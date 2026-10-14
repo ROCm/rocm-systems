@@ -46,16 +46,68 @@ void GwsDevice::register_compute_unit(ComputeUnitCore *cu) {
 
 void GwsDevice::unregister_compute_unit(ComputeUnitCore *cu) {
   std::lock_guard<std::mutex> lock(mutex_);
+  // Reconcile this CU's parked/resident contributions before dropping it. A CU
+  // destroyed (or re-pointed at another store via set_gws_device) while it still
+  // hosts parked or resident GWS waves must not leave inflated bookkeeping behind:
+  // a stuck parked_total_ (any_parked() wedged true) or an oversized barrier
+  // residency bound on the surviving CUs. During ~ComputeUnitCore this CU's own
+  // wfs_/active_wgs_ are still-alive base members and it is on its own thread; we
+  // hold mutex_ (which every peer scan also takes), so settling the accounting here
+  // is leaf-lock-safe. Waves halted/aborted on the normal path already reconciled
+  // via notify_parked_wave_gone/remove_resident, so only waves still parked and
+  // workgroups still resident at teardown are settled here (no double count).
+  for (auto &slot : cu->wfs_) {
+    if (!slot || slot->state() != WfState::GWS_WAIT)
+      continue;
+    const uint32_t process = slot->process_id();
+    auto it = parked_.find(process);
+    // A GWS_WAIT wave not accounted here parked on a different store (e.g. the CU
+    // was re-pointed via set_gws_device after parking); it is not this store's to
+    // reconcile, so touch neither parked_total_ nor sema_waiters for it.
+    if (it == parked_.end() || it->second == 0)
+      continue;
+    if (--it->second == 0)
+      parked_.erase(it);
+    parked_total_.fetch_sub(1, std::memory_order_release);
+    if (!slot->gws_wait_is_barrier_ && slot->gws_wait_rid_ < kResourceCount) {
+      auto rit = resources_.find(process);
+      if (rit != resources_.end() && rit->second[slot->gws_wait_rid_].sema_waiters > 0)
+        --rit->second[slot->gws_wait_rid_].sema_waiters;
+    }
+  }
+  for (const auto &entry : cu->active_wgs_) {
+    const uint32_t dispatch_id = static_cast<uint32_t>(entry.first >> 32);
+    auto rit = resident_waves_.find(dispatch_id);
+    if (rit == resident_waves_.end())
+      continue;
+    rit->second = rit->second > entry.second ? rit->second - entry.second : 0;
+    if (rit->second == 0)
+      resident_waves_.erase(rit);
+  }
   std::erase(cus_, cu);
   cu_runnable_.erase(cu);
   cu_summary_epoch_.erase(cu);
+  // A removed CU changes the quiescence picture; force peers to republish before
+  // any escape decision trusts a snapshot taken while this CU was still listed.
+  ++summary_epoch_;
 }
 
-void GwsDevice::add_resident(uint32_t dispatch_id, uint32_t count) {
-  if (count == 0)
+void GwsDevice::add_resident(uint32_t process_id, uint32_t dispatch_id, uint32_t count,
+                             uint32_t expected_total_waves) {
+  if (count == 0 && expected_total_waves == 0)
     return;
   std::lock_guard<std::mutex> lock(mutex_);
-  resident_waves_[dispatch_id] += count;
+  if (count != 0)
+    resident_waves_[dispatch_id] += count;
+  if (expected_total_waves != 0) {
+    // Track the dispatch's participant accounting so the barrier bound and the
+    // quiescence scan can reason about waves it will admit later. Every CU/XCD of
+    // the dispatch reports the same whole-grid total, so keep the max.
+    DispatchAdmission &adm = admission_[dispatch_id];
+    adm.process = process_id;
+    adm.expected = std::max(adm.expected, expected_total_waves);
+    adm.admitted += count;
+  }
   // New resident waves are potential signalers. Invalidate every published
   // quiescence snapshot so the deadlock backstop cannot treat a peer CU's
   // earlier zero-runnable summary (taken before this work became visible) as
@@ -74,8 +126,48 @@ void GwsDevice::remove_resident(uint32_t dispatch_id, uint32_t count) {
   if (it == resident_waves_.end())
     return;
   it->second = it->second > count ? it->second - count : 0;
-  if (it->second == 0)
+  if (it->second == 0) {
     resident_waves_.erase(it);
+    // A dispatch that has admitted its whole grid and now holds no resident wave
+    // is finished; drop its participant accounting so it no longer blocks the
+    // quiescence scan. A dispatch still mid-admission can transiently reach zero
+    // residents (rocjitsu admits workgroups over time), so keep its accounting
+    // until admission completes -- notify_dispatch_gone handles early teardown.
+    auto ait = admission_.find(dispatch_id);
+    if (ait != admission_.end() && ait->second.admitted >= ait->second.expected)
+      admission_.erase(ait);
+  }
+}
+
+void GwsDevice::notify_dispatch_gone(uint32_t dispatch_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  admission_.erase(dispatch_id);
+  resident_waves_.erase(dispatch_id);
+  // Removing pending work may permit a previously-blocked escape; force peers to
+  // republish before any escape trusts a pre-teardown snapshot.
+  ++summary_epoch_;
+}
+
+void GwsDevice::release_process(uint32_t process) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  resources_.erase(process);
+  auto pit = parked_.find(process);
+  if (pit != parked_.end()) {
+    // A well-drained process has no parked waves; keep the global fast-path gate
+    // consistent if teardown ever races a straggler.
+    if (pit->second != 0)
+      parked_total_.fetch_sub(pit->second, std::memory_order_release);
+    parked_.erase(pit);
+  }
+  std::erase_if(admission_, [process](const auto &e) { return e.second.process == process; });
+  for (auto &per_cu : cu_runnable_)
+    per_cu.second.erase(process);
+  ++summary_epoch_;
+}
+
+size_t GwsDevice::tracked_process_count() {
+  std::lock_guard<std::mutex> lock(mutex_);
+  return resources_.size();
 }
 
 void GwsDevice::park_wave(Wavefront &wf, uint32_t rid, bool is_barrier, uint64_t generation) {
@@ -84,6 +176,10 @@ void GwsDevice::park_wave(Wavefront &wf, uint32_t rid, bool is_barrier, uint64_t
   wf.gws_wait_generation_ = generation;
   wf.set_state(WfState::GWS_WAIT);
   ++parked_[wf.process_id()];
+  // A semaphore P-waiter reserves a V/BR credit so a fresh P (on any CU) cannot
+  // steal the release owed to it (see the entitlement note in the class doc).
+  if (!is_barrier && rid < kResourceCount)
+    ++resources_[wf.process_id()][rid].sema_waiters;
   // 0 -> positive opens a fresh snapshot version, invalidating stale per-CU
   // summaries so a producer that has not yet published cannot be mistaken for
   // quiescent at the start of a parking episode.
@@ -93,10 +189,18 @@ void GwsDevice::park_wave(Wavefront &wf, uint32_t rid, bool is_barrier, uint64_t
 
 void GwsDevice::wake_wave(ComputeUnitCore &cu, Wavefront &wf) {
   const uint32_t process = wf.process_id();
+  const uint32_t rid = wf.gws_wait_rid_;
+  const bool was_barrier = wf.gws_wait_is_barrier_;
   wf.gws_wait_rid_ = Wavefront::kNoGwsWait;
   wf.gws_wait_is_barrier_ = false;
   wf.set_state(WfState::RUNNING);
   wf.set_ready_cycle(cu.cycle_counter_);
+  // Release the waiter's reserved credit slot (a sema waiter no longer competes).
+  if (!was_barrier && rid < kResourceCount) {
+    auto rit = resources_.find(process);
+    if (rit != resources_.end() && rit->second[rid].sema_waiters > 0)
+      --rit->second[rid].sema_waiters;
+  }
   auto it = parked_.find(process);
   if (it != parked_.end() && it->second > 0 && --it->second == 0)
     parked_.erase(it);
@@ -149,13 +253,21 @@ bool GwsDevice::escape_ready(uint32_t process) const {
   auto parked_it = parked_.find(process);
   if (parked_it == parked_.end() || parked_it->second == 0)
     return false;
+  // A dispatch of this process that has not yet admitted its whole grid may still
+  // produce a signaler (e.g. a producer workgroup not dispatched yet). Do not
+  // escape while such work is pending: bumping the version as it admits cannot undo
+  // an escape that already fired (see the pending-work note in the class doc).
+  for (const auto &[dispatch_id, adm] : admission_) {
+    (void)dispatch_id;
+    if (adm.process == process && adm.admitted < adm.expected)
+      return false;
+  }
   uint64_t total_runnable = 0;
   for (ComputeUnitCore *cu : cus_) {
-    // wave_activity_ is a cross-CU atomic; reading it is race-free even while the
-    // peer steps. Its low word is the peer's non-halted wave count.
-    const uint32_t active =
-        static_cast<uint32_t>(cu->wave_activity_.load(std::memory_order_acquire));
-    if (active == 0)
+    // has_active_wfs() performs the same acquire load + low-word test on the CU's
+    // packed wave_activity_, keeping that representation inside the CU. It is a
+    // cross-CU read, race-free even while the peer steps.
+    if (!cu->has_active_wfs())
       continue; // Idle CU: hosts no waves of any process, contributes nothing.
     auto eit = cu_summary_epoch_.find(cu);
     if (eit == cu_summary_epoch_.end() || eit->second != summary_epoch_)
@@ -186,22 +298,32 @@ void GwsDevice::barrier_arrive(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid,
   if (rid >= kResourceCount)
     return;
   std::lock_guard<std::mutex> lock(mutex_);
-  auto resident_it = resident_waves_.find(wf.dispatch_id());
-  const uint32_t resident = resident_it != resident_waves_.end() ? resident_it->second : 0;
   Resource &res = resources_[wf.process_id()][rid];
   // The still-outstanding arrivals that must occur to release this wave are the
   // current counter (a fresh resource seeds that counter from this arrival's own
-  // value). A blocking arrival therefore needs (outstanding + 1) participants to
-  // be provably resident in the dispatch; if that set is larger than the resident
-  // waves it would reference arrivals that may never happen, so fall back to a
-  // non-blocking structural no-op. A releasing arrival (outstanding == 0) never
-  // blocks, so it is exempt from the gate. The gate is written as
-  // (outstanding >= resident), equivalent to (outstanding + 1 > resident) for
-  // integers but without overflow when count is near UINT32_MAX (a huge count
-  // takes the fallback, never wraps the sum to zero and parks).
+  // value -- see the first-arrival self-init policy in the class doc). A blocking
+  // arrival needs (outstanding + 1) participants co-resident; a releasing arrival
+  // (outstanding == 0) never blocks and is exempt from the gate below. Fall back to
+  // a non-blocking structural no-op only when that set can never be co-resident.
+  // When the dispatch's grid size is known, bound by it: late participants are
+  // merely not admitted yet, so the arrival parks and a later arrival (or the
+  // backstop) resolves it. Otherwise bound by the currently-resident waves. The
+  // test is written as (outstanding >= bound), equivalent to (outstanding + 1 >
+  // bound) for integers but overflow-safe for a count near UINT32_MAX (a huge
+  // count takes the fallback, never wraps the sum to zero and parks).
   const uint32_t outstanding = res.armed ? res.counter : count;
-  if (outstanding != 0 && outstanding >= resident)
-    return;
+  if (outstanding != 0) {
+    const auto adm = admission_.find(wf.dispatch_id());
+    if (adm != admission_.end() && adm->second.expected != 0) {
+      if (outstanding >= adm->second.expected)
+        return;
+    } else {
+      const auto resident_it = resident_waves_.find(wf.dispatch_id());
+      const uint32_t resident = resident_it != resident_waves_.end() ? resident_it->second : 0;
+      if (outstanding >= resident)
+        return;
+    }
+  }
   if (!res.armed) {
     res.counter = count;
     res.armed = true;
@@ -237,13 +359,18 @@ void GwsDevice::sema_p(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
   std::lock_guard<std::mutex> lock(mutex_);
   (void)cu;
   Resource &res = resources_[wf.process_id()][rid];
-  if (res.credits > 0) {
+  // Consume a credit only from the surplus beyond the credits reserved for waiters
+  // already parked on this resource (possibly on another CU), so a fresh P cannot
+  // steal a V/BR release owed to an earlier waiter (see the entitlement note in the
+  // class doc). Otherwise park and join the reserved queue.
+  if (res.credits > res.sema_waiters) {
     --res.credits;
     return;
   }
-  // No credit: park until any wave of this process signals the shared resource.
-  // A later V/BR leaves a credit this wave's CU consumes on its next poll; a
-  // release_all bumps the generation; the quiescence backstop is the last resort.
+  // No free credit: park until any wave of this process signals the shared
+  // resource. A later V/BR leaves a credit this wave's CU consumes on its next
+  // poll; a release_all bumps the generation; the quiescence backstop is the last
+  // resort.
   park_wave(wf, rid, /*is_barrier=*/false, res.release_gen);
 }
 
@@ -277,6 +404,12 @@ void GwsDevice::notify_parked_wave_gone(const Wavefront &wf) {
   if (--it->second == 0)
     parked_.erase(it);
   parked_total_.fetch_sub(1, std::memory_order_release);
+  // A gone semaphore waiter releases its reserved credit slot (see park_wave).
+  if (!wf.gws_wait_is_barrier_ && wf.gws_wait_rid_ < kResourceCount) {
+    auto rit = resources_.find(wf.process_id());
+    if (rit != resources_.end() && rit->second[wf.gws_wait_rid_].sema_waiters > 0)
+      --rit->second[wf.gws_wait_rid_].sema_waiters;
+  }
 }
 
 void GwsDevice::invalidate_resource(uint32_t process, uint32_t rid) {

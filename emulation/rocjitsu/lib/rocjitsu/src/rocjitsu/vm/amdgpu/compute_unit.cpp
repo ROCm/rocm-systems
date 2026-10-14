@@ -208,6 +208,12 @@ ComputeUnitCore::~ComputeUnitCore() {
   //     CU's own thread. The store never reads derived state, and wave_activity_
   //     is still alive here -- the base subobject is torn down only after this
   //     body returns.
+  //   - unregister_compute_unit() also reconciles THIS CU's still-parked /
+  //     still-resident GWS contributions by scanning its own wfs_ / active_wgs_.
+  //     Those are base-class members (alive during this body) and are read on this
+  //     CU's own thread under the store mutex_, so the self-reconcile is safe here
+  //     too; it stops a CU torn down with GWS waves still parked from leaving the
+  //     shared store's parked/residency bookkeeping inflated.
   //   - unregister_compute_unit() takes the store mutex_, the same lock every
   //     peer scan holds, and removes `this` before any base member dies, so no
   //     later scan can observe a freed CU.
@@ -507,7 +513,8 @@ void ComputeUnitCore::maybe_reset_lds_alloc() {
 }
 
 void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
-                                      uint32_t num_named_barriers) {
+                                      uint32_t num_named_barriers, uint32_t process_id,
+                                      uint32_t dispatch_total_waves) {
   // The driver's s_icache_inv rides the launch packet, so it lands once per
   // dispatch, not once per wave: a kernel VA reused by a later dispatch still
   // sees fresh code, while the sibling waves of one dispatch keep filling a
@@ -521,8 +528,10 @@ void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint
   active_wgs_[key] = wf_count;
   // Mirror the resident wave count into the device-global GWS store so the GWS
   // barrier's provable-participant bound is summed across CUs without racing on
-  // peer CU state (see GwsDevice).
-  gws_device_->add_resident(dispatch_id, wf_count);
+  // peer CU state, and (when the whole-grid size is known) record the dispatch's
+  // participant accounting so the bound and quiescence scan account for waves not
+  // yet admitted (see GwsDevice).
+  gws_device_->add_resident(process_id, dispatch_id, wf_count, dispatch_total_waves);
   if (wf_count <= 1) {
     // Single-wave workgroups are not allocated workgroup or named barriers.
     barrier_wgs_.erase(key);
@@ -830,6 +839,10 @@ void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
     if (static_cast<uint32_t>(entry.first >> 32) == dispatch_id)
       resident_here += entry.second;
   gws_device_->remove_resident(dispatch_id, resident_here);
+  // A faulted dispatch will never admit its remaining grid, so drop its GWS
+  // participant accounting; otherwise its never-to-arrive waves would keep the
+  // quiescence scan from ever escaping this process (see GwsDevice).
+  gws_device_->notify_dispatch_gone(dispatch_id);
   std::erase_if(active_wgs_, [dispatch_id](const auto &entry) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
   });
@@ -2295,11 +2308,15 @@ template <bool EnableAsync>
           if (!wf)
             continue;
           auto st = wf->state();
-          if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER)
+          // Include GWS_WAIT: a CU keeps stepping with parked GWS waves, so omitting
+          // them hides their PCs exactly when a stalled rendezvous is being probed.
+          if (st == WfState::RUNNING || st == WfState::WAITCNT || st == WfState::BARRIER ||
+              st == WfState::GWS_WAIT)
             os << std::format(" wf{}:pc={:#x}:{}", wf->wf_id(), wf->pc,
-                              st == WfState::RUNNING   ? "R"
-                              : st == WfState::WAITCNT ? "W"
-                                                       : "B");
+                              st == WfState::RUNNING    ? "R"
+                              : st == WfState::WAITCNT  ? "W"
+                              : st == WfState::GWS_WAIT ? "G"
+                                                        : "B");
         }
       });
     }

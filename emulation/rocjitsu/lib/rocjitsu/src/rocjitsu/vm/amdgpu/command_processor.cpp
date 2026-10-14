@@ -2426,8 +2426,14 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     }
 
     // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
+    // Report the whole-grid wave count (not this shard's) so the device-global GWS
+    // store can account for participants not yet admitted; fan-out shards admit
+    // independently, every XCD reports the same total, and the store keeps the max.
+    const uint64_t grid_total_waves =
+        static_cast<uint64_t>(entry.grid_total_wgs()) * entry.wfs_per_workgroup;
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
-                        entry.num_named_barriers);
+                        entry.num_named_barriers, entry.process_id,
+                        static_cast<uint32_t>(std::min<uint64_t>(grid_total_waves, UINT32_MAX)));
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
     plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,

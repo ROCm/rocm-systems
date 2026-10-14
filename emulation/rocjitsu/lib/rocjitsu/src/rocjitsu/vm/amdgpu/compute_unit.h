@@ -478,8 +478,15 @@ public:
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so release_wf() can detect WG completion.
+  /// @param process_id Owning process; forwarded to the GWS store so a grid's
+  /// participant accounting is attributed to the right process.
+  /// @param dispatch_total_waves Whole-grid wave count of the dispatch, reported
+  /// identically by every CU/XCD running it. Lets the GWS barrier bound and
+  /// quiescence scan account for waves not yet admitted (see GwsDevice). Pass 0
+  /// (the default, for standalone/test use) to bound GWS only by resident waves.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
-                       uint32_t num_named_barriers = 0);
+                       uint32_t num_named_barriers = 0, uint32_t process_id = 0,
+                       uint32_t dispatch_total_waves = 0);
 
   /// @brief Initialize a named barrier's member count and clear its signals.
   void named_barrier_init(Wavefront &wf, int32_t barrier_id, uint32_t member_count);

@@ -1635,6 +1635,11 @@ int SimulatedKfd::close(uint32_t process_id) {
       (void)gpu.legacy_vm->unregister_address_space(gpu_state.address_space);
       gpu_state.address_space = {};
     }
+    // The process's queues were force-cancelled above, so its waves are drained;
+    // drop its device-global GWS table so a later process reusing this rid starts
+    // from a clean slate rather than inheriting stale credits/residency (see
+    // GwsDevice::release_process).
+    gpu.soc->gws_device()->release_process(process_id);
   }
 
   // Doorbell mappings live in gpu_state_, not allocations_. Snapshot and clear

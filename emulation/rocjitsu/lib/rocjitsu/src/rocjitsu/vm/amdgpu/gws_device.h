@@ -60,19 +60,38 @@ class Wavefront;
 ///    the per-ISA modeling notes below) queues an arrival while the counter is
 ///    positive and, on the arrival that observes zero, releases every queued
 ///    arrival and reloads the counter from that arrival's own value (so
-///    consecutive phases may differ in size). A blocking arrival is gated on the
-///    outstanding counter: the still-required participant set is (counter + 1),
-///    and it parks only when that whole set is provably resident in the dispatch
-///    (summed across all CUs via @ref resident_waves_); larger sets fall back to
-///    a non-blocking structural no-op. The gate is overflow-safe for counts near
-///    UINT32_MAX. The release bumps a per-resource generation that parked
-///    arrivals (on any CU) observe to wake. Concurrent dispatches of one process
-///    sharing a single barrier resource is not a supported rendezvous (hardware
-///    treats a cooperative grid as the sole owner of its barrier); the residency
+///    consecutive phases may differ in size). The release bumps a per-resource
+///    generation that parked arrivals (on any CU) observe to wake.
+///
+///    Emulator policy -- first-arrival self-initialization: an arrival at a
+///    resource not armed by an explicit @c init seeds the counter from its own
+///    operand. Hardware (RDNA3/3.5 Table 63) requires a prior @c init and behavior
+///    without one is not validated, so cooperative kernels are expected to @c init
+///    first; this default only lets a test, or a phase recovering after the
+///    deadlock backstop invalidated its resource, proceed instead of stalling.
+///
+///    Participant bound (pending-work aware): a blocking arrival must prove the
+///    still-required set (counter + 1) can be co-resident before it parks. rocjitsu
+///    admits a grid's workgroups over time -- and independently per XCD through
+///    drain_fanout_inbox() -- so "currently resident" understates a grid still
+///    being admitted. When the dispatch's total size is known (@ref add_resident
+///    with a nonzero expected), the bound is that whole-grid size: the arrival
+///    parks whenever (counter + 1) <= grid size (late participants are merely not
+///    admitted yet), and only a count larger than the entire grid falls back to a
+///    non-blocking structural no-op. When the size is unknown (standalone/test) the
+///    bound is the currently-resident set, as before; the comparison is
+///    overflow-safe for counts near UINT32_MAX. Concurrent dispatches of one
+///    process sharing a single barrier resource is not a supported rendezvous
+///    (hardware treats a cooperative grid as the sole owner of its barrier); the
 ///    bound is intentionally dispatch-scoped.
 ///  * Semaphore: V/BR add credits and @c release_all bumps the generation; P
 ///    consumes a credit or parks until any wave of the process signals. Credits
-///    and the generation are consumed/observed by the waiter's own CU.
+///    and the generation are consumed/observed by the waiter's own CU. A credit is
+///    reserved for waiters already parked on the resource: a fresh P consumes a
+///    credit only when the credit count exceeds the parked-waiter count (@ref
+///    Resource::sema_waiters). This stops a P on the signaling CU from stealing a
+///    V/BR release owed to a waiter parked on another CU (which applies the wake on
+///    its own next step), matching the hardware rule that V/BR release queued waves.
 ///  * Deadlock-escape (@ref step_maintenance): a parked GWS wave is released only
 ///    when every non-halted *resident* wave of its process -- across all CUs --
 ///    is provably unable to signal (blocked in GWS_WAIT or at an s_barrier). This
@@ -87,10 +106,14 @@ class Wavefront;
 ///    a wave waking, or new resident work arriving (@ref add_resident) -- so a
 ///    stale zero-runnable summary cannot survive workgroup turnover (a parked
 ///    wave replaced by a runnable producer) or a producer dispatched alongside a
-///    parked wave. The guarantee covers only waves that are *resident* when the
-///    scan runs: queued-but-undispatched workgroups and future dispatches are not
-///    scanned, but each becomes resident through @ref add_resident, which
-///    advances the version and so blocks escape until the new work is accounted.
+///    parked wave. The guarantee covers waves that are *resident* when the scan
+///    runs plus waves the process has not admitted yet: when a dispatch's total
+///    size is known, escape is blocked while it still has waves to admit
+///    (expected > admitted), because a not-yet-admitted producer could still signal
+///    and bumping the version at admission cannot undo an escape that already fired.
+///    Once every expected wave has been admitted (and each then parks or retires)
+///    the scan proceeds as usual. Queued workgroups of a size-unknown dispatch
+///    still rely on @ref add_resident advancing the version as they become resident.
 ///    Recovery policy: abandoning a wait is not a silent state change. The
 ///    backstop *invalidates* each resource it abandons (counter/credits cleared,
 ///    disarmed, generation bumped) via @ref invalidate_resource, so a later
@@ -141,12 +164,24 @@ public:
   /// accurate. Must be called while @p wf is still in GWS_WAIT.
   void notify_parked_wave_gone(const Wavefront &wf);
 
-  /// @brief Record @p count resident (not-yet-retired) waves of a dispatch.
-  /// @details Maintained by the CU as workgroups begin/retire; bounds the GWS
-  /// barrier's provable-participant set. See class doc.
-  void add_resident(uint32_t dispatch_id, uint32_t count);
+  /// @brief Record @p count resident (not-yet-retired) waves of a dispatch, and
+  /// (when @p expected_total_waves is nonzero) the dispatch's total participant
+  /// count so the barrier bound and quiescence scan can account for waves not yet
+  /// admitted (see the pending-work note in the class doc).
+  /// @details Maintained by the CU as workgroups begin; @p expected_total_waves is
+  /// the whole-grid wave count, reported identically by every CU/XCD of the
+  /// dispatch (kept as a max, so repeats and shard order do not matter). Pass zero
+  /// for standalone/test use that does not model late admission; the dispatch is
+  /// then bounded only by currently-resident waves, as before.
+  void add_resident(uint32_t process_id, uint32_t dispatch_id, uint32_t count,
+                    uint32_t expected_total_waves);
   /// @brief Drop @p count resident waves of a dispatch (clamped at zero).
   void remove_resident(uint32_t dispatch_id, uint32_t count);
+  /// @brief Forget a dispatch's participant accounting (abort/teardown).
+  /// @details Called when a dispatch is torn down before it fully admits+retires
+  /// (e.g. abort), so its never-to-arrive participants stop blocking the quiescence
+  /// scan. Normal full retirement clears the accounting via @ref remove_resident.
+  void notify_dispatch_gone(uint32_t dispatch_id);
 
   /// @brief Per-step maintenance for the calling CU, on its own thread.
   /// @details Applies cross-CU wakeups to @p cu's own parked waves, refreshes
@@ -158,6 +193,18 @@ public:
   /// @brief True while any wave is parked anywhere (lock-free fast-path gate).
   bool any_parked() const { return parked_total_.load(std::memory_order_acquire) != 0; }
 
+  /// @brief Reclaim a departed process's GWS state after its waves/queues drain.
+  /// @details GWS resources persist across dispatches, so they are not freed on
+  /// dispatch retirement; a long-running driver would otherwise retain a table per
+  /// departed process. The process-teardown path calls this once the process's
+  /// waves and queues are gone, so live processes keep their resources while the
+  /// departed one's table (and bookkeeping) is released. Preserves the leaf-lock
+  /// protocol (takes only @ref mutex_).
+  void release_process(uint32_t process);
+
+  /// @brief Number of processes with live GWS resource tables (test/diagnostic).
+  size_t tracked_process_count();
+
 private:
   /// @brief Per-resource barrier/semaphore state.
   struct Resource {
@@ -167,6 +214,20 @@ private:
     uint32_t credits = 0;     ///< Semaphore credits (V/BR add, P consumes).
     bool armed = false;       ///< Whether the barrier counter has been seeded.
     uint64_t release_gen = 0; ///< Bumped by a barrier release / sema release_all.
+    /// Semaphore P-waiters currently parked on this resource (any CU). A V/BR
+    /// credit is reserved for these already-parked waiters, so a fresh P consumes
+    /// a credit only when it exceeds this count (see the entitlement note in the
+    /// class doc). Barrier waiters wake via @c release_gen and do not count here.
+    uint32_t sema_waiters = 0;
+  };
+
+  /// @brief Per-dispatch participant accounting (see the pending-work note in the
+  /// class doc). Lets the barrier bound and the quiescence scan reason about waves
+  /// a dispatch will admit later, not only those resident now.
+  struct DispatchAdmission {
+    uint32_t process = 0;  ///< Owning process (so the scan can find a process's dispatches).
+    uint32_t expected = 0; ///< Total waves the dispatch will ever admit (grid size).
+    uint32_t admitted = 0; ///< Cumulative waves admitted so far.
   };
 
   /// @brief Park @p wf on @p rid (barrier or semaphore). Requires @ref mutex_.
@@ -186,12 +247,19 @@ private:
   /// dispatch cannot inherit its unfinished phase. Requires @ref mutex_.
   void invalidate_resource(uint32_t process, uint32_t rid);
 
-  mutable std::mutex mutex_;
+  std::mutex mutex_;
   std::unordered_map<uint32_t, std::array<Resource, kResourceCount>> resources_;
   std::vector<ComputeUnitCore *> cus_;
 
-  /// Resident (not-yet-retired) wave count per dispatch; the barrier bound.
+  /// Resident (not-yet-retired) wave count per dispatch; the legacy barrier bound
+  /// when the dispatch's expected size is unknown (see @ref admission_).
   std::unordered_map<uint32_t, uint32_t> resident_waves_;
+  /// Per-dispatch participant accounting (expected/admitted), keyed by dispatch id.
+  /// Present only for dispatches whose total size was reported (@ref add_resident
+  /// with a nonzero expected); the barrier bound and the quiescence scan use it to
+  /// account for waves not yet admitted. Cleared on full retirement, dispatch
+  /// teardown (@ref notify_dispatch_gone), or process teardown (@ref release_process).
+  std::unordered_map<uint32_t, DispatchAdmission> admission_;
   /// Parked (GWS_WAIT) wave count per process; the deadlock-escape precondition.
   std::unordered_map<uint32_t, uint32_t> parked_;
   /// Total parked waves across all processes; lock-free fast-path gate.
