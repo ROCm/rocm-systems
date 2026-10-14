@@ -25,6 +25,11 @@ std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstra
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
+std::function<ncclResult_t(void*, int, int, int)> g_bootstrapBarrier =
+    [](void*, int, int, int) { return ncclInternalError; };
+ncclResult_t bootstrapBarrier(void* commState, int rank, int nranks, int tag) {
+  return g_bootstrapBarrier(commState, rank, nranks, tag);
+}
 // Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
 // ranks. Succeeds without touching bcastData; no test reaches it yet.
 ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
@@ -88,6 +93,7 @@ void ResetBootstrapStubs() {
   g_bootstrapCreateRoot = DefaultBootstrapCreateRoot;
   g_bootstrapNetInitFail = false;
   g_bootstrapAllGather = [](void*, void*, int) { return ncclInternalError; };
+  g_bootstrapBarrier = [](void*, int, int, int) { return ncclInternalError; };
   g_bootstrapGetUniqueIdResult = ncclSuccess;
   g_bootstrapGetUniqueIdCalls = 0;
   g_bcastGrowHandleResult = ncclSuccess;
