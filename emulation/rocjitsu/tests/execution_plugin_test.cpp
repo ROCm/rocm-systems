@@ -109,6 +109,7 @@ RJ_DIAGNOSTIC_POP
 #include <string>
 #include <string_view>
 #include <thread>
+#include <tuple>
 #include <type_traits>
 #include <vector>
 
@@ -5682,6 +5683,168 @@ TEST_F(FormattedLoadRaceTest, RejectsWholeDestinationRangeWhenItExceedsTheWaveAl
   EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
   EXPECT_FALSE(probe(255, 0xf, false));
 }
+
+struct BlockLoadCase {
+  const char *arch;
+  bool scratch;
+};
+
+class BlockLoadRaceTest : public ::testing::TestWithParam<BlockLoadCase> {
+protected:
+  std::unique_ptr<PluginFixture> fixture;
+  StringSink *sink = nullptr;
+  Wavefront *wave = nullptr;
+  RaceWavefrontState *plugin_state = nullptr;
+  std::unique_ptr<Decoder> decoder;
+
+  void SetUp() override {
+    fixture = std::make_unique<PluginFixture>(/*num_wf_slots=*/1, GetParam().arch,
+                                              /*wavefront_size=*/32, /*sgprs_per_wf=*/128);
+    PluginSinkConfig sink_config;
+    sink = &sink_config.emplace<StringSink>();
+    fixture->plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+    auto plugin = std::make_unique<RaceDetectorPlugin>();
+    auto *plugin_ptr = plugin.get();
+    ASSERT_TRUE(fixture->plugin_group_->add(std::move(plugin)));
+    fixture->soc->set_plugin_group(fixture->plugin_group_);
+    fixture->plugin_group_->onInit();
+    wave = fixture->cu()->dispatch_wf(0, 0x100, 128, 256, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    std::array<Wavefront *, 1> waves{wave};
+    fixture->plugin_group_->onAmdgpuWorkgroupDispatched(1, 0, 256, 128, waves);
+    plugin_state = static_cast<RaceWavefrontState *>(wave->plugin_state(plugin_ptr->slot_index()));
+    decoder = Decoder::create(fixture->cu()->arch());
+    ASSERT_NE(decoder, nullptr);
+    fixture->cu()->write_vgpr(wave->vgpr_alloc().base, 0, 0);
+    fixture->cu()->write_vgpr(wave->vgpr_alloc().base + 1, 0, 0);
+  }
+
+  void issue(uint32_t mask, uint8_t destination = 32) {
+    const bool scratch = GetParam().scratch;
+    std::array<uint32_t, 3> words;
+    if (fixture->cu()->arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+      words =
+          scratch
+              ? cdna5::build_vscratch(cdna5::kScratchLoadBlock,
+                                      {.saddr = 124, .vdst = destination, .sve = 1, .vaddr = 0})
+              : cdna5::build_vglobal(cdna5::kGlobalLoadBlock, {.saddr = 124, .vdst = destination});
+    } else {
+      words =
+          scratch
+              ? rdna4::build_vscratch(rdna4::kScratchLoadBlock,
+                                      {.saddr = 124, .vdst = destination, .sve = 1, .vaddr = 0})
+              : rdna4::build_vglobal(rdna4::kGlobalLoadBlock, {.saddr = 124, .vdst = destination});
+    }
+    std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
+    ASSERT_NE(load, nullptr);
+    wave->pc += 16;
+    wave->set_m0(mask);
+    ASSERT_TRUE(fixture->cu()->execute_instruction(load.get(), *wave).succeeded());
+    ASSERT_NE(load->data(), nullptr);
+    wave->set_m0(~mask); // The plugin must use the issue-time snapshot.
+    fixture->plugin_group_->onAmdgpuMemoryAccessRouted({}, *load, *wave);
+  }
+
+  void wait() {
+    wave->set_wait_target_loadcnt(0);
+    TestWaitcntInstruction load_wait("s_wait_loadcnt");
+    fixture->plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 4, load_wait, *wave);
+    wave->set_wait_target_dscnt(0);
+    TestWaitcntInstruction ds_wait("s_wait_dscnt");
+    fixture->plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 8, ds_wait, *wave);
+  }
+
+  bool probe(uint32_t destination, bool write, uint64_t lanes = 1) {
+    wave->pc += 16;
+    const size_t previous = sink->str().size();
+    const uint32_t physical = wave->vgpr_alloc().base + destination;
+    if (write)
+      fixture->plugin_group_->onAmdgpuWriteVgprLanes(wave, physical, lanes);
+    else
+      fixture->plugin_group_->onAmdgpuReadVgprLanes(wave, physical, lanes);
+    return sink->str().find("RACE ", previous) != std::string::npos;
+  }
+};
+
+TEST_P(BlockLoadRaceTest, TracksOnlyEnabledDestinationsAndKeepsEmptyMaskCounterEntry) {
+  for (uint32_t mask : {0u, 1u, 0x80000001u, 0x55555555u, 0xffffffffu}) {
+    SCOPED_TRACE(mask);
+    for (uint32_t word : {0u, 1u, 15u, 31u}) {
+      SCOPED_TRACE(word);
+      for (bool write : {false, true}) {
+        // Reissue for each consumer so report deduplication at the producing
+        // instruction cannot hide the enabled-word positive controls.
+        ASSERT_NO_FATAL_FAILURE(issue(mask));
+        ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
+        EXPECT_FALSE(probe(32 + word, write, /*lanes=*/2));
+        EXPECT_EQ(probe(32 + word, write), (mask & (uint32_t{1} << word)) != 0);
+        wait();
+        EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+        EXPECT_FALSE(probe(32 + word, write));
+      }
+    }
+  }
+}
+
+TEST_P(BlockLoadRaceTest, IncomingLoadChecksOnlyEnabledWordsForWaw) {
+  for (uint32_t mask : {0u, 1u, 0x80000001u}) {
+    for (uint32_t word : {0u, 1u, 31u}) {
+      SCOPED_TRACE(testing::Message() << "mask=" << mask << " word=" << word);
+      // LDS and global loads are not ordered with each other. A pending LDS
+      // destination exposes spurious WAW checks on a masked global/scratch load.
+      wave->pc += 16;
+      plugin_state->race_state->registerEvent(wave->pc, MemoryEventType::LDS_TO_VGPR, {32 + word},
+                                              1, 0xf, WaitCounterType::DSCNT,
+                                              MemoryOrderClass::LDS);
+      const size_t previous = sink->str().size();
+      ASSERT_NO_FATAL_FAILURE(issue(mask));
+      EXPECT_EQ(sink->str().find("RACE ", previous) != std::string::npos,
+                (mask & (uint32_t{1} << word)) != 0);
+      wait();
+      EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+    }
+  }
+}
+
+TEST_P(BlockLoadRaceTest, ChecksOwnedWordsForWawInPartialDestinationSpan) {
+  for (uint32_t mask : {0u, 1u, 0x80000000u, 0xffffffffu}) {
+    SCOPED_TRACE(mask);
+    // v240 belongs to this wave, but the full v[240:271] destination does not.
+    // Block destinations are checked per DWORD, so enabled v240 still writes.
+    wave->pc += 16;
+    plugin_state->race_state->registerEvent(wave->pc, MemoryEventType::LDS_TO_VGPR, {240}, 1, 0xf,
+                                            WaitCounterType::DSCNT, MemoryOrderClass::LDS);
+    const size_t previous = sink->str().size();
+    ASSERT_NO_FATAL_FAILURE(issue(mask, 240));
+    EXPECT_EQ(sink->str().find("RACE ", previous) != std::string::npos, (mask & 1u) != 0);
+    wait();
+    EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+  }
+}
+
+TEST_P(BlockLoadRaceTest, TracksOwnedWordsAndCounterInPartialDestinationSpan) {
+  for (uint32_t mask : {0u, 1u, 0x80000000u, 0x80008001u, 0xffffffffu}) {
+    for (uint32_t word : {0u, 1u, 15u}) {
+      for (bool write : {false, true}) {
+        SCOPED_TRACE(testing::Message()
+                     << "mask=" << mask << " word=" << word << " write=" << write);
+        ASSERT_NO_FATAL_FAILURE(issue(mask, 240));
+        ASSERT_EQ(plugin_state->race_state->getWaveMemoryEvents().size(), 1u);
+        EXPECT_FALSE(probe(240 + word, write, /*lanes=*/2));
+        EXPECT_EQ(probe(240 + word, write), (mask & (uint32_t{1} << word)) != 0);
+        wait();
+        EXPECT_TRUE(plugin_state->race_state->getWaveMemoryEvents().empty());
+      }
+    }
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(BlockLoads, BlockLoadRaceTest,
+                         ::testing::Values(BlockLoadCase{"cdna5", false},
+                                           BlockLoadCase{"cdna5", true},
+                                           BlockLoadCase{"rdna4", false},
+                                           BlockLoadCase{"rdna4", true}));
 
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
