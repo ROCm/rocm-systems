@@ -663,6 +663,31 @@ def test_preload_dump(*, name, args, **_):
     return check_errors([re.compile(s) for s in patterns], out_str, err_str)
 
 
+def test_preload_save_code_objects(*, name, args, **_):
+    """-c with the agent preloaded saves the code objects when the waves are printed."""
+    if not shutil.which("readelf"):
+        logger().info("Tool readelf not found, skipping %s", name)
+        unsupported_tests.add(test_preload_save_code_objects)
+        return True
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with agent_loaded_by("preload"):
+            run_and_communicate(
+                test_name=name,
+                args=args,
+                debug_agent_options=f"--save-code-objects={tmpdir} -c",
+            )
+
+        saved = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir)]
+        if not any(_has_symbol_with_readelf(p, "vector_add_assert_trap") for p in saved):
+            logger().info(
+                "No saved code object defines vector_add_assert_trap; saved:\n\t%s",
+                "\n\t".join(os.path.basename(p) for p in saved) or "(none)",
+            )
+            return False
+    return True
+
+
 def run_sigquit_resume(name, args, mode, patterns):
     """SIGQUIT a running kernel, release it once the waves are printed, and
     expect the program to finish: the agent resumes the waves it stopped."""
@@ -900,6 +925,12 @@ TEST_DEFINITIONS = [
         'description': 'Agent preloaded without HSA_TOOLS_LIB dumps a faulting wave',
         'args': '1',
         'function': test_preload_dump,
+    },
+    {
+        'name': 'test_preload_save_code_objects',
+        'description': '-c with the agent preloaded saves code objects when waves are printed',
+        'args': '1',
+        'function': test_preload_save_code_objects,
     },
     {
         'name': 'test_debug_info',
