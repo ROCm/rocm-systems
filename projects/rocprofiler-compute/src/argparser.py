@@ -57,6 +57,9 @@ DEPRECATED_OPTIONS = {
     "--no-roof": (
         "To skip roofline, select blocks with -b or --set that do not include block 4."
     ),
+    "--config-dir": (
+        "Custom panel configs will be replaced by user-defined metric sets and views."
+    ),
 }
 
 
@@ -171,6 +174,8 @@ def add_general_group(
         dest="config_dir",
         metavar="<dir>",
         help=(
+            "DEPRECATED: custom panel configs will be replaced by user-defined "
+            "metric sets and views in a future release.\n"
             "Specify the directory of customized report section configs "
             "(Default: built-in configs)."
         ),
