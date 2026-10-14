@@ -1423,44 +1423,61 @@ class SearchXmlChannelMicrotest : public ::testing::Test {
 };
 
 // ---------------------------------------------------------------------------
-// Test list (the agreed plan -- ROCM-31973).
+// What this pass found (ROCM-31973).
 //
-// Accepted-input contracts (landed first; they are what stops a later guard
-// being tightened into rejecting valid topology files):
+// Accepted-input contracts -- these are what stop any bound below being
+// tightened into rejecting a topology file RCCL itself would write:
 //
-//   [C1] WellFormedChannel_TranscribesGpuDevsToRanksInOrder
-//   [C2] WellFormedChannel_TranscribesNetDevsToInter
-//   [C3] ExplicitRankAttribute_IsUsedInsteadOfDevLookup
-//   [C4] ChannelIndex_SelectsItsOwnSliceOfIntraAndInter
-//   [C5] UnknownGpuDev_IsRejected
-//   [C6] GraphGeneratedByNcclTopoGetXmlFromGraph_RoundTripsBackToTheSameGraph
-//        (RCCL ships no graph XML of its own, so the format its own writer
-//         emits is the "our own input" contract that licenses a reject fix)
+//   WellFormedChannel_TranscribesGpuDevsToRanksInOrder
+//   WellFormedChannel_TranscribesNetDevsToInter
+//   ExplicitRankAttribute_IsUsedInsteadOfDevLookup
+//   ChannelIndex_SelectsItsOwnSliceOfIntraAndInter
+//   UnknownGpuDev_IsRejected
+//   SubnodesThatAreNeitherNetNorGpu_AreIgnored
+//   GraphGeneratedByNcclTopoGetXmlFromGraph_RoundTripsBackToTheSameGraph
+//       RCCL ships no graph XML of its own, so the format its own writer
+//       emits is the "our own input still parses" contract. That writer is
+//       also where the per-channel bounds below come from: it emits exactly
+//       two <net> and exactly ngpus <gpu> per channel.
+//   ...plus one tightest-accepted-input test per bound:
+//   LastValidChannelIndex_IsStillAccepted, ExactlyTwoNetSubs_AreStillAccepted,
+//   ExactlyNgpusGpuSubs_AreStillAccepted, ZeroRankAttribute_IsStillAccepted,
+//   LargestRepresentableRankAttribute_IsStillAccepted,
+//   NchannelsMatchingTheChannelsPresent_IsStillAccepted,
+//   TheLargestPermittedNchannels_IsStillAccepted,
+//   GraphForAnotherIdIsIgnoredWithoutBeingValidated.
 //
-// Rejection tests, one per row of the Phase 1 table:
+// Bounds added, each its own commit, each pinned from both directions:
 //
-//   [A] ChannelIndexBeyondMaxChannels_IsRejected
-//       graph->inter + 2*c and graph->intra + ngpus*c both run past the end of
-//       their arrays once c >= MAXCHANNELS; MAX_SUBS (512) admits c up to 511
-//       against MAXCHANNELS 256.
-//   [B] MoreNetSubsThanTheChannelHolds_IsRejected
-//       inter[n++] has only 2 slots per channel; nothing bounds n.
-//   [C] MoreGpuSubsThanGpus_IsRejected
-//       intra[g++] has only ngpus slots per channel; nothing bounds g. The
-//       overrun lands inside the same ncclTopoGraph, so it is invisible to
-//       ASan -- the assertion has to be on the clobbered next channel.
-//   [D] RankAttributeOutsideTheRankRange_IsRejected
-//       strtol into an int: "4294967296" truncates to 0 silently.
-//   [E] DevAttributeTooWideForTheIdSpace_IsRejected  -- expected to be
-//       reclassified (probe first); likely subsumed by the dev-not-found arm.
+//   [A] ChannelIndexBeyondMaxChannels_IsRejected, NegativeChannelIndex_IsRejected
+//       c was unchecked against MAXCHANNELS. The overrun lands on the next
+//       fields of the same ncclTopoGraph (nIntraChannels, intraNets), so
+//       AddressSanitizer cannot see it -- the assertion is on those fields.
+//       The c < 0 half was initially unpinned; branch coverage found it.
+//   [B] MoreNetSubsThanTheChannelHolds_IsRejected    (inter: 2 slots/channel)
+//   [C] MoreGpuSubsThanTheSystemHasGpus_IsRejected   (intra: ngpus slots/channel)
+//       Also an intra-object overrun, so also ASan-invisible.
+//   [D] RankAttributeTooWideForAnInt_IsRejected, NegativeRankAttribute_IsRejected
+//       strtol into an int truncated silently: rank="4294967296" became 0.
+//   [F] NchannelsOne{More,Fewer}ThanThePresentChannels_IsRejected and
+//       NchannelsClaimingMoreChannelsThanArePresent_IsRejected
+//       the caller copied nchannels into graph->nChannels unvalidated.
 //
-// Caller (ncclTopoGetGraphFromXmlSub), its own commit:
-//   [F] MoreChannelSubsThanMaxChannels_IsRejectedByTheCaller
-//       the loop over xmlGraph->nSubs and *nChannels = xmlGraph->nSubs are
-//       both unclamped, so the caller admits more than the buffers hold.
+// Reclassified, deliberately NOT guarded:
 //
-// TO BE WRITTEN -- this block is replaced at the end of the pass with what the
-// pass actually found, including reclassified rows.
+//   [E] A dev= attribute too wide for the id space. For <gpu> it is
+//       UNREACHABLE: the existing dev-not-found arm rejects it first. For
+//       <net>, strtol saturates to LONG_MAX and that value is stored, but
+//       inter holds int64 device ids, so it is a wrong value and not an
+//       out-of-bounds write -- outside this ticket's scope.
+//   [F, second half] A range check of nchannels against MAXCHANNELS is
+//       SUBSUMED: with the counts required to agree, nchannels > MAXCHANNELS
+//       implies more than MAXCHANNELS <channel> subs, which guard [A] rejects
+//       first. The test for it passed against unfixed code, so it was deleted
+//       rather than keep a guard that guards nothing.
+//
+// Not pinned: nothing. No test here is sanitizer-only -- every assertion is
+// visible to the ordinary build, so all of them protect CI.
 // ---------------------------------------------------------------------------
 
 // --- Accepted-input contracts ---------------------------------------------
@@ -1590,6 +1607,32 @@ TEST_F(SearchXmlChannelMicrotest, ChannelIndexBeyondMaxChannels_IsRejected) {
   EXPECT_EQ(ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()), ncclInvalidUsage);
   EXPECT_EQ(graph()->nIntraChannels, 0);
   EXPECT_EQ(graph()->intraNets[0], 0);
+}
+
+TEST_F(SearchXmlChannelMicrotest, NegativeChannelIndex_IsRejected) {
+  // Defensive: the one caller cannot pass a negative c today, but the function
+  // is externally linked and a negative index would write *before* both
+  // arrays. Without this the c < 0 half of the guard is unpinned.
+  ncclXmlNode* channel = NewNode("channel");
+  AddChild(channel, "net", "1");
+
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, -1, system(), graph()), ncclInvalidUsage);
+}
+
+TEST_F(SearchXmlChannelMicrotest, SubnodesThatAreNeitherNetNorGpu_AreIgnored) {
+  // The loop requires a dev attribute on every sub but only acts on net and
+  // gpu, so an unrecognised element must consume no slot in either array.
+  ncclXmlNode* channel = NewNode("channel");
+  AddChild(channel, "net", "1");
+  AddChild(channel, "nvswitch", "9");
+  AddChild(channel, "gpu", "2");
+  AddChild(channel, "net", "3");
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->inter[0], 1);
+  EXPECT_EQ(graph()->inter[1], 3);
+  EXPECT_EQ(graph()->intra[0], SearchXmlScene::kRankBase + 2);
 }
 
 TEST_F(SearchXmlChannelMicrotest, LastValidChannelIndex_IsStillAccepted) {
