@@ -47,7 +47,14 @@ namespace rocshmem {
  *****************************************************************************/
 template <typename T>
 __device__ void GDAContext::p(T *dest, T value, int pe) {
-  putmem_scalar(dest, &value, sizeof(T), pe);
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(dest, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy<MemcpyKind::Put>(remote, reinterpret_cast<void *>(&value), sizeof(T), local_pe);
+    return;
+  }
+  putmem_nbi(dest, &value, sizeof(T), pe);
 }
 
 template <typename T>
@@ -63,7 +70,16 @@ __device__ void GDAContext::put_nbi(T *dest, const T *source, size_t nelems, int
 template <typename T>
 __device__ T GDAContext::g(const T *source, int pe) {
   T ret{};
-  getmem_scalar(&ret, source, sizeof(T), pe);
+  int local_pe{-1};
+  char *remote{nullptr};
+  if (ipcImpl_.isIpcAvailable(constmem.my_pe, pe, &local_pe) &&
+      (remote = ipcImpl_.ipcPeerPtr(source, local_pe)) != nullptr) {
+    ipcImpl_.ipcCopy<MemcpyKind::Get>(&ret, remote, sizeof(T), local_pe);
+    return ret;
+  }
+  LOGD_ERROR_ABORT("gda::g not implemented");
+  //TODO the following is incorrect because ret is not ibv registered memory
+  //getmem(&ret, source, sizeof(T), pe);
   return ret;
 }
 
