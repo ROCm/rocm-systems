@@ -37,9 +37,6 @@ void SetMicroEnvAbsent(const char* name);
 void SetMicroEnviron(const std::vector<std::string>& entries);
 void ClearMicroEnv();
 
-// The param loader (src/misc/param.cc:78). Reads through micro_getenv, so a param
-// is scripted with SetMicroEnv("NCCL_FOO", "1") like any other variable; drive the
-// hook directly only when a test needs a value the real parser could not produce.
 extern std::function<int64_t(char const*, int64_t, int64_t, int64_t*, int8_t*)> g_ncclLoadParam;
 int64_t DefaultLoadParam(char const* env, int64_t deftVal, int64_t uninitialized, int64_t* cache,
                          int8_t* noCache);

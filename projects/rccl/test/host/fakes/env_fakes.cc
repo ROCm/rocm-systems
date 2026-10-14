@@ -22,7 +22,7 @@
 #include <unistd.h>
 
 #include "nccl.h"
-#include "param.h"  // ncclLoadParam
+#include "param.h"
 
 #include "signature-drift.h"
 
@@ -137,17 +137,6 @@ void ResetEnvFakes() {
 }
 
 const char* ncclGetEnv(const char* name) { return micro_getenv(name); }
-
-// ---------------------------------------------------------------------------
-// Param loader (src/misc/param.cc:78).
-//
-// Lives here because this file already owns ncclGetEnv, which is where the real
-// loader reads its value from -- so NCCL_PARAM/RCCL_PARAM obeys the same scripted
-// environment as a direct getenv, and a name the fixture has not mapped reads as
-// unset and yields deftVal. Previously faked in dev_runtime_micro_fakes.cc (filed
-// under a TU that does not define it) and, with a signature that predated the
-// noCache parameter and so could never bind, in nccl_fakes.cc.
-// ---------------------------------------------------------------------------
 
 int64_t DefaultLoadParam(char const* env, int64_t deftVal, int64_t /*uninitialized*/,
                          int64_t* cache, int8_t* noCache) {

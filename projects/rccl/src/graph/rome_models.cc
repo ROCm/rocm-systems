@@ -3832,10 +3832,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
   int gpu = 0;
   int offset = 0;
   int status = 0; // 0 : between numbers, 1 : inside number, 2: start NET, 3: inside NET
-  // Zeroed, and re-zeroed per channel below: the translation and the memcpy both
-  // run over all ngpus*2 slots however few the ring actually named, so an unnamed
-  // slot must hold a defined value. 0 reads back as a negative NET id, which is
-  // what every reader already treats as "no NET here".
   int nets[NCCL_TOPO_MAX_NODES * 2] = {};
   int net_offset = 0, net_count = 0;
   int ngpus = system->nodes[GPU].count;
@@ -3858,9 +3854,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
       if (digit >= 0 && digit <= 9) {
         switch (status) {
         case 0:
-          // Bound before the write, not after the increment below: gpus[gpu] is
-          // what overruns, and the check down there both ran too late and used
-          // > where the array needs >=.
           if (gpu >= NCCL_TOPO_MAX_NODES) {
             WARN("Too many GPUs in one ring (max %d) in user-defined rings (NCCL_RINGS); initialization will fail",
                  NCCL_TOPO_MAX_NODES);
@@ -3870,9 +3863,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           status = 1;
           break;
         case 1:
-          // Signed overflow is undefined, and the wrapped negative was then
-          // swallowed by the g < 0 test below, so the channel disappeared
-          // silently instead of the input being reported as malformed.
           if (gpus[gpu] > (INT_MAX - digit) / 10) {
             WARN("GPU number too large in user-defined rings (NCCL_RINGS); initialization will fail");
             return ncclInvalidUsage;
@@ -3880,10 +3870,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           gpus[gpu] = gpus[gpu] * 10 + digit;
           break;
         case 2:
-          // The per-channel limit below is the runtime ngpus * 2 and uses >, which
-          // at the widest GPU count leaves net_offset sitting exactly on the end
-          // of nets[]. Bound the write by the array itself. case 3 only ever
-          // follows this case at the same offset, so it is covered by this check.
           if (net_offset >= NCCL_TOPO_MAX_NODES * 2) {
             WARN("Too many NETs in one ring (max %d) in user-defined rings (NCCL_RINGS); initialization will fail",
                  NCCL_TOPO_MAX_NODES * 2);
@@ -3893,9 +3879,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           status = 3;
           break;
         case 3:
-          // Held biased by 'N', so the widest NET number that fits is INT_MAX - 'N'.
-          // Overflowing here is undefined, and the wrapped result was then quietly
-          // discarded as "not a NET this system has", losing the channel silently.
           if (nets[net_offset] - 'N' > (INT_MAX - 'N' - digit) / 10) {
             WARN("NET number too large in user-defined rings (NCCL_RINGS); initialization will fail");
             return ncclInvalidUsage;
@@ -3919,10 +3902,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           if (gpu != ngpus) goto newchannel;
           // Ignore if net_count is not 0 or odd number
           if (net_count && net_count % 2) goto newchannel;
-          // graph->intra, graph->inter and graph->intraNets are all indexed by
-          // nChannels, so a longer ring list writes past every one of them.
-          // Refuse rather than truncate: a silently shortened graph is not the
-          // topology that was asked for.
           if (nChannels >= MAXCHANNELS) {
             WARN("Too many channels in user-defined rings (max %d) (NCCL_RINGS); initialization will fail",
                  MAXCHANNELS);
@@ -3980,8 +3959,6 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
   } while (str[offset++] != 0);
 end:
   graph->nChannels = nChannels;
-  // A ring list that matched nothing is not an error -- callers test nChannels
-  // afterwards -- but dividing by it handed back an infinite bandwidth.
   graph->bwIntra = graph->bwInter = nChannels ? system->totalBw / nChannels : 0;
   if (graph->id == 1) {
     for (int i = 0; i < graph->nChannels; i++) {
@@ -5316,10 +5293,6 @@ ncclResult_t parseGIOTopos(struct ncclTopoSystem* system, struct ncclTopoGraph* 
   const int ncpus = system->nodes[CPU].count;
   const int nnets = system->nodes[NET].count;
 
-  // != rather than <: devids, g_hives and rdm below are all sized at NGPUS, and
-  // the model describes exactly that many GPUs, so a wider system overran every
-  // one of them -- and parseGraph's gpu_map bound, which trusts ngpus, then read
-  // past rdm.
   if (ngpus != NGPUS || ncpus > 2 || nnets != 0) return ncclSuccess;
 
   struct rcclRomeModel romeTopo;

@@ -689,42 +689,4 @@ TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetRingBase_IsAccepted) {
 
   ResetNcclFakes();
 }
-
-// ---------------------------------------------------------------------------
-// parseGraph (NCCL_RINGS): what the ROCM-31973 pass found, and what it did not.
-//
-// Every unchecked quantity listed when this work started now has a test above,
-// except for three that the work itself reclassified:
-//
-//   nets[-1] via a zero GPU count. Listed as an out-of-bounds write: with ngpus
-//   0 every segment matches the zero GPU count, and the reversal swap then
-//   indexes nets[ngpus * 2 - 1]. It is not reachable. The per-channel NET limit
-//   net_offset > ngpus * 2 becomes "> 0" and fires on the first NET token, so
-//   the channel is abandoned before the swap. The test written for it passed
-//   against unfixed code, which is how it was caught; it was deleted rather
-//   than kept as a guard that guards nothing.
-//
-//   intra[i * ngpus + 1] in the graph->id == 1 tail. Listed separately, but it
-//   is bounded by nChannels and so was fixed by bounding nChannels. What
-//   remains is a contract, TreeGraph_ResolvesOutgoingNetFromTheSecondGpu, not
-//   a bound.
-//
-//   The nets[] declaration initialiser. It only affects the first channel of a
-//   call, where unnamed slots are genuinely uninitialised stack; every later
-//   channel is covered by the per-channel reset. It survives mutation and is
-//   left that way deliberately -- ASan cannot see an uninitialised read, and a
-//   test asserting on whatever the stack held would be flaky rather than a
-//   guard.
-//
-// Two tests are ASan-only and do not protect CI, which runs the ordinary build:
-// SystemWithMoreGpusThanTheModel_IsIgnored, and the memory-write half of the
-// two overrun tests -- though both of those also assert a return code that the
-// ordinary build does see.
-// ---------------------------------------------------------------------------
-
-
-
-
-
-
 }  // namespace

@@ -157,11 +157,6 @@ ncclResult_t ncclCommWindowDeregister(ncclComm_t comm, ncclWindow_t win) {
 // Group state machine.
 // ---------------------------------------------------------------------------
 
-// ---------------------------------------------------------------------------
-// Param loader: see fakes/env_fakes.cc, which owns ncclLoadParam because it owns
-// the ncclGetEnv the real loader reads through.
-// ---------------------------------------------------------------------------
-
 // Emitted by init.cc, which this binary does not link, so the redirected
 // NCCL_PARAM in dev_runtime.cc does not cover it. Routed through g_loadParam
 // like the params dev_runtime.cc owns, so a test can drive the NCCL_WIN_ENABLE=0
