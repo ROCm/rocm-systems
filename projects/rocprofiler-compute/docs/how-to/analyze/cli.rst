@@ -149,6 +149,9 @@ To print the block as tables instead of the diagram, see :ref:`cli-view-table`.
    :align: left
    :alt: Roofline
 
+.. deprecated::
+   The block 4 terminal roofline plot (section 4.3) is deprecated and will be removed in a future release. The metric tables (4.1 and 4.2) remain. Use the interactive HTML roofline file generated alongside your workload directory for roofline visualization.
+
 .. note::
    * Visualized memory chart and Roofline chart are only supported in single run analysis. In multiple runs comparison mode, both are switched back to basic table view.
    * Visualized memory chart is drawn at a fixed width and needs a wide terminal. See :ref:`cli-memory-chart-viewing` if it wraps.

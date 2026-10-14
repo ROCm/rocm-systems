@@ -1182,6 +1182,11 @@ def show_all(
 
 def show_roof_plot(roof_plot: str) -> None:
     # TODO: short term solution to display roofline plot
+    console_warning(
+        "The block 4 terminal roofline plot is deprecated and will be removed in a "
+        "future release. Use the interactive HTML roofline file generated alongside "
+        "your workload directory instead."
+    )
     print("4.3 Roofline Plot:")
 
     if roof_plot:

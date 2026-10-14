@@ -41,6 +41,8 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 ### Upcoming changes
 
+* The block 4 terminal roofline plot (`-b 4` / `-b roof`) is deprecated and will be removed in a future release. The metric tables (4.1 and 4.2) remain. Use the interactive HTML roofline file generated alongside your workload directory for roofline visualization.
+
 ### Known issues
 
 ## ROCm Compute Profiler 3.10.0 for ROCm 10.2.0
