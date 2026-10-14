@@ -6,6 +6,8 @@
  *************************************************************************/
 
 #include "common_cast.h"
+#include "rocmwrap.h"
+#include "net_ib/multiseg.h"
 #include "rccl_ib_multiseg.h"
 
 ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
@@ -107,7 +109,90 @@ fail:
   goto exit;
 }
 
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+// RCCL: plugin regMrDmaBuf with fd < 0. offset is (cuMem export flags << 32) | segment count.
+static ncclResult_t IbCastRegMrDmaBufFromRange(void* comm, void* data, size_t size, int type, uint64_t packed,
+                                               void** mhandle) {
+  const int nExpect = (int)(packed & 0xffffffffu);
+  const int handleFlags = (int)(packed >> 32);
+  ncclResult_t ret = ncclSuccess;
+  void** segAddrs = NULL;
+  size_t* segLens = NULL;
+  uint64_t* segOffsets = NULL;
+  int* segFds = NULL;
+  int nSeg = 0;
+  size_t remaining = size;
+  *mhandle = NULL;
+
+  if (nExpect < 1 || nExpect > NCCL_IB_MAX_SEGMENTS) {
+    WARN("NET/IB: CAST multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nExpect,
+         NCCL_IB_MAX_SEGMENTS);
+    return ncclInvalidUsage;
+  }
+  NCCLCHECKGOTO(ncclCalloc(&segAddrs, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segLens, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segOffsets, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segFds, nExpect), ret, fail);
+  for (int s = 0; s < nExpect; s++) segFds[s] = -1;
+
+  {
+    uintptr_t segPtr = (uintptr_t)data;
+    for (int s = 0; s < nExpect && remaining > 0; s++) {
+      CUdeviceptr segBase = 0;
+      size_t segSize = 0;
+      CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, fail);
+      size_t inSeg = ncclIbBytesRemainingInSegment(segPtr, (uintptr_t)segBase, segSize);
+      size_t thisLen = remaining < inSeg ? remaining : inSeg;
+      int fd = -1;
+      CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&fd, (CUdeviceptr)segPtr, thisLen,
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, handleFlags),
+                  ret, fail);
+      segAddrs[s] = (void*)segPtr;
+      segLens[s] = thisLen;
+      segOffsets[s] = 0ULL;
+      segFds[s] = fd;
+      segPtr += thisLen;
+      remaining -= thisLen;
+      nSeg++;
+    }
+  }
+
+  if (remaining != 0 || nSeg != nExpect) {
+    WARN("NET/IB: CAST enumerated %d/%d segments for buffer %p but %zu/%zu bytes remain unregistered", nSeg, nExpect,
+         data, remaining, size);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  if (!ncclIbSegmentsUniform(nSeg, segLens)) {
+    INFO(NCCL_NET | NCCL_REG,
+         "Buffer %p (size %zu) has non-uniform segments; declining NET user-buffer registration (staging fallback)",
+         data, size);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  NCCLCHECKGOTO(IbCastRegMrDmaBufMultiSeg(comm, nSeg, segAddrs, segLens, segOffsets, segFds, type, mhandle), ret, fail);
+
+exit:
+  if (segFds) {
+    for (int s = 0; s < nExpect; s++) {
+      if (segFds[s] != -1) (void)close(segFds[s]);
+    }
+  }
+  free(segAddrs);
+  free(segLens);
+  free(segOffsets);
+  free(segFds);
+  return ret;
+fail:
+  goto exit;
+}
+#endif
+
 ncclResult_t IbCastRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  // RCCL: fd < 0 registers one MR per physical segment. A real fd stays one MR.
+  if (fd == -1) return IbCastRegMrDmaBufFromRange(comm, data, size, type, offset, mhandle);
+#endif
   return IbCastRegMrDmaBufInternal(comm, data, size, type, offset, fd, 0ULL, mhandle);
 }
 
