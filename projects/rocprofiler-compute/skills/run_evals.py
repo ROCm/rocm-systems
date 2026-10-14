@@ -144,41 +144,29 @@ def run_agent(prompt: str, workspace: Path, behavioral: bool) -> tuple[str, list
 
     Raises RuntimeError when the claude CLI itself fails.
     """
-    command = [
-        "claude",
-        "-p",
-        prompt,
+    options = [
         "--output-format",
         "stream-json",
         "--verbose",
         "--add-dir",
         str(workspace),
-        *ISOLATED_SETTINGS,
     ]
     if behavioral:
         # The agent has to build and profile the sample, so it runs commands
         # without asking.
-        command += ["--permission-mode", "bypassPermissions"]
+        options += ["--permission-mode", "bypassPermissions"]
     else:
         # Routing only: the decision to load a skill is all we grade, so deny
         # the agent the tools that would make it start doing the work.
-        command += ["--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit"]
+        options += ["--disallowedTools", "Bash", "Edit", "Write", "NotebookEdit"]
 
-    result = subprocess.run(
-        command,
-        cwd=workspace,
-        capture_output=True,
-        text=True,
-        timeout=900 if behavioral else 300,
+    output = _run_claude(
+        options, prompt, cwd=workspace, timeout=900 if behavioral else 300
     )
-    if result.returncode != 0:
-        raise RuntimeError(
-            f"claude exited {result.returncode}: {result.stderr.strip()[-500:]}"
-        )
 
     transcript: list[str] = []
     loaded: list[str] = []
-    for line in result.stdout.splitlines():
+    for line in output.splitlines():
         try:
             event = json.loads(line)
         except json.JSONDecodeError:
@@ -216,8 +204,44 @@ def _skills_in(event: Any) -> list[str]:
     return names
 
 
+def _run_claude(
+    options: list[str], prompt: str, cwd: Optional[Path] = None, timeout: int = 300
+) -> str:
+    """Run claude -p with the prompt on stdin and return its stdout.
+
+    Raises RuntimeError with the CLI's own error text when it exits non-zero.
+    """
+    result = subprocess.run(
+        ["claude", "-p", *options, *ISOLATED_SETTINGS],
+        input=prompt,
+        cwd=cwd,
+        capture_output=True,
+        text=True,
+        timeout=timeout,
+    )
+    if result.returncode != 0:
+        reason = _error_text(result.stdout) or result.stderr.strip()[-500:]
+        raise RuntimeError(f"claude exited {result.returncode}: {reason}")
+    return result.stdout
+
+
+def _error_text(output: str) -> str:
+    """Return the result text of the last JSON event in claude output, if any."""
+    for line in reversed(output.splitlines()):
+        try:
+            event = json.loads(line)
+        except json.JSONDecodeError:
+            continue
+        if isinstance(event, dict):
+            return str(event.get("result", ""))
+    return ""
+
+
 def grade_judged(claim: str, transcript: str, should_hold: bool) -> tuple[bool, str]:
-    """Ask a second agent whether a plain-language claim holds in the transcript."""
+    """Ask a second agent whether a plain-language claim holds in the transcript.
+
+    Raises RuntimeError when the claude CLI itself fails.
+    """
     question = (
         "You are grading an AI agent transcript against one claim.\n"
         f"Claim: {claim}\n"
@@ -225,23 +249,12 @@ def grade_judged(claim: str, transcript: str, should_hold: bool) -> tuple[bool, 
         "Answer only with the JSON object.\n\n"
         f"Transcript:\n{transcript[:200000]}"
     )
-    result = subprocess.run(
-        [
-            "claude",
-            "-p",
-            "--output-format",
-            "json",
-            "--json-schema",
-            json.dumps(JUDGE_SCHEMA),
-            *ISOLATED_SETTINGS,
-        ],
-        input=question,
-        capture_output=True,
-        text=True,
-        timeout=300,
+    output = _run_claude(
+        ["--output-format", "json", "--json-schema", json.dumps(JUDGE_SCHEMA)],
+        question,
     )
     try:
-        payload = json.loads(result.stdout)
+        payload = json.loads(output)
         verdict = payload if "pass" in payload else json.loads(payload["result"])
     except (json.JSONDecodeError, KeyError, TypeError):
         return False, "judge returned unparseable output"
@@ -297,11 +310,11 @@ def run_case(
     workspace = build_workspace(tmp / f"{name}-{case['id']}")
     try:
         transcript, loaded = run_agent(case_prompt(case), workspace, behavioral)
+        failures = grade(case, name, transcript, loaded, workspace, behavioral)
     except subprocess.TimeoutExpired:
         return name, case["id"], ["timed out"]
     except RuntimeError as error:
         return name, case["id"], [str(error)]
-    failures = grade(case, name, transcript, loaded, workspace, behavioral)
     return name, case["id"], failures
 
 
