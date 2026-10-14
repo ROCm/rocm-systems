@@ -172,6 +172,10 @@ constexpr size_t kExtentExtendedUnion = kAmdSmiFabricV1PayloadEnd;
 constexpr size_t kCompiledExtent =
   amdSmiFabricLayoutIs8Gpu ? kExtent8Gpu : (amdSmiFabricLayoutIs16Gpu ? kExtent16Gpu : kExtentExtendedUnion);
 
+// The typed amd_smi fabric path is only ever taken for the 8- and 16-GPU layouts; the extended
+// union always falls back to sysfs, so tests of the typed path skip on such a build.
+constexpr bool kTypedFabricLayout = amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu;
+
 template <typename FabricInfoT>
 void SetFabricVersion(FabricInfoT& info, uint32_t version) {
   if constexpr (amdSmiFabricInfoIsFlat<FabricInfoT>::value) {
@@ -224,6 +228,9 @@ struct FakeSmi {
   uint64_t maxBw = 0;
   int initCalls = 0;
   int shutdownCalls = 0;
+  int procsCalls = 0;
+  int typeCalls = 0;
+  int enumCalls = 0;
   int fabricInfoCalls = 0;
   int telemAllocCalls = 0;
   int telemGetCalls = 0;
@@ -269,6 +276,7 @@ amdsmi_status_t FakeSocketHandles(uint32_t* count, amdsmi_socket_handle* handles
   return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t FakeProcessorHandles(amdsmi_socket_handle socket, uint32_t* count, amdsmi_processor_handle* handles) {
+  ++g_smi.procsCalls;
   if (g_smi.procsStatus != AMDSMI_STATUS_SUCCESS) return g_smi.procsStatus;
   auto& procs = *static_cast<std::vector<FakeProc>*>(socket);
   if (handles != nullptr) {
@@ -278,10 +286,12 @@ amdsmi_status_t FakeProcessorHandles(amdsmi_socket_handle socket, uint32_t* coun
   return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t FakeProcessorType(amdsmi_processor_handle h, processor_type_t* type) {
+  ++g_smi.typeCalls;
   *type = Proc(h)->gpu ? AMDSMI_PROCESSOR_TYPE_AMD_GPU : AMDSMI_PROCESSOR_TYPE_AMD_CPU;
   return AMDSMI_STATUS_SUCCESS;
 }
 amdsmi_status_t FakeEnumerationInfo(amdsmi_processor_handle h, amdsmi_enumeration_info_t* info) {
+  ++g_smi.enumCalls;
   if (g_smi.enumStatus != AMDSMI_STATUS_SUCCESS) return g_smi.enumStatus;
   std::memset(info, 0, sizeof(*info));
   info->hip_id = Proc(h)->hipId;
@@ -378,48 +388,46 @@ amdsmi_status_t FakeTelemIdToString(uint64_t, const char** name) {
 const char* g_legacyTelemName = "LEGACY_NAME";
 const char* FakeLegacyTelemIdToString(uint64_t) { return g_legacyTelemName; }
 
+// Every amd_smi entry point amdsmi_wrap.cc resolves, by the name it dlsym()s, with its pfn_* slot and
+// this file's fake. One list drives installing the fakes, clearing them, and the dlopen test's dlsym.
+struct SmiSymbol {
+  const char* name;
+  void** slot;
+  void* fake;
+};
+#define SMI_SYMBOL(fn, fake) SmiSymbol{#fn, reinterpret_cast<void**>(&pfn_##fn), reinterpret_cast<void*>(fake)}
+const std::vector<SmiSymbol>& SmiSymbols() {
+  static const std::vector<SmiSymbol> symbols = {
+    SMI_SYMBOL(amdsmi_init, FakeInit),
+    SMI_SYMBOL(amdsmi_shut_down, FakeShutDown),
+    SMI_SYMBOL(amdsmi_status_code_to_string, FakeStatusString),
+    SMI_SYMBOL(amdsmi_get_lib_version, FakeLibVersion),
+    SMI_SYMBOL(amdsmi_get_socket_handles, FakeSocketHandles),
+    SMI_SYMBOL(amdsmi_get_processor_handles, FakeProcessorHandles),
+    SMI_SYMBOL(amdsmi_get_processor_type, FakeProcessorType),
+    SMI_SYMBOL(amdsmi_get_processor_handle_from_bdf, FakeHandleFromBdf),
+    SMI_SYMBOL(amdsmi_get_gpu_enumeration_info, FakeEnumerationInfo),
+    SMI_SYMBOL(amdsmi_get_gpu_bdf_id, FakeBdfId),
+    SMI_SYMBOL(amdsmi_topo_get_link_type, FakeLinkType),
+    SMI_SYMBOL(amdsmi_topo_get_link_weight, FakeLinkWeight),
+    SMI_SYMBOL(amdsmi_get_minmax_bandwidth_between_processors, FakeMinMaxBw),
+    SMI_SYMBOL(amdsmi_get_gpu_fabric_info, FakeFabricInfo),
+    SMI_SYMBOL(amdsmi_alloc_fabric_telemetry, FakeAllocTelem),
+    SMI_SYMBOL(amdsmi_get_fabric_telemetry_data, FakeGetTelem),
+    SMI_SYMBOL(amdsmi_free_fabric_telemetry, FakeFreeTelem),
+    SMI_SYMBOL(amdsmi_fabric_telem_id_to_string, FakeTelemIdToString),
+    SMI_SYMBOL(amdsmi_get_fw_info, FakeFwInfo),
+  };
+  return symbols;
+}
+#undef SMI_SYMBOL
+
 void InstallFakeSmiTable() {
-  pfn_amdsmi_init = FakeInit;
-  pfn_amdsmi_shut_down = FakeShutDown;
-  pfn_amdsmi_status_code_to_string = FakeStatusString;
-  pfn_amdsmi_get_lib_version = FakeLibVersion;
-  pfn_amdsmi_get_socket_handles = FakeSocketHandles;
-  pfn_amdsmi_get_processor_handles = FakeProcessorHandles;
-  pfn_amdsmi_get_processor_type = FakeProcessorType;
-  pfn_amdsmi_get_processor_handle_from_bdf = FakeHandleFromBdf;
-  pfn_amdsmi_get_gpu_enumeration_info = FakeEnumerationInfo;
-  pfn_amdsmi_get_gpu_bdf_id = FakeBdfId;
-  pfn_amdsmi_topo_get_link_type = FakeLinkType;
-  pfn_amdsmi_topo_get_link_weight = FakeLinkWeight;
-  pfn_amdsmi_get_minmax_bandwidth_between_processors = FakeMinMaxBw;
-  pfn_amdsmi_get_gpu_fabric_info = FakeFabricInfo;
-  pfn_amdsmi_alloc_fabric_telemetry = FakeAllocTelem;
-  pfn_amdsmi_get_fabric_telemetry_data = FakeGetTelem;
-  pfn_amdsmi_free_fabric_telemetry = FakeFreeTelem;
-  pfn_amdsmi_fabric_telem_id_to_string = FakeTelemIdToString;
-  pfn_amdsmi_get_fw_info = FakeFwInfo;
+  for (const auto& sym : SmiSymbols()) *sym.slot = sym.fake;
 }
 
 void ClearSmiTable() {
-  pfn_amdsmi_init = nullptr;
-  pfn_amdsmi_shut_down = nullptr;
-  pfn_amdsmi_status_code_to_string = nullptr;
-  pfn_amdsmi_get_lib_version = nullptr;
-  pfn_amdsmi_get_socket_handles = nullptr;
-  pfn_amdsmi_get_processor_handles = nullptr;
-  pfn_amdsmi_get_processor_type = nullptr;
-  pfn_amdsmi_get_processor_handle_from_bdf = nullptr;
-  pfn_amdsmi_get_gpu_enumeration_info = nullptr;
-  pfn_amdsmi_get_gpu_bdf_id = nullptr;
-  pfn_amdsmi_topo_get_link_type = nullptr;
-  pfn_amdsmi_topo_get_link_weight = nullptr;
-  pfn_amdsmi_get_minmax_bandwidth_between_processors = nullptr;
-  pfn_amdsmi_get_gpu_fabric_info = nullptr;
-  pfn_amdsmi_alloc_fabric_telemetry = nullptr;
-  pfn_amdsmi_get_fabric_telemetry_data = nullptr;
-  pfn_amdsmi_free_fabric_telemetry = nullptr;
-  pfn_amdsmi_fabric_telem_id_to_string = nullptr;
-  pfn_amdsmi_get_fw_info = nullptr;
+  for (const auto& sym : SmiSymbols()) *sym.slot = nullptr;
 }
 
 class AmdsmiWrapMicrotest : public ::testing::Test {
@@ -615,32 +623,16 @@ int DlopenResolvesChild() {
   g_params["RCCL_USE_AMD_SMI_LIB"] = 1;
   static int handle;
   g_dlopen = [](const char*, int) -> void* { return &handle; };
-  g_dlsymTable = {
-    {"amdsmi_init", reinterpret_cast<void*>(FakeInit)},
-    {"amdsmi_shut_down", reinterpret_cast<void*>(FakeShutDown)},
-    {"amdsmi_status_code_to_string", reinterpret_cast<void*>(FakeStatusString)},
-    {"amdsmi_get_lib_version", reinterpret_cast<void*>(FakeLibVersion)},
-    {"amdsmi_get_socket_handles", reinterpret_cast<void*>(FakeSocketHandles)},
-    {"amdsmi_get_processor_handles", reinterpret_cast<void*>(FakeProcessorHandles)},
-    {"amdsmi_get_processor_type", reinterpret_cast<void*>(FakeProcessorType)},
-    {"amdsmi_get_processor_handle_from_bdf", reinterpret_cast<void*>(FakeHandleFromBdf)},
-    {"amdsmi_get_gpu_enumeration_info", reinterpret_cast<void*>(FakeEnumerationInfo)},
-    {"amdsmi_get_gpu_bdf_id", reinterpret_cast<void*>(FakeBdfId)},
-    {"amdsmi_topo_get_link_type", reinterpret_cast<void*>(FakeLinkType)},
-    {"amdsmi_topo_get_link_weight", reinterpret_cast<void*>(FakeLinkWeight)},
-    {"amdsmi_get_minmax_bandwidth_between_processors", reinterpret_cast<void*>(FakeMinMaxBw)},
-    {"amdsmi_get_gpu_fabric_info", reinterpret_cast<void*>(FakeFabricInfo)},
-    {"amdsmi_fabric_telem_id_to_string", reinterpret_cast<void*>(FakeTelemIdToString)},
-    {"amdsmi_alloc_fabric_telemetry", reinterpret_cast<void*>(FakeAllocTelem)},
-    {"amdsmi_get_fabric_telemetry_data", reinterpret_cast<void*>(FakeGetTelem)},
-    {"amdsmi_free_fabric_telemetry", reinterpret_cast<void*>(FakeFreeTelem)},
-    {"amdsmi_get_fw_info", reinterpret_cast<void*>(FakeFwInfo)},
-  };
-  bool ok = amd_smi_init() == ncclSuccess && g_smi.initCalls == 1;
-  ok = ok && pfn_amdsmi_get_gpu_fabric_info == FakeFabricInfo && pfn_amdsmi_get_fw_info == FakeFwInfo &&
-       pfn_amdsmi_get_minmax_bandwidth_between_processors == FakeMinMaxBw &&
-       pfn_amdsmi_free_fabric_telemetry == FakeFreeTelem && pfn_amdsmi_get_lib_version == FakeLibVersion;
-  return ok ? 0 : 1;
+  for (const auto& sym : SmiSymbols()) g_dlsymTable[sym.name] = sym.fake;
+  if (amd_smi_init() != ncclSuccess || g_smi.initCalls != 1) return 1;
+  // Every slot must hold the fake dlsym returned for its own name: a misspelled name leaves it null.
+  for (const auto& sym : SmiSymbols()) {
+    if (*sym.slot != sym.fake) {
+      std::fprintf(stderr, "pfn slot for %s not resolved\n", sym.name);
+      return 2;
+    }
+  }
+  return 0;
 }
 }  // namespace
 
@@ -685,11 +677,16 @@ TEST_F(AmdsmiWrapMicrotest, ProcessorHandle_LibraryFailuresAreInternalError) {
   UseLib();
   TwoGpusBehindACpu();
   amdsmi_processor_handle h = nullptr;
+  // Each failure returns at once: nothing past the failing call runs.
   g_smi.socketsStatus = AMDSMI_STATUS_INVAL;
   EXPECT_EQ(getProcessorHandle(0, &h), ncclInternalError);
+  EXPECT_EQ(g_smi.procsCalls, 0);
   g_smi.socketsStatus = AMDSMI_STATUS_SUCCESS;
   g_smi.enumStatus = AMDSMI_STATUS_INVAL;
   EXPECT_EQ(getProcessorHandle(0, &h), ncclInternalError);
+  EXPECT_EQ(g_smi.enumCalls, 1);  // the first GPU's query failed; the second GPU was never asked
+  EXPECT_EQ(g_smi.typeCalls, 2);  // the CPU and that first GPU
+  EXPECT_EQ(h, nullptr);
 }
 
 #if !AMDSMI_DIRECT
@@ -1034,6 +1031,7 @@ TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_InitFailureIsReturned) {
 
 TEST_F(AmdsmiWrapMicrotest, FirmwareVersion_Wsl2IsZero) {
   UseWsl2();
+  g_arsmi.fwVersion = 0x55;  // so only the WSL2 early return can produce 0
   uint64_t fw = 7;
   EXPECT_EQ(amd_smi_getFirmwareVersion(0, &fw), ncclSuccess);
   EXPECT_EQ(fw, 0u);
@@ -1124,8 +1122,7 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_TooManyDevicesIsInternalError) {
   g_arsmi.numDevices = amdsmiFabricMaxDevices + 1;
   EXPECT_EQ(amd_smi_ensureFabricInitialized(), ncclInternalError);
   EXPECT_TRUE(Logged(NCCL_LOG_WARN, "exceeds internal maximum"));
-  g_arsmi.numDevices = amdsmiFabricMaxDevices;  // the boundary itself fits
-  Reset();
+  Reset();  // the boundary itself fits
   g_arsmi.numDevices = amdsmiFabricMaxDevices;
   EXPECT_EQ(amd_smi_ensureFabricInitialized(), ncclSuccess);
   EXPECT_EQ(amdsmiFabricDeviceCount, amdsmiFabricMaxDevices);
@@ -1165,7 +1162,7 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_DiscoveryRunsOnce) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, Fabric_LibPathReadsTheTypedStruct) {
-  if (!(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu)) {
+  if (!kTypedFabricLayout) {
     GTEST_SKIP() << "this build's amd_smi header uses the extended-union layout, which always reads sysfs";
   }
   UseLib();
@@ -1201,7 +1198,7 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_LibPathReadsTheTypedStruct) {
 
 // A version the library claims but RCCL cannot read is refused; the unreported sentinel reads as v1.
 TEST_F(AmdsmiWrapMicrotest, Fabric_LibVersionGate) {
-  if (!(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu)) GTEST_SKIP() << "extended-union layout reads sysfs";
+  if (!kTypedFabricLayout) GTEST_SKIP() << "extended-union layout reads sysfs";
   UseLib();
   FakeProc a, b;
   a.hipId = 0;
@@ -1216,7 +1213,7 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_LibVersionGate) {
 }
 
 TEST_F(AmdsmiWrapMicrotest, Fabric_LibPerDeviceFailureMarksOnlyThatDeviceUnsupported) {
-  if (!(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu)) GTEST_SKIP() << "extended-union layout reads sysfs";
+  if (!kTypedFabricLayout) GTEST_SKIP() << "extended-union layout reads sysfs";
   UseLib();
   FakeProc a, b;
   a.hipId = 0;
@@ -1245,7 +1242,7 @@ TEST_F(AmdsmiWrapMicrotest, Fabric_LibProbeFallsBackToSysfs) {
   };
   for (const auto& c : cases) {
     SCOPED_TRACE(c.name);
-    if (std::strcmp(c.name, "other layout") == 0 && !(amdSmiFabricLayoutIs8Gpu || amdSmiFabricLayoutIs16Gpu)) continue;
+    if (std::strcmp(c.name, "other layout") == 0 && !kTypedFabricLayout) continue;
     Reset();
     UseLib();
     FakeProc a;
