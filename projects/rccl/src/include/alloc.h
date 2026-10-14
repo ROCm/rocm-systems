@@ -632,6 +632,11 @@ static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* m
   }
 
 fail:
+  if (result != ncclSuccess) {
+    WARN("ncclCuMemFreeAddr: VMM teardown failed for %p after %zu bytes; preserving the address reservation", ptr,
+         totalSize);
+    return result;
+  }
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
@@ -808,6 +813,11 @@ static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manag
   }
 
 fail:
+  if (result != ncclSuccess) {
+    WARN("ncclCuMemFree: VMM teardown failed for %p after %zu bytes; preserving the address reservation", ptr,
+         totalSize);
+    return result;
+  }
   CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;

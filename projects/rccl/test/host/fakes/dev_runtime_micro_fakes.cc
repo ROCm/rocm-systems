@@ -383,7 +383,17 @@ ncclResult_t ncclRmaProxyDeregister(struct ncclComm* comm, void* wins[NCCL_GIN_M
 // ---------------------------------------------------------------------------
 // devr internal helpers (defined elsewhere in the real build).
 // ---------------------------------------------------------------------------
-static ncclResult_t DefaultPopulateSegmentSizes(struct ncclDevrMemory*, int) { return ncclSuccess; }
+static ncclResult_t DefaultPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments) {
+  if (mem == nullptr || mem->segmentSizes == nullptr || numSegments <= 0) return ncclInternalError;
+  size_t offset = 0;
+  for (int segment = 0; segment < numSegments; segment++) {
+    size_t remaining = mem->size - offset;
+    size_t segmentSize = segment + 1 == numSegments ? remaining : remaining / (numSegments - segment);
+    mem->segmentSizes[segment] = segmentSize;
+    offset += segmentSize;
+  }
+  return ncclSuccess;
+}
 std::function<ncclResult_t(struct ncclDevrMemory*, int)> g_devrPopulateSegmentSizes = DefaultPopulateSegmentSizes;
 
 ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments) {

@@ -118,7 +118,8 @@ static ncclResult_t getNcclVersionCompat(int version, struct ncclDevCommCompat**
 static std::mutex ncclWindowMapMutex;
 static ncclIntruAddressMap<ncclDevrWindow, struct ncclWindow_vidmem*, &ncclDevrWindow::vidmem, &ncclDevrWindow::next>
   ncclWindowMap;
-static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream);
+static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream,
+                                     bool forceCleanup = false);
 
 struct ncclDevrWindowSorted {
   uintptr_t userAddr;
@@ -275,7 +276,8 @@ fail_lsaRankList:
 }
 
 static ncclResult_t symTeamDestroyAll(struct ncclComm* comm); // Further down
-static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
+static ncclResult_t symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem,
+                                     bool forceCleanup = false); // Further down
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
                                            struct ncclWindow_vidmem* winDev); // Further down
@@ -326,7 +328,7 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
   {
     while (devr->winSortedCount > 0) {
       struct ncclDevrWindow* win = devr->winSorted[0].win;
-      NCCLCHECKIGNORE(symWindowDestroy(comm, win->vidmem, stream), ret);
+      NCCLCHECKIGNORE(symWindowDestroy(comm, win->vidmem, stream, /*forceCleanup=*/true), ret);
     }
     CUDACHECKIGNORE(cudaStreamSynchronize(stream));
   }
@@ -355,7 +357,7 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       INFO(NCCL_INIT, "ncclDevrFinalize: draining %d leftover device-API memory record(s)", leftover);
     }
     while (devr->memHead != nullptr) {
-      symMemoryDestroy(comm, devr->memHead);
+      NCCLCHECKIGNORE(symMemoryDestroy(comm, devr->memHead, /*forceCleanup=*/true), ret);
     }
     if (devr->lsaFlatBase != nullptr) {
       // The drain above unmapped every per-rank slice via symMemoryDestroy,
@@ -419,37 +421,47 @@ fail:
 
 static ncclResult_t symMemoryImportAndMapSegmentHandle(struct ncclComm* comm, int r, CUdeviceptr addr,
                                                        symLsaMessage* msg, CUmemGenericAllocationHandle memHandle,
-                                                       bool reuseLocal) {
+                                                       bool reuseLocal, bool* mapped = nullptr) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
-  CUmemGenericAllocationHandle impHandle;
+  CUmemGenericAllocationHandle impHandle = {};
+  bool imported = false;
+  ncclIpcFd fd = NCCL_INVALID_IPC_FD;
+  if (mapped != nullptr) *mapped = false;
   if (reuseLocal) {
     impHandle = memHandle;
   } else {
     if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
-      ncclIpcFd fd = NCCL_INVALID_IPC_FD;
       NCCLCHECKGOTO(ncclProxyClientGetFdBlocking(comm, devr->lsaRankList[r], msg, &fd), ret, fail);
       CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, reinterpret_cast<void*>((uintptr_t)fd),
                                                  ncclCuMemHandleType),
                   ret, fail);
+      imported = true;
       SYSCHECKGOTO(ncclIpcFdClose(fd), "close", ret, fail);
+      fd = NCCL_INVALID_IPC_FD;
     } else {
       CUCHECKGOTO(cuMemImportFromShareableHandle(&impHandle, (void*)&msg->fabricHandle, ncclCuMemHandleType), ret,
                   fail);
+      imported = true;
     }
   }
   CUCHECKGOTO(cuMemMap(addr, msg->segmentSize, 0, impHandle, 0), ret, fail);
+  if (mapped != nullptr) *mapped = true;
   NCCLCHECKGOTO(symMemorySetAccessForVASegment(comm, msg, addr), ret, fail);
-  if (!reuseLocal) {
+  if (imported) {
+    imported = false;
     CUCHECKGOTO(cuMemRelease(impHandle), ret, fail);
   }
 fail:
+  if (fd != NCCL_INVALID_IPC_FD) (void)ncclIpcFdClose(fd);
+  if (imported) CUCHECKIGNORE(cuMemRelease(impHandle));
   return ret;
 }
 
 static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, int r, symLsaMessage* messages,
                                                          int maxSegments, int numSegments,
-                                                         CUmemGenericAllocationHandle* memHandles, size_t bigOffset) {
+                                                         CUmemGenericAllocationHandle* memHandles, size_t bigOffset,
+                                                         int* mappedSegments = nullptr) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
@@ -458,9 +470,11 @@ static ncclResult_t symMemoryImportAndMapSegmentsForRank(struct ncclComm* comm, 
     symLsaMessage* msg = messages + r * maxSegments + segment;
     bool reuseLocal = (r == devr->lsaSelf) || (ncclParamSymReuseSysmemHandles() && ncclSymIsHostSegment(msg->type));
     CUmemGenericAllocationHandle handle = reuseLocal ? memHandles[segment] : (CUmemGenericAllocationHandle)0ULL;
-    NCCLCHECKGOTO(symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle,
-                                                     reuseLocal),
-                  ret, fail);
+    bool mapped = false;
+    ret = symMemoryImportAndMapSegmentHandle(comm, r, reinterpret_cast<CUdeviceptr>(addr), msg, handle, reuseLocal,
+                                             &mapped);
+    if (mapped && mappedSegments != nullptr) *mappedSegments = segment + 1;
+    if (ret != ncclSuccess) goto fail;
     addr += msg->segmentSize;
   }
 fail:
@@ -503,6 +517,17 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
                   ret, fail);
   }
 
+  // Persist the exact ranges that were mapped. Teardown must not rediscover
+  // them from the driver after another rank or the runtime has started
+  // dismantling the registration.
+  for (int r = 0; r < devr->lsaSize; r++) {
+    if (!registerLsa && r != devr->lsaSelf) continue;
+    for (int segment = 0; segment < segmentCounts[r]; segment++) {
+      mem->lsaSegmentSizes[r * mem->maxGlobalNumSegments + segment] =
+        messages[r * maxSegments + segment].segmentSize;
+    }
+  }
+
   if (devr->lsaFlatBase == nullptr) {
     // Create on first need.
     CUdeviceptr addr;
@@ -512,12 +537,14 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
 
   if (!registerLsa) {
     NCCLCHECKGOTO(symMemoryImportAndMapSegmentsForRank(comm, devr->lsaSelf, messages, maxSegments, numSegments,
-                                                       mem->memHandles, mem->bigOffset),
+                                                       mem->memHandles, mem->bigOffset,
+                                                       &mem->lsaMappedSegments[devr->lsaSelf]),
                   ret, fail);
   } else {
     for (int r = 0; r < devr->lsaSize; r++) {
       NCCLCHECKGOTO(symMemoryImportAndMapSegmentsForRank(comm, r, messages, maxSegments, segmentCounts[r],
-                                                         mem->memHandles, mem->bigOffset),
+                                                         mem->memHandles, mem->bigOffset,
+                                                         &mem->lsaMappedSegments[r]),
                     ret, fail);
     }
     // Ensure everyone has imported my mem handles.
@@ -827,33 +854,60 @@ static void symMemoryUnregister(struct ncclComm* comm, struct ncclDevrMemory* me
   }
 }
 
-static void symMemoryUnmapLsaRank(struct ncclDevrState* devr, struct ncclDevrMemory* mem, int rank) {
+static ncclResult_t symMemoryUnmapLsaRank(struct ncclDevrState* devr, struct ncclDevrMemory* mem, int rank) {
+  ncclResult_t ret = ncclSuccess;
   uintptr_t base = reinterpret_cast<uintptr_t>(devr->lsaFlatBase);
-  uintptr_t addr = base + rank * devr->bigSize + mem->bigOffset;
-  for (int idx = 0; idx < mem->lsaNumSegments[rank]; idx++) {
-    CUdeviceptr tmpBase = nullptr;
-    size_t tmpBaseSize = 0;
-    CUCHECKIGNORE(cuMemGetAddressRange(&tmpBase, &tmpBaseSize, reinterpret_cast<CUdeviceptr>(addr)));
-    CUCHECKIGNORE(cuMemUnmap(reinterpret_cast<CUdeviceptr>(addr), tmpBaseSize));
-    addr = addr + tmpBaseSize;
+  uintptr_t rankBase = base + rank * devr->bigSize + mem->bigOffset;
+  int* mappedSegments = &mem->lsaMappedSegments[rank];
+  size_t mappedSize = 0;
+
+  for (int idx = 0; idx < *mappedSegments; idx++) {
+    size_t segmentSize = mem->lsaSegmentSizes[rank * mem->maxGlobalNumSegments + idx];
+    if (segmentSize == 0) {
+      WARN("Symmetric memory rank %d segment %d has no recorded mapping size", rank, idx);
+      return ncclInternalError;
+    }
+    mappedSize += segmentSize;
   }
+
+  // Remove mappings in reverse order so lsaMappedSegments always describes a
+  // contiguous mapped prefix. If a driver call fails, a later cleanup attempt
+  // can resume without querying or touching segments that were already unmapped.
+  while (*mappedSegments > 0) {
+    int idx = *mappedSegments - 1;
+    size_t segmentSize = mem->lsaSegmentSizes[rank * mem->maxGlobalNumSegments + idx];
+    mappedSize -= segmentSize;
+    CUCHECKGOTO(cuMemUnmap(reinterpret_cast<CUdeviceptr>(rankBase + mappedSize), segmentSize), ret, fail);
+    *mappedSegments = idx;
+  }
+fail:
+  return ret;
 }
 
 // Unmap LSA-flat slices created by symMemoryMapLsaTeam. Must run before
 // ncclSpaceFree so a later obtain can remap the same bigOffset, and so
 // ncclDevrFinalize's cuMemAddressFree does not see leftover mappings.
 // Without LSA registration only our own rank's slice was mapped.
-static void symMemoryUnmapLsaTeam(struct ncclComm* comm, struct ncclDevrMemory* mem) {
-  if (comm == nullptr || mem == nullptr || mem->lsaNumSegments == nullptr) return;
+static ncclResult_t symMemoryUnmapLsaTeam(struct ncclComm* comm, struct ncclDevrMemory* mem,
+                                          bool forceCleanup = false) {
+  if (comm == nullptr || mem == nullptr || mem->lsaMappedSegments == nullptr || mem->lsaSegmentSizes == nullptr) {
+    return ncclSuccess;
+  }
+  ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
-  if (devr->lsaFlatBase == nullptr) return;
+  if (devr->lsaFlatBase == nullptr) return ncclSuccess;
   if (ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterLsa)) {
     for (int r = 0; r < devr->lsaSize; r++) {
-      symMemoryUnmapLsaRank(devr, mem, r);
+      ncclResult_t rankRet = symMemoryUnmapLsaRank(devr, mem, r);
+      if (rankRet != ncclSuccess) {
+        if (ret == ncclSuccess) ret = rankRet;
+        if (!forceCleanup) break;
+      }
     }
   } else {
-    symMemoryUnmapLsaRank(devr, mem, devr->lsaSelf);
+    ret = symMemoryUnmapLsaRank(devr, mem, devr->lsaSelf);
   }
+  return ret;
 }
 
 // On success we take caller's reference on memHandle.
@@ -965,6 +1019,8 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
   NCCLCHECKGOTO(ncclDevrPopulateSegmentSizes(mem, numSegments), ret, fail_mem);
 
   NCCLCHECKGOTO(ncclCalloc(&mem->lsaNumSegments, devr->lsaSize), ret, fail_mem);
+  NCCLCHECKGOTO(ncclCalloc(&mem->lsaSegmentSizes, (size_t)devr->lsaSize * maxGlobalNumSegments), ret, fail_mem);
+  NCCLCHECKGOTO(ncclCalloc(&mem->lsaMappedSegments, devr->lsaSize), ret, fail_mem);
   mem->lsaMinSize = size;
   mem->lsaMaxSize = size;
   for (int r = 0; r < devr->lsaSize; r++) {
@@ -1077,7 +1133,7 @@ fail_mem_space_teams:
     symUnbindTeamLe(comm, mem, t->mcLeId[counted]);
   }
 fail_mem_space:
-  symMemoryUnmapLsaTeam(comm, mem);
+  NCCLCHECKIGNORE(symMemoryUnmapLsaTeam(comm, mem, /*forceCleanup=*/true), ret);
   ncclSpaceFree(&devr->bigSpace, bigOffset, mem->lsaMaxSize);
 fail_mem:
   if (mem != nullptr) {
@@ -1085,6 +1141,8 @@ fail_mem:
     free(mem->memHandles);
     free(mem->segmentSizes);
     free(mem->lsaNumSegments);
+    free(mem->lsaSegmentSizes);
+    free(mem->lsaMappedSegments);
   }
   free(mem);
 fail_global_segment_info:
@@ -1093,10 +1151,11 @@ fail:
   return ret;
 }
 
-static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) {
+static ncclResult_t symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem, bool forceCleanup) {
   if (mem == nullptr) {
-    return;
+    return ncclSuccess;
   }
+  ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   struct ncclDevrMemory** memLink = &devr->memHead;
   while (*memLink != nullptr && *memLink != mem) {
@@ -1107,7 +1166,7 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
   // guards an explicit second destroy of a stale pointer: do not walk off a
   // drained memHead or repeat unmap/release/free.
   if (*memLink != mem) {
-    return;
+    return ncclSuccess;
   }
 
   symMemoryUnregister(comm, mem);
@@ -1119,27 +1178,62 @@ static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem) 
     symUnbindTeamMemory(comm, t, mem);
     symUnbindTeamLe(comm, mem, t->mcLeId[counted]);
   }
-  symMemoryUnmapLsaTeam(comm, mem);
+  {
+    ncclResult_t unmapRet = symMemoryUnmapLsaTeam(comm, mem, forceCleanup);
+    if (unmapRet != ncclSuccess) {
+      ret = unmapRet;
+      if (!forceCleanup) return ret;
+    }
+  }
 
-  ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
   for (int segment = 0; segment < mem->numSegments; segment++) {
-    CUCHECKIGNORE(cuMemRelease(mem->memHandles[segment]));
+    if (mem->memHandles[segment] == (CUmemGenericAllocationHandle)0ULL) continue;
+    hipError_t err = cuMemRelease(mem->memHandles[segment]);
+    if (err != hipSuccess) {
+      WARN("HIP failure '%s' releasing symmetric memory segment %d", hipGetErrorString(err), segment);
+      (void)hipGetLastError();
+      if (ret == ncclSuccess) ret = ncclUnhandledCudaError;
+      if (!forceCleanup) return ret;
+    } else {
+      mem->memHandles[segment] = (CUmemGenericAllocationHandle)0ULL;
+    }
+  }
+
+  {
+    ncclResult_t spaceRet = ncclSpaceFree(&devr->bigSpace, mem->bigOffset, mem->lsaMaxSize);
+    if (spaceRet != ncclSuccess) {
+      if (ret == ncclSuccess) ret = spaceRet;
+      if (!forceCleanup) return ret;
+    }
   }
 
   *memLink = mem->next; // Remove from list.
 
   free(mem->ginSegmentInfos);
   free(mem->lsaNumSegments);
+  free(mem->lsaSegmentSizes);
+  free(mem->lsaMappedSegments);
   free(mem->segmentSizes);
   free(mem->memHandles);
   free(mem);
+  return ret;
 }
 
 // Backing registrations are shared by windows over the same allocation; the last
 // reference tears the registration down. ncclDevrFinalize calls symMemoryDestroy
 // directly to force-drain registrations regardless of outstanding references.
-static void symMemoryDropRef(struct ncclComm* comm, struct ncclDevrMemory* mem) {
-  if (mem != nullptr && 0 == --mem->refCount) symMemoryDestroy(comm, mem);
+static ncclResult_t symMemoryDropRef(struct ncclComm* comm, struct ncclDevrMemory* mem,
+                                     bool forceCleanup = false) {
+  if (mem == nullptr) return ncclSuccess;
+  if (mem->refCount <= 0) return ncclInternalError;
+  if (mem->refCount > 1) {
+    mem->refCount -= 1;
+    return ncclSuccess;
+  }
+  // Keep the final reference until teardown succeeds. On failure the window
+  // and its registration remain owned and the caller must not free the backing
+  // allocation.
+  return symMemoryDestroy(comm, mem, forceCleanup);
 }
 
 static ncclResult_t symWindowTableInitOnce(struct ncclComm* comm, cudaStream_t stream) {
@@ -1246,7 +1340,8 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
   return ncclSuccess;
 }
 
-static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream) {
+static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, cudaStream_t stream,
+                                     bool forceCleanup) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   struct ncclWindow_vidmem* winDevHost;
@@ -1255,7 +1350,11 @@ static ncclResult_t symWindowDestroy(struct ncclComm* comm, struct ncclWindow_vi
   NCCLCHECKGOTO(ncclShadowPoolToHost(&devr->shadows, winDev, &winDevHost), ret, fail);
   winHost = (struct ncclDevrWindow*)winDevHost->winHost;
 
-  symMemoryDropRef(comm, winHost->memory);
+  if (forceCleanup) {
+    NCCLCHECKIGNORE(symMemoryDropRef(comm, winHost->memory, /*forceCleanup=*/true), ret);
+  } else {
+    NCCLCHECKGOTO(symMemoryDropRef(comm, winHost->memory), ret, fail);
+  }
 
   {
     struct ncclDevCommWindowTable* tableDev = devr->windowTable;
@@ -1679,7 +1778,8 @@ ncclResult_t ncclDevrWindowRegisterInGroup(struct ncclComm* comm, void* userPtr,
   return ret;
 
 fail_locReg_memHandle_mem_stream_win:
-  symWindowDestroy(comm, *outWinDev, stream);
+  NCCLCHECKIGNORE(symWindowDestroy(comm, *outWinDev, stream, /*forceCleanup=*/true), ret);
+  mem = nullptr; // the window owned mem's reference
   *outWinDev = nullptr;
   CUDACHECKIGNORE(cudaStreamSynchronize(stream));
 fail_locReg_memHandle_mem_stream:
@@ -1688,7 +1788,7 @@ fail_locReg_memHandle_mem_stream:
   if (stream != nullptr) {
     CUDACHECKIGNORE(cudaStreamDestroy(stream));
   }
-  symMemoryDropRef(comm, mem);
+  NCCLCHECKIGNORE(symMemoryDropRef(comm, mem, /*forceCleanup=*/true), ret);
 fail_locReg_memHandle:
   for (int idx = 0; idx < numSegments; idx++) {
     if (memHandles[idx] != 0x0ULL) {
@@ -2198,14 +2298,15 @@ ncclResult_t ncclDevrCommCreateInternal(struct ncclComm* comm, struct ncclDevCom
 
 fail_stream_mem_win:
   if (win != nullptr) {
-    symWindowDestroy(comm, win->vidmem, stream);
+    NCCLCHECKIGNORE(symWindowDestroy(comm, win->vidmem, stream, /*forceCleanup=*/true), ret);
+    mem = nullptr; // the window owned mem's reference
     CUDACHECKIGNORE(cudaStreamSynchronize(stream));
   }
 fail_stream_mem:
   if (memHandle != 0x0) {
     CUCHECKIGNORE(cuMemRelease(memHandle));
   }
-  symMemoryDropRef(comm, mem);
+  NCCLCHECKIGNORE(symMemoryDropRef(comm, mem, /*forceCleanup=*/true), ret);
 fail_stream:
   CUDACHECKIGNORE(cudaStreamDestroy(stream));
 fail:
