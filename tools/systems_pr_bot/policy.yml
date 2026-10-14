@@ -1,4 +1,4 @@
-version: 2
+version: 3
 
 pr:
   # Special case: automated dependency "bump" PRs.
@@ -147,10 +147,15 @@ diff:
     - '**/*.asc'
 
 checks:
-  # External checks that must be GREEN before PR is "ready for review"
-  # (Do NOT include therock-pr-bot here to avoid circular dependency.)
+  # Every named job is scheduled on these target branches. Formatting jobs
+  # inspect complete Git diffs themselves and succeed when their scope is empty.
+  # Path filters here would make enforcement depend on a capped API response.
   required_check_runs:
-    - pre-commit
+    - name: pre-commit / runtimes
+      branches: [develop]
+    - name: pre-commit
+    - name: pre-commit / cuid
+    - name: pre-commit / rocprofiler-compute
 
   failure_comments:
     pre-commit:
@@ -163,4 +168,6 @@ checks:
         - `pre-commit install`
         - `pre-commit run --all-files --show-diff-on-failure`
 
-        This repo uses `.pre-commit-config.yaml`.
+        The runtimes and rocjitsu checks use `.pre-commit-config.yaml`.
+        For CUID or rocprofiler-compute, add
+        `--config projects/<project>/.pre-commit-config.yaml` to the run command.

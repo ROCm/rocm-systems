@@ -1,0 +1,48 @@
+name: Systems PR Bot Tests
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'tools/systems_pr_bot/**'
+      - '.github/workflows/**'
+      - '.github/actions/scoped-formatting/**'
+  pull_request:
+    paths:
+      - 'tools/systems_pr_bot/**'
+      - '.github/workflows/**'
+      - '.github/actions/scoped-formatting/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  test:
+    name: systems-pr-bot-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 5
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            tools/systems_pr_bot
+            .github/workflows
+            .github/actions/scoped-formatting
+
+      - uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Install test dependencies
+        run: python -m pip install requests pyyaml
+
+      - name: Test policy, pagination, polling, and workflow consistency
+        run: python tools/systems_pr_bot/test_policy_check_ut.py -v
+
+      - name: Test formatting scope against real Git histories
+        run: python .github/actions/scoped-formatting/scope_test.py -v
