@@ -8,7 +8,6 @@
 
 #include "alloc.h"
 #include "archinfo.h"
-#include "bootstrap.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -30,35 +29,10 @@ using nccl_dda_detail::kDdaNranks;
     } \
   } while (0)
 
-namespace {
-
-constexpr int kDdaIpcFiniEnteredTag = 0xDDA0;
-constexpr int kDdaIpcFiniClosedTag = 0xDDA1;
-
-bool ddaIpcCommEligible(const ncclComm* comm) {
-  if (comm == nullptr || !rcclParamDdaEnable()) {
-    return false;
-  }
-  const bool ddaArchSupported =
-    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
-  return comm->nRanks == kDdaNranks && comm->nNodes == 1 && comm->bootstrap != nullptr && !comm->directMode &&
-         !comm->MNNVL && ddaArchSupported;
-}
-
-void rememberFirstError(ncclResult_t candidate, ncclResult_t* result) {
-  if (*result == ncclSuccess && candidate != ncclSuccess) {
-    *result = candidate;
-  }
-}
-
-bool ddaIpcCanCollectivelyTeardown(const ncclComm* comm) {
-  return ddaIpcCommEligible(comm) && comm->abortFlag != nullptr && !comm->revokedFlag &&
-         COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0;
-}
-
-} // namespace
-
 ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
+  if (comm == nullptr) {
+    return ncclSuccess;
+  }
   // Skip DDA if:
   // - nRanks is not exactly kDdaNranks (currently hardcoded to 8)
   // - multi-node runs
@@ -70,7 +44,10 @@ ncclResult_t ncclDdaIpcCommInit(ncclComm* comm) {
   //   scratch/barrier here is not necessary. On gfx12xx (RDNA4) the
   //   uncached-memory IPC export fails (hipIpcGetMemHandle -> hipErrorInvalidValue),
   //   which aborts comm init entirely. Gate init to match dispatch.
-  if (!ddaIpcCommEligible(comm)) {
+  const bool ddaArchSupported =
+    comm->archName != nullptr && (IsArchMatch(comm->archName, "gfx942") || IsArchMatch(comm->archName, "gfx950"));
+  if (comm->nRanks != kDdaNranks || comm->nNodes != 1 || comm->bootstrap == nullptr || comm->directMode ||
+      comm->MNNVL || !ddaArchSupported) {
     return ncclSuccess;
   }
 
@@ -224,43 +201,8 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
-
-  // IPC importers must release both the barrier and scratch mappings before any
-  // exporting rank frees its local allocation. Keep abort/revoke cleanup local:
-  // those paths cannot require every rank to enter another collective.
-  ncclResult_t result = ncclSuccess;
-  bool teardownCollectiveReady = false;
-  if (ddaIpcCanCollectivelyTeardown(comm)) {
-    ncclResult_t barrierResult =
-      bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, kDdaIpcFiniEnteredTag);
-    if (barrierResult == ncclSuccess) {
-      teardownCollectiveReady = true;
-    } else {
-      WARN("ncclDdaIpcCommFini: entry barrier failed");
-      rememberFirstError(barrierResult, &result);
-    }
-  }
-
-  auto* barrierState = static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
-  if (barrierState != nullptr && barrierState->resources != nullptr &&
-      barrierState->resources->ipcMemHandler != nullptr) {
-    rememberFirstError(barrierState->resources->ipcMemHandler->closePeerMappings(), &result);
-  }
-  if (comm->ddaIpcMemHandler != nullptr) {
-    rememberFirstError(comm->ddaIpcMemHandler->closePeerMappings(), &result);
-  }
-
-  if (teardownCollectiveReady) {
-    ncclResult_t barrierResult =
-      bootstrapBarrier(comm->bootstrap, comm->rank, comm->nRanks, kDdaIpcFiniClosedTag);
-    if (barrierResult != ncclSuccess) {
-      WARN("ncclDdaIpcCommFini: peer-close barrier failed");
-      rememberFirstError(barrierResult, &result);
-    }
-  }
-
   if (comm->ddaIpcBarrierState != nullptr) {
-    delete barrierState;
+    delete static_cast<DdaIpcBarrierState*>(comm->ddaIpcBarrierState);
     comm->ddaIpcBarrierState = nullptr;
   }
   CUDACHECKIGNORE(cudaFree(comm->ddaPeerPtrsDev));
@@ -274,5 +216,5 @@ ncclResult_t ncclDdaIpcCommFini(ncclComm* comm) {
   CUDACHECKIGNORE(cudaFree(comm->ddaScratch));
   comm->ddaScratch = nullptr;
   comm->ddaScratchBytes = 0;
-  return result;
+  return ncclSuccess;
 }
