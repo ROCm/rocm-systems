@@ -100,7 +100,7 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index. Repair writes through a checked directory descriptor to a new, unpredictably named file and renames it into place; it never follows a symbolic link, and refuses an archive whose `events.bin`, `manifest.json` or `pid-*` directory is one (a link in the path you name on the command line is resolved), and keeps the permissions of the files it replaces. The reader still follows links when it reads. On Windows a link or directory junction (any reparse point) is refused by checking the file attributes, but the write is not made through a checked directory handle, so a link swapped in between the check and the write is not caught |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
