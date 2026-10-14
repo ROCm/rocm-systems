@@ -1788,6 +1788,7 @@ _SMEM_NARROW_LOAD_MAP = {
 _SMEM_ATOMIC_OPS = frozenset(
     {
         'swap',
+        'cmpswap',
         'add',
         'sub',
         'smin',
@@ -1846,7 +1847,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
                         elem_size=elem_size,
                         num_elems=data_dw_actual,
                     )
-        # Scalar buffer atomics and compare-swap are not currently simulated.
+        # Scalar buffer atomics are not currently simulated.
         return InstructionSemantics(name, 'nop')
 
     is_store = '_STORE_' in upper or '_SCRATCH_STORE_' in upper

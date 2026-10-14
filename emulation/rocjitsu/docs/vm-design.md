@@ -552,9 +552,10 @@ smin/umin, smax/umax, and, or, xor, inc, dec.
 **Scalar atomics** (`s_atomic_*` and `s_atomic_*_x2`, CDNA1–4) bypass the
 L1 scalar cache and perform read-modify-write at L2; the atomic boundary's
 coherence epoch makes stale K$ lines refetch. The old value is returned to
-SDATA when GLC is set. Supported: swap, add, sub, smin/umin, smax/umax,
-and, or, xor, inc, dec. `s_atomic_cmpswap[_x2]` and `s_buffer_atomic_*` are
-not yet implemented.
+SDATA when GLC is set. Supported: swap, cmpswap, add, sub, smin/umin,
+smax/umax, and, or, xor, inc, dec. Compare-swap reads the source and then
+the compare value from SDATA and returns only the old value, to the low half.
+`s_buffer_atomic_*` are not yet implemented.
 
 **Cache management instructions:**
 

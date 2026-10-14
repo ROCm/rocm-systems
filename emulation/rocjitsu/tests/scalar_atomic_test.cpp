@@ -277,6 +277,60 @@ TEST_P(ScalarAtomicTest, ReadModifyWriteAndOptionalReturn) {
   }
 }
 
+struct CompareSwapCase {
+  uint16_t opcode;
+  uint32_t dwords;
+  uint64_t old;
+  uint64_t source;
+  uint64_t compare;
+  uint64_t expected;
+};
+
+TEST_P(ScalarAtomicTest, CompareSwapReturnsOldAndPreservesCompare) {
+  constexpr auto cases = std::to_array<CompareSwapCase>({
+      {cdna3::kSAtomicCmpswapSmem, 1, 5, 9, 5, 9},
+      {cdna3::kSAtomicCmpswapSmem, 1, 5, 9, 6, 5},
+      // X2 compares all 64 bits, and its compare value starts at SDATA[2].
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x1'0000'0005, 0x2'0000'0009},
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x3'0000'0005, 0x1'0000'0005},
+      {cdna3::kSAtomicCmpswapX2Smem, 2, 0x1'0000'0005, 0x2'0000'0009, 0x1'0000'0006, 0x1'0000'0005},
+  });
+  for (const auto &[opcode, dwords, old, source, compare, expected] : cases) {
+    for (uint8_t glc : {0, 1}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " old=" << old
+                                      << " compare=" << compare << " glc=" << +glc);
+      const uint64_t guard_address = kAddress + dwords * 4;
+      const unsigned compare_sgpr = 4 + dwords;
+      const unsigned guard_sgpr = 4 + 2 * dwords;
+      write_memory(kAddress, dwords, old);
+      memory.write32(guard_address, 0xdeadbeef);
+      write_sgprs(4, dwords, source);
+      write_sgprs(compare_sgpr, dwords, compare);
+      write_sgpr(guard_sgpr, 0x12345678);
+      if (backing) {
+        backing->update_attempts = 0;
+        backing->mutations = 0;
+      }
+      auto inst = prepare({.sdata = 4, .glc = glc, .imm = 1}, opcode);
+      ASSERT_NE(inst, nullptr);
+      ASSERT_EQ(pipeline->issue(inst.release(), *wf), VmAccessOutcome::Complete);
+      EXPECT_EQ(read_memory(kAddress, dwords), expected);
+      EXPECT_EQ(read_sgprs(4, dwords), glc ? old : source);
+      EXPECT_EQ(read_sgprs(compare_sgpr, dwords), compare);
+      EXPECT_EQ(memory.read32(guard_address), 0xdeadbeef);
+      EXPECT_EQ(read_sgpr(guard_sgpr), 0x12345678);
+      EXPECT_TRUE(wf->wait_counters().empty());
+      if (backing) {
+        // A translated mismatch skips the compare/exchange, as for vector
+        // atomics. L2 always writes the line back.
+        const unsigned writes = old == compare || memory_mode() == MemoryMode::CachedVm ? 1u : 0u;
+        EXPECT_EQ(backing->update_attempts, writes);
+        EXPECT_EQ(backing->mutations, writes);
+      }
+    }
+  }
+}
+
 TEST_P(ScalarAtomicTest, ImmediateRegisterAndCombinedOffsets) {
   const std::array fields{
       cdna3::SmemBuilderFields{.sbase = 3, .sdata = 4, .glc = 1, .imm = 1, .offset = 12},
@@ -476,6 +530,36 @@ TEST_P(ScalarAtomicTest, UnavailableCompareExchangeRetriesWithCurrentMemoryValue
       EXPECT_EQ(backing->mutations, 1u);
       EXPECT_EQ(read_memory(kAddress, dwords), 9u);
     }
+  }
+}
+
+TEST_P(ScalarAtomicTest, CompareSwapMismatchAfterLostExchangeDoesNotWrite) {
+  if (memory_mode() != MemoryMode::TranslatedVm)
+    GTEST_SKIP() << "Compare/exchange retries require a translated backing";
+  constexpr std::array<std::pair<uint16_t, uint32_t>, 2> kCompareSwapForms{
+      {{cdna3::kSAtomicCmpswapSmem, 1}, {cdna3::kSAtomicCmpswapX2Smem, 2}}};
+  for (const auto &[opcode, dwords] : kCompareSwapForms) {
+    SCOPED_TRACE(testing::Message() << "opcode=" << opcode);
+    write_memory(kAddress, dwords, 4);
+    write_sgprs(4, dwords, 9);
+    write_sgprs(4 + dwords, dwords, 4);
+    backing->mutations = 0;
+    backing->exchange_outcome = VmAccessOutcome::Unavailable;
+    auto inst = prepare({.sdata = 4, .glc = 1, .imm = 1}, opcode);
+    ASSERT_NE(inst, nullptr);
+    ASSERT_EQ(pipeline->issue_deferred(inst.release(), *wf), VmAccessOutcome::Complete);
+    pipeline->tick();
+    EXPECT_EQ(backing->mutations, 0u);
+
+    // Another writer changes memory after our matching load. The resumed
+    // exchange observes a mismatch and must return it without writing.
+    write_memory(kAddress, dwords, 7);
+    backing->exchange_outcome = VmAccessOutcome::Complete;
+    pipeline->tick();
+    EXPECT_TRUE(wf->wait_counters().empty());
+    EXPECT_EQ(backing->mutations, 0u);
+    EXPECT_EQ(read_memory(kAddress, dwords), 7u);
+    EXPECT_EQ(read_sgprs(4, dwords), 7u);
   }
 }
 
