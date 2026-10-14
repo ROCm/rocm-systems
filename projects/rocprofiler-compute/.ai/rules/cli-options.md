@@ -53,6 +53,14 @@ Every rename also needs these updates:
 - use the new name in the docs, tests, and `skills/`
 - check the output of `rocprof-compute profile --help` and `rocprof-compute analyze --help`
 
+## Experimental Options
+
+Options behind `--experimental` follow the same rules as other options. While an
+option is experimental, it may be renamed or removed without keeping the old name
+working, but the change still needs a `CHANGELOG.md` entry. When the feature
+becomes generally available, follow
+[Adding Experimental Features](../../CONTRIBUTING.md#adding-experimental-features).
+
 ## Arguments
 
 A list of values is passed as separate arguments, separated by spaces.
