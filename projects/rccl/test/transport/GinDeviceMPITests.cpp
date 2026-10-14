@@ -4419,6 +4419,89 @@ TEST_F(GinMPIDeviceTests, DevComm_PerInstanceGinResourcesRemainUsable) {
   MPI_Barrier(MPI_COMM_WORLD);
 }
 
+// World-team barrier whose signals come from a caller-built requirement node
+// instead of one of the devComm's built-in barrier pools.
+__global__ void userGinBarrierKernel(int iters, ncclGinBarrierHandle_t handle,
+                                     struct ncclDevComm devComm) {
+  ncclGin gin{devComm, /*ginContext=*/0};
+  ncclGinBarrierSession<ncclCoopCta> bar{
+      ncclCoopCta(), gin, ncclTeamWorld(devComm), handle, /*barrierIndex=*/0};
+  for (int i = 0; i < iters; i++) {
+    bar.sync(ncclCoopCta(), cuda::memory_order_relaxed, ncclGinFenceLevel::Relaxed);
+  }
+}
+
+// Caller-built resource requirement nodes keep their GIN signal and counter
+// requests when ncclDevCommCreate is deferred to ncclGroupEnd: each node's
+// start index is written and the devComm's counts cover it.
+TEST_F(GinMPIDeviceTests, DevComm_GroupedCreateKeepsGinRequirements) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/8))
+    GTEST_SKIP() << "Requires 2-8 ranks";
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t  comm   = getActiveCommunicator();
+  hipStream_t stream = getActiveStream();
+  ncclTeam_t  world  = ncclTeamWorld(comm);
+
+  // Nonzero top-level counts, so a start index the create never wrote (still 0)
+  // fails the range checks below.
+  constexpr int kUserSignals = 3;
+  constexpr int kUserCounters = 2;
+  constexpr int kBarriers = 1;
+  constexpr int kNodeCounters = 4;
+  constexpr int kIters = 16;
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginSignalCount = kUserSignals;
+  reqs.ginCounterCount = kUserCounters;
+
+  ncclGinBarrierHandle_t barrierHandle{};
+  ncclDevResourceRequirements barrierReq{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclGinBarrierCreateRequirement(comm, world, kBarriers,
+                                                             &barrierHandle, &barrierReq));
+  ncclGinCounter_t counterStart = 0;
+  ncclDevResourceRequirements counterReq{};
+  counterReq.ginCounterCount = kNodeCounters;
+  counterReq.outGinCounterStart = &counterStart;
+  barrierReq.next = &counterReq;
+  reqs.resourceRequirementsList = &barrierReq;
+
+  ncclDevComm devComm{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclGroupStart());
+  ncclResult_t createResult = ncclDevCommCreate(comm, &reqs, &devComm);
+  // The create runs at ncclGroupEnd, from the copy the call took of the nodes.
+  barrierReq = {};
+  counterReq = {};
+  ncclResult_t groupResult = ncclGroupEnd();
+  ASSERT_MPI_EQ(ncclSuccess, createResult);
+  ASSERT_MPI_EQ(ncclSuccess, groupResult);
+  auto devCommCleanup = makeScopeGuard([&]() {
+    (void)ncclDevCommDestroy(comm, &devComm);
+  });
+
+  // The caller's own ids stay [0, count); each node's range starts after them
+  // and lies inside the devComm.
+  const int signal0 = static_cast<int>(barrierHandle.signal0);
+  const int counter0 = static_cast<int>(counterStart);
+  ASSERT_MPI_TRUE(signal0 >= kUserSignals);
+  ASSERT_MPI_TRUE(signal0 + kBarriers * world.nRanks <= devComm.ginSignalCount);
+  ASSERT_MPI_TRUE(counter0 >= kUserCounters);
+  ASSERT_MPI_TRUE(counter0 + kNodeCounters <= devComm.ginCounterCount);
+
+  // All ranks finished setup before any kernel launches.
+  MPI_Barrier(MPI_COMM_WORLD);
+
+  // Every rank completing all rounds shows the backend allocated the node's
+  // signals.
+  userGinBarrierKernel<<<kGinKernelBlocks, kGinKernelThreads, 0, stream>>>(
+      kIters, barrierHandle, devComm);
+  ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(stream));
+  MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // ncclAlltoAll dispatches to ncclAllToAllGinSdma when eligible.
 TEST_F(GinMPIDeviceTests, Alltoall_SdmaInternal) {
   if (auto reason = ginProxyTestSkipReason(); !reason.empty())

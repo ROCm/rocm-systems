@@ -20,7 +20,9 @@ discovery, activation, context policy, metadata allocation, and shutdown. Its
 associated device-state type retains each activated endpoint's dependencies.
 `GpuDriver` is the complete GPU backend interface. It requires allocation and
 virtual-memory operations, creates both direct and kernel-mediated queues, and
-provides GPU presentation, cache control, timing, traps, and stream monitoring.
+provides cache control, timing, traps, and stream monitoring. The common
+`Driver` contract queries optional endpoint details without activation; a
+driver with no additional source returns empty details.
 `AllocationOperations` and `VirtualMemoryOperations` describe mechanisms that
 can also be implemented by a non-GPU driver. A created queue implements either
 `UserQueueResource` or `KernelQueueResource`; these resource contracts define
@@ -35,7 +37,8 @@ activation, driver context lifetime, and shutdown. It can discover and activate
 several devices; construction activates none. The AMDF and HSA frontends each
 use a `Session` as their rocddi root. A session owns a set of independently
 identified driver instances under one requested context lifetime. The
-current Linux constructor installs a KFD driver instance. Each activated
+current Linux catalog installs a KFD driver instance. The catalog is static;
+each session constructs its own instances from it. Each activated
 device retains only its owning driver instance and state. Session activation
 rejects an endpoint from another driver instance, and shutdown requires every
 device and resource owner to release its driver instance first. Clones share
@@ -50,6 +53,8 @@ implementations. `DeviceDriverState` pairs one such reference with the state
 acquired for a single activated endpoint. One driver instance can activate
 several devices. `Endpoint::driver_instance` carries the numeric identity that
 routes a passive snapshot to its owning driver instance.
+`Device::gpu` borrows a GPU-only driver projection from that activated state,
+so other device families do not enter GPU operation routing.
 
 The driver registry routes endpoint activation by the instance identity in
 each passive record. With multiple drivers, enumeration stages their records
@@ -71,8 +76,8 @@ occupancy, cleanup retry, and the order in which native owners and drivers are
 dropped.
 
 The common `Driver` trait imposes no GPU operations on non-GPU drivers. A new
-implementation adds a `DriverInstance` and `DeviceDriverState` variant and is
-installed by the session constructor. A GPU implementation satisfies
+implementation adds a `DriverInstance` and `DeviceDriverState` variant and an
+inert constructor to the compiled backend catalog. A GPU implementation satisfies
 `GpuDriver`; another device family implements only the shared resource
 contracts whose semantics it provides. Generic resource owners retain their
 concrete driver and cleanup state. Public allocation, virtual-memory, and
@@ -80,6 +85,8 @@ queue types contain private concrete-owner variants, so their Rust signatures
 do not contain KFD types. Linux descriptor, IPC, SVM, and event-page interop
 requires a KFD resource and checks that ownership before using KFD or DRM.
 Both C frontends route Linux interop through platform modules.
+Live allocations retain their driver after the creating device is dropped;
+failed final cleanup retains that driver through native quarantine.
 
 ## Architecture
 
@@ -124,11 +131,29 @@ The core source is organized by ownership domain:
   Cloned devices share family-specific service state, including the GPU copy
   pool. Linux KFD signal events live under `device/gpu/event/linux.rs` and are
   exposed through `device::gpu::event::linux`;
-- `memory.rs` and `memory/` own driver-generic allocation,
-  address-reservation, and mapping owners. A virtual-address reservation
-  verifies that every device uses the selected driver, intersects their
-  address apertures, and allocates mapping records before asking that driver
-  to reserve the native range. `memory::interop::linux` contains DMA-BUF,
+- `memory.rs` is the single memory namespace. `memory/storage.rs` and
+  `memory/storage/` provide fallible `Owned` and `Shared` storage for runtime
+  ownership records and fallible reservation of standard `Vec` values.
+  Production storage uses the system allocator; test hooks inject allocation
+  failures into native rollback paths. Owners can reserve storage before
+  acquiring native resources. `memory/host.rs` owns
+  host-only backing and cache operations
+  without activating an endpoint. `memory/device.rs` exposes memory qualified
+  for activated devices; its `memory/device/allocation.rs` implementation owns
+  native allocations and raw host registration.
+  `memory/device/registered_host.rs` composes rocddi-owned host backing with
+  safe per-driver registrations.
+  `memory/device/virtual_memory.rs` owns address reservations, detached backing,
+  and mappings. Device access is explicit even when a frontend represents the
+  host CPU as an HSA agent. `RegisteredHostMemory` owns one host allocation
+  and separate registrations with each device driver, so every driver can
+  report its own address and cleanup retains the backing. Raw registration of
+  caller-owned pages remains unsafe and leaves their lifetime with the caller.
+  A virtual-address reservation verifies that
+  every device uses the selected driver, intersects their address apertures,
+  and allocates mapping records before asking that driver to reserve the native
+  range.
+  `memory::interop::linux` contains DMA-BUF,
   KFD IPC, KFD SVM, and AIS file-transfer contracts used with Linux APIs and
   other processes;
 - `driver.rs` defines the private driver and resource interfaces;
@@ -151,7 +176,7 @@ The core source is organized by ownership domain:
   implementation supplies host allocation and page-size operations without
   exposing its native handle to the core.
   Host allocation reports a numeric extent and retains failed cleanup for
-  retry; `memory.rs` constructs the public information record. The core
+  retry; `memory/host.rs` constructs the public information record. The core
   host-memory API uses these services without activating a device.
   `topology::platform::linux` remains public endpoint metadata for runtime
   frontends; it does not own host services;

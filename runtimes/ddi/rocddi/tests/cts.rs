@@ -22,8 +22,8 @@ use rocddi::device::gpu::queue::{
     QueueProducerMode, QueueRequest, QueueRingMemory, SdmaEngineSelection, ring_doorbell,
 };
 use rocddi::device::gpu::{CopyRect, GpuCopySequence};
+use rocddi::memory::device::{DeviceAccess, HostMappingPolicy, MemoryKind, VirtualAddress};
 use rocddi::memory::interop::linux::{AisFileOperation, ais_transfer};
-use rocddi::memory::{DeviceAccess, HostMappingPolicy, MemoryKind};
 use rocddi::session::{DriverContextLifetime, Session};
 
 #[test]
@@ -623,7 +623,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
 
     let mut virtual_memory =
         device.create_virtual_memory(MemoryKind::System, 4096, false, false)?;
-    let mut reservation = session.reserve_virtual_address(&[&device], 4096, 4096, 0)?;
+    let mut reservation = VirtualAddress::reserve(&[&device], 4096, 4096, 0)?;
     let virtual_address = reservation.info().address;
     let mut mapping = device.map_virtual_memory(
         &virtual_memory,
@@ -678,7 +678,7 @@ fn gfx1201_sdma_copy_contract() -> Result<(), Box<dyn Error>> {
         false,
         true,
     )?;
-    let mut uncached_reservation = session.reserve_virtual_address(&[&device], 4096, 4096, 0)?;
+    let mut uncached_reservation = VirtualAddress::reserve(&[&device], 4096, 4096, 0)?;
     let uncached_address = uncached_reservation.info().address;
     let mut uncached_mapping = device.map_virtual_memory(
         &uncached_memory,
