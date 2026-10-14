@@ -104,13 +104,14 @@ while Dyninst requires Libiberty), and the CMake option to build the package alo
    "Nlohmann/JSON", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_NLOHMANN_JSON`` (default: ON)"
    "spdlog", "", "ROCm Systems Profiler", "``ROCPROFSYS_BUILD_SPDLOG`` (default: ON)"
    "ElfUtils", "0.178", "Dyninst", "``ROCPROFSYS_BUILD_ELFUTILS`` (default: OFF)"
-   "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF; a system LibIberty is used if found, otherwise binutils is downloaded and built)"
+   "LibIberty",  "", "Dyninst", "``ROCPROFSYS_BUILD_LIBIBERTY`` (default: OFF; ON, OFF, or AUTO)"
    "OpenMP", "4.x", "Dyninst", ""
 
 The CMake presets described later on this page turn on in-tree Dyninst and Elfutils
-builds even though the CMake defaults for those options are ``OFF``. LibIberty is not
-forced: the presets use the system LibIberty when available and fall back to building it
-from the binutils sources. Set ``ROCPROFSYS_BUILD_LIBIBERTY=ON`` to always build it.
+builds even though the CMake defaults for those options are ``OFF``. LibIberty is
+set to ``AUTO``: the system LibIberty is used when available, otherwise it is built from
+the binutils sources. ``ROCPROFSYS_BUILD_LIBIBERTY`` accepts ``ON`` (always build from
+source), ``OFF`` (require the system copy and fail if it is missing), or ``AUTO``.
 
 ROCm dependencies
 -----------------
@@ -175,7 +176,7 @@ configure and build commands from that directory.
 The project ships configure presets for common developer and CI layouts. All visible
 presets inherit a hidden ``default`` preset that selects the Ninja generator, the
 ``gcc``/``g++`` compilers, install prefix ``/opt/rocprofiler-systems``, Python support,
-and in-tree builds of Dyninst and Elfutils (LibIberty uses the system copy, or is built if missing).
+in-tree builds of Dyninst and Elfutils, and ``AUTO`` LibIberty (system copy, or built if missing).
 
 List the available presets, then configure, build, and install. The file defines
 configure presets only, so pass the build directory (not ``--preset``) to

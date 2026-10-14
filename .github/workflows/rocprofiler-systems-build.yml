@@ -247,6 +247,13 @@ jobs:
           echo "${TS}" >> "${GITHUB_PATH}"
           "${TS}/gcc" --version
 
+      - name: Install libiberty
+        shell: bash
+        run: |
+          # libiberty for Dyninst: use the system copy instead of downloading binutils
+          crb enable
+          dnf install -y binutils-devel
+
       - name: Configure environment
         shell: bash
         run: |
