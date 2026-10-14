@@ -100,8 +100,9 @@ TEST_F(RomeModelsParseGraphLightMicrotest, MoreNumbersInSegmentThanMaxNodes_IsRe
 }
 
 TEST_F(RomeModelsParseGraphLightMicrotest, GpuNumberAsWideAsAnInt_IsTranscribed) {
-  // Ten digits: one more than the buffer originally held (it has been expanded to accomodate ints)
-  constexpr int kWideDev = 2000000000;
+  // The largest accepted number, so the guard's boundary itself is pinned. It is also ten
+  // digits: one more than the buffer originally held (it has been expanded to accomodate ints)
+  constexpr int kWideDev = INT_MAX;
   system()->nodes[GPU].nodes[kGpus - 1].gpu.dev = kWideDev;
   const std::string tree = "(" + std::to_string(kWideDev) + ")";
 
@@ -178,7 +179,8 @@ TEST_F(RomeModelsParseGraphLightMicrotest, MoreSegmentsThanTreeBaseRows_IsReject
 }
 
 TEST_F(RomeModelsParseGraphLightMicrotest, NumberWiderThanIntRange_IsRejected) {
-  EXPECT_EQ(parseGraphLight("(4294967299)", system(), graph(), nullptr), ncclInvalidUsage);
+  // INT_MAX + 1: the smallest rejected number, so a guard that drifted by one would fail here.
+  EXPECT_EQ(parseGraphLight("(2147483648)", system(), graph(), nullptr), ncclInvalidUsage);
 }
 
 TEST_F(RomeModelsParseGraphLightMicrotest, SegmentLongerThanTreeBaseRow_IsRejected) {
