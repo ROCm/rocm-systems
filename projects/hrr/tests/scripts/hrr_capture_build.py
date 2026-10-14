@@ -64,7 +64,9 @@ RUNTIME_ARTIFACTS = (
     "core-hip_lib",
 )
 
-CAPTURE_LIB_GLOB = "libamdhip64.so*"
+# What CLR's install writes into lib/: amdhip64 plus hiprtc and its builtins.
+# All of it comes from this checkout, so all of it is carried to the test job.
+CAPTURE_LIB_GLOBS = ("libamdhip64.so*", "libhiprtc*.so*")
 
 # The suite must load exactly one copy of each, from the installed tree: the
 # capture-enabled amdhip64 built here and the base's ROCr.
@@ -175,26 +177,28 @@ def hrr_configure_command(src: Path, build: Path, dist: Path, archs: str) -> lis
 
 
 def remove_amdhip64(lib_dir: Path) -> None:
-    """Remove the release amdhip64 so only the capture-enabled one remains."""
-    for path in lib_dir.glob(CAPTURE_LIB_GLOB):
-        path.unlink()
+    """Remove the release amdhip64 and hiprtc so only the CLR build's remain."""
+    for glob in CAPTURE_LIB_GLOBS:
+        for path in lib_dir.glob(glob):
+            path.unlink()
 
 
 def copy_amdhip64(src_dir: Path, dst_dir: Path) -> list[str]:
-    """Copy libamdhip64.so* from src_dir to dst_dir, keeping symlinks."""
+    """Copy the CAPTURE_LIB_GLOBS libraries from src_dir to dst_dir, keeping symlinks."""
     dst_dir.mkdir(parents=True, exist_ok=True)
     copied = []
-    for path in sorted(src_dir.glob(CAPTURE_LIB_GLOB)):
-        target = dst_dir / path.name
-        if target.is_symlink() or target.exists():
-            target.unlink()
-        if path.is_symlink():
-            os.symlink(os.readlink(path), target)
-        else:
-            shutil.copy2(path, target)
-        copied.append(path.name)
-    if not copied:
-        raise SystemExit(f"no {CAPTURE_LIB_GLOB} in {src_dir}")
+    for glob in CAPTURE_LIB_GLOBS:
+        for path in sorted(src_dir.glob(glob)):
+            target = dst_dir / path.name
+            if target.is_symlink() or target.exists():
+                target.unlink()
+            if path.is_symlink():
+                os.symlink(os.readlink(path), target)
+            else:
+                shutil.copy2(path, target)
+            copied.append(path.name)
+    if not any(name.startswith("libamdhip64.so") for name in copied):
+        raise SystemExit(f"no libamdhip64.so* in {src_dir}")
     return copied
 
 

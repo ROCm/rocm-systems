@@ -66,7 +66,7 @@ class CommandTest(unittest.TestCase):
         names = {Path(rel).name for rel in cb.EXECUTABLES}
         self.assertTrue(names <= set(cb.HRR_TARGETS))
 
-    def test_build_and_runtime_artifacts_are_generic_names(self):
+    def test_runtime_artifacts_are_a_subset_of_build_artifacts(self):
         self.assertTrue(set(cb.RUNTIME_ARTIFACTS) <= set(cb.BUILD_ARTIFACTS))
 
 
@@ -105,17 +105,21 @@ class LibraryOverlayTest(unittest.TestCase):
         dist = self.tmp / "dist" / "lib"
         self.make_lib(capture, "libamdhip64.so.7.2.1", "capture")
         self.make_lib(dist, "libamdhip64.so.7.2.0", "release")
-        (dist / "libhiprtc.so.7").write_text("keep")
+        (dist / "libhiprtc.so.7").write_text("release")
+        (capture / "libhiprtc.so.7").write_text("capture")
         (dist / "libhsa-runtime64.so.1").write_text("base")
 
         cb.remove_amdhip64(dist)
         copied = cb.copy_amdhip64(capture, dist)
 
-        self.assertEqual(sorted(copied), ["libamdhip64.so", "libamdhip64.so.7", "libamdhip64.so.7.2.1"])
+        self.assertEqual(
+            sorted(copied),
+            ["libamdhip64.so", "libamdhip64.so.7", "libamdhip64.so.7.2.1", "libhiprtc.so.7"],
+        )
         self.assertFalse((dist / "libamdhip64.so.7.2.0").exists())
         self.assertEqual((dist / "libamdhip64.so").read_text(), "capture")
         self.assertTrue((dist / "libamdhip64.so.7").is_symlink())
-        self.assertEqual((dist / "libhiprtc.so.7").read_text(), "keep")
+        self.assertEqual((dist / "libhiprtc.so.7").read_text(), "capture")
         self.assertEqual((dist / "libhsa-runtime64.so.1").read_text(), "base")
 
     def test_copy_without_library_fails(self):
