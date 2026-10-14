@@ -4,19 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/param/param_registry.cc: the process-wide
-// ncclParamRegistry singleton (add/find/remove) that every DEFINE_NCCL_PARAM
-// registers into and the C API (src/param/c_api.cc) looks parameters up
-// through. Third PR in the AICOMRCCL-2820 stacked chain.
-//
-// A minimal FakeParam stands in for ncclParam<T> here: the registry only
-// ever touches its entries through the ncclParamInterface* pointer, so a
-// template-free double is enough to test add/find/remove in isolation from
-// param.h's env-plugin-dependent ncclParam<T> (covered by a later PR in this
-// chain, where c_api.cc's own NCCL_PARAM_DUMP_ALL dependency is covered too).
-// Every registration uses a key derived from the running test's own name, so
-// tests can run in any order, repeat, or shuffle without colliding with a
-// leftover registration from another test.
+// Host-only microtests for src/param/param_registry.cc's ncclParamRegistry singleton. FakeParam
+// stands in for ncclParam<T>, since the registry only uses the ncclParamInterface pointer.
 
 #include <gtest/gtest.h>
 
@@ -73,9 +62,7 @@ class ParamRegistryMicrotest : public ::testing::Test {
     registeredKeys_.clear();
   }
 
-  // Keys are scoped to the current test name so re-running, repeating, or
-  // shuffling tests never collides with a registration left behind -- or
-  // still live -- from another test.
+  // Scoped to the test name, so repeats and shuffles never collide.
   std::string Key(const char* suffix = "") {
     return std::string("PARAM_REGISTRY_TEST_") +
            ::testing::UnitTest::GetInstance()->current_test_info()->name() + suffix;
@@ -111,12 +98,8 @@ TEST_F(ParamRegistryMicrotest, Add_RegistersSoFindReturnsTheSameEntry) {
 }
 
 TEST_F(ParamRegistryMicrotest, Find_UnknownKeyReturnsNullptr) {
-  // A live entry must be registered first: otherwise a find() that ignored
-  // its key argument and returned the map's first entry would pass this test
-  // vacuously against an empty map. Bound to a named local, like every other
-  // Register() call site here: MakeInfo stores key.c_str() into the
-  // process-wide map, so passing Key() directly would leave that pointer
-  // dangling the moment this statement ends.
+  // Registered first, so a find() that ignored its key can't pass on an empty map. Bound to a local:
+  // the map keeps key.c_str(), so a temporary would dangle.
   std::string key = Key();
   FakeParam live(3);
   ASSERT_EQ(ncclSuccess, Register(key, &live));
@@ -129,8 +112,7 @@ TEST_F(ParamRegistryMicrotest, Add_DuplicateKeyWarnsAndLeavesTheFirstRegistratio
   FakeParam second(2);
   ASSERT_EQ(ncclSuccess, Register(key, &first));
 
-  // The duplicate carries different flags so that overwriting info on a
-  // rejected add() would show up below, not just overwriting the pointer.
+  // Different flags, so overwriting info on a rejected add() shows below.
   std::string log = CaptureLog([&]() {
     EXPECT_EQ(ncclInternalError,
               ncclParamRegistry::add(key, MakeInfo(key.c_str(), NCCL_PARAM_FLAG_PUBLISHED), &second));
@@ -156,9 +138,7 @@ TEST_F(ParamRegistryMicrotest, Remove_UnregistersSoFindReturnsNullptrAfterward) 
 }
 
 TEST_F(ParamRegistryMicrotest, Remove_OfAnUnknownKeyIsANoOpThatStillSucceeds) {
-  // Asserts more than the return code: remove() unconditionally returns
-  // ncclSuccess, so a map.clear() in its place would pass a return-code-only
-  // check too. A live entry surviving proves this really was a no-op.
+  // remove() always returns ncclSuccess, so check a live entry survived too.
   std::string key = Key();
   FakeParam fake(5);
   ASSERT_EQ(ncclSuccess, Register(key, &fake));
@@ -192,30 +172,19 @@ TEST_F(ParamRegistryMicrotest, Instance_ReflectsEveryAddedEntryByKey) {
   auto it = map.find(key);
   ASSERT_NE(map.end(), it);
   EXPECT_EQ(&fake, it->second.param);
-  // find() hands back a pointer into the map, not a copy of the entry: the C
-  // API resolves long-lived handles through it (param_registry.h:42) and
-  // dereferences them later (c_api.cc:64), so a copy would be a use-after-free
-  // waiting to happen.
+  // find() returns a pointer into the map, which the C API keeps as a long-lived handle.
   EXPECT_EQ(&it->second, ncclParamRegistry::find(key));
 }
 
 TEST_F(ParamRegistryMicrotest, State_IsASingletonSharedAcrossAllAccessors) {
-  // ncclParamRegistryInstance() is the C-linkage accessor every DSO resolves
-  // to the same symbol through; state() casts its return, and instance()/
-  // mutex() hand out the map and mutex living inside that one RegistryState.
-  // Cross-comparing them (not each against itself) proves they share state
-  // rather than each independently happening to be self-consistent.
+  // Cross-compared, so they share one RegistryState rather than each being self-consistent.
   EXPECT_EQ(ncclParamRegistryInstance(), static_cast<void*>(&ncclParamRegistry::state()));
   EXPECT_EQ(&ncclParamRegistry::state().map, &ncclParamRegistry::instance());
   EXPECT_EQ(&ncclParamRegistry::state().mtx, &ncclParamRegistry::mutex());
 }
 
-// State_IsASingletonSharedAcrossAllAccessors only proves mutex() resolves to
-// the right address; it doesn't prove add/find/remove actually lock it.
-// Deleting any of the three std::lock_guard lines in param_registry.cc leaves
-// every other test here green, since none of them run concurrently. Holding
-// the mutex on this thread and asserting that a concurrent call hasn't
-// returned yet exercises each lock_guard itself, not just its target.
+// None of the other tests run concurrently, so they pass without the lock_guards; holding the
+// mutex here and checking a concurrent call blocks pins each one.
 void ExpectBlocksOnRegistryMutex(const std::function<void()>& call) {
   std::atomic<bool> done{false};
   std::unique_lock<std::mutex> lock(ncclParamRegistry::mutex());
