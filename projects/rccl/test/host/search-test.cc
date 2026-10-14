@@ -1636,4 +1636,34 @@ TEST_F(SearchXmlChannelMicrotest, ExactlyTwoNetSubs_AreStillAccepted) {
   EXPECT_EQ(graph()->inter[1], 2);
 }
 
+TEST_F(SearchXmlChannelMicrotest, MoreGpuSubsThanTheSystemHasGpus_IsRejected) {
+  // A channel's intra slice is ngpus slots wide. Extra <gpu> subs run into
+  // channel 1's slots -- still inside the same ncclTopoGraph, so ASan cannot
+  // see it and the assertion has to be on the clobbered slots themselves.
+  constexpr int kSentinel = -7;
+  for (int i = 0; i < kGpus + 4; i++) graph()->intra[i] = kSentinel;
+
+  ncclXmlNode* channel = NewNode("channel");
+  for (int i = 0; i < kGpus + 2; i++) {
+    AddChild(channel, "gpu", std::to_string(i % kGpus).c_str());
+  }
+
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(graph()->intra[kGpus], kSentinel);
+  EXPECT_EQ(graph()->intra[kGpus + 1], kSentinel);
+}
+
+TEST_F(SearchXmlChannelMicrotest, ExactlyNgpusGpuSubs_AreStillAccepted) {
+  // The tightest accepted input for the gpu bound: a full channel, which is
+  // exactly what ncclTopoGetXmlFromChannel emits.
+  ncclXmlNode* channel = NewNode("channel");
+  for (int i = 0; i < kGpus; i++) AddChild(channel, "gpu", std::to_string(i).c_str());
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+
+  for (int i = 0; i < kGpus; i++) {
+    EXPECT_EQ(graph()->intra[i], SearchXmlScene::kRankBase + i) << "slot " << i;
+  }
+}
+
 }  // namespace
