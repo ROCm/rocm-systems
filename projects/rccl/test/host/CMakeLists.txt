@@ -293,10 +293,10 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroNcclDeviceCft -- src/cft_dev_runtime.cc + src/nccl_device/core.cc. Own
+  # rccl-UnitTestsMicroCftDevRuntime -- src/cft_dev_runtime.cc + src/nccl_device/core.cc. Own
   # binary: rccl-UnitTestsMicro fakes most of core.cc, which the LE-info queries call.
-  set(TEST_MICRO_NCCL_DEVICE_CFT_SOURCE_FILES
-    nccl-cft-dev-runtime-test.cc
+  set(TEST_MICRO_CFT_DEV_RUNTIME_SOURCE_FILES
+    cft-dev-runtime-test.cc
     fakes/cft_dev_runtime_fakes.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
@@ -1081,15 +1081,15 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
 
 # ---------------------------------------------------------------------------
-# rccl-UnitTestsMicroNcclDeviceCft
+# rccl-UnitTestsMicroCftDevRuntime
 # ---------------------------------------------------------------------------
-rccl_add_micro_binary(rccl-UnitTestsMicroNcclDeviceCft
-  SOURCES ${TEST_MICRO_NCCL_DEVICE_CFT_SOURCE_FILES}
+rccl_add_micro_binary(rccl-UnitTestsMicroCftDevRuntime
+  SOURCES ${TEST_MICRO_CFT_DEV_RUNTIME_SOURCE_FILES}
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     CORE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/nccl_device/core.cc"
     CFT_DEV_RUNTIME_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/cft_dev_runtime.cc"
-  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cft_dev_runtime.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
