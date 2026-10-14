@@ -4,7 +4,7 @@
 
 This note is the collection algorithm for Phase 1 in the high-level design (requirement FR-1), and how analyze reads every counter of a metric from one pass. The rule for combining SPU parts across passes, and the YAML functions that combine them, stay in the high-level design.
 
-A metric's **PMC set** is the hardware counters its expression reads. For an SPP metric, they share one perfmon pass. A **bucket** is one perfmon pass. This note uses "bucket" for that pass. A block's counter limit is that block's capacity in `perfmon_config` (`CounterFile` in `soc_base.py`). GRBM and SQ are charged separately.
+A metric's **PMC set** is the hardware counters its expression reads. For an SPP metric, they share one perfmon pass. A **bucket** is one perfmon pass. This note uses "bucket" for that pass. A block's counter limit is that block's capacity in `perfmon_config` (`CounterFile` in `soc_base.py`). Each hardware block has its own counter limit per pass.
 
 ---
 
