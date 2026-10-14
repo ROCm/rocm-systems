@@ -39,12 +39,12 @@ class driver {};  // Clean, folder provides context
 | `core/utils/` | `string_helper.hpp` | `core::utils` | `string_helper` |
 | `network/http/` | `client.hpp` | `network::http` | `client` |
 
-## Nested Namespaces (C++17)
+## Nested Namespaces
 
-Use nested namespace syntax when declaring:
+Use nested namespace syntax (C++17):
 
 ```cpp
-// ✅ GOOD: C++17 nested namespace
+// ✅ GOOD: nested namespace
 namespace network::http {
 class client {
     // ...
