@@ -125,14 +125,16 @@ def terminate_process(proc, timeout=10):
 class RdcdServer:
     """The session rdcd. Only one rdcd can run per host (rdcd.lock)."""
 
-    def __init__(self, rdcd_path):
+    def __init__(self, rdcd_path, env=None):
         self.rdcd_path = rdcd_path
+        self.env = env
         self.proc = None
 
     def start(self):
         """Start rdcd on port 50051; return False if it is not listening within 15 s."""
         self.proc = subprocess.Popen(
             [self.rdcd_path, "-u"],  # unauthenticated mode
+            env=self.env,
             stdout=subprocess.DEVNULL,
             stderr=subprocess.DEVNULL,
         )
@@ -145,17 +147,33 @@ class RdcdServer:
         return self.proc.poll()
 
 
+def fake_amdsmi(rocm_dir):
+    """The fake amd-smi from tests/fake_amdsmi, if it is installed."""
+    for path in (
+        os.environ.get("RDC_FAKE_LIB"),
+        os.path.join(rocm_dir, "share", "rdc", "rdctst_tests", "fake_gpu", "librdc_fake_amdsmi.so"),
+    ):
+        if path and os.path.isfile(path):
+            return path
+    return None
+
+
 @pytest.fixture(scope="session")
-def rdcd_server(rdcd_path, has_gpu):
+def rdcd_server(rdcd_path, has_gpu, rocm_dir):
     """Start rdcd in unauthenticated mode for the test session.
 
     Yields the RdcdServer.  Cleans up on teardown.
-    Skips if no GPU is present (daemon won't be useful).
+    Without a GPU, rdcd runs against the fake amd-smi (four simulated GPUs)
+    when it is installed; otherwise the daemon tests are skipped.
     """
+    env = os.environ.copy()
     if not has_gpu:
-        pytest.skip("No AMD GPU detected -- skipping daemon tests")
+        fake = fake_amdsmi(rocm_dir)
+        if fake is None:
+            pytest.skip("No AMD GPU and no fake amd-smi -- skipping daemon tests")
+        env.update(LD_PRELOAD=fake, RDC_FAKE_GPUS="4")
 
-    server = RdcdServer(rdcd_path)
+    server = RdcdServer(rdcd_path, env)
     if not server.start():
         server.stop()
         pytest.fail("rdcd did not start within 15 s")
