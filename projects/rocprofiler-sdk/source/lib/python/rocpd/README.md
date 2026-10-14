@@ -634,7 +634,7 @@ Purpose: One GPU PC (program counter) sample (schema 3.0.6+). Stores the sampled
 | event_id | References rocpd_event.id; its parent_id links to the dispatch event. |
 | dispatch_id | Dispatch id of the sampled kernel (unique within a recording/guid). |
 | correlation_id | Internal correlation id of the PC-sample record. |
-| exec_mask | Active SIMD lanes at sample time (TEXT, preserves the full 64-bit mask). |
+| exec_mask | Active SIMD lanes at sample time (TEXT, preserves the full 64-bit mask; `<`, `>`, and `ORDER BY` compare it as text). |
 | code_object_id | Code object containing the sampled instruction. |
 | code_object_offset | Byte offset within the code object (the PC value). |
 | wave_issued | Whether the wave issued an instruction (stochastic only; null for host-trap). |
@@ -644,7 +644,7 @@ Purpose: One GPU PC (program counter) sample (schema 3.0.6+). Stores the sampled
 
 **rocpd_disassembly_data**
 
-Purpose: Disassembled instruction text for sampled program counters (schema 3.0.6+). Populated at collection time with --complete-isa-decode, and by default during post-processing where lazily decoded instructions are written back at exit (disable with rocpd --no-cache-disassembly). Rows are deduplicated per (guid, code_object_id, code_object_offset).
+Purpose: Disassembled instruction text for sampled program counters (schema 3.0.6+). Populated at collection time with --complete-isa-decode, and by default during post-processing where instructions lazily decoded from a code object whose bytes match its recorded content_hash (rocpd_info_code_object.extdata) are written back at exit (disable with --no-cache-disassembly). Rows are deduplicated per (guid, code_object_id, code_object_offset).
 
 | Field | Meaning |
 | ----- | ------- |

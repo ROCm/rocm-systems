@@ -327,7 +327,8 @@ CREATE TABLE IF NOT EXISTS
 -- Disassembled instruction text for sampled program counters.  Populated two
 -- ways: (1) at collection time when --complete-isa-decode is passed to
 -- rocprofv3, and (2) by default during post-processing, where instructions
--- disassembled lazily are written back at process exit (disable with the rocpd
+-- disassembled lazily from a code object whose recorded content hash matches
+-- are written back at process exit (disable with the rocpd
 -- --no-cache-disassembly flag / cache_disassembly=False).  Rows are deduplicated
 -- per (guid, code_object_id, code_object_offset).
 CREATE TABLE IF NOT EXISTS
