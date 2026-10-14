@@ -10,7 +10,7 @@
 
 use super::{errno, error, native_error, sys, uapi};
 use crate::device::gpu::event::linux::SignalEventInfo;
-use crate::host_storage::{Allocator, Owned, Shared};
+use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 
 /// One KFD event and the shared native endpoint required to destroy it.
@@ -25,11 +25,11 @@ impl KfdSignalEvent {
     pub(super) fn create(
         kfd: Shared<sys::Kfd>,
         event_page_handle: Option<u64>,
-        allocator: Allocator,
+
         page_offered: &mut bool,
     ) -> Result<Owned<Self>, Error> {
         *page_offered = false;
-        let storage = Owned::try_new_uninit(allocator)?;
+        let storage = Owned::try_new_uninit()?;
         let mut args = uapi::CreateEvent::default();
         if let Err(source) = kfd.create_signal_event(event_page_handle, &mut args, page_offered) {
             if args.event_id != 0 && kfd.destroy_event(args.event_id).is_err() {
@@ -127,11 +127,7 @@ mod tests {
     use std::sync::{Arc, Mutex};
 
     fn endpoint(hook: IoctlHook) -> Shared<Kfd> {
-        Shared::new(
-            Kfd::with_hook(File::open("/dev/null").unwrap(), hook),
-            Allocator::default(),
-        )
-        .unwrap()
+        Shared::new(Kfd::with_hook(File::open("/dev/null").unwrap(), hook)).unwrap()
     }
 
     #[test]
@@ -157,9 +153,7 @@ mod tests {
             Ok(())
         }));
         let mut page_offered = false;
-        let mut event =
-            KfdSignalEvent::create(kfd, Some(0x1234), Allocator::default(), &mut page_offered)
-                .unwrap();
+        let mut event = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered).unwrap();
         assert!(page_offered);
         assert_eq!(
             event.info(),
@@ -186,10 +180,9 @@ mod tests {
             _ => panic!("unexpected event call"),
         }));
         let mut page_offered = false;
-        let error =
-            KfdSignalEvent::create(kfd, Some(0x1234), Allocator::default(), &mut page_offered)
-                .err()
-                .unwrap();
+        let error = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered)
+            .err()
+            .unwrap();
         assert!(page_offered);
         assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
         assert_eq!(*calls.lock().unwrap(), 1);
@@ -199,9 +192,7 @@ mod tests {
     fn invalid_page_handle_is_rejected_before_offer() {
         let kfd = endpoint(Arc::new(|_| panic!("invalid page reached KFD")));
         let mut page_offered = true;
-        assert!(
-            KfdSignalEvent::create(kfd, Some(0), Allocator::default(), &mut page_offered).is_err()
-        );
+        assert!(KfdSignalEvent::create(kfd, Some(0), &mut page_offered).is_err());
         assert!(!page_offered);
     }
 
@@ -210,10 +201,7 @@ mod tests {
         let mut kfd = endpoint(Arc::new(|_| panic!("closed KFD reached ioctl")));
         Shared::get_mut(&mut kfd).unwrap().close().unwrap();
         let mut page_offered = true;
-        assert!(
-            KfdSignalEvent::create(kfd, Some(0x1234), Allocator::default(), &mut page_offered)
-                .is_err()
-        );
+        assert!(KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered).is_err());
         assert!(!page_offered);
     }
 
@@ -228,11 +216,16 @@ mod tests {
         // SAFETY: The rejection callback is valid for this call and never
         // publishes storage; free cannot be invoked.
         let allocator = unsafe {
-            Allocator::from_callbacks(std::ptr::null_mut(), Some(reject), None, Some(unused_free))
-                .unwrap()
+            crate::memory::storage::Allocator::from_callbacks(
+                std::ptr::null_mut(),
+                Some(reject),
+                Some(unused_free),
+            )
+            .unwrap()
         };
         let mut page_offered = true;
-        let error = KfdSignalEvent::create(kfd, Some(0x1234), allocator, &mut page_offered)
+        let _scope = allocator.scope();
+        let error = KfdSignalEvent::create(kfd, Some(0x1234), &mut page_offered)
             .err()
             .unwrap();
         assert_eq!(error.kind(), ErrorKind::ResourceExhausted);
@@ -259,8 +252,7 @@ mod tests {
             _ => panic!("unexpected event call"),
         }));
         let mut page_offered = false;
-        let mut event =
-            KfdSignalEvent::create(kfd, None, Allocator::default(), &mut page_offered).unwrap();
+        let mut event = KfdSignalEvent::create(kfd, None, &mut page_offered).unwrap();
         assert!(!page_offered);
         assert_eq!(event.destroy().unwrap_err().kind(), ErrorKind::Driver);
         assert_eq!(
