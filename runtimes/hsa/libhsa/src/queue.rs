@@ -28,7 +28,7 @@ use rocddi::device::gpu::queue::{
     QueueAccessWidth, QueueErrorEvent, QueueParameters, QueuePriority, QueueProducerMode,
     QueueRequest, QueueRingMemory, QueueScratch, QueueTransport, SdmaEngineSelection,
 };
-use rocddi::memory::{Allocation, DeviceAccess, MemoryKind};
+use rocddi::memory::device::{Allocation, DeviceAccess, MemoryKind};
 use rocddi::topology::GpuInfo;
 
 use crate::callback_arg::CallbackArg;

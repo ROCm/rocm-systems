@@ -3271,6 +3271,12 @@ HIP_PUBLIC_API hipError_t hipKernelSetAttribute(hipFunction_attribute attrib, in
   return HIP_LOAD_DISPATCH_TABLE_FN(hipKernelSetAttribute_fn)(attrib, value, kernel, dev);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr,
+                                                         int value, int device) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipKernelSetAttributeForDevice_fn(kernel, attr, value, device);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipKernelGetFunction(hipFunction_t* pFunc, hipKernel_t kernel) {
   TRY;
   return HIP_LOAD_DISPATCH_TABLE_FN(hipKernelGetFunction_fn)(pFunc, kernel) ;

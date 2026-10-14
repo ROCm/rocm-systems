@@ -55,6 +55,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamBatchMemOp,           hipStreamBatchMemOp);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWriteValue64,         hipStreamWriteValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
+#endif
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -546,6 +549,17 @@ static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
 std::function<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int)>
     g_hipStreamBatchMemOp = DefaultHipStreamBatchMemOp;
 
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+static hipError_t DefaultHipMemcpyBatchAsync(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*,
+                                             size_t, size_t*, hipStream_t)
+{
+    return g_hipAsyncOpsResult;
+}
+std::function<hipError_t(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*, size_t, size_t*,
+                         hipStream_t)>
+    g_hipMemcpyBatchAsync = DefaultHipMemcpyBatchAsync;
+#endif
+
 static hipError_t DefaultHipStreamWriteValue64(hipStream_t, void*, std::uint64_t,
                                                unsigned int)
 {
@@ -627,6 +641,9 @@ void ResetHipFakes()
     g_hipEventQueryRequiresRecord   = false;
     g_recordedEvents.clear();
     g_hipStreamBatchMemOp           = DefaultHipStreamBatchMemOp;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    g_hipMemcpyBatchAsync           = DefaultHipMemcpyBatchAsync;
+#endif
     g_hipStreamWriteValue64         = DefaultHipStreamWriteValue64;
     g_hipStreamWaitValue64          = DefaultHipStreamWaitValue64;
 }
@@ -927,10 +944,10 @@ hipError_t hipStreamWriteValue32(hipStream_t, void*, std::uint32_t, unsigned int
 
 // ce_coll.cc's batch path; in-RCCL builds inherit CE_BATCH_ASYNC_SUPPORTED, standalone ones compile the call out.
 #ifdef CE_BATCH_ASYNC_SUPPORTED
-hipError_t hipMemcpyBatchAsync(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*, size_t, size_t*,
-                               hipStream_t)
+hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count, hipMemcpyAttributes* attrs,
+                               size_t* attrsIdxs, size_t numAttrs, size_t* failIdx, hipStream_t stream)
 {
-    FailLoudUnfaked("hip_fakes", "hipMemcpyBatchAsync");
+    return g_hipMemcpyBatchAsync(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx, stream);
 }
 #endif
 

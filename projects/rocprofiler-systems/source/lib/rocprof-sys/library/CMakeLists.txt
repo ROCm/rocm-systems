@@ -14,6 +14,7 @@ set(library_sources
 )
 
 set(library_headers
+    ${CMAKE_CURRENT_LIST_DIR}/annotation.hpp
     ${CMAKE_CURRENT_LIST_DIR}/coverage.hpp
     ${CMAKE_CURRENT_LIST_DIR}/process_sampler.hpp
     ${CMAKE_CURRENT_LIST_DIR}/perf.hpp
@@ -44,7 +45,6 @@ add_subdirectory(pmc)
 add_subdirectory(causal)
 add_subdirectory(components)
 add_subdirectory(coverage)
-add_subdirectory(tracing)
 
 set(ndebug_sources
     ${CMAKE_CURRENT_LIST_DIR}/components/mpi_gotcha.cpp
