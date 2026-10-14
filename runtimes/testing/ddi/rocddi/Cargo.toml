@@ -1,0 +1,23 @@
+# SPDX-License-Identifier: MIT
+
+[package]
+name = "rocddi-contract-tests"
+description = "Production rocddi contracts, independently built from runtime frontends"
+publish = false
+version.workspace = true
+edition.workspace = true
+rust-version.workspace = true
+license.workspace = true
+repository.workspace = true
+
+[[bin]]
+name = "rocddi-host-contract"
+path = "host_contract.rs"
+test = false
+bench = false
+
+[dependencies]
+rocddi.workspace = true
+
+[lints]
+workspace = true
