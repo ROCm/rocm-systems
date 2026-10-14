@@ -244,10 +244,7 @@ HIP_TEST_CASE(Unit_hipMemAdvise_TstAccessedByFlg4) {
 HIP_TEST_CASE(Unit_hipMemAdvise_TstAlignedAllocMem) {
   // Skip if XNACK is off
   if (HipTest::isXnackOn()) {
-    int pageMemAccess = 0;
-    HIP_CHECK(hipDeviceGetAttribute(&pageMemAccess, hipDeviceAttributePageableMemoryAccess, 0));
-    WARN("hipDeviceAttributePageableMemoryAccess:" << pageMemAccess);
-    if (HipTest::isManagedMemorySupportedOnDevice(0) && (pageMemAccess == 1)) {
+    if (HipTest::isManagedMemorySupportedOnDevice(0)) {
       int *Mllc = nullptr, MemSz = 4096 * 4, NumElms = 4096, InitVal = 123;
       // Mllc = reinterpret_cast<(int *)>(aligned_alloc(4096, MemSz));
       Mllc = reinterpret_cast<int*>(aligned_alloc(4096, 4096 * 4));
