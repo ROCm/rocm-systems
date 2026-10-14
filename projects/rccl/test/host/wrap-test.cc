@@ -4073,7 +4073,7 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax)
         g_loadParam = [](const char* env, int64_t deft) -> int64_t {
           if (std::strcmp(env, "RCCL_CE_ALLREDUCE") == 0)       return 1;
           if (std::strcmp(env, "RCCL_FORCE_CE_ALLREDUCE") == 0) return 1;
-          return deft;  // no size override -- table value (256 MiB) is used
+          return deft;  // no size env override -- local table value is used
         };
         ScopedHook symRequested(g_isSymmetricKernelRequested,
                                [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
@@ -4085,8 +4085,16 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenAboveTableMax)
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
-        // 256 MiB + 32 bytes: just past the table ceiling, divisible by nRanks=8.
-        constexpr size_t kCount = (256ULL * 1024 * 1024 / sizeof(float)) + 8;
+        // Supply a local table so rcclCeNonRegMaxTab reads a real entry rather
+        // than the null-table fallback (NCCL_CE_AR_TMPBUF_DEFAULT_BYTES).
+        // MakeCommWithArch sets archName but not archThresholds; the fake
+        // rcclGetArchThresholds always returns nullptr.
+        rcclArchThresholds archTab{};
+        constexpr size_t kTableCap = 256ULL * 1024 * 1024;
+        archTab.ceNonRegMax[ncclFuncAllReduce] = kTableCap;
+        comm->archThresholds = &archTab;
+        // kTableCap + 32 bytes: just past the table ceiling, divisible by nRanks=8.
+        constexpr size_t kCount = (kTableCap / sizeof(float)) + 8;
         rcclCollDecision decision{};
         EXPECT_EQ(ncclSuccess, rcclSelectAllReduce(comm, nullptr, nullptr, /*count=*/kCount, ncclFloat32, ncclSum,
                                                     /*stream=*/nullptr, /*query=*/true,
@@ -7078,7 +7086,7 @@ TEST(WrapMicrotestIsolated, GetCollImplInfo_AllGatherReachesCeRegisteredUnlikeGe
           ncclComm* comm = MakeCommWithArch(arch);
           comm->nRanks = 1;
           comm->nNodes = 1;
-          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;  // required by branch #3
+          comm->config.CTAPolicy = 0;  // window decides; CTAPolicy=ZERO would short-circuit it
           int algo, protocol, maxChannels;
           EXPECT_EQ(ncclSuccess, rcclGetCollImplInfo(comm, ncclFuncAllGather, 8, ncclFloat32, ncclSum, nullptr,
                                                       nullptr, /*graphCapturing=*/0, &algo, &protocol, &maxChannels))
