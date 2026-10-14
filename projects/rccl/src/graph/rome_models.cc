@@ -3861,6 +3861,13 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           status = 1;
           break;
         case 1:
+          // Signed overflow is undefined, and the wrapped negative was then
+          // swallowed by the g < 0 test below, so the channel disappeared
+          // silently instead of the input being reported as malformed.
+          if (gpus[gpu] > (INT_MAX - digit) / 10) {
+            WARN("GPU number too large in user-defined rings (NCCL_RINGS); initialization will fail");
+            return ncclInvalidUsage;
+          }
           gpus[gpu] = gpus[gpu] * 10 + digit;
           break;
         case 2:

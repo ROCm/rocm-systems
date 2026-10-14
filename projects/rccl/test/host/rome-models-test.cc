@@ -435,6 +435,22 @@ TEST_F(RomeModelsParseGraphMicrotest, ExactlyMaxNodesGpusInOneChannel_IsAccepted
   ResetNcclFakes();
 }
 
+TEST_F(RomeModelsParseGraphMicrotest, GpuNumberWiderThanIntRange_IsRejected) {
+  // INT_MAX + 1: the smallest number that cannot be accumulated, so a bound that
+  // drifted by one would fail here. Accumulating it overflowed a signed int,
+  // which is undefined, and the wrapped negative was then quietly swallowed by
+  // the g < 0 test -- the channel vanished instead of being reported.
+  EXPECT_EQ(parseGraph("2147483648", system(), graph(), nullptr, nullptr, 0), ncclInvalidUsage);
+}
+
+TEST_F(RomeModelsParseGraphMicrotest, GpuNumberAtIntMax_IsNotRejected) {
+  // The largest number that still fits. It names no GPU this system has, so the
+  // channel is ignored -- but ignoring is not rejecting, and a bound tightened by
+  // one would turn this into an error.
+  EXPECT_EQ(parseGraph("2147483647", system(), graph(), nullptr, nullptr, 0), ncclSuccess);
+  EXPECT_EQ(graph()->nChannels, 0);
+}
+
 TEST_F(RomeModelsParseGraphMicrotest, NoMatchingChannel_LeavesBandwidthAtZero) {
   // Callers test graph->nChannels after calling, so a ring list that matches
   // nothing is not an error -- but it must not leave a bandwidth behind either.
