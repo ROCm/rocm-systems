@@ -1819,7 +1819,7 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
                 if is_x2:
                     suffix = suffix[:-3]
                 info = _derive_flat_atomic_info(suffix, is_x2)
-                if info and upper in ('S_ATOMIC_DEC',):
+                if info and upper in ('S_ATOMIC_DEC', 'S_ATOMIC_DEC_X2'):
                     op, elem_size, data_dw_actual = info
                     return InstructionSemantics(
                         name,
