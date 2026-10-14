@@ -142,3 +142,32 @@ TEST(GpuUnit, MemoryPartitionSetCurrentModeReadOnlyFileIsSuccess) {
   EXPECT_EQ(rsmi_dev_memory_partition_set(card.index(), RSMI_MEMORY_PARTITION_NPS4),
             RSMI_STATUS_NOT_SUPPORTED);
 }
+
+// A refusal of a file that keeps its write bits (read-only mount, missing privileges)
+// means the request never reached the driver, so it is reported.
+TEST(GpuUnit, MemoryPartitionSetCurrentModeRefusedWritableFileIsError) {
+  if (geteuid() != 0) {
+    GTEST_SKIP() << "rsmi_dev_memory_partition_set requires root";
+  }
+  FakeCard card("NPS1");
+  ASSERT_TRUE(card.ok());
+  // Owner-only write access refuses root once CAP_DAC_OVERRIDE is dropped.
+  if (chown(card.current_file().c_str(), 65534, 65534) != 0) {
+    GTEST_SKIP() << "cannot chown the fake file: " << std::strerror(errno);
+  }
+  const auto before = fs::last_write_time(card.current_file());
+  ScopedNoDacOverride no_override;
+  const int probe = open(card.current_file().c_str(), O_WRONLY);
+  const int probe_errno = errno;
+  if (probe >= 0) {
+    close(probe);
+    GTEST_SKIP() << (no_override.error() != 0 ? std::strerror(no_override.error())
+                                              : "the file is still writable");
+  }
+  ASSERT_EQ(probe_errno, EACCES);
+
+  EXPECT_EQ(rsmi_dev_memory_partition_set(card.index(), RSMI_MEMORY_PARTITION_NPS1),
+            RSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_TRUE(fs::last_write_time(card.current_file()) == before) << "the file was written";
+  EXPECT_EQ(card.ReadCurrent(), "NPS1");
+}

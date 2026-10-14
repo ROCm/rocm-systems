@@ -239,7 +239,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - A buffer too small for the partition name had the byte after its end overwritten. The name is now truncated inside the buffer, and the call still reports that the buffer is too small.
 
 - **Requesting the current memory partition now cancels a pending partition change on drivers that support it**.  
-  - `amd-smi set --memory-partition` no longer advises a driver reload when the requested partition is already current. With older drivers, a partition requested earlier still applies at the next reload, and amd-smi says so.
+  - `amd-smi set --memory-partition` no longer advises a driver reload when the requested partition is already current; with older drivers, a partition requested earlier still applies at the next reload. If the partition can't be written (for example, `/sys` is read-only in a container), the request now fails instead of reporting success.
 
 - **Fixed `amdsmi_get_gpu_driver_info()` reporting `0` as the driver date**.  
   - Kernels that no longer use the DRM driver date report it as `0`. `driver_date` is now empty in the C API and `N/A` in Python.

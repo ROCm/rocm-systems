@@ -7,6 +7,7 @@
 #include <poll.h>
 #include <pthread.h>
 #include <sys/ioctl.h>
+#include <sys/stat.h>
 #include <sys/utsname.h>
 #include <unistd.h>
 
@@ -6898,9 +6899,12 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition, newMemoryPartition);
   rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 
-  // GPUs with a single memory partition mode expose the file read-only (EACCES);
-  // the mode is already current, so that refusal is not an error.
-  if (is_current_mode && status == RSMI_STATUS_PERMISSION) {
+  // Single-mode GPUs expose the file without write bits, so nothing can be pending
+  // there; a read-only mount (EROFS) keeps the write bits and is reported.
+  struct stat attr = {};
+  if (is_current_mode && status == RSMI_STATUS_PERMISSION &&
+      stat(dev->get_sys_file_path_by_type(amd::smi::kDevMemoryPartition).c_str(), &attr) == 0 &&
+      (attr.st_mode & (S_IWUSR | S_IWGRP | S_IWOTH)) == 0) {
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Success - requested mode is already current; write returned "
        << getRSMIStatusString(status, false) << " | Device #: " << dv_ind
