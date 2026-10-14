@@ -13,7 +13,8 @@
 
 #include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
-#include "hrr_reader.h"   // hrr::hash_hex
+#include "hrr_reader.h"   // hrr::hash_hex, hrr::read_file_capped
+#include "hrr_replay_limits.h"
 
 #include <hip/hip_runtime.h>
 // hipExtModuleLaunchKernel is declared in <hip/hip_ext.h>. That header redeclares
@@ -213,16 +214,15 @@ static std::string co_path(const std::string& archive_dir,
     return archive_dir + "/code_objects/" + hrr::hash_hex(hash_lo, hash_hi) + ".hsaco";
 }
 
-static std::vector<uint8_t> read_file(const std::string& path) {
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return {};
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz <= 0) { fclose(f); return {}; }
-    std::vector<uint8_t> buf(static_cast<size_t>(sz));
-    if (fread(buf.data(), 1, buf.size(), f) != buf.size()) { fclose(f); return {}; }
-    fclose(f);
+// *refused is set when the file was not read because of the file cap or an
+// allocation failure (not because it is missing): the caller ends the replay.
+static std::vector<uint8_t> read_file(const std::string& path, bool* refused = nullptr) {
+    std::vector<uint8_t> buf;
+    std::string err;
+    if (!hrr::read_file_capped(path, buf, &err, refused)) {
+        fprintf(stderr, "[HRR] %s\n", err.c_str());
+        return {};
+    }
     return buf;
 }
 
@@ -290,7 +290,15 @@ const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
         }
     }
     // Not cached — read from disk, then insert under exclusive lock
-    auto data = read_file(blob_path(archive_dir, hash_lo, hash_hi));
+    bool refused = false;
+    auto data = read_file(blob_path(archive_dir, hash_lo, hash_hi), &refused);
+    if (refused) {
+        // Not a missing blob: the replay cannot continue faithfully. Flag it
+        // now, so every thread stops at its next event, rather than after the
+        // consuming handler has gone on to its HIP call.
+        fatal_error.store(true, std::memory_order_release);
+        return nullptr;
+    }
     if (data.empty()) return nullptr;
     std::unique_lock lk(map_mutex);
     auto it = blob_cache_.emplace(key, std::move(data)).first;
@@ -311,7 +319,12 @@ const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi
             return it->second.data();
         }
     }
-    auto data = read_file(co_path(archive_dir, hash_lo, hash_hi));
+    bool refused = false;
+    auto data = read_file(co_path(archive_dir, hash_lo, hash_hi), &refused);
+    if (refused) {
+        fatal_error.store(true, std::memory_order_release);
+        return nullptr;
+    }
     if (data.empty()) return nullptr;
     std::unique_lock lk(map_mutex);
     auto [it, inserted] = blob_cache_.emplace(key, std::move(data));
@@ -3082,6 +3095,16 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
             std::memcpy(buf, blob, sz);
         else
             std::memset(buf, 0, sz);
+        if (!blob && ctx.fatal_error.load(std::memory_order_acquire)) {
+            // The blob was refused (cap or allocation), not merely absent:
+            // do not register zeros in its place.
+#ifdef _WIN32
+            _aligned_free(buf);
+#else
+            free(buf);
+#endif
+            return hipErrorUnknown;
+        }
     } else {
         std::memset(buf, 0, sz);
     }
@@ -3970,20 +3993,31 @@ hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
 // hipSuccess (see hip_capture_generated.cpp).  Replay drives the API trace
 // faster than the original CPU often did relative to GPU completion, so the
 // same call can transiently return hipErrorNotReady (600).  Spin until
-// hipSuccess to match the captured observable return.
-static hipError_t replay_query_until_success(hipError_t (*once)(void*), void* arg) {
-    int spin = 0;
-    for (;;) {
-        hipError_t r = once(arg);
-        if (r == hipSuccess)
-            return hipSuccess;
-        if (r != hipErrorNotReady)
-            return r;
-        if (++spin < 1000)
-            std::this_thread::yield();
-        else
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-    }
+// hipSuccess to match the captured observable return. That is a synchronize in
+// effect, so by default the spin has no count of its own (a kernel the
+// application polled for a long time must still replay); it ends when another
+// thread has failed, and --max-query-attempts N adds a bound.
+hipError_t replay_query_until_success(PlaybackContext& ctx, const char* api,
+                                             hipError_t (*once)(void*), void* arg) {
+    hipError_t r = hipSuccess;
+    const bool done = hrr::retry_bounded(ctx.max_query_attempts, [&] {
+        if (ctx.fatal_error.load(std::memory_order_acquire)) {
+            r = hipErrorUnknown;  // another thread failed: stop spinning
+            return true;
+        }
+        r = once(arg);
+        return r != hipErrorNotReady;
+    });
+    if (done)
+        return r;
+    fprintf(stderr,
+            "[HRR] Fatal: %s still returned hipErrorNotReady after %llu attempts "
+            "(--max-query-attempts); the recorded work did not complete\n",
+            api, (unsigned long long)ctx.max_query_attempts);
+    // Fatal for the whole replay, even under --continue-on-error: each further
+    // query of an archive like this would spend the full bound again.
+    ctx.fatal_error.store(true, std::memory_order_release);
+    return hipErrorNotReady;
 }
 
 struct replay_event_query_ctx {
@@ -3998,7 +4032,7 @@ static hipError_t replay_event_query_once(void* p) {
 hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipEventQuery*>(pl);
     replay_event_query_ctx c{ctx.translate_event(a->event)};
-    return replay_query_until_success(replay_event_query_once, &c);
+    return replay_query_until_success(ctx, "hipEventQuery", replay_event_query_once, &c);
 }
 
 struct replay_stream_query_ctx {
@@ -4018,13 +4052,13 @@ static hipError_t replay_stream_query_spt_once(void* p) {
 hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery*>(pl);
     replay_stream_query_ctx c{(hipStream_t)ctx.translate_stream(a->stream)};
-    return replay_query_until_success(replay_stream_query_once, &c);
+    return replay_query_until_success(ctx, "hipStreamQuery", replay_stream_query_once, &c);
 }
 
 hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery_spt*>(pl);
     replay_stream_query_ctx c{(hipStream_t)ctx.translate_stream(a->stream)};
-    return replay_query_until_success(replay_stream_query_spt_once, &c);
+    return replay_query_until_success(ctx, "hipStreamQuery_spt", replay_stream_query_spt_once, &c);
 }
 
 // ---------------------------------------------------------------------------
