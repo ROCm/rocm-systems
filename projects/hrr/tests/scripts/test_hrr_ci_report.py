@@ -91,6 +91,17 @@ class RenderTest(unittest.TestCase):
         self.assertEqual(rc, 0)
         self.assertIn("## HRR results by platform", out.getvalue())
 
+    def test_main_fails_when_configure_did_not_succeed(self):
+        for result in ("failure", "cancelled"):
+            with tempfile.TemporaryDirectory() as tmp, \
+                    mock.patch.object(rpt, "list_jobs", return_value=JOBS[:1]), \
+                    mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                    contextlib.redirect_stdout(io.StringIO()) as out:
+                rc = rpt.main(["--configure-result", result, "--run-gpu", "", "--families", "",
+                               "--results-dir", tmp])
+            self.assertEqual(rc, 1, result)
+            self.assertIn(f"Configure: {result}, so nothing else ran", out.getvalue())
+
 
 if __name__ == "__main__":
     unittest.main()

@@ -291,7 +291,11 @@ jobs:
   summary:
     name: HRR CI Summary
     needs: [configure, codegen, scripts, unit, gpu]
-    if: ${{ always() && (needs.configure.outputs.run_cpu == 'true' || needs.configure.outputs.run_gpu == 'true') }}
+    # Also when configure failed: then nothing else ran, and this job fails.
+    if: >-
+      ${{ always() && (needs.configure.result != 'success'
+      || needs.configure.outputs.run_cpu == 'true'
+      || needs.configure.outputs.run_gpu == 'true') }}
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -324,10 +328,12 @@ jobs:
       - name: Summarize
         env:
           GH_TOKEN: ${{ github.token }}
+          CONFIGURE_RESULT: ${{ needs.configure.result }}
           REASON: ${{ needs.configure.outputs.reason }}
           RUN_GPU: ${{ needs.configure.outputs.run_gpu }}
           FAMILIES: ${{ needs.configure.outputs.families }}
         run: >-
           python3 projects/hrr/tests/scripts/hrr_ci_report.py
+          --configure-result "${CONFIGURE_RESULT}"
           --reason "${REASON}" --run-gpu "${RUN_GPU}" --families "${FAMILIES}"
           --results-dir results --base-json base/base.json

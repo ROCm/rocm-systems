@@ -10,8 +10,8 @@ The summary has three parts:
     produced results (cancelled, timed out, still queued) still has a row;
   * the per-suite results table from summarize_junit.py.
 
-Exits 1 when any HRR job failed or was cancelled, or a results file could not
-be read.
+Exits 1 when the configure job did not succeed, any HRR job failed or was
+cancelled, or a results file could not be read.
 """
 
 from __future__ import annotations
@@ -60,7 +60,15 @@ def missing_families(families: list[dict], rows: list[dict]) -> list[str]:
     return [f["family"] for f in families if f["family"] not in seen]
 
 
-def render_header(reason: str, run_gpu: bool, families: list[dict], base: dict | None) -> str:
+def render_header(
+    reason: str, run_gpu: bool, families: list[dict], base: dict | None,
+    configure_result: str = "success",
+) -> str:
+    if configure_result != "success":
+        return (
+            f"## HRR CI\n\n- Configure: {configure_result}, so nothing else ran;"
+            " see the Configure job's log.\n\n"
+        )
     lines = ["## HRR CI", "", f"- Scope: {reason}."]
     if run_gpu:
         names = ", ".join(f["family"] for f in families) or "none"
@@ -114,6 +122,7 @@ def list_jobs(repo: str, run_id: str, attempt: str) -> list[dict]:
 
 def main(argv: list[str] | None = None) -> int:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
+    parser.add_argument("--configure-result", default="success")
     parser.add_argument("--reason", default="")
     parser.add_argument("--run-gpu", default="false")
     parser.add_argument("--families", default="[]")
@@ -133,7 +142,9 @@ def main(argv: list[str] | None = None) -> int:
     rows = classify_jobs(list_jobs(args.repo, args.run_id, args.run_attempt))
     missing = missing_families(families, rows)
 
-    markdown = render_header(args.reason, run_gpu, families, base) + render_jobs(rows, missing)
+    configured = args.configure_result == "success"
+    markdown = render_header(args.reason, run_gpu, families, base, args.configure_result)
+    markdown += render_jobs(rows, missing)
     errors: list[str] = []
     args.results_dir.mkdir(parents=True, exist_ok=True)
     markdown += summarize_junit.render(args.results_dir, errors)
@@ -145,7 +156,7 @@ def main(argv: list[str] | None = None) -> int:
             out.write(markdown)
     for error in errors:
         print(f"::error::unreadable JUnit XML {error}")
-    return 0 if overall_ok(rows, missing) and not errors else 1
+    return 0 if configured and overall_ok(rows, missing) and not errors else 1
 
 
 if __name__ == "__main__":
