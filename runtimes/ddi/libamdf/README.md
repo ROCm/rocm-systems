@@ -4,16 +4,16 @@
 # libamdf
 
 libamdf implements the AMDF native C ABI in Rust. Its sole public contract is
-the eight headers under `api-headers/include/amdf/`, synchronized from
-`hrx-system/libamdf` at `bd24215e6a5d1e12570c892356fd5b343ac38a6d` with an
-AMD copyright and MIT SPDX preamble.
+the eight headers under `api-headers/include/amdf/`, based on
+`hrx-system/libamdf` at `bd24215e6a5d1e12570c892356fd5b343ac38a6d` with
+local pre-beta API changes.
 The crate builds `libamdf.a`; the workspace-root shared package supplies the
 `libamdf.so` alias and the `libamdf.so.0` compatibility name. `amdf_query_api`
 is the AMDF C entry point. The shared image also exports HSA entry points, but
 loading AMDF does not initialize HSA.
 
 AMDF separates passive endpoint discovery from explicit device activation.
-An instance owns its callback allocator and native session; PROCESS sessions
+An instance owns its native session; PROCESS sessions
 share the library image's primary KFD connection. Upper runtimes
 own device selection, suballocation, queue pooling, packet construction,
 graphs, synchronization policy, and recovery. Native GPU mechanisms are
@@ -72,7 +72,7 @@ AMDF declarations or public lifetime rules.
 
 | Object | Ownership and lifetime |
 |---|---|
-| Instance | Owns the copied host allocator and native session; construction performs no discovery or device activation. |
+| Instance | Owns the native session; construction performs no discovery or device activation. |
 | Endpoint | Query-only object borrowing its instance; caches immutable endpoint and family facts. |
 | Device | Explicitly activated execution/address domain borrowing its endpoint. |
 | Memory scope | Borrowed storage metadata embedded in its instance or endpoint. |
@@ -104,12 +104,9 @@ finish their own cleanup without changing public borrowing rules.
 Constructors validate inputs and reserve metadata before publishing a complete
 output. Failure leaves outputs unchanged and creates no public cleanup
 obligation. Enumeration's documented BUFFER_TOO_SMALL count/prefix protocol
-is the exception. Metadata uses the instance's copied allocator callbacks;
-backing uses operating-system or driver allocation mechanisms. The callbacks
-and their user data remain valid through successful instance destruction.
-There is no global allocator selector. PROCESS sessions in one combined shared
-image reuse a system-allocated native KFD connection and exact DRM VM binding;
-the instance's callback allocator is not retained by that process owner.
+is the exception. Metadata uses the system allocator; backing uses operating
+system or driver allocation mechanisms. PROCESS sessions in one combined
+shared image reuse a native KFD connection and exact DRM VM binding.
 
 Destruction accepts a live handle by value and never clears the caller's
 pointer slot. An API-domain BUSY preflight leaves the affected queue or parent
@@ -119,10 +116,9 @@ Instance and device cleanup retains ownership for retry where their contracts
 specify it. Destruction does not implicitly wait for completion. Callers
 serialize destruction against other uses according to the imported headers.
 
-If ambiguous native cleanup still retains callback-backed metadata, instance
-destruction fails and preserves the remaining native owners. The caller keeps
-its allocator and library alive; no allocation registry or recovery service is
-introduced to conceal that failure.
+If ambiguous native cleanup still retains metadata, instance destruction
+fails and preserves the remaining native owners. No allocation registry or
+recovery service is introduced to conceal that failure.
 
 AMDF's `native_lifetime` field selects rocddi's driver context lifetime:
 PROCESS maps to `DriverContextLifetime::Process`, and INSTANCE maps to
@@ -200,8 +196,7 @@ fault alone does not imply a device reset. An operation that first reports
 terminal loss advances the current epoch for all live handles once; the later
 event adopts that generation. The device information query reads the epoch
 without a system call or lock. Destruction of the last handle for an endpoint
-stops and joins its worker before releasing the subscription and
-allocator-backed state.
+stops and joins its worker before releasing the subscription and observer state.
 
 A resource owns its native allocation and the progress of its own cleanup.
 AMDF memory destruction consumes the public handle even when native release
@@ -317,8 +312,8 @@ The rocddi layer contains a private core and two peer API frontends:
 - `ddi/rocddi` supplies implementation-neutral native mechanisms through
   domain modules for sessions, topology, activated devices, memory, queues,
   events, and profiling. Its private `driver/` layer owns the platform contract
-  and Linux KFD implementation, while `host_storage.rs` implements fallible
-  callback-backed ownership.
+  and Linux KFD implementation. `memory/storage.rs` implements fallible
+  metadata ownership within the same memory namespace.
 
 The CMake build stages both frontends in one shared image. Its AMDF and
 HSA aliases share the core's process context.

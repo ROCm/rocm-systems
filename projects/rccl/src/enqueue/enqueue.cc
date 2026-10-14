@@ -216,6 +216,10 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
 rccl_static int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count, ncclDataType_t datatype,
                                          int protocol, int nMaxChannels) {
   if (nMaxChannels <= 0 || count == 0) return nMaxChannels;
+  // scheduleCollTasksToPlan caps tuner/CSV nMaxChannels against comm->nChannels.
+  // Without this, CsvTuner can report 32/56 while the kernel
+  // launches on channel{Lo..Hi}={0..3}. Host microtests leave nChannels=0.
+  if (comm->nChannels > 0) nMaxChannels = std::min(nMaxChannels, comm->nChannels);
   constexpr size_t MinTrafficPerChannel = 16 << 10;
   size_t elementSize = ncclTypeSize(datatype);
   int trafficPerByte = ncclFuncTrafficPerByte(func, comm->nRanks);
@@ -3070,6 +3074,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   }
   // Honor Tuner config if available
   if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
+    rcclUpdateCollectiveAlgorithm(comm, nBytes, info, table);
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
   }
   rcclSetPipelining(comm, nBytes, info);
@@ -3122,6 +3127,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
     }
     INFO(NCCL_TUNING, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
+    rcclUpdateCollectiveChannels(comm, nBytes, info, nc);
   }
 
 #ifdef ENABLE_ROCSHMEM
@@ -4765,8 +4771,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                    opDev));
 
       } else if (!rcclNcclAlgoEnvIsSet() && !allGatherDecided && !alltoAllDecided &&
-                 rcclParamForceCe() && CeScratchAvailable && !hasSysmemSegment && comm->ddaScratch != nullptr &&
-                 recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
+                 rcclForceCeScratchEnabled(comm) && CeScratchAvailable && !hasSysmemSegment &&
+                 comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
         NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,
                                    comm->ddaPeerPtrsHost, opDev));
