@@ -246,6 +246,7 @@ jobs:
             # (hardware topology determines whether we see leaks or bad-frees).
             # The step always passes — output is captured for attribution analysis.
             "$ROCM_ROOT/llvm/bin/clang++" \
+              -D__HIP_PLATFORM_AMD__ \
               -I"$ROCM_ROOT/include" \
               -L"$ROCM_ROOT/lib" -Wl,-rpath,"$ROCM_ROOT/lib" \
               -fsanitize=address -shared-libasan \
