@@ -12,6 +12,7 @@
 #include "proxy.h"
 
 #include "fail_loud.h"
+#include "signature-drift.h"
 
 ncclResult_t g_proxySaveOpResult = ncclSuccess;
 int g_proxySaveOpCalls = 0;
@@ -47,11 +48,26 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
 ncclResult_t g_proxyStartResult = ncclSuccess;
 ncclResult_t ncclProxyStart(struct ncclComm*) { return g_proxyStartResult; }
 
-ncclResult_t ncclProxyCallAsync(struct ncclComm*, struct ncclProxyConnector*, int, void*, int, int, void*) {
+static ncclResult_t DefaultProxyCallAsync(struct ncclComm*, struct ncclProxyConnector*, int, void*, int, int, void*) {
   FailLoudUnfaked("proxy_fakes", "ncclProxyCallAsync");
 }
-ncclResult_t ncclPollProxyResponse(struct ncclComm*, struct ncclProxyConnector*, void*, void*) {
+std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, int, void*, int, int, void*)>
+    g_ncclProxyCallAsync = DefaultProxyCallAsync;
+ASSERT_HOOK_MATCHES_PROD(g_ncclProxyCallAsync, ncclProxyCallAsync);
+ncclResult_t ncclProxyCallAsync(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, int type, void* reqBuff,
+                                int reqSize, int respSize, void* opId) {
+  return g_ncclProxyCallAsync(comm, proxyConn, type, reqBuff, reqSize, respSize, opId);
+}
+
+static ncclResult_t DefaultPollProxyResponse(struct ncclComm*, struct ncclProxyConnector*, void*, void*) {
   FailLoudUnfaked("proxy_fakes", "ncclPollProxyResponse");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*, void*)> g_ncclPollProxyResponse =
+    DefaultPollProxyResponse;
+ASSERT_HOOK_MATCHES_PROD(g_ncclPollProxyResponse, ncclPollProxyResponse);
+ncclResult_t ncclPollProxyResponse(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, void* respBuff,
+                                   void* opId) {
+  return g_ncclPollProxyResponse(comm, proxyConn, respBuff, opId);
 }
 
 void ResetProxyFakes() {
@@ -64,4 +80,6 @@ void ResetProxyFakes() {
   g_proxySaveOpLastOpCount = 0;
   g_proxySaveOpSawNonNullJustInquire = false;
   g_proxyStartResult = ncclSuccess;
+  g_ncclProxyCallAsync = DefaultProxyCallAsync;
+  g_ncclPollProxyResponse = DefaultPollProxyResponse;
 }

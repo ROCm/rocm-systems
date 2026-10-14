@@ -54,6 +54,8 @@ ASSERT_HOOK_MATCHES_PROD(g_commGraphRegister,         ncclCommGraphRegister);
 ASSERT_HOOK_MATCHES_PROD(g_commGraphDeregister,       ncclCommGraphDeregister);
 ASSERT_HOOK_MATCHES_PROD(g_memTrackImportFromPeer,    ncclMemTrackImportFromPeer);
 ASSERT_HOOK_MATCHES_PROD(g_dynMemMarkExportToPeer,    ncclDynMemMarkExportToPeer);
+ASSERT_HOOK_MATCHES_PROD(g_shmImportShareableBuffer,  ncclShmImportShareableBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_shmIpcClose,               ncclShmIpcClose);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -224,19 +226,31 @@ ncclResult_t ncclRegLocalIsValid(struct ncclReg* reg, bool* isValid)
     return g_regLocalIsValid(reg, isValid);
 }
 
-ncclResult_t ncclShmImportShareableBuffer(struct ncclComm*  /*comm*/,
-                                          int               /*proxyRank*/,
-                                          ncclShmIpcDesc_t* /*desc*/,
-                                          void**            /*hptr*/,
-                                          void**            /*dptr*/,
-                                          ncclShmIpcDesc_t* /*descOut*/)
+static ncclResult_t DefaultShmImportShareableBuffer(struct ncclComm*, int, ncclShmIpcDesc_t*, void**, void**,
+                                                    ncclShmIpcDesc_t*)
 {
     return ncclSystemError;
 }
+std::function<ncclResult_t(struct ncclComm*, int, ncclShmIpcDesc_t*, void**, void**, ncclShmIpcDesc_t*)>
+    g_shmImportShareableBuffer = DefaultShmImportShareableBuffer;
+ncclResult_t ncclShmImportShareableBuffer(struct ncclComm*  comm,
+                                          int               proxyRank,
+                                          ncclShmIpcDesc_t* desc,
+                                          void**            hptr,
+                                          void**            dptr,
+                                          ncclShmIpcDesc_t* descOut)
+{
+    return g_shmImportShareableBuffer(comm, proxyRank, desc, hptr, dptr, descOut);
+}
 
-ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* /*desc*/)
+static ncclResult_t DefaultShmIpcClose(ncclShmIpcDesc_t*)
 {
     return ncclSuccess;
+}
+std::function<ncclResult_t(ncclShmIpcDesc_t*)> g_shmIpcClose = DefaultShmIpcClose;
+ncclResult_t ncclShmIpcClose(ncclShmIpcDesc_t* desc)
+{
+    return g_shmIpcClose(desc);
 }
 
 // ---------------------------------------------------------------------------
@@ -581,6 +595,8 @@ void ResetNcclFakes()
     g_ncclTopoCheckNet             = DefaultTopoCheckNet;
     g_regLocalIsValid              = DefaultRegLocalIsValid;
     g_shmAllocateShareableBuffer   = DefaultShmAllocateShareableBuffer;
+    g_shmImportShareableBuffer     = DefaultShmImportShareableBuffer;
+    g_shmIpcClose                  = DefaultShmIpcClose;
     g_commGraphRegister            = DefaultCommGraphRegister;
     g_commGraphDeregister          = DefaultCommGraphDeregister;
 }
