@@ -206,61 +206,48 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         'uint32_t',
         '[](auto a, auto b) { return util::stdx::min(a & 0xFFFFu, b & 0xFFFFu); }',
     ),
-    # --- float min/max. util::stdx::fmax/fmin match the scalar std::fmax/fmin
-    # used by the generated bodies for all finite/Inf inputs. Two accepted
-    # divergences (per project direction): (1) NaN inputs may differ in NaN
-    # payload; (2) a signed-zero tie returns the opposite-signed zero — scalar
-    # std::fmax/fmin returns the first operand, the packed vmaxps/vminps the
-    # second, so e.g. fmax(-0,+0) is -0 (scalar) vs +0 (SIMD). Both are
-    # numerically equal results; the guard tests skip NaN-input and zero-tie
-    # lanes (UtilSimd.Fmax/Fmin_VectorMatchesScalar_BitExact). All other inputs
-    # are bit-exact. (The earlier "not reproducible" note conflated these two
-    # accepted corners with a hard blocker.) ---
+    # Floating min/max share bit-exact NaN selection and signed-zero ordering
+    # with scalar execution, including the guest IEEE mode.
     'v_max_f32_vop2': (
         'float32_t',
-        '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
+        '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
     ),
     'v_min_f32_vop2': (
         'float32_t',
-        '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
+        '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
     ),
     'v_max_f16_vop2': (
         'uint32_t',
-        '[](auto a, auto b) {'
+        '[&wf](auto a, auto b) {'
         ' return util::f32_to_f16_simd('
-        'util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
+        'util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode())); }',
     ),
     'v_min_f16_vop2': (
         'uint32_t',
-        '[](auto a, auto b) {'
+        '[&wf](auto a, auto b) {'
         ' return util::f32_to_f16_simd('
-        'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
+        'util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode())); }',
     ),
-    # IEEE-2019 maximumNumber/minimumNumber (gfx1250/rdna4). Their generated
-    # scalar bodies are std::fmax / std::fmin — byte-for-byte the legacy
-    # v_max_f*/v_min_f* bodies above — so the functors are identical and inherit
-    # the same accepted NaN-payload / signed-zero-tie carve-out. The _vop3 twins
-    # auto-route from these _vop2 entries (f32 -> VOP3_BINARY_FP, f16 ->
-    # VOP3_BINARY_INT with the widening functor, mirroring v_max_f16_vop3).
+    # IEEE-2019 number forms use the same guest-mode helpers.
     'v_max_num_f32_vop2': (
         'float32_t',
-        '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
+        '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
     ),
     'v_min_num_f32_vop2': (
         'float32_t',
-        '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
+        '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
     ),
     'v_max_num_f16_vop2': (
         'uint32_t',
-        '[](auto a, auto b) {'
+        '[&wf](auto a, auto b) {'
         ' return util::f32_to_f16_simd('
-        'util::stdx::fmax(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
+        'util::max_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode())); }',
     ),
     'v_min_num_f16_vop2': (
         'uint32_t',
-        '[](auto a, auto b) {'
+        '[&wf](auto a, auto b) {'
         ' return util::f32_to_f16_simd('
-        'util::stdx::fmin(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b))); }',
+        'util::min_num_simd(util::f16_to_f32_simd(a), util::f16_to_f32_simd(b), wf.ieee_mode())); }',
     ),
     # v_cvt_pkrtz_f16_f32 (both spellings): pack two f32 -> two f16 with
     # round-toward-zero narrowing; proven bit-identical to the scalar helper.
@@ -517,11 +504,7 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' return static_cast<uint32_t>(amdgpu::frexp_f32(std::bit_cast<float>('
         'static_cast<uint32_t>(a[i])), wf.fp_denorm_mode_f32()).exponent); }); }',
     ),
-    # frexp f16: the scalar widens src to f32, runs std::frexp, then narrows the
-    # mantissa (or float(exp)) back to f16 via f32_to_f16. Compose the bit-exact
-    # f16<->f32 ports with the f32 frexp helpers; the f16<->f32 round trips and
-    # frexp are each bit-identical, so the composition matches. The VOP3 twins
-    # carry omod/clamp around that round trip (not reproduced) -> _VOP3_UNARY_SKIP.
+    # FREXP's mantissa is floating point; its exponent is an integer bit pattern.
     'v_frexp_mant_f16_vop1': (
         'uint32_t',
         'uint32_t',
@@ -532,14 +515,10 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
     'v_frexp_exp_i16_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        # The scalar narrows `static_cast<uint32_t>(exp)` to f16 -- the int->float
-        # conversion is UNSIGNED, so a negative exponent (0xFFFF_FFxx) becomes a
-        # ~4.29e9 float and f32_to_f16 saturates it to +Inf (0x7C00). Mirror that
-        # with an unsigned static_simd_cast (no signed intermediate).
         '[](auto a) {'
         ' auto e = util::frexp_exp_f32_simd('
         'std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));'
-        ' return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float>>(e)); }',
+        ' return e & 0xFFFFu; }',
     ),
     # --- f8 -> f32 (E4M3 / E5M2 8-bit float expand) ----------------------------
     # Scalar reads the low byte of src0 and expands via util::fp8_e4m3_to_f32 /
@@ -990,14 +969,12 @@ SIMD_VOP2_FMA_F64 = {'v_fmac_f64_vop2'}
 
 # template_name -> cpp_bin_op (over native<double>, no modifiers). VOP2 f64
 # binary forms: scalar bodies read src0/vsrc1 as read_lane64, no abs/neg/omod/
-# clamp. add/mul are bit-exact; max_num/min_num use util::stdx::fmax/fmin (scalar
-# is std::fmax/std::fmin) with the same accepted NaN-payload / signed-zero-tie
-# carve-out as the f64 vop3 forms in SIMD_VOP3_BINARY_FP64.
+# clamp. Min/max share scalar NaN selection and signed-zero ordering.
 SIMD_VOP2_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop2': '[](auto a, auto b) { return a + b; }',
     'v_mul_f64_vop2': '[](auto a, auto b) { return a * b; }',
-    'v_max_num_f64_vop2': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
-    'v_min_num_f64_vop2': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
+    'v_max_num_f64_vop2': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
+    'v_min_num_f64_vop2': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
 }
 
 
@@ -1941,11 +1918,7 @@ SIMD_VOP3_UNARY_INT_EXTRA: dict[str, tuple[str, str, str]] = {
 # applied in the f64 domain (apply_vop3_src_mod_f64 / apply_vop3_dst_mod_f64).
 # The VOPC table key convention is preserved: dict[name] -> functor string.
 #
-# For v_max_f64 / v_min_f64, stdx::fmax / stdx::fmin match scalar std::fmax /
-# std::fmin for all finite/Inf inputs except (a) NaN payload and (b) signed-zero
-# tie (matching the f32 finding) — accepted divergences, with the A/B test
-# skipping NaN-input and zero-tie lanes (same convention as v_max_f32 / v_min_f32
-# in SIMD_VOP2_BINARY).
+# Min/max share scalar NaN selection and signed-zero ordering.
 # VOP3-only f32 binary ops (no VOP2 twin, so not reachable via the _vop3
 # auto-route). Per-source abs/neg + result omod/clamp applied by the f32 binary
 # glue; the functor sees already-modified native<float> args. Currently the
@@ -1958,11 +1931,11 @@ SIMD_VOP3_BINARY_FP32: dict[str, str] = {
 SIMD_VOP3_BINARY_FP64: dict[str, str] = {
     'v_add_f64_vop3': '[](auto a, auto b) { return a + b; }',
     'v_mul_f64_vop3': '[](auto a, auto b) { return a * b; }',
-    'v_max_f64_vop3': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
-    'v_min_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
-    # IEEE-2019 num twins: scalar bodies are the same std::fmax / std::fmin.
-    'v_max_num_f64_vop3': '[](auto a, auto b) { return util::stdx::fmax(a, b); }',
-    'v_min_num_f64_vop3': '[](auto a, auto b) { return util::stdx::fmin(a, b); }',
+    'v_max_f64_vop3': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
+    'v_min_f64_vop3': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
+    # IEEE-2019 number forms use the same guest-mode helpers.
+    'v_max_num_f64_vop3': '[&wf](auto a, auto b) { return util::max_num_simd(a, b, wf.ieee_mode()); }',
+    'v_min_num_f64_vop3': '[&wf](auto a, auto b) { return util::min_num_simd(a, b, wf.ieee_mode()); }',
     # IEEE-2019 maximum/minimum (NaN-propagating, signed-zero-ordered).
     'v_maximum_f64_vop3': '[](auto a, auto b) { return util::ieee_maximum_simd(a, b); }',
     'v_minimum_f64_vop3': '[](auto a, auto b) { return util::ieee_minimum_simd(a, b); }',
@@ -2047,39 +2020,12 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
 }
 
 
-# VOP3 frexp twins routed through the EXISTING unary FP glue. Their generated
-# scalar bodies apply src0 abs/neg, compute the frexp exp/mantissa, then apply
-# result omod/clamp on the (float-domain) value and bit_cast / f32_to_f16 it to
-# the dst — exactly what the f32 / f16 unary FP glue produces. So only the
-# functor differs from the proven VOP1 forms.
-#   route 'fp16' -> ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16   (f16<->f32 widen glue)
-#   route 'fp32' -> ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, ...)
-# frexp_exp returns the uint32 two's-complement exponent (±0/Inf/NaN -> 0); the
-# static_simd_cast<float> reproduces the scalar `(float)(uint32_t)exp` exactly
-# (negative exp -> large float -> f16 +Inf, like scalar). frexp_mant_f32_simd is
-# the already-proven VOP1 helper. (v_frexp_exp_i32_f64 needs a new f64->f32
-# mixed-width glue and stays in _VOP3_UNARY_SKIP / scalar for now.)
+# Only the mantissa uses floating output glue. Integer exponent destinations
+# must not be converted to floating point or receive floating output modifiers.
 SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
     'v_frexp_mant_f16_vop3': (
         'fp16',
         '[](auto a) { return util::frexp_mant_f32_simd(std::bit_cast<util::native<uint32_t>>(a)); }',
-    ),
-    'v_frexp_exp_i16_f16_vop3': (
-        'fp16',
-        '[](auto a) { return util::stdx::static_simd_cast<util::native<float>>('
-        'util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a))); }',
-    ),
-    # f64 source -> float(exp) dst. Mixed-width (read64 / narrow32 store): the new
-    # cvt-vop3 f64->b32 glue applies the f64 src abs/neg + float omod/clamp.
-    # frexp_exp_f64_simd returns the int32 exp in the low 32 bits of each 64-bit
-    # lane; narrow to uint32 (scalar `(uint32_t)exp`) then to float (scalar
-    # unsigned `(float)(uint32_t)exp`). The intermediate uint32 narrow is
-    # load-bearing — a direct uint64->float would convert the full 64-bit value.
-    'v_frexp_exp_i32_f64_vop3': (
-        'fp64cvt',
-        '[](auto s) { return util::stdx::static_simd_cast<util::narrow32<float32_t>>('
-        'util::stdx::static_simd_cast<util::narrow32<uint32_t>>('
-        'util::frexp_exp_f64_simd(s))); }',
     ),
 }
 
@@ -2092,28 +2038,23 @@ SIMD_VOP3_TERNARY_FP32: dict[str, str] = {
     'v_fma_f32_vop3': '[&inst, &wf](auto a, auto b, auto c) { return amdgpu::fma_f32_simd(a, b, c, wf, amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)); }',
     'v_mad_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     'v_mad_legacy_f32_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
-    # min3/max3/med3 (f32): the scalar body composes std::fmax/std::fmin
-    # (max3 = fmax(fmax(a,b),c); min3 = fmin(fmin(a,b),c);
-    # med3 = fmax(fmin(fmax(a,b),c), fmin(a,b))). stdx::fmax/fmin match scalar
-    # for all finite/Inf inputs except NaN-payload and signed-zero tie (same
-    # accepted carve-out as v_max_f32 / v_min_f32; the A/B test skips NaN-input
-    # lanes and uses no ±0 inputs). omod/clamp applied by the glue.
+    # Nested min/max operations use the same bit-level rules as scalar execution.
     # DX9 FMA has zero-product and mandatory flushing rules distinct from FMA.
     'v_fma_dx9_zero_f32_vop3': (
         '[&wf](auto a, auto b, auto c) { return amdgpu::fma_dx9_zero_f32_simd(a, b, c, wf); }'
     ),
-    'v_max3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
-    'v_min3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
-    'v_med3_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }',
+    'v_max3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_min3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_med3_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()), util::min_num_simd(a, b, wf.ieee_mode()), wf.ieee_mode()); }',
     # minmax = max(min(a,b),c); maxmin = min(max(a,b),c). (RDNA3+.)
-    'v_minmax_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
-    'v_maxmin_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
+    'v_minmax_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_maxmin_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
     # IEEE-2019 num twins (gfx1250/rdna4): identical fmax/fmin compositions as
     # the legacy max3/min3/minmax/maxmin bodies above.
-    'v_max3_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
-    'v_min3_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
-    'v_minmax_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
-    'v_maxmin_num_f32_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
+    'v_max3_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_min3_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_minmax_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_maxmin_num_f32_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
     # IEEE-2019 maximum/minimum 3-input + combined forms. The scalar bodies are
     # the exact nested composition of the binary maximum/minimum (NaN-propagating,
     # signed-zero-ordered) — see util::ieee_{maximum,minimum}_simd.
@@ -2145,16 +2086,16 @@ SIMD_VOP3_TERNARY_FP16: dict[str, str] = {
     'v_mad_legacy_f16_vop3': '[](auto a, auto b, auto c) { return a * b + c; }',
     # min3/max3/med3 (f16): widened to f32 by the glue; same fmax/fmin
     # composition as the f32 forms (see SIMD_VOP3_TERNARY_FP32).
-    'v_max3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
-    'v_min3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
-    'v_med3_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(util::stdx::fmax(a, b), c), util::stdx::fmin(a, b)); }',
-    'v_minmax_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
-    'v_maxmin_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
+    'v_max3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_min3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_med3_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()), util::min_num_simd(a, b, wf.ieee_mode()), wf.ieee_mode()); }',
+    'v_minmax_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_maxmin_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
     # IEEE-2019 num twins (f16): same fmax/fmin compositions, widened by the glue.
-    'v_max3_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmax(a, b), c); }',
-    'v_min3_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmin(a, b), c); }',
-    'v_minmax_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmax(util::stdx::fmin(a, b), c); }',
-    'v_maxmin_num_f16_vop3': '[](auto a, auto b, auto c) { return util::stdx::fmin(util::stdx::fmax(a, b), c); }',
+    'v_max3_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_min3_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_minmax_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::max_num_simd(util::min_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
+    'v_maxmin_num_f16_vop3': '[&wf](auto a, auto b, auto c) { return util::min_num_simd(util::max_num_simd(a, b, wf.ieee_mode()), c, wf.ieee_mode()); }',
     # IEEE-2019 maximum/minimum 3-input + combined (f16; widened to f32 by glue).
     'v_maximum3_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_maximum_simd(util::ieee_maximum_simd(a, b), c); }',
     'v_minimum3_f16_vop3': '[](auto a, auto b, auto c) { return util::ieee_minimum_simd(util::ieee_minimum_simd(a, b), c); }',

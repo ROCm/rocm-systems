@@ -10,6 +10,7 @@
 #include <cstddef>
 #include <cstdint>
 #include <limits>
+#include <type_traits>
 
 // Platform feature detection for the vectorized f16<->f32 block converters.
 // x86 gets an F16C specialization; every other target (incl. ARM until a NEON
@@ -1513,6 +1514,50 @@ inline void unpack_6bit(const uint32_t dwords[6], uint8_t vals[32]) {
 // ---- Stochastic rounding LFSR ----
 
 inline uint32_t prng_advance(uint32_t seed) { return (seed << 1) ^ ((seed >> 31) ? 197u : 0u); }
+
+// Floating min/max must not inherit the host library's signed-zero or NaN
+// selection. Compare IEEE encodings, which also preserves denormal inputs when
+// the host has DAZ enabled. Source/output modifiers remain the caller's job.
+template <typename Float>
+inline Float floating_minmax(Float a, Float b, bool maximum, bool propagate_nan, bool ieee = true) {
+  static_assert(std::is_same_v<Float, float> || std::is_same_v<Float, double>);
+  using Bits = std::conditional_t<sizeof(Float) == 4, uint32_t, uint64_t>;
+  constexpr unsigned fraction = sizeof(Float) == 4 ? 23 : 52;
+  constexpr Bits sign = Bits{1} << (sizeof(Float) * 8 - 1);
+  constexpr Bits infinity =
+      static_cast<Bits>(sizeof(Float) == 4 ? 0x7f800000ull : 0x7ff0000000000000ull);
+  constexpr Bits quiet = Bits{1} << (fraction - 1);
+  const Bits ua = std::bit_cast<Bits>(a), ub = std::bit_cast<Bits>(b);
+  const bool nan_a = (ua & ~sign) > infinity, nan_b = (ub & ~sign) > infinity;
+  if (ieee && nan_a && !(ua & quiet))
+    return std::bit_cast<Float>(ua | quiet);
+  if (ieee && nan_b && !(ub & quiet))
+    return std::bit_cast<Float>(ub | quiet);
+  if (propagate_nan && nan_a)
+    return std::bit_cast<Float>(ua | quiet);
+  if (propagate_nan && nan_b)
+    return std::bit_cast<Float>(ub | quiet);
+  if (nan_a)
+    return b;
+  if (nan_b)
+    return a;
+  const Bits order_a = ua & sign ? ~ua : ua ^ sign;
+  const Bits order_b = ub & sign ? ~ub : ub ^ sign;
+  return (maximum ? order_a > order_b : order_a < order_b) ? a : b;
+}
+
+template <typename Float> inline Float minimum(Float a, Float b) {
+  return floating_minmax(a, b, false, true);
+}
+template <typename Float> inline Float maximum(Float a, Float b) {
+  return floating_minmax(a, b, true, true);
+}
+template <typename Float> inline Float min_num(Float a, Float b, bool ieee) {
+  return floating_minmax(a, b, false, false, ieee);
+}
+template <typename Float> inline Float max_num(Float a, Float b, bool ieee) {
+  return floating_minmax(a, b, true, false, ieee);
+}
 
 } // namespace util
 

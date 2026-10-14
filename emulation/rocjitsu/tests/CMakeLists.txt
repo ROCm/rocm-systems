@@ -679,6 +679,7 @@ add_executable(
     simd_correctness/mfma_lazy_storage_test.cpp
     vgpr_redispatch_test.cpp
     instruction_execution_harness_test.cpp
+    numeric_instruction_regression_test.cpp
     vop3_conversion_modifiers_test.cpp
     cube_instruction_test.cpp
     division_test.cpp

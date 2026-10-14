@@ -805,7 +805,7 @@ _VOP1_OP_MAP = {
     'V_LOG_LEGACY': ('vector_unary', 'log2'),
     'V_EXP': ('vector_unary', 'exp2'),
     'V_EXP_LEGACY': ('vector_unary', 'exp2'),
-    'V_PRNG': ('true_nop', None),  # PRNG not simulated
+    'V_PRNG': ('vector_unary', 'util::prng_advance'),
     'V_PERMLANE16_SWAP': ('vector_permlane16_swap', None),
     'V_PERMLANE32_SWAP': ('vector_permlane32_swap', None),
     'V_SWAPREL': ('vector_swaprel', None),
@@ -1314,8 +1314,11 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         for suffix in ('_B32', '_U32', '_I32', '_F32', '_F16', '_F64'):
             if name == f'{prefix}{suffix}':
                 _, dt = _split_dtype(name)
+                operation = (
+                    op + '_i' if op in ('maxmin', 'minmax') and dt[0] != 'f' else op
+                )
                 return InstructionSemantics(
-                    name, 'vector_ternary', operation=op, data_type=dt
+                    name, 'vector_ternary', operation=operation, data_type=dt
                 )
 
     for prefix, op in (('V_ADD_MAX', 'add_max'), ('V_ADD_MIN', 'add_min')):
@@ -1363,7 +1366,7 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     if name == 'V_CVT_PK_RTZ_F16_F32':
         return InstructionSemantics(name, 'vector_cvt_pkrtz_f16_f32')
     for norm_suffix in ('_I16_F16', '_U16_F16', '_I16_F32', '_U16_F32'):
-        if name == f'V_CVT_PK_NORM{norm_suffix}':
+        if name in (f'V_CVT_PK_NORM{norm_suffix}', f'V_CVT_PKNORM{norm_suffix}'):
             _, out_ty, in_ty = norm_suffix.split('_')
             return InstructionSemantics(
                 name,

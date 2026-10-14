@@ -141,11 +141,13 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxNumF32: {
-    float result = std::fmax(std::bit_cast<float>(src0), std::bit_cast<float>(src1));
+    float result =
+        util::max_num(std::bit_cast<float>(src0), std::bit_cast<float>(src1), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdMinNumF32: {
-    float result = std::fmin(std::bit_cast<float>(src0), std::bit_cast<float>(src1));
+    float result =
+        util::min_num(std::bit_cast<float>(src0), std::bit_cast<float>(src1), wf.ieee_mode());
     return std::bit_cast<uint32_t>(result);
   }
   case kVopdAddNcU32:

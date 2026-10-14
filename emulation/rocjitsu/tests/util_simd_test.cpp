@@ -891,17 +891,22 @@ TEST(UtilSimd, FlushDenormF32) {
 inline uint64_t bits_of(float v) { return std::bit_cast<uint32_t>(v); }
 inline uint64_t bits_of(double v) { return std::bit_cast<uint64_t>(v); }
 
-// Scalar references — literally the generated VOP3 body's inner expression.
+// Independent references for the quiet-NaN grid below. Selected NaNs retain
+// their sign and payload, and zero ties follow IEEE minimum/maximum ordering.
 template <typename T> T scalar_ieee_maximum(T a, T b) {
-  if (std::isnan(a) || std::isnan(b))
-    return std::numeric_limits<T>::quiet_NaN();
+  if (std::isnan(a))
+    return a;
+  if (std::isnan(b))
+    return b;
   if (a == b)
     return std::signbit(a) ? b : a;
   return a > b ? a : b;
 }
 template <typename T> T scalar_ieee_minimum(T a, T b) {
-  if (std::isnan(a) || std::isnan(b))
-    return std::numeric_limits<T>::quiet_NaN();
+  if (std::isnan(a))
+    return a;
+  if (std::isnan(b))
+    return b;
   if (a == b)
     return std::signbit(a) ? a : b;
   return a < b ? a : b;

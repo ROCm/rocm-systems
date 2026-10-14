@@ -2039,17 +2039,14 @@ void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane,
-        util::f32_to_f16_mode(
-            [&]() {
-              float s = util::f16_to_f32(
-                  static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-              int exp = 0;
-              if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-                std::frexp(s, &exp);
-              return static_cast<uint32_t>(exp);
-            }(),
-            wf.fp16_ovfl()));
+        *this, wf, vdst, lane, static_cast<uint32_t>(static_cast<uint16_t>([&]() {
+          float s = util::f16_to_f32(
+              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+          int exp = 0;
+          if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
+            std::frexp(s, &exp);
+          return static_cast<uint32_t>(exp);
+        }())));
   }
 }
 
@@ -2075,17 +2072,14 @@ RJ_NOINLINE void VFrexpExpI16F16Vop1::execute_modifier_impl(amdgpu::Wavefront &w
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane,
-        util::f32_to_f16_mode(
-            [&]() {
-              float s = util::f16_to_f32(
-                  static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-              int exp = 0;
-              if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-                std::frexp(s, &exp);
-              return static_cast<uint32_t>(exp);
-            }(),
-            wf.fp16_ovfl()));
+        *this, wf, vdst, lane, static_cast<uint32_t>(static_cast<uint16_t>([&]() {
+          float s = util::f16_to_f32(
+              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+          int exp = 0;
+          if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
+            std::frexp(s, &exp);
+          return static_cast<uint32_t>(exp);
+        }())));
   }
   dpp_write_mask_scope_.restore();
 }

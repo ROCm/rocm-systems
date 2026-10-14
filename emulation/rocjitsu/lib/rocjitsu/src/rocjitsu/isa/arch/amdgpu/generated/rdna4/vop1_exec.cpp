@@ -2408,19 +2408,10 @@ void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   }
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, [&](auto a) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a) {
-          if (wf.fp16_ovfl())
-            return ([](auto a) {
-              auto e = util::frexp_exp_f32_simd(
-                  std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));
-              return util::f32_to_f16_ovfl_simd(
-                  util::stdx::static_simd_cast<util::native<float>>(e));
-            })(a);
-          return ([](auto a) {
-            auto e = util::frexp_exp_f32_simd(
-                std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));
-            return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float>>(e));
-          })(a);
+        return std::bit_cast<util::native<uint32_t>>(([](auto a) {
+          auto e = util::frexp_exp_f32_simd(
+              std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));
+          return e & 0xFFFFu;
         })(std::bit_cast<util::native<uint32_t>>(a)));
       }))
     return;
@@ -2429,17 +2420,14 @@ void VFrexpExpI16F16Vop1::execute_impl(amdgpu::Wavefront &wf) {
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane,
-        util::f32_to_f16_mode(
-            [&]() {
-              float s = util::f16_to_f32(
-                  static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-              int exp = 0;
-              if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-                std::frexp(s, &exp);
-              return static_cast<uint32_t>(exp);
-            }(),
-            wf.fp16_ovfl()));
+        *this, wf, vdst, lane, static_cast<uint32_t>(static_cast<uint16_t>([&]() {
+          float s = util::f16_to_f32(
+              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+          int exp = 0;
+          if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
+            std::frexp(s, &exp);
+          return static_cast<uint32_t>(exp);
+        }())));
   }
 }
 
@@ -2462,19 +2450,10 @@ RJ_NOINLINE void VFrexpExpI16F16Vop1::execute_modifier_impl(amdgpu::Wavefront &w
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   auto &inst = *this;
   if (amdgpu::try_execute_words_simd<1, true, true, 1>(inst, wf, [&](auto a) {
-        return std::bit_cast<util::native<uint32_t>>(([&](auto a) {
-          if (wf.fp16_ovfl())
-            return ([](auto a) {
-              auto e = util::frexp_exp_f32_simd(
-                  std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));
-              return util::f32_to_f16_ovfl_simd(
-                  util::stdx::static_simd_cast<util::native<float>>(e));
-            })(a);
-          return ([](auto a) {
-            auto e = util::frexp_exp_f32_simd(
-                std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));
-            return util::f32_to_f16_simd(util::stdx::static_simd_cast<util::native<float>>(e));
-          })(a);
+        return std::bit_cast<util::native<uint32_t>>(([](auto a) {
+          auto e = util::frexp_exp_f32_simd(
+              std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)));
+          return e & 0xFFFFu;
         })(std::bit_cast<util::native<uint32_t>>(a)));
       }))
     return;
@@ -2483,17 +2462,14 @@ RJ_NOINLINE void VFrexpExpI16F16Vop1::execute_modifier_impl(amdgpu::Wavefront &w
     if (!(exec & (1ULL << lane)))
       continue;
     amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
-        *this, wf, vdst, lane,
-        util::f32_to_f16_mode(
-            [&]() {
-              float s = util::f16_to_f32(
-                  static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
-              int exp = 0;
-              if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-                std::frexp(s, &exp);
-              return static_cast<uint32_t>(exp);
-            }(),
-            wf.fp16_ovfl()));
+        *this, wf, vdst, lane, static_cast<uint32_t>(static_cast<uint16_t>([&]() {
+          float s = util::f16_to_f32(
+              static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+          int exp = 0;
+          if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
+            std::frexp(s, &exp);
+          return static_cast<uint32_t>(exp);
+        }())));
   }
   dpp_write_mask_scope_.restore();
 }

@@ -412,14 +412,14 @@ class TestDeriveScalarBinop:
         'name,operation,dtype,expected_cpp',
         [
             ('S_PACK_HL_B32_B16', 'pack_hl', 'b32', '0xFFFFu) << 16'),
-            ('S_MIN_NUM_F32', 'min_num', 'f32', 'std::fmin'),
-            ('S_MAX_NUM_F32', 'max_num', 'f32', 'std::fmax'),
-            ('S_MIN_NUM_F16', 'min_num', 'f16', 'std::fmin'),
-            ('S_MAX_NUM_F16', 'max_num', 'f16', 'std::fmax'),
-            ('S_MINIMUM_F32', 'minimum', 'f32', 'quiet_NaN'),
-            ('S_MAXIMUM_F32', 'maximum', 'f32', 'quiet_NaN'),
-            ('S_MINIMUM_F16', 'minimum', 'f16', 'quiet_NaN'),
-            ('S_MAXIMUM_F16', 'maximum', 'f16', 'quiet_NaN'),
+            ('S_MIN_NUM_F32', 'min_num', 'f32', 'util::min_num'),
+            ('S_MAX_NUM_F32', 'max_num', 'f32', 'util::max_num'),
+            ('S_MIN_NUM_F16', 'min_num', 'f16', 'util::min_num'),
+            ('S_MAX_NUM_F16', 'max_num', 'f16', 'util::max_num'),
+            ('S_MINIMUM_F32', 'minimum', 'f32', 'util::minimum'),
+            ('S_MAXIMUM_F32', 'maximum', 'f32', 'util::maximum'),
+            ('S_MINIMUM_F16', 'minimum', 'f16', 'util::minimum'),
+            ('S_MAXIMUM_F16', 'maximum', 'f16', 'util::maximum'),
         ],
     )
     def test_gfx1250_scalar_float_and_pack_ops_derive(

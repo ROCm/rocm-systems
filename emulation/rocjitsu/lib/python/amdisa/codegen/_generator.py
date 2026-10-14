@@ -2211,8 +2211,8 @@ class CodeGenerator:
                     ('VopdMaxF32', 'VopdMaxNumF32'),
                     '''
                     {
-                      float result = std::fmax(std::bit_cast<float>(src0),
-                                               std::bit_cast<float>(src1));
+                      float result = util::max_num(std::bit_cast<float>(src0),
+                                               std::bit_cast<float>(src1), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2221,8 +2221,8 @@ class CodeGenerator:
                     ('VopdMinF32', 'VopdMinNumF32'),
                     '''
                     {
-                      float result = std::fmin(std::bit_cast<float>(src0),
-                                               std::bit_cast<float>(src1));
+                      float result = util::min_num(std::bit_cast<float>(src0),
+                                               std::bit_cast<float>(src1), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2517,13 +2517,13 @@ class CodeGenerator:
                 return std::bit_cast<uint64_t>(result);
               }
               case kVopdMinNumF64: {
-                double result = std::fmin(std::bit_cast<double>(src0),
-                                          std::bit_cast<double>(src1));
+                double result = util::min_num(std::bit_cast<double>(src0),
+                                          std::bit_cast<double>(src1), wf.ieee_mode());
                 return std::bit_cast<uint64_t>(result);
               }
               case kVopdMaxNumF64: {
-                double result = std::fmax(std::bit_cast<double>(src0),
-                                          std::bit_cast<double>(src1));
+                double result = util::max_num(std::bit_cast<double>(src0),
+                                          std::bit_cast<double>(src1), wf.ieee_mode());
                 return std::bit_cast<uint64_t>(result);
               }
               default:
@@ -6524,6 +6524,10 @@ class CodeGenerator:
                 is_f32_to_integer = (
                     cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
                 )
+                has_integer_result = is_f32_to_integer or sem.operation in (
+                    'frexp_exp_f16',
+                    'frexp_exp_f32',
+                )
                 is_f16_input_conversion = (
                     cls == 'vector_unary' and dtype in F16_INPUT_CONVERSION_DTYPES
                 )
@@ -6544,9 +6548,9 @@ class CodeGenerator:
                     if has_abs and not is_integer_to_f32:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    if 'clamp' in inst_fields and not is_f32_to_integer:
+                    if 'clamp' in inst_fields and not has_integer_result:
                         ef.add('clamp')
-                    if 'omod' in inst_fields and not is_f32_to_integer:
+                    if 'omod' in inst_fields and not has_integer_result:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand

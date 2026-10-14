@@ -108,6 +108,8 @@ log "Verify CDNA5 gfx1251 public provenance"
 log "Running amdisa generator"
 "$python" -m amdisa \
   "${isa_entries[@]}" \
+  --isa-additions "cdna3:$isa_xml/amdgpu_isa_cdna3_legacy_math.xml" \
+  --isa-additions "cdna4:$isa_xml/amdgpu_isa_cdna4_legacy_math.xml" \
   --isa-additions "cdna5:$cdna5_delta" \
   --isa-variants "cdna5:$cdna5_variants" \
   --isa-output "$isa_out" \

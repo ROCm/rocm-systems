@@ -10,6 +10,7 @@
 #include "util/amdgpu_rsq.h"
 #include "util/amdgpu_sqrt.h"
 #include "util/bit.h"
+#include "util/data_types.h"
 
 #include <bit>
 #include <bitset>
@@ -1038,59 +1039,23 @@ inline native<float> bf8_e5m2_to_f32_simd(native<uint32_t> v) {
   return std::bit_cast<native<float>>(out);
 }
 
-/// Vector ports of the IEEE-2019 maximum / minimum operations (the non-"num"
-/// forms used by v_maximum_*/v_minimum_* on gfx1250/rdna4). Unlike fmax/fmin
-/// these PROPAGATE NaN (any NaN input -> canonical qNaN) and order signed zeros
-/// (-0 < +0): maximum of a ±0 tie is +0, minimum is -0. Bit-identical to the
-/// scalar bodies:
-///   if (isnan(a)||isnan(b)) return qNaN;
-///   if (a==b)              return signbit(a) ? <tie> : <other>;
-///   return a <cmp> b ? a : b;
+/// Apply the scalar IEEE selection rules to every SIMD lane. In particular,
+/// keep signaling NaN payloads and order -0 before +0 on every host compiler.
 template <typename V> V ieee_maximum_simd(V a, V b) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  if constexpr (std::is_same_v<typename V::value_type, double>) {
-    return map_native64_scalar<double>(a, b, [](double lhs, double rhs) {
-      if (std::isnan(lhs) || std::isnan(rhs))
-        return std::numeric_limits<double>::quiet_NaN();
-      if (lhs == rhs)
-        return std::signbit(lhs) ? rhs : lhs;
-      return lhs > rhs ? lhs : rhs;
-    });
-  } else
-#endif
-  {
-    const auto nan = stdx::isnan(a) || stdx::isnan(b);
-    const auto eq = (a == b);
-    const auto sa = stdx::signbit(a); // true when a is negative (incl. -0)
-    V res = b;                        // a < b (and the a==b,!sa case start)
-    stdx::where(a > b, res) = a;
-    stdx::where(eq && !sa, res) = a; // ±0 / equal tie: pick the +signed operand
-    stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
-    return res;
-  }
+  using Float = typename V::value_type;
+  return V([&](auto i) { return maximum(Float(a[i]), Float(b[i])); });
 }
 template <typename V> V ieee_minimum_simd(V a, V b) {
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-  if constexpr (std::is_same_v<typename V::value_type, double>) {
-    return map_native64_scalar<double>(a, b, [](double lhs, double rhs) {
-      if (std::isnan(lhs) || std::isnan(rhs))
-        return std::numeric_limits<double>::quiet_NaN();
-      if (lhs == rhs)
-        return std::signbit(lhs) ? lhs : rhs;
-      return lhs < rhs ? lhs : rhs;
-    });
-  } else
-#endif
-  {
-    const auto nan = stdx::isnan(a) || stdx::isnan(b);
-    const auto eq = (a == b);
-    const auto sa = stdx::signbit(a);
-    V res = b; // a > b (and the a==b,!sa case)
-    stdx::where(a < b, res) = a;
-    stdx::where(eq && sa, res) = a; // ±0 / equal tie: pick the -signed operand
-    stdx::where(nan, res) = V(std::numeric_limits<typename V::value_type>::quiet_NaN());
-    return res;
-  }
+  using Float = typename V::value_type;
+  return V([&](auto i) { return minimum(Float(a[i]), Float(b[i])); });
+}
+template <typename V> V min_num_simd(V a, V b, bool ieee) {
+  using Float = typename V::value_type;
+  return V([&](auto i) { return min_num(Float(a[i]), Float(b[i]), ieee); });
+}
+template <typename V> V max_num_simd(V a, V b, bool ieee) {
+  using Float = typename V::value_type;
+  return V([&](auto i) { return max_num(Float(a[i]), Float(b[i]), ieee); });
 }
 
 /// Round an in-range finite float to the nearest integer, with halfway values
