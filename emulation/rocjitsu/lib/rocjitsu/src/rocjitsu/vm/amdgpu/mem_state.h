@@ -12,6 +12,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
@@ -93,6 +94,11 @@ public:
   uint32_t response_data[16] = {};
   uint32_t store_data[16] = {};
   TranslatedMemoryProgress translated;
+
+  /// Atomics use elem_size for the entire RMW; ordinary accesses count DWORDs.
+  uint32_t access_size() const {
+    return discard_lines ? 0 : atomic_op != AtomicOp::NONE ? elem_size : num_dwords * elem_size;
+  }
 };
 
 /// @brief Per-element vector-memory lane masks with inline storage for the
@@ -236,7 +242,7 @@ public:
   /// Indexed LDS has an independent source-first policy.
   bool atomic_source_nan_first = false;
   bool lds_dword_extend = false; ///< Narrow LDS transfers extend to a full DWORD per lane.
-  bool lds_dst = false;          ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  bool lds_dst = false;          ///< Write the loaded payload to LDS instead of VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
   /// multicast this must be exactly Wavefront::lds_base(), the source WG
@@ -289,6 +295,17 @@ public:
     return lds_stack_inputs ? 1u : destination_vgpr_count();
   }
 };
+
+/// CDNA1-4 buffer-OOB reads still write zeros to legal LDS destinations.
+/// Later architectures suppress the LDS write for lanes that did not request data.
+inline uint64_t lds_destination_write_mask(const VectorMemState &state, rj_code_arch_t arch) {
+  uint64_t mask = arch_is_cdna_4_or_lower(arch) ? state.exec_mask : state.lane_mask;
+  if (state.lds_per_lane_addr)
+    for (uint32_t lane = 0; lane < state.wf_size; ++lane)
+      if (state.per_lane_lds_addr[lane] == kInvalidLdsAddress)
+        mask &= ~(uint64_t{1} << lane);
+  return mask;
+}
 
 /// Capture ordinary LDS-destination addresses and suppress out-of-allocation reads.
 /// Payload size and lane stride differ for DWORDX3: the fourth DWORD is untouched.

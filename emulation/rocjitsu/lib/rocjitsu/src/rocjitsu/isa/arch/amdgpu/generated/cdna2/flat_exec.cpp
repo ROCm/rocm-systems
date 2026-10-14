@@ -26,6 +26,26 @@ namespace rocjitsu {
 namespace cdna2 {
 
 void FlatLoadUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 1;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
@@ -39,6 +59,26 @@ void FlatLoadUbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 1;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = true;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
@@ -53,6 +93,26 @@ void FlatLoadSbyteFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 2;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 2;
@@ -66,6 +126,26 @@ void FlatLoadUshortFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 2;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = true;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 2;
@@ -80,6 +160,26 @@ void FlatLoadSshortFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 4;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
@@ -93,6 +193,26 @@ void FlatLoadDwordFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadDwordx2Flat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 4;
+    d->num_elems = 2;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 8, 8);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
@@ -106,6 +226,26 @@ void FlatLoadDwordx2Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 4;
+    d->num_elems = 3;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 12, 16);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
@@ -119,6 +259,26 @@ void FlatLoadDwordx3Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 4;
+    d->num_elems = 4;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 16, 16);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 4;
@@ -290,6 +450,26 @@ void FlatStoreDwordx4Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 1;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
@@ -304,6 +484,26 @@ void FlatLoadUbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 1;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
@@ -318,6 +518,26 @@ void FlatLoadUbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 1;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = true;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
@@ -333,6 +553,26 @@ void FlatLoadSbyteD16Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 1;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = true;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 1;
@@ -348,6 +588,26 @@ void FlatLoadSbyteD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 2;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 2;
@@ -362,6 +622,26 @@ void FlatLoadShortD16Flat::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void FlatLoadShortD16HiFlat::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.lds && inst_.seg != 0) {
+    auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
+    d->elem_size = 2;
+    d->num_elems = 1;
+    d->is_load = true;
+    d->lds_dst = true;
+    d->lds_dword_extend = true;
+    d->sign_extend = false;
+    d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
+    d->non_temporal = 0;
+    d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
+    // CDNA LDS-destination loads add the signed offset to both addresses.
+    uint32_t raw_offset = inst_.offset | (inst_.pad_12 << 12);
+    int32_t offset = static_cast<int32_t>(raw_offset << 19) >> 19;
+    flat_calculate_addresses(inst_, wf, *d);
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3fffcu) + offset, 4, 4);
+    set_data(std::move(d));
+    return;
+  }
   auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdst;
   d->elem_size = 2;

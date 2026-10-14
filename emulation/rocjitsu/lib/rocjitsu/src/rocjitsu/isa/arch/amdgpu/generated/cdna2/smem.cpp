@@ -1353,7 +1353,8 @@ SBufferAtomicSwapX2Smem::SBufferAtomicSwapX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1384,7 +1385,8 @@ SBufferAtomicCmpswapX2Smem::SBufferAtomicCmpswapX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata_return;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1414,7 +1416,8 @@ SBufferAtomicAddX2Smem::SBufferAtomicAddX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1444,7 +1447,8 @@ SBufferAtomicSubX2Smem::SBufferAtomicSubX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1474,7 +1478,8 @@ SBufferAtomicSminX2Smem::SBufferAtomicSminX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1504,7 +1509,8 @@ SBufferAtomicUminX2Smem::SBufferAtomicUminX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1534,7 +1540,8 @@ SBufferAtomicSmaxX2Smem::SBufferAtomicSmaxX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1564,7 +1571,8 @@ SBufferAtomicUmaxX2Smem::SBufferAtomicUmaxX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1594,7 +1602,8 @@ SBufferAtomicAndX2Smem::SBufferAtomicAndX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1624,7 +1633,8 @@ SBufferAtomicOrX2Smem::SBufferAtomicOrX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1654,7 +1664,8 @@ SBufferAtomicXorX2Smem::SBufferAtomicXorX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1684,7 +1695,8 @@ SBufferAtomicIncX2Smem::SBufferAtomicIncX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -1714,7 +1726,8 @@ SBufferAtomicDecX2Smem::SBufferAtomicDecX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2128,7 +2141,8 @@ SAtomicSwapX2Smem::SAtomicSwapX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2159,7 +2173,8 @@ SAtomicCmpswapX2Smem::SAtomicCmpswapX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata_return;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2189,7 +2204,8 @@ SAtomicAddX2Smem::SAtomicAddX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2219,7 +2235,8 @@ SAtomicSubX2Smem::SAtomicSubX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2249,7 +2266,8 @@ SAtomicSminX2Smem::SAtomicSminX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2279,7 +2297,8 @@ SAtomicUminX2Smem::SAtomicUminX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2309,7 +2328,8 @@ SAtomicSmaxX2Smem::SAtomicSmaxX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2339,7 +2359,8 @@ SAtomicUmaxX2Smem::SAtomicUmaxX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2369,7 +2390,8 @@ SAtomicAndX2Smem::SAtomicAndX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2399,7 +2421,8 @@ SAtomicOrX2Smem::SAtomicOrX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2429,7 +2452,8 @@ SAtomicXorX2Smem::SAtomicXorX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2459,7 +2483,8 @@ SAtomicIncX2Smem::SAtomicIncX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
@@ -2489,7 +2514,8 @@ SAtomicDecX2Smem::SAtomicDecX2Smem(const MachineInst *inst)
   if (inst_.glc)
     dst_operands_[num_dst_++] = &sdata;
   set_memory_issue_info({amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
-                                                         amdgpu::MemoryCompletionClass::UNORDERED}},
+                                                         amdgpu::MemoryCompletionClass::UNORDERED,
+                                                         static_cast<uint8_t>(inst_.glc ? 2 : 1)}},
                         false);
   flags_ |= MEMORY_WAIT_PRODUCER;
 }

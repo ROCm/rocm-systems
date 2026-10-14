@@ -1342,12 +1342,16 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
   switch (route_tag) {
   case SCALAR_MEM: {
     const auto &state = *inst.data_as<ScalarMemState>();
+    // Cache maintenance has a completion obligation but no memory transaction.
+    if (state.discard_lines)
+      return;
     access.route = MemoryRoute::SCALAR;
     access.is_load = state.is_load;
+    access.atomic_op = state.atomic_op;
     access.mtype = state.mtype;
     access.wait_counter = state.wait_counter_type;
     access.element_size_bytes = state.elem_size;
-    access.elements_per_lane = state.num_dwords;
+    access.elements_per_lane = state.atomic_op == AtomicOp::NONE ? state.num_dwords : 1;
     // A scalar access is one address, so it is a one-lane wavefront as far as
     // the memory system is concerned. Saying so lets a consumer treat both
     // routes with the same per-lane arithmetic.
@@ -1954,9 +1958,11 @@ template <bool EnableAsync>
   if (debug_probe) {
     if (inst->data()->tag() == SCALAR_MEM) {
       auto &d = *inst->data_as<ScalarMemState>();
-      dbg_is_write = !d.is_load;
-      dbg_bytes = std::max(1u, d.num_dwords * d.elem_size);
-      dbg_addrs.push_back(d.addr);
+      dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
+      dbg_is_write = !d.is_load || dbg_is_atomic;
+      dbg_bytes = d.access_size();
+      if (dbg_bytes)
+        dbg_addrs.push_back(d.addr);
     } else {
       auto &d = *inst->data_as<VectorMemState>();
       dbg_is_atomic = (d.atomic_op != AtomicOp::NONE);

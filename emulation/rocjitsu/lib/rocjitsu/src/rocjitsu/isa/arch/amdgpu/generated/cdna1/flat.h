@@ -28,6 +28,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadSbyteFlat : public Flat {
@@ -44,6 +45,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadUshortFlat : public Flat {
@@ -60,6 +62,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadSshortFlat : public Flat {
@@ -76,6 +79,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadDwordFlat : public Flat {
@@ -92,6 +96,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadDwordx2Flat : public Flat {
@@ -108,6 +113,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadDwordx3Flat : public Flat {
@@ -124,6 +130,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadDwordx4Flat : public Flat {
@@ -140,6 +147,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatStoreByteFlat : public Flat {
@@ -286,6 +294,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadUbyteD16HiFlat : public Flat {
@@ -304,6 +313,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadSbyteD16Flat : public Flat {
@@ -322,6 +332,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadSbyteD16HiFlat : public Flat {
@@ -340,6 +351,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadShortD16Flat : public Flat {
@@ -358,6 +370,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatLoadShortD16HiFlat : public Flat {
@@ -376,6 +389,7 @@ public:
   Operand gpumem;
   Operand m0;
   Operand saddr;
+  Operand lds_m0;
 };
 
 class FlatAtomicSwapFlat : public Flat {

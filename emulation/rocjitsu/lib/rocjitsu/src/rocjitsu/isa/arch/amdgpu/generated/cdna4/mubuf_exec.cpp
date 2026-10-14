@@ -45,6 +45,10 @@ void BufferLoadFormatXMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -65,6 +69,10 @@ void BufferLoadFormatXyMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 8, 8);
+  }
   set_data(std::move(d));
 }
 
@@ -85,6 +93,11 @@ void BufferLoadFormatXyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 12,
+                                    16);
+  }
   set_data(std::move(d));
 }
 
@@ -105,6 +118,11 @@ void BufferLoadFormatXyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 16,
+                                    16);
+  }
   set_data(std::move(d));
 }
 
@@ -203,6 +221,10 @@ void BufferLoadFormatD16XMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -225,6 +247,10 @@ void BufferLoadFormatD16XyMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 
@@ -247,6 +273,10 @@ void BufferLoadFormatD16XyzMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 8, 8);
+  }
   set_data(std::move(d));
 }
 
@@ -269,6 +299,10 @@ void BufferLoadFormatD16XyzwMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 8, 8);
+  }
   set_data(std::move(d));
 }
 
@@ -997,6 +1031,10 @@ void BufferLoadFormatD16HiXMubuf::execute_impl(amdgpu::Wavefront &wf) {
   }
   if (prepared.value())
     mubuf_calculate_addresses(inst_, wf, *d);
+  if (d->lds_dst) {
+    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),
+                                    static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset, 4, 4);
+  }
   set_data(std::move(d));
 }
 

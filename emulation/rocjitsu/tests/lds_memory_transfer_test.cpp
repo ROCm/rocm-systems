@@ -84,6 +84,8 @@ protected:
 };
 
 TEST_P(LdsMemoryTransfer, GlobalAndScratchExtendNarrowLoadsAndRespectExec) {
+  if (GetParam() < ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP() << "Dedicated LDS opcodes start at CDNA3";
   constexpr std::array<uint32_t, 5> expected{0x81, 0xffffff81, 0x8081, 0xffff8081, 0x76548081};
   for (unsigned segment : {1u, 2u})
     for (int offset : {-8, 0, 12})
@@ -119,6 +121,8 @@ TEST_P(LdsMemoryTransfer, GlobalAndScratchExtendNarrowLoadsAndRespectExec) {
 }
 
 TEST_P(LdsMemoryTransfer, WideGlobalLoadsLeaveFourthDwordUntouchedForX3) {
+  if (GetParam() < ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP() << "Dedicated LDS opcodes start at CDNA3";
   if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
     GTEST_SKIP() << "Wide global-to-LDS forms start with CDNA4";
   for (unsigned words : {3u, 4u}) {
@@ -143,6 +147,8 @@ TEST_P(LdsMemoryTransfer, WideGlobalLoadsLeaveFourthDwordUntouchedForX3) {
 }
 
 TEST_P(LdsMemoryTransfer, AllocationBoundsDropWholeLanesAndInvalidSegmentsReject) {
+  if (GetParam() < ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP() << "Dedicated LDS opcodes start at CDNA3";
   clear_lds();
   wave_->set_exec(7);
   wave_->set_lds_size(72);
@@ -199,7 +205,68 @@ TEST_P(LdsMemoryTransfer, BufferNarrowAndX3TransfersUseDwordLaneLayout) {
   }
 }
 
+TEST_P(LdsMemoryTransfer, RawAndFormatBufferLoadsShareM0WidthAndAllocationBounds) {
+  for (auto opcode : {cdna4::kBufferLoadDwordMubuf, cdna4::kBufferLoadFormatXMubuf})
+    for (uint32_t m0 : {0x10040u, 0xfffc0042u}) {
+      SCOPED_TRACE(testing::Message() << "opcode=" << opcode << " m0=" << m0);
+      clear_lds();
+      wave_->set_exec(7);
+      wave_->set_m0(m0);
+      wave_->set_lds_size(74);
+      scalar(0, 0x4000);
+      scalar(1, 0);
+      scalar(2, 4096);
+      scalar(3, 4 | (7 << 12) | (4 << 15)); // FLOAT32, select X.
+      for (unsigned lane = 0; lane < 3; ++lane) {
+        vector(2, lane, lane * 4);
+        vector(8, lane, 0x11111111);
+        memory_.write32(0x4000 + lane * 4, 0x3f800000 + lane);
+      }
+      auto words = cdna4::build_mubuf(
+          opcode, {.offen = 1, .lds = 1, .vaddr = 2, .vdata = 8, .srsrc = 0, .soffset = 128});
+      ASSERT_NO_FATAL_FAILURE(issue(words));
+      const unsigned offset = m0 & (GetParam() == ROCJITSU_CODE_ARCH_CDNA4 ? 0x3ffff : 0xffff);
+      for (unsigned lane = 0; lane < 3; ++lane) {
+        if (offset < 4096) {
+          EXPECT_EQ(wave_->lds().read32(128 + offset + lane * 4),
+                    offset + lane * 4 + 4 <= 74 ? 0x3f800000u + lane : 0xccccccccu);
+        }
+        EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 8, lane), 0x11111111u);
+      }
+      if (offset >= 4096) {
+        EXPECT_EQ(wave_->lds().read32(128 + 64), 0xccccccccu);
+      }
+    }
+}
+
+TEST_P(LdsMemoryTransfer, OlderFlatLdsBitRedirectsGlobalAndScratchLoads) {
+  if (GetParam() >= ROCJITSU_CODE_ARCH_CDNA3)
+    GTEST_SKIP() << "LDS bit forms are CDNA1/2";
+  for (unsigned segment : {1u, 2u}) {
+    clear_lds();
+    wave_->set_exec(3);
+    wave_->set_m0(0xfffc0043); // Global/Scratch ignore the low two M0 bits.
+    scalar(0, segment == 1 ? 8 : 0x4000);
+    scalar(1, 0);
+    for (unsigned lane = 0; lane < 2; ++lane) {
+      vector(2, lane, lane * 4);
+      vector(8, lane, 0x11111111);
+      const uint64_t address =
+          segment == 1 ? 0x8000 + (8 + lane * 4 + 4) / 4 * 256 + lane * 4 : 0x4000 + lane * 4 + 4;
+      memory_.write32(address, 0x55667788 + lane);
+    }
+    auto words = flat(20, segment, 4); // Pre-gfx940 GLOBAL/SCRATCH_LOAD_DWORD.
+    words[0] |= 1u << 13;
+    ASSERT_NO_FATAL_FAILURE(issue(words));
+    for (unsigned lane = 0; lane < 2; ++lane) {
+      EXPECT_EQ(wave_->lds().read32(128 + 64 + 4 + lane * 4), 0x55667788u + lane);
+      EXPECT_EQ(cu_->read_vgpr(wave_->vgpr_alloc().base + 8, lane), 0x11111111u);
+    }
+  }
+}
+
 INSTANTIATE_TEST_SUITE_P(Cdna, LdsMemoryTransfer,
-                         testing::Values(ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
+                         testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
+                                         ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4));
 } // namespace
 } // namespace rocjitsu

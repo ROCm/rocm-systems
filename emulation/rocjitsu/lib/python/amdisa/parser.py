@@ -338,6 +338,7 @@ class Parser:
         self.addition_xmls = tuple(addition_xmls)
         self._addition_by_id = {}
         self._unique_flat_segment_opcodes: dict[str, set[int]] = {}
+        self._scratch_segment_forms: set[tuple[int, str]] = set()
 
         self.encodings_node = xs.get_node(isa_node, xs.ENCODINGS)
         self.insts_node = xs.get_node(isa_node, xs.INSTS)

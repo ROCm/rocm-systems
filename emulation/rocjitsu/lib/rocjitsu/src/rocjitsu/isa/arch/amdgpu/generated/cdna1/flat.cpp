@@ -18,15 +18,20 @@ FlatLoadUbyteFlat::FlatLoadUbyteFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(8, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -68,15 +73,20 @@ FlatLoadSbyteFlat::FlatLoadSbyteFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(8, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -118,15 +128,20 @@ FlatLoadUshortFlat::FlatLoadUshortFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(16, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -168,15 +183,20 @@ FlatLoadSshortFlat::FlatLoadSshortFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(16, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -218,15 +238,20 @@ FlatLoadDwordFlat::FlatLoadDwordFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(32, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -268,15 +293,20 @@ FlatLoadDwordx2Flat::FlatLoadDwordx2Flat(const MachineInst *inst)
       vdst(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(64, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -318,15 +348,20 @@ FlatLoadDwordx3Flat::FlatLoadDwordx3Flat(const MachineInst *inst)
       vdst(96, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(96, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -368,15 +403,20 @@ FlatLoadDwordx4Flat::FlatLoadDwordx4Flat(const MachineInst *inst)
       vdst(128, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(128, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -838,15 +878,20 @@ FlatLoadUbyteD16Flat::FlatLoadUbyteD16Flat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(8, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -895,15 +940,20 @@ FlatLoadUbyteD16HiFlat::FlatLoadUbyteD16HiFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(8, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -952,15 +1002,20 @@ FlatLoadSbyteD16Flat::FlatLoadSbyteD16Flat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(8, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1009,15 +1064,20 @@ FlatLoadSbyteD16HiFlat::FlatLoadSbyteD16HiFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(8, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1066,15 +1126,20 @@ FlatLoadShortD16Flat::FlatLoadShortD16Flat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(16, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {
@@ -1123,15 +1188,20 @@ FlatLoadShortD16HiFlat::FlatLoadShortD16HiFlat(const MachineInst *inst)
       vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
       addr(64, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->addr),
       flat_scratch(64, OperandType::OPR_FLAT_SCRATCH, 0), gpumem(16, OperandType::OPR_GPUMEM, 0),
-      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0) {
-  dst_operands_[0] = &vdst;
+      m0(32, OperandType::OPR_SDST_M0, 124), saddr(0, OperandType::OPR_SREG, 0),
+      lds_m0(32, OperandType::OPR_SDST_M0, 124) {
   src_operands_[0] = &addr;
   src_operands_[1] = &gpumem;
   src_operands_[2] = &m0;
   num_src_ = 3;
-  num_dst_ = 1;
+  num_dst_ = 0;
   if (inst_.seg != 2)
     src_operands_[num_src_++] = &flat_scratch;
+  lds_m0.apply_fieldless_caps(false, false, false);
+  if (inst_.lds)
+    src_operands_[num_src_++] = &lds_m0;
+  if (!inst_.lds)
+    dst_operands_[num_dst_++] = &vdst;
   if (inst_.seg == 1) {
     addr = Operand(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(&inst_)->addr);
     if (inst_.saddr != 0x7F) {

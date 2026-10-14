@@ -283,8 +283,7 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   });
 
   if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
-    // GFX9/CDNA: out-of-range lanes return zeros, and those zeros are written to LDS.
-    const uint64_t write_mask = arch_is_cdna_4_or_lower(cu.arch()) ? d.exec_mask : d.lane_mask;
+    const uint64_t write_mask = lds_destination_write_mask(d, cu.arch());
     write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes, write_mask);
     return MemoryAccessCompletion::Complete;
   }

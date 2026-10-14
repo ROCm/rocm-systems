@@ -503,7 +503,6 @@ void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -515,6 +514,7 @@ void SBufferAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -524,7 +524,6 @@ void SBufferAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -536,6 +535,7 @@ void SBufferAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -545,7 +545,6 @@ void SBufferAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -557,6 +556,7 @@ void SBufferAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -566,7 +566,6 @@ void SBufferAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -578,6 +577,7 @@ void SBufferAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -587,7 +587,6 @@ void SBufferAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -599,6 +598,7 @@ void SBufferAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -608,7 +608,6 @@ void SBufferAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -620,6 +619,7 @@ void SBufferAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -629,7 +629,6 @@ void SBufferAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -641,6 +640,7 @@ void SBufferAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -650,7 +650,6 @@ void SBufferAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -662,6 +661,7 @@ void SBufferAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -671,7 +671,6 @@ void SBufferAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -683,6 +682,7 @@ void SBufferAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -692,7 +692,6 @@ void SBufferAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -704,6 +703,7 @@ void SBufferAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -713,7 +713,6 @@ void SBufferAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -725,6 +724,7 @@ void SBufferAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -734,7 +734,6 @@ void SBufferAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -746,6 +745,7 @@ void SBufferAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -755,7 +755,6 @@ void SBufferAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -767,6 +766,7 @@ void SBufferAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -776,7 +776,6 @@ void SBufferAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -788,6 +787,7 @@ void SBufferAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -797,7 +797,6 @@ void SBufferAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
   if (!source)
     return;
@@ -809,6 +808,7 @@ void SBufferAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -818,7 +818,6 @@ void SBufferAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -830,6 +829,7 @@ void SBufferAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -839,7 +839,6 @@ void SBufferAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -851,6 +850,7 @@ void SBufferAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -860,7 +860,6 @@ void SBufferAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -872,6 +871,7 @@ void SBufferAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -881,7 +881,6 @@ void SBufferAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -893,6 +892,7 @@ void SBufferAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -902,7 +902,6 @@ void SBufferAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -914,6 +913,7 @@ void SBufferAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -923,7 +923,6 @@ void SBufferAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -935,6 +934,7 @@ void SBufferAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -944,7 +944,6 @@ void SBufferAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -956,6 +955,7 @@ void SBufferAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -965,7 +965,6 @@ void SBufferAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -977,6 +976,7 @@ void SBufferAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -986,7 +986,6 @@ void SBufferAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -998,6 +997,7 @@ void SBufferAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1007,7 +1007,6 @@ void SBufferAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1019,6 +1018,7 @@ void SBufferAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1028,7 +1028,6 @@ void SBufferAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1040,6 +1039,7 @@ void SBufferAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1049,7 +1049,6 @@ void SAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1061,6 +1060,7 @@ void SAtomicSwapSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1070,7 +1070,6 @@ void SAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1082,6 +1081,7 @@ void SAtomicCmpswapSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1091,7 +1091,6 @@ void SAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1103,6 +1102,7 @@ void SAtomicAddSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1112,7 +1112,6 @@ void SAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1124,6 +1123,7 @@ void SAtomicSubSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1133,7 +1133,6 @@ void SAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1145,6 +1144,7 @@ void SAtomicSminSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1154,7 +1154,6 @@ void SAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1166,6 +1165,7 @@ void SAtomicUminSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1175,7 +1175,6 @@ void SAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1187,6 +1186,7 @@ void SAtomicSmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1196,7 +1196,6 @@ void SAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1208,6 +1207,7 @@ void SAtomicUmaxSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1217,7 +1217,6 @@ void SAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1229,6 +1228,7 @@ void SAtomicAndSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1238,7 +1238,6 @@ void SAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1250,6 +1249,7 @@ void SAtomicOrSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1259,7 +1259,6 @@ void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1271,6 +1270,7 @@ void SAtomicXorSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1280,7 +1280,6 @@ void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1292,6 +1291,7 @@ void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1301,7 +1301,6 @@ void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 4;
   d->num_dwords = 1;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
   if (!source)
     return;
@@ -1313,6 +1312,7 @@ void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1322,7 +1322,6 @@ void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1334,6 +1333,7 @@ void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1343,7 +1343,6 @@ void SAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 4u);
   if (!source)
     return;
@@ -1355,6 +1354,7 @@ void SAtomicCmpswapX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1364,7 +1364,6 @@ void SAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1376,6 +1375,7 @@ void SAtomicAddX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1385,7 +1385,6 @@ void SAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1397,6 +1396,7 @@ void SAtomicSubX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1406,7 +1406,6 @@ void SAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1418,6 +1417,7 @@ void SAtomicSminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1427,7 +1427,6 @@ void SAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1439,6 +1438,7 @@ void SAtomicUminX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1448,7 +1448,6 @@ void SAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1460,6 +1459,7 @@ void SAtomicSmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1469,7 +1469,6 @@ void SAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1481,6 +1480,7 @@ void SAtomicUmaxX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1490,7 +1490,6 @@ void SAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1502,6 +1501,7 @@ void SAtomicAndX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1511,7 +1511,6 @@ void SAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1523,6 +1522,7 @@ void SAtomicOrX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1532,7 +1532,6 @@ void SAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1544,6 +1543,7 @@ void SAtomicXorX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1553,7 +1553,6 @@ void SAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1565,6 +1564,7 @@ void SAtomicIncX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 
@@ -1574,7 +1574,6 @@ void SAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   d->elem_size = 8;
   d->num_dwords = 2;
   d->is_load = inst_.glc;
-  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 2u);
   if (!source)
     return;
@@ -1586,6 +1585,7 @@ void SAtomicDecX2Smem::execute_impl(amdgpu::Wavefront &wf) {
   if (!address)
     return;
   d->addr = *address;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
   set_data(std::move(d));
 }
 

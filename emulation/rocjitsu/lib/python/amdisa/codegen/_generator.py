@@ -7682,18 +7682,7 @@ class CodeGenerator:
             return self._gen_smem_atomic(sem)
 
         if cls == 'smem_discard':
-            return '\n'.join(
-                [
-                    '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
-                    '  d->is_load = false;',
-                    f'  d->discard_lines = {sem.num_elems};',
-                    f'  d->wait_counter_type = {self._wait_counter_type("smem_discard")};',
-                    '  auto address = smem_calculate_address(inst_, wf);',
-                    '  if (!address) return;',
-                    '  d->addr = *address & ~uint64_t{63};',
-                    '  set_data(std::move(d));',
-                ]
-            )
+            return self._gen_smem_discard(sem)
 
         if cls == 'flat_load_lds':
             return self._gen_flat_load_lds(sem)
@@ -8021,28 +8010,42 @@ class CodeGenerator:
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
+    def _gen_smem_discard(self, sem: InstructionSemantics) -> str:
+        lines = [
+            '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+            '  d->is_load = false;',
+            f'  d->discard_lines = {sem.num_elems};',
+        ]
+        self._append_wait_counter_type(lines, sem, 'smem_discard')
+        lines += [
+            '  auto address = smem_calculate_address(inst_, wf);',
+            '  if (!address) return;',
+            '  d->addr = *address & ~uint64_t{63};',
+            '  set_data(std::move(d));',
+        ]
+        return '\n'.join(lines)
+
     def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
         width = sem.elem_size // 4
-        return '\n'.join(
-            [
-                '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
-                f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
-                f'  d->elem_size = {sem.elem_size};',
-                f'  d->num_dwords = {width};',
-                '  d->is_load = inst_.glc;',
-                f'  d->wait_counter_type = {self._wait_counter_type("smem_atomic")};',
-                f'  auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {sem.num_elems}u);',
-                '  if (!source) return;',
-                f'  for (uint32_t i = 0; i < {sem.num_elems}; ++i)',
-                '    d->store_data[i] = amdgpu::read_scalar_register(wf, *source, i);',
-                '  d->dst_register = *source;',
-                f'  d->dst_register.width = {width};',
-                '  auto address = smem_calculate_address(inst_, wf, d.get());',
-                '  if (!address) return;',
-                '  d->addr = *address;',
-                '  set_data(std::move(d));',
-            ]
-        )
+        lines = [
+            '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+            f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
+            f'  d->elem_size = {sem.elem_size};',
+            f'  d->num_dwords = {width};',
+            '  d->is_load = inst_.glc;',
+            f'  auto source = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {sem.num_elems}u);',
+            '  if (!source) return;',
+            f'  for (uint32_t i = 0; i < {sem.num_elems}; ++i)',
+            '    d->store_data[i] = amdgpu::read_scalar_register(wf, *source, i);',
+            '  d->dst_register = *source;',
+            f'  d->dst_register.width = {width};',
+            '  auto address = smem_calculate_address(inst_, wf, d.get());',
+            '  if (!address) return;',
+            '  d->addr = *address;',
+        ]
+        self._append_wait_counter_type(lines, sem, 'smem_atomic')
+        lines.append('  set_data(std::move(d));')
+        return '\n'.join(lines)
 
     def _vop3p_opsel_exprs(self) -> tuple[str, str]:
         """Return ``(op_sel_expr, op_sel_hi_expr)`` for VOP3P execute() bodies."""
@@ -8273,7 +8276,7 @@ class CodeGenerator:
 
     @staticmethod
     def _memory_counter_obligation(
-        counter: str, completion: str, counter_increment: int = 1
+        counter: str, completion: str, counter_increment: int | str = 1
     ) -> str:
         fields = [counter, completion]
         if counter_increment != 1:
@@ -8282,8 +8285,10 @@ class CodeGenerator:
 
     def _memory_issue_counter_increment(
         self, sem: InstructionSemantics, sem_class: str
-    ) -> int:
+    ) -> int | str:
         """Return the number of counter tokens contributed by one issue."""
+        if sem_class == 'smem_atomic' and (getattr(sem, 'elem_size', None) or 4) > 4:
+            return 'static_cast<uint8_t>(inst_.glc ? 2 : 1)'
         if (
             sem_class in ('smem_load', 'smem_discard')
             and (getattr(sem, 'num_elems', None) or 1) > 1
@@ -8492,6 +8497,15 @@ class CodeGenerator:
         self, dst: list[str], src: list[str], sem: InstructionSemantics
     ) -> str:
         L = []
+        if self.isa_spec.arch_name in ('cdna1', 'cdna2'):
+            L.extend(
+                [
+                    '  if (inst_.lds && inst_.seg != 0) {',
+                    self._gen_flat_load_lds(sem),
+                    '    return;',
+                    '  }',
+                ]
+            )
         esz, ne = sem.elem_size, sem.num_elems
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
@@ -9204,12 +9218,34 @@ class CodeGenerator:
             ]
         )
         L.append(f'    {addr_fn}(inst_, wf, *d);')
+        if (
+            is_load
+            and encoding
+            and any(f.name == 'lds' for f in encoding.ucode_fields)
+            and self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+        ):
+            L.append('  if (d->lds_dst) {')
+            registers = (
+                (sem.num_elems + 1) // 2 if sem.elem_size == 2 else sem.num_elems
+            )
+            self._append_buffer_lds_destination(L, registers)
+            L.append('  }')
         if not is_load:
             L.append(
                 f"  amdgpu::capture_buffer_format_store(wf, *d, {self._vgpr_base_expr('vdata')});"
             )
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
+
+    def _append_buffer_lds_destination(self, lines: list[str], registers: int) -> None:
+        # Buffer ISA 9.1.9 uses a byte offset: 16 bits on CDNA1-3, 18 on CDNA4.
+        # Global/Scratch ISA 10.3 instead uses M0[17:2] * 4.
+        mask = '0x3ffffu' if self.isa_spec.arch_name == 'cdna4' else '0xffffu'
+        lines.append(
+            '    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
+            f' static_cast<int64_t>(wf.m0() & {mask}) + inst_.offset,'
+            f' {registers * 4}, {16 if registers >= 3 else registers * 4});'
+        )
 
     def _gen_buffer_load(
         self,
@@ -9256,11 +9292,7 @@ class CodeGenerator:
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
             if self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
-                L.append(
-                    '    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
-                    ' static_cast<int64_t>(wf.m0() & 0x3ffffu) + inst_.offset,'
-                    f' {ne * 4}, {16 if ne >= 3 else ne * 4});'
-                )
+                self._append_buffer_lds_destination(L, ne)
             L.append('    set_data(std::move(d));')
             L.append('    return;')
             L.append('  }')
@@ -10425,7 +10457,13 @@ class CodeGenerator:
                     buffer_lds_load = bool(
                         inst_sem
                         and 'load' in inst_sem.semantic_class
-                        and inst_sem.semantic_class.startswith(('buffer_', 'tbuffer_'))
+                        and (
+                            inst_sem.semantic_class.startswith(('buffer_', 'tbuffer_'))
+                            or (
+                                inst_sem.semantic_class == 'flat_load'
+                                and self.isa_spec.arch_name in ('cdna1', 'cdna2')
+                            )
+                        )
                         and 'lds' in inst_field_names
                     )
                     readwrite_output_sources = []
@@ -10674,10 +10712,12 @@ class CodeGenerator:
                                 f'dst_operands_[num_dst_++] = &{atomic_return_operand};'
                             )
                         elif (
-                            buffer_lds_load and opnd.is_output and opnd.name == 'vdata'
+                            buffer_lds_load
+                            and opnd.is_output
+                            and opnd.name in ('vdata', 'vdst')
                         ):
                             conditional_dst_body.append(
-                                'if (!inst_.lds) dst_operands_[num_dst_++] = &vdata;'
+                                f'if (!inst_.lds) dst_operands_[num_dst_++] = &{opnd.name};'
                             )
                         elif opnd.is_output:
                             opnd_body.append(

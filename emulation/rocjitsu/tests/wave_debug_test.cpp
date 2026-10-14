@@ -814,6 +814,61 @@ TEST(WaveDebugTest, ScalarLoadStraddlingIntoUnmappedPageReportsMemoryViolation) 
   fx.gpu_mem.unregister_process(kProcessId);
 }
 
+TEST(WaveDebugTest, ScalarAtomicAtPageEndAndDiscardDoNotProbeExtraBytes) {
+  WaveDebugFixture fx;
+  constexpr uint32_t kProcessId = 9;
+  constexpr uint64_t kPageSize = amdgpu::GpuMemory::PAGE_SIZE;
+  constexpr uint64_t kDataAddr = 0x40000;
+
+  std::vector<uint8_t> kernel_page(kPageSize);
+  std::vector<uint8_t> data_page(kPageSize);
+  KfdProcess::PageTable page_table;
+  util::DistributedSharedMutex page_table_mutex;
+  page_table[kKernelAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {kernel_page.data(),
+                                                              amdgpu::Mtype::RW};
+  page_table[kDataAddr >> amdgpu::GpuMemory::PAGE_SHIFT] = {data_page.data(), amdgpu::Mtype::RW};
+  fx.gpu_mem.register_process(kProcessId, &page_table, &page_table_mutex);
+
+  fx.gpu_mem.write32(kKernelAddr, 0xC28B0200u, kProcessId); // s_atomic_add_x2 s[8:9], s[0:1], 0 glc
+  fx.gpu_mem.write32(kKernelAddr + 4, 0, kProcessId);       // immediate offset 0
+  fx.gpu_mem.write32(kKernelAddr + 8, 0xBF800000u, kProcessId); // s_nop 0
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_process_id(kProcessId);
+  fx.cu->set_debug_active(true);
+
+  fx.l2.set_backing_memory(&fx.gpu_mem);
+
+  const uint64_t straddle = kDataAddr + kPageSize - 8;
+  ASSERT_TRUE(fx.gpu_mem.is_mapped(straddle, kProcessId));
+  ASSERT_FALSE(fx.gpu_mem.is_mapped(straddle + 8, kProcessId));
+  const uint32_t sbase = wave->sgpr_alloc().base;
+  fx.cu->write_sgpr(sbase + 0, static_cast<uint32_t>(straddle));
+  fx.cu->write_sgpr(sbase + 1, static_cast<uint32_t>(straddle >> 32));
+
+  uint64_t fault_address = ~uint64_t{0};
+  fx.cu->set_memory_violation_handler(
+      [&](amdgpu::Wavefront &faulting_wave, uint64_t address, bool is_write) {
+        EXPECT_EQ(&faulting_wave, wave);
+        EXPECT_TRUE(is_write);
+        fault_address = address;
+        faulting_wave.debug_trap(0);
+        return true;
+      });
+
+  fx.cu->step();
+  EXPECT_EQ(fault_address, ~uint64_t{0});
+  EXPECT_FALSE(wave->debug_halted());
+  fx.gpu_mem.write32(kKernelAddr + 8, 0xC0A20000u, kProcessId);
+  fx.gpu_mem.write32(kKernelAddr + 12, 0, kProcessId);
+  fx.cu->write_sgpr(sbase, 0x60000);
+  fx.cu->step();
+  EXPECT_EQ(fault_address, ~uint64_t{0});
+  EXPECT_FALSE(wave->debug_halted());
+
+  fx.gpu_mem.unregister_process(kProcessId);
+}
+
 // Linked gfx950 code forms helper addresses as GETPC plus a signed rel32
 // relocation. The 64-bit sum can have a 0x1ffff high dword even though it
 // denotes an address relative to the loaded code object. SWAPPC must relocate

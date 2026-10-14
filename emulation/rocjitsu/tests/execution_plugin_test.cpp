@@ -8514,6 +8514,53 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
 
   EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
 }
+TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
+  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginSinkConfig sink_config;
+  StringSink &sink = sink_config.emplace<StringSink>();
+  f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
+  ASSERT_TRUE(f.plugin_group_->add(std::make_unique<RaceDetectorPlugin>()));
+  f.soc->set_plugin_group(f.plugin_group_);
+  f.plugin_group_->onInit();
+
+  auto *cu = f.cu();
+  auto *writer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  auto *reader = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, /*sgprs=*/104, /*vgprs=*/256);
+  ASSERT_NE(writer, nullptr);
+  ASSERT_NE(reader, nullptr);
+  writer->set_exec(0x1u);
+  reader->set_exec(0x1u);
+  std::array<amdgpu::Wavefront *, 2> waves{writer, reader};
+  f.plugin_group_->onAmdgpuWorkgroupDispatched(/*dispatch_id=*/1, /*wg_id=*/0,
+                                               /*physical_vgpr_count=*/512, /*sgpr_count=*/208,
+                                               waves);
+
+  auto dropped = std::make_unique<VectorMemState>(GLOBAL_MEM);
+  dropped->elem_size = 4;
+  dropped->num_elems = 1;
+  dropped->is_load = true;
+  dropped->lds_dst = true;
+  dropped->lds_per_lane_addr = true;
+  dropped->wf_size = writer->wf_size();
+  dropped->exec_mask = 0x1u;
+  dropped->lane_mask = 0;
+  dropped->per_lane_lds_addr[0] = 0;
+  TestMemoryInstruction dropped_inst(std::move(dropped));
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, dropped_inst, *writer);
+
+  auto read = std::make_unique<VectorMemState>(LOCAL_MEM);
+  read->elem_size = 4;
+  read->num_elems = 1;
+  read->is_load = true;
+  read->wf_size = reader->wf_size();
+  read->lane_mask = 0x1u;
+  read->per_lane_addr[0] = 0;
+  read->dst_reg_base = reader->vgpr_alloc().base;
+  TestMemoryInstruction read_inst(std::move(read));
+  f.plugin_group_->onAmdgpuMemoryAccessRouted({}, read_inst, *reader);
+
+  EXPECT_EQ(sink.str().find("RACE "), std::string::npos);
+}
 
 class IgnoredGlobalMemoryRaceTest : public ::testing::TestWithParam<AtomicOp> {};
 
@@ -8655,6 +8702,45 @@ TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
 }
 
 // Routed memory observation.
+
+TEST(RoutedMemoryObservationTest, ScalarAtomicsReportRmwWidthAndDiscardIsNotATransaction) {
+  for (bool wide : {false, true})
+    for (bool returning : {false, true}) {
+      PluginFixture fixture;
+      auto *plugin = fixture.attach_memory_observation_plugin();
+      auto *cu = fixture.cu();
+      auto *wave = cu->dispatch_wf(0, 0, 104, 256);
+      ASSERT_NE(wave, nullptr);
+      wave->set_exec(0);
+      auto sb = wave->sgpr_alloc().base;
+      cu->write_sgpr(sb, 0x4000);
+      cu->write_sgpr(sb + 1, 0);
+      cu->write_sgpr(sb + 8, 1);
+      cu->write_sgpr(sb + 9, 0);
+      auto decoder = Decoder::create(cu->arch());
+      auto words = cdna4::build_smem(wide ? cdna4::kSAtomicAddX2Smem : cdna4::kSAtomicAddSmem,
+                                     {.sbase = 0, .sdata = 8, .glc = uint8_t(returning), .imm = 1});
+      std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      const auto obligations = inst->amdgpu_memory_issue_info()->counter_obligations();
+      ASSERT_EQ(obligations.size(), 1u);
+      EXPECT_EQ(obligations[0].counter_increment(), wide && returning ? 2 : 1);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *wave);
+      ASSERT_EQ(plugin->accesses.size(), 1u);
+      const auto &access = plugin->accesses.front();
+      EXPECT_EQ(access.atomic_op, AtomicOp::ADD);
+      EXPECT_EQ(access.is_load, returning);
+      EXPECT_EQ(access.bytes_per_lane, wide ? 8 : 4);
+      EXPECT_EQ(access.request_lane_mask, 1u);
+      words = cdna4::build_smem(cdna4::kSDcacheDiscardSmem, {.sbase = 0, .imm = 1});
+      inst.reset(decode_valid(*decoder, words.data()));
+      ASSERT_NE(inst, nullptr);
+      ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+      test::ComputeUnitTestAccess::route_memory_inst(*cu, inst.release(), *wave);
+      EXPECT_EQ(plugin->accesses.size(), 1u);
+    }
+}
 
 TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
   PluginFixture fixture;
