@@ -17,6 +17,8 @@ class VectorMemState;
 
 enum class BufferFormatEncoding : uint8_t { Gfx9, Rdna1, Rdna2, Gfx11 };
 
+enum class BufferStoreMissingChannel { Zero, ReplicateFirst };
+
 enum class BufferNumberFormat { Unorm, Snorm, Uscaled, Sscaled, Uint, Sint, Float };
 
 /// Decoded once at instruction setup and retained through memory completion.
@@ -32,9 +34,11 @@ buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding = BufferForma
 util::FailureOr<std::array<uint32_t, 4>>
 unpack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint8_t> bytes,
                      BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
-util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
-                                std::span<const uint32_t> components, std::span<uint8_t> bytes,
-                                BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
+util::Result
+pack_buffer_format(uint32_t format, uint32_t selectors, std::span<const uint32_t> components,
+                   std::span<uint8_t> bytes,
+                   BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11,
+                   BufferStoreMissingChannel missing = BufferStoreMissingChannel::Zero);
 
 /// Snapshot the descriptor before issuing the memory request. A negative format
 /// selects the resource's FORMAT/DST_SEL fields; MTBUF supplies its own format.

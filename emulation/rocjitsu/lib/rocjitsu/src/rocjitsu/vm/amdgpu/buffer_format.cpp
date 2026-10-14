@@ -225,7 +225,7 @@ std::array<uint32_t, 4> unpack_format(const Format &f, uint32_t selectors,
 }
 
 void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> components,
-                 std::span<uint8_t> bytes) {
+                 std::span<uint8_t> bytes, BufferStoreMissingChannel missing) {
   std::fill(bytes.begin(), bytes.end(), 0);
   uint32_t offset = 0;
   for (uint32_t i = 0; i < 4; ++i) {
@@ -233,11 +233,14 @@ void pack_format(const Format &f, uint32_t selectors, std::span<const uint32_t> 
     if (!width)
       continue;
     // Stores invert the descriptor's load mapping: an A8 view maps shader
-    // W to physical R, for example. Unprovided shader channels replicate X.
+    // W to physical R. Only RDNA4/CDNA5 replicate X for missing shader values.
     uint32_t component = 0;
     for (uint32_t shader = 0; shader < 4; ++shader) {
       if (((selectors >> (3 * shader)) & 7) == i + 4) {
-        component = components[shader < components.size() ? shader : 0];
+        if (shader < components.size())
+          component = components[shader];
+        else if (missing == BufferStoreMissingChannel::ReplicateFirst && !components.empty())
+          component = components[0];
         break;
       }
     }
@@ -262,12 +265,12 @@ util::FailureOr<std::array<uint32_t, 4>> unpack_buffer_format(uint32_t format, u
 
 util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
                                 std::span<const uint32_t> components, std::span<uint8_t> bytes,
-                                BufferFormatEncoding encoding) {
+                                BufferFormatEncoding encoding, BufferStoreMissingChannel missing) {
   const auto decoded = decode(format, encoding);
   if (decoded.failed())
     return util::Result::failure();
   const fp_mode::detail::ScopedFenv environment(0);
-  pack_format(decoded.value(), selectors, components, bytes);
+  pack_format(decoded.value(), selectors, components, bytes, missing);
   return util::Result::success();
 }
 
@@ -312,6 +315,7 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
 }
 
 void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base) {
+  const auto cu_arch = wf.cu().arch();
   RegisterAccess regs(wf);
   const uint32_t registers = d.buffer_d16 ? (d.buffer_components + 1) / 2 : d.buffer_components;
   auto data = regs.read_vgpr_region(data_base, registers, d.lane_mask);
@@ -336,8 +340,11 @@ void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data
                     : half
               : std::bit_cast<uint32_t>(util::f16_to_f32(half));
     }
+    const auto missing = cu_arch == ROCJITSU_CODE_ARCH_RDNA4 || cu_arch == ROCJITSU_CODE_ARCH_CDNA5
+                             ? BufferStoreMissingChannel::ReplicateFirst
+                             : BufferStoreMissingChannel::Zero;
     pack_format(format, d.buffer_selectors, std::span(components).first(d.buffer_components),
-                std::span(d.store_data).subspan(lane * d.elem_size, d.elem_size));
+                std::span(d.store_data).subspan(lane * d.elem_size, d.elem_size), missing);
   }
 }
 
