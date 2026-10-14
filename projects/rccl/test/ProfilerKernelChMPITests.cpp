@@ -361,6 +361,7 @@ protected:
             EXPECT_EQ(1, r.stopStates) << what << ": KernelCh on channel " << r.channelId
                                        << " got " << r.stopStates << " stop states";
             EXPECT_NE(0u, r.startTimer) << what << ": KernelCh start timer is zero";
+            EXPECT_NE(0u, r.stopTimer) << what << ": KernelCh stop timer is zero";
             if(!slotReuse)
                 EXPECT_GE(r.stopTimer, r.startTimer)
                     << what << ": KernelCh on channel " << r.channelId << " stops before it starts";
@@ -745,6 +746,10 @@ TEST_F(ProfilerKernelChMPITest, MixedEagerAndGraphPostInDeviceOrder)
     ncclComm_t comm = nullptr;
     hipStream_t stream = nullptr;
     KCH_SKIP_IF_NEEDED(createConfiguredCommWithRecorder(&config, &comm, &stream));
+    // NCCL_GRAPH_MIXING_SUPPORT overrides the config, and 0 would run the unsupported mix.
+    KCH_SKIP_IF_NEEDED(mpiCoordinatedSkipReason(comm->config.graphUsageMode != 2,
+                                                "graphUsageMode is not 2 after init; NCCL_GRAPH_MIXING_SUPPORT "
+                                                "in the environment overrides the config"));
 
     // Distinct sizes tell eager collectives and replayed ones apart in the record.
     constexpr size_t kEagerCount = 1 << 12, kGraphCount = 1 << 14;
