@@ -1859,10 +1859,10 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         // Try to use all channels, but one channel per operation.
         if (nChannelsMax == comm->p2pnChannelsPerPeer)
           while (nChannelsMin * nRanks > comm->p2pnChannels && nChannelsMin > 1) nChannelsMin /= 2;
-        // Ensure room for worst case of one new batch per channel. Mixed LL/LL128 rounds
-        // split into two one-sided work items, so reserve twice the P2P work.
-        if (!ncclTestBudget(budget, plan->nWorkBatches + 2 * nChannelsMax,
-                            plan->workBytes + 2 * sizeof(struct ncclDevWorkP2p))) {
+        // Ensure room for worst case of one new batch per channel. A round is always a
+        // single work item, including mixed LL/LL128 rounds.
+        if (!ncclTestBudget(budget, plan->nWorkBatches + nChannelsMax,
+                            plan->workBytes + sizeof(struct ncclDevWorkP2p))) {
           return ncclSuccess;
         }
         NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
