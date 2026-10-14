@@ -222,6 +222,9 @@ for BDF in $(lspci -D -d ${BCM_VENDOR}:${BCM_SWITCH_DEV} | awk '{print $1}'); do
     while [ -n "${CAP_OFFSET}" ] && [ "${CAP_OFFSET}" != "000" ] && [ "${CAP_ITERS}" -lt "${MAX_CAP_ITERS}" ]; do
         CAP_ITERS=$((CAP_ITERS + 1))
         CAP_HDR=$(setpci -s ${BDF} 0x${CAP_OFFSET}.L 2>/dev/null) || break
+        # Validate hex before arithmetic — an empty or malformed value
+        # would fail under set -e and abort the entire discovery run.
+        [[ "${CAP_HDR}" =~ ^[0-9a-fA-F]+$ ]] || break
         CAP_ID=$((16#${CAP_HDR} & 0xFFFF))
         if [ "${CAP_ID}" -eq 3 ]; then
             DSN_CAP_OFFSET="${CAP_OFFSET}"
@@ -336,7 +339,40 @@ fi
 # Populate sysfs if requested
 if [ "${MODE}" = "populate" ]; then
     if [ ${#LINK_PAIRS[@]} -eq 0 ]; then
-        echo "No peer links to create. Nothing to populate."
+        echo "No peer links discovered."
+        # If a previous --populate left a map on disk, it is now stale
+        # (e.g. firmware repartitioned to no peer pairs).  Invalidate it
+        # so RCCL does not keep consuming outdated PXB classifications.
+        if [ -f "${CHANGE_LOG}" ] && grep -q "sysfs_base=${SYSFS_BASE}" "${CHANGE_LOG}" 2>/dev/null; then
+            echo "Clearing previously populated map at ${SYSFS_BASE}"
+            while IFS=' ' read -r _TS _ACT ENTRY_PATH; do
+                [ "${_ACT}" = "CREATE_FILE" ] || continue
+                case "${ENTRY_PATH}" in
+                    "${SYSFS_BASE}/"*) rm -f "${ENTRY_PATH}" ;;
+                esac
+            done < "${CHANGE_LOG}"
+            while IFS=' ' read -r _TS _ACT ENTRY_PATH; do
+                [ "${_ACT}" = "CREATE_DIR" ] || continue
+                case "${ENTRY_PATH}" in
+                    "${SYSFS_BASE}/"*) [ -d "${ENTRY_PATH}" ] && rmdir "${ENTRY_PATH}" 2>/dev/null || true ;;
+                esac
+            done < <(tac "${CHANGE_LOG}")
+            rmdir "${SYSFS_BASE}" 2>/dev/null || true
+            rm -f "${CHANGE_LOG}"
+            logger "rccl_bcm_isl_discover: Zero links discovered — cleared stale ${SYSFS_BASE}"
+        fi
+        # Remove the rccl.conf entry so RCCL does not attempt to read
+        # a now-empty or absent directory.
+        if [ "${UPDATE_CONF}" -eq 1 ] && [ -f "${RCCL_CONF}" ]; then
+            if grep -q '^RCCL_BCM_LINKS_PATH=' "${RCCL_CONF}" 2>/dev/null; then
+                sed -i '/^RCCL_BCM_LINKS_PATH=/d' "${RCCL_CONF}"
+                sed -i '/^# Added by rccl_bcm_isl_discover/d' "${RCCL_CONF}"
+                echo "Removed RCCL_BCM_LINKS_PATH from ${RCCL_CONF}"
+                logger "rccl_bcm_isl_discover: Removed stale RCCL_BCM_LINKS_PATH from ${RCCL_CONF}"
+            fi
+        fi
+        echo ""
+        echo "Done."
         exit 0
     fi
 
@@ -344,16 +380,44 @@ if [ "${MODE}" = "populate" ]; then
     echo "Change log:          ${CHANGE_LOG}"
     echo "------------------------------------------------------------"
 
-    # If the base directory already exists and is non-empty, wipe it first.
-    # A previous --populate may have created links for a different switch
-    # topology (e.g. after firmware repartition); stale entries would cause
-    # ncclOsGetBcmLinks to report peers that no longer share a physical
-    # switch, leading to incorrect PATH_PXB classification.
+    # If the base directory already exists and is non-empty, clear it before
+    # re-populating.  A previous --populate may have created links for a
+    # different switch topology (e.g. after firmware repartition); stale
+    # entries would cause ncclOsGetBcmLinks to report peers that no longer
+    # share a physical switch, leading to incorrect PATH_PXB classification.
+    #
+    # Safety: only remove the directory if the change log proves this tool
+    # created it.  A typo in --sysfs-base that points at a pre-existing
+    # shared directory must not cause unrelated data loss.
     if [ -d "${SYSFS_BASE}" ] && [ -n "$(ls -A "${SYSFS_BASE}" 2>/dev/null)" ]; then
-        echo "  Clearing stale link structure under ${SYSFS_BASE}"
-        rm -rf "${SYSFS_BASE}"
-        rm -f "${CHANGE_LOG}"
-        logger "rccl_bcm_isl_discover: Cleared stale ${SYSFS_BASE} before re-populate"
+        if [ -f "${CHANGE_LOG}" ] && grep -q "sysfs_base=${SYSFS_BASE}" "${CHANGE_LOG}" 2>/dev/null; then
+            echo "  Clearing stale link structure under ${SYSFS_BASE}"
+            # Remove only entries recorded in the change log, then the base
+            # directory itself if it is now empty.
+            while IFS=' ' read -r _TS _ACT ENTRY_PATH; do
+                [ "${_ACT}" = "CREATE_FILE" ] || continue
+                case "${ENTRY_PATH}" in
+                    "${SYSFS_BASE}/"*) rm -f "${ENTRY_PATH}" ;;
+                esac
+            done < "${CHANGE_LOG}"
+            # Remove subdirectories recorded in the log (reverse order)
+            while IFS=' ' read -r _TS _ACT ENTRY_PATH; do
+                [ "${_ACT}" = "CREATE_DIR" ] || continue
+                case "${ENTRY_PATH}" in
+                    "${SYSFS_BASE}/"*) [ -d "${ENTRY_PATH}" ] && rmdir "${ENTRY_PATH}" 2>/dev/null || true ;;
+                esac
+            done < <(tac "${CHANGE_LOG}")
+            # Remove base dir only if empty
+            rmdir "${SYSFS_BASE}" 2>/dev/null || true
+            rm -f "${CHANGE_LOG}"
+            logger "rccl_bcm_isl_discover: Cleared stale ${SYSFS_BASE} before re-populate"
+        else
+            echo "  ERROR: ${SYSFS_BASE} exists and is non-empty but no change log"
+            echo "         at ${CHANGE_LOG} claims ownership.  Refusing to delete."
+            echo "         Remove the directory manually or use --clean with the"
+            echo "         correct --log-file to clear previous entries first."
+            exit 1
+        fi
     fi
 
     # Initialize change log

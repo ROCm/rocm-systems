@@ -18,6 +18,7 @@
 #include <string>
 #include <sys/stat.h>
 #include <thread>
+#include <ftw.h>
 #include <unistd.h>
 
 extern ncclNet_t ncclNetSocket;
@@ -1684,7 +1685,25 @@ TEST(NetBootstrapInterfaceTest, VirbrConsideredLast) {
             nVirbr, pick);
 }
 
-// ---------------------------------------------------------------------------
+// A failing ASSERT_* returns from the test body, so cleanup written at the end
+// is skipped and temp trees accumulate.  Tie removal to scope instead.
+namespace {
+class TempDir {
+ public:
+  explicit TempDir(std::string path) : path_(std::move(path)) {}
+  ~TempDir() { nftw(path_.c_str(), rmEntry_, 16, FTW_DEPTH | FTW_PHYS); }
+  TempDir(const TempDir&) = delete;
+  TempDir& operator=(const TempDir&) = delete;
+  const std::string& str() const { return path_; }
+
+ private:
+  static int rmEntry_(const char* p, const struct stat*, int, struct FTW*) {
+    return remove(p);
+  }
+  std::string path_;
+};
+}  // namespace
+
 // Test: BcmLinksEnvFallback
 //
 // GPU-free unit test for the RCCL_BCM_LINKS_PATH env-var fallback in
@@ -1705,7 +1724,9 @@ TEST(BcmLinksTest, EnvFallback) {
 
   // Pick two real PCI bus IDs so ncclOsGetPciPath's realpath() succeeds.
   DIR* pciDir = opendir("/sys/bus/pci/devices");
-  ASSERT_NE(pciDir, nullptr) << "cannot open /sys/bus/pci/devices";
+  if (pciDir == nullptr) {
+    GTEST_SKIP() << "/sys/bus/pci/devices not available";
+  }
 
   std::string bdfA, bdfB;
   struct dirent* entry;
@@ -1722,14 +1743,21 @@ TEST(BcmLinksTest, EnvFallback) {
   }
   closedir(pciDir);
 
-  ASSERT_FALSE(bdfA.empty()) << "no PCI devices in /sys/bus/pci/devices";
-  ASSERT_FALSE(bdfB.empty()) << "fewer than 2 PCI devices found";
+  if (bdfA.empty()) {
+    GTEST_SKIP() << "no PCI devices in /sys/bus/pci/devices";
+  }
+  if (bdfB.empty()) {
+    GTEST_SKIP() << "fewer than 2 PCI devices found";
+  }
 
   // Build mock directory: <tmpdir>/<bdfA>/<bdfB>
-  char tmpdir[] = "/tmp/rccl_bcm_test_XXXXXX";
-  ASSERT_NE(mkdtemp(tmpdir), nullptr) << "mkdtemp failed";
+  // TempDir is RAII — nftw-removes the tree on scope exit even if an
+  // ASSERT_ fires early, preventing /tmp/rccl_bcm_test_* accumulation.
+  char tmpl[] = "/tmp/rccl_bcm_test_XXXXXX";
+  ASSERT_NE(mkdtemp(tmpl), nullptr) << "mkdtemp failed";
+  TempDir tmpdir(tmpl);
 
-  std::string linkDir   = std::string(tmpdir) + "/" + bdfA;
+  std::string linkDir   = tmpdir.str() + "/" + bdfA;
   std::string linkEntry = linkDir + "/" + bdfB;
   ASSERT_EQ(mkdir(linkDir.c_str(), 0755), 0)
       << "mkdir failed: " << linkDir;
@@ -1738,7 +1766,7 @@ TEST(BcmLinksTest, EnvFallback) {
     fclose(f); }
 
   // Redirect the fallback path to our tmpdir.
-  ScopedEnv guard("RCCL_BCM_LINKS_PATH", tmpdir);
+  ScopedEnv guard("RCCL_BCM_LINKS_PATH", tmpdir.str().c_str());
 
   // Query bdfA — should discover bdfB as its sole peer.
   int   nlinks = -1;
@@ -1765,11 +1793,7 @@ TEST(BcmLinksTest, EnvFallback) {
   EXPECT_EQ(nlinks2, 0) << "expected 0 peers for " << bdfB;
   free(peers2);
 
-  // Cleanup
-  unlink(linkEntry.c_str());
-  rmdir(linkDir.c_str());
-  rmdir(tmpdir);
-
+  // tmpdir cleaned up by TempDir destructor on scope exit.
   TEST_INFO("BcmLinksEnvFallback: bdfA=%s bdfB=%s nlinks=%d",
             bdfA.c_str(), bdfB.c_str(), nlinks);
 }
