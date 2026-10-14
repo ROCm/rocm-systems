@@ -3671,6 +3671,13 @@ typedef union rocprofiler_hip_api_args_t
         int              device;
     } hipKernelSetAttributeForDevice;
 #endif
+#if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
+    struct {
+        hipKernel_t      kernel;
+        hipFuncCache_t   config;
+        hipDevice_t      device;
+    } hipKernelSetCacheConfig;
+#endif
 } rocprofiler_hip_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI

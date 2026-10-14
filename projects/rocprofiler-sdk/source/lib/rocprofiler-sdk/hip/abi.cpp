@@ -714,7 +714,7 @@ ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelSetAttributeForDevice_fn, 547)
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION >= 38
-ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelSetCacheConfig, 548);
+ROCP_SDK_ENFORCE_ABI(::HipDispatchTable, hipKernelSetCacheConfig_fn, 548);
 #endif
 
 #if HIP_RUNTIME_API_TABLE_STEP_VERSION == 0
