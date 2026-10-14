@@ -16,8 +16,8 @@
  *   RCCL_TESTS_NET_COUNTER_ENABLE=1   – enable collection
  *   RCCL_TESTS_NIC_COUNTER_LIST=a,b   – comma-separated counter subset
  *                                        (default: all counters for detected NIC)
- *   NCCL_IB_HCA=ib0,ib1,...           – IB device list (primary), parsed as
- *                                        RCCL does: ^ excludes, = exact, else prefix
+ *   NCCL_IB_HCA=ib0,ib1,...           – IB device list (primary), RCCL-like:
+ *                                        ^ excludes, = exact, else prefix
  *   RCCL_TESTS_NET_COUNTER_NIC_PREFIX – NIC prefix filter for auto-discovery
  *
  * Counter sources (looked up automatically per NIC type):
@@ -36,6 +36,7 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -50,8 +51,9 @@ enum CounterSource {
 struct CounterDescriptor {
   std::string name;           // canonical/display key (also primary sysfs lookup name)
   CounterSource source;
-  bool is_prefix;             // true -> sum of keys matching name ('*' = priority number)
+  bool is_prefix;             // true -> sum of keys matching the key ('*' = priority number)
   std::string fallback_name;  // alternative sysfs key to try when 'name' is missing
+  std::string key = {};       // lookup key or pattern if it differs from name
 };
 
 typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC, NIC_MLX5 } NicType;
@@ -98,6 +100,13 @@ std::vector<std::string> NetCounterParseIbHcaList();
 
 // Select from devs by an NCCL_IB_HCA value
 std::vector<std::string> NetCounterFilterIbHca(const char* env, std::vector<std::string> devs);
+
+// Parse `ethtool -S` output / bnxt_re debugfs info text into counters
+void NetCounterParseEthtool(const std::string& text,
+                            const std::vector<CounterDescriptor>& selected,
+                            std::map<std::string, uint64_t>& out);
+void NetCounterParseDebugfs(const std::string& text, const std::set<std::string>& wanted,
+                            std::map<std::string, uint64_t>& out);
 
 // Device lookup helpers
 std::string NetCounterFindIbDeviceForNic(const std::string& nic);
