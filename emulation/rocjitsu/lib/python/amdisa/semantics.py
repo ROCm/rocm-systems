@@ -1811,7 +1811,11 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    # S_ATOMIC_* are scalar atomics — not currently simulated.
+    if upper == 'S_ATOMIC_DEC':
+        return InstructionSemantics(
+            name, 'smem_atomic', operation='dec', elem_size=4, num_elems=1
+        )
+    # Other scalar atomics are not currently simulated.
     if '_ATOMIC_' in upper:
         return InstructionSemantics(name, 'nop')
 

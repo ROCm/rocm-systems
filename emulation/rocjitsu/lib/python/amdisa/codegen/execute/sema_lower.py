@@ -14,10 +14,15 @@ from amdisa.codegen.execute.floating_policy import FLUSH_NEAREST_F32_OPS
 from dataclasses import dataclass, field, replace
 from enum import Enum, auto
 
-from amdisa.codegen.execute import float_compare
+from amdisa.codegen.execute import (
+    float_compare,
+    float_minmax,
+    input_policy,
+    vop3_modifiers,
+)
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
-from amdisa.sema_derive import FLOAT_COMPARE_CALL
+from amdisa.sema_derive import FLOAT_COMPARE_CALL, FLOAT_MINMAX_CALL
 from amdisa.sema_ast import (
     ExecModel,
     SemaBlock,
@@ -118,7 +123,9 @@ class LoweringContext:
     operand_map: OperandMap | None = None
     indent: int = 1
     declared: set[str] = field(default_factory=set)
-    vector_preamble: list[str] = field(default_factory=list)
+    # Per-instruction declarations, emitted once before the body (before the
+    # lane loop for vector blocks).
+    body_preamble: list[str] = field(default_factory=list)
     is_lhs: bool = False
     vcc_var: str = 'vcc'
     vcc_read: str | None = None
@@ -222,7 +229,7 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
         writes_vcc = _writes_vcc(block.body)
         wrapped = []
         wrapped.append('  uint64_t exec = wf.exec();')
-        wrapped.extend(ctx.vector_preamble)
+        wrapped.extend(ctx.body_preamble)
         if writes_vcc:
             vcc_init = _vcc_init_expr(ctx)
             wrapped.append(f'  uint64_t vcc = {vcc_init};')
@@ -245,7 +252,8 @@ def lower_sema_block(block: SemaBlock, ctx: LoweringContext | None = None) -> st
             wrapped.append(f'  {vcc_write}')
         return '\n'.join(wrapped)
 
-    return '\n'.join(body_lines)
+    # Scalar blocks have no lane loop; per-instruction policies precede the body.
+    return '\n'.join([*ctx.body_preamble, *body_lines])
 
 
 _VCC_WRITING_CALLS = frozenset(
@@ -1112,13 +1120,35 @@ def _lower_dst_write(
 ) -> list[str]:
     """Lower a destination operand write."""
     idx = _get_operand_index(lhs_node)
-    raw_rhs = _lower_expr(rhs_node, ctx)
-    rhs = raw_rhs
-
-    needs_bitcast = _rhs_is_float_expr(rhs_node)
+    # Lower clamp(omod(minmax(...))) directly on destination bits, avoiding a
+    # conversion to host float and back. These forms only exist on targets
+    # without SDWA, so bypassing SDWA's F16 output modifiers is safe here.
+    selection_node, output_fields = _unwrap_output_modifiers(rhs_node)
+    writes_minmax_bits = _is_float_minmax(selection_node)
+    if writes_minmax_bits:
+        _, rhs = _float_minmax_selection(
+            selection_node,
+            ctx,
+            output_fields if selection_node is not rhs_node else None,
+        )
+        needs_bitcast = 0
+    elif selection_node is not rhs_node and _is_integral_rounding(selection_node):
+        # The rounding operation already returns F32/F64. Apply output modifiers
+        # to those bits using GPU MODE, independently of the host rounding mode.
+        dtype = f'f{selection_node.ty.size}'
+        declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
+        if declaration not in ctx.body_preamble:
+            ctx.body_preamble.append(declaration)
+        rounded = _lower_expr(selection_node, ctx)
+        bits = f'std::bit_cast<uint{selection_node.ty.size}_t>({rounded})'
+        rhs = vop3_modifiers.apply_output(dtype, bits)
+        needs_bitcast = 0
+    else:
+        rhs = _lower_expr(rhs_node, ctx)
+        needs_bitcast = _rhs_is_float_expr(rhs_node)
     lhs_ty = _get_operand_dtype(lhs_node)
     binding = ctx.operand_map.dst(idx) if ctx.operand_map else None
-    if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16:
+    if lhs_ty and lhs_ty.base == 'F' and lhs_ty.size == 16 and not writes_minmax_bits:
         if ctx.mode_arithmetic and _contains_mode_arithmetic(rhs_node):
             rhs = (
                 f'amdgpu::fp_mode::finish_arithmetic_f16({rhs}, '
@@ -1838,6 +1868,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
         return _lower_apply_clamp(node, ctx)
     if callee.startswith(FLOAT_COMPARE_CALL):
         return _lower_float_compare(node, ctx)
+    if callee.startswith(FLOAT_MINMAX_CALL):
+        return _lower_float_minmax(node, ctx)
 
     args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
@@ -2033,19 +2065,19 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     return f'{callee}({args_str})'
 
 
-def _lower_float_compare(node: SemaNode, ctx: LoweringContext) -> str:
-    """Lower a floating VOPC relation to comparison::evaluate on raw encodings.
+def _raw_float_sources(
+    node: SemaNode, ctx: LoweringContext
+) -> tuple[str, list[str], tuple[str, str] | None]:
+    """Read comparison/minmax source bits and declare their shared input policy.
 
-    CALL children: [ID(name), src0, src1], each a typed cast of a register
-    read, possibly wrapped in apply_src_mod by enrichment. The relation applies
-    ABS/NEG to the encoding itself, so the wrappers are reduced to the
-    instruction's modifier fields.
+    Sources are register reads wrapped in typed casts and optional apply_src_mod
+    calls. Pass ABS/NEG fields to the C++ helper, which applies them to the bits.
+    Return (source dtype, register reads, optional (ABS, NEG) fields).
     """
-    op = (node.call_name or '').removeprefix(FLOAT_COMPARE_CALL)
     has_abs = has_neg = False
     dtype = None
     reads = []
-    for src in node.children[1:3]:
+    for src in node.children[1:]:
         if src.kind == SemaNodeKind.CALL and src.call_name == 'apply_src_mod':
             has_neg |= src.children[3].lit_value == '1'
             has_abs |= src.children[4].lit_value == '1'
@@ -2056,23 +2088,92 @@ def _lower_float_compare(node: SemaNode, ctx: LoweringContext) -> str:
             src = src.children[0]
         if dtype is None or src.kind != SemaNodeKind.INSTOPERAND:
             raise ValueError(f'unexpected {node.call_name} source: {src}')
-        lane = float_compare.lane_type(dtype)
-        reads.append(f'static_cast<{lane}>({_lower_expr(src, ctx)})')
-    declaration = float_compare.policy_decl(dtype)
-    if declaration not in ctx.vector_preamble:
-        ctx.vector_preamble.append(declaration)
+        # Register reads already have the unsigned type the C++ helper requires.
+        reads.append(_lower_expr(src, ctx))
+    declaration = input_policy.policy_decl(dtype)
+    if declaration not in ctx.body_preamble:
+        ctx.body_preamble.append(declaration)
     modifiers = None
     if has_abs or has_neg:
         modifiers = ('inst_.abs' if has_abs else '0u', 'inst_.neg' if has_neg else '0u')
+    return dtype, reads, modifiers
+
+
+def _lower_float_compare(node: SemaNode, ctx: LoweringContext) -> str:
+    """Lower a floating VOPC relation to comparison::evaluate on raw encodings."""
+    op = (node.call_name or '').removeprefix(FLOAT_COMPARE_CALL)
+    dtype, reads, modifiers = _raw_float_sources(node, ctx)
     return float_compare.evaluate_expr(dtype, op, *reads, modifiers=modifiers)
 
 
-def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
-    """Lower apply_src_mod CALL to inline VOP3 NEG/ABS code.
+def _is_float_minmax(node: SemaNode) -> bool:
+    return node.kind == SemaNodeKind.CALL and (node.call_name or '').startswith(
+        FLOAT_MINMAX_CALL
+    )
 
-    VOP3 modifiers always interpret bits as float. The lambda bit_casts
-    the input to float, applies abs/neg, and returns float (or double
-    for F64 operations).
+
+def _is_integral_rounding(node: SemaNode) -> bool:
+    """These operations produce a destination-format result before OMOD/CLAMP."""
+    return node.ty in (SemaType.F32, SemaType.F64) and (
+        node.kind in (SemaNodeKind.FLOOR, SemaNodeKind.TRUNC)
+        or (node.kind == SemaNodeKind.CALL and node.call_name in ('ceil', 'rndne'))
+    )
+
+
+def _unwrap_output_modifiers(node: SemaNode) -> tuple[SemaNode, tuple[str, str]]:
+    """Read through output-modifier wrappers without changing the AST.
+
+    For clamp(omod(value)), return value and ('inst_.omod', 'inst_.clamp').
+    A missing wrapper contributes '0u', disabling that output stage.
+    """
+    omod = clamp = '0u'
+    while (
+        node.kind == SemaNodeKind.CALL
+        and node.call_name in ('apply_omod', 'apply_clamp')
+        and len(node.children) > 1
+    ):
+        if node.call_name == 'apply_omod':
+            omod = 'inst_.omod'
+        else:
+            clamp = 'inst_.clamp'
+        node = node.children[1]
+    return node, (omod, clamp)
+
+
+def _float_minmax_selection(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None = None,
+) -> tuple[str, str]:
+    """Return raw-bit selection with shared source/output modifier handling."""
+    form = (node.call_name or '').removeprefix(FLOAT_MINMAX_CALL)
+    dtype, reads, modifiers = _raw_float_sources(node, ctx)
+    output_policy = None
+    if output_fields is not None:
+        declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
+        if declaration not in ctx.body_preamble:
+            ctx.body_preamble.append(declaration)
+        output_policy = vop3_modifiers.OUTPUT_POLICY
+    return dtype, float_minmax.minmax_expr(
+        dtype, form, reads, modifiers=modifiers, output_policy=output_policy
+    )
+
+
+def _lower_float_minmax(node: SemaNode, ctx: LoweringContext) -> str:
+    """Convert selected bits to a floating-point value inside a larger expression.
+
+    Destination writes, including OMOD/CLAMP, keep the bits; see _lower_dst_write.
+    """
+    dtype, selected = _float_minmax_selection(node, ctx)
+    if dtype == 'f16':
+        return f'util::f16_to_f32(static_cast<uint16_t>({selected}))'
+    return f'std::bit_cast<{"double" if dtype == "f64" else "float"}>({selected})'
+
+
+def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
+    """Lower apply_src_mod through the shared ABS/NEG helper.
+
+    Preserve the existing source decoding and promotion before applying modifiers.
 
     CALL children: [ID('apply_src_mod'), src_expr, LIT(src_idx),
                      LIT(has_neg), LIT(has_abs)]
@@ -2107,13 +2208,13 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
         init = f'std::bit_cast<{fp_type}>({src_expr})'
     else:
         init = src_expr
-    parts = [f'[&]() {{ {fp_type} sv = {init};']
-    if has_abs:
-        parts.append(f' if (inst_.abs & (1u << {src_idx})) sv = std::fabs(sv);')
-    if has_neg:
-        parts.append(f' if (inst_.neg & (1u << {src_idx})) sv = -sv;')
-    parts.append(' return sv; }()')
-    return ''.join(parts)
+    abs_field = 'inst_.abs' if has_abs else '0u'
+    neg_field = 'inst_.neg' if has_neg else '0u'
+    return (
+        f'[&]() {{ {fp_type} sv = {init};'
+        f' return amdgpu::source_modifier::apply_to_float(sv, {src_idx}, '
+        f'{abs_field}, {neg_field}); }}()'
+    )
 
 
 def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
