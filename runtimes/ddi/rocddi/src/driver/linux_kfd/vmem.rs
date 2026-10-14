@@ -13,13 +13,14 @@
 //! mappings. A failed unmap or handle release leaves its native dependency live
 //! and attached to the owner for an explicit retry.
 
+use crate::memory::storage::TryPush;
 use std::fs::File;
 use std::io;
 use std::os::fd::AsRawFd;
 use std::sync::atomic::{AtomicBool, Ordering};
 
-use crate::host_storage::{Allocator, Buffer, Owned, Shared};
 use crate::memory::interop::linux::{DmaBuf, DmaBufInfo};
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{
     AllocationDesc, AllocationLimits, DeviceAccess, MemoryKind, VirtualMemoryInfo,
 };
@@ -46,20 +47,20 @@ pub(super) struct VmState {
     syncobj: u32,
     syncobj_destroy_uncertain: bool,
     next_point: u64,
-    gems: Buffer<ImportedGem>,
+    gems: Vec<ImportedGem>,
     // A failed MAP has no public mapping owner. Keep its timeline point and
     // GEM handle in this VM; the reservation and backing quarantine themselves.
-    pending_maps: Buffer<(u32, u64)>,
+    pending_maps: Vec<(u32, u64)>,
 }
 
 impl VmState {
-    pub(super) fn new(allocator: Allocator) -> Self {
+    pub(super) fn new() -> Self {
         Self {
             syncobj: 0,
             syncobj_destroy_uncertain: false,
             next_point: 0,
-            gems: Buffer::new(allocator),
-            pending_maps: Buffer::new(allocator),
+            gems: Vec::new(),
+            pending_maps: Vec::new(),
         }
     }
 
@@ -249,7 +250,6 @@ impl KfdVirtualAddress {
         size: u64,
         alignment: u64,
         address: u64,
-        allocator: Allocator,
     ) -> Result<Owned<Self>, Error> {
         let desc = AllocationDesc { size, alignment };
         let page = os_memory::page_size()
@@ -279,7 +279,7 @@ impl KfdVirtualAddress {
             )
         })?;
         let address = usize::try_from(address).unwrap_or(0);
-        let owner = Owned::try_new_uninit(allocator)?;
+        let owner = Owned::try_new_uninit()?;
         let reservation = os_memory::Reservation::new_at(size, alignment, bounds, address)
             .map_err(|source| native_error("virtual-address reservation", source))?;
         Ok(owner.write(Self {
@@ -400,7 +400,7 @@ impl KfdVirtualMemory {
             MemoryKind::DeviceLocal { coherent, .. } => {
                 uapi::VRAM | if coherent { uapi::COHERENT } else { 0 }
             }
-            MemoryKind::OwnedHost { .. } | MemoryKind::RegisteredHost { .. } => {
+            MemoryKind::OwnedHost { .. } => {
                 return Err(error(
                     ErrorKind::Unsupported,
                     "virtual-memory handles require platform-managed physical backing",
@@ -408,8 +408,8 @@ impl KfdVirtualMemory {
             }
         };
         vm.check()?;
-        let allocator = vm.allocator();
-        let owner = Owned::try_new_uninit(allocator)?;
+
+        let owner = Owned::try_new_uninit()?;
         let reservation =
             os_memory::Reservation::new(size_usize, host_page, vm.address_range(), false)
                 .map_err(|source| native_error("virtual-memory physical reservation", source))?;
@@ -490,7 +490,7 @@ impl KfdVirtualMemory {
         Ok(memory)
     }
 
-    pub(super) fn import(descriptor: i32, allocator: Allocator) -> Result<Owned<Self>, Error> {
+    pub(super) fn import(descriptor: i32) -> Result<Owned<Self>, Error> {
         let dma_buf = os_file::duplicate_file(descriptor)
             .map_err(|source| native_error("virtual-memory descriptor duplication", source))?;
         let file_info = os_file::dma_buf_file_info(&dma_buf)
@@ -498,23 +498,20 @@ impl KfdVirtualMemory {
         let page = os_memory::page_size()
             .map_err(|source| native_error("virtual-memory page size", source))?
             as u64;
-        Owned::new(
-            Self {
-                vm: None,
-                reservation: None,
-                handle: None,
-                dma_buf: Some(dma_buf),
-                info: VirtualMemoryInfo {
-                    size: file_info.size,
-                    mapping_granularity: page,
-                    physical_backing_id: file_info.physical_id,
-                },
-                freeing: false,
-                uncertain: false,
-                mapping_uncertain: AtomicBool::new(false),
+        Owned::new(Self {
+            vm: None,
+            reservation: None,
+            handle: None,
+            dma_buf: Some(dma_buf),
+            info: VirtualMemoryInfo {
+                size: file_info.size,
+                mapping_granularity: page,
+                physical_backing_id: file_info.physical_id,
             },
-            allocator,
-        )
+            freeing: false,
+            uncertain: false,
+            mapping_uncertain: AtomicBool::new(false),
+        })
         .map_err(Into::into)
     }
 
@@ -648,8 +645,8 @@ impl KfdVirtualDeviceMapping {
         vm.check()?;
         reservation.check()?;
         let dma_buf = memory.dma_buf()?;
-        let allocator = vm.allocator();
-        let owner = Owned::try_new_uninit(allocator)?;
+
+        let owner = Owned::try_new_uninit()?;
         let render = vm.render()?;
         let mut state = vm.vmem.lock().map_err(|_| {
             error(
@@ -766,7 +763,6 @@ impl KfdVirtualHostMapping {
         offset: u64,
         size: u64,
         permissions: DeviceAccess,
-        allocator: Allocator,
     ) -> Result<Owned<Self>, Error> {
         let supported_permissions = DeviceAccess::READ | DeviceAccess::WRITE;
         if !supported_permissions.contains(permissions) {
@@ -788,7 +784,7 @@ impl KfdVirtualHostMapping {
                 "virtual-memory host extent exceeds host width",
             )
         })?;
-        let owner = Owned::try_new_uninit(allocator)?;
+        let owner = Owned::try_new_uninit()?;
         let mut reservation = os_memory::Reservation::view(address, size);
         reservation
             .map_dma_buf_with_permissions(memory.dma_buf()?, offset, permissions.bits())

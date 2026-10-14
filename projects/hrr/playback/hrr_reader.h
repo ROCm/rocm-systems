@@ -206,6 +206,11 @@ struct Archive {
 // Load an archive from disk. Returns false on error.
 bool load_archive(const std::string& path, Archive& archive);
 
+// The pid in the name of a per-process archive directory, "pid-<decimal pid>",
+// or 0 for any other name. An archive moved aside to pid-<pid>.prev-<n>, when a
+// later process with the same pid starts capturing, is not one of them.
+uint64_t pid_from_archive_dir_name(const std::string& name);
+
 // Whether load_archive would find the archive in `archive_dir` complete: a
 // trailer whose total_events counts the records before it. Walks the record
 // headers and seeks over the payloads, so it costs a fraction of a load.
