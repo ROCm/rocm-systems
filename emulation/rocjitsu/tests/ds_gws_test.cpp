@@ -1891,18 +1891,15 @@ TEST_P(DsGwsTest, BarrierRendezvousWithLateAdmittedParticipant) {
   wf1->halt();
 }
 
-// Termination guard for the late-admission accounting: a GWS grid larger than the
-// CU's wave-slot capacity must still terminate. The admitted waves park at a
-// barrier bounded by the (larger) grid size and hold every slot, so the remaining
-// participants can never be admitted. The quiescence backstop decides whether a
-// not-yet-admitted producer can still be placed by mirroring the command
-// processor's placement test: it asks whether any CU the dispatch is allowed to
-// use can currently accept the whole workgroup (GwsDevice::note_dispatch_placement
-// publishes the requirements and eligible CU set). With both slots full of parked
-// waves no eligible CU can accept the two-wave workgroup, so the backstop escapes
-// instead of waiting forever on the never-admittable producers. Regression: an
-// unconditional expected>admitted escape block spins here indefinitely (a parked
-// GWS wave counts as runnable, so the CU keeps stepping), on all seven ISAs.
+// Termination guard for the late-admission accounting: a single-CP GWS grid larger
+// than the CU's wave-slot capacity must still terminate. The admitted waves park at
+// a barrier bounded by the (larger) grid size and hold every slot, so the remaining
+// participants can never be admitted. Placement lives in the command processor and
+// is greedy -- a placeable producer would already be resident -- so with no fan-out
+// shard still pending (nothing published via set_shard_pending), the quiescence
+// backstop sees a provably quiescent process and escapes the parked waves instead of
+// spinning forever. Regression: an unconditional expected>admitted escape block
+// spins here indefinitely (a parked GWS wave counts as runnable), on all seven ISAs.
 TEST_P(DsGwsTest, OversubscribedGridEscapesInsteadOfHanging) {
   const auto arch = GetParam();
   amdgpu::GpuMemory mem("ds_gws_oversub_mem");
@@ -1919,12 +1916,6 @@ TEST_P(DsGwsTest, OversubscribedGridEscapesInsteadOfHanging) {
   cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2,
                       /*num_named_barriers=*/0, /*process_id=*/0,
                       /*dispatch_total_waves=*/4);
-  // Model the command processor publishing placement state: a two-wave workgroup,
-  // eligible only on this CU.
-  cu->gws_device().note_dispatch_placement(/*dispatch_id=*/0, /*process_id=*/0,
-                                           /*expected_total_waves=*/4, /*wfs_per_workgroup=*/2,
-                                           /*lds_bytes=*/0, /*scratch_wave_limit=*/UINT32_MAX,
-                                           {cu.get()});
   for (auto *wf : {wf0, wf1}) {
     wf->set_exec(0x1);
     wf->set_m0(0);
@@ -1932,15 +1923,13 @@ TEST_P(DsGwsTest, OversubscribedGridEscapesInsteadOfHanging) {
 
   // Both resident waves arrive at a four-participant barrier (count = 3) and park;
   // the grid-size bound keeps them off the oversized-count fallback. The other two
-  // participants can never be admitted -- both slots are full of parked waves.
+  // participants can never be admitted -- both slots are full of parked waves -- and
+  // no fan-out shard is pending, so the backstop escapes.
   run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/3);
   run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/3);
   ASSERT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
 
-  // No eligible CU can accept the two-wave workgroup, so the backstop must escape
-  // the parked waves; they run their s_endpgm and the dispatch terminates instead
-  // of spinning forever.
   for (int i = 0; i < 16 && (!wf0->is_halted() || !wf1->is_halted()); ++i)
     cu->step();
   EXPECT_TRUE(wf0->is_halted());
@@ -1949,20 +1938,20 @@ TEST_P(DsGwsTest, OversubscribedGridEscapesInsteadOfHanging) {
   EXPECT_TRUE(wf1->wait_counters().empty());
 }
 
-// Leftover-slot case: a free wave slot is not the same as a placeable workgroup. A
-// three-slot CU holds a two-wave workgroup (one slot free), and the grid's next
-// workgroup also needs two waves -- which can_accept_workgroup(2) rejects. The old
-// "some CU has a free slot" gate blocked escape here forever; the placement-aware
-// gate escapes because no eligible CU can host the remaining workgroup.
-TEST_P(DsGwsTest, OversubscribedGridLeftoverSlotEscapes) {
+// A fan-out shard still sitting in a command processor's inbox (its producer not yet
+// placed) must defer the deadlock backstop: the command processor marks the shard
+// pending (set_shard_pending true) at accept and clears it (false) once it runs its
+// placement pass. Here two waves park at an oversized barrier; while a peer shard is
+// pending the backstop must NOT escape them, and once that shard is marked attempted
+// the backstop escapes. Regression (kuhar N4): a peer shard that contributed nothing
+// yet let the first wave escape before its producer could arrive, on all seven ISAs.
+TEST_P(DsGwsTest, PendingFanoutShardDefersThenAllowsEscape) {
   const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_leftover_mem");
-  amdgpu::L2Cache l2("ds_gws_leftover_l2");
+  amdgpu::GpuMemory mem("ds_gws_pending_mem");
+  amdgpu::L2Cache l2("ds_gws_pending_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
-  // Three slots: a two-wave workgroup leaves exactly one free -- too few for the
-  // next two-wave workgroup.
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/3);
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/2);
   auto decoder = Decoder::create(arch);
   auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
   auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
@@ -1971,10 +1960,11 @@ TEST_P(DsGwsTest, OversubscribedGridLeftoverSlotEscapes) {
   cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2,
                       /*num_named_barriers=*/0, /*process_id=*/0,
                       /*dispatch_total_waves=*/4);
-  cu->gws_device().note_dispatch_placement(/*dispatch_id=*/0, /*process_id=*/0,
-                                           /*expected_total_waves=*/4, /*wfs_per_workgroup=*/2,
-                                           /*lds_bytes=*/0, /*scratch_wave_limit=*/UINT32_MAX,
-                                           {cu.get()});
+  // A peer command processor (opaque key) accepted a shard of this grid into its
+  // inbox but has not yet placed it.
+  int peer_cp_key = 0;
+  cu->gws_device().set_shard_pending(/*dispatch_id=*/0, /*process_id=*/0,
+                                     /*shard_key=*/&peer_cp_key, /*pending=*/true);
   for (auto *wf : {wf0, wf1}) {
     wf->set_exec(0x1);
     wf->set_m0(0);
@@ -1984,25 +1974,37 @@ TEST_P(DsGwsTest, OversubscribedGridLeftoverSlotEscapes) {
   ASSERT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
 
-  // can_accept_workgroup(2) is false with one free slot, so the backstop escapes.
+  // While the peer shard is pending, the backstop must defer: its producer may still
+  // arrive once that shard is drained.
+  for (int i = 0; i < 16; ++i)
+    cu->step();
+  EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
+  EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
+
+  // The peer command processor ran its placement pass (whatever it could place is
+  // now resident; the rest is unplaceable): clear the pending mark. With no shard
+  // pending the process is provably quiescent and the backstop escapes.
+  cu->gws_device().set_shard_pending(/*dispatch_id=*/0, /*process_id=*/0,
+                                     /*shard_key=*/&peer_cp_key, /*pending=*/false);
   for (int i = 0; i < 16 && (!wf0->is_halted() || !wf1->is_halted()); ++i)
     cu->step();
   EXPECT_TRUE(wf0->is_halted());
   EXPECT_TRUE(wf1->is_halted());
 }
 
-// Control for the leftover-slot case: when an eligible CU genuinely can host the
-// next workgroup, the gate must still defer escape (the producer is admittable, so
-// releasing the parked waves would be premature). A four-slot CU holds a two-wave
-// workgroup, leaving room for the pending two-wave workgroup; the parked waves must
-// stay parked (no CP here ever places that producer, so they simply do not escape).
-TEST_P(DsGwsTest, PlaceableProducerDefersEscape) {
+// Fan-out shards are tracked independently: a dispatch spread over two command
+// processors defers escape until EVERY shard has attempted placement. A completed
+// shard's spare capacity is irrelevant (it cannot place another shard's fixed
+// workgroup share), so clearing one shard must not release the backstop while the
+// other is still pending. Regression (kuhar N3): unioning the shards let a finished
+// shard mask a peer shard that could never place its workgroup, on all seven ISAs.
+TEST_P(DsGwsTest, FanoutShardsTrackedIndependentlyForEscape) {
   const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_placeable_mem");
-  amdgpu::L2Cache l2("ds_gws_placeable_l2");
+  amdgpu::GpuMemory mem("ds_gws_twoshard_mem");
+  amdgpu::L2Cache l2("ds_gws_twoshard_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/2);
   auto decoder = Decoder::create(arch);
   auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
   auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
@@ -2011,10 +2013,12 @@ TEST_P(DsGwsTest, PlaceableProducerDefersEscape) {
   cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2,
                       /*num_named_barriers=*/0, /*process_id=*/0,
                       /*dispatch_total_waves=*/4);
-  cu->gws_device().note_dispatch_placement(/*dispatch_id=*/0, /*process_id=*/0,
-                                           /*expected_total_waves=*/4, /*wfs_per_workgroup=*/2,
-                                           /*lds_bytes=*/0, /*scratch_wave_limit=*/UINT32_MAX,
-                                           {cu.get()});
+  int shard_a_key = 0;
+  int shard_b_key = 0;
+  cu->gws_device().set_shard_pending(/*dispatch_id=*/0, /*process_id=*/0, &shard_a_key,
+                                     /*pending=*/true);
+  cu->gws_device().set_shard_pending(/*dispatch_id=*/0, /*process_id=*/0, &shard_b_key,
+                                     /*pending=*/true);
   for (auto *wf : {wf0, wf1}) {
     wf->set_exec(0x1);
     wf->set_m0(0);
@@ -2024,26 +2028,35 @@ TEST_P(DsGwsTest, PlaceableProducerDefersEscape) {
   ASSERT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
 
-  // Two slots remain free, so can_accept_workgroup(2) is true: the pending producer
-  // could still be placed, and the backstop must NOT escape the parked waves.
+  // Shard A finished its placement pass; shard B is still pending, so the backstop
+  // must keep deferring (B may yet place the producer).
+  cu->gws_device().set_shard_pending(/*dispatch_id=*/0, /*process_id=*/0, &shard_a_key,
+                                     /*pending=*/false);
   for (int i = 0; i < 16; ++i)
     cu->step();
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
 
-  wf0->halt();
-  wf1->halt();
+  // Shard B attempted too: no shard pending, so the backstop escapes.
+  cu->gws_device().set_shard_pending(/*dispatch_id=*/0, /*process_id=*/0, &shard_b_key,
+                                     /*pending=*/false);
+  for (int i = 0; i < 16 && (!wf0->is_halted() || !wf1->is_halted()); ++i)
+    cu->step();
+  EXPECT_TRUE(wf0->is_halted());
+  EXPECT_TRUE(wf1->is_halted());
 }
 
-// Untargeted-CU case: free capacity on a CU the dispatch is not allowed to use must
-// not defer escape. A full two-slot CU hosts the parked waves; a second CU shares
-// the store (so it joins the quiescence scan) but is idle and NOT in the dispatch's
-// eligible set. The old gate saw that idle CU's free slots and blocked escape
-// forever; the placement-aware gate consults only the eligible CU set and escapes.
-TEST_P(DsGwsTest, OversubscribedGridUntargetedIdleCuDoesNotDeferEscape) {
+// Free capacity on an idle peer CU that holds none of the dispatch's work must not
+// defer escape. A full two-slot CU hosts the parked waves; a second CU shares the
+// store (so it joins the quiescence scan) but is idle. Because the store no longer
+// re-derives placement from CU wave slots (placement lives in the command
+// processor), that idle CU's free capacity is irrelevant: with no fan-out shard
+// pending the backstop escapes. Regression (kuhar N2/N3): the store must not consult
+// a peer CU's allocator at all (it both raced that CU and misjudged placement).
+TEST_P(DsGwsTest, IdlePeerCuDoesNotDeferEscape) {
   const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_untargeted_mem");
-  amdgpu::L2Cache l2("ds_gws_untargeted_l2");
+  amdgpu::GpuMemory mem("ds_gws_idlepeer_mem");
+  amdgpu::L2Cache l2("ds_gws_idlepeer_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
@@ -2059,10 +2072,6 @@ TEST_P(DsGwsTest, OversubscribedGridUntargetedIdleCuDoesNotDeferEscape) {
   cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2,
                        /*num_named_barriers=*/0, /*process_id=*/0,
                        /*dispatch_total_waves=*/4);
-  // The dispatch is eligible only on cu0; cu1's free slots are irrelevant.
-  gws->note_dispatch_placement(/*dispatch_id=*/0, /*process_id=*/0,
-                               /*expected_total_waves=*/4, /*wfs_per_workgroup=*/2,
-                               /*lds_bytes=*/0, /*scratch_wave_limit=*/UINT32_MAX, {cu0.get()});
   for (auto *wf : {wf0, wf1}) {
     wf->set_exec(0x1);
     wf->set_m0(0);
@@ -2078,16 +2087,13 @@ TEST_P(DsGwsTest, OversubscribedGridUntargetedIdleCuDoesNotDeferEscape) {
   EXPECT_TRUE(wf1->is_halted());
 }
 
-// Fault/cancel paths must not leave a partially-admitted dispatch's participant
-// accounting behind: a dropped dispatch with admitted < expected would keep the
-// quiescence backstop from ever escaping that process (the never-to-arrive
-// producer looks pending forever). CommandProcessor::fail_pm4_queue now tears
-// resident waves down through the centralized abort path (abort_dispatch ->
-// notify_dispatch_gone), the same path the VM-fault handler uses. Here a dispatch
-// admits one of two expected waves and is then aborted; a second, fully admitted
-// single-wave dispatch of the same process must be able to escape (it would hang
-// if the dropped dispatch's stale admission entry still gated the scan).
-TEST_P(DsGwsTest, FaultedDispatchDoesNotWedgeEscape) {
+// Fault/cancel paths must not leave a dropped dispatch's participant accounting
+// behind. The centralized teardown (abort_dispatch, which the VM-fault handler and
+// CommandProcessor::fail_pm4_queue both drive) notifies the store so the dropped
+// dispatch's admission entry is cleared. Here a dispatch admits one of two expected
+// waves and is then aborted; its admission entry must be gone afterwards, and a
+// second, fully admitted single-wave dispatch of the same process must still escape.
+TEST_P(DsGwsTest, FaultedDispatchClearsAdmissionAndDoesNotWedgeEscape) {
   const auto arch = GetParam();
   amdgpu::GpuMemory mem("ds_gws_faultdrop_mem");
   amdgpu::L2Cache l2("ds_gws_faultdrop_l2");
@@ -2102,27 +2108,23 @@ TEST_P(DsGwsTest, FaultedDispatchDoesNotWedgeEscape) {
   cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1,
                       /*num_named_barriers=*/0, /*process_id=*/0,
                       /*dispatch_total_waves=*/2);
-  cu->gws_device().note_dispatch_placement(/*dispatch_id=*/0, /*process_id=*/0,
-                                           /*expected_total_waves=*/2, /*wfs_per_workgroup=*/1,
-                                           /*lds_bytes=*/0, /*scratch_wave_limit=*/UINT32_MAX,
-                                           {cu.get()});
+  ASSERT_EQ(cu->gws_device().tracked_dispatch_count(), 1u);
+
   // The dispatch is aborted (its queue failed): the centralized teardown drops the
-  // resident wave and the stale admitted < expected accounting.
+  // resident wave and clears the dropped dispatch's participant accounting.
   cu->abort_dispatch(/*dispatch_id=*/0);
   EXPECT_TRUE(dropped->is_halted());
+  EXPECT_EQ(cu->gws_device().tracked_dispatch_count(), 0u)
+      << "aborting a partially-admitted dispatch left its admission entry behind";
 
   // Dispatch 1: a single-wave grid of the same process. Its lone wave does a P with
-  // no credit and parks; with the dropped dispatch's accounting gone, the backstop
-  // sees a quiescent process and escapes it instead of waiting on a phantom producer.
+  // no credit and parks; no fan-out shard is pending, so the backstop sees a
+  // quiescent process and escapes it.
   auto *waiter = cu->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
   ASSERT_NE(waiter, nullptr);
   cu->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/1, /*wf_count=*/1,
                       /*num_named_barriers=*/0, /*process_id=*/0,
                       /*dispatch_total_waves=*/1);
-  cu->gws_device().note_dispatch_placement(/*dispatch_id=*/1, /*process_id=*/0,
-                                           /*expected_total_waves=*/1, /*wfs_per_workgroup=*/1,
-                                           /*lds_bytes=*/0, /*scratch_wave_limit=*/UINT32_MAX,
-                                           {cu.get()});
   waiter->set_exec(0x1);
   waiter->set_m0(0);
   run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *waiter, /*count=*/0);
@@ -2130,9 +2132,30 @@ TEST_P(DsGwsTest, FaultedDispatchDoesNotWedgeEscape) {
 
   for (int i = 0; i < 16 && !waiter->is_halted(); ++i)
     cu->step();
-  EXPECT_TRUE(waiter->is_halted())
-      << "a dropped partially-admitted dispatch left a stale admission entry that "
-         "wedged the quiescence backstop";
+  EXPECT_TRUE(waiter->is_halted());
+}
+
+// The store-level invariant CommandProcessor::fail_pm4_queue now relies on for its
+// no-live-wave case: a dropped dispatch whose last wave already retired still holds
+// an admitted<expected admission entry (remove_resident deliberately keeps it), so
+// the fault path must notify the store directly. notify_dispatch_gone clears that
+// entry even though no wave remains to drive the clear. Regression (kuhar N1): a
+// fault path that discovered dispatches only from live waves left this entry behind.
+TEST_P(DsGwsTest, NotifyDispatchGoneClearsRetiredWaveAdmission) {
+  const auto arch = GetParam();
+  (void)arch;
+  auto gws = std::make_shared<amdgpu::GwsDevice>();
+  // A dispatch admits one of two expected waves, then that wave retires: residency
+  // drops to zero but the admitted<expected admission entry is intentionally kept.
+  gws->add_resident(/*process_id=*/0, /*dispatch_id=*/7, /*count=*/1,
+                    /*expected_total_waves=*/2);
+  gws->remove_resident(/*dispatch_id=*/7, /*count=*/1);
+  EXPECT_EQ(gws->tracked_dispatch_count(), 1u)
+      << "a partially-admitted dispatch must retain its admission after its wave retires";
+
+  // The fault path clears it directly (no live wave remains to drive the clear).
+  gws->notify_dispatch_gone(/*dispatch_id=*/7);
+  EXPECT_EQ(gws->tracked_dispatch_count(), 0u);
 }
 
 // A remote release (a V/BR credit, or a barrier/release-all generation bump) is
@@ -2203,6 +2226,71 @@ TEST_P(DsGwsTest, RemoteReleaseDefersPeerQuiescenceDecision) {
 
   // B now polls, consumes the credit, and wakes -- confirming the deferred signaler
   // was real.
+  for (int i = 0; i < 4 && waiter_b->state() == amdgpu::WfState::GWS_WAIT; ++i)
+    cu_b->step();
+  EXPECT_NE(waiter_b->state(), amdgpu::WfState::GWS_WAIT);
+
+  waiter_a->halt();
+}
+
+// Companion to the V case (kuhar N5): a GWS init also publishes a consumable
+// semaphore credit, so it too must invalidate a peer's stale quiescence snapshot.
+// An init can run on a different dispatch/CU from the P it feeds (the CLR RunGwsInit
+// pattern), so a peer-CU P already parked may become runnable once it consumes the
+// seeded credit. Here waiter_a parks on rid 0; waiter_b parks on rid 1 (and, once
+// woken, would signal A); a producer on CU C inits rid 1 and halts. Stepping A
+// before B must not escape waiter_a. Regression: without init invalidating the
+// snapshot, A escapes on B's pre-init zero-runnable summary, on all seven ISAs.
+TEST_P(DsGwsTest, RemoteInitDefersPeerQuiescenceDecision) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_remote_init_mem");
+  amdgpu::L2Cache l2("ds_gws_remote_init_l2");
+  constexpr uint64_t kPc = 0x200000;
+  mem.write32(kPc, gws_s_endpgm_word(arch));
+  auto gws = std::make_shared<amdgpu::GwsDevice>();
+  auto cu_a = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu_b = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu_c = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  cu_a->set_gws_device(gws);
+  cu_b->set_gws_device(gws);
+  cu_c->set_gws_device(gws);
+  auto decoder = Decoder::create(arch);
+
+  auto *waiter_a = cu_a->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
+  auto *waiter_b = cu_b->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
+  auto *producer_c = cu_c->dispatch_wf(/*wg_id=*/2, kPc, 102, 16);
+  ASSERT_NE(waiter_a, nullptr);
+  ASSERT_NE(waiter_b, nullptr);
+  ASSERT_NE(producer_c, nullptr);
+  cu_a->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  cu_b->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
+  cu_c->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/2, /*wf_count=*/1);
+  for (auto *wf : {waiter_a, waiter_b, producer_c}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+
+  run_gws(*cu_a, *decoder, arch, GwsOp::kSemaP, *waiter_a, /*count=*/0, /*offset0=*/0);
+  run_gws(*cu_b, *decoder, arch, GwsOp::kSemaP, *waiter_b, /*count=*/0, /*offset0=*/1);
+  ASSERT_EQ(waiter_a->state(), amdgpu::WfState::GWS_WAIT);
+  ASSERT_EQ(waiter_b->state(), amdgpu::WfState::GWS_WAIT);
+
+  cu_a->step();
+  cu_b->step();
+  ASSERT_EQ(waiter_a->state(), amdgpu::WfState::GWS_WAIT);
+  ASSERT_EQ(waiter_b->state(), amdgpu::WfState::GWS_WAIT);
+
+  // CU C seeds a credit on waiter_b's resource via init and then goes idle.
+  run_gws(*cu_c, *decoder, arch, GwsOp::kInit, *producer_c, /*count=*/1, /*offset0=*/1);
+  producer_c->halt();
+
+  // Step A before B. The init must have invalidated B's snapshot, so waiter_a stays
+  // parked rather than escaping on B's stale zero-runnable summary.
+  cu_a->step();
+  EXPECT_EQ(waiter_a->state(), amdgpu::WfState::GWS_WAIT)
+      << "waiter A escaped before the peer an init-seeded credit will wake could signal";
+
+  // B now polls, consumes the seeded credit, and wakes.
   for (int i = 0; i < 4 && waiter_b->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu_b->step();
   EXPECT_NE(waiter_b->state(), amdgpu::WfState::GWS_WAIT);

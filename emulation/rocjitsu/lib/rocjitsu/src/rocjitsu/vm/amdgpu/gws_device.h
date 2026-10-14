@@ -12,6 +12,7 @@
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -109,29 +110,31 @@ class Wavefront;
 ///    wave replaced by a runnable producer) or a producer dispatched alongside a
 ///    parked wave. The guarantee covers waves that are *resident* when the scan
 ///    runs plus waves the process has not admitted yet, but only while the latter
-///    can still be admitted: when a dispatch still has waves to admit (expected >
-///    admitted), escape is blocked *iff the next workgroup can still be placed*.
-///    That placement test mirrors CommandProcessor::dispatch_workgroups() exactly
-///    -- the command processor publishes the dispatch's placement requirements and
-///    its eligible CU set (@ref note_dispatch_placement), and the scan asks whether
-///    any eligible CU can currently accept the whole workgroup
-///    (@ref ComputeUnitCore::can_accept_workgroup, which checks wave slots,
-///    registers, LDS, and scratch and takes no CU wave lock, so this stays within
-///    the leaf-lock protocol). A plain "some CU has a free wave slot" test is
-///    insufficient: it ignores the workgroup's wave count and resource needs and
-///    counts CUs the dispatch is not allowed to use, so it can block escape on a
-///    producer that can never actually be placed (a 3-slot CU cannot host a 2-wave
-///    workgroup with one slot free; an idle but untargeted CU cannot host it at
-///    all). If some eligible CU can accept it, the not-yet-admitted producer can be
-///    placed and could signal, so escape is deferred; bumping the version at its
-///    admission cannot undo an escape that already fired. If no eligible CU can
-///    accept it, the unadmitted producer is gated behind the parked waves being
-///    judged -- a genuine deadlock -- so escape proceeds; blocking unconditionally
-///    would forfeit termination (a parked GWS wave counts as runnable, so its CU
-///    would spin on it forever). A dispatch whose placement requirements were never
-///    published (standalone/test) cannot be proven admittable and so never blocks
-///    escape. Once every expected wave has been admitted (and each then parks or
-///    retires) the scan proceeds as usual.
+///    can still be admitted. Placement is the command processor's responsibility,
+///    not the store's: CommandProcessor::dispatch_workgroups() alone knows a
+///    dispatch's eligible CUs, its WGP paired-LDS/CU-mode reservations, and its PM4
+///    scratch pool, and it places greedily -- any workgroup it *can* place it places
+///    at once, so a placeable producer immediately becomes a resident, runnable wave
+///    (covered by the quiescence scan above). The store therefore never re-derives
+///    placement (which would both race the owning CU's allocator and misjudge the
+///    WGP/PM4 constraints it cannot see). Instead the command processor publishes,
+///    per fan-out shard, whether that shard still has workgroups it has not yet
+///    *attempted* to place (@ref set_shard_pending): a shard is marked pending when
+///    it is accepted into a CP's fan-out inbox and cleared once that CP has run its
+///    placement pass for it. Escape is blocked while any shard of the process's
+///    dispatches is still pending -- its not-yet-attempted workgroups may still
+///    produce a signaler. Once every shard has attempted placement (whatever it
+///    could place is resident; whatever it could not is genuinely unplaceable behind
+///    the parked waves being judged), only the quiescence scan governs: if no
+///    resident wave can still signal, escape proceeds. Blocking unconditionally on
+///    unadmitted work would forfeit termination (a parked GWS wave counts as
+///    runnable, so its CU would spin on it forever). A dispatch with no pending
+///    shard published (a single-CP cooperative grid, or standalone/test use) is
+///    governed by the quiescence scan alone. (Bound: because placement is evaluated
+///    at CP-pass granularity, a producer that becomes placeable only after a sibling
+///    retires can, in the step between that retirement and the next CP placement
+///    pass, momentarily look unplaceable; the last-resort backstop may then abandon
+///    the wait one step early -- an observable, recoverable event, see below.)
 ///
 ///    Recovery is observable: when the backstop abandons a wait it emits a
 ///    rate-limited diagnostic (process, resource, wave location) so a genuine
@@ -197,20 +200,20 @@ public:
   /// then bounded only by currently-resident waves, as before.
   void add_resident(uint32_t process_id, uint32_t dispatch_id, uint32_t count,
                     uint32_t expected_total_waves);
-  /// @brief Publish a dispatch's workgroup-placement requirements and eligible CU
-  /// set so the quiescence backstop can test whether a not-yet-admitted producer
-  /// could still be placed (see @ref escape_ready and the pending-work note in the
-  /// class doc).
-  /// @details Called by the command processor, which owns placement: it mirrors
-  /// CommandProcessor::dispatch_workgroups() (CU eligibility via entry.allows_cu
-  /// plus @ref ComputeUnitCore::can_accept_workgroup). @p eligible_cus is unioned
-  /// across calls so each fan-out shard's XCD contributes its CUs under the shared
-  /// dispatch id. Pass a non-empty @p eligible_cus and nonzero @p wfs_per_workgroup
-  /// to arm the gate; the store never dereferences a CU it has not registered.
-  void note_dispatch_placement(uint32_t dispatch_id, uint32_t process_id,
-                               uint32_t expected_total_waves, uint32_t wfs_per_workgroup,
-                               uint32_t lds_bytes, uint32_t scratch_wave_limit,
-                               const std::vector<ComputeUnitCore *> &eligible_cus);
+  /// @brief Mark (or clear) a fan-out shard as having workgroups not yet attempted
+  /// for placement, so the quiescence backstop defers while a not-yet-admitted
+  /// producer may still arrive (see @ref escape_ready and the pending-work note in
+  /// the class doc).
+  /// @details Placement lives entirely in the command processor, which calls this:
+  /// it marks a shard pending (@p pending true) when it accepts the shard into its
+  /// fan-out inbox, and clears it (@p pending false) once it has run a placement
+  /// pass for it (greedy placement means whatever was placeable is now resident, and
+  /// whatever remains is genuinely unplaceable). @p shard_key is an opaque,
+  /// never-dereferenced identity for the shard's owning command processor, so each
+  /// fan-out shard of one dispatch is tracked independently. A dispatch with no
+  /// pending shard published is governed by the quiescence scan alone.
+  void set_shard_pending(uint32_t dispatch_id, uint32_t process_id, const void *shard_key,
+                         bool pending);
   /// @brief Drop @p count resident waves of a dispatch (clamped at zero).
   void remove_resident(uint32_t dispatch_id, uint32_t count);
   /// @brief Un-admit @p count waves of a dispatch rolled back before execution.
@@ -251,6 +254,11 @@ public:
   /// @brief Number of processes with live GWS resource tables (test/diagnostic).
   size_t tracked_process_count();
 
+  /// @brief Number of dispatches with live participant accounting (test/diagnostic).
+  /// @details Lets a regression observe that a dropped/aborted dispatch's admission
+  /// entry was cleared (so it no longer lingers after teardown).
+  size_t tracked_dispatch_count();
+
 private:
   /// @brief Per-resource barrier/semaphore state.
   struct Resource {
@@ -278,19 +286,13 @@ private:
     uint32_t process_id = 0; ///< Owning process (so the scan can find a process's dispatches).
     uint32_t expected = 0;   ///< Total waves the dispatch will ever admit (grid size).
     uint32_t admitted = 0;   ///< Cumulative waves admitted so far.
-    /// Placement feasibility inputs published by the command processor (@ref
-    /// note_dispatch_placement) so the quiescence backstop can decide whether a
-    /// not-yet-admitted producer could actually be placed, mirroring
-    /// CommandProcessor::dispatch_workgroups(): the workgroup's wave count and its
-    /// LDS/scratch needs, plus the dispatch's eligible CU set (entry.allows_cu,
-    /// unioned across fan-out shards). A zero @c wfs_per_workgroup or an empty
-    /// @c eligible_cus means the requirements are unknown (standalone/test, no CP
-    /// publication); such a dispatch is never proven admittable, so it does not
-    /// block escape.
-    uint32_t wfs_per_workgroup = 0;
-    uint32_t lds_bytes = 0;
-    uint32_t scratch_wave_limit = UINT32_MAX;
-    std::vector<ComputeUnitCore *> eligible_cus;
+    /// Fan-out shards (identified by their owning command processor) that still have
+    /// workgroups the command processor has not yet attempted to place (@ref
+    /// set_shard_pending): populated when a shard is accepted into a CP's inbox and
+    /// emptied once that CP runs its placement pass. While non-empty the quiescence
+    /// backstop defers -- a not-yet-attempted shard may still place a producer. The
+    /// keys are opaque and never dereferenced (placement lives in the CP, not here).
+    std::unordered_set<const void *> unattempted_shards;
   };
 
   /// @brief Drop a parked semaphore P-waiter's queued arrival stamp from @p res

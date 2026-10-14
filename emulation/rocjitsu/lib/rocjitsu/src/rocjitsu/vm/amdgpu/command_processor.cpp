@@ -938,8 +938,21 @@ void CommandProcessor::accept_fanout_shard(DispatchEntry shard,
     // hw_queue_mutex_ is acquired while holding this one, and it is held only for
     // the push so a peer's engine thread never blocks on it for long.
     std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
-    if (!shard.is_non_kernel())
+    if (!shard.is_non_kernel()) {
       fanout_launch_metadata_inbox_.insert_or_assign(shard.dispatch_id, std::move(launch_metadata));
+      // Register this shard as pending in the device-global GWS store before it is
+      // even drained, so a peer shard already parked at a GWS wait cannot be declared
+      // deadlocked while this shard's producer is still sitting in the inbox (the
+      // backstop would otherwise escape it one quiescence pass too early). The owning
+      // CP clears the mark once it runs its placement pass (dispatch_workgroups).
+      // Keyed by this CP's identity so each fan-out shard is tracked independently.
+      // Only the opaque store leaf-lock is taken here (no peer CP lock), preserving
+      // the fan-out lock-order contract; the mark is cleared on teardown regardless.
+      shard.gws_pending_shard = true;
+      if (!cus_.empty())
+        cus_.front()->gws_device().set_shard_pending(shard.dispatch_id, shard.process_id,
+                                                     /*shard_key=*/this, /*pending=*/true);
+    }
     fanout_inbox_.push_back(std::move(shard));
   }
   // Cross-thread and cross-partition safe: the engine buffers the event and drains
@@ -2300,28 +2313,6 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   if (entry.grid_faulted())
     return {.dispatched = 0, .outcome = VmAccessOutcome::Complete};
 
-  // Publish this dispatch's workgroup-placement requirements and eligible CU set to
-  // the device-global GWS store once, so its deadlock backstop can decide whether a
-  // not-yet-admitted producer could still be placed (mirroring the placement test
-  // below) rather than guessing from a free wave slot anywhere. Fan-out shards keep
-  // one dispatch id, so each XCD's CP contributes its own eligible CUs (unioned in
-  // the store). The store never dereferences a CU it has not registered.
-  if (!entry.gws_admission_published) {
-    entry.gws_admission_published = true;
-    std::vector<ComputeUnitCore *> eligible_cus;
-    eligible_cus.reserve(cus_.size());
-    for (ComputeUnitCore *cu : cus_)
-      if (entry.allows_cu(cu))
-        eligible_cus.push_back(cu);
-    const uint64_t grid_total_waves =
-        static_cast<uint64_t>(entry.grid_total_wgs()) * entry.wfs_per_workgroup;
-    cus_.front()->gws_device().note_dispatch_placement(
-        entry.dispatch_id, entry.process_id,
-        static_cast<uint32_t>(std::min<uint64_t>(grid_total_waves, UINT32_MAX)),
-        entry.wfs_per_workgroup, entry.group_segment_fixed_size, entry.scratch_wave_limit_per_se,
-        eligible_cus);
-  }
-
   // All waves in one workgroup currently land on one physical CU so the
   // existing barrier implementation remains local. WGP mode additionally
   // reserves that CU's sibling and binds the waves to their shared LDS pool.
@@ -2580,6 +2571,19 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
         dispatch_to_placement(local_wg_id, global_wg_id, *placement);
     if (placement_outcome != VmAccessOutcome::Complete)
       return {.dispatched = dispatched, .outcome = placement_outcome};
+  }
+  // Reaching here (the while loop fully placed the shard, or broke out having placed
+  // all it could) means this command processor has run a placement pass for a shard
+  // it accepted via fan-out. Clear its pending mark so the GWS deadlock backstop no
+  // longer defers on its behalf: whatever was placeable is now resident (and visible
+  // to the quiescence scan), and whatever remains is genuinely unplaceable. Only
+  // fanned-in shards are tracked, so non-fan-out and non-GWS dispatches add no store
+  // traffic here. Transient/fault exits above skip this: a retry re-runs this pass,
+  // and a fault tears the dispatch down (clearing its admission wholesale).
+  if (entry.gws_pending_shard && !cus_.empty()) {
+    entry.gws_pending_shard = false;
+    cus_.front()->gws_device().set_shard_pending(entry.dispatch_id, entry.process_id,
+                                                 /*shard_key=*/this, /*pending=*/false);
   }
   return {.dispatched = dispatched, .outcome = VmAccessOutcome::Complete};
 }
@@ -3301,32 +3305,37 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
   for (auto &entry : queue.entries)
     if (entry.grid_completion)
       entry.grid_completion->mark_faulted();
+  // Clear every dropped dispatch's device-global GWS participant accounting before
+  // discarding the queue's entries. This must cover entries with no live wave --
+  // one that never admitted a wave, or whose last wave already retired -- which the
+  // resident-wave halt loop below cannot reach. remove_resident() deliberately
+  // keeps an admitted<expected entry, so a dropped dispatch would otherwise leave a
+  // stale admission entry that blocks the quiescence backstop from ever escaping
+  // this process. Residency and parked state are settled by each halted wave's
+  // free_wavefront_resources()/release_wf() below; only the whole-dispatch accounting
+  // is cleared here (notify_dispatch_gone is idempotent).
+  if (!cus_.empty()) {
+    GwsDevice &gws = cus_.front()->gws_device();
+    for (const DispatchEntry &entry : qs.entries)
+      gws.notify_dispatch_gone(entry.dispatch_id);
+    for (const DispatchEntry &entry : queue.entries)
+      gws.notify_dispatch_gone(entry.dispatch_id);
+  }
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
   // waves before releasing the submission's BO references or publishing failure.
-  // Tear each affected dispatch down through the centralized abort path rather
-  // than halting waves in place: a raw halt() bypasses free_wavefront_resources()
-  // and the dispatch-removal notifications, so a partially-admitted GWS dispatch
-  // would leave stale parked/resident/participant entries in the device-global
-  // store -- and a stale admitted<expected entry blocks the quiescence backstop
-  // from ever escaping that process. abort_dispatch() reconciles all of it
-  // (notify_parked_wave_gone + remove_resident + notify_dispatch_gone), exactly as
-  // the VM-fault abort path does across every CU.
+  // halt() frees the wave's SGPR/VGPR, resets the slot, reconciles its GWS
+  // parked/residency state (free_wavefront_resources()/release_wf()), fires the
+  // wavefront-halted hook, and notifies workgroup completion -- matching the
+  // non-fault teardown, so observers and completion bookkeeping stay consistent.
   for (auto *cu : cus_) {
-    std::vector<uint32_t> faulted_dispatch_ids;
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (wave && !wave->is_halted() && wave->process_id() == queue.process_id &&
-            wave->queue_id() == queue.queue_id) {
-          const uint32_t dispatch_id = wave->dispatch_id();
-          if (std::find(faulted_dispatch_ids.begin(), faulted_dispatch_ids.end(), dispatch_id) ==
-              faulted_dispatch_ids.end())
-            faulted_dispatch_ids.push_back(dispatch_id);
-        }
+            wave->queue_id() == queue.queue_id)
+          wave->halt();
       }
     });
-    for (uint32_t dispatch_id : faulted_dispatch_ids)
-      cu->abort_dispatch(dispatch_id);
   }
   flush_gpu_caches();
   qs.entries.clear();

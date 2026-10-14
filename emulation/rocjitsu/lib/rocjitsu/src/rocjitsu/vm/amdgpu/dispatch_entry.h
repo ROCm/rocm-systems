@@ -427,11 +427,12 @@ struct DispatchEntry {
   /// Completion hooks and signal have already been delivered.
   bool completion_notified = false;
   bool execution_begun = false;
-  /// Set once this entry has published its workgroup-placement requirements and
-  /// eligible CU set to the device-global GWS store (GwsDevice::note_dispatch_placement),
-  /// so the quiescence backstop can test whether a not-yet-admitted producer can
-  /// still be placed. Published once per shard; fan-out shards union their CUs.
-  bool gws_admission_published = false;
+  /// Set when this entry was accepted into a command processor's fan-out inbox and
+  /// marked pending in the device-global GWS store (GwsDevice::set_shard_pending), so
+  /// the quiescence backstop defers while this shard's producer has not yet been
+  /// placed. Cleared by the owning CP once it runs its placement pass. Only set for
+  /// fanned-in shards, so non-fan-out and non-GWS dispatches add no GWS store traffic.
+  bool gws_pending_shard = false;
   /// The packet carried an acquire fence of at least agent scope. Recorded on the
   /// entry so that every XCD running part of the grid can invalidate its own caches
   /// on its own thread, not just the one that read the packet.
