@@ -121,6 +121,7 @@ WORKLOAD_CONFIGS = {
         "gpu_target": "gfx950",
         "metric_key": "tokens_per_second_per_gpu",
         "multiple_results": "perf_primus-megatron-GPT-OSS-120B.csv",
+        "precisions": ["BF16", "FP8"],  # what MAD's run.sh trains on gfx950
         # The shipped config profiles iterations 6-7, which at 2 nodes cost
         # 3.2x (BF16) and 3.7x (FP8) a steady iteration and leave the next two
         # elevated. Primus averages from iteration 3, so 15 iterations give 13
