@@ -50,11 +50,12 @@ def test_fstype_label_folds_ext4_journal_mode(ais_check):
     assert ais_check.fstype_label(_mount(ais_check, fstype="xfs")) == "xfs"
 
 
-def _fake_topology(
+def _fake_topology(  # pylint: disable=too-many-arguments
     ais_check,
     monkeypatch,
     prefixes,
     slaves,
+    *,
     start=None,
     levels=None,
     names=None,

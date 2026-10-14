@@ -5,6 +5,10 @@
 
 # pylint: disable=invalid-name
 
+# ais-check ships as a single self-contained executable under /opt/rocm/bin, so
+# it stays one module rather than a package.
+# pylint: disable=too-many-lines
+
 """
 Check if the necessary AMD Infinity Storage (AIS) components are installed
 and whether at least one mounted volume can use hipFile's fast path.
@@ -740,6 +744,67 @@ def md_level(sysfs_dir):
         return None
 
 
+def dm_layer_verdict(sysfs_dir, prefix):
+    """
+    Classify a device-mapper node for the block-stack walk, given the target
+    prefix of its dm/uuid. Only LVM targets keep the direct path; a RAID LV
+    additionally has to run a pass-through level.
+    """
+    if prefix != "lvm":
+        return "reject"
+    raid_ok = lvm_raid_supported(sysfs_dir)
+    if raid_ok is True:
+        return "descend"
+    return "reject" if raid_ok is False else "unknown"
+
+
+def md_layer_verdict(sysfs_dir):
+    """
+    Classify an MD node for the block-stack walk. A partition of an array
+    (md0p1) carries no slaves or md/ state of its own, so the array it was
+    carved out of has to be inspected instead.
+    """
+    if os.path.exists(os.path.join(sysfs_dir, "partition")):
+        return "parent"
+    level = md_level(sysfs_dir)
+    if level is None:
+        return "unknown"
+    return "descend" if level in MD_PASSTHROUGH_LEVELS else "reject"
+
+
+def block_layer_verdict(sysfs_dir):
+    """
+    Classify one node of the block stack, from its dm/uuid prefix when it is a
+    device-mapper target and from its kernel name otherwise. Returns what the
+    walk should do with the node:
+
+      "descend"  a supported stacking layer; check the devices it sits on
+      "leaf"     a local NVMe; nothing below it to check
+      "parent"   an MD partition; the array it was carved out of carries the
+                 state to classify
+      "reject"   breaks the direct path, so the whole stack is False
+      "unknown"  can't be classified from sysfs, so the whole stack is None
+    """
+    prefix = dm_uuid_prefix(sysfs_dir)
+    if prefix is not None:
+        return dm_layer_verdict(sysfs_dir, prefix)
+    if os.path.isdir(os.path.join(sysfs_dir, "dm")):
+        # A device-mapper node always carries a dm/ directory in sysfs. If one
+        # is present but its uuid couldn't be read (permissions or a transient
+        # error), the layer's target type is unknown and the topology is
+        # unresolvable rather than a leaf.
+        return "unknown"
+
+    name = os.path.basename(sysfs_dir)
+    if name.startswith("md"):
+        return md_layer_verdict(sysfs_dir)
+    if name.startswith("nvme"):
+        # A physical leaf of the right kind; nothing below it to check.
+        return "leaf"
+    # Any other leaf (scsi, virtio, loopback, ...) is not P2P-capable.
+    return "reject"
+
+
 def stack_over_nvme(devno):
     """
     Whether a stacked (LVM or MD RAID) mount bottoms out on local NVMe.
@@ -765,40 +830,15 @@ def stack_over_nvme(devno):
             continue
         seen.add(node)
 
-        name = os.path.basename(node)
-        prefix = dm_uuid_prefix(node)
-        if prefix is not None:
-            # A device-mapper layer; only LVM targets keep the direct path.
-            if prefix != "lvm":
-                return False
-            raid_ok = lvm_raid_supported(node)
-            if raid_ok is not True:
-                return raid_ok
-        elif os.path.isdir(os.path.join(node, "dm")):
-            # A device-mapper node always carries a dm/ directory in sysfs. If
-            # one is present but its uuid couldn't be read (permissions or a
-            # transient error), the layer's target type is unknown and the
-            # topology is unresolvable rather than a leaf.
-            return None
-        elif name.startswith("md"):
-            # MD software RAID. A partition of an array (md0p1) carries no
-            # slaves or md/ state of its own, so step up to the array it was
-            # carved out of.
-            if os.path.exists(os.path.join(node, "partition")):
-                stack.append(os.path.dirname(node))
-                continue
-            level = md_level(node)
-            if level is None:
-                return None
-            if level not in MD_PASSTHROUGH_LEVELS:
-                return False
-        elif name.startswith("nvme"):
-            # A physical leaf of the right kind; nothing below it to check.
+        verdict = block_layer_verdict(node)
+        if verdict == "leaf":
             saw_leaf = True
             continue
-        else:
-            # Any other leaf (scsi, virtio, loopback, ...) is not P2P-capable.
-            return False
+        if verdict == "parent":
+            stack.append(os.path.dirname(node))
+            continue
+        if verdict != "descend":
+            return False if verdict == "reject" else None
 
         slaves = block_slaves(node)
         if not slaves:
