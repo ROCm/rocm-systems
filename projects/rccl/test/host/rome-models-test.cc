@@ -208,4 +208,30 @@ TEST_F(RomeModelsParseGraphLightMicrotest, SegmentLongerThanTreeBaseRow_IsReject
   }
 }
 
+// The shipping preset topologies go through the same guarded path as RCCL_TREES does
+// (rome_models.cc passes romeTopoModels[i].treeBase with a non-NULL gpu_map), under
+// NCCLCHECK, so a guard that rejected one of them would fail ncclCommInitRank outright.
+TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetTreeBase_IsAccepted) {
+  constexpr size_t kModels = sizeof(romeTopoModels) / sizeof(romeTopoModels[0]);
+
+  for (size_t i = 0; i < kModels; i++) {
+    const rcclRomeModel& model = romeTopoModels[i];
+    if (model.treeBase == nullptr) continue;
+    SCOPED_TRACE("romeTopoModels[" + std::to_string(i) + "], treeBase " + model.treeBase);
+
+    RomeModelsParseScene scene(model.nGpus);
+    ncclTopoGraph graph;
+    std::memset(&graph, 0, sizeof(graph));
+    // The production map is a permutation of the GPU numbers; identity is the
+    // representative one, and its length is what bounds the guarded lookup.
+    std::vector<int> identityMap(model.nGpus);
+    for (int g = 0; g < model.nGpus; g++) identityMap[g] = g;
+
+    EXPECT_EQ(parseGraphLight(model.treeBase, scene.system(), &graph, identityMap.data()),
+              ncclSuccess);
+  }
+
+  ResetNcclFakes();
+}
+
 }  // namespace
