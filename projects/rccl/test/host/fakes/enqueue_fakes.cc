@@ -80,7 +80,7 @@ std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable = DefaultEffe
 // the default-off policy here.
 int64_t rcclParamP2pDirectMaxChannels() { return 0; }
 bool ncclP2pUsesMemcpy() { return false; }
-int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t, int, bool) {
+int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t, int, int, bool) {
   return comm->p2pnChannelsPerPeer;
 }
 

@@ -7,56 +7,105 @@
 #include <gtest/gtest.h>
 
 #include <memory>
+#include <vector>
 
 #include "comm.h"
 #include "device.h"
 #include "enqueue.h"
 #include "nccl.h"
 
+namespace {
+constexpr int kPeer = 1;
+
+struct TwoRankComm {
+    std::unique_ptr<ncclComm> comm = std::make_unique<ncclComm>();
+    std::vector<ncclPeerInfo> peerInfo = std::vector<ncclPeerInfo>(2);
+
+    TwoRankComm(int p2pnChannels, int p2pnChannelsPerPeer, int argsBatches)
+    {
+        comm->rank                = 0;
+        comm->nRanks              = 2;
+        comm->p2pnChannels        = p2pnChannels;
+        comm->p2pnChannelsPerPeer = p2pnChannelsPerPeer;
+        comm->workArgsBytes       = sizeof(ncclDevKernelArgs) + argsBatches * sizeof(ncclDevWorkBatch);
+        peerInfo[0].hostHash      = 0x1234;
+        peerInfo[1].hostHash      = 0x1234;
+        comm->peerInfo            = peerInfo.data();
+    }
+    ncclComm* get() { return comm.get(); }
+};
+} // namespace
+
 TEST(P2pDirectMaxChannelsTests, DirectApisUseRequestedPoolWhenEnabled)
 {
-    auto comm                    = std::make_unique<ncclComm>();
-    comm->p2pnChannels           = 64;
-    comm->p2pnChannelsPerPeer    = 16;
-    comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 64 * sizeof(ncclDevWorkBatch);
+    TwoRankComm comm(64, 16, 64);
 
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, 128), 64);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, 128), 64);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 128), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, kPeer, 128), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, kPeer, 128), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 128), 64);
 }
 
 TEST(P2pDirectMaxChannelsTests, DisabledAndP2pBackedCollectivesKeepPeerSplit)
 {
-    auto comm                    = std::make_unique<ncclComm>();
-    comm->p2pnChannels           = 64;
-    comm->p2pnChannelsPerPeer    = 16;
-    comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 64 * sizeof(ncclDevWorkBatch);
+    TwoRankComm comm(64, 16, 64);
 
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, 0), 16);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncAlltoAll, 128), 16);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncGather, 128), 16);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 128, /*useMemcpy=*/true), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, kPeer, 0), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncAlltoAll, kPeer, 128), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncGather, kPeer, 128), 16);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 128, /*useMemcpy=*/true), 16);
+}
+
+TEST(P2pDirectMaxChannelsTests, OnlyPeersOnTheSameHostOrMnnvlCliqueAreWidened)
+{
+    TwoRankComm comm(64, 16, 64);
+    comm.peerInfo[kPeer].hostHash = 0x5678;
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, kPeer, 128), 16);
+
+    int cliqueRanks[]        = {0, kPeer};
+    comm.get()->MNNVL        = 1;
+    comm.get()->clique.size  = 2;
+    comm.get()->clique.ranks = cliqueRanks;
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, kPeer, 128), 64);
+
+    comm.get()->clique.size = 1;
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, kPeer, 128), 16);
+    comm.get()->clique.ranks = nullptr;
 }
 
 TEST(P2pDirectMaxChannelsTests, RequestedPoolRespectsKernelArgsBudget)
 {
-    auto comm                    = std::make_unique<ncclComm>();
-    comm->p2pnChannels           = 64;
-    comm->p2pnChannelsPerPeer    = 16;
-    comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 32 * sizeof(ncclDevWorkBatch);
+    TwoRankComm comm(64, 16, 32);
 
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 128), 32);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 128), 32);
 }
 
 TEST(P2pDirectMaxChannelsTests, RequestedPoolIsCappedAtValidatedMaximum)
 {
-    auto comm                    = std::make_unique<ncclComm>();
-    comm->p2pnChannels           = 256;
-    comm->p2pnChannelsPerPeer    = 64;
-    comm->workArgsBytes          = sizeof(ncclDevKernelArgs) + 256 * sizeof(ncclDevWorkBatch);
+    TwoRankComm comm(256, 64, 256);
 
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 64), 64);
-    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, 256), 128);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 64), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 256), 128);
+}
+
+TEST(P2pDirectMaxChannelsTests, RequestedPoolNeverNarrowsThePeerTile)
+{
+    TwoRankComm comm(256, 64, 256);
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 32), 64);
+}
+
+TEST(P2pDirectMaxChannelsTests, WidenedTransfersUseThePeerTileOrTheWholeWidenedTile)
+{
+    // Counts up to the per-peer tile keep their channels; counts between the two tiles fall back
+    // to the per-peer tile, so the peer never needs channels outside the two tiles it connected.
+    EXPECT_EQ(rcclP2pDirectTileChannels(16, 32, 128), 16);
+    EXPECT_EQ(rcclP2pDirectTileChannels(32, 32, 128), 32);
+    EXPECT_EQ(rcclP2pDirectTileChannels(64, 32, 128), 32);
+    EXPECT_EQ(rcclP2pDirectTileChannels(127, 32, 128), 32);
+    EXPECT_EQ(rcclP2pDirectTileChannels(128, 32, 128), 128);
+    // Without widening the count is untouched.
+    EXPECT_EQ(rcclP2pDirectTileChannels(48, 64, 64), 48);
 }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)

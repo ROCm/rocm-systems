@@ -488,14 +488,16 @@ in the following table.
         | communicator initialization.
 
     * - | ``RCCL_P2P_DIRECT_MAX_CHANNELS``
-        | Lets direct ``ncclSend`` / ``ncclRecv`` / ``ncclSendRecv``
-        | operations use a wider P2P channel tile. P2P-backed
-        | collectives such as all-to-all, scatter, and gather keep the normal
-        | per-peer channel split. The actual channel count remains
-        | message-size tuned and is capped by the P2P pool, kernel-argument
+        | Lets large direct ``ncclSend`` / ``ncclRecv`` / ``ncclSendRecv``
+        | transfers to peers on the same node or in the same MNNVL clique use
+        | a wider P2P channel tile. Each transfer uses either the normal
+        | per-peer channel split or the whole wider tile, depending on its
+        | size. P2P-backed collectives such as all-to-all, scatter, and
+        | gather, and peers reached over the network, keep the per-peer split.
+        | The wider tile is capped by the P2P pool, the kernel-argument
         | budget, and the validated maximum of 128 channels.
-        | This option is useful for large pairwise transfers on gfx1250 when
-        | the communicator contains more ranks than the operation uses.
+        | This option is useful for large pairwise transfers when the
+        | communicator contains more ranks than the operation uses.
         | It does not widen the Copy Engine path selected by
         | ``NCCL_P2P_USE_CUDA_MEMCPY=1``.
       - | ``0`` (default): use the communicator's per-peer channel count.
