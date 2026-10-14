@@ -105,6 +105,7 @@ WORKLOAD_CONFIGS = {
         "gpu_target": "gfx950",
         "metric_key": "tokens_per_second_per_gpu",
         "multiple_results": "perf_primus-megatron-Llama-3.1-70B.csv",
+        "precisions": ["BF16", "FP8"],  # what MAD's run.sh trains on gfx950
         "reference_values": {
             "2N": 1685,
             "4N": 1600,
@@ -1199,14 +1200,20 @@ def append_result(
 def pair_by_precision(
     baseline_results: list[dict],
     candidate_results: list[dict],
+    expected: list[str] | None = None,
 ) -> list[dict]:
     """Join the two phases into one comparison row per precision.
 
     A precision present in only one phase still gets a row, with the other
     side left as None, so the report can say which side is missing instead of
-    silently dropping it.
+    silently dropping it. So does an expected precision neither phase
+    returned: a leg disabled upstream must fail the gate, not pass it on the
+    precisions that are left.
     """
-    comparisons: dict[str, dict] = {}
+    comparisons: dict[str, dict] = {
+        precision: {"precision": precision, BASELINE: None, CANDIDATE: None}
+        for precision in expected or []
+    }
     for phase, rows in ((BASELINE, baseline_results), (CANDIDATE, candidate_results)):
         for row in rows:
             precision = row.get("precision") or ""
@@ -1531,6 +1538,7 @@ def main() -> None:
     # Step 7: Score the candidate against the baseline, per precision
     comparisons = pair_by_precision(
         phase_results.get(BASELINE, []), phase_results.get(CANDIDATE, []),
+        expected=workload_config.get("precisions", []),
     )
     regression_msgs = []
     for c in comparisons:
@@ -1573,7 +1581,7 @@ def main() -> None:
         BASELINE: workload_config["base_image"],
         CANDIDATE: overlay_image,
     }
-    if comparisons:
+    if all_rows:
         for c in comparisons:
             for phase in (BASELINE, CANDIDATE):
                 row = c[phase]
