@@ -55,7 +55,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
 
 * `-m/--mem-level` now accepts `ALL`, which is also its default.
 
-* `--specs-correction` takes a comma-separated list of `name:value` pairs, like other list options. The quoted form `--specs-correction="num_xcd:4,cu_per_gpu:64"` still works.
+* `--specs-correction` takes `name:value` pairs separated by spaces instead of commas, for example `--specs-correction num_xcd:4 cu_per_gpu:64`.
 
 * Top-level options such as `--list-metrics` can no longer be abbreviated (for example `--list-metr`), matching profile and analyze options.
 
