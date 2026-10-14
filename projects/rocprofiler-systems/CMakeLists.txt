@@ -593,6 +593,7 @@ install(
     PATTERN "evals" EXCLUDE
     PATTERN "run_evals.py" EXCLUDE
     PATTERN "test_run_evals.py" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
 )
 
 # ------------------------------------------------------------------------------#
