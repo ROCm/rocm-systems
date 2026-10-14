@@ -19,6 +19,23 @@ Older planning drafts are on branch `users/feizheng10/aiprofcomp-865-docs-backup
 
 `rocprof-compute profile` replays a kernel once per perfmon pass. Each hardware block in a pass has its own counter limit (`perfmon_config` on `CounterFile` in `src/rocprof_compute_soc/soc_base.py`). A pass can hold GRBM and SQ together, because each counter is charged only to its own block. The pass cannot hold more SQ counters than the SQ limit, even when GRBM still has room.
 
+gfx942, the reference architecture, is one example from `src/utils/mi_gpu_spec.yaml`:
+
+```yaml
+- gpu_arch: gfx942
+  perfmon_config:
+    SQ: 8
+    TA: 2
+    TD: 2
+    TCP: 4
+    TCC: 4
+    CPC: 2
+    CPF: 2
+    SPI: 6
+    GRBM: 2
+    GDS: 4
+```
+
 Analysis YAML defines a metric as an expression over PMC counters. A metric's PMC set is the hardware counters that expression reads. The shipping allocator packs the whole counter list into as few passes as it can. It does not require one metric’s counters to share a pass. Analyze then evaluates the expression on values merged across those replays.
 
 ```mermaid
