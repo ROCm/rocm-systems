@@ -268,7 +268,7 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_Are
   HIP_CHECK(hipLibraryUnload(library));
 }
 #else
-// @asserts: hipKernelSetAttributeForDevice - unavailable before CUDA 12.8
+// @asserts: hipKernelSetCacheConfig - unavailable before CUDA 12.0
 HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported)
 {
    HIP_SKIP_TEST("hipKernelSetCacheConfig requires CUDA 12.0 or later")
