@@ -5,7 +5,7 @@
 #![allow(clippy::unwrap_used, clippy::cast_possible_truncation)]
 use super::*;
 use crate::instance;
-use rocddi::host_storage::{Allocator, Buffer};
+use rocddi::memory::storage::TryPush;
 use std::mem::size_of;
 
 #[test]
@@ -135,28 +135,11 @@ fn local_backing_uses_the_scope_owner_even_when_it_is_not_first() {
     );
 }
 
-unsafe extern "C" fn reject_metadata_allocation(
-    _: *mut std::ffi::c_void,
-    _: u64,
-    _: u64,
-) -> *mut std::ffi::c_void {
-    std::ptr::null_mut()
-}
-
-unsafe extern "C" fn ignore_metadata_free(_: *mut std::ffi::c_void, _: *mut std::ffi::c_void) {}
-
 #[test]
-fn duplicate_device_handles_are_invalid_before_metadata_allocation() {
+fn duplicate_device_handles_are_invalid() {
     unsafe {
         let (instance, memory) = host_resource();
         assert_eq!(destroy(memory), 0);
-        (*instance.cast::<Instance>()).allocator = Allocator::from_callbacks(
-            std::ptr::null_mut(),
-            Some(reject_metadata_allocation),
-            None,
-            Some(ignore_metadata_free),
-        )
-        .unwrap();
         let scope = (&raw mut (*instance.cast::<Instance>()).scope).cast();
         let request = amdf_memory_device_access_t {
             device: std::ptr::null_mut(),
@@ -507,7 +490,7 @@ fn registration_requires_the_declared_host_cacheability() {
         assert!(memory.is_null());
         parameters.registered_host_cacheability = AMDF_HOST_CACHEABILITY_WRITE_BACK;
         assert_eq!(create(scope, &raw const parameters, &raw mut memory), 0);
-        let page = memory::host_page_size().unwrap();
+        let page = memory::host::host_page_size().unwrap();
         let address = bytes.as_ptr() as u64;
         let source_byte_offset = address & (page - 1);
         let mut memory_info = amdf_memory_info_t {
@@ -554,10 +537,9 @@ fn registration_requires_the_declared_host_cacheability() {
 #[test]
 fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
     unsafe {
-        let allocator = Allocator::system();
         let device = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let other_device = device.wrapping_add(1);
-        let mut accesses = Buffer::try_with_capacity(1, allocator).unwrap();
+        let mut accesses = rocddi::memory::storage::try_vec_with_capacity(1).unwrap();
         accesses
             .try_push(Access {
                 device,
@@ -571,25 +553,22 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
                 address: 0x0080_0000,
             })
             .unwrap();
-        let owner = Owned::new(
-            Memory {
-                scope: std::ptr::null_mut(),
-                backing: Backing::Registered,
-                info: amdf_memory_info_t {
-                    access_count: 1,
-                    byte_length: 16 * 1024,
-                    ..Default::default()
-                },
-                access: accesses,
-                host: None,
-                cacheability: AMDF_HOST_CACHEABILITY_UNKNOWN,
-                children: AtomicU64::new(0),
-                freeing: false,
-                host_backing_next: AtomicUsize::new(0),
-                listed_host_backing: false,
+        let owner = Owned::new(Memory {
+            scope: std::ptr::null_mut(),
+            backing: Backing::Registered,
+            info: amdf_memory_info_t {
+                access_count: 1,
+                byte_length: 16 * 1024,
+                ..Default::default()
             },
-            allocator,
-        )
+            access: accesses,
+            host: None,
+            cacheability: AMDF_HOST_CACHEABILITY_UNKNOWN,
+            children: AtomicU64::new(0),
+            freeing: false,
+            host_backing_next: AtomicUsize::new(0),
+            listed_host_backing: false,
+        })
         .unwrap();
         let pointer = owner.into_raw();
         let scratch = queue_scratch(pointer.cast(), 0, device, 7, 4096, 8192).unwrap();
@@ -621,9 +600,8 @@ fn queue_scratch_resolves_one_device_range_and_blocks_early_free() {
 #[test]
 fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
     unsafe {
-        let allocator = Allocator::system();
         let device = std::ptr::NonNull::<Device>::dangling().as_ptr();
-        let mut accesses = Buffer::try_with_capacity(1, allocator).unwrap();
+        let mut accesses = rocddi::memory::storage::try_vec_with_capacity(1).unwrap();
         accesses
             .try_push(Access {
                 device,
@@ -637,25 +615,22 @@ fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
                 address: 0x0080_0000,
             })
             .unwrap();
-        let owner = Owned::new(
-            Memory {
-                scope: std::ptr::null_mut(),
-                backing: Backing::Registered,
-                info: amdf_memory_info_t {
-                    access_count: 1,
-                    byte_length: 4096,
-                    ..Default::default()
-                },
-                access: accesses,
-                host: None,
-                cacheability: AMDF_HOST_CACHEABILITY_UNKNOWN,
-                children: AtomicU64::new(0),
-                freeing: false,
-                host_backing_next: AtomicUsize::new(0),
-                listed_host_backing: false,
+        let owner = Owned::new(Memory {
+            scope: std::ptr::null_mut(),
+            backing: Backing::Registered,
+            info: amdf_memory_info_t {
+                access_count: 1,
+                byte_length: 4096,
+                ..Default::default()
             },
-            allocator,
-        )
+            access: accesses,
+            host: None,
+            cacheability: AMDF_HOST_CACHEABILITY_UNKNOWN,
+            children: AtomicU64::new(0),
+            freeing: false,
+            host_backing_next: AtomicUsize::new(0),
+            listed_host_backing: false,
+        })
         .unwrap();
         let pointer = owner.into_raw();
         let command = kernel_command(pointer.cast(), 0, device, 7, 512, 24).unwrap();
@@ -693,10 +668,9 @@ fn kernel_commands_require_exact_executable_device_access_and_logical_range() {
 #[test]
 fn multi_device_access_queries_and_scratch_preserve_request_order() {
     unsafe {
-        let allocator = Allocator::system();
         let first = std::ptr::NonNull::<Device>::dangling().as_ptr();
         let second = first.wrapping_add(1);
-        let mut accesses = Buffer::try_with_capacity(2, allocator).unwrap();
+        let mut accesses = rocddi::memory::storage::try_vec_with_capacity(2).unwrap();
         for (ordinal, (device, address)) in [(first, 0x0080_0000), (second, 0x0090_0000)]
             .into_iter()
             .enumerate()
@@ -719,25 +693,22 @@ fn multi_device_access_queries_and_scratch_preserve_request_order() {
                 })
                 .unwrap();
         }
-        let owner = Owned::new(
-            Memory {
-                scope: std::ptr::null_mut(),
-                backing: Backing::Registered,
-                info: amdf_memory_info_t {
-                    access_count: 2,
-                    byte_length: 16 * 1024,
-                    ..Default::default()
-                },
-                access: accesses,
-                host: None,
-                cacheability: AMDF_HOST_CACHEABILITY_UNKNOWN,
-                children: AtomicU64::new(0),
-                freeing: false,
-                host_backing_next: AtomicUsize::new(0),
-                listed_host_backing: false,
+        let owner = Owned::new(Memory {
+            scope: std::ptr::null_mut(),
+            backing: Backing::Registered,
+            info: amdf_memory_info_t {
+                access_count: 2,
+                byte_length: 16 * 1024,
+                ..Default::default()
             },
-            allocator,
-        )
+            access: accesses,
+            host: None,
+            cacheability: AMDF_HOST_CACHEABILITY_UNKNOWN,
+            children: AtomicU64::new(0),
+            freeing: false,
+            host_backing_next: AtomicUsize::new(0),
+            listed_host_backing: false,
+        })
         .unwrap();
         let pointer = owner.into_raw();
         for (ordinal, (device, expected_address)) in [(first, 0x0080_0000), (second, 0x0090_0000)]
