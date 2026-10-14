@@ -1672,6 +1672,15 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
   CATCH;
 }
 
+// For use by tools only - not in library export table.
+hsa_status_t hsa_amd_enable_high_precision_timestamps() {
+  TRY;
+  IS_OPEN();
+  core::Runtime::runtime_singleton_->flag().set_enable_high_precision_timestamps(true);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
 hsa_status_t hsa_amd_register_system_event_handler(hsa_amd_system_event_callback_t callback,
                                                    void* data) {
   TRY;
@@ -2086,6 +2095,20 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_ha
   }
 
   return ret;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_vmem_get_vmem_info(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                        hsa_amd_vmem_handle_info_t* info) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(info);
+
+  /* The caller must provide a structure large enough to hold at least the size member. */
+  if (info->size < sizeof(hsa_amd_vmem_handle_info_t))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  return core::Runtime::runtime_singleton_->VMemoryGetHandleInfo(allocHandle, info);
   CATCH;
 }
 

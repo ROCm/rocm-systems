@@ -1371,6 +1371,11 @@ hsa_status_t HSA_API hsa_amd_vmem_get_alloc_properties_from_handle(
   return amdExtTable->hsa_amd_vmem_get_alloc_properties_from_handle_fn(alloc_handle, pool, type);
 }
 
+hsa_status_t HSA_API hsa_amd_vmem_get_vmem_info(
+    hsa_amd_vmem_alloc_handle_t alloc_handle, hsa_amd_vmem_handle_info_t* info) {
+  return amdExtTable->hsa_amd_vmem_get_vmem_info_fn(alloc_handle, info);
+}
+
 hsa_status_t HSA_API hsa_amd_agent_set_async_scratch_limit(hsa_agent_t agent, size_t threshold) {
   return amdExtTable->hsa_amd_agent_set_async_scratch_limit_fn(agent, threshold);
 }
@@ -1484,6 +1489,10 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
                                               hsa_amd_queue_intercept_handler callback,
                                               void* user_data) {
   return amdExtTable->hsa_amd_queue_intercept_register_fn(queue, callback, user_data);
+}
+
+hsa_status_t hsa_amd_enable_high_precision_timestamps() {
+  return amdExtTable->hsa_amd_enable_high_precision_timestamps_fn();
 }
 
 }  // namespace rocr

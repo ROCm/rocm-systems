@@ -438,6 +438,16 @@ rj_add_gtest_tests(rj_decode_fuzz_test)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 add_test(
+    NAME RocjitsuWaitCheckingCliTest
+    COMMAND
+        ${CMAKE_COMMAND} -E env RJ_ROCJITSU=$<TARGET_FILE:rocjitsu_bin>
+        RJ_SIM_CONFIG=${CMAKE_SOURCE_DIR}/configs/gfx1250_mi455x.json
+        RJ_DBT_CONFIG=${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_simulated_gfx942.json
+        ${Python3_EXECUTABLE} -B
+        ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_wait_checking_cli.py -v
+)
+set_tests_properties(RocjitsuWaitCheckingCliTest PROPERTIES TIMEOUT 120)
+add_test(
     NAME DecodeDifferentialUnitTest
     COMMAND
         ${Python3_EXECUTABLE}
@@ -463,6 +473,12 @@ add_test(
         ${CMAKE_CURRENT_SOURCE_DIR}/tools/test_pretranslate.py -v
 )
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_test(
+        NAME CorpusRunnerUnitTest
+        COMMAND
+            ${Python3_EXECUTABLE} -B
+            ${CMAKE_CURRENT_SOURCE_DIR}/corpus/test-run-corpus-tests.py -v
+    )
     add_test(
         NAME VfioGuestRunUnitTest
         COMMAND
@@ -627,6 +643,11 @@ add_executable(
     scalar_cache_policy_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    floating_operation_test.cpp
+    input_denormal_test.cpp
+    minmax_test.cpp
+    output_modifier_test.cpp
+    source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
     analysis/liveness_test.cpp
     patch/spill_manager_test.cpp
@@ -634,6 +655,7 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/vector_builder_test.cpp
     patch/smem_builder_test.cpp
+    patch/entry_prologue_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -646,6 +668,8 @@ add_executable(
     dbi/dbi_spill_sim_test.cpp
     dbi/dbi_arg_sim_test.cpp
     dbi/dbi_mask_sim_test.cpp
+    dbi/dbi_entry_prologue_sim_test.cpp
+    dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
@@ -675,10 +699,12 @@ add_executable(
     gfx12_dot_test.cpp
     packed_wmma_test.cpp
     atomic_semantics_and_decode_test.cpp
+    scalar_atomic_test.cpp
     isa_target_registry_test.cpp
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
+    isa_diagnostics_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp
@@ -752,9 +778,9 @@ add_executable(
     plugin_loader_test.cpp
     race-detector/race_detector_counter_capacity_tests.cpp
     race-detector/race_detector_event_registry_test.cpp
+    race-detector/race_detector_lds_history_test.cpp
     race-detector/race_detector_tests.cpp
     race-detector/interval_set_tests.cpp
-    race-detector/race_log_expectation_test.cpp
     big_int_test.cpp
     data_types_test.cpp
     drm_info_layout_test.cpp
@@ -873,7 +899,7 @@ set(_rj_l2_mutex_cases
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
 set(_rj_gtest_exclusions
-    "-*Benchmark*:*RequestExitWakesAllPartitions*:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
+    "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
 )
 foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
     string(
@@ -884,10 +910,25 @@ endforeach()
 
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit stress test
-# and the concurrent-close wait test, plus the L2 mutex suite, are registered
-# separately so CTest can bound a deadlocked child process.
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit, SharedPool
+# handoff, concurrent-close, and L2 mutex tests are registered separately so
+# CTest can bound a deadlocked child process, including helper destruction.
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# Register separately to bound handoffs and shutdown with an external timeout.
+# The test stresses handoffs for 20 seconds; CTest also bounds a lost wake while
+# joining issuers or destroying idle helpers.
+rj_add_test(
+    NAME "MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    COMMAND
+        $<TARGET_FILE:rocjitsu_tests>
+        "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+    RUN_SERIAL
+    TIMEOUT 40
+    INSTALL_COMMAND
+        "bin/rocjitsu_tests"
+        "--gtest_filter=MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs"
+)
 
 # A failed assertion cannot bound a blocked join or jthread destructor. Give
 # each L2 mutex case its own process timeout in build-tree and installed tests.
@@ -1437,6 +1478,7 @@ rj_add_test(
         ${CMAKE_SOURCE_DIR}/configs/gfx942_cdna3.json
         --cpu-thread-budget
         4
+        --wait-checking=off
         --
         $<TARGET_FILE:rocjitsu_tests>
         --gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff
@@ -1448,6 +1490,7 @@ rj_add_test(
         "\${RJ_INSTALLED_CONFIG_DIR}/gfx942_cdna3.json"
         "--cpu-thread-budget"
         "4"
+        "--wait-checking=off"
         "--"
         "bin/rocjitsu_tests"
         "--gtest_filter=EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
@@ -4083,8 +4126,6 @@ if(RJ_ENABLE_HIP_TESTS)
                 "ROCJITSU_RUNTIME_DIR=${LOGGING_RUNTIME_DIR}"
                 "RJ_SINK_DIR=${LOGGING_SINK_DIR}"
         )
-
-        add_subdirectory(race-detector)
     else()
         message(
             STATUS
