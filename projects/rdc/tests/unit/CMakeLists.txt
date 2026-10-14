@@ -153,3 +153,26 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# rdc_status_tests: the statuses the health calls return for a GPU group that does
+# not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc and
+# RdcGroupSettingsImpl.cc instead of linking librdc, so it needs no GPU;
+# librdc_bootstrap provides the logger and rdc_status_string().
+add_executable(
+    rdc_status_tests
+    ${SRC_DIR}/test_status_codes.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcWatchTableImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+)
+target_include_directories(
+    rdc_status_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_status_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_status_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_status_tests COMMAND rdc_status_tests)
+install(
+    TARGETS rdc_status_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
