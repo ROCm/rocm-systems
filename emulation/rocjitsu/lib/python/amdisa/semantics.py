@@ -2573,8 +2573,11 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                     name, 'ds_gws', operation=op, elem_size=4, num_elems=0
                 )
         # An unrecognized DS_GWS_* mnemonic matches none of the six supported
-        # operations; leave it unsupported (falls through to nop) rather than
-        # assigning it synchronization behavior.
+        # operations. Classify it as an explicit (unsimulated) nop here instead of
+        # letting control reach the generic DS-atomic fallback below: a name like
+        # DS_GWS_ADD_* contains '_ADD', so the fallback would otherwise mis-decode a
+        # GWS opcode as a read-modify-write atomic and give it memory semantics.
+        return InstructionSemantics(name, 'nop')
     # GDS ordered count.
     if upper == 'DS_ORDERED_COUNT':
         return InstructionSemantics(name, 'nop')

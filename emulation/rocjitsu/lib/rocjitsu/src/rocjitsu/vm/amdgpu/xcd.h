@@ -56,25 +56,17 @@ public:
   void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
   void add_shader_engine(ShaderEngine *se) { shader_engines_.push_back(se); }
 
-  /// @brief Share this XCD's device-global GWS store with all of its CUs.
-  ///
-  /// @details GWS resources are device-global and a dispatch's workgroups scatter
-  /// across this XCD's CUs (its command processor is the dispatch/cross-CU
-  /// boundary), so every CU must share one store for cross-CU wakeups and the
-  /// process-wide quiescence backstop (see GwsDevice). Each CU holds a shared_ptr
-  /// to the store, so it outlives every registered CU regardless of teardown
-  /// order. Must be called after the shader engines and their CUs are attached;
-  /// the full constructor calls it, and the config loader calls it after it
-  /// assembles the XCD's children.
+  /// @brief Point every CU the command processor can dispatch to at this XCD's
+  /// shared GWS store (see GwsDevice for the scheduling policy).
+  /// @details Each CU takes a shared_ptr, so the store outlives every registered
+  /// CU regardless of teardown order. Must be called after the CUs are attached to
+  /// the command processor; the full constructor and the config loader both do so.
   void wire_gws_to_cus();
 
-  /// @brief Adopt an externally owned device-global GWS store (SoC scope).
-  /// @details GWS resources are device-global, and under XCD fan-out a single
-  /// dispatch scatters its workgroups across XCDs (see GwsDevice), so a multi-XCD
-  /// device must share one store across every XCD -- not one per XCD. The owning
-  /// SoC injects its store here, replacing this XCD's standalone default, and the
-  /// XCD rewires every CU to it. A standalone XCD (no SoC) keeps its own default.
-  /// Idempotent; must be called after the shader engines and their CUs attach.
+  /// @brief Replace this XCD's default GWS store with an externally owned one (the
+  /// SoC's device-wide store, shared across every XCD; see GwsDevice).
+  /// @details Rewires every CU to @p store. Idempotent and a no-op if @p store is
+  /// null or already current; must be called after the CUs are attached.
   void adopt_gws_store(std::shared_ptr<GwsDevice> store);
 
   /// @brief Return the device-global GWS store this XCD's CUs share.

@@ -2300,6 +2300,28 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   if (entry.grid_faulted())
     return {.dispatched = 0, .outcome = VmAccessOutcome::Complete};
 
+  // Publish this dispatch's workgroup-placement requirements and eligible CU set to
+  // the device-global GWS store once, so its deadlock backstop can decide whether a
+  // not-yet-admitted producer could still be placed (mirroring the placement test
+  // below) rather than guessing from a free wave slot anywhere. Fan-out shards keep
+  // one dispatch id, so each XCD's CP contributes its own eligible CUs (unioned in
+  // the store). The store never dereferences a CU it has not registered.
+  if (!entry.gws_admission_published) {
+    entry.gws_admission_published = true;
+    std::vector<ComputeUnitCore *> eligible_cus;
+    eligible_cus.reserve(cus_.size());
+    for (ComputeUnitCore *cu : cus_)
+      if (entry.allows_cu(cu))
+        eligible_cus.push_back(cu);
+    const uint64_t grid_total_waves =
+        static_cast<uint64_t>(entry.grid_total_wgs()) * entry.wfs_per_workgroup;
+    cus_.front()->gws_device().note_dispatch_placement(
+        entry.dispatch_id, entry.process_id,
+        static_cast<uint32_t>(std::min<uint64_t>(grid_total_waves, UINT32_MAX)),
+        entry.wfs_per_workgroup, entry.group_segment_fixed_size, entry.scratch_wave_limit_per_se,
+        eligible_cus);
+  }
+
   // All waves in one workgroup currently land on one physical CU so the
   // existing barrier implementation remains local. WGP mode additionally
   // reserves that CU's sibling and binds the waves to their shared LDS pool.
@@ -3281,15 +3303,30 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
       entry.grid_completion->mark_faulted();
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
   // waves before releasing the submission's BO references or publishing failure.
+  // Tear each affected dispatch down through the centralized abort path rather
+  // than halting waves in place: a raw halt() bypasses free_wavefront_resources()
+  // and the dispatch-removal notifications, so a partially-admitted GWS dispatch
+  // would leave stale parked/resident/participant entries in the device-global
+  // store -- and a stale admitted<expected entry blocks the quiescence backstop
+  // from ever escaping that process. abort_dispatch() reconciles all of it
+  // (notify_parked_wave_gone + remove_resident + notify_dispatch_gone), exactly as
+  // the VM-fault abort path does across every CU.
   for (auto *cu : cus_) {
+    std::vector<uint32_t> faulted_dispatch_ids;
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
         auto *wave = cu->wf(slot);
         if (wave && !wave->is_halted() && wave->process_id() == queue.process_id &&
-            wave->queue_id() == queue.queue_id)
-          wave->halt();
+            wave->queue_id() == queue.queue_id) {
+          const uint32_t dispatch_id = wave->dispatch_id();
+          if (std::find(faulted_dispatch_ids.begin(), faulted_dispatch_ids.end(), dispatch_id) ==
+              faulted_dispatch_ids.end())
+            faulted_dispatch_ids.push_back(dispatch_id);
+        }
       }
     });
+    for (uint32_t dispatch_id : faulted_dispatch_ids)
+      cu->abort_dispatch(dispatch_id);
   }
   flush_gpu_caches();
   qs.entries.clear();

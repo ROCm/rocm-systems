@@ -63,6 +63,17 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 }
 
 void Xcd::wire_gws_to_cus() {
+  // Wire every CU the command processor can dispatch to, not just those reached
+  // through shader_engines_: a custom topology can attach CUs directly below the
+  // XCD (config_loader registers them with the CP but under no shader engine), and
+  // those CP-visible CUs must share the one device-global store too or they would
+  // keep a private default and miss cross-CU wakeups / the quiescence backstop.
+  // cp_ is set before this runs in both the full constructor and the config path.
+  if (cp_) {
+    for (ComputeUnitCore *compute_unit : cp_->compute_units())
+      compute_unit->set_gws_device(gws_device_);
+    return;
+  }
   for (ShaderEngine *shader_engine : shader_engines_)
     for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
       compute_unit->set_gws_device(gws_device_);

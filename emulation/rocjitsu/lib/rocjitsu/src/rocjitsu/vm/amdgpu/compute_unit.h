@@ -447,19 +447,14 @@ public:
     return *cluster_lds_multicast_engine_;
   }
 
-  /// @brief Share one reference-counted device-global GWS store across the CUs
-  /// that run a dispatch.
-  ///
-  /// @details GWS resources are device-global (see GwsDevice): the command
-  /// processor scatters a dispatch's workgroups across CUs -- and, under XCD
-  /// fan-out, across XCDs -- so every CU that can run a dispatch must share one
-  /// store for cross-CU wakeups and quiescence. The CU registers itself with the
-  /// store so its waves participate in shared wake and deadlock-escape. Holding
-  /// the shared_ptr guarantees the store outlives this CU, so ~ComputeUnitCore
-  /// can unregister safely even when the owning device tears its components down
-  /// in an arbitrary order. Passing nullptr restores this CU's private default
-  /// store (standalone use). This is the sole injection path; a CU with no
-  /// injected store uses its embedded default (default_gws_device_).
+  /// @brief Inject the device-global GWS store this CU participates in (see
+  /// GwsDevice for the scheduling policy).
+  /// @details Unregisters from the current store and registers with @p device,
+  /// which reconciles any live parked/resident GWS waves between the two stores.
+  /// Holding the shared_ptr keeps the store alive past this CU, so the destructor
+  /// can unregister regardless of component teardown order. Passing nullptr
+  /// restores this CU's embedded private default store (standalone use); this is
+  /// the sole injection path.
   void set_gws_device(std::shared_ptr<GwsDevice> device) {
     GwsDevice *replacement = device ? device.get() : &default_gws_device_;
     if (replacement == gws_device_) {
@@ -787,19 +782,6 @@ public:
   /// @retval false All slots are unallocated or halted.
   bool has_active_wfs() const {
     return static_cast<uint32_t>(wave_activity_.load(std::memory_order_acquire)) != 0;
-  }
-
-  /// @brief Whether this CU has a wave slot free to admit a new wavefront.
-  /// @details A slot is free when it holds no non-halted wave; the low word of
-  /// wave_activity_ is the non-halted (active) wave count and halted slots are
-  /// reused by dispatch_wf(). The GWS quiescence backstop uses this (cross-CU,
-  /// race-free acquire load) to tell a pending-but-admittable producer -- free
-  /// capacity exists, so it can still be placed and signal -- from one gated
-  /// behind the parked waves it is judging, where every slot is full (see
-  /// GwsDevice::escape_ready).
-  bool has_free_wf_slot() const {
-    return static_cast<uint32_t>(wave_activity_.load(std::memory_order_acquire)) <
-           config_.num_wf_slots;
   }
 
   /// @brief Check whether any wavefront can currently make forward progress.

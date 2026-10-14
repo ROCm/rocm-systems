@@ -8,6 +8,7 @@
 
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
@@ -108,18 +109,33 @@ class Wavefront;
 ///    wave replaced by a runnable producer) or a producer dispatched alongside a
 ///    parked wave. The guarantee covers waves that are *resident* when the scan
 ///    runs plus waves the process has not admitted yet, but only while the latter
-///    can still be admitted: when a dispatch's total size is known and it still has
-///    waves to admit (expected > admitted), escape is blocked *iff some CU still
-///    has a free wave slot* (@ref ComputeUnitCore::has_free_wf_slot), because then
-///    the not-yet-admitted producer can be placed and could signal, and bumping the
-///    version at its admission cannot undo an escape that already fired. If every
-///    CU is full, the unadmitted producer is gated behind the parked waves being
+///    can still be admitted: when a dispatch still has waves to admit (expected >
+///    admitted), escape is blocked *iff the next workgroup can still be placed*.
+///    That placement test mirrors CommandProcessor::dispatch_workgroups() exactly
+///    -- the command processor publishes the dispatch's placement requirements and
+///    its eligible CU set (@ref note_dispatch_placement), and the scan asks whether
+///    any eligible CU can currently accept the whole workgroup
+///    (@ref ComputeUnitCore::can_accept_workgroup, which checks wave slots,
+///    registers, LDS, and scratch and takes no CU wave lock, so this stays within
+///    the leaf-lock protocol). A plain "some CU has a free wave slot" test is
+///    insufficient: it ignores the workgroup's wave count and resource needs and
+///    counts CUs the dispatch is not allowed to use, so it can block escape on a
+///    producer that can never actually be placed (a 3-slot CU cannot host a 2-wave
+///    workgroup with one slot free; an idle but untargeted CU cannot host it at
+///    all). If some eligible CU can accept it, the not-yet-admitted producer can be
+///    placed and could signal, so escape is deferred; bumping the version at its
+///    admission cannot undo an escape that already fired. If no eligible CU can
+///    accept it, the unadmitted producer is gated behind the parked waves being
 ///    judged -- a genuine deadlock -- so escape proceeds; blocking unconditionally
 ///    would forfeit termination (a parked GWS wave counts as runnable, so its CU
-///    would spin on it forever). Once every expected wave has been admitted (and
-///    each then parks or retires) the scan proceeds as usual. Queued workgroups of
-///    a size-unknown dispatch still rely on @ref add_resident advancing the version
-///    as they become resident.
+///    would spin on it forever). A dispatch whose placement requirements were never
+///    published (standalone/test) cannot be proven admittable and so never blocks
+///    escape. Once every expected wave has been admitted (and each then parks or
+///    retires) the scan proceeds as usual.
+///
+///    Recovery is observable: when the backstop abandons a wait it emits a
+///    rate-limited diagnostic (process, resource, wave location) so a genuine
+///    deadlock is visible rather than silently papered over (@ref step_maintenance).
 ///    Recovery policy: abandoning a wait is not a silent state change. The
 ///    backstop *invalidates* each resource it abandons (counter/credits cleared,
 ///    disarmed, generation bumped) via @ref invalidate_resource, so a later
@@ -181,6 +197,20 @@ public:
   /// then bounded only by currently-resident waves, as before.
   void add_resident(uint32_t process_id, uint32_t dispatch_id, uint32_t count,
                     uint32_t expected_total_waves);
+  /// @brief Publish a dispatch's workgroup-placement requirements and eligible CU
+  /// set so the quiescence backstop can test whether a not-yet-admitted producer
+  /// could still be placed (see @ref escape_ready and the pending-work note in the
+  /// class doc).
+  /// @details Called by the command processor, which owns placement: it mirrors
+  /// CommandProcessor::dispatch_workgroups() (CU eligibility via entry.allows_cu
+  /// plus @ref ComputeUnitCore::can_accept_workgroup). @p eligible_cus is unioned
+  /// across calls so each fan-out shard's XCD contributes its CUs under the shared
+  /// dispatch id. Pass a non-empty @p eligible_cus and nonzero @p wfs_per_workgroup
+  /// to arm the gate; the store never dereferences a CU it has not registered.
+  void note_dispatch_placement(uint32_t dispatch_id, uint32_t process_id,
+                               uint32_t expected_total_waves, uint32_t wfs_per_workgroup,
+                               uint32_t lds_bytes, uint32_t scratch_wave_limit,
+                               const std::vector<ComputeUnitCore *> &eligible_cus);
   /// @brief Drop @p count resident waves of a dispatch (clamped at zero).
   void remove_resident(uint32_t dispatch_id, uint32_t count);
   /// @brief Un-admit @p count waves of a dispatch rolled back before execution.
@@ -216,7 +246,7 @@ public:
   /// waves and queues are gone, so live processes keep their resources while the
   /// departed one's table (and bookkeeping) is released. Preserves the leaf-lock
   /// protocol (takes only @ref mutex_).
-  void release_process(uint32_t process);
+  void release_process(uint32_t process_id);
 
   /// @brief Number of processes with live GWS resource tables (test/diagnostic).
   size_t tracked_process_count();
@@ -230,22 +260,42 @@ private:
     uint32_t credits = 0;     ///< Semaphore credits (V/BR add, P consumes).
     bool armed = false;       ///< Whether the barrier counter has been seeded.
     uint64_t release_gen = 0; ///< Bumped by a barrier release / sema release_all.
-    /// Semaphore P-waiters currently parked on this resource (any CU). A V/BR
-    /// credit is reserved for these already-parked waiters, so a fresh P consumes
-    /// a credit only when it exceeds this count (see the entitlement note in the
-    /// class doc). Barrier waiters wake via @c release_gen and do not count here.
-    uint32_t sema_waiters = 0;
+    /// Arrival-ordered sequence numbers of the semaphore P-waiters currently
+    /// parked on this resource (any CU), oldest first. A V/BR credit is reserved
+    /// for these already-parked waiters, so a fresh P consumes a credit only when
+    /// the credit count exceeds this queue's size, and @ref poll_local_waiters
+    /// lets a parked P consume a credit only when fewer than @c credits older
+    /// waiters remain -- so a later P (on any CU) cannot jump an earlier parked
+    /// waiter (see the entitlement note in the class doc). Barrier waiters wake
+    /// via @c release_gen and are not queued here.
+    std::vector<uint64_t> sema_wait_seqs;
   };
 
   /// @brief Per-dispatch participant accounting (see the pending-work note in the
   /// class doc). Lets the barrier bound and the quiescence scan reason about waves
   /// a dispatch will admit later, not only those resident now.
   struct DispatchAdmission {
-    uint32_t process = 0;  ///< Owning process (so the scan can find a process's dispatches).
-    uint32_t expected = 0; ///< Total waves the dispatch will ever admit (grid size).
-    uint32_t admitted = 0; ///< Cumulative waves admitted so far.
+    uint32_t process_id = 0; ///< Owning process (so the scan can find a process's dispatches).
+    uint32_t expected = 0;   ///< Total waves the dispatch will ever admit (grid size).
+    uint32_t admitted = 0;   ///< Cumulative waves admitted so far.
+    /// Placement feasibility inputs published by the command processor (@ref
+    /// note_dispatch_placement) so the quiescence backstop can decide whether a
+    /// not-yet-admitted producer could actually be placed, mirroring
+    /// CommandProcessor::dispatch_workgroups(): the workgroup's wave count and its
+    /// LDS/scratch needs, plus the dispatch's eligible CU set (entry.allows_cu,
+    /// unioned across fan-out shards). A zero @c wfs_per_workgroup or an empty
+    /// @c eligible_cus means the requirements are unknown (standalone/test, no CP
+    /// publication); such a dispatch is never proven admittable, so it does not
+    /// block escape.
+    uint32_t wfs_per_workgroup = 0;
+    uint32_t lds_bytes = 0;
+    uint32_t scratch_wave_limit = UINT32_MAX;
+    std::vector<ComputeUnitCore *> eligible_cus;
   };
 
+  /// @brief Drop a parked semaphore P-waiter's queued arrival stamp from @p res
+  /// (no-op if absent). Requires @ref mutex_.
+  void release_sema_waiter(Resource &res, uint64_t seq);
   /// @brief Park @p wf on @p rid (barrier or semaphore). Requires @ref mutex_.
   void park_wave(Wavefront &wf, uint32_t rid, bool is_barrier, uint64_t generation);
   /// @brief Wake @p wf running on @p cu, clearing its park state. Requires @ref mutex_.
@@ -253,15 +303,27 @@ private:
   /// @brief Wake @p cu's own parked waves whose credit/generation is satisfied.
   /// @returns the number of waves woken. Requires @ref mutex_.
   uint32_t poll_local_waiters(ComputeUnitCore &cu);
+  /// @brief Invalidate per-CU quiescence snapshots after a release (credit or
+  /// generation bump) that a waiter on another CU may still consume.
+  /// @details A release is published as resource state and applied by the waiter's
+  /// own CU on a later step, after this CU's @ref poll_local_waiters has woken any
+  /// local waiters. If a waiter remains parked anywhere, advance @ref summary_epoch_
+  /// so the quiescence backstop cannot treat the signaling CU's post-release
+  /// zero-runnable snapshot as proof of quiescence before the peer applies (and
+  /// republishes) the wake. Requires @ref mutex_.
+  void invalidate_snapshots_for_pending_release();
   /// @brief Refresh @p cu's published signalable-wave snapshot for the current
   /// park epoch. Requires @ref mutex_.
   void refresh_summary(ComputeUnitCore &cu);
-  /// @brief Whether process @p process is provably quiescent (genuine deadlock).
+  /// @brief Whether process @p process_id is provably quiescent (genuine deadlock).
   /// Requires @ref mutex_ and an up-to-date snapshot from every active CU.
-  bool escape_ready(uint32_t process) const;
+  bool escape_ready(uint32_t process_id) const;
   /// @brief Invalidate a resource abandoned by the deadlock backstop so a later
   /// dispatch cannot inherit its unfinished phase. Requires @ref mutex_.
-  void invalidate_resource(uint32_t process, uint32_t rid);
+  void invalidate_resource(uint32_t process_id, uint32_t rid);
+  /// @brief Emit a rate-limited recovery diagnostic when the deadlock backstop
+  /// abandons a wait (process, resource, wave location). Requires @ref mutex_.
+  void report_backstop_escape(const ComputeUnitCore &cu, const Wavefront &wf, uint32_t process_id);
 
   std::mutex mutex_;
   std::unordered_map<uint32_t, std::array<Resource, kResourceCount>> resources_;
@@ -293,6 +355,15 @@ private:
   std::unordered_map<ComputeUnitCore *, std::unordered_map<uint32_t, uint32_t>> cu_runnable_;
   /// summary_epoch_ at which each CU last published its snapshot.
   std::unordered_map<ComputeUnitCore *, uint64_t> cu_summary_epoch_;
+  /// Monotonic arrival stamp handed to each parked semaphore P-waiter so a V/BR
+  /// credit is released to the oldest queued waiter first, across CUs (see
+  /// @ref Resource::sema_wait_seqs and the entitlement note in the class doc).
+  uint64_t sema_seq_next_ = 0;
+  /// Rate-limiting state for the deadlock-backstop recovery diagnostic (guarded by
+  /// @ref mutex_). The backstop can abandon many waits in one pass; log at most
+  /// once per interval and report how many were suppressed since the last line.
+  std::chrono::steady_clock::time_point last_escape_diag_{};
+  uint64_t escape_diag_suppressed_ = 0;
 };
 
 } // namespace amdgpu

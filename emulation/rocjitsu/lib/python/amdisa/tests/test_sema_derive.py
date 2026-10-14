@@ -2547,10 +2547,23 @@ class TestDeriveDsGws:
         assert sem.elem_size == 4
         assert sem.num_elems == 0
 
-    def test_unknown_gws_mnemonic_is_unsupported(self):
-        # An unrecognized DS_GWS_* name must not be assigned synchronization
-        # behavior; it falls through to a nop instead of defaulting to barrier.
-        sem = derive_semantics('DS_GWS_FUTURE_VARIANT', 'ENC_DS')
+    @pytest.mark.parametrize(
+        'name',
+        [
+            'DS_GWS_FUTURE_VARIANT',
+            # Counterexample: the generic DS-atomic fallback keys off substrings
+            # like '_ADD'/'_SUB', so an unrecognized GWS name containing one must
+            # still be stopped as a GWS opcode (classified nop) and not mis-decoded
+            # as a read-modify-write atomic.
+            'DS_GWS_ADD_VARIANT',
+            'DS_GWS_SUB_FOO',
+            'DS_GWS_MIN_BAR',
+        ],
+    )
+    def test_unknown_gws_mnemonic_is_unsupported(self, name):
+        # An unrecognized DS_GWS_* name must not be assigned synchronization or
+        # memory-atomic behavior; it is classified as an unsimulated nop.
+        sem = derive_semantics(name, 'ENC_DS')
         assert sem is not None
         assert sem.semantic_class == 'nop'
 

@@ -1043,6 +1043,7 @@ public:
     gws_wait_rid_ = kNoGwsWait;
     gws_wait_is_barrier_ = false;
     gws_wait_generation_ = 0;
+    gws_wait_seq_ = 0;
     if (memory_wait_scoreboard_)
       memory_wait_scoreboard_->clear();
     wait_counters_ = {};
@@ -1166,7 +1167,12 @@ private:
   uint32_t gws_wait_rid_ = kNoGwsWait; ///< GWS resource id this wave is parked on.
   bool gws_wait_is_barrier_ = false;   ///< Parked at a GWS barrier (vs a semaphore P).
   uint64_t gws_wait_generation_ = 0;   ///< Resource release generation observed at park.
-  WfState state_ = WfState::HALTED;    ///< Current execution state.
+  /// Device-global arrival order stamped on a parked semaphore P-waiter. The GWS
+  /// store releases a V/BR credit to the oldest queued waiter first (across all
+  /// CUs), so a later P cannot jump an earlier parked one (see GwsDevice). Unused
+  /// by barrier waiters (they wake via the release generation).
+  uint64_t gws_wait_seq_ = 0;
+  WfState state_ = WfState::HALTED; ///< Current execution state.
   MemoryWaitShadow memory_wait_shadow_;
   std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;
   WaitCounters wait_counters_; ///< Outstanding memory operation counters.

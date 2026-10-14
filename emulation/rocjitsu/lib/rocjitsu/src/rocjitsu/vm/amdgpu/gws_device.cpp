@@ -5,8 +5,12 @@
 
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
+#include "util/log.h"
 
 #include <algorithm>
+#include <cassert>
+#include <chrono>
+#include <string>
 #include <unordered_map>
 
 namespace rocjitsu {
@@ -40,8 +44,41 @@ bool can_still_signal(WfState state) {
 
 void GwsDevice::register_compute_unit(ComputeUnitCore *cu) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (std::find(cus_.begin(), cus_.end(), cu) == cus_.end())
-    cus_.push_back(cu);
+  if (std::find(cus_.begin(), cus_.end(), cu) != cus_.end())
+    return;
+  cus_.push_back(cu);
+  // Reconcile any live GWS state the CU brings with it -- the mirror of
+  // unregister_compute_unit's reconcile-out. A CU re-pointed via set_gws_device
+  // while it still hosts parked waves (or resident workgroups) must have them
+  // accounted in the destination store, or this store's fast-path gate and
+  // quiescence scan would understate them: e.g. a later notify_parked_wave_gone
+  // for the migrated wave would decrement a count that was never incremented and
+  // wrongly cancel an unrelated waiter already parked here. A freshly created CU
+  // carries nothing, so this is a no-op at initial wiring.
+  //
+  // Resource phase state (barrier generation / credits) is intentionally NOT
+  // migrated: a live cross-CU rendezvous should re-point only drained CUs. This
+  // reconciliation keeps the bookkeeping counts consistent either way.
+  bool migrated_parked = false;
+  for (auto &slot : cu->wfs_) {
+    if (!slot || slot->state() != WfState::GWS_WAIT)
+      continue;
+    Wavefront &wf = *slot;
+    ++parked_[wf.process_id()];
+    parked_total_.fetch_add(1, std::memory_order_release);
+    migrated_parked = true;
+    if (!wf.gws_wait_is_barrier_ && wf.gws_wait_rid_ < kResourceCount) {
+      // Re-stamp the waiter into this store's arrival-order sequence space.
+      wf.gws_wait_seq_ = sema_seq_next_++;
+      resources_[wf.process_id()][wf.gws_wait_rid_].sema_wait_seqs.push_back(wf.gws_wait_seq_);
+    }
+  }
+  for (const auto &entry : cu->active_wgs_) {
+    const uint32_t dispatch_id = static_cast<uint32_t>(entry.first >> 32);
+    resident_waves_[dispatch_id] += entry.second;
+  }
+  if (migrated_parked)
+    ++summary_epoch_;
 }
 
 void GwsDevice::unregister_compute_unit(ComputeUnitCore *cu) {
@@ -59,20 +96,20 @@ void GwsDevice::unregister_compute_unit(ComputeUnitCore *cu) {
   for (auto &slot : cu->wfs_) {
     if (!slot || slot->state() != WfState::GWS_WAIT)
       continue;
-    const uint32_t process = slot->process_id();
-    auto it = parked_.find(process);
+    const uint32_t process_id = slot->process_id();
+    auto it = parked_.find(process_id);
     // A GWS_WAIT wave not accounted here parked on a different store (e.g. the CU
     // was re-pointed via set_gws_device after parking); it is not this store's to
-    // reconcile, so touch neither parked_total_ nor sema_waiters for it.
+    // reconcile, so touch neither parked_total_ nor the waiter queue for it.
     if (it == parked_.end() || it->second == 0)
       continue;
     if (--it->second == 0)
       parked_.erase(it);
     parked_total_.fetch_sub(1, std::memory_order_release);
     if (!slot->gws_wait_is_barrier_ && slot->gws_wait_rid_ < kResourceCount) {
-      auto rit = resources_.find(process);
-      if (rit != resources_.end() && rit->second[slot->gws_wait_rid_].sema_waiters > 0)
-        --rit->second[slot->gws_wait_rid_].sema_waiters;
+      auto rit = resources_.find(process_id);
+      if (rit != resources_.end())
+        release_sema_waiter(rit->second[slot->gws_wait_rid_], slot->gws_wait_seq_);
     }
   }
   for (const auto &entry : cu->active_wgs_) {
@@ -87,6 +124,13 @@ void GwsDevice::unregister_compute_unit(ComputeUnitCore *cu) {
   std::erase(cus_, cu);
   cu_runnable_.erase(cu);
   cu_summary_epoch_.erase(cu);
+  // A destroyed/re-pointed CU must not linger as an eligible placement target for
+  // any dispatch's admission accounting (its storage is about to disappear), else
+  // the quiescence backstop could dereference a dangling CU.
+  for (auto &[dispatch_id, adm] : admission_) {
+    (void)dispatch_id;
+    std::erase(adm.eligible_cus, cu);
+  }
   // A removed CU changes the quiescence picture; force peers to republish before
   // any escape decision trusts a snapshot taken while this CU was still listed.
   ++summary_epoch_;
@@ -104,7 +148,7 @@ void GwsDevice::add_resident(uint32_t process_id, uint32_t dispatch_id, uint32_t
     // quiescence scan can reason about waves it will admit later. Every CU/XCD of
     // the dispatch reports the same whole-grid total, so keep the max.
     DispatchAdmission &adm = admission_[dispatch_id];
-    adm.process = process_id;
+    adm.process_id = process_id;
     adm.expected = std::max(adm.expected, expected_total_waves);
     adm.admitted += count;
   }
@@ -115,6 +159,28 @@ void GwsDevice::add_resident(uint32_t process_id, uint32_t dispatch_id, uint32_t
   // alone would miss this: workgroup turnover (a parked wave replaced by a
   // runnable producer) or a producer dispatched alongside a parked wave leaves
   // parked_total_ positive, so only this versioning catches the new signaler.
+  ++summary_epoch_;
+}
+
+void GwsDevice::note_dispatch_placement(uint32_t dispatch_id, uint32_t process_id,
+                                        uint32_t expected_total_waves, uint32_t wfs_per_workgroup,
+                                        uint32_t lds_bytes, uint32_t scratch_wave_limit,
+                                        const std::vector<ComputeUnitCore *> &eligible_cus) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  DispatchAdmission &adm = admission_[dispatch_id];
+  adm.process_id = process_id;
+  adm.expected = std::max(adm.expected, expected_total_waves);
+  adm.wfs_per_workgroup = wfs_per_workgroup;
+  adm.lds_bytes = lds_bytes;
+  adm.scratch_wave_limit = scratch_wave_limit;
+  // Union the eligible CU set: a fan-out grid keeps one dispatch id across XCDs,
+  // so each XCD's command processor contributes the CUs it may place this grid's
+  // workgroups on (entry.allows_cu). Dedup keeps repeated publications idempotent.
+  for (ComputeUnitCore *cu : eligible_cus)
+    if (std::find(adm.eligible_cus.begin(), adm.eligible_cus.end(), cu) == adm.eligible_cus.end())
+      adm.eligible_cus.push_back(cu);
+  // Placement feasibility may have changed (new eligible CUs); force peers to
+  // republish before any escape decision trusts an earlier snapshot.
   ++summary_epoch_;
 }
 
@@ -166,10 +232,10 @@ void GwsDevice::notify_dispatch_gone(uint32_t dispatch_id) {
   ++summary_epoch_;
 }
 
-void GwsDevice::release_process(uint32_t process) {
+void GwsDevice::release_process(uint32_t process_id) {
   std::lock_guard<std::mutex> lock(mutex_);
-  resources_.erase(process);
-  auto pit = parked_.find(process);
+  resources_.erase(process_id);
+  auto pit = parked_.find(process_id);
   if (pit != parked_.end()) {
     // A well-drained process has no parked waves; keep the global fast-path gate
     // consistent if teardown ever races a straggler.
@@ -177,9 +243,10 @@ void GwsDevice::release_process(uint32_t process) {
       parked_total_.fetch_sub(pit->second, std::memory_order_release);
     parked_.erase(pit);
   }
-  std::erase_if(admission_, [process](const auto &e) { return e.second.process == process; });
+  std::erase_if(admission_,
+                [process_id](const auto &e) { return e.second.process_id == process_id; });
   for (auto &per_cu : cu_runnable_)
-    per_cu.second.erase(process);
+    per_cu.second.erase(process_id);
   ++summary_epoch_;
 }
 
@@ -188,16 +255,25 @@ size_t GwsDevice::tracked_process_count() {
   return resources_.size();
 }
 
+void GwsDevice::release_sema_waiter(Resource &res, uint64_t seq) {
+  auto it = std::find(res.sema_wait_seqs.begin(), res.sema_wait_seqs.end(), seq);
+  if (it != res.sema_wait_seqs.end())
+    res.sema_wait_seqs.erase(it);
+}
+
 void GwsDevice::park_wave(Wavefront &wf, uint32_t rid, bool is_barrier, uint64_t generation) {
   wf.gws_wait_rid_ = rid;
   wf.gws_wait_is_barrier_ = is_barrier;
   wf.gws_wait_generation_ = generation;
   wf.set_state(WfState::GWS_WAIT);
   ++parked_[wf.process_id()];
-  // A semaphore P-waiter reserves a V/BR credit so a fresh P (on any CU) cannot
-  // steal the release owed to it (see the entitlement note in the class doc).
-  if (!is_barrier && rid < kResourceCount)
-    ++resources_[wf.process_id()][rid].sema_waiters;
+  // A semaphore P-waiter joins the resource's arrival-ordered queue and reserves a
+  // V/BR credit, so a fresh P (on any CU) cannot steal the release owed to an
+  // earlier waiter (see the entitlement note in the class doc).
+  if (!is_barrier && rid < kResourceCount) {
+    wf.gws_wait_seq_ = sema_seq_next_++;
+    resources_[wf.process_id()][rid].sema_wait_seqs.push_back(wf.gws_wait_seq_);
+  }
   // 0 -> positive opens a fresh snapshot version, invalidating stale per-CU
   // summaries so a producer that has not yet published cannot be mistaken for
   // quiescent at the start of a parking episode.
@@ -209,15 +285,17 @@ void GwsDevice::wake_wave(ComputeUnitCore &cu, Wavefront &wf) {
   const uint32_t process = wf.process_id();
   const uint32_t rid = wf.gws_wait_rid_;
   const bool was_barrier = wf.gws_wait_is_barrier_;
+  const uint64_t seq = wf.gws_wait_seq_;
   wf.gws_wait_rid_ = Wavefront::kNoGwsWait;
   wf.gws_wait_is_barrier_ = false;
   wf.set_state(WfState::RUNNING);
   wf.set_ready_cycle(cu.cycle_counter_);
-  // Release the waiter's reserved credit slot (a sema waiter no longer competes).
+  // Drop the waiter's queued arrival stamp (a sema waiter no longer competes for a
+  // reserved credit).
   if (!was_barrier && rid < kResourceCount) {
     auto rit = resources_.find(process);
-    if (rit != resources_.end() && rit->second[rid].sema_waiters > 0)
-      --rit->second[rid].sema_waiters;
+    if (rit != resources_.end())
+      release_sema_waiter(rit->second[rid], seq);
   }
   auto it = parked_.find(process);
   if (it != parked_.end() && it->second > 0 && --it->second == 0)
@@ -245,14 +323,30 @@ uint32_t GwsDevice::poll_local_waiters(ComputeUnitCore &cu) {
       ++woke;
       continue;
     }
-    // A semaphore P consumes one credit left by a V/BR (possibly on another CU).
+    // A semaphore P consumes one credit left by a V/BR (possibly on another CU),
+    // but only on behalf of the oldest queued waiters: this wave may take a credit
+    // only when fewer than `credits` older waiters are still parked on the resource
+    // (across all CUs). That releases V/BR credits in arrival order, so a later P
+    // -- even one polled first because it shares the signaling CU -- cannot jump an
+    // earlier waiter parked on another CU (see the entitlement note in the class doc).
     if (!wf.gws_wait_is_barrier_ && res.credits > 0) {
-      --res.credits;
-      wake_wave(cu, wf);
-      ++woke;
+      uint32_t older = 0;
+      for (uint64_t queued_seq : res.sema_wait_seqs)
+        if (queued_seq < wf.gws_wait_seq_)
+          ++older;
+      if (older < res.credits) {
+        --res.credits;
+        wake_wave(cu, wf); // Removes this wave's stamp from sema_wait_seqs.
+        ++woke;
+      }
     }
   }
   return woke;
+}
+
+void GwsDevice::invalidate_snapshots_for_pending_release() {
+  if (parked_total_.load(std::memory_order_acquire) != 0)
+    ++summary_epoch_;
 }
 
 void GwsDevice::refresh_summary(ComputeUnitCore &cu) {
@@ -267,33 +361,35 @@ void GwsDevice::refresh_summary(ComputeUnitCore &cu) {
   cu_summary_epoch_[&cu] = summary_epoch_;
 }
 
-bool GwsDevice::escape_ready(uint32_t process) const {
-  auto parked_it = parked_.find(process);
+bool GwsDevice::escape_ready(uint32_t process_id) const {
+  auto parked_it = parked_.find(process_id);
   if (parked_it == parked_.end() || parked_it->second == 0)
     return false;
   // A dispatch of this process that has not yet admitted its whole grid may still
-  // produce a signaler (e.g. a producer workgroup not dispatched yet), but only if
-  // that producer can actually be admitted. Admission needs a free wave slot:
-  //  * If some CU still has capacity, the pending producer can be placed and could
+  // produce a signaler (a producer workgroup not placed yet), but only if that
+  // producer can still be placed. Mirror CommandProcessor::dispatch_workgroups():
+  // the producer is admittable iff some CU the dispatch is allowed to use can
+  // currently accept its whole workgroup (slots + registers + LDS + scratch).
+  //  * If an eligible CU can accept it, the producer can still be placed and could
   //    signal, so do not escape yet -- bumping the version at its admission cannot
   //    undo an escape that already fired.
-  //  * If every CU is full, the only slots are held by the parked waves we are
-  //    judging, so the unadmitted producer is gated behind them -- a genuine
-  //    deadlock the backstop must break. Blocking on it unconditionally would
-  //    forfeit the termination guarantee (a parked GWS wave counts as runnable, so
-  //    the CU would spin on it forever). Fall through to the quiescence test.
-  bool pending_admission = false;
+  //  * If no eligible CU can accept it, the producer is gated behind the parked
+  //    waves being judged -- a genuine deadlock the backstop must break. Blocking
+  //    unconditionally would forfeit the termination guarantee (a parked GWS wave
+  //    counts as runnable, so the CU would spin on it forever). Fall through.
+  // can_accept_workgroup() takes no CU wave lock, so these cross-CU reads stay
+  // within the leaf-lock protocol. A dispatch whose placement requirements were
+  // never published (standalone/test) cannot be proven admittable and is skipped.
   for (const auto &[dispatch_id, adm] : admission_) {
     (void)dispatch_id;
-    if (adm.process == process && adm.admitted < adm.expected) {
-      pending_admission = true;
-      break;
+    if (adm.process_id != process_id || adm.admitted >= adm.expected)
+      continue;
+    if (adm.wfs_per_workgroup == 0 || adm.eligible_cus.empty())
+      continue; // Placement requirements unknown: cannot prove this is admittable.
+    for (ComputeUnitCore *cu : adm.eligible_cus) {
+      if (cu->can_accept_workgroup(adm.wfs_per_workgroup, adm.lds_bytes, adm.scratch_wave_limit))
+        return false; // A pending producer can still be placed and signal.
     }
-  }
-  if (pending_admission) {
-    for (ComputeUnitCore *cu : cus_)
-      if (cu->has_free_wf_slot())
-        return false; // A producer can still be admitted into free capacity.
   }
   uint64_t total_runnable = 0;
   for (ComputeUnitCore *cu : cus_) {
@@ -308,7 +404,7 @@ bool GwsDevice::escape_ready(uint32_t process) const {
     auto rit = cu_runnable_.find(cu);
     if (rit == cu_runnable_.end())
       continue;
-    auto pit = rit->second.find(process);
+    auto pit = rit->second.find(process_id);
     if (pit != rit->second.end())
       total_runnable += pit->second;
   }
@@ -368,6 +464,7 @@ void GwsDevice::barrier_arrive(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid,
     ++res.release_gen;
     res.counter = count;
     poll_local_waiters(cu); // Same-CU peers wake now; cross-CU peers on their step.
+    invalidate_snapshots_for_pending_release();
     return;
   }
   // Positive counter: queue this arrival and park it.
@@ -384,6 +481,7 @@ void GwsDevice::sema_v(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
   // A same-CU waiter consumes the credit immediately; otherwise it persists for a
   // waiter on another CU to consume the next time that CU polls.
   poll_local_waiters(cu);
+  invalidate_snapshots_for_pending_release();
 }
 
 void GwsDevice::sema_p(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
@@ -396,7 +494,7 @@ void GwsDevice::sema_p(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
   // already parked on this resource (possibly on another CU), so a fresh P cannot
   // steal a V/BR release owed to an earlier waiter (see the entitlement note in the
   // class doc). Otherwise park and join the reserved queue.
-  if (res.credits > res.sema_waiters) {
+  if (res.credits > res.sema_wait_seqs.size()) {
     --res.credits;
     return;
   }
@@ -414,6 +512,7 @@ void GwsDevice::sema_br(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid, uint32
   Resource &res = resources_[wf.process_id()][rid];
   res.credits += count;
   poll_local_waiters(cu); // Same-CU waiters drain credits now; the rest persist.
+  invalidate_snapshots_for_pending_release();
 }
 
 void GwsDevice::sema_release_all(ComputeUnitCore &cu, Wavefront &wf, uint32_t rid) {
@@ -427,6 +526,7 @@ void GwsDevice::sema_release_all(ComputeUnitCore &cu, Wavefront &wf, uint32_t ri
   ++res.release_gen;
   res.credits = 0;
   poll_local_waiters(cu);
+  invalidate_snapshots_for_pending_release();
 }
 
 void GwsDevice::notify_parked_wave_gone(const Wavefront &wf) {
@@ -437,18 +537,18 @@ void GwsDevice::notify_parked_wave_gone(const Wavefront &wf) {
   if (--it->second == 0)
     parked_.erase(it);
   parked_total_.fetch_sub(1, std::memory_order_release);
-  // A gone semaphore waiter releases its reserved credit slot (see park_wave).
+  // A gone semaphore waiter drops its queued arrival stamp (see park_wave).
   if (!wf.gws_wait_is_barrier_ && wf.gws_wait_rid_ < kResourceCount) {
     auto rit = resources_.find(wf.process_id());
-    if (rit != resources_.end() && rit->second[wf.gws_wait_rid_].sema_waiters > 0)
-      --rit->second[wf.gws_wait_rid_].sema_waiters;
+    if (rit != resources_.end())
+      release_sema_waiter(rit->second[wf.gws_wait_rid_], wf.gws_wait_seq_);
   }
 }
 
-void GwsDevice::invalidate_resource(uint32_t process, uint32_t rid) {
+void GwsDevice::invalidate_resource(uint32_t process_id, uint32_t rid) {
   if (rid >= kResourceCount)
     return;
-  Resource &res = resources_[process][rid];
+  Resource &res = resources_[process_id][rid];
   res.counter = 0;
   res.credits = 0;
   res.armed = false;
@@ -472,18 +572,52 @@ void GwsDevice::step_maintenance(ComputeUnitCore &cu) {
   for (auto &slot : cu.wfs_) {
     if (!slot || slot->state() != WfState::GWS_WAIT)
       continue;
-    const uint32_t process = slot->process_id();
-    auto rit = ready.find(process);
+    const uint32_t process_id = slot->process_id();
+    auto rit = ready.find(process_id);
     if (rit == ready.end())
-      rit = ready.emplace(process, escape_ready(process)).first;
+      rit = ready.emplace(process_id, escape_ready(process_id)).first;
     if (rit->second) {
+      // The backstop only reaches here for a process proven quiescent by
+      // escape_ready() (no resident wave can still signal and no pending producer
+      // can still be placed). Assert the wake-path invariant -- only a still-parked
+      // wave is ever abandoned -- so a regression that reaches this branch for a
+      // runnable wave is caught in debug builds. (escape_ready() is not re-checked
+      // here: waking the first wave of the process bumps summary_epoch_, which would
+      // make a re-check spuriously fail for a sibling woken in the same pass.)
+      assert(slot->state() == WfState::GWS_WAIT &&
+             "GWS deadlock backstop must wake only a still-parked wave");
+      report_backstop_escape(cu, *slot, process_id);
       // Abandoning a genuinely deadlocked rendezvous is not a silent wake: drop
       // the resource's unfinished phase so a later dispatch reusing this rid does
       // not inherit a stale counter/credit (recovery policy, see class doc).
-      invalidate_resource(process, slot->gws_wait_rid_);
+      invalidate_resource(process_id, slot->gws_wait_rid_);
       wake_wave(cu, *slot);
     }
   }
+}
+
+void GwsDevice::report_backstop_escape(const ComputeUnitCore &cu, const Wavefront &wf,
+                                       uint32_t process_id) {
+  // Rate-limited recovery diagnostic: abandoning a wait is a real event (a genuine
+  // deadlock the model broke to keep the step budget finite), not a silent state
+  // change. The backstop can release many waves in one pass, so emit at most one
+  // line per interval and fold the rest into a suppressed count. Guarded by mutex_
+  // (held by the caller), so the throttle state needs no separate lock.
+  const auto now = std::chrono::steady_clock::now();
+  const bool first = last_escape_diag_.time_since_epoch().count() == 0;
+  if (!first && now - last_escape_diag_ < std::chrono::seconds(1)) {
+    ++escape_diag_suppressed_;
+    return;
+  }
+  util::Logger::warn("GWS deadlock backstop released a parked wave: process=", process_id,
+                     " resource=", wf.gws_wait_rid_,
+                     wf.gws_wait_is_barrier_ ? " (barrier)" : " (semaphore)",
+                     " dispatch=", wf.dispatch_id(), " cu=", cu.name(),
+                     escape_diag_suppressed_ != 0 ? " [" + std::to_string(escape_diag_suppressed_) +
+                                                        " more suppressed since last report]"
+                                                  : std::string());
+  last_escape_diag_ = now;
+  escape_diag_suppressed_ = 0;
 }
 
 } // namespace amdgpu
