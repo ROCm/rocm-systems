@@ -11,7 +11,7 @@
 #include "nccl.h"
 
 // RCCL: one dma-buf MR per physical segment. Not part of the NCCL plugin API.
-// Defined in net_ib/reg.cc; net.cc calls it from the proxy register hook.
+// Defined in net_ib/reg.cc; ncclIbRegMrDmaBuf calls it when fd < 0.
 ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
                                        int* segFds, int type, void** mhandle);
 
