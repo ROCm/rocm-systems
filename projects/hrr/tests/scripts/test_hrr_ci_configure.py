@@ -112,7 +112,7 @@ def family_keys(decision):
 class RepoConfigTest(unittest.TestCase):
     def test_every_family_runs_on_every_event_by_default(self):
         for key, family in REPO.families.items():
-            self.assertTrue(family.enabled, key)
+            self.assertEqual(family.enabled, key != "gfx125x", key)
             self.assertEqual(family.triggers, cfg.EVENTS, key)
 
     def test_multi_gpu_runner_only_nightly(self):

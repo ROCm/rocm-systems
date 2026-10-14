@@ -84,6 +84,9 @@ families:
   gfx1151: {}
   gfx1153: {}
   gfx120x: {}
-  # This pool is not reliably online; a job that finds no runner stays queued
-  # and holds up the summary until GitHub times it out.
-  gfx125x: {}
+  # Off until understood: in two runs the MI455 runner picked the job up, but
+  # --arch auto found no GPU, so no case ran. TheRock also reserves this small
+  # pool for designated workflows. A ci:gfx125x label or the workflow_dispatch
+  # families input still runs it.
+  gfx125x:
+    enabled: false
