@@ -1036,6 +1036,13 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
           return ncclSystemError;
         }
       }
+      // A channel owns exactly ngpus intra slots -- one per GPU, which is what
+      // ncclTopoGetXmlFromChannel emits. Without this, extra <gpu> subs run on
+      // into the next channel's slots.
+      if (g >= ngpus) {
+        WARN("XML Import Channel : too many gpu subnodes in channel %d (max %d).", c, ngpus);
+        return ncclInvalidUsage;
+      }
       intra[g++] = rank;
     }
   }
