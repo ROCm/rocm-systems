@@ -13,7 +13,7 @@ pub use types::*;
 
 use crate::device::gpu::GpuDevice;
 use crate::driver::{self, Driver, UserQueueResource};
-use crate::host_storage::{Owned, Shared};
+use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 
 /// Drains host packet stores before notifying a GPU queue through its doorbell.
@@ -326,7 +326,7 @@ impl GpuDevice<'_> {
         // SAFETY: The caller retains every raw address in the request, even
         // when native creation has an ambiguous result.
         Ok(Queue {
-            inner: unsafe { self.device.driver_state.create_queue(desc)? },
+            inner: unsafe { self.driver.create_queue(desc)? },
         })
     }
 
@@ -362,7 +362,6 @@ impl GpuDevice<'_> {
 mod queue_resource_tests {
     use super::*;
     use crate::driver::{CachedInfo, Driver};
-    use crate::host_storage::Allocator;
     use crate::session::DriverContextLifetime;
     use crate::topology::Endpoint;
     use std::sync::Arc;
@@ -406,10 +405,6 @@ mod queue_resource_tests {
 
     impl Driver for FakeDriver {
         type DeviceState = FakeDevice;
-
-        fn allocator(&self) -> Allocator {
-            Allocator::system()
-        }
 
         fn driver_instance(&self) -> u64 {
             1
@@ -517,33 +512,24 @@ mod queue_resource_tests {
     fn driver_queue_retains_native_owner_and_driver_through_failed_cleanup() -> Result<(), Error> {
         let driver_dropped = Arc::new(AtomicBool::new(false));
         let queue_drops = Arc::new(AtomicUsize::new(0));
-        let driver = Shared::new(
-            FakeDriver {
-                dropped: driver_dropped.clone(),
-                queue_drops: queue_drops.clone(),
-            },
-            Allocator::system(),
-        )?;
+        let driver = Shared::new(FakeDriver {
+            dropped: driver_dropped.clone(),
+            queue_drops: queue_drops.clone(),
+        })?;
         let state = FakeDevice;
-        let driver_queue = Owned::new(
-            FakeQueue {
-                info: transport(),
-                driver_dropped: driver.dropped.clone(),
-                queue_drops: driver.queue_drops.clone(),
-                fail_destroy: true,
-                released: false,
-            },
-            Allocator::system(),
-        )?;
+        let driver_queue = Owned::new(FakeQueue {
+            info: transport(),
+            driver_dropped: driver.dropped.clone(),
+            queue_drops: driver.queue_drops.clone(),
+            fail_destroy: true,
+            released: false,
+        })?;
         let mut queue = DriverQueue::new(driver.clone(), driver_queue);
         assert_eq!(queue.info(), transport());
-        let foreign = Shared::new(
-            FakeDriver {
-                dropped: Arc::new(AtomicBool::new(false)),
-                queue_drops: Arc::new(AtomicUsize::new(0)),
-            },
-            Allocator::system(),
-        )?;
+        let foreign = Shared::new(FakeDriver {
+            dropped: Arc::new(AtomicBool::new(false)),
+            queue_drops: Arc::new(AtomicUsize::new(0)),
+        })?;
         assert!(matches!(
             queue.map_device(&foreign, &state),
             Err(error) if error.kind() == ErrorKind::InvalidArgument

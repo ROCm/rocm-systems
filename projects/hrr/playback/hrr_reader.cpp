@@ -10,6 +10,7 @@
 
 #include <algorithm>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <vector>
@@ -75,13 +76,20 @@ const char* event_type_name(uint16_t type) {
   return "UNKNOWN";
 }
 
+uint64_t pid_from_archive_dir_name(const std::string& name) {
+  if (name.size() <= 4 || name.compare(0, 4, "pid-") != 0 ||
+      name.find_first_not_of("0123456789", 4) != std::string::npos)
+    return 0;
+  return std::strtoull(name.c_str() + 4, nullptr, 10);
+}
+
 static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
   std::vector<fs::path> dirs;
   if (!fs::exists(root) || !fs::is_directory(root)) return dirs;
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+    if (pid_from_archive_dir_name(name) != 0 && fs::exists(ent.path() / "events.bin"))
       dirs.push_back(ent.path());
   }
   std::sort(dirs.begin(), dirs.end());

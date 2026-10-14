@@ -4919,6 +4919,38 @@ TEST_F(DeepCopyDevCommRequirementsTest, DuplicatesResourceListNodes) {
   EXPECT_EQ(dst->resourceRequirementsList->next->next, nullptr);  // list terminated
 }
 
+// Each node's GIN signal and counter requests, and the pointers that receive
+// their start indices, survive the copy: the deferred create sizes the devComm
+// and writes those start indices from the copy alone.
+TEST_F(DeepCopyDevCommRequirementsTest, CopiesResourceNodeGinFields) {
+  ncclGinSignal_t signalStart1 = 0, signalStart2 = 0;
+  ncclGinCounter_t counterStart1 = 0, counterStart2 = 0;
+  res1.ginSignalCount = 8;
+  res1.ginCounterCount = 2;
+  res1.outGinSignalStart = &signalStart1;
+  res1.outGinCounterStart = &counterStart1;
+  res2.ginSignalCount = 4;
+  res2.ginCounterCount = 1;
+  res2.outGinSignalStart = &signalStart2;
+  res2.outGinCounterStart = &counterStart2;
+  res1.next = &res2;
+  src.resourceRequirementsList = &res1;
+
+  ASSERT_EQ(deepCopyDevCommRequirements(&src, &dst), ncclSuccess);
+  ncclDevResourceRequirements* copy1 = dst->resourceRequirementsList;
+  ASSERT_NE(copy1, nullptr);
+  EXPECT_EQ(copy1->ginSignalCount, 8);
+  EXPECT_EQ(copy1->ginCounterCount, 2);
+  EXPECT_EQ(copy1->outGinSignalStart, &signalStart1);
+  EXPECT_EQ(copy1->outGinCounterStart, &counterStart1);
+  ncclDevResourceRequirements* copy2 = copy1->next;
+  ASSERT_NE(copy2, nullptr);
+  EXPECT_EQ(copy2->ginSignalCount, 4);
+  EXPECT_EQ(copy2->ginCounterCount, 1);
+  EXPECT_EQ(copy2->outGinSignalStart, &signalStart2);
+  EXPECT_EQ(copy2->outGinCounterStart, &counterStart2);
+}
+
 // The team list likewise.
 TEST_F(DeepCopyDevCommRequirementsTest, DuplicatesTeamListNodes) {
   team1.multimem = true;
