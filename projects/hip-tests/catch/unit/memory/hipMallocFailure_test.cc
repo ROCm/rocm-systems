@@ -21,8 +21,14 @@ namespace {
 constexpr size_t ONE_MB = 1024 * 1024;
 // Noise allowed when comparing free memory, e.g. from the OS budget query
 constexpr size_t FREE_MEM_TOLERANCE = 64 * ONE_MB;
-// Requests grow in steps of this fraction of the idle free memory until one fails
+// Memory held for the whole test to create memory pressure, as a share of the idle free memory
+constexpr size_t HELD_DEVICE_PERCENT = 40;
+constexpr size_t HELD_HOST_PERCENT = 20;
+constexpr size_t MAX_HELD_HOST_SIZE = 4096 * ONE_MB;
+// Requests grow in steps of 1/REQUEST_STEPS of the idle free memory until one fails
 constexpr size_t REQUEST_STEPS = 20;
+
+constexpr size_t PercentOf(size_t value, size_t percent) { return value / 100 * percent; }
 
 size_t FreeMemory() {
   size_t freeMem = 0, totalMem = 0;
@@ -38,48 +44,71 @@ bool IsApu() {
 
 enum class AllocKind { Device, HostMalloc, HostRegister };
 
-struct Allocation {
-  AllocKind kind;
-  void* ptr = nullptr;
-  void* sysMem = nullptr;  // pageable memory for hipHostRegister
+// One allocation that is allowed to fail. Frees whatever it allocated when destroyed, also when a
+// REQUIRE throws. LinearAllocGuard can't be used here, it fails the test if the allocation fails.
+class Allocation {
+ public:
+  explicit Allocation(AllocKind kind) : kind_{kind} {}
+  Allocation(const Allocation&) = delete;
+  Allocation& operator=(const Allocation&) = delete;
+
+  ~Allocation() {
+    // No Catch macros, don't throw in the destructor
+    if (ptr_ == nullptr) {
+      return;
+    }
+    switch (kind_) {
+      case AllocKind::Device:
+        static_cast<void>(hipFree(ptr_));
+        break;
+      case AllocKind::HostMalloc:
+        static_cast<void>(hipHostFree(ptr_));
+        break;
+      case AllocKind::HostRegister:
+        if (registered_) {
+          static_cast<void>(hipHostUnregister(ptr_));
+        }
+        VirtualFree(ptr_, 0, MEM_RELEASE);
+        break;
+    }
+  }
 
   // Gets the pageable memory for hipHostRegister; false if Windows refuses it
   bool Prepare(size_t size) {
-    if (kind != AllocKind::HostRegister) return true;
-    sysMem = VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-    return sysMem != nullptr;
+    if (kind_ != AllocKind::HostRegister) {
+      return true;
+    }
+    ptr_ = VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    return ptr_ != nullptr;
   }
 
   hipError_t Allocate(size_t size) {
-    switch (kind) {
+    switch (kind_) {
       case AllocKind::Device:
-        return hipMalloc(&ptr, size);
+        return hipMalloc(&ptr_, size);
       case AllocKind::HostMalloc:
-        return hipHostMalloc(&ptr, size, hipHostMallocDefault);
-      case AllocKind::HostRegister:
-        return hipHostRegister(sysMem, size, hipHostRegisterDefault);
+        return hipHostMalloc(&ptr_, size, hipHostMallocDefault);
+      case AllocKind::HostRegister: {
+        const hipError_t result = hipHostRegister(ptr_, size, hipHostRegisterDefault);
+        registered_ = result == hipSuccess;
+        return result;
+      }
     }
     return hipErrorInvalidValue;
   }
 
-  // Frees what Allocate() allocated; registered is false if hipHostRegister failed
-  void Release(bool registered) {
-    if (kind == AllocKind::Device && ptr != nullptr) HIP_CHECK(hipFree(ptr));
-    if (kind == AllocKind::HostMalloc && ptr != nullptr) HIP_CHECK(hipHostFree(ptr));
-    if (sysMem != nullptr) {
-      if (registered) HIP_CHECK(hipHostUnregister(sysMem));
-      VirtualFree(sysMem, 0, MEM_RELEASE);
-    }
-    ptr = sysMem = nullptr;
-  }
+ private:
+  const AllocKind kind_;
+  void* ptr_ = nullptr;
+  bool registered_ = false;
 };
 
 // Holds device and host memory, then makes larger and larger allocations of the given kind until
 // one fails. Free memory must be unchanged by the failure and grow again after the release.
 void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   const size_t idle = FreeMemory();
-  const size_t heldDevSize = idle / 100 * 40;
-  const size_t heldHostSize = std::min(idle / 100 * 20, static_cast<size_t>(4096) * ONE_MB);
+  const size_t heldDevSize = PercentOf(idle, HELD_DEVICE_PERCENT);
+  const size_t heldHostSize = std::min(PercentOf(idle, HELD_HOST_PERCENT), MAX_HELD_HOST_SIZE);
   INFO("Idle free memory : " << idle / ONE_MB << " MB, held device : " << heldDevSize / ONE_MB
                              << " MB, held host : " << heldHostSize / ONE_MB << " MB");
 
@@ -94,19 +123,19 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   size_t beforeFailure = 0;
   for (size_t step = 1; step <= REQUEST_STEPS && !failed; ++step) {
     const size_t size = idle / REQUEST_STEPS * step;
-    Allocation alloc{kind};
+    Allocation alloc(kind);
     // Windows refusing the pageable memory is not a runtime failure
-    if (!alloc.Prepare(size)) break;
+    if (!alloc.Prepare(size)) {
+      break;
+    }
     const size_t before = FreeMemory();
     const hipError_t result = alloc.Allocate(size);
     if (result == hipSuccess) {
-      alloc.Release(true);
       continue;
     }
     // Clear the error, as an application recovering from out of memory would
     static_cast<void>(hipGetLastError());
     const size_t after = FreeMemory();
-    alloc.Release(false);
     failed = true;
     beforeFailure = before;
     INFO("Request : " << size / ONE_MB << " MB -> " << hipGetErrorName(result) << ", free before : "
@@ -117,7 +146,9 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   heldDev = LinearAllocGuard<char>();
   heldHost = LinearAllocGuard<char>();
   HIP_CHECK(hipDeviceSynchronize());
-  if (!failed) HIP_SKIP_TEST("No allocation failed, the failure path was not exercised");
+  if (!failed) {
+    HIP_SKIP_TEST("No allocation failed, the failure path was not exercised");
+  }
 
   // Not compared with idle: freed host allocations can stay cached in the runtime. The held device
   // memory must come back, though.
@@ -172,7 +203,9 @@ HIP_TEST_CASE(Unit_hipHostMalloc_Negative_FailureKeepsFreeMemory) {
 #ifndef _WIN32
   HIP_SKIP_TEST("Regression test for the Windows runtime");
 #else
-  if (!IsApu()) HIP_SKIP_TEST("dGPU --- host allocation sizes are tuned for APUs");
+  if (!IsApu()) {
+    HIP_SKIP_TEST("dGPU --- host allocation sizes are tuned for APUs");
+  }
   CheckFailedAllocKeepsFreeMemory(AllocKind::HostMalloc);
 #endif /* _WIN32 */
 }
@@ -192,7 +225,9 @@ HIP_TEST_CASE(Unit_hipHostRegister_Negative_FailureKeepsFreeMemory) {
 #ifndef _WIN32
   HIP_SKIP_TEST("Regression test for the Windows runtime");
 #else
-  if (!IsApu()) HIP_SKIP_TEST("dGPU --- host allocation sizes are tuned for APUs");
+  if (!IsApu()) {
+    HIP_SKIP_TEST("dGPU --- host allocation sizes are tuned for APUs");
+  }
   CheckFailedAllocKeepsFreeMemory(AllocKind::HostRegister);
 #endif /* _WIN32 */
 }
