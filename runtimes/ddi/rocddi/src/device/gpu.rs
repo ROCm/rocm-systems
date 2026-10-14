@@ -10,6 +10,7 @@
 //! requirements.
 
 use crate::device::Device;
+use crate::driver::GpuDriverRef;
 use crate::memory::Allocation;
 use crate::topology::{CacheInfo, GpuInfo};
 use crate::{Error, ErrorKind};
@@ -51,6 +52,8 @@ pub const fn is_compute_data_cache(cache: &CacheInfo) -> bool {
 pub struct GpuDevice<'a> {
     /// Activated owner from which this capability view borrows.
     pub(crate) device: &'a Device,
+    /// GPU-only driver projection validated when the view was created.
+    pub(crate) driver: GpuDriverRef<'a>,
     /// GPU topology and transport facts captured at activation.
     pub(crate) info: &'a GpuInfo,
     /// Shared GPU service owners retained by the activated device.
@@ -81,7 +84,7 @@ impl GpuDevice<'_> {
         if self.info.gfx_major < 12 {
             return Ok(false);
         }
-        self.device.driver_state.supports_expert_scheduling()
+        self.driver.supports_expert_scheduling()
     }
 
     /// Requests a process-VM persisting L2 reservation for this GPU.
@@ -99,9 +102,7 @@ impl GpuDevice<'_> {
                 detail: "persisting L2 request exceeds the native limit",
             });
         }
-        self.device
-            .driver_state
-            .set_persisting_l2_cache_size(size_bytes)
+        self.driver.set_persisting_l2_cache_size(size_bytes)
     }
 
     /// Returns the bytes currently available for allocation on this GPU.
@@ -112,7 +113,7 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Returns native query or device-lifetime failures.
     pub fn available_memory(&self) -> Result<u64, Error> {
-        self.device.driver_state.available_memory()
+        self.driver.available_memory()
     }
 
     /// Creates device-local backing inside this GPU's scratch aperture.
@@ -121,8 +122,7 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Reports invalid extents, unavailable local storage, or driver failures.
     pub fn allocate_queue_scratch(&self, size: u64) -> Result<Allocation, Error> {
-        self.device
-            .driver_state
+        self.driver
             .allocate_queue_scratch(self.device.endpoint.driver_instance, size)
     }
 
@@ -133,8 +133,7 @@ impl GpuDevice<'_> {
     /// # Errors
     /// Reports unsupported mappings or driver allocation and mapping failures.
     pub fn map_mmio_remap(&self) -> Result<Allocation, Error> {
-        self.device
-            .driver_state
+        self.driver
             .map_mmio_remap(self.device.endpoint.driver_instance)
     }
 }
