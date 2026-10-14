@@ -243,18 +243,16 @@ static std::vector<std::pair<fs::path, ProcessInfo>> collect_process_dirs(
 
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
-    const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) != 0) continue;
+    const uint64_t dir_pid = hrr::pid_from_archive_dir_name(ent.path().filename().string());
+    if (dir_pid == 0) continue;
     // A pid-* directory with no events.bin is not a capture: leftover empty
     // dirs must not be treated as repair failures or listed in the root index.
     if (!fs::exists(ent.path() / "events.bin")) continue;
     ProcessInfo info{};
     if (!read_process_manifest(ent.path() / "manifest.json", info)) {
       // Keep incomplete/crashed directories visible even if their manifest was
-      // never written; derive pid from the directory name when possible.
-      char* end = nullptr;
-      unsigned long long pid = std::strtoull(name.c_str() + 4, &end, 10);
-      if (end && *end == '\0') info.pid = static_cast<uint64_t>(pid);
+      // never written; the pid comes from the directory name.
+      info.pid = dir_pid;
     }
     processes.emplace_back(ent.path(), info);
   }
@@ -940,13 +938,7 @@ static bool write_u(FILE* f, const void* p, size_t n) {
 }
 
 static uint64_t pid_from_archive_dir(const fs::path& archive_dir) {
-  const std::string name = archive_dir.filename().string();
-  if (name.rfind("pid-", 0) != 0) return 0;
-
-  char* end = nullptr;
-  unsigned long long pid = std::strtoull(name.c_str() + 4, &end, 10);
-  if (!end || *end != '\0') return 0;
-  return static_cast<uint64_t>(pid);
+  return hrr::pid_from_archive_dir_name(archive_dir.filename().string());
 }
 
 static int repair_archive(const hrr::Archive& archive) {

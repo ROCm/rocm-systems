@@ -72,8 +72,8 @@ def _archive_dir():
     This is the whole "is HRR recording?" check: the capture writer creates
     pid-<pid>/active as the last step of a successful open and removes it at
     shutdown, so that file is the signal. Neither pid-<pid> nor its events.bin
-    is: both stay when the writer refuses an archive or fails to resume one, and
-    capture is then off. Re-checked on every poll because capture starts at HIP
+    is: both can stay when the writer refuses an archive, and capture is then
+    off. Re-checked on every poll because capture starts at HIP
     init, which is normally after this module loads.
 
     The marker must name this process. A process killed with SIGKILL leaves its
@@ -269,10 +269,9 @@ class _Stream:
                 if dfd is not None:
                     os.close(dfd)
             self._pid = os.getpid()
-            # Only on a fresh file. The stream is opened for append, and DESIGN.md
-            # explicitly supports a process re-opening its own writer on resume, so
-            # writing unconditionally would splice a second file header into the
-            # middle of the record stream. The reader parses those 8 bytes as an
+            # Only on a fresh file. The stream is opened for append and can be
+            # re-opened after close(), so writing unconditionally would splice
+            # a second file header into the middle of the record stream. The reader parses those 8 bytes as an
             # event header, reads a garbage payload length, and discards every
             # record from that point on as a torn tail.
             if self._fh.tell() == 0:
