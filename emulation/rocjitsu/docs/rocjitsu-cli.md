@@ -88,27 +88,43 @@ receiving real GPU descriptors over a Unix socket.
 ## Command-Line Options
 
 ```
-Usage: rocjitsu --config <config.json> [--daemon|--attach] -- <app> [args...]
-       rocjitsu --config <config.json> [--node <id>] --vfio-socket <path> [--vfio-socket <path> ...]
+Usage: rocjitsu [options] -- <app> [args...]
+       rocjitsu [options] --daemon
+       rocjitsu paths [--json]
+       rocjitsu [options] --vfio-socket <path> [--vfio-socket <path> ...]
 ```
 
 | Option | Description |
 |--------|-------------|
-| `--config <path>` | Path to simulation config JSON (required) |
-| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. |
+| `--config <path>` | Path to simulation config JSON. Cannot be combined with `--profile`. |
+| `--profile <name>` | Bundled profile config to run. Defaults to `mi350x` when neither `--config` nor `--profile` is supplied outside attach mode. |
+| `--node <id>` | Select a local node from a multi-node system manifest. Legacy `vm.gpu.num_gpus` configs need no node selector. Not available with `--attach`. |
+| `--cpu-thread-budget <n>`, `--cpu-thread-budget=<n>` | Replace `cpu_thread_budget` for this launch only; the source JSON is left unchanged. Zero selects automatic sizing. Not available with `--attach`. |
+| `--wait-checking <mode>`, `--wait-checking=<mode>` | Override wait checking for this launch only. `on` enables ordinary checks, `off` disables them, and `all` also enables gfx1250 XCNT checks. The source JSON is left unchanged. Not available with `--attach`. |
+| `--thread-budget-table` | Print engine and dispatch allocations without running a VM. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only. |
 | `--attach` | Attach to a running daemon. The socket path is resolved as `$ROCJITSU_RUNTIME_DIR/daemon.sock`, then `$XDG_RUNTIME_DIR/rocjitsu/daemon.sock`, falling back to `/tmp/rocjitsu-<uid>/daemon.sock`. |
 | `--vfio-socket <path>` | Serve a local GPU as a PCI function over VFIO-user. Repeat once per local GPU in ordinal order for a multi-GPU node. The number of sockets must match the selected node's local GPU count, and paths must be distinct. The VMM must share guest RAM through mmap-able file descriptors. |
 | `--check-vfio-user` | Exit successfully only when this binary was built with VFIO-user support. |
-| `--help`, `-h` | Print usage and exit |
-| `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit |
-| `--` | Separator between rocjitsu options and the target application command line |
+| `--help`, `-h` | Print usage and exit. |
+| `--version`, `-v` | Print version, Git revision, commit date, and commit title, then exit. |
+| `paths [--json]` | Print config/runtime search paths. `--json` must follow `paths`, as in `rocjitsu paths --json`. |
+| `--` | Separator between rocjitsu options and the target application command line. |
 
 ### Usage Examples
 
 ```bash
-# Local mode: in-process simulation
+# Local mode with a bundled profile
+rocjitsu --profile mi350x -- ./app
+
+# Local mode with an explicit config
 rocjitsu --config configs/gfx950_mi350x_kmd.json -- ./app
+
+# Inspect runtime and config locations
+rocjitsu paths --json
+
+# Show launch-time CPU thread allocation without starting a VM
+rocjitsu --profile mi350x --cpu-thread-budget 8 --thread-budget-table
 
 # Daemon mode: fork daemon + launch app
 rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
@@ -117,6 +133,9 @@ rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json -- ./app args...
 rocjitsu --daemon --config configs/gfx950_mi350x_kmd.json
 
 # Attach to running daemon
+rocjitsu --attach -- ./app
+
+# Attach to a running daemon while validating an explicit config
 rocjitsu --attach --config configs/gfx950_mi350x_kmd.json -- ./app
 
 # Serve the gfx1250 PCI function to a VMM
