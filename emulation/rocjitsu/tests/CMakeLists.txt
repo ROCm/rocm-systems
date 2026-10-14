@@ -402,11 +402,50 @@ set_tests_properties(
     PROPERTIES PASS_REGULAR_EXPRESSION "\"runtime_dir\": \".*/paths-runtime\""
 )
 add_test(
+    NAME RocjitsuGlobalJsonPaths
+    COMMAND
+        ${CMAKE_COMMAND} -E env ROCJITSU_RUNTIME_DIR=${_rj_paths_runtime}
+        $<TARGET_FILE:rocjitsu_bin> --json paths
+)
+set_tests_properties(
+    RocjitsuGlobalJsonPaths
+    PROPERTIES PASS_REGULAR_EXPRESSION "\"runtime_dir\": \".*/paths-runtime\""
+)
+add_test(
+    NAME RocjitsuGlobalJsonHelp
+    COMMAND $<TARGET_FILE:rocjitsu_bin> --json --help
+)
+set_tests_properties(
+    RocjitsuGlobalJsonHelp
+    PROPERTIES PASS_REGULAR_EXPRESSION "rocjitsu --config foo.json -- ./app"
+)
+
+add_test(
     NAME RocjitsuPathsRejectsUnknown
     COMMAND
         ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
         "-DTEST_ARGS=paths;--bogus" "-DTEST_REGEX=unknown paths option: --bogus"
         -P ${_rj_cli_failure_script}
+)
+
+add_test(
+    NAME RocjitsuLaunchWithoutSeparator
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuLaunchWithoutSeparator
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --env
+        RJ_CLI_NO_SEPARATOR_TEST=ok /usr/bin/env
+)
+set_tests_properties(
+    RocjitsuLaunchWithoutSeparator
+    PROPERTIES PASS_REGULAR_EXPRESSION "RJ_CLI_NO_SEPARATOR_TEST=ok"
+)
+add_test(
+    NAME RocjitsuLaunchRejectsUnknownFlagBeforeCommand
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--nodes;2;/usr/bin/true"
+        "-DTEST_REGEX=unknown option: --nodes" -P ${_rj_cli_failure_script}
 )
 
 # --cpu-thread-budget has to reach the allocation plan through the config copy the
@@ -489,6 +528,128 @@ if(NOT IS_ABSOLUTE "${CMAKE_INSTALL_DATADIR}")
             ${CMAKE_CURRENT_SOURCE_DIR}/profile_relocated_install_test.cmake
     )
 endif()
+
+add_test(
+    NAME RocjitsuExecModeClocked
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --exec-mode clocked
+        --thread-budget-table
+)
+add_test(
+    NAME RocjitsuExecModeFunctionalAssigned
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --exec-mode=functional
+        --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuExecModeClocked
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 1 \\| 0 \\| 8"
+)
+set_tests_properties(
+    RocjitsuExecModeFunctionalAssigned
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 17 \\| 8 \\| 32"
+)
+
+add_test(
+    NAME RocjitsuExecModeRejectsInvalid
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--exec-mode;fast;--thread-budget-table"
+        "-DTEST_REGEX=--exec-mode requires functional or clocked" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuExecModeRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--exec-mode;clocked;--attach;--;/usr/bin/true"
+        "-DTEST_REGEX=--exec-mode cannot be combined with --attach" -P
+        ${_rj_cli_failure_script}
+)
+
+add_test(
+    NAME RocjitsuGpusPerNode
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --gpus-per-node 2
+        --thread-budget-table
+)
+add_test(
+    NAME RocjitsuGpusPerNodeAssigned
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --gpus-per-node=2
+        --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuGpusPerNode
+    RocjitsuGpusPerNodeAssigned
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 17,17 \\| 8 \\| 48"
+)
+
+add_test(
+    NAME RocjitsuGpusPerNodeRejectsZero
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--gpus-per-node;0;--thread-budget-table"
+        "-DTEST_REGEX=--gpus-per-node requires a positive integer" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuGpusPerNodeRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--gpus-per-node;2;--attach;--;/usr/bin/true"
+        "-DTEST_REGEX=--gpus-per-node cannot be combined with --attach" -P
+        ${_rj_cli_failure_script}
+)
+
+add_test(
+    NAME RocjitsuPluginOption
+    COMMAND
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --plugin race --plugin
+        instruction-mix --thread-budget-table
+)
+set_tests_properties(
+    RocjitsuPluginOption
+    PROPERTIES PASS_REGULAR_EXPRESSION "Configured \\| 8 \\| 17 \\| 8 \\| 32"
+)
+
+add_test(
+    NAME RocjitsuPluginRejectsInvalid
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--plugin;../race;--thread-budget-table"
+        "-DTEST_REGEX=invalid plugin name '../race'" -P
+        ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuPluginRejectsAttach
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--plugin;race;--attach;--;/usr/bin/true"
+        "-DTEST_REGEX=--plugin cannot be combined with --attach" -P
+        ${_rj_cli_failure_script}
+)
+
+add_test(
+    NAME RocjitsuInProcessLaunch
+    COMMAND
+        ${CMAKE_COMMAND} -E env
+        ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/RocjitsuInProcessLaunch
+        $<TARGET_FILE:rocjitsu_bin> --profile mi350x --in-process --env
+        RJ_CLI_IN_PROCESS_TEST=ok -- /usr/bin/env
+)
+set_tests_properties(
+    RocjitsuInProcessLaunch
+    PROPERTIES PASS_REGULAR_EXPRESSION "RJ_CLI_IN_PROCESS_TEST=ok"
+)
+add_test(
+    NAME RocjitsuInProcessRejectsDaemon
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--profile;mi350x;--in-process;--daemon;--;/usr/bin/true"
+        "-DTEST_REGEX=--in-process cannot be combined with --daemon or --attach"
+        -P ${_rj_cli_failure_script}
+)
 
 add_test(
     NAME RocjitsuOptionCpuThreadBudget
@@ -916,6 +1077,30 @@ add_test(
         HIP_VISIBLE_DEVICES=1 -- /bin/sh -c
         [=[test "$(sed -n '2p' "$ROCJITSU_INVOCATION_DIR/config_path")" = 38145 &&
 test "$HIP_VISIBLE_DEVICES" = 1]=]
+)
+add_test(
+    NAME RocjitsuDbtSimulatorConfigRejectsExecMode
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_visibility_config};--exec-mode;clocked;--;/usr/bin/true"
+        "-DTEST_REGEX=--exec-mode cannot be combined with a dbt_guest simulator_config"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuDbtSimulatorConfigRejectsGpusPerNode
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_visibility_config};--gpus-per-node;2;--;/usr/bin/true"
+        "-DTEST_REGEX=--gpus-per-node cannot be combined with a dbt_guest simulator_config"
+        -P ${_rj_cli_failure_script}
+)
+add_test(
+    NAME RocjitsuDbtSimulatorConfigRejectsPlugin
+    COMMAND
+        ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_bin>"
+        "-DTEST_ARGS=--config;${_rj_dbt_visibility_config};--plugin;race;--;/usr/bin/true"
+        "-DTEST_REGEX=--plugin cannot be combined with a dbt_guest simulator_config"
+        -P ${_rj_cli_failure_script}
 )
 add_test(
     NAME RocjitsuLaunchEnvRejectsInvalid

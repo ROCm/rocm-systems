@@ -12,6 +12,8 @@
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
 
+#include <algorithm>
+#include <array>
 #include <charconv>
 #include <cstdlib>
 #include <filesystem>
@@ -19,6 +21,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <unistd.h>
 #include <vector>
 
@@ -46,6 +49,168 @@ DbtSiliconRevision silicon_revision_from_fb(fb::DbtSiliconRevision revision) {
     return DbtSiliconRevision::Gfx1250B0;
   }
   throw std::runtime_error("dbt_guest silicon revision is invalid");
+}
+
+bool is_filler(char c) { return c == ' ' || c == '\t' || c == '\r' || c == '\n'; }
+
+void skip_filler(std::string_view json, size_t &at) {
+  while (at < json.size()) {
+    if (is_filler(json[at])) {
+      ++at;
+    } else if (json.compare(at, 2, "//") == 0) {
+      const size_t line_end = json.find_first_of("\r\n", at + 2);
+      at = line_end == std::string_view::npos ? json.size() : line_end + 1;
+    } else if (json.compare(at, 2, "/*") == 0) {
+      const size_t block_end = json.find("*/", at + 2);
+      at = block_end == std::string_view::npos ? json.size() : block_end + 2;
+    } else {
+      return;
+    }
+  }
+}
+
+bool skip_quoted_string(std::string_view json, size_t &at) {
+  if (at >= json.size() || (json[at] != '"' && json[at] != '\''))
+    return false;
+  const char quote = json[at++];
+  while (at < json.size()) {
+    const char c = json[at++];
+    if (c == quote)
+      return true;
+    if (c == '\\' && at < json.size())
+      ++at;
+  }
+  return false;
+}
+
+bool skip_json_value(std::string_view json, size_t &at) {
+  skip_filler(json, at);
+  if (at >= json.size())
+    return false;
+
+  if (json[at] == '"' || json[at] == '\'')
+    return skip_quoted_string(json, at);
+
+  if (json[at] == '{' || json[at] == '[') {
+    const char open = json[at];
+    const char close = open == '{' ? '}' : ']';
+    uint32_t depth = 0;
+    while (at < json.size()) {
+      skip_filler(json, at);
+      if (at >= json.size())
+        return false;
+      if (json[at] == '"' || json[at] == '\'') {
+        if (!skip_quoted_string(json, at))
+          return false;
+        continue;
+      }
+      if (json[at] == open) {
+        ++depth;
+      } else if (json[at] == close) {
+        if (depth == 0)
+          return false;
+        --depth;
+        ++at;
+        if (depth == 0)
+          return true;
+        continue;
+      }
+      ++at;
+    }
+    return false;
+  }
+
+  while (at < json.size() && json[at] != ',' && json[at] != '}' && json[at] != ']' &&
+         !is_filler(json[at])) {
+    if (json.compare(at, 2, "//") == 0 || json.compare(at, 2, "/*") == 0)
+      break;
+    ++at;
+  }
+  return true;
+}
+
+std::optional<std::string> parse_field_name(std::string_view json, size_t &at) {
+  skip_filler(json, at);
+  if (at >= json.size())
+    return std::nullopt;
+
+  if (json[at] == '"' || json[at] == '\'') {
+    const char quote = json[at++];
+    std::string name;
+    while (at < json.size()) {
+      const char c = json[at++];
+      if (c == quote)
+        return name;
+      if (c == '\\') {
+        if (at >= json.size())
+          return std::nullopt;
+        name.push_back(json[at++]);
+      } else {
+        name.push_back(c);
+      }
+    }
+    return std::nullopt;
+  }
+
+  const size_t name_begin = at;
+  while (at < json.size()) {
+    const unsigned char c = static_cast<unsigned char>(json[at]);
+    const bool identifier_char =
+        (c >= 'A' && c <= 'Z') || (c >= 'a' && c <= 'z') || (c >= '0' && c <= '9') || c == '_';
+    if (!identifier_char)
+      break;
+    ++at;
+  }
+  if (name_begin == at)
+    return std::nullopt;
+  return std::string(json.substr(name_begin, at - name_begin));
+}
+
+bool is_ignored_dbt_strict_top_level_field(const std::string &name) {
+  constexpr std::array<std::string_view, 2> kIgnoredFields = {"plugins", "require_all_plugins"};
+  return std::ranges::find(kIgnoredFields, name) != kIgnoredFields.end();
+}
+
+std::string json_without_dbt_strict_ignored_top_level_fields(std::string_view json) {
+  size_t at = 0;
+  skip_filler(json, at);
+  if (at >= json.size() || json[at] != '{')
+    return std::string(json);
+  ++at;
+
+  std::string rewritten = "{";
+  bool first_field = true;
+  while (at < json.size()) {
+    skip_filler(json, at);
+    if (at < json.size() && json[at] == '}')
+      break;
+
+    const size_t field_begin = at;
+    std::optional<std::string> name = parse_field_name(json, at);
+    if (!name)
+      return std::string(json);
+    skip_filler(json, at);
+    if (at >= json.size() || json[at] != ':')
+      return std::string(json);
+    ++at;
+    if (!skip_json_value(json, at))
+      return std::string(json);
+    const size_t field_end = at;
+
+    if (!is_ignored_dbt_strict_top_level_field(*name)) {
+      if (!first_field)
+        rewritten += ",";
+      rewritten.append(json.substr(field_begin, field_end - field_begin));
+      first_field = false;
+    }
+
+    skip_filler(json, at);
+    if (at < json.size() && json[at] == ',')
+      ++at;
+  }
+
+  rewritten += "}";
+  return rewritten;
 }
 
 void validate_guest_device_geometry(const KfdDeviceConfig &device) {
@@ -155,8 +320,9 @@ DbtGuestConfig load_dbt_guest_config_from_file(const std::string &path) {
   // Simulation configs remain forward-compatible with unknown fields, but a
   // DBT guest block selects execution behavior and must reject misspelled keys
   // instead of silently falling back to the hardware backend.
+  const std::string strict_json = json_without_dbt_strict_ignored_top_level_fields(json);
   return with_parsed_simulation_config_json(
-      json, rocjitsu::kEmbeddedSchema,
+      strict_json, rocjitsu::kEmbeddedSchema,
       [](const fb::SimulationConfig *config) { return dbt_guest_from_fb(config->dbt_guest()); },
       false);
 }
