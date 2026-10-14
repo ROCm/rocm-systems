@@ -91,6 +91,7 @@
 #include <span>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 #include <vector>
 
@@ -286,51 +287,32 @@ TEST(CdnaVop3pPackedF32Test, SgprSourcesUseArchitectureSpecificWidth) {
   }
 }
 
-class Gfx1250MemoryTestCu
-    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa> {
+template <typename Isa>
+class MemoryTestCu : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa> {
 public:
-  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna5::Isa>;
+  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
+  using Base::route_memory_inst;
 
-  Gfx1250MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
-                      amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
+  MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
+               amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
       : Base(std::move(name), config, memory, l2) {
     if (l2)
       l2->set_backing_memory(memory);
-    set_memory(memory);
-    set_l2(l2);
+    this->set_memory(memory);
+    this->set_l2(l2);
   }
 
   void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
-    EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
+    EXPECT_TRUE(this->execute_instruction(inst, wf).succeeded());
     if (inst->is_memory_op())
-      route_memory_inst(inst, wf);
+      this->route_memory_inst(inst, wf);
     else
       delete inst;
   }
 };
 
-class Cdna4MemoryTestCu
-    : public amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa> {
-public:
-  using Base = amdgpu::IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, cdna4::Isa>;
-
-  Cdna4MemoryTestCu(std::string name, const amdgpu::ComputeUnitCore::Config &config,
-                    amdgpu::GpuMemory *memory, amdgpu::L2Cache *l2)
-      : Base(std::move(name), config, memory, l2) {
-    if (l2)
-      l2->set_backing_memory(memory);
-    set_memory(memory);
-    set_l2(l2);
-  }
-
-  void execute_and_route(Instruction *inst, amdgpu::Wavefront &wf) {
-    EXPECT_TRUE(execute_instruction(inst, wf).succeeded());
-    if (inst->is_memory_op())
-      route_memory_inst(inst, wf);
-    else
-      delete inst;
-  }
-};
+using Gfx1250MemoryTestCu = MemoryTestCu<cdna5::Isa>;
+using Cdna4MemoryTestCu = MemoryTestCu<cdna4::Isa>;
 
 class Gfx1250VgprReadRecorder final : public ExecutionPlugin {
 public:
@@ -698,6 +680,228 @@ TEST(Gfx1250MemoryExecutionHarness, ExecutesRepresentativeValidAddressStores) {
 
   if (!wf->is_halted())
     wf->halt();
+}
+
+template <typename Isa>
+void check_block_transfer_masks(rj_code_arch_t arch, bool general_completion = false) {
+  for (bool scratch : {false, true}) {
+    for (bool load : {false, true}) {
+      for (uint32_t mask : {0u, 1u, 0x80000000u, 0x80018089u, 0xffffffffu}) {
+        SCOPED_TRACE(testing::Message()
+                     << "scratch=" << scratch << " load=" << load << " mask=" << mask);
+        amdgpu::GpuMemory memory("block_mask_memory");
+        amdgpu::L2Cache l2("block_mask_l2");
+        amdgpu::ComputeUnitCore::Config cfg{};
+        cfg.arch = arch;
+        cfg.num_wf_slots = 1;
+        cfg.sgprs_per_wf = 106;
+        cfg.vgprs_per_wf = 256;
+        cfg.lds_size_kb = 64;
+        MemoryTestCu<Isa> cu("block_mask", cfg, &memory, &l2);
+        auto *wf = cu.dispatch_wf(0, 0, cfg.sgprs_per_wf, cfg.vgprs_per_wf);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(0x5); // Include an inactive lane between two active lanes.
+        wf->set_m0(mask);
+        constexpr uint64_t base = 0x8000;
+        constexpr uint32_t canary = 0xdeadbeef;
+        if (scratch) {
+          wf->set_scratch_base(base);
+          wf->set_scratch_lane_size(128);
+        }
+        const uint32_t vb = wf->vgpr_alloc().base;
+        auto address = [&](uint32_t lane, uint32_t word) {
+          return base + (scratch && arch == ROCJITSU_CODE_ARCH_CDNA5
+                             ? (word * wf->wf_size() + lane) * 4
+                             : lane * 128 + word * 4);
+        };
+        auto value = [](uint32_t lane, uint32_t word) { return 0xabc00000u + lane * 32 + word; };
+        for (uint32_t lane = 0; lane < 3; ++lane) {
+          const uint64_t addr = scratch ? 0 : address(lane, 0);
+          cu.write_vgpr(vb, lane, static_cast<uint32_t>(addr));
+          cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(addr >> 32));
+          for (uint32_t word = 0; word < 32; ++word) {
+            memory.write32(address(lane, word), load ? value(lane, word) : canary);
+            cu.write_vgpr(vb + 32 + word, lane, load ? canary : value(lane, word));
+          }
+        }
+        const auto build_words =
+            [&]<typename Fields>(std::array<uint32_t, 3> (*builder)(uint16_t, Fields),
+                                 uint16_t opcode) {
+              Fields fields{.saddr = 124,
+                            .vdst = uint8_t(load ? 32 : 0),
+                            .vsrc = uint8_t(load ? 0 : 32),
+                            .vaddr = 0};
+              if constexpr (requires { fields.sve; })
+                fields.sve = 1; // Documented SV scratch addressing, with zero v0.
+              return builder(opcode, fields);
+            };
+        std::array<uint32_t, 3> words;
+        if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+          words = scratch ? build_words(cdna5::build_vscratch,
+                                        load ? cdna5::kScratchLoadBlock : cdna5::kScratchStoreBlock)
+                          : build_words(cdna5::build_vglobal,
+                                        load ? cdna5::kGlobalLoadBlock : cdna5::kGlobalStoreBlock);
+        } else {
+          words = scratch ? build_words(rdna4::build_vscratch,
+                                        load ? rdna4::kScratchLoadBlock : rdna4::kScratchStoreBlock)
+                          : build_words(rdna4::build_vglobal,
+                                        load ? rdna4::kGlobalLoadBlock : rdna4::kGlobalStoreBlock);
+        }
+        auto decoder = Decoder::create(arch);
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+        if (load && general_completion) {
+          // Sign extension is a no-op for DWORDs, but bypasses the optimized
+          // completion loop so its fallback must preserve the same mask holes.
+          inst->data_as<amdgpu::VectorMemState>()->sign_extend = true;
+        }
+        wf->set_m0(~mask); // Memory access and writeback use the issue-time mask.
+        ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+        cu.flush_all();
+        for (uint32_t lane = 0; lane < 3; ++lane) {
+          for (uint32_t word = 0; word < 32; ++word) {
+            const bool selected = lane != 1 && (mask & (uint32_t{1} << word));
+            const uint32_t actual =
+                load ? cu.read_vgpr(vb + 32 + word, lane) : memory.read32(address(lane, word));
+            EXPECT_EQ(actual, selected ? value(lane, word) : canary)
+                << "lane=" << lane << " word=" << word;
+          }
+        }
+        wf->halt();
+      }
+    }
+  }
+}
+
+TEST(Gfx1250MemoryExecutionHarness, BlockTransfersPreserveM0Holes) {
+  check_block_transfer_masks<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5);
+}
+
+TEST(Rdna4MemoryExecutionHarness, BlockTransfersPreserveM0Holes) {
+  check_block_transfer_masks<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
+}
+
+TEST(Gfx1250MemoryExecutionHarness, BlockMaskGeneralCompletionMatchesFastPath) {
+  check_block_transfer_masks<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5, /*general_completion=*/true);
+}
+
+TEST(Rdna4MemoryExecutionHarness, BlockMaskGeneralCompletionMatchesFastPath) {
+  check_block_transfer_masks<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4, /*general_completion=*/true);
+}
+
+template <typename Isa> void check_block_transfer_ownership(rj_code_arch_t arch) {
+  for (bool scratch : {false, true}) {
+    for (bool load : {false, true}) {
+      for (uint32_t mask : {0u, 1u, 0x10000u, 0x80010001u, 0xffffffffu}) {
+        SCOPED_TRACE(testing::Message()
+                     << "scratch=" << scratch << " load=" << load << " mask=" << mask);
+        amdgpu::GpuMemory memory("block_ownership_memory");
+        amdgpu::L2Cache l2("block_ownership_l2");
+        amdgpu::ComputeUnitCore::Config config{};
+        config.arch = arch;
+        config.num_wf_slots = 3;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 256;
+        MemoryTestCu<Isa> cu("block_ownership", config, &memory, &l2);
+        auto *prefix = cu.dispatch_wf(0, 0, 128, 256);
+        auto *wave = cu.dispatch_wf(1, 0, 128, 256);
+        auto *neighbor = cu.dispatch_wf(2, 0, 128, 256);
+        ASSERT_NE(prefix, nullptr);
+        ASSERT_NE(wave, nullptr);
+        ASSERT_NE(neighbor, nullptr);
+        const uint32_t vb = wave->vgpr_alloc().base;
+        ASSERT_GT(vb, 0u); // VGPR0 fallback must be relative to the issuing wave.
+        ASSERT_EQ(neighbor->vgpr_alloc().base, vb + 256);
+        wave->set_exec(0x5);
+        wave->set_m0(mask);
+        constexpr uint64_t base = 0x8000;
+        constexpr uint32_t canary = 0xdeadbeef;
+        constexpr uint32_t neighbor_canary = 0xcafef00d;
+        if (scratch) {
+          wave->set_scratch_base(base);
+          wave->set_scratch_lane_size(128);
+        }
+        const auto address = [&](uint32_t lane, uint32_t word) {
+          return base + (scratch && arch == ROCJITSU_CODE_ARCH_CDNA5
+                             ? (word * wave->wf_size() + lane) * 4
+                             : lane * 128 + word * 4);
+        };
+        const auto value = [](uint32_t lane, uint32_t word) {
+          return 0xabc00000u + lane * 32 + word;
+        };
+        const auto fallback = [](uint32_t lane) { return 0x12345678u + lane; };
+        for (uint32_t lane = 0; lane < 3; ++lane) {
+          cu.write_vgpr(prefix->vgpr_alloc().base, lane, neighbor_canary);
+          cu.write_vgpr(vb, lane, fallback(lane));
+          const auto addr = scratch ? 0 : address(lane, 0);
+          cu.write_vgpr(vb + 2, lane, static_cast<uint32_t>(addr));
+          cu.write_vgpr(vb + 3, lane, static_cast<uint32_t>(addr >> 32));
+          for (uint32_t word = 0; word < 32; ++word) {
+            memory.write32(address(lane, word), load ? value(lane, word) : canary);
+            cu.write_vgpr(vb + 240 + word, lane,
+                          word < 16 ? (load ? canary : value(lane, word)) : neighbor_canary);
+          }
+        }
+        const auto build_words =
+            [&]<typename Fields>(std::array<uint32_t, 3> (*builder)(uint16_t, Fields),
+                                 uint16_t opcode) {
+              Fields fields{.saddr = 124,
+                            .vdst = uint8_t(load ? 240 : 0),
+                            .vsrc = uint8_t(load ? 0 : 240),
+                            .vaddr = 2};
+              if constexpr (requires { fields.sve; })
+                fields.sve = 1;
+              return builder(opcode, fields);
+            };
+        const auto words = [&] {
+          if constexpr (std::is_same_v<Isa, cdna5::Isa>)
+            return scratch ? build_words(cdna5::build_vscratch, load ? cdna5::kScratchLoadBlock
+                                                                     : cdna5::kScratchStoreBlock)
+                           : build_words(cdna5::build_vglobal,
+                                         load ? cdna5::kGlobalLoadBlock : cdna5::kGlobalStoreBlock);
+          else
+            return scratch ? build_words(rdna4::build_vscratch, load ? rdna4::kScratchLoadBlock
+                                                                     : rdna4::kScratchStoreBlock)
+                           : build_words(rdna4::build_vglobal,
+                                         load ? rdna4::kGlobalLoadBlock : rdna4::kGlobalStoreBlock);
+        }();
+        auto decoder = Decoder::create(arch);
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_TRUE(cu.execute_instruction(inst.get(), *wave).succeeded());
+        wave->set_m0(~mask);
+        ASSERT_EQ(cu.route_memory_inst(inst.release(), *wave), amdgpu::VmAccessOutcome::Complete);
+        cu.flush_all();
+        for (uint32_t lane = 0; lane < 3; ++lane) {
+          for (uint32_t word = 0; word < 32; ++word) {
+            const bool selected = lane != 1 && (mask & (uint32_t{1} << word));
+            if (word >= 16) {
+              EXPECT_EQ(cu.read_vgpr(vb + 240 + word, lane), neighbor_canary);
+            } else if (load) {
+              EXPECT_EQ(cu.read_vgpr(vb + 240 + word, lane), selected ? value(lane, word) : canary);
+            }
+            if (!load) {
+              EXPECT_EQ(memory.read32(address(lane, word)),
+                        selected ? (word < 16 ? value(lane, word) : fallback(lane)) : canary)
+                  << "lane=" << lane << " word=" << word;
+            }
+          }
+        }
+        prefix->halt();
+        wave->halt();
+        neighbor->halt();
+      }
+    }
+  }
+}
+
+TEST(Gfx1250MemoryExecutionHarness, BlockTransfersCheckOwnershipPerDword) {
+  check_block_transfer_ownership<cdna5::Isa>(ROCJITSU_CODE_ARCH_CDNA5);
+}
+
+TEST(Rdna4MemoryExecutionHarness, BlockTransfersCheckOwnershipPerDword) {
+  check_block_transfer_ownership<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
 }
 
 TEST(Gfx1250MemoryExecutionHarness, SwizzledBufferIdxenOffenUsesScaledStride) {

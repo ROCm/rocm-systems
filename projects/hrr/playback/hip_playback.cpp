@@ -13,7 +13,8 @@
 
 #include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
-#include "hrr_reader.h"   // hrr::hash_hex
+#include "hrr_reader.h"   // hrr::hash_hex, hrr::read_file_capped
+#include "hrr_replay_limits.h"
 
 #include <hip/hip_runtime.h>
 // hipExtModuleLaunchKernel is declared in <hip/hip_ext.h>. That header redeclares
@@ -34,6 +35,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <filesystem>
 #include <future>
 #include <memory>
 #include <new>
@@ -50,6 +52,10 @@
 #else
 #include <dlfcn.h>    // dlsym
 #include <unistd.h>   // _exit
+#include <sys/mman.h> // capture-address placement
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
 #endif
 
 // Thread-local sequence ID — set by dispatch_event before calling any handler.
@@ -209,16 +215,15 @@ static std::string co_path(const std::string& archive_dir,
     return archive_dir + "/code_objects/" + hrr::hash_hex(hash_lo, hash_hi) + ".hsaco";
 }
 
-static std::vector<uint8_t> read_file(const std::string& path) {
-    FILE* f = fopen(path.c_str(), "rb");
-    if (!f) return {};
-    fseek(f, 0, SEEK_END);
-    long sz = ftell(f);
-    fseek(f, 0, SEEK_SET);
-    if (sz <= 0) { fclose(f); return {}; }
-    std::vector<uint8_t> buf(static_cast<size_t>(sz));
-    if (fread(buf.data(), 1, buf.size(), f) != buf.size()) { fclose(f); return {}; }
-    fclose(f);
+// *refused is set when the file was not read because of the file cap or an
+// allocation failure (not because it is missing): the caller ends the replay.
+static std::vector<uint8_t> read_file(const std::string& path, bool* refused = nullptr) {
+    std::vector<uint8_t> buf;
+    std::string err;
+    if (!hrr::read_file_capped(path, buf, &err, refused)) {
+        fprintf(stderr, "[HRR] %s\n", err.c_str());
+        return {};
+    }
     return buf;
 }
 
@@ -285,11 +290,34 @@ const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
             return it->second.data();
         }
     }
-    // Not cached — read from disk, then insert under exclusive lock
-    auto data = read_file(blob_path(archive_dir, hash_lo, hash_hi));
-    if (data.empty()) return nullptr;
+    return cache_file(key, blob_path(archive_dir, hash_lo, hash_hi), sz_out, "blob cache");
+}
+
+// Read a file into blob_cache_ under `key`, charging its size to the host
+// budget before the read so the cap is checked before the bytes are held. The
+// cache is never evicted, so each entry stays charged for the run. Two threads
+// can miss on the same key; the one that loses the insert gives its charge back.
+const void* PlaybackContext::cache_file(const std::string& key, const std::string& path,
+                                        size_t* sz_out, const char* what) const {
+    auto* self = const_cast<PlaybackContext*>(this);
+    std::error_code ec;
+    const uintmax_t size = std::filesystem::file_size(path, ec);
+    const uint64_t charge = ec ? 0 : static_cast<uint64_t>(size);
+    if (!self->charge_host(charge, what)) return nullptr;
+    bool refused = false;
+    auto data = read_file(path, &refused);
+    if (refused) {
+        // Not a missing file: the replay cannot continue faithfully, so end it
+        // now rather than after the consuming handler reaches its HIP call.
+        fatal_error.store(true, std::memory_order_release);
+    }
+    if (data.empty()) {
+        self->host_budget.release(charge);
+        return nullptr;
+    }
     std::unique_lock lk(map_mutex);
-    auto it = blob_cache_.emplace(key, std::move(data)).first;
+    auto [it, inserted] = blob_cache_.emplace(key, std::move(data));
+    if (!inserted) self->host_budget.release(charge);
     if (sz_out) *sz_out = it->second.size();
     return it->second.data();
 }
@@ -307,13 +335,7 @@ const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi
             return it->second.data();
         }
     }
-    auto data = read_file(co_path(archive_dir, hash_lo, hash_hi));
-    if (data.empty()) return nullptr;
-    std::unique_lock lk(map_mutex);
-    auto [it, inserted] = blob_cache_.emplace(key, std::move(data));
-    (void)inserted;
-    if (sz_out) *sz_out = it->second.size();
-    return it->second.data();
+    return cache_file(key, co_path(archive_dir, hash_lo, hash_hi), sz_out, "code object cache");
 }
 
 hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
@@ -2372,10 +2394,14 @@ static size_t hrr_vmm_granularity(int device) {
 }
 
 // Reserve `mapped + gran` of VA, back only the first `mapped` bytes, and leave
-// the tail span unmapped. Any access past the mapped region traps.
-static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device,
+// the tail span unmapped. Any access past the mapped region traps. A `hint`
+// must be met exactly: the runtime reserves elsewhere when it cannot. With
+// `peers`, every device that can reach `device` as a peer gets access too:
+// hipDeviceEnablePeerAccess does not cover VMM memory.
+static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device, void* hint,
                                 void** out_va, size_t* out_reserved,
-                                hipMemGenericAllocationHandle_t* out_handle) {
+                                hipMemGenericAllocationHandle_t* out_handle,
+                                bool peers = false) {
     const size_t reserved = mapped + gran;
     hipMemAllocationProp prop{};
     prop.type          = hipMemAllocationTypePinned;
@@ -2383,8 +2409,9 @@ static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device,
     prop.location.id   = device;
 
     void* va = nullptr;
-    hipError_t r = hipMemAddressReserve(&va, reserved, 0, nullptr, 0);
+    hipError_t r = hipMemAddressReserve(&va, reserved, 0, hint, 0);
     if (r != hipSuccess || !va) return r != hipSuccess ? r : hipErrorOutOfMemory;
+    if (hint && va != hint) { (void)hipMemAddressFree(va, reserved); return hipErrorOutOfMemory; }
 
     hipMemGenericAllocationHandle_t handle{};
     r = hipMemCreate(&handle, mapped, &prop, 0);
@@ -2397,11 +2424,20 @@ static hipError_t hrr_guard_map(size_t mapped, size_t gran, int device,
         return r;
     }
 
-    hipMemAccessDesc desc{};
-    desc.location.type = hipMemLocationTypeDevice;
-    desc.location.id   = device;
-    desc.flags         = hipMemAccessFlagsProtReadWrite;
-    r = hipMemSetAccess(va, mapped, &desc, 1);
+    int ndev = 1;
+    if (!peers || hipGetDeviceCount(&ndev) != hipSuccess) ndev = 1;
+    std::vector<hipMemAccessDesc> desc(1);
+    desc[0].location.id = device;
+    for (int d = 0; d < ndev; ++d) {
+        int can = 0;
+        if (d != device && hipDeviceCanAccessPeer(&can, d, device) == hipSuccess && can)
+            desc.emplace_back().location.id = d;
+    }
+    for (auto& a : desc) {
+        a.location.type = hipMemLocationTypeDevice;
+        a.flags         = hipMemAccessFlagsProtReadWrite;
+    }
+    r = hipMemSetAccess(va, mapped, desc.data(), desc.size());
     if (r != hipSuccess) {
         (void)hipMemUnmap(va, mapped);
         (void)hipMemRelease(handle);
@@ -2422,6 +2458,116 @@ static void hrr_guard_unmap(void* va, size_t mapped, size_t reserved,
     (void)hipMemAddressFree(va, reserved);
 }
 
+// ---- Capture-address placement ----------------------------------------------
+// hipMalloc and hipMallocAsync land at their recorded address, as a VMM mapping
+// in place of the PROT_NONE placeholder hrr_place_hold left there before
+// hipInit. See DESIGN.md, "GPU Allocator Address Non-Determinism".
+
+#ifndef _WIN32
+// MAP_FIXED_NOREPLACE fails rather than move; a kernel too old to know the flag
+// takes the address as a hint, hence the check.
+static bool hrr_place_mmap(uint64_t b, uint64_t e) {
+    void* want = reinterpret_cast<void*>(b);
+    void* p = mmap(want, e - b, PROT_NONE,
+                   MAP_PRIVATE | MAP_ANONYMOUS | MAP_NORESERVE | MAP_FIXED_NOREPLACE, -1, 0);
+    if (p == MAP_FAILED) return false;
+    if (p != want) { munmap(p, e - b); return false; }
+    return true;
+}
+#endif
+
+void hrr_place_hold(PlaybackContext& ctx, const std::vector<HrrVaRange>& plan) {
+#ifndef _WIN32
+    // A padded allocation would run over its neighbours' recorded addresses.
+    if (replay_padded_alloc_size(1) > 1) return;
+    std::lock_guard<std::mutex> lk(ctx.place_mutex);
+    for (const auto& r : plan)
+        if (hrr_place_mmap(r.base, r.end)) ctx.place_held.add(r.base, r.end);
+    ctx.place = true;
+#else
+    (void)ctx; (void)plan;
+#endif
+}
+
+// Map the granules holding `size` bytes at the recorded address `rec` (a
+// stream-ordered allocation need not start on one). False: allocate as before.
+static bool hrr_place_alloc(PlaybackContext& ctx, uint64_t rec, size_t size, void** out,
+                            bool async = false) {
+#ifndef _WIN32
+    if (!ctx.place) return false;
+    const int      dev  = hrr_current_device();
+    const size_t   gran = hrr_vmm_granularity(dev);
+    const uint64_t base = rec - rec % gran;
+    const uint64_t len  = (rec + size - base + gran - 1) / gran * gran;
+    bool held;
+    {
+        std::lock_guard<std::mutex> lk(ctx.place_mutex);
+        held = ctx.place_held.take(base, base + len);
+        if (held) munmap(reinterpret_cast<void*>(base), len);
+    }
+    void* va = nullptr;
+    size_t reserved = 0;
+    hipMemGenericAllocationHandle_t handle{};
+    if (held && hrr_guard_map(len, 0, dev, reinterpret_cast<void*>(base), &va, &reserved,
+                              &handle, /*peers=*/true) == hipSuccess) {
+        {
+            std::unique_lock lk(ctx.map_mutex);
+            ctx.guard_allocs[reinterpret_cast<void*>(rec)] = {va, reserved, len, handle,
+                                                              /*placed=*/true, async};
+        }
+        ctx.placed++;
+        *out = reinterpret_cast<void*>(rec);
+        return true;
+    }
+    if (ctx.verbose)
+        fprintf(stderr, "[HRR] Placement: 0x%llx (%zu bytes) fell back: %s\n",
+                (unsigned long long)rec, size, held ? "not mapped there" : "not held");
+    if (held) {
+        (void)hipGetLastError();  // the recorded call succeeded
+        std::lock_guard<std::mutex> lk(ctx.place_mutex);
+        if (hrr_place_mmap(base, base + len)) ctx.place_held.add(base, base + len);
+    }
+    ctx.place_fell_back++;
+#else
+    (void)ctx; (void)rec; (void)size; (void)out; (void)async;
+#endif
+    return false;
+}
+
+// A placed allocation was unmapped. Hold its range again for the next
+// allocation recorded there, then flush the GPU TLBs: on gfx1201 with Linux
+// 7.0.0-34's in-box amdgpu, hipMemUnmap leaves stale entries, and KFD flushes
+// them when it unmaps an ordinary allocation larger than ROCr's 2 MiB
+// fragments. Not while a graph capture is open, where hipMalloc is illegal.
+static void hrr_place_released(PlaybackContext& ctx, uint64_t b, uint64_t e) {
+#ifndef _WIN32
+    {
+        std::lock_guard<std::mutex> lk(ctx.place_mutex);
+        if (hrr_place_mmap(b, e)) ctx.place_held.add(b, e);
+    }
+    if (ctx.in_graph_capture) return;
+    void* p = nullptr;
+    if (hipMalloc(&p, size_t(4) << 20) == hipSuccess) (void)hipFree(p);
+    else (void)hipGetLastError();
+#else
+    (void)ctx; (void)b; (void)e;
+#endif
+}
+
+static bool hrr_is_placed(PlaybackContext& ctx, void* live) {
+    std::shared_lock lk(ctx.map_mutex);
+    auto it = ctx.guard_allocs.find(live);
+    return it != ctx.guard_allocs.end() && it->second.placed;
+}
+
+// hipFree waits for the device before it frees hipMalloc memory, though not
+// hipMallocAsync memory; unmapping a VMM allocation in its place does not.
+static bool hrr_free_needs_sync(PlaybackContext& ctx, void* live) {
+    std::shared_lock lk(ctx.map_mutex);
+    auto it = ctx.guard_allocs.find(live);
+    return it != ctx.guard_allocs.end() && !it->second.async;
+}
+
 // ---- Segment-tail guard (--guard-segments) ----------------------------------
 
 static hipError_t hrr_guard_alloc(PlaybackContext& ctx, size_t want, void** out) {
@@ -2432,7 +2578,7 @@ static hipError_t hrr_guard_alloc(PlaybackContext& ctx, size_t want, void** out)
     void* va = nullptr;
     size_t reserved = 0;
     hipMemGenericAllocationHandle_t handle{};
-    hipError_t r = hrr_guard_map(mapped, gran, dev, &va, &reserved, &handle);
+    hipError_t r = hrr_guard_map(mapped, gran, dev, nullptr, &va, &reserved, &handle);
     if (r != hipSuccess) return r;
 
     {
@@ -2449,7 +2595,7 @@ static hipError_t hrr_guard_alloc(PlaybackContext& ctx, size_t want, void** out)
     return hipSuccess;
 }
 
-// Returns true if `live` was a guarded allocation and was torn down.
+// Returns true if `live` was a guarded or placed allocation and was torn down.
 static bool hrr_guard_free(PlaybackContext& ctx, void* live) {
     PlaybackContext::GuardAlloc g;
     {
@@ -2460,6 +2606,10 @@ static bool hrr_guard_free(PlaybackContext& ctx, void* live) {
         ctx.guard_allocs.erase(it);
     }
     hrr_guard_unmap(g.va_base, g.mapped, g.reserved, g.handle);
+    if (g.placed) {
+        const uint64_t b = reinterpret_cast<uint64_t>(g.va_base);
+        hrr_place_released(ctx, b, b + g.mapped);
+    }
     return true;
 }
 
@@ -2467,6 +2617,21 @@ void hrr_free_device_alloc(PlaybackContext& ctx, void* live) {
     if (!live) return;
     if (hrr_guard_free(ctx, live)) return;
     (void)hipFree(live);
+}
+
+void hrr_place_reset(PlaybackContext& ctx) {
+    std::vector<void*> placed;
+    {
+        std::shared_lock lk(ctx.map_mutex);
+        for (const auto& [va, g] : ctx.guard_allocs)
+            if (g.placed) placed.push_back(va);
+    }
+    for (void* va : placed) {
+        hrr_guard_free(ctx, va);
+        ctx.remove_alloc(reinterpret_cast<uint64_t>(va));  // placed: live == recorded
+    }
+    ctx.placed = 0;
+    ctx.place_fell_back = 0;
 }
 
 // ---- Block guard (--guard-blocks) -------------------------------------------
@@ -2513,7 +2678,7 @@ static hipError_t hrr_block_guard_alloc(PlaybackContext& ctx, uint64_t blk_base,
     void* va = nullptr;
     size_t reserved = 0;
     hipMemGenericAllocationHandle_t handle{};
-    hipError_t r = hrr_guard_map(mapped, gran, dev, &va, &reserved, &handle);
+    hipError_t r = hrr_guard_map(mapped, gran, dev, nullptr, &va, &reserved, &handle);
     if (r != hipSuccess) return r;
 
     g->va        = va;
@@ -2718,7 +2883,9 @@ static hipError_t replay_malloc(PlaybackContext& ctx, const uint8_t* pl,
     // landing in whatever the driver placed next. Managed memory has no VMM
     // equivalent, and a failed reservation falls back to a plain allocation
     // rather than failing the replay.
-    if (!managed && ctx.guard_segments &&
+    if (!managed && hrr_place_alloc(ctx, a->ptr, pad_sz, &live)) {
+        r = hipSuccess;
+    } else if (!managed && ctx.guard_segments &&
         hrr_guard_alloc(ctx, pad_sz, &live) == hipSuccess) {
         r = hipSuccess;
     } else if (managed) {
@@ -2792,7 +2959,10 @@ hipError_t playback_hipMallocAsync(PlaybackContext& ctx,
     void* live = nullptr;
     size_t orig_sz = static_cast<size_t>(a->size);
     size_t pad_sz  = replay_padded_alloc_size(orig_sz);
-    hipError_t r = hipMallocAsync(&live, pad_sz, stream);
+    // Inside a graph capture this is a graph allocation node; not placed.
+    const bool placed = !ctx.in_graph_capture &&
+                        hrr_place_alloc(ctx, a->dev_ptr, pad_sz, &live, /*async=*/true);
+    hipError_t r = placed ? hipSuccess : hipMallocAsync(&live, pad_sz, stream);
     if (r == hipSuccess) {
         if (hrr_replay_zero_init() && !ctx.in_graph_capture)
             (void)hipMemsetAsync(live, 0, pad_sz, stream);
@@ -2863,21 +3033,76 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
 // hipMallocHost:  ret(4) ptr(8) size(8)
 
+// An archive can record a host allocation again at an address that still holds
+// one: a second pass replays the same events, and a crafted archive can repeat
+// the address without a free. The entry being replaced keeps a live pinned
+// buffer, so free it, and give its charge back, before the new one is charged.
+// Otherwise the old buffer would stay allocated with no charge against it.
+static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
+    void* host_ptr = nullptr;
+    void* reg_buf = nullptr;
+    AllocKind kind = AllocKind::Device;
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        auto it = ctx.alloc_map.find(rec);
+        if (it == ctx.alloc_map.end()) return;
+        kind = it->second.kind;
+        if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
+        host_ptr = it->second.live_ptr;
+        ctx.host_budget.release(it->second.size);
+        ctx.alloc_map.erase(it);
+        auto rb = ctx.host_reg_bufs.find(rec);
+        if (rb != ctx.host_reg_bufs.end()) {
+            reg_buf = rb->second;
+            ctx.host_reg_bufs.erase(rb);
+        }
+    }
+    if (kind == AllocKind::HostMalloc) {
+        (void)hipHostFree(host_ptr);
+        return;
+    }
+    void* buf = reg_buf ? reg_buf : host_ptr;
+    (void)hipHostUnregister(buf);
+#ifdef _WIN32
+    _aligned_free(buf);
+#else
+    free(buf);
+#endif
+}
+
 hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
     void* live = nullptr;
+    free_replaced_host_alloc(ctx, a->ptr);
+    if (!ctx.charge_host(a->size, "hipHostMalloc")) return hipErrorMemoryAllocation;
     hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
     if (r == hipSuccess)
         ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+    else
+        ctx.host_budget.release(a->size);
+    // A call that failed the same way at capture is not a replay failure.
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipHostMalloc", a->ret);
+        return hipSuccess;
+    }
     return r;
 }
 
 hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
     void* live = nullptr;
+    free_replaced_host_alloc(ctx, a->ptr);
+    if (!ctx.charge_host(a->size, "hipMallocHost")) return hipErrorMemoryAllocation;
     hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
     if (r == hipSuccess)
         ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+    else
+        ctx.host_budget.release(a->size);
+    // A call that failed the same way at capture is not a replay failure.
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipMallocHost", a->ret);
+        return hipSuccess;
+    }
     return r;
 }
 
@@ -2886,15 +3111,6 @@ hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
     hipError_t r = hipFreeHost(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
-    return r;
-}
-
-hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hipError_t r = hipHostFree(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;
 }
@@ -2912,6 +3128,9 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostRegister*>(pl);
     size_t sz = static_cast<size_t>(a->sizeBytes);
     if (sz == 0) return hipSuccess;
+    free_replaced_host_alloc(ctx, a->hostPtr);
+    if (!ctx.charge_host(sz, "hipHostRegister backing buffer"))
+        return hipErrorMemoryAllocation;
 
     // Allocate backing host buffer aligned to 64 bytes (page-register friendly).
     void* buf = nullptr;
@@ -2920,7 +3139,10 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 #else
     if (posix_memalign(&buf, 64, sz) != 0) buf = nullptr;
 #endif
-    if (!buf) return hipErrorMemoryAllocation;
+    if (!buf) {
+        ctx.host_budget.release(sz);
+        return hipErrorMemoryAllocation;
+    }
 
     // Restore snapshot into the buffer.
     if (a->blob_hash_lo || a->blob_hash_hi) {
@@ -2930,6 +3152,16 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
             std::memcpy(buf, blob, sz);
         else
             std::memset(buf, 0, sz);
+        if (!blob && ctx.fatal_error.load(std::memory_order_acquire)) {
+            // The blob was refused (cap or allocation), not merely absent:
+            // do not register zeros in its place.
+#ifdef _WIN32
+            _aligned_free(buf);
+#else
+            free(buf);
+#endif
+            return hipErrorUnknown;
+        }
     } else {
         std::memset(buf, 0, sz);
     }
@@ -2940,6 +3172,7 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
         std::unique_lock lk(ctx.map_mutex);
         ctx.host_reg_bufs[a->hostPtr] = buf;
     } else {
+        ctx.host_budget.release(sz);
 #ifdef _WIN32
         _aligned_free(buf);
 #else
@@ -3034,7 +3267,9 @@ hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipFree*>(pl);
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
-    if (hrr_guard_free(ctx, live)) {  // --guard-segments: a VMM mapping
+    if (!ctx.in_graph_capture && hrr_free_needs_sync(ctx, live))
+        if (hipError_t sr = hipDeviceSynchronize(); sr != hipSuccess) return sr;
+    if (hrr_guard_free(ctx, live)) {  // placed or --guard-segments: a VMM mapping
         ctx.remove_alloc(a->ptr);
         return hipSuccess;
     }
@@ -3048,6 +3283,16 @@ hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* pl) {
     void*       live   = ctx.translate_ptr(a->dev_ptr);
     hipStream_t stream = ctx.translate_stream(a->stream);
     if (!live) return hipSuccess;
+    if (hrr_is_placed(ctx, live)) {
+        // Unmapped at once, after the work queued on its stream. A graph being
+        // captured may still use it, so it then stays mapped.
+        if (!ctx.in_graph_capture) {
+            if (hipError_t sr = hipStreamSynchronize(stream); sr != hipSuccess) return sr;
+            hrr_guard_free(ctx, live);
+        }
+        ctx.remove_alloc(a->dev_ptr);
+        return hipSuccess;
+    }
     hipError_t r = hipFreeAsync(live, stream);
     if (r == hipSuccess) ctx.remove_alloc(a->dev_ptr);
     return r;
@@ -3342,6 +3587,11 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                 ctx.note_d2h_fail(hrr_dispatch_seq);
             } else {
                 copy_sz = std::min(copy_sz, blob_sz);
+                hrr::ScopedCharge readback(ctx.host_budget, copy_sz);
+                if (!readback.ok()) {
+                    ctx.report_host_refusal(copy_sz, "D2H validation buffer");
+                    return hipErrorMemoryAllocation;
+                }
                 std::vector<uint8_t> actual(copy_sz);
                 // For async memcpy the stream may not yet have completed — sync it so
                 // all preceding GPU work has finished before reading back.
@@ -3432,6 +3682,11 @@ hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
         return hipErrorInvalidValue;
     }
     size_t sz = static_cast<size_t>(a->sizeBytes);
+    hrr::ScopedCharge readback(ctx.host_budget, sz);
+    if (!readback.ok()) {
+        ctx.report_host_refusal(sz, "hipMemcpyDtoH read-back buffer");
+        return hipErrorMemoryAllocation;
+    }
     std::vector<uint8_t> actual(sz);
     hipError_t r = hipMemcpyDtoH(actual.data(), (hipDeviceptr_t)src_dev, sz);
     if (r != hipSuccess) {
@@ -3469,6 +3724,11 @@ hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
         return hipErrorInvalidValue;
     }
     size_t sz = static_cast<size_t>(a->sizeBytes);
+    hrr::ScopedCharge readback(ctx.host_budget, sz);
+    if (!readback.ok()) {
+        ctx.report_host_refusal(sz, "hipMemcpyDtoHAsync read-back buffer");
+        return hipErrorMemoryAllocation;
+    }
     std::vector<uint8_t> actual(sz);
     hipStream_t stream = ctx.translate_stream(a->stream);
     hipError_t r = hipMemcpyDtoHAsync(actual.data(), (hipDeviceptr_t)src_dev, sz, stream);
@@ -3806,20 +4066,31 @@ hipError_t playback_hipEventDestroy(PlaybackContext& ctx,
 // hipSuccess (see hip_capture_generated.cpp).  Replay drives the API trace
 // faster than the original CPU often did relative to GPU completion, so the
 // same call can transiently return hipErrorNotReady (600).  Spin until
-// hipSuccess to match the captured observable return.
-static hipError_t replay_query_until_success(hipError_t (*once)(void*), void* arg) {
-    int spin = 0;
-    for (;;) {
-        hipError_t r = once(arg);
-        if (r == hipSuccess)
-            return hipSuccess;
-        if (r != hipErrorNotReady)
-            return r;
-        if (++spin < 1000)
-            std::this_thread::yield();
-        else
-            std::this_thread::sleep_for(std::chrono::microseconds(1));
-    }
+// hipSuccess to match the captured observable return. That is a synchronize in
+// effect, so by default the spin has no count of its own (a kernel the
+// application polled for a long time must still replay); it ends when another
+// thread has failed, and --max-query-attempts N adds a bound.
+hipError_t replay_query_until_success(PlaybackContext& ctx, const char* api,
+                                             hipError_t (*once)(void*), void* arg) {
+    hipError_t r = hipSuccess;
+    const bool done = hrr::retry_bounded(ctx.max_query_attempts, [&] {
+        if (ctx.fatal_error.load(std::memory_order_acquire)) {
+            r = hipErrorUnknown;  // another thread failed: stop spinning
+            return true;
+        }
+        r = once(arg);
+        return r != hipErrorNotReady;
+    });
+    if (done)
+        return r;
+    fprintf(stderr,
+            "[HRR] Fatal: %s still returned hipErrorNotReady after %llu attempts "
+            "(--max-query-attempts); the recorded work did not complete\n",
+            api, (unsigned long long)ctx.max_query_attempts);
+    // Fatal for the whole replay, even under --continue-on-error: each further
+    // query of an archive like this would spend the full bound again.
+    ctx.fatal_error.store(true, std::memory_order_release);
+    return hipErrorNotReady;
 }
 
 struct replay_event_query_ctx {
@@ -3834,7 +4105,7 @@ static hipError_t replay_event_query_once(void* p) {
 hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipEventQuery*>(pl);
     replay_event_query_ctx c{ctx.translate_event(a->event)};
-    return replay_query_until_success(replay_event_query_once, &c);
+    return replay_query_until_success(ctx, "hipEventQuery", replay_event_query_once, &c);
 }
 
 struct replay_stream_query_ctx {
@@ -3854,13 +4125,13 @@ static hipError_t replay_stream_query_spt_once(void* p) {
 hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery*>(pl);
     replay_stream_query_ctx c{(hipStream_t)ctx.translate_stream(a->stream)};
-    return replay_query_until_success(replay_stream_query_once, &c);
+    return replay_query_until_success(ctx, "hipStreamQuery", replay_stream_query_once, &c);
 }
 
 hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipStreamQuery_spt*>(pl);
     replay_stream_query_ctx c{(hipStream_t)ctx.translate_stream(a->stream)};
-    return replay_query_until_success(replay_stream_query_spt_once, &c);
+    return replay_query_until_success(ctx, "hipStreamQuery_spt", replay_stream_query_spt_once, &c);
 }
 
 // ---------------------------------------------------------------------------
@@ -4012,6 +4283,14 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
     // copy writes. Left uninitialized, the scratch commits only the pages the
     // copy and the comparison touch; one that cannot be had at all is a skipped
     // check, not a terminated replay.
+    // The scratch buffer counts against --max-host-bytes while it is held; a
+    // refusal ends the replay, as for the other read-back buffers.
+    const uint64_t scratch_bytes = dst.extent ? dst.extent : 1;
+    hrr::ScopedCharge scratch_charge(ctx.host_budget, scratch_bytes);
+    if (!scratch_charge.ok()) {
+        ctx.report_host_refusal(scratch_bytes, api);
+        return hipErrorMemoryAllocation;
+    }
     std::unique_ptr<uint8_t[]> host(new (std::nothrow) uint8_t[dst.extent ? dst.extent : 1]);
     if (!host) {
         fprintf(stderr, "[HRR] %s D2H: no %zu-byte scratch buffer for the recorded host rect, "
@@ -4069,6 +4348,11 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
         return hipSuccess;
     }
     // Like the scratch buffer, one that cannot be had is a skipped check.
+    hrr::ScopedCharge want_charge(ctx.host_budget, n ? n : 1);
+    if (!want_charge.ok()) {
+        ctx.report_host_refusal(n ? n : 1, api);
+        return hipErrorMemoryAllocation;
+    }
     std::unique_ptr<uint8_t[]> want(new (std::nothrow) uint8_t[n]);
     if (!want) {
         fprintf(stderr, "[HRR] %s D2H: no %zu-byte buffer for the expected rows, skipped\n",

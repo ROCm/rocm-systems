@@ -27,6 +27,7 @@
 #include "rocjitsu/vm/amdgpu/memory_wait_scoreboard.h"
 #include "rocjitsu/vm/plugins/execution_plugin_group.h"
 
+#include <cstring>
 #include <fstream>
 #include <iterator>
 #include <thread>
@@ -2347,6 +2348,307 @@ TEST(XcntExecutionTest, VectorAddressAndExecRespectPartialTranslationAndLoadWait
       EXPECT_EQ(counts[0], wait && (consumer == 0 || wait % 2 == 0) ? 0u : 1u);
       EXPECT_EQ(counts[1], 0u);
     }
+}
+
+TEST(MemoryWaitExecutionTest, BlockDependenciesUseCapturedDwordMask) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (bool scratch : {false, true}) {
+      for (bool load : {false, true}) {
+        if (!load && arch != ROCJITSU_CODE_ARCH_CDNA5)
+          continue; // XCNT replay is currently qualified only for CDNA5.
+        for (uint16_t data_base : {32, 240}) {
+          for (uint32_t mask : {0u, 1u, 0x80000001u, 0x55555555u, 0xffffffffu}) {
+            SCOPED_TRACE(testing::Message()
+                         << "arch=" << arch << " scratch=" << scratch << " load=" << load
+                         << " mask=" << mask << " data_base=" << data_base);
+            GpuMemory memory("block_wait_memory");
+            L2Cache l2("block_wait_l2");
+            ComputeUnitCore::Config config{};
+            config.arch = arch;
+            config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+            config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+            config.num_wf_slots = 1;
+            config.sgprs_per_wf = 128;
+            config.vgprs_per_wf = 256;
+            config.lds_size_kb = 64;
+            auto cu = ComputeUnitCore::create("block_wait_cu", config, &memory, &l2);
+            auto *wf = cu->dispatch_wf(0, 0x100, 128, 256, 32);
+            ASSERT_NE(wf, nullptr);
+            wf->set_exec(1);
+            wf->set_mode_raw(1u << 25);
+            wf->set_m0(mask);
+            for (uint32_t reg = 0; reg < 256; ++reg)
+              cu->write_vgpr(wf->vgpr_alloc().base + reg, 0, 0);
+            const auto build_words =
+                [&]<typename Fields>(std::array<uint32_t, 3> (*builder)(uint16_t, Fields),
+                                     uint16_t opcode) {
+                  Fields fields{.saddr = 124,
+                                .vdst = uint8_t(load ? data_base : 0),
+                                .vsrc = uint8_t(load ? 0 : data_base),
+                                .vaddr = 0};
+                  if constexpr (requires { fields.sve; })
+                    fields.sve = 1;
+                  return builder(opcode, fields);
+                };
+            std::array<uint32_t, 3> words;
+            if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              words = scratch ? build_words(cdna5::build_vscratch, load ? cdna5::kScratchLoadBlock
+                                                                        : cdna5::kScratchStoreBlock)
+                              : build_words(cdna5::build_vglobal, load ? cdna5::kGlobalLoadBlock
+                                                                       : cdna5::kGlobalStoreBlock);
+            } else {
+              words = scratch ? build_words(rdna4::build_vscratch, load ? rdna4::kScratchLoadBlock
+                                                                        : rdna4::kScratchStoreBlock)
+                              : build_words(rdna4::build_vglobal, load ? rdna4::kGlobalLoadBlock
+                                                                       : rdna4::kGlobalStoreBlock);
+            }
+            auto decoder = Decoder::create(arch);
+            util::StringDiagnostic error;
+            auto decoded = decoder->decode_window(words, 0, error.emitter());
+            ASSERT_TRUE(decoded.succeeded()) << error.message();
+            cu->track_memory_wait(*decoded.value(), *wf);
+            ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+            wf->set_m0(~mask); // Dependencies retain the mask captured before execution.
+            auto &scoreboard = *wf->memory_wait_scoreboard();
+            const auto counter = load ? WaitCounterKind::Load : WaitCounterKind::Store;
+            EXPECT_EQ(scoreboard.outstanding(counter), 1u); // Even M0=0 occupies a slot.
+            if (arch == ROCJITSU_CODE_ARCH_CDNA5) {
+              EXPECT_EQ(scoreboard.outstanding(WaitCounterKind::X), 1u);
+            }
+            for (uint16_t word = 0; word < 32; ++word) {
+              if (data_base + word >= 256)
+                continue;
+              // A diagnostic retires its dependency to suppress repeats. Reissue
+              // before each probe so every word is checked independently.
+              if (word != 0) {
+                scoreboard.wait(counter, 0);
+                scoreboard.wait(WaitCounterKind::X, 0);
+                wf->set_m0(mask);
+                cu->track_memory_wait(*decoded.value(), *wf);
+                wf->set_m0(~mask);
+              }
+              const auto before =
+                  load ? cu->memory_wait_diagnostic_count() : cu->xcnt_diagnostic_count();
+              scoreboard.access({RegClass::VGPR, static_cast<uint16_t>(data_base + word), 1}, 1,
+                                0xf,
+                                /*write=*/!load);
+              const auto after =
+                  load ? cu->memory_wait_diagnostic_count() : cu->xcnt_diagnostic_count();
+              EXPECT_EQ(after - before, (mask >> word) & 1u) << "word=" << word;
+            }
+            scoreboard.wait(counter, 0);
+            scoreboard.wait(WaitCounterKind::X, 0);
+            EXPECT_TRUE(scoreboard.empty());
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(MemoryWaitExecutionTest, BlockPrechecksRespectMaskAndPerDwordOwnership) {
+  struct Case {
+    uint8_t data_base;
+    uint32_t mask;
+    uint16_t pending_register;
+    bool owned_word;
+    bool fallback;
+  };
+  constexpr Case cases[] = {{32, 1, 32, true, false},          {32, 1, 33, false, false},
+                            {240, 1, 240, true, false},        {240, 1, 241, false, false},
+                            {240, 1, 0, false, false},         {240, 0x10000, 0, false, true},
+                            {240, 0x10000, 240, false, false}, {240, 0xffffffff, 255, true, false},
+                            {240, 0xffffffff, 0, false, true}, {240, 0, 240, false, false},
+                            {240, 0, 0, false, false}};
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    GpuMemory memory("block_precheck_memory");
+    L2Cache l2("block_precheck_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 256;
+    auto cu = ComputeUnitCore::create("block_precheck_cu", config, &memory, &l2);
+    auto *wave = cu->dispatch_wf(0, 0x100, 128, 256, 32);
+    ASSERT_NE(wave, nullptr);
+    wave->set_exec(1);
+    auto decoder = Decoder::create(arch);
+    auto &state = wave->ensure_memory_wait_scoreboard();
+    for (bool scratch : {false, true}) {
+      for (bool load : {false, true}) {
+        for (const auto &c : cases) {
+          const auto build_words =
+              [&]<typename Fields>(std::array<uint32_t, 3> (*builder)(uint16_t, Fields),
+                                   uint16_t opcode) {
+                Fields fields{.saddr = 124,
+                              .vdst = uint8_t(load ? c.data_base : 0),
+                              .vsrc = uint8_t(load ? 0 : c.data_base),
+                              .vaddr = 2}; // Keep address registers separate from VGPR0 fallback.
+                if constexpr (requires { fields.sve; })
+                  fields.sve = 1;
+                return builder(opcode, fields);
+              };
+          const auto words = [&] {
+            if (arch == ROCJITSU_CODE_ARCH_CDNA5)
+              return scratch ? build_words(cdna5::build_vscratch, load ? cdna5::kScratchLoadBlock
+                                                                       : cdna5::kScratchStoreBlock)
+                             : build_words(cdna5::build_vglobal, load ? cdna5::kGlobalLoadBlock
+                                                                      : cdna5::kGlobalStoreBlock);
+            return scratch ? build_words(rdna4::build_vscratch, load ? rdna4::kScratchLoadBlock
+                                                                     : rdna4::kScratchStoreBlock)
+                           : build_words(rdna4::build_vglobal,
+                                         load ? rdna4::kGlobalLoadBlock : rdna4::kGlobalStoreBlock);
+          }();
+          util::StringDiagnostic error;
+          auto decoded = decoder->decode_window(words, 0, error.emitter());
+          ASSERT_TRUE(decoded.succeeded()) << error.message();
+          for (bool waited : {false, true}) {
+            for (uint64_t pending_lanes : {1u, 2u}) {
+              SCOPED_TRACE(testing::Message()
+                           << "arch=" << arch << " scratch=" << scratch << " load=" << load
+                           << " base=" << unsigned(c.data_base) << " mask=" << c.mask
+                           << " pending=" << c.pending_register << " lanes=" << pending_lanes
+                           << " waited=" << waited);
+              state.clear();
+              state.bind(wave->pc, wave, &ComputeUnitCore::report_memory_wait);
+              // DS and global loads have no WAW ordering; stores consume a
+              // pending global load. Both checks must happen before execution.
+              const auto counter = load ? WaitCounterKind::Ds : WaitCounterKind::Load;
+              state.add({state.issue(counter),
+                         0x80,
+                         pending_lanes,
+                         {RegClass::VGPR, c.pending_register, 1},
+                         counter,
+                         0xf});
+              if (waited)
+                state.wait(counter, 0);
+              wave->set_m0(c.mask);
+              const auto before = cu->memory_wait_diagnostic_count();
+              state.check_instruction(*decoded.value(), *wave);
+              EXPECT_EQ(cu->memory_wait_diagnostic_count() - before,
+                        !waited && pending_lanes == 1 && (c.owned_word || (!load && c.fallback)));
+              EXPECT_EQ(decoded.value()->data(), nullptr);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(XcntExecutionTest, BlockStoreProtectsOwnedWordsAndVgpr0Fallback) {
+  struct Case {
+    uint8_t source;
+    uint32_t mask;
+    uint8_t overwritten;
+    bool hazard;
+  };
+  constexpr Case cases[] = {
+      {32, 1, 32, true},          {32, 1, 33, false},         {240, 1, 240, true},
+      {240, 1, 241, false},       {240, 1, 0, false},         {240, 0x10000, 0, true},
+      {240, 0x10000, 240, false}, {240, 0xffffffff, 0, true}, {240, 0xffffffff, 255, true},
+      {240, 0, 0, false}};
+  for (bool scratch : {false, true}) {
+    for (const auto &c : cases) {
+      for (bool waited : {false, true}) {
+        SCOPED_TRACE(testing::Message() << "scratch=" << scratch << " source=" << unsigned(c.source)
+                                        << " mask=" << c.mask << " overwritten="
+                                        << unsigned(c.overwritten) << " waited=" << waited);
+        GpuMemory memory("block_source_memory");
+        L2Cache l2("block_source_l2");
+        ComputeUnitCore::Config config{};
+        config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+        config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+        config.num_wf_slots = 2;
+        config.sgprs_per_wf = 128;
+        config.vgprs_per_wf = 256;
+        auto cu = ComputeUnitCore::create("block_source_cu", config, &memory, &l2);
+        ASSERT_NE(cu->dispatch_wf(0, 0x100, 128, 256, 32), nullptr);
+        auto *wave = cu->dispatch_wf(1, 0x100, 128, 256, 32);
+        ASSERT_NE(wave, nullptr);
+        ASSERT_GT(wave->vgpr_alloc().base, 0u);
+        wave->set_exec(1);
+        wave->set_mode_raw(1u << 25);
+        wave->set_m0(c.mask);
+        for (uint32_t reg = 0; reg < 256; ++reg)
+          cu->write_vgpr(wave->vgpr_alloc().base + reg, 0, 0x12340000u + reg);
+        cu->write_vgpr(wave->vgpr_alloc().base + 2, 0, 0);
+        cu->write_vgpr(wave->vgpr_alloc().base + 3, 0, 0);
+        const auto words =
+            scratch ? cdna5::build_vscratch(cdna5::kScratchStoreBlock,
+                                            {.saddr = 124, .sve = 1, .vsrc = c.source, .vaddr = 2})
+                    : cdna5::build_vglobal(cdna5::kGlobalStoreBlock,
+                                           {.saddr = 124, .vsrc = c.source, .vaddr = 2});
+        auto decoder = Decoder::create(config.arch);
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        cu->track_memory_wait(*decoded.value(), *wave);
+        ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wave).succeeded());
+        const auto &data = *decoded.value()->data_as<VectorMemState>();
+        for (uint32_t word = 0; word < 32; ++word) {
+          if (!(c.mask & (uint32_t{1} << word)))
+            continue;
+          uint32_t captured = 0;
+          std::memcpy(&captured, &data.store_data[word * sizeof(uint32_t)], sizeof(captured));
+          EXPECT_EQ(captured, 0x12340000u + (c.source + word < 256 ? c.source + word : 0));
+        }
+        wave->set_m0(~c.mask);
+        auto &state = *wave->memory_wait_scoreboard();
+        EXPECT_EQ(state.outstanding(WaitCounterKind::Store), 1u);
+        EXPECT_EQ(state.outstanding(WaitCounterKind::X), 1u);
+        if (waited)
+          state.wait(WaitCounterKind::X, 0);
+        const auto overwrite_words =
+            cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = c.overwritten});
+        auto overwrite = decoder->decode_window(overwrite_words, 0, error.emitter());
+        ASSERT_TRUE(overwrite.succeeded()) << error.message();
+        state.check_instruction(*overwrite.value(), *wave);
+        EXPECT_EQ(cu->xcnt_diagnostic_count(), !waited && c.hazard);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+      }
+    }
+  }
+}
+
+TEST(XcntExecutionTest, BlockStoreMaskedDataStillProtectsOverlappingAddress) {
+  for (bool scratch : {false, true}) {
+    SCOPED_TRACE(scratch);
+    GpuMemory memory("block_address_memory");
+    L2Cache l2("block_address_l2");
+    ComputeUnitCore::Config config{};
+    config.arch = ROCJITSU_CODE_ARCH_CDNA5;
+    config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.xcnt_diagnostics = MemoryWaitDiagnostics::Warn;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 128;
+    config.vgprs_per_wf = 128;
+    auto cu = ComputeUnitCore::create("block_address_cu", config, &memory, &l2);
+    auto *wf = cu->dispatch_wf(0, 0x100, 128, 128, 32);
+    ASSERT_NE(wf, nullptr);
+    wf->set_exec(1);
+    wf->set_mode_raw(1u << 25);
+    wf->set_m0(1); // Disabled data words still supply the address: v33, or v[33:34].
+    for (uint32_t reg = 32; reg < 64; ++reg)
+      cu->write_vgpr(wf->vgpr_alloc().base + reg, 0, 0);
+    const auto words =
+        scratch ? cdna5::build_vscratch(cdna5::kScratchStoreBlock,
+                                        {.saddr = 124, .sve = 1, .vsrc = 32, .vaddr = 33})
+                : cdna5::build_vglobal(cdna5::kGlobalStoreBlock,
+                                       {.saddr = 124, .vsrc = 32, .vaddr = 33});
+    auto decoder = Decoder::create(config.arch);
+    util::StringDiagnostic error;
+    auto decoded = decoder->decode_window(words, 0, error.emitter());
+    ASSERT_TRUE(decoded.succeeded()) << error.message();
+    cu->track_memory_wait(*decoded.value(), *wf);
+    ASSERT_TRUE(cu->execute_instruction(decoded.value().get(), *wf).succeeded());
+    auto &scoreboard = *wf->memory_wait_scoreboard();
+    scoreboard.access({RegClass::VGPR, 35, 1}, 1, 0xf, true);
+    EXPECT_EQ(cu->xcnt_diagnostic_count(), 0u);
+    scoreboard.access({RegClass::VGPR, 33, 2}, 1, 0xf, true);
+    EXPECT_EQ(cu->xcnt_diagnostic_count(), 1u);
+  }
 }
 
 TEST(XcntExecutionTest, StoreDataIsProtectedAndSourceReadsAreAllowed) {

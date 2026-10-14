@@ -10,10 +10,11 @@
 // Controllable seams for the libc socket / stdio / process surface.
 //
 // For units whose external dependencies are libc rather than HIP or nccl --
-// src/ras/client.cc is the first, and the socket-facing halves of
-// ras/client_support.cc, misc/socket.cc and bootstrap.cc are the obvious next
-// ones. Such a unit needs no HIP runtime and no nccl fakes at all.
-// diagnostics/ib_write_bw.cc uses only gethostname/access; prefer these over libc_interposers.cc's process-wide one.
+// src/ras/client.cc, src/ras/client_support.cc, and diagnostics/ib_write_bw.cc
+// (which uses only gethostname/access; prefer these over libc_interposers.cc's
+// process-wide one) use this surface today; misc/socket.cc and bootstrap.cc
+// are the obvious next candidates. A libc-only unit needs no HIP runtime and
+// no nccl fakes at all.
 //
 // fakes/libc_seam.h macro-renames each call in the unit under test to the
 // matching micro_* trampoline, which dispatches through the std::function slot
@@ -21,9 +22,8 @@
 // restores every default and clears every record.
 //
 // Add a symbol here when a unit under test reaches it -- with a working
-// default and a reset, never as a hardcoded always-succeed. Symbols not yet
-// needed by any unit (bind, listen, accept, send, recv, poll) are deliberately
-// absent: a seam written without its caller gets the recording surface wrong.
+// default and a reset, never as a hardcoded always-succeed. poll remains
+// deliberately absent until a caller needs a shared recording surface.
 
 #include <netdb.h>
 #include <sys/socket.h>
@@ -58,6 +58,12 @@ struct MicroPerrorCall {
   int err;
 };
 
+struct MicroFcntlCall {
+  int fd;
+  int cmd;
+  int arg;
+};
+
 // One scripted result for the read seam. `ret` < 0 makes the read fail with
 // `err` in errno; `ret` == 0 is EOF; a positive `ret` is the byte count the
 // step promises and must equal data.size(), which ScriptReadData derives for
@@ -83,6 +89,12 @@ extern std::function<ssize_t(int, void*, size_t)> g_read;
 extern std::function<int(int)> g_close;
 extern std::function<int(int, int, int)> g_socket;
 extern std::function<int(int, const struct sockaddr*, socklen_t)> g_connect;
+extern std::function<int(int, const struct sockaddr*, socklen_t)> g_bind;
+extern std::function<int(int, int)> g_listen;
+extern std::function<int(int, struct sockaddr*, socklen_t*)> g_accept;
+extern std::function<int(int, int, int)> g_fcntl;
+extern std::function<ssize_t(int, void*, size_t, int)> g_recv;
+extern std::function<ssize_t(int, const void*, size_t, int)> g_send;
 extern std::function<int(int, int, int, const void*, socklen_t)> g_setsockopt;
 extern std::function<int(const char*, const char*, const struct addrinfo*, struct addrinfo**)> g_getaddrinfo;
 extern std::function<void(struct addrinfo*)> g_freeaddrinfo;
@@ -113,9 +125,29 @@ extern std::vector<int> g_writtenFds;
 extern std::vector<int> g_readFds;
 extern std::vector<MicroReadStep> g_readScript;  // consumed front-to-back by the default read
 extern size_t g_readScriptPos;
+extern std::vector<int> g_boundFds;
+extern std::vector<int> g_listenedFds;
+extern std::vector<int> g_acceptedFds;
+extern std::vector<MicroFcntlCall> g_fcntlCalls;
+extern std::vector<int> g_recvFds;
+extern std::vector<int> g_recvFlags;
+extern std::vector<MicroReadStep> g_recvScript;
+extern size_t g_recvScriptPos;
+extern std::vector<int> g_sentFds;
+extern std::vector<int> g_sendFlags;
+extern std::string g_sentData;
 extern int g_nextSocketFd;              // what the default socket() hands back (-1 to fail it)
 extern int g_socketFailErrno;           // UNDRIVEN: errno the default socket() sets when g_nextSocketFd is -1; the
                                         // one socket-failure test needs per-call behaviour and uses a hook instead
+extern int g_bindResult;
+extern int g_bindErrno;
+extern int g_listenResult;
+extern int g_listenErrno;
+extern int g_nextAcceptFd;
+extern int g_acceptErrno;
+extern int g_fcntlResult;
+extern int g_fcntlErrno;
+extern int g_fcntlGetFlags;
 extern int g_lastSetsockoptLevel;       // level of the last setsockopt; without it SOL_SOCKET is unasserted
 extern int g_lastSetsockoptOptname;     // SO_SNDTIMEO / SO_RCVTIMEO of the last setsockopt
 extern struct timeval g_lastSetsockoptTimeval;
@@ -133,6 +165,12 @@ void ScriptRead(ssize_t ret, int err, std::string data);
 
 // Convenience: script one successful read that delivers `data`.
 void ScriptReadData(std::string data);
+
+// Queues one scripted recv result, with the same semantics as ScriptRead.
+void ScriptRecv(ssize_t ret, int err, std::string data);
+
+// Convenience: script one successful recv that delivers `data`.
+void ScriptRecvData(std::string data);
 
 // Restores every seam to its default and clears every record above.
 void ResetLibcFakes();
