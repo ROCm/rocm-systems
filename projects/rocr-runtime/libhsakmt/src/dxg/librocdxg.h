@@ -36,6 +36,7 @@
 #endif
 #include <stdint.h>
 #include <limits.h>
+#include <vector>
 #include "hsakmt/hsakmt.h"
 #if defined(__linux__)
 #include "hsakmt/hsakmt_drm.h"
@@ -48,6 +49,18 @@
 wsl::thunk::WDDMDevice* get_wddmdev(uint32_t node_id);
 wsl::thunk::WDDMDevice* WddmDevice(uint32_t dev_id);
 int CpuNodes();
+
+inline bool is_cpu_hsa_node(uint32_t node_id) {
+  return static_cast<int>(node_id) < CpuNodes();
+}
+
+inline uint32_t gpu_node_to_wddm_index(uint32_t node_id) {
+  return node_id - static_cast<uint32_t>(CpuNodes());
+}
+
+inline uint32_t wddm_index_to_gpu_node(uint32_t index) {
+  return index + static_cast<uint32_t>(CpuNodes());
+}
 
 uint32_t get_num_wddmdev();
 wsl::thunk::GpuMemory *get_gpu_mem(void *MemoryAddress);
@@ -70,8 +83,7 @@ struct hsakmtRuntime {
     system_heap_space_start_(0),
     system_heap_space_size_(0),
     handle_aperture_start_(0),
-    handle_aperture_size_(0),
-    default_node(1) {}
+    handle_aperture_size_(0) {}
 
   void HeapInit();
   void HeapFini();
@@ -113,7 +125,9 @@ struct hsakmtRuntime {
   unsigned long dxg_open_count;
 
   size_t max_single_alloc_size;
-  uint32_t default_node;
+  /* HSA node ids of the GPUs memory is mapped onto when the caller does not
+   * name a node. Filled once the WDDM adapters are enumerated. */
+  std::vector<uint32_t> default_node;
   D3DKMT_DRIVERVERSION wddm_version = static_cast<D3DKMT_DRIVERVERSION>(0);
 
   /* local heap means bo's backend is vram of all GPUs */

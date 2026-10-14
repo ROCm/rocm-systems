@@ -200,7 +200,14 @@ HSAKMT_STATUS hsaKmtAllocMemoryAlignInternal(HSAuint32 PreferredNode,
   } else
     *MemoryAddress = nullptr;
 
-  uint32_t node = (PreferredNode < CpuNodes()) ? dxg_runtime->default_node : PreferredNode;
+  uint32_t node;
+  if (PreferredNode < static_cast<HSAuint32>(CpuNodes())) {
+    if (dxg_runtime->default_node.empty())
+      return HSAKMT_STATUS_ERROR;
+    node = dxg_runtime->default_node[0];
+  } else {
+    node = PreferredNode;
+  }
   wsl::thunk::WDDMDevice *dev = get_wddmdev(node);
   if (!dev)
     return HSAKMT_STATUS_ERROR;
@@ -536,7 +543,9 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
 
 #if defined(__linux__)
   if (is_ipc_sysmemfd(GraphicsResourceHandle)) {
-    GraphicsResourceInfo->NodeId = dxg_runtime->default_node;
+    if (dxg_runtime->default_node.empty())
+      return HSAKMT_STATUS_ERROR;
+    GraphicsResourceInfo->NodeId = dxg_runtime->default_node[0];
 
     struct stat st;
     if (fstat(static_cast<int>(GraphicsResourceHandle), &st) == 0)
@@ -547,10 +556,14 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRegisterGraphicsHandleToNodesExt(HSAuint64 Graphic
   }
 #endif
 
+  HSAuint32 default_gpu = 0;
   if (NumberOfNodes == 0) {
     RegisterFlags.ui32.requiresVAddr = 0;
+    if (dxg_runtime->default_node.empty())
+      return HSAKMT_STATUS_ERROR;
+    default_gpu = dxg_runtime->default_node[0];
     NumberOfNodes = 1;
-    NodeArray = (HSAuint32*)&(dxg_runtime->default_node);
+    NodeArray = &default_gpu;
   }
   else {
     RegisterFlags.ui32.requiresVAddr = 1;
@@ -807,8 +820,11 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtMapMemoryToGPU(void *MemoryAddress,
                                              HSAuint64 MemorySizeInBytes,
                                              HSAuint64 *AlternateVAGPU) {
 
+  if (dxg_runtime->default_node.empty())
+    return HSAKMT_STATUS_ERROR;
+
   HSAuint64 NumberOfNodes = 1;
-  HSAuint32 NodeArray[] = {dxg_runtime->default_node};
+  HSAuint32 NodeArray[] = {dxg_runtime->default_node[0]};
   HsaMemFlags MemFlags;
   MemFlags.Value = 0;
   MemFlags.ui32.CoarseGrain = 1;
