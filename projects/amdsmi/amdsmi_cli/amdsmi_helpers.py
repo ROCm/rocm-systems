@@ -2080,6 +2080,10 @@ class AMDSMIHelpers:
             is REQUIRED in order to complete updating ALL GPUs in the hive to
             the requested partition mode.
 
+            A requested mode stays pending until the next driver reload.
+            Requesting the current mode cancels a pending mode if the driver
+            supports it; otherwise the next driver reload still applies it.
+
             ******REMINDER******
             In order to reload the AMD GPU driver, users MUST quit all GPU
             workloads across all devices.

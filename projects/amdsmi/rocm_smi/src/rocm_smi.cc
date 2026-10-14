@@ -6840,7 +6840,6 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   std::string newMemoryPartition = mapRSMIToStringMemoryPartitionTypes.at(memory_partition);
   std::string currentMemoryPartition;
 
-  // do nothing if memory_partition is the current mode
   rsmi_status_t ret_get = get_memory_partition(dv_ind, currentMemoryPartition);
   // we can try to set, even if we get unexpected data
   if (ret_get != RSMI_STATUS_SUCCESS && ret_get != RSMI_STATUS_UNEXPECTED_DATA) {
@@ -6854,19 +6853,8 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
     LOG_ERROR(ss);
     return ret_get;
   }
-  rsmi_memory_partition_type_t currRSMIMemoryPartition =
-      mapStringToMemoryPartitionTypes.at(currentMemoryPartition);
-  if (currRSMIMemoryPartition == memory_partition) {
-    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
-       << " | Success - no change, current memory partition was already requested"
-       << " setting"
-       << " | Device #: " << dv_ind
-       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
-       << " | Data: " << newMemoryPartition
-       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
-    LOG_TRACE(ss);
-    return RSMI_STATUS_SUCCESS;
-  }
+  const bool is_current_mode =
+      mapStringToMemoryPartitionTypes.at(currentMemoryPartition) == memory_partition;
 
   // is this an available mode to set to?
   std::string memory_capabilities_str = "unknown";
@@ -6905,9 +6893,23 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   }
 
   GET_DEV_FROM_INDX
+  // Write the current mode too: drivers that support it cancel a different mode
+  // requested earlier, which would otherwise apply at the next driver reload.
   int ret = dev->writeDevInfo(amd::smi::kDevMemoryPartition, newMemoryPartition);
   rsmi_status_t status = amd::smi::ErrnoToRsmiStatus(ret);
 
+  // GPUs with a single memory partition mode expose the file read-only (EACCES);
+  // the mode is already current, so that refusal is not an error.
+  if (is_current_mode && status == RSMI_STATUS_PERMISSION) {
+    ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+       << " | Success - requested mode is already current; write returned "
+       << getRSMIStatusString(status, false) << " | Device #: " << dv_ind
+       << " | Type: " << amd::smi::Device::get_type_string(amd::smi::kDevMemoryPartition)
+       << " | Data: " << newMemoryPartition
+       << " | Returning = " << getRSMIStatusString(RSMI_STATUS_SUCCESS, false);
+    LOG_INFO(ss);
+    return RSMI_STATUS_SUCCESS;
+  }
   if (status != RSMI_STATUS_SUCCESS) {
     if (status == RSMI_STATUS_PERMISSION) {
       status = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
