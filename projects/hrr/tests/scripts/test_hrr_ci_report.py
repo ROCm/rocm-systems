@@ -7,6 +7,7 @@ import contextlib
 import io
 import os
 import sys
+import subprocess
 import tempfile
 import unittest
 from pathlib import Path
@@ -106,6 +107,16 @@ class RenderTest(unittest.TestCase):
         self.assertIn("| Integration | gfx94x | — | — | — | — | _no results_ |", out.getvalue())
         self.assertIn("| Integration | gfx125x | — | — | — | — | _not run: disabled in ci.yaml_ |",
                       out.getvalue())
+
+    def test_main_reports_job_listing_failure(self):
+        err = subprocess.CalledProcessError(1, "gh", stderr="HTTP 403: rate limited\n")
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(rpt, "list_jobs", side_effect=err), \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = rpt.main(["--run-id", "7", "--results-dir", tmp])
+        self.assertEqual(rc, 1)
+        self.assertIn("::error::could not list the jobs of run 7: HTTP 403: rate limited", out.getvalue())
 
     def test_main_fails_when_configure_did_not_succeed(self):
         for result in ("failure", "cancelled"):

@@ -145,7 +145,13 @@ def main(argv: list[str] | None = None) -> int:
     if args.base_json and args.base_json.is_file():
         base = json.loads(args.base_json.read_text())
 
-    rows = classify_jobs(list_jobs(args.repo, args.run_id, args.run_attempt))
+    try:
+        jobs = list_jobs(args.repo, args.run_id, args.run_attempt)
+    except subprocess.CalledProcessError as e:
+        detail = (e.stderr or "").strip() or f"gh api exited {e.returncode}"
+        print(f"::error::could not list the jobs of run {args.run_id}: {detail}")
+        return 1
+    rows = classify_jobs(jobs)
     missing = missing_families(families, rows)
 
     configured = args.configure_result == "success"
