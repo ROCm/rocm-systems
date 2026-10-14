@@ -28,6 +28,21 @@ hipError_t ihipMemcpyCommand(amd::Command*& command, amd::Memory* dstMemory, amd
                              size_t sizeBytes, hipMemcpyKind kind, hip::Stream& stream,
                              size_t dstOffset, size_t srcOffset, bool isAsync = true);
 
+hipError_t ihipValidateMemcpyBatch(void** dsts, void** srcs, size_t* sizes, size_t* sizesDst,
+                                   hipExtMemcpyWait* waits, hipExtMemcpySignal* signals,
+                                   size_t count, hipExtMemcpyAttributes* attrs,
+                                   size_t* attrsIdxs, size_t numAttrs, size_t* failIdx);
+
+// The batch must already have passed ihipValidateMemcpyBatch.
+hipError_t ihipMemcpyBatchCreateCommands(void** dsts, void** srcs, size_t* sizes,
+                                         size_t* sizesDst, size_t count,
+                                         hipExtMemcpyAttributes* attrs, size_t* attrsIdxs,
+                                         size_t numAttrs, hip::Stream& stream,
+                                         std::vector<amd::Command*>& commands);
+
+std::vector<hipExtMemcpyAttributes> ihipToExtMemcpyAttributes(const hipMemcpyAttributes* attrs,
+                                                              size_t numAttrs);
+
 void ihipHtoHMemcpy(void* dst, const void* src, size_t sizeBytes, hip::Stream& stream);
 
 bool IsHtoHMemcpy(void* dst, const void* src);

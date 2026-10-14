@@ -568,4 +568,8 @@ hipKernelNameRefByPtr
 hipModuleEnumerateFunctions
 hipDeviceFlushGPUDirectRDMAWrites
 hipExtMemcpyBatchAsync
+hipGraphAddExtMemcpyBatchNode
+hipGraphExtMemcpyBatchNodeGetParams
+hipGraphExtMemcpyBatchNodeSetParams
+hipGraphExecExtMemcpyBatchNodeSetParams
 @HSA_EXPORTS@

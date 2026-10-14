@@ -953,6 +953,16 @@ hipError_t hipDeviceFlushGPUDirectRDMAWrites(hipFlushGPUDirectRDMAWritesTarget t
                                              hipFlushGPUDirectRDMAWritesScope scope);
 hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value,
                                           int device);
+hipError_t hipGraphAddExtMemcpyBatchNode(hipGraphNode_t* pGraphNode, hipGraph_t graph,
+                                         const hipGraphNode_t* pDependencies,
+                                         size_t numDependencies,
+                                         const hipExtMemcpyBatchNodeParams* nodeParams);
+hipError_t hipGraphExtMemcpyBatchNodeGetParams(hipGraphNode_t node,
+                                               hipExtMemcpyBatchNodeParams* pNodeParams);
+hipError_t hipGraphExtMemcpyBatchNodeSetParams(hipGraphNode_t node,
+                                               const hipExtMemcpyBatchNodeParams* pNodeParams);
+hipError_t hipGraphExecExtMemcpyBatchNodeSetParams(hipGraphExec_t hGraphExec, hipGraphNode_t node,
+                                                   const hipExtMemcpyBatchNodeParams* pNodeParams);
 }  // namespace hip
 
 namespace hip {
@@ -1544,6 +1554,13 @@ void UpdateDispatchTable(HipDispatchTable* ptrDispatchTable) {
   ptrDispatchTable->hipInitDevice_fn = hip::hipInitDevice;
   ptrDispatchTable->hipModuleEnumerateFunctions_fn = hip::hipModuleEnumerateFunctions;
   ptrDispatchTable->hipDeviceFlushGPUDirectRDMAWrites_fn = hip::hipDeviceFlushGPUDirectRDMAWrites;
+  ptrDispatchTable->hipGraphAddExtMemcpyBatchNode_fn = hip::hipGraphAddExtMemcpyBatchNode;
+  ptrDispatchTable->hipGraphExtMemcpyBatchNodeGetParams_fn =
+      hip::hipGraphExtMemcpyBatchNodeGetParams;
+  ptrDispatchTable->hipGraphExtMemcpyBatchNodeSetParams_fn =
+      hip::hipGraphExtMemcpyBatchNodeSetParams;
+  ptrDispatchTable->hipGraphExecExtMemcpyBatchNodeSetParams_fn =
+      hip::hipGraphExecExtMemcpyBatchNodeSetParams;
 }
 
 #if HIP_ROCPROFILER_REGISTER > 0
@@ -2293,15 +2310,21 @@ HIP_ENFORCE_ABI(HipDispatchTable, hipLibraryGetModule_fn, 546);
 HIP_ENFORCE_ABI(HipDispatchTable, hipKernelSetAttributeForDevice_fn, 547);
 // HIP_RUNTIME_API_TABLE_STEP_VERSION == 38
 HIP_ENFORCE_ABI(HipDispatchTable, hipExtMemcpyBatchAsync_fn, 548);
+
+// HIP_RUNTIME_API_TABLE_STEP_VERSION == 39
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphAddExtMemcpyBatchNode_fn, 549);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExtMemcpyBatchNodeGetParams_fn, 550);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExtMemcpyBatchNodeSetParams_fn, 551);
+HIP_ENFORCE_ABI(HipDispatchTable, hipGraphExecExtMemcpyBatchNodeSetParams_fn, 552);
 // if HIP_ENFORCE_ABI entries are added for each new function pointer in the table, the number below
 // will be +1 of the number in the last HIP_ENFORCE_ABI line. E.g.:
 //
 //  HIP_ENFORCE_ABI(<table>, <functor>, 8)
 //
 //  HIP_ENFORCE_ABI_VERSIONING(<table>, 9) <- 8 + 1 = 9
-HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 549)
+HIP_ENFORCE_ABI_VERSIONING(HipDispatchTable, 553)
 
-static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 38,
+static_assert(HIP_RUNTIME_API_TABLE_MAJOR_VERSION == 0 && HIP_RUNTIME_API_TABLE_STEP_VERSION == 39,
               "If you get this error, add new HIP_ENFORCE_ABI(...) code for the new function "
               "pointers and then update this check so it is true");
 #endif

@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <numeric>
 #include <string>
 #include <utility>
 #include <vector>
@@ -2199,55 +2200,91 @@ HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_WaitsSignals_Reserved_Negative) {
 /**
  * Test Description
  * ------------------------
- * - Stream capture is not supported: calling on a capturing stream (origin or joined) returns
- *   hipErrorStreamCaptureUnsupported and invalidates the capture.
+ * - Calling on a capturing stream (origin or joined) records the batch as a single
+ *   hipGraphNodeTypeExtMemcpyBatch node instead of running it, and launching the captured graph
+ *   performs the copy.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpyBatchAsync.cc
  */
-HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_StreamCapture_Negative) {
+HIP_TEST_CASE(Unit_hipExtMemcpyBatchAsync_StreamCapture_Positive) {
   constexpr size_t kBytes = 1024;
+  constexpr size_t kElems = kBytes / sizeof(int);
 
   void* d_a = nullptr;
   void* d_b = nullptr;
   HIP_CHECK(hipMalloc(&d_a, kBytes));
   HIP_CHECK(hipMalloc(&d_b, kBytes));
+  std::vector<int> pattern(kElems);
+  std::iota(pattern.begin(), pattern.end(), 7);
+  HIP_CHECK(hipMemcpy(d_b, pattern.data(), kBytes, hipMemcpyHostToDevice));
 
   hipStream_t stream;
+  hipStream_t side;
+  hipEvent_t fork;
+  hipEvent_t join;
   HIP_CHECK(hipStreamCreate(&stream));
+  HIP_CHECK(hipStreamCreate(&side));
+  HIP_CHECK(hipEventCreate(&fork));
+  HIP_CHECK(hipEventCreate(&join));
 
   void* dsts[] = {d_a};
   void* srcs[] = {d_b};
   size_t sizes[] = {kBytes};
 
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
-  HIP_CHECK_ERROR(hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
-                                         nullptr, nullptr, 0, stream),
-                  hipErrorStreamCaptureUnsupported);
+  const bool on_joined_stream = GENERATE(false, true);
+  INFO((on_joined_stream ? "joined stream" : "origin stream"));
+  HIP_CHECK(hipMemset(d_a, 0, kBytes));
 
+  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
+  hipStream_t capture_stream = stream;
+  if (on_joined_stream) {
+    HIP_CHECK(hipEventRecord(fork, stream));
+    HIP_CHECK(hipStreamWaitEvent(side, fork, 0));
+    capture_stream = side;
+  }
+  HIP_CHECK(hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
+                                   nullptr, nullptr, 0, capture_stream));
+  if (on_joined_stream) {
+    HIP_CHECK(hipEventRecord(join, side));
+    HIP_CHECK(hipStreamWaitEvent(stream, join, 0));
+  }
   hipGraph_t graph = nullptr;
-  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
-  REQUIRE(graph == nullptr);
+  HIP_CHECK(hipStreamEndCapture(stream, &graph));
+  REQUIRE(graph != nullptr);
 
-  // On a stream that joined another stream's capture, the origin's capture is invalidated too.
-  hipStream_t side;
-  hipEvent_t fork;
-  HIP_CHECK(hipStreamCreate(&side));
-  HIP_CHECK(hipEventCreate(&fork));
-  HIP_CHECK(hipStreamBeginCapture(stream, hipStreamCaptureModeRelaxed));
-  HIP_CHECK(hipEventRecord(fork, stream));
-  HIP_CHECK(hipStreamWaitEvent(side, fork, 0));
-  HIP_CHECK_ERROR(hipExtMemcpyBatchAsync(dsts, srcs, sizes, nullptr, nullptr, nullptr, 1,
-                                         nullptr, nullptr, 0, side),
-                  hipErrorStreamCaptureUnsupported);
-  HIP_CHECK_ERROR(hipStreamEndCapture(stream, &graph), hipErrorStreamCaptureInvalidated);
-  REQUIRE(graph == nullptr);
+  size_t num_nodes = 0;
+  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &num_nodes));
+  std::vector<hipGraphNode_t> nodes(num_nodes);
+  HIP_CHECK(hipGraphGetNodes(graph, nodes.data(), &num_nodes));
+  size_t num_batch_nodes = 0;
+  for (hipGraphNode_t node : nodes) {
+    hipGraphNodeType node_type;
+    HIP_CHECK(hipGraphNodeGetType(node, &node_type));
+    if (node_type == hipGraphNodeTypeExtMemcpyBatch) ++num_batch_nodes;
+  }
+  REQUIRE(num_batch_nodes == 1);
 
+  // Capture records the batch without running it.
+  std::vector<int> readback(kElems);
+  HIP_CHECK(hipMemcpy(readback.data(), d_a, kBytes, hipMemcpyDeviceToHost));
+  REQUIRE(readback == std::vector<int>(kElems, 0));
+
+  hipGraphExec_t graph_exec = nullptr;
+  HIP_CHECK(hipGraphInstantiate(&graph_exec, graph, nullptr, nullptr, 0));
+  HIP_CHECK(hipGraphLaunch(graph_exec, stream));
+  HIP_CHECK(hipStreamSynchronize(stream));
+  HIP_CHECK(hipMemcpy(readback.data(), d_a, kBytes, hipMemcpyDeviceToHost));
+  REQUIRE(readback == pattern);
+
+  HIP_CHECK(hipGraphExecDestroy(graph_exec));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipEventDestroy(join));
   HIP_CHECK(hipEventDestroy(fork));
   HIP_CHECK(hipStreamDestroy(side));
+  HIP_CHECK(hipStreamDestroy(stream));
   HIP_CHECK(hipFree(d_a));
   HIP_CHECK(hipFree(d_b));
-  HIP_CHECK(hipStreamDestroy(stream));
 }
 
 /**
