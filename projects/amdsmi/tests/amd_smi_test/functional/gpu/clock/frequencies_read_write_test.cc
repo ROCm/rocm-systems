@@ -69,7 +69,7 @@ static uint64_t effective_level_mask(uint64_t requested_mask, const amdsmi_frequ
 // Binary string for a bitmask, trimmed of leading zeros (down to at least one
 // digit) for display.
 static std::string to_bit_string(uint64_t mask) {
-  std::string s = std::bitset<AMDSMI_MAX_NUM_FREQUENCIES>(mask).to_string();
+  std::string s = std::bitset<64>(mask).to_string();
   s.erase(0, std::min(s.find_first_not_of('0'), s.size() - 1));
   return s;
 }
