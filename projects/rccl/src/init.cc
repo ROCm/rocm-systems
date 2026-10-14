@@ -2775,8 +2775,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
     }
   }
-  comm->globalRmaProxySupport =
-    globalRmaPluginSupport && globalCrossNicSupport && !globalNicFused && comm->cuMemGdrSupport;
+  comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && comm->cuMemGdrSupport;
   isOneLsaTeams = ncclDevrIsOneLsaTeam(comm);
   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() &&
                            (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || isOneLsaTeams);
@@ -2784,13 +2783,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // (globalRmaProxySupport) has no all-P2P symmetric window, and enqueue.cc has a
   // dedicated non-symmetric hostRma path for it. The numRmaCtx gate is upstream 2.31's.
   comm->hostRmaSupport = comm->config.numRmaCtx > 0 && (isOneLsaTeams || comm->globalRmaProxySupport);
-  if (!comm->symmetricSupport || comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE) {
-    INFO(NCCL_INIT,
-         "symmetricSupport %d, cuMemEnable %d, globalGinSupport %d, globalNicFused %d, cuMemGdrSupport %d, "
-         "contiguousRanksPerHost %d, crossNicSupport %d",
-         comm->symmetricSupport, ncclCuMemEnable(), comm->globalGinSupport, globalNicFused, comm->cuMemGdrSupport,
-         comm->contiguousRanksPerHost, globalCrossNicSupport);
-  }
+  INFO(NCCL_INIT | NCCL_NET,
+       "GIN/RMA support: ginConnection %d hostRma %d symmetric %d (ginTypeMask 0x%lx mloPart %d nicFused %d "
+       "crossNic %d railable %d rmaPlugin %d cuMemGdr %d cuMemEnable %d oneLsaTeam %d numRmaCtx %d)",
+       comm->globalGinSupport, comm->hostRmaSupport, comm->symmetricSupport, (unsigned long)globalGinTypeBitMask,
+       comm->hasMloPart, globalNicFused, globalCrossNicSupport, comm->contiguousRanksPerHost != INT_MAX,
+       globalRmaPluginSupport, comm->cuMemGdrSupport, ncclCuMemEnable(), isOneLsaTeams, comm->config.numRmaCtx);
 
   comm->ceColl.baseUCSymReadyPtr = NULL;
   comm->ceColl.baseUCSymComplPtr = NULL;
