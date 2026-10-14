@@ -512,14 +512,11 @@ without changing its evaluation logic.
 In Phase A the adapter is not wired into production. `generate_configs()` in
 `analysis_base.py` keeps calling `load_panel_configs()`, and `detect_counters()` in
 `soc_base.py` keeps scanning the panel YAMLs. The equivalence tests call the Layer 2
-functions directly and compare them with the old path. The cutover replaces the
-`load_panel_configs()` call in one change:
-
-```python
-# In generate_configs(), at the cutover:
-library = load_metric_library(METRIC_LIBRARY_DIR, arch)
-ac.panel_configs = layer2_to_panel_configs(library, arch)
-```
+functions directly and compare them with the old path. The adapter is never wired into
+production: production switches once, at Stage 8, through the Layer 3 views
+(`load_views()` / `views_to_panel_configs()`, see
+[Stage 8](lld-phase2-display-view.md#stage-8----adapter-retirement)), and the adapter is
+then removed.
 
 The Layer 2 files live in a sibling tree, `src/rocprof_compute_soc/metric_library/`
 (`METRIC_LIBRARY_DIR`), not in `analysis_configs/{arch}/`. The old loader requires a
@@ -697,7 +694,9 @@ today's YAMLs differ between tables:
 - **A different quantity under the same name** (e.g. `Wavefront Occupancy` as a count in
   table 201 and as a percent in 301) gets separate ids.
 - **The same quantity at a different unit scale** (e.g. `L2-Fabric Read BW` in GB/s vs
-  Bytes/s) keeps one id. The scaled form stays in the legacy mapping until Phase 2.
+  Bytes/s) keeps one id with one uniform definition (formula and unit). A different
+  display unit is a view concern: the scaled form stays in the legacy mapping until
+  Phase 2, where a view may request its own display unit (see `ViewMetricRef.unit`).
 - **The same quantity with a different formula** (e.g. the gfx1250 cache hit rates,
   HITS/REQ vs HITS/(HITS+MISSES)) is unified to one formula in both the old and the new
   files. Each case is approved individually and listed in the CHANGELOG, because it
