@@ -14,7 +14,7 @@
 ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
 
 // Distinct symbol from ncclIbRegMrDmaBufMultiSeg (both plugins link into librccl).
-// Declines nSegments>1 without peer NCCL_IB_CAP_MULTISEG, or under CTS offload, BY_ORDER or QP sharing.
+// Declines nSegments>1 under CTS offload, BY_ORDER or QP sharing, or on recv without peer NCCL_IB_CAP_MULTISEG.
 ncclResult_t IbCastRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
                                        int* segFds, int type, void** mhandle) {
   ncclResult_t ret = ncclSuccess;
@@ -38,8 +38,9 @@ ncclResult_t IbCastRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, si
     }
     // BY_ORDER adds byte_len per imm, and shared QPs need a commId and per-QP WR budget;
     // segmented sends publish size out of band and carry neither.
+    // RCCL: the side table describes the receiver; a sender splits locally onto one remote rkey.
     if (useCtsOffload || base->recvMatchingScheme == BY_ORDER || IbCastQpSharingEnabled() ||
-        ncclIbDeclineMultiSegRegistration(peerCaps, nSeg)) {
+        (!base->isSend && ncclIbDeclineMultiSegRegistration(peerCaps, nSeg))) {
       INFO(NCCL_NET | NCCL_REG,
            "NET/IB: CAST declining %d-segment registration (ctsOffload=%d scheme=%d qpSharing=%d peerCaps=0x%x)", nSeg,
            (int)useCtsOffload, base->recvMatchingScheme, (int)IbCastQpSharingEnabled(), peerCaps);
