@@ -7,6 +7,7 @@
 #include <cstdlib>
 
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "functional/gpu/ampp/ampp_read_write.h"
 #include "functional/gpu/clock/clock_limit_read_write.h"
 #include "functional/gpu/clock/frequencies_read.h"
 #include "functional/gpu/clock/frequencies_read_write.h"
@@ -46,6 +47,7 @@
 #include "functional/gpu/thermal/temp_read.h"
 #include "functional/gpu/xgmi/xgmi_read_write.h"
 #include "functional/ifoe/fabric/fabric_read.h"
+#include "functional/ifoe/fabric/fabric_write.h"
 #include "functional/ifoe/identity/ifoe_info_read.h"
 #include "functional/ifoe/tray/tray_info_read.h"
 #include "functional/system/cross_process_serialization.h"
@@ -204,6 +206,13 @@ TEST(GpuFunctionalReadWrite, TestPowerCapReadWrite) {
   TestPowerCapReadWrite tst;
   RunGenericTest(&tst);
 }
+TEST(GpuFunctionalReadWrite, TestAmppReadWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (amd::smi::is_vm_guest()) GTEST_SKIP();
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestAmppReadWrite tst;
+  RunGenericTest(&tst);
+}
 TEST(GpuFunctionalReadOnly, TestErrCntRead) {
   TestErrCntRead tst;
   RunGenericTest(&tst);
@@ -336,6 +345,13 @@ TEST(IfoeFunctionalReadOnly, TestFabricRead) {
   if (access("/dev/dxg", F_OK) == 0)
     GTEST_SKIP() << "Skipped on WSL: UALoE/fabric sysfs not available on DXG backend";
   TestFabricRead tst;
+  RunGenericTest(&tst);
+}
+
+TEST(IfoeFunctionalReadWrite, TestFabricWrite) {
+  if (std::getenv("AMDSMI_NON_PRIVILEGED")) GTEST_SKIP_("Skipped in non-privileged mode");
+  if (!amd::smi::is_sudo_user()) GTEST_SKIP_("Invalid permission - Must run as super user");
+  TestFabricWrite tst;
   RunGenericTest(&tst);
 }
 

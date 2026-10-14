@@ -9,6 +9,7 @@
 //! callback is retained. Failed native detach retains the VA and backing so a
 //! GPU address cannot be reused while it may still be mapped.
 
+use crate::memory::storage::TryPush;
 use std::os::fd::AsRawFd;
 
 use super::drm;
@@ -20,17 +21,13 @@ use super::vmem::{
 };
 use super::{error, native_error};
 use super::{os_file, os_memory};
-use crate::host_storage::{Buffer, Owned, Shared};
 use crate::memory::interop::linux::DmaBuf;
+use crate::memory::storage::{Owned, Shared};
 use crate::memory::{AllocationInfo, DeviceAccess};
 use crate::{Error, ErrorKind};
 
-fn local_gem(
-    render: &std::fs::File,
-    handle: u32,
-    allocator: crate::host_storage::Allocator,
-) -> Result<bool, Error> {
-    let mut entries = Buffer::new(allocator);
+fn local_gem(render: &std::fs::File, handle: u32) -> Result<bool, Error> {
+    let mut entries = Vec::new();
     for _ in 0..4 {
         let count = drm::list_gem_handles(render, entries.as_mut_slice())
             .map_err(|source| native_error("DRM GEM handle query", source))?;
@@ -101,7 +98,7 @@ fn validate_backing(vm: &DeviceVm, memory: &KfdVirtualMemory) -> Result<(), Erro
         || info.domains != drm::GEM_DOMAIN_GTT
         || info.flags & required != required
         || info.flags & excluded != 0
-        || !local_gem(&render, handle, vm.allocator())?
+        || !local_gem(&render, handle)?
     {
         return Err(error(
             ErrorKind::Unsupported,
@@ -157,8 +154,8 @@ impl DrmImportedSystem {
             ));
         }
         vm.check()?;
-        let allocator = vm.allocator();
-        let memory = KfdVirtualMemory::import(descriptor, allocator)?;
+
+        let memory = KfdVirtualMemory::import(descriptor)?;
         let native_size = memory.info().size;
         if native_size == 0
             || native_size % page != 0
@@ -172,9 +169,8 @@ impl DrmImportedSystem {
             ));
         }
         validate_backing(&vm, &memory)?;
-        let address =
-            KfdVirtualAddress::reserve(vm.address_range(), native_size, alignment, 0, allocator)?;
-        let slot = Owned::<Self>::try_new_uninit(allocator)?;
+        let address = KfdVirtualAddress::reserve(vm.address_range(), native_size, alignment, 0)?;
+        let slot = Owned::<Self>::try_new_uninit()?;
         let mut imported = slot.write(Self {
             owner: vm.clone(),
             physical_backing_id: memory.info().physical_backing_id,
@@ -225,7 +221,6 @@ impl DrmImportedSystem {
             0,
             native_size,
             DeviceAccess::READ | DeviceAccess::WRITE,
-            allocator,
         )?;
         imported.host = Some(host);
         imported.owner.check()?;
