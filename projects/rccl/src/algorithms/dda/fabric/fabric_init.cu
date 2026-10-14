@@ -176,24 +176,38 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
       WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
       goto fail;
     }
+    // A local failure from here on is agreed below (no early exit).
     barrierState = new (std::nothrow) DdaFabricBarrierState();
     if (barrierState == nullptr) {
       WARN("ncclDdaFabricCommInit: OOM allocating DdaFabricBarrierState");
-      goto fail;
+    } else {
+      barrierState->resources = std::move(barrierPair.first);
+      barrierState->barrierHost = barrierPair.second;
     }
-    barrierState->resources = std::move(barrierPair.first);
-    barrierState->barrierHost = barrierPair.second;
   }
 
-  // Zero the scratch once so the first epoch (>= 1) across all LL operations
-  // never false-matches leftover flag words. Subsequent LL calls rely on
-  // monotonic epochs + the 2-bank layout rather than re-zeroing.
-  CUDACHECKGOTO(cudaMemset(scratch, 0, bytes), res, fail);
-
-  // Device epoch cells for the LL collectives: zero-initialised
-  // so the first device-derived flag is 1. Bumped on the device every LL launch.
-  CUDACHECKGOTO(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), res, fail);
-  CUDACHECKGOTO(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), res, fail);
+  {
+    // Local steps after the last exchange; every rank that got here agrees on the outcome, so no
+    // rank ends with the fabric path while another has none.
+    bool ok = barrierState != nullptr;
+    // Zero the scratch once so the first epoch (>= 1) across all LL operations
+    // never false-matches leftover flag words. Subsequent LL calls rely on
+    // monotonic epochs + the 2-bank layout rather than re-zeroing.
+    ok = ok && cudaMemset(scratch, 0, bytes) == cudaSuccess;
+    // Device epoch cells for the LL collectives: zero-initialised
+    // so the first device-derived flag is 1. Bumped on the device every LL launch.
+    ok = ok && cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) == cudaSuccess;
+    ok = ok && cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) == cudaSuccess;
+    (void)cudaGetLastError();
+    std::vector<int> oks(nRanks, 0);
+    oks[comm->rank] = ok ? 1 : 0;
+    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, oks.data(), sizeof(int)), res, fail);
+    for (int x : oks) ok = ok && x != 0;
+    if (!ok) {
+      INFO(NCCL_INIT, "ncclDdaFabricCommInit: device setup failed on some rank; skipping fabric DDA path");
+      goto fail;
+    }
+  }
 
   // Success: hand ownership of every resource to comm.
   comm->ddaFabricMemHandler = handler;
