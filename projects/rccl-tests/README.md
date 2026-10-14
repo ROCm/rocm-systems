@@ -182,6 +182,19 @@ All tests support the same set of arguments :
   * `-G,--cudagraph <num graph launches>` Capture iterations as a HIP graph and then replay specified number of times. Default : 0.
   * `-C,--report_cputime <0/1>` Report CPU time instead of latency. Default : 0.
   * `-R,--local_register <0/1/2>` enable local (1) or symmetric (2) buffer registration on send/recv buffers. Default : 0.
+  * `--buffer_layout <default|multiseg|elastic>` send/recv layout. `default` keeps the existing single allocation. `multiseg` is a contiguous device VMM range of `--nsegments` physical segments (default 2). `elastic` is the same range with the last `--host_segments` segments backed by host memory (default 1 host segment). Expected and bias buffers stay on the existing allocator. Requires the default coarse memory type.
+  * `--nsegments <count>` segment count for `multiseg` and `elastic`. Default : 2. Ignored for `default`.
+  * `--host_segments <count>` trailing host segments for `elastic`. Default : 1. `elastic` with `-R 1` is rejected; use `-R 0` or `-R 2`.
+
+    Device multi-segment window, registered symmetrically:
+
+    `./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8 -R 2 --buffer_layout multiseg --nsegments 4`
+
+    Elastic window, one GPU segment and one host segment:
+
+    `./build/all_reduce_perf -b 8 -e 128M -f 2 -g 8 -R 2 --buffer_layout elastic --nsegments 2 --host_segments 1`
+
+    Runs without `--buffer_layout` keep the existing single-allocation path, including `-R 0/1/2`.
   * `-S,--report_timestamps <0/1>` Add timestamp (`"%Y-%m-%d %H:%M:%S"`) to each performance report line. Default : 0.
   * `-J,--output_file <file>` Write JSON output to filepath. Infer type from suffix (only `json` supported presently).
   * `-T,--timeout <time in seconds>` timeout each test after specified number of seconds. Default : disabled.
