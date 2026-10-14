@@ -390,6 +390,7 @@ class CodeGenerator:
     _MEMORY_ISSUE_KINDS = {
         'smem_load': 'scalar',
         'smem_store': 'scalar',
+        'smem_atomic': 'scalar',
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
@@ -7675,6 +7676,9 @@ class CodeGenerator:
         if cls == 'smem_store':
             return self._gen_smem_store(dst_ops, src_ops, sem)
 
+        if cls == 'smem_atomic':
+            return self._gen_smem_atomic(sem)
+
         if cls == 'flat_load':
             return self._gen_flat_load(dst_ops, src_ops, sem)
 
@@ -7997,6 +8001,50 @@ class CodeGenerator:
         L.append('  d->addr = *address;')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
+        # Semantics has no op-less smem_atomic fallback, so a missing op is a
+        # derivation bug rather than an unimplemented variant.
+        op_enum = self._ATOMIC_OP_ENUM.get(sem.operation)
+        if op_enum is None:
+            raise ValueError(
+                f'{sem.name}: unsupported smem_atomic operation: {sem.operation}'
+            )
+        # Compare-swap carries more data dwords than it returns.
+        data_dwords = sem.num_elems
+        return_dwords = sem.elem_size // 4
+        L = [
+            f'  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, {data_dwords}u);',
+            '  if (!data_register) return;',
+            '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+            '  d->dst_register = *data_register;',
+        ]
+        if return_dwords != data_dwords:
+            L.append(f'  d->dst_register.width = {return_dwords};')
+        L.extend(
+            [
+                f'  d->num_dwords = {return_dwords};',
+                '  d->elem_size = 4;',
+                f'  d->atomic_op = {op_enum};',
+                # Scalar atomic GLC selects return data, not cache policy.
+                '  d->is_load = inst_.glc != 0;',
+                '  d->mtype = amdgpu::Mtype::UC;',
+            ]
+        )
+        for i in range(data_dwords):
+            L.append(
+                f'  d->store_data[{i}] = amdgpu::read_scalar_register(wf, *data_register, {i});'
+            )
+        self._append_wait_counter_type(L, sem)
+        L.extend(
+            [
+                '  auto address = smem_calculate_address(inst_, wf);',
+                '  if (!address) return;',
+                '  d->addr = *address;',
+                '  set_data(std::move(d));',
+            ]
+        )
         return '\n'.join(L)
 
     def _vop3p_opsel_exprs(self) -> tuple[str, str]:
