@@ -10,6 +10,7 @@
 
 #include <hip/hip_runtime_api.h>
 #include <hip_test_common.hh>
+#include <resource_guards.hh>
 
 #include <algorithm>
 
@@ -73,15 +74,11 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   INFO("Idle free memory : " << idle / ONE_MB << " MB, held device : " << heldDevSize / ONE_MB
                              << " MB, held host : " << heldHostSize / ONE_MB << " MB");
 
-  void* heldDev = nullptr;
-  void* heldHost = nullptr;
-  if (hipMalloc(&heldDev, heldDevSize) != hipSuccess ||
-      hipHostMalloc(&heldHost, heldHostSize, hipHostMallocDefault) != hipSuccess) {
-    if (heldDev != nullptr) HIP_CHECK(hipFree(heldDev));
-    HIP_SKIP_TEST("Could not hold the memory needed to create memory pressure");
-  }
+  // Guards free the held memory even if a REQUIRE below fails
+  LinearAllocGuard<char> heldDev(LinearAllocs::hipMalloc, heldDevSize);
+  LinearAllocGuard<char> heldHost(LinearAllocs::hipHostMalloc, heldHostSize);
   // Touch the held device memory so it is backed by physical memory
-  HIP_CHECK(hipMemset(heldDev, 0, heldDevSize));
+  HIP_CHECK(hipMemset(heldDev.ptr(), 0, heldDevSize));
   HIP_CHECK(hipDeviceSynchronize());
 
   bool failed = false;
@@ -95,6 +92,8 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
       alloc.Release(true);
       continue;
     }
+    // Windows refusing the pageable memory is not a runtime failure
+    if (kind == AllocKind::HostRegister && alloc.sysMem == nullptr) break;
     // Clear the error, as an application recovering from out of memory would
     static_cast<void>(hipGetLastError());
     const size_t after = FreeMemory();
@@ -106,8 +105,8 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
     REQUIRE(after + FREE_MEM_TOLERANCE >= before);
   }
 
-  HIP_CHECK(hipFree(heldDev));
-  HIP_CHECK(hipHostFree(heldHost));
+  heldDev = LinearAllocGuard<char>();
+  heldHost = LinearAllocGuard<char>();
   HIP_CHECK(hipDeviceSynchronize());
   if (!failed) HIP_SKIP_TEST("No allocation failed, the failure path was not exercised");
 
