@@ -12,9 +12,7 @@
 #include "MPIHelpers.hpp"
 #include "ipcsocket.h"
 
-#ifdef RCCL_HAS_RMA_IB_PROXY
-#include "../transport/RmaMPI/RmaMultiSegmentHelpers.hpp"
-#endif
+#include "MultiSegmentVmmHelpers.hpp"
 
 #include <hip/hip_runtime.h>
 #include <mpi.h>
@@ -147,26 +145,8 @@ inline bool CheckHybridVmmRuntimeSupport(int dev, bool requireReexport,
 
 inline void FreeHybridVmm(HybridVmmBuffer& b)
 {
-#ifdef RCCL_HAS_RMA_IB_PROXY
-    RCCLRmaTests::ReleaseMappedVmm(b.base, b.totalSize, b.handles, b.segSizes,
-                                   /*uniformSegSize=*/0);
-#else
-    size_t offset = 0;
-    for (size_t i = 0; i < b.handles.size(); ++i)
-    {
-        if (b.base != 0 && i < b.segSizes.size())
-        {
-            hipDeviceptr_t va = reinterpret_cast<hipDeviceptr_t>(
-                reinterpret_cast<uintptr_t>(b.base) + offset);
-            (void)hipMemUnmap(va, b.segSizes[i]);
-            offset += b.segSizes[i];
-        }
-        if (b.handles[i] != 0)
-            (void)hipMemRelease(b.handles[i]);
-    }
-    if (b.base != 0 && b.totalSize != 0)
-        (void)hipMemAddressFree(b.base, b.totalSize);
-#endif
+    RCCLTestHelpers::ReleaseMappedVmm(b.base, b.totalSize, b.handles, b.segSizes,
+                                      /*uniformSegSize=*/0);
     if (b.exportFd >= 0) (void)close(b.exportFd);
     b = HybridVmmBuffer{};
 }

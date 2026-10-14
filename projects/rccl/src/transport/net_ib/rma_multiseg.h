@@ -24,6 +24,8 @@
 #define NCCL_RMA_MAX_DATA_WRS (4 * NCCL_RMA_MAX_SEGMENTS)
 #define NCCL_RMA_MAX_SIGNAL_WRS (NCCL_RMA_MAX_DATA_WRS + 1)
 #define NCCL_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_SEGMENTS
+// Sender QP depth with RMA multi-segment on. 256 is NET_IB_MAX_REQUESTS; connect.cc checks it.
+#define NCCL_RMA_SEND_QP_WRS (2 * 256 + NCCL_RMA_MAX_SIGNAL_WRS)
 
 static inline size_t ncclRmaSegmentSliceBytes(size_t remaining, size_t localRemaining, size_t remoteRemaining) {
   size_t chunk = remaining;

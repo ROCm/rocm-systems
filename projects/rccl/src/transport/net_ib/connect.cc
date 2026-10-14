@@ -11,6 +11,9 @@
 #include "rma_multiseg.h"
 #include "p2p_resiliency.h"
 
+static_assert(NCCL_RMA_SEND_QP_WRS == 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
+              "NCCL_RMA_SEND_QP_WRS must match the multi-segment sender depth");
+
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
 NCCL_PARAM(IbRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
@@ -721,8 +724,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // GIN iput can post NCCL_RMA_MAX_SIGNAL_WRS on top of the classic 2*MAX data budget.
-  qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS;
+  // Extra signal WRs only while multi-segment RMA is on. =0 keeps develop's depth.
+  qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled() ? NCCL_RMA_SEND_QP_WRS : 2 * NET_IB_MAX_REQUESTS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1383,8 +1386,9 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // GIN flush posts one RDMA read per segment on top of NET_IB_MAX_REQUESTS.
-    qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS;
+    // Extra flush WRs only while multi-segment RMA is on. =0 keeps develop's depth.
+    qpCreateAttrs.maxSendWorkRequest =
+      rcclRmaMultiSegEnabled() ? NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS : NET_IB_MAX_REQUESTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     // Loopback flush QP: local and remote device indices are this recv device.
