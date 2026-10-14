@@ -5,23 +5,24 @@ description: Use when moving computation from runtime to compile time — precom
 
 # C++ constexpr — Compile-Time Computation (C++20)
 
-Move work to compile time: zero runtime cost, no dependencies, trivially testable.
+Move work to compile time: no runtime cost, no dependencies, testable with `static_assert`.
+Every `constexpr` variable takes the `k_` prefix (`cpp-conventions.md`).
 
-## Core Forms
+## Choose the form
 
-### constexpr variable
+| Situation | Use |
+| --- | --- |
+| Constant known at compile time | `constexpr` variable |
+| Pure function that may run at compile time or runtime | `constexpr` function |
+| Function that must never run at runtime (validating a literal) | `consteval` function |
+| Static or global that needs constant initialization, but stays mutable | `constinit` |
+| Branch on a type property inside a template | `if constexpr` |
+| Precomputed mapping | `constexpr` function returning `std::array` |
+
+## Forms
 
 ```cpp
-constexpr int    k_cache_line_bytes = 64;
-constexpr double k_pi               = 3.14159265358979;
-```
-
-### constexpr function
-
-Evaluated at compile time when all arguments are compile-time constants; falls back to runtime otherwise:
-
-```cpp
-constexpr int k_demo_input = 8;
+constexpr int k_cache_line_bytes = 64;
 
 [[nodiscard]] constexpr int
 square(int value)
@@ -29,62 +30,43 @@ square(int value)
     return value * value;
 }
 
-constexpr int k_compiled    = square(k_demo_input);  // compile time
-const int     runtime_value = square(input);         // runtime — input is not constexpr
-```
-
-### consteval function (immediate function)
-
-`consteval` REQUIRES compile-time evaluation — every call must be a constant expression, or it fails to compile. Use it when running at runtime would be a bug (e.g. validating a literal):
-
-```cpp
-constexpr int k_factorial_input = 5;
+constexpr int k_demo_input = 8;
+constexpr int k_compiled   = square(k_demo_input);  // compile time
+const int     runtime      = square(read_input());  // runtime: same function
 
 [[nodiscard]] consteval int
 factorial(int number)
 {
     return number <= 1 ? 1 : number * factorial(number - 1);
 }
-
-constexpr int k_factorial_five = factorial(k_factorial_input);  // OK — compile time
-const int     input            = read();
-const int     bad = factorial(input);  // ERROR — input is not a constant expression
 ```
 
-Prefer `consteval` over the old "assign to a `constexpr` variable to force it" trick when the function should *never* run at runtime.
+`consteval` fails to compile for a non-constant argument. Prefer it to assigning the
+result to a `constexpr` variable when no call may ever run at runtime. Use the variable
+form when the same function also needs a runtime path.
 
-### constinit variable
+`constinit int g_counter = compute_seed();` removes static-initialization-order
+problems. It does not make the variable immutable; use `constexpr` for that.
 
-Guarantees a static / thread-local is initialized at compile time — eliminates the static-initialization-order fiasco. Unlike `constexpr`, the variable stays mutable:
+## if constexpr
 
-```cpp
-constinit int g_counter = compute_seed();  // constant-initialized, still mutable
-```
-
-### if constexpr
-
-Compile-time branch — the non-taken branch is not compiled, not just skipped:
+The untaken branch is not instantiated. Prefer it over tag dispatch or SFINAE.
 
 ```cpp
-constexpr int    k_int_scale   = 2;
-constexpr double k_float_scale = 2.0;
+template <typename T>
+inline constexpr bool k_always_false = false;
 
 template <typename T>
 [[nodiscard]] auto
 process(T value)
 {
-    if constexpr(std::is_integral_v<T>)
-        return value * k_int_scale;
-    else if constexpr(std::is_floating_point_v<T>)
-        return value * k_float_scale;
-    else
-        static_assert(false, "unsupported type");
+    if constexpr(std::is_integral_v<T>) return value * 2;
+    else if constexpr(std::is_floating_point_v<T>) return value * 2.0;
+    else static_assert(k_always_false<T>, "unsupported type");
 }
 ```
 
-Prefer `if constexpr` over tag dispatch or SFINAE — same result, far more readable.
-
-### Compile-time lookup table
+## Lookup table
 
 ```cpp
 constexpr int k_lut_size = 256;
@@ -97,85 +79,28 @@ build_lut()
         table[i] = i * i;
     return table;
 }
-constexpr auto k_lut = build_lut();  // built entirely at compile time
-
-const int value = k_lut[index];  // pure array access at runtime — zero computation
+constexpr auto k_lut = build_lut();  // runtime cost is one array read
 ```
 
-In C++20 most standard algorithms are `constexpr`, so you can use them inside a `constexpr` function instead of a hand-written loop:
+Most standard algorithms are `constexpr` in C++20; use `std::ranges::generate` or
+`std::ranges::fill` instead of a hand-written loop when it reads better.
+
+## Test
+
+A `constexpr` function is pure, so it needs no mock. Check it at compile time and, when a
+runtime path exists, once more with GTest:
 
 ```cpp
-constexpr int k_lut_size = 256;
-
-[[nodiscard]] constexpr auto
-build_lut()
-{
-    std::array<int, k_lut_size> table{};
-    std::ranges::generate(table, [index = 0]() mutable {
-        const int current = index;
-        ++index;
-        return current * current;
-    });
-    return table;
-}
-```
-
-## When to Use
-
-| Situation | Use |
-| --- | --- |
-| Constant known at compile time | `constexpr` variable |
-| Pure function on compile-time inputs | `constexpr` function |
-| Template branch on type property | `if constexpr` |
-| Precomputed mapping / LUT | `constexpr` function returning `std::array` |
-| Enforce compile-time evaluation | `consteval` function (or assign result to a `constexpr` variable) |
-| Function must NEVER run at runtime | `consteval` |
-| Static/global needing constant init (avoid SIOF) | `constinit` |
-
-## Testing
-
-`constexpr` functions are pure — no side effects, no dependencies — so no mocking is ever needed.
-
-```cpp
-constexpr int k_lut_index = 4;
-
-// Compile-time: catches bugs before the binary exists
 static_assert(square(k_demo_input) == k_demo_input * k_demo_input);
-static_assert(k_lut[k_lut_index] == k_lut_index * k_lut_index);
-
-// Runtime: works with GTest unchanged
-TEST(square_test, positive_input)
-{
-    EXPECT_EQ(square(k_demo_input), k_demo_input * k_demo_input);
-}
 ```
 
-## Forcing Compile-Time Evaluation
+## Gotchas
 
-Two ways, strongest first:
-
-```cpp
-// 1. consteval — the function itself can only ever run at compile time
-[[nodiscard]] consteval int
-checked(int value)
-{
-    return value;
-}
-
-// 2. Assign to a constexpr variable — forces evaluation at this call site
-constexpr int k_result =
-    expensive_fn(args);  // fails to compile if args are not constexpr
-```
-
-Use `consteval` when *no* call should ever fall back to runtime; use the `constexpr`-variable trick when the same function must also be usable at runtime elsewhere.
-
-## Common Mistakes
-
-| Mistake | Fix |
-| --- | --- |
-| Calling non-`constexpr` function inside `constexpr` function | Mark the callee `constexpr` or extract the computation |
-| `if constexpr` outside a template | Only valid in a template context |
-| Assuming `constexpr` function always runs at compile time | Use `consteval`, or assign to a `constexpr` variable to enforce it |
-| Using `consteval` for a function that also needs a runtime path | `consteval` forbids runtime calls — use plain `constexpr` instead |
-| Expecting `constinit` to make a variable immutable | It only guarantees constant *initialization*; the variable stays mutable — use `constexpr` for immutability |
-| Mutating state inside `constexpr` function | Allowed but the function must remain pure (no I/O, no globals) |
+- `static_assert(false, ...)` in a discarded `if constexpr` branch is ill-formed before
+  C++23 on older compilers. Use a dependent value such as `k_always_false<T>`.
+- A `constexpr` function runs at compile time only when every argument is constant and
+  the result is used in a constant expression. Otherwise it runs at runtime.
+- A `constexpr` function may only call `constexpr` functions. Mark the callee or move
+  the computation out.
+- `if constexpr` outside a template does not discard the branch.
+- A `constexpr` function stays pure: no I/O, no globals.
