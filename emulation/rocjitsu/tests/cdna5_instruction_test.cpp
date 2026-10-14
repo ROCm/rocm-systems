@@ -403,17 +403,16 @@ TEST(Gfx1250SimulationTest, SMovreldWritesM0IndexedScalarDestinations) {
 
 TEST(Gfx1250SimulationTest, SMovrelsd2B32UsesSeparatePackedM0Offsets) {
   const uint32_t code[] = {
-      0xBEFD00FFu,    0x00000201u, // s_mov_b32 m0, 0x201
-      0xBE8200FFu,    0x77777777u, // s_mov_b32 s2, 0x77777777
-      0xBE8300FFu,    0x88888888u, // s_mov_b32 s3, 0x88888888
-      0xBE884402u,                 // s_movrelsd_2_b32 s8, s2
+      0xBEFD00FFu,    0x0014000au, // s_mov_b32 m0, (20 << 16) | 10
+      0xBE9100FFu,    0x88888888u, // s_mov_b32 s17, 0x88888888
+      0xBE854407u,                 // s_movrelsd_2_b32 s5, s7
       S_ENDPGM_GFX12,
   };
 
   Gfx1250Sim sim;
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(wf->sgpr(10), 0x88888888u);
+  EXPECT_EQ(wf->sgpr(25), 0x88888888u);
 }
 
 TEST(Gfx1250SimulationTest, SplitNamedBarrierOpsReportIdleState) {

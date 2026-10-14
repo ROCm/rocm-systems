@@ -284,7 +284,8 @@ TEST(ScalarControlTest, MovrelUsesDwordOffsetsForBothWidthsAndDirections) {
     const auto base = wave->sgpr_alloc().base;
     for (bool wide : {false, true})
       for (bool destination : {false, true})
-        for (unsigned offset : {0u, 2u, 10u, 80u}) {
+        for (unsigned offset : {0u, 1u, 2u, 3u, 10u, 80u, 108u, 128u, 0x100u, 0x80000002u,
+                                0xfffffffeu, 0xffffffffu}) {
           SCOPED_TRACE(testing::Message() << "arch=" << arch.arch << " wide=" << wide
                                           << " dst=" << destination << " offset=" << offset);
           for (unsigned r = 0; r < 102; ++r)
@@ -297,10 +298,15 @@ TEST(ScalarControlTest, MovrelUsesDwordOffsetsForBothWidthsAndDirections) {
           std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
           ASSERT_NE(inst, nullptr);
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
-          const auto src = 4 + (destination ? 0 : offset);
-          const auto dst = 20 + (destination ? offset : 0);
-          for (unsigned r = 0; r < (wide ? 2u : 1u); ++r)
-            EXPECT_EQ(cu->read_sgpr(base + dst + r), 0x12340000u + src + r);
+          const uint64_t aligned = wide ? offset & ~1u : offset;
+          const uint64_t src = 4 + (destination ? 0 : aligned);
+          const uint64_t dst = 20 + (destination ? aligned : 0);
+          for (unsigned reg = 0; reg < 102; ++reg) {
+            uint32_t expected = 0x12340000u + reg;
+            if (dst + (wide ? 2u : 1u) <= 102 && reg >= dst && reg < dst + (wide ? 2u : 1u))
+              expected = 0x12340000u + (src + (wide ? 2u : 1u) <= 102 ? src : 0) + reg - dst;
+            EXPECT_EQ(cu->read_sgpr(base + reg), expected) << "reg=" << reg;
+          }
           EXPECT_TRUE(wave->read_scc());
         }
     wave->halt();
@@ -398,6 +404,49 @@ TEST(ScreenPartitionTest, RectangleCoverageMatchesAllSelectorsAndRespectsExec) {
     }
     wave->halt();
   }
+}
+
+TEST(ScreenPartitionTest, DppAndSdwaStageSourcesAndPreserveMaskedDestinations) {
+  amdgpu::GpuMemory memory("screen_modifier_memory");
+  amdgpu::L2Cache l2("screen_modifier_l2");
+  amdgpu::ComputeUnitCore::Config config{};
+  config.arch = ROCJITSU_CODE_ARCH_CDNA4;
+  config.num_wf_slots = 1;
+  config.sgprs_per_wf = 102;
+  config.vgprs_per_wf = 16;
+  auto cu = amdgpu::ComputeUnitCore::create("screen_modifier", config, &memory, &l2);
+  auto decoder = Decoder::create(config.arch);
+  auto *wave = cu->dispatch_wf(0, 0, 102, 16);
+  ASSERT_NE(wave, nullptr);
+  const auto base = wave->vgpr_alloc().base;
+  const uint32_t prefix = 0x7e000000u | (4u << 17) | (cdna4::kVScreenPartition4seB32Vop1 << 9);
+  const auto execute = [&](std::array<uint32_t, 2> words) {
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu->execute_instruction(inst.get(), *wave).succeeded());
+  };
+  for (bool scalar : {false, true}) {
+    ForceScalarGuard force(scalar);
+    wave->set_exec(1);
+    cu->write_vgpr(base + 2, 0, 0x55002100u);
+    cu->write_vgpr(base + 4, 0, 0xdeadbeefu);
+    execute({prefix | amdgpu::SRC_SDWA, 2u | (amdgpu::sdwa::BYTE_2 << 8) |
+                                            (amdgpu::sdwa::UNUSED_PRESERVE << 11) |
+                                            (amdgpu::sdwa::BYTE_1 << 16)});
+    EXPECT_EQ(cu->read_vgpr(base + 4, 0), 0xde0fbeefu);
+    wave->set_exec(~uint64_t{0});
+    for (unsigned lane = 0; lane < 64; ++lane) {
+      cu->write_vgpr(base + 2, lane, lane);
+      cu->write_vgpr(base + 4, lane, 0xdeadbeefu);
+    }
+    execute(
+        {prefix | amdgpu::SRC_DPP, 2u | (amdgpu::dpp::ROW_SHR1 << 8) | (15u << 24) | (1u << 28)});
+    constexpr uint32_t kCoverage[] = {1, 3, 7, 15, 5, 15, 15, 15, 7, 15, 15, 15, 15, 15, 15};
+    for (unsigned lane = 0; lane < 64; ++lane)
+      EXPECT_EQ(cu->read_vgpr(base + 4, lane),
+                lane > 0 && lane < 16 ? kCoverage[lane - 1] : 0xdeadbeefu);
+  }
+  wave->halt();
 }
 
 TEST(CdnaVop3pPackedF32Test, SgprSourcesUseArchitectureSpecificWidth) {

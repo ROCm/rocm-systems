@@ -2464,7 +2464,7 @@ inline void execute_s_sethalt_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]]
 
 template <typename Inst>
 inline void execute_s_setkill_sopp([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
-  if (inst.inst_.simm16 & 1u)
+  if (inst.simm16.encoding_value_ & 1u)
     wf.end();
 }
 

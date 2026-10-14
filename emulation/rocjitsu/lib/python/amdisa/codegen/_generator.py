@@ -6973,7 +6973,8 @@ class CodeGenerator:
             return '  (void)wf;\n throw util::UnimplementedInst(mnemonic());'
 
         if cls == 'setkill':
-            return '  if (inst_.simm16 & 1u) wf.end();'
+            # A killed wave still drains outstanding memory operations.
+            return '  if (simm16.encoding_value_ & 1u) wf.end();'
 
         if cls == 'endpgm':
             # Use end() instead of halt() to drain outstanding memory ops.
@@ -7305,71 +7306,45 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_movrel':
-            if op == 'src':
+            source_relative = op in ('src', 'srcdst2')
+            destination_relative = op in ('dst', 'srcdst2')
+            split = 'true' if op == 'srcdst2' else 'false'
+            L.append(
+                f'  uint32_t width_words = static_cast<uint32_t>({dst_ops[0]}.size_bits() / 32);'
+            )
+            source, destination = src_ops[0], dst_ops[0]
+            if destination_relative:
                 L.append(
-                    f'  uint32_t width_words = '
-                    f'static_cast<uint32_t>({src_ops[0]}.size_bits() / 32);'
+                    f'  auto dst_reg = amdgpu::relative_scalar_selector(wf, '
+                    f'{destination}.encoding_value(), wf.m0(), width_words, true, {split});'
+                )
+                L.append('  if (!dst_reg) return;')
+                L.append(
+                    f'  Operand indexed_dst({destination}.size_bits(), OperandType::OPR_SDST, '
+                    'static_cast<int>(*dst_reg));'
+                )
+                destination = 'indexed_dst'
+            if source_relative:
+                L.append(
+                    f'  auto src_reg = amdgpu::relative_scalar_selector(wf, '
+                    f'{source}.encoding_value(), wf.m0(), width_words, false, {split});'
                 )
                 L.append(
-                    f'  uint32_t src_reg = amdgpu::relative_scalar_selector('
-                    f'{src_ops[0]}.encoding_value(), wf.m0(), false, false);'
+                    f'  Operand indexed_src({source}.size_bits(), OperandType::OPR_SSRC, '
+                    'static_cast<int>(src_reg.value_or(0)));'
                 )
-                L.append(
-                    f'  Operand indexed_src({src_ops[0]}.size_bits(), OperandType::OPR_SSRC, '
-                    'static_cast<int>(src_reg));'
-                )
-                L.append('  if (width_words == 2) {')
-                L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));'
-                )
-                L.append('  } else {')
-                L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));'
-                )
-                L.append('  }')
-                return '\n'.join(L)
-            if op == 'dst':
-                L.append(
-                    f'  uint32_t width_words = '
-                    f'static_cast<uint32_t>({dst_ops[0]}.size_bits() / 32);'
-                )
-                L.append(
-                    f'  uint32_t dst_reg = amdgpu::relative_scalar_selector('
-                    f'{dst_ops[0]}.encoding_value(), wf.m0(), true, false);'
-                )
-                L.append(
-                    f'  Operand indexed_dst({dst_ops[0]}.size_bits(), OperandType::OPR_SDST, '
-                    'static_cast<int>(dst_reg));'
-                )
-                L.append('  if (width_words == 2) {')
-                L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}));'
-                )
-                L.append('  } else {')
-                L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]}));'
-                )
-                L.append('  }')
-                return '\n'.join(L)
-            if op == 'srcdst2':
-                L.append(
-                    f'  uint32_t src_reg = amdgpu::relative_scalar_selector('
-                    f'{src_ops[0]}.encoding_value(), wf.m0(), false, true);'
-                )
-                L.append(
-                    f'  uint32_t dst_reg = amdgpu::relative_scalar_selector('
-                    f'{dst_ops[0]}.encoding_value(), wf.m0(), true, true);'
-                )
-                L.append(
-                    '  Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));'
-                )
-                L.append(
-                    '  Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));'
-                )
-                L.append(
-                    '  amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));'
-                )
-                return '\n'.join(L)
+                source = 'indexed_src'
+            L.append('  amdgpu::RegisterAccess regs(wf);')
+            L.append('  if (width_words == 2) {')
+            L.append(
+                f'    regs.write_scalar64({destination}, regs.read_scalar64({source}));'
+            )
+            L.append('  } else {')
+            L.append(
+                f'    regs.write_scalar({destination}, regs.read_scalar({source}));'
+            )
+            L.append('  }')
+            return '\n'.join(L)
 
         if cls == 'scalar_call':
             # S_CALL_B64: dst = PC of next instruction (return address), then branch.
@@ -12598,7 +12573,7 @@ class CodeGenerator:
                         )
                     if _mem_sem and _mem_sem.semantic_class == 'endpgm':
                         # BasicBlock splitting treats PROGRAM_TERMINATOR as a hard
-                        # stop with no fallthrough successor. Only S_ENDPGM ends the
+                        # stop with no fallthrough successor. S_ENDPGM ends the
                         # wave. S_TRAP is NOT a terminator: on hardware it transfers
                         # to the trap handler and RETURNS to the next instruction,
                         # and with no handler configured (STATUS.TRAP_EN == 0, the
