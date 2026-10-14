@@ -10,8 +10,14 @@ target_compile_options(aqlprofile-core-tests-flags
                        INTERFACE -Wno-shadow -Wno-unused-parameter -Wno-unused-variable)
 
 set(AQLPROFILE_CORE_TEST_SOURCES
-    aql_profile_tests.cpp aql_profile_v2_tests.cpp command_buffer_tests.cpp
-    counter_tests.cpp logger_tests.cpp memorymanager_tests.cpp pm4_factory_tests.cpp
+    aql_profile_tests.cpp
+    aql_profile_v2_tests.cpp
+    command_buffer_tests.cpp
+    counter_tests.cpp
+    logger_tests.cpp
+    memorymanager_tests.cpp
+    pm4_factory_tests.cpp
+    pm4_factory_thread_safety_test.cpp
     aql_profile_v2_c_test.c)
 
 add_executable(aqlprofile-core-tests)
