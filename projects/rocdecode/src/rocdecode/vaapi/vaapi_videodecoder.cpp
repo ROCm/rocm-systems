@@ -1406,13 +1406,7 @@ rocDecStatus VaContext::CheckDecCapForCodecType(RocdecDecodeCaps *dec_cap) {
 
     dec_cap->num_decoders = va_contexts_[va_ctx_id].num_dec_engines;
     dec_cap->output_format_mask = va_contexts_[va_ctx_id].output_format_mask;
-    // The cached mask comes from vaQuerySurfaceAttributes on the VA profile, and drivers list the
-    // 10/12-bit pixel formats on 8-bit profiles too. Advertising a 16-bit output format for 8-bit
-    // content would be a lie: VaapiVideoDecoder::ValidateOutputFormat() downgrades any 16-bit
-    // output_format back to its 8-bit counterpart when bit_depth_minus_8 == 0, and the caller has no
-    // way to observe that. A caller that trusts the mask would then interpret an 8-bit surface as
-    // 16-bit and read twice the bytes per sample. Keep the mask consistent with what we will
-    // actually produce.
+    // Check to ensure 10-bit output format is not set for an 8-bit stream
     if (dec_cap->bit_depth_minus_8 == 0) {
         dec_cap->output_format_mask &= ~k16BitOutputFormatMask;
     }
