@@ -54,15 +54,23 @@ inline void Replace(Slot* slot, void* expected, void* desired) {
 #error "Outside Windows, HIP dispatch slots need GCC or Clang"
 #endif
 
-template <typename Table> Slot* Slots(const Table& table) {
+template <typename Table> constexpr void CheckLayout() {
   static_assert(sizeof(void (*)()) == sizeof(void*),
                 "dispatch slot atomics need function pointers the size of void*");
-  static_assert(offsetof(Table, size) == 0 && sizeof(table.size) == sizeof(size_t) &&
+  static_assert(offsetof(Table, size) == 0 && sizeof(Table::size) == sizeof(size_t) &&
                     (sizeof(Table) - sizeof(size_t)) % sizeof(void*) == 0,
                 "layout must match HIP dispatch tables: size_t size then void* slots");
   static_assert(sizeof(Slot) == sizeof(void*), "Slot must be a single pointer");
-  return reinterpret_cast<Slot*>(const_cast<char*>(reinterpret_cast<const char*>(&table)) +
-                                 sizeof(size_t));
+}
+
+template <typename Table> Slot* Slots(Table& table) {
+  CheckLayout<Table>();
+  return reinterpret_cast<Slot*>(reinterpret_cast<char*>(&table) + sizeof(size_t));
+}
+
+template <typename Table> const Slot* Slots(const Table& table) {
+  CheckLayout<Table>();
+  return reinterpret_cast<const Slot*>(reinterpret_cast<const char*>(&table) + sizeof(size_t));
 }
 
 }  // namespace dispatch_slot
@@ -72,7 +80,7 @@ template <typename Table> Slot* Slots(const Table& table) {
 // written. Unlike RemoveDispatchSlots() this does not compare first: a slot that
 // changed since `next` was taken still gets its wrapper.
 template <typename Table>
-void InstallDispatchSlots(const Table* live, const Table& wrappers, const Table& next) {
+void InstallDispatchSlots(Table* live, const Table& wrappers, const Table& next) {
   dispatch_slot::Slot* slot = dispatch_slot::Slots(*live);
   const dispatch_slot::Slot* wrapper = dispatch_slot::Slots(wrappers);
   const dispatch_slot::Slot* orig = dispatch_slot::Slots(next);
@@ -85,7 +93,7 @@ void InstallDispatchSlots(const Table* live, const Table& wrappers, const Table&
 // the slot still holds the wrapper. A slot that another component changed after
 // install keeps its new value.
 template <typename Table>
-void RemoveDispatchSlots(const Table* live, const Table& wrappers, const Table& next) {
+void RemoveDispatchSlots(Table* live, const Table& wrappers, const Table& next) {
   dispatch_slot::Slot* slot = dispatch_slot::Slots(*live);
   const dispatch_slot::Slot* wrapper = dispatch_slot::Slots(wrappers);
   const dispatch_slot::Slot* orig = dispatch_slot::Slots(next);

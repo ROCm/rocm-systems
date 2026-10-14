@@ -2510,24 +2510,34 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
+namespace {
+// The getters hand out the live tables read-only, but the tables themselves are
+// mutable statics in hip_api_trace.cpp. Only install and uninstall write them.
+HipDispatchTable* live_table() {
+  return const_cast<HipDispatchTable*>(hip::GetHipDispatchTable());
+}
+HipCompilerDispatchTable* live_compiler_table() {
+  return const_cast<HipCompilerDispatchTable*>(hip::GetHipCompilerDispatchTable());
+}
+}  // namespace
+
 void hip_capture_install() {
   if (g_installed.exchange(true)) return;
-  hip::InstallDispatchSlots(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+  hip::InstallDispatchSlots(live_table(), g_cap_table, g_real_table);
 }
 
 void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
-  hip::RemoveDispatchSlots(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+  hip::RemoveDispatchSlots(live_table(), g_cap_table, g_real_table);
   // The compiler shims go as well, or a capture refused at init or in a forked
   // child keeps running them with capture off. Shutdown leaves them.
   if (g_compiler_installed.exchange(false))
-    hip::RemoveDispatchSlots(hip::GetHipCompilerDispatchTable(), g_cap_compiler_table,
-                             g_real_compiler_table);
+    hip::RemoveDispatchSlots(live_compiler_table(), g_cap_compiler_table, g_real_compiler_table);
 }
 
 void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
   g_cap_compiler_table = shims;
-  hip::InstallDispatchSlots(hip::GetHipCompilerDispatchTable(), shims, g_real_compiler_table);
+  hip::InstallDispatchSlots(live_compiler_table(), shims, g_real_compiler_table);
 }
 
 // ---------------------------------------------------------------------------
@@ -2703,7 +2713,7 @@ void hip_capture_shutdown() {
   // Only the runtime shims: the compiler table keeps its shims, so a fat binary
   // unregistered after this still goes through them, and the writer drops it.
   if (g_installed.exchange(false))
-    hip::RemoveDispatchSlots(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+    hip::RemoveDispatchSlots(live_table(), g_cap_table, g_real_table);
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 
