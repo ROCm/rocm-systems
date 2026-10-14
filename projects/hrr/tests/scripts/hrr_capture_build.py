@@ -9,16 +9,19 @@ workflows instead and this script and test_hrr_capture_build.py are deleted.
 
 Release builds compile capture out (HIP_HRR_CAPTURE_ENABLED undefined). This
 script installs the ROCm artifacts that rocm-systems' own TheRock CI built for
-a recent develop commit, rebuilds only CLR from this checkout with capture
-enabled, installs it over those artifacts, and builds projects/hrr on top. The
-GPU jobs then install the same artifacts plus this amdhip64, so build and test
-use the same libraries, and the binaries' RUNPATH needs no LD_LIBRARY_PATH.
+a recent develop commit, then builds ROCr and CLR (with capture enabled) from
+this checkout over them, and builds projects/hrr on top. The compiler, comgr,
+the device libraries, rocprofiler-register and the sysdeps stay prebuilt. The
+GPU jobs install the same artifacts plus these two runtime libraries, so build
+and test use the same libraries, and the binaries' RUNPATH needs no
+LD_LIBRARY_PATH.
 
   fetch-base     Pick the base run and install the build-time artifacts.
-  build          Build CLR with capture, install it into the base, build HRR.
-  verify         Check the suite's case list and the embedded GPU targets.
+  build          Build ROCr, then CLR with capture, into the base; build HRR.
+  verify         Check the suite's case list, the embedded GPU targets and
+                 which runtime libraries the suite loads.
   install-base   On a GPU machine: install the run-time artifacts of the
-                 recorded base run and the capture-enabled amdhip64.
+                 recorded base run and the runtime libraries built here.
 """
 
 from __future__ import annotations
@@ -41,7 +44,7 @@ BASE_BRANCH = "develop"
 # The generic (target-neutral) artifacts are the same in every family group.
 BASE_ARTIFACT_GROUP = "gfx94X-dcgpu"
 
-# Artifacts needed to build CLR and projects/hrr.
+# Artifacts needed to build ROCr, CLR and projects/hrr.
 BUILD_ARTIFACTS = (
     "amd-llvm_run", "amd-llvm_lib", "amd-llvm_dev",
     "base_run", "base_lib", "base_dev",
@@ -59,7 +62,20 @@ RUNTIME_ARTIFACTS = (
     "core-hip_lib",
 )
 
-CAPTURE_LIB_GLOB = "libamdhip64.so*"
+# The libraries built from this checkout that replace the base's copies.
+RUNTIME_LIB_GLOBS = ("libamdhip64.so*", "libhsa-runtime64.so*")
+
+# Everything ROCr installs into the base, relative to --dist, so its build
+# replaces the base's ROCr files instead of mixing with them.
+ROCR_INSTALLED = (
+    "include/hsa",
+    "include/hsakmt",
+    "lib/cmake/hsa-runtime64",
+    "lib/cmake/hsakmt",
+    "lib/libhsakmt.a",
+    "lib/pkgconfig/libhsakmt.pc",
+    "lib/libhsa-runtime64.so*",
+)
 
 # What the GPU suite runs. The host unit suite is built and run by hrr-ci.yml.
 HRR_TARGETS = ("hrr-playback", "hrr-integration-tests", "hrr-test-dispatch-tool")
@@ -119,6 +135,28 @@ def fetch_command(therock: Path, base: dict, dist: Path, artifacts: Sequence[str
     ]
 
 
+def rocr_configure_command(src: Path, build: Path, dist: Path) -> list:
+    sysdeps = dist / "lib" / "rocm_sysdeps"
+    cmake_dir = dist / "lib" / "llvm" / "lib" / "cmake"
+    # The sysdeps provide libelf, libdrm and libnuma, as in TheRock.
+    return [
+        "env", f"PKG_CONFIG_PATH={sysdeps / 'lib' / 'pkgconfig'}",
+        "cmake", "-S", src / "projects" / "rocr-runtime", "-B", build / "rocr",
+        "-GNinja", "-Wno-dev",
+        "-DCMAKE_BUILD_TYPE=Release",
+        "-DBUILD_SHARED_LIBS=ON",
+        f"-DCMAKE_PREFIX_PATH={dist};{sysdeps}",
+        f"-DCMAKE_INSTALL_PREFIX={dist}",
+        "-DCMAKE_INSTALL_LIBDIR=lib",
+        # TheRock's libhsa-runtime64 RUNPATH.
+        "-DCMAKE_INSTALL_RPATH=$ORIGIN;$ORIGIN/rocm_sysdeps/lib",
+        # The blit and trap-handler kernels need the base's clang; ROCr's own
+        # hint (${CMAKE_PREFIX_PATH}/llvm) does not work with a list.
+        f"-DClang_DIR={cmake_dir / 'clang'}",
+        f"-DLLVM_DIR={cmake_dir / 'llvm'}",
+    ]
+
+
 def clr_configure_command(src: Path, build: Path, dist: Path) -> list:
     # HIP_HRR_CAPTURE_ENABLED is what compiles capture into amdhip64; CLR has
     # no CMake option for it.
@@ -162,28 +200,68 @@ def hrr_configure_command(src: Path, build: Path, dist: Path, archs: str) -> lis
     ]
 
 
-def remove_amdhip64(lib_dir: Path) -> None:
-    """Remove the release amdhip64 so only the capture-enabled one remains."""
-    for path in lib_dir.glob(CAPTURE_LIB_GLOB):
-        path.unlink()
+def remove_paths(root: Path, patterns: Sequence[str]) -> None:
+    for pattern in patterns:
+        for path in root.glob(pattern):
+            if path.is_dir() and not path.is_symlink():
+                shutil.rmtree(path)
+            else:
+                path.unlink()
 
 
-def copy_amdhip64(src_dir: Path, dst_dir: Path) -> list[str]:
-    """Copy libamdhip64.so* from src_dir to dst_dir, keeping symlinks."""
+def remove_runtime_libs(lib_dir: Path) -> None:
+    """Remove the base's runtime libraries so only the ones built here remain."""
+    remove_paths(lib_dir, RUNTIME_LIB_GLOBS)
+
+
+def copy_runtime_libs(src_dir: Path, dst_dir: Path) -> list[str]:
+    """Copy libamdhip64.so* and libhsa-runtime64.so*, keeping symlinks."""
     dst_dir.mkdir(parents=True, exist_ok=True)
     copied = []
-    for path in sorted(src_dir.glob(CAPTURE_LIB_GLOB)):
-        target = dst_dir / path.name
-        if target.is_symlink() or target.exists():
-            target.unlink()
-        if path.is_symlink():
-            os.symlink(os.readlink(path), target)
-        else:
-            shutil.copy2(path, target)
-        copied.append(path.name)
-    if not copied:
-        raise SystemExit(f"no {CAPTURE_LIB_GLOB} in {src_dir}")
+    for pattern in RUNTIME_LIB_GLOBS:
+        found = sorted(src_dir.glob(pattern))
+        if not found:
+            raise SystemExit(f"no {pattern} in {src_dir}")
+        for path in found:
+            target = dst_dir / path.name
+            if target.is_symlink() or target.exists():
+                target.unlink()
+            if path.is_symlink():
+                os.symlink(os.readlink(path), target)
+            else:
+                shutil.copy2(path, target)
+            copied.append(path.name)
     return copied
+
+
+def linkage_errors(ldd_output: str, lib_dir: Path) -> list[str]:
+    """Each runtime library must resolve to exactly one file, in lib_dir."""
+    resolved: dict[str, set[str]] = {}
+    for match in re.finditer(r"^\s*(\S+) => (\S+)", ldd_output, re.MULTILINE):
+        name, path = match.groups()
+        for pattern in RUNTIME_LIB_GLOBS:
+            stem = pattern.rstrip("*")
+            if name.startswith(stem):
+                resolved.setdefault(stem, set()).add(path)
+    errors = []
+    for pattern in RUNTIME_LIB_GLOBS:
+        stem = pattern.rstrip("*")
+        paths = resolved.get(stem, set())
+        if len(paths) != 1:
+            errors.append(f"{stem} resolves to {sorted(paths) or 'nothing'}")
+        elif Path(next(iter(paths))).parent != lib_dir:
+            errors.append(f"{stem} resolves to {next(iter(paths))}, not into {lib_dir}")
+    return errors
+
+
+def check_linkage(binary: Path, lib_dir: Path) -> int:
+    out = subprocess.run(["ldd", str(binary)], check=True, capture_output=True, text=True).stdout
+    errors = linkage_errors(out, lib_dir)
+    for error in errors:
+        print(f"::error::{binary.name}: {error}")
+    if not errors:
+        print(f"{binary.name} loads the runtime libraries from {lib_dir}")
+    return 1 if errors else 0
 
 
 def embedded_targets(objdump_output: str) -> set[str]:
@@ -207,11 +285,16 @@ def cmd_fetch_base(args: argparse.Namespace, runner: Runner = run) -> int:
 
 
 def cmd_build(args: argparse.Namespace, runner: Runner = run) -> int:
+    runner(rocr_configure_command(args.src, args.build, args.dist))
+    runner(["cmake", "--build", args.build / "rocr"])
+    remove_paths(args.dist, ROCR_INSTALLED)
+    runner(["cmake", "--install", args.build / "rocr"])
+    # CLR finds the ROCr just installed through its hsa-runtime64 package.
     runner(clr_configure_command(args.src, args.build, args.dist))
     runner(["cmake", "--build", args.build / "clr"])
-    remove_amdhip64(args.dist / "lib")
+    remove_paths(args.dist / "lib", ("libamdhip64.so*",))
     runner(["cmake", "--install", args.build / "clr"])
-    copy_amdhip64(args.dist / "lib", args.capture_lib)
+    copy_runtime_libs(args.dist / "lib", args.runtime_lib)
     runner(hrr_configure_command(args.src, args.build, args.dist, args.archs))
     runner(["cmake", "--build", args.build / "hrr", "--target", *HRR_TARGETS])
     return 0
@@ -233,7 +316,7 @@ def cmd_verify(args: argparse.Namespace) -> int:
     if missing:
         print(f"::error::missing from the fat binary: {' '.join(missing)}")
         return 1
-    return 0
+    return check_linkage(exe, args.dist / "lib")
 
 
 def restore_executable_bits(build: Path) -> None:
@@ -247,10 +330,12 @@ def cmd_install_base(args: argparse.Namespace, runner: Runner = run) -> int:
     base = json.loads(args.base_json.read_text())
     print(f"Base: {base['repo']} run {base['run_id']} at {base['commit']}")
     runner(fetch_command(args.therock, base, args.dist, RUNTIME_ARTIFACTS))
-    remove_amdhip64(args.dist / "lib")
-    copy_amdhip64(args.capture_lib, args.dist / "lib")
+    remove_runtime_libs(args.dist / "lib")
+    copy_runtime_libs(args.runtime_lib, args.dist / "lib")
     restore_executable_bits(args.build)
-    return 0
+    return check_linkage(
+        args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests", args.dist / "lib"
+    )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
@@ -260,11 +345,11 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--src", type=Path, default=Path.cwd())
     parser.add_argument("--dist", type=Path, default=Path("dist"))
     parser.add_argument("--build", type=Path, default=Path("build"))
-    parser.add_argument("--capture-lib", type=Path, default=Path("build/capture-lib"))
+    parser.add_argument("--runtime-lib", type=Path, default=Path("build/runtime-lib"))
     parser.add_argument("--base-json", type=Path, default=Path("build/base.json"))
     parser.add_argument("--archs", default=os.environ.get("HRR_ARCHS", ""))
     args = parser.parse_args(argv)
-    for name in ("therock", "src", "dist", "build", "capture_lib", "base_json"):
+    for name in ("therock", "src", "dist", "build", "runtime_lib", "base_json"):
         setattr(args, name, getattr(args, name).resolve())
     if args.command in ("build", "verify") and not args.archs:
         parser.error("--archs (or HRR_ARCHS) is required")

@@ -1,5 +1,6 @@
-# HRR GPU suite: build an amdhip64 with HRR capture compiled in, then run the
-# HRR capture/replay integration suite on each requested GPU family.
+# HRR GPU suite: build ROCr and an amdhip64 with HRR capture compiled in from
+# this checkout, then run the HRR capture/replay integration suite on each
+# requested GPU family.
 #
 # Called by hrr-ci.yml, which decides when this runs and on which families.
 #
@@ -45,6 +46,7 @@ jobs:
             projects/clr
             projects/hip
             projects/hrr
+            projects/rocr-runtime
 
       - name: Checkout TheRock artifact tools
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
@@ -88,7 +90,7 @@ jobs:
           name: hrr-capture-${{ github.sha }}
           path: |
             build/base.json
-            build/capture-lib/
+            build/runtime-lib/
             build/hrr/playback/hrr-playback
             build/hrr/tests/integration/hrr-integration-tests
             build/hrr/tests/integration/*.so
@@ -159,7 +161,7 @@ jobs:
           name: hrr-capture-${{ github.sha }}
           path: build
 
-      - name: Install base ROCm artifacts and the capture-enabled amdhip64
+      - name: Install base ROCm artifacts and the runtime libraries built here
         env:
           GITHUB_TOKEN: ${{ github.token }}
         run: python projects/hrr/tests/scripts/hrr_capture_build.py install-base
