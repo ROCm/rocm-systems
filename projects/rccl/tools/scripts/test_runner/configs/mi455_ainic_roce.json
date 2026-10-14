@@ -1420,6 +1420,11 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "P2pPxnLevel1NetId",
+          "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
+          "test_filter": "P2pPxnLevel1NetId.*"
+        },
+        {
           "name": "DdaAlltoAllThresholdTest",
           "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"

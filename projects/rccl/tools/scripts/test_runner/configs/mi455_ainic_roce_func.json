@@ -1479,6 +1479,11 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "P2pPxnLevel1NetId",
+          "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
+          "test_filter": "P2pPxnLevel1NetId.*"
+        },
+        {
           "name": "TimeoutTests",
           "description": "ncclTimeout host API unit tests: enum ordering, error string, async-error set/get/clear, argument validation",
           "test_filter": "TimeoutTests.*"
