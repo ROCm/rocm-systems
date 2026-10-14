@@ -302,6 +302,11 @@ def decide(
     return Decision(run_cpu, True, why, families)
 
 
+def is_fork(event: str, head_repo: str, repo: str) -> bool:
+    """A pull request from another repository, or from one since deleted."""
+    return event == "pull_request" and head_repo != repo
+
+
 def list_pr_files(repo: str, number: str) -> list[str] | None:
     out = subprocess.run(
         [
@@ -360,7 +365,9 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--before", default="")
     parser.add_argument("--after", default="")
     parser.add_argument("--labels", default="[]", help="JSON list of label names")
-    parser.add_argument("--is-fork", default="false")
+    parser.add_argument(
+        "--head-repo", default="", help="owner/name of the pull request's head repository"
+    )
     parser.add_argument(
         "--families", default="", help="Comma-separated family keys (workflow_dispatch)"
     )
@@ -386,7 +393,7 @@ def main(argv: list[str] | None = None) -> int:
             paths = list_push_files(args.repo, args.before, args.after)
 
         decision = decide(
-            args.event, paths, labels, args.is_fork == "true", requested,
+            args.event, paths, labels, is_fork(args.event, args.head_repo, args.repo), requested,
             config, matrix, pick_weighted,
         )
     except ConfigError as e:

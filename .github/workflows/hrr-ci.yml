@@ -98,13 +98,14 @@ jobs:
           BEFORE: ${{ github.event.before }}
           AFTER: ${{ github.sha }}
           LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
-          IS_FORK: ${{ github.event.pull_request.head.repo.fork || false }}
+          # Empty when the head repository was deleted, which counts as a fork.
+          HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           FAMILIES: ${{ inputs.families }}
         run: >-
           python projects/hrr/tests/scripts/hrr_ci_configure.py
           --event "${EVENT}" --repo "${REPO}" --pr-number "${PR_NUMBER}"
           --before "${BEFORE}" --after "${AFTER}" --labels "${LABELS}"
-          --is-fork "${IS_FORK}" --families "${FAMILIES}"
+          --head-repo "${HEAD_REPO}" --families "${FAMILIES}"
           --therock-dir therock
 
   codegen:

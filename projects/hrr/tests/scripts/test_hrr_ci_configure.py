@@ -5,11 +5,13 @@
 
 import copy
 import io
+import os
 import sys
 import tempfile
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
+from unittest import mock
 
 import yaml
 
@@ -314,6 +316,40 @@ class DecideTest(unittest.TestCase):
         d = decide("merge_group", [])
         self.assertFalse(d.run_cpu)
         self.assertFalse(d.run_gpu)
+
+
+class ForkTest(unittest.TestCase):
+    REPO = "ROCm/rocm-systems"
+
+    def test_same_repository_is_not_a_fork(self):
+        self.assertFalse(cfg.is_fork("pull_request", self.REPO, self.REPO))
+
+    def test_other_repository_is_a_fork(self):
+        self.assertTrue(cfg.is_fork("pull_request", "someone/rocm-systems", self.REPO))
+
+    def test_deleted_head_repository_is_a_fork(self):
+        self.assertTrue(cfg.is_fork("pull_request", "", self.REPO))
+
+    def test_only_pull_requests_are_forks(self):
+        self.assertFalse(cfg.is_fork("push", "", self.REPO))
+
+    def test_main_skips_gpu_for_a_deleted_head_repository(self):
+        with tempfile.TemporaryDirectory() as tmp, \
+                mock.patch.object(cfg, "list_pr_files", return_value=["projects/hrr/playback/x.cpp"]), \
+                mock.patch.object(cfg, "load_matrix", return_value=(MATRIX, pick_first)), \
+                mock.patch.dict(os.environ, {"GITHUB_OUTPUT": ""}):
+            path = Path(tmp) / "ci.yaml"
+            path.write_text(yaml.safe_dump(config_data()))
+            out = io.StringIO()
+            with redirect_stdout(out):
+                status = cfg.main(
+                    ["--event", "pull_request", "--repo", self.REPO, "--pr-number", "1",
+                     "--head-repo", "", "--therock-dir", tmp, "--config", str(path)]
+                )
+        self.assertEqual(status, 0)
+        self.assertIn("run_cpu=true\n", out.getvalue())
+        self.assertIn("run_gpu=false\n", out.getvalue())
+        self.assertIn("fork", out.getvalue())
 
 
 class OutputTest(unittest.TestCase):
