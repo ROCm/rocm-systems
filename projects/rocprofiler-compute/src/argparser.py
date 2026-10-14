@@ -38,6 +38,14 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
+def spec_correction_pair(value: str) -> str:
+    if "," in value:
+        raise argparse.ArgumentTypeError(
+            f"separate name:value pairs with spaces, got {value!r}"
+        )
+    return value
+
+
 def add_general_group(
     parser: argparse.ArgumentParser,
     rocprof_compute_home: Path,
@@ -862,11 +870,13 @@ Examples:
     )
     analyze_advanced_group.add_argument(
         "--specs-correction",
-        type=str,
-        metavar="<specs>",
+        metavar="<name:value>",
+        nargs="+",
+        type=spec_correction_pair,
         help=(
-            "Specify the specs to correct, as comma-separated name:value pairs.\n"
-            'For example: --specs-correction="num_xcd:4,cu_per_gpu:64".'
+            "Correct system specs, given as name:value pairs.\n"
+            "For example: --specs-correction num_xcd:4 cu_per_gpu:64.\n"
+            "Run -s/--specs to see the spec names."
         ),
     )
 
