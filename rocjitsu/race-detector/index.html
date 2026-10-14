@@ -2032,16 +2032,22 @@ regardless of the order the waves execute in:</p>
   via <code>race_test_builder.h</code>, covering VGPR, SGPR, LDS, D16, DTL, exec mask,
   multi-workgroup, and mixed counter scenarios.</li>
 <li><code>interval_set_tests.cpp</code> — unit tests for <code>IntervalSet</code>.</li>
-<li><code>hip_race_gfx950_test.hip</code> and <code>hip_race_gfx1151_test.hip</code> — end-to-end HIP
-  kernel tests run under the emulator with the <code>race</code> plugin enabled in the
-  config file.</li>
+<li>The <code>race</code> suite in
+  <a href="https://github.com/ROCm/rocjitsu-test-corpus">ROCm/rocjitsu-test-corpus</a>
+  owns the gfx950 and gfx1151 end-to-end HIP programs. The
+  <code>rocjitsu-test-corpus</code> workflow builds them with the corpus HIP toolchain
+  and runs each case under the emulator with the <code>race</code> plugin enabled.</li>
 </ul>
 <div class="highlight"><pre><span></span><code><span class="c1"># Core detection tests</span>
 ctest<span class="w"> </span>--test-dir<span class="w"> </span>build<span class="w"> </span>-R<span class="w"> </span><span class="s2">"RaceDetector|IntervalSet"</span>
-
-<span class="c1"># End-to-end HIP tests (the test config enables the race plugin)</span>
-ctest<span class="w"> </span>--test-dir<span class="w"> </span><span class="nv">$BUILD_DIR</span><span class="w"> </span>-R<span class="w"> </span><span class="s2">"RaceTest"</span>
 </code></pre></div>
+<p>To run the HIP cases locally, follow the corpus's
+<a href="https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration">race-suite instructions</a>
+and point the wrapper at the RocJITsu build being tested. Set
+<code>ROCJITSU_RACE_CONFIG</code> to <code>tests/race-detector/race_test_config.json</code> for gfx950
+or <code>configs/gfx1151.json</code> for gfx1151, using absolute paths from this source tree.
+The original <code>RaceTest.&lt;target&gt;_&lt;name&gt;</code> selectors remain available through
+the corpus's <code>--case</code> option.</p>
 <h2 id="limitations">Limitations<a class="headerlink" href="#limitations" title="Permanent link">&para;</a></h2>
 <ul>
 <li>
