@@ -35,8 +35,12 @@ if(PLATFORM MATCHES linux)
     )
 endif()
 
-list(APPEND _sources src/RTthread-x86-64.c src/RTtlsgetaddr-x86.S)
-list(APPEND _static_sources src/RTstatic_ctors_dtors-x86.c)
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "x86_64|amd64|AMD64")
+    list(APPEND _sources src/RTthread-x86-64.c src/RTtlsgetaddr-x86.S)
+    list(APPEND _static_sources src/RTstatic_ctors_dtors-x86.c)
+elseif(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le|ppc64")
+    list(APPEND _sources src/RTthread-powerpc.c src/RTthread-powerpc-asm.S)
+endif()
 
 # We use gcc to compile the various assembly files, but cmake doesn't default to knowing
 # that gcc can handle .S.

@@ -1,0 +1,11 @@
+--- a/src/components/appio/appio.c
++++ b/src/components/appio/appio.c
+@@ -184,7 +184,7 @@
+   return retval;
+ }
+
+-int __open(const char *pathname, int flags, mode_t mode);
++int __open(const char *pathname, int flags, ...);
+  __attribute__ ((visibility ("default"))) int open(const char *pathname, int flags, mode_t mode) {
+   int retval;
+   SUBDBG("appio: intercepted open(%s,%d,%d)\n", pathname, flags, mode);

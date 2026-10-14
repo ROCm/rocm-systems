@@ -244,6 +244,27 @@ ExternalProject_Add(
     BUILD_BYPRODUCTS "${_ROCPROFSYS_PAPI_BUILD_BYPRODUCTS}"
 )
 
+if(CMAKE_SYSTEM_PROCESSOR MATCHES "ppc64le|ppc64")
+    # PAPI's appio component declares __open() as non-variadic, but glibc's open64()
+    # is variadic. On PPC64 ELFv2 the compiler omits the parameter save area for the
+    # non-variadic call, and open64() corrupts the caller's saved registers through
+    # that missing area. Fix the prototype so the save area is allocated.
+    find_program(PATCH_EXECUTABLE NAMES patch REQUIRED)
+    ExternalProject_Add_Step(
+        rocprofiler-systems-papi-build papi-appio-variadic-patch
+        INDEPENDENT TRUE
+        COMMAND
+            ${CMAKE_COMMAND}
+            -DSRC=<SOURCE_DIR>/..
+            -DPATCH=${CMAKE_CURRENT_LIST_DIR}/papi-appio-ppc64le-open-variadic.patch
+            -DPATCH_EXE=${PATCH_EXECUTABLE}
+            -P ${CMAKE_CURRENT_LIST_DIR}/apply_patch_idempotent.cmake
+        DEPENDEES update
+        DEPENDERS patch
+        COMMENT "Patching PAPI appio __open() prototype for ppc64le"
+    )
+endif()
+
 # target for re-executing the installation
 add_custom_target(
     rocprofiler-systems-papi-install
