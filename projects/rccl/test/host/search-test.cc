@@ -15,6 +15,7 @@
 
 #include <climits>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <deque>
 #include <memory>
@@ -149,15 +150,112 @@ class SearchXmlChannelMicrotest : public ::testing::Test {
 // pass actually found, including reclassified rows.
 // ---------------------------------------------------------------------------
 
-// Phase-2 placeholder: proves the link closure of ncclTopoGetChannelFromXml,
-// i.e. that the whole of search.cc links against the fakes. Replaced by the
-// real tests above as they land.
-TEST_F(SearchXmlChannelMicrotest, PlaceholderLinkClosure) {
+// --- Accepted-input contracts ---------------------------------------------
+//
+// A valid channel is still accepted and still produces the right graph. These
+// are what stop any of the bounds below being tightened into rejecting a
+// topology file RCCL itself would write.
+
+TEST_F(SearchXmlChannelMicrotest, WellFormedChannel_TranscribesGpuDevsToRanksInOrder) {
+  // Devs deliberately out of order, and ranks are kRankBase+dev, so neither a
+  // skipped dev->rank translation nor a sorted write can pass by accident.
+  const int devs[kGpus] = {3, 0, 5, 1, 7, 2, 6, 4};
   ncclXmlNode* channel = NewNode("channel");
-  AddChild(channel, "gpu", "3");
+  for (int dev : devs) AddChild(channel, "gpu", std::to_string(dev).c_str());
 
   ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
-  EXPECT_EQ(graph()->intra[0], SearchXmlScene::kRankBase + 3);
+
+  for (int i = 0; i < kGpus; i++) {
+    EXPECT_EQ(graph()->intra[i], SearchXmlScene::kRankBase + devs[i]) << "slot " << i;
+  }
+}
+
+TEST_F(SearchXmlChannelMicrotest, WellFormedChannel_TranscribesNetDevsToInter) {
+  // The <dev> attribute of a net is parsed base 16 (see strtol(str, NULL, 16)).
+  ncclXmlNode* channel = NewNode("channel");
+  AddChild(channel, "net", "a");
+  AddChild(channel, "gpu", "0");
+  AddChild(channel, "net", "b");
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->inter[0], 0xa);
+  EXPECT_EQ(graph()->inter[1], 0xb);
+}
+
+TEST_F(SearchXmlChannelMicrotest, ExplicitRankAttribute_IsUsedInsteadOfDevLookup) {
+  // dev=0 would look up kRankBase+0; the explicit rank attribute must win.
+  ncclXmlNode* channel = NewNode("channel");
+  ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
+  SetAttr(gpu, "rank", "5");
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->intra[0], 5);
+}
+
+TEST_F(SearchXmlChannelMicrotest, ChannelIndex_SelectsItsOwnSliceOfIntraAndInter) {
+  constexpr int kChannel = 1;
+  constexpr int kSentinel = -42;
+  // Dirty channel 0's slots: the fixture zeroes the graph, so "channel 0 is
+  // untouched" would otherwise be true without the offset arithmetic running.
+  for (int i = 0; i < kGpus; i++) graph()->intra[i] = kSentinel;
+  graph()->inter[0] = kSentinel;
+  graph()->inter[1] = kSentinel;
+
+  ncclXmlNode* channel = NewNode("channel");
+  AddChild(channel, "net", "1");
+  AddChild(channel, "gpu", "6");
+  AddChild(channel, "net", "2");
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, kChannel, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->intra[kGpus * kChannel], SearchXmlScene::kRankBase + 6);
+  EXPECT_EQ(graph()->inter[2 * kChannel], 1);
+  EXPECT_EQ(graph()->inter[2 * kChannel + 1], 2);
+  // Channel 0 is left alone.
+  for (int i = 0; i < kGpus; i++) EXPECT_EQ(graph()->intra[i], kSentinel) << "slot " << i;
+  EXPECT_EQ(graph()->inter[0], kSentinel);
+  EXPECT_EQ(graph()->inter[1], kSentinel);
+}
+
+TEST_F(SearchXmlChannelMicrotest, UnknownGpuDev_IsRejected) {
+  // kGpus devs exist (0..7), so dev 9 names no GPU in this system.
+  ncclXmlNode* channel = NewNode("channel");
+  AddChild(channel, "gpu", "9");
+
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSystemError);
+}
+
+TEST_F(SearchXmlChannelMicrotest,
+       GraphGeneratedByNcclTopoGetXmlFromGraph_RoundTripsBackToTheSameGraph) {
+  // RCCL ships no graph XML of its own, so the format its own writer emits is
+  // the "our own input still parses" contract. Anything these guards reject
+  // that ncclTopoGetXmlFromGraph can produce is a regression.
+  const int ranks[kGpus] = {103, 100, 105, 101, 107, 102, 106, 104};
+  system()->inter = 1;  // make the writer emit the leading and trailing <net>
+
+  auto written = std::make_unique<ncclTopoGraph>();
+  std::memset(written.get(), 0, sizeof(*written));
+  written->id = 0;
+  written->nChannels = 1;
+  for (int i = 0; i < kGpus; i++) written->intra[i] = ranks[i];
+  written->inter[0] = 0xa;
+  written->inter[1] = 0xb;
+
+  struct ncclXml* xml = nullptr;
+  ASSERT_EQ(xmlAlloc(&xml, 64), ncclSuccess);
+  std::unique_ptr<ncclXml, decltype(&std::free)> xmlOwner(xml, &std::free);
+  struct ncclXmlNode* root = nullptr;
+  ASSERT_EQ(xmlAddNode(xml, nullptr, "graph", &root), ncclSuccess);
+  ASSERT_EQ(ncclTopoGetXmlFromChannel(written.get(), 0, system(), xml, root), ncclSuccess);
+  ASSERT_EQ(root->nSubs, 1);
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(root->subs[0], 0, system(), graph()), ncclSuccess);
+
+  for (int i = 0; i < kGpus; i++) EXPECT_EQ(graph()->intra[i], ranks[i]) << "slot " << i;
+  EXPECT_EQ(graph()->inter[0], 0xa);
+  EXPECT_EQ(graph()->inter[1], 0xb);
 }
 
 }  // namespace
