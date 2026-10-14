@@ -17,5 +17,4 @@ not left as the default.
 5. Report the summary from `.codecov/${1:-all}-summary.json` (coverage_pct,
    covered_lines, total_lines, function_pct, file_count).
 
-See the `rocprofsys-coverage` section of the `rocprofsys` skill and
-`testing-conventions` rule for details and common mistakes.
+See the `testing-conventions` rule for test-suite distinctions.

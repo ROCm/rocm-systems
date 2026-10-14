@@ -1,44 +1,46 @@
 ---
 name: testing-conventions
-description: Testing structure and conventions for rocprofiler-systems — unit tests and coverage
+description: Testing conventions for rocprofiler-systems — unit, integration, mocks, and coverage
 ---
 
 # Testing Conventions — rocprofiler-systems
 
-## HARD RULE: never run `ctest` — direct unit-test executable only
-
-Claude must never invoke `ctest` for this project, in any form (`ctest`,
-`ctest --output-on-failure`, `ctest -R <name>`, etc.), including for
-end-to-end/integration verification. Always run the aggregated GTest binary
-directly instead:
-
-```bash
-./build/<CMAKE_PRESET>/bin/rocprof-sys-unit-tests --gtest_filter=<pattern>
-```
-
 ## C++ unit tests
 
-- Live next to the code, in a `tests/` subdirectory per module (e.g.
-  `source/lib/common/tests/`, `source/lib/backends/amd_smi/tests/`,
-  `source/bin/common/tests/`).
-- Each module's tests build as an `OBJECT` library, aggregated in
-  `source/tests/CMakeLists.txt` (`UNIT_TEST_OBJECTS`) into one self-contained
-  GTest binary: `rocprof-sys-unit-tests`. New test files must be wired into
-  their module's own `tests/CMakeLists.txt`, not registered standalone.
-- **Never run `ctest`.** Always run the aggregated unit-test binary
-  directly:
+- Unit tests live beside their module in a `tests/` subdirectory.
+- Each module builds an `OBJECT` library. Add it to `UNIT_TEST_OBJECTS` in
+  `source/tests/CMakeLists.txt`; do not register a standalone unit-test
+  executable.
+- Run unit tests through the aggregated GTest binary:
 
-  ```bash
-  ./build/<CMAKE_PRESET>/bin/rocprof-sys-unit-tests --gtest_filter=<pattern>
-  ```
+```bash
+./build/<preset>/bin/rocprof-sys-unit-tests --gtest_filter=<pattern>
+```
 
-- When mocking with GMock, use `StrictMock<>` — never plain `Mock<>` — so
-  unexpected calls fail loudly instead of being silently ignored.
-- Mock types must be self-contained: never `#include` production headers in
-  a mock header; write lightweight fakes instead.
+## Integration and end-to-end tests
+
+The suite under `tests/` uses pytest with CTest as its executor. Do not run
+pytest directly. Run the generated CTest suite as documented in
+`tests/README.md`:
+
+```bash
+ctest --test-dir build/<preset> --output-on-failure
+```
+
+Use the direct GTest binary for unit tests and CTest for integration tests; the
+commands are not interchangeable.
+
+## GMock
+
+- Default to `StrictMock<>` so unexpected calls fail.
+- Use `NiceMock<>` only when uninteresting calls are deliberate and explain
+  that choice in the test.
+- Mock headers may include production interfaces or shared types required to
+  preserve the real contract. Avoid depending on concrete implementations
+  when an interface or lightweight test type is sufficient.
 
 ## Coverage
 
-Use the `coverage` CMake preset for day-to-day coverage visibility, run the
-unit-test binary, then `scripts/generate-coverage.py` — full workflow and
-common mistakes are in the `rocprofsys` skill.
+Configure and build the `coverage` preset, run the aggregated unit-test binary,
+then generate the report with `scripts/generate-coverage.py`. See
+`.claude/commands/coverage.md` for the exact command sequence.

@@ -8,8 +8,8 @@ Preset: `${1:-debug}`.
 Run the aggregated unit-test binary directly:
 `./build/${1:-debug}/bin/rocprof-sys-unit-tests ${ARGUMENTS:+--gtest_filter=$ARGUMENTS}`
 
-Never run `ctest`. Only the direct `rocprof-sys-unit-tests` executable is
-used for testing (see `testing-conventions` rule).
+This command runs C++ unit tests. Integration and end-to-end tests use CTest;
+see the `testing-conventions` rule.
 
 Report pass/fail counts and, on failure, the failing test names and relevant
 output.

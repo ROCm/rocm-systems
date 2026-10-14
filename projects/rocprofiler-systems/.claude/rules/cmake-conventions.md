@@ -7,8 +7,7 @@ description: CMake hard rules for rocprofiler-systems — presets, whole-project
 
 ## Presets
 
-Configure via `CMakePresets.json`, not hand-rolled flag lists, whenever a
-preset fits:
+Use `CMakePresets.json` whenever a preset fits:
 
 | Preset | Build type | Testing | Use for |
 | --- | --- | --- | --- |
@@ -16,43 +15,34 @@ preset fits:
 | `debug` | Debug | ON | Day-to-day development |
 | `debug-optimized` | RelWithDebInfo | ON | Debugging with realistic performance |
 | `release` | Release | OFF | Production builds |
-| `coverage` | Debug | ON | gcov-instrumented dev loop (see `rocprofsys` skill) |
+| `debug-mpi` | Debug | ON | Debug build with MPI |
+| `release-mpi` | Release | OFF | Release build with MPI |
+| `coverage` | Debug | ON | GCC coverage |
 
-Binary dir is always `build/<CMAKE_PRESET>` (from each preset's `binaryDir`). Don't
-invent a different build directory name for a preset build.
+Preset binary directories are `build/<preset>`.
 
 ```bash
-cmake --preset <CMAKE_PRESET>
+cmake --preset <preset>
 cmake --preset release -DROCPROFSYS_BUILD_DYNINST=ON   # override on top of a preset
 ```
 
-## HARD RULE: whole-project builds only
+## Whole-project builds only
 
-Never pass `--target <name>` to `cmake --build`, and never invoke a bare
-`ninja <target>` or `make <target>`. This project's test/coverage binaries
-link many `OBJECT` libraries scattered across `source/`; a partial build
-silently produces stale or incomplete artifacts. Always:
+Never pass `--target` to `cmake --build` or invoke a target through Ninja or
+Make directly. Unit tests aggregate object libraries from across `source/`, so
+always build the complete configured tree:
 
 ```bash
-cmake --build build/<CMAKE_PRESET> -j<N>
+cmake --build build/<preset> --parallel <jobs>
 ```
 
 ## Style
 
-- Modern, target-based CMake: `target_include_directories`,
-  `target_compile_options`, `target_link_libraries` with explicit
-  `PUBLIC`/`PRIVATE`/`INTERFACE`. No directory-scope
-  `include_directories()`/`add_compile_options()`/`link_libraries()`.
+- Prefer target-based commands with explicit `PUBLIC`, `PRIVATE`, or
+  `INTERFACE` scope.
+- Do not add directory-scope include, compile-option, or link commands to
+  first-party code.
 - CMake files are formatted with `gersemi` (`.gersemirc` in this repo,
-  enforced via pre-commit) — do not hand-format against a different style.
-- No `file(GLOB ...)` for source collection — list files explicitly, matching
-  the existing `CMakeLists.txt` pattern in each module.
-
-## Tests
-
-Never run `ctest`. Run the aggregated unit-test binary directly instead
-(see `testing-conventions` rule):
-
-```bash
-./build/<CMAKE_PRESET>/bin/rocprof-sys-unit-tests --gtest_filter=<pattern>
-```
+  enforced by pre-commit).
+- List compiled sources explicitly. Existing globs for generated or runtime
+  assets are intentional; do not introduce new globs without justification.
