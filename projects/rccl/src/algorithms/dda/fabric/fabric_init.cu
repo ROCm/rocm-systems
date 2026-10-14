@@ -15,6 +15,7 @@
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/alltoall/dda_alltoall_lazy.h"
 #include "algorithms/dda/alltoall/alltoall_dda_watchdog.h"
 #include "bootstrap.h"
 #include "rccl_common.h"
@@ -55,11 +56,37 @@ extern "C" __attribute__((visibility("default"))) void* rcclDdaA2aTestErrWordDev
 const char* ncclDdaA2aWdSiteName(uint32_t site) {
   using namespace dda::common;
   switch (site) {
+  case kDdaWdPushEntry: return "push ENTRY (peer has not started the op)";
+  case kDdaWdPushReady: return "push READY (peer data not arrived)";
+  case kDdaWdPushCuEntry: return "push-CU ENTRY (peer has not started the op)";
+  case kDdaWdPushCuReady: return "push-CU READY (peer data not arrived)";
   case kDdaWdLL: return "LL line flag";
   case kDdaWdLL128V2: return "LL128 line flag";
+  case kDdaA2aErrLaunch: return "push launch failed on the host (device epoch out of step with the peers)";
   case kDdaWdConcurrent: return "two AllToAll kernels of this communicator in flight at once (stream ordering broken)";
+  case kDdaWdAborted: return "abort flag (ncclCommAbort)";
   default: return "unknown";
   }
+}
+
+void ncclDdaA2aPoison(ncclComm* comm, uint32_t site) {
+  if (comm == nullptr || comm->ddaA2aErrHost == nullptr) return;
+  rcclDdaA2aPoisonHostWord(comm->ddaA2aErrHost, site);
+  WARN("DDA AllToAll: rank %d: %s; no further AllToAll can run on this communicator", comm->rank,
+       ncclDdaA2aWdSiteName(site));
+  // Device word, best effort and never waited for (a kernel of this comm may still be spinning): copy
+  // the pinned host mirror on a private non-blocking stream, in relaxed capture mode (the failed call
+  // may have been inside a capture). Kernels replayed from earlier graph captures then refuse at entry.
+  cudaStreamCaptureMode mode = cudaStreamCaptureModeRelaxed;
+  const bool modeSet = cudaThreadExchangeStreamCaptureMode(&mode) == cudaSuccess;
+  cudaStream_t stream = nullptr;
+  if (modeSet && comm->ddaA2aErrDev != nullptr &&
+      cudaStreamCreateWithFlags(&stream, cudaStreamNonBlocking) == cudaSuccess) {
+    (void)cudaMemcpyAsync(comm->ddaA2aErrDev, comm->ddaA2aErrHost, sizeof(uint32_t), cudaMemcpyHostToDevice, stream);
+    (void)cudaStreamDestroy(stream);
+  }
+  (void)cudaGetLastError();
+  if (modeSet) (void)cudaThreadExchangeStreamCaptureMode(&mode);
 }
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
@@ -137,18 +164,24 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
          parsedOverride.requested, localBlocksMax, localBlocksMax);
   }
 
-  std::vector<int> blockCaps(nRanks, 0);
-  blockCaps[comm->rank] = localBlocksMax;
+  // Per rank {CU-derived block cap, nonblocking config}.
+  std::vector<int> blockCaps(2 * nRanks, 0);
+  blockCaps[2 * comm->rank] = localBlocksMax;
+  blockCaps[2 * comm->rank + 1] = comm->config.blocking ? 0 : 1;
   // Fabric cliques are normally homogeneous, but harvested or disabled CUs
   // can produce different local caps. Every rank must launch the same number
   // of blocks because the barrier pairs participants by blockIdx.
-  NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), sizeof(int)));
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), 2 * sizeof(int)));
 
   int nBlocksMax = localBlocksMax;
+  // AllToAll buffers now (eager) if any rank's comm is nonblocking (its API calls must not wait for
+  // peers), else on first use; decided from gathered values so every rank makes the same choice.
+  bool a2aEager = false;
   for (int rank = 0; rank < nRanks; ++rank) {
-    if (blockCaps[rank] < nBlocksMax) {
-      nBlocksMax = blockCaps[rank];
+    if (blockCaps[2 * rank] < nBlocksMax) {
+      nBlocksMax = blockCaps[2 * rank];
     }
+    a2aEager = a2aEager || blockCaps[2 * rank + 1] != 0;
   }
 
   const size_t eagerVmmAr = rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
@@ -220,7 +253,7 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   {
     // Local steps after the last exchange; every rank that got here agrees on the outcome, so no
-    // rank ends with the fabric path while another has none.
+    // rank ends with the fabric path (and a pending AllToAll buffer agreement) while another has none.
     bool ok = barrierState != nullptr;
     // Zero the scratch once so the first epoch (>= 1) across all LL operations
     // never false-matches leftover flag words. Subsequent LL calls rely on
@@ -280,6 +313,11 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   INFO(NCCL_INIT,
        "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d",
        comm->cuCount, localBlocksMax, nBlocksMax);
+  // AllToAll push staging buffer: created collectively by the first AllToAll that can use it
+  // (dda_alltoall_fabric_lazy_host.h), so comms that never run one allocate nothing.
+  // If any rank's comm is nonblocking it is created now: its API calls must not wait for peers.
+  comm->ddaA2aLazy = dda_a2a_lazy::kUntried;
+  if (a2aEager) NCCLCHECK(ncclDdaA2aLazyInit(comm));
   return ncclSuccess;
 
 fail:
@@ -321,6 +359,7 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
            "communicator reported an error from then on", comm->rank, site, ncclDdaA2aWdSiteName(site));
     }
   }
+  (void)ncclDdaA2aPushCommFini(comm);
   CUDACHECKIGNORE(cudaFree(comm->ddaA2aErrDev));
   comm->ddaA2aErrDev = nullptr;
   (void)ncclCudaHostFree(comm->ddaA2aErrHost);

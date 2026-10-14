@@ -46,6 +46,9 @@ extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allToAllDdaI
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allToAllDdaFabricBlocks;
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allToAllDdaFabricLLBlocks;
 extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allToAllDdaFabricLL128Blocks;
+extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t)> g_allToAllDdaFabricPushEligible;
+extern std::function<uint32_t(ncclComm*, size_t, ncclDataType_t)> g_allToAllDdaFabricPushBlocks;
+extern std::function<ncclResult_t(ncclComm*)> g_ddaA2aLazyInit;
 
 extern std::function<bool(ncclComm*, const void*, void*, size_t, ncclDataType_t, ncclRedOp_t)>
     g_reduceScatterDdaIpcEligible;

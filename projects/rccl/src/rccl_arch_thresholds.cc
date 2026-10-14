@@ -236,6 +236,12 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
   // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
   .forceCeScratch = false,
+
+  // AllToAll one-shot push, out of place above the LL128 window up to here; A09 8r: 1 GiB push
+  // beats p2p (+17%). Equal to the default push buffer (RCCL_DDA_A2A_PUSH_BUFFER_SIZE).
+  .a2aPushMax = 1024ULL*1024*1024,
+  // A07 8r: CU-split push wins from 128 MiB, loses at 32-64 MiB (16r keeps it at 4 blocks/peer).
+  .a2aPushCuMin = 128ULL*1024*1024,
 };
 
 // gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.

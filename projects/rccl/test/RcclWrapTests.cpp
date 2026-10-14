@@ -3285,8 +3285,9 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
     EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
-// gfx1250, message above the LL128 cap (ddaLL128Max[A2A] = 16 MiB; ddaVmmMax[A2A] = 0 disables VMM):
-// falls to Direct p2p.
+// gfx1250, message above the LL128 cap (ddaLL128Max[A2A] = 16 MiB; ddaVmmMax[A2A] = 0 disables VMM)
+// on a comm without the push path (its state is null here): falls to Direct p2p. (SelectA2A passes
+// nullptr for both buffers, i.e. in place, which push never takes either.)
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
@@ -3306,7 +3307,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 }
 
 // gfx1250 AllToAll arch-table windows (rcclSelectAlltoAllFabric): LL to 64 KiB total or (from 8
-// ranks) 8 KiB per peer, LL128 V2 to 16 MiB. CE-Scratch is not forced (forceCeScratch = false).
+// ranks) 8 KiB per peer, LL128 V2 to 16 MiB, push out of place to 1 GiB. CE-Scratch is not forced
+// (forceCeScratch = false).
 TEST(RcclAlltoAllDecision, Gfx1250_A2aTableWindows)
 {
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
@@ -3316,8 +3318,14 @@ TEST(RcclAlltoAllDecision, Gfx1250_A2aTableWindows)
     EXPECT_EQ(tbl->rankScaledMinRanks, 8);
     EXPECT_EQ(tbl->ddaLL128Max[ncclFuncAlltoAll], 16ul << 20);
     EXPECT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul);
+    EXPECT_EQ(tbl->a2aPushMax, 1ul << 30);
+    EXPECT_EQ(tbl->a2aPushCuMin, 128ul << 20);
     EXPECT_EQ(tbl->ceNonRegMax[ncclFuncAlltoAll], 0ul);
     EXPECT_FALSE(tbl->forceCeScratch);
+    // Other arches leave the A2A fabric windows off.
+    const rcclArchThresholds* t950 = rcclGetArchThresholds("gfx950");
+    ASSERT_NE(t950, nullptr);
+    EXPECT_EQ(t950->a2aPushMax, 0ul);
 }
 
 // gfx950, message at its DDA-IPC ceiling (ddaVmmMax[A2A] = 4 MiB):

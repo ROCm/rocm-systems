@@ -145,3 +145,8 @@ ncclResult_t ncclAllToAllDdaFabric(const void* sendbuff, void* recvbuff, size_t 
   int typeSize = ncclTypeSize(datatype);
   return ncclAllToAllDdaFabricTyped<int8_t>(sendbuff, recvbuff, count * typeSize, comm, stream);
 }
+
+// One-shot PUSH variant (separate buffer + protocol); shares this TU's build rule.
+#include "algorithms/dda/alltoall/dda_alltoall_fabric_push_host.h"
+// Lazy creation of the push buffer (first eligible AllToAll).
+#include "algorithms/dda/alltoall/dda_alltoall_fabric_lazy_host.h"

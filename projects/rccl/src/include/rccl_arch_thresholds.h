@@ -134,6 +134,13 @@ struct rcclArchThresholds {
   // (ddaLLMax[A2A], or nRanks x ddaLLMaxPerRank[A2A] on rank-scaled comms -- the LL-vs-LL128
   // crossover is a per-peer size), LL128 ddaLL128Max[A2A] (a total; also an input of the
   // ddaScratch size).
+  //
+  // One-shot push (own fabric buffer, RCCL_DDA_A2A_PUSH_BUFFER_SIZE): out of place only, up to
+  // a2aPushMax total (multi-round if that exceeds the agreed buffer). 0 disables push.
+  size_t a2aPushMax;
+  // Push kernel variant: CU-split (one block per CU, separate copy-out CUs) from this total size
+  // of one push round; 0 = never.
+  size_t a2aPushCuMin;
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);

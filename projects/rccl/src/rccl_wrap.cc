@@ -784,6 +784,9 @@ ncclResult_t rcclGetAlgoName(int algo, const char** algoName) {
     case rcclAddonAlgos_t::RCCL_DIRECT_ALLTOALL:
       *algoName = "Direct";
       break;
+    case rcclAddonAlgos_t::RCCL_DDA_FABRIC_A2A_PUSH:
+      *algoName = "DDA-Push";
+      break;
     case rcclAddonAlgos_t::RCCL_HIERARCHICAL_REDUCESCATTER:
       *algoName = "Hier";
       break;
@@ -2064,16 +2067,29 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
   return rcclRingFallback(comm, sendbuff, recvbuff, ncclFuncReduceScatter, recvcount, datatype, query, decision);
 }
 
+// Tuning builds only (RCCL_DDA_A2A_TUNING, dda_alltoall.h): override the gfx1250 A2A arch-table
+// windows (-1 = table). Production builds compile these to -1.
+RCCL_A2A_KNOB(DdaA2aPushMax, "DDA_A2A_PUSH_MAX", -1);
+static inline size_t rcclA2aWindow(int64_t knob, size_t tableValue) { return knob >= 0 ? (size_t)knob : tableValue; }
+
 // gfx1250 fabric AllToAll paths, P = per-peer bytes, T = nRanks * P. Returns false (decision
 // untouched) when none applies. Order and rule (windows in rcclArchThresholds):
 //   LL        T <= rcclDdaLLThreshold(A2A) (ddaLLMax[A2A]; nRanks x ddaLLMaxPerRank[A2A] from
 //             rankScaledMinRanks ranks, i.e. P <= 8 KiB above 8 ranks on gfx1250)
 //   LL128 V2  T <= ddaLL128Max[A2A]
-// Every input is comm-uniform (count, datatype size, nRanks, arch table, comm-wide CU cap
-// ddaFabricMaxBlocks) except in-place-ness and 16B pointer alignment, which the caller must keep
-// the same on every rank (collective contract; a mismatch selects different kernels and the call
-// times out in the A2A watchdog).
-// *taken = false (decision untouched) when no fabric path applies.
+//   Push      out of place, P % 16 == 0, 16B-aligned buffers, table LL128 window < T <= a2aPushMax
+//             (multi-round if T exceeds its agreed buffer). The floor is the ARCH-TABLE LL128 window,
+//             not the env-adjusted one: with RCCL_DDA_LL=0 / RCCL_DDA_LL128=0 (or LL128 refusing a
+//             call) small calls take p2p, never push and its buffer. In place never takes push.
+// Every input is comm-uniform (count, datatype size, nRanks, arch table, agreed path
+// state, comm-wide CU cap ddaFabricMaxBlocks, agreed push buffer size) except in-place-ness and
+// 16B pointer alignment, which the caller must keep the same on every rank (collective
+// contract; a mismatch selects different kernels and the call times out in the A2A watchdog).
+// The push buffer is created by the first live call that push would take once the buffer exists
+// (ncclDdaA2aLazyInit, collective): the same rule (window, out of place, P % 16, alignment, LL128 not
+// taking it) minus the buffer-state check, so no call that push cannot take allocates it, and every
+// rank creates it on the same call. Before that, queries report push as unavailable.
+// *taken = false (decision untouched) when no fabric path applies; errors only from that creation.
 static ncclResult_t rcclSelectAlltoAllFabric(struct ncclComm* comm, const rcclArchThresholds* table,
                                              const void* sendbuff, void* recvbuff, size_t count,
                                              ncclDataType_t datatype, bool query, cudaStream_t stream,
@@ -2098,6 +2114,19 @@ static ncclResult_t rcclSelectAlltoAllFabric(struct ncclComm* comm, const rcclAr
   }
 
   const size_t ll128Max = rcclDdaLL128ThresholdTab(table, ncclFuncAlltoAll, comm->nRanks);
+  const size_t pushMax = rcclA2aWindow(rcclParamDdaA2aPushMax(), table->a2aPushMax);
+  const size_t pushMin = ddaTierCapFromTable(table, table->ddaLL128Max, table->ddaLL128MaxPerRank, ncclFuncAlltoAll,
+                                             comm->nRanks);
+  // Shape push can take (the push predicate minus its buffer-state checks).
+  const bool pushShape = !inPlace && pushMax > 0 && totalBytes > pushMin && totalBytes <= pushMax &&
+                         perPeer % 16 == 0 && (((uintptr_t)sendbuff | (uintptr_t)recvbuff) % 16) == 0;
+  if (!query && comm->ddaA2aLazy == 0 /* dda_a2a_lazy::kUntried */ && pushShape) {
+    // LL128 can hold more than the table window when RCCL_DDA_LL128_THRESHOLD raises it.
+    const bool ll128Holds = ll128Max > 0 && totalBytes <= ll128Max &&
+                            ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype);
+    if (!ll128Holds) NCCLCHECK(ncclDdaA2aLazyInit(comm));
+  }
+
   if (ll128Max > 0 && totalBytes <= ll128Max &&
       ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {
     decision->algo = RCCL_DDA_FABRIC_LL128;
@@ -2107,6 +2136,12 @@ static ncclResult_t rcclSelectAlltoAllFabric(struct ncclComm* comm, const rcclAr
     return ncclSuccess;
   }
 
+  if (pushShape && ncclAllToAllDdaFabricPushEligible(comm, sendbuff, recvbuff, count, datatype)) {
+    decision->algo = RCCL_DDA_FABRIC_A2A_PUSH;
+    decision->nMaxChannels = ncclAllToAllDdaFabricPushBlocks(comm, count, datatype);
+    *taken = true;
+    return ncclSuccess;
+  }
   if (!query) INFO(NCCL_TUNING, "A2A fabric paths: none eligible (perPeer=%zu total=%zu inPlace=%d)", perPeer, totalBytes, (int)inPlace);
   return ncclSuccess;
 }
@@ -2195,7 +2230,7 @@ ncclResult_t rcclSelectAlltoAll(struct ncclComm* comm, const void* sendbuff, voi
   if (!query && a2aSymkRequested && a2aSymSuppressedBySize)
     INFO(NCCL_TUNING, "A2A symk disqualified: totalBytes=%zu > a2aSymMaxR2=%zu", totalBytes, a2aSymMaxR2);
 
-  // (3) gfx1250 fabric paths (rcclSelectAlltoAllFabric: LL, LL128 V2).
+  // (3) gfx1250 fabric paths (rcclSelectAlltoAllFabric: LL, LL128 V2, Push).
   const bool a2aFabricArch = IsArchMatch(comm->archName, "gfx1250");
   if (!a2aSymEligible && a2aFabricArch && rcclDdaEnabled(comm, totalBytes, totalBytes, query, "A2A fabric")) {
     bool taken = false;
