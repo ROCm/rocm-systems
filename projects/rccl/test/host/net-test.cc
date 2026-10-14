@@ -10,11 +10,13 @@
 
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
 #include <unistd.h>
 
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <deque>
 #include <filesystem>
 #include <fstream>
 #include <initializer_list>
@@ -31,6 +33,7 @@
 #include "fakes/rocmwrap_fakes.h"
 #include "fakes/topo_net_stubs.h"
 #include "fakes/topo_stubs.h"
+#include "fakes/transport_net_ib_fakes.h"
 #include "fakes/transport_p2p_fakes.h"
 
 // Routes every NCCL_PARAM / RCCL_PARAM in net.cc through g_loadParam on each call.
@@ -65,6 +68,31 @@ struct FakeNet {
   void* lastAttrCtx = nullptr;
   ncclNetAttr_t lastAttr{};
 
+  // connect: hands out &sendComm, or nothing while commReady is false (still connecting).
+  ncclResult_t connectResult = ncclSuccess;
+  bool commReady = true;
+  int connectCalls = 0;
+  int lastConnectDev = -1;
+  void* lastConnectCtx = nullptr;
+  unsigned char lastConnectHandle[NCCL_NET_HANDLE_MAXSIZE] = {};
+  void* lastDevHandleArg = nullptr;
+  uint32_t lastDevHandleWord = 0;  // first word behind it: the channel id when it is an ncclNet_ctxt_t
+  ncclNetDeviceHandle_t* offloadHandle = nullptr;  // written to *devHandle when set
+  char sendComm = 0;
+
+  struct MrCall {
+    void* comm;
+    void* data;
+    size_t size;
+    int type;
+    uint64_t offset;
+    int fd;
+  };
+  std::vector<MrCall> regMrs, regMrDmaBufs;
+  ncclResult_t regMrResult = ncclSuccess;
+  int getDeviceMrCalls = 0;
+  std::vector<void*> closedSends;
+
   static ncclNetProperties_t DefaultProps() {
     ncclNetProperties_t p{};
     p.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
@@ -89,6 +117,39 @@ struct FakeNet {
     return ncclSuccess;
   }
 
+  ncclResult_t connect(void* ctx, int dev, void* handle, void** comm, ncclNetDeviceHandle_t** devHandle) {
+    ++connectCalls;
+    lastConnectCtx = ctx;
+    lastConnectDev = dev;
+    memcpy(lastConnectHandle, handle, NCCL_NET_HANDLE_MAXSIZE);
+    lastDevHandleArg = devHandle;
+    memcpy(&lastDevHandleWord, devHandle, sizeof(lastDevHandleWord));
+    if (offloadHandle) *devHandle = offloadHandle;
+    if (commReady) *comm = &sendComm;
+    return connectResult;
+  }
+
+  // An mhandle is the registered address, so tests can tell which buffer it came from.
+  ncclResult_t regMr(void* comm, void* data, size_t size, int type, void** mhandle) {
+    regMrs.push_back({comm, data, size, type, 0, -1});
+    *mhandle = data;
+    return regMrResult;
+  }
+  ncclResult_t regMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+    regMrDmaBufs.push_back({comm, data, size, type, offset, fd});
+    *mhandle = data;
+    return regMrResult;
+  }
+  ncclResult_t getDeviceMr(void*, void* mhandle, void** dptr) {
+    ++getDeviceMrCalls;
+    *dptr = static_cast<char*>(mhandle) + 1;
+    return ncclSuccess;
+  }
+  ncclResult_t closeSend(void* comm) {
+    closedSends.push_back(comm);
+    return ncclSuccess;
+  }
+
   ncclResult_t setNetAttr(void* ctx, ncclNetAttr_t* attr) {
     ++setNetAttrCalls;
     lastAttrCtx = ctx;
@@ -101,6 +162,11 @@ struct FakeNet {
     v.name = "FakeNet";
     v.getProperties = &FakeNet::TrampGetProperties;
     v.listen = &FakeNet::TrampListen;
+    v.connect = &FakeNet::TrampConnect;
+    v.regMr = &FakeNet::TrampRegMr;
+    v.regMrDmaBuf = &FakeNet::TrampRegMrDmaBuf;
+    v.getDeviceMr = &FakeNet::TrampGetDeviceMr;
+    v.closeSend = &FakeNet::TrampCloseSend;
     v.setNetAttr = &FakeNet::TrampSetNetAttr;
     return v;
   }
@@ -112,6 +178,20 @@ struct FakeNet {
   static ncclResult_t TrampListen(void* ctx, int dev, void* handle, void** comm) {
     return g_activeNet->listen(ctx, dev, handle, comm);
   }
+  static ncclResult_t TrampConnect(void* ctx, int dev, void* handle, void** comm, ncclNetDeviceHandle_t** devHandle) {
+    return g_activeNet->connect(ctx, dev, handle, comm, devHandle);
+  }
+  static ncclResult_t TrampRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
+    return g_activeNet->regMr(comm, data, size, type, mhandle);
+  }
+  static ncclResult_t TrampRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                       void** mhandle) {
+    return g_activeNet->regMrDmaBuf(comm, data, size, type, offset, fd, mhandle);
+  }
+  static ncclResult_t TrampGetDeviceMr(void* comm, void* mhandle, void** dptr) {
+    return g_activeNet->getDeviceMr(comm, mhandle, dptr);
+  }
+  static ncclResult_t TrampCloseSend(void* comm) { return g_activeNet->closeSend(comm); }
   static ncclResult_t TrampSetNetAttr(void* ctx, ncclNetAttr_t* attr) { return g_activeNet->setNetAttr(ctx, attr); }
 };
 
@@ -159,6 +239,7 @@ class NetMicrotestBase : public ::testing::Test {
     ResetHipFakes();
     ResetProxyFakes();
     ResetTopoStubs();
+    ResetTransportNetIbFakes();
     ResetTransportP2pFakes();
     ResetEnvFakes();
   }
@@ -534,13 +615,10 @@ TEST(NetHelpersMicrotest, GetDeviceHandle_NoOffloadNeeded_ClearsHandle) {
 // Shared p2p buffer pool (sharedNetBuffersInit / Get / Destroy, proxySharedInit)
 // ---------------------------------------------------------------------------
 
-class NetSharedBuffersMicrotest : public NetMicrotestBase {
+// Every device, host and shareable buffer goes through this ledger, so TearDown
+// releases exactly what production left allocated.
+class NetAllocMicrotestBase : public NetMicrotestBase {
  protected:
-  static constexpr int kLocalRanks = 4;
-  static constexpr int kChunk = 1 << 12;
-
-  // Every device, host and shareable buffer goes through this ledger, so TearDown
-  // releases exactly what production left allocated.
   std::set<void*> live_;
   int hostAllocs_ = 0, devAllocs_ = 0, shareableAllocs_ = 0;
   int hostFrees_ = 0, devFrees_ = 0;
@@ -556,8 +634,6 @@ class NetSharedBuffersMicrotest : public NetMicrotestBase {
 
   void SetUp() override {
     NetMicrotestBase::SetUp();
-    proxyState_.tpLocalnRanks = kLocalRanks;
-    proxyState_.p2pChunkSize = kChunk;
     g_hipHostMalloc = [this](void** p, size_t n, unsigned) {
       ++hostAllocs_;
       *p = Alloc(n);
@@ -588,12 +664,26 @@ class NetSharedBuffersMicrotest : public NetMicrotestBase {
   }
 
   void TearDown() override {
-    if (ncclProxyPeer** peers = proxyState_.progressState.localPeers) {
-      for (int r = 0; r < kLocalRanks; r++) free(peers[r]);
-      free(peers);
+    ncclProxyProgressState& ps = proxyState_.progressState;
+    if (ps.localPeers) {
+      for (int r = 0; r < proxyState_.tpLocalnRanks; r++) free(ps.localPeers[r]);
+      free(ps.localPeers);
     }
+    for (auto*& comms : ps.netComms) free(comms);
     for (void* p : live_) free(p);
     NetMicrotestBase::TearDown();
+  }
+};
+
+class NetSharedBuffersMicrotest : public NetAllocMicrotestBase {
+ protected:
+  static constexpr int kLocalRanks = 4;
+  static constexpr int kChunk = 1 << 12;
+
+  void SetUp() override {
+    NetAllocMicrotestBase::SetUp();
+    proxyState_.tpLocalnRanks = kLocalRanks;
+    proxyState_.p2pChunkSize = kChunk;
   }
 
   ncclProxySharedP2p& State(int localRank, int type) {
@@ -1926,6 +2016,567 @@ TEST_F(NetConnectMicrotest, RecvFree_ReleasesMap) {
 
   EXPECT_EQ(recvFree(&comm_, &conn_), ncclSuccess);
   conn_.transportResources = nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Proxy-side send connect (sendProxyConnect)
+// ---------------------------------------------------------------------------
+
+std::vector<int> g_exportedFds;
+hsa_status_t FakeExportDmaBuf(const void*, size_t, int* fd, uint64_t* offset) {
+  *fd = open("/dev/null", O_RDONLY);
+  *offset = 0x40;
+  g_exportedFds.push_back(*fd);
+  return HSA_STATUS_SUCCESS;
+}
+
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+// Builds with the cuMem DMA-BUF export: each export hands back a fresh fd, recorded here.
+struct CuMemExport {
+  void* ptr;
+  size_t size;
+  unsigned long long flags;
+  int fd;
+};
+struct CuMemExportRecorder : std::vector<CuMemExport> {
+  hipError_t result = hipSuccess;
+  void Install() {
+    g_hipMemGetHandleForAddressRange = [this](void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType,
+                                              unsigned long long flags) {
+      if (result != hipSuccess) return result;
+      int fd = open("/dev/null", O_RDONLY);
+      *static_cast<int*>(handle) = fd;
+      push_back({ptr, size, flags, fd});
+      return hipSuccess;
+    };
+  }
+  // Closes what the code under test left open, e.g. a bank fd no free released.
+  void CloseOpen() {
+    for (const auto& e : *this)
+      if (fcntl(e.fd, F_GETFD) != -1) close(e.fd);
+  }
+};
+#endif
+
+// Shared by the send and recv proxy-connect suites; Res is that side's resources type.
+template <typename Res>
+class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
+ protected:
+  static constexpr int kSizes[NCCL_NUM_PROTOCOLS] = {1 << 12, 1 << 13, 1 << 14};  // LL, LL128, SIMPLE
+  std::deque<ncclProxyConnection> conns_;
+  connectMap resp_{};
+  int done_ = -1;
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  CuMemExportRecorder exports_;
+#endif
+
+  void SetUp() override {
+    NetAllocMicrotestBase::SetUp();
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+    exports_.Install();
+#endif
+    proxyState_.tpLocalnRanks = 4;
+    proxyState_.tpnRanks = 8;
+    proxyState_.p2pnChannels = 2;
+    proxyState_.p2pChunkSize = 1 << 10;
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) proxyState_.buffSizes[p] = kSizes[p];
+    rcclPrimaryNicInfo = {rcclIBNicTypeDefault, 0, 0};
+    g_exportedFds.clear();
+  }
+
+  void TearDown() override {
+    for (auto& c : conns_) {
+      auto* r = static_cast<Res*>(c.transportResources);
+      if (r) {
+        free(r->gdrDesc);
+        if (r->netDeviceHandle != net_.offloadHandle) free(r->netDeviceHandle);
+      }
+      free(r);
+    }
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+    exports_.CloseOpen();
+#endif
+    NetAllocMicrotestBase::TearDown();
+  }
+
+  // A connection whose proxy setup already ran: the resources the proxy connect reads.
+  Res* AddConn(int shared = 0, int useGdr = 0, int tpLocalRank = 1) {
+    conns_.emplace_back();
+    conns_.back().sameProcess = 1;
+    auto* r = static_cast<Res*>(calloc(1, sizeof(Res)));
+    r->tpLocalRank = tpLocalRank;
+    r->tpRemoteRank = 5;
+    r->netDev = 2;
+    r->channelId = 3;
+    r->maxRecvs = 1;
+    r->sameDevice = 1;
+    r->shared = shared;
+    r->useGdr = static_cast<ncclTopoGdrMode>(useGdr);
+    conns_.back().transportResources = r;
+    return r;
+  }
+
+  static char* Buffer(Res* r, int p) { return NCCL_NET_MAP_GET_POINTER(&r->map, cpu, buffs[p]); }
+  static bool InDeviceMemory(Res* r, int p) { return NCCL_NET_MAP_DEV_MEM(&r->map, buffs[p]); }
+  int RegMrType(void* data) {
+    for (const auto& m : net_.regMrs)
+      if (m.data == data) return m.type;
+    return 0;
+  }
+};
+
+class NetSendProxyConnectMicrotest : public NetProxyConnectMicrotest<sendNetResources> {
+ protected:
+  netSendConnectArgs args_{};
+
+  void SetUp() override {
+    NetProxyConnectMicrotest::SetUp();
+    memset(args_.handle, 0x5A, sizeof(args_.handle));
+    args_.netAttr = NCCL_NET_ATTR_INIT;
+    args_.netAttr.op = BIT(ncclFuncSend);
+  }
+
+  ncclResult_t Connect(size_t i = 0, int respSize = sizeof(connectMap)) {
+    done_ = -1;
+    return sendProxyConnect(&conns_[i], &proxyState_, &args_, sizeof(args_), &resp_, respSize, &done_);
+  }
+};
+
+TEST_F(NetSendProxyConnectMicrotest, WrongRequestSize_Rejected) {
+  AddConn();
+
+  EXPECT_EQ(sendProxyConnect(&conns_[0], &proxyState_, &args_, sizeof(args_) - 1, &resp_, sizeof(resp_), &done_),
+            ncclInternalError);
+  EXPECT_EQ(net_.connectCalls, 0);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, Dedicated_ConnectsToPeerHandleWithHints) {
+  sendNetResources* r = AddConn();
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(done_, 1);
+  EXPECT_EQ(net_.setNetAttrCalls, 1);
+  EXPECT_EQ(net_.lastAttr.op, BIT(ncclFuncSend));
+  EXPECT_EQ(net_.connectCalls, 1);
+  EXPECT_EQ(net_.lastConnectCtx, &net_);
+  EXPECT_EQ(net_.lastConnectDev, 2);
+  EXPECT_EQ(memcmp(net_.lastConnectHandle, args_.handle, sizeof(args_.handle)), 0);
+  EXPECT_EQ(net_.lastDevHandleArg, &r->netDeviceHandle);
+  EXPECT_EQ(r->netSendComm, &net_.sendComm);
+  EXPECT_EQ(conns_[0].proxyAppendPtr, &conns_[0].proxyAppend);
+  EXPECT_EQ(conns_[0].needsProxyProgress, 1);
+  EXPECT_EQ(net_.getDeviceMrCalls, 0);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, StillConnecting_ReportsInProgressWithoutBuffers) {
+  AddConn();
+  net_.commReady = false;
+
+  EXPECT_EQ(Connect(), ncclInProgress);
+  EXPECT_EQ(done_, 0);
+  EXPECT_EQ(hostAllocs_, 0);
+
+  net_.commReady = true;
+  EXPECT_EQ(Connect(), ncclSuccess);
+  EXPECT_EQ(done_, 1);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, ConnectFails_ClosesPartialComm) {
+  AddConn();
+  net_.connectResult = ncclRemoteError;
+
+  EXPECT_EQ(Connect(), ncclRemoteError);
+  ASSERT_EQ(net_.closedSends.size(), 1u);
+  EXPECT_EQ(net_.closedSends[0], &net_.sendComm);
+
+  AddConn();
+  net_.commReady = false;
+  EXPECT_EQ(Connect(1), ncclRemoteError);
+  EXPECT_EQ(net_.closedSends.size(), 1u);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, Ainic_PassesChannelToPlugin) {
+  rcclPrimaryNicInfo.type = rcclIBNicTypeAINIC;
+  sendNetResources* dedicated = AddConn(/*shared=*/0);
+  sendNetResources* shared = AddConn(/*shared=*/1);
+  sendNetResources* sharedComms = AddConn(/*shared=*/1, 0, /*tpLocalRank=*/2);
+  sharedComms->maxRecvs = 2;
+  sendNetResources* res[] = {dedicated, shared, sharedComms};
+
+  for (size_t i = 0; i < 3; i++) {
+    SCOPED_TRACE(i);
+    ASSERT_EQ(Connect(i), ncclSuccess);
+    EXPECT_NE(net_.lastDevHandleArg, &res[i]->netDeviceHandle);
+    EXPECT_EQ(net_.lastDevHandleWord, 3u);
+  }
+}
+
+TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
+  sendNetResources* r = AddConn();
+  r->isP2p = 1;
+  struct RestoreIbPlugins {
+    ncclNet_t ib = ncclNetIb, cast = netIbCast;
+    ~RestoreIbPlugins() {
+      ncclNetIb = ib;
+      netIbCast = cast;
+    }
+  } restore;
+  ncclNetIb = netIbCast = vtable_;
+  void* policyHandle = nullptr;
+  int policyP2p = -1;
+  ScopedHook ib(g_rcclNetP2pPolicy, [&](void* h, int p2p) {
+    policyHandle = h;
+    policyP2p = p2p;
+    return ncclSuccess;
+  });
+  ScopedHook cast(g_rcclCastNetP2pPolicy, [](void*, int) { return ncclSuccess; });
+
+  proxyState_.ncclNet = &ncclNetIb;
+  EXPECT_EQ(Connect(), ncclSuccess);
+  EXPECT_EQ(policyHandle, args_.handle);
+  EXPECT_EQ(policyP2p, 1);
+  EXPECT_EQ(cast.calls, 0);
+
+  AddConn();
+  proxyState_.ncclNet = &netIbCast;
+  EXPECT_EQ(Connect(1), ncclSuccess);
+  EXPECT_EQ(cast.calls, 1);
+  EXPECT_EQ(ib.calls, 1);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, DedicatedHostBuffers_RegistersEveryProtocol) {
+  sendNetResources* r = AddConn();
+  ScopedHook dev(g_hipGetDevice, [](int* d) {
+    *d = 2;
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  ASSERT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
+  for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) {
+    SCOPED_TRACE(p);
+    ASSERT_NE(Buffer(r, p), nullptr);
+    EXPECT_FALSE(InDeviceMemory(r, p));
+    EXPECT_EQ(r->buffSizes[p], kSizes[p]);
+    EXPECT_EQ(RegMrType(Buffer(r, p)), NCCL_PTR_HOST);
+    EXPECT_EQ(r->mhandles[p], Buffer(r, p));
+  }
+  EXPECT_EQ(net_.regMrs[0].comm, &net_.sendComm);
+  EXPECT_EQ(net_.regMrs[0].size, (size_t)kSizes[NCCL_PROTO_LL]);
+  EXPECT_EQ(hostAllocs_, 1);
+  EXPECT_EQ(devAllocs_, 0);
+  EXPECT_EQ(r->sendMem->head, 0u);
+  EXPECT_EQ(r->recvMem->connFifo[NCCL_STEPS - 1].size, -1);
+  EXPECT_EQ(resp_.cudaDev, 2);
+  EXPECT_EQ(resp_.sameProcess, 1);
+  EXPECT_EQ(memcmp(&resp_, &r->map, sizeof(resp_)), 0);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, DedicatedGdr_KeepsOnlyLlInHostMemory) {
+  sendNetResources* r = AddConn(0, /*useGdr=*/1);
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_FALSE(InDeviceMemory(r, NCCL_PROTO_LL));
+  EXPECT_TRUE(InDeviceMemory(r, NCCL_PROTO_LL128));
+  EXPECT_TRUE(InDeviceMemory(r, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(RegMrType(Buffer(r, NCCL_PROTO_LL)), NCCL_PTR_HOST);
+  EXPECT_EQ(RegMrType(Buffer(r, NCCL_PROTO_LL128)), NCCL_PTR_CUDA);
+  EXPECT_EQ(RegMrType(Buffer(r, NCCL_PROTO_SIMPLE)), NCCL_PTR_CUDA);
+  EXPECT_EQ(devAllocs_, 1);
+  EXPECT_EQ(shareableAllocs_, 0);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, DedicatedGdrShareable_AllocatesIpcAlignedBank) {
+  sendNetResources* r = AddConn(0, 1);
+  conns_[0].sameProcess = 0;
+  ScopedHook shm(g_shmAllocateShareableBuffer, [this](size_t n, bool, void*, void** h, void** d) {
+    *h = *d = Alloc(n);
+    return ncclSuccess;
+  });
+  size_t allocated = 0;
+  ScopedHook alloc(g_ncclP2pAllocateShareableBuffer, [&](size_t n, int, ncclIpcDesc*, void** p, int,
+                                                         ncclMemManager*, ncclMemType_t) {
+    allocated = n;
+    *p = Alloc(n);
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+  EXPECT_EQ(allocated % CUDA_IPC_MIN, 0u);
+  EXPECT_GE(allocated, (size_t)kSizes[NCCL_PROTO_LL128] + kSizes[NCCL_PROTO_SIMPLE]);
+  EXPECT_EQ(devAllocs_, 0);
+
+  sendNetResources* cuMemConn = AddConn(0, 1);
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ASSERT_EQ(Connect(1), ncclSuccess);
+  EXPECT_EQ(alloc.calls, 2);
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  ASSERT_EQ(exports_.size(), 1u);  // cuMem banks are always exported for DMA-BUF registration
+  EXPECT_EQ(cuMemConn->map.mems[NCCL_NET_MAP_DEVMEM].dmaBufFd, exports_[0].fd);
+#else
+  (void)cuMemConn;
+#endif
+}
+
+TEST_F(NetSendProxyConnectMicrotest, RemoteProxy_ZeroesShmControlWords) {
+  sendNetResources* r = AddConn();
+  conns_[0].sameProcess = 0;
+  ScopedHook shm(g_shmAllocateShareableBuffer, [this](size_t n, bool, void*, void** h, void** d) {
+    *h = *d = Alloc(n);
+    memset(*h, 0xFF, n);
+    return ncclSuccess;
+  });
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(shm.calls, 1);
+  EXPECT_EQ(hostAllocs_, 0);
+  EXPECT_EQ(resp_.sameProcess, 0);
+  EXPECT_EQ(r->sendMem->head, 0u);
+  EXPECT_EQ(r->sendMem->ptrExchange, nullptr);
+  EXPECT_EQ(r->recvMem->tail, 0u);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, SharedBuffers_UsesPoolAndWithholdsCredits) {
+  sendNetResources* r = AddConn(/*shared=*/1);
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  ncclProxyPeer* peer = proxyState_.progressState.localPeers[1];
+  ASSERT_NE(peer, nullptr);
+  EXPECT_EQ(conns_[0].proxyAppendPtr, peer->send.proxyAppend + 3);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_SIMPLE), peer->send.hostBuff);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_SIMPLE], peer->send.size);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_LL), nullptr);
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_LL128), nullptr);
+  EXPECT_EQ(net_.regMrs.size(), 1u);
+  EXPECT_EQ(r->sendMem->head, (uint64_t)-NCCL_STEPS);
+  EXPECT_EQ(proxyState_.progressState.netComms[2], nullptr);  // one grouped recv: no shared comm
+}
+
+TEST_F(NetSendProxyConnectMicrotest, SharedGdrWithLlBuffers_StagesLlAndLl128) {
+  sendNetResources* r = AddConn(1, /*useGdr=*/1);
+  proxyState_.allocP2pNetLLBuffers = true;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  ncclProxyPeer* peer = proxyState_.progressState.localPeers[1];
+  EXPECT_EQ(Buffer(r, NCCL_PROTO_SIMPLE), peer->send.cudaBuff);
+  EXPECT_FALSE(InDeviceMemory(r, NCCL_PROTO_LL));
+  EXPECT_TRUE(InDeviceMemory(r, NCCL_PROTO_LL128));
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL], kSizes[NCCL_PROTO_LL]);
+  EXPECT_EQ(r->buffSizes[NCCL_PROTO_LL128], kSizes[NCCL_PROTO_LL128]);
+  EXPECT_EQ(devAllocs_, 2);  // the pool and the LL128 staging bank
+  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, SharedComms_OneLocalRankConnectsOthersReuse) {
+  AddConn(1, 0, /*tpLocalRank=*/1)->maxRecvs = 2;
+  AddConn(1, 0, /*tpLocalRank=*/2)->maxRecvs = 2;
+  AddConn(1, 0, /*tpLocalRank=*/1)->maxRecvs = 2;
+
+  ASSERT_EQ(Connect(0), ncclSuccess);
+  ASSERT_EQ(Connect(1), ncclSuccess);
+  ASSERT_EQ(Connect(2), ncclSuccess);
+
+  EXPECT_EQ(net_.connectCalls, 1);
+  ncclSharedNetComms* comms = proxyState_.progressState.netComms[2] + 5;
+  EXPECT_EQ(comms->sendComm[3], &net_.sendComm);
+  EXPECT_EQ(comms->sendRefCount[3], 3);
+  EXPECT_EQ(static_cast<sendNetResources*>(conns_[1].transportResources)->netSendComm, &net_.sendComm);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, SharedCommsPeerStillConnecting_Waits) {
+  AddConn(1, 0, 1)->maxRecvs = 2;
+  AddConn(1, 0, 2)->maxRecvs = 2;
+  net_.commReady = false;
+
+  EXPECT_EQ(Connect(0), ncclInProgress);
+  EXPECT_EQ(Connect(1), ncclInProgress);
+  EXPECT_EQ(net_.connectCalls, 1);
+
+  net_.commReady = true;
+  EXPECT_EQ(Connect(0), ncclSuccess);
+  EXPECT_EQ(Connect(1), ncclSuccess);
+  EXPECT_EQ(net_.connectCalls, 2);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, SharedCommsDisabled_ConnectsPerConnection) {
+  ScopedHook param(g_loadParam, ParamOverride({{"NET_SHARED_COMMS", 0}}));
+  AddConn(1, 0, 1)->maxRecvs = 2;
+  AddConn(1, 0, 2)->maxRecvs = 2;
+
+  ASSERT_EQ(Connect(0), ncclSuccess);
+  ASSERT_EQ(Connect(1), ncclSuccess);
+
+  EXPECT_EQ(net_.connectCalls, 2);
+  EXPECT_EQ(proxyState_.progressState.netComms[2], nullptr);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, GdrCopy_HeadLivesInGdcMemory) {
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  sendNetResources* r = AddConn(/*shared=*/1);
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  ASSERT_NE(r->gdcSync, nullptr);
+  EXPECT_EQ(*r->gdcSync, (uint64_t)-NCCL_STEPS);
+  EXPECT_EQ(r->sendMem->head, 0u);
+  EXPECT_EQ(resp_.mems[NCCL_NET_MAP_GDCMEM].cpuPtr, reinterpret_cast<char*>(r->gdcSync));
+  EXPECT_EQ(resp_.mems[NCCL_NET_MAP_GDCMEM].size, (ssize_t)sizeof(uint64_t));
+}
+
+TEST_F(NetSendProxyConnectMicrotest, GdrCopyNotApplicable_HeadStaysInHostMemory) {
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  AddConn()->sameDevice = 0;
+  {
+    ScopedHook param(g_loadParam, ParamOverride({{"GDRCOPY_SYNC_ENABLE", 0}}));
+    AddConn();
+    ASSERT_EQ(Connect(1), ncclSuccess);
+  }
+  ASSERT_EQ(Connect(0), ncclSuccess);
+
+  for (size_t i = 0; i < 2; i++)
+    EXPECT_EQ(static_cast<sendNetResources*>(conns_[i].transportResources)->gdcSync, nullptr);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, DeviceOffload_ExportsDeviceMhandles) {
+  ncclNetDeviceHandle_t handle{};
+  handle.needsProxyProgress = 0;
+  net_.offloadHandle = &handle;
+  sendNetResources* r = AddConn();
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(conns_[0].netDeviceHandle, &handle);
+  EXPECT_EQ(conns_[0].needsProxyProgress, 0);
+  EXPECT_EQ(net_.getDeviceMrCalls, NCCL_NUM_PROTOCOLS);
+  EXPECT_EQ(conns_[0].mhandles[NCCL_PROTO_SIMPLE], Buffer(r, NCCL_PROTO_SIMPLE) + 1);
+
+  vtable_.getDeviceMr = nullptr;
+  AddConn();
+  ASSERT_EQ(Connect(1), ncclSuccess);
+  EXPECT_EQ(net_.getDeviceMrCalls, NCCL_NUM_PROTOCOLS);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, HsaDmaBuf_RegistersDeviceBuffersByFd) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  proxyState_.dmaBufSupport = true;
+  sendNetResources* r = AddConn(0, 1);
+  r->useDmaBuf = 1;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  ASSERT_EQ(net_.regMrDmaBufs.size(), 2u);  // LL128 and SIMPLE; LL stays in host memory
+  EXPECT_EQ(RegMrType(Buffer(r, NCCL_PROTO_LL)), NCCL_PTR_HOST);
+  for (const auto& m : net_.regMrDmaBufs) {
+    EXPECT_EQ(m.type, NCCL_PTR_CUDA);
+    EXPECT_EQ(m.offset, 0x40u);
+  }
+  EXPECT_EQ(net_.regMrDmaBufs[1].data, Buffer(r, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(net_.regMrDmaBufs[1].fd, g_exportedFds[1]);
+  for (int fd : g_exportedFds) EXPECT_EQ(fcntl(fd, F_GETFD), -1) << "fd " << fd << " left open";
+}
+
+TEST_F(NetSendProxyConnectMicrotest, DmaBufUnavailable_FallsBackToRegMr) {
+  proxyState_.dmaBufSupport = true;
+  AddConn(0, 1)->useDmaBuf = 1;  // no HSA export entry point
+  ASSERT_EQ(Connect(0), ncclSuccess);
+
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  proxyState_.dmaBufSupport = false;
+  AddConn(0, 1)->useDmaBuf = 1;
+  ASSERT_EQ(Connect(1), ncclSuccess);
+
+  EXPECT_TRUE(net_.regMrDmaBufs.empty());
+  EXPECT_EQ(net_.regMrs.size(), 2u * NCCL_NUM_PROTOCOLS);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, DmaBufExportFails_ReturnsError) {
+  pfn_hsa_amd_portable_export_dmabuf = [](const void*, size_t, int*, uint64_t*) { return HSA_STATUS_ERROR; };
+  proxyState_.dmaBufSupport = true;
+  AddConn(0, 1)->useDmaBuf = 1;
+
+  EXPECT_EQ(Connect(), ncclUnhandledCudaError);
+}
+
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBuf_RegistersDeviceBuffersAgainstBankFd) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  sendNetResources* r = AddConn(0, ncclTopoGdrModePci);
+  r->useDmaBuf = 1;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  connectMapMem& bank = r->map.mems[NCCL_NET_MAP_DEVMEM];
+  ASSERT_EQ(exports_.size(), 1u);
+  EXPECT_EQ(exports_[0].ptr, bank.gpuPtr);
+  EXPECT_EQ(exports_[0].size, (size_t)bank.size);
+  EXPECT_EQ(exports_[0].flags, (unsigned long long)hipMemRangeFlagDmaBufMappingTypePcie);
+  ASSERT_EQ(net_.regMrDmaBufs.size(), 2u);  // LL128 and SIMPLE
+  for (const auto& m : net_.regMrDmaBufs) {
+    EXPECT_EQ(m.fd, bank.dmaBufFd);
+    EXPECT_EQ(m.offset, (uint64_t)(static_cast<char*>(m.data) - bank.gpuPtr));
+  }
+  EXPECT_EQ(RegMrType(Buffer(r, NCCL_PROTO_LL)), NCCL_PTR_HOST);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBufPoolBuffer_ExportedAndClosedOnItsOwn) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  sendNetResources* r = AddConn(/*shared=*/1, ncclTopoGdrModeDefault);
+  r->useDmaBuf = 1;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  ASSERT_EQ(exports_.size(), 1u);  // no dedicated bank, so only the pool buffer
+  EXPECT_EQ(exports_[0].ptr, Buffer(r, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(exports_[0].flags, 0u);
+  ASSERT_EQ(net_.regMrDmaBufs.size(), 1u);
+  EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_[0].fd);
+  EXPECT_EQ(net_.regMrDmaBufs[0].offset, 0u);
+  EXPECT_EQ(fcntl(exports_[0].fd, F_GETFD), -1);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, CuMemDmaBufPoolBesideStagingBank_ExportedSeparately) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  proxyState_.allocP2pNetLLBuffers = true;
+  sendNetResources* r = AddConn(/*shared=*/1, ncclTopoGdrModeDefault);
+  r->useDmaBuf = 1;
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  ASSERT_EQ(exports_.size(), 2u);  // the LL128 staging bank, then the pool buffer
+  ASSERT_EQ(net_.regMrDmaBufs.size(), 2u);
+  EXPECT_EQ(net_.regMrDmaBufs[0].data, Buffer(r, NCCL_PROTO_LL128));
+  EXPECT_EQ(net_.regMrDmaBufs[0].fd, exports_[0].fd);
+  EXPECT_EQ(net_.regMrDmaBufs[1].data, Buffer(r, NCCL_PROTO_SIMPLE));
+  EXPECT_EQ(net_.regMrDmaBufs[1].fd, exports_[1].fd);
+  EXPECT_EQ(net_.regMrDmaBufs[1].offset, 0u);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, CuMemBankExportFails_ReturnsError) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  exports_.result = hipErrorNotSupported;
+  AddConn(0, 1);
+
+  EXPECT_EQ(Connect(), ncclUnhandledCudaError);
+}
+#endif
+
+TEST_F(NetSendProxyConnectMicrotest, RegistrationFails_ReturnsError) {
+  AddConn();
+  net_.regMrResult = ncclSystemError;
+
+  EXPECT_EQ(Connect(), ncclSystemError);
+}
+
+TEST_F(NetSendProxyConnectMicrotest, WrongResponseSize_Rejected) {
+  AddConn();
+
+  EXPECT_EQ(Connect(0, sizeof(connectMap) - 1), ncclInternalError);
 }
 
 }  // namespace
