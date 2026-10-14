@@ -1360,7 +1360,7 @@ TEST_F(DispatchTest, DestroyQueueWithPendingPacket) {
                                                                 kernargs, signal, queue);
   hsa_signal_store_screlease(queue->doorbell_signal, wr_idx);
 
-  // AieAqlQueue::Inactivate destroys the kernel-mode queue; it does not drain the ring,
+  // AieKmqQueue::Inactivate destroys the kernel-mode queue; it does not drain the ring,
   // so this races tear-down against the in-flight packet. The destroy must still return
   // cleanly and leave the hardware detached from the buffers freed below.
   EXPECT_EQ(hsa_queue_destroy(queue), HSA_STATUS_SUCCESS);
