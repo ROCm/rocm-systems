@@ -134,6 +134,12 @@ struct testColl {
   // Other collectives leave it nullptr via aggregate initialization, so no other
   // struct needs to change.
   testResult_t (*deviceTime)(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec);
+  // Optional: for -D != 0 runs, report which device-kernel tier actually serves a
+  // message of `count` elements, given the env-resolved thresholds the kernel uses.
+  // Writes short algo/proto strings (each <=15 chars) into the caller's buffers.
+  // NULL for collectives without a tiered device kernel. deviceImpl is the -D value.
+  testResult_t (*getDeviceImplInfo)(int deviceImpl, size_t count, ncclDataType_t type,
+      int nRanks, int lsaSize, char* algoOut, char* protoOut);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;

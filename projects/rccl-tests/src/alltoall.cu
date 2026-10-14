@@ -592,6 +592,16 @@ testResult_t AlltoAllGetCollImplInfo(ncclComm_t comm, size_t count, ncclDataType
   return testSuccess;
 }
 
+// Tier report for -D runs. AllToAll has no size-based crossover: -D 3 is pure GIN
+// (every peer via gin.put), -D 4 is the fixed hybrid (CTA 0 GIN, CTAs 1..N LSA).
+// Neither depends on count/thresholds, so the report is a constant per deviceImpl.
+testResult_t AlltoAllGetDeviceImplInfo(int deviceImpl, size_t /*count*/, ncclDataType_t /*type*/,
+    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "D%d-GIN", deviceImpl);
+  snprintf(protoOut, 16, "%s", (deviceImpl == 4) ? "GIN+LSA" : "GIN-DIRECT");
+  return testSuccess;
+}
+
 struct testColl alltoAllTest = {
   "AlltoAll",
   AlltoAllGetCollByteCount,
@@ -603,7 +613,8 @@ struct testColl alltoAllTest = {
   // only, so rcclSymKGetInfo can never describe an AllToAll.
   NULL,
   AlltoAllGetCollImplInfo,
-  AlltoAllDeviceTime
+  AlltoAllDeviceTime,
+  AlltoAllGetDeviceImplInfo
 };
 
 void AlltoAllGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {

@@ -1514,7 +1514,25 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       if (enable_in_place)
         TESTCHECK(BenchTime(args, type, op, root, 1));
       if(output_algo_proto_channels) {
-        if(args->collTest->getAlgoProtoChannels) {
+        if (deviceImpl != 0) {
+          // -D != 0 launches the test's own device kernel (e.g. GIN-SDMA) and
+          // never calls the host collective, so the getCollImplInfo/
+          // getAlgoProtoChannels reporters below describe a dispatch that did
+          // not run. Report the selected device impl, and -- when the collective
+          // wires getDeviceImplInfo -- the actual tier the env-resolved thresholds
+          // select for this message size (FLAT/SAG/RING/LSA/LL/...).
+          char devAlgo[16];
+          snprintf(devAlgo, sizeof(devAlgo), "DEV-D%d", deviceImpl);
+          char devProto[16];
+          snprintf(devProto, sizeof(devProto), "GIN");
+          if (args->collTest->getDeviceImplInfo) {
+            const int nRanks = args->totalProcs * args->nGpus * args->nThreads;
+            const int lsaSize = (int)(args->devComms ? args->devComms[0].lsaSize : nRanks);
+            TESTCHECK(args->collTest->getDeviceImplInfo(deviceImpl, args->nbytes / wordSize(type), type,
+                                                        nRanks, lsaSize, devAlgo, devProto));
+          }
+          PRINT("%8s  %8s  %10s", devAlgo, devProto, "N/A");
+        } else if(args->collTest->getAlgoProtoChannels) {
           int algo, proto, nchannels;
           const char* algoName = NULL;
           const char* protoName = NULL;
