@@ -10,7 +10,6 @@ import pandas as pd
 import pytest
 
 from utils import schema
-from utils.metrics.aggregation import merge_dispatch_collect_sum
 from utils.metrics.collectable import (
     COLLECT_RATIO_SPECS_ATTR,
     COLLECT_SUM_SPECS_ATTR,
@@ -18,6 +17,7 @@ from utils.metrics.collectable import (
     WEIGHTED_AVG_ATTR,
     WEIGHTED_AVG_SUBS_ATTR,
     CompositeKind,
+    apply_composite_metrics,
     build_metric_eval_graph,
 )
 from utils.metrics.evaluation_pipeline import eval_metric
@@ -52,16 +52,6 @@ def _collect_sum_arch_config() -> schema.ArchConfig:
 @pytest.mark.misc
 def test_parse_collect_sum_submetrics():
     assert parse_collect_sum_submetrics("COLLECT_SUM(a, b)") == ["a", "b"]
-
-
-@pytest.mark.misc
-def test_merge_dispatch_collect_sum_two_parts():
-    ratios = [
-        pd.Series({1: 60.0, 2: 80.0}),
-        pd.Series({1: 40.0, 2: 20.0}),
-    ]
-    # Sum of fragment values, not the mean of the two per-dispatch sums (100).
-    assert merge_dispatch_collect_sum(ratios) == pytest.approx(200.0)
 
 
 @pytest.mark.misc
@@ -128,8 +118,8 @@ def test_collect_sum_pipeline_end_to_end():
     table_id = next(tid for tid, dt in ac.dfs_type.items() if dt == "metric_table")
     parent = ac.dfs[table_id]
     row = parent[parent["Metric"] == "hbm_total_traffic"]
-    # 100+100+80+50. A mean of the per-dispatch sums would be 165.
-    assert row.iloc[0]["Avg"] == pytest.approx(330.0)
+    # Pooled ratios: 100 * (140/150) + 100 * (70/90).
+    assert row.iloc[0]["Avg"] == pytest.approx(100 * (140 / 150) + 100 * (70 / 90))
 
 
 @pytest.mark.misc
@@ -171,8 +161,6 @@ def test_composite_cycle_is_left_unset():
 
 @pytest.mark.misc
 def test_collect_ratio_minus_negates_the_fragment():
-    from utils.metrics.collectable import apply_composite_metrics
-
     raw = pd.DataFrame({
         "Dispatch_ID": [1, 2],
         "SQ_A": [10.0, 30.0],
@@ -199,3 +187,114 @@ def test_collect_ratio_minus_negates_the_fragment():
     apply_composite_metrics({1: df}, {1: "metric_table"}, raw, {}, {})
     # (10-4 + 30-6) / (2+4) = 30/6 = 5. Mean of ratios would be (3 + 6) / 2.
     assert df.at["4", "Avg"] == pytest.approx(5.0)
+
+
+def collect_sum_parent(raw, pieces):
+    rows = []
+    cache = {}
+    for index, (name, expr) in enumerate(pieces, start=1):
+        rows.append([str(index), name, expr])
+        cache[name] = expr
+    parent_id = str(len(pieces) + 1)
+    rows.append([parent_id, "parent", ""])
+    df = pd.DataFrame(rows, columns=["Metric_ID", "Metric", "Avg"]).set_index(
+        "Metric_ID"
+    )
+    df.attrs[COLLECT_SUM_SPECS_ATTR] = {parent_id: [name for name, _expr in pieces]}
+    df.attrs["collectable_expr_cache"] = cache
+    apply_composite_metrics({1: df}, {1: "metric_table"}, raw, {}, {})
+    return df.at[parent_id, "Avg"]
+
+
+@pytest.mark.misc
+def test_collect_sum_adds_pooled_hbm_rates():
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "RD_BYTES": [10.0, 90.0],
+        "RD_DURATION": [10.0, 30.0],
+        "WR_BYTES": [5.0, 15.0],
+        "WR_DURATION": [10.0, 30.0],
+    })
+    result = collect_sum_parent(
+        raw,
+        [
+            (
+                "read",
+                "to_sum(raw_pmc_df['RD_BYTES']) / to_sum(raw_pmc_df['RD_DURATION'])",
+            ),
+            (
+                "write",
+                "to_sum(raw_pmc_df['WR_BYTES']) / to_sum(raw_pmc_df['WR_DURATION'])",
+            ),
+        ],
+    )
+    # (10+90)/(10+30) + (5+15)/(10+30)
+    assert result == pytest.approx(3.0)
+
+
+@pytest.mark.misc
+def test_collect_sum_adds_pooled_ipc_ratios():
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "INST_A": [2.0, 6.0],
+        "INST_B": [1.0, 1.0],
+        "CYCLES": [4.0, 4.0],
+    })
+    result = collect_sum_parent(
+        raw,
+        [
+            ("slice_a", "to_sum(raw_pmc_df['INST_A']) / to_sum(raw_pmc_df['CYCLES'])"),
+            ("slice_b", "to_sum(raw_pmc_df['INST_B']) / to_sum(raw_pmc_df['CYCLES'])"),
+        ],
+    )
+    # (2+6)/(4+4) + (1+1)/(4+4) = (8+2)/8
+    assert result == pytest.approx(1.25)
+
+
+@pytest.mark.misc
+def test_collect_sum_zero_denominator_is_unset():
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "RD_BYTES": [10.0, 90.0],
+        "RD_DURATION": [0.0, 0.0],
+        "WR_BYTES": [5.0, 15.0],
+        "WR_DURATION": [10.0, 30.0],
+    })
+    result = collect_sum_parent(
+        raw,
+        [
+            (
+                "read",
+                "to_sum(raw_pmc_df['RD_BYTES']) / to_sum(raw_pmc_df['RD_DURATION'])",
+            ),
+            (
+                "write",
+                "to_sum(raw_pmc_df['WR_BYTES']) / to_sum(raw_pmc_df['WR_DURATION'])",
+            ),
+        ],
+    )
+    assert result == "N/A"
+
+
+@pytest.mark.misc
+def test_collect_sum_missing_denominator_is_unset():
+    raw = pd.DataFrame({
+        "Dispatch_ID": [1, 2],
+        "RD_BYTES": [10.0, 90.0],
+        "WR_BYTES": [5.0, 15.0],
+        "WR_DURATION": [10.0, 30.0],
+    })
+    result = collect_sum_parent(
+        raw,
+        [
+            (
+                "read",
+                "to_sum(raw_pmc_df['RD_BYTES']) / to_sum(raw_pmc_df['RD_DURATION'])",
+            ),
+            (
+                "write",
+                "to_sum(raw_pmc_df['WR_BYTES']) / to_sum(raw_pmc_df['WR_DURATION'])",
+            ),
+        ],
+    )
+    assert result == "N/A"
