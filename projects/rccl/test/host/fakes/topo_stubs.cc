@@ -16,6 +16,7 @@
 #include <vector>
 #include <sched.h>
 
+#include "fakes/fail_loud.h"
 #include "fakes/signature-drift.h"
 #include "graph.h"  // PATH_DIS
 #include "nccl.h"
@@ -126,6 +127,18 @@ std::function<ncclResult_t(struct ncclTopoSystem*, int, int, int64_t*, int*)> g_
 ASSERT_HOOK_MATCHES_PROD(g_ncclTopoGetLocalNet, ncclTopoGetLocalNet);
 ncclResult_t ncclTopoGetLocalNet(struct ncclTopoSystem* system, int rank, int channelId, int64_t* id, int* dev) {
   return g_ncclTopoGetLocalNet(system, rank, channelId, id, dev);
+}
+ncclResult_t ncclTopoGetNetDev(struct ncclComm*, int, struct ncclTopoGraph*, int, int, int64_t*, int*, int*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoGetNetDev");
+}
+ncclResult_t ncclTopoGetIntraNetDev(struct ncclTopoSystem*, int, struct ncclTopoGraph*, int, int, int64_t*, int*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoGetIntraNetDev");
+}
+ncclResult_t ncclTopoCheckGdr(struct ncclTopoSystem*, int, int64_t, int, enum ncclTopoGdrMode*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoCheckGdr");
+}
+ncclResult_t ncclTopoNeedFlush(struct ncclComm*, int64_t, int, int, bool, enum ncclTopoFlushType*) {
+  FailLoudUnfaked("topo_stubs", "ncclTopoNeedFlush");
 }
 ncclResult_t ncclTopoGetNvbGpus(struct ncclTopoSystem* system, int rank, int* nranks, int** ranks) { ::abort(); }
 ncclResult_t ncclTopoGetPxnRanks(struct ncclComm* comm, int** intermediateRanks, int* nranks) { ::abort(); }

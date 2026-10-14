@@ -47,6 +47,13 @@ ncclResult_t ncclProxySaveOp(struct ncclComm* comm, struct ncclProxyOp* op, bool
 ncclResult_t g_proxyStartResult = ncclSuccess;
 ncclResult_t ncclProxyStart(struct ncclComm*) { return g_proxyStartResult; }
 
+ncclResult_t ncclProxyCallAsync(struct ncclComm*, struct ncclProxyConnector*, int, void*, int, int, void*) {
+  FailLoudUnfaked("proxy_fakes", "ncclProxyCallAsync");
+}
+ncclResult_t ncclPollProxyResponse(struct ncclComm*, struct ncclProxyConnector*, void*, void*) {
+  FailLoudUnfaked("proxy_fakes", "ncclPollProxyResponse");
+}
+
 void ResetProxyFakes() {
   g_proxySaveOpResult = ncclSuccess;
   g_proxySaveOpCalls = 0;

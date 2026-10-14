@@ -373,6 +373,26 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
     
+  # rccl-UnitTestsMicroNet -- src/transport/net.cc. Own binary: transport_stubs.cc, which most
+  # targets link, defines rcclUseAinic and netTransport, and net.cc defines both.
+  set(TEST_MICRO_NET_SOURCE_FILES
+    net-test.cc
+    fakes/collectives_fakes.cc           # func/algo/proto name tables
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
+    fakes/os_fakes.cc
+    fakes/proxy_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/topo_stubs.cc
+    fakes/transport_net_ib_fakes.cc      # ncclNetIb / netIbCast
+    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real parseStringList/matchIfList for NCCL_IB_HCA
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
   # src/diagnostics/p2p.cc; fakes transport/p2p.cc, which rccl-UnitTestsMicro compiles.
   set(TEST_MICRO_DIAGNOSTICS_SOURCE_FILES
     diag-p2p-test.cc
@@ -1120,6 +1140,18 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
     DIAG_IB_WRITE_BW_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/ib_write_bw.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNet
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNet
+  SOURCES ${TEST_MICRO_NET_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # net_tmp.cc, not net.cc: src/CMakeLists.txt lists plugin/net.cc first, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_tmp.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
