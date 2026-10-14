@@ -773,9 +773,10 @@
     "cast_udma_pinning_sharing": {
       "extends": "gtest_base",
       "timeout": 600,
-      "description": "AINIC UDMA QP pinning verification with QP sharing enabled. Verifies the sharing-path UDMA mask selection in ncclIbCreateQpIonic produces valid per-QP UDMA indices. Skips cleanly on non-AINIC or older drivers.",
+      "description": "AINIC UDMA QP pinning verification with QP sharing enabled and NGROUPS=1. With a single sharing group the per-QP qpIdx selector distributes QPs across UDMA engines. Verifies per-QP UDMA indices are valid and spread across engines when udmaCount > 2. Skips cleanly on non-AINIC or older drivers.",
       "env_variables": {
-        "RCCL_IB_QP_SHARING_ENABLE": "1"
+        "RCCL_IB_QP_SHARING_ENABLE": "1",
+        "RCCL_IB_COMM_NGROUPS": "1"
       },
       "tests": [
         {

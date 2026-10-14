@@ -2299,37 +2299,6 @@ TEST_F(NetIbMPITest, CastRegistrationRejectsBadArguments) {
         << "deregMr must reject a null communicator";
     EXPECT_EQ(DeregisterMemory(nullptr, nullptr), ncclSuccess)
         << "deregMr must keep treating a null handle as a no-op, ahead of the comm check";
-=======
-// Test: CastUdmaPinningVerify
-//
-// Functional HW test: establishes a CAST connection, reads back per-QP UDMA
-// indices via ionic_dv_qp_get_udma_idx, and verifies that the round-robin
-// distribution matches expectations (each QP's UDMA index is within range and
-// all UDMA engines are used when nqps >= udmaCount).
-//
-// Also performs a data-integrity send/recv to confirm the QPs are functional.
-//
-// Requires: AINIC NIC with ionic driver supporting qp_get_udma_idx.
-// Skips cleanly on non-AINIC or older drivers (all queryOk false).
-// =============================================================================
-TEST_F(NetIbMPITest, CastUdmaPinningVerify) {
-    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit);
-
-    const int rank = MPIEnvironment::world_rank;
-
-    net_ = &netIbCast;
-    AssertInitAndGetDevices(nullptr);
-
-    // Route check: skip if dev 0 has no routable GID.
-    ncclNetProperties_t props;
-    memset(&props, 0, sizeof(props));
-    ASSERT_EQ(GetDeviceProperties(0, &props), ncclSuccess);
-    int skipFlag = (props.name && !CanRouteCrossNode(props.name)) ? 1 : 0;
-    MPI_Allreduce(MPI_IN_PLACE, &skipFlag, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
-    if (skipFlag) {
-        GTEST_SKIP() << "dev 0 has no routable GID on at least one rank";
-    }
 
     void* listenComm = nullptr;
     void* sendComm   = nullptr;
@@ -2497,14 +2466,21 @@ TEST_F(NetIbMPITest, CastUdmaPinningVerify) {
 // Test: CastUdmaPinningSharingVerify
 //
 // Functional HW test: establishes a CAST connection with QP sharing enabled
-// (RCCL_IB_QP_SHARING_ENABLE=1), reads back per-QP UDMA indices via
-// ionic_dv_qp_get_udma_idx, and verifies that the sharing-path UDMA mask
-// selection in ncclIbCreateQpIonic works correctly:
+// (RCCL_IB_QP_SHARING_ENABLE=1, RCCL_IB_COMM_NGROUPS=1), reads back per-QP
+// UDMA indices via ionic_dv_qp_get_udma_idx, and verifies that the
+// sharing-path UDMA mask selection in ncclIbCreateQpIonic works correctly:
 //   - Each QP's UDMA index is within [0, udmaCount)
 //   - Data integrity via send/recv confirms functional QPs
 //
+// NGROUPS must be 1 so that connect.cc selects the per-QP qpIdx as the
+// udmaSelector (connect.cc:504).  With NGROUPS > 1 the selector is
+// qpSharingGroupIdx, which is constant across all QPs in a connection,
+// so every QP would land on one engine and the distinct-engine check
+// would be ineffective.
+//
 // Requires: AINIC NIC with ionic driver supporting qp_get_udma_idx,
-//           and RCCL_IB_QP_SHARING_ENABLE=1 set via test runner config.
+//           and RCCL_IB_QP_SHARING_ENABLE=1 + RCCL_IB_COMM_NGROUPS=1
+//           set via test runner config.
 // Skips cleanly on non-AINIC, older drivers, or if sharing is not enabled.
 // =============================================================================
 TEST_F(NetIbMPITest, CastUdmaPinningSharingVerify) {
@@ -2553,9 +2529,9 @@ TEST_F(NetIbMPITest, CastUdmaPinningSharingVerify) {
             udmaSkip = 1;
         } else {
             // Validate per-QP UDMA indices: each must be in range.
-            // With QP sharing the UDMA selector depends on group index
-            // or QP index, so we verify range validity rather than a
-            // specific round-robin sequence.
+            // With NGROUPS=1 the sharing path uses qpIdx as the UDMA
+            // selector, so distinct QPs get distinct engines via the
+            // round-robin formula 1u << (qpIdx % udmaCount).
             std::set<uint8_t> distinctEngines;
             for (int i = 0; i < udma.nqps; i++) {
                 if (!udma.queryOk[i]) continue;
