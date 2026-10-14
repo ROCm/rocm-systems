@@ -37,42 +37,23 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amd-smi ras --cper` now lists these events (`fabric-linkdown`, `fabric-linkup`, `fabric-fatal`) alongside GPU errors.
 
 - **Added the fabric PPoD/vPoD/DF-station configuration write APIs**.  
-  - New APIs: `amdsmi_set_gpu_fabric_ppod_config()`, `amdsmi_set_gpu_fabric_vpod_config()`, `amdsmi_set_gpu_fabric_station_config()`.
-  - New structures: `amdsmi_fabric_ppod_config_t`, `amdsmi_fabric_vpod_config_t`, `amdsmi_fabric_station_config_t`, and the `amdsmi_fabric_ppod_data_t`, `amdsmi_fabric_vpod_data_t`, `amdsmi_fabric_station_data_t` payloads they share with `amdsmi_get_gpu_fabric_info()`.
-  - New enums: `amdsmi_fabric_config_version_t`, `amdsmi_fabric_ppod_field_t`, `amdsmi_fabric_vpod_field_t`, `amdsmi_fabric_df_field_t`. Each config carries a `mask` selecting the fields to write and a `commit` flag.
-  - `commit == false` validates the request and writes nothing. The driver ignores the staging files unless a commit follows, so values left there would only be picked up by the next commit.
-  - `mask` must select at least one field. A request with `mask == 0` returns `AMDSMI_STATUS_INVAL` even when `commit` is set, so a bare commit cannot flush whatever a prior partial write left staged.
-  - A committing request compares the write subtree against the flat surface before it writes anything and logs any field already pending, since the driver applies everything staged rather than only the fields the request named. The check is observational and never changes the result; enable debug logging to see the report.
+  - New `amdsmi_set_gpu_fabric_ppod_config()`, `amdsmi_set_gpu_fabric_vpod_config()` and `amdsmi_set_gpu_fabric_station_config()`. Their config structures share data payloads with `amdsmi_get_gpu_fabric_info()`.
+  - Each request selects the fields to write with `mask` and applies them only when `commit` is set; with `commit == false` it only validates. A `mask` of `0` returns `AMDSMI_STATUS_INVAL`.
+  - A commit applies every staged field, not only the ones in that request.
 
 - **Added `amdsmi_fabric_info_v2_t`, a second layout for `amdsmi_get_gpu_fabric_info()`**.  
-  - Groups the version 1 fields into the `ppod`/`vpod`/`station` payloads shared with the write APIs above, and exposes the DF/station data (`station_flags`, `num_stations`, `lane_en_bitmap`) and `local_accelerator_count`, none of which have a version 1 equivalent.
-  - New enum `amdsmi_fabric_info_version_t` selects the layout. Set `fabric_version` to `AMDSMI_FABRIC_INFO_VERSION_2` before the call to receive the new layout:
+  - Set `fabric_version` to `AMDSMI_FABRIC_INFO_VERSION_2` before the call to receive it. It adds the DF/station data (`station_flags`, `num_stations`, `lane_en_bitmap`) and `local_accelerator_count`.
+  - New `ppod_mask`, `vpod_mask` and `station_mask` report which fields were read. A clear bit means that field is unavailable.
+  - The Python `amdsmi_get_gpu_fabric_info()` uses the new layout automatically and adds the three mask keys.
 
-    ```c
-    amdsmi_fabric_info_t info = {0};   /* C++: amdsmi_fabric_info_t info = {}; */
-    info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
-    amdsmi_get_gpu_fabric_info(handle, &info);
-    ```
+- **Added `amdsmi_get_link_topology()` on baremetal**.  
+  - Returns the link type, status, weight, hop count and framebuffer sharing between two GPUs, as on the host interface. Also available in the Python and Rust bindings, with `AmdSmiLinkStatus` and `AmdsmiLinkStatusT` for the status values.
+  - For the same GPU as source and destination it reports `INTERNAL`, `ENABLED`, zero hops and weight, and framebuffer sharing. For that pair `amdsmi_topo_get_link_type()` reports PCIe with 2 hops and `amdsmi_topo_get_link_weight()` reports twice the NUMA weight (typically 40).
 
-  - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
-  - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
-
-- **Added unified `amdsmi_get_link_topology()` API on baremetal**.  
-  - Returns link weight, status, type, hop count, and framebuffer-sharing data.
-  - Matches the existing host interface; includes Python and Rust bindings.
-  - Exports `AmdSmiLinkStatus` in Python and `AmdsmiLinkStatusT` in Rust for status interpretation.
-  - Self pair (same GPU): `INTERNAL`, `ENABLED`, zero hops and weight, `fb_sharing=1`.
-  - Migration from component APIs on baremetal:
-    - `amdsmi_topo_get_link_type(gpu, gpu)` reports PCIe and 2 hops instead.
-    - `amdsmi_topo_get_link_weight(gpu, gpu)` reports twice the NUMA node weight (typically 40).
-
-- **Added AMPP (amdsmi power profile) API and CLI support**.
-  - `amdsmi_get_ampp_profiles`, `amdsmi_get_ampp_fields`, `amdsmi_activate_ampp_profile`, and `amdsmi_configure_ampp_profile` expose the driver's `app_modes/` sysfs tree of predefined power/performance recipes. Profiles, fields, and units are all dynamically enumerated at runtime — nothing is hardcoded, since the driver does not guarantee a fixed field set, profile count, or naming across SoC generations.
-  - `amd-smi static --ampp` displays the tree-wide `app_modes/profile_abi` version plus per-profile active/writable/configured state and per-field name/unit/value/min/max.
-  - `amd-smi set --ampp-activate <profile_name>` activates a profile.
-  - `amd-smi set --ampp-configure <profile_name> KEY=VALUE...` stages one or more fields on a writable profile and commits them.
-  - `amd-smi set --ampp-configure @<path>` restores every writable profile with staged fields from an `amd-smi static --ampp --json`-shaped file in one call.
-  - This is unrelated to the legacy `amdsmi_*_gpu_power_profile*` preset-mask API, which is unchanged.
+- **Added AMPP (amdsmi power profile) API and CLI support**.  
+  - New `amdsmi_get_ampp_profiles()`, `amdsmi_get_ampp_fields()`, `amdsmi_activate_ampp_profile()` and `amdsmi_configure_ampp_profile()` list, activate and configure the driver's predefined power/performance profiles. Profiles and fields are read from the driver and can differ between GPU generations.
+  - `amd-smi static --ampp` shows each profile's state and fields. `amd-smi set --ampp-activate <profile>` activates a profile, and `amd-smi set --ampp-configure <profile> KEY=VALUE...` sets fields on a writable one. `--ampp-configure @<file>` restores fields from saved `amd-smi static --ampp --json` output.
+  - The existing `amdsmi_*_gpu_power_profile*` APIs are separate and unchanged.
 
 ### Changed
 
@@ -154,12 +135,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Default `amd-smi static` output on guests now includes NUMA, in human-readable, JSON, and CSV output.
 
 - **`amdsmi_fabric_info_t::fabric_version` is now an in/out layout selector**.  
-  - On input it names the union member `amdsmi_get_gpu_fabric_info()` fills; on output it reports the member that was filled. Any value other than `AMDSMI_FABRIC_INFO_VERSION_2` selects `amdsmi_fabric_info_v1_t`, so a zero-initialized structure and one left uninitialized both yield the version 1 layout. An unrecognized value is not an error.
-  - `amdsmi_fabric_info_v1_t` and its field offsets are unchanged and now frozen; on the version 1 path no byte past that union member is written, including the trailing `reserved` words. Existing binaries need no recompile.
-  - `sizeof(amdsmi_fabric_info_t)` grows from 320 to 552 bytes to accommodate `amdsmi_fabric_info_v2_t`. Code that allocates the structure by name is unaffected after a recompile; code that hardcodes the size or serializes the structure whole must be updated.
+  - Any value other than `AMDSMI_FABRIC_INFO_VERSION_2`, including zero, selects the unchanged version 1 layout. On return, `fabric_version` reports the layout that was filled.
+  - `sizeof(amdsmi_fabric_info_t)` grows from 320 to 552 bytes. Existing binaries are unaffected because the version 1 path writes nothing past the version 1 layout. Code that hardcodes the size or serializes the whole structure must be updated.
 
-- **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
-  - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
+- **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as unavailable instead of truncating it**.  
+  - A `vpod_active_accelerators` or `local_accelerators` list longer than its array was silently cut short. It is now left unavailable, with its `vpod_mask` or `ppod_mask` bit clear.
 
 ### Removed
 
@@ -220,13 +200,13 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Pressing Tab completes `amd-smi` subcommands and their options again, whether completion is registered explicitly or through the global `argcomplete` hook.
 
 - **Fixed `amd-smi node --tray` printing an empty section on hardware without UALoE**.  
-  - The tray output was guarded on the retrieved dictionary being non-empty, so the `N/A` defaults next to it could never be reached. `NODE:` was emitted with no body, and `--json` returned `[{"node": {}}]`. All three output formats now report `MAX_ACC_PER_TRAY` and `TRAY_TYPE` as `N/A`.
+  - It printed `NODE:` with nothing under it, and `--json` returned `[{"node": {}}]`. All output formats now show `MAX_ACC_PER_TRAY` and `TRAY_TYPE` as `N/A`.
 
-- **Fixed `amdsmi_get_afids_from_cper()` raising `TypeError` when passed a list of CPER records**.  
-  - The list branch called `isinstance()` with a subscripted generic, which Python rejects at runtime, so the documented list-of-dicts input always failed. `bytes` input was unaffected. Input that is neither `bytes` nor a list now raises `AmdSmiParameterException`.
+- **Fixed the Python `amdsmi_get_afids_from_cper()` raising `TypeError` for a list of CPER records**.  
+  - The documented list input always failed; `bytes` input was unaffected. Input of any other type now raises `AmdSmiParameterException`.
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
-  - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
+  - When `amdsmi_get_gpu_accelerator_partition_profile_config()` returned `AMDSMI_STATUS_NO_PERM`, the example read an uninitialized profile count and ran past the profile array. It now skips the profile list when that call fails.
 
 - **Fixed APU core and skin temperatures showing `0.0 °C` when the sensor is not measured**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amd-smi metric` and the library now report these readings as not available instead of a false 0 °C.
