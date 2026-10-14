@@ -451,6 +451,38 @@ TEST_F(RomeModelsParseGraphMicrotest, GpuNumberAtIntMax_IsNotRejected) {
   EXPECT_EQ(graph()->nChannels, 0);
 }
 
+// A NET slot the ring did not name. nets[] holds a NET number biased by 'N', so an
+// absent slot must translate to a negative NET id, which is what the translation
+// and the inter[] checks both read as "no NET here".
+bool IsAbsentNetSlot(int slot) { return slot - 'N' < 0; }
+
+TEST_F(RomeModelsParseGraphMicrotest, NetSlotsTheRingDidNotName_AreNotCarriedOver) {
+  system()->nodes[NET].count = 2;
+  system()->nodes[NET].nodes[0].id = 50;
+  system()->nodes[NET].nodes[1].id = 51;
+
+  // The first segment names five NETs, which is odd, so it is ignored as a
+  // channel -- but it still writes them into nets[]. The second segment names
+  // only its two end NETs, leaving the slots between them holding the first
+  // segment's numbers. Seeding the stale state from an earlier iteration of the
+  // same call keeps this deterministic; the raw uninitialised values this used to
+  // expose varied run to run.
+  ASSERT_EQ(parseGraph("N5 0 N6 1 N7 2 N8 3 N9|N0 0 1 2 3 N1", system(), graph(), nullptr,
+                       nullptr, 0),
+            ncclSuccess);
+
+  ASSERT_EQ(graph()->nChannels, 1);
+  EXPECT_EQ(graph()->inter[0], 0);
+  EXPECT_EQ(graph()->inter[1], 1);
+
+  // Slots 1, 3 and 5 are where the ignored segment's N6, N7 and N8 landed.
+  for (int slot : {1, 2, 3, 4, 5, 6}) {
+    SCOPED_TRACE("intraNets slot " + std::to_string(slot));
+    EXPECT_TRUE(IsAbsentNetSlot(graph()->intraNets[slot]))
+        << "slot holds NET " << graph()->intraNets[slot] - 'N';
+  }
+}
+
 TEST_F(RomeModelsParseGraphMicrotest, NoMatchingChannel_LeavesBandwidthAtZero) {
   // Callers test graph->nChannels after calling, so a ring list that matches
   // nothing is not an error -- but it must not leave a bandwidth behind either.
@@ -599,6 +631,7 @@ TEST(RomeModelsPresetTopologiesMicrotest, EveryPresetRingBase_IsAccepted) {
 //   ExactlyMaxChannels_IsAccepted
 //   EveryPresetRingBase_IsAccepted
 // ---------------------------------------------------------------------------
+
 
 
 

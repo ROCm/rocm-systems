@@ -3832,7 +3832,11 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
   int gpu = 0;
   int offset = 0;
   int status = 0; // 0 : between numbers, 1 : inside number, 2: start NET, 3: inside NET
-  int nets[NCCL_TOPO_MAX_NODES * 2];
+  // Zeroed, and re-zeroed per channel below: the translation and the memcpy both
+  // run over all ngpus*2 slots however few the ring actually named, so an unnamed
+  // slot must hold a defined value. 0 reads back as a negative NET id, which is
+  // what every reader already treats as "no NET here".
+  int nets[NCCL_TOPO_MAX_NODES * 2] = {};
   int net_offset = 0, net_count = 0;
   int ngpus = system->nodes[GPU].count;
   int nnets = system->nodes[NET].count;
@@ -3948,6 +3952,7 @@ ncclResult_t parseGraph(const char* str, struct ncclTopoSystem* system, struct n
           gpu = 0;
           net_offset = 0;
           net_count = 0;
+          memset(nets, 0, sizeof(nets));
         }
       }
     }
