@@ -685,6 +685,12 @@ HSA_API_INFO_DEFINITION_V(ROCPROFILER_HSA_TABLE_ID_AmdExt,
                           memory_handle,
                           info)
 #        endif
+#        if HSA_AMD_EXT_API_TABLE_STEP_VERSION >= 0x16
+HSA_API_INFO_DEFINITION_0(ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_enable_high_precision_timestamps,
+                          hsa_amd_enable_high_precision_timestamps,
+                          hsa_amd_enable_high_precision_timestamps_fn)
+#        endif
 #    endif
 
 #elif defined(ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL) &&                              \
