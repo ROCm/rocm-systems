@@ -2520,7 +2520,11 @@ _PACKED_RTZ_VOP3 = ('v_cvt_pkrtz_f16_f32_vop3', 'v_cvt_pk_rtz_f16_f32_vop3')
 def _modified_conversion_op(
     cpp_op: str, *, bits: int, arity: int = 2, flush_f16_inputs: bool = False
 ) -> str:
-    """Apply floating source signs before a raw-word SIMD conversion."""
+    """Apply floating source modifiers before a raw-word SIMD conversion.
+
+    By default, apply ABS/NEG to the sign bit of each bits-wide source. With
+    flush_f16_inputs, prepare 16-bit F16 sources with MODE input flushing.
+    """
     operands = ('a', 'b')[:arity]
     parameters = ', '.join(f'auto {operand}' for operand in operands)
     if flush_f16_inputs:

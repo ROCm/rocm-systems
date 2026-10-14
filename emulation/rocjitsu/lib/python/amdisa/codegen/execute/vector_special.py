@@ -1382,6 +1382,8 @@ def gen_vector_cvt_pk(
     """Generate pack/convert instructions."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
+    if cls == 'vector_cvt_pknorm' and dtype == 'f16':
+        L.append('  const uint32_t f16_denorm_mode = wf.fp_denorm_mode_f16_f64();')
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if cls == 'vector_cvt_pk_u8_f32':
@@ -1405,9 +1407,6 @@ def gen_vector_cvt_pk(
         )
     elif cls == 'vector_cvt_pknorm':
         if dtype == 'f16':
-            L.insert(
-                1, '  const uint32_t f16_denorm_mode = wf.fp_denorm_mode_f16_f64();'
-            )
             if is_vop3:
                 reads = [_read_vop3_true16_src(src[i], opsel, i) for i in range(2)]
             else:
