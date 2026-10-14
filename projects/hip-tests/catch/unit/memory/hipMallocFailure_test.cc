@@ -12,11 +12,10 @@
 #include <hip_test_common.hh>
 #include <resource_guards.hh>
 
-#include <algorithm>
-
 #ifdef _WIN32
 #include <windows.h>
-#endif
+
+#include <algorithm>
 
 namespace {
 constexpr size_t ONE_MB = 1024 * 1024;
@@ -31,13 +30,25 @@ size_t FreeMemory() {
   return freeMem;
 }
 
-#ifdef _WIN32
+bool IsApu() {
+  hipDeviceProp_t prop{};
+  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  return prop.integrated;
+}
+
 enum class AllocKind { Device, HostMalloc, HostRegister };
 
 struct Allocation {
   AllocKind kind;
   void* ptr = nullptr;
   void* sysMem = nullptr;  // pageable memory for hipHostRegister
+
+  // Gets the pageable memory for hipHostRegister; false if Windows refuses it
+  bool Prepare(size_t size) {
+    if (kind != AllocKind::HostRegister) return true;
+    sysMem = VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
+    return sysMem != nullptr;
+  }
 
   hipError_t Allocate(size_t size) {
     switch (kind) {
@@ -46,8 +57,6 @@ struct Allocation {
       case AllocKind::HostMalloc:
         return hipHostMalloc(&ptr, size, hipHostMallocDefault);
       case AllocKind::HostRegister:
-        sysMem = VirtualAlloc(nullptr, size, MEM_RESERVE | MEM_COMMIT, PAGE_READWRITE);
-        if (sysMem == nullptr) return hipErrorOutOfMemory;
         return hipHostRegister(sysMem, size, hipHostRegisterDefault);
     }
     return hipErrorInvalidValue;
@@ -85,15 +94,15 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   size_t beforeFailure = 0;
   for (size_t step = 1; step <= REQUEST_STEPS && !failed; ++step) {
     const size_t size = idle / REQUEST_STEPS * step;
-    const size_t before = FreeMemory();
     Allocation alloc{kind};
+    // Windows refusing the pageable memory is not a runtime failure
+    if (!alloc.Prepare(size)) break;
+    const size_t before = FreeMemory();
     const hipError_t result = alloc.Allocate(size);
     if (result == hipSuccess) {
       alloc.Release(true);
       continue;
     }
-    // Windows refusing the pageable memory is not a runtime failure
-    if (kind == AllocKind::HostRegister && alloc.sysMem == nullptr) break;
     // Clear the error, as an application recovering from out of memory would
     static_cast<void>(hipGetLastError());
     const size_t after = FreeMemory();
@@ -116,16 +125,19 @@ void CheckFailedAllocKeepsFreeMemory(AllocKind kind) {
   INFO("Free memory after releasing the held memory : " << released / ONE_MB << " MB");
   REQUIRE(released + FREE_MEM_TOLERANCE >= beforeFailure + heldDevSize);
 }
-#endif /* _WIN32 */
 }  // namespace
+#endif /* _WIN32 */
+
+// One test case per allocation kind, so that ctest runs each in its own process: in one process,
+// the memory held by the next kind can fault on Windows APUs (a separate runtime issue).
 
 /**
  * Test Description
  * ------------------------
- * - A failed allocation must not change the free memory reported by hipMemGetInfo.
- * - Holds device and host memory, then makes larger and larger hipMalloc, hipHostMalloc or
- *   hipHostRegister requests until one fails. Free memory must be unchanged by the failure and
- *   grow by the held device memory when that is freed. Skipped if no request fails.
+ * - A failed hipMalloc must not change the free memory reported by hipMemGetInfo.
+ * - Holds device and host memory, then makes larger and larger requests until one fails. Free
+ *   memory must be unchanged by the failure and grow by the held device memory when that is freed.
+ *   Skipped if no request fails.
  * - Regression test: when memory could not be made resident, the runtime subtracted the size of the
  *   failed allocation from its free memory counters without having added it. The counter wrapped,
  *   hipMemGetInfo reported 0 for the rest of the process and, on APUs, later device allocations
@@ -141,18 +153,46 @@ HIP_TEST_CASE(Unit_hipMalloc_Negative_FailureKeepsFreeMemory) {
 #ifndef _WIN32
   HIP_SKIP_TEST("Regression test for the Windows runtime");
 #else
-  hipDeviceProp_t prop{};
-  HIP_CHECK(hipGetDeviceProperties(&prop, 0));
+  CheckFailedAllocKeepsFreeMemory(AllocKind::Device);
+#endif /* _WIN32 */
+}
 
-  SECTION("hipMalloc") { CheckFailedAllocKeepsFreeMemory(AllocKind::Device); }
-  // The host allocations are sized from device memory; only an APU has host memory to match
-  SECTION("hipHostMalloc") {
-    if (!prop.integrated) HIP_SKIP_TEST("dGPU --- host allocation sizes are tuned for APUs");
-    CheckFailedAllocKeepsFreeMemory(AllocKind::HostMalloc);
-  }
-  SECTION("hipHostRegister") {
-    if (!prop.integrated) HIP_SKIP_TEST("dGPU --- host allocation sizes are tuned for APUs");
-    CheckFailedAllocKeepsFreeMemory(AllocKind::HostRegister);
-  }
+/**
+ * Test Description
+ * ------------------------
+ * - Same as Unit_hipMalloc_Negative_FailureKeepsFreeMemory, for hipHostMalloc.
+ * Test source
+ * ------------------------
+ * - unit/memory/hipMallocFailure_test.cc
+ * Test requirements
+ * ------------------------
+ * - Windows, APU (host allocation sizes follow device memory)
+ */
+HIP_TEST_CASE(Unit_hipHostMalloc_Negative_FailureKeepsFreeMemory) {
+#ifndef _WIN32
+  HIP_SKIP_TEST("Regression test for the Windows runtime");
+#else
+  if (!IsApu()) HIP_SKIP_TEST("dGPU --- host allocation sizes are tuned for APUs");
+  CheckFailedAllocKeepsFreeMemory(AllocKind::HostMalloc);
+#endif /* _WIN32 */
+}
+
+/**
+ * Test Description
+ * ------------------------
+ * - Same as Unit_hipMalloc_Negative_FailureKeepsFreeMemory, for hipHostRegister.
+ * Test source
+ * ------------------------
+ * - unit/memory/hipMallocFailure_test.cc
+ * Test requirements
+ * ------------------------
+ * - Windows, APU (host allocation sizes follow device memory)
+ */
+HIP_TEST_CASE(Unit_hipHostRegister_Negative_FailureKeepsFreeMemory) {
+#ifndef _WIN32
+  HIP_SKIP_TEST("Regression test for the Windows runtime");
+#else
+  if (!IsApu()) HIP_SKIP_TEST("dGPU --- host allocation sizes are tuned for APUs");
+  CheckFailedAllocKeepsFreeMemory(AllocKind::HostRegister);
 #endif /* _WIN32 */
 }
