@@ -40,9 +40,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLL128Max = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    64ULL*1024*1024,     // [2] AllGather
-    64ULL*1024*1024,     // [3] ReduceScatter -- (1 MiB, 64 MiB] after the LL cap
-    32ULL*1024*1024,     // [4] AllReduce
+    128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
+    2ULL*1024*1024,      // [3] ReduceScatter
+    256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M (AICOMRCCL-2875); its scratch
+                         //                        slot reaches 256M from 32 ranks, ~128M at 2-8, 240M at 16
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
@@ -170,6 +171,66 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
+  // crossovers move with the per-rank share, so on 8+ rank comms these replace the
+  // totals above (which stay in force for smaller comms).
+  .ddaLLMaxPerRank = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    16ULL*1024,          // [2] AllGather       -- LL beats LL128 to 128K/256K/512K/1M at 8/16/32/64
+    256ULL*1024,         // [3] ReduceScatter   -- LL past 2M/4M/8M/16M at 8/16/32/64 trails LL128 up to 2x
+    1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,                   // [8] AlltoAll        -- unchanged
+  },
+  .ddaLL128MaxPerRank = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    16ULL*1024*1024,     // [2] AllGather       -- 128M at 8 ranks, 256M (clipped) from 16
+    512ULL*1024,         // [3] ReduceScatter   -- the LL128 slot reaches nRanks x 512K
+    0,                   // [4] AllReduce       -- ddaLL128Max total
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,                   // [8] AlltoAll        -- unchanged
+  },
+  .ddaVmmMaxPerRank = {
+    0,                   // [0] Broadcast      -- not used
+    0,                   // [1] Reduce          -- not used
+    0,                   // [2] AllGather       -- VMM off
+    2ULL*1024*1024,      // [3] ReduceScatter   -- VMM beats Ring 1.2-1.9x to 16M/32M/64M/128M
+    0,                   // [4] AllReduce       -- ddaVmmMax total (see ddaArVmmFirst*)
+    0,                   // [5] SendRecv        -- not used
+    0,                   // [6] Send            -- not used
+    0,                   // [7] Recv            -- not used
+    0,                   // [8] AlltoAll        -- VMM off
+  },
+  .rankScaledMinRanks = 8,
+  .rankScaledMaxBytes = 256ULL*1024*1024,
+  // From 32 ranks, AllReduce VMM beats LL two-shot / LL128 1.3-3.7x between 2M and nRanks x 512K.
+  .ddaArVmmFirstMinRanks = 32,
+  .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
+  .ddaArVmmFirstMaxPerRank = 512ULL*1024,
+  // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
+  .ddaVmmBlockBudget = 2048,
+  .ddaVmmMinBlocks = 32,
+  .ddaVmmMaxBlocks = 128,
+  // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
+  .arRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 beats Simple to 256M/512M/1G/2G at 8-64
+  .arTreeLL128Unlimited = true,                   // Tree LL128 beats Tree Simple 1.3-2.9x at 32M-16G
+  .arTreeMaxPerRank = 1ULL*1024*1024,             // Tree beats Ring 1.4-2.3x to 8M/16M/32M/64M
+  .arTreeLLMaxPerRank = 32ULL*1024,               // Tree LL beats LL128 1.2-1.6x to 256K/512K/1M/2M
+  .agRingLL128MaxPerRank = 64ULL*1024*1024,       // Ring LL128 beats Simple to 512M/1G/2G/4G
+  .rsRingLL128MinPerRank = 512ULL*1024,           // Ring LL128 beats LL from 1M per rank
+  .rsRingLL128MaxPerRank = 8ULL*1024*1024,        // 2/4-byte types: Simple wins past 8M per rank
+  .rsRingLL128MaxPerRank1B = 32ULL*1024*1024,     // fp8: LL128 holds to 32M per rank
+  .rsRingSimpleCappedMaxPerRank = 32ULL*1024*1024,// 128 channels beat 192 by 1.1-1.3x in (8M, 32M]
+  .rsRingSimpleCappedChannels = 128,
+  // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
+  // ceiling and the scratch size (nRanks x 64 MiB) (AICOMRCCL-2876).
+  .forceCeScratch = false,
 };
 
 // gfx950: DDA-IPC cap is 128 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -205,6 +266,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     kThreshUnlimited,     // [8] AlltoAll        -- not used
   },
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .forceCeScratch = true,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
@@ -240,6 +302,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx942 = {
     kThreshUnlimited,     // [8] AlltoAll        -- not used
   },
   .symMinR2    = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .forceCeScratch = true,
 };
 
 const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
@@ -249,5 +312,4 @@ const rcclArchThresholds* rcclGetArchThresholds(const char* gcn) {
   if (IsArchMatch(gcn, "gfx942")) return &rcclArchThresholds_gfx942;
   return nullptr;
 }
-
 

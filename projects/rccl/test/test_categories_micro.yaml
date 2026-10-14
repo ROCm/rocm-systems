@@ -41,6 +41,8 @@ test_categories:
       - "RasCollectivesMicrotest.*"
       # ras/diagnostics.cc
       - "RasDiagnosticsMicrotest.*"
+      # ras/rasnet.cc
+      - "RasNetMicrotest.*"
       # ras/diagnostics_gpu.cc
       - "RasDiagnosticsGpuMicrotest.*"
       # ras/peers.cc
@@ -102,8 +104,11 @@ test_categories:
       - "WrapMicrotestIsolated.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
+      # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
+      - "DvSymbolsTestIsolated.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)
       - "CeCollMicrotest.*"
+      - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
       # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
