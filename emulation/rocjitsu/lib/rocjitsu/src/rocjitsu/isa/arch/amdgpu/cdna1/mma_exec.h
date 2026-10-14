@@ -6,14 +6,14 @@
 
 /// @file CDNA1 MFMA — thin wrapper around the shared MFMA implementation.
 ///
-/// CDNA1 (GFX908) stores MFMA results in a separate accumulator bank.
+/// CDNA1 (GFX908) uses AccMode::Separate for its accumulator bank.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 
 namespace rocjitsu {
 namespace cdna1 {
 
-/// CDNA1 accumulator operands use the 768-based ACC register selectors.
+/// CDNA1 uses Separate mode with 768-based ACC register selectors.
 template <typename F>
 inline uint32_t resolve_acc(uint32_t vb, uint32_t dst, int src2_ev, uint32_t &const_acc,
                             F &&get_const) {

@@ -780,7 +780,8 @@ class IsaProfile(ABC):
         """Width of the ADDTID M0 byte base.
 
         The 16-bit form adds OFFSET at that width before widening; the 20-bit
-        form widens OFFSET before addition. Lane offsets are added last."""
+        form widens OFFSET before addition. Lane offsets are added last.
+        """
         return 16
 
     @property
@@ -791,6 +792,10 @@ class IsaProfile(ABC):
         writeback, not only to address formation.
         """
         return False
+
+    def ds_subbyte_transpose_kind(self, bits: int) -> int:
+        """CDNA4 contiguous sixteen-lane transpose layout for B4/B6."""
+        return 8 if bits == 4 else 9
 
     @property
     def ds_b8_transpose_kind(self) -> int:
@@ -2936,6 +2941,10 @@ class Cdna5Profile(Rdna4Profile):
     @property
     def cpp_namespace(self) -> str | None:
         return 'cdna5'
+
+    def ds_subbyte_transpose_kind(self, bits: int) -> int:
+        """CDNA5 interleaved source-lane layout for B4/B6."""
+        return 1 if bits == 4 else 2
 
     @property
     def ds_b8_transpose_kind(self) -> int:

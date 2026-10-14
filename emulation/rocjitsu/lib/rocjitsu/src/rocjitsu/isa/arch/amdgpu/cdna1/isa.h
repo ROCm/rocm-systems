@@ -29,7 +29,8 @@ namespace cdna1 {
 /// does not expose COND_DBG_USER / COND_DBG_SYS but those bits are inert in
 /// simulation.
 struct Isa : amdgpu::CdnaIsaBase {
-  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF = 256;
+  static constexpr uint32_t MAX_ACC_VGPRS_PER_WF =
+      256; ///< Separate accumulator bank, encoded from 768.
   using Decoder = cdna1::Decoder;
   using MachineInst = cdna1::MachineInst;
   using OperandType = cdna1::OperandType;

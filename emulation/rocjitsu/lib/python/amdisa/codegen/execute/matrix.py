@@ -423,8 +423,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             index_key_expr = 'index_key'
         else:
             L.append(f'  uint32_t const_acc;')
-            acc_namespace = arch_name if arch_name in ('cdna1', 'cdna2') else 'amdgpu'
-            L.append(f'  uint32_t s2 = {acc_namespace}::resolve_acc(vb, dst,')
+            L.append(f'  uint32_t s2 = {arch_name}::resolve_acc(vb, dst,')
             L.append(
                 f'      {s2}.encoding_value_, const_acc,'
                 f' [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});'

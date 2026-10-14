@@ -2736,6 +2736,11 @@ def derive_semantics(
             if sem is not None:
                 break
 
+    if sem is not None and profile is not None:
+        if sem.semantic_class in ('ds_read_tr_b4', 'ds_read_tr_b6'):
+            bits = 4 if sem.semantic_class == 'ds_read_tr_b4' else 6
+            sem = replace(sem, transpose_kind=profile.ds_subbyte_transpose_kind(bits))
+
     if (
         sem is not None
         and profile is not None

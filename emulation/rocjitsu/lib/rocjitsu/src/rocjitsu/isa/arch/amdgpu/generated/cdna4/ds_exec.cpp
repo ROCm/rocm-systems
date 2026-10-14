@@ -3075,7 +3075,7 @@ void DsReadB64TrB4Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 2;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->transpose = 1;
+  d->transpose = 8;
   ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }
@@ -3089,7 +3089,7 @@ void DsReadB96TrB6Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 3;
   d->is_load = true;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  d->transpose = 2;
+  d->transpose = 9;
   ds_calculate_addresses(inst_, wf, *d);
   set_data(std::move(d));
 }

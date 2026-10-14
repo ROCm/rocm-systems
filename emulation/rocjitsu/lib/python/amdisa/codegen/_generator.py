@@ -9401,6 +9401,8 @@ class CodeGenerator:
             '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
         )
         lines.append('    uint32_t m0 = wf.m0();')
+        if self.isa_spec.profile.ds_addtid_m0_base_bits not in (16, 20):
+            raise ValueError("Unsupported ADDTID base and offset policy")
         mask = (1 << self.isa_spec.profile.ds_addtid_m0_base_bits) - 1
         if self.isa_spec.profile.ds_addtid_m0_base_bits == 16:
             # The 16-bit base-plus-offset expression widens before adding laneID.

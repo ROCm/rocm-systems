@@ -620,6 +620,33 @@ TEST(TransposeLoadTest, Cdna4B64TrB8MatchesMfmaLaneLayout) {
   }
 }
 
+// Layouts independently described by Triton TargetFeatures (CDNA4 B4) and
+// ROCm FlyDSL CDNA4 CopyAtom (B4/B6). Exercise every bit, including packed
+// six-bit fields that cross DWORDs and both wave halves.
+TEST(TransposeLoadTest, Cdna4SubbyteTransposesEveryBitWithinSixteenLaneMatrices) {
+  for (unsigned bits : {4u, 6u}) {
+    const unsigned lane_bytes = bits * 2;
+    amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
+    state.wf_size = 64;
+    state.num_elems = lane_bytes / 4;
+    state.transpose = static_cast<uint8_t>(bits == 4 ? amdgpu::TransposeKind::CDNA4_TR_B4
+                                                     : amdgpu::TransposeKind::CDNA4_TR_B6);
+    for (unsigned input_bit = 0; input_bit < 64 * lane_bytes * 8; ++input_bit) {
+      state.response_data.assign(64 * lane_bytes, 0);
+      state.response_data[input_bit / 8] = 1u << (input_bit % 8);
+      const unsigned source_lane = input_bit / (16 * bits);
+      const unsigned source_element = (input_bit / bits) % 16;
+      const unsigned output_bit =
+          ((source_lane / 16 * 16 + source_element) * 16 + source_lane % 16) * bits +
+          input_bit % bits;
+      std::vector<uint8_t> expected(64 * lane_bytes, 0);
+      expected[output_bit / 8] = 1u << (output_bit % 8);
+      amdgpu::transpose_response(state);
+      EXPECT_EQ(state.response_data, expected) << "bits=" << bits << " input_bit=" << input_bit;
+    }
+  }
+}
+
 TEST(TransposeLoadTest, Cdna5DsTrB8MatchesMatrixLayout) {
   amdgpu::VectorMemState state(amdgpu::LOCAL_MEM);
   state.wf_size = 32;

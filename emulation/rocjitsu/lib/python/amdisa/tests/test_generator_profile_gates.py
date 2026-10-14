@@ -2032,7 +2032,7 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
 
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'Isa::resolved_vgpr_offset' not in body
-    assert 'amdgpu::resolve_acc(vb, dst,' in body
+    assert 'rdna4::resolve_acc(vb, dst,' in body
     assert (
         'amdgpu::exec_gfx12_wmma_dot4<false>(cu, wf.wf_size(), dst, '
         'src0_base, src1_base, s2,' in body
