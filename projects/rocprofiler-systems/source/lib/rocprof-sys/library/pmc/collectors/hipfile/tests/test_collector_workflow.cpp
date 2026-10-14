@@ -43,7 +43,7 @@ struct recorded_sample
  * same decisions without a trace cache behind them.
  *
  * The real policy stores the whole per-GPU snapshot as one hipfile_pmc_sample and lets
- * the Perfetto and RocPD processors expand it over METRIC_TABLE. This stub expands
+ * the Perfetto and RocPD processors expand it over k_metric_table. This stub expands
  * eagerly instead, because these tests assert on individual metric values; the gating
  * decisions under test are the same either way.
  */
@@ -67,8 +67,6 @@ struct stub_cache
         metadata_gpus.push_back(gpu_id);
     }
 
-    // NOLINTNEXTLINE(readability-function-size) -- needs a refactor of every collector's
-    // store_sample
     static void store_sample(std::size_t device_id, const std::string& /*device_name*/,
                              const enabled_metrics& enabled_cfg,
                              const enabled_metrics& supported, const metrics& values,
@@ -80,7 +78,7 @@ struct stub_cache
         }
 
         const std::uint32_t active = enabled_cfg.value & supported.value;
-        for(const auto& metric : METRIC_TABLE)
+        for(const auto& metric : k_metric_table)
         {
             if((active & (1U << metric.bit)) == 0U)
             {
@@ -125,7 +123,7 @@ struct stub_settings
         gpu_filter      = device_filter{};
         gpu_filter.mode = device_selection_mode::all;
         set_visible_identity(2);
-        hipfile_metrics.value = ALL_HIPFILE_METRICS;
+        hipfile_metrics.value = k_all_hipfile_metrics;
         perfetto_legacy       = false;
     }
 
@@ -174,6 +172,9 @@ constexpr std::uint64_t k_b1000 = 1000;
 constexpr std::uint64_t k_b3000 = 3000;
 }  // namespace test_bytes
 
+// GTest fixtures stay abstract because Test::TestBody is pure virtual. PMC
+// tests keep the CamelCase *Test name used with TEST_F.
+// NOLINTNEXTLINE(readability-identifier-naming)
 class HipFileCollectorTest : public ::testing::Test
 {
 protected:
@@ -228,7 +229,7 @@ TEST_F(HipFileCollectorTest, sample_emits_every_metric_for_every_gpu)
 
     m_collector->sample(static_cast<std::int64_t>(k_ts_1));
 
-    EXPECT_EQ(stub_cache::samples.size(), 2U * METRIC_TABLE.size());
+    EXPECT_EQ(stub_cache::samples.size(), 2U * k_metric_table.size());
 }
 
 TEST_F(HipFileCollectorTest, shutdown_propagates_to_provider)
@@ -311,9 +312,8 @@ TEST_F(HipFileCollectorTest, selecting_a_group_emits_both_directions)
 
 // ── Metric groups ───────────────────────────────────────────────────────────
 
-constexpr std::array<const char*, 7> k_all_groups{ "bytes",    "ops",    "fastpath",
-                                                   "fallback", "errors", "unaligned",
-                                                   "bandwidth" };
+constexpr std::array k_all_groups{ "bytes",  "ops",       "fastpath", "fallback",
+                                   "errors", "unaligned", "bandwidth" };
 
 TEST(HipFileMetricGroups, each_group_covers_exactly_one_read_and_one_write)
 {
@@ -335,8 +335,8 @@ TEST(HipFileMetricGroups, groups_partition_the_metric_table)
         bits += std::popcount(metric_group_mask(group));
     }
 
-    EXPECT_EQ(combined, ALL_HIPFILE_METRICS);
-    EXPECT_EQ(bits, static_cast<int>(METRIC_TABLE.size()));
+    EXPECT_EQ(combined, k_all_hipfile_metrics);
+    EXPECT_EQ(bits, static_cast<int>(k_metric_table.size()));
 }
 
 TEST(HipFileMetricGroups, unknown_group_selects_nothing)
@@ -442,7 +442,7 @@ TEST_F(HipFileCollectorTest, enabling_perfetto_does_not_change_pmc_output)
     // reach Perfetto as PMC records; a real writer would put two producers on every
     // track. What must hold either way is that the PMC output is unchanged.
     EXPECT_EQ(stub_perfetto::store_count, 1U);
-    EXPECT_EQ(stub_cache::samples.size(), METRIC_TABLE.size());
+    EXPECT_EQ(stub_cache::samples.size(), k_metric_table.size());
 }
 
 // ── Pause ───────────────────────────────────────────────────────────────────
@@ -458,7 +458,7 @@ TEST_F(HipFileCollectorTest, pause_emits_zeros_for_every_track)
 
     m_collector->pause(static_cast<std::int64_t>(k_ts_2));
 
-    ASSERT_EQ(stub_cache::samples.size(), METRIC_TABLE.size());
+    ASSERT_EQ(stub_cache::samples.size(), k_metric_table.size());
     for(const auto& sample : stub_cache::samples)
     {
         EXPECT_DOUBLE_EQ(sample.value, 0.0) << sample.metric;

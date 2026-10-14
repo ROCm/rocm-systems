@@ -133,12 +133,12 @@ struct hipfile_traits
             return entries;
         }
 
-        if(type_indices.size() > MAX_GPUS)
+        if(type_indices.size() > k_max_gpus)
         {
             LOG_WARNING("{} GPUs are visible but hipFile reports stats for at most {}; "
                         "telemetry for the remaining GPUs is unavailable",
-                        type_indices.size(), MAX_GPUS);
-            type_indices.resize(MAX_GPUS);
+                        type_indices.size(), k_max_gpus);
+            type_indices.resize(k_max_gpus);
         }
 
         auto devices = provider->template get_devices<device_t>(type_indices);

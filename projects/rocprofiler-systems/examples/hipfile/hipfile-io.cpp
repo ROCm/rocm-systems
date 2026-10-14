@@ -16,6 +16,8 @@
 //
 // Usage: hipfile-io [FILE] [GPUID] [SECONDS]
 
+// Built with the hipFile SDK include path, which the tidy job does not have.
+// NOLINTNEXTLINE(clang-diagnostic-error)
 #include <hipfile.h>
 
 #include <hip/hip_runtime_api.h>
@@ -32,7 +34,7 @@
 
 #include <fcntl.h>
 #include <sys/stat.h>
-#include <sys/types.h>
+#include <sys/types.h>  // NOLINT(misc-include-cleaner) -- provides off_t and ssize_t
 #include <unistd.h>
 
 namespace
@@ -170,7 +172,7 @@ open_scratch_file(const char* path, size_t bytes)
         return -1;
     }
 
-    if(ftruncate(raw_fd, static_cast<off_t>(bytes)) != 0)
+    if(ftruncate(raw_fd, static_cast<off_t>(bytes)) != 0)  // NOLINT(misc-include-cleaner)
     {
         fprintf(stderr, "ftruncate failed (%s)\n", strerror(errno));
         close(raw_fd);
@@ -238,14 +240,14 @@ run_io_loop(hipFileHandle_t handle, void* devbuf, size_t bytes, int seconds)
     while(std::chrono::steady_clock::now() < deadline)
     {
         const auto bytes_written = hipFileWrite(handle, devbuf, bytes, 0, 0);
-        if(bytes_written != static_cast<ssize_t>(bytes))
+        if(bytes_written != static_cast<ssize_t>(bytes))  // NOLINT(misc-include-cleaner)
         {
             fprintf(stderr, "hipFileWrite returned %zd, expected %zu\n", bytes_written,
                     bytes);
             return { false, iterations };
         }
         const auto bytes_read = hipFileRead(handle, devbuf, bytes, 0, 0);
-        if(bytes_read != static_cast<ssize_t>(bytes))
+        if(bytes_read != static_cast<ssize_t>(bytes))  // NOLINT(misc-include-cleaner)
         {
             fprintf(stderr, "hipFileRead returned %zd, expected %zu\n", bytes_read,
                     bytes);

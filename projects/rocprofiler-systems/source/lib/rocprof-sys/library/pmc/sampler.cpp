@@ -47,6 +47,7 @@
 #include "core/agent.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
+#include "core/config.hpp"
 #include "core/state.hpp"
 #if ROCPROFILER_VERSION >= 600
 #    include "backends/rocprofiler_sdk/backend.hpp"
