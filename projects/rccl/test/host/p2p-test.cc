@@ -211,17 +211,11 @@ inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
 // p2p.cc link-satisfying stubs + this file's controllable alloc seams.
 //
 // Defined here (not in a shared fakes/ .cc) because they have no owning fakes
-// file: allocTracker is an alloc.h data symbol p2p.cc alone references. The
-// ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro shims
-// above. They must land after #include P2P_CC_PATH so the production types
-// they mention (allocationTracker, the alloc.h templates, etc.) are already
-// in scope. busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they
+// file. The ncclCudaCallocAsync / ncclCudaMemcpyAsync emulators back the macro
+// shims above. They must land after #include P2P_CC_PATH so the production
+// types they mention (the alloc.h templates, etc.) are already in scope. busIdToInt64 / getBusId are owned by src/misc/utils.cc, so they
 // live in fakes/utils_fakes.cc, not here.
 // ---------------------------------------------------------------------------
-
-// allocTracker is an array of per-device counters in alloc.h; size it to the
-// same MAX_ALLOC_TRACK_NGPU the header uses. Zero-initialised.
-struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 
 // Controllable seams: ncclCudaCallocAsync / ncclCudaMemcpyAsync. Substitutes
 // for the header-only function templates in alloc.h -- the shim macros above
