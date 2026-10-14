@@ -1560,7 +1560,11 @@ hsa_status_t ExecutableImpl::LoadSegmentsV2(hsa_agent_t agent,
   hsa_status_t status = HSA_STATUS_SUCCESS;
   for (size_t i = 0; i < c->DataSegmentCount(); ++i) {
     status = LoadSegmentV2(c->DataSegment(i), load_segment.get());
-    if (status != HSA_STATUS_SUCCESS) return status;
+    if (status != HSA_STATUS_SUCCESS) {
+      // Not yet in objects, so the executable destructor will not free it.
+      load_segment->Destroy();
+      return status;
+    }
   }
 
   objects.push_back(load_segment);
@@ -1617,10 +1621,12 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   // The combined code segment allocation is sized from the last data segment
   // only (see LoadSegmentsV2). A crafted code object with non-monotonic,
   // overlapping, or out-of-range p_vaddr values could otherwise drive the copy
-  // below past the end of that allocation (heap OOB write). Bound the copy
-  // destination [offset, offset + imageSize) against the allocation explicitly,
-  // since Segment::Offset() only asserts the start address and compiles out
-  // under NDEBUG. See ROCM-26177 finding #1.
+  // below past the end of that allocation (heap OOB write). Bound the claimed
+  // extent [offset, offset + p_memsz) against the allocation. p_filesz <=
+  // p_memsz was checked above, so this also covers the copied range. An
+  // earlier PT_LOAD can have a p_memsz that extends past the allocation while
+  // its p_filesz still fits (ROCM-32935). Segment::Offset() only asserts the
+  // start address and that assert compiles out under NDEBUG.
   const uint64_t seg_vaddr = data_segment->vaddr();
   const uint64_t base_vaddr = load_segment->VAddr();
   const size_t alloc_size = load_segment->Size();
@@ -1629,7 +1635,7 @@ hsa_status_t ExecutableImpl::LoadSegmentV2(const code::Segment *data_segment,
   }
   const uint64_t offset = seg_vaddr - base_vaddr;
   if (offset > alloc_size ||
-      data_segment->imageSize() > alloc_size - offset) {
+      data_segment->memSize() > alloc_size - offset) {
     return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
   }
 
