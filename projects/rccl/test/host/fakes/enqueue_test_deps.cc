@@ -17,6 +17,10 @@
 // compile rccl_wrap.cc, which this target does not.
 int64_t ncclParamP2pDisable() { return g_loadParam("P2P_DISABLE", 0); }
 
+// transport/p2p.cc owns ncclP2pUsesMemcpy. enqueue.cc's direct P2P channel
+// policy calls it, and this target does not compile p2p.cc.
+bool ncclP2pUsesMemcpy() { return g_loadParam("P2P_USE_CUDA_MEMCPY", 0) != 0; }
+
 void ResetEnqueueTestDeps() {
   ResetHipFakes();
   ResetNcclFakes();
