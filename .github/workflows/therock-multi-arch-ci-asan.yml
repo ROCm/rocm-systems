@@ -11,6 +11,10 @@
 # runtime-tests) testing hip-tests and rocrtst, so that it is cheap enough to
 # run automatically on every pull request. See ROCm/TheRock#7202.
 #
+# TEMPORARY: TheRock users/dravindr/host_asan_8455_test lets hip-tests and
+# rocrtst run even when the sanity check fails, so this validation run can
+# record those failures. Revert with that workflow change.
+#
 # For scheduled nightly runs, see therock-multi-arch-ci-asan-nightly.yml.
 
 name: TheRock Multi-Arch CI ASAN
