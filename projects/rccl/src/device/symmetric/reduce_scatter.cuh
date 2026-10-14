@@ -22,7 +22,6 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
   using Acc = typename Red::EltType;
   using AccPack = BytePack<BytePerPack * sizeof(Acc) / sizeof(T)>;
 
-  ncclTeam world = ncclTeamWorld(handler.comm);
   int wn = tn / WARP_SIZE;
   int w = t / WARP_SIZE;
   int lane = t % WARP_SIZE;
@@ -41,6 +40,11 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
                                 EnableTma ? 0 :
 #endif
                                             lane);
+  // Read the windows once here: peerPtr() and localPtr() inside the loop re-read them after every store.
+  // The getter takes an LSA slot; world rank r is slot lsaShift + r, as peerPtr(world, r) computes.
+  ncclLsaPointerGetter<Pack> inLsa(inpPacks);
+  int const lsaShift = handler.comm.lsaRank - rank;
+  Pack* outLocal = outPacks.localPtr();
 
   Pack acc0[UnrollPacks];
 
@@ -61,13 +65,13 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
   if (0 < nIters) {
 #if NCCL_SYMK_ASYNC_TILE
     if NCCL_IF_CONSTEXPR (EnableTma) {
-      ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
+      ncclSymkTileLoad(tmaSmem->buff[0], inLsa(lsaShift + rank), tileSize, tmaSmem->bar, tmaSize, lane);
     } else
 #endif
     {
       NVCC_PRAGMA_UNROLL_AUTO
       for (int u = 0; u < UnrollPacks; u++) {
-        acc0[u] = inpPacks.peerPtr(world, rank)[u * WARP_SIZE];
+        acc0[u] = inLsa(lsaShift + rank)[u * WARP_SIZE];
       }
     }
   }
@@ -83,14 +87,14 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
         Pack tmp1[UnrollPacks];
 #if NCCL_SYMK_ASYNC_TILE
         if NCCL_IF_CONSTEXPR (EnableTma) {
-          ncclSymkTileLoad(tmaSmem->buff[1], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
+          ncclSymkTileLoad(tmaSmem->buff[1], inLsa(lsaShift + r), tileSize, tmaSmem->bar, tmaSize, lane);
           ncclSymkTileLoadWait</*Arrivers=*/WARP_SIZE>(tmaSmem->bar, tmaSize, lane);
         } else
 #endif
         {
           NVCC_PRAGMA_UNROLL_AUTO
           for (int u = 0; u < UnrollPacks; u++) {
-            tmp1[u] = inpPacks.peerPtr(world, r)[u * WARP_SIZE];
+            tmp1[u] = inLsa(lsaShift + r)[u * WARP_SIZE];
           }
         }
         NVCC_PRAGMA_UNROLL_AUTO
@@ -129,13 +133,13 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
             if (partial && ur != 0 && dr + ur == nRanks) break;
 #if NCCL_SYMK_ASYNC_TILE
             if NCCL_IF_CONSTEXPR (EnableTma) {
-              ncclSymkTileLoad(tmaSmem->buff[ur], inpPacks.peerPtr(world, r), tileSize, tmaSmem->bar, tmaSize, lane);
+              ncclSymkTileLoad(tmaSmem->buff[ur], inLsa(lsaShift + r), tileSize, tmaSmem->bar, tmaSize, lane);
             } else
 #endif
             {
               NVCC_PRAGMA_UNROLL(UnrollPacks)
               for (int u = 0; u < UnrollPacks; u++) {
-                tmp1[ur][u] = inpPacks.peerPtr(world, r)[u * WARP_SIZE];
+                tmp1[ur][u] = inLsa(lsaShift + r)[u * WARP_SIZE];
               }
             }
             r += 1;
@@ -182,7 +186,7 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
       if NCCL_IF_CONSTEXPR (EnableTma) {
         // Publish the lanes' reduced tile to the engine that is about to read it.
         ncclSymkTileFenceSmem();
-        ncclSymkTileStore(outPacks.localPtr(), tmaSmem->buff[0], tileSize, lane);
+        ncclSymkTileStore(outLocal, tmaSmem->buff[0], tileSize, lane);
         // Drain before the next iteration refills the tile.
         ncclSymkTileStoreWait(lane);
         __syncwarp();
@@ -190,24 +194,24 @@ static __device__ void reduceDeep(ncclSymkArgsHandler const& handler, int tn, in
 #endif
       {
         NVCC_PRAGMA_UNROLL(UnrollPacks)
-        for (int u = 0; u < UnrollPacks; u++) outPacks.localPtr()[u * WARP_SIZE] = acc0[u];
+        for (int u = 0; u < UnrollPacks; u++) outLocal[u * WARP_SIZE] = acc0[u];
       }
 
-      inpPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
-      outPacks += intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      inLsa.base = (Pack*)inLsa.base + intptr_t(wn) * UnrollPacks * WARP_SIZE;
+      outLocal += intptr_t(wn) * UnrollPacks * WARP_SIZE;
       nIters -= wn;
       if (nIters <= 0) break;
 
 #if NCCL_SYMK_ASYNC_TILE
       if NCCL_IF_CONSTEXPR (EnableTma) {
-        ncclSymkTileLoad(tmaSmem->buff[0], inpPacks.peerPtr(world, rank), tileSize, tmaSmem->bar, tmaSize, lane);
+        ncclSymkTileLoad(tmaSmem->buff[0], inLsa(lsaShift + rank), tileSize, tmaSmem->bar, tmaSize, lane);
       } else
 #endif
       {
         // Load data for next iteration.
         NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPacks; u++) {
-          acc0[u] = inpPacks.peerPtr(world, rank)[u * WARP_SIZE];
+          acc0[u] = inLsa(lsaShift + rank)[u * WARP_SIZE];
         }
       }
     }
@@ -219,16 +223,17 @@ static __device__ void reduceEnds(ncclSymkArgsHandler const& handler, int tn, in
                                   ncclSymPtr<T> output, size_t nElts, uint32_t nPreElts, size_t nSufElts) {
   using Acc = typename Red::EltType;
 
-  ncclTeam world = ncclTeamWorld(handler.comm);
   int const& rank = handler.comm.rank;
   int const& nRanks = handler.comm.nRanks;
 
-  ncclSymPtr<BytePack<sizeof(T)>> inpPacks = (ncclSymPtr<BytePack<sizeof(T)>>)input;
-  ncclSymPtr<BytePack<sizeof(T)>> outPacks = (ncclSymPtr<BytePack<sizeof(T)>>)output;
+  // As in reduceDeep: read the windows once, and index the inputs by LSA slot.
+  ncclLsaPointerGetter<BytePack<sizeof(T)>> inLsa((ncclSymPtr<BytePack<sizeof(T)>>)input);
+  int const lsaShift = handler.comm.lsaRank - rank;
+  BytePack<sizeof(T)>* outLocal = ((ncclSymPtr<BytePack<sizeof(T)>>)output).localPtr();
   NVCC_PRAGMA_UNROLL_DISABLED
   for (size_t i = t; i < nPreElts + nSufElts; i += tn) {
     size_t elt = i < nPreElts ? i : nElts - nSufElts - nPreElts + i;
-    BytePack<sizeof(T)> acc0 = inpPacks.peerPtr(world, rank)[elt];
+    BytePack<sizeof(T)> acc0 = inLsa(lsaShift + rank)[elt];
     BytePack<sizeof(Acc)> acc1;
     BytePack<sizeof(T)> tmp[UnrollPeers];
     int dr = 1;
@@ -245,7 +250,7 @@ static __device__ void reduceEnds(ncclSymkArgsHandler const& handler, int tn, in
         NVCC_PRAGMA_UNROLL_AUTO
         for (int u = 0; u < UnrollPeers - partial; u++) {
           if (partial && u != 0 && dr + u == nRanks) break;
-          tmp[u] = inpPacks.peerPtr(world, r)[elt];
+          tmp[u] = inLsa(lsaShift + r)[elt];
           r += 1;
           if (r == nRanks) r = 0;
         }
@@ -263,7 +268,7 @@ static __device__ void reduceEnds(ncclSymkArgsHandler const& handler, int tn, in
 
     acc1 = applyPostOp(red, acc1);
     acc0 = applyCast<Acc, T>(acc1);
-    outPacks.localPtr()[elt] = acc0;
+    outLocal[elt] = acc0;
   }
 }
 
