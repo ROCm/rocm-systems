@@ -10,6 +10,12 @@ Compile-time DI via template policy parameters. Zero runtime overhead, full mock
 **Ownership rule:** The class always **owns** its dependencies as value members constructed from the policy type.
 Never store dependency references or accept deps via constructor — that mixes two different DI styles and creates dangling-reference risk.
 
+**External libraries:** the policy is the `Wrapper` of `source/lib/backends/<library>/`
+(`template <typename Wrapper> class backend`). Its functions are static, so the class
+holds no member and calls `Wrapper::call(...)`. Layout and rules are in
+`architecture-conventions.md`. Concepts for a policy live in `source/lib/policies/` and
+include only standard headers.
+
 ## Option 1 — Single Dependency (value member)
 
 ```cpp
@@ -82,7 +88,7 @@ struct gmock_dependency {
     MOCK_METHOD(return_type, operation, (args...));
 };
 
-std::unique_ptr<gmock_dependency> g_mock;
+std::unique_ptr<::testing::StrictMock<gmock_dependency>> g_mock;
 
 struct mock_dependency {
     return_type operation(args...) { return g_mock->operation(args...); }
@@ -97,14 +103,15 @@ private:
 
 class my_class_test : public ::testing::Test {
 protected:
-    void SetUp() override    { g_mock = std::make_unique<gmock_dependency>(); }
+    void SetUp() override    { g_mock = std::make_unique<::testing::StrictMock<gmock_dependency>>(); }
     void TearDown() override { g_mock.reset(); }
 };
 
 using sut = my_class<mock_dependency>;
 
 TEST_F(my_class_test, does_work) {
-    EXPECT_CALL(*g_mock, operation(expected_args))
+    EXPECT_CALL(*g_mock, operation(Eq(expected_args)))
+        .Times(1)
         .WillOnce(testing::Return(expected_value));
     sut obj;
     EXPECT_EQ(obj.do_work(args...), expected_value);
@@ -117,8 +124,8 @@ Policy bundle variant — one global per dep, one wrapper per dep:
 struct gmock_dep_a { MOCK_METHOD(return_type, op_a, (args...)); };
 struct gmock_dep_b { MOCK_METHOD(return_type, op_b, (args...)); };
 
-std::unique_ptr<gmock_dep_a> g_mock_a;
-std::unique_ptr<gmock_dep_b> g_mock_b;
+std::unique_ptr<::testing::StrictMock<gmock_dep_a>> g_mock_a;
+std::unique_ptr<::testing::StrictMock<gmock_dep_b>> g_mock_b;
 
 struct mock_dep_a { return_type op_a(args...) { return g_mock_a->op_a(args...); } };
 struct mock_dep_b { return_type op_b(args...) { return g_mock_b->op_b(args...); } };
@@ -131,8 +138,8 @@ struct mock_policy {
 class my_class_test : public ::testing::Test {
 protected:
     void SetUp() override {
-        g_mock_a = std::make_unique<gmock_dep_a>();
-        g_mock_b = std::make_unique<gmock_dep_b>();
+        g_mock_a = std::make_unique<::testing::StrictMock<gmock_dep_a>>();
+        g_mock_b = std::make_unique<::testing::StrictMock<gmock_dep_b>>();
     }
     void TearDown() override { g_mock_a.reset(); g_mock_b.reset(); }
 };
@@ -140,7 +147,8 @@ protected:
 using sut = my_class<mock_policy>;
 
 TEST_F(my_class_test, method_a_calls_op_a) {
-    EXPECT_CALL(*g_mock_a, op_a(expected_args))
+    EXPECT_CALL(*g_mock_a, op_a(Eq(expected_args)))
+        .Times(1)
         .WillOnce(testing::Return(expected_value));
     sut obj;
     obj.method_a(args...);
@@ -153,25 +161,21 @@ TEST_F(my_class_test, method_a_calls_op_a) {
 | --- | --- |
 | One external call to hide | Option 1 — single template param |
 | 2+ related dependencies | Option 2 — policy bundle |
+| External library | Static `Wrapper` policy + `backend<Wrapper>` |
 | GMock for any policy dep | 2-class + global (mocks are non-copyable) |
 | Runtime polymorphism needed | Virtual interface instead |
 | Hot path, zero overhead required | Either option (no vtable) |
 
-## MANDATORY: Always Use GMock for Tests
+## Test doubles
 
-**Never write hand-rolled spy structs.** Every test for policy-based DI code must use `MOCK_METHOD`.
+Default to `MOCK_METHOD` with `StrictMock`: `EXPECT_CALL` checks exact arguments and call
+counts, and `MOCK_METHOD` satisfies a policy concept by duck-typing without a virtual
+base. Test rules (`Times(N)`, exact matchers, no `ON_CALL`) are in `testing-gtest-gmock`.
 
-`MOCK_METHOD` satisfies any policy concept through duck-typing — no virtual base class required.
-
-**Why GMock, not hand-rolled spies:**
-
-- `EXPECT_CALL` verifies exact arguments — spies require manual `EXPECT_EQ` per field
-- `WillOnce(Return(...))` controls return values — spies hardcode them
-- Argument matchers (`HasSubstr`, `_`, `Eq`, `AllOf`) handle complex inputs
-- Failure messages name the expectation — spy failures say "expected X got Y" with no context
-- `InSequence` verifies call order — spies cannot
-
-**Red flag:** If you find yourself writing `struct spy_X { std::vector<...> captured; ... }` — stop. Use `MOCK_METHOD` instead.
+Exception: when the policy is a set of static functions and the observable is how often
+the library was called, a hand-written fake with `inline static` state and a call
+counter is the repository pattern (`backends/hipfile/tests/mock_wrapper.hpp`).
+Do not write a spy that records arguments to compare by hand.
 
 ## Common Mistakes
 
@@ -180,7 +184,7 @@ TEST_F(my_class_test, method_a_calls_op_a) {
 | Storing dep as `Dep& m_dep` member | Dangling reference risk — store as value `Dep m_dep{}` |
 | Accepting dep in constructor (`my_class(Dep& d)`) | Mixes constructor injection with template DI — pick one style |
 | Passing dep via `shared_ptr`/`unique_ptr` ctor arg | Same mixing problem — let the class construct its own dep |
-| Hand-rolled spy structs in tests | Always use `MOCK_METHOD` |
+| Spy struct that records arguments | Use `MOCK_METHOD` (see Test doubles) |
 | Wrapper calls itself recursively | Qualify the real call explicitly (e.g. `::free_function()`) |
 | Unconstrained `auto` parameter (abbreviated template) | Constrain it with a concept (`void op(std::integral auto x)`) or use explicit `template<typename T>` |
 | Missing `typename` on nested alias | `typename Policy::dep_a`, not `Policy::dep_a` |

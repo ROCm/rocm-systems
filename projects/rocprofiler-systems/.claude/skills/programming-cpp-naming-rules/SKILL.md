@@ -1,6 +1,6 @@
 ---
 name: programming-cpp-naming-rules
-description: C++ naming — folder matches namespace, private members m_, constants k_, abstract types end in _interface
+description: Use when creating or renaming a C++ file, type, namespace, or identifier — folder matches namespace, no redundant prefixes, private members m_, constants k_, abstract types end in _interface
 ---
 
 # C++ Naming Rules
@@ -49,53 +49,10 @@ class driver
 | `core/utils/` | `string_helper.hpp` | `core::utils` | `string_helper` |
 | `network/http/` | `client.hpp` | `network::http` | `client` |
 
-## Nested Namespaces
+## In this repository
 
-Use nested namespace syntax (C++17):
-
-```cpp
-// ✅ GOOD: nested namespace
-namespace network::http
-{
-class client
-{
-    // ...
-};
-}  // namespace network::http
-
-// ❌ AVOID: Old style (more verbose)
-namespace network
-{
-namespace http
-{
-class client
-{
-    // ...
-};
-}  // namespace http
-}  // namespace network
-```
-
-## Include Guards / #pragma once
-
-Match the full path in include guards:
-
-```cpp
-// File: amd_smi/gpu/metrics.hpp
-
-#pragma once  // Preferred
-
-// OR traditional include guard matching full path:
-#ifndef AMD_SMI_GPU_METRICS_HPP
-#    define AMD_SMI_GPU_METRICS_HPP
-
-// ...
-
-#endif  // AMD_SMI_GPU_METRICS_HPP
-```
-
-## Summary
-
-- **Folder = namespace context** - don't repeat it in filenames
-- **Filename = class name** - easy to find
-- **Path tells the full story**: `project/module/submodule/class.hpp`
+- The folder under `source/lib/` maps to the namespace below `rocprofsys`:
+  `source/lib/backends/hipfile/backend.hpp` declares
+  `rocprofsys::backends::hipfile::backend`. Tests add a `testing` namespace.
+- Use nested namespace syntax (`namespace a::b`) and `#pragma once`.
+- Headers use `.hpp`.
