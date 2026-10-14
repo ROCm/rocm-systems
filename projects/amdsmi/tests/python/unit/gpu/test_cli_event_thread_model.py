@@ -30,6 +30,7 @@ import argparse
 import io
 import os
 import signal
+import sys
 import threading
 import time
 import types
@@ -52,6 +53,12 @@ class _FakeLibraryException(Exception):
         self._message = message
 
     def __str__(self):
+        return self._message
+
+    def get_error_code(self):
+        return self.err_code
+
+    def get_error_info(self, detailed=True):
         return self._message
 
 
@@ -95,9 +102,6 @@ class _FakeHelpers:
     def check_required_groups(self):
         self.check_required_groups_calls += 1
 
-    # event.py calls get_gpu_id_from_device (no "_handle" suffix); the real
-    # AMDSMIHelpers class only defines get_gpu_id_from_device_handle, so this
-    # stub matches event.py's actual call site rather than the real API.
     def get_gpu_id_from_device_handle(self, device_handle):
         return device_handle
 
@@ -184,23 +188,23 @@ class TestOpenListeners(unittest.TestCase):
         commands = self._make_commands()
         self.interface.AmdSmiEventReader = self._make_reader_class(failing=("bad",))
 
-        out = io.StringIO()
-        with redirect_stdout(out):
+        err = io.StringIO()
+        with redirect_stderr(err):
             listeners = commands._open_listeners(["bad", "good"])
 
         self.assertEqual([listener.device for listener in listeners], ["good"])
-        self.assertEqual(out.getvalue().count("boom-bad"), 1)
+        self.assertEqual(err.getvalue().count("boom-bad"), 1)
 
     def test_each_failed_device_is_reported_exactly_once(self):
         commands = self._make_commands()
         self.interface.AmdSmiEventReader = self._make_reader_class(failing=("bad",))
 
-        out = io.StringIO()
-        with redirect_stdout(out):
+        err = io.StringIO()
+        with redirect_stderr(err):
             listeners = commands._open_listeners(["good1", "bad", "good2"])
 
         self.assertEqual([listener.device for listener in listeners], ["good1", "good2"])
-        self.assertEqual(out.getvalue().count("boom-bad"), 1)
+        self.assertEqual(err.getvalue().count("boom-bad"), 1)
 
     def test_unexpected_exception_stops_already_opened_listeners(self):
         commands = self._make_commands()
@@ -242,6 +246,13 @@ class TestEventThreadMessageParsing(unittest.TestCase):
         commands.logger = _FakeLogger()
         return commands
 
+    def test_no_listeners_returns_immediately(self):
+        commands = self._make_commands()
+
+        commands._event_thread(commands, [])
+
+        self.assertEqual(commands.logger.calls, [])
+
     def test_message_parsed_into_dict_and_logged(self):
         commands = self._make_commands()
         batch = [
@@ -261,7 +272,7 @@ class TestEventThreadMessageParsing(unittest.TestCase):
             def stop(self):
                 pass
 
-        commands._event_thread(commands, _Listener())
+        commands._event_thread(commands, [_Listener()])
 
         self.assertEqual(len(commands.logger.calls), 1)
         processor_handle, values = commands.logger.calls[0]
@@ -285,7 +296,7 @@ class TestEventThreadMessageParsing(unittest.TestCase):
 
         out = io.StringIO()
         with redirect_stdout(out):
-            commands._event_thread(commands, _Listener())
+            commands._event_thread(commands, [_Listener()])
 
         self.assertEqual(out.getvalue(), "")
         self.assertEqual(commands.logger.calls, [])
@@ -304,7 +315,7 @@ class TestEventThreadMessageParsing(unittest.TestCase):
 
         err = io.StringIO()
         with redirect_stderr(err):
-            commands._event_thread(commands, _Listener())
+            commands._event_thread(commands, [_Listener()])
 
         self.assertIn("mock boom", err.getvalue())
 
@@ -325,13 +336,16 @@ class TestEventThreadMessageParsing(unittest.TestCase):
 
         err = io.StringIO()
         with redirect_stderr(err):
-            commands._event_thread(commands, _Listener())
+            commands._event_thread(commands, [_Listener()])
 
         self.assertEqual(len(commands.logger.calls), 1)
         self.assertEqual(commands.logger.calls[0][0], "h1")
         self.assertNotEqual(err.getvalue(), "")
 
-    def test_listener_stop_called_on_normal_completion(self):
+    def test_does_not_stop_listener_itself(self):
+        # event() owns listener.stop() centrally (once, in its own finally
+        # block) now that a single thread reads through listeners[0];
+        # _event_thread must not also stop it.
         commands = self._make_commands()
         stopped = []
 
@@ -343,11 +357,11 @@ class TestEventThreadMessageParsing(unittest.TestCase):
             def stop(self):
                 stopped.append(True)
 
-        commands._event_thread(commands, _Listener())
+        commands._event_thread(commands, [_Listener()])
 
-        self.assertEqual(stopped, [True])
+        self.assertEqual(stopped, [])
 
-    def test_listener_stop_called_and_exception_propagates_on_unexpected_error(self):
+    def test_unexpected_exception_propagates_without_stopping_listener(self):
         commands = self._make_commands()
         stopped = []
 
@@ -359,9 +373,9 @@ class TestEventThreadMessageParsing(unittest.TestCase):
                 stopped.append(True)
 
         with self.assertRaises(RuntimeError):
-            commands._event_thread(commands, _Listener())
+            commands._event_thread(commands, [_Listener()])
 
-        self.assertEqual(stopped, [True])
+        self.assertEqual(stopped, [])
 
 
 class TestEventSigtermHandler(unittest.TestCase):
@@ -408,6 +422,26 @@ class TestEventOrchestration(unittest.TestCase):
             threading.Thread, "start", lambda self: self.run()
         ), mock.patch.object(threading.Thread, "join", lambda self, timeout=None: None):
             commands.event(args)
+
+    def test_every_gpu_fails_to_open_raises_before_banner_or_thread(self):
+        # if event() swallows _open_listeners()'s failure and presses on
+        # with an empty/partial listener set, the CLI would sit at
+        # "Press q and hit ENTER" forever with no indication anything failed
+        commands = self._make_commands()
+        exc = self.exception_module.AmdSmiLibraryException(7, message="all gpus failed")
+        commands._open_listeners = mock.Mock(side_effect=exc)
+
+        out = io.StringIO()
+        with mock.patch.object(self.event_module.threading, "Thread") as thread_cls:
+            with redirect_stdout(out):
+                with self.assertRaises(self.exception_module.AmdSmiLibraryException) as ctx:
+                    commands.event(_build_event_args([0]))
+
+        self.assertIs(ctx.exception, exc)
+        self.assertEqual(ctx.exception.err_code, 7)
+        self.assertNotIn("EVENT LISTENING", out.getvalue())
+        commands._event_thread.assert_not_called()
+        thread_cls.assert_not_called()
 
     def test_quit_message_stops_cleanly(self):
         listener = mock.Mock()
@@ -460,14 +494,17 @@ class TestEventOrchestration(unittest.TestCase):
         listener.stop.assert_called_once()
         self.assertEqual(signal.getsignal(signal.SIGTERM), previous_handler)
 
-    def test_one_thread_started_per_listener(self):
+    def test_one_thread_started_regardless_of_listener_count(self):
+        # event() reads through a single thread (listeners[0].read() is a
+        # global poll that returns every device's events), so N listeners
+        # still start exactly one thread, given the whole list.
         listeners = [mock.Mock(), mock.Mock()]
         commands = self._make_commands(listeners=listeners)
 
         with mock.patch("builtins.input", return_value="q"):
             self._run_synchronously(commands, _build_event_args([0, 1]))
 
-        self.assertEqual(commands._event_thread.call_count, 2)
+        commands._event_thread.assert_called_once_with(commands, listeners)
         for listener in listeners:
             listener.stop.assert_called_once()
 
@@ -500,27 +537,46 @@ def _raise_event_timeout(signum, frame):
 class TestEventRealThreads(unittest.TestCase):
     """Runs event() with real, unpatched Thread.start/join.
 
-    The tests above patch Thread.start/join to run inline, which proves the
-    message-passing logic but can't catch an actual hang: a worker thread that
-    never observes ``stop`` would just make those tests block forever too.
-    These run real OS threads and bound the wait with a SIGALRM (event()
-    itself must stay on the main thread -- it calls signal.signal(SIGTERM,
-    ...), which only works there), so a reintroduced hang fails the assertion
-    instead of hanging the suite.
+    * ``test_real_threads_quit_without_hanging`` and
+      ``test_real_stdin_pipe_returns_only_after_quit`` both mock ``_open_listeners`` to return a canned
+      listener list, and replace ``_event_thread`` with their own worker (a
+      ``while not self.stop`` spin, or a no-op) to prove the real thread
+      lifecycle and stdin handling in ``event()`` itself, not ``_open_listeners``
+      or ``_event_thread``'s own logic -- so neither would catch a regression
+      where ``event()`` swallows an ``_open_listeners()`` failure and presses on
+      with no listeners (covered instead by
+      ``TestEventOrchestration.test_every_gpu_fails_to_open_raises_before_banner_or_thread``,
+      which mocks ``_open_listeners`` to raise).
+    * ``test_one_gpu_fails_other_keeps_running_until_quit`` wires up the genuine
+      ``_open_listeners``/``_event_thread`` against a fake ``AmdSmiEventReader``
+      -- to exercise those components directly.
     """
 
     @classmethod
     def setUpClass(cls):
         if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
             raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+        if not hasattr(signal, "SIGALRM"):
+            raise unittest.SkipTest("SIGALRM is POSIX-only; unavailable on this platform")
         modules = _build_fake_amdsmi()
         stub_modules(cls, modules)
+        cls.interface = modules["amdsmi.amdsmi_interface"]
+        cls.exception_module = modules["amdsmi.amdsmi_exception"]
         cls.event_module = _load_event_module()
 
     def _make_commands(self, listeners):
         commands = object.__new__(self.event_module.EventCommands)
         commands.device_handles = []
         commands._open_listeners = mock.Mock(return_value=listeners)
+        return commands
+
+    def _make_real_commands(self):
+        """Commands with the real _open_listeners/_event_thread wired up, not mocked."""
+        commands = object.__new__(self.event_module.EventCommands)
+        commands.device_handles = []
+        commands.group_check_printed = True
+        commands.helpers = _FakeHelpers()
+        commands.logger = _FakeLogger()
         return commands
 
     def _run_with_timeout(self, commands, args, timeout_seconds=5):
@@ -552,3 +608,163 @@ class TestEventRealThreads(unittest.TestCase):
 
         self.assertTrue(commands.stop)
         listener.stop.assert_called_once()
+
+    def test_one_gpu_fails_other_keeps_running_until_quit(self):
+        # One GPU failing to open must not stop the other from reporting
+        # events, and its listener is stopped exactly once after the user quits.
+        exception_cls = self.exception_module.AmdSmiLibraryException
+        stop_calls = []
+
+        class _Reader:
+            def __init__(self, device, event_types):
+                self.device = device
+                if device == "bad":
+                    raise exception_cls(1, "boom-bad")
+
+            def read(self, timeout):
+                time.sleep(0.01)
+                return [
+                    {
+                        "timestamp": 1,
+                        "processor_handle": self.device,
+                        "event": "PROCESS_START",
+                        "message": "pid: 1  ",
+                    }
+                ]
+
+            def stop(self):
+                stop_calls.append(self.device)
+
+        self.interface.AmdSmiEventReader = _Reader
+        commands = self._make_real_commands()
+
+        out = io.StringIO()
+        err = io.StringIO()
+        with redirect_stdout(out), redirect_stderr(err), mock.patch(
+            "builtins.input", return_value="q"
+        ):
+            self._run_with_timeout(commands, _build_event_args(["bad", "good"]))
+
+        self.assertIn("boom-bad", err.getvalue())
+        self.assertNotIn("boom-bad", out.getvalue())
+        self.assertTrue(commands.logger.calls)
+        self.assertTrue(all(handle == "good" for handle, _ in commands.logger.calls))
+        self.assertEqual(stop_calls, ["good"])
+
+    def test_real_stdin_pipe_returns_only_after_quit(self):
+        # A real OS pipe as stdin: a non-"q" line must not be mistaken for
+        # quit -- event() has to keep looping until "q" actually arrives.
+        commands = self._make_commands([])
+        commands._event_thread = lambda *_a, **_kw: None
+
+        read_fd, write_fd = os.pipe()
+        real_stdin = os.fdopen(read_fd)
+
+        def _feed():
+            os.write(write_fd, b"x\n")
+            time.sleep(0.05)
+            os.write(write_fd, b"q\n")
+            os.close(write_fd)
+
+        feeder = threading.Thread(target=_feed)
+        feeder.start()
+        start = time.monotonic()
+        try:
+            with mock.patch.object(sys, "stdin", real_stdin):
+                self._run_with_timeout(commands, _build_event_args([0]))
+        finally:
+            feeder.join()
+            real_stdin.close()
+        elapsed = time.monotonic() - start
+
+        self.assertTrue(commands.stop)
+        self.assertGreaterEqual(elapsed, 0.05)
+
+
+class TestEventOpenListenersRealRecordOrRaise(unittest.TestCase):
+    """Exercises _open_listeners()/event() against the real
+    ``amdsmi_helpers.AMDSMIHelpers.record_or_raise()``, so NO_PERM ->
+    ``PermissionError`` is proven to be the production translation, not a test
+    double's approximation of it (``_FakeHelpers.record_or_raise`` elsewhere in
+    this file never raises).
+    """
+
+    @classmethod
+    def setUpClass(cls):
+        if not EVENT_PATH or not os.path.isfile(EVENT_PATH):
+            raise unittest.SkipTest(f"amd-smi CLI event.py not found (looked in {_CLI_DIR})")
+        if not _CLI_DIR:
+            raise unittest.SkipTest("amd-smi CLI source not found")
+
+        modules = _build_fake_amdsmi()
+        interface = modules["amdsmi.amdsmi_interface"]
+        wrapper = interface.amdsmi_wrapper
+        # record_or_raise()'s own NO_PERM check, plus the constants
+        # amdsmi_helpers.py's CPER_DECODE_MESSAGES class-body dict reads at
+        # import time (unrelated to this test, but evaluated unconditionally).
+        wrapper.AMDSMI_STATUS_NO_PERM = 10
+        wrapper.AMDSMI_STATUS_NOT_SUPPORTED = 2
+        wrapper.AMDSMI_STATUS_INVAL = 5
+        wrapper.AMDSMI_STATUS_UNEXPECTED_SIZE = 100
+        wrapper.AMDSMI_STATUS_UNEXPECTED_DATA = 101
+        interface.AmdSmiInitFlags = types.SimpleNamespace(
+            INIT_ALL_PROCESSORS=0xFFFFFFFF, INIT_AMD_GPUS=1, INIT_AMD_CPUS=2, INIT_AMD_NICS=4
+        )
+        interface.amdsmi_init = lambda _flag: None
+        interface.amdsmi_shut_down = lambda: None
+        interface.AmdSmiLibraryException = modules["amdsmi.amdsmi_exception"].AmdSmiLibraryException
+        interface.AmdSmiParameterException = type("AmdSmiParameterException", (Exception,), {})
+
+        # amdsmi_helpers.py does `from amdsmi_init import *`; evict any stale
+        # fake a sibling test file left behind so this loads the real sources.
+        modules.update(
+            dict.fromkeys(("amdsmi_init", "amdsmi_helpers", "amdsmi_cli_exceptions", "BDF"))
+        )
+        stub_modules(cls, modules)
+        if _CLI_DIR not in sys.path:
+            sys.path.insert(0, _CLI_DIR)
+
+        cls.interface = interface
+        cls.exception_module = modules["amdsmi.amdsmi_exception"]
+        import amdsmi_helpers as real_amdsmi_helpers
+
+        cls.event_module = _load_event_module()
+        # Only record_or_raise() itself needs to be the genuine method; the
+        # NO_PERM branch never touches AMDSMIHelpers.__init__'s other state
+        # (error_collector etc.), so a minimal stand-in is enough to host it.
+        cls.helpers_cls = type(
+            "_RealRecordOrRaiseHelpers",
+            (),
+            {
+                "record_or_raise": real_amdsmi_helpers.AMDSMIHelpers.record_or_raise,
+                "check_required_groups": lambda self: None,
+                "get_gpu_id_from_device_handle": lambda self, device_handle: device_handle,
+            },
+        )
+
+    def test_second_gpu_no_perm_raises_permission_error_via_real_helpers(self):
+        exception_cls = self.exception_module.AmdSmiLibraryException
+        no_perm = self.interface.amdsmi_wrapper.AMDSMI_STATUS_NO_PERM
+        stop_calls = []
+
+        class _Reader:
+            def __init__(self, device, event_types):
+                self.device = device
+                if device == "bad":
+                    raise exception_cls(no_perm, "needs elevation")
+
+            def stop(self):
+                stop_calls.append(self.device)
+
+        self.interface.AmdSmiEventReader = _Reader
+        commands = object.__new__(self.event_module.EventCommands)
+        commands.device_handles = []
+        commands.group_check_printed = True
+        commands.helpers = self.helpers_cls()
+
+        with mock.patch.object(self.event_module.threading, "Thread") as thread_cls:
+            with self.assertRaises(PermissionError):
+                commands.event(_build_event_args(["good", "bad"]))
+
+        self.assertEqual(stop_calls, ["good"])
+        thread_cls.assert_not_called()
