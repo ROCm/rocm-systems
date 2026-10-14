@@ -608,8 +608,6 @@ inline constexpr char const kApiUnsupportedOnNvidia[] =
     "API is not supported on NVIDIA.";
 inline constexpr char const kTextureGatherUnsupportedAmd[] =
     "texture gather arrays are not supported on AMD backend.";
-inline constexpr char const kPitch2DSamplerModesSupportedOnNvidia[] =
-    "Pitch2D normalized coordinates / linear filtering are supported on NVIDIA.";
 inline constexpr char const kGlewInitFailed[] = "GLEW initialization failed.";
 inline constexpr char const kAssertionsDisabled[] =
     "assertions are disabled in this build.";
@@ -632,6 +630,8 @@ inline constexpr char const kNotEnoughFreeHostMemory[] =
 inline constexpr char const kRequiresLinux[] = "this test requires Linux.";
 inline constexpr char const kSdmaSwapUnsupported[] =
     "SDMA swap is not supported on this device.";
+inline constexpr char const kConcurrentManagedAccessUnsupported[] =
+    "device does not support concurrent managed access.";
 }  // namespace SkipReason
 
 /**

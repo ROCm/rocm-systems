@@ -19,6 +19,8 @@ HRR Capture is now disabled by default on AMD platforms. The feature will be sec
 HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 ```
 
+A process that initialises HIP with capture on says so once on stderr, whatever `AMD_LOG_LEVEL` is set to: the line begins with `[HRR capture] Recording` and names the process's own directory in the archive, such as `./my_capture.hrr/pid-4242`. Child processes record to their own `pid-*` directories in the same archive. A child started with `exec` prints a line of its own; a child created with `fork()` after HIP has started does not.
+
 Use the in-tree `libamdhip64` from the **same source commit** when testing capture changes:
 
 ```bash
@@ -88,15 +90,17 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory |
+| `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
+
+On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
 
 ### `hrr-playback` CLI options
 
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite a crash-truncated archive with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
@@ -114,6 +118,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--progress-seconds S` | Heartbeat at most every `S` seconds |
 | `--version` | Print the archive format version this build reads, the revision it was built from, and the HIP runtime it is linked against, then exit (no GPU) |
 | `--warn-untranslated-args` | Report kernel-arg pointers that resolve in no allocation, VMM reservation or region (they reach the GPU as null) — the measurement that says a capture lost allocations below the HIP API |
+| `--no-placement` | Let `hipMalloc`/`hipMallocAsync` return fresh addresses instead of the recorded ones (placement is on by default on Linux; see DESIGN.md) |
 | `--no-regions` | Ignore any external region annotations in the archive |
 | `--regions-strict` | Count intra-segment out-of-bounds findings toward the exit code (default: report only) |
 | `--guard-segments` | VMM-back every device allocation and leave an unmapped span after it (diagnostic) |
@@ -200,7 +205,7 @@ capture.hrr/
   capture itself
 - **blobs/** — host payloads referenced by the trace
 - **code_objects/** — code objects, content-addressed by hash (device images
-  extracted by the runtime, or the raw file for `hipModuleLoad`); a launch
+  extracted by the runtime, for `hipModuleLoad` too); a launch
   records the hash so kernels sharing a name (Triton emits many `triton_`)
   still resolve to the code object they came from
 - **Complete: NO** — original run crashed before clean shutdown; reader still recovers complete events
@@ -218,6 +223,11 @@ Optional Cursor/agent skill: [skills/decode-and-triage/SKILL.md](skills/decode-a
 **Windows:** full native replay via `triage_archive.ps1` + `ensure_playback.ps1`; Docker replay
 requires Linux or WSL2. Docker replay uses the image HRR stack by default; set
 `HRR_DOCKER_MOUNT_CLR=1` to overlay a host dev build (`CLR_BUILD` / `HRR_PLAYBACK`).
+
+For the other end, producing an archive in the first place:
+[skills/enable-recording/SKILL.md](skills/enable-recording/SKILL.md)
+checks that the runtime a workload loads can capture at all, runs it with capture
+enabled, and reports whether the archive holds anything.
 
 ## Copyright
 

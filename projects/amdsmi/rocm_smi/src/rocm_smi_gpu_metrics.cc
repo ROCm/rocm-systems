@@ -2446,7 +2446,24 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBaseDynamic_t::copy_internal_to_externa
     using Dst = std::remove_reference_t<decltype(dst)>;
     using T = std::remove_cv_t<std::remove_extent_t<Dst>>;
     auto v = std::get_if<std::vector<T>>(&r.m_value);
-    if (!v) return;  // Not a vector type, skip
+    if (!v) {
+      // A single-instance row parses as a scalar (MI450's one xGMI data
+      // counter); it is element 0. The driver may declare another width, so
+      // keep its all-ones "not reported", and values that do not fit, unset.
+      std::visit(
+          [&](const auto& x) {
+            using S = std::decay_t<decltype(x)>;
+            if constexpr (std::is_unsigned_v<S>) {
+              bool unset = x == std::numeric_limits<S>::max();
+              if constexpr (sizeof(S) > sizeof(T)) {
+                unset = unset || x > std::numeric_limits<T>::max();
+              }
+              dst[0] = unset ? init_max_uint_types<T>() : static_cast<T>(x);
+            }
+          },
+          r.m_value);
+      return;
+    }
     const std::size_t n = std::min<std::size_t>(v->size(), cap);
     std::copy_n(v->data(), n, dst);
   };
@@ -2815,6 +2832,14 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
                          static_cast<uint32_t>(std::size(apu.temperature_core))),
                 apu.temperature_core);
     apu.temperature_skin = metrics.m_temperature_skin;
+    // Core and skin temperatures that are not measured arrive as 0 rather than the 0xFFFF
+    // sentinel; 0 centi-C is not a real reading from a powered die.
+    constexpr auto kTempNotAvailable = std::numeric_limits<uint16_t>::max();
+    std::replace(std::begin(apu.temperature_core), std::end(apu.temperature_core), uint16_t{0},
+                 kTempNotAvailable);
+    if (apu.temperature_skin == 0) {
+      apu.temperature_skin = kTempNotAvailable;
+    }
     apu.average_gfx_activity = metrics.m_average_gfx_activity;
     apu.average_vcn_activity = metrics.m_average_vcn_activity;
     std::copy_n(std::begin(metrics.m_average_ipu_activity),
