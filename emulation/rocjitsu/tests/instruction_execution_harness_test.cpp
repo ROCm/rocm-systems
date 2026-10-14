@@ -7247,7 +7247,15 @@ TEST(DsSwizzleExecutionTest, InactiveSourcesAreZeroAndInactiveDestinationsArePre
 
     // Quad broadcast from lane 1 and adjacent-lane swaps. Check numerical results
     // directly, without using the shared footprint/lane-selection helpers.
-    for (uint16_t offset : {0x8055, 0x80b1}) {
+    // CDNA ISA DS_SWIZZLE_B32 published examples (zero-based lane indices).
+    constexpr std::array<unsigned, 32> fft = {0,  16, 8,  24, 4,  20, 12, 28, 2,  18, 10,
+                                              26, 6,  22, 14, 30, 1,  17, 9,  25, 5,  21,
+                                              13, 29, 3,  19, 11, 27, 7,  23, 15, 31};
+    constexpr std::array<unsigned, 32> fft16 = {0,  8,  4,  12, 2,  10, 6,  14, 1,  9,  5,
+                                                13, 3,  11, 7,  15, 16, 24, 20, 28, 18, 26,
+                                                22, 30, 17, 25, 21, 29, 19, 27, 23, 31};
+    for (uint16_t offset :
+         {0x8055, 0x80b1, 0xe000, 0xe010, 0xe01f, 0xc020, 0xc420, 0xc021, 0xc421}) {
       SCOPED_TRACE(::testing::Message() << "offset=" << offset);
       for (uint8_t destination : {0, 4}) {
         SCOPED_TRACE(::testing::Message() << "destination=" << unsigned(destination));
@@ -7292,7 +7300,37 @@ TEST(DsSwizzleExecutionTest, InactiveSourcesAreZeroAndInactiveDestinationsArePre
           wf->set_exec(exec);
           ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
           for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
-            const uint32_t source = offset == 0x8055 ? (lane & ~3u) + 1 : lane ^ 1u;
+            uint32_t source = 0;
+            const unsigned local = lane % 32, group = lane / 32 * 32;
+            switch (offset) {
+            case 0x8055:
+              source = (lane & ~3u) + 1;
+              break;
+            case 0x80b1:
+              source = lane ^ 1u;
+              break;
+            case 0xe000:
+              source = group + fft[local];
+              break;
+            case 0xe010:
+              source = group + fft16[local];
+              break;
+            case 0xe01f:
+              source = lane;
+              break;
+            case 0xc020:
+              source = group + (local + 1) % 32;
+              break;
+            case 0xc420:
+              source = group + (local + 31) % 32;
+              break;
+            case 0xc021:
+              source = group + (local % 2 ? (local + 2) % 32 : local);
+              break;
+            case 0xc421:
+              source = group + (local % 2 ? local : (local + 30) % 32);
+              break;
+            }
             uint32_t expected = destination == 0 ? lane + 1 : kSentinel;
             if (exec & (uint64_t{1} << lane))
               expected = (exec & (uint64_t{1} << source)) ? source + 1 : 0;
@@ -7303,6 +7341,186 @@ TEST(DsSwizzleExecutionTest, InactiveSourcesAreZeroAndInactiveDestinationsArePre
     }
     if (!wf->is_halted())
       wf->halt();
+  }
+}
+
+TEST(DsAddtidExecutionTest, ByteBaseAndOffsetApplyToLoadsAndStoresAcrossArchitectures) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2,
+                    ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
+    amdgpu::GpuMemory memory("addtid");
+    amdgpu::L2Cache l2("addtid_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 102;
+    config.vgprs_per_wf = 16;
+    config.lds_size_kb = arch == ROCJITSU_CODE_ARCH_CDNA5 ? 128 : 64;
+    auto cu = amdgpu::ComputeUnitCore::create("addtid_cu", config, &memory, &l2);
+    auto decoder = Decoder::create(arch);
+    auto *wf = cu->dispatch_wf(0, 0, 102, 16);
+    ASSERT_NE(wf, nullptr);
+    wf->set_lds_base(128);
+    wf->set_lds_size(config.lds_size_kb * 1024 - 128);
+    const auto vb = wf->vgpr_alloc().base;
+    const uint64_t full = ~uint64_t{0} >> (64 - wf->wf_size());
+    for (uint32_t m0 : {0u, 0x120u, 0xabc00120u, 0x10120u, 0xfff0u, 0xffffcu, 0xfe80u})
+      for (uint64_t exec : {uint64_t{0}, uint64_t{0x8000000100000025} & full, full}) {
+        SCOPED_TRACE(testing::Message() << "arch=" << arch << " m0=" << m0 << " exec=" << exec);
+        // The pre-CDNA5 base plus OFFSET wraps at 16 bits; lane addition never wraps.
+        const auto address = [&](unsigned lane) {
+          const uint32_t base =
+              arch == ROCJITSU_CODE_ARCH_CDNA5 ? (m0 & 0xfffffu) + 0x104 : (m0 + 0x104) & 0xffffu;
+          return 128 + base + lane * 4;
+        };
+        const bool address_only =
+            m0 == 0xfe80u || (arch == ROCJITSU_CODE_ARCH_CDNA5 && m0 == 0xffffcu);
+        wf->set_m0(m0);
+        wf->set_exec(exec);
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+          cu->write_vgpr(vb + 2, lane, 0x12340000 + lane);
+          cu->write_vgpr(vb + 4, lane, 0xcccccccc);
+          if (!address_only)
+            wf->lds().write32(address(lane), 0xdddddddd);
+        }
+        for (bool load : {false, true}) {
+          std::array<uint32_t, 2> words;
+          switch (arch) {
+          case ROCJITSU_CODE_ARCH_CDNA1:
+            words = cdna1::build_ds(load ? cdna1::kDsReadAddtidB32Ds : cdna1::kDsWriteAddtidB32Ds,
+                                    {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_CDNA2:
+            words = cdna2::build_ds(load ? cdna2::kDsReadAddtidB32Ds : cdna2::kDsWriteAddtidB32Ds,
+                                    {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_CDNA3:
+            words = cdna3::build_ds(load ? cdna3::kDsReadAddtidB32Ds : cdna3::kDsWriteAddtidB32Ds,
+                                    {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_CDNA4:
+            words = cdna4::build_ds(load ? cdna4::kDsReadAddtidB32Ds : cdna4::kDsWriteAddtidB32Ds,
+                                    {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_RDNA1:
+            words = rdna1::build_ds(load ? rdna1::kDsReadAddtidB32Ds : rdna1::kDsWriteAddtidB32Ds,
+                                    {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_RDNA2:
+            words = rdna2::build_ds(load ? rdna2::kDsReadAddtidB32Ds : rdna2::kDsWriteAddtidB32Ds,
+                                    {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_RDNA3:
+            words = rdna3::build_ds(load ? rdna3::kDsLoadAddtidB32Ds : rdna3::kDsStoreAddtidB32Ds,
+                                    {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_RDNA3_5:
+            words =
+                rdna3_5::build_ds(load ? rdna3_5::kDsLoadAddtidB32Ds : rdna3_5::kDsStoreAddtidB32Ds,
+                                  {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_RDNA4:
+            words =
+                rdna4::build_vds(load ? rdna4::kDsLoadAddtidB32Vds : rdna4::kDsStoreAddtidB32Vds,
+                                 {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          case ROCJITSU_CODE_ARCH_CDNA5:
+            words =
+                cdna5::build_vds(load ? cdna5::kDsLoadAddtidB32Vds : cdna5::kDsStoreAddtidB32Vds,
+                                 {.offset0 = 4, .offset1 = 1, .data0 = 2, .vdst = 4});
+            break;
+          default:
+            FAIL() << arch;
+          }
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          const auto *state = inst->data_as<amdgpu::VectorMemState>();
+          ASSERT_NE(state, nullptr);
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane)
+            if (exec & (uint64_t{1} << lane)) {
+              EXPECT_EQ(state->per_lane_addr[lane], address(lane));
+            }
+          if (address_only)
+            continue;
+          amdgpu::LocalMemPipeline pipeline;
+          ASSERT_EQ(pipeline.issue(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+        }
+        if (address_only)
+          continue;
+        for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+          const bool active = exec & (uint64_t{1} << lane);
+          EXPECT_EQ(wf->lds().read32(address(lane)), active ? 0x12340000 + lane : 0xdddddddd);
+          EXPECT_EQ(cu->read_vgpr(vb + 4, lane), active ? 0x12340000 + lane : 0xcccccccc);
+        }
+      }
+    wf->halt();
+  }
+}
+
+TEST(MfmaExecMaskTest, DenseInstructionsIgnoreExecAndUseTheAccumulatorBank) {
+  struct Case {
+    uint16_t opcode;
+    uint32_t input;
+    float result;
+  };
+  const Case cases[] = {
+      {cdna4::kVMfmaF3216x16x4F32Vop3pMfma, 0x3f800000, 4},
+      {cdna4::kVMfmaF3216x16x16F16Vop3pMfma, 0x3c003c00, 16},
+      {cdna4::kVMfmaF3216x16x32Bf8Bf8Vop3pMfma, 0x3c3c3c3c, 32},
+  };
+  for (auto arch : {ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2, ROCJITSU_CODE_ARCH_CDNA3,
+                    ROCJITSU_CODE_ARCH_CDNA4}) {
+    amdgpu::GpuMemory memory("mfma_exec");
+    amdgpu::L2Cache l2("mfma_exec_l2");
+    amdgpu::ComputeUnitCore::Config config{};
+    config.arch = arch;
+    config.num_wf_slots = 1;
+    config.sgprs_per_wf = 102;
+    config.vgprs_per_wf = 256;
+    auto cu = amdgpu::ComputeUnitCore::create("mfma_exec_cu", config, &memory, &l2);
+    auto decoder = Decoder::create(arch);
+    auto *wf = cu->dispatch_wf(0, 0, 102, 256);
+    ASSERT_NE(wf, nullptr);
+    auto vb = wf->vgpr_alloc().base;
+    const auto destination =
+        vb + 64 + (arch == ROCJITSU_CODE_ARCH_CDNA1 ? amdgpu::ACC_VGPR_OFFSET : 0);
+    for (const auto &test : cases)
+      for (bool scalar : {false, true})
+        for (uint64_t exec :
+             {uint64_t{0}, uint64_t{1}, uint64_t{0x8000000100000025}, ~uint64_t{0}}) {
+          // The full-wave EXEC rule is explicit in the CDNA3/4 control tables.
+          // Older targets only qualify the accumulator bank at full EXEC.
+          if (arch < ROCJITSU_CODE_ARCH_CDNA3 &&
+              (exec != ~uint64_t{0} || test.opcode == cdna4::kVMfmaF3216x16x32Bf8Bf8Vop3pMfma))
+            continue;
+          // CDNA3 uses the FNUZ exponent bias; CDNA4 uses IEEE E5M2.
+          const auto input = arch == ROCJITSU_CODE_ARCH_CDNA3 && test.input == 0x3c3c3c3c
+                                 ? 0x40404040u
+                                 : test.input;
+          ForceScalarGuard scalar_guard(scalar);
+          SCOPED_TRACE(testing::Message() << "arch=" << arch << " op=" << test.opcode
+                                          << " scalar=" << scalar << " exec=" << exec);
+          for (unsigned reg = 0; reg < 4; ++reg)
+            for (unsigned lane = 0; lane < 64; ++lane) {
+              cu->write_vgpr(vb + reg, lane, input);
+              cu->write_vgpr(vb + 16 + reg, lane, input);
+              cu->write_vgpr(destination + reg, lane, 0xcccccccc);
+            }
+          wf->set_exec(exec);
+          const auto words = cdna4::build_vop3p_mfma(
+              test.opcode, {.vdst = 64, .acc_cd = 0, .src0 = 256, .src1 = 272, .src2 = 128});
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          EXPECT_EQ(wf->vgpr_write_mask(), ~uint64_t{0});
+          for (unsigned reg = 0; reg < 4; ++reg)
+            for (unsigned lane = 0; lane < 64; ++lane)
+              EXPECT_EQ(cu->read_vgpr(destination + reg, lane),
+                        std::bit_cast<uint32_t>(test.result));
+        }
+    wf->halt();
   }
 }
 

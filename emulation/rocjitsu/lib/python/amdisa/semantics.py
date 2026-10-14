@@ -2358,6 +2358,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
             num_elems=1,
             operation='st64' if is_st64 else None,
         )
+    # Classify ADDTID before the ordinary DS write/read suffix tables.
+    if 'ADDTID' in upper:
+        if is_write:
+            return InstructionSemantics(
+                name, 'ds_write_addtid', elem_size=4, num_elems=1
+            )
+        if is_read:
+            return InstructionSemantics(
+                name, 'ds_read_addtid', elem_size=4, num_elems=1
+            )
+        return InstructionSemantics(name, 'nop')
     if is_write:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
@@ -2380,17 +2391,6 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                 num_elems=ne,
                 transpose_kind=transpose_kind,
             )
-    # ADDTID instructions: address = thread_id * M0_stride + offset.
-    if 'ADDTID' in upper:
-        if is_write:
-            return InstructionSemantics(
-                name, 'ds_write_addtid', elem_size=4, num_elems=1
-            )
-        if is_read:
-            return InstructionSemantics(
-                name, 'ds_read_addtid', elem_size=4, num_elems=1
-            )
-        return InstructionSemantics(name, 'nop')
     if is_read:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
@@ -2709,6 +2709,18 @@ def derive_semantics(
             sem = fallback(name)
             if sem is not None:
                 break
+
+    if (
+        sem is not None
+        and profile is not None
+        and sem.semantic_class in ('ds_read_tr_b4', 'ds_read_tr_b6')
+    ):
+        kind = (
+            profile.ds_b4_transpose_kind
+            if sem.semantic_class == 'ds_read_tr_b4'
+            else profile.ds_b6_transpose_kind
+        )
+        sem = replace(sem, transpose_kind=kind)
 
     if (
         sem is not None

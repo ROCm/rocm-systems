@@ -9296,20 +9296,19 @@ class CodeGenerator:
             '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
         )
         lines.append('    uint32_t m0 = wf.m0();')
-        if self.isa_spec.profile.ds_addtid_uses_m0_byte_base:
-            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            lines.append('      if (!(exec & (1ULL << lane))) continue;')
-            lines.append('      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;')
-            lines.append(
-                '      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();'
-            )
+        if self.isa_spec.profile.ds_addtid_m0_base_bits not in (16, 20):
+            raise ValueError("Unsupported ADDTID base and offset policy")
+        mask = (1 << self.isa_spec.profile.ds_addtid_m0_base_bits) - 1
+        if self.isa_spec.profile.ds_addtid_m0_base_bits == 16:
+            # The 16-bit base-plus-offset expression widens before adding laneID.
+            lines.append(f'    uint32_t byte_base = (m0 + offset) & 0x{mask:x}u;')
         else:
-            lines.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
-            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            lines.append('      if (!(exec & (1ULL << lane))) continue;')
-            lines.append(
-                '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
-            )
+            lines.append(f'    uint32_t byte_base = (m0 & 0x{mask:x}u) + offset;')
+        lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        lines.append('      if (!(exec & (1ULL << lane))) continue;')
+        lines.append(
+            '      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();'
+        )
         lines.append('    }')
         lines.append('  }')
 
@@ -9347,6 +9346,18 @@ class CodeGenerator:
         L.append('  uint64_t exec = wf.exec();')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {sem.elem_size});')
+        L.extend(
+            [
+                '  if (exec) {',
+                '    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);',
+                '    if (data.valid()) {',
+                '      data.copy_dwords_lane_major(d->store_data, exec);',
+                '      set_data(std::move(d));',
+                '      return;',
+                '    }',
+                '  }',
+            ]
+        )
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(
@@ -9372,8 +9383,8 @@ class CodeGenerator:
         # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6,
         # CDNA5_DS_TR_B8=7. Defaults describe the B64 (num_elems=2) forms.
         tr_map = {
-            'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
-            'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2
+            'ds_read_tr_b4': (4, 2, self.isa_spec.profile.ds_b4_transpose_kind),
+            'ds_read_tr_b6': (4, 3, self.isa_spec.profile.ds_b6_transpose_kind),
             'ds_read_tr_b8': (4, 2, 3),  # elem_size=4, num_elems=2, transpose=3
             'ds_read_tr_b16': (4, 2, 5),  # elem_size=4, num_elems=2, transpose=5
         }

@@ -352,8 +352,8 @@ def test_gfx1250_addtid_uses_m0_byte_base_addresses(
     )
     load_body = _generated_method_body(vds, 'DsLoadAddtidB32Vds', 'DsPermuteB32Vds')
     for body in (store_body, load_body):
-        assert 'uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;' in body
-        assert 'lane_offset + offset + wf.lds_base()' in body
+        assert 'uint32_t byte_base = (m0 & 0xfffffu) + offset;' in body
+        assert 'byte_base + lane * 4u + wf.lds_base()' in body
         assert 'ds_stride_bytes' not in body
 
 
@@ -395,15 +395,15 @@ def test_gfx1250_profile_scopes_special_ds_semantics() -> None:
         return derive_all_semantics(spec)
 
     gfx1250 = semantics_for(Cdna5Profile())
-    assert Cdna5Profile().ds_addtid_uses_m0_byte_base
+    assert Cdna5Profile().ds_addtid_m0_base_bits == 20
     assert gfx1250['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write_addtid'
     for name in names[1:]:
         assert gfx1250[name].semantic_class == 'ds_atomic2'
         assert gfx1250[name].operation == 'swap'
 
     rdna4 = semantics_for(Rdna4Profile())
-    assert not Rdna4Profile().ds_addtid_uses_m0_byte_base
-    assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write'
+    assert Rdna4Profile().ds_addtid_m0_base_bits == 16
+    assert rdna4['DS_STORE_ADDTID_B32'].semantic_class == 'ds_write_addtid'
     for name in names[1:]:
         assert rdna4[name].semantic_class == 'ds_atomic2'
 
@@ -431,6 +431,38 @@ def test_b8_transpose_aliases_share_profile_routing(profile, expected_kind) -> N
     semantics = derive_all_semantics(spec)
 
     assert {semantics[name].transpose_kind for name in names} == {expected_kind}
+
+
+@pytest.mark.parametrize(
+    ('profile', 'arch', 'encoding', 'name', 'class_name', 'expected_kind'),
+    [
+        (Cdna4Profile(), 'cdna4', 'ds', 'DS_READ_B64_TR_B4', 'DsReadB64TrB4Ds', 8),
+        (Cdna4Profile(), 'cdna4', 'ds', 'DS_READ_B96_TR_B6', 'DsReadB96TrB6Ds', 9),
+        (Cdna5Profile(), 'cdna5', 'vds', 'DS_LOAD_TR4_B64', 'DsLoadTr4B64Vds', 1),
+        (Cdna5Profile(), 'cdna5', 'vds', 'DS_LOAD_TR6_B96', 'DsLoadTr6B96Vds', 2),
+    ],
+)
+def test_subbyte_transpose_selects_architecture_layout(
+    profile, arch, encoding, name, class_name, expected_kind
+) -> None:
+    spec = SimpleNamespace(
+        profile=profile,
+        inst_encodings=[
+            SimpleNamespace(
+                enc_name=f'ENC_{encoding.upper()}',
+                insts=[SimpleNamespace(name=name)],
+            )
+        ],
+    )
+    assert derive_all_semantics(spec)[name].transpose_kind == expected_kind
+
+    generated = (
+        _repo_root()
+        / 'emulation/rocjitsu/lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    cpp = (generated / arch / f'{encoding}_exec.cpp').read_text()
+    body = cpp.split(f'void {class_name}::execute_impl(', 1)[1].split('\n}', 1)[0]
+    assert f'd->transpose = {expected_kind};' in body
 
 
 @pytest.mark.parametrize(
@@ -2032,7 +2064,7 @@ def test_matrix_direct_offsets_do_not_use_resolved_operand_setup():
 
     assert 'uint32_t dst = vb + vdst.encoding_value_;' in body
     assert 'Isa::resolved_vgpr_offset' not in body
-    assert 'amdgpu::resolve_acc(vb, dst,' in body
+    assert 'rdna4::resolve_acc(vb, dst,' in body
     assert (
         'amdgpu::exec_gfx12_wmma_dot4<false>(cu, wf.wf_size(), dst, '
         'src0_base, src1_base, s2,' in body
