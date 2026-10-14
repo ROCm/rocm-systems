@@ -644,6 +644,7 @@ add_executable(
     patch/instruction_builder_test.cpp
     patch/vector_builder_test.cpp
     patch/smem_builder_test.cpp
+    patch/entry_prologue_test.cpp
     patch/kernarg_extension_test.cpp
     patch/sidecar_metadata_test.cpp
     patch/trampoline_builder_test.cpp
@@ -656,6 +657,8 @@ add_executable(
     dbi/dbi_spill_sim_test.cpp
     dbi/dbi_arg_sim_test.cpp
     dbi/dbi_mask_sim_test.cpp
+    dbi/dbi_entry_prologue_sim_test.cpp
+    dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
     dbt/semantic_scratch_test.cpp
@@ -689,6 +692,7 @@ add_executable(
     pseudo_scalar_exec_test.cpp
     scalar_scc_test.cpp
     vskip_test.cpp
+    isa_diagnostics_test.cpp
     cdna3_predicate_mask_test.cpp
     scoped_temp_test.cpp
     wave_debug_test.cpp

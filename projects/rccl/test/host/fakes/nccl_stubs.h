@@ -41,6 +41,9 @@ extern std::function<ncclResult_t(struct ncclComm*)> g_ncclProfilerPluginFinaliz
 // src/plugin/tuner.cc: commCleanup unloads the tuner plugin through this.
 extern std::function<ncclResult_t(struct ncclComm*)> g_ncclTunerPluginUnload;
 
+// src/allocator.cc: ce_coll.cc allocates its staging buffers here; the default aborts.
+extern std::function<ncclResult_t(void**, size_t)> g_ncclMemAlloc;
+
 // src/misc/mem_manager.cc: commFree releases the single-node size arrays here.
 extern std::function<ncclResult_t(void*)> g_ncclMemFree;
 

@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 623 | 623 | 0 |
-| **total** | **623** | **623** | **0** |
+| `contract` | 627 | 627 | 0 |
+| **total** | **627** | **627** | **0** |
 
 ## Tier: `contract`
 
@@ -704,12 +704,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel` | hipKernelNameRef | resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier |
 | `Contract_KernelNameRef_HipKernelNameRef_NvidiaUnsupported_IsSkipped` | hipKernelNameRef | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
-### `kernel_object_attributes` (3 cases)
+### `kernel_object_attributes` (5 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_KernelObjectAttributes_HipKernelGetAttribute_Default_ReturnsSaneValues` | hipKernelGetAttribute | reports a positive max-threads-per-block and non-negative static resource usage for a loaded kernel |
 | `Contract_KernelObjectAttributes_HipKernelGetParamInfo_Default_ReturnsFirstParamLayout` | hipKernelGetParamInfo | reports the first parameter at offset zero with size at least that of a device pointer |
+| `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack` | hipKernelSetAttributeForDevice | preserves current device and target value |
+| `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped` | hipKernelSetAttributeForDevice | unavailable before CUDA 12.8 |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
 
 ### `library` (21 cases)
@@ -1222,12 +1224,14 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_Vmm_HipMemMap_MapUnmap_SucceedsWhenSupported` | hipMemMap | mapping a handle into a reserved address range succeeds and unmaps cleanly when supported |
 | `Contract_Vmm_HipMemSetAccess_Default_AllowsRoundTripWhenSupported` | hipMemSetAccess | granting read-write access to mapped VMM memory allows a host round-trip through it |
 
-### `vmm_handle` (4 cases)
+### `vmm_handle` (6 cases)
 
 | Case | API | Asserts |
 |---|---|---|
 | `Contract_VmmHandle_HipMemExportToShareableHandle_ExportImportShareableHandle_RoundTrips` | hipMemExportToShareableHandle | an exported POSIX-fd shareable handle imports back into a usable allocation handle within the same process |
 | `Contract_VmmHandle_HipMemGetAllocationPropertiesFromHandle_GetAllocationProperties_RoundTripsFromHandle` | hipMemGetAllocationPropertiesFromHandle | properties queried from the handle reflect the pinned type and device location it was created with |
 | `Contract_VmmHandle_HipMemGetHandleForAddressRange_DmaBufFd_IsQueryableWhenSupported` | hipMemGetHandleForAddressRange | a dma-buf fd export yields a non-negative descriptor when supported, else reports non-success and skips |
+| `Contract_VmmHandle_HipMemGetHandleForAddressRange_HostPointer_ReturnsInvalidValue` | hipMemGetHandleForAddressRange | a pointer that is not a device allocation is rejected with hipErrorInvalidValue |
+| `Contract_VmmHandle_HipMemGetHandleForAddressRange_PcieMappingFlag_IsAcceptedOrReportsNotSupported` | hipMemGetHandleForAddressRange | a PCIe-mapped dma-buf export is accepted or reported unsupported, never rejected as an invalid argument |
 | `Contract_VmmHandle_HipMemRetainAllocationHandle_ByAddress_Succeeds` | hipMemRetainAllocationHandle | retaining the handle for a mapped address yields a usable handle releasable independently of the original |
 
