@@ -35,6 +35,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <cstdint>
+#include <filesystem>
 #include <future>
 #include <memory>
 #include <new>
@@ -289,19 +290,34 @@ const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
             return it->second.data();
         }
     }
-    // Not cached — read from disk, then insert under exclusive lock
+    return cache_file(key, blob_path(archive_dir, hash_lo, hash_hi), sz_out, "blob cache");
+}
+
+// Read a file into blob_cache_ under `key`, charging its size to the host
+// budget before the read so the cap is checked before the bytes are held. The
+// cache is never evicted, so each entry stays charged for the run. Two threads
+// can miss on the same key; the one that loses the insert gives its charge back.
+const void* PlaybackContext::cache_file(const std::string& key, const std::string& path,
+                                        size_t* sz_out, const char* what) const {
+    auto* self = const_cast<PlaybackContext*>(this);
+    std::error_code ec;
+    const uintmax_t size = std::filesystem::file_size(path, ec);
+    const uint64_t charge = ec ? 0 : static_cast<uint64_t>(size);
+    if (!self->charge_host(charge, what)) return nullptr;
     bool refused = false;
-    auto data = read_file(blob_path(archive_dir, hash_lo, hash_hi), &refused);
+    auto data = read_file(path, &refused);
     if (refused) {
-        // Not a missing blob: the replay cannot continue faithfully. Flag it
-        // now, so every thread stops at its next event, rather than after the
-        // consuming handler has gone on to its HIP call.
+        // Not a missing file: the replay cannot continue faithfully, so end it
+        // now rather than after the consuming handler reaches its HIP call.
         fatal_error.store(true, std::memory_order_release);
+    }
+    if (data.empty()) {
+        self->host_budget.release(charge);
         return nullptr;
     }
-    if (data.empty()) return nullptr;
     std::unique_lock lk(map_mutex);
-    auto it = blob_cache_.emplace(key, std::move(data)).first;
+    auto [it, inserted] = blob_cache_.emplace(key, std::move(data));
+    if (!inserted) self->host_budget.release(charge);
     if (sz_out) *sz_out = it->second.size();
     return it->second.data();
 }
@@ -319,18 +335,7 @@ const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi
             return it->second.data();
         }
     }
-    bool refused = false;
-    auto data = read_file(co_path(archive_dir, hash_lo, hash_hi), &refused);
-    if (refused) {
-        fatal_error.store(true, std::memory_order_release);
-        return nullptr;
-    }
-    if (data.empty()) return nullptr;
-    std::unique_lock lk(map_mutex);
-    auto [it, inserted] = blob_cache_.emplace(key, std::move(data));
-    (void)inserted;
-    if (sz_out) *sz_out = it->second.size();
-    return it->second.data();
+    return cache_file(key, co_path(archive_dir, hash_lo, hash_hi), sz_out, "code object cache");
 }
 
 hipModule_t PlaybackContext::load_module(uint64_t hash_lo, uint64_t hash_hi) {
@@ -3028,21 +3033,76 @@ hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* pl) {
 // hipHostMalloc:  ret(4) ptr(8) size(8) flags(4)
 // hipMallocHost:  ret(4) ptr(8) size(8)
 
+// An archive can record a host allocation again at an address that still holds
+// one: a second pass replays the same events, and a crafted archive can repeat
+// the address without a free. The entry being replaced keeps a live pinned
+// buffer, so free it, and give its charge back, before the new one is charged.
+// Otherwise the old buffer would stay allocated with no charge against it.
+static void free_replaced_host_alloc(PlaybackContext& ctx, uint64_t rec) {
+    void* host_ptr = nullptr;
+    void* reg_buf = nullptr;
+    AllocKind kind = AllocKind::Device;
+    {
+        std::unique_lock lk(ctx.map_mutex);
+        auto it = ctx.alloc_map.find(rec);
+        if (it == ctx.alloc_map.end()) return;
+        kind = it->second.kind;
+        if (kind != AllocKind::HostMalloc && kind != AllocKind::HostRegister) return;
+        host_ptr = it->second.live_ptr;
+        ctx.host_budget.release(it->second.size);
+        ctx.alloc_map.erase(it);
+        auto rb = ctx.host_reg_bufs.find(rec);
+        if (rb != ctx.host_reg_bufs.end()) {
+            reg_buf = rb->second;
+            ctx.host_reg_bufs.erase(rb);
+        }
+    }
+    if (kind == AllocKind::HostMalloc) {
+        (void)hipHostFree(host_ptr);
+        return;
+    }
+    void* buf = reg_buf ? reg_buf : host_ptr;
+    (void)hipHostUnregister(buf);
+#ifdef _WIN32
+    _aligned_free(buf);
+#else
+    free(buf);
+#endif
+}
+
 hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(pl);
     void* live = nullptr;
+    free_replaced_host_alloc(ctx, a->ptr);
+    if (!ctx.charge_host(a->size, "hipHostMalloc")) return hipErrorMemoryAllocation;
     hipError_t r = hipHostMalloc(&live, static_cast<size_t>(a->size), a->flags);
     if (r == hipSuccess)
         ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+    else
+        ctx.host_budget.release(a->size);
+    // A call that failed the same way at capture is not a replay failure.
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipHostMalloc", a->ret);
+        return hipSuccess;
+    }
     return r;
 }
 
 hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipMallocHost*>(pl);
     void* live = nullptr;
+    free_replaced_host_alloc(ctx, a->ptr);
+    if (!ctx.charge_host(a->size, "hipMallocHost")) return hipErrorMemoryAllocation;
     hipError_t r = hipMallocHost(&live, static_cast<size_t>(a->size));
     if (r == hipSuccess)
         ctx.record_alloc(a->ptr, live, static_cast<size_t>(a->size), AllocKind::HostMalloc);
+    else
+        ctx.host_budget.release(a->size);
+    // A call that failed the same way at capture is not a replay failure.
+    if (r != hipSuccess && a->ret != 0 && static_cast<int32_t>(r) == a->ret) {
+        hrr_note_recorded_error(ctx, "hipMallocHost", a->ret);
+        return hipSuccess;
+    }
     return r;
 }
 
@@ -3051,15 +3111,6 @@ hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* pl) {
     void* live = ctx.translate_ptr(a->ptr);
     if (!live) return hipSuccess;
     hipError_t r = hipFreeHost(live);
-    if (r == hipSuccess) ctx.remove_alloc(a->ptr);
-    return r;
-}
-
-hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* pl) {
-    const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(pl);
-    void* live = ctx.translate_ptr(a->ptr);
-    if (!live) return hipSuccess;
-    hipError_t r = hipHostFree(live);
     if (r == hipSuccess) ctx.remove_alloc(a->ptr);
     return r;
 }
@@ -3077,6 +3128,9 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipHostRegister*>(pl);
     size_t sz = static_cast<size_t>(a->sizeBytes);
     if (sz == 0) return hipSuccess;
+    free_replaced_host_alloc(ctx, a->hostPtr);
+    if (!ctx.charge_host(sz, "hipHostRegister backing buffer"))
+        return hipErrorMemoryAllocation;
 
     // Allocate backing host buffer aligned to 64 bytes (page-register friendly).
     void* buf = nullptr;
@@ -3085,7 +3139,10 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
 #else
     if (posix_memalign(&buf, 64, sz) != 0) buf = nullptr;
 #endif
-    if (!buf) return hipErrorMemoryAllocation;
+    if (!buf) {
+        ctx.host_budget.release(sz);
+        return hipErrorMemoryAllocation;
+    }
 
     // Restore snapshot into the buffer.
     if (a->blob_hash_lo || a->blob_hash_hi) {
@@ -3115,6 +3172,7 @@ hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* pl) {
         std::unique_lock lk(ctx.map_mutex);
         ctx.host_reg_bufs[a->hostPtr] = buf;
     } else {
+        ctx.host_budget.release(sz);
 #ifdef _WIN32
         _aligned_free(buf);
 #else
@@ -3529,6 +3587,11 @@ static hipError_t replay_memcpy_impl(PlaybackContext& ctx,
                 ctx.note_d2h_fail(hrr_dispatch_seq);
             } else {
                 copy_sz = std::min(copy_sz, blob_sz);
+                hrr::ScopedCharge readback(ctx.host_budget, copy_sz);
+                if (!readback.ok()) {
+                    ctx.report_host_refusal(copy_sz, "D2H validation buffer");
+                    return hipErrorMemoryAllocation;
+                }
                 std::vector<uint8_t> actual(copy_sz);
                 // For async memcpy the stream may not yet have completed — sync it so
                 // all preceding GPU work has finished before reading back.
@@ -3619,6 +3682,11 @@ hipError_t playback_hipMemcpyDtoH(PlaybackContext& ctx,
         return hipErrorInvalidValue;
     }
     size_t sz = static_cast<size_t>(a->sizeBytes);
+    hrr::ScopedCharge readback(ctx.host_budget, sz);
+    if (!readback.ok()) {
+        ctx.report_host_refusal(sz, "hipMemcpyDtoH read-back buffer");
+        return hipErrorMemoryAllocation;
+    }
     std::vector<uint8_t> actual(sz);
     hipError_t r = hipMemcpyDtoH(actual.data(), (hipDeviceptr_t)src_dev, sz);
     if (r != hipSuccess) {
@@ -3656,6 +3724,11 @@ hipError_t playback_hipMemcpyDtoHAsync(PlaybackContext& ctx,
         return hipErrorInvalidValue;
     }
     size_t sz = static_cast<size_t>(a->sizeBytes);
+    hrr::ScopedCharge readback(ctx.host_budget, sz);
+    if (!readback.ok()) {
+        ctx.report_host_refusal(sz, "hipMemcpyDtoHAsync read-back buffer");
+        return hipErrorMemoryAllocation;
+    }
     std::vector<uint8_t> actual(sz);
     hipStream_t stream = ctx.translate_stream(a->stream);
     hipError_t r = hipMemcpyDtoHAsync(actual.data(), (hipDeviceptr_t)src_dev, sz, stream);
@@ -4210,6 +4283,14 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
     // copy writes. Left uninitialized, the scratch commits only the pages the
     // copy and the comparison touch; one that cannot be had at all is a skipped
     // check, not a terminated replay.
+    // The scratch buffer counts against --max-host-bytes while it is held; a
+    // refusal ends the replay, as for the other read-back buffers.
+    const uint64_t scratch_bytes = dst.extent ? dst.extent : 1;
+    hrr::ScopedCharge scratch_charge(ctx.host_budget, scratch_bytes);
+    if (!scratch_charge.ok()) {
+        ctx.report_host_refusal(scratch_bytes, api);
+        return hipErrorMemoryAllocation;
+    }
     std::unique_ptr<uint8_t[]> host(new (std::nothrow) uint8_t[dst.extent ? dst.extent : 1]);
     if (!host) {
         fprintf(stderr, "[HRR] %s D2H: no %zu-byte scratch buffer for the recorded host rect, "
@@ -4267,6 +4348,11 @@ static hipError_t replay_pitched_d2h(PlaybackContext& ctx, const char* api,
         return hipSuccess;
     }
     // Like the scratch buffer, one that cannot be had is a skipped check.
+    hrr::ScopedCharge want_charge(ctx.host_budget, n ? n : 1);
+    if (!want_charge.ok()) {
+        ctx.report_host_refusal(n ? n : 1, api);
+        return hipErrorMemoryAllocation;
+    }
     std::unique_ptr<uint8_t[]> want(new (std::nothrow) uint8_t[n]);
     if (!want) {
         fprintf(stderr, "[HRR] %s D2H: no %zu-byte buffer for the expected rows, skipped\n",

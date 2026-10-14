@@ -302,6 +302,11 @@ MANUAL_PLAYBACK_APIS: Set[str] = {
     # address this process does not have.
     "hipGetSymbolAddress",
     "hipGetSymbolSize",
+    # Pinned host allocation — charged to the host budget (--max-host-bytes), a
+    # replaced entry is freed first, and hipFreeHost gives the allocation back
+    "hipHostMalloc",
+    "hipMallocHost",
+    "hipFreeHost",
     # Host memory registration — need handle map + blob restore + device ptr recording
     "hipHostRegister",
     "hipHostUnregister",
@@ -590,11 +595,10 @@ NOOP_PLAYBACK_APIS: Set[str] = {
     "hipMalloc3DArray",
     # hipMalloc3D — pitchedDevPtr output (stale), hipExtent non-castable; output not needed for D2H — noop
     "hipMalloc3D",
-    # hipMemAllocHost / hipMallocHost / hipHostAlloc / hipFreeHost — host ptr alloc/free; not device allocations — noop
+    # hipMemAllocHost / hipHostAlloc — host ptr alloc; not device allocations — noop
+    # (hipMallocHost / hipFreeHost are replayed by hand: see MANUAL_PLAYBACK_APIS)
     "hipMemAllocHost",
-    "hipMallocHost",
     "hipHostAlloc",
-    "hipFreeHost",
     # hipMemAllocPitch — hipDeviceptr_t* output (type mismatch) + output not in alloc_map — noop
     "hipMemAllocPitch",
     # hipHostGetFlags — output flag ptr (stale) — noop
