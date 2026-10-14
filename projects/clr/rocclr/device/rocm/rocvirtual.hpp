@@ -50,7 +50,7 @@ constexpr static uint64_t kTimeout100us = 100 * K;
 constexpr static uint64_t kUnlimitedWait = std::numeric_limits<uint64_t>::max();
 constexpr static uint64_t kInvalidQueueIndex = std::numeric_limits<uint64_t>::max();
 
-constexpr static uint64_t kTimeout4Secs = 4 * M;
+constexpr static uint64_t kTimeout4Secs = 4 * G;
 
 inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yield = false) {
   hsa_wait_state_t wait_state = HSA_WAIT_STATE_BLOCKED;
@@ -83,8 +83,8 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
         ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
                 "Device not Stable, while waiting for Signal ="
-                "(0x%lx) for %d ns",
-                signal.handle, kTimeout4Secs);
+                "(0x%lx) for %llu ns",
+                signal.handle, static_cast<unsigned long long>(kTimeout4Secs));
         return true;
       }
       if (yield && wait_state == HSA_WAIT_STATE_ACTIVE) {
