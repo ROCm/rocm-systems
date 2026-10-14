@@ -210,7 +210,13 @@ void TestGpuMetricsRead::Run(void) {
                   << smi_amdgpu_get_status_string(ret_xcd, false)
                   << "\n\t\t** XCD Counter Value: " << temp_xcd_counter_value << "\n";
       }
-      CHK_ERR_ASRT(err);
+      // This asserted err a second time, so the XCD result itself went
+      // unchecked. A device without XCDs may answer NOT_SUPPORTED; anything
+      // else is a real failure.
+      if (ret_xcd != AMDSMI_STATUS_NOT_SUPPORTED) {
+        ASSERT_EQ(ret_xcd, AMDSMI_STATUS_SUCCESS)
+            << "device " << i << " failed to report its XCD counter";
+      }
 
       // Verify XCD count is stable across multiple calls regardless of clock state
       if (ret_xcd == AMDSMI_STATUS_SUCCESS && temp_xcd_counter_value > 0) {

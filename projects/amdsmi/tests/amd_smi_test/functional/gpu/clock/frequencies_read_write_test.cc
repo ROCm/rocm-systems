@@ -105,6 +105,7 @@ void TestFrequenciesReadWrite::Run(void) {
     // from by running the test once per clock. Unset => exercise all clocks.
     const char* only_clk_env = std::getenv("AMDSMI_TEST_CLK");
 
+    uint32_t clocks_exercised = 0;
     for (uint32_t clk = AMDSMI_CLK_TYPE_FIRST; clk <= AMDSMI_CLK_TYPE__MAX; ++clk) {
       amdsmi_clk = (amdsmi_clk_type_t)clk;
 
@@ -357,10 +358,20 @@ void TestFrequenciesReadWrite::Run(void) {
 
       if (freq_read()) {
         CHK_ERR_ASRT(ret)
+        ++clocks_exercised;
       } else {
         continue;
       }
       freq_write();
+    }
+
+    // Every clock can decline one at a time -- PCIE always, an unsupported
+    // domain, or an APU power-gating one into an empty file. If that accounts
+    // for all of them the device was never exercised, which must not read as a
+    // pass. Skipped when AMDSMI_TEST_CLK narrows the run to a single clock.
+    if (only_clk_env == nullptr) {
+      EXPECT_GT(clocks_exercised, 0u)
+          << "device " << dv_ind << " reported no readable clock domain at all";
     }
   }
 }

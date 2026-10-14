@@ -1178,15 +1178,20 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
   }
 
   size_t num = fread(p_binary_data, b_size, 1, ptr);
+  // fread() reports both a short file and a failed read as 0, and only the
+  // stream says which. Ask before fclose() invalidates it.
+  const bool read_failed = (std::ferror(ptr) != 0);
   fclose(ptr);
   if ((num * b_size) != b_size) {
-    // The node opened, so it is neither missing nor unreadable: it simply held
-    // fewer bytes than it said it would. Report that as a size error, because
-    // ENOENT would reach the caller as NOT_SUPPORTED and read as a verdict on
-    // the device rather than on the data.
+    // The node opened, so it is neither missing nor unreadable: either the
+    // driver failed to produce the table or the node held fewer bytes than it
+    // said it would. Report both as a size error -- no caller tells them apart
+    // -- but name the cause, because ENOENT would reach the caller as
+    // NOT_SUPPORTED and read as a verdict on the device rather than the data.
     ss << "Could not read DevInfoBinary for DevInfoType (" << get_type_string(type) << ") - SYSFS ("
-       << sysfs_path << "), binary size error; "
-       << "[buff: " << p_binary_data << " size: " << b_size << " read: " << num << "]"
+       << sysfs_path << "), "
+       << (read_failed ? "the driver failed the read" : "the node was shorter than declared")
+       << "; [buff: " << p_binary_data << " size: " << b_size << " read: " << num << "]"
        << ", returning EIO (" << std::strerror(EIO) << ")";
     LOG_ERROR(ss);
     return EIO;

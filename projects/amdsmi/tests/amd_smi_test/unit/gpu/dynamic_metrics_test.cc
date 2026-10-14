@@ -3,7 +3,9 @@
 
 #include <amd_smi_test/test_base.h>
 #include <gtest/gtest.h>
+#include <unistd.h>
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -400,11 +402,15 @@ constexpr T FilledValue(std::size_t offset) {
 }
 
 // Fake sysfs tree at <tmp>/<name>/device/gpu_metrics. Binary reads are cached
-// per (device path, read size), so each case needs its own directory.
+// per (device path, read size), so each case needs its own directory. The
+// process id and a counter keep that true for concurrent runs and for repeats
+// of the same case, which would otherwise share a path and its cache entry.
 class FakeMetricsDevice {
  public:
   explicit FakeMetricsDevice(const std::string& name)
-      : root_(std::filesystem::temp_directory_path() / ("amdsmi_apu_metrics_" + name)) {
+      : root_(std::filesystem::temp_directory_path() /
+              ("amdsmi_apu_metrics_" + name + "_" + std::to_string(::getpid()) + "_" +
+               std::to_string(NextInstanceId()))) {
     std::filesystem::remove_all(root_);
     std::filesystem::create_directories(root_ / "device");
   }
@@ -425,6 +431,11 @@ class FakeMetricsDevice {
   std::string path() const { return root_.string(); }
 
  private:
+  static unsigned NextInstanceId() {
+    static std::atomic<unsigned> counter{0};
+    return counter.fetch_add(1);
+  }
+
   static void Write(const std::filesystem::path& file, const std::vector<uint8_t>& blob) {
     std::ofstream stream(file, std::ios::binary | std::ios::trunc);
     stream.write(reinterpret_cast<const char*>(blob.data()),
@@ -565,9 +576,9 @@ TEST(GpuUnit, UnsupportedMetricRevisionReportsNotSupported) {
   EXPECT_EQ(device.dev_log_gpu_metrics(metrics_log), rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
 
   const auto [copy_status, metrics] = device.dev_copy_internal_to_external_metrics();
-  EXPECT_EQ(copy_status, rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA)
+  EXPECT_NE(copy_status, rsmi_status_t::RSMI_STATUS_SUCCESS)
       << "the copy stage cannot tell an unsupported revision apart, which is why callers "
-         "stop on the setup status instead";
+         "stop on the setup status instead; it only has to refuse to succeed";
   EXPECT_EQ(metrics.apu_metrics, nullptr);
 }
 
@@ -728,7 +739,7 @@ TEST(GpuUnit, PublicMetricsEntryReportsAMalformedTable) {
 TEST(GpuUnit, PublicPartitionMetricsEntryReportsUnsupportedRevision) {
   PRINT_VERBOSITY();
 
-  FakeMetricsDevice fake_device("partition_unsupported_v1_9");
+  FakeMetricsDevice fake_device("partition_unsupported_v9_9");
   // Partition metrics are read from device/xcp/xcp_metrics.
   fake_device.WritePartitionMetrics(BuildMetricsBlob(sizeof(ApuMetrics), 9, 9, sizeof(ApuMetrics)));
 

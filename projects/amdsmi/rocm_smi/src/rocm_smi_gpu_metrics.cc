@@ -5092,9 +5092,22 @@ auto Device::dev_read_gpu_metrics_all_data(DevInfoTypes type) -> rsmi_status_t {
     // instead of indeterminate data.
     auto* metrics_table = m_gpu_metrics_ptr->get_metrics_table().get();
     const auto table_size = m_gpu_metrics_ptr->sizeof_metric_table();
-    if (metrics_table != nullptr && table_size != 0) {
-      std::memset(metrics_table, 0xFF, table_size);
+    // Stop here rather than only skipping the fill: readDevInfo() below would
+    // be handed the same null pointer, and its assert() is compiled out of a
+    // release build, so the read would run on it.
+    if (metrics_table == nullptr || table_size == 0) {
+      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
+      ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
+         << " | Fail "
+         << " | Device #: " << index() << " | Type: " << Device::get_type_string(type)
+         << " | File Path: " << gpu_metrics_path
+         << " | Cause: Selected metrics version produced no table to read into"
+         << " | Table size: " << table_size
+         << " | Returning = " << getRSMIStatusString(status_code, false) << " |";
+      LOG_ERROR(ss);
+      return status_code;
     }
+    std::memset(metrics_table, 0xFF, table_size);
     const auto read_size =
         std::min(static_cast<std::size_t>(m_gpu_metrics_header.m_structure_size), table_size);
     // The table has to carry at least the header it was selected by. Below that
