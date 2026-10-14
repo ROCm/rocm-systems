@@ -12,9 +12,9 @@
 // already have GPU-binary coverage in test/DeviceResourceRequirementTests.cpp
 // (AICOMRCCL-2446); this file ports those same goldens host-only rather than
 // duplicating the reasoning, since the functions under test are pure host
-// computation with no HIP/device calls. Both copies are built and run today
-// (test/CMakeLists.txt, ci-precheckin.json) and have already drifted at a few
-// lines; retiring the GPU-binary copy once this suite has run clean in CI for
+// computation with no HIP/device calls. Both copies are built from test/CMakeLists.txt; the GPU
+// copy runs from ci-precheckin.json and this one from test/host/run_host_tests.sh. They have
+// already drifted at a few lines; retiring the GPU-binary copy once this suite has run clean in CI for
 // a while is tracked separately in AICOMRCCL-2912, not done here.
 
 #include <gtest/gtest.h>
@@ -260,10 +260,13 @@ TEST(NcclDeviceRequirementsMicrotest, GinInboxA2ACreateRequirement_BufferSizeAnd
   const std::vector<Case> cases = {
     {"smallest_safe_team", 2, 1, 7, 256, 2052},   // 1*(128+128); 1*4*(1+512)
     {"larger_team", 5, 2, 8, 768, 4128},          // 2*(128+256); 2*4*(4+512)
+    // nPeers=3 is the only row whose reciprocal is inexact, so the r >= y correction actually runs.
+    {"non_pow2_peers", 4, 1, 7, 256, 2060},       // 1*(128+128); 1*4*(3+512)
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
-    ncclTeam_t peers{c.nRanks, /*rank=*/0, /*stride=*/1};
+    // Non-identity rank and stride, so a stray `+ team.rank` or `* team.stride` would show.
+    ncclTeam_t peers{c.nRanks, /*rank=*/c.nRanks - 1, /*stride=*/4};
     ncclGinInboxA2AHandle handle = poisonedHandle<ncclGinInboxA2AHandle>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
     ASSERT_EQ(ncclGinInboxA2ACreateRequirement(peers, c.nBlocks, c.sizeLog2, &handle, &req), ncclSuccess);
@@ -348,14 +351,14 @@ TEST(NcclDeviceRequirementsMicrotest, LsaBarrierCreateRequirement_BufferSizeForm
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
-    ncclTeam_t team{c.nRanks, /*rank=*/0, /*stride=*/1};
+    ncclTeam_t team{c.nRanks, /*rank=*/c.nRanks - 1, /*stride=*/4};
     ncclLsaBarrierHandle_t handle = poisonedHandle<ncclLsaBarrierHandle_t>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
     ASSERT_EQ(ncclLsaBarrierCreateRequirement(team, c.nBarriers, &handle, &req), ncclSuccess);
     const size_t expected = static_cast<size_t>(3 * c.nBarriers + c.nBarriers * c.nRanks) * sizeof(uint32_t);
     EXPECT_EQ(req.bufferSize, expected);
     EXPECT_EQ(req.bufferSize, c.goldenBufferSize);
-    EXPECT_EQ(req.bufferAlign, alignof(uint32_t));
+    EXPECT_EQ(req.bufferAlign, size_t{4});  // alignof(uint32_t) today; a literal, so a change fails here
     EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
     EXPECT_EQ(handle.nBarriers, c.nBarriers);
     // The buffer-only sibling of the GIN/CFT barriers below: no GIN signals here.
@@ -381,7 +384,7 @@ TEST(NcclDeviceRequirementsMicrotest, GinBarrierCreateRequirement_NullCommAndSig
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
-    ncclTeam_t team{c.nRanks, /*rank=*/0, /*stride=*/1};
+    ncclTeam_t team{c.nRanks, /*rank=*/c.nRanks - 1, /*stride=*/4};
     ncclGinBarrierHandle_t handle = poisonedHandle<ncclGinBarrierHandle_t>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
     ASSERT_EQ(ncclGinBarrierCreateRequirement(/*comm=*/nullptr, team, c.nBarriers, &handle, &req), ncclSuccess);
@@ -416,14 +419,14 @@ TEST(NcclDeviceRequirementsMicrotest, CftBarrierCreateRequirement_BufferSizeForm
   };
   for (const Case& c : cases) {
     SCOPED_TRACE(c.name);
-    ncclTeam_t team{c.nRanks, /*rank=*/0, /*stride=*/1};
+    ncclTeam_t team{c.nRanks, /*rank=*/c.nRanks - 1, /*stride=*/4};
     ncclCftBarrierHandle_t handle = poisonedHandle<ncclCftBarrierHandle_t>();
     ncclDevResourceRequirements_t req = poisonedRequirement();
     ASSERT_EQ(ncclCftBarrierCreateRequirement(team, c.nBarriers, &handle, &req), ncclSuccess);
     const size_t expected = static_cast<size_t>(3 * c.nBarriers + c.nBarriers * c.nRanks) * NCCL_CFT_BARRIER_GRAN;
     EXPECT_EQ(req.bufferSize, expected);
     EXPECT_EQ(req.bufferSize, c.goldenBufferSize);
-    EXPECT_EQ(req.bufferAlign, static_cast<size_t>(NCCL_CFT_BARRIER_ALIGN));
+    EXPECT_EQ(req.bufferAlign, size_t{16});  // NCCL_CFT_BARRIER_ALIGN today; a literal, so a change fails here
     EXPECT_EQ(req.outBufferHandle, &handle.bufHandle);
     EXPECT_EQ(handle.nBarriers, c.nBarriers);
     ExpectNoGinSignalFields(req);
