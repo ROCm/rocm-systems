@@ -10,17 +10,26 @@ use crate::memory::storage::TryPush;
 use crate::memory::storage::{Owned, Shared};
 use crate::{Error, ErrorKind};
 
-/// Allocation owner and cached facts shared by drivers that can
-/// allocate device-accessible backing.
+/// Allocation owner and cached facts shared by drivers that can allocate
+/// device-accessible backing. The driver remains live through native cleanup.
 pub(crate) struct DriverAllocation<D: AllocationOperations> {
     inner: Owned<D::Allocation>,
+    // A live allocation keeps its driver open even after the creating device
+    // is dropped. Drop releases the native owner before this reference.
+    driver: Shared<D>,
     info: AllocationInfo,
+    released: bool,
 }
 
 impl<D: AllocationOperations> DriverAllocation<D> {
-    pub(crate) fn new(inner: Owned<D::Allocation>) -> Self {
+    pub(crate) fn new(driver: Shared<D>, inner: Owned<D::Allocation>) -> Self {
         let info = inner.cached_info();
-        Self { inner, info }
+        Self {
+            inner,
+            driver,
+            info,
+            released: false,
+        }
     }
 
     pub(crate) fn driver_state(&self) -> &D::Allocation {
@@ -52,7 +61,21 @@ impl<D: AllocationOperations> DriverAllocation<D> {
     }
 
     pub(crate) fn free(&mut self) -> Result<(), Error> {
-        D::free_allocation(&mut self.inner)
+        if !self.released {
+            D::free_allocation(&mut self.inner)?;
+            self.released = true;
+        }
+        Ok(())
+    }
+}
+
+impl<D: AllocationOperations> Drop for DriverAllocation<D> {
+    fn drop(&mut self) {
+        if self.free().is_err() {
+            // Native cleanup may still reference this driver's context. The
+            // native owner quarantines its own dependencies on final drop.
+            std::mem::forget(self.driver.clone());
+        }
     }
 }
 
