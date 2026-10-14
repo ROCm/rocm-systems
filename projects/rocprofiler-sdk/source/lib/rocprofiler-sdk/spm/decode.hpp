@@ -38,6 +38,8 @@ struct spm_sample_t
     uint64_t value{0};
     uint64_t index{0};
     int      shader_engine{0};
+    int      shader_array{-1};
+    int      wgp{-1};
     bool     is_global{false};
 };
 

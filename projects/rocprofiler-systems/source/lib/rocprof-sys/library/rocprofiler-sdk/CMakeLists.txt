@@ -4,15 +4,11 @@
 set(rocprofiler_sdk_sources
     ${CMAKE_CURRENT_LIST_DIR}/counters.cpp
     ${CMAKE_CURRENT_LIST_DIR}/fwd.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/roctx_client.cpp
-    ${CMAKE_CURRENT_LIST_DIR}/marker_writer.cpp
 )
 
 set(rocprofiler_sdk_headers
     ${CMAKE_CURRENT_LIST_DIR}/counters.hpp
     ${CMAKE_CURRENT_LIST_DIR}/fwd.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/roctx_client.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/marker_writer.hpp
     ${CMAKE_CURRENT_LIST_DIR}/types.hpp
     ${CMAKE_CURRENT_LIST_DIR}/buffered_domain.hpp
     ${CMAKE_CURRENT_LIST_DIR}/callback_domain.hpp

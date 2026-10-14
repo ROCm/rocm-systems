@@ -421,7 +421,7 @@ static constexpr size_t ncclSymkArLLWideBytes = 64 << 10;
 static constexpr size_t ncclSymkAgLLWideBusBytes = 512 << 10;
 static constexpr size_t ncclSymkAgWideBlockBusBytes = 64 << 20;
 // Where AllGather's store kernel overtakes LL, which the shared cost model places past 8 MB.
-static constexpr size_t ncclSymkAgStoreMinBusBytes = 4 << 20;
+static constexpr size_t ncclSymkAgStoreMinBusBytes = 1 << 20;
 // Block widths those thresholds select between. 1024 is the widest workgroup gfx950 will launch.
 static constexpr int ncclSymkGfx950NarrowThreads = 256;
 static constexpr int ncclSymkGfx950WideThreads = 512;

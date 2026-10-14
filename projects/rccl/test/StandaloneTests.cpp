@@ -630,9 +630,8 @@ namespace RcclUnitTesting
   {
     // Gated here rather than inside the isolated body: RUN_ISOLATED_TESTS ends in
     // EXPECT_TRUE(), so a GTEST_SKIP() in the child is reported as a pass by the parent.
-    int numDevices;
-    HIPCALL(hipGetDeviceCount(&numDevices));
-    if (numDevices < 2) {
+    // EnvVars probes in a fresh process, keeping this parent HIP-free for later forks.
+    if (EnvVars().maxGpus < 2) {
       GTEST_SKIP() << "This test requires at least 2 devices.";
     }
 

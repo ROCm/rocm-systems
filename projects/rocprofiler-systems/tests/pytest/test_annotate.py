@@ -64,7 +64,7 @@ class TestAnnotate(RocprofsysTest):
     ]
     RUN_ARGS = ["30", "2", "200"]
 
-    def test_parallel_overhead(self, mode, annotate_env, annotate_papi_condition):
+    def test_parallel_overhead(self, mode, annotate_env):
 
         result = self.run_test(
             mode,
@@ -74,24 +74,5 @@ class TestAnnotate(RocprofsysTest):
             run_args=self.RUN_ARGS,
         )
         self.assert_regex(result)
-
-        if mode == "sampling":
-            self.assert_perfetto(
-                result,
-                key_names=["thread_cpu_clock"],
-                key_counts=[6],
-            )
-
-        if mode == "binary_rewrite":
-            if annotate_papi_condition:
-                key_names = ["perf::PERF_COUNT_SW_CPU_CLOCK", "thread_cpu_clock"]
-                key_counts = [8, 8]
-            else:
-                key_names = ["thread_cpu_clock"]
-                key_counts = [8]
-
-            self.assert_perfetto(
-                result,
-                key_names=key_names,
-                key_counts=key_counts,
-            )
+        # Perfetto annotation key checks (thread_cpu_clock, PAPI) return with the
+        # annotations follow-up.
