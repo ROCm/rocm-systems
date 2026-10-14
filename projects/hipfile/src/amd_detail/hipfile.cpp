@@ -717,7 +717,7 @@ hipFileGetStatsL1(hipFileStatsLevel1_t *stats)
 
         *stats = {};
 
-        static constexpr IoType       ioTypes[]{IoType::Read, IoType::Write};
+        static constexpr IoType ioTypes[]{IoType::Read, IoType::Write};
 
         for (size_t gpuId{}; gpuId < Stats::MaxGpus; ++gpuId) {
             for (const StatsBackend &backend : getStatBackends()) {

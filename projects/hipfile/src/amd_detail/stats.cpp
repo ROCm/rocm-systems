@@ -33,7 +33,9 @@ constexpr std::array backends{
     hipFile::StatsBackend::Host,
 };
 
-std::span<StatsBackend> getStatBackends() {
+std::span<StatsBackend>
+getStatBackends()
+{
     return backends;
 }
 
