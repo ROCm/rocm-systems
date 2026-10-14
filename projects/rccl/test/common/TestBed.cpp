@@ -772,9 +772,41 @@ namespace RcclUnitTesting
     for (int i = 0; i < this->numGroupCalls; ++i)
       if (groupId == -1 || groupId == i) groupList.push_back(i);
 
+    // Symmetric registration is grouped across every rank owned by a child.
+    // Mirror that shape during teardown, and finish deregistration on every
+    // child before any backing allocation is freed.
+    std::vector<std::vector<int>> ranksPerChild(this->numActiveChildren);
+    for (int currRank : rankList)
+      ranksPerChild[rankToChildMap[currRank]].push_back(currRank);
+
+    int const deregCmd = TestBedChild::CHILD_DEREGISTER_MEM;
     int const deallocCmd = TestBedChild::CHILD_DEALLOCATE_MEM;
-    std::vector<int> ackChildIds;
     for (auto currGroup : groupList) {
+      // Phase 1: deregister all selected windows/handles. Send every child its
+      // command before waiting so any collective registration teardown can
+      // make progress across processes.
+      for (int childId = 0; childId < this->numActiveChildren; ++childId) {
+        if (ranksPerChild[childId].empty()) continue;
+        PIPE_WRITE(childId, deregCmd);
+        PIPE_WRITE(childId, currGroup);
+        PIPE_WRITE(childId, collId);
+        int const numRanks = static_cast<int>(ranksPerChild[childId].size());
+        PIPE_WRITE(childId, numRanks);
+        for (int currRank : ranksPerChild[childId])
+          PIPE_WRITE(childId, currRank);
+      }
+
+      std::vector<int> deregAckChildIds;
+      for (int childId = 0; childId < this->numActiveChildren; ++childId)
+        if (!ranksPerChild[childId].empty()) deregAckChildIds.push_back(childId);
+
+      bool allDeregistered = false;
+      CollectAcks(deregAckChildIds, &allDeregistered);
+      if (!allDeregistered) return;
+
+      // Phase 2: now no selected communicator retains a window/registration
+      // over these buffers, so their backing allocations can be released.
+      std::vector<int> deallocAckChildIds;
       for (auto currRank : rankList)
       {
         int const childId = rankToChildMap[currRank];
@@ -782,12 +814,12 @@ namespace RcclUnitTesting
         PIPE_WRITE(childId, currRank);
         PIPE_WRITE(childId, currGroup);
         PIPE_WRITE(childId, collId);
-        ackChildIds.push_back(childId);
+        deallocAckChildIds.push_back(childId);
       }
-    }
 
-    // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
-    CollectAcks(ackChildIds);
+      // Each CHILD_DEALLOCATE_MEM command produces one acknowledgement.
+      CollectAcks(deallocAckChildIds);
+    }
 
     InteractiveWait("Finishing DeallocateMem");
   }
