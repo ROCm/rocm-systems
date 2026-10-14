@@ -1921,11 +1921,11 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
       } else {
         struct ncclTaskP2p* p2pTasks[2] = {recv, send};
         // Ensure room for worst case of one new batch per channel. A round is a single work
-        // item, including mixed LL/LL128 rounds, unless a widened direction makes the send and
-        // recv tiles differ; then each direction is its own work item.
-        int strides[2] = {rcclP2pChannelStride(comm, recv), rcclP2pChannelStride(comm, send)};
-        bool maySplit = recv && send && std::max(strides[0], strides[1]) > nChannelsMax;
-        int roundBatches = maySplit ? strides[0] + strides[1] : std::max(strides[0], strides[1]);
+        // item, including mixed LL/LL128 rounds, unless one direction is on the widened tile and
+        // the other on the per-peer tile; then each direction is its own work item.
+        int maxStride = std::max(rcclP2pChannelStride(comm, recv), rcclP2pChannelStride(comm, send));
+        bool maySplit = recv && send && sendRank != comm->rank && maxStride > nChannelsMax;
+        int roundBatches = maySplit ? maxStride + nChannelsMax : maxStride;
         int roundWorks = maySplit ? 2 : 1;
         if (!ncclTestBudget(budget, plan->nWorkBatches + roundBatches,
                             plan->workBytes + roundWorks * sizeof(struct ncclDevWorkP2p))) {

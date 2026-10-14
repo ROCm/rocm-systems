@@ -4277,6 +4277,37 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_PeerOnAnotherHost_IsNotWidened) {
   EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[1]->nSendChannels);
 }
 
+TEST_F(EnqueueMicrotest, ScheduleP2p_WidenedSendRecvToEveryPeer_SharesBatchesInOneLaunch) {
+  // ncclSend/ncclRecv to every peer, self included, as PyTorch all_to_all issues it. Rounds 0 and
+  // 2 use channels 0-127, rounds 1 and 3 channels 128-255; each pair shares one batch per channel.
+  constexpr int kRanks = WidenedP2pScene::kRanks;
+  constexpr ssize_t kBytes = ssize_t(256) << 20;
+  WidenedP2pScene sc(ncclFuncSend, kBytes, ncclFuncRecv, kBytes);
+  std::vector<ncclTaskP2p> sends(kRanks), recvs(kRanks);
+  std::vector<char> bufs(2 * kRanks);
+  ncclComm* c = sc.bp.c();
+  for (int peer = 0; peer < kRanks; ++peer) {
+    sends[peer] = sc.send;
+    sends[peer].root = peer;
+    sends[peer].buff = &bufs[2 * peer];
+    recvs[peer] = sc.recv;
+    recvs[peer].root = peer;
+    recvs[peer].buff = &bufs[2 * peer + 1];
+    ncclIntruQueueEnqueue(&sc.plannerPeers[peer].sendQueue, &sends[peer]);
+    ncclIntruQueueEnqueue(&sc.plannerPeers[peer].recvQueue, &recvs[peer]);
+  }
+  c->planner.nTasksP2p = 2 * kRanks;
+  c->planner.nTasksP2pSend = kRanks;
+  c->planner.nTasksP2pRecv = kRanks;
+  // One batch per channel for 508 channels: the 8 KiB ROCm argument buffer.
+  ncclKernelPlanBudget budget = MakeBudget(508 * kBatch, /*out=*/ssize_t(1) << 30);
+  int epoch = 0, round = 0;
+  ASSERT_EQ(ncclSuccess, scheduleP2pTasksToPlan(c, &epoch, &round, sc.bp.p(), &budget));
+  EXPECT_EQ(0, c->planner.nTasksP2p) << "every round must land in the first plan";
+  EXPECT_EQ(WidenedP2pScene::kP2pChannels, sc.bp.p()->nWorkBatches);
+  EXPECT_EQ(size_t(kRanks), sc.works().size());
+}
+
 TEST_F(EnqueueMicrotest, ScheduleP2p_SplitRound_ReservesBothTiles) {
   // The split round needs 128 + 64 batches: one short must defer it, an exact fit must not.
   const int needed = WidenedP2pScene::kWideChannels + WidenedP2pScene::kChannelsPerPeer;
