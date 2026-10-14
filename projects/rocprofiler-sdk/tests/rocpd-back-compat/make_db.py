@@ -546,6 +546,8 @@ def insert_minimal_data(
             ),
         )
 
+    # Replay-aware counter views were introduced in schema 3.0.5.
+    if ver >= (3, 0, 5):
         # Kernel-replay dispatch counters. Dispatch 1 is replayed three times: SQ_WAVES has two
         # instances in every pass, with per-pass sums 16, 18 and 20; GRBM_COUNT is collected by
         # pass 0 only; SQ_INSTS_SALU by passes 1 and 2 only, with per-pass sums 5 and 6. Passes

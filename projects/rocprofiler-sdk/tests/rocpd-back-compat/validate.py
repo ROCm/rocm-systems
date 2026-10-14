@@ -262,8 +262,9 @@ def test_csv_counter_collection_averages_replay_passes(output_root, latest_schem
     """counters_collection must average a counter over kernel-replay passes, not sum them.
 
     make_db.py gives dispatch 1 SQ_WAVES in three replay passes with per-pass sums 16, 18
-    and 20, GRBM_COUNT in pass 0 only, and SQ_INSTS_SALU in passes 1 and 2 only with sums
-    5 and 6, and gives dispatch 2 untagged SQ_WAVES rows that sum to 8.
+    and 20, GRBM_COUNT in pass 0 only (modeling later passes dedicated to another service),
+    and SQ_INSTS_SALU in passes 1 and 2 only with sums 5 and 6. Dispatch 2 has untagged
+    SQ_WAVES rows that sum to 8, modeling collection without kernel replay.
     """
     counter_csv = output_root / latest_schema / "csv" / "out_counter_collection_trace.csv"
     assert (
@@ -280,6 +281,39 @@ def test_csv_counter_collection_averages_replay_passes(output_root, latest_schem
         (1, "SQ_INSTS_SALU"): 5.5,
         (2, "SQ_WAVES"): 8.0,
     }, f"unexpected counter_collection values for schema {latest_schema}: {values}"
+
+
+def test_counters_collection_schema_unchanged_from_3_0_4(output_root, latest_schema):
+    """Replay averaging must not change the counters_collection columns."""
+
+    def columns(version):
+        db_path = (
+            output_root
+            / version
+            / "db"
+            / f"schema_{version.replace('.', '_')}.db"
+        )
+        with sqlite3.connect(db_path) as connection:
+            return [
+                row[1] for row in connection.execute("PRAGMA table_info(counters_collection)")
+            ]
+
+    assert columns(latest_schema) == columns("3.0.4")
+
+
+def test_pmc_events_replay_pass_absent_before_3_0_5(output_root, old_schema):
+    """Archived schemas must retain their original pmc_events columns."""
+    db_path = (
+        output_root
+        / old_schema
+        / "db"
+        / f"schema_{old_schema.replace('.', '_')}.db"
+    )
+    with sqlite3.connect(db_path) as connection:
+        columns = [
+            row[1] for row in connection.execute("PRAGMA table_info(pmc_events)")
+        ]
+    assert "replay_pass" not in columns
 
 
 def test_pmc_events_report_replay_pass(output_root, latest_schema):

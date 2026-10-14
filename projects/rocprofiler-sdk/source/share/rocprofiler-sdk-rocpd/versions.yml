@@ -30,6 +30,13 @@ rocprofiler-sdk-rocpd:
       rocpd_data_views: versions/3.0.3/data_views.sql
       rocpd_summary_views: versions/3.0.3/summary_views.sql
     - version: "3.0.4"
+      rocpd_metadata: versions/3.0.4/rocpd_metadata.sql
+      rocpd_tables: versions/3.0.4/rocpd_tables.sql
+      rocpd_views: versions/3.0.4/rocpd_views.sql
+      rocpd_indexes: versions/3.0.4/rocpd_indexes.sql
+      rocpd_data_views: versions/3.0.4/data_views.sql
+      rocpd_summary_views: versions/3.0.4/summary_views.sql
+    - version: "3.0.5"
       rocpd_metadata: rocpd_metadata.sql
       rocpd_tables: rocpd_tables.sql
       rocpd_views: rocpd_views.sql
@@ -59,6 +66,8 @@ rocprofiler-sdk-rocpd:
 # Version 3.0.4
 # - Added rocpd_hip_event table for HIP event barrier records (hipEventRecord, hipStreamWaitEvent)
 # - Added hip_events data view
-# - Fix (no table change): kernel-replay passes after the first tag their rocpd_pmc_event rows with
-#   replay_pass in extdata, counters_collection averages a counter over the passes that collected
-#   it instead of summing them, and pmc_events reports the pass in a replay_pass column
+
+# Version 3.0.5
+# - Kernel-replay passes after the first tag their rocpd_pmc_event rows with replay_pass in extdata
+# - counters_collection averages a counter over the passes that collected it instead of summing them
+# - pmc_events reports the kernel-replay pass in a replay_pass column
