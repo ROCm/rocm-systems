@@ -14,6 +14,8 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
+#include "algorithms/dda/alltoall/alltoall_dda_watchdog.h"
 #include "bootstrap.h"
 #include "rccl_common.h"
 #include "param.h"
@@ -31,6 +33,34 @@ using nccl_dda_detail::DdaFabricBarrierState;
 using nccl_dda_detail::DdaFabricMaxBlocksOverride;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
+// DDA AllToAll device-side wait timeout in seconds; 0 (default) = never, as in NCCL: a slow peer is
+// not an error by default (rank skew is normal in training), ncclCommAbort ends every wait instead.
+// See alltoall_dda_watchdog.h.
+RCCL_PARAM(DdaA2aTimeout, "DDA_A2A_TIMEOUT", 0);
+
+dda::common::DdaA2aWdCtx ncclDdaA2aWdCtx(const ncclComm* comm) {
+  return static_cast<dda::common::DdaA2aErr*>(comm->ddaA2aErrDev);
+}
+
+#if RCCL_DDA_A2A_TUNING
+// Tuning builds only: a test hook, not API (not in rccl.h, not built in production). The device
+// address of the comm's DdaA2aErr (uint32 site at byte 0, uint32 in-flight count at byte 4), or
+// nullptr before fabric init. GPU test tools find it with dlsym(RTLD_DEFAULT, ...) to force the
+// concurrent trip (write the in-flight count) or to check site == 0 and in-flight == 0 after a run.
+extern "C" __attribute__((visibility("default"))) void* rcclDdaA2aTestErrWordDev(ncclComm* comm) {
+  return comm != nullptr ? comm->ddaA2aErrDev : nullptr;
+}
+#endif
+
+const char* ncclDdaA2aWdSiteName(uint32_t site) {
+  using namespace dda::common;
+  switch (site) {
+  case kDdaWdLL: return "LL line flag";
+  case kDdaWdLL128V2: return "LL128 line flag";
+  case kDdaWdConcurrent: return "two AllToAll kernels of this communicator in flight at once (stream ordering broken)";
+  default: return "unknown";
+  }
+}
 
 bool ncclDdaUseFabricPath(ncclComm* comm) {
   if (comm == nullptr) {
@@ -138,6 +168,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   void** peerHost = nullptr;
   DdaFabricBarrierState* barrierState = nullptr;
   uint32_t* epochDev = nullptr;
+  void* a2aErrDev = nullptr;
+  uint32_t* a2aErrHost = nullptr;
+  const int64_t a2aTimeoutSecs = rcclParamDdaA2aTimeout();
   std::vector<void*> h_ptrs(nRanks, nullptr);
   const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
   ncclResult_t res = ncclSuccess;
@@ -175,24 +208,52 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
       WARN("ncclDdaFabricCommInit: FabricGpuBarrier malloc/init failed");
       goto fail;
     }
+    // A local failure from here on is agreed below (no early exit).
     barrierState = new (std::nothrow) DdaFabricBarrierState();
     if (barrierState == nullptr) {
       WARN("ncclDdaFabricCommInit: OOM allocating DdaFabricBarrierState");
-      goto fail;
+    } else {
+      barrierState->resources = std::move(barrierPair.first);
+      barrierState->barrierHost = barrierPair.second;
     }
-    barrierState->resources = std::move(barrierPair.first);
-    barrierState->barrierHost = barrierPair.second;
   }
 
-  // Zero the scratch once so the first epoch (>= 1) across all LL operations
-  // never false-matches leftover flag words. Subsequent LL calls rely on
-  // monotonic epochs + the 2-bank layout rather than re-zeroing.
-  CUDACHECKGOTO(cudaMemset(scratch, 0, bytes), res, fail);
-
-  // Device epoch cells for the LL collectives: zero-initialised
-  // so the first device-derived flag is 1. Bumped on the device every LL launch.
-  CUDACHECKGOTO(cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)), res, fail);
-  CUDACHECKGOTO(cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)), res, fail);
+  {
+    // Local steps after the last exchange; every rank that got here agrees on the outcome, so no
+    // rank ends with the fabric path while another has none.
+    bool ok = barrierState != nullptr;
+    // Zero the scratch once so the first epoch (>= 1) across all LL operations
+    // never false-matches leftover flag words. Subsequent LL calls rely on
+    // monotonic epochs + the 2-bank layout rather than re-zeroing.
+    ok = ok && cudaMemset(scratch, 0, bytes) == cudaSuccess;
+    // Device epoch cells for the LL collectives: zero-initialised
+    // so the first device-derived flag is 1. Bumped on the device every LL launch.
+    ok = ok && cudaMalloc(&epochDev, epochLen * sizeof(uint32_t)) == cudaSuccess;
+    ok = ok && cudaMemset(epochDev, 0, epochLen * sizeof(uint32_t)) == cudaSuccess;
+    // AllToAll per-comm error word (device) + its host-pinned mirror (alltoall_dda_watchdog.h).
+    // Its constant part (host mirror, abort flag, wall_clock64 tick counts at 100 MHz on gfx1250: the
+    // opt-in timeout and the 1 ms abort-poll gate) is written here once, so kernels take one pointer.
+    ok = ok && cudaMalloc(&a2aErrDev, sizeof(dda::common::DdaA2aErr)) == cudaSuccess;
+    ok = ok && ncclCudaHostCalloc(&a2aErrHost, 1) == ncclSuccess;
+    if (ok) {
+      dda::common::DdaA2aErr init{};
+      const double khz = GetDeviceWallClockRateInKhz(comm->cudaDev);
+      init.errHost = a2aErrHost;
+      init.abortFlag = comm->abortFlagDev;
+      init.ticks = a2aTimeoutSecs > 0 ? (uint64_t)((double)a2aTimeoutSecs * khz * 1000.0) : 0;
+      init.abortTicks = (uint64_t)khz;
+      ok = cudaMemcpy(a2aErrDev, &init, sizeof(init), cudaMemcpyHostToDevice) == cudaSuccess;
+    }
+    (void)cudaGetLastError();
+    std::vector<int> oks(nRanks, 0);
+    oks[comm->rank] = ok ? 1 : 0;
+    NCCLCHECKGOTO(bootstrapAllGather(comm->bootstrap, oks.data(), sizeof(int)), res, fail);
+    for (int x : oks) ok = ok && x != 0;
+    if (!ok) {
+      INFO(NCCL_INIT, "ncclDdaFabricCommInit: device setup failed on some rank; skipping fabric DDA path");
+      goto fail;
+    }
+  }
 
   // Success: hand ownership of every resource to comm.
   comm->ddaFabricMemHandler = handler;
@@ -205,6 +266,11 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   comm->ddaFabricMaxBlocks = nBlocksMax;
   comm->ddaLLEpochDev = epochDev;
   comm->ddaLLEpochLen = (int)epochLen;
+  comm->ddaA2aErrDev = a2aErrDev;
+  comm->ddaA2aErrHost = a2aErrHost;
+  if (a2aTimeoutSecs > 0) {
+    INFO(NCCL_INIT, "DDA AllToAll: device wait timeout %lld s (RCCL_DDA_A2A_TIMEOUT)", (long long)a2aTimeoutSecs);
+  }
   INFO(NCCL_INIT,
        "ncclDdaFabricCommInit: nRanks %d, scratch %zu bytes (vmm, gfx1250 fabric path; derived from RCCL DDA params; "
        "RCCL_DDA_FABRIC_BUFFER_SIZE=%lld), LL enabled=%lld threshold=%lld, "
@@ -217,6 +283,12 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   return ncclSuccess;
 
 fail:
+  if (a2aErrHost != nullptr) {
+    (void)ncclCudaHostFree(a2aErrHost);
+  }
+  if (a2aErrDev != nullptr) {
+    CUDACHECKIGNORE(cudaFree(a2aErrDev));
+  }
   if (barrierState != nullptr) {
     delete barrierState;
   }
@@ -242,6 +314,17 @@ ncclResult_t ncclDdaFabricCommFini(ncclComm* comm) {
   if (comm == nullptr) {
     return ncclSuccess;
   }
+  if (comm->ddaA2aErrHost != nullptr) {
+    const uint32_t site = __atomic_load_n(comm->ddaA2aErrHost, __ATOMIC_ACQUIRE);
+    if (site != 0 && site != dda::common::kDdaWdAborted) {
+      WARN("DDA AllToAll on rank %d failed earlier (wait site %u: %s); that call's results were invalid and the "
+           "communicator reported an error from then on", comm->rank, site, ncclDdaA2aWdSiteName(site));
+    }
+  }
+  CUDACHECKIGNORE(cudaFree(comm->ddaA2aErrDev));
+  comm->ddaA2aErrDev = nullptr;
+  (void)ncclCudaHostFree(comm->ddaA2aErrHost);
+  comm->ddaA2aErrHost = nullptr;
   if (comm->ddaFabricBarrierState != nullptr) {
     delete static_cast<DdaFabricBarrierState*>(comm->ddaFabricBarrierState);
     comm->ddaFabricBarrierState = nullptr;

@@ -1622,6 +1622,44 @@ TEST_F(InitMicrotest, GetAsyncError_GinError_ReturnsRemoteError) {
   EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
   EXPECT_EQ(ncclRemoteError, e);
 }
+// DDA AllToAll device error word (host-pinned mirror comm->ddaA2aErrHost, alltoall_dda_watchdog.h):
+// a wait-site trip surfaces as ncclRemoteError, a concurrent-launch trip as ncclInvalidUsage, and
+// the error sticks in comm->asyncResult.
+TEST_F(InitMicrotest, GetAsyncError_DdaA2aTrip_ReturnsRemoteErrorAndSticks) {
+  ReadyComm rc;
+  uint32_t word = 0;
+  rc.get()->ddaA2aErrHost = &word;
+  ncclResult_t e = ncclInProgress;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclSuccess, e);  // healthy word: no error
+  word = 3;                   // a wait-site trip
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclRemoteError, e);
+  EXPECT_EQ(ncclRemoteError, rc.get()->asyncResult);
+  word = 0;  // the comm stays failed even if the mirror were cleared
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclRemoteError, e);
+  rc.get()->ddaA2aErrHost = nullptr;
+}
+TEST_F(InitMicrotest, GetAsyncError_DdaA2aAborted_IsNotAnAsyncError) {
+  ReadyComm rc;
+  uint32_t word = kDdaA2aErrAborted;  // a wait saw ncclCommAbort's flag
+  rc.get()->ddaA2aErrHost = &word;
+  ncclResult_t e = ncclInProgress;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclSuccess, e);
+  EXPECT_EQ(ncclSuccess, rc.get()->asyncResult);
+  rc.get()->ddaA2aErrHost = nullptr;
+}
+TEST_F(InitMicrotest, GetAsyncError_DdaA2aConcurrent_ReturnsInvalidUsage) {
+  ReadyComm rc;
+  uint32_t word = kDdaA2aErrConcurrent;
+  rc.get()->ddaA2aErrHost = &word;
+  ncclResult_t e = ncclSuccess;
+  EXPECT_EQ(ncclSuccess, ncclCommGetAsyncError_impl(rc.get(), &e));
+  EXPECT_EQ(ncclInvalidUsage, e);
+  rc.get()->ddaA2aErrHost = nullptr;
+}
 TEST_F(InitMicrotest, GetAsyncError_GinNotConnected_SkipsTheGinQuery) {
   ReadyComm rc;
   auto sr = std::make_unique<ncclSharedResources>();

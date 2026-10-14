@@ -156,6 +156,7 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_fabric.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll.h
   algorithms/dda/alltoall/alltoall_dda_fabric_ll128.h
+  algorithms/dda/alltoall/alltoall_dda_watchdog.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h

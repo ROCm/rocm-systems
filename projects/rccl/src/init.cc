@@ -86,6 +86,7 @@
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/ipc/ipc_init.h"
 #include "algorithms/dda/fabric/fabric_init.h"
+#include "algorithms/dda/alltoall/dda_alltoall.h"
 #if defined(__x86_64__) || defined(_M_X64)
 #include <cpuid.h>
 #endif
@@ -799,6 +800,8 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
   comm->ddaFabricMaxBlocks = 0;
   comm->ddaLLEpochDev = nullptr;
   comm->ddaLLEpochLen = 0;
+  comm->ddaA2aErrDev = nullptr;
+  comm->ddaA2aErrHost = nullptr;
 
   comm->rank = rank;
   comm->nRanks = ndev;
@@ -5113,6 +5116,21 @@ ncclResult_t ncclCommGetAsyncError_impl(ncclComm_t comm, ncclResult_t* asyncErro
         WARN("GIN Error detected");
         *asyncError = ncclRemoteError;
       }
+    }
+  }
+
+  /* DDA AllToAll device-side failure (opt-in wait timeout, or two A2A kernels of this comm in flight
+   * at once); see alltoall_dda_watchdog.h. The device word is mirrored to host-pinned memory. */
+  if (*asyncError == ncclSuccess && comm->ddaA2aErrHost != nullptr) {
+    const uint32_t site = __atomic_load_n(comm->ddaA2aErrHost, __ATOMIC_ACQUIRE);
+    if (rcclDdaA2aAsyncResult(site) != ncclSuccess) {
+      // Reached once: from then on comm->asyncResult carries the error (first load above).
+      const ncclResult_t err = rcclDdaA2aAsyncResult(site);
+      WARN("DDA AllToAll device error on rank %d (wait site %u): %s", comm->rank, site,
+           err == ncclInvalidUsage ? "two AllToAll calls of this communicator ran concurrently"
+                                   : "a peer did not arrive within RCCL_DDA_A2A_TIMEOUT");
+      ncclCommSetAsyncError(comm, err);
+      *asyncError = err;
     }
   }
 

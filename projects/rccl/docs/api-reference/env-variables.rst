@@ -881,6 +881,15 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the LL128 tier ceiling, overriding the table.
           Pre-table default: ``0`` (LL128 tier was off before the arch table).
 
+    * - | ``RCCL_DDA_A2A_TIMEOUT``
+        | Device-side wait timeout of the DDA AllToAll kernels, in seconds. By default the kernels wait for
+          a late peer indefinitely, as NCCL kernels do (rank skew is normal in training), and leave within
+          about 1 ms once ``ncclCommAbort`` is called. With a positive value a wait that exceeds it ends the
+          kernel; ``ncclCommGetAsyncError`` and every later ``ncclAlltoAll`` on that communicator then return
+          ``ncclRemoteError`` and later AllToAll kernels move no data.
+      - | ``0``: Never time out (default).
+        | ``N``: Time out after ``N`` seconds.
+
     * - | ``RCCL_MEMALLOC_FABRIC``
         | Handle type of ``ncclMemAlloc`` allocations on devices that support FABRIC handles. FABRIC
           allocations can be registered across the trays of a UALink clique; HIP allows only one handle
