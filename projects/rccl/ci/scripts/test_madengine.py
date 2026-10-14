@@ -84,14 +84,13 @@ CANDIDATE = "candidate"
 OVERLAY_CTX = "overlay_ctx"
 OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 
-# TEMPORARY PIN — must move back to ROCm/madengine before this leaves draft.
 # The A/B below needs both runs in one allocation, which requires madengine to
 # execute a multi-node workload in place instead of submitting its own sbatch
-# (ROCm/madengine#213).  That is not on develop yet, so the fork is pinned.
-MADENGINE_REPO = "https://github.com/mkuznet1/madengine.git"
-MADENGINE_REF = "95685108f27bd4eb4d44209f5ee2e7e86d5451c3"  # madengine#213, on #190
+# (ROCm/madengine#213), so the pin must not predate it.
+MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
+MADENGINE_REF = "00ee3e80c0a308599633caf74e5d91a72164a2fe"  # develop, has #190 and #213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "b4b296310e52ba5cd67d898825165b06b60cf9bf"  # mad-rccl, 2026-09-08
+MAD_REF = "7a9a25e742ef60e8deffb6e5fd9b559857d2018d"  # mad-rccl, 2026-10-09
 MAD_BRANCH = "mad-rccl"
 
 WORKLOAD_CONFIGS = {
