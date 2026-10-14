@@ -51,13 +51,33 @@ static bool rcclSymkAllGatherLLYieldsToST(struct ncclTuningInput_t* const inputs
          ncclSymkGfx950AllGatherPrefersStore(comm->nRanks, inputs->nBytes);
 }
 
+// In gfx1250 partition mode AllGather runs only LL and the hierarchical kernel: LL below
+// ncclSymkAgHierMinBusBytes and the hierarchical kernel from there, wherever the latter can run,
+// unless the user forced or narrowed the choice.
+static bool rcclSymkAllGatherYieldsInPartitionMode(struct ncclTuningInput_t* const inputs,
+                                                   enum ncclSymkKernelId kernelId, uint32_t valid_kmask) {
+  constexpr int hier = ncclSymkKernelId_AllGather_HierLsaLDST;
+  struct ncclComm* comm = inputs->comm;
+  if (inputs->func != ncclFuncAllGather || !ncclSymkIsGfx1250(comm) || !comm->hasMloPart ||
+      comm->tuningContext.forced[inputs->func] || !(valid_kmask >> hier & 1) ||
+      !(inputs->tuningMask >> (NCCL_TUNING_SYM_KERNEL_ID_OFFSET + hier) & 1) ||
+      inputs->winRegType != ncclSymSendRegRecvReg)
+    return false;
+  if (ncclSymkGfx1250AllGatherPrefersHier(comm->nRanks, inputs->nBytes)) return kernelId != hier;
+  return kernelId != hier && kernelId != ncclSymkKernelId_AllGather_LL;
+}
+
 static int rcclSymkCalculateWarps(struct ncclTuningInput_t* const inputs, enum ncclSymkKernelId kernelId) {
   struct ncclComm* comm = inputs->comm;
   bool isLL = ncclSymkLLKernelMask() >> kernelId & 1;
   bool isLsa = ncclSymkLsaKernelMask() >> kernelId & 1;
-  // GIN RS carves its pipeline roles out of blockDim.x and symCheckTmaLaunch() requires the full launch
-  // for Tma, so both keep it. The GIN+LSA AG kernel sizes itself from ncclSymkMaxThreads.
-  bool fullWidth = ((ncclSymkGinKernelMask() & ~ncclSymkAGKernelMask()) | ncclSymkTmaKernelMask()) >> kernelId & 1;
+  // GIN carves its pipeline roles out of blockDim.x and symCheckTmaLaunch() requires the full launch
+  // for Tma, so both keep it. HierLsaLDST splits its warps into one pull group per remote package, so
+  // it takes the full launch as well. The GIN+LSA AG kernel sizes itself from ncclSymkMaxThreads.
+  uint32_t fullWidthMask = (ncclSymkGinKernelMask() & ~ncclSymkAGKernelMask()) | ncclSymkTmaKernelMask() |
+                           1 << ncclSymkKernelId_AllGather_HierLsaLDST;
+  bool fullWidth = fullWidthMask >> kernelId & 1;
+
   int nThreads = ncclSymkMaxThreads;
   if (fullWidth) {
     nThreads = ncclSymkWarpsPerBlock * comm->WarpSize;
@@ -103,14 +123,18 @@ ncclResult_t ncclTuningSymkModelSim(struct ncclTuningInput_t* const inputs, stru
       (inputs->func == ncclFuncReduceScatter && inputs->winRegType != ncclSymSendRegRecvReg &&
        inputs->winRegType != ncclSymSendRegRecvNonreg && (tuning_kmask & ncclSymkLLKernelMask()) == 0) ||
       (inputs->func == ncclFuncAllGather && inputs->winRegType != ncclSymSendRegRecvReg && inputs->comm->nNodes > 1 &&
-       (tuning_kmask & ncclSymkGinKernelMask()) != 0)) {
+       (tuning_kmask & ncclSymkGinKernelMask()) != 0) ||
+      // HierLsaLDST pulls each peer's input out of place, which needs the send window registered.
+      (inputs->func == ncclFuncAllGather && inputs->winRegType != ncclSymSendRegRecvReg &&
+       tuning->symKernelId == ncclSymkKernelId_AllGather_HierLsaLDST)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;
   }
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-  if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
+  if (rcclSymkAllGatherLLYieldsToST(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask) ||
+      rcclSymkAllGatherYieldsInPartitionMode(inputs, (enum ncclSymkKernelId)tuning->symKernelId, valid_kmask)) {
     tuning->valid = 0;
     tuning->timeUs = -1.0;
     return ncclSuccess;

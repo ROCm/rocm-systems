@@ -12,7 +12,7 @@
 #include <stdint.h>
 
 // One row per selectable algorithm. name is the selection key, matched as a case-insensitive
-// substring. mask == 1ull << (cost-model tuning id): general in [0,21), symmetric in [21,39).
+// substring. mask == 1ull << (cost-model tuning id): general in [0,21), symmetric in [21,40).
 struct ncclAlgRegEntry {
   const char* name;
   uint64_t mask;

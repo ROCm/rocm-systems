@@ -162,6 +162,11 @@ bool ncclSymkLsaBaseModel(struct ncclTuningInput_t* input, enum ncclSymkKernelId
     busBytes = (nRanks - 1) * nBytes; // Wrong. Should be nRanks*nBytes but we want to beat non-MC.
     busMultiplier *= 0.55 * nRanks;
     break;
+  case ncclSymkKernelId_AllGather_HierLsaLDST:
+    // Slightly more bytes than the flat kernel moves. The win is that all but one copy per rank stays
+    // on-package, which this model has no term for, so selection needs measurement first.
+    busBytes = nRanks * nBytes;
+    break;
 
   case ncclSymkKernelId_ReduceScatter_LL:
     busBytes = nRanks * nBytes * LL_BusFactor;

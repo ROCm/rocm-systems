@@ -36,7 +36,8 @@ constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncc
                                    1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
-                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC |
+                                   1 << ncclSymkKernelId_AllGather_HierLsaLDST;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
                                    1 << ncclSymkKernelId_AllReduce_RSxLDMC_AGxSTMC |
@@ -67,6 +68,9 @@ constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 <<
                                     1 << ncclSymkKernelId_ReduceScatter_TmaLD;
 
 constexpr uint32_t kernelMask_DynamicSmem = (kernelMask_Gin & kernelMask_RS) | kernelMask_Tma;
+
+// Needs the LSA team to factor into equal-size packages; see computeHierScaleInSize().
+constexpr uint32_t kernelMask_HierLsaLDST = 1 << ncclSymkKernelId_AllGather_HierLsaLDST;
 
 int ncclSymkLLKernelMask() {
   return kernelMask_LL;
@@ -213,7 +217,33 @@ bool ncclSymkIsGfx950(struct ncclComm* comm) {
   return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr &&
          IsArchMatch(comm->archName, "gfx950");
 }
+
+// The partition-mode AllGather tuning is fitted to gfx1250 and must not reach other architectures.
+// Peers must pick the same kernel, so every rank has to share this arch.
+bool ncclSymkIsGfx1250(struct ncclComm* comm) {
+  return comm->minCompCap == comm->maxCompCap && comm->archName != nullptr &&
+         IsArchMatch(comm->archName, "gfx1250");
+}
 #endif
+
+static bool sameCard(struct ncclPeerInfo const& a, struct ncclPeerInfo const& b) {
+  return a.hostHash == b.hostHash && (a.busId & ~0xfLL) == (b.busId & ~0xfLL);
+}
+
+// How many consecutive ranks share a physical device.
+static int computeHierScaleInSize(struct ncclComm* comm) {
+  struct ncclPeerInfo* peerInfo = comm->peerInfo;
+  if (peerInfo == nullptr || comm->nRanks < 2) return 0;
+
+  int size = 1;
+  while (size < comm->nRanks && sameCard(peerInfo[size], peerInfo[0])) size++;
+  if (size < 2 || size == comm->nRanks || comm->nRanks % size != 0) return 0;
+
+  for (int r = 1; r < comm->nRanks; r++) {
+    if (sameCard(peerInfo[r], peerInfo[r - 1]) != (r % size != 0)) return 0;
+  }
+  return size;
+}
 
 ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   // ncclTeamLsa() below calls this internally but drops the error code so we do it here.
@@ -222,6 +252,9 @@ ncclResult_t ncclSymkInitOnce(struct ncclComm* comm) {
   struct ncclSymkState* symk = &comm->symkState;
   if (!symk->initialized) {
     symk->initialized = true;
+    symk->kcomm.hierScaleInSize = computeHierScaleInSize(comm);
+    INFO(NCCL_INIT, "Symmetric hierarchical scale-in size = %d (nRanks %d)", symk->kcomm.hierScaleInSize,
+         comm->nRanks);
     struct ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
     // Disable LSA multicast for cross-clique since NVLS isn't available across cliques
     symk->hasLsaMultimem =
@@ -397,6 +430,11 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
   if (!hasGin) kmask &= ~kernelMask_Gin;
   bool needGin = ncclTeamLsa(comm).nRanks < comm->nRanks;
   kmask &= needGin ? kernelMask_Gin : ~kernelMask_Gin;
+
+  // Needs at least two packages of equal size to have a cross-package hop worth saving.
+  int scaleIn = comm->symkState.kcomm.hierScaleInSize;
+  int lsaRanks = ncclTeamLsa(comm).nRanks;
+  if (scaleIn <= 0 || lsaRanks % scaleIn != 0 || lsaRanks / scaleIn < 2) kmask &= ~kernelMask_HierLsaLDST;
   return kmask;
 }
 
@@ -431,6 +469,14 @@ static constexpr int ncclSymkGfx950WidestThreads = 1024;
 
 bool ncclSymkGfx950AllGatherPrefersStore(int nRanks, size_t nBytes) {
   return size_t(nRanks) * nBytes >= ncclSymkAgStoreMinBusBytes;
+}
+
+// Where AllGather's hierarchical kernel overtakes LL on gfx1250 in partition mode. The shared cost
+// model never picks it: it has no term for the copies that stay on-package.
+static constexpr size_t ncclSymkAgHierMinBusBytes = 1 << 20;
+
+bool ncclSymkGfx1250AllGatherPrefersHier(int nRanks, size_t nBytes) {
+  return size_t(nRanks) * nBytes >= ncclSymkAgHierMinBusBytes;
 }
 
 int ncclSymkGfx950BlockThreads(ncclFunc_t coll, bool isLL, int nRanks, size_t nBytes) {

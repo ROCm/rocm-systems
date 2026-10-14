@@ -89,6 +89,8 @@ template <bool EnableProfiler>
 __device__ __forceinline__ void ncclSymkRun_AllGather_TmaST(struct ncclSymkDevWorkArgs const* args);
 template <bool EnableProfiler>
 __device__ __forceinline__ void ncclSymkRun_AllGather_TmaSTMC(struct ncclSymkDevWorkArgs const* args);
+template <bool EnableProfiler>
+__device__ __forceinline__ void ncclSymkRun_AllGather_HierLsaLDST(struct ncclSymkDevWorkArgs const* args);
 
 template <bool EnableProfiler, template <typename> typename Red, typename T>
 __device__ __forceinline__ void ncclSymkRun_ReduceScatter_LL(struct ncclSymkDevWorkArgs const* args);
