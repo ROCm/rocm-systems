@@ -396,11 +396,7 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL, P2p, isNetOffload, Metadata, Pi
     else if (sizeof(U) == 2) __builtin_nontemporal_store(u2, (uint16_t*)dst);
     else if (sizeof(U) == 4) __builtin_nontemporal_store(u4, (uint32_t*)dst);
     else __builtin_nontemporal_store(u8, (uint64_t*)dst);
-#if defined(__gfx950__) && ROCM_VERSION < 70002
-    __builtin_amdgcn_fence(
-      __ATOMIC_RELEASE,
-      ""); // flush cache on gfx950 if ROCr fix for hipHostMallocUncached is not available (ROCm version < 7.0.2)
-#endif
+    // No ROCm < 7.0.2 hipHostMallocUncached fence as in storeLL: store<> only writes user buffers.
 #endif
 #else
     if (sizeof(U) == 1) asm volatile("st.volatile.global.b8 [%0],%1;" ::"l"(dst), "r"(u4) : "memory");
