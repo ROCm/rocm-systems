@@ -165,12 +165,14 @@ jobs:
         env:
           FAMILY: ${{ matrix.family }}
           HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
-          # --arch auto finds this machine's GPU with the installed rocminfo.
-          ROCM_SDK: ${{ github.workspace }}/dist
           # A regions case faults the GPU on purpose; without this ROCr writes a
           # gpucore file of about 160 MB into the workspace.
           HSA_DISABLE_COREDUMP_ON_EXCEPTION: "1"
+        # --arch auto finds this machine's GPU with the installed rocminfo.
+        # github.workspace is the runner's host path, which a container need
+        # not have; GITHUB_WORKSPACE is the path inside the container.
         run: >-
+          ROCM_SDK="${GITHUB_WORKSPACE}/dist"
           python projects/hrr/tests/scripts/run_catch2.py
           --xml "integration-${FAMILY}.xml"
           --timeout 1200
