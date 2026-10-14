@@ -35,9 +35,16 @@ commands are not interchangeable.
 - Default to `StrictMock<>` so unexpected calls fail.
 - Use `NiceMock<>` only when uninteresting calls are deliberate and explain
   that choice in the test.
-- Mock headers may include production interfaces or shared types required to
-  preserve the real contract. Avoid depending on concrete implementations
-  when an interface or lightweight test type is sufficient.
+- A unit test isolates one unit. Replace every collaborator that can be
+  injected (backend wrapper, policy type, interface) with a mock or fake.
+- A mock never includes an external library header (`<hipfile.h>`,
+  `<amd_smi/amdsmi.h>`, `<rocprofiler-sdk/...>`). Redefine the library types
+  it needs as plain test structs whose field names match the library's, as
+  `backends/hipfile/tests/mock_wrapper.hpp` does. Unit tests must build on a
+  machine where that library is not installed.
+- A mock may include project-owned headers such as interfaces, `types.hpp`, or
+  constants when the real contract needs them. It does not include the
+  concrete implementation it replaces.
 
 ## Coverage
 

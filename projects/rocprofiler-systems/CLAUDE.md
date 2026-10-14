@@ -10,6 +10,8 @@ C++20, CMake, part of the `rocm-systems` monorepo
 Read the applicable files in `.claude/rules/` before making changes:
 
 - `cpp-conventions.md` for C++ files.
+- `architecture-conventions.md` for where helpers live, external-library
+  backends, policies, and failure on unhandled cases.
 - `cmake-build.md` for configuring and building.
 - `cmake-conventions.md` for writing or editing CMake files.
 - `testing-conventions.md` for tests and coverage.
