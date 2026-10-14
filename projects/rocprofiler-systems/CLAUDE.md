@@ -34,8 +34,6 @@ Load only skills relevant to the current task. Skills are in
 | Compile-time computation | `programming-cpp-constexpr` |
 | Python work | `programming-python` |
 | C++ tests | `testing-gtest-gmock` |
-| Smell reference while reviewing existing code | `code-smells` |
-| Refactoring | `refactoring-techniques` |
 
 ## Commands
 
