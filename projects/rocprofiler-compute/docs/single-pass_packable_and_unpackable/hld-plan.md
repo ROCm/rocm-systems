@@ -8,7 +8,7 @@ The packing algorithm is in [Metric grouping (SPP / SPU)](lld-metrics-grouping-a
 
 **Related design:**
 
-- [Analysis config YAML redesign](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) — A collectable is one part of a split metric. Its counters fit in one hardware pass. This plan uses that idea on today’s panel YAML.
+- [Analysis config YAML redesign](../design/analysis-config-redesign/hld-analysis-config-redesign.md#layer-details) — A collectable is a single-pass sub-expression of a multi-pass metric. This plan uses that idea on today’s panel YAML.
 - [Three-layer analysis config LLD](../design/analysis-config-redesign/lld-index.md) and [metric library LLD](../design/analysis-config-redesign/lld-phase1-metric-library.md) — the migration this plan does not do.
 
 Older planning drafts are on branch `users/feizheng10/aiprofcomp-865-docs-backup`.
@@ -91,7 +91,7 @@ A **single-pass unpackable (SPU)** metric is one whose counters cannot fit one e
 |------|---------|
 | SPP | `CPC Utilization` |
 | SPU | `VALU FLOPs` (F16/F32/F64 rates) |
-| Part of an SPU metric | `hbm_read_sub` (HBM Bandwidth read part). Its counters fit one pass |
+| Collectable | A single-pass sub-expression of a multi-pass metric. The metric is rewritten as a combination of collectables, and each collectable is collected in its own pass. `hbm_read_sub` (HBM Bandwidth read fragment) |
 | `WEIGHTED_AVG` | One ratio whose weight was split: \((M_0 C_0 + M_1 C_1)/(C_0 + C_1)\), e.g. `WEIGHTED_AVG(read_ratio_sub, write_ratio_sub)` weighted by `TCC_EA0_RDREQ_sum` and `TCC_EA0_WRREQ_sum` |
 | `COLLECT_SUM` / `COLLECT_RATIO` | A sum of those parts, and a ratio of summed parts. HBM Bandwidth is `COLLECT_SUM(hbm_read_sub, hbm_write_sub)` |
 
