@@ -8106,7 +8106,6 @@ int64_t EnabledCeReduceScatterParams(const char* env, int64_t deft) {
 
 int64_t ForcedCeReduceScatterParams(const char* env, int64_t deft) {
   if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return int64_t(1);
-  if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return int64_t(1);
   return deft;
 }
 

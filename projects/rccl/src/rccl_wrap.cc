@@ -1621,7 +1621,6 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
   // Re-read every call. A function-local static latches the first value and
   // ignores the host-test param seam.
   const int enabled = rcclParamCeReduceScatter();
-  const int force = rcclParamForceCeReduceScatter();
   if (!enabled) {
     static bool warnedDisabled = false;
     if (!warnedDisabled) {
@@ -1647,7 +1646,7 @@ bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataTyp
   // No message-size cap: CE ReduceScatter pipelines through ceARTmpBuf slots, so
   // large messages are chunked rather than rejected (unlike CE AllReduce 2-shot).
 
-  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO && !force) {
+  if (comm->config.CTAPolicy != NCCL_CTA_POLICY_ZERO) {
     WARN("Skipping CE ReduceScatter: CTA policy is not ZERO");
     return false;
   }
@@ -2344,15 +2343,15 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     // CE ReduceScatter always stages through ceARTmpBuf, so user-buffer symmetric
     // registration is not required (unlike CE AllReduce's registered-window path).
     // Force mode preempts an otherwise-eligible symmetric kernel.
-    const bool ceReduceScatterAllowed =
+    const bool ceReduceScatterBase =
       ceArGraphAllowed && rcclUseCeReduceScatter(comm, recvcount, datatype, op);
-    if ((force || !symEligible) && ceReduceScatterAllowed && ncclGroupDepth == 0 &&
-        comm->ceColl.ceARTmpBuf != NULL) {
+    const bool ceReduceScatterAllowed = ncclGroupDepth == 0 && ceReduceScatterBase;
+    if ((force || !symEligible) && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
     }
-    // ceReduceScatterAllowed does not look at ceARTmpBuf. The buffer is allocated
+    // ceReduceScatterBase does not look at ceARTmpBuf. The buffer is allocated
     // by the CE launch, which the eager CE early-return never reaches. Hand this
     // call to enqueue so CE init runs and ncclLaunchCeColl allocates staging.
     // Otherwise DDA is suppressed below and the call stays on the ring kernel.
@@ -2360,7 +2359,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     // must remain queued until ncclGroupEnd. RCCL_CE_REGISTERED is the queued
     // CE dispatch token even when force mode uses internal staging rather than
     // registered user buffers. It also initializes staging on the first call.
-    if ((force || !symEligible) && ceReduceScatterAllowed &&
+    if ((force || !symEligible) && ceReduceScatterBase &&
         (ncclGroupDepth != 0 || comm->ceColl.ceARTmpBuf == NULL)) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
