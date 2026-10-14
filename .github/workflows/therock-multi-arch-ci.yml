@@ -12,7 +12,9 @@
 # - Supports prebuilt stages to skip certain build stages
 # - Better parallelization across GPU architectures
 
-# TheRock ref: pinned to ROCm/TheRock commit c01e3a3f3f67966dd35612cf363b49964f33cd47.
+# TheRock ref: TEMPORARILY pointed at the branch
+# users/geomin12/external-ci-file-goodbye to test ROCm/TheRock's removal of
+# configure_external_repo_ci.py. Restore a pinned SHA before merging.
 # NOTE: update all `@<ref>` refs and `ref:` inputs together when switching
 
 # =============================================================================
@@ -45,17 +47,13 @@ on:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X (empty = skip linux)"
         default: ""
-      linux_test_labels:
-        type: string
-        description: "If enabled, reduce test set on Linux to the list of labels prefixed with 'test:'. ex: test:rocprim, test:hipcub"
-        default: ""
       windows_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Windows GPU families to build and test. ex: gfx94X, gfx120X (empty = skip windows)"
         default: ""
-      windows_test_labels:
+      pr_labels:
         type: string
-        description: "If enabled, reduce test set on Windows to the list of labels prefixed with 'test:' ex: test:rocprim, test:hipcub"
+        description: "Comma-separated labels, as a PR would carry. ex: test:hip-tests,test_filter:quick"
         default: ""
       prebuilt_stages:
         type: string
@@ -103,9 +101,8 @@ jobs:
     name: Configure Changed Projects
     runs-on: ubuntu-24.04
     outputs:
-      changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
-      run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
-      test_type: ${{ steps.configure-pr.outputs.test_type || steps.configure-manual.outputs.test_type }}
+      changed_projects: ${{ steps.configure-manual.outputs.changed_projects }}
+      run_all_tests: ${{ steps.configure-manual.outputs.run_all_tests }}
       # Allowlist of build stages this PR needs (fed to TheRock's build_stages).
       build_stages: ${{ steps.build_stages.outputs.build_stages }}
       # "none" when every changed project is Linux-only, else empty (use default).
@@ -123,7 +120,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: ROCm/TheRock
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: users/geomin12/external-ci-file-goodbye
           path: _therock
           # _therock_utils + (cone-mode) root BUILD_TOPOLOGY.toml and
           # build_tools/project_mappings.json are needed to map changed projects
@@ -136,26 +133,22 @@ jobs:
             build_tools/artifact_subprojects.json
           sparse-checkout-cone-mode: false
 
-      - name: Configure CI for pull request or push
-        id: configure-pr
-        if: ${{ github.event_name == 'pull_request' || github.event_name == 'push' }}
-        env:
-          GH_TOKEN: ${{ github.token }}
-        run: |
-          python3 _therock/build_tools/github_actions/configure_external_repo_ci.py \
-            --event-name "${{ github.event_name }}" \
-            --github-repo "${{ github.repository }}" \
-            --base-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.base.sha || github.event.before }}" \
-            --head-sha "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}" \
-            --config-path ".github/repos-config.json"
-
-      - name: Configure CI for manual run
+      # TheRock retired configure_external_repo_ci.py and now derives
+      # changed_projects itself, inside setup_multi_arch.yml. rocm-systems has
+      # not opted in yet: its external_repo JSON carries no "projects_config",
+      # so TheRock cannot map this repo's diff onto projects and every run gets
+      # full coverage. Declare that here instead of computing it.
+      #
+      # Consequence: compute_build_stages.py below always sees run_all_tests=true
+      # and therefore returns an empty allowlist, so every stage builds. Adding
+      # "projects_config" to external_repo restores narrowing -- but note that
+      # build_stages is an *input* to setup, so the caller cannot pre-compute it
+      # from a value setup produces; TheRock would need to narrow stages itself.
+      - name: Configure CI
         id: configure-manual
-        if: ${{ github.event_name != 'pull_request' }}
         run: |
           echo "changed_projects=" >> "${GITHUB_OUTPUT}"
           echo "run_all_tests=true" >> "${GITHUB_OUTPUT}"
-          echo "test_type=quick" >> "${GITHUB_OUTPUT}"
 
       # Map the changed projects to the minimal allowlist of TheRock build
       # stages needed to build them (BUILD_TOPOLOGY.toml is the source of truth;
@@ -166,21 +159,20 @@ jobs:
         id: build_stages
         run: |
           python3 .github/scripts/compute_build_stages.py \
-            --changed-projects "${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
-            --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
+            --changed-projects "${{ steps.configure-manual.outputs.changed_projects }}" \
+            --run-all-tests "${{ steps.configure-manual.outputs.run_all_tests }}" \
             --therock-path "_therock"
 
   setup:
     needs: configure
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@users/geomin12/external-ci-file-goodbye
     with:
       build_variant: "release"
       # Limit GPU families for rocm-systems CI
       # Note: gfx125X is added for MI455 bringup with limited tests (hip-tests, rocrtst, sanity)
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || needs.configure.outputs.windows_amdgpu_families || 'gfx110X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
-      windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      pr_labels: ${{ inputs.pr_labels || '' }}
       # Per-PR selective build: the configure job maps the changed projects to
       # the minimal allowlist of build stages via TheRock's build topology.
       # TheRock (ROCm/TheRock#7600) builds only these stages and skips every
@@ -198,7 +190,7 @@ jobs:
       # and determines which stages to rebuild based on changed files
       stage_reuse_mode: reuse-stage
       repository: ROCm/TheRock
-      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+      ref: users/geomin12/external-ci-file-goodbye
       # TEMPORARY: MI455 bringup - pass family_overrides to configure test runner and limited tests
       # TODO(geomin12): Remove family_overrides once MI455 is in therock-ci-config
       # NOTE: MI455 machine is down - test-runs-on set to "" until back online (was: linux-mi455-gpu-rocm)
@@ -230,19 +222,20 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@users/geomin12/external-ci-file-goodbye
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
       rocm_deb_package_version: ${{ needs.setup.outputs.rocm_deb_package_version }}
       rocm_rpm_package_version: ${{ needs.setup.outputs.rocm_rpm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      # Empty means run every test. rocm-systems does not pass
+      # projects_config, so TheRock cannot narrow and this stays empty.
+      changed_projects: ${{ needs.setup.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+      ref: users/geomin12/external-ci-file-goodbye
     permissions:
       contents: read
       id-token: write
@@ -255,17 +248,18 @@ jobs:
         needs.setup.outputs.windows_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_windows.yml@users/geomin12/external-ci-file-goodbye
     with:
       build_config: ${{ needs.setup.outputs.windows_build_config }}
       test_labels: ${{ needs.setup.outputs.windows_test_labels }}
       rocm_package_version: ${{ needs.setup.outputs.rocm_package_version }}
-      test_type: ${{ needs.configure.outputs.test_type }}
+      test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
-      # Empty string when run_all_tests=true triggers full test run in downstream workflow
-      changed_projects: ${{ needs.configure.outputs.run_all_tests == 'true' && '' || needs.configure.outputs.changed_projects }}
+      # Empty means run every test. rocm-systems does not pass
+      # projects_config, so TheRock cannot narrow and this stays empty.
+      changed_projects: ${{ needs.setup.outputs.changed_projects }}
       repository: ROCm/TheRock
-      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+      ref: users/geomin12/external-ci-file-goodbye
     permissions:
       contents: read
       id-token: write
@@ -284,7 +278,7 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+          ref: users/geomin12/external-ci-file-goodbye
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 

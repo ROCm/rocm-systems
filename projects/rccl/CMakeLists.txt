@@ -1003,3 +1003,9 @@ set_target_properties(rccl PROPERTIES
   ARCHIVE_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   LIBRARY_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}"
   RUNTIME_OUTPUT_DIRECTORY "${PROJECT_BINARY_DIR}")
+
+# CI TEST SCAFFOLDING -- do not merge.
+# Mock change to exercise ROCm/TheRock#external-ci-file-goodbye: a non-skippable
+# source change must still trigger CI through the consolidated engine. Because
+# rocm-systems passes no "projects_config", changed_projects stays empty and the
+# run gets full test coverage.
