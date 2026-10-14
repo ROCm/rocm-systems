@@ -24,8 +24,8 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  rust-quality:
-    name: rust-quality
+  runtimes-rust-quality:
+    name: runtimes-rust-quality
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     steps:
@@ -63,8 +63,8 @@ jobs:
           --workspace --all-targets --all-features --frozen
           -- -D warnings
 
-  build-test:
-    name: build-test / ${{ matrix.name }}
+  runtimes-build-test:
+    name: runtimes-build-test / ${{ matrix.name }}
     runs-on: ubuntu-24.04
     timeout-minutes: 20
     strategy:
