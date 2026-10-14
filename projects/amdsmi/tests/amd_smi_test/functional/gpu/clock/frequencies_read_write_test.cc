@@ -158,6 +158,13 @@ void TestFrequenciesReadWrite::Run(void) {
           return false;
         }
 
+        // Matches TestFrequenciesRead: an empty pp_dpm_* table (e.g. APU fclk) has no level.
+        if (ret == AMDSMI_STATUS_UNEXPECTED_DATA) {
+          std::cerr << "WARN: Clock file [" << FreqEnumToStr(amdsmi_clk) << "] exists on device ["
+                    << dv_ind << "] but empty!" << std::endl;
+          return false;
+        }
+
         IF_VERB(STANDARD) {
           std::cout << "Initial frequency for clock " << FreqEnumToStr(amdsmi_clk) << " is "
                     << f.current << std::endl;

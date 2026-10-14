@@ -298,11 +298,15 @@ class TestCliBase(unittest.TestCase):
                 for name, clk_type in clk_types.items():
                     try:
                         freq = amdsmi.amdsmi_get_clk_freq(processor, clk_type)
-                        info = amdsmi.amdsmi_get_clock_info(processor, clk_type)
                     except amdsmi.AmdSmiLibraryException:
                         entry[name] = None
                         continue
-                    freq["has_deep_sleep"] = info["clk_deep_sleep"] != "N/A"
+                    try:
+                        info = amdsmi.amdsmi_get_clock_info(processor, clk_type)
+                        freq["has_deep_sleep"] = info["clk_deep_sleep"] != "N/A"
+                    except amdsmi.AmdSmiLibraryException:
+                        # No gpu_metrics (e.g. an iGPU), yet the table is still settable.
+                        freq["has_deep_sleep"] = False
                     entry[name] = freq
                 per_gpu.append(entry)
         finally:
@@ -986,8 +990,8 @@ class TestCliBase(unittest.TestCase):
                 defaulting to it while actually running on every device.
 
         Returns:
-            int: the highest settable level plus one, or 0 when the device does
-            not expose the clock -- in which case the caller drops the command.
+            int: the highest settable level plus one, or 0 when a target device
+            does not expose the clock -- in which case the caller drops the command.
         """
         if clk_type == "PCIE":
             pcie_levels = self.static_data["gpu_data"][gpu_index]["bus"]["pcie_levels"]
@@ -999,9 +1003,11 @@ class TestCliBase(unittest.TestCase):
         per_gpu = []
         for table in tables:
             freq = table.get(clk_type)
-            if freq and freq["num_supported"]:
-                # The deep-sleep row occupies a table slot but is not settable.
-                per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
+            # A device with no table (e.g. an iGPU's empty pp_dpm_fclk) fails any mask.
+            if not freq or not freq["num_supported"]:
+                return 0
+            # The deep-sleep row occupies a table slot but is not settable.
+            per_gpu.append(freq["num_supported"] - int(freq["has_deep_sleep"]))
         return min(per_gpu) if per_gpu else 0
 
     @staticmethod
@@ -1110,6 +1116,44 @@ class TestCliBase(unittest.TestCase):
             return Verdict(f" {prefix}: Received and Allowed FAIL ({detail})", False)
         return Verdict(f" Success: Received and Expected FAIL ({detail})", False)
 
+    def _grade_each_gpu(self, cmd, cond, detail):
+        """Re-run a command that targeted every GPU once per GPU and grade each run.
+
+        The CLI folds differing per-device failures into MIXED_DEVICE_ERRORS, so GPUs
+        that each answer with an accepted but different code fail the run as a whole.
+
+        Returns:
+            Verdict | None: the per-GPU verdict, or None when *cmd* names one device,
+            a non-GPU device, or an output file.
+        """
+        words = cmd.split()
+        if "--gpu" in words:
+            index = words.index("--gpu")
+            if words[index + 1] != "all":
+                return None
+            del words[index : index + 2]
+        elif any(word in words for word in ("--cpu", "--core", "--vf", "--nic", "--switch")):
+            return None
+        gpu_ids = [entry["gpu"] for entry in self.list_data]
+        if len(gpu_ids) < 2 or "--file" in words:
+            return None
+
+        accept = self._accepted_codes(cond)
+        results = []
+        all_accepted = True
+        for gpu_id in gpu_ids:
+            gpu_cmd = " ".join([*words, "--gpu", str(gpu_id)])
+            rc, _, _ = self.util.RunCmdSync(gpu_cmd, msg_in=self._prompt_answer_for(gpu_cmd))
+            all_accepted = all_accepted and rc in accept
+            results.append(f"GPU {gpu_id} rc={rc} {EXIT_CODE_NAMES.get(rc, '')}".rstrip())
+        per_gpu = "; ".join(results)
+        if all_accepted:
+            return Verdict(f" Success: Received and Allowed FAIL ({detail}: {per_gpu})", False)
+        return Verdict(
+            f" Failure: Received FAIL ({detail}: {per_gpu}), expected {_describe_codes(accept)}",
+            True,
+        )
+
     def RunCmds(self, cmds):
         errors = []
         msg_len = 0
@@ -1151,6 +1195,8 @@ class TestCliBase(unittest.TestCase):
                     os.remove(self.tmp_filename)
 
             verdict = self._grade(cond, rc, file_error, detail)
+            if verdict.counts_as_failure and rc == AmdSmiExitCode.MIXED_DEVICE_ERRORS:
+                verdict = self._grade_each_gpu(cmd, cond, detail) or verdict
             msg += verdict.message
             if verdict.counts_as_failure:
                 errors.append(msg)
