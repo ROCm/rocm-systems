@@ -16,6 +16,8 @@ When you recognize a problem that an STL algorithm or container solves, **sugges
 - Less error-prone
 - Often more efficient
 - Easier to parallelize
+
+This project is **C++20**. Prefer `std::ranges` overloads and `std::views` over iterator-pair algorithms when the input is a whole container. Prefer `std::erase` / `std::erase_if` over the erase-remove idiom. `std::ranges::to` and `std::ranges::fold_left` are C++23 — do not use them.
 </IMPORTANT>
 
 Reference: [CppReference - Algorithms](https://en.cppreference.com/w/cpp/algorithm)
@@ -26,19 +28,19 @@ Reference: [CppReference - Algorithms](https://en.cppreference.com/w/cpp/algorit
 
 | When you see... | Suggest... |
 | ----------------- | ------------ |
-| Loop to find an element | `std::find`, `std::find_if` |
-| Loop to check if any/all elements match | `std::any_of`, `std::all_of`, `std::none_of` |
-| Loop to count elements | `std::count`, `std::count_if` |
-| Loop to copy elements | `std::copy`, `std::copy_if` |
-| Loop to transform elements | `std::transform` |
-| Loop to accumulate/sum values | `std::accumulate`, `std::reduce` |
-| Loop to remove elements | `std::remove`, `std::remove_if` + `erase` |
-| Loop to sort | `std::sort`, `std::stable_sort`, `std::partial_sort` |
-| Loop to find min/max | `std::min_element`, `std::max_element`, `std::minmax_element` |
-| Loop to reverse | `std::reverse` |
-| Loop to fill with values | `std::fill`, `std::generate` |
-| Loop to check if sorted | `std::is_sorted` |
-| Nested loops for set operations | `std::set_union`, `std::set_intersection`, `std::set_difference` |
+| Loop to find an element | `std::ranges::find`, `std::ranges::find_if` |
+| Loop to check if any/all elements match | `std::ranges::any_of`, `std::ranges::all_of`, `std::ranges::none_of` |
+| Loop to count elements | `std::ranges::count`, `std::ranges::count_if` |
+| Loop to copy elements | `std::ranges::copy`, `std::ranges::copy_if` |
+| Loop to transform elements | `std::ranges::transform` |
+| Loop to accumulate/sum values | `std::accumulate`, `std::reduce` (`std::ranges::fold_left` is C++23) |
+| Loop to remove elements | `std::erase`, `std::erase_if` |
+| Loop to sort | `std::ranges::sort`, `std::ranges::stable_sort`, `std::ranges::partial_sort` |
+| Loop to find min/max | `std::ranges::min_element`, `std::ranges::max_element`, `std::ranges::minmax_element` |
+| Loop to reverse | `std::ranges::reverse` |
+| Loop to fill with values | `std::ranges::fill`, `std::ranges::generate` |
+| Loop to check if sorted | `std::ranges::is_sorted` |
+| Nested loops for set operations | `std::ranges::set_union`, `std::ranges::set_intersection`, `std::ranges::set_difference` |
 
 ## Data Structures - When to Use What
 
@@ -181,7 +183,7 @@ int clamped = std::clamp(value, low, high);
 int sum = std::accumulate(v.begin(), v.end(), 0);
 int product = std::accumulate(v.begin(), v.end(), 1, std::multiplies<>{});
 
-// Reduce (parallelizable version of accumulate, C++17)
+// Reduce (parallelizable version of accumulate, C++20)
 int sum = std::reduce(v.begin(), v.end());
 
 // Inner product (dot product)
@@ -193,7 +195,7 @@ std::partial_sum(v.begin(), v.end(), result.begin());
 // Adjacent difference
 std::adjacent_difference(v.begin(), v.end(), result.begin());
 
-// Transform reduce (C++17)
+// Transform reduce (C++20)
 auto result = std::transform_reduce(v.begin(), v.end(), init, binary_op, unary_op);
 ```
 
@@ -267,32 +269,29 @@ When you detect an algorithm opportunity, present it like this:
 > }
 > ```
 >
-> Consider using `std::find`:
+> Consider using `std::ranges::find`:
 >
 > ```cpp
-> auto it = std::find(v.begin(), v.end(), target);
+> auto it = std::ranges::find(v, target);
 > ```
 >
 > **Benefits:** More readable, expresses intent, potentially optimized.
 
 ## Common Patterns
 
-### Erase-Remove Idiom
+### Erase
 
 ```cpp
-// Remove all even numbers
-v.erase(std::remove_if(v.begin(), v.end(),
-    [](int x) { return x % 2 == 0; }), v.end());
-
-// C++20 only (NOT available): std::erase_if(v, pred);
+// C++20
+std::erase_if(v, [](int x) { return x % 2 == 0; });
+std::erase(v, value);
 ```
 
 ### Transform + Back Inserter
 
 ```cpp
 std::vector<std::string> names;
-std::transform(people.begin(), people.end(),
-    std::back_inserter(names),
+std::ranges::transform(people, std::back_inserter(names),
     [](const Person& p) { return p.name; });
 ```
 
@@ -300,8 +299,7 @@ std::transform(people.begin(), people.end(),
 
 ```cpp
 std::vector<int> evens;
-std::copy_if(v.begin(), v.end(),
-    std::back_inserter(evens),
+std::ranges::copy_if(v, std::back_inserter(evens),
     [](int x) { return x % 2 == 0; });
 ```
 
@@ -315,22 +313,21 @@ std::string result = std::accumulate(strings.begin(), strings.end(),
     });
 ```
 
-## C++20 Ranges (NOT AVAILABLE)
+## C++20 Ranges
 
 <IMPORTANT>
-This project uses **C++17**. C++20 Ranges are NOT available.
-Use traditional STL algorithms with iterators instead.
+Use `std::ranges` and `std::views`. Do not use `std::ranges::to` (C++23). Copy a view into a container with the iterator-pair constructor or `std::ranges::copy`.
 </IMPORTANT>
 
 ```cpp
-// Use this (C++17) - traditional iterators
-std::vector<int> evens;
-std::copy_if(v.begin(), v.end(), std::back_inserter(evens),
-    [](int x) { return x % 2 == 0; });
-std::sort(evens.begin(), evens.end());
+std::ranges::sort(v);
+auto it = std::ranges::find_if(v, [](int x) { return x % 2 == 0; });
 
-// NOT available (C++20 ranges) - DO NOT USE
-// auto evens = v | std::views::filter(...) | std::ranges::to<...>();
+auto even_view = v | std::views::filter([](int x) { return x % 2 == 0; });
+std::vector<int> evens(even_view.begin(), even_view.end());
+
+// C++23 — do not use
+// auto evens = v | std::views::filter(...) | std::ranges::to<std::vector>();
 ```
 
 ## References

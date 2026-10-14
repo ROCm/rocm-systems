@@ -82,7 +82,11 @@ In C++20 most standard algorithms are `constexpr`, so you can use them inside a 
 ```cpp
 constexpr auto build_lut() {
     std::array<int, 256> t{};
-    std::ranges::generate(t, [i = 0]() mutable { return i * i++; });
+    std::ranges::generate(t, [i = 0]() mutable {
+        int n = i;
+        ++i;
+        return n * n;
+    });
     return t;
 }
 ```

@@ -515,7 +515,7 @@ items.emplace_back(image{});
 | **std::variant** | Fixed set of known types (prefer this when possible) |
 | **Virtual inheritance** | Types naturally form a hierarchy |
 
-**Standard library examples:** `std::function`, `std::any`, `std::move_only_function` (C++23)
+**Standard library examples:** `std::function`, `std::any`. `std::move_only_function` is C++23 — do not use it.
 
 ## Anti-Patterns to Avoid
 

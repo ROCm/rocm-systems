@@ -484,7 +484,7 @@ void process(T& obj) noexcept(noexcept(obj.do_work())) {
 [[nodiscard]] bool try_lock();
 [[nodiscard]] iterator find(const key_type& key);
 
-// Entire class (C++17) - all methods return important values
+// Entire class (C++20) - all methods return important values
 class [[nodiscard]] result {
     // ...
 };
@@ -532,9 +532,9 @@ void critical_section() {
 | `[[nodiscard]]` | Ignoring return value is likely a bug |
 | `[[maybe_unused]]` | Intentionally unused (suppress warning) |
 
-## C++20 Features (USE THESE)
+## Language and Library Features
 
-This project uses **C++20**. The C++17 features below remain valid and preferred; the C++20 additions follow them.
+This project uses **C++20**. The C++17 features below remain valid. Prefer the C++20 additions that follow.
 
 ### Type Deduction & Inference
 
@@ -578,7 +578,7 @@ This project uses **C++20**. The C++17 features below remain valid and preferred
 - **Execution policies**: `std::execution::par`, `std::execution::seq`
 
 ```cpp
-// C++17 examples (still valid in C++20)
+// C++17 examples (valid in this C++20 project)
 auto [iter, success] = map.insert({key, value});  // Structured binding
 
 if constexpr (std::is_integral_v<T>) {  // Compile-time if
@@ -594,6 +594,7 @@ std::string_view get_name();  // Zero-copy string view
 
 - **Concepts** - constrain templates (`template<std::integral T>`, `requires` clauses) instead of SFINAE
 - **Ranges** - `std::ranges::sort`, views, and `|` pipelines (see `programming-cpp-stl-algorithms`)
+- **`std::erase` / `std::erase_if`** - remove elements without the erase-remove idiom
 - **`std::span<T>`** - non-owning view over contiguous memory; prefer over pointer + size
 - **`std::jthread` + `std::stop_token`** - auto-joining threads with cooperative cancellation
 - **`std::condition_variable_any::wait(lock, stop_token, pred)`** - stop-token-interruptible waits
@@ -611,7 +612,8 @@ std::string_view get_name();  // Zero-copy string view
 - ~~`std::expected`~~ - use `std::optional` + error code, or a project Result type
 - ~~`std::print` / `std::println`~~ - use `std::format` to a stream, or `fmt`
 - ~~`std::flat_map` / `std::flat_set`~~, ~~`std::mdspan`~~, ~~`std::generator`~~
-- ~~Deducing `this`~~, ~~`if consteval`~~, ~~`std::ranges::to`~~
+- ~~Deducing `this`~~, ~~`if consteval`~~, ~~`std::ranges::to`~~, ~~`std::ranges::fold_left`~~
+- ~~`std::move_only_function`~~ - use `std::function`
 - ~~`gsl::span`~~ - GSL is NOT used in this project; use `std::span`
 
 **`std::span` guidance:** prefer `std::span<T>` (or `std::span<const T>`) over pointer + size for contiguous ranges. If the codebase already has a span-like type (`array_view`, `buffer_view`), match the surrounding code and use that instead.
