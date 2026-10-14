@@ -358,6 +358,29 @@ FailureOr<std::string> set_top_level_field(std::string_view json, std::string_vi
   return set_field_in_object(json, at, field, value, emit_error);
 }
 
+template <typename Value, typename ReadField>
+FailureOr<std::string> json_with_top_level_number(std::string_view json, std::string_view field,
+                                                  Value value, ReadField read_field,
+                                                  const util::DiagnosticEmitter &emit_error) {
+  FailureOr<std::string> rewritten =
+      set_top_level_field(json, field, std::to_string(value), emit_error);
+  if (rewritten.failed())
+    return Result::failure();
+
+  // The schema parser reports a bad document by throwing. Callers of this function
+  // handle failure through the returned result, so that message is emitted here.
+  Value applied = {};
+  try {
+    applied = with_parsed_simulation_config_json(rewritten.value(), rocjitsu::kEmbeddedSchema,
+                                                 std::move(read_field));
+  } catch (const std::runtime_error &error) {
+    return emit_error.emit() << error.what();
+  }
+  if (applied != value)
+    return emit_error.emit() << "cannot apply " << field << " to the simulation config";
+  return std::move(rewritten.value());
+}
+
 FailureOr<std::string> json_with_gpu_count(std::string_view json, uint32_t count,
                                            const util::DiagnosticEmitter &emit_error) {
   size_t at = 0;
@@ -441,30 +464,41 @@ FailureOr<std::string> json_with_plugin_enabled(std::string_view json, std::stri
 
 FailureOr<std::string> json_with_cpu_thread_budget(std::string_view json, uint32_t budget,
                                                    const util::DiagnosticEmitter &emit_error) {
-  FailureOr<std::string> rewritten =
-      set_top_level_field(json, kBudgetField, std::to_string(budget), emit_error);
-  if (rewritten.failed())
-    return Result::failure();
-
-  // The schema parser reports a bad document by throwing. Callers of this function
-  // handle failure through the returned result, so that message is emitted here.
-  uint32_t applied = 0;
-  try {
-    applied = with_parsed_simulation_config_json(
-        rewritten.value(), rocjitsu::kEmbeddedSchema,
-        [](const fb::SimulationConfig *config) { return config->cpu_thread_budget(); });
-  } catch (const std::runtime_error &error) {
-    return emit_error.emit() << error.what();
-  }
-  if (applied != budget)
-    return emit_error.emit() << "cannot apply cpu_thread_budget to the simulation config";
-  return std::move(rewritten.value());
+  return json_with_top_level_number(
+      json, kBudgetField, budget,
+      [](const fb::SimulationConfig *config) { return config->cpu_thread_budget(); }, emit_error);
 }
 
 FailureOr<std::string> json_with_launch_overrides(std::string_view json,
                                                   const LaunchOverrides &overrides,
                                                   const util::DiagnosticEmitter &emit_error) {
   std::string rewritten(json);
+  if (overrides.num_threads) {
+    auto result = json_with_top_level_number(
+        rewritten, "num_threads", *overrides.num_threads,
+        [](const fb::SimulationConfig *config) { return config->num_threads(); }, emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+  }
+  if (overrides.cpu_dispatch_threads) {
+    auto result = json_with_top_level_number(
+        rewritten, "cpu_dispatch_threads", *overrides.cpu_dispatch_threads,
+        [](const fb::SimulationConfig *config) { return config->cpu_dispatch_threads(); },
+        emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+  }
+  if (overrides.async_helper_threads) {
+    auto result = json_with_top_level_number(
+        rewritten, "async_helper_threads", *overrides.async_helper_threads,
+        [](const fb::SimulationConfig *config) { return config->async_helper_threads(); },
+        emit_error);
+    if (result.failed())
+      return Result::failure();
+    rewritten = std::move(result.value());
+  }
   if (overrides.exec_mode) {
     std::string value = "\"";
     value.append(*overrides.exec_mode).append("\"");
