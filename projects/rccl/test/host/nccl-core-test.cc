@@ -4,13 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/nccl_device/core.cc: the ncclTeam* family that
-// maps a communicator onto its world/LSA/CFT/rail views, plus the
-// world/LSA rank-translation helpers. Five of the seven gate through
-// ncclDevrInitOnce first (all but ncclTeamWorld and ncclTeamRankToWorld), so
-// the fake's hook lets us drive both the success path (devrState fields read
-// back verbatim) and the failure path (all five return a poisoned/zeroed
-// answer rather than touching uninitialised devrState).
+// Host-only microtests for src/nccl_device/core.cc's ncclTeam* and rank-translation helpers.
+// ncclDevrInitOnce is faked so both its success and failure paths run.
 
 #include <gtest/gtest.h>
 
@@ -47,8 +42,7 @@ TEST_F(NcclCoreMicrotest, TeamWorld_ReturnsCommNRanksAndRankWithStrideOne) {
 }
 
 TEST_F(NcclCoreMicrotest, TeamWorldAndRankToWorld_IgnoreAFailingInitOnce) {
-  // The only two of the seven that don't gate on ncclDevrInitOnce: with it
-  // failing, both must still return real values rather than a zeroed/-1 answer.
+  // The two that don't gate on ncclDevrInitOnce still return real values when it fails.
   g_devrInitOnce = [](ncclComm*) { return ncclSystemError; };
   comm->nRanks = 4;
   comm->rank = 2;
@@ -70,8 +64,7 @@ TEST_F(NcclCoreMicrotest, TeamLsa_SuccessPath_ReadsLsaSizeAndSelfFromDevrState) 
 }
 
 TEST_F(NcclCoreMicrotest, TeamLsa_InitOnceFails_ReturnsZeroedTeamWithoutReadingDevrState) {
-  // Poison lsaSize/lsaSelf so that if the function ignored the failure and
-  // read them anyway, the zero-check below would fail loudly.
+  // Poisoned, so reading them despite the failure shows up below.
   comm->devrState.lsaSize = 99;
   comm->devrState.lsaSelf = 99;
   g_devrInitOnce = [](ncclComm*) { return ncclSystemError; };
@@ -101,9 +94,7 @@ TEST_F(NcclCoreMicrotest, TeamCftMultimem_InitOnceFails_ReturnsZeroedTeam) {
 }
 
 TEST_F(NcclCoreMicrotest, TeamRail_SuccessPath_DividesCommNRanksAndRankByLsaSize) {
-  // Constants chosen so each field separates `/` from its look-alikes: nRanks 24/4=6 is
-  // neither lsaSize (4) nor 24%4=0, and rank 9/4=2 differs from 9%4=1 (ncclTeamInnerFactor
-  // uses `%` on the same field, so that mix-up is the realistic one).
+  // 24/4 = 6 and 9/4 = 2 differ from the `%` results ncclTeamInnerFactor would give.
   comm->nRanks = 24;
   comm->rank = 9;
   comm->devrState.lsaSize = 4;
@@ -135,14 +126,7 @@ TEST_F(NcclCoreMicrotest, TeamCft_FlatMode_ReturnsFlatTeamFromCftSizeAndSelf) {
 }
 
 TEST_F(NcclCoreMicrotest, TeamCft_HierMultimemMode_OuterFactorsTheFlatTeamByCftMcSize) {
-  // ncclTeamOuterFactor(flat, innerSize): nRanks = flat.nRanks/innerSize,
-  // rank = flat.rank/innerSize, stride = flat.stride*innerSize (== 1*innerSize
-  // here since the flat team's stride is always 1).
-  //
-  // lsaSize is set to a distinct non-zero value (the HIER_LSA test's own
-  // divisor) so that if the two mode arms in production were swapped, this
-  // test would divide by a real, wrong number and get a mis-answer to diff
-  // against -- not silently divide by zero and crash identically either way.
+  // lsaSize is a distinct non-zero value, so swapped mode arms give a wrong answer, not a crash.
   comm->devrState.cftSize = 12;
   comm->devrState.cftSelf = 7;
   comm->devrState.cftMcSize = 3;
@@ -154,8 +138,7 @@ TEST_F(NcclCoreMicrotest, TeamCft_HierMultimemMode_OuterFactorsTheFlatTeamByCftM
 }
 
 TEST_F(NcclCoreMicrotest, TeamCft_HierLsaMode_OuterFactorsTheFlatTeamByLsaSize) {
-  // cftMcSize is likewise set to a distinct non-zero value for the same
-  // swapped-arm reason as the HIER_MULTIMEM test above.
+  // cftMcSize is distinct for the same reason.
   comm->devrState.cftSize = 20;
   comm->devrState.cftSelf = 9;
   comm->devrState.lsaSize = 5;
@@ -188,8 +171,7 @@ TEST_F(NcclCoreMicrotest, TeamCft_InitOnceFails_ReturnsZeroedTeamRegardlessOfMod
 }
 
 TEST_F(NcclCoreMicrotest, TeamRankToWorld_MapsATeamLocalRankBackToItsWorldRankViaStride) {
-  // Does not gate on ncclDevrInitOnce at all -- pure arithmetic over comm->rank
-  // and the caller-supplied team, so no fake wiring is needed for this one.
+  // Pure arithmetic: doesn't gate on ncclDevrInitOnce.
   comm->rank = 10;
   ncclTeam_t team{/*nRanks=*/4, /*rank=*/2, /*stride=*/3};
   // comm->rank + (rank - team.rank) * team.stride
