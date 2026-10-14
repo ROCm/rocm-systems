@@ -76,6 +76,15 @@ def get_min_max_time(connection):
     ):
         subqueries.append("SELECT start as min_time, end as max_time FROM hip_events")
 
+    # PC samples can be the only timed records (PC sampling without tracing).
+    if (
+        hasattr(connection, "supported_features")
+        and "pc_sampling" in connection.supported_features
+    ):
+        subqueries.append(
+            "SELECT timestamp as min_time, timestamp as max_time FROM rocpd_gpu_pc_sample"
+        )
+
     union_all = " UNION ALL ".join(subqueries)
     min_max_query = f"""
         SELECT
@@ -182,6 +191,9 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
 
     def dump_min_max(label):
         bounds_min, bounds_max = get_min_max_time(connection)
+        if bounds_min is None or bounds_max is None:
+            print(f"# {label:>8} time bounds: none (no timed records)")
+            return None
         # bounds_min /= 1.0e9
         # bounds_max /= 1.0e9
         delta = bounds_max - bounds_min
@@ -191,6 +203,10 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
         return delta
 
     orig_delta = dump_min_max("Initial")
+    if orig_delta is None:
+        raise ValueError(
+            "ERROR: Cannot create time window - trace file contains no timing data"
+        )
 
     # Get start and end times
     if not is_marker_mode:
@@ -265,7 +281,12 @@ def apply_time_window(connection: RocpdImportData, **kwargs: Any) -> None:
 
     upd_delta = dump_min_max("Windowed")
 
-    reduction = (1.0 - (upd_delta / orig_delta)) * 100.0
+    if upd_delta is None:
+        reduction = 100.0
+    elif orig_delta == 0:
+        reduction = 0.0
+    else:
+        reduction = (1.0 - (upd_delta / orig_delta)) * 100.0
     print(f"# Time windowing reduced the duration by {reduction:6.2f}%")
 
     return connection

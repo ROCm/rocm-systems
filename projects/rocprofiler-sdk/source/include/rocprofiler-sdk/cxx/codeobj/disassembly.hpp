@@ -231,21 +231,30 @@ public:
         std::memcpy(buffer.data(), codeobj_data, codeobj_size);
 
         THROW_COMGR(amd_comgr_create_data(AMD_COMGR_DATA_KIND_EXECUTABLE, &data));
-        THROW_COMGR(amd_comgr_set_data(data, buffer.size(), buffer.data()));
+        // The destructor does not run for a failed constructor: release the data handle (and
+        // the bytes amd_comgr_set_data copied into it) before propagating the failure.
+        try
+        {
+            THROW_COMGR(amd_comgr_set_data(data, buffer.size(), buffer.data()));
 
-        size_t      isa_size = 128;
-        std::string input_isa{};
-        input_isa.resize(isa_size);
-        THROW_COMGR(amd_comgr_get_data_isa_name(data, &isa_size, input_isa.data()));
+            size_t      isa_size = 128;
+            std::string input_isa{};
+            input_isa.resize(isa_size);
+            THROW_COMGR(amd_comgr_get_data_isa_name(data, &isa_size, input_isa.data()));
 
-        THROW_COMGR(amd_comgr_create_disassembly_info(
-            input_isa.data(),
-            &DisassemblyInstance::memory_callback,
-            &DisassemblyInstance::inst_callback,
-            [](uint64_t, void*) {},
-            &info));
+            THROW_COMGR(amd_comgr_create_disassembly_info(
+                input_isa.data(),
+                &DisassemblyInstance::memory_callback,
+                &DisassemblyInstance::inst_callback,
+                [](uint64_t, void*) {},
+                &info));
 
-        if(input_isa.find("gfx1250") != std::string::npos) gfxip = 1250;
+            if(input_isa.find("gfx1250") != std::string::npos) gfxip = 1250;
+        } catch(...)
+        {
+            amd_comgr_release_data(data);
+            throw;
+        }
     }
     ~DisassemblyInstance()
     {
