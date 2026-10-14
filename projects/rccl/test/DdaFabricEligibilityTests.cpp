@@ -1792,4 +1792,24 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_PastThresholdRejected)
         mockComm_.get(), sendbuff_, recvbuff_, shardBytes / sizeof(float), ncclFloat32, ncclSum));
 }
 
+// Bank 1 used to start at nRanks * slotStride (8 MiB at 4 ranks, 16 MiB at 8).
+// That range sits inside bank 0 of the other LL tiers, which share this scratch
+// and place their bank 1 at ddaBankSize. The LL floor is what sizes scratch when
+// LL is on, so the check uses that allocation rather than the fixture's max.
+TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_BankOneMatchesSharedScratchMidpoint)
+{
+    for (const int nRanks : {4, 8}) {
+        const size_t scratch = nccl_dda_detail::ddaFabricScratchSizing(
+            nRanks, -1, 1, 8 * 1024 * 1024, 1, 0);
+        const size_t bank = dda::common::ddaBankSize(scratch);
+        const size_t packedBank = dda::common::ddaLLRsBankBytes(nRanks);
+
+        EXPECT_LT(packedBank, bank) << "nRanks=" << nRanks;
+        EXPECT_EQ(dda::common::ddaLLRsBankOffsetPkts(0, bank), 0u) << "nRanks=" << nRanks;
+        EXPECT_EQ(dda::common::ddaLLRsBankOffsetPkts(1, bank) * sizeof(dda::common::LLPacket16),
+                  bank)
+            << "nRanks=" << nRanks;
+    }
+}
+
 } // namespace RcclUnitTesting
