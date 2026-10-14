@@ -109,11 +109,8 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetOnlyCompressed)
   endif()
 
-  # Build hipSpirvTest with a custom command so it is compiled for amdgcnspirv only.
-  # Catch2 v3 is not header-only, so its include dirs and library come from the
-  # Catch2::Catch2 target (works for both find_package and FetchContent Catch2).
-  # On Windows the custom command does not get CMake's MSVC runtime flags, so pick
-  # the runtime that matches CMAKE_MSVC_RUNTIME_LIBRARY (default is the DLL runtime).
+  # Custom command so hipSpirvTest is compiled for amdgcnspirv only.
+  # On Windows, match the MSVC runtime used by Catch2 (CMAKE_MSVC_RUNTIME_LIBRARY).
   set(SPIRV_TEST_RUNTIME_FLAG)
   if(WIN32)
     if(NOT CMAKE_MSVC_RUNTIME_LIBRARY OR CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL")
