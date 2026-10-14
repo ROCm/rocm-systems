@@ -215,7 +215,7 @@ After Phase 2 YAML, the gfx942 allocator gate is `packable_multi == 0`, passes =
 
 | Decision | Why | Alternative |
 |----------|-----|-------------|
-| SPP packing replaces the shipping allocator | The shipping pack minimizes passes for all 274 counters, so 75 metrics whose sets fit one pass stay split | The shipping allocator's hand-kept list of metrics to keep together. It covers only a few metric IDs |
+| SPP packing replaces the shipping allocator | The shipping pack minimizes passes for all 274 counters, so 75 metrics whose sets fit one pass stay split | The shipping allocator's hand-kept list of a few metric IDs. It visits those IDs first. The greedy pass still visits every metric |
 | On gfx1250, `SP_VALU_*` and `SQ_VMEM_*` do not share a pass | Both charge SQ, and the SP FLOP counters return zero when they share a pass. Free SQ slots do not prevent that. The check runs before a set is called single-pass packable, and during placement, merge, and leftover fill. An extra pass is acceptable | Treating free SQ slots as enough to share a pass |
 | Copy a counter into another pass when two PMC sets cannot share a pass | Keeping each counter in only one pass cannot place all 358 SPP sets, and gfx942 stays at 14 passes | One dedicated pass per metric |
 | Reading each metric from one pass ships with packing | A copied counter has several values. Merging them evaluates the ratio on different replays. `CPC Utilization` averages can sit far above 100% | Packing alone, or reading from one pass alone |
