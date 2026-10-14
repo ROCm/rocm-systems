@@ -124,7 +124,10 @@ static ncclResult_t ginRocshmemGdaConnect(void* ctx, void* handles[], int nranks
   cctx->rank = rank;
   cctx->comm = ictx->comm;
 
-  // Resolve traffic class: NCCL_GIN_IB_TC > NCCL_IB_TC > comm config > default 0
+  // Resolve traffic class: NCCL_GIN_IB_TC > NCCL_IB_TC > host comm config > default 0.
+  // The proxy path also has a device-communicator ginTrafficClass rung, but the GDA
+  // backend creates its QPs here in connect(), before ginConfig.trafficClass is known
+  // (it only reaches createContext()), so that rung cannot be honored on this path.
   int trafficClass = 0;
   if (ncclParamGinIbTc() != -1) {
     trafficClass = static_cast<int>(ncclParamGinIbTc());

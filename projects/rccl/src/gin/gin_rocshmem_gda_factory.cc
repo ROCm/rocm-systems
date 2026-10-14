@@ -1239,7 +1239,8 @@ int rocshmem_gin_create_qps(int nRanks, int myRank, int (*allgather)(void* ctx, 
     *out_gpu_qps = gpu_ptr_array;
   }
 
-  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d, tc=%d)", nRanks, set->nic.nic_name.c_str(), myRank, nRanks, traffic_class);
+  LOG_TRACE("GIN QP factory: %d QPs ready on %s (rank %d/%d, tc=%d)", nRanks, set->nic.nic_name.c_str(), myRank,
+            nRanks, set->traffic_class);
   *out_qp_set = set;
   return 0;
 
