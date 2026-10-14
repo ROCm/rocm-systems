@@ -65,7 +65,8 @@ TEST(ring_buffer, init_zero_size_constructor)
 TEST(ring_buffer, init_rounds_to_page_size)
 {
     // non-zero sizes keep rounding up to a multiple of the page size
-    const auto _page = units::get_page_size();
+    // get_page_size() is int64_t; brace-init of a size_t rejects the narrowing conversion
+    const auto _page = static_cast<size_t>(units::get_page_size());
 
     auto _one = container::base::ring_buffer{1};
     EXPECT_EQ(_one.capacity(), _page);
