@@ -688,6 +688,19 @@ TEST(GpuUnit, TruncatedMetricsTableReportsUnexpectedSize) {
   EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE);
 }
 
+// An ASIC whose driver has no metrics callback still publishes the node, and
+// reading it returns nothing at all. That is the device reporting it has no
+// metrics, so it has to stay unsupported rather than be read as a bad table.
+TEST(GpuUnit, EmptyMetricsNodeReportsNotSupported) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("empty_node");
+  fake_device.WriteMetrics({});
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+}
+
 // The early return that keeps an unsupported revision from reaching the copy
 // stage lives in the public entry point, so exercise that entry point: the
 // Device stage alone stays green with the guard deleted.

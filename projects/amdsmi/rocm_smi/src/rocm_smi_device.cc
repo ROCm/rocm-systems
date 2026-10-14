@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -1177,24 +1178,37 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
     return errno;
   }
 
-  size_t num = fread(p_binary_data, b_size, 1, ptr);
-  // fread() reports both a short file and a failed read as 0, and only the
-  // stream says which. Ask before fclose() invalidates it.
+  // Count bytes rather than whole items, so a node that came up short can be
+  // told apart from one that produced nothing at all.
+  errno = 0;
+  const std::size_t bytes_read = fread(p_binary_data, 1, b_size, ptr);
+  const int read_errno = errno;
+  // fread() reports an empty node, a short node and a refused read alike, and
+  // only the stream says which. Ask before fclose() invalidates it.
   const bool read_failed = (std::ferror(ptr) != 0);
   fclose(ptr);
-  if ((num * b_size) != b_size) {
-    // The node opened, so it is neither missing nor unreadable: either the
-    // driver failed to produce the table or the node held fewer bytes than it
-    // said it would. Report both as a size error -- no caller tells them apart
-    // -- but name the cause, because ENOENT would reach the caller as
-    // NOT_SUPPORTED and read as a verdict on the device rather than the data.
+  if (bytes_read != b_size) {
+    auto result = EIO;
+    const auto* cause = "the node came up short of the size it declared";
+    if (read_failed) {
+      // The driver refused the read: a suspended or resetting device answers
+      // EBUSY and a runtime-inactive one EPERM. Hand back what it said, so
+      // those keep reaching the caller as the device states they are.
+      result = (read_errno != 0) ? read_errno : EIO;
+      cause = "the driver refused the read";
+    } else if (bytes_read == 0) {
+      // An ASIC whose driver has no metrics callback publishes an empty node.
+      // That is the device saying it has nothing to report, not a malformed
+      // table, so it has to stay NOT_SUPPORTED rather than become a size error.
+      result = ENOENT;
+      cause = "the node is empty";
+    }
     ss << "Could not read DevInfoBinary for DevInfoType (" << get_type_string(type) << ") - SYSFS ("
-       << sysfs_path << "), "
-       << (read_failed ? "the driver failed the read" : "the node was shorter than declared")
-       << "; [buff: " << p_binary_data << " size: " << b_size << " read: " << num << "]"
-       << ", returning EIO (" << std::strerror(EIO) << ")";
+       << sysfs_path << "), " << cause << "; [buff: " << p_binary_data << " size: " << b_size
+       << " read: " << bytes_read << "]"
+       << ", returning " << std::to_string(result) << " (" << std::strerror(result) << ")";
     LOG_ERROR(ss);
-    return EIO;
+    return result;
   }
 
   if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
