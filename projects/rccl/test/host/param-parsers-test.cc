@@ -4,13 +4,8 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/include/param/parser_default.h,
-// src/include/param/parser_enum.h, src/include/param/parser_bitset.h, and
-// src/include/param/parser_list.h: the four parser factories that
-// src/include/param/param.h wires every DEFINE_NCCL_PARAM up to. Second PR
-// in the AICOMRCCL-2820 stacked chain; see param-utils-test.cc for the
-// shared ncclParamParser<T> wrapper and option-set builders these factories
-// return/consume.
+// Host-only microtests for the parser factories in
+// src/include/param/parser_{default,enum,bitset,list}.h.
 
 #include <gtest/gtest.h>
 
@@ -28,9 +23,7 @@
 
 namespace {
 
-// ---------------------------------------------------------------------------
 // ncclParamParserDefault<T>: bool
-// ---------------------------------------------------------------------------
 
 TEST(ParamParsersMicrotest, Bool_ResolvesEveryAcceptedSpelling) {
   bool out = false;
@@ -67,21 +60,15 @@ TEST(ParamParsersMicrotest, Bool_DescribesAcceptedSpellings) {
   EXPECT_STREQ("Boolean: 1/T/TRUE or 0/F/FALSE", ncclParamParserDefault<bool>::desc);
 }
 
-// ---------------------------------------------------------------------------
 // ncclParamParserDefault<T>: const char*
-// ---------------------------------------------------------------------------
 
 TEST(ParamParsersMicrotest, Cstr_ResolvePassesThePointerThrough) {
-  // EXPECT_EQ(in, out), not EXPECT_STREQ: resolve() aliases the caller's
-  // buffer (parser_default.h:69-73) rather than copying it, so the test must
-  // check pointer identity, which EXPECT_STREQ's content-only check can't see.
+  // EXPECT_EQ, not EXPECT_STREQ: resolve() aliases the caller's buffer.
   const char* in = "hello";
   const char* out = nullptr;
   EXPECT_EQ(ncclSuccess, ncclParamParserDefault<const char*>::resolve(in, out));
   EXPECT_EQ(in, out);
-  // The one resolve() here that accepts a null input rather than rejecting
-  // it: bool, integer, OneOf, and ListOf all pin their null/empty rejection,
-  // but this assigns straight through and still returns ncclSuccess.
+  // Unlike the other parsers, a null input is accepted here.
   out = in;
   EXPECT_EQ(ncclSuccess, ncclParamParserDefault<const char*>::resolve(nullptr, out));
   EXPECT_EQ(nullptr, out);
@@ -97,9 +84,7 @@ TEST(ParamParsersMicrotest, Cstr_ToStringEmptyForNull) {
   EXPECT_EQ("hello", ncclParamParserDefault<const char*>::toString("hello"));
 }
 
-// ---------------------------------------------------------------------------
 // ncclIntegerParser / ncclParamParserDefault<integer types>
-// ---------------------------------------------------------------------------
 
 TEST(ParamParsersMicrotest, Integer_ResolvesSignedAndUnsigned) {
   int32_t s = 0;
@@ -117,10 +102,7 @@ TEST(ParamParsersMicrotest, Integer_RejectsNullEmptyAndTrailingGarbage) {
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int32_t>::resolve("", out));
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int32_t>::resolve("12abc", out));
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<int32_t>::resolve("abc", out));
-  // The signed and unsigned arms duplicate this guard (parser_default.h:99,102)
-  // but every other unsigned resolve() case here ("42", the ERANGE overflow,
-  // and "-1") takes a path that never reaches it, so the unsigned arm's own
-  // copy needs its own garbage cases.
+  // The unsigned arm has its own copy of this guard, so it needs its own garbage cases.
   uint32_t unsignedOut = 0;
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint32_t>::resolve("12abc", unsignedOut));
   EXPECT_EQ(ncclInvalidArgument, ncclParamParserDefault<uint32_t>::resolve("abc", unsignedOut));
@@ -142,9 +124,7 @@ TEST(ParamParsersMicrotest, Integer_ParsesBase10Only_NoHexOrOctalPrefix) {
 }
 
 TEST(ParamParsersMicrotest, Integer_RejectsOverflowOfTheIntermediateLongLong) {
-  // Exercises strtoll/strtoull's own ERANGE, as distinct from the T-narrowing
-  // truncation in Integer_NarrowerTypeTruncatesRatherThanErrors below: this
-  // magnitude overflows (unsigned) long long itself, not just int32_t/uint32_t.
+  // Overflows long long itself, not just the narrower T.
   int32_t signedOut = 0;
   EXPECT_EQ(ncclInvalidArgument,
             ncclParamParserDefault<int32_t>::resolve("999999999999999999999999999", signedOut));
@@ -154,18 +134,14 @@ TEST(ParamParsersMicrotest, Integer_RejectsOverflowOfTheIntermediateLongLong) {
 }
 
 TEST(ParamParsersMicrotest, Integer_NegativeUnsignedWrapsRatherThanErrors) {
-  // strtoull() accepts a leading '-' and negates the parsed magnitude rather
-  // than rejecting it; pinning that passthrough behavior here since
-  // ncclIntegerParser<uint32_t>::resolve() does not special-case the sign.
+  // strtoull() negates a leading '-' rather than rejecting it (pinned as observed).
   uint32_t out = 0;
   EXPECT_EQ(ncclSuccess, ncclParamParserDefault<uint32_t>::resolve("-1", out));
   EXPECT_EQ(0xFFFFFFFFu, out);
 }
 
 TEST(ParamParsersMicrotest, Integer_NarrowerTypeTruncatesRatherThanErrors) {
-  // resolve() only checks errno/ERANGE on the intermediate long long, not
-  // against T's own range; a value that overflows int8_t but not long long
-  // silently truncates via static_cast, matching current production behavior.
+  // Only long long's range is checked, so this truncates silently (pinned as observed).
   int8_t out = 0;
   EXPECT_EQ(ncclSuccess, ncclParamParserDefault<int8_t>::resolve("200", out));
   EXPECT_EQ(static_cast<int8_t>(200), out);
@@ -181,9 +157,7 @@ TEST(ParamParsersMicrotest, Integer_ToStringMatchesStdToString) {
   EXPECT_EQ(std::to_string(7u), ncclParamParserDefault<uint32_t>::toString(7u));
 }
 
-// ---------------------------------------------------------------------------
 // ncclParamParserDefault<T>: primary template (unsupported types)
-// ---------------------------------------------------------------------------
 
 TEST(ParamParsersMicrotest, UnsupportedType_AlwaysFailsAndDescribesItself) {
   double out = 0.0;
@@ -193,9 +167,7 @@ TEST(ParamParsersMicrotest, UnsupportedType_AlwaysFailsAndDescribesItself) {
   EXPECT_STREQ("Unsupported parser", ncclParamParserDefault<double>::desc);
 }
 
-// ---------------------------------------------------------------------------
 // ncclParamDefault<T> factory
-// ---------------------------------------------------------------------------
 
 TEST(ParamParsersMicrotest, DefaultFactory_WiresTheMatchingSpecialization) {
   const ncclParamParser<bool>& parser = ncclParamDefault<bool>();
@@ -211,9 +183,7 @@ TEST(ParamParsersMicrotest, DefaultFactory_ReturnsTheSameInstanceEveryCall) {
   EXPECT_EQ(&ncclParamDefault<int32_t>(), &ncclParamDefault<int32_t>());
 }
 
-// ---------------------------------------------------------------------------
 // ncclParamBounded<T>
-// ---------------------------------------------------------------------------
 
 TEST(ParamParsersMicrotest, Bounded_ValidatesWithinClosedRangeOnly) {
   ncclParamParser<int32_t> parser = ncclParamBounded<int32_t>(1, 10);
@@ -230,8 +200,7 @@ TEST(ParamParsersMicrotest, Bounded_ResolveAndToStringDelegateToTheDefaultParser
   EXPECT_EQ(ncclSuccess, parser.resolve("7", out));
   EXPECT_EQ(7, out);
   EXPECT_EQ("7", parser.toString(7));
-  // resolve() only delegates parsing to the default parser; bounds are enforced
-  // separately by validate(), so an out-of-range value still resolves here.
+  // Bounds are enforced by validate(), not resolve().
   EXPECT_EQ(ncclSuccess, parser.resolve("11", out));
   EXPECT_EQ(11, out);
   EXPECT_FALSE(parser.validate(out));
@@ -249,9 +218,7 @@ TEST(ParamParsersMicrotest, Bounded_SingleArgOverloadDefaultsUpperToTypeMax) {
   EXPECT_TRUE(parser.validate(std::numeric_limits<uint8_t>::max()));
 }
 
-// ---------------------------------------------------------------------------
 // ncclParamOneOf (parser_enum.h)
-// ---------------------------------------------------------------------------
 
 enum class Mode : int32_t { Off = 0, On = 1, Auto = 2 };
 
@@ -301,17 +268,12 @@ TEST(ParamParsersMicrotest, OneOf_DescribesEachOptionWithOrWithoutADescription) 
       parser.desc);
 }
 
-// ---------------------------------------------------------------------------
 // ncclParamBitsetOf (parser_bitset.h)
-// ---------------------------------------------------------------------------
 
 enum class Flag : uint32_t { None = 0, A = 1, B = 2, C = 4, AB = 3 };
 
 ncclParamParser<uint32_t> MakeFlagParser(bool ignoreUnknown = false) {
-  // NONE is listed so toString(0) returns it from the exact-match pass, and so
-  // bitsetToString's isSingleBit(0) guard skips it whenever decomposition runs
-  // for some other value instead. C carries a description so the built desc
-  // string exercises both the described and undescribed option formatting.
+  // NONE is listed so toString(0) returns it; C has a description so both desc formats appear.
   auto opts = makeOptions(makeOption<Flag>("NONE", Flag::None), makeOption<Flag>("A", Flag::A),
                           makeOption<Flag>("B", Flag::B), makeOption<Flag>("C", Flag::C, "the C bit"),
                           makeOption<Flag>("AB", Flag::AB));
@@ -364,12 +326,10 @@ TEST(ParamParsersMicrotest, Bitset_ResolveTrimsAndSkipsEmptyTokens) {
 TEST(ParamParsersMicrotest, Bitset_CaretPrefixInvertsTheMask) {
   auto parser = MakeFlagParser();
   uint32_t out = 0;
-  // ^A starts from all-bits-set and clears only A's single bit, not any
-  // composite alias that happens to include it.
+  // ^A starts from all bits set and clears only A's bit.
   EXPECT_EQ(ncclSuccess, parser.resolve("^A", out));
   EXPECT_EQ(~uint32_t(0) & ~uint32_t(1), out);
-  // A bare '^' finds no token to clear, so every bit stays set -- worth
-  // pinning since that's a one-character env value enabling every flag.
+  // A bare '^' clears nothing, so every bit stays set.
   EXPECT_EQ(ncclSuccess, parser.resolve("^", out));
   EXPECT_EQ(~uint32_t(0), out);
 }
@@ -394,9 +354,7 @@ TEST(ParamParsersMicrotest, Bitset_RejectsNullInput) {
 }
 
 TEST(ParamParsersMicrotest, Bitset_EmptyStringResolvesToZeroRatherThanErroring) {
-  // Unlike nullptr, "" passes the null check and the token loop simply never
-  // finds a non-empty token to OR in, so this succeeds with no bits set --
-  // distinct from a rejected unknown token.
+  // "" has no tokens, so it succeeds with no bits set, unlike an unknown token.
   auto parser = MakeFlagParser();
   uint32_t out = 0xFFu;
   EXPECT_EQ(ncclSuccess, parser.resolve("", out));
@@ -410,26 +368,19 @@ TEST(ParamParsersMicrotest, Bitset_ValidateAlwaysTrue) {
 
 TEST(ParamParsersMicrotest, Bitset_ToStringPrefersAnExactCompositeMatch) {
   auto parser = MakeFlagParser();
-  // 3 (A|B) is itself a listed option (AB); the exact-match pass finds it
-  // before decomposition ever runs.
+  // 3 (A|B) is itself the listed AB, found by the exact-match pass.
   EXPECT_EQ("AB", parser.toString(3u));
 }
 
 TEST(ParamParsersMicrotest, Bitset_ToStringDecomposesAnUnlistedCombination) {
   auto parser = MakeFlagParser();
-  // 5 (A|C) has no listed alias, so it decomposes into single-bit options,
-  // skipping AB (not a single bit) even though AB's own bit (A) is set.
+  // 5 (A|C) has no alias, so it decomposes into single bits, skipping AB.
   EXPECT_EQ("A,C", parser.toString(5u));
 }
 
 TEST(ParamParsersMicrotest, Bitset_ToStringDecompositionSkipsOverlappingCompositeAlias) {
-  // MakeFlagParser declares AB after A and B, so by the time decomposition
-  // would reach AB, A and B have already consumed its bits out of `remaining`
-  // regardless of the isSingleBit guard -- that ordering makes the guard
-  // unobservable through MakeFlagParser alone. Declaring AB first instead
-  // means decomposition reaches it while both its bits are still available:
-  // without the guard at parser_bitset.h:83, AB matches "A|B|C" (7) as a
-  // subset and leaks into the output alongside C.
+  // AB declared first, so decomposition reaches it with both bits still set: only the isSingleBit
+  // guard keeps it out of the output.
   auto opts = makeOptions(makeOption<Flag>("AB", Flag::AB), makeOption<Flag>("A", Flag::A),
                           makeOption<Flag>("B", Flag::B), makeOption<Flag>("C", Flag::C));
   auto parser = ncclParamBitsetOf<Flag, uint32_t>(opts);
@@ -439,32 +390,24 @@ TEST(ParamParsersMicrotest, Bitset_ToStringDecompositionSkipsOverlappingComposit
 TEST(ParamParsersMicrotest, Bitset_ToStringOfZeroOrNoMatchIsNone) {
   auto parser = MakeFlagParser();
   EXPECT_EQ("NONE", parser.toString(0u));
-  // 8u matches no alias and no listed single bit, so this reaches the
-  // fallback's own "NONE" arm rather than the exact-match pass above.
+  // 8u matches nothing listed, so this reaches the fallback "NONE".
   EXPECT_EQ("NONE", parser.toString(8u));
 }
 
 TEST(ParamParsersMicrotest, Bitset_ToStringSilentlyDropsAnUnlistedBit) {
   auto parser = MakeFlagParser();
-  // 9u is A (1, listed) | an unlisted bit (8). Decomposition only emits listed
-  // single-bit options, so the unlisted bit is dropped from the string with no
-  // indication it was ever set -- toString is not round-trippable here.
+  // 9u is A | an unlisted bit; the unlisted bit is dropped from the string.
   EXPECT_EQ("A", parser.toString(9u));
 }
 
 TEST(ParamParsersMicrotest, Bitset_DescribesEachOptionWithOrWithoutADescription) {
   auto parser = MakeFlagParser();
-  // ncclParamBitsetOf hardcodes "Comma-separated list of:" regardless of the
-  // actual delimiter (a pre-existing quirk in parser_bitset.h, not something
-  // this test should paper over); MakeFlagParser uses the default ',' so the
-  // hardcoded text happens to match here.
+  // The desc says "Comma-separated" whatever the delimiter (pinned as observed).
   EXPECT_EQ("Comma-separated list of:\n        NONE\n        A\n        B\n        C - the C bit\n        AB",
             parser.desc);
 }
 
-// ---------------------------------------------------------------------------
 // ncclParamListOf (parser_list.h)
-// ---------------------------------------------------------------------------
 
 TEST(ParamParsersMicrotest, ListOf_ResolveIntoAVectorPreservesOrder) {
   auto parser = ncclParamListOf<std::vector<std::string>>(',');
@@ -509,8 +452,7 @@ TEST(ParamParsersMicrotest, ListOf_ToStringJoinsWithTheDelimiter) {
 TEST(ParamParsersMicrotest, ListOf_HonorsANonDefaultDelimiter) {
   auto parser = ncclParamListOf<std::vector<std::string>>(';');
   EXPECT_EQ("Delimiter-separated list (delimiter=';')", parser.desc);
-  // Round-trips through ';' itself, not just its desc string: split() and the
-  // toString join could both hardcode ',' and still pass every other test here.
+  // Round-trips through ';' itself, so a hardcoded ',' in split() or the join would fail.
   std::vector<std::string> out;
   EXPECT_EQ(ncclSuccess, parser.resolve("a;b,c", out));
   EXPECT_EQ((std::vector<std::string>{"a", "b,c"}), out);
