@@ -63,7 +63,17 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_ExactlyAtLL128Threshold_Enabled)
     const size_t threshold = rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll];
     EXPECT_TRUE(rcclDdaEnabled(mockComm_.get(), threshold, threshold));
     EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt1MbLL128Threshold, ncclFloat32));
+        mockComm_.get(), testAlltoAllFloat32CountAtGfx1250LL128Threshold(), ncclFloat32));
+}
+
+// The DDA entry gate is the widest tier: on gfx1250 A2A that is LL128 (16 MiB), above the old 1 MiB cap.
+TEST_F(DdaAlltoAllThresholdTest, Gfx1250_LL128ThresholdIs16MiB)
+{
+    mockComm_.reset("gfx1250:sramecc+:xnack-");
+    EXPECT_EQ(rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll], 16ul << 20);
+    EXPECT_EQ(testDdaAlltoAllThreshold(mockComm_.get()), 16ul << 20);
+    EXPECT_TRUE(testRcclDdaAlltoAllThresholdEnabled(
+        mockComm_.get(), (1ul << 20) / (8 * sizeof(float)) + 1, ncclFloat32));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverLL128Threshold_Disabled)
@@ -72,7 +82,7 @@ TEST_F(DdaAlltoAllThresholdTest, Gfx1250_OneByteOverLL128Threshold_Disabled)
     const size_t threshold = rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll];
     EXPECT_FALSE(rcclDdaEnabled(mockComm_.get(), threshold + 1, threshold));
     EXPECT_FALSE(testRcclDdaAlltoAllThresholdEnabled(
-        mockComm_.get(), kAlltoAllFloat32CountAt1MbLL128Threshold + 1, ncclFloat32));
+        mockComm_.get(), testAlltoAllFloat32CountAtGfx1250LL128Threshold() + 1, ncclFloat32));
 }
 
 TEST_F(DdaAlltoAllThresholdTest, UnsupportedArch_Disabled)

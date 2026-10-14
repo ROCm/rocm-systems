@@ -16,6 +16,7 @@
 #include "group.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "rccl_common.h"
+#include "rccl_arch_thresholds.h"
 
 namespace RcclUnitTesting
 {
@@ -80,10 +81,12 @@ constexpr size_t kAlltoAllFloat32CountAt4MbThreshold =
     4194304UL /
     (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
 
-// Per-rank float32 count whose 8-rank AlltoAll totals exactly 1 MiB (gfx1250 LL128 ceiling).
-constexpr size_t kAlltoAllFloat32CountAt1MbLL128Threshold =
-    1048576UL /
-    (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+// Per-rank float32 count whose 8-rank AlltoAll totals exactly the gfx1250 LL128 ceiling
+// (ddaLL128Max[A2A]: the widest A2A tier the DDA entry gate admits on that arch).
+inline size_t testAlltoAllFloat32CountAtGfx1250LL128Threshold() {
+  return rcclGetArchThresholds("gfx1250")->ddaLL128Max[ncclFuncAlltoAll] /
+         (static_cast<size_t>(nccl_dda_detail::kDdaNranks) * sizeof(float));
+}
 
 // 4 KiB/rank float32: single-block grid on 8-rank IPC launch (in-kernel copy path).
 constexpr size_t kAlltoAllFloat32CountAt4KbPerRank = 1024;

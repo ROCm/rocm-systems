@@ -27,6 +27,7 @@
 #endif
 
 #include "algorithms/dda/device/CollCommon.h"
+#include "algorithms/dda/alltoall/alltoall_dda_watchdog.h"
 
 namespace dda::common {
 
@@ -40,7 +41,9 @@ constexpr size_t kDdaLLA2ASlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
 // The self column copies sendbuff[self] -> recvbuff[self] locally; other columns
 // scatter this rank's chunk-for-peer-b (sendbuff[b]) into peer b's slot, then
 // poll their own slot b for the chunk peer b sent to us (-> recvbuff[b]).
-template <typename T, int NRANKS_CT>
+// WD: poll-loop watchdog (alltoall_dda_watchdog.h). true (production): abortable, opt-in timeout;
+// false: unbounded spin (tuning builds only, attribution of the watchdog's cost).
+template <typename T, int NRANKS_CT, bool WD>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
@@ -50,7 +53,8 @@ __launch_bounds__(512)
                                       size_t perChunkBytes,                  // per-peer chunk payload; multiple of 16
                                       int selfRank, int nRanksRt,
                                       uint32_t* __restrict__ epochDev,       // per-block LL epoch cells
-                                      int epochLen) {                        // number of cells in epochDev
+                                      int epochLen,                          // number of cells in epochDev
+                                      DdaA2aWdCtx wdc) {                     // abort / timeout / error word
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const int peer = blockIdx.x;             // grid.x == nRanks: one column/peer
@@ -65,7 +69,10 @@ __launch_bounds__(512)
   // On-device, graph-safe flag/bank derivation. bank = flag & 1.
   const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
   const int total = gridDim.x * gridDim.y;
+  // Poison check: issued before the epoch load so both loads overlap; a failed communicator moves no data.
+  const bool poisoned = WD && ddaA2aPoisoned(wdc);
   const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
+  if (poisoned) return;
   const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
 
   // This block's packet range [pkBegin, pkEnd); [0, nPk) when nChunks == 1.
@@ -112,9 +119,10 @@ __launch_bounds__(512)
     uint32_t* out = reinterpret_cast<uint32_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
     for (size_t pk = pkBegin + tid; pk < pkEnd; pk += nthreads) {
       uint32_t d0, f0, d1, f1;
+      DdaA2aWd wd(wdc);
       do {
         ddaLLLoadLineB128(reinterpret_cast<const uint32_t*>(const_cast<LLPacket16*>(&src[pk])), d0, f0, d1, f1);
-      } while (f0 != flag || f1 != flag);
+      } while ((f0 != flag || f1 != flag) && !(WD && wd.expired(kDdaWdLL)));
       out[2 * pk] = d0;
       out[2 * pk + 1] = d1;
     }

@@ -113,6 +113,7 @@ option(BUILD_NCCL4PY                           "Build the nccl4py Python binding
 option(RCCL_HIP_FATBIN_AT_TAIL                 "Place .hip_fatbin at the end of librccl.so"    ON)
 option(GENERATE_SYM_KERNELS                    "Generate symmetric memory kernels"             ON)
 option(ENABLE_TDM_SIMPLE                       "Build the experimental gfx1250 TDM SIMPLE copy path" OFF)
+option(RCCL_DDA_A2A_TUNING                     "Read the DDA AllToAll tuning/attribution env knobs (test builds)" OFF)
 option(INSTALL_DEPENDENCIES                    "Force install dependencies"                    OFF)
 option(REPORT_KERNEL_RESOURCE_USE              "Append -Rpass-analysis=kernel to CXX flags"    OFF)
 option(ROCTX                                   "Enable ROCTX"                                  ${RCCL_DEFAULT_ROCTX})
@@ -126,6 +127,11 @@ option(RCCL_POISON_HIP_ATOMICS                 "Reject __hip_atomic_* builtins i
 option(DWORDX4_INTRINSICS                      "Turn off compilation with dwordx4 intrinsics"  ON)
 if(ENABLE_TDM_SIMPLE)
   add_compile_definitions(ENABLE_TDM_SIMPLE=1)
+endif()
+# Directory scope so the device-linker compiles of the DDA .cu files (which snapshot target + directory
+# definitions, not CMAKE_CXX_FLAGS) see it as well as the host sources.
+if(RCCL_DDA_A2A_TUNING)
+  add_compile_definitions(RCCL_DDA_A2A_TUNING=1)
 endif()
 # rocSHMEM integration (mutually exclusive — enabling both causes duplicate
 # rocshmem state between librccl.so and the executable at runtime):

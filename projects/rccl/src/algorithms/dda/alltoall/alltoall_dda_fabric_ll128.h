@@ -28,123 +28,236 @@
 
 #include "algorithms/dda/device/CollCommon.h"
 #include "algorithms/dda/device/CollCommon_ll128.h"
+#include "algorithms/dda/alltoall/alltoall_dda_watchdog.h"
 
 namespace dda::common {
 
-// Per-peer chunk hard cap and the resulting fixed slot stride in 128B lines
-// (compile-time, so the double-buffered layout is identical on every rank and
-// call). The effective size gate is the runtime LL128 threshold; this cap
-// bounds the scratch footprint.
-constexpr size_t kDdaLL128A2AMaxPerChunkBytes = 524288;              // 512 KiB
-constexpr size_t kDdaLL128A2ASlotStrideLines =
-  (kDdaLL128A2AMaxPerChunkBytes / 8 + (size_t)kDdaLL128DataElems - 1) / (size_t)kDdaLL128DataElems; // ceil(nWords/15)
+// ---- register-packed (16B/lane, warp-per-2KiB-slice) A2A, 8-lane cooperative atomic
+// 128B lines (same wire format and helpers as all_gather_dda_fabric_ll128.h). One
+// atomic 16B load per line both polls the flag and carries the payload (no dependent
+// second load); sendbuff loads for U slices are issued before any wire store and held
+// in registers (no per-line load->store serialization); peer columns are rotated
+// (peer = self+x+1) so the grid does not hammer one destination at a time; the self
+// copy is spread over the whole grid; slots are carved from the shared bank layout
+// (ddaBankSize), so the per-chunk cap is the slot size. (Replaces the original
+// word-per-lane kernel, which this one matched or beat at every measured size.)
 
-// LL128 all-to-all kernel. 2D grid: grid.x == nRanks selects the peer column;
-// grid.y == blocksPerPeer splits that peer's line range into gridDim.y chunks.
-// The self column copies sendbuff[self] -> recvbuff[self] locally; other columns
-// scatter this rank's chunk-for-peer-b (sendbuff[b]) into peer b's slot (warp-
-// cooperative 128B writes), then poll their own slot b for peer b's chunk and
-// unpack into recvbuff[b].
-template <typename T, int NRANKS_CT>
+constexpr size_t ddaLL128A2ASlotWords(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(uint64_t) * (size_t)nRanks, (size_t)kDdaLL128WireWordsPerSlice);
+}
+
+// Plain (cacheable) 16B access for the local user buffers.
+__device__ __forceinline__ void ddaA2aLd16(const int8_t* p, uint64_t& lo, uint64_t& hi) {
+  const v4u v = *reinterpret_cast<const v4u*>(p);
+  lo = ((uint64_t)v[1] << 32) | (uint64_t)v[0];
+  hi = ((uint64_t)v[3] << 32) | (uint64_t)v[2];
+}
+__device__ __forceinline__ void ddaA2aSt16(int8_t* p, uint64_t lo, uint64_t hi) {
+  v4u v;
+  v[0] = (uint32_t)lo; v[1] = (uint32_t)(lo >> 32);
+  v[2] = (uint32_t)hi; v[3] = (uint32_t)(hi >> 32);
+  *reinterpret_cast<v4u*>(p) = v;
+}
+
+// Same lane/chunk mapping as ddaLL128LoadRegs, with plain loads.
+__device__ __forceinline__ void ddaA2aLoadRegs(uint64_t (&regs)[kDdaLL128WordsPerThread], const int8_t* src,
+                                               int eltN, int wid, bool flag) {
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    if (!flag || g % 2 == 0) {
+      const int ix = ddaLL128ChunkIx(g, wid);
+      if (ix * 16 < eltN) ddaA2aLd16(src + ix * 16, regs[2 * g], regs[2 * g + 1]);
+    }
+  }
+}
+// Full-slice fast path: unconditional loads (no exec-masked branches, so the
+// compiler keeps all four in flight). A flag lane's odd pair is not payload; it
+// re-reads the even pair's address and is overwritten by ddaA2aShuffleIn.
+__device__ __forceinline__ void ddaA2aLoadRegsFull(uint64_t (&regs)[kDdaLL128WordsPerThread], const int8_t* src,
+                                                   int wid, bool flag) {
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    const int ix = ddaLL128ChunkIx((flag && (g % 2)) ? g - 1 : g, wid);
+    ddaA2aLd16(src + ix * 16, regs[2 * g], regs[2 * g + 1]);
+  }
+}
+__device__ __forceinline__ void ddaA2aShuffleIn(uint64_t (&regs)[kDdaLL128WordsPerThread], bool flag) {
+#pragma unroll
+  for (int g = 1; g < kDdaLL128Pairs; g += 2)
+    if (flag) regs[2 * g] = regs[2 * g - 1];
+}
+// Same mapping as ddaLL128StoreRegs, with plain stores.
+__device__ __forceinline__ void ddaA2aStoreRegs(int8_t* dst, uint64_t (&regs)[kDdaLL128WordsPerThread], int eltN,
+                                                int wid, bool flag) {
+#pragma unroll
+  for (int g = 1; g < kDdaLL128Pairs; g += 2)
+    if (flag) regs[2 * g - 1] = regs[2 * g];
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    if (!flag || g % 2 == 0) {
+      const int ix = ddaLL128ChunkIx(g, wid);
+      if (ix * 16 < eltN) ddaA2aSt16(dst + ix * 16, regs[2 * g], regs[2 * g + 1]);
+    }
+  }
+}
+
+// Pin a register so LLVM keeps every load of a batch issued before the first store
+// (an empty asm memory clobber does not stop load sinking with __restrict__).
+__device__ __forceinline__ void ddaA2aHold(uint64_t& v) { asm volatile("" : "+v"(v)); }
+
+template <typename T, int NRANKS_CT, int U>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
 #endif
-  __global__ void ddaAllToAllFabricLL128(T* const* __restrict__ peerScratch, // ddaPeerPtrsDev: nRanks scratch bases
-                                         T* __restrict__ recvbuff, // local user output (nRanks chunks)
-                                         const T* __restrict__ sendbuff, // local user input (nRanks chunks)
-                                         size_t perChunkBytes, // per-peer chunk payload; multiple of 16
-                                         int selfRank, int nRanksRt,
-                                         uint32_t* __restrict__ epochDev, // per-block LL epoch cells
-                                         int epochLen) { // number of cells in epochDev
-
+  __global__ void ddaAllToAllFabricLL128V2(T* const* __restrict__ peerScratch,
+                                           T* __restrict__ recvbuff,
+                                           const T* __restrict__ sendbuff,
+                                           size_t perChunkBytes, // per-peer payload; multiple of 16
+                                           int selfRank, int nRanksRt,
+                                           uint32_t* __restrict__ epochDev, int epochLen,
+                                           size_t slicesTotal, // slices per peer chunk
+                                           size_t bankSize,
+                                           DdaA2aWdCtx wdc) { // abort / timeout / error word
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
-  const int peer = blockIdx.x; // grid.x == nRanks: one column/peer
-  if (peer >= nRanks) return; // safety if grid.x > nRanks
-  const int chunk = blockIdx.y; // grid.y == blocksPerPeer
-  const int nChunks = gridDim.y; // >= 1
+  const int peer = (selfRank + (int)blockIdx.x + 1) % nRanks;
 
-  const size_t nWords = perChunkBytes >> 3; // 8B payload words
-  const size_t numLines = ddaLL128NumLines(nWords); // 128B lines this size
-  const size_t slot = kDdaLL128A2ASlotStrideLines; // lines per slot
+  const int tid = threadIdx.x;
+  const int nthreads = blockDim.x;
+  const int lane = tid % kDdaLL128Warp;
+  const int warp = tid / kDdaLL128Warp;
+  const int nwarps = nthreads / kDdaLL128Warp;
+  const bool flagLane = ddaLL128IsFlagLane(lane);
 
-  // On-device, graph-safe flag/bank derivation.
-  const int flatBlockId = blockIdx.x * gridDim.y + blockIdx.y;
-  const int total = gridDim.x * gridDim.y;
-  const uint32_t flag = ddaGetLLEpochInc(epochDev, flatBlockId, 1);
-  const size_t bankOffsetLines = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const int flatBlockId = (int)(blockIdx.x * gridDim.y + blockIdx.y);
+  const int total = (int)(gridDim.x * gridDim.y);
+  // Epoch read WITHOUT the leading block barrier of ddaGetLLEpochInc: the barrier only
+  // orders this read before ddaSetLLEpoch's writes, so it moves to the kernel end and the
+  // epoch load overlaps the first sendbuff loads instead of delaying them.
+  // Poison word and epoch loaded together. The empty asm makes both values ready before the poison
+  // branch; without it LLVM branches on the poison word first and issues the epoch load only after
+  // it returns (two dependent round trips at kernel entry).
+  uint32_t site = wdc->site;
+  uint32_t epoch = epochDev[flatBlockId];
+  asm volatile("" : "+s"(site), "+s"(epoch));
+  uint32_t flag32 = epoch + 1u;
+  if (flag32 == 0u) flag32 = 2u; // skip 0 sentinel; keep bank parity (as ddaGetLLEpochInc)
+  if (site != 0) return;         // failed communicator: move no data
+  const uint64_t flag = ((uint64_t)flag32 << 32) | (uint64_t)flag32;
+  const size_t slotWords = ddaLL128A2ASlotWords(bankSize, nRanks);
+  const uint64_t bankWords = (uint64_t)(flag32 & 1u) * (uint64_t)(bankSize / sizeof(uint64_t));
 
-  // This block's line range [lnBegin, lnEnd); [0, numLines) when nChunks == 1.
-  const size_t lnPerChunk = (numLines + (size_t)nChunks - 1) / (size_t)nChunks;
-  const size_t lnBegin = (size_t)chunk * lnPerChunk;
-  size_t lnEnd = lnBegin + lnPerChunk;
-  if (lnEnd > numLines) lnEnd = numLines;
+  const size_t gwarp = (size_t)blockIdx.y * (size_t)nwarps + (size_t)warp;
+  const size_t wstride = (size_t)gridDim.y * (size_t)nwarps;
 
-  if (peer == selfRank) {
-    // self column: local copy sendbuff[self] -> recvbuff[self] (16B nontemporal).
-    const uint4* s4 =
-      reinterpret_cast<const uint4*>(reinterpret_cast<const char*>(sendbuff) + (size_t)selfRank * perChunkBytes);
-    uint4* d4 = reinterpret_cast<uint4*>(reinterpret_cast<char*>(recvbuff) + (size_t)selfRank * perChunkBytes);
-    const size_t nVec = perChunkBytes >> 4; // number of 16B chunks
-    const int tid = threadIdx.x;
-    const int nthreads = blockDim.x;
-    const size_t vecPerChunk = (nVec + (size_t)nChunks - 1) / (size_t)nChunks;
-    const size_t vBegin = (size_t)chunk * vecPerChunk;
-    size_t vEnd = vBegin + vecPerChunk;
-    if (vEnd > nVec) vEnd = nVec;
-    for (size_t i = vBegin + tid; i < vEnd; i += nthreads) {
-      const uint4* p = &s4[i];
-      uint4 v;
-      v.x = __builtin_nontemporal_load(&p->x);
-      v.y = __builtin_nontemporal_load(&p->y);
-      v.z = __builtin_nontemporal_load(&p->z);
-      v.w = __builtin_nontemporal_load(&p->w);
-      uint4* q = &d4[i];
-      __builtin_nontemporal_store(v.x, &q->x);
-      __builtin_nontemporal_store(v.y, &q->y);
-      __builtin_nontemporal_store(v.z, &q->z);
-      __builtin_nontemporal_store(v.w, &q->w);
+  const int8_t* srcBytes = reinterpret_cast<const int8_t*>(sendbuff) + (size_t)peer * perChunkBytes;
+  uint64_t* scatterSlot =
+    reinterpret_cast<uint64_t*>(peerScratch[peer]) + bankWords + (uint64_t)selfRank * (uint64_t)slotWords;
+  const uint64_t* gatherSlot = reinterpret_cast<const uint64_t*>(peerScratch[selfRank]) + bankWords +
+    (uint64_t)peer * (uint64_t)slotWords;
+  int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perChunkBytes;
+
+  // Phase 1: push U slices per warp per step; all loads of the step precede its stores.
+  // Full slices (all but a trailing partial one) take branch-free loads under a
+  // warp-uniform predicate; the partial slice, if any, is pushed after its batch.
+  const size_t fullSlices = perChunkBytes / (size_t)kDdaLL128DataBytesPerSlice;
+  for (size_t s0 = gwarp; s0 < slicesTotal; s0 += wstride * U) {
+    uint64_t regs[U][kDdaLL128WordsPerThread];
+    if (s0 + (size_t)(U - 1) * wstride < fullSlices) { // whole batch full: no predicates at all
+#pragma unroll
+      for (int u = 0; u < U; u++)
+        ddaA2aLoadRegsFull(regs[u], srcBytes + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128DataBytesPerSlice,
+                           lane, flagLane);
+#pragma unroll
+      for (int u = 0; u < U; u++)
+#pragma unroll
+        for (int w = 0; w < kDdaLL128WordsPerThread; w++) ddaA2aHold(regs[u][w]);
+#pragma unroll
+      for (int u = 0; u < U; u++) {
+        ddaA2aShuffleIn(regs[u], flagLane);
+        ddaLL128StoreWire(scatterSlot + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                          regs[u], flag, flagLane);
+      }
+      continue;
     }
-  } else {
-    // 16 lanes cooperate on one 128B line.
-    const int group = threadIdx.x / kDdaLL128Lanes;
-    const int lane = threadIdx.x % kDdaLL128Lanes;
-    const int groups = blockDim.x / kDdaLL128Lanes;
-    const uint64_t* sw =
-      reinterpret_cast<const uint64_t*>(reinterpret_cast<const char*>(sendbuff) + (size_t)peer * perChunkBytes);
-
-    // scatter: write my chunk-for-peer into peer's slot (== selfRank), flag-last.
-    LLLine128* dst = reinterpret_cast<LLLine128*>(peerScratch[peer]) + (size_t)selfRank * slot + bankOffsetLines;
-    for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
-      const size_t base = ln * (size_t)kDdaLL128DataElems;
-      if (lane < kDdaLL128DataElems) {
-        const size_t e = base + (size_t)lane;
-        const uint64_t v = (e < nWords) ? sw[e] : 0ull;
-        ddaLL128StoreWord(&dst[ln].w[lane], v);
-      }
-      // Unfenced: the payload store above precedes this flag store in warp
-      // program order; gfx1250 preserves the visibility order.
-      if (lane == kDdaLL128FlagElem) {
-        ddaLL128StoreWord(&dst[ln].w[kDdaLL128FlagElem], (uint64_t)flag);
+#pragma unroll
+    for (int u = 0; u < U; u++) {
+      const size_t s = s0 + (size_t)u * wstride;
+      if (s < fullSlices) {
+        ddaA2aLoadRegsFull(regs[u], srcBytes + s * (size_t)kDdaLL128DataBytesPerSlice, lane, flagLane);
+      } else {
+#pragma unroll
+        for (int w = 0; w < kDdaLL128WordsPerThread; w++) regs[u][w] = 0;
       }
     }
-
-    // gather: poll my slot for peer, unpack into recvbuff[peer].
-    LLLine128* src = reinterpret_cast<LLLine128*>(peerScratch[selfRank]) + bankOffsetLines + (size_t)peer * slot;
-    uint64_t* out = reinterpret_cast<uint64_t*>(reinterpret_cast<char*>(recvbuff) + (size_t)peer * perChunkBytes);
-    for (size_t ln = lnBegin + group; ln < lnEnd; ln += groups) {
-      const size_t base = ln * (size_t)kDdaLL128DataElems;
-      // all 16 lanes poll the shared flag word (broadcast); unfenced.
-      while (ddaLL128LoadWord(&src[ln].w[kDdaLL128FlagElem]) != (uint64_t)flag) {
-      }
-      if (lane < kDdaLL128DataElems) {
-        const size_t e = base + (size_t)lane;
-        const uint64_t v = ddaLL128LoadWord(&src[ln].w[lane]);
-        if (e < nWords) out[e] = v;
+#pragma unroll
+    for (int u = 0; u < U; u++)
+#pragma unroll
+      for (int w = 0; w < kDdaLL128WordsPerThread; w++) ddaA2aHold(regs[u][w]);
+#pragma unroll
+    for (int u = 0; u < U; u++) {
+      const size_t s = s0 + (size_t)u * wstride;
+      if (s < fullSlices) {
+        ddaA2aShuffleIn(regs[u], flagLane);
+        ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs[u], flag, flagLane);
+      } else if (s < slicesTotal) { // trailing partial slice
+        const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+        ddaA2aLoadRegs(regs[u], srcBytes + dataByte, (int)(perChunkBytes - dataByte), lane, flagLane);
+        ddaA2aShuffleIn(regs[u], flagLane);
+        ddaLL128StoreWire(scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs[u], flag, flagLane);
       }
     }
   }
 
-  ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag);
+  // Self chunk: local copy spread over the whole grid.
+  {
+    const v4u* s4 = reinterpret_cast<const v4u*>(reinterpret_cast<const int8_t*>(sendbuff) +
+                                                  (size_t)selfRank * perChunkBytes);
+    v4u* d4 = reinterpret_cast<v4u*>(reinterpret_cast<int8_t*>(recvbuff) + (size_t)selfRank * perChunkBytes);
+    const size_t nVec = perChunkBytes >> 4;
+    const size_t gtid = (size_t)flatBlockId * (size_t)nthreads + (size_t)tid;
+    const size_t stride = (size_t)total * (size_t)nthreads;
+    for (size_t i = gtid; i < nVec; i += stride) d4[i] = s4[i];
+  }
+
+  // Phase 2: poll U slices at once; the atomic 128B line load that sees the flag
+  // also carries the payload, so a matched load is consumed directly.
+  for (size_t s0 = gwarp; s0 < slicesTotal; s0 += wstride * U) {
+    uint64_t vr[U][kDdaLL128WordsPerThread];
+    bool need;
+    // Number of valid slices in this batch (warp-uniform).
+    int nv = 0;
+#pragma unroll
+    for (int u = 0; u < U; u++) nv += (s0 + (size_t)u * wstride < slicesTotal) ? 1 : 0;
+    const uint64_t* wire0 = gatherSlot + s0 * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane;
+    const size_t wireStep = wstride * (size_t)kDdaLL128WireWordsPerSlice;
+    DdaA2aWd wd(wdc);
+    do {
+#pragma unroll
+      for (int u = 0; u < U; u++)
+        if (u < nv)
+#pragma unroll
+          for (int w = 0; w < kDdaLL128WordsPerThread; w += 2)
+            ddaLL128LoadAtomic16B(wire0 + u * wireStep + w * kDdaLL128Warp, vr[u][w], vr[u][w + 1]);
+      need = false;
+#pragma unroll
+      for (int u = 0; u < U; u++)
+        if (u < nv)
+#pragma unroll
+          for (int w = 0; w < kDdaLL128WordsPerThread; w += 2) need |= flagLane && (vr[u][w + 1] != flag);
+    } while (__any(need) && !wd.expiredUniform(kDdaWdLL128V2));
+#pragma unroll
+    for (int u = 0; u < U; u++) {
+      const size_t s = s0 + (size_t)u * wstride;
+      if (s < slicesTotal) {
+        const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
+        const size_t rem = perChunkBytes - dataByte;
+        const int elt = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+        ddaA2aStoreRegs(dstBytes + dataByte, vr[u], elt, lane, flagLane);
+      }
+    }
+  }
+  __syncthreads(); // every thread of the block has read its epoch cell (see top)
+  ddaSetLLEpoch(epochDev, epochLen, flatBlockId, total, flag32);
 }
 
 } // namespace dda::common

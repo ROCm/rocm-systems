@@ -525,6 +525,19 @@ ncclResult_t ncclAlltoAll_impl(const void* sendbuff, void* recvbuff, size_t coun
 
   NCCLCHECK(Recorder::instance().record(rrAllToAll, sendbuff, recvbuff, count, datatype, comm, stream));
 
+  // A DDA AllToAll of this comm failed on the device earlier (alltoall_dda_watchdog.h): its protocol
+  // state is out of step, so no later AllToAll may run on it (the DDA addon path does not go through
+  // ncclCommEnsureReady). Also reported by ncclCommGetAsyncError.
+  if (comm != nullptr && comm->ddaA2aErrHost != nullptr) {
+    const uint32_t site = __atomic_load_n(comm->ddaA2aErrHost, __ATOMIC_ACQUIRE);
+    if (site != 0) {
+      WARN("ncclAlltoAll: rank %d: an earlier DDA AllToAll on this communicator %s (wait site %u); no further "
+           "AllToAll can run on it", comm->rank,
+           site == kDdaA2aErrAborted ? "was abandoned on an abort" : "failed on the device", site);
+      return rcclDdaA2aErrorResult(site);
+    }
+  }
+
   struct rcclCollDecision decision;
   NCCLCHECK(rcclSelectAlltoAll(comm, sendbuff, recvbuff, count, datatype, stream, /*query=*/false,
                                /*graphCapturingHint=*/false, &decision));
