@@ -2,7 +2,7 @@
 name: amdsmi-review-docs
 description: "Documentation review subagent. Checks docs, comments, help text, docstrings. Use when: documentation review, docs check, help text."
 tools: read/readFile, search/textSearch, search/fileSearch, search/listDirectory
-model: "Claude Sonnet 5"
+model: "Claude Sonnet 5.5"
 user-invocable: false
 ---
 

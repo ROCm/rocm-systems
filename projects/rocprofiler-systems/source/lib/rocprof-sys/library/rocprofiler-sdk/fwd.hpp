@@ -4,7 +4,6 @@
 #pragma once
 
 #include "core/agent_manager.hpp"
-#include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 
 #include <rocprofiler-sdk/agent.h>
@@ -27,8 +26,6 @@
 namespace rocprofsys::rocprofiler_sdk
 {
 using hardware_counter_info = ::tim::hardware_counters::info;
-
-using callback_arg_array_t = std::vector<std::pair<std::string, std::string>>;
 
 using rocprofsys_agent_t = agent;
 
