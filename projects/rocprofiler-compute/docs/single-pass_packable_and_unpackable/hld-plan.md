@@ -38,7 +38,7 @@ gfx942, the reference architecture, is one example from `src/utils/mi_gpu_spec.y
     GDS: 4
 ```
 
-Analysis YAML defines a metric as an expression over PMC counters. A metric's PMC set is the hardware counters that expression reads. The shipping allocator packs the whole counter list into as few passes as it can. It does not require one metric’s counters to share a pass. Analyze then evaluates the expression on values merged across those replays.
+Analysis YAML defines a metric as an expression over PMC counters. A metric's PMC set is the hardware counters that expression reads. The shipping allocator puts each counter in one pass and cannot copy it. A metric whose counters were already placed gets split.
 
 ```mermaid
 flowchart LR
