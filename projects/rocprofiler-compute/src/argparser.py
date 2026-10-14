@@ -835,7 +835,7 @@ Examples:
         metavar="<levels>",
         nargs="+",
         choices=ROOFLINE_MEM_LEVELS,
-        default="ALL",
+        default=["ALL"],
         help=(
             "Filter by memory level (Default: ALL).\n"
             f"Values: {', '.join(ROOFLINE_MEM_LEVELS)}"
