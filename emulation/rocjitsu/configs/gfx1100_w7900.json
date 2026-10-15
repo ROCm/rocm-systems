@@ -15,6 +15,11 @@
       "device": {
         "gpu_id": 7019,
         "gfx_target_version": 110000,
+        "ip_versions": [
+          {"hardware_id": 11, "major": 11, "minor": 0, "revision": 0},
+          {"hardware_id": 42, "major": 6, "minor": 0, "revision": 0},
+          {"hardware_id": 108, "major": 4, "minor": 3, "revision": 0}
+        ],
         "vendor_id": 4098,
         "device_id": 29768,
         "family_id": 145,

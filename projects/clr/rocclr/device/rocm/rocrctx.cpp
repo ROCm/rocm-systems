@@ -37,6 +37,7 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_queue_load_write_index_scacquire)
   GET_ROCR_SYMBOL(hsa_queue_load_write_index_relaxed)
   GET_ROCR_SYMBOL(hsa_queue_add_write_index_screlease)
+  GET_ROCR_SYMBOL(hsa_queue_cas_write_index_screlease)
   GET_ROCR_SYMBOL(hsa_memory_register)
   GET_ROCR_SYMBOL(hsa_memory_deregister)
   GET_ROCR_SYMBOL(hsa_memory_copy)
@@ -109,6 +110,8 @@ bool Hsa::LoadLib() {
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_reserve)
   GET_ROCR_SYMBOL(hsa_amd_vmem_address_free)
   GET_ROCR_SYMBOL(hsa_amd_vmem_handle_create)
+  // Optional: absent on an older ROCr, in which case getVmmAllocInfo falls back.
+  GET_ROCR_OPTIONAL_SYMBOL_DECLTYPE(hsa_amd_vmem_get_vmem_info)
   GET_ROCR_SYMBOL(hsa_amd_vmem_handle_release)
   GET_ROCR_SYMBOL(hsa_amd_vmem_map)
   GET_ROCR_SYMBOL(hsa_amd_vmem_unmap)

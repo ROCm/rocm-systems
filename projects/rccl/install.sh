@@ -63,7 +63,7 @@ quiet_warnings=false
 #                   Does NOT enable alltoall_wg offload.
 build_rocshmem_support=false
 build_rocshmem_gin=false
-rocshmem_mono_hash="33d980d7ca1f0bf90cfe4ff9106310abcf47b550"
+rocshmem_mono_hash="f636cc5be66716349dd9ed42eebb7b4d651fbb20"
 custom_cmake_options=""
 
 # #################################################
@@ -74,7 +74,7 @@ function display_help()
     echo "RCCL build & installation helper script"
     echo " Options:"
     echo "       --address-sanitizer     Build with address sanitizer enabled"
-    echo "       --all_unrolls           Build every unroll factor (1,2,4,8,16,32) for the targeted GPU arch(es) instead of the per-arch default set"
+    echo "       --all_unrolls           Also build unroll factors 8 and 16 on top of the per-arch default set"
     echo "       --amdgpu_targets        Only compile for specified GPU architecture(s). For multiple targets, separate by ';' (builds for all supported GPU architectures by default)"
     echo "       --cmake-options         Pass additional CMake options (e.g. --cmake-options \"-DFOO=BAR -DBAZ=ON\")"
     echo "       --debug                 Build debug library"
@@ -399,7 +399,7 @@ if [[ "${build_local_gpu_only}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_LOCAL_GPU_TARGET_ONLY=ON"
 fi
 
-# Build every unroll factor for the targeted arch(es)
+# Also build unroll 8 and 16 on top of the per-arch default
 if [[ "${build_all_unrolls}" == true ]]; then
     cmake_common_options="${cmake_common_options} -DBUILD_ALL_UNROLLS=ON"
 fi

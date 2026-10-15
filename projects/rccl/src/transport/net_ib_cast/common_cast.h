@@ -133,6 +133,8 @@ struct alignas(64) ncclIbDev {
   struct ibv_port_attr portAttr;
   struct ncclIbStats stats;
   int dmaBufSupported;
+  int8_t udSupported;  // -1 not probed yet, 0 no, 1 yes
+  int8_t rdmaReadSupported;  // -1 not probed yet, 0 no, 1 yes
   int16_t railId;
   int16_t planeId;
   int16_t planeIdx;
@@ -581,6 +583,7 @@ struct alignas(32) ncclIbNetCommBase {
   int nRemDevs;
   bool remOooRq;
   bool localOooRq;
+  bool optRecvCompletion;
   int recvMatchingScheme;
   int nDataQps;
   struct ncclIbDevInfo remDevs[NCCL_IB_MAX_DEVS_PER_NIC];
@@ -795,6 +798,7 @@ static_assert((offsetof(struct ncclIbRecvComm, remCtsFifo) % 32) == 0,
               "ncclIbRecvComm ctsFifo must be 32-byte aligned");
 
 ncclResult_t IbCastBaseCommInit(struct ncclIbNetCommBase* baseComm, bool isSend);
+void IbCastInitOptRecvCompletion(struct ncclIbNetCommBase* baseComm, bool useCtsOffload);
 ncclResult_t IbCastRecvCommInit(struct ncclIbRecvComm* recvComm);
 ncclResult_t IbCastSendCommInit(struct ncclIbSendComm* sendComm);
 

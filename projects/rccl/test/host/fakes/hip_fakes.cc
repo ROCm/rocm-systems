@@ -42,6 +42,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocation
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
+ASSERT_HOOK_MATCHES_PROD(g_hipDriverGetVersion,           hipDriverGetVersion);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitEvent,            hipStreamWaitEvent);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationGranularity, hipMemGetAllocationGranularity);
@@ -55,6 +56,9 @@ ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamBatchMemOp,           hipStreamBatchMemOp);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWriteValue64,         hipStreamWriteValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
+#endif
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -130,6 +134,15 @@ static hipError_t DefaultHipRuntimeGetVersion(int* version)
     return hipSuccess;
 }
 std::function<hipError_t(int*)> g_hipRuntimeGetVersion = DefaultHipRuntimeGetVersion;
+
+static hipError_t DefaultHipDriverGetVersion(int* version)
+{
+    if (version) {
+        *version = 70002000;
+    }
+    return hipSuccess;
+}
+std::function<hipError_t(int*)> g_hipDriverGetVersion = DefaultHipDriverGetVersion;
 
 static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int)
 {
@@ -239,6 +252,12 @@ static hipError_t DefaultHipDeviceCanAccessPeer(int* canAccessPeer, int, int)
 }
 std::function<hipError_t(int*, int, int)> g_hipDeviceCanAccessPeer = DefaultHipDeviceCanAccessPeer;
 
+static hipError_t DefaultHipDeviceEnablePeerAccess(int, unsigned int) { return hipErrorInvalidValue; }
+std::function<hipError_t(int, unsigned int)> g_hipDeviceEnablePeerAccess = DefaultHipDeviceEnablePeerAccess;
+
+static hipError_t DefaultHipDeviceDisablePeerAccess(int) { return hipErrorInvalidValue; }
+std::function<hipError_t(int)> g_hipDeviceDisablePeerAccess = DefaultHipDeviceDisablePeerAccess;
+
 // --- deep-path result seams (commAlloc/devCommSetup) --------------------
 // Default to failure so any call a test hasn't opted into surfaces as an
 // unexpected call; a test sets the relevant seam to hipSuccess to enable the
@@ -261,6 +280,7 @@ hipError_t g_hipStreamCreateResult       = hipErrorInvalidValue;
 hipError_t g_hipAsyncOpsResult           = hipErrorInvalidValue;
 int        g_hipWarpSize                 = 64;
 int        g_hipDirectManagedMemAccess   = 1;
+int        g_hipMemoryPoolsSupported     = 1;
 int        g_hipMemcpyAsyncCalls         = 0;
 std::vector<HipMemcpyAsyncRecord> g_hipMemcpyAsyncArgs;
 
@@ -539,6 +559,17 @@ static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
 std::function<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int)>
     g_hipStreamBatchMemOp = DefaultHipStreamBatchMemOp;
 
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+static hipError_t DefaultHipMemcpyBatchAsync(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*,
+                                             size_t, size_t*, hipStream_t)
+{
+    return g_hipAsyncOpsResult;
+}
+std::function<hipError_t(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*, size_t, size_t*,
+                         hipStream_t)>
+    g_hipMemcpyBatchAsync = DefaultHipMemcpyBatchAsync;
+#endif
+
 static hipError_t DefaultHipStreamWriteValue64(hipStream_t, void*, std::uint64_t,
                                                unsigned int)
 {
@@ -566,6 +597,7 @@ void ResetHipFakes()
     g_hipPointerGetAttribute        = DefaultHipPointerGetAttribute;
     // init.cc device-model seams
     g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
+    g_hipDriverGetVersion           = DefaultHipDriverGetVersion;
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
     g_hipHostMalloc                 = DefaultHipHostMalloc;
@@ -577,6 +609,8 @@ void ResetHipFakes()
     g_hipSetDevice                  = DefaultHipSetDevice;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
     g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
+    g_hipDeviceEnablePeerAccess     = DefaultHipDeviceEnablePeerAccess;
+    g_hipDeviceDisablePeerAccess    = DefaultHipDeviceDisablePeerAccess;
     g_deviceCount                   = 8;
     g_currentDevice                 = 0;
     g_hipDeviceGetAttribute         = DefaultHipDeviceGetAttribute;
@@ -590,6 +624,7 @@ void ResetHipFakes()
     g_hipAsyncOpsResult             = hipErrorInvalidValue;
     g_hipWarpSize                   = 64;
     g_hipDirectManagedMemAccess     = 1;
+    g_hipMemoryPoolsSupported       = 1;
     g_hipMemcpyAsyncCalls           = 0;
     g_hipMemcpyAsyncArgs.clear();
     // VMM / IPC / stream seams (undoes InstallHipVmmEmulator too)
@@ -617,6 +652,9 @@ void ResetHipFakes()
     g_hipEventQueryRequiresRecord   = false;
     g_recordedEvents.clear();
     g_hipStreamBatchMemOp           = DefaultHipStreamBatchMemOp;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    g_hipMemcpyBatchAsync           = DefaultHipMemcpyBatchAsync;
+#endif
     g_hipStreamWriteValue64         = DefaultHipStreamWriteValue64;
     g_hipStreamWaitValue64          = DefaultHipStreamWaitValue64;
 }
@@ -651,9 +689,14 @@ hipError_t hipDeviceCanAccessPeer(int* canAccessPeer, int dev1, int dev2)
     return g_hipDeviceCanAccessPeer(canAccessPeer, dev1, dev2);
 }
 
-hipError_t hipDeviceEnablePeerAccess(int, unsigned int)
+hipError_t hipDeviceEnablePeerAccess(int peerDevice, unsigned int flags)
 {
-    return hipErrorInvalidValue;
+    return g_hipDeviceEnablePeerAccess(peerDevice, flags);
+}
+
+hipError_t hipDeviceDisablePeerAccess(int peerDevice)
+{
+    return g_hipDeviceDisablePeerAccess(peerDevice);
 }
 
 hipError_t hipDeviceGet(hipDevice_t* device, int)
@@ -681,6 +724,8 @@ static hipError_t DefaultHipDeviceGetAttribute(int* pi, hipDeviceAttribute_t att
             *pi = g_hipWarpSize; break;
         case hipDeviceAttributeDirectManagedMemAccessFromHost:
             *pi = g_hipDirectManagedMemAccess; break;   // 1 -> ncclCudaHostCalloc takes the extMalloc arm
+        case hipDeviceAttributeMemoryPoolsSupported:
+            *pi = g_hipMemoryPoolsSupported; break;     // 1 -> commAlloc creates comm->memPool (NCCL 2.32 gate)
         default:
             *pi = 0; break;
     }
@@ -903,6 +948,20 @@ hipError_t hipStreamWriteValue64(hipStream_t stream, void* ptr, std::uint64_t va
     return g_hipStreamWriteValue64(stream, ptr, value, flags);
 }
 
+hipError_t hipStreamWriteValue32(hipStream_t, void*, std::uint32_t, unsigned int)
+{
+    FailLoudUnfaked("hip_fakes", "hipStreamWriteValue32");
+}
+
+// ce_coll.cc's batch path; in-RCCL builds inherit CE_BATCH_ASYNC_SUPPORTED, standalone ones compile the call out.
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count, hipMemcpyAttributes* attrs,
+                               size_t* attrsIdxs, size_t numAttrs, size_t* failIdx, hipStream_t stream)
+{
+    return g_hipMemcpyBatchAsync(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx, stream);
+}
+#endif
+
 hipError_t hipThreadExchangeStreamCaptureMode(hipStreamCaptureMode* mode)
 {
     return g_hipThreadExchangeStreamCaptureMode(mode);
@@ -927,7 +986,7 @@ hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
 {
     return g_hipGetDeviceProperties(prop, device);
 }
-hipError_t hipDriverGetVersion(int* v) { if (v) *v = 70002000; return hipSuccess; }
+hipError_t hipDriverGetVersion(int* version) { return g_hipDriverGetVersion(version); }
 hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
     return g_hipStreamWaitEvent(stream, event, flags);

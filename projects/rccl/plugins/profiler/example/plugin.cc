@@ -874,6 +874,7 @@ __hidden ncclResult_t exampleProfilerStartEvent(void* context, void** eHandle, n
   } else if (eDescr->type == ncclProfileKernelCh) {
     struct taskEventBase* eventBase = (struct taskEventBase *)eDescr->parentObj;
     if (eventBase == NULL) return ncclSuccess;
+    if (eDescr->kernelCh.channelId >= MAX_CHANNELS) return ncclSuccess;
     if (eventBase->type == ncclProfileColl) {
       struct collective* parent = (struct collective *)eDescr->parentObj;
       int channelId = eDescr->kernelCh.channelId;

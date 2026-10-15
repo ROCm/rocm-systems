@@ -16,10 +16,12 @@ namespace hrr_cap {
 namespace writer {
 
 // Open events.bin for writing in output_dir. Creates directory tree.
-// Must be called before any write_* functions.
+// Must be called before any write_* functions. Returns false, leaving capture
+// off, when the file system holding the archive has less than the reserve free.
 bool open(const char* output_dir);
 
-// Returns true if open() has been called successfully.
+// True while events.bin is open: from a successful open() until close(), or
+// until capture stops because the file system fell to the reserve.
 bool is_open();
 
 // Cache process-level metadata JSON for manifest writers. The emergency
@@ -27,8 +29,9 @@ bool is_open();
 void set_capture_metadata_json(const std::string& metadata_json);
 
 // Flush events.bin, append the clean-shutdown trailer (hrr_eof_record), fsync,
-// and write manifest.json with "complete": true. Safe to call multiple times
-// (the trailer is written only once). Call on normal shutdown.
+// and write manifest.json with "complete": true. Call on normal shutdown: once the
+// trailer is written, events, blobs and code objects are dropped until close() and
+// the next open(). Use checkpoint() to flush while capture runs.
 void flush(const char* output_dir);
 
 // Force any buffered events to disk and fsync. Bounds how much capture data a
@@ -85,13 +88,19 @@ bool is_incomplete();
 // the archive is well-formed; what is missing is the ability to re-execute
 // this particular call. Thread-safe; the warning fires once per (api, reason)
 // per process.
+//
+// The note belongs to the next write_event_raw() on the calling thread, and is
+// listed only if that event is recorded: the shim calls it just before writing
+// the event. Both strings must stay valid until then.
 void note_unreplayable(const char* api, const char* reason);
 
-// Write a buffer as a content-addressed blob. Returns hash.
+// Write a buffer as a content-addressed blob. Returns hash, or {} when the
+// writer is not open, flush() has written the trailer, or capture has stopped
+// for lack of space.
 // Thread-safe. Skips write if blob already exists on disk.
 Hash128 write_blob(const void* data, size_t len);
 
-// Write a code object (.hsaco) blob. Returns hash.
+// Write a code object (.hsaco) blob. Returns hash, or {} as write_blob() does.
 Hash128 write_code_object(const void* image, size_t image_size);
 
 // Number of events written so far.

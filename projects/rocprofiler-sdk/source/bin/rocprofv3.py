@@ -53,6 +53,12 @@ PERFETTO_BUFFER_SIZE_KB_MIN = 1
 PERFETTO_BUFFER_SIZE_KB_MAX = ((1 << 32) - 1) // 1024
 DEPRECATED_DIRECT_OUTPUT_FORMATS = ("csv", "pftrace", "otf2")
 ATT_RESOURCE_MODES = ("default", "hsa", "code-object")
+REATTACH_INVARIANT_FILTER = (
+    r".*_trace|^pc_sampling_.*$|^att_.*$|"
+    r"^(pmc|pmc_groups|output_config|extra_counters)$|"
+    r"^selected_regions(_ref_count)?$|"
+    r"^kernel_(include_regex|exclude_regex|iteration_range)$"
+)
 
 
 class dotdict(dict):
@@ -820,7 +826,7 @@ For attachment profiling of running processes:
         help="Specifies the unit for the SPM sample interval. Used with --spm-sample-interval to define the sampling interval",
         default=None,
         type=str.lower,
-        choices=("sclk_cycles",),
+        choices=("sclk_cycles", "refclk_cycles"),
     )
 
     pc_sampling_options = parser.add_argument_group("PC sampling options")
@@ -2741,9 +2747,7 @@ def main(argv=None):
                     dotdict(prev_args),
                     # when updating this filter, please also update documentation on reattachment
                     # in using-rocprofv3-process-attachment.rst
-                    filter=r".*_trace|^pc_sampling_.*$|^att_.*$|"
-                    r"^(pmc|pmc_groups|output_config|extra_counters)$|"
-                    r"^kernel_(include_regex|exclude_regex|iteration_range)$",
+                    filter=REATTACH_INVARIANT_FILTER,
                     require_in_both=True,
                     # Allow this value to be None if it is not set in current cmd line
                     ignore_prev_inp=r"attach_duration_msec",

@@ -1,3 +1,6 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
 //! AMDF storage scopes, explicit access and host-view lifetimes.
 //!
 //! One resource owns its native backing; public parents are borrowed. This
@@ -7,12 +10,13 @@
 
 use crate::generated::amdf::*;
 use crate::instance::{Device, Endpoint, Instance, endpoint_id, supported_endpoint};
+use crate::platform::IntoRawFd;
+use crate::platform::memory as linux_interop;
 use crate::support::*;
-use rocddi::host_storage::{Buffer, Owned};
 use rocddi::memory;
-use rocddi::memory::interop::linux as linux_interop;
+use rocddi::memory::storage::Owned;
+use rocddi::memory::storage::TryPush;
 use std::ffi::c_void;
-use std::os::fd::IntoRawFd;
 use std::sync::atomic::{AtomicU64, AtomicUsize, Ordering};
 
 const BACKING_FLAGS: u64 =
@@ -31,9 +35,9 @@ pub(crate) struct Scope {
 
 /// Native or caller-owned storage underlying one public memory object.
 enum Backing {
-    Host(memory::HostAllocation),
+    Host(memory::host::HostAllocation),
     Registered,
-    Gpu(memory::Allocation),
+    Gpu(memory::device::Allocation),
     Alias { _borrow: SourceBorrow },
 }
 
@@ -66,7 +70,7 @@ pub(crate) struct Memory {
     scope: *mut Scope,
     backing: Backing,
     info: amdf_memory_info_t,
-    access: Buffer<Access>,
+    access: Vec<Access>,
     host: Option<usize>,
     cacheability: u32,
     children: AtomicU64,
@@ -313,9 +317,9 @@ unsafe extern "C" fn close_dma_buf(
     }
     let descriptor = unsafe { payload.file_descriptor };
     if let Ok(descriptor) = i32::try_from(descriptor) {
-        // AMDF export transferred ownership to this value. The callback runs
-        // at most once, so the Linux backend consumes the descriptor here.
-        let _ = rocddi::session::linux::close_descriptor(descriptor);
+        // SAFETY: AMDF export transferred ownership of this descriptor to the
+        // external-memory value, whose release callback runs at most once.
+        let _ = unsafe { linux_interop::close_owned_descriptor(descriptor) };
     }
 }
 
@@ -454,7 +458,7 @@ unsafe fn profile(
     let mut capabilities = amdf_memory_access_capabilities_t::default();
     if let Some(endpoint) = endpoint {
         let requested_access =
-            memory::DeviceAccess::from_bits(request.access).ok_or(UNSUPPORTED)?;
+            memory::device::DeviceAccess::from_bits(request.access).ok_or(UNSUPPORTED)?;
         let flags = AMDF_MEMORY_FLAG_DEVICE_ADDRESS
             | if local {
                 0
@@ -464,7 +468,7 @@ unsafe fn profile(
         // KFD always installs readable GPU PTEs; WRITE and EXECUTE are
         // independent additions. Queue storage uses these same native BOs.
         let supported_flags = flags | AMDF_MEMORY_FLAG_QUEUE_STORAGE;
-        if !requested_access.contains(memory::DeviceAccess::READ)
+        if !requested_access.contains(memory::device::DeviceAccess::READ)
             || !endpoint
                 .native
                 .supported_permissions
@@ -591,11 +595,10 @@ unsafe fn joint_profile(
     scope: &Scope,
     ordinal: u32,
     accesses: &[ProfileAccess<'_>],
-    allocator: rocddi::host_storage::Allocator,
 ) -> Result<
     (
         amdf_memory_profile_t,
-        Buffer<amdf_memory_access_capabilities_t>,
+        Vec<amdf_memory_access_capabilities_t>,
     ),
     u64,
 > {
@@ -612,7 +615,7 @@ unsafe fn joint_profile(
                 false,
             )?
         };
-        return Ok((profile, Buffer::new(allocator)));
+        return Ok((profile, Vec::new()));
     }
     if !scope.endpoint.is_null() {
         let owner = unsafe { &*scope.endpoint };
@@ -627,7 +630,7 @@ unsafe fn joint_profile(
         return Err(UNSUPPORTED);
     }
     let mut capabilities =
-        Buffer::try_with_capacity(accesses.len(), allocator).map_err(|_| EXHAUSTED)?;
+        rocddi::memory::storage::try_vec_with_capacity(accesses.len()).map_err(|_| EXHAUSTED)?;
     let mut selected = None;
     let mut common = (0, u64::MAX);
     for access in accesses {
@@ -714,7 +717,6 @@ unsafe fn scopes(
     }
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn instance_scopes(
     pointer: *mut amdf_instance_t,
     capacity: u32,
@@ -733,7 +735,6 @@ pub(crate) unsafe extern "C" fn instance_scopes(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn device_scopes(
     pointer: *mut amdf_device_t,
     capacity: u32,
@@ -753,7 +754,6 @@ pub(crate) unsafe extern "C" fn device_scopes(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn scope_info(
     pointer: *mut amdf_memory_scope_t,
     out: *mut amdf_memory_scope_info_t,
@@ -779,7 +779,6 @@ pub(crate) unsafe extern "C" fn scope_info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn device_profile(
     pointer: *mut amdf_memory_scope_t,
     ordinal: u32,
@@ -810,9 +809,8 @@ pub(crate) unsafe extern "C" fn device_profile(
         if !uniform_requirements(accesses.iter().map(|access| access.requirements)) {
             return Err(UNSUPPORTED);
         }
-        let allocator = (*scope.instance).allocator;
-        let mut staged =
-            Buffer::try_with_capacity(count as usize, allocator).map_err(|_| EXHAUSTED)?;
+        let mut staged = rocddi::memory::storage::try_vec_with_capacity(count as usize)
+            .map_err(|_| EXHAUSTED)?;
         for access in accesses {
             let device = object(access.device.cast::<Device>())?;
             staged
@@ -824,7 +822,7 @@ pub(crate) unsafe extern "C" fn device_profile(
                 })
                 .map_err(|_| EXHAUSTED)?;
         }
-        let (profile, capabilities) = joint_profile(scope, ordinal, &staged, allocator)?;
+        let (profile, capabilities) = joint_profile(scope, ordinal, &staged)?;
         for (index, capability) in capabilities.into_iter().enumerate() {
             output(
                 caps.add(index),
@@ -837,7 +835,6 @@ pub(crate) unsafe extern "C" fn device_profile(
     })
 }
 
-#[allow(unused_unsafe)]
 #[allow(
     clippy::too_many_lines,
     reason = "admission, acquisition, and publication share cleanup ownership"
@@ -848,351 +845,375 @@ pub(crate) unsafe extern "C" fn create(
     out: *mut *mut amdf_memory_t,
 ) -> u64 {
     crate::support::boundary(|| {
-        unsafe {
-            let scope = object(pointer.cast::<Scope>())?;
-            output_pointer(out)?;
-            let create = input(info, AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO)?;
-            if create.required_flags & !BACKING_FLAGS != 0
-                || create.byte_length == 0
-                || create.reserved != 0
-                || (create.minimum_alignment != 0 && !create.minimum_alignment.is_power_of_two())
+        // SAFETY: The C caller retains this provider-owned scope for the call.
+        let scope = unsafe { object(pointer.cast::<Scope>()) }?;
+        output_pointer(out)?;
+        // SAFETY: The caller supplies a readable descriptor; input validates
+        // its prefix before copying the complete record.
+        let create = unsafe { input(info, AMDF_STRUCTURE_TYPE_MEMORY_CREATE_INFO) }?;
+        if create.required_flags & !BACKING_FLAGS != 0
+            || create.byte_length == 0
+            || create.reserved != 0
+            || (create.minimum_alignment != 0 && !create.minimum_alignment.is_power_of_two())
+        {
+            return Err(INVALID);
+        }
+        // SAFETY: The admitted descriptor supplies a live access array.
+        let accesses = unsafe { array(create.accesses, create.access_count) }?;
+        // SAFETY: The live scope borrows its parent instance.
+        let instance = unsafe { object(scope.instance) }?;
+        if instance.closing || instance.process_id != std::process::id() {
+            return Err(PRECONDITION);
+        }
+        if !unique_devices(accesses) {
+            return Err(INVALID);
+        }
+        for access in accesses {
+            requirements(access.requirements)?;
+            // SAFETY: Each requested handle remains live for the call.
+            let device = unsafe { object(access.device.cast::<Device>()) }?;
+            // SAFETY: A live device borrows its endpoint.
+            if unsafe { object(device.endpoint) }?.instance != scope.instance {
+                return Err(INVALID);
+            }
+        }
+        if !uniform_requirements(accesses.iter().map(|access| access.requirements)) {
+            return Err(UNSUPPORTED);
+        }
+        let mut staged = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+            .map_err(|_| EXHAUSTED)?;
+        for access in accesses {
+            // SAFETY: These handles were admitted above and remain live.
+            let device = unsafe { object(access.device.cast::<Device>()) }?;
+            // SAFETY: A live device borrows its endpoint for its entire lifetime.
+            let endpoint = unsafe { object(device.endpoint) }?;
+            staged
+                .try_push(ProfileAccess {
+                    endpoint,
+                    request: access.requirements,
+                    address_range: device.native.address_range(),
+                    import_supported: linux_interop::supports_system_dma_buf_import(&device.native),
+                })
+                .map_err(|_| EXHAUSTED)?;
+        }
+        // SAFETY: Scope and staged endpoint borrows remain live through
+        // profile selection.
+        let (profile, capabilities) =
+            unsafe { joint_profile(scope, create.memory_profile_ordinal, &staged) }?;
+        let local = profile.memory_class == AMDF_MEMORY_CLASS_LOCAL;
+        let owner = if scope.endpoint.is_null() {
+            None
+        } else {
+            // SAFETY: A non-null scope endpoint is owned by the live instance.
+            Some(unsafe { object(scope.endpoint) }?.native.id)
+        };
+        let owner_index = physical_owner_index(
+            local,
+            owner,
+            staged.iter().map(|access| access.endpoint.native.id),
+        )?;
+        let device = accesses
+            .get(owner_index)
+            .map(|access| {
+                // SAFETY: The requested device was admitted above.
+                unsafe { object(access.device.cast::<Device>()) }
+            })
+            .transpose()?;
+        let request = accesses
+            .first()
+            .map_or(amdf_memory_access_requirements_t::default(), |a| {
+                a.requirements
+            });
+        let registered = profile.roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER != 0;
+        if registered == create.registered_host_pointer.is_null() {
+            return Err(INVALID);
+        }
+        if registered {
+            if create.registered_host_cacheability
+                != profile.registration.registered_host_cacheability
+            {
+                return Err(UNSUPPORTED);
+            }
+        } else if create.registered_host_cacheability != AMDF_HOST_CACHEABILITY_UNKNOWN {
+            return Err(INVALID);
+        }
+        let limits = if registered {
+            profile.registration
+        } else {
+            profile.allocation
+        };
+        if create.required_flags & !profile.supported_flags != 0
+            || create.byte_length > limits.maximum_byte_length
+            || create.minimum_alignment > limits.maximum_alignment
+        {
+            return Err(UNSUPPORTED);
+        }
+        let alignment = create.minimum_alignment.max(limits.minimum_alignment);
+        let page = instance.host_page_size;
+        let (registered_address, mut source_byte_offset, mut native_length) = if registered {
+            let address = create.registered_host_pointer as usize;
+            let requested_alignment = usize::try_from(alignment).map_err(|_| RANGE)?;
+            if address % requested_alignment != 0
+                || address
+                    .checked_add(usize::try_from(create.byte_length).map_err(|_| RANGE)?)
+                    .is_none()
             {
                 return Err(INVALID);
             }
-            let accesses = array(create.accesses, create.access_count)?;
-            let instance = &*scope.instance;
-            if !unique_devices(accesses) {
-                return Err(INVALID);
-            }
-            for access in accesses {
-                requirements(access.requirements)?;
-                let device = object(access.device.cast::<Device>())?;
-                if (*device.endpoint).instance != scope.instance {
-                    return Err(INVALID);
-                }
-            }
-            if !uniform_requirements(accesses.iter().map(|access| access.requirements)) {
-                return Err(UNSUPPORTED);
-            }
-            let mut staged = Buffer::try_with_capacity(accesses.len(), instance.allocator)
+            let source_byte_offset = address as u64 & (page - 1);
+            let native_length = rounded(
+                source_byte_offset
+                    .checked_add(create.byte_length)
+                    .ok_or(RANGE)?,
+                page,
+            )?;
+            (Some(address), source_byte_offset, native_length)
+        } else {
+            (None, 0, rounded(create.byte_length, page)?)
+        };
+        let slot = Owned::<Memory>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let mut access_records = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+            .map_err(|_| EXHAUSTED)?;
+        let mut peer_devices =
+            rocddi::memory::storage::try_vec_with_capacity(accesses.len().saturating_sub(1))
                 .map_err(|_| EXHAUSTED)?;
-            for access in accesses {
-                let device = object(access.device.cast::<Device>())?;
-                staged
-                    .try_push(ProfileAccess {
-                        endpoint: &*device.endpoint,
-                        request: access.requirements,
-                        address_range: device.native.address_range(),
-                        import_supported: linux_interop::supports_system_dma_buf_import(
-                            &device.native,
-                        ),
+        for (index, access) in accesses.iter().enumerate() {
+            if index == owner_index {
+                continue;
+            }
+            // SAFETY: The peer handle was admitted above and remains live.
+            let peer = unsafe { object(access.device.cast::<Device>()) }?;
+            peer_devices.try_push(&peer.native).map_err(|_| EXHAUSTED)?;
+        }
+        // Arbitrary caller storage has no identity. A provider-owned host
+        // view can reuse the known BO and its already-established VM access.
+        let mut physical_backing_id = if registered {
+            amdf_physical_memory_id_t::default()
+        } else {
+            amdf_physical_memory_id_t {
+                words: [scope.instance as u64, next_id(&instance.ids)?],
+            }
+        };
+        let visible = profile.guaranteed_flags & AMDF_MEMORY_FLAG_HOST_VISIBLE != 0;
+        let alias = if registered && device.is_some() {
+            // SAFETY: The instance owns the locked host-backing list; admitted
+            // device handles remain live while the borrow is acquired.
+            unsafe {
+                find_host_alias(
+                    instance,
+                    registered_address.ok_or(INTERNAL)?,
+                    create.byte_length,
+                    accesses,
+                )
+            }?
+        } else {
+            None
+        };
+        let (backing, host, cacheability) = if let Some((borrow, offset)) = alias {
+            // SAFETY: the registered child keeps the listed source live.
+            let source = unsafe { &*borrow.source };
+            source_byte_offset = source
+                .info
+                .source_byte_offset
+                .checked_add(offset)
+                .ok_or(RANGE)?;
+            native_length = source.info.native_allocation_byte_length;
+            physical_backing_id = source.info.physical_backing_id;
+            for (index, (requested, capability)) in accesses.iter().zip(&capabilities).enumerate() {
+                // SAFETY: The requested device remains live throughout creation.
+                let access_device = unsafe { &*requested.device.cast::<Device>() };
+                let existing = source
+                    .access
+                    .iter()
+                    .find(|existing| {
+                        // SAFETY: source access devices outlive source memory.
+                        let owner = unsafe { &*existing.device };
+                        access_device.native.shares_address_domain(&owner.native)
+                            && existing.info.access == requested.requirements.access
+                            && existing.info.reset_epoch == access_device.current_reset_epoch()
+                    })
+                    .ok_or(INTERNAL)?;
+                let address = existing.address.checked_add(offset).ok_or(RANGE)?;
+                access_records
+                    .try_push(Access {
+                        device: requested.device.cast(),
+                        address,
+                        info: amdf_memory_access_info_t {
+                            ordinal: u32::try_from(index).map_err(|_| INTERNAL)?,
+                            access: requested.requirements.access,
+                            device_id: access_device.id,
+                            flags: capability.guaranteed_flags | requested.requirements.flags,
+                            atomic_operations_32: capability.atomic_operations_32,
+                            atomic_operations_64: capability.atomic_operations_64,
+                            address_domain_ordinal: capability
+                                .device_address
+                                .address_domain_ordinal,
+                            address_kinds: capability.address_kinds,
+                            reset_epoch: access_device.current_reset_epoch(),
+                            ..Default::default()
+                        },
                     })
                     .map_err(|_| EXHAUSTED)?;
             }
-            let (profile, capabilities) = joint_profile(
-                scope,
-                create.memory_profile_ordinal,
-                &staged,
-                instance.allocator,
-            )?;
-            let local = profile.memory_class == AMDF_MEMORY_CLASS_LOCAL;
-            let owner = (!scope.endpoint.is_null()).then(|| (*scope.endpoint).native.id);
-            let owner_index = physical_owner_index(
-                local,
-                owner,
-                staged.iter().map(|access| access.endpoint.native.id),
-            )?;
-            let device = accesses
-                .get(owner_index)
-                .map(|access| &*access.device.cast::<Device>());
-            let request = accesses
-                .first()
-                .map_or(amdf_memory_access_requirements_t::default(), |a| {
-                    a.requirements
-                });
-            let registered = profile.roles & AMDF_MEMORY_PROFILE_ROLE_REGISTER != 0;
-            if registered == create.registered_host_pointer.is_null() {
-                return Err(INVALID);
-            }
-            if registered {
-                if create.registered_host_cacheability
-                    != profile.registration.registered_host_cacheability
-                {
-                    return Err(UNSUPPORTED);
+            (
+                Backing::Alias { _borrow: borrow },
+                registered_address,
+                source.cacheability,
+            )
+        } else if let Some(device) = device {
+            let kind = if local {
+                memory::device::MemoryKind::DeviceLocal {
+                    host_visible: visible,
+                    coherent: false,
+                    uncached: false,
+                    contiguous: false,
                 }
-            } else if create.registered_host_cacheability != AMDF_HOST_CACHEABILITY_UNKNOWN {
-                return Err(INVALID);
-            }
-            let limits = if registered {
-                profile.registration
             } else {
-                profile.allocation
+                memory::device::MemoryKind::System
             };
-            if create.required_flags & !profile.supported_flags != 0
-                || create.byte_length > limits.maximum_byte_length
-                || create.minimum_alignment > limits.maximum_alignment
-            {
-                return Err(UNSUPPORTED);
-            }
-            let alignment = create.minimum_alignment.max(limits.minimum_alignment);
-            let page = instance.host_page_size;
-            let (registered_address, mut source_byte_offset, mut native_length) = if registered {
-                let address = create.registered_host_pointer as usize;
-                let requested_alignment = usize::try_from(alignment).map_err(|_| RANGE)?;
-                if address % requested_alignment != 0
-                    || address
-                        .checked_add(usize::try_from(create.byte_length).map_err(|_| RANGE)?)
-                        .is_none()
-                {
-                    return Err(INVALID);
-                }
-                let source_byte_offset = address as u64 & (page - 1);
-                let native_length = rounded(
-                    source_byte_offset
-                        .checked_add(create.byte_length)
-                        .ok_or(RANGE)?,
-                    page,
-                )?;
-                (Some(address), source_byte_offset, native_length)
-            } else {
-                (None, 0, rounded(create.byte_length, page)?)
-            };
-            let slot =
-                Owned::<Memory>::try_new_uninit(instance.allocator).map_err(|_| EXHAUSTED)?;
-            let mut access_records = Buffer::try_with_capacity(accesses.len(), instance.allocator)
-                .map_err(|_| EXHAUSTED)?;
-            let mut peer_devices =
-                Buffer::try_with_capacity(accesses.len().saturating_sub(1), instance.allocator)
-                    .map_err(|_| EXHAUSTED)?;
-            for (index, access) in accesses.iter().enumerate() {
-                if index == owner_index {
-                    continue;
-                }
-                peer_devices
-                    .try_push(&(*access.device.cast::<Device>()).native)
-                    .map_err(|_| EXHAUSTED)?;
-            }
-            // Arbitrary caller storage has no identity. A provider-owned host
-            // view can reuse the known BO and its already-established VM access.
-            let mut physical_backing_id = if registered {
-                amdf_physical_memory_id_t::default()
-            } else {
-                amdf_physical_memory_id_t {
-                    words: [scope.instance as u64, next_id(&instance.ids)?],
-                }
-            };
-            let visible = profile.guaranteed_flags & AMDF_MEMORY_FLAG_HOST_VISIBLE != 0;
-            let alias = if registered && device.is_some() {
+            let permissions =
+                memory::device::DeviceAccess::from_bits(request.access).ok_or(UNSUPPORTED)?;
+            let native_allocation = if let Some(address) = registered_address {
+                // SAFETY: The AMDF REGISTER owner borrows the caller's
+                // host pages until native destruction succeeds. An
+                // uncertain native result retains that owner.
                 unsafe {
-                    find_host_alias(
-                        instance,
-                        registered_address.ok_or(INTERNAL)?,
-                        create.byte_length,
-                        accesses,
-                    )?
-                }
-            } else {
-                None
-            };
-            let (backing, host, cacheability) = if let Some((borrow, offset)) = alias {
-                // SAFETY: the registered child keeps the listed source live.
-                let source = unsafe { &*borrow.source };
-                source_byte_offset = source
-                    .info
-                    .source_byte_offset
-                    .checked_add(offset)
-                    .ok_or(RANGE)?;
-                native_length = source.info.native_allocation_byte_length;
-                physical_backing_id = source.info.physical_backing_id;
-                for (index, (requested, capability)) in
-                    accesses.iter().zip(&capabilities).enumerate()
-                {
-                    let access_device = unsafe { &*requested.device.cast::<Device>() };
-                    let existing = source
-                        .access
-                        .iter()
-                        .find(|existing| {
-                            // SAFETY: source access devices outlive source memory.
-                            let owner = unsafe { &*existing.device };
-                            access_device.native.shares_address_domain(&owner.native)
-                                && existing.info.access == requested.requirements.access
-                                && existing.info.reset_epoch == access_device.current_reset_epoch()
-                        })
-                        .ok_or(INTERNAL)?;
-                    let address = existing.address.checked_add(offset).ok_or(RANGE)?;
-                    access_records
-                        .try_push(Access {
-                            device: requested.device.cast(),
-                            address,
-                            info: amdf_memory_access_info_t {
-                                ordinal: u32::try_from(index).map_err(|_| INTERNAL)?,
-                                access: requested.requirements.access,
-                                device_id: access_device.id,
-                                flags: capability.guaranteed_flags | requested.requirements.flags,
-                                atomic_operations_32: capability.atomic_operations_32,
-                                atomic_operations_64: capability.atomic_operations_64,
-                                address_domain_ordinal: capability
-                                    .device_address
-                                    .address_domain_ordinal,
-                                address_kinds: capability.address_kinds,
-                                reset_epoch: access_device.current_reset_epoch(),
-                                ..Default::default()
-                            },
-                        })
-                        .map_err(|_| EXHAUSTED)?;
-                }
-                (
-                    Backing::Alias { _borrow: borrow },
-                    registered_address,
-                    source.cacheability,
-                )
-            } else if let Some(device) = device {
-                let kind = if let Some(address) = registered_address {
-                    memory::MemoryKind::RegisteredHost {
-                        address,
-                        uncached: false,
-                    }
-                } else if local {
-                    memory::MemoryKind::DeviceLocal {
-                        host_visible: visible,
-                        coherent: false,
-                        uncached: false,
-                        contiguous: false,
-                    }
-                } else {
-                    memory::MemoryKind::System
-                };
-                let permissions =
-                    memory::DeviceAccess::from_bits(request.access).ok_or(UNSUPPORTED)?;
-                let native_allocation = device
-                    .native
-                    .allocate_with_peers(
+                    device.native.register_host_with_peers(
                         peer_devices.as_slice(),
-                        kind,
+                        address,
+                        memory::device::HostMappingPolicy::Fine,
                         native_length,
                         alignment.max(page),
                         permissions,
                     )
-                    .map_err(|e| native(&e))?;
-                let addresses = native_allocation.info();
-                if profile.guaranteed_flags & AMDF_MEMORY_FLAG_SHAREABLE != 0 {
-                    let dma_buf = linux_interop::export_dma_buf(&native_allocation)
-                        .map_err(|error| native(&error))?;
-                    physical_backing_id.words = dma_buf.info().physical_backing_id;
                 }
-                for (index, (requested, capability)) in
-                    accesses.iter().zip(&capabilities).enumerate()
-                {
-                    let access_device = &*requested.device.cast::<Device>();
-                    let address = native_allocation
-                        .device_address(&access_device.native)
-                        .map_err(|error| native(&error))?;
-                    access_records
-                        .try_push(Access {
-                            device: requested.device.cast(),
-                            address,
-                            info: amdf_memory_access_info_t {
-                                ordinal: u32::try_from(index).map_err(|_| INTERNAL)?,
-                                access: requested.requirements.access,
-                                device_id: access_device.id,
-                                flags: capability.guaranteed_flags | requested.requirements.flags,
-                                atomic_operations_32: capability.atomic_operations_32,
-                                atomic_operations_64: capability.atomic_operations_64,
-                                address_domain_ordinal: capability
-                                    .device_address
-                                    .address_domain_ordinal,
-                                address_kinds: capability.address_kinds,
-                                reset_epoch: access_device.current_reset_epoch(),
-                                ..Default::default()
-                            },
-                        })
-                        .map_err(|_| EXHAUSTED)?;
-                }
-                (
-                    Backing::Gpu(native_allocation),
-                    addresses.host_address,
-                    if local && visible {
-                        match device.native.endpoint().host_local_cacheability {
-                            Some(memory::HostCacheability::WriteBack) => {
-                                AMDF_HOST_CACHEABILITY_WRITE_BACK
-                            }
-                            Some(memory::HostCacheability::WriteCombined) => {
-                                AMDF_HOST_CACHEABILITY_WRITE_COMBINED
-                            }
-                            // Profile admission required a qualified mapping recipe.
-                            None => return Err(INTERNAL),
-                        }
-                    } else {
-                        AMDF_HOST_CACHEABILITY_WRITE_BACK
-                    },
-                )
-            } else if registered {
-                (
-                    Backing::Registered,
-                    registered_address,
-                    create.registered_host_cacheability,
-                )
             } else {
-                let native_allocation = instance
-                    .native
-                    .allocate_host(native_length, alignment)
-                    .map_err(|e| native(&e))?;
-                let address = native_allocation.info().host_address;
-                (
-                    Backing::Host(native_allocation),
-                    Some(address),
-                    AMDF_HOST_CACHEABILITY_WRITE_BACK,
+                device.native.allocate_with_peers(
+                    peer_devices.as_slice(),
+                    kind,
+                    native_length,
+                    alignment.max(page),
+                    permissions,
                 )
-            };
-            let actual_alignment = if registered {
-                let host_alignment = 1u64 << (host.ok_or(INTERNAL)? as u64).trailing_zeros();
-                access_records
-                    .iter()
-                    .fold(host_alignment, |alignment, access| {
-                        alignment.min(1u64 << access.address.trailing_zeros())
-                    })
-            } else {
-                alignment
-            };
-            let listed_host_backing = !registered
-                && !local
-                && create.access_count != 0
-                && host.is_some()
-                && matches!(backing, Backing::Gpu(_));
-            let mut owner = slot.write(Memory {
-                scope: pointer.cast(),
-                backing,
-                host,
-                access: access_records,
-                cacheability,
-                info: amdf_memory_info_t {
-                    memory_profile_ordinal: profile.ordinal,
-                    memory_class: profile.memory_class,
-                    access_count: create.access_count,
-                    flags: profile.guaranteed_flags | create.required_flags,
-                    source_byte_offset,
-                    byte_length: create.byte_length,
-                    alignment: actual_alignment,
-                    native_allocation_byte_length: native_length,
-                    native_allocation_granularity: page,
-                    physical_backing_id,
-                    ..Default::default()
-                },
-                children: AtomicU64::new(0),
-                freeing: false,
-                host_backing_next: AtomicUsize::new(0),
-                listed_host_backing,
-            });
-            if listed_host_backing {
-                list_host_backing(instance, &mut owner)?;
             }
-            out.write(owner.into_raw().cast());
-            Ok(())
+            .map_err(|e| device.native_error_status(&e))?;
+            let addresses = native_allocation.info();
+            if profile.guaranteed_flags & AMDF_MEMORY_FLAG_SHAREABLE != 0 {
+                let dma_buf = linux_interop::export_dma_buf(&native_allocation)
+                    .map_err(|error| device.native_error_status(&error))?;
+                physical_backing_id.words = dma_buf.info().physical_backing_id;
+            }
+            for (index, (requested, capability)) in accesses.iter().zip(&capabilities).enumerate() {
+                // SAFETY: The requested device remains live throughout creation.
+                let access_device = unsafe { &*requested.device.cast::<Device>() };
+                let address = native_allocation
+                    .device_address(&access_device.native)
+                    .map_err(|error| access_device.native_error_status(&error))?;
+                access_records
+                    .try_push(Access {
+                        device: requested.device.cast(),
+                        address,
+                        info: amdf_memory_access_info_t {
+                            ordinal: u32::try_from(index).map_err(|_| INTERNAL)?,
+                            access: requested.requirements.access,
+                            device_id: access_device.id,
+                            flags: capability.guaranteed_flags | requested.requirements.flags,
+                            atomic_operations_32: capability.atomic_operations_32,
+                            atomic_operations_64: capability.atomic_operations_64,
+                            address_domain_ordinal: capability
+                                .device_address
+                                .address_domain_ordinal,
+                            address_kinds: capability.address_kinds,
+                            reset_epoch: access_device.current_reset_epoch(),
+                            ..Default::default()
+                        },
+                    })
+                    .map_err(|_| EXHAUSTED)?;
+            }
+            (
+                Backing::Gpu(native_allocation),
+                addresses.host_address,
+                if local && visible {
+                    match device.native.endpoint().host_local_cacheability {
+                        Some(memory::device::HostCacheability::WriteBack) => {
+                            AMDF_HOST_CACHEABILITY_WRITE_BACK
+                        }
+                        Some(memory::device::HostCacheability::WriteCombined) => {
+                            AMDF_HOST_CACHEABILITY_WRITE_COMBINED
+                        }
+                        // Profile admission required a qualified mapping recipe.
+                        None => return Err(INTERNAL),
+                    }
+                } else {
+                    AMDF_HOST_CACHEABILITY_WRITE_BACK
+                },
+            )
+        } else if registered {
+            (
+                Backing::Registered,
+                registered_address,
+                create.registered_host_cacheability,
+            )
+        } else {
+            let native_allocation =
+                memory::host::HostAllocation::allocate(native_length, alignment)
+                    .map_err(|e| native(&e))?;
+            let address = native_allocation.info().host_address;
+            (
+                Backing::Host(native_allocation),
+                Some(address),
+                AMDF_HOST_CACHEABILITY_WRITE_BACK,
+            )
+        };
+        let actual_alignment = if registered {
+            let host_alignment = 1u64 << (host.ok_or(INTERNAL)? as u64).trailing_zeros();
+            access_records
+                .iter()
+                .fold(host_alignment, |alignment, access| {
+                    alignment.min(1u64 << access.address.trailing_zeros())
+                })
+        } else {
+            alignment
+        };
+        let listed_host_backing = !registered
+            && !local
+            && create.access_count != 0
+            && host.is_some()
+            && matches!(backing, Backing::Gpu(_));
+        let mut owner = slot.write(Memory {
+            scope: pointer.cast(),
+            backing,
+            host,
+            access: access_records,
+            cacheability,
+            info: amdf_memory_info_t {
+                memory_profile_ordinal: profile.ordinal,
+                memory_class: profile.memory_class,
+                access_count: create.access_count,
+                flags: profile.guaranteed_flags | create.required_flags,
+                source_byte_offset,
+                byte_length: create.byte_length,
+                alignment: actual_alignment,
+                native_allocation_byte_length: native_length,
+                native_allocation_granularity: page,
+                physical_backing_id,
+                ..Default::default()
+            },
+            children: AtomicU64::new(0),
+            freeing: false,
+            host_backing_next: AtomicUsize::new(0),
+            listed_host_backing,
+        });
+        if listed_host_backing {
+            list_host_backing(instance, &mut owner)?;
         }
+        // SAFETY: The output slot was validated before native acquisition;
+        // ownership transfers only after every creation step succeeds.
+        unsafe { out.write(owner.into_raw().cast()) };
+        Ok(())
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn info(
     pointer: *mut amdf_memory_t,
     out: *mut amdf_memory_info_t,
@@ -1204,7 +1225,6 @@ pub(crate) unsafe extern "C" fn info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn access_info(
     pointer: *mut amdf_memory_t,
     ordinal: u32,
@@ -1221,7 +1241,6 @@ pub(crate) unsafe extern "C" fn access_info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn address(
     pointer: *mut amdf_memory_t,
     ordinal: u32,
@@ -1248,7 +1267,6 @@ pub(crate) unsafe extern "C" fn address(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn map(
     pointer: *mut amdf_memory_t,
     info: *const amdf_memory_map_info_t,
@@ -1266,8 +1284,7 @@ pub(crate) unsafe extern "C" fn map(
         }
         range(map.byte_offset, map.byte_length, memory.info.byte_length).map_err(|_| INVALID)?;
         let host = memory.host.ok_or(UNSUPPORTED)?;
-        let slot = Owned::<Mapping>::try_new_uninit((*(*memory.scope).instance).allocator)
-            .map_err(|_| EXHAUSTED)?;
+        let slot = Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?;
         let (line, flush, invalidate) =
             host_transitions(&*(*memory.scope).instance, memory.cacheability)?;
         register(&memory.children)?;
@@ -1293,7 +1310,6 @@ pub(crate) unsafe extern "C" fn map(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn mapping_info(
     pointer: *mut amdf_host_mapping_t,
     out: *mut amdf_host_mapping_info_t,
@@ -1305,7 +1321,6 @@ pub(crate) unsafe extern "C" fn mapping_info(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn cache_control(
     pointer: *mut amdf_host_mapping_t,
     operation: u32,
@@ -1341,7 +1356,7 @@ pub(crate) unsafe extern "C" fn cache_control(
             AMDF_CACHE_TRANSITION_KIND_NONE => return Ok(()),
             _ => {}
         }
-        memory::host_cache_control(
+        memory::host::host_cache_control(
             mapping.info.pointer as usize + usize::try_from(offset).map_err(|_| RANGE)?,
             length,
             mapping.info.cache_line_size,
@@ -1351,7 +1366,6 @@ pub(crate) unsafe extern "C" fn cache_control(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_host_mapping_t) -> u64 {
     crate::support::boundary(|| unsafe {
         let mapping = object(pointer.cast::<Mapping>())?;
@@ -1361,7 +1375,6 @@ pub(crate) unsafe extern "C" fn unmap(pointer: *mut amdf_host_mapping_t) -> u64 
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_t) -> u64 {
     crate::support::boundary(|| {
         unsafe {
@@ -1388,12 +1401,18 @@ pub(crate) unsafe extern "C" fn destroy(pointer: *mut amdf_memory_t) -> u64 {
                 Backing::Host(allocation) => allocation.free(),
                 Backing::Gpu(allocation) => allocation.free(),
                 Backing::Registered | Backing::Alias { .. } => Ok(()),
-            };
+            }
+            .map_err(|error| {
+                memory.access.first().map_or_else(
+                    || native(&error),
+                    |access| (&*access.device).native_error_status(&error),
+                )
+            });
             // The ABI consumes the public memory handle even when a native
             // release fails. Dropping the internal owner finishes safe cleanup
             // or lets the native owner retain uncertain state for process exit.
             drop(Owned::from_raw(pointer.cast::<Memory>()));
-            result.map_err(|error| native(&error))
+            result
         }
     })
 }
@@ -1467,7 +1486,7 @@ pub(crate) unsafe fn kernel_command(
     reset_epoch: u64,
     byte_offset: u64,
     byte_length: u64,
-) -> Result<rocddi::gpu::queue::KernelCommand, u64> {
+) -> Result<rocddi::device::gpu::queue::KernelCommand, u64> {
     if byte_length == 0 || byte_offset % 4 != 0 || byte_length % 4 != 0 {
         return Err(INVALID);
     }
@@ -1499,7 +1518,7 @@ pub(crate) unsafe fn kernel_command(
     if device_address == 0 || device_address % 4 != 0 {
         return Err(INVALID);
     }
-    Ok(rocddi::gpu::queue::KernelCommand {
+    Ok(rocddi::device::gpu::queue::KernelCommand {
         device_address,
         byte_length,
     })
@@ -1514,7 +1533,6 @@ pub(crate) unsafe fn borrow_for_queue(pointer: *mut Memory) -> Result<QueueScrat
     Ok(QueueScratchBorrow { memory: pointer })
 }
 
-#[allow(unused_unsafe)]
 #[allow(
     clippy::too_many_lines,
     reason = "external admission, native attachment, and move-on-success publication form one transaction"
@@ -1554,10 +1572,10 @@ pub(crate) unsafe extern "C" fn import(
         if !uniform_requirements(accesses.iter().map(|access| access.requirements)) {
             return Err(UNSUPPORTED);
         }
-        let mut staged =
-            Buffer::try_with_capacity(accesses.len(), instance.allocator).map_err(|_| EXHAUSTED)?;
-        let mut devices =
-            Buffer::try_with_capacity(accesses.len(), instance.allocator).map_err(|_| EXHAUSTED)?;
+        let mut staged = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+            .map_err(|_| EXHAUSTED)?;
+        let mut devices = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+            .map_err(|_| EXHAUSTED)?;
         for access in accesses {
             let device = object(access.device.cast::<Device>())?;
             staged
@@ -1570,12 +1588,7 @@ pub(crate) unsafe extern "C" fn import(
                 .map_err(|_| EXHAUSTED)?;
             devices.try_push(&device.native).map_err(|_| EXHAUSTED)?;
         }
-        let (profile, capabilities) = joint_profile(
-            scope,
-            info.memory_profile_ordinal,
-            &staged,
-            instance.allocator,
-        )?;
+        let (profile, capabilities) = joint_profile(scope, info.memory_profile_ordinal, &staged)?;
         if profile.roles & AMDF_MEMORY_PROFILE_ROLE_IMPORT == 0
             || profile.memory_class != AMDF_MEMORY_CLASS_SYSTEM
             || info.required_flags & !profile.supported_flags != 0
@@ -1599,11 +1612,11 @@ pub(crate) unsafe extern "C" fn import(
             return Err(UNSUPPORTED);
         }
         let descriptor = i32::try_from(external.payload.file_descriptor).map_err(|_| INVALID)?;
-        let slot = Owned::<Memory>::try_new_uninit(instance.allocator).map_err(|_| EXHAUSTED)?;
-        let mut access_records =
-            Buffer::try_with_capacity(accesses.len(), instance.allocator).map_err(|_| EXHAUSTED)?;
-        let permissions =
-            memory::DeviceAccess::from_bits(accesses[0].requirements.access).ok_or(UNSUPPORTED)?;
+        let slot = Owned::<Memory>::try_new_uninit().map_err(|_| EXHAUSTED)?;
+        let mut access_records = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+            .map_err(|_| EXHAUSTED)?;
+        let permissions = memory::device::DeviceAccess::from_bits(accesses[0].requirements.access)
+            .ok_or(UNSUPPORTED)?;
         let native_allocation = linux_interop::import_system_dma_buf(
             &instance.native,
             devices.as_slice(),
@@ -1613,7 +1626,10 @@ pub(crate) unsafe extern "C" fn import(
             alignment,
             permissions,
         )
-        .map_err(|error| native(&error))?;
+        .map_err(|error| {
+            let device = &*accesses[0].device.cast::<Device>();
+            device.native_error_status(&error)
+        })?;
         let native_info = native_allocation.info();
         if has_identity(external.physical_backing_id.words)
             && external.physical_backing_id.words != native_info.physical_backing_id
@@ -1625,7 +1641,7 @@ pub(crate) unsafe extern "C" fn import(
             let device = &*requested.device.cast::<Device>();
             let address = native_allocation
                 .device_address(&device.native)
-                .map_err(|error| native(&error))?;
+                .map_err(|error| device.native_error_status(&error))?;
             access_records
                 .try_push(Access {
                     device: requested.device.cast(),
@@ -1687,7 +1703,6 @@ pub(crate) unsafe extern "C" fn import(
     })
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn export(
     pointer: *mut amdf_memory_t,
     info: *const amdf_memory_export_info_t,
@@ -1751,7 +1766,8 @@ pub(crate) unsafe extern "C" fn export(
         let Backing::Gpu(allocation) = &memory.backing else {
             return Err(UNSUPPORTED);
         };
-        let dma_buf = linux_interop::export_dma_buf(allocation).map_err(|error| native(&error))?;
+        let dma_buf = linux_interop::export_dma_buf(allocation)
+            .map_err(|error| device.native_error_status(&error))?;
         let dma_buf_info = dma_buf.info();
         if dma_buf_info.byte_length != memory.info.native_allocation_byte_length
             || dma_buf_info.physical_backing_id != memory.info.physical_backing_id.words
@@ -1906,7 +1922,8 @@ fn device_site(
         || (family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_SDMA
             && family.format_version == AMDF_GPU_SDMA_QUEUE_FORMAT_VERSION_1
             && family.format_features
-                == AMDF_GPU_SDMA_FORMAT_FEATURE_GCR | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM)
+                == AMDF_GPU_SDMA_FORMAT_FEATURE_USER_GCR
+                    | AMDF_GPU_SDMA_FORMAT_FEATURE_FENCE_SYSTEM)
         || (family.command_type == AMDF_QUEUE_COMMAND_TYPE_GPU_AQL
             && family.format_version == 1
             && family.format_features == 0);
@@ -1975,7 +1992,7 @@ unsafe fn profile_site(
                 accesses.len() == 1
                     && matches!(
                         device.native.endpoint().host_local_cacheability,
-                        Some(memory::HostCacheability::WriteCombined)
+                        Some(memory::device::HostCacheability::WriteCombined)
                     ),
             ))
         }
@@ -1996,8 +2013,10 @@ unsafe fn profile_site(
                 registered_host_cacheability
             } else if profile.memory_class == AMDF_MEMORY_CLASS_LOCAL {
                 match unsafe { (*scope.endpoint).native.host_local_cacheability } {
-                    Some(memory::HostCacheability::WriteBack) => AMDF_HOST_CACHEABILITY_WRITE_BACK,
-                    Some(memory::HostCacheability::WriteCombined) => {
+                    Some(memory::device::HostCacheability::WriteBack) => {
+                        AMDF_HOST_CACHEABILITY_WRITE_BACK
+                    }
+                    Some(memory::device::HostCacheability::WriteCombined) => {
                         AMDF_HOST_CACHEABILITY_WRITE_COMBINED
                     }
                     None => return Err(UNSUPPORTED),
@@ -2029,7 +2048,6 @@ unsafe fn profile_site(
     }
 }
 
-#[allow(unused_unsafe)]
 #[allow(
     clippy::too_many_lines,
     reason = "profile qualification validates one atomic caller contract"
@@ -2054,9 +2072,8 @@ pub(crate) unsafe extern "C" fn scope_pair_info(
         if !unique_devices(accesses) {
             return Err(INVALID);
         }
-        let allocator = (*scope.instance).allocator;
-        let mut staged =
-            Buffer::try_with_capacity(accesses.len(), allocator).map_err(|_| EXHAUSTED)?;
+        let mut staged = rocddi::memory::storage::try_vec_with_capacity(accesses.len())
+            .map_err(|_| EXHAUSTED)?;
         for access in accesses {
             requirements(access.requirements)?;
             let device = object(access.device.cast::<Device>())?;
@@ -2072,8 +2089,7 @@ pub(crate) unsafe extern "C" fn scope_pair_info(
                 })
                 .map_err(|_| EXHAUSTED)?;
         }
-        let (profile, capabilities) =
-            joint_profile(scope, query.memory_profile_ordinal, &staged, allocator)?;
+        let (profile, capabilities) = joint_profile(scope, query.memory_profile_ordinal, &staged)?;
         if query.required_flags & !profile.supported_flags != 0 {
             return Err(UNSUPPORTED);
         }
@@ -2189,7 +2205,6 @@ unsafe fn site(pointer: *const amdf_memory_site_t) -> Result<Site, u64> {
     }
 }
 
-#[allow(unused_unsafe)]
 pub(crate) unsafe extern "C" fn pair_info(
     producer: *const amdf_memory_site_t,
     consumer: *const amdf_memory_site_t,
