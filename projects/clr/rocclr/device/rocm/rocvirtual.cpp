@@ -374,13 +374,18 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device) {
     cached_timing_.start_ = time.start;
     cached_timing_.end_ = time.end;
   } else if (is_barrier_) {
-    // hsa_amd_profiling_get_dispatch_time() is only valid for dispatch (kernel) packets.
-    // On some hardware (e.g. gfx1171), calling it on a barrier signal returns values
-    // where start > end.  Use min/max to ensure start <= end for internal profiling.
-    hsa_amd_profiling_dispatch_time_t time = {};
-    Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
-    cached_timing_.start_ = std::min(time.start, time.end);
-    cached_timing_.end_ = std::max(time.start, time.end);
+    // hsa_amd_profiling_get_dispatch_time() returns inverted/unreliable values for
+    // barrier signals on some hardware (e.g. gfx1171).  Read raw GPU ticks from
+    // the amd_signal_t and convert to nanoseconds with integer arithmetic.
+    const auto* amdSignal = reinterpret_cast<const amd_signal_t*>(signal_.handle);
+    uint64_t freq = 0;
+    Hsa::system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &freq);
+    if (freq == 0) freq = 1;
+    auto ticksToNs = [freq](uint64_t ticks) -> uint64_t {
+      return (ticks / freq) * 1000000000ULL + (ticks % freq) * 1000000000ULL / freq;
+    };
+    cached_timing_.start_ = ticksToNs(amdSignal->start_ts);
+    cached_timing_.end_ = ticksToNs(amdSignal->end_ts);
   } else {
     hsa_amd_profiling_dispatch_time_t time = {};
     Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
