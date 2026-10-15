@@ -11,6 +11,8 @@
 #include "gin.h"
 #include "rma_multiseg.h"
 
+extern int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset);
+
 const int NCCL_GIN_IB_ALLGATHER_TAG = 0xa0;
 const int NCCL_GIN_IB_ALLTOALL_TAG = 0xa1;
 
@@ -448,6 +450,9 @@ struct ncclRmaIbProxyCtx {
   int nContexts;
   int wrBatchsize;
   struct ncclRmaIbProxyWrBatch batch;
+  // RCCL: per-peer SQ credits for the send and flush QPs, allocated on first use.
+  struct ncclRmaWrCredits** sendCredits;
+  struct ncclRmaWrCredits** flushCredits;
 };
 
 // Ring the doorbell for the pending chain, if any.
@@ -498,6 +503,100 @@ static ncclResult_t ncclRmaIbProxyCommitWrs(struct ncclRmaIbProxyCtx* ctx, int n
   return ncclSuccess;
 }
 
+// RCCL: segment-split chains can fill the SQ before the proxy's request cap; wait on the CQ instead of overrunning it.
+static_assert(NET_IB_MAX_REQUESTS == NCCL_RMA_CREDIT_IDS, "credit ring must cover every live request id");
+static_assert(NCCL_RMA_MAX_SIGNAL_WRS <= UINT8_MAX, "credit ring stores WR counts in uint8_t");
+static ncclResult_t ncclRmaIbProxyGetSendComm(struct ncclRmaIbProxyCtx* rmaProxyCtx, int rank,
+                                              struct ncclIbSendComm** commPtr);
+static ncclResult_t ncclRmaIbProxyGetRecvComm(struct ncclRmaIbProxyCtx* rmaProxyCtx, int rank,
+                                              struct ncclIbRecvComm** commPtr);
+
+static ncclResult_t rcclRmaWrCreditsGet(struct ncclRmaIbProxyCtx* ctx, int rank, bool flush,
+                                        struct ncclRmaWrCredits** credits) {
+  struct ncclRmaWrCredits*** table = flush ? &ctx->flushCredits : &ctx->sendCredits;
+  if (*table == NULL) NCCLCHECK(ncclCalloc(table, ctx->nranks));
+  if ((*table)[rank] == NULL) NCCLCHECK(ncclCalloc(&(*table)[rank], 1));
+  *credits = (*table)[rank];
+  return ncclSuccess;
+}
+
+static void rcclRmaWrCreditsFree(struct ncclRmaIbProxyCtx* ctx) {
+  struct ncclRmaWrCredits** tables[2] = {ctx->sendCredits, ctx->flushCredits};
+  for (struct ncclRmaWrCredits** table : tables) {
+    if (table == NULL) continue;
+    for (int i = 0; i < ctx->nranks; i++) free(table[i]);
+    free(table);
+  }
+  ctx->sendCredits = ctx->flushCredits = NULL;
+}
+
+// Advance completedSeq from up to four CQEs, as Test() does.
+static ncclResult_t rcclRmaIbProxyPollSeq(struct ncclIbNetCommBase* commBase, struct ncclIbNetCommDevBase* devBase,
+                                          uint64_t* completedSeq, int* nDone) {
+  struct ibv_wc wc[4];
+  NCCLCHECK(wrap_ibv_poll_cq(devBase->cq, 4, wc, nDone));
+  for (int i = 0; i < *nDone; i++) {
+    if (wc[i].status != IBV_WC_SUCCESS) {
+      WARN("NET/IB/RMA: completion error status=%d opcode=%d vendor err %u while waiting for WR credits",
+           wc[i].status, wc[i].opcode, wc[i].vendor_err);
+      printIbWcStatusHint(wc[i].status);
+      return ncclRemoteError;
+    }
+    struct ncclIbRequest* wcReq = commBase->reqs + wc[i].wr_id;
+    if (wcReq->id > *completedSeq) *completedSeq = wcReq->id;
+  }
+  return ncclSuccess;
+}
+
+// Wait until nWrs fit on the peer's send (or flush) SQ. Untracked ids are single-MR ops.
+static ncclResult_t rcclRmaWrCreditsReserve(struct ncclRmaIbProxyCtx* ctx, int rank, bool flush, int nWrs,
+                                            struct ncclRmaWrCredits** credits) {
+  struct ncclIbNetCommBase* commBase;
+  struct ncclIbNetCommDevBase* devBase;
+  uint64_t *postedSeq, *completedSeq;
+  // RCCL: the depth the QP was created with. The single-segment flush reserves its one WR before the
+  // lazily created flush QP exists, and that one WR fits the base depth.
+  int capacity;
+  if (flush) {
+    struct ncclIbRecvComm* comm;
+    NCCLCHECK(ncclRmaIbProxyGetRecvComm(ctx, rank, &comm));
+    commBase = &comm->base;
+    devBase = &comm->devs[0].base;
+    postedSeq = &comm->ginSeq.posted;
+    completedSeq = &comm->ginSeq.completed;
+    capacity = comm->devs[0].gpuFlush.qp.qp ? comm->devs[0].gpuFlush.qp.maxSendWrs : NET_IB_MAX_REQUESTS;
+  } else {
+    struct ncclIbSendComm* comm;
+    NCCLCHECK(ncclRmaIbProxyGetSendComm(ctx, rank, &comm));
+    commBase = &comm->base;
+    devBase = &comm->devs[0].base;
+    postedSeq = &comm->ginSeq.posted;
+    completedSeq = &comm->ginSeq.completed;
+    capacity = comm->base.qps[0].maxSendWrs;
+  }
+  if (nWrs > capacity) {
+    WARN("NET/IB/RMA: %d %s WRs exceed QP depth %d to rank %d", nWrs, flush ? "flush" : "send", capacity, rank);
+    return ncclInternalError;
+  }
+  const int untrackedCost = flush ? 1 : NCCL_RMA_MAX_IB_WRS_PER_OP;
+  struct ncclRmaWrCredits* c;
+  NCCLCHECK(rcclRmaWrCreditsGet(ctx, rank, flush, &c));
+  ncclRmaWrCreditsRelease(c, *completedSeq);
+  if (!ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(c, *postedSeq, untrackedCost), nWrs, capacity)) {
+    // Batched WRs count as in use; they have to reach the QP before they can complete.
+    // As in Test(), a stuck WR surfaces as an error CQE once the HCA's retries run out.
+    NCCLCHECK(ncclRmaIbProxyPostBatch(ctx));
+    while (!ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(c, *postedSeq, untrackedCost), nWrs, capacity)) {
+      int nDone = 0;
+      NCCLCHECK(rcclRmaIbProxyPollSeq(commBase, devBase, completedSeq, &nDone));
+      ncclRmaWrCreditsRelease(c, *completedSeq);
+      if (nDone == 0) sched_yield();
+    }
+  }
+  if (credits) *credits = c;
+  return ncclSuccess;
+}
+
 ncclResult_t ncclRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config, void** rmaCtx) {
   ncclResult_t ret = ncclSuccess;
   struct ncclGinIbCollComm* cComm = (struct ncclGinIbCollComm*)collComm;
@@ -545,6 +644,7 @@ ncclResult_t ncclRmaIbProxyCreateContext(void* collComm, ncclRmaConfig_t* config
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullSendComm, sizeof(void*) * nranks), ret, end);
     NCCLCHECKGOTO(ncclIbMalloc((void**)&gc->fullRecvComm, sizeof(void*) * nranks), ret, end);
     gc->rank = cComm->rank;
+    gc->nranks = nranks;
     gc->wrBatchsize = (int)wrBatchsize;
 
     for (int i = 0; i < nranks; i += rankStride) {
@@ -594,6 +694,7 @@ ncclResult_t ncclRmaIbProxyDestroyContext(void* rmaCtx) {
       free(gc[c].fullSendComm);
       gc[c].fullSendComm = NULL;
     }
+    rcclRmaWrCreditsFree(&gc[c]);
   }
   return ncclSuccess;
 }
@@ -648,11 +749,6 @@ ncclResult_t ncclRmaIbProxyDeregMrSym(void* collComm, void* mhandle) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclRmaIbProxyCloseColl(void* collComm) {
-  free(collComm);
-  return ncclSuccess;
-}
-
 static ncclResult_t ncclRmaIbProxyGetSendComm(struct ncclRmaIbProxyCtx* rmaProxyCtx, int rank,
                                               struct ncclIbSendComm** commPtr) {
   *commPtr = (struct ncclIbSendComm*)rmaProxyCtx->fullSendComm[rank];
@@ -686,6 +782,8 @@ struct rcclRmaIbProxySegMrHandle {
   uintptr_t* base_vas;
   uint32_t* rkeys;
   size_t* rankSegOff;
+  // nSegments == 1: the develop layout over mrHandle[0] and base_vas, with device-0 rkeys, for develop's op bodies.
+  struct ncclRmaIbProxyMrHandle single;
 };
 
 struct ncclRmaIbProxyRegistration {
@@ -747,22 +845,17 @@ static ncclResult_t ncclRmaBuildSegmentedWrs(struct ibv_send_wr* wr, struct ibv_
       return ncclInternalError;
     }
     const size_t* rOffs = ncclRmaRankOff(remoteH, remoteRank);
-    int rs = ncclRmaSegOf(remoteH, remoteRank, rOff);
-    size_t remoteRemaining = rOffs[rs + 1] - rOff;
-
-    int ls = 0;
-    size_t localRemaining = SIZE_MAX;
-    const size_t* lOffs = NULL;
-    if (flushSge == NULL) {
-      lOffs = ncclRmaRankOff(localH, localRank);
-      ls = ncclRmaSegOf(localH, localRank, lOff);
-      localRemaining = lOffs[ls + 1] - lOff;
-    }
+    const size_t* lOffs = flushSge == NULL ? ncclRmaRankOff(localH, localRank) : NULL;
     // Paired transfers are limited by ibv_sge::length. Flush WRs read one byte
     // but advance to the next physical segment in one step, regardless of the
     // segment's size.
-    size_t chunk = flushSge == NULL ? ncclRmaSegmentSliceBytes(rem, localRemaining, remoteRemaining) :
-                                      (rem < remoteRemaining ? rem : remoteRemaining);
+    int ls, rs;
+    size_t chunk = ncclRmaNextSlice(lOffs, flushSge == NULL ? localH->nSegments : 0, rOffs, remoteH->nSegments, lOff,
+                                    rOff, rem, &ls, &rs);
+    if (chunk == 0) {
+      WARN("NET/IB/RMA: transfer of %zu bytes runs past the registered segments", size);
+      return ncclInternalError;
+    }
 
     uintptr_t rAddr = remoteH->base_vas[(size_t)remoteRank * remoteH->nSegments + rs] + (rOff - rOffs[rs]);
 
@@ -949,10 +1042,15 @@ ncclResult_t rcclRmaIbProxyRegMrSymDmaBuf(void* collComm, void* data, size_t siz
       uintptr_t exportBase = segPtr & ~(uintptr_t)(hostPageSize - 1);
       size_t exportLen = segPtr + thisLen - exportBase;
       ALIGN_SIZE(exportLen, hostPageSize);
-      CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)exportBase, exportLen,
-                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
-                  ret, reconcile);
-      ret = ncclIbRegMrDmaBufInternal(cComm->recvComm, (void*)segPtr, thisLen, type, 0ULL, segFd, mr_flags,
+      // RCCL: imported host segments cannot be exported here; use the owner's fd published by the test or window.
+      uint64_t segFdOffset = 0;
+      segFd = rcclHostSegmentFdLookup(exportBase, exportLen, &segFdOffset);
+      if (segFd < 0) {
+        CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&segFd, (CUdeviceptr)exportBase, exportLen,
+                                                  CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, 0),
+                    ret, reconcile);
+      }
+      ret = ncclIbRegMrDmaBufInternal(cComm->recvComm, (void*)segPtr, thisLen, type, segFdOffset, segFd, mr_flags,
                                       (void**)&rmaMrHandle->mrHandle[s]);
       (void)close(segFd);
       if (ret != ncclSuccess) goto reconcile;
@@ -1047,6 +1145,7 @@ reconcile:
   if (ret == ncclSuccess) ret = ncclCalloc(&rmaMrHandle->base_vas, (size_t)cComm->nranks * nSeg);
   if (ret == ncclSuccess)
     ret = ncclCalloc(&rmaMrHandle->rkeys, (size_t)cComm->nranks * nSeg * NCCL_IB_MAX_DEVS_PER_NIC);
+  if (ret == ncclSuccess && nSeg == 1) ret = ncclCalloc(&rmaMrHandle->single.rkeys, cComm->nranks);
   localRegistration.status = ret;
   NCCLCHECKGOTO(cComm->allGather(cComm, &localRegistration, registrations, sizeof(struct ncclRmaIbProxyRegistration)),
                 ret, fail);
@@ -1063,6 +1162,11 @@ reconcile:
   NCCLCHECKGOTO(cComm->allGather(cComm, localRkeys, rmaMrHandle->rkeys,
                                  sizeof(uint32_t) * nSeg * NCCL_IB_MAX_DEVS_PER_NIC),
                 ret, fail);
+  if (nSeg == 1) {
+    rmaMrHandle->single.mrHandle = rmaMrHandle->mrHandle[0];
+    rmaMrHandle->single.base_vas = rmaMrHandle->base_vas;
+    for (int r = 0; r < cComm->nranks; r++) rmaMrHandle->single.rkeys[r] = ncclRmaRemoteRkey(rmaMrHandle, r, 0, 0);
+  }
 
   *mhandle = rmaMrHandle;
   return ncclSuccess;
@@ -1077,6 +1181,7 @@ fail:
     free(rmaMrHandle->base_vas);
     free(rmaMrHandle->rkeys);
     free(rmaMrHandle->rankSegOff);
+    free(rmaMrHandle->single.rkeys);
     free(rmaMrHandle);
   }
   return ret;
@@ -1096,6 +1201,7 @@ ncclResult_t rcclRmaIbProxyDeregMrSym(void* collComm, void* mhandle) {
   free(rmaMrHandle->base_vas);
   free(rmaMrHandle->rkeys);
   free(rmaMrHandle->rankSegOff);
+  free(rmaMrHandle->single.rkeys);
   free(rmaMrHandle);
   return ret;
 }
@@ -1125,6 +1231,8 @@ ncclResult_t rcclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   int nWr = 0;
   NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_WRITE, qp, srcMrHandle,
                                      rmaProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size, /*flushSge=*/NULL));
+  struct ncclRmaWrCredits* credits = NULL;
+  if (nWr > 0) NCCLCHECK(rcclRmaWrCreditsReserve(rmaProxyCtx, rank, /*flush=*/false, nWr, &credits));
 
   struct ncclIbRequest* req;
   NCCLCHECK(ncclIbGetRequest(&comm->base, &req));
@@ -1141,10 +1249,13 @@ ncclResult_t rcclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
   if (nWr == 0) req->id = --comm->ginSeq.posted;
 
   int posted = 0;
+  uint64_t id = req->id;
   ncclResult_t postRet =
     ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nWr, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
   ncclIbAddEvent(req, qp->devIndex);
-  return ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  ncclResult_t ret = ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  if (posted > 0) ncclRmaWrCreditsRecord(credits, id, nWr);
+  return ret;
 }
 
 ncclResult_t rcclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
@@ -1174,6 +1285,8 @@ ncclResult_t rcclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
   NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nWr, IBV_WR_RDMA_READ, qp, localMrHandle,
                                      rmaProxyCtx->rank, localOffset, remoteMrHandle, rank, remoteOffset, size,
                                      /*flushSge=*/NULL));
+  struct ncclRmaWrCredits* credits = NULL;
+  if (nWr > 0) NCCLCHECK(rcclRmaWrCreditsReserve(rmaProxyCtx, rank, /*flush=*/false, nWr, &credits));
 
   struct ncclIbRequest* req;
   NCCLCHECK(ncclIbGetRequest(&comm->base, &req));
@@ -1190,9 +1303,12 @@ ncclResult_t rcclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset
   if (nWr == 0) req->id = --comm->ginSeq.posted;
 
   int posted = 0;
+  uint64_t id = req->id;
   ncclResult_t postRet =
     ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nWr, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
-  return ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  ncclResult_t ret = ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  if (posted > 0) ncclRmaWrCreditsRecord(credits, id, nWr);
+  return ret;
 }
 
 ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
@@ -1243,6 +1359,8 @@ ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
     NCCLCHECK(ncclRmaBuildSegmentedWrs(wr, sge, NCCL_RMA_MAX_DATA_WRS, &nPut, IBV_WR_RDMA_WRITE, qp, srcMrHandle,
                                        rmaProxyCtx->rank, srcOff, dstMrHandle, rank, dstOff, size, /*flushSge=*/NULL));
   }
+  struct ncclRmaWrCredits* credits = NULL;
+  NCCLCHECK(rcclRmaWrCreditsReserve(rmaProxyCtx, rank, /*flush=*/false, nPut + 1, &credits));
 
   struct ncclIbRequest* req;
   NCCLCHECK(ncclIbGetRequest(&comm->base, &req));
@@ -1282,9 +1400,12 @@ ncclResult_t rcclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
 
   // Send the put and the signal in one go
   int posted = 0;
+  uint64_t id = req->id;
   ncclResult_t postRet =
     ncclRmaIbProxyQueueWrs(rmaProxyCtx, qp, wr, sge, nPut + 1, optFlags & ncclRmaOptFlagsAggregateRequests, &posted);
-  return ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nPut + 1, request);
+  ncclResult_t ret = ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nPut + 1, request);
+  if (posted > 0) ncclRmaWrCreditsRecord(credits, id, nPut + 1);
+  return ret;
 }
 
 ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request) {
@@ -1314,6 +1435,8 @@ ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
                                      /*remoteH=*/rmaMrHandle, /*remoteRank=*/rmaProxyCtx->rank, /*remoteOff=*/0,
                                      /*size=*/ncclRmaMrBytes(rmaMrHandle, rmaProxyCtx->rank),
                                      /*flushSge=*/&comm->devs[qp->devIndex].gpuFlush.sge));
+  struct ncclRmaWrCredits* credits = NULL;
+  if (nWr > 0) NCCLCHECK(rcclRmaWrCreditsReserve(rmaProxyCtx, rank, /*flush=*/true, nWr, &credits));
 
   struct ncclIbRequest* req;
   NCCLCHECK(ncclIbGetRequest(&comm->base, &req));
@@ -1332,9 +1455,12 @@ ncclResult_t rcclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint
   TRACE(NCCL_NET, "NET/IB: %s: Posting %d-segment flush request (req=%p, comm=%p)", __func__, nWr, req, req->base);
   TIME_START(4);
   int posted = 0;
+  uint64_t id = req->id;
   ncclResult_t postRet = ncclRmaPostWrs(qp, &wr[0], nWr, &posted);
   TIME_STOP(4);
-  return ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  ncclResult_t ret = ncclRmaFinishPostedRequest(req, &comm->ginSeq.posted, postRet, posted, nWr, request);
+  if (posted > 0) ncclRmaWrCreditsRecord(credits, id, nWr);
+  return ret;
 }
 
 // Called before the sequence check: later completions advance it past a lost tail.
@@ -1344,11 +1470,27 @@ ncclResult_t rcclRmaIbProxyTestFailed(struct ncclIbRequest* req, int* done) {
   return ncclRemoteError;
 }
 
+// Swap every non-NULL handle to its develop-layout view when all of them have one segment.
+static bool rcclRmaIbProxyUseSingle(void** h0, void** h1, void** h2) {
+  void** handles[3] = {h0, h1, h2};
+  for (void** h : handles) {
+    if (h && *h && ((struct rcclRmaIbProxySegMrHandle*)*h)->nSegments != 1) return false;
+  }
+  for (void** h : handles) {
+    if (h && *h) *h = &((struct rcclRmaIbProxySegMrHandle*)*h)->single;
+  }
+  return true;
+}
+
 
 ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void* srcMhandle, size_t size,
                                 uint64_t dstOff, void* dstMhandle, uint32_t rank, uint32_t optFlags, void** request) {
-  if (rcclRmaMultiSegEnabled())
-    return rcclRmaIbProxyIPut(rmaCtx, context, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, optFlags, request);
+  if (rcclRmaMultiSegEnabled()) {
+    if (!rcclRmaIbProxyUseSingle(&srcMhandle, &dstMhandle, NULL))
+      return rcclRmaIbProxyIPut(rmaCtx, context, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, optFlags, request);
+    NCCLCHECK(rcclRmaWrCreditsReserve((struct ncclRmaIbProxyCtx*)rmaCtx + context, rank, /*flush=*/false,
+                                      NCCL_RMA_MAX_IB_WRS_PER_OP, NULL));
+  }
   struct ncclRmaIbProxyCtx* rmaProxyCtx = &((struct ncclRmaIbProxyCtx*)rmaCtx)[context];
 
   struct ncclRmaIbProxyMrHandle* srcMrHandle = (struct ncclRmaIbProxyMrHandle*)srcMhandle;
@@ -1402,9 +1544,13 @@ ncclResult_t ncclRmaIbProxyIPut(void* rmaCtx, int context, uint64_t srcOff, void
 ncclResult_t ncclRmaIbProxyIGet(void* rmaCtx, int context, uint64_t remoteOffset, void* remoteMhandle, size_t size,
                                 uint64_t localOffset, void* localMhandle, uint32_t rank, uint32_t optFlags,
                                 void** request) {
-  if (rcclRmaMultiSegEnabled())
-    return rcclRmaIbProxyIGet(rmaCtx, context, remoteOffset, remoteMhandle, size, localOffset, localMhandle, rank,
-                              optFlags, request);
+  if (rcclRmaMultiSegEnabled()) {
+    if (!rcclRmaIbProxyUseSingle(&remoteMhandle, &localMhandle, NULL))
+      return rcclRmaIbProxyIGet(rmaCtx, context, remoteOffset, remoteMhandle, size, localOffset, localMhandle, rank,
+                                optFlags, request);
+    NCCLCHECK(rcclRmaWrCreditsReserve((struct ncclRmaIbProxyCtx*)rmaCtx + context, rank, /*flush=*/false,
+                                      NCCL_RMA_MAX_IB_WRS_PER_OP, NULL));
+  }
   struct ncclRmaIbProxyCtx* rmaProxyCtx = &((struct ncclRmaIbProxyCtx*)rmaCtx)[context];
 
   struct ncclRmaIbProxyMrHandle* remoteMrHandle = (struct ncclRmaIbProxyMrHandle*)remoteMhandle;
@@ -1456,9 +1602,13 @@ ncclResult_t ncclRmaIbProxyIPutSignal(void* rmaCtx, int context, uint64_t srcOff
                                       uint64_t dstOff, void* dstMhandle, uint32_t rank, uint64_t signalOff,
                                       void* signalMhandle, uint64_t signalValue, uint32_t signalOp, bool isStrongSignal,
                                       uint32_t optFlags, void** request) {
-  if (rcclRmaMultiSegEnabled())
-    return rcclRmaIbProxyIPutSignal(rmaCtx, context, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, signalOff,
-                                    signalMhandle, signalValue, signalOp, isStrongSignal, optFlags, request);
+  if (rcclRmaMultiSegEnabled()) {
+    if (!rcclRmaIbProxyUseSingle(&srcMhandle, &dstMhandle, &signalMhandle))
+      return rcclRmaIbProxyIPutSignal(rmaCtx, context, srcOff, srcMhandle, size, dstOff, dstMhandle, rank, signalOff,
+                                      signalMhandle, signalValue, signalOp, isStrongSignal, optFlags, request);
+    NCCLCHECK(rcclRmaWrCreditsReserve((struct ncclRmaIbProxyCtx*)rmaCtx + context, rank, /*flush=*/false,
+                                      NCCL_RMA_MAX_IB_WRS_PER_OP, NULL));
+  }
   (void)isStrongSignal;
   if (signalOp != NCCL_NET_SIGNAL_OP_INC && signalOp != NCCL_NET_SIGNAL_OP_ADD) {
     WARN("ncclRmaIbProxyIPutSignal: Unsupported signalOp %u", signalOp);
@@ -1614,7 +1764,11 @@ ncclResult_t ncclRmaIbProxyTest(void* collComm, void* request, int* done) {
 }
 
 ncclResult_t ncclRmaIbProxyIFlush(void* rmaCtx, int context, void* mhandle, uint32_t rank, void** request) {
-  if (rcclRmaMultiSegEnabled()) return rcclRmaIbProxyIFlush(rmaCtx, context, mhandle, rank, request);
+  if (rcclRmaMultiSegEnabled()) {
+    if (!rcclRmaIbProxyUseSingle(&mhandle, NULL, NULL))
+      return rcclRmaIbProxyIFlush(rmaCtx, context, mhandle, rank, request);
+    NCCLCHECK(rcclRmaWrCreditsReserve((struct ncclRmaIbProxyCtx*)rmaCtx + context, rank, /*flush=*/true, 1, NULL));
+  }
   struct ncclRmaIbProxyCtx* rmaProxyCtx = &((struct ncclRmaIbProxyCtx*)rmaCtx)[context];
   struct ncclRmaIbProxyMrHandle* rmaMrHandle = (struct ncclRmaIbProxyMrHandle*)mhandle;
   struct ncclIbRecvComm* comm;
