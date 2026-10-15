@@ -675,12 +675,11 @@ TEST_F(AllocatorShadowPoolMicrotest, Alloc_FirstUseFailures) {
 
 TEST_F(AllocatorShadowPoolMicrotest, Alloc_LargeObjectsGetTheirOwnAllocation) {
   // Pages are used only while at least three objects fit in 64 KiB.
-  void* paged = Alloc(21845);
+  Alloc(21845);
   void* direct = Alloc(21846);
   EXPECT_EQ(mallocs_, (std::vector<size_t>{64 << 10, 21846}));
   ASSERT_EQ(ncclShadowPoolFree(&pool_, direct, kStream), ncclSuccess);
   EXPECT_EQ(asyncFrees_, std::vector<void*>{direct});
-  (void)paged;
 }
 
 TEST_F(AllocatorShadowPoolMicrotest, Alloc_DeviceAllocationFailuresAreReported) {
@@ -725,14 +724,13 @@ TEST_F(AllocatorShadowPoolMicrotest, Page_FillsUpLeavesTheListAndReturnsWhenASlo
   for (int i = 0; i < 64; i++) objs.push_back(Alloc(16));
   for (int i = 1; i < 64; i++) EXPECT_EQ(objs[i], static_cast<char*>(objs[0]) + 16 * i);
   EXPECT_EQ(pool_.pages, nullptr);  // the full page left the list
-  void* next = Alloc(16);
+  Alloc(16);
   EXPECT_EQ(mallocs_.size(), 2u);
   ASSERT_EQ(ncclShadowPoolFree(&pool_, objs[5], kStream), ncclSuccess);
   ASSERT_EQ(ncclShadowPoolFree(&pool_, objs[9], kStream), ncclSuccess);
   EXPECT_EQ(Alloc(16), objs[5]);
   EXPECT_EQ(Alloc(16), objs[9]);
   EXPECT_EQ(mallocs_.size(), 2u);
-  (void)next;
 }
 
 TEST_F(AllocatorShadowPoolMicrotest, Page_SizeClassesDoNotShare) {
@@ -793,7 +791,7 @@ TEST_F(AllocatorShadowPoolMicrotest, CollidingObjectsAreFoundAlongTheChain) {
 }
 
 TEST_F(AllocatorShadowPoolMicrotest, UnknownObjectsAreRejected) {
-  void* dev = Alloc(8);
+  Alloc(8);
   int other = 0;
   void* h = this;
   EXPECT_EQ(ncclShadowPoolToHost(&pool_, &other, &h), ncclInternalError);
@@ -803,7 +801,6 @@ TEST_F(AllocatorShadowPoolMicrotest, UnknownObjectsAreRejected) {
   EXPECT_EQ(h, nullptr);
   EXPECT_EQ(ncclShadowPoolFree(&pool_, nullptr, kStream), ncclSuccess);
   EXPECT_EQ(pool_.count, 1);
-  (void)dev;
 }
 
 // BUG: on a pool that never allocated there is no table yet, so an unknown object crashes the lookup

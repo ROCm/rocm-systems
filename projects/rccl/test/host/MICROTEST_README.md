@@ -845,9 +845,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
-`rccl-UnitTestsMicroMemManager`,
-`rccl-UnitTestsMicroAllocator`,
-`rccl-UnitTestsMicroMnnvl`,
+`rccl-UnitTestsMicroMemManager`, `rccl-UnitTestsMicroAllocator`, `rccl-UnitTestsMicroMnnvl`,
 `rccl-UnitTestsMicroAlloc`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test

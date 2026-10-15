@@ -855,7 +855,7 @@ TEST_F(MemManagerMicrotest, Resume_WithoutBootstrapSkipsBarriersAndExchange) {
 
 TEST_F(MemManagerMicrotest, Exchange_SendsExportedLocalHandlesToEveryPeer) {
   Regroup(1, 3);
-  ncclDynMemEntry* posix = Track(Addr(0x1000), ncclMemScratch, 0x11);
+  Track(Addr(0x1000), ncclMemScratch, 0x11);
   ncclDynMemEntry* fabric = Track(Addr(0x2000), ncclMemOffload, 0x12, CU_MEM_HANDLE_TYPE_FABRIC);
   Track(Addr(0x3000), ncclMemScratch, 0x13);  // never exported: not broadcast
   ASSERT_EQ(ncclDynMemMarkExportToPeer(mgr_, Addr(0x1000), 0), ncclSuccess);
@@ -885,7 +885,6 @@ TEST_F(MemManagerMicrotest, Exchange_SendsExportedLocalHandlesToEveryPeer) {
   EXPECT_EQ(p.handleData, (uint64_t)0x11);
   EXPECT_EQ(sent_[2].size(), 2u);
   EXPECT_EQ(recvPeers_, std::vector<int>{2});
-  (void)posix;
 }
 
 // A FABRIC entry without a valid exported handle is still broadcast, with its handle bytes unset.
