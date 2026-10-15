@@ -90,7 +90,7 @@ void requireAllEqual(const std::vector<int>& host, int expected) {
  * still outstanding. Only the first launch needs a cross-stream dependency --
  * the rest are ordered behind it by stream order -- so a runtime is free to
  * skip the later ones. What it must not do is let any of them start before the
- * fill, which would make the increments land on uninitialised memory.
+ * fill, which would make the increments land on uninitialized memory.
  */
 HIP_TEST_CASE(Unit_hipStreamImplicitSync_RepeatedLaunchesAfterNullStream) {
   const size_t n = elementCount();
@@ -177,28 +177,28 @@ HIP_TEST_CASE(Unit_hipStreamImplicitSync_MultipleBlockingStreams) {
   HIP_CHECK(hipMalloc(&buf, n * sizeof(int)));
 
   std::vector<hipStream_t> streams(num_streams, nullptr);
-  for (int i = 0; i < num_streams; ++i) {
-    HIP_CHECK(hipStreamCreate(&streams[i]));
+  for (hipStream_t& stream : streams) {
+    HIP_CHECK(hipStreamCreate(&stream));
   }
 
   hipLaunchKernelGGL(fillKernel, dim3(1), dim3(64), 0, 0, buf, kSeed, n);
   HIP_CHECK(hipGetLastError());
 
-  for (int i = 0; i < num_streams; ++i) {
-    hipLaunchKernelGGL(atomicIncKernel, dim3(1), dim3(64), 0, streams[i], buf, n);
+  for (hipStream_t stream : streams) {
+    hipLaunchKernelGGL(atomicIncKernel, dim3(1), dim3(64), 0, stream, buf, n);
     HIP_CHECK(hipGetLastError());
   }
 
   std::vector<int> host(n, 0);
-  for (int i = 0; i < num_streams; ++i) {
-    HIP_CHECK(hipStreamSynchronize(streams[i]));
+  for (hipStream_t stream : streams) {
+    HIP_CHECK(hipStreamSynchronize(stream));
   }
   HIP_CHECK(hipMemcpy(host.data(), buf, n * sizeof(int), hipMemcpyDeviceToHost));
 
   requireAllEqual(host, kSeed + num_streams);
 
-  for (int i = 0; i < num_streams; ++i) {
-    HIP_CHECK(hipStreamDestroy(streams[i]));
+  for (hipStream_t stream : streams) {
+    HIP_CHECK(hipStreamDestroy(stream));
   }
   HIP_CHECK(hipFree(buf));
 }

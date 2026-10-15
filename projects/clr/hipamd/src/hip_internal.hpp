@@ -500,7 +500,7 @@ namespace hip {
     // --- Null-stream blocking tracker ---
 
     /// True if this stream already waits on null-stream HW signal \p signal.
-    bool IsBlockedOn(void* signal) const;
+    [[nodiscard]] bool IsBlockedOn(void* signal) const;
 
     /// Records the null-stream signal this stream waits on. Call after the wait is enqueued.
     void SetBlockedOn(void* signal);
