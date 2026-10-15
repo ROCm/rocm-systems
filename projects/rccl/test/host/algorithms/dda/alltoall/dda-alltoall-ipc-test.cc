@@ -64,7 +64,7 @@ class DdaAlltoallIpcMicrotest : public ::testing::Test {
   }
 
   DdaIpcMockComm mock_;
-  DdaIpcBarrierState* const barrier_ = LeakedBarrierState<DdaIpcBarrierState>(0xa5);
+  DdaIpcBarrierState* const barrier_ = SharedBarrierState<DdaIpcBarrierState>(0xa5);
   std::vector<DdaCopy> copies_;
 };
 
@@ -180,12 +180,13 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_StagingCopyErrorIsReportedWithoutLaunchin
 TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankAndBarrier) {
   for (size_t count : {size_t{8}, kSingleBlockFloats * 2}) {
     g_ddaLaunches.clear();
+    comm().addonStopEvent = kStopEvent;
     ASSERT_EQ(Run(count, ncclFloat16), ncclSuccess);
     ASSERT_EQ(g_ddaLaunches.size(), 1u);
     const DdaLaunch& launch = g_ddaLaunches[0];
     EXPECT_EQ(launch.stream, kStream);
     EXPECT_EQ(launch.startEvent, nullptr);
-    EXPECT_EQ(launch.stopEvent, count == 8 ? kStopEvent : nullptr);
+    EXPECT_EQ(launch.stopEvent, kStopEvent) << "count " << count;
     EXPECT_EQ(launch.sharedMemBytes, 0u);
     EXPECT_EQ(launch.flags, 0u);
     ASSERT_EQ(launch.args.size(), 6u);
@@ -195,8 +196,8 @@ TEST_F(DdaAlltoallIpcMicrotest, Launch_PassesBuffersPerPeerBytesRankAndBarrier) 
     EXPECT_EQ(launch.Arg<const int8_t*>(3), kSendbuff);
     EXPECT_EQ(launch.Arg<int>(4), 4);
     EXPECT_TRUE(SameBarrier(launch.Arg<IpcGpuBarrier>(5), barrier_->barrierHost));
+    EXPECT_EQ(comm().addonStopEvent, nullptr);
   }
-  EXPECT_EQ(comm().addonStopEvent, nullptr);
 }
 
 // The 24-block cap is spelled out rather than read from DDA_IPC_MAXBLOCKS, so a changed cap fails here.

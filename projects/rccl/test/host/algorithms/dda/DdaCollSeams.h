@@ -73,11 +73,11 @@ const void* KernelPtr(K kernel) {
   return reinterpret_cast<const void*>(kernel);
 }
 
-// Never destroyed: the destructor would pull in barrier resource teardown this binary does not link. The barrier
-// bytes are filled so a launch can be checked to carry this exact barrier.
+// One per State type, never destroyed: the destructor would pull in barrier resource teardown this binary does
+// not link. The barrier bytes are filled so a launch can be checked to carry this exact barrier.
 template <typename State>
-State* LeakedBarrierState(unsigned char fill) {
-  State* state = new State();
+State* SharedBarrierState(unsigned char fill) {
+  static State* const state = new State();
   std::memset(static_cast<void*>(&state->barrierHost), fill, sizeof(state->barrierHost));
   return state;
 }

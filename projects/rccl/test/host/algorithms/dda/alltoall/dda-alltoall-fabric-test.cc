@@ -62,7 +62,7 @@ class DdaAlltoallFabricMicrotest : public ::testing::Test {
   }
 
   DdaFabricMockComm mock_;
-  DdaFabricBarrierState* const barrier_ = LeakedBarrierState<DdaFabricBarrierState>(0x5a);
+  DdaFabricBarrierState* const barrier_ = SharedBarrierState<DdaFabricBarrierState>(0x5a);
   std::vector<DdaCopy> copies_;
 };
 

@@ -59,7 +59,7 @@ class DdaAllGatherIpcMicrotest : public ::testing::Test {
   }
 
   DdaIpcMockComm mock_;
-  DdaIpcBarrierState* const barrier_ = LeakedBarrierState<DdaIpcBarrierState>(0xa5);
+  DdaIpcBarrierState* const barrier_ = SharedBarrierState<DdaIpcBarrierState>(0xa5);
 };
 
 TEST_F(DdaAllGatherIpcMicrotest, Eligible_BaselineFp32) {

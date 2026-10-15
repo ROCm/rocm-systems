@@ -60,7 +60,7 @@ class DdaAllGatherFabricMicrotest : public ::testing::Test {
   }
 
   DdaFabricMockComm mock_;
-  DdaFabricBarrierState* const barrier_ = LeakedBarrierState<DdaFabricBarrierState>(0x5a);
+  DdaFabricBarrierState* const barrier_ = SharedBarrierState<DdaFabricBarrierState>(0x5a);
 };
 
 TEST_F(DdaAllGatherFabricMicrotest, Eligible_BaselineFp32) {

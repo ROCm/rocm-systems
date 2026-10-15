@@ -74,7 +74,7 @@ class DdaReduceScatterIpcMicrotest : public ::testing::Test {
   }
 
   DdaIpcMockComm mock_;
-  DdaIpcBarrierState* const barrier_ = LeakedBarrierState<DdaIpcBarrierState>(0xa5);
+  DdaIpcBarrierState* const barrier_ = SharedBarrierState<DdaIpcBarrierState>(0xa5);
   std::vector<DdaCopy> copies_;
 };
 
@@ -212,8 +212,9 @@ TEST_F(DdaReduceScatterIpcMicrotest, Launch_GridFollowsShardAndCapsAt24) {
     ncclDataType_t datatype;
     unsigned blocks, threads;
   };
-  const Case cases[] = {{4, ncclFloat32, 1, 64},       {2048, ncclFloat32, 1, 512},    {2052, ncclFloat32, 2, 320},
-                        {4096, ncclFloat16, 1, 512},   {1u << 14, ncclFloat32, 8, 512}, {1u << 16, ncclFloat32, 24, 512}};
+  const Case cases[] = {{4, ncclFloat32, 1, 64},         {2048, ncclFloat32, 1, 512},
+                        {2052, ncclFloat32, 2, 320},     {4096, ncclFloat16, 1, 512},
+                        {1u << 14, ncclFloat32, 8, 512}, {1u << 16, ncclFloat32, 24, 512}};
   for (const Case& c : cases) {
     g_ddaLaunches.clear();
     ASSERT_EQ(Run(c.count, c.datatype), ncclSuccess);
