@@ -96,8 +96,10 @@ def test_sp_valu_and_sq_vmem_stay_in_different_passes():
     cfg = {"SQ": 8}
     sp_group = frozenset({"SP_VALU_FLOPS_FP32", "SP_VALU_FLOPS_FP16"})
     vmem_group = frozenset({"SQ_VMEM_REQ", "SQ_VMEM_STALL"})
-    files, file_count = _ensure_packable_union([], sp_group, cfg, 0)
-    files, file_count = _ensure_packable_union(files, vmem_group, cfg, file_count)
+    files, file_count = _ensure_single_pass_metric_set([], sp_group, cfg, 0)
+    files, file_count = _ensure_single_pass_metric_set(
+        files, vmem_group, cfg, file_count
+    )
     assert len(files) == 2
     assert _any_bucket_has_full_group(files, sp_group)
     assert _any_bucket_has_full_group(files, vmem_group)
@@ -106,7 +108,7 @@ def test_sp_valu_and_sq_vmem_stay_in_different_passes():
     assert merges == 0
     assert len(merged) == 2
 
-    filled, _next, stats = fill_slot_limit_into_existing_passes(
+    filled, _next, stats = fill_multi_pass_metrics_into_existing_passes(
         [files[0]],
         [vmem_group],
         cfg,
