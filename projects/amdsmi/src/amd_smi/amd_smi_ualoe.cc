@@ -619,7 +619,7 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
 
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = device->backend()) {
-    return backend->AllocFabricTelemetry(category_mask, telemetry);
+    return backend->alloc_fabric_telemetry(category_mask, telemetry);
   }
 #endif
 
@@ -663,7 +663,7 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
 
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = device->backend()) {
-    return backend->GetFabricTelemetryData(telemetry);
+    return backend->get_fabric_telemetry_data(telemetry);
   }
 #endif
 
@@ -702,7 +702,7 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
 
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = device->backend()) {
-    return backend->FreeFabricTelemetry(telemetry);
+    return backend->free_fabric_telemetry(telemetry);
   }
 #endif
 
@@ -754,7 +754,7 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
 
 #ifdef ENABLE_WSL_BACKEND
   if (auto* backend = device->backend()) {
-    return backend->GetGpuFabricInfo(info);
+    return backend->get_gpu_fabric_info(info);
   }
 #endif
 
