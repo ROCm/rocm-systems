@@ -318,6 +318,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   from `api-trace-test.cc`); suite `ApiTrace*`. Its own binary because it defines
   the public `NCCL_API` entry points that `fakes/api_trace_fakes.cc` supplies
   elsewhere. See `test_categories_micro_api_trace.yaml`.
+- **`rccl-UnitTestsMicroRecorder`** — `misc/recorder.cc` (via `RECORDER_CC_PATH`,
+  from `recorder-test.cc`); suite `Recorder*`. Its own binary because it is the
+  real `rccl::Recorder`, which `fakes/recorder_fakes.cc` supplies elsewhere. See
+  `test_categories_micro_recorder.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -837,6 +841,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroRecorder`,
 `rccl-UnitTestsMicroApiTrace`,
 `rccl-UnitTestsMicroDebug`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
@@ -879,6 +884,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroRecorder           # misc/recorder.cc tests
 ./build/rccl-UnitTestsMicroApiTrace           # misc/api_trace.cc tests
 ./build/rccl-UnitTestsMicroDebug              # debug.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests

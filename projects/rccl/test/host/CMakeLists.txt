@@ -402,6 +402,13 @@ function(rccl_define_micro_source_lists)
     api-trace-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroRecorder -- src/misc/recorder.cc. Own binary: it is the real
+  # rccl::Recorder, which fakes/recorder_fakes.cc supplies elsewhere.
+  set(TEST_MICRO_RECORDER_SOURCE_FILES
+    recorder-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1088,6 +1095,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroApiTrace
     ${_MICRO_MODE_DEFS}
     API_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/api_trace.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_api_trace.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroRecorder
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroRecorder
+  SOURCES ${TEST_MICRO_RECORDER_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    RECORDER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/recorder.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_recorder.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels

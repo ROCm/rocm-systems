@@ -168,6 +168,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
+    "rccl-UnitTestsMicroRecorder:$SCRIPT_DIR/host_tests_micro_recorder.xml"
     "rccl-UnitTestsMicroApiTrace:$SCRIPT_DIR/host_tests_micro_api_trace.xml"
     "rccl-UnitTestsMicroDebug:$SCRIPT_DIR/host_tests_micro_debug.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
