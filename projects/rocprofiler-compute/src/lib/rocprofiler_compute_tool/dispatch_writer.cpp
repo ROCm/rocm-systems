@@ -24,17 +24,24 @@ static_assert(DispatchWriter::kFileSuffix.size() >= compression::kGzipSuffix.siz
                       compression::kGzipSuffix,
               "DispatchWriter::kFileSuffix must end in the gzip suffix");
 
-void write_row(std::ostream& out, const dispatch_record_t& record)
+// Handles are randomized per process, so write the node id.
+uint64_t gpu_id(const tool_data_t& tool_data, uint64_t agent_handle)
 {
-    out << record.dispatch_id << ',' << record.agent_id << ',' << record.kernel_id << ','
-        << record.grid_size << ',' << record.workgroup_size << ',' << record.lds_per_workgroup
-        << ',' << record.scratch_per_workitem << ',' << record.start_timestamp << ','
-        << record.end_timestamp << ',' << record.correlation_id;
+    const auto agent = tool_data.agents.find(agent_handle);
+    return agent == tool_data.agents.end() ? agent_handle : agent->second.node_id;
 }
 }  // namespace
 
 bool format_dispatch_csv(const tool_data_t& tool_data, const csv::Sink& sink)
 {
+    const auto write_row = [&tool_data](std::ostream& out, const dispatch_record_t& record)
+    {
+        out << record.dispatch_id << ',' << gpu_id(tool_data, record.agent_id) << ','
+            << record.kernel_id << ',' << record.grid_size << ',' << record.workgroup_size << ','
+            << record.lds_per_workgroup << ',' << record.scratch_per_workitem << ','
+            << record.start_timestamp << ',' << record.end_timestamp << ',' << record.correlation_id;
+    };
+
     return csv::format(kHeader, tool_data.dispatch_records, write_row, sink);
 }
 
