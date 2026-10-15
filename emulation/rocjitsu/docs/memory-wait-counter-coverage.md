@@ -179,9 +179,9 @@ do not establish dynamic GDS source/EXEC protection.
 The external
 [`race` suite](https://github.com/ROCm/rocjitsu-test-corpus#rocjitsu-race-detector-integration)
 runs compiler-generated returning atomics and explicit VM-only, no-wait and
-EXP-only sequences on gfx942, gfx950 and gfx1151. These tests
-also check synchronized FLAT-to-LDS exchanges and missing-barrier controls on
-all three targets. These are emulation tests. Generator tests cover the VMEM
+EXP-only sequences on gfx942, gfx950 and gfx1151. It also checks synchronized
+FLAT-to-LDS exchanges, missing-barrier controls and the atomic-to-GLOBAL/VALU
+ordering pair on all three targets. These are emulation tests. Generator tests cover the VMEM
 metadata contract across all ten profiles, while decoded C++ tests retain
 older-target GDS obligations and check the CDNA4 fallback policy.
 
