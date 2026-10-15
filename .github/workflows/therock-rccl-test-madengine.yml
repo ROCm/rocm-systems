@@ -219,6 +219,7 @@ jobs:
         env:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
+          JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
         run: |
           export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH}"
 
@@ -230,12 +231,24 @@ jobs:
             NOTIFY_ARGS="$NOTIFY_ARGS --teams-webhook ${{ inputs.teams_webhook }}"
           fi
 
-          # Arithmetic in bash, not in a workflow expression: GitHub Actions
-          # expressions have no arithmetic operators, so subtracting there is
-          # a parse error that rejects the whole workflow file at dispatch.
-          # (Do not write an empty expression in these comments either -- the
-          # run block is scanned for expressions, comment lines included.)
-          SCRIPT_TIMEOUT=$(( ${{ inputs.job_timeout_minutes }} - 60 ))
+          # Read from the environment and validated, NOT interpolated into the
+          # script. A dispatch input pasted straight into a run block is
+          # executed as shell, and this step holds MAD_SECRETS_HFTOKEN. The
+          # job-level fromJSON() does not protect it either: that parses the
+          # leading JSON value, so something like "450 $(...)" satisfies the
+          # timeout and still reaches bash here as code.
+          #
+          # Arithmetic stays in bash because workflow expressions have no
+          # arithmetic operators, and subtracting there is a parse error that
+          # rejects the whole file at dispatch. (Do not write an empty
+          # expression in these comments either -- the run block is scanned
+          # for expressions, comment lines included.)
+          case "${JOB_TIMEOUT_MINUTES}" in
+            ''|*[!0-9]*)
+              echo "::error::job_timeout_minutes must be a plain integer, got '${JOB_TIMEOUT_MINUTES}'"
+              exit 1 ;;
+          esac
+          SCRIPT_TIMEOUT=$(( JOB_TIMEOUT_MINUTES - 60 ))
 
           python3 rocm-systems/projects/rccl/ci/scripts/test_madengine.py \
             --artifact-dir "${OUTPUT_ARTIFACTS_DIR}" \

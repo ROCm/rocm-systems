@@ -910,6 +910,21 @@ def resolve_base_digest(base_image: str) -> str:
     return digest
 
 
+def base_identity(from_ref: str) -> str:
+    """Short, stable token for the exact base an A/B image was built from.
+
+    Both MaxText tags carry it so the tag changes whenever the base does.
+    Without it the run id alone identified the images, and a workflow *re-run*
+    keeps GITHUB_RUN_ID: on the second attempt resolve_base_digest() could pick
+    up a moved tag, the baseline would rebuild on it, and the candidate's
+    `docker image inspect` would still hit the first attempt's image and skip
+    its build. The pair would then straddle two base images while every
+    Dockerfile prefix still matched. Compute nodes match on the tag too, so the
+    same staleness reaches them.
+    """
+    return hashlib.sha256(from_ref.encode()).hexdigest()[:10]
+
+
 def build_maxtext_baseline_image(
     base_image: str,
     work_dir: Path,
@@ -950,7 +965,7 @@ def build_maxtext_baseline_image(
     # Rebuilding every run costs very little. The payload layers are shared with
     # the candidate and come out of the local cache; a rebuild with everything
     # cached measured 2 seconds on ruby.
-    tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}"
+    tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}-{base_identity(from_ref)}"
     log.info("Building MaxText baseline image (Primus, stock RCCL): %s", tag)
     # No --pull: from_ref is already a digest, resolved once for both images.
     subprocess.run(
@@ -984,6 +999,12 @@ def build_rccl_overlay_image(
     """
     rccl_commit = get_rccl_commit(rccl_lib)
     tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
+    if family == "maxtext" and from_ref:
+        # Same identity the baseline carries, for the same reason: the run id
+        # alone survives a re-run, so without this the candidate could hit the
+        # previous attempt's image and skip its build while the baseline was
+        # rebuilt on a base that had moved.
+        tag = f"{tag}-{base_identity(from_ref)}"
 
     image_exists = subprocess.run(
         ["docker", "image", "inspect", tag],
