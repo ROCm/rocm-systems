@@ -4,6 +4,7 @@
 """Unit tests for utils/utils_common.py."""
 
 import builtins
+import copy
 import io
 import logging
 import os
@@ -1364,3 +1365,113 @@ def test_definitions_limited_to_agent_keeps_installed_builtins():
     assert names == ["SQ_WAVES", "CPC_STAT_BUSY", "Wavefronts"]
     busy = limited["rocprofiler-sdk"]["counters"][1]
     assert busy["definitions"][0]["architectures"] == ["gfx1201"]
+
+
+@pytest.mark.parametrize("agent_arch", ["gfx1201", "gfx1250", "gfx942"])
+def test_counter_dependencies_are_architecture_specific(agent_arch):
+    other_arch = "gfx908"
+    installed = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {
+                    "name": name,
+                    "description": "Installed counter",
+                    "definitions": [
+                        {"architectures": [other_arch], "block": "SQ", "event": 4}
+                    ],
+                }
+                for name in ("RAW", "MISSING")
+            ]
+        }
+    }
+    custom = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {
+                    "name": "RAW",
+                    "definitions": [
+                        {
+                            "architectures": [agent_arch, other_arch],
+                            "block": "SQ",
+                            "event": 5,
+                        }
+                    ],
+                },
+                {
+                    "name": "SUM",
+                    "definitions": [
+                        {
+                            "architectures": [agent_arch],
+                            "expression": "reduce(RAW,sum)",
+                        }
+                    ],
+                },
+                {
+                    "name": "BROKEN",
+                    "definitions": [
+                        {
+                            "architectures": [agent_arch],
+                            "expression": "reduce(MISSING,sum)",
+                        }
+                    ],
+                },
+                {
+                    "name": "TRANSITIVE",
+                    "definitions": [
+                        {"architectures": [agent_arch], "expression": "BROKEN"}
+                    ],
+                },
+            ]
+        }
+    }
+    original_installed = copy.deepcopy(installed)
+    original_custom = copy.deepcopy(custom)
+    merged = utils_common.definitions_limited_to_agent(
+        custom, agent_arch, {"RAW", "MISSING"}, installed
+    )
+    counters = {c["name"]: c for c in merged["rocprofiler-sdk"]["counters"]}
+    assert set(counters) == {"RAW", "MISSING", "SUM"}
+    assert counters["RAW"]["definitions"] == [
+        {"architectures": [other_arch], "block": "SQ", "event": 4},
+        {"architectures": [agent_arch], "block": "SQ", "event": 5},
+    ]
+    assert counters["MISSING"] == original_installed["rocprofiler-sdk"]["counters"][1]
+    assert installed == original_installed
+    assert custom == original_custom
+
+
+def test_counter_dependencies_keep_sdk_constants():
+    installed = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {
+                    "name": "RAW",
+                    "definitions": [
+                        {"architectures": ["gfx1201"], "block": "SQ", "event": 4}
+                    ],
+                }
+            ]
+        }
+    }
+    custom = {
+        "rocprofiler-sdk": {
+            "counters": [
+                {
+                    "name": "NORMALIZED",
+                    "definitions": [
+                        {
+                            "architectures": ["gfx1201"],
+                            "expression": "reduce(RAW,sum)/simd_count",
+                        }
+                    ],
+                }
+            ]
+        }
+    }
+    merged = utils_common.definitions_limited_to_agent(
+        custom, "gfx1201", {"RAW", "simd_count"}, installed
+    )
+    assert [c["name"] for c in merged["rocprofiler-sdk"]["counters"]] == [
+        "RAW",
+        "NORMALIZED",
+    ]

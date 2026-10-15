@@ -1039,11 +1039,20 @@ def definitions_limited_to_agent(
     it aborts if a definition repeats a counter it already provides. Setting
     ``ROCPROFILER_METRICS_PATH`` also replaces the install's counter file, so
     the built-in definitions have to travel with the extras. Keep definitions
-    for ``agent_arch`` only, omit built-in names, drop expressions that still
-    cannot be resolved, and append what remains to ``installed_config``.
+    for ``agent_arch`` only, omit definitions already installed for that
+    architecture, and drop expressions whose dependencies are unavailable on
+    that architecture. Preserve all installed definitions when merging extras.
     """
-    kept_counters = _counters_for_agent(sdk_config, agent_arch, builtin_counter_names)
-    known_names = _installed_counter_names(installed_config)
+    known_names = _installed_counter_names(installed_config, agent_arch)
+    excluded_names = builtin_counter_names
+    if installed_config:
+        # The availability query combines GPUs; a name on another GPU is not
+        # evidence that its definition exists for this architecture.
+        excluded_names = known_names
+        known_names = known_names | (
+            builtin_counter_names - _installed_counter_names(installed_config)
+        )
+    kept_counters = _counters_for_agent(sdk_config, agent_arch, excluded_names)
     kept_counters = _without_unresolved_expressions(kept_counters, known_names)
     rocprofiler_sdk = dict(sdk_config["rocprofiler-sdk"])
     rocprofiler_sdk["counters"] = kept_counters
@@ -1104,6 +1113,7 @@ def _installed_sdk_counter_config_path(sdk_tool_path: Optional[str]) -> Optional
 
 def _installed_counter_names(
     installed_config: Optional[dict[str, Any]],
+    agent_arch: Optional[str] = None,
 ) -> set[str]:
     if not installed_config:
         return set()
@@ -1111,7 +1121,15 @@ def _installed_counter_names(
     return {
         counter["name"]
         for counter in counters
-        if isinstance(counter, dict) and isinstance(counter.get("name"), str)
+        if isinstance(counter, dict)
+        and isinstance(counter.get("name"), str)
+        and (
+            agent_arch is None
+            or any(
+                agent_arch in definition.get("architectures", [])
+                for definition in counter.get("definitions", [])
+            )
+        )
     }
 
 
@@ -1123,13 +1141,34 @@ def _merge_installed_counters(
         return agent_config
     installed_sdk = dict(installed_config["rocprofiler-sdk"])
     installed_counters = list(installed_sdk.get("counters") or [])
-    installed_names = _installed_counter_names(installed_config)
-    extras = [
-        counter
-        for counter in agent_config["rocprofiler-sdk"]["counters"]
-        if counter["name"] not in installed_names
-    ]
-    installed_sdk["counters"] = [*installed_counters, *extras]
+    indices = {counter["name"]: i for i, counter in enumerate(installed_counters)}
+    for counter in agent_config["rocprofiler-sdk"]["counters"]:
+        index = indices.get(counter["name"])
+        if index is None:
+            indices[counter["name"]] = len(installed_counters)
+            installed_counters.append(counter)
+            continue
+        installed_counter = installed_counters[index]
+        installed_arches = {
+            arch
+            for definition in installed_counter["definitions"]
+            for arch in definition["architectures"]
+        }
+        extras = []
+        for definition in counter["definitions"]:
+            architectures = [
+                arch
+                for arch in definition["architectures"]
+                if arch not in installed_arches
+            ]
+            if architectures:
+                extras.append({**definition, "architectures": architectures})
+        if extras:
+            installed_counters[index] = {
+                **installed_counter,
+                "definitions": [*installed_counter["definitions"], *extras],
+            }
+    installed_sdk["counters"] = installed_counters
     return {**installed_config, "rocprofiler-sdk": installed_sdk}
 
 
