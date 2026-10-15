@@ -980,23 +980,36 @@ def mpi_unavailable_reason(
     return None
 
 
-def backend_include_ompt_unavailable_reason(
-    rocprof_config: RocprofsysConfig,
-) -> str | None:
-    """Skip ``-I ompt`` tests when this build omits ompt from backend choices."""
+@lru_cache(maxsize=1)
+def _ompt_include_choice_supported(rocprofsys_run: str) -> bool | None:
+    """Cached probe for whether ``-I ompt`` is a valid backend-include choice.
+
+    Returns None if the probe itself failed (binary missing/timeout), so the
+    caller can distinguish "not supported" from "could not tell".
+    """
     try:
         result = subprocess.run(
-            [str(rocprof_config.rocprofsys_run), "-I", "ompt", "--help"],
+            [rocprofsys_run, "-I", "ompt", "--help"],
             capture_output=True,
             text=True,
             timeout=15,
         )
-        combined = (result.stdout or "") + (result.stderr or "")
-        if "Invalid choice: 'ompt'" in combined:
-            return "Backend include choice 'ompt' not available in this build"
-        return None
     except (OSError, subprocess.SubprocessError, subprocess.TimeoutExpired):
+        return None
+    combined = (result.stdout or "") + (result.stderr or "")
+    return "Invalid choice: 'ompt'" not in combined
+
+
+def backend_include_ompt_unavailable_reason(
+    rocprof_config: RocprofsysConfig,
+) -> str | None:
+    """Skip ``-I ompt`` tests when this build omits ompt from backend choices."""
+    supported = _ompt_include_choice_supported(str(rocprof_config.rocprofsys_run))
+    if supported is None:
         return "Could not query backend include choice 'ompt'"
+    if not supported:
+        return "Backend include choice 'ompt' not available in this build"
+    return None
 
 
 def python_base_unavailable_reason(rocprof_config: RocprofsysConfig) -> str | None:
@@ -2176,6 +2189,26 @@ def validation_rules_dir(rocprof_config) -> Path:
     return rocprof_config.rocpd_validation_rules
 
 
+# Shared by test_domain_flags.py / test_backend_flags.py: both exercise the
+# same transpose GPU workload, so the launch args and baseline env/rules are
+# defined once here instead of being duplicated per module.
+DOMAIN_BACKEND_TRANSPOSE_ARGS = ["2", "100", "50"]
+DOMAIN_BACKEND_SAMPLING_VERBOSE_ARGS = ["-v", "2"]
+
+
+@pytest.fixture
+def domain_backend_flag_env() -> dict[str, str]:
+    return {
+        "ROCPROFSYS_TIME_OUTPUT": "OFF",
+        "ROCPROFSYS_USE_PID": "OFF",
+    }
+
+
+@pytest.fixture
+def transpose_baseline_rules(validation_rules_dir: Path) -> list[Path]:
+    return [validation_rules_dir / "default-rules.json"]
+
+
 # ----------------------------------------------------------------------------
 # Module-scoped Fixtures
 # ----------------------------------------------------------------------------
@@ -2443,6 +2476,22 @@ class RocprofsysTest:
         self.num_threads = get_test_num_threads
         self.test_output_dir = test_output_dir
         self.library_path = library_path
+
+    def run_transpose_sample(
+        self, env: dict[str, str], sampling_args: list[str]
+    ) -> object:
+        """Run the transpose HIP workload via rocprof-sys-sample.
+
+        Shared by test_domain_flags.py / test_backend_flags.py.
+        """
+        return self.run_test(
+            "sampling",
+            target="transpose",
+            env=env,
+            sampling_args=[*sampling_args, *DOMAIN_BACKEND_SAMPLING_VERBOSE_ARGS],
+            run_args=DOMAIN_BACKEND_TRANSPOSE_ARGS,
+            check_target_arch=True,
+        )
 
 
 # ============================================================================

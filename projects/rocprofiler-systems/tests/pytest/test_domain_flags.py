@@ -16,9 +16,6 @@ from conftest import RocprofsysTest
 
 pytestmark = [pytest.mark.domain_flags, pytest.mark.sampling]
 
-TRANSPOSE_ARGS = ["2", "100", "50"]
-SAMPLING_VERBOSE = ["-v", "2"]
-
 DOMAIN_FILTER_RULES = frozenset(
     {
         "gpu-metrics-selected",
@@ -42,21 +39,6 @@ _CPU_TARGET_ENV = {
     "ROCPROFSYS_USE_SAMPLING": "OFF",
     "ROCPROFSYS_USE_PROCESS_SAMPLING": "OFF",
 }
-
-
-def _run_transpose_sample(
-    test: RocprofsysTest,
-    env: dict[str, str],
-    sampling_args: list[str],
-) -> object:
-    return test.run_test(
-        "sampling",
-        target="transpose",
-        env=env,
-        sampling_args=[*sampling_args, *SAMPLING_VERBOSE],
-        run_args=TRANSPOSE_ARGS,
-        check_target_arch=True,
-    )
 
 
 def _resolve_rocpd_rules(
@@ -334,19 +316,6 @@ PRESET_ARTIFACT_CASES = [
 
 
 @pytest.fixture
-def domain_flag_env() -> dict[str, str]:
-    return {
-        "ROCPROFSYS_TIME_OUTPUT": "OFF",
-        "ROCPROFSYS_USE_PID": "OFF",
-    }
-
-
-@pytest.fixture
-def transpose_baseline_rules(validation_rules_dir: Path) -> list[Path]:
-    return [validation_rules_dir / "default-rules.json"]
-
-
-@pytest.fixture
 def domain_rules(validation_rules_dir: Path):
     def _rules(*names: str) -> list[Path]:
         return [
@@ -360,7 +329,7 @@ def domain_rules(validation_rules_dir: Path):
 @pytest.mark.gpu
 @pytest.mark.hip
 @pytest.mark.transpose
-@pytest.mark.rocpd("domain_flag_env")
+@pytest.mark.rocpd("domain_backend_flag_env")
 @pytest.mark.class_name("domain-flags-artifacts")
 class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
     @pytest.mark.parametrize(
@@ -369,7 +338,7 @@ class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
     )
     def test_on_transpose(
         self,
-        domain_flag_env,
+        domain_backend_flag_env,
         validation_rules_dir,
         transpose_baseline_rules,
         domain_rules,
@@ -380,8 +349,8 @@ class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
         with_amd_smi,
         filter_profiles,
     ):
-        env = {**domain_flag_env, **(seed_env or {})}
-        result = _run_transpose_sample(self, env, flag_args)
+        env = {**domain_backend_flag_env, **(seed_env or {})}
+        result = self.run_transpose_sample(env, flag_args)
         self.assert_regex(result, pass_regex=pass_regex)
         _assert_workload_artifacts(
             self,
@@ -401,7 +370,7 @@ class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
     )
     def test_preset_on_transpose(
         self,
-        domain_flag_env,
+        domain_backend_flag_env,
         validation_rules_dir,
         transpose_baseline_rules,
         domain_rules,
@@ -412,8 +381,8 @@ class TestDomainFlagsArtifactsOnWorkload(RocprofsysTest):
         with_amd_smi,
         filter_profiles,
     ):
-        env = {**domain_flag_env, **(seed_env or {})}
-        result = _run_transpose_sample(self, env, flag_args)
+        env = {**domain_backend_flag_env, **(seed_env or {})}
+        result = self.run_transpose_sample(env, flag_args)
         self.assert_regex(result, pass_regex=pass_regex)
         _assert_workload_artifacts(
             self,
