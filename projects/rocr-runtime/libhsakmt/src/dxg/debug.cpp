@@ -112,6 +112,10 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeEnable(void *rDebug, bool setupTtmp) {
 HSAKMT_STATUS HSAKMTAPI hsaKmtRuntimeDisable(void) {
   HSAKMT_STATUS result = hsaKmtCheckRuntimeDebugSupport();
 
+  if (result)
+    return HSAKMT_STATUS_SUCCESS;
+
+  assert(false);
   return HSAKMT_STATUS_SUCCESS;
 }
 

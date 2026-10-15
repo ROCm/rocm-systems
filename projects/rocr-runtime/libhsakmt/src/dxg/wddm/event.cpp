@@ -248,11 +248,13 @@ HSAKMT_STATUS EventLnx::WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_el
     if (ret == 0)
       return done() ? HSAKMT_STATUS_SUCCESS : HSAKMT_STATUS_WAIT_TIMEOUT;
 
-    // An eventfd stays readable until Reset() drains it, so accumulate the set
-    // of signaled events across poll() iterations to honor wait_all.
+    // An eventfd stays readable until Reset() drains it; a negative fd makes
+    // poll() skip it so wait_all blocks on the remaining events instead of spinning.
     for (uint32_t i = 0; i < num_elems; i++) {
-      if (pfds[i].revents & (POLLIN | POLLERR | POLLHUP))
+      if (pfds[i].revents & (POLLIN | POLLERR | POLLHUP)) {
         signaled[i] = true;
+        pfds[i].fd = -1;
+      }
     }
 
     if (done())
