@@ -50,7 +50,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
 
 ### Resolved issues
-* Fixed hangs with `NCCL_P2P_USE_CUDA_MEMCPY=1`. The Copy Engine transport now carries only send/recv-based operations, so collectives keep the kernel P2P transport instead of routing SIMPLE steps through Copy Engine copies.
+* Fixed hangs with `NCCL_P2P_USE_CUDA_MEMCPY=1`. Copy Engine copies use a non-blocking proxy stream, cross-process staging buffers use legacy IPC instead of the slow cuMem/VMM import path, and the Copy Engine transport carries only send/recv-based operations, so collectives keep the kernel P2P transport.
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
 * Fixed P2P IPC registration reuse producing out-of-bounds remote addresses when a registered allocation spans multiple cuMem segments.
