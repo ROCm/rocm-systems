@@ -233,6 +233,7 @@ TEST_F(HipFileStream, deregister_with_registered_stream_works)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
+    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     stream_map.deregisterStream(nonnull_stream);
 }
 
@@ -240,6 +241,7 @@ TEST_F(HipFileStream, deregister_twice_throws)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     stream_map.registerStream(nonnull_stream, 0);
+    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     stream_map.deregisterStream(nonnull_stream);
     ASSERT_THROW(stream_map.deregisterStream(nonnull_stream), std::invalid_argument);
 }
@@ -247,6 +249,28 @@ TEST_F(HipFileStream, deregister_twice_throws)
 TEST_F(HipFileStream, deregister_with_unregistered_stream_throws)
 {
     ASSERT_THROW(stream_map.deregisterStream(nonnull_stream), std::invalid_argument);
+}
+
+TEST_F(HipFileStream, deregister_drains_the_stream_before_releasing_resources)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+
+    ::testing::InSequence seq;
+    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
+    EXPECT_CALL(mhip, hipFree(&g_stream_signal_slot_storage));
+    EXPECT_CALL(mhip, hipStreamDestroy(reinterpret_cast<hipStream_t>(0xC0C0)));
+    stream_map.deregisterStream(nonnull_stream);
+}
+
+TEST_F(HipFileStream, register_null_stream_throws)
+{
+    ASSERT_THROW(stream_map.registerStream(nullptr, 0), std::invalid_argument);
+}
+
+TEST_F(HipFileStream, register_per_thread_stream_throws)
+{
+    ASSERT_THROW(stream_map.registerStream(hipStreamPerThread, 0), std::invalid_argument);
 }
 
 TEST(HipFileStreamDestructor, resource_free_failure_logs)
@@ -260,6 +284,7 @@ TEST(HipFileStreamDestructor, resource_free_failure_logs)
         .Times(::testing::AnyNumber())
         .WillRepeatedly(::testing::Throw(Hip::RuntimeError(hipErrorInvalidValue)));
     EXPECT_CALL(mhip, hipStreamDestroy(reinterpret_cast<hipStream_t>(0xC0C0)));
+    EXPECT_CALL(mhip, hipStreamSynchronize(reinterpret_cast<hipStream_t>(1)));
     EXPECT_CALL(msys, syslog);
     {
         StreamMap stream_map;
@@ -301,6 +326,7 @@ TEST_F(HipFileStreamExternal, register_and_deregister_with_valid_stream_works)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);
     ASSERT_EQ(hipFileStreamRegister(nonnull_stream, 0), HIPFILE_SUCCESS);
+    EXPECT_CALL(mhip, hipStreamSynchronize(nonnull_stream));
     ASSERT_EQ(hipFileStreamDeregister(nonnull_stream), HIPFILE_SUCCESS);
 }
 

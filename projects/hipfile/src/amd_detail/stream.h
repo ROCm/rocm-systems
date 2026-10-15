@@ -31,6 +31,7 @@ public:
     virtual uint64_t                     nextSignalTarget()            = 0;
     virtual void                         releaseSignalTarget()         = 0;
     virtual bool                         isManaged() const             = 0;
+    virtual void                         drainAndRelease()             = 0;
 };
 
 class StreamMap;
@@ -52,6 +53,7 @@ public:
     virtual uint64_t                     nextSignalTarget() override;
     virtual void                         releaseSignalTarget() override;
     virtual bool                         isManaged() const override;
+    virtual void                         drainAndRelease() override;
 
     Stream(const hipStream_t hip_stream, uint32_t flags, bool managed, const PassKey<StreamMap> &k);
 

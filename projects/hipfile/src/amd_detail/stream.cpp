@@ -118,6 +118,10 @@ Stream::getLock()
 void
 StreamMap::registerStream(hipStream_t hip_stream, uint32_t flags)
 {
+    if (hip_stream == nullptr || hip_stream == hipStreamPerThread) {
+        throw std::invalid_argument("The default stream cannot be registered for async operations");
+    }
+
     if (StreamMap::from_ptr.end() != StreamMap::from_ptr.find(hip_stream)) {
         throw std::invalid_argument("Stream is already registered");
     }
@@ -134,7 +138,8 @@ StreamMap::deregisterStream(hipStream_t hip_stream)
         throw std::invalid_argument("Stream is not registered");
     }
 
-    StreamMap::from_ptr.erase(hip_stream);
+    itr->second->drainAndRelease();
+    StreamMap::from_ptr.erase(itr);
 }
 
 std::shared_ptr<IStream>
@@ -184,9 +189,41 @@ Stream::isManaged() const
     return managed;
 }
 
-Stream::~Stream()
+void
+Stream::drainAndRelease()
 {
     if (!managed) {
+        return;
+    }
+
+    Context<Hip>::get()->hipStreamSynchronize(hip_stream);
+
+    DeviceGuard device_guard{device_id};
+    if (signal_slot) {
+        uint64_t *slot = signal_slot;
+        signal_slot    = nullptr;
+        try {
+            Context<Hip>::get()->hipFree(slot);
+        }
+        catch (...) {
+            Context<Sys>::get()->syslog(LOG_CRIT, "Error releasing stream async resources.");
+        }
+    }
+    if (copy_stream) {
+        hipStream_t stream = copy_stream;
+        copy_stream        = nullptr;
+        try {
+            Context<Hip>::get()->hipStreamDestroy(stream);
+        }
+        catch (...) {
+            Context<Sys>::get()->syslog(LOG_CRIT, "Error releasing stream async resources.");
+        }
+    }
+}
+
+Stream::~Stream()
+{
+    if (copy_stream == nullptr && signal_slot == nullptr) {
         return;
     }
     try {
