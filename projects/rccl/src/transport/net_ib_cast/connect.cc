@@ -610,13 +610,12 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   out->isP2p = base->isP2p;
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
-    out->maxSendWorkRequest = NCCL_IB_MAX_SEND_WRS;
+    out->maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
   } else {
     IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
-    // Match IbCastReceiverQpsCreateToRts: CTS posts an unsignaled side-table WR
-    // before the CTS WR. Resiliency signals every CTS WR, so 1x times two WRs;
-    // otherwise 2x times two WRs. AINIC recovery rebuilds through this builder.
-    out->maxSendWorkRequest = NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2;
+    // Multi-segment matches IbCastReceiverQpsCreateToRts (side-table WR per CTS WR) for AINIC recovery rebuilds.
+    out->maxSendWorkRequest =
+      IbCastAdvertiseMultiSeg() ? NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2 : NET_IB_MAX_REQUESTS;
   }
 }
 
@@ -1024,7 +1023,9 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  qpCreateAttrs.maxSendWorkRequest = NCCL_IB_MAX_SEND_WRS;
+  // Send requests are sent using at most 2 messages (RDMA Write and RDMA Write with Immediate)
+  // Multi-segment adds one segmented multi-recv chain to the 2*MAX budget.
+  qpCreateAttrs.maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
   qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
   qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
   qpCreateAttrs.cqDepthMultiplier = depthMult;
@@ -1608,7 +1609,7 @@ ib_recv_dev_list:
 
     // Prepare my CTS FIFO + multi-seg side table (one covering MR).
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
-                                  sizeof(comm->ctsFifo) + sizeof(comm->segLayoutFifo),
+                                  sizeof(comm->ctsFifo) + (IbCastAdvertiseMultiSeg() ? sizeof(comm->segLayoutFifo) : 0),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     devInfo->rkey = commDev->ctsFifoMr->rkey;
@@ -1668,7 +1669,7 @@ ib_recv_dev_list:
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
+  if (IbCastAdvertiseMultiSeg()) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -1694,7 +1695,8 @@ ib_connect:
 
   memcpy(&remMeta, stage->buffer, sizeof(ncclIbConnectionMetadata));
   comm->base.optRecvCompletion = comm->base.optRecvCompletion && remMeta.optRecvCompletion;
-  comm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
+  // With the switch off, ignore the peer's MULTISEG cap so neither side waits on or writes a side table.
+  comm->peerCaps = IbCastAdvertiseMultiSeg() ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName)) : 0;
 
   // ensure that the remote devices have the same link layer than the local devices used in the connection.
   if (comm->base.vProps.ndevs > 0) {
@@ -1831,11 +1833,14 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
-  // CTS messages are posted using send work requests. Multi-segment CTS posts
-  // an unsignaled side-table WR before the CTS WR (two WRs per slot). Because
-  // only specific CTS WRs are signaled, the send queue needs 2x max requests
-  // times two WRs. Resiliency signals every CTS WR, so 1x times two WRs.
-  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2) * 2;
+  // CTS messages are posted using send work requests.
+  // Note that because only specific CTS messages are signaled, the send queue
+  // size needs to be double the number of max requests.
+  // When resiliency is enabled, the number of send work requests is as the
+  // number of max requests because every CTS message is signaled.
+  qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS * (rComm->base.resiliency ? 1 : 2);
+  // Multi-segment chains an unsignaled side-table WR before each CTS WR.
+  if (IbCastAdvertiseMultiSeg()) qpCreateAttrs.maxSendWorkRequest *= 2;
 
   qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
   qpCreateAttrs.qpSharingGroupIdx = remMeta->sharedGroupIdx;
@@ -1976,8 +1981,7 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.cq = rCommDev->base.cq;
       qpCreateAttrs.pd = rCommDev->base.pd;
       qpCreateAttrs.maxRecvWorkRequest = 0;
-      qpCreateAttrs.maxSendWorkRequest =
-        NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS;
+      qpCreateAttrs.maxSendWorkRequest = IbCastFlushQpSendDepth();
       qpCreateAttrs.qpContext = &rComm->base.stats;
       qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
       qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
@@ -2402,7 +2406,7 @@ ib_recv:
 
   /* copy back the received info */
   memcpy(&remMeta, stage->buffer, sizeof(struct ncclIbConnectionMetadata));
-  rComm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
+  rComm->peerCaps = IbCastAdvertiseMultiSeg() ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName)) : 0;
 
   rComm->base.isP2p = remMeta.isP2p;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
@@ -2575,7 +2579,10 @@ ib_recv:
 
   // Store the remote CTS FIFO info provided by the remote peer
   rComm->remCtsFifo.addr = remMeta.addr;
-  rComm->remSegLayout.addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
+  if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+    NCCLCHECKGOTO(ncclIbMalloc((void**)&rComm->remSegLayout, sizeof(*rComm->remSegLayout)), ret, fail);
+    rComm->remSegLayout->addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
+  }
   for (int i = 0; i < rComm->base.nRemDevs; i++) {
     rComm->remCtsFifo.rkeys[i] = remMeta.devs[i].rkey;
   }
@@ -2588,10 +2595,11 @@ ib_recv:
                                   IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     rCommDev->sge.lkey = rCommDev->ctsFifoMr->lkey;
-    NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, &rComm->remSegLayout.elems,
-                                  sizeof(rComm->remSegLayout.elems),
-                                  IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
-                  ret, fail);
+    if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
+      NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->segLayoutFifoMr, rCommDev->base.pd, rComm->remSegLayout->elems,
+                                    sizeof(rComm->remSegLayout->elems), IBV_ACCESS_LOCAL_WRITE),
+                    ret, fail);
+    }
 
     // Register completion records
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&rCommDev->cmplsRecordsMr, rCommDev->base.pd, &rComm->cmplsRecords,
@@ -2704,7 +2712,7 @@ ib_recv:
   meta.optRecvCompletion = rComm->base.optRecvCompletion;
   rComm->base.optRecvCompletion = rComm->base.optRecvCompletion && remMeta.optRecvCompletion;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
-  ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
+  if (IbCastAdvertiseMultiSeg()) ncclIbSetConnectCaps(meta.devName, sizeof(meta.devName), NCCL_IB_CAP_MULTISEG);
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -2742,6 +2750,7 @@ fail:
     (void)IbCastCloseRecv(rComm);
     stage->comm = NULL;
   } else {
+    if (rComm) free(rComm->remSegLayout);
     free(rComm);
   }
   goto exit;
@@ -2942,6 +2951,7 @@ ncclResult_t IbCastCloseRecv(void* recvComm) {
     if (comm->base.resiliency) {
       NCCLCHECK(IbCastResiliencyDestroy(&comm->base.resiliency));
     }
+    free(comm->remSegLayout);
     free(comm);
   }
   return ncclSuccess;
