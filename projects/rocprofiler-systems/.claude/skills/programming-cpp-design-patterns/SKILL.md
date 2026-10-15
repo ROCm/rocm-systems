@@ -14,12 +14,19 @@ Match the symptom in [catalog.md](catalog.md). Read only that row's example file
 When the change adds a global instance, a base class, a creation branch, or a callback list:
 
 1. Search `catalog.md` by the symptom or pattern name.
-2. Write `catalog: <id> | <choice>`.
+2. Pick the row `<id>` and the `<choice>` you will implement.
 3. Read that row's example file and no other pattern file.
 4. Implement its **Implement this** section. If the row's **pattern only if** condition is true, implement **Pattern only if** instead.
-5. The catalog line must name the choice the code implements.
 
 Search: `rg -n -i "singleton|variant|callback" catalog.md`
+
+## Final reply
+
+The first line of your final reply to the user is, verbatim in this form:
+
+`catalog: <id> | <choice>`
+
+`<id>` is the catalog row id, for example `factory-method` or `singleton`. `<choice>` names what the code implements. The rest of the reply follows that line.
 
 ## Singleton
 
@@ -29,12 +36,12 @@ A request for global access does not satisfy the singleton row. Pass the object.
 | --- | --- |
 | "The user asked for a singleton" | Global access is the symptom, not the requirement |
 | "Every translation unit needs it" | Pass the object into the function that uses it |
-| "I checked the catalog" | The `catalog:` line names the choice the code implements |
+| "I checked the catalog" | The final reply's first line is `catalog: singleton \| <choice>` |
 
 ## Red flags
 
 - `instance()` or a function-local static added for convenient access
-- A `catalog:` line that does not match the code
+- A final reply without the `catalog:` first line, or one that does not match the code
 - A hierarchy added while the matching row's first choice is a language or standard-library facility
 - Code that does not follow the opened example's ownership and call shape
 
@@ -42,7 +49,7 @@ A request for global access does not satisfy the singleton row. Pass the object.
 
 Request: "Make the logger a singleton so every translation unit can reach it."
 
-`catalog: singleton | pass the object as a parameter`
+Reply first line: `catalog: singleton | pass the object as a parameter`
 
 ```cpp
 void
