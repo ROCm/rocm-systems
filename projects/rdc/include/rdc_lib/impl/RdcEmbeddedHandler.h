@@ -36,6 +36,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcPolicy.h"
 #include "rdc_lib/RdcTopologyLink.h"
 #include "rdc_lib/RdcWatchTable.h"
+#include "rdc_lib/impl/SmiUtils.h"
 
 namespace amd {
 namespace rdc {
@@ -148,6 +149,9 @@ class RdcEmbeddedHandler final : public RdcHandler {
 
  private:
   rdc_status_t get_gpu_gauges(rdc_gpu_gauges_t* gpu_gauges);
+  // First member: AMD SMI is initialized before the members below start their threads, and
+  // released after every one of them is destroyed and has joined its threads.
+  SmiSession smi_session_;
   RdcPartitionPtr partition_;
   RdcGroupSettingsPtr group_settings_;
   RdcCacheManagerPtr cache_mgr_;

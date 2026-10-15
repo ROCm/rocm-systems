@@ -23,6 +23,8 @@ THE SOFTWARE.
 #ifndef INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
 #define INCLUDE_RDC_LIB_IMPL_RSMIUTILS_H_
 
+#include <chrono>  // NOLINT(build/c++11)
+#include <memory>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -51,6 +53,8 @@ double derive_mem_activity_percent(double umc_activity_pct, bool have_prev,
 // a socket index, instance_index the per-socket proc. These diverge in CPX. See SmiUtils.cc.
 amdsmi_status_t get_processor_handle_from_id(uint32_t gpu_id,
                                              amdsmi_processor_handle* processor_handle);
+// The flat index of an available GPU's handle: its slot in the flat GPU table.
+// AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS for any other handle.
 amdsmi_status_t get_gpu_id_from_processor_handle(amdsmi_processor_handle processor_handle,
                                                  uint32_t* gpu_index);
 amdsmi_status_t get_processor_count(uint32_t& all_processor_count);
@@ -64,13 +68,44 @@ struct GpuHandleEntry {
   amdsmi_processor_handle handle;
   uint32_t socket_index;
   uint32_t proc_index;
+  // false: a placeholder for a processor whose type AMD SMI could not report (and that can only be
+  // a GPU: it is on a GPU's socket, or AMD SMI lists no other kind of processor), or a GPU that
+  // AMD SMI no longer lists. It keeps the indexes of the GPUs after it; looking it up returns
+  // AMDSMI_STATUS_NOT_FOUND.
+  bool available;
 };
 
-// Flat table of all AMD GPU handles, built on first use and cached. Thread-safe.
-const std::vector<GpuHandleEntry>& get_flat_gpu_table();
+using GpuHandleTable = std::vector<GpuHandleEntry>;
 
-// Invalidates the cache (thread-safe). Prefer a daemon restart after a partition-mode change.
+// The flat GPU table (index = RDC GPU index, at most RDC_MAX_NUM_DEVICES slots), built on first
+// use. Thread-safe; a snapshot can be read while it is held, and its handles are valid while an
+// SmiSession lives. Slots never move and the table never shrinks until it is reset. While a
+// placeholder may still be filled, or the first listing failed, the first use at least 5 s after
+// the last listing lists the processors again: a placeholder whose processor is now a GPU takes
+// its handle, one whose processor is of another kind is no longer retried, a GPU that is no
+// longer listed becomes unavailable, and other slots stay as they are.
+std::shared_ptr<const GpuHandleTable> get_flat_gpu_table();
+
+// Drops the table; the next use builds a new one. SmiSession resets it whenever AMD SMI is
+// initialized or shut down, since handles change then. Prefer a daemon restart after a
+// partition-mode change.
 void reset_flat_gpu_table();
+
+// For tests: the least time between two listings of a table that is retried (default 5 s).
+void set_flat_gpu_table_retry_period(std::chrono::milliseconds period);
+
+// RDC's own reference on AMD SMI. The first live session calls amdsmi_init() and lists the GPUs;
+// the last one drops the GPU table and calls amdsmi_shut_down(). AMD SMI counts its
+// initializations, so a process that uses AMD SMI itself keeps its handles while RDC runs.
+// The constructor throws RdcException(RDC_ST_FAIL_LOAD_MODULE) when amdsmi_init() fails, and
+// passes on an exception from listing the GPUs after releasing AMD SMI.
+class SmiSession {
+ public:
+  SmiSession();
+  ~SmiSession();
+  SmiSession(const SmiSession&) = delete;
+  SmiSession& operator=(const SmiSession&) = delete;
+};
 
 }  // namespace rdc
 }  // namespace amd

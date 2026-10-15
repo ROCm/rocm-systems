@@ -110,6 +110,11 @@ rdc_status_t RdcNotificationImpl::set_listen_events(const std::vector<RdcFieldKe
     // Get processor handle from GPU id
     amdsmi_processor_handle processor_handle;
     ret = get_processor_handle_from_id(it->first, &processor_handle);
+    if (ret == AMDSMI_STATUS_NOT_FOUND) {
+      // An unavailable GPU sends no events; its mask is set once a later call finds it.
+      RDC_LOG(RDC_DEBUG, "GPU " << it->first << " is unavailable; not listening for its events");
+      continue;
+    }
     if (ret != AMDSMI_STATUS_SUCCESS) {
       RDC_LOG(RDC_ERROR,
               "Failed to get processor handle for GPU " << it->first << " error: " << ret);

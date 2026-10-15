@@ -195,9 +195,11 @@ rdc_status_t RdcSmiDiagnosticImpl::check_smi_topo_info(uint32_t gpu_index[RDC_MA
   for (uint32_t i = 0; i < gpu_count; i++) {
     for (uint32_t j = 0; j < gpu_count; j++) {
       if (gpu_index[i] == gpu_index[j]) continue;
-      std::pair<amdsmi_processor_handle, amdsmi_processor_handle> ph;
-      err = get_processor_handle_from_id(gpu_index[i], &ph.first);
-      err = get_processor_handle_from_id(gpu_index[i], &ph.second);
+      std::pair<amdsmi_processor_handle, amdsmi_processor_handle> ph{nullptr, nullptr};
+      if (get_processor_handle_from_id(gpu_index[i], &ph.first) != AMDSMI_STATUS_SUCCESS ||
+          get_processor_handle_from_id(gpu_index[i], &ph.second) != AMDSMI_STATUS_SUCCESS) {
+        continue;  // an unavailable GPU has no links to check
+      }
 
       uint64_t weight;
       err = amdsmi_topo_get_link_weight(ph.first, ph.second, &weight);
@@ -289,8 +291,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_temperature_level(
   int64_t current_temp = 0;
   std::string info = msg;
   std::string per_gpu_info = per_gpu_msg;
-  amdsmi_processor_handle processor_handle;
-  get_processor_handle_from_id(gpu_index, &processor_handle);
+  amdsmi_processor_handle processor_handle = nullptr;
+  if (get_processor_handle_from_id(gpu_index, &processor_handle) != AMDSMI_STATUS_SUCCESS) {
+    return result;  // as when AMD SMI cannot read the temperature
+  }
 
   err = amdsmi_get_temp_metric(processor_handle, type, met, &current_temp);
   if (err != AMDSMI_STATUS_SUCCESS) return result;
@@ -433,8 +437,10 @@ rdc_diag_result_t RdcSmiDiagnosticImpl::check_voltage_level(uint32_t gpu_index,
   int64_t current_voltage = 0;
   std::string info = msg;
   std::string per_gpu_info = per_gpu_msg;
-  amdsmi_processor_handle processor_handle;
-  get_processor_handle_from_id(gpu_index, &processor_handle);
+  amdsmi_processor_handle processor_handle = nullptr;
+  if (get_processor_handle_from_id(gpu_index, &processor_handle) != AMDSMI_STATUS_SUCCESS) {
+    return result;  // as when AMD SMI cannot read the voltage
+  }
 
   err = amdsmi_get_gpu_volt_metric(processor_handle, type, met, &current_voltage);
   if (err != AMDSMI_STATUS_SUCCESS) return result;

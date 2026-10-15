@@ -56,6 +56,12 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdcd` exits at once, with status 1, on a second SIGTERM or SIGINT, or on one that arrives while it shuts down, so another stop request ends a stalled shutdown.
 
+- A process that uses AMD SMI itself keeps working AMD SMI handles after it starts RDC in embedded mode. Loading RDC shut AMD SMI down and initialized it again, which invalidated the handles of the host process.
+
+- `rdc_start_embedded()` returns `RDC_ST_FAIL_LOAD_MODULE`, and `rdcd` exits with an error, when AMD SMI fails to initialize. Both aborted the process.
+
+- GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added

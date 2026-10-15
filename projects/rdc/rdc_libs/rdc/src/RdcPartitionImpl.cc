@@ -108,7 +108,11 @@ rdc_status_t RdcPartitionImpl::rdc_instance_profile_get_impl(
 }
 
 rdc_status_t RdcPartitionImpl::rdc_get_num_partition_impl(uint32_t index, uint16_t* num_partition) {
-  if (get_num_partition(index, num_partition) != AMDSMI_STATUS_SUCCESS) {
+  amdsmi_status_t ret = get_num_partition(index, num_partition);
+  if (ret == AMDSMI_STATUS_NOT_FOUND) {
+    return RDC_ST_NOT_FOUND;  // a GPU AMD SMI cannot identify
+  }
+  if (ret != AMDSMI_STATUS_SUCCESS) {
     return RDC_ST_UNKNOWN_ERROR;
   }
   return RDC_ST_OK;

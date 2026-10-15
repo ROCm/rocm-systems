@@ -112,7 +112,10 @@ void RdcMetricFetcherImpl::get_ecc(uint32_t gpu_index, rdc_field_t field_id,
 
   amdsmi_processor_handle processor_handle = nullptr;
   err = get_processor_handle_from_id(gpu_index, &processor_handle);
-  assert(err == AMDSMI_STATUS_SUCCESS);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;  // the GPU became unavailable since the caller looked it up
+    return;
+  }
 
   // because RDC already had an established order that is different from amd-smi : map blocks to
   // fields manually
@@ -343,7 +346,10 @@ void RdcMetricFetcherImpl::get_ecc_deferred(uint32_t gpu_index, rdc_field_t fiel
 
   amdsmi_processor_handle processor_handle = nullptr;
   amdsmi_status_t err = get_processor_handle_from_id(gpu_index, &processor_handle);
-  assert(err == AMDSMI_STATUS_SUCCESS);
+  if (err != AMDSMI_STATUS_SUCCESS) {
+    value->status = err;  // the GPU became unavailable since the caller looked it up
+    return;
+  }
 
   auto field_to_block_de = [](rdc_field_t field) -> amdsmi_gpu_block_t {
     switch (field) {
@@ -569,7 +575,9 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
   for (; ite != bulk_fields.end(); ite++) {
     amdsmi_gpu_metrics_t gpu_metrics;
     amdsmi_processor_handle processor_handle = nullptr;
-    rs = get_processor_handle_from_id(ite->first, &processor_handle);
+    if (get_processor_handle_from_id(ite->first, &processor_handle) != AMDSMI_STATUS_SUCCESS) {
+      continue;  // an unavailable GPU: its fields are fetched one by one and read nothing
+    }
 
     rs = amdsmi_get_gpu_metrics_info(processor_handle, &gpu_metrics);
     if (rs != AMDSMI_STATUS_SUCCESS) {
@@ -919,18 +927,8 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       }
       break;
     }
-    case RDC_FI_GPU_COUNT: {
-      const auto& table = get_flat_gpu_table();
-      value->type = INTEGER;
-      // An empty table means SMI init / socket enumeration failed; surface that as an
-      // error instead of silently reporting a count of 0.
-      if (table.empty()) {
-        value->status = AMDSMI_STATUS_NOT_INIT;
-      } else {
-        value->status = AMDSMI_STATUS_SUCCESS;
-        value->value.l_int = static_cast<int64_t>(table.size());
-      }
-    } break;
+    case RDC_FI_GPU_COUNT:  // answered by fetch_smi_field() before any GPU lookup
+      break;
     case RDC_FI_GPU_PARTITION_COUNT: {
       // Only some drivers fill the gpu_metrics partition count (none that publish
       // gpu_metrics v1.9), so take the count from the GPU's partition profile, as
@@ -1874,6 +1872,20 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
   rdc_status_t status = RDC_ST_UNKNOWN_ERROR;
   rdc_entity_info_t info = rdc_get_info_from_entity_index(gpu_index);
 
+  if (field_id == RDC_FI_GPU_COUNT) {
+    // A property of the table, not of a GPU, so GPU 0 being unavailable does not matter. With
+    // no GPU, the lookup below fails as for any field.
+    std::shared_ptr<const GpuHandleTable> table = get_flat_gpu_table();
+    if (!table->empty()) {
+      value->ts = now();
+      value->field_id = field_id;
+      value->type = INTEGER;
+      value->status = AMDSMI_STATUS_SUCCESS;
+      value->value.l_int = static_cast<int64_t>(table->size());
+      return RDC_ST_OK;
+    }
+  }
+
   // Pass the full entity index, not info.device_index, so the flat/socket dispatch stays
   // correct for CPU, physical-GPU, and partition entities (matters in CPX).
   amdsmi_status_t ret = get_processor_handle_from_id(gpu_index, &processor_handle);
@@ -1885,7 +1897,11 @@ rdc_status_t RdcMetricFetcherImpl::fetch_smi_field(uint32_t gpu_index, rdc_field
     } else {
       info_str = std::to_string(info.device_index);
     }
-    RDC_LOG(RDC_ERROR,
+    // An unavailable GPU was logged once, when it became unavailable; every field it is
+    // asked for fails the same way.
+    bool unavailable =
+        ret == AMDSMI_STATUS_NOT_FOUND && info.entity_role == RDC_DEVICE_ROLE_PHYSICAL;
+    RDC_LOG(unavailable ? RDC_DEBUG : RDC_ERROR,
             "Failed to get processor handle for device " << info_str << " error: " << ret);
     return Smi2RdcError(ret);
   }
