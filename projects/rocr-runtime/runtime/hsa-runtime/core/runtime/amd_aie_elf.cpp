@@ -21,15 +21,33 @@ namespace {
 /// @brief ELF OS/ABI identifying an aie2p AIE ELF.
 constexpr uint8_t kElfAmdAie2p = 69;
 
+/// @brief ELF OS/ABI identifying an aie4 (AIE4/Medusa) AIE ELF, one past kElfAmdAie2p; confirmed
+/// against an aiecc-produced npu3 full ELF.
+constexpr uint8_t kElfAmdAie4 = 70;
+
 /// @brief Returns the ELF OS/ABI a full ELF for @p arch carries, or 0 if @p arch has no full-ELF
 /// format this reader implements. aie2 (Phoenix) has none at all: XRT defines no platform value
 /// for it.
-uint8_t ElfOsAbiForArch(std::string_view arch) { return arch == "aie2p" ? kElfAmdAie2p : 0; }
+uint8_t ElfOsAbiForArch(std::string_view arch) {
+  if (arch == "aie2p") return kElfAmdAie2p;
+  if (arch == "aie4") return kElfAmdAie4;
+  return 0;
+}
 
-/// @brief Relocation types, matching the patch schemes the NPU firmware and XRT use.
+/// @brief Relocation types, matching aiebu's symbol::patch_schema (src/cpp/common/symbol.h) --
+/// the values the NPU firmware and XRT use.
 enum class PatchScheme : uint32_t {
-  /// @brief Fold a buffer address into a shim DMA buffer descriptor. Used for kernel arguments.
+  /// @brief Fold a buffer address into a shim DMA buffer descriptor. Used for kernel arguments on
+  /// aie2p: a 48-bit field split across two dwords (site[1] low 32 bits, site[2] bits 0-15 for
+  /// bits 32-47).
   kShimDma48 = 5,
+  /// @brief Same as kShimDma48 but for aie4's wider shim DMA buffer descriptor: a 57-bit field
+  /// (site[1] low 32 bits, site[0] bits 0-24 for bits 32-56; aiebu's write57_aie4 in
+  /// src/cpp/analyzer/transform_manager.cpp). Recognized here so a kernel argument site using it
+  /// is not rejected as an unsupported scheme; the dispatch-time address patch for it is not
+  /// implemented yet (see PatchShimDma48's kDdrAieAddrOffset -- its aie4 equivalent is not
+  /// confirmed), so nothing calls into one.
+  kShimDma57Aie4 = 6,
   /// @brief Store a plain 64-bit address. Used for the PDI address.
   kAddress64 = 8,
 };
@@ -320,7 +338,7 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
         // the control code, so refuse instead.
         return fail(std::string("unsupported relocation symbol: ") + sym_name);
       }
-      if (site.scheme != PatchScheme::kShimDma48) {
+      if (site.scheme != PatchScheme::kShimDma48 && site.scheme != PatchScheme::kShimDma57Aie4) {
         return fail("unsupported patch scheme for a kernel argument");
       }
       if (arg_index > kMaxArgIndex) {
