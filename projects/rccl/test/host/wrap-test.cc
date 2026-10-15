@@ -1287,7 +1287,7 @@ rcclArchThresholds MakeRankScaledTable() {
   rcclArchThresholds t{};
   t.ddaLLMax[ncclFuncAllReduce] = 32 * kMiB;
   t.ddaLLMax[ncclFuncAllGather] = 128 * kKiB;
-  t.ddaLLMax[ncclFuncReduceScatter] = 16 * kMiB;
+  t.ddaLLMax[ncclFuncReduceScatter] = 1 * kMiB;
   t.ddaLL128Max[ncclFuncAllReduce] = 256 * kMiB;
   t.ddaLL128Max[ncclFuncAllGather] = 128 * kMiB;
   t.ddaLL128Max[ncclFuncReduceScatter] = 64 * kMiB;
@@ -5194,6 +5194,7 @@ TEST(WrapMicrotestIsolated, DdaTierCaps_RankScaledFromMinRanks) {
         comm->nRanks = 7;
         EXPECT_EQ(32 * kMiB, rcclDdaLLThreshold(comm, ncclFuncAllReduce));
         EXPECT_EQ(128 * kKiB, rcclDdaLLThreshold(comm, ncclFuncAllGather));
+        EXPECT_EQ(1 * kMiB, rcclDdaLLThreshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(64 * kMiB, rcclDdaLL128Threshold(comm, ncclFuncReduceScatter));
         EXPECT_EQ(0u, rcclDdaVmmThreshold(comm, ncclFuncReduceScatter));
         comm->nRanks = 8;
