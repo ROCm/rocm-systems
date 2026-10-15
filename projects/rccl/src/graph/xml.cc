@@ -1375,7 +1375,7 @@ ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct nccl
   NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, &smiIndex));
 #endif
   int hipDev = -1;
-  if (hipDeviceGetByPCIBusId(&hipDev, busId) != hipSuccess || hipDev < 0) hipDev = (int)smiIndex;
+  CUDACHECK(hipDeviceGetByPCIBusId(&hipDev, busId));
   NCCLCHECK(ncclTopoGetXmlFromGpu(node, (uint32_t)hipDev, smiIndex, xml, gpuNode));
 #else
   nvmlDevice_t nvmlDev;
