@@ -158,8 +158,12 @@ bool PeerDropped(struct ncclSocket* sock, int timeoutMs) {
   char byte;
   while (std::chrono::steady_clock::now() < deadline) {
     bool closed = false;
-    if (ncclSocketTryRecv(sock, &byte, 1, &closed, /*blocking=*/false) != ncclSuccess || closed) return true;
-    std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    ncclResult_t res = ncclSocketTryRecv(sock, &byte, 1, &closed, /*blocking=*/false);
+    if (res == ncclInProgress) { // still connected, nothing to read yet
+      std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      continue;
+    }
+    return res != ncclSuccess || closed;
   }
   return false;
 }
