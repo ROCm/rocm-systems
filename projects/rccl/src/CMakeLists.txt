@@ -162,6 +162,7 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_fabric_direct.h
   algorithms/dda/alltoall/dda_alltoall_fabric_direct_host.h
   algorithms/dda/alltoall/dda_alltoall_fabric_lazy_host.h
+  algorithms/dda/alltoall/dda_alltoall_implicit_policy.h
   algorithms/dda/alltoall/dda_alltoall_lazy.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda.h
   algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric.h

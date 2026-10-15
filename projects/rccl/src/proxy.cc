@@ -2110,6 +2110,7 @@ void* ncclProxyService(void* _args) {
   free(proxyState->listenSock);
   proxyOpsFree(proxyState);
 fail:
+  ncclP2pAsyncCloserJoin(proxyState);  // also on the error exits of the poll loop
   free(activePollfds);
   free(activePollSlots);
   free(pollfds);

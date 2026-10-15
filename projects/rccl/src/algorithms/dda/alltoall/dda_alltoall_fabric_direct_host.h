@@ -37,6 +37,14 @@ RCCL_A2A_KNOB(DdaA2aDirectBpp, "DDA_A2A_DIRECT_BPP", 0);  // 0 = ddaA2aDirectBpp
 RCCL_A2A_KNOB(DdaA2aDirectSelfBlocks, "DDA_A2A_DIRECT_SELF_BLOCKS", 12);
 RCCL_A2A_KNOB(DdaA2aDirectThreads, "DDA_A2A_DIRECT_THREADS", 256);
 RCCL_A2A_KNOB(DdaA2aDirectUnroll, "DDA_A2A_DIRECT_UNROLL", 0);  // 0 = size table
+// Implicit zero-copy for receive buffers outside a symmetric window (opt-in): registration cache of
+// unregistered receive allocations (dda_alltoall_implicit_policy.h, ncclIpcImplicitReg* in p2p.cc).
+RCCL_PARAM(DdaA2aImplicit, "DDA_A2A_IMPLICIT", 0);
+RCCL_PARAM(DdaA2aImplicitCache, "DDA_A2A_IMPLICIT_CACHE", 8);
+RCCL_PARAM(DdaA2aImplicitLegacyBytes, "DDA_A2A_IMPLICIT_LEGACY_BYTES", 4ll << 30);
+// Tests only: 1 ignore the buffer id (stale maps, negative control), 2/4/32 force staged pairs, 8 do
+// not wait for imports at registration, 16 no closes before destroy.
+RCCL_A2A_KNOB(DdaA2aImplicitDebug, "DDA_A2A_IMPLICIT_DEBUG", 0);
 
 namespace {
 

@@ -8,6 +8,7 @@
 #include "nccl.h"
 #include "debug.h"
 #include "rocmwrap.h"
+#include "alloc.h"  // rcclMemAddressReserve / rcclMemAddressFree (HIP VMM VA race workaround)
 #include "archinfo.h"
 #include "kernel_config.h"
 #include "hsa/hsa.h"
@@ -81,7 +82,7 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
     goto done; // 7.0.2.2-without-backport fails here
   created = true;
 
-  if (CUPFN(cuMemAddressReserve(&ptr, granularity, granularity, 0, 0)) != hipSuccess) goto cleanup;
+  if (rcclMemAddressReserve(&ptr, granularity, granularity, 0, 0) != hipSuccess) goto cleanup;
   reserved = true;
 
   if (CUPFN(cuMemMap(ptr, granularity, 0, handle, 0)) != hipSuccess) goto cleanup;
@@ -113,7 +114,7 @@ static int ncclCuMemFunctionalProbe(CUdevice dev, int devOrdinal) {
 
 cleanup:
   if (mapped) CUCHECKIGNORE(cuMemUnmap(ptr, granularity));
-  if (reserved) CUCHECKIGNORE(cuMemAddressFree(ptr, granularity));
+  if (reserved) CUCHECKIGNORE(rcclMemAddressFree(ptr, granularity));
   if (created) CUCHECKIGNORE(cuMemRelease(handle));
   (void)hipGetLastError(); // clear any sticky error from the probe
 done:

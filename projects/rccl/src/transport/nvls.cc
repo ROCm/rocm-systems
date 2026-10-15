@@ -239,7 +239,7 @@ static ncclResult_t nvlsAllocBindUc(struct ncclComm* comm, const struct ncclMcPa
   CUCHECKGOTO(cuMemGetAllocationGranularity(&ucgran, &ucprop, CU_MEM_ALLOC_GRANULARITY_RECOMMENDED), ret, fail);
   ALIGN_SIZE(ucsize, ucgran);
   // Map a VA for UC memory with MC alignment and size
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)&ucptr, ucsize, ucgran, 0U, 0), ret, fail);
+  CUCHECKGOTO(rcclMemAddressReserve((CUdeviceptr*)&ucptr, ucsize, ucgran, 0U, 0), ret, fail);
 
   // Alloc local physical mem for this NVLS group
   CUCHECKGOTO(cuMemCreate(&ucHandle, ucsize, &ucprop, 0), ret, fail1);
@@ -271,7 +271,7 @@ fail3:
 fail2:
   CUCHECK(cuMemRelease(ucHandle));
 fail1:
-  CUCHECK(cuMemAddressFree((CUdeviceptr)ucptr, ucsize));
+  CUCHECK(rcclMemAddressFree((CUdeviceptr)ucptr, ucsize));
 fail:
   goto exit;
 }

@@ -129,7 +129,7 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
     if (!fabricUpgrade) CUCHECKGOTO(cuMemCreate(&handle, handleSize, &memprop, 0), ret, vmm_fail);
     handleCreated = true;
     /* Reserve a virtual address range */
-    CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0), ret, vmm_fail);
+    CUCHECKGOTO(rcclMemAddressReserve((CUdeviceptr*)ptr, handleSize, memGran, 0, 0), ret, vmm_fail);
     addressReserved = true;
     /* Map the virtual address range to the physical allocation */
     CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, handleSize, 0, handle, 0), ret, vmm_fail);
@@ -149,7 +149,7 @@ ncclResult_t ncclMemAlloc_impl(void** ptr, size_t size) {
 
 vmm_fail:
     if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, handleSize);
-    if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, handleSize);
+    if (addressReserved) (void)rcclMemAddressFree((CUdeviceptr)*ptr, handleSize);
     if (handleCreated) (void)cuMemRelease(handle);
     *ptr = NULL;
     goto exit;

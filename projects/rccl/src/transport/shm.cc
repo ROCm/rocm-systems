@@ -648,7 +648,7 @@ ncclResult_t ncclShmImportShareableBuffer(struct ncclComm* comm, int proxyRank, 
     ALIGN_SIZE(size, granularity);
 
     // Reserve and map address
-    CUCHECK(cuMemAddressReserve(&hostptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
+    CUCHECK(rcclMemAddressReserve(&hostptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
     CUCHECK(cuMemMap(hostptr, size, /* offset */ 0, handle, /* flags */ 0));
 
     // Allow access by the local GPU

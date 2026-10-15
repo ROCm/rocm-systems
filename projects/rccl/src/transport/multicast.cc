@@ -146,7 +146,7 @@ ncclResult_t ncclMcGroupBuildPartitions(struct ncclComm* comm, const struct nccl
                 ret, fail);
 
   // Reserve and map the whole MC VA once; each consumer slice is a view into it.
-  CUCHECKGOTO(cuMemAddressReserve(&base, capacity, recGran, 0U, 0), ret, fail);
+  CUCHECKGOTO(rcclMemAddressReserve(&base, capacity, recGran, 0U, 0), ret, fail);
   CUCHECKGOTO(cuMemMap(base, capacity, 0, mcHandle, 0), ret, fail);
   mapped = 1;
   desc.flags = CU_MEM_ACCESS_FLAGS_PROT_READWRITE;
@@ -179,7 +179,7 @@ ncclResult_t ncclMcGroupBuildPartitions(struct ncclComm* comm, const struct nccl
 fail:
   // Best-effort (CUCALL) so a failing cleanup op cannot skip releasing the MC handle.
   if (mapped) CUCALL(cuMemUnmap(base, capacity));
-  if (base) CUCALL(cuMemAddressFree(base, capacity));
+  if (base) CUCALL(rcclMemAddressFree(base, capacity));
   if (mcCreated) CUCALL(cuMemRelease(mcHandle));
   return ret;
 }
@@ -190,7 +190,7 @@ ncclResult_t ncclMcGroupDestroy(struct ncclMcGroup** groupPtr) {
   INFO(NCCL_NVLS, "NVLS destroy MC group %llx capacity %zu dev %d", group->handle, group->capacity, group->dev);
   // Releasing the MC handle drops any bindings still present; UC memory is freed by the caller.
   CUCHECKIGNORE(cuMemUnmap((CUdeviceptr)group->base, group->capacity));
-  CUCHECKIGNORE(cuMemAddressFree((CUdeviceptr)group->base, group->capacity));
+  CUCHECKIGNORE(rcclMemAddressFree((CUdeviceptr)group->base, group->capacity));
   CUCHECKIGNORE(cuMemRelease(group->handle));
   free(group);
   *groupPtr = NULL;

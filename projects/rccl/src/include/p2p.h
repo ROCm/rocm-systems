@@ -66,6 +66,7 @@ struct ncclIpcImpInfo {
   bool legacyIpcCap;
   uintptr_t offset;
   int numSegments;
+  int asyncClose;  // RCCL: deregister request only; close off the proxy thread (see p2pProxyDeregister)
 };
 
 struct ncclIpcRegInfo {
@@ -90,5 +91,13 @@ ncclResult_t ncclIpcGraphRegisterBuffer(ncclComm* comm, const void* userbuff, si
                                         uintptr_t** peerRmtAddrsOut, void* cleanupQueuePtr, int* nCleanupQueueElts);
 
 ncclResult_t ncclIpcDeregBuffer(struct ncclComm* comm, struct ncclIpcRegInfo* regInfo);
+// RCCL: private (not cached in comm->regCache) asynchronous whole-allocation registration, see p2p.cc.
+struct ncclIpcImplicitReg;
+ncclResult_t ncclIpcImplicitRegStart(ncclComm* comm, void* base, size_t size, int* peerRanks, int nPeers,
+                                     struct ncclIpcImplicitReg** out);
+ncclResult_t ncclIpcImplicitRegPoll(ncclComm* comm, struct ncclIpcImplicitReg* reg, uintptr_t* addrs, int* pending);
+ncclResult_t ncclIpcImplicitDeregPoll(ncclComm* comm, struct ncclIpcImplicitReg* reg, int* pending, bool asyncClose);
+int ncclIpcImplicitIsLegacy(struct ncclIpcImplicitReg* reg);
+void ncclIpcImplicitFree(struct ncclIpcImplicitReg* reg);
 
 #endif
