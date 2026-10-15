@@ -13,8 +13,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 
 | Tier | Cases | Tagged | Missing `@asserts` |
 |---|---:|---:|---:|
-| `contract` | 627 | 627 | 0 |
-| **total** | **627** | **627** | **0** |
+| `contract` | 629 | 629 | 0 |
+| **total** | **629** | **629** | **0** |
 
 ## Tier: `contract`
 
@@ -704,7 +704,7 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelNameRef_HipKernelNameRef_ByFunction_NamesResolvedKernel` | hipKernelNameRef | resolves a hipFunction_t (from hipGetFuncBySymbol) to a non-empty name mentioning the kernel identifier |
 | `Contract_KernelNameRef_HipKernelNameRef_NvidiaUnsupported_IsSkipped` | hipKernelNameRef | NVIDIA backend does not expose this API family; the contract is skipped until backend parity exists |
 
-### `kernel_object_attributes` (5 cases)
+### `kernel_object_attributes` (7 cases)
 
 | Case | API | Asserts |
 |---|---|---|
@@ -713,6 +713,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack` | hipKernelSetAttributeForDevice | preserves current device and target value |
 | `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped` | hipKernelSetAttributeForDevice | unavailable before CUDA 12.8 |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
+| `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported` | hipKernelSetCacheConfig | all hipFuncCache_t values are supported and kernel |
+| `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported` | hipKernelSetCacheConfig | unavailable before CUDA 12.0 |
 
 ### `library` (21 cases)
 
