@@ -12,6 +12,11 @@
 #include "rma.h"
 #include "rocmwrap.h"
 #include "transport.h"
+#include "transport/net_ib/rma_multiseg.h"
+
+#include <mutex>
+#include <unistd.h>
+#include <vector>
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags) {
@@ -122,7 +127,45 @@ ncclResult_t rcclDevrGinSegmentRegType(bool globalHasSysmemSegment, int maxGloba
 }
 #endif
 
-bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm) {
-  // Only RMA backends that register one MR per physical segment can take a multi-segment window.
-  return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy;
+bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments) {
+  // Only RMA backends that register one MR per physical segment can take a multi-segment window,
+  // and the IB proxy needs the same count on every rank within its MR table.
+  return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy &&
+         minGlobalNumSegments == maxGlobalNumSegments && maxGlobalNumSegments <= NCCL_RMA_MAX_SEGMENTS;
+}
+
+namespace {
+struct rcclHostSegmentFd {
+  uintptr_t base;
+  size_t size;
+  int fd;
+};
+std::mutex rcclHostSegmentFdsMutex;
+std::vector<rcclHostSegmentFd> rcclHostSegmentFds;
+} // namespace
+
+void rcclHostSegmentFdRegister(void* base, size_t size, int fd) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  rcclHostSegmentFds.push_back({(uintptr_t)base, size, fd});
+}
+
+void rcclHostSegmentFdDeregister(int fd) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  for (size_t i = 0; i < rcclHostSegmentFds.size(); i++) {
+    if (rcclHostSegmentFds[i].fd == fd) {
+      rcclHostSegmentFds.erase(rcclHostSegmentFds.begin() + i);
+      return;
+    }
+  }
+}
+
+int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  for (const rcclHostSegmentFd& e : rcclHostSegmentFds) {
+    if (addr >= e.base && addr + len <= e.base + e.size) {
+      *offset = addr - e.base;
+      return dup(e.fd);
+    }
+  }
+  return -1;
 }

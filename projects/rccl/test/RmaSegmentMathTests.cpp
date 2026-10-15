@@ -222,3 +222,193 @@ TEST(RmaSegmentMathTest, PeerSegOffIndexesPerRankTable)
     EXPECT_EQ(ncclRmaPeerSegOff(table, local, 0)[1], size_t{4096});
     EXPECT_EQ(ncclRmaPeerSegOff(table, local, 1)[1], size_t{8192});
 }
+
+// ncclRmaNextSlice is the step gin.cc's WR builder takes; walk it like the builder does.
+TEST(RmaSegmentMathTest, NextSliceSplitsAtBothSidesBoundaries)
+{
+    const size_t local[] = {0, 100, 250};
+    const size_t remote[] = {0, 60, 250};
+    const size_t expectBytes[] = {60, 40, 150};
+    const int expectLocal[] = {0, 0, 1};
+    const int expectRemote[] = {0, 1, 1};
+    uint64_t lOff = 0, rOff = 0;
+    size_t rem = 250;
+    for (int i = 0; i < 3; ++i) {
+        int ls = -1, rs = -1;
+        const size_t chunk = ncclRmaNextSlice(local, 2, remote, 2, lOff, rOff, rem, &ls, &rs);
+        EXPECT_EQ(chunk, expectBytes[i]) << "slice " << i;
+        EXPECT_EQ(ls, expectLocal[i]) << "slice " << i;
+        EXPECT_EQ(rs, expectRemote[i]) << "slice " << i;
+        lOff += chunk;
+        rOff += chunk;
+        rem -= chunk;
+    }
+    EXPECT_EQ(rem, size_t{0});
+    EXPECT_EQ(ncclRmaCountLayoutDataWrs(local, 2, remote, 2, 0, 0, 250, NCCL_RMA_MAX_DATA_WRS), 3);
+}
+
+TEST(RmaSegmentMathTest, NextSliceFlushModeStepsOneRemoteSegment)
+{
+    const size_t remote[] = {0, 4096, 4096 + 10, 3 * 4096};
+    const size_t expectBytes[] = {4096, 10, 2 * 4096 - 10};
+    uint64_t rOff = 0;
+    size_t rem = remote[3];
+    for (int i = 0; i < 3; ++i) {
+        int ls = -1, rs = -1;
+        const size_t chunk = ncclRmaNextSlice(nullptr, 0, remote, 3, 0, rOff, rem, &ls, &rs);
+        EXPECT_EQ(chunk, expectBytes[i]) << "segment " << i;
+        EXPECT_EQ(ls, 0);
+        EXPECT_EQ(rs, i);
+        rOff += chunk;
+        rem -= chunk;
+    }
+    EXPECT_EQ(ncclRmaCountLayoutDataWrs(nullptr, 0, remote, 3, 0, 0, remote[3], NCCL_RMA_MAX_FLUSH_WRS), 3);
+}
+
+TEST(RmaSegmentMathTest, NextSliceStartsMidSegmentAndCapsAtSgeLength)
+{
+    ASSERT_GT(SIZE_MAX, static_cast<size_t>(UINT32_MAX));
+    const size_t big = static_cast<size_t>(UINT32_MAX) + 4096;
+    const size_t local[] = {0, big};
+    const size_t remote[] = {0, 512, big};
+    int ls = -1, rs = -1;
+    EXPECT_EQ(ncclRmaNextSlice(local, 1, remote, 2, 100, 100, 1000, &ls, &rs), size_t{412});
+    EXPECT_EQ(rs, 0);
+    EXPECT_EQ(ncclRmaNextSlice(local, 1, remote, 2, 512, 512, big - 512, &ls, &rs), static_cast<size_t>(UINT32_MAX));
+    EXPECT_EQ(rs, 1);
+}
+
+// A zero slice would spin the builder forever; it must report past-the-end instead.
+TEST(RmaSegmentMathTest, NextSliceReturnsZeroPastEitherTable)
+{
+    const size_t local[] = {0, 100};
+    const size_t remote[] = {0, 200};
+    int ls = -1, rs = -1;
+    EXPECT_EQ(ncclRmaNextSlice(local, 1, remote, 1, 100, 0, 50, &ls, &rs), size_t{0});
+    EXPECT_EQ(ncclRmaNextSlice(local, 1, remote, 1, 0, 200, 50, &ls, &rs), size_t{0});
+    EXPECT_EQ(ncclRmaNextSlice(nullptr, 0, remote, 1, 0, 250, 50, &ls, &rs), size_t{0});
+    EXPECT_EQ(ncclRmaCountLayoutDataWrs(local, 1, remote, 1, 0, 0, 150, NCCL_RMA_MAX_DATA_WRS),
+              NCCL_RMA_MAX_DATA_WRS + 1);
+}
+
+// Asymmetric windows: three local segments against one remote segment is three slices.
+TEST(RmaSegmentMathTest, NextSliceLocalHasMoreSegmentsThanRemote)
+{
+    const size_t local[] = {0, 50, 120, 300};
+    const size_t remote[] = {0, 300};
+    const size_t expectBytes[] = {50, 70, 180};
+    uint64_t lOff = 0, rOff = 0;
+    size_t rem = 300;
+    for (int i = 0; i < 3; ++i) {
+        int ls = -1, rs = -1;
+        const size_t chunk = ncclRmaNextSlice(local, 3, remote, 1, lOff, rOff, rem, &ls, &rs);
+        EXPECT_EQ(chunk, expectBytes[i]) << "slice " << i;
+        EXPECT_EQ(ls, i) << "slice " << i;
+        EXPECT_EQ(rs, 0) << "slice " << i;
+        lOff += chunk;
+        rOff += chunk;
+        rem -= chunk;
+    }
+    EXPECT_EQ(rem, size_t{0});
+    EXPECT_EQ(ncclRmaCountLayoutDataWrs(local, 3, remote, 1, 0, 0, 300, NCCL_RMA_MAX_DATA_WRS), 3);
+}
+
+TEST(RmaSegmentMathTest, WrCreditsAvailableRespectsCapacity)
+{
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(0, NCCL_RMA_MAX_SIGNAL_WRS, NCCL_RMA_SEND_QP_WRS));
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(NCCL_RMA_SEND_QP_WRS - 2, 2, NCCL_RMA_SEND_QP_WRS));
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(NCCL_RMA_SEND_QP_WRS - 1, 2, NCCL_RMA_SEND_QP_WRS));
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(0, NCCL_RMA_SEND_QP_WRS + 1, NCCL_RMA_SEND_QP_WRS));
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(-1, 1, NCCL_RMA_SEND_QP_WRS));
+}
+
+// Eight full 65-WR chains fit a 577-deep SQ; the ninth must wait for completions.
+TEST(RmaSegmentMathTest, WrCreditsBlockNinthMaxChain)
+{
+    ncclRmaWrCredits c = {};
+    uint64_t posted = 0;
+    for (int i = 0; i < 8; ++i) {
+        ASSERT_TRUE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), NCCL_RMA_MAX_SIGNAL_WRS,
+                                              NCCL_RMA_SEND_QP_WRS))
+            << "chain " << i;
+        ncclRmaWrCreditsRecord(&c, ++posted, NCCL_RMA_MAX_SIGNAL_WRS);
+    }
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 8 * NCCL_RMA_MAX_SIGNAL_WRS);
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), NCCL_RMA_MAX_SIGNAL_WRS,
+                                           NCCL_RMA_SEND_QP_WRS));
+    ncclRmaWrCreditsRelease(&c, 1);
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 7 * NCCL_RMA_MAX_SIGNAL_WRS);
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), NCCL_RMA_MAX_SIGNAL_WRS,
+                                          NCCL_RMA_SEND_QP_WRS));
+}
+
+// Ids without an entry are single-MR ops; they cost untrackedCost until released.
+TEST(RmaSegmentMathTest, WrCreditsMixTrackedAndUntrackedIds)
+{
+    ncclRmaWrCredits c = {};
+    uint64_t posted = 0;
+    ++posted;                                  // id 1: untracked
+    ncclRmaWrCreditsRecord(&c, ++posted, 40);  // id 2: 40-WR chain
+    ++posted;                                  // id 3: untracked
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 40 + 2 * 2);
+    ncclRmaWrCreditsRelease(&c, 2);
+    EXPECT_EQ(c.trackedIds, 0);
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 2);
+    ncclRmaWrCreditsRelease(&c, 3);
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 0);
+    ncclRmaWrCreditsRelease(&c, 2);
+    EXPECT_EQ(c.releasedSeq, uint64_t{3}) << "release never moves backwards";
+}
+
+TEST(RmaSegmentMathTest, WrCreditsRingReusesSlotsAcrossWrap)
+{
+    ncclRmaWrCredits c = {};
+    uint64_t posted = 0;
+    for (int round = 0; round < 3; ++round) {
+        for (int i = 0; i < NCCL_RMA_CREDIT_IDS; ++i) ncclRmaWrCreditsRecord(&c, ++posted, 3);
+        EXPECT_EQ(c.trackedIds, NCCL_RMA_CREDIT_IDS);
+        EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 3 * NCCL_RMA_CREDIT_IDS);
+        ncclRmaWrCreditsRelease(&c, posted);
+        EXPECT_EQ(c.trackedIds, 0);
+        EXPECT_EQ(c.trackedWrs, 0);
+    }
+    ncclRmaWrCreditsRecord(&c, c.releasedSeq, 5);
+    EXPECT_EQ(c.trackedIds, 0) << "an already-released id is not recorded";
+    ncclRmaWrCreditsRecord(&c, ++posted, 0);
+    EXPECT_EQ(c.trackedIds, 0) << "a zero-WR request is not recorded";
+}
+
+// A second record of the same id replaces its length. It must not add another tracked id.
+TEST(RmaSegmentMathTest, WrCreditsRecordReplacesExistingId)
+{
+    ncclRmaWrCredits c = {};
+    uint64_t posted = 0;
+    ncclRmaWrCreditsRecord(&c, ++posted, 10);
+    ncclRmaWrCreditsRecord(&c, posted, 25);
+    EXPECT_EQ(c.trackedIds, 1);
+    EXPECT_EQ(c.trackedWrs, 25);
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 25);
+    ncclRmaWrCreditsRelease(&c, posted);
+    EXPECT_EQ(c.trackedIds, 0);
+    EXPECT_EQ(c.trackedWrs, 0);
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 0);
+}
+
+// One completion can advance completedSeq across several ids, tracked and empty.
+TEST(RmaSegmentMathTest, WrCreditsReleaseJumpsSeveralIds)
+{
+    ncclRmaWrCredits c = {};
+    uint64_t posted = 0;
+    ncclRmaWrCreditsRecord(&c, ++posted, 4);  // id 1
+    ++posted;                                 // id 2: untracked hole
+    ncclRmaWrCreditsRecord(&c, ++posted, 7);  // id 3
+    ++posted;                                 // id 4: untracked hole
+    ncclRmaWrCreditsRecord(&c, ++posted, 9);  // id 5
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 1), 4 + 7 + 9 + 2);
+    ncclRmaWrCreditsRelease(&c, 4);
+    EXPECT_EQ(c.releasedSeq, uint64_t{4});
+    EXPECT_EQ(c.trackedIds, 1);
+    EXPECT_EQ(c.trackedWrs, 9);
+    // The one live id is tracked, so the untracked cost does not apply.
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 1), 9);
+}
