@@ -204,12 +204,11 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
     # above this CTestTestfile, same as ../amdsmitst. They are unittest scripts,
     # not gtest, so they are not generated from test_categories.yaml.
     #
-    # test_runner.py selects with -L ^<category>$ -L ^ex_gpu_<arch>$. Each
-    # runner therefore carries every category label and every ex_gpu_* label
-    # (keep that list in sync with exclude_gpu in test_categories.yaml) plus
-    # amdsmi_python, which is the run-time off switch.
+    # test_runner.py uses -L ex_gpu_<arch> for listed GPUs and -LE ex_gpu for
+    # others. Separate registrations keep each runner in both selections.
+    # Keep the arch labels in sync with exclude_gpu in test_categories.yaml.
     if(AMDSMI_CTEST_PYTHON_TESTS)
-        set(_AMDSMI_PYTHON_LABELS
+        set(_AMDSMI_PYTHON_CATEGORY_LABELS
             "quick"
             "pre-commit"
             "smoke"
@@ -221,6 +220,10 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
             "extended"
             "full"
             "all"
+            "amdsmi_python"
+        )
+        set(_AMDSMI_PYTHON_LABELS
+            ${_AMDSMI_PYTHON_CATEGORY_LABELS}
             "ex_gpu_gfx906"
             "ex_gpu_gfx908"
             "ex_gpu_gfx90a"
@@ -228,8 +231,8 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
             "ex_gpu_gfx103X"
             "ex_gpu_gfx110X"
             "ex_gpu_gfx115X"
-            "amdsmi_python"
         )
+        list(JOIN _AMDSMI_PYTHON_CATEGORY_LABELS ";" _AMDSMI_PYTHON_GENERIC_LABEL_STRING)
         list(JOIN _AMDSMI_PYTHON_LABELS ";" _AMDSMI_PYTHON_LABEL_STRING)
         # Pipe, not semicolon: CMake splits unescaped semicolons into list items.
         set(_AMDSMI_PYTHON_TESTS
@@ -245,6 +248,8 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
                 APPEND "${_AMDSMI_INSTALL_TEST_FILE}"
                 "add_test(${_py_name} ../python_unittest/${_py_script} -v)\n"
                 "set_tests_properties(${_py_name} PROPERTIES LABELS \"${_AMDSMI_PYTHON_LABEL_STRING}\" TIMEOUT 180)\n\n"
+                "add_test(${_py_name}_generic ../python_unittest/${_py_script} -v)\n"
+                "set_tests_properties(${_py_name}_generic PROPERTIES LABELS \"${_AMDSMI_PYTHON_GENERIC_LABEL_STRING}\" TIMEOUT 180)\n\n"
             )
         endforeach()
     endif()

@@ -1,0 +1,75 @@
+#!/usr/bin/env python3
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+"""The installed CTestTestfile must run each Python runner once per GPU.
+
+TheRock's test_runner.py selects ``-L ^<category>$ -L ^ex_gpu_<arch>$`` when the
+GPU has an exclude_gpu block in test_categories.yaml, and
+``-L ^<category>$ -LE ex_gpu`` when it does not (gfx950, gfx12xx, generic). This
+replays both selections against share/amd_smi/tests/ctest/CTestTestfile.cmake.
+"""
+
+import re
+import unittest
+from pathlib import Path
+
+_CTEST_FILE = Path(__file__).resolve().parents[3] / "ctest" / "CTestTestfile.cmake"
+_CATEGORIES = ("quick", "standard", "comprehensive", "full")
+_PYTHON_RUNNERS = ("unit_tests.py", "integration_test.py", "cli_unit_test.py")
+
+
+def _load_tests(text):
+    commands = dict(re.findall(r"^add_test\((\S+) (.+)\)$", text, re.MULTILINE))
+    labels = {
+        name: set(value.split(";"))
+        for name, value in re.findall(
+            r'^set_tests_properties\((\S+) PROPERTIES LABELS "([^"]*)"', text, re.MULTILINE
+        )
+    }
+    return {name: (commands[name], labels.get(name, set())) for name in commands}
+
+
+class CtestCategoryLabelsTest(unittest.TestCase):
+    def setUp(self):
+        if not _CTEST_FILE.is_file():
+            self.skipTest(f"{_CTEST_FILE} not installed (built outside rocm-systems)")
+        self.tests = _load_tests(_CTEST_FILE.read_text())
+        self.archs = sorted(
+            {
+                label
+                for _, labels in self.tests.values()
+                for label in labels
+                if label.startswith("ex_gpu_")
+            }
+        )
+
+    def _runner_counts(self, selected):
+        return {
+            runner: sum(
+                1 for name in selected if f"python_unittest/{runner}" in self.tests[name][0]
+            )
+            for runner in _PYTHON_RUNNERS
+        }
+
+    def test_each_runner_selected_once_on_listed_arch(self):
+        self.assertTrue(self.archs, "no ex_gpu_* labels in the ctest file")
+        for category in _CATEGORIES:
+            for arch in self.archs:
+                selected = [
+                    n for n, (_, labels) in self.tests.items() if {category, arch} <= labels
+                ]
+                with self.subTest(category=category, arch=arch):
+                    self.assertEqual(
+                        self._runner_counts(selected), dict.fromkeys(_PYTHON_RUNNERS, 1)
+                    )
+
+    def test_each_runner_selected_once_on_unlisted_arch(self):
+        for category in _CATEGORIES:
+            selected = [
+                n
+                for n, (_, labels) in self.tests.items()
+                if category in labels and not any("ex_gpu" in label for label in labels)
+            ]
+            with self.subTest(category=category):
+                self.assertEqual(self._runner_counts(selected), dict.fromkeys(_PYTHON_RUNNERS, 1))
