@@ -23,7 +23,11 @@ THE SOFTWARE.
 #define SERVER_INCLUDE_RDC_RDC_API_SERVICE_H_
 
 #include <grpcpp/server_context.h>
+#include <pthread.h>
 
+#include <atomic>
+#include <map>
+#include <mutex>  // NOLINT
 #include <thread>
 
 #include "rdc.grpc.pb.h"  // NOLINT
@@ -204,10 +208,15 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
     pthread_mutex_t mutex;
     pthread_cond_t cond;
     rdc_policy_callback_response_t response;
-    bool start;
+    bool pending = false;  // a response not sent yet; guarded by mutex
+    std::atomic<bool> start{false};
   };
-  // map for group_id and thread context
+  // map for group_id and thread context; contexts are never freed
   static std::map<uint32_t, struct policy_thread_context*> policy_threads_;
+  // guards policy_threads_: RPC threads and RDC's policy thread use it
+  static std::mutex policy_threads_mutex_;
+  static policy_thread_context* find_policy_thread(uint32_t group_id);
+  static void stop_policy_stream(policy_thread_context* ctx);
   static int PolicyCallback(rdc_policy_callback_response_t* userData);
 };
 

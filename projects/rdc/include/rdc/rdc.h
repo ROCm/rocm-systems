@@ -1598,6 +1598,10 @@ const char* rdc_diagnostic_result_string(rdc_diag_result_t result);
  *
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned for an unknown condition or action.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
+ *  @retval ::RDC_ST_NOT_SUPPORTED is returned if a GPU of the group cannot report
+ *  the retired pages that a ::RDC_POLICY_COND_MAX_PAGE_RETRIED condition needs.
  */
 rdc_status_t rdc_policy_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             rdc_policy_t policy);
@@ -1677,7 +1681,8 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
 /**
  *  @brief un-register a policy callback function for a conditioin.
  *
- *  @details Un-register the policy callback for a condition.
+ *  @details Un-register the policy callback for a condition. A check that is
+ *  already running may still call the callback once after this returns.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
