@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <array>
 #include <cassert>
+#include <cstddef>
 #include <cstdint>
 #include <cstring>
 #include <iostream>
@@ -1003,6 +1004,20 @@ struct AMDApuMetrics_v30_t {
   /* Metrics table alpha filter time constant [us] */
   uint32_t m_time_filter_alphavalue;
 };
+
+// The APU tables are a driver ABI: these mirror the kernel's gpu_metrics_v2_1
+// through v2_4 and v3_0. Pin the sizes the driver publishes to literals so a
+// field inserted or reordered here breaks the build, instead of silently
+// moving the readers and their tests together onto the wrong offsets.
+static_assert(offsetof(AMDApuMetrics_v24_t, m_indep_throttle_status) == 120,
+              "gpu_metrics_v2_1 is 120 bytes: the v2.1 table stops here");
+static_assert(offsetof(AMDApuMetrics_v24_t, m_average_temperature_gfx) == 128,
+              "gpu_metrics_v2_2 is 128 bytes: the v2.2 table stops here");
+static_assert(offsetof(AMDApuMetrics_v24_t, m_average_cpu_voltage) == 152,
+              "gpu_metrics_v2_3 is 152 bytes: the v2.3 table stops here");
+static_assert(sizeof(AMDApuMetrics_v24_t) == 168, "gpu_metrics_v2_4 is 168 bytes");
+static_assert(sizeof(AMDApuMetrics_v30_t) == 264, "gpu_metrics_v3_0 is 264 bytes");
+
 using AMGpuMetricsLatest_t = AMDGpuDynamicMetrics_t;
 
 /**
@@ -1569,7 +1584,13 @@ class GpuMetricsBase_v18_t final : public GpuMetricsBase_t {
  public:
   ~GpuMetricsBase_v18_t() = default;
 
-  size_t sizeof_metric_table() override { return sizeof(AMDGpuMetrics_v18_t); }
+  // v1.8 backs both the GPU table and the smaller partition table, so the size
+  // has to follow the same selection get_metrics_table() makes -- callers size
+  // their writes from here and would otherwise overrun the partition buffer.
+  size_t sizeof_metric_table() override {
+    return m_is_partition_metrics ? sizeof(AMDGpuMetrics_v18_Partition_v1_0_t)
+                                  : sizeof(AMDGpuMetrics_v18_t);
+  }
 
   GpuMetricTypePtr_t get_metrics_table() override {
     std::ostringstream ss;

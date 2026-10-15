@@ -49,6 +49,19 @@ TEST_F(CeAllReduceEligibilityTest, CeImplementedReturnsTrueForAllReduceOnSupport
     EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat32));
 }
 
+TEST_F(CeAllReduceEligibilityTest, CeImplementedRejectsFp8AllReduceOnly)
+{
+    if(!isCeRuntimeDriverSupported())
+        GTEST_SKIP() << "CE driver not in supported range";
+
+    EXPECT_FALSE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3));
+    EXPECT_FALSE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclFloat8e5m2));
+    EXPECT_FALSE(ncclCeAvailable(mockComm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat8e4m3,
+                                 ncclSymSendRegRecvReg, nullptr, nullptr));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAllReduce, ncclDevSum, ncclBfloat16));
+    EXPECT_TRUE(ncclCeImplemented(ncclFuncAllGather, ncclDevSum, ncclFloat8e4m3));
+}
+
 TEST_F(CeAllReduceEligibilityTest, CeAvailable_EligibleWithSymmetricSingleNode)
 {
     if(!isCeRuntimeDriverSupported())
