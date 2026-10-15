@@ -9,8 +9,8 @@
 #include "rocmwrap_fakes.h"
 
 #include "nccl.h"
-#include "rocmwrap.h"
 #include "nccl_fakes.h"  // g_loadParam
+#include "rocmwrap.h"
 
 ncclResult_t rocmLibraryInit(void) { return ncclSuccess; }
 
