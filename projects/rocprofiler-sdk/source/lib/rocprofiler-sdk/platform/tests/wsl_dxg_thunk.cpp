@@ -39,6 +39,8 @@
 #include <cstdlib>
 #include <cstring>
 #include <optional>
+#include <ostream>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -46,6 +48,8 @@ namespace
 {
 using rocprofiler::platform::wsl::DxgLoaderOps;
 using rocprofiler::platform::wsl::DxgThunk;
+using rocprofiler::platform::wsl::kLibRocdxgUnversionedName;
+using rocprofiler::platform::wsl::kLibRocdxgVersionedName;
 using rocprofiler::platform::wsl::read_dxg_gpu_topology;
 using rocprofiler::platform::wsl::resolve_dxg_thunk;
 
@@ -72,7 +76,7 @@ public:
             ::unsetenv("ROCPROFILER_REGISTER_TOOL_ATTACHED");
     }
 
-    ToolAttachedEnv(const ToolAttachedEnv&) = delete;
+    ToolAttachedEnv(const ToolAttachedEnv&)            = delete;
     ToolAttachedEnv& operator=(const ToolAttachedEnv&) = delete;
 
 private:
@@ -127,7 +131,7 @@ struct FakeThunk
     FakeThunk() { g_state = &state; }
     ~FakeThunk() { g_state = nullptr; }
 
-    FakeThunk(const FakeThunk&) = delete;
+    FakeThunk(const FakeThunk&)            = delete;
     FakeThunk& operator=(const FakeThunk&) = delete;
 
     static HSAKMT_STATUS OpenKfd()
@@ -215,30 +219,51 @@ struct FakeThunk
     }
 };
 
-// A fake dynamic loader. Records the flags of every open so the
-// RTLD_NOLOAD-then-plain-dlopen order can be checked, records every symbol
-// asked for so the resolved set can be pinned exactly, and counts closes.
+const std::string kVersioned   = kLibRocdxgVersionedName;
+const std::string kUnversioned = kLibRocdxgUnversionedName;
+const std::string kHsaDir      = "/fake/rocm/lib/";
+
+// One dlopen as the fake loader saw it.
+struct OpenCall
+{
+    std::string name;
+    bool        noload;
+
+    bool operator==(const OpenCall& rhs) const { return name == rhs.name && noload == rhs.noload; }
+};
+
+std::ostream&
+operator<<(std::ostream& os, const OpenCall& call)
+{
+    return os << (call.noload ? "noload:" : "load:") << call.name;
+}
+
+// A fake dynamic loader. `resident` is what RTLD_NOLOAD finds and `loadable`
+// is what a real open finds, both keyed by the exact name passed to dlopen, so
+// the candidate order can be pinned. Records every symbol asked for so the
+// resolved set can be pinned exactly, and counts closes.
 struct FakeLoader
 {
-    std::vector<int>         open_flags;
+    std::vector<OpenCall>    opens;
     std::vector<std::string> requested_symbols;
-    int                      close_count      = 0;
-    bool                     noload_finds_it  = true;
-    bool                     plain_open_works = true;
-    std::string              missing_symbol   = {};
-    void*                    handle           = reinterpret_cast<void*>(0xd06);
+    int                      close_count    = 0;
+    std::set<std::string>    resident       = {kVersioned, kUnversioned};
+    std::set<std::string>    loadable       = {};
+    std::string              hsa_dir        = kHsaDir;
+    std::string              missing_symbol = {};
+    void*                    handle         = reinterpret_cast<void*>(0xd06);
 
     DxgLoaderOps ops()
     {
         auto out = DxgLoaderOps{};
-        out.open = [this](const char*, int flags) -> void* {
-            open_flags.emplace_back(flags);
+        out.open = [this](const char* name, int flags) -> void* {
             const bool is_noload = (flags & RTLD_NOLOAD) != 0;
-            if(is_noload && !noload_finds_it) return nullptr;
-            if(!is_noload && !plain_open_works) return nullptr;
-            return handle;
+            opens.emplace_back(OpenCall{name, is_noload});
+            const auto& found = is_noload ? resident : loadable;
+            return found.count(name) != 0 ? handle : nullptr;
         };
-        out.sym = [this](void*, const char* name) -> void* {
+        out.hsa_runtime_dir = [this]() { return hsa_dir; };
+        out.sym             = [this](void*, const char* name) -> void* {
             requested_symbols.emplace_back(name);
             if(missing_symbol == name) return nullptr;
             if(std::strcmp(name, "hsaKmtOpenKFD") == 0)
@@ -312,7 +337,7 @@ TEST(wsl_dxg_thunk, explicit_late_attach_never_loads_or_calls_the_thunk)
     fake.publish_gpu_nodes(2);
 
     EXPECT_TRUE(read_dxg_gpu_topology(loader.ops()).empty());
-    EXPECT_TRUE(loader.open_flags.empty()) << "late attach must be rejected before dlopen";
+    EXPECT_TRUE(loader.opens.empty()) << "late attach must be rejected before dlopen";
     EXPECT_TRUE(loader.requested_symbols.empty());
     EXPECT_EQ(loader.close_count, 0);
     EXPECT_TRUE(fake.state.calls.empty());
@@ -544,10 +569,25 @@ TEST(wsl_dxg_thunk, a_thunk_agreeing_on_the_record_size_is_read)
 
 // --- the loader ------------------------------------------------------------
 
-// The normal case during a profiling run: the HSA runtime already loaded the
-// thunk, RTLD_NOLOAD finds it, and the reference taken is given back.
-TEST(wsl_dxg_thunk, an_already_resident_library_is_reused_and_released)
+// The versioned name is the one the HSA runtime asks for first, and it carries
+// the major of the hsakmt rocdxg_version.h this build compiled against.
+TEST(wsl_dxg_thunk, the_versioned_name_comes_from_rocdxg_version_h)
 {
+    EXPECT_EQ(kUnversioned, "librocdxg.so");
+#if defined(ROCDXG_LIB_VERSION_MAJOR)
+    EXPECT_EQ(kVersioned, "librocdxg.so." + std::to_string(ROCDXG_LIB_VERSION_MAJOR));
+#else
+    EXPECT_TRUE(kVersioned.empty()) << "no rocdxg_version.h, so no major to version with";
+#endif
+}
+
+// The normal case during a profiling run: the HSA runtime already loaded the
+// thunk under its versioned soname, RTLD_NOLOAD finds it, and the reference
+// taken is given back.
+TEST(wsl_dxg_thunk, a_resident_versioned_library_is_reused_and_released)
+{
+    if(kVersioned.empty()) GTEST_SKIP() << "built against headers without rocdxg_version.h";
+
     auto fake   = FakeThunk{};
     auto loader = FakeLoader{};
     fake.publish_gpu_nodes(1);
@@ -555,42 +595,151 @@ TEST(wsl_dxg_thunk, an_already_resident_library_is_reused_and_released)
     const auto nodes = read_dxg_gpu_topology(loader.ops());
 
     EXPECT_EQ(nodes.size(), 1);
-    ASSERT_EQ(loader.open_flags.size(), 1);
-    EXPECT_TRUE((loader.open_flags.front() & RTLD_NOLOAD) != 0)
+    EXPECT_EQ(loader.opens, (std::vector<OpenCall>{{kVersioned, true}}))
         << "the resident copy must be looked for before a fresh load";
     EXPECT_EQ(loader.close_count, 1);
 }
 
-// A pre-HSA consumer - rocprofv3-avail, tool initialization - is the first to
-// touch the library, so RTLD_NOLOAD misses and a real load follows.
-TEST(wsl_dxg_thunk, a_cold_process_falls_through_to_a_real_load)
+// A development install where the HSA runtime fell back to the unversioned
+// name. That copy is reused, and nothing is loaded - in particular not a
+// versioned copy that would be a second, different librocdxg in the process.
+TEST(wsl_dxg_thunk, a_resident_unversioned_library_is_reused_before_anything_is_loaded)
 {
-    auto fake              = FakeThunk{};
-    auto loader            = FakeLoader{};
-    loader.noload_finds_it = false;
+    auto fake       = FakeThunk{};
+    auto loader     = FakeLoader{};
+    loader.resident = {kUnversioned};
+    loader.loadable = {kVersioned, kHsaDir + kVersioned};
     fake.publish_gpu_nodes(1);
 
     const auto nodes = read_dxg_gpu_topology(loader.ops());
 
     EXPECT_EQ(nodes.size(), 1);
-    ASSERT_EQ(loader.open_flags.size(), 2);
-    EXPECT_TRUE((loader.open_flags.at(0) & RTLD_NOLOAD) != 0);
-    EXPECT_TRUE((loader.open_flags.at(1) & RTLD_NOLOAD) == 0);
+    for(const auto& call : loader.opens)
+        EXPECT_TRUE(call.noload) << "nothing may be loaded while a copy is resident: " << call;
+    EXPECT_EQ(loader.opens.back(), (OpenCall{kUnversioned, true}));
     EXPECT_EQ(loader.close_count, 1);
 }
 
-// No thunk at all: nothing was opened, so nothing is closed, and it is not
-// fatal.
-TEST(wsl_dxg_thunk, a_missing_library_closes_nothing)
+// A pre-HSA consumer - rocprofv3-avail, tool initialization - is the first to
+// touch the library, so RTLD_NOLOAD misses and the versioned name is loaded
+// through the ordinary search, before anything else is tried.
+TEST(wsl_dxg_thunk, a_cold_process_loads_the_versioned_name_first)
 {
-    auto fake               = FakeThunk{};
-    auto loader             = FakeLoader{};
-    loader.noload_finds_it  = false;
-    loader.plain_open_works = false;
+    if(kVersioned.empty()) GTEST_SKIP() << "built against headers without rocdxg_version.h";
+
+    auto fake       = FakeThunk{};
+    auto loader     = FakeLoader{};
+    loader.resident = {};
+    loader.loadable = {kVersioned, kHsaDir + kVersioned, kUnversioned};
+    fake.publish_gpu_nodes(1);
 
     const auto nodes = read_dxg_gpu_topology(loader.ops());
 
+    EXPECT_EQ(nodes.size(), 1);
+    EXPECT_EQ(
+        loader.opens,
+        (std::vector<OpenCall>{{kVersioned, true}, {kUnversioned, true}, {kVersioned, false}}));
+    EXPECT_EQ(loader.close_count, 1);
+}
+
+// The packaged layout: only librocdxg.so.<major> is shipped, beside
+// libhsa-runtime64, in a directory the ordinary search does not cover. It is
+// found there, as the HSA runtime finds it, and before the unversioned name.
+TEST(wsl_dxg_thunk, a_versioned_only_package_is_found_beside_libhsa_runtime64)
+{
+    if(kVersioned.empty()) GTEST_SKIP() << "built against headers without rocdxg_version.h";
+
+    auto fake       = FakeThunk{};
+    auto loader     = FakeLoader{};
+    loader.resident = {};
+    loader.loadable = {kHsaDir + kVersioned, kUnversioned};
+    fake.publish_gpu_nodes(1);
+
+    const auto nodes = read_dxg_gpu_topology(loader.ops());
+
+    EXPECT_EQ(nodes.size(), 1);
+    EXPECT_EQ(loader.opens,
+              (std::vector<OpenCall>{{kVersioned, true},
+                                     {kUnversioned, true},
+                                     {kVersioned, false},
+                                     {kHsaDir + kVersioned, false}}));
+    EXPECT_EQ(loader.close_count, 1);
+}
+
+// A thunk that ships only the unversioned development name still loads, once
+// every versioned candidate has been tried.
+TEST(wsl_dxg_thunk, an_unversioned_only_install_is_still_loaded)
+{
+    auto fake       = FakeThunk{};
+    auto loader     = FakeLoader{};
+    loader.resident = {};
+    loader.loadable = {kUnversioned};
+    fake.publish_gpu_nodes(1);
+
+    const auto nodes = read_dxg_gpu_topology(loader.ops());
+
+    EXPECT_EQ(nodes.size(), 1);
+    ASSERT_FALSE(loader.opens.empty());
+    EXPECT_EQ(loader.opens.back(), (OpenCall{kUnversioned, false}));
+    EXPECT_EQ(loader.close_count, 1);
+}
+
+// The same, with the unversioned name only beside libhsa-runtime64.
+TEST(wsl_dxg_thunk, an_unversioned_library_beside_libhsa_runtime64_is_the_last_resort)
+{
+    auto fake       = FakeThunk{};
+    auto loader     = FakeLoader{};
+    loader.resident = {};
+    loader.loadable = {kHsaDir + kUnversioned};
+    fake.publish_gpu_nodes(1);
+
+    const auto nodes = read_dxg_gpu_topology(loader.ops());
+
+    EXPECT_EQ(nodes.size(), 1);
+    ASSERT_FALSE(loader.opens.empty());
+    EXPECT_EQ(loader.opens.back(), (OpenCall{kHsaDir + kUnversioned, false}));
+    EXPECT_EQ(loader.close_count, 1);
+}
+
+// No thunk at all: every candidate is tried once in the HSA runtime's order,
+// nothing was opened, so nothing is closed, and it is not fatal.
+TEST(wsl_dxg_thunk, a_missing_library_tries_every_candidate_and_closes_nothing)
+{
+    auto fake       = FakeThunk{};
+    auto loader     = FakeLoader{};
+    loader.resident = {};
+
+    const auto nodes = read_dxg_gpu_topology(loader.ops());
+
+    auto expected = std::vector<OpenCall>{};
+    if(!kVersioned.empty()) expected.push_back({kVersioned, true});
+    expected.push_back({kUnversioned, true});
+    if(!kVersioned.empty())
+    {
+        expected.push_back({kVersioned, false});
+        expected.push_back({kHsaDir + kVersioned, false});
+    }
+    expected.push_back({kUnversioned, false});
+    expected.push_back({kHsaDir + kUnversioned, false});
+
     EXPECT_TRUE(nodes.empty());
+    EXPECT_EQ(loader.opens, expected);
+    EXPECT_EQ(loader.close_count, 0);
+    EXPECT_TRUE(fake.state.calls.empty());
+}
+
+// With no libhsa-runtime64 mapped there is no directory to search beside, so
+// only the bare names are tried rather than a path relative to nothing.
+TEST(wsl_dxg_thunk, without_libhsa_runtime64_only_the_bare_names_are_tried)
+{
+    auto fake       = FakeThunk{};
+    auto loader     = FakeLoader{};
+    loader.resident = {};
+    loader.hsa_dir  = {};
+
+    EXPECT_TRUE(read_dxg_gpu_topology(loader.ops()).empty());
+    for(const auto& call : loader.opens)
+        EXPECT_TRUE(call.name == kVersioned || call.name == kUnversioned) << call;
     EXPECT_EQ(loader.close_count, 0);
     EXPECT_TRUE(fake.state.calls.empty());
 }
