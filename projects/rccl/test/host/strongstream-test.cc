@@ -303,7 +303,7 @@ class StrongstreamMicrotest : public ::testing::Test {
     return work;
   }
 
-  ncclStrongStream ss;
+  ncclStrongStream ss_;
 };
 
 // Context tracking
@@ -496,45 +496,45 @@ TEST_F(StrongstreamMicrotest, GraphAddDestructor_HipFailuresPropagate) {
     FailNext(fn);
     EXPECT_EQ(ncclCudaGraphAddDestructor(Captured(1), DestructorFn, nullptr), ncclUnhandledCudaError);
   }
-  EXPECT_EQ(Count("hipGraphRetainUserObject"), 1);  // not reached when create fails
+  EXPECT_EQ(Count("hipGraphRetainUserObject"), 1);
 }
 
 // Construct / destruct / synchronize
 
 TEST_F(StrongstreamMicrotest, Construct_CreatesANonBlockingStreamAndAnUntimedEvent) {
-  ss.everCaptured = true;
-  ss.graphOriginCaptured = true;
-  ss.captureHead = reinterpret_cast<ncclStrongStreamCapture*>(0x1);
-  ASSERT_EQ(ncclStrongStreamConstruct(&ss), ncclSuccess);
+  ss_.everCaptured = true;
+  ss_.graphOriginCaptured = true;
+  ss_.captureHead = reinterpret_cast<ncclStrongStreamCapture*>(0x1);
+  ASSERT_EQ(ncclStrongStreamConstruct(&ss_), ncclSuccess);
   auto streams = CallsTo("hipStreamCreateWithFlags");
   ASSERT_EQ(streams.size(), 1u);
   EXPECT_EQ(streams[0].flags, (uint64_t)hipStreamNonBlocking);
-  EXPECT_EQ(ss.liveStream, streams[0].a);
+  EXPECT_EQ(ss_.liveStream, streams[0].a);
   auto events = CallsTo("hipEventCreateWithFlags");
   ASSERT_EQ(events.size(), 1u);
   EXPECT_EQ(events[0].flags, (uint64_t)hipEventDisableTiming);
-  EXPECT_EQ(ss.serialEvent, events[0].a);
-  EXPECT_FALSE(ss.everCaptured);
-  EXPECT_FALSE(ss.graphOriginCaptured);
-  EXPECT_EQ(ss.captureHead, nullptr);
-  ASSERT_EQ(ncclStrongStreamDestruct(&ss), ncclSuccess);
+  EXPECT_EQ(ss_.serialEvent, events[0].a);
+  EXPECT_FALSE(ss_.everCaptured);
+  EXPECT_FALSE(ss_.graphOriginCaptured);
+  EXPECT_EQ(ss_.captureHead, nullptr);
+  ASSERT_EQ(ncclStrongStreamDestruct(&ss_), ncclSuccess);
 }
 
 TEST_F(StrongstreamMicrotest, Construct_HipFailuresPropagate) {
   FailNext("hipStreamCreateWithFlags");
-  EXPECT_EQ(ncclStrongStreamConstruct(&ss), ncclUnhandledCudaError);
+  EXPECT_EQ(ncclStrongStreamConstruct(&ss_), ncclUnhandledCudaError);
   EXPECT_EQ(Count("hipEventCreateWithFlags"), 0);
   FailNext("hipEventCreateWithFlags");
-  EXPECT_EQ(ncclStrongStreamConstruct(&ss), ncclUnhandledCudaError);
+  EXPECT_EQ(ncclStrongStreamConstruct(&ss_), ncclUnhandledCudaError);
 }
 
 TEST_F(StrongstreamMicrotest, Destruct_ReleasesEveryCaptureStream) {
-  Construct(&ss);
-  AcquireCapture(&ss, 1);
-  AcquireCapture(&ss, 2);
+  Construct(&ss_);
+  AcquireCapture(&ss_, 1);
+  AcquireCapture(&ss_, 2);
   ASSERT_EQ(g_liveStreams.size(), 3u);
   g_frees = 0;
-  ASSERT_EQ(ncclStrongStreamDestruct(&ss), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamDestruct(&ss_), ncclSuccess);
   EXPECT_TRUE(g_liveStreams.empty());
   EXPECT_TRUE(g_liveEvents.empty());
   EXPECT_EQ(g_frees, 2);
@@ -543,130 +543,130 @@ TEST_F(StrongstreamMicrotest, Destruct_ReleasesEveryCaptureStream) {
 TEST_F(StrongstreamMicrotest, Destruct_HipFailuresPropagate) {
   for (int failing : {1, 2}) {  // live stream, then the capture stream
     SCOPED_TRACE(failing);
-    Construct(&ss);
-    AcquireCapture(&ss, 1);
+    Construct(&ss_);
+    AcquireCapture(&ss_, 1);
     g_calls.clear();
     FailNext("hipStreamDestroy", failing);
-    EXPECT_EQ(ncclStrongStreamDestruct(&ss), ncclUnhandledCudaError);
+    EXPECT_EQ(ncclStrongStreamDestruct(&ss_), ncclUnhandledCudaError);
     EXPECT_EQ(Count("hipEventDestroy"), 0);
     g_failAt.clear();
   }
-  Construct(&ss);
+  Construct(&ss_);
   FailNext("hipEventDestroy");
-  EXPECT_EQ(ncclStrongStreamDestruct(&ss), ncclUnhandledCudaError);
+  EXPECT_EQ(ncclStrongStreamDestruct(&ss_), ncclUnhandledCudaError);
 }
 
 TEST_F(StrongstreamMicrotest, Synchronize_WaitsOnSerialEventThenSyncsTheLiveStream) {
-  Construct(&ss);
-  ASSERT_EQ(ncclStrongStreamSynchronize(&ss), ncclSuccess);
+  Construct(&ss_);
+  ASSERT_EQ(ncclStrongStreamSynchronize(&ss_), ncclSuccess);
   ASSERT_EQ(g_calls.size(), 2u);
   EXPECT_EQ(g_calls[0].fn, "hipStreamWaitEvent");
-  EXPECT_EQ(g_calls[0].a, ss.liveStream);
-  EXPECT_EQ(g_calls[0].b, ss.serialEvent);
+  EXPECT_EQ(g_calls[0].a, ss_.liveStream);
+  EXPECT_EQ(g_calls[0].b, ss_.serialEvent);
   EXPECT_EQ(g_calls[1].fn, "hipStreamSynchronize");
-  EXPECT_EQ(g_calls[1].a, ss.liveStream);
+  EXPECT_EQ(g_calls[1].a, ss_.liveStream);
 
   FailNext("hipStreamWaitEvent");
-  EXPECT_EQ(ncclStrongStreamSynchronize(&ss), ncclUnhandledCudaError);
+  EXPECT_EQ(ncclStrongStreamSynchronize(&ss_), ncclUnhandledCudaError);
   FailNext("hipStreamSynchronize");
-  EXPECT_EQ(ncclStrongStreamSynchronize(&ss), ncclUnhandledCudaError);
-  ncclStrongStreamDestruct(&ss);
+  EXPECT_EQ(ncclStrongStreamSynchronize(&ss_), ncclUnhandledCudaError);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // Acquire / release of live work
 
 TEST_F(StrongstreamMicrotest, AcquireLive_ReturnsTheLiveStream) {
-  Construct(&ss);
+  Construct(&ss_);
   hipStream_t work = nullptr;
-  ASSERT_EQ(ncclStrongStreamAcquire(Live(), &ss, false, &work), ncclSuccess);
-  EXPECT_EQ(work, ss.liveStream);
-  EXPECT_EQ(ss.liveAcquiredBy, localThreadId());
+  ASSERT_EQ(ncclStrongStreamAcquire(Live(), &ss_, false, &work), ncclSuccess);
+  EXPECT_EQ(work, ss_.liveStream);
+  EXPECT_EQ(ss_.liveAcquiredBy, localThreadId());
   EXPECT_TRUE(g_calls.empty());  // never captured: nothing to order against
-  ASSERT_EQ(ncclStrongStreamAcquiredWorkStream(Live(), &ss, false, &work), ncclSuccess);
-  EXPECT_EQ(work, ss.liveStream);
-  ncclStrongStreamDestruct(&ss);
+  ASSERT_EQ(ncclStrongStreamAcquiredWorkStream(Live(), &ss_, false, &work), ncclSuccess);
+  EXPECT_EQ(work, ss_.liveStream);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // Once a graph has captured the stream, live work in mixing mode is ordered after it.
 TEST_F(StrongstreamMicrotest, AcquireLive_AfterACaptureWaitsOnTheSerialEventWhenMixing) {
-  Construct(&ss);
-  ss.everCaptured = true;
+  Construct(&ss_);
+  ss_.everCaptured = true;
   hipStream_t work = nullptr;
-  ASSERT_EQ(ncclStrongStreamAcquire(Live(2), &ss, false, &work), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamAcquire(Live(2), &ss_, false, &work), ncclSuccess);
   auto waits = CallsTo("hipStreamWaitEvent");
   ASSERT_EQ(waits.size(), 1u);
-  EXPECT_EQ(waits[0].a, ss.liveStream);
-  EXPECT_EQ(waits[0].b, ss.serialEvent);
+  EXPECT_EQ(waits[0].a, ss_.liveStream);
+  EXPECT_EQ(waits[0].b, ss_.serialEvent);
 
   g_calls.clear();
-  ASSERT_EQ(ncclStrongStreamAcquire(Live(1), &ss, false, &work), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamAcquire(Live(1), &ss_, false, &work), ncclSuccess);
   EXPECT_TRUE(g_calls.empty());
 
   FailNext("hipStreamWaitEvent");
-  EXPECT_EQ(ncclStrongStreamAcquire(Live(2), &ss, false, &work), ncclUnhandledCudaError);
-  ncclStrongStreamDestruct(&ss);
+  EXPECT_EQ(ncclStrongStreamAcquire(Live(2), &ss_, false, &work), ncclUnhandledCudaError);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, ReleaseLive_RecordsTheSerialEventOnlyAfterACapture) {
-  Construct(&ss);
+  Construct(&ss_);
   hipStream_t work = nullptr;
-  ASSERT_EQ(ncclStrongStreamAcquire(Live(), &ss, false, &work), ncclSuccess);
-  ASSERT_EQ(ncclStrongStreamRelease(Live(), &ss, false), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamAcquire(Live(), &ss_, false, &work), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamRelease(Live(), &ss_, false), ncclSuccess);
   EXPECT_TRUE(g_calls.empty());
 
-  ss.everCaptured = true;
-  ASSERT_EQ(ncclStrongStreamRelease(Live(), &ss, false), ncclSuccess);
+  ss_.everCaptured = true;
+  ASSERT_EQ(ncclStrongStreamRelease(Live(), &ss_, false), ncclSuccess);
   auto records = CallsTo("hipEventRecord");
   ASSERT_EQ(records.size(), 1u);
-  EXPECT_EQ(records[0].a, ss.serialEvent);
-  EXPECT_EQ(records[0].b, ss.liveStream);
+  EXPECT_EQ(records[0].a, ss_.serialEvent);
+  EXPECT_EQ(records[0].b, ss_.liveStream);
 
   FailNext("hipEventRecord");
-  EXPECT_EQ(ncclStrongStreamRelease(Live(), &ss, false), ncclUnhandledCudaError);
-  ncclStrongStreamDestruct(&ss);
+  EXPECT_EQ(ncclStrongStreamRelease(Live(), &ss_, false), ncclUnhandledCudaError);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, Release_WithoutMixingDoesNothing) {
-  Construct(&ss);
-  ss.everCaptured = true;
-  ss.liveAcquiredBy = nullptr;  // would be a race in mixing mode
-  EXPECT_EQ(ncclStrongStreamRelease(Live(1), &ss, false), ncclSuccess);
-  EXPECT_EQ(ncclStrongStreamRelease(Captured(4, 0), &ss, false), ncclSuccess);
+  Construct(&ss_);
+  ss_.everCaptured = true;
+  ss_.liveAcquiredBy = nullptr;  // would be a race in mixing mode
+  EXPECT_EQ(ncclStrongStreamRelease(Live(1), &ss_, false), ncclSuccess);
+  EXPECT_EQ(ncclStrongStreamRelease(Captured(4, 0), &ss_, false), ncclSuccess);
   EXPECT_TRUE(g_calls.empty());
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // Release from a thread other than the acquirer is fatal by default (NCCL_LAUNCH_RACE_FATAL=1).
 TEST_F(StrongstreamMicrotest, ReleaseLive_FromAnotherThreadIsALaunchRace) {
-  Construct(&ss);
+  Construct(&ss_);
   std::thread([&] {
     hipStream_t work;
-    ASSERT_EQ(ncclStrongStreamAcquire(Live(), &ss, false, &work), ncclSuccess);
+    ASSERT_EQ(ncclStrongStreamAcquire(Live(), &ss_, false, &work), ncclSuccess);
   }).join();
-  EXPECT_EQ(ncclStrongStreamRelease(Live(), &ss, false), ncclInvalidUsage);
+  EXPECT_EQ(ncclStrongStreamRelease(Live(), &ss_, false), ncclInvalidUsage);
   EXPECT_TRUE(Logged(NCCL_LOG_ERROR, "host threads racing to launch NCCL on same device"));
   EXPECT_EQ(g_paramEnv, "NCCL_LAUNCH_RACE_FATAL");
   EXPECT_EQ(g_paramDefault, 1);
 
   g_raceFatalSet = true;
   g_raceFatal = 0;
-  EXPECT_EQ(ncclStrongStreamRelease(Live(), &ss, false), ncclSuccess);
-  ncclStrongStreamDestruct(&ss);
+  EXPECT_EQ(ncclStrongStreamRelease(Live(), &ss_, false), ncclSuccess);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // Acquire / release of captured work
 
 TEST_F(StrongstreamMicrotest, AcquireCapture_JoinsTheGraphOnANewCaptureStream) {
-  Construct(&ss);
+  Construct(&ss_);
   hipStream_t work = nullptr;
-  ASSERT_EQ(ncclStrongStreamAcquire(Captured(7), &ss, false, &work), ncclSuccess);
-  EXPECT_TRUE(ss.everCaptured);
-  ASSERT_NE(ss.captureHead, nullptr);
-  EXPECT_EQ(ss.captureHead->graphId, 7u);
-  EXPECT_EQ(ss.captureHead->captureStream, work);
-  EXPECT_EQ(ss.captureHead->acquiredBy, localThreadId());
-  EXPECT_EQ(ss.captureHead->next, nullptr);
-  EXPECT_NE(work, ss.liveStream);
+  ASSERT_EQ(ncclStrongStreamAcquire(Captured(7), &ss_, false, &work), ncclSuccess);
+  EXPECT_TRUE(ss_.everCaptured);
+  ASSERT_NE(ss_.captureHead, nullptr);
+  EXPECT_EQ(ss_.captureHead->graphId, 7u);
+  EXPECT_EQ(ss_.captureHead->captureStream, work);
+  EXPECT_EQ(ss_.captureHead->acquiredBy, localThreadId());
+  EXPECT_EQ(ss_.captureHead->next, nullptr);
+  EXPECT_NE(work, ss_.liveStream);
 
   // The capture stream enters the graph via an event recorded on the origin, then drops that
   // dependency; on first capture the live stream's position is published and waited on.
@@ -689,134 +689,134 @@ TEST_F(StrongstreamMicrotest, AcquireCapture_JoinsTheGraphOnANewCaptureStream) {
   EXPECT_EQ(g_calls[5].n, 0u);
   EXPECT_EQ(g_calls[5].flags, (uint64_t)hipStreamSetCaptureDependencies);
   EXPECT_EQ(g_calls[6].fn, "hipEventRecord");
-  EXPECT_EQ(g_calls[6].a, ss.serialEvent);
-  EXPECT_EQ(g_calls[6].b, ss.liveStream);
+  EXPECT_EQ(g_calls[6].a, ss_.serialEvent);
+  EXPECT_EQ(g_calls[6].b, ss_.liveStream);
   EXPECT_EQ(g_calls[7].fn, "hipStreamWaitEvent");
   EXPECT_EQ(g_calls[7].a, work);
-  EXPECT_EQ(g_calls[7].b, ss.serialEvent);
-  ncclStrongStreamDestruct(&ss);
+  EXPECT_EQ(g_calls[7].b, ss_.serialEvent);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, AcquireCapture_SerialEventIsPublishedOnlyOnTheFirstCapture) {
-  Construct(&ss);
-  AcquireCapture(&ss, 1);
+  Construct(&ss_);
+  AcquireCapture(&ss_, 1);
   g_calls.clear();
-  AcquireCapture(&ss, 2);
+  AcquireCapture(&ss_, 2);
   auto records = CallsTo("hipEventRecord");
-  ASSERT_EQ(records.size(), 1u);  // just the scratch event
-  EXPECT_NE(records[0].a, ss.serialEvent);
-  EXPECT_EQ(CallsTo("hipStreamWaitEvent").back().b, ss.serialEvent);
-  ncclStrongStreamDestruct(&ss);
+  ASSERT_EQ(records.size(), 1u);
+  EXPECT_NE(records[0].a, ss_.serialEvent);
+  EXPECT_EQ(CallsTo("hipStreamWaitEvent").back().b, ss_.serialEvent);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, AcquireCapture_WithoutMixingSkipsTheSerialEvent) {
-  Construct(&ss);
-  AcquireCapture(&ss, 1, /*mode=*/1);
-  EXPECT_TRUE(ss.everCaptured);
+  Construct(&ss_);
+  AcquireCapture(&ss_, 1, /*mode=*/1);
+  EXPECT_TRUE(ss_.everCaptured);
   for (const auto& c : g_calls) {
-    EXPECT_NE(c.a, ss.serialEvent) << c.fn;
-    EXPECT_NE(c.b, ss.serialEvent) << c.fn;
+    EXPECT_NE(c.a, ss_.serialEvent) << c.fn;
+    EXPECT_NE(c.b, ss_.serialEvent) << c.fn;
   }
   EXPECT_EQ(Count("hipEventRecord"), 1);
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, AcquireCapture_SameGraphReusesItsCaptureStream) {
-  Construct(&ss);
-  hipStream_t first = AcquireCapture(&ss, 1);
-  hipStream_t second = AcquireCapture(&ss, 2);
+  Construct(&ss_);
+  hipStream_t first = AcquireCapture(&ss_, 1);
+  hipStream_t second = AcquireCapture(&ss_, 2);
   g_calls.clear();
 
   hipStream_t work = nullptr;
-  std::thread([&] { ASSERT_EQ(ncclStrongStreamAcquire(Captured(1), &ss, false, &work), ncclSuccess); }).join();
+  std::thread([&] { ASSERT_EQ(ncclStrongStreamAcquire(Captured(1), &ss_, false, &work), ncclSuccess); }).join();
   EXPECT_EQ(work, first);
-  EXPECT_EQ(ss.captureHead->captureStream, second);  // newest first
-  EXPECT_NE(ss.captureHead->next->acquiredBy, localThreadId());  // re-acquired by the other thread
-  EXPECT_EQ(CallsTo("hipStreamIsCapturing").size(), 1u);  // graph 2 is checked on the way
+  EXPECT_EQ(ss_.captureHead->captureStream, second);
+  EXPECT_NE(ss_.captureHead->next->acquiredBy, localThreadId());  // re-acquired by the other thread
+  EXPECT_EQ(CallsTo("hipStreamIsCapturing").size(), 1u);
   EXPECT_EQ(Count("hipStreamCreateWithFlags"), 0);
 
-  ASSERT_EQ(ncclStrongStreamAcquiredWorkStream(Captured(1), &ss, false, &work), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamAcquiredWorkStream(Captured(1), &ss_, false, &work), ncclSuccess);
   EXPECT_EQ(work, first);
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // Entries whose capture ended are dropped; one is kept as a spare for the new graph.
 TEST_F(StrongstreamMicrotest, AcquireCapture_EndedCapturesAreRecycled) {
-  Construct(&ss);
-  hipStream_t a = AcquireCapture(&ss, 1);
-  hipStream_t b = AcquireCapture(&ss, 2);
-  hipStream_t c = AcquireCapture(&ss, 3);
+  Construct(&ss_);
+  hipStream_t a = AcquireCapture(&ss_, 1);
+  hipStream_t b = AcquireCapture(&ss_, 2);
+  hipStream_t c = AcquireCapture(&ss_, 3);
   g_capture[c].status = hipStreamCaptureStatusNone;
   g_capture[a].status = hipStreamCaptureStatusInvalidated;
   g_calls.clear();
   g_frees = 0;
 
   hipStream_t work = nullptr;
-  ASSERT_EQ(ncclStrongStreamAcquire(Captured(4), &ss, false, &work), ncclSuccess);
-  EXPECT_EQ(work, c);  // the first ended entry is reused
+  ASSERT_EQ(ncclStrongStreamAcquire(Captured(4), &ss_, false, &work), ncclSuccess);
+  EXPECT_EQ(work, c);
   EXPECT_EQ(Count("hipStreamCreateWithFlags"), 0);
   auto destroyed = CallsTo("hipStreamDestroy");
   ASSERT_EQ(destroyed.size(), 1u);
   EXPECT_EQ(destroyed[0].a, a);
   EXPECT_EQ(g_frees, 1);
 
-  ASSERT_EQ(ss.captureHead->graphId, 4u);
-  ASSERT_EQ(ss.captureHead->next->graphId, 2u);
-  EXPECT_EQ(ss.captureHead->next->captureStream, b);
-  EXPECT_EQ(ss.captureHead->next->next, nullptr);
-  ncclStrongStreamDestruct(&ss);
+  ASSERT_EQ(ss_.captureHead->graphId, 4u);
+  ASSERT_EQ(ss_.captureHead->next->graphId, 2u);
+  EXPECT_EQ(ss_.captureHead->next->captureStream, b);
+  EXPECT_EQ(ss_.captureHead->next->next, nullptr);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // A failed destroy of a surplus ended capture is only logged.
 TEST_F(StrongstreamMicrotest, AcquireCapture_DestroyFailureOfAnEndedCaptureIsIgnored) {
-  Construct(&ss);
-  hipStream_t a = AcquireCapture(&ss, 1);
-  hipStream_t b = AcquireCapture(&ss, 2);
+  Construct(&ss_);
+  hipStream_t a = AcquireCapture(&ss_, 1);
+  hipStream_t b = AcquireCapture(&ss_, 2);
   g_capture[a].status = hipStreamCaptureStatusNone;
   g_capture[b].status = hipStreamCaptureStatusNone;
   FailNext("hipStreamDestroy");
   hipStream_t work = nullptr;
-  ASSERT_EQ(ncclStrongStreamAcquire(Captured(3), &ss, false, &work), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamAcquire(Captured(3), &ss_, false, &work), ncclSuccess);
   EXPECT_EQ(work, b);
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Cuda failure"));
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, AcquireCapture_CaptureQueryFailureLeavesTheListAlone) {
-  Construct(&ss);
-  AcquireCapture(&ss, 1);
-  ncclStrongStreamCapture* head = ss.captureHead;
+  Construct(&ss_);
+  AcquireCapture(&ss_, 1);
+  ncclStrongStreamCapture* head = ss_.captureHead;
   FailNext("hipStreamIsCapturing");
   hipStream_t work = nullptr;
-  EXPECT_EQ(ncclStrongStreamAcquire(Captured(2), &ss, true, &work), ncclUnhandledCudaError);
+  EXPECT_EQ(ncclStrongStreamAcquire(Captured(2), &ss_, true, &work), ncclUnhandledCudaError);
   EXPECT_EQ(work, nullptr);
-  EXPECT_EQ(ss.captureHead, head);
-  EXPECT_FALSE(HeldElsewhere(ss.mutex));
-  ncclStrongStreamDestruct(&ss);
+  EXPECT_EQ(ss_.captureHead, head);
+  EXPECT_FALSE(HeldElsewhere(ss_.mutex));
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, AcquireCapture_AllocationFailureIsASystemError) {
-  Construct(&ss);
+  Construct(&ss_);
   g_failCalloc = true;
   hipStream_t work = nullptr;
-  EXPECT_EQ(ncclStrongStreamAcquire(Captured(1), &ss, true, &work), ncclSystemError);
-  EXPECT_EQ(ss.captureHead, nullptr);
+  EXPECT_EQ(ncclStrongStreamAcquire(Captured(1), &ss_, true, &work), ncclSystemError);
+  EXPECT_EQ(ss_.captureHead, nullptr);
   EXPECT_EQ(work, nullptr);
-  EXPECT_FALSE(HeldElsewhere(ss.mutex));
-  ncclStrongStreamDestruct(&ss);
+  EXPECT_FALSE(HeldElsewhere(ss_.mutex));
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // Observed: the calloc'd entry is not freed when its capture stream cannot be created.
 TEST_F(StrongstreamMicrotest, AcquireCapture_CaptureStreamCreateFailurePropagates) {
-  Construct(&ss);
+  Construct(&ss_);
   FailNext("hipStreamCreateWithFlags");
   hipStream_t work = nullptr;
-  EXPECT_EQ(ncclStrongStreamAcquire(Captured(1), &ss, false, &work), ncclUnhandledCudaError);
-  EXPECT_EQ(ss.captureHead, nullptr);
+  EXPECT_EQ(ncclStrongStreamAcquire(Captured(1), &ss_, false, &work), ncclUnhandledCudaError);
+  EXPECT_EQ(ss_.captureHead, nullptr);
   ASSERT_EQ(g_callocs.size(), 1u);
   EXPECT_EQ(g_frees, 0);
   std::free(g_callocs[0]);
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // Each HIP call after the entry is linked propagates; the entry stays for the next acquire.
@@ -826,79 +826,79 @@ TEST_F(StrongstreamMicrotest, AcquireCapture_JoinFailuresPropagate) {
       {"hipStreamUpdateCaptureDependencies", 1}, {"hipEventRecord", 2}, {"hipStreamWaitEvent", 2}};
   for (const auto& f : failures) {
     SCOPED_TRACE(f.first + " #" + std::to_string(f.second));
-    Construct(&ss);
+    Construct(&ss_);
     FailNext(f.first, f.second);
     hipStream_t work = nullptr;
-    EXPECT_EQ(ncclStrongStreamAcquire(Captured(1), &ss, false, &work), ncclUnhandledCudaError);
-    ASSERT_NE(ss.captureHead, nullptr);
-    EXPECT_EQ(work, ss.captureHead->captureStream);
+    EXPECT_EQ(ncclStrongStreamAcquire(Captured(1), &ss_, false, &work), ncclUnhandledCudaError);
+    ASSERT_NE(ss_.captureHead, nullptr);
+    EXPECT_EQ(work, ss_.captureHead->captureStream);
     g_failAt.clear();
-    ncclStrongStreamDestruct(&ss);
+    ncclStrongStreamDestruct(&ss_);
   }
 }
 
 // The list is walked under the strong stream's mutex, which is dropped before the stream joins.
 TEST_F(StrongstreamMicrotest, AcquireCapture_ConcurrentHoldsTheMutexOnlyForTheList) {
-  Construct(&ss);
-  hipStream_t a = AcquireCapture(&ss, 1);
+  Construct(&ss_);
+  hipStream_t a = AcquireCapture(&ss_, 1);
   std::map<std::string, bool> held;
   g_onCall = [&](const std::string& fn) {
-    if (!held.count(fn)) held[fn] = HeldElsewhere(ss.mutex);
+    if (!held.count(fn)) held[fn] = HeldElsewhere(ss_.mutex);
   };
   hipStream_t work = nullptr;
-  ASSERT_EQ(ncclStrongStreamAcquire(Captured(2), &ss, true, &work), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamAcquire(Captured(2), &ss_, true, &work), ncclSuccess);
   EXPECT_TRUE(held["hipStreamIsCapturing"]);
   EXPECT_TRUE(held["hipStreamCreateWithFlags"]);
   EXPECT_FALSE(held["hipEventCreateWithFlags"]);
 
   held.clear();
   g_capture[a].status = hipStreamCaptureStatusNone;
-  ASSERT_EQ(ncclStrongStreamAcquire(Captured(3), &ss, false, &work), ncclSuccess);
+  ASSERT_EQ(ncclStrongStreamAcquire(Captured(3), &ss_, false, &work), ncclSuccess);
   EXPECT_FALSE(held["hipStreamIsCapturing"]);
   g_onCall = nullptr;
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, ConcurrentLookupsWaitForTheMutex) {
-  Construct(&ss);
-  AcquireCapture(&ss, 1);
+  Construct(&ss_);
+  AcquireCapture(&ss_, 1);
   hipStream_t work = nullptr;
   g_raceFatalSet = true;  // Release runs on the async thread, not the acquirer
   g_raceFatal = 0;
   for (bool concurrent : {true, false}) {
     SCOPED_TRACE(concurrent);
-    EXPECT_EQ(CompletesWhileLocked(ss.mutex, [&] { ncclStrongStreamAcquire(Captured(1), &ss, concurrent, &work); }),
+    EXPECT_EQ(CompletesWhileLocked(ss_.mutex, [&] { ncclStrongStreamAcquire(Captured(1), &ss_, concurrent, &work); }),
               !concurrent);
-    EXPECT_EQ(CompletesWhileLocked(ss.mutex,
-                                   [&] { ncclStrongStreamAcquiredWorkStream(Captured(1), &ss, concurrent, &work); }),
+    EXPECT_EQ(CompletesWhileLocked(ss_.mutex,
+                                   [&] { ncclStrongStreamAcquiredWorkStream(Captured(1), &ss_, concurrent, &work); }),
               !concurrent);
-    EXPECT_EQ(CompletesWhileLocked(ss.mutex,
-                                   [&] { ncclStrongStreamRelease(Captured(1), &ss, concurrent); }),
+    EXPECT_EQ(CompletesWhileLocked(ss_.mutex,
+                                   [&] { ncclStrongStreamRelease(Captured(1), &ss_, concurrent); }),
               !concurrent);
   }
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // Release adds a serialEvent record node after the capture stream's frontier and moves the
 // frontier onto it.
 TEST_F(StrongstreamMicrotest, ReleaseCapture_RecordsTheSerialEventIntoTheGraph) {
-  Construct(&ss);
-  hipStream_t first = AcquireCapture(&ss, 1);
-  AcquireCapture(&ss, 2);
+  Construct(&ss_);
+  hipStream_t first = AcquireCapture(&ss_, 1);
+  AcquireCapture(&ss_, 2);
   hipGraphNode_t n1 = reinterpret_cast<hipGraphNode_t>(0x51), n2 = reinterpret_cast<hipGraphNode_t>(0x52);
   g_capture[first].deps = {n1, n2};
   g_calls.clear();
 
   std::map<std::string, bool> held;
-  g_onCall = [&](const std::string& fn) { held[fn] = HeldElsewhere(ss.mutex); };
-  ASSERT_EQ(ncclStrongStreamRelease(Captured(1), &ss, true), ncclSuccess);
+  g_onCall = [&](const std::string& fn) { held[fn] = HeldElsewhere(ss_.mutex); };
+  ASSERT_EQ(ncclStrongStreamRelease(Captured(1), &ss_, true), ncclSuccess);
   g_onCall = nullptr;
   EXPECT_FALSE(held["hipGraphAddEventRecordNode"]);
 
   auto node = CallsTo("hipGraphAddEventRecordNode");
   ASSERT_EQ(node.size(), 1u);
   EXPECT_EQ(node[0].a, kGraph);
-  EXPECT_EQ(node[0].b, ss.serialEvent);
+  EXPECT_EQ(node[0].b, ss_.serialEvent);
   EXPECT_EQ(node[0].n, 0u);
   EXPECT_EQ(CallsTo("hipStreamGetCaptureInfo_v2")[0].a, first);
   auto deps = CallsTo("hipGraphAddDependencies");
@@ -916,20 +916,20 @@ TEST_F(StrongstreamMicrotest, ReleaseCapture_RecordsTheSerialEventIntoTheGraph) 
   EXPECT_EQ(update[0].c, node[0].c);
   EXPECT_EQ(update[0].n, 1u);
   EXPECT_EQ(update[0].flags, (uint64_t)hipStreamSetCaptureDependencies);
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, ReleaseCapture_FromAnotherThreadIsALaunchRace) {
-  Construct(&ss);
-  std::thread([&] { AcquireCapture(&ss, 1); }).join();
-  EXPECT_EQ(ncclStrongStreamRelease(Captured(1), &ss, false), ncclInvalidUsage);
+  Construct(&ss_);
+  std::thread([&] { AcquireCapture(&ss_, 1); }).join();
+  EXPECT_EQ(ncclStrongStreamRelease(Captured(1), &ss_, false), ncclInvalidUsage);
   EXPECT_TRUE(Logged(NCCL_LOG_ERROR, "host threads racing"));
-  EXPECT_EQ(Count("hipStreamUpdateCaptureDependencies"), 2);  // the record still happened
+  EXPECT_EQ(Count("hipStreamUpdateCaptureDependencies"), 2);
 
   g_raceFatalSet = true;
   g_raceFatal = 0;
-  EXPECT_EQ(ncclStrongStreamRelease(Captured(1), &ss, false), ncclSuccess);
-  ncclStrongStreamDestruct(&ss);
+  EXPECT_EQ(ncclStrongStreamRelease(Captured(1), &ss_, false), ncclSuccess);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 TEST_F(StrongstreamMicrotest, ReleaseCapture_RecordFailuresPropagate) {
@@ -937,15 +937,15 @@ TEST_F(StrongstreamMicrotest, ReleaseCapture_RecordFailuresPropagate) {
                                                              {"hipStreamGetCaptureInfo_v2", 1},
                                                              {"hipGraphAddDependencies", 1},
                                                              {"hipStreamUpdateCaptureDependencies", 1}};
-  Construct(&ss);
-  hipStream_t work = AcquireCapture(&ss, 1);
+  Construct(&ss_);
+  hipStream_t work = AcquireCapture(&ss_, 1);
   g_capture[work].deps = {reinterpret_cast<hipGraphNode_t>(0x51)};
   for (const auto& f : failures) {
     SCOPED_TRACE(f.first);
     FailNext(f.first, f.second);
-    EXPECT_EQ(ncclStrongStreamRelease(Captured(1), &ss, false), ncclUnhandledCudaError);
+    EXPECT_EQ(ncclStrongStreamRelease(Captured(1), &ss_, false), ncclUnhandledCudaError);
   }
-  ncclStrongStreamDestruct(&ss);
+  ncclStrongStreamDestruct(&ss_);
 }
 
 // ncclCudaGraphRecordEvent records like Release but must leave the origin's frontier alone.

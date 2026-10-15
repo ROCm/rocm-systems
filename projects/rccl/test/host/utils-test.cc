@@ -640,7 +640,7 @@ TEST_F(UtilsMicrotest, HashPointer_MixesTheKeyIntoTheTopBits) {
 TEST_F(UtilsMicrotest, AddressMap_InsertFindRemove) {
   Entry a{reinterpret_cast<void*>(0x1000), nullptr};
   Entry b{reinterpret_cast<void*>(0x2000), nullptr};
-  EXPECT_EQ(nullptr, Find(a.key));  // no table yet
+  EXPECT_EQ(nullptr, Find(a.key));
   ASSERT_EQ(ncclSuccess, Insert(&a));
   EXPECT_EQ(4, map_.base.hbits);
   EXPECT_EQ(1, map_.base.count);
@@ -693,7 +693,7 @@ TEST_F(UtilsMicrotest, AddressMap_GrowsAtTwoEntriesPerBucket) {
   for (int b = 0; b < 32; b++)
     for (Entry* e = static_cast<Entry*>(map_.base.table[b]); e; e = e->next)
       EXPECT_EQ((uint64_t)b, ncclHashPointer(5, e->key));
-  EXPECT_EQ(1u, g_live.size());  // the old table was freed
+  EXPECT_EQ(1u, g_live.size());
 }
 
 TEST_F(UtilsMicrotest, AddressMap_AllocationFailuresAreSystemErrors) {
@@ -719,7 +719,7 @@ TEST_F(UtilsMicrotest, AddressMap_InsertingALinkedObjectIsReported) {
   Entry e{reinterpret_cast<void*>(0x1000), &other};
   ASSERT_EQ(ncclSuccess, Insert(&e));
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "non-NULL next pointer"));
-  EXPECT_EQ(nullptr, e.next);  // relinked into its bucket
+  EXPECT_EQ(nullptr, e.next);
 }
 
 TEST_F(UtilsMicrotest, AddressMap_ShortKeysCompareOnlyTheirBytes) {
