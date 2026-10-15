@@ -60,6 +60,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
 
+- `rdcd` exits with an error when it cannot listen on its port, for example when another process uses the port. It printed "Server listening" and then crashed.
+
+- `rdc_stop_embedded()` after `rdc_config_set()` no longer aborts with "terminate called without an active exception".
+
+- `rdcd` names the owner of a lock file that it cannot open, instead of reporting "Numerical result out of range". It no longer reports "Bad file descriptor" for a lock file that does not exist, and prints the path of a lock file that it cannot read.
+
+- `rdcd` exits at once, with status 1, on a second SIGTERM or SIGINT, or on one that arrives while it shuts down, so another stop request ends a stalled shutdown.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added
