@@ -26,21 +26,22 @@ underlying physical volumes are all local NVMe devices. A volume whose physical
 volumes include any non-NVMe or multipath device falls back to compatibility
 mode.
 
-This includes RAID logical volumes, with the same restriction that applies to
-MD arrays below. LVM implements a RAID LV with the ``dm-raid`` target, which
-runs the MD personality code, so a RAID LV qualifies for the fastpath only when
-it uses a pass-through RAID level, ``raid0``, ``raid1``, or ``raid10``, and
+This includes RAID logical volumes, with the same restrictions as apply to MD arrays.
+
+LVM implements a RAID LV with the ``dm-raid`` target, which
+runs the MD personality code. A RAID LV qualifies for the fastpath only when
+it uses a pass-through RAID level (``raid0``, ``raid1``, or ``raid10``) and
 every member resides on a local NVMe physical volume. A parity RAID LV
 (``raid4``, ``raid5``, ``raid6``) falls back to compatibility mode, as does a
 volume with any member on a non-NVMe physical volume.
 
-Check the level of a RAID LV with::
+Use the following command to check the level of a RAID LV::
 
    lvs -o lv_name,segtype vg
 
-``ais-check`` reads the same information from the device-mapper table, which
-needs the privileges ``dmsetup`` requires. Without them it reports a RAID LV as
-``unverified`` rather than guessing; plain linear and striped volumes are
+``ais-check`` reads the same information from the device-mapper table and
+needs the privileges ``dmsetup`` requires. Without these privileges, ``ais-check`` reports a RAID LV as
+``unverified``. Plain linear and striped volumes are
 unaffected.
 
 MD software RAID
@@ -49,26 +50,26 @@ MD software RAID
 MD software RAID arrays (``mdadm``, ``/dev/md*``) are supported for the
 fastpath when both of the following hold:
 
-- the array runs one of the pass-through personalities, ``linear``, ``raid0``,
+- The array runs one of the pass-through personalities, ``linear``, ``raid0``,
   ``raid1``, or ``raid10``, and
-- every member device of the array is a local NVMe device.
+- Every member device of the array is a local NVMe device.
 
-Those personalities remap the original request onto a member device without
+The pass-through personalities remap the original request onto a member device without
 interposing a buffer, so the direct path survives. An array with any non-NVMe
 or multipath member falls back to compatibility mode. Because reads from a
 mirrored array can be served by any mirror, and different regions of a striped
 array reside on different members, a single unsupported member disqualifies the
 whole array.
 
-The parity personalities, ``raid4``, ``raid5``, and ``raid6``, are **not**
-supported and always fall back to compatibility mode, even when every member is
+The parity personalities, ``raid4``, ``raid5``, and ``raid6``, are not
+supported and always fall back to compatibility mode even when every member is
 a local NVMe device. They route the transfer through the MD stripe cache to
 compute parity, copying it into host memory instead of handing the original
 request to a member device, so there is no direct path left to use. This is the
 same code an LVM parity RAID LV runs, which is why both are excluded. The same
 applies to any other personality, such as ``faulty`` or ``multipath``.
 
-Check the personality of an array with::
+Use the following command to check the personality of an array::
 
    cat /sys/block/md0/md/level
 

@@ -29,7 +29,7 @@ When run with the verbose option, a list of discovered HIP runtime libraries is 
 
 The mounted volumes table indicates whether a hipFile can use fastpath with each mount point. Each row in the table describes one block-backed mount. Pseudo file systems are omitted. Only mount points with "yes" in the``HIPFILE`` column are eligible for fastpath.
 
-For example, this table indicates that ``/``, ``/home``, ``/data``, and ``/mnt/raid10`` are eligible for fastpath, while ``/mnt/raid5`` and ``/mnt/secure`` are not:
+For example, this table shows that ``/``, ``/home``, ``/data``, and ``/mnt/raid10`` are eligible for fastpath, while ``/mnt/raid5`` and ``/mnt/secure`` are not:
 
 .. code-block:: shell-session
 
@@ -54,14 +54,14 @@ For ``lvm`` and ``md`` backing, ``ais-check`` follows the block stack and
 reports the volume as capable only when every layer is an LVM target or an
 MD RAID array, every RAID layer runs a pass-through personality (``linear``,
 ``raid0``, ``raid1``, ``raid10``), and all of the devices underneath them
-are local NVMe. The two can be stacked on each other in either order. The
-parity personalities (``raid4``, ``raid5``, ``raid6``) are reported as not
-capable, because they stage the transfer in the MD stripe cache rather than
-passing it to a member device. That applies to an LVM RAID logical volume
+are local NVMe. The LVM target and RAID array can be stacked on each other in either order. The
+parity personalities (``raid4``, ``raid5``, ``raid6``) are always reported as not
+capable because they stage the transfer in the MD stripe cache rather than
+passing it to a member device. This applies to an LVM RAID logical volume
 just as it does to an MD array, since LVM implements a RAID LV with the
 ``dm-raid`` target, which runs the same personality code.
 
-The RAID level of an LVM volume is not exposed in sysfs, so ``ais-check``
+The RAID level of an LVM volume is not exposed in sysfs. ``ais-check``
 reads it from the device-mapper table. When it cannot run ``dmsetup`` with
 enough privilege, a RAID LV is reported as ``unverified``. Linear and
 striped volumes are classified from sysfs alone and are unaffected.

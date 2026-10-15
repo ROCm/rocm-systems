@@ -51,13 +51,13 @@ uses one of the following storage configurations:
 * raw NVMe block device (without multipathing)
 * ext4 on an NVMe block device mounted with ``data=ordered``
 * xfs on an NVMe block device
-* an LVM logical volume whose physical volumes are all local NVMe, and which is
+* an LVM logical volume whose physical volumes are all local NVMe and which is
   linear, striped, or a ``raid0``, ``raid1``, or ``raid10`` RAID LV
 * an MD software RAID array running a ``linear``, ``raid0``, ``raid1``, or
   ``raid10`` personality whose member devices are all local NVMe
 
 Parity RAID (``raid4``, ``raid5``, ``raid6``) is not supported, as an MD array
-or as an LVM RAID LV: it stages the transfer in the MD stripe cache instead of
+or as an LVM RAID LV. It stages the transfer in the MD stripe cache instead of
 handing it to a member device.
 
 If the target file or device is backed by any other storage configuration,
