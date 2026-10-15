@@ -39,12 +39,16 @@ class PlaybackDefaultTest(unittest.TestCase):
         self.assertIn("static std::atomic<bool> warned{false};", text)
         self.assertIn("warned.exchange(true)", text)
 
-    def test_grandfathered_untranslated_handle_still_calls_hip(self):
-        self.assertIn("hipLibraryGetGlobal", gen.DIRECT_PLAYBACK_APIS)
+    def test_grandfathered_untranslated_handle_is_refused(self):
+        name = "hipLibraryGetGlobal"
+        self.assertNotIn(name, gen.DIRECT_PLAYBACK_APIS)
+        self.assertIn(name, gen.PLAYBACK_ONLY_UNREPLAYABLE_APIS)
         text = gen.generate_playback_shim(
-            entry("hipLibraryGetGlobal", "hipLibrary_t", "library")
+            entry(name, "hipLibrary_t", "library")
         )
-        self.assertIn("hipLibraryGetGlobal((hipLibrary_t)a->library)", text)
+        self.assertIn(f'hrr_note_unreplayable(ctx, "{name}"', text)
+        self.assertIn("return hipErrorNotSupported;", text)
+        self.assertNotIn(f"{name}((", text)
         self.assertNotIn("NOOP playback handler", text)
 
     def test_manual_classification_emits_only_an_extern(self):
