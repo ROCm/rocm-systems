@@ -892,9 +892,10 @@ TEST_F(SymmetricKernelCorruptionTest, MisalignedBuffers_FourBytePackTier)
     }
 }
 
-// On gfx950 AllGather moves from LL to the store kernel at 4 MB of bus bytes. The data tests above
-// pass on either kernel, so this asks the symmetric tuner through the reporter rccl-tests uses.
-TEST_F(SymmetricKernelCorruptionTest, AllGather_StoreKernelFrom4MB)
+// On gfx950 AllGather moves from LL to the store kernel at 1 MB of bus bytes, and the store kernel
+// launches at most 24 blocks. The data tests above pass on either kernel, so this asks the symmetric
+// tuner through the reporter rccl-tests uses.
+TEST_F(SymmetricKernelCorruptionTest, AllGather_StoreKernelFrom1MB)
 {
     if(!validateTestPrerequisites(2))
         GTEST_SKIP() << "Need >= 2 MPI ranks";
@@ -913,7 +914,7 @@ TEST_F(SymmetricKernelCorruptionTest, AllGather_StoreKernelFrom4MB)
         GTEST_SKIP() << "The AllGather store crossover is fitted on 8 ranks";
 
     // The threshold counts bus bytes, which is nRanks times AllGather's per-rank count.
-    constexpr size_t kStoreFromBusBytes = 4 << 20;
+    constexpr size_t kStoreFromBusBytes = 1 << 20;
     const size_t     switchCount = kStoreFromBusBytes / (static_cast<size_t>(nRanks) * sizeof(float));
 
     SymBuf agSend, agRecv;
@@ -934,14 +935,140 @@ TEST_F(SymmetricKernelCorruptionTest, AllGather_StoreKernelFrom4MB)
     ASSERT_EQ(ncclSuccess,
               rcclSymKGetInfo(getActiveCommunicator(), ncclFuncAllGather, switchCount - 1, ncclFloat,
                               ncclSum, &algo, &proto, &nChannels));
-    EXPECT_EQ(static_cast<int>(RCCL_SYMMETRIC), algo) << "AllGather just below 4 MB left the symmetric kernels";
-    EXPECT_EQ(NCCL_PROTO_LL, proto) << "AllGather just below 4 MB should stay on LL";
+    EXPECT_EQ(static_cast<int>(RCCL_SYMMETRIC), algo) << "AllGather just below 1 MB left the symmetric kernels";
+    EXPECT_EQ(NCCL_PROTO_LL, proto) << "AllGather just below 1 MB should stay on LL";
 
     ASSERT_EQ(ncclSuccess,
               rcclSymKGetInfo(getActiveCommunicator(), ncclFuncAllGather, switchCount, ncclFloat,
                               ncclSum, &algo, &proto, &nChannels));
-    EXPECT_EQ(static_cast<int>(RCCL_SYMMETRIC), algo) << "AllGather at 4 MB left the symmetric kernels";
-    EXPECT_EQ(NCCL_PROTO_SIMPLE, proto) << "AllGather at 4 MB should take the store kernel";
+    EXPECT_EQ(static_cast<int>(RCCL_SYMMETRIC), algo) << "AllGather at 1 MB left the symmetric kernels";
+    EXPECT_EQ(NCCL_PROTO_SIMPLE, proto) << "AllGather at 1 MB should take the store kernel";
+    EXPECT_LE(nChannels, 24) << "gfx950 caps the AllGather store kernel at 24 blocks";
+}
+
+// ===========================================================================
+// Test group 5: AllGather store kernel data placement
+//
+// Forces AllGather_ST so every size takes it, including those LL would get, and
+// checks position-dependent data across its tiers: the 16-byte deep loop, the
+// 4-byte tier a 4-byte input skew reaches, the per-byte head and tail a 1-byte
+// skew or odd size reaches, and in-place.
+// ===========================================================================
+
+namespace
+{
+
+// Prime, so the period does not divide any power-of-two chunk or tile and a
+// misplaced chunk still changes the bytes it lands on.
+constexpr size_t kAgStPatternPeriod = 251;
+
+// Byte a rank writes at an index of its contribution. The rank term is distinct
+// for up to 8 ranks, so a swapped slot changes the value too.
+inline uint8_t agStValue(int rank, size_t idx)
+{
+    return static_cast<uint8_t>((idx + 37 * static_cast<size_t>(rank)) % kAgStPatternPeriod);
+}
+
+} // namespace
+
+TEST_F(SymmetricKernelCorruptionTest, AllGatherST_PositionDependentData)
+{
+    // The store kernel writes straight into every peer's window: at most 8 ranks on one node.
+    constexpr int kMaxRanks = 8;
+    if(!validateTestPrerequisites(2, kMaxRanks, false, 1, 1))
+    {
+        GTEST_SKIP() << "Need 2 to " << kMaxRanks << " MPI ranks on a single node";
+    }
+
+    // Read at communicator init, so the guard must outlive createTestCommunicator.
+    MPIHelpers::MpiEnvGuard symKernelGuard("NCCL_SYM_KERNEL", "AllGather_ST");
+    ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+    int rank{};
+    int nRanks{};
+    ASSERT_EQ(ncclSuccess, ncclCommUserRank(getActiveCommunicator(), &rank));
+    ASSERT_EQ(ncclSuccess, ncclCommCount(getActiveCommunicator(), &nRanks));
+
+    // Per-rank byte counts: below the 16-byte tier, around tile edges, and deep enough for many waves.
+    const std::vector<size_t> counts   = {1, 15, 16, 17, 255, 4096, 4097, 65539, (1 << 20) + 5, 4 << 20};
+    const size_t              maxCount = *std::max_element(counts.begin(), counts.end());
+
+    // Input skew in bytes from its window base, and whether the input is the rank's own output slot.
+    struct Placement
+    {
+        size_t      skew;
+        bool        inPlace;
+        const char* name;
+    };
+    const std::vector<Placement> placements = {
+        {0, false, "aligned"}, {4, false, "4-byte skew"}, {1, false, "1-byte skew"}, {0, true, "in-place"}};
+    constexpr size_t kMaxSkew = 4;
+
+    // Window registration is collective, so allocate once and agree on the outcome before any rank can skip.
+    SymBuf            sendSym;
+    SymBuf            recvSym;
+    const std::string noSym
+        = allocSymBufsSkipReason({{maxCount + kMaxSkew, &sendSym}, {maxCount * nRanks, &recvSym}});
+    if(!noSym.empty())
+    {
+        GTEST_SKIP() << noSym;
+    }
+
+    // Without symmetricSupport the forced kernel is ineligible; skip with that reason instead of on ncclInvalidUsage.
+    ncclCommProperties_t props = NCCL_COMM_PROPERTIES_INITIALIZER;
+    ASSERT_MPI_EQ(ncclSuccess, ncclCommQueryProperties(getActiveCommunicator(), &props));
+    int symmetric = props.deviceApiSupport ? 1 : 0;
+    ASSERT_EQ(MPI_SUCCESS, MPI_Allreduce(MPI_IN_PLACE, &symmetric, 1, MPI_INT, MPI_MIN, MPI_COMM_WORLD));
+    if(!symmetric)
+    {
+        GTEST_SKIP() << "Symmetric kernels unavailable (symmetricSupport off, e.g. cuMem needs Linux >= 6.8)";
+    }
+
+    bool first = true;
+    for(size_t count : counts)
+    {
+        for(const Placement& p : placements)
+        {
+            uint8_t* recv = static_cast<uint8_t*>(recvSym.ptr);
+            uint8_t* send = p.inPlace ? recv + static_cast<size_t>(rank) * count
+                                      : static_cast<uint8_t*>(sendSym.ptr) + p.skew;
+
+            ASSERT_MPI_EQ(hipSuccess, zeroInitializeBuffer<uint8_t>(recv, count * nRanks));
+            ASSERT_MPI_EQ(hipSuccess,
+                          initializeBufferWithPattern<uint8_t>(
+                              send, count, [rank](size_t i) { return agStValue(rank, i); }));
+
+            // Only the first call may skip on ncclInvalidUsage; agree collectively so diverging verdicts cannot hang.
+            ncclResult_t res = ncclAllGather(send, recv, count, ncclUint8, getActiveCommunicator(), getActiveStream());
+            // Drain before the vote so a skip never leaves a kernel writing a window that ~SymBuf deregisters and frees.
+            hipError_t syncErr = (res == ncclSuccess) ? hipStreamSynchronize(getActiveStream()) : hipSuccess;
+            const std::string ineligible
+                = mpiCoordinatedSkipReason(res == ncclInvalidUsage && first,
+                                           "AllGather_ST symmetric kernel not eligible on this topology");
+            if(!ineligible.empty())
+            {
+                GTEST_SKIP() << ineligible;
+            }
+            first = false;
+            ASSERT_MPI_EQ(ncclSuccess, res);
+            ASSERT_MPI_EQ(hipSuccess, syncErr);
+
+            size_t  errIdx{};
+            uint8_t expVal{}, actVal{};
+            bool    ok = verifyBufferData<uint8_t>(
+                recv, count * nRanks,
+                [count](size_t j) { return agStValue(static_cast<int>(j / count), j % count); },
+                0, 0, &errIdx, &expVal, &actVal);
+            if(!ok)
+            {
+                ADD_FAILURE() << "AllGather_ST mismatch, " << p.name << ", count=" << count << " index=" << errIdx
+                              << " (rank " << errIdx / count << ", offset " << errIdx % count << ")"
+                              << " expected=" << static_cast<int>(expVal) << " got=" << static_cast<int>(actVal);
+            }
+            // Collective so a rank-local mismatch stops every rank instead of leaving peers in the next kernel.
+            ASSERT_MPI_TRUE(ok);
+        }
+    }
 }
 
 #endif // MPI_TESTS_ENABLED

@@ -170,7 +170,7 @@ inline std::vector<fs::path> hrr_process_archives(const fs::path& root) {
   for (const auto& ent : fs::directory_iterator(root, ec)) {
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+    if (hrr::pid_from_archive_dir_name(name) != 0 && fs::exists(ent.path() / "events.bin"))
       archives.push_back(ent.path());
   }
   std::sort(archives.begin(), archives.end());
@@ -185,7 +185,7 @@ inline fs::path hrr_single_process_archive(const fs::path& root) {
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+    if (hrr::pid_from_archive_dir_name(name) != 0 && fs::exists(ent.path() / "events.bin"))
       archives.push_back(ent.path());
   }
   INFO("Process archive count: " << archives.size());

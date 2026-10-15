@@ -7,7 +7,16 @@
 # Their SDWA forms use the same output modifiers as VOP3. SIN can produce
 # subnormals and retains its separate MODE policy.
 FLUSH_NEAREST_F32_OPS = frozenset(
-    {'V_LOG_F32', 'V_EXP_F32', 'V_RCP_F32', 'V_RSQ_F32', 'V_SQRT_F32', 'V_COS_F32'}
+    {
+        'V_LOG_LEGACY_F32',
+        'V_EXP_LEGACY_F32',
+        'V_LOG_F32',
+        'V_EXP_F32',
+        'V_RCP_F32',
+        'V_RSQ_F32',
+        'V_SQRT_F32',
+        'V_COS_F32',
+    }
 )
 
 # Evaluate and round these operations to half before output modifiers.

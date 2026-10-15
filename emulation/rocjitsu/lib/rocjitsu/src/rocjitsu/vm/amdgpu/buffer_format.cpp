@@ -271,6 +271,20 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
   return util::Result::success();
 }
 
+util::FailureOr<bool> prepare_buffer_format_state(VectorMemState &d) {
+  const auto decoded = decode(d.buffer_format, d.buffer_format_encoding);
+  if (decoded.failed())
+    return util::Result::failure();
+  d.decoded_buffer_format = decoded.value();
+  uint32_t bits = 0;
+  for (uint32_t width : d.decoded_buffer_format.widths)
+    bits += width;
+  if (!bits)
+    return false;
+  d.elem_size = bits / 8;
+  return true;
+}
+
 util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, uint32_t resource,
                                             int format, uint32_t components) {
   d.buffer_components = components;
@@ -298,17 +312,7 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
           : (word3 >> 12) & (arch == ROCJITSU_CODE_ARCH_RDNA4 ? 63 : 127);
   if (resource_format == 0)
     return false;
-  const auto decoded = decode(d.buffer_format, d.buffer_format_encoding);
-  if (decoded.failed())
-    return util::Result::failure();
-  d.decoded_buffer_format = decoded.value();
-  uint32_t bits = 0;
-  for (uint32_t width : d.decoded_buffer_format.widths)
-    bits += width;
-  if (!bits)
-    return false;
-  d.elem_size = bits / 8;
-  return true;
+  return prepare_buffer_format_state(d);
 }
 
 void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base) {
@@ -347,8 +351,10 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
     return;
   const auto &format = d.decoded_buffer_format;
   const fp_mode::detail::ScopedFenv environment(0);
+  const uint64_t lane_write_mask =
+      d.lds_dst ? lds_destination_write_mask(d, cu.arch()) : d.exec_mask;
   for (uint32_t lane = 0; lane < d.wf_size; ++lane) {
-    if (!(d.exec_mask & (1ULL << lane)))
+    if (!(lane_write_mask & (1ULL << lane)))
       continue;
     const auto bytes = d.lane_mask & (1ULL << lane)
                            ? std::span(d.response_data).subspan(lane * d.elem_size, d.elem_size)
@@ -357,7 +363,9 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
     for (uint32_t reg = 0; reg < registers; ++reg) {
       if (!d.buffer_d16) {
         if (d.lds_dst)
-          wf.lds().write(d.lds_base + (lane * registers + reg) * 4,
+          wf.lds().write((d.lds_per_lane_addr ? d.per_lane_lds_addr[lane]
+                                              : d.lds_base + lane * registers * 4) +
+                             reg * 4,
                          reinterpret_cast<const uint8_t *>(&values[reg]), 4);
         else
           cu.write_vgpr(d.dst_reg_base + reg, lane, values[reg]);
@@ -380,8 +388,10 @@ void complete_buffer_format_load(Wavefront &wf, ComputeUnitCore &cu, const Vecto
       if (write_mask != ~0u && !cu.sram_ecc() && !d.lds_dst)
         packed |= cu.read_vgpr_storage(d.dst_reg_base + reg, lane) & ~write_mask;
       if (d.lds_dst)
-        wf.lds().write(d.lds_base + (lane * registers + reg) * 4,
-                       reinterpret_cast<const uint8_t *>(&packed), 4);
+        wf.lds().write(
+            (d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * registers * 4) +
+                reg * 4,
+            reinterpret_cast<const uint8_t *>(&packed), 4);
       else
         cu.write_vgpr(d.dst_reg_base + reg, lane, packed);
     }
