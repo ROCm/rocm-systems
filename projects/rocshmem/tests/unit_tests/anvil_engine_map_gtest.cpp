@@ -32,6 +32,8 @@ namespace {
 // MI300X engine counts as ROCr reports them.
 constexpr uint32_t kSpxXgmi = 14;
 constexpr uint32_t kSpxTotal = 16;
+constexpr uint32_t kDpxTotal = 8;
+constexpr uint32_t kQpxTotal = 4;
 constexpr uint32_t kCpxXgmi = 0;
 constexpr uint32_t kCpxTotal = 2;
 
@@ -44,9 +46,31 @@ TEST(AnvilEngineMap, PartitionIsNoXgmiEnginesWithKnownTotal) {
   EXPECT_FALSE(isSdmaPartition(0, 0));
 }
 
+TEST(AnvilEngineMap, OnlyEvenEnginesAreUsable) {
+  for (int engine = 0; engine < static_cast<int>(kSpxTotal); ++engine) {
+    EXPECT_EQ(isUsableSdmaEngine(engine), engine % 2 == 0) << "engine=" << engine;
+  }
+  EXPECT_FALSE(isUsableSdmaEngine(-1));
+}
+
+TEST(AnvilEngineMap, UsableEngineCountIncludesOnlyEvenEngines) {
+  EXPECT_EQ(usableSdmaEngines(kSpxTotal), 8u);
+  EXPECT_EQ(usableSdmaEngines(kDpxTotal), 4u);
+  EXPECT_EQ(usableSdmaEngines(kQpxTotal), 2u);
+  EXPECT_EQ(usableSdmaEngines(kCpxTotal), 1u);
+  EXPECT_EQ(usableSdmaEngines(0), 0u);
+}
+
+TEST(AnvilEngineMap, PreferredMaskSelectsAnEvenEngine) {
+  EXPECT_EQ(preferredUsableEngine(0x0004), 2);
+  EXPECT_EQ(preferredUsableEngine(0x0006), 2);
+  EXPECT_EQ(preferredUsableEngine(0x0002), 0);
+  EXPECT_EQ(preferredUsableEngine(0x8000), 14);
+  EXPECT_EQ(preferredUsableEngine(0), -1);
+}
+
 TEST(AnvilEngineMap, PartitionFoldsEvenWhenDoubledIdIsInRange) {
-  // Same-device CPX peers share an OAM id and hit the map diagonal, doubled id 0. Without the
-  // partition fold they would all be pinned to engine 0.
+  // The partition path must apply the safe-engine fold even when the legacy map id is in range.
   EXPECT_TRUE(oamMapEngineNeedsFold(kCpxXgmi, kCpxTotal, 0));
   EXPECT_TRUE(oamMapEngineNeedsFold(kCpxXgmi, kCpxTotal, 1));
 }
@@ -67,21 +91,29 @@ TEST(AnvilEngineMap, UnknownTotalNeverFolds) {
   EXPECT_FALSE(oamMapEngineNeedsFold(0, 0, 12));
 }
 
-TEST(AnvilEngineMap, FoldStaysInRangeForEveryInput) {
-  for (int oam = 0; oam < 8; ++oam) {
-    for (int src = -1; src < 8; ++src) {
-      for (int dst = -1; dst < 8; ++dst) {
-        const int e = foldOamMapEngine(oam, src, dst, kCpxTotal);
-        EXPECT_GE(e, 0);
-        EXPECT_LT(e, static_cast<int>(kCpxTotal));
+TEST(AnvilEngineMap, FoldStaysOnAnInRangeEvenEngine) {
+  for (uint32_t total : {kDpxTotal, kQpxTotal, kCpxTotal}) {
+    for (int oam = 0; oam < 8; ++oam) {
+      for (int src = -1; src < 8; ++src) {
+        for (int dst = -1; dst < 8; ++dst) {
+          const int engine = foldOamMapEngine(oam, src, dst, total);
+          EXPECT_TRUE(isUsableSdmaEngine(engine)) << "total=" << total << " engine=" << engine;
+          EXPECT_LT(engine, static_cast<int>(total)) << "total=" << total;
+        }
       }
     }
   }
 }
 
-TEST(AnvilEngineMap, FoldSeparatesPartitionsOfOneDevice) {
-  // Diagonal (oam 0) pairs from function 0 to functions 0 and 1 land on different engines.
-  EXPECT_NE(foldOamMapEngine(0, 0, 0, kCpxTotal), foldOamMapEngine(0, 0, 1, kCpxTotal));
+TEST(AnvilEngineMap, CpxFoldUsesOnlyEngineZero) {
+  for (int oam = 0; oam < 8; ++oam) {
+    EXPECT_EQ(foldOamMapEngine(oam, 3, 5, kCpxTotal), 0);
+  }
+}
+
+TEST(AnvilEngineMap, FoldSeparatesPairsWhenMultipleEvenEnginesExist) {
+  EXPECT_NE(foldOamMapEngine(0, 0, 1, kDpxTotal),
+            foldOamMapEngine(0, 1, 1, kDpxTotal));
 }
 
 TEST(AnvilEngineMap, FoldTreatsUnreadableFunctionAsZero) {
@@ -114,6 +146,16 @@ TEST(AnvilEngineMap, QueueBudgetRefusesOverSubscription) {
   EXPECT_FALSE(queueBudgetExceeded(9, 7, kCpxTotal, 8));
   EXPECT_TRUE(queueBudgetExceeded(10, 7, kCpxTotal, 8));
   EXPECT_TRUE(queueBudgetExceeded(0, 17, kCpxTotal, 8));
+}
+
+TEST(AnvilEngineMap, QueueBudgetCountsEvenEnginesOnly) {
+  const uint32_t cpxUsable = usableSdmaEngines(kCpxTotal);
+  EXPECT_FALSE(queueBudgetExceeded(7, 1, cpxUsable, 8));
+  EXPECT_TRUE(queueBudgetExceeded(8, 1, cpxUsable, 8));
+
+  const uint32_t qpxUsable = usableSdmaEngines(kQpxTotal);
+  EXPECT_FALSE(queueBudgetExceeded(15, 1, qpxUsable, 8));
+  EXPECT_TRUE(queueBudgetExceeded(16, 1, qpxUsable, 8));
 }
 
 TEST(AnvilEngineMap, QueueBudgetUnknownNeverRefuses) {
