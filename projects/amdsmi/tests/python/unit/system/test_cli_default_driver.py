@@ -6,12 +6,19 @@
 
 import importlib.util
 import io
+import os
+import sys
 import types
 import unittest
 from contextlib import redirect_stdout
 from pathlib import Path
 
-from common.common import stub_modules_at_import
+from common.common import cli_search_order, find_cli_dir, stub_modules_at_import
+
+# default.py imports the CLI's own exception module, so the CLI dir must be importable
+_CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
+if _CLI_DIR and _CLI_DIR not in sys.path:
+    sys.path.append(_CLI_DIR)
 
 _DRIVER_INFO = {
     "driver_name": "amdgpu",
@@ -111,6 +118,19 @@ def _run_default() -> dict:
     return commands.logger.output
 
 
+def _run_default_without_amdgpu(gpus_without_driver: list) -> dict:
+    module = _load_default_module()
+    commands = object.__new__(module.DefaultCommands)
+    commands.logger = types.SimpleNamespace(format="human_readable", output={})
+    commands.helpers = types.SimpleNamespace(
+        is_amdgpu_initialized=lambda: False,
+        get_devices_without_driver=lambda _driver: gpus_without_driver,
+    )
+    commands.group_check_printed = True
+    commands.default(types.SimpleNamespace())
+    return commands.logger.output
+
+
 def _load_logger_module() -> types.ModuleType:
     helpers_module = types.ModuleType("amdsmi_helpers")
     helpers_module.AMDSMIHelpers = type("AMDSMIHelpers", (), {})
@@ -148,6 +168,16 @@ class TestDefaultDriverHeader(unittest.TestCase):
         output = _run_default()
         self.assertEqual(output["version_info"]["amdgpu version"], _DRIVER_INFO)
         self.assertNotIn("amdgpu dkms version", output["version_info"])
+
+    def test_missing_amdgpu_with_a_gpu_present_names_the_driver(self) -> None:
+        with self.assertRaises(Exception) as ctx:
+            _run_default_without_amdgpu(gpus_without_driver=["0001:01:00.0"])
+
+        self.assertEqual(type(ctx.exception).__name__, "AmdSmiDriverNotLoadedException")
+        self.assertIn("requires the amdgpu driver", str(ctx.exception))
+
+    def test_missing_amdgpu_without_a_gpu_prints_nothing(self) -> None:
+        self.assertEqual(_run_default_without_amdgpu(gpus_without_driver=[]), {})
 
     def test_banner_prints_driver_rows_in_order(self) -> None:
         module = _load_logger_module()

@@ -262,6 +262,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
 
+- **Fixed misleading errors when a GPU, CPU, or AI NIC driver is not loaded**.  
+  - When the device is present, `amd-smi` now names the missing driver (exit code 206) instead of reporting "not supported" or an invalid parameter, and `list`, `static`, and `metric` show the available devices with a note about the rest.
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
