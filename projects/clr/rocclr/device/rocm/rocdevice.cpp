@@ -1262,6 +1262,13 @@ bool Device::populateOCLDeviceConstants() {
   Hsa::agent_get_info(bkendDevice_,
                       static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH),
                       &pcie_stores_need_flush_);
+  // CP firmware without hint support takes a hinted handle as the signal address. Left false by
+  // a runtime without the query.
+  if (DEBUG_CLR_PERF_HINTS) {
+    Hsa::agent_get_info(bkendDevice_,
+                        static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED),
+                        &signal_hints_);
+  }
 
   for (auto agent : gpu_agents_) {
     if (agent.handle != bkendDevice_.handle) {
@@ -4119,7 +4126,7 @@ bool Device::CreateHwEvents(int count, bool batched, std::vector<void*>& hw_even
   }
   hw_events.resize(count);
   for (int event_idx = 0; event_idx < count; ++event_idx) {
-    ProfilingSignal* profiling_signal = new ProfilingSignal();
+    ProfilingSignal* profiling_signal = new ProfilingSignal(SignalHints());
     profiling_signal->signal_ = signals[event_idx];
     profiling_signal->in_device_memory_ = in_device_memory;
     hw_events[event_idx] = profiling_signal;
@@ -4258,7 +4265,7 @@ uint8_t* Device::CreateBarrierPacket(int num_deps) const {
 
 // ================================================================================================
 void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                 const std::vector<void*>& hw_events) const {
+                                 const std::vector<void*>& hw_events, bool profiled) const {
   for (const auto& patch : patches) {
     auto* ps = reinterpret_cast<ProfilingSignal*>(hw_events[patch.hw_event_index]);
     hsa_signal_t sig = ps->signal_;
@@ -4273,8 +4280,10 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
           offsetof(hsa_amd_ext_kernel_dispatch_packet_t, dep_signal);
       memcpy(raw + kExtDepSignalOffset, &sig, sizeof(sig));
     } else if (patch.dep_slot == HwEventPatch::kCompletionSignal) {
+      // Pooled signals rest armed at 1, and only this packet completes them
+      ps->binary_use_ = true;
       auto* pkt = reinterpret_cast<hsa_barrier_and_packet_t*>(raw);
-      pkt->completion_signal = sig;
+      pkt->completion_signal = ps->PacketHandle(profiled);
 
       // Prepare this signal for profiling. The dispatch path assigns this
       // launch's slot only when the actual carrier is a kernel dispatch.
@@ -4291,7 +4300,7 @@ void Device::ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
 
 // ================================================================================================
 bool Device::CreateUserEvent(amd::UserEvent* event) const {
-  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal());
+  std::unique_ptr<ProfilingSignal> signal(new ProfilingSignal(SignalHints()));
   if ((signal == nullptr) ||
       (HSA_STATUS_SUCCESS != Hsa::signal_create(0, 0, nullptr, &signal->signal_))) {
     return false;

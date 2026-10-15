@@ -2041,7 +2041,7 @@ class GraphKernelNode : public GraphNode {
     }
     if (signal_is_required_) {
       // Optimize the barriers by adding a signal into the dispatch packet directly
-      command->SetProfiling();
+      command->RequireSignal();
     }
     commands_.emplace_back(command);
     return status;
@@ -3351,7 +3351,7 @@ class GraphEventRecordNode : public GraphNode {
     hip::Event* e = reinterpret_cast<hip::Event*>(event_);
     commands_.reserve(1);
     amd::Command* command = nullptr;
-    status = e->recordCommand(command, stream);
+    status = e->recordCommand(command, stream, 0, !hip::Event::kBatchFlush);
     commands_.emplace_back(command);
     return status;
   }

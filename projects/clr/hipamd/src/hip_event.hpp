@@ -74,12 +74,13 @@ typedef struct ihipIpcEventShmem_s {
 
 class EventMarker : public amd::Marker {
  public:
-  EventMarker(amd::HostQueue& stream, bool disableFlush, bool markerTs = false,
+  EventMarker(amd::HostQueue& stream, bool disableFlush, bool signalRequired = false,
               int32_t scope = amd::Device::kCacheStateInvalid, bool batch_flush = true,
               bool enable_profiling = true)
       : amd::Marker(stream, disableFlush) {
     profilingInfo_.enabled_ = enable_profiling;
-    profilingInfo_.marker_ts_ = markerTs;
+    profilingInfo_.timed_ = enable_profiling;
+    profilingInfo_.signal_required_ = signalRequired;
     profilingInfo_.batch_flush_ = batch_flush;
     profilingInfo_.clear();
     setCommandEntryScope(scope);

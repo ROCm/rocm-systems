@@ -2301,8 +2301,9 @@ class Device : public RuntimeObject {
   //! single-signal field share an offset, so callers patch slot 0 either way.
   //! num_deps == 0 is a completion-only barrier.
   virtual uint8_t* CreateBarrierPacket(int num_deps = 0) const { return nullptr; }
+  //! profiled means the launch reads the timing of its patched completion signals
   virtual void ApplyHwEventPatches(const std::vector<HwEventPatch>& patches,
-                                   const std::vector<void*>& hw_events) const {}
+                                   const std::vector<void*>& hw_events, bool profiled) const {}
 
   virtual const bool isFineGrainSupported() const {
     return (info().svmCapabilities_ & CL_DEVICE_SVM_ATOMICS) != 0 ? true : false;

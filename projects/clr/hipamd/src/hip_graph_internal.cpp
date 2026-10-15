@@ -2733,18 +2733,19 @@ amd::Command* GraphExecSegmented::EnqueueSegmentedGraph(hip::Stream* launch_stre
     return launch_stream;
   };
 
-  // Apply pre-computed patches -- writes HW events directly into flatPacketData
-  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
-  if (!sync_plan_.patch_list.empty()) {
-    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events);
-  }
-
   // Single AccumulateCommand on launch_stream manages all HW event lifetimes
   // and serves as the dispatch anchor for all segments across all streams.
   // Kernel dispatch records are added to the command at dispatch time (via
   // addKernelDispatch in dispatchAqlPacketBatchFlat) — no string borrowing,
   // no GraphExecBase pin.
   auto* graph_accumulate = new amd::AccumulateCommand(*launch_stream, {}, nullptr);
+
+  // Apply pre-computed patches -- writes HW events directly into flatPacketData
+  // via the flat_packet pointers resolved at instantiate time, so no rebuild needed.
+  if (!sync_plan_.patch_list.empty()) {
+    device->ApplyHwEventPatches(sync_plan_.patch_list, segment_hw_events,
+                                graph_accumulate->profilingInfo().timed_);
+  }
 
   // Register HW events with graph_accumulate so profiling can read them.
   for (auto& hw_event : segment_hw_events) {
