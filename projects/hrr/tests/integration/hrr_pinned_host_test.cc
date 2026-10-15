@@ -19,6 +19,13 @@
 #include <vector>
 #ifndef _WIN32
 #include <sys/mman.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+#include <atomic>
+#include <chrono>
+#include <csignal>
+#include <thread>
 #endif
 
 namespace {
@@ -125,6 +132,53 @@ TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostUnregister(p));
   munmap(p, 1 << 16);
 }
+
+// Forks while another thread snapshots a 32 MiB pinned allocation, so most forks
+// land while it holds the pinned tracking lock. Each child frees an address
+// capture does not track, which takes that lock and fails without device work.
+// A child that inherited the lock held never exits.
+TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  constexpr size_t kBig = 32u << 20;
+  void* p = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(&p, kBig, 0));
+  std::memset(p, 1, kBig);
+  // Nothing may REQUIRE before the join.
+  std::atomic<bool> stop{false};
+  std::thread launcher([&] {
+    while (!stop.load()) {
+      hipLaunchKernelGGL(hrr_pinned_ignore, dim3(1), dim3(1), 0, nullptr,
+                         reinterpret_cast<uint64_t>(p));
+      (void)hipStreamSynchronize(nullptr);
+    }
+  });
+  std::this_thread::sleep_for(std::chrono::milliseconds(200));
+  int hung = 0, failed = 0;
+  for (int i = 0; i < 20 && !hung; ++i) {
+    const pid_t pid = fork();
+    if (pid == 0) {
+      int x = 0;
+      _exit(hipFree(&x) == hipSuccess);
+    }
+    int status = 0;
+    pid_t got = 0;
+    for (int ms = 0; pid > 0 && ms < 10000 && (got = waitpid(pid, &status, WNOHANG)) == 0; ++ms)
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+    if (pid > 0 && got == 0) {
+      kill(pid, SIGKILL);
+      waitpid(pid, &status, 0);
+      ++hung;
+    } else if (got != pid || !WIFEXITED(status) || WEXITSTATUS(status) != 0) {
+      ++failed;
+    }
+  }
+  stop = true;
+  launcher.join();
+  HRR_HIP_CHECK(hipHostFree(p));
+  INFO("hung " << hung << ", failed " << failed);
+  REQUIRE(hung == 0);
+  REQUIRE(failed == 0);
+}
 #endif
 
 #if defined(HRR_PLAYBACK_EXE) && defined(HRR_TEST_EXE)
@@ -173,6 +227,19 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostFreedRoundtrip) {
   CHECK(ret == 0);
   CHECK(out.find("Pinned host snapshots") == std::string::npos);
 }
+
+#ifndef _WIN32
+// The pinned tracking lock is held across fork(), so no child inherits it locked.
+HRR_TEST_CASE(Unit_HRR_PinnedHostFork) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_fork"};
+  hrr::test::SpawnProc proc(hrr_self_exe());
+  proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+  set_proc_search_path(proc);
+  const int ret = proc.runWithTimeout("\"Unit_HRR_PinnedHostFork_Direct\"", 300);
+  INFO("Capture exit code: " << ret);
+  REQUIRE(ret == 0);
+}
+#endif
 #endif  // HRR_PLAYBACK_EXE && HRR_TEST_EXE
 
 /**

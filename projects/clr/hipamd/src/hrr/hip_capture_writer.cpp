@@ -172,8 +172,10 @@ static constexpr size_t   kPathMax          = 4096;
 static constexpr size_t   kMetadataJsonMax  = 128u * 1024u;
 static constexpr size_t   kEmergencyManifestMax = kMetadataJsonMax + 1024u;
 
-// Lock order: g_reopen_mu, then g_file_mu, then g_blob_mu, then
-// g_unreplayable_mu. atfork_prepare is the only path that holds them all.
+// Lock order: g_pinned_mu (hip_capture.cpp, held while a launch copies pinned
+// host memory or writes its event), then g_reopen_mu, then g_file_mu, then
+// g_blob_mu, then g_unreplayable_mu. Only fork() holds them all: the pinned
+// prepare handler takes g_pinned_mu, then atfork_prepare takes the rest.
 static std::mutex   g_file_mu;
 static int          g_events_fd = -1;
 // g_base_dir is the archive path requested via HIP_HRR_CAPTURE_OUTPUT.

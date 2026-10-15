@@ -209,6 +209,8 @@ cases:
   Unit_HRR_Occupancy_Direct: {}
   Unit_HRR_OverflowingMemcpy3DNotRecorded: {}
   Unit_HRR_OverflowingMemcpy3D_Direct: {}
+  Unit_HRR_PinnedHostFork: {}
+  Unit_HRR_PinnedHostFork_Direct: {}
   Unit_HRR_PinnedHostFreedRoundtrip: {}
   Unit_HRR_PinnedHostFreed_Direct: {}
   Unit_HRR_PinnedHostMalloc_Direct: {}

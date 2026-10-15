@@ -181,10 +181,11 @@ struct PinnedAlloc {
 };
 struct HostSnap {
   uint64_t         base = 0, size = 0;
-  hrr_cap::Hash128 hash{};
+  hrr_cap::Hash128 hash{}, last{};
   bool             record = false;  // contents differ from the last record
+  std::unique_ptr<uint8_t[]> copy;  // the bytes, until hashed and written
 };
-std::mutex                       g_pinned_mu;  // also held while a snapshot reads
+std::mutex                       g_pinned_mu;  // also held while a snapshot copies
 std::map<uintptr_t, PinnedAlloc> g_pinned;
 std::atomic<size_t>              g_pinned_count{0};
 // The pinned allocations the launch this thread is making points into.
@@ -204,6 +205,20 @@ static void pinned_untrack(void* p) {
   std::lock_guard<std::mutex> lk(g_pinned_mu);
   g_pinned.erase(reinterpret_cast<uintptr_t>(p));
   g_pinned_count.store(g_pinned.size(), std::memory_order_relaxed);
+}
+
+// fork() takes g_pinned_mu before the writer's locks, the order a launch takes
+// them in, so a child never inherits it held by a snapshot on a thread it does
+// not have. Registered after writer::open() registers the writer's handlers:
+// prepare handlers run in reverse order of registration.
+static void pinned_install_atfork() {
+#ifndef _WIN32
+  static std::once_flag once;
+  std::call_once(once, [] {
+    pthread_atfork([] { g_pinned_mu.lock(); }, [] { g_pinned_mu.unlock(); },
+                   [] { g_pinned_mu.unlock(); });
+  });
+#endif
 }
 
 static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
@@ -226,11 +241,18 @@ static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
           "pinned host snapshot",
           "a pinned allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB was not recorded");
     } else {
-      s.hash = hrr_cap::writer::write_blob(reinterpret_cast<const void*>(s.base), s.size);
-      PinnedAlloc& a = it->second;
-      s.record = (s.hash.lo || s.hash.hi) && (s.hash.lo != a.last.lo || s.hash.hi != a.last.hi);
+      // Hashed and written from the copy, after the lock, so the blob holds
+      // the bytes its hash names.
+      s.copy.reset(new (std::nothrow) uint8_t[s.size]);
+      if (s.copy) {
+        std::memcpy(s.copy.get(), reinterpret_cast<const void*>(s.base), s.size);
+        s.last = it->second.last;
+      } else {
+        hrr_cap::writer::note_unreplayable("pinned host snapshot",
+                                           "no memory to copy a pinned allocation");
+      }
     }
-    t_snaps.push_back(s);
+    t_snaps.push_back(std::move(s));
   }
 }
 
@@ -244,7 +266,7 @@ struct PinnedSnapshot {
       return;
     if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
     const amd::KernelSignature& sig = hip::asKernel(f)->signature();
-    std::lock_guard<std::mutex> lk(g_pinned_mu);
+    std::unique_lock<std::mutex> lk(g_pinned_mu);
     uint32_t param_idx = 0;
     for (uint32_t i = 0; i < sig.numParametersAll(); i++) {
       const auto& d = sig.at(i);
@@ -256,6 +278,13 @@ struct PinnedSnapshot {
         bytes = static_cast<const uint8_t*>(params[param_idx]);
       param_idx++;
       if (d.offset_ % sizeof(uint64_t) == 0) pinned_scan_locked(bytes, d.size_);
+    }
+    lk.unlock();
+    for (HostSnap& s : t_snaps) {
+      if (!s.copy) continue;
+      s.hash = hrr_cap::writer::write_blob(s.copy.get(), s.size);
+      s.copy.reset();
+      s.record = (s.hash.lo || s.hash.hi) && (s.hash.lo != s.last.lo || s.hash.hi != s.last.hi);
     }
   }
   ~PinnedSnapshot() { t_snaps.clear(); }
@@ -2935,6 +2964,7 @@ void hip_capture_init() {
       hip_capture_uninstall();
       return;
     }
+    pinned_install_atfork();
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());

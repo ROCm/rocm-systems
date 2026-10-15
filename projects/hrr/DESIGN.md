@@ -541,9 +541,10 @@ call records; replay would run it on whatever its fresh buffer holds. Capture tr
 ranges of `hipHostMalloc` and `hipHostRegister` (dropped on `hipHostFree`, `hipFreeHost`,
 `hipFree` and `hipHostUnregister`). Before each launch it reads the 8-byte-aligned words of
 the arguments, by-value structs included; for each tracked allocation a word points into,
-it writes the whole allocation as a blob and adds a record (base, offset 0, length, blob
-hash, direction 0) to the launch event, unless the hash equals that of the allocation's
-last record. Struct words pointing into such an allocation are flagged for translation like
+it copies the whole allocation under the tracking lock, writes the copy as a blob and adds a
+record (base, offset 0, length, blob hash, direction 0) to the launch event, unless the hash
+equals that of the allocation's last record. Struct words pointing into such an allocation
+are flagged for translation like
 embedded device pointers, and replay translates them without the device-address shape
 check. Replay checks each record names the base of a pinned host
 allocation it made, lies inside it and matches its blob's length, refusing and counting it
@@ -553,7 +554,8 @@ summary prints restored, refused and skipped counts.
 Kept deliberately simple:
 
 - Capture does not wait for the stream: the bytes are those at enqueue time, which is what
-  the kernel reads unless earlier queued work still changes them.
+  the kernel reads unless earlier queued work still changes them. If that work is writing
+  the allocation during the copy, replay restores the partial bytes over its output.
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
   `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
   `unreplayable_apis`.
@@ -567,8 +569,7 @@ Kept deliberately simple:
   stay in replay's buffer as they did at capture; a host store that puts back exactly the
   last recorded bytes after such a device write is missed.
 - Only the launch stream is synchronized before a restore; work on other streams reading
-  the buffer is not waited for. A `fork()` while another thread snapshots can leave the
-  child's tracking lock held.
+  the buffer is not waited for.
 
 **Threat model.** The snapshots put into the archive host memory the application never
 handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,
