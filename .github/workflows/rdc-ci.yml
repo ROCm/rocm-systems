@@ -288,7 +288,7 @@ jobs:
       shell: bash
       run: |
         # TheRock runs this copy; it must import on its own and hold only the
-        # fake library, the suite and its value table.
+        # fake library, the suite, its value table and its stress plumbing.
         suite="$ROCM_DIR/share/rdc/rdctst_tests/fake_gpu"
         python3 -m pytest --collect-only -q -p no:cacheprovider "$suite"
         extra=$(find "$suite" -type f ! -name '*.py' ! -name '*.so' ! -name '*.inc')
@@ -654,6 +654,283 @@ jobs:
         path: |
           ${{ env.SANITIZER_LOGS }}
           projects/rdc/build/test-results-sanitize-*.xml
+        retention-days: 30
+
+  # =================================================================
+  #  Clang job — RDC built with the toolchain TheRock uses: AMD clang,
+  #  gRPC 1.78.1 linked statically. Runs the no-GPU tests, the stress
+  #  tests and the ThreadSanitizer race tests. Not gating until repo
+  #  variable RDC_CLANG_GATING is 'true'.
+  # =================================================================
+  rdc_clang:
+    if: ${{ (github.event_name != 'pull_request' || !github.event.pull_request.head.repo.fork) }}
+    needs: rdc_build
+    runs-on: lstt_ci_runners
+    timeout-minutes: 60
+    continue-on-error: ${{ vars.RDC_CLANG_GATING != 'true' }}
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2
+      # ThreadSanitizer turns address randomization off for itself on hosts
+      # with 32 bits of mmap entropy (vm.mmap_rnd_bits=32, as Ubuntu's 6.8
+      # kernels set it), and Docker's default seccomp profile blocks that
+      # (setarch -R fails there too). Only seccomp is relaxed: no --privileged,
+      # no added capabilities, and like the other jobs this one runs only for
+      # branches of this repository. Drop the option if the race tests leave
+      # this job.
+      options: --security-opt seccomp=unconfined
+    env:
+      CC: /opt/rocm/llvm/bin/clang
+      CXX: /opt/rocm/llvm/bin/clang++
+      GRPC_VERSION: "1.78.1"
+      GRPC_ROOT: /opt/grpc-static
+      CLANG_PREFIX: /opt/rdc-clang
+
+    steps:
+    - uses: actions/checkout@v4
+      with:
+        sparse-checkout: projects/rdc
+
+    - name: Install build and test tools
+      working-directory: .
+      run: |
+        apt update -y
+        apt install -y \
+          build-essential \
+          ccache \
+          cmake \
+          git \
+          libcap-dev \
+          libdrm-dev \
+          libgflags-dev \
+          libmnl-dev \
+          libnl-3-dev \
+          libnl-genl-3-dev \
+          pkg-config \
+          python3 \
+          python3-pip \
+          rocm-core
+        pip3 install pytest pytest-timeout prometheus_client
+
+    - name: Check the compiler
+      shell: bash
+      run: |
+        set -euo pipefail
+        version="$("${CXX}" --version | head -1)"
+        echo "${version}"
+        grep -q '^AMD clang version' <<< "${version}" \
+          || { echo "${CXX} is not AMD clang"; exit 1; }
+
+    - name: Set the cache date and compiler
+      shell: bash
+      run: |
+        set -euo pipefail
+        echo "TODAY=$(date +%Y_%m_%d)" >> "$GITHUB_ENV"
+        # A static gRPC is linked into RDC, so its cache is per compiler.
+        echo "CLANG_ID=$("${CXX}" --version | head -1 | sha256sum | cut -c1-12)" >> "$GITHUB_ENV"
+
+    - name: Download the amd-smi package
+      uses: actions/download-artifact@v4
+      with:
+        name: rdc-packages
+        path: /tmp/rdc-packages
+
+    - name: Install amd-smi
+      shell: bash
+      working-directory: .
+      run: |
+        set -euo pipefail
+        mapfile -t debs < <(find /tmp/rdc-packages -iname 'amd-smi-lib*.deb' ! -iname '*tests*')
+        test "${#debs[@]}" -eq 1
+        apt-get install -y "${debs[@]}"
+
+    # actions/cache saves only when the job succeeds, so restore and save
+    # separately. The key names the image, the compiler and the gRPC version;
+    # change it when the gRPC build options below change.
+    - name: Restore gRPC
+      id: grpc-cache
+      uses: actions/cache/restore@v4
+      with:
+        path: ${{ env.GRPC_ROOT }}
+        key: grpc-${{ env.GRPC_VERSION }}-static-clang-${{ env.CLANG_ID }}-rocm-dev-ubuntu-22.04-7.2
+
+    - name: Build and install gRPC
+      if: ${{ steps.grpc-cache.outputs.cache-hit != 'true' }}
+      working-directory: .
+      shell: bash
+      run: |
+        set -euo pipefail
+        git clone --branch "v${GRPC_VERSION}" --depth 1 \
+          https://github.com/grpc/grpc.git /tmp/grpc
+        git -C /tmp/grpc submodule update --init --depth 1 \
+          third_party/abseil-cpp \
+          third_party/boringssl-with-bazel \
+          third_party/cares/cares \
+          third_party/protobuf \
+          third_party/re2 \
+          third_party/zlib
+        # Static and position-independent, as TheRock links it into RDC.
+        cmake -S /tmp/grpc -B /tmp/grpc/build \
+          -DgRPC_INSTALL=ON \
+          -DgRPC_BUILD_TESTS=OFF \
+          -DBUILD_SHARED_LIBS=OFF \
+          -DCMAKE_POSITION_INDEPENDENT_CODE=ON \
+          -DABSL_PROPAGATE_CXX_STD=ON \
+          -DCMAKE_INSTALL_PREFIX="${GRPC_ROOT}" \
+          -DCMAKE_INSTALL_LIBDIR=lib \
+          -DCMAKE_BUILD_TYPE=Release
+        cmake --build /tmp/grpc/build --parallel "$(nproc)"
+        cmake --install /tmp/grpc/build
+
+    - name: Save gRPC
+      if: ${{ steps.grpc-cache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ${{ env.GRPC_ROOT }}
+        key: grpc-${{ env.GRPC_VERSION }}-static-clang-${{ env.CLANG_ID }}-rocm-dev-ubuntu-22.04-7.2
+
+    - name: Restore .ccache
+      id: ccache
+      uses: actions/cache/restore@v4
+      with:
+        path: ~/.cache/ccache
+        key: ${{ runner.os }}-rdc-clang-ccache-${{ github.ref_name }}-${{ env.TODAY }}
+        restore-keys: |
+          ${{ runner.os }}-rdc-clang-ccache-${{ github.ref_name }}-
+          ${{ runner.os }}-rdc-clang-ccache-
+
+    - name: Build RDC with clang
+      shell: bash
+      run: |
+        set -euo pipefail
+        cmake \
+          -B build-clang \
+          -DCMAKE_C_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_CXX_COMPILER_LAUNCHER=ccache \
+          -DCMAKE_BUILD_TYPE="${BUILD_TYPE}" \
+          -DGRPC_DESIRED_VERSION="${GRPC_VERSION}" \
+          -DGRPC_ROOT="${GRPC_ROOT}" \
+          -DBUILD_RUNTIME=OFF \
+          -DBUILD_PROFILER=OFF \
+          -DBUILD_RVS=OFF \
+          -DBUILD_TESTS=ON \
+          -DRDC_BUILD_RACE_TESTS=ON \
+          -DCMAKE_INSTALL_PREFIX="${CLANG_PREFIX}"
+        make -C build-clang -j "$(nproc)"
+        make -C build-clang install
+        ccache --show-stats
+
+    - name: Save .ccache
+      if: ${{ !cancelled() && steps.ccache.outputs.cache-hit != 'true' }}
+      uses: actions/cache/save@v4
+      with:
+        path: ~/.cache/ccache
+        key: ${{ runner.os }}-rdc-clang-ccache-${{ github.ref_name }}-${{ env.TODAY }}
+
+    - name: Check the build
+      shell: bash
+      run: |
+        set -euo pipefail
+        # RDC itself compiled by AMD clang: the configured compiler, and the
+        # producer recorded in RDC's own objects (a linked binary also holds
+        # the producers of the static gRPC it contains).
+        grep -qxF "CMAKE_CXX_COMPILER:FILEPATH=${CXX}" build-clang/CMakeCache.txt \
+          || { echo "RDC was not configured with ${CXX}"; exit 1; }
+        readelf="$(dirname "${CXX}")/llvm-readelf"
+        test -x "${readelf}" || { echo "no ${readelf}"; exit 1; }
+        for src in RdcEmbeddedHandler.cc rdc_server_main.cc; do
+          obj="$(find build-clang -name "${src}.o" -print -quit)"
+          test -n "${obj}" || { echo "no object file for ${src}"; exit 1; }
+          grep -q 'AMD clang' <<< "$("${readelf}" -p .comment "${obj}")" \
+            || { echo "${obj} was not compiled by AMD clang"; exit 1; }
+        done
+        # gRPC linked statically: no RDC binary or library needs a gRPC,
+        # protobuf or Abseil library.
+        for f in bin/rdcd bin/rdci lib/librdc.so lib/librdc_bootstrap.so lib/librdc_client.so; do
+          test -f "${CLANG_PREFIX}/${f}" || { echo "no ${f}"; exit 1; }
+          dynamic="$("${readelf}" -d "${CLANG_PREFIX}/${f}")"
+          if grep -E '\(NEEDED\).*\[lib(grpc|gpr|protobuf|absl)' <<< "${dynamic}"; then
+            echo "${f} needs a gRPC, protobuf or Abseil library"; exit 1
+          fi
+        done
+        # The installed fake-GPU suite carries its stress plumbing.
+        for f in conftest.py fake_gpu_stress.py; do
+          test -f "${CLANG_PREFIX}/share/rdc/rdctst_tests/fake_gpu/${f}" \
+            || { echo "the installed fake-GPU suite has no ${f}"; exit 1; }
+        done
+
+    - name: Run the tests
+      shell: bash
+      run: |
+        set -euo pipefail
+        mkdir -p build
+        # Time limits scale like the tests' own waits (an integer factor).
+        limit=$((300 * RDC_TEST_TIME_FACTOR))
+        export ROCM_DIR="${CLANG_PREFIX}" RDC_TEST_PREFIX="${CLANG_PREFIX}"
+        # gRPC is linked in: no gRPC directory on the path.
+        export LD_LIBRARY_PATH="${CLANG_PREFIX}/lib:${CLANG_PREFIX}/lib/rdc:/opt/rocm/lib${LD_LIBRARY_PATH:+:${LD_LIBRARY_PATH}}"
+        failed=0
+        ran=0
+        shopt -s nullglob
+        for t in "${CLANG_PREFIX}"/share/rdc/rdctst_tests/rdc_*_tests; do
+          name="$(basename "$t")"
+          case "${name}" in
+            rdc_unit_tests) continue ;;         # needs a GPU
+            rdc_diag_kernel_tests) continue ;;  # has no install RPATH
+          esac
+          echo "::group::${name}"
+          timeout -k 30 "${limit}" "$t" --gtest_output="xml:build/test-results-clang-${name}.xml" || failed=1
+          echo "::endgroup::"
+          ran=$((ran + 1))
+        done
+        test "${ran}" -ge 2 || { echo "ran ${ran} gtests"; failed=1; }
+        # Race tests: built, never installed. ThreadSanitizer reports every
+        # race it sees, then exits with 66; the test results still pass.
+        echo "::group::rdc_race_tests"
+        timeout -k 30 "${limit}" build-clang/tests/race/rdc_race_tests \
+          --gtest_output="xml:build/test-results-clang-rdc_race_tests.xml" || {
+          rc=$?
+          failed=1
+          echo "::error title=rdc_race_tests::exit ${rc} (66: ThreadSanitizer found a race or could not start; 124: timed out; 137: killed)"
+        }
+        echo "::endgroup::"
+        # Each pytest suite must still collect at least this many tests: a
+        # broken import must not shrink it to a pass.
+        collected() {
+          local out
+          out="$(timeout -k 30 "${limit}" python3 -m pytest --collect-only -q -p no:cacheprovider "$@" 2>&1)" \
+            || { echo 0; return; }
+          grep -Eo '[0-9]+ tests? collected' <<< "${out}" | tail -1 | grep -Eo '^[0-9]+' || echo 0
+        }
+        suite="${CLANG_PREFIX}/share/rdc/rdctst_tests/fake_gpu"
+        fake="$(collected "${suite}")"
+        nogpu="$(collected tests/ci --ignore-glob='tests/ci/test_fake_gpu*.py')"
+        echo "collected: ${fake} fake-GPU tests, ${nogpu} other no-GPU tests"
+        test "${fake}" -ge 100 || { echo "too few fake-GPU tests"; failed=1; }
+        test "${nogpu}" -ge 50 || { echo "too few no-GPU tests"; failed=1; }
+        RDC_CI_REQUIRE_FAKE=1 RDC_CI_REQUIRE_STRESS=1 python3 -m pytest "${suite}" \
+          -v --tb=short -p no:cacheprovider --timeout="${limit}" \
+          --junitxml=build/test-results-clang-fake-gpu.xml || failed=1
+        python3 -m pytest tests/ci --ignore-glob='tests/ci/test_fake_gpu*.py' \
+          -v --tb=short -p no:cacheprovider --timeout="${limit}" \
+          --junitxml=build/test-results-clang-nogpu.xml || failed=1
+        exit "${failed}"
+      env:
+        PYTHONDONTWRITEBYTECODE: "1"
+        RDC_TEST_STRESS: "1"
+        # The runners are shared: room for a loaded host.
+        RDC_TEST_TIME_FACTOR: "2"
+        RDC_SRC_DIR: ${{ github.workspace }}/projects/rdc/python_binding
+
+    - name: Publish test summary
+      if: always()
+      run: python3 tests/ci/junit_summary.py >> "$GITHUB_STEP_SUMMARY"
+
+    - name: Upload test results
+      if: always()
+      uses: actions/upload-artifact@v4
+      with:
+        name: rdc-clang-results
+        path: projects/rdc/build/test-results-clang-*.xml
         retention-days: 30
 
   # =================================================================
