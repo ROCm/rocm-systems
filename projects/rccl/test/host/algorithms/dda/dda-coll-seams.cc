@@ -58,4 +58,7 @@ __attribute__((weak)) void __hipUnregisterFatBinary(void**) {}
 __attribute__((weak)) hipError_t __hipPopCallConfiguration(dim3*, dim3*, size_t*, hipStream_t*) {
   return hipErrorNotSupported;
 }
+// clang >= 23 registers per-kernel profile shadows under -fprofile-instr-generate; these keep the ROCm profile runtime out.
+__attribute__((weak)) void __llvm_profile_offload_register_shadow_variable(void*) {}
+__attribute__((weak)) void __llvm_profile_offload_register_section_shadow_variable(void*) {}
 }  // extern "C"
