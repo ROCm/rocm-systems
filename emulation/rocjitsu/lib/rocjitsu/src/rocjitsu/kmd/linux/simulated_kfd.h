@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/soc.h"
@@ -599,11 +600,12 @@ private:
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
                                         bool retain_on_rejection = true,
                                         bool reserve_runtime_on_rejection = false);
-  bool defer_wave_exception_to_runtime(amdgpu::Wavefront &wf, uint64_t exception_mask,
-                                       bool suspend_while_pending,
-                                       bool clear_debug_stop_on_success = false,
-                                       bool runtime_already_reserved = false,
-                                       bool runtime_failure_debuggable = true);
+  bool defer_wave_exception_to_runtime(
+      amdgpu::Wavefront &wf, uint64_t exception_mask, bool suspend_while_pending,
+      bool clear_debug_stop_on_success = false, bool runtime_already_reserved = false,
+      bool runtime_failure_debuggable = true,
+      amdgpu::QueueExceptionDeliveryPolicy delivery_policy =
+          amdgpu::QueueExceptionDeliveryPolicy::WaitForAcknowledgment);
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
   /// @param retain_on_rejection Whether a serialized stop whose notification
   ///        loses its subscription or notifier should remain in the queue's
@@ -644,7 +646,10 @@ private:
   /// atomic read-modify-write.
   bool on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes, bool is_write,
                           bool is_atomic);
+  /// @brief Decode failures go to a publishable debugger stop first, then the runtime.
   bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
+  /// @brief Report emulator support failures as queue aborts without fabricating a trap.
+  bool on_wave_instruction_failure(amdgpu::Wavefront &wf);
   bool on_wave_alu_exception(amdgpu::Wavefront &wf);
 
   /// @brief Memory-violation handler installed on every compute unit.

@@ -1116,12 +1116,15 @@ void SimulatedKfd::init_command_processors_locked() {
         cu->set_sendmsg_handler([this](amdgpu::Wavefront &wf, uint32_t message) {
           return on_wave_sendmsg(wf, message);
         });
-        cu->set_queue_exception_handler([this, gpu_ordinal](uint32_t queue_id, uint32_t process_id,
-                                                            uint64_t status,
-                                                            bool retain_failure_for_debugger) {
-          const bool delivered = gpu_ordinal < gpus_.size() &&
-                                 signal_runtime_queue_exception(gpus_[gpu_ordinal].gpu_id, queue_id,
-                                                                process_id, status);
+        cu->set_queue_exception_handler([this, gpu_ordinal](
+                                            uint32_t queue_id, uint32_t process_id, uint64_t status,
+                                            bool retain_failure_for_debugger,
+                                            amdgpu::QueueExceptionDeliveryPolicy delivery_policy) {
+          const bool delivered =
+              gpu_ordinal < gpus_.size() &&
+              signal_runtime_queue_exception(
+                  gpus_[gpu_ordinal].gpu_id, queue_id, process_id, status,
+                  delivery_policy == amdgpu::QueueExceptionDeliveryPolicy::WaitForAcknowledgment);
           if (runtime_exception_result_hook_for_testing_)
             runtime_exception_result_hook_for_testing_(delivered);
           complete_runtime_queue_exception(process_id, queue_id, status, delivered,
@@ -1138,6 +1141,8 @@ void SimulatedKfd::init_command_processors_locked() {
         });
         cu->set_illegal_inst_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
+        cu->set_instruction_failure_handler(
+            [this](amdgpu::Wavefront &wf) { return on_wave_instruction_failure(wf); });
         cu->set_alu_exception_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_alu_exception(wf); });
         cu->set_memory_violation_handler(
@@ -2937,6 +2942,7 @@ int SimulatedKfd::create_queue_ioctl(KfdProcess &proc, void *arg) {
         // The gfx1250 debugger ABI publishes each queue in its owning XCC
         // save area. Preserve the legacy single-area model for older targets.
         .xcc_id = gpu->soc->arch() == ROCJITSU_CODE_ARCH_CDNA5 ? target_xcc_id : 0,
+        .has_runtime_exception_signal = queue_request.exception_status_address != 0,
         .exception_status = KFD_EC_MASK(EC_QUEUE_NEW),
         .debug_notification_retained_status = KFD_EC_MASK(EC_QUEUE_NEW),
         .debug_notification_events = {KFD_EC_MASK(EC_QUEUE_NEW)},
@@ -4544,25 +4550,28 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
   return accepted;
 }
 
-bool SimulatedKfd::defer_wave_exception_to_runtime(amdgpu::Wavefront &wave, uint64_t exception_mask,
-                                                   bool suspend_while_pending,
-                                                   bool clear_debug_stop_on_success,
-                                                   bool runtime_already_reserved,
-                                                   bool runtime_failure_debuggable) {
+bool SimulatedKfd::defer_wave_exception_to_runtime(
+    amdgpu::Wavefront &wave, uint64_t exception_mask, bool suspend_while_pending,
+    bool clear_debug_stop_on_success, bool runtime_already_reserved,
+    bool runtime_failure_debuggable, amdgpu::QueueExceptionDeliveryPolicy delivery_policy) {
   auto proc = find_process(wave.process_id());
   if (proc && !runtime_already_reserved)
     reserve_runtime_queue_exception(proc, wave.queue_id(), exception_mask);
   wave.set_fatal_exception_pending(true);
   if (suspend_while_pending)
     wave.set_debug_suspended(true);
-  const bool queued =
-      wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(), exception_mask,
-                                       clear_debug_stop_on_success, runtime_failure_debuggable);
+  const bool queued = wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(),
+                                                       exception_mask, clear_debug_stop_on_success,
+                                                       runtime_failure_debuggable, delivery_policy);
   if (!queued && proc) {
     if (runtime_exception_result_hook_for_testing_)
       runtime_exception_result_hook_for_testing_(false);
     complete_runtime_queue_exception(wave.process_id(), wave.queue_id(), exception_mask,
                                      /*delivered=*/false, runtime_failure_debuggable);
+  }
+  if (!queued && delivery_policy == amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail) {
+    if (auto *sim_engine = wave.cu().engine())
+      sim_engine->request_exit("Failed to queue an instruction-rejection notification", /*code=*/1);
   }
   // Once a fatal path reaches this helper, the wave is either held here or in
   // its trap handler until the deferred result is known. The originating
@@ -4733,15 +4742,17 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
   auto proc = find_process(wave.process_id());
   if (!proc)
     return false;
+  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION);
+  bool debugger_enabled = false;
   {
     std::lock_guard<std::mutex> lk(debug_sessions_mutex_);
     auto session = debug_sessions_.find(proc->client_pid());
-    if (session == debug_sessions_.end() || !session->second.enabled)
-      return false;
+    debugger_enabled = session != debug_sessions_.end() && session->second.enabled;
   }
   uint64_t ctx_base = 0;
   uint32_t ctx_size = 0;
   uint32_t gpu_id = 0;
+  bool has_runtime_signal = false;
   {
     std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
     auto queue = proc->queue_snapshot_map_.find(wave.queue_id());
@@ -4750,17 +4761,23 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
     ctx_base = queue->second.ctx_save_restore_address;
     ctx_size = queue->second.ctx_save_restore_area_size;
     gpu_id = queue->second.gpu_id;
+    has_runtime_signal = queue->second.has_runtime_exception_signal;
   }
-  if (ctx_base == 0)
-    return false;
-  if (!debug_stop_publishable(gpu_id))
-    return false;
+  if (!debugger_enabled || ctx_base == 0 || !debug_stop_publishable(gpu_id)) {
+    if (!has_runtime_signal)
+      return false;
+    return defer_wave_exception_to_runtime(wave, kException,
+                                           /*suspend_while_pending=*/true,
+                                           /*clear_debug_stop_on_success=*/false,
+                                           /*runtime_already_reserved=*/false,
+                                           /*runtime_failure_debuggable=*/false,
+                                           amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail);
+  }
   constexpr uint32_t kTrapstsIllegalInst = 1u << 11;
   const auto saved = wave.debug_stop_state();
   wave.set_trapsts(wave.trapsts() | kTrapstsIllegalInst);
   wave.set_fatal_exception_pending(true);
   wave.debug_trap(0);
-  constexpr uint64_t kException = KFD_EC_MASK(EC_QUEUE_WAVE_ILLEGAL_INSTRUCTION);
   bool runtime_failure_debuggable = false;
   if (!report_wave_stopped(proc, wave.queue_id(), gpu_id, ctx_base, ctx_size, kException,
                            /*retain_on_rejection=*/true, &runtime_failure_debuggable)) {
@@ -4772,6 +4789,30 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
                                            runtime_failure_debuggable);
   }
   return true;
+}
+
+bool SimulatedKfd::on_wave_instruction_failure(amdgpu::Wavefront &wave) {
+  auto proc = find_process(wave.process_id());
+  if (!proc)
+    return false;
+  {
+    std::lock_guard<std::mutex> lock(proc->alloc_mutex_);
+    auto queue = proc->queue_snapshot_map_.find(wave.queue_id());
+    if (queue == proc->queue_snapshot_map_.end() || !queue->second.has_runtime_exception_signal)
+      return false;
+  }
+  // A simulator capability failure has no architectural wave-stop reason.
+  // dbgapi cannot surface or forward a queue abort without such a wave stop;
+  // giving it ownership would strand the queue. Deliver directly to ROCr even
+  // with a debugger attached, preserving TRAPSTS and the debugger stop state.
+  // ROCr acknowledges only once per queue and may run an error callback or
+  // core dump first. Successful publication transfers ownership without waiting.
+  return defer_wave_exception_to_runtime(wave, KFD_EC_MASK(EC_QUEUE_WAVE_ABORT),
+                                         /*suspend_while_pending=*/true,
+                                         /*clear_debug_stop_on_success=*/false,
+                                         /*runtime_already_reserved=*/false,
+                                         /*runtime_failure_debuggable=*/false,
+                                         amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail);
 }
 
 bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, bool) {
