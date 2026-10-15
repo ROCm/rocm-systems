@@ -4094,7 +4094,7 @@ inline static hipError_t hipKernelSetAttributeForDevice(hipKernel_t kernel, hipF
 #if CUDA_VERSION >= CUDA_12000
 inline static hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config,
                                                  hipDevice_t dev) {
-  return hipCUDAErrorTohipError(cuKernelSetCacheConfig(
+  return hipCUResultTohipError(cuKernelSetCacheConfig(
       reinterpret_cast<cudaKernel_t>(kernel), static_cast<CUfunc_cache_enum>(config), dev));
 }
 #endif
