@@ -889,6 +889,7 @@ extern "C" int ginTestIbvMtuToInt(int mtu) {
 }
 
 extern "C" int ginTestNegotiatePathMtu(int local_mtu, int remote_mtu, int* out_mtu) {
+  if (ginIbvMtuToInt(static_cast<enum ibv_mtu>(local_mtu)) == 0) return -1;
   enum ibv_mtu out;
   int rc = ginNegotiatePathMtu(static_cast<enum ibv_mtu>(local_mtu), static_cast<enum ibv_mtu>(remote_mtu), &out);
   if (rc != 0) return rc;
@@ -934,8 +935,7 @@ static int gin_modify_qps_init_to_rtr(rocshmem_gin_qp_set* set, struct gin_dest_
       memcpy(&attr.ah_attr.grh.dgid, &remote_info[i].gid, 16);
     } else {
       // Mirrors transport/net_ib/connect.cc::ncclIbQpRtr(), but doesn't prefer a routable-FLID
-      // sgid_index like ncclIbGetGidIndex() does — unreached today since native IB remains
-      // inspection-only.
+      // sgid_index like ncclIbGetGidIndex() does.
       bool sameSubnet = (ginExtractLocalSubnetPrefix(set->nic.gid.global.subnet_prefix) ==
                          ginExtractLocalSubnetPrefix(remote_info[i].gid.global.subnet_prefix));
       bool needGlobal = !sameSubnet || (set->nic.portinfo.flags & IBV_QPF_GRH_REQUIRED);
