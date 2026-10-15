@@ -321,22 +321,67 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
 
   // Multi-XCD: workgroups from the same dispatch can arrive on different
   // partition threads, so detectors_ and dispatch_disasm_ need protection.
+  const CounterCapacities capacities = counterCapacitiesForArch(wavefronts.front()->cu().arch());
   std::lock_guard<std::mutex> lock(dispatch_mutex_);
-  detectors_[key] = std::make_unique<RaceDetector>(
-      static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
-      static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
-      counterCapacitiesForArch(wavefronts.front()->cu().arch()));
+  std::unique_ptr<RaceDetector> detector;
+  for (size_t i = free_detectors_.size(); i-- > 0;) {
+    const DetectorShape &shape = free_detectors_[i].shape;
+    if (shape.num_waves == num_waves && shape.vgpr_count == physical_vgpr_count &&
+        shape.sgpr_count == physical_sgpr_count && shape.vmcnt == capacities.vmcnt &&
+        shape.lgkmcnt == capacities.lgkmcnt) {
+      detector = std::move(free_detectors_[i].detector);
+      free_detectors_.erase(free_detectors_.begin() + static_cast<std::ptrdiff_t>(i));
+      detector->reset(Dim3d(static_cast<int>(wg_id)), std::move(handler));
+      break;
+    }
+  }
+  if (!detector)
+    detector = std::make_unique<RaceDetector>(
+        static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
+        static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
+        capacities);
+  detectors_[key] = std::move(detector);
+  detector_shapes_[key] = DetectorShape{num_waves, physical_vgpr_count, physical_sgpr_count,
+                                        capacities.vmcnt, capacities.lgkmcnt};
 
   auto &det = *detectors_[key];
   auto &dc = dispatch_disasm_[dispatch_id];
   if (!dc)
     dc = std::make_shared<DisasmCache>();
   for (uint32_t w = 0; w < num_waves; ++w) {
+    // Wavefront objects are pooled and keep their plugin state across workgroups,
+    // so recycle the state, including its 2 KiB PC trace, instead of reallocating.
+    if (wavefronts[w]->has_plugin_state(slot_index())) {
+      auto *state = get_state(*wavefronts[w]);
+      state->trace.clear();
+      state->race_state = &det.getWaveRaceState(static_cast<int>(w));
+      state->disasm = dc;
+      continue;
+    }
     auto state = std::make_unique<RaceWavefrontState>();
     state->race_state = &det.getWaveRaceState(static_cast<int>(w));
     state->disasm = dc;
     wavefronts[w]->set_plugin_state(slot_index(), std::move(state));
   }
+}
+
+void RaceDetectorPlugin::onAmdgpuWorkgroupCompleted(uint32_t dispatch_id, uint32_t wg_id) {
+  // All waves of the workgroup have halted, so no further hook can reach its
+  // detector. Without this, the event registry and per-wave register tables of
+  // every workgroup of every dispatch stay allocated until teardown, and each
+  // new workgroup pays for a fresh set of allocations on the dispatch thread.
+  // Keep a bounded pool of finished detectors for the next workgroup to reuse.
+  std::lock_guard<std::mutex> lock(dispatch_mutex_);
+  const WorkgroupKey key{dispatch_id, wg_id};
+  auto it = detectors_.find(key);
+  if (it == detectors_.end())
+    return;
+  std::unique_ptr<RaceDetector> finished = std::move(it->second);
+  detectors_.erase(it);
+  const DetectorShape shape = detector_shapes_[key];
+  detector_shapes_.erase(key);
+  if (free_detectors_.size() < kMaxPooledDetectors)
+    free_detectors_.push_back({shape, std::move(finished)});
 }
 
 void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessObservation &access,
