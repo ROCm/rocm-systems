@@ -15,6 +15,7 @@
 
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_utils.h"
+#include "libdrm/amdgpu_drm.h"
 #include "test_common.h"
 
 TestFrequenciesReadWrite::TestFrequenciesReadWrite() : TestBase() {
@@ -67,16 +68,17 @@ static uint64_t effective_level_mask(uint64_t requested_mask, const amdsmi_frequ
 }
 
 // Binary string for a bitmask, trimmed of leading zeros (down to at least one
-// digit) for display.
+// digit) for display. Covers every level bit plus bit
+// AMDSMI_MAX_NUM_FREQUENCIES, the out-of-range bit the test sets.
 static std::string to_bit_string(uint64_t mask) {
-  std::string s = std::bitset<AMDSMI_MAX_NUM_FREQUENCIES>(mask).to_string();
+  std::string s = std::bitset<AMDSMI_MAX_NUM_FREQUENCIES + 1>(mask).to_string();
   s.erase(0, std::min(s.find_first_not_of('0'), s.size() - 1));
   return s;
 }
 
 void TestFrequenciesReadWrite::Run(void) {
   amdsmi_status_t ret;
-  amdsmi_frequencies_t f;
+  amdsmi_frequencies_t f{};
   uint64_t freq_bitmask;
   amdsmi_clk_type_t amdsmi_clk;
   const std::map<amdsmi_clk_type_t, std::string> clk_type_map = {
@@ -104,6 +106,8 @@ void TestFrequenciesReadWrite::Run(void) {
     // from by running the test once per clock. Unset => exercise all clocks.
     const char* only_clk_env = std::getenv("AMDSMI_TEST_CLK");
 
+    uint32_t clocks_exercised = 0;
+    bool skipped_an_empty_clock_file = false;
     for (uint32_t clk = AMDSMI_CLK_TYPE_FIRST; clk <= AMDSMI_CLK_TYPE__MAX; ++clk) {
       amdsmi_clk = (amdsmi_clk_type_t)clk;
 
@@ -155,6 +159,25 @@ void TestFrequenciesReadWrite::Run(void) {
           std::cout << "\t**Set " << FreqEnumToStr(amdsmi_clk) << ": Not supported on this machine"
                     << std::endl;
           return false;
+        }
+
+        // Special driver issue that shouldn't normally occur: the clock file exists
+        // but reads back empty.
+        if (ret == AMDSMI_STATUS_UNEXPECTED_DATA) {
+          std::cerr << "WARN: Clock file [" << FreqEnumToStr(amdsmi_clk) << "] exists on device ["
+                    << dv_ind << "] but empty!" << std::endl;
+          std::cerr << "      Likely a driver issue!" << std::endl;
+          // Only an APU is known to power-gate a domain into an empty file, so
+          // skip the write there and leave every other ASIC on its previous
+          // path: an empty clock file on a discrete GPU stays visible instead
+          // of being absorbed here.
+          amdsmi_asic_info_t asic_info = {};
+          if (amdsmi_get_gpu_asic_info(processor_handles_[dv_ind], &asic_info) ==
+                  AMDSMI_STATUS_SUCCESS &&
+              (asic_info.flags & AMDGPU_IDS_FLAGS_FUSION) != 0) {
+            skipped_an_empty_clock_file = true;
+            return false;
+          }
         }
 
         IF_VERB(STANDARD) {
@@ -219,13 +242,17 @@ void TestFrequenciesReadWrite::Run(void) {
 
         // Negative case: a mask entirely above the settable range must be
         // rejected with INVAL, regardless of how many levels are settable.
+        // Use the first level no device can have: a clock with fine-grained
+        // DPM lists only its minimum and maximum, plus its current frequency
+        // while that is in between, so the level count read above can grow
+        // before the write.
         if (settable > 0) {
-          uint64_t invalid_bitmask = 1ULL << settable;
+          uint64_t invalid_bitmask = 1ULL << AMDSMI_MAX_NUM_FREQUENCIES;
           std::string invalid_bm_str = to_bit_string(invalid_bitmask);
 
           IF_VERB(STANDARD) {
             std::cout << "Setting frequency mask for " << FreqEnumToStr(amdsmi_clk) << " to 0b"
-                      << invalid_bm_str << " (level " << settable
+                      << invalid_bm_str << " (level " << AMDSMI_MAX_NUM_FREQUENCIES
                       << ", out-of-range, expect AMDSMI_STATUS_INVAL) ..." << std::endl;
           }
           DISPLAY_AMDSMI_API(set_api_str("0b" + invalid_bm_str), gpu_tag_str(false),
@@ -338,10 +365,19 @@ void TestFrequenciesReadWrite::Run(void) {
 
       if (freq_read()) {
         CHK_ERR_ASRT(ret)
+        ++clocks_exercised;
       } else {
         continue;
       }
       freq_write();
+    }
+
+    // Only guard the skip added here: a device that declines every clock
+    // on its own did so before this test changed. Narrowing the run to one
+    // clock leaves nothing to compare against.
+    if (skipped_an_empty_clock_file && only_clk_env == nullptr) {
+      EXPECT_GT(clocks_exercised, 0u)
+          << "device " << dv_ind << " had every clock skipped as an empty file";
     }
   }
 }

@@ -134,6 +134,17 @@ static inline size_t abce_builder_max_copy_size(const abce_builder_t* builder) {
   return builder->max_copy_size;
 }
 
+// SWAP exists on gfx94x/95x and gfx125+; no other part has the packet.
+static inline bool abce_builder_swap_supported(const abce_builder_t* builder) {
+  return builder->is_gfx125plus || (builder->isa.major == 9 && builder->isa.minor >= 4);
+}
+
+// Required alignment of both swap endpoints.
+static inline size_t abce_builder_swap_alignment(const abce_builder_t* builder) {
+  return builder->is_gfx125plus ? SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS_ALIGNMENT
+                                : SDMA_PKT_COPY_LINEAR_SWAP_ALIGNMENT;
+}
+
 static inline bool abce_builder_requires_gcr(const abce_builder_t* builder) {
   return builder->packet_caps.use_gcr;
 }
@@ -475,8 +486,7 @@ static inline void abce_builder_build_swap_copy(const abce_builder_t* builder, c
                      "gfx125plus swap packet must match legacy swap packet size for shared stride");
   const bool use_gfx125plus = builder->scope_fields && builder->is_gfx125plus;
 
-  const size_t alignment = use_gfx125plus ? SDMA_PKT_COPY_LINEAR_SWAP_GFX125PLUS_ALIGNMENT
-                                          : SDMA_PKT_COPY_LINEAR_SWAP_ALIGNMENT;
+  const size_t alignment = abce_builder_swap_alignment(builder);
   (void)alignment;
   ABCE_ASSERT(((uintptr_t)addr_a & (alignment - 1)) == 0);
   ABCE_ASSERT(((uintptr_t)addr_b & (alignment - 1)) == 0);
