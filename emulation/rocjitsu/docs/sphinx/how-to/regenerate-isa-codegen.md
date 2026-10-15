@@ -67,9 +67,9 @@ When neither `--gen-isas` nor `--gen-dbt` is specified, both are generated.
 
 The repository helper is the authoritative whole-tree workflow. It derives the
 checked-in MR ISA inputs and output directories from its own location, verifies
-the public CDNA5 gfx1251 extension provenance, applies the CDNA5 additions and
-target-variant manifest, regenerates ISA and DBT output, and formats changed
-generated files.
+the public CDNA5 gfx1251 extension provenance, applies the CDNA1 through CDNA4
+legacy-math additions and CDNA5 additions and target-variant manifest,
+regenerates ISA and DBT output, and formats changed generated files.
 
 Activate a Python virtual environment containing the generator dependencies and
 `pre-commit`, then run this command from the `rocm-systems` repository root:
@@ -79,8 +79,9 @@ Activate a Python virtual environment containing the generator dependencies and
 ```
 
 Use the lower-level CLI only for focused generator development. Preserve the
-CDNA5 `--isa-additions` and `--isa-variants` inputs shown in the detailed
-`docs/codegen.md` documentation when generating CDNA5 output.
+CDNA1-4 legacy math additions and CDNA5 `--isa-additions` and
+`--isa-variants` inputs shown in the detailed
+`docs/codegen.md` documentation for the corresponding CDNA output.
 
 ## Workflow for modifying ISA semantics
 
