@@ -506,7 +506,8 @@ in the following table.
         | ``NCCL_STEPS`` steps of this size.
         | Other architectures and the default kernel P2P path are unchanged.
       - | Size in bytes (default: ``4194304``, or 4 MiB).
-        | Values at or below the standard P2P step size keep the standard step.
+        | Values at or below the standard P2P step size keep the standard step;
+        | values above 32 MiB are capped to 32 MiB.
 
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
