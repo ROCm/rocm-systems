@@ -805,7 +805,8 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_busy_percent_get(uint32_t dv_ind) {
                                    AMDSMI_MEM_TYPE_VRAM, &gpu_memory_usage_temp)) &&
       (AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_gpu_memory_total(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-                                   AMDSMI_MEM_TYPE_VRAM, &gpu_memory_total_temp))) {
+                                   AMDSMI_MEM_TYPE_VRAM, &gpu_memory_total_temp)) &&
+      (gpu_memory_total_temp != 0)) {
     readSuccess = true;
     gpu_memory_busy_percent = (uint64_t)(gpu_memory_usage_temp * 100) / gpu_memory_total_temp;
   }
