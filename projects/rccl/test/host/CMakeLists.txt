@@ -389,13 +389,15 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroLinux -- src/os/linux*.cc and src/misc/socket.cc. Own binary: it runs
+  # rccl-UnitTestsMicroLinux -- src/os/linux*.cc, misc/{socket,shmutils,signals}.cc. Own binary: it runs
   # the real os/linux.cc that the shared fakes stub, plus real crypt.cc and utils.cc.
   set(TEST_MICRO_LINUX_SOURCE_FILES
     linux-test.cc
     linux-ipcsocket-test.cc
     linux-socket-pair-test.cc
     socket-test.cc
+    shmutils-test.cc
+    signals-test.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
@@ -1078,6 +1080,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroLinux
     LINUX_IPCSOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux_ipcsocket.cc"
     LINUX_SOCKET_PAIR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux_socket_pair.cc"
     SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/socket.cc"
+    SHMUTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/shmutils.cc"
+    SIGNALS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/signals.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_linux.yaml")
 
 # ---------------------------------------------------------------------------

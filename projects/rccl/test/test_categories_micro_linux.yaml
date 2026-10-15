@@ -8,6 +8,8 @@ test_categories:
     test_patterns:
       - "Linux*"
       - "Socket*"
+      - "Shmutils*"
+      - "Signals*"
     exclude_windows:
       - "*"
     labels:

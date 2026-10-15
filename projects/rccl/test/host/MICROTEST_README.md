@@ -311,8 +311,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 - **`rccl-UnitTestsMicroLinux`** — `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
-  plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc` and `misc/socket.cc`, one test
-  TU each; suites `Linux*`, `Socket*`. Its own binary because it runs the real
+  plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc`, `misc/socket.cc`,
+  `misc/shmutils.cc` and `misc/signals.cc`, one test TU each; suites `Linux*`,
+  `Socket*`, `Shmutils*`, `Signals*`. Its own binary because it runs the real
   `os/linux.cc` the shared fakes stub, on real sockets, files and shared memory. See
   `test_categories_micro_linux.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
@@ -875,7 +876,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
-./build/rccl-UnitTestsMicroLinux              # src/os/linux*.cc, src/misc/socket.cc tests
+./build/rccl-UnitTestsMicroLinux              # src/os/linux*.cc, misc/{socket,shmutils,signals}.cc
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests

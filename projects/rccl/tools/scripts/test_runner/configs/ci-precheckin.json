@@ -266,7 +266,7 @@
       "num_gpus": 1,
       "timeout": 60,
       "tests": [
-        {"name": "LinuxMicrotests", "description": "Host-only os/linux.cc, linux_ipcsocket.cc, linux_socket_pair.cc and misc/socket.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+        {"name": "LinuxMicrotests", "description": "Host-only os/linux.cc, linux_ipcsocket.cc, linux_socket_pair.cc, misc/socket.cc, shmutils.cc and signals.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
     }
   },
@@ -333,7 +333,7 @@
     },
     {
       "name": "RCCL Microtests - os/linux.cc and sockets",
-      "description": "rccl-UnitTestsMicroLinux (host-only os/linux*.cc and misc/socket.cc microtests, no GPU/HIP/RCCL runtime)",
+      "description": "rccl-UnitTestsMicroLinux (host-only os/linux.cc, sockets, shm and signals microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_linux",
       "enabled": true
     }
