@@ -393,9 +393,9 @@ def load_df_pmc(
     Read all raw pmc counters into one analysis df plus a ``PassLayout``.
 
     Counter data comes from the native tool's per-pid artifacts when there are
-    any, and from the rocpd result artifacts otherwise. When the same counter
-    appears in multiple passes (SPP duplication), the wide frame keeps a base
-    column (first pass) and per-pass shadow columns.
+    any, and from the rocpd result artifacts otherwise. When single-pass metric
+    packing copies a counter across passes, the wide frame keeps a base column
+    (first pass) and per-pass shadow columns.
     """
     long_df = _read_counter_rows(Path(raw_data_dir))
     if long_df.empty:
