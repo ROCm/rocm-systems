@@ -333,7 +333,7 @@ done
 
 if [[ "${race_tests}" == true ]]; then
   race_targets=(
-    "gfx942 ${ROCJITSU_SOURCE_DIR}/configs/gfx942_cdna3.json"
+    "gfx942 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_gfx942_config.json"
     "gfx950 ${ROCJITSU_SOURCE_DIR}/tests/race-detector/race_test_config.json"
     "gfx1151 ${ROCJITSU_SOURCE_DIR}/configs/gfx1151.json"
   )
