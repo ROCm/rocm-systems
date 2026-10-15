@@ -753,6 +753,15 @@ if(
         APPEND
         PROPERTY COMPILE_OPTIONS -Wno-error=stringop-overflow
     )
+    # GCC 16 also diagnoses the unreachable eight-byte fast path as an
+    # out-of-bounds copy into the test's four-byte destination.
+    if(CMAKE_CXX_COMPILER_VERSION VERSION_GREATER_EQUAL "16")
+        set_property(
+            SOURCE lds_test.cpp
+            APPEND
+            PROPERTY COMPILE_OPTIONS -Wno-error=array-bounds
+        )
+    endif()
 endif()
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
