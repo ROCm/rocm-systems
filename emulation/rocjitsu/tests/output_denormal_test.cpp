@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+/// @file output_denormal_test.cpp
+/// @brief MODE-controlled output-denormal flushing.
+
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/output_denormal.h"
 

@@ -689,15 +689,20 @@ TEST_P(Vop3ConversionModifierTest, FrexpExponentIsSignedIntegerWithoutOutputModi
   struct Case {
     uint16_t f16;
     uint64_t f64;
-    int32_t exponent;
+    int32_t f16_exponent, f64_exponent;
+    bool subnormal = false;
   };
   // gfx1100/gfx1201 captures cover 1.0 and 0.25 for F16 (VOP1 and VOP3) and
   // 1.0 for F64 VOP3; gfx942/gfx950 captures show OMOD=2 leaves the exponent.
-  constexpr Case cases[] = {{0x3c00, 0x3ff0000000000000, 1},
-                            {0x3400, 0x3fd0000000000000, -1},
-                            {0xc000, 0xc008000000000000, 2},
-                            {0x7bff, 0x40effc0000000000, 16},
-                            {0x0000, 0x0000000000000000, 0}};
+  // gfx1100/gfx1201 give exponent 0 for subnormal sources when MODE.FP_DENORM
+  // flushes F16/F64 inputs.
+  constexpr Case cases[] = {{0x3c00, 0x3ff0000000000000, 1, 1},
+                            {0x3400, 0x3fd0000000000000, -1, -1},
+                            {0xc000, 0xc008000000000000, 2, 2},
+                            {0x7bff, 0x40effc0000000000, 16, 16},
+                            {0x0000, 0x0000000000000000, 0, 0},
+                            {0x0001, 0x0000000000000001, -23, -1073, true},
+                            {0x83ff, 0x800fffffffffffff, -14, -1022, true}};
   const bool early_rdna =
       GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
   const bool true16 = !gfx9() && !early_rdna;
@@ -752,16 +757,92 @@ TEST_P(Vop3ConversionModifierTest, FrexpExponentIsSignedIntegerWithoutOutputModi
                 ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
                 for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
                   const auto &c = cases[lane % std::size(cases)];
-                  const uint32_t half = static_cast<uint16_t>(c.exponent);
-                  const uint32_t expected = f64      ? static_cast<uint32_t>(c.exponent)
+                  const bool flushed = c.subnormal && !(mode & 0x40u);
+                  const int32_t exponent = flushed ? 0 : f64 ? c.f64_exponent : c.f16_exponent;
+                  const uint32_t half = static_cast<uint16_t>(exponent);
+                  const uint32_t expected = f64      ? static_cast<uint32_t>(exponent)
                                             : high   ? (half << 16) | 0xa5a5u
                                             : true16 ? 0xa5a50000u | half
                                                      : half;
                   EXPECT_EQ(cu->read_vgpr(vb + 4, lane),
                             exec & (1ull << lane) ? expected : 0xa5a5a5a5u)
-                      << "lane=" << lane << " exponent=" << c.exponent;
+                      << "lane=" << lane << " exponent=" << exponent;
                 }
               }
+            }
+          }
+        }
+      }
+    }
+    wf->halt();
+  }
+}
+
+TEST_P(Vop3ConversionModifierTest, FrexpMantissaFlushesSubnormalSourcesUnderMode) {
+  struct Case {
+    uint16_t f16, f16_kept;
+    uint64_t f64, f64_kept;
+    bool subnormal;
+  };
+  // gfx1201 captures: a flushed subnormal gives a signed zero mantissa, a kept
+  // one is normalized.
+  constexpr Case cases[] = {{0x3c00, 0x3800, 0x3ff0000000000000, 0x3fe0000000000000, false},
+                            {0x0001, 0x3800, 0x0000000000000001, 0x3fe0000000000000, true},
+                            {0x83ff, 0xbbfe, 0x800fffffffffffff, 0xbfeffffffffffffe, true}};
+  const bool early_rdna =
+      GetParam() == ROCJITSU_CODE_ARCH_RDNA1 || GetParam() == ROCJITSU_CODE_ARCH_RDNA2;
+  const bool preserve_high = !gfx9() && !early_rdna;
+  for (bool force_scalar : {false, true}) {
+    ForceScalarGuard guard(force_scalar);
+    amdgpu::GpuMemory memory("frexp_mantissa_memory");
+    amdgpu::L2Cache l2("frexp_mantissa_l2");
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = GetParam();
+    cfg.num_wf_slots = 1;
+    cfg.sgprs_per_wf = gfx9() ? 102 : 106;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    auto cu = amdgpu::ComputeUnitCore::create("frexp_mantissa", cfg, &memory, &l2);
+    auto decoder = Decoder::create(GetParam());
+    auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+    ASSERT_NE(wf, nullptr);
+    const auto vb = wf->vgpr_alloc().base;
+    wf->set_exec(wf->wf_size() == 64 ? ~0ull : 0xffffffffull);
+    for (bool f64 : {false, true}) {
+      for (bool vop3 : {false, true}) {
+        // GFX9 uses VOP1 66/49 and VOP3 386/369; later encodings use VOP1 89/61
+        // and VOP3 473/445 for the F16/F64 forms.
+        const uint32_t opcode = vop3 ? (gfx9() ? (f64 ? 369u : 386u) : (f64 ? 445u : 473u))
+                                     : (gfx9() ? (f64 ? 49u : 66u) : (f64 ? 61u : 89u));
+        const uint32_t words[] = {vop3 ? ((gfx9() ? 0xd0000004u : 0xd4000004u) | (opcode << 16))
+                                       : (0x7e000100u | (4u << 17) | (opcode << 9)),
+                                  256u};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words));
+        ASSERT_NE(inst, nullptr);
+        for (uint32_t mode : {0u, 0xf0u}) {
+          SCOPED_TRACE(testing::Message() << "scalar=" << force_scalar << " f64=" << f64
+                                          << " vop3=" << vop3 << " mode=" << mode);
+          wf->set_mode_raw(mode);
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+            const auto &c = cases[lane % std::size(cases)];
+            cu->write_vgpr(vb, lane, f64 ? static_cast<uint32_t>(c.f64) : (0xdead0000u | c.f16));
+            cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(c.f64 >> 32));
+            cu->write_vgpr(vb + 4, lane, 0xa5a5a5a5u);
+            cu->write_vgpr(vb + 5, lane, 0xa5a5a5a5u);
+          }
+          ASSERT_TRUE(cu->execute_instruction(inst.get(), *wf).succeeded());
+          for (uint32_t lane = 0; lane < wf->wf_size(); ++lane) {
+            const auto &c = cases[lane % std::size(cases)];
+            const bool flushed = c.subnormal && !(mode & 0x40u);
+            if (f64) {
+              const uint64_t expected = flushed ? c.f64 & 0x8000000000000000u : c.f64_kept;
+              const uint64_t actual =
+                  cu->read_vgpr(vb + 4, lane) | (uint64_t{cu->read_vgpr(vb + 5, lane)} << 32);
+              EXPECT_EQ(actual, expected) << "lane=" << lane;
+            } else {
+              const uint32_t half = flushed ? c.f16 & 0x8000u : c.f16_kept;
+              EXPECT_EQ(cu->read_vgpr(vb + 4, lane), half | (preserve_high ? 0xa5a50000u : 0))
+                  << "lane=" << lane;
             }
           }
         }

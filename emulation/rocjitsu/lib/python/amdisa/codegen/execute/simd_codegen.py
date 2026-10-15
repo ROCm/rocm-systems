@@ -488,22 +488,29 @@ SIMD_VOP1_UNARY: dict[str, tuple[str, str, str]] = {
         ' return static_cast<uint32_t>(amdgpu::frexp_f32(std::bit_cast<float>('
         'static_cast<uint32_t>(a[i])), wf.fp_denorm_mode_f32()).exponent); }); }',
     ),
-    # FREXP F16: widen -> FREXP -> narrow mantissa or signed 16-bit exponent.
-    # The mantissa's VOP3 twin uses SIMD_VOP3_FREXP_FP for modifiers.
+    # FREXP F16: flush the raw half under MODE, widen, then narrow the mantissa
+    # or keep the signed 16-bit exponent. The mantissa's VOP3 twin uses
+    # SIMD_VOP3_FREXP_FP for modifiers.
     'v_frexp_mant_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::f32_to_f16_simd(util::frexp_mant_f32_simd('
-        'std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)))); }',
+        _flush_input_then(
+            'F16',
+            '[](auto a) {'
+            ' return util::f32_to_f16_simd(util::frexp_mant_f32_simd('
+            'std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)))); }',
+        ),
     ),
     'v_frexp_exp_i16_f16_vop1': (
         'uint32_t',
         'uint32_t',
-        '[](auto a) {'
-        ' return util::frexp_exp_f32_simd('
-        'std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)))'
-        ' & util::native<uint32_t>(0xFFFFu); }',
+        _flush_input_then(
+            'F16',
+            '[](auto a) {'
+            ' return util::frexp_exp_f32_simd('
+            'std::bit_cast<util::native<uint32_t>>(util::f16_to_f32_simd(a)))'
+            ' & util::native<uint32_t>(0xFFFFu); }',
+        ),
     ),
     # --- f8 -> f32 (E4M3 / E5M2 8-bit float expand) ----------------------------
     # Scalar reads the low byte of src0 and expands via util::fp8_e4m3_to_f32 /
@@ -1022,7 +1029,7 @@ SIMD_VOP1_UNARY_F64: dict[str, tuple[str, str]] = {
     # renorm (see util::frexp_mant_f64_simd). VOP3 twin in SIMD_VOP3_UNARY_FP64.
     'v_frexp_mant_f64_vop1': (
         'double',
-        '[](auto a) { return util::frexp_mant_f64_simd(a); }',
+        _flush_input_then('F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'),
     ),
 }
 
@@ -1060,13 +1067,17 @@ SIMD_CVT_F64_TO_B32: dict[str, tuple[str, str]] = {
         ' auto r = util::cvt_u32_f64_saturate_input_simd(s);'
         ' return util::stdx::static_simd_cast<util::narrow32<uint32_t>>(r); }',
     ),
-    # FREXP exponent (F64 -> int32): narrow the low 32 exponent bits. The VOP3
-    # twin reuses this functor: ABS/NEG cannot change the exponent.
+    # FREXP exponent (F64 -> int32): flush the source under MODE, then narrow
+    # the low 32 exponent bits. The VOP3 twin reuses this functor: ABS/NEG
+    # cannot change the exponent.
     'v_frexp_exp_i32_f64_vop1': (
         'int32_t',
-        '[](auto s) {'
-        ' return util::stdx::static_simd_cast<util::narrow32<int32_t>>('
-        'util::frexp_exp_f64_simd(s)); }',
+        _flush_input_then(
+            'F64',
+            '[](auto s) {'
+            ' return util::stdx::static_simd_cast<util::narrow32<int32_t>>('
+            'util::frexp_exp_f64_simd(s)); }',
+        ),
     ),
 }
 
@@ -1982,9 +1993,12 @@ SIMD_VOP3_UNARY_FP64: dict[str, str] = {
     # std::floor bit-exact incl. sign-of-zero (NaN-floor(NaN) = NaN; NaN result
     # skipped by the test like any other NaN-result lane).
     'v_fract_f64_vop3': '[](auto a) { return a - util::floor_simd(a); }',
-    # frexp mantissa: same functor as the VOP1 form; the f64 unary FP glue applies
-    # abs/neg on the source and omod/clamp on the mantissa, matching the scalar.
-    'v_frexp_mant_f64_vop3': '[](auto a) { return util::frexp_mant_f64_simd(a); }',
+    # frexp mantissa: same functor as the VOP1 form, after MODE input flushing;
+    # the f64 unary FP glue applies abs/neg on the source and omod/clamp on the
+    # mantissa, matching the scalar.
+    'v_frexp_mant_f64_vop3': _flush_input_then(
+        'F64', '[](auto a) { return util::frexp_mant_f64_simd(a); }'
+    ),
     # v_rcp_f64 / v_rsq_f64: scalar uses transcendental::*_f64 with explicit
     # NaN passthrough, ±0 -> copysign(Inf, x), ±Inf -> copysign(0, x); negative
     # rsq inputs -> qNaN. Plain 1.0 / x and 1.0 / sqrt match the IEEE result
@@ -2046,8 +2060,8 @@ SIMD_VOP3_UNARY_FP16: dict[str, str] = {
 }
 
 
-# Specialized VOP3 FREXP mantissa route (fp16: F16 unary glue; round to half
-# before OMOD/CLAMP). Exponent results are integers and take no output
+# Specialized VOP3 FREXP mantissa route (fp16: F16 unary glue; flush the raw
+# half under MODE, then round to half before OMOD/CLAMP). Exponent results are integers and take no output
 # modifiers: F64 reuses its VOP1 functor, and the F16 form stays scalar.
 SIMD_VOP3_FREXP_FP: dict[str, tuple[str, str]] = {
     'v_frexp_mant_f16_vop3': (
@@ -3028,7 +3042,8 @@ def _simd_probe_line(
                 if true16_vop3
                 else 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16'
             )
-            return f'  {macro}({fn});'
+            # The glue flushes the raw half before widening it for the functor.
+            return f'  {macro}({fn}, false, {input_policy.policy_expr("f16")});'
         return f'  ROCJITSU_TRY_SIMD_VOP3_UNARY_FP(float32_t, float32_t, {fn});'
     # F16 unary glue: integral rounding, FRACT and SQRT/RCP/RSQ/EXP/LOG.
     spec3unaf16 = SIMD_VOP3_UNARY_FP16.get(template_name)

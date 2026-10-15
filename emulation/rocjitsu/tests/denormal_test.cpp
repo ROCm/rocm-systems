@@ -1,6 +1,9 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+/// @file denormal_test.cpp
+/// @brief Policy-free denormal flushing and its host-value adapter (denormal_value.h).
+
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"

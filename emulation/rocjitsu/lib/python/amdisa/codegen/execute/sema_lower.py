@@ -1907,6 +1907,23 @@ def _takes_flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> bool:
     return callee in F16_FLUSHED_SOURCE_CALLS and node.ty == SemaType.F16
 
 
+def _frexp_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
+    """Return an F16/F64 FREXP source flushed by MODE before it is split.
+
+    F32 sources pass MODE to frexp_f32 instead. An F16 source is flushed before
+    widening, since a subnormal half is normal in F32.
+    """
+    if not (node.call_name or '').startswith('frexp_') or len(node.children) != 2:
+        return None
+    if ctx.exec_model != ExecModel.VECTOR:
+        return None
+    source = node.children[1]
+    read = source.children[1] if source.call_name == 'apply_src_mod' else source
+    if read.ty not in (SemaType.F16, SemaType.F64):
+        return None
+    return _input_flushed_source(source, ctx)
+
+
 def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
     """Lower a .call node through inline ops, helper registry, or VOP3 modifiers."""
     callee = node.call_name or ''
@@ -1931,6 +1948,8 @@ def _lower_call(node: SemaNode, ctx: LoweringContext) -> str:
 
     if _takes_flushed_f16_source(node, ctx):
         args = [_flushed_f16_source(node.children[1], ctx)]
+    elif (source := _frexp_flushed_source(node, ctx)) is not None:
+        args = [source]
     else:
         args = [_lower_expr(c, ctx) for c in node.children[1:]]
     args_str = ', '.join(args)
