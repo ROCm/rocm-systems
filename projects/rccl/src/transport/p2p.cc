@@ -301,9 +301,11 @@ static ncclResult_t p2pAllocateShareableBuffer(size_t size, int refcount, ncclIp
   } else {
     // Allocate a CUDA buffer and generate an IPC handle for it
 #if defined(HIP_UNCACHED_MEMORY)
-    NCCLCHECK(ncclCudaCalloc((char**)ptr, size, manager, memtype, hipDeviceMallocUncached));
+    NCCLCHECK(ncclCudaCalloc((char**)ptr, size, manager, memtype, hipDeviceMallocUncached,
+                             /*forceLegacy=*/true));
 #else
-    NCCLCHECK(ncclCudaCalloc((char**)ptr, size, manager, memtype, hipDeviceMallocFinegrained));
+    NCCLCHECK(ncclCudaCalloc((char**)ptr, size, manager, memtype, hipDeviceMallocFinegrained,
+                             /*forceLegacy=*/true));
 #endif
     cudaError_t res = cudaIpcGetMemHandle(&ipcDesc->devIpc, *ptr);
     if (res != cudaSuccess) {
@@ -955,7 +957,7 @@ static ncclResult_t p2pSendProxyFree(struct ncclProxyConnection* connection, str
         ncclCudaFree(p2pBuff->directPtr, proxyState->memManager);
       } else {
         // Do not check return code as CUDA may have already shut down
-        ncclCudaFree(p2pBuff->directPtr, proxyState->memManager);
+        ncclCudaFree(p2pBuff->directPtr, proxyState->memManager, /*numSegments=*/1, /*forceLegacy=*/true);
       }
       free(proxyInfo);
     }
@@ -979,7 +981,7 @@ static ncclResult_t p2pRecvProxyFree(struct ncclProxyConnection* connection, str
       ncclCudaFree(p2pBuff->directPtr, proxyState->memManager);
     } else {
       // Do not check return code as CUDA may have already shut down
-      ncclCudaFree(p2pBuff->directPtr, proxyState->memManager);
+      ncclCudaFree(p2pBuff->directPtr, proxyState->memManager, /*numSegments=*/1, /*forceLegacy=*/true);
     }
     free(proxyInfo);
   }
