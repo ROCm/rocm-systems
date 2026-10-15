@@ -50,7 +50,7 @@ class MlApiTracePair:
 class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
-    # PassLayout for SPP same-pass analyze binding; None when unavailable.
+    # PassLayout for same-pass metric binding; None when unavailable.
     pmc_pass_layout: Optional["PassLayout"] = None
     dfs: dict[int, pd.DataFrame] = field(default_factory=dict)
     dfs_type: dict[int, str] = field(default_factory=dict)
