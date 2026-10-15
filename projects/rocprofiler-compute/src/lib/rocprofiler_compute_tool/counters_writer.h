@@ -1,6 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier:  MIT
 #pragma once
+#include "output_registry.h"
 #include "sdk_callbacks.h"
 
 #include <functional>
@@ -9,10 +10,16 @@
 namespace rocprofiler_compute_tool
 {
 
-class CountersWriter
+class CountersWriter : public OutputWriter
 {
 public:
-    virtual ~CountersWriter()                           = default;
+    /// Drops records for kernels that are not being targeted, then writes what
+    /// is left. Dispatches profiled before the targeted kernel was registered
+    /// leave records behind that do not belong in the output.
+    void write(tool_data_t& tool_data) override;
+
+    std::string_view name() const override { return "counters"; }
+
     virtual void write_counters(tool_data_t* tool_data) = 0;
 };
 
