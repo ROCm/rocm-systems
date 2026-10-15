@@ -541,6 +541,11 @@ extern "C" void** __hipRegisterFatBinary(const void*) {
 extern "C" void __hipRegisterFunction(void**, const void*, char*, const char*, unsigned int, uint3*, uint3*, dim3*,
                                       dim3*, int*) {}
 extern "C" void __hipUnregisterFatBinary(void**) {}
+// clang >= 23 registers per-kernel profile shadows under -fprofile-instr-generate; these keep the ROCm
+// profile runtime out.
+extern "C" void __hipRegisterVar(void**, char*, char*, const char*, int, size_t, int, int) {}
+extern "C" __attribute__((weak)) void __llvm_profile_offload_register_shadow_variable(void*) {}
+extern "C" __attribute__((weak)) void __llvm_profile_offload_register_section_shadow_variable(void*) {}
 hipError_t __hipPushCallConfiguration(dim3 grid, dim3 block, size_t shmem, hipStream_t stream) {
   fake.pushedGrid = grid;
   fake.pushedBlock = block;
