@@ -104,6 +104,12 @@ ncclResult_t ncclMakeSymmetricTaskList(struct ncclComm* comm, struct ncclTaskCol
     ncclDevRedOp_t symkOp = symkRedOp(task->opHost, task->opDev.op);
     bool symAvailable = task->symkExtract != RCCL_SYMK_EXTRACT_DENY &&
                         ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count);
+    // The symmetric kernels never read the bias buffer, so taking this path for
+    // ncclAllReduceWithBias would silently drop the bias from the result.
+    // ncclAllReduceWithBias_impl bypasses rcclSelectAllReduce and goes straight to
+    // taskAppend, so symkExtract is left at RCCL_SYMK_EXTRACT_NONE and cannot gate
+    // this. Mirrors the equivalent guard in rcclUseCeAr2Shot().
+    if (task->acc != nullptr) symAvailable = false;
     // Env (NCCL_ALGO/PROTO/SYM_KERNEL) is a global override that wins over per-call
     // algSelection for any function it forced.
     uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
