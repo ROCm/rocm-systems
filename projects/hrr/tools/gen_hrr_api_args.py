@@ -1571,6 +1571,7 @@ _ENUM_TYPES = {
     "hipGraphMemAttributeType", "hipJitInputType",
     "hipMemAllocationHandleType", "hipMemRangeHandleType",
     "hipPointer_attribute", "hipStreamAttrID", "hipGLDeviceList",
+    "hipExecAffinityType",
 }
 
 # Scalar type map: normalised type string -> C field type
@@ -2070,8 +2071,11 @@ _HEADER_PREAMBLE = """\
  * v8: hipDeviceFlushGPUDirectRDMAWrites and hipLibraryGetModule were
  * appended to HipDispatchTable. Each took a compiler ID, so the compiler
  * API IDs moved up by two. develop still records both under v7. A v7
- * reader decodes those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)8u)
+ * reader decodes those events as the wrong API.
+ * v9: hipKernelSetAttributeForDevice and hipDeviceGetExecAffinitySupport
+ * were appended to HipDispatchTable, moving the compiler API IDs up by
+ * another two. A v8 reader decodes those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)9u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
