@@ -1379,27 +1379,32 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
 // Scatter with fewer parts than p2pnChannelsPerPeer claims only its own channels and leaves the side
 // unseen, so a later task to the same peer that uses every part still claims the rest.
 TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterWithFewerParts_ClaimsItsPartsAndLeavesTheRestForLater) {
-  TaskPostTuning_P2pScene p2p;
-  ScopedHook scatterParts(g_rcclP2pTaskParts, [](struct ncclComm* comm, ncclFunc_t collAPI) {
-    return collAPI == ncclFuncScatter ? 1 : comm->p2pnChannelsPerPeer;
-  });
-  const std::vector<int> sendChannels = p2p.Channels(kIsSend);
-  ASSERT_EQ(2u, sendChannels.size());
-  bool needPreconnect = false;
+  for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
+    TaskPostTuning_P2pScene p2p;
+    ScopedHook scatterParts(g_rcclP2pTaskParts, [](struct ncclComm* comm, ncclFunc_t collAPI) {
+      return collAPI == ncclFuncScatter ? 1 : comm->p2pnChannelsPerPeer;
+    });
+    const std::vector<int> channels = p2p.Channels(isSendNotRecv);
+    ASSERT_EQ(2u, channels.size());
+    bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncScatter, &needPreconnect));
+    ASSERT_EQ(ncclSuccess,
+              postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncScatter, &needPreconnect));
 
-  EXPECT_TRUE(needPreconnect);
-  EXPECT_FALSE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
-  EXPECT_EQ(kConnected, p2p.Send(sendChannels[0], kP2pPeer)->hasSeen);
-  EXPECT_EQ(kNotConnected, p2p.Send(sendChannels[1], kP2pPeer)->hasSeen);
-  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), {sendChannels[0]}));
+    EXPECT_TRUE(needPreconnect);
+    EXPECT_FALSE(p2p.Seen(isSendNotRecv, kP2pPeer));
+    EXPECT_EQ(kConnected, p2p.Conn(isSendNotRecv, channels[0], kP2pPeer)->hasSeen);
+    EXPECT_EQ(kNotConnected, p2p.Conn(isSendNotRecv, channels[1], kP2pPeer)->hasSeen);
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), {channels[0]}));
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
+    // The full-part task adds only the channel the Scatter left out.
+    ASSERT_EQ(ncclSuccess,
+              postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect));
 
-  EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
-  EXPECT_EQ(kConnected, p2p.Send(sendChannels[1], kP2pPeer)->hasSeen);
-  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), sendChannels));
+    EXPECT_TRUE(p2p.Seen(isSendNotRecv, kP2pPeer));
+    EXPECT_EQ(kConnected, p2p.Conn(isSendNotRecv, channels[1], kP2pPeer)->hasSeen);
+    EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connect(isSendNotRecv, kP2pPeer), channels));
+  }
 }
 
 // Production duplicates the loop body per side, so each of these runs on the recv copy as well as the send one.

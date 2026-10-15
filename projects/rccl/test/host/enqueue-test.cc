@@ -365,10 +365,10 @@ TEST_F(EnqueueMicrotest, P2pTaskParts_AinicScatterTakesThePartsWhoseFlowsFitTheP
   struct Case {
     int nNodes, nRanks, p2pnChannels, perPeer, scatterParts;
   };
-  // 8 GPUs per node with the MI355X pools, then power-of-two rounding (64 / 19 = 3) and the
-  // one-part floor (64 / 127 = 0).
+  // 8 GPUs per node with the MI355X pools, the pool boundary (16 peers x 2 parts fill 32 channels,
+  // 17 peers do not), power-of-two rounding (64 / 19 = 3) and the one-part floor (64 / 127 = 0).
   for (Case k : {Case{2, 16, 32, 2, 2}, Case{3, 24, 64, 4, 2}, Case{4, 32, 32, 2, 1}, Case{8, 64, 64, 2, 1},
-                 Case{3, 20, 64, 8, 2}, Case{16, 128, 64, 2, 1}}) {
+                 Case{2, 17, 32, 2, 2}, Case{2, 18, 32, 2, 1}, Case{3, 20, 64, 8, 2}, Case{16, 128, 64, 2, 1}}) {
     auto comm = P2pPartsComm(k.nNodes, k.nRanks, k.p2pnChannels, k.perPeer);
     EXPECT_EQ(k.scatterParts, rcclP2pTaskParts(comm.get(), ncclFuncScatter))
       << k.nRanks << " ranks, " << k.p2pnChannels << " channels";
