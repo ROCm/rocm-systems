@@ -194,6 +194,10 @@ target_compile_options(test_nic_vpd_suite PRIVATE -fno-rtti)
 target_link_libraries(test_nic_vpd_suite amdsminic ${FILESYSTEM_LIB})
 add_test(NAME nic_vpd_suite COMMAND test_nic_vpd_suite)
 
+# The pass/fail harness every NIC suite reports through. Needs no library.
+add_executable(test_nic_check_suite ${CMAKE_CURRENT_SOURCE_DIR}/../nic/test_nic_check_suite.cpp)
+add_test(NAME nic_check_suite COMMAND test_nic_check_suite)
+
 # Install tests
 install(
     TARGETS
@@ -205,6 +209,7 @@ install(
         test_nic_rdma_resolver_suite
         test_nic_log_suite
         test_nic_vpd_suite
+        test_nic_check_suite
     DESTINATION ${SHARE_INSTALL_PREFIX}/tests
     COMPONENT ${TESTS_COMPONENT}
 )

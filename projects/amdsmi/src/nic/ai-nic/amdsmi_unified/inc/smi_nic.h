@@ -142,7 +142,9 @@ class SmiNicPort {
   // when the transport supports it, netlink FEC stats). Const: the cache is a
   // mutable implementation detail, not part of the port's logical state, so a
   // query-time refresh does not require a non-const port.
-  void collect_vendor_statistics() const;
+  // Returns 0, or the errno of the failed read. A driver without ethtool statistics (ENOTSUP) has
+  // none to report, which is not a failure.
+  int collect_vendor_statistics() const;
   // Returns the subset of the cached counters this port's stat_table_ allows
   // for `scope`: Default returns only Default-tier names present; Extended
   // returns every present name in the table (Default is a subset of Extended).

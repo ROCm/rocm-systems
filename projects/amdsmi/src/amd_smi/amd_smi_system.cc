@@ -8,11 +8,13 @@
 #include <cassert>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <sstream>
+#include <string>
 
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #ifdef ENABLE_WSL_BACKEND
@@ -542,8 +544,8 @@ static void install_nic_debug_log() {
 
 amdsmi_status_t AMDSmiSystem::populate_amd_ainic_devices() {
   install_nic_debug_log();
-  bool ainic_only = (nic_filter_ == AMDSMI_NIC_FILTER_AINIC_ONLY);
-  smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_, ainic_only);
+  bool is_ainic_only = (nic_filter_ == AMDSMI_NIC_FILTER_AINIC_ONLY);
+  smi_nic_status_t status = smi_nic_create_context(&ainic_ctx_, is_ainic_only);
   CHK_AMDNIC_RET(status);
 
   smi_nic_discovery_t discovery = {};

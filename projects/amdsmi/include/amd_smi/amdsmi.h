@@ -3189,7 +3189,7 @@ typedef enum {
  */
 typedef enum {
   AMDSMI_NIC_FILTER_ALL = 0,     //!< Discover every supported NIC (default)
-  AMDSMI_NIC_FILTER_AINIC_ONLY,  //!< Discover only AMD AINIC (Pensando) devices
+  AMDSMI_NIC_FILTER_AINIC_ONLY,  //!< Discover only AMD NICs (AINIC cards and UALoE endpoints)
 } amdsmi_nic_filter_t;
 
 /**
@@ -10490,8 +10490,8 @@ amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
  *  be set BEFORE calling @ref amdsmi_init to affect that init.
  *
  *  The default is ::AMDSMI_NIC_FILTER_ALL (every supported NIC is discovered).
- *  Enable AINIC-only discovery with ::AMDSMI_NIC_FILTER_AINIC_ONLY; disable it
- *  (restore the default) with ::AMDSMI_NIC_FILTER_ALL.
+ *  Skip third-party NICs with ::AMDSMI_NIC_FILTER_AINIC_ONLY, which keeps AINIC cards and
+ *  UALoE endpoints; restore the default with ::AMDSMI_NIC_FILTER_ALL.
  *
  *  @param[in] mode an ::amdsmi_nic_filter_t value
  *
@@ -10544,7 +10544,9 @@ amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handl
  *  @param[in] processor_handle NIC for which to query
  *
  *  @param[out] info reference to the nic port info struct.
- *  Must be allocated by user.
+ *  Must be allocated by user. `ports[i]` is the port the statistics calls take as
+ *  `port_index` i. A port with no driver bound keeps its `bdf`, `port_num` and `netdev`;
+ *  its other fields read N/A.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
@@ -10603,7 +10605,8 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
  *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
  *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a port with no
+ *    counters (num_stats is 0), non-zero on fail.
  *    ::AMDSMI_STATUS_NOT_SUPPORTED if the NIC has no RDMA port at @p rdma_port_index
  */
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
@@ -10675,7 +10678,9 @@ amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handl
  *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
  *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a port with no
+ *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
+ *    port, non-zero on other failure
  */
 amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
                                                uint32_t port_index, uint32_t* num_stats,
@@ -10724,7 +10729,10 @@ typedef enum {
  *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
  *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a driver with no
+ *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
+ *    port, ::AMDSMI_STATUS_API_FAILED if the driver's statistics could not be read, non-zero on
+ *    other failure
  */
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
                                                  uint32_t port_index, amdsmi_nic_stat_scope_t scope,

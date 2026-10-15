@@ -41,12 +41,12 @@ class SmiNicSubsystem {
   std::pair<uint16_t, uint16_t> read_pci_ids(const std::string& sysfs_bus_path) const;
   bool was_bdf_resolved(const std::string& symlink, std::string& bdf) const;
 
-  // True if the driver bound at driver_dir claims bdf. match_canonical=false:
-  // a direct child entry named <bdf> counts (PCI driver dir). match_canonical=true:
+  // True if the driver bound at driver_dir claims bdf. is_canonical_match=false:
+  // a direct child entry named <bdf> counts (PCI driver dir). is_canonical_match=true:
   // any symlink whose resolved target path contains /<bdf>/ counts (auxiliary
   // driver dir). driver_dir already includes any test sysfs-root prefix.
   bool is_driver_bound_to_bdf(const std::string& driver_dir, const std::string& bdf,
-                              bool match_canonical) const;
+                              bool is_canonical_match) const;
 };
 
 #endif  // AMDSMI_UNIFIED_NIC_SUBSYSTEM_H_

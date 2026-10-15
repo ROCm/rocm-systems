@@ -3,6 +3,8 @@
 
 #include "amd_smi/impl/amd_smi_socket.h"
 
+#include <cstdint>
+
 namespace amd::smi {
 
 AMDSmiSocket::~AMDSmiSocket() {
