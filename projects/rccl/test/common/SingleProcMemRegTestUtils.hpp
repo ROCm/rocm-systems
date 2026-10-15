@@ -44,6 +44,16 @@ namespace RcclUnitTesting
     // DEBUG ONLY (revert before merge): surface the failing HIP VMM call in CI logs.
     ScopedEnvVar ncclDebug("NCCL_DEBUG", "WARN");
     ScopedEnvVar ncclDebugSubsys("NCCL_DEBUG_SUBSYS", "INIT,ALLOC,REG");
+    // DEBUG ONLY (revert before merge): abort the exec'd workers at the first
+    // detected heap corruption. glibc >= 2.34 ignores MALLOC_CHECK_ unless
+    // libc_malloc_debug is preloaded; a missing library is only a loader warning.
+    char const* const inheritedPreload = std::getenv("LD_PRELOAD");
+    std::string const preload = (inheritedPreload != nullptr && *inheritedPreload != '\0')
+      ? std::string(inheritedPreload) + ":libc_malloc_debug.so.0"
+      : std::string("libc_malloc_debug.so.0");
+    ScopedEnvVar mallocDebugPreload("LD_PRELOAD", preload.c_str());
+    ScopedEnvVar mallocCheck("MALLOC_CHECK_", "3");
+    ScopedEnvVar mallocPerturb("MALLOC_PERTURB_", "165");
     TestBed testBed;
     int const hipRuntimeVer = testBed.ev.GetHipRuntimeVersion();
     if (!NCCL_CUMEM_VERSION_SUPPORTED(hipRuntimeVer))
