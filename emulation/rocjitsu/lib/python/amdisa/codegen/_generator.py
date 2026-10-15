@@ -8049,8 +8049,7 @@ class CodeGenerator:
                 f'  d->num_dwords = {return_dwords};',
                 '  d->elem_size = 4;',
                 f'  d->atomic_op = {op_enum};',
-                # Scalar atomic GLC selects return data, not cache policy.
-                '  d->is_load = inst_.glc != 0;',
+                f'  d->is_load = {self._smem_atomic_return_expr()};',
                 '  d->mtype = amdgpu::Mtype::UC;',
             ]
         )
@@ -8139,6 +8138,14 @@ class CodeGenerator:
         if self.isa_spec.profile.coherency_model == MemoryCoherencyModel.GFX12_SCOPE_TH:
             return 'amdgpu::gfx12_atomic_returns(inst_.th)'
         return f'({sc0_expr} != 0)'
+
+    def _smem_atomic_return_expr(self) -> str:
+        """Return the expression that marks whether a scalar atomic returns old data.
+
+        SMEM retains GLC on CDNA3/4, whose vector atomics use SC0 to select the
+        return value. Scalar atomic GLC selects return data, not cache policy.
+        """
+        return 'inst_.glc != 0'
 
     def _cache_flags_includes(self) -> list[str]:
         """Return cache_flags header path(s) for this ISA's coherency model.
@@ -10684,9 +10691,7 @@ class CodeGenerator:
                         )
                         if _is_optional_atomic_return:
                             if inst_sem.semantic_class == 'smem_atomic':
-                                # SMEM retains GLC on CDNA3/4, whose vector
-                                # atomics use SC0 to select the return value.
-                                returns_data = 'inst_.glc != 0'
+                                returns_data = self._smem_atomic_return_expr()
                             else:
                                 sc0, _, _ = self._coherency_exprs()
                                 returns_data = self._atomic_return_expr(sc0)
