@@ -56,6 +56,31 @@ hsa_status_t discover_first_global_coarse_grain_mem_pool(hsa_amd_memory_pool_t p
   return HSA_STATUS_INFO_BREAK;
 }
 
+// Like discover_first_global_coarse_grain_mem_pool, but further restricted to the device-local
+// (NPU) pool specifically: AMD::MemoryRegion only reports HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_
+// REC_GRANULE as 0 for non-system heap types, so this is how a caller tells the NPU pool apart
+// from a device's plain system-backed pools. AIE4 (UMQ) agents have no such pool at all.
+hsa_status_t discover_first_npu_local_mem_pool(hsa_amd_memory_pool_t pool, void* data) {
+  hsa_status_t status = discover_first_global_coarse_grain_mem_pool(pool, data);
+  if (status != HSA_STATUS_INFO_BREAK) {
+    return status;
+  }
+
+  std::size_t rec_granule = 0;
+  status = hsa_amd_memory_pool_get_info(pool, HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE,
+                                        &rec_granule);
+  if (status != HSA_STATUS_SUCCESS) {
+    return status;
+  }
+  if (rec_granule != 0) {
+    // Not the NPU pool; keep looking.
+    *static_cast<hsa_amd_memory_pool_t*>(data) = hsa_amd_memory_pool_t{};
+    return HSA_STATUS_SUCCESS;
+  }
+
+  return HSA_STATUS_INFO_BREAK;
+}
+
 hsa_status_t collect_all_pools(hsa_amd_memory_pool_t pool, void* data) {
   if (!data) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -471,10 +496,10 @@ TEST_F(MemoryTest, VMemCreateNPU) {
 
 TEST_F(MemoryTest, VMemMapNPU) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(
-          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
-      HSA_STATUS_INFO_BREAK);
+  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_npu_local_mem_pool,
+                                         &global_memory_pool) != HSA_STATUS_INFO_BREAK) {
+    GTEST_SKIP() << "No NPU-local memory pool found; skipping test";
+  }
 
   // allocate on NPU 0
   constexpr std::size_t buffer_size = 1024;
@@ -889,7 +914,9 @@ TEST_F(MemoryTest, IterateAllPools) {
   std::vector<hsa_amd_memory_pool_t> pools;
   ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), collect_all_pools, &pools),
             HSA_STATUS_SUCCESS);
-  ASSERT_EQ(pools.size(), 3u);
+  // Every agent has a kernarg and a plain system pool; an NPU-local pool is a third, present only
+  // on devices with a dev heap (aie2/aie2p KMQ, not AIE4 UMQ).
+  ASSERT_GE(pools.size(), 2u);
 
   std::size_t coarse_grain_count = 0;
   for (const auto& pool : pools) {
@@ -905,7 +932,7 @@ TEST_F(MemoryTest, IterateAllPools) {
       ++coarse_grain_count;
     }
   }
-  EXPECT_EQ(coarse_grain_count, 3u);
+  EXPECT_EQ(coarse_grain_count, pools.size());
 }
 
 TEST_F(MemoryTest, PoolCanMigrate) {
@@ -1020,10 +1047,10 @@ TEST_F(MemoryTest, VMemMapSameHandleTwice) {
 
 TEST_F(MemoryTest, VMemDoubleMap) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(
-          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
-      HSA_STATUS_INFO_BREAK);
+  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_npu_local_mem_pool,
+                                         &global_memory_pool) != HSA_STATUS_INFO_BREAK) {
+    GTEST_SKIP() << "No NPU-local memory pool found; skipping test";
+  }
 
   constexpr std::size_t buffer_size = 1024;
   constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
@@ -1048,10 +1075,10 @@ TEST_F(MemoryTest, VMemDoubleMap) {
 
 TEST_F(MemoryTest, VMemReleaseBeforeUnmap) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(
-          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
-      HSA_STATUS_INFO_BREAK);
+  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_npu_local_mem_pool,
+                                         &global_memory_pool) != HSA_STATUS_INFO_BREAK) {
+    GTEST_SKIP() << "No NPU-local memory pool found; skipping test";
+  }
 
   constexpr std::size_t buffer_size = 1024;
   constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
