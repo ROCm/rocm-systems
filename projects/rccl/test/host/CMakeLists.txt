@@ -396,6 +396,9 @@ function(rccl_define_micro_source_lists)
     algorithms/dda/all_gather/dda-all-gather-fabric-ll-test.cc
     algorithms/dda/all_gather/dda-all-gather-fabric-ll128-test.cc
     algorithms/dda/all_gather/dda-all-gather-ipc-test.cc
+    algorithms/dda/all_reduce/dda-all-reduce-fabric-test.cc
+    algorithms/dda/all_reduce/dda-all-reduce-fabric-ll-test.cc
+    algorithms/dda/all_reduce/dda-all-reduce-fabric-ll128-test.cc
     algorithms/dda/alltoall/dda-alltoall-fabric-test.cc
     algorithms/dda/alltoall/dda-alltoall-fabric-ll-test.cc
     algorithms/dda/alltoall/dda-alltoall-fabric-ll128-test.cc
@@ -1087,6 +1090,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDdaColl
     DDA_ALL_GATHER_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll.cu.cpp"
     DDA_ALL_GATHER_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_fabric_ll128.cu.cpp"
     DDA_ALL_GATHER_IPC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_gather/dda_all_gather_ipc.cu.cpp"
+    DDA_ALL_REDUCE_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric.cu.cpp"
+    DDA_ALL_REDUCE_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll.cu.cpp"
+    DDA_ALL_REDUCE_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/all_reduce/dda_all_reduce_fabric_ll128.cu.cpp"
     DDA_ALLTOALL_FABRIC_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric.cu.cpp"
     DDA_ALLTOALL_FABRIC_LL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll.cu.cpp"
     DDA_ALLTOALL_FABRIC_LL128_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/algorithms/dda/alltoall/dda_alltoall_fabric_ll128.cu.cpp"
