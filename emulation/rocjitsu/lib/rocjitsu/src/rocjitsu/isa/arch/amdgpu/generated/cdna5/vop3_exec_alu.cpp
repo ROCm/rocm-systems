@@ -939,6 +939,48 @@ RJ_NOINLINE void VTanhBf16Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
   dpp_write_mask_scope_.restore();
 }
 
+void VPrngB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
+    execute_modifier_impl(wf);
+    return;
+  }
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane,
+        util::prng_advance(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+  }
+}
+
+RJ_NOINLINE void VPrngB32Vop3::execute_modifier_impl(amdgpu::Wavefront &wf) {
+  std::optional<StagedOperand> dpp_src0_;
+  amdgpu::dpp::DppPlan dpp_plan_;
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    dpp_plan_ = amdgpu::dpp::make_dpp_plan(wf.wf_size(), dpp_ctrl_, dpp_row_mask_, dpp_bank_mask_,
+                                           dpp_bound_ctrl_, dpp_fi_, wf.exec(), true);
+  [[maybe_unused]] uint64_t dpp_old_exec_ = wf.exec();
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    amdgpu::dpp::apply_dpp(src0, dpp_plan_, dpp_old_exec_, dpp_src0_, wf);
+  if (amdgpu::dpp::is_src_dpp8(inst_.src0))
+    amdgpu::dpp::apply_dpp8(src0, dpp8_lane_sel_, dpp_fi_, dpp_src0_, wf);
+  ScopedOperandDelegate dpp_src0_binding_(src0, dpp_src0_ ? &*dpp_src0_ : nullptr);
+  amdgpu::dpp::ScopedVgprWriteMask dpp_write_mask_scope_;
+  if (inst_.src0 == amdgpu::SRC_DPP)
+    dpp_write_mask_scope_.bind(wf,
+                               wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane,
+        util::prng_advance(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+  }
+  dpp_write_mask_scope_.restore();
+}
+
 void VRcpF16Vop3::execute_impl(amdgpu::Wavefront &wf) {
   if (inst_.src0 == amdgpu::SRC_DPP || amdgpu::dpp::is_src_dpp8(inst_.src0)) {
     execute_modifier_impl(wf);
