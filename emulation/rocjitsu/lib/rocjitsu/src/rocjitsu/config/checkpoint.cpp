@@ -6,6 +6,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
+#include "rocjitsu/vm/amdgpu/workgroup_key.h"
 #include "rocjitsu/vm/virtual_machine.h"
 
 #include "checkpoint_generated.h"
@@ -17,6 +18,7 @@
 #include <fstream>
 #include <limits>
 #include <stdexcept>
+#include <unordered_map>
 #include <vector>
 
 namespace rocjitsu {
@@ -144,9 +146,13 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
   // Preserve automatic requests, including zero engines/budget.
   // Field absence continues to identify legacy serial-dispatch checkpoints.
   builder.ForceDefaults(true);
-  auto result = fb::CreateSimulationConfig(
-      builder, engine_config.max_ticks, engine_config.num_threads, exec_mode_str, fb_vm, 0, 0,
-      cpu_dispatch_threads, cpu_thread_budget, fb_choices, async_helper_threads);
+  const uint32_t race_shadow_mb = static_cast<uint32_t>(
+      std::min<uint64_t>(soc.memory_race_checker()->global_shadow_budget() >> 20,
+                         std::numeric_limits<uint32_t>::max()));
+  auto result = fb::CreateSimulationConfig(builder, engine_config.max_ticks,
+                                           engine_config.num_threads, exec_mode_str, fb_vm, 0, 0,
+                                           cpu_dispatch_threads, cpu_thread_budget, fb_choices,
+                                           async_helper_threads, 0, 0, 0, race_shadow_mb);
   builder.ForceDefaults(false);
   return result;
 }
@@ -281,7 +287,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
         auto cus = fb::CreateComputeUnitState(
             builder, name, wfs_vec, 0, cu->config().functional_quantum, true,
             cu->config().memory_wait_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
-            cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off);
+            cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
+            cu->config().memory_race_diagnostics != amdgpu::MemoryWaitDiagnostics::Off);
         cu_offsets.push_back(cus);
       }
     }
@@ -405,6 +412,10 @@ LoadedConfig restore_checkpoint(const std::string &path) {
   auto soc = std::make_unique<SoC>("gpu_soc", vm_config.soc);
   auto *soc_ptr = soc.get();
   auto *mem_ptr = soc->memory();
+  if (flatbuffers::IsFieldPresent(fb_config,
+                                  fb::SimulationConfig::VT_RACE_CHECKING_GLOBAL_SHADOW_MB))
+    soc->set_memory_race_global_shadow_budget(uint64_t{fb_config->race_checking_global_shadow_mb()}
+                                              << 20);
 
   // Restore GPU memory pages.
   if (auto *mem_state = checkpoint->memory()) {
@@ -438,13 +449,17 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       using amdgpu::MemoryWaitDiagnostics;
       const auto memory_checks = cu_state->memory_wait_checks();
       const auto xcnt_checks = cu_state->xcnt_checks();
+      const auto race_checks = cu_state->memory_race_checks();
       cu->restore_wait_diagnostics(
           memory_checks
               ? (*memory_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
               : cu->config().memory_wait_diagnostics,
           xcnt_checks ? (*xcnt_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
-                      : cu->config().xcnt_diagnostics);
+                      : cu->config().xcnt_diagnostics,
+          race_checks ? (*race_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
+                      : cu->config().memory_race_diagnostics);
       if (auto *wf_states = cu_state->wavefronts()) {
+        std::unordered_map<uint64_t, uint32_t> restored_workgroups;
         for (auto *wf_state : *wf_states) {
           uint32_t num_sgprs =
               wf_state->sgprs() ? wf_state->sgprs()->size() : cu->config().sgprs_per_wf;
@@ -516,6 +531,12 @@ LoadedConfig restore_checkpoint(const std::string &path) {
           if (auto *vgprs = wf_state->vgprs())
             restore_vgpr_block_into_zeroed_storage(*cu, wf->vgpr_alloc().base, *vgprs,
                                                    wf_state->vgpr_lane_count(), wf->wf_size());
+          ++restored_workgroups[amdgpu::wg_key(wf->dispatch_id(), wf->wg_id())];
+        }
+
+        for (const auto &[key, wf_count] : restored_workgroups) {
+          cu->begin_workgroup(static_cast<uint32_t>(key >> 32), static_cast<uint32_t>(key),
+                              wf_count);
         }
       }
     }

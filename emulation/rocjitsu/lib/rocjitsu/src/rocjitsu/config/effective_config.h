@@ -28,8 +28,9 @@ inline constexpr char kEffectiveConfigName[] = "effective_config.json";
 struct LaunchOverrides {
   std::optional<uint32_t> cpu_thread_budget = std::nullopt;
   std::optional<WaitChecking> wait_checking = std::nullopt;
+  std::optional<bool> race_checking = std::nullopt;
 
-  bool empty() const { return !cpu_thread_budget && !wait_checking; }
+  bool empty() const { return !cpu_thread_budget && !wait_checking && !race_checking; }
 };
 
 /// @brief Return @p json with its top-level `cpu_thread_budget` set to @p budget.

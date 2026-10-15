@@ -393,6 +393,23 @@ inline void append_copy(TensorDmaState &state, Wavefront &wf, uint64_t global_el
   state.elements.push_back(element);
 }
 
+inline void track_tensor_races(const TensorDmaState &state, Wavefront &wf) {
+  if (!wf.cu().tracks_address_races())
+    return;
+  std::vector<uint64_t> global_addresses;
+  std::vector<uint32_t> lds_addresses;
+  global_addresses.reserve(state.elements.size());
+  lds_addresses.reserve(state.elements.size());
+  for (const TensorDmaTransferElement &element : state.elements) {
+    if (!element.in_bounds)
+      continue;
+    global_addresses.push_back(element.global_address);
+    lds_addresses.push_back(element.lds_address);
+  }
+  wf.cu().track_tensor_dma_accesses(wf.pc, global_addresses, lds_addresses, state.desc.elem_size,
+                                    state.store_from_lds);
+}
+
 template <typename Visitor>
 inline void for_each_gather_tensor_element(const TensorDmaDescriptor &desc,
                                            const TensorDmaLayout &layout, Visitor &visit) {
@@ -475,6 +492,7 @@ inline util::Result prepare_tensor(TensorDmaState &state, Wavefront &wf) {
     append_copy(state, wf, global_element, lds_element, in_bounds);
   };
   for_each_tensor_element(desc, layout, append_element);
+  track_tensor_races(state, wf);
 
   if (wf.address_space()) {
     state.access = wf.snapshot_vm_access();

@@ -827,6 +827,17 @@ uint16_t MemoryWaitScoreboard::ordered_write_order(const waitcheck_detail::Class
   return it == orders_.end() ? kUnordered : static_cast<uint16_t>(it - orders_.begin());
 }
 
+MemoryWaitScoreboard::CompletionToken
+MemoryWaitScoreboard::latest_token(WaitCounterKind counter) const {
+  const auto i = static_cast<size_t>(counter);
+  CompletionToken token{counter, issued_[i], kUnordered, 0};
+  if (token.sequence != 0 && last_order_[i] != kUnordered) {
+    token.order = last_order_[i];
+    token.order_sequence = orders_[token.order].issued;
+  }
+  return token;
+}
+
 bool MemoryWaitScoreboard::completed(WaitCounterKind counter, uint64_t sequence, uint16_t order,
                                      uint64_t order_sequence) const {
   return sequence <= retired_[static_cast<size_t>(counter)] ||

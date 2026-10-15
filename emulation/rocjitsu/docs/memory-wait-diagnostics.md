@@ -116,10 +116,9 @@ of scalar-memory, GDS, or legacy CDNA FLAT results from backpressure.
 
 Completion dependencies survive ordinary branches and CU scheduling; branches
 implicitly drain XCNT. State is reset when a wave slot is freed and is not serialized
-in checkpoints. The checker does not compare memory addresses or check overlapping
-LDS accesses, including accesses from lanes of the same wave. It does not validate
-store visibility, source lifetime beyond the qualified XCNT checks above, or
-communication between waves.
+in checkpoints. The ordinary checker does not compare memory addresses. The opt-in
+core address checker described below reuses its completion positions to cover those
+hazards.
 A warning describes a possible missing wait under
 delayed completion or replay even though eager execution already has a value. The
 feature does not model GPU latency.
@@ -143,8 +142,90 @@ hardware occupancy or select a latency at which memory becomes visible.
 
 These are known limits, not an exhaustive list. Investigate warnings against the
 target's ordering rules; use `--wait-checking=off` to suppress both warning classes
-when needed. Plugins may overlap with these checks and additionally validate
-hazards such as memory visibility and communication between waves.
+when needed.
+
+## Address race diagnostics
+
+`--race-checking=on` or top-level `"race_checking": "on"` enables the core
+`memory-race:` checker on every CU. Without either global override, a CU opts in
+with `{"key":"memory_race_diagnostics","value":"warn"}`; `off` is the default
+and the only other accepted value. The checker reports same-wave overlapping LDS
+RAW/WAR/WAW while the producer completion token remains pending, and cross-wave
+LDS conflicts not ordered by the exact resolved barrier member set. It also
+compares vector global, scalar-memory, and tensor-DMA accesses between
+workgroups in the same dispatch. Scratch/private accesses and
+atomic-vs-atomic pairs are excluded. Compiler-lowered atomic loads and stores
+still look like ordinary accesses and remain a
+[known false-positive class](address-race-checking-gaps.md#atomic-loads-and-stores).
+Ordinary same-class DS issue ordering is honored; direct-to-LDS writes use their
+load obligation and tensor transfers use `tensorcnt`.
+
+Tensor ranges come from exact in-bounds elements, including descriptor padding.
+Direct-to-LDS destinations use routed per-lane addresses and cluster participant
+selection. Diagnostics identify both sites, waves and lanes and recommend a wait
+or barrier. The global budget is `race_checking_global_shadow_mb` (512 MiB by
+default) and bounds the shadow's allocated storage. If another access cannot be
+retained within that budget, the checker warns once and sets
+`coverage_degraded`; the access is still checked against retained history.
+Separately, console output keeps at most 64 distinct race keys at a time across
+the live dispatches of one GPU/SoC checker and warns once when further keys are
+suppressed. LDS history is outside the global budget: it lives only while its
+workgroup is resident and grows with the workgroup's waves and LDS footprint.
+
+One `MemoryRaceChecker` is shared by every command processor and CU of a
+GPU/SoC. It keys workgroup state by the SoC-wide dispatch ID and the grid-wide
+workgroup ID. Each memory instruction is checked once with all of its lane
+ranges. A 64-shard map locates LDS state; each workgroup then has its own state
+mutex. Different workgroups do not serialize on that state mutex, but lookups
+that hash to one map shard briefly share its mutex.
+
+Each workgroup keeps one record per wave, access kind and LDS dword: a newer
+access by the same wave subsumes an older one. A barrier that every active wave
+joins drops the history. A barrier orders only completed accesses: one still in
+flight, such as a multi-buffered async copy, stays unordered with the other
+members until a barrier that follows its completion, so only touching its bytes
+early is reported.
+
+The global shadow has 256 hash shards. An access holds one shard mutex at a time
+as it visits pages, so pages that hash to the same shard can serialize. It keeps
+compact per-dword records tagged with the accessing workgroup. A dword's bytes
+keep at most one record per workgroup and two other workgroups per access kind.
+That is enough to detect any later conflicting workgroup, so read-shared data
+such as kernel arguments or GEMM inputs does not grow the shadow with the number
+of readers.
+
+Set top-level `memory_diagnostic_report` to write combined core wait and address
+findings as JSON. One report object is shared by every CP and CU of a GPU and is
+flushed whenever a dispatch retires or is dropped. Findings accumulate across
+dispatches in the process, and each flush rewrites the complete retained report.
+A configuration-only SoC that never flushes and records nothing does not replace
+an existing file; the first dispatch flush writes a report even when its
+`findings` array is empty. GPU 0 writes the configured path. In a multi-GPU
+config, each additional GPU `N` writes `<path>.gpuN`.
+
+The version-1 JSON object contains `findings`, `observed`, `suppressed` and
+`coverage_degraded`. Each finding identifies its checker, kind, resource,
+producer and consumer PCs, and dispatch/workgroup/wave context; race entries
+also include the byte range, lanes and recommended action. The report retains
+at most 1,024 `memory-wait` and 1,024 `memory-race` entries. `observed` counts
+findings delivered to the report plus race events explicitly suppressed by the
+64-key cap; repeated race keys deduplicated before reporting are not counted.
+The shared `suppressed` counter includes either kind overflowing its
+1,024-entry vector and races rejected by the 64-key console cap.
+
+JSON output is optional. Without `memory_diagnostic_report`, enabled checks
+still print `memory-wait:`, `xcnt-wait:` and `memory-race:` warnings to the
+normal log.
+
+Address history is not serialized in checkpoints and is reset on restore, while
+the configured global shadow budget is preserved. The report path is not
+checkpointed, so a VM restored through `rj_vm_restore_checkpoint` does not write
+a JSON diagnostic report. The legacy race-detector plugin remains supported,
+but enabling both produces overlapping reports and a warning based on the
+effective per-CU settings; prefer the core mode for new address-race workflows.
+
+[Address race checking gaps](address-race-checking-gaps.md) lists the checker's
+known false positives, false negatives, limits and current performance evidence.
 
 ## Access planning and cost
 

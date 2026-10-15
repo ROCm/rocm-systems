@@ -12,6 +12,16 @@ model. Each plugin receives callbacks at well-defined points during
 wavefront execution, and all output flows through a configurable sink
 system that separates diagnostic content from its destination.
 
+```{note}
+The core address checker is not an execution plugin. For new race-checking
+workflows, use `rocjitsu --race-checking=on` or top-level
+`"race_checking":"on"` and optionally `memory_diagnostic_report`; see
+[Address race diagnostics](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/memory-wait-diagnostics.md#address-race-diagnostics).
+The `RJ_RACE` plugin documented below is the compatible legacy path with
+register-event and disassembly-rich output. Enabling both paths produces
+overlapping diagnostics and extra callback overhead.
+```
+
 ## Hook points
 
 Plugins implement a common interface that defines several callback hook
@@ -81,7 +91,7 @@ that multiple sinks can be active at the same time. For example,
 
 | Variable | Default | Description |
 |----------|---------|-------------|
-| `RJ_RACE` | unset | Set to `1` to load the race detection plugin. |
+| `RJ_RACE` | unset | Set to `1` to load the legacy race detection plugin. |
 | `RJ_LOG` | unset | Set to `1` to load the kernel logging plugin. |
 | `RJ_SINKS` | `stderr` | Comma-separated list of sink types: `stderr`, `stdout`, `file`. |
 | `RJ_SINK_DIR` | *(none)* | Directory for file sinks. Required when `file` appears in `RJ_SINKS`. |
@@ -94,7 +104,7 @@ For a full reference of all rocJITsu environment variables, see
 
 ### Race detector
 
-The race detector plugin hooks memory instructions, register reads,
+The legacy race detector plugin hooks memory instructions, register reads,
 barriers, and `s_waitcnt` events to detect data races within a
 workgroup. It tracks in-flight memory events through a lifecycle ---
 active, wave-complete, and retired --- and reports when a register or

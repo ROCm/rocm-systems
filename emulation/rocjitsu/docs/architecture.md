@@ -55,6 +55,11 @@ Models the GPU hardware pipeline:
 - **ComputeUnit** — Executes wavefronts. Manages SGPR/VGPR register
   files, LDS, and scratch memory. Supports functional and cycle-accurate
   modes.
+- **Memory diagnostics** — Each wave has an issuer-owned wait scoreboard for
+  register readiness and replay-source lifetime. One SoC-owned
+  `MemoryRaceChecker` shares LDS/global address history across every CP and CU
+  of that GPU, and an optional per-GPU report combines both diagnostic kinds.
+  See [memory wait diagnostics](memory-wait-diagnostics.md).
 - **CompletionTracker** — Tracks per-dispatch workgroup retirement.
   Fires completion signals in submission order. Writes queue-inactive
   signal on HQD idle. Guest-visible publication is journaled across transient

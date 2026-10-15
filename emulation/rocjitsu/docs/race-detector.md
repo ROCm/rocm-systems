@@ -1,5 +1,29 @@
 # Race Detector
 
+This page documents the legacy execution plugin. For new workflows, prefer the
+opt-in core checker:
+
+```sh
+rocjitsu --config my_config.json --race-checking=on -- ./my_app
+```
+
+The core path shares rocJITsu's production wait-counter completion state and
+adds routed address coverage for same-wave and cross-wave LDS RAW/WAR/WAW,
+cross-workgroup vector and scalar global conflicts, exact tensor-DMA footprints,
+and direct-to-LDS destinations. It supports current architectures, exact named
+barrier membership, per-workgroup member sets for cluster barriers, byte ranges,
+split counters, and bounded per-GPU JSON reporting through top-level
+`memory_diagnostic_report`. Scratch/private memory and atomic-vs-atomic pairs are
+intentionally excluded. Pending history is reset on checkpoint restore.
+
+The plugin remains available for compatibility and its richer legacy
+register-event and disassembly presentation. The ordinary core wait checker has
+broader register-readiness coverage on current targets, while the core address
+checker covers the LDS/global hazards summarized above. Enabling the plugin
+with the core checks therefore produces overlapping diagnostics and extra
+callback overhead; keep it for legacy output or plugin-specific investigation,
+not as the default core workflow.
+
 Detects synchronization hazards in AMD GPU kernels. Tracks in-flight memory
 events (loads, stores) and reports races when a register or LDS memory is
 accessed before the operation that produced it has been properly synchronized.

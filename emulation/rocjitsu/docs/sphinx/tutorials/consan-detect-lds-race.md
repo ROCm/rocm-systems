@@ -20,8 +20,9 @@ race report, fixing the bug, and verifying the clean output.
 ```{note}
 ConSan patches native machine code at load time and runs on a physical
 GPU. To detect the same class of LDS races without a physical GPU, use
-the built-in race detector inside the rocJITsu emulator instead---see
-[Detect a missing barrier with the race detector](race-detection-walkthrough.md).
+rocJITsu's [core address checker](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/memory-wait-diagnostics.md#address-race-diagnostics).
+The [race-detector walkthrough](race-detection-walkthrough.md) demonstrates the
+compatible legacy execution plugin and its disassembly-rich output.
 ```
 
 ## What ConSan instruments

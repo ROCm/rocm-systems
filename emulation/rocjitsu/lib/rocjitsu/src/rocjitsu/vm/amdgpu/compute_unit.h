@@ -20,6 +20,7 @@
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
 #include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/memory_pipeline.h"
+#include "rocjitsu/vm/amdgpu/memory_race_checker.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
@@ -67,6 +68,13 @@ enum class MemoryWaitDiagnostics { Off, Warn };
 class CommandProcessor;
 class AsyncInstructionWindow;
 class MmaAdmissionCache;
+class MemoryDiagnosticReport;
+
+/// @brief Build the process/dispatch/workgroup/wave identity used by core
+/// memory diagnostics.
+inline MemoryRaceChecker::WaveKey memory_race_wave_key(const Wavefront &wf) {
+  return {wf.process_id(), wf.dispatch_id(), wf.wg_id(), wf.wf_id(), wf.dispatch_generation()};
+}
 struct AsyncInstructionWindowStorage;
 namespace matrix_coexecution {
 class ExecutionResources;
@@ -146,14 +154,17 @@ public:
     MemoryWaitDiagnostics memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
     /// Opt in to gfx1250 replay-source overwrite diagnostics independently.
     MemoryWaitDiagnostics xcnt_diagnostics = MemoryWaitDiagnostics::Off;
+    /// Opt in to address-aware LDS and global race diagnostics.
+    MemoryWaitDiagnostics memory_race_diagnostics = MemoryWaitDiagnostics::Off;
 
     /// @brief Whether gfx1250 replay-source diagnostics are enabled.
     bool xcnt_checks_enabled() const {
       return arch == ROCJITSU_CODE_ARCH_CDNA5 && xcnt_diagnostics != MemoryWaitDiagnostics::Off;
     }
-    /// @brief Whether either core memory-result or replay-source checking is enabled.
+    /// @brief Whether any core memory-result, replay-source, or address check is enabled.
     bool memory_wait_checks_enabled() const {
-      return memory_wait_diagnostics != MemoryWaitDiagnostics::Off || xcnt_checks_enabled();
+      return memory_wait_diagnostics != MemoryWaitDiagnostics::Off || xcnt_checks_enabled() ||
+             memory_race_diagnostics != MemoryWaitDiagnostics::Off;
     }
   };
 
@@ -178,6 +189,12 @@ public:
   void report_undefined_behavior(const Wavefront &wf, std::string_view reason);
   /// @brief Register a producer using planned FLAT lanes before execution.
   void track_memory_wait(Instruction &inst, Wavefront &wf);
+  /// @brief Record one tensor-DMA instruction's in-bounds elements for address
+  /// races; element i moves `size` bytes between the two i-th addresses.
+  void track_tensor_dma_accesses(Wavefront &wf, uint64_t pc,
+                                 std::span<const uint64_t> global_addresses,
+                                 std::span<const uint32_t> lds_addresses, uint32_t size,
+                                 bool store_from_lds);
   /// @brief Format a scoreboard hazard using its owning wavefront context.
   static void report_memory_wait(void *context, const MemoryWaitScoreboard::Hazard &hazard);
 
@@ -269,10 +286,12 @@ public:
   void set_functional_quantum(uint32_t quantum) { config_.functional_quantum = quantum; }
 
   /// @brief Restore wait policies before populating checkpoint wavefront slots.
-  void restore_wait_diagnostics(MemoryWaitDiagnostics memory, MemoryWaitDiagnostics xcnt) {
+  void restore_wait_diagnostics(MemoryWaitDiagnostics memory, MemoryWaitDiagnostics xcnt,
+                                MemoryWaitDiagnostics race) {
     assert(!has_active_wfs());
     config_.memory_wait_diagnostics = memory;
     config_.xcnt_diagnostics = xcnt;
+    config_.memory_race_diagnostics = race;
   }
 
   /// @brief Select whether the CP continuation event owns functional execution.
@@ -406,6 +425,16 @@ public:
 
   /// @brief Set the command processor for WG completion notification.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
+  void set_memory_race_checker(std::shared_ptr<MemoryRaceChecker> checker) {
+    memory_race_checker_ = std::move(checker);
+  }
+  void set_memory_diagnostic_report(std::shared_ptr<MemoryDiagnosticReport> report) {
+    memory_diagnostic_report_ = std::move(report);
+  }
+  bool memory_race_checks_enabled() const {
+    return config_.memory_race_diagnostics != MemoryWaitDiagnostics::Off &&
+           memory_race_checker_ != nullptr;
+  }
 
   /// @brief Set the device VM service shared by legacy and PCI/VFIO queues.
   void set_gpu_vm(GpuVm *gpu_vm) {
@@ -1221,6 +1250,10 @@ protected:
                             uint8_t decoded_route_tag, bool normalized_to_local,
                             std::span<const uint64_t> pre_routing_addresses,
                             uint64_t flat_local_lane_mask, uint64_t flat_dds_lane_mask);
+  void track_address_races(const Instruction &inst, Wavefront &wf, uint8_t route_tag,
+                           uint8_t decoded_route_tag,
+                           std::span<const uint64_t> pre_routing_addresses,
+                           uint64_t flat_local_lane_mask, uint64_t flat_dds_lane_mask);
 
   /// @brief Fire the on_idle callback if registered.
   void notify_idle() {
@@ -1432,6 +1465,8 @@ protected:
   uint64_t memory_wait_diagnostic_count_ = 0;
   std::vector<waitcheck_detail::ClassifiedEvent> memory_wait_classification_;
   uint64_t xcnt_diagnostic_count_ = 0;
+  std::shared_ptr<MemoryRaceChecker> memory_race_checker_;
+  std::shared_ptr<MemoryDiagnosticReport> memory_diagnostic_report_;
   // Reports come only from the CU issuing thread; helpers must not report.
   std::atomic<uint64_t> isa_diagnostic_count_{0};
 
@@ -1532,6 +1567,15 @@ inline bool InstructionComputeUnitView::observes_tensor_dma_memory_access() cons
 inline void InstructionComputeUnitView::report_tensor_dma_memory_access(
     const TensorDmaMemoryAccessObservation &access) {
   raw_cu().plugin_group().onAmdgpuTensorDmaMemoryAccess(access, raw_wavefront());
+}
+inline bool InstructionComputeUnitView::tracks_address_races() const {
+  return raw_cu().memory_race_checks_enabled();
+}
+inline void InstructionComputeUnitView::track_tensor_dma_accesses(
+    uint64_t pc, std::span<const uint64_t> global_addresses,
+    std::span<const uint32_t> lds_addresses, uint32_t size, bool store_from_lds) {
+  raw_cu().track_tensor_dma_accesses(raw_wavefront(), pc, global_addresses, lds_addresses, size,
+                                     store_from_lds);
 }
 
 /// @brief Execution-mode-aware compute unit shell.

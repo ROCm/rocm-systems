@@ -20,6 +20,7 @@
 #include "rocjitsu/vm/plugins/execution_plugin.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <memory>
 #include <mutex>
@@ -142,6 +143,11 @@ public:
 
   uint32_t num_plugins() const { return static_cast<uint32_t>(plugins_.size()); }
   bool empty() const { return plugins_.empty(); }
+  /// @brief Whether a plugin with exactly @p name is present.
+  bool contains(std::string_view name) const {
+    return std::ranges::any_of(
+        plugins_, [&](const PluginEntry &entry) { return entry.plugin->name() == name; });
+  }
 
   /// True only when every plugin opts into the async observation contract.
   bool supports_async_instructions() const { return supports_async_instructions_; }

@@ -397,6 +397,9 @@ void print_usage() {
          "                    all = ordinary plus gfx1250 XCNT.\n"
          "                    Omission keeps JSON settings and defaults. The source\n"
          "                    config is unchanged. Not available with --attach.\n"
+         "  --race-checking <mode>, --race-checking=<mode>\n"
+         "                    Enable or disable core LDS/global address race checks\n"
+         "                    for this launch (on or off; default off).\n"
          "  --vfio-socket <path>\n"
          "                    Serve the configured GPU as a PCI function to a VMM over\n"
          "                    the vfio-user protocol on this AF_UNIX socket, instead of\n"
@@ -466,6 +469,18 @@ int main(int argc, char *argv[]) {
         std::cerr << "rocjitsu: --wait-checking requires on, off, or all\n";
         return 1;
       }
+    } else if (arg == "--race-checking" || arg.starts_with("--race-checking=")) {
+      const size_t equals = arg.find('=');
+      std::string_view value;
+      if (equals != std::string_view::npos)
+        value = arg.substr(equals + 1);
+      else if (i + 1 < argc)
+        value = argv[++i];
+      overrides.race_checking = config::parse_race_checking(value);
+      if (!overrides.race_checking) {
+        std::cerr << "rocjitsu: --race-checking requires on or off\n";
+        return 1;
+      }
     } else if (arg == "--vfio-socket" && i + 1 < argc) {
       vfio_socket = argv[++i];
     } else if (arg == "--thread-budget-table") {
@@ -523,6 +538,10 @@ int main(int argc, char *argv[]) {
   }
   if (overrides.wait_checking && attach_mode) {
     std::cerr << "rocjitsu: --wait-checking cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.race_checking && attach_mode) {
+    std::cerr << "rocjitsu: --race-checking cannot be combined with --attach\n";
     return 1;
   }
 
@@ -657,6 +676,13 @@ int main(int argc, char *argv[]) {
       !dbt_guest_config.host.simulator_config_path.empty()) {
     std::cerr << std::format("rocjitsu: --wait-checking cannot be combined with a dbt_guest "
                              "simulator_config; set wait_checking in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_mode && overrides.race_checking &&
+      !dbt_guest_config.host.simulator_config_path.empty()) {
+    std::cerr << std::format("rocjitsu: --race-checking cannot be combined with a dbt_guest "
+                             "simulator_config; set race_checking in {} instead\n",
                              dbt_guest_config.host.simulator_config_path);
     return 1;
   }

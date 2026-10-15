@@ -53,12 +53,13 @@ address stream at runtime, move it to the host, analyse it there.
 The framework must be more general than its first client; the shapes it is
 expected to serve are set out below.
 
-**Two race detectors already exist in this project, and neither is what is
-described here.** One is a simulator plugin: it does not use binary
-instrumentation, it relies on the simulator's total observability, and it was
-written for that environment. The other is a prototype, usable but not
-production code and not a design to reproduce. Neither is the intended
-architecture; neither is superseded by this document.
+**Three race-detection paths already exist in this project, and none is what is
+described here.** The SoC-owned
+[core address checker](memory-wait-diagnostics.md#address-race-diagnostics) and
+the compatible [execution plugin](race-detector.md) both rely on the
+simulator's total observability rather than binary instrumentation. The third
+is a usable prototype, not production code or a design to reproduce. None is
+the intended DBI architecture, and none is superseded by this document.
 
 
 ### The range of tools

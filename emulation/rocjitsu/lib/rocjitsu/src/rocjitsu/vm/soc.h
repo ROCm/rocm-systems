@@ -14,6 +14,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hbm_controller.h"
 #include "rocjitsu/vm/amdgpu/iod.h"
+#include "rocjitsu/vm/amdgpu/memory_diagnostic_report.h"
 #include "rocjitsu/vm/amdgpu/mes_engine.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_scheduler.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
@@ -99,6 +100,22 @@ public:
 
   /// @brief Wire topology links between XCDs, IODs, and memory.
   void initialize() override;
+  void set_memory_race_global_shadow_budget(uint64_t bytes) {
+    memory_race_checker_->set_global_shadow_budget(bytes);
+  }
+  void set_memory_diagnostic_report_path(std::string path) {
+    memory_diagnostic_report_ =
+        path.empty() ? nullptr : std::make_shared<amdgpu::MemoryDiagnosticReport>(std::move(path));
+    memory_race_checker_->set_report(memory_diagnostic_report_);
+    for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      cp->set_memory_race_checker(memory_race_checker_);
+      cp->set_memory_diagnostic_report(memory_diagnostic_report_);
+    });
+  }
+  /// @brief Return the SoC-wide address race checker.
+  const std::shared_ptr<amdgpu::MemoryRaceChecker> &memory_race_checker() const {
+    return memory_race_checker_;
+  }
 
   /// @brief Return the number of XCDs.
   /// @returns Number of Accelerator Complex Dies.
@@ -289,6 +306,9 @@ private:
   uint32_t requested_dispatch_threads_ = 1;
   uint32_t dispatch_threads_ = 1;
   std::shared_ptr<ExecutionPluginGroup> plugin_group_;
+  std::shared_ptr<amdgpu::MemoryRaceChecker> memory_race_checker_ =
+      std::make_shared<amdgpu::MemoryRaceChecker>();
+  std::shared_ptr<amdgpu::MemoryDiagnosticReport> memory_diagnostic_report_;
   std::vector<amdgpu::ComputeUnitCore *> all_cus_cache_;
   bool vm_resources_released_ = false;
 };

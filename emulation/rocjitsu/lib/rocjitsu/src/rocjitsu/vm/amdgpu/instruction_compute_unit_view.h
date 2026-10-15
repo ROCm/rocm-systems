@@ -11,6 +11,7 @@
 #include "simdojo/sim/sim_types.h"
 
 #include <cstdint>
+#include <span>
 #include <string>
 
 namespace simdojo {
@@ -71,6 +72,10 @@ public:
                               bool retain_failure_for_debugger = true);
   bool observes_tensor_dma_memory_access() const;
   void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
+  bool tracks_address_races() const;
+  void track_tensor_dma_accesses(uint64_t pc, std::span<const uint64_t> global_addresses,
+                                 std::span<const uint32_t> lds_addresses, uint32_t size,
+                                 bool store_from_lds);
 
 private:
   ComputeUnitCore &raw_cu() { return *cu_; }

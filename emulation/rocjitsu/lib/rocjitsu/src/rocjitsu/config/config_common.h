@@ -41,6 +41,15 @@ inline std::optional<WaitChecking> parse_wait_checking(std::string_view value) {
   return std::nullopt;
 }
 
+/// @brief Parse the core address-race launch mode.
+inline std::optional<bool> parse_race_checking(std::string_view value) {
+  if (value == "on")
+    return true;
+  if (value == "off")
+    return false;
+  return std::nullopt;
+}
+
 /// @brief Parse a complete unsigned 32-bit decimal value.
 inline std::optional<uint32_t> parse_uint32(std::string_view text) {
   uint32_t value = 0;

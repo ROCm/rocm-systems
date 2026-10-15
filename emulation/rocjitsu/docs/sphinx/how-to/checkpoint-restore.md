@@ -7,7 +7,7 @@ myst:
 # Save and restore a simulation checkpoint
 
 Long-running GPU simulations can take hours or days to reach a point of
-interest. Checkpointing lets you persist the entire virtual machine
+interest. Checkpointing lets you persist the virtual machine's architectural
 state to disk at a specific simulation tick, then restore it later to
 resume execution or reproduce a failure without re-running the
 simulation from the beginning.
@@ -100,6 +100,18 @@ saved checkpoint file. The restored VM is ready to continue execution.
 `rj_vm_restore_checkpoint` returns `ROCJITSU_STATUS_INVALID_FILE` if the
 checkpoint file cannot be opened and `ROCJITSU_STATUS_ERROR` if
 deserialization fails.
+
+## Diagnostic state after restore
+
+The checkpoint preserves each CU's effective memory-wait, XCNT and address-race
+policy, together with `race_checking_global_shadow_mb`. It does not serialize
+pending register dependencies or retained LDS/global address history. Those
+diagnostic histories restart empty, so a missing wait or race whose producer
+precedes the checkpoint can be missed after restore.
+
+`memory_diagnostic_report` is not checkpointed either. A VM restored through
+`rj_vm_restore_checkpoint` continues to print enabled diagnostics but does not
+write their combined JSON report.
 
 ## Save periodic checkpoints during a long simulation
 

@@ -318,6 +318,15 @@ table SimulationConfig {
   // Optional override for all CUs: "off", "on" (ordinary only), or "all" (with XCNT).
   // Omission preserves the per-CU diagnostic settings and defaults.
   wait_checking: string;
+  // Optional override for address-aware core race detection: "off" or "on".
+  // Omission preserves the per-CU setting, which defaults to off.
+  race_checking: string;
+  // Optional JSON destination for combined per-GPU core memory diagnostics.
+  // GPU 0 uses this path; additional GPU N appends ".gpuN".
+  memory_diagnostic_report: string;
+  // Optional memory budget in MiB for race checking's global-access shadow.
+  // Accesses past it are still checked but not retained. Omission keeps 512.
+  race_checking_global_shadow_mb: uint32;
 }
 
 root_type SimulationConfig;

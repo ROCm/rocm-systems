@@ -101,6 +101,8 @@ nav:
       - MMA lookahead admission: mma-admission.md
       - Concurrent dispatch: concurrent-dispatch.md
       - Memory wait coverage: memory-wait-counter-coverage.md
+      - Address race checking gaps: address-race-checking-gaps.md
+      - Address race performance: address-race-checking-performance-analysis.md
   - Project:
       - Blog: blog/index.md
       - Performance dashboard: performance-dashboard.md

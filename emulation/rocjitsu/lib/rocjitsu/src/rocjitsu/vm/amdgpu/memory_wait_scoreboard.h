@@ -137,6 +137,17 @@ public:
     bool write;
     uint32_t required_wait;
   };
+  /// Stable reference to one issued completion position. Address diagnostics
+  /// use the same token as register readiness so waits, ordering classes, and
+  /// counter-capacity backpressure cannot disagree between the two checkers.
+  struct CompletionToken {
+    WaitCounterKind counter = WaitCounterKind::Load;
+    uint64_t sequence = 0;
+    uint16_t order = kUnordered;
+    uint64_t order_sequence = 0;
+
+    explicit operator bool() const { return sequence != 0; }
+  };
   using Reporter = void (*)(void *, const Hazard &);
 
   bool empty() const { return events_.empty(); }
@@ -162,6 +173,10 @@ public:
                  uint32_t units = 1, bool backpressure_ordered = true);
   uint64_t issue(const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch,
                  uint32_t units = 1);
+  CompletionToken latest_token(WaitCounterKind counter) const;
+  bool completed(CompletionToken token) const {
+    return !token || completed(token.counter, token.sequence, token.order, token.order_sequence);
+  }
   /// Use the same decoded counter units for admission and issue accounting.
   static uint32_t issue_units(const Instruction &inst,
                               const waitcheck_detail::ClassifiedEvent &event, rj_code_arch_t arch);

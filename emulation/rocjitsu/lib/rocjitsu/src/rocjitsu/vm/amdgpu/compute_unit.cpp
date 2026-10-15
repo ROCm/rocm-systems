@@ -28,6 +28,7 @@
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/memory_diagnostic_report.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
 #include "rocjitsu/vm/plugins/memory_access_observation.h"
 #include "util/except.h"
@@ -101,6 +102,35 @@ bool has_setreg_vgpr_msb_fixup(const ComputeUnitCore::Config &config) {
 }
 
 bool is_privileged(const Wavefront &wf) { return (wf.status_raw() & kPrivilegedStatusBit) != 0; }
+
+void attach_completion_tokens(MemoryRaceChecker::Access &access, const Instruction &inst,
+                              const Wavefront &wf) {
+  const auto *scoreboard = wf.memory_wait_scoreboard();
+  if (!scoreboard)
+    return;
+  thread_local std::vector<waitcheck_detail::ClassifiedEvent> events;
+  if (waitcheck_detail::WaitcheckTarget::classify_events_into(inst, wf.cu().arch(), events)
+          .failed())
+    return;
+  for (const auto &event : events) {
+    using K = WaitCounterKind;
+    if (event.counter == K::X || event.counter == K::Exp || event.counter == K::VmVsrc ||
+        event.counter == K::VaVdst || event.counter == K::Depctr)
+      continue;
+    const auto token = scoreboard->latest_token(event.counter);
+    if (!token || std::ranges::any_of(std::span<const MemoryWaitScoreboard::CompletionToken>(
+                                          access.completions.data(), access.completion_count),
+                                      [&](const auto &old) {
+                                        return old.counter == token.counter &&
+                                               old.sequence == token.sequence;
+                                      }))
+      continue;
+    if (access.completion_count < access.completions.size())
+      access.completions[access.completion_count++] = token;
+    if (token.order != MemoryWaitScoreboard::kUnordered)
+      access.ordered_class = 1u + (static_cast<uint32_t>(token.counter) << 16) + token.order;
+  }
+}
 
 std::string_view instruction_execution_error_name(InstructionExecutionError error) {
   switch (error) {
@@ -368,6 +398,8 @@ size_t ComputeUnitCore::num_wfs() const {
 
 void ComputeUnitCore::free_wavefront_resources(Wavefront &wf) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
+  if (memory_race_checks_enabled() && !wf.is_halted())
+    memory_race_checker_->end_wave(memory_race_wave_key(wf));
   scalar_mem_pipeline_.cancel(wf);
   global_mem_pipeline_.cancel(wf);
   local_mem_pipeline_.cancel(wf);
@@ -473,6 +505,13 @@ void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint
 
   const uint64_t key = wg_key(dispatch_id, wg_id);
   active_wgs_[key] = wf_count;
+  if (memory_race_checks_enabled()) {
+    for (const auto &wave : wfs_) {
+      if (wave && !wave->is_halted() && wave->dispatch_id() == dispatch_id &&
+          wave->wg_id() == wg_id)
+        memory_race_checker_->begin_wave(memory_race_wave_key(*wave));
+    }
+  }
   if (wf_count <= 1) {
     // Single-wave workgroups are not allocated workgroup or named barriers.
     barrier_wgs_.erase(key);
@@ -584,6 +623,13 @@ std::vector<Wavefront *> ComputeUnitCore::complete_barrier(uint32_t dispatch_id,
 
 void ComputeUnitCore::notify_barrier_complete(std::span<Wavefront *> members) {
   if (!members.empty()) {
+    if (memory_race_checks_enabled()) {
+      std::vector<MemoryRaceChecker::WaveKey> keys;
+      keys.reserve(members.size());
+      for (const auto *member : members)
+        keys.push_back(memory_race_wave_key(*member));
+      memory_race_checker_->barrier(keys);
+    }
     plugin_group_->onAmdgpuBarrierResolved(members);
   }
 }
@@ -695,6 +741,8 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
   if (it != active_wgs_.end() && --it->second == 0) {
     active_wgs_.erase(it);
     barrier_wgs_.erase(key);
+    if (memory_race_checks_enabled())
+      memory_race_checker_->end_workgroup(dispatch_id, wg_id);
     // Queued rather than sent: notify_wg_complete() takes the CP's
     // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
     // takes in the other order when it dispatches. WaveStateGuard delivers it
@@ -720,6 +768,8 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   }
   active_wgs_.erase(wg_key(dispatch_id, wg_id));
   barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
+  if (memory_race_checks_enabled())
+    memory_race_checker_->end_workgroup(dispatch_id, wg_id);
   maybe_reset_lds_alloc();
 }
 
@@ -730,6 +780,10 @@ void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
       free_wavefront_resources(*wavefront);
   }
 
+  if (memory_race_checks_enabled())
+    for (const auto &entry : active_wgs_)
+      if (static_cast<uint32_t>(entry.first >> 32) == dispatch_id)
+        memory_race_checker_->end_workgroup(dispatch_id, static_cast<uint32_t>(entry.first));
   std::erase_if(active_wgs_, [dispatch_id](const auto &entry) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
   });
@@ -843,7 +897,7 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
         request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
     if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
-      if (observe_routed_access) {
+      if (observe_routed_access || memory_race_checks_enabled()) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
@@ -885,6 +939,9 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
   if (observe_routed_access)
     report_routed_access(*inst, wf, route_tag, decoded_route_tag, normalized_to_local,
                          pre_routing_addresses, flat_local_lane_mask, flat_dds_lane_mask);
+  if (memory_race_checks_enabled())
+    track_address_races(*inst, wf, route_tag, decoded_route_tag, pre_routing_addresses,
+                        flat_local_lane_mask, flat_dds_lane_mask);
 
   switch (route_tag) {
   case SCALAR_MEM:
@@ -932,8 +989,6 @@ void ComputeUnitCore::report_memory_wait(void *context,
   auto &cu = wf.raw_cu();
   const bool replay = hazard.producer.counter == WaitCounterKind::X;
   const auto count = replay ? ++cu.xcnt_diagnostic_count_ : ++cu.memory_wait_diagnostic_count_;
-  if (count > kMaxMemoryWaitDiagnostics)
-    return;
   auto counter_name = wait_counter_name(hazard.producer.counter);
   const auto model = waitcheck_detail::waitcnt_model(cu.arch());
   if (model.succeeded() && waitcheck_detail::uses_legacy_waitcnt(model.value())) {
@@ -948,6 +1003,11 @@ void ComputeUnitCore::report_memory_wait(void *context,
       cu.arch(), hazard.producer.counter);
   const auto required = max_wait.succeeded() ? std::min(hazard.required_wait, max_wait.value())
                                              : hazard.required_wait;
+  if (cu.memory_diagnostic_report_)
+    cu.memory_diagnostic_report_->add_wait(memory_race_wave_key(wf), hazard, counter_name,
+                                           required);
+  if (count > kMaxMemoryWaitDiagnostics)
+    return;
   const auto register_name = [&] {
     switch (hazard.reg.cls) {
     case RegClass::VGPR:
@@ -1318,7 +1378,180 @@ DecodedMemorySpace decoded_memory_space(std::string_view mnemonic, uint8_t decod
   }
 }
 
+/// Hardware discards LDS accesses outside the workgroup's allocation, so their
+/// bytes are never shared. Compilers rely on this to disable a wave's
+/// direct-to-LDS load with an out-of-range M0 such as 0x7fffffff.
+void clip_to_lds_allocation(std::vector<MemoryRaceChecker::LaneRange> &ranges,
+                            const Wavefront &wf) {
+  const uint64_t base = wf.lds_base();
+  const uint64_t end = base + wf.lds_size();
+  size_t kept = 0;
+  for (const auto &range : ranges) {
+    const uint64_t start = std::max(range.address, base);
+    const uint64_t stop = std::min(range.address + range.size, end);
+    if (start < stop)
+      ranges[kept++] = {start, static_cast<uint32_t>(stop - start), range.lane};
+  }
+  ranges.resize(kept);
+}
+
 } // namespace
+
+void ComputeUnitCore::track_address_races(const Instruction &inst, Wavefront &wf, uint8_t route_tag,
+                                          uint8_t decoded_route_tag,
+                                          std::span<const uint64_t> pre_routing_addresses,
+                                          uint64_t flat_local_lane_mask,
+                                          uint64_t flat_dds_lane_mask) {
+  using LaneRange = MemoryRaceChecker::LaneRange;
+  if (route_tag != SCALAR_MEM && route_tag != LOCAL_MEM && route_tag != GLOBAL_MEM)
+    return;
+  auto make_access = [&](bool read, bool write, bool atomic) {
+    MemoryRaceChecker::Access access{.wave = memory_race_wave_key(wf),
+                                     .pc = wf.pc,
+                                     .read = read,
+                                     .write = write,
+                                     .atomic = atomic};
+    attach_completion_tokens(access, inst, wf);
+    return access;
+  };
+  thread_local std::vector<LaneRange> ranges;
+  ranges.clear();
+
+  if (route_tag == SCALAR_MEM) {
+    const auto &d = *inst.data_as<ScalarMemState>();
+    for (uint32_t element = 0; element < d.num_dwords; ++element) {
+      if (d.is_load && (d.load_dword_mask & (uint16_t{1} << element)) == 0)
+        continue;
+      const uint64_t address = d.addr + uint64_t{element} * d.elem_size;
+      if (!ranges.empty() && ranges.back().address + ranges.back().size == address)
+        ranges.back().size += d.elem_size;
+      else
+        ranges.push_back({address, d.elem_size, -1});
+    }
+    if (!ranges.empty())
+      memory_race_checker_->global_access(make_access(d.is_load, !d.is_load, false), ranges);
+    return;
+  }
+
+  const auto &d = *inst.data_as<VectorMemState>();
+  const bool atomic = d.atomic_op != AtomicOp::NONE;
+  const uint64_t shared_lanes = flat_local_lane_mask | flat_dds_lane_mask;
+  const bool flat = decoded_route_tag == GLOBAL_MEM && inst.mnemonic().starts_with("flat_");
+  const uint32_t elements = atomic ? 1 : d.num_elems;
+  const auto &scoreboard = wf.ensure_memory_wait_scoreboard();
+  const MemoryRaceChecker::Access access =
+      make_access(d.is_load || atomic, !d.is_load || atomic, atomic);
+  const auto collect = [&](bool lds, uint64_t lanes, std::span<const uint64_t> addresses) {
+    const auto translate = [&](uint64_t address) {
+      return lds && flat ? (address - shared_aperture_base_) + wf.lds_base() : address;
+    };
+    if (d.element_lane_masks.empty()) {
+      // Every element of a lane is present, so the lane covers one range.
+      for (uint64_t pending = d.lane_mask & lanes; pending != 0; pending &= pending - 1) {
+        const uint32_t lane = static_cast<uint32_t>(std::countr_zero(pending));
+        ranges.push_back(
+            {translate(addresses[lane]), elements * d.elem_size, static_cast<int32_t>(lane)});
+      }
+      return;
+    }
+    for (uint32_t element = 0; element < elements; ++element) {
+      for (uint64_t pending = d.element_lane_masks[element] & lanes; pending != 0;
+           pending &= pending - 1) {
+        const uint32_t lane = static_cast<uint32_t>(std::countr_zero(pending));
+        ranges.push_back({translate(addresses[lane] + uint64_t{element} * d.elem_size), d.elem_size,
+                          static_cast<int32_t>(lane)});
+      }
+    }
+  };
+  const auto flush = [&](bool lds, const MemoryRaceChecker::Access &instruction) {
+    if (lds)
+      clip_to_lds_allocation(ranges, wf);
+    if (ranges.empty())
+      return;
+    if (lds)
+      memory_race_checker_->lds_access(instruction, ranges, scoreboard);
+    else
+      memory_race_checker_->global_access(instruction, ranges);
+    ranges.clear();
+  };
+
+  const std::span<const uint64_t> routed_addresses(d.per_lane_addr.data(), wf.wf_size());
+  if (flat && !pre_routing_addresses.empty()) {
+    collect(true, shared_lanes, pre_routing_addresses);
+    flush(true, access);
+    collect(false, d.lane_mask & ~shared_lanes & ~d.scratch_lane_mask, pre_routing_addresses);
+    flush(false, access);
+  } else if (route_tag == LOCAL_MEM) {
+    collect(true, d.lane_mask, routed_addresses);
+    if (d.ds2_active)
+      collect(true, d.lane_mask,
+              std::span<const uint64_t>(d.ds2_per_lane_addr.data(), wf.wf_size()));
+    flush(true, access);
+  } else {
+    collect(false, d.lane_mask & ~d.scratch_lane_mask, routed_addresses);
+    flush(false, access);
+  }
+
+  // Async global-to-LDS loads have two address effects sharing the same VMEM
+  // completion: the global read above and the deferred LDS write here.
+  const bool cluster_destination_selected =
+      !d.cluster_multicast || d.cluster_mcast_mask == 0 ||
+      (d.cluster_mcast_mask & cluster_multicast_rank_mask(wf.cluster_rank())) != 0;
+  if (d.lds_dst && cluster_destination_selected) {
+    const uint32_t per_lane_bytes = elements * d.elem_size;
+    for (uint64_t lanes = d.lane_mask; lanes != 0; lanes &= lanes - 1) {
+      const uint32_t lane = static_cast<uint32_t>(std::countr_zero(lanes));
+      const uint64_t base =
+          d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+      ranges.push_back({base, per_lane_bytes, static_cast<int32_t>(lane)});
+    }
+    MemoryRaceChecker::Access lds_write = access;
+    lds_write.read = false;
+    lds_write.write = true;
+    lds_write.atomic = false;
+    lds_write.ordered_class = 0;
+    flush(true, lds_write);
+  }
+}
+
+void ComputeUnitCore::track_tensor_dma_accesses(Wavefront &wf, uint64_t pc,
+                                                std::span<const uint64_t> global_addresses,
+                                                std::span<const uint32_t> lds_addresses,
+                                                uint32_t size, bool store_from_lds) {
+  if (!memory_race_checks_enabled() || global_addresses.empty())
+    return;
+  auto &scoreboard = wf.ensure_memory_wait_scoreboard();
+  MemoryRaceChecker::Access access{
+      .wave = memory_race_wave_key(wf), .pc = pc, .read = !store_from_lds, .write = store_from_lds};
+  if (const auto token = scoreboard.latest_token(WaitCounterKind::Tensor)) {
+    access.completions[0] = token;
+    access.completion_count = 1;
+    if (token.order != MemoryWaitScoreboard::kUnordered)
+      access.ordered_class = 1u + (static_cast<uint32_t>(token.counter) << 16) + token.order;
+  }
+  thread_local std::vector<MemoryRaceChecker::LaneRange> ranges;
+  const auto collect = [&](auto addresses) {
+    ranges.clear();
+    for (const uint64_t address : addresses) {
+      auto *last = ranges.empty() ? nullptr : &ranges.back();
+      if (last && last->address + last->size == address &&
+          last->size <= std::numeric_limits<uint32_t>::max() - size)
+        last->size += size;
+      else
+        ranges.push_back({address, size, -1});
+    }
+  };
+  collect(global_addresses);
+  memory_race_checker_->global_access(access, ranges);
+  collect(lds_addresses);
+  clip_to_lds_allocation(ranges, wf);
+  if (ranges.empty())
+    return;
+  access.read = store_from_lds;
+  access.write = !store_from_lds;
+  access.ordered_class = 0;
+  memory_race_checker_->lds_access(access, ranges, scoreboard);
+}
 
 void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &wf,
                                            uint8_t route_tag, uint8_t decoded_route_tag,
@@ -1676,6 +1909,8 @@ template <bool EnableAsync>
         (config_.arch == ROCJITSU_CODE_ARCH_CDNA5 &&
          waitcheck_detail::WaitcheckTarget::is_xcnt_drain(*inst)))
       wait_state->before(*inst, config_.arch);
+    if (memory_race_checks_enabled() && (inst->is_waitcnt() || inst->has_embedded_memory_wait()))
+      memory_race_checker_->retire_completed(memory_race_wave_key(*active), *wait_state);
     wait_state->bind(active->pc, active, &ComputeUnitCore::report_memory_wait);
   }
   bool wait_checked = false;

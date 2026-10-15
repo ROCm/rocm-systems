@@ -674,6 +674,7 @@ add_executable(
     kfd_ioctl_test.cpp
     waitcnt_counter_test.cpp
     memory_wait_scoreboard_test.cpp
+    memory_race_checker_test.cpp
     register_access_test.cpp
     register_file_test.cpp
     simd_correctness/mfma_lazy_storage_test.cpp

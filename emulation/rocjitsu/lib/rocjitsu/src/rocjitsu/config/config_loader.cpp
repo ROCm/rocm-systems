@@ -582,6 +582,14 @@ std::unordered_map<std::string, FactoryFn> &factories() {
         else
           throw std::invalid_argument("xcnt_diagnostics must be warn or off");
       }
+      if (auto it = cfg.find("memory_race_diagnostics"); it != cfg.end()) {
+        if (it->second == "off")
+          cc.memory_race_diagnostics = amdgpu::MemoryWaitDiagnostics::Off;
+        else if (it->second == "warn")
+          cc.memory_race_diagnostics = amdgpu::MemoryWaitDiagnostics::Warn;
+        else
+          throw std::invalid_argument("memory_race_diagnostics must be warn or off");
+      }
       return amdgpu::ComputeUnitCore::create(n, cc, mem, nullptr, mode);
     };
   }
@@ -956,6 +964,23 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
     cu_overrides["memory_wait_diagnostics"] = *mode == WaitChecking::Off ? "off" : "warn";
     cu_overrides["xcnt_diagnostics"] = *mode == WaitChecking::All ? "warn" : "off";
   }
+  if (const auto *setting = fb_config->race_checking()) {
+    const auto enabled = parse_race_checking(setting->string_view());
+    if (!enabled)
+      throw std::invalid_argument("race_checking must be on or off");
+    cu_overrides["memory_race_diagnostics"] = *enabled ? "warn" : "off";
+  }
+  std::optional<uint64_t> race_shadow_bytes;
+  if (flatbuffers::IsFieldPresent(fb_config,
+                                  fb::SimulationConfig::VT_RACE_CHECKING_GLOBAL_SHADOW_MB)) {
+    if (fb_config->race_checking_global_shadow_mb() == 0)
+      throw std::invalid_argument("race_checking_global_shadow_mb must be positive");
+    race_shadow_bytes = uint64_t{fb_config->race_checking_global_shadow_mb()} << 20;
+  }
+  const auto configure_race_checking = [&](SoC &soc) {
+    if (race_shadow_bytes)
+      soc.set_memory_race_global_shadow_budget(*race_shadow_bytes);
+  };
   LoadedConfig result;
   result.engine_config = engine_config_from_fb(fb_config);
   result.exec_mode = exec_mode_from_fb(fb_config);
@@ -1025,6 +1050,11 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
   result.build_result = build_topology(topo_def, result.exec_mode, arch, result.target,
                                        result.async_resources, result.device.num_cu_per_sh,
                                        result.device.num_shader_arrays_per_engine, cu_overrides);
+  if (SoC *soc = result.soc()) {
+    configure_race_checking(*soc);
+    if (const auto *path = fb_config->memory_diagnostic_report())
+      soc->set_memory_diagnostic_report_path(path->str());
+  }
   if (result.device.present)
     if (SoC *soc = result.soc())
       soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
@@ -1052,10 +1082,14 @@ LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint
       result.extra_gpu_builds.push_back(build_topology(
           topo_def, result.exec_mode, arch, result.target, result.async_resources,
           result.device.num_cu_per_sh, result.device.num_shader_arrays_per_engine, cu_overrides));
-      if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get()))
+      if (auto *soc = dynamic_cast<SoC *>(result.extra_gpu_builds.back().root.get())) {
         soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
           cp->set_scratch_slots_per_cu(result.device.max_slots_scratch_cu);
         });
+        configure_race_checking(*soc);
+        if (const auto *path = fb_config->memory_diagnostic_report())
+          soc->set_memory_diagnostic_report_path(std::format("{}.gpu{}", path->string_view(), i));
+      }
     }
   }
 

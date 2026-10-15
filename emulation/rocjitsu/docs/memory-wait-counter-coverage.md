@@ -138,10 +138,12 @@ architecturally sufficient instruction spacing can make a dependency safe withou
 an explicit wait; latency and instruction spacing are not modeled here.
 See [diagnostic limitations](memory-wait-diagnostics.md#false-negatives-and-false-positives).
 
-The diagnostic checks pending register results and the qualified XCNT source
-lifetimes. It does not compare memory addresses, prove memory visibility, check LDS
-or tensor transfer footprints, or detect communication hazards within or between
-waves. ASYNC, TENSOR and store-only producers still count without a register result.
+The ordinary diagnostic checks pending register results and qualified XCNT source
+lifetimes. The opt-in core address checker (`race_checking=on`) consumes the same
+completion positions and adds overlapping LDS, direct-to-LDS, exact tensor
+footprint, and cross-workgroup global/scalar checks. It does not turn eager
+execution into a latency or cache-coherence simulation. ASYNC, TENSOR and
+store-only producers still count without a register result.
 
 The [XCNT policy](memory-wait-diagnostics.md#xcnt-replay-source-diagnostics)
 covers SMEM sources and VMEM sources in multi-group replay mode. Single-group VMEM,

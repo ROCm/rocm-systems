@@ -19,9 +19,10 @@ namespace config {
 
 /// @brief Save the current simulation state to a binary FlatBuffer file.
 ///
-/// Captures the full state of all wavefronts, compute units, the command
-/// processor, and GPU memory pages. The resulting file can be loaded with
-/// restore_checkpoint() to resume simulation from this point.
+/// Captures the architectural state of all wavefronts, compute units, the
+/// command processor, and GPU memory pages. Transient diagnostic dependency
+/// and address histories are intentionally excluded. The resulting file can be
+/// loaded with restore_checkpoint() to resume simulation from this point.
 /// @param path Output file path for the binary checkpoint.
 /// @param soc The SoC to serialize.
 /// @param tick Current simulation tick.
@@ -46,8 +47,9 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 /// wavefront register state and GPU memory pages to match the checkpointed
 /// values. Scheduling indices (CU round-robin position, CP dispatch cursor)
 /// are saved in the checkpoint but not yet restored; simulation resumes with
-/// the same correctness guarantees but may schedule wavefronts in a different
-/// order than the original run.
+/// the same functional correctness guarantees but may schedule wavefronts in a
+/// different order than the original run. Diagnostic dependency and address
+/// histories restart empty, and no JSON diagnostic-report path is restored.
 /// @param path Path to the binary checkpoint file.
 /// @returns LoadedConfig with engine parameters and a topology with restored state.
 LoadedConfig restore_checkpoint(const std::string &path);

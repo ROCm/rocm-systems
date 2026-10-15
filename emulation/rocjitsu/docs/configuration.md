@@ -93,6 +93,9 @@ The example above is intentionally minimal.
 | `cpu_thread_budget` | int | Automatic selection ceiling. Omitted/0 uses CPU affinity and the target allocation table; a positive value overrides the budget. |
 | `async_helper_threads` | int | Shared MMA helpers per VM. Omitted/-1 selects the table; 0 disables; explicit values are 0–128. |
 | `wait_checking` | string | Override wait diagnostics on every CU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
+| `race_checking` | string | Set core address-aware LDS/global race diagnostics on every CU: `on` or `off` (default). Enabled CUs use one shared checker per SoC/GPU. |
+| `memory_diagnostic_report` | string | Optional path for a combined per-GPU JSON report of core `memory-wait` and `memory-race` findings. GPU 0 uses this path; additional GPU `N` appends `.gpuN`. |
+| `race_checking_global_shadow_mb` | int | Memory budget in MiB for race checking's record of global accesses (default 512, must be positive). It bounds allocated storage; past it, accesses are still checked but no longer retained. |
 | `thread_allocations` | array | Preferred `num_threads` / `cpu_dispatch_threads` / `async_helper_threads` triples, selected by total execution-thread cost. |
 | `exec_mode` | string | Execution mode. Use `"clocked"` for clocked execution; `"functional"` is the default/fallback. |
 | `vm.arch` | string | ISA architecture family: `cdna3`, `cdna4`, `cdna5`, etc. |
@@ -349,6 +352,27 @@ each with values `warn` or `off`. Invalid per-CU values are rejected even with a
 global override. Checkpoints preserve each CU's effective diagnostic settings;
 older checkpoints without these fields use the defaults. See
 [memory wait diagnostics](memory-wait-diagnostics.md) for coverage and limitations.
+
+Address race checking is opt-in. Use `--race-checking=on`, top-level
+`"race_checking": "on"`, or per-CU
+`{"key":"memory_race_diagnostics","value":"warn"}`. The accepted per-CU values are
+`warn` and `off`. `--race-checking=off` disables the core address checker for
+one launch; the flag uses the same config-copy mechanism and attach/DBT
+restrictions as `--wait-checking`. Pending address history is intentionally
+reset at checkpoint restore, so races whose producer predates a restore are
+outside coverage. When the global shadow cannot retain another access within
+`race_checking_global_shadow_mb`, the checker warns once per GPU checker that
+coverage is degraded and reports
+`coverage_degraded` in that GPU's JSON report; raise the budget to retain more
+accesses. Checkpoints preserve the global shadow budget, but not
+`memory_diagnostic_report`; a VM restored through `rj_vm_restore_checkpoint`
+does not write a JSON diagnostic report. The report is owned once per GPU,
+combines findings from all of its CPs and CUs, and is flushed whenever a
+dispatch retires or is dropped. GPU 0 writes the configured path; in a
+multi-GPU config, additional GPU `N` writes `<path>.gpuN`. A config-validation
+machine that executes no dispatch does not overwrite a workload's report at the
+same path. Enabled memory-wait findings are written to this combined report even
+when address race checking is off.
 
 Qualified [ISA diagnostics](isa-diagnostics.md) are always enabled, independently
 of memory-wait checking. The checks use decoded fields and existing operands;

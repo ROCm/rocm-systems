@@ -4,17 +4,25 @@ Execution plugins that hook into rocjitsu's simulation model. Each plugin
 implements the `ExecutionPlugin` interface and receives callbacks for
 wavefront dispatches, memory instructions, register reads, barriers, etc.
 
+The opt-in core address checker is not an execution plugin. New race-checking
+workflows should use `rocjitsu --race-checking=on` or top-level
+`"race_checking":"on"` and, optionally, `memory_diagnostic_report`; see
+[memory wait diagnostics](memory-wait-diagnostics.md#address-race-diagnostics).
+The `race` plugin below remains available for compatibility and its legacy
+register-event/disassembly presentation. Enabling both paths produces
+overlapping diagnostics and additional callback overhead.
+
 ## Plugins
 
 | Plugin | Location | Description |
 |---|---|---|
-| `RaceDetectorPlugin` | `race_detector/` | Hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
+| `RaceDetectorPlugin` | `race_detector/` | Legacy plugin that hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races. Reports violations with disassembly traces. See [race-detector.md](race-detector.md). |
 | `KernelLoggingPlugin` | `logging/` | Logs kernel dispatches and detects MMA instruction usage. |
 | `ThroughputPlugin` | `throughput/` | Reports per-dispatch and aggregate wave-instruction MIPS with an exclusive instruction-family breakdown. |
 | `InstructionMixPlugin` | `instruction_mix/` | Records which ISA mnemonics a run executed and how often, per dispatch and in aggregate, for instruction-mix and instruction-coverage reporting. |
 | `PerfsimPlugin` | `perfsim/` | Adapts gfx1250 execution observations to an external Perfsim backend implementing FFM observer APIs v8 through v13. Built only when explicitly enabled. See the [Perfsim adapter README](../lib/rocjitsu/src/rocjitsu/vm/plugins/perfsim/README.md). |
 
-The race detector plugin contains both the core detection algorithm
+The race detector plugin contains both its internal detection algorithm
 (`race_detector/core/`) and the rocjitsu adapter (`race_detector/plugin.h`).
 
 ### Throughput Plugin

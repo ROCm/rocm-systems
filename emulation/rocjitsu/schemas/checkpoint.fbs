@@ -61,6 +61,7 @@ table ComputeUnitState {
   // retain the native defaults; false explicitly disables the corresponding check.
   memory_wait_checks: bool = null;
   xcnt_checks: bool = null;
+  memory_race_checks: bool = null;
 }
 
 /// Serialized state of a command processor.

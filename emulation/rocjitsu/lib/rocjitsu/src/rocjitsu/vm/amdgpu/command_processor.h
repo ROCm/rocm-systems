@@ -264,10 +264,26 @@ public:
         std::max(scratch_waves_per_se_, cu->scratch_scoreboard_base() + cu->scratch_slots_per_cu());
     cu->set_pool_driven(dispatch_threads_ > 1);
     cu->set_command_processor(this);
+    cu->set_memory_race_checker(memory_race_checker_);
+    cu->set_memory_diagnostic_report(memory_diagnostic_report_);
     cu->set_gpu_vm(gpu_vm_);
     cu->set_on_idle([this]() { on_cu_idle(); });
     cu->set_on_pool_ready([this, cu]() { on_cu_pool_ready(cu); });
     on_cu_pool_ready(cu);
+  }
+
+  void set_memory_race_checker(std::shared_ptr<MemoryRaceChecker> checker) {
+    memory_race_checker_ = std::move(checker);
+    for (auto *cu : cus_)
+      cu->set_memory_race_checker(memory_race_checker_);
+  }
+  void set_memory_diagnostic_report(std::shared_ptr<MemoryDiagnosticReport> report) {
+    memory_diagnostic_report_ = std::move(report);
+    for (auto *cu : cus_)
+      cu->set_memory_diagnostic_report(memory_diagnostic_report_);
+  }
+  const std::shared_ptr<MemoryRaceChecker> &memory_race_checker() const {
+    return memory_race_checker_;
   }
 
   void startup() override;
@@ -527,6 +543,7 @@ private:
   uint64_t register_queue(ComputeQueueConfig queue, bool fanout_replica);
   [[nodiscard]] QueuePrepareCloseStatus close_queue_registration(uint64_t registration_id,
                                                                  bool force) noexcept;
+  void end_dispatch_diagnostics(uint32_t dispatch_id);
 
   struct DispatchLaunchMetadata {
     std::array<uint32_t, 4> scratch_resource_descriptor{};
@@ -924,6 +941,8 @@ private:
   mutable std::recursive_mutex hw_queue_mutex_;
 
   std::shared_ptr<ExecutionPluginGroup> plugin_group_ = ExecutionPluginGroup::empty_group();
+  std::shared_ptr<MemoryRaceChecker> memory_race_checker_;
+  std::shared_ptr<MemoryDiagnosticReport> memory_diagnostic_report_;
 
   friend class ComputeUnitCore;
 

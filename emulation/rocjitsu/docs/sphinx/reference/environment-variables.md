@@ -19,13 +19,21 @@ command-line options that interact with these variables, see
 
 ### `RJ_RACE`
 
-Enables the race detection plugin.
+Enables the legacy race detection plugin.
 
 | | |
 |---|---|
 | **Default** | Disabled (unset) |
 | **Allowed values** | `1` to enable |
 | **Effect** | When set to `1`, the race detection plugin hooks memory instructions, register reads, barriers, and `s_waitcnt` to detect data races within a workgroup. Reports violations with disassembly traces. |
+
+The core address checker has no environment-variable switch. Prefer
+`rocjitsu --race-checking=on` or top-level `"race_checking":"on"` for new
+workflows. Its optional combined wait/race JSON output is configured with
+`memory_diagnostic_report`; see
+[Address race diagnostics](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/memory-wait-diagnostics.md#address-race-diagnostics).
+Do not enable `RJ_RACE` and the core checker together unless the overlapping
+legacy output is intentional.
 
 ### `RJ_LOG`
 

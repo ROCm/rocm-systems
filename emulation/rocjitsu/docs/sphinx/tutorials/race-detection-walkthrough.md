@@ -16,10 +16,13 @@ You do not need a physical AMD GPU for this workflow. The rocJITsu
 emulator runs the kernel entirely on the CPU.
 
 ```{note}
-This tutorial uses the built-in race detector, an execution plugin that
-runs inside the rocJITsu emulator (`RJ_RACE=1`). To detect the same
-class of LDS races on a physical GPU without the emulator, use the
-ConSan DBI sanitizer instead---see
+This tutorial intentionally demonstrates the legacy race-detector execution
+plugin (`RJ_RACE=1`) and its disassembly-rich output. For new emulator
+workflows, prefer the core checker with `rocjitsu --race-checking=on`; see
+[Address race diagnostics](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/memory-wait-diagnostics.md#address-race-diagnostics).
+Do not enable both unless overlapping output is intentional. To detect the same
+class of LDS races on a physical GPU without the emulator, use the ConSan DBI
+sanitizer instead---see
 [Detect an LDS data race with ConSan](consan-detect-lds-race.md).
 ```
 
@@ -75,7 +78,8 @@ Set `RJ_RACE=1` to activate the race detection plugin, then launch the
 binary under rocJITsu:
 
 ``` bash
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+RJ_RACE=1 build/tools/rocjitsu/rocjitsu \
+  --config configs/gfx950_mi355x.json -- /tmp/race_example
 ```
 
 ## Interpret the race report
@@ -129,7 +133,8 @@ Recompile and rerun:
 
 ``` bash
 hipcc -o /tmp/race_example race_example.hip --offload-arch=gfx950
-RJ_RACE=1 build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+RJ_RACE=1 build/tools/rocjitsu/rocjitsu \
+  --config configs/gfx950_mi355x.json -- /tmp/race_example
 ```
 
 The output should complete with `done` and no `RACE` reports.
@@ -141,7 +146,8 @@ using the sink system:
 
 ``` bash
 RJ_RACE=1 RJ_SINKS=file RJ_SINK_DIR=/tmp/output \
-  build/tools/rocjitsu/rocjitsu -- /tmp/race_example
+  build/tools/rocjitsu/rocjitsu \
+  --config configs/gfx950_mi355x.json -- /tmp/race_example
 ```
 
 Reports are written to `/tmp/output/race.log`.

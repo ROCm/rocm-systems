@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/hsa_clock.h"
 #include "rocjitsu/vm/amdgpu/mem_state.h"
+#include "rocjitsu/vm/amdgpu/memory_diagnostic_report.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h"
 
 #include "rocjitsu/base/rj_compiler.h"
@@ -848,6 +849,10 @@ void CommandProcessor::startup() {
         return gate_dispatch_retirement(queue, entry);
       });
   completion_->set_dispatch_retired_callback([this](const DispatchEntry &entry) {
+    // A single-XCD dispatch has no GridCompletion object, so there is no
+    // grid-retired callback. Fanned-out grids are ended once by that callback.
+    if (!entry.grid_completion)
+      end_dispatch_diagnostics(entry.dispatch_id);
     erase_cluster_workgroups(entry.dispatch_id);
     dispatch_launch_metadata_.erase(entry.dispatch_id);
     // Resume the ring after the blocking packet's completion is durable.
@@ -856,7 +861,10 @@ void CommandProcessor::startup() {
       arm_stall_recheck(engine()->context(partition_id()).current_tick());
     }
   });
-  completion_->set_grid_retired_callback([this](const DispatchEntry &) { wake_all_xcds(); });
+  completion_->set_grid_retired_callback([this](const DispatchEntry &entry) {
+    end_dispatch_diagnostics(entry.dispatch_id);
+    wake_all_xcds();
+  });
   // Waves admitted before engine attachment could not notify the pool driver.
   // Seed those CUs once; admission and resume callbacks maintain the set later.
   if (dispatch_threads_ > 1)
@@ -875,6 +883,13 @@ void CommandProcessor::shutdown() {
     is_primary_ = false;
   }
   completion_.reset();
+}
+
+void CommandProcessor::end_dispatch_diagnostics(uint32_t dispatch_id) {
+  if (memory_race_checker_)
+    memory_race_checker_->end_dispatch(dispatch_id);
+  if (memory_diagnostic_report_)
+    memory_diagnostic_report_->flush();
 }
 
 void CommandProcessor::set_xcd_topology(uint32_t rank, std::vector<CommandProcessor *> peers) {
@@ -1464,8 +1479,10 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
         });
       }
       drop_replicas = queue->xcd_fanout;
-      for (const DispatchEntry &entry : queue->entries)
+      for (const DispatchEntry &entry : queue->entries) {
+        end_dispatch_diagnostics(entry.dispatch_id);
         dispatch_launch_metadata_.erase(entry.dispatch_id);
+      }
       // Cancel every child stream before releasing the queue's VM lease.
       if (!queue->commands.submissions.empty() || !queue->dispatches.entries.empty())
         fail_pm4_queue(*queue, queue->dispatches);
@@ -2011,8 +2028,20 @@ void CommandProcessor::drain_pending_cluster_barrier_completions() {
           cu->complete_barrier(completion.dispatch_id, peer_wg_id, completion.completion_bit);
       members.insert(members.end(), peer_members.begin(), peer_members.end());
     }
-    if (!members.empty())
+    if (!members.empty()) {
+      const bool track_races =
+          memory_race_checker_ && std::ranges::any_of(completion.peers, [](const auto &peer) {
+            return peer.first->memory_race_checks_enabled();
+          });
+      if (track_races) {
+        std::vector<MemoryRaceChecker::WaveKey> keys;
+        keys.reserve(members.size());
+        for (const auto *member : members)
+          keys.push_back(memory_race_wave_key(*member));
+        memory_race_checker_->barrier(keys);
+      }
       plugin_group_->onAmdgpuBarrierResolved(std::span<Wavefront *>(members));
+    }
   }
 }
 
@@ -2678,6 +2707,7 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
   for (ComputeUnitCore *cu : cus_)
     cu->abort_dispatch(static_cast<uint32_t>(dispatch_id));
+  end_dispatch_diagnostics(static_cast<uint32_t>(dispatch_id));
   return true;
 }
 
@@ -3043,6 +3073,7 @@ void CommandProcessor::service_command_streams(simdojo::Tick now) {
       flush_gpu_caches();
       if (entry.execution_begun)
         plugin_group_->onAmdgpuDispatchExecutionEnd(entry.dispatch_id);
+      end_dispatch_diagnostics(entry.dispatch_id);
       erase_cluster_workgroups(entry.dispatch_id);
       state.entries.pop_front();
     }
@@ -3286,6 +3317,8 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
     });
   }
   flush_gpu_caches();
+  for (const auto &entry : qs.entries)
+    end_dispatch_diagnostics(entry.dispatch_id);
   qs.entries.clear();
   for (auto &submission : queue.commands.submissions)
     if (submission.complete)

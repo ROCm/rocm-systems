@@ -45,7 +45,7 @@ class WaitCheckingCliTest(unittest.TestCase):
 
     def write_source(self, mode):
         config = json.loads(self.template.read_text())
-        config.update(wait_checking=mode, cpu_thread_budget=6)
+        config.update(wait_checking=mode, race_checking="off", cpu_thread_budget=6)
         self.source.write_text(json.dumps(config, indent=2) + "\n")
 
     def run_cli(self, *args, config=None):
@@ -120,6 +120,35 @@ class WaitCheckingCliTest(unittest.TestCase):
 
     def test_last_mode_wins(self):
         self.check_handoff(["--wait-checking=off", "--wait-checking", "on"], "on")
+
+    def test_race_checking_modes_and_validation(self):
+        for assigned, mode in ((False, "on"), (True, "off")):
+            flag = [f"--race-checking={mode}"] if assigned else ["--race-checking", mode]
+            result = self.run_cli(
+                *flag, "--", sys.executable, "-c", PROBE, "local"
+            )
+            self.assertEqual(result.returncode, 0, result.stdout + result.stderr)
+            self.assertEqual(json.loads(result.stdout)["config"]["race_checking"], mode)
+        for flags in (
+            ["--race-checking"],
+            ["--race-checking="],
+            ["--race-checking=warn"],
+            ["--race-checking", "--", "true"],
+        ):
+            result = self.run_cli(*flags)
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--race-checking requires on or off", result.stderr)
+
+    def test_race_checking_rejects_attach_and_external_dbt_config(self):
+        for flags, config, message in (
+            (["--attach"], self.source, "cannot be combined with --attach"),
+            ([], self.dbt_config, "cannot be combined with a dbt_guest simulator_config"),
+        ):
+            result = self.run_cli(
+                "--race-checking=on", *flags, "--", "true", config=config
+            )
+            self.assertNotEqual(result.returncode, 0)
+            self.assertIn("--race-checking " + message, result.stderr)
 
     def test_rejects_missing_or_invalid_values(self):
         for flags in (

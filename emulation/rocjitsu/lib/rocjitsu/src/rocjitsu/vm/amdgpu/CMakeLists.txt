@@ -21,7 +21,9 @@ rj_add_object_library(rocjitsu_vm_amdgpu
     l1_vector_cache.cpp
     l2_cache.cpp
     lds_stack.cpp
+    memory_diagnostic_report.cpp
     memory_pipeline.cpp
+    memory_race_checker.cpp
     memory_side_cache.cpp
     mes_engine.cpp
     memory_wait_scoreboard.cpp

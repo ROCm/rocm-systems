@@ -3469,6 +3469,15 @@ TEST(ExecutionPluginTest, EmptyGroupDispatchBypassesCallbackLock) {
             non_empty_before + 1);
 }
 
+TEST(ExecutionPluginGroupTest, ContainsUsesExactPluginName) {
+  ExecutionPluginGroup group(PluginSinkConfig{});
+  EXPECT_FALSE(group.contains("race"));
+  ASSERT_TRUE(group.add(std::make_unique<ExecutionPlugin>("race-extra")));
+  EXPECT_FALSE(group.contains("race"));
+  ASSERT_TRUE(group.add(std::make_unique<ExecutionPlugin>("race")));
+  EXPECT_TRUE(group.contains("race"));
+}
+
 int run_serial_hot_hook_halt_snapshot() {
   PluginFixture f;
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
@@ -9263,6 +9272,45 @@ TEST(RoutedMemoryObservationTest, PerElementBoundsAndCachePolicyAreCarried) {
   EXPECT_EQ(access.mtype, Mtype::UC);
   EXPECT_TRUE(access.force_l1_bypass);
   EXPECT_TRUE(access.lds_destination);
+}
+
+TEST(CoreRaceCheckingTest, DirectToLdsWritesOutsideTheAllocationAreNotShared) {
+  // Compilers disable a wave's direct-to-LDS load by pointing M0 past the
+  // workgroup's LDS allocation, where hardware discards the write.
+  auto findings_for_m0 = [](uint32_t m0) {
+    std::vector<MemoryRaceChecker::Finding> findings;
+    PluginFixture fixture(/*num_wf_slots=*/2);
+    auto *cu = fixture.cu();
+    cu->restore_wait_diagnostics(cu->config().memory_wait_diagnostics,
+                                 cu->config().xcnt_diagnostics, MemoryWaitDiagnostics::Warn);
+    cu->set_memory_race_checker(std::make_shared<MemoryRaceChecker>(
+        [&](const MemoryRaceChecker::Finding &finding) { findings.push_back(finding); }));
+    for (int i = 0; i < 2; ++i) {
+      auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0x800, /*sgprs=*/104, /*vgprs=*/256);
+      EXPECT_NE(wave, nullptr);
+      if (!wave)
+        break;
+      wave->set_lds_size(1024);
+      wave->set_exec(0b11);
+      wave->ensure_memory_wait_scoreboard();
+      auto state = std::make_unique<VectorMemState>(GLOBAL_MEM);
+      state->wf_size = wave->wf_size();
+      state->elem_size = 4;
+      state->num_elems = 1;
+      state->is_load = true;
+      state->exec_mask = 0b11;
+      state->lane_mask = 0b11;
+      state->lds_dst = true;
+      state->lds_base = wave->lds_base() + m0;
+      state->per_lane_addr[0] = 0xC000;
+      state->per_lane_addr[1] = 0xC004;
+      test::ComputeUnitTestAccess::route_memory_inst(
+          *cu, new TestMemoryInstruction(std::move(state)), *wave);
+    }
+    return findings.size();
+  };
+  EXPECT_GT(findings_for_m0(0), 0u);
+  EXPECT_EQ(findings_for_m0(0x7fffffff), 0u);
 }
 
 TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {

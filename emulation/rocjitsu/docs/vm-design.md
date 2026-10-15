@@ -19,6 +19,9 @@ execution.
 | `rj_vm.cpp` | C API: create, step, run, checkpoint |
 | `amdgpu/command_processor.h/cpp` | CP: dispatch packets, doorbell loop |
 | `amdgpu/compute_unit.h/cpp` | CU: wavefront slots, register files, execution |
+| `amdgpu/memory_wait_scoreboard.h/cpp` | Per-wave completion positions and register/replay-source diagnostics |
+| `amdgpu/memory_race_checker.h/cpp` | SoC-wide address race state for all CPs and CUs of one GPU |
+| `amdgpu/memory_diagnostic_report.h/cpp` | Bounded per-GPU JSON report combining wait and address findings |
 | `amdgpu/shader_engine.h/cpp` | SE: container of compute units |
 | `amdgpu/xcd.h/cpp` | XCD: CP + shader engines |
 | `amdgpu/wavefront.h/cpp` | Wavefront: ISA-specific thread state |
@@ -68,6 +71,13 @@ The `VirtualMachine` is a `simdojo::CompositeComponent` set as the topology root
 and it owns the simulated KFD alongside its SoCs. The simulation infrastructure
 (engine, topology, partitioning) is managed by `SimulationEngine`; the SoC
 represents the hardware being modeled.
+
+The diagnostic objects are not topology components. Every wave owns its lazily
+allocated wait scoreboard, while the SoC shares one `MemoryRaceChecker` and
+optional `MemoryDiagnosticReport` across all of its command processors and CUs. See
+[memory wait diagnostics](memory-wait-diagnostics.md) for semantics and
+[address race checking gaps](address-race-checking-gaps.md) for current limits
+and performance evidence.
 
 ## Address spaces, translation, and backing
 

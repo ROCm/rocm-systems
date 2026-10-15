@@ -23,11 +23,20 @@ rocjitsu --config <config.json> --vfio-socket <path>
 | `--config <path>` | Path to the simulation configuration JSON file. Required for all modes. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only (no application is launched). |
 | `--attach` | Attach to a running daemon. The socket path is resolved as described in [Environment variables and socket path resolution](#socket-path-resolution). |
+| `--cpu-thread-budget <n>` | Replace top-level `cpu_thread_budget` for this launch without changing the source config. Zero selects automatic sizing. |
+| `--wait-checking <mode>` | Override wait diagnostics on every CU for this launch: `on`, `off`, or `all` (ordinary plus gfx1250 XCNT). |
+| `--race-checking <mode>` | Override core address-race diagnostics on every CU for this launch: `on` or `off`. |
 | `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
+| `--thread-budget-table` | Print resolved engine, dispatch-worker, and helper-thread allocations without running a VM. |
 | `--check-vfio-user` | Exit successfully only when the selected binary includes VFIO-user support. |
 | `--help`, `-h` | Print usage information and exit. |
 | `--version`, `-v` | Print the version string and exit. |
 | `--` | Separator between rocJITsu options and the target application command line. |
+
+The three launch overrides also accept `--name=value` and leave the source JSON
+unchanged. They cannot be combined with `--attach`. When an enabled DBT guest
+names an external `dbt_guest.simulator_config`, set the value in that host
+config instead.
 
 ## Execution modes
 

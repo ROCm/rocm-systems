@@ -1554,6 +1554,60 @@ TEST(ConfigLoaderTest, RejectsInvalidWaitChecking) {
   EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
 }
 
+TEST(ConfigLoaderTest, RaceCheckingOverridesEveryCu) {
+  using amdgpu::MemoryWaitDiagnostics;
+  std::string source = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+  for (const bool enabled : {false, true}) {
+    auto json = config::json_with_launch_overrides(source, {.race_checking = enabled});
+    ASSERT_TRUE(json.succeeded());
+    auto loaded = config::load_config_from_string(json.value(), kEmbeddedSchema);
+    std::vector<simdojo::Component *> components;
+    loaded.build_result.root->collect_components(components);
+    unsigned count = 0;
+    for (auto *component : components) {
+      auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+      if (!cu)
+        continue;
+      ++count;
+      EXPECT_EQ(cu->config().memory_race_diagnostics,
+                enabled ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off);
+      EXPECT_EQ(cu->memory_race_checks_enabled(), enabled);
+    }
+    EXPECT_GT(count, 0u);
+  }
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidRaceChecking) {
+  std::string json = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+  json.insert(json.find('{') + 1, R"("race_checking": "invalid",)");
+  EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
+}
+
+TEST(ConfigLoaderTest, RaceCheckingGlobalShadowBudgetReachesEveryCommandProcessor) {
+  const std::string source = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+  for (const auto &[setting, expected] :
+       {std::pair<std::string, uint64_t>{"", amdgpu::MemoryRaceChecker::kDefaultGlobalShadowBytes},
+        {R"("race_checking_global_shadow_mb": 64,)", uint64_t{64} << 20}}) {
+    SCOPED_TRACE(setting);
+    std::string json = source;
+    json.insert(json.find('{') + 1, setting);
+    auto loaded = config::load_config_from_string(json, kEmbeddedSchema);
+    ASSERT_NE(loaded.soc(), nullptr);
+    unsigned count = 0;
+    loaded.soc()->for_each_cp([&](amdgpu::CommandProcessor *cp) {
+      ++count;
+      EXPECT_EQ(cp->memory_race_checker()->global_shadow_budget(), expected);
+    });
+    EXPECT_GT(count, 0u);
+  }
+}
+
+TEST(ConfigLoaderTest, RejectsZeroRaceCheckingGlobalShadowBudget) {
+  std::string json = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+  json.insert(json.find('{') + 1, R"("race_checking_global_shadow_mb": 0,)");
+  EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
+}
+
 TEST(ConfigLoaderTest, WaitCheckingStillRejectsInvalidPerCuSettings) {
   for (const char *key : {"memory_wait_diagnostics", "xcnt_diagnostics"}) {
     for (const char *mode : {"on", "off", "all"}) {
@@ -2425,6 +2479,28 @@ TEST(CheckpointTest, RoundTripsWaitCheckingModes) {
     ASSERT_NE(restored_cu->wf(0), nullptr);
     EXPECT_EQ(restored_cu->wf(0)->memory_wait_checks_enabled(), mode != config::WaitChecking::Off);
   }
+}
+
+TEST(CheckpointTest, RoundTripsRaceShadowBudget) {
+  std::string json = config::read_config_file(test::config_path("gfx1250_mi455x.json"));
+  const size_t root = json.find('{');
+  ASSERT_NE(root, std::string::npos);
+  json.insert(root + 1, "\"race_checking\":\"on\",\"race_checking_global_shadow_mb\":37,");
+  auto source = config::load_config_from_string(json, kEmbeddedSchema);
+  ASSERT_EQ(source.soc()->memory_race_checker()->global_shadow_budget(), uint64_t{37} << 20);
+  auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(source_cu->dispatch_wf(9, 0, 32, 32), nullptr);
+
+  test::ScopedTempFile checkpoint("rocjitsu-race-budget-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  EXPECT_EQ(restored.soc()->memory_race_checker()->global_shadow_budget(), uint64_t{37} << 20);
+  ASSERT_EQ(restored.soc()->memory_race_checker()->tracked_workgroups(), 1u);
+  auto *restored_wf = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0)->wf(0);
+  ASSERT_NE(restored_wf, nullptr);
+  restored_wf->halt(amdgpu::Wavefront::CpCompletionNotice::Suppress);
+  EXPECT_EQ(restored.soc()->memory_race_checker()->tracked_workgroups(), 0u);
 }
 
 TEST(CheckpointTest, RoundTripsIndependentPerCuWaitSettings) {

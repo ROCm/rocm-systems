@@ -7,6 +7,7 @@
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
+#include "util/log.h"
 
 #include <algorithm>
 #include <memory>
@@ -67,8 +68,11 @@ void SoC::add_xcd(amdgpu::Xcd *xcd) {
     xcd->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
     xcd->l2_cache()->set_gpu_vm(&gpu_vm_);
   }
-  if (amdgpu::CommandProcessor *cp = xcd->command_processor())
+  if (amdgpu::CommandProcessor *cp = xcd->command_processor()) {
     cp->set_gpu_vm(&gpu_vm_, internal_address_space_);
+    cp->set_memory_race_checker(memory_race_checker_);
+    cp->set_memory_diagnostic_report(memory_diagnostic_report_);
+  }
   xcds_.push_back(xcd);
 }
 
@@ -196,9 +200,7 @@ SoC::SoC(std::string name, const Config &config)
       auto xcd_ptr =
           std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
                                         config.arch, memory_, config.exec_mode, cache_coherence_);
-      xcd_ptr->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
-      xcd_ptr->l2_cache()->set_gpu_vm(&gpu_vm_);
-      xcds_.push_back(xcd_ptr.get());
+      add_xcd(xcd_ptr.get());
       add_child(std::move(xcd_ptr));
     }
   } else {
@@ -208,9 +210,7 @@ SoC::SoC(std::string name, const Config &config)
       auto xcd_ptr =
           std::make_unique<amdgpu::Xcd>(soc_name + ".xcd" + std::to_string(i), config.xcd,
                                         config.arch, memory_, config.exec_mode, cache_coherence_);
-      xcd_ptr->l2_cache()->set_legacy_maintenance_vm(&gpu_vm_);
-      xcd_ptr->l2_cache()->set_gpu_vm(&gpu_vm_);
-      xcds_.push_back(xcd_ptr.get());
+      add_xcd(xcd_ptr.get());
       add_child(std::move(xcd_ptr));
     }
   }
@@ -251,6 +251,18 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_or
 
 void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
   plugin_group_ = plugin_group ? plugin_group : ExecutionPluginGroup::empty_group();
+  bool core_races_enabled = false;
+  for_each_cp([&](amdgpu::CommandProcessor *cp) {
+    core_races_enabled |=
+        std::ranges::any_of(cp->compute_units(), [](const amdgpu::ComputeUnitCore *cu) {
+          return cu->config().memory_race_diagnostics != amdgpu::MemoryWaitDiagnostics::Off;
+        });
+  });
+  if (core_races_enabled && plugin_group_->contains("race"))
+    util::Logger::warn(
+        "memory-race: core race checking and the race plugin are both enabled. Their reports "
+        "overlap and both instrument memory accesses; remove the race plugin or set top-level "
+        "race_checking to \"off\" (rocjitsu --race-checking=off).");
   for (auto *xcd : xcds_)
     xcd->set_plugin_group(plugin_group_);
 }
@@ -320,6 +332,8 @@ void SoC::initialize() {
     for (auto *xcd_ptr : xcds_)
       if (auto *cp = xcd_ptr->command_processor()) {
         cp->set_gpu_vm(&gpu_vm_, internal_address_space_);
+        cp->set_memory_race_checker(memory_race_checker_);
+        cp->set_memory_diagnostic_report(memory_diagnostic_report_);
         cps.push_back(cp);
       } else {
         cps.push_back(nullptr);

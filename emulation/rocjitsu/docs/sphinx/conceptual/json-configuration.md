@@ -47,6 +47,9 @@ objects for the virtual machine and the topology.
 | `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity and target allocations. Positive values override the budget. |
 | `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
 | `wait_checking` | string | Override diagnostics on every CU and GPU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
+| `race_checking` | string | Enable (`on`) or disable (`off`, the default) core address-aware LDS/global race diagnostics on every CU. Enabled CUs use one shared checker per SoC/GPU. |
+| `memory_diagnostic_report` | string | Optional destination for a combined per-GPU JSON report of core memory-wait and memory-race findings. GPU 0 uses this path; additional GPU `N` appends `.gpuN`. |
+| `race_checking_global_shadow_mb` | int | Positive global-access shadow budget in MiB (default 512). Accesses beyond it are checked but not retained. |
 | `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |
 | `vm.arch` | string | Target architecture, such as `cdna3`, `cdna4`, or `rdna4`. |
@@ -61,7 +64,7 @@ still uses at most its active CU count. The selection counts engines, all retain
 dispatch workers and shared helpers: E + sum(D - 1) + H. Explicit knobs
 override the selected allocation; configs without a table use serial defaults.
 Clocked mode always uses serial dispatch. See the source
-[configuration guide](../../configuration.md)
+[configuration guide](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/configuration.md)
 for table examples and `rocjitsu --thread-budget-table`.
 `rocjitsu --cpu-thread-budget N` replaces JSON `cpu_thread_budget` for that launch.
 
@@ -73,8 +76,24 @@ enables XCNT. The flag overrides JSON settings on every CU and GPU for the launc
 leaving the source file unchanged. Omitting it preserves JSON settings and defaults.
 `mirage run` accepts the same flag with profiles or `--config`, including alongside
 `--cpu-thread-budget` in daemon and in-process modes.
-See the source [memory wait diagnostics guide](../../memory-wait-diagnostics.md)
+See the source [memory wait diagnostics guide](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/memory-wait-diagnostics.md)
 for coverage, per-CU controls and launch-mode restrictions.
+
+Address race checking is opt-in. Use top-level `"race_checking": "on"` or
+`rocjitsu --race-checking=on`; the launch flag leaves the source config
+unchanged and has the same attach and DBT-host-config restrictions as
+`--wait-checking`. Without a global override, each CU accepts
+`{"key":"memory_race_diagnostics","value":"warn"}`; `off` is the default.
+`race_checking_global_shadow_mb` bounds allocated global shadow storage, not an
+access count. Accesses that cannot be retained are still checked against
+retained history and set `coverage_degraded`.
+
+The optional report is shared across every CP and CU of one GPU, accumulates
+findings across dispatches, and is flushed whenever a dispatch retires or is
+dropped. It includes enabled memory-wait findings even when race checking is
+off. GPU 0 uses the configured path; additional GPU `N` writes `<path>.gpuN`. See
+[address race diagnostics](https://github.com/ROCm/rocm-systems/blob/develop/emulation/rocjitsu/docs/memory-wait-diagnostics.md#address-race-diagnostics)
+for coverage and synchronization semantics.
 
 `exec_mode` is matched literally. Only `"clocked"` selects cycle-accurate
 mode. If the field is omitted or set to `"functional"`, `"cycle"`, or any
