@@ -2218,7 +2218,8 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 #endif
   // RCCL: Only use one slice per primitive on some single node gfx9xx systems, only currently enabled for AllReduce, ReduceScatter, and AllGather
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942") ||
-      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950")) {
+      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx950") ||
+      IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx1250")) {
     comm->rcclUseOneSlice = nNodes == 1;
   }
   if (IsArchMatch(comm->topo->nodes[GPU].nodes[idx].gpu.gcn, "gfx942")) {

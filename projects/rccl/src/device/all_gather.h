@@ -110,7 +110,8 @@ __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct 
 }
 } // namespace
 
-#if defined(__gfx942__)  // Use a single slice per simple primitive for a single node on some GFX9 devices.
+#if defined(__gfx942__) || \
+  defined(__gfx1250__)  // Use a single slice per simple primitive for a single node on some GFX9 devices.
 #define rcclAllGatherRunRingSimpleProtoImpl(tid, nthreads, work) \
   if (work->rcclUseOneSlice) { \
     runRing<T, RedOp, \

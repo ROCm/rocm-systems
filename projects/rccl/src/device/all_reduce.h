@@ -285,7 +285,8 @@ __device__ __attribute__((noinline)) void runTreeSplit(int tid, int nthreads, st
 }
 } // namespace
 
-#if defined(__gfx942__) // Use a single slice per simple primitive for a single node on some gfx942 devices.
+#if defined(__gfx942__) || \
+  defined(__gfx1250__) // Use a single slice per simple primitive for a single node on some gfx942 devices.
 #define rcclAllReduceRunRingSimpleProtoImpl(tid, nthreads, work) \
   if (work->rcclUseOneSlice) { \
     using Proto = \
