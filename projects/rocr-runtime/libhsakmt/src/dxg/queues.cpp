@@ -249,8 +249,8 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAllocQueueGWS(HSA_QUEUEID QueueId, HSAuint32 nGWS,
   if (!queue_)
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
-  assert(false);
-  return HSAKMT_STATUS_SUCCESS;
+  // WKMI has no per-queue GWS allocation.
+  return HSAKMT_STATUS_NOT_SUPPORTED;
 }
 
 HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t value) {
