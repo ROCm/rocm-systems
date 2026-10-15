@@ -49,6 +49,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
 
 ### Resolved issues
+* Fixed ordinary collectives paying up to about 0.8 ms per operation in single-process multi-rank jobs. RCCL now creates concurrent task-preparation threads only for the first collective that can initialize a symmetric kernel, instead of for every collective whenever the communicator supports symmetric memory.
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
 * Fixed P2P IPC registration reuse producing out-of-bounds remote addresses when a registered allocation spans multiple cuMem segments.
