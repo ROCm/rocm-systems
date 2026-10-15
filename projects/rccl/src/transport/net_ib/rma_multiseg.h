@@ -61,6 +61,20 @@ static inline int ncclRmaSegIndexOf(const size_t* segOff, int nSeg, uint64_t off
   return nSeg - 1;
 }
 
+// Bytes of the next WR at (lOff, rOff) and the segments it lands in; the WR builder and the counter share it.
+// Flush mode (localOff == NULL) takes the rest of the remote segment. Returns 0 past the end of either table.
+static inline size_t ncclRmaNextSlice(const size_t* localOff, int nLocal, const size_t* remoteOff, int nRemote,
+                                      uint64_t lOff, uint64_t rOff, size_t rem, int* ls, int* rs) {
+  *ls = 0;
+  *rs = ncclRmaSegIndexOf(remoteOff, nRemote, rOff);
+  if (rOff >= remoteOff[*rs + 1]) return 0;
+  size_t remoteRemaining = remoteOff[*rs + 1] - rOff;
+  if (localOff == NULL) return rem < remoteRemaining ? rem : remoteRemaining;
+  *ls = ncclRmaSegIndexOf(localOff, nLocal, lOff);
+  if (lOff >= localOff[*ls + 1]) return 0;
+  return ncclRmaSegmentSliceBytes(rem, localOff[*ls + 1] - lOff, remoteRemaining);
+}
+
 // Count WRs for explicit local/remote segOff tables. Returns maxWr+1 if the chain does not fit.
 static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, const size_t* remoteOff, int nRemote,
                                             uint64_t lOff, uint64_t rOff, size_t size, int maxWr) {
@@ -68,9 +82,8 @@ static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, 
   size_t rem = size;
   while (rem > 0) {
     if (ncclRmaDataWrBudgetFull(n, maxWr)) return maxWr + 1;
-    int ls = ncclRmaSegIndexOf(localOff, nLocal, lOff);
-    int rs = ncclRmaSegIndexOf(remoteOff, nRemote, rOff);
-    size_t chunk = ncclRmaSegmentSliceBytes(rem, localOff[ls + 1] - lOff, remoteOff[rs + 1] - rOff);
+    int ls, rs;
+    size_t chunk = ncclRmaNextSlice(localOff, nLocal, remoteOff, nRemote, lOff, rOff, rem, &ls, &rs);
     if (chunk == 0) return maxWr + 1;
     lOff += chunk;
     rOff += chunk;
@@ -82,6 +95,43 @@ static inline int ncclRmaCountLayoutDataWrs(const size_t* localOff, int nLocal, 
 
 static inline int ncclRmaWrIsSignaled(int wrIndex, int nWrs) {
   return nWrs > 0 && wrIndex == nWrs - 1;
+}
+
+static inline int ncclRmaWrCreditsAvailable(int outstanding, int requested, int capacity) {
+  return outstanding >= 0 && requested >= 0 && requested <= capacity && outstanding <= capacity - requested;
+}
+
+// Request ids are dense per comm and at most NCCL_RMA_CREDIT_IDS are live, so a chain's WR count
+// lives at id % NCCL_RMA_CREDIT_IDS. Ids without an entry are single-MR ops at a fixed cost.
+#define NCCL_RMA_CREDIT_IDS 256
+struct ncclRmaWrCredits {
+  uint64_t releasedSeq;
+  int trackedWrs;
+  int trackedIds;
+  uint8_t wrsById[NCCL_RMA_CREDIT_IDS];
+};
+
+static inline void ncclRmaWrCreditsRelease(struct ncclRmaWrCredits* c, uint64_t completedSeq) {
+  for (; c->releasedSeq < completedSeq; c->releasedSeq++) {
+    uint8_t* wrs = &c->wrsById[(c->releasedSeq + 1) % NCCL_RMA_CREDIT_IDS];
+    if (*wrs == 0) continue;
+    c->trackedWrs -= *wrs;
+    c->trackedIds--;
+    *wrs = 0;
+  }
+}
+
+static inline int ncclRmaWrCreditsInUse(const struct ncclRmaWrCredits* c, uint64_t postedSeq, int untrackedCost) {
+  uint64_t live = postedSeq > c->releasedSeq ? postedSeq - c->releasedSeq : 0;
+  return c->trackedWrs + ((int)live - c->trackedIds) * untrackedCost;
+}
+
+static inline void ncclRmaWrCreditsRecord(struct ncclRmaWrCredits* c, uint64_t id, int nWrs) {
+  if (id <= c->releasedSeq || nWrs <= 0) return;
+  uint8_t* wrs = &c->wrsById[id % NCCL_RMA_CREDIT_IDS];
+  if (*wrs == 0) c->trackedIds++;
+  c->trackedWrs += nWrs - *wrs;
+  *wrs = (uint8_t)nWrs;
 }
 
 // True when ibv_post_send accepted a prefix that did not include the signaled last WR.
