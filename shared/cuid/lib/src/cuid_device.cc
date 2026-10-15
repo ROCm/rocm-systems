@@ -3,6 +3,8 @@
 
 #include "cuid_device.h"
 
+#include <unistd.h>
+
 #include <cstring>
 
 #include "cuid_util.h"
@@ -37,6 +39,62 @@ bool no_permanent_primary(amdcuid_status_t status) {
 }
 
 }  // namespace
+
+amdcuid_status_t CuidDevice::driver_attribute_path(const std::string& attribute,
+                                                   std::string& path) const {
+  std::string bdf;
+  if (this->get_bdf(bdf) != AMDCUID_STATUS_SUCCESS || bdf.empty()) {
+    // No BDF: a CPU, the platform, or a GIM-only device that sysfs does not
+    // enumerate. There is nothing to look up under /sys/bus/pci/devices.
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
+
+  path = "/sys/bus/pci/devices/" + bdf + "/" + attribute;
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidDevice::read_driver_published(const std::string& attribute, amdcuid_id_t& out,
+                                                   uint8_t raw_bits[16]) const {
+  std::string path;
+  if (this->driver_attribute_path(attribute, path) != AMDCUID_STATUS_SUCCESS) {
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
+
+  amdcuid_id_t published = {};
+  const amdcuid_status_t status = CuidUtilities::read_driver_cuid_from_path(path, &published);
+  switch (status) {
+    case AMDCUID_STATUS_SUCCESS:
+      out = published;
+      CuidUtilities::remove_UUIDv8_bits(&out, raw_bits);
+      return AMDCUID_STATUS_SUCCESS;
+    case AMDCUID_STATUS_FILE_NOT_FOUND:
+      // The driver does not implement the CUID interface, or found no serial
+      // and so created none of the attributes. No kernel value to defer to.
+      return AMDCUID_STATUS_UNSUPPORTED;
+    default:
+      return status;
+  }
+}
+
+amdcuid_status_t CuidDevice::driver_primary_cuid(amdcuid_primary_id& id) const {
+  // cuid_unit_id is what says the driver publishes a CUID here. A
+  // cuid_primary without it comes from a driver with another interface, whose
+  // identity this library cannot complete, so the device is treated as
+  // unpublished.
+  std::string unit_id_path;
+  if (driver_attribute_path(CuidUtilities::kDriverUnitIdAttribute, unit_id_path) !=
+          AMDCUID_STATUS_SUCCESS ||
+      access(unit_id_path.c_str(), F_OK) != 0) {
+    return AMDCUID_STATUS_UNSUPPORTED;
+  }
+  amdcuid_primary_id published = {};
+  const amdcuid_status_t drv = read_driver_published(
+      CuidUtilities::kDriverPrimaryAttribute, published.UUIDv8_representation, published.raw_bits);
+  if (drv == AMDCUID_STATUS_SUCCESS) {
+    id = published;
+  }
+  return drv;
+}
 
 amdcuid_status_t CuidDevice::get_temporary_cuid(amdcuid_derived_id& id) const {
   CuidUtilities::AuxiliaryInput input;
