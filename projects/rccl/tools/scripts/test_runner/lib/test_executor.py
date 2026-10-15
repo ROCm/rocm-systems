@@ -3296,7 +3296,8 @@ class TestExecutor:
                        "rccl-UnitTestsMicroCrypt",
                        "rccl-UnitTestsMicroStrongstream",
                        "rccl-UnitTestsMicroUtils",
-                       "rccl-UnitTestsMicroArgcheck"]:
+                       "rccl-UnitTestsMicroArgcheck",
+                       "rccl-UnitTestsMicroCpuset"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])

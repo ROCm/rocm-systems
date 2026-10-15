@@ -301,6 +301,17 @@
       "tests": [
         {"name": "ArgcheckMicrotests", "description": "Host-only misc/argcheck.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_cpuset": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroCpuset",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "CpusetMicrotests", "description": "Host-only include/cpuset.h microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -386,6 +397,12 @@
       "name": "RCCL Microtests - misc/argcheck.cc",
       "description": "rccl-UnitTestsMicroArgcheck (host-only misc/argcheck.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_argcheck",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - include/cpuset.h",
+      "description": "rccl-UnitTestsMicroCpuset (host-only include/cpuset.h microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_cpuset",
       "enabled": true
     }
   ]

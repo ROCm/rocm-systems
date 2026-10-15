@@ -416,6 +416,13 @@ function(rccl_define_micro_source_lists)
     argcheck-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCpuset -- src/include/cpuset.h. Own binary: the test defines the ncclOsCpu*
+  # helpers from os/linux.cc, which no shared fake provides.
+  set(TEST_MICRO_CPUSET_SOURCE_FILES
+    cpuset-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1122,6 +1129,15 @@ rccl_add_micro_binary(rccl-UnitTestsMicroArgcheck
     ${_MICRO_MODE_DEFS}
     ARGCHECK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/argcheck.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_argcheck.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCpuset
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCpuset
+  SOURCES ${TEST_MICRO_CPUSET_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_cpuset.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
