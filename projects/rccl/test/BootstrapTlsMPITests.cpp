@@ -16,6 +16,7 @@
 #include "MPITestBase.hpp"
 #include "MPIHelpers.hpp"
 #include "TestChecks.hpp"
+#include "common/EncryptionTestHelpers.hpp"
 
 #include <hip/hip_runtime.h>
 #include <vector>
@@ -24,24 +25,16 @@ namespace {
 
 constexpr const char* kPsk = "rccl-bootstrap-tls-mpi-test-key-0123456789";
 
-#if defined(NCCL_TLS_BACKEND_OPENSSL3)
-constexpr bool kTlsBuild = true;
-#else
-constexpr bool kTlsBuild = false;
-#endif
-
-ncclResult_t SetPsk(const char* psk) {
-  ncclEncryptionConfig_t cfg = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
-  cfg.mode = NCCL_ENCRYPTION_MODE_PSK;
-  cfg.psk = psk;
-  return ncclSetEncryption(&cfg);
-}
+using RcclUnitTesting::ClearPsk;
+using RcclUnitTesting::kTlsBuild;
+using RcclUnitTesting::SetPsk;
 
 // Sum-AllReduce of (rank + 1) on `comm`, checked on the host.
 ::testing::AssertionResult AllReduceRankSum(ncclComm_t comm, hipStream_t stream) {
   int rank = 0, nranks = 0;
-  if (ncclCommUserRank(comm, &rank) != ncclSuccess || ncclCommCount(comm, &nranks) != ncclSuccess)
+  if (ncclCommUserRank(comm, &rank) != ncclSuccess || ncclCommCount(comm, &nranks) != ncclSuccess) {
     return ::testing::AssertionFailure() << "comm query failed";
+  }
   constexpr size_t kCount = 1 << 16;
   std::vector<float> host(kCount, (float)(rank + 1));
   float* dev = nullptr;
@@ -54,22 +47,26 @@ ncclResult_t SetPsk(const char* psk) {
   (void)hipFree(dev);
   if (!ok) return ::testing::AssertionFailure() << "AllReduce failed: " << ncclGetErrorString(res);
   const float expected = nranks * (nranks + 1) / 2.0f;
-  for (size_t i = 0; i < kCount; i++)
-    if (host[i] != expected)
+  for (size_t i = 0; i < kCount; i++) {
+    if (host[i] != expected) {
       return ::testing::AssertionFailure() << "element " << i << " = " << host[i] << ", expected " << expected;
+    }
+  }
   return ::testing::AssertionSuccess();
 }
 
 // Each rank sends its rank id to the next rank and receives from the previous one.
 ::testing::AssertionResult RingSendRecv(ncclComm_t comm, hipStream_t stream) {
   int rank = 0, nranks = 0;
-  if (ncclCommUserRank(comm, &rank) != ncclSuccess || ncclCommCount(comm, &nranks) != ncclSuccess)
+  if (ncclCommUserRank(comm, &rank) != ncclSuccess || ncclCommCount(comm, &nranks) != ncclSuccess) {
     return ::testing::AssertionFailure() << "comm query failed";
+  }
   constexpr size_t kCount = 1 << 14;
   std::vector<int> host(kCount, rank);
   int *sendBuf = nullptr, *recvBuf = nullptr;
-  if (hipMalloc(&sendBuf, kCount * sizeof(int)) != hipSuccess || hipMalloc(&recvBuf, kCount * sizeof(int)) != hipSuccess)
+  if (hipMalloc(&sendBuf, kCount * sizeof(int)) != hipSuccess || hipMalloc(&recvBuf, kCount * sizeof(int)) != hipSuccess) {
     return ::testing::AssertionFailure() << "hipMalloc";
+  }
   bool ok = hipMemcpy(sendBuf, host.data(), kCount * sizeof(int), hipMemcpyHostToDevice) == hipSuccess &&
             ncclGroupStart() == ncclSuccess;
   if (ok) {
@@ -83,9 +80,11 @@ ncclResult_t SetPsk(const char* psk) {
   (void)hipFree(recvBuf);
   if (!ok) return ::testing::AssertionFailure() << "send/recv failed";
   const int expected = (rank + nranks - 1) % nranks;
-  for (size_t i = 0; i < kCount; i++)
-    if (host[i] != expected)
+  for (size_t i = 0; i < kCount; i++) {
+    if (host[i] != expected) {
       return ::testing::AssertionFailure() << "element " << i << " = " << host[i] << ", expected " << expected;
+    }
+  }
   return ::testing::AssertionSuccess();
 }
 
@@ -101,7 +100,7 @@ class BootstrapTlsMPITest : public MPITestBase {
 protected:
   void TearDown() override {
     MPITestBase::TearDown();
-    (void)ncclSetEncryption(nullptr);
+    (void)ClearPsk();
     MPI_Barrier(MPI_COMM_WORLD);
   }
 };

@@ -6,15 +6,14 @@
 
 // A connection that is not an NCCL peer (port scanner, a peer with the wrong magic,
 // a plaintext peer reaching an encrypted root) must be dropped by the bootstrap root
-// without ending its accept loop. Before the fix, bootstrapAccept handed the rejected
-// socket back to bootstrapRoot, whose recv then failed and killed the root thread, so
-// every rank's communicator creation failed.
+// without ending its accept loop, or every rank's communicator creation fails.
 
 #ifdef MPI_TESTS_ENABLED
 
 #include "MPITestBase.hpp"
 #include "MPIHelpers.hpp"
 #include "TestChecks.hpp"
+#include "common/EncryptionTestHelpers.hpp"
 
 #include "bootstrap.h"
 
@@ -25,11 +24,9 @@
 
 namespace {
 
-#if defined(NCCL_TLS_BACKEND_OPENSSL3)
-constexpr bool kTlsBuild = true;
-#else
-constexpr bool kTlsBuild = false;
-#endif
+using RcclUnitTesting::ClearPsk;
+using RcclUnitTesting::kTlsBuild;
+using RcclUnitTesting::SetPsk;
 
 // Connects to the root listener named by `id` and sends bytes that are neither the
 // socket hello nor a TLS ClientHello. Returns the descriptor (kept open) or -1.
@@ -53,7 +50,7 @@ class BootstrapStrayPeerMPITest : public MPITestBase {
 protected:
   void TearDown() override {
     MPITestBase::TearDown();
-    (void)ncclSetEncryption(nullptr);
+    (void)ClearPsk();
     MPI_Barrier(MPI_COMM_WORLD);
   }
 
@@ -86,10 +83,7 @@ TEST_F(BootstrapStrayPeerMPITest, RootSkipsNonNcclPeer) {
 TEST_F(BootstrapStrayPeerMPITest, EncryptedRootSkipsNonTlsPeer) {
   SKIP_UNLESS_MPI_PREREQS(2);
   if (!kTlsBuild) GTEST_SKIP() << "RCCL was built without TLS_BACKEND=OPENSSL3";
-  ncclEncryptionConfig_t cfg = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
-  cfg.mode = NCCL_ENCRYPTION_MODE_PSK;
-  cfg.psk = "rccl-bootstrap-stray-peer-test-key-0123456789";
-  ASSERT_EQ(ncclSuccess, ncclSetEncryption(&cfg));
+  ASSERT_EQ(ncclSuccess, SetPsk("rccl-bootstrap-stray-peer-test-key-0123456789"));
   InitBehindStrayPeer();
 }
 
