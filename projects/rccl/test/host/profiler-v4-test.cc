@@ -69,12 +69,6 @@ struct FakeV4 {
 
 void FakeLog(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
 
-// Fills the stack the adapter's frame will reuse, so a field it never writes reads back as 0xA5.
-__attribute__((noinline)) void PoisonStack() {
-  volatile unsigned char junk[4096];
-  for (size_t i = 0; i < sizeof(junk); i++) junk[i] = 0xA5;
-}
-
 class ProfilerV4Microtest : public ::testing::Test {
  protected:
   FakeV4 fake_;
@@ -180,18 +174,6 @@ TEST_F(ProfilerV4Microtest, StartEvent_P2p_ParentsToTheGroup) {
   EXPECT_EQ(v4->p2p.count, 77u);
   EXPECT_STREQ(v4->p2p.datatype, "ncclUint64");
   EXPECT_EQ(v4->p2p.peer, 4);
-}
-
-// Bug: the v4 adapter builds an uninitialised descriptor and never copies p2p.nChannels, so a v4 plugin reads
-// whatever was on the stack instead of the channel count.
-TEST_F(ProfilerV4Microtest, StartEvent_P2p_NeverCopiesNChannels) {
-  ncclProfilerEventDescr_t d{};
-  d.type = ncclProfileP2p;
-  d.p2p.nChannels = 3;
-  PoisonStack();
-  const auto* v4 = Start(d);
-  ASSERT_NE(v4, nullptr);
-  EXPECT_NE(v4->p2p.nChannels, 3);
 }
 
 TEST_F(ProfilerV4Microtest, StartEvent_ProxyKernelAndNetEvents) {

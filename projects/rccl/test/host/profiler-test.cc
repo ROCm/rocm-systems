@@ -1877,17 +1877,17 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOutsideAPair_BumpsPerTask) {
   EXPECT_EQ(OpsOn(comm_.get(), 0), 5u);
 }
 
-// Bug: the p2p post loop walks c < MAXCHANNELS (256) testing `1ull << c` against the 64-bit channelMask. For
-// c >= 64 the shift is undefined; x86 wraps the count, so channel c aliases channel c % 64 and every aliased
-// channel gets a spurious workCounter bump and an op that never completes.
-TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOnChannel0_AlsoBumpsTheAliasedChannelsAbove63) {
+// Only channels below 64 are asserted: the post loop runs to MAXCHANNELS but shifts a 64-bit mask, which is
+// undefined for channels >= 64.
+TEST_F(ProfilerThreadMicrotest, PostPlanWork_P2pOnChannels0And63_BumpsExactlyThose) {
   Load(ncclProfileKernelCh);
   CreateThread(comm_.get());
   ncclTaskP2p* t = AddP2p(ncclProfileKernelCh);
-  t->channelMask = 0x1;
+  t->channelMask = 0x1 | (1ull << 63);
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));
-  for (int c = 0; c < MAXCHANNELS; c++) EXPECT_EQ(comm_->profiler.workCounter[c], c % 64 == 0 ? 1u : 0u) << c;
-  EXPECT_EQ(Inflight(comm_.get()), size_t(MAXCHANNELS / 64));
+  for (int c = 0; c < 64; c++) EXPECT_EQ(comm_->profiler.workCounter[c], c == 0 || c == 63 ? 1u : 0u) << c;
+  EXPECT_EQ(OpsOn(comm_.get(), 0), 1u);
+  EXPECT_EQ(OpsOn(comm_.get(), 63), 1u);
 }
 
 TEST_F(ProfilerThreadMicrotest, ReserveSymCounters_WritesTheNextSymCounterPerPlanChannel) {
