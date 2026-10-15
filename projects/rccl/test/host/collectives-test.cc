@@ -245,8 +245,8 @@ void RecordLaunch(const void* fn, dim3 grid, dim3 block, void** args, size_t shm
                   hipEvent_t stop) {
   fake.trace.push_back("launch");
   fake.launches.push_back({fn, grid, block, shmem, stream, stop, *static_cast<const char**>(args[0]),
-                        *static_cast<char**>(args[1]), *static_cast<size_t*>(args[2]), *static_cast<int*>(args[3]),
-                        *static_cast<int*>(args[4])});
+                           *static_cast<char**>(args[1]), *static_cast<size_t*>(args[2]),
+                           *static_cast<int*>(args[3]), *static_cast<int*>(args[4])});
 }
 
 }  // namespace
@@ -840,8 +840,15 @@ TEST_F(CollectivesMicrotest, MustUseEnqueuePath_NullCommCheckModeOrSuspend) {
 }
 
 TEST_F(CollectivesMicrotest, EnqueueSetupNeedsSwitch_OnlyForAlgosThatRewriteTheInfo) {
+#ifdef ENABLE_ROCSHMEM
+  constexpr bool kGdaRewrites = true;
+#else
+  constexpr bool kGdaRewrites = false;
+#endif
   for (int algo = 0; algo < RCCL_DIRECT_ALLTOALL + 1; algo++) {
-    EXPECT_EQ(algo == RCCL_DIRECT_ALLGATHER || algo == RCCL_A2A_PIVOT, rcclEnqueueSetupNeedsSwitch(algo)) << algo;
+    const bool rewrites =
+        algo == RCCL_DIRECT_ALLGATHER || algo == RCCL_A2A_PIVOT || (kGdaRewrites && algo == RCCL_A2A_GDA);
+    EXPECT_EQ(rewrites, rcclEnqueueSetupNeedsSwitch(algo)) << algo;
   }
 }
 
@@ -2126,7 +2133,8 @@ TEST_F(CollectivesAlltoAllvMicrotest, SetupFailuresStopBeforeAnyTraffic) {
   EXPECT_TRUE(fake.p2ps.empty());
 }
 
-// A failed post returns without ncclGroupEnd or skip(false): the group stays open and later calls go unrecorded.
+// Pins a known defect, not the intended contract: a failed post returns without ncclGroupEnd or skip(false), so
+// the caller's group stays open and later calls go unrecorded. Update these expectations when it is fixed.
 TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_FailuresReturnTheFirstError) {
   fake.groupStartResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
@@ -2272,7 +2280,8 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangeFailuresReturnTheFirstError) {
     fake.p2pFailAt = failAt;
     EXPECT_EQ(ncclInternalError, AlltoAllv());
     EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
-    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));  // the group is left open
+    // Known defect, pinned as observed: the group is left open.
+    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
   }
   fake.p2pFailAt = 0;
   fake.groupEndResult = ncclRemoteError;
@@ -2522,7 +2531,7 @@ TEST_F(CollectivesRingAgMicrotest, StageZeroSendsTheOwnInputThenForwardsPeerBloc
 TEST_F(CollectivesRingAgMicrotest, TailLoopSendsOnlyTheRemainder) {
   auto algo = Make(0);
   size_t perLoop[3] = {};
-  for (int step = 0; step < 3 * kStepsPerLoop; step += kChunkSteps * 3) {
+  for (int step = 0; step < 3 * kStepsPerLoop; step += kStepsPerLoop) {
     for (int slice = 0; slice < kChunkSteps; slice++) {
       perLoop[step / kStepsPerLoop] += Send(*algo, kRing[0], step + slice).size;
     }

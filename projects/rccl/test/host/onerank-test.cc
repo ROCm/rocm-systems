@@ -201,9 +201,9 @@ TEST_F(OnerankMicrotest, CopyFailuresAreHipErrors) {
   EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclInt8));
   EXPECT_TRUE(g_memcpys.empty());
   g_captureModes.clear();
-  g_exchangeFailAt = 2;
+  g_exchangeFailAt = 2;  // restoring the caller's mode fails after the copy was issued
   EXPECT_EQ(ncclUnhandledCudaError, LaunchOneRank(Op(ncclDevSum), ncclInt8));
-  EXPECT_TRUE(g_launches.empty());
+  EXPECT_EQ(1u, g_memcpys.size());
 }
 
 TEST_F(OnerankMicrotest, PreMulSumAlwaysReduces) {
