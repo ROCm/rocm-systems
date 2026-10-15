@@ -395,6 +395,13 @@ function(rccl_define_micro_source_lists)
     debug-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroApiTrace -- src/misc/api_trace.cc. Own binary: it defines the public
+  # NCCL_API entry points that fakes/api_trace_fakes.cc supplies elsewhere.
+  set(TEST_MICRO_API_TRACE_SOURCE_FILES
+    api-trace-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1071,6 +1078,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDebug
     ${_MICRO_MODE_DEFS}
     DEBUG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/debug.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_debug.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroApiTrace
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroApiTrace
+  SOURCES ${TEST_MICRO_API_TRACE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    API_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/api_trace.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_api_trace.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
