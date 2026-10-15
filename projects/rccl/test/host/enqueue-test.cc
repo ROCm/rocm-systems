@@ -402,6 +402,56 @@ TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
 }
 
 // ===========================================================================
+// rcclP2pScatterNodeMajor and rcclP2pNodeMajorRound (channel.h)
+//
+// Multi-node AINIC Scatter on equal-size nodes takes the node-major index of the
+// (sender, receiver) pair as its channel round instead of the p2pSchedule round.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, P2pScatterNodeMajor_OnlyMultiNodeAinicScatterOnEqualNodes) {
+  std::unique_ptr<ncclComm> storage{new ncclComm{}};
+  ncclComm& comm = *storage;
+  comm.nNodes = 4;
+  comm.minLocalRanks = 8;
+  comm.maxLocalRanks = 8;
+  g_rcclUseAinicValue = true;
+  EXPECT_TRUE(rcclP2pScatterNodeMajor(&comm, ncclFuncScatter));
+  for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather,
+                       ncclFuncAlltoAllv}) {
+    EXPECT_FALSE(rcclP2pScatterNodeMajor(&comm, f)) << "collAPI=" << int(f);
+  }
+  comm.minLocalRanks = 4;
+  EXPECT_FALSE(rcclP2pScatterNodeMajor(&comm, ncclFuncScatter)) << "nodes of different sizes";
+  comm.minLocalRanks = 8;
+  comm.nNodes = 1;
+  EXPECT_FALSE(rcclP2pScatterNodeMajor(&comm, ncclFuncScatter)) << "single node";
+  comm.nNodes = 4;
+  g_rcclUseAinicValue = false;
+  EXPECT_FALSE(rcclP2pScatterNodeMajor(&comm, ncclFuncScatter)) << "not AINIC";
+}
+
+TEST_F(EnqueueMicrotest, P2pNodeMajorRound_IsTheNodeDeltaThenTheLocalDelta) {
+  constexpr int kNodes = 4;
+  constexpr int kLocalRanks = 8;
+  std::unique_ptr<ncclComm> storage{new ncclComm{}};
+  ncclComm& comm = *storage;
+  std::vector<int> node(kNodes * kLocalRanks), local(kNodes * kLocalRanks);
+  for (int r = 0; r < kNodes * kLocalRanks; r++) {
+    node[r] = r / kLocalRanks;
+    local[r] = r % kLocalRanks;
+  }
+  comm.nNodes = kNodes;
+  comm.maxLocalRanks = kLocalRanks;
+  comm.rankToNode = node.data();
+  comm.rankToLocalRank = local.data();
+  // Ranks are numbered node by node, so from rank 0 the round is the receiver itself.
+  for (int r = 0; r < kNodes * kLocalRanks; r++) EXPECT_EQ(r, rcclP2pNodeMajorRound(&comm, 0, r)) << "receiver " << r;
+  // Node 1 -> node 0 is 3 nodes ahead, local 5 -> local 2 is 5 ranks ahead.
+  EXPECT_EQ(3 * kLocalRanks + 5, rcclP2pNodeMajorRound(&comm, 13, 2));
+  EXPECT_EQ(0, rcclP2pNodeMajorRound(&comm, 13, 13));
+}
+
+// ===========================================================================
 // calcP2pChannelCount (enqueue.cc:1550)
 //
 // DEAD CODE: repo-wide grep finds exactly one occurrence -- its own definition.
@@ -3984,9 +4034,9 @@ struct Gfx1250AddP2pScene {
     sendTask.func = ncclFuncSend;
   }
 
-  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes) {
+  ncclResult_t add(ssize_t sendBytes, ssize_t recvBytes, int channelRound = 0) {
     struct ncclTaskP2p* tasks[2] = {&recvTask, &sendTask};
-    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0,
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/1, /*nChannelsMax=*/1, /*p2pRound=*/0, channelRound,
                         /*sendRank=*/1, sendMem, sendBytes, /*recvRank=*/1, recvMem, recvBytes,
                         /*sendOpCount=*/0, /*recvOpCount=*/0, planTotalTasks, tasks);
   }
@@ -4037,6 +4087,15 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Default2KiB_UsesLegacyLlKernel) {
   auto* batch = sc.bp.tailBatch();
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId) << "default must not select the LL128 kernel";
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_ChannelRoundPicksTheChannelBase) {
+  // p2pRound stays 0; the work's channel base follows channelRound.
+  Gfx1250AddP2pScene sc;
+  ASSERT_EQ(ncclSuccess, sc.add(/*sendBytes=*/(1 << 20) + 1, /*recvBytes=*/(1 << 20) + 1, /*channelRound=*/2));
+  auto* work = sc.p2pWork();
+  ASSERT_NE(nullptr, work);
+  EXPECT_EQ(2, work->channelBase);
 }
 
 TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {

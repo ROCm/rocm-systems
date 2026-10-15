@@ -41,6 +41,23 @@ inline uint8_t ncclP2pChannelBaseForRound(struct ncclComm* comm, int p2pRound, i
   return base & 0xff;
 }
 
+// Multi-node AINIC Scatter takes its channel base from the node-major index of the (sender, receiver) pair
+// instead of the p2pSchedule round. p2pSchedule interleaves nodes in groups of NCCL_MAX_DEV_WORK_P2P_PER_BATCH
+// local ranks, which slows a root that drives every peer at once. The index needs equal-size nodes.
+inline bool rcclP2pScatterNodeMajor(struct ncclComm* comm, ncclFunc_t collAPI) {
+  return collAPI == ncclFuncScatter && comm->nNodes > 1 && comm->minLocalRanks == comm->maxLocalRanks &&
+         rcclUseAinic();
+}
+
+// Channel round of a node-major transfer from sender to receiver. Both ends derive it from the pair
+// alone, so they agree on the channels.
+inline int rcclP2pNodeMajorRound(struct ncclComm* comm, int sender, int receiver) {
+  int nodeDelta = (comm->rankToNode[receiver] - comm->rankToNode[sender] + comm->nNodes) % comm->nNodes;
+  int localDelta =
+    (comm->rankToLocalRank[receiver] - comm->rankToLocalRank[sender] + comm->maxLocalRanks) % comm->maxLocalRanks;
+  return nodeDelta * comm->maxLocalRanks + localDelta;
+}
+
 inline bool rcclP2pBatchEligible(int enabled, ssize_t sendBytes, ssize_t recvBytes, ssize_t threshold) {
   return enabled && sendBytes == recvBytes && sendBytes <= threshold && recvBytes <= threshold;
 }

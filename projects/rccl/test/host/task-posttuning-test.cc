@@ -1237,7 +1237,7 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_SendSide_TakesTheRoundThatSchedul
   TaskPostTuning_P2pScene p2p;
   uint8_t base = kPoisonedBase;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &base));
 
   EXPECT_EQ(kP2pSendRound, base);
 }
@@ -1246,7 +1246,7 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_RecvSide_TakesTheRoundThatSchedul
   TaskPostTuning_P2pScene p2p;
   uint8_t base = kPoisonedBase;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsRecv, &base));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsRecv, ncclFuncSendRecv, &base));
 
   EXPECT_EQ(kP2pRecvRound, base);
 }
@@ -1258,8 +1258,10 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_EveryPeerInTheSchedule_ResolvesTo
     uint8_t sendBase = kPoisonedBase;
     uint8_t recvBase = kPoisonedBase;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsSend, &sendBase)) << "peer " << peer;
-    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsRecv, &recvBase)) << "peer " << peer;
+    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsSend, ncclFuncSendRecv, &sendBase))
+      << "peer " << peer;
+    ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), peer, kIsRecv, ncclFuncSendRecv, &recvBase))
+      << "peer " << peer;
 
     EXPECT_EQ((peer - kP2pRank + kRanks) % kRanks, sendBase) << "peer " << peer;
     EXPECT_EQ((kP2pRank - peer + kRanks) % kRanks, recvBase) << "peer " << peer;
@@ -1276,7 +1278,7 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_AnyPeer_AsksThisCommForItsEffecti
   });
   uint8_t base = kPoisonedBase;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &base));
 
   EXPECT_EQ(1, batchEnable.calls);
   EXPECT_EQ(p2p.comm(), seen);
@@ -1291,7 +1293,7 @@ TEST_F(TaskPostTuningMicrotest, P2pChannelBase_HandBuiltScheduleOmittingThePeer_
   p2p.ScheduleAt(kSpareRound).sendRank = kP2pPeer;
   uint8_t base = kPoisonedBase;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, &base));
+  ASSERT_EQ(ncclSuccess, postTuneP2pChannelBase(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &base));
 
   EXPECT_EQ(kSpareRound, base);
 }
@@ -1400,6 +1402,67 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterWithFewerParts_Claims
   EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
   EXPECT_EQ(kConnected, p2p.Send(sendChannels[1], kP2pPeer)->hasSeen);
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), sendChannels));
+}
+
+// Two AINIC nodes of two ranks, numbered node by node, so Scatter is on the node-major layout. kP2pRank (node 0,
+// local 1) to kP2pPeer (node 1, local 0) is one node and one local rank ahead: node-major round 1 * 2 + 1,
+// while the schedule round is kP2pSendRound. PXN is off so the multi-node base skips
+// rcclParamPxnOptQpUsage, a fail-loud stub here.
+constexpr int kNodeMajorSendRound = 3;
+class TaskPostTuning_NodeMajorP2pScene : public TaskPostTuning_P2pScene {
+ public:
+  TaskPostTuning_NodeMajorP2pScene()
+    : ainic_(g_useAinic, [] { return true; }), pxn_(g_pxnDisable, [](struct ncclComm*) { return kPxnDisabled; }) {
+    comm()->nNodes = 2;
+    comm()->maxLocalRanks = 2;
+    comm()->minLocalRanks = 2;
+    comm()->rankToNode = node_.data();
+    comm()->rankToLocalRank = local_.data();
+  }
+
+ private:
+  ScopedHook<bool()> ainic_;
+  ScopedHook<int(struct ncclComm*)> pxn_;
+  std::vector<int> node_{0, 0, 1, 1};
+  std::vector<int> local_{0, 1, 0, 1};
+};
+
+// send/recvSeen covers schedule-round channels only, so the Scatter leaves the side unseen.
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterNodeMajor_ClaimsTheNodeMajorChannels) {
+  TaskPostTuning_NodeMajorP2pScene p2p;
+  const std::vector<int> nodeMajorChannels =
+    TaskPostTuning_SingleNodeChannels(kNodeMajorSendRound, kP2pChannelsPerPeer, kP2pChannels);
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncScatter, &needPreconnect));
+
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_FALSE(p2p.Seen(kIsSend, kP2pPeer));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), nodeMajorChannels));
+}
+
+// A side seen by an earlier task has its schedule-round channels claimed, not the Scatter's.
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterNodeMajor_ClaimsItsChannelsOnASeenSide) {
+  TaskPostTuning_NodeMajorP2pScene p2p;
+  const std::vector<int> nodeMajorChannels =
+    TaskPostTuning_SingleNodeChannels(kNodeMajorSendRound, kP2pChannelsPerPeer, kP2pChannels);
+  p2p.Seen(kIsSend, kP2pPeer) = true;
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncScatter, &needPreconnect));
+
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), nodeMajorChannels));
+}
+
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_SendRecvOnNodeMajorComm_KeepsTheScheduleRound) {
+  TaskPostTuning_NodeMajorP2pScene p2p;
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
+
+  EXPECT_TRUE(p2p.Seen(kIsSend, kP2pPeer));
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), p2p.Channels(kIsSend)));
 }
 
 // Production duplicates the loop body per side, so each of these runs on the recv copy as well as the send one.

@@ -141,10 +141,15 @@ static ncclResult_t postTuneSymFreeTuningInfoRaw(struct ncclComm* comm, struct n
   return ncclSuccess;
 }
 
-static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool isSendNotRecv, uint8_t* baseOut) {
+static ncclResult_t postTuneP2pChannelBase(struct ncclComm* comm, int peer, bool isSendNotRecv, ncclFunc_t collAPI,
+                                           uint8_t* baseOut) {
   int round = 0;
-  while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
-    round += 1;
+  if (rcclP2pScatterNodeMajor(comm, collAPI)) {
+    round = rcclP2pNodeMajorRound(comm, isSendNotRecv ? comm->rank : peer, isSendNotRecv ? peer : comm->rank);
+  } else {
+    while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
+      round += 1;
+    }
   }
   *baseOut = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
   return ncclSuccess;
@@ -157,15 +162,19 @@ static ncclResult_t postTuneP2pRecordPreconnect(struct ncclComm* comm, int peer,
 
   if (peer < 0 || peer >= comm->nRanks) return ncclInvalidArgument;
   if (comm->rank == peer) return ncclSuccess;
-  if (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) return ncclSuccess;
+  // send/recvSeen covers the channels of the schedule round only, so a Scatter on its own layout
+  // neither relies on it nor sets it.
+  bool ownLayout = rcclP2pScatterNodeMajor(comm, collAPI);
+  if (!ownLayout && (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen))
+    return ncclSuccess;
 
-  NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
+  NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, collAPI, &base));
 
   // Mark channels that need pre-connect. planner->peers[peer].send/recvSeen is
   // private to each comm, so we need to set it anyway. Leave it clear when only
   // some parts are connected, so a later task to this peer still connects the rest.
   int nParts = rcclP2pTaskParts(comm, collAPI);
-  if (nParts == comm->p2pnChannelsPerPeer)
+  if (!ownLayout && nParts == comm->p2pnChannelsPerPeer)
     (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
   for (int c = 0; c < nParts; c++) {
     int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, c, comm->p2pnChannelsPerPeer, comm->nNodes,
@@ -231,7 +240,7 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
   if (protocol != NCCL_PROTO_SIMPLE) return ncclSuccess;
   if (!task->allowUB || task->bytes == 0 || task->buff == nullptr || peer == comm->rank) return ncclSuccess;
 
-  NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, &base));
+  NCCLCHECK(postTuneP2pChannelBase(comm, peer, isSendNotRecv, task->collAPI, &base));
 
   int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, 0, comm->p2pnChannelsPerPeer, comm->nNodes,
                                         comm->p2pChannelShiftSize);
