@@ -1,10 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-"""Same-pass analyze binding for SPP-duplicated PMC counters.
+"""Same-pass analyze binding for copied PMC counters.
 
-SPP may list the same counter in multiple perfmon passes so each packable
-metric's PMC set is co-collected. Analyze must evaluate those metrics using
-values from one qualifying pass, not a name-keyed mega-table last-write.
+Single-pass metric packing may list the same counter in multiple perfmon passes
+so each metric's PMC set is co-collected. Analyze must evaluate those metrics
+using values from one qualifying pass, not a name-keyed mega-table last-write.
 """
 
 import re
