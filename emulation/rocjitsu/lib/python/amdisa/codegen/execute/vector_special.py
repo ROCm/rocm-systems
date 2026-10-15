@@ -10,6 +10,7 @@ saturating packs, arithmetic, lane permutations, and packed type conversion.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
@@ -1383,7 +1384,7 @@ def gen_vector_cvt_pk(
     L = []
     L.append('  uint64_t exec = wf.exec();')
     if cls == 'vector_cvt_pknorm' and dtype == 'f16':
-        L.append('  const uint32_t f16_denorm_mode = wf.fp_denorm_mode_f16_f64();')
+        L.append(input_policy.policy_decl('f16'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if cls == 'vector_cvt_pk_u8_f32':
@@ -1414,18 +1415,17 @@ def gen_vector_cvt_pk(
                     f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
                     for i in range(2)
                 ]
+            abs_field = 'inst_.abs' if has_abs else '0u'
             for i, read in enumerate(reads):
-                absolute = f'inst_.abs & (1u << {i})' if has_abs else 'false'
                 L.append(
-                    f'    uint16_t s{i}_bits = amdgpu::fp_mode::detail::modify_f16('
-                    f'static_cast<uint16_t>({read}), {absolute}, '
-                    f'inst_.neg & (1u << {i}));'
+                    f'    uint32_t s{i}_bits = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+                    f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+                    f'static_cast<uint32_t>({read}), {i}, {abs_field}, inst_.neg), '
+                    f'{input_policy.NAME});'
                 )
                 L.append(
-                    f'    s{i}_bits = amdgpu::fp_mode::detail::flush_input_f16('
-                    f's{i}_bits, f16_denorm_mode);'
+                    f'    float s{i} = util::f16_to_f32(static_cast<uint16_t>(s{i}_bits));'
                 )
-                L.append(f'    float s{i} = util::f16_to_f32(s{i}_bits);')
         else:
             L.append(
                 f'    float s0 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'

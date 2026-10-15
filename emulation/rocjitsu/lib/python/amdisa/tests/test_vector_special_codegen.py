@@ -656,16 +656,13 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
     assert 'util::rndne_scalar(std::clamp(static_cast<double>(f)' in cpp
     for source in (0, 1):
         if dtype == 'f16':
-            absolute = f'inst_.abs & (1u << {source})' if has_abs else 'false'
-            modified = (
-                f's{source}_bits = amdgpu::fp_mode::detail::modify_f16('
-                f'static_cast<uint16_t>'
+            flushed = (
+                f's{source}_bits = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+                'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
             )
-            assert modified in cpp
-            assert (f'{absolute}, inst_.neg & (1u << {source}));') in cpp
-            flushed = f's{source}_bits = amdgpu::fp_mode::detail::flush_input_f16('
-            widened = f'float s{source} = util::f16_to_f32(s{source}_bits);'
-            assert cpp.index(modified) < cpp.index(flushed)
+            assert flushed in cpp
+            assert f'{source}, {abs_field}, inst_.neg), input_policy);' in cpp
+            widened = f'float s{source} = util::f16_to_f32(static_cast<uint16_t>(s{source}_bits));'
             assert cpp.index(flushed) < cpp.index(widened)
         else:
             modifiers = (
@@ -675,8 +672,12 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
             assert modifiers in cpp
             assert cpp.index(modifiers) < cpp.index('util::rndne_scalar')
     assert ('apply_to_float' in cpp) == (dtype == 'f32')
+    assert 'fp_mode::detail::' not in cpp
     if dtype == 'f16':
-        assert 'f16_denorm_mode = wf.fp_denorm_mode_f16_f64()' in cpp
+        assert (
+            'input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
+            in cpp
+        )
     for prefix in ('pk_norm', 'pknorm'):
         probe = simd_probe_line(f'v_cvt_{prefix}_{op}_{dtype}_vop3')
         assert not probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg))')
@@ -684,9 +685,9 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
             conversion = f'cvt_pknorm_{op}_f32_simd'
             if dtype == 'f16':
                 prepared = (
-                    f'{source} = amdgpu::prepare_f16_input_simd('
-                    f'{source}, inst.inst_.abs & {1 << index}u, '
-                    f'inst.inst_.neg & {1 << index}u, f16_denorm_mode);'
+                    f'{source} = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+                    f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+                    f'{source}, {index}, inst.inst_.abs, inst.inst_.neg), input_policy);'
                 )
                 assert prepared in probe
                 assert probe.index(prepared) < probe.index(conversion)
@@ -700,4 +701,4 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
                 assert probe.index(absolute) < probe.index(negative)
                 assert probe.index(negative) < probe.index(conversion)
         if dtype == 'f16':
-            assert 'f16_denorm_mode = wf.fp_denorm_mode_f16_f64()' in probe
+            assert 'input_policy = amdgpu::input_denormal::Policy::make(' in probe
