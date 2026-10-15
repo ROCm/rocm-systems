@@ -15,6 +15,7 @@
 #include <optional>
 #include <stdexcept>
 #include <string>
+#include <string_view>
 #include <utility>
 
 namespace profiler_hub
@@ -95,48 +96,37 @@ storage_t::impl::get_storage_version() const
         auto executor = backend->create_read_statement_executor<metadata_row_t>(
             query, &metadata_row_t::tag, &metadata_row_t::value);
 
-        bool                         saw_component = false;
-        std::optional<std::string>   version_text;
-        std::optional<std::uint32_t> major;
-        std::optional<std::uint32_t> minor;
-        std::optional<std::uint32_t> patch;
+        std::optional<std::string> version_text;
+        std::optional<std::string> major;
+        std::optional<std::string> minor;
+        std::optional<std::string> patch;
         for(const auto& row : executor().to_vector())
         {
             if(row.tag == "schema_version")
-            {
                 version_text = row.value;
-            }
             else if(row.tag == "schema_version_major")
-            {
-                major         = static_cast<std::uint32_t>(std::stoul(row.value));
-                saw_component = true;
-            }
+                major = row.value;
             else if(row.tag == "schema_version_minor")
-            {
-                minor         = static_cast<std::uint32_t>(std::stoul(row.value));
-                saw_component = true;
-            }
+                minor = row.value;
             else if(row.tag == "schema_version_patch")
-            {
-                patch         = static_cast<std::uint32_t>(std::stoul(row.value));
-                saw_component = true;
-            }
+                patch = row.value;
         }
-        if(major.has_value() && minor.has_value() && patch.has_value())
+        const auto text_view = [](const std::optional<std::string>& text) {
+            return text.has_value() ? std::optional<std::string_view>{ *text }
+                                    : std::nullopt;
+        };
+        const data_storage::schema_version_resolution_t resolved =
+            data_storage::resolve_schema_version({ text_view(version_text),
+                                                   text_view(major),
+                                                   text_view(minor),
+                                                   text_view(patch) });
+        if(resolved.status == data_storage::schema_version_status_t::resolved)
         {
-            version = { major.value(), minor.value(), patch.value() };
+            version = resolved.version;
         }
-        else if(version_text.has_value())
+        else
         {
-            const auto parsed =
-                data_storage::parse_schema_version_text(version_text.value());
-            if(parsed.has_value()) version = parsed.value();
-        }
-        else if(saw_component)
-        {
-            if(major.has_value()) version.major = major.value();
-            if(minor.has_value()) version.minor = minor.value();
-            if(patch.has_value()) version.patch = patch.value();
+            LOG_ERROR("Failed to resolve schema version from '{}'", table);
         }
     } catch(const std::exception& err)
     {

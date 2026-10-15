@@ -129,6 +129,10 @@ downstream consumer of the library.
 
 ### Changed
 
+- `storage_t::get_storage_version()` uses the same schema-version rules as
+  `probe_database()`. All three split tags are required, otherwise
+  `schema_version` must be `major`, `major.minor`, or `major.minor.patch`.
+  A partial set of split tags is not a version.
 - **Breaking:** `ph_process_t` now carries `ppid`, `init`, `fini`, `start`, `end`,
   `environment`, and `extdata` from the trace. The new numeric fields are
   `ph_optional_uint64_t`.

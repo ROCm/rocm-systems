@@ -254,67 +254,64 @@ probe_sqlite(const std::string& path)
                          uuid);
     }
 
-    std::optional<std::uint32_t> major;
-    std::optional<std::uint32_t> minor;
-    std::optional<std::uint32_t> patch;
-    std::optional<version_t>     version_text;
-    bool                         version_text_malformed = false;
+    std::optional<std::string> version_text;
+    std::optional<std::string> major;
+    std::optional<std::string> minor;
+    std::optional<std::string> patch;
     while((rc = sqlite_api_policy::step(versions.get())) == sqlite_api_policy::result_row)
     {
         const std::string tag   = sqlite_api_policy::column_text(versions.get(), 0);
         const std::string value = sqlite_api_policy::column_text(versions.get(), 1);
         if(tag == "schema_version")
-        {
-            version_text           = data_storage::parse_schema_version_text(value);
-            version_text_malformed = !version_text.has_value();
-            continue;
-        }
-
-        const auto parsed = data_storage::parse_u32(value);
-        if(!parsed.has_value())
-        {
-            return result_of(probe_status_t::metadata_malformed,
-                             "rocpd schema version is not an integer: " + tag,
-                             database_kind_t::sqlite,
-                             trace_schema_t::rocpd,
-                             {},
-                             uuid);
-        }
-        if(tag == "schema_version_major")
-            major = parsed;
+            version_text = value;
+        else if(tag == "schema_version_major")
+            major = value;
         else if(tag == "schema_version_minor")
-            minor = parsed;
+            minor = value;
         else if(tag == "schema_version_patch")
-            patch = parsed;
+            patch = value;
     }
 
-    std::optional<version_t> version;
-    if(major.has_value() && minor.has_value() && patch.has_value())
-    {
-        version = version_t{ major.value(), minor.value(), patch.value() };
-    }
-    else if(version_text.has_value())
-    {
-        version = version_text;
-    }
-    if(rc != sqlite_api_policy::result_done || !version.has_value())
+    const auto text_view = [](const std::optional<std::string>& text) {
+        return text.has_value() ? std::optional<std::string_view>{ *text } : std::nullopt;
+    };
+    const data_storage::schema_version_resolution_t resolved =
+        data_storage::resolve_schema_version({ text_view(version_text),
+                                               text_view(major),
+                                               text_view(minor),
+                                               text_view(patch) });
+    if(resolved.status == data_storage::schema_version_status_t::component_not_integer)
     {
         return result_of(probe_status_t::metadata_malformed,
-                         version_text_malformed ? "rocpd schema_version text is malformed"
-                                                : "rocpd schema version is incomplete",
+                         "rocpd schema version is not an integer: " +
+                             std::string{ data_storage::schema_version_component_name(
+                                 resolved.component) },
                          database_kind_t::sqlite,
                          trace_schema_t::rocpd,
                          {},
                          uuid);
     }
-    if(find_support(database_kind_t::sqlite, trace_schema_t::rocpd, version.value()) ==
+    if(rc != sqlite_api_policy::result_done ||
+       resolved.status != data_storage::schema_version_status_t::resolved)
+    {
+        return result_of(probe_status_t::metadata_malformed,
+                         resolved.status ==
+                                 data_storage::schema_version_status_t::text_malformed
+                             ? "rocpd schema_version text is malformed"
+                             : "rocpd schema version is incomplete",
+                         database_kind_t::sqlite,
+                         trace_schema_t::rocpd,
+                         {},
+                         uuid);
+    }
+    if(find_support(database_kind_t::sqlite, trace_schema_t::rocpd, resolved.version) ==
        nullptr)
     {
         return result_of(probe_status_t::unsupported_version,
                          "rocpd schema version is not supported",
                          database_kind_t::sqlite,
                          trace_schema_t::rocpd,
-                         version.value(),
+                         resolved.version,
                          uuid);
     }
 
@@ -322,7 +319,7 @@ probe_sqlite(const std::string& path)
                      "",
                      database_kind_t::sqlite,
                      trace_schema_t::rocpd,
-                     version.value(),
+                     resolved.version,
                      uuid);
 }
 
