@@ -71,11 +71,14 @@ ncclResult_t SetPsk(const char* psk) {
   if (hipMalloc(&sendBuf, kCount * sizeof(int)) != hipSuccess || hipMalloc(&recvBuf, kCount * sizeof(int)) != hipSuccess)
     return ::testing::AssertionFailure() << "hipMalloc";
   bool ok = hipMemcpy(sendBuf, host.data(), kCount * sizeof(int), hipMemcpyHostToDevice) == hipSuccess &&
-            ncclGroupStart() == ncclSuccess &&
-            ncclSend(sendBuf, kCount, ncclInt32, (rank + 1) % nranks, comm, stream) == ncclSuccess &&
-            ncclRecv(recvBuf, kCount, ncclInt32, (rank + nranks - 1) % nranks, comm, stream) == ncclSuccess &&
-            ncclGroupEnd() == ncclSuccess && hipStreamSynchronize(stream) == hipSuccess &&
-            hipMemcpy(host.data(), recvBuf, kCount * sizeof(int), hipMemcpyDeviceToHost) == hipSuccess;
+            ncclGroupStart() == ncclSuccess;
+  if (ok) {
+    // ncclGroupEnd must run even if an enqueue fails, or the group stays open for later calls.
+    bool enqueued = ncclSend(sendBuf, kCount, ncclInt32, (rank + 1) % nranks, comm, stream) == ncclSuccess &&
+                    ncclRecv(recvBuf, kCount, ncclInt32, (rank + nranks - 1) % nranks, comm, stream) == ncclSuccess;
+    ok = ncclGroupEnd() == ncclSuccess && enqueued && hipStreamSynchronize(stream) == hipSuccess &&
+         hipMemcpy(host.data(), recvBuf, kCount * sizeof(int), hipMemcpyDeviceToHost) == hipSuccess;
+  }
   (void)hipFree(sendBuf);
   (void)hipFree(recvBuf);
   if (!ok) return ::testing::AssertionFailure() << "send/recv failed";
