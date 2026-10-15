@@ -36,8 +36,8 @@ def verify_install(*, project: Path, build_dir: Path) -> None:
         int(re.search(r"#define AMDSMI_LIB_VERSION_" + part + r"\s+(\d+)", header).group(1))
         for part in ("MAJOR", "MINOR")
     )
-    if version != (27, 1):
-        raise ValueError("this module targets the AMD SMI 27.1 header")
+    if version[0] != 27 or version[1] < 1:
+        raise ValueError("this module targets AMD SMI 27.x headers from 27.1 on")
     prefix = Path("/amdsmi-go-stage")
     with tempfile.TemporaryDirectory(prefix="amdsmi-go-install-") as directory:
         root = Path(directory)
@@ -122,13 +122,16 @@ def verify_install(*, project: Path, build_dir: Path) -> None:
             "var _ func(smi.ProcessorHandle) (smi.AcceleratorPartitionProfile, []uint32, error) = smi.GetGpuAcceleratorPartitionProfile\n"
             "func main() { v, err := smi.GetLibVersion(); "
             "if err != nil { panic(err) }; "
-            'if v.Major != 27 || v.Minor != 1 { panic("native version mismatch") } }\n'
+            + "if v.Major != %d || v.Minor != %d " % version
+            + '{ panic("native version mismatch") } }\n'
         )
         binary = root / "native-version"
         subprocess.run(["go", "build", "-o", str(binary), "."], cwd=consumer, env=env, check=True)
         subprocess.run([str(binary)], env=env, check=True)
         print(
-            "Verified {} installed Go files and staged AMD SMI 27.1 consumer".format(len(expected))
+            "Verified {} installed Go files and staged AMD SMI {}.{} consumer".format(
+                len(expected), *version
+            )
         )
 
 
