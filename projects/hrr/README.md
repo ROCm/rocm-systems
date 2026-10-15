@@ -153,6 +153,8 @@ zero-extent or host-to-host 2D copy is a no-op. A fixed-size string in a record 
 copied into a bounded, NUL-terminated buffer before it is used.
 `tools/tests/test_gen_raw_slots.py` regenerates the handlers and fails if a raw
 cast of a recorded pointer or handle remains.
+`tools/tests/test_generated_files_current.py` fails if a checked-in generated
+source or the matrix expectations header is stale against the generator.
 
 ### External region annotations
 

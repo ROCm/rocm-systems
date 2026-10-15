@@ -2071,9 +2071,12 @@ _HEADER_PREAMBLE = """\
  * appended to HipDispatchTable. Each took a compiler ID, so the compiler
  * API IDs moved up by two. develop still records both under v7. A v7
  * reader decodes those events as the wrong API.
- * v9: a kernel launch event carries pinned host snapshot records after its
- * arguments (num_snapshots was always 0). A v8 reader would not restore them. */
-#define HRR_VERSION ((uint16_t)9u)
+ * v9: hipKernelSetAttributeForDevice was appended to HipDispatchTable,
+ * taking the first compiler ID and shifting the compiler API IDs up by one.
+ * A v8 reader would decode those events as the wrong API.
+ * v10: a kernel launch event carries pinned host snapshot records after its
+ * arguments (num_snapshots was always 0). A v9 reader would not restore them. */
+#define HRR_VERSION ((uint16_t)10u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)

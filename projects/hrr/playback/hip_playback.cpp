@@ -472,7 +472,7 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //             value_kind: 0=scalar, 1=gpu-pointer, 2=hidden,
 //                         3=scalar/struct with embedded gpu pointer(s);
 //             kind 3 appends u16 n_ptrs then n_ptrs * u16 byte offsets.
-//   per snapshot (v9): u64 ptr_handle, u64 offset, u64 length, u64 hash_lo,
+//   per snapshot (v10): u64 ptr_handle, u64 offset, u64 length, u64 hash_lo,
 //             u64 hash_hi, u8 direction (0)
 //   u32 num_attrs, u32 attr stride, num_attrs * stride bytes
 
