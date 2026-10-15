@@ -1066,6 +1066,15 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
 int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots);
 
 /**
+ * Set up the n QPs of one device on a channel and resolve their handles.
+ * Entries with the same key (e.g. the ibv_qp a QP-sharing secondary borrows)
+ * share one slot, so posts and completions on that QP meet in the same place.
+ * handles[q] is NULL for an untracked entry. Returns the slots granted.
+ */
+int rcclTelemetrySetupQps(int devIdx, int chIdx, const void* const* keys, const int* isDataQp, int n,
+                          RcclQpStats** handles);
+
+/**
  * Mark a device's channel ids as not real NCCL channel ids.
  *
  * Call from a transport that cannot supply a channel id (e.g. mlx5/thor2, where
@@ -1101,25 +1110,6 @@ static inline void rcclTelemetrySetQpRole(int devIdx, int chIdx, int qpIdx, int 
   else
     __atomic_fetch_add(&ch->num_cts_qp, 1, __ATOMIC_RELAXED);
 }
-
-/* Internal to net_telemetry.cc, exposed for the unit test. */
-
-/* Longest `ethtool -S` statistic name we ever ask for. The kernel bounds a
- * statistic name by ETH_GSTRING_LEN (32), and the per-priority names we format
- * stay well inside that, so this has room to spare. */
-#define RCCL_TEL_ETHTOOL_KEY_MAX 64
-
-typedef struct {
-  char     key[RCCL_TEL_ETHTOOL_KEY_MAX];
-  int64_t* target;
-} RcclEthtoolWantedEx;
-
-/* First match in `wanted` order wins, so a primary key queued before its
- * fallback is preferred. */
-void rcclTelemetryEthtoolResolve(const char* names, size_t nameStride, const uint64_t* values, unsigned n,
-                                 RcclEthtoolWantedEx* wanted, int nwanted);
-
-extern const char* rcclTelemetrySysRoot;
 
 #ifdef __cplusplus
 }
