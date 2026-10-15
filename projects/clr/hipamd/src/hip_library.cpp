@@ -667,10 +667,7 @@ hipError_t hipKernelSetCacheConfig(hipKernel_t kernel, hipFuncCache_t config, hi
     HIP_RETURN(hipErrorInvalidResourceHandle);
   }
 
-  auto* currentDevice = hip::getCurrentDevice();
-  const auto& devices = currentDevice->devices();
-
-  if (device < 0 || static_cast<size_t>(device) >= devices.size()) {
+  if (device < 0 || static_cast<size_t>(device) >= hip::g_devices.size()) {
     HIP_RETURN(hipErrorInvalidDevice);
   }
 
