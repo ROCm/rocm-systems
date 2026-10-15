@@ -8,6 +8,7 @@ test_categories:
       - "DiagP2pMicrotest.*"
       - "DiagIbWriteBwMicrotest.*"
       - "DiagnosticsMicrotest.*"
+      - "DiagP2pDeviceMicrotest.*"
     exclude_windows:
       - "*"
     labels:

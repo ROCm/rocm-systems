@@ -315,8 +315,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. Also `src/diagnostics.cc` (`DIAGNOSTICS_CC_PATH`, suite
-  `DiagnosticsMicrotest.*`), its runners renamed so `diagnostics_fakes.cc` stays
-  linked. See `test_categories_micro_diagnostics.yaml`.
+  `DiagnosticsMicrotest.*`) and `src/diagnostics/device/p2p.cu` (`DIAG_P2P_DEVICE_CU_PATH`,
+  suite `DiagP2pDeviceMicrotest.*`), each with its symbols renamed so the fakes of
+  both stay linked. See `test_categories_micro_diagnostics.yaml`.
 
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.

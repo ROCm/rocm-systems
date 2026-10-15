@@ -378,6 +378,7 @@ function(rccl_define_micro_source_lists)
     diag-p2p-test.cc
     diag-ib-write-bw-test.cc
     diagnostics-test.cc
+    diag-p2p-device-test.cc
     fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
     fakes/diagnostics_fakes.cc           # src/diagnostics.cc external-tool runners
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
@@ -1114,6 +1115,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTaskPrep
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDiagnostics
 # ---------------------------------------------------------------------------
+# p2p.cu's <<<>>> must not reach hip_fakes.cc's aborting hipLaunchKernel; see diag-p2p-device-test.cc.
+set_source_files_properties(diag-p2p-device-test.cc PROPERTIES
+  COMPILE_OPTIONS "-fno-hip-new-launch-api;-fuse-cuid=none")
 rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
   SOURCES ${TEST_MICRO_DIAGNOSTICS_SOURCE_FILES}
   EXTRA_DEFS
@@ -1121,6 +1125,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
     DIAG_IB_WRITE_BW_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/ib_write_bw.cc"
     DIAGNOSTICS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics.cc"
+    DIAG_P2P_DEVICE_CU_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/device/p2p.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
 
 # =====================================================================
