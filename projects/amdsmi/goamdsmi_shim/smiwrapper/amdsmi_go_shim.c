@@ -35,6 +35,7 @@ static uint32_t num_gpuSockets = GOAMDSMI_VALUE_0;
 static uint32_t cpuInitCompleted = false;
 static uint32_t gpuInitCompleted = false;
 static uint32_t apuInitCompleted = false;
+static uint32_t gpuOnlyAmdsmiInitCompleted = false;
 
 static uint32_t num_cpu_inAllSocket = GOAMDSMI_VALUE_0;
 static uint32_t num_cpu_physicalCore_inAllSocket = GOAMDSMI_VALUE_0;
@@ -257,7 +258,10 @@ goamdsmi_status_t go_shim_amdsmiapu_init(goamdsmi_Init_t goamdsmi_Init) {
         printf("AMDSMI, Status, Identified GPU Driver and going to enumurate only GPU\n");
       }
 
-      if ((AMDSMI_STATUS_SUCCESS != amdsmi_init(AMDSMI_INIT_AMD_GPUS)) ||
+      if (AMDSMI_STATUS_SUCCESS == amdsmi_init(AMDSMI_INIT_AMD_GPUS)) {
+        gpuOnlyAmdsmiInitCompleted = true;
+      }
+      if (!gpuOnlyAmdsmiInitCompleted ||
           (AMDSMI_STATUS_SUCCESS != amdsmi_get_socket_handles(&num_gpuSockets, nullptr)) ||
           (AMDSMI_STATUS_SUCCESS !=
            amdsmi_get_socket_handles(&num_gpuSockets, &amdsmi_gpusocket_handle_all_socket[0])) ||
@@ -523,7 +527,15 @@ bool goamdsmi_gpu_init() {
   return gpu_init_success;
 }
 
-bool goamdsmi_gpu_shutdown() { return false; }
+bool goamdsmi_gpu_shutdown() {
+  if (!gpuOnlyAmdsmiInitCompleted) return false;
+  bool gpu_shutdown_success = (AMDSMI_STATUS_SUCCESS == amdsmi_shut_down());
+  gpuOnlyAmdsmiInitCompleted = false;
+  gpuInitCompleted = false;
+  num_gpuSockets = GOAMDSMI_VALUE_0;
+  num_gpu_devices_inAllSocket = GOAMDSMI_VALUE_0;
+  return gpu_shutdown_success;
+}
 
 uint32_t goamdsmi_gpu_num_monitor_devices() {
   uint32_t gpu_num_monitor_devices = num_gpu_devices_inAllSocket;
