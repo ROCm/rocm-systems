@@ -83,9 +83,17 @@ TEST(Collector, NicType_MajorityWins) {
   EXPECT_TRUE(mixed);
   EXPECT_EQ(NetCounterDominantNicType({NIC_UNKNOWN, NIC_IONIC}, mixed), NIC_IONIC);
   EXPECT_FALSE(mixed);
-  EXPECT_EQ(NetCounterDominantNicType({NIC_MLX5, NIC_BNXT_RE}, mixed), NIC_MLX5);  // tie: first seen
+  EXPECT_EQ(NetCounterDominantNicType({NIC_MLX5, NIC_BNXT_RE}, mixed), NIC_BNXT_RE);  // tie: not mlx5
+  EXPECT_TRUE(mixed);
+  EXPECT_EQ(NetCounterDominantNicType({NIC_IONIC, NIC_BNXT_RE}, mixed), NIC_IONIC);  // tie: first seen
   EXPECT_EQ(NetCounterDominantNicType({NIC_UNKNOWN}, mixed), NIC_UNKNOWN);
   EXPECT_FALSE(mixed);
+}
+
+TEST(Collector, NicType_KeepDevices) {
+  std::vector<NicType> types = {NIC_MLX5, NIC_BNXT_RE, NIC_UNKNOWN, NIC_BNXT_RE};
+  EXPECT_EQ(NetCounterKeepDevices(types, NIC_BNXT_RE, false), (std::vector<bool>{false, true, true, true}));
+  EXPECT_EQ(NetCounterKeepDevices(types, NIC_BNXT_RE, true), (std::vector<bool>{true, true, true, true}));
 }
 
 TEST(Collector, Unknown_UsesBnxtTable) {
@@ -163,6 +171,8 @@ TEST(Collector, Debugfs_OnlyFlaggedMissingCounters) {
   for (NicType t : {NIC_IONIC, NIC_MLX5}) {
     EXPECT_TRUE(DebugfsWanted(NetCounterGetCounterList(t), {}).empty()) << NicTypeStr(t);
   }
+  std::vector<CounterDescriptor> src = {{"x", COUNTER_SRC_DEBUGFS, false, ""}};
+  EXPECT_EQ(DebugfsWanted(src, {}), (std::set<std::string>{"x"}));
 }
 
 TEST(Collector, Delta_MixedSourcesIsNotAvailable) {
