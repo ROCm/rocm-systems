@@ -107,9 +107,12 @@ public:
     uint32_t flags = 0;
     uint64_t handle = 0;
     int memfd = -1;
+    // Public dma-buf access mode retained across IPC import and re-export.
+    int export_access_mode = -1;
     uint32_t gpu_id = 0;
     bool user_va = false;
     bool imported = false;
+    bool shared = false; ///< Simulator cache policy; does not alter requested ABI flags.
     int dmabuf_fd = -1;
     // True when the driver created host_ptr (mmap it itself) and must munmap it
     // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages

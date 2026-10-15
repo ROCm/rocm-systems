@@ -125,6 +125,7 @@ struct GemObject {
   // import, has no EXPORT_DMABUF record of its own and takes them from here.
   uint32_t alloc_flags = 0;
   bool has_alloc_flags = false;
+  int prime_access_mode = -1; ///< Public dma-buf mode fixed by the first export/import.
 };
 
 } // namespace rocjitsu
@@ -1276,10 +1277,22 @@ public:
     PrivateDrmFd(const PrivateDrmFd &) = delete;
     PrivateDrmFd &operator=(const PrivateDrmFd &) = delete;
 
-    static std::shared_ptr<PrivateDrmFd> duplicate(int source) {
+    static std::shared_ptr<PrivateDrmFd> duplicate(int source, bool require_readwrite = false) {
       auto result = std::make_shared<PrivateDrmFd>();
       std::lock_guard lock(mutex_);
+      // CPU access through a public dma-buf fd does not restrict the BO's GPU
+      // mapping or the importing DRM file's GEM_MMAP view.
+      int reopened = -1;
+      if (require_readwrite && (real().fcntl(source, F_GETFL, 0) & O_ACCMODE) != O_RDWR) {
+        const auto path = std::format("/proc/self/fd/{}", source);
+        reopened = real().openat(AT_FDCWD, path.c_str(), O_RDWR | O_CLOEXEC, 0);
+        if (reopened < 0)
+          return {};
+        source = reopened;
+      }
       const int fd = real().fcntl(source, F_DUPFD_CLOEXEC, SimulatedKfd::kBackingFdMin);
+      if (reopened >= 0)
+        real().close(reopened);
       if (fd < 0)
         return {};
       result->fd_ = fd;
@@ -2930,6 +2943,15 @@ public:
     return MAP_FAILED;
   }
 
+  /// @brief Attach existing BO metadata to a newly created KFD dma-buf import.
+  void retain_kfd_import_state(int dmabuf_fd, SimulatedKfd &driver) {
+    struct stat st {};
+    if (real().fstat_fn(dmabuf_fd, &st) != 0)
+      return;
+    std::lock_guard lock(fd_mutex_);
+    (void)driver.retain_bo_state(st, shared_gem_object_locked(st));
+  }
+
   /// @brief Record KFD alloc flags for an exported dmabuf fd (at EXPORT_DMABUF).
   /// @details The flags determine the GPU PTE MTYPE when the fd is later mapped via
   /// GEM_VA and must be captured at export time because the underlying allocation
@@ -3025,7 +3047,7 @@ public:
     // could then be recycled and the lazy mmap in gem_map() would map an unrelated
     // file. The dup keeps the same dmabuf open under a private fd until the handle is
     // torn down. Reject an import if its backing cannot be retained.
-    auto backing_fd = PrivateDrmFd::duplicate(dmabuf_fd);
+    auto backing_fd = PrivateDrmFd::duplicate(dmabuf_fd, /*require_readwrite=*/true);
     if (!backing_fd)
       return 0;
     // Mint the next free handle. Skip 0 ("no handle") and any handle still live, so a
@@ -3067,9 +3089,11 @@ public:
     // state a PRIME export retains, and the allocation may be freed while the fd lives.
     if (identified)
       exported_gem_objects_[dmabuf_fd] = gem.object;
+    if (gem.object->prime_access_mode < 0)
+      gem.object->prime_access_mode = real().fcntl(dmabuf_fd, F_GETFL, 0) & O_ACCMODE;
     // The first export or import fixes the buffer's flags; later imports of any
     // descriptor to it map with the same cache policy.
-    if (flags_exported) {
+    if (flags_exported && !gem.object->has_alloc_flags) {
       gem.object->alloc_flags = alloc_flags;
       gem.object->has_alloc_flags = true;
     } else if (gem.object->has_alloc_flags) {
@@ -3105,42 +3129,42 @@ public:
 
   /// @brief Turn a GEM handle back into a dma-buf fd (DRM_IOCTL_PRIME_HANDLE_TO_FD).
   /// @details hsa_amd_vmem_set_access exports the imported BO this way before it maps
-  /// the VA. The fd is a dup of the handle's backing memfd; the caller closes it.
+  /// the VA. A fresh export honors DRM_RDWR; later exports keep the first public
+  /// mode, including across import. The private BO alias remains read-write.
+  /// The caller owns the returned fd.
   int prime_export(const DrmFileToken &file, uint32_t handle, uint32_t flags) {
     if (flags & ~(DRM_CLOEXEC | DRM_RDWR))
       return -EINVAL;
-    std::shared_ptr<PrivateDrmFd> backing;
-    std::shared_ptr<GemObject> object;
-    uint32_t alloc_flags = 0;
-    {
-      std::lock_guard lock(fd_mutex_);
-      auto it = gem_entries_.find(handle);
-      if (it == gem_entries_.end() || !file || it->second.handle_closed ||
-          it->second.drm_file_id != file->id || !it->second.dmabuf_fd)
-        return -ENOENT;
-      backing = it->second.dmabuf_fd;
-      object = it->second.object;
-      alloc_flags = it->second.alloc_flags;
-    }
+    std::lock_guard lock(fd_mutex_);
+    auto it = gem_entries_.find(handle);
+    if (it == gem_entries_.end() || !file || it->second.handle_closed ||
+        it->second.drm_file_id != file->id || !it->second.dmabuf_fd)
+      return -ENOENT;
+    const auto &entry = it->second;
+    const auto &object = entry.object;
+    const int access_mode = object->prime_access_mode >= 0
+                                ? object->prime_access_mode
+                                : ((flags & DRM_RDWR) ? O_RDWR : O_RDONLY);
     int exported = -1;
     int error = 0;
-    const int cmd = (flags & DRM_CLOEXEC) ? F_DUPFD_CLOEXEC : F_DUPFD;
-    backing->use([&](int fd) {
-      exported = real().fcntl(fd, cmd, 0);
+    entry.dmabuf_fd->use([&](int fd) {
+      const auto path = std::format("/proc/self/fd/{}", fd);
+      const int open_flags = access_mode | ((flags & DRM_CLOEXEC) ? O_CLOEXEC : 0);
+      exported = real().openat(AT_FDCWD, path.c_str(), open_flags, 0);
       error = errno;
       return exported;
     });
     if (exported < 0)
       return error ? -error : -EBADF;
-    track_gem_flags(exported, alloc_flags);
-    {
-      std::lock_guard lock(fd_mutex_);
-      if (!object->has_alloc_flags) {
-        object->alloc_flags = alloc_flags;
-        object->has_alloc_flags = true;
-      }
-      exported_gem_objects_[exported] = std::move(object);
+    // Linux reuses an existing export's access mode, including after import.
+    // Keep that public mode separate from our private read-write BO alias.
+    object->prime_access_mode = access_mode;
+    pending_gem_flags_[exported] = entry.alloc_flags;
+    if (!object->has_alloc_flags) {
+      object->alloc_flags = entry.alloc_flags;
+      object->has_alloc_flags = true;
     }
+    exported_gem_objects_[exported] = object;
     return exported;
   }
 
@@ -5046,14 +5070,20 @@ RJ_INTERPOSER_EXPORT int rj_ioctl(int fd, unsigned long request, ...) {
           // flags determine the GPU PTE MTYPE when the fd is later mapped via GEM_VA,
           // and must be recorded now because the allocation may be freed first. Only
           // the local simulated driver exports dmabufs this path can later map.
+          if (rc == 0 && request == AMDKFD_IOC_IMPORT_DMABUF && arg) {
+            if (auto *sim = dynamic_cast<SimulatedKfd *>(drv.get())) {
+              auto *import_args = static_cast<kfd_ioctl_import_dmabuf_args *>(arg);
+              InterposerContext::ctx.retain_kfd_import_state(import_args->dmabuf_fd, *sim);
+            }
+          }
           if (rc == 0 && request == AMDKFD_IOC_EXPORT_DMABUF && arg) {
             if (auto *sim = dynamic_cast<SimulatedKfd *>(drv.get())) {
               auto *export_args = static_cast<kfd_ioctl_export_dmabuf_args *>(arg);
-              // alloc_flags_for_handle locks the process alloc mutex internally, so the
+              // mapping_flags_for_handle locks the process alloc mutex internally, so the
               // interposer does not reach into driver-private per-process state.
               InterposerContext::ctx.track_gem_flags(
                   static_cast<int>(export_args->dmabuf_fd),
-                  sim->alloc_flags_for_handle(export_args->handle));
+                  sim->mapping_flags_for_handle(export_args->handle));
             }
           }
           return kfd_ioctl_ret(rc);

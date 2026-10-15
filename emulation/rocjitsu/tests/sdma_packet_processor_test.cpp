@@ -163,34 +163,45 @@ constexpr RectLayout kRectLayouts[] = {
     {true, SdmaPacketDialect::Rdna4},
 };
 
+struct LinearRectOptions {
+  uint32_t element = 0;
+  uint32_t rect_x = 1;
+  uint32_t rect_y = 1;
+  uint32_t rect_z = 1;
+  uint32_t src_pitch_bytes = 0;
+  uint32_t dst_pitch_bytes = 0;
+  uint32_t src_slice_bytes = 0;
+  uint32_t dst_slice_bytes = 0;
+  uint32_t src_off_x = 0;
+  uint32_t dst_off_x = 0;
+  uint32_t src_off_y = 0;
+  uint32_t dst_off_y = 0;
+  uint32_t src_off_z = 0;
+  uint32_t dst_off_z = 0;
+};
+
 std::array<uint32_t, 13> linear_rect_packet(bool gfx12_rect, uint64_t source, uint64_t destination,
-                                            uint32_t element, uint32_t rect_x, uint32_t rect_y,
-                                            uint32_t rect_z, uint32_t src_pitch_bytes,
-                                            uint32_t dst_pitch_bytes, uint32_t src_slice_bytes = 0,
-                                            uint32_t dst_slice_bytes = 0, uint32_t src_off_x = 0,
-                                            uint32_t dst_off_x = 0, uint32_t src_off_y = 0,
-                                            uint32_t dst_off_y = 0, uint32_t src_off_z = 0,
-                                            uint32_t dst_off_z = 0) {
-  const uint32_t element_bytes = 1u << element;
-  const uint32_t src_pitch_elements = src_pitch_bytes / element_bytes;
-  const uint32_t dst_pitch_elements = dst_pitch_bytes / element_bytes;
+                                            const LinearRectOptions &shape) {
+  const uint32_t element_bytes = 1u << shape.element;
+  const uint32_t src_pitch_elements = shape.src_pitch_bytes / element_bytes;
+  const uint32_t dst_pitch_elements = shape.dst_pitch_bytes / element_bytes;
   std::array<uint32_t, 13> packet{};
-  packet[0] = 1u | (4u << 8) | (element << 29);
+  packet[0] = 1u | (4u << 8) | (shape.element << 29);
   packet[1] = static_cast<uint32_t>(source);
   packet[2] = static_cast<uint32_t>(source >> 32);
-  packet[3] = src_off_x | (src_off_y << 16);
+  packet[3] = shape.src_off_x | (shape.src_off_y << 16);
   packet[6] = static_cast<uint32_t>(destination);
   packet[7] = static_cast<uint32_t>(destination >> 32);
-  packet[8] = dst_off_x | (dst_off_y << 16);
+  packet[8] = shape.dst_off_x | (shape.dst_off_y << 16);
   const uint32_t pitch_shift = gfx12_rect ? 16u : 13u;
-  packet[4] = src_off_z | ((src_pitch_elements - 1u) << pitch_shift);
-  packet[9] = dst_off_z | ((dst_pitch_elements - 1u) << pitch_shift);
-  if (src_slice_bytes != 0 || dst_slice_bytes != 0) {
-    packet[5] = src_slice_bytes / element_bytes - 1u;
-    packet[10] = dst_slice_bytes / element_bytes - 1u;
+  packet[4] = shape.src_off_z | ((src_pitch_elements - 1u) << pitch_shift);
+  packet[9] = shape.dst_off_z | ((dst_pitch_elements - 1u) << pitch_shift);
+  if (shape.src_slice_bytes != 0 || shape.dst_slice_bytes != 0) {
+    packet[5] = shape.src_slice_bytes / element_bytes - 1u;
+    packet[10] = shape.dst_slice_bytes / element_bytes - 1u;
   }
-  packet[11] = (rect_x - 1u) | ((rect_y - 1u) << 16);
-  packet[12] = rect_z - 1u;
+  packet[11] = (shape.rect_x - 1u) | ((shape.rect_y - 1u) << 16);
+  packet[12] = shape.rect_z - 1u;
   return packet;
 }
 
@@ -515,8 +526,8 @@ TEST(SdmaPacketProcessorTest, LinearRectCopiesPitchedRowsAndSkipsTheGap) {
       fixture.memory->store<uint8_t>(kDestination + i, 0x5a);
 
     const std::array<uint32_t, 13> packet = linear_rect_packet(
-        test_case.gfx12_rect, kSource, kDestination, /*element=*/0, /*rect_x=*/4, /*rect_y=*/2,
-        /*rect_z=*/1, /*src_pitch_bytes=*/8, /*dst_pitch_bytes=*/16);
+        test_case.gfx12_rect, kSource, kDestination,
+        {.rect_x = 4, .rect_y = 2, .rect_z = 1, .src_pitch_bytes = 8, .dst_pitch_bytes = 16});
     SdmaPacketProcessor processor(test_case.dialect);
     const SdmaPacketProcessResult result =
         processor.process({.available_dwords = packet,
@@ -546,10 +557,16 @@ TEST(SdmaPacketProcessorTest, LinearRectHonorsElementSizeAndSlicePitch) {
 
     // 16-byte elements, two rows, then a second slice. Matches the dword-aligned
     // rectangle hipMemcpy2D submits, plus a slice so the Z stride is exercised.
-    const std::array<uint32_t, 13> packet = linear_rect_packet(
-        test_case.gfx12_rect, kSource, kDestination, /*element=*/4, /*rect_x=*/2, /*rect_y=*/2,
-        /*rect_z=*/2, /*src_pitch_bytes=*/32, /*dst_pitch_bytes=*/32,
-        /*src_slice_bytes=*/64, /*dst_slice_bytes=*/64);
+    const std::array<uint32_t, 13> packet =
+        linear_rect_packet(test_case.gfx12_rect, kSource, kDestination,
+                           {.element = 4,
+                            .rect_x = 2,
+                            .rect_y = 2,
+                            .rect_z = 2,
+                            .src_pitch_bytes = 32,
+                            .dst_pitch_bytes = 32,
+                            .src_slice_bytes = 64,
+                            .dst_slice_bytes = 64});
     SdmaPacketProcessor processor(test_case.dialect);
     const SdmaPacketProcessResult result =
         processor.process({.available_dwords = packet,
@@ -588,9 +605,16 @@ TEST(SdmaPacketProcessorTest, LinearRectKeepsDistinctPaddedSliceStrides) {
     for (uint32_t i = 0; i < kDstSlice * kSlices; ++i)
       fixture.memory->store<uint8_t>(kDestination + i, kGap);
 
-    const std::array<uint32_t, 13> packet = linear_rect_packet(
-        test_case.gfx12_rect, kSource, kDestination, /*element=*/4, /*rect_x=*/kRowBytes / 16,
-        /*rect_y=*/kRows, /*rect_z=*/kSlices, kSrcPitch, kDstPitch, kSrcSlice, kDstSlice);
+    const std::array<uint32_t, 13> packet =
+        linear_rect_packet(test_case.gfx12_rect, kSource, kDestination,
+                           {.element = 4,
+                            .rect_x = kRowBytes / 16,
+                            .rect_y = kRows,
+                            .rect_z = kSlices,
+                            .src_pitch_bytes = kSrcPitch,
+                            .dst_pitch_bytes = kDstPitch,
+                            .src_slice_bytes = kSrcSlice,
+                            .dst_slice_bytes = kDstSlice});
     SdmaPacketProcessor processor(test_case.dialect);
     const SdmaPacketProcessResult result =
         processor.process({.available_dwords = packet,
@@ -623,11 +647,15 @@ TEST(SdmaPacketProcessorTest, LinearRectUsesZOriginWhenTheCopyIsOneSlice) {
     fixture.memory->store<uint32_t>(kDestination, 0);
 
     const std::array<uint32_t, 13> packet =
-        linear_rect_packet(test_case.gfx12_rect, kSource, kDestination, /*element=*/0,
-                           /*rect_x=*/4, /*rect_y=*/1, /*rect_z=*/1, /*src_pitch_bytes=*/4,
-                           /*dst_pitch_bytes=*/4, /*src_slice_bytes=*/32, /*dst_slice_bytes=*/32,
-                           /*src_off_x=*/0, /*dst_off_x=*/0, /*src_off_y=*/0, /*dst_off_y=*/0,
-                           /*src_off_z=*/1, /*dst_off_z=*/0);
+        linear_rect_packet(test_case.gfx12_rect, kSource, kDestination,
+                           {.rect_x = 4,
+                            .rect_y = 1,
+                            .rect_z = 1,
+                            .src_pitch_bytes = 4,
+                            .dst_pitch_bytes = 4,
+                            .src_slice_bytes = 32,
+                            .dst_slice_bytes = 32,
+                            .src_off_z = 1});
     SdmaPacketProcessor processor(test_case.dialect);
     const SdmaPacketProcessResult result =
         processor.process({.available_dwords = packet,
@@ -661,10 +689,16 @@ TEST(SdmaPacketProcessorTest, LinearRectScalesXOriginsByTheElementSize) {
       fixture.memory->store<uint8_t>(kDestination + i, kGap);
 
     // 2-byte elements: X origins of 1 and 3 elements are byte offsets 2 and 6.
-    const std::array<uint32_t, 13> packet = linear_rect_packet(
-        test_case.gfx12_rect, kSource, kDestination, /*element=*/1, /*rect_x=*/kRowBytes / 2,
-        /*rect_y=*/kRows, /*rect_z=*/1, kSrcPitch, kDstPitch, /*src_slice_bytes=*/0,
-        /*dst_slice_bytes=*/0, /*src_off_x=*/1, /*dst_off_x=*/3);
+    const std::array<uint32_t, 13> packet =
+        linear_rect_packet(test_case.gfx12_rect, kSource, kDestination,
+                           {.element = 1,
+                            .rect_x = kRowBytes / 2,
+                            .rect_y = kRows,
+                            .rect_z = 1,
+                            .src_pitch_bytes = kSrcPitch,
+                            .dst_pitch_bytes = kDstPitch,
+                            .src_off_x = 1,
+                            .dst_off_x = 3});
     SdmaPacketProcessor processor(test_case.dialect);
     const SdmaPacketProcessResult result =
         processor.process({.available_dwords = packet,
@@ -700,11 +734,15 @@ TEST(SdmaPacketProcessorTest, LinearRectAppliesSourceAndDestinationYOrigins) {
       fixture.memory->store<uint8_t>(kDestination + i, 0x5a);
 
     // Copy 4x2 bytes from source row 1 to destination row 2 (16-byte pitch).
-    const std::array<uint32_t, 13> packet = linear_rect_packet(
-        test_case.gfx12_rect, kSource, kDestination, /*element=*/0, /*rect_x=*/4, /*rect_y=*/2,
-        /*rect_z=*/1, /*src_pitch_bytes=*/8, /*dst_pitch_bytes=*/16, /*src_slice_bytes=*/0,
-        /*dst_slice_bytes=*/0, /*src_off_x=*/0, /*dst_off_x=*/0, /*src_off_y=*/1,
-        /*dst_off_y=*/2, /*src_off_z=*/0, /*dst_off_z=*/0);
+    const std::array<uint32_t, 13> packet =
+        linear_rect_packet(test_case.gfx12_rect, kSource, kDestination,
+                           {.rect_x = 4,
+                            .rect_y = 2,
+                            .rect_z = 1,
+                            .src_pitch_bytes = 8,
+                            .dst_pitch_bytes = 16,
+                            .src_off_y = 1,
+                            .dst_off_y = 2});
     SdmaPacketProcessor processor(test_case.dialect);
     const SdmaPacketProcessResult result =
         processor.process({.available_dwords = packet,
@@ -733,10 +771,14 @@ TEST(SdmaPacketProcessorTest, LinearRectAcceptsTheGfx1250RuntimeFields) {
   for (uint32_t i = 0; i < 16; ++i)
     fixture.memory->store<uint8_t>(kDestination + i, 0x5a);
 
-  std::array<uint32_t, 13> packet = linear_rect_packet(
-      true, kSource, kDestination, /*element=*/0, /*rect_x=*/4, /*rect_y=*/1, /*rect_z=*/1,
-      /*src_pitch_bytes=*/16, /*dst_pitch_bytes=*/16, /*src_slice_bytes=*/0,
-      /*dst_slice_bytes=*/0, /*src_off_x=*/8, /*dst_off_x=*/4);
+  std::array<uint32_t, 13> packet = linear_rect_packet(true, kSource, kDestination,
+                                                       {.rect_x = 4,
+                                                        .rect_y = 1,
+                                                        .rect_z = 1,
+                                                        .src_pitch_bytes = 16,
+                                                        .dst_pitch_bytes = 16,
+                                                        .src_off_x = 8,
+                                                        .dst_off_x = 4});
   // ROCr sets HEADER.npd and system scope for both sides on gfx1250. The scope
   // fields share bit positions with the pre-GFX12 endian swap.
   constexpr uint32_t kSystemScope = 3;
@@ -754,10 +796,67 @@ TEST(SdmaPacketProcessorTest, LinearRectAcceptsTheGfx1250RuntimeFields) {
   EXPECT_EQ(fixture.memory->load<uint32_t>(kDestination + 8), 0x5a5a5a5au);
 }
 
+TEST(SdmaPacketProcessorTest, LinearRectResumesWithinTheSecondChunk) {
+  constexpr uint64_t kSource = 0x1000;
+  constexpr uint64_t kDestination = 0x8000;
+  constexpr uint32_t kRowBytes = 6000;
+  constexpr uint32_t kRows = 2;
+  constexpr uint32_t kSrcPitch = 6400;
+  constexpr uint32_t kDstPitch = 6144;
+  constexpr uint32_t kDstX = 32;
+  constexpr uint8_t kGap = 0xe7;
+  for (const auto &layout : kRectLayouts) {
+    SCOPED_TRACE(static_cast<int>(layout.dialect));
+    PacketProcessorFixture fixture(0x10000, 256);
+    ASSERT_TRUE(fixture.access);
+    const auto pattern = [](uint32_t i) { return static_cast<uint8_t>((i * 17 + i / 251) % 251); };
+    for (uint32_t i = 0; i < kSrcPitch * kRows; ++i)
+      fixture.memory->store<uint8_t>(kSource + i, pattern(i));
+    for (uint32_t i = 0; i < kDstPitch * kRows; ++i)
+      fixture.memory->store<uint8_t>(kDestination + i, kGap);
+    // Stop after the first physical span in chunk two has committed.
+    constexpr uint64_t kBlocked = kDestination + 4096 + 256;
+    fixture.memory->set_unavailable_write(kBlocked);
+    const auto packet = linear_rect_packet(layout.gfx12_rect, kSource, kDestination,
+                                           {.rect_x = kRowBytes,
+                                            .rect_y = kRows,
+                                            .src_pitch_bytes = kSrcPitch,
+                                            .dst_pitch_bytes = kDstPitch,
+                                            .dst_off_x = kDstX});
+    SdmaPacketProcessor processor(layout.dialect);
+    const auto first = processor.process({.available_dwords = packet,
+                                          .access = *fixture.access,
+                                          .continuation = fixture.continuation});
+    ASSERT_EQ(first.packet.status, PacketProcessStatus::Blocked);
+    ASSERT_TRUE(fixture.continuation.pending());
+    EXPECT_EQ(fixture.memory->write_calls(kDestination + kDstX), 1u);
+    EXPECT_EQ(fixture.memory->write_calls(kDestination + 4096 + kDstX), 1u);
+    EXPECT_EQ(fixture.memory->load<uint8_t>(kBlocked), kGap);
+    const auto resumed = processor.process(
+        {.available_dwords = {}, .access = *fixture.access, .continuation = fixture.continuation});
+    ASSERT_EQ(resumed.packet.status, PacketProcessStatus::Complete);
+    EXPECT_EQ(resumed.packet.retirement_bytes, packet.size() * sizeof(uint32_t));
+    EXPECT_FALSE(fixture.continuation.pending());
+    EXPECT_EQ(fixture.memory->write_calls(kDestination + kDstX), 1u);
+    EXPECT_EQ(fixture.memory->write_calls(kDestination + 4096 + kDstX), 1u);
+    EXPECT_EQ(fixture.memory->write_calls(kBlocked), 2u);
+    for (uint32_t i = 0; i < kDstPitch * kRows; ++i) {
+      const uint32_t row = i / kDstPitch;
+      const uint32_t column = i % kDstPitch;
+      const bool copied = column >= kDstX && column < kDstX + kRowBytes;
+      EXPECT_EQ(fixture.memory->load<uint8_t>(kDestination + i),
+                copied ? pattern(row * kSrcPitch + column - kDstX) : kGap)
+          << "row " << row << " column " << column;
+    }
+  }
+}
+
 TEST(SdmaPacketProcessorTest, LinearRectRejectsEndianSwap) {
   PacketProcessorFixture fixture;
   ASSERT_TRUE(fixture.access);
-  std::array<uint32_t, 13> packet = linear_rect_packet(false, 0x1000, 0x1800, 0, 4, 1, 1, 4, 4);
+  std::array<uint32_t, 13> packet = linear_rect_packet(
+      false, 0x1000, 0x1800,
+      {.rect_x = 4, .rect_y = 1, .rect_z = 1, .src_pitch_bytes = 4, .dst_pitch_bytes = 4});
   packet[12] |= 1u << 16;
 
   SdmaPacketProcessor processor(SdmaPacketDialect::LegacyExtendedCount);

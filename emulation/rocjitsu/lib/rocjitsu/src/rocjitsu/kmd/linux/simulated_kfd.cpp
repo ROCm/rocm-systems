@@ -150,14 +150,14 @@ private:
 
 } // namespace
 
-amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags) {
+amdgpu::Mtype SimulatedKfd::pte_mtype_for_flags(uint32_t flags, bool shared) {
   if (flags & KFD_IOC_ALLOC_MEM_FLAGS_UNCACHED)
     return amdgpu::Mtype::UC;
   if (flags & (KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_USERPTR))
     return amdgpu::Mtype::UC;
   if (flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL)
     return amdgpu::Mtype::UC;
-  if (flags & KFD_IOC_ALLOC_MEM_FLAGS_COHERENT)
+  if (shared || (flags & KFD_IOC_ALLOC_MEM_FLAGS_COHERENT))
     return amdgpu::Mtype::CC;
   return amdgpu::Mtype::RW;
 }
@@ -737,8 +737,23 @@ std::shared_ptr<GemObject> SimulatedKfd::retain_bo_state(const struct stat &st,
         state = alloc.bo_state;
     }
   }
+  // An IPC share handle can predate the PRIME operation that first tags the
+  // BO. Retain the same record there so later imports inherit that metadata.
+  std::lock_guard ipc_lock(ipc_mutex_);
+  std::vector<IpcObject *> shared;
+  for (auto &[key, object] : ipc_store_) {
+    struct stat backing_st {};
+    if (object.backing_memfd >= 0 && safe_fstat(object.backing_memfd, &backing_st) == 0 &&
+        backing_st.st_dev == st.st_dev && backing_st.st_ino == st.st_ino) {
+      shared.push_back(&object);
+      if (object.bo_state)
+        state = object.bo_state;
+    }
+  }
   for (auto *alloc : backed)
     alloc->bo_state = state;
+  for (auto *object : shared)
+    object->bo_state = state;
   return state;
 }
 
@@ -746,13 +761,15 @@ std::shared_ptr<KfdProcess> SimulatedKfd::find_local_process() const {
   return find_process(local_process_id_);
 }
 
-uint32_t SimulatedKfd::alloc_flags_for_handle(uint64_t handle) const {
+uint32_t SimulatedKfd::mapping_flags_for_handle(uint64_t handle) const {
   auto proc = find_process(local_process_id_);
   if (!proc)
     return 0;
   std::lock_guard<std::mutex> lk(proc->alloc_mutex_);
   auto it = proc->allocations_.find(handle);
-  return it != proc->allocations_.end() ? it->second.flags : 0;
+  return it != proc->allocations_.end()
+             ? it->second.flags | (it->second.shared ? KFD_IOC_ALLOC_MEM_FLAGS_COHERENT : 0)
+             : 0;
 }
 
 void SimulatedKfd::map_to_gpu(KfdProcess &proc, uint64_t gpu_va, void *host_ptr, size_t size,
@@ -2230,7 +2247,8 @@ void *SimulatedKfd::dispatch_mmap(KfdProcess &proc, void *addr, size_t length, i
   });
   // mmap and KFD BOs cover whole pages, including the last partial page.
   const size_t mapped_bytes = std::min(alloc.size, (uint64_t(length) + 0xFFF) & ~uint64_t(0xFFF));
-  map_to_gpu(proc, alloc.gpu_va, host_ptr, mapped_bytes, pte_mtype_for_flags(alloc.flags));
+  map_to_gpu(proc, alloc.gpu_va, host_ptr, mapped_bytes,
+             pte_mtype_for_flags(alloc.flags, alloc.shared));
 
   return host_ptr;
 }
@@ -2491,41 +2509,40 @@ int SimulatedKfd::alloc_memory_ioctl(KfdProcess &proc, void *arg) {
   if (is_userptr && !daemon_mode_) {
     alloc.host_ptr = reinterpret_cast<void *>(va);
     map_to_gpu(proc, va, reinterpret_cast<void *>(va), alloc.size, alloc_mtype);
-  } else if (daemon_mode_ || !user_provided_va || !is_doorbell) {
-    // A caller-reserved VA is backed by a memfd from the start, so a later
-    // dmabuf or IPC export shares the pages the caller already maps instead
-    // of copying them while writers are live. That backing is left sparse,
-    // the way the anonymous mapping it replaces filled on first touch.
+  } else if (!is_doorbell) {
+    // Every allocation on this path retains one backing descriptor, even if
+    // it is never exported. Fail allocation if that backing cannot be created
+    // or sized. Caller-VA backing stays sparse until first touch.
     const bool sparse_backing = !daemon_mode_ && user_provided_va;
     auto raw_fd = memfd_create("rocjitsu_alloc", MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    if (raw_fd >= 0) {
-      alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
-      if (alloc.memfd < 0)
-        alloc.memfd = raw_fd;
-      else
-        libc_passthrough().close(raw_fd);
-      {
-        std::lock_guard<std::mutex> lk(owned_fds_mutex_);
-        owned_fds_.insert(alloc.memfd);
-      }
-      if (alloc.memfd >= 0) {
-        [[maybe_unused]] auto ft_rc = ftruncate(alloc.memfd, static_cast<off_t>(alloc.size));
-        if (!sparse_backing)
-          fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
-        safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
-
-        if (daemon_mode_ && !is_doorbell) {
-          auto *mapped =
-              safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
-          if (mapped != MAP_FAILED) {
-            alloc.host_ptr = mapped;
-            alloc.host_ptr_owned = true;
-            // Driver-owned: this is our memfd, mapped read-write here and held
-            // open, so nothing outside can change its protection or unmap it.
-            map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype,
-                       KfdProcess::HostExtentOwner::Driver);
-          }
-        }
+    if (raw_fd < 0)
+      return -errno;
+    if (ftruncate(raw_fd, static_cast<off_t>(alloc.size)) != 0) {
+      const int error = errno;
+      libc_passthrough().close(raw_fd);
+      return -error;
+    }
+    alloc.memfd = safe_fcntl(raw_fd, F_DUPFD_CLOEXEC, kBackingFdMin);
+    if (alloc.memfd < 0)
+      alloc.memfd = raw_fd;
+    else
+      libc_passthrough().close(raw_fd);
+    {
+      std::lock_guard<std::mutex> lk(owned_fds_mutex_);
+      owned_fds_.insert(alloc.memfd);
+    }
+    if (!sparse_backing)
+      fallocate(alloc.memfd, 0, 0, static_cast<off_t>(alloc.size));
+    safe_fcntl(alloc.memfd, F_ADD_SEALS, F_SEAL_SHRINK);
+    if (daemon_mode_) {
+      auto *mapped =
+          safe_mmap(nullptr, alloc.size, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.memfd, 0);
+      if (mapped != MAP_FAILED) {
+        alloc.host_ptr = mapped;
+        alloc.host_ptr_owned = true;
+        // Driver-owned: no application alias can change this mapping's protection.
+        map_to_gpu(proc, va, alloc.host_ptr, alloc.size, alloc_mtype,
+                   KfdProcess::HostExtentOwner::Driver);
       }
     }
   }
@@ -2729,7 +2746,8 @@ int SimulatedKfd::map_memory_ioctl(KfdProcess &proc, void *arg) {
                       alloc.host_ptr != nullptr);
   });
   if (alloc.host_ptr)
-    map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.size, pte_mtype_for_flags(alloc.flags));
+    map_to_gpu(proc, alloc.gpu_va, alloc.host_ptr, alloc.size,
+               pte_mtype_for_flags(alloc.flags, alloc.shared));
   args->n_success = args->n_devices;
   return 0;
 }
@@ -3196,10 +3214,15 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
     KfdProcess::GpuAllocation alloc{};
     alloc.gpu_va = args->va_addr;
     alloc.size = size;
+    alloc.gpu_id = args->gpu_id;
+    // Import currently models unknown backing as GTT. IPC re-export preserves
+    // these placeholder flags; PRIME retains an existing BO's authoritative
+    // flags when it recognizes the same backing.
     alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
     alloc.handle = handle;
     alloc.user_va = true;
     alloc.imported = true;
+    alloc.shared = true;
     alloc.dmabuf_fd = dupfd;
     alloc.host_ptr = reinterpret_cast<void *>(args->va_addr);
     proc.allocations_[handle] = alloc;
@@ -3222,35 +3245,28 @@ int SimulatedKfd::import_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   return 0;
 }
 
-int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc,
-                                          const char *name) {
-  if (alloc.memfd < 0) {
-    // A USERPTR range is the caller's own memory; amdgpu refuses to export it.
-    if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
-      return -EPERM;
-    // Allocations that can be exported are created with a memfd. A mapped one
-    // without it has live writers, so moving its bytes would lose stores.
-    if (alloc.host_ptr)
-      return -EINVAL;
-    // Unmapped: the first mmap of the allocation maps this memfd.
-    int fd = memfd_create(name, MFD_CLOEXEC | MFD_ALLOW_SEALING);
-    if (fd < 0)
-      return -errno;
-    if (ftruncate(fd, static_cast<off_t>(alloc.size)) != 0) {
-      const int error = errno;
-      libc_passthrough().close(fd);
-      return -error;
-    }
-    alloc.memfd = fd;
-    std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-    owned_fds_.insert(fd);
-  }
-  // Upgrade the exporter's PTE mtype to CC (cache coherent) so that
-  // the local GPU sees writes from the importing GPU.  On real hardware
-  // xGMI snoops handle this; in the simulator CC forces L2 invalidate
-  // before every refetch, emulating the cross-GPU coherence protocol.
-  proc.set_page_mtype(alloc.gpu_va, alloc.size, amdgpu::Mtype::CC);
-  return 0;
+int SimulatedKfd::share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc) {
+  // Doorbells use separate backing; USERPTR pages are not owned by the BO.
+  if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_USERPTR)
+    return -EPERM;
+  if (alloc.flags & KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL)
+    return -EINVAL;
+  const int backing = alloc.memfd >= 0 ? alloc.memfd : (alloc.imported ? alloc.dmabuf_fd : -1);
+  if (backing < 0)
+    return -EINVAL;
+  // IPC may retain a writable private alias for a read-only public dma-buf.
+  const int exported =
+      alloc.export_access_mode >= 0
+          ? libc_passthrough().openat(AT_FDCWD, std::format("/proc/self/fd/{}", backing).c_str(),
+                                      alloc.export_access_mode | O_CLOEXEC, 0)
+          : safe_fcntl(backing, F_DUPFD_CLOEXEC, 0);
+  if (exported < 0)
+    return -errno;
+  // Publish the KFD sharing policy only after retaining the export succeeds.
+  // Keep it separate from requested flags returned by IPC_IMPORT_HANDLE.
+  alloc.shared = true;
+  proc.set_page_mtype(alloc.gpu_va, alloc.size, pte_mtype_for_flags(alloc.flags, alloc.shared));
+  return exported;
 }
 
 int SimulatedKfd::export_dmabuf_ioctl(KfdProcess &proc, void *arg) {
@@ -3260,65 +3276,50 @@ int SimulatedKfd::export_dmabuf_ioctl(KfdProcess &proc, void *arg) {
   auto it = proc.allocations_.find(args->handle);
   if (it == proc.allocations_.end())
     return -EINVAL;
-  if (int rc = share_allocation_locked(proc, it->second, "rocjitsu_dmabuf_promote"); rc != 0)
-    return rc;
-  const auto &alloc = it->second;
-  int dupfd = safe_fcntl(alloc.memfd, F_DUPFD_CLOEXEC, 0);
+  const int dupfd = share_allocation_locked(proc, it->second);
   if (dupfd < 0)
-    return -errno;
+    return dupfd;
   args->dmabuf_fd = dupfd;
   return 0;
 }
 
 int SimulatedKfd::ipc_export_handle_ioctl(KfdProcess &proc, void *arg) {
   auto *args = static_cast<kfd_ioctl_ipc_export_handle_args *>(arg);
-
-  uint64_t alloc_size = 0;
-  uint32_t alloc_flags = 0;
-  uint32_t alloc_gpu_id = 0;
-  int dup_fd = -1;
-
-  {
-    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
-    auto it = proc.allocations_.find(args->handle);
-    if (it == proc.allocations_.end())
-      return -EINVAL;
-    auto &alloc = it->second;
-    if (int rc = share_allocation_locked(proc, alloc, "rocjitsu_ipc_promote"); rc != 0)
-      return rc;
-
-    alloc_size = alloc.size;
-    alloc_flags = alloc.flags;
-    alloc_gpu_id = alloc.gpu_id;
-    dup_fd = safe_fcntl(alloc.memfd, F_DUPFD_CLOEXEC, 0);
-  }
-
-  if (dup_fd < 0)
-    return -errno;
-
   IpcHandleKey key{};
-  if (getrandom(key.words, sizeof(key.words), 0) != sizeof(key.words)) {
-    libc_passthrough().close(dup_fd);
+  const ssize_t random_bytes = getrandom(key.words, sizeof(key.words), 0);
+  if (random_bytes < 0)
     return -errno;
-  }
+  if (random_bytes != sizeof(key.words))
+    return -EIO;
+
+  // Keep the allocation's metadata snapshot and IPC publication atomic with
+  // retain_bo_state(). Generate the key before taking either lock.
+  std::lock_guard alloc_lock(proc.alloc_mutex_);
+  auto it = proc.allocations_.find(args->handle);
+  if (it == proc.allocations_.end())
+    return -EINVAL;
+  auto &alloc = it->second;
+  const int dup_fd = share_allocation_locked(proc, alloc);
+  if (dup_fd < 0)
+    return dup_fd;
 
   IpcObject obj{};
   std::memcpy(obj.share_handle, key.words, sizeof(key.words));
   obj.backing_memfd = dup_fd;
-  obj.allocation_size = alloc_size;
-  obj.allocation_flags = alloc_flags;
-  obj.source_gpu_id = alloc_gpu_id;
+  obj.bo_state = alloc.bo_state;
+  obj.allocation_size = alloc.size;
+  obj.allocation_flags = alloc.flags;
+  obj.source_gpu_id = alloc.gpu_id;
   obj.source_process_id = proc.process_id();
   obj.source_alloc_handle = args->handle;
-
   {
-    std::lock_guard<std::mutex> lk(ipc_mutex_);
+    std::lock_guard ipc_lock(ipc_mutex_);
     ipc_store_[key] = obj;
   }
 
   std::memcpy(args->share_handle, key.words, sizeof(key.words));
-  util::Logger::vm("ipc_export: handle=", args->handle, " size=", alloc_size,
-                   " gpu_id=", alloc_gpu_id);
+  util::Logger::vm("ipc_export: handle=", args->handle, " size=", alloc.size,
+                   " gpu_id=", alloc.gpu_id);
   return 0;
 }
 
@@ -3328,11 +3329,15 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
   IpcHandleKey key{};
   std::memcpy(key.words, args->share_handle, sizeof(key.words));
 
-  int dup_fd = -1;
+  UniqueDriverFd backing;
+  std::shared_ptr<GemObject> bo_state;
   uint64_t alloc_size = 0;
   uint32_t alloc_flags = 0;
   uint32_t source_gpu_id = 0;
 
+  // Prevent first-time PRIME tagging from racing the metadata snapshot and
+  // allocation insertion. Match retain_bo_state()'s alloc -> IPC lock order.
+  std::unique_lock alloc_lock(proc.alloc_mutex_);
   {
     std::lock_guard<std::mutex> lk(ipc_mutex_);
     auto it = ipc_store_.find(key);
@@ -3341,37 +3346,37 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc_size = it->second.allocation_size;
     alloc_flags = it->second.allocation_flags;
     source_gpu_id = it->second.source_gpu_id;
-    dup_fd = safe_fcntl(it->second.backing_memfd, F_DUPFD_CLOEXEC, 0);
+    bo_state = it->second.bo_state;
+    if (args->gpu_id != 0 && args->gpu_id != source_gpu_id)
+      return -EINVAL;
+    backing = UniqueDriverFd(safe_fcntl(it->second.backing_memfd, F_DUPFD_CLOEXEC, 0));
   }
-
-  if (args->gpu_id != 0 && args->gpu_id != source_gpu_id) {
-    util::Logger::vm("ipc_import: gpu_id mismatch: requested=", args->gpu_id,
-                     " source=", source_gpu_id);
-    return -EINVAL;
-  }
-
-  if (dup_fd < 0)
+  if (!backing)
     return -errno;
-
+  const int original_flags = safe_fcntl(backing.get(), F_GETFL, 0);
+  if (original_flags < 0)
+    return -errno;
+  const int public_mode = original_flags & O_ACCMODE;
+  if (public_mode != O_RDWR) {
+    const auto path = std::format("/proc/self/fd/{}", backing.get());
+    const int writable = libc_passthrough().openat(AT_FDCWD, path.c_str(), O_RDWR | O_CLOEXEC, 0);
+    if (writable < 0)
+      return -errno;
+    backing = UniqueDriverFd(writable);
+  }
+  auto *host_ptr =
+      safe_mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE, MAP_SHARED, backing.get(), 0);
+  if (host_ptr == MAP_FAILED)
+    return -errno;
+  const int dup_fd = backing.release();
   {
     std::lock_guard<std::mutex> flk(owned_fds_mutex_);
     owned_fds_.insert(dup_fd);
   }
 
-  auto *host_ptr = safe_mmap(nullptr, alloc_size, PROT_READ | PROT_WRITE, MAP_SHARED, dup_fd, 0);
-  if (host_ptr == MAP_FAILED) {
-    {
-      std::lock_guard<std::mutex> flk(owned_fds_mutex_);
-      owned_fds_.erase(dup_fd);
-    }
-    libc_passthrough().close(dup_fd);
-    return -ENOMEM;
-  }
-
   uint64_t gpu_va;
   uint64_t handle;
   {
-    std::lock_guard<std::mutex> lk(proc.alloc_mutex_);
     if (args->va_addr != 0)
       gpu_va = args->va_addr;
     else {
@@ -3388,10 +3393,15 @@ int SimulatedKfd::ipc_import_handle_ioctl(KfdProcess &proc, void *arg) {
     alloc.host_ptr = host_ptr;
     alloc.host_ptr_owned = true;
     alloc.memfd = dup_fd;
+    alloc.bo_state = std::move(bo_state);
+    alloc.export_access_mode = public_mode;
     alloc.gpu_id = source_gpu_id;
     alloc.imported = true;
+    alloc.shared = true;
     proc.allocations_[handle] = alloc;
   }
+
+  alloc_lock.unlock();
 
   // IPC-imported memory uses CC (cache coherent) mtype to emulate the
   // cross-GPU coherence that real hardware provides via xGMI snoops.

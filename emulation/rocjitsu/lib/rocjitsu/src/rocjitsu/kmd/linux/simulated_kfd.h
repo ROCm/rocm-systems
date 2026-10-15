@@ -134,6 +134,7 @@ struct IpcHandleKeyHash {
 struct IpcObject {
   uint32_t share_handle[4];
   int backing_memfd = -1;
+  std::shared_ptr<GemObject> bo_state;
   uint64_t allocation_size = 0;
   uint32_t allocation_flags = 0;
   uint32_t source_gpu_id = 0;
@@ -432,10 +433,11 @@ public:
   [[nodiscard]] int claim_fd(int real_fd);
   [[nodiscard]] bool owns_reserved_fd(int fd) const;
 
-  /// @brief Derive the PTE MTYPE from KFD allocation flags (mirrors amdgpu).
-  /// @details Public so the interposer's DRM GEM_VA path can install page-table
-  /// entries with the same coherency type the KFD alloc requested.
-  static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags);
+  /// @brief Derive PTE MTYPE from KFD allocation flags and simulator sharing policy.
+  /// @details @p shared retains coherence across remapping without modifying the
+  /// requested allocation flags. mapping_flags_for_handle encodes that policy as
+  /// COHERENT for the interposer's GEM_VA path.
+  static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags, bool shared = false);
   /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
   int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
   /// Cancel accepted work and release the queue owned by one DRM context/ring.
@@ -467,19 +469,21 @@ public:
   /// @note Called by the interposer's prime_import with its fd_mutex_ held. This takes
   /// process_mutex_ (find_process, released at once), then alloc_mutex_; the two are
   /// never nested. fd_mutex_ < process_mutex_ and fd_mutex_ < alloc_mutex_ are
-  /// recorded here, not in the global ordering below; no reverse edge exists.
+  /// recorded here, not in the global ordering below. Retaining IPC state also
+  /// follows alloc_mutex_ < ipc_mutex_, as allocation teardown does.
   [[nodiscard]] std::shared_ptr<GemObject> retain_bo_state(const struct stat &st,
                                                            std::shared_ptr<GemObject> state);
 
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
 
-  /// @brief KFD allocation flags for a local-process allocation @p handle, or 0.
+  /// @brief Effective mapping flags for a local-process allocation @p handle, or 0.
   /// @details Locks the process alloc mutex internally, keeping lock discipline for
   /// per-process allocation state inside the driver. Used by the interposer to
   /// capture the GPU PTE MTYPE flags at EXPORT_DMABUF time (before the allocation
-  /// may be freed).
-  uint32_t alloc_flags_for_handle(uint64_t handle) const;
+  /// may be freed). Includes sharing policy without changing the requested flags
+  /// returned by the KFD ABI.
+  uint32_t mapping_flags_for_handle(uint64_t handle) const;
 
   /// @brief Per-GPU device state (mirrors kfd_dev in the kernel).
   struct GpuDevice {
@@ -533,10 +537,11 @@ private:
                   KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
-  /// @brief Give @p alloc memfd backing that every exporter and importer shares.
-  /// @details Keeps the allocation's CPU mapping on the shared backing and marks
-  /// its pages cache coherent. Caller holds proc.alloc_mutex_.
-  int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc, const char *name);
+  /// @brief Export existing backing with its public mode and coherent sharing policy.
+  /// @details Retains the policy for future mappings and imports as well as
+  /// current PTEs. Returns the new fd or a negative errno; failure leaves the
+  /// policy unchanged. Caller holds proc.alloc_mutex_.
+  int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc);
 
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
