@@ -749,11 +749,6 @@ ncclResult_t ncclRmaIbProxyDeregMrSym(void* collComm, void* mhandle) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclRmaIbProxyCloseColl(void* collComm) {
-  free(collComm);
-  return ncclSuccess;
-}
-
 static ncclResult_t ncclRmaIbProxyGetSendComm(struct ncclRmaIbProxyCtx* rmaProxyCtx, int rank,
                                               struct ncclIbSendComm** commPtr) {
   *commPtr = (struct ncclIbSendComm*)rmaProxyCtx->fullSendComm[rank];
