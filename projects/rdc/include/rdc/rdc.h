@@ -1050,7 +1050,8 @@ rdc_status_t rdc_connect(const char* ipAndPort, rdc_handle_t* p_rdc_handle, cons
  *  @brief Disconnect from rdcd daemon.
  *
  *  @details Disconnect from rdcd daemon, and p_rdc_handle becomes invalid
- *  after this call.
+ *  after this call. It stops the policy callbacks registered on the handle
+ *  and waits for a running one to return.
  *
  *  @param[in] p_rdc_handle The RDC handler that come from rdc_connect().
  *
@@ -1657,7 +1658,9 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
 /**
  *  @brief Register a function to be called when policy condition is meet.
  *
- *  @details Register the RDC policy callback
+ *  @details Register the RDC policy callback. On a handle from rdc_connect(),
+ *  the callback runs on a thread that the library starts for the group. The
+ *  callback may call rdc_policy_unregister(), but not rdc_disconnect().
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
@@ -1666,6 +1669,10 @@ typedef int (*rdc_policy_register_callback)(rdc_policy_callback_response_t* user
  *  @param[in] callback  The callback function to be called when condition meet.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_CONFLICT On a handle from rdc_connect(): a callback is
+ *  already registered for the group.
+ *  @retval ::RDC_ST_INSUFF_RESOURCES On a handle from rdc_connect(): the
+ *  thread for the callback could not start.
  */
 rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                  rdc_policy_register_callback callback);
@@ -1673,7 +1680,10 @@ rdc_status_t rdc_policy_register(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
 /**
  *  @brief un-register a policy callback function for a conditioin.
  *
- *  @details Un-register the policy callback for a condition.
+ *  @details Un-register the policy callback for a condition. On a handle from
+ *  rdc_connect(), it waits for a running callback of the group to return.
+ *  Called from a callback, it does not wait, and the callback of the group
+ *  may run again until rdc_disconnect() returns.
  *
  *  @param[in] p_rdc_handle The RDC handler.
  *
