@@ -226,11 +226,24 @@ void write_lds_dst_load_direct(const VectorMemState &d, Lds &lds, uint32_t per_l
           "LDS-destination load payload too small: lane={} offset={} bytes={} payload={}", lane,
           data_offset, per_lane_bytes, d.response_data.size()));
     }
+    const uint32_t output_bytes = d.lds_dword_extend ? d.num_elems * 4 : per_lane_bytes;
     uint32_t lds_addr =
-        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * per_lane_bytes;
+        d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * output_bytes;
     if (lds_addr == kInvalidLdsAddress)
       continue;
-    lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+    if (d.lds_dword_extend && d.elem_size < 4) {
+      assert(d.num_elems == 1);
+      uint32_t value = 0;
+      std::memcpy(&value, &d.response_data[data_offset], d.elem_size);
+      if (d.sign_extend) {
+        value = d.elem_size == 1
+                    ? static_cast<uint32_t>(static_cast<int32_t>(static_cast<int8_t>(value)))
+                    : static_cast<uint32_t>(static_cast<int32_t>(static_cast<int16_t>(value)));
+      }
+      lds.write32(lds_addr, value);
+    } else {
+      lds.write(lds_addr, &d.response_data[data_offset], per_lane_bytes);
+    }
   }
 }
 
@@ -270,8 +283,7 @@ MemoryAccessCompletion complete_lds_dst_load(VectorMemState &d, Wavefront &wf, C
   });
 
   if (!d.cluster_multicast || cluster_downgrades_to_ordinary) {
-    // GFX9/CDNA: out-of-range lanes return zeros, and those zeros are written to LDS.
-    const uint64_t write_mask = arch_is_cdna_4_or_lower(cu.arch()) ? d.exec_mask : d.lane_mask;
+    const uint64_t write_mask = lds_destination_write_mask(d, cu.arch());
     write_lds_dst_load_direct(d, wf.lds(), per_lane_bytes, write_mask);
     return MemoryAccessCompletion::Complete;
   }
@@ -445,7 +457,8 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
     return VmAccessOutcome::Malformed;
   // Masked loads still write the zero response, without taking a VM snapshot or
   // touching backing memory, including byte and halfword requests.
-  if (d.is_load && d.load_dword_mask == 0)
+  // Fully masked stores likewise perform no VM or backing-memory access.
+  if (d.load_dword_mask == 0)
     return VmAccessOutcome::Complete;
   if (wf.address_space()) {
     const bool may_refresh_unready =
@@ -493,6 +506,22 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
             return outcome;
         }
       } else {
+        if (d.load_dword_mask != 0xffff) {
+          while (d.translated.request_index < d.num_dwords) {
+            const auto index = d.translated.request_index;
+            if (d.load_dword_mask & (1u << index)) {
+              const auto outcome = d.translated.access->write(
+                  d.addr + index * sizeof(uint32_t),
+                  {reinterpret_cast<const std::byte *>(&d.store_data[index]), sizeof(uint32_t)},
+                  d.translated.completed_bytes);
+              if (outcome != VmAccessOutcome::Complete)
+                return outcome;
+            }
+            ++d.translated.request_index;
+            d.translated.completed_bytes = 0;
+          }
+          return VmAccessOutcome::Complete;
+        }
         const VmAccessOutcome outcome = d.translated.access->write(
             d.addr,
             std::span<const std::byte>(reinterpret_cast<const std::byte *>(d.store_data),
@@ -541,6 +570,19 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
         return outcome;
     }
   } else {
+    if (d.load_dword_mask != 0xffff) {
+      while (d.translated.request_index < d.num_dwords) {
+        const auto index = d.translated.request_index;
+        if (d.load_dword_mask & (1u << index)) {
+          const auto outcome =
+              l1_->store(d.addr + index * 4, 1, &d.store_data[index], wf.process_id(), d.mtype);
+          if (outcome != VmAccessOutcome::Complete)
+            return outcome;
+        }
+        ++d.translated.request_index;
+      }
+      return VmAccessOutcome::Complete;
+    }
     const VmAccessOutcome outcome =
         l1_->store(d.addr, d.num_dwords, d.store_data, wf.process_id(), d.mtype);
     if (outcome != VmAccessOutcome::Complete)

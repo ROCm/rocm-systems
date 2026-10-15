@@ -1098,6 +1098,21 @@
         {"name": "HostApi_RmaDisableCrossNodePutFails_NonSym", "description": "Host API: NCCL_RMA_DISABLE=1, non-symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of using the proxy", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails", "env_variables": {"NCCL_CUMEM_ENABLE": "0"}}
       ]
     },
+
+    "gin_connect_leak": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "description": "ncclGinConnectOnce must release the comms it opened when a later connect fails",
+      "tests": [
+        {"name": "GinConnectLeak_FailedConnectReleasesOpenedComms", "description": "second connect is made to fail; the first GIN comm and the listen comm must be closed", "test_filter": "GinConnectLeakMPITest.FailedConnectReleasesOpenedComms"}
+      ]
+    },
+
     "rma_external_plugin_put_signal": {
       "extends": "default",
       "is_gtest": true,
@@ -2934,6 +2949,16 @@
           "description": "Interleaved CE AllGather and SM AllReduce on same comm; validates no state corruption",
           "test_filter": "CeMPI_Stress.InterleavedCEAllGatherAndSMAllReduce",
           "timeout": 300
+        },
+        {
+          "name": "CE_AllReduce_MaxOp_2Ranks",
+          "description": "128 MiB Max AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MaxOp128MiB"
+        },
+        {
+          "name": "CE_AllReduce_MinOp_2Ranks",
+          "description": "128 MiB Min AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MinOp128MiB"
         }
       ]
     },
@@ -5458,6 +5483,12 @@
       "name": "RMA External Plugin - Put Signal",
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
       "config": "rma_external_plugin_put_signal",
+      "enabled": true
+    },
+    {
+      "name": "GIN Connect Leak",
+      "description": "Resource release when GIN connection setup fails",
+      "config": "gin_connect_leak",
       "enabled": true
     }
   ]

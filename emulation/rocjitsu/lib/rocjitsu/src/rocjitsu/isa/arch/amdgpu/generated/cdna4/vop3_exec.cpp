@@ -255,8 +255,7 @@ void VClrexcpVop3::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void VScreenPartition4seB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  amdgpu::execute_v_screen_partition_4se_b32_vop3(*this, wf);
 }
 
 void VMovB64Vop3::execute_impl(amdgpu::Wavefront &wf) { amdgpu::execute_v_mov_b64_vop3(*this, wf); }
@@ -1154,7 +1153,16 @@ void VCvtPkF32Bf8Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
 }
 
-void VPrngB32Vop3::execute_impl(amdgpu::Wavefront &wf) { (void)wf; }
+void VPrngB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  uint64_t exec = wf.exec();
+  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+    if (!(exec & (1ULL << lane)))
+      continue;
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(
+        *this, wf, vdst, lane,
+        util::prng_advance(amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+  }
+}
 
 void VPermlane16SwapB32Vop3::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
@@ -12226,6 +12234,14 @@ void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   }
   amdgpu::write_wave_mask_scalar(vdst, wf, result);
   commit_result(result);
+}
+
+void VExpLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_exp_legacy_f32_vop3(*this, wf);
+}
+
+void VLogLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_log_legacy_f32_vop3(*this, wf);
 }
 
 void VAddCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
