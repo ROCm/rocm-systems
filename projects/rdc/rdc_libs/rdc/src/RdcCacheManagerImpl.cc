@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <cmath>
 #include <ctime>
 #include <sstream>
+#include <tuple>
 
 #include "rdc_lib/RdcLogger.h"
 #include "rdc_lib/rdc_common.h"
@@ -528,10 +529,45 @@ rdc_status_t RdcCacheManagerImpl::rdc_job_start_stats(const char job_id[64],
   }
 
   std::lock_guard<std::mutex> guard(cache_mutex_);
-  // Remove the old stats if it exists
-  cache_jobs_.erase(job_id);
-  cache_jobs_.insert({job_id, cacheEntry});
+  auto old_stats = cache_jobs_.find(job_id);
+  if (old_stats != cache_jobs_.end()) {
+    // A job started again replaces its old stats.
+    cache_jobs_.erase(old_stats);
+  } else if (cache_jobs_.size() >= kMaxJobs && oldest_stopped_job() == cache_jobs_.end()) {
+    return RDC_ST_MAX_LIMIT;
+  }
+  cacheEntry.start_order = job_starts_++;
+  cache_jobs_.insert({job_id, std::move(cacheEntry)});
   return RDC_ST_OK;
+}
+
+void RdcCacheManagerImpl::evict_jobs() {
+  std::lock_guard<std::mutex> guard(cache_mutex_);
+  while (cache_jobs_.size() > kMaxJobs) {
+    auto oldest = oldest_stopped_job();
+    if (oldest == cache_jobs_.end()) {
+      return;
+    }
+    RDC_LOG(RDC_INFO,
+            "Removed the stats of job " << oldest->first << ": RDC keeps " << kMaxJobs << " jobs");
+    cache_jobs_.erase(oldest);
+  }
+}
+
+RdcJobStatsCache::iterator RdcCacheManagerImpl::oldest_stopped_job() {
+  auto oldest = cache_jobs_.end();
+  for (auto job = cache_jobs_.begin(); job != cache_jobs_.end(); ++job) {
+    const auto& stats = job->second;
+    if (stats.end_time == 0) {
+      continue;  // running
+    }
+    if (oldest == cache_jobs_.end() ||
+        std::tie(stats.end_time, stats.start_order) <
+            std::tie(oldest->second.end_time, oldest->second.start_order)) {
+      oldest = job;
+    }
+  }
+  return oldest;
 }
 
 rdc_status_t RdcCacheManagerImpl::rdc_job_stop_stats(const char job_id[64],

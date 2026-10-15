@@ -9,6 +9,9 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- **RDC keeps at most 256 jobs, running or stopped**.
+  - A job with a new ID that starts when RDC already keeps 256 jobs removes the job that stopped first, and `rdc_job_get_stats()` returns `RDC_ST_NOT_FOUND` for it. If no job has stopped, a start on a group whose job fields are not watched first stops the running job, started first, whose GPU group was destroyed or runs a later job, and that job makes room (it stays stopped if the start then fails); if there is none, `rdc_job_start_stats()` returns `RDC_ST_MAX_LIMIT`. A start that fails removes no other job. Every job used to stay in memory until `rdc_job_remove()` or `rdc_job_remove_all()` removed it.
+
 ### Removed
 
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
@@ -47,6 +50,12 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
   - A GPU that cannot be partitioned now reports 1.
 
 - Stopping `rdcd`, or embedded RDC with `rdc_stop_embedded()`, no longer hangs. Rarely, the stop never returned and the process had to be killed.
+
+- A job start that fails, for example on a GPU group that runs another job, no longer leaves a running job behind. Its job ID returned `RDC_ST_ALREADY_EXIST` until the job was removed, and stopping it stopped the stats of the group's other job. A start that failed to set up process events, whose job kept collecting stats although `rdc_job_start_stats()` returned the error, no longer leaves a job either.
+
+- `rdc_job_remove()` and `rdc_job_remove_all()` now free the ID of a job that cannot stop, for example after a client unwatched the job fields of its group. Starting a job with that ID returned `RDC_ST_ALREADY_EXIST`.
+
+- Two `rdc_job_start_stats()` calls with the same job ID at the same time no longer both succeed. One of the two GPU groups then kept a watch that failed its later jobs with `RDC_ST_CONFLICT`.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 
