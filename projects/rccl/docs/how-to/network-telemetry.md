@@ -222,7 +222,7 @@ channel (aggregated) and per QP.
 |---|---|
 | `num_wqe_sent` | Send WQEs posted on this QP. |
 | `num_recv_wqe` | Receive WQEs posted (`ibv_post_recv`). |
-| `num_wqe_rcvd` | Send, receive and CTS completions drained from the CQ. Not counted: GPU flush completions, and completions resiliency matches to no active request. |
+| `num_wqe_rcvd` | Send, receive and CTS completions drained from the CQ. Not counted: error completions (see `num_cq_errors`), GPU flush completions, and completions resiliency matches to no active request. |
 | `num_wqe_completed` | Completions that matched a tracked posting, i.e. those with a recorded post timestamp so latency is computable. |
 | `num_cts_sent` | CTS (clear-to-send) messages posted. |
 | `num_cts_sent_signalled` / `num_cts_sent_unsignalled` | Split of `num_cts_sent` by whether the WR was signalled. Their sum equals `num_cts_sent`. |
@@ -292,3 +292,5 @@ sysfs or the NIC counters.
   `pfc_*_pause_us` as 0 while PFC frames are counted.
 - With QP sharing, each communicator has its own QP slots, so a shared QP is
   counted once per communicator using it.
+- In `hw_samples`, a column the NIC cannot read falls back to a related counter:
+  `local_ack_timeout_err` reports `to_retransmits` on ainic and thor2.
