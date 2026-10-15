@@ -10,8 +10,8 @@ myst:
 ## Read-only Go module
 
 Import `github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi`. Requires Linux,
-CGO, Go 1.20+, a C compiler, and the AMD SMI 27.1 public header and matching
-`libamd_smi` shared library. See the [setup guide](../how-to/amdsmi-go-lib.md)
+CGO, Go 1.20+, a C compiler, an AMD SMI 27.x public header (27.1 or later), and a
+27.x `libamd_smi` shared library at least as new. See the [setup guide](../how-to/amdsmi-go-lib.md)
 and the standalone guide installed at `share/amd_smi/go/README.md`. CPU, NIC,
 set/reset, all-profile configuration, and event APIs are not included.
 Other operating systems and `CGO_ENABLED=0` are unsupported; `linux && cgo`

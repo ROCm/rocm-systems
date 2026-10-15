@@ -9,7 +9,7 @@ legacy shim dependency is used. Native dependencies are still required.
 | Requirement | Value |
 | --- | --- |
 | Build | Linux, CGO, Go 1.20+, a C compiler |
-| Native dependency | AMD SMI 27.1 public development header and matching shared library |
+| Native dependency | AMD SMI 27.x public development header (27.1 or later) and a 27.x shared library at least as new |
 | Runtime GPU queries | Loaded AMD GPU driver and native device permissions; Go adds no root requirement |
 | Compilation and mock tests | No GPU or root required |
 | Module | `github.com/ROCm/rocm-systems/projects/amdsmi/go` |
@@ -17,7 +17,7 @@ legacy shim dependency is used. Native dependencies are still required.
 | Native library | `libamd_smi` (`-lamd_smi`), not `libamdsmi` |
 
 Go 1.20 is the language/toolchain floor declared by the Go module. The native
-AMD SMI 27.1 dependency is separate: `Init` checks the loaded library against
+AMD SMI 27.x dependency is separate: `Init` checks the loaded library against
 the compiled C header, not against the Go version. Both requirements apply.
 
 Other operating systems and `CGO_ENABLED=0` are unsupported. The production
@@ -62,7 +62,7 @@ queries; executing it does.
 ## Source pairing and consumption
 
 Pin an immutable published source revision containing this module and pair it
-with the matching native 27.1 release for compilation. Any v0 module tag must use
+with a native 27.x release (27.1 or later) for compilation. Any v0 module tag must use
 the monorepo form `projects/amdsmi/go/v0.X.Y`; this is a naming convention, not a
 claim that a tag exists. Native major 27 is not the Go module version.
 Remote acquisition requires a published revision containing the module;
