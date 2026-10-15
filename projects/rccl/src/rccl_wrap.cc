@@ -2003,7 +2003,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           return ncclSuccess;
         }
         // The entry gate now admits the widest tier, so VMM re-checks its own cap.
-        // On gfx1250 this tier runs only on rank-scaled comms (ddaVmmMaxPerRank[RS]).
+        // On gfx1250 SPX this tier runs only on rank-scaled comms (ddaVmmMaxPerRank[RS]); the
+        // DPX table's ddaVmmMax total sits under the LL tier except at 8 ranks.
         if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
             ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_VMM;

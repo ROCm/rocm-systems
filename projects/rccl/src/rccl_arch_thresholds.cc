@@ -237,29 +237,32 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
 };
 
 // gfx1250 in DPX mode (each GPU split into two partitions), picked by
-// RCCL_TUNING_PARTITION_MODE. A copy of the SPX table above until DPX gets its own
-// sweep; change entries here, not there, to tune DPX. The per-entry notes are the SPX
-// measurements and have not been re-measured on DPX.
+// RCCL_TUNING_PARTITION_MODE. Started as a copy of the SPX table above; change entries
+// here, not there, to tune DPX. Entries marked (DPX) were re-measured on DPX
+// nodes at 8/16/32 ranks (rccl-tests -n 10, median of 3 rounds); the other per-entry
+// notes are still the SPX measurements.
 // Index mapping: [Bcast=0, Reduce=1, AG=2, RS=3, AR=4, SR=5, Send=6, Recv=7, A2A=8]
 static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   // ddaLLMax: DDA LL tier ceiling per collective (fabric gfx1250 only).
   .ddaLLMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    128ULL*1024,         // [2] AllGather
+    512ULL*1024,         // [2] AllGather       -- LL beats LL128 1.4-1.6x to 512K at 8 ranks; the
+                         //                        crossover falls with rank count (512K at 16, ~128K
+                         //                        at 32), so this is a total, not rank-scaled (DPX)
     16ULL*1024*1024,     // [3] ReduceScatter
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
     0,                   // [7] Recv            -- not used
-    64ULL*1024,          // [8] AlltoAll
+    2ULL*1024*1024,      // [8] AlltoAll        -- LL beats Direct 1.2-4.3x to 2M at 8/16/32 (DPX)
   },
   // ddaLL128Max: DDA LL128 tier ceiling per collective.
   // RCCL_PARAM(DdaLL128, ...) defaults to 1 (enabled); set RCCL_DDA_LL128=0 to disable.
   .ddaLL128Max = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
+    64ULL*1024*1024,     // [2] AllGather       -- Ring beats it 1.1-1.4x at 128M-256M on 8/16/32 (DPX)
     2ULL*1024*1024,      // [3] ReduceScatter
     256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M (AICOMRCCL-2875); its scratch
                          //                        slot reaches 256M from 32 ranks, ~128M at 2-8, 240M at 16
@@ -274,7 +277,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- 0 = disabled
-    0,                   // [3] ReduceScatter   -- 0 = disabled
+    16ULL*1024*1024,     // [3] ReduceScatter   -- wins only at 16M on 8 ranks; the LL tier covers it
+                         //                        below 8 ranks and from 16 (DPX)
     16ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -396,8 +400,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaLLMaxPerRank = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    16ULL*1024,          // [2] AllGather       -- LL beats LL128 to 128K/256K/512K/1M at 8/16/32/64
-    256ULL*1024,         // [3] ReduceScatter   -- LL past 2M/4M/8M/16M at 8/16/32/64 trails LL128 up to 2x
+    0,                   // [2] AllGather       -- ddaLLMax total (DPX)
+    1ULL*1024*1024,      // [3] ReduceScatter   -- LL beats DDA Simple / Ring 1.1-1.5x to 8M/16M/32M
+                         //                        at 8/16/32 (DPX)
     1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -407,7 +412,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   .ddaLL128MaxPerRank = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    16ULL*1024*1024,     // [2] AllGather       -- 128M at 8 ranks, 256M (clipped) from 16
+    0,                   // [2] AllGather       -- ddaLL128Max total (DPX)
     512ULL*1024,         // [3] ReduceScatter   -- the LL128 slot reaches nRanks x 512K
     0,                   // [4] AllReduce       -- ddaLL128Max total
     0,                   // [5] SendRecv        -- not used
@@ -419,7 +424,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
     0,                   // [2] AllGather       -- VMM off
-    2ULL*1024*1024,      // [3] ReduceScatter   -- VMM beats Ring 1.2-1.9x to 16M/32M/64M/128M
+    0,                   // [3] ReduceScatter   -- ddaVmmMax total: Ring LL128 beats VMM 1.3-1.5x at
+                         //                        32M/64M on 16/32 ranks (DPX)
     0,                   // [4] AllReduce       -- ddaVmmMax total (see ddaArVmmFirst*)
     0,                   // [5] SendRecv        -- not used
     0,                   // [6] Send            -- not used
@@ -428,23 +434,29 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
   },
   .rankScaledMinRanks = 8,
   .rankScaledMaxBytes = 256ULL*1024*1024,
-  // From 32 ranks, AllReduce VMM beats LL two-shot / LL128 1.3-3.7x between 2M and nRanks x 512K.
+  // From 32 ranks, AllReduce VMM beats LL two-shot between 2M and nRanks x 256K; above that LL
+  // two-shot wins 1.2-1.3x (16M on 32 ranks) (DPX).
   .ddaArVmmFirstMinRanks = 32,
   .ddaArVmmFirstMinBytes = 2ULL*1024*1024,
-  .ddaArVmmFirstMaxPerRank = 512ULL*1024,
+  .ddaArVmmFirstMaxPerRank = 256ULL*1024,
   // VMM peaks at 128 / 128 / 64 / 32 blocks on 8 / 16 / 32 / 64 ranks.
   .ddaVmmBlockBudget = 2048,
   .ddaVmmMinBlocks = 32,
   .ddaVmmMaxBlocks = 128,
   // Ring / Tree crossovers, same sweep (AllReduce LL128: AICOMRCCL-2874/2875).
-  .arRingLL128MaxPerRank = 32ULL*1024*1024,       // Ring LL128 beats Simple to 256M/512M/1G/2G at 8-64
+  .arRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.1-1.3x from 256M/512M/1G
+                                                  // at 8/16/32 (DPX)
   .arTreeLL128Unlimited = true,                   // Tree LL128 beats Tree Simple 1.3-2.9x at 32M-16G
   .arTreeMaxPerRank = 1ULL*1024*1024,             // Tree beats Ring 1.4-2.3x to 8M/16M/32M/64M
-  .arTreeLLMaxPerRank = 32ULL*1024,               // Tree LL beats LL128 1.2-1.6x to 256K/512K/1M/2M
-  .agRingLL128MaxPerRank = 64ULL*1024*1024,       // Ring LL128 beats Simple to 512M/1G/2G/4G
-  .rsRingLL128MinPerRank = 512ULL*1024,           // Ring LL128 beats LL from 1M per rank
+  .arTreeLLMaxPerRank = 256ULL*1024,              // Tree LL beats LL128 1.3-2.1x to 2M/4M/8M at 8/16/32
+                                                  // (fp8, DPX)
+  .agRingLL128MaxPerRank = 16ULL*1024*1024,       // Ring Simple beats LL128 1.2-1.4x from 256M/1G/2G
+                                                  // at 8/16/32 (DPX)
+  .rsRingLL128MinPerRank = 1ULL*1024*1024,        // Ring LL beats LL128 1.1-1.2x to 1M per rank
+                                                  // (fp8 at 16/32 ranks, DPX)
   .rsRingLL128MaxPerRank = 8ULL*1024*1024,        // 2/4-byte types: Simple wins past 8M per rank
-  .rsRingLL128MaxPerRank1B = 32ULL*1024*1024,     // fp8: LL128 holds to 32M per rank
+  .rsRingLL128MaxPerRank1B = 16ULL*1024*1024,     // fp8: Ring Simple beats LL128 1.2-1.3x from 32M per
+                                                  // rank (DPX)
   .rsRingSimpleCappedMaxPerRank = 32ULL*1024*1024,// 128 channels beat 192 by 1.1-1.3x in (8M, 32M]
   .rsRingSimpleCappedChannels = 128,
   // CE-Scratch trails the DDA / Ring / Direct kernels it displaces between the DDA
