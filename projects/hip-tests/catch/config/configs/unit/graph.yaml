@@ -32,15 +32,24 @@ graph:
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_WithoutFlags:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_ElapsedTime:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_WithFlags:
     <<: *level_default
     tags: [node]
   Unit_hipGraphAddEventRecordNode_MultipleRun:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddEventRecordNode_Functional_TimingDisabled:
     <<: *level_default
@@ -84,8 +93,8 @@ graph:
   Unit_hipGraphAddMemcpyNode_Negative_Parameters:
     <<: *level_default
     disabled:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-245; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged"
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-245; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [node, image]
   Unit_hipGraphClone_Negative:
     <<: *level_default
@@ -119,18 +128,33 @@ graph:
     tags: [lifecycle, multigpu]
   Unit_hipGraphInstantiateWithFlags_FlagAutoFreeOnLaunch_check:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchInLoop:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchFillKernel:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_AutoFreeOnLaunchDoubleKernel:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithFlags_WithDefaultAndAutoFreeOnLaunch:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphInstantiateWithParams_Negative:
     <<: *level_default
@@ -235,6 +259,9 @@ graph:
     tags: [exec]
   Unit_hipGraphExecMemsetNodeSetParams_Negative_Updating_Non1D_Node:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphMemsetNodeSetParams_FlatAlloc_2D_Positive: *level_default
   Unit_hipGraphMemsetNodeSetParams_PitchedAlloc_OverExtent_Negative:
@@ -251,6 +278,9 @@ graph:
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsToSymbol_Negative_Parameters:
     <<: *level_default
@@ -266,12 +296,21 @@ graph:
     tags: [lifecycle]
   Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ClonedGrph:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphDestroyNode_Complx_ChkNumOfNodesNDep_ChldNode:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipGraphGetNodes_Positive_Functional:
     <<: *level_default
@@ -377,6 +416,9 @@ graph:
     tags: [node]
   Unit_hipGraphAddChildGraphNode_MultGraphsAsSingleGraph:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddChildGraphNode_CmplxNstGrph_MultGPU:
     <<: *level_default
@@ -548,6 +590,9 @@ graph:
     tags: [query]
   Unit_hipGraphMemsetNodeSetParams_Positive_Basic:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
   Unit_hipGraphMemsetNodeSetParams_Negative_Parameters:
     <<: *level_default
     tags: [node]
@@ -565,6 +610,9 @@ graph:
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Positive_Basic:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsFromSymbol_Negative_Parameters:
     <<: *level_default
@@ -817,6 +865,9 @@ graph:
     tags: [capture]
   Unit_hipStreamBeginCapture_captureComplexGraph:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [capture]
   Unit_hipStreamBeginCapture_captureEmptyStreams:
     <<: *level_default
@@ -856,6 +907,9 @@ graph:
     tags: [userobj]
   Unit_hipGraphUserObj_ClonedGraph:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [userobj]
   Unit_hipGraphUserObj_ManualGraph:
     <<: *level_default
@@ -1064,6 +1118,9 @@ graph:
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Positive_Basic:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphMemcpyNodeSetParamsFromSymbol_Negative_Parameters:
     <<: *level_default
@@ -1194,6 +1251,9 @@ graph:
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Positive_Basic:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphExecMemcpyNodeSetParamsToSymbol_Negative_Parameters:
     <<: *level_default
@@ -1233,6 +1293,9 @@ graph:
     tags: [exec]
   Unit_hipGraphExecChildGraphNodeSetParams_ChildTopology:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipStreamGetCaptureInfo_v2_Positive_Functional:
     <<: *level_default
@@ -1257,6 +1320,9 @@ graph:
     tags: [lifecycle]
   Unit_hipStreamSetCaptureDependencies_Positive_Functional:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [capture]
   Unit_hipStreamAddCaptureDependencies_Positive_Functional:
     <<: *level_default
@@ -1287,6 +1353,9 @@ graph:
     tags: [capture]
   Unit_hipLaunchHostFunc_CrossStreamDep_UncapturedFirstNode:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [capture]
   Unit_hipLaunchHostFunc_BlitDtoHHostCallbackVisibility:
     <<: *level_default
@@ -1440,12 +1509,18 @@ graph:
     tags: [exec]
   Unit_hipGraphUpload_Functional_multidevice_test:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphUpload_Functional_With_Priority_Stream:
     <<: *level_default
     tags: [exec]
   Unit_hipGraphUpload_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [exec]
   Unit_hipGraphCrossDeviceLaunch_CrossStreamDependencyOrdering:
     <<: *level_default
@@ -1462,8 +1537,8 @@ graph:
   Unit_hipGraphStreamPool_InstantiateFootprint:
     <<: *level_default
     disabled:
-      targets: [asan]
-      reason: "AIRUNTIME-2744 - stream allocation at instantiate, so the footprint is unmeasurable there; asan quarantines freed gpu allocations, so hipMemGetInfo does not immediately report memory released by hipGraphExecDestroy; needs to be re-triaged on asan"
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2744 - stream allocation at instantiate, so the footprint is unmeasurable there; asan quarantines freed gpu allocations, so hipMemGetInfo does not immediately report memory released by hipGraphExecDestroy; needs to be re-triaged on asan. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [exec]
   Unit_hipGraphSegmentOrdering_SameLevelPeers:
     <<: *level_2
@@ -1617,12 +1692,18 @@ graph:
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_MultiDevice:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_2:
     <<: *level_default
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Functional_3:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query]
   Unit_hipGraphMem_Alloc_Free_NodeGetParams_Negative:
     <<: *level_default
@@ -1641,6 +1722,9 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Positive_FreeInGraph:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Positive_FreeOutsideStream:
     <<: *level_default
@@ -1683,6 +1767,9 @@ graph:
     tags: [node]
   Unit_hipGraphAddMemFreeNode_Negative_NotSupported:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAddMemFreeNode_Functional:
     <<: *level_default
@@ -1777,21 +1864,39 @@ graph:
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_2D:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocPitch_1D:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_2D:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc3D_1D:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMalloc_1D:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipDrvGraphAddMemsetNode_hipMallocManaged:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node, managed_memory]
   Unit_hipDrvGraphAddMemcpyNode_Negative:
     <<: *level_default
@@ -1845,6 +1950,9 @@ graph:
     tags: [node]
   Unit_hipGraphAllocNodeMemReuse_MallocWithoutFree_NoReuse:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [node]
   Unit_hipGraphAllocNodeMemReuse_DifferentStreams_Reuse:
     <<: *level_default

@@ -83,6 +83,9 @@ device:
     tags: [query, P0]
   Unit_hipDeviceGetPCIBusId_Negative_PartialFill:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query, P0]
   Unit_hipDeviceGetPCIBusId_NegTst:
     <<: *level_default
@@ -170,6 +173,9 @@ device:
     tags: [config, P0]
   Unit_hipGetDeviceFlags_Positive_Context:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [config, P0]
   Unit_hipGetSetDeviceFlags_InvalidFlag:
     <<: *level_default
@@ -191,6 +197,9 @@ device:
     tags: [query, P0]
   Unit_hipDeviceGetUuid_Positive:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query, P0]
   Unit_hipDeviceGetUuid_Negative:
     <<: *level_default
@@ -317,9 +326,15 @@ device:
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Positive_Basic:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Positive_Threaded:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [config, P0]
   Unit_hipDeviceGetSharedMemConfig_Negative_Parameters:
     <<: *level_default
@@ -359,6 +374,9 @@ device:
     tags: [init, smoke, P0]
   Unit_hipInit_Negative:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [init, P0]
   Unit_hipInitDevice_Positive_Basic:
     <<: *level_default

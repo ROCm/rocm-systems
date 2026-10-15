@@ -12,6 +12,9 @@ executionctx:
     <<: *level_default
   Unit_hipExecutionCtxStreamDestroy_Negative:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
   Unit_hipExecutionCtxStreamDetached_StreamApis_Negative:
     <<: *level_default
   Unit_hipExecutionCtxStreamDetached_EventRecord_Negative:
@@ -59,8 +62,8 @@ executionctx:
   Unit_hipExecutionCtxRecordWaitEvent_Sanity:
     <<: *level_default
     disabled:
-      targets: [amd_linux]
-      reason: "AIRUNTIME-2744 - fails on amd_linux. Needs re-triage on amd_linux."
+      targets: [amd_windows, amd_linux]
+      reason: "AIRUNTIME-2744 - fails on amd_linux. Needs re-triage on amd_linux. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
   Unit_hipExecutionCtxRecordEventFunctional:
     <<: *level_default
   Unit_hipExecutionCtxRecordWait_Blocking:

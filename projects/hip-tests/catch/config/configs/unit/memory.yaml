@@ -158,12 +158,21 @@ memory:
     tags: [transfer]
   Unit_hipMemcpy2D_H2D_D2D_D2H:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [P1]
   Unit_hipMemcpy2D_H2D_D2D_D2H_WithOffset:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [P1]
   Unit_hipMemcpy2D_H2D_D2D_D2H_Managed_WithOffset:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [P1, managed_memory]
   Unit_hipMemcpy2D_multiDevice_Basic_Size_Test:
     <<: *level_default
@@ -185,6 +194,9 @@ memory:
     tags: [P1]
   Unit_hipMemcpy2DAsync_Host_N_PinnedMem:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [P1]
   Unit_hipMemcpy2DAsync_multiDevice_StreamOnDiffDevice:
     <<: *level_default
@@ -426,6 +438,9 @@ memory:
     tags: [query]
   Unit_hipHostGetDevicePointer_Negative:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query, P1]
   Unit_hipHostGetDevicePointer_UseCase:
     <<: *level_default
@@ -551,6 +566,9 @@ memory:
     tags: [memset, P1]
   Unit_hipMemset3DAsync_capturehipMemset3DAsync:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memset, P1]
   Unit_hipMemset3D_Capture:
     <<: *level_default
@@ -565,6 +583,9 @@ memory:
     tags: [memset, P1]
   Unit_hipMemset2DAsync_capturehipMemset2DAsync:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memset, P1]
   Unit_hipMemset2D_Capture:
     <<: *level_default
@@ -622,8 +643,8 @@ memory:
   Unit_hipMemPrefetchAsync_NonPageSz:
     <<: *level_default
     disabled:
-      targets: [amd_linux]
-      reason: "AIRUNTIME-2744 - temporarily disabled due to a change in API behavior; needs to be re-triaged on amd_linux."
+      targets: [amd_windows, amd_linux]
+      reason: "AIRUNTIME-2744 - temporarily disabled due to a change in API behavior; needs to be re-triaged on amd_linux. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [query, P1, managed_memory]
   Unit_hipMemAdvise_MmapMem:
     <<: *level_default
@@ -960,8 +981,8 @@ memory:
   Unit_hipMemPoolExportToShareableHandle_SameProc:
     <<: *level_default
     disabled:
-      targets: [amd_linux]
-      reason: "AIRUNTIME-2744 - needs to be re-triaged on amd_linux."
+      targets: [amd_windows, amd_linux]
+      reason: "AIRUNTIME-2744 - needs to be re-triaged on amd_linux. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [alloc, P1]
   Unit_hipMemPoolExportToShareableHandle_ChldUseHdl:
     <<: *level_default
@@ -1047,8 +1068,8 @@ memory:
   Unit_hipMemVmm_Basic:
     <<: *level_default
     disabled:
-      targets: [amd_linux]
-      reason: "AIRUNTIME-2291 - temporarily disabled because it hangs in CI 942; hipMemMap returns an invalid error (SWDEV-396616); re-triage on amd_linux is still pending."
+      targets: [amd_windows, amd_linux]
+      reason: "AIRUNTIME-2291 - temporarily disabled because it hangs in CI 942; hipMemMap returns an invalid error (SWDEV-396616); re-triage on amd_linux is still pending. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [virtualMemoryManagement, P1]
   Unit_hipMemVmm_Uncached:
     <<: *level_default
@@ -1186,15 +1207,27 @@ memory:
     tags: [stream, P1]
   Unit_hipMemPoolApi_BasicAlloc:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMemPoolApi_BasicTrim:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMemPoolApi_BasicReuse:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMemPoolApi_Opportunistic:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc]
   Unit_hipMemPoolApi_Default:
     <<: *level_default
@@ -1237,6 +1270,9 @@ memory:
     tags: [alloc, multigpu, P1]
   Unit_hipMemPoolSetAccess_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMemPoolSetAccess_SetAccess:
     <<: *level_default
@@ -1246,6 +1282,9 @@ memory:
     tags: [alloc, P1]
   Unit_hipMemPoolGetAccess_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMemPoolGetAccess_SetGet:
     <<: *level_default
@@ -1264,15 +1303,24 @@ memory:
     tags: [alloc]
   Unit_hipMemPoolSetAttribute_EventDependencies:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMemPoolSetAttribute_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMemPoolSetAttribute_ResetMemHighAttr:
     <<: *level_default
     tags: [alloc, P1]
   Unit_hipMemPoolGetAttribute_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMemPoolGetAttribute_SetGet:
     <<: *level_default
@@ -1324,6 +1372,9 @@ memory:
     tags: [alloc, multigpu, P1]
   Unit_hipMemPoolTrimTo_Multithreaded:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_Basic_OneAlloc:
     <<: *level_default
@@ -1367,14 +1418,14 @@ memory:
   Unit_hipMallocFromPoolAsync_MThread_MaxThresh:
     <<: *level_default
     disabled:
-      targets: [asan]
-      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged on asan."
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged on asan. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_DefaultMempool:
     <<: *level_default
     disabled:
-      targets: [asan]
-      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged on asan."
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2744 - test does not play well with ASAN; needs to be re-triaged on asan. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [alloc, P1]
   Unit_hipMallocFromPoolAsync_MThread_CommonMpool_MaxThresh:
     <<: *level_default
@@ -1567,6 +1618,9 @@ memory:
     tags: [transfer, P1]
   Unit_hipMemcpyAsync_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [transfer, P1]
   Unit_hipMemcpyAsync_Capture:
     <<: *level_default
@@ -1591,6 +1645,9 @@ memory:
     tags: [transfer, P1]
   Unit_hipMemcpyDtoHAsync_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [transfer, P1]
   Unit_hipMemcpyHtoDAsync_Positive_Basic:
     <<: *level_default
@@ -1600,6 +1657,9 @@ memory:
     tags: [transfer, P1]
   Unit_hipMemcpyHtoDAsync_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [transfer, P1]
   Unit_hipMemcpyDtoDAsync_Positive_Basic:
     <<: *level_default
@@ -1609,6 +1669,9 @@ memory:
     tags: [transfer, P1]
   Unit_hipMemcpyDtoDAsync_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [transfer, P1]
   Unit_hipMemcpyDtoHAsync_Capture:
     <<: *level_default
@@ -1694,8 +1757,8 @@ memory:
   Unit_hipMalloc_Allocate90PercentOfDeviceMemory:
     <<: *level_default
     disabled:
-      targets: [asan]
-      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151; huge memory usage, no point enabling it with ASAN; needs to be re-triaged on asan."
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2744 - Rock window failures on gfx1151; huge memory usage, no point enabling it with ASAN; needs to be re-triaged on asan. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [alloc, P0]
   Unit_hipMalloc_Positive_APU_LargeAllocSpill:
     <<: *level_default
@@ -1706,15 +1769,24 @@ memory:
   Unit_hipMalloc_AllocateMoreThanTotalVRAM: *level_default
   Unit_hipMalloc3D_ValidatePitch:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P0]
   Unit_hipMemAllocPitch_ValidatePitch:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMallocPitch_ValidatePitch:
     <<: *level_default
     tags: [alloc, P0]
   Unit_hipMalloc3D_Negative:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMallocPitch_Negative:
     <<: *level_default
@@ -1863,8 +1935,8 @@ memory:
   Unit_hipDrvMemcpy3D_Positive_Array:
     <<: *level_default
     disabled:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-238; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged."
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-238; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3D_Negative_Parameters:
     <<: *level_default
@@ -1908,8 +1980,8 @@ memory:
   Unit_hipDrvMemcpy3DAsync_Positive_Array:
     <<: *level_default
     disabled:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-238; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged."
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2744 - disabled due to defect EXSWHTEC-238; gfx1201 (amd_wsl) self-skips because texture/image is not supported on this device; needs to be re-triaged. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [transfer, image, P1]
   Unit_hipDrvMemcpy3DAsync_Negative_Parameters:
     <<: *level_default
@@ -2248,6 +2320,9 @@ memory:
     tags: [query, P1, managed_memory]
   Unit_hipFreeAsync_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipFreeAsync_capturehipFreeAsync:
     <<: *level_default
@@ -2350,6 +2425,9 @@ memory:
     tags: [query, P1, managed_memory]
   Unit_hipMemGetAddressRange_Positive:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [query, P1]
   Unit_hipMemGetAddressRange_Negative:
     <<: *level_default
@@ -2383,6 +2461,9 @@ memory:
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_Negative_InvalidFlags:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipMallocMipmappedArray_Negative_InvalidFormat:
     <<: *level_default
@@ -2425,6 +2506,9 @@ memory:
     tags: [alloc, P1]
   Unit_hipGetMipmappedArrayLevel_Negative:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipFreeMipmappedArrayImplicitSyncArray:
     <<: *level_default
@@ -2434,6 +2518,9 @@ memory:
     tags: [alloc, P1]
   Unit_hipFreeMipmappedArrayMultiTArray:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [P1]
   Unit_hipFreeMipmappedArray_NoLeakAfterGetLevel:
     <<: *level_default
@@ -2530,12 +2617,21 @@ memory:
     tags: [alloc, P1]
   Unit_hipHostAlloc_Negative_NonCoherent:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipHostAlloc_Negative_Coherent:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipHostAlloc_Negative_NumaUser:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [alloc, P1]
   Unit_hipHostAlloc_ArgValidation:
     <<: *level_default

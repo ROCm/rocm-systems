@@ -30,11 +30,14 @@ streamperthread:
   Unit_hipStreamPerThread_MultiThread:
     <<: *level_default
     disabled:
-      targets: [amd_linux, nvidia_linux, nvidia_windows]
-      reason: "AIRUNTIME-2744 - test does not reflect a valid use case (SWDEV-569454) on amd_linux, nvidia_linux, and nvidia_windows. Needs re-triage on amd_linux, nvidia_linux, nvidia_windows."
+      targets: [amd_windows, amd_linux, nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - test does not reflect a valid use case (SWDEV-569454) on amd_linux, nvidia_linux, and nvidia_windows. Needs re-triage on amd_linux, nvidia_linux, nvidia_windows. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [stream]
   Unit_hipStreamPerThread_DeviceReset_1:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [stream]
   Unit_hipStreamPerThread_DeviceReset_2:
     <<: *level_default

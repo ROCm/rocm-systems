@@ -11,6 +11,9 @@ kernel:
     tags: [attributes, P1]
   Unit_hipDynamicShared:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory, P0]
   Unit_hipDynamicShared2:
     <<: *level_default

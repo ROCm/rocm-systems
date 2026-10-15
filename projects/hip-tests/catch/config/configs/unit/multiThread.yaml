@@ -2,6 +2,9 @@
 multiThread:
   Unit_hipMemsetAsync_QueueJobsMultithreaded:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory, P1]
   Unit_hipMultiThreadDevice_Streams:
     <<: *level_default
@@ -17,6 +20,9 @@ multiThread:
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadDevice_NearZero:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [device_mgmt, P1]
   Unit_hipMultiThreadStreams1_AsyncSync:
     <<: *level_default

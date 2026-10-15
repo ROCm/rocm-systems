@@ -41,33 +41,60 @@ deviceLib:
     tags: [synchronization, P0]
   Unit_deviceAllocation_Malloc_PerThread_PrimitiveDataType:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory, P0]
   Unit_deviceAllocation_ComplexDataType:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory]
   Unit_deviceAllocation_CodeObjects:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory]
   Unit_deviceAllocation_Malloc_PerThread_Graph:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory, P0]
   Unit_deviceAllocation_New_PerThread_Graph:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory, P0]
   Unit_deviceAllocation_DeviceFunc:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory]
   Unit_deviceAllocation_VirtualFunction:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory, P0]
   Unit_deviceAllocation_SingKernels_MulThreads:
     <<: *level_default
     tags: [memory]
   Unit_deviceAllocation_Malloc_MulCodeObj:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory, P0]
   Unit_deviceAllocation_New_MulCodeObj:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [memory, P0]
   Unit_deviceAllocationFollowedByDeviceReset:
     <<: *level_default
@@ -209,6 +236,9 @@ deviceLib:
     tags: [types, P0]
   Unit_hipVectorTypes_test_on_device:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [types, P0]
   Unit_hipTestHalf:
     <<: *level_default

@@ -17,6 +17,9 @@ executionControl:
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [kernel, launch]
   Unit_hipLaunchKernel_Verify_Capture: *level_default
   Unit_hipLaunchCooperativeKernel_Positive_Basic:
@@ -56,8 +59,8 @@ executionControl:
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_Parameters:
     <<: *level_default
     disabled:
-      targets: [amd_linux, amd_wsl]
-      reason: "AIRUNTIME-2892 - needs to be further investigated; disabled due to defect EXSWHTEC-244. gfx1201 (amd_wsl) FAIL: localError == hipErrorInvalidValue -> 101 == 1. Needs re-triage on amd_linux."
+      targets: [amd_windows, amd_linux, amd_wsl]
+      reason: "AIRUNTIME-2892 - needs to be further investigated; disabled due to defect EXSWHTEC-244. gfx1201 (amd_wsl) FAIL: localError == hipErrorInvalidValue -> 101 == 1. Needs re-triage on amd_linux. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [kernel, launch]
   Unit_hipExtLaunchMultiKernelMultiDevice_Negative_MultiKernelSameDevice:
     <<: *level_default
@@ -83,9 +86,15 @@ executionControl:
     tags: [kernel]
   Unit_hipFuncSetCacheConfig_Positive_Basic:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Negative_Parameters:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [attributes, kernel]
   Unit_hipFuncSetCacheConfig_Positive_VerifyCarveoutMapping:
     <<: *level_default

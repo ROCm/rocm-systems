@@ -81,6 +81,9 @@ stream:
     tags: [lifecycle, P0]
   Unit_hipStreamCreateWithFlags_DefaultStreamInteraction:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_FunctionalForAllPriorities:
     <<: *level_default
@@ -94,8 +97,8 @@ stream:
   Unit_hipStreamCreateWithPriority_MulthreadNonblockingflag:
     <<: *level_default
     disabled:
-      targets: [asan]
-      reason: "AIRUNTIME-2744 - SWDEV-394199: does not play well with asan; needs to be re-triaged on asan"
+      targets: [amd_windows, asan]
+      reason: "AIRUNTIME-2744 - SWDEV-394199: does not play well with asan; needs to be re-triaged on asan. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_NegTst:
     <<: *level_default
@@ -105,6 +108,9 @@ stream:
     tags: [lifecycle, P1]
   Unit_hipStreamCreateWithPriority_VerifyKernelResults:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [lifecycle]
   Unit_hipStreamCreateWithPriority_TestMultipleStreamWithPriority:
     <<: *level_default
@@ -189,12 +195,18 @@ stream:
     tags: [synchronization, smoke, P0]
   Unit_hipStreamSynchronize_NullStreamSynchronization:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_SynchronizeStreamAndQueryNullStream:
     <<: *level_default
     tags: [synchronization, P0]
   Unit_hipStreamSynchronize_NullStreamAndStreamPerThread:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, P1]
   Unit_hipStreamKilledWorkerThread:
     <<: *level_default
@@ -207,6 +219,9 @@ stream:
     tags: [synchronization, P0]
   Unit_hipStreamQuery_WithFinishedWork:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, smoke, P0]
   Unit_hipStreamQuery_SubmitWorkOnStreamAndQueryNullStream:
     <<: *level_default
@@ -226,8 +241,8 @@ stream:
   Unit_hipStreamAddCallback_StrmSyncTiming:
     <<: *level_default
     disabled:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2892 - amd_wsl disabled due to defect EXSWHTEC-203; gfx1201 (amd_wsl) flaky, passed then failed within 10 runs; needs to be re-triaged"
+      targets: [amd_windows, amd_wsl]
+      reason: "AIRUNTIME-2892 - amd_wsl disabled due to defect EXSWHTEC-203; gfx1201 (amd_wsl) flaky, passed then failed within 10 runs; needs to be re-triaged. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_basic:
     <<: *level_default
@@ -246,6 +261,9 @@ stream:
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_KernelHost:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_multidevice:
     <<: *level_default
@@ -258,6 +276,9 @@ stream:
     tags: [callback, P1]
   Unit_hipLaunchHostFunc_Graph:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [callback, P1]
   Unit_hipStreamGetDevice_Negative:
     <<: *level_default
@@ -372,6 +393,9 @@ stream:
     tags: [synchronization, smoke, P0]
   Unit_hipStreamWaitEvent_DifferentStreams:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, P1]
   Unit_hipStreamGetFlags_spt_Basic:
     <<: *level_default
@@ -396,12 +420,21 @@ stream:
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamQuery_spt_WithFinishedWork:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamQuery_spt_NegativeCases:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamQuery_spt_WithPendingWork:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_EmptyStream:
     <<: *level_default
@@ -414,6 +447,9 @@ stream:
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamSynchronize_spt_SynchronizeStreamAndQueryNullStream:
     <<: *level_default
+    disabled:
+      targets: [amd_windows]
+      reason: "AIRUNTIME-2892 - test is passing but we are hitting the 120min total timeout with the additional tests enabled. Improve test runtimes or increase total timeout in TheRock."
     tags: [synchronization, streamperthread, P1]
   Unit_hipStreamBatchMemOp_Negative_Tests:
     <<: *level_default
@@ -421,8 +457,8 @@ stream:
   Unit_hipStreamBatchMemOp_SequentialOrdering:
     <<: *level_default
     disabled:
-      targets: [amd_wsl, nvidia]
-      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because the variant is skipped; needs to be re-triaged on nvidia"
+      targets: [amd_windows, amd_wsl, nvidia]
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips because the variant is skipped; needs to be re-triaged on nvidia. amd_windows re-disabled (AIRUNTIME-2892): test passes but the full suite exceeds the 120min CI timeout with these tests enabled; improve test runtimes or raise the TheRock total timeout."
     tags: [synchronization, memory]
   Unit_hipStreamBatchMemOp_SequentialOrdering_MultiGPU:
     <<: *level_default
