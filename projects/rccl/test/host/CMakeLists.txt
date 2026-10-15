@@ -389,7 +389,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroProxy -- src/proxy.cc. Own binary: it compiles the real proxy.cc, which proxy_fakes.cc fakes for the other binaries.
+  # rccl-UnitTestsMicroProxy -- src/proxy.cc. Own binary: it compiles the real proxy.cc, which
+  # proxy_fakes.cc fakes for the other binaries.
   set(TEST_MICRO_PROXY_SOURCE_FILES
     proxy-test.cc
     ../common/main_altrsmi.cpp
