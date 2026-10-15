@@ -356,20 +356,28 @@ class Roofline:
         self,
         level_ai: dict[str, float],
         ceiling_data: dict[str, Any],
-        performance: float,
         compute_peaks: list[tuple[str, float]],
     ) -> tuple[str, str, Optional[float]]:
+        """Name the specific binding roof for a kernel: the roof with the lowest
+        achievable performance at the kernel's operating point. The compute
+        candidate is the envelope cap -- the tallest compute roof drawn on the
+        figure -- so the limiter agrees with the drawn roof and with the
+        percent of roofline the tooltip reports.
+
+        Every known roof stays a candidate even when the kernel has already
+        exceeded it: dropping exceeded roofs would re-label a kernel against
+        whichever weaker roof survives, and a kernel that outruns every known
+        roof would report "Unknown" instead of its nearest one at >100%.
+        """
         candidates: list[tuple[float, str, str]] = []
         for level_name, ai_value in level_ai.items():
             bandwidth = self._peak_value(ceiling_data, level_name.lower())
             if bandwidth and ai_value > 0:
-                roof = bandwidth * ai_value
-                if roof >= performance:
-                    candidates.append((roof, level_name, "Memory"))
+                candidates.append((bandwidth * ai_value, level_name, "Memory"))
 
-        for label, peak in compute_peaks:
-            if peak >= performance:
-                candidates.append((peak, label, "Compute"))
+        compute_cap, compute_cap_label = self._envelope_compute_cap(compute_peaks)
+        if compute_cap != float("inf"):
+            candidates.append((compute_cap, compute_cap_label, "Compute"))
 
         if not candidates:
             return "Unknown", "Unknown", None
@@ -412,11 +420,9 @@ class Roofline:
                 for values in (kernel_colors, counts, kernel_time, kernel_pct_runtime)
             )
             limiter, limiter_category, roof_value = self._determine_kernel_limiter(
-                level_ai, ceiling_data, points[0]["perf"], compute_peaks
+                level_ai, ceiling_data, compute_peaks
             )
-            limiting_peak = self._resolve_limiting_peak(
-                limiter, limiter_category, points
-            )
+            limiting_peak = self._resolve_limiting_peak(limiter_category, limiter)
             self._attach_kernel_hover_cells(points, roof_value, bandwidth_html)
 
             traces.append(
@@ -458,12 +464,16 @@ class Roofline:
         return traces, kernels_model
 
     @staticmethod
-    def _resolve_limiting_peak(
-        limiter: str, limiter_category: str, points: list[dict[str, Any]]
-    ) -> str:
-        if limiter_category == "Memory":
-            return limiter
-        return min(points, key=lambda point: point["ai"])["peak"]
+    def _resolve_limiting_peak(limiter_category: str, limiter: str) -> Optional[str]:
+        """The one memory level 'Limited by' should isolate for this kernel,
+        or None when no single level explains it.
+
+        Only a Memory-category limiter names a plotted cache level directly.
+        A Compute-bound or Unknown kernel has no memory level singled out by
+        the roofline itself, so the client falls back to showing every point
+        instead of guessing one from the kernel's own arithmetic intensities.
+        """
+        return limiter if limiter_category == "Memory" else None
 
     @staticmethod
     def _attach_kernel_hover_cells(

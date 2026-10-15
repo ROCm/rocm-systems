@@ -298,6 +298,11 @@
       return points;
     }
     if (peak === LIMITING_PEAK_VALUE) {
+      // Compute-bound and Unknown kernels carry no limitingPeak: no single
+      // memory level explains them, so show every point instead of a guess.
+      if (!kernel.limitingPeak) {
+        return points;
+      }
       return points.filter(function (point) {
         return point.peak === kernel.limitingPeak;
       });

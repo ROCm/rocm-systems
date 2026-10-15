@@ -624,7 +624,7 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 Interactive Roofline HTML:
 
-* Use the *AI axis* selector to choose one memory level per kernel, *All peaks* to plot every level at once, or *Limited by* to show each kernel's limiting memory-level point (falling back to its leftmost point when no memory-level limiter is available).
+* Use the *AI axis* selector to choose one memory level per kernel, *All peaks* to plot every level at once, or *Limited by* to show each kernel's limiting memory-level point (falling back to every point when the kernel has no single limiting memory level).
 Isolating one kernel shows it across all available memory levels.
 * Use the *Precision* selector to choose one or more arithmetic precision's peak roofline to display on the plot.
 * Use the *Kernels* and *Bandwidth rooflines* panels to isolate, multi-select, or reset plotted items. The *Runtime shown* slider filters to the heaviest kernels that reach the selected GPU resident-time cutoff.

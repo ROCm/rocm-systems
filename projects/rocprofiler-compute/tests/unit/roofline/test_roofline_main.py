@@ -181,7 +181,13 @@ def pct_roof(kernel: dict, point_index: int = 0) -> float:
     return float(kernel["points"][point_index]["hoverCells"][1])
 
 
-def test_kernel_traces_stacked_compute_peaks__limiter_names_binding_one() -> None:
+def test_kernel_traces_stacked_compute_peaks__limiter_uses_the_envelope_cap() -> None:
+    """The compute candidate is the envelope cap -- the tallest compute roof
+    drawn across every stacked datatype, which is also the cap the bandwidth
+    diagonals are clipped to -- not whichever individual peak the kernel
+    happens to still be under. HBM's own roof (150,000) sits below that
+    envelope cap (180,000, FP16 MFMA), so HBM binds even though FP32 MFMA
+    (90,000) is a smaller number than HBM's roof."""
     ai_data = {"ai_hbm": [[100.0], [50000.0]], "kernelNames": ["kA"]}
 
     traces, _ = kernel_traces(
@@ -190,16 +196,22 @@ def test_kernel_traces_stacked_compute_peaks__limiter_names_binding_one() -> Non
         compute_peaks=[("FP32 MFMA", 90000.0), ("FP16 MFMA", 180000.0)],
     )
 
-    assert "Limited by Compute: FP32 MFMA" in traces[0].hovertemplate
+    assert "Limited by Memory: HBM" in traces[0].hovertemplate
 
 
-def test_kernel_traces_exceeded_memory_roof__falls_back_to_compute_peak() -> None:
-    traces, _ = kernel_traces(
+def test_kernel_traces_exceeded_memory_roof__still_scored_against_it() -> None:
+    """A kernel that outruns its own memory roof stays scored against that
+    roof instead of being quietly re-labeled against a compute peak it
+    hasn't reached: the roof it has exceeded is still the lowest known
+    ceiling, so it is still the one reported, and the percent of roofline
+    crosses 100% instead of hiding the overrun."""
+    traces, model = kernel_traces(
         make_roofline(["FP32"]),
         {"ai_hbm": [[1.0], [5000.0]], "kernelNames": ["kA"]},
     )
 
-    assert "Limited by Compute: FP32 VALU" in traces[0].hovertemplate
+    assert "Limited by Memory: HBM" in traces[0].hovertemplate
+    assert pct_roof(model[0]) > 100.0
 
 
 def test_kernel_traces_name_the_roof_that_binds() -> None:
@@ -244,12 +256,16 @@ def test_kernel_traces_expose_the_limiting_peak_for_a_memory_bound_kernel() -> N
     assert model[0]["limitingPeak"] == "HBM"
 
 
-def test_kernel_traces_expose_the_leftmost_peak_for_a_compute_bound_kernel() -> None:
+def test_kernel_traces_expose_no_single_limiting_peak_for_a_compute_bound_kernel() -> (
+    None
+):
     """A compute-bound kernel's limiter names a datatype/op-path (e.g. 'FP32
-    VALU'), not a cache level, so no point.peak matches it directly.
-    limitingPeak falls back to the peak of the kernel's own lowest-AI point
-    (L2's AI of 0.5 sits left of HBM's AI of 2.0) so the client still has a
-    single point to show without guessing which one."""
+    VALU'), not a cache level, so no point.peak matches it directly. There is
+    no single memory level the roofline singles out as this kernel's
+    bottleneck, so limitingPeak is None: a guess from the kernel's own
+    arithmetic intensities (e.g. always picking the leftmost point) would be
+    arbitrary, since arithmetic intensity increases with memory traffic, not
+    with how compute-bound the kernel is."""
     _, model = kernel_traces(
         make_roofline(["FP32"]),
         {
@@ -261,14 +277,15 @@ def test_kernel_traces_expose_the_leftmost_peak_for_a_compute_bound_kernel() -> 
         ceiling_data={},
     )
 
-    assert model[0]["limitingPeak"] == "L2"
+    assert model[0]["limitingPeak"] is None
 
 
-def test_kernel_traces_expose_the_leftmost_peak_when_the_limiter_is_unknown() -> None:
+def test_kernel_traces_expose_no_single_limiting_peak_when_the_limiter_is_unknown() -> (
+    None
+):
     """No ceiling data and no compute peaks leaves no candidate roof at all, so
     the limiter falls back to Unknown -- and, same as the compute-bound case,
-    limitingPeak falls back to the kernel's own lowest-AI point (L2 at 0.5,
-    left of HBM's 2.0)."""
+    limitingPeak is None rather than an arbitrary point."""
     traces, model = kernel_traces(
         make_roofline(["FP32"]),
         {
@@ -282,7 +299,7 @@ def test_kernel_traces_expose_the_leftmost_peak_when_the_limiter_is_unknown() ->
     )
 
     assert "Limited by Unknown: Unknown" in traces[0].hovertemplate
-    assert model[0]["limitingPeak"] == "L2"
+    assert model[0]["limitingPeak"] is None
 
 
 def test_kernel_traces_differing_bandwidths__points_share_binding_roof_pct() -> None:
