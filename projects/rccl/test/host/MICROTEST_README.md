@@ -310,10 +310,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
-- **`rccl-UnitTestsMicroLinux`** — `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`)
-  and `misc/socket.cc` (`SOCKET_CC_PATH`, from `socket-test.cc`); suites `Linux*`,
-  `Socket*`. Its own binary because it runs the real `os/linux.cc` the shared fakes
-  stub, on real sockets, files and shared memory. See `test_categories_micro_linux.yaml`.
+- **`rccl-UnitTestsMicroLinux`** — `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
+  plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc` and `misc/socket.cc`, one test
+  TU each; suites `Linux*`, `Socket*`. Its own binary because it runs the real
+  `os/linux.cc` the shared fakes stub, on real sockets, files and shared memory. See
+  `test_categories_micro_linux.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -874,7 +875,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
-./build/rccl-UnitTestsMicroLinux              # src/os/linux.cc, src/misc/socket.cc tests
+./build/rccl-UnitTestsMicroLinux              # src/os/linux*.cc, src/misc/socket.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests
