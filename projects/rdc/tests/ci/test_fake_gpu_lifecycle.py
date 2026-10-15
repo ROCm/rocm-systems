@@ -3,13 +3,18 @@
 Runs like test_fake_gpu.py (same environment variables and helpers).
 """
 
+import contextlib
+import fcntl
 import os
 import pwd
 import shutil
+import signal
 import socket
 import stat
 import subprocess
 import sys
+import tempfile
+import time
 
 import pytest
 
@@ -21,6 +26,7 @@ from test_fake_gpu import (  # noqa: F401 (tools is a fixture)
     Rdcd,
     _first_file,
     _free_port,
+    _listening,
     _missing,
     _rdcd_lock_problem,
     tools,
@@ -84,8 +90,9 @@ def _run(cmd, env, what):
 
 def test_rdcd_exits_with_an_error_when_its_port_is_in_use(tools, tmp_path):
     d = Rdcd(tools, tmp_path)
-    # rdcd checks both lock files; it closed fd -1 for a missing one and said so.
-    a_lock_file_is_missing = not (os.path.exists(ROOT_LOCK) and os.path.exists(USER_LOCK))
+    # rdcd closed fd -1 for a missing lock file it checked, and said so. Only a non-root rdcd
+    # checks a lock file it does not take (the root one).
+    a_lock_file_is_missing = os.geteuid() != 0 and not os.path.exists(ROOT_LOCK)
     # gRPC binds with SO_REUSEPORT, which works only if every socket on the port
     # sets it; this one does not, so rdcd cannot bind.
     with socket.socket(socket.AF_INET, socket.SOCK_STREAM) as busy:
@@ -126,13 +133,10 @@ def test_rdcd_stops_with_a_config_set(tools, tmp_path):
     assert "RDC server successfully shut down." in d.output(), d.output()
 
 
-@pytest.mark.parametrize(
-    "mode, message",
-    [(0o644, f"{USER_LOCK} owned by user: root"), (0o600, f"Failed to open lock file {USER_LOCK}")],
-    ids=["readable", "unreadable"],
-)
-def test_rdcd_reports_a_lock_file_of_another_user(tools, tmp_path, mode, message):
+@pytest.mark.parametrize("mode", [0o644, 0o600], ids=["readable", "unreadable"])
+def test_rdcd_reports_a_lock_file_of_another_user(tools, tmp_path, mode):
     # rdcd run as nobody checks root's lock, then opens its own: USER_LOCK, here root's.
+    message = f"{USER_LOCK} owned by user: root"
     if os.geteuid() != 0:
         pytest.skip("needs root, to run rdcd as another user against root's lock file")
     setpriv = shutil.which("setpriv")
@@ -142,8 +146,6 @@ def test_rdcd_reports_a_lock_file_of_another_user(tools, tmp_path, mode, message
         nobody = None
     if setpriv is None or nobody is None:
         pytest.skip("needs setpriv and the user nobody")
-    if os.path.exists(ROOT_LOCK) and not os.stat(ROOT_LOCK).st_mode & stat.S_IROTH:
-        pytest.skip(f"{ROOT_LOCK} is not readable by other users")
     for lock in (ROOT_LOCK, USER_LOCK):
         if _rdcd_lock_problem(lock, takes_it=False):
             pytest.skip(f"another rdcd holds {lock}")
@@ -161,3 +163,289 @@ def test_rdcd_reports_a_lock_file_of_another_user(tools, tmp_path, mode, message
         os.remove(USER_LOCK)
     assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
     assert message in out, out[-3000:]
+
+
+# rdcd's messages for a lock file it refuses to use, and for another rdcd that holds a lock.
+REFUSED = "must be a regular file owned by"
+ALREADY_RUNNING = "is locked. Is rdcd already running?"
+
+
+def _need_root():
+    if os.geteuid() != 0:
+        pytest.skip("needs root: a root rdcd takes /var/run/rdcd.lock")
+
+
+def _nobody():
+    """setpriv arguments that run a command as the user nobody (the test runs as root)."""
+    _need_root()
+    setpriv = shutil.which("setpriv")
+    try:
+        nobody = pwd.getpwnam("nobody")
+    except KeyError:
+        nobody = None
+    if setpriv is None or nobody is None:
+        pytest.skip("needs setpriv and the user nobody")
+    return nobody, [
+        setpriv,
+        f"--reuid={nobody.pw_uid}",
+        f"--regid={nobody.pw_gid}",
+        "--clear-groups",
+    ]
+
+
+@contextlib.contextmanager
+def _set_aside(path):
+    """Moves an unlocked lock file aside for the test, and puts it back afterwards."""
+    if _rdcd_lock_problem(path, takes_it=False):
+        pytest.skip(f"another rdcd holds {path}")
+    saved = path + ".set-aside-by-test"
+    if os.path.lexists(saved):
+        pytest.skip(f"{saved} is left from an earlier run; put it back or remove it")
+    had = os.path.lexists(path)
+    if had:
+        os.rename(path, saved)
+    try:
+        yield
+    finally:
+        if os.path.lexists(path):
+            os.remove(path)
+        if had:
+            os.rename(saved, path)
+
+
+def _start(cmd, env, port, **popen_args):
+    """Starts rdcd; returns it once it listens on `port`, or fails the test if it exits."""
+    proc = subprocess.Popen(
+        cmd, env=env, stdout=subprocess.PIPE, stderr=subprocess.STDOUT, text=True, **popen_args
+    )
+    deadline = time.monotonic() + 10 * FACTOR
+    while not _listening(port):
+        if proc.poll() is not None or time.monotonic() > deadline:
+            proc.kill()
+            out = proc.communicate()[0]
+            pytest.fail(f"rdcd did not start (exit {proc.returncode})\n{out[-3000:]}")
+        time.sleep(0.1)
+    return proc
+
+
+def _stop(proc):
+    proc.send_signal(signal.SIGTERM)
+    try:
+        out = proc.communicate(timeout=15 * FACTOR)[0]
+    except subprocess.TimeoutExpired:
+        proc.kill()
+        out = proc.communicate()[0]
+        pytest.fail(f"rdcd did not stop on SIGTERM\n{out[-3000:]}")
+    assert proc.returncode == 0, f"rdcd exited with {proc.returncode}\n{out[-3000:]}"
+
+
+def _env_for_nobody(d, log_dir):
+    # The fake's call log goes where nobody can write.
+    return dict(d.env, RDC_FAKE_LOG=os.path.join(log_dir, "fake_calls.log"))
+
+
+@contextlib.contextmanager
+def _writable_dir():
+    path = tempfile.mkdtemp(prefix="rdcd-nobody-")
+    os.chmod(path, 0o1777)
+    try:
+        yield path
+    finally:
+        shutil.rmtree(path, ignore_errors=True)
+
+
+def test_rdcd_refuses_a_symbolic_link_as_its_lock_file(tools, tmp_path):
+    _need_root()
+    target = tmp_path / "target"
+    with _set_aside(ROOT_LOCK):
+        os.symlink(target, ROOT_LOCK)
+        d = Rdcd(tools, tmp_path)
+        code, out = _run([d.rdcd_path, "-u", "-p", str(_free_port())], d.env, "symbolic link")
+    assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
+    assert f"{ROOT_LOCK} {REFUSED} root" in out, out[-3000:]
+    assert not target.exists(), "rdcd created the file the link points to"
+
+
+def test_rdcd_refuses_a_lock_file_of_another_user(tools, tmp_path):
+    nobody, _ = _nobody()
+    with _set_aside(ROOT_LOCK):
+        with open(ROOT_LOCK, "x"):
+            pass
+        os.chown(ROOT_LOCK, nobody.pw_uid, nobody.pw_gid)
+        os.chmod(ROOT_LOCK, 0o666)
+        d = Rdcd(tools, tmp_path)
+        code, out = _run([d.rdcd_path, "-u", "-p", str(_free_port())], d.env, "foreign lock file")
+    assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
+    assert f"{ROOT_LOCK} {REFUSED} root" in out, out[-3000:]
+
+
+def test_rdcd_refuses_a_lock_file_with_another_name(tools, tmp_path):
+    # rdcd writes into its lock file; through a hard link it would write into another file.
+    _need_root()
+    other = ROOT_LOCK + ".other-name-by-test"
+    if os.path.lexists(other):
+        pytest.skip(f"{other} exists")
+    with _set_aside(ROOT_LOCK):
+        try:
+            with open(other, "w") as f:
+                f.write("keep\n")
+            os.link(other, ROOT_LOCK)
+            d = Rdcd(tools, tmp_path)
+            code, out = _run([d.rdcd_path, "-u", "-p", str(_free_port())], d.env, "hard link")
+            with open(other) as f:
+                content = f.read()
+        finally:
+            if os.path.lexists(other):
+                os.remove(other)
+    assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
+    assert f"{ROOT_LOCK} {REFUSED} root" in out, out[-3000:]
+    assert content == "keep\n", content
+
+
+def test_rdcd_writes_only_its_pid_into_the_lock_file(tools, tmp_path):
+    _need_root()
+    with _set_aside(ROOT_LOCK):
+        with open(ROOT_LOCK, "x") as f:
+            f.write("9999999999")  # a longer pid of an earlier rdcd
+        os.chmod(ROOT_LOCK, 0o644)
+        d = Rdcd(tools, tmp_path).start()
+        try:
+            with open(ROOT_LOCK) as f:
+                content = f.read()
+        finally:
+            code = d.stop()
+    assert code == 0, d.output()
+    assert content == str(d.proc.pid), content
+
+
+def test_a_locked_file_in_tmp_does_not_stop_a_root_rdcd(tools, tmp_path):
+    # Any local user can create /tmp/rdcd.lock and lock it.
+    nobody, _ = _nobody()
+    with _set_aside(USER_LOCK):
+        fd = os.open(USER_LOCK, os.O_RDWR | os.O_CREAT, 0o644)
+        try:
+            os.fchown(fd, nobody.pw_uid, nobody.pw_gid)
+            fcntl.lockf(fd, fcntl.LOCK_EX | fcntl.LOCK_NB)
+            d = Rdcd(tools, tmp_path).start()
+            assert d.stop() == 0, d.output()
+        finally:
+            os.close(fd)
+
+
+def test_a_second_rdcd_exits_with_1(tools, tmp_path):
+    # On another port, so that only the lock can stop it.
+    d = Rdcd(tools, tmp_path).start()
+    try:
+        code, out = _run([d.rdcd_path, "-u", "-p", str(_free_port())], d.env, "second rdcd")
+    finally:
+        assert d.stop() == 0, d.output()
+    assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
+    assert ALREADY_RUNNING in out, out[-3000:]
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o600], ids=["readable", "unreadable"])
+def test_an_unlocked_root_lock_file_does_not_stop_a_non_root_rdcd(tools, tmp_path, mode):
+    _, as_nobody = _nobody()
+    with _set_aside(ROOT_LOCK), _set_aside(USER_LOCK), _writable_dir() as log_dir:
+        with open(ROOT_LOCK, "x"):
+            pass
+        os.chmod(ROOT_LOCK, mode)
+        d = Rdcd(tools, tmp_path)
+        port = _free_port()
+        _stop(
+            _start(
+                as_nobody + [d.rdcd_path, "-u", "-p", str(port)], _env_for_nobody(d, log_dir), port
+            )
+        )
+
+
+@pytest.mark.parametrize("mode", [0o644, 0o600], ids=["readable", "unreadable"])
+def test_a_non_root_rdcd_next_to_a_root_rdcd(tools, tmp_path, mode):
+    # A non-root rdcd can tell that the root rdcd runs only if it can read its lock file.
+    _, as_nobody = _nobody()
+    with _set_aside(ROOT_LOCK), _set_aside(USER_LOCK), _writable_dir() as log_dir:
+        root = Rdcd(tools, tmp_path).start()  # creates ROOT_LOCK; _set_aside puts the old one back
+        try:
+            os.chmod(ROOT_LOCK, mode)
+            port = _free_port()
+            cmd = as_nobody + [root.rdcd_path, "-u", "-p", str(port)]
+            env = _env_for_nobody(root, log_dir)
+            if mode & stat.S_IROTH:
+                code, out = _run(cmd, env, "non-root rdcd next to the root rdcd")
+                assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
+                assert f"{ROOT_LOCK} {ALREADY_RUNNING}" in out, out[-3000:]
+            else:
+                _stop(_start(cmd, env, port))
+        finally:
+            assert root.stop() == 0, root.output()
+
+
+@pytest.mark.parametrize("bad", [["--no-such-option"], ["-a"]], ids=["unknown", "no-argument"])
+def test_an_unknown_option_stops_rdcd(tools, tmp_path, bad):
+    # Both after a valid port, so that an rdcd that ignored them would start and keep running.
+    d = Rdcd(tools, tmp_path)
+    cmd = [d.rdcd_path, "-u", "-p", str(_free_port())] + bad
+    code, out = _run(cmd, d.env, "bad option")
+    assert code == 1, f"rdcd exited with {code}\n{out[-3000:]}"
+    assert "Optional rdcd Arguments" in out, out[-3000:]
+
+
+def test_rdcd_closes_inherited_descriptors(tools, tmp_path):
+    # Started with stdin closed and one more descriptor open, as a service manager may.
+    d = Rdcd(tools, tmp_path)
+    port = _free_port()
+    with open(tmp_path / "inherited", "w") as inherited:
+        proc = _start(
+            [d.rdcd_path, "-u", "-p", str(port)],
+            d.env,
+            port,
+            stdin=subprocess.DEVNULL,
+            pass_fds=(inherited.fileno(),),
+            preexec_fn=lambda: os.close(0),
+        )
+    fds = {}
+    try:
+        for fd in os.listdir(f"/proc/{proc.pid}/fd"):
+            try:
+                fds[int(fd)] = os.readlink(f"/proc/{proc.pid}/fd/{fd}")
+            except OSError:
+                pass  # closed meanwhile (gRPC's connections come and go)
+    finally:
+        _stop(proc)
+    assert fds.get(0) == "/dev/null", fds
+    assert str(tmp_path / "inherited") not in fds.values(), fds
+
+
+@pytest.mark.stress
+def test_rdcd_stops_on_sigterm_while_it_logs(tools, tmp_path):
+    # rdcd's signal handler runs on whichever thread the signal hits, also one that is writing a
+    # debug log line; rdcd must still stop.
+    d = Rdcd(tools, tmp_path)
+    for cycle in range(40):
+        port = _free_port()
+        proc = _start([d.rdcd_path, "-u", "-d", "-p", str(port)], d.env, port)
+        host = f"127.0.0.1:{port}"
+        dmon = subprocess.Popen(
+            [
+                d.rdci_path,
+                "dmon",
+                "-u",
+                "--host",
+                host,
+                "-i",
+                "0",
+                "-e",
+                "100,201,300",
+                "-d",
+                "100",
+            ],
+            env=d.rdci_env,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.DEVNULL,
+        )
+        time.sleep(0.3 + (cycle % 5) * 0.1)
+        try:
+            _stop(proc)
+        finally:
+            dmon.kill()
+            dmon.wait()
