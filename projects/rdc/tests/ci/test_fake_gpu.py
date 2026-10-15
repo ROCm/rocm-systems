@@ -724,3 +724,20 @@ def test_runtime_files_do_not_contain_the_fake():
     for path in binaries:
         with open(path, "rb") as f:
             assert b"RDC_FAKE_" not in f.read(), f"{path} references the fake"
+
+
+# ---------------------------------------------------------------------------
+# Stress: long loops, run only with RDC_TEST_STRESS=1
+# ---------------------------------------------------------------------------
+@pytest.mark.stress
+def test_rdcd_start_watch_stop_loop(tools, tmp_path):
+    """rdcd starts, serves a watch and stops cleanly 50 times in a row."""
+    for i in range(50):
+        run = tmp_path / f"run{i}"
+        run.mkdir()
+        d = Rdcd(tools, run).start()
+        try:
+            d.ok("dmon", "-e", ",".join(str(f) for f in DMON_FIELDS), "-i", "0", "-c", "1")
+        finally:
+            code = d.stop()
+        assert code == 0, f"run {i}: rdcd exited with {code}\n{d.output()}"
