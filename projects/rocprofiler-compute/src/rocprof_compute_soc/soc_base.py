@@ -413,7 +413,7 @@ class OmniSoC_Base:
         if single_pass is None:
             console_error(
                 "profiling",
-                "single-pass packing could not place every packable metric set",
+                "single-pass packing could not place every single-pass metric set",
             )
             raise AssertionError("single-pass packing failed")
         output_files, file_count, _stats = single_pass
