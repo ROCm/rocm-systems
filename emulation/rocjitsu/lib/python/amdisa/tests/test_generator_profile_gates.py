@@ -8321,11 +8321,9 @@ def test_supported_vmem_writes_do_not_use_expcnt(arch_name, profile):
         assert 'amdgpu::WaitCounterType::EXPCNT' not in issue, name
 
 
-def test_legacy_gds_preserves_expcnt_obligations():
-    codegen = object.__new__(CodeGenerator)
-    ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
-
-    for arch_name, profile in (
+@pytest.mark.parametrize(
+    'arch_name,profile',
+    [
         ('cdna1', Cdna1Profile()),
         ('cdna2', Cdna2Profile()),
         ('cdna3', CdnaProfile()),
@@ -8333,12 +8331,17 @@ def test_legacy_gds_preserves_expcnt_obligations():
         ('rdna2', Rdna2Profile()),
         ('rdna3', Rdna3Profile()),
         ('rdna3_5', Rdna3_5Profile()),
-    ):
-        codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
-        ds_info = codegen._memory_issue_initializer(ds, {'gds'})
-        assert 'inst_.gds != 0' in ds_info
-        assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
-        assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
+    ],
+)
+def test_legacy_gds_preserves_expcnt_obligations(arch_name, profile):
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(arch_name=arch_name, profile=profile)
+    ds = InstructionSemantics('DS_READ_B32', 'ds_read', elem_size=4, num_elems=1)
+
+    ds_info = codegen._memory_issue_initializer(ds, {'gds'})
+    assert 'inst_.gds != 0' in ds_info
+    assert 'amdgpu::MemoryCompletionClass::GDS' in ds_info
+    assert 'amdgpu::WaitCounterType::EXPCNT' in ds_info
 
 
 @pytest.mark.parametrize(
