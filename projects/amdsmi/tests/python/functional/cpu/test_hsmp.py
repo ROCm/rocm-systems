@@ -88,12 +88,6 @@ class TestCpuHsmp(unittest.TestCase):
 
     def test_get_esmi_err_msg(self):
         self.common.print_func_name("")
-
-        if self.common.TODO_SKIP_FAIL:
-            msg = "\tSkipping test_get_esmi_err_msg as it fails (Unknown Error)."
-            self.common.print(msg)
-            self.skipTest(msg)
-
         for _, status_type, _ in common.STATUS_TYPES:
             # Inputs outside the esmi enum range match no entry and return SUCCESS.
             expected = _ESMI_CODE_TO_STATUS.get(status_type.value, amdsmi.AmdSmiStatus.SUCCESS)
@@ -102,7 +96,13 @@ class TestCpuHsmp(unittest.TestCase):
             try:
                 ret = amdsmi.amdsmi_get_esmi_err_msg(status_type)
                 self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
+                if expected != amdsmi.AmdSmiStatus.SUCCESS:
+                    self.raise_exception = AssertionError(
+                        f"{msg} returned SUCCESS, expected {status_cond}"
+                    )
+                    self.common.print(f"\tTEST FAILURE, expected {status_cond}")
+                else:
+                    self.common.check_ret("", "", self.common.PASS)
             except amdsmi.AmdSmiLibraryException as e:
                 if self.common.check_ret(msg, e, status_cond):
                     self.raise_exception = e
