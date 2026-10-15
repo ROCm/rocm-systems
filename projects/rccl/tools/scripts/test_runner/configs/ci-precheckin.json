@@ -268,6 +268,17 @@
       "tests": [
         {"name": "MemManagerMicrotests", "description": "Host-only mem_manager microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_allocator": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroAllocator",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "AllocatorMicrotests", "description": "Host-only allocator microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -335,6 +346,12 @@
       "name": "RCCL Microtests - mem_manager",
       "description": "rccl-UnitTestsMicroMemManager (host-only mem_manager microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_mem_manager",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - allocator",
+      "description": "rccl-UnitTestsMicroAllocator (host-only allocator microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_allocator",
       "enabled": true
     }
   ]

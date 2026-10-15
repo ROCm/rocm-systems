@@ -230,6 +230,16 @@ static hipError_t DefaultHipSetDevice(int dev)
 }
 std::function<hipError_t(int)> g_hipSetDevice = DefaultHipSetDevice;
 
+// fillInfo() CUCHECKs cuDeviceGet (hipDeviceGet) on every rank before it probes the fabric-handle
+// attribute, so this must succeed on the default TransportsRankComm path or initTransportsRank never
+// reaches the postset.
+static hipError_t DefaultHipDeviceGet(hipDevice_t* device, int)
+{
+    if (device) *device = 0;
+    return hipSuccess;
+}
+std::function<hipError_t(hipDevice_t*, int)> g_hipDeviceGet = DefaultHipDeviceGet;
+
 static hipError_t DefaultHipGetDeviceCount(int* count)
 {
     if (count) {
@@ -642,6 +652,7 @@ void ResetHipFakes()
     g_hipHostFree                   = DefaultHipHostFree;
     g_hipGetDevice                  = DefaultHipGetDevice;
     g_hipSetDevice                  = DefaultHipSetDevice;
+    g_hipDeviceGet                  = DefaultHipDeviceGet;
     g_hipGetDeviceCount             = DefaultHipGetDeviceCount;
     g_hipDeviceCanAccessPeer        = DefaultHipDeviceCanAccessPeer;
     g_hipDeviceEnablePeerAccess     = DefaultHipDeviceEnablePeerAccess;
@@ -741,14 +752,7 @@ hipError_t hipDeviceDisablePeerAccess(int peerDevice)
     return g_hipDeviceDisablePeerAccess(peerDevice);
 }
 
-hipError_t hipDeviceGet(hipDevice_t* device, int)
-{
-    // fillInfo() CUCHECKs cuDeviceGet (hipDeviceGet) on every rank before it
-    // probes the fabric-handle attribute, so this must succeed on the default
-    // TransportsRankComm path or initTransportsRank never reaches the postset.
-    if (device) *device = 0;
-    return hipSuccess;
-}
+hipError_t hipDeviceGet(hipDevice_t* device, int ordinal) { return g_hipDeviceGet(device, ordinal); }
 
 hipError_t hipDeviceGetUuid(hipUUID* uuid, hipDevice_t)
 {

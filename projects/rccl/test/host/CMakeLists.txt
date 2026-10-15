@@ -396,6 +396,14 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroAllocator -- src/allocator.cc. Own binary: every other binary that needs
+  # ncclShadowPoolToHost links allocator_fakes.cc instead.
+  set(TEST_MICRO_ALLOCATOR_SOURCE_FILES
+    allocator-test.cc
+    fakes/hip_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1072,6 +1080,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroMemManager
     ${_MICRO_MODE_DEFS}
     MEM_MANAGER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mem_manager.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mem_manager.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroAllocator
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroAllocator
+  SOURCES ${TEST_MICRO_ALLOCATOR_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ALLOCATOR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/allocator.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_allocator.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels

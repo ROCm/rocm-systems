@@ -88,6 +88,8 @@ extern int g_deviceCount;
 extern int g_currentDevice;
 extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
 extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
+// Defaults to device 0 and hipSuccess, as the plain stub did.
+extern std::function<hipError_t(hipDevice_t* /*device*/, int /*ordinal*/)> g_hipDeviceGet;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 // Defaults to hipErrorInvalidValue with *canAccessPeer = 0, the fail-loud floor's behaviour.
 extern std::function<hipError_t(int* /*canAccessPeer*/, int /*dev1*/, int /*dev2*/)> g_hipDeviceCanAccessPeer;
