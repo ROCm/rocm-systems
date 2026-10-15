@@ -40,10 +40,11 @@ string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" PRELOAD_ENV
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-selected-regions-stochastic
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-method stochastic
-        --pc-sampling-interval 1048576 --pc-sampling-unit cycles --selected-regions
-        --kernel-trace -d ${CMAKE_CURRENT_BINARY_DIR}/selected-regions -o out
-        --output-format json csv -- $<TARGET_FILE:roctx-pause-resume>
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled
+        --pc-sampling-method stochastic --pc-sampling-interval 1048576 --pc-sampling-unit
+        cycles --selected-regions --kernel-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/selected-regions -o out --output-format json csv --
+        $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
     TIMEOUT 90
     LABELS "integration-tests;pc-sampling;pause-resume;selected-regions;stochastic"
@@ -70,9 +71,9 @@ rocprofiler_add_integration_validate_test(
 rocprofiler_add_integration_execute_test(
     rocprofv3-test-pc-sampling-selected-regions-ref-count-stochastic
     COMMAND
-        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-method stochastic
-        --pc-sampling-interval 1048576 --pc-sampling-unit cycles --selected-regions
-        --selected-regions-ref-count --kernel-trace -d
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled
+        --pc-sampling-method stochastic --pc-sampling-interval 1048576 --pc-sampling-unit
+        cycles --selected-regions --selected-regions-ref-count --kernel-trace -d
         ${CMAKE_CURRENT_BINARY_DIR}/selected-regions-ref-count -o out --output-format json
         csv -- $<TARGET_FILE:roctx-pause-resume>
     DEPENDS roctx-pause-resume
