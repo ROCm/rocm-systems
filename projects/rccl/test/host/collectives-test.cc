@@ -43,21 +43,12 @@ struct LogLine {
   ncclDebugLogLevel level;
   std::string text;
 };
-std::vector<LogLine> g_log;
-
-// Dependency calls in issue order, for tests that pin sequencing.
-std::vector<std::string> g_trace;
 
 struct Enqueued {
   ncclInfo info;
   bool directReduceScatter;
   std::vector<size_t> sizes;  // info.sizes points at the caller's stack, so snapshot it
 };
-std::vector<Enqueued> g_enqueued;
-std::deque<ncclResult_t> g_enqueueResults;  // consumed per call; empty means success
-
-const ncclCollConfig_t* g_parsedConfig = nullptr;
-ncclResult_t g_parseResult = ncclSuccess;
 
 struct Recorded {
   rccl::rcclCall_t type;
@@ -68,9 +59,6 @@ struct Recorded {
   const size_t* sendcounts;
   const size_t* rdispls;
 };
-std::vector<Recorded> g_recorded;
-std::vector<bool> g_recorderSkips;
-ncclResult_t g_recordResult = ncclSuccess;
 
 struct Select {
   std::string coll;
@@ -82,12 +70,6 @@ struct Select {
   bool query;
   bool hint;
 };
-std::vector<Select> g_selects;
-rcclCollDecision g_decision{};
-ncclResult_t g_selectResult = ncclSuccess;
-
-ncclResult_t g_addonBeginResult = ncclSuccess;
-ncclResult_t g_addonEndSeen = ncclInternalError;
 
 struct Addon {
   std::string fn;
@@ -99,40 +81,19 @@ struct Addon {
   ncclComm* comm;
   hipStream_t stream;
 };
-std::vector<Addon> g_addons;
-ncclResult_t g_addonResult = ncclSuccess;
 
 struct DdaEnabledCall {
   size_t totalBytes;
   size_t threshold;
   bool query;
 };
-std::vector<DdaEnabledCall> g_ddaEnabledCalls;
-bool g_ddaEnabled = false;
-size_t g_ddaThreshold = 0;
-std::vector<ncclFunc_t> g_thresholdFuncs;
-int64_t g_ddaEnableParam = 1;
-const char* g_algoName = "ADDON";
 
-std::function<bool(ncclComm*, size_t)> g_useAgDirect;
-std::function<bool(ncclComm*, size_t)> g_useRsDirect;
-
-ncclResult_t g_symkInitResult = ncclSuccess;
-bool g_symkAvailable = true;
 struct SymkQuery {
   ncclFunc_t coll;
   int red;
   ncclDataType_t type;
   size_t nElts;
 };
-std::vector<SymkQuery> g_symkQueries;
-
-std::map<const void*, ncclDevrWindow*> g_windows;
-const void* g_findWindowFailPtr = nullptr;
-std::set<ncclDevrWindow*> g_sysmemWindows;
-ncclSymRegType_t g_regType = ncclSymSendNonregRecvNonreg;
-ncclResult_t g_regTypeResult = ncclSuccess;
-std::vector<std::pair<ncclDevrWindow*, ncclDevrWindow*>> g_regTypeArgs;
 
 struct CeEligibility {
   ncclDataType_t datatype;
@@ -142,23 +103,6 @@ struct CeEligibility {
   bool sysmem;
   bool capturing;
 };
-std::vector<CeEligibility> g_ceEligCalls;
-std::vector<CeEligibility> g_hierEligCalls;
-bool g_ceElig = false;
-bool g_hierElig = false;
-
-bool g_capturing = false;
-ncclResult_t g_captureResult = ncclSuccess;
-std::vector<int> g_captureModes;
-
-std::vector<size_t> g_memAllocSizes;
-std::vector<void*> g_memAllocs;
-int g_memAllocFailAt = 0;
-
-int g_currentDevice = 9;
-hipError_t g_getDeviceResult = hipSuccess;
-int g_setDeviceCalls = 0;
-int g_setDeviceFailAt = 0;
 
 struct Memcpy {
   void* dst;
@@ -167,13 +111,7 @@ struct Memcpy {
   hipMemcpyKind kind;
   hipStream_t stream;
 };
-std::vector<Memcpy> g_memcpys;
-std::deque<hipError_t> g_memcpyResults;
-hipError_t g_syncResult = hipSuccess;
-hipError_t g_lastError = hipSuccess;
 
-ncclResult_t g_groupStartResult = ncclSuccess;
-ncclResult_t g_groupEndResult = ncclSuccess;
 struct P2p {
   bool send;
   const void* buff;
@@ -181,9 +119,6 @@ struct P2p {
   ncclDataType_t datatype;
   int peer;
 };
-std::vector<P2p> g_p2ps;
-int g_p2pFailAt = 0;
-std::map<int, std::vector<size_t>> g_peerMeta;  // copied into an ncclRecv buffer from that peer
 
 struct Bcast {
   const void* sendbuff;
@@ -191,13 +126,7 @@ struct Bcast {
   size_t count;
   int root;
 };
-std::vector<Bcast> g_broadcasts;
 
-ncclResult_t g_commCountResult = ncclSuccess;
-ncclResult_t g_userRankResult = ncclSuccess;
-
-ncclResult_t g_profStartResult = ncclSuccess;
-ncclCeCollArgs g_profArgs{};
 struct CeAr {
   const void* sendbuff;
   void* recvbuff;
@@ -207,12 +136,6 @@ struct CeAr {
   ncclDevrWindow* win;
   ncclCeCollArgs* args;
 };
-std::vector<CeAr> g_ceArs;
-ncclResult_t g_ceArResult = ncclSuccess;
-
-std::vector<uint8_t> g_peerFlags;
-std::vector<uint8_t> g_gatheredOwnFlag;
-ncclResult_t g_bootstrapResult = ncclSuccess;
 
 struct KernelLaunch {
   const void* fn;
@@ -227,29 +150,101 @@ struct KernelLaunch {
   int cols;
   int rows;
 };
-std::vector<KernelLaunch> g_launches;
-dim3 g_pushedGrid, g_pushedBlock;
-size_t g_pushedShmem = 0;
-hipStream_t g_pushedStream = nullptr;
+
+// Every seam's knobs and observations; SetUp resets them with `fake = Fakes{}`.
+struct Fakes {
+  std::vector<LogLine> log;
+  std::vector<std::string> trace;  // dependency calls in issue order
+  std::vector<Enqueued> enqueued;
+  std::deque<ncclResult_t> enqueueResults;  // consumed per call; empty means success
+  const ncclCollConfig_t* parsedConfig = nullptr;
+  ncclResult_t parseResult = ncclSuccess;
+  std::vector<Recorded> recorded;
+  std::vector<bool> recorderSkips;
+  ncclResult_t recordResult = ncclSuccess;
+  std::vector<Select> selects;
+  rcclCollDecision decision{NCCL_ALGO_RING};
+  ncclResult_t selectResult = ncclSuccess;
+  ncclResult_t addonBeginResult = ncclSuccess;
+  ncclResult_t addonEndSeen = ncclInternalError;
+  std::vector<Addon> addons;
+  ncclResult_t addonResult = ncclSuccess;
+  std::vector<DdaEnabledCall> ddaEnabledCalls;
+  bool ddaEnabled = false;
+  size_t ddaThreshold = 0;
+  std::vector<ncclFunc_t> thresholdFuncs;
+  int64_t ddaEnableParam = 1;
+  const char* algoName = "ADDON";
+  std::function<bool(ncclComm*, size_t)> useAgDirect;
+  std::function<bool(ncclComm*, size_t)> useRsDirect;
+  ncclResult_t symkInitResult = ncclSuccess;
+  bool symkAvailable = true;
+  std::vector<SymkQuery> symkQueries;
+  std::map<const void*, ncclDevrWindow*> windows;
+  const void* findWindowFailPtr = nullptr;
+  std::set<ncclDevrWindow*> sysmemWindows;
+  ncclSymRegType_t regType = ncclSymSendNonregRecvNonreg;
+  ncclResult_t regTypeResult = ncclSuccess;
+  std::vector<std::pair<ncclDevrWindow*, ncclDevrWindow*>> regTypeArgs;
+  std::vector<CeEligibility> ceEligCalls;
+  std::vector<CeEligibility> hierEligCalls;
+  bool ceElig = false;
+  bool hierElig = false;
+  bool capturing = false;
+  ncclResult_t captureResult = ncclSuccess;
+  std::vector<int> captureModes;
+  std::vector<size_t> memAllocSizes;
+  std::vector<void*> memAllocs;
+  int memAllocFailAt = 0;
+  int currentDevice = 9;
+  hipError_t getDeviceResult = hipSuccess;
+  int setDeviceCalls = 0;
+  int setDeviceFailAt = 0;
+  std::vector<Memcpy> memcpys;
+  std::deque<hipError_t> memcpyResults;
+  hipError_t syncResult = hipSuccess;
+  hipError_t lastError = hipSuccess;
+  ncclResult_t groupStartResult = ncclSuccess;
+  ncclResult_t groupEndResult = ncclSuccess;
+  std::vector<P2p> p2ps;
+  int p2pFailAt = 0;
+  std::map<int, std::vector<size_t>> peerMeta;  // copied into an ncclRecv buffer from that peer
+  std::vector<Bcast> broadcasts;
+  ncclResult_t commCountResult = ncclSuccess;
+  ncclResult_t userRankResult = ncclSuccess;
+  ncclResult_t profStartResult = ncclSuccess;
+  ncclCeCollArgs profArgs{};
+  std::vector<CeAr> ceArs;
+  ncclResult_t ceArResult = ncclSuccess;
+  std::vector<uint8_t> peerFlags;
+  std::vector<uint8_t> gatheredOwnFlag;
+  ncclResult_t bootstrapResult = ncclSuccess;
+  std::vector<KernelLaunch> launches;
+  dim3 pushedGrid;
+  dim3 pushedBlock;
+  size_t pushedShmem = 0;
+  hipStream_t pushedStream = nullptr;
+};
+Fakes fake;
 
 ncclResult_t PopEnqueueResult() {
-  if (g_enqueueResults.empty()) return ncclSuccess;
-  ncclResult_t res = g_enqueueResults.front();
-  g_enqueueResults.pop_front();
+  if (fake.enqueueResults.empty()) return ncclSuccess;
+  ncclResult_t res = fake.enqueueResults.front();
+  fake.enqueueResults.pop_front();
   return res;
 }
 
 ncclResult_t RecordAddon(const char* fn, const void* s, void* r, size_t n, ncclDataType_t t, ncclRedOp_t o,
                          ncclComm* c, hipStream_t st) {
-  g_trace.push_back(fn);
-  g_addons.push_back({fn, s, r, n, t, o, c, st});
-  return g_addonResult;
+  fake.trace.push_back(fn);
+  fake.addons.push_back({fn, s, r, n, t, o, c, st});
+  return fake.addonResult;
 }
 
 void RecordLaunch(const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream,
                   hipEvent_t stop) {
-  g_trace.push_back("launch");
-  g_launches.push_back({fn, grid, block, shmem, stream, stop, *static_cast<const char**>(args[0]),
+  fake.trace.push_back("launch");
+  fake.launches.push_back({fn, grid, block, shmem, stream, stop, *static_cast<const char**>(args[0]),
                         *static_cast<char**>(args[1]), *static_cast<size_t*>(args[2]), *static_cast<int*>(args[3]),
                         *static_cast<int*>(args[4])});
 }
@@ -262,23 +257,23 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, cons
   va_start(ap, fmt);
   std::vsnprintf(buf, sizeof(buf), fmt, ap);
   va_end(ap);
-  g_log.push_back({level, buf});
+  fake.log.push_back({level, buf});
 }
 
 ncclResult_t ncclEnqueueCheck(ncclInfo* info) {
-  g_trace.push_back(std::string("enqueue ") + info->opName);
+  fake.trace.push_back(std::string("enqueue ") + info->opName);
   std::vector<size_t> sizes;
   if (info->sizes != nullptr) {
     const size_t n = info->comm->nRanks;
     sizes.assign(info->sizes, info->sizes + 4 * n * n);
   }
-  g_enqueued.push_back({*info, info->comm != nullptr && info->comm->enableDirectReduceScatter, sizes});
+  fake.enqueued.push_back({*info, info->comm != nullptr && info->comm->enableDirectReduceScatter, sizes});
   return PopEnqueueResult();
 }
 
 ncclResult_t ncclParseCollConfig(const ncclCollConfig_t* config, ncclCollConfig_t* internal) {
-  g_parsedConfig = config;
-  if (g_parseResult != ncclSuccess) return g_parseResult;
+  fake.parsedConfig = config;
+  if (fake.parseResult != ncclSuccess) return fake.parseResult;
   *internal = *config;
   return ncclSuccess;
 }
@@ -290,57 +285,57 @@ Recorder& Recorder::instance() {
   static Recorder recorder;
   return recorder;
 }
-void Recorder::skip(bool b) { g_recorderSkips.push_back(b); }
+void Recorder::skip(bool b) { fake.recorderSkips.push_back(b); }
 ncclResult_t Recorder::record(rcclCall_t type, const ncclInfo& info) {
-  g_trace.push_back("record");
-  g_recorded.push_back({type, info.sendbuff, info.recvbuff, info.count, info.root, nullptr, nullptr});
-  return g_recordResult;
+  fake.trace.push_back("record");
+  fake.recorded.push_back({type, info.sendbuff, info.recvbuff, info.count, info.root, nullptr, nullptr});
+  return fake.recordResult;
 }
 ncclResult_t Recorder::record(rcclCall_t type, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
                               ncclComm_t, hipStream_t, int root, const size_t sendcounts[], const size_t[],
                               const size_t[], const size_t rdispls[]) {
-  g_trace.push_back("record");
-  g_recorded.push_back({type, sendbuff, recvbuff, count, root, sendcounts, rdispls});
-  return g_recordResult;
+  fake.trace.push_back("record");
+  fake.recorded.push_back({type, sendbuff, recvbuff, count, root, sendcounts, rdispls});
+  return fake.recordResult;
 }
 }  // namespace rccl
 
 ncclResult_t rcclSelectAllReduce(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
                                  ncclRedOp_t op, hipStream_t stream, bool query, bool hint, rcclCollDecision* d) {
-  g_trace.push_back("select");
-  g_selects.push_back({"AllReduce", sendbuff, recvbuff, count, op, stream, query, hint});
-  *d = g_decision;
-  return g_selectResult;
+  fake.trace.push_back("select");
+  fake.selects.push_back({"AllReduce", sendbuff, recvbuff, count, op, stream, query, hint});
+  *d = fake.decision;
+  return fake.selectResult;
 }
 ncclResult_t rcclSelectAllGather(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
                                  hipStream_t stream, bool query, bool hint, rcclCollDecision* d) {
-  g_trace.push_back("select");
-  g_selects.push_back({"AllGather", sendbuff, recvbuff, count, ncclNumOps, stream, query, hint});
-  *d = g_decision;
-  return g_selectResult;
+  fake.trace.push_back("select");
+  fake.selects.push_back({"AllGather", sendbuff, recvbuff, count, ncclNumOps, stream, query, hint});
+  *d = fake.decision;
+  return fake.selectResult;
 }
 ncclResult_t rcclSelectReduceScatter(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                      ncclDataType_t, ncclRedOp_t op, bool query, rcclCollDecision* d) {
-  g_trace.push_back("select");
-  g_selects.push_back({"ReduceScatter", sendbuff, recvbuff, count, op, nullptr, query, false});
-  *d = g_decision;
-  return g_selectResult;
+  fake.trace.push_back("select");
+  fake.selects.push_back({"ReduceScatter", sendbuff, recvbuff, count, op, nullptr, query, false});
+  *d = fake.decision;
+  return fake.selectResult;
 }
 ncclResult_t rcclSelectAlltoAll(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t,
                                 hipStream_t stream, bool query, bool hint, rcclCollDecision* d) {
-  g_trace.push_back("select");
-  g_selects.push_back({"AlltoAll", sendbuff, recvbuff, count, ncclNumOps, stream, query, hint});
-  *d = g_decision;
-  return g_selectResult;
+  fake.trace.push_back("select");
+  fake.selects.push_back({"AlltoAll", sendbuff, recvbuff, count, ncclNumOps, stream, query, hint});
+  *d = fake.decision;
+  return fake.selectResult;
 }
 
 ncclResult_t rcclAddonLaunchBegin(ncclComm*, hipStream_t, rcclAddonLaunchState*) {
-  g_trace.push_back("begin");
-  return g_addonBeginResult;
+  fake.trace.push_back("begin");
+  return fake.addonBeginResult;
 }
 ncclResult_t rcclAddonLaunchEnd(ncclComm*, hipStream_t, const rcclAddonLaunchState&, ncclResult_t res) {
-  g_trace.push_back("end");
-  g_addonEndSeen = res;
+  fake.trace.push_back("end");
+  fake.addonEndSeen = res;
   return res;
 }
 
@@ -382,155 +377,157 @@ bool IsArchMatch(char const* arch, char const* target) {
 }
 
 bool rcclDdaEnabled(const ncclComm*, size_t totalBytes, size_t threshold, bool query, const char*) {
-  g_ddaEnabledCalls.push_back({totalBytes, threshold, query});
-  return g_ddaEnabled;
+  fake.ddaEnabledCalls.push_back({totalBytes, threshold, query});
+  return fake.ddaEnabled;
 }
 size_t rcclDdaEntryThreshold(const ncclComm*, ncclFunc_t func) {
-  g_thresholdFuncs.push_back(func);
-  return g_ddaThreshold;
+  fake.thresholdFuncs.push_back(func);
+  return fake.ddaThreshold;
 }
-int64_t rcclParamDdaEnable() { return g_ddaEnableParam; }
+int64_t rcclParamDdaEnable() { return fake.ddaEnableParam; }
 ncclResult_t rcclGetAlgoName(int, const char** algoName) {
-  *algoName = g_algoName;
+  *algoName = fake.algoName;
   return ncclSuccess;
 }
-bool rcclUseAllGatherDirect(ncclComm* comm, size_t& msgSize) { return g_useAgDirect && g_useAgDirect(comm, msgSize); }
+bool rcclUseAllGatherDirect(ncclComm* comm, size_t& msgSize) {
+  return fake.useAgDirect && fake.useAgDirect(comm, msgSize);
+}
 bool rcclUseReduceScatterDirect(ncclComm* comm, size_t& msgSize) {
-  return g_useRsDirect && g_useRsDirect(comm, msgSize);
+  return fake.useRsDirect && fake.useRsDirect(comm, msgSize);
 }
 
-ncclResult_t ncclSymkInitOnce(ncclComm*) { return g_symkInitResult; }
+ncclResult_t ncclSymkInitOnce(ncclComm*) { return fake.symkInitResult; }
 bool ncclSymkAvailable(ncclComm*, ncclFunc_t coll, int red, ncclDataType_t ty, size_t nElts) {
-  g_symkQueries.push_back({coll, red, ty, nElts});
-  return g_symkAvailable;
+  fake.symkQueries.push_back({coll, red, ty, nElts});
+  return fake.symkAvailable;
 }
 ncclResult_t ncclDevrFindWindow(ncclComm*, void const* userPtr, ncclDevrWindow** outWin) {
-  g_trace.push_back("findWindow");
-  if (userPtr != nullptr && userPtr == g_findWindowFailPtr) return ncclInternalError;
-  auto it = g_windows.find(userPtr);
-  *outWin = it == g_windows.end() ? nullptr : it->second;
+  fake.trace.push_back("findWindow");
+  if (userPtr != nullptr && userPtr == fake.findWindowFailPtr) return ncclInternalError;
+  auto it = fake.windows.find(userPtr);
+  *outWin = it == fake.windows.end() ? nullptr : it->second;
   return ncclSuccess;
 }
-bool ncclDevrWindowHasSysmemSegment(ncclDevrWindow* win) { return g_sysmemWindows.count(win) != 0; }
+bool ncclDevrWindowHasSysmemSegment(ncclDevrWindow* win) { return fake.sysmemWindows.count(win) != 0; }
 ncclResult_t ncclGetSymRegType(ncclDevrWindow* sendWin, ncclDevrWindow* recvWin, ncclSymRegType_t* winRegType) {
-  g_regTypeArgs.push_back({sendWin, recvWin});
-  *winRegType = g_regType;
-  return g_regTypeResult;
+  fake.regTypeArgs.push_back({sendWin, recvWin});
+  *winRegType = fake.regType;
+  return fake.regTypeResult;
 }
 bool ncclCeAlltoAllvEligible(ncclComm*, ncclDataType_t datatype, ncclSymRegType_t regType, bool sysmem,
                              bool capturing) {
-  g_ceEligCalls.push_back({datatype, regType, nullptr, nullptr, sysmem, capturing});
-  return g_ceElig;
+  fake.ceEligCalls.push_back({datatype, regType, nullptr, nullptr, sysmem, capturing});
+  return fake.ceElig;
 }
 bool ncclHierCeAlltoAllvEligible(ncclComm*, ncclDataType_t datatype, ncclSymRegType_t regType, ncclDevrWindow* sendWin,
                                  ncclDevrWindow* recvWin, bool sysmem, bool capturing) {
-  g_hierEligCalls.push_back({datatype, regType, sendWin, recvWin, sysmem, capturing});
-  return g_hierElig;
+  fake.hierEligCalls.push_back({datatype, regType, sendWin, recvWin, sysmem, capturing});
+  return fake.hierElig;
 }
 ncclResult_t ncclCudaGetCapturingGraph(ncclCudaGraph* graph, hipStream_t, int graphUsageMode) {
-  g_captureModes.push_back(graphUsageMode);
-  graph->graphId = g_capturing ? 7 : ULLONG_MAX;
-  return g_captureResult;
+  fake.captureModes.push_back(graphUsageMode);
+  graph->graphId = fake.capturing ? 7 : ULLONG_MAX;
+  return fake.captureResult;
 }
 
 ncclResult_t ncclMemAlloc(void** ptr, size_t size) {
-  g_trace.push_back("memAlloc");
-  g_memAllocSizes.push_back(size);
-  if (static_cast<int>(g_memAllocSizes.size()) == g_memAllocFailAt) return ncclSystemError;
+  fake.trace.push_back("memAlloc");
+  fake.memAllocSizes.push_back(size);
+  if (static_cast<int>(fake.memAllocSizes.size()) == fake.memAllocFailAt) return ncclSystemError;
   *ptr = std::calloc(size, 1);
-  g_memAllocs.push_back(*ptr);
+  fake.memAllocs.push_back(*ptr);
   return ncclSuccess;
 }
 
 hipError_t hipGetDevice(int* dev) {
-  *dev = g_currentDevice;
-  return g_getDeviceResult;
+  *dev = fake.currentDevice;
+  return fake.getDeviceResult;
 }
 hipError_t hipSetDevice(int dev) {
-  g_trace.push_back("setDevice " + std::to_string(dev));
-  if (++g_setDeviceCalls == g_setDeviceFailAt) return hipErrorInvalidDevice;
-  g_currentDevice = dev;
+  fake.trace.push_back("setDevice " + std::to_string(dev));
+  if (++fake.setDeviceCalls == fake.setDeviceFailAt) return hipErrorInvalidDevice;
+  fake.currentDevice = dev;
   return hipSuccess;
 }
 hipError_t hipMemcpyAsync(void* dst, const void* src, size_t bytes, hipMemcpyKind kind, hipStream_t stream) {
-  g_trace.push_back("memcpy");
-  g_memcpys.push_back({dst, src, bytes, kind, stream});
+  fake.trace.push_back("memcpy");
+  fake.memcpys.push_back({dst, src, bytes, kind, stream});
   if (dst == nullptr || src == nullptr) {
     ADD_FAILURE() << "hipMemcpyAsync with a null pointer";
     return hipErrorInvalidValue;
   }
-  if (!g_memcpyResults.empty()) {
-    hipError_t res = g_memcpyResults.front();
-    g_memcpyResults.pop_front();
+  if (!fake.memcpyResults.empty()) {
+    hipError_t res = fake.memcpyResults.front();
+    fake.memcpyResults.pop_front();
     if (res != hipSuccess) return res;
   }
   std::memcpy(dst, src, bytes);
   return hipSuccess;
 }
 hipError_t hipStreamSynchronize(hipStream_t) {
-  g_trace.push_back("sync");
-  return g_syncResult;
+  fake.trace.push_back("sync");
+  return fake.syncResult;
 }
-hipError_t hipGetLastError() { return g_lastError; }
+hipError_t hipGetLastError() { return fake.lastError; }
 const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
 
 ncclResult_t ncclGroupStart() {
-  g_trace.push_back("groupStart");
-  return g_groupStartResult;
+  fake.trace.push_back("groupStart");
+  return fake.groupStartResult;
 }
 ncclResult_t ncclGroupEnd() {
-  g_trace.push_back("groupEnd");
-  return g_groupEndResult;
+  fake.trace.push_back("groupEnd");
+  return fake.groupEndResult;
 }
 ncclResult_t ncclSend(const void* buff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t, hipStream_t) {
-  g_p2ps.push_back({true, buff, count, datatype, peer});
-  return static_cast<int>(g_p2ps.size()) == g_p2pFailAt ? ncclInternalError : ncclSuccess;
+  fake.p2ps.push_back({true, buff, count, datatype, peer});
+  return static_cast<int>(fake.p2ps.size()) == fake.p2pFailAt ? ncclInternalError : ncclSuccess;
 }
 ncclResult_t ncclRecv(void* buff, size_t count, ncclDataType_t datatype, int peer, ncclComm_t, hipStream_t) {
-  g_p2ps.push_back({false, buff, count, datatype, peer});
-  auto it = g_peerMeta.find(peer);
-  if (it != g_peerMeta.end()) std::memcpy(buff, it->second.data(), it->second.size() * sizeof(size_t));
-  return static_cast<int>(g_p2ps.size()) == g_p2pFailAt ? ncclInternalError : ncclSuccess;
+  fake.p2ps.push_back({false, buff, count, datatype, peer});
+  auto it = fake.peerMeta.find(peer);
+  if (it != fake.peerMeta.end()) std::memcpy(buff, it->second.data(), it->second.size() * sizeof(size_t));
+  return static_cast<int>(fake.p2ps.size()) == fake.p2pFailAt ? ncclInternalError : ncclSuccess;
 }
 ncclResult_t ncclBroadcast(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t, int root, ncclComm_t,
                            hipStream_t) {
-  g_broadcasts.push_back({sendbuff, recvbuff, count, root});
+  fake.broadcasts.push_back({sendbuff, recvbuff, count, root});
   return ncclSuccess;
 }
 ncclResult_t ncclCommCount(const ncclComm_t comm, int* count) {
   *count = comm->nRanks;
-  return g_commCountResult;
+  return fake.commCountResult;
 }
 ncclResult_t ncclCommUserRank(const ncclComm_t comm, int* rank) {
   *rank = comm->rank;
-  return g_userRankResult;
+  return fake.userRankResult;
 }
 
 ncclResult_t ncclProfilerStartCeCollEvent(ncclComm*, ncclCeCollArgs* args, hipStream_t) {
-  g_trace.push_back("profStart");
-  g_profArgs = *args;
-  return g_profStartResult;
+  fake.trace.push_back("profStart");
+  fake.profArgs = *args;
+  return fake.profStartResult;
 }
 ncclResult_t ncclProfilerStopCeCollEvent(ncclComm*, ncclCeCollArgs*, hipStream_t) {
-  g_trace.push_back("profStop");
+  fake.trace.push_back("profStop");
   return ncclSuccess;
 }
 ncclResult_t ncclCeAllReduce(ncclComm*, const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                              ncclRedOp_t op, hipStream_t, ncclDevrWindow* win, ncclCeCollArgs* args) {
-  g_trace.push_back("ceAllReduce");
-  g_ceArs.push_back({sendbuff, recvbuff, count, datatype, op, win, args});
-  return g_ceArResult;
+  fake.trace.push_back("ceAllReduce");
+  fake.ceArs.push_back({sendbuff, recvbuff, count, datatype, op, win, args});
+  return fake.ceArResult;
 }
 
 ncclResult_t bootstrapAllGather(void*, void* allData, int size) {
-  g_trace.push_back("allGather");
+  fake.trace.push_back("allGather");
   uint8_t* flags = static_cast<uint8_t*>(allData);
-  for (size_t r = 0; r < g_peerFlags.size(); r++) {
-    if (flags[r] == 0 || flags[r] == 1) g_gatheredOwnFlag.push_back(flags[r]);
+  for (size_t r = 0; r < fake.peerFlags.size(); r++) {
+    if (flags[r] == 0 || flags[r] == 1) fake.gatheredOwnFlag.push_back(flags[r]);
   }
-  if (g_bootstrapResult != ncclSuccess) return g_bootstrapResult;
-  for (size_t r = 0; r < g_peerFlags.size(); r++) {
-    if (g_peerFlags[r] != 0xff) flags[r] = g_peerFlags[r];
+  if (fake.bootstrapResult != ncclSuccess) return fake.bootstrapResult;
+  for (size_t r = 0; r < fake.peerFlags.size(); r++) {
+    if (fake.peerFlags[r] != 0xff) flags[r] = fake.peerFlags[r];
   }
   return ncclSuccess;
 }
@@ -545,17 +542,17 @@ extern "C" void __hipRegisterFunction(void**, const void*, char*, const char*, u
                                       dim3*, int*) {}
 extern "C" void __hipUnregisterFatBinary(void**) {}
 hipError_t __hipPushCallConfiguration(dim3 grid, dim3 block, size_t shmem, hipStream_t stream) {
-  g_pushedGrid = grid;
-  g_pushedBlock = block;
-  g_pushedShmem = shmem;
-  g_pushedStream = stream;
+  fake.pushedGrid = grid;
+  fake.pushedBlock = block;
+  fake.pushedShmem = shmem;
+  fake.pushedStream = stream;
   return hipSuccess;
 }
 hipError_t __hipPopCallConfiguration(dim3* grid, dim3* block, size_t* shmem, hipStream_t* stream) {
-  *grid = g_pushedGrid;
-  *block = g_pushedBlock;
-  *shmem = g_pushedShmem;
-  *stream = g_pushedStream;
+  *grid = fake.pushedGrid;
+  *block = fake.pushedBlock;
+  *shmem = fake.pushedShmem;
+  *stream = fake.pushedStream;
   return hipSuccess;
 }
 hipError_t hipLaunchKernel(const void* fn, dim3 grid, dim3 block, void** args, size_t shmem, hipStream_t stream) {
@@ -581,7 +578,7 @@ constexpr int kCudaDev = 3;
 constexpr size_t kCount = 32;
 
 bool Logged(ncclDebugLogLevel level, const std::string& needle) {
-  for (const LogLine& line : g_log) {
+  for (const LogLine& line : fake.log) {
     if (line.level == level && line.text.find(needle) != std::string::npos) return true;
   }
   return false;
@@ -590,73 +587,7 @@ bool Logged(ncclDebugLogLevel level, const std::string& needle) {
 class CollectivesMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
-    g_log.clear();
-    g_trace.clear();
-    g_enqueued.clear();
-    g_enqueueResults.clear();
-    g_parsedConfig = nullptr;
-    g_parseResult = ncclSuccess;
-    g_recorded.clear();
-    g_recorderSkips.clear();
-    g_recordResult = ncclSuccess;
-    g_selects.clear();
-    g_decision = rcclCollDecision{};
-    g_decision.algo = NCCL_ALGO_RING;
-    g_selectResult = ncclSuccess;
-    g_addonBeginResult = ncclSuccess;
-    g_addonEndSeen = ncclInternalError;
-    g_addons.clear();
-    g_addonResult = ncclSuccess;
-    g_ddaEnabledCalls.clear();
-    g_ddaEnabled = false;
-    g_ddaThreshold = 0;
-    g_thresholdFuncs.clear();
-    g_ddaEnableParam = 1;
-    g_algoName = "ADDON";
-    g_useAgDirect = nullptr;
-    g_useRsDirect = nullptr;
-    g_symkInitResult = ncclSuccess;
-    g_symkAvailable = true;
-    g_symkQueries.clear();
-    g_windows.clear();
-    g_findWindowFailPtr = nullptr;
-    g_sysmemWindows.clear();
-    g_regType = ncclSymSendNonregRecvNonreg;
-    g_regTypeResult = ncclSuccess;
-    g_regTypeArgs.clear();
-    g_ceEligCalls.clear();
-    g_hierEligCalls.clear();
-    g_ceElig = false;
-    g_hierElig = false;
-    g_capturing = false;
-    g_captureResult = ncclSuccess;
-    g_captureModes.clear();
-    g_memAllocSizes.clear();
-    g_memAllocFailAt = 0;
-    g_currentDevice = 9;
-    g_getDeviceResult = hipSuccess;
-    g_setDeviceCalls = 0;
-    g_setDeviceFailAt = 0;
-    g_memcpys.clear();
-    g_memcpyResults.clear();
-    g_syncResult = hipSuccess;
-    g_lastError = hipSuccess;
-    g_groupStartResult = ncclSuccess;
-    g_groupEndResult = ncclSuccess;
-    g_p2ps.clear();
-    g_p2pFailAt = 0;
-    g_peerMeta.clear();
-    g_broadcasts.clear();
-    g_commCountResult = ncclSuccess;
-    g_userRankResult = ncclSuccess;
-    g_profStartResult = ncclSuccess;
-    g_profArgs = ncclCeCollArgs{};
-    g_ceArs.clear();
-    g_ceArResult = ncclSuccess;
-    g_peerFlags.clear();
-    g_gatheredOwnFlag.clear();
-    g_bootstrapResult = ncclSuccess;
-    g_launches.clear();
+    fake = Fakes{};
     g_loadParam = [this](const char* env, int64_t deftVal) {
       params_.push_back(env);
       return deftVal;
@@ -669,8 +600,8 @@ class CollectivesMicrotest : public ::testing::Test {
   }
 
   void TearDown() override {
-    for (void* p : g_memAllocs) std::free(p);
-    g_memAllocs.clear();
+    for (void* p : fake.memAllocs) std::free(p);
+    fake.memAllocs.clear();
   }
 
   std::unique_ptr<ncclComm> MakeComm(int rank, int nRanks) {
@@ -683,7 +614,7 @@ class CollectivesMicrotest : public ::testing::Test {
 
   void SetArch(const char* arch) { std::snprintf(arch_, sizeof(arch_), "%s", arch); }
 
-  const ncclInfo& Info(size_t i = 0) { return g_enqueued.at(i).info; }
+  const ncclInfo& Info(size_t i = 0) { return fake.enqueued.at(i).info; }
 
   ncclResult_t AllGather(size_t count = kCount) {
     return ncclAllGather_impl(send_.data(), recv_.data(), count, ncclFloat32, comm_.get(), stream_);
@@ -698,7 +629,7 @@ class CollectivesMicrotest : public ::testing::Test {
     return ncclReduceScatter_impl(send_.data(), recv_.data(), count, ncclFloat32, ncclMin, comm_.get(), stream_);
   }
 
-  void Decide(int algo) { g_decision.algo = algo; }
+  void Decide(int algo) { fake.decision.algo = algo; }
 
   // Each addon arm of one collective: bracketed by the launch prologue/epilogue, no enqueue.
   struct AddonArm {
@@ -709,24 +640,24 @@ class CollectivesMicrotest : public ::testing::Test {
     for (const AddonArm& arm : arms) {
       SCOPED_TRACE(arm.fn);
       Decide(arm.algo);
-      g_trace.clear();
-      g_addons.clear();
-      g_enqueued.clear();
-      g_addonResult = ncclRemoteError;
+      fake.trace.clear();
+      fake.addons.clear();
+      fake.enqueued.clear();
+      fake.addonResult = ncclRemoteError;
       EXPECT_EQ(ncclRemoteError, call());
-      EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", arm.fn, "end"}), g_trace);
-      EXPECT_EQ(ncclRemoteError, g_addonEndSeen);
-      ASSERT_EQ(1u, g_addons.size());
-      EXPECT_EQ(send_.data(), g_addons[0].sendbuff);
-      EXPECT_EQ(recv_.data(), g_addons[0].recvbuff);
-      EXPECT_EQ(kCount, g_addons[0].count);
-      EXPECT_EQ(ncclFloat32, g_addons[0].datatype);
-      EXPECT_EQ(op, g_addons[0].op);
-      EXPECT_EQ(comm_.get(), g_addons[0].comm);
-      EXPECT_EQ(stream_, g_addons[0].stream);
-      EXPECT_TRUE(g_enqueued.empty());
+      EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", arm.fn, "end"}), fake.trace);
+      EXPECT_EQ(ncclRemoteError, fake.addonEndSeen);
+      ASSERT_EQ(1u, fake.addons.size());
+      EXPECT_EQ(send_.data(), fake.addons[0].sendbuff);
+      EXPECT_EQ(recv_.data(), fake.addons[0].recvbuff);
+      EXPECT_EQ(kCount, fake.addons[0].count);
+      EXPECT_EQ(ncclFloat32, fake.addons[0].datatype);
+      EXPECT_EQ(op, fake.addons[0].op);
+      EXPECT_EQ(comm_.get(), fake.addons[0].comm);
+      EXPECT_EQ(stream_, fake.addons[0].stream);
+      EXPECT_TRUE(fake.enqueued.empty());
     }
-    g_addonResult = ncclSuccess;
+    fake.addonResult = ncclSuccess;
   }
 
   char arch_[16] = "gfx942";
@@ -800,40 +731,40 @@ TEST_F(CollectivesMicrotest, AlltoAllPivotEnable_ReadsItsEnvWithDefaultOff) {
 // Dispatch helpers
 
 TEST_F(CollectivesMicrotest, AllReduceDda_SymmetricEligibleNeverTakesDda) {
-  g_ddaEnabled = true;
+  fake.ddaEnabled = true;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false, false));
-  EXPECT_TRUE(g_ddaEnabledCalls.empty());
+  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AR DDA disqualified: symk eligible"));
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_CeAllowedYieldsOffGfx1250) {
-  g_ddaEnabled = true;
+  fake.ddaEnabled = true;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, true, false));
-  EXPECT_TRUE(g_ddaEnabledCalls.empty());
+  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ceAllReduceAllowed=1 on non-gfx1250"));
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250FabricRunsEvenWhenCeIsAllowed) {
   SetArch("gfx1250");
-  g_ddaEnabled = true;
-  g_ddaThreshold = 4096;
+  fake.ddaEnabled = true;
+  fake.ddaThreshold = 4096;
   EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat16, false, true, false));
-  ASSERT_EQ(1u, g_ddaEnabledCalls.size());
-  EXPECT_EQ(kCount * 2, g_ddaEnabledCalls[0].totalBytes);
-  EXPECT_EQ(4096u, g_ddaEnabledCalls[0].threshold);
-  EXPECT_FALSE(g_ddaEnabledCalls[0].query);
-  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, g_thresholdFuncs);
-  EXPECT_TRUE(g_log.empty());
+  ASSERT_EQ(1u, fake.ddaEnabledCalls.size());
+  EXPECT_EQ(kCount * 2, fake.ddaEnabledCalls[0].totalBytes);
+  EXPECT_EQ(4096u, fake.ddaEnabledCalls[0].threshold);
+  EXPECT_FALSE(fake.ddaEnabledCalls[0].query);
+  EXPECT_EQ(std::vector<ncclFunc_t>{ncclFuncAllReduce}, fake.thresholdFuncs);
+  EXPECT_TRUE(fake.log.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_ExplainsADisabledDda) {
-  g_ddaEnableParam = 0;
+  fake.ddaEnableParam = 0;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AR DDA disqualified: RCCL_DDA_ENABLE=0"));
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_ExplainsAMessageOverTheThreshold) {
-  g_ddaThreshold = 64;
+  fake.ddaThreshold = 64;
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat64, false, false, false));
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AR DDA disqualified: msgBytes=256 > entryThreshold=64"));
 }
@@ -846,30 +777,30 @@ TEST_F(CollectivesMicrotest, AllReduceDda_Gfx1250WithCeAllowedFallsToTheThreshol
 
 TEST_F(CollectivesMicrotest, AllReduceDda_QueryIsSilent) {
   EXPECT_FALSE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, true, false, true));
-  EXPECT_TRUE(g_log.empty());
+  EXPECT_TRUE(fake.log.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllReduceDda_TakesDdaWhenNothingElseServesTheCall) {
-  g_ddaEnabled = true;
+  fake.ddaEnabled = true;
   EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm_.get(), kCount, ncclFloat32, false, false, false));
-  EXPECT_TRUE(g_log.empty());
+  EXPECT_TRUE(fake.log.empty());
 }
 
 TEST_F(CollectivesMicrotest, AlltoAllDda_YieldsToCe) {
-  g_ddaEnabled = true;
+  fake.ddaEnabled = true;
   EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(comm_.get(), 1024, true));
-  EXPECT_TRUE(g_ddaEnabledCalls.empty());
+  EXPECT_TRUE(fake.ddaEnabledCalls.empty());
 }
 
 TEST_F(CollectivesMicrotest, AlltoAllDda_AsksDdaWithTheAlltoAllThreshold) {
-  g_ddaThreshold = 2048;
+  fake.ddaThreshold = 2048;
   EXPECT_FALSE(rcclAlltoAllShouldTakeDdaPath(comm_.get(), 1024, false));
-  g_ddaEnabled = true;
+  fake.ddaEnabled = true;
   EXPECT_TRUE(rcclAlltoAllShouldTakeDdaPath(comm_.get(), 1024, false));
-  ASSERT_EQ(2u, g_ddaEnabledCalls.size());
-  EXPECT_EQ(1024u, g_ddaEnabledCalls[1].totalBytes);
-  EXPECT_EQ(2048u, g_ddaEnabledCalls[1].threshold);
-  EXPECT_EQ(ncclFuncAlltoAll, g_thresholdFuncs.at(1));
+  ASSERT_EQ(2u, fake.ddaEnabledCalls.size());
+  EXPECT_EQ(1024u, fake.ddaEnabledCalls[1].totalBytes);
+  EXPECT_EQ(2048u, fake.ddaEnabledCalls[1].threshold);
+  EXPECT_EQ(ncclFuncAlltoAll, fake.thresholdFuncs.at(1));
 }
 
 TEST_F(CollectivesMicrotest, CommIsSuspended_NeedsAMemoryManager) {
@@ -930,8 +861,8 @@ class CollectivesSymmetricMicrotest : public CollectivesMicrotest {
     comm_->symmetricSupport = 1;
     sendWin_.winFlags = NCCL_WIN_COLL_SYMMETRIC;
     recvWin_.winFlags = NCCL_WIN_COLL_SYMMETRIC;
-    g_windows[send_.data()] = &sendWin_;
-    g_windows[recv_.data()] = &recvWin_;
+    fake.windows[send_.data()] = &sendWin_;
+    fake.windows[recv_.data()] = &recvWin_;
   }
   bool RequestedWin() {
     return isSymmetricKernelRequestedWin(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, kCount, &sendWin_,
@@ -947,11 +878,11 @@ class CollectivesSymmetricMicrotest : public CollectivesMicrotest {
 
 TEST_F(CollectivesSymmetricMicrotest, Win_BothWindowsSymmetricAndKernelAvailable) {
   EXPECT_TRUE(RequestedWin());
-  ASSERT_EQ(1u, g_symkQueries.size());
-  EXPECT_EQ(ncclFuncAllReduce, g_symkQueries[0].coll);
-  EXPECT_EQ(ncclDevSum, g_symkQueries[0].red);
-  EXPECT_EQ(ncclFloat32, g_symkQueries[0].type);
-  EXPECT_EQ(kCount, g_symkQueries[0].nElts);
+  ASSERT_EQ(1u, fake.symkQueries.size());
+  EXPECT_EQ(ncclFuncAllReduce, fake.symkQueries[0].coll);
+  EXPECT_EQ(ncclDevSum, fake.symkQueries[0].red);
+  EXPECT_EQ(ncclFloat32, fake.symkQueries[0].type);
+  EXPECT_EQ(kCount, fake.symkQueries[0].nElts);
 }
 
 TEST_F(CollectivesSymmetricMicrotest, Win_EachPrerequisiteIsRequired) {
@@ -960,13 +891,13 @@ TEST_F(CollectivesSymmetricMicrotest, Win_EachPrerequisiteIsRequired) {
   comm_->symmetricSupport = 0;
   EXPECT_FALSE(RequestedWin());
   comm_->symmetricSupport = 1;
-  g_symkInitResult = ncclInternalError;
+  fake.symkInitResult = ncclInternalError;
   EXPECT_FALSE(RequestedWin());
-  EXPECT_TRUE(g_symkQueries.empty());
-  g_symkInitResult = ncclSuccess;
-  g_symkAvailable = false;
+  EXPECT_TRUE(fake.symkQueries.empty());
+  fake.symkInitResult = ncclSuccess;
+  fake.symkAvailable = false;
   EXPECT_FALSE(RequestedWin());
-  g_symkAvailable = true;
+  fake.symkAvailable = true;
   EXPECT_FALSE(isSymmetricKernelRequestedWin(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, kCount, nullptr,
                                              &recvWin_));
   EXPECT_FALSE(isSymmetricKernelRequestedWin(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat32, kCount, &sendWin_,
@@ -981,12 +912,12 @@ TEST_F(CollectivesSymmetricMicrotest, Win_EachPrerequisiteIsRequired) {
 TEST_F(CollectivesSymmetricMicrotest, Request_LooksUpBothBuffersAndAnswersLocally) {
   comm_->bootstrap = reinterpret_cast<void*>(0xb007);
   EXPECT_TRUE(Requested(false));
-  EXPECT_EQ((std::vector<std::string>{"findWindow", "findWindow"}), g_trace);
-  ASSERT_EQ(1u, g_symkQueries.size());
-  EXPECT_EQ(ncclFuncAllGather, g_symkQueries[0].coll);
-  EXPECT_EQ(ncclDevMinMax, g_symkQueries[0].red);
-  EXPECT_EQ(ncclBfloat16, g_symkQueries[0].type);
-  g_windows.erase(recv_.data());
+  EXPECT_EQ((std::vector<std::string>{"findWindow", "findWindow"}), fake.trace);
+  ASSERT_EQ(1u, fake.symkQueries.size());
+  EXPECT_EQ(ncclFuncAllGather, fake.symkQueries[0].coll);
+  EXPECT_EQ(ncclDevMinMax, fake.symkQueries[0].red);
+  EXPECT_EQ(ncclBfloat16, fake.symkQueries[0].type);
+  fake.windows.erase(recv_.data());
   EXPECT_FALSE(Requested(false));
   EXPECT_FALSE(isSymmetricKernelRequested(nullptr, ncclFuncAllGather, ncclDevSum, ncclFloat32, kCount, send_.data(),
                                           recv_.data(), true));
@@ -997,17 +928,17 @@ TEST_F(CollectivesSymmetricMicrotest, Request_AgreementNeedsPeersAndABootstrap) 
   comm_->bootstrap = reinterpret_cast<void*>(0xb007);
   comm_->nRanks = 1;
   EXPECT_TRUE(Requested(true));
-  EXPECT_EQ(0, std::count(g_trace.begin(), g_trace.end(), "allGather"));
+  EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "allGather"));
 }
 
 TEST_F(CollectivesSymmetricMicrotest, Request_AgreementIsUnanimous) {
   comm_->bootstrap = reinterpret_cast<void*>(0xb007);
-  g_peerFlags = {1, 0xff, 1, 1};
+  fake.peerFlags = {1, 0xff, 1, 1};
   EXPECT_TRUE(Requested(true));
-  EXPECT_EQ((std::vector<uint8_t>{0, 1, 0, 0}), g_gatheredOwnFlag);  // only this rank's slot is set
-  g_peerFlags = {1, 0xff, 1, 0};
+  EXPECT_EQ((std::vector<uint8_t>{0, 1, 0, 0}), fake.gatheredOwnFlag);  // only this rank's slot is set
+  fake.peerFlags = {1, 0xff, 1, 0};
   EXPECT_FALSE(Requested(true));
-  g_peerFlags = {0, 0xff, 1, 1};
+  fake.peerFlags = {0, 0xff, 1, 1};
   EXPECT_FALSE(Requested(true));
 }
 
@@ -1015,15 +946,15 @@ TEST_F(CollectivesSymmetricMicrotest, Request_AgreementIsUnanimous) {
 TEST_F(CollectivesSymmetricMicrotest, Request_IneligibleRankStillJoinsTheAgreement) {
   comm_->bootstrap = reinterpret_cast<void*>(0xb007);
   comm_->symmetricSupport = 0;
-  g_peerFlags = {1, 0xff, 1, 1};
+  fake.peerFlags = {1, 0xff, 1, 1};
   EXPECT_FALSE(Requested(true));
-  EXPECT_EQ((std::vector<uint8_t>{0, 0, 0, 0}), g_gatheredOwnFlag);
+  EXPECT_EQ((std::vector<uint8_t>{0, 0, 0, 0}), fake.gatheredOwnFlag);
 }
 
 TEST_F(CollectivesSymmetricMicrotest, Request_FailedAgreementIsNo) {
   comm_->bootstrap = reinterpret_cast<void*>(0xb007);
-  g_peerFlags = {1, 0xff, 1, 1};
-  g_bootstrapResult = ncclRemoteError;
+  fake.peerFlags = {1, 0xff, 1, 1};
+  fake.bootstrapResult = ncclRemoteError;
   EXPECT_FALSE(Requested(true));
 }
 
@@ -1064,12 +995,12 @@ TEST_F(CollectivesMicrotest, ConfigEntryPoints_EnqueueTheParsedConfig) {
   };
   for (const Case& tc : cases) {
     SCOPED_TRACE(tc.name);
-    g_enqueued.clear();
-    g_parsedConfig = nullptr;
-    g_enqueueResults = {ncclInvalidUsage};
+    fake.enqueued.clear();
+    fake.parsedConfig = nullptr;
+    fake.enqueueResults = {ncclInvalidUsage};
     EXPECT_EQ(ncclInvalidUsage, tc.call());
-    EXPECT_EQ(&config, g_parsedConfig);
-    ASSERT_EQ(1u, g_enqueued.size());
+    EXPECT_EQ(&config, fake.parsedConfig);
+    ASSERT_EQ(1u, fake.enqueued.size());
     const ncclInfo& info = Info();
     EXPECT_EQ(tc.coll, info.coll);
     EXPECT_STREQ(tc.name, info.opName);
@@ -1085,13 +1016,13 @@ TEST_F(CollectivesMicrotest, ConfigEntryPoints_EnqueueTheParsedConfig) {
     EXPECT_EQ(tc.sliceSteps, info.sliceSteps);
     EXPECT_EQ(7, info.collConfig.minCTAs);
     EXPECT_FALSE(info.decisionValid);
-    EXPECT_TRUE(g_recorded.empty());
+    EXPECT_TRUE(fake.recorded.empty());
 
-    g_enqueued.clear();
-    g_parseResult = ncclInvalidArgument;
+    fake.enqueued.clear();
+    fake.parseResult = ncclInvalidArgument;
     EXPECT_EQ(ncclInvalidArgument, tc.call());
-    EXPECT_TRUE(g_enqueued.empty());
-    g_parseResult = ncclSuccess;
+    EXPECT_TRUE(fake.enqueued.empty());
+    fake.parseResult = ncclSuccess;
   }
 }
 
@@ -1130,16 +1061,16 @@ TEST_F(CollectivesMicrotest, PlainEntryPoints_RecordThenEnqueue) {
   };
   for (const Case& tc : cases) {
     SCOPED_TRACE(tc.name);
-    g_enqueued.clear();
-    g_recorded.clear();
-    g_trace.clear();
-    g_enqueueResults = {ncclInvalidUsage};
+    fake.enqueued.clear();
+    fake.recorded.clear();
+    fake.trace.clear();
+    fake.enqueueResults = {ncclInvalidUsage};
     EXPECT_EQ(ncclInvalidUsage, tc.call());
-    EXPECT_EQ((std::vector<std::string>{"record", std::string("enqueue ") + tc.name}), g_trace);
-    ASSERT_EQ(1u, g_recorded.size());
-    EXPECT_EQ(tc.record, g_recorded[0].type);
-    EXPECT_EQ(kCount, g_recorded[0].count);
-    EXPECT_EQ(tc.root, g_recorded[0].root);
+    EXPECT_EQ((std::vector<std::string>{"record", std::string("enqueue ") + tc.name}), fake.trace);
+    ASSERT_EQ(1u, fake.recorded.size());
+    EXPECT_EQ(tc.record, fake.recorded[0].type);
+    EXPECT_EQ(kCount, fake.recorded[0].count);
+    EXPECT_EQ(tc.root, fake.recorded[0].root);
     const ncclInfo& info = Info();
     EXPECT_EQ(tc.coll, info.coll);
     EXPECT_STREQ(tc.name, info.opName);
@@ -1156,30 +1087,30 @@ TEST_F(CollectivesMicrotest, PlainEntryPoints_RecordThenEnqueue) {
     EXPECT_EQ(nullptr, info.acc);
     EXPECT_FALSE(info.useDirect);
 
-    g_enqueued.clear();
-    g_recordResult = ncclSystemError;
+    fake.enqueued.clear();
+    fake.recordResult = ncclSystemError;
     EXPECT_EQ(ncclSystemError, tc.call());
-    EXPECT_TRUE(g_enqueued.empty());
-    g_recordResult = ncclSuccess;
+    EXPECT_TRUE(fake.enqueued.empty());
+    fake.recordResult = ncclSuccess;
   }
 }
 
 TEST_F(CollectivesMicrotest, Bcast_RecordsInPlaceThenBroadcasts) {
   EXPECT_EQ(ncclSuccess, ncclBcast(recv_.data(), kCount, ncclInt8, 3, comm_.get(), stream_));
-  ASSERT_EQ(1u, g_recorded.size());
-  EXPECT_EQ(rccl::rrBcast, g_recorded[0].type);
-  EXPECT_EQ(recv_.data(), g_recorded[0].sendbuff);
-  EXPECT_EQ(recv_.data(), g_recorded[0].recvbuff);
-  EXPECT_EQ(3, g_recorded[0].root);
-  ASSERT_EQ(1u, g_broadcasts.size());
-  EXPECT_EQ(recv_.data(), g_broadcasts[0].sendbuff);
-  EXPECT_EQ(recv_.data(), g_broadcasts[0].recvbuff);
-  EXPECT_EQ(kCount, g_broadcasts[0].count);
-  EXPECT_EQ(3, g_broadcasts[0].root);
+  ASSERT_EQ(1u, fake.recorded.size());
+  EXPECT_EQ(rccl::rrBcast, fake.recorded[0].type);
+  EXPECT_EQ(recv_.data(), fake.recorded[0].sendbuff);
+  EXPECT_EQ(recv_.data(), fake.recorded[0].recvbuff);
+  EXPECT_EQ(3, fake.recorded[0].root);
+  ASSERT_EQ(1u, fake.broadcasts.size());
+  EXPECT_EQ(recv_.data(), fake.broadcasts[0].sendbuff);
+  EXPECT_EQ(recv_.data(), fake.broadcasts[0].recvbuff);
+  EXPECT_EQ(kCount, fake.broadcasts[0].count);
+  EXPECT_EQ(3, fake.broadcasts[0].root);
 
-  g_recordResult = ncclSystemError;
+  fake.recordResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, ncclBcast(recv_.data(), kCount, ncclInt8, 3, comm_.get(), stream_));
-  EXPECT_EQ(1u, g_broadcasts.size());
+  EXPECT_EQ(1u, fake.broadcasts.size());
 }
 
 TEST_F(CollectivesMicrotest, OneSidedEntryPoints_CarryTheWindowAndSignal) {
@@ -1215,7 +1146,7 @@ TEST_F(CollectivesMicrotest, OneSidedEntryPoints_CarryTheWindowAndSignal) {
   EXPECT_EQ(0x5u, sig.flags);
 
   ncclWaitSignalDesc_t descs[2] = {};
-  g_enqueueResults = {ncclInProgress};
+  fake.enqueueResults = {ncclInProgress};
   EXPECT_EQ(ncclInProgress, ncclWaitSignal_impl(2, descs, comm_.get(), stream_));
   const ncclInfo& wait = Info(2);
   EXPECT_EQ(ncclFuncWaitSignal, wait.coll);
@@ -1226,7 +1157,7 @@ TEST_F(CollectivesMicrotest, OneSidedEntryPoints_CarryTheWindowAndSignal) {
   EXPECT_EQ(descs, wait.signalDescs);
   EXPECT_EQ(comm_.get(), wait.comm);
   EXPECT_EQ(stream_, wait.stream);
-  EXPECT_TRUE(g_recorded.empty());
+  EXPECT_TRUE(fake.recorded.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllReduceWithBias_RejectsANullAccumulator) {
@@ -1234,16 +1165,16 @@ TEST_F(CollectivesMicrotest, AllReduceWithBias_RejectsANullAccumulator) {
             ncclAllReduceWithBias_impl(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum, comm_.get(), stream_,
                                        nullptr));
   EXPECT_TRUE(Logged(NCCL_LOG_WARN, "acc cannot be nullptr"));
-  EXPECT_TRUE(g_recorded.empty());
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.recorded.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllReduceWithBias_EnqueuesTheAccumulatorWithoutADecision) {
   float acc[kCount] = {};
   EXPECT_EQ(ncclSuccess, ncclAllReduceWithBias_impl(send_.data(), recv_.data(), kCount, ncclFloat32, ncclMax,
                                                     comm_.get(), stream_, acc));
-  ASSERT_EQ(1u, g_recorded.size());
-  EXPECT_EQ(rccl::rrAllReduceWithBias, g_recorded[0].type);
+  ASSERT_EQ(1u, fake.recorded.size());
+  EXPECT_EQ(rccl::rrAllReduceWithBias, fake.recorded[0].type);
   const ncclInfo& info = Info();
   EXPECT_EQ(ncclFuncAllReduce, info.coll);
   EXPECT_EQ(acc, info.acc);
@@ -1251,12 +1182,12 @@ TEST_F(CollectivesMicrotest, AllReduceWithBias_EnqueuesTheAccumulatorWithoutADec
   EXPECT_EQ(ALLREDUCE_CHUNKSTEPS, info.chunkSteps);
   EXPECT_EQ(ALLREDUCE_SLICESTEPS, info.sliceSteps);
   EXPECT_FALSE(info.decisionValid);
-  EXPECT_TRUE(g_selects.empty());
+  EXPECT_TRUE(fake.selects.empty());
 
-  g_recordResult = ncclSystemError;
+  fake.recordResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, ncclAllReduceWithBias_impl(send_.data(), recv_.data(), kCount, ncclFloat32, ncclMax,
                                                         comm_.get(), stream_, acc));
-  EXPECT_EQ(1u, g_enqueued.size());
+  EXPECT_EQ(1u, fake.enqueued.size());
 }
 
 // gfx950 single-node comms use one chunk and one slice step; other arches only shrink the slices.
@@ -1280,7 +1211,7 @@ TEST_F(CollectivesMicrotest, SliceSteps_FollowArchAndOneSlice) {
     SCOPED_TRACE(std::string(tc.arch) + " oneSlice=" + std::to_string(tc.oneSlice));
     SetArch(tc.arch);
     comm_->rcclUseOneSlice = tc.oneSlice;
-    g_enqueued.clear();
+    fake.enqueued.clear();
     ASSERT_EQ(ncclSuccess, ncclAllReduce_impl(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum, comm_.get(),
                                               stream_));
     ASSERT_EQ(ncclSuccess, ncclAllReduceWithBias_impl(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum,
@@ -1288,7 +1219,7 @@ TEST_F(CollectivesMicrotest, SliceSteps_FollowArchAndOneSlice) {
     ASSERT_EQ(ncclSuccess, ncclAllGather_impl(send_.data(), recv_.data(), kCount, ncclFloat32, comm_.get(), stream_));
     ASSERT_EQ(ncclSuccess, ncclReduceScatter_impl(send_.data(), recv_.data(), kCount, ncclFloat32, ncclSum,
                                                   comm_.get(), stream_));
-    ASSERT_EQ(4u, g_enqueued.size());
+    ASSERT_EQ(4u, fake.enqueued.size());
     EXPECT_EQ(tc.arChunk, Info(0).chunkSteps);
     EXPECT_EQ(tc.arSlice, Info(0).sliceSteps);
     EXPECT_EQ(tc.arChunk, Info(1).chunkSteps);
@@ -1303,20 +1234,20 @@ TEST_F(CollectivesMicrotest, SliceSteps_FollowArchAndOneSlice) {
 // AllGather dispatch
 
 TEST_F(CollectivesMicrotest, AllGather_SelectsOnceAndEnqueuesTheDecision) {
-  g_decision = {NCCL_ALGO_RING, NCCL_PROTO_LL, 3, true, true};
-  g_enqueueResults = {ncclInProgress};
+  fake.decision = {NCCL_ALGO_RING, NCCL_PROTO_LL, 3, true, true};
+  fake.enqueueResults = {ncclInProgress};
   EXPECT_EQ(ncclInProgress, AllGather());
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue AllGather"}), g_trace);
-  ASSERT_EQ(1u, g_recorded.size());
-  EXPECT_EQ(rccl::rrAllGather, g_recorded[0].type);
-  ASSERT_EQ(1u, g_selects.size());
-  EXPECT_EQ("AllGather", g_selects[0].coll);
-  EXPECT_EQ(send_.data(), g_selects[0].sendbuff);
-  EXPECT_EQ(recv_.data(), g_selects[0].recvbuff);
-  EXPECT_EQ(kCount, g_selects[0].count);
-  EXPECT_EQ(stream_, g_selects[0].stream);
-  EXPECT_FALSE(g_selects[0].query);
-  EXPECT_FALSE(g_selects[0].hint);
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue AllGather"}), fake.trace);
+  ASSERT_EQ(1u, fake.recorded.size());
+  EXPECT_EQ(rccl::rrAllGather, fake.recorded[0].type);
+  ASSERT_EQ(1u, fake.selects.size());
+  EXPECT_EQ("AllGather", fake.selects[0].coll);
+  EXPECT_EQ(send_.data(), fake.selects[0].sendbuff);
+  EXPECT_EQ(recv_.data(), fake.selects[0].recvbuff);
+  EXPECT_EQ(kCount, fake.selects[0].count);
+  EXPECT_EQ(stream_, fake.selects[0].stream);
+  EXPECT_FALSE(fake.selects[0].query);
+  EXPECT_FALSE(fake.selects[0].hint);
   const ncclInfo& info = Info();
   EXPECT_EQ(ncclFuncAllGather, info.coll);
   EXPECT_STREQ("AllGather", info.opName);
@@ -1333,24 +1264,24 @@ TEST_F(CollectivesMicrotest, AllGather_SelectsOnceAndEnqueuesTheDecision) {
   EXPECT_TRUE(info.decision.ceCapturing);
   EXPECT_TRUE(info.decision.ceArGraphAllowed);
   EXPECT_FALSE(info.useDirect);
-  EXPECT_TRUE(g_log.empty());
+  EXPECT_TRUE(fake.log.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllGather_FailuresBeforeDispatchStopIt) {
-  g_commCountResult = ncclInvalidArgument;
+  fake.commCountResult = ncclInvalidArgument;
   EXPECT_EQ(ncclInvalidArgument, AllGather());
-  g_commCountResult = ncclSuccess;
-  g_userRankResult = ncclInvalidArgument;
+  fake.commCountResult = ncclSuccess;
+  fake.userRankResult = ncclInvalidArgument;
   EXPECT_EQ(ncclInvalidArgument, AllGather());
-  EXPECT_TRUE(g_recorded.empty());
-  g_userRankResult = ncclSuccess;
-  g_recordResult = ncclSystemError;
+  EXPECT_TRUE(fake.recorded.empty());
+  fake.userRankResult = ncclSuccess;
+  fake.recordResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, AllGather());
-  EXPECT_TRUE(g_selects.empty());
-  g_recordResult = ncclSuccess;
-  g_selectResult = ncclInternalError;
+  EXPECT_TRUE(fake.selects.empty());
+  fake.recordResult = ncclSuccess;
+  fake.selectResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, AllGather());
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllGather_DdaArmsLaunchAsAddons) {
@@ -1368,29 +1299,29 @@ TEST_F(CollectivesMicrotest, AllGather_DdaArmsLaunchAsAddons) {
 
 TEST_F(CollectivesMicrotest, AllGather_FailedPrologueSkipsTheAddon) {
   Decide(RCCL_DDA_IPC);
-  g_addonBeginResult = ncclSystemError;
+  fake.addonBeginResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, AllGather());
-  EXPECT_TRUE(g_addons.empty());
-  EXPECT_EQ(ncclSystemError, g_addonEndSeen);
+  EXPECT_TRUE(fake.addons.empty());
+  EXPECT_EQ(ncclSystemError, fake.addonEndSeen);
 }
 
 TEST_F(CollectivesMicrotest, AllGather_CeAndSymmetricEnqueueTheirDecision) {
   for (int algo : {RCCL_CE_REGISTERED, RCCL_CE_SCRATCH, RCCL_SYMMETRIC}) {
     SCOPED_TRACE(algo);
     Decide(algo);
-    g_enqueued.clear();
+    fake.enqueued.clear();
     EXPECT_EQ(ncclSuccess, AllGather());
-    ASSERT_EQ(1u, g_enqueued.size());
+    ASSERT_EQ(1u, fake.enqueued.size());
     EXPECT_EQ(algo, Info().decision.algo);
     EXPECT_FALSE(Info().useDirect);
-    EXPECT_TRUE(g_addons.empty());
+    EXPECT_TRUE(fake.addons.empty());
   }
 }
 
 TEST_F(CollectivesMicrotest, AllGather_DirectMarksTheInfo) {
   Decide(RCCL_DIRECT_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather());
-  ASSERT_EQ(1u, g_enqueued.size());
+  ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_TRUE(Info().useDirect);
   EXPECT_EQ(RCCL_DIRECT_ALLGATHER, Info().decision.algo);
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "RCCL DIRECT ALLGATHER count = 32, msgSize = 512"));
@@ -1400,7 +1331,7 @@ TEST_F(CollectivesMicrotest, AllGather_DirectMarksTheInfo) {
 TEST_F(CollectivesMicrotest, AllGather_EmptyDirectCallIsANoOp) {
   Decide(RCCL_DIRECT_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather(0));
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
@@ -1408,14 +1339,14 @@ TEST_F(CollectivesMicrotest, AllGather_CheckModeDivertsAddonsButKeepsDirect) {
   comm_->rank = 0;
   Decide(RCCL_DDA_IPC);
   EXPECT_EQ(ncclSuccess, AllGather());
-  ASSERT_EQ(1u, g_enqueued.size());
+  ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_EQ(RCCL_DDA_IPC, Info().decision.algo);
-  EXPECT_TRUE(g_addons.empty());
+  EXPECT_TRUE(fake.addons.empty());
   EXPECT_FALSE(Logged(NCCL_LOG_INFO, "impl selected"));
 
   Decide(RCCL_DIRECT_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather());
-  ASSERT_EQ(2u, g_enqueued.size());
+  ASSERT_EQ(2u, fake.enqueued.size());
   EXPECT_TRUE(Info(1).useDirect);
 }
 
@@ -1430,7 +1361,7 @@ TEST_F(CollectivesMicrotest, AllGather_NamesTheAddonOnRankZeroOnly) {
   Decide(RCCL_DIRECT_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather impl selected: algo ADDON"));
-  g_algoName = nullptr;
+  fake.algoName = nullptr;
   EXPECT_EQ(ncclSuccess, AllGather());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllGather impl selected: algo ?"));
 }
@@ -1457,11 +1388,11 @@ class CollectivesHierarchicalMicrotest : public CollectivesMicrotest {
     comm_->addonStopEvent = stopEvent_;
     send_.assign(kCount * kLocal * kNodes, 1.0f);
     recv_.assign(kCount * kLocal * kNodes, 0.0f);
-    g_useAgDirect = [this](ncclComm* comm, size_t msgSize) {
+    fake.useAgDirect = [this](ncclComm* comm, size_t msgSize) {
       directAsks_.push_back({comm, msgSize});
       return comm == directComm_ || directComm_ == &any_;
     };
-    g_useRsDirect = g_useAgDirect;
+    fake.useRsDirect = fake.useAgDirect;
   }
 
   struct DirectAsk {
@@ -1484,7 +1415,7 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_InterThenIntraThenShuffle) {
   EXPECT_EQ(ncclSuccess, AllGather());
   EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", "enqueue HierarchicalAllGather-Inter",
                                       "enqueue HierarchicalAllGather-Intra", "launch", "end"}),
-            g_trace);
+            fake.trace);
   ASSERT_EQ(2u, directAsks_.size());
   EXPECT_EQ(inter_.get(), directAsks_[0].comm);
   EXPECT_EQ(kCount * kNodes * sizeof(float), directAsks_[0].msgSize);
@@ -1508,8 +1439,8 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_InterThenIntraThenShuffle) {
   EXPECT_EQ(intra_.get(), intra.comm);
   EXPECT_EQ(ALLGATHER_SLICESTEPS, intra.sliceSteps);
 
-  ASSERT_EQ(1u, g_launches.size());
-  const KernelLaunch& k = g_launches[0];
+  ASSERT_EQ(1u, fake.launches.size());
+  const KernelLaunch& k = fake.launches[0];
   EXPECT_EQ(reinterpret_cast<const void*>(hierarchicalShuffle), k.fn);
   EXPECT_EQ(8u, k.grid.x);
   EXPECT_EQ(static_cast<unsigned>(HIERARCHICAL_SHUFFLE_THREADS), k.block.x);
@@ -1535,12 +1466,12 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_InPlaceStagesTheOwnSliceFirst
   Decide(RCCL_HIERARCHICAL_ALLGATHER);
   const float* own = recv_.data() + comm_->rank * kCount;
   EXPECT_EQ(ncclSuccess, ncclAllGather_impl(own, recv_.data(), kCount, ncclFloat32, comm_.get(), stream_));
-  ASSERT_EQ(1u, g_memcpys.size());
-  EXPECT_EQ(temp_.data(), g_memcpys[0].dst);
-  EXPECT_EQ(own, g_memcpys[0].src);
-  EXPECT_EQ(kCount * sizeof(float), g_memcpys[0].bytes);
-  EXPECT_EQ(hipMemcpyDeviceToDevice, g_memcpys[0].kind);
-  EXPECT_EQ(stream_, g_memcpys[0].stream);
+  ASSERT_EQ(1u, fake.memcpys.size());
+  EXPECT_EQ(temp_.data(), fake.memcpys[0].dst);
+  EXPECT_EQ(own, fake.memcpys[0].src);
+  EXPECT_EQ(kCount * sizeof(float), fake.memcpys[0].bytes);
+  EXPECT_EQ(hipMemcpyDeviceToDevice, fake.memcpys[0].kind);
+  EXPECT_EQ(stream_, fake.memcpys[0].stream);
   EXPECT_EQ(temp_.data(), Info(0).sendbuff);
 }
 
@@ -1548,7 +1479,7 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_DirectStepsPostPerPeer) {
   Decide(RCCL_HIERARCHICAL_ALLGATHER);
   directComm_ = &any_;
   EXPECT_EQ(ncclSuccess, AllGather());
-  ASSERT_EQ(2u, g_enqueued.size());
+  ASSERT_EQ(2u, fake.enqueued.size());
   EXPECT_TRUE(Info(0).useDirect);
   EXPECT_STREQ("AllGather", Info(0).opName);
   EXPECT_EQ(inter_.get(), Info(0).comm);
@@ -1571,7 +1502,7 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_InterDirectOnlyUpTo16Nodes) {
   EXPECT_TRUE(Info(0).useDirect);
   inter_->nRanks = 17;
   directAsks_.clear();
-  g_enqueued.clear();
+  fake.enqueued.clear();
   EXPECT_EQ(ncclSuccess, AllGather());
   ASSERT_EQ(1u, directAsks_.size());
   EXPECT_EQ(intra_.get(), directAsks_[0].comm);
@@ -1581,40 +1512,40 @@ TEST_F(CollectivesHierarchicalMicrotest, AllGather_InterDirectOnlyUpTo16Nodes) {
 TEST_F(CollectivesHierarchicalMicrotest, AllGather_EmptyCallLaunchesNothing) {
   Decide(RCCL_HIERARCHICAL_ALLGATHER);
   EXPECT_EQ(ncclSuccess, AllGather(0));
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", "end"}), g_trace);
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", "end"}), fake.trace);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, AllGather_EachStepFailureStopsTheRest) {
   Decide(RCCL_HIERARCHICAL_ALLGATHER);
   const float* own = recv_.data() + comm_->rank * kCount;
-  g_memcpyResults = {hipErrorOutOfMemory};
+  fake.memcpyResults = {hipErrorOutOfMemory};
   EXPECT_EQ(ncclUnhandledCudaError,
             ncclAllGather_impl(own, recv_.data(), kCount, ncclFloat32, comm_.get(), stream_));
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 
-  g_enqueueResults = {ncclRemoteError};
+  fake.enqueueResults = {ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, AllGather());
-  EXPECT_EQ(1u, g_enqueued.size());
+  EXPECT_EQ(1u, fake.enqueued.size());
 
-  g_enqueued.clear();
-  g_enqueueResults = {ncclSuccess, ncclRemoteError};
+  fake.enqueued.clear();
+  fake.enqueueResults = {ncclSuccess, ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, AllGather());
-  EXPECT_EQ(2u, g_enqueued.size());
-  EXPECT_TRUE(g_launches.empty());
+  EXPECT_EQ(2u, fake.enqueued.size());
+  EXPECT_TRUE(fake.launches.empty());
 
   directComm_ = &any_;
-  g_enqueued.clear();
-  g_enqueueResults = {ncclRemoteError};
+  fake.enqueued.clear();
+  fake.enqueueResults = {ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, AllGather());
-  EXPECT_EQ(1u, g_enqueued.size());
-  g_enqueued.clear();
-  g_enqueueResults = {ncclSuccess, ncclRemoteError};
+  EXPECT_EQ(1u, fake.enqueued.size());
+  fake.enqueued.clear();
+  fake.enqueueResults = {ncclSuccess, ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, AllGather());
-  EXPECT_TRUE(g_launches.empty());
+  EXPECT_TRUE(fake.launches.empty());
 
-  g_lastError = hipErrorLaunchFailure;
+  fake.lastError = hipErrorLaunchFailure;
   EXPECT_EQ(ncclUnhandledCudaError, AllGather());
-  EXPECT_EQ(1u, g_launches.size());
+  EXPECT_EQ(1u, fake.launches.size());
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ShuffleBlocksScaleWithTheGatheredBytes) {
@@ -1626,9 +1557,9 @@ TEST_F(CollectivesHierarchicalMicrotest, ShuffleBlocksScaleWithTheGatheredBytes)
   comm_->hierarchicalTempBuffer = temp_.data();
   EXPECT_EQ(ncclSuccess, AllGather(perRank));
   EXPECT_EQ(ncclSuccess, AllGather(perRank + 1));
-  ASSERT_EQ(2u, g_launches.size());
-  EXPECT_EQ(8u, g_launches[0].grid.x);
-  EXPECT_EQ(16u, g_launches[1].grid.x);
+  ASSERT_EQ(2u, fake.launches.size());
+  EXPECT_EQ(8u, fake.launches[0].grid.x);
+  EXPECT_EQ(16u, fake.launches[1].grid.x);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_ShuffleThenIntraThenInter) {
@@ -1636,9 +1567,9 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_ShuffleThenIntraThenInter
   EXPECT_EQ(ncclSuccess, ReduceScatter());
   EXPECT_EQ((std::vector<std::string>{"record", "select", "begin", "launch", "enqueue HierarchicalReduceScatter-Intra",
                                       "enqueue HierarchicalReduceScatter-Inter", "end"}),
-            g_trace);
-  ASSERT_EQ(1u, g_launches.size());
-  const KernelLaunch& k = g_launches[0];
+            fake.trace);
+  ASSERT_EQ(1u, fake.launches.size());
+  const KernelLaunch& k = fake.launches[0];
   EXPECT_EQ(reinterpret_cast<const void*>(hierarchicalShuffle), k.fn);
   EXPECT_EQ(8u, k.grid.x);
   EXPECT_EQ(static_cast<unsigned>(HIERARCHICAL_SHUFFLE_THREADS), k.block.x);
@@ -1684,7 +1615,7 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_DirectInterStep) {
   directComm_ = inter_.get();
   inter_->rcclUseOneSlice = 1;  // the inter step keeps the multi-node steps regardless
   EXPECT_EQ(ncclSuccess, ReduceScatter());
-  ASSERT_EQ(3u, g_enqueued.size());
+  ASSERT_EQ(3u, fake.enqueued.size());
   float* intraOut = temp_.data() + intra_->rank * kCount * kNodes;
   EXPECT_TRUE(Info(1).useDirect);
   EXPECT_EQ(intraOut, Info(1).sendbuff);
@@ -1694,30 +1625,30 @@ TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_DirectInterStep) {
   EXPECT_EQ(REDUCESCATTER_SLICESTEPS, Info(1).sliceSteps);
   EXPECT_FALSE(Info(2).useDirect);
   EXPECT_EQ(recv_.data(), Info(2).recvbuff);
-  EXPECT_TRUE(g_enqueued[1].directReduceScatter);
-  EXPECT_TRUE(g_enqueued[2].directReduceScatter);
+  EXPECT_TRUE(fake.enqueued[1].directReduceScatter);
+  EXPECT_TRUE(fake.enqueued[2].directReduceScatter);
   EXPECT_FALSE(inter_->enableDirectReduceScatter);
 }
 
 TEST_F(CollectivesHierarchicalMicrotest, ReduceScatter_EachStepFailureStopsTheRest) {
   Decide(RCCL_HIERARCHICAL_REDUCESCATTER);
   EXPECT_EQ(ncclSuccess, ReduceScatter(0));
-  EXPECT_TRUE(g_launches.empty());
+  EXPECT_TRUE(fake.launches.empty());
 
-  g_lastError = hipErrorLaunchFailure;
+  fake.lastError = hipErrorLaunchFailure;
   EXPECT_EQ(ncclUnhandledCudaError, ReduceScatter());
-  EXPECT_TRUE(g_enqueued.empty());
-  g_lastError = hipSuccess;
+  EXPECT_TRUE(fake.enqueued.empty());
+  fake.lastError = hipSuccess;
 
-  g_enqueueResults = {ncclRemoteError};
+  fake.enqueueResults = {ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, ReduceScatter());
-  EXPECT_EQ(1u, g_enqueued.size());
+  EXPECT_EQ(1u, fake.enqueued.size());
 
   directComm_ = inter_.get();
-  g_enqueued.clear();
-  g_enqueueResults = {ncclSuccess, ncclRemoteError};
+  fake.enqueued.clear();
+  fake.enqueueResults = {ncclSuccess, ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, ReduceScatter());
-  EXPECT_EQ(2u, g_enqueued.size());
+  EXPECT_EQ(2u, fake.enqueued.size());
 }
 
 // AlltoAll dispatch
@@ -1726,23 +1657,23 @@ TEST_F(CollectivesMicrotest, AlltoAll_RecordsSelectsAndEnqueuesTheDecision) {
   for (int algo : std::vector<int>{NCCL_ALGO_RING, RCCL_CE_REGISTERED, RCCL_CE_SCRATCH, RCCL_DIRECT_ALLTOALL}) {
     SCOPED_TRACE(algo);
     Decide(algo);
-    g_trace.clear();
-    g_enqueued.clear();
-    g_recorded.clear();
-    g_selects.clear();
+    fake.trace.clear();
+    fake.enqueued.clear();
+    fake.recorded.clear();
+    fake.selects.clear();
     EXPECT_EQ(ncclSuccess, AlltoAll());
-    EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue AlltoAll"}), g_trace);
-    ASSERT_EQ(1u, g_recorded.size());
-    EXPECT_EQ(rccl::rrAllToAll, g_recorded[0].type);
-    EXPECT_EQ(send_.data(), g_recorded[0].sendbuff);
-    EXPECT_EQ(recv_.data(), g_recorded[0].recvbuff);
-    EXPECT_EQ(kCount, g_recorded[0].count);
-    ASSERT_EQ(1u, g_selects.size());
-    EXPECT_EQ("AlltoAll", g_selects[0].coll);
-    EXPECT_EQ(kCount, g_selects[0].count);
-    EXPECT_EQ(stream_, g_selects[0].stream);
-    EXPECT_FALSE(g_selects[0].query);
-    EXPECT_FALSE(g_selects[0].hint);
+    EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue AlltoAll"}), fake.trace);
+    ASSERT_EQ(1u, fake.recorded.size());
+    EXPECT_EQ(rccl::rrAllToAll, fake.recorded[0].type);
+    EXPECT_EQ(send_.data(), fake.recorded[0].sendbuff);
+    EXPECT_EQ(recv_.data(), fake.recorded[0].recvbuff);
+    EXPECT_EQ(kCount, fake.recorded[0].count);
+    ASSERT_EQ(1u, fake.selects.size());
+    EXPECT_EQ("AlltoAll", fake.selects[0].coll);
+    EXPECT_EQ(kCount, fake.selects[0].count);
+    EXPECT_EQ(stream_, fake.selects[0].stream);
+    EXPECT_FALSE(fake.selects[0].query);
+    EXPECT_FALSE(fake.selects[0].hint);
     const ncclInfo& info = Info();
     EXPECT_EQ(ncclFuncAlltoAll, info.coll);
     EXPECT_EQ(send_.data(), info.sendbuff);
@@ -1756,21 +1687,21 @@ TEST_F(CollectivesMicrotest, AlltoAll_RecordsSelectsAndEnqueuesTheDecision) {
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_RecordOrSelectFailureStops) {
-  g_recordResult = ncclSystemError;
+  fake.recordResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, AlltoAll());
-  EXPECT_TRUE(g_selects.empty());
-  g_recordResult = ncclSuccess;
-  g_selectResult = ncclInternalError;
+  EXPECT_TRUE(fake.selects.empty());
+  fake.recordResult = ncclSuccess;
+  fake.selectResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, AlltoAll());
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_PivotEnqueuesItsOwnInfoEvenInCheckMode) {
   Decide(RCCL_A2A_PIVOT);
   comm_->checkMode = ncclCheckModeDebugLocal;
-  g_enqueueResults = {ncclInProgress};
+  fake.enqueueResults = {ncclInProgress};
   EXPECT_EQ(ncclInProgress, AlltoAll());
-  ASSERT_EQ(1u, g_enqueued.size());
+  ASSERT_EQ(1u, fake.enqueued.size());
   const ncclInfo& info = Info();
   EXPECT_EQ(ncclFuncAlltoAllPivot, info.coll);
   EXPECT_STREQ("AlltoAllPivot", info.opName);
@@ -1799,11 +1730,11 @@ TEST_F(CollectivesMicrotest, AlltoAll_CheckModeDivertsDda) {
   comm_->rank = 0;
   Decide(RCCL_DDA_FABRIC_LL);
   EXPECT_EQ(ncclSuccess, AlltoAll());
-  ASSERT_EQ(1u, g_enqueued.size());
+  ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_EQ(ncclFuncAlltoAll, Info().coll);
   EXPECT_EQ(RCCL_DDA_FABRIC_LL, Info().decision.algo);
-  EXPECT_TRUE(g_addons.empty());
-  EXPECT_TRUE(g_log.empty());
+  EXPECT_TRUE(fake.addons.empty());
+  EXPECT_TRUE(fake.log.empty());
 }
 
 TEST_F(CollectivesMicrotest, AlltoAll_NamesTheAddonOnRankZeroOnly) {
@@ -1812,8 +1743,8 @@ TEST_F(CollectivesMicrotest, AlltoAll_NamesTheAddonOnRankZeroOnly) {
   comm_->rank = 0;
   Decide(NCCL_ALGO_RING);
   EXPECT_EQ(ncclSuccess, AlltoAll());
-  EXPECT_TRUE(g_log.empty());
-  g_algoName = nullptr;
+  EXPECT_TRUE(fake.log.empty());
+  fake.algoName = nullptr;
   Decide(RCCL_DIRECT_ALLTOALL);
   EXPECT_EQ(ncclSuccess, AlltoAll());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AlltoAll impl selected: algo ?"));
@@ -1825,23 +1756,23 @@ TEST_F(CollectivesMicrotest, AllReduce_RecordsSelectsAndEnqueuesTheDecision) {
   for (int algo : std::vector<int>{NCCL_ALGO_TREE, RCCL_SYMMETRIC, RCCL_CE_REGISTERED}) {
     SCOPED_TRACE(algo);
     Decide(algo);
-    g_trace.clear();
-    g_enqueued.clear();
-    g_recorded.clear();
-    g_selects.clear();
+    fake.trace.clear();
+    fake.enqueued.clear();
+    fake.recorded.clear();
+    fake.selects.clear();
     EXPECT_EQ(ncclSuccess, AllReduce());
-    EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue AllReduce"}), g_trace);
-    ASSERT_EQ(1u, g_recorded.size());
-    EXPECT_EQ(rccl::rrAllReduce, g_recorded[0].type);
-    ASSERT_EQ(1u, g_selects.size());
-    EXPECT_EQ("AllReduce", g_selects[0].coll);
-    EXPECT_EQ(send_.data(), g_selects[0].sendbuff);
-    EXPECT_EQ(recv_.data(), g_selects[0].recvbuff);
-    EXPECT_EQ(kCount, g_selects[0].count);
-    EXPECT_EQ(ncclProd, g_selects[0].op);
-    EXPECT_EQ(stream_, g_selects[0].stream);
-    EXPECT_FALSE(g_selects[0].query);
-    EXPECT_FALSE(g_selects[0].hint);
+    EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue AllReduce"}), fake.trace);
+    ASSERT_EQ(1u, fake.recorded.size());
+    EXPECT_EQ(rccl::rrAllReduce, fake.recorded[0].type);
+    ASSERT_EQ(1u, fake.selects.size());
+    EXPECT_EQ("AllReduce", fake.selects[0].coll);
+    EXPECT_EQ(send_.data(), fake.selects[0].sendbuff);
+    EXPECT_EQ(recv_.data(), fake.selects[0].recvbuff);
+    EXPECT_EQ(kCount, fake.selects[0].count);
+    EXPECT_EQ(ncclProd, fake.selects[0].op);
+    EXPECT_EQ(stream_, fake.selects[0].stream);
+    EXPECT_FALSE(fake.selects[0].query);
+    EXPECT_FALSE(fake.selects[0].hint);
     const ncclInfo& info = Info();
     EXPECT_EQ(ncclFuncAllReduce, info.coll);
     EXPECT_EQ(ncclProd, info.op);
@@ -1852,13 +1783,13 @@ TEST_F(CollectivesMicrotest, AllReduce_RecordsSelectsAndEnqueuesTheDecision) {
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_RecordOrSelectFailureStops) {
-  g_recordResult = ncclSystemError;
+  fake.recordResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, AllReduce());
-  EXPECT_TRUE(g_selects.empty());
-  g_recordResult = ncclSuccess;
-  g_selectResult = ncclInternalError;
+  EXPECT_TRUE(fake.selects.empty());
+  fake.recordResult = ncclSuccess;
+  fake.selectResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, AllReduce());
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_DdaArmsLaunchAsAddons) {
@@ -1877,13 +1808,13 @@ TEST_F(CollectivesMicrotest, AllReduce_CheckModeDivertsAddons) {
   comm_->checkMode = ncclCheckModeDebugLocal;
   for (int algo : {RCCL_CE_2SHOT, RCCL_DDA_IPC}) {
     Decide(algo);
-    g_enqueued.clear();
+    fake.enqueued.clear();
     EXPECT_EQ(ncclSuccess, AllReduce());
-    ASSERT_EQ(1u, g_enqueued.size());
+    ASSERT_EQ(1u, fake.enqueued.size());
     EXPECT_EQ(algo, Info().decision.algo);
   }
-  EXPECT_TRUE(g_addons.empty());
-  EXPECT_TRUE(g_ceArs.empty());
+  EXPECT_TRUE(fake.addons.empty());
+  EXPECT_TRUE(fake.ceArs.empty());
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_NamesTheAddonOnRankZeroOnly) {
@@ -1892,99 +1823,99 @@ TEST_F(CollectivesMicrotest, AllReduce_NamesTheAddonOnRankZeroOnly) {
   comm_->rank = 0;
   Decide(NCCL_ALGO_PAT);
   EXPECT_EQ(ncclSuccess, AllReduce());
-  EXPECT_TRUE(g_log.empty());
+  EXPECT_TRUE(fake.log.empty());
   Decide(RCCL_SYMMETRIC);
   EXPECT_EQ(ncclSuccess, AllReduce());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce impl selected: algo ADDON"));
-  g_algoName = nullptr;
+  fake.algoName = nullptr;
   EXPECT_EQ(ncclSuccess, AllReduce());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "AllReduce impl selected: algo ?"));
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotRunsInsideAProfilerEvent) {
   Decide(RCCL_CE_2SHOT);
-  g_ceArResult = ncclRemoteError;
+  fake.ceArResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AllReduce());
   EXPECT_EQ((std::vector<std::string>{"record", "select", "profStart", "begin", "ceAllReduce", "end", "profStop"}),
-            g_trace);
-  EXPECT_EQ(ncclFuncAllReduce, g_profArgs.func);
-  EXPECT_EQ(ncclFloat32, g_profArgs.datatype);
-  EXPECT_EQ(ncclProd, g_profArgs.redOp);
-  EXPECT_EQ(kCount, g_profArgs.nElts);
-  EXPECT_EQ(sizeof(float), g_profArgs.eltSize);
-  EXPECT_EQ(reinterpret_cast<uint8_t*>(send_.data()), g_profArgs.sendBuff);
-  EXPECT_EQ(reinterpret_cast<uint8_t*>(recv_.data()), g_profArgs.recvBuff);
-  EXPECT_EQ(nullptr, g_profArgs.collApiEventHandle);
-  ASSERT_EQ(1u, g_ceArs.size());
-  EXPECT_EQ(send_.data(), g_ceArs[0].sendbuff);
-  EXPECT_EQ(recv_.data(), g_ceArs[0].recvbuff);
-  EXPECT_EQ(kCount, g_ceArs[0].count);
-  EXPECT_EQ(ncclFloat32, g_ceArs[0].datatype);
-  EXPECT_EQ(ncclProd, g_ceArs[0].op);
-  EXPECT_EQ(nullptr, g_ceArs[0].win);
-  EXPECT_NE(nullptr, g_ceArs[0].args);
-  EXPECT_TRUE(g_enqueued.empty());
+            fake.trace);
+  EXPECT_EQ(ncclFuncAllReduce, fake.profArgs.func);
+  EXPECT_EQ(ncclFloat32, fake.profArgs.datatype);
+  EXPECT_EQ(ncclProd, fake.profArgs.redOp);
+  EXPECT_EQ(kCount, fake.profArgs.nElts);
+  EXPECT_EQ(sizeof(float), fake.profArgs.eltSize);
+  EXPECT_EQ(reinterpret_cast<uint8_t*>(send_.data()), fake.profArgs.sendBuff);
+  EXPECT_EQ(reinterpret_cast<uint8_t*>(recv_.data()), fake.profArgs.recvBuff);
+  EXPECT_EQ(nullptr, fake.profArgs.collApiEventHandle);
+  ASSERT_EQ(1u, fake.ceArs.size());
+  EXPECT_EQ(send_.data(), fake.ceArs[0].sendbuff);
+  EXPECT_EQ(recv_.data(), fake.ceArs[0].recvbuff);
+  EXPECT_EQ(kCount, fake.ceArs[0].count);
+  EXPECT_EQ(ncclFloat32, fake.ceArs[0].datatype);
+  EXPECT_EQ(ncclProd, fake.ceArs[0].op);
+  EXPECT_EQ(nullptr, fake.ceArs[0].win);
+  EXPECT_NE(nullptr, fake.ceArs[0].args);
+  EXPECT_TRUE(fake.enqueued.empty());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "CE 2-shot AllReduce: count=32 datatype=7 op=1 rank=1/4"));
 }
 
 TEST_F(CollectivesMicrotest, AllReduce_CeTwoShotSkipsEmptyCallsAndAFailedProfilerStart) {
   Decide(RCCL_CE_2SHOT);
   EXPECT_EQ(ncclSuccess, AllReduce(0));
-  EXPECT_EQ((std::vector<std::string>{"record", "select"}), g_trace);
-  g_profStartResult = ncclInternalError;
+  EXPECT_EQ((std::vector<std::string>{"record", "select"}), fake.trace);
+  fake.profStartResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, AllReduce());
-  EXPECT_TRUE(g_ceArs.empty());
-  EXPECT_EQ(0, std::count(g_trace.begin(), g_trace.end(), "profStop"));
+  EXPECT_TRUE(fake.ceArs.empty());
+  EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "profStop"));
 }
 
 // ReduceScatter dispatch
 
 TEST_F(CollectivesMicrotest, ReduceScatter_ProbesCaptureIntoTheDecision) {
   comm_->enableDirectReduceScatter = 1;
-  g_capturing = true;
-  g_decision.ceCapturing = false;
+  fake.capturing = true;
+  fake.decision.ceCapturing = false;
   EXPECT_EQ(ncclSuccess, ReduceScatter());
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue ReduceScatter"}), g_trace);
-  ASSERT_EQ(1u, g_recorded.size());
-  EXPECT_EQ(rccl::rrReduceScatter, g_recorded[0].type);
-  ASSERT_EQ(1u, g_selects.size());
-  EXPECT_EQ("ReduceScatter", g_selects[0].coll);
-  EXPECT_EQ(send_.data(), g_selects[0].sendbuff);
-  EXPECT_EQ(recv_.data(), g_selects[0].recvbuff);
-  EXPECT_EQ(kCount, g_selects[0].count);
-  EXPECT_EQ(ncclMin, g_selects[0].op);
-  EXPECT_FALSE(g_selects[0].query);
-  EXPECT_EQ(std::vector<int>{2}, g_captureModes);
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue ReduceScatter"}), fake.trace);
+  ASSERT_EQ(1u, fake.recorded.size());
+  EXPECT_EQ(rccl::rrReduceScatter, fake.recorded[0].type);
+  ASSERT_EQ(1u, fake.selects.size());
+  EXPECT_EQ("ReduceScatter", fake.selects[0].coll);
+  EXPECT_EQ(send_.data(), fake.selects[0].sendbuff);
+  EXPECT_EQ(recv_.data(), fake.selects[0].recvbuff);
+  EXPECT_EQ(kCount, fake.selects[0].count);
+  EXPECT_EQ(ncclMin, fake.selects[0].op);
+  EXPECT_FALSE(fake.selects[0].query);
+  EXPECT_EQ(std::vector<int>{2}, fake.captureModes);
   const ncclInfo& info = Info();
   EXPECT_EQ(ncclFuncReduceScatter, info.coll);
   EXPECT_EQ(ncclMin, info.op);
   EXPECT_TRUE(info.decisionValid);
   EXPECT_TRUE(info.decision.ceCapturing);
-  EXPECT_FALSE(g_enqueued[0].directReduceScatter);  // a stale force flag is cleared first
+  EXPECT_FALSE(fake.enqueued[0].directReduceScatter);  // a stale force flag is cleared first
 
-  g_enqueued.clear();
-  g_capturing = false;
-  g_decision.ceCapturing = true;
+  fake.enqueued.clear();
+  fake.capturing = false;
+  fake.decision.ceCapturing = true;
   EXPECT_EQ(ncclSuccess, ReduceScatter());
   EXPECT_FALSE(Info().decision.ceCapturing);
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_FailuresBeforeDispatchStopIt) {
-  g_commCountResult = ncclInvalidArgument;
+  fake.commCountResult = ncclInvalidArgument;
   EXPECT_EQ(ncclInvalidArgument, ReduceScatter());
-  EXPECT_TRUE(g_recorded.empty());
-  g_commCountResult = ncclSuccess;
-  g_recordResult = ncclSystemError;
+  EXPECT_TRUE(fake.recorded.empty());
+  fake.commCountResult = ncclSuccess;
+  fake.recordResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, ReduceScatter());
-  EXPECT_TRUE(g_selects.empty());
-  g_recordResult = ncclSuccess;
-  g_selectResult = ncclInternalError;
+  EXPECT_TRUE(fake.selects.empty());
+  fake.recordResult = ncclSuccess;
+  fake.selectResult = ncclInternalError;
   EXPECT_EQ(ncclInternalError, ReduceScatter());
-  EXPECT_TRUE(g_captureModes.empty());
-  g_selectResult = ncclSuccess;
-  g_captureResult = ncclInvalidUsage;
+  EXPECT_TRUE(fake.captureModes.empty());
+  fake.selectResult = ncclSuccess;
+  fake.captureResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, ReduceScatter());
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_DdaArmsLaunchAsAddons) {
@@ -2006,10 +1937,10 @@ TEST_F(CollectivesMicrotest, ReduceScatter_CheckModeDivertsAddons) {
   comm_->rank = 0;
   Decide(RCCL_DIRECT_REDUCESCATTER);
   EXPECT_EQ(ncclSuccess, ReduceScatter());
-  ASSERT_EQ(1u, g_enqueued.size());
+  ASSERT_EQ(1u, fake.enqueued.size());
   EXPECT_FALSE(Info().useDirect);
-  EXPECT_FALSE(g_enqueued[0].directReduceScatter);
-  EXPECT_TRUE(g_log.empty());
+  EXPECT_FALSE(fake.enqueued[0].directReduceScatter);
+  EXPECT_TRUE(fake.log.empty());
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_NamesTheAddonOnRankZeroOnly) {
@@ -2018,8 +1949,8 @@ TEST_F(CollectivesMicrotest, ReduceScatter_NamesTheAddonOnRankZeroOnly) {
   comm_->rank = 0;
   Decide(NCCL_ALGO_RING);
   EXPECT_EQ(ncclSuccess, ReduceScatter());
-  EXPECT_TRUE(g_log.empty());
-  g_algoName = nullptr;
+  EXPECT_TRUE(fake.log.empty());
+  fake.algoName = nullptr;
   Decide(RCCL_SYMMETRIC);
   EXPECT_EQ(ncclSuccess, ReduceScatter());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "ReduceScatter impl selected: algo ?"));
@@ -2032,8 +1963,9 @@ TEST_F(CollectivesMicrotest, ReduceScatter_DirectStagesThenReduces) {
   comm_->tempBuff = &tempBuff;
   comm_->rcclUseOneSlice = 1;
   EXPECT_EQ(ncclSuccess, ReduceScatter());
-  EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue ReduceScatter", "enqueue ReduceScatter"}), g_trace);
-  ASSERT_EQ(2u, g_enqueued.size());
+  EXPECT_EQ((std::vector<std::string>{"record", "select", "enqueue ReduceScatter", "enqueue ReduceScatter"}),
+            fake.trace);
+  ASSERT_EQ(2u, fake.enqueued.size());
   const ncclInfo& stage = Info(0);
   EXPECT_TRUE(stage.useDirect);
   EXPECT_EQ(send_.data(), stage.sendbuff);
@@ -2047,22 +1979,22 @@ TEST_F(CollectivesMicrotest, ReduceScatter_DirectStagesThenReduces) {
   EXPECT_EQ(send_.data(), reduce.sendbuff);
   EXPECT_EQ(recv_.data(), reduce.recvbuff);
   EXPECT_EQ(REDUCESCATTER_SLICESTEPS_SINGLE_NODE, reduce.sliceSteps);
-  EXPECT_TRUE(g_enqueued[0].directReduceScatter);
-  EXPECT_TRUE(g_enqueued[1].directReduceScatter);
+  EXPECT_TRUE(fake.enqueued[0].directReduceScatter);
+  EXPECT_TRUE(fake.enqueued[1].directReduceScatter);
   EXPECT_FALSE(comm_->enableDirectReduceScatter);
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "RCCL DIRECT REDUCE-SCATTER recvcount=32 msgSize=512 rank=1 nRanks=4 nNodes=1"));
 }
 
 TEST_F(CollectivesMicrotest, ReduceScatter_DirectClearsTheForceFlagOnFailure) {
   Decide(RCCL_DIRECT_REDUCESCATTER);
-  g_enqueueResults = {ncclRemoteError};
+  fake.enqueueResults = {ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, ReduceScatter());
-  EXPECT_EQ(1u, g_enqueued.size());
+  EXPECT_EQ(1u, fake.enqueued.size());
   EXPECT_FALSE(comm_->enableDirectReduceScatter);
-  g_enqueued.clear();
-  g_enqueueResults = {ncclSuccess, ncclInvalidUsage};
+  fake.enqueued.clear();
+  fake.enqueueResults = {ncclSuccess, ncclInvalidUsage};
   EXPECT_EQ(ncclInvalidUsage, ReduceScatter());
-  EXPECT_EQ(2u, g_enqueued.size());
+  EXPECT_EQ(2u, fake.enqueued.size());
   EXPECT_FALSE(comm_->enableDirectReduceScatter);
 }
 
@@ -2070,7 +2002,7 @@ TEST_F(CollectivesMicrotest, ReduceScatter_EmptyDirectCallIsANoOp) {
   Decide(RCCL_DIRECT_REDUCESCATTER);
   comm_->enableDirectReduceScatter = 1;
   EXPECT_EQ(ncclSuccess, ReduceScatter(0));
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
   EXPECT_FALSE(comm_->enableDirectReduceScatter);
 }
 
@@ -2080,9 +2012,9 @@ class CollectivesAlltoAllvMicrotest : public CollectivesMicrotest {
  protected:
   void SetUp() override {
     CollectivesMicrotest::SetUp();
-    g_windows[send_.data()] = &sendWin_;
-    g_windows[recv_.data()] = &recvWin_;
-    g_regType = ncclSymSendRegRecvReg;
+    fake.windows[send_.data()] = &sendWin_;
+    fake.windows[recv_.data()] = &recvWin_;
+    fake.regType = ncclSymSendRegRecvReg;
   }
   ncclResult_t AlltoAllv() {
     return ncclAlltoAllv_impl(send_.data(), sendcounts_, sdispls_, recv_.data(), recvcounts_, rdispls_, ncclFloat32,
@@ -2097,8 +2029,8 @@ class CollectivesAlltoAllvMicrotest : public CollectivesMicrotest {
   }
   void ScriptPeerBlocks() {
     for (int r = 0; r < kNRanks; r++) {
-      g_peerMeta[r].assign(4 * kNRanks, 0);
-      for (int i = 0; i < 4 * kNRanks; i++) g_peerMeta[r][i] = 1000 * r + i;
+      fake.peerMeta[r].assign(4 * kNRanks, 0);
+      for (int i = 0; i < 4 * kNRanks; i++) fake.peerMeta[r][i] = 1000 * r + i;
     }
   }
   size_t sendcounts_[kNRanks] = {1, 2, 3, 4};
@@ -2111,19 +2043,19 @@ class CollectivesAlltoAllvMicrotest : public CollectivesMicrotest {
 
 TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_PostsEveryPeerAtItsDisplacement) {
   EXPECT_EQ(ncclSuccess, AlltoAllv());
-  ASSERT_EQ(1u, g_recorded.size());
-  EXPECT_EQ(rccl::rrAllToAllv, g_recorded[0].type);
-  EXPECT_EQ(send_.data(), g_recorded[0].sendbuff);
-  EXPECT_EQ(recv_.data(), g_recorded[0].recvbuff);
-  EXPECT_EQ(0u, g_recorded[0].count);
-  EXPECT_EQ(sendcounts_, g_recorded[0].sendcounts);
-  EXPECT_EQ(rdispls_, g_recorded[0].rdispls);
-  EXPECT_EQ((std::vector<bool>{true, false}), g_recorderSkips);
-  ASSERT_EQ(2u * kNRanks, g_p2ps.size());
+  ASSERT_EQ(1u, fake.recorded.size());
+  EXPECT_EQ(rccl::rrAllToAllv, fake.recorded[0].type);
+  EXPECT_EQ(send_.data(), fake.recorded[0].sendbuff);
+  EXPECT_EQ(recv_.data(), fake.recorded[0].recvbuff);
+  EXPECT_EQ(0u, fake.recorded[0].count);
+  EXPECT_EQ(sendcounts_, fake.recorded[0].sendcounts);
+  EXPECT_EQ(rdispls_, fake.recorded[0].rdispls);
+  EXPECT_EQ((std::vector<bool>{true, false}), fake.recorderSkips);
+  ASSERT_EQ(2u * kNRanks, fake.p2ps.size());
   for (int r = 0; r < kNRanks; r++) {
     SCOPED_TRACE(r);
-    const P2p& send = g_p2ps[2 * r];
-    const P2p& recv = g_p2ps[2 * r + 1];
+    const P2p& send = fake.p2ps[2 * r];
+    const P2p& recv = fake.p2ps[2 * r + 1];
     EXPECT_TRUE(send.send);
     EXPECT_EQ(send_.data() + sdispls_[r], send.buff);
     EXPECT_EQ(sendcounts_[r], send.count);
@@ -2134,130 +2066,130 @@ TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_PostsEveryPeerAtItsDisplacement
     EXPECT_EQ(recvcounts_[r], recv.count);
     EXPECT_EQ(r, recv.peer);
   }
-  EXPECT_EQ((std::vector<std::string>{"record", "findWindow", "findWindow", "groupStart", "groupEnd"}), g_trace);
-  EXPECT_TRUE(g_enqueued.empty());
-  EXPECT_TRUE(g_memAllocSizes.empty());
+  EXPECT_EQ((std::vector<std::string>{"record", "findWindow", "findWindow", "groupStart", "groupEnd"}), fake.trace);
+  EXPECT_TRUE(fake.enqueued.empty());
+  EXPECT_TRUE(fake.memAllocSizes.empty());
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Eligibility_SeesTheWindowsRegistrationSysmemAndCapture) {
-  g_sysmemWindows.insert(&recvWin_);
-  g_capturing = true;
+  fake.sysmemWindows.insert(&recvWin_);
+  fake.capturing = true;
   EXPECT_EQ(ncclSuccess, AlltoAllv());
-  ASSERT_EQ(1u, g_regTypeArgs.size());
-  EXPECT_EQ(&sendWin_, g_regTypeArgs[0].first);
-  EXPECT_EQ(&recvWin_, g_regTypeArgs[0].second);
-  EXPECT_EQ(std::vector<int>{2}, g_captureModes);
-  ASSERT_EQ(1u, g_ceEligCalls.size());
-  EXPECT_EQ(ncclFloat32, g_ceEligCalls[0].datatype);
-  EXPECT_EQ(ncclSymSendRegRecvReg, g_ceEligCalls[0].regType);
-  EXPECT_TRUE(g_ceEligCalls[0].sysmem);
-  EXPECT_TRUE(g_ceEligCalls[0].capturing);
-  ASSERT_EQ(1u, g_hierEligCalls.size());
-  EXPECT_EQ(&sendWin_, g_hierEligCalls[0].sendWin);
-  EXPECT_EQ(&recvWin_, g_hierEligCalls[0].recvWin);
-  EXPECT_TRUE(g_hierEligCalls[0].sysmem);
-  EXPECT_TRUE(g_hierEligCalls[0].capturing);
+  ASSERT_EQ(1u, fake.regTypeArgs.size());
+  EXPECT_EQ(&sendWin_, fake.regTypeArgs[0].first);
+  EXPECT_EQ(&recvWin_, fake.regTypeArgs[0].second);
+  EXPECT_EQ(std::vector<int>{2}, fake.captureModes);
+  ASSERT_EQ(1u, fake.ceEligCalls.size());
+  EXPECT_EQ(ncclFloat32, fake.ceEligCalls[0].datatype);
+  EXPECT_EQ(ncclSymSendRegRecvReg, fake.ceEligCalls[0].regType);
+  EXPECT_TRUE(fake.ceEligCalls[0].sysmem);
+  EXPECT_TRUE(fake.ceEligCalls[0].capturing);
+  ASSERT_EQ(1u, fake.hierEligCalls.size());
+  EXPECT_EQ(&sendWin_, fake.hierEligCalls[0].sendWin);
+  EXPECT_EQ(&recvWin_, fake.hierEligCalls[0].recvWin);
+  EXPECT_TRUE(fake.hierEligCalls[0].sysmem);
+  EXPECT_TRUE(fake.hierEligCalls[0].capturing);
 
-  g_sysmemWindows = {&sendWin_};
-  g_capturing = false;
+  fake.sysmemWindows = {&sendWin_};
+  fake.capturing = false;
   EXPECT_EQ(ncclSuccess, AlltoAllv());
-  EXPECT_TRUE(g_ceEligCalls[1].sysmem);
-  EXPECT_FALSE(g_ceEligCalls[1].capturing);
-  g_sysmemWindows.clear();
+  EXPECT_TRUE(fake.ceEligCalls[1].sysmem);
+  EXPECT_FALSE(fake.ceEligCalls[1].capturing);
+  fake.sysmemWindows.clear();
   EXPECT_EQ(ncclSuccess, AlltoAllv());
-  EXPECT_FALSE(g_ceEligCalls[2].sysmem);
-  EXPECT_FALSE(g_hierEligCalls[2].sysmem);
+  EXPECT_FALSE(fake.ceEligCalls[2].sysmem);
+  EXPECT_FALSE(fake.hierEligCalls[2].sysmem);
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, SetupFailuresStopBeforeAnyTraffic) {
-  g_recordResult = ncclSystemError;
+  fake.recordResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, AlltoAllv());
-  g_recordResult = ncclSuccess;
-  g_commCountResult = ncclInvalidArgument;
+  fake.recordResult = ncclSuccess;
+  fake.commCountResult = ncclInvalidArgument;
   EXPECT_EQ(ncclInvalidArgument, AlltoAllv());
-  g_commCountResult = ncclSuccess;
-  g_userRankResult = ncclInvalidArgument;
+  fake.commCountResult = ncclSuccess;
+  fake.userRankResult = ncclInvalidArgument;
   EXPECT_EQ(ncclInvalidArgument, AlltoAllv());
-  g_userRankResult = ncclSuccess;
-  g_findWindowFailPtr = send_.data();
+  fake.userRankResult = ncclSuccess;
+  fake.findWindowFailPtr = send_.data();
   EXPECT_EQ(ncclInternalError, AlltoAllv());
-  g_findWindowFailPtr = recv_.data();
+  fake.findWindowFailPtr = recv_.data();
   EXPECT_EQ(ncclInternalError, AlltoAllv());
-  g_findWindowFailPtr = nullptr;
-  g_regTypeResult = ncclInvalidUsage;
+  fake.findWindowFailPtr = nullptr;
+  fake.regTypeResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
-  EXPECT_TRUE(g_captureModes.empty());
-  g_regTypeResult = ncclSuccess;
-  g_captureResult = ncclRemoteError;
+  EXPECT_TRUE(fake.captureModes.empty());
+  fake.regTypeResult = ncclSuccess;
+  fake.captureResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AlltoAllv());
-  EXPECT_TRUE(g_ceEligCalls.empty());
-  EXPECT_TRUE(g_p2ps.empty());
+  EXPECT_TRUE(fake.ceEligCalls.empty());
+  EXPECT_TRUE(fake.p2ps.empty());
 }
 
 // A failed post returns without ncclGroupEnd or skip(false): the group stays open and later calls go unrecorded.
 TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_FailuresReturnTheFirstError) {
-  g_groupStartResult = ncclInvalidUsage;
+  fake.groupStartResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
-  EXPECT_TRUE(g_p2ps.empty());
-  g_groupStartResult = ncclSuccess;
+  EXPECT_TRUE(fake.p2ps.empty());
+  fake.groupStartResult = ncclSuccess;
   for (int failAt : {3, 4}) {
     SCOPED_TRACE(failAt);
-    g_p2ps.clear();
-    g_recorderSkips.clear();
-    g_trace.clear();
-    g_p2pFailAt = failAt;
+    fake.p2ps.clear();
+    fake.recorderSkips.clear();
+    fake.trace.clear();
+    fake.p2pFailAt = failAt;
     EXPECT_EQ(ncclInternalError, AlltoAllv());
-    EXPECT_EQ(static_cast<size_t>(failAt), g_p2ps.size());
-    EXPECT_EQ(std::vector<bool>{true}, g_recorderSkips);
-    EXPECT_EQ(0, std::count(g_trace.begin(), g_trace.end(), "groupEnd"));
+    EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
+    EXPECT_EQ(std::vector<bool>{true}, fake.recorderSkips);
+    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
   }
-  g_p2pFailAt = 0;
-  g_recorderSkips.clear();
-  g_groupEndResult = ncclRemoteError;
+  fake.p2pFailAt = 0;
+  fake.recorderSkips.clear();
+  fake.groupEndResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AlltoAllv());
-  EXPECT_EQ(std::vector<bool>{true}, g_recorderSkips);
+  EXPECT_EQ(std::vector<bool>{true}, fake.recorderSkips);
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangesTheSizeMatrixThenEnqueuesIt) {
-  g_ceElig = true;
+  fake.ceElig = true;
   ScriptPeerBlocks();
-  g_enqueueResults = {ncclInProgress};
+  fake.enqueueResults = {ncclInProgress};
   EXPECT_EQ(ncclInProgress, AlltoAllv());
   const size_t nLocal = 4 * kNRanks;
-  EXPECT_EQ((std::vector<size_t>{nLocal * sizeof(size_t), nLocal * kNRanks * sizeof(size_t)}), g_memAllocSizes);
+  EXPECT_EQ((std::vector<size_t>{nLocal * sizeof(size_t), nLocal * kNRanks * sizeof(size_t)}), fake.memAllocSizes);
   EXPECT_EQ((std::vector<std::string>{"record", "findWindow", "findWindow", "setDevice 3", "memAlloc", "memAlloc",
                                       "setDevice 9", "memcpy", "groupStart", "groupEnd", "memcpy", "sync",
                                       "enqueue AlltoAllv"}),
-            g_trace);
-  EXPECT_EQ(9, g_currentDevice);
+            fake.trace);
+  EXPECT_EQ(9, fake.currentDevice);
 
-  ASSERT_EQ(2u, g_memcpys.size());
-  EXPECT_EQ(comm_->localSizes, g_memcpys[0].dst);
-  EXPECT_EQ(nLocal * sizeof(size_t), g_memcpys[0].bytes);
-  EXPECT_EQ(hipMemcpyHostToDevice, g_memcpys[0].kind);
-  EXPECT_EQ(stream_, g_memcpys[0].stream);
+  ASSERT_EQ(2u, fake.memcpys.size());
+  EXPECT_EQ(comm_->localSizes, fake.memcpys[0].dst);
+  EXPECT_EQ(nLocal * sizeof(size_t), fake.memcpys[0].bytes);
+  EXPECT_EQ(hipMemcpyHostToDevice, fake.memcpys[0].kind);
+  EXPECT_EQ(stream_, fake.memcpys[0].stream);
   const size_t* local = static_cast<const size_t*>(comm_->localSizes);
   EXPECT_EQ(LocalBlock(), std::vector<size_t>(local, local + nLocal));
-  EXPECT_EQ(comm_->gatheredSizes, g_memcpys[1].src);
-  EXPECT_EQ(nLocal * kNRanks * sizeof(size_t), g_memcpys[1].bytes);
-  EXPECT_EQ(hipMemcpyDeviceToHost, g_memcpys[1].kind);
+  EXPECT_EQ(comm_->gatheredSizes, fake.memcpys[1].src);
+  EXPECT_EQ(nLocal * kNRanks * sizeof(size_t), fake.memcpys[1].bytes);
+  EXPECT_EQ(hipMemcpyDeviceToHost, fake.memcpys[1].kind);
 
-  ASSERT_EQ(2u * kNRanks, g_p2ps.size());
+  ASSERT_EQ(2u * kNRanks, fake.p2ps.size());
   for (int r = 0; r < kNRanks; r++) {
     SCOPED_TRACE(r);
-    EXPECT_TRUE(g_p2ps[2 * r].send);
-    EXPECT_EQ(comm_->localSizes, g_p2ps[2 * r].buff);
-    EXPECT_EQ(nLocal, g_p2ps[2 * r].count);
-    EXPECT_EQ(ncclUint64, g_p2ps[2 * r].datatype);
-    EXPECT_EQ(r, g_p2ps[2 * r].peer);
-    EXPECT_FALSE(g_p2ps[2 * r + 1].send);
-    EXPECT_EQ(static_cast<size_t*>(comm_->gatheredSizes) + r * nLocal, g_p2ps[2 * r + 1].buff);
-    EXPECT_EQ(nLocal, g_p2ps[2 * r + 1].count);
-    EXPECT_EQ(ncclUint64, g_p2ps[2 * r + 1].datatype);
-    EXPECT_EQ(r, g_p2ps[2 * r + 1].peer);
+    EXPECT_TRUE(fake.p2ps[2 * r].send);
+    EXPECT_EQ(comm_->localSizes, fake.p2ps[2 * r].buff);
+    EXPECT_EQ(nLocal, fake.p2ps[2 * r].count);
+    EXPECT_EQ(ncclUint64, fake.p2ps[2 * r].datatype);
+    EXPECT_EQ(r, fake.p2ps[2 * r].peer);
+    EXPECT_FALSE(fake.p2ps[2 * r + 1].send);
+    EXPECT_EQ(static_cast<size_t*>(comm_->gatheredSizes) + r * nLocal, fake.p2ps[2 * r + 1].buff);
+    EXPECT_EQ(nLocal, fake.p2ps[2 * r + 1].count);
+    EXPECT_EQ(ncclUint64, fake.p2ps[2 * r + 1].datatype);
+    EXPECT_EQ(r, fake.p2ps[2 * r + 1].peer);
   }
 
-  ASSERT_EQ(1u, g_enqueued.size());
+  ASSERT_EQ(1u, fake.enqueued.size());
   const ncclInfo& info = Info();
   EXPECT_EQ(ncclFuncAlltoAllv, info.coll);
   EXPECT_STREQ("AlltoAllv", info.opName);
@@ -2268,91 +2200,91 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangesTheSizeMatrixThenEnqueuesIt) {
   EXPECT_EQ(ALLTOALL_CHUNKSTEPS, info.chunkSteps);
   EXPECT_EQ(ALLTOALL_SLICESTEPS, info.sliceSteps);
   std::vector<size_t> expected;
-  for (int r = 0; r < kNRanks; r++) expected.insert(expected.end(), g_peerMeta[r].begin(), g_peerMeta[r].end());
-  EXPECT_EQ(expected, g_enqueued[0].sizes);
-  EXPECT_TRUE(g_recorderSkips.empty());
+  for (int r = 0; r < kNRanks; r++) expected.insert(expected.end(), fake.peerMeta[r].begin(), fake.peerMeta[r].end());
+  EXPECT_EQ(expected, fake.enqueued[0].sizes);
+  EXPECT_TRUE(fake.recorderSkips.empty());
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ReusesTheMetadataBuffers) {
-  g_hierElig = true;
+  fake.hierElig = true;
   EXPECT_EQ(ncclSuccess, AlltoAllv());
   void* local = comm_->localSizes;
   void* gathered = comm_->gatheredSizes;
-  g_trace.clear();
+  fake.trace.clear();
   EXPECT_EQ(ncclSuccess, AlltoAllv());
-  EXPECT_EQ(2u, g_memAllocSizes.size());
-  EXPECT_EQ(0, std::count(g_trace.begin(), g_trace.end(), "setDevice 3"));
+  EXPECT_EQ(2u, fake.memAllocSizes.size());
+  EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "setDevice 3"));
   EXPECT_EQ(local, comm_->localSizes);
   EXPECT_EQ(gathered, comm_->gatheredSizes);
-  EXPECT_EQ(2u, g_enqueued.size());
+  EXPECT_EQ(2u, fake.enqueued.size());
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_FailedAllocationRestoresTheDevice) {
-  g_ceElig = true;
-  g_memAllocFailAt = 1;
+  fake.ceElig = true;
+  fake.memAllocFailAt = 1;
   EXPECT_EQ(ncclSystemError, AlltoAllv());
-  EXPECT_EQ(1u, g_memAllocSizes.size());
-  EXPECT_EQ(9, g_currentDevice);
+  EXPECT_EQ(1u, fake.memAllocSizes.size());
+  EXPECT_EQ(9, fake.currentDevice);
   EXPECT_EQ(nullptr, comm_->localSizes);
 
-  g_memAllocSizes.clear();
-  g_memAllocFailAt = 2;
+  fake.memAllocSizes.clear();
+  fake.memAllocFailAt = 2;
   EXPECT_EQ(ncclSystemError, AlltoAllv());
-  EXPECT_EQ(9, g_currentDevice);
+  EXPECT_EQ(9, fake.currentDevice);
   EXPECT_NE(nullptr, comm_->localSizes);
   EXPECT_EQ(nullptr, comm_->gatheredSizes);
-  EXPECT_TRUE(g_p2ps.empty());
+  EXPECT_TRUE(fake.p2ps.empty());
 
-  g_memAllocSizes.clear();
-  g_memAllocFailAt = 0;
+  fake.memAllocSizes.clear();
+  fake.memAllocFailAt = 0;
   EXPECT_EQ(ncclSuccess, AlltoAllv());
-  EXPECT_EQ(std::vector<size_t>{4 * kNRanks * kNRanks * sizeof(size_t)}, g_memAllocSizes);
+  EXPECT_EQ(std::vector<size_t>{4 * kNRanks * kNRanks * sizeof(size_t)}, fake.memAllocSizes);
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_DeviceSwitchFailuresStopTheCall) {
-  g_ceElig = true;
-  g_getDeviceResult = hipErrorInvalidContext;
+  fake.ceElig = true;
+  fake.getDeviceResult = hipErrorInvalidContext;
   EXPECT_EQ(ncclUnhandledCudaError, AlltoAllv());
-  EXPECT_EQ(0, g_setDeviceCalls);
-  g_getDeviceResult = hipSuccess;
-  g_setDeviceFailAt = 1;
+  EXPECT_EQ(0, fake.setDeviceCalls);
+  fake.getDeviceResult = hipSuccess;
+  fake.setDeviceFailAt = 1;
   EXPECT_EQ(ncclUnhandledCudaError, AlltoAllv());
-  EXPECT_TRUE(g_memAllocSizes.empty());
-  g_setDeviceCalls = 0;
-  g_setDeviceFailAt = 2;
+  EXPECT_TRUE(fake.memAllocSizes.empty());
+  fake.setDeviceCalls = 0;
+  fake.setDeviceFailAt = 2;
   EXPECT_EQ(ncclUnhandledCudaError, AlltoAllv());
-  EXPECT_EQ(2u, g_memAllocSizes.size());
-  EXPECT_TRUE(g_p2ps.empty());
+  EXPECT_EQ(2u, fake.memAllocSizes.size());
+  EXPECT_TRUE(fake.p2ps.empty());
 }
 
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangeFailuresReturnTheFirstError) {
-  g_ceElig = true;
-  g_memcpyResults = {hipErrorInvalidValue};
+  fake.ceElig = true;
+  fake.memcpyResults = {hipErrorInvalidValue};
   EXPECT_EQ(ncclUnhandledCudaError, AlltoAllv());
-  EXPECT_TRUE(g_p2ps.empty());
+  EXPECT_TRUE(fake.p2ps.empty());
 
-  g_groupStartResult = ncclInvalidUsage;
+  fake.groupStartResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
-  g_groupStartResult = ncclSuccess;
+  fake.groupStartResult = ncclSuccess;
   for (int failAt : {1, 2}) {
-    g_p2ps.clear();
-    g_trace.clear();
-    g_p2pFailAt = failAt;
+    fake.p2ps.clear();
+    fake.trace.clear();
+    fake.p2pFailAt = failAt;
     EXPECT_EQ(ncclInternalError, AlltoAllv());
-    EXPECT_EQ(static_cast<size_t>(failAt), g_p2ps.size());
-    EXPECT_EQ(0, std::count(g_trace.begin(), g_trace.end(), "groupEnd"));  // the group is left open
+    EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
+    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));  // the group is left open
   }
-  g_p2pFailAt = 0;
-  g_groupEndResult = ncclRemoteError;
+  fake.p2pFailAt = 0;
+  fake.groupEndResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AlltoAllv());
-  g_groupEndResult = ncclSuccess;
-  g_memcpys.clear();
-  g_memcpyResults = {hipSuccess, hipErrorInvalidValue};
+  fake.groupEndResult = ncclSuccess;
+  fake.memcpys.clear();
+  fake.memcpyResults = {hipSuccess, hipErrorInvalidValue};
   EXPECT_EQ(ncclUnhandledCudaError, AlltoAllv());
-  EXPECT_EQ(2u, g_memcpys.size());
-  g_syncResult = hipErrorLaunchFailure;
+  EXPECT_EQ(2u, fake.memcpys.size());
+  fake.syncResult = hipErrorLaunchFailure;
   EXPECT_EQ(ncclUnhandledCudaError, AlltoAllv());
-  EXPECT_TRUE(g_enqueued.empty());
+  EXPECT_TRUE(fake.enqueued.empty());
 }
 
 // alltoallv_meta.h
