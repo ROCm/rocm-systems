@@ -6369,8 +6369,9 @@ TEST(RemoteDriverDisconnectTest, GracefulCloseAndDestructionStopTheMonitor) {
       ASSERT_GE(kfd, 0);
       const util::UniqueHandle kfd_closer{kfd};
       server.join();
-      if (explicit_close)
+      if (explicit_close) {
         EXPECT_EQ(driver.close(), 0);
+      }
     }
     EXPECT_EQ(notifications.load(), 0u);
   }
