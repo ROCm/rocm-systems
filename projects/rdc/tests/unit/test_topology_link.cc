@@ -68,6 +68,7 @@ void ExpectNotAvailable(const rdc_topology_link_info_t& link) {
   EXPECT_EQ(link.min_bandwidth, kNotAvailable);
   EXPECT_EQ(link.max_bandwidth, kNotAvailable);
   EXPECT_EQ(link.hops, kNotAvailable);
+  EXPECT_EQ(link.link_type, RDC_IOLINK_TYPE_UNDEFINED);
   EXPECT_FALSE(link.is_p2p_accessible);
 }
 

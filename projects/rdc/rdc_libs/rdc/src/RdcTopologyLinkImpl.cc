@@ -140,7 +140,10 @@ rdc_status_t RdcTopologyLinkImpl::rdc_device_topology_get(uint32_t gpu_index,
     results->link_infos[i].min_bandwidth = min_bandwidth;
     results->link_infos[i].max_bandwidth = max_bandwidth;
     results->link_infos[i].hops = hops;
-    results->link_infos[i].link_type = static_cast<rdc_topology_link_type_t>(type);
+    // RDC defines only PCIe and xGMI; any other amdsmi type (or a failed lookup) is undefined.
+    results->link_infos[i].link_type = type == AMDSMI_LINK_TYPE_PCIE   ? RDC_IOLINK_TYPE_PCIEXPRESS
+                                       : type == AMDSMI_LINK_TYPE_XGMI ? RDC_IOLINK_TYPE_XGMI
+                                                                       : RDC_IOLINK_TYPE_UNDEFINED;
     results->link_infos[i].is_p2p_accessible = accessible;
   }
   return RDC_ST_OK;

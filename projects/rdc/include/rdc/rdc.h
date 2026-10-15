@@ -837,7 +837,7 @@ typedef struct {
 } rdc_topology_link_info_t;
 
 /**
- * @brief The data in the data structure will be set to max value if it is N/A or error
+ * @brief The topology of a device; see rdc_device_topology_get() for unknown values.
  */
 typedef struct {
   uint32_t num_of_gpus;  // The length of link_infos array
@@ -1745,9 +1745,18 @@ rdc_status_t rdc_health_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
  *
  *  @param[in] gpu_index The GPU gpu index.
  *
- *  @param[out] results  The device topology
+ *  @param[out] results  The device topology. link_infos[i] describes the link from
+ *  gpu_index to GPU i, for each of the num_of_gpus GPUs, and has its gpu_index set to i.
+ *  A value that cannot be read is reported as unknown: the maximum value for weight,
+ *  min_bandwidth, max_bandwidth and hops, RDC_IOLINK_TYPE_UNDEFINED for link_type and false
+ *  for is_p2p_accessible. The entry for gpu_index itself has all of these unknown values.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND gpu_index, its NUMA node or another GPU cannot be found.
+ *  @retval ::RDC_ST_MAX_LIMIT the system has more GPUs than link_infos can hold.
+ *
+ *  Other failures, such as an invalid handle or an error from rdcd, return their own
+ *  status. On any error, results is not valid.
  */
 rdc_status_t rdc_device_topology_get(rdc_handle_t p_rdc_handle, uint32_t gpu_index,
                                      rdc_device_topology_t* results);
