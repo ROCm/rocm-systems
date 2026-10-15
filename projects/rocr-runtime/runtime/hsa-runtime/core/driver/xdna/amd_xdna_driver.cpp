@@ -204,12 +204,15 @@ struct ert_cmd_chain_data {
 enum class XDNADeviceType {
   /// @brief Unknown device.
   Unknown = 0,
-  /// @brief Phoenix (npu1), aie2 architecture. PDI + instruction sequence dispatch only.
-  Phx,
-  /// @brief Strix / Strix Halo / Krackan (npu4/5/6), aie2p architecture. PDI + instruction sequence
+  /// @brief Phoenix (npu1). PDI + instruction sequence dispatch only.
+  Aie2,
+  /// @brief Strix / Strix Halo / Krackan (npu4/5/6). PDI + instruction sequence
   /// and full-ELF
   /// dispatch.
-  Stx,
+  Aie2p,
+  /// @brief AIE4 architecture ("npu3" classic/vf parts). Dispatches through a user-mode queue
+  /// (UMQ) rather than KMQ; see @ref AieUmqQueue.
+  Aie4,
 };
 
 /// @brief Devnode path for XDNA devices.
@@ -820,6 +823,21 @@ struct KmqMetadata {
   uint32_t NumTiles() const { return num_cols * num_core_rows; }
 };
 
+/// @brief Metadata for an AIE4 user-mode queue (UMQ): the hardware context created against the
+/// queue's own AQL ring, and the mapped doorbell used to notify CERT of new work.
+///
+/// Unlike KMQ, there is no separate ring or per-batch driver call: the queue's ring_buf_ (the same
+/// HSA-visible AQL packet ring every queue already has) is handed to the device directly as the
+/// hwctx's umq_bo, and submission is a single doorbell write, the same as a GPU hardware queue.
+struct UmqMetadata {
+  /// @brief Hardware context the queue dispatches against.
+  uint32_t hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
+  /// @brief DRM sync object the hardware context signals command completion on.
+  uint32_t syncobj_handle = 0;
+  /// @brief Doorbell register, mapped for the lifetime of the queue.
+  volatile uint32_t* doorbell = nullptr;
+};
+
 /// @brief Flushes the CPU cache for the packet's arguments.
 ///
 /// The sizes of the arguments are after the pointers of the arguments.
@@ -1100,7 +1118,11 @@ uint64_t XdnaDriver::GetDevHeapByteSize() { return dev_heap_size; }
 
 hsa_status_t XdnaDriver::Init() { return InitDeviceHeap(); }
 
-hsa_status_t XdnaDriver::ShutDown() { return FreeDeviceHeap(); }
+hsa_status_t XdnaDriver::ShutDown() {
+  const hsa_status_t heap_err = FreeDeviceHeap();
+  const hsa_status_t close_err = Close();
+  return (heap_err != HSA_STATUS_SUCCESS) ? heap_err : close_err;
+}
 
 hsa_status_t XdnaDriver::QueryKernelModeDriver(core::DriverQuery query) {
   switch (query) {
@@ -1133,12 +1155,40 @@ static hsa_status_t ReadDeviceId(const std::string& sysfs_device_path, uint16_t*
 static XDNADeviceType DeviceTypeOf(uint16_t device_id) {
   switch (device_id) {
     case 0x1502:
-      return XDNADeviceType::Phx;  // Phoenix (npu1, aie2)
+      return XDNADeviceType::Aie2;  // Phoenix (npu1, aie2)
     case 0x17f0:
-      return XDNADeviceType::Stx;  // Strix / Strix Halo / Krackan (npu4/5/6, aie2p)
+      return XDNADeviceType::Aie2p;  // Strix / Strix Halo / Krackan (npu4/5/6, aie2p)
+    case 0x1b0a:
+    case 0x1b0c:
+      return XDNADeviceType::Aie4;  // "npu3" classic (0x1b0a) / vf (0x1b0c), aie4
+    case 0x17f1:
+    case 0x17f3:
+      // 0x17f1/0x17f3 (classic/vf) are reused across the "npu3" (rev 0x10) and npu9/10/11 (revs
+      // 0x13/0x14/0x15) parts; all of them are aie4. 0x17f2 (pf) is left unmapped, same as
+      // 0x1b0b: it is a management-only function, not a compute agent.
+      return XDNADeviceType::Aie4;
     default:
       return XDNADeviceType::Unknown;
   }
+}
+
+/// @brief Reads the kernel driver's queue submission mode from the sysfs device directory
+/// @p sysfs_device_path.
+///
+/// This is the same "device_type" sysfs attribute the amdxdna kernel driver exposes and the
+/// xdna-driver userspace shim keys its own KMQ/UMQ device selection on.
+///
+/// @param[in] sysfs_device_path sysfs directory holding the device's attributes
+/// @param[out] device_type one of the AMDXDNA_DEV_TYPE_* values read from that directory
+static hsa_status_t ReadDeviceType(const std::string& sysfs_device_path, int* device_type) {
+  const std::string device_type_file = sysfs_device_path + "/device_type";
+
+  // device_type is decimal, unlike the hex-formatted "device" (PCI device ID) file.
+  std::ifstream is(device_type_file);
+  if (!is.good() || !(is >> *device_type)) {
+    return HSA_STATUS_ERROR;
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::Open() {
@@ -1194,7 +1244,7 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
   // Fill in node properties that depend on device type.
   std::fill_n(node_props.AMDName, HSA_PUBLIC_NAME_SIZE, 0);
   switch (DeviceTypeOf(device_id)) {
-    case XDNADeviceType::Phx: {
+    case XDNADeviceType::Aie2: {
       constexpr std::string_view name("aie2");
       assert(name.size() < HSA_PUBLIC_NAME_SIZE);
       std::copy(name.begin(), name.end(), node_props.AMDName);
@@ -1202,8 +1252,15 @@ hsa_status_t XdnaDriver::GetNodeProperties(HsaNodeProperties& node_props, uint32
       node_props.NumArrays = aie_metadata.cols - 1;
     } break;
 
-    case XDNADeviceType::Stx: {
+    case XDNADeviceType::Aie2p: {
       constexpr std::string_view name("aie2p");
+      assert(name.size() < HSA_PUBLIC_NAME_SIZE);
+      std::copy(name.begin(), name.end(), node_props.AMDName);
+      node_props.NumArrays = aie_metadata.cols;
+    } break;
+
+    case XDNADeviceType::Aie4: {
+      constexpr std::string_view name("aie4");
       assert(name.size() < HSA_PUBLIC_NAME_SIZE);
       std::copy(name.begin(), name.end(), node_props.AMDName);
       node_props.NumArrays = aie_metadata.cols;
@@ -1469,6 +1526,92 @@ hsa_status_t XdnaDriver::DestroyKernelModeQueue(void* queue_metadata) const {
   return first_err;
 }
 
+bool XdnaDriver::UsesUserModeQueue() const {
+  const std::string sysfs_device_path = std::string(sysfs_path) + "/" + devnode_name_ + "/device";
+  int device_type = AMDXDNA_DEV_TYPE_KMQ;
+  if (ReadDeviceType(sysfs_device_path, &device_type) != HSA_STATUS_SUCCESS) {
+    assert(false && "Failed to read the XDNA device_type from sysfs.");
+    return false;
+  }
+  return device_type == AMDXDNA_DEV_TYPE_UMQ;
+}
+
+hsa_status_t XdnaDriver::CreateUserModeQueue(void* ring_buf, const core::Agent& agent,
+                                             uint32_t num_cols, uint32_t num_core_rows,
+                                             void** queue_metadata,
+                                             volatile uint32_t** doorbell) const {
+  // Unlike KMQ, UMQ has no separate ring: the queue's own HSA-visible AQL packet ring (ring_buf,
+  // same allocation every AIE queue already has) is handed to the device directly as the hwctx's
+  // umq_bo. CERT reads packets out of it in place, the same way a GPU hardware queue's ring is
+  // read directly by the command processor.
+  uint32_t ring_bo_handle = 0;
+  hsa_status_t err = ResolveBOHandle(ring_buf, agent, &ring_bo_handle, nullptr, nullptr);
+  if (err != HSA_STATUS_SUCCESS) {
+    return err;
+  }
+
+  amdxdna_qos_info qos_info = {};
+  qos_info.user_start_col = USER_START_COL_NOT_REQUESTED;
+
+  amdxdna_drm_create_hwctx create_hwctx_args = {};
+  create_hwctx_args.qos_p = reinterpret_cast<uintptr_t>(&qos_info);
+  create_hwctx_args.umq_bo = ring_bo_handle;
+  create_hwctx_args.max_opc = 0x800;
+  create_hwctx_args.num_tiles = num_cols * num_core_rows;
+  err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args);
+  if (err != HSA_STATUS_SUCCESS) {
+    assert(false && "Failed to create hardware context for UMQ");
+    return err;
+  }
+  MAKE_NAMED_SCOPE_GUARD(hwctx_guard, [&] {
+    if (DestroyHwCtx(fd_, create_hwctx_args.handle) != HSA_STATUS_SUCCESS) {
+      log_warning_n(10, "AIE: failed to destroy a hardware context after a failed UMQ setup.\n");
+    }
+  });
+
+  volatile uint32_t* doorbell_ptr = nullptr;
+  if (create_hwctx_args.umq_doorbell != AMDXDNA_INVALID_DOORBELL_OFFSET) {
+    void* mem = mmap(nullptr, sizeof(uint32_t), PROT_WRITE, MAP_SHARED, fd_,
+                     create_hwctx_args.umq_doorbell);
+    if (mem == MAP_FAILED) {
+      return HSA_STATUS_ERROR;
+    }
+    doorbell_ptr = reinterpret_cast<volatile uint32_t*>(mem);
+  }
+
+  auto umq_metadata = std::make_unique<UmqMetadata>();
+  umq_metadata->hw_ctx_handle = create_hwctx_args.handle;
+  umq_metadata->syncobj_handle = create_hwctx_args.syncobj_handle;
+  umq_metadata->doorbell = doorbell_ptr;
+
+  hwctx_guard.Dismiss();
+  *queue_metadata = umq_metadata.release();
+  *doorbell = doorbell_ptr;
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t XdnaDriver::DestroyUserModeQueue(void* queue_metadata) const {
+  if (queue_metadata == nullptr) {
+    return HSA_STATUS_ERROR_INVALID_QUEUE;
+  }
+
+  std::unique_ptr<UmqMetadata> umq_metadata;
+  umq_metadata.reset(static_cast<UmqMetadata*>(queue_metadata));
+
+  if (umq_metadata->doorbell != nullptr) {
+    munmap(const_cast<uint32_t*>(umq_metadata->doorbell), sizeof(uint32_t));
+    umq_metadata->doorbell = nullptr;
+  }
+
+  if (umq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE) {
+    return HSA_STATUS_SUCCESS;
+  }
+  const hsa_status_t err = DestroyHwCtx(fd_, umq_metadata->hw_ctx_handle);
+  umq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
+  umq_metadata->syncobj_handle = 0;
+  return err;
+}
+
 hsa_status_t XdnaDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                                         uint32_t* queue_cu_mask) const {
   // AIE doesn't support queue CU masks.
@@ -1679,6 +1822,14 @@ hsa_status_t XdnaDriver::QueryDriverVersion() {
 }
 
 hsa_status_t XdnaDriver::InitDeviceHeap() {
+  // UMQ (AIE4) devices have no KMQ-style pre-reserved dev heap: the kernel driver rejects
+  // AMDXDNA_BO_DEV_HEAP creation for them. Leave dev_heap_bo/dev_heap_vaddr unset; HasDevHeap()
+  // reports this so AieAgent sizes its device-local memory region at 0 instead of assuming one.
+  if (UsesUserModeQueue()) {
+    has_dev_heap_ = false;
+    return HSA_STATUS_SUCCESS;
+  }
+
   amdxdna_drm_create_bo create_bo_args = {};
   create_bo_args.size = dev_heap_size;
   create_bo_args.type = AMDXDNA_BO_DEV_HEAP;
@@ -1709,6 +1860,7 @@ hsa_status_t XdnaDriver::InitDeviceHeap() {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
   }
   dev_heap_vaddr = heap;
+  has_dev_heap_ = true;
 
   dev_heap_guard.Dismiss();
 
@@ -2256,7 +2408,7 @@ static hsa_status_t SubmitFullElfChain(int fd, void* dev_heap_vaddr,
   // queue that already has a full-ELF context passed this check then.
   const bool mode_changed = (kmq_metadata->mode != AieKernelKind::FullElf);
   const bool no_context = (kmq_metadata->hw_ctx_handle == AMDXDNA_INVALID_CTX_HANDLE);
-  if ((mode_changed || no_context) && kmq_metadata->device_type != XDNADeviceType::Stx) {
+  if ((mode_changed || no_context) && kmq_metadata->device_type != XDNADeviceType::Aie2p) {
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
