@@ -8,6 +8,7 @@
 #include <gtest/gtest.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <filesystem>
 #include <string>
 #include <string_view>
@@ -264,16 +265,36 @@ TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresDispatchCountingService)
     EXPECT_TRUE(args.record_callback_args != nullptr);
 }
 
+TEST_F(TestRocprofilerComputeTool, OnToolInit_ConfiguresKernelDispatchTracingForCompletions)
+{
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto& services = m_sdk_wrapper->get_callback_tracing_service_info();
+    const auto  dispatch = std::find_if(services.begin(),
+                                        services.end(),
+                                        [](const auto& service)
+                                        {
+                                           return service.kind ==
+                                                  ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH;
+                                        });
+    ASSERT_NE(dispatch, services.end());
+    EXPECT_EQ(dispatch->operations,
+              std::vector<rocprofiler_tracing_operation_t>{ROCPROFILER_KERNEL_DISPATCH_COMPLETE});
+    EXPECT_EQ(dispatch->callback_args, cfg->tool_data);
+}
+
 TEST_F(TestRocprofilerComputeTool, OnFiniEmptyCounterRecords_DoesntWriteCounters)
 {
     const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     cfg->finalize(cfg->tool_data);
     EXPECT_EQ(m_counters_writer->get_write_counters_info().size(), 0);
 }
 
 TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCounterRecords_WritesCounters)
 {
-    const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     const auto         tool_data  = get_tool_data(cfg);
     constexpr uint64_t counter_id = 20;
     constexpr uint64_t kernel_id  = 11;
@@ -285,7 +306,8 @@ TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCounterRecords_WritesCounte
 
 TEST_F(TestRocprofilerComputeTool, OnFiniWithNonEmptyCountersAndKernelFiltering_WriteOnlyFilteredCounters)
 {
-    const auto         cfg        = rocprofiler_configure(1, "", 1, &m_client_id);
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_TRUE(test_knobs::replace_writer("counters", m_counters_writer));
     const auto         tool_data  = get_tool_data(cfg);
     constexpr uint64_t counter_id = 20;
     constexpr uint64_t kernel_id0 = 11;
@@ -320,6 +342,18 @@ TEST_F(TestRocprofilerComputeTool, ToolInit_WithoutRequestedCounters_DoesNotConf
     ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
     EXPECT_TRUE(m_sdk_wrapper->get_dispatch_counting_service_info().empty());
     EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
+}
+
+TEST_F(TestRocprofilerComputeTool, ToolInit_WithoutRequestedCounters_StillTracesKernelDispatches)
+{
+    m_input_parameters->set_requested_counters("");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto& services = m_sdk_wrapper->get_callback_tracing_service_info();
+    EXPECT_TRUE(std::any_of(services.begin(),
+                            services.end(),
+                            [](const auto& service)
+                            { return service.kind == ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH; }));
 }
 
 TEST_F(TestRocprofilerComputeTool, RocprofilerConfigure_RegistersHsaInterceptCallback)
@@ -378,7 +412,6 @@ void TestRocprofilerComputeTool::SetUp()
 
     test_knobs::set_input_parameters(m_input_parameters);
     test_knobs::set_sdk_wrapper(m_sdk_wrapper);
-    test_knobs::set_csv_writer(m_counters_writer);
 }
 
 void TestRocprofilerComputeTool::TearDown()
