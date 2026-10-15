@@ -15,7 +15,7 @@ on:
         description: 'ROCm/tRCCL ref for the coco harness.'
         type: string
         required: false
-        default: 'main'
+        default: '1.3.x'
       dry_run:
         description: 'Resolve stacks and submissions without building or running anything.'
         type: boolean
@@ -58,7 +58,7 @@ jobs:
         id: resolve
         uses: ./.github/actions/rccl-resolve-coco-run
         with:
-          coco_ref: ${{ inputs.coco_ref || 'main' }}
+          coco_ref: ${{ inputs.coco_ref || '1.3.x' }}
           dry_run: ${{ inputs.dry_run || false }}
           periodic_mode: ${{ inputs.periodic_mode || 'nightly' }}
           schedule: ${{ github.event.schedule }}

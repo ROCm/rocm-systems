@@ -880,6 +880,75 @@ TEST(GpuVmPipeline, TranslatedScalarReadAndWriteResumeWithoutReplayingCompletedC
   EXPECT_EQ(context.external->write_history[2].address, kStoreAddress + sizeof(uint32_t));
 }
 
+TEST(GpuVmPipeline, MaskedScalarStoreRetryPreservesCompletedWordsAndPartialWord) {
+  TranslatedPipelineContext context;
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  context.external->translation_granule = sizeof(uint16_t);
+
+  constexpr uint64_t kAddress = 0x1c0;
+  constexpr uint32_t kSentinel = 0x55555555;
+  constexpr std::array<uint32_t, 4> kStored = {0x11223344, 0x55667788, 0x99aabbcc, 0xddeeff00};
+  for (uint32_t index = 0; index < kStored.size(); ++index)
+    context.external->store(kAddress + index * sizeof(uint32_t), kSentinel);
+  // Complete the first DWORD and half the second before backing memory stalls.
+  context.external->unavailable_write_call = 4;
+  auto store = std::make_unique<amdgpu::ScalarMemState>();
+  store->addr = kAddress;
+  store->num_dwords = kStored.size();
+  store->is_load = false;
+  store->load_dword_mask = 0x7;
+  std::ranges::copy(kStored, store->store_data);
+  amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
+  EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(store)), *context.wf),
+            amdgpu::VmAccessOutcome::Complete);
+  ASSERT_EQ(context.wf->state(), amdgpu::WfState::VM_RETRY);
+  EXPECT_FALSE(context.wf->wait_counters().empty());
+  EXPECT_EQ(context.external->load<uint32_t>(kAddress), kStored[0]);
+  EXPECT_EQ(context.external->load<uint32_t>(kAddress + 4), 0x55557788u);
+
+  // A peer can change already-written bytes before retry. Replaying them would
+  // overwrite its updates, so check both completed-word and within-word progress.
+  context.external->store(kAddress, uint32_t{0x12345678});
+  context.external->store(kAddress + 4, uint16_t{0xabcd});
+  pipeline.tick();
+
+  EXPECT_TRUE(pipeline.empty());
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_EQ(context.external->load<uint32_t>(kAddress), 0x12345678u);
+  EXPECT_EQ(context.external->load<uint32_t>(kAddress + 4), 0x5566abcdu);
+  EXPECT_EQ(context.external->load<uint32_t>(kAddress + 8), kStored[2]);
+  EXPECT_EQ(context.external->load<uint32_t>(kAddress + 12), kSentinel);
+  constexpr std::array<uint32_t, 7> kExpectedOffsets = {0, 2, 4, 6, 6, 8, 10};
+  ASSERT_EQ(context.external->write_history.size(), kExpectedOffsets.size());
+  for (uint32_t index = 0; index < kExpectedOffsets.size(); ++index) {
+    SCOPED_TRACE(index);
+    EXPECT_EQ(context.external->write_history[index].address, kAddress + kExpectedOffsets[index]);
+    EXPECT_EQ(context.external->write_history[index].size, sizeof(uint16_t));
+  }
+}
+
+TEST(GpuVmPipeline, FullyMaskedScalarStoreDoesNotAcquireRevokedAddressSpace) {
+  TranslatedPipelineContext context;
+  ASSERT_TRUE(context.address_space);
+  ASSERT_NE(context.wf, nullptr);
+  ASSERT_TRUE(context.sim.soc->gpu_vm().invalidate(context.address_space));
+
+  auto store = std::make_unique<amdgpu::ScalarMemState>();
+  store->addr = 0x1c0;
+  store->num_dwords = 4;
+  store->is_load = false;
+  store->load_dword_mask = 0;
+  amdgpu::ScalarMemPipeline pipeline(&context.cu->l1_scalar());
+  EXPECT_EQ(pipeline.issue_deferred(new TestMemoryInstruction(std::move(store)), *context.wf),
+            amdgpu::VmAccessOutcome::Complete);
+  EXPECT_TRUE(pipeline.empty());
+  EXPECT_EQ(context.wf->state(), amdgpu::WfState::RUNNING);
+  EXPECT_TRUE(context.wf->wait_counters().empty());
+  EXPECT_EQ(context.external->write_calls, 0u);
+}
+
 TEST(GpuVmPipeline, DeferredOperationCannotWriteBackIntoReusedWaveSlot) {
   TranslatedPipelineContext context;
   ASSERT_TRUE(context.address_space);
