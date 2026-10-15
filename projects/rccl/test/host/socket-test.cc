@@ -163,7 +163,7 @@ class SocketMicrotest : public ::testing::Test {
 // Basics
 
 TEST_F(SocketMicrotest, DefaultMagic_EnvOverridesOnceElseBuiltIn) {
-  GTEST_FLAG_SET(death_test_style, "threadsafe");  // a fresh process: the value is cached on first use
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";  // a fresh process: the value is cached on first use
   auto magicIs = [](const char* env, uint64_t expected, const char* log) {
     if (env) setenv("NCCL_SOCKET_MAGIC", env, 1);
     else unsetenv("NCCL_SOCKET_MAGIC");
