@@ -139,9 +139,11 @@ collection time.
 A compatible analysis consumer parses the flat fields, nests marker intervals
 per OS thread, and uses ltid plus timestamp containment to attach worker trees
 to their launcher. Across replay passes, ltid is not a stable identity because
-the OS assigns new thread ids. The consumer can exclude it from its stitch
-key while retaining seqNr, tid, and ftid. Consumers expecting the older stacked
-marker syntax require the flat-marker analysis update.
+the OS assigns new thread ids. The stitch key is the Function cell with
+ltid= removed: name, location, seqNr, tid, ftid, scope, args, and backend.
+function_ordinal is the 0-based occurrence of that stitch key in the pass,
+in marker order, assigned after join. Cross-pass collapse matches on stitch
+key and function_ordinal.
 
 ## Plain-C interface
 

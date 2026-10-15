@@ -1378,7 +1378,10 @@ def _join_pass_marker_and_counter(pair: schema.MlApiTracePair) -> pd.DataFrame:
 
 
 def _marker_stitch_key(function_value: object) -> str:
-    """Pass-stable Function identity: keep seqNr, tid, ftid; omit ltid."""
+    """Function cell with ltid= stripped.
+
+    Kept in the key: name, location, seqNr, tid, ftid, scope, args, backend.
+    """
     if function_value is None or (
         isinstance(function_value, float) and pd.isna(function_value)
     ):
@@ -1391,7 +1394,12 @@ def _marker_stitch_key(function_value: object) -> str:
 
 
 def _add_stitch_key_and_ordinal(pass_frame: pd.DataFrame) -> pd.DataFrame:
-    """Add stitch_key from Function (seqNr, tid, ftid kept; ltid omitted)."""
+    """Add stitch_key and function_ordinal for this pass.
+
+    stitch_key is Function with ltid= removed. function_ordinal is the
+    0-based occurrence of that stitch_key in marker order. Collapse matches
+    on both.
+    """
     if pass_frame.empty:
         result = pass_frame.copy()
         result["stitch_key"] = pd.Series(dtype=str)
