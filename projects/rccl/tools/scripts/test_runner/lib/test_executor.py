@@ -3293,7 +3293,8 @@ class TestExecutor:
                        "rccl-UnitTestsMicroEnqueue",
                        "rccl-UnitTestsMicroSymKernels",
                        "rccl-UnitTestsMicroGinHost",
-                       "rccl-UnitTestsMicroNcclDevice"]:
+                       "rccl-UnitTestsMicroNcclDevice",
+                       "rccl-UnitTestsMicroCore"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])
