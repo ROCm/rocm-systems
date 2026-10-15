@@ -81,6 +81,7 @@ class TestMetricNicPortStats(unittest.TestCase):
                 self.helpers.handle_ainics.return_value = (False, self.device_handles_ainics[0])
                 self.logger = mock.Mock()
                 self.logger.is_json_format.return_value = is_json
+                self.logger.is_csv_format.return_value = False
 
         command = _Command()
         command._amdsmi_stub = amdsmi_stub
@@ -120,6 +121,24 @@ class TestMetricNicPortStats(unittest.TestCase):
 
         _, called_args, _ = get_vendor_stats.mock_calls[0]
         self.assertEqual(called_args[2], 1)  # AMDSMI_NIC_STAT_SCOPE_EXTENDED, forced by JSON
+
+    def test_a_failed_vendor_read_leaves_that_block_empty_and_keeps_the_rest(self):
+        module, amdsmi_stub = _load_metric()
+        command = self._make_command(module, amdsmi_stub, is_json=False)
+        interface = amdsmi_stub.amdsmi_interface
+        interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
+        interface.amdsmi_get_nic_port_info = mock.Mock(
+            return_value={"num_ports": 1, "ports": [{"netdev": "enp1s0"}]}
+        )
+        library_error = amdsmi_stub.amdsmi_exception.AmdSmiLibraryException
+        interface.amdsmi_get_nic_vendor_statistics = mock.Mock(side_effect=library_error())
+        interface.amdsmi_get_nic_port_statistics = mock.Mock(return_value={"rx_bytes": 5})
+
+        command.metric_nic(types.SimpleNamespace(nic=None, port=-1, extended=False))
+
+        port = command.logger.store_ainic_output.call_args[0][2]["PORTS"]["PORT_0"]
+        self.assertEqual(port["VENDOR_STATISTICS"], {})
+        self.assertEqual(port["STATISTICS"], {"RX_BYTES": 5})
 
     def test_no_ports_reports_plainly(self):
         module, amdsmi_stub = _load_metric()

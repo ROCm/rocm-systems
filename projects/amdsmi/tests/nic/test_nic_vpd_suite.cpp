@@ -14,29 +14,15 @@
 #include <string>
 #include <vector>
 
+#include "nic_check.h"
 #include "smi_nic_vpd.h"
 
 namespace vpd = amd::smi::nic::vpd;
 
-// Test Infrastructure
-
-static int tests_run = 0;
-static int tests_failed = 0;
-
-static void check(const std::string& name, bool passed, const std::string& detail = "") {
-  tests_run++;
-  if (!passed) {
-    tests_failed++;
-  }
-  std::cout << (passed ? "  PASS: " : "  FAIL: ") << name;
-  if (!detail.empty()) {
-    std::cout << " - " << detail;
-  }
-  std::cout << "\n";
-}
+using nic_test::check;
 
 static bool is_equal(const std::optional<std::string>& got, const std::string& want) {
-  return got.has_value() && got.value() == want;
+  return got.has_value() && (got.value() == want);
 }
 
 // VPD image builders (PCI Local Bus spec resource tags).
@@ -203,6 +189,5 @@ int main() {
   }
 
   std::cout << "====================\n";
-  std::cout << "Ran " << tests_run << " checks, " << tests_failed << " failed\n";
-  return tests_failed == 0 ? 0 : 1;
+  return nic_test::report();
 }

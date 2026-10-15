@@ -6,7 +6,9 @@
 #include <unistd.h>
 
 #include <climits>
+#include <cstdint>
 #include <filesystem>
+#include <string>
 
 #include "smi_sysfs.h"
 
@@ -61,7 +63,7 @@ bool SmiNicSubsystem::was_bdf_resolved(const std::string& symlink, std::string& 
 }
 
 bool SmiNicSubsystem::is_driver_bound_to_bdf(const std::string& driver_dir, const std::string& bdf,
-                                             bool match_canonical) const {
+                                             bool is_canonical_match) const {
   std::error_code ec;
   if (!fs::exists(driver_dir, ec) || !fs::is_directory(driver_dir, ec)) {
     return false;
@@ -75,7 +77,7 @@ bool SmiNicSubsystem::is_driver_bound_to_bdf(const std::string& driver_dir, cons
         continue;
       }
 
-      if (!match_canonical) {
+      if (!is_canonical_match) {
         if (entry.path().filename().string() == bdf) {
           return true;
         }
