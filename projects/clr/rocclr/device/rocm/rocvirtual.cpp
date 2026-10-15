@@ -952,7 +952,7 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 }
 
 // ================================================================================================
-bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
+bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal, bool wait_only) {
   // Wait for the current signal to complete
   if (Hsa::signal_load_relaxed(signal->signal_) > 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Host wait on completion_signal=0x%zx",
@@ -961,6 +961,9 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
       LogPrintfError("Failed signal [0x%lx] wait", signal->signal_);
       return false;
     }
+  }
+  if (wait_only) {
+    return true;
   }
 
   // Process this signal's timing before signal reuse
@@ -5329,10 +5332,12 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
   std::scoped_lock lock(execution());
   if (vcmd.CpuWaitRequested()) {
     if (IS_WINDOWS) SetStateFlag(kForceIrq);
-    // It should be safe to call flush directly if there are not pending dispatches without
-    // HSA signal callback
     AcquireHwQueueIfNeeded();
-    flush(vcmd.GetBatchHead());
+    // Make sure the last signal covers all submitted work, but don't wait for it here. The wait
+    // would hold the execution() lock and block all other threads, which submit to this queue.
+    // The caller waits for the attached signal and completes the batch in CompleteCpuWait().
+    releaseGpuMemoryFence(kSkipCpuWait);
+    AttachHwEvent(&vcmd, Barriers().GetLastSignal());
     SetCoalesceWindow(0, nullptr);
   } else {
     profilingBegin(vcmd);
@@ -5398,6 +5403,31 @@ void VirtualGPU::submitMarker(amd::Marker& vcmd) {
     profilingEnd();
   }
   ClearStateFlag(kForceIrq);
+}
+
+// ================================================================================================
+void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
+  auto* signal = reinterpret_cast<ProfilingSignal*>(cmd.HwEvent());
+  assert((signal != nullptr) && "Marker with CPU wait must have a HW event!");
+
+  // Wait without the execution() lock. The marker holds a reference to the signal,
+  // so the tracker can't reuse it in the meantime
+  constexpr bool kWaitOnly = true;
+  Barriers().CpuWaitForSignal(signal, kWaitOnly);
+
+  {
+    std::scoped_lock lock(execution());
+    // The signal is complete, hence this call only processes its timing
+    Barriers().CpuWaitForSignal(signal);
+    // Kernel arguments and memory dependencies can be released only if the wait covered all
+    // submitted work, otherwise newer submissions may still use them
+    if ((Barriers().GetLastSignal() == signal) && !IsPendingDispatch()) {
+      ResetQueueStates();
+    }
+  }
+  // The batch belongs to the marker only, so completing it (callbacks, release) needs no lock.
+  // The signal timing is already processed above
+  updateCommandsState(cmd.GetBatchHead());
 }
 
 // ================================================================================================
