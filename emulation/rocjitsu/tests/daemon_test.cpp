@@ -229,11 +229,29 @@ protected:
 
   void TearDown() override {
     if (daemon_pid_ > 0) {
-      EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
       int status = 0;
-      EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
-      EXPECT_TRUE(WIFEXITED(status));
-      EXPECT_EQ(WEXITSTATUS(status), expected_daemon_exit_);
+      pid_t exited = 0;
+      if (expected_daemon_exit_ != EXIT_SUCCESS) {
+        // Fatal VM failures must stop the daemon without a teardown signal.
+        // SIGTERM sent after its signal-wait loop has ended can remain pending
+        // until the CLI restores its signal mask, replacing the failure exit.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do {
+          exited = waitpid(daemon_pid_, &status, WNOHANG);
+          if (exited == daemon_pid_ || (exited < 0 && errno != EINTR))
+            break;
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (std::chrono::steady_clock::now() < deadline);
+        EXPECT_EQ(exited, daemon_pid_) << "daemon did not exit after a fatal VM failure";
+      }
+      if (exited != daemon_pid_) {
+        EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
+        EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
+      }
+      EXPECT_TRUE(WIFEXITED(status)) << "daemon exit status=" << status;
+      if (WIFEXITED(status)) {
+        EXPECT_EQ(WEXITSTATUS(status), expected_daemon_exit_);
+      }
       EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
