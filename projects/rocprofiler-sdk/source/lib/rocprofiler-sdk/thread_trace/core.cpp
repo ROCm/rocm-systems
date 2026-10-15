@@ -76,10 +76,10 @@ constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB minimum to give the GPU ro
 
 struct cbdata_t
 {
-    rocprofiler_agent_id_t                          agent    = {.handle = 0    rocprofiler_thread_trace_shader_data_callback_t cb_fn    = nullptr;
+    rocprofiler_agent_id_t                          agent    = {.handle = 0};
+    rocprofiler_thread_trace_shader_data_callback_t cb_fn    = nullptr;
     const rocprofiler_user_data_t*                  userdata = nullptr;
     std::vector<uint64_t>                           next_chunks{};
-};
 
     aqlprofile_handle_t handle{};
 };
@@ -149,11 +149,6 @@ ThreadTracerAgent::ThreadTracerAgent(thread_trace_parameter_pack _params,
 : params(std::move(_params))
 , agent_id(cache)
 {
-    const auto* agent = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
-
-    num_shader_engines = agent->num_shader_banks;
-    params.shader_engine_mask &= (uint64_t{1} << num_shader_engines) - 1;
-
     if(params.resource_mode != ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT)
         initialize_resources();
 
@@ -171,6 +166,10 @@ ThreadTracerAgent::initialize_resources()
 {
     // Subsequent starts reuse the queue and packet factory.
     ROCP_TRACE << "Constructing ATT instance for agent " << agent_id.handle;
+    const auto* agent  = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
+    num_shader_engines = agent->num_shader_banks;
+    params.shader_engine_mask &= (uint64_t{1} << num_shader_engines) - 1;
+
     const bool   multi_buffer = params.num_buffers > 1;
     const size_t staging_n    = multi_buffer ? params.num_buffers : 0;
 
@@ -420,7 +419,7 @@ ThreadTracerAgent::start_thread_trace_locked()
         producer_data.copy_data_fn     = att_queue_copy;
         producer_data.shared           = worker_data;
         producer_data.num_shader_engines = num_shader_engines;
-        producer_data.buffer_packets   = std::move(buffer_packets);
+        producer_data.buffer_packets     = std::move(buffer_packets);
         producer_data.restart_trace    = [this](auto& snapshot) {
             auto snapshot_lock = std::unique_lock{trace_resources_mut};
             // Keep marker allocations alive in the producer until the next completed stop.

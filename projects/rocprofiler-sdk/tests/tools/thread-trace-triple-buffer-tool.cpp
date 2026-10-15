@@ -409,13 +409,12 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
 
                         const auto bounded_end_byte = std::min(end_byte, output_size);
                         auto       current_sdata    = uint32_t{0};
-                        ROCPROFILER_CALL(
-                            rocprofiler_trace_decode(decoder,
-                                                     parse_single_se,
-                                                     buffer.data() + current_byte,
-                                                     bounded_end_byte - current_byte,
-                                                     &current_sdata),
-                            "thread trace decode");
+                        ROCPROFILER_CALL(rocprofiler_trace_decode(decoder,
+                                                                  parse_single_se,
+                                                                  buffer.data() + current_byte,
+                                                                  bounded_end_byte - current_byte,
+                                                                  &current_sdata),
+                                         "thread trace decode");
                         current_byte = end_byte;
                     }
                 }
