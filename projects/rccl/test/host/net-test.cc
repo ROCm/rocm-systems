@@ -17,10 +17,13 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -119,8 +122,9 @@ struct FakeNet {
 std::function<int64_t(const char*, int64_t)> ParamOverride(std::initializer_list<std::pair<const char*, int64_t>> kv) {
   std::vector<std::pair<std::string, int64_t>> table(kv.begin(), kv.end());
   return [table](const char* env, int64_t deft) {
-    for (const auto& [name, value] : table)
+    for (const auto& [name, value] : table) {
       if (name == env) return value;
+    }
     return deft;
   };
 }
@@ -206,7 +210,7 @@ class NetIbNicDetectMicrotest : public NetMicrotestBase {
 };
 
 TEST_F(NetIbNicDetectMicrotest, ReadIbNicRate_SeveralPorts_ReturnsHighestParsableRate) {
-  AddDevice("mlx5_0", "0x15b3", "0x1021", {"100 Gb/sec (4X EDR)", "garbage", "400 Gb/sec (4X NDR)"});
+  AddDevice("mlx5_0", "0x15b3", "0x1021", {"100 Gb/sec (4X EDR)", "400 Gb/sec (4X NDR)", "garbage", "200 Gb/sec"});
 
   EXPECT_EQ(readIBNicRate("mlx5_0"), 400);
 }
@@ -276,11 +280,22 @@ TEST_F(NetIbNicDetectMicrotest, Detect_UnknownVendors_ReportsDefaultWithCount) {
 TEST_F(NetIbNicDetectMicrotest, Detect_MissingPciIds_IgnoresDevice) {
   AddDevice("mlx5_0", "0x15b3", "0x1021");
   std::filesystem::create_directories(root_ / "broken0" / "device");
+  WriteFile(root_ / "broken1" / "device" / "vendor", "0x15b3");  // device id missing
 
   rcclDetectIBNics();
 
   EXPECT_EQ(rcclPrimaryNicInfo.type, rcclIBNicTypeMLX);
   EXPECT_EQ(rcclPrimaryNicInfo.count, 1);
+}
+
+TEST_F(NetIbNicDetectMicrotest, Detect_KnownVendorUnknownDevice_CountsAsDefault) {
+  AddDevice("ionic_0", "0x1dd8", "0x2001");
+  AddDevice("bnxt_re0", "0x14e4", "0x1751");
+
+  rcclDetectIBNics();
+
+  EXPECT_EQ(rcclPrimaryNicInfo.type, rcclIBNicTypeDefault);
+  EXPECT_EQ(rcclPrimaryNicInfo.count, 2);
 }
 
 TEST_F(NetIbNicDetectMicrotest, Detect_AinicRoceDisabled_CountsAinicAsDefault) {
@@ -708,6 +723,7 @@ TEST_F(NetSharedBuffersMicrotest, Init_AllocationFails_ReturnsError) {
 
 TEST_F(NetSharedBuffersMicrotest, Destroy_InvalidPoolState_Rejected) {
   EXPECT_EQ(Destroy(kLocalRanks, 0), ncclInvalidArgument);
+  EXPECT_EQ(Destroy(-1, 0), ncclInvalidArgument);
   EXPECT_EQ(Destroy(0, 0), ncclInternalError);  // no pool yet
 
   ASSERT_EQ(Init(0, 0, 0, 1, 1), ncclSuccess);
@@ -779,7 +795,25 @@ TEST_F(NetSharedBuffersMicrotest, Destroy_DeviceBufferSameProcess_FreesWithoutIp
   EXPECT_TRUE(live_.empty());
 }
 
-// proxySharedInit picks host or device memory from /dev/dxg (WSL); these assertions hold for both.
+TEST_F(NetSharedBuffersMicrotest, Destroy_DeviceBufferWithCuMem_ReleasesIpc) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ASSERT_EQ(Init(1, 0, 0, 1, 1), ncclSuccess);
+  ScopedHook ipcFree(g_ncclP2pFreeShareableBuffer, [](ncclIpcDesc*) { return ncclSuccess; });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [this](void* p, size_t) {
+    Release(p);
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(Destroy(0, 0, /*sameProcess=*/1), ncclSuccess);
+
+  EXPECT_EQ(ipcFree.calls, 1);
+  EXPECT_TRUE(live_.empty());
+}
+
+// proxySharedInit takes host memory under WSL (/dev/dxg present) and device memory otherwise.
 TEST_F(NetSharedBuffersMicrotest, ProxySharedInit_ReservesSendPoolForConnectionRank) {
   ncclProxyConnection conn{};
   conn.tpLocalRank = 2;
@@ -790,6 +824,9 @@ TEST_F(NetSharedBuffersMicrotest, ProxySharedInit_ReservesSendPoolForConnectionR
   EXPECT_EQ(State(2, 0).refcount, 1);
   EXPECT_EQ(State(2, 0).size, (int64_t)3 * NCCL_SHARED_STEPS * kChunk);
   EXPECT_EQ(State(2, 1).refcount, 0);
+  bool wsl = access("/dev/dxg", F_OK) == 0;
+  EXPECT_EQ(State(2, 0).hostBuff != nullptr, wsl);
+  EXPECT_EQ(State(2, 0).cudaBuff != nullptr, !wsl);
 }
 
 // ---------------------------------------------------------------------------
@@ -827,9 +864,13 @@ class NetProxySetupMicrotest : public NetMicrotestBase {
   recvNetResources* RecvRes() { return static_cast<recvNetResources*>(conn_.transportResources); }
 
   // Runs one side's setup on a fresh connection and reports the DMA-BUF choice.
-  int UseDmaBuf(bool send) {
+  void ResetConn() {
     free(conn_.transportResources);
     conn_ = {};
+  }
+
+  int UseDmaBuf(bool send) {
+    ResetConn();
     EXPECT_EQ(send ? SendSetup() : RecvSetup(), ncclSuccess);
     if (!conn_.transportResources) return -1;
     return send ? SendRes()->useDmaBuf : RecvRes()->useDmaBuf;
@@ -881,9 +922,12 @@ TEST_F(NetProxySetupMicrotest, RecvSetup_ValidRequest_RecordsRequestAndListens) 
   req_.channelId = 3;
   req_.connIndex = 1;
   req_.sameDevice = 1;
+  uint32_t hdp = 0;
+  req_.curr_hdp_reg = &hdp;
   net_.props.maxRecvs = 8;
   net_.props.netDeviceType = NCCL_NET_DEVICE_UNPACK;
   net_.props.netDeviceVersion = 7;
+  net_.props.maxP2pBytes = 1 << 20;
 
   ASSERT_EQ(RecvSetup(), ncclSuccess);
 
@@ -896,8 +940,11 @@ TEST_F(NetProxySetupMicrotest, RecvSetup_ValidRequest_RecordsRequestAndListens) 
   EXPECT_EQ(r->tpLocalRank, 1);
   EXPECT_EQ(r->tpRemoteRank, 9);
   EXPECT_EQ(r->netDev, 2);
+  EXPECT_EQ(r->shared, 1);
   EXPECT_EQ(r->useGdr, ncclTopoGdrModeDefault);
   EXPECT_EQ(r->needFlush, ncclTopoFlushAlways);
+  EXPECT_EQ(r->curr_hdp_reg, &hdp);
+  EXPECT_EQ(r->maxP2pBytes, (size_t)1 << 20);
   EXPECT_EQ(r->channelId, 3);
   EXPECT_EQ(r->connIndex, 1);
   EXPECT_EQ(r->sameDevice, 1);
@@ -918,18 +965,18 @@ TEST_F(NetProxySetupMicrotest, Setup_WrongRequestSize_RejectedWithoutResources) 
 }
 
 TEST_F(NetProxySetupMicrotest, Setup_LocalRankOutOfRange_RejectedWithoutResources) {
-  req_.tpLocalRank = 4;
-  EXPECT_EQ(SendSetup(), ncclInvalidArgument);
-  req_.tpLocalRank = -1;
-  EXPECT_EQ(RecvSetup(), ncclInvalidArgument);
+  for (int bad : {4, -1}) {
+    req_.tpLocalRank = bad;
+    EXPECT_EQ(SendSetup(), ncclInvalidArgument);
+    EXPECT_EQ(RecvSetup(), ncclInvalidArgument);
+  }
   EXPECT_EQ(conn_.transportResources, nullptr);
 }
 
 TEST_F(NetProxySetupMicrotest, Setup_PropertiesFail_ReturnsError) {
   net_.propsResult = ncclSystemError;
   EXPECT_EQ(SendSetup(), ncclSystemError);
-  free(conn_.transportResources);
-  conn_ = {};
+  ResetConn();
   EXPECT_EQ(RecvSetup(), ncclSystemError);
   EXPECT_EQ(net_.listenCalls, 0);
 }
@@ -938,11 +985,9 @@ TEST_F(NetProxySetupMicrotest, Setup_InvalidMaxP2pBytes_Rejected) {
   for (size_t bad : {(size_t)0, (size_t)NCCL_MAX_NET_SIZE_BYTES + 1}) {
     SCOPED_TRACE(bad);
     net_.props.maxP2pBytes = bad;
-    free(conn_.transportResources);
-    conn_ = {};
+    ResetConn();
     EXPECT_EQ(SendSetup(), ncclInternalError);
-    free(conn_.transportResources);
-    conn_ = {};
+    ResetConn();
     EXPECT_EQ(RecvSetup(), ncclInternalError);
   }
   EXPECT_EQ(net_.listenCalls, 0);
@@ -951,16 +996,14 @@ TEST_F(NetProxySetupMicrotest, Setup_InvalidMaxP2pBytes_Rejected) {
 TEST_F(NetProxySetupMicrotest, Setup_MaxP2pBytesAtLimit_Accepted) {
   net_.props.maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
   EXPECT_EQ(SendSetup(), ncclSuccess);
-  free(conn_.transportResources);
-  conn_ = {};
+  ResetConn();
   EXPECT_EQ(RecvSetup(), ncclSuccess);
 }
 
 TEST_F(NetProxySetupMicrotest, Setup_WrongResponseSize_Rejected) {
   EXPECT_EQ(SendSetup(sizeof(setupReq), /*respSize=*/4), ncclInternalError);
   EXPECT_EQ(done_, 0);
-  free(conn_.transportResources);
-  conn_ = {};
+  ResetConn();
   EXPECT_EQ(RecvSetup(sizeof(setupReq), /*respSize=*/0), ncclInternalError);
   EXPECT_EQ(net_.listenCalls, 0);
 }
