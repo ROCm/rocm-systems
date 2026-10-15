@@ -237,6 +237,13 @@ jobs:
           # Must run in this mode and list a GPU, or the loop below proves
           # nothing.
           "$AMDSMI_PREFIX/bin/amd-smi" list | grep '^GPU: '
+          # Must load ASAN too: a CLI that picked up an uninstrumented library
+          # would run the loop below without a report and pass. ASAN prints
+          # this line at verbosity 1, which the loop leaves off: it also prints
+          # ==<pid>== lines that would read as findings. Not grep -q: the CLI
+          # fails when grep closes the pipe early.
+          ASAN_OPTIONS="$ASAN_OPTIONS:verbosity=1" "$AMDSMI_PREFIX/bin/amd-smi" version 2>&1 |
+            grep 'AddressSanitizer Init done'
           # The sweep's commands plus "" for bare amd-smi (logged as "default"):
           # the default view, which lists GPU processes.
           commands=("" list static firmware ucode bad-pages metric process topology monitor dmon xgmi partition)
