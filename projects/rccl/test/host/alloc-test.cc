@@ -12,6 +12,7 @@
 
 #include <unistd.h>
 
+#include <algorithm>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -21,6 +22,8 @@
 #include <map>
 #include <set>
 #include <string>
+#include <tuple>
+#include <utility>
 #include <vector>
 
 #include "alloc.h"
@@ -94,6 +97,11 @@ namespace {
 constexpr int kDev = 3;
 constexpr hipDevice_t kHipDev = 13;
 constexpr size_t kGran = 4096;
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypeUncached;
+#else
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypePinned;
+#endif
 constexpr uintptr_t kVa = 0x100000;
 const hipStream_t kPrivateStream = reinterpret_cast<hipStream_t>(0x5);
 const hipStream_t kSideStream = reinterpret_cast<hipStream_t>(0x6);
@@ -783,7 +791,7 @@ TEST_F(AllocMicrotest, CuMemAlloc_ZeroesTheMappingOnAPrivateStream) {
   ASSERT_EQ(ncclCuMemAlloc(&p, &h, CU_MEM_HANDLE_TYPE_FABRIC, 100), ncclSuccess);
   EXPECT_EQ(p, Va());
   EXPECT_EQ(h, kHandle);
-  EXPECT_EQ(createProp_.type, hipMemAllocationTypePinned);
+  EXPECT_EQ(createProp_.type, kVmmType);
   EXPECT_EQ(createProp_.location.type, hipMemLocationTypeDevice);
   EXPECT_EQ(createProp_.location.id, kHipDev);
   EXPECT_EQ(createProp_.requestedHandleType, CU_MEM_HANDLE_TYPE_FABRIC);

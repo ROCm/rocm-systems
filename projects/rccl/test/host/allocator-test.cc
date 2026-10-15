@@ -18,6 +18,7 @@
 #include <map>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "comm.h"
@@ -88,6 +89,11 @@ namespace {
 constexpr int kDev = 3;
 constexpr hipDevice_t kHipDev = 13;
 constexpr size_t kGran = 1 << 16;
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypeUncached;
+#else
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypePinned;
+#endif
 const hipStream_t kStream = reinterpret_cast<hipStream_t>(0x5);
 const hipMemPool_t kPool = reinterpret_cast<hipMemPool_t>(0x7);
 
@@ -309,7 +315,7 @@ TEST_F(AllocatorMicrotest, MemAlloc_MapsAlignedVmmMemoryForEveryPeerThatCanReach
   ASSERT_EQ(ncclMemAlloc_impl(&p, kGran + 1), ncclSuccess);
   EXPECT_EQ(p, reinterpret_cast<void*>(0x40000));
   EXPECT_EQ(createSize_, 2 * kGran);
-  EXPECT_EQ(prop_.type, hipMemAllocationTypePinned);
+  EXPECT_EQ(prop_.type, kVmmType);
   EXPECT_EQ(prop_.location.type, hipMemLocationTypeDevice);
   EXPECT_EQ(prop_.location.id, kHipDev);
   EXPECT_EQ(prop_.requestedHandleType, hipMemHandleTypePosixFileDescriptor);

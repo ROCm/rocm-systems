@@ -18,9 +18,11 @@
 #include <cstdio>
 #include <cstring>
 #include <functional>
+#include <initializer_list>
 #include <map>
 #include <memory>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "comm.h"
@@ -130,6 +132,11 @@ namespace {
 
 constexpr int kDev = 2;
 constexpr size_t kSize = 1 << 16;
+#if defined(HIP_VMM_UNCACHED_MEMORY)
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypeUncached;
+#else
+constexpr hipMemAllocationType kVmmType = hipMemAllocationTypePinned;
+#endif
 
 hipMemGenericAllocationHandle_t Handle(uintptr_t v) {
   return reinterpret_cast<hipMemGenericAllocationHandle_t>(v);
@@ -710,7 +717,7 @@ TEST_F(MemManagerMicrotest, Resume_RecreatesLocalMemoryAndRestoresOffload) {
   ASSERT_EQ(creates_.size(), 2u);
   for (auto& c : creates_) {
     EXPECT_EQ(c.size, kSize);
-    EXPECT_EQ(c.prop.type, hipMemAllocationTypePinned);
+    EXPECT_EQ(c.prop.type, kVmmType);
     EXPECT_EQ(c.prop.location.type, hipMemLocationTypeDevice);
     EXPECT_EQ(c.prop.requestedHandleType, hipMemHandleTypePosixFileDescriptor);
     EXPECT_EQ(c.prop.allocFlags.gpuDirectRDMACapable, 1);
