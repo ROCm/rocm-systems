@@ -1104,6 +1104,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDebug
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroApiTrace
   SOURCES ${TEST_MICRO_API_TRACE_SOURCE_FILES}
+  # The rocprofiler-register branch would need librocprofiler-register; keep the standalone config.
+  REMOVE_DEFS RCCL_ROCPROFILER_REGISTER=1
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     API_TRACE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/api_trace.cc"
