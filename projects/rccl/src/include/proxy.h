@@ -439,6 +439,7 @@ struct proxyMemHandle {
 struct ncclProxyConnection {
   int send, transport, shared;
   int tpLocalRank, sameProcess;
+  int p2pForceLegacyIpc;
   struct ncclSocket* sock;
   uint64_t peerId; // Initialized with peer->id, used for connection checks
   struct ncclTransportComm* tcomm;

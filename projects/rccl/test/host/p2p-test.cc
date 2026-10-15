@@ -3857,6 +3857,49 @@ TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineMode_KeepsSysAcquire)
     p2pTransport.recv.free(&comm_, &recv);
 }
 
+TEST_F(P2pSetupMicrotest, RecvSetup_CrossProcessCopyEngine_ForcesLegacyIpc)
+{
+    ScopedUseMemcpy ceMode(1);
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    peer_.pidHash = kPid + 1;
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSuccess);
+
+    auto* resources = static_cast<p2pResources*>(recv.transportResources);
+    ASSERT_NE(resources, nullptr);
+    EXPECT_TRUE(resources->useCe);
+    EXPECT_TRUE(resources->forceLegacyIpc);
+    EXPECT_EQ(resources->type, P2P_IPC);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
+TEST_F(P2pSetupMicrotest, RecvSetup_SameProcessCopyEngine_KeepsCuMem)
+{
+    ScopedUseMemcpy ceMode(1);
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    InstallTopo(/*read=*/0);
+    InstallHappyProxy();
+
+    ncclConnector recv{};
+    ASSERT_EQ(p2pTransport.recv.setup(&comm_, nullptr, &myInfo_, &peer_,
+                                      &connect_info_, &recv, 0, 0),
+              ncclSuccess);
+
+    auto* resources = static_cast<p2pResources*>(recv.transportResources);
+    ASSERT_NE(resources, nullptr);
+    EXPECT_TRUE(resources->useCe);
+    EXPECT_FALSE(resources->forceLegacyIpc);
+    EXPECT_EQ(resources->type, P2P_CUMEM);
+
+    p2pTransport.recv.free(&comm_, &recv);
+}
+
 // NCCL_P2P_USE_CUDA_MEMCPY applies to send/recv connections only: a connection set up for a
 // collective graph keeps the kernel transport, so the GPU publishes the step itself.
 TEST_F(P2pSetupMicrotest, RecvSetup_CopyEngineModeCollectiveGraph_KeepsKernelP2p)
@@ -6871,6 +6914,33 @@ TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_CuMemEnabled_StashesCuMemProxy
     EXPECT_NE(conn_.transportResources, resp.directPtr);
     auto* info = static_cast<p2pCuMemProxyInfo*>(conn_.transportResources);
     EXPECT_EQ(info->p2pBuff.directPtr, resp.directPtr);
+
+    ShutdownFlagGuard shutdown;
+    EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
+}
+
+TEST_F(P2pProxyLifecycleMicrotest, SendProxySetup_ForcedLegacyIpcBypassesEnabledCuMem)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t { return hipSuccess; });
+
+    ncclP2pRequest req{};
+    req.size = 0x800;
+    req.peerRank = 1;
+    req.forceLegacyIpc = 1;
+
+    ncclP2pBuff resp{};
+    int done = 0;
+    auto r = p2pTransport.send.proxySetup(&conn_, &state_, &req, sizeof(req),
+                                          &resp, sizeof(resp), &done);
+
+    EXPECT_EQ(r, ncclSuccess);
+    EXPECT_EQ(done, 1);
+    EXPECT_NE(resp.directPtr, nullptr);
+    EXPECT_EQ(resp.forceLegacyIpc, 1);
+    EXPECT_EQ(conn_.p2pForceLegacyIpc, 1);
+    EXPECT_EQ(conn_.transportResources, resp.directPtr);
 
     ShutdownFlagGuard shutdown;
     EXPECT_EQ(p2pTransport.send.proxyFree(&conn_, &state_), ncclSuccess);
