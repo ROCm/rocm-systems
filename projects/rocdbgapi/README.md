@@ -8,7 +8,7 @@ Introduction
 ------------
 
 The AMD Debugger API is a library that provides all the support necessary for a
-debugger and other tools to perform low level control of the execution and
+debugger and other tools to perform low-level control of the execution and
 inspection of execution state of AMD's commercially available GPU architectures.
 
 For more information about the AMD ROCm ecosystem, see:
