@@ -10,8 +10,12 @@
 #include <netlink/errno.h>
 #include <netlink/genl/ctrl.h>
 
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
+#include <functional>
+#include <optional>
+#include <string>
 #include <utility>
 
 #include "smi_nic_log.h"
@@ -24,10 +28,10 @@ constexpr size_t kQueryHeadTextLen = 64;
 constexpr int kNlBufferBytes = 32768;
 }  // namespace
 
-GenericNetlinkClient::GenericNetlinkClient() : socket_(), connected_(false) {}
+GenericNetlinkClient::GenericNetlinkClient() : socket_(), is_connected_(false) {}
 
 int GenericNetlinkClient::connect() {
-  if (connected_) {
+  if (is_connected_) {
     return 0;  // Already connected
   }
 
@@ -39,12 +43,12 @@ int GenericNetlinkClient::connect() {
   socket_.set_buffer_size(kNlBufferBytes, kNlBufferBytes);
   socket_.disable_auto_ack();
 
-  connected_ = true;
+  is_connected_ = true;
   return 0;
 }
 
 std::optional<int> GenericNetlinkClient::resolve_family_id(const std::string& family_name) {
-  if (!connected_) {
+  if (!is_connected_) {
     return std::nullopt;
   }
 
@@ -93,7 +97,7 @@ int GenericNetlinkClient::query(int family_id, uint8_t cmd, uint8_t version,
 int GenericNetlinkClient::query_impl(int family_id, uint8_t cmd, uint8_t version,
                                      std::function<int(NLMessage&)> build_fn,
                                      MessageHandler handler, void* arg, uint16_t flags) {
-  if (!connected_) {
+  if (!is_connected_) {
     return -NLE_BAD_SOCK;
   }
 

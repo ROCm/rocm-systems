@@ -13,22 +13,14 @@
 #include <vector>
 
 #include "amd_smi/impl/amd_smi_nic_stats.h"
+#include "nic_check.h"
 
 namespace {
 
 using amd::smi::copy_nic_stats;
+using amd::smi::get_nic_stats;
 using amd::smi::was_nic_stat_scope_resolved;
-
-auto g_tests_run = int{0};
-auto g_tests_failed = int{0};
-
-auto check(const std::string& name, bool was_passed) -> void {
-  ++g_tests_run;
-  if (!was_passed) {
-    ++g_tests_failed;
-  }
-  std::cout << (was_passed ? "  PASS: " : "  FAIL: ") << name << "\n";
-}
+using nic_test::check;
 
 // The info struct holds hundreds of KB, so it lives on the heap.
 auto make_info(uint32_t count) -> std::unique_ptr<smi_nic_stat_info_t> {
@@ -115,6 +107,93 @@ auto test_scope_rejects_values_outside_the_enum() -> void {
         !was_nic_stat_scope_resolved(AMDSMI_NIC_STAT_SCOPE_DEFAULT, nullptr));
 }
 
+auto test_two_call_without_an_array_asks_only_the_count() -> void {
+  std::cout << "\nTwo-call: no array, only the count is asked\n";
+  auto num_list_calls = int{0};
+  auto num_stats = uint32_t{0};
+
+  const auto status = get_nic_stats(
+      [](uint32_t* available) {
+        *available = 7;
+        return AMDSMI_STATUS_SUCCESS;
+      },
+      [&num_list_calls](smi_nic_stat_info_t*) {
+        ++num_list_calls;
+        return AMDSMI_STATUS_SUCCESS;
+      },
+      &num_stats, nullptr);
+
+  check("status is SUCCESS", (status == AMDSMI_STATUS_SUCCESS));
+  check("num_stats is the count", (num_stats == 7));
+  check("the list is not read", (num_list_calls == 0));
+}
+
+// A fill call must not also run the count: each one is a full read of the device.
+auto test_two_call_with_an_array_skips_the_count() -> void {
+  std::cout << "\nTwo-call: an array, only the list is read\n";
+  auto num_count_calls = int{0};
+  auto out = make_out(8);
+  auto num_stats = uint32_t{8};
+
+  const auto status = get_nic_stats(
+      [&num_count_calls](uint32_t*) {
+        ++num_count_calls;
+        return AMDSMI_STATUS_SUCCESS;
+      },
+      [](smi_nic_stat_info_t* info) {
+        *info = *make_info(3);
+        return AMDSMI_STATUS_SUCCESS;
+      },
+      &num_stats, out.data());
+
+  check("status is SUCCESS", (status == AMDSMI_STATUS_SUCCESS));
+  check("num_stats is the entry count", (num_stats == 3));
+  check("last entry is copied", (out[2].value == 102) && (std::string(out[2].name) == "stat_2"));
+  check("the count is not asked", (num_count_calls == 0));
+}
+
+auto test_two_call_without_an_array_returns_the_count_error() -> void {
+  std::cout << "\nTwo-call: the count fails\n";
+  auto num_stats = uint32_t{55};
+
+  const auto status = get_nic_stats([](uint32_t*) { return AMDSMI_STATUS_API_FAILED; },
+                                    [](smi_nic_stat_info_t*) { return AMDSMI_STATUS_SUCCESS; },
+                                    &num_stats, nullptr);
+
+  check("the count's status comes back", (status == AMDSMI_STATUS_API_FAILED));
+  check("num_stats is left alone", (num_stats == 55));
+}
+
+auto test_two_call_with_an_array_returns_the_list_error() -> void {
+  std::cout << "\nTwo-call: the list fails\n";
+  auto out = make_out(4);
+  auto num_stats = uint32_t{4};
+
+  const auto status = get_nic_stats([](uint32_t*) { return AMDSMI_STATUS_SUCCESS; },
+                                    [](smi_nic_stat_info_t*) { return AMDSMI_STATUS_NOT_FOUND; },
+                                    &num_stats, out.data());
+
+  check("the list's status comes back", (status == AMDSMI_STATUS_NOT_FOUND));
+  check("the array is left alone", (out[0].value == kUnsetValue));
+  check("num_stats is left alone", (num_stats == 4));
+}
+
+auto test_two_call_with_a_short_array_says_so() -> void {
+  std::cout << "\nTwo-call: an array that is too short\n";
+  auto out = make_out(2);
+  auto num_stats = uint32_t{2};
+
+  const auto status = get_nic_stats([](uint32_t*) { return AMDSMI_STATUS_SUCCESS; },
+                                    [](smi_nic_stat_info_t* info) {
+                                      *info = *make_info(3);
+                                      return AMDSMI_STATUS_SUCCESS;
+                                    },
+                                    &num_stats, out.data());
+
+  check("status is INSUFFICIENT_SIZE", (status == AMDSMI_STATUS_INSUFFICIENT_SIZE));
+  check("num_stats is the number available", (num_stats == 3));
+}
+
 }  // namespace
 
 int main() {
@@ -123,7 +202,11 @@ int main() {
   test_copy_into_short_array_says_so();
   test_scope_accepts_the_two_public_values();
   test_scope_rejects_values_outside_the_enum();
+  test_two_call_without_an_array_asks_only_the_count();
+  test_two_call_with_an_array_skips_the_count();
+  test_two_call_without_an_array_returns_the_count_error();
+  test_two_call_with_an_array_returns_the_list_error();
+  test_two_call_with_a_short_array_says_so();
 
-  std::cout << "\n" << g_tests_run << " tests run, " << g_tests_failed << " failed\n";
-  return (g_tests_failed == 0) ? 0 : 1;
+  return nic_test::report();
 }

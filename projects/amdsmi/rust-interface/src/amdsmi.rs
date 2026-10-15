@@ -253,6 +253,74 @@ pub fn amdsmi_get_processor_handles(
     Ok(processor_handles)
 }
 
+/// Retrieves the NIC processor handles for a specific socket.
+///
+/// NIC processors are kept apart from GPU processors, so [`amdsmi_get_processor_handles`]
+/// never returns them.
+///
+/// # Arguments
+///
+/// * `socket_handle` - A handle to the socket for which the NIC processor handles are being queried.
+///
+/// # Returns
+///
+/// * `AmdsmiResult<Vec<AmdsmiProcessorHandle>>` - Returns `Ok(Vec<AmdsmiProcessorHandle>)` containing the NIC [`AmdsmiProcessorHandle`]s of the socket (empty if it has none) if successful, or an error if it fails.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+/// #
+/// # fn main() {
+/// #   // Initialize the AMD SMI library for NICs
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
+/// #
+///     let socket_handle = amdsmi_get_socket_handles().unwrap()[0];
+///
+///     // Retrieve the NIC processor handles
+///     match amdsmi_get_nic_processor_handles(socket_handle) {
+///         Ok(handles) => {
+///             for handle in handles {
+///                 // Perform operations with the AMD SMI library
+///                 // ...
+///             }
+///         }
+///         Err(e) => panic!("Failed to get NIC processor handles: {}", e),
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+///
+/// # Errors
+///
+/// This function will return the error in [`AmdsmiStatusT`] if the underlying `amdsmi_wrapper::amdsmi_get_nic_processor_handles` call fails.
+pub fn amdsmi_get_nic_processor_handles(
+    socket_handle: AmdsmiSocketHandle,
+) -> AmdsmiResult<Vec<AmdsmiProcessorHandle>> {
+    let mut processor_count: u32 = 0;
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_nic_processor_handles(
+        socket_handle,
+        &mut processor_count,
+        std::ptr::null_mut()
+    ));
+
+    let mut processor_handles = Vec::with_capacity(processor_count as usize);
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_nic_processor_handles(
+        socket_handle,
+        &mut processor_count,
+        processor_handles.as_mut_ptr()
+    ));
+
+    // SAFETY: the library wrote `processor_count` handles into the buffer, and the count never
+    // exceeds the capacity reserved from the first call.
+    unsafe {
+        processor_handles.set_len(processor_count as usize);
+    }
+    Ok(processor_handles)
+}
+
 /// Retrieves the type of a specific processor.
 ///
 /// This function returns the processor type of the specified processor handle.
@@ -5250,7 +5318,7 @@ pub fn amdsmi_get_gpu_asic_info(
 /// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
 /// #
 ///     // Example NIC processor_handle, assuming at least one NIC is present
-///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///     let processor_handle = amdsmi_get_nic_processor_handles!()[0];
 ///
 ///     // Retrieve the NIC firmware versions
 ///     match amdsmi_get_nic_fw_info(processor_handle) {
@@ -5298,7 +5366,7 @@ pub fn amdsmi_get_nic_fw_info(
 /// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
 /// #
 ///     // Example NIC processor_handle, assuming at least one NIC is present
-///     let processor_handle = amdsmi_get_processor_handles!()[0];
+///     let processor_handle = amdsmi_get_nic_processor_handles!()[0];
 ///
 ///     // Retrieve live NIC telemetry
 ///     match amdsmi_get_nic_telemetry(processor_handle) {
@@ -6509,6 +6577,51 @@ macro_rules! amdsmi_get_processor_handles {
             // Call the amdsmi_get_processor_handles function directly
             let mut processors = amdsmi_get_processor_handles(socket_handle)
                 .expect("Failed to get processor handles for socket");
+
+            // Append the processor handles to the main vector
+            processor_handles.append(&mut processors);
+        }
+
+        processor_handles
+    }};
+}
+
+/// A macro to get all the NIC processor handles directly.
+///
+/// This macro retrieves all the NIC processor handles by first getting the socket handles
+/// and then getting the NIC processor handles for each socket. The result is empty when no NIC is present.
+///
+/// # Example
+///
+/// ```no_run
+/// # use amdsmi::*;
+///
+/// # fn main() {
+/// #   // Initialize the AMD SMI library for NICs
+/// #   amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdNics).expect("Failed to initialize AMD SMI");
+/// #
+///     let processor_handles = amdsmi_get_nic_processor_handles!();
+///     for handle in processor_handles {
+///         // Perform operations with each NIC processor handle
+///         // ...
+///     }
+/// #
+/// #   // Shut down the AMD SMI library
+/// #   amdsmi_shut_down().expect("Failed to shut down AMD SMI");
+/// # }
+/// ```
+#[macro_export]
+macro_rules! amdsmi_get_nic_processor_handles {
+    () => {{
+        // Get the socket handles
+        let socket_handles = amdsmi_get_socket_handles().expect("Failed to get socket handles");
+
+        let mut processor_handles = Vec::new();
+
+        // Iterate over each socket handle to get the NIC processor handles
+        for socket_handle in socket_handles {
+            let mut processors = amdsmi_get_nic_processor_handles(socket_handle)
+                .expect("Failed to get NIC processor handles for socket");
 
             // Append the processor handles to the main vector
             processor_handles.append(&mut processors);

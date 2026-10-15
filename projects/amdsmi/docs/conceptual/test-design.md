@@ -251,8 +251,8 @@ machine regardless of GPU** (see `mock_cper/README.md` for provenance).
 ### Standalone NIC suites (`tests/nic/`)
 
 The NIC library (`amdsminic`) also has C++ suites that are not part of `amdsmitst`. Each
-`test_nic_*_suite.cpp` is its own executable with a small `check()` harness, links `amdsminic`
-directly, and needs no hardware or root. They cover what a GTest fixture would only wrap: sysfs
+`test_nic_*_suite.cpp` is its own executable that reports through the shared `nic_check.h` harness,
+links `amdsminic` directly, and needs no hardware or root. They cover what a GTest fixture would only wrap: sysfs
 and VPD parsing against temporary trees, the discovery plugins, the statistics tables, the
 debug-log masking, and the helpers behind the public statistics getters.
 
@@ -265,10 +265,11 @@ debug-log masking, and the helpers behind the public statistics getters.
 | `test_nic_rdma_resolver_suite` | flat RDMA port index to (port, IB device, RDMA port) |
 | `test_nic_log_suite` | debug-log seam, value masking, sysfs reads including large counters |
 | `test_nic_vpd_suite` | PCI VPD tag walk, truncation safety, ASCII-only output |
+| `test_nic_check_suite` | the `nic_check.h` harness itself: counting, PASS and FAIL lines, exit code |
 
-CMake registers all seven with `add_test()` (run `ctest -R nic`) and installs them beside
+CMake registers all eight with `add_test()` (run `ctest -R nic`) and installs them beside
 `amdsmitst`; CI does not run them yet. `tests/nic/build_tests.sh` is a separate manual build,
-without CMake, against an existing `libamdsminic.a`. It builds all seven suites plus the tools that
+without CMake, against an existing `libamdsminic.a`. It builds all eight suites plus the tools that
 need a live interface (`test_nic_transport_suite`, `benchmark_nic_transport`, `probe_devlink_*`).
 
 ### CMake integration

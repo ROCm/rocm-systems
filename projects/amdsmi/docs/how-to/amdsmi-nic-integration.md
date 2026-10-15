@@ -172,7 +172,7 @@ enumerate one vendor's hardware.
      std::pair<uint16_t, uint16_t> read_pci_ids(const std::string& sysfs_bus_path) const;
      bool was_bdf_resolved(const std::string& symlink, std::string& bdf) const;
      bool is_driver_bound_to_bdf(const std::string& driver_dir, const std::string& bdf,
-                                 bool match_canonical) const;
+                                 bool is_canonical_match) const;
    };
    ```
 
@@ -194,7 +194,7 @@ enumerate one vendor's hardware.
 4. **Ports reuse the shared ethtool transport.** `SmiNicSystem` creates one
    transport with `create_transport(NicBackend_t::Auto)`
    (`inc/smi_nic_transport.h`) and passes it to every plugin and port. `Auto`
-   tries the netlink backend first (kernel 5.6+ with libnl-3, built only when
+   tries the netlink backend first (kernel 5.13+ with libnl-3, built only when
    `HAVE_LIBNL3` is defined) and falls back to the ioctl backend for pause and
    link settings; driver info, ethtool statistics and the permanent address always
    use ioctl, and FEC statistics exist only on the netlink backend. A plugin that
@@ -791,7 +791,7 @@ The `amdsminic` static library exposes a vendor-neutral C interface,
 AMD SMI dispatch layer (`src/amd_smi/amd_smi.cc`) calls. It is context-based:
 
 ```c
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool ainic_only);
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool is_ainic_only);
 smi_nic_status_t smi_nic_destroy_context(smi_nic_ctx_t ctx);
 smi_nic_status_t smi_discover_nics(smi_nic_ctx_t ctx, smi_nic_discovery_t* discovery);
 
@@ -1308,8 +1308,7 @@ try:
             print(f"  Revision:      {asic['REVISION']}")
             print(f"  Capability:    {asic['CAPABILITY']}")  # e.g. ['FWCTL', 'NETDEV']
 
-            # Firmware versions (name -> version). Not yet implemented: this call
-            # currently raises AmdSmiLibraryException(AMDSMI_STATUS_NOT_YET_IMPLEMENTED).
+            # Firmware versions (name -> version).
             fw = amdsmi.amdsmi_get_nic_fw_info(nic)
             for name, version in fw.items():
                 print(f"  FW {name}: {version}")
@@ -1449,9 +1448,10 @@ The BM AMD SMI library uses CMake (≥ 3.15) with a C++17-compatible compiler.
 The NIC library (`amdsminic`) is built as part of the main library. The netlink
 transport backend is compiled only when libnl-3 is present (detected via
 `pkg-config`, guarded by `HAVE_LIBNL3`); otherwise the ioctl backend is used.
-The netlink sources also need Linux UAPI headers from kernel 5.6 or newer
-(`linux/ethtool_netlink.h` and the `DEVLINK_ATTR_PORT_SPLITTABLE` and
-`DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER` devlink attributes). The build does not
+The netlink sources also need Linux UAPI headers from kernel 5.13 or newer
+(`linux/ethtool_netlink.h` with `ETHTOOL_A_FEC_STATS`, and the
+`DEVLINK_ATTR_PORT_SPLITTABLE` and `DEVLINK_ATTR_INFO_BOARD_SERIAL_NUMBER`
+devlink attributes). The build does not
 detect their absence, so a build host with older headers, such as Ubuntu 20.04
 (kernel 5.4 headers), is not supported.
 The host AMD SMI library has its own build system, documented in its repository
@@ -1468,7 +1468,7 @@ linked above.
 The following runtime dependencies are relevant to the BM AMD SMI NIC library:
 
 - Linux kernel sysfs (PCIe device info, netdev, InfiniBand/RDMA, VPD)
-- libnl-3 (optional; enables the netlink ethtool transport backend; requires kernel UAPI headers 5.6 or newer at build time)
+- libnl-3 (optional; enables the netlink ethtool transport backend; requires kernel UAPI headers 5.13 or newer at build time)
 - The relevant NIC vendor kernel driver (required for that vendor's device discovery)
 
 ---

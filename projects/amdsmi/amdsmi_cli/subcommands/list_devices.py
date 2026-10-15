@@ -317,12 +317,7 @@ class ListDevicesCommands:
 
         if nic_requested:
             # Explicit --nic matched no NICs: report that, don't list GPUs.
-            self.logger.output = {}
-            self.logger.clear_multiple_devices_output()
-            if self.logger.is_human_readable_format():
-                print("No AI NICs found")
-            else:
-                self.logger.print_output(emit_empty=True)
+            self.logger.print_no_ainics_found()
             return
 
         self.logger.output = {}

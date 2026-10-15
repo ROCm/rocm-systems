@@ -183,6 +183,26 @@ def cli_search_order(source_dir, prefer_install=False):
     return (source_dir, amdsmi_path)
 
 
+def amdsmi_interface_path(start_file: str) -> pathlib.Path:
+    """Return the ``amdsmi_interface.py`` source for tests that parse it as text.
+
+    A checkout carries it in ``py-interface/``; an install ships it inside the ``amdsmi``
+    package under ``share/amd_smi`` and has no ``py-interface`` directory. Priority follows
+    ``cli_search_order()``: a pinned install wins, otherwise the checkout does.
+    """
+    checkout = [
+        parent / "py-interface" / "amdsmi_interface.py"
+        for parent in pathlib.Path(start_file).resolve().parents
+    ]
+    installed = [pathlib.Path(amdsmi_path) / "amdsmi" / "amdsmi_interface.py"]
+    candidates = installed + checkout if amdsmi_path_is_explicit else checkout + installed
+    for candidate in candidates:
+        if candidate.is_file():
+            return candidate
+    searched = "\n  ".join(str(candidate) for candidate in candidates)
+    raise FileNotFoundError(f"amdsmi_interface.py not found; searched:\n  {searched}")
+
+
 def generated_version_stub(version="0.0.0+source"):
     """Stub entry for the CLI's ``_version``, or empty when the real one resolves.
 

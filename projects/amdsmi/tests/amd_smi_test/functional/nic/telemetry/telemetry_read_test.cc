@@ -38,13 +38,13 @@ void TestNicTelemetryRead::Close() { TestBase::Close(); }
 void TestNicTelemetryRead::Run(void) {
   TestBase::Run();
   if (setup_failed_) {
-    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << std::endl; }
+    IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**\n"; }
     return;
   }
 
   std::vector<amdsmi_processor_handle> nics = nic_handles();
   if (nics.empty()) {
-    IF_VERB(STANDARD) { std::cout << "\t**No AMD NIC present. Skipping.**" << std::endl; }
+    IF_VERB(STANDARD) { std::cout << "\t**No AMD NIC present. Skipping.**\n"; }
     return;
   }
   amdsmi_processor_handle nic = nics[0];
@@ -83,9 +83,7 @@ void TestNicTelemetryRead::Run(void) {
     const amdsmi_status_t fw_status = amdsmi_get_nic_fw_info(nic, &fw);
     if (fw_status == AMDSMI_STATUS_NOT_SUPPORTED) {
       // Firmware versions come over devlink; not every NIC or build exposes them.
-      IF_VERB(STANDARD) {
-        std::cout << "\t**NIC firmware info not supported. Skipping.**" << std::endl;
-      }
+      IF_VERB(STANDARD) { std::cout << "\t**NIC firmware info not supported. Skipping.**\n"; }
     } else {
       ASSERT_EQ(fw_status, AMDSMI_STATUS_SUCCESS);
       EXPECT_LE(fw.num_fw, static_cast<uint32_t>(AMDSMI_MAX_NIC_FW));

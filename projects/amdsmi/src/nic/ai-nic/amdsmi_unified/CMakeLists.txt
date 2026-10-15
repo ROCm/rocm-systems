@@ -13,10 +13,10 @@ project(amdsminic LANGUAGES CXX)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-# Check for libnl-3 (optional, for netlink transport backend)
-find_package(PkgConfig QUIET)
-if(PKG_CONFIG_FOUND)
-    pkg_check_modules(LIBNL3 libnl-3.0 libnl-genl-3.0)
+# The top-level configure resolved libnl (bundled config targets or pkg-config). Reuse that result:
+# a second lookup here can pick a different libnl and load both into libamd_smi.so.
+if(USING_BUNDLED_NETLINK OR (LIBNL3_FOUND AND LIBNLGENL3_FOUND))
+    set(NIC_HAS_LIBNL TRUE)
 endif()
 
 set(PROJECT_ROOT ${CMAKE_CURRENT_SOURCE_DIR})
@@ -71,9 +71,9 @@ set(CPP_SRCS_NETLINK
     "${NIC_SOURCE_DIR}/smi_nic_transport_netlink.cpp"
 )
 
-if(LIBNL3_FOUND)
+if(NIC_HAS_LIBNL)
     list(APPEND CPP_SRCS ${CPP_SRCS_NETLINK})
-    message(STATUS "libnl-3 found (${LIBNL3_VERSION}): building with netlink transport backend")
+    message(STATUS "libnl-3 found: building with netlink transport backend")
 else()
     message(STATUS "libnl-3 not found: building without netlink transport backend")
 endif()
@@ -86,12 +86,16 @@ set_target_properties(amdsminic PROPERTIES ARCHIVE_OUTPUT_DIRECTORY ${NIC_BUILD_
 target_include_directories(amdsminic PRIVATE "${NIC_SOURCE_DIR}/vendors")
 
 # Add compile definition if libnl-3 is available
-if(LIBNL3_FOUND)
+if(NIC_HAS_LIBNL)
     target_compile_definitions(amdsminic PRIVATE HAVE_LIBNL3)
-    target_include_directories(amdsminic PRIVATE ${LIBNL3_INCLUDE_DIRS})
-    # Absolute paths: bare -lnl-3 names resolve to the system libnl and load it next to the
-    # bundled one the rest of the link uses, which crashes at startup (see src/ualoe_lib).
-    target_link_libraries(amdsminic PRIVATE ${LIBNL3_LINK_LIBRARIES})
+    if(USING_BUNDLED_NETLINK)
+        target_link_libraries(amdsminic PRIVATE libnl::genl)
+    else()
+        # Absolute paths: bare -lnl-3 names can resolve to a different libnl than the rest of the
+        # link uses and load two copies, which crashes at startup (see src/ualoe_lib).
+        target_include_directories(amdsminic PRIVATE ${LIBNL3_INCLUDE_DIRS} ${LIBNLGENL3_INCLUDE_DIRS})
+        target_link_libraries(amdsminic PRIVATE ${LIBNL3_LINK_LIBRARIES} ${LIBNLGENL3_LINK_LIBRARIES})
+    endif()
 endif()
 
 target_include_directories(

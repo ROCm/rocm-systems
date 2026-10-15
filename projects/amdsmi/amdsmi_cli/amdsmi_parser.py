@@ -1441,7 +1441,8 @@ class AMDSMIParser(argparse.ArgumentParser):
 
         if self.helpers.is_ainic_initialized():
             nic_help = (
-                f"Select a NIC ID, BDF, or UUID from the possible choices:\n{self.nic_choices_str}"
+                "Select a NIC ID, BDF, or UUID from the possible choices; "
+                f"a bare --nic selects every NIC:\n{self.nic_choices_str}"
             )
             device_args.add_argument(
                 "-N", "--nic", action=self._nic_select(self.nic_choices), nargs="*", help=nic_help
@@ -1776,7 +1777,7 @@ class AMDSMIParser(argparse.ArgumentParser):
             return
 
         # Subparser help text
-        firmware_help = "Gets firmware information about the specified GPU"
+        firmware_help = "Gets firmware information about the specified GPU or NIC"
         firmware_subcommand_help = f"{self.description}\n\nIf no GPU is specified, return firmware information for all GPUs on the system."
         firmware_optionals_title = "Firmware Arguments"
 
@@ -1862,7 +1863,7 @@ class AMDSMIParser(argparse.ArgumentParser):
 
     def _add_metric_parser(self, subparsers: argparse._SubParsersAction, func):
         # Subparser help text
-        metric_help = "Gets metric/performance information about the specified GPU"
+        metric_help = "Gets metric/performance information about the specified GPU or NIC"
         metric_subcommand_help = f"{self.description}\n\nIf no GPU is specified, returns metric information for all GPUs on the system.\
                                 \nIf no metric argument is provided, all metric information will be displayed."
         metric_optionals_title = "Metric arguments"

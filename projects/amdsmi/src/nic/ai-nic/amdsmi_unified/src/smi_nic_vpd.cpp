@@ -4,6 +4,10 @@
 #include "smi_nic_vpd.h"
 
 #include <cstddef>
+#include <cstdint>
+#include <optional>
+#include <string>
+#include <vector>
 
 namespace amd::smi::nic::vpd {
 
@@ -49,11 +53,11 @@ std::optional<std::string> trimmed(const uint8_t* data, size_t len) {
 // Decodes the { keyword[2], len[1], data[len] } entries inside a VPD-R block.
 void parse_vpd_r(const std::vector<uint8_t>& image, size_t start, size_t end, VpdFields& out) {
   size_t j = start;
-  while (j + kKeywordHeaderLen <= end) {
+  while ((j + kKeywordHeaderLen) <= end) {
     const char k0 = static_cast<char>(image[j]);
     const char k1 = static_cast<char>(image[j + 1]);
     const size_t klen = image[j + 2];
-    if (j + kKeywordHeaderLen + klen > end) {
+    if ((j + kKeywordHeaderLen + klen) > end) {
       return;  // truncated keyword; stop rather than read past the block
     }
     const uint8_t* kdata = image.data() + j + kKeywordHeaderLen;
@@ -74,13 +78,13 @@ VpdFields parse_pci_vpd(const std::vector<uint8_t>& image) {
   while (i < image.size()) {
     const uint8_t tag = image[i];
     if (tag & kLargeResourceFlag) {
-      if (i + kLargeHeaderLen > image.size()) {
+      if ((i + kLargeHeaderLen) > image.size()) {
         break;  // incomplete large-resource header
       }
       const uint8_t item = tag & kLargeItemMask;
       const size_t len = image[i + 1] | (static_cast<size_t>(image[i + 2]) << kLenHighByteShift);
       const size_t data = i + kLargeHeaderLen;
-      if (data + len > image.size()) {
+      if ((data + len) > image.size()) {
         break;  // declared length runs past the image
       }
       if (item == kLargeItemIdentifier) {

@@ -15,6 +15,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <utility>
 
 #include "nic_unit_fixture.h"
 #include "smi_nic.h"
@@ -162,14 +163,14 @@ TEST_F(NicUnit, ConsumerAutonegNulloptOnFailure) {
 TEST_F(NicUnit, ConsumerPauseParamsPassThrough) {
   auto fake = std::make_shared<FakeTransport>();
   fake->pause = {true, {}, 0};
-  fake->pause.value.rx_pause = true;
-  fake->pause.value.tx_pause = false;
+  fake->pause.value.is_rx_pause_enabled = true;
+  fake->pause.value.is_tx_pause_enabled = false;
 
   auto port = make_fake_port(fake);
   auto p = port.pause_params();
   ASSERT_TRUE(p.has_value());
-  EXPECT_TRUE(p->rx_pause);
-  EXPECT_FALSE(p->tx_pause);
+  EXPECT_TRUE(p->is_rx_pause_enabled);
+  EXPECT_FALSE(p->is_tx_pause_enabled);
 }
 
 }  // namespace

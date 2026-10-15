@@ -113,7 +113,7 @@ void compare_results(const BenchmarkResult& ioctl_result, const BenchmarkResult&
   if (ratio > 1.0) {
     std::cout << "  → Ioctl is " << ((ratio - 1.0) * 100) << "% faster (ratio: " << ratio << "x)\n";
   } else {
-    std::cout << "  → Netlink is " << ((1.0 / ratio - 1.0) * 100)
+    std::cout << "  → Netlink is " << (((1.0 / ratio) - 1.0) * 100)
               << "% faster (ratio: " << (1.0 / ratio) << "x)\n";
   }
 }
@@ -163,12 +163,12 @@ int main(int argc, char** argv) {
   std::cout << "\nBackend availability:\n";
   std::cout << "  Ioctl:   " << ioctl_transport->backend_name() << "\n";
 
-  bool netlink_available = false;
+  bool is_netlink_available = false;
 #ifdef HAVE_LIBNL3
   auto test_nl = netlink_transport->get_pause_params(iface);
-  netlink_available = (test_nl.success || (test_nl.error_code != ENOTSUP));
+  is_netlink_available = (test_nl.success || (test_nl.error_code != ENOTSUP));
   std::cout << "  Netlink: " << netlink_transport->backend_name();
-  if (!netlink_available) {
+  if (!is_netlink_available) {
     std::cout << " (NOT AVAILABLE - initialization failed)";
   }
   std::cout << "\n";
@@ -178,7 +178,7 @@ int main(int argc, char** argv) {
 
   std::cout << "  Auto:    " << auto_transport->backend_name() << "\n";
 
-  if (!netlink_available) {
+  if (!is_netlink_available) {
     std::cout << "\nWARNING: Netlink backend not available.\n";
     std::cout << "   Only ioctl benchmarks will run.\n";
     std::cout << "   To enable netlink:\n";
@@ -190,7 +190,7 @@ int main(int argc, char** argv) {
   print_header("Warmup (100 operations to warm caches)");
   for (int i = 0; i < 100; i++) {
     (void)ioctl_transport->get_pause_params(iface);
-    if (netlink_available) {
+    if (is_netlink_available) {
       (void)netlink_transport->get_pause_params(iface);
     }
   }
@@ -203,7 +203,7 @@ int main(int argc, char** argv) {
   ioctl_pause.print("Ioctl:");
 
   BenchmarkResult netlink_pause{};
-  if (netlink_available) {
+  if (is_netlink_available) {
     netlink_pause = measure_with_stats([&]() { (void)netlink_transport->get_pause_params(iface); },
                                        trials, iterations);
     netlink_pause.print("Netlink:");
@@ -219,7 +219,7 @@ int main(int argc, char** argv) {
   ioctl_link.print("Ioctl:");
 
   BenchmarkResult netlink_link{};
-  if (netlink_available) {
+  if (is_netlink_available) {
     netlink_link = measure_with_stats([&]() { (void)netlink_transport->get_link_settings(iface); },
                                       trials, iterations);
     netlink_link.print("Netlink:");
@@ -259,7 +259,7 @@ int main(int argc, char** argv) {
       trials, iterations);
   ioctl_batch.print("Ioctl batch:");
 
-  if (netlink_available) {
+  if (is_netlink_available) {
     auto netlink_batch = measure_with_stats(
         [&]() {
           (void)netlink_transport->get_pause_params(iface);
@@ -289,7 +289,7 @@ int main(int argc, char** argv) {
 
   print_header("Summary");
 
-  if (netlink_available) {
+  if (is_netlink_available) {
     std::cout << "\nAverage latency comparison:\n";
     std::cout << std::fixed << std::setprecision(2);
 

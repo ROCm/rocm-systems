@@ -10,6 +10,7 @@
 
 #include <linux/ethtool_netlink.h>
 
+#include <cstdint>
 #include <string>
 
 #include "netlink_generic.h"
@@ -39,7 +40,7 @@ class EthtoolNetlinkClient {
   // Connects the socket and resolves the ethtool family. Returns 0 or -errno.
   int init();
 
-  bool is_initialized() const { return initialized_; }
+  bool is_initialized() const { return is_initialized_; }
 
   transport::Result<transport::LinkSettings> get_link_settings(const std::string& iface);
   transport::Result<transport::PauseParams> get_pause_params(const std::string& iface);
@@ -53,7 +54,7 @@ class EthtoolNetlinkClient {
  private:
   GenericNetlinkClient client_;
   int family_id_;
-  bool initialized_;
+  bool is_initialized_;
 
   /**
    * Adds the per-message header nest (header_attr, an ETHTOOL_A_*_HEADER id)

@@ -3,6 +3,7 @@
 
 #include <algorithm>
 #include <array>
+#include <cstdint>
 #include <cstdio>
 #include <memory>
 #include <string>
@@ -29,8 +30,9 @@ auto mac_text(const std::array<uint8_t, 6>& mac) -> std::string {
 }
 
 auto describe(const PauseParams& v) -> std::string {
-  return "autoneg=" + std::to_string(v.autoneg) + " rx_pause=" + std::to_string(v.rx_pause) +
-         " tx_pause=" + std::to_string(v.tx_pause);
+  return "autoneg=" + std::to_string(v.is_autoneg_enabled) +
+         " rx_pause=" + std::to_string(v.is_rx_pause_enabled) +
+         " tx_pause=" + std::to_string(v.is_tx_pause_enabled);
 }
 
 auto describe(const LinkSettings& v) -> std::string {

@@ -14,11 +14,11 @@ import ctypes
 import types
 import unittest
 from enum import IntEnum
-from pathlib import Path
 from typing import Any, Dict, List
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_INTERFACE_PATH = _REPO_ROOT / "py-interface" / "amdsmi_interface.py"
+from common.common import amdsmi_interface_path
+
+_INTERFACE_PATH = amdsmi_interface_path(__file__)
 
 _STATUS_SUCCESS = 0
 _REPORTER_BYTES = 64
@@ -144,3 +144,7 @@ class TestNicTelemetryReporter(unittest.TestCase):
         health = _decode(_HEALTH_UNSUPPORTED, _COUNT_UNSUPPORTED, b"")["health"]
         self.assertEqual(health["state"], "UNSUPPORTED")
         self.assertEqual(health["error_count"], "N/A")
+
+    def test_a_reporter_with_a_stray_byte_is_replaced_not_raised(self) -> None:
+        health = _decode(_HEALTH_HEALTHY, 0, b"ab\xffcd")["health"]
+        self.assertEqual(health["reporter"], "ab\N{REPLACEMENT CHARACTER}cd")

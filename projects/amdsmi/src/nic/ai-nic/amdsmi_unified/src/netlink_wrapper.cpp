@@ -9,9 +9,12 @@
 
 #include <netlink/errno.h>
 
+#include <cstdint>
 #include <cstring>
 #include <stdexcept>
+#include <string>
 #include <utility>
+#include <vector>
 
 namespace amd::nic::netlink {
 

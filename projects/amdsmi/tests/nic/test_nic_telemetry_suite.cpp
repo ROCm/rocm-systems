@@ -15,17 +15,20 @@
 #include <unistd.h>
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <map>
+#include <memory>
 #include <optional>
 #include <string>
 #include <system_error>
 #include <vector>
 
+#include "nic_check.h"
 #include "smi_nic_interface.h"
 #include "smi_nic_telemetry.h"
 
@@ -44,22 +47,7 @@ static_assert(sizeof(tel::NicPortSplit) == 2, "NicPortSplit grew; revisit public
 static_assert(sizeof(tel::NicTelemetrySnapshot) == 84,
               "NicTelemetrySnapshot grew; revisit public C2 copy");
 
-// Test Infrastructure
-
-static int tests_run = 0;
-static int tests_failed = 0;
-
-static void check(const std::string& name, bool passed, const std::string& detail = "") {
-  tests_run++;
-  if (!passed) {
-    tests_failed++;
-  }
-  std::cout << (passed ? "  PASS: " : "  FAIL: ") << name;
-  if (!detail.empty()) {
-    std::cout << " - " << detail;
-  }
-  std::cout << "\n";
-}
+using nic_test::check;
 
 // Fakes
 
@@ -268,7 +256,7 @@ static void test_health_error_count_saturates_below_sentinel() {
         r.value.error_count != tel::kErrorCountUnsupported,
         "got " + std::to_string(r.value.error_count));
   check("error_count saturated to reserved value minus 1",
-        r.value.error_count == tel::kErrorCountUnsupported - 1,
+        r.value.error_count == (tel::kErrorCountUnsupported - 1),
         "got " + std::to_string(r.value.error_count));
 }
 
@@ -450,9 +438,9 @@ static void test_device_info_supported() {
   check("version_count = 3", r.value.version_count == 3,
         "got " + std::to_string(r.value.version_count));
   check("running fw name/value forwarded",
-        r.value.versions[1].type == static_cast<uint8_t>(dl::DevlinkVersionType::Running) &&
-            std::strcmp(r.value.versions[1].name, "fw") == 0 &&
-            std::strcmp(r.value.versions[1].value, "1.60.0-73") == 0);
+        (r.value.versions[1].type == static_cast<uint8_t>(dl::DevlinkVersionType::Running)) &&
+            (std::strcmp(r.value.versions[1].name, "fw") == 0) &&
+            (std::strcmp(r.value.versions[1].value, "1.60.0-73") == 0));
 }
 
 static void test_device_info_unsupported() {
@@ -617,8 +605,7 @@ int main() {
   test_snapshot_mixed();
   test_snapshot_all_unsupported();
 
-  std::cout << "\n" << (tests_run - tests_failed) << "/" << tests_run << " checks passed\n";
   auto ec = std::error_code{};
   std::filesystem::remove_all(g_tmpdir, ec);
-  return tests_failed == 0 ? 0 : 1;
+  return nic_test::report();
 }

@@ -158,7 +158,7 @@ class DevlinkNetlinkClient : public IDevlinkClient {
 
   GenericNetlinkClient client_;
   int family_id_ = -1;
-  bool initialized_ = false;
+  bool is_initialized_ = false;
 };
 #endif  // HAVE_LIBNL3
 

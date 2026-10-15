@@ -226,8 +226,8 @@ typedef struct {
  * can be used concurrently from different threads.
  *
  * @param[out] ctx Pointer to store the created context handle
- * @param[in] ainic_only If true, discover only AMD AINIC devices; if false,
- *            discover all supported NICs.
+ * @param[in] is_ainic_only If true, discover only AMD NICs (AINIC cards and UALoE
+ *            endpoints); if false, discover all supported NICs.
  *
  * @return ::SMI_NIC_STATUS_SUCCESS if context created successfully
  * @return ::SMI_NIC_STATUS_WRONG_PARAM if ctx is NULL
@@ -237,7 +237,7 @@ typedef struct {
  * @note The context must be destroyed with smi_nic_destroy_context()
  *
  */
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool ainic_only);
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool is_ainic_only);
 
 /**
  * @brief Destroy a NIC context and free its resources
