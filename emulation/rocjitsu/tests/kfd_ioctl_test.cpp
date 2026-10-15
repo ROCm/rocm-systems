@@ -839,6 +839,202 @@ TEST_F(KfdIoctlTest, CreateQueueAcceptsOlderAndNewerPayloadSizes) {
   }
 }
 
+TEST_F(KfdIoctlTest, QueueIdentityMappingsPreservePartialPageBacking) {
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  alignas(4096) std::array<std::byte, 4096> ring{};
+  std::array<std::byte, 64> first{}, second{};
+  first.fill(std::byte{42});
+  second.fill(std::byte{73});
+  const uint64_t ring_va = reinterpret_cast<uint64_t>(ring.data());
+  process->map_pages(ring_va + 64, first.data(), first.size(), rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  process->map_pages(ring_va + 192, second.data(), second.size(), rocjitsu::amdgpu::Mtype::RW,
+                     rocjitsu::KfdProcess::HostExtentOwner::Driver);
+  const auto existing = process->page_table_.at(ring_va >> 12);
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = kGpuId;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  queue.ring_base_address = ring_va;
+  queue.ring_size = 1024;
+  queue.read_pointer_address = ring_va + 2048;
+  queue.write_pointer_address = ring_va + 2056;
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  const auto &page = process->page_table_.at(ring_va >> 12);
+  EXPECT_EQ(page.mtype, existing.mtype);
+  for (const auto &extent : existing.host_extents)
+    EXPECT_NE(std::ranges::find(page.host_extents, extent), page.host_extents.end());
+  auto access = soc_->gpu_vm().snapshot_vmid(driver_->local_process_id());
+  ASSERT_TRUE(access);
+  std::array<std::byte, 1024> expected{}, observed{};
+  std::ranges::copy(first, expected.begin() + 64);
+  std::ranges::copy(second, expected.begin() + 192);
+  // VM transfers respect sub-page translation boundaries, so read one packet
+  // at a time across the original extents and the newly backed gaps.
+  for (size_t offset = 0; offset < observed.size(); offset += 64)
+    ASSERT_EQ(access->read(ring_va + offset, std::span(observed).subspan(offset, 64)),
+              rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(observed, expected);
+  EXPECT_EQ(access->atomic_load(queue.read_pointer_address, 8).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(access->atomic_load(queue.write_pointer_address, 8).outcome,
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+}
+
+TEST_F(KfdIoctlTest, UnsupportedMetadataQueueDoesNotChangeProcessState) {
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  alignas(4096) std::array<std::byte, 2048> ring{};
+  alignas(64) std::array<std::byte, 256> backing{};
+  const uint64_t ring_va = reinterpret_cast<uint64_t>(ring.data());
+  process->map_pages(ring_va, backing.data(), backing.size());
+  const auto pages = process->page_table_;
+  const auto generation = *process->page_table_generation();
+  const auto next_queue = process->next_queue_id_;
+  const auto next_doorbell = process->gpu(0).next_doorbell_offset;
+  alignas(8) uint64_t pointers[2]{};
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kGpuId;
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  args.ring_base_address = ring_va;
+  args.ring_size = 1024;
+  args.metadata_ring_size = 4096;
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  args.queue_percentage = 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
+  EXPECT_EQ(process->page_table_, pages);
+  EXPECT_EQ(*process->page_table_generation(), generation);
+  EXPECT_EQ(process->next_queue_id_, next_queue);
+  EXPECT_EQ(process->gpu(0).next_doorbell_offset, next_doorbell);
+  EXPECT_TRUE(process->active_queue_ids_.empty());
+  EXPECT_EQ(args.queue_id, 0u);
+}
+
+class KfdBoQueueTest : public KfdIoctlTest,
+                       public ::testing::WithParamInterface<std::tuple<const char *, uint32_t>> {
+protected:
+  void SetUp() override {
+    SetUpWithConfig(std::string(CONFIG_DIR) + "/" + std::get<0>(GetParam()));
+  }
+};
+
+TEST_P(KfdBoQueueTest, DispatchPreservesBackingWithSeparateCpuAlias) {
+  using namespace rocr::llvm::amdhsa;
+  constexpr size_t bytes = 12288;
+  void *reservation = ::mmap(nullptr, bytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reservation, MAP_FAILED);
+  const auto unmap_bo = [](void *address) { ::munmap(address, bytes); };
+  std::unique_ptr<void, decltype(unmap_bo)> reserved(reservation, unmap_bo);
+  const uint64_t base = reinterpret_cast<uint64_t>(reservation);
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = base;
+  alloc.size = bytes;
+  alloc.gpu_id = driver_->gpu_id();
+  alloc.flags = std::get<1>(GetParam()) | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&alloc.gpu_id);
+  map.n_devices = 1;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  void *alias =
+      driver_->mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_SHARED, alloc.mmap_offset);
+  ASSERT_NE(alias, MAP_FAILED);
+  std::unique_ptr<void, decltype(unmap_bo)> cpu_alias(alias, unmap_bo);
+  ASSERT_NE(alias, reservation);
+  auto *cpu = static_cast<std::byte *>(alias);
+  auto &read_pointer = *reinterpret_cast<uint64_t *>(cpu + offsetof(amd_queue_t, read_dispatch_id));
+  auto &write_pointer =
+      *reinterpret_cast<uint64_t *>(cpu + offsetof(amd_queue_t, write_dispatch_id));
+  auto *signal = reinterpret_cast<uint64_t *>(cpu + 2048);
+  signal[1] = 1;
+  auto *packet = reinterpret_cast<hsa_kernel_dispatch_packet_t *>(cpu + 4096);
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  alignas(4096) std::array<std::byte, 4096> code{};
+  kernel_descriptor_t kd{};
+  kd.kernel_code_entry_byte_offset = sizeof(kd);
+  const bool metadata = soc_->arch() == ROCJITSU_CODE_ARCH_CDNA5;
+  AMDHSA_BITS_SET(kd.kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                  metadata);
+  std::memcpy(code.data(), &kd, sizeof(kd));
+  const uint32_t endpgm = rocjitsu::build_s_endpgm(soc_->arch());
+  std::memcpy(code.data() + sizeof(kd), &endpgm, sizeof(endpgm));
+  constexpr uint64_t kernel = 0x10000;
+  process->map_pages(kernel, code.data(), code.size());
+  const auto pages = process->page_table_;
+  kfd_ioctl_create_queue_args queue{};
+  queue.gpu_id = alloc.gpu_id;
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  queue.ring_base_address = base + 4096;
+  queue.ring_size = 1024;
+  queue.metadata_ring_size =
+      metadata ? queue.ring_size * rocjitsu::amdgpu::aql_metadata::kBlocks : 0;
+  queue.read_pointer_address = base + offsetof(amd_queue_t, read_dispatch_id);
+  queue.write_pointer_address = base + offsetof(amd_queue_t, write_dispatch_id);
+  queue.queue_percentage = 100;
+  ASSERT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  ASSERT_EQ(process->page_table_, pages) << "queue creation replaced BO-backed extents";
+  void *doorbell = driver_->mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED,
+                                 static_cast<off_t>(queue.doorbell_offset));
+  ASSERT_NE(doorbell, MAP_FAILED);
+  const auto unmap_doorbell = [this](void *address) {
+    EXPECT_EQ(driver_->munmap(address, 4096), 0);
+  };
+  std::unique_ptr<void, decltype(unmap_doorbell)> mapped_doorbell(doorbell, unmap_doorbell);
+  packet->setup = 1;
+  packet->workgroup_size_x = packet->grid_size_x = metadata ? 32 : 64;
+  packet->workgroup_size_y = packet->workgroup_size_z = 1;
+  packet->grid_size_y = packet->grid_size_z = 1;
+  packet->kernel_object = kernel;
+  packet->completion_signal.handle = base + 2048;
+  if (metadata) {
+    auto *companion = reinterpret_cast<uint32_t *>(cpu + 4096 + 1024);
+    namespace metadata_abi = rocjitsu::amdgpu::aql_metadata;
+    std::memcpy(companion + metadata_abi::kDescriptorWord,
+                code.data() + metadata_abi::kKernelDescriptorOffset,
+                metadata_abi::kDescriptorBytes);
+    for (uint32_t block = 0; block < metadata_abi::kBlocks; ++block)
+      std::atomic_ref<uint32_t>(companion[metadata_abi::header_word(block)])
+          .store(HSA_PACKET_TYPE_KERNEL_DISPATCH, std::memory_order_release);
+  }
+  std::atomic_ref<uint16_t>(packet->header)
+      .store(HSA_PACKET_TYPE_KERNEL_DISPATCH, std::memory_order_release);
+  std::atomic_ref<uint64_t>(write_pointer).store(1, std::memory_order_release);
+  std::atomic_ref<uint64_t>(*static_cast<uint64_t *>(doorbell)).store(0, std::memory_order_release);
+  for (uint32_t attempt = 0;
+       attempt < 2000 && std::atomic_ref<uint64_t>(signal[1]).load(std::memory_order_acquire) != 0;
+       ++attempt) {
+    (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
+  EXPECT_EQ(std::atomic_ref<uint64_t>(signal[1]).load(std::memory_order_acquire), 0u);
+  EXPECT_EQ(std::atomic_ref<uint64_t>(read_pointer).load(std::memory_order_acquire), 1u);
+  uint64_t dispatched = 0;
+  soc_->for_each_cp([&](rocjitsu::amdgpu::CommandProcessor *cp) {
+    dispatched += cp->dispatched_workgroups();
+    EXPECT_FALSE(cp->queue_faulted_for_test(queue.queue_id, driver_->local_process_id()));
+  });
+  EXPECT_EQ(dispatched, 1u);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  kfd_ioctl_free_memory_of_gpu_args release{.handle = alloc.handle};
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &release), 0);
+}
+
+INSTANTIATE_TEST_SUITE_P(
+    PrivateBacking, KfdBoQueueTest,
+    ::testing::Values(std::tuple{"gfx950_mi355x.json", KFD_IOC_ALLOC_MEM_FLAGS_VRAM},
+                      std::tuple{"gfx950_mi355x.json", KFD_IOC_ALLOC_MEM_FLAGS_GTT},
+                      std::tuple{"gfx1250_mi455x.json", KFD_IOC_ALLOC_MEM_FLAGS_VRAM},
+                      std::tuple{"gfx1250_mi455x.json", KFD_IOC_ALLOC_MEM_FLAGS_GTT}));
+
 // A compute queue created through KFD is replicated onto every XCD so its
 // dispatches can be spread across the whole device; the XCD that owns the queue
 // still reads the ring alone. An SDMA queue is per-engine and is not replicated.
@@ -1867,6 +2063,52 @@ protected:
   void expect_failed_runtime_exception(bool reject_overlapping_debug_notification,
                                        bool unmap_status_on_interrupt = false);
 };
+
+TEST_F(KfdIoctlCdna5Test, MetadataRingOverflowDoesNotChangeGpuMappings) {
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  const auto pages = process->page_table_.size();
+  const auto next_queue = process->next_queue_id_;
+  alignas(8) uint64_t pointers[2]{};
+  kfd_ioctl_create_queue_args args{};
+  args.gpu_id = kCdna5GpuId;
+  args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  args.ring_base_address = UINT64_MAX - 255;
+  args.ring_size = 1024;
+  args.metadata_ring_size = 4096;
+  args.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+  args.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+  args.queue_percentage = 100;
+  EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
+  EXPECT_EQ(process->page_table_.size(), pages);
+  EXPECT_EQ(process->next_queue_id_, next_queue);
+  EXPECT_EQ(args.queue_id, 0u);
+}
+
+TEST_F(KfdIoctlCdna5Test, MetadataCapacityMismatchDoesNotChangeProcessState) {
+  auto process = driver_->find_process(driver_->local_process_id());
+  ASSERT_NE(process, nullptr);
+  alignas(4096) std::array<std::byte, 12288> ring{};
+  alignas(8) uint64_t pointers[2]{};
+  const auto pages = process->page_table_;
+  const auto next_queue = process->next_queue_id_;
+  for (uint32_t metadata_size : {256u, 2048u, 8192u}) {
+    SCOPED_TRACE(metadata_size);
+    kfd_ioctl_create_queue_args args{};
+    args.gpu_id = kCdna5GpuId;
+    args.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+    args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    args.ring_size = 1024;
+    args.metadata_ring_size = metadata_size;
+    args.read_pointer_address = reinterpret_cast<uint64_t>(&pointers[0]);
+    args.write_pointer_address = reinterpret_cast<uint64_t>(&pointers[1]);
+    args.queue_percentage = 100;
+    EXPECT_EQ(driver_->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), -EINVAL);
+    EXPECT_EQ(process->page_table_, pages);
+    EXPECT_EQ(process->next_queue_id_, next_queue);
+    EXPECT_EQ(args.queue_id, 0u);
+  }
+}
 
 TEST_F(KfdIoctlCdna5Test, SdmaCreateNormalizesSmallRingsAndRejectsNonPowersOfTwo) {
   alignas(4096) std::array<std::byte, 4096> ring{};

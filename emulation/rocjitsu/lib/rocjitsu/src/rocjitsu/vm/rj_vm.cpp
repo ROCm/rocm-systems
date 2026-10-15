@@ -5,6 +5,8 @@
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/checkpoint.h"
+#include "rocjitsu/kmd/linux/host_mapping_lock.h"
+#include "rocjitsu/kmd/linux/libc_passthrough.h"
 #include "rocjitsu/kmd/linux/simulated_kfd.h"
 #include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/plugins/plugin_loader.h"
@@ -518,17 +520,25 @@ rj_status_t rj_vm_device_map_as(rj_vm_t *vm, uint32_t process_id, rj_vm_map_t *m
 rj_status_t rj_vm_device_unmap(rj_vm_t *vm, rj_vm_unmap_t *unmap) {
   if (!vm || !unmap || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  vm->vm->driver()->munmap(reinterpret_cast<void *>(unmap->addr),
-                           static_cast<size_t>(unmap->length));
-  return ROCJITSU_STATUS_SUCCESS;
+  return rj_vm_device_unmap_as(vm, vm->vm->driver()->local_process_id(), unmap);
 }
 
 rj_status_t rj_vm_device_unmap_as(rj_vm_t *vm, uint32_t process_id, rj_vm_unmap_t *unmap) {
   if (!vm || !unmap || !vm->vm || !vm->vm->driver())
     return ROCJITSU_STATUS_INVALID_ARGUMENT;
-  vm->vm->driver()->munmap(process_id, reinterpret_cast<void *>(unmap->addr),
-                           static_cast<size_t>(unmap->length));
-  return ROCJITSU_STATUS_SUCCESS;
+  auto *driver = vm->vm->driver();
+  void *addr = reinterpret_cast<void *>(unmap->addr);
+  const size_t length = static_cast<size_t>(unmap->length);
+  int result = driver->munmap(process_id, addr, length);
+  if (result == -ENOENT) {
+    // CPU aliases are ordinary client VMAs. Match the interposer's libc fallback
+    // for local calls; a daemon must never unmap a client's address in itself.
+    if (driver->daemon_mode())
+      return ROCJITSU_STATUS_SUCCESS;
+    auto mapping_lock = host_mapping_lock().lock_exclusive();
+    result = libc_passthrough().munmap(addr, length);
+  }
+  return result == 0 ? ROCJITSU_STATUS_SUCCESS : ROCJITSU_STATUS_ERROR;
 }
 
 rj_status_t rj_vm_gpu_id(rj_vm_t *vm, uint32_t *gpu_id) {

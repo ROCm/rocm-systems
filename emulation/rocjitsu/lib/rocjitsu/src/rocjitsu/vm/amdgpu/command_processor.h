@@ -603,11 +603,14 @@ private:
 
   /// @brief Build and admit one normalized AQL kernel-dispatch packet.
   /// @param packet_index Absolute AQL ring index for debugger correlation.
+  /// @param metadata Captured version-0.0 companion; empty uses descriptor,
+  /// kernargs and completion event ID from memory (including CLR KDQ-disabled queues).
   [[nodiscard]] AqlAdmissionResult
   admit_kernel_dispatch(const hsa_kernel_dispatch_packet_t &packet, ComputeQueueRecord &queue,
                         const GpuVmAccess &transaction_access, uint64_t packet_address,
                         uint32_t ring_slot, uint64_t packet_index = 0,
-                        ClusterDispatchShape cluster_shape = {});
+                        ClusterDispatchShape cluster_shape = {},
+                        std::span<const uint32_t> metadata = {});
 
   /// @brief Commit the typed action produced by AqlPacketProcessor.
   [[nodiscard]] AqlAdmissionResult admit_aql_packet(const AqlPacketProcessRequest &request,

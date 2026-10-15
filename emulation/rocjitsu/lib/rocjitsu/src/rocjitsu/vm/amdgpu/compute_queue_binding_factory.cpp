@@ -92,6 +92,7 @@ public:
         .initial_consumer_cursor = request.initial_consumer_cursor,
         .packet_callbacks = callbacks_,
         .scheduling_percentage = request.scheduling_percentage,
+        .metadata_ring_size = request.ring.metadata_size_bytes,
     });
     if (registration_id == 0)
       return {};
