@@ -538,10 +538,10 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC("bad_resp_err",               HWC_IB_SYSFS, "bad_resp_err"),
   HWC("unrecoverable_err",          HWC_IB_SYSFS, "unrecoverable_err"),
   HWC("recoverable_errors",         HWC_IB_SYSFS, "recoverable_errors"),
-  HWC_FB("rx_errors",               HWC_IB_SYSFS, "rx_errors", "rx_roce_errors"),
-  HWC_FB("rx_discards",             HWC_IB_SYSFS, "rx_discards", "rx_roce_discards"),
-  HWC_FB("tx_errors",               HWC_IB_SYSFS, "tx_errors", "tx_roce_errors"),
-  HWC_FB("tx_discards",             HWC_IB_SYSFS, "tx_discards", "tx_roce_discards"),
+  HWC_FB("rx_errors",               HWC_IB_SYSFS, "rx_roce_errors", "rx_errors"),
+  HWC_FB("rx_discards",             HWC_IB_SYSFS, "rx_roce_discards", "rx_discards"),
+  HWC_FB("tx_errors",               HWC_IB_SYSFS, "tx_roce_errors", "tx_errors"),
+  HWC_FB("tx_discards",             HWC_IB_SYSFS, "tx_roce_discards", "tx_discards"),
   HWC("rx_roce_error_pkts",         HWC_IB_SYSFS, "rx_roce_error_pkts"),
   HWC("rx_roce_discard_pkts",       HWC_IB_SYSFS, "rx_roce_discard_pkts"),
 
@@ -650,9 +650,7 @@ void rcclTelemetryEthtoolResolve(const char* names, size_t nameStride, const uin
     size_t keyLen = strlen(wanted[i].key);
     for (unsigned s = 0; s < n; s++) {
       const char* name = names + (size_t)s * nameStride;
-      if (strnlen(name, nameStride) != keyLen ||
-          strncmp(name, wanted[i].key, nameStride) != 0)
-        continue;
+      if (strnlen(name, nameStride) != keyLen || strncmp(name, wanted[i].key, nameStride) != 0) continue;
       *(wanted[i].target) = (int64_t)values[s];
       break;
     }

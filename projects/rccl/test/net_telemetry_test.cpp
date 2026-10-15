@@ -935,7 +935,7 @@ static void testConcurrent(void) {
 
 /* ---- ethtool key matching ------------------------------------------- */
 
-/* bnxt_en lists rx_pause_frames (fallback) before rx_pfc_frames (primary). */
+/* The primary key wins even when the NIC lists its fallback first. */
 static void testEthtoolFallbackOrder(void) {
   std::printf("testEthtoolFallbackOrder\n");
   const size_t stride = 32;
