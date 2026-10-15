@@ -1184,6 +1184,7 @@ class TaskPostTuning_P2pScene {
     comm->connectRecv = connectRecv_.data();
     comm->p2pnChannels = nP2pChannels;
     comm->p2pnChannelsPerPeer = nChannelsPerPeer;
+    comm->p2pnChannelsPerPeerScatter = nChannelsPerPeer;
     comm->p2pChannelShiftSize = kNoChannelShift;
     for (int channelId = 0; channelId < nP2pChannels; channelId++) {
       for (int peer = 0; peer < kRanks; peer++) {
@@ -1303,13 +1304,13 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerOutsideTheCommunicator_R
   for (int peer : {-1, kRanks}) {
     bool needPreconnect = false;
 
-    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, &needPreconnect))
+    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, ncclFuncSendRecv, &needPreconnect))
       << "peer " << peer;
 
     EXPECT_FALSE(needPreconnect) << "peer " << peer;
     needPreconnect = true;
 
-    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, &needPreconnect))
+    EXPECT_EQ(ncclInvalidArgument, postTuneP2pRecordPreconnect(p2p.comm(), peer, kIsSend, ncclFuncSendRecv, &needPreconnect))
       << "peer " << peer;
 
     EXPECT_TRUE(needPreconnect) << "peer " << peer;
@@ -1320,14 +1321,14 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerIsThisRank_SucceedsWitho
   TaskPostTuning_P2pScene p2p;
   bool needPreconnect = false;
 
-  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, &needPreconnect));
+  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_FALSE(needPreconnect);
   EXPECT_FALSE(p2p.comm()->planner.peers[kP2pRank].sendSeen);
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pRank), {}));
   needPreconnect = true;
 
-  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, &needPreconnect));
+  EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pRank, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
 }
@@ -1337,7 +1338,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshSendPeer_ClaimsItsSendC
   const std::vector<int> sendChannels = p2p.Channels(kIsSend);
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
@@ -1359,7 +1360,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
   const std::vector<int> recvChannels = p2p.Channels(kIsRecv);
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsRecv, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsRecv, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].recvSeen);
@@ -1376,6 +1377,30 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectRecv(kP2pRank), {}));
 }
 
+// Scatter with fewer parts than p2pnChannelsPerPeer claims only its own channels and leaves the side
+// unseen, so a later task to the same peer that uses every part still claims the rest.
+TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterWithFewerParts_ClaimsItsPartsAndLeavesTheRestForLater) {
+  TaskPostTuning_P2pScene p2p;
+  p2p.comm()->p2pnChannelsPerPeerScatter = 1;
+  const std::vector<int> sendChannels = p2p.Channels(kIsSend);
+  ASSERT_EQ(2u, sendChannels.size());
+  bool needPreconnect = false;
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncScatter, &needPreconnect));
+
+  EXPECT_TRUE(needPreconnect);
+  EXPECT_FALSE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
+  EXPECT_EQ(kConnected, p2p.Send(sendChannels[0], kP2pPeer)->hasSeen);
+  EXPECT_EQ(kNotConnected, p2p.Send(sendChannels[1], kP2pPeer)->hasSeen);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), {sendChannels[0]}));
+
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
+
+  EXPECT_TRUE(p2p.comm()->planner.peers[kP2pPeer].sendSeen);
+  EXPECT_EQ(kConnected, p2p.Send(sendChannels[1], kP2pPeer)->hasSeen);
+  EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer), sendChannels));
+}
+
 // Production duplicates the loop body per side, so each of these runs on the recv copy as well as the send one.
 TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSide_ClaimsNoChannel) {
   for (bool isSendNotRecv : {kIsSend, kIsRecv}) {
@@ -1383,7 +1408,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSid
     p2p.Seen(isSendNotRecv, kP2pPeer) = true;
     bool needPreconnect = false;
 
-    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_FALSE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1394,7 +1419,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerAlreadyRecordedOnThatSid
     }
     needPreconnect = true;
 
-    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    EXPECT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1406,7 +1431,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_PeerRecordedOnTheOtherSideOn
   p2p.comm()->planner.peers[kP2pPeer].recvSeen = true;
   bool needPreconnect = false;
 
-  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, &needPreconnect));
+  ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, kIsSend, ncclFuncSendRecv, &needPreconnect));
 
   EXPECT_TRUE(needPreconnect);
   EXPECT_TRUE(TaskPostTuning_MaskHasExactly(p2p.connectSend(kP2pPeer),
@@ -1420,7 +1445,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_SomeChannelsAlreadyConnected
     p2p.Conn(isSendNotRecv, channels.front(), kP2pPeer)->hasSeen = kConnected;
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1439,7 +1464,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_EveryChannelAlreadyConnected
     }
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_FALSE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1457,7 +1482,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_CallerAlreadyNeedsSetup_Keep
     }
     bool needPreconnect = true;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_TRUE(needPreconnect) << "isSendNotRecv " << isSendNotRecv;
@@ -1470,7 +1495,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ChannelsBeyondTheFirstMaskWo
     const std::vector<int> channels = p2p.Channels(isSendNotRecv);
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_LE(CHANNELS_PER_MASK_WORD, channels.front()) << "isSendNotRecv " << isSendNotRecv;
@@ -1486,7 +1511,7 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ChannelRangeStraddlingAMaskW
     const std::vector<int> channels = p2p.Channels(isSendNotRecv);
     bool needPreconnect = false;
 
-    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, &needPreconnect))
+    ASSERT_EQ(ncclSuccess, postTuneP2pRecordPreconnect(p2p.comm(), kP2pPeer, isSendNotRecv, ncclFuncSendRecv, &needPreconnect))
       << "isSendNotRecv " << isSendNotRecv;
 
     EXPECT_NE(0, channels.front() % CHANNELS_PER_MASK_WORD) << "isSendNotRecv " << isSendNotRecv;

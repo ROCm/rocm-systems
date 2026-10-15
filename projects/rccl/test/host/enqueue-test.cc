@@ -340,6 +340,48 @@ TEST_F(EnqueueMicrotest, ShmemDynamicSize_DeviceLinker_IsAlwaysZero) {
 #endif
 
 // ===========================================================================
+// rcclP2pTaskParts (enqueue.cc:1340) and rcclP2pPolicyChannels (enqueue.cc:1345)
+//
+// Scatter takes p2pnChannelsPerPeerScatter, every other collAPI takes
+// p2pnChannelsPerPeer. Both ends of a pair must get the same answer, so it may
+// depend only on comm-wide fields.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterUsesPreRaiseCount) {
+  std::unique_ptr<ncclComm> storage{new ncclComm{}};
+  ncclComm& comm = *storage;
+  comm.p2pnChannelsPerPeer = 2;
+  comm.p2pnChannelsPerPeerScatter = 1;
+  EXPECT_EQ(1, rcclP2pTaskParts(&comm, ncclFuncScatter));
+  for (ncclFunc_t f : {ncclFuncSendRecv, ncclFuncSend, ncclFuncRecv, ncclFuncAlltoAll, ncclFuncGather,
+                       ncclFuncAlltoAllv}) {
+    EXPECT_EQ(2, rcclP2pTaskParts(&comm, f)) << "collAPI=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pTaskParts_ScatterUnchangedWhenNotRaised) {
+  std::unique_ptr<ncclComm> storage{new ncclComm{}};
+  ncclComm& comm = *storage;
+  comm.p2pnChannelsPerPeer = 4;
+  comm.p2pnChannelsPerPeerScatter = 4;
+  for (ncclFunc_t f : {ncclFuncScatter, ncclFuncSend, ncclFuncAlltoAll, ncclFuncGather}) {
+    EXPECT_EQ(4, rcclP2pTaskParts(&comm, f)) << "collAPI=" << int(f);
+  }
+}
+
+TEST_F(EnqueueMicrotest, P2pPolicyChannels_ScatterBelowPerPeerReturnsItsParts) {
+  // Returns before the arch policy table, so comm.topo is never read.
+  std::unique_ptr<ncclComm> storage{new ncclComm{}};
+  ncclComm& comm = *storage;
+  comm.p2pnChannelsPerPeer = 2;
+  comm.p2pnChannelsPerPeerScatter = 1;
+  ncclTaskP2p task{};
+  task.collAPI = ncclFuncScatter;
+  EXPECT_EQ(1, rcclP2pPolicyChannels(&comm, &task));
+  EXPECT_EQ(-1, rcclP2pPolicyChannels(&comm, nullptr));
+}
+
+// ===========================================================================
 // calcP2pChannelCount (enqueue.cc:1550)
 //
 // DEAD CODE: repo-wide grep finds exactly one occurrence -- its own definition.
@@ -3892,6 +3934,7 @@ struct Gfx1250AddP2pScene {
     c->cudaArch = 1250;
     c->p2pnChannels = 4;
     c->p2pnChannelsPerPeer = 1;
+    c->p2pnChannelsPerPeerScatter = 1;
     c->p2pChannelShiftSize = 0;
     c->p2pChunkSize = 128 << 10;
     c->ll128LineElems = 16;
