@@ -55,9 +55,9 @@ DEFERRED_CRASHES: dict = {}
 # amdsmi_* calls RDC links that this module does not reach, with the reason.
 # The coverage test fails once one of them is reached, so the list stays true.
 UNREACHED_APIS = {
-    "amdsmi_get_afids_from_cper": "needs CPER records; the fake reports none",
+    "amdsmi_get_afids_from_cper": "needs CPER records; the fake reports none by default",
     "amdsmi_get_gpu_accelerator_partition_profile_config": "partition profile query",
-    "amdsmi_get_gpu_compute_process_gpus": "needs processes; the fake reports none",
+    "amdsmi_get_gpu_compute_process_gpus": "needs processes; the fake reports none by default",
     "amdsmi_get_lib_version": "component version query, not exposed by rdci",
     "amdsmi_get_power_cap_info": "rdci config has no --host option",
     "amdsmi_set_power_cap": "rdci config has no --host option",
