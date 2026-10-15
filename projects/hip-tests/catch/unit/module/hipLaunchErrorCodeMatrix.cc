@@ -21,10 +21,10 @@
  *
  * Cells recording a known defect -- hipSuccess where an error is expected -- kept as observed, see
  * clr/consolidate_grid_size_plan.md:
- *   - kHccModule c8: blockDim.x=66560 narrows to 1024 and launches mis-shapen (Sec6.1)
+ *   - kHccModule c8: blockDim.x=66560 narrows to 1024 and launches mis-shapen
  *   - kHccModule / kLaunch / kExtLaunch / kByPtr c12: sharedMemBytes 2^32 truncates to 0
- *   - kDrvExCluster c13/c14: the cluster path never consults IsValidConfig() (Sec6.2)
- *   - kGraphAdd / kGraphSet / kGraphExecSet c15: nothing checks gridDim.x vs maxGridDimX (Sec6.3a)
+ *   - kDrvExCluster c13/c14: the cluster path never consults IsValidConfig()
+ *   - kGraphAdd / kGraphSet / kGraphExecSet c15: nothing checks gridDim.x vs maxGridDimX
  */
 
 #include <array>
@@ -163,6 +163,12 @@ hipKernelNodeParams MakeNodeParams(const CaseSpec& c) {
                         static_cast<unsigned>(c.shared));
 }
 
+bool DeviceSupportsClusterLaunch(int device) {
+  hipDeviceProp_t props{};
+  HIP_CHECK(hipGetDeviceProperties(&props, device));
+  return props.clusterLaunch != 0;
+}
+
 // A graph holding one valid (1,1,1) no-op node, for the SetParams rows to re-parent.
 struct GraphWithNode {
   GraphWithNode() {
@@ -274,7 +280,17 @@ HIP_TEST_CASE(Unit_hipLaunchErrorCodeMatrix_Golden) {
   }
 
   SECTION("hipDrvLaunchKernelEx(clusterDim attr)") {
-    RunRow(kDrvExCluster, [&](const CaseSpec& c) {
+    // Where the device cannot launch clusters at all, a cluster larger than 1 fails in the queue
+    // (hipErrorUnknown) rather than in configuration validation, which says nothing about the check
+    // ordering this matrix exists to pin -- so drop those cells rather than recording a second,
+    // hardware-dependent expectation. Driven off useCluster so a new cluster case needs no edit.
+    Row clusterRow = kDrvExCluster;
+    if (!DeviceSupportsClusterLaunch(0)) {
+      for (const auto& c : cases) {
+        if (c.useCluster) clusterRow[c.id - 1] = NA;
+      }
+    }
+    RunRow(clusterRow, [&](const CaseSpec& c) {
       hipLaunchAttribute attr{};
       attr.id = hipLaunchAttributeClusterDimension;
       attr.value.clusterDim.x = c.useCluster ? c.cx : 1;
