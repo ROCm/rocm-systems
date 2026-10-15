@@ -449,22 +449,39 @@ public:
 
   /// @brief Inject the device-global GWS store this CU participates in (see
   /// GwsDevice for the scheduling policy).
-  /// @details Unregisters from the current store and registers with @p device,
-  /// which reconciles any live parked/resident GWS waves between the two stores.
+  /// @details Unregisters from the current store and registers with @p device.
   /// Holding the shared_ptr keeps the store alive past this CU, so the destructor
   /// can unregister regardless of component teardown order. Passing nullptr
   /// restores this CU's embedded private default store (standalone use); this is
   /// the sole injection path.
-  void set_gws_device(std::shared_ptr<GwsDevice> device) {
+  ///
+  /// Only a drained CU may be re-pointed. A GWS resource's phase (barrier
+  /// generation / semaphore credits) lives in the store, not on the wave, so a live
+  /// parked or resident wave cannot carry its rendezvous across stores: migrating it
+  /// would compare its old generation against the destination's unrelated one and
+  /// wake it without its peers arriving. Production wires stores during topology
+  /// construction, before any dispatch, so the CU is empty then. A replacement
+  /// requested while the CU still hosts active waves is therefore rejected (the CU
+  /// keeps its current store) rather than performing an unsafe partial migration;
+  /// callers must drain the CU first.
+  /// @returns true if the store was changed (or was already @p device); false if the
+  /// replacement was rejected because the CU is not drained.
+  bool set_gws_device(std::shared_ptr<GwsDevice> device) {
     GwsDevice *replacement = device ? device.get() : &default_gws_device_;
     if (replacement == gws_device_) {
       gws_device_owner_ = std::move(device);
-      return;
+      return true;
+    }
+    if (has_active_wfs() || !active_wgs_.empty()) {
+      util::Logger::warn("set_gws_device rejected: CU ", name(),
+                         " still hosts active GWS waves; drain it before re-pointing");
+      return false;
     }
     gws_device_->unregister_compute_unit(this);
     gws_device_owner_ = std::move(device);
     gws_device_ = replacement;
     gws_device_->register_compute_unit(this);
+    return true;
   }
 
   /// @brief Return the device-global GWS store this CU participates in.

@@ -47,18 +47,14 @@ void GwsDevice::register_compute_unit(ComputeUnitCore *cu) {
   if (std::find(cus_.begin(), cus_.end(), cu) != cus_.end())
     return;
   cus_.push_back(cu);
-  // Reconcile any live GWS state the CU brings with it -- the mirror of
-  // unregister_compute_unit's reconcile-out. A CU re-pointed via set_gws_device
-  // while it still hosts parked waves (or resident workgroups) must have them
-  // accounted in the destination store, or this store's fast-path gate and
-  // quiescence scan would understate them: e.g. a later notify_parked_wave_gone
-  // for the migrated wave would decrement a count that was never incremented and
-  // wrongly cancel an unrelated waiter already parked here. A freshly created CU
-  // carries nothing, so this is a no-op at initial wiring.
-  //
-  // Resource phase state (barrier generation / credits) is intentionally NOT
-  // migrated: a live cross-CU rendezvous should re-point only drained CUs. This
-  // reconciliation keeps the bookkeeping counts consistent either way.
+  // Defense-in-depth bookkeeping reconcile, the mirror of unregister_compute_unit's
+  // reconcile-out. set_gws_device() now rejects re-pointing a CU that still hosts
+  // active waves (a live rendezvous cannot carry its resource phase across stores),
+  // so a CU joining here is normally drained and these loops are a no-op. They
+  // remain so that if a CU ever did arrive with residual parked/resident state, the
+  // fast-path gate and quiescence scan would still count it consistently (otherwise
+  // a later notify_parked_wave_gone could decrement a count that was never
+  // incremented and wrongly cancel an unrelated waiter already parked here).
   bool migrated_parked = false;
   for (auto &slot : cu->wfs_) {
     if (!slot || slot->state() != WfState::GWS_WAIT)
@@ -79,6 +75,11 @@ void GwsDevice::register_compute_unit(ComputeUnitCore *cu) {
   }
   if (migrated_parked)
     ++summary_epoch_;
+  // A CU joining this store adds execution slots, so a producer the CP previously
+  // could not place may now fit: re-arm any shard recorded Unplaced against the
+  // pre-join capacity. (At initial topology wiring no shard exists yet, so this is
+  // harmless; it matters only when a drained CU is later re-pointed into the store.)
+  ++capacity_epoch_;
 }
 
 void GwsDevice::unregister_compute_unit(ComputeUnitCore *cu) {
@@ -176,12 +177,16 @@ void GwsDevice::set_shard_placement(uint32_t process_id, uint32_t dispatch_id,
   }
   case ShardPlacement::Unplaced: {
     // The CP attempted placement and some workgroup did not fit. Record the current
-    // capacity version: escape defers while this stays current (genuinely stuck ->
-    // terminates) and re-arms if a later retirement advances the version before the
-    // CP re-attempts against the freed room.
+    // capacity version (@ref capacity_epoch_, distinct from the quiescence version):
+    // escape defers while this stays current (genuinely stuck -> terminates) and
+    // re-arms only if a later event that frees room advances the capacity version
+    // before the CP re-attempts against it. Tagging against the capacity version --
+    // not the quiescence version -- is deliberate: a wave merely parking advances
+    // quiescence without freeing any slot, so a stalled serial dispatch (no sibling
+    // to retire and re-trigger placement) must still be allowed to escape.
     DispatchAdmission &adm = admission_[dispatch_id];
     adm.process_id = process_id;
-    adm.shard_attempt_epoch[shard_key] = summary_epoch_;
+    adm.shard_attempt_epoch[shard_key] = capacity_epoch_;
     return;
   }
   case ShardPlacement::Resolved: {
@@ -209,10 +214,12 @@ void GwsDevice::remove_resident(uint32_t dispatch_id, uint32_t count) {
     return;
   it->second = it->second > count ? it->second - count : 0;
   // A retirement frees CU capacity, so a producer the CP previously could not place
-  // may now fit. Advance the capacity version: any shard recorded Unplaced at an
-  // older version is now stale and must defer escape until the CP re-attempts
-  // placement against the freed room (see set_shard_placement / escape_ready).
-  ++summary_epoch_;
+  // may now fit. Advance the capacity version only: any shard recorded Unplaced at an
+  // older capacity version is now stale and must defer escape until the CP re-attempts
+  // placement against the freed room (see set_shard_placement / escape_ready). A
+  // retirement removes a potential signaler rather than introducing one, so it does
+  // not need to invalidate the quiescence snapshots.
+  ++capacity_epoch_;
   if (it->second == 0) {
     resident_waves_.erase(it);
     // A dispatch that has admitted its whole grid and now holds no resident wave
@@ -237,6 +244,9 @@ void GwsDevice::remove_admitted(uint32_t dispatch_id, uint32_t count) {
   // A rolled-back producer may have been masking pending work; force peers to
   // republish so the quiescence scan re-evaluates against the corrected count.
   ++summary_epoch_;
+  // Rolling the wave back also frees the slot it had committed, so re-arm any shard
+  // the CP recorded Unplaced against the pre-rollback capacity.
+  ++capacity_epoch_;
 }
 
 void GwsDevice::notify_dispatch_gone(uint32_t dispatch_id) {
@@ -251,6 +261,9 @@ void GwsDevice::notify_dispatch_gone(uint32_t dispatch_id) {
   // Removing pending work may permit a previously-blocked escape; force peers to
   // republish before any escape trusts a pre-teardown snapshot.
   ++summary_epoch_;
+  // Tearing the dispatch down frees whatever slots its waves held, so re-arm any
+  // sibling shard the CP recorded Unplaced against the pre-teardown capacity.
+  ++capacity_epoch_;
 }
 
 void GwsDevice::release_process(uint32_t process_id) {
@@ -269,6 +282,9 @@ void GwsDevice::release_process(uint32_t process_id) {
   for (auto &per_cu : cu_runnable_)
     per_cu.second.erase(process_id);
   ++summary_epoch_;
+  // Reclaiming the process frees every slot its waves held, so re-arm any shard a
+  // surviving process's CP recorded Unplaced against the pre-teardown capacity.
+  ++capacity_epoch_;
 }
 
 size_t GwsDevice::tracked_process_count() {
@@ -285,6 +301,12 @@ size_t GwsDevice::tracked_shard_count(uint32_t dispatch_id) {
   std::lock_guard<std::mutex> lock(mutex_);
   auto it = admission_.find(dispatch_id);
   return it == admission_.end() ? 0 : it->second.shard_attempt_epoch.size();
+}
+
+size_t GwsDevice::tracked_resident_count(uint32_t dispatch_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = resident_waves_.find(dispatch_id);
+  return it == resident_waves_.end() ? 0 : it->second;
 }
 
 void GwsDevice::release_sema_waiter(Resource &res, uint64_t seq) {
@@ -342,7 +364,7 @@ void GwsDevice::wake_wave(ComputeUnitCore &cu, Wavefront &wf) {
 }
 
 uint32_t GwsDevice::poll_local_waiters(ComputeUnitCore &cu) {
-  uint32_t woke = 0;
+  uint32_t woken_count = 0;
   for (auto &slot : cu.wfs_) {
     if (!slot || slot->state() != WfState::GWS_WAIT)
       continue;
@@ -352,7 +374,7 @@ uint32_t GwsDevice::poll_local_waiters(ComputeUnitCore &cu) {
     // every arrival queued before it regardless of credits.
     if (res.release_gen > wf.gws_wait_generation_) {
       wake_wave(cu, wf);
-      ++woke;
+      ++woken_count;
       continue;
     }
     // A semaphore P consumes one credit left by a V/BR (possibly on another CU),
@@ -362,18 +384,18 @@ uint32_t GwsDevice::poll_local_waiters(ComputeUnitCore &cu) {
     // -- even one polled first because it shares the signaling CU -- cannot jump an
     // earlier waiter parked on another CU (see the entitlement note in the class doc).
     if (!wf.gws_wait_is_barrier_ && res.credits > 0) {
-      uint32_t older = 0;
+      uint32_t older_waiter_count = 0;
       for (uint64_t queued_seq : res.sema_wait_seqs)
         if (queued_seq < wf.gws_wait_seq_)
-          ++older;
-      if (older < res.credits) {
+          ++older_waiter_count;
+      if (older_waiter_count < res.credits) {
         --res.credits;
         wake_wave(cu, wf); // Removes this wave's stamp from sema_wait_seqs.
-        ++woke;
+        ++woken_count;
       }
     }
   }
-  return woke;
+  return woken_count;
 }
 
 void GwsDevice::invalidate_snapshots_for_pending_release() {
@@ -413,7 +435,7 @@ bool GwsDevice::escape_ready(uint32_t process_id) const {
       continue;
     for (const auto &[shard_key, attempt_epoch] : adm.shard_attempt_epoch) {
       (void)shard_key;
-      if (attempt_epoch != summary_epoch_)
+      if (attempt_epoch != capacity_epoch_)
         return false; // Never-attempted (sentinel) or stale: the CP may still place.
     }
   }
@@ -557,6 +579,15 @@ void GwsDevice::sema_release_all(ComputeUnitCore &cu, Wavefront &wf, uint32_t ri
   // released by this one.
   ++res.release_gen;
   res.credits = 0;
+  // Retire the released waiters' credit reservations now. The generation bump above
+  // wakes every currently queued P-waiter regardless of credits, so their arrival
+  // stamps no longer entitle them to a credit; leaving the stamps queued would let a
+  // fresh P (or poll_local_waiters) reserve a later V/BR credit on behalf of waves
+  // that will instead wake through release_gen without consuming one, so a genuinely
+  // creditable P parked afterwards could stall. Each waiter's own CU still performs
+  // the wake and state update on its next step (release_sema_waiter there is then a
+  // no-op); only the shared reservation bookkeeping is settled here.
+  res.sema_wait_seqs.clear();
   poll_local_waiters(cu);
   invalidate_snapshots_for_pending_release();
 }

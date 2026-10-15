@@ -7874,9 +7874,20 @@ class CodeGenerator:
             return gds_guard + self._gen_ds_barrier_arrive(dst_ops, src_ops, sem)
 
         if cls == 'ds_gws':
-            # GWS legitimately targets GDS, so (unlike the other DS classes) it
-            # must not be guarded against inst_.gds.
-            return self._gen_ds_gws(dst_ops, src_ops, sem)
+            # GWS legitimately targets GDS and is architecturally defined only for
+            # gds=1. Unlike the other DS classes (which reject gds=1), apply the
+            # inverse guard: reject the gds=0 encoding. Executing the stateful GWS
+            # semantics then would park a wave, while the instruction's completion is
+            # classified as LDS and omits the GDS EXPCNT obligation, so the stateful
+            # behavior and the memory-wait accounting would disagree. ISAs whose DS
+            # encoding carries no gds field always target GDS, so no guard is emitted.
+            gds_guard = ''
+            if self._enc_has_field('gds'):
+                gds_guard = (
+                    '  if (!inst_.gds)\n'
+                    '    throw util::UnimplementedInst(mnemonic());\n'
+                )
+            return gds_guard + self._gen_ds_gws(dst_ops, src_ops, sem)
 
         if cls in ('ds_permute', 'ds_swizzle'):
             is_swizzle = cls == 'ds_swizzle'

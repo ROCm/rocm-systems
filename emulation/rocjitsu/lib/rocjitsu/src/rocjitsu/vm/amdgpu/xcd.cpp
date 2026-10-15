@@ -69,11 +69,14 @@ void Xcd::wire_gws_to_cus() {
   // those CP-visible CUs must share the one device-global store too or they would
   // keep a private default and miss cross-CU wakeups / the quiescence backstop.
   // cp_ is set before this runs in both the full constructor and the config path.
+  // Hand the store to the command processor, which both forwards it to every CU it
+  // dispatches to and keeps it for its own GWS placement bookkeeping (one owner of
+  // the shared-store dependency instead of each site reaching through a CU).
   if (cp_) {
-    for (ComputeUnitCore *compute_unit : cp_->compute_units())
-      compute_unit->set_gws_device(gws_device_);
+    cp_->set_gws_device(gws_device_);
     return;
   }
+  // Standalone-XCD fallback: no command processor, so wire the CUs directly.
   for (ShaderEngine *shader_engine : shader_engines_)
     for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
       compute_unit->set_gws_device(gws_device_);

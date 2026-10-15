@@ -565,6 +565,8 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =
@@ -581,6 +583,8 @@ void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   uint64_t exec = wf.exec();
   uint32_t rid =
       (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
@@ -599,6 +603,8 @@ void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =
@@ -615,6 +621,8 @@ void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   uint64_t exec = wf.exec();
   uint32_t rid =
       (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
@@ -633,6 +641,8 @@ void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   uint64_t exec = wf.exec();
   if (exec) {
     uint32_t rid =
@@ -649,6 +659,8 @@ void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
   uint64_t exec = wf.exec();
   uint32_t rid =
       (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;

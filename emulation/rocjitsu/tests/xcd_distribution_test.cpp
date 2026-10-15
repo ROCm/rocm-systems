@@ -6,6 +6,7 @@
 
 #include "aql_queue.h"
 #include "decode_test_util.h"
+#include "gws_test_encoding.h"
 #include "test_paths.h"
 
 #include "embedded_schema.h"
@@ -184,20 +185,20 @@ void install_scratch_kernel(amdgpu::GpuMemory &memory, uint32_t private_bytes,
 }
 
 // Minimal CDNA3 (GFX9) DS GWS op issue for the cross-XCD rendezvous regressions.
-// GFX9 numbers DS GWS from SEMA_RELEASE_ALL = 152; the count-carrying ops read the
-// count from the ADDR VGPR's first active lane. These run through the CU execute
-// path only (no instruction fetch), so a config-loaded CU can be driven directly.
+// The opcode map and the count-carrying ADDR choice come from gws_test_encoding.h
+// (shared with ds_gws_test.cpp), so this keeps only the fixture-specific execute
+// setup: these run through the CU execute path (no instruction fetch), so a
+// config-loaded CU can be driven directly.
 namespace gws_cdna3 {
-constexpr uint16_t kSemaV = 154;
-constexpr uint16_t kSemaP = 156;
-constexpr uint16_t kBarrier = 157;
 constexpr uint8_t kCountVgpr = 4;
 
-void issue(amdgpu::ComputeUnitCore &cu, Decoder &decoder, uint16_t op, amdgpu::Wavefront &wf,
-           bool has_count, uint32_t count) {
+void issue(amdgpu::ComputeUnitCore &cu, Decoder &decoder, test::GwsOp op, amdgpu::Wavefront &wf,
+           uint32_t count = 0) {
+  const bool has_count = test::gws_has_addr(op);
   if (has_count)
     cu.write_vgpr(wf.vgpr_alloc().base + kCountVgpr, /*lane=*/0, count);
-  const auto words = cdna3::build_ds(op, {.gds = 1, .addr = has_count ? kCountVgpr : uint8_t{0}});
+  const auto words = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, op),
+                                     {.gds = 1, .addr = has_count ? kCountVgpr : uint8_t{0}});
   std::unique_ptr<Instruction> inst(decode_valid(decoder, words.data()));
   ASSERT_NE(inst, nullptr);
   ASSERT_TRUE(cu.execute_instruction(inst.get(), wf).succeeded());
@@ -1898,14 +1899,14 @@ TEST(XcdDistributionTest, CrossXcdGwsBarrierRendezvous) {
 
   // wf0 (XCD0) arrives first at a two-participant barrier and parks: proof the
   // residency bound crossed the XCD boundary (a per-XCD bound of 1 would not park).
-  gws_cdna3::issue(*cu0, *decoder, gws_cdna3::kBarrier, *wf0, /*has_count=*/true, /*count=*/1);
+  gws_cdna3::issue(*cu0, *decoder, test::GwsOp::kBarrier, *wf0, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT)
       << "cross-XCD barrier arrival proceeded before its peer (per-XCD residency)";
 
   // wf1 (XCD1) is the releasing arrival; the peer parked on XCD0 wakes when XCD0
   // next runs its GWS maintenance (cross-XCD wake is poll-applied). wf1 is never
   // stepped, so it stays RUNNING at pc 0.
-  gws_cdna3::issue(*cu1, *decoder, gws_cdna3::kBarrier, *wf1, /*has_count=*/true, /*count=*/1);
+  gws_cdna3::issue(*cu1, *decoder, test::GwsOp::kBarrier, *wf1, /*count=*/1);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
   for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu0->step();
@@ -1951,7 +1952,7 @@ TEST(XcdDistributionTest, CrossXcdGwsPDoesNotEscapeWhilePeerXcdProducerRunnable)
     wf->set_m0(0);
   }
 
-  gws_cdna3::issue(*cu0, *decoder, gws_cdna3::kSemaP, *consumer, /*has_count=*/false, /*count=*/0);
+  gws_cdna3::issue(*cu0, *decoder, test::GwsOp::kSemaP, *consumer);
   ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
 
   // Running XCD0's GWS maintenance must NOT escape the P: the shared quiescence
@@ -1966,7 +1967,7 @@ TEST(XcdDistributionTest, CrossXcdGwsPDoesNotEscapeWhilePeerXcdProducerRunnable)
 
   // The producer signals; XCD0 then releases the consumer with a credit on its
   // next step -- a real V, never a cross-XCD premature escape.
-  gws_cdna3::issue(*cu1, *decoder, gws_cdna3::kSemaV, *producer, /*has_count=*/false, /*count=*/0);
+  gws_cdna3::issue(*cu1, *decoder, test::GwsOp::kSemaV, *producer);
   for (int i = 0; i < 4 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu0->step();
   EXPECT_NE(consumer->state(), amdgpu::WfState::GWS_WAIT);
@@ -2035,8 +2036,7 @@ TEST(XcdDistributionTest, FanoutOwnerShareDefersPeerQuiescenceUntilProducerSigna
                            /*num_named_barriers=*/0, kProcess, /*dispatch_total_waves=*/0);
   consumer->set_exec(0x1);
   consumer->set_m0(0);
-  gws_cdna3::issue(*peer_cu, *decoder, gws_cdna3::kSemaP, *consumer, /*has_count=*/false,
-                   /*count=*/0);
+  gws_cdna3::issue(*peer_cu, *decoder, test::GwsOp::kSemaP, *consumer);
   ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
   for (int i = 0; i < 16; ++i)
     peer_cu->step();
@@ -2058,8 +2058,7 @@ TEST(XcdDistributionTest, FanoutOwnerShareDefersPeerQuiescenceUntilProducerSigna
                             /*num_named_barriers=*/0, kProcess, /*dispatch_total_waves=*/0);
   producer->set_exec(0x1);
   producer->set_m0(0);
-  gws_cdna3::issue(*owner_cu, *decoder, gws_cdna3::kSemaV, *producer, /*has_count=*/false,
-                   /*count=*/0);
+  gws_cdna3::issue(*owner_cu, *decoder, test::GwsOp::kSemaV, *producer);
   for (int i = 0; i < 8 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
     peer_cu->step();
   EXPECT_NE(consumer->state(), amdgpu::WfState::GWS_WAIT)

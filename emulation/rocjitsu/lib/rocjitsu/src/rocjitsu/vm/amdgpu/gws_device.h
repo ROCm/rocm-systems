@@ -118,8 +118,9 @@ class Wavefront;
 ///    placement (which would both race the owning CU's allocator and misjudge the
 ///    WGP/PM4 constraints it cannot see). Instead the command processor publishes
 ///    each shard's placement state (@ref set_shard_placement), tagged against the
-///    capacity version @ref summary_epoch_ (which advances whenever free capacity
-///    could change -- a wave placed, retired, or a CU added/removed):
+///    capacity version @ref capacity_epoch_ (distinct from the quiescence version;
+///    it advances only when free capacity may have *increased* -- a wave retired or
+///    rolled back, a dispatch torn down, a process reclaimed, or a CU added):
 ///     * @c Pending -- accepted but not yet attempted (a fan-out shard still in an
 ///       inbox, or the owner's own local share registered before fan-out). Always
 ///       defers: its producer may still be placed once the CP reaches it.
@@ -139,6 +140,10 @@ class Wavefront;
 ///    forever); tying the Unplaced record to a monotonic capacity version keeps the
 ///    deadlock case terminating (with no capacity change the record stays current,
 ///    so escape fires) while deferring across every real re-placement opportunity.
+///    Because that version tracks only capacity-freeing events and not quiescence,
+///    a wave merely parking does not invalidate the record: a stalled serial
+///    dispatch (no sibling to retire and re-trigger placement) still escapes once
+///    the CP confirms the work genuinely does not fit, instead of deferring forever.
 ///    A dispatch with no shard state published (standalone/test use) is governed by
 ///    the quiescence scan alone.
 ///
@@ -282,6 +287,13 @@ public:
   /// observe shard registration/clearing through the real CP fan-out/drain paths.
   size_t tracked_shard_count(uint32_t dispatch_id);
 
+  /// @brief Resident (not-yet-retired) wave count recorded for @p dispatch_id
+  /// (test/diagnostic). Zero if none remain. Lets a lifecycle test confirm that
+  /// halting a wave actually retired its residency (via remove_resident keyed by the
+  /// wave's own dispatch id) rather than leaving a phantom resident behind until CU
+  /// teardown.
+  size_t tracked_resident_count(uint32_t dispatch_id);
+
 private:
   /// @brief Per-resource barrier/semaphore state.
   struct Resource {
@@ -311,12 +323,12 @@ private:
     uint32_t admitted = 0;   ///< Cumulative waves admitted so far.
     /// Shards (identified by their owning command processor) with workgroups the CP
     /// has not yet placed (@ref set_shard_placement). The value is the capacity
-    /// version (@ref summary_epoch_) at which the CP last attempted placement, or
+    /// version (@ref capacity_epoch_) at which the CP last attempted placement, or
     /// @ref kShardNeverAttempted for a shard accepted but not yet attempted. While
-    /// any entry is unattempted, or attempted at a stale version, the quiescence
-    /// backstop defers (the CP may still place a producer, possibly only after a
-    /// sibling retirement frees room). The keys are opaque and never dereferenced
-    /// (placement lives in the CP, not here).
+    /// any entry is unattempted, or attempted at a stale capacity version, the
+    /// quiescence backstop defers (the CP may still place a producer, possibly only
+    /// after a sibling retirement frees room). The keys are opaque and never
+    /// dereferenced (placement lives in the CP, not here).
     std::unordered_map<const void *, uint64_t> shard_attempt_epoch;
   };
   /// @brief Sentinel attempt-version for a shard accepted but not yet attempted.
@@ -371,19 +383,28 @@ private:
   std::unordered_map<uint32_t, uint32_t> parked_;
   /// Total parked waves across all processes; lock-free fast-path gate.
   std::atomic<uint32_t> parked_total_{0};
-  /// Monotonic version for the per-CU quiescence snapshots below, doubling as the
-  /// capacity version for shard placement records (@ref DispatchAdmission). Bumped
-  /// whenever a potential signaler may have appeared or free capacity may have
-  /// changed -- a 0 -> positive parked transition, a wave waking (wake_wave), new
-  /// resident work (add_resident), or a wave retiring (remove_resident). escape_ready
-  /// trusts a CU's published summary only if it was refreshed at the current
-  /// version, which closes the workgroup-turnover gap: a parked wave replaced by
-  /// (or joined by) a runnable producer advances the version, so a peer's earlier
-  /// zero-runnable summary cannot survive to drive a false escape. A shard's
-  /// Unplaced record is likewise re-armed: once a retirement advances the version,
-  /// the CP's stale attempt record forces a deferral until it re-attempts placement
-  /// against the freed capacity.
+  /// Monotonic version for the per-CU quiescence snapshots below. Bumped whenever a
+  /// potential signaler may have appeared -- a 0 -> positive parked transition, a
+  /// wave waking (wake_wave), new resident work (add_resident), or a shard being
+  /// published/cleared (set_shard_placement Pending/Resolved). escape_ready trusts a
+  /// CU's published summary only if it was refreshed at the current version, which
+  /// closes the workgroup-turnover gap: a parked wave replaced by (or joined by) a
+  /// runnable producer advances the version, so a peer's earlier zero-runnable
+  /// summary cannot survive to drive a false escape.
   uint64_t summary_epoch_ = 0;
+  /// Monotonic version for shard placement records (@ref DispatchAdmission),
+  /// deliberately separate from @ref summary_epoch_. Bumped only when free execution
+  /// capacity may have *increased* -- a wave retiring (remove_resident), a committed
+  /// wave rolled back (remove_admitted), a dispatch torn down (notify_dispatch_gone),
+  /// a process reclaimed (release_process), or a CU joining the store
+  /// (register_compute_unit). A shard recorded Unplaced at an older capacity version
+  /// is stale and must defer escape until the CP re-attempts placement against the
+  /// freed room. Keeping this distinct from the quiescence version is what lets a
+  /// stalled serial dispatch escape: a wave merely parking advances quiescence but
+  /// frees no slot, so it must not invalidate a legitimate "genuinely unplaceable"
+  /// verdict and wedge the backstop forever (nothing would retire to re-trigger
+  /// placement).
+  uint64_t capacity_epoch_ = 0;
   /// Per-CU published count of signalable (can-still-run) waves, per process,
   /// refreshed each step by the owning CU. Absent/stale CUs block escape.
   std::unordered_map<ComputeUnitCore *, std::unordered_map<uint32_t, uint32_t>> cu_runnable_;

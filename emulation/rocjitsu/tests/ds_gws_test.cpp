@@ -11,6 +11,7 @@
 /// store lifetime/reconciliation on CU teardown, re-pointing, and process release.
 
 #include "decode_test_util.h"
+#include "gws_test_encoding.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna1/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna2/builders.h"
@@ -39,6 +40,7 @@
 #include "rocjitsu/vm/amdgpu/shader_engine.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/xcd.h"
+#include "util/except.h"
 
 #include <gtest/gtest.h>
 
@@ -57,8 +59,11 @@ namespace {
 using namespace rocjitsu;
 
 // GWS (Global Wave Sync) is defined by every GFX9 (CDNA1-3) ISA and by the
-// GFX10/GFX11 (RDNA1-3.5) ISAs.
-enum class GwsOp { kReleaseAll, kInit, kSemaV, kSemaBr, kSemaP, kBarrier };
+// GFX10/GFX11 (RDNA1-3.5) ISAs. The opcode map and the count-carrying ADDR choice
+// are shared with the cross-XCD regressions via gws_test_encoding.h.
+using test::gws_has_addr;
+using test::gws_opcode;
+using test::GwsOp;
 
 struct GwsVariant {
   GwsOp op;
@@ -73,37 +78,6 @@ constexpr std::array<GwsVariant, 6> kGwsVariants{{
     {GwsOp::kSemaP, "ds_gws_sema_p"},
     {GwsOp::kBarrier, "ds_gws_barrier"},
 }};
-
-// INIT/SEMA_BR/BARRIER take the resource count from the ADDR VGPR; the rest are
-// address-less.
-constexpr bool gws_has_addr(GwsOp op) {
-  return op == GwsOp::kInit || op == GwsOp::kSemaBr || op == GwsOp::kBarrier;
-}
-
-constexpr bool is_gfx9(rj_code_arch_t arch) {
-  return arch == ROCJITSU_CODE_ARCH_CDNA1 || arch == ROCJITSU_CODE_ARCH_CDNA2 ||
-         arch == ROCJITSU_CODE_ARCH_CDNA3;
-}
-
-uint16_t gws_opcode(rj_code_arch_t arch, GwsOp op) {
-  // GFX9 DS GWS opcodes start at 152 (SEMA_RELEASE_ALL); GFX10/11 start at 24.
-  const uint16_t base = is_gfx9(arch) ? 152 : 24;
-  switch (op) {
-  case GwsOp::kReleaseAll:
-    return base + 0;
-  case GwsOp::kInit:
-    return base + 1;
-  case GwsOp::kSemaV:
-    return base + 2;
-  case GwsOp::kSemaBr:
-    return base + 3;
-  case GwsOp::kSemaP:
-    return base + 4;
-  case GwsOp::kBarrier:
-    return base + 5;
-  }
-  return base;
-}
 
 // GFX11 routes GWS completion through DSCNT; the older ISAs use LGKMCNT.
 amdgpu::WaitCounterType expected_wait_counter(rj_code_arch_t arch) {
@@ -280,20 +254,44 @@ TEST_P(DsGwsTest, StructuralModelExecutesAndAccounts) {
   wf->halt();
 }
 
-// Without the GDS bit the model still executes (architecturally GWS always
-// uses GDS, but the structural path must not throw): it decodes and completes
-// as an LDS-classified op.
-TEST_P(DsGwsTest, DecodesWithoutGdsBit) {
+// GWS is architecturally defined only for gds=1. The gds=0 encoding still decodes
+// to the same mnemonic (the GDS bit does not change decode), but executing it must
+// be rejected rather than silently applying the stateful GWS semantics: the
+// generated body would park a wave while the instruction's completion is classified
+// as LDS and omits the GDS wait obligation, so the stateful behavior and the
+// memory-wait accounting would disagree. The inverse GDS guard (ds_gws rejects
+// gds=0, the mirror of the other DS classes rejecting gds=1) raises
+// UnimplementedInst at execution instead.
+TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
   const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_nogds_mem");
+  amdgpu::L2Cache l2("ds_gws_nogds_l2");
+  amdgpu::ComputeUnitCore::Config cfg{};
+  cfg.arch = arch;
+  cfg.num_wf_slots = 1;
+  cfg.sgprs_per_wf = 102;
+  cfg.vgprs_per_wf = 16;
+  cfg.lds_size_kb = 64;
+  auto cu = amdgpu::ComputeUnitCore::create("ds_gws_nogds", cfg, &mem, &l2);
   auto decoder = Decoder::create(arch);
+  auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
+  ASSERT_NE(wf, nullptr);
+  wf->set_exec(0x1);
+  wf->set_m0(0);
   for (const auto &variant : kGwsVariants) {
     const auto words = build_gws(arch, gws_opcode(arch, variant.op), /*gds=*/0,
                                  gws_has_addr(variant.op) ? kAddrVgpr : 0);
     std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
     ASSERT_NE(inst, nullptr) << variant.mnemonic << " failed to decode on arch " << unsigned(arch);
     EXPECT_EQ(inst->mnemonic(), variant.mnemonic);
+    // Decode is unaffected by the GDS bit, so the op still classifies as a memory op.
     EXPECT_TRUE(inst->is_memory_op()) << variant.mnemonic;
+    // Execution must be rejected: no wave is parked and no stateful side effect runs.
+    EXPECT_THROW((void)cu->execute_instruction(inst.get(), *wf), util::UnimplementedInst)
+        << variant.mnemonic << " on arch " << unsigned(arch);
+    EXPECT_NE(wf->state(), amdgpu::WfState::GWS_WAIT) << variant.mnemonic;
   }
+  wf->halt();
 }
 
 // ---------------------------------------------------------------------------
@@ -2293,6 +2291,10 @@ TEST_P(DsGwsTest, FaultedDispatchClearsAdmissionAndDoesNotWedgeEscape) {
   // quiescent process and escapes it.
   auto *waiter = cu->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
   ASSERT_NE(waiter, nullptr);
+  // Match the wave's dispatch id to begin_workgroup's so halting it retires its
+  // residency (remove_resident keys off the wave's own dispatch id); dispatch_wf
+  // leaves it at 0, which would otherwise strand a phantom resident on dispatch 1.
+  waiter->set_dispatch_id(1);
   cu->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/1, /*wf_count=*/1,
                       /*num_named_barriers=*/0, /*process_id=*/0,
                       /*dispatch_total_waves=*/1);
@@ -2304,6 +2306,8 @@ TEST_P(DsGwsTest, FaultedDispatchClearsAdmissionAndDoesNotWedgeEscape) {
   for (int i = 0; i < 16 && !waiter->is_halted(); ++i)
     cu->step();
   EXPECT_TRUE(waiter->is_halted());
+  // The escaped wave retired its own residency: no phantom resident lingers.
+  EXPECT_EQ(cu->gws_device().tracked_resident_count(1), 0u);
 }
 
 // The store-level invariant CommandProcessor::fail_pm4_queue now relies on for its
@@ -2497,15 +2501,18 @@ TEST_P(DsGwsTest, DestroyingCuReconcilesParkedWaveInSharedStore) {
   EXPECT_FALSE(gws->any_parked());
 }
 
-// Companion to the destruction case: re-pointing a CU at a different store via
-// set_gws_device must reconcile the CU's parked contribution out of the store it
-// is leaving AND into the store it joins. The destination here is already
-// populated (another CU's wave is parked in store B), so the two stores' parked
-// bookkeeping must stay independent and correct across the migration. Regression:
-// if the migrated wave is not reconciled into B, B undercounts it, and the later
-// notify_parked_wave_gone() for that wave decrements a count it never incremented
-// -- wrongly cancelling B's unrelated, still-parked waiter.
-TEST_P(DsGwsTest, ReplacingCuStoreReconcilesParkedWaveInOldStore) {
+// Re-pointing a CU to a different GWS store is only safe while the CU is drained: a
+// GWS resource's phase (barrier generation / semaphore credits) lives in the store,
+// so a live parked waiter cannot carry its rendezvous across stores -- migrating it
+// would compare its stale generation against the destination's unrelated one and
+// wake it without its peers arriving. set_gws_device must therefore REJECT a
+// replacement requested while the CU still hosts a parked wave, keeping it on its
+// current store, rather than performing an unsafe partial migration. The destination
+// here is populated (another CU's wave is parked in store B), proving the rejected
+// attempt leaves both stores' bookkeeping untouched. Once the CU is drained the
+// re-point is accepted. Regression: migrating the live waiter corrupted the
+// destination's parked accounting and could spuriously wake its unrelated waiter.
+TEST_P(DsGwsTest, ReplacingLiveCuStoreIsRejectedUntilDrained) {
   const auto arch = GetParam();
   amdgpu::GpuMemory mem("ds_gws_replace_mem");
   amdgpu::L2Cache l2("ds_gws_replace_l2");
@@ -2513,11 +2520,12 @@ TEST_P(DsGwsTest, ReplacingCuStoreReconcilesParkedWaveInOldStore) {
   auto store_b = std::make_shared<amdgpu::GwsDevice>();
   auto decoder = Decoder::create(arch);
 
-  // A resident waiter already parked in store B on its own CU.
+  // A resident waiter already parked in store B on its own CU (populated destination).
   auto cu_b = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  cu_b->set_gws_device(store_b);
+  ASSERT_TRUE(cu_b->set_gws_device(store_b)); // Drained CU: accepted.
   auto *wf_b = cu_b->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(wf_b, nullptr);
+  wf_b->set_dispatch_id(1);
   cu_b->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/0, /*wf_count=*/1);
   wf_b->set_exec(0x1);
   wf_b->set_m0(0);
@@ -2527,7 +2535,7 @@ TEST_P(DsGwsTest, ReplacingCuStoreReconcilesParkedWaveInOldStore) {
 
   // A second CU parks a waiter in store A.
   auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  cu->set_gws_device(store_a);
+  ASSERT_TRUE(cu->set_gws_device(store_a)); // Drained CU: accepted.
   auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(wf, nullptr);
   cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
@@ -2537,21 +2545,92 @@ TEST_P(DsGwsTest, ReplacingCuStoreReconcilesParkedWaveInOldStore) {
   ASSERT_EQ(wf->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_TRUE(store_a->any_parked());
 
-  // Move the CU to store B: leaving A reconciles its parked wave out, joining B
-  // reconciles it in (B now accounts both its own waiter and the migrated one).
-  cu->set_gws_device(store_b);
-  EXPECT_FALSE(store_a->any_parked());
-  EXPECT_TRUE(store_b->any_parked());
+  // Attempt to move the live CU to store B: rejected. The CU stays on store A, and
+  // store B gains nothing (its own waiter is undisturbed).
+  EXPECT_FALSE(cu->set_gws_device(store_b))
+      << "re-pointing a CU with a parked GWS waiter must be rejected";
+  EXPECT_EQ(&cu->gws_device(), store_a.get());
+  EXPECT_TRUE(store_a->any_parked());
+  EXPECT_EQ(store_b->tracked_resident_count(/*dispatch_id=*/0), 0u)
+      << "the rejected migration leaked the live CU's wave into the destination store";
 
-  // Retire the migrated wave through the normal free path (notify_parked_wave_gone
-  // on store B). B must still report its original waiter as parked.
+  // Drain the CU (its waiter retires on store A), then the re-point is accepted.
   cu->abort_dispatch(/*dispatch_id=*/0);
   EXPECT_TRUE(wf->is_halted());
+  EXPECT_FALSE(store_a->any_parked());
   EXPECT_TRUE(store_b->any_parked())
-      << "retiring the migrated wave cancelled store B's unrelated parked waiter";
+      << "retiring store A's waiter disturbed store B's unrelated parked waiter";
+  EXPECT_TRUE(cu->set_gws_device(store_b)) << "a drained CU must accept a re-point";
+  EXPECT_EQ(&cu->gws_device(), store_b.get());
 
   // Halt cu_b's waiter before teardown so it is no longer GWS_WAIT.
   wf_b->halt();
+  EXPECT_EQ(store_b->tracked_resident_count(/*dispatch_id=*/1), 0u);
+}
+
+// sema_release_all must retire the released waiters' credit reservations, not just
+// bump the release generation. A release_all wakes every queued P-waiter through the
+// generation (each on its own CU's next step), so their arrival stamps no longer
+// entitle them to a credit; leaving the stamps queued makes a later V's credit be
+// reserved for a wave that will never consume it, stranding a fresh P that should
+// take it. Ordering matters: CU0 parks a P, then CU1 runs release_all, V, and a new
+// P all before CU0 ever polls (so CU0's waiter has not yet been woken out of the
+// queue). Regression: the new P parked behind the released waiter's stale
+// reservation despite the available credit, on all seven ISAs.
+TEST_P(DsGwsTest, ReleaseAllRetiresCreditReservationForDelayedPeerPoll) {
+  const auto arch = GetParam();
+  amdgpu::GpuMemory mem("ds_gws_relall_mem");
+  amdgpu::L2Cache l2("ds_gws_relall_l2");
+  constexpr uint64_t kPc = 0x200000;
+  mem.write32(kPc, gws_s_endpgm_word(arch));
+  auto gws = std::make_shared<amdgpu::GwsDevice>();
+  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  cu0->set_gws_device(gws);
+  cu1->set_gws_device(gws);
+  auto decoder = Decoder::create(arch);
+
+  // CU0 parks a P waiter on the resource (no credit): it queues an arrival stamp.
+  auto *p0 = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
+  ASSERT_NE(p0, nullptr);
+  p0->set_dispatch_id(0);
+  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
+  p0->set_exec(0x1);
+  p0->set_m0(0);
+  run_gws(*cu0, *decoder, arch, GwsOp::kSemaP, *p0, /*count=*/0);
+  ASSERT_EQ(p0->state(), amdgpu::WfState::GWS_WAIT);
+
+  // CU1 runs release_all, then V, then a NEW P -- all before CU0 polls. release_all
+  // wakes p0 through the generation (applied on CU0's own next step), so its credit
+  // reservation must be retired now; the V credit then belongs to the new P.
+  auto *rel = cu1->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
+  auto *p1 = cu1->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
+  ASSERT_NE(rel, nullptr);
+  ASSERT_NE(p1, nullptr);
+  rel->set_dispatch_id(1);
+  p1->set_dispatch_id(1);
+  cu1->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/1, /*wf_count=*/2);
+  for (auto *wf : {rel, p1}) {
+    wf->set_exec(0x1);
+    wf->set_m0(0);
+  }
+  run_gws(*cu1, *decoder, arch, GwsOp::kReleaseAll, *rel, /*count=*/0);
+  run_gws(*cu1, *decoder, arch, GwsOp::kSemaV, *rel, /*count=*/0);
+  run_gws(*cu1, *decoder, arch, GwsOp::kSemaP, *p1, /*count=*/0);
+
+  // Core regression: the new P took the V credit instead of parking behind p0's
+  // released-but-still-queued reservation.
+  EXPECT_EQ(p1->state(), amdgpu::WfState::RUNNING)
+      << "new P parked behind a released waiter's stale credit reservation";
+
+  // p0 wakes on CU0's own next step via the release generation (not a credit) and
+  // retires at its s_endpgm.
+  for (int i = 0; i < 8 && p0->state() == amdgpu::WfState::GWS_WAIT; ++i)
+    cu0->step();
+  EXPECT_NE(p0->state(), amdgpu::WfState::GWS_WAIT);
+
+  rel->halt();
+  p1->halt();
 }
 
 // GWS resources persist across dispatches but belong to a process; on process
@@ -2576,6 +2655,11 @@ TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
   ASSERT_NE(init_b, nullptr);
   init_a->set_process_id(kProcA);
   init_b->set_process_id(kProcB);
+  // Match each wave's dispatch id to its begin_workgroup dispatch id so halting it
+  // retires its own residency (remove_resident keys off the wave's dispatch id);
+  // dispatch_wf leaves it at 0, which would strand phantom residents on dispatch 1+.
+  init_a->set_dispatch_id(0);
+  init_b->set_dispatch_id(1);
   cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1,
                       /*num_named_barriers=*/0, kProcA, /*dispatch_total_waves=*/0);
   cu->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/1, /*wf_count=*/1,
@@ -2590,6 +2674,9 @@ TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
   EXPECT_EQ(gws->tracked_process_count(), 2u);
   init_a->halt();
   init_b->halt();
+  // Halting retired each init wave's residency: no phantom residents remain.
+  EXPECT_EQ(gws->tracked_resident_count(/*dispatch_id=*/0), 0u);
+  EXPECT_EQ(gws->tracked_resident_count(/*dispatch_id=*/1), 0u);
 
   // Process A tears down: only its table is dropped.
   gws->release_process(kProcA);
@@ -2599,6 +2686,7 @@ TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
   auto *p_a = cu->dispatch_wf(/*wg_id=*/2, /*pc=*/0, 102, 16);
   ASSERT_NE(p_a, nullptr);
   p_a->set_process_id(kProcA);
+  p_a->set_dispatch_id(2);
   cu->begin_workgroup(/*dispatch_id=*/2, /*wg_id=*/2, /*wf_count=*/1,
                       /*num_named_barriers=*/0, kProcA, /*dispatch_total_waves=*/0);
   p_a->set_exec(0x1);
@@ -2611,6 +2699,7 @@ TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
   auto *p_b = cu->dispatch_wf(/*wg_id=*/3, /*pc=*/0, 102, 16);
   ASSERT_NE(p_b, nullptr);
   p_b->set_process_id(kProcB);
+  p_b->set_dispatch_id(3);
   cu->begin_workgroup(/*dispatch_id=*/3, /*wg_id=*/3, /*wf_count=*/1,
                       /*num_named_barriers=*/0, kProcB, /*dispatch_total_waves=*/0);
   p_b->set_exec(0x1);
@@ -2620,7 +2709,9 @@ TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
       << "process B lost its credit when A was released";
 
   p_b->halt();
-  // p_a left parked; the CU's unregister reconciles it on destruction.
+  // p_b retired its residency on halt; p_a is left parked intentionally (the CU's
+  // unregister reconciles it on destruction).
+  EXPECT_EQ(gws->tracked_resident_count(/*dispatch_id=*/3), 0u);
 }
 
 } // namespace

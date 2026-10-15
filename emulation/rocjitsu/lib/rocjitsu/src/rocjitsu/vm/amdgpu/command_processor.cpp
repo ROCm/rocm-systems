@@ -940,19 +940,19 @@ void CommandProcessor::accept_fanout_shard(DispatchEntry shard,
     std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
     if (!shard.is_non_kernel()) {
       fanout_launch_metadata_inbox_.insert_or_assign(shard.dispatch_id, std::move(launch_metadata));
-      // Register this shard as pending in the device-global GWS store before it is
-      // even drained, so a peer shard already parked at a GWS wait cannot be declared
-      // deadlocked while this shard's producer is still sitting in the inbox (the
-      // backstop would otherwise escape it one quiescence pass too early). The owning
-      // CP clears the mark once it runs its placement pass (dispatch_workgroups).
-      // Keyed by this CP's identity so each fan-out shard is tracked independently.
-      // Only the opaque store leaf-lock is taken here (no peer CP lock), preserving
-      // the fan-out lock-order contract; the mark is cleared on teardown regardless.
-      shard.gws_pending_shard = true;
-      if (!cus_.empty())
-        cus_.front()->gws_device().set_shard_placement(shard.process_id, shard.dispatch_id,
-                                                       /*shard_key=*/this,
-                                                       GwsDevice::ShardPlacement::Pending);
+      // Publish this shard's placement as Pending in the device-global GWS store
+      // before it is even drained, so a peer shard already parked at a GWS wait
+      // cannot be declared deadlocked while this shard's producer is still sitting in
+      // the inbox (the backstop would otherwise escape it one quiescence pass too
+      // early). The owning CP resolves the mark once it runs its placement pass
+      // (dispatch_workgroups). Keyed by this CP's identity so each fan-out shard is
+      // tracked independently. Only the opaque store leaf-lock is taken here (no peer
+      // CP lock), preserving the fan-out lock-order contract; the mark is resolved on
+      // teardown regardless. See GwsDevice for the three-state placement policy.
+      shard.gws_shard_unresolved = true;
+      if (gws_device_)
+        gws_device_->set_shard_placement(shard.process_id, shard.dispatch_id,
+                                         /*shard_key=*/this, GwsDevice::ShardPlacement::Pending);
     }
     fanout_inbox_.push_back(std::move(shard));
   }
@@ -1002,15 +1002,14 @@ void CommandProcessor::drain_fanout_inbox() {
   stall_recheck_backoff_ = 1;
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  // Clear the GWS pending mark accept_fanout_shard() published for a shard that is
-  // being discarded instead of enqueued. Without this, a dropped shard's Pending mark
+  // Resolve the unresolved placement mark accept_fanout_shard() published for a shard
+  // that is being discarded instead of enqueued. Without this, a dropped shard's mark
   // would wedge the deadlock backstop forever: it is keyed by this CP's identity and
-  // only this CP's placement pass clears it, but a discarded shard never runs one.
-  const auto discard_pending_mark = [&](const DispatchEntry &shard) {
-    if (!shard.is_non_kernel() && shard.gws_pending_shard && !cus_.empty())
-      cus_.front()->gws_device().set_shard_placement(shard.process_id, shard.dispatch_id,
-                                                     /*shard_key=*/this,
-                                                     GwsDevice::ShardPlacement::Resolved);
+  // only this CP's placement pass resolves it, but a discarded shard never runs one.
+  const auto resolve_discarded_mark = [&](const DispatchEntry &shard) {
+    if (!shard.is_non_kernel() && shard.gws_shard_unresolved && gws_device_)
+      gws_device_->set_shard_placement(shard.process_id, shard.dispatch_id,
+                                       /*shard_key=*/this, GwsDevice::ShardPlacement::Resolved);
   };
   for (DispatchEntry &shard : inbox) {
     const std::vector<ComputeQueueRecord>::iterator queue =
@@ -1030,14 +1029,14 @@ void CommandProcessor::drain_fanout_inbox() {
       // teardown is what reaches this window -- for_each_cp removes replicas in
       // XCD order while a later owner is still registered, and an
       // already-scheduled peer doorbell can drain concurrently.
-      discard_pending_mark(shard);
+      resolve_discarded_mark(shard);
       continue;
     }
     // A terminal VM fault closes execution admission for the queue. A peer may
     // already have emitted another shard before it observed the shared fault;
     // dropping it here prevents future work from appearing behind the fault.
     if (queue->faulted) {
-      discard_pending_mark(shard);
+      resolve_discarded_mark(shard);
       continue;
     }
     // Honour the packet's acquire fence on this XCD too. The owner invalidated
@@ -1050,7 +1049,7 @@ void CommandProcessor::drain_fanout_inbox() {
           launch_metadata.find(shard.dispatch_id);
       if (metadata == launch_metadata.end()) {
         queue->faulted = true;
-        discard_pending_mark(shard);
+        resolve_discarded_mark(shard);
         continue;
       }
       dispatch_launch_metadata_.insert_or_assign(shard.dispatch_id, std::move(metadata->second));
@@ -1093,20 +1092,19 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp,
   auto grid = std::make_shared<GridCompletion>();
   grid->grid_wgs = grid_wgs;
 
-  // Register the owner's own local share as pending BEFORE exposing any peer shard
-  // below. accept_fanout_shard() publishes each peer's pending mark, but the owner's
-  // producer workgroups are just as able to be the signaler a peer's parked GWS
-  // waiter depends on. Without this, a peer that parks a P could be declared
-  // deadlocked while the owner's V producer has merely not reached its placement pass
-  // yet. Keyed by this CP's identity; the owner's dispatch_workgroups() pass resolves
-  // it (Resolved once fully placed, or Unplaced while stalled) -- an empty owner share
-  // resolves immediately on that pass. Peer-first ordering (register before the loop)
-  // ensures no peer waiter can observe the owner's share as absent.
-  if (!dp.is_non_kernel() && !cus_.empty()) {
-    dp.gws_pending_shard = true;
-    cus_.front()->gws_device().set_shard_placement(dp.process_id, dp.dispatch_id,
-                                                   /*shard_key=*/this,
-                                                   GwsDevice::ShardPlacement::Pending);
+  // Publish the owner's own local share as Pending BEFORE exposing any peer shard
+  // below. accept_fanout_shard() publishes each peer's mark, but the owner's producer
+  // workgroups are just as able to be the signaler a peer's parked GWS waiter depends
+  // on. Without this, a peer that parks a P could be declared deadlocked while the
+  // owner's V producer has merely not reached its placement pass yet. Keyed by this
+  // CP's identity; the owner's dispatch_workgroups() pass resolves it (Resolved once
+  // fully placed, or Unplaced while stalled) -- an empty owner share resolves
+  // immediately on that pass. Peer-first ordering (publish before the loop) ensures no
+  // peer waiter can observe the owner's share as absent.
+  if (!dp.is_non_kernel() && gws_device_) {
+    dp.gws_shard_unresolved = true;
+    gws_device_->set_shard_placement(dp.process_id, dp.dispatch_id,
+                                     /*shard_key=*/this, GwsDevice::ShardPlacement::Pending);
   }
 
   const auto apply_share = [&](DispatchEntry &entry, uint32_t physical_rank) {
@@ -2620,16 +2618,15 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
   //     capacity change, so escape still terminates.
   // Transient/fault exits above skip this: a retry re-runs this pass, and a fault
   // tears the dispatch down (clearing its admission wholesale).
-  if (!cus_.empty()) {
-    GwsDevice &gws = cus_.front()->gws_device();
+  if (gws_device_) {
     if (entry.dispatched_wgs < entry.total_wgs) {
-      entry.gws_pending_shard = true;
-      gws.set_shard_placement(entry.process_id, entry.dispatch_id, /*shard_key=*/this,
-                              GwsDevice::ShardPlacement::Unplaced);
-    } else if (entry.gws_pending_shard) {
-      entry.gws_pending_shard = false;
-      gws.set_shard_placement(entry.process_id, entry.dispatch_id, /*shard_key=*/this,
-                              GwsDevice::ShardPlacement::Resolved);
+      entry.gws_shard_unresolved = true;
+      gws_device_->set_shard_placement(entry.process_id, entry.dispatch_id, /*shard_key=*/this,
+                                       GwsDevice::ShardPlacement::Unplaced);
+    } else if (entry.gws_shard_unresolved) {
+      entry.gws_shard_unresolved = false;
+      gws_device_->set_shard_placement(entry.process_id, entry.dispatch_id, /*shard_key=*/this,
+                                       GwsDevice::ShardPlacement::Resolved);
     }
   }
   return {.dispatched = dispatched, .outcome = VmAccessOutcome::Complete};
@@ -3361,12 +3358,11 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
   // this process. Residency and parked state are settled by each halted wave's
   // free_wavefront_resources()/release_wf() below; only the whole-dispatch accounting
   // is cleared here (notify_dispatch_gone is idempotent).
-  if (!cus_.empty()) {
-    GwsDevice &gws = cus_.front()->gws_device();
+  if (gws_device_) {
     for (const DispatchEntry &entry : qs.entries)
-      gws.notify_dispatch_gone(entry.dispatch_id);
+      gws_device_->notify_dispatch_gone(entry.dispatch_id);
     for (const DispatchEntry &entry : queue.entries)
-      gws.notify_dispatch_gone(entry.dispatch_id);
+      gws_device_->notify_dispatch_gone(entry.dispatch_id);
   }
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
   // waves before releasing the submission's BO references or publishing failure.

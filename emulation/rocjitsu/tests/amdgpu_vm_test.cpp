@@ -7,11 +7,14 @@
 #include "throwing_instruction_test_util.h"
 
 #include "embedded_schema.h"
+#include "gws_test_encoding.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
@@ -5931,6 +5934,52 @@ TEST(CommandProcessorGwsFanoutTest, FaultedQueueDrainClearsShardPlacementMark) {
   EXPECT_FALSE(f.cp()->has_dispatch_for_test(kQueue, kProcess, 11));
   EXPECT_EQ(gws.tracked_shard_count(11), 0u)
       << "faulted-queue drain left the dropped shard's GWS placement mark set";
+}
+
+// A GWS sema_p with no credit parks its wave until the device-global backstop
+// escapes waiters that can never be signalled, so an oversubscribed GWS grid must
+// still drain. The hazard lives in the command processor's placement bookkeeping:
+// when more workgroups want slots than a compute unit has, the surplus shard is
+// published as "unplaced" and is only re-attempted when free capacity reappears.
+// Parking a wave advances the device's quiescence version but frees no capacity, so
+// the unplaced record must stay current and let the backstop fire. Folding both
+// facts into one version staled that record whenever a wave parked, deferring the
+// escape forever under serial dispatch (the pooled driver re-attempted placement on
+// its own cadence and so masked the hang). Both dispatch drivers are exercised end
+// to end because neither single-shard store-level test covers this ordering: one
+// publishes no record and the other publishes it only after the wave has parked.
+TEST(CommandProcessorGwsPlacementTest, OversubscribedGwsGridDrainsUnderSerialAndPooledDispatch) {
+  for (const uint32_t dispatch_threads : {1u, 2u}) {
+    SCOPED_TRACE(dispatch_threads == 1 ? "serial" : "pooled");
+    // Two wave slots, three single-wave workgroups: the third cannot be placed
+    // while the first two hold parked GWS waiters.
+    VmFixture f("cdna3", /*num_cus=*/1, /*num_wf_slots=*/2, /*lds_size_kb=*/64,
+                /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_shader_engines=*/1,
+                /*max_ticks=*/2'000'000);
+    if (dispatch_threads > 1)
+      f.cp()->set_dispatch_threads(dispatch_threads);
+
+    const std::array<uint32_t, 2> gws_p = cdna3::build_ds(
+        test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaP), {.gds = 1});
+    const uint32_t code[] = {gws_p[0], gws_p[1], cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]};
+    const uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104,
+                                       /*vgprs=*/256, /*user_sgprs=*/2,
+                                       /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
+                                       /*enable_vgpr_workitem_id=*/0,
+                                       /*extra_compute_pgm_rsrc1=*/0, /*wave32=*/false);
+
+    constexpr uint64_t kSignal = 0x7000;
+    init_completion_signal(f.mem(), kSignal);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(make_dispatch_packet(ko, kSignal, /*grid_size_x=*/192,
+                                      /*workgroup_size_x=*/64));
+
+    ASSERT_NO_THROW(f.engine->run());
+    EXPECT_FALSE(f.cu()->has_active_wfs())
+        << "oversubscribed GWS grid left waiters parked: the placement backstop never fired";
+    EXPECT_EQ(completion_signal_value(f.mem(), kSignal), 0)
+        << "oversubscribed GWS grid never completed";
+  }
 }
 
 TEST(CommandProcessorAqlTest, InvalidPm4IbFaultsWithoutCompletionOrSuccessorExecution) {
