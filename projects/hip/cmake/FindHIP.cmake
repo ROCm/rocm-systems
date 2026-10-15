@@ -102,7 +102,11 @@ macro(HIP_ADD_LIBRARY hip_target)
         target_compile_options(${hip_target} PRIVATE ${_hip_cxx_opts})
     endif()
     if(hip_FOUND AND TARGET hip::device)
-        target_link_libraries(${hip_target} PRIVATE hip::device)
+        # PUBLIC so consumers of this library inherit hip::device usage
+        # requirements. Must use the keyword signature because callers (e.g.
+        # rocALUTION) add their own PRIVATE/PUBLIC links to the same target
+        # and CMake policy CMP0023 forbids mixing plain and keyword forms.
+        target_link_libraries(${hip_target} PUBLIC hip::device)
     endif()
     unset(_hip_src)
     unset(_hip_cmake_opts)
@@ -116,6 +120,8 @@ macro(HIP_ADD_EXECUTABLE hip_target)
         target_compile_options(${hip_target} PRIVATE ${_hip_cxx_opts})
     endif()
     if(hip_FOUND AND TARGET hip::device)
+        # PRIVATE for executables — nothing consumes an executable's link
+        # interface. Keyword form required for CMP0023 (see HIP_ADD_LIBRARY).
         target_link_libraries(${hip_target} PRIVATE hip::device)
     endif()
     unset(_hip_src)
