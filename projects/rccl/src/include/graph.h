@@ -43,8 +43,12 @@ int rcclP2pCeChannelsPerPeerCap(int current, int pool, bool isGfx1250, bool useM
 inline bool rcclP2pUseCeForConnection(bool useMemcpy, bool collectiveGraph) {
   return useMemcpy && !collectiveGraph;
 }
+// Copy Engine steps must keep the int step and buffer sizes of the connectors and the proxy, and the
+// planner's 32-step part bound, from overflowing.
+constexpr int64_t kRcclP2pCeMaxStepSize = 32 << 20;
 inline size_t rcclP2pCeStepSizePolicy(int cudaArch, bool useMemcpy, int64_t configured, size_t fallback) {
-  return cudaArch == 1250 && useMemcpy && configured > (int64_t)fallback ? configured : fallback;
+  if (cudaArch != 1250 || !useMemcpy || configured <= (int64_t)fallback) return fallback;
+  return configured < kRcclP2pCeMaxStepSize ? configured : kRcclP2pCeMaxStepSize;
 }
 inline bool rcclP2pCeSharesProxyStream(int cudaArch) {
   return cudaArch == 1250;

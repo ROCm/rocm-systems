@@ -46,6 +46,13 @@ TEST(P2pCeChannelCapTests, Gfx1250CeStepOnlyGrowsTheDefaultStep)
     EXPECT_EQ(rcclP2pCeStepSizePolicy(/*cudaArch=*/1250, false, 4 * 1024 * 1024, 512 * 1024), 512 * 1024);
 }
 
+TEST(P2pCeChannelCapTests, Gfx1250CeStepIsCappedAt32MiB)
+{
+    EXPECT_EQ(rcclP2pCeStepSizePolicy(/*cudaArch=*/1250, true, 32 * 1024 * 1024, 512 * 1024), 32 * 1024 * 1024);
+    EXPECT_EQ(rcclP2pCeStepSizePolicy(/*cudaArch=*/1250, true, 512 * 1024 * 1024, 512 * 1024), 32 * 1024 * 1024);
+    EXPECT_EQ(rcclP2pCeStepSizePolicy(/*cudaArch=*/1250, true, int64_t(1) << 40, 512 * 1024), 32 * 1024 * 1024);
+}
+
 TEST(P2pCeChannelCapTests, Gfx1250CeConnectionsShareTheProxyStream)
 {
     EXPECT_TRUE(rcclP2pCeSharesProxyStream(/*cudaArch=*/1250));

@@ -6,7 +6,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Added
 * `RCCL_P2P_CE_CHANNELS_PER_PEER` (default `16`): caps gfx1250 Copy Engine P2P channels per peer to avoid per-channel VMM resource exhaustion. The channels share one non-blocking stream per proxy thread to avoid SDMA completion stalls.
-* `NCCL_P2P_CE_CHUNK_SIZE` (default 4 MiB): sets the gfx1250 Copy Engine P2P step size when `NCCL_P2P_USE_CUDA_MEMCPY=1`.
+* `NCCL_P2P_CE_CHUNK_SIZE` (default 4 MiB, at most 32 MiB): sets the gfx1250 Copy Engine P2P step size when `NCCL_P2P_USE_CUDA_MEMCPY=1`.
 * `ncclGinFlushTimeout` and `ncclGinWaitTimeout` support on the rocSHMEM GDA and Anvil SDMA GIN backends, along with `ncclGinFlushAsync` and `ncclGinWait` on rocSHMEM GDA. Flush and wait on both backends also return when the communicator is aborted, except blocking flush on Anvil SDMA.
 
 ### Changed
