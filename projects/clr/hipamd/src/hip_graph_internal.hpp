@@ -3445,7 +3445,11 @@ class GraphHostNode : public GraphNode {
       // This is just to invoke a callback, so no need to flush caches.
       block_command->setCommandEntryScope(amd::Device::kCacheStateIgnore);
       block_command->enqueue();
-      block_command->notifyCmdQueue();
+      // Block the calling thread until the host callback has completed. Without
+      // this, EnqueueSegment immediately proceeds to the next node (e.g. an H2D
+      // memcpy) whose CPU-side staging copy would run before set_vector writes
+      // h_array, resulting in stale data being copied to the device.
+      block_command->awaitCompletion();
       block_command->release();
       commands_[0]->release();
     }

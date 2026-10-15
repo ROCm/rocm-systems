@@ -373,6 +373,14 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device) {
     Hsa::profiling_get_async_copy_time(signal_, &time);
     cached_timing_.start_ = time.start;
     cached_timing_.end_ = time.end;
+  } else if (is_barrier_) {
+    // hsa_amd_profiling_get_dispatch_time() is only valid for dispatch (kernel) packets.
+    // On some hardware (e.g. gfx1171), calling it on a barrier signal returns values
+    // where start > end.  Use min/max to ensure start <= end for internal profiling.
+    hsa_amd_profiling_dispatch_time_t time = {};
+    Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
+    cached_timing_.start_ = std::min(time.start, time.end);
+    cached_timing_.end_ = std::max(time.start, time.end);
   } else {
     hsa_amd_profiling_dispatch_time_t time = {};
     Hsa::profiling_get_dispatch_time(gpu_device, signal_, &time);
@@ -2228,6 +2236,8 @@ void VirtualGPU::dispatchBarrierPacket(uint16_t packetHeader, bool skipSignal,
   if (!external_signal) {
     // Get active signal for current dispatch if profiling is necessary
     barrier_packet_.completion_signal = Barriers().ActiveSignal(kInitSignalValueOne, timestamp_);
+    // Mark as barrier so CacheTimingData reads raw HW ticks instead of profiling_get_dispatch_time
+    Barriers().GetLastSignal()->is_barrier_ = true;
   } else {
     // Attach external signal to the packet
     barrier_packet_.completion_signal = signal;
@@ -2304,6 +2314,8 @@ void VirtualGPU::dispatchBarrierValuePacket(uint16_t packetHeader, bool resolveD
     // Get active signal for current dispatch if profiling is necessary
     barrier_value_packet_.completion_signal =
         Barriers().ActiveSignal(kInitSignalValueOne, skipTs ? nullptr : timestamp_);
+    // Mark as barrier so CacheTimingData reads raw HW ticks instead of profiling_get_dispatch_time
+    Barriers().GetLastSignal()->is_barrier_ = true;
   } else {
     // Attach external signal to the packet
     barrier_value_packet_.completion_signal = completionSignal;

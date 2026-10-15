@@ -68,6 +68,11 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
   HwQueueEngine engine_;  //!< Engine used with this signal
   //! AccumulateCommand dispatch record this signal supplies timing for.
   uint32_t dispatch_slot_ = kNoDispatchSlot;
+  //! True when this signal is the completion signal of a barrier (AND or vendor-value) packet.
+  //! hsa_amd_profiling_get_dispatch_time() is only valid for dispatch packets; for barrier
+  //! packets it returns undefined values on some hardware (e.g. gfx1171 inverts start/end).
+  //! When set, CacheTimingData reads raw amd_signal_t HW ticks instead.
+  bool is_barrier_ = false;
   std::recursive_mutex lock_;  //!< Signal lock for update
 
   typedef union {
@@ -94,6 +99,7 @@ class ProfilingSignal : public amd::ReferenceCountedObject {
     flags_.data_ = 0;
     flags_.done_ = true;
     dispatch_slot_ = kNoDispatchSlot;
+    is_barrier_ = false;
   }
 
   virtual ~ProfilingSignal();
