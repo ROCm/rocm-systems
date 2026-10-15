@@ -44,6 +44,11 @@ ncclResult_t ncclIbWqeLatGetCommState(void* comm, struct ncclIbWqeLatCommState* 
 /* Runs ncclIbWqeLatMonStampSend on m as if m were the latMon of a QP posting head. */
 ncclResult_t ncclIbWqeLatTestStampSend(struct ncclIbWqeLatMon* m, struct ibv_send_wr* head);
 
+/* Runs ncclIbWqeLatHandleCompletion on m as if m were the latMon of a QP whose CQ
+ * returned a completion with this opcode at tPollNs. The QP has no device, so the
+ * completion must not be slow: a slow report would read device state. */
+ncclResult_t ncclIbWqeLatTestHandleCompletion(struct ncclIbWqeLatMon* m, enum ibv_wc_opcode opcode, uint64_t tPollNs);
+
 #ifdef __cplusplus
 } /* extern "C" */
 #endif

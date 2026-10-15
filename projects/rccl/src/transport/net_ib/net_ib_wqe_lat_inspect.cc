@@ -42,3 +42,27 @@ ncclResult_t ncclIbWqeLatTestStampSend(struct ncclIbWqeLatMon* m, struct ibv_sen
   *m = qp.latMon;
   return ncclSuccess;
 }
+
+ncclResult_t ncclIbWqeLatTestHandleCompletion(struct ncclIbWqeLatMon* m, enum ibv_wc_opcode opcode, uint64_t tPollNs) {
+  if (m == NULL) return ncclInvalidArgument;
+  // A one-device, one-QP comm, enough for the QP lookup by number.
+  struct ncclIbNetCommBase* base = NULL;
+  NCCLCHECK(ncclIbMalloc((void**)&base, sizeof(*base)));
+  struct ibv_qp ibvQp;
+  memset(&ibvQp, 0, sizeof(ibvQp));
+  ibvQp.qp_num = 1;
+  base->vProps.ndevs = 1;
+  base->nqps = 1;
+  base->qps[0].qp = &ibvQp;
+  base->qps[0].latMon = *m;
+
+  struct ibv_wc wc;
+  memset(&wc, 0, sizeof(wc));
+  wc.opcode = opcode;
+  wc.qp_num = ibvQp.qp_num;
+  bool tPollNsValid = true;
+  ncclIbWqeLatHandleCompletion(base, 0, &wc, &tPollNs, &tPollNsValid);
+  *m = base->qps[0].latMon;
+  free(base);
+  return ncclSuccess;
+}

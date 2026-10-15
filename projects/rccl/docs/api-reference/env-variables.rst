@@ -371,8 +371,9 @@ in the following table.
           logged as ``NET/IB: WQE stall (no CQE)``. Both messages are logged
           at most once per second per QP, at ``INFO`` level with the ``NET``
           subsystem (``NCCL_DEBUG=INFO``, ``NCCL_DEBUG_SUBSYS=NET``). Each
-          line identifies the local and remote QP number, device, port, LID
-          and GID.
+          line identifies the local and remote QP number, device, port and
+          LID. The GIDs are only filled in on RoCE (Ethernet link layer)
+          devices and print empty on InfiniBand.
         | Read once per process. Not applied by the ``IB-CAST`` transport.
       - | Integer value, nanoseconds (default: ``0``, disabled)
 

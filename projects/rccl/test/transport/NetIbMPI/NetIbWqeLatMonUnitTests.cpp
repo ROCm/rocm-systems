@@ -19,9 +19,10 @@
 /*
  * CPU-only unit coverage for the net_ib per-QP WQE post-to-poll latency
  * monitor (src/transport/net_ib/wqe_lat_mon.cc): the sampling state machine
- * (ncclIbWqeLatMonStampSend / OnComplete), the Welford mean/stddev and P^2
- * percentile statistics, the slow-completion threshold and the stall check
- * with their 1 s report rate limiters.
+ * (ncclIbWqeLatMonStampSend / OnComplete) and the completion opcode filter in
+ * front of it, the Welford mean/stddev and P^2 percentile statistics, the
+ * slow-completion threshold and the stall check with their 1 s report rate
+ * limiters.
  *
  * Synthetic timestamps are fed straight into OnComplete/CheckStall, so the
  * expected values are exact. No MPI communication, RDMA or GPU is used; the
@@ -542,6 +543,35 @@ TEST(NetIbWqeLatMonUnit, PipelinedPostsSampleOnePerTrackingWindow) {
   EXPECT_FALSE(m.tracking);
   EXPECT_EQ(m.inflight, 0u);
   EXPECT_EQ(snapshot(&m).count, 2u);
+}
+
+// =============================================================================
+// Test: HandleCompletionIgnoresRecvOpcodes
+//
+// ncclIbTest hands every CQE it polls to the monitor, receive completions
+// included. Those must leave a tracking QP untouched (no sample, inflight
+// not drained); only a send-side opcode closes the sample.
+// =============================================================================
+TEST(NetIbWqeLatMonUnit, HandleCompletionIgnoresRecvOpcodes) {
+  ScopedWqeLatGlobals g(true, UINT64_MAX);
+  struct ncclIbWqeLatMon m;
+  ncclIbWqeLatMonInit(&m);
+  auto wrs = makeWrChain({true});
+  ASSERT_EQ(ncclIbWqeLatTestStampSend(&m, wrs.data()), ncclSuccess);
+  const uint64_t postNs = m.trackedPostNs;
+
+  for (enum ibv_wc_opcode op : {IBV_WC_RECV, IBV_WC_RECV_RDMA_WITH_IMM}) {
+    ASSERT_EQ(ncclIbWqeLatTestHandleCompletion(&m, op, postNs + 42), ncclSuccess);
+    EXPECT_TRUE(m.tracking) << "opcode " << op;
+    EXPECT_EQ(m.inflight, 1u) << "opcode " << op;
+    EXPECT_EQ(snapshot(&m).count, 0u) << "opcode " << op;
+  }
+
+  ASSERT_EQ(ncclIbWqeLatTestHandleCompletion(&m, IBV_WC_RDMA_WRITE, postNs + 42), ncclSuccess);
+  EXPECT_FALSE(m.tracking);
+  EXPECT_EQ(m.inflight, 0u);
+  EXPECT_EQ(snapshot(&m).count, 1u);
+  EXPECT_EQ(snapshot(&m).maxNs, 42u);
 }
 
 #endif  // MPI_TESTS_ENABLED

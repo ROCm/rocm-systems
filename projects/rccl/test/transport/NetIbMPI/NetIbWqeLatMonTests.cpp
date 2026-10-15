@@ -8,6 +8,7 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include <cerrno>
 #include <sstream>
 #include <string>
 
@@ -41,12 +42,22 @@ namespace {
 constexpr uint64_t kNoSlowThresholdNs = UINT64_MAX;
 constexpr const char* kSummaryPrefix = "NET/IB: WQE latency summary [";
 
-// What NCCL_IB_WQE_LATENCY_REPORT should resolve to, worked out from the
-// environment independently of the library's parsing: on unless set to 0.
-bool envReportExpected() {
-    const char* repEnv = getenv("NCCL_IB_WQE_LATENCY_REPORT");
-    return repEnv ? strtoll(repEnv, nullptr, 0) != 0 : true;
+// What an integer NCCL parameter should resolve to, worked out from the
+// environment independently of the library's parsing. Mirrors ncclLoadParam
+// (src/misc/param.cc): a value that is unset, empty or does not parse falls
+// back to the default.
+long long envParamExpected(const char* name, long long deflt) {
+    const char* str = getenv(name);
+    if (str == nullptr || *str == '\0') return deflt;
+    errno = 0;
+    char* end = nullptr;
+    const long long value = strtoll(str, &end, 0);
+    return (errno != 0 || end == str) ? deflt : value;
 }
+
+long long envThresholdExpected() { return envParamExpected("NCCL_IB_WQE_LATENCY_THRESHOLD_NS", 0); }
+
+bool envReportExpected() { return envParamExpected("NCCL_IB_WQE_LATENCY_REPORT", 1) != 0; }
 
 struct WqeLatTotals {
     uint64_t count = 0;
@@ -118,8 +129,12 @@ protected:
     // Returns false on every rank if either rank failed, after recording the
     // failure locally.
     bool OpenSession(WqeLatSession& s, size_t size) {
+        // A failed setup only returns from the helper (its ASSERTs cannot end
+        // the test), leaving the comm NULL; registering on it would crash.
         SetupConnectionWithGuard(0, s.pair, s.connGuard);
         s.comm = (MPIEnvironment::world_rank == 0) ? s.pair.recvComm : s.pair.sendComm;
+        EXPECT_NE(s.comm, nullptr) << "connection setup failed";
+        if (!AllRanksOk(s.comm != nullptr)) return false;
         s.buf = malloc(size);
         s.bufGuard = makeHostBufferAutoGuard(s.buf);
         const bool ok =
@@ -162,7 +177,7 @@ protected:
     // summaries against st, the comm's state after its last transfer. With
     // reporting on there is exactly one per QP holding samples, carrying that
     // QP's sample count; with it off there are none. RCCL logs to stdout
-    // unless NCCL_DEBUG_FILE redirects it, so the log is only checked then.
+    // unless NCCL_DEBUG_FILE redirects it; the test is skipped then.
     void CloseSendAndCheckSummaries(void* sendComm, const struct ncclIbWqeLatCommState& st, bool expectSummaries) {
         ncclResult_t closeResult = ncclSuccess;
         std::string log;
@@ -172,9 +187,7 @@ protected:
         }
         EXPECT_EQ(closeResult, ncclSuccess);
         if (getenv("NCCL_DEBUG_FILE") != nullptr) {
-            TEST_INFO("Rank %d: NCCL_DEBUG_FILE is set, close-time summaries not checked",
-                      MPIEnvironment::world_rank);
-            return;
+            GTEST_SKIP() << "NCCL_DEBUG_FILE redirects the log off stdout; close-time summaries cannot be checked";
         }
 
         std::vector<std::string> summaries;
@@ -190,14 +203,23 @@ protected:
             if (!expectSummaries) continue;
             const std::string qpnField = "qpn=" + std::to_string(s.qpNum) + " ";
             const std::string countField = "]: n=" + std::to_string(s.stats.count) + " ";
-            int matches = 0;
+            // QP numbers are only unique per device and the comm's QPs are
+            // striped across devices, so expect one line per sampled QP that
+            // shares this number and require only that one of them carries
+            // this QP's sample count.
+            int expectedMatches = 0;
+            for (int o = 0; o < st.nqps; o++) {
+                if (st.qps[o].stats.count > 0 && st.qps[o].qpNum == s.qpNum) expectedMatches++;
+            }
+            int matches = 0, countMatches = 0;
             for (const std::string& line : summaries) {
                 if (line.find(qpnField) == std::string::npos) continue;
                 matches++;
+                if (line.find(countField) != std::string::npos) countMatches++;
                 EXPECT_NE(line.find(std::string(kSummaryPrefix) + "send "), std::string::npos) << line;
-                EXPECT_NE(line.find(countField), std::string::npos) << "qp " << q << ": " << line;
             }
-            EXPECT_EQ(matches, 1) << "qp " << q << " qpn " << s.qpNum;
+            EXPECT_EQ(matches, expectedMatches) << "qp " << q << " qpn " << s.qpNum;
+            EXPECT_GE(countMatches, 1) << "qp " << q << " qpn " << s.qpNum << " n=" << s.stats.count;
         }
         EXPECT_GT(sampledQps, 0);
         EXPECT_EQ(summaries.size(), expectSummaries ? (size_t)sampledQps : 0u) << log;
@@ -205,9 +227,11 @@ protected:
 
     // Sync transfers followed by the per-QP accounting every enabled run must
     // satisfy: one sample per signaled WQE, nothing left in flight, and no
-    // samples on the receive side (which never posts through ncclIbMultiSend).
-    // Then the sender closes its comm and checks the close-time summaries.
-    void CheckSyncTransfersAreCounted(const char* tag, bool expectNoSlow, bool expectSummaries) {
+    // samples on the receive side (which never posts through ncclIbMultiSend),
+    // and a QP's samples counted slow exactly when its max exceeds the
+    // threshold. Then the sender closes its comm and checks the close-time
+    // summaries.
+    void CheckSyncTransfersAreCounted(const char* tag, bool expectSummaries) {
         const int rank = MPIEnvironment::world_rank;
         const size_t kMaxSize = 1 << 20;
         WqeLatSession s(net_);
@@ -231,10 +255,6 @@ protected:
             EXPECT_EQ(st.isSend, 1);
             EXPECT_EQ(t.count, sizes.size() * (uint64_t)st.nqpsPerRequest)
                 << "nqps=" << st.nqps << " nqpsPerRequest=" << st.nqpsPerRequest;
-            EXPECT_LE(t.slow, t.count);
-            if (expectNoSlow) {
-                EXPECT_EQ(t.slow, 0u);
-            }
             if (st.nqpsPerRequest == st.nqps) {
                 for (int q = 0; q < st.nqps; q++) {
                     EXPECT_EQ(st.qps[q].stats.count, (uint64_t)sizes.size()) << "qp " << q;
@@ -242,9 +262,16 @@ protected:
             }
             // The four percentiles come from independent P^2 estimators, so
             // only bounds by max are invariant; ordering is a unit-test concern.
+            // The threshold is fixed for the run and a sample is slow when its
+            // latency exceeds it, so a QP has slow samples iff its max does.
             for (int q = 0; q < st.nqps; q++) {
                 const struct ncclIbWqeLatStats& s = st.qps[q].stats;
                 if (s.count == 0) continue;
+                if (s.maxNs > ncclIbWqeLatThresholdNs) {
+                    EXPECT_GT(s.slowCount, 0u) << "qp " << q << " max=" << s.maxNs;
+                } else {
+                    EXPECT_EQ(s.slowCount, 0u) << "qp " << q << " max=" << s.maxNs;
+                }
                 EXPECT_GT(s.meanNs, 0.0) << "qp " << q;
                 EXPECT_LE((double)s.meanNs, (double)s.maxNs) << "qp " << q;
                 EXPECT_LE(s.p50Ns, s.maxNs) << "qp " << q;
@@ -286,7 +313,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvKnobs) {
 
     const char* thrEnv = getenv("NCCL_IB_WQE_LATENCY_THRESHOLD_NS");
     const char* repEnv = getenv("NCCL_IB_WQE_LATENCY_REPORT");
-    const long long thr = thrEnv ? strtoll(thrEnv, nullptr, 0) : 0;
+    const long long thr = envThresholdExpected();
     const bool report = envReportExpected();
     TEST_INFO("Rank %d: NCCL_IB_WQE_LATENCY_THRESHOLD_NS=%s NCCL_IB_WQE_LATENCY_REPORT=%s -> enabled=%d thr=%lu "
               "report=%d",
@@ -345,7 +372,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonSyncSendsCountEverySignaledWqe) {
     ScopedWqeLatGlobals g(true, kNoSlowThresholdNs);
     AssertInitAndGetDevices(nullptr);
 
-    CheckSyncTransfersAreCounted("sync", /*expectNoSlow=*/true, /*expectSummaries=*/true);
+    CheckSyncTransfersAreCounted("sync", /*expectSummaries=*/true);
 }
 
 // =============================================================================
@@ -359,7 +386,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonReportOffSuppressesSummaries) {
     ScopedWqeLatGlobals g(true, kNoSlowThresholdNs, /*report=*/false);
     AssertInitAndGetDevices(nullptr);
 
-    CheckSyncTransfersAreCounted("report-off", /*expectNoSlow=*/true, /*expectSummaries=*/false);
+    CheckSyncTransfersAreCounted("report-off", /*expectSummaries=*/false);
 }
 
 // =============================================================================
@@ -539,8 +566,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonPipelinedSendsSampleOncePerQp) {
 // =============================================================================
 TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvEnabledRecordsSends) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses, false, kMinGpusPerNode, kNoNodeLimit);
-    const char* thrEnv = getenv("NCCL_IB_WQE_LATENCY_THRESHOLD_NS");
-    if (thrEnv == nullptr || strtoll(thrEnv, nullptr, 0) <= 0) {
+    if (envThresholdExpected() <= 0) {
         GTEST_SKIP() << "NCCL_IB_WQE_LATENCY_THRESHOLD_NS not set > 0";
     }
     // The globals are only parsed on the first ncclIbWqeLatMonInit, which in
@@ -550,7 +576,7 @@ TEST_F(NetIbWqeLatMonTest, WqeLatMonEnvEnabledRecordsSends) {
     AssertInitAndGetDevices(nullptr);
     ASSERT_TRUE(ncclIbWqeLatEnabled);
 
-    CheckSyncTransfersAreCounted("env", /*expectNoSlow=*/false, /*expectSummaries=*/envReportExpected());
+    CheckSyncTransfersAreCounted("env", /*expectSummaries=*/envReportExpected());
 }
 
 #endif  // MPI_TESTS_ENABLED
