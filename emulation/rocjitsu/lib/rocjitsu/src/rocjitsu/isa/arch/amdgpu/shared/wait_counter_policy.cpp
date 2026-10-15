@@ -6,7 +6,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/isa/operand.h"
 
-namespace rocjitsu {
+namespace rocjitsu::amdgpu {
 std::string_view wait_counter_name(WaitCounterKind counter) {
   switch (counter) {
   case WaitCounterKind::Load:
@@ -114,8 +114,12 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
   };
   auto set_field = [&](WaitCounterKind counter, uint32_t value) {
     const auto no_wait = counter_no_wait_value(arch, counter).value();
-    if (no_wait && value < *no_wait)
-      fields[counter_index(counter)] = value;
+    if (no_wait) {
+      // Only the counter field participates; upper SIMM16 bits are ignored.
+      value &= *no_wait;
+      if (value < *no_wait)
+        fields[counter_index(counter)] = value;
+    }
   };
 
   const std::string_view mnemonic = inst.mnemonic();
@@ -208,4 +212,4 @@ WaitCounterPolicy::explicit_wait_fields(const Instruction &inst, rj_code_arch_t 
   return (value >> shift) & ((1u << width) - 1u);
 }
 
-} // namespace rocjitsu
+} // namespace rocjitsu::amdgpu

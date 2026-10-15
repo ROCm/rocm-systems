@@ -10,6 +10,7 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
+#include <sstream>
 #include <string>
 #include <string_view>
 #include <vector>
@@ -18,7 +19,51 @@ namespace rocjitsu {
 class Instruction;
 
 namespace waitcheck_detail {
-inline constexpr size_t kCounterCount = kWaitCounterCount;
+using amdgpu::WaitcntModel;
+using amdgpu::WaitCounterKind;
+using amdgpu::WaitCounterPolicy;
+using amdgpu::WaitFields;
+
+[[nodiscard]] inline util::FailureOr<std::string>
+wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t arch) {
+  const auto model = amdgpu::waitcnt_model(arch);
+  if (model.failed())
+    return util::Result::failure();
+  std::ostringstream os;
+  if (amdgpu::uses_legacy_waitcnt(model.value())) {
+    switch (counter) {
+    case WaitCounterKind::Load:
+      os << "s_waitcnt vmcnt(" << required_count << ")";
+      return os.str();
+    case WaitCounterKind::Ds:
+      os << "s_waitcnt lgkmcnt(" << required_count << ")";
+      return os.str();
+    case WaitCounterKind::Exp:
+      os << "s_waitcnt expcnt(" << required_count << ")";
+      return os.str();
+    case WaitCounterKind::Store:
+      if (amdgpu::has_legacy_vscnt(model.value())) {
+        os << "s_waitcnt_vscnt null, " << required_count;
+        return os.str();
+      }
+      break;
+    default:
+      break;
+    }
+  }
+  if (counter == WaitCounterKind::X) {
+    os << "s_wait_xcnt " << required_count;
+  } else if (counter == WaitCounterKind::VmVsrc || counter == WaitCounterKind::VaVdst) {
+    os << (amdgpu::has_legacy_vscnt(model.value()) ? "s_waitcnt_depctr " : "s_wait_alu ")
+       << (counter == WaitCounterKind::VmVsrc ? "depctr_vm_vsrc(" : "depctr_va_vdst(")
+       << required_count << ")";
+  } else {
+    os << "s_wait_" << amdgpu::wait_counter_name(counter) << " <= " << required_count;
+  }
+  return os.str();
+}
+
+inline constexpr size_t kCounterCount = amdgpu::kWaitCounterCount;
 
 enum class WaitEventKind {
   Unknown,

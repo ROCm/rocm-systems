@@ -545,19 +545,20 @@ void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const 
                                                          amdgpu::Wavefront &wf) {
   if (!inst.is_waitcnt())
     return;
-  const auto fields = WaitCounterPolicy::explicit_wait_fields(inst, wf.cu().arch());
+  const auto fields = amdgpu::WaitCounterPolicy::explicit_wait_fields(inst, wf.cu().arch());
   if (fields.failed() || !fields.value())
     return;
 
   auto *s = get_state(wf);
   assert(s && s->race_state);
-  const auto model = waitcnt_model(wf.cu().arch()).value();
+  const auto model = amdgpu::waitcnt_model(wf.cu().arch()).value();
   PendingWaitCount wait;
   for (size_t i = 0; i < fields.value()->size(); ++i) {
     const auto threshold = (*fields.value())[i];
     if (!threshold)
       continue;
-    if (const auto counter = memory_wait_counter_type(static_cast<WaitCounterKind>(i), model))
+    if (const auto counter =
+            amdgpu::memory_wait_counter_type(static_cast<amdgpu::WaitCounterKind>(i), model))
       wait.add(*counter, static_cast<int>(*threshold));
   }
   if (!wait.empty())
