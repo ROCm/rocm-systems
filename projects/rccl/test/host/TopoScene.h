@@ -41,7 +41,7 @@ using SystemPtr = std::unique_ptr<ncclTopoSystem, SystemDeleter>;
 
 inline XmlPtr NewXml(int maxNodes = kXmlNodes) {
   ncclXml* xml = nullptr;
-  EXPECT_EQ(xmlAlloc(&xml, maxNodes), ncclSuccess);
+  EXPECT_EQ(ncclSuccess, xmlAlloc(&xml, maxNodes));
   return XmlPtr(xml);
 }
 
@@ -53,7 +53,7 @@ class TempFile {
     int fd = mkstemp(tmpl);
     path_ = tmpl;
     if (fd >= 0) {
-      if (!text.empty()) EXPECT_EQ(write(fd, text.data(), text.size()), (ssize_t)text.size());
+      if (!text.empty()) EXPECT_EQ((ssize_t)text.size(), write(fd, text.data(), text.size()));
       close(fd);
     }
   }
@@ -81,7 +81,7 @@ inline ncclResult_t ParseXml(const std::string& text, ncclXml* xml) {
 
 inline XmlPtr MustParseXml(const std::string& text, int maxNodes = kXmlNodes) {
   XmlPtr xml = NewXml(maxNodes);
-  EXPECT_EQ(ParseXml(text, xml.get()), ncclSuccess) << text;
+  EXPECT_EQ(ncclSuccess, ParseXml(text, xml.get())) << text;
   return xml;
 }
 
@@ -91,15 +91,19 @@ inline std::string Extra(const std::string& attrs) { return attrs.empty() ? "" :
 
 inline std::string System(const std::string& body) { return "<system version=\"2\">\n" + body + "</system>\n"; }
 
-inline std::string Cpu(int numa, const std::string& body, const std::string& attrs = "") {
-  return "<cpu numaid=\"" + std::to_string(numa) + "\" arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"25\" " +
-         "modelid=\"1\" affinity=\"0000000f\"" + Extra(attrs) + ">\n" + body + "</cpu>\n";
+constexpr const char* kAmdCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"25\" modelid=\"1\"";
+constexpr const char* kRomeCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"143\" modelid=\"49\"";
+constexpr const char* kIntelCpu = "arch=\"x86_64\" vendor=\"GenuineIntel\" familyid=\"6\" modelid=\"0x55\"";
+
+inline std::string Cpu(int numa, const std::string& body, const std::string& attrs = "", const char* ids = kAmdCpu) {
+  return "<cpu numaid=\"" + std::to_string(numa) + "\" " + ids + " affinity=\"0000000f\"" + Extra(attrs) + ">\n" + body +
+         "</cpu>\n";
 }
 
 inline std::string Pci(const std::string& busId, const std::string& body, const std::string& cls = "0x060400",
                        const std::string& attrs = "") {
-  return "<pci busid=\"" + busId + "\" class=\"" + cls + "\" vendor=\"0x1000\" device=\"0xc030\" " +
-         "subsystem_vendor=\"0x1000\" subsystem_device=\"0x100b\" link_speed=\"32.0 GT/s PCIe\" link_width=\"16\"" +
+  return "<pci busid=\"" + busId + "\" class=\"" + cls + "\" vendor=\"0x1022\" device=\"0x14ab\" " +
+         "subsystem_vendor=\"0x1022\" subsystem_device=\"0x14ab\" link_speed=\"32.0 GT/s PCIe\" link_width=\"16\"" +
          Extra(attrs) + ">\n" + body + "</pci>\n";
 }
 
@@ -122,8 +126,15 @@ inline std::string GpuPci(const std::string& busId, int dev, int rank, const std
 
 inline std::string Net(const std::string& name, int dev, const std::string& attrs = "") {
   return "<net name=\"" + name + "\" dev=\"" + std::to_string(dev) + "\" speed=\"400000\" port=\"1\" " +
-         "latency=\"0.000000\" guid=\"" + std::to_string(0x100 + dev) + "\" maxconn=\"131072\" gdr=\"1\" " +
+         "latency=\"0.000000\" guid=\"0x" + std::to_string(100 + dev) + "\" maxconn=\"131072\" gdr=\"1\" " +
          "rail=\"" + std::to_string(dev) + "\" plane=\"0\"" + Extra(attrs) + "/>\n";
+}
+
+// A net/gin/rma device named <tag><dev>, with explicit rail and plane.
+inline std::string RailNet(const std::string& tag, int dev, int rail = 0, int plane = 0, int speed = 400000) {
+  return "<" + tag + " name=\"" + tag + std::to_string(dev) + "\" dev=\"" + std::to_string(dev) + "\" speed=\"" +
+         std::to_string(speed) + "\" guid=\"0x" + std::to_string(dev + 1) + "\" gdr=\"1\" rail=\"" +
+         std::to_string(rail) + "\" plane=\"" + std::to_string(plane) + "\"/>\n";
 }
 
 inline std::string NicPci(const std::string& busId, const std::string& nets) {
@@ -170,19 +181,23 @@ inline std::string XgmiSystem(int nGpus, int nCpus = 1, bool nics = false, const
   return System(body);
 }
 
-inline SystemPtr BuildSystem(const std::string& text, ncclResult_t expect = ncclSuccess) {
-  XmlPtr xml = MustParseXml(text);
+inline SystemPtr BuildSystem(ncclXml* xml, ncclResult_t expect = ncclSuccess) {
   ncclTopoSystem* system = nullptr;
-  EXPECT_EQ(ncclTopoGetSystemFromXml(xml.get(), &system, 0), expect);
+  EXPECT_EQ(expect, ncclTopoGetSystemFromXml(xml, &system, 0));
   return SystemPtr(system);
 }
 
-// Builds the system and computes its paths without a communicator.
+inline SystemPtr BuildSystem(const std::string& text, ncclResult_t expect = ncclSuccess) {
+  return BuildSystem(MustParseXml(text).get(), expect);
+}
+
+// Builds the system as init.cc does before computing its paths, without a communicator.
 inline SystemPtr BuildWithPaths(const std::string& text) {
   SystemPtr system = BuildSystem(text);
   if (system) {
     system->nRanks = system->nodes[GPU].count;
-    EXPECT_EQ(ncclTopoComputePaths(system.get(), nullptr), ncclSuccess);
+    system->netGdrLevel = -2;
+    EXPECT_EQ(ncclSuccess, ncclTopoComputePaths(system.get(), nullptr));
   }
   return system;
 }

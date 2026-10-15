@@ -311,7 +311,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 - **`rccl-UnitTestsMicroTopo`** — the real `src/graph` files, each `#include`d from its own
-  test TU: `graph/xml.cc` (via `XML_CC_PATH`, from `xml-test.cc`, suites `Xml*`). Its own binary
+  test TU: `graph/xml.cc` (via `XML_CC_PATH`, from `xml-test.cc`, suites `Xml*`), `graph/topo.cc`
+  (`TOPO_CC_PATH`, `topo-test.cc`, `Topo*`), `graph/paths.cc` (`PATHS_CC_PATH`, `paths-test.cc`,
+  `Paths*`). Its own binary
   because every other micro binary fakes the graph symbols. Topologies come from XML built in
   `TopoScene.h`. See `test_categories_micro_topo.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via

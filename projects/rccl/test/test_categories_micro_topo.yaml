@@ -8,6 +8,8 @@ test_categories:
     description: "Smoke — host-only src/graph micro-tests, sub-second."
     test_patterns:
       - "Xml*"
+      - "Topo*"
+      - "Paths*"
     exclude_windows:
       - "*"
     labels:
