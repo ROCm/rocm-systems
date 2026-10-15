@@ -458,12 +458,13 @@ hipFunction_t PlaybackContext::resolve_replacement(const std::string& kernel_nam
 //   u32 num_attrs, u32 attr stride, num_attrs * stride bytes
 
 // Write a launch's pinned host snapshots back before it runs, once the work
-// already queued on its stream is done. Not inside a graph capture, where the
-// kernel runs only when the graph is launched.
+// already queued on its stream is done. Not when that stream captures into a
+// graph, where the kernel runs only when the graph is launched.
 static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
                                    uint16_t n, hipStream_t stream,
                                    const std::string& kernel_name) {
-    if (ctx.in_graph_capture) {
+    hipStreamCaptureStatus cs = hipStreamCaptureStatusNone;
+    if (hipStreamIsCapturing(stream, &cs) != hipSuccess || cs != hipStreamCaptureStatusNone) {
         ctx.host_snapshots_skipped += n;
         return;
     }

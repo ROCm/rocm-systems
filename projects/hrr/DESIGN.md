@@ -559,9 +559,9 @@ Kept deliberately simple:
 - `HIP_HRR_HOST_SNAPSHOTS=0` turns snapshots off; an allocation larger than
   `HIP_HRR_HOST_SNAPSHOT_MAX_MB` (64) is not snapshotted and is listed under
   `unreplayable_apis`.
-- Replay restores nothing for a launch replayed into a graph capture, and capture does not
-  snapshot at graph launch. A record written while any stream captures does not become the
-  allocation's last, so the next launch outside the capture records again.
+- Replay restores nothing for a launch replayed into a capturing stream, and capture does
+  not snapshot at graph launch. A record for a launch into a capturing stream does not
+  become the allocation's last, so the next launch outside the capture records again.
 - `hipHostAlloc`, `hipMallocHost` and `hipMemAllocHost` are not tracked, since replay makes
   no buffer for them, nor is a `hipHostRegister` device alias that differs from the host
   address.

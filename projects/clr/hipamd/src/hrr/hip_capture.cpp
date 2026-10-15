@@ -663,13 +663,12 @@ static void serialize_kernel_launch(
     return;
   }
   // A record becomes the allocation's last only once its event is written, in
-  // the same order as the events. Replay restores nothing while any graph
-  // capture is open, so a record written then does not become the last.
-  bool capturing = false;
-  if (!t_snaps.empty()) {
-    amd::ScopedLock cl(hip::g_streamSetLock);
-    capturing = !hip::g_allCapturingStreams.empty();
-  }
+  // the same order as the events. Replay restores nothing for a launch into a
+  // stream capture, so a record written for one does not become the last.
+  hipStream_t cs = stream;
+  hip::getStreamPerThread(cs);
+  const bool capturing = cs && cs != hipStreamLegacy &&
+      reinterpret_cast<hip::Stream*>(cs)->GetCaptureStatus() != hipStreamCaptureStatusNone;
   std::unique_lock<std::mutex> lk(g_pinned_mu, std::defer_lock);
   if (!t_snaps.empty()) lk.lock();
   hrr_cap::writer::write_event_raw(api_id,

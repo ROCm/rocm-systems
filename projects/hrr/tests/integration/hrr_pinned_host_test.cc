@@ -23,9 +23,13 @@
 #include <unistd.h>
 
 #include <atomic>
+#include <cerrno>
 #include <chrono>
 #include <csignal>
 #include <thread>
+#ifndef MAP_FIXED_NOREPLACE
+#define MAP_FIXED_NOREPLACE 0x100000
+#endif
 #endif
 
 namespace {
@@ -65,15 +69,20 @@ static void hrr_pinned_workload(int* in, bool by_struct = false) {
   };
   for (int it = 0; it < kPinnedIters; ++it) {
     for (int i = 0; i < kPinnedN; ++i) in[i] = pinned_value(it, i);  // uncaptured stores
-    if (it == 2) {  // replay restores nothing in a graph capture; the next launch still must
-      hipStream_t s = nullptr;
+    // Replay restores nothing in a graph capture. A launch on another stream
+    // meanwhile is restored, and leaves the next launch nothing to record.
+    if (it == 2) {
+      hipStream_t s = nullptr, s2 = nullptr;
       hipGraph_t g  = nullptr;
       HRR_HIP_CHECK(hipStreamCreate(&s));
+      HRR_HIP_CHECK(hipStreamCreate(&s2));
       HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
       launch(s);
+      launch(s2);
       HRR_HIP_CHECK(hipStreamEndCapture(s, &g));
       HRR_HIP_CHECK(hipGraphDestroy(g));
       HRR_HIP_CHECK(hipStreamDestroy(s));
+      HRR_HIP_CHECK(hipStreamDestroy(s2));
     }
     launch(nullptr);
     HRR_HIP_CHECK(hipMemcpy(hout.data(), dout, kPinnedN * sizeof(int), hipMemcpyDeviceToHost));
@@ -125,8 +134,15 @@ TEST_CASE("Unit_HRR_PinnedHostRegister_Direct", "[.][hrr-direct]") {
 TEST_CASE("Unit_HRR_PinnedHostStructLowBits_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipSetDevice(0));
   void* at = reinterpret_cast<void*>(uintptr_t{0x7e0000000000});
-  void* p  = mmap(at, 1 << 16, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
-  REQUIRE(p == at);
+  void* p  = mmap(at, 1 << 16, PROT_READ | PROT_WRITE,
+                  MAP_PRIVATE | MAP_ANONYMOUS | MAP_FIXED_NOREPLACE, -1, 0);
+  if (p != at) {
+    const int err = errno;
+    // A kernel older than 4.17 takes the address as a hint only.
+    if (p != MAP_FAILED) munmap(p, 1 << 16);
+    if (p != MAP_FAILED || err == EEXIST) HRR_SKIP("0x7e0000000000 is already mapped");
+    FAIL("mmap: " << std::strerror(err));
+  }
   HRR_HIP_CHECK(hipHostRegister(p, kPinnedN * sizeof(int), hipHostRegisterDefault));
   hrr_pinned_workload(static_cast<int*>(p), true);
   HRR_HIP_CHECK(hipHostUnregister(p));
@@ -188,10 +204,12 @@ TEST_CASE("Unit_HRR_PinnedHostFork_Direct", "[.][hrr-direct]") {
 HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
   for (const char* direct : {"Unit_HRR_PinnedHostMalloc_Direct",
                              "Unit_HRR_PinnedHostRegister_Direct",
+                             "Unit_HRR_PinnedHostStruct_Direct",
 #ifndef _WIN32
+                             // Last, since a skip ends the case.
                              "Unit_HRR_PinnedHostStructLowBits_Direct",
 #endif
-                             "Unit_HRR_PinnedHostStruct_Direct"}) {
+                            }) {
     for (const char* snapshots : {"1", "0"}) {
       // Without snapshots the struct would carry a host address replay never mapped.
       if (std::string(direct).find("Struct") != std::string::npos && *snapshots == '0')
