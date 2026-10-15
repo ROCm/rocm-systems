@@ -119,7 +119,8 @@ static inline ncclResult_t IbCastMultiSendSegmented(struct ncclIbSendComm* comm,
   volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
   int nreqs = ctsFifoNreqs(slots, 0);
   uint64_t nowNs = 0;
-  if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
+  // RCCL: the peer writes this slot, so bound the reload on both sides like IbCastIsend does.
+  if (nreqs < 1 || nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
   TRACE(NCCL_NET, "NET/IB: %s: Posting a segmented send request (req=%p, comm=%p, id=%ld, slot=%d, nreqs=%d)", __func__,
         reqs[0], reqs[0]->base, reqs[0]->id, slot, nreqs);
@@ -480,9 +481,9 @@ static inline struct ibv_send_wr* rcclIbCastPostFifoSideWr(struct ncclIbRecvComm
   memset(wrSide, 0, sizeof(*wrSide));
   memset(sgeSide, 0, sizeof(*sgeSide));
   wrSide->wr.rdma.remote_addr =
-    comm->remSegLayout.addr + (uint64_t)slot * NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSegLayout);
+    comm->remSegLayout->addr + (uint64_t)slot * NCCL_NET_IB_MAX_RECVS * sizeof(struct ncclIbSegLayout);
   wrSide->wr.rdma.rkey = comm->base.remDevs[ctsQp->remDevIdx].rkey;
-  sgeSide->addr = (uint64_t)comm->remSegLayout.elems[slot];
+  sgeSide->addr = (uint64_t)comm->remSegLayout->elems[slot];
   sgeSide->length = n * sizeof(struct ncclIbSegLayout);
   sgeSide->lkey = comm->devs[ctsQp->devIndex].segLayoutFifoMr->lkey;
   wrSide->sg_list = sgeSide;
@@ -534,8 +535,10 @@ static inline ncclResult_t rcclIbCastIrecvCheckHandle(struct ncclIbRecvComm* com
 
 static inline void rcclIbCastIrecvFillSideTable(struct ncclIbRecvComm* comm, int slot, int i,
                                                 struct ncclIbMrHandle* mhandleWrapper) {
-  struct ncclIbSegLayout* sideElem = comm->remSegLayout.elems[slot];
-  if ((comm->peerCaps & NCCL_IB_CAP_MULTISEG) && !comm->useCtsOffload) {
+  // RCCL: the side-table buffer exists only when the peer advertised the cap.
+  if ((comm->peerCaps & NCCL_IB_CAP_MULTISEG) == 0) return;
+  struct ncclIbSegLayout* sideElem = comm->remSegLayout->elems[slot];
+  if (!comm->useCtsOffload) {
     if (mhandleWrapper->nSegments > 1) {
       sideElem[i].nSegments = mhandleWrapper->nSegments;
       for (int s = 0; s < mhandleWrapper->nSegments; s++) {
