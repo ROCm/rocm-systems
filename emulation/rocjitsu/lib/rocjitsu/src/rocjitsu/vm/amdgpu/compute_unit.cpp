@@ -1705,8 +1705,27 @@ template <bool EnableAsync>
     drain_async_window();
     // Preserve debugger-first handling of illegal instructions. PM4 failures
     // remain exclusive to their submission and are handled below.
-    if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
+    if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active)) {
+      // A debugger may stop and repair this wave. A runtime claim instead
+      // preserves its exception state but must still fail the simulator run.
+      if (!active->debug_halted()) {
+        const std::string failure =
+            std::format("CU {}: wf{} could not decode instruction at pc={:#x} (pid={} qid={} "
+                        "dispatch={} wg={}) "
+                        "words=[{:#x},{:#x},{:#x},{:#x}]: {}",
+                        this->name(), active->wf_id(), active->pc, active->process_id(),
+                        active->queue_id(), active->dispatch_id(), active->wg_id(), words[0],
+                        words[1], words[2], words[3], decode_error.message());
+        util::Logger::warn(failure);
+        pending_dispatch_failures_.push_back({.queue_id = active->queue_id(),
+                                              .process_id = active->process_id(),
+                                              .dispatch_id = active->dispatch_id(),
+                                              .vm_outcome = std::nullopt});
+        if (auto *sim_engine = engine())
+          sim_engine->request_exit(failure, /*code=*/1);
+      }
       return;
+    }
     active->report_instruction_execution_error(InstructionExecutionError::DecodeFailure);
     const std::string failure = std::format(
         "CU {}: wf{} could not decode instruction at pc={:#x} (pid={} qid={} dispatch={} wg={}) "
