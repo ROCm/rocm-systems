@@ -719,7 +719,8 @@ uint64_t goamdsmi_gpu_dev_gpu_clk_freq_get_sclk(uint32_t dv_ind) {
   if ((dv_ind < num_gpu_devices_inAllSocket) &&
       (AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_clk_freq(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-                           AMDSMI_CLK_TYPE_SYS, &freq))) {
+                           AMDSMI_CLK_TYPE_SYS, &freq)) &&
+      (freq.current < freq.num_supported) && (freq.current < AMDSMI_MAX_NUM_FREQUENCIES)) {
     readSuccess = true;
     gpu_sclk_freq = freq.frequency[freq.current];
   }
@@ -740,7 +741,8 @@ uint64_t goamdsmi_gpu_dev_gpu_clk_freq_get_mclk(uint32_t dv_ind) {
   if ((dv_ind < num_gpu_devices_inAllSocket) &&
       (AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_clk_freq(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-                           AMDSMI_CLK_TYPE_MEM, &freq))) {
+                           AMDSMI_CLK_TYPE_MEM, &freq)) &&
+      (freq.current < freq.num_supported) && (freq.current < AMDSMI_MAX_NUM_FREQUENCIES)) {
     readSuccess = true;
     gpu_memclk_freq = freq.frequency[freq.current];
   }
