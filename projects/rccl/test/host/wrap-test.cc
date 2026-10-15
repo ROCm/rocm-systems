@@ -3783,13 +3783,16 @@ int SelectCeVsSymk(int ctaPolicy, size_t count, bool symkRequested, const rcclAr
 }
 }  // namespace
 
-TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyNullTableKeepsCeRegisteredDisabled) {
+TEST(WrapMicrotestIsolated, SelectAllReduce_ZeroPolicyNullTableTakesCeRegistered) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_ZeroPolicyNullTableKeepsCeRegisteredDisabled",
+      "Wrap_SelectAllReduce_ZeroPolicyNullTableTakesCeRegistered",
       []() {
+        // null table -> rcclCeRegMaxTab returns kThreshUnlimited -> ceRegInWindow=true,
+        // ceArRegMax != 0 -> ceRegZero fires under ZERO policy.
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
-        EXPECT_EQ(NCCL_ALGO_RING, SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, /*count=*/8, /*symkRequested=*/false,
-                                                 /*table=*/nullptr, "gfx90a"));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED,
+                  SelectCeVsSymk(NCCL_CTA_POLICY_ZERO, /*count=*/8, /*symkRequested=*/false,
+                                 /*table=*/nullptr, "gfx90a"));
       });
 }
 

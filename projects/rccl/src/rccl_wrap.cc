@@ -1688,9 +1688,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceEnabledByArch     = rcclCeAllReduceEnabledDef(ceArArchDefault);
   const bool ceAvailable         = ceArGraphAllowed && ceBufferOk && ceAllReduceOpSupported && ceCountDivisible && ceEnabledByArch;
   // Tuning cap only: registered CE has no staging allocation, so this does not
-  // size a buffer. kThreshUnlimited = no upper bound; 0 (null table, untuned
-  // collective, or env var 0) disables registered CE, under ZERO too.
-  // Independent of the 2-shot selector (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
+  // size a buffer. kThreshUnlimited = no upper bound (null table or explicit table entry);
+  // env var 0 disables registered CE. Independent of the 2-shot selector
+  // (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
   // CTAPolicy=ZERO takes CE whenever it is available, like upstream taskAppend and rcclSelectAllGather Branch #3.
