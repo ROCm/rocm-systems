@@ -22,6 +22,7 @@ THE SOFTWARE.
 
 #ifndef INCLUDE_RDC_LIB_RDC_COMMON_H_
 #define INCLUDE_RDC_LIB_RDC_COMMON_H_
+#include <cstring>
 #include <iostream>
 #include <map>
 #include <utility>
@@ -39,6 +40,31 @@ typedef std::map<RdcFieldKey, uint64_t> rdc_gpu_gauges_t;
 
 //!< Initial metadata key with which rdcd admits a RegisterPolicy stream
 inline constexpr char kRdcPolicyAdmissionKey[] = "rdc-policy-admission";
+
+//!< The size of the C API's job_id parameters, char job_id[64]
+inline constexpr size_t kRdcJobIdSize = 64;
+
+//!< Whether a job ID of length bytes fits the C API's char job_id[64] with its
+//!< NUL and has no control characters, which logs would carry.
+inline bool rdc_valid_job_id(const char* job_id, size_t length) {
+  if (length >= kRdcJobIdSize) {
+    return false;
+  }
+  for (size_t i = 0; i < length; ++i) {
+    const unsigned char c = static_cast<unsigned char>(job_id[i]);
+    if (c < 0x20 || c == 0x7f) {
+      return false;
+    }
+  }
+  return true;
+}
+
+//!< Whether a group or field group name of length bytes fits RDC's
+//!< char[RDC_MAX_STR_LENGTH] name buffers with its NUL and has no NUL inside
+//!< (which a std::string from a client can have, and its c_str() would cut).
+inline bool rdc_valid_name(const char* name, size_t length) {
+  return length < RDC_MAX_STR_LENGTH && (length == 0 || std::memchr(name, '\0', length) == nullptr);
+}
 
 /**
  *  @brief The strncpy but with null terminated

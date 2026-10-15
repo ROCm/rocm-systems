@@ -1081,6 +1081,8 @@ rdc_status_t rdc_disconnect(rdc_handle_t p_rdc_handle);
  *  @param[in] update_freq  How often to update this field in usec.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if job_id is NULL, has no NUL in
+ *  its first 64 bytes, or has a control character.
  */
 rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                  const char job_id[64], uint64_t update_freq);
@@ -1099,6 +1101,8 @@ rdc_status_t rdc_job_start_stats(rdc_handle_t p_rdc_handle, rdc_gpu_group_t grou
  *  successful call, the value will contain the stats of the job.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if job_id is NULL, has no NUL in
+ *  its first 64 bytes, or has a control character.
  */
 rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
                                rdc_job_info_t* p_job_info);
@@ -1115,6 +1119,8 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
  *  @param[in] job_id The name of the job.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if job_id is NULL, has no NUL in
+ *  its first 64 bytes, or has a control character.
  */
 rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle, const char job_id[64]);
 
@@ -1130,6 +1136,8 @@ rdc_status_t rdc_job_stop_stats(rdc_handle_t p_rdc_handle, const char job_id[64]
  *  @param[in] job_id The name of the job.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if job_id is NULL, has no NUL in
+ *  its first 64 bytes, or has a control character.
  */
 rdc_status_t rdc_job_remove(rdc_handle_t p_rdc_handle, const char job_id[64]);
 
@@ -1235,6 +1243,8 @@ rdc_status_t rdc_device_get_component_version(rdc_handle_t p_rdc_handle, rdc_com
  *  group API calls.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if group_name is NULL or has
+ *  no NUL in its first RDC_MAX_STR_LENGTH bytes.
  */
 rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle, rdc_group_type_t type,
                                   const char* group_name, rdc_gpu_group_t* p_rdc_group_id);
@@ -1329,6 +1339,8 @@ rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p_
  *  @param[out] rdc_field_group_id Handle to the newly-created field group
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_BAD_PARAMETER is returned if field_group_name has no NUL
+ *  in its first RDC_MAX_STR_LENGTH bytes.
  */
 rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_field_ids,
                                     rdc_field_t* field_ids, const char* field_group_name,
