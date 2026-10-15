@@ -124,7 +124,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
           [this](void* base, size_t size, bool large) { ReleaseScratch(base, size, large); }),
       trap_handler_tma_region_(NULL),
       rec_sdma_eng_override_(false),
-      sdma_native_(node_props.Capability2.ui32.NativeSDMA),
+      sdma_native_(node_props.NativeSDMASupported),
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false),

@@ -260,11 +260,8 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::Initialize(const core::Agent& agent,
   needs_kmt_doorbell_ = is_dxg_ ||
                         core::Runtime::runtime_singleton_->thunkLoader()->IsDTIF();
 
-  // libhsakmt appends a progress-fence epilogue on every doorbell, so every reservation must include it.
-  // The node reports the size only when it actually supports the native user queue, so ANDing the
-  // policy flag in here yields 0 on every path that does not get an epilogue.
   if (agent_->sdma_native())
-    sdma_epilogue_bytes_ = agent_->properties().Capability2.ui32.NativeSDMAEpilogueBytes;
+    sdma_epilogue_bytes_ = agent_->properties().NativeSDMAEpilogueBytes;
   sdma_wait_idle_ = core::Runtime::runtime_singleton_->flag().sdma_wait_idle();
   enable_sdma_hdp_flush_ = core::Runtime::runtime_singleton_->flag().enable_sdma_hdp_flush();
 
@@ -2663,7 +2660,11 @@ void BlitSdma<useGCR, scopeFields>::BuildPollCommand(char* cmd_addr, void* addr,
   packet_addr->HEADER_UNION.op = SDMA_OP_POLL_REGMEM;
   packet_addr->HEADER_UNION.mem_poll = 1;
   packet_addr->HEADER_UNION.func = 0x3;  // IsEqual.
-  packet_addr->HEADER_UNION.hdp_flush = enable_sdma_hdp_flush_ && hdp_flush_support_ ? 1 : 0;
+  if (is_dxg_) {
+    // On Windows/DXG, set the HDP flush bit if enabled and supported.
+    // while on other platforms this bit keep as default (0).
+    packet_addr->HEADER_UNION.hdp_flush = enable_sdma_hdp_flush_ && hdp_flush_support_ ? 1 : 0;
+  }
   packet_addr->ADDR_LO_UNION.addr_31_0 = ptrlow32(addr);
   packet_addr->ADDR_HI_UNION.addr_63_32 = ptrhigh32(addr);
 

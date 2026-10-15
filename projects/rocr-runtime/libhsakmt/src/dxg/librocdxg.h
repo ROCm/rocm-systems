@@ -71,8 +71,7 @@ struct hsakmtRuntime {
     system_heap_space_size_(0),
     handle_aperture_start_(0),
     handle_aperture_size_(0),
-    default_node(1) {
-  }
+    default_node(1) {}
 
   void HeapInit();
   void HeapFini();
@@ -143,7 +142,6 @@ struct hsakmtRuntime {
       uint64_t enable_thunk_sub_allocator : 1;
       uint64_t is_svm_api_supported : 1;
       uint64_t disable_wait_timeout_ : 1;
-      // Set by hsaKmtSetSdmaConfig.
       uint64_t sdma_gpu_poll_ : 1;
     };
     uint64_t settings_bits_ = 0;

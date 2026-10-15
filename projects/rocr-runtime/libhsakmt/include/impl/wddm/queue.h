@@ -345,7 +345,7 @@ public:
   bool IsNativeSdma(void) const { return native_sdma_; }
 
   //!< Bytes appended per native-SDMA doorbell: one FENCE packet carrying the progress fence.
-  //!< Also the headroom the producer must reserve, via HSA_CAPABILITY2::NativeSDMAEpilogueBytes.
+  //!< Also the headroom the producer must reserve, via HsaNodeProperties::NativeSDMAEpilogueBytes.
   static constexpr uint32_t kHwQueueEpilogueBytes = 8 * 4;
 
   //!< amd_queue_t the KMD reports read_dispatch_id (rptr) into; required for an SDMA-AQL

@@ -2805,12 +2805,6 @@ hsa_status_t Runtime::Load() {
     return HSA_STATUS_ERROR_NOT_INITIALIZED;
   }
 
-  if (HSAKMT_CALL(hsaKmtSetSdmaConfig) != nullptr) {
-    HsaSdmaConfig sdma_config = {};
-    sdma_config.ui32.GpuPoll = flag_.enable_sdma_gpu_poll() ? 1 : 0;
-    HSAKMT_CALL(hsaKmtSetSdmaConfig(sdma_config));
-  }
-
 #if defined(__linux__)
   if (!thunkLoader_->CheckThunkAbi()) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;

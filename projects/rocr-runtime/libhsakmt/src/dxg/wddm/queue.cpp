@@ -1296,7 +1296,11 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
     create_info.mem_flags = Wkmi::kQueueObject;
     GpuMemory* gpu_mem = nullptr;
     auto code = device->CreateGpuMemory(create_info, &gpu_mem);
-    assert(code == ErrorCode::Success);
+    if (code != ErrorCode::Success) {
+      pr_err("SDMA user queue: AmdQueueT page allocation failed, code=%d, size=%" PRIu64 "\n",
+             static_cast<int>(code), static_cast<uint64_t>(create_info.size));
+      return;
+    }
     amd_queue_memory_ = gpu_mem;
 
     // Zero the page: read_dispatch_id here is the ring read offset (GetRingRptr), and a
@@ -1306,7 +1310,15 @@ SDMAQueue::SDMAQueue(WDDMDevice* device, void* ring, uint64_t cmdbuf_size, uint3
   }
 
   bool ret = device->CreateQueue(this);
-  assert(ret);
+  if (!ret) {
+    if (amd_queue_memory_) {
+      delete amd_queue_memory_;
+      amd_queue_memory_ = nullptr;
+    }
+    pr_err("SDMA queue creation failed: engine=%u, hws=%d, path=%s\n", engine, (int)use_hws,
+           native_sdma_ ? "native user queue" : "legacy SWS translation thread");
+    return;
+  }
 
   if (!native_sdma_ || !gpu_poll_) thread_ = std::thread(SdmaThread, this);
 }
@@ -1407,9 +1419,10 @@ void SDMAQueue::RingDoorbell(uint64_t /*value*/) {
     const uint64_t start = wptr_pre_;
     const uint64_t end = wptr_next_;
     wptr_pre_ = wptr_next_;
-    // SubmitNative pr_errs on both of its failure paths, so nothing is lost by not
-    // propagating: the span simply never runs and the waiter times out.
-    SubmitNative(start, end);
+    if (!SubmitNative(start, end)) {
+      pr_err("native SDMA submit failed for span %" PRIx64 "-%" PRIx64 " (doorbell path)\n",
+             start, end);
+    }
     return;
   }
 

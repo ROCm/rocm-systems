@@ -930,8 +930,8 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   const bool native_sdma =
       device->IsSdmaSupported() && device->NumSdmaEngine() != 0 &&
       device->IsHwsEnabled(device->GetSdmaEngine(0));
-  props.Capability2.ui32.NativeSDMA = native_sdma ? 1 : 0;
-  props.Capability2.ui32.NativeSDMAEpilogueBytes =
+  props.NativeSDMASupported = native_sdma ? 1 : 0;
+  props.NativeSDMAEpilogueBytes =
       native_sdma ? wsl::thunk::SDMAQueue::kHwQueueEpilogueBytes : 0;
 
   {

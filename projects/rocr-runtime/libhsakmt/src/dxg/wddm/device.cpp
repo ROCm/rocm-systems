@@ -71,7 +71,6 @@ WDDMDevice::WDDMDevice(D3DKMT_HANDLE adapter, LUID adapter_luid, uint32_t node_i
   NTSTATUS ret = ParseDeviceInfo();
   pr_rocr_info("kmd_version:%" PRIu32 "\n", device_info_.kmd_version);
   device_info_.hwsInfo.hwsMask.aql_queue &= !dxg_runtime->use_pm4_;
-
   // The KMD only accepts PM4 packets on COMPUTE0, but wkmi defaults compute_schedid
   // to COMPUTE1 whenever AQL-on-compute1 is supported. Override to COMPUTE0 for the
   // PM4 path.
@@ -895,7 +894,6 @@ void WDDMDevice::GetClockCounters(uint64_t *gpu, uint64_t *cpu) {
 }
 
 bool WDDMDevice::CreateQueue(WDDMQueue* queue, uint64_t debugger_data) {
-  // The KMD recognizes the SDMA ring from the ROCr client id.
   if (!CreateContext(queue->queue_engine, &queue->context, debugger_data, queue->IsNativeSdma()))
     return false;
 

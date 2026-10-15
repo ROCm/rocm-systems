@@ -466,19 +466,6 @@ hsaKmtQueueRingDoorbell(
 );
 
 /**
- * The runtime reads HSA_ENABLE_SDMA_GPU_POLL and pushes it down.
- *
- * @param[in] Config Policy bits; see HsaSdmaConfig.
- *
- * @returns HSAKMT_STATUS_SUCCESS on success
- */
-HSAKMT_STATUS
-HSAKMTAPI
-hsaKmtSetSdmaConfig(
-    HsaSdmaConfig Config    //IN
-);
-
-/**
   Allows an HSA process to set/change the default and alternate memory coherency, before starting to dispatch.
 */
 

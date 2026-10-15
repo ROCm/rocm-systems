@@ -233,9 +233,7 @@ typedef union
         unsigned int PerSDMAQueueResetSupported : 1;  // Indicates per-sdma queue reset supported
         unsigned int AqlEmulationPm4_ : 1;            // Indicates device uses AQL emulation via PM4 packets
         unsigned int StallOnRetryFault : 1;           // Node runs in recoverable-fault mode
-        unsigned int NativeSDMA : 1;                  // Device supports the native SDMA user queue
-        unsigned int NativeSDMAEpilogueBytes : 16;    // Per-doorbell epilogue size in the SDMA user queue
-        unsigned int Reserved : 12; // Reserved
+        unsigned int Reserved : 29; // Reserved
     } ui32;
 } HSA_CAPABILITY2;
 
@@ -364,6 +362,9 @@ typedef struct _HsaNodeProperties
     HSAuint64       WallClockKHz;      // Wall Clock Frequency in KHz
 
     HSAuint32       FabricHandleSupported; // 0 - not supported, 1 - supported
+
+    HSAuint32       NativeSDMASupported;   // 0 - not supported, 1 - device provides the native SDMA user queue
+    HSAuint32       NativeSDMAEpilogueBytes; // Per-doorbell epilogue size in the native SDMA user queue
 } HsaNodeProperties;
 
 
@@ -796,27 +797,6 @@ typedef struct _HsaQueueResource
 
     volatile HSAint64* ErrorReason;  /** exception bits signal payload */
 } HsaQueueResource;
-
-/** Windows/DXG only: process-wide SDMA policy, applied by hsaKmtSetSdmaConfig to every
- *  queue created afterwards.
- */
-typedef struct _HsaSdmaConfig
-{
-    union
-    {
-        struct
-        {
-            unsigned int GpuPoll         : 1; // default = 0: the producer's dependency POLL_REGMEM packets are
-                                              // waited out and stripped on a host thread before the span is
-                                              // submitted. If 1: they are left in the ring for the SDMA engine
-                                              // to execute. Ignored on queues that did not get a native user
-                                              // queue, which HSA_CAPABILITY2.NativeSDMA decides.
-            unsigned int Reserved        : 31;
-
-        } ui32;
-        HSAuint32 Value;
-    };
-} HsaSdmaConfig;
 
 
 //TEMPORARY structure definition - to be used only on "Triniti + Southern Islands" platform

@@ -261,12 +261,6 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtQueueRingDoorbell(HSA_QUEUEID QueueId, uint64_t va
     return HSAKMT_STATUS_INVALID_PARAMETER;
 
   queue_->RingDoorbell(value);
-
-  return HSAKMT_STATUS_SUCCESS;
-}
-
-HSAKMT_STATUS HSAKMTAPI hsaKmtSetSdmaConfig(HsaSdmaConfig Config) {
-  dxg_runtime->sdma_gpu_poll_ = Config.ui32.GpuPoll != 0;
   return HSAKMT_STATUS_SUCCESS;
 }
 

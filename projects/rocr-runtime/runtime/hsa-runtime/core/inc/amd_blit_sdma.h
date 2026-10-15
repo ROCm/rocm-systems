@@ -558,7 +558,7 @@ template <bool useGCR, bool scopeFields> class BlitSdma : public BlitSdmaBase {
 
   /// Bytes libhsakmt appends to the ring on every doorbell for its progress-fence
   /// epilogue (Windows/DXG native SDMA user queue); every reservation must include them.
-  /// 0 on all other paths. See HSA_CAPABILITY2::NativeSDMAEpilogueBytes.
+  /// 0 on all other paths. See HsaNodeProperties::NativeSDMAEpilogueBytes.
   uint32_t sdma_epilogue_bytes_;
 
   volatile uint64_t* queue_wptr_;

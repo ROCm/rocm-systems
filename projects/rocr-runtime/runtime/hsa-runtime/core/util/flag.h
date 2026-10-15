@@ -137,14 +137,6 @@ class Flag {
     var = os::GetEnvVar("HSA_ENABLE_HIGH_PRECISION_TIMESTAMPS");
     enable_high_precision_timestamps_.store(var == "1", std::memory_order_relaxed);
 
-    enable_sdma_gpu_poll_ = false;
-#if defined(_WIN32)
-    var = os::GetEnvVar("HSA_ENABLE_SDMA_GPU_POLL");
-    // Only takes effect on a native SDMA user queue, which the device capability decides.
-    // Default to false because gpu poll is stuck in KMD
-    enable_sdma_gpu_poll_ = (var == "1") ? true : false;
-#endif
-
     var = os::GetEnvVar("HSA_ENABLE_PEER_SDMA");
     enable_peer_sdma_ = (var == "0") ? SDMA_DISABLE : ((var == "1") ? SDMA_ENABLE : SDMA_DEFAULT);
 
@@ -455,8 +447,6 @@ class Flag {
 
   SDMA_OVERRIDE enable_sdma() const { return enable_sdma_; }
 
-  bool enable_sdma_gpu_poll() const { return enable_sdma_gpu_poll_; }
-
   SDMA_OVERRIDE enable_peer_sdma() const { return enable_peer_sdma_; }
 
   SDMA_OVERRIDE enable_sdma_gang() const { return enable_sdma_gang_; }
@@ -662,7 +652,6 @@ class Flag {
   SDMA_OVERRIDE sdma_multicast_ = SDMA_DEFAULT;
 
   SDMA_OVERRIDE enable_sdma_;
-  bool enable_sdma_gpu_poll_;
   SDMA_OVERRIDE enable_peer_sdma_;
   SDMA_OVERRIDE enable_sdma_gang_;
   SDMA_OVERRIDE enable_sdma_copy_size_override_;
