@@ -18,7 +18,7 @@ Full documentation for rocDecode is available at [https://rocm.docs.amd.com/proj
 * Resolved vendored libva link issue in samples without extra env vars.
 * Fixed a stray RASL picture being output from the first CRA picture after an application signals end of sequence with the `ROCDEC_PKT_ENDOFSTREAM` packet flag. The flag now ends the coded video sequence the same way an in-band EOS NAL unit does, so the next IRAP picture gets `NoRaslOutputFlag` equal to 1.
 * Fixed out-of-bounds memory access issues in the HEVC, AVC, AV1, VP9 and base parsers.
-
+* Fixed `rocDecGetDecoderCaps` advertising 16-bit output surface formats for 8-bit content.
 ## rocDecode 1.8.0 for ROCm 7.13
 
 ### Added
