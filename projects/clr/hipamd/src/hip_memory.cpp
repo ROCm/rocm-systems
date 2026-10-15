@@ -13,7 +13,6 @@
 #include "hip_internal.hpp"
 #include "hip_platform.hpp"
 #include "hip_conversions.hpp"
-#include "utils/flags.hpp"
 #include "platform/context.hpp"
 #include "platform/command.hpp"
 #include "platform/memory.hpp"
@@ -3325,19 +3324,19 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
 
   if (failIdx != nullptr) *failIdx = SIZE_MAX;
 
-  // Call internal batch implementation. When chunking is enabled (and there are
-  // no attrs to remap onto sub-ranges), split the input into progressively
-  // doubling chunks and parse+submit each so the first chunk rings the doorbell
-  // before the rest of the input is parsed.
+  // Split large batches into progressively doubling chunks so the first chunk
+  // rings the doorbell before the rest of the input is parsed.
+  constexpr size_t kChunkStart = 72;
+  constexpr size_t kChunkCap = 1024;
+  constexpr size_t kMinChunkCount = 4096;  // below this, chunking costs more than it saves
   hip::Stream& hipStream = *hip::getStream(stream);
-  const size_t chunkBase = GPU_BATCH_CHUNK;
   hipError_t status = hipSuccess;
-  if (chunkBase == 0 || numAttrs > 0 || count <= chunkBase) {
+  if (GPU_BATCH_CHUNK == 0 || numAttrs > 0 || count < kMinChunkCount) {
     status = ihipMemcpyBatch(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, hipStream, true,
                              failIdx);
   } else {
     size_t off = 0;
-    size_t csz = chunkBase;
+    size_t csz = kChunkStart;
     while (off < count && status == hipSuccess) {
       const size_t n = (csz < count - off) ? csz : (count - off);
       size_t chunkFailIdx = SIZE_MAX;
@@ -3347,7 +3346,7 @@ hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t c
         *failIdx = off + chunkFailIdx;
       }
       off += n;
-      csz = (csz * 2 < 1024) ? csz * 2 : 1024;
+      csz = (csz * 2 < kChunkCap) ? csz * 2 : kChunkCap;
     }
   }
 
