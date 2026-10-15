@@ -291,9 +291,17 @@ CPU breakpoint triggers (prototype)
 
 ``rocprofv3-att-gdb`` starts an application under ROCgdb and uses CPU breakpoints
 to start and stop ATT. Pass the same ATT and output parameters you normally use
-with rocprofv3. The launcher automatically enables ATT selected regions, loads
-ROCTx and the prototype helper into the application, and configures the debugger.
-The application does not need ROCTx calls or a ROCTx link dependency.
+with rocprofv3. The launcher enables a dedicated ATT context in rocprofv3 and
+configures the debugger. The application does not need ROCTx calls or a ROCTx
+link dependency; application Pause/Resume calls do not control debugger ATT.
+Use a matching rocprofv3 build containing the debugger control backend.
+
+The same command supports a process tree without a multiprocess flag. If A
+launches B and B launches GPU worker C, launch A and name the breakpoint in B.
+ROCgdb retains descendants and resolves pending breakpoints as executables load.
+The trigger broadcasts to every profiling process registered in the session.
+Each process decides how its configured ATT resources respond. The debugger
+does not query GPU resource state or assign devices.
 
 For a start and end breakpoint:
 
@@ -318,8 +326,8 @@ start-breakpoint hits and activate capture on hit 101:
     rocprofv3-att-gdb --start begin_iteration --skip 100 --stop end_iteration \
         -d traces -- ./application
 
-The count applies to hits of the start breakpoint across application threads
-and all its resolved locations. It selects dispatch 101 only when that location
+The count applies to hits of the start breakpoint across application threads,
+retained inferiors, and all resolved locations. It selects dispatch 101 only when that location
 executes once per desired dispatch; it does not count global GPU dispatch IDs.
 The end breakpoint remains disabled throughout warmup. Ignored hits can still
 trap in the debugger during warmup, but make no profiler calls. The start
@@ -342,7 +350,7 @@ with inlining disabled and is not a general kernel-name selector for optimized,
 JIT, or graph launches. ROCgdb also supports GPU kernel-entry breakpoints, but
 those require the future GPU-breakpoint support described below; their hits can
 occur per wave rather than once per dispatch. rocprofv3's
-``--kernel-include-regex`` does not select a debugger trigger in this selected-region
+``--kernel-include-regex`` does not select a debugger trigger in this device
 ATT mode. Choosing a kernel-specific start trigger does not restrict capture to
 that kernel; other GPU work in the selected region can also be traced.
 
@@ -363,7 +371,7 @@ triggers:
 
 The start fires on hit 101. The stop fires on the next visit to that location,
 after GDB resumes past the current breakpoint instruction. Hits count across
-threads, so the next visit can come from another thread.
+threads in the triggering process, so the next visit can come from another thread.
 
 The source line after ``hipDeviceSynchronize()`` does not guarantee a stop after
 synchronization. Optimization can split, move, or merge instructions, and GDB
@@ -379,9 +387,9 @@ introduce an additional stop during the trace.
 Durations accept ``us``, ``ms``, and ``s``. You can supply both ``--stop`` and
 ``--timeout``; the first stop wins. A sleeping application-side worker handles
 the one-shot timeout without interrupting an arbitrary application thread to
-inject a profiler call. The interval begins after ``roctxProfilerResume(0)``
-returns and the debugger finishes continuing the triggering thread. The debugger
-then tells the helper to arm the timer for the full duration. Profiler setup,
+inject a profiler call. The interval begins after all participants acknowledge
+their start operations and the debugger finishes continuing the triggering thread.
+The debugger then sends a common absolute monotonic deadline to every worker. Profiler setup,
 debugger continuation, and notification delivery can extend the trace; they do
 not consume the requested interval. When a shared user breakpoint holds the
 triggering thread, the timer waits for manual continuation. Later user stops
@@ -389,7 +397,8 @@ do not pause or restart the timer.
 
 CPU scheduling and GPU command submission can delay the stop, so a timeout is
 not an exact GPU-duration guarantee. A short interval can still end before a
-kernel launches. An end breakpoint or explicit cancellation can stop earlier.
+kernel launches. An end breakpoint, explicit cancellation, or process exit can
+stop earlier.
 
 A one-shot watchdog in the debugger reports an error if stopping has not
 completed within 10 seconds after the deadline. It adds no periodic checks in
@@ -424,10 +433,9 @@ The prototype uses non-stop mode: Ctrl+C stops the selected thread, and
 running. ``att arm`` creates the capture breakpoints; capture starts on the
 next selected start hit. If you add ``--skip N``, it counts hits after arming,
 excluding iterations that already ran. This workflow requires launching with
-the profiler/helper as above. Profiler injection into an independently started
-process remains part of the planned attach support.
-If an early loader stop delays the helper's startup, connection attempts resume
-on continuation or at the selected start hit.
+the profiler as above. An early loader stop can delay registration until execution
+continues. Use ``att status`` to see registered participants. Processes joining
+after a capture starts participate in the next capture.
 
 ``att cancel`` removes an armed trigger or stops an active capture. After a
 capture finishes, ``att arm`` can set up another capture. Unrelated user
@@ -438,7 +446,7 @@ the thread reaches a new user breakpoint or signal stop before the call returns.
 Use ``help att`` for the available commands.
 
 For automation, add ``--batch`` with ``--start`` and a stop condition. The
-launcher exits after the application, returning nonzero for an incomplete
+launcher exits after the process tree and participants, returning nonzero for an incomplete
 capture, a control failure, or an application error. Without ``--batch``, ROCgdb
 stays open for inspection. This option does not select dispatch batches or end
 the application when capture stops. ``--rocgdb PATH`` and
@@ -448,19 +456,43 @@ can be repeated to configure the debugger before the application runs.
 Raw ``.att`` data is flushed when the stop call completes. Normal rocprofv3
 decoding and final output generation complete when the application exits.
 Look for ``[att] ACTIVE`` and ``[att] DONE`` in the debugger output, followed by
-the usual files in your selected output directory.
+the usual files under ``att_gdb_<session>/process_<pid>_<generation>/`` in your
+selected output directory. The session's ``capture_<id>.json`` manifest records
+the trigger PID, participants, acknowledgements, deadline, errors, and output
+locations. ACTIVE acknowledges local start calls; it does not imply that every
+visible GPU has initialized ATT resources.
 
-This first pass supports a single launched process and CPU breakpoints on Linux.
+An orderly participant exit flushes its trace and acknowledges completion. Other
+participants continue to their stop boundary. An unexplained disconnect marks
+the capture incomplete. If the trigger process exits while other participants
+still need its end breakpoint, an already armed timeout is required to continue.
+
+For an independently running profiling participant, use ``att session`` to print
+the session descriptor path, then run from another terminal:
+
+.. code-block:: bash
+
+    rocprofv3 --att --att-debugger-session /tmp/rocprofv3-att-gdb-.../session.json \
+        --attach PID -d traces
+
+Pass the usual ATT parameters and follow the normal rocprofv3 attach prerequisites.
+The participant must not already be ptrace-owned by ROCgdb. Wait for registration
+before the trigger and finish capture before detaching. Sharing debugger and
+profiler execution control of the same PID requires a future ptrace handoff.
+
+This implementation supports CPU breakpoints on Linux, including nested fork/exec
+and spawn descendants. Raw fork without exec after profiler/GPU-runtime
+initialization is not supported. Launchers replacing the environment must retain
+the profiling and session configuration.
 Select the start after normal GPU initialization and loading of the intended
 kernel code objects, typically after a warm-up iteration. It preserves the
 normal ATT resource mode; it does not allocate resources on every visible GPU.
 Other application threads and submitted GPU work can continue while the trigger
 is being handled. Existing waves are not made visible through a preemption
-cycle in this prototype. Application ROCTx Pause/Resume calls share its control
-state and can interfere with captures. Coordinated CPU/GPU holds, independent
-production controls, GPU breakpoints, and rocprofv3 attachment are follow-up work.
+cycle in this prototype. Application ROCTx controls are independent of debugger
+ATT. Coordinated CPU/GPU holds, CWSR, and GPU breakpoints are follow-up work.
 
-The helper adds no periodic polling, dispatch interception, or buffer scanning
+The control worker adds no periodic polling, dispatch interception, or buffer scanning
 during capture. Breakpoint and start/stop handling still affect the boundaries;
 this prototype does not establish cycle-identical execution to an unattached
 application.

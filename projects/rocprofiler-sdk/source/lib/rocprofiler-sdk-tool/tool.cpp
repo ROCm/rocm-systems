@@ -25,6 +25,7 @@
 
 #include "att_no_intercept.hpp"
 #include "config.hpp"
+#include "debugger_control.hpp"
 #include "execution_profile.hpp"
 #include "graph_stack.hpp"
 #include "helper.hpp"
@@ -2896,6 +2897,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     for(uint64_t i = 0; i < context_ids_length; ++i)
     {
+        if(tool::debugger_control::owns(context_ids[i])) continue;
         // In selected-regions mode, these profiling contexts intentionally start stopped.
         // Reference-counted mode retains its existing attach behavior until its process-lifetime
         // state can be reset safely at an attachment-session boundary.
@@ -2917,6 +2919,7 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
         }
     }
 
+    tool::debugger_control::start_worker();
     return 0;
 }
 
@@ -3384,7 +3387,16 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
         // Use device_thread_trace_service when handling consecutive kernels or marker trace
         const auto handle_consecutive_kernels = tool::get_config().att_consecutive_kernels >= 1;
         const auto handle_marker_trace        = tool::get_config().selected_regions;
+        const auto handle_debugger_trace      = tool::debugger_control::requested();
+        rocprofiler_context_id_t debugger_context{};
         rocprofiler_user_data_t user{.value = 0};
+
+        if(handle_debugger_trace)
+        {
+            ROCP_FATAL_IF(att_no_intercept || handle_consecutive_kernels)
+                << "debugger ATT control cannot be combined with other ATT trigger modes";
+            debugger_context = tool::debugger_control::configure(callbacks.att_shader_data);
+        }
 
         if(att_no_intercept && handle_marker_trace)
         {
@@ -3399,7 +3411,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
                 << "selected-regions and att-consecutive-kernels options are mutually exclusive";
         }
 
-        if(!att_no_intercept && handle_marker_trace)
+        if(!handle_debugger_trace && !att_no_intercept && handle_marker_trace)
         {
             // Marker-controlled device thread trace:
             // Context is registered for pause/resume control and starts stopped.
@@ -3442,7 +3454,18 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
             auto agent_params = global_parameters;
             for(auto& counter : get_att_perfcounter_params(id, att_perf))
                 agent_params.push_back(counter);
-            if(att_no_intercept)
+            if(handle_debugger_trace)
+            {
+                ROCPROFILER_CALL(rocprofiler_configure_device_thread_trace_service(
+                                     debugger_context,
+                                     id,
+                                     agent_params.data(),
+                                     agent_params.size(),
+                                     tool::debugger_control::shader_data_callback,
+                                     user),
+                                 "debugger thread trace service configure");
+            }
+            else if(att_no_intercept)
             {
                 auto trace_config = tool::att_no_intercept::configure_agent(
                     id, tool::get_config().att_consecutive_kernels);
@@ -3745,6 +3768,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     if(tool_metadata->process_start_ns == 0)
         rocprofiler_get_timestamp(&(tool_metadata->process_start_ns));
 
+    // An injected client is published by tool_attach after attach setup completes.
+    if(tool::get_env("ROCPROF_ATTACH_PID", pid_t{0}) != getpid())
+        tool::debugger_control::start_worker();
     return 0;
 }
 
@@ -4244,6 +4270,7 @@ generate_output(cleanup_mode _cleanup_mode, bool skip_output = false)
 void
 tool_detach(void* /*tool_data*/)
 {
+    tool::debugger_control::finalize();
     detach_output_generated = true;
 
     auto _detach_timer = common::simple_timer{"[rocprofv3] tool detachment"};
@@ -4298,6 +4325,8 @@ tool_fini(void* /*tool_data*/)
     static bool _first = true;
     if(!_first) return;
     _first = false;
+
+    tool::debugger_control::finalize();
 
     client_identifier = nullptr;
     client_finalizer  = nullptr;

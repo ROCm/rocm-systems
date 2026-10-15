@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 # SPDX-License-Identifier: MIT
-"""Launch a single application under ROCgdb with breakpoint-controlled ATT."""
+"""Launch a process tree under ROCgdb with breakpoint-controlled ATT."""
 
 import argparse
 import json
@@ -12,6 +12,7 @@ import shutil
 import subprocess
 import sys
 import tempfile
+import uuid
 
 sys.path.insert(0, str(Path(__file__).resolve().parent.parent / "share/rocprofiler-sdk"))
 from rocprofv3_att_gdb_common import parse_duration, parse_skip
@@ -28,10 +29,10 @@ def executable(value, fallback):
 def main(argv=None):
     argv = list(sys.argv[1:] if argv is None else argv)
     parser = argparse.ArgumentParser(
-        description="Single-process CPU-breakpoint ATT prototype. Remaining options go to rocprofv3.",
+        description="CPU-breakpoint ATT for an application and its descendants. Remaining options go to rocprofv3.",
         usage="%(prog)s [--start LOCATION (--stop LOCATION | --timeout 10ms)] [ATT options] -- APPLICATION [args]",
         epilog="Without --start, use 'att arm --start LOCATION --stop LOCATION' inside ROCgdb, then 'run'. "
-        "Choose a start after GPU initialization. Application ROCTx Pause/Resume shares prototype control state.",
+        "A breakpoint in any descendant triggers all registered profiling processes. Choose a start after participant initialization.",
         allow_abbrev=False,
     )
     parser.add_argument("--start", help="CPU function or file:line that starts capture")
@@ -51,7 +52,7 @@ def main(argv=None):
     parser.add_argument(
         "--batch",
         action="store_true",
-        help="unattended mode: exit after the application instead of keeping ROCgdb open; nonzero on incomplete capture",
+        help="unattended mode: exit after the process tree; nonzero on incomplete capture",
     )
     parser.add_argument(
         "--rocgdb", help="ROCgdb executable (default: next to rocprofv3 or on PATH)"
@@ -69,10 +70,8 @@ def main(argv=None):
         "--preload",
         nargs="*",
         default=os.environ.get("ROCPROF_PRELOAD", "").split(":"),
-        help="additional preloads, passed before the prototype helper",
+        help="additional application preloads",
     )
-    # Useful when testing a standalone prototype build against an installed SDK.
-    parser.add_argument("--helper", help=argparse.SUPPRESS)
     parser.add_argument("--extension", help=argparse.SUPPRESS)
     split = argv.index("--") if "--" in argv else len(argv)
     args, profiler_args = parser.parse_known_args(argv[:split])
@@ -99,9 +98,7 @@ def main(argv=None):
     }
     for option in profiler_args:
         if option.split("=", 1)[0] in incompatible or re.match(r"^-[pi].+", option):
-            parser.error(
-                f"{option} is incompatible with this single-process launch prototype"
-            )
+            parser.error(f"{option} is incompatible with the debugger launch workflow")
 
     prefix = Path(__file__).resolve().parent.parent
     try:
@@ -119,39 +116,15 @@ def main(argv=None):
                 shutil.which("rocgdb") or "/opt/rocm/bin/rocgdb",
             ],
         )
-        helper = (
-            Path(args.helper)
-            if args.helper
-            else next(
-                (
-                    p
-                    for d in ("lib", "lib64")
-                    if (
-                        p := prefix / d / "rocprofiler-sdk/librocprofv3-att-gdb-helper.so"
-                    ).is_file()
-                ),
-                prefix / "lib/rocprofiler-sdk/librocprofv3-att-gdb-helper.so",
-            )
-        )
         extension = (
             Path(args.extension)
             if args.extension
             else prefix / "share/rocprofiler-sdk/rocprofv3_att_gdb.py"
         )
-        if not helper.is_file() or not extension.is_file():
+        if not extension.is_file():
             raise ValueError(
-                "prototype helper/extension missing; build and install rocprofv3-att-gdb first"
+                "debugger extension missing; build and install rocprofv3-att-gdb first"
             )
-        # Let rocprofv3 choose its matching SDK; --rocm-root may override its installation.
-        rocm_root = Path(profiler).resolve().parent.parent
-        for i, option in enumerate(profiler_args):
-            if option == "--rocm-root" and i + 1 < len(profiler_args):
-                rocm_root = Path(profiler_args[i + 1])
-            elif option.startswith("--rocm-root="):
-                rocm_root = Path(option.split("=", 1)[1])
-        roctx = rocm_root / "lib/librocprofiler-sdk-roctx.so"
-        if not roctx.is_file():
-            raise ValueError(f"ROCTx library not found: {roctx}")
         app = executable(application[0], [application[0]])
     except ValueError as error:
         parser.error(str(error))
@@ -162,6 +135,8 @@ def main(argv=None):
     ) as directory:
         config = {
             "socket": f"{directory}/control.sock",
+            "session": uuid.uuid4().hex,
+            "session_file": f"{directory}/session.json",
             "batch": args.batch,
             "start": args.start,
             "skip": args.skip,
@@ -172,17 +147,18 @@ def main(argv=None):
                 profiler,
                 *profiler_args,
                 "--att",
-                "--selected-regions",
-                "--selected-regions-ref-count=false",
+                "--att-debugger-session",
+                f"{directory}/session.json",
                 "--preload",
                 *[p for p in args.preload if p],
-                str(helper.resolve()),
-                str(roctx.resolve()),
                 "--",
             ],
         }
         config_path = Path(directory) / "config.json"
         config_path.write_text(json.dumps(config))
+        Path(config["session_file"]).write_text(
+            json.dumps({"socket": config["socket"], "session": config["session"]})
+        )
         init_path = Path(directory) / "init.gdb"
         init_path.write_text(
             "python\nimport os, gdb, traceback\nos.environ['ROCPROFV3_GDB_CONFIG'] = "

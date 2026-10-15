@@ -15,6 +15,7 @@ def pytest_addoption(parser):
     )
     parser.addoption("--rocm", default="/opt/rocm")
     parser.addoption("--gpu-arch", default="native")
+    parser.addoption("--profiler", help="rocprofv3 from the SDK build under test")
 
 
 @pytest.fixture(scope="session")
@@ -78,3 +79,45 @@ def hip_app_noinline(request, tmp_path_factory):
     # A symbol for the stub may remain even when optimized callers inline it.
     # This separate fixture tests only the supported out-of-line launch case.
     return compile_hip_app(request, tmp_path_factory, ["-fno-inline"])
+
+
+@pytest.fixture(scope="session")
+def process_tree(tmp_path_factory):
+    root = tmp_path_factory.mktemp("process-tree")
+    binaries = []
+    for name in ("tree_root", "tree_trigger", "tree_worker"):
+        binary = root / name
+        subprocess.run(
+            [
+                os.environ.get("CXX", "c++"),
+                "-g",
+                "-O0",
+                str(Path(__file__).parent / f"{name}.cpp"),
+                "-o",
+                str(binary),
+            ],
+            check=True,
+        )
+        binaries.append(str(binary))
+    return binaries
+
+
+@pytest.fixture(scope="session")
+def gpu_process_tree(request, tmp_path_factory, process_tree):
+    if not request.config.getoption("--gpu"):
+        pytest.skip("use --gpu")
+    binary = tmp_path_factory.mktemp("gpu-tree") / "tree_worker"
+    subprocess.run(
+        [
+            str(Path(request.config.getoption("--rocm")) / "bin/hipcc"),
+            "-g",
+            "-O1",
+            "-DATT_GPU_FIXTURE",
+            "--offload-arch=" + request.config.getoption("--gpu-arch"),
+            str(Path(__file__).parent / "tree_worker.cpp"),
+            "-o",
+            str(binary),
+        ],
+        check=True,
+    )
+    return [*process_tree[:2], str(binary)]

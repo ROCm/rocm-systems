@@ -26,6 +26,7 @@ import os
 import sys
 import re
 import argparse
+import json
 import textwrap
 import subprocess
 
@@ -1047,6 +1048,13 @@ For attachment profiling of running processes:
     advanced_options = parser.add_argument_group("Advanced options")
 
     advanced_options.add_argument(
+        "--att-debugger-session",
+        help="Join the ATT trigger session printed by 'att session' in rocprofv3-att-gdb",
+        metavar="FILE",
+        default=None,
+    )
+
+    advanced_options.add_argument(
         "--preload",
         help="Libraries to prepend to LD_PRELOAD (useful for sanitizer libraries)",
         default=os.environ.get("ROCPROF_PRELOAD", "").split(":"),
@@ -1742,6 +1750,25 @@ def run(app_args, args, **kwargs):
         return app_env.get(env_var, None)
 
     update_env("ROCPROFILER_LIBRARY_CTOR", True)
+
+    if args.att_debugger_session:
+        if not args.advanced_thread_trace:
+            fatal_error("--att-debugger-session requires --att")
+        try:
+            with open(args.att_debugger_session) as stream:
+                session = json.load(stream)
+            if (
+                not isinstance(session, dict)
+                or not isinstance(session.get("socket"), str)
+                or not session["socket"]
+                or not isinstance(session.get("session"), str)
+                or not re.fullmatch(r"[0-9a-f]{32}", session["session"])
+            ):
+                raise ValueError("invalid session descriptor")
+            update_env("ROCPROFV3_GDB_SOCKET", session["socket"], overwrite=True)
+            update_env("ROCPROFV3_GDB_SESSION", session["session"], overwrite=True)
+        except (OSError, ValueError, TypeError) as error:
+            fatal_error(f"Unable to join ATT debugger session: {error}")
 
     ROCPROFV3_DIR = os.path.dirname(os.path.realpath(__file__))
     ROCM_DIR = os.path.dirname(ROCPROFV3_DIR)

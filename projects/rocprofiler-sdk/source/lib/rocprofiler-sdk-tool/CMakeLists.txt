@@ -8,6 +8,8 @@ set(TOOL_HEADERS
     att_no_intercept.hpp
     att_no_intercept_impl.hpp
     config.hpp
+    debugger_control.hpp
+    debugger_control_transport.hpp
     execution_profile.hpp
     graph_stack.hpp
     helper.hpp
@@ -15,8 +17,17 @@ set(TOOL_HEADERS
     kernel_iteration_filter.hpp
     stream_stack.hpp)
 
-set(TOOL_SOURCES att_no_intercept.cpp config.cpp graph_stack.cpp kernel_filter_range.cpp
-                 kernel_iteration_filter.cpp main.c stream_stack.cpp tool.cpp)
+set(TOOL_SOURCES
+    att_no_intercept.cpp
+    config.cpp
+    debugger_control.cpp
+    debugger_control_transport.cpp
+    graph_stack.cpp
+    kernel_filter_range.cpp
+    kernel_iteration_filter.cpp
+    main.c
+    stream_stack.cpp
+    tool.cpp)
 
 if(rocprof-trace-decoder_FOUND)
     list(APPEND TOOL_SOURCES att_no_intercept_quick_scan.cpp)
@@ -34,6 +45,7 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-common-library
             rocprofiler-sdk::rocprofiler-sdk-output-library
             rocprofiler-sdk::rocprofiler-sdk-cereal
+            rocprofiler-sdk::rocprofiler-sdk-json
             rocprofiler-sdk::rocprofiler-sdk-perfetto
             rocprofiler-sdk::rocprofiler-sdk-otf2
             rocprofiler-sdk::rocprofiler-sdk-dw

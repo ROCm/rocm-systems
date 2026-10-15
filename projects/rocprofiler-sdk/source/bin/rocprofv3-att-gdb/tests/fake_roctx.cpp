@@ -4,6 +4,7 @@
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
+#include <cstring>
 
 static int
 record(const char* name, const char* gate_variable)
@@ -20,7 +21,7 @@ record(const char* name, const char* gate_variable)
         while(access(gate, F_OK) != 0)
             usleep(1000);
     }
-    return 0;
+    return std::getenv("ATT_TEST_FAIL_STOP") && std::strcmp(name, "stop") == 0 ? 1 : 0;
 }
 extern "C" int roctxProfilerResume(uint64_t) { return record("start", "ATT_TEST_RESUME_GATE"); }
 extern "C" int roctxProfilerPause(uint64_t) { return record("stop", "ATT_TEST_PAUSE_GATE"); }

@@ -9,6 +9,7 @@ from pathlib import Path
 import shutil
 import subprocess
 import tempfile
+import uuid
 
 import pytest
 
@@ -48,7 +49,15 @@ def session(debugger, cpu_app, helper, fake_roctx, launcher, tmp_path):
     with ExitStack() as stack:
 
         def launch(
-            start="capture_begin", stop="capture_end", timeout=0, mode="", **environment
+            start="capture_begin",
+            stop="capture_end",
+            timeout=0,
+            mode="",
+            application=None,
+            app_args=None,
+            batch=False,
+            skip=0,
+            **environment,
         ):
             directory = Path(
                 stack.enter_context(tempfile.TemporaryDirectory(prefix="att-gdb-test-"))
@@ -58,7 +67,9 @@ def session(debugger, cpu_app, helper, fake_roctx, launcher, tmp_path):
                 json.dumps(
                     dict(
                         socket=str(directory / "socket"),
-                        batch=False,
+                        session=uuid.uuid4().hex,
+                        batch=batch,
+                        skip=skip,
                         start=start,
                         stop=stop,
                         timeout=timeout,
@@ -86,14 +97,15 @@ def session(debugger, cpu_app, helper, fake_roctx, launcher, tmp_path):
                         "-ex",
                         "source " + str(extension),
                         "--args",
-                        cpu_app,
-                        mode,
+                        application or cpu_app,
+                        *(app_args if app_args is not None else [mode]),
                     ],
                     tmp_path / "debugger.log",
                     env=env,
                 )
             )
             console.expect("(gdb)")
+            console.att_config = json.loads(config.read_text())
             # Shorten failure detection while retaining the real asynchronous event loop.
             console.send("python capture.control_timeout = 0.5")
             return console
@@ -223,11 +235,10 @@ def test_timeout_excludes_slow_resume_and_debugger_continuation(session, tmp_pat
 
 
 @pytest.mark.parametrize("armed", [True, False])
-def test_connection_retries_after_loader_pause(session, armed):
+def test_registration_after_loader_pause(session, armed):
     console = session(start="capture_begin" if armed else None)
-    console.send("python capture.connect_timeout = 0.1\nstarti")
+    console.send("starti")
     console.expect("stopped.")
-    console.expect("control unavailable:")
     if not armed:
         console.send("att arm --start capture_begin --stop capture_end")
     console.send("continue")
@@ -252,3 +263,121 @@ def test_completed_capture_watchdog_does_not_affect_rearm(session):
     console.send("att status")
     console.expect("state=ACTIVE capture=2")
     assert b"[att] ERROR" not in console.output
+
+
+@pytest.mark.parametrize(
+    "mode", ["fork", "spawn", "fork-orphan", "spawn-orphan", "repeat"]
+)
+def test_nested_trigger_and_parent_exit(session, process_tree, tmp_path, mode):
+    root, trigger, worker = process_tree
+    console = session(
+        start="tree_begin",
+        stop="tree_end",
+        application=root,
+        app_args=[trigger, worker, mode],
+        batch=True,
+        skip=1 if mode == "repeat" else 0,
+    )
+    console.send("run")
+    console.expect("DONE capture=1 reason=breakpoint")
+    assert console.process.wait(timeout=10) == 0
+    assert b"pending" in console.output  # B's trigger symbol does not exist in A.
+    expected = 2 if "orphan" in mode else 3
+    calls = (tmp_path / "calls").read_text().splitlines()
+    assert calls.count("start") == calls.count("stop") == expected
+
+
+def test_broadcast_does_not_wait_for_first_participant(session, process_tree, tmp_path):
+    root, trigger, worker = process_tree
+    gate = tmp_path / "resume"
+    console = session(
+        start="tree_begin",
+        stop="tree_end",
+        application=root,
+        app_args=[trigger, worker, "fork"],
+        ATT_TEST_RESUME_GATE=str(gate),
+    )
+    console.send("run")
+    for _ in range(3):
+        console.expect("WAITING_start")
+    assert (tmp_path / "calls").read_text().splitlines() == ["start"] * 3
+    gate.touch()
+    console.expect("DONE capture=1")
+
+
+def test_nested_timeout_uses_trigger_descendant_continuation(
+    session, process_tree, tmp_path
+):
+    root, trigger, worker = process_tree
+    console = session(
+        start="tree_begin",
+        stop=None,
+        timeout=20_000_000,
+        application=root,
+        app_args=[trigger, worker, "fork-timeout"],
+        batch=True,
+    )
+    console.send("run")
+    console.expect("DONE capture=1 reason=timeout")
+    assert console.process.wait(timeout=10) == 0
+    assert (tmp_path / "calls").read_text().splitlines().count("stop") == 3
+
+
+def test_late_participant_joins_next_capture(session, helper, fake_roctx, tmp_path):
+    console = session()
+    console.send("break user_stop\nbreak between_captures\nrun")
+    console.expect("ACTIVE capture=1")
+    console.expect("hit Breakpoint 3")
+    config = console.att_config
+    env = dict(
+        os.environ,
+        LD_PRELOAD=f"{helper}:{fake_roctx}",
+        ROCPROFV3_GDB_SOCKET=config["socket"],
+        ROCPROFV3_GDB_SESSION=config["session"],
+        ATT_TEST_CALLS=str(tmp_path / "calls"),
+    )
+    late = subprocess.Popen(["/bin/sleep", "30"], env=env)
+    try:
+        console.expect(f"PID {late.pid},")
+        assert (tmp_path / "calls").read_text().splitlines() == ["start"]
+        console.send("disable 3\ncontinue")
+        console.expect("DONE capture=1")
+        console.expect("hit Breakpoint 4")
+        console.send(
+            "att arm --start capture_begin --stop capture_end\ndisable 4\ncontinue"
+        )
+        console.expect("DONE capture=2")
+        calls = (tmp_path / "calls").read_text().splitlines()
+        assert calls.count("start") == calls.count("stop") == 3
+    finally:
+        late.terminate()
+        late.wait(timeout=3)
+
+
+def test_repeated_stop_failure_has_bounded_cleanup(session, tmp_path):
+    console = session(ATT_TEST_FAIL_STOP="1")
+    console.send("run")
+    console.expect("ERROR:")
+    console.expect("cleanup acknowledgement missing")
+    calls = (tmp_path / "calls").read_text().splitlines()
+    assert calls == ["start", "stop", "stop"]
+
+
+def test_group_cancel_while_starts_are_pending(session, process_tree, tmp_path):
+    root, trigger, worker = process_tree
+    gate = tmp_path / "resume"
+    console = session(
+        start="tree_begin",
+        stop="tree_end",
+        application=root,
+        app_args=[trigger, worker, "fork"],
+        ATT_TEST_RESUME_GATE=str(gate),
+    )
+    console.send("run")
+    for _ in range(3):
+        console.expect("WAITING_start")
+    console.send("att cancel")
+    gate.touch()
+    console.expect("DONE capture=1 reason=cancel")
+    assert b"[att] ACTIVE" not in console.output
+    assert (tmp_path / "calls").read_text().splitlines().count("stop") == 3
