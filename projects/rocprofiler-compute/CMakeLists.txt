@@ -985,7 +985,7 @@ add_test(
 )
 
 # -----------------------------------
-# Single-pass packable (SPP) + bucket helper unit tests
+# Single-pass metric (single-pass metric) + bucket helper unit tests
 # -----------------------------------
 
 add_test(
@@ -1005,7 +1005,7 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
-# Same-pass bind (SPP analyze)
+# Same-pass bind (single-pass metric analyze)
 add_test(
     NAME test_pass_provenance
     COMMAND
