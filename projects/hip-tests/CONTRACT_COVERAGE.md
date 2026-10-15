@@ -160,7 +160,7 @@ binaries instead of exposing portable state to assert.
 | `kernel` | 4 |
 | `kernel_launch` | 7 |
 | `kernel_name_ref` | 3 |
-| `kernel_object_attributes` | 3 |
+| `kernel_object_attributes` | 5 |
 | `library` | 14 |
 | `library_file` | 3 |
 | `logging` | 3 |
