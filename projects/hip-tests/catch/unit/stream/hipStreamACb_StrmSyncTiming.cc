@@ -34,14 +34,6 @@ __global__ void vector_square(float* C_d, float* A_d, size_t N_elmts) {
   for (size_t i = offset; i < N_elmts; i += stride) {
     C_d[i] = A_d[i] * A_d[i];
   }
-
-  // Delay the thread 1
-  if (offset == 1) {
-    unsigned long long int wait_t = 3200000000, start = clock64(), cur;
-    do {
-      cur = clock64() - start;
-    } while (cur < wait_t);
-  }
 }
 
 float *A_h, *C_h;
