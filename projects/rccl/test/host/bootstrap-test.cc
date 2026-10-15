@@ -731,6 +731,10 @@ class BootstrapMicrotest : public ::testing::Test {
     while (g_liveRoots > 0 && Clock::now() < deadline) g_sockCv.wait_for(lock, std::chrono::milliseconds(1));
     EXPECT_EQ(0, g_liveRoots);
   }
+  size_t PendingOn(const struct ncclSocket& listen) {
+    std::lock_guard<std::mutex> lock(g_sockMu);
+    return g_listeners[listen.socketDescriptor - kListenFd].pending.size();
+  }
   int OpenListeners() {
     std::lock_guard<std::mutex> lock(g_sockMu);
     return std::count_if(g_openFds.begin(), g_openFds.end(), [](int fd) { return fd >= kListenFd; });
@@ -1262,6 +1266,7 @@ TEST_F(BootstrapMicrotest, Root_RankGoneBeforeItsAnswer_MakesTheRootGiveUp) {
   (void)ncclSocketClose(&listen[0]);
   CheckIn(1, 2, &listen[1]);  // completes the ring: the root now answers both, starting with rank 0
   WaitRoots();
+  EXPECT_EQ(0u, PendingOn(listen[1]));  // gave up rather than answering rank 1 anyway
   (void)ncclSocketClose(&listen[1]);
 }
 
@@ -1920,8 +1925,24 @@ TEST_F(BootstrapMicrotest, IntraNodeAllGather_EncryptedConnectsOnAHelperThread) 
   int local[3] = {0, 1, 2};
   char data[3][3] = {};
   for (int r = 0; r < 3; r++) data[r][r] = char('a' + r);
-  EXPECT_TRUE(AllOk(OnRanks([&](int r) { return bootstrapIntraNodeAllGather(State(r), local, r, 3, data[r], 1); })));
+  std::mutex mu;
+  std::set<std::thread::id> rankThreads, connectThreads;
+  SetSockFault([&](const char* op, struct ncclSocket*) {
+    std::lock_guard<std::mutex> lock(mu);
+    if (std::strcmp(op, "connect") == 0) connectThreads.insert(std::this_thread::get_id());
+    return ncclSuccess;
+  });
+  EXPECT_TRUE(AllOk(OnRanks([&](int r) {
+    {
+      std::lock_guard<std::mutex> lock(mu);
+      rankThreads.insert(std::this_thread::get_id());
+    }
+    return bootstrapIntraNodeAllGather(State(r), local, r, 3, data[r], 1);
+  })));
+  SetSockFault(nullptr);
   for (int r = 0; r < 3; r++) EXPECT_EQ("abc", std::string(data[r], 3)) << r;
+  EXPECT_EQ(3u, connectThreads.size());
+  for (auto id : connectThreads) EXPECT_EQ(0u, rankThreads.count(id));
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 
