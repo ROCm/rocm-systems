@@ -1441,11 +1441,6 @@ rsmi_status_t GpuMetricsBase_v18_t::populate_metrics_dynamic_tbl() {
                            m_gpu_metrics_tbl.m_xcp_stats->gfx_low_utilization_acc,
                            "xcp_stats->gfx_low_utilization_acc");
 
-    // GPU metrics v1.9 xcp_stats info
-    populate_metrics_table(
-        AMDGpuMetricsClassId_t::kGpuMetricXcpStats, AMDGpuMetricsUnitType_t::kMetricTempXcd,
-        m_gpu_metrics_tbl.m_xcp_stats->temperature_xcd, "xcp_stats->temperature_xcd");
-
     // PCIE other end recovery counter info
     populate_metrics_table(AMDGpuMetricsClassId_t::kGpuMetricLinkWidthSpeed,
                            AMDGpuMetricsUnitType_t::kMetricPcieLCPerfOtherEndRecov,
@@ -1507,10 +1502,6 @@ rsmi_status_t GpuMetricsBase_v18_t::populate_metrics_dynamic_tbl() {
                            AMDGpuMetricsUnitType_t::kMetricGfxLowUtilitizationAcc,
                            m_gpu_metrics_partition_tbl.m_gfx_low_utilization_acc,
                            "[partition 1.0] gfx_low_utilization_acc");
-    // v1.9
-    populate_metrics_table(
-        AMDGpuMetricsClassId_t::kGpuMetricXcpStats, AMDGpuMetricsUnitType_t::kMetricTempXcd,
-        m_gpu_metrics_partition_tbl.m_temperature_xcd, "xcp_stats->temperature_xcd");
   }
 
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
@@ -3126,8 +3117,6 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v18_t::copy_internal_to_external_m
                     pub_it->gfx_low_utilization_acc);
         std::copy_n(std::begin(priv_it->gfx_below_host_limit_total_acc), RSMI_MAX_NUM_XCC,
                     pub_it->gfx_below_host_limit_total_acc);
-        std::copy_n(std::begin(priv_it->temperature_xcd), RSMI_MAX_NUM_XCC,
-                    pub_it->temperature_xcd);
       }
     } else {
       // Partition Data: /sys/class/drm/renderDXXX/device/xcp/xcp_metrics
@@ -3196,8 +3185,6 @@ AMGpuMetricsPublicLatestTupl_t GpuMetricsBase_v18_t::copy_internal_to_external_m
                       RSMI_MAX_NUM_XCC, it->gfx_low_utilization_acc);
           std::copy_n(std::begin(m_gpu_metrics_partition_tbl.m_gfx_below_host_limit_total_acc),
                       RSMI_MAX_NUM_XCC, it->gfx_below_host_limit_total_acc);
-          std::copy_n(std::begin(m_gpu_metrics_partition_tbl.m_temperature_xcd), RSMI_MAX_NUM_XCC,
-                      it->temperature_xcd);
         } else {
           break;  // No need to copy for other rows
         }
