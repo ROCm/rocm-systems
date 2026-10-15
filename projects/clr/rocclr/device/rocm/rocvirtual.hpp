@@ -51,6 +51,7 @@ constexpr static uint64_t kUnlimitedWait = std::numeric_limits<uint64_t>::max();
 constexpr static uint64_t kInvalidQueueIndex = std::numeric_limits<uint64_t>::max();
 
 constexpr static uint64_t kTimeout4Secs = 4 * G;
+constexpr static uint64_t kTimeout4Ms = 4 * M;
 
 inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yield = false) {
   hsa_wait_state_t wait_state = HSA_WAIT_STATE_BLOCKED;
@@ -78,13 +79,16 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
 
     // This is unlimited wait, but we wait for 4 secs and check if the device is
     // unstable, if so we return, otherwise we continue to wait in the while loop.
+    // An active wait that asked to yield (hipSyncPolicyYield) gives up the CPU
+    // between waits, so it keeps re-arming every 4 ms.
+    const uint64_t timeout = (active_wait && yield) ? kTimeout4Ms : kTimeout4Secs;
     while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
-                                     kTimeout4Secs, wait_state) != 0) {
+                                     timeout, wait_state) != 0) {
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
         ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
                 "Device not Stable, while waiting for Signal ="
                 "(0x%lx) for %llu ns",
-                signal.handle, static_cast<unsigned long long>(kTimeout4Secs));
+                signal.handle, static_cast<unsigned long long>(timeout));
         return true;
       }
       if (yield && wait_state == HSA_WAIT_STATE_ACTIVE) {
