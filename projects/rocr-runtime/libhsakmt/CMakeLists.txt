@@ -416,9 +416,10 @@ else()
       ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary
       LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} COMPONENT binary )
   endif()
-  # Install public headers
+  # Install public headers. rocdxg_smi.h describes librocdxg, which only the
+  # WSL build produces, so it would otherwise ship for a library that is absent.
   install ( DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/include/${HSAKMT_TARGET} DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}
-    COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE)
+    COMPONENT dev PATTERN "linux" EXCLUDE PATTERN "*virtio*" EXCLUDE PATTERN "rocdxg*" EXCLUDE)
 
   # Record our usage data for clients find_package calls. On Windows, this is
   # only relocatable for the prebuilt WKMI path because that path installs

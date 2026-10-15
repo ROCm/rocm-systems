@@ -424,6 +424,8 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_enum_processes(uint32_t node_id, uint32_t* nu
 HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_info(uint32_t node_id,
                                                    rocdxg_smi_device_info_t* info) {
   if (info == nullptr) return HSAKMT_STATUS_INVALID_PARAMETER;
+  // Rejects a caller built against a different layout before anything is written.
+  if (info->struct_size != sizeof(*info)) return HSAKMT_STATUS_BUFFER_TOO_SMALL;
   auto* wdev = checked_device(node_id);
   if (wdev == nullptr) return HSAKMT_STATUS_INVALID_NODE_UNIT;
 
@@ -460,6 +462,7 @@ HSAKMT_STATUS HSAKMTAPI rocdxg_smi_get_device_info(uint32_t node_id,
     info->asic.rev_id = wdev->AsicRevision();
     info->asic.asic_serial = wdev->Uuid();
     info->asic.num_of_compute_units = wdev->ComputeUnitCount();
+    info->asic.num_xcc = wdev->NumXcc();
     info->asic.target_graphics_version = target_graphics_version(*wdev);
     copy_string(info->asic.market_name, wdev->ProductName());
   }
