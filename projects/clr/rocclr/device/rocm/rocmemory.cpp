@@ -1809,9 +1809,11 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
 
   if (hsaStatus != HSA_STATUS_SUCCESS) {
     LogPrintfError("[OCL] Fail to allocate image memory with status: %d \n", hsaStatus);
-    if (errorCode != nullptr &&
-        hsaStatus == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED)) {
-      *errorCode = amd::Memory::kErrorImagePitchUnsupported;
+    if (errorCode != nullptr) {
+      *errorCode =
+          (hsaStatus == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED))
+              ? amd::Memory::kErrorImagePitchUnsupported
+              : amd::Memory::kErrorUnknown;
     }
     return false;
   }

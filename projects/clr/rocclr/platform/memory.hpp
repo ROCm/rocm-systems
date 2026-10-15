@@ -156,6 +156,7 @@ class Memory : public amd::RuntimeObject {
   enum ErrorCode : uint32_t {
     kErrorNone                  = 0,  //!< No device-create failure recorded (default).
     kErrorImagePitchUnsupported = 1,  //!< Image row pitch rejected by the backend.
+    kErrorUnknown               = 2,  //!< Generic/unspecified device-create failure.
   };
 
   struct UserData {
