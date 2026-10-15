@@ -250,6 +250,11 @@ The `amdsmitst` tests are grouped into the quality categories defined in
 `amd_smi_test/test_categories.yaml` (`quick`/`standard`/`comprehensive`/`full`)
 and can be run through CTest labels.
 
+`quick` and `standard` do not require root. The three Python runners currently
+require root, so they carry only `comprehensive`/`full` (and their aliases), plus
+the `requires_root` label. Run those categories with `sudo`; adding
+`-LE '^amdsmi_python$'` omits the Python runners.
+
 > **Keep in sync:** the per-ASIC exclusions are maintained by hand in **both**
 > `amd_smi_test/test_categories.yaml` (this ctest label path) and
 > `amd_smi_test/amdsmitst.exclude` (the `detect_asic_filter.sh` runtime path).

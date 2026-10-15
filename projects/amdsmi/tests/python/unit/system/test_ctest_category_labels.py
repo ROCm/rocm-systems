@@ -15,7 +15,7 @@ import unittest
 from pathlib import Path
 
 _CTEST_FILE = Path(__file__).resolve().parents[3] / "ctest" / "CTestTestfile.cmake"
-_CATEGORIES = ("quick", "standard", "comprehensive", "full")
+_CATEGORIES = ("comprehensive", "full")
 _PYTHON_RUNNERS = ("unit_tests.py", "integration_test.py", "cli_unit_test.py")
 
 
@@ -73,3 +73,12 @@ class CtestCategoryLabelsTest(unittest.TestCase):
             ]
             with self.subTest(category=category):
                 self.assertEqual(self._runner_counts(selected), dict.fromkeys(_PYTHON_RUNNERS, 1))
+
+    def test_root_runners_do_not_have_unprivileged_labels(self):
+        unprivileged = {"quick", "pre-commit", "smoke", "standard", "pr", "precheckin"}
+        for name, (command, labels) in self.tests.items():
+            if "python_unittest/" not in command:
+                continue
+            with self.subTest(runner=name):
+                self.assertFalse(labels & unprivileged)
+                self.assertIn("requires_root", labels)

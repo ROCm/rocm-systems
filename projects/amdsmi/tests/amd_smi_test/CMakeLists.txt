@@ -209,18 +209,13 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
     # Keep the arch labels in sync with exclude_gpu in test_categories.yaml.
     if(AMDSMI_CTEST_PYTHON_TESTS)
         set(_AMDSMI_PYTHON_CATEGORY_LABELS
-            "quick"
-            "pre-commit"
-            "smoke"
-            "standard"
-            "pr"
-            "precheckin"
             "comprehensive"
             "nightly"
             "extended"
             "full"
             "all"
             "amdsmi_python"
+            "requires_root"
         )
         set(_AMDSMI_PYTHON_LABELS
             ${_AMDSMI_PYTHON_CATEGORY_LABELS}
