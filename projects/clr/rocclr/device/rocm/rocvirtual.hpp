@@ -82,8 +82,8 @@ inline bool WaitForSignal(hsa_signal_t signal, bool active_wait = false, bool yi
     // An active wait that asked to yield (hipSyncPolicyYield) gives up the CPU
     // between waits, so it keeps re-arming every 4 ms.
     const uint64_t timeout = (active_wait && yield) ? kTimeout4Ms : kTimeout4Secs;
-    while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne,
-                                     timeout, wait_state) != 0) {
+    while (Hsa::signal_wait_scacquire(signal, HSA_SIGNAL_CONDITION_LT, kInitSignalValueOne, timeout,
+                                      wait_state) != 0) {
       if (HIP_SKIP_ABORT_ON_GPU_ERROR && amd::Device::IsGPUInError()) {
         ClPrint(amd::LOG_ERROR, amd::LOG_SIG,
                 "Device not Stable, while waiting for Signal ="
