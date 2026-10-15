@@ -1813,4 +1813,138 @@ TEST_F(ProxyProgressThreadMicrotest, CreateStartsOneNamedThread) {
   EXPECT_FALSE(st().thread.joinable());
 }
 
+// Shared-memory ops pool and connection init (service side)
+
+class ProxyShmPoolMicrotest : public ProxyFixture {
+ protected:
+  void SetUp() override {
+    ProxyFixture::SetUp();
+    ps_.abortFlag = &abort_;
+    ps_.tpLocalnRanks = 3;
+    ps_.tpnRanks = 8;
+  }
+  void TearDown() override {
+    if (st().opsPool) {
+      EXPECT_EQ(ncclProxyProgressDestroy(&ps_), ncclSuccess);
+      proxyOpsFree(&ps_);
+    }
+    for (int b = 0; b < pool_.banks; b++) free(pool_.pools[b]);
+    free(pool_.pools);
+    ProxyFixture::TearDown();
+  }
+  ncclProxyProgressState& st() { return ps_.progressState; }
+
+  ncclProxyState ps_ = {};
+  uint32_t abort_ = 0;
+  ncclProxyConnectionPool pool_ = {nullptr, 0, NCCL_PROXY_CONN_POOL_SIZE};
+};
+
+TEST_F(ProxyShmPoolMicrotest, ProgressInit_MapsThePoolOnceThreadsFreeListsAndStartsTheThread) {
+  ASSERT_EQ(proxyProgressInit(&ps_), ncclSuccess);
+  ncclProxyOpsPool* pool = st().opsPool;
+  ASSERT_NE(pool, nullptr);
+  EXPECT_EQ(g_shm.opens, 1);
+  EXPECT_EQ(g_shm.lastRefcount, 3);
+  EXPECT_STREQ(st().opsPoolShmSuffix, "AbC123");
+  EXPECT_EQ(pool->nextOps, -1);
+  for (int r = 0; r < 3; r++) {
+    EXPECT_EQ(pool->freeOps[r], r * MAX_OPS_PER_PEER);
+    EXPECT_EQ(pool->ops[r * MAX_OPS_PER_PEER].next, r * MAX_OPS_PER_PEER + 1);
+    EXPECT_EQ(pool->ops[(r + 1) * MAX_OPS_PER_PEER - 1].next, -1);
+  }
+  EXPECT_EQ(pool->syncObjectsInitialized, 1);
+  EXPECT_TRUE(st().thread.joinable());
+  ASSERT_EQ(proxyProgressInit(&ps_), ncclSuccess);
+  EXPECT_EQ(g_shm.opens, 1);
+}
+
+TEST_F(ProxyShmPoolMicrotest, ProgressInit_ShmOpenFailurePropagates) {
+  g_shm.openResult = ncclSystemError;
+  EXPECT_EQ(proxyProgressInit(&ps_), ncclSystemError);
+  EXPECT_EQ(st().opsPool, nullptr);
+  EXPECT_FALSE(st().thread.joinable());
+}
+
+TEST_F(ProxyShmPoolMicrotest, OpsFree_UnsharesClosesAndForgetsThePool) {
+  ASSERT_EQ(proxyProgressInit(&ps_), ncclSuccess);
+  ASSERT_EQ(ncclProxyProgressDestroy(&ps_), ncclSuccess);
+  g_shm.closeResult = ncclSystemError;
+  proxyOpsFree(&ps_);
+  EXPECT_EQ(g_mutexCondUnshared, 1);
+  EXPECT_EQ(g_shm.closes, 1);
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "shm close failed"));
+  EXPECT_EQ(st().opsPool, nullptr);
+  EXPECT_EQ(st().handle, nullptr);
+  proxyOpsFree(&ps_);  // nothing mapped: only the (null) handle close
+  EXPECT_EQ(g_mutexCondUnshared, 1);
+  EXPECT_EQ(g_shm.closes, 2);
+}
+
+TEST_F(ProxyShmPoolMicrotest, ShmUnlink_OnlyWhenMappedAndFailureIsNotFatal) {
+  ncclComm& comm = *comm_;
+  comm.proxyState = &ps_;
+  EXPECT_EQ(ncclProxyShmUnlink(&comm), ncclSuccess);
+  EXPECT_EQ(g_shm.unlinks, 0);
+  ASSERT_EQ(proxyProgressInit(&ps_), ncclSuccess);
+  EXPECT_EQ(ncclProxyShmUnlink(&comm), ncclSuccess);
+  g_shm.unlinkResult = ncclSystemError;
+  EXPECT_EQ(ncclProxyShmUnlink(&comm), ncclSuccess);
+  EXPECT_EQ(g_shm.unlinks, 2);
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "proxy ops shm unlink failed"));
+}
+
+TEST_F(ProxyShmPoolMicrotest, ConnInit_RejectsOutOfRangeLocalRanks) {
+  ncclProxyLocalPeer peer = {};
+  ncclProxyInitReq req = {0, 1, 3, 0, 0};
+  ncclProxyInitResp resp = {};
+  ncclProxyConnection* conn = nullptr;
+  EXPECT_EQ(proxyConnInit(&peer, &pool_, &ps_, &req, &resp, &conn), ncclInvalidArgument);
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "tpLocalRank 3 out of range [0,3)"));
+  req.tpLocalRank = -1;
+  EXPECT_EQ(proxyConnInit(&peer, &pool_, &ps_, &req, &resp, &conn), ncclInvalidArgument);
+  EXPECT_EQ(pool_.banks, 0);
+}
+
+TEST_F(ProxyShmPoolMicrotest, ConnInit_RegistersTheConnectionAndMapsOpsForProgressTransports) {
+  ncclProxyLocalPeer peer = {};
+  peer.id = 42;
+  ncclProxyInitReq req = {/*transport*/ 0, /*send*/ 1, /*tpLocalRank*/ 2, /*tpRank*/ 6, /*sameProcess*/ 1};
+  ncclProxyInitResp resp = {};
+  ncclProxyConnection* conn = nullptr;
+  ASSERT_EQ(proxyConnInit(&peer, &pool_, &ps_, &req, &resp, &conn), ncclSuccess);
+  ASSERT_EQ(conn, pool_.pools[0]);
+  EXPECT_EQ(resp.connection, conn);
+  EXPECT_EQ(resp.connId, 0);
+  EXPECT_EQ(conn->sock, &peer.sock);
+  EXPECT_EQ(conn->peerId, 42u);
+  EXPECT_EQ(conn->send, 1);
+  EXPECT_EQ(conn->tpLocalRank, 2);
+  EXPECT_EQ(conn->sameProcess, 1);
+  EXPECT_EQ(conn->tcomm, &g_transports[0].send);
+  EXPECT_EQ(conn->state, connInitialized);
+  EXPECT_EQ(peer.tpLocalRank, 2);
+  EXPECT_EQ(peer.tpRank, 6);
+  EXPECT_EQ(std::string(resp.devShmPath, 6), "AbC123");
+  req = {/*transport*/ 1, /*send*/ 0, 1, 1, 0};  // no proxyProgress: no shm path
+  ncclProxyInitResp resp2 = {};
+  ASSERT_EQ(proxyConnInit(&peer, &pool_, &ps_, &req, &resp2, &conn), ncclSuccess);
+  EXPECT_EQ(resp2.connId, 1);
+  EXPECT_EQ(conn->tcomm, &g_transports[1].recv);
+  EXPECT_EQ(resp2.devShmPath[0], '\0');
+  EXPECT_EQ(g_shm.opens, 1);
+}
+
+TEST_F(ProxyShmPoolMicrotest, ConnInit_PoolAndShmFailuresPropagate) {
+  ncclProxyLocalPeer peer = {};
+  ncclProxyInitReq req = {0, 0, 0, 0, 0};
+  ncclProxyInitResp resp = {};
+  ncclProxyConnection* conn = nullptr;
+  g_callocFailAt = 0;
+  EXPECT_EQ(proxyConnInit(&peer, &pool_, &ps_, &req, &resp, &conn), ncclSystemError);
+  g_callocFailAt = -1;
+  g_shm.openResult = ncclSystemError;
+  EXPECT_EQ(proxyConnInit(&peer, &pool_, &ps_, &req, &resp, &conn), ncclSystemError);
+  EXPECT_NE(conn->state, connInitialized);
+}
+
 }  // namespace
