@@ -133,10 +133,9 @@ main(int argc, char** argv)
         // because a tool library cannot be loaded
         //
         // NOTE: for the attach-tree mode, this test spawns a single child with no descendants,
-        // so rocattach_attach_tree() reduces to one setup() call and the returned last_status
-        // is deterministically ROCATTACH_STATUS_ERROR. If this test is extended to a real
-        // process tree, revisit this expectation because last_status only reflects the last
-        // failure encountered.
+        // so rocattach_attach_tree() reduces to one setup() call. Nothing attaches, so it
+        // returns the status of that failure. If this test is extended to a real process tree,
+        // note that rocattach_attach_tree() returns success when any process attaches.
         rocattach_status_t status =
             use_tree_attach ? rocattach_attach_tree(child_pid) : rocattach_attach(child_pid);
 

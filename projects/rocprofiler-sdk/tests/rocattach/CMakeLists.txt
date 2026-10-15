@@ -161,7 +161,7 @@ endif()
 rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-execute
     COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool>
+            $<TARGET_FILE:rocprofiler-sdk-c-tool-configured>
     DEPENDS rocattach-parallel-attach-test
     TIMEOUT 45
     LABELS "attachment"
@@ -174,7 +174,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocattach-stale-register-library-test-execute
     COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool> --stale-register-library
+            $<TARGET_FILE:rocprofiler-sdk-c-tool-configured> --stale-register-library
     DEPENDS rocattach-parallel-attach-test
     TIMEOUT 45
     LABELS "attachment"
@@ -296,7 +296,7 @@ rocprofiler_add_integration_execute_test(
 rocprofiler_add_integration_execute_test(
     rocattach-parallel-attach-test-signal-execute
     COMMAND $<TARGET_FILE:rocattach-parallel-attach-test> $<TARGET_FILE:attachment-test>
-            $<TARGET_FILE:rocprofiler-sdk-c-tool> --send-signal
+            $<TARGET_FILE:rocprofiler-sdk-c-tool-configured> --send-signal
     DEPENDS rocattach-parallel-attach-test
     TIMEOUT 45
     LABELS "attachment"
@@ -317,7 +317,7 @@ target_link_libraries(
 rocprofiler_add_integration_execute_test(
     rocattach-attach-tree-test-execute
     TARGET rocattach-attach-tree-test
-    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool>
+    ARGS $<TARGET_FILE:attachment-test> $<TARGET_FILE:rocprofiler-sdk-c-tool-configured>
     TIMEOUT 45
     LABELS "attachment"
     ENVIRONMENT "${rocattach-test-env}"
@@ -373,7 +373,17 @@ rocprofiler_add_integration_execute_test(
     )
 
 # Test that a tool library the target cannot load fails the attach without bringing down
-# the target
+# the target. The rocprofiler-sdk under test is preloaded so that rocprofiler-register
+# uses it instead of an SDK colocated with an installed rocprofiler-register.
+if(ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE)
+    set(rocattach-missing-tool-library-preload
+        "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}:$<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>"
+        )
+else()
+    set(rocattach-missing-tool-library-preload
+        "$<TARGET_FILE:rocprofiler-sdk::rocprofiler-sdk-shared-library>")
+endif()
+
 rocprofiler_add_integration_execute_test(
     rocattach-missing-tool-library-test-execute
     TARGET rocattach-without-env-test
@@ -382,7 +392,7 @@ rocprofiler_add_integration_execute_test(
     TIMEOUT 45
     DISABLED ${IS_DISABLED}
     LABELS "attachment"
-    PRELOAD "${ROCPROFILER_MEMCHECK_PRELOAD_ENV_VALUE}"
+    PRELOAD "${rocattach-missing-tool-library-preload}"
     ENVIRONMENT "${rocattach-test-env}"
     PASS_REGULAR_EXPRESSION
         "Test PASSED: attach failed gracefully without crashing target"
