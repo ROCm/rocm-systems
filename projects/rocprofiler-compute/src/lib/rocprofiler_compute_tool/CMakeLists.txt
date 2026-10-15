@@ -14,6 +14,8 @@ add_library(
     environ_cache.cpp
     input_parameters.h
     input_parameters.cpp
+    output_registry.h
+    output_registry.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
     pc_sampling_feature.h
