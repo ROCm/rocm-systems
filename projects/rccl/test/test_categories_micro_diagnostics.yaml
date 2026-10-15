@@ -1,4 +1,4 @@
-# CTest categories for the host-only src/diagnostics/p2p.cc and ib_write_bw.cc microtests.
+# CTest categories for the host-only src/diagnostics.cc and src/diagnostics/ microtests.
 #
 # gtest's `*` does not cross `.`, so a suite missing here never runs under CTest; sync with the diag-*-test.cc suites.
 test_categories:
@@ -7,6 +7,7 @@ test_categories:
     test_patterns:
       - "DiagP2pMicrotest.*"
       - "DiagIbWriteBwMicrotest.*"
+      - "DiagnosticsMicrotest.*"
     exclude_windows:
       - "*"
     labels:
