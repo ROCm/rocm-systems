@@ -28,6 +28,7 @@ common = [
     "*LICENSE",
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",
+    ".github/workflows/systems-pr-bot.yml",
 
     # Formatting infrastructure and lightweight tests have their own CI.
     ".github/workflows/*-formatting.yml",

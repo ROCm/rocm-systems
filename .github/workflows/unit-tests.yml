@@ -39,6 +39,13 @@ jobs:
               .github/workflows
             dependencies: pyyaml
             run: python -B -m unittest discover -s .github/actions/scoped-formatting/tests -v
+          - suite: systems-pr-bot
+            include: '^(tools/systems_pr_bot/|\.github/workflows/)'
+            sparse-checkout: |
+              tools/systems_pr_bot
+              .github/workflows
+            dependencies: requests pyyaml
+            run: python -B tools/systems_pr_bot/test_policy_check_ut.py -v
     steps:
       - name: Checkout scope inspector
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
