@@ -54,6 +54,52 @@ abstraction over it. Copy the structure of the closest existing backend:
 - Write each concept to state the minimum its consumer needs, so any conforming
   type, including test fakes, can satisfy it.
 
+## Trace data: `source/lib/core/trace_cache/`
+
+Collectors record trace data at runtime. It is converted to output formats only
+after the run finishes:
+
+1. **Record (hot path).** `trace_cache::get_buffer_storage().store(sample)`
+   takes one mutex and `memcpy`s a type header and the serialized sample into a
+   100 MB in-memory ring buffer. A background thread writes the buffer to
+   `/tmp/buffered_storage_<ppid>_<pid>.bin` once 80 MB are used.
+2. **Metadata (once per entity).** `trace_cache::get_metadata_registry().add_*()`
+   records threads, tracks, PMC info, queues, streams, strings and code objects
+   in deduplicated sets. These are saved to `/tmp/metadata_<ppid>_<pid>.json`.
+3. **Post-process (at finalization, root process only).**
+   `cache_manager::post_process_bulk()` finds every cache file. `storage_parser`
+   reads each record, and `type_registry` turns it back into its sample type.
+   The sample is then passed to `sample_processor_interface::handle()` on each
+   output processor: `perfetto_processor`, `rocpd_processor`.
+
+Keep `store()` fast:
+
+- A sample holds raw values: timestamps, IDs, handles, enums. Look up names,
+  build strings and format output in post-processing, not before `store()`.
+- Data that is the same for every sample (thread info, track name, PMC
+  description) goes into the metadata registry once. The sample stores only
+  the ID that refers to it.
+- Do not wrap `store()` in your own lock. `store()` throws if the storage is
+  not running.
+- `std::string_view` fields are copied into the buffer, so the viewed data only
+  has to live until `store()` returns. In a parsed sample, a `string_view`
+  points into the parser's read buffer, which is reused for the next record.
+  A processor copies it if it keeps it after `handle()` returns.
+
+To add a sample type, copy an existing one:
+
+1. Add a new value to `type_identifier_t`. Never renumber or reuse a value.
+   `fragmented_space` is reserved.
+2. Write a struct that derives from `cacheable_t` and declares
+   `static constexpr type_identifier_t type_identifier`. Allowed field types:
+   trivially copyable values, `std::string_view`, `std::vector` or `std::span`
+   of trivially copyable values, and `std::optional` (not nested).
+3. Specialize `serialize`, `deserialize` and `get_size`. All three list the same
+   fields in the same order.
+4. Add the type to `storage_parser_t` in `storage_parser_alias.hpp`. Add a
+   `handle()` overload to `sample_processor_interface`, and implement it in
+   every processor.
+
 ## Unreachable cases fail loudly
 
 When a `switch` over an enum handles every current value, add a `default:` that
