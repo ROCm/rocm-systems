@@ -113,10 +113,29 @@ def family_keys(decision):
 
 
 class RepoConfigTest(unittest.TestCase):
-    def test_every_family_runs_on_every_event_by_default(self):
+    def test_only_gfx94x_runs_by_default(self):
+        """Every family stays listed, but only gfx94x runs unless asked for.
+
+        The others stay in ci.yaml so a ci:gfx... label or the
+        workflow_dispatch families input can still request them; disabling is
+        what keeps them off the default run.
+        """
+        self.assertEqual(
+            sorted(key for key, family in REPO.families.items() if family.enabled),
+            ["gfx94x"],
+        )
         for key, family in REPO.families.items():
-            self.assertEqual(family.enabled, key != "gfx125x", key)
             self.assertEqual(family.triggers, cfg.EVENTS, key)
+
+    def test_a_label_still_requests_a_disabled_family(self):
+        d = decide(
+            "pull_request",
+            ["projects/hrr/playback/x.cpp"],
+            ["ci:gfx110x"],
+            config=REPO,
+        )
+        self.assertIn("gfx94x", family_keys(d))
+        self.assertIn("gfx110x", family_keys(d))
 
     def test_multi_gpu_runner_only_nightly(self):
         for key, family in REPO.families.items():

@@ -73,18 +73,34 @@ capture_label: ci:hrr-capture
 # A family without a runner label is skipped. Every job queues on its own
 # runner pool and the summary waits for all of them, so to reduce GPU load or
 # take a pool out, set enabled: false or narrow triggers here.
+#
+# Only gfx94x runs by default for now; every other family is disabled but
+# still listed, so a `ci:gfx...` label or the workflow_dispatch `families`
+# input can request it. Delete an `enabled: false` line to make a family run
+# by default again. targets.arch in integration.yaml stays wide on purpose:
+# configure fails unless it covers every family listed here, and a requested
+# family needs its architecture compiled into the binary.
 families:
-  gfx90a: {}
+  gfx90a:
+    enabled: false
   gfx94x: {}
-  # Nightly on an 8-GPU node, so the multi-device cases run once a day.
+  # Off by default with the other non-gfx94x families. Nightly on an 8-GPU
+  # node, so once re-enabled the multi-device cases run once a day.
   gfx950:
     multi_gpu_triggers: [schedule]
-  gfx103x: {}
-  gfx110x: {}
-  gfx1150: {}
-  gfx1151: {}
-  gfx1153: {}
-  gfx120x: {}
+    enabled: false
+  gfx103x:
+    enabled: false
+  gfx110x:
+    enabled: false
+  gfx1150:
+    enabled: false
+  gfx1151:
+    enabled: false
+  gfx1153:
+    enabled: false
+  gfx120x:
+    enabled: false
   # Off until understood: in two runs the MI455 runner picked the job up, but
   # --arch auto found no GPU, so no case ran. TheRock also reserves this small
   # pool for designated workflows. A ci:gfx125x label or the workflow_dispatch

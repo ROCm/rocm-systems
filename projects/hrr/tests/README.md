@@ -152,7 +152,11 @@ applies (`scripts/hrr_ci_configure.py`):
   only gfx950 uses one, nightly; elsewhere the cases that need two devices skip and
   show in the summary's Skip column. A `ci:gfx...` label adds a
   family; the `workflow_dispatch` input `families` replaces the selection. Both can
-  name a disabled family.
+  name a disabled family. Only gfx94x is enabled today; the others are listed with
+  `enabled: false`, so they run only when a label or the input asks for them.
+  `targets.arch` in `config/integration.yaml` stays wide on purpose: configure fails
+  unless it covers every family listed here, and a requested family needs its
+  architecture compiled into the binary.
 - `rocm_sdk_version`: the ROCm SDK the unit job installs.
 
 An unknown key, trigger or family fails the configure job, and so does a family whose
