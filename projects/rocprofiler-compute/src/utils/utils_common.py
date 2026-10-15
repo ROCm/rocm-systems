@@ -41,6 +41,7 @@ PROFILE_OUTPUT_FORMAT = "rocpd"
 NATIVE_COUNTERS_PREFIX = "counters"
 NATIVE_DISPATCH_PREFIX = "dispatch"
 NATIVE_KERNEL_SYMBOLS_PREFIX = "kernel_symbols"
+NATIVE_AGENTS_PREFIX = "agents"
 # Panel id of block 30, Memory Bandwidth Analysis
 MEMBW_ANALYSIS_PANEL_ID: int = 3000
 

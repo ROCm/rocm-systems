@@ -33,6 +33,17 @@ std::filesystem::path expected_output_directory(std::string_view output_path,
     return std::filesystem::path{std::string{output_path}} /
            std::filesystem::path{std::string{directory_name}};
 }
+
+rocprofiler_agent_t make_agent(uint64_t handle, rocprofiler_agent_type_t type, uint32_t node_id)
+{
+    rocprofiler_agent_t agent{};
+    agent.id.handle    = handle;
+    agent.type         = type;
+    agent.node_id      = node_id;
+    agent.name         = "gfx942";
+    agent.product_name = "AMD Instinct MI300X";
+    return agent;
+}
 }  // namespace
 
 TEST_F(TestRocprofilerComputeTool, ProvidedEmptyOutputPath_UsesDefault)
@@ -400,6 +411,51 @@ TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AfterToolFini_IsNoOp)
     const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
     reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
     EXPECT_TRUE(m_sdk_wrapper->get_started_contexts().empty());
+}
+
+TEST_F(TestRocprofilerComputeTool, RocprofilerConfigure_NamesTheAgentsFile)
+{
+    m_input_parameters->set_output_path("out");
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    EXPECT_EQ(get_tool_data(cfg)->agents_filename,
+              expected_output_path("out", "_agents.csv.gz").string());
+}
+
+TEST_F(TestRocprofilerComputeTool, ToolInit_DoesNotQueryAgents)
+{
+    m_sdk_wrapper->set_available_agents({make_agent(4000, ROCPROFILER_AGENT_TYPE_GPU, 2)});
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    EXPECT_TRUE(get_tool_data(cfg)->agents.empty());
+}
+
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_RecordsOnlyGpuAgents)
+{
+    m_sdk_wrapper->set_available_agents({make_agent(4000, ROCPROFILER_AGENT_TYPE_CPU, 0),
+                                         make_agent(4002, ROCPROFILER_AGENT_TYPE_GPU, 2),
+                                         make_agent(4003, ROCPROFILER_AGENT_TYPE_GPU, 3)});
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+
+    const auto& agents = get_tool_data(cfg)->agents;
+    ASSERT_EQ(agents.size(), 2u);
+    EXPECT_EQ(agents.at(4002).node_id, 2u);
+    EXPECT_EQ(agents.at(4002).name, "gfx942");
+    EXPECT_EQ(agents.at(4003).node_id, 3u);
+}
+
+TEST_F(TestRocprofilerComputeTool, HsaInterceptCallback_AgentQueryFails_StillStartsContext)
+{
+    m_sdk_wrapper->set_query_available_agents_fails(true);
+    const auto cfg = rocprofiler_configure(1, "", 1, &m_client_id);
+    ASSERT_EQ(cfg->initialize(nullptr, cfg->tool_data), 0);
+    const auto reg = m_sdk_wrapper->get_hsa_intercept_registration_info()[0];
+    reg.callback(ROCPROFILER_HSA_TABLE, 0, 0, nullptr, 0, reg.user_data);
+
+    EXPECT_TRUE(get_tool_data(cfg)->agents.empty());
+    EXPECT_EQ(m_sdk_wrapper->get_started_contexts().size(), 1u);
 }
 
 //////////////////////////////////////////////////////////////////////////

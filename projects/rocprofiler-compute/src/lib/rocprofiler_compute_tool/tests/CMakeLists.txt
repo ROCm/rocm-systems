@@ -21,6 +21,8 @@ add_executable(
     test_dispatch_writer.cpp
     test_kernel_symbols_writer.h
     test_kernel_symbols_writer.cpp
+    test_agent_writer.h
+    test_agent_writer.cpp
     mocks.h
     mocks.cpp
     main.cpp
