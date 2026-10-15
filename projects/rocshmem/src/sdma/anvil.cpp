@@ -669,8 +669,6 @@ int AnvilLib::getOamId(int deviceId) {
     if (file.is_open() && (file >> xgmi_physical_id)) return xgmi_physical_id;
   }
 
-  // LOG_ERROR so a default ROCSHMEM_DEBUG_LEVEL=ERROR banff repro still shows the preferred-engine
-  // values that explain why the OAM map was needed.
   LOG_ERROR("anvil: no xGMI physical id for %s or %s device=%d %s", loc.busId.c_str(),
             loc.physBusId.c_str(), deviceId, describeSelection(selection_).c_str());
   return -1;
@@ -703,7 +701,7 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
     const PciFunctionBus srcPci = pciFunctionBus(getBusId(srcDeviceId));
     const PciFunctionBus dstPci = pciFunctionBus(getBusId(dstDeviceId));
     // An unreadable tail adds 0 and therefore collides with function 0. The warning logs the raw
-    // BDF so that case is not silent. The info line reports the values the fold actually added.
+    // BDF so that case is not silent. The trace line reports the values the fold actually added.
     const int srcFn = srcPci.function < 0 ? 0 : srcPci.function;
     const int dstFn = dstPci.function < 0 ? 0 : dstPci.function;
     const int folded =
@@ -712,7 +710,7 @@ int AnvilLib::getSdmaEngineIdFromOamMap(int srcDeviceId, int dstDeviceId) {
       LOG_WARN("anvil: PCI function unreadable src=%s dst=%s, using engine %d (oam=%d total=%u)",
                srcPci.busId.c_str(), dstPci.busId.c_str(), folded, oamEngine, numSdmaEnginesTotal_);
     } else if (partition) {
-      LOG_INFO("anvil: partition engine %d (oam=%d srcFn=%d dstFn=%d total=%u)", folded, oamEngine,
+      LOG_TRACE("anvil: partition engine %d (oam=%d srcFn=%d dstFn=%d total=%u)", folded, oamEngine,
                srcFn, dstFn, numSdmaEnginesTotal_);
     } else {
       LOG_WARN(
