@@ -33,6 +33,7 @@ RUN set -euo pipefail; \
         apt-get install -y git && \
         python3 -m pip install -U awscli pipx && \
         python3 -m pip install -U --user -r /root/requirements.txt; \
+        echo -e 'PKG_CONFIG_PATH="/opt/rocm/lib/pkgconfig:/opt/rocm/lib/llvm/lib/pkgconfig:/opt/rocm/lib/rocprofiler-systems/pkgconfig:/opt/rocm/lib/rdc/grpc/lib/pkgconfig:/opt/rocm/lib/rdc/grpc/lib/rocm_sysdeps/lib/pkgconfig:/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:/opt/rocm/lib/host-math/lib/pkgconfig:/opt/rocm/share/pkgconfig:${PKG_CONFIG_PATH}"\nexport PKG_CONFIG_PATH' > /etc/profile.d/rocm-pkg-config.sh; \
     fi;
 
 # RHEL
@@ -63,6 +64,7 @@ RUN set -euo pipefail; \
         export PATH=/opt/rh/gcc-toolset-11/root/usr/bin:${PATH}; \
         python3 -m pip install --upgrade pip; \
         python3 -m pip install --upgrade -r /root/requirements.txt; \
+        echo -e 'PKG_CONFIG_PATH="/opt/rocm/lib/pkgconfig:/opt/rocm/lib/llvm/lib/pkgconfig:/opt/rocm/lib/rocprofiler-systems/pkgconfig:/opt/rocm/lib/rdc/grpc/lib/pkgconfig:/opt/rocm/lib/rdc/grpc/lib/rocm_sysdeps/lib/pkgconfig:/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:/opt/rocm/lib/host-math/lib/pkgconfig:/opt/rocm/share/pkgconfig:${PKG_CONFIG_PATH}"\nexport PKG_CONFIG_PATH' > /etc/profile.d/rocm-pkg-config.sh; \
     fi;
 
 # SLES
@@ -80,6 +82,7 @@ RUN set -euo pipefail; \
         cd /tmp; wget https://www.kernel.org/pub/software/scm/git/git-2.52.0.tar.xz; \
         tar -xf git-2.52.0.tar.xz; cd git-2.52.0; make prefix=/usr all -j 32; make prefix=/usr install; \
         cd /tmp; ln -s -f /usr/bin/git /usr/local/bin/git; rm -rf git-2.52.0*; \
+        echo -e 'PKG_CONFIG_PATH="/opt/rocm/lib/pkgconfig:/opt/rocm/lib/llvm/lib/pkgconfig:/opt/rocm/lib/rocprofiler-systems/pkgconfig:/opt/rocm/lib/rdc/grpc/lib/pkgconfig:/opt/rocm/lib/rdc/grpc/lib/rocm_sysdeps/lib/pkgconfig:/opt/rocm/lib/rocm_sysdeps/lib/pkgconfig:/opt/rocm/lib/host-math/lib/pkgconfig:/opt/rocm/share/pkgconfig:${PKG_CONFIG_PATH}"\nexport PKG_CONFIG_PATH' > /etc/profile.d/rocm-pkg-config.sh; \
     fi;
 
 # Nightly Tarball
@@ -96,6 +99,11 @@ RUN set -euo pipefail; \
 # to the relocatable ${pcfiledir} form so they resolve relative to the installed location.
 # Idempotent: only lines containing a build-stage rocm_sysdeps path are touched, so this is a
 # no-op once ROCm/TheRock#6906 is fixed.
+#
+# The amdgpu-install package and its /opt/amdgpu installation are no longer used. The TheRock
+# tarball provides all required components including libdrm_amdgpu. Both /opt/rocm* and /opt/amdgpu*
+# are removed before tarball extraction to ensure a clean installation and prevent conflicts between
+# old amdgpu-install artifacts and TheRock-provided libraries.
 RUN set -euo pipefail; \
     if [ $(grep -i "sles" /etc/os-release | wc -l) -gt 0 ]; then \
         source rocprofiler-sdk/bin/activate; \
@@ -103,7 +111,7 @@ RUN set -euo pipefail; \
         source ~/.bashrc; \
     fi; \
     aws s3 cp "s3://therock-nightly-tarball/${GPU_TARBALL}" /tmp/rocm-${GPU_TYPE}.tar.gz --no-sign-request && \
-    rm -rf /opt/rocm* && \
+    rm -rf /opt/rocm* /opt/amdgpu* && \
     mkdir -p /opt/rocm && \
     tar -xf /tmp/rocm-${GPU_TYPE}.tar.gz -C /opt/rocm && \
     rm -f /tmp/rocm-${GPU_TYPE}.tar.gz && \
