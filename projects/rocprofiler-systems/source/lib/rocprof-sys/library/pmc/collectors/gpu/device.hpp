@@ -8,9 +8,9 @@
 
 #include <concepts>
 #include <cstdint>
+#include <fmt/format.h>
 #include <memory>
 #include <optional>
-#include <spdlog/fmt/fmt.h>
 #include <stdexcept>
 #include <string>
 
@@ -225,9 +225,9 @@ private:
 
         try
         {
-            auto info      = m_backend->get_gpu_asic_info();
-            m_product_name = info.product_name;
-            m_vendor_name  = info.vendor_name;
+            auto const info = m_backend->get_gpu_asic_info();
+            m_product_name  = info.product_name;
+            m_vendor_name   = info.vendor_name;
         } catch(const std::runtime_error& e)
         {
             LOG_DEBUG("GPU device [{}]: {}", m_index, e.what());

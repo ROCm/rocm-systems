@@ -11,6 +11,8 @@
 #include "device/device.hpp"
 #include "hip_code_object.hpp"
 
+#include <unordered_set>
+
 namespace hip_impl {
 
 hipError_t ihipOccupancyMaxActiveBlocksPerMultiprocessor(
@@ -26,9 +28,33 @@ class PlatformState {
   // Dynamic Code Objects functions
   hipError_t LoadModule(hipModule_t* module, const char* fname, const void* image = nullptr);
   hipError_t UnloadModule(hipModule_t hmod);
-  bool IsValidDynFunc(const void* hfunc);
+
+  //! Publishes a library-owned DynCO under its module handle so the
+  //! hipModuleGet*() functions can use handle returned by hipLibraryGetModule().
+  hipError_t RegisterLibraryModule(hipModule_t hmod, hip::DynCO* dynCO);
+  void UnregisterLibraryModule(hipModule_t hmod);
+
+  //! Tracks kernel handles from creation to release, so IsValidFuncHandle() can
+  //! reject a pointer that never came from the runtime.
+  void RegisterFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    funcHandles_.insert(hfunc);
+  }
+
+  void UnregisterFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    funcHandles_.erase(hfunc);
+  }
+
+  bool IsValidFuncHandle(const void* hfunc) {
+    std::scoped_lock lock(funcHandleLock_);
+    return funcHandles_.find(hfunc) != funcHandles_.end();
+  }
+
   hipError_t GetDynFunc(hipFunction_t* hfunc, hipModule_t hmod, const char* func_name);
   hipError_t GetFuncCount(unsigned int* count, hipModule_t hmod);
+  hipError_t EnumerateFunctions(hipFunction_t* functions, unsigned int numFunctions,
+                                hipModule_t hmod);
   hipError_t GetDynGlobalVar(const char* hostVar, hipModule_t hmod, hipDeviceptr_t* dev_ptr,
                              size_t* size_ptr);
   hipError_t GetDynTexRef(const char* hostVar, hipModule_t hmod, textureReference** texRef);
@@ -91,12 +117,19 @@ class PlatformState {
   PlatformState() : statCO_(*this), log_level_(0), log_size_(0), log_mask_(0) {}
   ~PlatformState() {}
 
+  //! Remove all the texture references associated with the module
+  void RemoveTexRefs(hipModule_t hmod);
+
   std::recursive_mutex lock_;       //!< Guards PlatformState globals
   std::recursive_mutex lg_lock_;    //!< Lock for logging operations
   static PlatformState* platform_;  //!< Singleton instance
 
   //! Dynamic Code Object map, keyin module to get the corresponding object
   std::unordered_map<hipModule_t, hip::DynCO*> dynCO_map_;
+  //! Subset of dynCO_map_ keys whose DynCO is owned by a LibraryContainer.
+  std::unordered_set<hipModule_t> library_modules_;
+  std::mutex funcHandleLock_;
+  std::unordered_set<const void*> funcHandles_;
   hip::StatCO statCO_;              //!< Static Code object var
   bool initialized_{false};         //!< Platform initialization state
   //! Texture reference map: texRef -> (module, name)

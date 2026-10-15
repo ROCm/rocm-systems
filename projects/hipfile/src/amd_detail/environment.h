@@ -5,7 +5,16 @@
 
 #pragma once
 
+#include "context.h"
+#include "sys.h"
+
+#include <charconv>
+#include <concepts>
+#include <cstdlib>
+#include <limits>
 #include <optional>
+#include <strings.h>
+#include <string_view>
 
 namespace hipFile {
 
@@ -16,6 +25,23 @@ public:
     /// @return An optional value of type T if the key was set, nullopt if the key
     /// was not set or had an invalid value for the type T
     template <typename T> static std::optional<T> get(const char *key);
+
+    template <typename T>
+        requires std::integral<T> && (!std::same_as<T, bool>)
+    static std::optional<T> get(const char *key)
+    {
+        const char *value{Context<Sys>::get()->getenv(key)};
+        if (value == nullptr)
+            return std::nullopt;
+        std::string_view sv{value};
+        T                x{};
+        auto [ptr, ec]{std::from_chars(sv.data(), sv.data() + sv.size(), x, 10)};
+        if (ec == std::errc::invalid_argument || *ptr != '\0')
+            return std::nullopt;
+        else if (ec == std::errc::result_out_of_range)
+            return std::numeric_limits<T>::max();
+        return x;
+    }
 
     /// @brief Allow I/O operations to fallback to POSIX I/O APIs
     ///
@@ -60,6 +86,12 @@ public:
     /// nullopt if HIPFILE_UNSUPPORTED_FILE_SYSTEMS was unset or had a value other than
     /// true or false.
     static std::optional<bool> unsupported_file_systems();
-};
 
+    /// @brief Control the size of the host bounce buffer used for async fallback I/O operations
+    ///
+    /// The default value is 1 MiB.
+    static constexpr const char *const ASYNC_BUFFER_SIZE{"HIPFILE_ASYNC_BUFFER_SIZE"};
+
+    static std::optional<size_t> async_buffer_size();
+};
 }

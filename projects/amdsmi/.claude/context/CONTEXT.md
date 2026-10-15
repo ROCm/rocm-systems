@@ -81,7 +81,7 @@ Disambiguation: GPU index ≠ `gpu_id` (device type) ≠ handle ≠ OAM ID.
 
 ### compute partition
 
-The **active** XCC-grouping mode of a GPU: `amdsmi_compute_partition_type_t` SPX/DPX/TPX/QPX/CPX (amdsmi.h:489-511), get/set via `amdsmi_get_gpu_compute_partition()` / `..._set_...`. GPU-**global** state (applies to all processes). **Not** the per-process `amdsmi_kfd_info_t.current_partition_id` (amdsmi.h:1148-1153), which is a process-scoped KFD/XCP assignment.
+The **active** XCC-grouping mode of a GPU: `amdsmi_compute_partition_type_t` SPX/DPX/TPX/QPX/CPX (amdsmi.h:489-511), get/set via `amdsmi_get_gpu_accelerator_partition_profile()` / `..._set_...`. GPU-**global** state (applies to all processes). **Not** the per-process `amdsmi_kfd_info_t.current_partition_id` (amdsmi.h:1148-1153), which is a process-scoped KFD/XCP assignment.
 Disambiguation: compute partition (GPU-global mode) ≠ `current_partition_id` (per-process KFD).
 
 ### accelerator partition

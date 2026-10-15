@@ -29,11 +29,13 @@ enum class HwregState : uint8_t {
   XnackStatePrivGfx1250,
   XnackMaskGfx1250,
   Trapsts,
+  SimdIdCdna2_4,
   GprAllocGfx9_10,
   GprAllocCdna3_4,
   WaveSchedMode,
   IbStsGfx1250,
   IbSts2Gfx1250,
+  WgpIdGfx1250,
 };
 
 enum class HwregWritePolicy : uint8_t {
@@ -78,6 +80,13 @@ uint32_t blocks_minus_one(uint32_t count, uint32_t block_size) {
   if (count == 0)
     return 0;
   return ((count + block_size - 1u) / block_size) - 1u;
+}
+
+uint32_t cdna2_4_hw_id_raw(const Wavefront &wf) {
+  // CDNA2/3/4 define SIMD_ID at HW_ID[5:4]. Assign permanent CU wave slots
+  // cyclically to four logical SIMDs. Slot identity survives reuse and
+  // checkpoint restoration; no timing model is implied.
+  return field_value(wf.wf_id() % 4u, 4, 2);
 }
 
 uint32_t gfx9_10_gpr_alloc_raw(const Wavefront &wf) {
@@ -155,6 +164,10 @@ void set_gfx12_trap_ctrl_raw(Wavefront &wf, uint32_t value) { wf.set_gfx12_trap_
 // UserWritable records ISA privilege, not simulator completeness. If a
 // user-writable register has no HwregState backing yet, writes return
 // Unsupported rather than fabricating hidden state or side effects.
+
+// CDNA2 backs HW_ID.SIMD_ID. CDNA1's public ISA omits the field layout, so
+// instantiate its otherwise shared register table with HW_ID unsupported.
+template <HwregState HwIdState>
 constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
     // CDNA-family ISA XML uses MODE=1 and STATUS=2. Keep XML-only and
     // unmodeled state explicit but unsupported until the corresponding VM
@@ -162,7 +175,7 @@ constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
     {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
-    {4, "HW_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {4, "HW_ID", HwIdState, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocGfx9_10, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -181,14 +194,13 @@ constexpr HwregDescriptor CDNA1_2_HWREGS[] = {
 };
 
 constexpr HwregDescriptor CDNA3_4_HWREGS[] = {
-    // CDNA3/CDNA4 ISA manuals define the GPR_ALLOC field layout; MODE/STATUS
-    // and GPR_ALLOC have backing wave state, while the other XML HWREG IDs stay
-    // named but unsupported until their VM state and privilege side effects are
-    // represented.
+    // MODE/STATUS, TRAPSTS, GPR_ALLOC and HW_ID.SIMD_ID have backing wave state.
+    // The other XML HWREG IDs stay named but unsupported until their VM state,
+    // field layouts and privilege side effects are represented.
     {1, "MODE", HwregState::Mode, HwregWritePolicy::UserWritable},
     {2, "STATUS", HwregState::Status, HwregWritePolicy::Privileged},
     {3, "TRAPSTS", HwregState::Trapsts, HwregWritePolicy::UserWritable},
-    {4, "HW_ID", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {4, "HW_ID", HwregState::SimdIdCdna2_4, HwregWritePolicy::ReadOnly},
     {5, "GPR_ALLOC", HwregState::GprAllocCdna3_4, HwregWritePolicy::ReadOnly},
     {6, "LDS_ALLOC", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {7, "IB_STS", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
@@ -351,7 +363,7 @@ constexpr HwregDescriptor GFX1250_HWREGS[] = {
     {19, "WAVE_TRAP_CTRL", HwregState::TrapCtrlGfx12, HwregWritePolicy::Privileged},
     {20, "WAVE_SCRATCH_BASE_LO", HwregState::Unsupported, HwregWritePolicy::Privileged},
     {21, "WAVE_SCRATCH_BASE_HI", HwregState::Unsupported, HwregWritePolicy::Privileged},
-    {23, "WAVE_HW_ID1", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
+    {23, "WAVE_HW_ID1", HwregState::WgpIdGfx1250, HwregWritePolicy::ReadOnly},
     {24, "WAVE_HW_ID2", HwregState::Unsupported, HwregWritePolicy::ReadOnly},
     {26, "WAVE_SCHED_MODE", HwregState::WaveSchedMode, HwregWritePolicy::UserWritable},
     {28, "IB_STS2", HwregState::IbSts2Gfx1250, HwregWritePolicy::ReadOnly},
@@ -371,8 +383,9 @@ HwregTable table_for_arch(rj_code_arch_t arch) {
    */
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
+    return make_table(CDNA1_2_HWREGS<HwregState::Unsupported>);
   case ROCJITSU_CODE_ARCH_CDNA2:
-    return make_table(CDNA1_2_HWREGS);
+    return make_table(CDNA1_2_HWREGS<HwregState::SimdIdCdna2_4>);
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
     return make_table(CDNA3_4_HWREGS);
@@ -416,6 +429,16 @@ bool field_intersects(const DecodedHwreg &decoded, uint32_t offset, uint32_t siz
   return decoded.offset < offset + size && offset < decoded.offset + decoded.size;
 }
 
+// Observe only the requested field, never the other bits read to preserve a
+// partial HWREG write. GFX12 moved SCC from STATUS[0] to STATE_PRIV[9].
+bool field_aliases_scc(const Wavefront &wf, HwregState state, const DecodedHwreg &decoded) {
+  if (state == HwregState::StatePrivGfx12)
+    return field_intersects(decoded, 9, 1);
+  const auto arch = wf.cu().arch();
+  return state == HwregState::Status && arch != ROCJITSU_CODE_ARCH_RDNA4 &&
+         arch != ROCJITSU_CODE_ARCH_CDNA5 && field_intersects(decoded, 0, 1);
+}
+
 HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_value) {
   switch (state) {
   case HwregState::Mode:
@@ -445,6 +468,9 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
   case HwregState::Trapsts:
     raw_value = wf.trapsts();
     return HwregAccessResult::Success;
+  case HwregState::SimdIdCdna2_4:
+    raw_value = cdna2_4_hw_id_raw(wf);
+    return HwregAccessResult::Success;
   case HwregState::GprAllocGfx9_10:
     raw_value = gfx9_10_gpr_alloc_raw(wf);
     return HwregAccessResult::Success;
@@ -459,6 +485,12 @@ HwregAccessResult read_raw_hwreg(Wavefront &wf, HwregState state, uint32_t &raw_
     return HwregAccessResult::Success;
   case HwregState::IbSts2Gfx1250:
     raw_value = gfx1250_ib_sts2_raw(wf);
+    return HwregAccessResult::Success;
+  case HwregState::WgpIdGfx1250:
+    if (!wf.cu().cus_per_shader_array() || wf.cu().cus_per_shader_array() > 16)
+      return HwregAccessResult::Unsupported;
+    // Each gfx1250 ComputeUnit models one WGP, including its shared LDS.
+    raw_value = field_value(wf.cu().shader_array_cu_id(), 10, 4);
     return HwregAccessResult::Success;
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
@@ -507,10 +539,12 @@ HwregAccessResult write_raw_hwreg(Wavefront &wf, HwregState state, uint32_t raw_
   case HwregState::XnackMaskGfx1250:
     wf.set_gfx1250_xnack_mask_raw(raw_value);
     return HwregAccessResult::Success;
+  case HwregState::SimdIdCdna2_4:
   case HwregState::GprAllocGfx9_10:
   case HwregState::GprAllocCdna3_4:
   case HwregState::IbStsGfx1250:
   case HwregState::IbSts2Gfx1250:
+  case HwregState::WgpIdGfx1250:
   case HwregState::Unsupported:
     return HwregAccessResult::Unsupported;
   }
@@ -613,7 +647,21 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
     return HwregAccessResult::Unsupported;
   }
 
+  // Only SIMD_ID[5:4] has backing state; do not fabricate the other HW_ID fields.
+  if (desc->state == HwregState::SimdIdCdna2_4 &&
+      (decoded.offset < 4 || decoded.offset + decoded.size > 6)) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
+  }
+
   if (desc->state == HwregState::GprAllocCdna3_4 && field_intersects(decoded, 12, 6)) {
+    value = 0;
+    return HwregAccessResult::Unsupported;
+  }
+
+  // Only WGP_ID[13:10] has backing state; do not fabricate the other HW_ID1 fields.
+  if (desc->state == HwregState::WgpIdGfx1250 &&
+      (decoded.offset < 10 || decoded.offset + decoded.size > 14)) {
     value = 0;
     return HwregAccessResult::Unsupported;
   }
@@ -629,7 +677,17 @@ HwregAccessResult read_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t &valu
   return HwregAccessResult::Success;
 }
 
-HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src) {
+bool hwreg_accesses_scc(const Wavefront &wf, uint16_t hwreg, bool write) {
+  const auto decoded = decode_hwreg(hwreg);
+  const auto *desc = find_descriptor(wf.cu().arch(), decoded.id);
+  if (!desc || !field_aliases_scc(wf, desc->state, decoded))
+    return false;
+  return !write || (desc->write_policy != HwregWritePolicy::ReadOnly &&
+                    (desc->write_policy != HwregWritePolicy::Privileged || wf.in_trap_handler()));
+}
+
+HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src,
+                                    HwregWriteKind kind) {
   DecodedHwreg decoded = decode_hwreg(hwreg);
   const HwregDescriptor *desc = find_descriptor(wf.cu().arch(), decoded.id);
   if (!desc)
@@ -654,7 +712,19 @@ HwregAccessResult write_hwreg_field(Wavefront &wf, uint16_t hwreg, uint32_t src)
   if (result != HwregAccessResult::Success)
     return result;
 
-  return write_raw_hwreg(wf, desc->state, insert_hwreg_field(raw_value, src, decoded));
+  uint32_t updated = insert_hwreg_field(raw_value, src, decoded);
+  if (desc->state == HwregState::Mode && kind != HwregWriteKind::Generic &&
+      wf.cu().setreg_vgpr_msb_fixup()) {
+    // Public LLVM's SetregVGPRMSBFixup contract records that gfx1250 MODE
+    // writes take VGPR-MSB from the unshifted source bits[12:19], regardless of
+    // the requested HWREG slice. gfx1251 lacks this target capability and uses
+    // the ordinary field insertion above.
+    updated = (updated & ~VGPR_MSB_MODE_MASK) | (src & VGPR_MSB_MODE_MASK);
+    if (kind == HwregWriteKind::SetregImm32)
+      wf.arm_setreg_vgpr_msb_hazard();
+  }
+
+  return write_raw_hwreg(wf, desc->state, updated);
 }
 
 } // namespace amdgpu

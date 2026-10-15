@@ -5,7 +5,6 @@
  * See LICENSE.txt for license information.
  ************************************************************************/
 
-#include <cassert>
 #include <memory>
 #include <vector>
 
@@ -21,8 +20,9 @@ namespace dda::common {
 /* static */ __host__ std::pair<std::unique_ptr<FabricGpuBarrierResources>, FabricGpuBarrier>
 FabricGpuBarrier::mallocAndInit(int nRanks, int nBlocks, int selfRank, void* bootstrap,
                                 struct ncclMemManager* manager) {
-  if (nRanks <= 0 || nRanks > kDdaMaxNranks) {
-    WARN("FabricGpuBarrier::mallocAndInit: nRanks %d out of range (1..%d)", nRanks, kDdaMaxNranks);
+  if (nRanks <= 0 || nRanks > kDdaMaxNranks || selfRank < 0 || selfRank >= nRanks || nBlocks <= 0) {
+    WARN("FabricGpuBarrier::mallocAndInit: invalid geometry nRanks=%d, selfRank=%d, nBlocks=%d",
+         nRanks, selfRank, nBlocks);
     return {nullptr, FabricGpuBarrier{}};
   }
 

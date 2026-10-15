@@ -26,6 +26,20 @@ HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) {
   std::size_t free{}, total{};
   HIP_CHECK(hipMemGetInfo(&free, &total));
   const std::size_t memBudget = total;
+  std::printf("hipMemGetInfo: free %zu total %zu\n", free, total);
+
+  auto printPoolState = [&pool](const char* step, int alloc_idx, void* alloc_ptr,
+                                std::size_t alloc_size) {
+    uint64_t used_bytes = 0;
+    uint64_t reserved_bytes = 0;
+    HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrUsedMemCurrent, &used_bytes));
+    HIP_CHECK(hipMemPoolGetAttribute(pool, hipMemPoolAttrReservedMemCurrent, &reserved_bytes));
+    std::printf("%s[%d] ptr %p size %zu: used %llu reserved %llu (%llu chunks of 128 MiB)\n", step,
+                alloc_idx, alloc_ptr, alloc_size, static_cast<unsigned long long>(used_bytes),
+                static_cast<unsigned long long>(reserved_bytes),
+                static_cast<unsigned long long>(reserved_bytes >> 27));
+    std::fflush(stdout);
+  };
 
   hipStream_t stream = nullptr;
 
@@ -48,6 +62,7 @@ HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) {
     expectedTotal += allocSize;
     HIP_CHECK(hipMallocAsync(&ptrs[numAllocs], sizes[numAllocs], stream));
     HIP_CHECK(hipStreamSynchronize(stream));
+    printPoolState("alloc", numAllocs, ptrs[numAllocs], sizes[numAllocs]);
     numAllocs++;
   }
 
@@ -63,6 +78,7 @@ HIP_TEST_CASE(Unit_hipMemPoolMaxAlloc) {
   for (int i = 0; i < numAllocs; i++) {
     HIP_CHECK(hipFreeAsync(ptrs[i], stream));
     HIP_CHECK(hipStreamSynchronize(stream));
+    printPoolState("free", i, ptrs[i], sizes[i]);
   }
 
   // Verify pool reports zero usage after all frees

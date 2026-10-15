@@ -25,7 +25,7 @@ public:
   virtual ~WavefrontScheduler() = default;
 
   /// @brief Pick the next wavefront to issue from.
-  /// @param slots All wavefront slots on this CU.
+  /// @param slots All wavefront slots on this CU; unmaterialized slots are null.
   /// @returns Pointer to the chosen RUNNING wavefront, or nullptr if none ready.
   virtual Wavefront *schedule(std::span<const std::unique_ptr<Wavefront>> slots) = 0;
 };
@@ -46,7 +46,7 @@ public:
     Wavefront *best = nullptr;
     uint64_t oldest = UINT64_MAX;
     for (auto &w : slots) {
-      if (w->state() == WfState::RUNNING && w->ready_cycle() < oldest) {
+      if (w && w->state() == WfState::RUNNING && w->ready_cycle() < oldest) {
         oldest = w->ready_cycle();
         best = w.get();
       }

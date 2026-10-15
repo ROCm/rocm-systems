@@ -412,6 +412,7 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
         "num_compute_units": None,
         "gpu_cache_info": None,
         "vram_bit_width": None,
+        "perf_level": None,
     }
 
     with amdsmi_interface.amdsmi_ctx():
@@ -426,6 +427,8 @@ def _extract_gpu_info(gpu_arch: Optional[str]) -> dict[str, Any]:
         result["num_compute_units"] = amdsmi_interface.get_gpu_num_compute_units()
         result["gpu_cache_info"] = amdsmi_interface.get_gpu_cache_info() or {}
         result["vram_bit_width"] = amdsmi_interface.get_gpu_vram_bit_width()
+        if spec_family_for_arch(gpu_arch) is MachineSpecsRDNA35:
+            result["perf_level"] = amdsmi_interface.get_gpu_perf_level()
 
     if is_partition_supported:
         if result["compute_partition"] == "N/A" or not result["compute_partition"]:
@@ -1025,7 +1028,7 @@ class MachineSpecsCDNA(MachineSpecs):
         whole_chip_xcds = mi_gpu_specs.get_num_xcds(
             self.gpu_arch, self.gpu_model or None, "SPX"
         )
-        divisor = {"nps4": 4, "nps8": 8}.get(partition, 1)
+        divisor = {"nps2": 2, "nps4": 4, "nps8": 8}.get(partition, 1)
         return str(int(self.l2_banks) * whole_chip_xcds // divisor)
 
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
@@ -1057,11 +1060,26 @@ class MachineSpecsRDNA35(MachineSpecs):
         },
     )
 
+    perf_level: Optional[str] = field(
+        default=None,
+        metadata={
+            "doc": (
+                "The PowerPlay performance level the GPU was profiling at. "
+                "AUTO can gate the perfmon clock on this family and zero "
+                "counters such as TCP_REQ."
+            ),
+            "name": "Performance Level",
+            "show_in_table": False,
+        },
+    )
+
     def finalize_soc_fields(self, gpu_info: dict[str, Any]) -> None:
         if self.se_per_gpu is None or self.sa_per_se is None:
             self.num_gl1c = None
         else:
             self.num_gl1c = str(int(self.se_per_gpu) * int(self.sa_per_se))
+
+        self.perf_level = gpu_info.get("perf_level")
 
         super().finalize_soc_fields(gpu_info)
 

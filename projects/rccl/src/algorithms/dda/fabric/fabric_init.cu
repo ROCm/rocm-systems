@@ -14,6 +14,7 @@
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
 #include "algorithms/dda/fabric/fabric_mem_handler.h"
+#include "bootstrap.h"
 #include "rccl_common.h"
 #include "param.h"
 
@@ -27,6 +28,7 @@ using nccl_dda_detail::ddaFabricMaxNBlocksForScratch;
 using nccl_dda_detail::ddaFabricScratchSizing;
 using nccl_dda_detail::ddaLLEpochCount;
 using nccl_dda_detail::DdaFabricBarrierState;
+using nccl_dda_detail::DdaFabricMaxBlocksOverride;
 
 RCCL_PARAM(DdaFabricBufferSizeForScratch, "DDA_FABRIC_BUFFER_SIZE", -1);
 
@@ -58,16 +60,23 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
 
   const int nRanks = comm->nRanks;
   const int64_t llEnabled = rcclParamDdaLL();
-  const int64_t llThresh = rcclParamDdaLLThreshold();
   const int64_t ll128Enabled = rcclParamDdaLL128();
-  const int64_t ll128Thresh = rcclParamDdaLL128Threshold();
-  const int64_t simpleThresh = rcclParamDdaThreshold();
+  // Size scratch to the largest DDA/CE-scratch table cap (all collectives,
+  // including graph VMM), not AllReduce VMM alone. Otherwise AG CE-Scratch
+  // or AR LL128 can win the selector and then fail the ddaScratchBytes check.
+  // ddaVmmMaxGraph is in that max even if this comm never captures: scratch
+  // is allocated once and exported across the clique, so a later graph AR
+  // must still fit. On gfx1250 that is a silent 256 MiB tax vs eager VMM.
+  // RCCL_DDA_FABRIC_BUFFER_SIZE overrides.
+  const size_t llThresh = rcclDdaLLThreshold(comm, ncclFuncAllReduce);
+  const size_t ll128Thresh = rcclDdaLL128Threshold(comm, ncclFuncAllReduce);
+  const size_t simpleThresh = rcclDdaScratchPayloadCap(comm);
   const int64_t fabricScratchOverride = rcclParamDdaFabricBufferSizeForScratch();
 
   // Right-sized from the DDA thresholds and nRanks (env-overridable) instead of
   // a fixed 10 GiB. RCCL_DDA_FABRIC_BUFFER_SIZE=0 disables the fabric DDA path.
-  size_t bytes =
-    ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(), simpleThresh, llEnabled, ll128Enabled);
+  size_t bytes = ddaFabricScratchSizing(nRanks, fabricScratchOverride, rcclParamDdaEnable(), simpleThresh, llEnabled,
+                                        ll128Enabled, ll128Thresh);
   if (bytes == 0) {
     return ncclSuccess;
   }
@@ -81,6 +90,44 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
     return ncclSuccess;
   }
 
+  const char* fabricMaxBlocksOverride = getenv("RCCL_DDA_FABRIC_MAXBLOCKS");
+  DdaFabricMaxBlocksOverride parsedOverride;
+  const int localBlocksMax =
+    ddaFabricMaxNBlocksForScratch(comm->cuCount, fabricMaxBlocksOverride, &parsedOverride);
+
+  if (parsedOverride.specified && !parsedOverride.valid) {
+    WARN("ncclDdaFabricCommInit: Ignoring invalid RCCL_DDA_FABRIC_MAXBLOCKS='%s'; using CU-derived cap %d.",
+         fabricMaxBlocksOverride, localBlocksMax);
+  } else if (parsedOverride.valid && parsedOverride.requested < 1) {
+    WARN("ncclDdaFabricCommInit: RCCL_DDA_FABRIC_MAXBLOCKS=%ld is below the minimum; using 1.",
+         parsedOverride.requested);
+  } else if (parsedOverride.valid && parsedOverride.requested > localBlocksMax) {
+    WARN("ncclDdaFabricCommInit: RCCL_DDA_FABRIC_MAXBLOCKS=%ld exceeds CU-derived cap (%d); using %d. "
+         "The override can only lower the block count, not raise it.",
+         parsedOverride.requested, localBlocksMax, localBlocksMax);
+  }
+
+  std::vector<int> blockCaps(nRanks, 0);
+  blockCaps[comm->rank] = localBlocksMax;
+  // Fabric cliques are normally homogeneous, but harvested or disabled CUs
+  // can produce different local caps. Every rank must launch the same number
+  // of blocks because the barrier pairs participants by blockIdx.
+  NCCLCHECK(bootstrapAllGather(comm->bootstrap, blockCaps.data(), sizeof(int)));
+
+  int nBlocksMax = localBlocksMax;
+  for (int rank = 0; rank < nRanks; ++rank) {
+    if (blockCaps[rank] < nBlocksMax) {
+      nBlocksMax = blockCaps[rank];
+    }
+  }
+
+  const size_t eagerVmmAr = rcclDdaVmmThreshold(comm, ncclFuncAllReduce);
+  INFO(NCCL_INIT,
+       "ncclDdaFabricCommInit: allocating %zu-byte scratch; payload cap %lld includes graph VMM "
+       "(ddaVmmMaxGraph) even for eager-only comms; AR eager VMM=%zu. "
+       "Override with RCCL_DDA_FABRIC_BUFFER_SIZE.",
+       bytes, (long long)simpleThresh, eagerVmmAr);
+
   // Owned resources: handed to comm on success, freed at `fail` otherwise.
   // All declared before any goto so the cleanup label is reachable without
   // jumping over an initialization.
@@ -92,7 +139,6 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
   DdaFabricBarrierState* barrierState = nullptr;
   uint32_t* epochDev = nullptr;
   std::vector<void*> h_ptrs(nRanks, nullptr);
-  const int nBlocksMax = ddaFabricMaxNBlocksForScratch();
   const size_t epochLen = ddaLLEpochCount(nRanks, nBlocksMax);
   ncclResult_t res = ncclSuccess;
 
@@ -165,6 +211,9 @@ ncclResult_t ncclDdaFabricCommInit(ncclComm* comm) {
        "LL128 enabled=%lld threshold=%lld, Simple threshold=%lld, FabricGpuBarrier nBlocks=%d, peer table on device",
        nRanks, bytes, (long long)fabricScratchOverride, (long long)llEnabled, (long long)llThresh,
        (long long)ll128Enabled, (long long)ll128Thresh, (long long)simpleThresh, nBlocksMax);
+  INFO(NCCL_INIT,
+       "ncclDdaFabricCommInit: CU count=%d, local max blocks=%d, communicator max blocks=%d",
+       comm->cuCount, localBlocksMax, nBlocksMax);
   return ncclSuccess;
 
 fail:

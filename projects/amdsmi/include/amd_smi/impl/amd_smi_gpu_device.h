@@ -4,6 +4,7 @@
 #ifndef AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 #define AMD_SMI_INCLUDE_IMPL_AMD_SMI_GPU_DEVICE_H_
 
+#include <cstdint>
 #include <map>
 #include <mutex>
 #include <set>
@@ -55,37 +56,35 @@ constexpr auto kUALOE_VPOD_ACTIVE_ACCELS = std::string_view("vpod_active_accels"
 constexpr auto kUALOE_LOCAL_ACCELS = std::string_view("local_accels");
 constexpr auto kUALOE_ADDR_MODE = std::string_view("addr_mode");
 constexpr auto kUALOE_ACCEL_STATE = std::string_view("accel_state");
-constexpr auto kUALOE_BDF_OFFSET = std::uint16_t(0x01);  // TODO: Example offset - TBD
+constexpr auto kUALOE_STATION_FLAGS = std::string_view("station_flags");
+constexpr auto kUALOE_NUM_STATIONS = std::string_view("num_stations");
+constexpr auto kUALOE_LANE_EN_BITMAP = std::string_view("lane_en_bitmap");
 
-enum class UALoeLinkInfo_t : std::uint16_t {
-  LINK_TYPE = 0,
-  ACCEL_ID,
-  BANDWIDTH,
-  LATENCY,
-  PPOD_ID,
-  PPOD_SIZE,
-  VPOD_ID,
-  VPOD_SIZE,
-  VPOD_ACTIVE_ACCELS,
-  LOCAL_ACCELS,
-  ADDR_MODE,
-  ACCEL_STATE,
-  ALL_LINK_INFO
-};
+constexpr auto kUALOE_UALINK_SETUP_SUBDIR = std::string_view("setup/");
+constexpr auto kUALOE_UALINK_CONFIG_SUBDIR = std::string_view("config/");
+constexpr auto kUALOE_UALINK_STATIONS_SUBDIR = std::string_view("stations/");
+constexpr auto kUALOE_UALINK_COMMIT_FILE = std::string_view("commit");
+
+/**
+ *  Flat surface: the legacy field files that live directly under the ualink root
+ *  (no write-subtree prefix). Reads here use the same field filenames as the
+ *  subtree readers, letting a caller diff flat vs setup/config/df to confirm a
+ *  commit propagated into the flat surface.
+ */
+constexpr auto kUALOE_UALINK_FLAT_SUBDIR = std::string_view("");
+
+enum class UALoeLinkInfo_t : std::uint16_t { LINK_TYPE = 0, ACCEL_STATE, ALL_LINK_INFO };
 
 using UALoeLinkInfoMap_t = std::map<UALoeLinkInfo_t, std::string_view>;
+
+/**
+ *  Flat surface owned by get_fabric_info_from_ualoe()
+ *      - fabric_type and accel_state only
+ *  The Ppod/Vpod/Station payloads are sourced authoritatively from their
+ *  respective subtrees via the 'query_fabric_*_config()' readers
+ */
 inline const auto UALoeLinkInfoMap = UALoeLinkInfoMap_t{
     {UALoeLinkInfo_t::LINK_TYPE, kUALOE_LINK_TYPE},
-    {UALoeLinkInfo_t::ACCEL_ID, kUALOE_ACCEL_ID},
-    {UALoeLinkInfo_t::BANDWIDTH, kUALOE_BANDWIDTH},
-    {UALoeLinkInfo_t::LATENCY, kUALOE_LATENCY},
-    {UALoeLinkInfo_t::PPOD_ID, kUALOE_PPOD_ID},
-    {UALoeLinkInfo_t::PPOD_SIZE, kUALOE_PPOD_SIZE},
-    {UALoeLinkInfo_t::VPOD_ID, kUALOE_VPOD_ID},
-    {UALoeLinkInfo_t::VPOD_SIZE, kUALOE_VPOD_SIZE},
-    {UALoeLinkInfo_t::VPOD_ACTIVE_ACCELS, kUALOE_VPOD_ACTIVE_ACCELS},
-    {UALoeLinkInfo_t::LOCAL_ACCELS, kUALOE_LOCAL_ACCELS},
-    {UALoeLinkInfo_t::ADDR_MODE, kUALOE_ADDR_MODE},
     {UALoeLinkInfo_t::ACCEL_STATE, kUALOE_ACCEL_STATE},
 };
 using UALoeLinkInfoType_t = std::underlying_type_t<UALoeLinkInfo_t>;
@@ -142,6 +141,9 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   std::string bdf_to_string() const;  // -e feature
   std::vector<uint64_t> get_bitmask_from_numa_node(int32_t node_id, uint32_t size) const;
   std::vector<uint64_t> get_bitmask_from_local_cpulist(uint32_t drm_card, uint32_t size) const;
+  // Set the bit for every CPU named by a sysfs cpulist ("0-3,8") that the
+  // bitmask can hold. Malformed entries are skipped.
+  static void parse_cpulist(const std::string& cpulist, std::vector<uint64_t>& bitmask);
 
   // Get the UALoE handle, opening the IFoE/UALoE session on first use.
   // Deferred out of the constructor so amdsmi_init() and non-fabric queries
@@ -149,12 +151,39 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   // initialization in an uninterruptible generic-netlink wait.
   ualoe_handle_t get_ualoe_handle();
 
-  /** UALoE fabric sysfs:
-   *    - partial reads; see amdsmi_get_gpu_fabric_info() for status info
+  /**
+   *    UALoE fabric sysfs:
+   *        - partial reads (see amdsmi_get_gpu_fabric_info() for status info)
+   *        - fabric_info is in/out: its fabric_version on entry selects the layout written back,
+   *          and only the bytes belonging to that layout are touched
    */
   auto get_fabric_info_from_ualoe(
       amdsmi_fabric_info_t& fabric_info,
       UALoeLinkInfo_t link_info_type = UALoeLinkInfo_t::ALL_LINK_INFO) const -> amdsmi_status_t;
+
+  auto apply_fabric_ppod_config(const amdsmi_fabric_ppod_config_t& config) const -> amdsmi_status_t;
+  auto apply_fabric_vpod_config(const amdsmi_fabric_vpod_config_t& config) const -> amdsmi_status_t;
+  auto apply_fabric_station_config(const amdsmi_fabric_station_config_t& config) const
+      -> amdsmi_status_t;
+
+  /**
+   *    UALoE fabric write-subtree readback (live, post-commit state):
+   *        - config.mask selects fields to read. On return it reports fields actually populated
+   *        - absent/empty masked fields keep a sentinel value and clear their readback bit
+   */
+  auto query_fabric_ppod_config(amdsmi_fabric_ppod_config_t& config) const -> amdsmi_status_t;
+  auto query_fabric_vpod_config(amdsmi_fabric_vpod_config_t& config) const -> amdsmi_status_t;
+  auto query_fabric_station_config(amdsmi_fabric_station_config_t& config) const -> amdsmi_status_t;
+
+  /**
+   *    UALoE fabric flat-surface readback (legacy files directly under the ualink
+   *    root). Same fields/semantics as the subtree readers above, but sourced from
+   *    the flat surface so callers can diff the two and confirm commit propagation.
+   */
+  auto query_fabric_ppod_config_flat(amdsmi_fabric_ppod_config_t& config) const -> amdsmi_status_t;
+  auto query_fabric_vpod_config_flat(amdsmi_fabric_vpod_config_t& config) const -> amdsmi_status_t;
+  auto query_fabric_station_config_flat(amdsmi_fabric_station_config_t& config) const
+      -> amdsmi_status_t;
 
   auto has_ifoe_related_bdf() const -> bool;
   auto get_ifoe_bdf_string() const -> std::string;
@@ -176,11 +205,36 @@ class AMDSmiGPUDevice : public AMDSmiProcessor {
   int32_t get_compute_process_list_impl(GPUComputeProcessList_t& compute_process_list,
                                         ComputeProcessListType_t list_type);
   void populate_ifoe_fabric_bdf_list();
+
   // UALoE — session is opened lazily on the first get_ualoe_handle() call
   void open_ualoe_session();
   ualoe_handle_t ualoe_handle_ = (-1);
   std::once_flag ualoe_open_once_;
+
+  /**
+   *  UALoE sysfs ualink root: /sys/class/drm/<gpu_path>/device/ualink
+   */
+  auto get_ualink_directory_path() const -> std::string;
 };
+
+namespace gpu_device::details {
+
+/**
+ *  Project the version 2 payload onto the frozen version 1 layout
+ */
+auto flatten_v2_to_v1(const amdsmi_fabric_info_v2_t& source, amdsmi_fabric_info_v1_t& destination)
+    -> void;
+
+/**
+ *  Bounded write into caller memory: only the union member named by requested_version is
+ *  touched, so a caller that predates version 2 keeps its smaller allocation intact.
+ *  Declared here so the layout tests can exercise the bound without a live device
+ */
+auto publish_fabric_info(const amdsmi_bdf_t& fabric_bdf, const amdsmi_fabric_info_v2_t& source,
+                         std::uint32_t requested_version, amdsmi_fabric_info_t& destination)
+    -> void;
+
+}  // namespace gpu_device::details
 
 }  // namespace amd::smi
 

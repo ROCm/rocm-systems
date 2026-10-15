@@ -4,8 +4,7 @@
 /// @file xcd.h
 /// @brief Accelerator Complex Die (XCD) containing shader engines and a command processor.
 
-#ifndef ROCJITSU_VM_AMDGPU_XCD_H_
-#define ROCJITSU_VM_AMDGPU_XCD_H_
+#pragma once
 
 #include "rocjitsu/vm/amdgpu/command_processor.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -17,6 +16,7 @@
 
 #include <cassert>
 #include <cstdint>
+#include <memory>
 #include <string>
 #include <vector>
 
@@ -43,14 +43,16 @@ public:
   /// @param memory Shared GPU memory for instruction fetch (not owned).
   /// @param exec_mode Execution mode for CU creation.
   Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory *memory,
-      simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL);
+      simdojo::ExecMode exec_mode = simdojo::ExecMode::FUNCTIONAL,
+      std::shared_ptr<DeviceCacheCoherence> coherence = std::make_shared<DeviceCacheCoherence>());
 
   /// @brief Construct an empty XCD (children added externally by the config loader).
   explicit Xcd(std::string name) : simdojo::CompositeComponent(std::move(name)) { set_weight(0); }
 
   /// @brief Set typed child pointers after the builder populates children.
   void set_command_processor(CommandProcessor *cp) { cp_ = cp; }
-  void set_l2_cache(L2Cache *l2) { l2_cache_ = l2; }
+  void set_l2_cache(L2Cache *l2);
+  void set_coherence_domain(std::shared_ptr<DeviceCacheCoherence> coherence);
   void add_shader_engine(ShaderEngine *se) { shader_engines_.push_back(se); }
 
   /// @brief Set flat-address-space aperture boundaries on all CUs via their SPIs.
@@ -108,6 +110,7 @@ public:
 
 private:
   simdojo::ExecMode exec_mode_;
+  std::shared_ptr<DeviceCacheCoherence> coherence_ = std::make_shared<DeviceCacheCoherence>();
   CommandProcessor *cp_ = nullptr;
   L2Cache *l2_cache_ = nullptr;
   std::vector<ShaderEngine *> shader_engines_;
@@ -115,5 +118,3 @@ private:
 
 } // namespace amdgpu
 } // namespace rocjitsu
-
-#endif // ROCJITSU_VM_AMDGPU_XCD_H_

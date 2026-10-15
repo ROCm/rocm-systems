@@ -375,6 +375,8 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VPermlane16SwapB32Vop1>,
     &execute_with_backend<VPermlane32SwapB32Vop1>,
     &execute_with_backend<VCvtF32Bf16Vop1>,
+    &execute_with_backend<VExpLegacyF32Vop1>,
+    &execute_with_backend<VLogLegacyF32Vop1>,
     &execute_with_backend<VCmpClassF32Vopc>,
     &execute_with_backend<VCmpxClassF32Vopc>,
     &execute_with_backend<VCmpClassF64Vopc>,
@@ -1239,6 +1241,8 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<VCmpxNeU64Vop3>,
     &execute_with_backend<VCmpxGeU64Vop3>,
     &execute_with_backend<VCmpxTU64Vop3>,
+    &execute_with_backend<VExpLegacyF32Vop3>,
+    &execute_with_backend<VLogLegacyF32Vop3>,
     &execute_with_backend<VAddCoU32Vop3SdstEnc>,
     &execute_with_backend<VSubCoU32Vop3SdstEnc>,
     &execute_with_backend<VSubrevCoU32Vop3SdstEnc>,
@@ -1519,6 +1523,13 @@ constexpr InstructionCallbackTable kInstructionCallbacks{{
     &execute_with_backend<FlatAtomicXorX2Flat>,
     &execute_with_backend<FlatAtomicIncX2Flat>,
     &execute_with_backend<FlatAtomicDecX2Flat>,
+    &execute_with_backend<GlobalLoadLdsUbyteFlat>,
+    &execute_with_backend<GlobalLoadLdsSbyteFlat>,
+    &execute_with_backend<GlobalLoadLdsUshortFlat>,
+    &execute_with_backend<GlobalLoadLdsSshortFlat>,
+    &execute_with_backend<GlobalLoadLdsDwordFlat>,
+    &execute_with_backend<GlobalLoadLdsDwordx4Flat>,
+    &execute_with_backend<GlobalLoadLdsDwordx3Flat>,
 }};
 
 } // namespace

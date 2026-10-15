@@ -62,19 +62,26 @@ def markers2timestamp(
 
 
 def get_min_max_time(connection):
-    min_max_query = """
+    subqueries = [
+        "SELECT start as min_time, end as max_time FROM regions_and_samples",
+        "SELECT start as min_time, end as max_time FROM rocpd_kernel_dispatch",
+        "SELECT start as min_time, end as max_time FROM rocpd_memory_allocate",
+        "SELECT start as min_time, end as max_time FROM rocpd_memory_copy",
+    ]
+
+    # Include hip_event records when the schema supports them (3.0.4+).
+    if (
+        hasattr(connection, "supported_features")
+        and "hip_event" in connection.supported_features
+    ):
+        subqueries.append("SELECT start as min_time, end as max_time FROM hip_events")
+
+    union_all = " UNION ALL ".join(subqueries)
+    min_max_query = f"""
         SELECT
             MIN(min_time) as min_time,
             MAX(max_time) as max_time
-        FROM (
-            SELECT start as min_time, end as max_time FROM regions_and_samples
-            UNION ALL
-            SELECT start as min_time, end as max_time FROM rocpd_kernel_dispatch
-            UNION ALL
-            SELECT start as min_time, end as max_time FROM rocpd_memory_allocate
-            UNION ALL
-            SELECT start as min_time, end as max_time FROM rocpd_memory_copy
-        )"""
+        FROM ({union_all})"""
 
     min_time, max_time = execute_statement(connection, min_max_query).fetchone()
     return (min_time, max_time)

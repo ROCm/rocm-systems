@@ -85,7 +85,7 @@ set(PKG_VERSION_NUM_COMMIT 0)
 project(
     ${AMD_SMI_LIBS_TARGET}
     DESCRIPTION "AMD System Management libraries"
-    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/amdsmi"
+    HOMEPAGE_URL "https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi"
 )
 
 set(CMAKE_CXX_STANDARD 17)
@@ -167,7 +167,7 @@ cmake_dependent_option(
     AUTO_BUILD_STATIC_LIBS
     "auto-build static library (tests/examples link to static)"
     ON
-    "NOT BUILD_SHARED_LIBS OR BUILD_TESTS"
+    "NOT BUILD_SHARED_LIBS OR BUILD_TESTS OR BUILD_EXAMPLES"
     OFF
 )
 cmake_dependent_option(
@@ -348,6 +348,7 @@ set(CMN_SRC_LIST
     "${ROCM_SRC_DIR}/rocm_smi_binary_parser.cc"
     "${ROCM_SRC_DIR}/rocm_smi_board_temp.cc"
     "${ROCM_SRC_DIR}/rocm_smi_npm.cc"
+    "${ROCM_SRC_DIR}/rocm_smi_ampp.cc"
 )
 
 if(ENABLE_ESMI_LIB)
@@ -377,6 +378,7 @@ set(CMN_INC_LIST
     "${ROCM_INC_DIR}/rocm_smi_binary_parser.h"
     "${ROCM_INC_DIR}/rocm_smi_board_temp.h"
     "${ROCM_INC_DIR}/rocm_smi_npm.h"
+    "${ROCM_INC_DIR}/rocm_smi_ampp.h"
 )
 
 add_subdirectory("rocm_smi")
@@ -471,6 +473,8 @@ install(
     PATTERN "*.txt"
     PATTERN "build*" EXCLUDE
     PATTERN ".cache*" EXCLUDE
+    # Includes impl headers that are build-only, so it cannot compile against an install tree.
+    PATTERN "amd_smi_cper.cc" EXCLUDE
 )
 
 # Make for goamdsmi_shim library

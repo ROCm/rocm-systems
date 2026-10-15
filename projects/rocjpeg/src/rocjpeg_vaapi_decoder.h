@@ -43,6 +43,9 @@ THE SOFTWARE.
 #include <va/va.h>
 #include <va/va_drm.h>
 #include <va/va_drmcommon.h>
+#ifdef ROCJPEG_USE_DLOPEN_VA
+#include "rocjpeg_vaapi_loader.h"
+#endif
 #include "rocjpeg_commons.h"
 #include "rocjpeg_parser.h"
 #include "../api/rocjpeg/rocjpeg.h"
@@ -65,7 +68,7 @@ typedef enum {
  * whether it can convert to RGB, and whether it supports ROI (Region of Interest) decoding.
  */
 typedef struct {
-    uint32_t num_jpeg_cores; /**< Number of JPEG cores in the VCN JPEG decoder. */
+    uint32_t num_jpeg_cores; /**< Number of JPEG cores in the VCN JPEG decoder. Always >= 1: it is the stride used to group work into sub-batches, so a zero would stall those loops. */
     bool can_convert_to_rgb; /**< Flag indicating whether the VCN JPEG decoder can convert to RGB. */
     bool can_roi_decode; /**< Flag indicating whether the VCN JPEG decoder supports ROI decoding. */
 } VcnJpegSpec;
@@ -329,6 +332,25 @@ public:
     const VcnJpegSpec& GetCurrentVcnJpegSpec() const {return current_vcn_jpeg_spec_;}
 
     /**
+     * @brief Returns the minimum and maximum picture dimensions supported by the VCN JPEG decoder.
+     */
+    uint32_t GetMinPictureWidth() const {return min_picture_width_;}
+    uint32_t GetMinPictureHeight() const {return min_picture_height_;}
+    uint32_t GetMaxPictureWidth() const {return max_picture_width_;}
+    uint32_t GetMaxPictureHeight() const {return max_picture_height_;}
+
+    /**
+     * @brief Returns the layout the VCN JPEG decoder writes for a chroma subsampling.
+     *
+     * The layout is the one SubmitDecode/SubmitDecodeBatched request for non-RGB output. If the VA-API driver reports
+     * its supported surface pixel formats, the layout is returned only when the driver lists the corresponding fourcc.
+     *
+     * @param chroma_subsampling The chroma subsampling.
+     * @return The surface format, or ROCJPEG_SURFACE_FORMAT_NONE if the chroma subsampling is not supported.
+     */
+    RocJpegSurfaceFormat GetNativeSurfaceFormat(ChromaSubsampling chroma_subsampling) const;
+
+    /**
      * Sets the specified VASurfaceID as idle.
      *
      * @param surface_id The VASurfaceID to set as idle.
@@ -336,6 +358,12 @@ public:
      */
     RocJpegStatus SetSurfaceAsIdle(VASurfaceID surface_id);
 private:
+#ifdef ROCJPEG_USE_DLOPEN_VA
+    // Shared reference to the process-wide VA loader. The dlopen handle stays
+    // open as long as at least one decoder instance exists; dlclose runs when
+    // the last shared_ptr is destroyed.
+    std::shared_ptr<RocJpegVaapiLoader> va_loader_;
+#endif
     int device_id_; // The ID of the device
     int drm_fd_; // The file descriptor for the DRM device
     uint32_t min_picture_width_; // The minimum width of the picture
@@ -345,6 +373,7 @@ private:
     uint32_t default_surface_width_; // The default width of the surface
     uint32_t default_surface_height_; // The default height of the surface
     bool supports_modifiers_; // DRM format modifiers support
+    std::vector<uint32_t> driver_pixel_formats_; // Surface pixel formats (fourcc) reported by the VA-API driver for the JPEG config
     VADisplay va_display_; // The VAAPI display
     VAContextID va_context_id_; // The VAAPI context ID
     std::vector<VAConfigAttrib> va_config_attrib_; // The VAAPI configuration attributes

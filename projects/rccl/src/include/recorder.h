@@ -6,7 +6,10 @@
 #include <mutex>
 #include <chrono>
 
-#include "info.h"
+#include "nccl.h"
+
+// Only references to ncclInfo appear here, so tools such as RcclReplayer build without the internal headers.
+struct ncclInfo;
 
 namespace rccl {
 // API opcode covered by rccl replayer

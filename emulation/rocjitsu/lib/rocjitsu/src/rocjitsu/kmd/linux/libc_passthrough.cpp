@@ -23,8 +23,10 @@ void LibcPassthrough::resolve() {
   read = util::lookup_symbol<decltype(read)>(handle, "read");
   write = util::lookup_symbol<decltype(write)>(handle, "write");
   ioctl = util::lookup_symbol<decltype(ioctl)>(handle, "ioctl");
+  syscall = util::lookup_symbol<decltype(syscall)>(handle, "syscall");
   mmap = util::lookup_symbol<decltype(mmap)>(handle, "mmap");
   munmap = util::lookup_symbol<decltype(munmap)>(handle, "munmap");
+  mremap = util::lookup_symbol<decltype(mremap)>(handle, "mremap");
   mprotect = util::lookup_symbol<decltype(mprotect)>(handle, "mprotect");
   madvise = util::lookup_symbol<decltype(madvise)>(handle, "madvise");
   memfd_create = util::lookup_symbol<decltype(memfd_create)>(handle, "memfd_create");
@@ -53,15 +55,17 @@ void LibcPassthrough::resolve() {
   lxstat_fn = util::lookup_symbol<decltype(lxstat_fn)>(handle, "__lxstat");
   lxstat64_fn = util::lookup_symbol<decltype(lxstat64_fn)>(handle, "__lxstat64");
   readlink_fn = util::lookup_symbol<decltype(readlink_fn)>(handle, "readlink");
+  realpath_fn = util::lookup_symbol<decltype(realpath_fn)>(handle, "realpath");
+  realpath_chk_fn = util::lookup_symbol<decltype(realpath_chk_fn)>(handle, "__realpath_chk");
   fork = util::lookup_symbol<decltype(fork)>(handle, "fork");
   // Keep ready() false unless every required interposed libc entry point was
   // resolved. In release builds the asserts disappear, so the boolean must not
   // claim readiness while any later call would dereference a null function
   // pointer.
-  initialized_ = openat && close && read && write && ioctl && mmap && munmap && mprotect &&
-                 madvise && memfd_create && dup && dup2 && dup3 && fcntl && fopen && freopen &&
-                 opendir && readdir && closedir && stat && lstat && access && fstat_fn &&
-                 readlink_fn && fork;
+  initialized_ = openat && close && read && write && ioctl && syscall && mmap && munmap &&
+                 mprotect && madvise && memfd_create && dup && dup2 && dup3 && fcntl && fopen &&
+                 freopen && opendir && readdir && closedir && stat && lstat && access && fstat_fn &&
+                 readlink_fn && realpath_fn && fork;
   assert(initialized_);
 }
 
