@@ -159,6 +159,11 @@ jobs:
               '[.[] | select(."os-release" == $os)]')
           fi
 
+          # Apply the per-mode override (test-label, timeout-minutes) so the job
+          # only sees the final values.
+          MATRIX_CONTENT=$(echo "$MATRIX_CONTENT" | jq -c --arg mode "$MODE" \
+            '[.[] | (if $mode == "continuous" then . + (.continuous // {}) else . end) | del(.continuous)]')
+
           if [ "$(echo "$MATRIX_CONTENT" | jq 'length')" -eq 0 ]; then
             echo "::error::No matrix entries match (event=${EVENT_NAME}, mode=${MODE}, arch=${INPUT_ARCH}, os-release=${INPUT_OS})"
             exit 1
@@ -301,7 +306,7 @@ jobs:
       - name: Configure, Build, and Test
         id: test
         continue-on-error: true
-        timeout-minutes: ${{ steps.setup_env.outputs.mode == 'Nightly' && 120 || 90 }}
+        timeout-minutes: ${{ matrix.system.timeout-minutes }}
         working-directory: projects/rocprofiler-compute
         run: |
           set -e
@@ -321,8 +326,8 @@ jobs:
             -DINSTALL_TESTS=ON \
             -DPYTEST_NUMPROCS=8 \
             -- \
-            -L full \
-            -LE full_rocprofiler_compute_ci_exclude
+            -L ${{ matrix.system.test-label }} \
+            -LE ${{ matrix.system.test-label }}_rocprofiler_compute_ci_exclude
 
       - name: Upload Test Logs (on failure)
         if: steps.test.outcome == 'failure'
