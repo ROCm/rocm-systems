@@ -112,6 +112,7 @@ struct SockFakes {
   int lastInitType;
 };
 SockFakes g_sock;
+std::vector<int> g_closedFds;  // every descriptor the unit closed, so fail-path cleanup never double-closes
 
 bool WaitReadable(int fd) {
   struct pollfd p = {fd, POLLIN, 0};
@@ -160,6 +161,7 @@ ncclResult_t ncclSocketSetFd(ncclSocketDescriptor fd, struct ncclSocket* sock) {
 }
 ncclResult_t ncclSocketClose(struct ncclSocket* sock, bool) {
   g_sock.closes++;
+  g_closedFds.push_back(sock->socketDescriptor);
   if (g_sock.onClose) g_sock.onClose(sock->socketDescriptor);
   if (sock->socketDescriptor >= 0) close(sock->socketDescriptor);
   sock->socketDescriptor = -1;
@@ -297,7 +299,9 @@ ncclResult_t ncclShmUnlink(ncclShmHandle_t) {
 
 // --- OS, HIP, cuMem, thread naming, profiler.
 namespace {
-int g_mutexCondShared, g_mutexCondUnshared, g_setAffinity, g_threadNames, g_deviceSyncs;
+int g_mutexCondShared, g_mutexCondUnshared, g_threadNames, g_deviceSyncs;
+std::atomic<int> g_setAffinity;  // both service threads apply it
+std::mutex g_hipMutex;
 hipError_t g_hipSetDeviceResult, g_hipExportResult, g_hipIpcCloseResult;
 std::vector<int> g_hipSetDevices;
 std::vector<void*> g_hipIpcClosed;
@@ -305,6 +309,7 @@ int g_cuMemEnable, g_cuMemHostEnable;
 bool g_proxyDiagEnabled;
 int g_profOpStarts, g_profCtrlStarts, g_profCtrlStops;
 std::vector<int> g_profCtrlStates;
+std::atomic<int> g_profSleeps;  // set before the idle proxy waits, under the pool mutex
 }  // namespace
 
 void ncclOsSetMutexCondShared(std::mutex&, std::condition_variable&, int* initialized) {
@@ -332,6 +337,7 @@ int ncclOsGetCpu() { return 0; }
 uint64_t ncclOsGetTid() { return 0; }
 
 hipError_t hipSetDevice(int dev) {
+  std::lock_guard<std::mutex> lock(g_hipMutex);
   g_hipSetDevices.push_back(dev);
   return g_hipSetDeviceResult;
 }
@@ -369,6 +375,7 @@ ncclResult_t ncclProfilerStopProxyCtrlEvent(void*) {
   return ncclSuccess;
 }
 ncclResult_t ncclProfilerRecordProxyCtrlEventState(void*, int, ncclProfilerEventState_t state) {
+  if (state == ncclProfilerProxyCtrlSleep) g_profSleeps++;
   g_profCtrlStates.push_back(state);
   return ncclSuccess;
 }
@@ -445,16 +452,25 @@ static ncclResult_t ProxyTestRealloc(T** ptr, size_t oldNelem, size_t nelem, con
   if (g_reallocCalls++ == g_reallocFailAt) return ncclSystemError;
   return ncclReallocDebug(ptr, oldNelem, nelem, file, line, fn, true);
 }
+// Fail-path tests free what the unit left behind only if the unit did not free it itself.
+void* g_watchedFree;
+std::atomic<bool> g_watchedFreed;
+static void ProxyTestFree(void* p) {
+  if (p != nullptr && p == g_watchedFree) g_watchedFreed = true;
+  std::free(p);
+}
 static void* ProxyTestMalloc(size_t n) { return g_mallocCalls++ == g_mallocFailAt ? nullptr : std::malloc(n); }
 #undef ncclCalloc
 #define ncclCalloc(...) ProxyTestCalloc(__FILE__, __LINE__, __func__, __VA_ARGS__)
 #undef ncclRealloc
 #define ncclRealloc(ptr, o, n) ProxyTestRealloc(ptr, o, n, __FILE__, __LINE__, __func__)
 #define malloc(n) ProxyTestMalloc(n)
+#define free(p) ProxyTestFree(p)
 
 #include PROXY_CC_PATH
 
 #undef malloc
+#undef free
 
 namespace {
 
@@ -471,6 +487,10 @@ class ProxyFixture : public ::testing::Test {
     g_ipc.recvFd = NCCL_INVALID_IPC_FD;
     g_shm = ShmFakes{};
     g_mutexCondShared = g_mutexCondUnshared = g_setAffinity = g_threadNames = g_deviceSyncs = 0;
+    g_profSleeps = 0;
+    g_closedFds.clear();
+    g_watchedFree = nullptr;
+    g_watchedFreed = false;
     g_hipSetDeviceResult = g_hipExportResult = g_hipIpcCloseResult = hipSuccess;
     g_hipSetDevices.clear();
     g_hipIpcClosed.clear();
@@ -1286,9 +1306,11 @@ class ProxyProgressFixture : public ProxyFixture {
   }
   void TearDown() override {
     if (st().thread.joinable()) {
+      std::unique_lock<std::mutex> lock(opsPool_->mutex);  // under the lock, so the wakeup cannot be lost
       COMPILER_ATOMIC_STORE(&abort_, 1, std::memory_order_release);
       st().stop.store(2);
-      if (opsPool_) opsPool_->cond.notify_all();
+      opsPool_->cond.notify_all();
+      lock.unlock();
       st().thread.join();
     }
     free(args_);
@@ -1698,7 +1720,7 @@ TEST_F(ProxyGetPostedOpsMicrotest, IdleProxySleepsUntilAPost) {
   MakeOpsPool();
   auto [first, last] = Chain({{1, 1, 4}});
   std::thread client([&, first = first, last = last] {
-    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    EXPECT_TRUE(WaitFor([] { return g_profSleeps > 0; }));  // recorded before the proxy waits, under the lock
     ncclProxyPost(opsPool_, first, last);
   });
   int added = 0;
@@ -1774,18 +1796,18 @@ TEST_F(ProxyProgressThreadMicrotest, StopWaitsForActiveOpsButAbortDoesNot) {
     std::lock_guard<std::mutex> lock(opsPool_->mutex);
     st().stop.store(1);
   }
-  std::this_thread::sleep_for(std::chrono::milliseconds(10));
-  EXPECT_TRUE(st().thread.joinable());
-  EXPECT_NE(st().active, nullptr);  // still progressing after stop
+  int callsAtStop = g_progressCalls;
+  EXPECT_TRUE(WaitFor([&] { return g_progressCalls > callsAtStop + 10; }));  // still progressing after stop
   release = true;
   st().thread.join();
   EXPECT_EQ(st().active, nullptr);
   st().stop.store(0);
   release = false;
   Start();
+  g_progressCalls = 0;
   auto [f2, l2] = Chain({{0, 1, 1}});
   ASSERT_EQ(ncclProxyPost(opsPool_, f2, l2), ncclSuccess);
-  ASSERT_TRUE(WaitFor([&] { return st().active != nullptr; }));
+  ASSERT_TRUE(WaitFor([] { return g_progressCalls > 0; }));
   COMPILER_ATOMIC_STORE(&abort_, 1, std::memory_order_release);
   st().thread.join();
   EXPECT_NE(st().active, nullptr);
@@ -1808,10 +1830,12 @@ TEST_F(ProxyProgressThreadMicrotest, AppendErrorsAreRecordedButTheThreadKeepsRun
   opsPool_->ops[first].connection = nullptr;
   ASSERT_EQ(ncclProxyPost(opsPool_, first, last), ncclSuccess);
   ASSERT_TRUE(WaitFor([&] { return COMPILER_ATOMIC_LOAD(&ps_.asyncResult, std::memory_order_acquire) != ncclSuccess; }));
-  EXPECT_EQ(ps_.asyncResult, ncclInternalError);
-  EXPECT_TRUE(st().thread.joinable());
-  opsPool_->nextOps = -1;  // nothing left to append so the thread can sleep and be stopped
-  st().nextOps = -1;
+  EXPECT_EQ(COMPILER_ATOMIC_LOAD(&ps_.asyncResult, std::memory_order_acquire), ncclInternalError);
+  COMPILER_ATOMIC_STORE(&ps_.asyncResult, ncclSuccess, std::memory_order_release);
+  EXPECT_TRUE(WaitFor([&] {  // the thread is still looping: it retries the bad op and reports again
+    return COMPILER_ATOMIC_LOAD(&ps_.asyncResult, std::memory_order_acquire) == ncclInternalError;
+  }));
+  COMPILER_ATOMIC_STORE(&abort_, 1, std::memory_order_release);  // the bad op is retried forever; abort ends it
   Stop();
 }
 
@@ -2471,6 +2495,7 @@ class ProxyServiceFixture : public ProxyFixture {
     fds_.push_back(p[1]);
     ps_.listenSock = (ncclSocket*)calloc(1, sizeof(ncclSocket));
     ps_.listenSock->socketDescriptor = p[0];
+    g_watchedFree = ps_.listenSock;
     ps_.abortFlag = &abort_;
     ps_.tpnRanks = 4;
     ps_.tpLocalnRanks = 2;
@@ -2488,10 +2513,14 @@ class ProxyServiceFixture : public ProxyFixture {
     ProxyFixture::TearDown();
   }
   ncclProxyProgressState& st() { return ps_.progressState; }
-  // For runs that end on a fail path, which leaves the listen socket to its owner.
+  // After a run that may have ended on a fail path: release what the unit did not.
   void FreeListenSock() {
-    close(ps_.listenSock->socketDescriptor);
+    if (g_watchedFreed) return;
+    if (ps_.listenSock->socketDescriptor >= 0) close(ps_.listenSock->socketDescriptor);
     free(ps_.listenSock);
+  }
+  static void CloseUnlessClosed(int fd) {
+    if (std::find(g_closedFds.begin(), g_closedFds.end(), fd) == g_closedFds.end()) close(fd);
   }
 
   // A client the service will accept on its next poll; returns the client's end.
@@ -2841,6 +2870,7 @@ TEST_F(ProxyServiceLoopMicrotest, AbortWithCuMemHostClosesPeersWhenStopped) {
     ps_.directMode = variant == 0;
     ps_.stop = variant == 0;
     ps_.listenSock = (ncclSocket*)calloc(1, sizeof(ncclSocket));
+    g_watchedFree = ps_.listenSock;
     int p[2];
     ASSERT_EQ(pipe(p), 0);
     fds_.push_back(p[1]);
@@ -2864,13 +2894,14 @@ TEST_F(ProxyServiceLoopMicrotest, AcceptFailuresAreLoggedAndAffinityIsApplied) {
 
 TEST_F(ProxyServiceLoopMicrotest, TooManyConnectionsEndsTheService) {
   ps_.tpnRanks = 1;  // NCCL_MAX_PROXY_CONNECTIONS slots
-  std::vector<int> ours;
   for (int i = 0; i < NCCL_MAX_PROXY_CONNECTIONS + 1; i++) Connect();
-  ours.assign(g_sock.acceptFds.begin(), g_sock.acceptFds.end() - 1);
+  std::vector<int> ours(g_sock.acceptFds.begin(), g_sock.acceptFds.end());
   ncclProxyService(&ps_);
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Too many connections (145 max)"));
-  for (int fd : ours) close(fd);  // the fail path leaks peers and the listen socket to their owners
-  close(g_sock.acceptFds.front());
+  ASSERT_EQ(g_sock.acceptFds.size(), 1u);  // every slot was filled; the extra client was never accepted
+  EXPECT_EQ(g_sock.acceptFds.front(), ours.back());
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, ("Too many connections (" + std::to_string(NCCL_MAX_PROXY_CONNECTIONS) +
+                                     " max)").c_str()));
+  for (int fd : ours) CloseUnlessClosed(fd);
   FreeListenSock();
 }
 
@@ -2889,6 +2920,8 @@ TEST_F(ProxyServiceLoopMicrotest, StartupFailuresReturnWithoutServing) {
 }
 
 TEST_F(ProxyServiceLoopMicrotest, PollFailureEndsTheService) {
+  Connect();
+  int ours = g_sock.acceptFds.front();
   struct rlimit old;
   ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &old), 0);
   struct rlimit none = {0, old.rlim_max};
@@ -2896,6 +2929,8 @@ TEST_F(ProxyServiceLoopMicrotest, PollFailureEndsTheService) {
   ncclProxyService(&ps_);
   ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &old), 0);
   EXPECT_TRUE(Logged(NCCL_LOG_WARN, "[Proxy Service] Poll failed"));
+  EXPECT_EQ(g_sock.acceptFds.size(), 1u);  // the first poll failed, so the pending client was never accepted
+  CloseUnlessClosed(ours);
   FreeListenSock();
 }
 
@@ -2940,6 +2975,7 @@ class ProxyUdsServiceMicrotest : public ProxyServiceFixture {
   int udsW_ = -1;
 };
 
+#if ROCM_VERSION >= 70000  // proxyGetFd / proxyQueryFd are compiled out before ROCm 7
 TEST_F(ProxyUdsServiceMicrotest, GetFd_ExportsTheHandleAndSendsTheFdBack) {
   Hdr(ncclProxyMsgGetFd, 0xbeef, (void*)0x40);
   g_ipc.recvFd = 12;
@@ -2994,13 +3030,6 @@ TEST_F(ProxyUdsServiceMicrotest, QueryFd_EchoesTheRemoteFdAndSwallowsSendErrors)
   EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclInternalError);
 }
 
-TEST_F(ProxyUdsServiceMicrotest, RecvReq_UnknownTypeOrRecvFailure) {
-  Hdr(ncclProxyMsgSetup, 0, nullptr);
-  EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclInternalError);
-  g_ipc.recvResult = ncclRemoteError;
-  EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclRemoteError);
-}
-
 TEST_F(ProxyUdsServiceMicrotest, ServiceHandlesRequestsUntilStopOrAbort) {
   ps_.cudaDev = 4;
   g_hipSetDeviceResult = hipErrorInvalidDevice;
@@ -3017,6 +3046,23 @@ TEST_F(ProxyUdsServiceMicrotest, ServiceHandlesRequestsUntilStopOrAbort) {
   abort_ = 1;
   ncclProxyServiceUDS(&ps_);
   EXPECT_EQ(g_ipc.sent.size(), 1u);
+}
+
+#else
+TEST_F(ProxyUdsServiceMicrotest, FdRequests_AreRejectedBeforeRocm7) {
+  for (int type : {ncclProxyMsgGetFd, ncclProxyMsgQueryFd}) {
+    Hdr(type, 0, nullptr);
+    EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclInternalError);
+  }
+  EXPECT_TRUE(g_ipc.sent.empty());
+}
+#endif
+
+TEST_F(ProxyUdsServiceMicrotest, RecvReq_UnknownTypeOrRecvFailure) {
+  Hdr(ncclProxyMsgSetup, 0, nullptr);
+  EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclInternalError);
+  g_ipc.recvResult = ncclRemoteError;
+  EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclRemoteError);
 }
 
 TEST_F(ProxyUdsServiceMicrotest, ServiceGetFdOrPollFailuresEndIt) {
