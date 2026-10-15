@@ -98,9 +98,9 @@ TEST_F(RingsMicrotest, BuildRings_EachRingIsCheckedOnItsOwn) {
 }
 
 TEST_F(RingsMicrotest, DumpLine_PadsToTheWidestRankAndTruncates) {
-  std::vector<int> values = {0, 7, 12};
+  std::vector<int> values = {0, 7, 1, 2, 3, 4, 5, 6, 8, 9, 10, 11};
   dumpLine(values.data(), 12, "p:");
-  EXPECT_TRUE(Logged("p:  0  7 12"));
+  EXPECT_TRUE(Logged("p:  0  7  1  2  3  4  5  6  8  9 10 11"));
 
   std::vector<int> many(100);
   for (int i = 0; i < 100; i++) many[i] = i;

@@ -5,7 +5,9 @@
  ************************************************************************/
 
 // Fakes for everything src/graph/*.cc calls outside src/graph, for rccl-UnitTestsMicroTopo. That binary
-// compiles the real graph files, so it links none of the shared fakes, which define graph symbols.
+// compiles the real graph files, so topo_stubs.cc, nccl_fakes.cc, init_fakes.cc and tuning_fakes.cc, which
+// define graph symbols, cannot link. The HIP, amd-smi, OS and bootstrap seams sit here with the rest so one
+// ResetGraphFakes() restores every hook the graph tests set.
 
 #ifndef RCCL_TEST_HOST_GRAPH_FAKES_H_
 #define RCCL_TEST_HOST_GRAPH_FAKES_H_

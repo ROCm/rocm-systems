@@ -766,8 +766,9 @@ TEST_F(XmlSysfsMicrotest, GetXmlFromSys_KeepsTheTopologyFileAttributes) {
   const std::string path = "/sys/devices/pci0000:00/0000:00:01.0";
   SysfsDevice("0000:00:01.0", path, "0x020000");
   ncclXmlNode* pci = PciNode("0000:00:01.0");
-  for (const char* key : {"vendor", "device", "subsystem_vendor", "subsystem_device", "link_speed", "link_width"})
+  for (const char* key : {"vendor", "device", "subsystem_vendor", "subsystem_device", "link_speed", "link_width"}) {
     ASSERT_EQ(ncclSuccess, xmlSetAttr(pci, key, "file"));
+  }
 
   ASSERT_EQ(ncclSuccess, ncclTopoGetXmlFromSys(pci, xml_.get()));
 
@@ -895,8 +896,9 @@ TEST_F(XmlSysfsMicrotest, GetXmlFromSys_FullCpuFails) {
 TEST_F(XmlSysfsMicrotest, GetXmlFromSys_FullNodeFailsToRecordTheLink) {
   ncclXmlNode* pci = PciNode("0000:01:00.0");
   ASSERT_EQ(ncclSuccess, xmlSetAttr(pci, "class", "0x020000"));
-  for (int a = pci->nAttrs; a < MAX_ATTR_COUNT; a++)
+  for (int a = pci->nAttrs; a < MAX_ATTR_COUNT; a++) {
     ASSERT_EQ(ncclSuccess, xmlSetAttrInt(pci, std::to_string(a).c_str(), a));
+  }
 
   EXPECT_EQ(ncclInternalError, ncclTopoGetXmlFromSys(pci, xml_.get()));
 }
@@ -939,8 +941,9 @@ class XmlGpuMicrotest : public XmlSysfsMicrotest {
 
   static std::vector<ncclXmlNode*> Links(ncclXmlNode* gpu) {
     std::vector<ncclXmlNode*> links;
-    for (int s = 0; s < gpu->nSubs; s++)
+    for (int s = 0; s < gpu->nSubs; s++) {
       if (strcmp(gpu->subs[s]->name, "xgmi") == 0) links.push_back(gpu->subs[s]);
+    }
     return links;
   }
 };
@@ -1134,8 +1137,9 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_MissingTargetClassComesFromSysfs) {
   g_pciPaths["0000:30:00.0"] = "/sys/x/0000:30:00.0";
   g_sysfs["/sys/x/0000:30:00.0/class"] = "0x020000";
   ncclXmlNode* gpu = Add(pci_, "gpu", {{"dev", "0"}, {"sm", "1"}, {"gcn", "gfx942"}, {"arch", "0"}});
-  for (const char* target : {"fffffff:ffff:ff", "0000:20:00.0", "0000:30:00.0", "0000:40:00.0"})
+  for (const char* target : {"fffffff:ffff:ff", "0000:20:00.0", "0000:30:00.0", "0000:40:00.0"}) {
     Add(gpu, "xgmi", {{"target", target}, {"count", "1"}});
+  }
   Add(gpu, "other");
 
   ASSERT_EQ(gpu, GpuNode());

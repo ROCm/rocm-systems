@@ -25,8 +25,6 @@ using namespace topo_scene;
 
 namespace {
 
-using GraphPtr = std::unique_ptr<ncclTopoGraph, FreeDeleter>;
-
 class ConnectMicrotest : public ::testing::Test {
  protected:
   std::unique_ptr<ncclComm> comm_ = std::make_unique<ncclComm>();
@@ -68,8 +66,9 @@ class ConnectMicrotest : public ::testing::Test {
   void Intra(int algo, const std::vector<std::vector<int>>& channels) {
     ncclTopoGraph* graph = graphs_[algo];
     graph->nChannels = channels.size();
-    for (size_t c = 0; c < channels.size(); c++)
+    for (size_t c = 0; c < channels.size(); c++) {
       for (size_t i = 0; i < channels[c].size(); i++) graph->intra[c * channels[c].size() + i] = channels[c][i];
+    }
   }
 
   ncclTopoRanks Preset(ncclResult_t expect = ncclSuccess) {
@@ -272,8 +271,9 @@ TEST_F(ConnectMicrotest, Preset_IntraGraphGenPermutesChannelZerosRing) {
   g_params["RCCL_INTRA_GRAPH_GEN"] = 1;
   g_generateRings = [](int n, uint32_t nChannels, int* order) {
     const int orders[2][4] = {{0, 1, 2, 3}, {2, 0, 3, 1}};
-    for (uint32_t c = 0; c < nChannels; c++)
+    for (uint32_t c = 0; c < nChannels; c++) {
       for (int i = 0; i < n; i++) order[c * n + i] = orders[c][i];
+    }
     return ncclSuccess;
   };
 
@@ -314,8 +314,9 @@ TEST_F(ConnectMicrotest, Preset_Gfx11And12KeepOneRingOrderUnlessP2pIsOff) {
     Intra(NCCL_ALGO_TREE, {{0, 1, 2, 3}, {0, 1, 2, 3}});
     g_params["RCCL_INTRA_GRAPH_GEN"] = 1;
     g_generateRings = [](int n, uint32_t nChannels, int* order) {
-      for (uint32_t c = 0; c < nChannels; c++)
+      for (uint32_t c = 0; c < nChannels; c++) {
         for (int i = 0; i < n; i++) order[c * n + i] = (i + c) % n;
+      }
       return ncclSuccess;
     };
 
@@ -468,8 +469,9 @@ TEST_F(ConnectMicrotest, ConnectRingsLoadBalanced_FollowsTheGeneratedNodeOrder) 
   comm_->nChannels = 2;
   g_generateRings = [](int n, uint32_t nChannels, int* order) {
     const int orders[2][3] = {{0, 1, 2}, {0, 2, 1}};
-    for (uint32_t c = 0; c < nChannels; c++)
+    for (uint32_t c = 0; c < nChannels; c++) {
       for (int i = 0; i < n; i++) order[c * n + i] = orders[c][i];
+    }
     return ncclSuccess;
   };
   std::vector<int> recv = {0, 2, 4, 0, 2, 4}, send = {1, 3, 5, 1, 3, 5}, prev(12, -1), next(12, -1);
@@ -494,12 +496,13 @@ TEST_F(ConnectMicrotest, ConnectRingsLoadBalanced_FollowsTheGeneratedNodeOrder) 
 struct NodeTrees {
   std::vector<int> parent, child0, child1;
   NodeTrees(int nNodes, int nChannels) {
-    for (int c = 0; c < nChannels; c++)
+    for (int c = 0; c < nChannels; c++) {
       for (int n = 0; n < nNodes; n++) {
         parent.push_back(2 * n);
         child0.push_back(2 * n + 1);
         child1.push_back(2 * n);
       }
+    }
   }
 };
 
@@ -532,8 +535,9 @@ TEST_F(ConnectMicrotest, ConnectTrees_OverTheChannelLimitTheSecondHalfHasItsOwnR
   comm_->nChannels = 2 * CHANNEL_LIMIT;
   ResetChannels();
   NodeTrees t(4, 2 * CHANNEL_LIMIT);
-  for (int n = 0; n < 4; n++)
+  for (int n = 0; n < 4; n++) {
     t.child0[CHANNEL_LIMIT * 4 + n] = t.child1[CHANNEL_LIMIT * 4 + n] = t.parent[CHANNEL_LIMIT * 4 + n] = 2 * n;
+  }
 
   ASSERT_EQ(ncclSuccess, connectTrees(comm_.get(), t.parent.data(), t.child0.data(), t.child1.data(), nullptr));
 
@@ -578,12 +582,13 @@ TEST_F(ConnectMicrotest, ConnectRailOptimizedTrees_SwapsChannelPairsOnOddParityN
   ResetChannels();
   // Complementary pairs: even channels lead with 2n, odd ones with 2n+1.
   std::vector<int> parent, child0, child1;
-  for (int c = 0; c < 4; c++)
+  for (int c = 0; c < 4; c++) {
     for (int n = 0; n < 2; n++) {
       parent.push_back(c % 2 ? 2 * n + 1 : 2 * n);
       child0.push_back(c % 2 ? 2 * n : 2 * n + 1);
       child1.push_back(c % 2 ? 2 * n + 1 : 2 * n);
     }
+  }
   ncclTopoGraph& tree = comm_->graphs[NCCL_ALGO_TREE];
   for (int c = 0; c < 4; c++) {
     tree.inter[2 * c] = 100 + c;
@@ -607,12 +612,13 @@ TEST_F(ConnectMicrotest, ConnectRailOptimizedTrees_ChildRanksFollowTheChildNodes
   comm_->nChannels = 4;
   ResetChannels();
   std::vector<int> parent, child0, child1;
-  for (int c = 0; c < 4; c++)
+  for (int c = 0; c < 4; c++) {
     for (int n = 0; n < 4; n++) {
       parent.push_back(c % 2 ? 2 * n + 1 : 2 * n);
       child0.push_back(c % 2 ? 2 * n : 2 * n + 1);
       child1.push_back(c % 2 ? 2 * n + 1 : 2 * n);
     }
+  }
 
   ASSERT_EQ(ncclSuccess, connectRailOptimizedTrees(comm_.get(), parent.data(), child0.data(), child1.data()));
 
@@ -938,8 +944,9 @@ TEST_F(ConnectPostsetMicrotest, Postset_Gfx1151AndInterGraphGenUseLoadBalancedRi
     comm_->nChannels = 2;
     if (interGen) g_params["RCCL_INTER_GRAPH_GEN"] = 1;
     g_generateRings = [](int n, uint32_t nChannels, int* order) {
-      for (uint32_t c = 0; c < nChannels; c++)
+      for (uint32_t c = 0; c < nChannels; c++) {
         for (int i = 0; i < n; i++) order[c * n + i] = c % 2 ? n - 1 - i : i;
+      }
       return ncclSuccess;
     };
     std::vector<ncclTopoRanks> all = AllRanks(1, 3, 2);
@@ -1052,8 +1059,8 @@ TEST_F(ConnectPostsetMicrotest, Postset_FastIntraNodeAndUnpackNetsDoubleTheChann
 TEST_F(ConnectPostsetMicrotest, Postset_ChildCommStaysWithinItsParentsChannels) {
   Use(2, 1, 0);
   comm_->nChannels = 2;
-  ncclComm parentOwner;
-  shared_->owner = &parentOwner;
+  auto parentOwner = std::make_unique<ncclComm>();
+  shared_->owner = parentOwner.get();
   shared_->tpNChannels = 3;
   std::vector<ncclTopoRanks> all = AllRanks(2, 1, 2);
 

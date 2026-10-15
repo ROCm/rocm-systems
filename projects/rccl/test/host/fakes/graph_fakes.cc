@@ -37,8 +37,9 @@ void ncclDebugLog(ncclDebugLogLevel level, unsigned long, const char*, int, cons
 }
 
 bool Logged(const char* needle) {
-  for (const LogLine& l : g_logs)
+  for (const LogLine& l : g_logs) {
     if (l.text.find(needle) != std::string::npos) return true;
+  }
   return false;
 }
 
@@ -300,8 +301,9 @@ int g_tuningOverrideCalls = 0;
 void rcclApplyTuningOverrides(struct ncclTopoSystem*) { g_tuningOverrideCalls++; }
 
 static ncclResult_t DefaultGenerateRings(int nNodes, uint32_t nChannels, int* order) {
-  for (uint32_t c = 0; c < nChannels; c++)
+  for (uint32_t c = 0; c < nChannels; c++) {
     for (int i = 0; i < nNodes; i++) order[c * nNodes + i] = i;
+  }
   return ncclSuccess;
 }
 static void DefaultFindRingCutIndices(int nChannels, int nNodes, const int*, int* cut) {

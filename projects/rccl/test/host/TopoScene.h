@@ -29,9 +29,16 @@
 // Defined in topo-test.cc, which owns topo.cc's NCCL_NETDEVS_POLICY statics.
 void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num);
 
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#define TOPO_SCENE_ASAN 1
+#else
+#define TOPO_SCENE_ASAN 0
+#endif
+
 namespace topo_scene {
 
 constexpr int kXmlNodes = 512;
+constexpr bool kAsan = TOPO_SCENE_ASAN;  // tests that pin a production leak or overflow skip under ASan
 
 struct FreeDeleter {
   void operator()(void* p) const { free(p); }
@@ -41,6 +48,16 @@ struct SystemDeleter {
 };
 using XmlPtr = std::unique_ptr<ncclXml, FreeDeleter>;
 using SystemPtr = std::unique_ptr<ncclTopoSystem, SystemDeleter>;
+using GraphPtr = std::unique_ptr<ncclTopoGraph, FreeDeleter>;
+
+inline GraphPtr NewGraph(int id, int pattern, int minChannels = 1, int maxChannels = MAXCHANNELS / 2) {
+  GraphPtr graph(static_cast<ncclTopoGraph*>(calloc(1, sizeof(ncclTopoGraph))));
+  graph->id = id;
+  graph->pattern = pattern;
+  graph->minChannels = minChannels;
+  graph->maxChannels = maxChannels;
+  return graph;
+}
 
 inline XmlPtr NewXml(int maxNodes = kXmlNodes) {
   ncclXml* xml = nullptr;
@@ -54,13 +71,17 @@ class TempFile {
   explicit TempFile(const std::string& text = "") {
     char tmpl[] = "/tmp/rccl-topo-XXXXXX";
     int fd = mkstemp(tmpl);
-    path_ = tmpl;
-    if (fd >= 0) {
-      if (!text.empty()) EXPECT_EQ((ssize_t)text.size(), write(fd, text.data(), text.size()));
-      close(fd);
+    if (fd < 0) {
+      ADD_FAILURE() << "mkstemp failed";
+      return;
     }
+    path_ = tmpl;
+    if (!text.empty()) EXPECT_EQ((ssize_t)text.size(), write(fd, text.data(), text.size()));
+    close(fd);
   }
-  ~TempFile() { unlink(path_.c_str()); }
+  ~TempFile() {
+    if (!path_.empty()) unlink(path_.c_str());
+  }
   const char* path() const { return path_.c_str(); }
   std::string Read() const {
     std::string out;
@@ -173,8 +194,9 @@ inline std::string XgmiSystem(int nGpus, int nCpus = 1, bool nics = false, const
     std::string cpuBody;
     for (int g = c * perCpu; g < (c + 1) * perCpu; g++) {
       std::string links;
-      for (int p = 0; p < nGpus; p++)
+      for (int p = 0; p < nGpus; p++) {
         if (p != g) links += Xgmi(GpuBus(p));
+      }
       std::string sw = GpuPci(GpuBus(g), g, g, links, "", gcn);
       if (nics) sw += NicPci(NicBus(g), Net("mlx5_" + std::to_string(g), g));
       cpuBody += Pci(SwitchBus(g), sw);
@@ -206,8 +228,9 @@ inline SystemPtr BuildWithPaths(const std::string& text) {
 }
 
 inline int GpuIndexOfRank(ncclTopoSystem* system, int rank) {
-  for (int g = 0; g < system->nodes[GPU].count; g++)
+  for (int g = 0; g < system->nodes[GPU].count; g++) {
     if (system->nodes[GPU].nodes[g].gpu.rank == rank) return g;
+  }
   return -1;
 }
 

@@ -210,8 +210,9 @@ class PathsHyperVMicrotest : public PathsMicrotest {
 
   SystemPtr Build(const std::vector<std::string>& nicBuses, int nRanks) {
     std::string body;
-    for (size_t g = 0; g < nicBuses.size(); g++)
+    for (size_t g = 0; g < nicBuses.size(); g++) {
       body += GpuPci(GpuBus(g), g, g) + NicPci(nicBuses[g], Net("n" + std::to_string(g), g));
+    }
     SystemPtr system = BuildSystem(System(Cpu(0, body, "", kIntelCpu)));
     system->nRanks = nRanks;
     system->netGdrLevel = -2;
@@ -339,9 +340,11 @@ TEST_F(PathsMicrotest, RemovePaths_FreesEveryPathList) {
 
   ncclTopoRemovePaths(system.get());
 
-  for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++)
-    for (int n = 0; n < system->nodes[t].count; n++)
+  for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++) {
+    for (int n = 0; n < system->nodes[t].count; n++) {
       for (int p = 0; p < NCCL_TOPO_NODE_TYPES; p++) EXPECT_EQ(nullptr, system->nodes[t].nodes[n].paths[p]);
+    }
+  }
 }
 
 // --- User levels
@@ -1069,8 +1072,8 @@ TEST_F(PathsP2pChannelsMicrotest, P2pChannels_RomeFourByTwoUsesTwoPerPeer) {
 
 TEST_F(PathsP2pChannelsMicrotest, P2pChannels_SharedCommIsBoundByTheParent) {
   Setup(BuildWithPaths(XgmiSystem(2, 1, false, "gfx90a")), 2, 1, 16);
-  ncclComm parent{};
-  shared_->owner = &parent;
+  auto parent = std::make_unique<ncclComm>();
+  shared_->owner = parent.get();
   shared_->tpP2pNChannels = 4;
 
   Compute();

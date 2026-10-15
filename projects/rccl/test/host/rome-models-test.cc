@@ -32,23 +32,21 @@ namespace {
 
 constexpr int kModels = sizeof(romeTopoModels) / sizeof(romeTopoModels[0]);
 constexpr int kSixteenNicModel = 41;  // rome_model_84
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-constexpr bool kAsan = true;
-#else
-constexpr bool kAsan = false;
+
+#if defined(__GLIBC_PREREQ)
+#if __GLIBC_PREREQ(2, 33)
+#define ROME_TEST_HAS_MALLINFO2 1
+#endif
 #endif
 
-size_t InUseBytes() { return mallinfo2().uordblks + mallinfo2().hblkhd; }
-
-using GraphPtr = std::unique_ptr<ncclTopoGraph, FreeDeleter>;
-
-GraphPtr NewGraph(int id, int pattern) {
-  GraphPtr graph(static_cast<ncclTopoGraph*>(calloc(1, sizeof(ncclTopoGraph))));
-  graph->id = id;
-  graph->pattern = pattern;
-  graph->minChannels = 1;
-  graph->maxChannels = MAXCHANNELS / 2;
-  return graph;
+// Bytes the heap holds; a leak shows up as growth across a call. mallinfo2 needs glibc 2.33.
+size_t InUseBytes() {
+#ifdef ROME_TEST_HAS_MALLINFO2
+  struct mallinfo2 info = mallinfo2();
+#else
+  struct mallinfo info = mallinfo();
+#endif
+  return (size_t)info.uordblks + (size_t)info.hblkhd;
 }
 
 std::string BusId(int64_t id) {
@@ -78,12 +76,14 @@ std::string ModelXml(const rcclRomeModel& m, const char* cpuIds = kRomeCpu) {
     for (int g = 0; g < m.nGpus; g++) {
       if (m.gpuNuma[g] != c) continue;
       std::string links;
-      for (int p = 0; p < m.nGpus; p++)
+      for (int p = 0; p < m.nGpus; p++) {
         if (m.connMatrix[g * m.nGpus + p]) links += Xgmi(BusId(m.gpuIds[p]), m.connMatrix[g * m.nGpus + p]);
+      }
       cpu += GpuPci(BusId(m.gpuIds[g]), g, g, links);
     }
-    for (int n = 0; n < m.nNics; n++)
+    for (int n = 0; n < m.nNics; n++) {
       if (m.nicNuma[n] == c) cpu += NicPci(BusId(m.nicIds[n]), RailNet("net", n, n));
+    }
     body += Cpu(c, cpu, "", cpuIds);
   }
   return System(body);
@@ -268,8 +268,9 @@ TEST_F(RomeModelsMicrotest, Rome4P2H_NetOverridePairsGpusSharingASwitch) {
   ASSERT_EQ(43, system_->romeTopoModelIdx);
 
   int pxb = 0;
-  for (int g = 0; g < 8; g++)
+  for (int g = 0; g < 8; g++) {
     for (int n = 0; n < 4; n++) pxb += system_->nodes[GPU].nodes[g].paths[NET][n].type == PATH_PXB;
+  }
   EXPECT_EQ(8, pxb);  // the four planted PXB pairs, plus each partner GPU (dev / 2)
 
   UseModel(m);
@@ -277,15 +278,17 @@ TEST_F(RomeModelsMicrotest, Rome4P2H_NetOverridePairsGpusSharingASwitch) {
   tree = NewGraph(1, NCCL_TOPO_PATTERN_BALANCED_TREE);
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), tree.get(), nullptr));
   pxb = 0;
-  for (int g = 0; g < 8; g++)
+  for (int g = 0; g < 8; g++) {
     for (int n = 0; n < 4; n++) pxb += system_->nodes[GPU].nodes[g].paths[NET][n].type == PATH_PXB;
+  }
   EXPECT_EQ(4, pxb);
 }
 
 TEST_F(RomeModelsMicrotest, Rome4P2H_NicsMustMatchTheModelGdrLevels) {
   UseModel(romeTopoModels[43]);
-  for (int g = 0; g < 8; g++)
+  for (int g = 0; g < 8; g++) {
     for (int n = 0; n < 4; n++) system_->nodes[GPU].nodes[g].paths[NET][n].type = PATH_SYS;
+  }
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
 
   ASSERT_EQ(ncclSuccess, parseRome4P2H(system_.get(), ring.get(), nullptr));
@@ -438,11 +441,12 @@ TEST_F(RomeModelsMicrotest, A2a8P_TreeBaseIsUsedWhenThereAreNoRailTrees) {
 
 TEST_F(RomeModelsMicrotest, A2a8P_PixAndPxbNicsAreInterchangeable) {
   UseModel(romeTopoModels[40], -1, kAmdCpu);
-  for (int g = 0; g < 8; g++)
+  for (int g = 0; g < 8; g++) {
     for (int n = 0; n < 8; n++) {
       ncclTopoLinkList& path = system_->nodes[GPU].nodes[g].paths[NET][n];
       if (path.type == PATH_PXB) path.type = PATH_PIX;
     }
+  }
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
 
   ASSERT_EQ(ncclSuccess, parseA2a8P(system_.get(), ring.get(), nullptr));
@@ -539,8 +543,9 @@ TEST_F(RomeModelsMicrotest, FindGpuHives_UnevenHivesAreAnError) {
   rcclRomeModel m = {};
   m.nGpus = 8;
   m.nLinks = 3;
-  for (int a = 0; a < 8; a++)
+  for (int a = 0; a < 8; a++) {
     for (int b = 0; b < 8; b++) m.connMatrix[a * 8 + b] = a != b && a / 4 == b / 4;
+  }
   m.connMatrix[4 * 8 + 0] = m.connMatrix[0 * 8 + 4] = 1;  // GPU 4 joins GPU 0's hive, leaving 5 and 3
   std::vector<int> hives(8, -1);
   int nHives[2] = {0, 0};
@@ -585,8 +590,9 @@ std::string ChordalRing(const int partner[8], bool nics) {
   std::string body;
   for (int g = 0; g < 8; g++) {
     std::string links;
-    for (int p = 0; p < 8; p++)
+    for (int p = 0; p < 8; p++) {
       if (p != g && p != partner[g]) links += Xgmi(GpuBus(p));
+    }
     std::string gpu = GpuPci(GpuBus(g), g, g, links);
     body += nics && g % 2 ? Pci(SwitchBus(g), gpu + NicPci(NicBus(g), RailNet("net", g / 2, g / 2))) : gpu;
   }
@@ -731,14 +737,19 @@ TEST_F(RomeModelsParseMicrotest, ParseGraph_StopsAtTooManyNics) {
 }
 
 // Observed: the GPU count is checked after the write, so GPU number NCCL_TOPO_MAX_NODES + 1 lands one past gpus[].
+// The write runs in a death-test child so the test process never executes it.
 TEST_F(RomeModelsParseMicrotest, ParseGraph_OneGpuPastTheLimitIsWrittenBeforeTheStop) {
   if (kAsan) GTEST_SKIP() << "the out-of-bounds stack write would fail AddressSanitizer";
   std::string many;
   for (int g = 0; g <= NCCL_TOPO_MAX_NODES; g++) many += std::to_string(g % 4) + " ";
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
-  ASSERT_EQ(ncclSuccess, parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0));
-
-  EXPECT_EQ(0, ring_->nChannels);
+  EXPECT_EXIT(
+      {
+        ncclResult_t ret = parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0);
+        _exit(ret == ncclSuccess && ring_->nChannels == 0 ? 0 : 1);
+      },
+      ::testing::ExitedWithCode(0), "");
 }
 
 TEST_F(RomeModelsParseMicrotest, ParseGraphLight_TranslatesDevsIntoTheTreeString) {

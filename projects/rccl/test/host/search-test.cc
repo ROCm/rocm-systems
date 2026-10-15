@@ -27,17 +27,6 @@ using namespace topo_scene;
 
 namespace {
 
-using GraphPtr = std::unique_ptr<ncclTopoGraph, FreeDeleter>;
-
-GraphPtr NewGraph(int id, int pattern, int minChannels = 1, int maxChannels = MAXCHANNELS / 2) {
-  GraphPtr graph(static_cast<ncclTopoGraph*>(calloc(1, sizeof(ncclTopoGraph))));
-  graph->id = id;
-  graph->pattern = pattern;
-  graph->minChannels = minChannels;
-  graph->maxChannels = maxChannels;
-  return graph;
-}
-
 class SearchMicrotest : public ::testing::Test {
  protected:
   SystemPtr system_;
@@ -184,9 +173,11 @@ TEST_F(SearchMicrotest, Compute_NvlsNeedsAnNvSwitchAndHopper) {
 
 TEST_F(SearchMicrotest, Compute_UnreachableGpusFallBackToTheSimpleOrder) {
   Use(XgmiSystem(2, 1, true), 4);
-  for (int g = 0; g < 2; g++)
-    for (int p = 0; p < 2; p++)
+  for (int g = 0; g < 2; g++) {
+    for (int p = 0; p < 2; p++) {
       if (g != p) system_->nodes[GPU].nodes[g].paths[GPU][p].type = PATH_DIS;
+    }
+  }
 
   GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
 
@@ -242,9 +233,10 @@ TEST_F(SearchMicrotest, Compute_InterNodeTreeStaysOnOneNicPerChannel) {
 
 TEST_F(SearchMicrotest, Compute_CollNetDirectUsesCollCapableNics) {
   std::string body;
-  for (int g = 0; g < 2; g++)
+  for (int g = 0; g < 2; g++) {
     body += Pci(SwitchBus(g), GpuPci(GpuBus(g), g, g, Xgmi(GpuBus(1 - g))) +
                                 NicPci(NicBus(g), Net("c" + std::to_string(g), g, "coll=\"1\"")));
+  }
   Use(System(Cpu(0, body)), 4);
   GraphPtr graph = NewGraph(4, NCCL_TOPO_PATTERN_COLLNET_DIRECT, 1, MAXCHANNELS);
   graph->collNet = 1;
@@ -288,8 +280,9 @@ TEST_F(SearchMicrotest, FollowPath_NotEnoughBandwidthRewinds) {
 
   EXPECT_EQ(nullptr, node);  // 18 GB/s left on the XGMI link
   ncclTopoLinkList& path = system_->nodes[GPU].nodes[0].paths[GPU][1];
-  for (int i = 0; i < path.count; i++)
+  for (int i = 0; i < path.count; i++) {
     EXPECT_FLOAT_EQ(path.list[i]->type == LINK_NVL ? 18 : LOC_BW - 30, path.list[i]->bw);
+  }
 }
 
 TEST_F(SearchMicrotest, FollowPath_AnyShortfallRewinds) {
@@ -352,8 +345,9 @@ TEST_F(SearchMicrotest, FollowPath_PreAmpereDevsChargeTheReverseLinkFromANic) {
 
   ASSERT_NE(nullptr, node);
   ncclTopoLink* up = nullptr;
-  for (int l = 0; l < dev->nlinks; l++)
+  for (int l = 0; l < dev->nlinks; l++) {
     if (dev->links[l].type == LINK_PCI) up = dev->links + l;
+  }
   EXPECT_FLOAT_EQ(48 - 1, up->bw);  // an eighth of the forward bandwidth comes back as reads
 }
 
@@ -363,8 +357,9 @@ TEST_F(SearchMicrotest, FollowPath_MissingReverseLinkIsAnError) {
   graph->bwInter = 8;
   graph->typeInter = PATH_PIX;
   ncclTopoNode* dev = system_->nodes[DEV].nodes;
-  for (int l = 0; l < dev->nlinks; l++)
+  for (int l = 0; l < dev->nlinks; l++) {
     if (dev->links[l].type == LINK_PCI) dev->links[l].type = LINK_SYS;
+  }
   ncclTopoNode* node = nullptr;
 
   EXPECT_EQ(ncclInternalError, ncclTopoFollowPath(system_.get(), graph.get(), NET, 0, GPU, 0, 1, &node));
@@ -384,9 +379,11 @@ TEST_F(SearchMicrotest, FollowPath_PowerNvlinkToTheCpuChargesBothWays) {
   ASSERT_EQ(ncclSuccess, ncclTopoFollowPath(system_.get(), graph.get(), GPU, 0, GPU, 1, 1, &node));
 
   ASSERT_NE(nullptr, node);
-  for (int l = 0; l < cpu->nlinks; l++)
-    if (cpu->links[l].type == LINK_NVL && cpu->links[l].remNode == system_->nodes[DEV].nodes)
+  for (int l = 0; l < cpu->nlinks; l++) {
+    if (cpu->links[l].type == LINK_NVL && cpu->links[l].remNode == system_->nodes[DEV].nodes) {
       EXPECT_FLOAT_EQ(GFX94X_XGMI_WIDTH - 10, cpu->links[l].bw);
+    }
+  }
 }
 
 // --- Search helpers
@@ -704,9 +701,10 @@ TEST_F(SearchMicrotest, Compute_TreeStartsFromTheBandwidthItsReturnPathAdds) {
 
 TEST_F(SearchMicrotest, Compute_NicsOnOnePortShareItsBandwidth) {
   std::string body;
-  for (int g = 0; g < 2; g++)
+  for (int g = 0; g < 2; g++) {
     body += Pci(SwitchBus(g), GpuPci(GpuBus(g), g, g, Xgmi(GpuBus(1 - g))) +
                                   NicPci(NicBus(g), RailNet("net", g, g, 0, 200000)));
+  }
   Use(System(Cpu(0, body)), 4);
   EXPECT_EQ(2, Compute(0, NCCL_TOPO_PATTERN_RING)->nChannels);
 
@@ -769,8 +767,9 @@ TEST_F(SearchNvlsMicrotest, Compute_HopperBalancedTreeAlsoTriesAPlainTree) {
 TEST_F(SearchMicrotest, Compute_InterNodeNvlsPicksOneNicPerHead) {
   std::string toSwitch = Xgmi("fffffff:ffff:ff", 4, "0x068000");
   std::string body;
-  for (int g = 0; g < 2; g++)
+  for (int g = 0; g < 2; g++) {
     body += Pci(SwitchBus(g), GpuPci(GpuBus(g), g, g, toSwitch) + NicPci(NicBus(g), Net("n" + std::to_string(g), g)));
+  }
   body += Pci(SwitchBus(2), NicPci(NicBus(2), Net("n2", 2)));
   Use(System(Cpu(0, body)), 4);
   for (int d = 0; d < system_->nodes[DEV].count; d++) system_->nodes[DEV].nodes[d].dev.cudaCompCap = 90;
@@ -1250,8 +1249,9 @@ TEST_F(SearchMicrotest, Compute_InterNodePlainTreeSearches) {
 TEST_F(SearchNvlsMicrotest, Compute_NvlsBacksOffWhenTheUplinkIsShort) {
   for (int d = 0; d < system_->nodes[DEV].count; d++) {
     ncclTopoNode* dev = system_->nodes[DEV].nodes + d;
-    for (int l = 0; l < dev->nlinks; l++)
+    for (int l = 0; l < dev->nlinks; l++) {
       if (dev->links[l].remNode->type == NVS) dev->links[l].bw = 1;
+    }
   }
 
   GraphPtr nvls = Compute(3, NCCL_TOPO_PATTERN_NVLS, 1, MAXCHANNELS);
@@ -1300,9 +1300,10 @@ TEST_F(SearchMicrotest, Compute_HopperInterNodeBalancedTree) {
 // Different rails force the crossNic retry; fast NICs leave room for the odd channels to look for their entry NIC.
 TEST_F(SearchMicrotest, Compute_CrossNicRingEndsOnTheOtherRail) {
   std::string body;
-  for (int g = 0; g < 2; g++)
+  for (int g = 0; g < 2; g++) {
     body += Pci(SwitchBus(g), GpuPci(GpuBus(g), g, g, Xgmi(GpuBus(1 - g), 4)) +
                                   NicPci(NicBus(g), RailNet("net", g, g, 0, 1600000)));
+  }
   Use(System(Cpu(0, body)), 4);
 
   GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
