@@ -102,7 +102,7 @@ testAsyncIoFn(void *)
 
 TEST_F(HipFileAsyncOp, submitIo_runs_io_fn_on_pool_and_signals_completion)
 {
-    StrictMock<MThreadPool> mpool;
+    StrictMock<MStreamThreadPool> mpool;
     auto                    tg     = std::make_unique<StrictMock<MTaskGroup>>();
     auto                    tg_raw = tg.get();
     std::function<void()>   captured;
@@ -170,7 +170,7 @@ TEST_F(HipFileAsyncOp, async_dispatch_reports_error_without_inline_io_when_submi
 
 TEST_F(HipFileAsyncOp, submitIoAndWait_runs_io_fn_on_pool_and_signals_completion)
 {
-    StrictMock<MThreadPool> mpool;
+    StrictMock<MStreamThreadPool> mpool;
     auto                    tg     = std::make_unique<StrictMock<MTaskGroup>>();
     auto                    tg_raw = tg.get();
     EXPECT_CALL(mpool, makeTaskGroup()).WillOnce(Return(ByMove(std::move(tg))));

@@ -35,7 +35,7 @@ enum class IoType;
 
 namespace hipFile {
 
-AsyncMonitor::AsyncMonitor() : task_group{Context<IThreadPool>::get()->makeTaskGroup()}
+AsyncMonitor::AsyncMonitor() : task_group{Context<IStreamThreadPool>::get()->makeTaskGroup()}
 {
 }
 

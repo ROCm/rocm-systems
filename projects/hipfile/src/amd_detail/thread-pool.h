@@ -64,4 +64,29 @@ private:
 
 HIPFILE_CONTEXT_DEFAULT_IMPL(IThreadPool, ThreadPool);
 
+class IStreamThreadPool {
+public:
+    virtual ~IStreamThreadPool() = default;
+
+    virtual std::unique_ptr<ITaskGroup> makeTaskGroup() = 0;
+};
+
+class StreamThreadPool : public IStreamThreadPool {
+public:
+    explicit StreamThreadPool(size_t workers = std::thread::hardware_concurrency());
+    ~StreamThreadPool() override;
+
+    StreamThreadPool(const StreamThreadPool &)            = delete;
+    StreamThreadPool &operator=(const StreamThreadPool &) = delete;
+    StreamThreadPool(StreamThreadPool &&)                 = delete;
+    StreamThreadPool &operator=(StreamThreadPool &&)      = delete;
+
+    std::unique_ptr<ITaskGroup> makeTaskGroup() override;
+
+private:
+    ThreadPool pool;
+};
+
+HIPFILE_CONTEXT_DEFAULT_IMPL(IStreamThreadPool, StreamThreadPool);
+
 }
