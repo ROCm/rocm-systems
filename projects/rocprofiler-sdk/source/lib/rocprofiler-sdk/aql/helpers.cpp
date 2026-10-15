@@ -126,6 +126,45 @@ get_dim_info(rocprofiler_agent_id_t   agent,
     return ROCPROFILER_STATUS_SUCCESS;
 }
 
+namespace
+{
+// With cmd_buffer == nullptr only cmd_size is set, otherwise the enable commands are written to
+// cmd_buffer and packet is populated to execute them.
+hsa_status_t
+get_enable_cmd_packet(hsa_agent_t                   hsa_agent,
+                      void*                         cmd_buffer,
+                      uint32_t&                     cmd_size,
+                      hsa_ext_amd_aql_pm4_packet_t* packet)
+{
+#if ROCPROFILER_EXTERNAL_AQLPROFILE
+    // The external AQLProfile library only provides the enable command through its v1 API
+    auto profile           = hsa_ven_amd_aqlprofile_profile_t{};
+    profile.agent          = hsa_agent;
+    profile.command_buffer = {cmd_buffer, cmd_size};
+
+    auto status =
+        hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, packet);
+    cmd_size = profile.command_buffer.size;
+    return status;
+#else
+    const auto* rocp_agent = rocprofiler::agent::get_rocprofiler_agent(hsa_agent);
+    const auto* aql_agent =
+        (rocp_agent) ? rocprofiler::agent::get_aql_agent(rocp_agent->id) : nullptr;
+    if(!aql_agent) return HSA_STATUS_ERROR_INVALID_AGENT;
+
+    auto profile =
+        aqlprofile_pmc_profile_t{.agent = *aql_agent, .events = nullptr, .event_count = 0};
+    auto control = aqlprofile_pmc_control_packet_t{
+        .command_buffer = cmd_buffer, .command_buffer_size = cmd_size, .packet = {}};
+
+    auto status = aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_ENABLE_CMD, &control);
+    cmd_size    = control.command_buffer_size;
+    if(status == HSA_STATUS_SUCCESS && cmd_buffer) *packet = control.packet;
+    return status;
+#endif
+}
+}  // namespace
+
 rocprofiler_status_t
 set_profiler_active_on_queue(hsa_amd_memory_pool_t             pool,
                              hsa_agent_t                       hsa_agent,
@@ -137,37 +176,33 @@ set_profiler_active_on_queue(hsa_amd_memory_pool_t             pool,
     CHECK(hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn != nullptr);
 
     // Inject packet to enable profiling of other process queues on this queue
-    hsa_ven_amd_aqlprofile_profile_t profile{};
-    profile.agent = hsa_agent;
-
     // Query for cmd buffer size
-    hsa_ven_amd_aqlprofile_info_type_t info_type =
-        (hsa_ven_amd_aqlprofile_info_type_t)((int) HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD);
-    if(hsa_ven_amd_aqlprofile_get_info(&profile, info_type, nullptr) != HSA_STATUS_SUCCESS)
+    uint32_t cmd_size = 0;
+    if(get_enable_cmd_packet(hsa_agent, nullptr, cmd_size, nullptr) != HSA_STATUS_SUCCESS)
     {
         return ROCPROFILER_STATUS_ERROR;
     }
     // Allocate cmd buffer
-    const size_t mask = 0x1000 - 1;
-    auto         size = (profile.command_buffer.size + mask) & ~mask;
+    const size_t mask       = 0x1000 - 1;
+    auto         size       = (cmd_size + mask) & ~mask;
+    void*        cmd_buffer = nullptr;
 
     if(hsa::get_amd_ext_table()->hsa_amd_memory_pool_allocate_fn(
-           pool, size, hsa::hsa_amd_memory_pool_executable_flag, &profile.command_buffer.ptr) !=
-       HSA_STATUS_SUCCESS)
+           pool, size, hsa::hsa_amd_memory_pool_executable_flag, &cmd_buffer) != HSA_STATUS_SUCCESS)
     {
         ROCP_WARNING << "Failed to allocate memory to enable profile command on agent, some "
                         "counters will be unavailable";
         return ROCPROFILER_STATUS_ERROR;
     }
     if(hsa::get_amd_ext_table()->hsa_amd_agents_allow_access_fn(
-           1, &hsa_agent, nullptr, profile.command_buffer.ptr) != HSA_STATUS_SUCCESS)
+           1, &hsa_agent, nullptr, cmd_buffer) != HSA_STATUS_SUCCESS)
     {
         ROCP_WARNING << "Agent cannot access memory, some counters will be unavailable";
         return ROCPROFILER_STATUS_ERROR;
     }
 
     hsa::rocprofiler_packet packet{};
-    if(hsa_ven_amd_aqlprofile_get_info(&profile, info_type, &packet.ext_amd_aql_pm4) !=
+    if(get_enable_cmd_packet(hsa_agent, cmd_buffer, cmd_size, &packet.ext_amd_aql_pm4) !=
        HSA_STATUS_SUCCESS)
     {
         ROCP_WARNING << "Failed to generate command packet, some counters will be unavailable";
@@ -175,7 +210,7 @@ set_profiler_active_on_queue(hsa_amd_memory_pool_t             pool,
     }
 
     packet_submit(packet);
-    hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(profile.command_buffer.ptr);
+    hsa::get_amd_ext_table()->hsa_amd_memory_pool_free_fn(cmd_buffer);
     return ROCPROFILER_STATUS_SUCCESS;
 }
 

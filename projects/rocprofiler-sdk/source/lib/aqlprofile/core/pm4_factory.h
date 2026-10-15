@@ -38,7 +38,6 @@
 #include "lib/aqlprofile/core/aql_profile.hpp"
 #include "lib/aqlprofile/core/aql_profile_exception.h"
 #include "lib/aqlprofile/def/gpu_block_info.h"
-#include "lib/common/environment.hpp"
 #include "lib/aqlprofile/pm4/cmd_builder.h"
 #include "lib/aqlprofile/pm4/pmc_builder.h"
 #include "lib/aqlprofile/pm4/spm_builder.h"
@@ -133,14 +132,6 @@ public:
 
     static Pm4Factory* Create(aqlprofile_agent_handle_t agent_info, bool concurrent = false);
     static Pm4Factory* Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent);
-    // Create factory for a given agent
-    static Pm4Factory* Create(const hsa_agent_t agent, const bool concurrent = false);
-    // Create factory for a given profile
-    static Pm4Factory* Create(const profile_t* profile)
-    {
-        // First check and save the mode
-        return Create(profile->agent, CheckConcurrent(profile));
-    }
     // Destroy factory
     static void Destroy();
 
@@ -148,8 +139,6 @@ public:
     gpu_id_t GetGpuId() const { return gpu_id_; }
     // Is pmc to be profiled concurrently?
     bool IsConcurrent() const { return concurrent_mode_; }
-    // Is getting SPM data using driver public API?
-    bool SpmKfdMode() const { return spm_kfd_mode_; }
 
     // Return PM4 command builder
     pm4_builder::CmdBuilder* GetCmdBuilder() const { return cmd_builder_; }
@@ -297,7 +286,6 @@ protected:
     gpu_id_t         gpu_id_     = INVAL_GPU_ID;
     // Concurrent mode
     static bool concurrent_create_mode_;
-    static bool spm_kfd_mode_;
     bool        concurrent_mode_ = false;
 
 private:
@@ -341,8 +329,6 @@ private:
     // Create MI450 factory
     static Pm4Factory* Mi450Create(const AgentInfo* agent_info);
 
-    static bool CheckConcurrent(const profile_t* profile);
-
     // Mutex for inter thread synchronization for the instances create/destroy
     static mutex_t mutex_;
     // Factory instances container
@@ -363,9 +349,6 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
     instances_t::iterator it  = ret.first;
 
     concurrent_create_mode_ = concurrent;
-    // Check presence, not value (even empty string means "enabled")
-    static bool spm_kfd = rocprofiler::common::get_env_optional("ROCP_SPM_KFD_MODE").has_value();
-    spm_kfd_mode_       = spm_kfd;
 
     // Create a factory implementation for the GPU id
     if(ret.second)
@@ -398,39 +381,6 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
     return it->second;
 }
 
-// Create PM4 factory
-inline Pm4Factory*
-Pm4Factory::Create(const hsa_agent_t agent, bool concurrent)
-{
-    // Note: locking is handled by Create(const AgentInfo*, gpu_id_t, bool) below, which is
-    // the single chokepoint that mutates the shared instance map.
-    const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
-    // Get GPU id for a given agent
-
-    hsa_status_t      status = HSA_STATUS_ERROR;
-    std::vector<char> agent_name{};
-    agent_name.resize(64);
-    uint32_t device_id = 0;
-
-    // Getting GfxIP name
-    status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
-        agent, HSA_AGENT_INFO_NAME, agent_name.data());
-    if(status == HSA_STATUS_SUCCESS)
-    {
-        // Getting DeviceId
-        hsa_agent_info_t attribute = static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_CHIP_ID);
-        status = rocprofiler::aqlprofile::get_core_table()->hsa_agent_get_info_fn(
-            agent, attribute, &device_id);
-    }
-    if(status != HSA_STATUS_SUCCESS)
-    {
-        throw aql_profile_exc_msg("Pm4Factory::Create() bad agent");
-    }
-
-    const gpu_id_t gpu_id = GetGpuId(agent_name.data());
-    return Pm4Factory::Create(agent_info, gpu_id, concurrent);
-}
-
 inline Pm4Factory*
 Pm4Factory::Create(aqlprofile_agent_handle_t agent_info, bool concurrent)
 {
@@ -453,20 +403,6 @@ Pm4Factory::Destroy()
         delete instances_;
         instances_ = nullptr;
     }
-}
-
-// Check the setting of pmc profiling mode
-inline bool
-Pm4Factory::CheckConcurrent(const profile_t* profile)
-{
-    for(const hsa_ven_amd_aqlprofile_parameter_t* p = profile->parameters;
-        p < (profile->parameters + profile->parameter_count);
-        ++p)
-    {
-        if(p->parameter_name == HSA_VEN_AMD_AQLPROFILE_PARAMETER_NAME_K_CONCURRENT) return true;
-    }
-
-    return false;
 }
 
 // Return GPU id for a given agent
