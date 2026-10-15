@@ -50,6 +50,9 @@ cases:
   Unit_HRR_CaptureActiveMarker: {}
   Unit_HRR_CaptureActiveMarker_Direct: {}
   Unit_HRR_CaptureArchiveIsPrivate: {}
+  Unit_HRR_CaptureCapabilities: {}
+  Unit_HRR_CaptureCapabilitiesImport_Direct: {}
+  Unit_HRR_CaptureCapabilities_Direct: {}
   Unit_HRR_CaptureCrashDuringFork: {}
   Unit_HRR_CaptureCrashDuringFork_Direct: {}
   Unit_HRR_CaptureCrashOnSmallStack: {}
@@ -61,13 +64,11 @@ cases:
   Unit_HRR_CaptureKeepsRootManifestWhenBaseIsUnreadable: {}
   Unit_HRR_CaptureMarkerRefused_Direct: {}
   Unit_HRR_CaptureMarksUnwrittenFilesIncomplete: {}
+  Unit_HRR_CaptureMovesEarlierArchiveAside: {}
   Unit_HRR_CaptureRefusesPlantedLinks: {}
   Unit_HRR_CaptureReplayRoundtrip: {}
-  Unit_HRR_CaptureResumeCountsOnlyWholeRecords: {}
-  Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles: {}
   Unit_HRR_CaptureStartNotice: {}
   Unit_HRR_CaptureSurvivesUnusableOutputPath: {}
-  Unit_HRR_CaptureTrimFails_Direct: {}
   Unit_HRR_ChevronLaunchRoundtrip: {}
   Unit_HRR_ChevronLaunch_Direct: {}
   Unit_HRR_ConfigureCallRoundtrip: {}
@@ -262,5 +263,7 @@ cases:
   Unit_HRR_UncapturedHostWrite_Direct: {}
   Unit_HRR_VMMRoundtrip: {}
   Unit_HRR_VMM_Direct: {}
+  Unit_HRR_VaPlacement_Direct: {}
+  Unit_HRR_VaPlacement_StoredPointer: {}
   Unit_HRR_ZeroInitRead_Direct: {}
   Unit_HRR_ZeroInitRoundtrip: {}

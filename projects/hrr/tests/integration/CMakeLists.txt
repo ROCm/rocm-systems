@@ -38,9 +38,18 @@
 #   ./derive_manifest.py
 #   ./check_matrix.py --emit-cxx
 #
+# hrr_capture_capabilities_test.cc covers what capture leaves out of the archive
+# when a call hands back a capability or an address: IPC handles and resolved
+# entry points are not recorded. Contains its own hidden [.][hrr-direct]
+# workloads; the exporter starts the importer as a second process.
+#
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
 # address-shaped lost pointer becomes null. Contains its own hidden
+# [.][hrr-direct] workload.
+#
+# hrr_va_placement_test.cc covers capture-address placement: a device pointer
+# stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
 # [.][hrr-direct] workload.
 #
 # hrr_dispatch_swap_test.cc covers capture shutdown: a slot another component
@@ -79,6 +88,7 @@ set(HRR_GPU_WORKLOAD_SOURCES
   hrr_regions_test.cc
   hrr_api_matrix_workload_test.cc
   hrr_kernel_args_test.cc
+  hrr_va_placement_test.cc
   hrr_disk_space_test.cc
 )
 
@@ -99,6 +109,7 @@ add_executable(hrr-integration-tests
   hrr_dispatch_swap_test.cc
   hrr_capture_access_test.cc
   hrr_fatbin_header_test.cc
+  hrr_capture_capabilities_test.cc
   hrr_secure_exec_test.cc
   hrr_clock_hook.cc
 )

@@ -1,0 +1,78 @@
+{
+    "evaluations": [
+        {
+            "expected_behavior": [
+                "explains that runtime mode instruments the executable and the shared libraries it loads while binary rewrite (-o) only covers the target's own code",
+                "notes that binary rewrite has lower overhead and is preferred for MPI",
+                "shows that a rewritten binary is run with rocprof-sys-run -- ./app.inst"
+            ],
+            "id": "instrumenting-runtime-vs-rewrite",
+            "prompt": "What is the difference between runtime instrumentation and binary rewrite in rocprof-sys-instrument, and which should I use for my MPI application?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "uses --module-exclude (-ME) to drop libm and --module-restrict (-MR) to keep only solver.cpp",
+                "explains that patterns are unanchored regular expressions",
+                "warns that combining --module-restrict with --function-restrict ignores the function restriction"
+            ],
+            "id": "instrumenting-exclude-a-library",
+            "prompt": "How do I stop rocprof-sys-instrument from instrumenting libm, and separately how do I limit it to only the functions in solver.cpp?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "defines a function as one symbol and a module as its source file when debug info exists or the binary or library otherwise",
+                "shows how to list them with --print-available modules or pair"
+            ],
+            "id": "instrumenting-function-vs-module",
+            "prompt": "In rocprof-sys-instrument what is a module as opposed to a function?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "recommends --simulate, optionally with --print-instrumented or --dump-info",
+                "states that a dry run neither runs the application nor writes the rewritten binary",
+                "says --dump-info reports go to rocprofsys-<name>-output/instrumentation/"
+            ],
+            "id": "instrumenting-dry-run",
+            "prompt": "Can I preview which functions rocprof-sys-instrument will instrument without actually running my app?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "explains the default minimum of 1024 instructions and the matching address-range minimum",
+                "recommends lowering --min-instructions (for example -i 0 or a smaller value) and using --instrument-loops",
+                "notes that more detail means more overhead"
+            ],
+            "id": "instrumenting-min-instructions-granularity",
+            "prompt": "Only a handful of my functions are instrumented. How do I instrument smaller functions and loops with rocprof-sys-instrument?",
+            "skill_should_trigger": true
+        },
+        {
+            "expected_behavior": [
+                "suggests --print-excluded or --dump-info with --simulate",
+                "points to the heuristics block in excluded.json to see which constraint applied",
+                "mentions that binary rewrite does not instrument shared libraries"
+            ],
+            "id": "instrumenting-function-missing-from-trace",
+            "prompt": "My function is missing from the rocprof-sys trace after a binary rewrite. How do I find out why it was excluded?",
+            "skill_should_trigger": true
+        },
+        {
+            "id": "instrumenting-attach-to-running-process",
+            "prompt": "I have a long-running training process already started. How do I attach rocprof-sys to it?",
+            "skill_should_trigger": false
+        },
+        {
+            "id": "instrumenting-which-preset-for-training",
+            "prompt": "Which rocprof-sys preset should I use for an AI training job on GPUs?",
+            "skill_should_trigger": false
+        },
+        {
+            "id": "instrumenting-list-available-counters",
+            "prompt": "What hardware counters can I collect on this machine with rocprof-sys?",
+            "skill_should_trigger": false
+        }
+    ]
+}

@@ -423,7 +423,7 @@ def gen_mfma(ctx: ExecuteContext) -> str:
             index_key_expr = 'index_key'
         else:
             L.append(f'  uint32_t const_acc;')
-            L.append(f'  uint32_t s2 = amdgpu::resolve_acc(vb, dst,')
+            L.append(f'  uint32_t s2 = {arch_name}::resolve_acc(vb, dst,')
             L.append(
                 f'      {s2}.encoding_value_, const_acc,'
                 f' [&] {{ return amdgpu::RegisterAccess(wf).read_scalar({s2}); }});'

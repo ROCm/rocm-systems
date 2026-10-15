@@ -9701,11 +9701,11 @@ TEST(BinaryTranslatorE2E, Gfx1250F16K128WmmaLoweringMatchesUnloweredExecution) {
   EXPECT_GT(saturated_positive, 0u) << "no output element reached +infinity";
   EXPECT_GT(saturated_negative, 0u) << "no output element reached -infinity";
 
-  // A NaN accumulator produces a NaN result on both paths, but not the same
-  // encoding: V_MAXIMUM_F32 and V_MINIMUM_F32 return the canonical quiet NaN,
-  // so the clamp drops the sign and payload the source instruction carries
-  // through. IEEE 754 leaves both uninterpreted and the ISA promises only that
-  // a NaN input yields a NaN output, so compare NaN-ness instead of bits.
+  // A NaN accumulator produces a NaN result on both paths. The emulator's
+  // V_MAXIMUM_F32 and V_MINIMUM_F32 clamp returns the first NaN quieted, with
+  // its sign and payload, but that model is not verified on CDNA5 hardware and
+  // the ISA promises only that a NaN input yields a NaN output, so compare
+  // NaN-ness instead of bits.
   wf->set_mode_raw(0u);
   fill_inputs(0xFE00FE00u);
   zero_destination();
