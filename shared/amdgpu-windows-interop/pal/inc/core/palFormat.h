@@ -31,6 +31,7 @@
 
 #pragma once
 
+#include <initializer_list>
 #include "palUtil.h"
 
 /// Library-wide namespace encapsulating all PAL entities.
@@ -73,7 +74,11 @@ namespace Pal
 /// samples are together, followed by all of the chroma samples.  Some planar formats interleave the U and V chroma
 /// data, while some choose to have separate U and V planes.  Both packed and planar formats can have any subsampling
 /// ratio between the luma and chroma data.
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1007
 enum class ChNumFormat : Util::uint32
+#else
+enum class ChNumFormat : Util::uint16
+#endif
 {
     Undefined                = 0x0,  ///< Used in situations where no format is needed, like raw memory views, or to
                                      ///  indicate no color/depth target will be attached when creating a graphics
@@ -407,6 +412,8 @@ enum class ChannelSwizzle : Util::uint8
     Count
 };
 
+static_assert(Util::uint8(ChannelSwizzle::Count) <= 0xF, "ChannelMapping assumes this enum fits in 4b!");
+
 /// Specifies a mapping for each component of an image or buffer view to a channel in its associated resource.
 ///
 /// @ingroup ResourceBinding
@@ -416,14 +423,64 @@ struct ChannelMapping
     {
         struct
         {
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1007
             ChannelSwizzle r;          ///< Red component swizzle.
             ChannelSwizzle g;          ///< Green component swizzle.
             ChannelSwizzle b;          ///< Blue component swizzle.
             ChannelSwizzle a;          ///< Alpha component swizzle.
+#else
+            ChannelSwizzle r : 4;      ///< Red component swizzle.
+            ChannelSwizzle g : 4;      ///< Green component swizzle.
+            ChannelSwizzle b : 4;      ///< Blue component swizzle.
+            ChannelSwizzle a : 4;      ///< Alpha component swizzle.
+#endif
         };
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1007
         ChannelSwizzle     swizzle[4]; ///< All four swizzles packed into one array.
         Util::uint32       swizzleValue;
+#else
+        Util::uint16       swizzleValue;
+#endif
     };
+
+    ChannelSwizzle GetSwizzle(Util::uint32 idx) const
+    {
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1007
+        return swizzle[idx];
+#else
+        return static_cast<ChannelSwizzle>((swizzleValue >> (4 * idx)) & 0xF);
+#endif
+    }
+
+    void SetSwizzle(Util::uint32 idx, ChannelSwizzle val)
+    {
+#if PAL_CLIENT_INTERFACE_MAJOR_VERSION < 1007
+        swizzle[idx] = val;
+#else
+        swizzleValue = (swizzleValue & (~(0xF << (4 * idx)))) |  // Existing swizzles
+                       ((Util::uint16(val) & 0xF) << (4 * idx)); // New swizzle
+#endif
+    }
+
+    /// Assigns the mapping from a brace-enclosed list of up to four swizzles, in r,g,b,a order.
+    ///
+    /// Some compilers (e.g., GCC) fail to compile a plain aggregate assignment (`mapping = { ... };`) once the
+    /// r,g,b,a members become bit-fields (@see PAL_CLIENT_INTERFACE_MAJOR_VERSION 1007); this overload gives call
+    /// sites a way to keep using brace-enclosed assignment regardless of the underlying struct layout.
+    constexpr ChannelMapping& operator=(std::initializer_list<ChannelSwizzle> list)
+    {
+        Util::uint32 idx = 0;
+        for (ChannelSwizzle chSwizzle : list)
+        {
+            if (idx >= 4)
+            {
+                break;
+            }
+            SetSwizzle(idx, chSwizzle);
+            idx++;
+        }
+        return *this;
+    }
 };
 
 /// Specifies a pixel format for an image or memory view and its corresponding channel swizzle.

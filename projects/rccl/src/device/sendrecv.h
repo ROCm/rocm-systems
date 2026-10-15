@@ -14,9 +14,11 @@
 // parameters to this specialization; UserRegMode selects the latency protocol:
 //   UserRegMode == 0 -> latency-bound send/recv uses the legacy LL protocol. Built on every
 //                       arch; the default and the only variant when LL128 is off.
-//   UserRegMode == 1 -> latency-bound send/recv uses LL128. Built for gfx942/gfx950/gfx1250,
-//                       launched on gfx942/gfx950 only, and only when
-//                       NCCL_ALLOC_P2P_NET_LL_BUFFERS=1.
+//   UserRegMode == 1 -> latency-bound send/recv uses LL128. Built for gfx942/gfx950/gfx1250.
+//                       Launched on gfx942/gfx950 when NCCL_ALLOC_P2P_NET_LL_BUFFERS=1, and on
+//                       gfx1250 when NCCL_P2P_LL128_ENABLE=1 (SendRecv 4 GPU/node
+//                       windows from 0 through the nRanks cap, or the threshold path
+//                       on other rank counts). Default ENABLE=-1 does not launch it.
 // The host picks the variant via ncclDevFuncId_P2p(useLL128); the per-op work->{send,recv}
 // ProtoLL bit only means "this op is latency-bound", not which LL-family protocol.
 template <typename T, typename RedOp>

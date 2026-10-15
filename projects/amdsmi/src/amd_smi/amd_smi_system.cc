@@ -36,7 +36,9 @@
 namespace amd::smi {
 
 AMDSmiSystem& AMDSmiSystem::getInstance() {
-  static AMDSmiSystem instance;
+  // Never destroyed, so the sockets and processors it owns stay reachable and valid when a
+  // process exits without amdsmi_shut_down() or with a thread still inside the library.
+  static AMDSmiSystem& instance = *new AMDSmiSystem();
   return instance;
 }
 

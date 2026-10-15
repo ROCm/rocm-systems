@@ -32,6 +32,14 @@ class RegisterAccess;
 struct TensorDmaMemoryAccessObservation;
 class Wavefront;
 
+/// @brief Completion contract for a deferred runtime queue exception.
+enum class QueueExceptionDeliveryPolicy {
+  /// Preserve the trap-handler acknowledgment and debugger-ownership protocol.
+  WaitForAcknowledgment,
+  /// Publish without waiting for ROCr; fail the engine if publication fails.
+  PublishOrFail,
+};
+
 /// @brief Narrow CU API exposed to AMDGPU instruction emulation code.
 ///
 /// @details This view deliberately omits public physical register storage APIs.
@@ -52,6 +60,8 @@ public:
   bool observes_register_access() const;
   bool debug_active() const;
   rj_code_arch_t arch() const;
+  uint32_t cus_per_shader_array() const;
+  uint32_t shader_array_cu_id() const;
   uint32_t wf_size() const;
   uint32_t sgprs_per_wf() const;
   uint32_t vgpr_allocation_block_size() const;
@@ -63,10 +73,13 @@ public:
   bool handle_sendmsg(Wavefront &wf, uint32_t message);
   void notify_trap_complete(Wavefront &wf);
   /// Queue a runtime exception for delivery after instruction execution drops
-  /// the compute unit's wave-state lock.
+  /// the compute unit's wave-state lock. A caller without a debugger fallback
+  /// can require engine failure if the runtime cannot take ownership.
   bool signal_queue_exception(uint32_t queue_id, uint32_t process_id, uint64_t status,
                               bool clear_debug_stop_on_success = false,
-                              bool retain_failure_for_debugger = true);
+                              bool retain_failure_for_debugger = true,
+                              QueueExceptionDeliveryPolicy delivery_policy =
+                                  QueueExceptionDeliveryPolicy::WaitForAcknowledgment);
   bool observes_tensor_dma_memory_access() const;
   void report_tensor_dma_memory_access(const TensorDmaMemoryAccessObservation &access);
 

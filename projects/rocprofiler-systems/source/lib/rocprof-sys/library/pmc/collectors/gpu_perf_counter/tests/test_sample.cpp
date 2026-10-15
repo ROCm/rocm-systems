@@ -29,7 +29,7 @@ TEST_F(SdkPmcSampleTest, EmptySampleRoundTrip)
     serialize(buffer.data(), original);
 
     std::uint8_t* ptr          = buffer.data();
-    auto          deserialized = deserialize<sample>(ptr);
+    auto const    deserialized = deserialize<sample>(ptr);
 
     EXPECT_EQ(deserialized.device_id, 0U);
     EXPECT_EQ(deserialized.timestamp, 1000U);

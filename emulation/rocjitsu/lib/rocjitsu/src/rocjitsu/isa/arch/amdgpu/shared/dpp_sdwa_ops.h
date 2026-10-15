@@ -419,11 +419,6 @@ private:
 
 inline uint32_t dpp8_src_lane(uint32_t lane, uint32_t lane_sel);
 
-inline uint8_t true16_source_byte_mask(uint32_t opsel, uint32_t source_index) {
-  return (opsel & (1u << source_index)) ? rocjitsu::ExecutionPlugin::kHighHalfByteMask
-                                        : rocjitsu::ExecutionPlugin::kLowHalfByteMask;
-}
-
 inline DppPlan make_dpp8_plan(uint32_t wf_size, uint32_t lane_sel, uint32_t fi,
                               uint64_t exec_mask) {
   DppPlan plan;

@@ -159,10 +159,14 @@ TEST_F(backend_test, query_counter_details_returns_metadata_with_one_instance_an
 {
     const counter_id cid{ 7 };
 
-    dim_info      dim{ .dimension_name = "index", .index = 0 };
-    dim_info*     dims_arr[] = { &dim };
-    dim_instance  inst{ .instance_id = 1, .dimensions_count = 1, .dimensions = dims_arr };
-    dim_instance* insts_arr[] = { &inst };
+    dim_info dim{ .dimension_name = "index", .index = 0 };
+    // NOLINTNEXTLINE(misc-const-correctness) - dim_instance::dimensions is a non-const
+    // dim_info**
+    dim_info*    dims_arr[] = { &dim };
+    dim_instance inst{ .instance_id = 1, .dimensions_count = 1, .dimensions = dims_arr };
+    // NOLINTNEXTLINE(misc-const-correctness) - counter_info_v1_t::dimensions_instances is
+    // non-const
+    dim_instance*     insts_arr[] = { &inst };
     counter_info_v1_t fill{ .name                       = "SQ_WAVES",
                             .description                = "Wave count",
                             .block                      = "SQ",
@@ -194,8 +198,10 @@ TEST_F(backend_test, query_counter_details_returns_empty_dims_when_instance_has_
 {
     const counter_id cid{ 8 };
 
-    dim_instance  inst{ .instance_id = 2, .dimensions_count = 0, .dimensions = nullptr };
-    dim_instance* insts_arr[] = { &inst };
+    dim_instance inst{ .instance_id = 2, .dimensions_count = 0, .dimensions = nullptr };
+    // NOLINTNEXTLINE(misc-const-correctness) - counter_info_v1_t::dimensions_instances is
+    // non-const
+    dim_instance*     insts_arr[] = { &inst };
     counter_info_v1_t fill{ .name                       = "SQ_BUSY",
                             .description                = nullptr,
                             .block                      = nullptr,
@@ -834,6 +840,26 @@ TEST_F(backend_test, check_version_compatibility_throws_on_runtime_version_misma
 
     using sut_v = backend<version_mismatch_tag>;
     EXPECT_THROW(sut_v::check_version_compatibility(), std::runtime_error);
+}
+
+TEST_F(backend_test, marker_constants_forward_wrapper_values)
+{
+    EXPECT_EQ(sut::CALLBACK_TRACING_MARKER_CONTROL_API,
+              mock_sdk::CALLBACK_TRACING_MARKER_CONTROL_API);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxMarkA,
+              mock_sdk::MARKER_CORE_API_ID_roctxMarkA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangePushA,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangePushA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangePop,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangePop);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangeStartA,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangeStartA);
+    EXPECT_EQ(sut::MARKER_CORE_API_ID_roctxRangeStop,
+              mock_sdk::MARKER_CORE_API_ID_roctxRangeStop);
+    EXPECT_EQ(sut::MARKER_CONTROL_API_ID_roctxProfilerPause,
+              mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerPause);
+    EXPECT_EQ(sut::MARKER_CONTROL_API_ID_roctxProfilerResume,
+              mock_sdk::MARKER_CONTROL_API_ID_roctxProfilerResume);
 }
 
 }  // namespace rocprofsys::backends::rocprofiler_sdk::testing

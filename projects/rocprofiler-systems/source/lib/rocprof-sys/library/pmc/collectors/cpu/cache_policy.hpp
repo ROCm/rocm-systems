@@ -123,30 +123,31 @@ struct cache_policy
             return;
         }
 
-        auto add_process_pmc = [&, socket_id](const char* metric_name, const char* symbol,
-                                              const char* description, const char* units,
-                                              const char* value_type) {
-            registry.add_pmc_info({ .type             = agent_type::cpu,
-                                    .agent_type_index = socket_id,
-                                    .target_arch      = target_arch,
-                                    .event_code       = event_code,
-                                    .instance_id      = instance_id,
-                                    .name             = metric_name,
-                                    .symbol           = symbol,
-                                    .description      = description,
-                                    .long_description = long_description,
-                                    .component        = component,
-                                    .units            = units,
-                                    .value_type       = value_type,
-                                    .block            = block,
-                                    .expression       = expression,
-                                    .is_constant      = is_constant,
-                                    .is_derived       = is_derived,
-                                    .extdata          = extdata });
-            registry.add_track({ .track_name = metric_name,
-                                 .thread_id  = std::nullopt,
-                                 .extdata    = extdata });
-        };
+        auto const add_process_pmc =
+            [&, socket_id](const char* metric_name, const char* symbol,
+                           const char* description, const char* units,
+                           const char* value_type) {
+                registry.add_pmc_info({ .type             = agent_type::cpu,
+                                        .agent_type_index = socket_id,
+                                        .target_arch      = target_arch,
+                                        .event_code       = event_code,
+                                        .instance_id      = instance_id,
+                                        .name             = metric_name,
+                                        .symbol           = symbol,
+                                        .description      = description,
+                                        .long_description = long_description,
+                                        .component        = component,
+                                        .units            = units,
+                                        .value_type       = value_type,
+                                        .block            = block,
+                                        .expression       = expression,
+                                        .is_constant      = is_constant,
+                                        .is_derived       = is_derived,
+                                        .extdata          = extdata });
+                registry.add_track({ .track_name = metric_name,
+                                     .thread_id  = std::nullopt,
+                                     .extdata    = extdata });
+            };
 
         add_process_pmc(name<category::process_page>::value, "Page RSS",
                         "Process Physical Memory (RSS)", "MB",

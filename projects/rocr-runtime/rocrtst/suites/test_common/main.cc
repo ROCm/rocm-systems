@@ -56,11 +56,13 @@
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
+#include "suites/functional/memory_fragment.h"
 #include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
 #include "suites/functional/svm_memory.h"
 #include "suites/functional/time_stamp.h"
+#include "suites/functional/heap_reservation.h"
 #include "suites/performance/dispatch_time.h"
 #include "suites/performance/memory_async_copy.h"
 #if ENABLE_COPY_NUMA
@@ -375,6 +377,15 @@ TEST(rocrtstFunc, Time_Stamp) {
   RunCustomTestEpilog(&ts);
 }
 
+TEST(rocrtstFunc, Heap_Reservation) {
+    if (rocrtst::SkipIfNotWsl("heap VA pools are reserved only by the WSL/DXG thunk")) return;
+    HeapReservationTest hr;
+
+    if (!RunCustomTestProlog(&hr)) return;
+    hr.HeapReservationSurvivesConstrainedAddressSpace();
+    RunCustomTestEpilog(&hr);
+}
+
 TEST(rocrtstFunc, BarrierPkt_TimeStamp) {
     TimeStamp ts;
     RunCustomTestProlog(&ts);
@@ -557,6 +568,27 @@ TEST(rocrtstFunc, Memory_Atomic_Xchg_Test) {
     RunCustomTestEpilog(&ma);
 }
 
+TEST(rocrtstFunc, Memory_Fragment_Overlap_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentOverlapTest();
+    RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_ZeroInit_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentZeroInitTest();
+    RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_Coherence_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentCoherenceTest();
+    RunCustomTestEpilog(&mf);
+}
+
 TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
     DebugBasicTest mt;
     if (!RunCustomTestProlog(&mt)) return;
@@ -661,9 +693,7 @@ TEST(rocrtstFunc, GpuDiscoveryDeprecatedDoorbellTest) {
   // present. Regression test for: a single pre-Vega GPU (e.g. Polaris/gfx803)
   // would abort HSA initialization for ALL devices in the system.
   GpuDiscoveryDeprecatedTest gdt;
-  RunCustomTestProlog(&gdt);
-  gdt.Run();
-  RunCustomTestEpilog(&gdt);
+  RunGenericTest(&gdt);
 }
 
 TEST(rocrtstFunc, SvmMemory_Basic_Test) {
@@ -785,6 +815,13 @@ TEST(rocrtstFunc, VirtMemory_Imported_Handle_Pointer_Info_Test) {
   VirtMemoryTestBasic vmt;
   if (!RunCustomTestProlog(&vmt)) return;
   vmt.TestImportedHandlePointerInfo();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Host_Backed_Alloc_Import_Info_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestHostBackedAllocImportInfo();
   RunCustomTestEpilog(&vmt);
 }
 

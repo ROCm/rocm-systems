@@ -80,11 +80,11 @@ add_perfetto_annotation(::perfetto::EventContext& ctx, Np&& name, Tp&& value,
     static_assert(concepts::is_string_type<named_type>::value,
                   "Error! name is not a string type");
 
-    auto get_debug_annotation = [&]() {
+    auto const get_debug_annotation = [&]() {
         auto* debug_annotation = ctx.event()->add_debug_annotations();
         if(idx >= 0)
         {
-            auto arg_name = fmt::format("arg{}-{}", idx, std::forward<Np>(name));
+            auto const arg_name = fmt::format("arg{}-{}", idx, std::forward<Np>(name));
             debug_annotation->set_name(arg_name);
         }
         else

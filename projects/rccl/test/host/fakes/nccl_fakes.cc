@@ -13,10 +13,11 @@
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
+#include <unistd.h>
 
 #include "nccl.h"
 #include "alloc.h"        // ncclCuMemEnable
-#include "debug.h"        // ncclDebugLog, ncclDebugLevel, ...
+#include "debug.h"        // ncclDebugLog, ncclDebugLevelMask, ...
 #include "param.h"        // ncclLoadParam
 #include "rocmwrap.h"     // ncclCuMemHandleType
 #include "utils.h"        // busIdToInt64
@@ -27,6 +28,7 @@
 #include "comm.h"         // ncclCommGraphRegister / Deregister
 #include "strongstream.h" // ncclStrongStream*
 #include "mem_manager.h"  // ncclMemTrack / ncclMemUntrack / ncclDynMemMarkExportToPeer
+#include "ipcsocket.h"    // ncclIpcFd
 
 #include <functional>
 
@@ -43,6 +45,8 @@ ASSERT_HOOK_MATCHES_PROD(g_proxyCallBlocking,         ncclProxyCallBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_proxyClientQueryFdBlocking, ncclProxyClientQueryFdBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_proxyClientBatchQueryFdBlocking, ncclProxyClientBatchQueryFdBlocking);
 ASSERT_HOOK_MATCHES_PROD(g_strongStreamAcquire,       ncclStrongStreamAcquire);
+ASSERT_HOOK_MATCHES_PROD(g_strongStreamRelease,       ncclStrongStreamRelease);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStreamWaitStream,      ncclStreamWaitStream);
 // ncclCuMemEnable: header declares `int ncclCuMemEnable()` (rocmwrap.h).
 ASSERT_HOOK_MATCHES_PROD(g_cuMemEnable,               ncclCuMemEnable);
 ASSERT_HOOK_MATCHES_PROD(g_regLocalIsValid,           ncclRegLocalIsValid);
@@ -64,7 +68,7 @@ hipMemAllocationHandleType ncclCuMemHandleType =
 // Logging / param infrastructure
 // ---------------------------------------------------------------------------
 
-int                 ncclDebugLevel   = 0;   // NCCL_LOG_NONE
+uint32_t            ncclDebugLevelMask = 0; // NCCL_LOG_NONE
 uint64_t            ncclDebugMask    = 0;
 thread_local int    ncclDebugNoWarn  = 0;
 
@@ -197,6 +201,11 @@ ncclResult_t ncclProxyClientQueryFdBlocking(struct ncclComm*           comm,
 {
     return g_proxyClientQueryFdBlocking(comm, proxyConn, localFd, rmtFd);
 }
+
+// src/os/linux_ipcsocket.cc (NCCL 2.32): p2p.cc and dev_runtime.cc close
+// imported fds through this instead of close(2). A real close, as production
+// does, so suites that hand back a dup'd fd can still prove it was closed.
+int ncclIpcFdClose(ncclIpcFd fd) { return ::close(fd); }
 
 // --- Controllable seam: ncclRegLocalIsValid -----------------------------
 // Default preserves the old stub: report the record as not locally valid
@@ -373,18 +382,32 @@ ncclResult_t ncclStrongStreamAcquire(struct ncclCudaGraph graph,
     return g_strongStreamAcquire(graph, ss, concurrent, stream);
 }
 
-ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph     /*graph*/,
-                                     struct ncclStrongStream* /*ss*/,
-                                     bool                     /*concurrent*/)
+static ncclResult_t DefaultStrongStreamRelease(struct ncclCudaGraph, struct ncclStrongStream*, bool)
 {
     return ncclSuccess;
 }
 
-ncclResult_t ncclStreamWaitStream(hipStream_t /*a*/,
-                                  hipStream_t /*b*/,
-                                  hipEvent_t  /*ev*/)
+std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool)>
+    g_strongStreamRelease = DefaultStrongStreamRelease;
+
+ncclResult_t ncclStrongStreamRelease(struct ncclCudaGraph     graph,
+                                     struct ncclStrongStream* ss,
+                                     bool                     concurrent)
+{
+    return g_strongStreamRelease(graph, ss, concurrent);
+}
+
+static ncclResult_t DefaultStreamWaitStream(hipStream_t, hipStream_t, hipEvent_t)
 {
     return ncclSuccess;
+}
+
+std::function<ncclResult_t(hipStream_t, hipStream_t, hipEvent_t)> g_ncclStreamWaitStream =
+    DefaultStreamWaitStream;
+
+ncclResult_t ncclStreamWaitStream(hipStream_t a, hipStream_t b, hipEvent_t ev)
+{
+    return g_ncclStreamWaitStream(a, b, ev);
 }
 
 ncclResult_t DefaultTopoGetLinkType(int, int, bool* isXGMI, int)
@@ -542,6 +565,8 @@ void ResetNcclFakes()
 {
     g_ncclProxyClientGetFdBlocking = DefaultNcclProxyClientGetFdBlocking;
     g_strongStreamAcquire          = DefaultStrongStreamAcquire;
+    g_strongStreamRelease          = DefaultStrongStreamRelease;
+    g_ncclStreamWaitStream         = DefaultStreamWaitStream;
     g_proxyConnect                 = DefaultProxyConnect;
     g_proxyCallBlocking            = DefaultProxyCallBlocking;
     g_loadParam                    = DefaultLoadParam;
