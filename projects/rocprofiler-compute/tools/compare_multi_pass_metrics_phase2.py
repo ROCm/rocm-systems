@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
-"""Compare the 16 former SPU metrics before vs after Phase 2.
+"""Compare the 16 multi-pass metrics before vs after Phase 2.
 
 Parses ``rocprof-compute analyze --view table`` logs and writes CSV + HTML.
 """
@@ -12,7 +12,7 @@ import re
 from pathlib import Path
 from typing import Dict, List, Optional, Tuple
 
-SLOT16: List[Tuple[str, str]] = [
+MULTI_PASS_METRICS: List[Tuple[str, str]] = [
     ("2.1.0", "VALU FLOPs"),
     ("2.1.17", "vL1D Cache Hit Rate"),
     ("3.1.28", "VL1 Hit"),
@@ -76,9 +76,9 @@ def main() -> int:
         nargs="+",
         default=["vcopy", "nbody", "mega_kernel"],
     )
-    parser.add_argument("--before-suffix", default="_spp.log")
-    parser.add_argument("--after-suffix", default="_spp.log")
-    parser.add_argument("--title", default="SPU-16 before/after Phase 2")
+    parser.add_argument("--before-suffix", default="_single-pass.log")
+    parser.add_argument("--after-suffix", default="_single-pass.log")
+    parser.add_argument("--title", default="16 multi-pass metrics before/after Phase 2")
     args = parser.parse_args()
 
     args.out_dir.mkdir(parents=True, exist_ok=True)
@@ -89,7 +89,7 @@ def main() -> int:
         after_path = args.after_dir / f"{workload}{args.after_suffix}"
         before = parse_log(before_path) if before_path.exists() else {}
         after = parse_log(after_path) if after_path.exists() else {}
-        for mid, expected_name in SLOT16:
+        for mid, expected_name in MULTI_PASS_METRICS:
             b_name, b_avg = before.get(mid, ("?", "N/A"))
             a_name, a_avg = after.get(mid, ("?", "N/A"))
             b_f = to_float(b_avg)
@@ -110,7 +110,7 @@ def main() -> int:
                 "after_log": str(after_path),
             })
 
-    csv_path = args.out_dir / "slot16_before_after_phase2.csv"
+    csv_path = args.out_dir / "multi_pass_metrics_before_after_phase2.csv"
     with csv_path.open("w", encoding="utf-8") as handle:
         handle.write("workload,metric_id,name,before_avg,after_avg,rel_pct\n")
         for row in rows:
@@ -130,7 +130,7 @@ def main() -> int:
         row for row in rows if row["before_avg"] == "N/A" or row["after_avg"] == "N/A"
     ]
 
-    html_path = args.out_dir / "slot16_before_after_phase2.html"
+    html_path = args.out_dir / "multi_pass_metrics_before_after_phase2.html"
     lines = [
         "<!DOCTYPE html><html><head><meta charset='utf-8'>",
         f"<title>{html.escape(args.title)}</title>",
@@ -144,9 +144,9 @@ def main() -> int:
         ".pos{color:#1b5e20;} .neg{color:#b71c1c;}",
         "</style></head><body>",
         f"<h1>{html.escape(args.title)}</h1>",
-        "<p>Before = Phase 1 SPP analyze (pre Phase 2 YAML). "
+        "<p>Before = Phase 1 single-pass metric analysis (pre Phase 2 YAML). "
         "After = Phase 2 <code>COLLECT_SUM</code>/<code>COLLECT_RATIO</code> "
-        "parents. Same 16 SPU metric IDs from the gfx942 impact report.</p>",
+        "parents. The same 16 multi-pass metric IDs from the gfx942 impact report.</p>",
         f"<p>Rows: {len(rows)}; changed (|rel|&gt;0): {len(changed)}; "
         f"missing either side: {len(missing)}</p>",
         "<table><thead><tr>",
