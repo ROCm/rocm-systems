@@ -278,7 +278,7 @@ concept externals =
     // forwarding metadata-registry inserts ──────────────────────────────────────────
     &&
     requires(std::string_view text, Externals::thread_info_t thread_info,
-             Externals::region_sample         sample,
+             Externals::thread_info_t (&make_thread)(), Externals::region_sample sample,
              Externals::rocm_hip_api_category hip_category) {
         { Externals::is_active() } -> std::convertible_to<bool>;
         { Externals::get_use_timemory() } -> std::convertible_to<bool>;
@@ -286,9 +286,7 @@ concept externals =
         { Externals::tracing_pop_timemory(hip_category, text) };
         { Externals::get_metadata_registry().add_string(text) };
         {
-            Externals::get_metadata_registry().ensure_thread(
-                std::uint64_t{},
-                trace_cache::value_builder<typename Externals::thread_info_t>{})
+            Externals::get_metadata_registry().ensure_thread(std::uint64_t{}, make_thread)
         };
         { Externals::get_buffer_storage().store(std::move(sample)) };
     }
@@ -299,8 +297,7 @@ concept externals =
     // callbacks make through them.
     && requires(const char* text, std::string_view name, std::uint64_t value,
                 Externals::rocm_marker_api_category marker_category,
-                Externals::string_id_t              string_id,
-                const char*                         symbol_name) {
+                Externals::string_id_t string_id, const char* symbol_name) {
            { Externals::is_roctx_enabled() } -> std::convertible_to<bool>;
            { Externals::get_roctx_pause_resume_enabled() } -> std::convertible_to<bool>;
            {
