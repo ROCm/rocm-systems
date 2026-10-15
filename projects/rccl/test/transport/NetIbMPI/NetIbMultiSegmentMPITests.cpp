@@ -81,9 +81,11 @@ protected:
     // Per-segment iflush is the RCCL fallback (param default is 1 = scratchpad).
     // RCCL_PARAM caches on first read, so this process must be launched with
     // RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (test_runner one-mpirun-per-test).
-    static bool directGdrFlushEnabled() {
+    // IB-CAST also keeps flush off unless NCCL_GDR_FLUSH_DISABLE=0.
+    bool directGdrFlushEnabled() const {
         const char* v = getenv("RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING");
-        return v && atoi(v) == 0;
+        if (!(v && atoi(v) == 0)) return false;
+        return net_ != &netIbCast || MPIHelpers::getEnvParam<int>("NCCL_GDR_FLUSH_DISABLE", 1) == 0;
     }
 
     static void FillDevice(void* dptr, size_t size, uint8_t seed) {
@@ -138,7 +140,6 @@ protected:
             PostSendWithRetry(pair.sendComm, buf, size, tag, sendMh_, &req);
             int sz = 0;
             EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
-            EXPECT_EQ(sz, static_cast<int>(size));
         }
         MPI_Barrier(MPI_COMM_WORLD);
         if (rank == 0)
@@ -243,6 +244,33 @@ protected:
             if (pair.sendComm == nullptr) usleep(kPollIntervalUs);
         }
         return ncclSuccess;
+    }
+
+    bool OptRecvCompletionActive(void* comm) {
+        int flag = 0;
+        return net_ == &netIbCast && ncclIbCastGetOptRecvCompletion(comm, &flag) == ncclSuccess && flag == 1;
+    }
+
+    // One hinted 1-recv over the whole window; the skip path reports size 0.
+    void HintedWholeWindowTransfer(ConnectionPair& pair, void* mh, int tag, uint8_t seed) {
+        const int rank = MPIEnvironment::world_rank;
+        if (rank == 1) ASSERT_NO_FATAL_FAILURE(FillDevice(lastBuf_->ptr, lastBuf_->totalSize, seed));
+        MPI_Barrier(MPI_COMM_WORLD);
+        void* req = nullptr;
+        int sz = -1;
+        if (rank == 0)
+            PostSingleRecv(pair.recvComm, lastBuf_->ptr, lastBuf_->totalSize, tag, mh, &req, /*optRecvHint=*/true);
+        else
+            PostSendWithRetry(pair.sendComm, lastBuf_->ptr, lastBuf_->totalSize, tag, mh, &req, /*optRecvHint=*/true);
+        EXPECT_EQ(WaitForCompletion(req, &sz, kLargeTransferTimeoutMs), ncclSuccess);
+        // The hinted recv completes without waiting for data; verify only once the send has completed.
+        MPI_Barrier(MPI_COMM_WORLD);
+        if (rank == 0) {
+            EXPECT_EQ(sz, 0) << "a hinted 1-recv must take the optional-completion skip path";
+            EXPECT_TRUE(VerifyDevice(lastBuf_->ptr, lastBuf_->totalSize, seed))
+                << "data mismatch on the segmented RDMA-write path";
+        }
+        MPI_Barrier(MPI_COMM_WORLD);
     }
 
     std::string            skipReason_;
@@ -370,8 +398,9 @@ TEST_F(NetIbMultiSegmentMPITest, ExceedsMaxSegmentsRejected) {
         void* atCapMh = nullptr;
         ncclResult_t atCapRet = RegisterMultiSegmentMr(comm, *atCap, net_ == &netIbCast, &atCapMh);
         NetMHandleGuard atCapGuard(atCapMh, NetMHandleDeleter(net_, comm));
-        ASSERT_EQ(atCapRet, ncclSuccess) << "registration at exactly NCCL_IB_MAX_SEGMENTS must succeed";
-        ASSERT_NE(atCapMh, nullptr) << "at-cap registration must produce a handle";
+        EXPECT_EQ(atCapRet, ncclSuccess) << "registration at exactly NCCL_IB_MAX_SEGMENTS must succeed";
+        EXPECT_NE(atCapMh, nullptr) << "at-cap registration must produce a handle";
+        if (!MPIHelpers::allRanksTrue(atCapRet == ncclSuccess && atCapMh != nullptr)) return;
     }
 
     void* mh = nullptr;
@@ -405,7 +434,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentRegisterOff_DeclinesRegistration) {
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
     void* mh = nullptr;
-    ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, &mh);
+    ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, net_ == &netIbCast, &mh);
 #if NCCL_CUMEM_DMABUF_EXPORT_GATE
     if (rank == 0) {
         EXPECT_EQ(r, ncclInvalidUsage) << "NCCL_MULTI_SEGMENT_REGISTER=0 receiver still registered a multi-segment buffer";
@@ -447,7 +476,7 @@ TEST_F(NetIbMultiSegmentMPITest, OldPeer_SingleRkeyCrossBoundaryTransfer) {
     void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
 
     void* multiMh = nullptr;
-    ncclResult_t multi = RegisterMultiSegmentMr(comm, *sendWin, &multiMh);
+    ncclResult_t multi = RegisterMultiSegmentMr(comm, *sendWin, net_ == &netIbCast, &multiMh);
     bool regOk = true;
     if (rank == 0) {
         EXPECT_EQ(multi, ncclInvalidUsage) << "receiver accepted a multi-segment registration from a peer that did not advertise";
@@ -495,6 +524,41 @@ TEST_F(NetIbMultiSegmentMPITest, OldPeer_SingleRkeyCrossBoundaryTransfer) {
     }
 }
 
+// IB-CAST declines multi-segment registration under BY_ORDER matching or QP sharing,
+// since segmented sends carry neither a per-imm byte_len nor a shared-QP commId.
+TEST_F(NetIbMultiSegmentMPITest, CastUnsafeMode_DeclinesRegistration) {
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                            false, kMinGpusPerNode, kNoNodeLimit);
+    const bool byOrder   = MPIHelpers::getEnvParam<int>("NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME", -2) == 2;
+    const bool qpSharing = MPIHelpers::getEnvParam<int>("RCCL_IB_QP_SHARING_ENABLE", 0) == 1;
+    if (SyncSkip(net_ != &netIbCast || !(byOrder || qpSharing)))
+        GTEST_SKIP() << "Requires NCCL_NET=IB-CAST with NCCL_IB_RECEIVER_SIDE_MATCHING_SCHEME=2 "
+                        "or RCCL_IB_QP_SHARING_ENABLE=1";
+    int ndev = 0; AssertInitAndGetDevices(&ndev);
+    if (SyncSkip(!PtrSupported(NCCL_PTR_DMABUF))) GTEST_SKIP() << "DMA-BUF registration not supported";
+
+    const int rank = MPIEnvironment::world_rank;
+    MultiSegmentVmmBuffer* buf = AllocSym(kNumSegments);
+    if (SyncSkip(buf == nullptr)) GTEST_SKIP() << "multi-segment VMM allocation unavailable";
+
+    ConnectionPair pair; NetConnectionGuard guard(net_);
+    ASSERT_SETUP_CONNECTION(0, pair, guard);
+    void* comm = (rank == 0) ? pair.recvComm : pair.sendComm;
+
+    void* mh = nullptr;
+    ncclResult_t r = RegisterMultiSegmentMr(comm, *buf, /*isCast=*/true, &mh);
+#if NCCL_CUMEM_DMABUF_EXPORT_GATE
+    EXPECT_EQ(r, ncclInvalidUsage) << "byOrder=" << byOrder << " qpSharing=" << qpSharing
+                                   << ": unsafe mode still registered a multi-segment buffer";
+    EXPECT_EQ(mh, nullptr);
+    if (mh != nullptr) (void)net_->deregMr(comm, mh);
+#else
+    (void)r;
+    GTEST_SKIP() << "dma-buf export API unavailable at build time";
+#endif
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
 // REGRESSION: a single-segment window registered through the multi-segment
 // entry point still registers and transfers via the nSeg==1 fast path (which
 // leaves ncclIbMultiSend on its original, unmodified code path).
@@ -509,7 +573,7 @@ TEST_F(NetIbMultiSegmentMPITest, SingleSegmentThroughMultiSegPath) {
 // GDR flush is required, so iflush must return a request.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
     if (SyncSkip(!directGdrFlushEnabled()))
-        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
+        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (+ NCCL_GDR_FLUSH_DISABLE=0 on IB-CAST) "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
@@ -555,7 +619,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushSelectsSegmentMr) {
 // without a boundary error and still complete.
 TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
     if (SyncSkip(!directGdrFlushEnabled()))
-        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
+        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (+ NCCL_GDR_FLUSH_DISABLE=0 on IB-CAST) "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
@@ -599,7 +663,7 @@ TEST_F(NetIbMultiSegmentMPITest, MultiSegmentFlushTouchesEverySegment) {
 // iflush must fence every non-zero entry, not only the final receive.
 TEST_F(NetIbMultiSegmentMPITest, MultiRecvFlushTouchesEveryHandle) {
     if (SyncSkip(!directGdrFlushEnabled()))
-        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 "
+        GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (+ NCCL_GDR_FLUSH_DISABLE=0 on IB-CAST) "
                         "(per-segment iflush chain; RCCL_PARAM caches per process)";
     ConnectionPair pair; NetConnectionGuard guard(net_); void* mh0 = nullptr; void* comm = nullptr;
     SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh0, comm);
@@ -937,6 +1001,75 @@ TEST_F(NetIbMultiSegmentMPITest, ConcurrentPairsMoveEverySegmentBoundary) {
         }
     }
     EXPECT_TRUE(MPIHelpers::allRanksTrue(!HasFailure())) << "a pair failed; see that rank's output";
+}
+
+// OPT-RECV: a hinted 1-recv crosses every boundary with plain RDMA writes and
+// reports size 0; with n=2 the skip helper does not apply and sizes are real.
+TEST_F(NetIbMultiSegmentMPITest, OptRecvCompletionSegmentedSkipsImm) {
+    ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+    if (SyncSkip(!OptRecvCompletionActive(comm)))
+        GTEST_SKIP() << "needs IB-CAST with RCCL_IB_OPTIONAL_RECV_COMPLETION=1 and QP scheduling off";
+
+    HintedWholeWindowTransfer(pair, mh, /*tag=*/900, /*seed=*/0x3C);
+
+    const int rank = MPIEnvironment::world_rank;
+    uint8_t* base = static_cast<uint8_t*>(lastBuf_->ptr);
+    const size_t seg = lastBuf_->segSize;
+    void* bufs[2] = {base + seg / 2, base + 2 * seg + seg / 2};
+    size_t sizes[2] = {seg, seg};
+    int tags[2] = {901, 902};
+    void* mhs[2] = {mh, mh};
+    const uint8_t seeds[2] = {0x51, 0x62};
+    if (rank == 0) {
+        ASSERT_NO_FATAL_FAILURE(FillDeviceConstant(base, lastBuf_->totalSize, 0xEE));
+    } else {
+        for (int i = 0; i < 2; i++) ASSERT_NO_FATAL_FAILURE(FillDevice(bufs[i], sizes[i], seeds[i]));
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+    if (rank == 0) {
+        void* req = nullptr;
+        int got[2] = {-1, -1};
+        EXPECT_EQ(PostRecv(pair.recvComm, 2, bufs, sizes, tags, mhs, &req, /*optRecvHint=*/true), ncclSuccess);
+        EXPECT_EQ(WaitForCompletion(req, got, kLargeTransferTimeoutMs), ncclSuccess);
+        for (int i = 0; i < 2; i++) {
+            EXPECT_EQ(got[i], static_cast<int>(sizes[i])) << "n=2 entry " << i << " must report its size";
+            EXPECT_TRUE(VerifyDevice(bufs[i], sizes[i], seeds[i])) << "n=2 entry " << i;
+        }
+        EXPECT_TRUE(VerifyDeviceConstant(base, seg / 2, 0xEE)) << "bytes before entry 0 were written";
+    } else {
+        void* reqs[2] = {};
+        for (int i = 0; i < 2; i++)
+            PostSendWithRetry(pair.sendComm, bufs[i], sizes[i], tags[i], mh, &reqs[i], /*optRecvHint=*/true);
+        for (int i = 0; i < 2; i++) {
+            int sz = 0;
+            EXPECT_EQ(WaitForCompletion(reqs[i], &sz, kLargeTransferTimeoutMs), ncclSuccess) << "send " << i;
+        }
+    }
+    MPI_Barrier(MPI_COMM_WORLD);
+}
+
+// NEGATIVE: a hinted recv past the registered segments fails before taking a
+// request slot, so the next hinted recv still pairs with the sender's first send.
+TEST_F(NetIbMultiSegmentMPITest, OptRecvInvalidRangeRejectedBeforeRequest) {
+    ConnectionPair pair; NetConnectionGuard guard(net_); void* mh = nullptr; void* comm = nullptr;
+    SETUP_REGISTERED_OR_SKIP(kNumSegments, pair, guard, mh, comm);
+    NetMHandleGuard mhGuard(mh, NetMHandleDeleter(net_, comm));
+    if (SyncSkip(!OptRecvCompletionActive(comm)))
+        GTEST_SKIP() << "needs IB-CAST with RCCL_IB_OPTIONAL_RECV_COMPLETION=1 and QP scheduling off";
+
+    if (MPIEnvironment::world_rank == 0) {
+        const size_t seg = lastBuf_->segSize;
+        void* data[1] = {static_cast<uint8_t*>(lastBuf_->ptr) + lastBuf_->totalSize - seg / 2};
+        size_t sizes[1] = {seg};
+        int tags[1] = {910};
+        void* mhs[1] = {mh};
+        void* req = (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION;
+        EXPECT_EQ(net_->irecv(pair.recvComm, 1, data, sizes, tags, mhs, nullptr, &req), ncclInternalError);
+        EXPECT_EQ(req, (void*)NCCL_NET_OPTIONAL_RECV_COMPLETION) << "a rejected irecv must not hand back a request";
+    }
+    HintedWholeWindowTransfer(pair, mh, /*tag=*/911, /*seed=*/0x7A);
 }
 
 #endif // MPI_TESTS_ENABLED

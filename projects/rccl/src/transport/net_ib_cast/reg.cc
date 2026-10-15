@@ -6,6 +6,8 @@
  *************************************************************************/
 
 #include "common_cast.h"
+#include "rocmwrap.h"
+#include "net_ib/multiseg.h"
 #include "rccl_ib_multiseg.h"
 
 ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle);
@@ -107,78 +109,95 @@ fail:
   goto exit;
 }
 
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+// RCCL: plugin regMrDmaBuf with fd < 0. offset is (cuMem export flags << 32) | segment count.
+static ncclResult_t IbCastRegMrDmaBufFromRange(void* comm, void* data, size_t size, int type, uint64_t packed,
+                                               void** mhandle) {
+  const int nExpect = (int)(packed & 0xffffffffu);
+  const int handleFlags = (int)(packed >> 32);
+  ncclResult_t ret = ncclSuccess;
+  void** segAddrs = NULL;
+  size_t* segLens = NULL;
+  uint64_t* segOffsets = NULL;
+  int* segFds = NULL;
+  int nSeg = 0;
+  size_t remaining = size;
+  *mhandle = NULL;
+
+  if (nExpect < 1 || nExpect > NCCL_IB_MAX_SEGMENTS) {
+    WARN("NET/IB: CAST multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nExpect,
+         NCCL_IB_MAX_SEGMENTS);
+    return ncclInvalidUsage;
+  }
+  NCCLCHECKGOTO(ncclCalloc(&segAddrs, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segLens, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segOffsets, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segFds, nExpect), ret, fail);
+  for (int s = 0; s < nExpect; s++) segFds[s] = -1;
+
+  {
+    uintptr_t segPtr = (uintptr_t)data;
+    for (int s = 0; s < nExpect && remaining > 0; s++) {
+      CUdeviceptr segBase = 0;
+      size_t segSize = 0;
+      CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, fail);
+      size_t inSeg = ncclIbBytesRemainingInSegment(segPtr, (uintptr_t)segBase, segSize);
+      size_t thisLen = remaining < inSeg ? remaining : inSeg;
+      int fd = -1;
+      CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&fd, (CUdeviceptr)segPtr, thisLen,
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, handleFlags),
+                  ret, fail);
+      segAddrs[s] = (void*)segPtr;
+      segLens[s] = thisLen;
+      segOffsets[s] = 0ULL;
+      segFds[s] = fd;
+      segPtr += thisLen;
+      remaining -= thisLen;
+      nSeg++;
+    }
+  }
+
+  if (remaining != 0 || nSeg != nExpect) {
+    WARN("NET/IB: CAST enumerated %d/%d segments for buffer %p but %zu/%zu bytes remain unregistered", nSeg, nExpect,
+         data, remaining, size);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  if (!ncclIbSegmentsUniform(nSeg, segLens)) {
+    INFO(NCCL_NET | NCCL_REG,
+         "Buffer %p (size %zu) has non-uniform segments; declining NET user-buffer registration (staging fallback)",
+         data, size);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  NCCLCHECKGOTO(IbCastRegMrDmaBufMultiSeg(comm, nSeg, segAddrs, segLens, segOffsets, segFds, type, mhandle), ret, fail);
+
+exit:
+  if (segFds) {
+    for (int s = 0; s < nExpect; s++) {
+      if (segFds[s] != -1) (void)close(segFds[s]);
+    }
+  }
+  free(segAddrs);
+  free(segLens);
+  free(segOffsets);
+  free(segFds);
+  return ret;
+fail:
+  goto exit;
+}
+#endif
+
 ncclResult_t IbCastRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  // RCCL: fd < 0 registers one MR per physical segment. A real fd stays one MR.
+  if (fd == -1) return IbCastRegMrDmaBufFromRange(comm, data, size, type, offset, mhandle);
+#endif
   return IbCastRegMrDmaBufInternal(comm, data, size, type, offset, fd, 0ULL, mhandle);
 }
 
 ncclResult_t IbCastRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
   return IbCastRegMrDmaBufInternal(comm, data, size, type, 0ULL, -1, 0, mhandle);
-}
-
-/* Multi-segment DMA-BUF support (AIRUNTIME-2351 CAST P2P wire-option follow-up).
- *
- * Same HIP first-segment dma-buf limitation as classic. Distinct symbol from
- * ncclIbRegMrDmaBufMultiSeg because both plugins link into librccl. nSegments>1
- * is declined when the peer did not advertise NCCL_IB_CAP_MULTISEG or when CTS
- * offload is on (the NIC owns CTS and will not consume a host-visible side table).
- */
-ncclResult_t IbCastRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
-                                       int* segFds, int type, void** mhandle) {
-  ncclResult_t ret = ncclSuccess;
-  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
-  struct ncclIbMrHandle* mhandleWrapper = NULL;
-  *mhandle = NULL;
-  if (nSeg < 1 || nSeg > NCCL_IB_MAX_SEGMENTS) {
-    WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nSeg,
-         NCCL_IB_MAX_SEGMENTS);
-    return ncclInvalidUsage;
-  }
-  if (nSeg > 1) {
-    uint32_t peerCaps;
-    bool useCtsOffload;
-    if (base->isSend) {
-      peerCaps = ((struct ncclIbSendComm*)comm)->peerCaps;
-      useCtsOffload = ((struct ncclIbSendComm*)comm)->useCtsOffload;
-    } else {
-      peerCaps = ((struct ncclIbRecvComm*)comm)->peerCaps;
-      useCtsOffload = ((struct ncclIbRecvComm*)comm)->useCtsOffload;
-    }
-    if (useCtsOffload || (peerCaps & NCCL_IB_CAP_MULTISEG) == 0) {
-      INFO(NCCL_NET | NCCL_REG,
-           "NET/IB: CAST declining %d-segment registration (ctsOffload=%d peerCaps=0x%x)", nSeg, (int)useCtsOffload,
-           peerCaps);
-      return ncclInvalidUsage;
-    }
-  }
-  NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
-  mhandleWrapper->nSegments = nSeg;
-  for (int s = 0; s < nSeg; s++) {
-    mhandleWrapper->segStart[s] = (uintptr_t)segAddrs[s];
-    mhandleWrapper->segLen[s] = segLens[s];
-    for (int i = 0; i < base->vProps.ndevs; i++) {
-      struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
-      NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, segAddrs[s], segLens[s], type, segOffsets[s], segFds[s], 0ULL,
-                                               &mhandleWrapper->segMrs[s][i]),
-                    ret, fail);
-    }
-  }
-  for (int i = 0; i < base->vProps.ndevs; i++) mhandleWrapper->mrs[i] = mhandleWrapper->segMrs[0][i];
-  INFO(NCCL_NET | NCCL_REG, "NET/IB: CAST registered multi-segment buffer %p size %zu as %d DMA-BUF MRs", segAddrs[0],
-       (size_t)(mhandleWrapper->segStart[nSeg - 1] + mhandleWrapper->segLen[nSeg - 1] - mhandleWrapper->segStart[0]),
-       nSeg);
-  *mhandle = (void*)mhandleWrapper;
-  return ncclSuccess;
-fail:
-  for (int s = 0; s < nSeg; s++) {
-    for (int i = 0; i < base->vProps.ndevs; i++) {
-      if (mhandleWrapper->segMrs[s][i]) {
-        struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
-        (void)IbCastDeregMrInternal(devComm, mhandleWrapper->segMrs[s][i]);
-      }
-    }
-  }
-  free(mhandleWrapper);
-  return ret;
 }
 
 ncclResult_t IbCastDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) {
@@ -211,18 +230,11 @@ ncclResult_t IbCastDeregMr(void* comm, void* mhandle) {
 
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
-  if (mhandleWrapper->nSegments > 1) {
-    for (int s = 0; s < mhandleWrapper->nSegments; s++) {
-      for (int i = 0; i < base->vProps.ndevs; i++) {
-        struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
-        NCCLCHECK(IbCastDeregMrInternal(devComm, mhandleWrapper->segMrs[s][i]));
-      }
-    }
-  } else {
-    for (int i = 0; i < base->vProps.ndevs; i++) {
-      struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
-      NCCLCHECK(IbCastDeregMrInternal(devComm, mhandleWrapper->mrs[i]));
-    }
+  if (mhandleWrapper->nSegments > 1) return rcclIbCastDeregMrMultiSeg(comm, mhandle);
+  for (int i = 0; i < base->vProps.ndevs; i++) {
+    // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
+    struct ncclIbNetCommDevBase* devComm = IbCastGetNetCommDevBase(base, i);
+    NCCLCHECK(IbCastDeregMrInternal(devComm, mhandleWrapper->mrs[i]));
   }
   free(mhandleWrapper);
   return ncclSuccess;
