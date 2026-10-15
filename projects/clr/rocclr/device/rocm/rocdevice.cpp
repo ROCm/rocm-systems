@@ -2449,20 +2449,26 @@ uint64_t Device::hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const 
 
   // Resolve the backing CPU agent.
   //   -2 (Host)            -> default CPU agent.
-  //   -1 (HostNumaCurrent) -> current node, else default agent.
-  //   >= 0 (HostNuma)      -> that node, else default agent.
+  //   -1 (HostNumaCurrent) -> current node
+  //   >= 0 (HostNuma)      -> that node
+  const AgentInfo* agentInfo = cpu_agent_info_;
   int node = numaNode;
   if (numaNode == -1) {
     node = static_cast<int>(numa::getCurrentNumaNode());
   }
-  if (node < 0 || static_cast<size_t>(node) >= cpu_agents_.size()) {
-    node = 0;
+  if (node >= static_cast<int>(cpu_agents_.size())) {
+    LogPrintfError("hostVmemAlloc: invalid NUMA node %d (cpu agents: %zu)", node,
+                   cpu_agents_.size());
+    return 0;
+  }
+  if (node >= 0) {
+    agentInfo = &cpu_agents_[node];
   }
 
   // PHYMEM: ROCCLR_MEM_HSA_UNCACHED is passed as HSA_AMD_MEMORY_POOL_UNCACHED_FLAG in |flags|.
   const bool uncached = (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG) != 0;
   const MemorySegment mem_seg = uncached ? kUncachedAtomics : kAtomics;
-  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, &cpu_agents_[node]);
+  hsa_amd_memory_pool_t pool = getHostMemoryPool(mem_seg, agentInfo);
   if (pool.handle == 0) {
     LogPrintfError("hostVmemAlloc: no host memory pool for NUMA node %d", node);
     return 0;
