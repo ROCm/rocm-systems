@@ -58,12 +58,14 @@ def _block(block: dict[str, Any]) -> list[str]:
 
 def _blocks(data: dict[str, Any]) -> list[str]:
     by_id = {block["id"]: block for block in data["blocks"]}
-    ordered = list(layout_from_json(Path("layout"), data).blocks())
+    layout = layout_from_json(Path("layout"), data)
+    ordered = list(layout.blocks())
+    # A blank line before the first block of every column after the first
+    column_starts = {column[0].id for column in layout.columns[1:]}
     lines = ['  "blocks": [']
     for i, block in enumerate(ordered):
-        if i and block.position == "grid" and not block.parent:
-            if block.column != ordered[i - 1].column:
-                lines.append("")
+        if block.id in column_starts:
+            lines.append("")
         sub = _block(by_id[block.id])
         sub[-1] += "," if i < len(ordered) - 1 else ""
         lines.extend(sub)

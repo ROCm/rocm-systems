@@ -57,6 +57,9 @@ _ARROW_CATEGORIES = ("read", "write", "atomic", "neutral")
 _DIRECTIONS = ("forward", "backward", "both")
 _ARROW_STYLES = ("inline", "stacked")
 
+# (owner block id or None, position, column) of a stack of blocks
+StackKey = tuple[Optional[str], str, int]
+
 
 @dataclass(frozen=True)
 class LayoutItem:
@@ -112,11 +115,15 @@ class Layout:
     columns: tuple[tuple[LayoutBlock, ...], ...]  # top-level grid blocks
     arrows: tuple[LayoutArrow, ...]
 
+    def top_level_blocks(self) -> Iterator[LayoutBlock]:
+        """The blocks stacked in the columns, column by column."""
+        for column in self.columns:
+            yield from column
+
     def blocks(self) -> Iterator[LayoutBlock]:
         """All blocks, each parent before its nested and attached blocks."""
-        for column in self.columns:
-            for block in column:
-                yield from _with_descendants(block)
+        for block in self.top_level_blocks():
+            yield from _with_descendants(block)
 
     def metrics(self) -> set[str]:
         """Names of all metrics the layout shows."""
@@ -190,10 +197,9 @@ def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
     if len(data["scope"]["labels"]) != 2:
         _fail(path, "scope needs two labels")
     raw_blocks = _raw_blocks(path, data["blocks"])
-    groups = _sibling_groups(path, raw_blocks)
+    groups, column_count = _stacks(path, raw_blocks)
     columns = tuple(
-        tuple(_block(path, raw, groups) for raw in groups[("column", column)])
-        for column in range(len([k for k in groups if k[0] == "column"]))
+        _stacked(path, groups, (None, "grid", column)) for column in range(column_count)
     )
     left, right = data["scope"]["labels"]
     layout = Layout(
@@ -298,50 +304,49 @@ def _raw_blocks(path: Path, entries: list[dict[str, Any]]) -> dict[str, dict[str
     return by_id
 
 
-def _sibling_groups(
+def _stacks(
     path: Path, raw_blocks: dict[str, dict[str, Any]]
-) -> dict[tuple[Any, ...], list[dict[str, Any]]]:
-    """Blocks grouped with the blocks they are stacked with, sorted by order.
+) -> tuple[dict[StackKey, list[dict[str, Any]]], int]:
+    """Blocks grouped into the stacks they are drawn in, each sorted by order.
 
-    A group is the top-level grid blocks of a column, the children of a parent, or
-    the above (or below) blocks of a host.
+    A stack is keyed by (owner, position, column): the owner is the parent or host,
+    or None for the top-level blocks of a column. Also returns the column count.
     """
-    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    stacks: dict[StackKey, list[dict[str, Any]]] = defaultdict(list)
     for raw in raw_blocks.values():
         owner_id = raw.get("parent") or raw.get("host")
-        if owner_id is None:
-            groups[("column", raw["column"])].append(raw)
-            continue
-        owner = raw_blocks.get(owner_id)
-        if owner is None:
+        owner = raw_blocks.get(owner_id) if owner_id else None
+        if owner_id and owner is None:
             _fail(path, f"{raw['id']!r} refers to unknown block {owner_id!r}")
-        if owner["position"] != "grid" or ("host" in raw and "parent" in owner):
+        if owner and (
+            owner["position"] != "grid" or ("host" in raw and "parent" in owner)
+        ):
             _fail(path, f"{raw['id']!r} must hang off a block in a column")
-        if owner["column"] != raw["column"]:
+        if owner and owner["column"] != raw["column"]:
             _fail(path, f"{raw['id']!r} must have the column of {owner_id!r}")
-        groups[
-            ("parent", owner_id)
-            if "parent" in raw
-            else ("host", owner_id, raw["position"])
-        ].append(raw)
-    columns = sorted(key[1] for key in groups if key[0] == "column")
-    if columns != list(range(len(columns))) or not columns:
+        stacks[(owner_id, raw["position"], raw["column"])].append(raw)
+    columns = sorted(column for owner, _, column in stacks if owner is None)
+    if not columns or columns != list(range(len(columns))):
         _fail(path, f"columns must be numbered 0, 1, ... with no gaps, not {columns}")
-    for key, members in groups.items():
+    for members in stacks.values():
         members.sort(key=lambda raw: raw["order"])
         if [raw["order"] for raw in members] != list(range(len(members))):
             ids = [raw["id"] for raw in members]
             _fail(path, f"blocks {ids} must have orders 0, 1, ... with no gaps")
-    return groups
+    return stacks, len(columns)
+
+
+def _stacked(
+    path: Path, stacks: dict[StackKey, list[dict[str, Any]]], key: StackKey
+) -> tuple["LayoutBlock", ...]:
+    return tuple(_block(path, raw, stacks) for raw in stacks.get(key, []))
 
 
 def _block(
-    path: Path,
-    raw: dict[str, Any],
-    groups: dict[tuple[Any, ...], list[dict[str, Any]]],
+    path: Path, raw: dict[str, Any], stacks: dict[StackKey, list[dict[str, Any]]]
 ) -> LayoutBlock:
-    block_id = raw["id"]
-    children = groups.get(("parent", block_id), [])
+    block_id, column = raw["id"], raw["column"]
+    children = _stacked(path, stacks, (block_id, "grid", column))
     if children and {"content", "stall_level"} & set(raw):
         _fail(path, f"{block_id!r} has nested blocks, so its metrics go in them")
     items = tuple(_item(path, entry) for entry in raw.get("content", []))
@@ -357,15 +362,9 @@ def _block(
         host=raw.get("host"),
         stall_level=raw.get("stall_level"),
         items=items,
-        children=tuple(_block(path, child, groups) for child in children),
-        above=tuple(
-            _block(path, sub, groups)
-            for sub in groups.get(("host", block_id, "above"), [])
-        ),
-        below=tuple(
-            _block(path, sub, groups)
-            for sub in groups.get(("host", block_id, "below"), [])
-        ),
+        children=children,
+        above=_stacked(path, stacks, (block_id, "above", column)),
+        below=_stacked(path, stacks, (block_id, "below", column)),
     )
 
 
@@ -409,7 +408,7 @@ def _check_references(layout: Layout, raw_blocks: dict[str, dict[str, Any]]) -> 
         _fail(layout.path, f"blocks {unplaced} nest inside each other")
     for arrow in layout.arrows:
         _check_arrow(layout.path, arrow, by_id)
-    after_first = {b.id for column in layout.columns[1:] for b in column}
+    after_first = {b.id for b in layout.top_level_blocks() if b.column > 0}
     if layout.scope_split not in after_first:
         _fail(
             layout.path,

@@ -477,7 +477,7 @@ class MemChart:
             grid.add_column(width=width, no_wrap=True)
         grid.add_row(*(cell for cell, _ in kept))
 
-        hosts = [b for column in self.layout.columns for b in column]
+        hosts = list(self.layout.top_level_blocks())
         sections: list[RenderableType] = [f"[bold]{chart_title}[/bold]"]
         sections += [self._attached(h, sub, True) for h in hosts for sub in h.above]
         sections += [self._scope_bar(sum(widths)), "", grid]
