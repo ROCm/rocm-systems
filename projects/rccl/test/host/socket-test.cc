@@ -1,0 +1,1150 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Host-only microtests for src/misc/socket.cc over real loopback TCP, with the real os/linux.cc and
+// the plaintext crypt.cc handshake underneath. Its own libc calls are seamed only to fail.
+
+#include <gtest/gtest.h>
+
+#include <cerrno>
+#include <cstdlib>
+#include <cstring>
+#include <fcntl.h>
+#include <functional>
+#include <ifaddrs.h>
+#include <mutex>
+#include <net/if.h>
+#include <netdb.h>
+#include <string>
+#include <sys/ioctl.h>
+#include <sys/resource.h>
+#include <sys/syscall.h>
+#include <thread>
+#include <time.h>
+#include <unistd.h>
+#include <vector>
+
+#include "crypt.h"
+#include "os.h"
+#include "param.h"
+#include "socket.h"
+#include "utils.h"
+
+#include "linux-test-common.h"
+
+namespace sk {
+#define SK_HOOKS(X) X(shutdown) X(setsockopt) X(bind) X(getsockname) X(listen) X(getaddrinfo) X(getnameinfo)
+#define SK_DECLARE(fn) lx::Hook<decltype(&::fn)>::type fn = ::fn;
+SK_HOOKS(SK_DECLARE)
+#define SK_RESET(fn) fn = ::fn;
+void Reset() { SK_HOOKS(SK_RESET) }
+}  // namespace sk
+
+#define shutdown(...) sk::shutdown(__VA_ARGS__)
+#define setsockopt(...) sk::setsockopt(__VA_ARGS__)
+#define bind(...) sk::bind(__VA_ARGS__)
+#define getsockname(...) sk::getsockname(__VA_ARGS__)
+#define listen(...) sk::listen(__VA_ARGS__)
+#define getaddrinfo(...) sk::getaddrinfo(__VA_ARGS__)
+#define getnameinfo(...) sk::getnameinfo(__VA_ARGS__)
+#include SOCKET_CC_PATH
+#undef shutdown
+#undef setsockopt
+#undef bind
+#undef getsockname
+#undef listen
+#undef getaddrinfo
+#undef getnameinfo
+
+namespace {
+
+constexpr uint64_t kMagic = 0x5eed5eed12345678ull;
+
+bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
+
+ncclSocketAddress V4(const char* ip, uint16_t port) {
+  ncclSocketAddress a;
+  std::memset(&a, 0, sizeof(a));
+  a.sin.sin_family = AF_INET;
+  a.sin.sin_port = htons(port);
+  inet_pton(AF_INET, ip, &a.sin.sin_addr);
+  return a;
+}
+
+ncclSocketAddress V6(const char* ip, uint16_t port) {
+  ncclSocketAddress a;
+  std::memset(&a, 0, sizeof(a));
+  a.sin6.sin6_family = AF_INET6;
+  a.sin6.sin6_port = htons(port);
+  inet_pton(AF_INET6, ip, &a.sin6.sin6_addr);
+  return a;
+}
+
+std::string Str(const ncclSocketAddress& a) {
+  char buf[SOCKET_NAME_MAXLEN + 1];
+  return ncclSocketToString(&a, buf, sizeof(buf));
+}
+
+int IntOpt(int fd, int level, int name) {
+  int v = -1;
+  socklen_t len = sizeof(v);
+  ::getsockopt(fd, level, name, &v, &len);
+  return v;
+}
+
+class SocketMicrotest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    g_linuxLog.clear();
+    sk::Reset();
+    lx::Reset();
+    for (ncclSocket* s : {&listen_, &client_, &server_}) {
+      std::memset(s, 0, sizeof(*s));
+      s->socketDescriptor = s->acceptSocketDescriptor = NCCL_INVALID_SOCKET;
+    }
+  }
+  void TearDown() override {
+    for (ncclSocket* s : {&client_, &server_, &listen_}) ncclSocketClose(s);
+    for (int fd : fds_) ::close(fd);
+    ncclSetEncryption(nullptr);
+    sk::Reset();
+    lx::Reset();
+  }
+  int Track(int fd) {
+    fds_.push_back(fd);
+    return fd;
+  }
+  void Listen(int asyncFlag = 0, volatile uint32_t* abortFlag = nullptr) {
+    ncclSocketAddress any = V4("127.0.0.1", 0);
+    ASSERT_EQ(ncclSocketInit(&listen_, &any, kMagic, ncclSocketTypeBootstrap, abortFlag, asyncFlag), ncclSuccess);
+    ASSERT_EQ(ncclSocketListen(&listen_), ncclSuccess);
+  }
+  ncclSocketAddress ListenAddr() {
+    ncclSocketAddress a;
+    EXPECT_EQ(ncclSocketGetAddr(&listen_, &a), ncclSuccess);
+    return a;
+  }
+  // client_ connects to listen_ with the given magic and type; blocking unless asyncFlag.
+  ncclResult_t Connect(uint64_t magic = kMagic, ncclSocketType type = ncclSocketTypeBootstrap, int asyncFlag = 0) {
+    ncclSocketAddress a = ListenAddr();
+    EXPECT_EQ(ncclSocketInit(&client_, &a, magic, type, nullptr, asyncFlag), ncclSuccess);
+    return ncclSocketConnect(&client_);
+  }
+  // client_ and server_ end Ready.
+  void Pair() {
+    Listen();
+    ASSERT_EQ(Connect(), ncclSuccess);
+    ASSERT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);
+    ASSERT_EQ(client_.state, ncclSocketStateReady);
+    ASSERT_EQ(server_.state, ncclSocketStateReady);
+  }
+  // A raw TCP client of listen_ that sends the given hello bytes, or none.
+  int RawClient(const std::string& hello) {
+    ncclSocketAddress a = ListenAddr();
+    int fd = Track(::socket(AF_INET, SOCK_STREAM, 0));
+    EXPECT_EQ(::connect(fd, &a.sa, sizeof(a.sin)), 0);
+    if (!hello.empty()) EXPECT_EQ(::send(fd, hello.data(), hello.size(), 0), (ssize_t)hello.size());
+    return fd;
+  }
+  static std::string Hello(uint64_t magic, ncclSocketType type) {
+    std::string h(NCCL_SOCKET_PLAIN_HELLO_BYTES, '\0');
+    std::memcpy(&h[0], &magic, sizeof(magic));
+    std::memcpy(&h[sizeof(magic)], &type, sizeof(type));
+    return h;
+  }
+  ncclSocket listen_, client_, server_;
+  std::vector<int> fds_;
+  LinuxScopedEnv retrySleep_{"NCCL_SOCKET_RETRY_SLEEP_MSEC", "0"};
+};
+
+// Basics
+
+TEST_F(SocketMicrotest, DefaultMagic_EnvOverridesOnceElseBuiltIn) {
+  GTEST_FLAG_SET(death_test_style, "threadsafe");  // a fresh process: the value is cached on first use
+  auto magicIs = [](const char* env, uint64_t expected, const char* log) {
+    if (env) setenv("NCCL_SOCKET_MAGIC", env, 1);
+    else unsetenv("NCCL_SOCKET_MAGIC");
+    bool ok = ncclSocketDefaultMagic() == expected && LinuxLogged(log);
+    setenv("NCCL_SOCKET_MAGIC", "0x99", 1);
+    ok = ok && ncclSocketDefaultMagic() == expected;  // cached
+    exit(ok ? 0 : 1);
+  };
+  EXPECT_EXIT(magicIs(nullptr, NCCL_SOCKET_MAGIC, "(built-in default)"), ::testing::ExitedWithCode(0), "");
+  EXPECT_EXIT(magicIs("", NCCL_SOCKET_MAGIC, "(built-in default)"), ::testing::ExitedWithCode(0), "");
+  EXPECT_EXIT(magicIs("0x1234", 0x1234, "Socket handshake magic 0x0000000000001234 (NCCL_SOCKET_MAGIC)"),
+              ::testing::ExitedWithCode(0), "");
+  EXPECT_EXIT(magicIs("12abc", NCCL_SOCKET_MAGIC, "NCCL_SOCKET_MAGIC invalid value \"12abc\""),
+              ::testing::ExitedWithCode(0), "");
+}
+
+TEST_F(SocketMicrotest, Move_TransfersOwnershipAndInvalidatesTheSource) {
+  Pair();
+  ncclSocket moved;
+  int fd = client_.socketDescriptor;
+  client_.crypto = (ncclSocketCrypto*)0x1;
+  ncclSocketMove(&moved, &client_);
+  EXPECT_EQ(moved.socketDescriptor, fd);
+  EXPECT_EQ(moved.state, ncclSocketStateReady);
+  EXPECT_EQ(moved.magic, kMagic);
+  EXPECT_EQ(moved.crypto, (ncclSocketCrypto*)0x1);
+  EXPECT_EQ(client_.socketDescriptor, NCCL_INVALID_SOCKET);
+  EXPECT_EQ(client_.acceptSocketDescriptor, NCCL_INVALID_SOCKET);
+  EXPECT_EQ(client_.state, ncclSocketStateNone);
+  EXPECT_EQ(client_.crypto, nullptr);
+  moved.crypto = nullptr;
+  ncclSocketClose(&moved);
+}
+
+TEST_F(SocketMicrotest, ToPort_ReadsEitherFamily) {
+  ncclSocketAddress a = V4("10.0.0.1", 5000);
+  EXPECT_EQ(ncclSocketToPort(&a), 5000);
+  a = V6("::1", 6001);
+  EXPECT_EQ(ncclSocketToPort(&a), 6001);
+}
+
+TEST_F(SocketMicrotest, GetAndSetFd) {
+  int fd = 0;
+  EXPECT_EQ(ncclSocketGetFd(nullptr, &fd), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketSetFd(3, nullptr), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketGetFd: pass NULL socket"));
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketSetFd: pass NULL socket"));
+  ASSERT_EQ(ncclSocketSetFd(7, &client_), ncclSuccess);
+  EXPECT_EQ(ncclSocketGetFd(&client_, nullptr), ncclSuccess);
+  ASSERT_EQ(ncclSocketGetFd(&client_, &fd), ncclSuccess);
+  EXPECT_EQ(fd, 7);
+  client_.socketDescriptor = NCCL_INVALID_SOCKET;
+}
+
+TEST_F(SocketMicrotest, Shutdown_SignalsThePeerAndMarksTerminating) {
+  EXPECT_EQ(ncclSocketShutdown(nullptr, SHUT_RDWR), ncclSuccess);
+  ASSERT_EQ(ncclSocketShutdown(&client_, SHUT_RDWR), ncclSuccess);  // no descriptor: state only
+  EXPECT_EQ(client_.state, ncclSocketStateTerminating);
+  Pair();
+  ASSERT_EQ(ncclSocketShutdown(&client_, SHUT_WR), ncclSuccess);
+  EXPECT_EQ(client_.state, ncclSocketStateTerminating);
+  char c;
+  EXPECT_EQ(::recv(server_.socketDescriptor, &c, 1, 0), 0);
+}
+
+TEST_F(SocketMicrotest, Shutdown_FailureIsASystemError) {
+  int p[2];
+  ASSERT_EQ(pipe(p), 0);
+  Track(p[0]);
+  Track(p[1]);
+  ncclSocket sock = client_;
+  sock.socketDescriptor = p[0];
+  EXPECT_EQ(ncclSocketShutdown(&sock, SHUT_RDWR), ncclSystemError);
+  EXPECT_TRUE(LinuxLogged("WARN Call to shutdown failed"));
+}
+
+// Listen
+
+TEST_F(SocketMicrotest, Listen_RejectsNullOrUnopenedSockets) {
+  EXPECT_EQ(ncclSocketListen(nullptr), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketListen(&listen_), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketListen: pass NULL socket"));
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketListen: socket is invalid"));
+}
+
+TEST_F(SocketMicrotest, Listen_AnyPortGetsAnEphemeralPort) {
+  Listen();
+  EXPECT_EQ(listen_.state, ncclSocketStateReady);
+  EXPECT_EQ(listen_.acceptSocketDescriptor, listen_.socketDescriptor);
+  EXPECT_NE(ncclSocketToPort(&listen_.addr), 0);
+  EXPECT_EQ(IntOpt(listen_.socketDescriptor, SOL_SOCKET, SO_ACCEPTCONN), 1);
+  EXPECT_EQ(IntOpt(listen_.socketDescriptor, SOL_SOCKET, SO_REUSEADDR), 0);
+}
+
+TEST_F(SocketMicrotest, Listen_AFixedPortIsReusable) {
+  Listen();
+  ncclSocketAddress fixed = ListenAddr();
+  ncclSocketClose(&listen_);
+  ASSERT_EQ(ncclSocketInit(&listen_, &fixed), ncclSuccess);
+  ASSERT_EQ(ncclSocketListen(&listen_), ncclSuccess);
+  EXPECT_EQ(ncclSocketToPort(&listen_.addr), ncclSocketToPort(&fixed));
+  EXPECT_EQ(IntOpt(listen_.socketDescriptor, SOL_SOCKET, SO_REUSEADDR), 1);
+  EXPECT_EQ(IntOpt(listen_.socketDescriptor, SOL_SOCKET, SO_REUSEPORT), 1);
+}
+
+TEST_F(SocketMicrotest, Listen_PortInUseIsASystemError) {
+  Listen();  // without SO_REUSEPORT, so nobody can share the port
+  ncclSocketAddress taken = ListenAddr();
+  ncclSocket other;
+  ASSERT_EQ(ncclSocketInit(&other, &taken), ncclSuccess);
+  EXPECT_EQ(ncclSocketListen(&other), ncclSystemError);
+  EXPECT_TRUE(LinuxLogged("WARN Call to bind failed: Address already in use"));
+  ncclSocketClose(&other);
+}
+
+TEST_F(SocketMicrotest, Listen_SyscallFailuresAreSystemErrors) {
+  for (int step = 0; step < 4; step++) {
+    SCOPED_TRACE(step);
+    sk::Reset();
+    g_linuxLog.clear();
+    auto fail = [](auto...) {
+      errno = EACCES;
+      return -1;
+    };
+    const char* expect[] = {"setsockopt", "setsockopt", "getsockname", "listen"};
+    if (step == 0) sk::setsockopt = fail;
+    if (step == 1)
+      sk::setsockopt = [](int fd, int level, int name, const void* v, socklen_t len) {
+        if (name == SO_REUSEPORT) {
+          errno = EACCES;
+          return -1;
+        }
+        return ::setsockopt(fd, level, name, v, len);
+      };
+    if (step == 2) sk::getsockname = fail;
+    if (step == 3) sk::listen = fail;
+    ncclSocket sock;
+    ncclSocketAddress a = V4("127.0.0.1", step < 2 ? 1 : 0);  // a fixed port takes the setsockopt path
+    ASSERT_EQ(ncclSocketInit(&sock, &a), ncclSuccess);
+    EXPECT_EQ(ncclSocketListen(&sock), ncclSystemError);
+    EXPECT_TRUE(LinuxLogged((std::string("WARN Call to ") + expect[step] + " failed").c_str()));
+    ncclSocketClose(&sock);
+  }
+}
+
+// Addresses
+
+TEST_F(SocketMicrotest, ToString_NumericHostAndPort) {
+  EXPECT_EQ(Str(V4("127.0.0.1", 5000)), "127.0.0.1<5000>");
+  EXPECT_EQ(Str(V6("::1", 80)), "::1<80>");
+  char buf[6] = "junk";
+  ncclSocketAddress a = V4("127.0.0.1", 5000);
+  EXPECT_STREQ(ncclSocketToString(&a, buf, sizeof(buf)), "127.0");
+}
+
+TEST_F(SocketMicrotest, ToString_UnprintableAddressesAreEmpty) {
+  char buf[64] = "junk";
+  EXPECT_EQ(ncclSocketToString(nullptr, buf, sizeof(buf)), buf);
+  EXPECT_STREQ(buf, "");
+  ncclSocketAddress a = V4("127.0.0.1", 1);
+  EXPECT_EQ(ncclSocketToString(&a, nullptr, 0), nullptr);
+  a.sa.sa_family = AF_UNIX;
+  std::strcpy(buf, "junk");
+  EXPECT_STREQ(ncclSocketToString(&a, buf, sizeof(buf)), "");
+  a = V4("127.0.0.1", 1);
+  sk::getnameinfo = [](const sockaddr*, socklen_t, char*, socklen_t, char*, socklen_t, int) { return EAI_FAIL; };
+  std::strcpy(buf, "junk");
+  EXPECT_STREQ(ncclSocketToString(&a, buf, sizeof(buf)), "");
+}
+
+TEST_F(SocketMicrotest, ToString_NumericHostFormIsOptional) {
+  std::vector<int> flags;
+  sk::getnameinfo = [&](const sockaddr* sa, socklen_t len, char* host, socklen_t hl, char* serv, socklen_t sl,
+                        int f) {
+    flags.push_back(f);
+    return ::getnameinfo(sa, len, host, hl, serv, sl, f | NI_NUMERICHOST);
+  };
+  ncclSocketAddress a = V4("127.0.0.1", 1);
+  char buf[64];
+  ncclSocketToString(&a, buf, sizeof(buf));
+  ncclSocketToString(&a, buf, sizeof(buf), /*numericHostForm=*/0);
+  EXPECT_EQ(flags, (std::vector<int>{NI_NUMERICSERV | NI_NUMERICHOST, NI_NUMERICSERV}));
+}
+
+TEST_F(SocketMicrotest, EnvSocketFamily) {
+  {
+    LinuxScopedEnv env("NCCL_SOCKET_FAMILY", nullptr);
+    EXPECT_EQ(ncclEnvSocketFamily(), -1);
+    EXPECT_TRUE(g_linuxLog.empty());
+  }
+  const std::pair<const char*, int> cases[] = {{"AF_INET", AF_INET}, {"AF_INET6", AF_INET6}, {"AF_UNIX", -1}};
+  for (auto& c : cases) {
+    LinuxScopedEnv env("NCCL_SOCKET_FAMILY", c.first);
+    EXPECT_EQ(ncclEnvSocketFamily(), c.second) << c.first;
+  }
+  EXPECT_TRUE(LinuxLogged("NCCL_SOCKET_FAMILY set by environment to AF_UNIX"));
+}
+
+TEST_F(SocketMicrotest, GetAddrFromString_IPv4WithPort) {
+  ncclSocketAddress a;
+  ASSERT_EQ(ncclSocketGetAddrFromString(&a, "10.1.2.3:5000"), ncclSuccess);
+  EXPECT_EQ(Str(a), "10.1.2.3<5000>");
+  // Observed: without a port, the missing -1 becomes port 65535.
+  ASSERT_EQ(ncclSocketGetAddrFromString(&a, "10.1.2.3"), ncclSuccess);
+  EXPECT_EQ(ncclSocketToPort(&a), 65535);
+}
+
+TEST_F(SocketMicrotest, GetAddrFromString_ResolvedIPv6IsGlobalScope) {
+  sk::getaddrinfo = [](const char*, const char* svc, const addrinfo* hints, addrinfo** res) {
+    EXPECT_EQ(hints->ai_family, AF_UNSPEC);
+    EXPECT_EQ(hints->ai_socktype, SOCK_STREAM);
+    int rc = ::getaddrinfo("fe80::1", svc, hints, res);
+    ((sockaddr_in6*)(*res)->ai_addr)->sin6_scope_id = 5;
+    ((sockaddr_in6*)(*res)->ai_addr)->sin6_flowinfo = 7;
+    return rc;
+  };
+  ncclSocketAddress a;
+  ASSERT_EQ(ncclSocketGetAddrFromString(&a, "somehost:4000"), ncclSuccess);
+  EXPECT_EQ(a.sa.sa_family, AF_INET6);
+  EXPECT_EQ(ncclSocketToPort(&a), 4000);
+  EXPECT_EQ(a.sin6.sin6_scope_id, 0u);
+  EXPECT_EQ(a.sin6.sin6_flowinfo, 0u);
+}
+
+TEST_F(SocketMicrotest, GetAddrFromString_IPv4Failures) {
+  ncclSocketAddress a;
+  EXPECT_EQ(ncclSocketGetAddrFromString(&a, nullptr), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketGetAddrFromString(&a, "x"), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN Net : string is null"));
+  EXPECT_EQ(ncclSocketGetAddrFromString(&a, ":5000"), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("No valid <IPv4_or_hostname>:<port> pair found"));
+  sk::getaddrinfo = [](const char*, const char*, const addrinfo*, addrinfo**) { return EAI_NONAME; };
+  EXPECT_EQ(ncclSocketGetAddrFromString(&a, "nohost:1"), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("error encountered when getting address info"));
+  sk::getaddrinfo = [](const char*, const char* svc, const addrinfo* hints, addrinfo** res) {
+    int rc = ::getaddrinfo("127.0.0.1", svc, hints, res);
+    (*res)->ai_family = AF_UNIX;
+    return rc;
+  };
+  EXPECT_EQ(ncclSocketGetAddrFromString(&a, "odd:1"), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN Net : unsupported IP family"));
+}
+
+TEST_F(SocketMicrotest, GetAddrFromString_BracketedIPv6) {
+  ncclSocketAddress a;
+  ASSERT_EQ(ncclSocketGetAddrFromString(&a, "[2001:db8::7]:8080"), ncclSuccess);
+  EXPECT_EQ(Str(a), "2001:db8::7<8080>");
+  EXPECT_EQ(a.sin6.sin6_scope_id, 0u);
+  ASSERT_EQ(ncclSocketGetAddrFromString(&a, "[fe80::1%lo]:80"), ncclSuccess);
+  EXPECT_EQ(ncclSocketToPort(&a), 80);
+  EXPECT_EQ(a.sin6.sin6_scope_id, if_nametoindex("lo"));
+  char host[INET6_ADDRSTRLEN];
+  EXPECT_STREQ(inet_ntop(AF_INET6, &a.sin6.sin6_addr, host, sizeof(host)), "fe80::1");
+  EXPECT_EQ(ncclSocketGetAddrFromString(&a, "[::1:80"), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("No valid [IPv6]:port pair found"));
+}
+
+TEST_F(SocketMicrotest, GetAddr_OnlyFromAReadySocket) {
+  ncclSocketAddress a;
+  EXPECT_EQ(ncclSocketGetAddr(nullptr, &a), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketGetAddr: pass NULL socket"));
+  EXPECT_EQ(ncclSocketGetAddr(&listen_, &a), ncclInternalError);
+  Listen();
+  ASSERT_EQ(ncclSocketGetAddr(&listen_, &a), ncclSuccess);
+  EXPECT_EQ(std::memcmp(&a, &listen_.addr, sizeof(a)), 0);
+}
+
+// Interface selection, over a scripted getifaddrs() list
+
+class SocketIfMicrotest : public SocketMicrotest {
+ protected:
+  void SetUp() override {
+    SocketMicrotest::SetUp();
+    ifs_.Install();
+  }
+  std::vector<std::string> Find() {
+    char names[MAX_IFS * MAX_IF_NAME_SIZE];
+    ncclSocketAddress addrs[MAX_IFS];
+    int n = -1;
+    EXPECT_EQ(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &n), ncclSuccess);
+    std::vector<std::string> out;
+    for (int i = 0; i < n; i++) out.push_back(names + i * MAX_IF_NAME_SIZE);
+    return out;
+  }
+  LinuxFakeIfaddrs ifs_;
+  LinuxScopedEnv ifname_{"NCCL_SOCKET_IFNAME", nullptr};
+  LinuxScopedEnv commId_{"NCCL_COMM_ID", nullptr};
+  LinuxScopedEnv family_{"NCCL_SOCKET_FAMILY", nullptr};
+};
+
+TEST_F(SocketIfMicrotest, Auto_PrefersIbThenAnythingButDockerLoopbackAndBridges) {
+  ifs_.Add("lo", AF_INET, "127.0.0.1");
+  ifs_.Add("docker0", AF_INET, "172.17.0.1");
+  ifs_.Add("virbr0", AF_INET, "192.168.122.1");
+  ifs_.Add("eth0", AF_INET, "10.0.0.1");
+  ifs_.Add("ib0", AF_INET, "10.1.0.1");
+  EXPECT_EQ(Find(), (std::vector<std::string>{"ib0"}));
+}
+
+TEST_F(SocketIfMicrotest, Auto_FallsBackToDockerThenLoopbackThenBridges) {
+  ifs_.Add("lo", AF_INET, "127.0.0.1");
+  ifs_.Add("virbr0", AF_INET, "192.168.122.1");
+  ifs_.Add("docker0", AF_INET, "172.17.0.1");
+  ifs_.Add("eth0", AF_INET, "10.0.0.1");
+  EXPECT_EQ(Find(), (std::vector<std::string>{"eth0"}));
+  LinuxFakeIfaddrs noEth;
+  noEth.Add("lo", AF_INET, "127.0.0.1");
+  noEth.Add("virbr0", AF_INET, "192.168.122.1");
+  noEth.Add("docker0", AF_INET, "172.17.0.1");
+  noEth.Install();
+  EXPECT_EQ(Find(), (std::vector<std::string>{"docker0"}));
+  LinuxFakeIfaddrs noDocker;
+  noDocker.Add("virbr0", AF_INET, "192.168.122.1");
+  noDocker.Add("lo", AF_INET, "127.0.0.1");
+  noDocker.Install();
+  EXPECT_EQ(Find(), (std::vector<std::string>{"lo"}));
+  LinuxFakeIfaddrs bridgeOnly;
+  bridgeOnly.Add("virbr0", AF_INET, "192.168.122.1");
+  bridgeOnly.Install();
+  EXPECT_EQ(Find(), (std::vector<std::string>{"virbr0"}));
+  LinuxFakeIfaddrs none;
+  none.Install();
+  EXPECT_EQ(Find(), (std::vector<std::string>{}));
+  ifs_.Install();
+}
+
+TEST_F(SocketIfMicrotest, Auto_CommIdPicksTheInterfaceInItsSubnet) {
+  ifs_.Add("eth0", AF_INET, "192.168.0.1", "255.255.255.0");
+  ifs_.Add("eth1", AF_INET, "10.0.0.1", "255.0.0.0");
+  {
+    LinuxScopedEnv env("NCCL_COMM_ID", "10.9.9.9:5000");
+    EXPECT_EQ(Find(), (std::vector<std::string>{"eth1"}));
+    EXPECT_TRUE(LinuxLogged("NCCL_COMM_ID set by environment to 10.9.9.9:5000"));
+  }
+  {
+    LinuxScopedEnv env("NCCL_COMM_ID", "x");  // too short: ignored
+    EXPECT_EQ(Find(), (std::vector<std::string>{"eth0", "eth1"}));
+  }
+  {
+    LinuxScopedEnv env("NCCL_COMM_ID", "11.0.0.1:5000");  // no subnet match: fall through
+    EXPECT_EQ(Find(), (std::vector<std::string>{"eth0", "eth1"}));
+  }
+}
+
+TEST_F(SocketIfMicrotest, Auto_BadCommIdIsAnError) {
+  LinuxScopedEnv env("NCCL_COMM_ID", "[::1");
+  ifs_.Add("eth0", AF_INET, "10.0.0.1");
+  char names[MAX_IFS * MAX_IF_NAME_SIZE];
+  ncclSocketAddress addrs[MAX_IFS];
+  int n = -1;
+  EXPECT_EQ(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &n), ncclInvalidArgument);
+}
+
+TEST_F(SocketIfMicrotest, IfnameAndFamilyComeFromTheEnvironment) {
+  ifs_.Add("eth0", AF_INET, "10.0.0.1");
+  ifs_.Add("eth0", AF_INET6, "2001:db8::1");
+  ifs_.Add("ib0", AF_INET, "10.1.0.1");
+  {
+    LinuxScopedEnv env("NCCL_SOCKET_IFNAME", "eth");
+    EXPECT_EQ(Find(), (std::vector<std::string>{"eth0"}));
+    EXPECT_TRUE(LinuxLogged("NCCL_SOCKET_IFNAME set by environment to eth"));
+  }
+  {
+    LinuxScopedEnv env("NCCL_SOCKET_IFNAME", "e");  // one character: ignored
+    EXPECT_EQ(Find(), (std::vector<std::string>{"ib0"}));
+  }
+  LinuxScopedEnv env("NCCL_SOCKET_IFNAME", "eth0");
+  LinuxScopedEnv fam("NCCL_SOCKET_FAMILY", "AF_INET6");
+  char names[MAX_IFS * MAX_IF_NAME_SIZE];
+  ncclSocketAddress addrs[MAX_IFS];
+  int n = -1;
+  ASSERT_EQ(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &n), ncclSuccess);
+  ASSERT_EQ(n, 1);
+  EXPECT_EQ(addrs[0].sa.sa_family, AF_INET6);
+}
+
+TEST_F(SocketIfMicrotest, EnumerationFailuresPropagate) {
+  lx::getifaddrs = [](ifaddrs**) {
+    errno = ENOMEM;
+    return -1;
+  };
+  char names[MAX_IFS * MAX_IF_NAME_SIZE];
+  ncclSocketAddress addrs[MAX_IFS];
+  int n = -1;
+  EXPECT_EQ(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &n), ncclSystemError);
+  LinuxScopedEnv env("NCCL_SOCKET_IFNAME", "eth0");
+  EXPECT_EQ(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &n), ncclSystemError);
+}
+
+// Fails the n-th getifaddrs() call, to reach each fallback's error check.
+TEST_F(SocketIfMicrotest, EachFallbackPropagatesAnEnumerationFailure) {
+  LinuxScopedEnv env("NCCL_COMM_ID", "10.9.9.9:5000");
+  for (int failAt = 1; failAt <= 6; failAt++) {
+    SCOPED_TRACE(failAt);
+    int calls = 0;
+    lx::getifaddrs = [&](ifaddrs** out) {
+      if (++calls == failAt) {
+        errno = ENOMEM;
+        return -1;
+      }
+      *out = nullptr;
+      return 0;
+    };
+    lx::freeifaddrs = [](ifaddrs*) {};
+    char names[MAX_IFS * MAX_IF_NAME_SIZE];
+    ncclSocketAddress addrs[MAX_IFS];
+    int n = -1;
+    EXPECT_EQ(ncclFindInterfaces(names, addrs, MAX_IF_NAME_SIZE, MAX_IFS, &n), ncclSystemError);
+  }
+}
+
+// Init
+
+TEST_F(SocketMicrotest, Init_WithoutAnAddressOnlyResetsState) {
+  EXPECT_EQ(ncclSocketInit(nullptr), ncclSuccess);
+  volatile uint32_t abortFlag = 0;
+  std::memset(&client_, 0x5a, sizeof(client_));
+  ASSERT_EQ(ncclSocketInit(&client_, nullptr, kMagic, ncclSocketTypeProxy, &abortFlag, 1, 1), ncclSuccess);
+  EXPECT_EQ(client_.state, ncclSocketStateInitialized);
+  EXPECT_EQ(client_.socketDescriptor, NCCL_INVALID_SOCKET);
+  EXPECT_EQ(client_.acceptSocketDescriptor, NCCL_INVALID_SOCKET);
+  EXPECT_EQ(client_.errorRetries, 0);
+  EXPECT_EQ(client_.abortFlag, &abortFlag);
+  EXPECT_EQ(client_.asyncFlag, 1);
+  EXPECT_EQ(client_.customRetry, 1);
+  EXPECT_EQ(client_.magic, kMagic);
+  EXPECT_EQ(client_.type, ncclSocketTypeProxy);
+  EXPECT_EQ(client_.finalizeCounter, 0);
+  EXPECT_EQ(client_.crypto, nullptr);
+  ncclSocketAddress zero;
+  std::memset(&zero, 0, sizeof(zero));
+  EXPECT_EQ(std::memcmp(&client_.addr, &zero, sizeof(zero)), 0);
+}
+
+TEST_F(SocketMicrotest, Init_OpensASocketOfTheAddressFamily) {
+  ncclSocketAddress a = V4("127.0.0.1", 1);
+  ASSERT_EQ(ncclSocketInit(&client_, &a), ncclSuccess);
+  EXPECT_TRUE(FdOpen(client_.socketDescriptor));
+  EXPECT_EQ(client_.salen, (int)sizeof(sockaddr_in));
+  EXPECT_EQ(client_.magic, ncclSocketDefaultMagic());
+  EXPECT_EQ(client_.type, ncclSocketTypeUnknown);
+  EXPECT_EQ(IntOpt(client_.socketDescriptor, SOL_SOCKET, SO_REUSEADDR), 0);
+  linger l{};
+  socklen_t len = sizeof(l);
+  ::getsockopt(client_.socketDescriptor, SOL_SOCKET, SO_LINGER, &l, &len);
+  EXPECT_EQ(l.l_onoff, 0);
+  ncclSocketAddress b = V6("::1", 1);
+  ASSERT_EQ(ncclSocketInit(&server_, &b), ncclSuccess);
+  EXPECT_EQ(server_.salen, (int)sizeof(sockaddr_in6));
+  EXPECT_EQ(IntOpt(server_.socketDescriptor, SOL_SOCKET, SO_DOMAIN), AF_INET6);
+}
+
+TEST_F(SocketMicrotest, Init_AppliesTheReuseAddrAndLingerParams) {
+  LinuxScopedEnv reuse("RCCL_SOCKET_REUSEADDR", "1");
+  LinuxScopedEnv lingerEnv("RCCL_SOCKET_LINGER", "0");
+  ncclSocketAddress a = V4("127.0.0.1", 1);
+  ASSERT_EQ(ncclSocketInit(&client_, &a), ncclSuccess);
+  EXPECT_EQ(IntOpt(client_.socketDescriptor, SOL_SOCKET, SO_REUSEADDR), 1);
+  linger l{};
+  socklen_t len = sizeof(l);
+  ::getsockopt(client_.socketDescriptor, SOL_SOCKET, SO_LINGER, &l, &len);
+  EXPECT_EQ(l.l_onoff, 1);
+  EXPECT_EQ(l.l_linger, 0);
+}
+
+TEST_F(SocketMicrotest, Init_RejectsANonIpAddress) {
+  ncclSocketAddress a = V4("127.0.0.1", 1);
+  a.sa.sa_family = AF_UNIX;
+  EXPECT_EQ(ncclSocketInit(&client_, &a), ncclInternalError);
+  EXPECT_EQ(client_.socketDescriptor, NCCL_INVALID_SOCKET);
+  EXPECT_TRUE(LinuxLogged("is neither AF_INET(2) nor AF_INET6(10)"));
+}
+
+// Failures after the descriptor exists close it again.
+TEST_F(SocketMicrotest, Init_FailuresCloseTheSocket) {
+  LinuxScopedEnv reuse("RCCL_SOCKET_REUSEADDR", "1");
+  LinuxScopedEnv lingerEnv("RCCL_SOCKET_LINGER", "3");
+  ncclSocketAddress a = V4("127.0.0.1", 1);
+  for (int failing : {SO_REUSEADDR, SO_LINGER}) {
+    int created = -1;
+    sk::setsockopt = [&](int fd, int level, int name, const void* v, socklen_t len) {
+      created = fd;
+      if (name == failing) {
+        errno = EINVAL;
+        return -1;
+      }
+      return ::setsockopt(fd, level, name, v, len);
+    };
+    EXPECT_EQ(ncclSocketInit(&client_, &a), ncclSystemError);
+    EXPECT_FALSE(FdOpen(created));
+    EXPECT_EQ(client_.state, ncclSocketStateClosed);
+    EXPECT_EQ(client_.socketDescriptor, NCCL_INVALID_SOCKET);
+  }
+}
+
+TEST_F(SocketMicrotest, Init_SocketCreationFailureClosesNothing) {
+  rlimit saved;
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &saved), 0);
+  int lowest = dup(0);
+  ::close(lowest);
+  rlimit tight = saved;
+  tight.rlim_cur = lowest;  // the next descriptor would exceed the limit
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &tight), 0);
+  ncclSocketAddress a = V4("127.0.0.1", 1);
+  ncclResult_t ret = ncclSocketInit(&client_, &a);
+  setrlimit(RLIMIT_NOFILE, &saved);
+  EXPECT_EQ(ret, ncclSystemError);
+  EXPECT_EQ(client_.state, ncclSocketStateClosed);
+  EXPECT_TRUE(LinuxLogged("WARN Call to socket failed: Too many open files"));
+}
+
+// Connect, accept and the plaintext hello
+
+TEST_F(SocketMicrotest, ConnectAndAccept_HandshakeThenExchangeData) {
+  Pair();
+  EXPECT_EQ(client_.finalizeCounter, (int)NCCL_SOCKET_PLAIN_HELLO_BYTES);
+  EXPECT_EQ(server_.magic, kMagic);
+  EXPECT_NE(server_.socketDescriptor, listen_.socketDescriptor);
+  EXPECT_EQ(server_.acceptSocketDescriptor, listen_.socketDescriptor);
+  int running = 0;
+  ASSERT_EQ(ncclSocketReady(&client_, &running), ncclSuccess);
+  EXPECT_EQ(running, 1);
+  char out[] = "ping", in[5] = {};
+  ASSERT_EQ(ncclSocketSend(&client_, out, sizeof(out)), ncclSuccess);
+  ASSERT_EQ(ncclSocketRecv(&server_, in, sizeof(in)), ncclSuccess);
+  EXPECT_STREQ(in, "ping");
+}
+
+TEST_F(SocketMicrotest, Connect_RejectsBadSocketsAndStates) {
+  EXPECT_EQ(ncclSocketConnect(nullptr), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketConnect: pass NULL socket"));
+  EXPECT_EQ(ncclSocketConnect(&client_), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketConnect: socket is invalid"));
+  ncclSocketAddress a = V4("127.0.0.1", 1);
+  ASSERT_EQ(ncclSocketInit(&client_, &a), ncclSuccess);
+  client_.state = ncclSocketStateReady;
+  EXPECT_EQ(ncclSocketConnect(&client_), ncclInternalError);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketConnect: wrong socket state 7"));
+  client_.state = ncclSocketStateError;
+  EXPECT_EQ(ncclSocketConnect(&client_), ncclRemoteError);
+}
+
+#ifndef NCCL_TLS_BACKEND_OPENSSL3
+TEST_F(SocketMicrotest, Connect_EncryptionWithoutTlsFailsBeforeConnecting) {
+  Listen();
+  ncclEncryptionConfig_t config = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
+  config.mode = NCCL_ENCRYPTION_MODE_PSK;
+  config.psk = "0123456789abcdef0123456789abcdef";
+  ASSERT_EQ(ncclSetEncryption(&config), ncclSuccess);
+  EXPECT_EQ(Connect(), ncclInvalidUsage);
+  EXPECT_EQ(client_.state, ncclSocketStateInitialized);
+}
+#endif
+
+TEST_F(SocketMicrotest, Connect_RefusedPastTheRetryCountIsARemoteError) {
+  LinuxScopedEnv retries("NCCL_SOCKET_RETRY_CNT", "1");
+  Listen();
+  ncclSocketAddress a = ListenAddr();
+  ncclSocketClose(&listen_);
+  ASSERT_EQ(ncclSocketInit(&client_, &a), ncclSuccess);
+  EXPECT_EQ(ncclSocketConnect(&client_), ncclRemoteError);
+  EXPECT_EQ(client_.state, ncclSocketStateError);
+  EXPECT_EQ(client_.errorRetries, 2);
+}
+
+TEST_F(SocketMicrotest, Connect_AbortReturnsAnInternalError) {
+  Listen();
+  ncclSocketAddress a = ListenAddr();
+  volatile uint32_t abortFlag = 1;
+  ASSERT_EQ(ncclSocketInit(&client_, &a, kMagic, ncclSocketTypeBootstrap, &abortFlag), ncclSuccess);
+  EXPECT_EQ(ncclSocketConnect(&client_), ncclInternalError);
+}
+
+TEST_F(SocketMicrotest, Connect_AsyncReturnsEarlyAndReadyFinishes) {
+  Listen();
+  ASSERT_EQ(Connect(kMagic, ncclSocketTypeBootstrap, /*asyncFlag=*/1), ncclSuccess);
+  EXPECT_TRUE(client_.state == ncclSocketStateConnecting || client_.state == ncclSocketStateConnectPolling ||
+              client_.state == ncclSocketStateConnected || client_.state == ncclSocketStateReady);
+  int running = 0;
+  for (int i = 0; i < 1000 && !running; i++) ASSERT_EQ(ncclSocketReady(&client_, &running), ncclSuccess);
+  EXPECT_EQ(running, 1);
+  ASSERT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);
+  EXPECT_EQ(server_.state, ncclSocketStateReady);
+}
+
+TEST_F(SocketMicrotest, Connect_AsyncStopsInWhicheverConnectStateItReached) {
+  LinuxScopedEnv retries("NCCL_SOCKET_RETRY_CNT", "5");
+  Listen();
+  for (int err : {EINPROGRESS, ECONNREFUSED}) {
+    lx::connect = [err](int, const sockaddr*, socklen_t) {
+      errno = err;
+      return -1;
+    };
+    lx::poll = [](pollfd*, nfds_t, int) { return 0; };  // still connecting
+    ncclSocketClose(&client_);
+    ASSERT_EQ(Connect(kMagic, ncclSocketTypeBootstrap, /*asyncFlag=*/1), ncclSuccess);
+    EXPECT_EQ(client_.state, err == EINPROGRESS ? ncclSocketStateConnectPolling : ncclSocketStateConnecting);
+  }
+}
+
+TEST_F(SocketMicrotest, PollConnect_CompletesAPendingConnect) {
+  EXPECT_EQ(ncclSocketPollConnect(nullptr), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketPollConnect: pass NULL socket"));
+  Listen();
+  ncclSocketAddress a = ListenAddr();
+  ASSERT_EQ(ncclSocketInit(&client_, &a), ncclSuccess);
+  ASSERT_EQ(::connect(client_.socketDescriptor, &a.sa, sizeof(a.sin)), 0);
+  client_.state = ncclSocketStateConnectPolling;
+  ASSERT_EQ(ncclSocketPollConnect(&client_), ncclSuccess);
+  EXPECT_EQ(client_.state, ncclSocketStateConnected);
+  ncclSocket bad = client_;
+  bad.socketDescriptor = 1 << 20;  // poll reports POLLNVAL; getsockopt then fails
+  EXPECT_EQ(ncclSocketPollConnect(&bad), ncclSystemError);
+}
+
+// An async connect whose hello cannot be sent yet stays Connected.
+TEST_F(SocketMicrotest, Ready_HelloThatCannotBeSentYetStaysConnected) {
+  Pair();
+  client_.asyncFlag = 1;
+  fcntl(client_.socketDescriptor, F_SETFL, O_NONBLOCK);
+  std::vector<char> junk(1 << 16);
+  while (::send(client_.socketDescriptor, junk.data(), junk.size(), MSG_DONTWAIT) > 0) {
+  }
+  client_.state = ncclSocketStateConnected;
+  client_.finalizeCounter = 0;
+  int running = 1;
+  ASSERT_EQ(ncclSocketReady(&client_, &running), ncclSuccess);
+  EXPECT_EQ(running, 0);
+  EXPECT_EQ(client_.state, ncclSocketStateConnected);
+}
+
+TEST_F(SocketMicrotest, Ready_NullStoppedOrFailedSockets) {
+  int running = 1;
+  ASSERT_EQ(ncclSocketReady(nullptr, &running), ncclSuccess);
+  EXPECT_EQ(running, 0);
+  for (ncclSocketState state : {ncclSocketStateError, ncclSocketStateClosed}) {
+    client_.state = state;
+    EXPECT_EQ(ncclSocketReady(&client_, &running), ncclRemoteError);
+  }
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketReady: unexpected socket state 10"));
+  client_.state = ncclSocketStateNone;
+}
+
+TEST_F(SocketMicrotest, Accept_RejectsBadArgumentsAndListenerStates) {
+  EXPECT_EQ(ncclSocketAccept(nullptr, &listen_), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketAccept(&server_, nullptr), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketAccept: pass NULL socket"));
+  listen_.state = ncclSocketStateInitialized;
+  EXPECT_EQ(ncclSocketAccept(&server_, &listen_), ncclInternalError);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketAccept: wrong socket state 1"));
+  listen_.state = ncclSocketStateError;
+  EXPECT_EQ(ncclSocketAccept(&server_, &listen_), ncclSystemError);
+  listen_.state = ncclSocketStateNone;
+}
+
+TEST_F(SocketMicrotest, Accept_AbortReturnsAnInternalError) {
+  volatile uint32_t abortFlag = 1;
+  Listen(0, &abortFlag);  // non-blocking: nothing pending, so the loop sees the flag
+  EXPECT_EQ(ncclSocketAccept(&server_, &listen_), ncclInternalError);
+}
+
+TEST_F(SocketMicrotest, Accept_WrongMagicIsDroppedThenTheNextPeerAccepted) {
+  Listen();
+  int bad = RawClient(Hello(kMagic ^ 1, ncclSocketTypeBootstrap));
+  ASSERT_EQ(Connect(), ncclSuccess);
+  ASSERT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);
+  EXPECT_EQ(server_.state, ncclSocketStateReady);
+  EXPECT_TRUE(LinuxLogged("ATTN Socket magic mismatch"));
+  char c;
+  EXPECT_EQ(::recv(bad, &c, 1, 0), 0);  // the bad peer was closed
+}
+
+TEST_F(SocketMicrotest, Accept_WithoutRetryReturnsAfterABadPeer) {
+  Listen();
+  RawClient(Hello(kMagic, ncclSocketTypeProxy));
+  ASSERT_EQ(ncclSocketAccept(&server_, &listen_, /*retry=*/false), ncclSuccess);
+  EXPECT_EQ(server_.state, ncclSocketStateAccepting);
+  EXPECT_EQ(server_.socketDescriptor, NCCL_INVALID_SOCKET);
+  EXPECT_TRUE(LinuxLogged("ATTN Wrong socket type"));
+}
+
+// A blocking accept keeps reading a hello that arrives in pieces.
+TEST_F(SocketMicrotest, Accept_BlockingWaitsForTheWholeHello) {
+  Listen();
+  std::string hello = Hello(kMagic, ncclSocketTypeBootstrap);
+  int raw = RawClient(hello.substr(0, 3));
+  std::thread rest([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    ::send(raw, hello.data() + 3, hello.size() - 3, 0);
+  });
+  ASSERT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);
+  rest.join();
+  EXPECT_EQ(server_.state, ncclSocketStateReady);
+}
+
+TEST_F(SocketMicrotest, Accept_AsyncProgressesThroughReady) {
+  Listen(/*asyncFlag=*/1);
+  ASSERT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);  // nobody yet
+  EXPECT_EQ(server_.state, ncclSocketStateAccepting);
+  std::string hello = Hello(kMagic, ncclSocketTypeBootstrap);
+  int raw = RawClient("");
+  int running = 1;
+  for (int i = 0; i < 1000 && server_.state == ncclSocketStateAccepting; i++)
+    ASSERT_EQ(ncclSocketReady(&server_, &running), ncclSuccess);
+  EXPECT_EQ(server_.state, ncclSocketStateAccepted);  // waiting for the hello
+  EXPECT_EQ(running, 0);
+  ::send(raw, hello.data(), hello.size(), 0);
+  for (int i = 0; i < 1000 && !running; i++) ASSERT_EQ(ncclSocketReady(&server_, &running), ncclSuccess);
+  EXPECT_EQ(running, 1);
+  // Re-entering accept on an accepted socket keeps it.
+  ASSERT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);
+  EXPECT_EQ(server_.state, ncclSocketStateReady);
+}
+
+TEST_F(SocketMicrotest, Ready_BadHandshakeGoesBackToAccepting) {
+  Listen(/*asyncFlag=*/1);
+  ASSERT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);
+  RawClient(Hello(kMagic ^ 1, ncclSocketTypeBootstrap));
+  int running = 1;
+  for (int i = 0; i < 1000 && !LinuxLogged("magic mismatch"); i++)
+    ASSERT_EQ(ncclSocketReady(&server_, &running), ncclSuccess);
+  EXPECT_EQ(server_.state, ncclSocketStateAccepting);
+  EXPECT_EQ(running, 0);
+  // A caller re-entering after a reset goes straight back to accepting the next peer.
+  RawClient(Hello(kMagic, ncclSocketTypeBootstrap));
+  server_.state = ncclSocketStateBadHandshake;
+  ASSERT_EQ(ncclSocketReady(&server_, &running), ncclSuccess);
+  EXPECT_NE(server_.state, ncclSocketStateAccepting);
+  for (int i = 0; i < 1000 && !running; i++) ASSERT_EQ(ncclSocketReady(&server_, &running), ncclSuccess);
+  EXPECT_EQ(running, 1);
+}
+
+TEST_F(SocketMicrotest, Accept_SetFlagsFailurePropagates) {
+  Listen();
+  RawClient(Hello(kMagic, ncclSocketTypeBootstrap));
+  lx::setsockopt = [](int, int, int, const void*, socklen_t) {
+    errno = ENOMEM;
+    return -1;
+  };
+  EXPECT_EQ(ncclSocketAccept(&server_, &listen_), ncclSystemError);
+  EXPECT_TRUE(LinuxLogged("WARN Call to setsockopt TCP NODELAY failed"));
+}
+
+// Data transfer
+
+TEST_F(SocketMicrotest, Transfers_RejectNullSockets) {
+  int offset = 0;
+  char c;
+  bool closed;
+  EXPECT_EQ(ncclSocketProgress(NCCL_SOCKET_SEND, nullptr, &c, 1, &offset), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketWait(NCCL_SOCKET_SEND, nullptr, &c, 1, &offset), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketSend(nullptr, &c, 1), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketRecv(nullptr, &c, 1), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketTryRecv(nullptr, &c, 1, &closed, true), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketSendRecv(nullptr, &c, 1, &server_, &c, 1), ncclInternalError);
+  EXPECT_EQ(ncclSocketSendRecv(&client_, &c, 1, nullptr, &c, 1), ncclInternalError);
+  for (const char* fn : {"ncclSocketProgress", "ncclSocketWait", "ncclSocketSend", "ncclSocketRecv",
+                         "ncclSocketTryRecv"})
+    EXPECT_TRUE(LinuxLogged((std::string("WARN ") + fn + ": pass NULL socket").c_str())) << fn;
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketSendRecv: invalid socket"));
+}
+
+TEST_F(SocketMicrotest, Transfers_NeedAReadySocket) {
+  char c = 0;
+  client_.state = ncclSocketStateTerminating;
+  EXPECT_EQ(ncclSocketSend(&client_, &c, 1), ncclInternalError);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketSend: socket state (8) is not ready"));
+  client_.state = ncclSocketStateConnected;
+  EXPECT_EQ(ncclSocketRecv(&client_, &c, 1), ncclInternalError);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketRecv: socket state (6) is not ready"));
+  server_.state = ncclSocketStateReady;
+  EXPECT_EQ(ncclSocketSendRecv(&server_, &c, 1, &client_, &c, 1), ncclInternalError);
+  EXPECT_EQ(ncclSocketSendRecv(&client_, &c, 1, &server_, &c, 1), ncclInternalError);
+  EXPECT_TRUE(LinuxLogged("WARN ncclSocketSendRecv: socket state (6/7) is not ready"));
+  client_.state = server_.state = ncclSocketStateNone;
+}
+
+// A terminating socket can still drain what the peer sent.
+TEST_F(SocketMicrotest, Recv_WorksWhileTerminating) {
+  Pair();
+  char out[] = "tail", in[5] = {};
+  ASSERT_EQ(ncclSocketSend(&client_, out, sizeof(out)), ncclSuccess);
+  ASSERT_EQ(ncclSocketShutdown(&server_, SHUT_WR), ncclSuccess);
+  ASSERT_EQ(ncclSocketRecv(&server_, in, sizeof(in)), ncclSuccess);
+  EXPECT_STREQ(in, "tail");
+  ASSERT_EQ(ncclSocketSendRecv(&client_, out, sizeof(out), &server_, in, sizeof(in)), ncclSuccess);
+}
+
+TEST_F(SocketMicrotest, Recv_PeerCloseIsARemoteError) {
+  Pair();
+  ncclSocketClose(&client_);
+  char in[4];
+  EXPECT_EQ(ncclSocketRecv(&server_, in, sizeof(in)), ncclRemoteError);
+  EXPECT_TRUE(LinuxLogged("WARN socketProgress: Connection closed by remote peer"));
+}
+
+TEST_F(SocketMicrotest, Wait_PollsUntilTheRestArrives) {
+  LinuxScopedEnv poll("NCCL_SOCKET_POLL_TIMEOUT_MSEC", "1000");
+  Pair();
+  std::thread late([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    ::send(client_.socketDescriptor, "abcd", 4, 0);
+  });
+  server_.asyncFlag = 1;  // single non-blocking attempts, so the wait goes through poll
+  int polls = 0;
+  lx::poll = [&](pollfd* p, nfds_t n, int timeout) {
+    EXPECT_EQ(p->events, POLLIN);
+    EXPECT_EQ(timeout, 1000);
+    polls++;
+    return ::poll(p, n, timeout);
+  };
+  char in[4];
+  int offset = 0;
+  ASSERT_EQ(ncclSocketWait(NCCL_SOCKET_RECV, &server_, in, sizeof(in), &offset), ncclSuccess);
+  late.join();
+  EXPECT_GE(polls, 1);
+  EXPECT_EQ(offset, 4);
+  EXPECT_EQ(std::string(in, 4), "abcd");
+}
+
+TEST_F(SocketMicrotest, SendRecv_ExchangesBothWaysAtOnce) {
+  Pair();
+  std::vector<char> big(1 << 20, 'c'), fromServer(1 << 20);
+  std::thread peer([&] {
+    std::vector<char> in(1 << 20);
+    std::vector<char> out(1 << 20, 's');
+    EXPECT_EQ(ncclSocketSendRecv(&server_, out.data(), out.size(), &server_, in.data(), in.size()), ncclSuccess);
+    EXPECT_EQ(in, big);
+  });
+  ASSERT_EQ(ncclSocketSendRecv(&client_, big.data(), big.size(), &client_, fromServer.data(), fromServer.size()),
+            ncclSuccess);
+  peer.join();
+  EXPECT_EQ(fromServer, std::vector<char>(1 << 20, 's'));
+}
+
+TEST_F(SocketMicrotest, SendRecv_PropagatesErrors) {
+  Pair();
+  ncclSocketClose(&server_);
+  char c = 'x', in;
+  EXPECT_EQ(ncclSocketSendRecv(&client_, &c, 0, &client_, &in, 1), ncclRemoteError);
+  int p[2];
+  ASSERT_EQ(pipe(p), 0);
+  Track(p[0]);
+  Track(p[1]);
+  ncclSocket notSock = client_;
+  notSock.socketDescriptor = p[0];
+  EXPECT_EQ(ncclSocketSendRecv(&notSock, &c, 1, &client_, &in, 0), ncclRemoteError);
+}
+
+TEST_F(SocketMicrotest, MultiOp_ValidatesEveryOp) {
+  char buf[4];
+  ncclSocketOp ops[2] = {{NCCL_SOCKET_SEND, &client_, buf, 4, 0}, {NCCL_SOCKET_RECV, &client_, buf, 4, 0}};
+  EXPECT_EQ(ncclSocketMultiOp(nullptr, 1), ncclInvalidArgument);
+  EXPECT_EQ(ncclSocketMultiOp(ops, 0), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("invalid arguments ops=(nil) numOps=1"));
+  ops[1].sock = nullptr;
+  EXPECT_EQ(ncclSocketMultiOp(ops, 2), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("invalid socket at index 1"));
+  ops[1].sock = &client_;
+  ops[1].op = 7;
+  EXPECT_EQ(ncclSocketMultiOp(ops, 2), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("invalid op 7 at index 1"));
+  ops[1].op = NCCL_SOCKET_RECV;
+  ops[1].size = -1;
+  EXPECT_EQ(ncclSocketMultiOp(ops, 2), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("invalid size -1 at index 1"));
+  ops[1].size = 4;
+  ops[1].ptr = nullptr;
+  EXPECT_EQ(ncclSocketMultiOp(ops, 2), ncclInvalidArgument);
+  EXPECT_TRUE(LinuxLogged("NULL ptr with size 4 at index 1"));
+}
+
+TEST_F(SocketMicrotest, MultiOp_RunsSendsAndReceivesToCompletion) {
+  Pair();
+  std::vector<char> a(1 << 20, 'a'), b(1 << 20, 'b'), gotA(1 << 20), gotB(1 << 20);
+  ncclSocketOp clientOps[3] = {{NCCL_SOCKET_SEND, &client_, a.data(), (int)a.size(), 9},
+                               {NCCL_SOCKET_RECV, &client_, gotB.data(), (int)gotB.size(), 9},
+                               {NCCL_SOCKET_SEND, &client_, nullptr, 0, 9}};
+  ncclSocketOp serverOps[2] = {{NCCL_SOCKET_RECV, &server_, gotA.data(), (int)gotA.size(), 0},
+                               {NCCL_SOCKET_SEND, &server_, b.data(), (int)b.size(), 0}};
+  std::thread peer([&] { EXPECT_EQ(ncclSocketMultiOp(serverOps, 2), ncclSuccess); });
+  ASSERT_EQ(ncclSocketMultiOp(clientOps, 3), ncclSuccess);
+  peer.join();
+  EXPECT_EQ(clientOps[0].offset, (int)a.size());
+  EXPECT_EQ(clientOps[2].offset, 0);
+  EXPECT_EQ(gotA, a);
+  EXPECT_EQ(gotB, b);
+  ncclSocketOp onlyEmpty = {NCCL_SOCKET_RECV, &client_, nullptr, 0, 0};
+  EXPECT_EQ(ncclSocketMultiOp(&onlyEmpty, 1), ncclSuccess);
+  ncclSocketClose(&server_);
+  char c;
+  ncclSocketOp closedPeer = {NCCL_SOCKET_RECV, &client_, &c, 1, 0};
+  EXPECT_EQ(ncclSocketMultiOp(&closedPeer, 1), ncclRemoteError);
+}
+
+TEST_F(SocketMicrotest, TryRecv_NonBlockingReportsInProgress) {
+  Pair();
+  char in[4];
+  bool closed = true;
+  EXPECT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/false), ncclInProgress);
+  EXPECT_FALSE(closed);
+  ::send(client_.socketDescriptor, "ab", 2, 0);
+  std::thread rest([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    ::send(client_.socketDescriptor, "cd", 2, 0);
+  });
+  for (int i = 0; i < 1000; i++) {
+    int avail = 0;
+    ::ioctl(server_.socketDescriptor, FIONREAD, &avail);
+    if (avail) break;
+  }
+  ASSERT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/false), ncclSuccess);
+  rest.join();
+  EXPECT_EQ(std::string(in, 4), "abcd");  // once data started, it finishes the message
+}
+
+TEST_F(SocketMicrotest, TryRecv_BlockingWaitsForTheFirstBytes) {
+  Pair();
+  std::thread late([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    ::send(client_.socketDescriptor, "wxyz", 4, 0);
+  });
+  char in[4];
+  bool closed = true;
+  ASSERT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/true), ncclSuccess);
+  late.join();
+  EXPECT_FALSE(closed);
+  EXPECT_EQ(std::string(in, 4), "wxyz");
+}
+
+TEST_F(SocketMicrotest, TryRecv_ReportsAClosedPeer) {
+  Pair();
+  bool closed = false;
+  char in[4];
+  ::send(client_.socketDescriptor, "ab", 2, 0);
+  ncclSocketClose(&client_);
+  ASSERT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/true), ncclSuccess);
+  EXPECT_TRUE(closed);  // closed mid-message
+  closed = false;
+  ASSERT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/true), ncclSuccess);
+  EXPECT_TRUE(closed);  // closed before any data
+}
+
+TEST_F(SocketMicrotest, TryRecv_PropagatesErrors) {
+  int p[2];
+  ASSERT_EQ(pipe(p), 0);
+  Track(p[0]);
+  Track(p[1]);
+  ncclSocket notSock = client_;
+  notSock.socketDescriptor = p[0];
+  bool closed;
+  char in[4];
+  EXPECT_EQ(ncclSocketTryRecv(&notSock, in, sizeof(in), &closed, true), ncclRemoteError);
+  Pair();
+  volatile uint32_t abortFlag = 0;
+  server_.abortFlag = &abortFlag;
+  ::send(client_.socketDescriptor, "ab", 2, 0);
+  std::thread abort([&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    abortFlag = 1;
+  });
+  EXPECT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, true), ncclInternalError);  // after "ab"
+  abort.join();
+}
+
+#ifndef NCCL_TLS_BACKEND_OPENSSL3
+// With TLS state attached, I/O goes through crypt.cc, which this build has no backend for.
+TEST_F(SocketMicrotest, Progress_TlsStateRoutesThroughCrypt) {
+  Pair();
+  client_.crypto = (ncclSocketCrypto*)malloc(16);
+  char buf[4] = {};
+  int offset = 0;
+  EXPECT_EQ(ncclSocketProgress(NCCL_SOCKET_SEND, &client_, buf, sizeof(buf), &offset), ncclInternalError);
+  EXPECT_TRUE(LinuxLogged("ncclCryptSocketSend called without TLS support"));
+  EXPECT_EQ(ncclSocketProgress(NCCL_SOCKET_RECV, &client_, buf, sizeof(buf), &offset), ncclInternalError);
+  EXPECT_TRUE(LinuxLogged("ncclCryptSocketRecv called without TLS support"));
+  offset = sizeof(buf);  // nothing left to move: no call
+  g_linuxLog.clear();
+  EXPECT_EQ(ncclSocketProgress(NCCL_SOCKET_SEND, &client_, buf, sizeof(buf), &offset), ncclSuccess);
+  EXPECT_TRUE(g_linuxLog.empty());
+}
+#endif
+
+}  // namespace

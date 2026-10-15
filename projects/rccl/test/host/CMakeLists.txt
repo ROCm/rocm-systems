@@ -388,6 +388,16 @@ function(rccl_define_micro_source_lists)
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroLinux -- src/os/linux.cc and src/misc/socket.cc. Own binary: it runs
+  # the real os/linux.cc that the shared fakes stub, plus real crypt.cc and utils.cc.
+  set(TEST_MICRO_LINUX_SOURCE_FILES
+    linux-test.cc
+    socket-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1054,6 +1064,17 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroLinux
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroLinux
+  SOURCES ${TEST_MICRO_LINUX_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    LINUX_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux.cc"
+    SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/socket.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_linux.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
