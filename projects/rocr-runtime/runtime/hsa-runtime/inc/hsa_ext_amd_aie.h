@@ -50,6 +50,11 @@ typedef enum {
    * AIE KMQ packet.
    */
   HSA_AMD_AIE_PACKET_OPCODE_KMQ = 0,
+
+  /**
+   * AIE UMQ packet.
+   */
+  HSA_AMD_AIE_PACKET_OPCODE_UMQ = 1,
 } hsa_amd_aie_packet_opcode_t;
 
 /**
