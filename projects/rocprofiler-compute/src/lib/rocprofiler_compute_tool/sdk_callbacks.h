@@ -85,7 +85,7 @@ struct tool_data_t
     std::vector<counter_info_record_t>         counter_records;
     std::set<uint64_t>                         target_kernel_ids{};
     iteration_multiplexing_mode_t iteration_multiplexing_mode{iteration_multiplexing_mode_t::DISABLED};
-    pc_sampling_feature_t pc_sampling{};
+    pc_sampling_feature_t::ptr pc_sampling{std::make_shared<pc_sampling_feature_t>()};
 };
 
 class SdkCallbacks
