@@ -185,7 +185,7 @@ uint16_t g_nextPort = 1000;
 bool g_sockShutdown = false;
 int g_liveRoots = 0;
 std::chrono::milliseconds g_waitLimit(5000);
-// ncclSocketAccept(retry=false) hands back a rejected peer as Accepting (socket.cc since #9924).
+// Mirrors socket.cc: ncclSocketAccept(retry=false) hands back a rejected peer as Accepting, not BadHandshake.
 ncclSocketState g_rejectedState = ncclSocketStateAccepting;
 int g_readyPolls = 0;  // ncclSocketReady says "not yet" this many times first
 std::atomic<int> g_multiOps{0};  // only the bidirectional socket ring uses ncclSocketMultiOp
@@ -777,6 +777,7 @@ class BootstrapMicrotest : public ::testing::Test {
     auto all = OnRanks([&](int r) { return bootstrapInit(1, &handle_, Comm(r), nullptr); });
     for (ncclResult_t r : all)
       if (r != ncclSuccess) return r;
+    WaitRoots();  // so a fault hook installed next is never reached from the root thread
     return ncclSuccess;
   }
   std::vector<ncclResult_t> CloseRanks() {
@@ -1115,8 +1116,8 @@ TEST_F(BootstrapMicrotest, Accept_BadHandshakePeerIsClosedAndTheNextOneAccepted)
   for (auto* s : {&l, &stray, &good, &sock}) (void)ncclSocketClose(s);
 }
 
-// Bug, fixed by open PR #13368: since #9924 ncclSocketAccept(retry=false) returns a rejected peer as Accepting,
-// not BadHandshake, so bootstrapAccept's retry never fires and it hands back a socket that is not connected.
+// Bug, pinned as observed: bootstrapAccept only retries on BadHandshake, so it hands back the rejected peer's
+// unconnected socket. A fix in bootstrapAccept flips the state and recv expectations below.
 TEST_F(BootstrapMicrotest, Accept_RejectedPeerAsSocketCcReportsIt_IsReturnedUnconnected) {
   struct ncclSocket l, stray, good, sock;
   ASSERT_EQ(ncclSuccess, ncclSocketInit(&l, &bootstrapNetIfAddr, 7, ncclSocketTypeBootstrap, &abort_));
@@ -1207,7 +1208,8 @@ TEST_F(BootstrapMicrotest, CreateRoot_EachSocketStepFailureIsReturnedAndNoThread
   }
 }
 
-// Bug: when ncclSocketGetAddr fails after a successful listen, the fail path frees the socket without closing it.
+// Bug, pinned as observed: when ncclSocketGetAddr fails after a successful listen, the fail path frees the socket
+// without closing it. A fix that closes it makes OpenListeners() 0.
 TEST_F(BootstrapMicrotest, CreateRoot_GetAddrFails_LeaksTheListeningSocket) {
   SetSockFault([](const char* op, struct ncclSocket*) {
     return std::strcmp(op, "getaddr") == 0 ? ncclSystemError : ncclSuccess;
@@ -1263,7 +1265,8 @@ TEST_F(BootstrapMicrotest, Root_RankGoneBeforeItsAnswer_MakesTheRootGiveUp) {
   (void)ncclSocketClose(&listen[1]);
 }
 
-// Same bug as Accept_RejectedPeerAsSocketCcReportsIt_IsReturnedUnconnected: one stray connection kills the root.
+// Bug, pinned as observed (see Accept_RejectedPeerAsSocketCcReportsIt_IsReturnedUnconnected): one stray
+// connection makes the root exit. A fix lets the root skip it, so the final sendToRoot then succeeds.
 TEST_F(BootstrapMicrotest, Root_StrayPeerWithTheWrongMagic_MakesTheRootExit) {
   ASSERT_EQ(ncclSuccess, bootstrapGetUniqueId(&handle_, nullptr));
   struct ncclSocket stray;
@@ -1351,8 +1354,8 @@ TEST_F(BootstrapMicrotest, Init_RasOffOrFailingIsSkippedWithoutFailingInit) {
   EXPECT_TRUE(g_rasAdded.empty());
 }
 
-// Bug: every failure past the proxy listen (here ncclProxyInit itself) frees proxySocket without closing it,
-// and nothing else closes it since the proxy thread never started.
+// Bug, pinned as observed: every failure past the proxy listen (here ncclProxyInit itself) frees proxySocket
+// without closing it, and nothing else closes it since the proxy thread never started. A fix makes this 0.
 TEST_F(BootstrapMicrotest, Init_ProxyInitFails_LeaksTheProxyListenSocket) {
   g_proxyInitResult = ncclSystemError;
   EXPECT_EQ(ncclSystemError, InitRanks(2));
@@ -1629,7 +1632,8 @@ TEST_F(BootstrapMicrotest, Split_RasInitFailureIsOnlyLogged) {
   ExpectAllGather(1);
 }
 
-// Bug: the same proxySocket leak as Init_ProxyInitFails_LeaksTheProxyListenSocket, on the split path.
+// Bug, pinned as observed: the proxySocket leak of Init_ProxyInitFails_LeaksTheProxyListenSocket, on the split
+// path. A fix makes this 0.
 TEST_F(BootstrapMicrotest, Split_ProxyInitFails_LeaksTheProxyListenSocket) {
   ASSERT_EQ(ncclSuccess, InitRanks(2));
   g_proxyInitResult = ncclSystemError;
@@ -1720,9 +1724,10 @@ TEST_F(BootstrapMicrotest, Grow_ExistingAndNewRanksCloseOneRing) {
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 
-// Bug: under NCCL_OOB_NET_ENABLE=1 + NCCL_BOOTSTRAP_BIDIR_NET=1 a grow never finishes. Existing ranks take nextPeer
-// from rank+1 over the parent bootstrap, so its revHandle is the next rank's reverse listener where the previous
-// rank's is expected, and existing ranks that got no handle (nHandles == 0) skip the reverse ring altogether.
+// Bug, pinned as observed: under NCCL_OOB_NET_ENABLE=1 + NCCL_BOOTSTRAP_BIDIR_NET=1 a grow never finishes.
+// Existing ranks take nextPeer from rank+1 over the parent bootstrap, so its revHandle is the next rank's reverse
+// listener where the previous rank's is expected, and existing ranks that got no handle (nHandles == 0) skip the
+// reverse ring altogether. A fix makes the bidir runs succeed like the bidir=0 ones.
 TEST_F(BootstrapMicrotest, Grow_NetBidir_ReverseRingNeverConnectsSoInitHangsUntilAbort) {
   g_params["OOB_NET_ENABLE"] = 1;
   for (int bidir : {0, 1})
@@ -1740,7 +1745,7 @@ TEST_F(BootstrapMicrotest, Grow_NetBidir_ReverseRingNeverConnectsSoInitHangsUnti
       ASSERT_EQ(ncclSuccess, bootstrapGetUniqueId(&grow, parent[0]->comm.get()));
       for (auto* p : parent) p->comm->childCount++;
       MakeRanks(existing + 2);
-      watchdog_ = std::chrono::milliseconds(300);
+      watchdog_ = bidir ? std::chrono::milliseconds(300) : g_waitLimit;
       auto res = OnRanks([&](int r) {
         Comm(r)->isGrow = true;
         if (r >= existing) return bootstrapInit(1, &grow, Comm(r), nullptr);
@@ -1795,8 +1800,9 @@ TEST_F(BootstrapMicrotest, SendRecv_TransferFailuresAreReturned) {
   }
 }
 
-// Bug: the failing close frees the parked connections but leaves the list head dangling and the state alive,
-// so a second bootstrapClose (e.g. an abort after a failed destroy) frees the same list again.
+// Bug, pinned as observed: the failing close frees the parked connections but leaves the list head dangling and
+// the state alive, so a second bootstrapClose (e.g. an abort after a failed destroy) frees the same list again.
+// A fix that clears the head flips the last EXPECT.
 TEST_F(BootstrapMicrotest, Close_WithAParkedConnection_FailsAndLeavesTheFreedListLinked) {
   ASSERT_EQ(ncclSuccess, InitRanks(2));
   auto res = OnRanks([&](int r) -> ncclResult_t {
@@ -1835,12 +1841,27 @@ TEST_F(BootstrapMicrotest, Close_WhileAbortingDropsParkedConnectionsQuietly) {
 
 TEST_F(BootstrapMicrotest, Barrier_EveryRankLeavesAfterAllArrive) {
   ASSERT_EQ(ncclSuccess, InitRanks(5));
-  EXPECT_TRUE(AllOk(OnRanks([&](int r) { return bootstrapBarrier(State(r), r, 5, 0x77); })));
+  // The last rank arrives late; nobody may leave before it does.
+  std::atomic<bool> lateArrived(false);
+  auto late = [&] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(50));
+    lateArrived = true;
+  };
+  EXPECT_TRUE(AllOk(OnRanks([&](int r) {
+    if (r == 4) late();
+    ncclResult_t res = bootstrapBarrier(State(r), r, 5, 0x77);
+    EXPECT_TRUE(lateArrived) << "rank " << r << " left early";
+    return res;
+  })));
   // Intra-node barrier over ranks 1 and 3 only, in local-rank order.
   int local[2] = {1, 3};
+  lateArrived = false;
   EXPECT_TRUE(AllOk(OnRanks([&](int r) {
     if (r != 1 && r != 3) return ncclSuccess;
-    return bootstrapIntraNodeBarrier(State(r), local, r == 1 ? 0 : 1, 2, 0x78);
+    if (r == 3) late();
+    ncclResult_t res = bootstrapIntraNodeBarrier(State(r), local, r == 1 ? 0 : 1, 2, 0x78);
+    EXPECT_TRUE(lateArrived) << "rank " << r << " left early";
+    return res;
   })));
   EXPECT_EQ(ncclSuccess, bootstrapBarrier(State(0), 0, 1, 0x79));
   EXPECT_TRUE(AllOk(CloseRanks()));
@@ -1960,7 +1981,7 @@ class BootstrapAsyncSendMicrotest : public BootstrapMicrotest {
     SetSockFault([this](const char* op, struct ncclSocket*) {
       if (std::strcmp(op, "connect") != 0 || ++connects_ != 1) return ncclSuccess;
       std::unique_lock<std::mutex> lock(gateMu_);
-      gateCv_.wait(lock, [this] { return open_; });
+      EXPECT_TRUE(gateCv_.wait_for(lock, g_waitLimit, [this] { return open_; }));
       return ncclRemoteError;
     });
     ASSERT_EQ(ncclSuccess, bootstrapSend(state_, 1, 4, (void*)"a", 1));
@@ -1971,7 +1992,8 @@ class BootstrapAsyncSendMicrotest : public BootstrapMicrotest {
     }
     gateCv_.notify_all();
     std::unique_lock<std::mutex> lock(state_->asyncSendLock);
-    while (!ncclIntruQueueEmpty(&state_->asyncSendQueue)) state_->asyncSendCond.wait(lock);
+    ASSERT_TRUE(state_->asyncSendCond.wait_for(lock, g_waitLimit,
+                                               [this] { return ncclIntruQueueEmpty(&state_->asyncSendQueue); }));
   }
 };
 
