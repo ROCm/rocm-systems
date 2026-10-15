@@ -61,6 +61,44 @@ exclusion, which prevents partial runs from becoming a develop baseline.
 With `--warn-perf`, `run-corpus-tests.sh` warns about passing tests whose
 runtime approaches the pytest timeout.
 
+## Runtime CTS AQL
+
+The release lane builds only the runtime CTS `aql` suite and runs its eligible
+cases sequentially on gfx1250, gfx950, gfx942, gfx1201, and gfx1100. It uses the
+existing KFD configs for gfx942/gfx950 and the MI455X, R9700, and W7900 configs
+for the remaining targets. Every binary runs through the rocjitsu launcher.
+All targets use the thread allocation defaults from their configs.
+Manifest entries marked slow or explicitly skipped remain excluded; the
+simulator slow cutoff is 60 seconds. Logs, JSON results, and per-target JUnit
+reports are uploaded as `rocjitsu-runtime-cts-aql-release`.
+
+The pinned corpus forces `maxfail=1` for each AQL invocation, including runs
+through a simulator wrapper. The first failing case stops that target's run;
+the outer loop continues to other targets and returns failure if any run failed.
+Later cases on a failing target do not run or receive JUnit entries. Passing
+`--maxfail=0` cannot override the corpus hook.
+
+CI and local runs use `run-runtime-cts.sh`, whose target/config table supplies
+both the CMake architecture list and the run loop. From the pinned corpus
+checkout, with CMake, Ninja, the ROCm SDK, pytest, pytest-xdist, and filelock
+installed:
+
+```bash
+export ROCJITSU_SOURCE_DIR=/path/to/rocm-systems/emulation/rocjitsu
+export ROCJITSU_BUILD_DIR=/path/to/rocjitsu-build
+bash "$ROCJITSU_SOURCE_DIR/tests/corpus/run-runtime-cts.sh" build
+bash "$ROCJITSU_SOURCE_DIR/tests/corpus/run-runtime-cts.sh" run
+```
+
+Set `ROCJITSU_RUNTIME_CTS_CORPUS_DIR` to run from another directory. Arguments
+after `run` are passed to pytest, for example `--case smoke` to select cases.
+Reports are written to `.pytest-artifacts/runtime-cts/junit/aql-<target>.xml`.
+
+The runtime CTS checkout has its own pin. Publish the corpus commit before
+running CI, then keep `ROCJITSU_RUNTIME_CTS_CORPUS_REF` and the
+`runtime_cts_corpus_ref` dispatch default synchronized. Manual dispatches can
+override this ref independently of the HIP/DBT and Vulkan corpus pins.
+
 ## gfx1201 simulator exclusions
 
 `fpsan_global_load_tr_gfx12_w64_test` is excluded because its wave64
