@@ -4135,6 +4135,10 @@ class NetProgressMicrotestBase : public NetMicrotestBase {
   }
 
   char* Local(int p = NCCL_PROTO_SIMPLE) { return NCCL_NET_MAP_GET_POINTER(&res_.map, cpu, buffs[p]); }
+  // The dedicated buffer slot that holds step `step` of `sub`.
+  char* Slot(const ncclProxySubArgs& sub, int p = NCCL_PROTO_SIMPLE, uint64_t step = 0) {
+    return Local(p) + ((sub.base + step) % NCCL_STEPS) * kStepBytes;
+  }
   volatile ncclConnFifo& Fifo(int slot) { return res_.recvMem->connFifo[slot % NCCL_STEPS]; }
 };
 
@@ -4213,10 +4217,11 @@ TEST_F(NetSendProgressMicrotest, SharedSeveralSubs_InterleavePoolSlots) {
   AddSub(3);
   ncclProxySubArgs& second = AddSub(3);  // base 3: its FIFO slots don't overlap the first sub's
 
-  ASSERT_EQ(Progress(), ncclSuccess);
-  ASSERT_EQ(Progress(), ncclSuccess);
+  for (int i = 0; i < 3; i++) ASSERT_EQ(Progress(), ncclSuccess);
 
+  // Pool slot = posted * nsubs + sub index.
   EXPECT_EQ(Fifo(second.base + 1).offset, (int64_t)kStepBytes * (NCCL_SHARED_STEPS + 1 * 2 + 1));
+  EXPECT_EQ(Fifo(second.base + 2).offset, (int64_t)kStepBytes * (NCCL_SHARED_STEPS + 2 * 2 + 1));
 }
 
 TEST_F(NetSendProgressMicrotest, SharedGdrCopy_PostsCreditsToGdcWord) {
@@ -4260,7 +4265,7 @@ TEST_F(NetSendProgressMicrotest, Simple_WaitsForGpuThenSendsStepFromDedicatedSlo
   ASSERT_EQ(Progress(), ncclSuccess);
 
   ASSERT_EQ(net_.isends.size(), 1u);
-  EXPECT_EQ(net_.isends[0].data, Local() + (sub.base % NCCL_STEPS) * kStepBytes);
+  EXPECT_EQ(net_.isends[0].data, Slot(sub));
   EXPECT_EQ(net_.isends[0].size, 512u);
   EXPECT_EQ(net_.isends[0].tag, 7);
   EXPECT_EQ(net_.isends[0].mhandle, mhandles_[NCCL_PROTO_SIMPLE]);
@@ -4291,15 +4296,19 @@ TEST_F(NetSendProgressMicrotest, Ll_SendsWithCompletionHintOnceEveryLineIsFlagge
   ncclProxySubArgs& sub = AddSub(1);
   ASSERT_EQ(Progress(), ncclSuccess);
   Fifo(sub.base).size = 2 * sizeof(ncclLLFifoLine);  // no tail needed for LL
-  auto* lines = reinterpret_cast<ncclLLFifoLine*>(Local(NCCL_PROTO_LL) + (sub.base % NCCL_STEPS) * kStepBytes);
+  auto* lines = reinterpret_cast<ncclLLFifoLine*>(Slot(sub, NCCL_PROTO_LL));
   uint32_t flag = NCCL_LL_FLAG(sub.base + 1);
   lines[0].flag1 = lines[0].flag2 = flag;
   lines[1].flag1 = flag;
-
   ASSERT_EQ(Progress(), ncclSuccess);
   EXPECT_TRUE(net_.isends.empty());
 
+  lines[1].flag1 = 0;
   lines[1].flag2 = flag;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_TRUE(net_.isends.empty());
+
+  lines[1].flag1 = flag;
   ASSERT_EQ(Progress(), ncclSuccess);
   ASSERT_EQ(net_.isends.size(), 1u);
   EXPECT_EQ(net_.isends[0].requestIn, reinterpret_cast<void*>(NCCL_NET_OPTIONAL_RECV_COMPLETION));
@@ -4311,7 +4320,7 @@ TEST_F(NetSendProgressMicrotest, Ll_CompletionHintDisabled_NotOffered) {
   ncclProxySubArgs& sub = AddSub(1);
   ASSERT_EQ(Progress(), ncclSuccess);
   Fifo(sub.base).size = sizeof(ncclLLFifoLine);
-  auto* line = reinterpret_cast<ncclLLFifoLine*>(Local(NCCL_PROTO_LL) + (sub.base % NCCL_STEPS) * kStepBytes);
+  auto* line = reinterpret_cast<ncclLLFifoLine*>(Slot(sub, NCCL_PROTO_LL));
   line->flag1 = line->flag2 = NCCL_LL_FLAG(sub.base + 1);
 
   ASSERT_EQ(Progress(), ncclSuccess);
@@ -4326,7 +4335,7 @@ TEST_F(NetSendProgressMicrotest, Ll128InHostMemory_WaitsForLineFlags) {
   ASSERT_EQ(Progress(), ncclSuccess);
   int lineBytes = sizeof(uint64_t) * NCCL_LL128_LINEELEMS;
   GpuWrote(sub, 0, 2 * lineBytes);
-  auto* words = reinterpret_cast<uint64_t*>(Local(NCCL_PROTO_LL128) + (sub.base % NCCL_STEPS) * kStepBytes);
+  auto* words = reinterpret_cast<uint64_t*>(Slot(sub, NCCL_PROTO_LL128));
   words[NCCL_LL128_DATAELEMS] = sub.base + 1;
   words[NCCL_LL128_LINEELEMS + NCCL_LL128_DATAELEMS] = sub.base;  // previous step's flag
 
@@ -4357,7 +4366,7 @@ TEST_F(NetSendProgressMicrotest, SharedLl_SendsFromDedicatedLlSlot) {
   ncclProxySubArgs& sub = AddSub(1);
   ASSERT_EQ(Progress(), ncclSuccess);  // posts a pool offset into the FIFO
   Fifo(sub.base).size = sizeof(ncclLLFifoLine);
-  auto* line = reinterpret_cast<ncclLLFifoLine*>(Local(NCCL_PROTO_LL) + (sub.base % NCCL_STEPS) * kStepBytes);
+  auto* line = reinterpret_cast<ncclLLFifoLine*>(Slot(sub, NCCL_PROTO_LL));
   line->flag1 = line->flag2 = NCCL_LL_FLAG(sub.base + 1);
 
   ASSERT_EQ(Progress(), ncclSuccess);
@@ -4380,17 +4389,20 @@ TEST_F(NetSendProgressMicrotest, SharedSimple_SendsFromPoolOffset) {
 
 TEST_F(NetSendProgressMicrotest, SharedRegistered_SendsStraightFromUserBuffer) {
   MakeShared();
-  std::vector<uint8_t> user(64);
-  ncclProxySubArgs& sub = AddSub(1);
+  uint8_t* user = reinterpret_cast<uint8_t*>(0x10000000);  // never dereferenced
+  ncclProxySubArgs& sub = AddSub(2);
   sub.reg = 1;
-  sub.sendbuff = user.data();
+  sub.sendbuff = user;
+  ASSERT_EQ(Progress(), ncclSuccess);
   ASSERT_EQ(Progress(), ncclSuccess);
   GpuWrote(sub, 0, 64);
-
+  ASSERT_EQ(Progress(), ncclSuccess);
+  GpuWrote(sub, 1, 64);
   ASSERT_EQ(Progress(), ncclSuccess);
 
-  ASSERT_EQ(net_.isends.size(), 1u);
-  EXPECT_EQ(net_.isends[0].data, user.data());
+  ASSERT_EQ(net_.isends.size(), 2u);
+  EXPECT_EQ(net_.isends[0].data, user);
+  EXPECT_EQ(net_.isends[1].data, user + NCCL_MAX_NET_SIZE);
 }
 
 TEST_F(NetSendProgressMicrotest, RingRegistered_SendsRingSliceAndChecksSize) {
@@ -4420,9 +4432,8 @@ TEST_F(NetSendProgressMicrotest, RingRegistered_SendsRingSliceAndChecksSize) {
 TEST_F(NetSendProgressMicrotest, HdpRegister_FlushedOncePerNewTail) {
   uint32_t hdp = 0;
   res_.curr_hdp_reg = &hdp;
-  ncclProxySubArgs& sub = AddSub(2);
-  ASSERT_EQ(Progress(), ncclSuccess);
-  ASSERT_EQ(Progress(), ncclSuccess);
+  ncclProxySubArgs& sub = AddSub(3);
+  for (int i = 0; i < 3; i++) ASSERT_EQ(Progress(), ncclSuccess);
   Fifo(sub.base).size = Fifo(sub.base + 1).size = 64;
   res_.recvMem->tail = sub.base + 2;
 
@@ -4433,6 +4444,11 @@ TEST_F(NetSendProgressMicrotest, HdpRegister_FlushedOncePerNewTail) {
   ASSERT_EQ(Progress(), ncclSuccess);  // second step, same tail
   EXPECT_EQ(net_.isends.size(), 2u);
   EXPECT_EQ(hdp, 0u);
+
+  GpuWrote(sub, 2, 64);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(net_.isends.size(), 3u);
+  EXPECT_EQ(hdp, 1u);
 }
 
 TEST_F(NetSendProgressMicrotest, Send_PinsTransferHints) {
