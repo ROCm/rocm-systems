@@ -624,6 +624,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx950 = {
     0,                    // [7] Recv            -- not used
     0,                    // [8] AlltoAll        -- not used
   },
+  .forceCeScratch = true,
 };
 
 // gfx942: DDA-IPC cap is 8 MiB for AR/AG/RS and 4 MiB for AlltoAll. No fabric LL/LL128.
