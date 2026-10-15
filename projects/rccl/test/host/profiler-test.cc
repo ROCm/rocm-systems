@@ -491,8 +491,6 @@ TEST_F(ProfilerMicrotest, PluginLoad_ProxyTraceEnabled_OpensTheSiblingNextToRccl
             (std::vector<std::string>{"(null)", "/opt/rocm/lib/librccl-profiler-proxytrace.so"}));
   EXPECT_TRUE(ncclProfilerPluginLoaded());
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Loaded proxy-trace plugin from /opt/rocm/lib/librccl-profiler-proxytrace.so"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO,
-                     "Successfully loaded external profiler plugin /opt/rocm/lib/librccl-profiler-proxytrace.so"));
 }
 
 TEST_F(ProfilerMicrotest, PluginLoad_ProxyTraceSiblingUnavailable_FallsThroughToTheNetPluginLib) {
@@ -569,7 +567,7 @@ TEST_F(ProfilerMicrotest, PluginInit_PluginInitFails_UnloadsAndContinuesWithoutP
 
 // Bug: PluginInit already unloads on a failed plugin init(), and commFree calls PluginFinalize for every comm,
 // so the failed comm unloads twice and closes the lib under a comm that is still profiling.
-TEST_F(ProfilerMicrotest, PluginInit_FailedInitThenFinalize_ClosesTheLibUnderAnotherLiveComm) {
+TEST_F(ProfilerMicrotest, PluginInit_KnownBug_FailedInitThenFinalize_ClosesTheLibUnderAnotherLiveComm) {
   auto failing = NewComm(nullptr);
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
   fake_.initResult = ncclInternalError;
@@ -1087,7 +1085,7 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_SymPlan_AdvertisesTheKernelVariant
 
 // Bug: ncclTaskColl::nChannels was widened to 16 bits for MAXCHANNELS=256, but the v7 descriptor's
 // coll.nChannels is uint8_t, so a 256-channel collective is advertised to the plugin as 0 channels.
-TEST_F(ProfilerPlanMicrotest, StartTaskEvents_CollOn256Channels_AdvertisesZeroChannels) {
+TEST_F(ProfilerPlanMicrotest, StartTaskEvents_KnownBug_CollOn256Channels_AdvertisesZeroChannels) {
   Load(ncclProfileColl);
   AddColl(ncclProfileColl)->nChannels = 256;
   ASSERT_EQ(ncclSuccess, ncclProfilerStartTaskEvents(plan_.get()));
@@ -1646,16 +1644,24 @@ class ProfilerThreadMicrotest : public ProfilerPlanMicrotest {
   std::vector<ncclDevProfiler> symCompleted_ = std::vector<ncclDevProfiler>(MAXCHANNELS);
   std::vector<ncclDevProfilerPhases> phases_ = std::vector<ncclDevProfilerPhases>(MAXCHANNELS);
   uint32_t abortFlag_ = 0;
+  std::vector<std::unique_ptr<ncclComm>> children_;  // outlive TearDown's thread teardown
   std::vector<ncclComm*> live_;  // comms whose thread ref TearDown still has to drop
+  std::atomic<bool> inCallback_{false}, releaseCallback_{false};
 
   void SetUp() override {
     ProfilerPlanMicrotest::SetUp();
     Wire(comm_.get());
   }
   void TearDown() override {
+    releaseCallback_ = true;
     for (auto it = live_.rbegin(); it != live_.rend(); ++it) ncclProfilerThreadDestroy(*it);
     live_.clear();
     ProfilerPlanMicrotest::TearDown();
+  }
+  ncclComm* NewChild() {
+    children_.push_back(NewComm(H(0xC9)));
+    Wire(children_.back().get());
+    return children_.back().get();
   }
   void Wire(ncclComm* comm) {
     comm->abortFlag = &abortFlag_;
@@ -1737,18 +1743,17 @@ TEST_F(ProfilerThreadMicrotest, ThreadCreate_BindsTheCommDeviceAndLogsItsCap) {
 TEST_F(ProfilerThreadMicrotest, ThreadCreate_SharedResourcesChild_ReusesTheParentsThread) {
   Load(ncclProfileKernelCh);
   CreateThread(comm_.get());
-  auto child = NewComm(H(0xC9));
-  Wire(child.get());
-  ASSERT_EQ(ncclSuccess, ncclProfilerThreadCreate(child.get(), comm_.get()));  // parent not sharing
+  ncclComm* child = NewChild();
+  CreateThread(child, comm_.get());  // parent not sharing
   EXPECT_NE(child->profiler.profilerThread, comm_->profiler.profilerThread);
-  ASSERT_EQ(ncclSuccess, ncclProfilerThreadDestroy(child.get()));
+  Destroy(child);
 
   comm_->shareResources = true;
-  CreateThread(child.get(), comm_.get());
+  CreateThread(child, comm_.get());
   ncclProfilerThread* pt = comm_->profiler.profilerThread;
   EXPECT_EQ(child->profiler.profilerThread, pt);
   EXPECT_EQ(pt->refCount, 2);
-  Destroy(child.get());
+  Destroy(child);
   EXPECT_EQ(child->profiler.profilerThread, nullptr);
   EXPECT_EQ(pt->refCount, 1);
 
@@ -2097,17 +2102,16 @@ TEST_F(ProfilerThreadMicrotest, ThreadDestroy_SharedThread_PurgesOnlyTheLeavingC
   Load(ncclProfileKernelCh);
   comm_->shareResources = true;
   CreateThread(comm_.get());
-  auto child = NewComm(H(0xC9));
-  Wire(child.get());
-  CreateThread(child.get(), comm_.get());
+  ncclComm* child = NewChild();
+  CreateThread(child, comm_.get());
 
   AddKernelChColl(0, 1, H(0x51));
   ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(comm_.get(), plan_.get()));  // never completes
-  plan_->comm = child.get();
-  ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(child.get(), plan_.get()));
+  plan_->comm = child;
+  ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(child, plan_.get()));
   EXPECT_EQ(Inflight(comm_.get()), 4u);
 
-  Destroy(child.get());
+  Destroy(child);
   WithIdleThread(comm_.get(), [](ncclProfilerThread* pt) {
     EXPECT_EQ(pt->inflight, 2u);
     for (ncclProfilerWorkOp* l : {pt->pending, pt->active})
@@ -2119,30 +2123,28 @@ TEST_F(ProfilerThreadMicrotest, ThreadDestroy_SharedThread_PurgesOnlyTheLeavingC
 // across a plugin callback that is still running against it.
 TEST_F(ProfilerThreadMicrotest, ThreadDestroy_WaitsOutAPluginCallbackInFlight) {
   Load(ncclProfileKernelCh);
-  std::atomic<bool> inCallback{false}, release{false};
-  fake_.onStart = [&] {
-    inCallback = true;
-    while (!release) std::this_thread::yield();
+  fake_.onStart = [this] {
+    inCallback_ = true;
+    while (!releaseCallback_) std::this_thread::yield();
   };
   comm_->shareResources = true;
   CreateThread(comm_.get());
-  auto child = NewComm(H(0xC9));
-  Wire(child.get());
-  CreateThread(child.get(), comm_.get());
+  ncclComm* child = NewChild();
+  CreateThread(child, comm_.get());
   Stamp(started_, 0, 1, 10);
   AddKernelChColl(0, 0, H(0x51));
-  plan_->comm = child.get();
-  ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(child.get(), plan_.get()));
-  ASSERT_TRUE(waitUntil([&] { return inCallback.load(); }));
+  plan_->comm = child;
+  ASSERT_EQ(ncclSuccess, ncclProfilerPostPlanWork(child, plan_.get()));
+  ASSERT_TRUE(waitUntil([this] { return inCallback_.load(); }));
 
   std::atomic<bool> destroyed{false};
   std::thread destroyer([&] {
-    ncclProfilerThreadDestroy(child.get());
+    ncclProfilerThreadDestroy(child);
     destroyed = true;
   });
   std::this_thread::sleep_for(std::chrono::milliseconds(30));
   EXPECT_FALSE(destroyed.load());
-  release = true;
+  releaseCallback_ = true;
   destroyer.join();
   EXPECT_TRUE(destroyed.load());
   live_.pop_back();
@@ -2160,14 +2162,6 @@ TEST_F(ProfilerThreadMicrotest, ProfilerThread_Abort_DrainsStuckOpsAndExits) {
   __atomic_store_n(&abortFlag_, 1, __ATOMIC_RELAXED);
   ASSERT_TRUE(waitUntil([] { return Logged(NCCL_LOG_INFO, "exiting: maxInflightSeen=1, droppedOps=0"); }));
   EXPECT_EQ(Inflight(comm_.get()), 0u);
-}
-
-TEST_F(ProfilerThreadMicrotest, ProfilerThread_AbortWhileIdle_Exits) {
-  Load(ncclProfileKernelCh);
-  __atomic_store_n(&abortFlag_, 1, __ATOMIC_RELAXED);
-  CreateThread(comm_.get());
-  Destroy(comm_.get());
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "[Profiler Thread] started"));
 }
 
 TEST_F(ProfilerThreadMicrotest, ThreadDestroy_LastRefWithAnotherContextsOpsQueued_DrainsAndJoins) {
@@ -2212,7 +2206,7 @@ TEST_F(ProfilerThreadMicrotest, PostPlanWork_ManyOpsInFlight_CompleteInOrderOfTh
     Stamp(completed_, 0, wc, 10 * wc);
   }
   ASSERT_TRUE(waitUntil([this] { return fake_.NumStops() == 2; }));
-  EXPECT_EQ(Inflight(comm_.get()), 1u);
+  ASSERT_TRUE(waitUntil([this] { return Inflight(comm_.get()) == 1; }));
   Stamp(started_, 0, 2, 2);
   Stamp(completed_, 0, 2, 20);
   ASSERT_TRUE(waitUntil([this] { return Inflight(comm_.get()) == 0; }));

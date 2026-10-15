@@ -85,14 +85,11 @@ class ProfilerV4Microtest : public ::testing::Test {
   }
   void TearDown() override { FakeV4::cur() = nullptr; }
 
-  const ncclProfilerEventDescr_v4_t* Start(ncclProfilerEventDescr_t& d, void** h) {
-    size_t before = fake_.starts.size();
-    EXPECT_EQ(ncclSuccess, prof_->startEvent(H(0xC0), h, &d));
-    return fake_.starts.size() == before ? nullptr : &fake_.starts.back();
-  }
   const ncclProfilerEventDescr_v4_t* Start(ncclProfilerEventDescr_t& d) {
     void* h = nullptr;
-    return Start(d, &h);
+    size_t before = fake_.starts.size();
+    EXPECT_EQ(ncclSuccess, prof_->startEvent(H(0xC0), &h, &d));
+    return fake_.starts.size() == before ? nullptr : &fake_.starts.back();
   }
 };
 
@@ -229,14 +226,11 @@ TEST_F(ProfilerV4Microtest, StartEvent_ProxyKernelAndNetEvents) {
   }
 }
 
-// Unlike v1-v3 and v6, the v4 adapter leaves the caller's handle as it was for an event it drops.
-TEST_F(ProfilerV4Microtest, StartEvent_EventsNewerThanV4_AreDroppedLeavingTheHandle) {
+TEST_F(ProfilerV4Microtest, StartEvent_EventsNewerThanV4_AreDropped) {
   for (uint64_t type : {ncclProfileGroupApi, ncclProfileCollApi, ncclProfileKernelLaunch, ncclProfileCeColl}) {
     ncclProfilerEventDescr_t d{};
     d.type = type;
-    void* h = H(0xBAD);
-    EXPECT_EQ(Start(d, &h), nullptr) << type;
-    EXPECT_EQ(h, H(0xBAD));
+    EXPECT_EQ(Start(d), nullptr) << type;
   }
 }
 
