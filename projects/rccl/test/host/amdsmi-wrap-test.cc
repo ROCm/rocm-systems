@@ -953,6 +953,10 @@ TEST_F(AmdsmiWrapMicrotest, LinkInfo_ArsmiFailureIsInternalError) {
 TEST_F(AmdsmiWrapMicrotest, LinkInfo_LibQueriesTheSrcAndDstGpus) {
   InitFor(/*lib=*/true);
   TwoGpusBehindACpu();
+  FakeProc trailingCpu;  // after GPU1 too, so a last-match lookup without the type check picks it
+  trailingCpu.gpu = false;
+  trailingCpu.hipId = 1;
+  g_smi.sockets[0].push_back(trailingCpu);
   g_smi.linkType = AMDSMI_LINK_TYPE_PCIE;
   g_smi.linkHops = 3;
   g_smi.minBw = 64;  // only XGMI uses the bandwidth ratio, so a PCIe link's count stays 1
@@ -1262,6 +1266,9 @@ TEST_F(AmdsmiWrapMicrotest, FabricAccessors_ReadTheCacheWithBoundsChecks) {
   EXPECT_TRUE(supported);
   ASSERT_EQ(amd_smi_isFabricSupported(1, &supported), ncclSuccess);
   EXPECT_FALSE(supported);
+  // Past the device count but populated, so only the bounds checks keep index 2 out.
+  amdsmiFabricDevices[2].fabricSupported = true;
+  amdsmiFabricDevices[2].bandwidth = 500000;
   supported = true;
   ASSERT_EQ(amd_smi_isFabricSupported(2, &supported), ncclSuccess);
   EXPECT_FALSE(supported);
