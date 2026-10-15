@@ -71,6 +71,26 @@ TEST_F(TestDispatchWriter, Records_AreWrittenOnePerLineInOrder)
                   "1,2,8,1048576,256,16384,0,1000,2000,2\n");
 }
 
+TEST_F(TestDispatchWriter, KnownAgent_WritesItsNodeIdAsGpuId)
+{
+    agent_record_t agent{};
+    agent.node_id                = 5;
+    m_tool_data.agents[2]        = agent;
+    m_tool_data.dispatch_records = {make_record(0, 7)};
+
+    EXPECT_EQ(format(), std::string{kHeader} + "0,5,7,1048576,256,16384,0,1000,2000,1\n");
+}
+
+TEST_F(TestDispatchWriter, UnknownAgent_WritesItsHandleAsGpuId)
+{
+    agent_record_t agent{};
+    agent.node_id                = 5;
+    m_tool_data.agents[3]        = agent;
+    m_tool_data.dispatch_records = {make_record(0, 7)};
+
+    EXPECT_EQ(format(), std::string{kHeader} + "0,2,7,1048576,256,16384,0,1000,2000,1\n");
+}
+
 TEST_F(TestDispatchWriter, ManyRecords_AreAllWrittenAcrossBatches)
 {
     // More rows than fit in one batch.

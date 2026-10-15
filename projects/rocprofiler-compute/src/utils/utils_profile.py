@@ -27,6 +27,7 @@ from utils.logger import (
     demarcate,
 )
 from utils.utils_common import (
+    NATIVE_AGENTS_PREFIX,
     NATIVE_COUNTERS_PREFIX,
     NATIVE_DISPATCH_PREFIX,
     NATIVE_KERNEL_SYMBOLS_PREFIX,
@@ -167,6 +168,7 @@ def keep_native_artifacts(source_dir: Path, workload_dir: Path, fbase: str) -> N
         (NATIVE_COUNTERS_PREFIX, "_native_counter_collection.csv"),
         (NATIVE_DISPATCH_PREFIX, "_dispatch.csv"),
         (NATIVE_KERNEL_SYMBOLS_PREFIX, "_kernel_symbols.csv"),
+        (NATIVE_AGENTS_PREFIX, "_agents.csv"),
     ):
         pattern = f"*{suffix}{csv_compression.GZIP_SUFFIX}"
         for source in sorted(source_dir.glob(pattern)):
