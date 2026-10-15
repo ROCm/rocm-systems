@@ -269,7 +269,7 @@ HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_Are
 }
 #else
 // @asserts: hipKernelSetCacheConfig - unavailable before CUDA 12.0
-HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported)
+HIP_TEST_CASE(Contract_KernelObjectAttributes_HipKernelSetCacheConfig_NvidiaPre120Unsupported_IsSkipped)
 {
    HIP_SKIP_TEST("hipKernelSetCacheConfig requires CUDA 12.0 or later")
 }

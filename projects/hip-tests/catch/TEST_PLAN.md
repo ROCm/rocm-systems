@@ -713,8 +713,8 @@ Each row is one `HIP_TEST_CASE`. The API and invariant come from the `// @assert
 | `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NonCurrentDevice_PreservesCurrentAndReadsBack` | hipKernelSetAttributeForDevice | preserves current device and target value |
 | `Contract_KernelObjectAttributes_HipKernelSetAttributeForDevice_NvidiaPre128Unsupported_IsSkipped` | hipKernelSetAttributeForDevice | unavailable before CUDA 12.8 |
 | `Contract_KernelObjectAttributes_HipKernelSetAttribute_SetMaxDynamicSharedMemory_IsAcceptedOrUnsupported` | hipKernelSetAttribute | setting max dynamic shared memory to zero is either accepted or reported as unsupported, never another error |
+| `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_NvidiaPre120Unsupported_IsSkipped` | hipKernelSetCacheConfig | unavailable before CUDA 12.0 |
 | `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported` | hipKernelSetCacheConfig | all hipFuncCache_t values are supported and kernel |
-| `Contract_KernelObjectAttributes_HipKernelSetCacheConfig_Values_AreSupported` | hipKernelSetCacheConfig | unavailable before CUDA 12.0 |
 
 ### `library` (21 cases)
 
