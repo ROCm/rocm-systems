@@ -46,8 +46,9 @@ namespace {
 std::vector<std::string> g_logs;
 
 bool Logged(const char* needle) {
-  for (const auto& m : g_logs)
+  for (const auto& m : g_logs) {
     if (m.find(needle) != std::string::npos) return true;
+  }
   return false;
 }
 
@@ -103,7 +104,6 @@ namespace {
 struct AllocCall {
   std::string kind;
   size_t bytes;
-  int hostFlags;
   bool forceHost;
 };
 
@@ -114,8 +114,8 @@ struct FakeMem {
   int memcpyCalls = 0;
   ncclResult_t memcpyResult = ncclSuccess;
 
-  bool Record(const std::string& kind, size_t bytes, int hostFlags = 0, bool forceHost = false) {
-    calls.push_back({kind, bytes, hostFlags, forceHost});
+  bool Record(const std::string& kind, size_t bytes, bool forceHost = false) {
+    calls.push_back({kind, bytes, forceHost});
     return static_cast<int>(calls.size()) - 1 != failAt;
   }
   void* Alloc(const std::string& kind, size_t bytes) {
@@ -138,9 +138,9 @@ FakeMem g_mem;
 }  // namespace
 
 template <typename T>
-ncclResult_t FakeAllocMemCPUAccessible(T** ptr, T** devPtr, size_t nelem, int hostFlags, void** gdrHandle,
+ncclResult_t FakeAllocMemCPUAccessible(T** ptr, T** devPtr, size_t nelem, int, void** gdrHandle,
                                        struct ncclMemManager*, bool forceHost = false) {
-  if (!g_mem.Record("cpuAccessible", nelem * sizeof(T), hostFlags, forceHost)) return ncclUnhandledCudaError;
+  if (!g_mem.Record("cpuAccessible", nelem * sizeof(T), forceHost)) return ncclUnhandledCudaError;
   *ptr = static_cast<T*>(g_mem.Alloc("cpuAccessible", nelem * sizeof(T)));
   if (ncclGdrCopy && !forceHost) {
     // GDR: the GPU sees a separate mapping, tracked through the handle.
@@ -679,7 +679,8 @@ TEST_F(GinHostProxyRegMrMicrotest, Cuda_RejectedDmaBufAndFailedReexportFallsBack
   EXPECT_EQ(-1, rma_.regs[0].fd);
 }
 
-// Observed: when the retry is rejected too, the error returns before the second export's fd is closed.
+// LATENT BUG (gin_host_proxy.cc:470): when the retry is rejected too, NCCLCHECK returns before the second
+// export's fd is closed.
 TEST_F(GinHostProxyRegMrMicrotest, Cuda_BothDmaBufRegistrationsRejected_LeaksTheSecondFd) {
   rma_.regMrSymDmaBufResults = {ncclSystemError, ncclRemoteError};
   EXPECT_EQ(ncclRemoteError, Reg(NCCL_PTR_CUDA));
@@ -743,6 +744,10 @@ class GinHostProxyContextMicrotest : public GinHostProxyMicrotest {
   ncclResult_t Create(ncclGinConfig_t config) {
     return ncclGinProxy.createContext(collComm_, &config, &ginCtx_, &devHandle_);
   }
+  void Destroy() {
+    ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
+    ginCtx_ = nullptr;
+  }
   ginProxyCtx* Ctx() { return static_cast<ginProxyCtx*>(ginCtx_); }
   ncclGinProxyGpuCtx_t* GpuCtx() { return static_cast<ncclGinProxyGpuCtx_t*>(devHandle_->handle); }
   size_t QueueSizeFor(int64_t param) {
@@ -800,12 +805,11 @@ TEST_F(GinHostProxyContextMicrotest, Create_PublishesOneGpuContextPerContext) {
   EXPECT_EQ(32, Ctx()->pollBatch);
 }
 
-TEST_F(GinHostProxyContextMicrotest, Create_AllocatesQueuesOnTheHostAndIndicesWriteCombined) {
+TEST_F(GinHostProxyContextMicrotest, Create_ForcesOnlyTheQueuesIntoHostMemory) {
   ASSERT_EQ(ncclSuccess, Create(Config(3, /*nContexts=*/1)));
   ASSERT_EQ(9u, g_mem.calls.size());
   EXPECT_EQ("cpuAccessible", g_mem.calls[0].kind);  // counters
   EXPECT_EQ(4 * sizeof(uint64_t), g_mem.calls[0].bytes);
-  EXPECT_EQ(hipHostMallocWriteCombined, g_mem.calls[0].hostFlags);
   EXPECT_FALSE(g_mem.calls[0].forceHost);
   EXPECT_EQ("cuMem", g_mem.calls[1].kind);  // signals
   EXPECT_EQ(3 * sizeof(uint64_t), g_mem.calls[1].bytes);
@@ -814,10 +818,8 @@ TEST_F(GinHostProxyContextMicrotest, Create_AllocatesQueuesOnTheHostAndIndicesWr
   // pis, lastIssuedGet, lastVisibleGet: one uint32 per rank each.
   for (int i = 3; i < 6; i++) EXPECT_EQ(2 * sizeof(uint32_t), g_mem.calls[i].bytes) << i;
   EXPECT_EQ(32 * 2 * sizeof(ncclGinProxyGfd_t), g_mem.calls[6].bytes);  // queues
-  EXPECT_EQ(0, g_mem.calls[6].hostFlags);
   EXPECT_TRUE(g_mem.calls[6].forceHost);
   EXPECT_EQ(2 * sizeof(uint32_t), g_mem.calls[7].bytes);  // cis
-  EXPECT_EQ(hipHostMallocWriteCombined, g_mem.calls[7].hostFlags);
   EXPECT_FALSE(g_mem.calls[7].forceHost);
   EXPECT_EQ("cudaCalloc", g_mem.calls[8].kind);  // the GPU-context array
   EXPECT_EQ(NCCL_GIN_PROXY_GPU_CONTEXT_MAX_SIZE, g_mem.calls[8].bytes);
@@ -845,8 +847,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_ZeroesAndRegistersSignalsStronglyOrd
 TEST_F(GinHostProxyContextMicrotest, Create_ZeroesTheSignalBuffer) {
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   for (int i = 0; i < 2 * 3; i++) EXPECT_EQ(0u, Ctx()->signalsDev[i]) << i;
-  ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
-  ginCtx_ = nullptr;
+  Destroy();
 
   g_memsetResult = hipErrorInvalidValue;
   EXPECT_EQ(ncclUnhandledCudaError, Create(Config(3)));
@@ -855,7 +856,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_ZeroesTheSignalBuffer) {
 TEST_F(GinHostProxyContextMicrotest, Create_SignalMrFlagsFollowTheBackendVersion) {
   ASSERT_EQ(ncclSuccess, Create(Config(2)));
   EXPECT_EQ((uint64_t)(NCCL_NET_MR_FLAG_FORCE_SO | NCCL_NET_MR_FLAG_SIGNAL_NEVER_RESET), rma_.regs[0].mrFlags);
-  ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
+  Destroy();
   rma_.regs.clear();
   ASSERT_EQ(ncclSuccess, Create(Config(1)));
   EXPECT_EQ((uint64_t)NCCL_NET_MR_FLAG_FORCE_SO, rma_.regs[0].mrFlags);  // v1 always reset signals
@@ -867,7 +868,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_OlderBackendVersionsUseTheirOwnGpuCo
   EXPECT_EQ(2, v1[1].nranks);
   EXPECT_EQ(Ctx()->hostGpuCtx[1].queues, v1[1].queues);
   EXPECT_EQ(Ctx()->signalsDev + 3, v1[1].signals);
-  ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
+  Destroy();
 
   ASSERT_EQ(ncclSuccess, Create(Config(2)));
   auto* v2 = static_cast<ncclGinProxyGpuCtx_v2_t*>(devHandle_->handle);
@@ -876,8 +877,8 @@ TEST_F(GinHostProxyContextMicrotest, Create_OlderBackendVersionsUseTheirOwnGpuCo
   EXPECT_EQ(Ctx()->hostGpuCtx[1].lastVisibleGet, v2[1].lastVisibleGet);
 }
 
-// Observed: 0 passes the version check up front, so the failure comes from the GPU-context writer after
-// the RMA context and every buffer exist, and none of them is released.
+// LATENT BUG (gin_host_proxy.cc:499, :604): 0 passes the version check up front, so the failure comes from
+// the GPU-context writer after the RMA context and every buffer exist, and none of them is released.
 TEST_F(GinHostProxyContextMicrotest, Create_BackendVersionZero_FailsLateAndLeaksEverything) {
   EXPECT_EQ(ncclInternalError, Create(Config(0)));
   EXPECT_EQ(nullptr, ginCtx_);
@@ -901,15 +902,20 @@ TEST_F(GinHostProxyContextMicrotest, Create_WithoutSignalsOrCountersAllocatesNei
   EXPECT_EQ(NCCL_PTR_HOST, rma_.regs[0].type);
 }
 
-TEST_F(GinHostProxyContextMicrotest, Create_LogsWhenGdrCopyIsUnavailable) {
+// Where counters live is allocMemCPUAccessible's call; the proxy logs the choice and must hand the GPU
+// the device-side pointer either way.
+TEST_F(GinHostProxyContextMicrotest, Create_GdrCopyChoosesTheCountersMappingTheGpuSees) {
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   EXPECT_TRUE(Logged("will not be using GDRCopy"));
-  ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
+  EXPECT_EQ(nullptr, Ctx()->countersGdrHandle);
+  EXPECT_EQ(Ctx()->counters, GpuCtx()[0].counters);
+  Destroy();
   g_logs.clear();
   ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   EXPECT_FALSE(Logged("GDRCopy"));
   EXPECT_NE(nullptr, Ctx()->countersGdrHandle);
+  EXPECT_NE(Ctx()->counters, GpuCtx()[0].counters);
   EXPECT_EQ(Ctx()->countersDev, GpuCtx()[0].counters);
 }
 
@@ -933,8 +939,8 @@ TEST_F(GinHostProxyContextMicrotest, Create_QueueLimitScalesWithMaxRecvs) {
   EXPECT_EQ(64u, QueueSizeFor(64));
 }
 
-// Observed: the fallback size is never checked itself, so a plugin with a non-power-of-two maxRecvs gets
-// a queue the index mask (queueSize - 1) cannot wrap.
+// LATENT BUG (gin_host_proxy.cc:528-546): the fallback size is never checked itself, so a plugin with a
+// non-power-of-two maxRecvs gets a queue the index mask (queueSize - 1) cannot wrap.
 TEST_F(GinHostProxyContextMicrotest, Create_NonPowerOfTwoMaxRecvs_KeepsANonPowerOfTwoQueue) {
   CollComm()->props.maxRecvs = 3;
   EXPECT_EQ(96u, QueueSizeFor(-1));
@@ -946,7 +952,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_PollBatchIsAtLeastOne) {
     pollBatchParam_ = param;
     ASSERT_EQ(ncclSuccess, Create(Config(3)));
     EXPECT_EQ(1, Ctx()->pollBatch) << param;
-    ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
+    Destroy();
   }
   pollBatchParam_ = 5;
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
@@ -970,7 +976,7 @@ TEST_F(GinHostProxyContextMicrotest, Create_PropagatesPluginAndAllocationFailure
   g_mem.Reset();
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   const int nAllocs = static_cast<int>(g_mem.calls.size());
-  ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
+  Destroy();
   // CreateContext has no cleanup on its error paths, so each attempt starts from a clean fake heap.
   for (int failAt = 0; failAt < nAllocs; failAt++) {
     g_mem.Reset();
@@ -978,7 +984,6 @@ TEST_F(GinHostProxyContextMicrotest, Create_PropagatesPluginAndAllocationFailure
     EXPECT_EQ(ncclUnhandledCudaError, Create(Config(3))) << failAt;
     EXPECT_EQ((size_t)failAt + 1, g_mem.calls.size()) << "stopped at the failing allocation";
   }
-  ginCtx_ = nullptr;
 }
 
 TEST_F(GinHostProxyContextMicrotest, Destroy_NullIsANoOp) {
@@ -986,15 +991,15 @@ TEST_F(GinHostProxyContextMicrotest, Destroy_NullIsANoOp) {
   EXPECT_TRUE(rma_.destroyedContexts.empty());
 }
 
-// Observed: everything CreateContext allocated is released except the signal-offsets buffer.
+// LATENT BUG (gin_host_proxy.cc:575, :634-682): destroy releases everything CreateContext allocated except
+// the signal-offsets buffer.
 TEST_F(GinHostProxyContextMicrotest, Destroy_ReleasesAllButTheSignalOffsets) {
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   void* signalOffsets = Ctx()->signalOffsetsDev;
   void* signalsMh = Ctx()->signalsMhandle;
   void* inlinesMh0 = Ctx()->hostGpuCtx[0].inlinesMhandle;
   void* inlinesMh1 = Ctx()->hostGpuCtx[1].inlinesMhandle;
-  ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
-  ginCtx_ = nullptr;
+  Destroy();
 
   EXPECT_EQ(std::vector<void*>{kPluginRmaCtx}, rma_.destroyedContexts);
   std::vector<std::pair<void*, void*>> deregs = {
@@ -1009,8 +1014,7 @@ TEST_F(GinHostProxyContextMicrotest, Destroy_FreesGdrCountersThroughTheirHandle)
   ASSERT_EQ(ncclSuccess, Create(Config(3, 1, 0, /*nCounters=*/2)));
   void* gdrDev = Ctx()->countersGdrHandle;
   ASSERT_EQ(1u, g_mem.live.count(gdrDev));
-  ASSERT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
-  ginCtx_ = nullptr;
+  Destroy();
   EXPECT_TRUE(g_mem.live.empty());
 }
 
@@ -1026,7 +1030,7 @@ TEST_F(GinHostProxyContextMicrotest, Destroy_IgnoresDeregistrationFailures) {
   ASSERT_EQ(ncclSuccess, Create(Config(3)));
   rma_.deregMrSymResult = ncclSystemError;
   EXPECT_EQ(ncclSuccess, ncclGinProxy.destroyContext(ginCtx_));
-  ginCtx_ = nullptr;
+  ginCtx_ = nullptr;  // deregistration failures are ignored, so the context is gone
   EXPECT_EQ(3u, rma_.deregs.size());
 }
 
@@ -1111,8 +1115,9 @@ TEST_F(GinHostProxyProgressMicrotest, Poll_WaitsForTheRestOfAPartiallyWrittenGfd
   __atomic_store_n(&slot->qword[0].raw, g.qword[0].raw, __ATOMIC_RELEASE);
   std::thread producer([&] {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
-    for (int k = ncclGinProxyGfdQwords - 1; k > 0; k--)
+    for (int k = ncclGinProxyGfdQwords - 1; k > 0; k--) {
       __atomic_store_n(&slot->qword[k].raw, g.qword[k].raw, __ATOMIC_RELEASE);
+    }
   });
   EXPECT_EQ(ncclSuccess, Progress());
   producer.join();
@@ -1292,8 +1297,9 @@ TEST_F(GinHostProxyProgressMicrotest, Completion_AdvancesTheCiAndBumpsTheGfdsCou
   EXPECT_EQ(1u, Ci(1, 1));
   EXPECT_EQ(1u, Ctx()->hostGpuCtx[1].cisShadow[1]);
   EXPECT_EQ(1u, Ctx()->counters[1 * kCounters + 3]);
-  for (int i = 0; i < 2 * kCounters; i++)
+  for (int i = 0; i < 2 * kCounters; i++) {
     if (i != 1 * kCounters + 3) EXPECT_EQ(0u, Ctx()->counters[i]) << i;
+  }
 
   ASSERT_EQ(ncclSuccess, Progress());
   EXPECT_EQ(2u, rma_.tested.size()) << "a consumed GFD is not tested again";
