@@ -18,7 +18,6 @@ import numpy as np
 import sys
 
 from aie.iron import ObjectFifo, Program, Runtime, Worker
-from aie.iron.device import NPU1Col1, NPU2Col1
 from aie.iron.controlflow import range_
 from aie.dialects.aiex import npu_load_pdi
 
@@ -44,11 +43,16 @@ FULL_ELF = "--full-elf" in sys.argv[1:]
 positional = [a for a in sys.argv[1:] if not a.startswith("--")]
 
 if not positional:
-    raise ValueError("[ERROR] Expected a device name ('npu' or 'npu2')")
+    raise ValueError("[ERROR] Expected a device name ('npu', 'npu2' or 'npu3')")
 if positional[0] == "npu":
+    from aie.iron.device import NPU1Col1
     dev = NPU1Col1()
 elif positional[0] == "npu2":
+    from aie.iron.device import NPU2Col1
     dev = NPU2Col1()
+elif positional[0] == "npu3":
+    from aie.iron.device import NPU3Col1
+    dev = NPU3Col1()
 else:
     raise ValueError("[ERROR] Device name {} is unknown".format(positional[0]))
 
