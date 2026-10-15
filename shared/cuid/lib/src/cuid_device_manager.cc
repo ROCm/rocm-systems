@@ -155,7 +155,7 @@ amdcuid_status_t CuidDeviceManager::build_cuid_index() {
       if (unavailable != AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND) unavailable = status;
     };
     amdcuid_derived_id derived{};
-    const auto status = device->get_derived_cuid(derived);
+    const auto status = device->get_derived_cuid(derived, geteuid() == 0 ? hmac_ : nullptr);
     if (status != AMDCUID_STATUS_SUCCESS) {
       if (status == AMDCUID_STATUS_HMAC_ERROR) return status;
       skip(status);
