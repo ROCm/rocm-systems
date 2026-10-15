@@ -89,6 +89,10 @@ test_categories:
       - "CsvTunerMicrotest.*"
       # include/param/utils.h, include/param/parser_common.h
       - "ParamUtilsMicrotest.*"
+      # commDump.cc
+      - "CommDumpMicrotest.*"
+      # include/timer.h
+      - "TimerMicrotest.*"
       # group.cc
       - "GroupEndInternalTest.*"
       - "GroupCommHeadChainTest.*"

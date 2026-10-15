@@ -1,0 +1,75 @@
+/*************************************************************************
+ * Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
+ *
+ * See LICENSE.txt for license information
+ ************************************************************************/
+
+// Host-only microtests for src/commDump.cc: ncclCommDump's null guards and the profiler proxy-trace dump.
+
+#include <gtest/gtest.h>
+
+#include <memory>
+#include <string>
+#include <unordered_map>
+#include <vector>
+
+#include "../common/LogCapture.hpp"
+#include "comm.h"
+
+namespace {
+std::vector<void*> g_dumpedContexts;
+}  // namespace
+
+void ncclProfilerProxyTraceDumpIfAny(void* profilerContext) { g_dumpedContexts.push_back(profilerContext); }
+
+#include COMM_DUMP_CC_PATH
+
+namespace {
+
+using RcclUnitTesting::CaptureLog;
+using RcclUnitTesting::LogHas;
+
+class CommDumpMicrotest : public ::testing::Test {
+ protected:
+  void SetUp() override {
+    g_dumpedContexts.clear();
+    comm_ = std::make_unique<ncclComm>();
+    comm_->proxyState = reinterpret_cast<ncclProxyState*>(0x50);
+    comm_->profilerContext = reinterpret_cast<void*>(0xc7);
+  }
+
+  std::unique_ptr<ncclComm> comm_;
+  std::unordered_map<std::string, std::string> map_{{"key", "value"}};
+};
+
+TEST_F(CommDumpMicrotest, DumpsTheProfilerProxyTrace) {
+  ncclResult_t res = ncclInternalError;
+  std::string log = CaptureLog([&] { res = ncclCommDump(comm_.get(), map_); });
+
+  EXPECT_EQ(res, ncclSuccess);
+  EXPECT_EQ(g_dumpedContexts, std::vector<void*>{reinterpret_cast<void*>(0xc7)});
+  EXPECT_TRUE(LogHas(log, "ncclCommDump() proxy-trace (profiler plugin):")) << log;
+  EXPECT_EQ(map_, (std::unordered_map<std::string, std::string>{{"key", "value"}}));
+}
+
+TEST_F(CommDumpMicrotest, NullCommIsWarnedAndSkipped) {
+  ncclResult_t res = ncclInternalError;
+  std::string log = CaptureLog([&] { res = ncclCommDump(nullptr, map_); });
+
+  EXPECT_EQ(res, ncclSuccess);
+  EXPECT_TRUE(g_dumpedContexts.empty());
+  EXPECT_TRUE(LogHas(log, "ncclCommDump comm is null")) << log;
+}
+
+TEST_F(CommDumpMicrotest, MissingProxyStateIsWarnedAndSkipped) {
+  comm_->proxyState = nullptr;
+  ncclResult_t res = ncclInternalError;
+  std::string log = CaptureLog([&] { res = ncclCommDump(comm_.get(), map_); });
+
+  EXPECT_EQ(res, ncclSuccess);
+  EXPECT_TRUE(g_dumpedContexts.empty());
+  EXPECT_TRUE(LogHas(log, "ncclCommDump comm->proxyState is null")) << log;
+  EXPECT_FALSE(LogHas(log, "proxy-trace")) << log;
+}
+
+}  // namespace

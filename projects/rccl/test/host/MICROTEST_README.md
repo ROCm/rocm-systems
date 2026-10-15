@@ -196,6 +196,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
     registry, the remaining parsers, the C API, and env loading) are covered
     by its follow-ups.
+  - `commDump.cc` (`COMM_DUMP_CC_PATH`, from `comm-dump-test.cc`); suite
+    `CommDumpMicrotest.*`. Defines `ncclProfilerProxyTraceDumpIfAny`.
+  - `include/timer.h` built with `ENABLE_TIMER`, from `timer-test.cc`; suite
+    `TimerMicrotest.*`. Header-only, no `_CC_PATH` macro needed.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
