@@ -1,7 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Shared helpers for perfmon bucket packing (SPP, legacy, inspector tools)."""
+"""Shared helpers for single-pass, legacy, and inspector bucket packing."""
 
 from typing import TYPE_CHECKING, Any, Dict, FrozenSet, List, Optional, Set, Tuple
 
@@ -91,7 +91,7 @@ def iter_metric_groups(
     return rows
 
 
-def count_packable_multi_bucket_metrics(
+def count_single_pass_metrics_split_across_buckets(
     output_files: List[CounterFile],
     soc: "OmniSoC_Base",
     profile_counters: Set[str],
@@ -100,7 +100,9 @@ def count_packable_multi_bucket_metrics(
     """Metrics that span buckets but whose PMC set fits one hardware bucket."""
     metric_groups = iter_metric_groups(soc, profile_counters)
     ctr_to_bucket = _counter_to_bucket_index(output_files)
-    return _packable_multi_bucket_count(metric_groups, ctr_to_bucket, perfmon_config)
+    return _single_pass_metrics_split_across_buckets_count(
+        metric_groups, ctr_to_bucket, perfmon_config
+    )
 
 
 def count_multi_bucket_metrics(
@@ -128,7 +130,7 @@ def _counter_to_bucket_index(
     return mapping
 
 
-def _packable_multi_bucket_count(
+def _single_pass_metrics_split_across_buckets_count(
     metric_groups: List[_MetricGroup],
     ctr_to_bucket: Dict[str, int],
     perfmon_config: Dict[str, int],
