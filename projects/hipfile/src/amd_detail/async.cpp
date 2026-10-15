@@ -100,18 +100,18 @@ AsyncOp::~AsyncOp()
 void
 async_run_io(void *userargs)
 {
-    auto         op   = static_cast<AsyncOp *>(userargs);
-    const size_t size = std::min(*get_variant_ptr(op->size), getMaxRwCount());
-    const hoff_t fo   = *get_variant_ptr(op->file_offset);
-    const hoff_t bo   = *get_variant_ptr(op->buffer_offset);
-    if (!paramsValid(op->buffer, size, fo, bo)) {
+    auto         op       = static_cast<AsyncOp *>(userargs);
+    const size_t size     = std::min(*get_variant_ptr(op->size), getMaxRwCount());
+    const hoff_t file_off = *get_variant_ptr(op->file_offset);
+    const hoff_t buf_off  = *get_variant_ptr(op->buffer_offset);
+    if (!paramsValid(op->buffer, size, file_off, buf_off)) {
         *op->bytes_transferred = -hipFileInvalidValue;
     }
     else {
         try {
             DeviceGuard device_guard{op->stream->getHipDevice()};
-            *op->bytes_transferred =
-                op->backend->io(op->io_type, op->file, op->buffer, size, fo, bo, op->stream->copyStream());
+            *op->bytes_transferred = op->backend->io(op->io_type, op->file, op->buffer, size, file_off,
+                                                     buf_off, op->stream->copyStream());
         }
         catch (...) {
             *op->bytes_transferred = -hipFileInternalError;
