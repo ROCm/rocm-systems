@@ -1982,6 +1982,14 @@ Activate a Python virtual environment containing the generator dependencies and
 appropriate relative or absolute path. It discovers the active environment
 through <code>VIRTUAL_ENV</code> or the active Python interpreter, then formats changed
 generated files through the repository's pre-commit configuration.</p>
+<p>The CDNA1 through CDNA4 additions provide LLVM-supported legacy EXP/LOG encodings
+missing from the published base XML, while preserving those upstream inputs.
+The legacy EXP/LOG executors use the shared transcendental approximation and
+explicit flush/nearest output policy. The CDNA1/CDNA2 manuals specify base-2
+operations with unspecified legacy semantics. The CDNA3/CDNA4 manuals list the
+legacy names among transcendental operations but omit their opcode and operation
+definitions; their encodings come from LLVM. Bit-for-bit agreement for arbitrary
+inputs has not been qualified on CDNA hardware.</p>
 <p>The manual commands below are useful for focused generator development and are
 run from the rocjitsu project root. Set <code>MRISA</code> to the shared MR ISA directory:</p>
 <div class="highlight"><pre><span></span><code><span class="nv">MRISA</span><span class="o">=</span>../../shared/machine-readable-isa/isa
@@ -1997,6 +2005,10 @@ python<span class="w"> </span>-m<span class="w"> </span>amdisa<span class="w"> <
 <span class="w">    </span>rdna3_5:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3_5.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>rdna4:<span class="nv">$MRISA</span>/amdgpu_isa_rdna4.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna1:<span class="nv">$MRISA</span>/amdgpu_isa_cdna1_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna2:<span class="nv">$MRISA</span>/amdgpu_isa_cdna2_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna3:<span class="nv">$MRISA</span>/amdgpu_isa_cdna3_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna4:<span class="nv">$MRISA</span>/amdgpu_isa_cdna4_legacy_math.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_gfx1251_delta.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--isa-variants<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_variants.json<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--isa-output<span class="w"> </span>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated<span class="w"> </span><span class="se">\</span>
@@ -2018,6 +2030,10 @@ find<span class="w"> </span>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated<
 <span class="w">    </span>rdna3_5:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3_5.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>rdna4:<span class="nv">$MRISA</span>/amdgpu_isa_rdna4.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna1:<span class="nv">$MRISA</span>/amdgpu_isa_cdna1_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna2:<span class="nv">$MRISA</span>/amdgpu_isa_cdna2_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna3:<span class="nv">$MRISA</span>/amdgpu_isa_cdna3_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna4:<span class="nv">$MRISA</span>/amdgpu_isa_cdna4_legacy_math.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_gfx1251_delta.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--isa-variants<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_variants.json<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--gen-isas<span class="w"> </span><span class="se">\</span>
@@ -2039,6 +2055,10 @@ find<span class="w"> </span>lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated<
 <span class="w">    </span>rdna3_5:<span class="nv">$MRISA</span>/amdgpu_isa_rdna3_5.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>rdna4:<span class="nv">$MRISA</span>/amdgpu_isa_rdna4.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">    </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna1:<span class="nv">$MRISA</span>/amdgpu_isa_cdna1_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna2:<span class="nv">$MRISA</span>/amdgpu_isa_cdna2_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna3:<span class="nv">$MRISA</span>/amdgpu_isa_cdna3_legacy_math.xml<span class="w"> </span><span class="se">\</span>
+<span class="w">  </span>--isa-additions<span class="w"> </span>cdna4:<span class="nv">$MRISA</span>/amdgpu_isa_cdna4_legacy_math.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--isa-additions<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_gfx1251_delta.xml<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--isa-variants<span class="w"> </span>cdna5:<span class="nv">$MRISA</span>/amdgpu_isa_cdna5_variants.json<span class="w"> </span><span class="se">\</span>
 <span class="w">  </span>--gen-dbt<span class="w"> </span><span class="se">\</span>
