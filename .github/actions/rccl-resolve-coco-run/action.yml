@@ -8,7 +8,7 @@ inputs:
   coco_ref:
     description: 'ROCm/tRCCL ref for the coco harness.'
     required: false
-    default: 'main'
+    default: '1.3.x'
   dry_run:
     description: 'Resolve stacks and submissions without building or running anything.'
     required: false

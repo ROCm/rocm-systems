@@ -6,8 +6,8 @@
 use crate::device::gpu::GpuDevice;
 use crate::device::gpu::queue::QueueErrorEvent;
 use crate::driver;
-use crate::host_storage::Owned;
 use crate::memory::Allocation;
+use crate::memory::storage::Owned;
 use crate::{Error, ErrorKind};
 
 /// KFD identity and mailbox slot assigned to one interrupt-capable signal.
@@ -101,7 +101,7 @@ impl SignalEventPage {
             detail: "attempted signal event page lost its allocation",
         })?;
         driver::KfdDriver::retain_kfd_signal_event_page(
-            allocation.linux_kfd_mut().driver_state_mut(),
+            allocation.inner.linux_kfd_mut()?.driver_state_mut(),
         )?;
         self.attempted = false;
         self.allocation = None;
@@ -135,11 +135,11 @@ pub fn create_signal_event(
                 kind: ErrorKind::Internal,
                 detail: "signal event page lost its allocation",
             })?;
-            Some(allocation.linux_kfd().driver_state())
+            Some(allocation.inner.linux_kfd()?.driver_state())
         }
         None => None,
     };
-    let (driver, state) = device.device.linux_kfd()?;
+    let (driver, state) = device.device.driver_state.linux_kfd()?;
     let mut page_offered = false;
     let result = driver.create_kfd_signal_event(state, native_page, &mut page_offered);
     if let Some(page) = event_page {

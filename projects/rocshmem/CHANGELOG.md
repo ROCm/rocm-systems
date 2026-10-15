@@ -4,6 +4,8 @@
 ### Fixed
 * Fixed tile RMA operations (`rocshmem_tile_put`, `rocshmem_tile_get`) to correctly apply non-zero `start_coord` values to both the source and destination tensors; previously only the remote tensor was offset, causing incorrect data movement when `start_coord != 0`.
   Fully-packed column-major tiles are now also classified as `Contiguous`, enabling a single flat memcpy instead of per-column copies.
+* Fixed `rocshmem_tile_broadcast` (and `_wave`, `_wg` variants) on the IPC and GDA backends: the root PE's destination buffer was not written when `dst != src`, leaving it uninitialised while non-root PEs received the correct data via `tile_get`. The root PE now performs a local tile copy at the appropriate scope when `dst_data != src_data`, matching the nvshmem reference behaviour.
+* Fixed `rocshmem_ctx_tile_*` collective operations (allgather, broadcast, sum/max/min reduce, collective_wait) silently discarding the caller-supplied `rocshmem_ctx_t` context. The context was accepted but not forwarded to the internal bitcode layer, which always used `ROCSHMEM_CTX_DEFAULT` instead. The context is now threaded through correctly.
 
 ### Added
 * GDA device code refactor (#7217)
@@ -25,6 +27,13 @@
 ### Deprecated
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
+
+### Changed
+* SDMA transport, when built in (`USE_SDMA=ON`), is disabled at runtime by default;
+  set `ROCSHMEM_SDMA_ENABLED=1` to activate it.
+* `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
+  Wave and workgroup operations automatically scale the threshold by the wavefront size,
+  avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
 
 ## rocSHMEM 3.7.0 for ROCm 10.1
 

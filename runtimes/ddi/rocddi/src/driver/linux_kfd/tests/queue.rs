@@ -9,11 +9,10 @@
 
 use super::super::memory;
 use super::*;
-use crate::host_storage::Allocator;
 use crate::session::DriverContextLifetime;
 use std::sync::Arc;
 fn shared<T>(value: T) -> Shared<T> {
-    Shared::new(value, Allocator::default()).unwrap()
+    Shared::new(value).unwrap()
 }
 use crate::device::gpu::queue::{QueueProducerMode, QueueRingMemory, SdmaEngineSelection};
 use std::collections::{BTreeMap, VecDeque};

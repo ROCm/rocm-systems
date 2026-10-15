@@ -15,6 +15,7 @@
 
 // hrr_api_args.h — HRR_API_* enum values and hrr_api_names[] string table
 #include "hrr/hrr_api_args.h"
+#include "hrr_replay_limits.h"  // kDefaultMaxEvents
 
 // HRR Archive Reader — reads .hrr trace archives produced by the in-tree
 // capture layer (HIP_HRR_CAPTURE_OUTPUT).
@@ -205,6 +206,11 @@ struct Archive {
 // Load an archive from disk. Returns false on error.
 bool load_archive(const std::string& path, Archive& archive);
 
+// The pid in the name of a per-process archive directory, "pid-<decimal pid>",
+// or 0 for any other name. An archive moved aside to pid-<pid>.prev-<n>, when a
+// later process with the same pid starts capturing, is not one of them.
+uint64_t pid_from_archive_dir_name(const std::string& name);
+
 // Whether load_archive would find the archive in `archive_dir` complete: a
 // trailer whose total_events counts the records before it. Walks the record
 // headers and seeks over the payloads, so it costs a fraction of a load.
@@ -251,6 +257,30 @@ FILE* open_record_stream(const std::string& file_path, uint32_t expected_magic,
 // Returns an empty vector when the directory does not exist, which is the
 // normal case for a capture with no external producer.
 std::vector<std::string> find_region_streams(const std::string& archive_dir);
+
+// Largest file read_file_capped() and the readers below will load whole. A blob
+// or code object above it is refused instead of allocated; the archive chose
+// the size, so the replayer must not. Default kDefaultMaxFileBytes (4 GiB);
+// 0 refuses every file. Set once at start-up, before any reader thread runs.
+constexpr uint64_t kDefaultMaxFileBytes = 4ull << 30;
+uint64_t max_file_bytes();
+void set_max_file_bytes(uint64_t bytes);
+
+// Most events load_archive() will hold. It stops at the first record past the
+// cap and fails, naming the count and the cap, so an archive cannot make the
+// reader allocate without bound. Default kDefaultMaxEvents (hrr_replay_limits.h). Set once at
+// start-up, before any reader thread runs.
+uint64_t max_events();
+void set_max_events(uint64_t events);
+
+// Read a whole file into `data`, refusing one larger than max_file_bytes().
+// Returns false if the file cannot be opened or read, or is too large; *error
+// (when given) then says which, naming the path and, for a refusal, the size.
+// An empty `data` with a true return is a zero-byte file. *refused (when given)
+// is set when the file exists but was not read for a resource reason, the cap
+// or an allocation failure, as opposed to being missing or unreadable.
+bool read_file_capped(const std::string& path, std::vector<uint8_t>& data,
+                      std::string* error = nullptr, bool* refused = nullptr);
 
 // Read a blob's bytes given its hash. Returns false if not found.
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,

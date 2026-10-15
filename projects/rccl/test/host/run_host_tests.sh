@@ -23,7 +23,8 @@
 #   configure       configure test/host
 #   build           build all host binaries (default target)
 #   guards          device-table unittest and kernel-count pytest plus
-#                   src/include/test_poison_hip_atomics.py and the
+#                   src/include/test_poison_hip_atomics.py,
+#                   test/test_makefile_depflags.py, and the
 #                   tools/RcclReplayer host checks (make test)
 #   run             run the suite (timestamped log + JUnit XML). Always emits
 #                   llvm source-based coverage profiles (*.profraw) into
@@ -165,6 +166,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
     "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
+    "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
   )
@@ -228,6 +230,12 @@ do_poison_hip_atomics() {
   python3 "$RCCL_ROOT/src/include/test_poison_hip_atomics.py"
 }
 
+# Keep Makefile header tracking on -MM (NCCL PR #1806).
+do_makefile_depflags() {
+  echo "==> Makefile -MM depflags (unittest: test/test_makefile_depflags.py)"
+  python3 "$RCCL_ROOT/test/test_makefile_depflags.py" -v
+}
+
 # Run the device-table generator guard. It is plain unittest and needs only
 # python3. The suite is also registered with add_test() in test/CMakeLists.txt,
 # but nothing in RCCL CI runs `ctest`, so that registration never gates. Running
@@ -256,14 +264,15 @@ do_replayer_guards() {
   echo "==> RcclReplayer host checks (make -C tools/RcclReplayer test)"
   make -C "$RCCL_ROOT/tools/RcclReplayer" test
 }
-
-# All CPU-only guards: the device-table unittest, the kernel-count pytest suite,
-# the __hip_atomic_* poison compile probe, then the RcclReplayer host checks. Collected with `|| rc=1` rather
-# than run back to back so that under `set -e` (line 53) an early failure still
-# leaves the later guards running and reported, instead of aborting the phase at
-# the first one. Same idiom as do_host_tests above.
+# All CPU-only guards: makefile -MM scan, the device-table unittest, the
+# kernel-count pytest suite, the __hip_atomic_* poison compile probe, then
+# the RcclReplayer host checks. Collected with `|| rc=1` rather than run
+# back to back so that under `set -e` an early failure still leaves the
+# later guards running and reported, instead of aborting the phase at the
+# first one. Same idiom as do_host_tests above.
 do_guards() {
   local rc=0
+  do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1
   do_poison_hip_atomics || rc=1
