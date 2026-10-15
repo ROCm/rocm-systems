@@ -67,9 +67,29 @@ def matching_definitions(counter: dict, gfx: str) -> list[dict]:
     ]
 
 
-def resolve_cases(args: argparse.Namespace, counters: list[dict]) -> dict[str, set[int]]:
+def append_case(
+    cases: dict[str, list[tuple[str, int]]],
+    block: str,
+    name: str,
+    event_id: int,
+) -> None:
+    if any(separator in name for separator in (":", ",")):
+        raise ValueError(f"metric name cannot contain ':' or ',': {name}")
+    if all(existing_id != event_id for _, existing_id in cases[block]):
+        cases[block].append((name, event_id))
+
+
+def is_level_counter(name: str) -> bool:
+    return "LEVEL" in name.upper().split("_")
+
+
+def resolve_cases(args: argparse.Namespace, counters: list[dict]) -> tuple[
+    dict[str, list[tuple[str, int]]],
+    dict[str, list[tuple[str, int]]],
+]:
     requested_block = args.block.upper() if args.block else None
-    cases: dict[str, set[int]] = defaultdict(set)
+    cases: dict[str, list[tuple[str, int]]] = defaultdict(list)
+    skipped: dict[str, list[tuple[str, int]]] = defaultdict(list)
 
     if args.events:
         counters_by_name = {counter["name"]: counter for counter in counters}
@@ -88,7 +108,22 @@ def resolve_cases(args: argparse.Namespace, counters: list[dict]) -> dict[str, s
                     raise ValueError(f"numeric event {token} requires --block")
                 if not 0 <= event_id <= 0xFFFFFFFF:
                     raise ValueError(f"event ID is outside uint32_t: {token}")
-                cases[requested_block].add(event_id)
+                matching_names = [
+                    counter["name"]
+                    for counter in counters
+                    if any(
+                        str(definition["block"]).upper() == requested_block
+                        and int(definition["event"]) == event_id
+                        for definition in matching_definitions(counter, args.gfx)
+                    )
+                ]
+                event_name = matching_names[0] if matching_names else f"EVENT_{event_id}"
+                append_case(
+                    skipped if is_level_counter(event_name) else cases,
+                    requested_block,
+                    event_name,
+                    event_id,
+                )
                 continue
 
             counter = counters_by_name.get(token)
@@ -106,26 +141,51 @@ def resolve_cases(args: argparse.Namespace, counters: list[dict]) -> dict[str, s
                     raise ValueError(
                         f"metric {token} belongs to {block}, not {requested_block}"
                     )
-                cases[block].add(int(definition["event"]))
+                append_case(
+                    skipped if is_level_counter(token) else cases,
+                    block,
+                    token,
+                    int(definition["event"]),
+                )
     else:
         for counter in counters:
             for definition in matching_definitions(counter, args.gfx):
                 block = str(definition["block"]).upper()
                 if requested_block and block != requested_block:
                     continue
-                cases[block].add(int(definition["event"]))
+                append_case(
+                    skipped if is_level_counter(counter["name"]) else cases,
+                    block,
+                    counter["name"],
+                    int(definition["event"]),
+                )
 
     if not cases:
         scope = f"block {requested_block}" if requested_block else args.gfx
         raise ValueError(f"no PMC events found for {scope}")
-    return cases
+    return cases, skipped
 
 
-def format_cpp_arguments(gfx: str, cases: dict[str, set[int]]) -> str:
+def format_event_arguments(events: list[tuple[str, int]]) -> str:
+    return ",".join(
+        f"{name}:{event_id}"
+        for name, event_id in sorted(events, key=lambda event: (event[1], event[0]))
+    )
+
+
+def format_cpp_arguments(
+    gfx: str,
+    cases: dict[str, list[tuple[str, int]]],
+    skipped: dict[str, list[tuple[str, int]]],
+) -> str:
     arguments = ["--gfx", gfx]
-    for block in sorted(cases):
-        events = ",".join(str(event) for event in sorted(cases[block]))
-        arguments.extend(("--block", block, "--events", events))
+    for block in sorted(cases.keys() | skipped.keys()):
+        arguments.append("--block")
+        arguments.append(block)
+        if cases[block]:
+            arguments.extend(("--events", format_event_arguments(cases[block])))
+        if skipped[block]:
+            arguments.extend(("--skipped-events", format_event_arguments(skipped[block])))
     return shlex.join(arguments)
 
 
@@ -138,10 +198,10 @@ def main() -> None:
     args.config = args.config.expanduser().resolve()
     print(f"resolved config path ({config_source}): {args.config}", file=sys.stderr)
     try:
-        cases = resolve_cases(args, load_counters(args.config))
+        cases, skipped = resolve_cases(args, load_counters(args.config))
     except (KeyError, OSError, TypeError, ValueError) as error:
         raise SystemExit(f"packet argument error: {error}") from error
-    print(format_cpp_arguments(args.gfx, cases))
+    print(format_cpp_arguments(args.gfx, cases, skipped))
 
 
 if __name__ == "__main__":

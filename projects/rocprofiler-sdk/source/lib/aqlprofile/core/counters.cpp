@@ -309,7 +309,6 @@ _internal_aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 han
     pm4_builder::CmdBuffer commands;
     auto                   memorymgr =
         std::make_shared<CounterMemoryManager>(profile.agent, alloc_cb, dealloc_cb, userdata);
-    MemoryManager::RegisterManager(memorymgr);
     memorymgr->CopyEvents(profile.events, profile.event_count);
 
     pm4_builder::CmdBuffer read_cmd;
@@ -343,19 +342,20 @@ _internal_aqlprofile_pmc_create_packets(aqlprofile_handle_t*                 han
     size_t read_size  = aql_profile::CommandBufferMgr::Align(read_cmd.Size());
     memorymgr->CreateCmdBuf(start_size + stop_size + read_size);
 
-    handle->handle                      = memorymgr->GetHandler();
     pm4_builder::CmdBuilder* cmd_writer = pm4_factory->GetCmdBuilder();
     uint8_t*                 cmdbuf     = reinterpret_cast<uint8_t*>(memorymgr->GetCmdBuf());
 
-    memcpy_cb(cmdbuf, read_cmd.Data(), read_cmd.Size(), userdata);
+    MemoryManager::CheckStatus(memcpy_cb(cmdbuf, read_cmd.Data(), read_cmd.Size(), userdata));
     aql_profile::PopulateAql(cmdbuf, read_cmd.Size(), cmd_writer, &packets->read_packet);
     cmdbuf += read_size;
-    memcpy_cb(cmdbuf, start_cmd.Data(), start_cmd.Size(), userdata);
+    MemoryManager::CheckStatus(memcpy_cb(cmdbuf, start_cmd.Data(), start_cmd.Size(), userdata));
     aql_profile::PopulateAql(cmdbuf, start_cmd.Size(), cmd_writer, &packets->start_packet);
     cmdbuf += start_size;
-    memcpy_cb(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), userdata);
+    MemoryManager::CheckStatus(memcpy_cb(cmdbuf, stop_cmd.Data(), stop_cmd.Size(), userdata));
     aql_profile::PopulateAql(cmdbuf, stop_cmd.Size(), cmd_writer, &packets->stop_packet);
 
+    MemoryManager::RegisterManager(memorymgr);
+    handle->handle = memorymgr->GetHandler();
     return HSA_STATUS_SUCCESS;
 }
 

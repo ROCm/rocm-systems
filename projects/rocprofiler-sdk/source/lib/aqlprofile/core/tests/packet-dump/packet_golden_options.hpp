@@ -7,10 +7,17 @@
 #include <string>
 #include <vector>
 
+struct packet_test_event
+{
+    std::string name{};
+    uint32_t    id = 0;
+};
+
 struct packet_test_case
 {
-    std::string           block{};
-    std::vector<uint32_t> events{};
+    std::string                    block{};
+    std::vector<packet_test_event> events{};
+    std::vector<packet_test_event> skipped_events{};
 };
 
 struct packet_test_architecture
