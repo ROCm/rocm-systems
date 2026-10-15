@@ -142,7 +142,7 @@ __device__ ATTR_NO_INLINE void rocshmem_ulonglong_alltoall_wg(
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -230,7 +230,7 @@ __device__ ATTR_NO_INLINE int rocshmem_ctx_ulonglong_alltoall_wave(
  *
  * This function must be called as a wave collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
