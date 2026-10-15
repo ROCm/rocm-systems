@@ -142,7 +142,10 @@ TEST_F(BootstrapTlsMPITest, EnablingEncryptionBetweenCommunicators) {
   ASSERT_EQ(ncclSuccess, SetPsk(kPsk));
   ncclUniqueId id;
   int rank = MPIEnvironment::world_rank, nranks = MPIEnvironment::world_size;
-  if (rank == 0) ASSERT_EQ(ncclSuccess, ncclGetUniqueId(&id));
+  int idRes = ncclSuccess;
+  if (rank == 0) idRes = ncclGetUniqueId(&id);
+  MPI_Bcast(&idRes, 1, MPI_INT, 0, MPI_COMM_WORLD);
+  ASSERT_EQ(ncclSuccess, idRes) << "ncclGetUniqueId failed on rank 0";
   MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
   ncclComm_t encrypted = nullptr;
   ASSERT_EQ(ncclSuccess, ncclCommInitRank(&encrypted, nranks, id, rank));
