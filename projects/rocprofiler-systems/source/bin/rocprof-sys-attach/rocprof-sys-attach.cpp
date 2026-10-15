@@ -90,19 +90,21 @@ print_usage(const char* prog_name)
         << "\n"
         << "Options:\n"
         << "  -p, --pid PID[,PID,...]\n"
-        << "                       Process ID(s) to attach to (required, repeatable)\n"
+        << "                       Process ID(s) to attach to (required, repeatable;\n"
+        << "                       quote the list if it contains spaces)\n"
         << "  -o, --output PATH    Output path for profiling results\n"
         << "  -F, --format FORMAT[,FORMAT,...]\n"
         << "                       Output format(s): perfetto, rocpd\n"
         << "  -d, --detach-after SECONDS\n"
-        << "                       Detach from all processes automatically after SECONDS\n"
-        << "                       (non-interactive). When omitted, waits for input on stdin.\n"
+        << "                       Detach from all processes after SECONDS\n"
+        << "                       (non-interactive). When omitted, waits on stdin.\n"
         << "  -h, --help           Show this help message\n"
         << "\n"
+        << "Prerequisites:\n"
+        << "  Target processes must be started with ROCP_TOOL_ATTACH=1.\n"
+        << "  Appropriate ptrace permissions are also required.\n"
+        << "\n"
         << "Environment variables:\n"
-        << "  ROCPROFSYS_OUTPUT_PATH       Output directory for profiling data\n"
-        << "  ROCPROFSYS_TRACE             Enable perfetto trace output\n"
-        << "  ROCPROFSYS_USE_ROCPD         Enable rocpd database output\n"
         << "  ROCPROF_ATTACH_TOOL_LIBRARY  Path to the tool library\n"
         << "\n"
         << "Once attached, enter a session id to detach from that process, 'a' to\n"
@@ -247,7 +249,7 @@ parse_pids(attach_options& opts, const char* arg)
     std::stringstream stream(arg);
     while(std::getline(stream, token, ','))
     {
-        const auto pid = safe_from_chars<pid_t>(token);
+        const auto pid = safe_from_chars<pid_t>(rocprofsys::utility::string::trim(token));
         if(pid.is_error())
         {
             LOG_ERROR("Invalid PID '{}': {}.", token, pid.error());
@@ -354,6 +356,21 @@ parse_args(int argc, char* argv[])
     return opts;
 }
 
+void
+warn_if_outputs_may_collide(std::size_t pid_count)
+{
+    const auto* use_pid = std::getenv(rocprofsys::env_vars::USE_PID);
+    if(pid_count > 1 && use_pid != nullptr &&
+       !rocprofsys::utility::string::to_bool(use_pid, true))
+    {
+        LOG_WARNING("{} is off while attaching to {} processes. Their output files can "
+                    "share one name, and a later detach can overwrite an earlier trace. "
+                    "Set {}=ON.",
+                    rocprofsys::env_vars::USE_PID, pid_count,
+                    rocprofsys::env_vars::USE_PID);
+    }
+}
+
 bool
 attach_all(const std::vector<pid_t>& pids, active_sessions& sessions)
 {
@@ -392,13 +409,13 @@ attach_all(const std::vector<pid_t>& pids, active_sessions& sessions)
 bool
 detach(active_sessions& sessions, session target)
 {
-    const auto status = rocattach_detach(target.pid);
-    sessions.remove(target.id);
-    if(status != ROCATTACH_STATUS_SUCCESS)
+    if(rocattach_detach(target.pid) != ROCATTACH_STATUS_SUCCESS)
     {
-        LOG_ERROR("Failed to detach from process {} (session {})", target.pid, target.id);
+        LOG_ERROR("Failed to detach from process {} (session {}); it stays active",
+                  target.pid, target.id);
         return false;
     }
+    sessions.remove(target.id);
     LOG_INFO("Detached from process {} (session {})", target.pid, target.id);
     return true;
 }
@@ -407,9 +424,9 @@ bool
 detach_all(active_sessions& sessions)
 {
     bool all_detached = true;
-    while(!sessions.active().empty())
+    for(const auto& entry : std::vector<session>{ sessions.active() })
     {
-        all_detached = (detach(sessions, sessions.active().front()) && all_detached);
+        all_detached = detach(sessions, entry) && all_detached;
     }
     return all_detached;
 }
@@ -502,6 +519,8 @@ main(int argc, char* argv[])
     setup_output_env(opts.output_path);
     setup_output_format_env(opts.profile_format);
 
+    warn_if_outputs_may_collide(opts.pids.size());
+
     active_sessions sessions;
     const bool      all_attached = attach_all(opts.pids, sessions);
     if(sessions.active().empty())
@@ -513,7 +532,8 @@ main(int argc, char* argv[])
     {
         LOG_INFO("Attached. Detaching after {} second(s).", opts.detach_after);
         std::this_thread::sleep_for(std::chrono::seconds(opts.detach_after));
-        return (all_attached && detach_all(sessions)) ? EXIT_SUCCESS : EXIT_FAILURE;
+        const bool all_detached = detach_all(sessions);
+        return (all_attached && all_detached) ? EXIT_SUCCESS : EXIT_FAILURE;
     }
 
     const bool all_detached = run_detach_prompt(sessions);
