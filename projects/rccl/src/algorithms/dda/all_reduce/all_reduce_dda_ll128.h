@@ -115,22 +115,36 @@ __launch_bounds__(512)
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 
     // Fold in rank order 0..nRanks-1 on every rank: a per-rank order rounds differently and the replicas diverge.
-    uint64_t acc[kDdaLL128WordsPerThread] = {};
-    for (int peer = 0; peer < nRanks; ++peer) {
-      uint64_t vr[kDdaLL128WordsPerThread] = {};
-      if (peer == selfRank) {
-        ddaLL128LoadRegs<int8_t>(vr, srcBytes + dataByte, eltInSlice, lane, flagLane);
-      } else {
-        const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
-        ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+    // Own slice is loaded first so the load overlaps the polls; rank 0 seeds acc, so the sum is ((r0 + r1) + r2) + ...
+    uint64_t self[kDdaLL128WordsPerThread] = {};
+    ddaLL128LoadRegs<int8_t>(self, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    uint64_t acc[kDdaLL128WordsPerThread];
+    if (selfRank == 0) {
+#pragma unroll
+      for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+        acc[u] = self[u];
       }
+    } else {
+      ddaLL128PollWire(gatherBase + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, acc, flag, lane);
+    }
+    for (int peer = 1; peer < nRanks; ++peer) {
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
       // from the even ones and never writes them out, so folding blind is cheaper
       // than predicating the loop.
+      if (peer == selfRank) {
 #pragma unroll
-      for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
-        acc[u] = (peer == 0) ? vr[u] : ddaLL128AddWord<T>(acc[u], vr[u]);
+        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+          acc[u] = ddaLL128AddWord<T>(acc[u], self[u]);
+        }
+      } else {
+        const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
+        uint64_t vr[kDdaLL128WordsPerThread];
+        ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+#pragma unroll
+        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+          acc[u] = ddaLL128AddWord<T>(acc[u], vr[u]);
+        }
       }
     }
 
