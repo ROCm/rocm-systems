@@ -279,6 +279,17 @@
       "tests": [
         {"name": "StrongstreamMicrotests", "description": "Host-only misc/strongstream.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_utils": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroUtils",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "UtilsMicrotests", "description": "Host-only misc/utils.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -352,6 +363,12 @@
       "name": "RCCL Microtests - misc/strongstream.cc",
       "description": "rccl-UnitTestsMicroStrongstream (host-only misc/strongstream.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_strongstream",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - misc/utils.cc",
+      "description": "rccl-UnitTestsMicroUtils (host-only misc/utils.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_utils",
       "enabled": true
     }
   ]

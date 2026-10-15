@@ -319,6 +319,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   binary because the test defines the HIP stream, event and graph calls it records, and
   `strongstream_stubs.cc` / `nccl_fakes.cc` already define this unit's symbols. See
   `test_categories_micro_strongstream.yaml`.
+- **`rccl-UnitTestsMicroUtils`** — `misc/utils.cc` (via `UTILS_CC_PATH`, from
+  `utils-test.cc`); suite `Utils*`. Its own binary because the test seams HIP, env and
+  libc (allocation, hostname, boot id, `readlink`, `sysconf`) around a unit other
+  binaries link whole. See `test_categories_micro_utils.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -838,7 +842,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
-`rccl-UnitTestsMicroCrypt`, `rccl-UnitTestsMicroStrongstream`,
+`rccl-UnitTestsMicroCrypt`, `rccl-UnitTestsMicroStrongstream`, `rccl-UnitTestsMicroUtils`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -881,6 +885,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroCrypt              # misc/crypt.cc tests
 ./build/rccl-UnitTestsMicroStrongstream       # misc/strongstream.cc tests
+./build/rccl-UnitTestsMicroUtils              # misc/utils.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests

@@ -402,6 +402,13 @@ function(rccl_define_micro_source_lists)
     strongstream-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroUtils -- src/misc/utils.cc. Own binary: the test seams HIP, env and libc
+  # around utils.cc, which other micro binaries link whole as an oracle TU.
+  set(TEST_MICRO_UTILS_SOURCE_FILES
+    utils-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1088,6 +1095,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroStrongstream
     ${_MICRO_MODE_DEFS}
     STRONGSTREAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/strongstream.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_strongstream.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroUtils
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroUtils
+  SOURCES ${TEST_MICRO_UTILS_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    UTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_utils.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
