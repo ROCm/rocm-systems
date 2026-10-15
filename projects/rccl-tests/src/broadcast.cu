@@ -575,9 +575,8 @@ __global__ void GinHybridBroadcastKernel(ncclWindow_t sendwin, size_t sendoffset
 
   const int ginContext = 0;
   const unsigned int signalIndex = 0;
-  // All GIN traffic is block 0's and each peer is posted to by one thread
-  // (r=threadIdx.x stride), so each QP is single-owner; THREAD mode
-  // (--gin_resource_sharing 0) elides the SQ-lock atomics on the GDA bnxt/mlx5 path.
+  // Only block 0 communicates (commCta below), one thread per peer QP
+  // (single-owner), so THREAD mode drops the SQ lock.
   ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
 
   // All GIN traffic on this path is confined to block 0, and so are the signal
@@ -678,9 +677,8 @@ __global__ void GinScatterAllgatherBroadcastKernel(ncclWindow_t sendwin, size_t 
   const int tid = threadIdx.x + blockIdx.x * blockDim.x;
   const int nthreads = blockDim.x * gridDim.x;
 
-  // Both scatter and gather phases are block 0's, one thread per peer (r=threadIdx.x
-  // stride), so each QP is single-owner; THREAD mode (--gin_resource_sharing 0) drops
-  // the SQ-lock atomics.
+  // Only block 0 communicates (commCta below), one thread per peer QP in both
+  // phases (single-owner), so THREAD mode drops the SQ lock.
   ncclGin gin { devComm, /*context=*/0, ginResourceSharingModeDev() };
   const unsigned int sigScatter = 0;
   const unsigned int sigGather = 1;

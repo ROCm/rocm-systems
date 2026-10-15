@@ -268,9 +268,7 @@ template <typename T>
 __device__ void ginAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm) {
   int ginContext = 0;
   unsigned int signalIndex = blockIdx.x;
-  // Each peer's QP is posted to by exactly one thread (grid-strided r=tid), so the
-  // SQ is single-owner and THREAD mode (--gin_resource_sharing 0) can drop the
-  // per-WQE SQ-lock atomics on the rocshmem-GDA bnxt/mlx5 path.
+  // One thread per peer QP (single-owner), so THREAD mode drops the SQ lock.
   ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
   uint64_t signalValue = gin.readSignal(signalIndex);
 
@@ -324,9 +322,8 @@ __device__ void hybridAlltoAllBody(ncclWindow_t sendwin, size_t sendoffset, nccl
     /* CTA 0: remote peers via GIN */
     int ginContext = 0;
     unsigned int signalIndex = 0;
-    // One thread per remote peer (grid-strided), so each QP has a single poster;
-    // THREAD mode (--gin_resource_sharing 0) elides the SQ-lock atomics on the GDA
-    // bnxt/mlx5 post path.
+    // Only CTA 0 communicates, one thread per peer QP (single-owner), so THREAD
+    // mode drops the SQ lock.
     ncclGin gin { devComm, ginContext, ginResourceSharingModeDev() };
     uint64_t signalValue = gin.readSignal(signalIndex);
 
@@ -475,7 +472,7 @@ testResult_t AlltoAllRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, 
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(NvlAlltoAllKernelOptimized, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
         return testSuccess;
 #endif
-#if NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7) && defined(NCCL_OS_LINUX)
       case 3:
         TESTCHECK(uploadGinResourceSharingMode());
         TESTCHECK(testLaunchDeviceKernel(SPECIALIZE_KERNEL(GinAlltoAllKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, type, op, root, comm, stream));
