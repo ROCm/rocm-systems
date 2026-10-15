@@ -32,25 +32,6 @@
 
 namespace sdma_anvil {
 
-// Every queue slot on an even-numbered MI300 SDMA engine is reachable by a GPU-written doorbell.
-// Slots 0-3 on odd engines are not (ROCM-32598), and this code cannot choose a slot, so use only
-// even engines until the slot-aware workaround can inspect and park unusable queues.
-inline bool isUsableSdmaEngine(int engineId) { return engineId >= 0 && engineId % 2 == 0; }
-
-// Number of even engines in a node-local engine range. A zero total means the count is unknown.
-inline uint32_t usableSdmaEngines(uint32_t numSdmaEnginesTotal) {
-  return (numSdmaEnginesTotal + 1) / 2;
-}
-
-// Select an even engine from an HSA preferred-copy-engine mask. Prefer an even bit from the mask;
-// if it contains only odd engines, use the paired even engine immediately below the lowest one.
-// Return -1 for an empty mask.
-inline int preferredUsableEngine(uint32_t preferredMask) {
-  if (preferredMask == 0) return -1;
-  const uint32_t evenMask = preferredMask & 0x55555555u;
-  return evenMask != 0 ? __builtin_ctz(evenMask) : (__builtin_ctz(preferredMask) & ~1);
-}
-
 // A CPX/DPX partition owns host SDMA engines but no xGMI engines. Callers pass a total of 0 when
 // the engine counts could not be queried, so a failed query is never read as a partition.
 inline bool isSdmaPartition(uint32_t numSdmaXgmiEngines, uint32_t numSdmaEnginesTotal) {
@@ -70,14 +51,13 @@ inline bool oamMapEngineNeedsFold(uint32_t numSdmaXgmiEngines, uint32_t numSdmaE
   return partition || outOfRange;
 }
 
-// Fold the undoubled OAM-map value and both PCI functions onto an even engine this node reports.
-// numEnginesTotal must be > 0. An unreadable function (-1) counts as 0 and therefore collides with
-// function 0.
-inline int foldOamMapEngine(int oamEngine, int srcFn, int dstFn, uint32_t numEnginesTotal) {
+// Fold the undoubled OAM-map value and both PCI functions into the engines this
+// node reports. numEngines must be > 0. An unreadable function (-1) counts as 0
+// and therefore collides with function 0.
+inline int foldOamMapEngine(int oamEngine, int srcFn, int dstFn, uint32_t numEngines) {
   const int src = srcFn < 0 ? 0 : srcFn;
   const int dst = dstFn < 0 ? 0 : dstFn;
-  return 2 * ((oamEngine + src + dst) %
-              static_cast<int>(usableSdmaEngines(numEnginesTotal)));
+  return (oamEngine + src + dst) % static_cast<int>(numEngines);
 }
 
 // PCI function and the function-0 BDF of the same device. function is -1 when the tail is not a
@@ -108,12 +88,55 @@ inline PciFunctionBus pciFunctionBus(const std::string& busId) {
   return loc;
 }
 
-// True when taking `requested` more queues would exceed the queue budget, counted across the
-// engines the caller can safely use. Either count being 0 means the budget is unknown, which is
+// KFD gives every SDMA queue a fixed 8-byte doorbell in the process doorbell page. Instance k's
+// slots start at byte kSdmaDoorbellBase + k * kSdmaDoorbellStride of each kDoorbellHalfPage half
+// (amdgpu reserves 20 dwords per instance from qword 0x100), and slot q sits (q & 1) halves and
+// (q >> 1) qwords past that.
+//
+// A doorbell written by a GPU kernel reaches the SDMA instance that owns the start of its 32-byte
+// block; a host write reaches the instance that owns its exact address (ROCM-32598). The stride is
+// not a multiple of 32, so the first 16 bytes of every odd instance's range share a block with the
+// previous instance, and a GPU-written doorbell there never reaches the queue. Anvil rings every
+// doorbell from the GPU, so it cannot use those slots.
+constexpr uint32_t kSdmaDoorbellBase = 0x800;
+constexpr uint32_t kSdmaDoorbellStride = 0x50;
+constexpr uint32_t kGpuDoorbellRouteBytes = 0x20;
+constexpr uint32_t kDoorbellHalfPage = 0x1000;
+
+// True when a GPU write to this SDMA queue doorbell is routed to another instance. Takes the
+// doorbell's virtual address: the doorbell page is mapped page-aligned, so the low bits are the
+// offset KFD assigned.
+inline bool gpuDoorbellMisrouted(uint64_t doorbellAddress) {
+  const uint32_t offset = static_cast<uint32_t>(doorbellAddress % kDoorbellHalfPage);
+  if (offset < kSdmaDoorbellBase) return false;
+  const uint32_t instanceBase = offset - (offset - kSdmaDoorbellBase) % kSdmaDoorbellStride;
+  return offset - offset % kGpuDoorbellRouteBytes < instanceBase;
+}
+
+// Queue slots of an engine whose doorbell a GPU write reaches. engineId is node-local; on a
+// partition the global instance is node * engines + engineId, which has the same parity because
+// every MI300 partition owns an even number of engines, and parity alone decides the misrouting.
+inline uint32_t gpuReachableQueueSlots(uint32_t engineId, uint32_t queuesPerEngine) {
+  uint32_t reachable = 0;
+  for (uint32_t q = 0; q < queuesPerEngine; ++q) {
+    const uint64_t doorbell = kSdmaDoorbellBase + uint64_t{engineId} * kSdmaDoorbellStride +
+                              (q & 1) * kDoorbellHalfPage + (q >> 1) * sizeof(uint64_t);
+    if (!gpuDoorbellMisrouted(doorbell)) ++reachable;
+  }
+  return reachable;
+}
+
+// Queues Anvil can use on a node: the GPU-reachable slots of every engine. 0 (unknown) when either
+// count is 0.
+inline uint32_t sdmaQueueBudget(uint32_t numEnginesTotal, uint32_t queuesPerEngine) {
+  uint32_t budget = 0;
+  for (uint32_t e = 0; e < numEnginesTotal; ++e) budget += gpuReachableQueueSlots(e, queuesPerEngine);
+  return budget;
+}
+
+// True when taking `requested` more queues would exceed `budget`. A budget of 0 is unknown and is
 // never reported as exhausted.
-inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t numEnginesTotal,
-                                uint32_t queuesPerEngine) {
-  const uint32_t budget = numEnginesTotal * queuesPerEngine;
+inline bool queueBudgetExceeded(uint32_t used, int requested, uint32_t budget) {
   return requested > 0 && budget > 0 && used + static_cast<uint32_t>(requested) > budget;
 }
 
