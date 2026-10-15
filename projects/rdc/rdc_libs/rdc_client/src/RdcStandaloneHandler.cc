@@ -53,6 +53,43 @@ RdcStandaloneHandler::RdcStandaloneHandler(const char* ip_and_port, const char* 
   stub_ = ::rdc::RdcAPI::NewStub(grpc::CreateChannel(ip_and_port, cred));
 }
 
+namespace {
+// True on the threads that read policy streams, where the callbacks run.
+thread_local bool t_in_policy_reader = false;
+}  // namespace
+
+RdcStandaloneHandler::~RdcStandaloneHandler() {
+  // Every reader the handle owns, also one unregistered from a callback,
+  // ends here, before stub_ does.
+  std::vector<std::shared_ptr<policy_stream>> streams;
+  {
+    std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+    streams.swap(draining_);
+    for (auto& entry : policy_streams_) {
+      streams.push_back(entry.second);
+    }
+    policy_streams_.clear();
+  }
+  for (auto& stream : streams) {
+    stop_policy_stream(stream.get());
+    if (!stream->reader.joinable()) {
+      continue;
+    }
+    if (stream->reader.get_id() == std::this_thread::get_id()) {
+      // rdc_disconnect() from a callback, which rdc.h does not allow; do not
+      // join this thread from itself.
+      stream->reader.detach();
+    } else {
+      stream->reader.join();
+    }
+  }
+}
+
+void RdcStandaloneHandler::stop_policy_stream(policy_stream* stream) {
+  stream->stop = true;
+  stream->context.TryCancel();
+}
+
 rdc_status_t RdcStandaloneHandler::error_handle(::grpc::Status status, uint32_t rdc_status) {
   if (!status.ok()) {
     std::cout << status.error_message() << ". Error code:" << status.error_code() << std::endl;
@@ -908,38 +945,31 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_delete(rdc_gpu_group_t group_id,
 
 rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
                                                        rdc_policy_register_callback callback) {
-  // check if a thread for a group is already registered
-  auto it = policy_threads_.find(group_id);
-  if (it != policy_threads_.end()) {
+  std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+  if (policy_streams_.count(group_id) != 0) {
     return RDC_ST_CONFLICT;
   }
 
-  // no registered callback, start the thread to read the stream from rdcd
-  struct policy_thread_context ctx = {true, nullptr};
+  // Read the stream from rdcd on a thread of its own. The thread uses only
+  // the stream it is given, never policy_streams_, and touches the handler
+  // only to start the call.
+  auto stream = std::make_shared<policy_stream>();
+  policy_streams_.emplace(group_id, stream);
+  try {
+    stream->reader = std::thread([this, s = stream, group_id, callback]() {
+      t_in_policy_reader = true;
+      ::rdc::RegisterPolicyRequest request;
+      ::rdc::RegisterPolicyResponse reply;
 
-  ctx.t = new std::thread([this, group_id, callback]() {
-    // call rdcd
-    ::rdc::RegisterPolicyRequest request;
-    ::rdc::RegisterPolicyResponse reply;
-    ::grpc::ClientContext context;
+      request.set_group_id(group_id);
 
-    request.set_group_id(group_id);
+      std::unique_ptr<grpc::ClientReader<::rdc::RegisterPolicyResponse>> reader(
+          stub_->RegisterPolicy(&s->context, request));
 
-    // call to gRPC
-    std::unique_ptr<grpc::ClientReader<::rdc::RegisterPolicyResponse>> reader(
-        stub_->RegisterPolicy(&context, request));
-
-    bool start = true;
-    while (start) {
-      auto it = policy_threads_.find(group_id);
-      if (it != policy_threads_.end()) {
-        if (it->second.start == false) start = false;
-      } else {
-        start = false;
-      }
-
-      if (reader->Read(&reply)) {
-        reply.status();
+      // The loop ends when stop_policy_stream() sets stop, or when Read()
+      // fails: rdcd ended the stream, the connection is gone or the call was
+      // cancelled.
+      while (!s->stop && reader->Read(&reply)) {
         ::rdc::PolicyCondition cond = reply.condition();
 
         rdc_policy_callback_response_t response;
@@ -953,12 +983,13 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_register(rdc_gpu_group_t group_id,
 
         callback(&response);
       }
-    }
 
-    reader->Finish();
-  });
-
-  policy_threads_.insert(std::make_pair(group_id, ctx));
+      reader->Finish();
+    });
+  } catch (...) {  // std::system_error or std::bad_alloc
+    policy_streams_.erase(group_id);
+    return RDC_ST_INSUFF_RESOURCES;
+  }
 
   return RDC_ST_OK;
 }
@@ -968,18 +999,34 @@ rdc_status_t RdcStandaloneHandler::rdc_policy_unregister(rdc_gpu_group_t group_i
   ::rdc::UnRegisterPolicyResponse reply;
   ::grpc::ClientContext context;
 
-  // stop the assocaticted thread of a group
-  auto it = policy_threads_.find(group_id);
-  if (it != policy_threads_.end()) {
-    struct policy_thread_context& ctx = it->second;
-    ctx.start = false;
+  // A callback cannot wait for its own reader, or for another reader that
+  // may be waiting for it, so from a callback the stream goes to draining_
+  // for the destructor to join.
+  const bool from_callback = t_in_policy_reader;
+  std::shared_ptr<policy_stream> stream;
+  {
+    std::lock_guard<std::mutex> guard(policy_streams_mutex_);
+    auto it = policy_streams_.find(group_id);
+    if (it != policy_streams_.end()) {
+      stream = it->second;
+      policy_streams_.erase(it);
+      if (from_callback) {
+        draining_.push_back(stream);
+      }
+    }
   }
 
-  // construcut the request
+  // rdcd ends the stream, then the reader is stopped and joined, also when
+  // rdcd cannot be reached.
   request.set_group_id(group_id);
-
-  // call gRPC
   ::grpc::Status status = stub_->UnRegisterPolicy(&context, request, &reply);
+  if (stream) {
+    stop_policy_stream(stream.get());
+    if (!from_callback && stream->reader.joinable()) {
+      stream->reader.join();
+    }
+  }
+
   return error_handle(status, reply.status());
 }
 

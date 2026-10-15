@@ -23,9 +23,13 @@ THE SOFTWARE.
 #define INCLUDE_RDC_LIB_IMPL_RDCSTANDALONEHANDLER_H_
 #include <grpcpp/grpcpp.h>
 
+#include <atomic>
 #include <future>
+#include <map>
 #include <memory>
+#include <mutex>
 #include <thread>
+#include <vector>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
@@ -139,6 +143,7 @@ class RdcStandaloneHandler : public RdcHandler {
 
   explicit RdcStandaloneHandler(const char* ip_and_port, const char* root_ca,
                                 const char* client_cert, const char* client_key);
+  ~RdcStandaloneHandler() override;
 
  private:
   // Helper function to handle the error
@@ -147,14 +152,23 @@ class RdcStandaloneHandler : public RdcHandler {
   bool copy_gpu_usage_info(const ::rdc::GpuUsageInfo& src, rdc_gpu_usage_info_t* target);
 
   std::unique_ptr<::rdc::RdcAPI::Stub> stub_;
-  // thread for policy callback
 
-  struct policy_thread_context {
-    bool start;
-    std::thread* t;
+  // A RegisterPolicy stream and the thread that reads it and calls the
+  // callback. The thread holds a reference, so the stream outlives it.
+  struct policy_stream {
+    std::atomic<bool> stop{false};
+    ::grpc::ClientContext context;  // TryCancel() ends a blocked Read()
+    std::thread reader;
   };
+  // Makes the reader leave its loop; it does not wait for it.
+  static void stop_policy_stream(policy_stream* stream);
 
-  std::map<uint32_t, struct policy_thread_context> policy_threads_;
+  // Guards policy_streams_ and draining_. A stream is in one of them, or
+  // held by the rdc_policy_unregister() call that joins it.
+  std::mutex policy_streams_mutex_;
+  std::map<uint32_t, std::shared_ptr<policy_stream>> policy_streams_;
+  // Streams unregistered from a callback, joined by the destructor.
+  std::vector<std::shared_ptr<policy_stream>> draining_;
 };
 
 }  // namespace rdc

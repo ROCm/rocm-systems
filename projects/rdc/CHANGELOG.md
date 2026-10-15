@@ -68,6 +68,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - `rdcd` exits at once, with status 1, on a second SIGTERM or SIGINT, or on one that arrives while it shuts down, so another stop request ends a stalled shutdown.
 
+- `rdci policy --reg` no longer uses a whole CPU core once rdcd goes away, and no longer reads freed memory as it exits. With a connection to rdcd, `rdc_policy_unregister()` and `rdc_disconnect()` now wait for a running policy callback to return, and `rdc_policy_register()` works again for a group that was unregistered; it used to return `RDC_ST_CONFLICT` for that group until the connection was closed.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added
