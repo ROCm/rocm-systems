@@ -854,7 +854,9 @@ struct ncclIbRecvComm {
   // Structure to hold all the related structures regarding the CTS FIFO
   // structure.
   struct ncclIbRemCtsFifo remCtsFifo;
-  struct ncclIbRemSegLayout remSegLayout;
+  // RCCL: local source of the side-table write. Allocated only when the peer
+  // advertised NCCL_IB_CAP_MULTISEG.
+  struct ncclIbRemSegLayout* remSegLayout;
   uint32_t peerCaps;
   // Structure to hold all the completion records of all the outstanding
   // receive requests on the receiver side.
