@@ -133,6 +133,10 @@ class RdcWatchTableImpl : public RdcWatchTable {
   std::vector<rdc_field_t> health_component_fields(unsigned int components);
   //!< rdc_health_clear without taking health_api_mutex_; for callers that hold it.
   rdc_status_t health_clear_unlocked(rdc_gpu_group_t group_id);
+  //!< Start the health history of a watched field whose probe in rdc_health_set
+  //!< failed, from its first successful refresh. Caller holds watch_mutex_.
+  void start_health_history_locked(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                                   const rdc_field_value& value);
   //!< output: Whether health incidents are full
   bool add_health_incident(uint32_t gpu_index, rdc_health_system_t component,
                            rdc_health_result_t health, uint32_t err_code, std::string err_msg,

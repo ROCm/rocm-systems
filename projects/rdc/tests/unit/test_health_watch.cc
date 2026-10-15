@@ -25,11 +25,13 @@ THE SOFTWARE.
 
 #include <gtest/gtest.h>
 
+#include <chrono>
 #include <iostream>
 #include <map>
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -38,6 +40,7 @@ THE SOFTWARE.
 #include "rdc_lib/RdcModuleMgr.h"
 #include "rdc_lib/RdcNotification.h"
 #include "rdc_lib/RdcPartition.h"
+#include "rdc_lib/RdcTelemetry.h"
 #include "rdc_lib/impl/RdcCacheManagerImpl.h"
 #include "rdc_lib/impl/RdcGroupSettingsImpl.h"
 #include "rdc_lib/impl/RdcWatchTableImpl.h"
@@ -73,7 +76,9 @@ class FakeFetcher : public amd::rdc::RdcMetricFetcher {
     Reading r = (it == readings_.end()) ? Reading{RDC_ST_NOT_SUPPORTED, 0} : it->second;
     *value = {};
     value->field_id = field;
-    value->ts = 1;
+    value->ts = std::chrono::duration_cast<std::chrono::milliseconds>(
+                    std::chrono::system_clock::now().time_since_epoch())
+                    .count();
     value->type = INTEGER;
     value->status = r.status;
     value->value.l_int = r.value;
@@ -97,10 +102,40 @@ class SinglePartition : public amd::rdc::RdcPartition {
   }
 };
 
-class NoModules : public amd::rdc::RdcModuleMgr {
+class FakeTelemetry : public amd::rdc::RdcTelemetry {
  public:
-  amd::rdc::RdcTelemetryPtr get_telemetry_module() override { return nullptr; }
+  explicit FakeTelemetry(std::shared_ptr<FakeFetcher> fetcher) : fetcher_(std::move(fetcher)) {}
+
+  rdc_status_t rdc_telemetry_fields_query(uint32_t[MAX_NUM_FIELDS], uint32_t*) override {
+    return RDC_ST_NOT_SUPPORTED;
+  }
+  rdc_status_t rdc_telemetry_fields_value_get(rdc_gpu_field_t* fields, uint32_t fields_count,
+                                              rdc_field_value_f callback,
+                                              void* user_data) override {
+    std::vector<rdc_gpu_field_value_t> values(fields_count);
+    for (uint32_t i = 0; i < fields_count; i++) {
+      values[i].gpu_index = fields[i].gpu_index;
+      fetcher_->fetch_smi_field(fields[i].gpu_index, fields[i].field_id, &values[i].field_value);
+    }
+    return callback(values.data(), fields_count, user_data);
+  }
+  rdc_status_t rdc_telemetry_fields_watch(rdc_gpu_field_t*, uint32_t) override { return RDC_ST_OK; }
+  rdc_status_t rdc_telemetry_fields_unwatch(rdc_gpu_field_t*, uint32_t) override {
+    return RDC_ST_OK;
+  }
+
+ private:
+  std::shared_ptr<FakeFetcher> fetcher_;
+};
+
+class TelemetryOnly : public amd::rdc::RdcModuleMgr {
+ public:
+  explicit TelemetryOnly(amd::rdc::RdcTelemetryPtr telemetry) : telemetry_(std::move(telemetry)) {}
+  amd::rdc::RdcTelemetryPtr get_telemetry_module() override { return telemetry_; }
   amd::rdc::RdcDiagnosticPtr get_diagnostic_module() override { return nullptr; }
+
+ private:
+  amd::rdc::RdcTelemetryPtr telemetry_;
 };
 
 class NoNotifications : public amd::rdc::RdcNotification {
@@ -138,7 +173,8 @@ class HealthWatchTest : public ::testing::Test {
     groups_ = std::make_shared<amd::rdc::RdcGroupSettingsImpl>(std::make_shared<SinglePartition>());
     table_ = std::make_unique<amd::rdc::RdcWatchTableImpl>(
         groups_, std::make_shared<amd::rdc::RdcCacheManagerImpl>(), fetcher_,
-        std::make_shared<NoModules>(), std::make_shared<NoNotifications>());
+        std::make_shared<TelemetryOnly>(std::make_shared<FakeTelemetry>(fetcher_)),
+        std::make_shared<NoNotifications>());
     ASSERT_EQ(RDC_ST_OK, groups_->rdc_group_gpu_create("health", &group_));
     ASSERT_EQ(RDC_ST_OK, groups_->rdc_group_gpu_add(group_, kGpu));
   }
@@ -211,6 +247,32 @@ TEST_F(HealthWatchTest, TransientProbeFailureStaysWatched) {
   int probed = fetcher_->fetches(kGpu, RDC_HEALTH_PCIE_REPLAY_COUNT);
   check();
   EXPECT_LT(probed, fetcher_->fetches(kGpu, RDC_HEALTH_PCIE_REPLAY_COUNT));
+}
+
+TEST_F(HealthWatchTest, TransientProbeFailureStartsHistoryAtFirstRefresh) {
+  fetcher_->set(kGpu, RDC_HEALTH_PCIE_REPLAY_COUNT, RDC_ST_UNKNOWN_ERROR);
+  ASSERT_EQ(RDC_ST_OK, table_->rdc_health_set(group_, RDC_HEALTH_WATCH_PCIE));
+
+  fetcher_->set(kGpu, RDC_HEALTH_PCIE_REPLAY_COUNT, RDC_ST_OK, 0);
+  EXPECT_EQ(0u, check().incidents_count);
+
+  fetcher_->set(kGpu, RDC_HEALTH_PCIE_REPLAY_COUNT, RDC_ST_OK, PCIE_MAX_REPLAYS_PERMIN + 1);
+  rdc_health_response_t response = check();
+  ASSERT_EQ(1u, response.incidents_count);
+  EXPECT_EQ(RDC_FR_PCI_REPLAY_RATE, response.incidents[0].error.code);
+}
+
+TEST_F(HealthWatchTest, TransientProbeFailureStartsHistoryAtFirstBackgroundUpdate) {
+  fetcher_->set(kGpu, RDC_HEALTH_PCIE_REPLAY_COUNT, RDC_ST_UNKNOWN_ERROR);
+  ASSERT_EQ(RDC_ST_OK, table_->rdc_health_set(group_, RDC_HEALTH_WATCH_PCIE));
+
+  fetcher_->set(kGpu, RDC_HEALTH_PCIE_REPLAY_COUNT, RDC_ST_OK, 0);
+  ASSERT_EQ(RDC_ST_OK, table_->rdc_field_update_all());
+
+  fetcher_->set(kGpu, RDC_HEALTH_PCIE_REPLAY_COUNT, RDC_ST_OK, PCIE_MAX_REPLAYS_PERMIN + 1);
+  rdc_health_response_t response = check();
+  ASSERT_EQ(1u, response.incidents_count);
+  EXPECT_EQ(RDC_FR_PCI_REPLAY_RATE, response.incidents[0].error.code);
 }
 
 TEST_F(HealthWatchTest, NothingReadableLeavesNoWatch) {

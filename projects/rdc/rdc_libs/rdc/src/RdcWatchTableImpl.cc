@@ -918,9 +918,10 @@ rdc_status_t RdcWatchTableImpl::rdc_health_check(rdc_gpu_group_t group_id,
     result = metric_fetcher_->fetch_smi_field(fields->first, fields->second, &value);
     if (result != RDC_ST_OK) continue;
 
-    // set current values to cache
-    result = cache_mgr_->rdc_update_health_stats(group_id, fields->first, value);
-    if (result != RDC_ST_OK) continue;
+    if (cache_mgr_->rdc_update_health_stats(group_id, fields->first, value) == RDC_ST_NOT_FOUND) {
+      std::lock_guard<std::mutex> guard(watch_mutex_);
+      start_health_history_locked(group_id, fields->first, value);
+    }
   }
 
   // init response
@@ -1004,6 +1005,17 @@ rdc_status_t RdcWatchTableImpl::health_clear_unlocked(rdc_gpu_group_t group_id) 
   return RDC_ST_OK;
 }
 
+void RdcWatchTableImpl::start_health_history_locked(rdc_gpu_group_t group_id, uint32_t gpu_index,
+                                                    const rdc_field_value& value) {
+  auto health = health_watch_table_.find(group_id);
+  if (health == health_watch_table_.end()) return;
+  const auto& fields = health->second.fields;
+  if (std::find(fields.begin(), fields.end(), RdcFieldKey{gpu_index, value.field_id}) ==
+      fields.end())
+    return;
+  cache_mgr_->rdc_health_set(group_id, gpu_index, value);
+}
+
 bool RdcWatchTableImpl::is_job_watch_field(uint32_t gpu_index, rdc_field_t field_id,
                                            std::string& job_id) const {
   RdcFieldKey key{gpu_index, field_id};
@@ -1071,7 +1083,10 @@ rdc_status_t RdcWatchTableImpl::handle_fields(rdc_gpu_field_value_t* values, uin
     // Update the health stats cache
     rdc_gpu_group_t group_id;
     if (watchTable->is_health_watch_field(gpu_index, field_id, group_id)) {
-      watchTable->cache_mgr_->rdc_update_health_stats(group_id, gpu_index, values[i].field_value);
+      if (watchTable->cache_mgr_->rdc_update_health_stats(
+              group_id, gpu_index, values[i].field_value) == RDC_ST_NOT_FOUND) {
+        watchTable->start_health_history_locked(group_id, gpu_index, values[i].field_value);
+      }
     }
   }
   return RDC_ST_OK;
