@@ -171,6 +171,7 @@ do_host_tests() {
     # Standalone-only: roctx.cc's ROCTX_ENABLE arm.
     "rccl-UnitTestsMicroRoctxNvml-roctx:$SCRIPT_DIR/host_tests_micro_roctx_nvml_roctx.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
+    "rccl-UnitTestsMicroRocmwrap:$SCRIPT_DIR/host_tests_micro_rocmwrap.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs

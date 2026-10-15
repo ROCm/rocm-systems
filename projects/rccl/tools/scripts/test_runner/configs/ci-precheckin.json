@@ -268,6 +268,17 @@
       "tests": [
         {"name": "RoctxNvmlMicrotests", "description": "Host-only misc/roctx.cc + misc/nvmlwrap_stub.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_rocmwrap": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroRocmwrap",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "RocmwrapMicrotests", "description": "Host-only misc/rocmwrap.cc microtests (no GPU, no HIP/RCCL runtime); covers the cuMem VMM capability checks and rocmLibraryInit's ROCr/DMA-BUF setup", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -335,6 +346,12 @@
       "name": "RCCL Microtests - misc/roctx.cc + misc/nvmlwrap_stub.cc",
       "description": "rccl-UnitTestsMicroRoctxNvml (host-only misc/roctx.cc + misc/nvmlwrap_stub.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_roctx_nvml",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - rocmwrap.cc",
+      "description": "rccl-UnitTestsMicroRocmwrap (host-only misc/rocmwrap.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_rocmwrap",
       "enabled": true
     }
   ]
