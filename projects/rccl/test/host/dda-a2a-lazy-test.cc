@@ -27,6 +27,7 @@
 namespace {
 
 using dda_a2a_lazy::kDirect;
+using dda_a2a_lazy::kImplicit;
 using dda_a2a_lazy::kPush;
 
 constexpr int64_t kFlagBytes = 2ll << 20;  // dda::common::kDdaA2aPushFlagBytes (HIP-only header)
@@ -74,6 +75,7 @@ class FakeBootstrap {
 struct Blob {
   uint64_t pushDesc;
   uint64_t directDesc;
+  uint64_t implicitDesc;
 };
 
 struct RankPlan {
@@ -95,8 +97,9 @@ class FakeOps {
     mine->pushBytes = pushBytes;
     mine->blob.pushDesc = 0x1000 + rank_;
     mine->blob.directDesc = 0x2000 + rank_;
+    mine->blob.implicitDesc = 0x3000 + rank_;
     freeLeft_ = plan_.freeBytes;
-    for (uint32_t part : {kPush, kDirect}) {
+    for (uint32_t part : {kPush, kDirect, kImplicit}) {
       if (!(want & part)) continue;
       if (plan_.setupFails & part) continue;
       if (part == kPush && plan_.freeBytes >= 0) {
@@ -120,6 +123,7 @@ class FakeOps {
     for (int i = 0; i < n_; ++i) {
       if ((parts & kPush) && all[i].blob.pushDesc != uint64_t(0x1000 + i)) descOk_ = false;
       if ((parts & kDirect) && all[i].blob.directDesc != uint64_t(0x2000 + i)) descOk_ = false;
+      if ((parts & kImplicit) && all[i].blob.implicitDesc != uint64_t(0x3000 + i)) descOk_ = false;
     }
     imported_ |= parts & ~plan_.importFails;
     return parts & ~plan_.importFails;
@@ -245,6 +249,49 @@ TEST(DdaA2aLazyMicrotest, MixedFailuresStayUniform) {
   plans[3].setupFails = kDirect;
   plans[9].importFails = kPush;
   ExpectUniform(RunRanks(plans), 0, 0, 2);
+}
+
+// Implicit staging buffer (RCCL_DDA_A2A_IMPLICIT=1, opt-in): agreed only when every rank wants and
+// creates it, and never without the Direct flag buffer it serves.
+TEST(DdaA2aLazyMicrotest, ImplicitAgreedWhenEveryRankHasIt) {
+  std::vector<RankPlan> plans(8);
+  for (auto& p : plans) p.want = kPush | kDirect | kImplicit;
+  ExpectUniform(RunRanks(plans), kPush | kDirect | kImplicit, 1ll << 30, 2);
+}
+
+TEST(DdaA2aLazyMicrotest, ImplicitNotWantedOnOneRankIsOffEverywhere) {
+  std::vector<RankPlan> plans(8);
+  for (auto& p : plans) p.want = kPush | kDirect | kImplicit;
+  plans[5].want = kPush | kDirect;  // RCCL_DDA_A2A_IMPLICIT unset on one rank
+  auto out = RunRanks(plans);
+  ExpectUniform(out, kPush | kDirect, 1ll << 30, 2);
+  for (int r = 0; r < 8; ++r) {
+    if (r != 5) EXPECT_TRUE(out[r].released & kImplicit) << "rank " << r << " frees its unused staging buffer";
+  }
+}
+
+TEST(DdaA2aLazyMicrotest, ImplicitDroppedWithDirect) {
+  std::vector<RankPlan> plans(4);
+  for (auto& p : plans) p.want = kPush | kDirect | kImplicit;
+  plans[2].setupFails = kDirect;  // the staging buffer exists everywhere, the flag buffer does not
+  auto out = RunRanks(plans);
+  ExpectUniform(out, kPush, 1ll << 30, 2);
+  for (int r = 0; r < 4; ++r) EXPECT_TRUE(out[r].released & kImplicit) << r;
+  plans[2].setupFails = 0;
+  plans[1].importFails = kDirect;  // decided in the second round
+  out = RunRanks(plans);
+  ExpectUniform(out, kPush, 1ll << 30, 2);
+  for (int r = 0; r < 4; ++r) EXPECT_TRUE(out[r].released & kImplicit) << r;
+}
+
+TEST(DdaA2aLazyMicrotest, ImplicitFailureLeavesDirectAndPush) {
+  std::vector<RankPlan> plans(16);
+  for (auto& p : plans) p.want = kPush | kDirect | kImplicit;
+  plans[7].setupFails = kImplicit;
+  ExpectUniform(RunRanks(plans), kPush | kDirect, 1ll << 30, 2);
+  plans[7].setupFails = 0;
+  plans[12].importFails = kImplicit;
+  ExpectUniform(RunRanks(plans), kPush | kDirect, 1ll << 30, 2);
 }
 
 // Push buffer sizes against free device memory: the configured size and its halves down to 64 MiB,

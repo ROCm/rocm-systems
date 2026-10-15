@@ -62,6 +62,8 @@ const char* ncclDdaA2aWdSiteName(uint32_t site) {
   case kDdaWdPushCuReady: return "push-CU READY (peer data not arrived)";
   case kDdaWdDirectEntry: return "direct ENTRY (peer has not started the op)";
   case kDdaWdDirectDone: return "direct DONE (peer data not arrived)";
+  case kDdaWdHybridConsumed: return "direct staged CONSUMED (peer has not copied a staged round out)";
+  case kDdaWdHybridDone: return "direct staged DONE (peer has not staged a round)";
   case kDdaWdLL: return "LL line flag";
   case kDdaWdLL128V2: return "LL128 line flag";
   case kDdaA2aErrLaunch: return "push / Direct launch failed on the host (device epoch out of step with the peers)";

@@ -160,6 +160,7 @@ set(SRC_FILES
   algorithms/dda/alltoall/alltoall_dda_watchdog.h
   algorithms/dda/alltoall/dda_alltoall_fabric_push_host.h
   algorithms/dda/alltoall/alltoall_dda_fabric_direct.h
+  algorithms/dda/alltoall/alltoall_dda_fabric_direct_hybrid.h
   algorithms/dda/alltoall/dda_alltoall_fabric_direct_host.h
   algorithms/dda/alltoall/dda_alltoall_fabric_lazy_host.h
   algorithms/dda/alltoall/dda_alltoall_implicit_policy.h

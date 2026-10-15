@@ -892,6 +892,37 @@ threshold table introduced for gfx1250.
       - | ``1``: Enabled (default).
         | ``0``: Disabled; those calls use LL128, the one-shot push path or p2p.
 
+    * - | ``RCCL_DDA_A2A_IMPLICIT``
+        | gfx1250 MNNVL communicators of up to 16 ranks: extends the zero-copy path (``RCCL_DDA_A2A_DIRECT``)
+          to out-of-place calls whose receive buffer is not in a symmetric window, in the same size window.
+          Each receive allocation is registered with every peer on first use (cuMem POSIX file descriptor or
+          FABRIC handle for VMM memory such as ``ncclMemAlloc``; legacy IPC for ``hipMalloc`` memory, same
+          host only) and cached; buffers registered with ``ncclCommRegister`` use that registration. A peer
+          that cannot write a receive buffer directly (no mapping, e.g. a ``hipMalloc`` buffer on another
+          tray) stages its data through the receiver's 64 MiB per-rank staging buffer instead, so ranks need
+          not agree on registration. The first call that sees a new allocation waits for the peers'
+          imports (normally milliseconds, at most 30 s) while the peers' kernels already wait for this
+          rank, so ``RCCL_DDA_A2A_TIMEOUT``, if set, should be well above that. A ``hipMalloc``
+          allocation whose import is still in flight after 30 s is staged and stays registered until the
+          communicator is destroyed (it must not be freed before). The path becomes available on the first AllToAll that creates the push / zero-copy
+          buffers. Takes effect only when set on every rank.
+      - | ``0``: Disabled (default); such calls use LL128, the one-shot push path or p2p.
+        | ``1``: Enabled.
+
+    * - | ``RCCL_DDA_A2A_IMPLICIT_CACHE``
+        | With ``RCCL_DDA_A2A_IMPLICIT=1``: number of receive allocations kept registered per communicator
+          (least recently used is released). An allocation used by a graph capture stays registered until
+          the graph is destroyed; when every cached allocation is held by a live graph, new allocations
+          are staged.
+      - | Default: ``8``
+
+    * - | ``RCCL_DDA_A2A_IMPLICIT_LEGACY_BYTES``
+        | With ``RCCL_DDA_A2A_IMPLICIT=1``: bytes of ``hipMalloc`` receive allocations imported per
+          communicator. These imports are released only when the communicator is destroyed; beyond the
+          budget such buffers are staged.
+      - | Default: ``4294967296`` (4 GiB)
+        | ``0``: never import ``hipMalloc`` memory; negative: no limit.
+
     * - | ``RCCL_DDA_A2A_PUSH``
         | gfx1250 MNNVL communicators: enables the one-shot push DDA AllToAll path for out-of-place calls
           above the LL128 window up to 1 GiB (in-place calls never use it), which stages through a

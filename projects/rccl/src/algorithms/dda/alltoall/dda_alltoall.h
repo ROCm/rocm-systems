@@ -18,8 +18,9 @@ struct ncclComm;
 // negative controls). Production builds compile each knob to its default (no env lookup, the
 // dead branches fold away); build with -DRCCL_DDA_A2A_TUNING=1 to read RCCL_<env> again.
 // Env that stays in production (documented in docs/api-reference/env-variables.rst):
-// RCCL_DDA_A2A_DIRECT / _PUSH (kill switches), RCCL_DDA_A2A_PUSH_BUFFER_SIZE, RCCL_DDA_A2A_TIMEOUT
-// (alltoall_dda_watchdog.h), RCCL_MEMALLOC_FABRIC.
+// RCCL_DDA_A2A_DIRECT / _PUSH (kill switches), RCCL_DDA_A2A_IMPLICIT (opt-in),
+// RCCL_DDA_A2A_IMPLICIT_CACHE, RCCL_DDA_A2A_IMPLICIT_LEGACY_BYTES, RCCL_DDA_A2A_PUSH_BUFFER_SIZE,
+// RCCL_DDA_A2A_TIMEOUT (alltoall_dda_watchdog.h), RCCL_MEMALLOC_FABRIC.
 // Selection thresholds live in rcclArchThresholds (a2a* fields), not in env.
 // Define each knob in exactly one translation unit (RCCL_PARAM has external linkage).
 #ifndef RCCL_DDA_A2A_TUNING
@@ -97,8 +98,8 @@ size_t ncclAllToAllDdaFabricPushRoundBytes(ncclComm* comm, size_t perPeer);
 ncclResult_t ncclAllToAllDdaFabricPush(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,
                                        ncclComm* comm, cudaStream_t stream);
 
-// Zero-copy one-shot push into the peers' recvbuff in a symmetric window (gfx1250); flag buffer
-// from ncclDdaA2aLazyInit (dda_alltoall_fabric_direct_host.h).
+// Zero-copy one-shot push into the peers' recvbuff (gfx1250): a symmetric-window recvbuff, or any
+// other with the implicit part; flag buffer from ncclDdaA2aLazyInit (dda_alltoall_fabric_direct_host.h).
 ncclResult_t ncclDdaA2aDirectCommFini(ncclComm* comm);
 // Shape + "recvbuff in a symmetric window", independent of the path's state (the lazy trigger);
 // no side effects.
@@ -107,6 +108,11 @@ bool ncclAllToAllDdaFabricDirectWindowed(ncclComm* comm, const void* sendbuff, v
 // Windowed + the agreed flag buffer + geometry + every peer's mapping; no side effects.
 bool ncclAllToAllDdaFabricDirectEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
                                          ncclDataType_t datatype);
+// For a call that is NOT windowed: the agreed implicit part (RCCL_DDA_A2A_IMPLICIT) + shape +
+// geometry + staging round bound; comm-uniform, no side effects. The call then runs the hybrid kernel
+// (per-pair zero-copy or staging, decided by each receiver at run time).
+bool ncclAllToAllDdaFabricDirectImplicitEligible(ncclComm* comm, const void* sendbuff, void* recvbuff, size_t count,
+                                                 ncclDataType_t datatype);
 uint32_t ncclAllToAllDdaFabricDirectBlocks(ncclComm* comm);
 // Any failure poisons the comm (ncclDdaA2aPoison, kDdaA2aErrLaunch), as a push call does.
 ncclResult_t ncclAllToAllDdaFabricDirect(const void* sendbuff, void* recvbuff, size_t count, ncclDataType_t datatype,

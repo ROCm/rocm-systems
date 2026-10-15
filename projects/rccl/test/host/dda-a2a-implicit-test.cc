@@ -110,3 +110,108 @@ TEST(DdaA2aImplicitMicrotest, LegacyChurnPlateausAtBudget) {
   EXPECT_EQ(size_t(kBudget), imported);
   EXPECT_EQ(1000 - 4, staged);
 }
+
+// Staging slot of pairs that are not mapped (64 MiB staging buffer per rank, the production size):
+// one 4 KiB-multiple slot per source, never above the per-peer chunk rounded up to 4 KiB, and a
+// round count every rank computes alike. The Direct window (P > 1 MiB, T <= 16 GiB) stays far below
+// the 16-bit round limit.
+TEST(DdaA2aImplicitMicrotest, StagingSlotAndRounds) {
+  const size_t M = 1u << 20;
+  const size_t scratch = 64 * M;
+  EXPECT_EQ(8 * M, stagingSlot(scratch, 8, 1ull << 30));
+  EXPECT_EQ(4 * M, stagingSlot(scratch, 16, 1ull << 30));
+  EXPECT_EQ(32 * M, stagingSlot(scratch, 2, 8ull << 30));
+  EXPECT_EQ(2 * M, stagingSlot(scratch, 8, 2 * M));                    // capped at the chunk
+  EXPECT_EQ(2 * M + 4096, stagingSlot(scratch, 8, 2 * M + 16));        // chunk rounded up to 4 KiB
+  EXPECT_EQ(size_t(5461) * 4096, stagingSlot(scratch, 3, 1ull << 30));  // non-power-of-two rank count
+  EXPECT_EQ(0u, stagingSlot(scratch, 0, M));
+  EXPECT_EQ(0u, stagingSlot(4096 * 4 - 1, 4, M));                      // under 4 KiB per source
+  EXPECT_EQ(SIZE_MAX, stagingRounds(4096 * 4 - 1, 4, M));
+  EXPECT_EQ(1u, stagingRounds(scratch, 8, 2 * M));
+  EXPECT_EQ(128u, stagingRounds(scratch, 8, 1ull << 30));             // 8r, T = 8 GiB
+  EXPECT_EQ(256u, stagingRounds(scratch, 16, 1ull << 30));            // 16r, T = 16 GiB (a2aDirectMax)
+  EXPECT_EQ(256u, stagingRounds(scratch, 2, 8ull << 30));             // 2r, T = 16 GiB
+  EXPECT_EQ(1u, stagingRounds(scratch, 16, 1));
+}
+
+namespace {
+struct Retiring {
+  void* ev;
+  int id;
+};
+struct LegacyEntry {
+  uintptr_t base;
+  bool legacy;
+};
+}  // namespace
+
+// Retiring entries never query their events while the call's stream is capturing (a query during a
+// capture invalidates it); only a definite completion lets an entry close, any other query result
+// (not ready, an error such as a capture-unsupported return) keeps it.
+TEST(DdaA2aImplicitMicrotest, ProgressNeverQueriesWhileCapturing) {
+  int ev0 = 0, ev1 = 0;
+  std::vector<Retiring> v = {{&ev0, 0}, {&ev1, 1}, {nullptr, 2}};
+  int queries = 0, closes = 0;
+  auto query = [&](Retiring& r) {
+    ++queries;
+    if (r.id == 0) return false;  // not ready, or any error
+    r.ev = nullptr;
+    return true;
+  };
+  auto close = [&](Retiring&) {
+    ++closes;
+    return true;
+  };
+  progressRetiring(v, /*capturing=*/true, query, close);
+  EXPECT_EQ(0, queries);
+  EXPECT_EQ(0, closes);
+  EXPECT_EQ(3u, v.size());
+  progressRetiring(v, /*capturing=*/false, query, close);
+  EXPECT_EQ(2, queries);  // entry 2 has no event left to wait for
+  EXPECT_EQ(2, closes);
+  ASSERT_EQ(1u, v.size());
+  EXPECT_EQ(0, v[0].id);
+  // A close still in flight keeps the entry (its event is not queried again).
+  v[0].ev = nullptr;
+  progressRetiring(v, false, query, [](Retiring&) { return false; });
+  EXPECT_EQ(1u, v.size());
+  EXPECT_EQ(2, queries);
+}
+
+// An ncclCommRegister record of an allocation the cache already imported with legacy IPC (cached or
+// retired-but-mapped) must keep using the cache (no second legacy import).
+TEST(DdaA2aImplicitMicrotest, LegacyEntryAtBasePreferredOverRegistration) {
+  LegacyEntry a{0x1000, true}, b{0x2000, false}, z{0x3000, true};
+  std::vector<LegacyEntry*> cache = {&a, &b}, zombies = {&z};
+  EXPECT_TRUE(hasLegacyAt(cache, zombies, 0x1000));
+  EXPECT_FALSE(hasLegacyAt(cache, zombies, 0x2000));  // VMM import: the registration may import it again
+  EXPECT_TRUE(hasLegacyAt(cache, zombies, 0x3000));
+  EXPECT_FALSE(hasLegacyAt(cache, zombies, 0x4000));
+}
+
+// The real implicit predicate (ncclAllToAllDdaFabricDirectImplicitEligible forwards to it): the agreed
+// staging part, shape and round bound decide; registration state is not an input.
+TEST(DdaA2aImplicitMicrotest, ImplicitEligiblePredicate) {
+  const size_t M = 1u << 20, S = 64 * M, maxR = 0xFFFE;
+  const uintptr_t snd = 0x10000000, rcv = 0x20000000;
+  EXPECT_TRUE(implicitEligible(true, S, 8, 8, 16, 2 * M, snd, rcv, true, maxR));
+  EXPECT_FALSE(implicitEligible(false, S, 8, 8, 16, 2 * M, snd, rcv, true, maxR));  // no staging buffer agreed
+  EXPECT_FALSE(implicitEligible(true, S, 8, 8, 16, 2 * M, rcv, rcv, true, maxR));   // in place
+  EXPECT_FALSE(implicitEligible(true, S, 32, 32, 16, 2 * M, snd, rcv, true, maxR)); // > 16 ranks
+  EXPECT_FALSE(implicitEligible(true, S, 8, 4, 16, 2 * M, snd, rcv, true, maxR));   // not one LSA team
+  EXPECT_FALSE(implicitEligible(true, S, 8, 8, 16, 2 * M + 8, snd, rcv, true, maxR));  // P % 16
+  EXPECT_FALSE(implicitEligible(true, S, 8, 8, 16, 2 * M, snd + 8, rcv, true, maxR));  // alignment
+  EXPECT_FALSE(implicitEligible(true, S, 8, 8, 16, 2 * M, snd, rcv, false, maxR));     // no geometry
+  EXPECT_FALSE(implicitEligible(true, 4096 * 8 - 1, 8, 8, 16, 2 * M, snd, rcv, true, maxR));  // no slot
+  EXPECT_TRUE(implicitEligible(true, S, 8, 8, 16, 1ull << 30, snd, rcv, true, 128));   // 128 rounds
+  EXPECT_FALSE(implicitEligible(true, S, 8, 8, 16, 1ull << 30, snd, rcv, true, 127));  // round bound
+}
+
+// The launcher's kernel choice: window kernel for windowed calls, hybrid otherwise.
+TEST(DdaA2aImplicitMicrotest, DispatchDirectByWindow) {
+  int w = 0, h = 0;
+  EXPECT_EQ(1, dispatchDirect(true, [&] { return ++w; }, [&] { return ++h + 100; }));
+  EXPECT_EQ(101, dispatchDirect(false, [&] { return ++w; }, [&] { return ++h + 100; }));
+  EXPECT_EQ(1, w);
+  EXPECT_EQ(1, h);
+}
