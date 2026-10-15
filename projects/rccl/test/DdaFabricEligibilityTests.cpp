@@ -1653,12 +1653,12 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_OverSlotCapacityRejecte
         mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum));
 }
 
-// gfx1250 defaults: LL is 1 MiB total, LL128 is 64 MiB total. The selector
-// checks LL first, so LL128 owns every message from just above 1 MiB through 64 MiB.
+// gfx1250 on this 8-rank comm: ReduceScatter LL128 is nRanks x 2 MiB.
+// The selector checks LL first, so LL128 owns messages above the LL cap through 16 MiB.
 TEST_F(DdaFabricEligibilityTest, ReduceScatter_Gfx1250DefaultThresholds)
 {
     constexpr size_t kLlCap    = 1ULL * 1024 * 1024;
-    constexpr size_t kLl128Cap = 64ULL * 1024 * 1024;
+    constexpr size_t kLl128Cap = 16ULL * 1024 * 1024;
     EXPECT_EQ(rcclDdaLLThreshold(mockComm_.get(), ncclFuncReduceScatter), kLlCap);
     EXPECT_EQ(rcclDdaLL128Threshold(mockComm_.get(), ncclFuncReduceScatter), kLl128Cap);
     EXPECT_LT(kLlCap, kLl128Cap);
@@ -1742,7 +1742,7 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_MaxRanksEligible)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32, ncclSum));
 }
 
-// 2 MiB total is the first power-of-two step above the 1 MiB LL cap and inside 64 MiB.
+// 2 MiB total is the first power-of-two step above the 1 MiB LL cap and inside the 8-rank LL128 cap.
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AboveLlCapWithinLl128Cap)
 {
     constexpr size_t totalBytes = 2ULL * 1024 * 1024;
@@ -1759,7 +1759,7 @@ TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AboveLlCapWithinLl128Ca
 TEST_F(DdaFabricLL128EligibilityTest, ReduceScatterLL128_AtThresholdEligible)
 {
     const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncReduceScatter);
-    ASSERT_EQ(totalCap, 64ULL * 1024 * 1024);
+    ASSERT_EQ(totalCap, 16ULL * 1024 * 1024);
     const int savedRanks = mockComm_.comm.nRanks;
     for (int nRanks : {4, 8})
     {
