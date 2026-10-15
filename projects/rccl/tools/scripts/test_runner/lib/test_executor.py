@@ -3295,7 +3295,8 @@ class TestExecutor:
                        "rccl-UnitTestsMicroGinHost",
                        "rccl-UnitTestsMicroDebug",
                        "rccl-UnitTestsMicroApiTrace",
-                       "rccl-UnitTestsMicroRecorder"]:
+                       "rccl-UnitTestsMicroRecorder",
+                       "rccl-UnitTestsMicroCollTrace"]:
             binary_path = os.path.join(host_test_dir, binary)
             if os.path.isfile(binary_path):
                 object_files.extend(["--object", binary_path])

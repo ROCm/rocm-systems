@@ -290,6 +290,17 @@
       "tests": [
         {"name": "RecorderMicrotests", "description": "Host-only misc/recorder.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_coll_trace": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroCollTrace",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "CollTraceMicrotests", "description": "Host-only misc/latency_profiler microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -369,6 +380,12 @@
       "name": "RCCL Microtests - misc/recorder.cc",
       "description": "rccl-UnitTestsMicroRecorder (host-only misc/recorder.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_recorder",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - misc/latency_profiler",
+      "description": "rccl-UnitTestsMicroCollTrace (host-only misc/latency_profiler microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_coll_trace",
       "enabled": true
     }
   ]
