@@ -1616,24 +1616,26 @@ static bool DiscoverRdmaNics(NetworkCounterContext& ctx) {
   return true;
 }
 
-static NicType DetectNicTypeFromIbDevices(const std::vector<std::string>& ib_names,
-                                          bool& mixed) {
-  NicType nic_type = NIC_UNKNOWN;
-  mixed = false;
-  for (size_t i = 0; i < ib_names.size(); i++) {
-    NicType t = NetCounterDetectNicType(ib_names[i]);
-    if (t == NIC_UNKNOWN) continue;
-    if (nic_type == NIC_UNKNOWN) {
-      nic_type = t;
-    } else if (t != nic_type) {
-      mixed = true;
-      break;
+// Use the most common NIC type's table and drop devices of another known type
+// (e.g. a frontend NIC), which that table cannot read.
+static NicType SelectNicType(NetworkCounterContext& ctx) {
+  std::vector<NicType> types;
+  for (const auto& ib : ctx.ib_names) { types.push_back(NetCounterDetectNicType(ib)); }
+  bool mixed = false;
+  NicType nic_type = NetCounterDominantNicType(types, mixed);
+  if (!mixed) { return nic_type; }
+  std::vector<std::string> nics, ibs;
+  for (size_t i = 0; i < types.size(); i++) {
+    if (types[i] != NIC_UNKNOWN && types[i] != nic_type) {
+      fprintf(stderr, "# Warning: skipping %s (%s), counters are read as %s\n", ctx.ib_names[i].c_str(),
+              NicTypeStr(types[i]), NicTypeStr(nic_type));
+      continue;
     }
+    nics.push_back(ctx.nic_names[i]);
+    ibs.push_back(ctx.ib_names[i]);
   }
-  if (mixed) {
-    fprintf(stderr,
-            "# Warning: mixed NIC types detected during counter table selection\n");
-  }
+  ctx.nic_names = nics;
+  ctx.ib_names = ibs;
   return nic_type;
 }
 
@@ -1658,8 +1660,7 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     return ctx;
   }
 
-  bool mixed_detect = false;
-  NicType nic_type = DetectNicTypeFromIbDevices(ctx.ib_names, mixed_detect);
+  NicType nic_type = SelectNicType(ctx);
   ctx.selected_counters = NetCounterGetCounterList(nic_type);
 
   size_t ndevs = ctx.nic_names.size();
@@ -1687,7 +1688,7 @@ NetworkCounterContext NetCounterCollectBefore(struct threadArgs* args) {
     }
   }
   printf("\n");
-  printf("# NIC type: %s\n", mixed_detect ? "MIXED" : NicTypeStr(nic_type));
+  printf("# NIC type: %s\n", NicTypeStr(nic_type));
   printf("# Counters (%zu):", ctx.selected_counters.size());
   for (const auto& d : ctx.selected_counters) { printf(" %s", d.name.c_str()); }
   printf("\n");
