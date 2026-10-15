@@ -8,8 +8,7 @@
 
 #if defined(ENABLE_ROCSHMEM_GIN)
 
-#include <infiniband/verbs.h>
-
+#include "ibvcore.h"
 #include "gin_rocshmem_gda_inspect.h"
 
 namespace {
@@ -48,6 +47,12 @@ TEST(GinMtuNegotiation, NegotiateEqualMtus) {
 TEST(GinMtuNegotiation, NegotiateRejectsInvalidRemoteMtu) {
   int out = -1;
   EXPECT_EQ(ginTestNegotiatePathMtu(IBV_MTU_4096, 0, &out), -1);
+  EXPECT_EQ(out, -1);  // untouched on failure
+}
+
+TEST(GinMtuNegotiation, NegotiateRejectsInvalidLocalMtu) {
+  int out = -1;
+  EXPECT_EQ(ginTestNegotiatePathMtu(0, IBV_MTU_4096, &out), -1);
   EXPECT_EQ(out, -1);  // untouched on failure
 }
 
