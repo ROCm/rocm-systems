@@ -1,0 +1,5 @@
+[Unit]
+Description=Benchmark runner CPU allocation
+
+[Slice]
+AllowedCPUs=0-63
