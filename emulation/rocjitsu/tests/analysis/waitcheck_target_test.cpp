@@ -702,15 +702,18 @@ TEST(WaitcheckTarget, Cdna4GdsUsesOnlyLgkmcnt) {
     EXPECT_EQ(events[0].kind, WaitEventKind::Gds);
     EXPECT_EQ(events[0].registers, TrackedRegisterSource::Defs);
   };
+  // CDNA4 reserves GDS=1 (ISA Table 57). Exercise defensive classification,
+  // not supported executable GDS instructions.
   for (const std::array<uint32_t, 2> words :
        {std::array<uint32_t, 2>{0xd86d0000u, 1u},        // ds_read_b32 v0, v1 gds.
         std::array<uint32_t, 2>{0xd81b0000u, 0x201u},    // ds_write_b32 v1, v2 gds.
         std::array<uint32_t, 2>{0xd8010000u, 0x201u}}) { // ds_add_u32 v1, v2 gds.
-    auto inst = decode(words, ROCJITSU_CODE_ARCH_CDNA4);
+    std::unique_ptr<Instruction> inst = decode(words, ROCJITSU_CODE_ARCH_CDNA4);
     ASSERT_NE(inst, nullptr);
     expect_ds_only(*inst);
   }
-  // This opcode implies GDS without consulting an encoded GDS bit.
+  // This synthetic mnemonic is absent from the CDNA4 instruction set; it
+  // exercises the fallback for implicit GDS without consulting a GDS bit.
   NamedInstruction always_gds("ds_ordered_count");
   expect_ds_only(always_gds);
 }
