@@ -1714,6 +1714,18 @@ TEST_F(NetConnectMicrotest, SendConnect_OtherProcess_ImportsHostAndDeviceMemory)
   EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_SIMPLE], imported.data());
 }
 
+TEST_F(NetConnectMicrotest, SendConnect_CuMemSameDevice_UsesProxyBuffersDirectly) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook peer(g_hipDeviceEnablePeerAccess, [](int, unsigned) { return hipSuccess; });
+  ScopedHook shm(g_shmImportShareableBuffer, [](auto...) { return ncclInternalError; });
+  ScopedHook dev(g_ncclP2pImportShareableBuffer, [](auto...) { return ncclInternalError; });
+
+  ASSERT_EQ(SendConnect(), ncclSuccess);
+
+  EXPECT_EQ(peer.calls + shm.calls + dev.calls, 0);
+  EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_SIMPLE], devMem_.data());
+}
+
 TEST_F(NetConnectMicrotest, SendConnect_CuMemOtherDevice_ImportsInsteadOfPeerAccess) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   BuildMap(1, 3, 0);
@@ -1955,13 +1967,20 @@ TEST_F(NetConnectMicrotest, SendFree_OtherDeviceCuMem_ReleasesShareableBuffer) {
 TEST_F(NetConnectMicrotest, SendFree_OtherProcess_ClosesHostShm) {
   map_.sameProcess = 0;
   map_.cudaDev = g_currentDevice;
-  ScopedHook shmClose(g_shmIpcClose, [](shmIpcDesc*) { return ncclSuccess; });
-  conn_.transportResources = HeapMap();
+  shmIpcDesc* closed = nullptr;
+  ScopedHook shmClose(g_shmIpcClose, [&](shmIpcDesc* desc) {
+    closed = desc;
+    return ncclSuccess;
+  });
+  connectMap* map = HeapMap();
+  shmIpcDesc* attached = &map->mems[NCCL_NET_MAP_HOSTMEM].attachDesc;  // compared by address only
+  conn_.transportResources = map;
 
   EXPECT_EQ(sendFree(&comm_, &conn_), ncclSuccess);
   conn_.transportResources = nullptr;
 
   EXPECT_EQ(shmClose.calls, 1);
+  EXPECT_EQ(closed, attached);
 }
 
 TEST_F(NetConnectMicrotest, RecvFree_ReleasesMap) {
