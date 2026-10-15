@@ -4017,6 +4017,7 @@ struct AllToAllPlanScene {
   std::vector<char> recvBufs = std::vector<char>(kRanks);
 
   AllToAllPlanScene() {
+    InstallSendRecvDevFuncIds();
     ncclComm* c = bp.c();
     c->rank = 0;
     c->nRanks = kRanks;
