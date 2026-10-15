@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "net_telemetry.h"
+#include "net_telemetry_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -206,6 +206,39 @@ int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) 
   return startSlot;
 }
 
+int rcclTelemetrySetupQps(int devIdx, int chIdx, const void* const* keys, const int* isDataQp, int n,
+                          RcclQpStats** handles) {
+  int distinct = 0;
+  for (int q = 0; q < n; q++) {
+    handles[q] = NULL;
+    int first = q;
+    for (int j = 0; j < q && first == q; j++) {
+      if (keys[j] == keys[q]) first = j;
+    }
+    if (first == q) distinct++;
+  }
+  int numSlots = 0;
+  int startSlot = rcclTelemetrySetupChannel(devIdx, chIdx, distinct, &numSlots);
+  int k = 0;
+  for (int q = 0; q < n; q++) {
+    int first = q;
+    for (int j = 0; j < q && first == q; j++) {
+      if (keys[j] == keys[q]) first = j;
+    }
+    if (first != q) {
+      handles[q] = handles[first];
+      continue;
+    }
+    // Entries past the granted slots stay NULL (untracked).
+    if (k < numSlots) {
+      rcclTelemetrySetQpRole(devIdx, chIdx, startSlot + k, isDataQp[q]);
+      handles[q] = rcclTelemetryResolveQp(devIdx, chIdx, startSlot + k);
+    }
+    k++;
+  }
+  return numSlots;
+}
+
 /* ---- Periodic HW-counter sampler (time series for congestion) ------ */
 /* When RCCL_TELEMETRY_SAMPLE_MS > 0, a background thread samples a small
  * set of congestion-relevant IB-sysfs counters plus the atomic SW byte
@@ -239,7 +272,7 @@ static const RcclTelSampledDesc rcclTelSampled[] = {
   {"oos_drop_count", NULL},                       /* ainic, mlx5, thor2 */
   {"seq_err_naks_rcvd", NULL},                    /* ainic, mlx5, thor2 */
   {"rnr_retry_err", NULL},                        /* ainic, mlx5, thor2 */
-  {"local_ack_timeout_err", "to_retransmits"},    /* mlx5 | ainic, thor2 */
+  {"local_ack_timeout_err", "to_retransmits"},    /* mlx5 | ainic, thor2 (no such counter) */
 };
 #define RCCL_TEL_NUM_SAMPLED ((int)(sizeof(rcclTelSampled) / sizeof(rcclTelSampled[0])))
 #define RCCL_TEL_MAX_SAMPLES 100000
@@ -530,6 +563,7 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC("seq_err_naks_rcvd",          HWC_IB_SYSFS, "seq_err_naks_rcvd"),
   HWC("rnr_retry_err",              HWC_IB_SYSFS, "rnr_naks_rcvd"),
   HWC("max_retry_exceeded",         HWC_IB_SYSFS, "max_retry_exceeded"),
+  HWC("local_ack_timeout_err",      HWC_IB_SYSFS, "local_ack_timeout_err"),
   HWC_FB("oos_drop_count",          HWC_IB_SYSFS, "res_oos_drop_count", "oos_drop_count"),
   HWC("dup_req",                    HWC_IB_SYSFS, "dup_req"),
   HWC("missing_resp",               HWC_IB_SYSFS, "missing_resp"),
@@ -1391,24 +1425,24 @@ static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* c
 /* Periodic HW-counter sampler                                        */
 /* ------------------------------------------------------------------ */
 
-/* Resolve a sampled json_name, or its alternate, to a row of the HW table. */
-static int rcclTelemetrySampledTableIdx(const RcclHwConfig* hw, int sampled) {
-  const RcclTelSampledDesc* s = &rcclTelSampled[sampled];
-  for (int c = 0; c < hw->num_counters; c++) {
-    if (strcmp(hw->counters[c].json_name, s->name) == 0) return c;
-  }
-  if (s->alt == NULL) return -1;
-  for (int c = 0; c < hw->num_counters; c++) {
-    if (strcmp(hw->counters[c].json_name, s->alt) == 0) return c;
-  }
-  return -1;
-}
-
 /* Read one resolved row, honouring the table's fallback sysfs key. */
 static int64_t rcclTelemetrySampleRow(const RcclDeviceStats* dev, const RcclHwCounterDesc* d) {
   int64_t v = rcclTelemetryReadHwCounter(dev->roce_device, d->key);
   if (v < 0 && d->key_fallback != NULL) v = rcclTelemetryReadHwCounter(dev->roce_device, d->key_fallback);
   return v;
+}
+
+/* Resolve a sampled json_name to a row of the HW table. The alternate is used
+ * when the table has no such row or the device cannot read it. */
+static int rcclTelemetrySampledTableIdx(const RcclDeviceStats* dev, const RcclHwConfig* hw, int sampled) {
+  const RcclTelSampledDesc* s = &rcclTelSampled[sampled];
+  int nameIdx = -1, altIdx = -1;
+  for (int c = 0; c < hw->num_counters; c++) {
+    if (strcmp(hw->counters[c].json_name, s->name) == 0) nameIdx = c;
+    else if (s->alt != NULL && strcmp(hw->counters[c].json_name, s->alt) == 0) altIdx = c;
+  }
+  if (nameIdx >= 0 && (altIdx < 0 || rcclTelemetrySampleRow(dev, &hw->counters[nameIdx]) >= 0)) return nameIdx;
+  return altIdx;
 }
 
 /* Warn once about any sampled name that no configured device's table defines,
@@ -1459,7 +1493,7 @@ static void* rcclTelemetrySamplerMain(void* arg) {
       smp->tx_bytes = __atomic_load_n(&dev->tx_bytes, __ATOMIC_RELAXED);
       smp->rx_bytes = __atomic_load_n(&dev->rx_bytes, __ATOMIC_RELAXED);
       for (int c = 0; c < RCCL_TEL_NUM_SAMPLED; c++) {
-        if (idx_cache[i][c] == -2) idx_cache[i][c] = rcclTelemetrySampledTableIdx(hw, c);
+        if (idx_cache[i][c] == -2) idx_cache[i][c] = rcclTelemetrySampledTableIdx(dev, hw, c);
         int ti = idx_cache[i][c];
         smp->cong[c] = (ti >= 0) ? rcclTelemetrySampleRow(dev, &hw->counters[ti]) : -1;
       }
