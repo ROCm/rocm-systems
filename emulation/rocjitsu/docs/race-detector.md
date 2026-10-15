@@ -227,6 +227,9 @@ core checker's [FLAT register-readiness policy](memory-wait-counter-coverage.md#
 tracks the groups separately. Functional execution splits mixed requests by
 address space, completing retryable global/scratch work before accessing LDS.
 The race plugin retains both counter obligations on its single mixed event.
+LDS validation and interval registration are bounded by the CU backing capacity.
+Out-of-bounds addresses preserve register and counter dependencies without
+recording LDS bytes. DDS has no emulator backing and faults before execution.
 
 An all-ones wait-count field is the architectural “do not wait” value. CDNA's
 four-bit `lgkmcnt(15)` and six-bit `vmcnt(63)` therefore retire no events;

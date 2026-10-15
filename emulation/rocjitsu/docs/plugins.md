@@ -485,13 +485,14 @@ LDS pipeline, rewrites
 the addresses into the workgroup's LDS allocation, and sets
 `normalized_to_local` to `true`.
 
-Mixed FLAT requests retain `MemoryRoute::GLOBAL` and their original execution
-addresses. The global pipeline separates the lanes by backing store, completing
+Mixed FLAT requests retain `MemoryRoute::GLOBAL`. The global pipeline separates the lanes by backing store, completing
 retryable global/scratch work before accessing LDS. These
 observations have `normalized_to_local == false`. On both routes, `addresses`
 reports effective shared addresses in the workgroup's LDS allocation, and
 `pre_routing_addresses` preserves the original aperture addresses. Normalizing
-a mixed observation does not alter the instruction's retained execution state.
+shared lanes during routing gives execution and observers the same addresses.
+DDS lanes are identified separately and fault before memory execution because
+the emulator does not implement DDS backing.
 Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
 for LDS and DDS lanes; choosing a backing store
 from `route` alone misses the shared-aperture portion of a mixed request.

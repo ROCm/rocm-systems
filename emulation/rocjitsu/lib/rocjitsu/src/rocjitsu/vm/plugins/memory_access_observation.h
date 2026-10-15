@@ -238,8 +238,9 @@ struct MemoryAccessObservation {
   /// The span is borrowed for the callback just like @ref addresses. A FLAT
   /// access rewritten through the shared aperture uses this to retain the
   /// original aperture addresses while @ref addresses reports the effective
-  /// LDS allocation addresses. For mixed FLAT, only the observation is
-  /// normalized; the instruction retains its original execution addresses.
+  /// LDS allocation addresses. Both uniform and mixed FLAT execution use the
+  /// same normalized addresses as the observation. DDS addresses remain
+  /// distinguishable by their mask and fault because DDS execution is unsupported.
   std::span<const uint64_t> pre_routing_addresses;
   /// @brief Per-element lanes requesting memory traffic. Buffer bounds can
   ///        narrow later elements; block transfers can have arbitrary M0 holes.
