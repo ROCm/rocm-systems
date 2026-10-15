@@ -488,6 +488,7 @@ probe_status_name(ph_probe_status_t status)
 {
     switch(status)
     {
+        case PH_PROBE_STATUS_UNKNOWN: return "unknown";
         case PH_PROBE_STATUS_SUPPORTED: return "supported";
         case PH_PROBE_STATUS_FILE_NOT_FOUND: return "file_not_found";
         case PH_PROBE_STATUS_UNREADABLE: return "unreadable";

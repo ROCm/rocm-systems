@@ -130,7 +130,8 @@ ph_probe_database_details(const char*          file_path,
         return PH_RESULT_INVALID_ARGUMENT;
     }
 
-    *probe = {};
+    *probe        = {};
+    probe->status = PH_PROBE_STATUS_UNKNOWN;
     copy_probe_text({}, uuid, uuid_capacity);
     copy_probe_text({}, message, message_capacity);
     return guard_call(

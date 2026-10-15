@@ -74,7 +74,8 @@ extern "C"
     /** @brief Detailed outcome of probing a database without loading its trace. */
     typedef enum
     {
-        PH_PROBE_STATUS_SUPPORTED,
+        PH_PROBE_STATUS_UNKNOWN   = -1,
+        PH_PROBE_STATUS_SUPPORTED = 0,
         PH_PROBE_STATUS_FILE_NOT_FOUND,
         PH_PROBE_STATUS_UNREADABLE,
         PH_PROBE_STATUS_UNKNOWN_FORMAT,

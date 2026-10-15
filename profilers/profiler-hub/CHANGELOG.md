@@ -54,7 +54,9 @@ downstream consumer of the library.
   reader accepts.
 - `ph_probe_database_details()` preserves the existing C probe ABI while also
   copying the probe diagnostic message and trace UUID into caller-owned
-  buffers.
+  buffers. Probe output is initialized to `PH_PROBE_STATUS_UNKNOWN`, so a probe
+  result is never reported as supported unless probing completes successfully,
+  while the numeric values of existing statuses remain unchanged.
 - `ph_get_node()` returns `stream_hardware_links`: one entry per distinct
   stream-to-hardware relationship in kernel-dispatch, memory-allocate, and
   memory-copy rows. `reader_t::get_stream_hardware_links()` returns the same
