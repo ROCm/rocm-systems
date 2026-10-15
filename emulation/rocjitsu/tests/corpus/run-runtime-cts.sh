@@ -28,7 +28,7 @@ targets=(
   'gfx1201 gfx1201_r9700.json'
   'gfx1100 gfx1100_w7900.json'
 )
-suites=(aql)
+suites=(aql pm4)
 
 if [[ "${mode}" == run ]]; then
   launcher="${ROCJITSU_BUILD_DIR:-${source_dir}/build}/tools/rocjitsu/rocjitsu"

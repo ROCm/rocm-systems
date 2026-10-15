@@ -11,6 +11,7 @@ RJ_DIAGNOSTIC_POP
 
 #include <gtest/gtest.h>
 
+#include <array>
 #include <atomic>
 #include <chrono>
 #include <thread>
@@ -21,7 +22,13 @@ namespace {
 
 class KfdEventsTest : public ::testing::Test {
 protected:
+  std::array<uint64_t, 512> page;
   rocjitsu::EventState events;
+
+  void SetUp() override {
+    page.fill(KFD_SIGNAL_EVENT_LIMIT);
+    events.adopt_page(page.data(), sizeof(page));
+  }
 
   uint32_t create(bool auto_reset = true, uint32_t type = KFD_IOC_EVENT_SIGNAL) {
     kfd_ioctl_create_event_args args{};
@@ -37,6 +44,8 @@ protected:
       args.event_id = id;
       EXPECT_EQ(events.set_event(&args), 0);
     } else {
+      if (source == 2)
+        std::atomic_ref<uint64_t>(page[id]).store(id, std::memory_order_release);
       events.signal_interrupt(source == 1 ? id : 0);
     }
   }
@@ -114,6 +123,62 @@ protected:
     EXPECT_EQ(poll.args.wait_result, KFD_IOC_WAIT_RESULT_TIMEOUT);
   }
 };
+
+TEST_F(KfdEventsTest, GenericInterruptConsumesOnlyPublishedSlotsOnce) {
+  const uint32_t first = create();
+  const uint32_t second = create();
+  events.signal_interrupt(0);
+  expect_unsignaled(first);
+  expect_unsignaled(second);
+  std::atomic_ref<uint64_t>(page[first]).store(first, std::memory_order_release);
+  events.signal_interrupt(0);
+  Wait wait(events, {first}, 1, true, true);
+  wait.complete();
+  EXPECT_EQ(wait.data[0].signal_event_data.last_event_age, 2u);
+  EXPECT_EQ(page[first], KFD_SIGNAL_EVENT_LIMIT);
+  expect_unsignaled(second);
+  events.signal_interrupt(0);
+  expect_unsignaled(first);
+  std::atomic_ref<uint64_t>(page[second]).store(second, std::memory_order_release);
+  events.signal_interrupt(0);
+  Wait second_wait(events, {second}, 1, true, true);
+  second_wait.complete();
+  EXPECT_EQ(second_wait.data[0].signal_event_data.last_event_age, 2u);
+  events.signal_interrupt(0);
+  expect_unsignaled(second);
+}
+
+TEST_F(KfdEventsTest, DirectSignalsAndResetCannotBeReplayedByGenericInterrupts) {
+  (void)create();
+  const uint32_t id = create(); // Its first signaled age equals its trigger ID.
+  for (int source : {0, 1}) {
+    SCOPED_TRACE(source);
+    if (source == 1)
+      std::atomic_ref<uint64_t>(page[id]).store(id, std::memory_order_release);
+    signal(id, source);
+    Wait wait(events, {id}, 0, true, true);
+    wait.complete();
+    events.signal_interrupt(0);
+    expect_unsignaled(id);
+  }
+  std::atomic_ref<uint64_t>(page[id]).store(id, std::memory_order_release);
+  reset(id);
+  events.signal_interrupt(0);
+  expect_unsignaled(id);
+  signal(id, 2);
+  Wait wait(events, {id}, 0, true, true);
+  wait.complete();
+}
+
+TEST_F(KfdEventsTest, GenericInterruptWithoutMappedPageDoesNotSignalEvents) {
+  const uint32_t id = create();
+  ASSERT_TRUE(events.release_page(page.data()));
+  events.signal_interrupt(0);
+  expect_unsignaled(id);
+  signal(id, 1);
+  Wait wait(events, {id}, 0, true, true);
+  wait.complete();
+}
 
 class KfdEventOrderingTest : public KfdEventsTest,
                              public ::testing::WithParamInterface<std::tuple<int, uint64_t, bool>> {

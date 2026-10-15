@@ -1902,10 +1902,9 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
     // HQD idle monitoring: periodically fire HQD_IDLE for queues that are
     // currently empty. On real hardware the CP continuously monitors queue
     // activity and fires the idle interrupt whenever the queue is inactive.
-    // Our drain_completions fires on the non-empty→empty transition, but a
-    // process may create a new event AFTER that transition and miss the
-    // signal. Re-broadcasting every ~10ms ensures late-created events see
-    // the idle state within a bounded window.
+    // Rescan every ~10ms to pick up signal slots published after the drain
+    // transition. Event delivery consumes only published slots, so these
+    // generic interrupts cannot complete another queue's unpublished event.
     if (poll_count % 100 == 0) {
       // Snapshot the idle queues' process ids under the lock, then deliver interrupts
       // OUTSIDE it. Subscribers are external frontend callbacks whose internal
@@ -1918,8 +1917,11 @@ void CommandProcessor::doorbell_poll_loop(std::stop_token stop) {
         for (size_t queue_index = 0; queue_index < compute_queues_.size(); ++queue_index) {
           // A replica does not own the queue, so it must not report it idle: its
           // shards drain before the owner's and the same KFD queue would otherwise
-          // raise this from several CPs at once.
-          if (compute_queues_[queue_index].fanout_replica)
+          // raise this from several CPs at once. AQL idle interrupts scan its
+          // published signal slots; native PM4 delivers explicit RELEASE_MEM
+          // interrupts. The event scan leaves unrelated unpublished slots alone.
+          if (compute_queues_[queue_index].fanout_replica ||
+              compute_queues_[queue_index].packet_format != QueuePacketFormat::Aql)
             continue;
           if (!compute_queues_[queue_index].has_pending_commands() &&
               compute_queues_[queue_index].process_id != 0) {
@@ -3010,8 +3012,13 @@ void CommandProcessor::service_pm4_ring(ComputeQueueRecord &queue, simdojo::Tick
     return;
   }
   const auto consumer = queue.read_pointer_journal.cursor();
-  const auto producer =
-      normalize_pm4_producer_cursor(queue.last_doorbell, consumer, queue.ring_size / 4);
+  const auto ring_dwords = queue.ring_size / 4;
+  // Native PM4 compares ring offsets. A client may lift its software producer
+  // by whole rings without changing the hardware consumer's starting offset.
+  const auto notified = queue.doorbell_mode == QueueDoorbellMode::HostPolled
+                            ? queue.last_doorbell % ring_dwords
+                            : queue.last_doorbell;
+  const auto producer = normalize_pm4_producer_cursor(notified, consumer, ring_dwords);
   if (outcome != VmAccessOutcome::Complete || !producer) {
     fail_pm4_queue(queue, queue.dispatches);
     return;

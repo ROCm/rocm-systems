@@ -553,7 +553,7 @@ VmAccessOutcome GpuVmAccess::write(uint64_t address, std::span<const std::byte> 
 AtomicLoadResult GpuVmAccess::atomic_load(uint64_t address, uint32_t width) const {
   if ((width != sizeof(uint16_t) && width != sizeof(uint32_t) && width != sizeof(uint64_t)) ||
       (address & (width - 1)) != 0) {
-    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
+    report_terminal_fault(address, VmAccessKind::Read, VmAccessOutcome::Malformed);
     return {.outcome = VmAccessOutcome::Malformed, .value = 0};
   }
   if (access_state_ == nullptr)
@@ -565,13 +565,13 @@ AtomicLoadResult GpuVmAccess::atomic_load(uint64_t address, uint32_t width) cons
     return {.outcome = VmAccessOutcome::Unavailable, .value = 0};
 
   const VmTranslationResult translated =
-      access_state_->translator->translate(address, width, VmAccessKind::Atomic);
+      access_state_->translator->translate(address, width, VmAccessKind::Read);
   if (!translated) {
-    report_terminal_fault(address, VmAccessKind::Atomic, translated.outcome);
+    report_terminal_fault(address, VmAccessKind::Read, translated.outcome);
     return {.outcome = translated.outcome, .value = 0};
   }
   if (translated.translation.contiguous_bytes < width) {
-    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
+    report_terminal_fault(address, VmAccessKind::Read, VmAccessOutcome::Malformed);
     return {.outcome = VmAccessOutcome::Malformed, .value = 0};
   }
   return access_state_->physical_memory->atomic_load(translated.translation.domain,
@@ -580,7 +580,7 @@ AtomicLoadResult GpuVmAccess::atomic_load(uint64_t address, uint32_t width) cons
 
 VmAccessOutcome GpuVmAccess::atomic_store(uint64_t address, uint32_t width, uint64_t value) const {
   if ((width != sizeof(uint32_t) && width != sizeof(uint64_t)) || (address & (width - 1)) != 0) {
-    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
+    report_terminal_fault(address, VmAccessKind::Write, VmAccessOutcome::Malformed);
     return VmAccessOutcome::Malformed;
   }
   if (access_state_ == nullptr)
@@ -592,13 +592,13 @@ VmAccessOutcome GpuVmAccess::atomic_store(uint64_t address, uint32_t width, uint
     return VmAccessOutcome::Unavailable;
 
   const VmTranslationResult translated =
-      access_state_->translator->translate(address, width, VmAccessKind::Atomic);
+      access_state_->translator->translate(address, width, VmAccessKind::Write);
   if (!translated) {
-    report_terminal_fault(address, VmAccessKind::Atomic, translated.outcome);
+    report_terminal_fault(address, VmAccessKind::Write, translated.outcome);
     return translated.outcome;
   }
   if (translated.translation.contiguous_bytes < width) {
-    report_terminal_fault(address, VmAccessKind::Atomic, VmAccessOutcome::Malformed);
+    report_terminal_fault(address, VmAccessKind::Write, VmAccessOutcome::Malformed);
     return VmAccessOutcome::Malformed;
   }
   return access_state_->physical_memory->atomic_store(translated.translation.domain,
