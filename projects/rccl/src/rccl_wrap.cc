@@ -848,7 +848,7 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
 namespace {
 // This comm's arch table, or NULL when the arch has no DDA tuning at all.
 // comm->archThresholds is populated at init; the lookup covers comms assembled
-// by hand (unit tests) so they resolve exactly like production ones.
+// by hand (unit tests) and resolves them like an SPX comm.
 inline const rcclArchThresholds* extAlgoArchTable(const ncclComm* comm) {
   if (comm == nullptr) return nullptr;
   if (rcclParamIgnoreArchTable() && !IsArchMatch(comm->archName, "gfx942")
@@ -2003,7 +2003,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           return ncclSuccess;
         }
         // The entry gate now admits the widest tier, so VMM re-checks its own cap.
-        // On gfx1250 this tier runs only on rank-scaled comms (ddaVmmMaxPerRank[RS]).
+        // On gfx1250 SPX this tier runs only on rank-scaled comms (ddaVmmMaxPerRank[RS]); the
+        // DPX table's ddaVmmMax total sits under the LL tier except at 8 ranks.
         if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
             ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_VMM;
