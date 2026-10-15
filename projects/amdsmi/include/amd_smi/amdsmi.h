@@ -2259,6 +2259,14 @@ typedef struct {
 
   /**
    * @brief Utilization
+   *
+   * On a v2.x table the GFX and MM activity below are in hundredths of a percent,
+   * the unit the APU firmware reports, and are not converted here -- the same
+   * arrangement as the power fields further down. The whole-percent values are in
+   * ::amdsmi_gpu_metrics_t.average_gfx_activity and
+   * ::amdsmi_gpu_metrics_t.average_mm_activity. A v3.0 table reports GFX
+   * activity in whole percent to begin with, so both forms match there; it
+   * carries no MM activity, which reads back as not applicable.
    */
   uint16_t average_gfx_activity;                            //!< v2_4, v3_0
   uint16_t average_mm_activity;                             //!< v2_4
@@ -5136,11 +5144,24 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  including a GPU metrics table (v1.x) reported by an APU: the pointer
  *  tracks the table the device publishes, not whether the device is an APU.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on
- *  fail. Returns ::AMDSMI_STATUS_NOT_SUPPORTED when the device reports a
- *  metrics revision this library does not model, and
- *  ::AMDSMI_STATUS_UNEXPECTED_SIZE when the table it hands back does not match
- *  the size its header declares.
+ *  The APU sub-struct reports GFX and MM activity in the raw unit its firmware
+ *  uses, as its power fields stay in milliwatts: hundredths of a percent on a
+ *  v2.x table, whole percent on v3.0. @p pgpu_metrics->average_gfx_activity and
+ *  @p pgpu_metrics->average_mm_activity are whole percent for every revision.
+ *
+ *  A field the reported revision does not carry reads back as the not-applicable
+ *  sentinel, the maximum value of its type. The sentinel is never scaled, so a
+ *  field marked not applicable stays recognizable as one at both levels.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED the device reports a metrics revision
+ *  this library does not model, or publishes an empty metrics node.
+ *  @retval ::AMDSMI_STATUS_BUSY the device is resetting or suspended, so the
+ *  driver declined the read.
+ *  @retval ::AMDSMI_STATUS_NO_PERM the metrics node cannot be read with the
+ *  caller's privileges.
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the read came up short of the size the
+ *  header declares, or the driver failed it without naming a device state.
  */
 amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_handle,
                                             amdsmi_gpu_metrics_t* pgpu_metrics);
@@ -5165,22 +5186,22 @@ amdsmi_status_t amdsmi_get_gpu_metrics_info(amdsmi_processor_handle processor_ha
  *  provided arguments.
  *
  *  **APU Metrics:**
- *  When APU-specific metrics are available (APU metrics table v2.1-v2.4 or
- *  v3.0; v2.0 is not supported),
- *  @p pgpu_metrics->apu_metrics will point to thread-local library-owned storage.
- *  This pointer is invalidated by ANY subsequent call to
- *  ::amdsmi_get_gpu_metrics_info or ::amdsmi_get_gpu_partition_metrics_info on
- *  the same thread, even for different devices. Callers must copy the entire
- *  ::amdsmi_apu_metrics_t structure immediately after the call to preserve the data.
- *  Every other table leaves @p pgpu_metrics->apu_metrics as nullptr,
- *  including a GPU metrics table (v1.x) reported by an APU: the pointer
- *  tracks the table the device publishes, not whether the device is an APU.
+ *  A partition metrics table never carries them. This call resolves only the XCP
+ *  partition revisions, so @p pgpu_metrics->apu_metrics is always nullptr here;
+ *  use ::amdsmi_get_gpu_metrics_info for a device that publishes an APU table.
+ *  This call does still invalidate an ::amdsmi_apu_metrics_t pointer obtained
+ *  earlier from that function on the same thread, so copy what it returned before
+ *  calling this one.
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on
- *  fail. Returns ::AMDSMI_STATUS_NOT_SUPPORTED when the device reports a
- *  metrics revision this library does not model, and
- *  ::AMDSMI_STATUS_UNEXPECTED_SIZE when the table it hands back does not match
- *  the size its header declares.
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail.
+ *  @retval ::AMDSMI_STATUS_NOT_SUPPORTED the device reports a metrics revision
+ *  this library does not model, or publishes an empty metrics node.
+ *  @retval ::AMDSMI_STATUS_BUSY the device is resetting or suspended, so the
+ *  driver declined the read.
+ *  @retval ::AMDSMI_STATUS_NO_PERM the metrics node cannot be read with the
+ *  caller's privileges.
+ *  @retval ::AMDSMI_STATUS_UNEXPECTED_SIZE the read came up short of the size the
+ *  header declares, or the driver failed it without naming a device state.
  */
 amdsmi_status_t amdsmi_get_gpu_partition_metrics_info(amdsmi_processor_handle processor_handle,
                                                       amdsmi_gpu_metrics_t* pgpu_metrics);
