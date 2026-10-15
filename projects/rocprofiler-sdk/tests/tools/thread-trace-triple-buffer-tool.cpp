@@ -372,9 +372,11 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
         static const bool is_multi_se_test =
             std::getenv("ATT_MULTI_SE") ? atoi(std::getenv("ATT_MULTI_SE")) != 0 : false;
 
-        size_t total_size = 0;
+        size_t total_size             = 0;
+        bool   has_complete_gpu_trace = false;
         for(auto& agent_output : *agent_buffers)
         {
+            size_t engines_with_data = 0;
             for(size_t shader_engine_id = 0; shader_engine_id < agent_output.shader_engines.size();
                 ++shader_engine_id)
             {
@@ -388,17 +390,14 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 {
                     auto state                      = shader_data_parse_state_t{};
                     state.expected_shader_engine_id = static_cast<uint32_t>(shader_engine_id);
-                    ROCPROFILER_CALL(
-                        rocprofiler_trace_decode(
-                            decoder, parse_multi_se, buffer.data(), output_size, &state),
-                        "trace decode");
-
-                    if(state.record_count == 0)
+                    if(output_size > 0)
                     {
-                        std::cerr << "Incomplete shaderdata for SE " << shader_engine_id
-                                  << ": decoded " << state.record_count << " records" << std::endl;
-                        abort();
+                        ROCPROFILER_CALL(
+                            rocprofiler_trace_decode(
+                                decoder, parse_multi_se, buffer.data(), output_size, &state),
+                            "trace decode");
                     }
+                    if(state.record_count > 0) ++engines_with_data;
                 }
                 else
                 {
@@ -423,7 +422,14 @@ cntrl_tracing_callback(rocprofiler_callback_tracing_record_t record,
                 shader_engine.next_expected_chunk = 0;
                 shader_engine.end_chunks.clear();
             }
+            has_complete_gpu_trace |=
+                engines_with_data > 0 && engines_with_data == agent_output.shader_engines.size();
         }
+
+        // The workload runs on one HIP device; other visible GPUs may be idle.
+        // Require all shader engines on the same GPU, not just records across GPUs.
+        if(is_multi_se_test && !has_complete_gpu_trace)
+            throw std::runtime_error("No GPU produced shaderdata for every shader engine");
 
         static bool ignore_size = std::getenv("STARTSTOP") ? atoi(std::getenv("STARTSTOP")) : false;
         if(!ignore_size && total_size < MIN_TRACE_SIZE)
