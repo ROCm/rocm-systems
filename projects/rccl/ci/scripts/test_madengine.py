@@ -204,6 +204,25 @@ WORKLOAD_CONFIGS = {
         "tags": ["maxtext", "jax", "MI355X", "llama3.1_405B-fp8-pretrain",
                  "fp8", "training"],
         "env_vars": {
+            # INFO, not the WARN every other workload inherits, and it is
+            # verify_rccl_replacement() that needs it rather than anyone
+            # reading the log. RCCL prints its version banner from
+            #   if ((levelMask & (1u << NCCL_LOG_INFO)) ||
+            #       ((levelMask & (1u << NCCL_LOG_VERSION)) && myrank == 0))
+            # (src/init.cc, the showVersion call_once), so at WARN only global
+            # rank 0 prints it. MaxText runs one communicator across all 32
+            # GPUs, so rank 0 sits on exactly one node and the other three
+            # produce no banner -- while the check requires one per node and
+            # would fail a run that trained perfectly. Megatron escapes this
+            # because PyTorch builds several process groups, so some rank 0
+            # lands on every node; that is luck, not design, and it is why the
+            # setting is scoped to this workload.
+            #
+            # SUBSYS keeps the volume down: INIT and NET are what the banner
+            # and the "NET/IB ... GDRDMA" confirmation live in. Both match
+            # ROCm/MAD#228's validated template.
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "INIT,NET",
             "XLA_GPU_AUTOTUNE_LEVEL": "0",
             # In MAD#228's validated template. The Megatron workloads are green
             # without it on the same cluster, so this is "explicitly no plugin"
