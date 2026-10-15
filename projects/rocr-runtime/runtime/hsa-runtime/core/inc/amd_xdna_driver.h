@@ -68,8 +68,13 @@ public:
   /// @param[out] driver object
   static hsa_status_t DiscoverDriver(std::unique_ptr<core::Driver>& driver);
 
-  /// @brief Returns the size of the dev heap in bytes.
+  /// @brief Returns the size of the dev heap in bytes. This is the size reserved when a dev heap
+  /// exists on this device; check @ref HasDevHeap first, since UMQ (AIE4) devices have none.
   static uint64_t GetDevHeapByteSize();
+
+  /// @brief Returns whether this device has a dev heap. KMQ (aie2/aie2p) devices do; UMQ (AIE4)
+  /// devices do not, since the kernel driver rejects AMDXDNA_BO_DEV_HEAP creation for them.
+  bool HasDevHeap() const { return has_dev_heap_; }
 
   hsa_status_t Init() override;
   hsa_status_t ShutDown() override;
@@ -121,6 +126,33 @@ public:
   ///
   /// @param[in] queue_metadata KMQ metadata to be destroyed
   hsa_status_t DestroyKernelModeQueue(void* queue_metadata) const;
+
+  /// @brief Returns whether this device submits through a user-mode queue (UMQ) rather than a
+  /// kernel-mode queue (KMQ), per the kernel driver's own device_type. Defaults to false (KMQ) if
+  /// the device_type cannot be read.
+  bool UsesUserModeQueue() const;
+
+  /// @brief Create User Mode Queue (UMQ) metadata: the hardware context created against the
+  /// queue's own ring, and the mapped doorbell, for an AIE4 agent dispatch queue.
+  ///
+  /// Unlike KMQ, UMQ has no separate ring: @p ring_buf (the queue's own HSA-visible AQL packet
+  /// ring) is handed to the device directly, and dispatch is a single doorbell write with no
+  /// per-batch driver call -- the same model a GPU hardware queue uses.
+  ///
+  /// @param[in] ring_buf the queue's AQL packet ring (hsa_queue_t::base_address)
+  /// @param[in] agent agent the queue dispatches to, to resolve @p ring_buf's BO handle
+  /// @param[in] num_cols number of columns to create the queue's hardware context with
+  /// @param[in] num_core_rows number of core tiles in each column
+  /// @param[out] queue_metadata UMQ metadata created for the dispatch queue
+  /// @param[out] doorbell the mapped hardware doorbell to ring on dispatch
+  hsa_status_t CreateUserModeQueue(void* ring_buf, const core::Agent& agent, uint32_t num_cols,
+                                   uint32_t num_core_rows, void** queue_metadata,
+                                   volatile uint32_t** doorbell) const;
+
+  /// @brief Destroy the User Mode Queue (UMQ) metadata: its hardware context and doorbell mapping.
+  ///
+  /// @param[in] queue_metadata UMQ metadata to be destroyed
+  hsa_status_t DestroyUserModeQueue(void* queue_metadata) const;
 
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;
@@ -205,6 +237,9 @@ public:
   /// @brief The aligned device heap mapping, of size @ref dev_heap_size and alignment
   /// @ref dev_heap_alignment.
   void* dev_heap_vaddr = nullptr;
+
+  /// @brief Whether this device has a dev heap. Set by InitDeviceHeap(); see @ref HasDevHeap.
+  bool has_dev_heap_ = false;
 
   /// @brief Device heap size in bytes.
   static constexpr size_t dev_heap_size = 64 * 1024 * 1024;
