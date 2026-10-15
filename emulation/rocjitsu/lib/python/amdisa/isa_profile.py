@@ -776,9 +776,13 @@ class IsaProfile(ABC):
         return {}
 
     @property
-    def ds_addtid_uses_m0_byte_base(self) -> bool:
-        """True when DS ADDTID addresses use M0 as a byte-address base."""
-        return False
+    def ds_addtid_m0_base_bits(self) -> int:
+        """Width of the ADDTID M0 byte base.
+
+        The 16-bit form adds OFFSET at that width before widening; the 20-bit
+        form widens OFFSET before addition. Lane offsets are added last.
+        """
+        return 16
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:
@@ -788,6 +792,16 @@ class IsaProfile(ABC):
         writeback, not only to address formation.
         """
         return False
+
+    @property
+    def ds_b4_transpose_kind(self) -> int:
+        """CDNA4 contiguous sixteen-lane B4 transpose layout."""
+        return 8
+
+    @property
+    def ds_b6_transpose_kind(self) -> int:
+        """CDNA4 contiguous sixteen-lane B6 transpose layout."""
+        return 9
 
     @property
     def ds_b8_transpose_kind(self) -> int:
@@ -1520,12 +1534,12 @@ class _AmdgpuProfileBase(IsaProfile):
 
     @property
     def has_acc_vgpr(self) -> bool:
-        """True if this ISA has AccVGPRs (CDNA2/3/4 only)."""
+        """True if this ISA has AccVGPRs (CDNA1-4)."""
         return False
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
-        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA3/4)."""
+        """Encoding index where AccVGPR range begins (512 for CDNA2, 768 for CDNA1/3/4)."""
         return 0
 
     @property
@@ -1970,7 +1984,7 @@ class Cdna1Profile(CdnaProfile):
     """ISA profile for CDNA1 (GFX908 / MI100).
 
     Differs from CDNA3/4 (the CdnaProfile defaults):
-    - No AccVGPRs.
+    - Separate accumulator VGPRs, with selectors starting at 768.
     - GFX9-style GLC-only coherency model.
     - Scratch base via SGPR pair (not HW register).
     - ENC_VOP3PX2 does not exist in CDNA1 XML.
@@ -1983,7 +1997,7 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def has_acc_vgpr(self) -> bool:
-        return False
+        return True
 
     @property
     def dpp_64bit_input_row_select_only(self) -> bool:
@@ -1991,11 +2005,11 @@ class Cdna1Profile(CdnaProfile):
 
     @property
     def acc_vgpr_encoding_base(self) -> int:
-        return 0
+        return 768
 
     @property
     def max_acc_vgprs(self) -> int:
-        return 0
+        return 256
 
     @property
     def descriptor_vgpr_count_granule_wave32(self) -> int:
@@ -2935,6 +2949,16 @@ class Cdna5Profile(Rdna4Profile):
         return 'cdna5'
 
     @property
+    def ds_b4_transpose_kind(self) -> int:
+        """CDNA5 interleaved source-lane B4 layout."""
+        return 1
+
+    @property
+    def ds_b6_transpose_kind(self) -> int:
+        """CDNA5 interleaved source-lane B6 layout."""
+        return 2
+
+    @property
     def ds_b8_transpose_kind(self) -> int:
         # gfx1250 groups source lanes by four rows and two eight-column halves.
         # Keep every mnemonic alias on the corresponding CDNA5 DS routing.
@@ -2952,14 +2976,8 @@ class Cdna5Profile(Rdna4Profile):
         return overrides
 
     @property
-    def semantic_class_overrides(self) -> dict[str, str]:
-        return {
-            'DS_STORE_ADDTID_B32': 'ds_write_addtid',
-        }
-
-    @property
-    def ds_addtid_uses_m0_byte_base(self) -> bool:
-        return True
+    def ds_addtid_m0_base_bits(self) -> int:
+        return 20
 
     @property
     def ds_transpose_ignores_exec(self) -> bool:
