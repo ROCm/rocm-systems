@@ -278,8 +278,10 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
 
         auto name = builder.CreateString(cu->name());
         auto wfs_vec = builder.CreateVector(wf_offsets);
-        auto cus = fb::CreateComputeUnitState(builder, name, wfs_vec, 0,
-                                              cu->config().functional_quantum, true);
+        auto cus = fb::CreateComputeUnitState(
+            builder, name, wfs_vec, 0, cu->config().functional_quantum, true,
+            cu->config().memory_wait_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
+            cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off);
         cu_offsets.push_back(cus);
       }
     }
@@ -433,6 +435,15 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       auto *cu = all_cus[i];
       if (cu_state->functional_quantum_present())
         cu->set_functional_quantum(cu_state->functional_quantum());
+      using amdgpu::MemoryWaitDiagnostics;
+      const auto memory_checks = cu_state->memory_wait_checks();
+      const auto xcnt_checks = cu_state->xcnt_checks();
+      cu->restore_wait_diagnostics(
+          memory_checks
+              ? (*memory_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
+              : cu->config().memory_wait_diagnostics,
+          xcnt_checks ? (*xcnt_checks ? MemoryWaitDiagnostics::Warn : MemoryWaitDiagnostics::Off)
+                      : cu->config().xcnt_diagnostics);
       if (auto *wf_states = cu_state->wavefronts()) {
         for (auto *wf_state : *wf_states) {
           uint32_t num_sgprs =

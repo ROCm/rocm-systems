@@ -390,6 +390,7 @@ class CodeGenerator:
     _MEMORY_ISSUE_KINDS = {
         'smem_load': 'scalar',
         'smem_store': 'scalar',
+        'smem_atomic': 'scalar',
         'flat_load': 'flat_load',
         'flat_store': 'flat_store',
         'flat_atomic': 'flat_atomic',
@@ -2208,7 +2209,7 @@ class CodeGenerator:
                     ''',
                 ),
                 case_block(
-                    ('VopdMaxF32', 'VopdMaxNumF32'),
+                    ('VopdMaxF32',),
                     '''
                     {
                       float result = std::fmax(std::bit_cast<float>(src0),
@@ -2218,12 +2219,30 @@ class CodeGenerator:
                     ''',
                 ),
                 case_block(
-                    ('VopdMinF32', 'VopdMinNumF32'),
+                    ('VopdMaxNumF32',),
+                    '''
+                    {
+                      return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinF32',),
                     '''
                     {
                       float result = std::fmin(std::bit_cast<float>(src0),
                                                std::bit_cast<float>(src1));
                       return std::bit_cast<uint32_t>(result);
+                    }
+                    ''',
+                ),
+                case_block(
+                    ('VopdMinNumF32',),
+                    '''
+                    {
+                      return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
+                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
                     }
                     ''',
                 ),
@@ -2844,6 +2863,104 @@ class CodeGenerator:
             .replace('@VOPD_INTEGER_SIMD_PROBE@', vopd_integer_simd_probe)
         )
 
+        vopd_isa_diagnostics = cpp_block('''
+            // Evaluate the qualified operand restrictions once, at decode.
+            const bool vopd3 = @IS_VOPD3@;
+            const auto bank_conflict = [](const Operand &a, const Operand &b) {
+              const auto ar = a.to_register_ref();
+              const auto br = b.to_register_ref();
+              if (!ar || !br || ar->cls != RegClass::VGPR || br->cls != RegClass::VGPR)
+                return false;
+              const unsigned x = ar->index;
+              const unsigned y = br->index;
+              const bool shared = @ALLOW_SHARED@ && x == y && a.size_bits() == b.size_bits();
+              const auto bank_mask = [](unsigned index, unsigned bits) {
+                unsigned mask = 1u << (index % 4);
+                // F64 sources occupy two adjacent 32-bit VGPR banks.
+                if (bits == 64)
+                  mask |= 1u << ((index + 1) % 4);
+                return mask;
+              };
+              return !shared && (bank_mask(x, a.size_bits()) & bank_mask(y, b.size_bits())) != 0;
+            };
+            // GFX12 sends the Y source of MOV/MOV through the SRC2 port.
+            const bool split_moves = @ALLOW_SHARED@ &&
+                                     opx_ == kVopdMovB32 && opy_ == kVopdMovB32;
+            bool invalid = !split_moves && bank_conflict(srcx0_, srcy0_);
+            const auto uses_src1_port = [=](const Slot &slot) {
+              return slot.op != kVopdMovB32 && (vopd3 || slot.op != kVopdFmamkF32);
+            };
+            if (uses_src1_port(x_) && uses_src1_port(y_))
+              invalid |= bank_conflict(srcx1_, srcy1_);
+            if (vopd3) {
+              // Only explicit SRC2 operands; no inferred implicit port usage.
+              if (x_.has_src2_operand && y_.has_src2_operand)
+                invalid |= bank_conflict(srcx2_, srcy2_);
+            } else {
+              const auto src2_port = [](const Slot &slot) -> const Operand * {
+                if (slot.op == kVopdFmamkF32)
+                  return slot.src1;
+            @ACCUMULATOR_PORTS@
+                return nullptr;
+              };
+              const Operand *x = src2_port(x_);
+              const Operand *y = src2_port(y_);
+              if (x && y) {
+                // LLVM also permits same-register sharing on the GFX12 SRC2 port.
+                const bool shared = @ALLOW_SHARED@ &&
+                                    x->encoding_value() == y->encoding_value() &&
+                                    x->size_bits() == y->size_bits();
+                invalid |= !shared && (x->encoding_value() & 1) == (y->encoding_value() & 1);
+              }
+            }
+            // RDNA3/3.5/4 explicitly count plain CNDMASK's implicit VCC read.
+            // Wave32 uses VCC_LO (106); deduplicate it with explicit data reads.
+            int scalar_selectors[6] = {106};
+            unsigned scalar_count = @COUNT_CNDMASK_VCC@ &&
+                                    (opx_ == kVopdCndmaskB32 || opy_ == kVopdCndmaskB32);
+            for (unsigned i = 0; i < num_src_; ++i) {
+              const auto &source = *src_operands_[i];
+              const auto reg = source.to_register_ref();
+              if ((reg && reg->cls == RegClass::VGPR) || source.const_value())
+                continue;
+              int selector = source.encoding_value();
+              // Only GFX12 explicitly qualifies EXEC/SCC as scalar inputs.
+              if (@ALLOW_SHARED@ && (selector == 126 || selector == 127 || selector == 253))
+                selector = 126;
+              else if (selector < 0 || selector >= 124)
+                continue;
+              bool seen = false;
+              for (unsigned j = 0; j < scalar_count; ++j)
+                seen |= scalar_selectors[j] == selector;
+              if (!seen)
+                scalar_selectors[scalar_count++] = selector;
+            }
+            invalid |= scalar_count + unsigned(has_literal_) > 2;
+            if (invalid)
+              flags_ |= INVALID_VOPD_OPERANDS;
+        ''')
+        accumulator_ports = ''
+        if logical_arch in ('rdna3', 'rdna3_5', 'rdna4'):
+            accumulator_ports = cpp_block('''
+                if (slot.op == kVopdFmacF32 || slot.op == kVopdDot2AccF32F16 ||
+                    slot.op == kVopdDot2AccF32Bf16)
+                  return slot.dst;
+            ''')
+        vopd_isa_diagnostics = (
+            vopd_isa_diagnostics.replace(
+                '@IS_VOPD3@', 'format_ == Format::Vopd3' if has_vopd3 else 'false'
+            )
+            .replace(
+                '@ALLOW_SHARED@',
+                'true' if logical_arch in ('rdna4', 'cdna5') else 'false',
+            )
+            .replace('@ACCUMULATOR_PORTS@', accumulator_ports)
+            .replace(
+                '@COUNT_CNDMASK_VCC@',
+                'true' if logical_arch in ('rdna3', 'rdna3_5', 'rdna4') else 'false',
+            )
+        )
+
         impl = (
             textwrap.dedent('''
             // Copyright (c) 2026 Advanced Micro Devices, Inc.
@@ -2970,6 +3087,7 @@ class CodeGenerator:
 
               opcode_ = static_cast<uint16_t>((opx_ << 8) | opy_);
               init_operands();
+            @VOPD_ISA_DIAGNOSTICS@
               mnemonic_storage_ = std::string(op_name(opx_)) + " :: " + op_name(opy_);
               mnemonic_ = mnemonic_storage_;
               disassembly_ = format_slot(x_) + " :: " + format_slot(y_);
@@ -3066,6 +3184,7 @@ class CodeGenerator:
             .replace('@VOPD3_HEADER_DECLS@', vopd3_header_decls)
             .replace('@VOPD_SLOT_CONSTANTS@', vopd_slot_constants)
             .replace('@VOPD_OPCODE_VALIDATION_HELPERS@', vopd_opcode_validation_helpers)
+            .replace('@VOPD_ISA_DIAGNOSTICS@', vopd_isa_diagnostics)
             .replace('@VOPD3_UNUSED_ATTR@', vopd3_unused_attr)
             .replace('@VOPD_OP_NAME_CASES@', vopd_op_name_cases)
             .replace('@VOPD3_MODEL_HELPERS@', vopd3_model_helpers)
@@ -6534,7 +6653,7 @@ class CodeGenerator:
                 )
                 is_true16_vop3 = true16_vop3_info.enabled
                 if is_true16_vop3:
-                    lctx.vector_preamble.append(
+                    lctx.body_preamble.append(
                         '  [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);'
                     )
                     vop3_opsel = 'opsel'
@@ -6661,9 +6780,9 @@ class CodeGenerator:
                         for i in range(3)
                     )
                     src_mods = ''.join(
-                        f'    if (inst_.abs & (1u << {i})) src{i}_value = std::fabs(src{i}_value);\n'
-                        f'    if (inst_.neg & (1u << {i})) src{i}_value = -src{i}_value;\n'
+                        line + '\n'
                         for i in range(3)
+                        for line in vop3_src_mod(f'src{i}_value', i, has_abs=True)
                     )
                     return (
                         '  uint64_t exec = wf.exec();\n'
@@ -6688,11 +6807,10 @@ class CodeGenerator:
                     src_mods = ''
                     finish = ''
                     if is_vop3:
-                        src_mods = (
-                            '    if (inst_.abs & 1u) src0_value = std::fabs(src0_value);\n'
-                            '    if (inst_.abs & 2u) src1_value = std::fabs(src1_value);\n'
-                            '    if (inst_.neg & 1u) src0_value = -src0_value;\n'
-                            '    if (inst_.neg & 2u) src1_value = -src1_value;\n'
+                        src_mods = ''.join(
+                            line + '\n'
+                            for i in range(2)
+                            for line in vop3_src_mod(f'src{i}_value', i, has_abs=True)
                         )
                         finish = (
                             '    uint32_t omod = amdgpu::fp_mode::effective_omod(\n'
@@ -6868,6 +6986,10 @@ class CodeGenerator:
 
         if cls == 'nop':
             return '  (void)wf;\n throw util::UnimplementedInst(mnemonic());'
+
+        if cls == 'setkill':
+            # A killed wave still drains outstanding memory operations.
+            return '  if (simm16.encoding_value_ & 1u) wf.end();'
 
         if cls == 'endpgm':
             # Use end() instead of halt() to drain outstanding memory ops.
@@ -7199,71 +7321,45 @@ class CodeGenerator:
             return '\n'.join(L)
 
         if cls == 'scalar_movrel':
-            if op == 'src':
+            source_relative = op in ('src', 'srcdst2')
+            destination_relative = op in ('dst', 'srcdst2')
+            split = 'true' if op == 'srcdst2' else 'false'
+            L.append(
+                f'  uint32_t width_words = static_cast<uint32_t>({dst_ops[0]}.size_bits() / 32);'
+            )
+            source, destination = src_ops[0], dst_ops[0]
+            if destination_relative:
                 L.append(
-                    f'  uint32_t width_words = '
-                    f'static_cast<uint32_t>({src_ops[0]}.size_bits() / 32);'
+                    f'  auto dst_reg = amdgpu::relative_scalar_selector(wf, '
+                    f'{destination}.encoding_value(), wf.m0(), width_words, true, {split});'
+                )
+                L.append('  if (!dst_reg) return;')
+                L.append(
+                    f'  Operand indexed_dst({destination}.size_bits(), OperandType::OPR_SDST, '
+                    'static_cast<int>(*dst_reg));'
+                )
+                destination = 'indexed_dst'
+            if source_relative:
+                L.append(
+                    f'  auto src_reg = amdgpu::relative_scalar_selector(wf, '
+                    f'{source}.encoding_value(), wf.m0(), width_words, false, {split});'
                 )
                 L.append(
-                    f'  uint32_t src_reg = amdgpu::relative_scalar_selector('
-                    f'{src_ops[0]}.encoding_value(), width_words, wf.m0(), false, false);'
+                    f'  Operand indexed_src({source}.size_bits(), OperandType::OPR_SSRC, '
+                    'static_cast<int>(src_reg.value_or(0)));'
                 )
-                L.append(
-                    f'  Operand indexed_src({src_ops[0]}.size_bits(), OperandType::OPR_SSRC, '
-                    'static_cast<int>(src_reg));'
-                )
-                L.append('  if (width_words == 2) {')
-                L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_scalar64({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));'
-                )
-                L.append('  } else {')
-                L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_scalar({dst_ops[0]}, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));'
-                )
-                L.append('  }')
-                return '\n'.join(L)
-            if op == 'dst':
-                L.append(
-                    f'  uint32_t width_words = '
-                    f'static_cast<uint32_t>({dst_ops[0]}.size_bits() / 32);'
-                )
-                L.append(
-                    f'  uint32_t dst_reg = amdgpu::relative_scalar_selector('
-                    f'{dst_ops[0]}.encoding_value(), width_words, wf.m0(), true, false);'
-                )
-                L.append(
-                    f'  Operand indexed_dst({dst_ops[0]}.size_bits(), OperandType::OPR_SDST, '
-                    'static_cast<int>(dst_reg));'
-                )
-                L.append('  if (width_words == 2) {')
-                L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar64({src_ops[0]}));'
-                )
-                L.append('  } else {')
-                L.append(
-                    f'    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar({src_ops[0]}));'
-                )
-                L.append('  }')
-                return '\n'.join(L)
-            if op == 'srcdst2':
-                L.append(
-                    f'  uint32_t src_reg = amdgpu::relative_scalar_selector('
-                    f'{src_ops[0]}.encoding_value(), 1, wf.m0(), false, true);'
-                )
-                L.append(
-                    f'  uint32_t dst_reg = amdgpu::relative_scalar_selector('
-                    f'{dst_ops[0]}.encoding_value(), 1, wf.m0(), true, true);'
-                )
-                L.append(
-                    '  Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));'
-                )
-                L.append(
-                    '  Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));'
-                )
-                L.append(
-                    '  amdgpu::RegisterAccess(wf).write_scalar(indexed_dst, amdgpu::RegisterAccess(wf).read_scalar(indexed_src));'
-                )
-                return '\n'.join(L)
+                source = 'indexed_src'
+            L.append('  amdgpu::RegisterAccess regs(wf);')
+            L.append('  if (width_words == 2) {')
+            L.append(
+                f'    regs.write_scalar64({destination}, regs.read_scalar64({source}));'
+            )
+            L.append('  } else {')
+            L.append(
+                f'    regs.write_scalar({destination}, regs.read_scalar({source}));'
+            )
+            L.append('  }')
+            return '\n'.join(L)
 
         if cls == 'scalar_call':
             # S_CALL_B64: dst = PC of next instruction (return address), then branch.
@@ -7574,6 +7670,9 @@ class CodeGenerator:
 
         if cls == 'smem_store':
             return self._gen_smem_store(dst_ops, src_ops, sem)
+
+        if cls == 'smem_atomic':
+            return self._gen_smem_atomic(sem)
 
         if cls == 'flat_load':
             return self._gen_flat_load(dst_ops, src_ops, sem)
@@ -7889,14 +7988,51 @@ class CodeGenerator:
             '    d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);'
         )
         if self.isa_spec.profile.smem_address_uses_access_size:
-            addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
+            addr_args = 'inst_, wf, d->elem_size * d->num_dwords, d.get()'
         else:
-            addr_args = 'inst_, wf'
+            addr_args = 'inst_, wf, d.get()'
         L.append(f'  auto address = smem_calculate_address({addr_args});')
         L.append('  if (!address) return;')
         L.append('  d->addr = *address;')
         # Counter increment handled by MemoryPipeline::issue().
         L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_smem_atomic(self, sem: InstructionSemantics) -> str:
+        # This emitter uses a global pointer and one 32-bit data register.
+        if (
+            sem.name.upper() != 'S_ATOMIC_DEC'
+            or sem.operation != 'dec'
+            or sem.elem_size != 4
+            or sem.num_elems != 1
+        ):
+            raise ValueError(
+                f'{sem.name}: smem_atomic supports only 32-bit S_ATOMIC_DEC '
+                f'(operation={sem.operation!r}, elem_size={sem.elem_size}, '
+                f'num_elems={sem.num_elems})'
+            )
+        L = [
+            '  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);',
+            '  if (!data_register) return;',
+            '  auto d = std::make_unique<amdgpu::ScalarMemState>();',
+            '  d->dst_register = *data_register;',
+            '  d->num_dwords = 1;',
+            '  d->elem_size = 4;',
+            f'  d->atomic_op = {self._ATOMIC_OP_ENUM[sem.operation]};',
+            # Scalar atomic GLC selects return data, not cache policy.
+            '  d->is_load = inst_.glc != 0;',
+            '  d->mtype = amdgpu::Mtype::UC;',
+            '  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);',
+        ]
+        self._append_wait_counter_type(L, sem)
+        L.extend(
+            [
+                '  auto address = smem_calculate_address(inst_, wf);',
+                '  if (!address) return;',
+                '  d->addr = *address;',
+                '  set_data(std::move(d));',
+            ]
+        )
         return '\n'.join(L)
 
     def _vop3p_opsel_exprs(self) -> tuple[str, str]:
@@ -8316,6 +8452,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        block = sem.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         L.append(
@@ -8323,7 +8460,11 @@ class CodeGenerator:
         )
         L.append(f"  d->dst_reg_base = {self._vgpr_base_expr('vdst')};")
         L.append(f'  d->elem_size = {esz};')
-        L.append(f'  d->num_elems = {ne};')
+        L.append(
+            '  d->num_elems = amdgpu::kBlockDwordCount;'
+            if block
+            else f'  d->num_elems = {ne};'
+        )
         L.append('  d->is_load = true;')
         self._append_wait_counter_type(L, sem, 'flat_load')
         if sem.sign_extend:
@@ -8334,11 +8475,25 @@ class CodeGenerator:
             L.append('  d->d16_lo = true;')
         if getattr(sem, 'transpose_kind', 0):
             L.append(f'  d->transpose = {sem.transpose_kind};')
+        if self.isa_spec.arch_name in ('rdna4', 'cdna5') and sem.name.startswith(
+            'GLOBAL_LOAD_TR'
+        ):
+            # WMMA load-transpose instructions require all lanes, or EXEC=0 (NOP).
+            L.append(
+                '  const uint64_t full_exec = ~uint64_t{0} >> (64 - wf.wf_size());'
+            )
+            L.append('  if (wf.exec() != 0 && wf.exec() != full_exec)')
+            L.append(
+                '    wf.report_undefined_behavior('
+                '"global transpose load requires a full or empty EXEC mask");'
+            )
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         if sem.name.startswith('CLUSTER_LOAD_'):
             L.append('  d->request_force_l1_bypass = true;')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if block:
+            L.append('  d->set_block_dword_mask(wf.m0());')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -8347,6 +8502,7 @@ class CodeGenerator:
     ) -> str:
         L = []
         esz, ne = sem.elem_size, sem.num_elems
+        block = sem.name in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK')
         sc0, sc1, nt = self._coherency_exprs()
         acc = self._acc_vgpr_expr
         data_field = self.isa_spec.profile.flat_store_src_field
@@ -8355,12 +8511,42 @@ class CodeGenerator:
             '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
         )
         L.append(f'  d->elem_size = {esz};')
-        L.append(f'  d->num_elems = {ne};')
+        L.append(
+            '  d->num_elems = amdgpu::kBlockDwordCount;'
+            if block
+            else f'  d->num_elems = {ne};'
+        )
         L.append('  d->is_load = false;')
         self._append_wait_counter_type(L, sem, 'flat_store')
         L.append(f'  d->mtype = {self._mtype_expr()};')
         L.append(f'  d->non_temporal = {nt};')
         L.append('  flat_calculate_addresses(inst_, wf, *d);')
+        if block:
+            L.append('  d->set_block_dword_mask(wf.m0());')
+            L.append(f'  uint32_t data_base = {data_base};')
+            L.append(
+                '  constexpr uint32_t block_bytes = amdgpu::kBlockDwordCount * sizeof(uint32_t);'
+            )
+            L.append('  d->store_data.resize(wf.wf_size() * block_bytes);')
+            L.append('  const amdgpu::RegisterAccess registers(wf);')
+            L.append('  for (uint32_t i = 0; i < amdgpu::kBlockDwordCount; ++i) {')
+            L.append('    if (!d->block_dword_enabled(i)) continue;')
+            L.append(
+                '    const auto source = registers.block_store_source_vgpr(data_base + i);'
+            )
+            L.append(
+                '    auto data = registers.read_vgpr_region(source, 1, d->lane_mask);'
+            )
+            L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+            L.append('      if (!(d->lane_mask & (uint64_t{1} << lane))) continue;')
+            L.append('      const uint32_t value = data.lane(0, lane);')
+            L.append(
+                '      std::memcpy(&d->store_data[lane * block_bytes + i * sizeof(value)], &value, sizeof(value));'
+            )
+            L.append('    }')
+            L.append('  }')
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
         L.append('  uint64_t exec = wf.exec();')
         L.append(f'  uint32_t data_base = {data_base};')
         data_regs = ne if esz == 4 else 1
@@ -8996,7 +9182,8 @@ class CodeGenerator:
         encoding = self.isa_spec.encoding_map.get(inst.enc_name)
         if is_load and encoding and any(f.name == 'lds' for f in encoding.ucode_fields):
             L.append('  d->lds_dst = inst_.lds;')
-            L.append('  d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
+            if self.isa_spec.arch_name not in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                L.append('  d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
         if sem.elem_size == 2:
             L.append('  d->buffer_d16 = true;')
             L.append(f'  d->d16_hi = {str(sem.d16_hi).lower()};')
@@ -9015,12 +9202,34 @@ class CodeGenerator:
             ]
         )
         L.append(f'    {addr_fn}(inst_, wf, *d);')
+        if (
+            is_load
+            and encoding
+            and any(f.name == 'lds' for f in encoding.ucode_fields)
+            and self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+        ):
+            L.append('  if (d->lds_dst) {')
+            registers = (
+                (sem.num_elems + 1) // 2 if sem.elem_size == 2 else sem.num_elems
+            )
+            self._append_buffer_lds_destination(L, registers)
+            L.append('  }')
         if not is_load:
             L.append(
                 f"  amdgpu::capture_buffer_format_store(wf, *d, {self._vgpr_base_expr('vdata')});"
             )
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
+
+    def _append_buffer_lds_destination(self, lines: list[str], registers: int) -> None:
+        # Buffer ISA 9.1.9 uses a byte offset: 16 bits on CDNA1-3, 18 on CDNA4.
+        # Global/Scratch ISA 10.3 instead uses M0[17:2] * 4.
+        mask = '0x3ffffu' if self.isa_spec.arch_name == 'cdna4' else '0xffffu'
+        lines.append(
+            '    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
+            f' static_cast<int64_t>(wf.m0() & {mask}) + inst_.offset,'
+            f' {registers * 4}, {16 if registers >= 3 else registers * 4});'
+        )
 
     def _gen_buffer_load(
         self,
@@ -9058,10 +9267,16 @@ class CodeGenerator:
             L.append('    d->is_load = true;')
             self._append_wait_counter_type(L, sem, cls, indent='    ')
             L.append('    d->lds_dst = true;')
-            L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
+            if self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                L.append('    d->lds_dword_extend = true;')
+                L.append(f'    d->sign_extend = {str(sem.sign_extend).lower()};')
+            else:
+                L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
+            if self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                self._append_buffer_lds_destination(L, ne)
             L.append('    set_data(std::move(d));')
             L.append('    return;')
             L.append('  }')
@@ -9184,20 +9399,19 @@ class CodeGenerator:
             '    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;'
         )
         lines.append('    uint32_t m0 = wf.m0();')
-        if self.isa_spec.profile.ds_addtid_uses_m0_byte_base:
-            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            lines.append('      if (!(exec & (1ULL << lane))) continue;')
-            lines.append('      uint32_t lane_offset = (m0 + lane * 4U) & 0xFFFFFU;')
-            lines.append(
-                '      d->per_lane_addr[lane] = lane_offset + offset + wf.lds_base();'
-            )
+        if self.isa_spec.profile.ds_addtid_m0_base_bits not in (16, 20):
+            raise ValueError("Unsupported ADDTID base and offset policy")
+        mask = (1 << self.isa_spec.profile.ds_addtid_m0_base_bits) - 1
+        if self.isa_spec.profile.ds_addtid_m0_base_bits == 16:
+            # The 16-bit base-plus-offset expression widens before adding laneID.
+            lines.append(f'    uint32_t byte_base = (m0 + offset) & 0x{mask:x}u;')
         else:
-            lines.append('    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;')
-            lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-            lines.append('      if (!(exec & (1ULL << lane))) continue;')
-            lines.append(
-                '      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();'
-            )
+            lines.append(f'    uint32_t byte_base = (m0 & 0x{mask:x}u) + offset;')
+        lines.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        lines.append('      if (!(exec & (1ULL << lane))) continue;')
+        lines.append(
+            '      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();'
+        )
         lines.append('    }')
         lines.append('  }')
 
@@ -9235,6 +9449,18 @@ class CodeGenerator:
         L.append('  uint64_t exec = wf.exec();')
         L.append(f"  uint32_t data_base = {self._vgpr_base_expr('data0')};")
         L.append(f'  d->store_data.resize(wf.wf_size() * {sem.elem_size});')
+        L.extend(
+            [
+                '  if (exec) {',
+                '    auto data = amdgpu::RegisterAccess(wf).read_vgpr_region(data_base, 1, exec);',
+                '    if (data.valid()) {',
+                '      data.copy_dwords_lane_major(d->store_data, exec);',
+                '      set_data(std::move(d));',
+                '      return;',
+                '    }',
+                '  }',
+            ]
+        )
         L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
         L.append('    if (!(exec & (1ULL << lane))) continue;')
         L.append(
@@ -9260,8 +9486,8 @@ class CodeGenerator:
         # TR16_B128=4, B64_TR_B16=5, WMMA_TR_B8=6,
         # CDNA5_DS_TR_B8=7. Defaults describe the B64 (num_elems=2) forms.
         tr_map = {
-            'ds_read_tr_b4': (4, 2, 1),  # elem_size=4, num_elems=2, transpose=1
-            'ds_read_tr_b6': (4, 3, 2),  # elem_size=4, num_elems=3, transpose=2
+            'ds_read_tr_b4': (4, 2, self.isa_spec.profile.ds_b4_transpose_kind),
+            'ds_read_tr_b6': (4, 3, self.isa_spec.profile.ds_b6_transpose_kind),
             'ds_read_tr_b8': (4, 2, 3),  # elem_size=4, num_elems=2, transpose=3
             'ds_read_tr_b16': (4, 2, 5),  # elem_size=4, num_elems=2, transpose=5
         }
@@ -9410,16 +9636,30 @@ class CodeGenerator:
         L.append(
             f"  uint32_t addr_base = {self._vgpr_base_expr('addr', use_acc=False)};"
         )
-        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('    if (!(exec & (1ULL << lane))) continue;')
+        # Keep DS_READ2's existing per-lane callbacks: coalescing them changes
+        # what observers see. Only the unobserved path shares the region lookup.
+        L.append('  auto calculate_addresses = [&](auto read_address) {')
+        L.append('    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
+        L.append('      if (!(exec & (1ULL << lane))) continue;')
+        L.append('      uint32_t base = read_address(lane);')
         L.append(
-            '    uint32_t base = amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);'
+            f'      d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * {stride_scale} + wf.lds_base();'
         )
         L.append(
-            f'    d->per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset0) * {stride_scale} + wf.lds_base();'
+            f'      d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * {stride_scale} + wf.lds_base();'
+        )
+        L.append('    }')
+        L.append('  };')
+        L.append('  if (cu.observes_register_access()) {')
+        L.append('    calculate_addresses([&](uint32_t lane) {')
+        L.append('      return amdgpu::RegisterAccess(cu).read_vgpr(addr_base, lane);')
+        L.append('    });')
+        L.append('  } else {')
+        L.append(
+            '    const auto addresses = amdgpu::RegisterAccess(cu).read_vgpr_region(addr_base, 1, exec).lanes();'
         )
         L.append(
-            f'    d->ds2_per_lane_addr[lane] = base + static_cast<uint32_t>(inst_.offset1) * {stride_scale} + wf.lds_base();'
+            '    calculate_addresses([&](uint32_t lane) { return addresses[lane]; });'
         )
         L.append('  }')
         L.append('  set_data(std::move(d));')
@@ -10420,6 +10660,10 @@ class CodeGenerator:
                                     inst_sem.semantic_class == 'buffer_atomic'
                                     and opnd.name == 'vdata'
                                 )
+                                or (
+                                    inst_sem.semantic_class == 'smem_atomic'
+                                    and opnd.name == 'sdata'
+                                )
                             )
                         )
                         # Compare-swap consumes two elements through vdata but
@@ -10445,9 +10689,15 @@ class CodeGenerator:
                             else opnd.name
                         )
                         if _is_optional_atomic_return:
-                            sc0, _, _ = self._coherency_exprs()
+                            if inst_sem.semantic_class == 'smem_atomic':
+                                # SMEM retains GLC on CDNA3/4, whose vector
+                                # atomics use SC0 to select the return value.
+                                returns_data = 'inst_.glc != 0'
+                            else:
+                                sc0, _, _ = self._coherency_exprs()
+                                returns_data = self._atomic_return_expr(sc0)
                             conditional_dst_body.append(
-                                f'if ({self._atomic_return_expr(sc0)}) '
+                                f'if ({returns_data}) '
                                 f'dst_operands_[num_dst_++] = &{atomic_return_operand};'
                             )
                         elif (
@@ -10649,6 +10899,12 @@ class CodeGenerator:
                         )
                     if inst_sem:
                         access_conditions = []
+                        if inst.name in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK'):
+                            access_conditions.append('modifiers.block_data = &vdst;')
+                        elif inst.name in ('GLOBAL_STORE_BLOCK', 'SCRATCH_STORE_BLOCK'):
+                            access_conditions.append(
+                                f'modifiers.block_data = &{self.isa_spec.profile.flat_store_src_field};'
+                            )
                         if is_smem and inst.name.startswith(
                             ('S_BUFFER_LOAD_', 'S_BUFFER_STORE_')
                         ):
@@ -12063,8 +12319,68 @@ class CodeGenerator:
                             ctor_body_parts.append(caps_stmt)
 
                     ctor_body_parts.extend(vgpr_msb_role_body)
+                    if (
+                        self.isa_spec.arch_name
+                        in ('rdna3', 'rdna3_5', 'rdna4', 'cdna5')
+                        and enc.enc_name.upper() == 'ENC_VOP3P'
+                        and re.match(r'V_(?:DOT\d+|WMMA)_.*_IU[48]$', inst.name)
+                        and not (
+                            self.isa_spec.arch_name == 'cdna5'
+                            and inst.name == 'V_DOT8_I32_IU4'
+                        )
+                    ):
+                        # NEG[1:0] selects signedness; only these other bits
+                        # are explicitly undefined for the qualified IU forms.
+                        ctor_body_parts.append(
+                            'if ((inst_.neg & 4u) || inst_.neg_hi) '
+                            'flags_ |= INVALID_IU_MODIFIERS;'
+                        )
+                    if self.isa_spec.arch_name in ('rdna4', 'cdna5'):
+                        # Restrict alignment checks to explicitly sized scalar
+                        # data, not generated wave-mask or mixed-width metadata.
+                        # Special selectors and tuples crossing their region
+                        # retain their separate ISA semantics.
+                        scalar_load = re.fullmatch(
+                            r'S_(?:BUFFER_)?LOAD_B(64|96|128|256|512)', inst.name
+                        )
+                        if scalar_load:
+                            bits = int(scalar_load[1])
+                            mask = 1 if bits == 64 else 3
+                            ctor_body_parts.append(
+                                f'if (inst_.sdata + {bits // 32}u <= 106u && '
+                                f'(inst_.sdata & {mask}u)) '
+                                'flags_ |= MISALIGNED_SCALAR_DATA;'
+                            )
+                        if inst.name.startswith('S_BUFFER_LOAD_'):
+                            ctor_body_parts.append(
+                                'if (inst_.sbase * 2u + 4u <= 106u && (inst_.sbase & 1u)) '
+                                'flags_ |= MISALIGNED_SCALAR_DATA;'
+                            )
+                        if inst.name == 'S_MOV_B64':
+                            ctor_body_parts.append(
+                                'if ((inst_.sdst < 105u && (inst_.sdst & 1u)) || '
+                                '(inst_.ssrc0 < 105u && (inst_.ssrc0 & 1u))) '
+                                'flags_ |= MISALIGNED_SCALAR_DATA;'
+                            )
                     if inst_sem and inst_sem.semantic_class == 'mfma':
                         ctor_body_parts.append('flags_ |= MATRIX_REGISTER_ACCESSES;')
+                        # CBSZ is a broadcast for F32/I32 MFMA, but a format
+                        # selector for F8/F6/F4; F64 ignores it. Qualify the
+                        # static restriction once and report on the CU issuer.
+                        broadcast_shape = re.match(
+                            r'V_MFMA_(?:F32|I32)_(\d+)X(\d+)X', inst.name
+                        )
+                        if (
+                            self.isa_spec.arch_name in ('cdna3', 'cdna4')
+                            and broadcast_shape
+                            and 'F8F6F4' not in inst.name.replace('_', '')
+                        ):
+                            rows, cols = map(int, broadcast_shape.groups())
+                            blocks = 64 * (inst.operands[0].size // 32) // (rows * cols)
+                            ctor_body_parts.append(
+                                f'if ((1u << inst_.cbsz) > {blocks}u) '
+                                'flags_ |= INVALID_MFMA_BROADCAST;'
+                            )
                     # These qualified execution emitters only access their
                     # OperandMap bindings, including tied operands. New opcodes
                     # in these classes inherit the complete-register contract;
@@ -12125,6 +12441,7 @@ class CodeGenerator:
                             'global_load_addtid',
                         )
                         and 'FORMAT' not in inst.name
+                        and inst.name not in ('GLOBAL_LOAD_BLOCK', 'SCRATCH_LOAD_BLOCK')
                         and not inst.name.startswith('FLAT_')
                         and not (_mem_sem.d16_hi or _mem_sem.d16_lo)
                     ):
@@ -12233,9 +12550,13 @@ class CodeGenerator:
                         ctor_body_parts.append('flags_ |= BRANCH;')
                     if _mem_sem and _mem_sem.semantic_class == 'cbranch':
                         ctor_body_parts.append('flags_ |= COND_BRANCH;')
+                    if _mem_sem and _mem_sem.semantic_class == 'setkill':
+                        ctor_body_parts.append(
+                            'if (inst_.simm16 & 1u) flags_ |= PROGRAM_TERMINATOR;'
+                        )
                     if _mem_sem and _mem_sem.semantic_class == 'endpgm':
                         # BasicBlock splitting treats PROGRAM_TERMINATOR as a hard
-                        # stop with no fallthrough successor. Only S_ENDPGM ends the
+                        # stop with no fallthrough successor. S_ENDPGM ends the
                         # wave. S_TRAP is NOT a terminator: on hardware it transfers
                         # to the trap handler and RETURNS to the next instruction,
                         # and with no handler configured (STATUS.TRAP_EN == 0, the

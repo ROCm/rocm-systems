@@ -717,8 +717,8 @@ def gen_vector_mad_64_32(
     D.u64 = S0.u32 * S1.u32 + S2.u64 (unsigned)
 
     Sources S0 and S1 are 32-bit; the accumulator S2 and result D are
-    64-bit VGPR pairs. The unsigned SDST-encoded form also writes the per-lane
-    carry-out mask to SDST.
+    64-bit VGPR pairs. SDST holds unsigned carry-out or signed bit 64 of the
+    65-bit sum, independently of integer saturation.
     """
     writes_carry = len(dst) > 1
     L = []
@@ -739,10 +739,13 @@ def gen_vector_mad_64_32(
         )
         L.append('    uint64_t product = static_cast<uint64_t>(s0 * s1);')
         L.append('    uint64_t result = product + s2;')
-        if writes_carry or integer_clamp:
+        if integer_clamp:
             L.append('    bool overflow = amdgpu::signed_add_overflows(product, s2);')
         if writes_carry:
-            L.append('    if (overflow)')
+            # SDST is bit 64 of the signed 65-bit sum, independent of saturation.
+            L.append(
+                '    if (((product >> 63) ^ (s2 >> 63) ^ (result < product)) != 0)'
+            )
             L.append('      carry |= 1ULL << lane;')
         if integer_clamp:
             L.append('    if (inst_.clamp && overflow) {')
@@ -1322,6 +1325,13 @@ def gen_vector_permlane_family(dst: list[str], src: list[str], op: str | None) -
     L.append(f'  uint32_t selector = amdgpu::RegisterAccess(wf).read_scalar({src[1]});')
     L.append(
         f'  uint32_t lane_group_width = amdgpu::RegisterAccess(wf).read_scalar({src[2]});'
+    )
+    L.append(
+        '  if (exec && inst_.src2 < 256 && '
+        '(!lane_group_width || (lane_group_width & (lane_group_width - 1))))'
+    )
+    L.append(
+        '    wf.report_undefined_behavior("permlane group width is not a power of two");'
     )
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
