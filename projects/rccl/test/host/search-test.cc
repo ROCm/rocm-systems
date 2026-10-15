@@ -242,8 +242,9 @@ TEST_F(SearchMicrotest, Compute_InterNodeTreeStaysOnOneNicPerChannel) {
 
 TEST_F(SearchMicrotest, Compute_CollNetDirectUsesCollCapableNics) {
   std::string body;
-  for (int g = 0; g < 2; g++) body += Pci(SwitchBus(g), GpuPci(GpuBus(g), g, g, Xgmi(GpuBus(1 - g))) +
-                                                        NicPci(NicBus(g), Net("c" + std::to_string(g), g, "coll=\"1\"")));
+  for (int g = 0; g < 2; g++)
+    body += Pci(SwitchBus(g), GpuPci(GpuBus(g), g, g, Xgmi(GpuBus(1 - g))) +
+                                NicPci(NicBus(g), Net("c" + std::to_string(g), g, "coll=\"1\"")));
   Use(System(Cpu(0, body)), 4);
   GraphPtr graph = NewGraph(4, NCCL_TOPO_PATTERN_COLLNET_DIRECT, 1, MAXCHANNELS);
   graph->collNet = 1;
@@ -287,7 +288,8 @@ TEST_F(SearchMicrotest, FollowPath_NotEnoughBandwidthRewinds) {
 
   EXPECT_EQ(nullptr, node);  // 18 GB/s left on the XGMI link
   ncclTopoLinkList& path = system_->nodes[GPU].nodes[0].paths[GPU][1];
-  for (int i = 0; i < path.count; i++) EXPECT_FLOAT_EQ(path.list[i]->type == LINK_NVL ? 18 : LOC_BW - 30, path.list[i]->bw);
+  for (int i = 0; i < path.count; i++)
+    EXPECT_FLOAT_EQ(path.list[i]->type == LINK_NVL ? 18 : LOC_BW - 30, path.list[i]->bw);
 }
 
 TEST_F(SearchMicrotest, FollowPath_AnyShortfallRewinds) {
@@ -436,7 +438,8 @@ TEST_F(SearchMicrotest, NextGpuSort_TwoGpusBehindASwitchHaveOneNeighbor) {
   GraphPtr graph = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   int next[NCCL_TOPO_MAX_NODES], count = 0;
 
-  ASSERT_EQ(ncclSuccess, ncclTopoSearchNextGpuSort(system_.get(), graph.get(), system_->nodes[GPU].nodes, next, &count, 0));
+  ASSERT_EQ(ncclSuccess,
+            ncclTopoSearchNextGpuSort(system_.get(), graph.get(), system_->nodes[GPU].nodes, next, &count, 0));
 
   EXPECT_EQ(1, count);
   EXPECT_EQ(1, next[0]);
@@ -448,11 +451,14 @@ TEST_F(SearchMicrotest, NextGpuSort_EqualIntraScoresGoInReverseWhenAwayFromTheNi
   graph->inter[0] = system_->nodes[NET].nodes[0].id;
   int next[NCCL_TOPO_MAX_NODES], count = 0;
 
-  ASSERT_EQ(ncclSuccess, ncclTopoSearchNextGpuSort(system_.get(), graph.get(), system_->nodes[GPU].nodes, next, &count, 0));
+  ASSERT_EQ(ncclSuccess,
+            ncclTopoSearchNextGpuSort(system_.get(), graph.get(), system_->nodes[GPU].nodes, next, &count, 0));
   EXPECT_EQ(std::vector<int>({1, 2, 3}), std::vector<int>(next, next + count));
-  ASSERT_EQ(ncclSuccess, ncclTopoSearchNextGpuSort(system_.get(), graph.get(), system_->nodes[GPU].nodes, next, &count, -1));
+  ASSERT_EQ(ncclSuccess,
+            ncclTopoSearchNextGpuSort(system_.get(), graph.get(), system_->nodes[GPU].nodes, next, &count, -1));
   EXPECT_EQ(std::vector<int>({3, 2, 1}), std::vector<int>(next, next + count));
-  ASSERT_EQ(ncclSuccess, ncclTopoSearchNextGpuSort(system_.get(), graph.get(), system_->nodes[GPU].nodes, next, &count, 1));
+  ASSERT_EQ(ncclSuccess,
+            ncclTopoSearchNextGpuSort(system_.get(), graph.get(), system_->nodes[GPU].nodes, next, &count, 1));
   EXPECT_EQ(3, count);
 }
 
@@ -809,7 +815,8 @@ TEST_F(SearchMicrotest, Compute_EmptyGraphFileFallsThroughToTheSearch) {
 }
 
 TEST_F(SearchMicrotest, Compute_UserRingsAndTreesSkipTheSearch) {
-  Use(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) + GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))), "", kRomeCpu)));
+  Use(
+    System(Cpu(0, GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) + GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))), "", kRomeCpu)));
   setenv("NCCL_RINGS", "0 1|1 0", 1);
 
   GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
@@ -1253,9 +1260,10 @@ TEST_F(SearchNvlsMicrotest, Compute_NvlsBacksOffWhenTheUplinkIsShort) {
 }
 
 TEST_F(SearchMicrotest, Compute_CollNetHeadsAreNotDuplicated) {
-  std::string body = Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) + NicPci(NicBus(0), Net("c0", 0, "coll=\"1\"")) +
-                                       NicPci(NicBus(2), Net("c2", 2, "coll=\"1\""))) +
-                     Pci(SwitchBus(1), GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))));
+  std::string body =
+    Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) + NicPci(NicBus(0), Net("c0", 0, "coll=\"1\"")) +
+                        NicPci(NicBus(2), Net("c2", 2, "coll=\"1\""))) +
+    Pci(SwitchBus(1), GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))));
   Use(System(Cpu(0, body)), 4);
   GraphPtr graph = NewGraph(4, NCCL_TOPO_PATTERN_COLLNET_DIRECT, 1, MAXCHANNELS);
   graph->collNet = 1;
@@ -1269,8 +1277,8 @@ TEST_F(SearchMicrotest, Compute_CollNetHeadsAreNotDuplicated) {
 }
 
 TEST_F(SearchMicrotest, Compute_SharedNicTriesEveryEquallyCloseGpu) {
-  std::string body = Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) + GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))) +
-                                       NicPci(NicBus(0), Net("n0", 0)));
+  std::string body = Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) +
+                                         GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))) + NicPci(NicBus(0), Net("n0", 0)));
   Use(System(Cpu(0, body)), 4);
 
   GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);

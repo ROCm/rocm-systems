@@ -311,10 +311,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 - **`rccl-UnitTestsMicroTopo`** — the real `src/graph` files, each `#include`d from its own
-  test TU via `<STEM>_CC_PATH`: `xml.cc` (`xml-test.cc`, `Xml*`), `topo.cc` (`Topo*`), `paths.cc`
-  (`Paths*`), `search.cc` (`Search*`), `rome_models.cc` (`rome-models-test.cc`, `RomeModels*`).
-  Its own binary because every other micro binary fakes the graph symbols. Topologies come from
-  XML built in `TopoScene.h`. See `test_categories_micro_topo.yaml`.
+  test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`), `paths.cc` (`Paths*`),
+  `search.cc` (`Search*`), `rome_models.cc` (`RomeModels*`), `connect.cc` (`Connect*`),
+  `rings.cc` (`Rings*`), `trees.cc` (`Trees*`). Its own binary because every other micro binary
+  fakes the graph symbols. Topologies come from XML built in `TopoScene.h`; externals are faked
+  in `fakes/graph_fakes.cc`. See `test_categories_micro_topo.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the

@@ -12,6 +12,9 @@ test_categories:
       - "Paths*"
       - "Search*"
       - "RomeModels*"
+      - "Connect*"
+      - "Rings*"
+      - "Trees*"
     exclude_windows:
       - "*"
     labels:

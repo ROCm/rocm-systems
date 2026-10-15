@@ -99,8 +99,8 @@ constexpr const char* kRomeCpu = "arch=\"x86_64\" vendor=\"AuthenticAMD\" family
 constexpr const char* kIntelCpu = "arch=\"x86_64\" vendor=\"GenuineIntel\" familyid=\"6\" modelid=\"0x55\"";
 
 inline std::string Cpu(int numa, const std::string& body, const std::string& attrs = "", const char* ids = kAmdCpu) {
-  return "<cpu numaid=\"" + std::to_string(numa) + "\" " + ids + " affinity=\"0000000f\"" + Extra(attrs) + ">\n" + body +
-         "</cpu>\n";
+  return "<cpu numaid=\"" + std::to_string(numa) + "\" " + ids + " affinity=\"0000000f\"" + Extra(attrs) + ">\n" +
+         body + "</cpu>\n";
 }
 
 inline std::string Pci(const std::string& busId, const std::string& body, const std::string& cls = "0x060400",

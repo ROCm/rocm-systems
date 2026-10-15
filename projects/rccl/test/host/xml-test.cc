@@ -350,11 +350,12 @@ TEST_F(XmlMicrotest, GetXmlGraphFromFile_WrongVersionIsInvalidUsage) {
 // --- Trimming
 
 TEST_F(XmlMicrotest, TrimXml_DropsBranchesWithoutAKeptNode) {
-  ASSERT_EQ(ncclSuccess, Parse("<system version=\"2\">"
-                               "<cpu numaid=\"0\"><pci busid=\"a\"><gpu dev=\"0\" keep=\"1\"/><gpu dev=\"1\"/></pci>"
-                               "<pci busid=\"b\"><nic><net name=\"n0\" keep=\"1\"/><gin name=\"g0\"/><rma name=\"r0\"/></nic></pci>"
-                               "<pci busid=\"c\" keep=\"0\"/></cpu>"
-                               "<cpu numaid=\"1\"><pci busid=\"c\"/></cpu></system>"));
+  ASSERT_EQ(ncclSuccess,
+            Parse("<system version=\"2\">"
+                  "<cpu numaid=\"0\"><pci busid=\"a\"><gpu dev=\"0\" keep=\"1\"/><gpu dev=\"1\"/></pci>"
+                  "<pci busid=\"b\"><nic><net name=\"n0\" keep=\"1\"/><gin name=\"g0\"/><rma name=\"r0\"/></nic></pci>"
+                  "<pci busid=\"c\" keep=\"0\"/></cpu>"
+                  "<cpu numaid=\"1\"><pci busid=\"c\"/></cpu></system>"));
 
   ASSERT_EQ(ncclSuccess, ncclTopoTrimXml(xml_.get()));
 
@@ -894,7 +895,8 @@ TEST_F(XmlSysfsMicrotest, GetXmlFromSys_FullCpuFails) {
 TEST_F(XmlSysfsMicrotest, GetXmlFromSys_FullNodeFailsToRecordTheLink) {
   ncclXmlNode* pci = PciNode("0000:01:00.0");
   ASSERT_EQ(ncclSuccess, xmlSetAttr(pci, "class", "0x020000"));
-  for (int a = pci->nAttrs; a < MAX_ATTR_COUNT; a++) ASSERT_EQ(ncclSuccess, xmlSetAttrInt(pci, std::to_string(a).c_str(), a));
+  for (int a = pci->nAttrs; a < MAX_ATTR_COUNT; a++)
+    ASSERT_EQ(ncclSuccess, xmlSetAttrInt(pci, std::to_string(a).c_str(), a));
 
   EXPECT_EQ(ncclInternalError, ncclTopoGetXmlFromSys(pci, xml_.get()));
 }

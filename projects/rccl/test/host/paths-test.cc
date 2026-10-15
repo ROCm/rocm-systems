@@ -48,7 +48,8 @@ class PathsMicrotest : public ::testing::Test {
 
 // Two partitions of one GPU and a NIC behind one switch.
 std::string PartitionedSwitch(const std::string& gpuAttrs0, const std::string& gpuAttrs1) {
-  std::string pci = "<pci busid=\"" + GpuBus(0) + "\" class=\"0x120000\" link_speed=\"32.0 GT/s PCIe\" link_width=\"16\">" +
+  std::string pci = "<pci busid=\"" + GpuBus(0) +
+                    "\" class=\"0x120000\" link_speed=\"32.0 GT/s PCIe\" link_width=\"16\">" +
                     Gpu(0, 0, "", gpuAttrs0) + Gpu(1, 1, "", gpuAttrs1) + "</pci>";
   return Pci(SwitchBus(0), pci + NicPci(NicBus(0), Net("a", 0)));
 }
@@ -129,7 +130,8 @@ TEST_F(PathsMicrotest, ComputePaths_TwoXgmiHopsAreNvbUnlessDisabled) {
 
 TEST_F(PathsMicrotest, ComputePaths_XgmiSwitchIsOneNvlHopBetweenDevs) {
   std::string toSwitch = Xgmi("fffffff:ffff:ff", 1, "0x068000");
-  SystemPtr system = BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, toSwitch) + GpuPci(GpuBus(1), 1, 1, toSwitch))));
+  SystemPtr system =
+    BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0, toSwitch) + GpuPci(GpuBus(1), 1, 1, toSwitch))));
 
   ncclTopoLinkList& path = Path(system.get(), GPU, 0, GPU, 1);
   EXPECT_EQ(PATH_NVL, path.type);
@@ -320,8 +322,8 @@ TEST_F(PathsMicrotest, GetLocalCpu_PicksTheFewestHops) {
 }
 
 TEST_F(PathsMicrotest, PrintPaths_LogsEachSourceNode) {
-  SystemPtr system = BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0) +
-                                                                                 RailNet("gin", 1) + RailNet("rma", 2)))));
+  SystemPtr system = BuildWithPaths(
+    System(Cpu(0, GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0) + RailNet("gin", 1) + RailNet("rma", 2)))));
 
   ASSERT_EQ(ncclSuccess, ncclTopoPrintPaths(system.get()));
 
@@ -433,7 +435,8 @@ TEST_F(PathsCommMicrotest, CheckP2p_AnyPathOnAnAmdHostAndPxbOnOthers) {
   Use(BuildWithPaths(PcieSystem()));
   EXPECT_EQ(1, P2p(0, 3));
 
-  for (const char* ids : {kIntelCpu, "arch=\"arm64\"", "arch=\"x86_64\" vendor=\"CentaurHauls\" familyid=\"7\" modelid=\"1\""}) {
+  for (const char* ids :
+       {kIntelCpu, "arch=\"arm64\"", "arch=\"x86_64\" vendor=\"CentaurHauls\" familyid=\"7\" modelid=\"1\""}) {
     std::string pcie = System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + GpuPci(GpuBus(1), 1, 1)) +
                                          GpuPci(GpuBus(2), 2, 2), "", ids));
     Use(BuildWithPaths(pcie));
@@ -469,7 +472,8 @@ TEST_F(PathsCommMicrotest, CheckP2p_UnknownRanks) {
   Use(BuildWithPaths(XgmiSystem(2)));
   int p2p = -1;
 
-  EXPECT_EQ(ncclInternalError, ncclTopoCheckP2p(nullptr, system_.get(), 7, 0, &p2p, nullptr, nullptr, nullptr, nullptr));
+  EXPECT_EQ(ncclInternalError,
+            ncclTopoCheckP2p(nullptr, system_.get(), 7, 0, &p2p, nullptr, nullptr, nullptr, nullptr));
   EXPECT_EQ(0, P2p(0, 7));
   EXPECT_FALSE(Logged("not in local topology"));
   comm_->MNNVL = 1;
@@ -613,7 +617,8 @@ TEST_F(PathsGdrMicrotest, CheckGdr_LevelFromC2cParamSystemAndUser) {
 
 // Rome: a GPU and a NIC hanging directly off the same root complex quadrant get GDR up to PHB.
 TEST_F(PathsGdrMicrotest, CheckGdr_RomeSameQuadrantAllowsPhb) {
-  std::string body = GpuPci("0000:41:00.0", 0, 0) + NicPci("0000:42:00.0", Net("a", 0)) + NicPci("0000:81:00.0", Net("b", 1));
+  std::string body =
+    GpuPci("0000:41:00.0", 0, 0) + NicPci("0000:42:00.0", Net("a", 0)) + NicPci("0000:81:00.0", Net("b", 1));
   Use(BuildWithPaths(System(Cpu(0, body, "", kRomeCpu))));
 
   EXPECT_EQ(ncclTopoGdrModeDefault, Gdr(0, 0));
@@ -654,7 +659,8 @@ TEST_F(PathsGdrMicrotest, CheckGdr_MloPartReadsTheDevDistance) {
 }
 
 TEST_F(PathsGdrMicrotest, CheckGdr_C2cGpuOnAPciNicForcesPciMapping) {
-  XmlPtr xml = MustParseXml(System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0))))));
+  XmlPtr xml =
+    MustParseXml(System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0))))));
   ncclXmlNode* gpu = nullptr;
   ncclXmlNode* c2c = nullptr;
   ASSERT_EQ(ncclSuccess, xmlFindTag(xml.get(), "gpu", &gpu));
@@ -745,8 +751,9 @@ TEST_F(PathsCommMicrotest, NeedFlush_ForcedOrUnlessTheNetManagesIt) {
 }
 
 TEST_F(PathsMicrotest, CheckNet_OnlyWhenBothGpusReachFasterNicsAndIntraNetIsAllowed) {
-  SystemPtr pcie = BuildWithPaths(System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0)))) +
-                                         Cpu(1, Pci(SwitchBus(1), GpuPci(GpuBus(1), 1, 1) + NicPci(NicBus(1), Net("b", 1))))));
+  SystemPtr pcie =
+    BuildWithPaths(System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0)))) +
+                          Cpu(1, Pci(SwitchBus(1), GpuPci(GpuBus(1), 1, 1) + NicPci(NicBus(1), Net("b", 1))))));
   int net = -1;
   ASSERT_EQ(ncclSuccess, ncclTopoCheckNet(pcie.get(), 0, 1, &net));
   EXPECT_EQ(0, net);
@@ -764,8 +771,9 @@ TEST_F(PathsMicrotest, CheckNet_OnlyWhenBothGpusReachFasterNicsAndIntraNetIsAllo
 
 TEST_F(PathsMicrotest, CheckNet_GpuWithoutNicPathsLosesToP2p) {
   g_params["NET_DISABLE_INTRA"] = 0;
-  SystemPtr system = BuildWithPaths(System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0)))) +
-                                           Cpu(1, GpuPci(GpuBus(1), 1, 1), "host_hash=\"0x5\"")));
+  SystemPtr system =
+    BuildWithPaths(System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0)))) +
+                          Cpu(1, GpuPci(GpuBus(1), 1, 1), "host_hash=\"0x5\"")));
   ASSERT_EQ(nullptr, system->nodes[GPU].nodes[1].paths[NET]);
   int net = -1;
 
@@ -871,9 +879,9 @@ TEST_F(PathsMicrotest, GpuMinMaxPath_SkipSelfAndMissingPaths) {
 }
 
 TEST_F(PathsMicrotest, GpuMaxLocalNetPath_TakesEachGpusNearestNic) {
-  SystemPtr system = BuildWithPaths(System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0))) +
-                                                  GpuPci(GpuBus(1), 1, 1)) +
-                                           Cpu(1, GpuPci(GpuBus(2), 2, 2), "host_hash=\"0x5\"")));
+  SystemPtr system = BuildWithPaths(System(
+    Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0))) + GpuPci(GpuBus(1), 1, 1)) +
+    Cpu(1, GpuPci(GpuBus(2), 2, 2), "host_hash=\"0x5\"")));
   int value = -1;
 
   ASSERT_EQ(ncclSuccess, ncclTopoGetGpuMaxLocalNetPath(system.get(), &value));
@@ -888,8 +896,9 @@ TEST_F(PathsMicrotest, NvlinkSummaries_AllNvlinkDirectAndSplit) {
   SystemPtr full = BuildWithPaths(XgmiSystem(4));
   SystemPtr ring = BuildWithPaths(XgmiRing4());
   SystemPtr pcie = BuildWithPaths(PcieSystem());
-  std::string halves = System(Cpu(0, GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) + GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))) +
-                                         GpuPci(GpuBus(2), 2, 2, Xgmi(GpuBus(3))) + GpuPci(GpuBus(3), 3, 3, Xgmi(GpuBus(2)))));
+  std::string halves =
+    System(Cpu(0, GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) + GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))) +
+                    GpuPci(GpuBus(2), 2, 2, Xgmi(GpuBus(3))) + GpuPci(GpuBus(3), 3, 3, Xgmi(GpuBus(2)))));
   SystemPtr split = BuildWithPaths(halves);
   int all = -1, splitNvl = -1;
   bool direct = false;
@@ -967,6 +976,10 @@ class PathsP2pChannelsMicrotest : public PathsCommMicrotest {
     comm_->nChannels = nChannels;
   }
 
+  void Compute() {
+    ASSERT_EQ(ncclSuccess, ncclTopoComputeP2pChannelsPerPeer(comm_.get()));
+    ASSERT_EQ(ncclSuccess, ncclTopoComputeP2pChannels(comm_.get()));
+  }
 };
 
 TEST_F(PathsP2pChannelsMicrotest, PerPeer_XgmiWidthPcieAndSelf) {
@@ -1023,6 +1036,137 @@ TEST_F(PathsP2pChannelsMicrotest, PerPeer_RemoteRankWithoutNicGetsTwo) {
   ASSERT_EQ(ncclSuccess, ncclTopoComputeP2pChannelsPerPeer(comm_.get()));
 
   EXPECT_EQ(2, comm_->p2pnChannelsPerPeer);
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_SingleNodeGfx942DoublesThePerPeerCount) {
+  Setup(BuildWithPaths(XgmiSystem(4)), 4, 1, 6);
+
+  Compute();
+
+  EXPECT_EQ(8, comm_->p2pnChannels);
+  EXPECT_EQ(8, comm_->p2pnChannelsPerPeer);
+  EXPECT_EQ(std::vector<int>({6, 7}), g_initChannelCalls);
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_IntelWithoutFullXgmiIsEightByEight) {
+  Setup(BuildWithPaths(System(Cpu(0, GpuPci(GpuBus(0), 0, 0) + GpuPci(GpuBus(1), 1, 1), "", kIntelCpu))), 2, 1, 4);
+
+  Compute();
+
+  EXPECT_EQ(8, comm_->p2pnChannels);
+  EXPECT_EQ(8, comm_->p2pnChannelsPerPeer);
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_RomeFourByTwoUsesTwoPerPeer) {
+  Setup(BuildWithPaths(XgmiSystem(2)), 2, 1, 6);
+  system_->type |= RCCL_TOPO_4P2H_ROME;
+
+  Compute();
+
+  EXPECT_EQ(8, comm_->p2pnChannels);
+  EXPECT_EQ(2, comm_->p2pnChannelsPerPeer);
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_SharedCommIsBoundByTheParent) {
+  Setup(BuildWithPaths(XgmiSystem(2, 1, false, "gfx90a")), 2, 1, 16);
+  ncclComm parent{};
+  shared_->owner = &parent;
+  shared_->tpP2pNChannels = 4;
+
+  Compute();
+
+  EXPECT_EQ(4, comm_->p2pnChannels);
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_UserMaxCapsBelowThePerPeerCount) {
+  Setup(BuildWithPaths(XgmiSystem(4)), 4, 1, 6);
+  g_params["MAX_P2P_NCHANNELS"] = 1;
+  g_params["MIN_P2P_NCHANNELS"] = 4;
+
+  Compute();
+
+  EXPECT_EQ(1, comm_->p2pnChannels);
+  EXPECT_EQ(1, comm_->p2pnChannelsPerPeer);
+  EXPECT_TRUE(Logged("NCCL_MAX_P2P_NCHANNELS=1 overrides NCCL_MIN_P2P_NCHANNELS=4; using 1 P2P channels"));
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_Gfx950MultiNodeCaps) {
+  struct Case {
+    int nRanks, nNodes, cuReduce, expected;
+  };
+  for (const Case& c : {Case{16, 2, 0, 32}, Case{32, 4, 0, 32}, Case{8, 2, 0, 16}, Case{16, 4, 0, 16},
+                        Case{64, 16, 1, 16}, Case{64, 16, 0, 64}}) {
+    Setup(BuildWithPaths(XgmiSystem(4, 1, false, "gfx950")), c.nRanks, c.nNodes, 64);
+    system_->nRanks = c.nRanks;
+    g_params["P2P_CU_REDUCE_SCALE_ENABLE"] = c.cuReduce;
+
+    Compute();
+
+    EXPECT_EQ(c.expected, comm_->p2pnChannels) << c.nRanks << "/" << c.nNodes;
+  }
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_SaturationTilesThePoolOverThePeers) {
+  Setup(BuildWithPaths(XgmiSystem(4, 1, false, "gfx1250")), 4, 1, MAXCHANNELS);
+
+  Compute();
+
+  EXPECT_EQ(256, comm_->p2pnChannels);  // gfx1250 single node: the CU-bound pool
+  EXPECT_EQ(64, comm_->p2pnChannelsPerPeer);  // 256 / 4 peers, on by default for gfx1250
+  EXPECT_TRUE(Logged("RCCL_SATURATE_P2P_NCHANNELS: p2pnChannelsPerPeer 8 -> 64"));
+
+  g_params["RCCL_SATURATE_P2P_NCHANNELS"] = 0;
+  Compute();
+  EXPECT_EQ(8, comm_->p2pnChannelsPerPeer);
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_MultiNodeHalvesPerPeerToFitOneRound) {
+  Setup(BuildWithPaths(XgmiSystem(1, 1, true)), 8, 8, 8);
+
+  Compute();
+
+  EXPECT_EQ(8, comm_->p2pnChannels);
+  EXPECT_EQ(1, comm_->p2pnChannelsPerPeer);
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_AinicRestoresTwoChannelsPerPeerBelowScale) {
+  Setup(BuildWithPaths(XgmiSystem(1, 1, true)), 8, 8, 8);
+  g_useAinic = true;
+  comm_->minNetCount = 1;
+
+  Compute();
+  EXPECT_EQ(2, comm_->p2pnChannelsPerPeer);
+
+  Setup(BuildWithPaths(XgmiSystem(1, 1, true)), 16, 16, 8);
+  Compute();
+  EXPECT_EQ(1, comm_->p2pnChannelsPerPeer);  // at scale: one per peer
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_InitChannelFailureIsReturned) {
+  Setup(BuildWithPaths(XgmiSystem(4)), 4, 1, 2);
+  g_initChannelResult = ncclSystemError;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoComputeP2pChannelsPerPeer(comm_.get()));
+  EXPECT_EQ(ncclSystemError, ncclTopoComputeP2pChannels(comm_.get()));
+}
+
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_GrowCommAgreesOnTheSmallestCount) {
+  Setup(BuildWithPaths(XgmiSystem(4)), 4, 1, 6);
+  comm_->isGrow = true;
+  g_bootstrapAllGather = [](void*, void* data, int) {
+    int* v = static_cast<int*>(data);
+    v[1] = v[2] = 50;
+    v[3] = 2;
+    return ncclSuccess;
+  };
+
+  Compute();
+  EXPECT_EQ(2, comm_->p2pnChannels);
+  EXPECT_EQ(2, comm_->p2pnChannelsPerPeer);
+
+  g_bootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
+  EXPECT_EQ(ncclSystemError, ncclTopoComputeP2pChannels(comm_.get()));
 }
 
 // --- Trim
@@ -1146,6 +1290,13 @@ TEST_F(PathsTrimMicrotest, TrimSystem_MnnvlCliquePeersOnAnotherHostStay) {
   ASSERT_EQ(ncclSuccess, Trim());
   EXPECT_EQ(std::vector<int>({0, 1}), Ranks());
   EXPECT_TRUE(Logged("MNNVL enabled, checking clique membership for 2 ranks"));
+}
+
+TEST_F(PathsTrimMicrotest, TrimSystem_PathRebuildFailureIsReturned) {
+  Use(BuildWithPaths(XgmiSystem(1)));
+  ASSERT_EQ(ncclSuccess, ncclTopoConnectNodes(system_->nodes[CPU].nodes, system_->nodes[GPU].nodes, LINK_NVL, 1));
+
+  EXPECT_EQ(ncclInternalError, Trim());
 }
 
 // --- PXN ranks

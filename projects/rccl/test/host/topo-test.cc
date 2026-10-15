@@ -330,7 +330,8 @@ TEST_F(TopoMicrotest, GetSystemFromXml_UnsplitMloPartsShareOneDev) {
   ncclTopoNode* dev = Node(system.get(), DEV, kBus0);
   EXPECT_EQ(2, dev->dev.nGpus);
   EXPECT_EQ(NCCL_TOPO_ID(0, NCCL_TOPO_GPU_LOCAL_ID(kBus0, 1)), system->nodes[GPU].nodes[1].id);
-  EXPECT_FLOAT_EQ(GFX94X_XGMI_WIDTH, Link(dev, Node(system.get(), DEV, BusId(GpuBus(1))))->bw);  // second GPU not primary
+  EXPECT_FLOAT_EQ(GFX94X_XGMI_WIDTH,
+                  Link(dev, Node(system.get(), DEV, BusId(GpuBus(1))))->bw);  // second GPU not primary
 }
 
 TEST_F(TopoMicrotest, GetSystemFromXml_SameMloPartTwiceSharesTheDevAndItsLinks) {
@@ -564,7 +565,8 @@ TEST_F(TopoMicrotest, AddCpu_DecodesArchVendorAndModel) {
 // two AMD sockets always get the Zen 1/2 inter-socket bandwidth, even on Zen 5 (CPUID family 26).
 TEST_F(TopoMicrotest, AddCpu_AmdZenGenerationIsOverwrittenSoSocketsGetZen12Bandwidth) {
   const char* zen5 = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"26\" modelid=\"2\"";
-  SystemPtr system = BuildSystem(System(std::string("<cpu numaid=\"0\" ") + zen5 + "/><cpu numaid=\"1\" " + zen5 + "/>"));
+  SystemPtr system =
+    BuildSystem(System(std::string("<cpu numaid=\"0\" ") + zen5 + "/><cpu numaid=\"1\" " + zen5 + "/>"));
 
   ncclTopoNode* cpu = system->nodes[CPU].nodes;
   EXPECT_EQ(NCCL_TOPO_CPU_MODEL_AMD_ZEN, cpu->cpu.model);
@@ -653,7 +655,8 @@ TEST_F(TopoNodeMicrotest, ConnectNodes_FailsPastMaxLinks) {
   ncclTopoNode* hub = Create(CPU, 0);
   for (int n = 0; n < NCCL_TOPO_MAX_NODES; n++) {
     ncclTopoNode* leaf = Create(PCI, n);
-    for (int type : {LINK_LOC, LINK_NVL, LINK_PCI, LINK_SYS}) ASSERT_EQ(ncclSuccess, ncclTopoConnectNodes(hub, leaf, type, 1));
+    for (int type : {LINK_LOC, LINK_NVL, LINK_PCI, LINK_SYS})
+      ASSERT_EQ(ncclSuccess, ncclTopoConnectNodes(hub, leaf, type, 1));
   }
   ASSERT_EQ(NCCL_TOPO_MAX_LINKS, hub->nlinks);
 
@@ -879,7 +882,8 @@ TEST_F(TopoLocalMicrotest, GetLocalGinAndRma_UseTheirOwnNodes) {
 
 TEST_F(TopoLocalMicrotest, GetLocalGpu_MapsANicToTheGpuThatUsesIt) {
   std::string far = NicPci(NicBus(5), RailNet("net", 1, 1));
-  SystemPtr system = BuildWithPaths(System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), RailNet("net", 0, 0)))) + Cpu(1, far)));
+  SystemPtr system = BuildWithPaths(
+    System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), RailNet("net", 0, 0)))) + Cpu(1, far)));
   int gpu = -2;
 
   ASSERT_EQ(ncclSuccess, ncclTopoGetLocalGpu(system.get(), system->nodes[NET].nodes[0].id, &gpu));
@@ -911,7 +915,8 @@ TEST_F(TopoLocalMicrotest, GetLocalNetCountByBw_AddsNicsUntilTheGpuLinkIsCovered
 }
 
 TEST_F(TopoLocalMicrotest, GetMinNetBw_ReadsThePathToTheLocalNics) {
-  SystemPtr system = BuildWithPaths(SharedSwitchSystem({RailNet("net", 0, 0, 0, 200000), RailNet("net", 1, 0, 1, 80000)}));
+  SystemPtr system =
+    BuildWithPaths(SharedSwitchSystem({RailNet("net", 0, 0, 0, 200000), RailNet("net", 1, 0, 1, 80000)}));
   SystemPtr none = BuildWithPaths(XgmiSystem(1));
   SetPolicy(NETDEVS_POLICY_ALL);
   float bw = -1;
@@ -1797,6 +1802,24 @@ TEST_F(TopoMicrotest, GetXmlCpuArch_TakesTheFirstCpuThatHasOne) {
   EXPECT_EQ(NCCL_TOPO_CPU_ARCH_ARM, arch);
 }
 
+TEST_F(TopoMicrotest, DevToRankAndIdToNetDev_StayOnTheGivenSystem) {
+  SystemPtr system = BuildSystem(System(Cpu(0, GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0))) +
+                                        Cpu(1, GpuPci(GpuBus(1), 1, 1), "host_hash=\"0x5\"")));
+  int g = GpuIndexOfRank(system.get(), 0);
+  int systemId = NCCL_TOPO_ID_SYSTEM_ID(system->nodes[GPU].nodes[g].id);
+  int rank = 7, netDev = 7;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoDevToRank(system.get(), systemId, 0, true, &rank));
+  EXPECT_EQ(0, rank);
+  EXPECT_EQ(ncclInternalError,
+            ncclTopoDevToRank(system.get(), systemId, 1, false, &rank));  // dev 1 is on the other host
+  EXPECT_EQ(-1, rank);
+  EXPECT_FALSE(Logged("could not find rank for nvml dev 1"));
+  EXPECT_EQ(ncclInternalError, ncclTopoIdToNetDev(system.get(), 0x99, &netDev));
+  EXPECT_EQ(-1, netDev);
+  EXPECT_TRUE(Logged("Could not find NET with id 99"));
+}
+
 // Observed: the "str == NULL will return NCCL_TOPO_CPU_ARCH_UNDEF" comment does not hold, kvConvertToInt
 // dereferences the NULL string.
 TEST_F(TopoMicrotest, GetXmlCpuArch_NoCpuArchCrashes) {
@@ -1871,7 +1894,8 @@ TEST_F(TopoMicrotest, XmlInitAttr_OnlySetsMissingValues) {
   EXPECT_STREQ("0x1f", node->attrs[2].value);
   EXPECT_STREQ("keep", node->attrs[0].value);
   EXPECT_STREQ("1.500000", node->attrs[3].value);
-  for (int a = node->nAttrs; a < MAX_ATTR_COUNT; a++) ASSERT_EQ(ncclSuccess, xmlSetAttrInt(node, std::to_string(a).c_str(), a));
+  for (int a = node->nAttrs; a < MAX_ATTR_COUNT; a++)
+    ASSERT_EQ(ncclSuccess, xmlSetAttrInt(node, std::to_string(a).c_str(), a));
   EXPECT_EQ(ncclInternalError, xmlInitAttrInt(node, "x", 1));
   EXPECT_EQ(ncclInternalError, xmlInitAttrUint64(node, "x", 1));
   EXPECT_EQ(ncclInternalError, xmlInitAttrFloat(node, "x", 1));
@@ -1931,7 +1955,8 @@ TEST_F(TopoOrphanNicMicrotest, GetVNicParent_NoCpuAtAllFails) {
 TEST_F(TopoMicrotest, NetRailKeyIndex_FailsPastMaxRails) {
   ncclTopoNetRailKeyList list;
   int rail = -1;
-  for (uint64_t k = 0; k < NCCL_TOPO_MAX_NODES; k++) ASSERT_EQ(ncclSuccess, ncclTopoGetNetRailKeyIndex(&list, k, &rail));
+  for (uint64_t k = 0; k < NCCL_TOPO_MAX_NODES; k++)
+    ASSERT_EQ(ncclSuccess, ncclTopoGetNetRailKeyIndex(&list, k, &rail));
   EXPECT_EQ(NCCL_TOPO_MAX_NODES - 1, rail);
 
   ASSERT_EQ(ncclSuccess, ncclTopoGetNetRailKeyIndex(&list, 5, &rail));
