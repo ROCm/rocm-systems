@@ -105,6 +105,23 @@ TEST_F(HipFileStream, get_stream_with_unregistered_stream_works)
     ASSERT_EQ(nonnull_stream, stream->getHipStream());
 }
 
+TEST_F(HipFileStream, unregistered_stream_is_unmanaged)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    auto stream = stream_map.getStream(nonnull_stream);
+    ASSERT_FALSE(stream->isManaged());
+    ASSERT_EQ(stream->copyStream(), nullptr);
+    ASSERT_EQ(stream->signalSlot(), nullptr);
+    ASSERT_FALSE(stream->canUseStreamWaitValue());
+}
+
+TEST_F(HipFileStream, registered_stream_is_managed)
+{
+    EXPECT_CALL(mhip, hipStreamGetDevice);
+    stream_map.registerStream(nonnull_stream, 0);
+    ASSERT_TRUE(stream_map.getStream(nonnull_stream)->isManaged());
+}
+
 TEST_F(HipFileStream, canUseStreamWaitValue_reflects_device_attribute_supported)
 {
     EXPECT_CALL(mhip, hipStreamGetDevice);

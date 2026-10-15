@@ -22,12 +22,12 @@
 #include <utility>
 
 namespace hipFile {
-Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<StreamMap> &)
+Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, bool _managed, const PassKey<StreamMap> &)
     : hip_stream{_hip_stream}, device_id{0}, fixed_buf_offset{(flags & HIPFILE_STREAM_FIXED_BUF_OFFSET) != 0},
       fixed_file_offset{(flags & HIPFILE_STREAM_FIXED_FILE_OFFSET) != 0},
       fixed_io_size{(flags & HIPFILE_STREAM_FIXED_FILE_SIZE) != 0},
       page_aligned{(flags & HIPFILE_STREAM_PAGE_ALIGNED_INPUTS) != 0}, can_use_stream_wait_value{false},
-      copy_stream{nullptr}, signal_slot{nullptr}, signal_counter{0}
+      managed{_managed}, copy_stream{nullptr}, signal_slot{nullptr}, signal_counter{0}
 
 {
     if ((flags & HIPFILE_STREAM_FLAGS_MASK) != flags) {
@@ -35,6 +35,10 @@ Stream::Stream(const hipStream_t _hip_stream, uint32_t flags, const PassKey<Stre
     }
 
     device_id = Context<Hip>::get()->hipStreamGetDevice(hip_stream);
+
+    if (!managed) {
+        return;
+    }
 
     can_use_stream_wait_value =
         Context<Hip>::get()->hipDeviceGetAttribute(hipDeviceAttributeCanUseStreamWaitValue, device_id) != 0;
@@ -118,7 +122,7 @@ StreamMap::registerStream(hipStream_t hip_stream, uint32_t flags)
         throw std::invalid_argument("Stream is already registered");
     }
 
-    auto stream = std::shared_ptr<Stream>(new Stream(hip_stream, flags, PassKey<StreamMap>{}));
+    auto stream = std::shared_ptr<Stream>(new Stream(hip_stream, flags, true, PassKey<StreamMap>{}));
     StreamMap::from_ptr[hip_stream] = stream;
 }
 
@@ -138,7 +142,7 @@ StreamMap::getStream(hipStream_t hip_stream)
 {
     auto itr = StreamMap::from_ptr.find(hip_stream);
     if (StreamMap::from_ptr.end() == itr) {
-        return std::shared_ptr<Stream>(new Stream(hip_stream, 0, PassKey<StreamMap>{}));
+        return std::shared_ptr<Stream>(new Stream(hip_stream, 0, false, PassKey<StreamMap>{}));
     }
 
     return itr->second;
@@ -174,8 +178,17 @@ Stream::releaseSignalTarget()
     --signal_counter;
 }
 
+bool
+Stream::isManaged() const
+{
+    return managed;
+}
+
 Stream::~Stream()
 {
+    if (!managed) {
+        return;
+    }
     try {
         DeviceGuard device_guard{device_id};
         if (signal_slot) {

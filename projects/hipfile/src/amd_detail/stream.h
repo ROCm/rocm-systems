@@ -30,6 +30,7 @@ public:
     virtual uint64_t                    *signalSlot() const            = 0;
     virtual uint64_t                     nextSignalTarget()            = 0;
     virtual void                         releaseSignalTarget()         = 0;
+    virtual bool                         isManaged() const             = 0;
 };
 
 class StreamMap;
@@ -50,8 +51,9 @@ public:
     virtual uint64_t                    *signalSlot() const override;
     virtual uint64_t                     nextSignalTarget() override;
     virtual void                         releaseSignalTarget() override;
+    virtual bool                         isManaged() const override;
 
-    Stream(const hipStream_t hip_stream, uint32_t flags, const PassKey<StreamMap> &k);
+    Stream(const hipStream_t hip_stream, uint32_t flags, bool managed, const PassKey<StreamMap> &k);
 
 private:
     Stream(const Stream &)             = delete;
@@ -66,6 +68,7 @@ private:
     bool        fixed_io_size;
     bool        page_aligned;
     bool        can_use_stream_wait_value;
+    bool        managed;
     std::mutex  mutex;
 
     hipStream_t copy_stream;

@@ -139,6 +139,12 @@ enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFil
     op->backend = std::move(backend);
     op->io_fn   = async_run_io;
 
+    if (stream->getHipStream() == nullptr) {
+        Context<Hip>::get()->hipStreamSynchronize(nullptr);
+        op->io_fn(op.get());
+        return;
+    }
+
     auto        stream_lock = stream->getLock();
     hipStream_t hip_stream  = stream->getHipStream();
     bool        wait_value  = stream->canUseStreamWaitValue();

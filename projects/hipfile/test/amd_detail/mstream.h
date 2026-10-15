@@ -24,6 +24,7 @@ public:
     MOCK_METHOD(uint64_t *, signalSlot, (), (const, override));
     MOCK_METHOD(uint64_t, nextSignalTarget, (), (override));
     MOCK_METHOD(void, releaseSignalTarget, (), (override));
+    MOCK_METHOD(bool, isManaged, (), (const, override));
 };
 
 }

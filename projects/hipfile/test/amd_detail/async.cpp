@@ -103,9 +103,9 @@ testAsyncIoFn(void *)
 TEST_F(HipFileAsyncOp, submitIo_runs_io_fn_on_pool_and_signals_completion)
 {
     StrictMock<MStreamThreadPool> mpool;
-    auto                    tg     = std::make_unique<StrictMock<MTaskGroup>>();
-    auto                    tg_raw = tg.get();
-    std::function<void()>   captured;
+    auto                          tg     = std::make_unique<StrictMock<MTaskGroup>>();
+    auto                          tg_raw = tg.get();
+    std::function<void()>         captured;
     EXPECT_CALL(mpool, makeTaskGroup()).WillOnce(Return(ByMove(std::move(tg))));
     EXPECT_CALL(*tg_raw, wait());
     StrictMock<MAsyncMonitor> mmon;
@@ -171,8 +171,8 @@ TEST_F(HipFileAsyncOp, async_dispatch_reports_error_without_inline_io_when_submi
 TEST_F(HipFileAsyncOp, submitIoAndWait_runs_io_fn_on_pool_and_signals_completion)
 {
     StrictMock<MStreamThreadPool> mpool;
-    auto                    tg     = std::make_unique<StrictMock<MTaskGroup>>();
-    auto                    tg_raw = tg.get();
+    auto                          tg     = std::make_unique<StrictMock<MTaskGroup>>();
+    auto                          tg_raw = tg.get();
     EXPECT_CALL(mpool, makeTaskGroup()).WillOnce(Return(ByMove(std::move(tg))));
     EXPECT_CALL(*tg_raw, wait());
     StrictMock<MAsyncMonitor> mmon;
@@ -275,6 +275,26 @@ TEST_F(HipFileAsyncOp, enqueueAsync_unsupported_emits_inline)
             [](hipStream_t, hipHostFn_t, void *ud) { std::unique_ptr<AsyncOp>{static_cast<AsyncOp *>(ud)}; });
 
     enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes, stream);
+}
+
+TEST_F(HipFileAsyncOp, enqueueAsync_null_stream_runs_synchronously)
+{
+    StrictMock<MAsyncMonitor> mmon;
+    auto                      backend       = std::make_shared<StrictMock<MBackend>>();
+    size_t                    size          = 100;
+    hoff_t                    file_offset   = 0;
+    hoff_t                    buffer_offset = 0;
+    ssize_t                   bytes         = 42;
+
+    EXPECT_CALL(*stream, getHipStream).WillRepeatedly(Return(nullptr));
+    EXPECT_CALL(*stream, copyStream).WillRepeatedly(Return(nullptr));
+    EXPECT_CALL(mhip, hipStreamSynchronize(nullptr));
+    EXPECT_CALL(mhip, hipGetDevice).WillOnce(Return(0));
+    EXPECT_CALL(*backend, io(IoType::Read, _, _, size, file_offset, buffer_offset, nullptr))
+        .WillOnce(Return(77));
+
+    enqueueAsync(backend, IoType::Read, file, buffer, &size, &file_offset, &buffer_offset, &bytes, stream);
+    ASSERT_EQ(bytes, 77);
 }
 
 TEST_F(HipFileAsyncOp, enqueueAsync_rolls_back_signal_target_when_dispatch_fails)
