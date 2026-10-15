@@ -4,6 +4,7 @@
 #include "smi_nic_log.h"
 
 #include <atomic>
+#include <string>
 
 namespace amd::smi::nic::log {
 

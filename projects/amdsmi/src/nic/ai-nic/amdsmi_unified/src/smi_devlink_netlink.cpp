@@ -89,7 +89,7 @@ int health_dump_handler(struct nl_msg* msg, void* arg) {
 
   // A dump can span multiple devices; keep only the requested one.
   if (!NLAttributes::is_present(tb[DEVLINK_ATTR_DEV_NAME]) ||
-      ctx->dev != NLAttributes::get_string(tb[DEVLINK_ATTR_DEV_NAME])) {
+      (ctx->dev != NLAttributes::get_string(tb[DEVLINK_ATTR_DEV_NAME]))) {
     return NL_SKIP;
   }
 
@@ -128,7 +128,7 @@ int health_dump_handler(struct nl_msg* msg, void* arg) {
 }  // namespace
 
 int DevlinkNetlinkClient::init() {
-  if (initialized_) {
+  if (is_initialized_) {
     return 0;
   }
   int ret = client_.connect();
@@ -140,7 +140,7 @@ int DevlinkNetlinkClient::init() {
     return -NLE_OBJ_NOTFOUND;
   }
   family_id_ = family.value();
-  initialized_ = true;
+  is_initialized_ = true;
   return 0;
 }
 
@@ -213,8 +213,8 @@ namespace {
  */
 struct PortDumpContext {
   std::string dev;  // target devlink device (PCI BDF)
-  bool found_physical = false;
-  bool found_any = false;
+  bool was_physical_found = false;
+  bool was_any_found = false;
   DevlinkPortSplit split{};
 };
 
@@ -223,7 +223,7 @@ int port_dump_handler(struct nl_msg* msg, void* arg) {
   if (!ctx) {
     return NL_SKIP;
   }
-  if (ctx->found_physical) {
+  if (ctx->was_physical_found) {
     return NL_OK;  // already have the port we want
   }
 
@@ -234,14 +234,14 @@ int port_dump_handler(struct nl_msg* msg, void* arg) {
   }
 
   if (!NLAttributes::is_present(tb[DEVLINK_ATTR_DEV_NAME]) ||
-      ctx->dev != NLAttributes::get_string(tb[DEVLINK_ATTR_DEV_NAME])) {
+      (ctx->dev != NLAttributes::get_string(tb[DEVLINK_ATTR_DEV_NAME]))) {
     return NL_SKIP;
   }
 
-  const bool physical =
+  const bool is_physical =
       NLAttributes::is_present(tb[DEVLINK_ATTR_PORT_FLAVOUR]) &&
-      NLAttributes::get_u16(tb[DEVLINK_ATTR_PORT_FLAVOUR]) == DEVLINK_PORT_FLAVOUR_PHYSICAL;
-  if (!physical && ctx->found_any) {
+      (NLAttributes::get_u16(tb[DEVLINK_ATTR_PORT_FLAVOUR]) == DEVLINK_PORT_FLAVOUR_PHYSICAL);
+  if (!is_physical && ctx->was_any_found) {
     return NL_OK;  // keep the first non-physical port only until a physical one appears
   }
 
@@ -256,9 +256,9 @@ int port_dump_handler(struct nl_msg* msg, void* arg) {
   }
 
   ctx->split = split;
-  ctx->found_any = true;
-  if (physical) {
-    ctx->found_physical = true;
+  ctx->was_any_found = true;
+  if (is_physical) {
+    ctx->was_physical_found = true;
   }
   return NL_OK;
 }
@@ -284,13 +284,13 @@ transport::Result<DevlinkPortSplit> DevlinkNetlinkClient::get_port_split(const s
                       port_dump_handler, &ctx, NLM_F_REQUEST | NLM_F_DUMP);
   if (amd::smi::nic::log::is_enabled()) {
     log_devlink(__PRETTY_FUNCTION__, "PORT_GET", dev, ret,
-                ctx.found_any ? devlink_describe(ctx.split) : "no port object");
+                ctx.was_any_found ? devlink_describe(ctx.split) : "no port object");
   }
   if (ret < 0) {
     result.error_code = -ret;
     return result;
   }
-  if (!ctx.found_any) {
+  if (!ctx.was_any_found) {
     return result;  // device exposes no port object (e.g. pds_core): ENOTSUP
   }
 
@@ -306,7 +306,7 @@ namespace {
 struct DeviceInfoContext {
   std::string dev;         // target devlink device (PCI BDF)
   DevlinkDeviceInfo* out;  // populated in place
-  bool found = false;      // set once the target device's info is seen
+  bool was_found = false;  // set once the target device's info is seen
 };
 
 // Parses one nested version attr ({NAME, VALUE}) and appends it, tagged with its
@@ -344,7 +344,7 @@ int device_info_handler(struct nl_msg* msg, void* arg) {
 
   // A dump can span multiple devices; keep only the requested one.
   if (!NLAttributes::is_present(tb[DEVLINK_ATTR_DEV_NAME]) ||
-      ctx->dev != NLAttributes::get_string(tb[DEVLINK_ATTR_DEV_NAME])) {
+      (ctx->dev != NLAttributes::get_string(tb[DEVLINK_ATTR_DEV_NAME]))) {
     return NL_SKIP;
   }
 
@@ -382,7 +382,7 @@ int device_info_handler(struct nl_msg* msg, void* arg) {
     }
   }
 
-  ctx->found = true;
+  ctx->was_found = true;
   return NL_OK;
 }
 
@@ -407,13 +407,13 @@ transport::Result<DevlinkDeviceInfo> DevlinkNetlinkClient::get_device_info(const
                       device_info_handler, &ctx, NLM_F_REQUEST | NLM_F_DUMP);
   if (amd::smi::nic::log::is_enabled()) {
     log_devlink(__PRETTY_FUNCTION__, "INFO_GET", dev, ret,
-                ctx.found ? devlink_describe(info) : "no devlink instance");
+                ctx.was_found ? devlink_describe(info) : "no devlink instance");
   }
   if (ret < 0) {
     result.error_code = -ret;
     return result;
   }
-  if (!ctx.found) {
+  if (!ctx.was_found) {
     return result;  // device has no devlink instance: ENOTSUP
   }
 

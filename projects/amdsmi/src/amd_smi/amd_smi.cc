@@ -11,6 +11,7 @@
 #include <cctype>
 #include <cerrno>
 #include <cstddef>
+#include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
@@ -977,25 +978,16 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
   smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
   const uint64_t device = ainic_info.bus.bdf.as_uint;
 
-  uint32_t available = 0;
-  smi_nic_status_t nic_status =
-      smi_get_nic_port_statistics_count(ctx, device, port_index, &available);
-  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
-    return amd::smi::ainic_to_amdsmi_status(nic_status);
-  }
-
-  if (stats == nullptr) {
-    *num_stats = available;
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  auto info = std::make_unique<smi_nic_stat_info_t>();
-  nic_status = smi_get_nic_port_statistics_list(ctx, device, port_index, info.get());
-  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
-    return amd::smi::ainic_to_amdsmi_status(nic_status);
-  }
-
-  return amd::smi::copy_nic_stats(*info, num_stats, stats);
+  return amd::smi::get_nic_stats(
+      [&](uint32_t* available) {
+        return amd::smi::ainic_to_amdsmi_status(
+            smi_get_nic_port_statistics_count(ctx, device, port_index, available));
+      },
+      [&](smi_nic_stat_info_t* info) {
+        return amd::smi::ainic_to_amdsmi_status(
+            smi_get_nic_port_statistics_list(ctx, device, port_index, info));
+      },
+      num_stats, stats);
 }
 
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
@@ -1019,25 +1011,16 @@ amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle process
   smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
   const uint64_t device = ainic_info.bus.bdf.as_uint;
 
-  uint32_t available = 0;
-  smi_nic_status_t nic_status =
-      smi_get_nic_vendor_statistics_count(ctx, device, port_index, nic_scope, &available);
-  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
-    return amd::smi::ainic_to_amdsmi_status(nic_status);
-  }
-
-  if (stats == nullptr) {
-    *num_stats = available;
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  auto info = std::make_unique<smi_nic_stat_info_t>();
-  nic_status = smi_get_nic_vendor_statistics_list(ctx, device, port_index, nic_scope, info.get());
-  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
-    return amd::smi::ainic_to_amdsmi_status(nic_status);
-  }
-
-  return amd::smi::copy_nic_stats(*info, num_stats, stats);
+  return amd::smi::get_nic_stats(
+      [&](uint32_t* available) {
+        return amd::smi::ainic_to_amdsmi_status(
+            smi_get_nic_vendor_statistics_count(ctx, device, port_index, nic_scope, available));
+      },
+      [&](smi_nic_stat_info_t* info) {
+        return amd::smi::ainic_to_amdsmi_status(
+            smi_get_nic_vendor_statistics_list(ctx, device, port_index, nic_scope, info));
+      },
+      num_stats, stats);
 }
 
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
@@ -1068,26 +1051,16 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
   smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
   const uint64_t device = ainic_info.bus.bdf.as_uint;
 
-  uint32_t available = 0;
-  smi_nic_status_t nic_status = smi_get_nic_rdma_port_statistics_count(
-      ctx, device, ref.port_index, ref.ib_index, ref.rdma_port_index, &available);
-  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
-    return amd::smi::ainic_to_amdsmi_status(nic_status);
-  }
-
-  if (stats == nullptr) {
-    *num_stats = available;
-    return AMDSMI_STATUS_SUCCESS;
-  }
-
-  auto info = std::make_unique<smi_nic_stat_info_t>();
-  nic_status = smi_get_nic_rdma_port_statistics_list(ctx, device, ref.port_index, ref.ib_index,
-                                                     ref.rdma_port_index, info.get());
-  if (nic_status != SMI_NIC_STATUS_SUCCESS) {
-    return amd::smi::ainic_to_amdsmi_status(nic_status);
-  }
-
-  return amd::smi::copy_nic_stats(*info, num_stats, stats);
+  return amd::smi::get_nic_stats(
+      [&](uint32_t* available) {
+        return amd::smi::ainic_to_amdsmi_status(smi_get_nic_rdma_port_statistics_count(
+            ctx, device, ref.port_index, ref.ib_index, ref.rdma_port_index, available));
+      },
+      [&](smi_nic_stat_info_t* info) {
+        return amd::smi::ainic_to_amdsmi_status(smi_get_nic_rdma_port_statistics_list(
+            ctx, device, ref.port_index, ref.ib_index, ref.rdma_port_index, info));
+      },
+      num_stats, stats);
 }
 
 amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_handle,

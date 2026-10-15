@@ -34,6 +34,7 @@ readonly TEST_TARGETS=(
   test_nic_stats_suite
   test_nic_stats_copy_suite
   test_nic_rdma_resolver_suite
+  test_nic_check_suite
   probe_devlink_health
   probe_devlink_port
 )
@@ -137,6 +138,7 @@ main() {
   log "  ${OUT_DIR}/test_nic_stats_suite"
   log "  ${OUT_DIR}/test_nic_stats_copy_suite"
   log "  ${OUT_DIR}/test_nic_rdma_resolver_suite"
+  log "  ${OUT_DIR}/test_nic_check_suite"
   log "  # live devlink probes (need a devlink NIC + root):"
   log "  sudo ${OUT_DIR}/probe_devlink_health <pci-bdf>   # e.g. 0000:63:00.0"
   log "  sudo ${OUT_DIR}/probe_devlink_port   <pci-bdf>   # e.g. 0000:63:00.0"

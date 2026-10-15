@@ -13,11 +13,14 @@
 
 #include <array>
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
+#include <exception>
 #include <iomanip>
 #include <iostream>
 #include <sstream>
 #include <string>
+#include <vector>
 
 #include "smi_nic_transport.h"
 
@@ -26,7 +29,7 @@ using namespace amd::smi::nic::transport;
 // Test Infrastructure
 
 struct TestResult {
-  bool passed;
+  bool is_passed;
   std::string test_name;
   std::string message;
 };
@@ -36,16 +39,16 @@ int tests_run = 0;
 int tests_passed = 0;
 int tests_failed = 0;
 
-void record_test(const std::string& test_name, bool passed, const std::string& message = "") {
+void record_test(const std::string& test_name, bool is_passed, const std::string& message = "") {
   tests_run++;
-  if (passed) {
+  if (is_passed) {
     tests_passed++;
   } else {
     tests_failed++;
   }
-  test_results.push_back({passed, test_name, message});
+  test_results.push_back({is_passed, test_name, message});
 
-  std::cout << (passed ? "  PASS" : "  FAIL") << ": " << test_name;
+  std::cout << (is_passed ? "  PASS" : "  FAIL") << ": " << test_name;
   if (!message.empty()) {
     std::cout << " - " << message;
   }
@@ -108,7 +111,7 @@ void test_ioctl_operations(const std::string& iface) {
 
   auto pause = transport->get_pause_params(iface);
   record_test("Pause params", pause.success,
-              pause.success ? std::string("rx=") + (pause.value.rx_pause ? "on" : "off")
+              pause.success ? std::string("rx=") + (pause.value.is_rx_pause_enabled ? "on" : "off")
                             : "errno: " + std::to_string(pause.error_code));
 
   auto link = transport->get_link_settings(iface);
@@ -148,7 +151,7 @@ void test_netlink_operations(const std::string& iface) {
 
   auto pause = transport->get_pause_params(iface);
   record_test("Pause params", pause.success || (pause.error_code == ENOTSUP),
-              pause.success ? std::string("rx=") + (pause.value.rx_pause ? "on" : "off")
+              pause.success ? std::string("rx=") + (pause.value.is_rx_pause_enabled ? "on" : "off")
                             : "errno: " + std::to_string(pause.error_code));
 
   auto link = transport->get_link_settings(iface);
@@ -242,12 +245,13 @@ void test_ioctl_vs_netlink_consistency(const std::string& iface) {
   auto netlink_pause = netlink_transport->get_pause_params(iface);
 
   if (ioctl_pause.success && netlink_pause.success) {
-    bool pause_match = (ioctl_pause.value.rx_pause == netlink_pause.value.rx_pause &&
-                        ioctl_pause.value.tx_pause == netlink_pause.value.tx_pause &&
-                        ioctl_pause.value.autoneg == netlink_pause.value.autoneg);
-    record_test("Pause params match", pause_match,
-                std::string("rx: ioctl=") + (ioctl_pause.value.rx_pause ? "on" : "off") +
-                    " netlink=" + (netlink_pause.value.rx_pause ? "on" : "off"));
+    bool is_pause_matching =
+        ((ioctl_pause.value.is_rx_pause_enabled == netlink_pause.value.is_rx_pause_enabled) &&
+         (ioctl_pause.value.is_tx_pause_enabled == netlink_pause.value.is_tx_pause_enabled) &&
+         (ioctl_pause.value.is_autoneg_enabled == netlink_pause.value.is_autoneg_enabled));
+    record_test("Pause params match", is_pause_matching,
+                std::string("rx: ioctl=") + (ioctl_pause.value.is_rx_pause_enabled ? "on" : "off") +
+                    " netlink=" + (netlink_pause.value.is_rx_pause_enabled ? "on" : "off"));
   } else {
     record_test("Pause comparison", true, "Skipped (one backend failed or ENOTSUP)");
   }
@@ -256,9 +260,9 @@ void test_ioctl_vs_netlink_consistency(const std::string& iface) {
   auto netlink_link = netlink_transport->get_link_settings(iface);
 
   if (ioctl_link.success && netlink_link.success) {
-    bool link_match = (ioctl_link.value.speed == netlink_link.value.speed &&
-                       ioctl_link.value.duplex == netlink_link.value.duplex);
-    record_test("Link settings match", link_match,
+    bool is_link_matching = ((ioctl_link.value.speed == netlink_link.value.speed) &&
+                             (ioctl_link.value.duplex == netlink_link.value.duplex));
+    record_test("Link settings match", is_link_matching,
                 "speed: ioctl=" + std::to_string(ioctl_link.value.speed) +
                     " netlink=" + std::to_string(netlink_link.value.speed));
   } else {
@@ -336,7 +340,7 @@ int main(int argc, char** argv) {
   if (tests_failed > 0) {
     std::cout << "Failed Tests:\n";
     for (const auto& result : test_results) {
-      if (!result.passed) {
+      if (!result.is_passed) {
         std::cout << "  - " << result.test_name;
         if (!result.message.empty()) {
           std::cout << ": " << result.message;

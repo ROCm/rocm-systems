@@ -20,6 +20,7 @@
 #include <utility>
 #include <vector>
 
+#include "nic_check.h"
 #include "smi_nic.h"
 #include "smi_nic_interface.h"
 #include "smi_nic_log.h"
@@ -31,16 +32,7 @@
 
 namespace fs = std::filesystem;
 
-static int tests_run = 0;
-static int tests_failed = 0;
-
-static void check(const std::string& name, bool passed) {
-  tests_run++;
-  if (!passed) {
-    tests_failed++;
-  }
-  std::cout << (passed ? "  PASS: " : "  FAIL: ") << name << "\n";
-}
+using nic_test::check;
 
 // Creates a unique tmp sysfs root; pair it with a TmpRootGuard_t.
 static fs::path make_tmp_root() {
@@ -296,7 +288,7 @@ int main() {
   }
 
   // ---- Broadcom Rdma positive: an aux-driver symlink whose resolved target
-  //      passes through /<bdf>/ exercises the match_canonical=true branch of
+  //      passes through /<bdf>/ exercises the is_canonical_match=true branch of
   //      the shared is_driver_bound_to_bdf helper (its most intricate path). ----
   fs::path rdma_root = make_tmp_root();
   TmpRootGuard_t rdma_root_guard(rdma_root);
@@ -578,8 +570,8 @@ int main() {
 
   // ---- a fabric endpoint survives the AINIC-only filter ----
   // NicProduct is what discover_nics() filters on, and AINIC is the only value
-  // that passes. An endpoint labelled otherwise would vanish from the CLI, which
-  // runs the filter, while still appearing in an unfiltered enumeration.
+  // that passes. The filter exists to skip third-party NICs, so an AMD fabric
+  // endpoint must stay in an AINIC-only enumeration.
   {
     fs::path filter_root = make_tmp_root();
     TmpRootGuard_t filter_root_guard(filter_root);
@@ -588,7 +580,7 @@ int main() {
 
     SmiNicSystem filter_sys((filter_root / "sys/bus/pci/devices").string(),
                             (filter_root / "sys/class/net").string());
-    filter_sys.discover_nics(/*ainic_only=*/true);
+    filter_sys.discover_nics(/*is_ainic_only=*/true);
     check("fabric endpoint survives ainic_only", filter_sys.get_nics().size() == 1);
   }
 
@@ -757,7 +749,7 @@ int main() {
 
   // ---- SmiNicSystem discovery filter: ALL vs AINIC-only over a mixed tree ----
   // One tree holds a Pensando AINIC (fwctl-only) and a Broadcom bnxt_en netdev.
-  // The default (ainic_only=false) keeps both; ainic_only=true drops non-AINIC.
+  // The default (is_ainic_only=false) keeps both; is_ainic_only=true drops non-AINIC.
   {
     fs::path mix_root = make_tmp_root();
     TmpRootGuard_t mix_root_guard(mix_root);
@@ -768,11 +760,11 @@ int main() {
     const std::string net = (mix_root / "sys/class/net").string();
 
     SmiNicSystem all_sys(pci, net);
-    all_sys.discover_nics(/*ainic_only=*/false);
+    all_sys.discover_nics(/*is_ainic_only=*/false);
     check("filter ALL discovers both NICs", all_sys.get_nics().size() == 2);
 
     SmiNicSystem ainic_sys(pci, net);
-    ainic_sys.discover_nics(/*ainic_only=*/true);
+    ainic_sys.discover_nics(/*is_ainic_only=*/true);
     const auto& only = ainic_sys.get_nics();
     check("filter AINIC-only discovers exactly one NIC", only.size() == 1);
     if (only.size() == 1) {
@@ -798,7 +790,7 @@ int main() {
     SmiNicSystem own_sys((own_root / "sys/bus/pci/devices").string(),
                          (own_root / "sys/class/net").string());
     own_sys.register_subsystem(std::make_unique<StubAmdSubsystem>(stub_bdf));
-    own_sys.discover_nics(/*ainic_only=*/false);
+    own_sys.discover_nics(/*is_ainic_only=*/false);
     check("only the stub plugin contributes a NIC to the empty tree",
           own_sys.get_nics().size() == 1);
     check("driver query resolves through the plugin that owns the NIC",
@@ -820,7 +812,7 @@ int main() {
 
     SmiNicSystem sort_sys((sort_root / "sys/bus/pci/devices").string(),
                           (sort_root / "sys/class/net").string());
-    sort_sys.discover_nics(/*ainic_only=*/false);
+    sort_sys.discover_nics(/*is_ainic_only=*/false);
     const auto& sorted = sort_sys.get_nics();
     const bool has_four = (sorted.size() == 4);
     check("mixed tree discovers two cards and two fabric endpoints", has_four);
@@ -952,8 +944,8 @@ int main() {
           nic.serial_number() == std::optional<std::string>("SN-1"));
     write_fake_vpd(bus, "NAME-2", "PN-2", "SN-2");
     check("a later accessor reuses the first read",
-          nic.product_name() == std::optional<std::string>("NAME-1") &&
-              nic.part_number() == std::optional<std::string>("PN-1"));
+          (nic.product_name() == std::optional<std::string>("NAME-1")) &&
+              (nic.part_number() == std::optional<std::string>("PN-1")));
     fs::remove(bus / "vpd");
     check("readability keeps the first read", nic.is_vpd_readable());
   }
@@ -976,6 +968,5 @@ int main() {
           nic.serial_number() == std::optional<std::string>("PORT-SN"));
   }
 
-  std::cout << tests_run << " run, " << tests_failed << " failed\n";
-  return tests_failed == 0 ? 0 : 1;
+  return nic_test::report();
 }

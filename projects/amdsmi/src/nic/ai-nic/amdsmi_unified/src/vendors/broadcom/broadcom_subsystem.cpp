@@ -4,6 +4,11 @@
 #include "broadcom/broadcom_subsystem.h"
 
 #include <filesystem>
+#include <memory>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 #include "broadcom_stats.h"
 
@@ -20,11 +25,11 @@ bool SmiNicSubsystemBroadcom::is_driver_loaded(const std::string& bdf,
   switch (driver_type) {
     case DriverType::Main:
       return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/bnxt_en", bdf,
-                                    /*match_canonical=*/false);
+                                    /*is_canonical_match=*/false);
     case DriverType::Rdma:
       return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/auxiliary/drivers/bnxt_re.rdma",
                                     bdf,
-                                    /*match_canonical=*/true);
+                                    /*is_canonical_match=*/true);
     default:
       return false;
   }

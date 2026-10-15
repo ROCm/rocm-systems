@@ -97,9 +97,13 @@ class FirmwareCommands:
         if args.gpu == None:
             args.gpu = self.device_handles
 
-        if self.helpers.is_ainic_initialized() and (nic or getattr(args, "nic", None)):
+        nic_selection = getattr(args, "nic", None)
+        if self.helpers.is_ainic_initialized() and (nic or nic_selection is not None):
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
+            if isinstance(nic_selection, list) and not nic_selection:
+                self.logger.print_no_ainics_found()
+                return
             self.firmware_nic(args, multiple_devices, nic, fw_list)
             return
         # Handle multiple GPUs

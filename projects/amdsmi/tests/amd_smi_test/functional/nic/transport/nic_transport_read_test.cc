@@ -12,6 +12,9 @@
 
 #include <gtest/gtest.h>
 
+#include <exception>
+#include <string>
+
 #include "smi_nic.h"
 #include "smi_nic_system.h"
 

@@ -4,8 +4,10 @@
 #include "smi_nic_telemetry.h"
 
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <iterator>
+#include <memory>
 #include <utility>
 #include <variant>
 #include <vector>
@@ -68,13 +70,13 @@ transport::Result<NicTemperature> NicTelemetry::get_temperature(const ::SmiNic& 
 
   static_assert(std::size(sensors) == std::size(fields), "one field per sensor");
 
-  bool any_supported = false;
+  bool has_supported_sensor = false;
   for (size_t i = 0; i < std::size(sensors); ++i) {
     const auto path = nic.hwmon_temp_path(sensors[i]);
     if (!path.has_value()) {
       continue;  // this vendor does not expose this sensor
     }
-    any_supported = true;
+    has_supported_sensor = true;
 
     SmiSysfsReader::SysfsValue value;
     if (SmiSysfsReader::readLine(path.value(), value) != SmiSysfsReader::SysfsStatus::Success) {
@@ -90,7 +92,7 @@ transport::Result<NicTemperature> NicTelemetry::get_temperature(const ::SmiNic& 
     *fields[i] = static_cast<uint16_t>(millidegrees / kMilliDegreesPerDegree);
   }
 
-  if (!any_supported) {
+  if (!has_supported_sensor) {
     return {false, {}, ENOTSUP};
   }
   return {true, temp, 0};

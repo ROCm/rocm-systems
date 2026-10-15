@@ -52,7 +52,7 @@ class GenericNetlinkClient {
 
   NLSocket& socket() { return socket_; }
 
-  bool is_connected() const { return connected_; }
+  bool is_connected() const { return is_connected_; }
 
  private:
   int query_impl(int family_id, uint8_t cmd, uint8_t version,
@@ -60,7 +60,7 @@ class GenericNetlinkClient {
                  uint16_t flags);
 
   NLSocket socket_;
-  bool connected_;
+  bool is_connected_;
 };
 
 }  // namespace amd::nic::netlink

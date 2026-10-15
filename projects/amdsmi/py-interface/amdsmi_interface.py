@@ -2554,31 +2554,35 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "DEVICE_ID": hex(ainic_info_struct.asic.device_id),
             "SUBSYSTEM_ID": hex(ainic_info_struct.asic.subsystem_id),
             "REVISION": hex(ainic_info_struct.asic.revision),
-            "PERMANENT_ADDRESS": ainic_info_struct.asic.permanent_address.decode("utf-8"),
-            "PRODUCT_NAME": ainic_info_struct.asic.product_name.decode("utf-8"),
-            "PART_NUMBER": ainic_info_struct.asic.part_number.decode("utf-8"),
-            "SERIAL_NUMBER": ainic_info_struct.asic.serial_number.decode("utf-8"),
-            "VENDOR_NAME": ainic_info_struct.asic.vendor_name.decode("utf-8"),
+            "PERMANENT_ADDRESS": ainic_info_struct.asic.permanent_address.decode(
+                "utf-8", errors="replace"
+            ),
+            "PRODUCT_NAME": ainic_info_struct.asic.product_name.decode("utf-8", errors="replace"),
+            "PART_NUMBER": ainic_info_struct.asic.part_number.decode("utf-8", errors="replace"),
+            "SERIAL_NUMBER": ainic_info_struct.asic.serial_number.decode("utf-8", errors="replace"),
+            "VENDOR_NAME": ainic_info_struct.asic.vendor_name.decode("utf-8", errors="replace"),
             "CAPABILITY": _decode_nic_capabilities(ainic_info_struct.asic.capability),
         },
         "BUS": {
             "bdf": _format_bdf(ainic_info_struct.bus.bdf),
             "MAX_PCIE_WIDTH": int(ainic_info_struct.bus.max_pcie_width),
             "MAX_PCIE_SPEED": ainic_info_struct.bus.max_pcie_speed,
-            "PCIE_INTERFACE_VERSION": ainic_info_struct.bus.pcie_interface_version.decode("utf-8"),
-            "SLOT_TYPE": ainic_info_struct.bus.slot_type.decode("utf-8"),
+            "PCIE_INTERFACE_VERSION": ainic_info_struct.bus.pcie_interface_version.decode(
+                "utf-8", errors="replace"
+            ),
+            "SLOT_TYPE": ainic_info_struct.bus.slot_type.decode("utf-8", errors="replace"),
         },
         "DRIVER": {
-            "NAME": ainic_info_struct.driver.name.decode("utf-8"),
-            "VERSION": ainic_info_struct.driver.version.decode("utf-8"),
+            "NAME": ainic_info_struct.driver.name.decode("utf-8", errors="replace"),
+            "VERSION": ainic_info_struct.driver.version.decode("utf-8", errors="replace"),
         },
         "NUMA": {
             "NODE": ainic_info_struct.numa.node,
-            "AFFINITY": ainic_info_struct.numa.affinity.decode("utf-8"),
+            "AFFINITY": ainic_info_struct.numa.affinity.decode("utf-8", errors="replace"),
         },
         "FW": {
-            "FW_0": ainic_info_struct.driver.name.decode("utf-8"),
-            "FW_HEARTBEAT": ainic_info_struct.driver.version.decode("utf-8"),
+            "FW_0": ainic_info_struct.driver.name.decode("utf-8", errors="replace"),
+            "FW_HEARTBEAT": ainic_info_struct.driver.version.decode("utf-8", errors="replace"),
         },
         "PORTS": {},
         "RDMA_DEVICES": {},
@@ -2588,20 +2592,20 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
         if port_num == ainic_info_struct.port.num_ports:
             break
         ainic_info["PORTS"][f"PORT_{port_num}"] = {
-            "TYPE": port_info.type.decode("utf-8"),
-            "FLAVOUR": port_info.flavour.decode("utf-8"),
-            "NETDEV": port_info.netdev.decode("utf-8"),
+            "TYPE": port_info.type.decode("utf-8", errors="replace"),
+            "FLAVOUR": port_info.flavour.decode("utf-8", errors="replace"),
+            "NETDEV": port_info.netdev.decode("utf-8", errors="replace"),
             "IFINDEX": port_info.ifindex,
-            "MAC_ADDRESS": port_info.mac_address.decode("utf-8"),
+            "MAC_ADDRESS": port_info.mac_address.decode("utf-8", errors="replace"),
             "CARRIER": port_info.carrier,
             "MTU": f"{port_info.mtu}B",
-            "LINK_STATE": port_info.link_state.decode("utf-8"),
+            "LINK_STATE": port_info.link_state.decode("utf-8", errors="replace"),
             "LINK_SPEED": f"{port_info.link_speed} Mb/s",
             "ACTIVE_FEC": f"{port_info.active_fec}",
-            "AUTONEG": port_info.autoneg.decode("utf-8"),
-            "PAUSE_AUTONEG": port_info.pause_autoneg.decode("utf-8"),
-            "PAUSE_RX": port_info.pause_rx.decode("utf-8"),
-            "PAUSE_TX": port_info.pause_tx.decode("utf-8"),
+            "AUTONEG": port_info.autoneg.decode("utf-8", errors="replace"),
+            "PAUSE_AUTONEG": port_info.pause_autoneg.decode("utf-8", errors="replace"),
+            "PAUSE_RX": port_info.pause_rx.decode("utf-8", errors="replace"),
+            "PAUSE_TX": port_info.pause_tx.decode("utf-8", errors="replace"),
         }
         port_num = port_num + 1
     rdma_dev_num = 0
@@ -2609,11 +2613,11 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
         if rdma_dev_num == ainic_info_struct.rdma_dev.num_rdma_dev:
             break
         ainic_info["RDMA_DEVICES"][f"RDMA_DEVICE_{rdma_dev_num}"] = {
-            "NAME": dev.rdma_dev.decode("utf-8"),
-            "NODE_GUID": dev.node_guid.decode("utf-8"),
-            "NODE_TYPE": dev.node_type.decode("utf-8"),
-            "SYS_IMAGE_GUID": dev.sys_image_guid.decode("utf-8"),
-            "FW_VER": dev.fw_ver.decode("utf-8"),
+            "NAME": dev.rdma_dev.decode("utf-8", errors="replace"),
+            "NODE_GUID": dev.node_guid.decode("utf-8", errors="replace"),
+            "NODE_TYPE": dev.node_type.decode("utf-8", errors="replace"),
+            "SYS_IMAGE_GUID": dev.sys_image_guid.decode("utf-8", errors="replace"),
+            "FW_VER": dev.fw_ver.decode("utf-8", errors="replace"),
         }
         rdma_port_num = 0
         for rdma_port in dev.rdma_port_info:
@@ -2630,9 +2634,9 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             if active_mtu == max_uint16_t:
                 active_mtu = "N/A"
             ainic_info["RDMA_DEVICES"][f"RDMA_DEVICE_{rdma_dev_num}"][f"PORT_{rdma_port_num}"] = {
-                "NETDEV": rdma_port.netdev.decode("utf-8"),
+                "NETDEV": rdma_port.netdev.decode("utf-8", errors="replace"),
                 "PORT_NUM": rdma_port.rdma_port,
-                "STATE": rdma_port.state.decode("utf-8"),
+                "STATE": rdma_port.state.decode("utf-8", errors="replace"),
                 "MAX_MTU": max_mtu,
                 "ACTIVE_MTU": active_mtu,
             }
@@ -2695,8 +2699,8 @@ def amdsmi_get_nic_fw_info(
     # count can't drive an out-of-bounds ctypes access.
     for i in range(min(fw_info.num_fw, len(fw_info.fw))):
         entry = fw_info.fw[i]
-        name = entry.name.decode("utf-8")
-        version = entry.version.decode("utf-8")
+        name = entry.name.decode("utf-8", errors="replace")
+        version = entry.version.decode("utf-8", errors="replace")
         fw_info_dict[name] = version if version else "N/A"
 
     return fw_info_dict
@@ -2740,7 +2744,7 @@ def amdsmi_get_nic_type_label(processor_handle: amdsmi_wrapper.amdsmi_processor_
     if nic_type == AmdSmiNicType.OTHER:
         asic = amdsmi_wrapper.amdsmi_nic_asic_info_t()
         _check_res(amdsmi_wrapper.amdsmi_get_nic_asic_info(processor_handle, ctypes.byref(asic)))
-        vendor_name = asic.vendor_name.decode("utf-8")
+        vendor_name = asic.vendor_name.decode("utf-8", errors="replace")
     return _nic_type_label(nic_type, vendor_name)
 
 
@@ -2773,7 +2777,7 @@ def amdsmi_get_nic_telemetry(
         "health": {
             "state": health_state,
             "error_count": _u(telem.health.error_count, 0xFFFFFFFF),
-            "reporter": telem.health.reporter.decode("utf-8") or "N/A",
+            "reporter": telem.health.reporter.decode("utf-8", errors="replace") or "N/A",
         },
         "port_split": {
             "splittable": _u(telem.port_split.splittable, 0xFF),
@@ -2794,7 +2798,7 @@ def amdsmi_get_nic_port_info(
     # num_ports comes from the C layer; clamp to the fixed ports[] capacity so a
     # bad count can't drive an out-of-bounds ctypes access.
     ports = [
-        {"netdev": port_info.ports[i].netdev.decode("utf-8")}
+        {"netdev": port_info.ports[i].netdev.decode("utf-8", errors="replace")}
         for i in range(min(port_info.num_ports, len(port_info.ports)))
     ]
 
@@ -2824,7 +2828,10 @@ def amdsmi_get_nic_port_statistics(
         )
     )
 
-    return {stats[i].name.decode("utf-8"): stats[i].value for i in range(num_stats.value)}
+    return {
+        stats[i].name.decode("utf-8", errors="replace"): stats[i].value
+        for i in range(num_stats.value)
+    }
 
 
 def amdsmi_get_nic_vendor_statistics(
@@ -2852,7 +2859,10 @@ def amdsmi_get_nic_vendor_statistics(
         )
     )
 
-    return {stats[i].name.decode("utf-8"): stats[i].value for i in range(num_stats.value)}
+    return {
+        stats[i].name.decode("utf-8", errors="replace"): stats[i].value
+        for i in range(num_stats.value)
+    }
 
 
 def amdsmi_get_nic_rdma_port_statistics(
@@ -2878,7 +2888,10 @@ def amdsmi_get_nic_rdma_port_statistics(
         )
     )
 
-    return {stats[i].name.decode("utf-8"): stats[i].value for i in range(num_stats.value)}
+    return {
+        stats[i].name.decode("utf-8", errors="replace"): stats[i].value
+        for i in range(num_stats.value)
+    }
 
 
 def amdsmi_get_gpu_device_uuid(processor_handle: processor_handle_t) -> str:
