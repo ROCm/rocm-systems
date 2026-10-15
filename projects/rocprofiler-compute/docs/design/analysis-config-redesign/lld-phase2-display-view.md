@@ -67,7 +67,7 @@ New module `src/utils/layer3_reader.py`.
 `load_views(view_dirs: list[Path], arch: str, library: MetricLibrary) -> list[ViewDefinition]`:
 
 1. Discover `*.yaml` files in each directory in `view_dirs`.
-2. Load each via `yaml.safe_load` (no `!inherit` needed for view files -- they are
+2. Load each via `yaml.safe_load` (no `inherit` needed for view files -- they are
    flat by design).
 3. Validate against `layer3_schema.py`.
 4. Filter: skip views where `archs` is set and the current arch is not in the list.
@@ -87,8 +87,8 @@ redesign.
 `views_to_panel_configs(views: list[ViewDefinition], library: MetricLibrary) -> OrderedDict[int, dict]`:
 
 Translates view objects into the same `OrderedDict[int, dict]` consumed by
-`build_dfs()`. This replaces Stage 3's `layer2_to_panel_configs()` as the permanent
-translation from the new format to the existing pipeline.
+`build_dfs()`. It is the translation from the new format to the existing pipeline; Phase
+A ships no adapter (see [Stage 3](lld-phase1-metric-library.md#stage-3----equivalence-with-the-analysis-configs)).
 
 - Panel IDs: from `legacy_panel_id` during transition, or from view ordering when
   legacy IDs are removed.
@@ -274,15 +274,10 @@ WARNING: Numeric metric ID '11.2.3' is deprecated.
 `convert_metric_id_to_panel_info()` remains during the deprecation window for
 backward compatibility.
 
-**Legacy mapping** -- the transition-only mapping that carries `legacy_id` per table row
-is removed.
-
 **`legacy_panel_id`** -- removed from all Layer 3 view files.
 
 **Old panel config YAML files** -- removed from per-arch directories. The base arch
 and `views/` directories are the canonical source.
-
-**`compat_adapter.py`** -- removed.
 
 ### Tooling cleanup
 
