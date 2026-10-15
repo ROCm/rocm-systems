@@ -19,10 +19,13 @@
 #include <deque>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
 #include <memory>
+#include <mutex>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ScopedHook.h"
@@ -240,8 +243,9 @@ struct FakeNet {
 std::function<int64_t(const char*, int64_t)> ParamOverride(std::initializer_list<std::pair<const char*, int64_t>> kv) {
   std::vector<std::pair<std::string, int64_t>> table(kv.begin(), kv.end());
   return [table](const char* env, int64_t deft) {
-    for (const auto& [name, value] : table)
+    for (const auto& [name, value] : table) {
       if (name == env) return value;
+    }
     return deft;
   };
 }
@@ -328,7 +332,7 @@ class NetIbNicDetectMicrotest : public NetMicrotestBase {
 };
 
 TEST_F(NetIbNicDetectMicrotest, ReadIbNicRate_SeveralPorts_ReturnsHighestParsableRate) {
-  AddDevice("mlx5_0", "0x15b3", "0x1021", {"100 Gb/sec (4X EDR)", "garbage", "400 Gb/sec (4X NDR)"});
+  AddDevice("mlx5_0", "0x15b3", "0x1021", {"100 Gb/sec (4X EDR)", "400 Gb/sec (4X NDR)", "garbage", "200 Gb/sec"});
 
   EXPECT_EQ(readIBNicRate("mlx5_0"), 400);
 }
@@ -398,11 +402,22 @@ TEST_F(NetIbNicDetectMicrotest, Detect_UnknownVendors_ReportsDefaultWithCount) {
 TEST_F(NetIbNicDetectMicrotest, Detect_MissingPciIds_IgnoresDevice) {
   AddDevice("mlx5_0", "0x15b3", "0x1021");
   std::filesystem::create_directories(root_ / "broken0" / "device");
+  WriteFile(root_ / "broken1" / "device" / "vendor", "0x15b3");  // device id missing
 
   rcclDetectIBNics();
 
   EXPECT_EQ(rcclPrimaryNicInfo.type, rcclIBNicTypeMLX);
   EXPECT_EQ(rcclPrimaryNicInfo.count, 1);
+}
+
+TEST_F(NetIbNicDetectMicrotest, Detect_KnownVendorUnknownDevice_CountsAsDefault) {
+  AddDevice("ionic_0", "0x1dd8", "0x2001");
+  AddDevice("bnxt_re0", "0x14e4", "0x1751");
+
+  rcclDetectIBNics();
+
+  EXPECT_EQ(rcclPrimaryNicInfo.type, rcclIBNicTypeDefault);
+  EXPECT_EQ(rcclPrimaryNicInfo.count, 2);
 }
 
 TEST_F(NetIbNicDetectMicrotest, Detect_AinicRoceDisabled_CountsAinicAsDefault) {
@@ -839,6 +854,7 @@ TEST_F(NetSharedBuffersMicrotest, Init_AllocationFails_ReturnsError) {
 
 TEST_F(NetSharedBuffersMicrotest, Destroy_InvalidPoolState_Rejected) {
   EXPECT_EQ(Destroy(kLocalRanks, 0), ncclInvalidArgument);
+  EXPECT_EQ(Destroy(-1, 0), ncclInvalidArgument);
   EXPECT_EQ(Destroy(0, 0), ncclInternalError);  // no pool yet
 
   ASSERT_EQ(Init(0, 0, 0, 1, 1), ncclSuccess);
@@ -910,7 +926,25 @@ TEST_F(NetSharedBuffersMicrotest, Destroy_DeviceBufferSameProcess_FreesWithoutIp
   EXPECT_TRUE(live_.empty());
 }
 
-// proxySharedInit picks host or device memory from /dev/dxg (WSL); these assertions hold for both.
+TEST_F(NetSharedBuffersMicrotest, Destroy_DeviceBufferWithCuMem_ReleasesIpc) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ASSERT_EQ(Init(1, 0, 0, 1, 1), ncclSuccess);
+  ScopedHook ipcFree(g_ncclP2pFreeShareableBuffer, [](ncclIpcDesc*) { return ncclSuccess; });
+  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) { return hipSuccess; });
+  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
+  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
+  ScopedHook addrFree(g_hipMemAddressFree, [this](void* p, size_t) {
+    Release(p);
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(Destroy(0, 0, /*sameProcess=*/1), ncclSuccess);
+
+  EXPECT_EQ(ipcFree.calls, 1);
+  EXPECT_TRUE(live_.empty());
+}
+
+// proxySharedInit takes host memory under WSL (/dev/dxg present) and device memory otherwise.
 TEST_F(NetSharedBuffersMicrotest, ProxySharedInit_ReservesSendPoolForConnectionRank) {
   ncclProxyConnection conn{};
   conn.tpLocalRank = 2;
@@ -921,6 +955,9 @@ TEST_F(NetSharedBuffersMicrotest, ProxySharedInit_ReservesSendPoolForConnectionR
   EXPECT_EQ(State(2, 0).refcount, 1);
   EXPECT_EQ(State(2, 0).size, (int64_t)3 * NCCL_SHARED_STEPS * kChunk);
   EXPECT_EQ(State(2, 1).refcount, 0);
+  bool wsl = access("/dev/dxg", F_OK) == 0;
+  EXPECT_EQ(State(2, 0).hostBuff != nullptr, wsl);
+  EXPECT_EQ(State(2, 0).cudaBuff != nullptr, !wsl);
 }
 
 // ---------------------------------------------------------------------------
@@ -958,9 +995,13 @@ class NetProxySetupMicrotest : public NetMicrotestBase {
   recvNetResources* RecvRes() { return static_cast<recvNetResources*>(conn_.transportResources); }
 
   // Runs one side's setup on a fresh connection and reports the DMA-BUF choice.
-  int UseDmaBuf(bool send) {
+  void ResetConn() {
     free(conn_.transportResources);
     conn_ = {};
+  }
+
+  int UseDmaBuf(bool send) {
+    ResetConn();
     EXPECT_EQ(send ? SendSetup() : RecvSetup(), ncclSuccess);
     if (!conn_.transportResources) return -1;
     return send ? SendRes()->useDmaBuf : RecvRes()->useDmaBuf;
@@ -1012,9 +1053,12 @@ TEST_F(NetProxySetupMicrotest, RecvSetup_ValidRequest_RecordsRequestAndListens) 
   req_.channelId = 3;
   req_.connIndex = 1;
   req_.sameDevice = 1;
+  uint32_t hdp = 0;
+  req_.curr_hdp_reg = &hdp;
   net_.props.maxRecvs = 8;
   net_.props.netDeviceType = NCCL_NET_DEVICE_UNPACK;
   net_.props.netDeviceVersion = 7;
+  net_.props.maxP2pBytes = 1 << 20;
 
   ASSERT_EQ(RecvSetup(), ncclSuccess);
 
@@ -1027,8 +1071,11 @@ TEST_F(NetProxySetupMicrotest, RecvSetup_ValidRequest_RecordsRequestAndListens) 
   EXPECT_EQ(r->tpLocalRank, 1);
   EXPECT_EQ(r->tpRemoteRank, 9);
   EXPECT_EQ(r->netDev, 2);
+  EXPECT_EQ(r->shared, 1);
   EXPECT_EQ(r->useGdr, ncclTopoGdrModeDefault);
   EXPECT_EQ(r->needFlush, ncclTopoFlushAlways);
+  EXPECT_EQ(r->curr_hdp_reg, &hdp);
+  EXPECT_EQ(r->maxP2pBytes, (size_t)1 << 20);
   EXPECT_EQ(r->channelId, 3);
   EXPECT_EQ(r->connIndex, 1);
   EXPECT_EQ(r->sameDevice, 1);
@@ -1049,18 +1096,18 @@ TEST_F(NetProxySetupMicrotest, Setup_WrongRequestSize_RejectedWithoutResources) 
 }
 
 TEST_F(NetProxySetupMicrotest, Setup_LocalRankOutOfRange_RejectedWithoutResources) {
-  req_.tpLocalRank = 4;
-  EXPECT_EQ(SendSetup(), ncclInvalidArgument);
-  req_.tpLocalRank = -1;
-  EXPECT_EQ(RecvSetup(), ncclInvalidArgument);
+  for (int bad : {4, -1}) {
+    req_.tpLocalRank = bad;
+    EXPECT_EQ(SendSetup(), ncclInvalidArgument);
+    EXPECT_EQ(RecvSetup(), ncclInvalidArgument);
+  }
   EXPECT_EQ(conn_.transportResources, nullptr);
 }
 
 TEST_F(NetProxySetupMicrotest, Setup_PropertiesFail_ReturnsError) {
   net_.propsResult = ncclSystemError;
   EXPECT_EQ(SendSetup(), ncclSystemError);
-  free(conn_.transportResources);
-  conn_ = {};
+  ResetConn();
   EXPECT_EQ(RecvSetup(), ncclSystemError);
   EXPECT_EQ(net_.listenCalls, 0);
 }
@@ -1069,11 +1116,9 @@ TEST_F(NetProxySetupMicrotest, Setup_InvalidMaxP2pBytes_Rejected) {
   for (size_t bad : {(size_t)0, (size_t)NCCL_MAX_NET_SIZE_BYTES + 1}) {
     SCOPED_TRACE(bad);
     net_.props.maxP2pBytes = bad;
-    free(conn_.transportResources);
-    conn_ = {};
+    ResetConn();
     EXPECT_EQ(SendSetup(), ncclInternalError);
-    free(conn_.transportResources);
-    conn_ = {};
+    ResetConn();
     EXPECT_EQ(RecvSetup(), ncclInternalError);
   }
   EXPECT_EQ(net_.listenCalls, 0);
@@ -1082,16 +1127,14 @@ TEST_F(NetProxySetupMicrotest, Setup_InvalidMaxP2pBytes_Rejected) {
 TEST_F(NetProxySetupMicrotest, Setup_MaxP2pBytesAtLimit_Accepted) {
   net_.props.maxP2pBytes = NCCL_MAX_NET_SIZE_BYTES;
   EXPECT_EQ(SendSetup(), ncclSuccess);
-  free(conn_.transportResources);
-  conn_ = {};
+  ResetConn();
   EXPECT_EQ(RecvSetup(), ncclSuccess);
 }
 
 TEST_F(NetProxySetupMicrotest, Setup_WrongResponseSize_Rejected) {
   EXPECT_EQ(SendSetup(sizeof(setupReq), /*respSize=*/4), ncclInternalError);
   EXPECT_EQ(done_, 0);
-  free(conn_.transportResources);
-  conn_ = {};
+  ResetConn();
   EXPECT_EQ(RecvSetup(sizeof(setupReq), /*respSize=*/0), ncclInternalError);
   EXPECT_EQ(net_.listenCalls, 0);
 }
@@ -1802,6 +1845,18 @@ TEST_F(NetConnectMicrotest, SendConnect_OtherProcess_ImportsHostAndDeviceMemory)
   EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_SIMPLE], imported.data());
 }
 
+TEST_F(NetConnectMicrotest, SendConnect_CuMemSameDevice_UsesProxyBuffersDirectly) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  ScopedHook peer(g_hipDeviceEnablePeerAccess, [](int, unsigned) { return hipSuccess; });
+  ScopedHook shm(g_shmImportShareableBuffer, [](auto...) { return ncclInternalError; });
+  ScopedHook dev(g_ncclP2pImportShareableBuffer, [](auto...) { return ncclInternalError; });
+
+  ASSERT_EQ(SendConnect(), ncclSuccess);
+
+  EXPECT_EQ(peer.calls + shm.calls + dev.calls, 0);
+  EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_SIMPLE], devMem_.data());
+}
+
 TEST_F(NetConnectMicrotest, SendConnect_CuMemOtherDevice_ImportsInsteadOfPeerAccess) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   BuildMap(1, 3, 0);
@@ -2043,13 +2098,20 @@ TEST_F(NetConnectMicrotest, SendFree_OtherDeviceCuMem_ReleasesShareableBuffer) {
 TEST_F(NetConnectMicrotest, SendFree_OtherProcess_ClosesHostShm) {
   map_.sameProcess = 0;
   map_.cudaDev = g_currentDevice;
-  ScopedHook shmClose(g_shmIpcClose, [](shmIpcDesc*) { return ncclSuccess; });
-  conn_.transportResources = HeapMap();
+  shmIpcDesc* closed = nullptr;
+  ScopedHook shmClose(g_shmIpcClose, [&](shmIpcDesc* desc) {
+    closed = desc;
+    return ncclSuccess;
+  });
+  connectMap* map = HeapMap();
+  shmIpcDesc* attached = &map->mems[NCCL_NET_MAP_HOSTMEM].attachDesc;  // compared by address only
+  conn_.transportResources = map;
 
   EXPECT_EQ(sendFree(&comm_, &conn_), ncclSuccess);
   conn_.transportResources = nullptr;
 
   EXPECT_EQ(shmClose.calls, 1);
+  EXPECT_EQ(closed, attached);
 }
 
 TEST_F(NetConnectMicrotest, RecvFree_ReleasesMap) {
@@ -2063,9 +2125,13 @@ TEST_F(NetConnectMicrotest, RecvFree_ReleasesMap) {
 // Proxy-side send connect (sendProxyConnect)
 // ---------------------------------------------------------------------------
 
+// Each export gets a higher fd number than any before it, so a stale fd can't match by reuse.
 std::vector<int> g_exportedFds;
+int g_nextExportFd = 200;
 hsa_status_t FakeExportDmaBuf(const void*, size_t, int* fd, uint64_t* offset) {
-  *fd = open("/dev/null", O_RDONLY);
+  int devNull = open("/dev/null", O_RDONLY);
+  *fd = fcntl(devNull, F_DUPFD, g_nextExportFd++);
+  close(devNull);
   *offset = 0x40;
   g_exportedFds.push_back(*fd);
   return HSA_STATUS_SUCCESS;
@@ -2093,8 +2159,9 @@ struct CuMemExportRecorder : std::vector<CuMemExport> {
   }
   // Closes what the code under test left open, e.g. a bank fd no free released.
   void CloseOpen() {
-    for (const auto& e : *this)
+    for (const auto& e : *this) {
       if (fcntl(e.fd, F_GETFD) != -1) close(e.fd);
+    }
   }
 };
 #endif
@@ -2123,6 +2190,7 @@ class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) proxyState_.buffSizes[p] = kSizes[p];
     rcclPrimaryNicInfo = {rcclIBNicTypeDefault, 0, 0};
     g_exportedFds.clear();
+    g_nextExportFd = 200;
   }
 
   void TearDown() override {
@@ -2169,8 +2237,9 @@ class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
   static char* Buffer(Res* r, int p) { return NCCL_NET_MAP_GET_POINTER(&r->map, cpu, buffs[p]); }
   static bool InDeviceMemory(Res* r, int p) { return NCCL_NET_MAP_DEV_MEM(&r->map, buffs[p]); }
   int RegMrType(void* data) {
-    for (const auto& m : net_.regMrs)
+    for (const auto& m : net_.regMrs) {
       if (m.data == data) return m.type;
+    }
     return 0;
   }
 };
@@ -2280,7 +2349,13 @@ TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
     policyP2p = p2p;
     return ncclSuccess;
   });
-  ScopedHook cast(g_rcclCastNetP2pPolicy, [](void*, int) { return ncclSuccess; });
+  void* castHandle = nullptr;
+  int castP2p = -1;
+  ScopedHook cast(g_rcclCastNetP2pPolicy, [&](void* h, int p2p) {
+    castHandle = h;
+    castP2p = p2p;
+    return ncclSuccess;
+  });
 
   proxyState_.ncclNet = &ncclNetIb;
   EXPECT_EQ(Connect(), ncclSuccess);
@@ -2288,10 +2363,12 @@ TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
   EXPECT_EQ(policyP2p, 1);
   EXPECT_EQ(cast.calls, 0);
 
-  AddConn();
+  AddConn()->isP2p = 1;
   proxyState_.ncclNet = &netIbCast;
   EXPECT_EQ(Connect(1), ncclSuccess);
   EXPECT_EQ(cast.calls, 1);
+  EXPECT_EQ(castHandle, args_.handle);
+  EXPECT_EQ(castP2p, 1);
   EXPECT_EQ(ib.calls, 1);
 }
 
@@ -2489,8 +2566,9 @@ TEST_F(NetSendProxyConnectMicrotest, GdrCopyNotApplicable_HeadStaysInHostMemory)
   }
   ASSERT_EQ(Connect(0), ncclSuccess);
 
-  for (size_t i = 0; i < 2; i++)
+  for (size_t i = 0; i < 2; i++) {
     EXPECT_EQ(static_cast<sendNetResources*>(conns_[i].transportResources)->gdcSync, nullptr);
+  }
 }
 
 TEST_F(NetSendProxyConnectMicrotest, DeviceOffload_ExportsDeviceMhandles) {
@@ -2498,6 +2576,7 @@ TEST_F(NetSendProxyConnectMicrotest, DeviceOffload_ExportsDeviceMhandles) {
   handle.needsProxyProgress = 0;
   net_.offloadHandle = &handle;
   sendNetResources* r = AddConn();
+  conns_[0].needsProxyProgress = 1;  // must come from the handle
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
@@ -2529,6 +2608,17 @@ TEST_F(NetSendProxyConnectMicrotest, HsaDmaBuf_RegistersDeviceBuffersByFd) {
   EXPECT_EQ(net_.regMrDmaBufs[1].data, Buffer(r, NCCL_PROTO_SIMPLE));
   EXPECT_EQ(net_.regMrDmaBufs[1].fd, g_exportedFds[1]);
   for (int fd : g_exportedFds) EXPECT_EQ(fcntl(fd, F_GETFD), -1) << "fd " << fd << " left open";
+}
+
+TEST_F(NetSendProxyConnectMicrotest, DmaBufNotSelected_UsesRegMr) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  proxyState_.dmaBufSupport = true;
+  AddConn(0, 1);  // useDmaBuf stays 0
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_TRUE(net_.regMrDmaBufs.empty());
+  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
 }
 
 TEST_F(NetSendProxyConnectMicrotest, DmaBufUnavailable_FallsBackToRegMr) {
