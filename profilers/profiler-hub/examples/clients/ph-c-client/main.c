@@ -518,8 +518,11 @@ probe_databases(int count, char** paths)
     int failed = 0;
     for(int i = 0; i < count; ++i)
     {
-        ph_database_probe_t probe  = { 0 };
-        const ph_result_t   result = ph_probe_database(paths[i], &probe);
+        ph_database_probe_t probe = { 0 };
+        char                uuid[128];
+        char                message[1024];
+        const ph_result_t   result = ph_probe_database_details(
+            paths[i], &probe, uuid, sizeof(uuid), message, sizeof(message));
         if(result != PH_RESULT_SUCCESS)
         {
             fprintf(stderr, "%s: probe call failed (%d)\n", paths[i], (int) result);
@@ -527,14 +530,17 @@ probe_databases(int count, char** paths)
             continue;
         }
 
-        printf("%s: status=%s database=%s schema=%s version=%u.%u.%u\n",
+        printf("%s: status=%s database=%s schema=%s version=%u.%u.%u uuid=%s "
+               "message=%s\n",
                paths[i],
                probe_status_name(probe.status),
                database_kind_name(probe.database_kind),
                trace_schema_name(probe.trace_schema),
                probe.schema_version.major,
                probe.schema_version.minor,
-               probe.schema_version.patch);
+               probe.schema_version.patch,
+               uuid,
+               message);
         if(probe.status != PH_PROBE_STATUS_SUPPORTED) failed = 1;
     }
     return failed;

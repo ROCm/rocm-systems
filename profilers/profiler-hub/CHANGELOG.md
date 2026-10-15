@@ -52,6 +52,9 @@ downstream consumer of the library.
   instead of opening an unsupported trace. Another database format is added by
   registering a detector, and another schema by registering the versions its
   reader accepts.
+- `ph_probe_database_details()` preserves the existing C probe ABI while also
+  copying the probe diagnostic message and trace UUID into caller-owned
+  buffers.
 - `ph_get_node()` returns `stream_hardware_links`: one entry per distinct
   stream-to-hardware relationship in kernel-dispatch, memory-allocate, and
   memory-copy rows. `reader_t::get_stream_hardware_links()` returns the same
