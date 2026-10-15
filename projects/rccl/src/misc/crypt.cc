@@ -369,7 +369,7 @@ static ncclResult_t cryptInitLib() {
   // client that only writes (bootstrapSend, the unidirectional ring) never reads them,
   // and closing a TCP socket with unread data sends RST and drops its unsent bytes.
   if (ncclCryptOpenSsl.pfn_SSL_CTX_set_num_tickets(ncclCryptServerCtx, 0) != 1) {
-    WARN("ncclCrypt: OpenSSL TLS context initialization failed");
+    WARN("ncclCrypt: disabling OpenSSL TLS session tickets failed");
     ret = ncclSystemError;
     goto fail;
   }
