@@ -74,7 +74,6 @@ INT_REDUCTION_WAVE_DEF_GEN(unsigned long long, ulonglong)
 FLOAT_REDUCTION_WAVE_DEF_GEN(float, float)
 FLOAT_REDUCTION_WAVE_DEF_GEN(double, double)
 FLOAT_REDUCTION_WAVE_DEF_GEN(__half, half)
-FLOAT_REDUCTION_WAVE_DEF_GEN(__hip_bfloat16, bfloat16)
 
 /******************************************************************************
  * DEVICE TEST KERNEL

@@ -229,8 +229,6 @@ template <> inline std::string type_name<__hip_bfloat16>()     { return "bfloat1
 
 #define ROCSHMEM_PUSH_REDUCTION_NONRO(TESTER, args, testers)                              \
   if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("half"))          \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __half,      args, testers) }                 \
-  if ((args).type_coverage == TypeCoverage::Full || (args).type_enabled("bfloat16"))      \
-    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __hip_bfloat16, args, testers)}
+    { ROCSHMEM_PUSH_REDUCTION_ARITH(TESTER, __half,      args, testers) }
 
 #endif // _TYPE_LISTS_HPP_

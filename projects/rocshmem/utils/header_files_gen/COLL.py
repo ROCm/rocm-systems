@@ -444,13 +444,66 @@ def generate_reduction_wave_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
+    _types = [
+        ("float", "float"),
+        ("double", "double"),
+        ("char", "char"),
+        ("signed char", "schar"),
+        ("short", "short"),
+        ("int", "int"),
+        ("long", "long"),
+        ("long long", "longlong"),
+        ("unsigned char", "uchar"),
+        ("unsigned short", "ushort"),
+        ("unsigned int", "uint"),
+        ("unsigned long", "ulong"),
+        ("unsigned long long", "ulonglong"),
+        ("__half", "half"),
+        ("int8_t", "int8"),
+        ("int16_t", "int16"),
+        ("int32_t", "int32"),
+        ("int64_t", "int64"),
+        ("uint8_t", "uint8"),
+        ("uint16_t", "uint16"),
+        ("uint32_t", "uint32"),
+        ("uint64_t", "uint64"),
+        ("size_t", "size"),
+        ("ptrdiff_t", "ptrdiff"),
+    ]
+
+    __int_types = [
+        0, # ("float", "float"),
+        0, # ("double", "double"),
+        1, # ("char", "char"),
+        1, # ("signed char", "schar"),
+        1, # ("short", "short"),
+        1, # ("int", "int"),
+        1, # ("long", "long"),
+        1, # ("long long", "longlong"),
+        1, # ("unsigned char", "uchar"),
+        1, # ("unsigned short", "ushort"),
+        1, # ("unsigned int", "uint"),
+        1, # ("unsigned long", "ulong"),
+        1, # ("unsigned long long", "ulonglong"),
+        0, # ("__half", "half"),
+        1, # ("int8_t", "int8"),
+        1, # ("int16_t", "int16"),
+        1, # ("int32_t", "int32"),
+        1, # ("int64_t", "int64"),
+        1, # ("uint8_t", "uint8"),
+        1, # ("uint16_t", "uint16"),
+        1, # ("uint32_t", "uint32"),
+        1, # ("uint64_t", "uint64"),
+        1, # ("size_t", "size"),
+        1, # ("ptrdiff_t", "ptrdiff"),
+    ]
     # int types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if cond]:
         expanded_code += arith_reduction_wave_api(type_, tname_)
         expanded_code += bitwise_reduction_wave_api(type_, tname_)
 
     # float types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if not cond]:
         expanded_code += arith_reduction_wave_api(type_, tname_)
 
     return expanded_code
@@ -499,14 +552,67 @@ def generate_reducescatter_wg_api():
  *
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
+    _types = [
+            ("float", "float"),
+            ("double", "double"),
+            ("char", "char"),
+            ("signed char", "schar"),
+            ("short", "short"),
+            ("int", "int"),
+            ("long", "long"),
+            ("long long", "longlong"),
+            ("unsigned char", "uchar"),
+            ("unsigned short", "ushort"),
+            ("unsigned int", "uint"),
+            ("unsigned long", "ulong"),
+            ("unsigned long long", "ulonglong"),
+            ("__half", "half"),
+            ("int8_t", "int8"),
+            ("int16_t", "int16"),
+            ("int32_t", "int32"),
+            ("int64_t", "int64"),
+            ("uint8_t", "uint8"),
+            ("uint16_t", "uint16"),
+            ("uint32_t", "uint32"),
+            ("uint64_t", "uint64"),
+            ("size_t", "size"),
+            ("ptrdiff_t", "ptrdiff"),
+        ]
+    
+    __int_types = [
+        0, # ("float", "float"),
+        0, # ("double", "double"),
+        1, # ("char", "char"),
+        1, # ("signed char", "schar"),
+        1, # ("short", "short"),
+        1, # ("int", "int"),
+        1, # ("long", "long"),
+        1, # ("long long", "longlong"),
+        1, # ("unsigned char", "uchar"),
+        1, # ("unsigned short", "ushort"),
+        1, # ("unsigned int", "uint"),
+        1, # ("unsigned long", "ulong"),
+        1, # ("unsigned long long", "ulonglong"),
+        0, # ("__half", "half"),
+        1, # ("int8_t", "int8"),
+        1, # ("int16_t", "int16"),
+        1, # ("int32_t", "int32"),
+        1, # ("int64_t", "int64"),
+        1, # ("uint8_t", "uint8"),
+        1, # ("uint16_t", "uint16"),
+        1, # ("uint32_t", "uint32"),
+        1, # ("uint64_t", "uint64"),
+        1, # ("size_t", "size"),
+        1, # ("ptrdiff_t", "ptrdiff"),
+    ]
 
     # int types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if cond]:
         expanded_code += arith_reducescatter_api(type_, tname_)
         expanded_code += bitwise_reducescatter_api(type_, tname_)
 
     # float types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if not cond]:
         expanded_code += arith_reducescatter_api(type_, tname_)
 
     return expanded_code
@@ -535,14 +641,67 @@ def generate_reducescatter_wave_api():
  * of source[i*nreduce..(i+1)*nreduce-1] across all PEs in the team.
  * Only the wave (wavefront) participates. Returns ROCSHMEM_SUCCESS on success.
  */\n"""
+    _types = [
+        ("float", "float"),
+        ("double", "double"),
+        ("char", "char"),
+        ("signed char", "schar"),
+        ("short", "short"),
+        ("int", "int"),
+        ("long", "long"),
+        ("long long", "longlong"),
+        ("unsigned char", "uchar"),
+        ("unsigned short", "ushort"),
+        ("unsigned int", "uint"),
+        ("unsigned long", "ulong"),
+        ("unsigned long long", "ulonglong"),
+        ("__half", "half"),
+        ("int8_t", "int8"),
+        ("int16_t", "int16"),
+        ("int32_t", "int32"),
+        ("int64_t", "int64"),
+        ("uint8_t", "uint8"),
+        ("uint16_t", "uint16"),
+        ("uint32_t", "uint32"),
+        ("uint64_t", "uint64"),
+        ("size_t", "size"),
+        ("ptrdiff_t", "ptrdiff"),
+    ]
+    
+    __int_types = [
+        0, # ("float", "float"),
+        0, # ("double", "double"),
+        1, # ("char", "char"),
+        1, # ("signed char", "schar"),
+        1, # ("short", "short"),
+        1, # ("int", "int"),
+        1, # ("long", "long"),
+        1, # ("long long", "longlong"),
+        1, # ("unsigned char", "uchar"),
+        1, # ("unsigned short", "ushort"),
+        1, # ("unsigned int", "uint"),
+        1, # ("unsigned long", "ulong"),
+        1, # ("unsigned long long", "ulonglong"),
+        0, # ("__half", "half"),
+        1, # ("int8_t", "int8"),
+        1, # ("int16_t", "int16"),
+        1, # ("int32_t", "int32"),
+        1, # ("int64_t", "int64"),
+        1, # ("uint8_t", "uint8"),
+        1, # ("uint16_t", "uint16"),
+        1, # ("uint32_t", "uint32"),
+        1, # ("uint64_t", "uint64"),
+        1, # ("size_t", "size"),
+        1, # ("ptrdiff_t", "ptrdiff"),
+    ]
 
     # int types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if cond]:
         expanded_code += arith_reducescatter_wave_api(type_, tname_)
         expanded_code += bitwise_reducescatter_wave_api(type_, tname_)
 
     # float types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if not cond]:
         expanded_code += arith_reducescatter_wave_api(type_, tname_)
 
     return expanded_code
@@ -570,14 +729,67 @@ def generate_reducescatter_host_api():
  * @brief Host-side reduce-scatter: PE i receives the element-wise reduction
  * of source[i*nreduce..(i+1)*nreduce-1] across all PEs.
  */\n"""
+    _types = [
+        ("float", "float"),
+        ("double", "double"),
+        ("char", "char"),
+        ("signed char", "schar"),
+        ("short", "short"),
+        ("int", "int"),
+        ("long", "long"),
+        ("long long", "longlong"),
+        ("unsigned char", "uchar"),
+        ("unsigned short", "ushort"),
+        ("unsigned int", "uint"),
+        ("unsigned long", "ulong"),
+        ("unsigned long long", "ulonglong"),
+        ("__half", "half"),
+        ("int8_t", "int8"),
+        ("int16_t", "int16"),
+        ("int32_t", "int32"),
+        ("int64_t", "int64"),
+        ("uint8_t", "uint8"),
+        ("uint16_t", "uint16"),
+        ("uint32_t", "uint32"),
+        ("uint64_t", "uint64"),
+        ("size_t", "size"),
+        ("ptrdiff_t", "ptrdiff"),
+    ]
+     
+    __int_types = [
+         0, # ("float", "float"),
+         0, # ("double", "double"),
+         1, # ("char", "char"),
+         1, # ("signed char", "schar"),
+         1, # ("short", "short"),
+         1, # ("int", "int"),
+         1, # ("long", "long"),
+         1, # ("long long", "longlong"),
+         1, # ("unsigned char", "uchar"),
+         1, # ("unsigned short", "ushort"),
+         1, # ("unsigned int", "uint"),
+         1, # ("unsigned long", "ulong"),
+         1, # ("unsigned long long", "ulonglong"),
+         0, # ("__half", "half"),
+         1, # ("int8_t", "int8"),
+         1, # ("int16_t", "int16"),
+         1, # ("int32_t", "int32"),
+         1, # ("int64_t", "int64"),
+         1, # ("uint8_t", "uint8"),
+         1, # ("uint16_t", "uint16"),
+         1, # ("uint32_t", "uint32"),
+         1, # ("uint64_t", "uint64"),
+         1, # ("size_t", "size"),
+         1, # ("ptrdiff_t", "ptrdiff"),
+     ]
 
     # int types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if cond]:
         expanded_code += arith_reducescatter_host_api(type_, tname_)
         expanded_code += bitwise_reducescatter_host_api(type_, tname_)
 
     # float types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if not cond]:
         expanded_code += arith_reducescatter_host_api(type_, tname_)
 
     return expanded_code
@@ -619,13 +831,67 @@ def generate_reduction_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
+    _types = [
+        ("float", "float"),
+        ("double", "double"),
+        ("char", "char"),
+        ("signed char", "schar"),
+        ("short", "short"),
+        ("int", "int"),
+        ("long", "long"),
+        ("long long", "longlong"),
+        ("unsigned char", "uchar"),
+        ("unsigned short", "ushort"),
+        ("unsigned int", "uint"),
+        ("unsigned long", "ulong"),
+        ("unsigned long long", "ulonglong"),
+        ("__half", "half"),
+        ("int8_t", "int8"),
+        ("int16_t", "int16"),
+        ("int32_t", "int32"),
+        ("int64_t", "int64"),
+        ("uint8_t", "uint8"),
+        ("uint16_t", "uint16"),
+        ("uint32_t", "uint32"),
+        ("uint64_t", "uint64"),
+        ("size_t", "size"),
+        ("ptrdiff_t", "ptrdiff"),
+    ]
+    
+    __int_types = [
+        0, # ("float", "float"),
+        0, # ("double", "double"),
+        1, # ("char", "char"),
+        1, # ("signed char", "schar"),
+        1, # ("short", "short"),
+        1, # ("int", "int"),
+        1, # ("long", "long"),
+        1, # ("long long", "longlong"),
+        1, # ("unsigned char", "uchar"),
+        1, # ("unsigned short", "ushort"),
+        1, # ("unsigned int", "uint"),
+        1, # ("unsigned long", "ulong"),
+        1, # ("unsigned long long", "ulonglong"),
+        0, # ("__half", "half"),
+        1, # ("int8_t", "int8"),
+        1, # ("int16_t", "int16"),
+        1, # ("int32_t", "int32"),
+        1, # ("int64_t", "int64"),
+        1, # ("uint8_t", "uint8"),
+        1, # ("uint16_t", "uint16"),
+        1, # ("uint32_t", "uint32"),
+        1, # ("uint64_t", "uint64"),
+        1, # ("size_t", "size"),
+        1, # ("ptrdiff_t", "ptrdiff"),
+    ]
+
     # int types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if cond]:
         expanded_code += arith_reduction_api(type_, tname_)
         expanded_code += bitwise_reduction_api(type_, tname_)
 
     # float types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if not cond]:
         expanded_code += arith_reduction_api(type_, tname_)
 
     return expanded_code
@@ -648,14 +914,67 @@ def generate_reduce_on_stream_api():
  *
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
+    _types = [
+        ("float", "float"),
+        ("double", "double"),
+        ("char", "char"),
+        ("signed char", "schar"),
+        ("short", "short"),
+        ("int", "int"),
+        ("long", "long"),
+        ("long long", "longlong"),
+        ("unsigned char", "uchar"),
+        ("unsigned short", "ushort"),
+        ("unsigned int", "uint"),
+        ("unsigned long", "ulong"),
+        ("unsigned long long", "ulonglong"),
+        ("__half", "half"),
+        ("int8_t", "int8"),
+        ("int16_t", "int16"),
+        ("int32_t", "int32"),
+        ("int64_t", "int64"),
+        ("uint8_t", "uint8"),
+        ("uint16_t", "uint16"),
+        ("uint32_t", "uint32"),
+        ("uint64_t", "uint64"),
+        ("size_t", "size"),
+        ("ptrdiff_t", "ptrdiff"),
+    ]
+    
+    __int_types = [
+        0, # ("float", "float"),
+        0, # ("double", "double"),
+        1, # ("char", "char"),
+        1, # ("signed char", "schar"),
+        1, # ("short", "short"),
+        1, # ("int", "int"),
+        1, # ("long", "long"),
+        1, # ("long long", "longlong"),
+        1, # ("unsigned char", "uchar"),
+        1, # ("unsigned short", "ushort"),
+        1, # ("unsigned int", "uint"),
+        1, # ("unsigned long", "ulong"),
+        1, # ("unsigned long long", "ulonglong"),
+        0, # ("__half", "half"),
+        1, # ("int8_t", "int8"),
+        1, # ("int16_t", "int16"),
+        1, # ("int32_t", "int32"),
+        1, # ("int64_t", "int64"),
+        1, # ("uint8_t", "uint8"),
+        1, # ("uint16_t", "uint16"),
+        1, # ("uint32_t", "uint32"),
+        1, # ("uint64_t", "uint64"),
+        1, # ("size_t", "size"),
+        1, # ("ptrdiff_t", "ptrdiff"),
+    ]
 
     # int types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if cond]:
         expanded_code += arith_reduce_on_stream_api(type_, tname_)
         expanded_code += bitwise_reduce_on_stream_api(type_, tname_)
 
     # float types
-    for type_, tname_ in [_type for _type, cond in zip(types, _int_types) if not cond]:
+    for type_, tname_ in [_type for _type, cond in zip(_types, __int_types) if not cond]:
         expanded_code += arith_reduce_on_stream_api(type_, tname_)
 
     return expanded_code

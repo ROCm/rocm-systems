@@ -60,7 +60,7 @@ REDUCE_ON_STREAM_DEF(int,              int)
 REDUCE_ON_STREAM_DEF(float,            float)
 REDUCE_ON_STREAM_DEF(double,           double)
 REDUCE_ON_STREAM_DEF(__half,           half)
-REDUCE_ON_STREAM_DEF(__hip_bfloat16,   bfloat16)
+// REDUCE_ON_STREAM_DEF(__hip_bfloat16,   bfloat16)
 
 /******************************************************************************
  * HOST TESTER CLASS METHODS

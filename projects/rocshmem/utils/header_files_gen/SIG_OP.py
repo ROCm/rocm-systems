@@ -137,7 +137,7 @@ def signal_fetch_dec():
     ]
     for suffix, scope in [("_wg", "work-group"), ("_wave", "wave")]:
         declarations.append(
-            "/**\n"
+            "\n/**\n"
             f" * @brief Atomically fetch a signal value collectively at {scope} scope.\n"
             " *\n"
             " * @deprecated Use rocshmem_signal_fetch() instead.\n"
@@ -152,7 +152,7 @@ def signal_fetch_dec():
 def signal_wait_dec():
     return (
         "__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_wait_until(\n"
-        "    uint64_t *sig_addr, int cmp, uint64_t cmp_value);"
+        "    uint64_t *sig_addr, int cmp, uint64_t cmp_value);\n"
     )
 
 
