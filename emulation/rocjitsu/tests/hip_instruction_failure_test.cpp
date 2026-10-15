@@ -6,8 +6,10 @@
 ///
 /// Requires the simulator interposer via LD_PRELOAD=librocjitsu.so.
 
+#include <chrono>
 #include <cstdlib>
 #include <hip/hip_runtime.h>
+#include <thread>
 
 #include <gtest/gtest.h>
 
@@ -34,8 +36,11 @@ __global__ void undecodable_instruction() { asm volatile(".long 0xbfff0000"); }
     undecodable_instruction<<<4, 64>>>();
   if (hipGetLastError() != hipSuccess)
     std::_Exit(kLaunchFailure);
-  // Any return is unexpected, regardless of synchronization's status.
-  (void)hipDeviceSynchronize();
+  // Queue-owner exception delivery can return a HIP error before the engine
+  // thread finishes shutdown. Successful synchronization is always a failure.
+  if (hipDeviceSynchronize() == hipSuccess)
+    std::_Exit(kSynchronizationReturned);
+  std::this_thread::sleep_for(std::chrono::seconds(2));
   std::_Exit(kSynchronizationReturned);
 }
 
