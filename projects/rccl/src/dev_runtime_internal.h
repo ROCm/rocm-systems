@@ -87,6 +87,8 @@ struct ncclDevrMemory {
   // GIN registration state.
   int numGinSegments;                              // 1 unless GIN needs multiple per-segment windows
   struct ncclDevrGinSegmentInfo* ginSegmentInfos;  // per-GIN-segment info
+  // RCCL: owner's DMA-BUF fd per imported host segment (-1 otherwise); closed when the memory is destroyed.
+  int* hostOwnerFds;
 };
 
 ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments);

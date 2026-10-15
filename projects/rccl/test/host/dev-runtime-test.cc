@@ -1252,6 +1252,7 @@ protected:
   }
 
   void TearDown() override {
+    symMemoryCloseHostOwnerFds(&mem);
     comm->devrState.lsaRankList = nullptr;  // borrowed, not malloc'd
     ResetDevRuntimeMicroFakes();
   }
@@ -1375,6 +1376,48 @@ TEST_F(SymMemoryMapLsaTeamTest, BarrierFails_ReturnsError) {
   EXPECT_EQ(barrier.calls, 1);
 }
 
+// Publish walks this rank's segment sizes from primaryAddr. A lookup has to
+// land inside one segment: the RMA export rounds to a page but still asks for
+// one segment, and a range that crosses two entries misses.
+TEST_F(SymMemoryMapLsaTeamTest, Publish_IndexesOwnerFdsBySegmentVa) {
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  int* fds = static_cast<int*>(calloc(2, sizeof(int)));
+  ASSERT_NE(fds, nullptr);
+  fds[0] = -1;
+  fds[1] = dup(pipefd[1]);
+  segmentSizes.assign({4096, 8192});
+  mem.segmentSizes = segmentSizes.data();
+  mem.numSegments = 2;
+  mem.primaryAddr = reinterpret_cast<void*>(0x200000);
+  mem.hostOwnerFds = fds;
+  ASSERT_GE(fds[1], 0);
+
+  symMemoryPublishHostOwnerFds(&mem);
+
+  uint64_t off = 7;
+  EXPECT_EQ(rcclHostSegmentFdLookup(0x200000, 4096, &off), -1);
+  int got = rcclHostSegmentFdLookup(0x200000 + 4096, 8192, &off);
+  EXPECT_GE(got, 0);
+  EXPECT_EQ(off, 0u);
+  if (got >= 0) close(got);
+  got = rcclHostSegmentFdLookup(0x200000 + 4096 + 100, 50, &off);
+  EXPECT_GE(got, 0);
+  EXPECT_EQ(off, 100u);
+  if (got >= 0) close(got);
+  EXPECT_EQ(rcclHostSegmentFdLookup(0x200000 + 4096 - 16, 32, &off), -1);
+
+  int owned = fds[1];
+  symMemoryCloseHostOwnerFds(&mem);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(rcclHostSegmentFdLookup(0x200000 + 4096, 8192, &off), -1);
+  EXPECT_EQ(fcntl(owned, F_GETFD), -1);
+}
+
 #if defined(__HIP_PLATFORM_AMD__) && NCCL_CUMEM_HOST_GATE
 // ROCM-29810: HIP reports an imported host VMM handle as device, so one host owner
 // beside device peers is the owner's segment imported everywhere else; it maps.
@@ -1465,6 +1508,177 @@ TEST_F(SymMemoryMapLsaTeamTest, AllHostOwnersWithReuseParam_Succeeds) {
 
   EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
   EXPECT_EQ(barrier.calls, 1);
+}
+
+// This rank exported the host segment, so NIC registration can still export it.
+// The owner fd is only for the ranks that imported it.
+TEST_F(SymMemoryMapLsaTeamTest, HostOwner_DoesNotFetchFd) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = kLocHost;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = hipMemLocationTypeDevice;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+}
+
+// Default SYM_REUSE_SYSMEM_HANDLES is off, so a one-host-owner team does not
+// take the fd path. Device windows and the reuse-off elastic path stay put.
+TEST_F(SymMemoryMapLsaTeamTest, ReuseOff_DoesNotFetchOwnerFd) {
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+}
+
+// Fabric and other shareable handles are not POSIX fds. Nothing is published.
+TEST_F(SymMemoryMapLsaTeamTest, NonPosixHandle_DoesNotFetchOwnerFd) {
+  hipMemAllocationHandleType saved = ncclCuMemHandleType;
+  ncclCuMemHandleType = kMemHandleTypeNonPosix;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+  ncclCuMemHandleType = saved;
+}
+
+// The importer cannot re-export the host segment, so the map keeps the owner's
+// POSIX fd and publishes it at this rank's segment VA for RMA registration.
+TEST_F(SymMemoryMapLsaTeamTest, ImportedHostSegment_PublishesOwnerFd) {
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    if (fd) *fd = dup(pipefd[1]);
+    return ncclSuccess;
+  });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(barrier.calls, 1);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_GE(mem.hostOwnerFds[0], 0);
+
+  mem.primaryAddr = reinterpret_cast<void*>(0x200000);
+  symMemoryPublishHostOwnerFds(&mem);
+  uint64_t off = 1;
+  int got = rcclHostSegmentFdLookup(0x200000, mem.segmentSizes[0], &off);
+  EXPECT_GE(got, 0);
+  EXPECT_EQ(off, 0u);
+  if (got >= 0) close(got);
+
+  int owned = mem.hostOwnerFds[0];
+  symMemoryCloseHostOwnerFds(&mem);
+  EXPECT_EQ(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(rcclHostSegmentFdLookup(0x200000, 4096, &off), -1);
+  EXPECT_EQ(fcntl(owned, F_GETFD), -1);
+}
+
+// A failed fetch must not leave a live fd, and the map must not continue.
+TEST_F(SymMemoryMapLsaTeamTest, OwnerFdFetchFails_FailsMapWithoutKeepingFd) {
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "SYM_REUSE_SYSMEM_HANDLES" ? 1 : deftVal;
+  });
+  ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
+                   [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
+                     if (prop) {
+                       *prop = hipMemAllocationProp{};
+                       prop->location.type = hipMemLocationTypeDevice;
+                     }
+                     return hipSuccess;
+                   });
+  ScopedHook gather(g_devrBootstrapIntraNodeAllGather,
+                    [](void*, int*, int, int, void* buf, int) {
+                      auto* msgs = static_cast<symLsaMessage*>(buf);
+                      msgs[1].type = kLocHost;
+                      msgs[1].segmentSize = 4096;
+                      return ncclSuccess;
+                    });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
+                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+  ScopedHook barrier(g_devrBootstrapIntraNodeBarrier, [](void*, int*, int, int, int) { return ncclSuccess; });
+
+  EXPECT_NE(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
+  EXPECT_EQ(proxy.calls, 1);
+  EXPECT_EQ(barrier.calls, 0);
+  ASSERT_NE(mem.hostOwnerFds, nullptr);
+  EXPECT_EQ(mem.hostOwnerFds[0], -1);
 }
 #endif
 
