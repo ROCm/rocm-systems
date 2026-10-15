@@ -10378,6 +10378,79 @@ TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
   }
 }
 
+TEST(ClusterDispatchTest, LaterPeerSetupRollbackCancelsOnlyThatWaveIncarnation) {
+  using namespace rocr::llvm::amdhsa;
+  for (uint32_t dispatch_threads : {1u, 2u}) {
+    SCOPED_TRACE(dispatch_threads);
+    VmFixture f("cdna5", 2, 1, 64, 128);
+    f.cp()->set_dispatch_threads(dispatch_threads);
+    constexpr uint32_t process_id = 77;
+    auto physical = std::make_shared<amdgpu::GpuMemoryPhysicalAccess>(*f.mem());
+    auto address_space = f.soc_ptr->gpu_vm().register_translated(
+        process_id, std::make_shared<amdgpu::IdentityAddressSpaceTranslator>(), physical);
+    ASSERT_TRUE(address_space);
+    auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+    auto *observed = lifecycle.get();
+    uint32_t invalidations = 0;
+    observed->on_launch = [&](amdgpu::Wavefront &wave) {
+      EXPECT_EQ(wave.debug_read_sgpr(0), 0x12345678u);
+      if (invalidations == 0) {
+        ASSERT_TRUE(f.soc_ptr->gpu_vm().invalidate(address_space));
+        ++invalidations;
+      }
+    };
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(lifecycle)));
+    f.soc_ptr->set_plugin_group(group);
+    const uint32_t end = 0xBFB00000u;
+    const uint64_t kernel = f.write_kernel(0x1000, &end, sizeof(end), 128, 256, 1);
+    uint16_t preload = 0;
+    AMDHSA_BITS_SET(preload, KERNARG_PRELOAD_SPEC_LENGTH, 1);
+    f.mem()->load_image(reinterpret_cast<const uint8_t *>(&preload), sizeof(preload),
+                        kernel + offsetof(kernel_descriptor_t, kernarg_preload));
+    f.mem()->write32(0x2000, 0x12345678u);
+    init_completion_signal(f.mem(), 0x3000);
+    test::AqlQueue queue(
+        f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR, test::AqlQueue::DEFAULT_RING_SIZE,
+        test::AqlQueue::DEFAULT_READ_PTR_ADDR, test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+        test::AqlQueue::DEFAULT_DOORBELL_ADDR, false, 1, address_space, process_id);
+    amdgpu::AmdExtKernelDispatchPacket packet{};
+    packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+    packet.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+    packet.setup = 1;
+    packet.workgroup_size_x = 32;
+    packet.workgroup_size_y = packet.workgroup_size_z = 1;
+    packet.cluster_count_x = packet.cluster_count_y = packet.cluster_count_z = 1;
+    packet.cluster_size_x = 2;
+    packet.cluster_size_y = packet.cluster_size_z = 1;
+    packet.group_segment_size = 64 * 1024;
+    packet.kernel_object = kernel;
+    packet.kernarg_address = reinterpret_cast<void *>(0x2000);
+    packet.completion_signal.handle = 0x3000;
+    queue.submit(packet);
+    ASSERT_TRUE(f.engine->step());
+    EXPECT_EQ(observed->cancellations, 1u);
+    // Retrying cleanup of the already-rolled-back workgroup cannot notify twice.
+    for (uint32_t repeat = 0; repeat < 2; ++repeat)
+      for (uint32_t cu = 0; cu < 2; ++cu)
+        f.cu(cu)->abort_workgroup(1, 0);
+    EXPECT_EQ(observed->cancellations, 1u);
+    for (uint32_t step = 0; step < 1000 && f.engine->step(); ++step) {
+    }
+    EXPECT_EQ(invalidations, 1u);
+    EXPECT_EQ(observed->launches, 3u);
+    EXPECT_EQ(observed->cancellations, 1u);
+    EXPECT_EQ(observed->halts, 2u);
+    EXPECT_EQ(observed->completed_workgroups, 2u);
+    EXPECT_EQ(observed->completed_dispatches, 1u);
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x3000), 0);
+    EXPECT_FALSE(f.cp()->queue_faulted_for_test(1, process_id));
+    EXPECT_TRUE(f.cu(0)->is_idle());
+    EXPECT_TRUE(f.cu(1)->is_idle());
+    EXPECT_TRUE(f.cp()->cluster_lds_targets(1, 0, 3).empty());
+  }
+}
+
 TEST(Pm4DispatchTest, CancellationFailsPendingSubmissionAndReleasesVmBinding) {
   KfdProcess process(7);
   VmFixture f;

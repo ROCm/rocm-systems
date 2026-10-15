@@ -1418,9 +1418,11 @@ void PerfsimPlugin::retire_wavefront(amdgpu::Wavefront &wf, bool cancelled) {
       impl_->reject(dispatch_id, cancelled
                                      ? "wavefront cancelled after an instruction failure"
                                      : "wavefront halted after an instruction execution failure");
-    if (cancelled)
+    // A committed setup rollback has no recorded instructions to discard.
+    // Retire its physical identity so a retry can observe the same logical wave.
+    if (cancelled && wave.saw_instruction)
       impl_->reject(dispatch_id, "wavefront cancelled before dispatch completion");
-    else if (!wave.saw_instruction || !wave.last_instruction_terminates)
+    else if (!cancelled && (!wave.saw_instruction || !wave.last_instruction_terminates))
       impl_->reject(dispatch_id, "wavefront halted without a terminating instruction");
     if (dispatch.live_waves != 0)
       --dispatch.live_waves;
