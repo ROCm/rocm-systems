@@ -54,6 +54,7 @@ set(TEST_SOURCES_UNIT
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/device_type_c.c
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/device_type_table_test.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/driver_cuid_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/id_string_test.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/lookup_policy_test.cc
@@ -83,6 +84,7 @@ set(TEST_HEADERS
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/acpi_parser_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/concurrency_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/cuid_gpu_test.h
+    ${CMAKE_CURRENT_SOURCE_DIR}/unit/driver_cuid_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/gim_util_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/id_string_test.h
     ${CMAKE_CURRENT_SOURCE_DIR}/unit/pci_util_test.h

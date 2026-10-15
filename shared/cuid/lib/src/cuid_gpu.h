@@ -79,6 +79,8 @@ class CuidGpu : public CuidDevice {
                                            const std::string& kfd_nodes,
                                            CuidPartitionParent& parent);
   amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
+  amdcuid_status_t driver_attribute_path(const std::string& attribute,
+                                         std::string& path) const override;
 
   // The partition node for the node a card points at
   // (/sys/class/drm/cardN/device: the PCI device for the first partition, an

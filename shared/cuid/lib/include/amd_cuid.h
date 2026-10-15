@@ -37,7 +37,11 @@ extern "C" {
 //! amdcuid_set_hash_key() and amdcuid_get_key_info() return
 //! AMDCUID_STATUS_UNSUPPORTED. AMDCUID_QUERY_SOURCE and amdcuid_source_t
 //! added. A CPU's UnitID is 0, and a NIC's is its PCI function number.
-#define AMDCUID_LIB_VERSION_MINOR 1
+//!
+//! 2.2.0: a GPU or partition is driver-published when amdgpu exposes
+//! cuid_unit_id, and its primary CUID is the driver's cuid_primary, read by
+//! root.
+#define AMDCUID_LIB_VERSION_MINOR 2
 
 //! Patch version should be updated for each bug fix or non-API change
 #define AMDCUID_LIB_VERSION_PATCH 0

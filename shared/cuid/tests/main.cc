@@ -7,6 +7,7 @@
 #include "unit/acpi_parser_test.h"
 #include "unit/concurrency_test.h"
 #include "unit/cuid_gpu_test.h"
+#include "unit/driver_cuid_test.h"
 #include "unit/gim_util_test.h"
 #include "unit/id_string_test.h"
 #include "unit/pci_util_test.h"
@@ -47,6 +48,11 @@ TEST(cuidtstUnprivileged, IdString) {
 
 TEST(cuidtstUnprivileged, Utilities) {
   TestUtilities tst;
+  RunGenericTest(&tst);
+}
+
+TEST(cuidtstUnprivileged, DriverCuid) {
+  TestDriverCuid tst;
   RunGenericTest(&tst);
 }
 
