@@ -14,22 +14,13 @@
 #include <string>
 
 #include "amd_smi/impl/amd_smi_rdma_port.h"
+#include "nic_check.h"
 
 namespace {
 
 using amd::smi::RdmaPortRef_t;
 using amd::smi::was_rdma_port_resolved;
-
-auto g_tests_run = int{0};
-auto g_tests_failed = int{0};
-
-auto check(const std::string& name, bool was_passed) -> void {
-  ++g_tests_run;
-  if (!was_passed) {
-    ++g_tests_failed;
-  }
-  std::cout << (was_passed ? "  PASS: " : "  FAIL: ") << name << "\n";
-}
+using nic_test::check;
 
 // The structs hold hundreds of KB of char arrays, so they live on the heap.
 struct Fixture_t {
@@ -57,7 +48,7 @@ struct Fixture_t {
     ++rdma->num_rdma_dev;
   }
 
-  auto resolve(uint32_t flat_index, RdmaPortRef_t* ref) const -> bool {
+  auto was_port_resolved(uint32_t flat_index, RdmaPortRef_t* ref) const -> bool {
     return was_rdma_port_resolved(*rdma, *ports, flat_index, ref);
   }
 };
@@ -79,9 +70,9 @@ auto test_one_device_one_port() -> void {
   fx.add_rdma_device("enP1p3s0f3", 1);
 
   auto ref = make_unset_ref();
-  check("single device: index 0 resolves", fx.resolve(0, &ref));
+  check("single device: index 0 resolves", fx.was_port_resolved(0, &ref));
   check("single device: index 0 is (0,0,0)", is_ref(ref, 0, 0, 0));
-  check("single device: index 1 is out of range", !fx.resolve(1, &ref));
+  check("single device: index 1 is out of range", !fx.was_port_resolved(1, &ref));
 }
 
 auto test_two_netdev_ports_each_with_a_device() -> void {
@@ -92,7 +83,7 @@ auto test_two_netdev_ports_each_with_a_device() -> void {
   fx.add_rdma_device("enP2p3s0f3", 1);
 
   auto ref = make_unset_ref();
-  check("two netdev ports: index 1 resolves", fx.resolve(1, &ref));
+  check("two netdev ports: index 1 resolves", fx.was_port_resolved(1, &ref));
   check("two netdev ports: index 1 is (1,0,0)", is_ref(ref, 1, 0, 0));
 }
 
@@ -103,7 +94,7 @@ auto test_two_devices_on_one_netdev_port() -> void {
   fx.add_rdma_device("enP1p3s0f3", 1);
 
   auto ref = make_unset_ref();
-  check("shared netdev port: index 1 resolves", fx.resolve(1, &ref));
+  check("shared netdev port: index 1 resolves", fx.was_port_resolved(1, &ref));
   check("shared netdev port: index 1 is (0,1,0)", is_ref(ref, 0, 1, 0));
 }
 
@@ -113,9 +104,9 @@ auto test_one_device_with_two_rdma_ports() -> void {
   fx.add_rdma_device("enP1p3s0f3", 2);
 
   auto ref = make_unset_ref();
-  check("two RDMA ports: index 1 resolves", fx.resolve(1, &ref));
+  check("two RDMA ports: index 1 resolves", fx.was_port_resolved(1, &ref));
   check("two RDMA ports: index 1 is (0,0,1)", is_ref(ref, 0, 0, 1));
-  check("two RDMA ports: index 2 is out of range", !fx.resolve(2, &ref));
+  check("two RDMA ports: index 2 is out of range", !fx.was_port_resolved(2, &ref));
 }
 
 auto test_index_counts_ports_across_devices() -> void {
@@ -126,7 +117,7 @@ auto test_index_counts_ports_across_devices() -> void {
   fx.add_rdma_device("enP2p3s0f3", 1);
 
   auto ref = make_unset_ref();
-  check("ports across devices: index 2 resolves", fx.resolve(2, &ref));
+  check("ports across devices: index 2 resolves", fx.was_port_resolved(2, &ref));
   check("ports across devices: index 2 is (1,0,0)", is_ref(ref, 1, 0, 0));
 }
 
@@ -136,11 +127,11 @@ auto test_unresolvable_inputs() -> void {
   fx.add_rdma_device("unknown0", 1);
 
   auto ref = make_unset_ref();
-  check("a device whose netdev is not a NIC port does not resolve", !fx.resolve(0, &ref));
+  check("a device whose netdev is not a NIC port does not resolve", !fx.was_port_resolved(0, &ref));
 
   auto empty = Fixture_t{};
-  check("no RDMA device does not resolve", !empty.resolve(0, &ref));
-  check("a null result pointer does not resolve", !fx.resolve(0, nullptr));
+  check("no RDMA device does not resolve", !empty.was_port_resolved(0, &ref));
+  check("a null result pointer does not resolve", !fx.was_port_resolved(0, nullptr));
 }
 
 }  // namespace
@@ -153,6 +144,5 @@ auto main() -> int {
   test_index_counts_ports_across_devices();
   test_unresolvable_inputs();
 
-  std::cout << "\n" << g_tests_run << " tests run, " << g_tests_failed << " failed\n";
-  return (g_tests_failed == 0) ? 0 : 1;
+  return nic_test::report();
 }

@@ -129,6 +129,33 @@ class TestInitNicOnlyGating(unittest.TestCase):
         # GPU present short-circuits the gate; the NIC probe is not needed.
         module._any_nic_present.assert_not_called()
 
+    def _init_raising(self, err_code):
+        module = _load_amdsmi_init(_make_amdsmi_stub())
+        self._patch_gates(module, gpu=True, hsmp=False, nic_present=True)
+        lib_exc = module.amdsmi_interface.AmdSmiLibraryException(err_code)
+        patcher = mock.patch.object(module.amdsmi_interface, "amdsmi_init", side_effect=lib_exc)
+        patcher.start()
+        self.addCleanup(patcher.stop)
+        return module
+
+    def test_library_not_init_exits_with_drivers_not_loaded(self):
+        module = self._init_raising(1)  # AMDSMI_STATUS_NOT_INIT in the stub
+        with self.assertRaises(SystemExit) as ctx:
+            module.amdsmi_cli_init()
+        self.assertEqual(ctx.exception.code, int(module.AmdSmiExitCode.DRIVERS_NOT_LOADED))
+
+    def test_library_driver_not_loaded_exits_with_drivers_not_loaded(self):
+        module = self._init_raising(2)  # AMDSMI_STATUS_DRIVER_NOT_LOADED in the stub
+        with self.assertRaises(SystemExit) as ctx:
+            module.amdsmi_cli_init()
+        self.assertEqual(ctx.exception.code, int(module.AmdSmiExitCode.DRIVERS_NOT_LOADED))
+
+    def test_other_library_failure_is_raised_not_translated(self):
+        module = self._init_raising(99)
+        with self.assertRaises(module.amdsmi_interface.AmdSmiLibraryException) as ctx:
+            module.amdsmi_cli_init()
+        self.assertEqual(ctx.exception.err_code, 99)
+
 
 class TestAnyNicPresentHelper(unittest.TestCase):
     """Exercises the real _any_nic_present detector (not mocked).

@@ -3,6 +3,9 @@
 
 #include "vendor_registry.h"
 
+#include <memory>
+#include <vector>
+
 #include "amd/ifoe_subsystem.h"
 #include "broadcom/broadcom_subsystem.h"
 #include "pensando/pensando_subsystem.h"

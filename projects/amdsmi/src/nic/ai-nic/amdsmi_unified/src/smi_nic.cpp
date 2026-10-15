@@ -9,14 +9,19 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <iomanip>
 #include <iterator>
+#include <map>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <stdexcept>
 #include <string>
+#include <system_error>
+#include <utility>
 #include <vector>
 
 #include "smi_nic_log.h"
@@ -278,7 +283,7 @@ const std::vector<SmiInfiniBand>& SmiNicPort::infiniband() const { return infini
 
 uint8_t SmiNicPort::infiniband_num() const { return static_cast<uint8_t>(infiniband_.size()); }
 
-void SmiNicPort::collect_vendor_statistics() const {
+int SmiNicPort::collect_vendor_statistics() const {
   // Built fresh and assigned wholesale (not merged) so a counter the driver
   // stops reporting disappears instead of keeping its last value forever,
   // and so FEC counters (previously merged via emplace into a map that
@@ -318,6 +323,7 @@ void SmiNicPort::collect_vendor_statistics() const {
   }
 
   vendor_stats_map_ = std::move(merged);
+  return (result.success || (result.error_code == ENOTSUP)) ? 0 : result.error_code;
 }
 
 std::map<std::string, uint64_t> SmiNicPort::get_vendor_stats_map(StatTier_t scope) const {
@@ -339,6 +345,8 @@ std::map<std::string, uint64_t> SmiNicPort::get_vendor_stats_map(StatTier_t scop
 }
 
 void SmiNicPort::collect_standard_statistics() const {
+  // Rebuilt on every call, so a counter the kernel stops exposing disappears.
+  standard_stats_map_.clear();
   std::string stats_path = sysfs_class_path_ + "/statistics";
 
   // Error codes throughout: this runs under a C API, where a throw means std::terminate, and

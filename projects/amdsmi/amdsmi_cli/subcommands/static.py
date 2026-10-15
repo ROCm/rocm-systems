@@ -1623,6 +1623,9 @@ class StaticCommands:
                 return False
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
+            if isinstance(args.nic, list) and not args.nic:
+                self.logger.print_no_ainics_found()
+                return True
             self._static_ainic(args, multiple_devices, nic)
             return True
 

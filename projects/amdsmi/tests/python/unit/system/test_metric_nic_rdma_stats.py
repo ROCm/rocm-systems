@@ -93,6 +93,7 @@ class TestMetricNicRdma(unittest.TestCase):
                 self.helpers.handle_ainics.return_value = (False, self.device_handles_ainics[0])
                 self.logger = mock.Mock()
                 self.logger.is_json_format.return_value = is_json
+                self.logger.is_csv_format.return_value = False
 
         interface.amdsmi_get_nic_telemetry = mock.Mock(return_value={})
         # Like the real function: RDMA_DEVICES is only in the detail view.

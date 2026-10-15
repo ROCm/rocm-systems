@@ -12,11 +12,11 @@ compiled from the real source and run against a fake NIC.
 import ast
 import types
 import unittest
-from pathlib import Path
 from typing import Any, Dict
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_INTERFACE_PATH = _REPO_ROOT / "py-interface" / "amdsmi_interface.py"
+from common.common import amdsmi_interface_path
+
+_INTERFACE_PATH = amdsmi_interface_path(__file__)
 _FUNCTION_NAME = "amdsmi_get_ainic_info_summary"
 _REPLACEMENT_CHAR = "\N{REPLACEMENT CHARACTER}"
 

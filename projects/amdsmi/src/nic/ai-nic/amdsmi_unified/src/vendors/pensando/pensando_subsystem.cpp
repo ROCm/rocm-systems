@@ -4,8 +4,14 @@
 #include "pensando_subsystem.h"
 
 #include <algorithm>
+#include <cstdint>
 #include <cstdio>
 #include <filesystem>
+#include <memory>
+#include <string>
+#include <system_error>
+#include <utility>
+#include <vector>
 
 #include "pensando_stats.h"
 #include "smi_nic_log.h"
@@ -43,11 +49,11 @@ bool SmiNicSubsystemPensando::is_driver_loaded(const std::string& bdf,
   switch (driver_type) {
     case DriverType::Main:
       return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/ionic", bdf,
-                                    /*match_canonical=*/false);
+                                    /*is_canonical_match=*/false);
     case DriverType::Rdma:
       return is_driver_bound_to_bdf(
           driver_sysfs_root_ + "/sys/bus/auxiliary/drivers/ionic_rdma.rdma", bdf,
-          /*match_canonical=*/true);
+          /*is_canonical_match=*/true);
     default:
       return false;
   }

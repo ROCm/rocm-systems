@@ -11,7 +11,9 @@
 #include <netlink/errno.h>
 
 #include <cerrno>
+#include <cstdint>
 #include <cstring>
+#include <string>
 #include <utility>
 
 namespace amd::nic::netlink {
@@ -23,10 +25,10 @@ struct QueryContext {
 };
 }  // namespace
 
-EthtoolNetlinkClient::EthtoolNetlinkClient() : client_(), family_id_(-1), initialized_(false) {}
+EthtoolNetlinkClient::EthtoolNetlinkClient() : client_(), family_id_(-1), is_initialized_(false) {}
 
 int EthtoolNetlinkClient::init() {
-  if (initialized_) {
+  if (is_initialized_) {
     return 0;
   }
 
@@ -41,7 +43,7 @@ int EthtoolNetlinkClient::init() {
   }
 
   family_id_ = family.value();
-  initialized_ = true;
+  is_initialized_ = true;
   return 0;
 }
 
@@ -125,7 +127,7 @@ transport::Result<transport::LinkSettings> EthtoolNetlinkClient::get_link_settin
     const std::string& iface) {
   transport::Result<transport::LinkSettings> result{false, {}, ENOTSUP};
 
-  if (!initialized_) {
+  if (!is_initialized_) {
     result.error_code = ENOTCONN;
     return result;
   }
@@ -177,9 +179,9 @@ static int pause_handler(struct nl_msg* msg, void* arg) {
     ctx->result->error_code = ENODATA;
     return NL_SKIP;
   }
-  pause.autoneg = NLAttributes::get_u8(tb[ETHTOOL_A_PAUSE_AUTONEG]) != 0;
-  pause.rx_pause = NLAttributes::get_u8(tb[ETHTOOL_A_PAUSE_RX]) != 0;
-  pause.tx_pause = NLAttributes::get_u8(tb[ETHTOOL_A_PAUSE_TX]) != 0;
+  pause.is_autoneg_enabled = NLAttributes::get_u8(tb[ETHTOOL_A_PAUSE_AUTONEG]) != 0;
+  pause.is_rx_pause_enabled = NLAttributes::get_u8(tb[ETHTOOL_A_PAUSE_RX]) != 0;
+  pause.is_tx_pause_enabled = NLAttributes::get_u8(tb[ETHTOOL_A_PAUSE_TX]) != 0;
 
   ctx->result->success = true;
   ctx->result->value = pause;
@@ -192,7 +194,7 @@ transport::Result<transport::PauseParams> EthtoolNetlinkClient::get_pause_params
     const std::string& iface) {
   transport::Result<transport::PauseParams> result{false, {}, ENOTSUP};
 
-  if (!initialized_) {
+  if (!is_initialized_) {
     result.error_code = ENOTCONN;
     return result;
   }
@@ -298,7 +300,7 @@ transport::Result<transport::FecStatistics_t> EthtoolNetlinkClient::get_fec_stat
     const std::string& iface) {
   transport::Result<transport::FecStatistics_t> result{false, {}, ENOTSUP};
 
-  if (!initialized_) {
+  if (!is_initialized_) {
     result.error_code = ENOTCONN;
     return result;
   }

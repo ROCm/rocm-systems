@@ -5,6 +5,8 @@
  * Netlink and auto-selecting transport backends.
  */
 
+#include <utility>
+
 #include "smi_nic_transport.h"
 
 #ifdef HAVE_LIBNL3
@@ -27,7 +29,7 @@ namespace {
  */
 class NetlinkBackend : public NicTransport {
  public:
-  NetlinkBackend() : initialized_(client_.init() == 0) {}
+  NetlinkBackend() : is_initialized_(client_.init() == 0) {}
 
   ~NetlinkBackend() override = default;
 
@@ -37,14 +39,14 @@ class NetlinkBackend : public NicTransport {
   NetlinkBackend& operator=(NetlinkBackend&&) = delete;
 
   Result<PauseParams> get_pause_params(const std::string& iface) override {
-    if (!initialized_) {
+    if (!is_initialized_) {
       return {false, {}, ENOTSUP};
     }
     return client_.get_pause_params(iface);
   }
 
   Result<LinkSettings> get_link_settings(const std::string& iface) override {
-    if (!initialized_) {
+    if (!is_initialized_) {
       return {false, {}, ENOTSUP};
     }
     return client_.get_link_settings(iface);
@@ -59,7 +61,7 @@ class NetlinkBackend : public NicTransport {
   }
 
   Result<FecStatistics_t> get_fec_statistics(const std::string& iface) override {
-    if (!initialized_) {
+    if (!is_initialized_) {
       return {false, {}, ENOTSUP};
     }
     return client_.get_fec_statistics(iface);
@@ -70,14 +72,14 @@ class NetlinkBackend : public NicTransport {
   }
 
   std::string backend_name() const override {
-    return initialized_ ? "netlink" : "netlink (unavailable)";
+    return is_initialized_ ? "netlink" : "netlink (unavailable)";
   }
 
-  bool is_available() const { return initialized_; }
+  bool is_available() const { return is_initialized_; }
 
  private:
   ::amd::nic::netlink::EthtoolNetlinkClient client_;
-  const bool initialized_;
+  const bool is_initialized_;
 };
 
 /**

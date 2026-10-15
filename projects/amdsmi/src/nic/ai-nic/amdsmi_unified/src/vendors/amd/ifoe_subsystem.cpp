@@ -3,7 +3,12 @@
 
 #include "ifoe_subsystem.h"
 
+#include <cstdint>
 #include <filesystem>
+#include <memory>
+#include <string>
+#include <system_error>
+#include <vector>
 
 namespace fs = std::filesystem;
 
@@ -36,7 +41,7 @@ bool SmiNicSubsystemIfoe::is_driver_loaded(const std::string& bdf, DriverType dr
     return false;
   }
   return is_driver_bound_to_bdf(driver_sysfs_root_ + "/sys/bus/pci/drivers/ifoe", bdf,
-                                /*match_canonical=*/false);
+                                /*is_canonical_match=*/false);
 }
 
 // PCI ids alone identify the endpoint: it exposes no netdev, so a net-class

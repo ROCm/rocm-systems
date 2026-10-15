@@ -10,6 +10,7 @@
 #include <set>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include "smi_nic_subsystem.h"
 #include "smi_sysfs.h"
@@ -78,7 +79,7 @@ bool SmiNicSystem::is_driver_loaded(const std::string& bdf, DriverType driver_ty
   return false;
 }
 
-void SmiNicSystem::discover_nics(bool ainic_only) {
+void SmiNicSystem::discover_nics(bool is_ainic_only) {
   std::error_code ec;
 
   if (!fs::exists(pci_path_, ec) || !fs::is_directory(pci_path_, ec)) {
@@ -90,7 +91,7 @@ void SmiNicSystem::discover_nics(bool ainic_only) {
     subsystem->discover(pci_path_, net_path_, transport_);
     const auto& subsys_nics = subsystem->get_nics();
     for (const auto& nic : subsys_nics) {
-      if (ainic_only && nic->product() != NicProduct::AINIC) {
+      if (is_ainic_only && (nic->product() != NicProduct::AINIC)) {
         continue;
       }
       nics_.push_back(nic.get());

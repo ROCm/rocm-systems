@@ -12,13 +12,18 @@
 
 #include <array>
 #include <cerrno>
+#include <cstdint>
 #include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <iostream>
 #include <memory>
+#include <optional>
 #include <string>
+#include <system_error>
+#include <utility>
+#include <variant>
 #include <vector>
 
 #ifdef HAVE_LIBNL3
@@ -28,6 +33,7 @@
 #include "netlink_generic.h"
 #include "smi_devlink_netlink.h"
 #endif
+#include "nic_check.h"
 #include "smi_ethtool_ioctl.h"
 #include "smi_nic.h"
 #include "smi_nic_log.h"
@@ -51,20 +57,7 @@ constexpr auto kMacLastByte = uint8_t{0xe0};
 // A generic-netlink family id the kernel never assigns.
 constexpr auto kBogusFamilyId = 0x7ffe;
 
-auto tests_run = 0;
-auto tests_failed = 0;
-
-auto check(const std::string& name, bool passed, const std::string& detail = "") -> void {
-  tests_run++;
-  if (!passed) {
-    tests_failed++;
-  }
-  std::cout << (passed ? "  PASS: " : "  FAIL: ") << name;
-  if (!detail.empty()) {
-    std::cout << " - " << detail;
-  }
-  std::cout << "\n";
-}
+using nic_test::check;
 
 auto g_captured = std::vector<std::string>{};
 
@@ -702,6 +695,5 @@ int main() {
   test_devlink_describe_device_info_masks_serials();
 #endif
 
-  std::cout << "\n" << tests_run << " tests run, " << tests_failed << " failed\n";
-  return (tests_failed == 0) ? 0 : 1;
+  return nic_test::report();
 }

@@ -45,9 +45,9 @@ struct Result {
 
 // Flow-control pause frame configuration. ethtool -a
 struct PauseParams {
-  bool autoneg;
-  bool rx_pause;
-  bool tx_pause;
+  bool is_autoneg_enabled;
+  bool is_rx_pause_enabled;
+  bool is_tx_pause_enabled;
 };
 
 // Physical-layer link configuration and status. ethtool <iface>

@@ -12,13 +12,15 @@ compiled from the real source and run against a fake NIC.
 import ast
 import types
 import unittest
-from pathlib import Path
 from typing import Any, Dict, List
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_INTERFACE_PATH = _REPO_ROOT / "py-interface" / "amdsmi_interface.py"
+from common.common import amdsmi_interface_path
+
+_INTERFACE_PATH = amdsmi_interface_path(__file__)
 _FUNCTION_NAME = "amdsmi_get_ainic_info_detail"
 _ARRAY_LEN = 4  # the library arrays are larger than the populated count
+_INVALID_UTF8 = b"ab\xffcd"
+_REPLACEMENT_CHAR = "\N{REPLACEMENT CHARACTER}"
 
 
 def _load_detail() -> Any:
@@ -113,3 +115,34 @@ class TestNicInfoDetailRdma(unittest.TestCase):
         detail = _load_detail()(_nic(1, [_rdma_dev(b"ionic_0", 2)]))
         device = detail["RDMA_DEVICES"]["RDMA_DEVICE_0"]
         self.assertEqual([key for key in device if key.startswith("PORT_")], ["PORT_0", "PORT_1"])
+
+
+def _poison(node: Any) -> None:
+    """Replace every bytes field under ``node`` with text that is not valid UTF-8."""
+    for name, value in vars(node).items():
+        if isinstance(value, bytes):
+            setattr(node, name, _INVALID_UTF8)
+        elif isinstance(value, types.SimpleNamespace):
+            _poison(value)
+        elif isinstance(value, list):
+            for item in value:
+                _poison(item)
+
+
+class TestNicInfoDetailText(unittest.TestCase):
+    """A device string with a stray byte must not abort the whole ``static --nic`` output."""
+
+    def test_non_utf8_text_is_replaced_in_every_field(self) -> None:
+        nic = _nic(1, [_rdma_dev(b"ionic_0", 1)])
+        _poison(nic)
+        detail = _load_detail()(nic)
+        port = detail["PORTS"]["PORT_0"]
+        device = detail["RDMA_DEVICES"]["RDMA_DEVICE_0"]
+        for text in (
+            detail["ASIC"]["SERIAL_NUMBER"],
+            detail["DRIVER"]["NAME"],
+            port["NETDEV"],
+            device["FW_VER"],
+            device["PORT_0"]["STATE"],
+        ):
+            self.assertIn(_REPLACEMENT_CHAR, text)

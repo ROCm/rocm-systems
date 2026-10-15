@@ -13,6 +13,7 @@
 
 #include <array>
 #include <cstddef>
+#include <cstdint>
 #include <cstring>
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"

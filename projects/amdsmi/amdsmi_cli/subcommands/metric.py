@@ -17,6 +17,22 @@ from amdsmi.amdsmi_interface import AMDSMI_MAX_RAIL_INDEX
 _SECTION_KEYS_BY_METRIC_ARG = {"overdrive": ("overdrive", "mem_overdrive")}
 
 
+def _flatten_with_prefix(node: dict, prefix: str) -> dict:
+    """Flatten nested dicts into one level, joining the keys with ``_`` under ``prefix``.
+
+    The CSV logger flattens nested dicts without a parent prefix, so counters that share a name
+    across ports overwrite each other. A full key path keeps them apart.
+    """
+    flat = {}
+    for key, value in node.items():
+        name = f"{prefix}{key}"
+        if isinstance(value, dict):
+            flat.update(_flatten_with_prefix(value, f"{name}_"))
+        else:
+            flat[name] = value
+    return flat
+
+
 class MetricCommands:
     def metric_gpu(
         self,
@@ -3473,7 +3489,9 @@ class MetricCommands:
                     "STATISTICS": standard_stats,
                 }
 
-            if ports_output:
+            if ports_output and self.logger.is_csv_format():
+                values.update(_flatten_with_prefix(ports_output, ""))
+            elif ports_output:
                 values["PORTS"] = ports_output
             elif not self.logger.is_json_format():
                 values["PORTS"] = "No ports found for this NIC"
@@ -3483,7 +3501,9 @@ class MetricCommands:
         requested_rdma = getattr(args, "rdma", None)
         if requested_rdma is not None:
             rdma_ports = self._nic_rdma_ports(args.nic, requested_rdma, nic_id)
-            if rdma_ports:
+            if rdma_ports and self.logger.is_csv_format():
+                values.update(_flatten_with_prefix(rdma_ports, "RDMA_"))
+            elif rdma_ports:
                 values["RDMA_PORTS"] = rdma_ports
             elif not self.logger.is_json_format():
                 values["RDMA_PORTS"] = "No RDMA ports found for this NIC"
@@ -3649,9 +3669,12 @@ class MetricCommands:
         if core:
             args.core = core
 
-        if self.helpers.is_ainic_initialized() and getattr(args, "nic", None):
+        if self.helpers.is_ainic_initialized() and getattr(args, "nic", None) is not None:
             self.logger.output = {}
             self.logger.clear_multiple_devices_output()
+            if isinstance(args.nic, list) and not args.nic:
+                self.logger.print_no_ainics_found()
+                return
             self.metric_nic(args, multiple_devices)
             return
 

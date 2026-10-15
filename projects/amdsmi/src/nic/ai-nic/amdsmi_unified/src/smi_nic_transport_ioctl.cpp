@@ -29,6 +29,7 @@
 #include <cstdlib>
 #include <cstring>
 #include <memory>
+#include <string>
 #include <vector>
 
 #include "smi_ethtool_ioctl.h"
@@ -98,8 +99,8 @@ Result<VendorStatistics> read_driver_statistics(const DriverStatsIoctls_t& ioctl
      */
     const size_t capacity = static_cast<size_t>(stats_num) + kStatsHeadroom;
     auto strings =
-        make_zeroed<ethtool_gstrings>(sizeof(ethtool_gstrings) + capacity * ETH_GSTRING_LEN);
-    auto stats = make_zeroed<ethtool_stats>(sizeof(ethtool_stats) + capacity * sizeof(uint64_t));
+        make_zeroed<ethtool_gstrings>(sizeof(ethtool_gstrings) + (capacity * ETH_GSTRING_LEN));
+    auto stats = make_zeroed<ethtool_stats>(sizeof(ethtool_stats) + (capacity * sizeof(uint64_t)));
     if (!strings || !stats) {
       return {false, {}, ENOMEM};
     }
@@ -294,7 +295,7 @@ std::shared_ptr<NicTransport> create_auto_backend();
 }  // namespace internal
 #endif
 
-std::shared_ptr<NicTransport> create_transport(NicBackend_t backend) {
+std::shared_ptr<NicTransport> create_transport([[maybe_unused]] NicBackend_t backend) {
 #ifdef HAVE_LIBNL3
   if (backend == NicBackend_t::Netlink) {
     return with_debug_logging(internal::create_netlink_backend());

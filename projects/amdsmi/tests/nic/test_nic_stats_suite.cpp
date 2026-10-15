@@ -17,33 +17,24 @@
 #include <iostream>
 #include <map>
 #include <memory>
+#include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
+#include "nic_check.h"
 #include "smi_nic.h"
 #include "smi_nic_interface.h"
 #include "smi_nic_log.h"
 #include "smi_nic_stats.h"
+#include "smi_nic_testing.h"
 #include "smi_nic_transport.h"
 #include "vendors/broadcom/broadcom_stats.h"
 #include "vendors/pensando/pensando_stats.h"
 
 namespace tp = amd::smi::nic::transport;
 
-static int tests_run = 0;
-static int tests_failed = 0;
-
-static void check(const std::string& name, bool passed, const std::string& detail = "") {
-  tests_run++;
-  if (!passed) {
-    tests_failed++;
-  }
-  std::cout << (passed ? "  PASS: " : "  FAIL: ") << name;
-  if (!detail.empty()) {
-    std::cout << " - " << detail;
-  }
-  std::cout << "\n";
-}
+using nic_test::check;
 
 // Fake transport: returns whatever the test pre-loads, no I/O.
 class FakeTransport : public tp::NicTransport {
@@ -387,6 +378,361 @@ static void test_real_tables_fit_within_cap() {
         kBroadcomStatTable.size() <= SMI_NIC_MAX_STATISTICS);
 }
 
+// Interface layer: the smi_get_nic_*_statistics_* entry points, reached through a prepared system.
+// One NIC at 0000:03:00.0 with one port whose driver counts as loaded; no hardware.
+constexpr auto kFakeNicBdf = uint64_t{0x300};
+
+class FakeSubsystem : public SmiNicSubsystem {
+ public:
+  void discover(const std::string&, const std::string&,
+                std::shared_ptr<tp::NicTransport>) override {}
+  NicVendor vendor() const override { return NicVendor::AMD; }
+  bool is_driver_loaded(const std::string& bdf, DriverType) const override {
+    return (m_unbound.count(bdf) == 0);
+  }
+  const std::vector<std::unique_ptr<SmiNic>>& get_nics() const override { return nics_; }
+  void add(std::unique_ptr<SmiNic> nic) { nics_.push_back(std::move(nic)); }
+  void unbind(const std::string& bdf) { m_unbound.insert(bdf); }
+
+ private:
+  std::vector<std::unique_ptr<SmiNic>> nics_;
+  std::set<std::string> m_unbound;
+};
+
+struct InterfaceFixture_t {
+  InterfaceFixture_t(const std::string& class_path, std::shared_ptr<FakeTransport> transport,
+                     const StatTable_t* table, const SmiInfiniBand* infiniband = nullptr) {
+    auto nic = std::make_unique<SmiNic>("faketh0", "0000:03:00.0");
+    auto port = SmiNicPort("faketh0", "0000:03:00.1", class_path, "/tmp", transport, table);
+    if (infiniband != nullptr) {
+      port.add_infiniband(*infiniband);
+    }
+    nic->add_nic_port(std::move(port));
+    auto subsystem = std::make_unique<FakeSubsystem>();
+    subsystem->add(std::move(nic));
+    auto system = std::make_unique<SmiNicSystem>("/tmp", "/tmp");
+    system->register_subsystem(std::move(subsystem));
+    system->discover_nics();
+    smi_nic_create_context_for_testing(&ctx, std::move(system));
+  }
+  ~InterfaceFixture_t() {
+    if (ctx != nullptr) {
+      smi_nic_destroy_context(ctx);
+    }
+  }
+  InterfaceFixture_t(const InterfaceFixture_t&) = delete;
+  InterfaceFixture_t& operator=(const InterfaceFixture_t&) = delete;
+
+  smi_nic_ctx_t ctx = nullptr;
+};
+
+static void test_interface_reads_vendor_statistics_from_a_prepared_system() {
+  auto transport = std::make_shared<FakeTransport>();
+  transport->stats = {true, {{"tx_packets", "rx_packets"}, {5, 6}}, 0};
+  InterfaceFixture_t fixture("/tmp", transport, &kTestTable);
+
+  auto count = uint32_t{0};
+  check("vendor count succeeds",
+        smi_get_nic_vendor_statistics_count(fixture.ctx, kFakeNicBdf, 0, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                            &count) == SMI_NIC_STATUS_SUCCESS);
+  check("vendor count sees both counters", count == 2, std::to_string(count));
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  check("vendor list succeeds",
+        smi_get_nic_vendor_statistics_list(fixture.ctx, kFakeNicBdf, 0, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                           info.get()) == SMI_NIC_STATUS_SUCCESS);
+  check("vendor list carries both counters", info->count == 2, std::to_string(info->count));
+}
+
+static void test_interface_reports_a_failed_vendor_read_as_an_error() {
+  auto transport = std::make_shared<FakeTransport>();
+  transport->stats = {false, {}, EPERM};
+  InterfaceFixture_t fixture("/tmp", transport, &kTestTable);
+
+  auto count = uint32_t{0};
+  check("a failed vendor read is an error, not zero counters",
+        smi_get_nic_vendor_statistics_count(fixture.ctx, kFakeNicBdf, 0, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                            &count) == SMI_NIC_STATUS_ERROR);
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  check("a failed vendor read is an error from the list too",
+        smi_get_nic_vendor_statistics_list(fixture.ctx, kFakeNicBdf, 0, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                           info.get()) == SMI_NIC_STATUS_ERROR);
+}
+
+// A driver without ethtool statistics has none to report; that is not a failure.
+static void test_interface_treats_an_unsupported_vendor_read_as_no_counters() {
+  auto transport = std::make_shared<FakeTransport>();
+  transport->stats = {false, {}, ENOTSUP};
+  InterfaceFixture_t fixture("/tmp", transport, &kTestTable);
+
+  auto count = uint32_t{99};
+  check("an unsupported vendor read still succeeds",
+        smi_get_nic_vendor_statistics_count(fixture.ctx, kFakeNicBdf, 0, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                            &count) == SMI_NIC_STATUS_SUCCESS);
+  check("an unsupported vendor read reports zero counters", count == 0, std::to_string(count));
+}
+
+// A caller sizes its array from the count, so the count cannot promise more than the list returns.
+static void test_interface_count_matches_the_cap_on_the_list() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-stat-cap-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  fs::create_directories(root / "statistics");
+  const auto num_counters = uint32_t{SMI_NIC_MAX_STATISTICS} + 44;
+  for (auto i = uint32_t{0}; i < num_counters; ++i) {
+    write_counter(root / "statistics", "counter_" + std::to_string(i), i);
+  }
+  InterfaceFixture_t fixture(root.string(), std::make_shared<FakeTransport>(), &kTestTable);
+
+  auto count = uint32_t{0};
+  check("port count succeeds", smi_get_nic_port_statistics_count(fixture.ctx, kFakeNicBdf, 0,
+                                                                 &count) == SMI_NIC_STATUS_SUCCESS);
+  check("port count stops at the cap", count == SMI_NIC_MAX_STATISTICS, std::to_string(count));
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  check("port list succeeds",
+        smi_get_nic_port_statistics_list(fixture.ctx, kFakeNicBdf, 0, info.get()) ==
+            SMI_NIC_STATUS_SUCCESS);
+  check("port list stops at the cap too", info->count == SMI_NIC_MAX_STATISTICS,
+        std::to_string(info->count));
+  fs::remove_all(root);
+}
+
+static void test_interface_rdma_count_matches_the_cap_on_the_list() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-rdma-cap-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  fs::create_directories(root / "hw_counters");
+  const auto num_counters = uint32_t{SMI_NIC_MAX_STATISTICS} + 44;
+  for (auto i = uint32_t{0}; i < num_counters; ++i) {
+    write_counter(root / "hw_counters", "hw_" + std::to_string(i), i);
+  }
+  std::string netdev = "faketh0";
+  std::string name = "1";
+  std::string ib_name = "fakerdma0";
+  std::string ib_path = root.string();
+  SmiInfiniBand infiniband(ib_name, ib_path);
+  infiniband.add_port(SmiInfiniBandPort(netdev, name, ib_path));
+  InterfaceFixture_t fixture("/tmp", std::make_shared<FakeTransport>(), &kTestTable, &infiniband);
+
+  auto count = uint32_t{0};
+  check("rdma count succeeds",
+        smi_get_nic_rdma_port_statistics_count(fixture.ctx, kFakeNicBdf, 0, 0, 0, &count) ==
+            SMI_NIC_STATUS_SUCCESS);
+  check("rdma count stops at the cap", count == SMI_NIC_MAX_STATISTICS, std::to_string(count));
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  check("rdma list succeeds",
+        smi_get_nic_rdma_port_statistics_list(fixture.ctx, kFakeNicBdf, 0, 0, 0, info.get()) ==
+            SMI_NIC_STATUS_SUCCESS);
+  check("rdma list stops at the cap too", info->count == SMI_NIC_MAX_STATISTICS,
+        std::to_string(info->count));
+  fs::remove_all(root);
+}
+
+// An empty set reads the same from the count and the list, so a caller that probes with the count
+// and then asks for the list is not surprised by a different status.
+static void test_interface_vendor_list_of_nothing_succeeds_with_zero() {
+  auto transport = std::make_shared<FakeTransport>();
+  transport->stats = {true, {}, 0};
+  InterfaceFixture_t fixture("/tmp", transport, &kTestTable);
+
+  auto count = uint32_t{99};
+  check("an empty vendor count succeeds",
+        smi_get_nic_vendor_statistics_count(fixture.ctx, kFakeNicBdf, 0, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                            &count) == SMI_NIC_STATUS_SUCCESS);
+  check("an empty vendor count is zero", count == 0, std::to_string(count));
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  info->count = 99;
+  check("an empty vendor list succeeds like the count",
+        smi_get_nic_vendor_statistics_list(fixture.ctx, kFakeNicBdf, 0, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                           info.get()) == SMI_NIC_STATUS_SUCCESS);
+  check("an empty vendor list is zero", info->count == 0, std::to_string(info->count));
+}
+
+static void test_interface_port_list_of_nothing_succeeds_with_zero() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-std-empty-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  fs::create_directories(root / "statistics");
+  InterfaceFixture_t fixture(root.string(), std::make_shared<FakeTransport>(), &kTestTable);
+
+  auto count = uint32_t{99};
+  check("an empty port count succeeds",
+        smi_get_nic_port_statistics_count(fixture.ctx, kFakeNicBdf, 0, &count) ==
+            SMI_NIC_STATUS_SUCCESS);
+  check("an empty port count is zero", count == 0, std::to_string(count));
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  info->count = 99;
+  check("an empty port list succeeds like the count",
+        smi_get_nic_port_statistics_list(fixture.ctx, kFakeNicBdf, 0, info.get()) ==
+            SMI_NIC_STATUS_SUCCESS);
+  check("an empty port list is zero", info->count == 0, std::to_string(info->count));
+  fs::remove_all(root);
+}
+
+static void test_interface_rdma_list_of_nothing_succeeds_with_zero() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-rdma-empty-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  fs::create_directories(root / "hw_counters");
+  std::string netdev = "faketh0";
+  std::string name = "1";
+  std::string ib_name = "fakerdma0";
+  std::string ib_path = root.string();
+  SmiInfiniBand infiniband(ib_name, ib_path);
+  infiniband.add_port(SmiInfiniBandPort(netdev, name, ib_path));
+  InterfaceFixture_t fixture("/tmp", std::make_shared<FakeTransport>(), &kTestTable, &infiniband);
+
+  auto count = uint32_t{99};
+  check("an empty rdma count succeeds",
+        smi_get_nic_rdma_port_statistics_count(fixture.ctx, kFakeNicBdf, 0, 0, 0, &count) ==
+            SMI_NIC_STATUS_SUCCESS);
+  check("an empty rdma count is zero", count == 0, std::to_string(count));
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  info->count = 99;
+  check("an empty rdma list succeeds like the count",
+        smi_get_nic_rdma_port_statistics_list(fixture.ctx, kFakeNicBdf, 0, 0, 0, info.get()) ==
+            SMI_NIC_STATUS_SUCCESS);
+  check("an empty rdma list is zero", info->count == 0, std::to_string(info->count));
+  fs::remove_all(root);
+}
+
+// The count and the list answer an index past the last port the same way.
+static void test_interface_out_of_range_index_reads_the_same_from_count_and_list() {
+  auto transport = std::make_shared<FakeTransport>();
+  InterfaceFixture_t fixture("/tmp", transport, &kTestTable);
+  const auto kPastLastPort = uint32_t{7};
+
+  auto count = uint32_t{0};
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  check("a port count past the last port is not found",
+        smi_get_nic_port_statistics_count(fixture.ctx, kFakeNicBdf, kPastLastPort, &count) ==
+            SMI_NIC_STATUS_NOT_FOUND);
+  check("a port list past the last port is not found",
+        smi_get_nic_port_statistics_list(fixture.ctx, kFakeNicBdf, kPastLastPort, info.get()) ==
+            SMI_NIC_STATUS_NOT_FOUND);
+
+  std::string netdev = "faketh0";
+  std::string name = "1";
+  std::string ib_name = "fakerdma0";
+  std::string ib_path = "/tmp";
+  SmiInfiniBand infiniband(ib_name, ib_path);
+  infiniband.add_port(SmiInfiniBandPort(netdev, name, ib_path));
+  InterfaceFixture_t rdma_fixture("/tmp", transport, &kTestTable, &infiniband);
+  check("an rdma count past the last rdma port is not found",
+        smi_get_nic_rdma_port_statistics_count(rdma_fixture.ctx, kFakeNicBdf, 0, 0, kPastLastPort,
+                                               &count) == SMI_NIC_STATUS_NOT_FOUND);
+  check("an rdma list past the last rdma port is not found",
+        smi_get_nic_rdma_port_statistics_list(rdma_fixture.ctx, kFakeNicBdf, 0, 0, kPastLastPort,
+                                              info.get()) == SMI_NIC_STATUS_NOT_FOUND);
+}
+
+// A counter the kernel stops exposing must not linger at its last value.
+static void test_standard_statistics_drop_a_counter_that_disappears() {
+  namespace fs = std::filesystem;
+  const fs::path root =
+      fs::temp_directory_path() / ("amdsmi-std-gone-" + std::to_string(::getpid()));
+  fs::remove_all(root);
+  fs::create_directories(root / "statistics");
+  write_counter(root / "statistics", "rx_bytes", 7);
+  write_counter(root / "statistics", "tx_bytes", 9);
+  SmiNicPort port("faketh0", "0000:00:00.0", root.string(), root.string());
+
+  port.collect_standard_statistics();
+  check("both counters are read at first", port.get_standard_stats_map().size() == 2,
+        std::to_string(port.get_standard_stats_map().size()));
+
+  fs::remove(root / "statistics" / "tx_bytes");
+  port.collect_standard_statistics();
+  check("a counter the kernel stops exposing disappears",
+        port.get_standard_stats_map().count("tx_bytes") == 0);
+  check("the counter that remains is still read",
+        port.get_standard_stats_map().count("rx_bytes") == 1);
+  fs::remove_all(root);
+}
+
+// Two ports on one NIC: ethA (0000:03:00.1) has no driver bound, ethB (0000:03:00.2) is healthy.
+struct UnboundPortFixture_t {
+  UnboundPortFixture_t() {
+    auto transport_a = std::make_shared<FakeTransport>();
+    transport_a->stats = {true, {{"tx_packets"}, {111}}, 0};
+    auto transport_b = std::make_shared<FakeTransport>();
+    transport_b->stats = {true, {{"tx_packets"}, {222}}, 0};
+
+    auto nic = std::make_unique<SmiNic>("ethA", "0000:03:00.0");
+    nic->add_nic_port(SmiNicPort("ethA", "0000:03:00.1", "/tmp", "/tmp", transport_a, &kTestTable));
+    nic->add_nic_port(SmiNicPort("ethB", "0000:03:00.2", "/tmp", "/tmp", transport_b, &kTestTable));
+    auto subsystem = std::make_unique<FakeSubsystem>();
+    subsystem->unbind("0000:03:00.1");
+    subsystem->add(std::move(nic));
+    auto system = std::make_unique<SmiNicSystem>("/tmp", "/tmp");
+    system->register_subsystem(std::move(subsystem));
+    system->discover_nics();
+    smi_nic_create_context_for_testing(&ctx, std::move(system));
+  }
+  ~UnboundPortFixture_t() {
+    if (ctx != nullptr) {
+      smi_nic_destroy_context(ctx);
+    }
+  }
+  UnboundPortFixture_t(const UnboundPortFixture_t&) = delete;
+  UnboundPortFixture_t& operator=(const UnboundPortFixture_t&) = delete;
+
+  smi_nic_ctx_t ctx = nullptr;
+};
+
+static void test_interface_port_info_index_names_the_port_that_statistics_read() {
+  UnboundPortFixture_t fixture;
+
+  auto info = std::make_unique<smi_nic_port_info_t>();
+  check("port info succeeds with one port unbound",
+        smi_get_nic_port_info(fixture.ctx, kFakeNicBdf, info.get()) == SMI_NIC_STATUS_SUCCESS);
+  check("port info keeps the unbound port in its slot", info->num_ports == 2);
+  check("info index 0 is ethA", std::string(info->ports[0].netdev) == "ethA");
+  check("info index 1 is ethB", std::string(info->ports[1].netdev) == "ethB");
+  check("an unbound port reports N/A link state", std::string(info->ports[0].link_state) == "N/A");
+
+  auto count = uint32_t{0};
+  check("statistics on the unbound index report the driver as not loaded",
+        smi_get_nic_vendor_statistics_count(fixture.ctx, kFakeNicBdf, 0, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                            &count) == SMI_NIC_STATUS_DRIVER_NOT_LOADED);
+
+  auto stats = std::make_unique<smi_nic_stat_info_t>();
+  check("statistics on index 1 succeed",
+        smi_get_nic_vendor_statistics_list(fixture.ctx, kFakeNicBdf, 1, SMI_NIC_STAT_SCOPE_DEFAULT,
+                                           stats.get()) == SMI_NIC_STATUS_SUCCESS);
+  check("statistics on index 1 are ethB's counters", stats->stats[0].value == 222);
+}
+
+static void test_interface_port_info_reports_driver_not_loaded_when_every_port_is_unbound() {
+  // The only port has no driver bound.
+  auto nic = std::make_unique<SmiNic>("ethA", "0000:03:00.0");
+  nic->add_nic_port(SmiNicPort("ethA", "0000:03:00.1", "/tmp", "/tmp",
+                               std::make_shared<FakeTransport>(), &kTestTable));
+  auto subsystem = std::make_unique<FakeSubsystem>();
+  subsystem->unbind("0000:03:00.1");
+  subsystem->add(std::move(nic));
+  auto system = std::make_unique<SmiNicSystem>("/tmp", "/tmp");
+  system->register_subsystem(std::move(subsystem));
+  system->discover_nics();
+  auto ctx = smi_nic_ctx_t{nullptr};
+  smi_nic_create_context_for_testing(&ctx, std::move(system));
+
+  auto info = std::make_unique<smi_nic_port_info_t>();
+  check("port info reports DRIVER_NOT_LOADED when no port has a driver",
+        smi_get_nic_port_info(ctx, kFakeNicBdf, info.get()) == SMI_NIC_STATUS_DRIVER_NOT_LOADED);
+  smi_nic_destroy_context(ctx);
+}
+
 int main() {
   test_default_scope_excludes_extended();
   test_extended_scope_is_superset();
@@ -402,7 +748,18 @@ int main() {
   test_no_table_yields_empty_map();
   test_large_table_not_truncated_by_mechanism();
   test_real_tables_fit_within_cap();
+  test_interface_reads_vendor_statistics_from_a_prepared_system();
+  test_interface_reports_a_failed_vendor_read_as_an_error();
+  test_interface_treats_an_unsupported_vendor_read_as_no_counters();
+  test_interface_count_matches_the_cap_on_the_list();
+  test_interface_rdma_count_matches_the_cap_on_the_list();
+  test_interface_vendor_list_of_nothing_succeeds_with_zero();
+  test_interface_port_list_of_nothing_succeeds_with_zero();
+  test_interface_rdma_list_of_nothing_succeeds_with_zero();
+  test_interface_out_of_range_index_reads_the_same_from_count_and_list();
+  test_standard_statistics_drop_a_counter_that_disappears();
+  test_interface_port_info_index_names_the_port_that_statistics_read();
+  test_interface_port_info_reports_driver_not_loaded_when_every_port_is_unbound();
 
-  std::cout << "\n" << tests_run << " tests run, " << tests_failed << " failed\n";
-  return tests_failed == 0 ? 0 : 1;
+  return nic_test::report();
 }

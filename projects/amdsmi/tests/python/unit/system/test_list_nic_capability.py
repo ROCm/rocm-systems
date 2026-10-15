@@ -23,12 +23,11 @@ import unittest
 from typing import List
 from unittest import mock
 
-from common.common import amdsmi_path, cli_search_order, find_cli_dir
+from common.common import amdsmi_interface_path, amdsmi_path, cli_search_order, find_cli_dir
 
-_REPO_ROOT = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", "..", ".."))
 _CLI_DIR = find_cli_dir(*cli_search_order(os.path.dirname(os.path.abspath(__file__))))
 _MODULE_PATH = os.path.join(_CLI_DIR, "subcommands", "list_devices.py") if _CLI_DIR else None
-_INTERFACE_PATH = os.path.join(_REPO_ROOT, "py-interface", "amdsmi_interface.py")
+_INTERFACE_PATH = amdsmi_interface_path(__file__)
 
 if not _MODULE_PATH or not os.path.isfile(_MODULE_PATH):
     raise unittest.SkipTest(

@@ -13,11 +13,11 @@ import ctypes
 import types
 import unittest
 from enum import IntEnum
-from pathlib import Path
 from typing import Dict, List
 
-_REPO_ROOT = Path(__file__).resolve().parents[4]
-_INTERFACE_PATH = _REPO_ROOT / "py-interface" / "amdsmi_interface.py"
+from common.common import amdsmi_interface_path
+
+_INTERFACE_PATH = amdsmi_interface_path(__file__)
 
 _NIC_TYPE_UNKNOWN = 0
 _NIC_TYPE_AINIC = 1

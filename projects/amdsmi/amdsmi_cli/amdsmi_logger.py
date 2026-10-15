@@ -630,6 +630,15 @@ class AMDSMILogger:
 
             self.output = {}
 
+    def print_no_ainics_found(self):
+        """Report an explicit --nic that matched no NICs, in the selected format."""
+        self.output = {}
+        self.clear_multiple_devices_output()
+        if self.is_human_readable_format():
+            print("No AI NICs found")
+        else:
+            self.print_output(emit_empty=True)
+
     def print_output(
         self,
         multiple_device_enabled=False,

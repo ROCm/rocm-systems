@@ -7,6 +7,7 @@
 #include <algorithm>
 #include <cstdint>
 #include <cstdio>
+#include <memory>
 
 #include "amd_smi/amdsmi.h"
 
@@ -49,6 +50,32 @@ inline auto copy_nic_stats(const smi_nic_stat_info_t& info, uint32_t* num_stats,
   const auto is_truncated = (info.count > *num_stats);
   *num_stats = info.count;
   return is_truncated ? AMDSMI_STATUS_INSUFFICIENT_SIZE : AMDSMI_STATUS_SUCCESS;
+}
+
+/**
+ * The two-call pattern behind the statistics getters. With no array the count answers; with an
+ * array only the list is read, so the device is queried once and not twice. Both callables return
+ * the amdsmi status.
+ */
+template <typename CountFn, typename ListFn>
+inline auto get_nic_stats(CountFn&& count_stats, ListFn&& list_stats, uint32_t* num_stats,
+                          amdsmi_nic_stat_t* stats) -> amdsmi_status_t {
+  if (stats == nullptr) {
+    auto available = uint32_t{0};
+    const auto count_status = count_stats(&available);
+    if (count_status != AMDSMI_STATUS_SUCCESS) {
+      return count_status;
+    }
+    *num_stats = available;
+    return AMDSMI_STATUS_SUCCESS;
+  }
+
+  auto info = std::make_unique<smi_nic_stat_info_t>();
+  const auto list_status = list_stats(info.get());
+  if (list_status != AMDSMI_STATUS_SUCCESS) {
+    return list_status;
+  }
+  return copy_nic_stats(*info, num_stats, stats);
 }
 
 }  // namespace amd::smi

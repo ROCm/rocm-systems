@@ -29,8 +29,9 @@ class SmiNicSystem {
   ~SmiNicSystem() = default;
 
   void register_subsystem(std::unique_ptr<SmiNicSubsystem> subsystem);
-  // ainic_only=true drops non-AINIC NICs (product() != NicProduct::AINIC).
-  void discover_nics(bool ainic_only = false);
+  // is_ainic_only=true drops non-AINIC NICs (product() != NicProduct::AINIC). UALoE endpoints carry
+  // NicProduct::AINIC, so they stay.
+  void discover_nics(bool is_ainic_only = false);
   bool is_driver_loaded(const std::string& bdf, DriverType driver_type) const;
 
   std::vector<std::string> list_bdfs();
