@@ -6,6 +6,11 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ## amd_smi_lib for ROCm 10.2.0
 
+### Added
+
+- **Added an opt-in `dynamic-loading` feature to the Rust bindings**.  
+  - `libamd_smi.so` is loaded on the first API call instead of being linked at build time, so applications build and start without AMD SMI installed. `AMDSMI_LIB_DIR` selects the library directory at runtime.
+
 ### Resolved Issues
 
 - **Fixed runtime fatal CPERs reporting no AFIDs**.  

@@ -14,6 +14,7 @@ fn library() -> AmdsmiResult<&'static Library> {
     LIBRARY
         .get_or_init(|| {
             let path = std::env::var_os("AMDSMI_LIB_DIR")
+                .filter(|directory| !directory.is_empty())
                 .map(|directory| PathBuf::from(directory).join("libamd_smi.so"))
                 .unwrap_or_else(|| PathBuf::from("libamd_smi.so"));
             // SAFETY: as with link-time loading, the caller must use a trusted

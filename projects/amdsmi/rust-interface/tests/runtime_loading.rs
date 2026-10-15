@@ -58,20 +58,44 @@ fn queries_preserve_arguments_outputs_and_statuses() {
 }
 
 #[test]
+fn empty_library_directory_is_treated_as_unset() {
+    let directory = tempfile::tempdir().unwrap();
+    std::fs::write(directory.path().join("libamd_smi.so"), "not a library").unwrap();
+    let library = mock_library();
+    let output = Command::new(std::env::current_exe().unwrap())
+        .args([
+            "--exact",
+            "runtime_loading_child",
+            "--ignored",
+            "--nocapture",
+        ])
+        .current_dir(directory.path())
+        .env("AMDSMI_TEST_CASE", "missing_symbol")
+        .env("AMDSMI_LIB_DIR", "")
+        .env("LD_LIBRARY_PATH", library.path())
+        .output()
+        .unwrap();
+    assert!(output.status.success(), "{output:?}");
+}
+
+#[test]
 #[ignore = "run by the parent tests with an isolated library configuration"]
 fn runtime_loading_child() {
     match std::env::var("AMDSMI_TEST_CASE").unwrap().as_str() {
         "missing_library" => {
             let error = amdsmi::amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).unwrap_err();
             assert_eq!(error, AmdsmiStatusT::AmdsmiStatusFailLoadModule);
-            // Formatting a loader error must not panic or recursively format it.
-            assert!(!error.to_string().is_empty());
+            assert_eq!(error.to_string(), "Failed to load libamd_smi.so");
         }
         "missing_symbol" => {
             assert!(matches!(
                 amdsmi::amdsmi_get_gpu_device_bdf(std::ptr::null_mut()),
                 Err(AmdsmiStatusT::AmdsmiStatusFailLoadSymbol)
             ));
+            assert_eq!(
+                AmdsmiStatusT::AmdsmiStatusFailLoadSymbol.to_string(),
+                "Failed to load an AMD SMI symbol"
+            );
             amdsmi::amdsmi_init(AmdsmiInitFlagsT::AmdsmiInitAmdGpus).unwrap();
             amdsmi::amdsmi_shut_down().unwrap();
         }
