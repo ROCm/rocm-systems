@@ -7988,9 +7988,9 @@ class CodeGenerator:
             '    d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);'
         )
         if self.isa_spec.profile.smem_address_uses_access_size:
-            addr_args = 'inst_, wf, d->elem_size * d->num_dwords'
+            addr_args = 'inst_, wf, d->elem_size * d->num_dwords, d.get()'
         else:
-            addr_args = 'inst_, wf'
+            addr_args = 'inst_, wf, d.get()'
         L.append(f'  auto address = smem_calculate_address({addr_args});')
         L.append('  if (!address) return;')
         L.append('  d->addr = *address;')
@@ -9182,7 +9182,8 @@ class CodeGenerator:
         encoding = self.isa_spec.encoding_map.get(inst.enc_name)
         if is_load and encoding and any(f.name == 'lds' for f in encoding.ucode_fields):
             L.append('  d->lds_dst = inst_.lds;')
-            L.append('  d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
+            if self.isa_spec.arch_name not in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                L.append('  d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
         if sem.elem_size == 2:
             L.append('  d->buffer_d16 = true;')
             L.append(f'  d->d16_hi = {str(sem.d16_hi).lower()};')
@@ -9201,12 +9202,34 @@ class CodeGenerator:
             ]
         )
         L.append(f'    {addr_fn}(inst_, wf, *d);')
+        if (
+            is_load
+            and encoding
+            and any(f.name == 'lds' for f in encoding.ucode_fields)
+            and self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4')
+        ):
+            L.append('  if (d->lds_dst) {')
+            registers = (
+                (sem.num_elems + 1) // 2 if sem.elem_size == 2 else sem.num_elems
+            )
+            self._append_buffer_lds_destination(L, registers)
+            L.append('  }')
         if not is_load:
             L.append(
                 f"  amdgpu::capture_buffer_format_store(wf, *d, {self._vgpr_base_expr('vdata')});"
             )
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
+
+    def _append_buffer_lds_destination(self, lines: list[str], registers: int) -> None:
+        # Buffer ISA 9.1.9 uses a byte offset: 16 bits on CDNA1-3, 18 on CDNA4.
+        # Global/Scratch ISA 10.3 instead uses M0[17:2] * 4.
+        mask = '0x3ffffu' if self.isa_spec.arch_name == 'cdna4' else '0xffffu'
+        lines.append(
+            '    amdgpu::prepare_lds_destination(*d, wf.lds_base(), wf.lds_size(),'
+            f' static_cast<int64_t>(wf.m0() & {mask}) + inst_.offset,'
+            f' {registers * 4}, {16 if registers >= 3 else registers * 4});'
+        )
 
     def _gen_buffer_load(
         self,
@@ -9244,10 +9267,16 @@ class CodeGenerator:
             L.append('    d->is_load = true;')
             self._append_wait_counter_type(L, sem, cls, indent='    ')
             L.append('    d->lds_dst = true;')
-            L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
+            if self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                L.append('    d->lds_dword_extend = true;')
+                L.append(f'    d->sign_extend = {str(sem.sign_extend).lower()};')
+            else:
+                L.append('    d->lds_base = wf.m0() + inst_.offset + wf.lds_base();')
             L.append(f'    d->mtype = {self._mtype_expr()};')
             L.append(f'    d->non_temporal = {nt};')
             L.append(f'    {addr_fn}(inst_, wf, *d);')
+            if self.isa_spec.arch_name in ('cdna1', 'cdna2', 'cdna3', 'cdna4'):
+                self._append_buffer_lds_destination(L, ne)
             L.append('    set_data(std::move(d));')
             L.append('    return;')
             L.append('  }')

@@ -422,7 +422,9 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (d.lds_dst) {
       if (obligations.empty())
         return;
-      uint32_t perLaneBytes = d.num_elems * d.elem_size;
+      uint32_t perLaneBytes = d.buffer_components
+                                  ? 4u * d.destination_vgpr_count()
+                                  : d.num_elems * (d.lds_dword_extend ? 4u : d.elem_size);
       if (d.cluster_multicast && d.cluster_mcast_mask != 0) {
         uint32_t selfMask = amdgpu::cluster_multicast_rank_mask(wf.cluster_rank());
         uint32_t peerMask = d.cluster_mcast_mask & ~selfMask;
@@ -432,12 +434,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
           return;
       }
       uint32_t ldsAddrs[64];
-      uint64_t validLaneMask = d.lane_mask;
+      const uint64_t validLaneMask = amdgpu::lds_destination_write_mask(d, wf.cu().arch());
       for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
         ldsAddrs[lane] =
             d.lds_per_lane_addr ? d.per_lane_lds_addr[lane] : d.lds_base + lane * perLaneBytes;
-        if (ldsAddrs[lane] == amdgpu::kInvalidLdsAddress)
-          validLaneMask &= ~(1ULL << lane);
       }
       rs->registerLdsEvent(wf.pc, MemoryEventType::GLOBAL_TO_LDS, {}, validLaneMask, wf.wf_size(),
                            std::span<const uint32_t>(ldsAddrs, wf.wf_size()), perLaneBytes, 0xF,
