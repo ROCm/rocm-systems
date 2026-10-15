@@ -395,6 +395,13 @@ function(rccl_define_micro_source_lists)
     collectives-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroOnerank -- src/device/onerank.cu. Own binary: fakes/sched_stubs.cc fakes
+  # ncclLaunchOneRank, and this test seams the HIP launch calls itself.
+  set(TEST_MICRO_ONERANK_SOURCE_FILES
+    onerank-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1074,6 +1081,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCollectives
 # collectives.cc defines a kernel. An empty embedded device binary stands in for the device pass, so the
 # host-only object registers it without referencing a fatbin symbol nothing provides.
 target_compile_options(rccl-UnitTestsMicroCollectives PRIVATE "SHELL:-Xclang -fcuda-include-gpubinary -Xclang /dev/null")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroOnerank
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroOnerank
+  SOURCES ${TEST_MICRO_ONERANK_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device  # device/op128.h includes rccl_ptr.h unqualified
+    ${RCCL_HOST_HIPIFY_DIR}/src/device               # common_kernel.h includes "tdm/tdmCopy.h"
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ONERANK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/device/onerank.cu.cpp"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_onerank.yaml")
+# onerank.cu defines kernels too; see rccl-UnitTestsMicroCollectives.
+target_compile_options(rccl-UnitTestsMicroOnerank PRIVATE "SHELL:-Xclang -fcuda-include-gpubinary -Xclang /dev/null")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
