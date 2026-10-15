@@ -780,9 +780,10 @@ uint32_t goamdsmi_gpu_dev_gpu_busy_percent_get(uint32_t dv_ind) {
   uint32_t gpu_busy_percent = GOAMDSMI_UINT32_MAX;
   amdsmi_engine_usage_t amdsmi_engine_usage_temp;
 
-  if (AMDSMI_STATUS_SUCCESS ==
-      amdsmi_get_gpu_activity(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-                              &amdsmi_engine_usage_temp)) {
+  if ((dv_ind < num_gpu_devices_inAllSocket) &&
+      (AMDSMI_STATUS_SUCCESS ==
+       amdsmi_get_gpu_activity(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
+                               &amdsmi_engine_usage_temp))) {
     readSuccess = true;
     gpu_busy_percent = amdsmi_engine_usage_temp.gfx_activity;
   }
@@ -800,7 +801,8 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_busy_percent_get(uint32_t dv_ind) {
   uint64_t gpu_memory_usage_temp = GOAMDSMI_UINT64_MAX;
   uint64_t gpu_memory_total_temp = GOAMDSMI_UINT64_MAX;
 
-  if ((AMDSMI_STATUS_SUCCESS ==
+  if ((dv_ind < num_gpu_devices_inAllSocket) &&
+      (AMDSMI_STATUS_SUCCESS ==
        amdsmi_get_gpu_memory_usage(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
                                    AMDSMI_MEM_TYPE_VRAM, &gpu_memory_usage_temp)) &&
       (AMDSMI_STATUS_SUCCESS ==
@@ -823,9 +825,10 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_usage_get(uint32_t dv_ind) {
   uint64_t gpu_memory_usage = GOAMDSMI_UINT64_MAX;
   uint64_t gpu_memory_usage_temp = GOAMDSMI_UINT64_MAX;
 
-  if (AMDSMI_STATUS_SUCCESS ==
-      amdsmi_get_gpu_memory_usage(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-                                  AMDSMI_MEM_TYPE_VRAM, &gpu_memory_usage_temp)) {
+  if ((dv_ind < num_gpu_devices_inAllSocket) &&
+      (AMDSMI_STATUS_SUCCESS ==
+       amdsmi_get_gpu_memory_usage(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
+                                   AMDSMI_MEM_TYPE_VRAM, &gpu_memory_usage_temp))) {
     readSuccess = true;
     gpu_memory_usage = (uint64_t)gpu_memory_usage_temp;
   }
@@ -842,9 +845,10 @@ uint64_t goamdsmi_gpu_dev_gpu_memory_total_get(uint32_t dv_ind) {
   uint64_t gpu_memory_total = GOAMDSMI_UINT64_MAX;
   uint64_t gpu_memory_total_temp = GOAMDSMI_UINT64_MAX;
 
-  if (AMDSMI_STATUS_SUCCESS ==
-      amdsmi_get_gpu_memory_total(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
-                                  AMDSMI_MEM_TYPE_VRAM, &gpu_memory_total_temp)) {
+  if ((dv_ind < num_gpu_devices_inAllSocket) &&
+      (AMDSMI_STATUS_SUCCESS ==
+       amdsmi_get_gpu_memory_total(amdsmi_processor_handle_all_gpu_device_across_socket[dv_ind],
+                                   AMDSMI_MEM_TYPE_VRAM, &gpu_memory_total_temp))) {
     readSuccess = true;
     gpu_memory_total = (uint64_t)gpu_memory_total_temp;
   }
