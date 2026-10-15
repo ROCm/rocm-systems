@@ -253,8 +253,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed power readings of exactly 255 W showing as N/A in the Python library**.  
   - A reading of exactly 255 in any power or voltage field was treated as unavailable.
 
-- **Fixed wrong overdrive clock and voltage values in the Python library**.  
-  - The memory clock range showed the fabric clock range, and the clock limits, voltage curve and curve regions were also wrong.
+- **Fixed wrong overdrive clock values in the Python library**.  
+  - The memory clock range showed the fabric clock range, and the clock limits read 0 even when the GPU reported them.
 
 - **Fixed wrong CPU DIMM readings in the Python library on Python 3.14 and later**.  
   - The update rate, DIMM address and temperature were wrong.
