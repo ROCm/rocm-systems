@@ -15,8 +15,6 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_format.h"
 
-#include <cstdint>
-
 namespace rocjitsu::amdgpu::denormal {
 
 namespace detail {
