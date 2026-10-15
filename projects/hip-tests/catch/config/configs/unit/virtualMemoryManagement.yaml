@@ -11,12 +11,20 @@ virtualMemoryManagement:
     <<: *level_default
   Unit_hipMemRetainAllocationHandle_Capture: *level_default
   Unit_hipMemImportFromShareableHandle_Positive_Basic: *level_default
-  Unit_hipMemImportFromShareableHandle_HostBackedAlloc: *level_default
+  Unit_hipMemImportFromShareableHandle_HostBackedAlloc:
+    <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device-side ASAN on gfx942 (heap-use-after-free in libamdhip64 / LeakSanitizer leaks); needs re-triage on asan."
   Unit_hipMemImportFromShareableHandle_Negative_Parameters: *level_default
   Unit_hipMemImportFromShareableHandle_MulProc_ChldUseHdl: *level_default
   Unit_hipMemImportFromShareableHandle_MulProc_ParntChldUseHdl: *level_default
   Unit_hipMemImportFromShareableHandle_MulProc_GrndChldUseHdl: *level_default
-  Unit_hipMemImportFromShareableHandle_Capture: *level_default
+  Unit_hipMemImportFromShareableHandle_Capture:
+    <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device-side ASAN on gfx942 (heap-use-after-free in libamdhip64 / LeakSanitizer leaks); needs re-triage on asan."
   Unit_hipMemGetHandleForAddressRange_Negative: *level_default
   Unit_hipMemGetHandleForAddressRange_DeviceMemory:
     <<: *level_default
@@ -28,7 +36,11 @@ virtualMemoryManagement:
     disabled:
       targets: [asan]
       reason: "AIRUNTIME-2744 - does not play well with ASAN; needs to be re-triaged."
-  Unit_hipMemGetHandleForAddressRange_VM: *level_default
+  Unit_hipMemGetHandleForAddressRange_VM:
+    <<: *level_default
+    disabled:
+      targets: [asan]
+      reason: "AIRUNTIME-2892 - fails under device-side ASAN on gfx942 (heap-use-after-free in libamdhip64 / LeakSanitizer leaks); needs re-triage on asan."
   Unit_hipMemGetHandleForAddressRange_VM_PcieFlag: *level_default
   Unit_hipMemGetHandleForAddressRange_DeviceMemory_InAnotherDevice:
     <<: *level_default
@@ -147,8 +159,8 @@ virtualMemoryManagement:
       targets: [amd_windows]
       reason: "AIRUNTIME-2744 - Linux-only test; uses libnuma and unit/virtualMemoryManagement/CMakeLists.txt gates hipMemCreateHostNuma.cc under if(UNIX), so it is never built or run on native Windows."
     disabled:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged."
+      targets: [asan, amd_wsl]
+      reason: "AIRUNTIME-2744 - gfx1201 (amd_wsl) self-skips the variant; needs to be re-triaged. AIRUNTIME-2892 - fails under device-side ASAN on gfx942 (heap-use-after-free in libamdhip64 / LeakSanitizer leaks); needs re-triage on asan."
   Unit_hipMemSetAccess_SetGet:
     <<: *level_default
     disabled:
