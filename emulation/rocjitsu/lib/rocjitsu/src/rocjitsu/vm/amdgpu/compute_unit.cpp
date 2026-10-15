@@ -44,6 +44,11 @@
 
 namespace rocjitsu {
 namespace amdgpu {
+uint32_t InstructionComputeUnitView::xcc_id() const {
+  auto *cp = raw_cu().command_processor();
+  return cp ? cp->xcc_id() : 0;
+}
+
 bool InstructionComputeUnitView::signal_queue_exception(uint32_t queue_id, uint32_t process_id,
                                                         uint64_t status,
                                                         bool clear_debug_stop_on_success,

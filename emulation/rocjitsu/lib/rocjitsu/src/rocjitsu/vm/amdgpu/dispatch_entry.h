@@ -395,6 +395,9 @@ struct DispatchEntry {
   /// Number of wave slices between adjacent shader-engine scratch regions.
   /// Zero selects the model's full physical capacity for simulator-owned backing.
   uint32_t scratch_wave_stride_per_se = 0;
+  /// Runtime wave slice size; zero derives private bytes times dispatch wave width,
+  /// rounded up to the architecture's scratch allocation granule.
+  uint32_t scratch_wave_size_bytes = 0;
   uint32_t group_segment_fixed_size = 0;
   /// ROCr allocated primary scratch for this dispatch as a single-use block.
   bool scratch_use_once = false;
@@ -723,6 +726,14 @@ struct ComputeQueueRecord : ComputeQueueConfig {
     return !entries.empty() || !dispatches.entries.empty() || !commands.submissions.empty() ||
            command_access.has_value() || read_pointer_journal.publication_pending();
   }
+
+  // Recognize our own queue metadata on later dispatches without claiming
+  // runtime replacements of either the backing address or capacity.
+  struct SimulatorScratch {
+    uint64_t backing_address;
+    uint32_t tmpring_size;
+  };
+  std::optional<SimulatorScratch> simulator_scratch;
 
   enum class Status { Idle, Active, Blocked };
 
