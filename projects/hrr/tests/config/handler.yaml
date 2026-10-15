@@ -1,0 +1,50 @@
+# HRR test configuration. Every case the binary registers has an entry here.
+# An empty entry runs on every OS and GPU architecture.
+#
+# A skip rule matches when every key under "when" matches (a list is OR, a
+# missing key matches anything, and a value may be a glob such as gfx11*).
+# kind: disabled is a temporary regression and requires a public issue URL.
+# kind: unsupported is permanent and needs only a reason.
+#
+# hrr-handler-tests is built only on POSIX (tests/unit/CMakeLists.txt), so this
+# suite targets Linux only.
+#
+# Regenerate the case names from a built binary with:
+#   hrr_test_config.py check --binary <exe> --config <this file> --update
+# Listing needs no GPU. Say so in the commit message when the set changes.
+version: 1
+suite: unit
+binary: hrr-handler-tests
+select: "*"
+targets:
+  os: [linux]
+  arch: [gfx90a, gfx942, gfx950, gfx1030, gfx1100, gfx1101, gfx1102, gfx1103, gfx1150, gfx1151, gfx1153, gfx1200, gfx1201, gfx1250]
+cases:
+  Unit_HRR_AccessPolicyWindow_KernelNodeAttributeTranslatesBasePtr: {}
+  Unit_HRR_AccessPolicyWindow_StreamAttributeTranslatesBasePtr: {}
+  Unit_HRR_Blob_AbsentBlobDoesNotEndTheReplay: {}
+  Unit_HRR_Blob_CapRefusalEndsTheReplay: {}
+  Unit_HRR_GraphDeps_InlineCapacity: {}
+  Unit_HRR_GraphDeps_MemAllocNodeRefusesOversizeCount: {}
+  Unit_HRR_GraphDeps_SymbolCopyNodesRefuseOversizeCount: {}
+  Unit_HRR_GraphDeps_SymbolCopyNodesRefuseTruncatedList: {}
+  Unit_HRR_GraphDeps_TruncatedDependencyListIsRefused: {}
+  Unit_HRR_HostBudget_BlobCacheChargesOnce: {}
+  Unit_HRR_HostBudget_BlobCacheRefusesOverBudgetAndMissing: {}
+  Unit_HRR_HostBudget_CodeObjectCacheIsChargedSeparately: {}
+  Unit_HRR_HostBudget_ConcurrentLoadsOfOneBlobChargeOnce: {}
+  Unit_HRR_HostBudget_DispatchFreesReplacedHostAllocation: {}
+  Unit_HRR_HostBudget_DispatchTableUsesTheChargingHandlers: {}
+  Unit_HRR_HostBudget_HostAllocationHandlersRefuseOverBudget: {}
+  Unit_HRR_HostBudget_LandingBufferChargesGrowthOnly: {}
+  Unit_HRR_Query_CompletingQueryReturnsSuccess: {}
+  Unit_HRR_Query_DefaultHasNoAttemptBound: {}
+  Unit_HRR_Query_NeverCompletingQueryEndsTheReplay: {}
+  Unit_HRR_Query_OtherErrorIsReturnedAtOnce: {}
+  Unit_HRR_Query_StopsWhenReplayIsFatal: {}
+  Unit_HRR_Query_ZeroBoundMakesNoCall: {}
+  Unit_HRR_Refusals_GeneratedHandlersRefuseUntranslatableSlots: {}
+  Unit_HRR_Refusals_LinkAddFileIsRefused: {}
+  Unit_HRR_Refusals_LinkCreateRefusesPointerCarryingOptions: {}
+  Unit_HRR_Refusals_Memcpy2DNoOpCopiesAreNotRefused: {}
+  Unit_HRR_Refusals_Memcpy2DWithUnmappedEndIsRefused: {}

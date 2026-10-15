@@ -397,6 +397,19 @@ def detect_os() -> str:
     return "windows" if os.name == "nt" else "linux"
 
 
+def compiled_out_here(config: dict, name: str, os_name: str) -> bool:
+    """True when an OS-wide ``unsupported`` rule covers the case on ``os_name``.
+
+    Such a case may be compiled out of the binary there (an ``#ifndef _WIN32``
+    around the whole file), so ``check`` does not call its absence MISSING.
+    A rule that names an architecture is not OS-wide and does not count.
+    """
+    return any(
+        rule.get("kind") == "unsupported" and rule_matches(rule, os_name, []) is not None
+        for rule in _rules_for(config, name)
+    )
+
+
 def _archs_in(text: str) -> list[str]:
     found = []
     for line in text.splitlines():
@@ -487,7 +500,9 @@ def _cmd_check(args: argparse.Namespace) -> int:
               f"({len(added)} added, {len(removed)} removed)")
         for name in removed:
             print(f"  removed {name}")
-    expected = set(config["cases"])
+    os_name = detect_os()
+    expected = {name for name in config["cases"]
+                if not compiled_out_here(config, name, os_name)}
     actual = set(names)
     missing = sorted(expected - actual)
     unexpected = sorted(actual - expected)

@@ -199,6 +199,26 @@ class CheckTest(unittest.TestCase):
         self.assertIn("UNEXPECTED", err.getvalue())
         self.assertIn("New", err.getvalue())
 
+    def test_check_allows_a_case_compiled_out_where_it_is_unsupported(self):
+        self.write(suite({
+            "Kept": {},
+            "PosixOnly": {"skip": [rule({"os": "windows"})]},
+            "OneArch": {"skip": [rule({"os": "windows", "arch": "gfx90a"})]},
+        }))
+        payload = listing(("Kept", []))
+        for os_name, rc, text in (("windows", 1, "OneArch"), ("linux", 1, "PosixOnly")):
+            with self.subTest(os=os_name):
+                with mock.patch.object(cfg, "detect_os", return_value=os_name), \
+                        mock.patch.object(cfg.subprocess, "run", return_value=completed(payload)):
+                    err = io.StringIO()
+                    with contextlib.redirect_stderr(err):
+                        got = cfg.main(["check", "--binary", "./bin", "--config", str(self.path)])
+                self.assertEqual(got, rc)
+                self.assertIn("MISSING", err.getvalue())
+                self.assertIn(text, err.getvalue())
+                if os_name == "windows":
+                    self.assertNotIn("PosixOnly", err.getvalue())
+
     def test_update_keeps_rules_and_adds_empty_entries(self):
         kept = rule({"os": "linux", "arch": "gfx1151"}, "disabled", "npu",
                     "https://github.com/ROCm/rocm-systems/issues/1")

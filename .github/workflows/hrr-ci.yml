@@ -168,8 +168,12 @@ jobs:
           persist-credentials: false
           # Cone mode also checks out projects/clr/hipamd/src/amdhip.def.in,
           # which gen_hrr_api_args.py reads on import. A test reads hrr-ci.yml.
+          # The generator-rule tests in tools/tests regenerate the handlers from
+          # the HIP headers.
           sparse-checkout: |
             projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
             projects/clr/hipamd/src/hrr
             .github/workflows
 
@@ -184,10 +188,11 @@ jobs:
         run: >-
           python projects/hrr/tests/scripts/hrr_test_config.py lint
           projects/hrr/tests/config/unit.yaml
+          projects/hrr/tests/config/handler.yaml
           projects/hrr/tests/config/integration.yaml
 
       - name: Run tests
-        run: python -m pytest projects/hrr/tests/scripts
+        run: python -m pytest projects/hrr/tests/scripts projects/hrr/tools/tests
 
   unit:
     name: Unit (${{ matrix.os }})
@@ -275,12 +280,36 @@ jobs:
           --arch none
           -- "build/tests/unit/${EXE}"
 
+      # hrr-handler-tests is POSIX only (tests/unit/CMakeLists.txt), and an
+      # AddressSanitizer build that reaches no GPU. Its results land beside the
+      # unit results as an "Other" row in the summary.
+      - name: Check the compiled handler case list
+        if: ${{ runner.os == 'Linux' }}
+        run: >-
+          python projects/hrr/tests/scripts/hrr_test_config.py check
+          --binary build/tests/unit/hrr-handler-tests
+          --config projects/hrr/tests/config/handler.yaml
+
+      - name: Run handler suite
+        if: ${{ runner.os == 'Linux' }}
+        env:
+          OS: ${{ matrix.os }}
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
+        run: >-
+          python projects/hrr/tests/scripts/run_catch2.py
+          --xml "handler-${OS}.xml"
+          --config projects/hrr/tests/config/handler.yaml
+          --arch none
+          -- build/tests/unit/hrr-handler-tests
+
       - name: Upload results
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
           name: results-unit-${{ matrix.os }}
-          path: unit-${{ matrix.os }}.xml
+          path: |
+            unit-${{ matrix.os }}.xml
+            handler-${{ matrix.os }}.xml
           if-no-files-found: ignore
           retention-days: 7
 
