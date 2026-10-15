@@ -500,10 +500,8 @@ def main() -> None:
     # code objects (prevents findSymbol → guarantee → abort)
     override_bundled_hip_runtime(rccl_lib_dir)
 
-    # Step 4b-2: The CI-built HIP runtime is built against develop-HEAD ROCr
-    # headers and may reference hsa_amd_* symbols the pip-pinned ROCr does
-    # not export, so ROCr must be replaced as a pair with HIP.  Both must
-    # complete before the first `import torch` in step 5.
+    # Step 4b-2: ROCr must be replaced as a pair with HIP above, and both
+    # must complete before the first `import torch` in step 5.
     override_bundled_hsa_runtime(rccl_lib_dir)
 
     # Step 4c: Configure kpack device code loading — TheRock-built libraries
