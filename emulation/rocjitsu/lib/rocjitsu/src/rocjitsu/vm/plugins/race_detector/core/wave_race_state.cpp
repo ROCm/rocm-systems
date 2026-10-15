@@ -13,10 +13,12 @@
 
 namespace rocjitsu::plugins::race_detector {
 namespace {
-void appendLdsInterval(IntervalSet &intervals, uint32_t address, int bytes) {
-  // Out-of-range shared addresses (including DDS) retain their event's
-  // register/counter dependencies without indexing ordinary LDS storage.
-  if (bytes <= 0 || address > static_cast<uint32_t>(std::numeric_limits<int>::max() - bytes))
+void appendLdsInterval(IntervalSet &intervals, uint32_t address, int bytes,
+                       const RaceDetector &detector) {
+  // Intervals must fit the CU's logical LDS backing and the signed index type.
+  // Rejected addresses retain their event's register/counter dependencies.
+  if (bytes <= 0 || !detector.validLdsRange(address, bytes) ||
+      address > static_cast<uint32_t>(std::numeric_limits<int>::max() - bytes))
     return;
   const int start = static_cast<int>(address);
   intervals.append(start, start + bytes);
@@ -237,7 +239,7 @@ void WaveRaceState::registerLdsEvent(
     MemoryOrderClass memoryOrder, uint64_t ldsLaneMask) {
   IntervalSet intervals;
   forEachActiveLane(execMask & ldsLaneMask, waveSize, [&](int lane) {
-    appendLdsInterval(intervals, laneBaseAddresses[lane], bytesPerLane);
+    appendLdsInterval(intervals, laneBaseAddresses[lane], bytesPerLane, *detector);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
@@ -253,7 +255,7 @@ void WaveRaceState::registerLdsEvent(
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     for (const auto addresses : {firstLaneBaseAddresses, secondLaneBaseAddresses})
-      appendLdsInterval(intervals, addresses[lane], bytesPerLane);
+      appendLdsInterval(intervals, addresses[lane], bytesPerLane, *detector);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
@@ -292,8 +294,8 @@ void WaveRaceState::registerDualOffsetLdsEvent(
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     uint32_t vAddr = laneBaseAddresses[lane];
-    appendLdsInterval(intervals, vAddr + static_cast<uint32_t>(offset0) * 8, 8);
-    appendLdsInterval(intervals, vAddr + static_cast<uint32_t>(offset1) * 8, 8);
+    appendLdsInterval(intervals, vAddr + static_cast<uint32_t>(offset0) * 8, 8, *detector);
+    appendLdsInterval(intervals, vAddr + static_cast<uint32_t>(offset1) * 8, 8, *detector);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, 0xF, std::move(intervals),

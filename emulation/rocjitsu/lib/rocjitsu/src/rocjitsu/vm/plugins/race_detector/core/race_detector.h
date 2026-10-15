@@ -39,7 +39,8 @@ class RaceDetector {
 
 public:
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
-               std::function<void(RaceViolation)> raceHandler, CounterCapacities);
+               std::function<void(RaceViolation)> raceHandler, CounterCapacities,
+               size_t ldsSizeBytes);
 
   /// Allocate an event using the counter and ordering implied by its type.
   EventId allocateEventId(WaveId wave, uint64_t pc, MemoryEventType type,
@@ -85,6 +86,13 @@ public:
   void validateWrite(int addr, WaveId, int lane, int nBytes,
                      MemoryOrderClass currentMemoryOrder = MemoryOrderClass::LDS) const;
 
+  /// True only when the complete access lies in the CU's logical LDS backing.
+  bool validLdsRange(uint64_t address, uint64_t bytes) const {
+    return bytes != 0 && address < ldsSizeBytes_ && bytes <= ldsSizeBytes_ - address;
+  }
+
+  size_t ldsSizeBytes() const { return ldsSizeBytes_; }
+
   const EventRegistry &events() const { return events_; }
 
   const std::vector<EventId> &getLdsWriteEvents() const { return ldsWriteEvents; }
@@ -112,8 +120,8 @@ private:
     WaveId orderedWave{-1};
   };
 
-  static void adjustByteCounts(const IntervalSet &ivs, std::vector<LdsChunkCounts> &counts,
-                               int delta, WaveId orderedWave = WaveId{-1});
+  void adjustByteCounts(const IntervalSet &ivs, std::vector<LdsChunkCounts> &counts, int delta,
+                        WaveId orderedWave = WaveId{-1});
   static bool hasPotentialLdsConflict(int addr, int nBytes,
                                       const std::vector<LdsChunkCounts> &counts, WaveId wave,
                                       MemoryOrderClass currentMemoryOrder);
@@ -127,8 +135,7 @@ private:
   /// Outstanding write/read counts at chunk granularity for fast-path
   /// validation. Indexed by byte address / kCountGranularity. Conservative:
   /// may over-report conflicts for sub-chunk accesses. Vectors start empty
-  /// and grow dynamically in adjustByteCounts as LDS events arrive, avoiding
-  /// reliance on compiler metadata for the LDS size.
+  /// and grow only within the CU backing capacity as LDS events arrive.
   static constexpr int kCountGranularity = 16;
   /// Sole-owner tracking avoids rescanning a long loop's own ordered LDS
   /// history, using one wave ID per chunk rather than per-wave counters.
@@ -136,6 +143,7 @@ private:
   std::vector<LdsChunkCounts> byteWriteCounts;
   std::vector<LdsChunkCounts> byteReadCounts;
 
+  size_t ldsSizeBytes_;
   EventRegistry events_;
 
   Dim3d workgroupId;

@@ -11,8 +11,8 @@ namespace rocjitsu::plugins::race_detector {
 
 RaceDetector::RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
                            std::function<void(RaceViolation)> raceHandler,
-                           CounterCapacities counterCapacities)
-    : workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
+                           CounterCapacities counterCapacities, size_t ldsSizeBytes)
+    : ldsSizeBytes_(ldsSizeBytes), workgroupId(workgroupId), raceHandler(std::move(raceHandler)) {
   waveRaceStates.reserve(nWaves);
   for (int i = 0; i < nWaves; ++i) {
     waveRaceStates.emplace_back(vgprCount, sgprCount, WaveId{i}, this, counterCapacities);
@@ -90,6 +90,8 @@ void RaceDetector::retireEvent(EventId eventId) {
 
 void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
                                 MemoryOrderClass currentMemoryOrder) const {
+  if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
+    return;
   if (!hasPotentialLdsConflict(addr, nBytes, byteWriteCounts, wave, currentMemoryOrder)) {
     return;
   }
@@ -114,6 +116,8 @@ void RaceDetector::validateRead(int addr, WaveId wave, int lane, int nBytes,
 
 void RaceDetector::validateWrite(int addr, WaveId wave, int lane, int nBytes,
                                  MemoryOrderClass currentMemoryOrder) const {
+  if (addr < 0 || nBytes <= 0 || !validLdsRange(addr, nBytes))
+    return;
   if (!hasPotentialLdsConflict(addr, nBytes, byteReadCounts, wave, currentMemoryOrder)) {
     return;
   }
@@ -158,7 +162,8 @@ bool RaceDetector::hasPotentialLdsConflict(int addr, int nBytes,
 void RaceDetector::adjustByteCounts(const IntervalSet &ivs, std::vector<LdsChunkCounts> &counts,
                                     int delta, WaveId orderedWave) {
   for (const auto &iv : ivs) {
-    if (iv.start < 0)
+    if (iv.start < 0 || iv.end <= iv.start ||
+        !validLdsRange(iv.start, static_cast<uint64_t>(iv.end) - iv.start))
       continue;
     int cStart = iv.start / kCountGranularity;
     int cEnd = (iv.end - 1) / kCountGranularity + 1;

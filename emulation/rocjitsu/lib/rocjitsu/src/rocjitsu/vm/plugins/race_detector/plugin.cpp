@@ -325,7 +325,8 @@ void RaceDetectorPlugin::onAmdgpuWorkgroupDispatched(uint32_t dispatch_id, uint3
   detectors_[key] = std::make_unique<RaceDetector>(
       static_cast<int>(num_waves), static_cast<int>(physical_vgpr_count),
       static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)), std::move(handler),
-      counterCapacitiesForArch(wavefronts.front()->cu().arch()));
+      counterCapacitiesForArch(wavefronts.front()->cu().arch()),
+      wavefronts.front()->lds().size_bytes());
 
   auto &det = *detectors_[key];
   auto &dc = dispatch_disasm_[dispatch_id];
@@ -383,8 +384,10 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(ldsMask & (1ULL << lane)))
         continue;
-      laneAddrs[lane] =
-          static_cast<uint32_t>(mixedFlat ? access.addresses[lane] : d.per_lane_addr[lane]);
+      const uint64_t address = mixedFlat ? access.addresses[lane] : d.per_lane_addr[lane];
+      laneAddrs[lane] = detector->validLdsRange(address, perLaneBytes)
+                            ? static_cast<uint32_t>(address)
+                            : amdgpu::kInvalidLdsAddress;
       int addr = static_cast<int>(laneAddrs[lane]);
       if (d.is_load)
         detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
