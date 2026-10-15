@@ -4,6 +4,7 @@
 
 #include "gsl_assert.h"
 
+#include <stdexcept>
 #include <utility>
 
 std::string_view MockInputParameters::get_output_path()
@@ -244,6 +245,28 @@ const std::vector<MockSdkWrapper::hsa_intercept_registration_info>&
 const std::vector<MockSdkWrapper::query_counter_record_info>& MockSdkWrapper::get_query_counter_record_info() const
 {
     return m_query_counter_record_info;
+}
+
+void MockSdkWrapper::query_available_agents(rocprofiler_query_available_agents_cb_t callback,
+                                            void*                                   user_data)
+{
+    if (m_query_available_agents_fails)
+        throw std::runtime_error("query available agents failure");
+
+    std::vector<const void*> agents;
+    for (const auto& agent : m_available_agents)
+        agents.push_back(&agent);
+    callback(ROCPROFILER_AGENT_INFO_VERSION_0, agents.data(), agents.size(), user_data);
+}
+
+void MockSdkWrapper::set_available_agents(const std::vector<rocprofiler_agent_t>& agents)
+{
+    m_available_agents = agents;
+}
+
+void MockSdkWrapper::set_query_available_agents_fails(bool fails)
+{
+    m_query_available_agents_fails = fails;
 }
 
 /////////////////////////////////////////////////////////////////////////
