@@ -245,8 +245,7 @@ static ncclResult_t postTuneP2pRegisterBuffer(struct ncclComm* comm, struct nccl
   if (network) {
     bool pxnUsed = !ncclPxnDisable(comm) && comm->isAllNvlink && comm->maxLocalRanks > 1;
     if (proxySameProcess && !pxnUsed && (conn->conn.flags & NCCL_DIRECT_NIC)) {
-      int nParts = rcclP2pTaskParts(comm, task->collAPI);
-      for (int part = 0; part < nParts; part++) {
+      for (int part = 0; part < comm->p2pnChannelsPerPeer; part++) {
         int partChannelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer,
                                                   comm->nNodes, comm->p2pChannelShiftSize);
         struct ncclConnector* partConn = isSendNotRecv ? &comm->channels[partChannelId].peers[peer]->send[connIndex] :
