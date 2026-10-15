@@ -930,6 +930,11 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "TopoGpuDev",
+          "description": "Topology GPU dev index tests",
+          "test_filter": "TopoGpuDev.*"
+        },
+        {
           "name": "P2pPxnLevel1NetId",
           "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
           "test_filter": "P2pPxnLevel1NetId.*"
