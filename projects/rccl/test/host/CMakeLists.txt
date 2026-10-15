@@ -388,6 +388,13 @@ function(rccl_define_micro_source_lists)
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCollectives -- src/collectives.cc. Own binary: every other target links
+  # fakes/collectives_fakes.cc, which defines this file's string helpers.
+  set(TEST_MICRO_COLLECTIVES_SOURCE_FILES
+    collectives-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1054,6 +1061,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCollectives
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCollectives
+  SOURCES ${TEST_MICRO_COLLECTIVES_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    COLLECTIVES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/collectives.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_collectives.yaml")
+# collectives.cc defines a kernel. An empty embedded device binary stands in for the device pass, so the
+# host-only object registers it without referencing a fatbin symbol nothing provides.
+target_compile_options(rccl-UnitTestsMicroCollectives PRIVATE "SHELL:-Xclang -fcuda-include-gpubinary -Xclang /dev/null")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
