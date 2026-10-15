@@ -21,28 +21,27 @@
 #include <cstdint>
 #include <utility>
 
-// Tuned block sizes by total message size: 512 threads up to
-// kDdaLL128AGWideAboveBytes, 1024 above it. A valid RCCL_DDA_LL128_AG_THREADS
-// overrides both.
+// Tuned block sizes by total message size: 512 threads up to the size below,
+// 1024 above it. Across hosts 512 stays faster up to a larger size. A valid
+// RCCL_DDA_LL128_AG_THREADS overrides both.
 constexpr unsigned kDdaLL128AGThreads = 512;
 constexpr unsigned kDdaLL128AGWideThreads = 1024;
 constexpr size_t kDdaLL128AGWideAboveBytes = (size_t)4 * 1024 * 1024;
+constexpr size_t kDdaLL128AGWideAboveBytesMultiHost = (size_t)8 * 1024 * 1024;
 // Slices each warp keeps in flight; the kernel is only instantiated for 1, 2 and 4.
 constexpr int kDdaLL128AGDefaultUnroll = 4;
 // Grid budget for this tier, applied under RCCL_DDA_FABRIC_MAXBLOCKS to messages
 // above the size below; 0 or less leaves only the fabric-wide cap.
 constexpr int kDdaLL128AGDefaultMaxBlocks = 64;
-// Total message size above which the budget applies. Smaller messages leave each
-// warp a slice or two, and the extra slice the budget adds costs more time than
-// the CUs it saves; across hosts that holds up to a larger size.
-constexpr size_t kDdaLL128AGMaxBlocksAboveBytes = (size_t)4 * 1024 * 1024;
-constexpr size_t kDdaLL128AGMaxBlocksAboveBytesMultiHost = (size_t)8 * 1024 * 1024;
+// Total message size above which the budget applies. At 2 MiB and below it only
+// binds across hosts, where it costs more time than the CUs it saves.
+constexpr size_t kDdaLL128AGMaxBlocksAboveBytes = (size_t)2 * 1024 * 1024;
 
 RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
 RCCL_PARAM(DdaLL128AGUnroll, "DDA_LL128_AG_UNROLL", kDdaLL128AGDefaultUnroll);
 RCCL_PARAM(DdaLL128AGMaxBlocks, "DDA_LL128_AG_MAXBLOCKS", kDdaLL128AGDefaultMaxBlocks);
-// -1 picks the size above by whether the ranks span hosts.
-RCCL_PARAM(DdaLL128AGMaxBlocksAboveBytes, "DDA_LL128_AG_MAXBLOCKS_ABOVE_BYTES", -1);
+RCCL_PARAM(DdaLL128AGMaxBlocksAboveBytes, "DDA_LL128_AG_MAXBLOCKS_ABOVE_BYTES",
+           (int64_t)kDdaLL128AGMaxBlocksAboveBytes);
 
 namespace {
 
@@ -63,22 +62,6 @@ constexpr size_t ddaLL128AGMaxPerRankBytes(int nRanks, size_t scratchBytes) {
   return ddaLL128AGSlotSlices(nRanks, scratchBytes) * (size_t)kDdaLL128DataBytesPerSlice;
 }
 
-unsigned ddaLL128AGThreads(unsigned blockSize) {
-  const int64_t UserInput = rcclParamDdaLL128AGThreads();
-  if (UserInput >= kDdaLL128Warp && UserInput <= 1024 && (UserInput % kDdaLL128Warp) == 0) {
-    return (unsigned)UserInput;
-  }
-  return blockSize;
-}
-
-int ddaLL128AGUnroll() {
-  const int64_t UserInput = rcclParamDdaLL128AGUnroll();
-  if (UserInput == 1 || UserInput == 2 || UserInput == 4) {
-    return (int)UserInput;
-  }
-  return kDdaLL128AGDefaultUnroll;
-}
-
 // MNNVL folds a multi-host gfx1250 clique into one node (comm->nNodes == 1), so
 // hosts are told apart by host hash.
 bool ddaLL128AGSpansHosts(const ncclComm* comm) {
@@ -89,12 +72,27 @@ bool ddaLL128AGSpansHosts(const ncclComm* comm) {
   return false;
 }
 
-size_t ddaLL128AGMaxBlocksAboveBytes(const ncclComm* comm) {
-  const int64_t UserInput = rcclParamDdaLL128AGMaxBlocksAboveBytes();
-  if (UserInput >= 0) {
-    return (size_t)UserInput;
+unsigned ddaLL128AGThreads(const ncclComm* comm, size_t totalBytes) {
+  const int64_t UserInput = rcclParamDdaLL128AGThreads();
+  if (UserInput >= kDdaLL128Warp && UserInput <= 1024 && (UserInput % kDdaLL128Warp) == 0) {
+    return (unsigned)UserInput;
   }
-  return ddaLL128AGSpansHosts(comm) ? kDdaLL128AGMaxBlocksAboveBytesMultiHost : kDdaLL128AGMaxBlocksAboveBytes;
+  const size_t wideAboveBytes =
+    ddaLL128AGSpansHosts(comm) ? kDdaLL128AGWideAboveBytesMultiHost : kDdaLL128AGWideAboveBytes;
+  return totalBytes > wideAboveBytes ? kDdaLL128AGWideThreads : kDdaLL128AGThreads;
+}
+
+int ddaLL128AGUnroll() {
+  const int64_t UserInput = rcclParamDdaLL128AGUnroll();
+  if (UserInput == 1 || UserInput == 2 || UserInput == 4) {
+    return (int)UserInput;
+  }
+  return kDdaLL128AGDefaultUnroll;
+}
+
+size_t ddaLL128AGMaxBlocksAboveBytes() {
+  const int64_t UserInput = rcclParamDdaLL128AGMaxBlocksAboveBytes();
+  return UserInput >= 0 ? (size_t)UserInput : kDdaLL128AGMaxBlocksAboveBytes;
 }
 
 // Blocks in one peer column: a warp per slice, capped by the column's share of
@@ -112,13 +110,12 @@ unsigned ddaLL128AGBlocksPerPeer(size_t slices, size_t warps, int nPeers, size_t
 // grid.y = the per-peer slice split, capped by the tier's grid budget.
 static inline std::pair<dim3, dim3> ddaAllGatherFabricLL128Geom(ncclComm* comm, size_t perRankBytes) {
   const size_t totalBytes = perRankBytes * (size_t)comm->nRanks;
-  const unsigned threads =
-    ddaLL128AGThreads(totalBytes > kDdaLL128AGWideAboveBytes ? kDdaLL128AGWideThreads : kDdaLL128AGThreads);
+  const unsigned threads = ddaLL128AGThreads(comm, totalBytes);
   const size_t warps = threads / (unsigned)kDdaLL128Warp;
   const int nPeers = comm->nRanks - 1;
   int nBlocksMax = comm->ddaFabricMaxBlocks;
   const int64_t agMaxBlocks = rcclParamDdaLL128AGMaxBlocks();
-  if (totalBytes > ddaLL128AGMaxBlocksAboveBytes(comm) && agMaxBlocks > 0 && agMaxBlocks < nBlocksMax) {
+  if (totalBytes > ddaLL128AGMaxBlocksAboveBytes() && agMaxBlocks > 0 && agMaxBlocks < nBlocksMax) {
     nBlocksMax = (int)agMaxBlocks;
   }
   if (nBlocksMax < 1) nBlocksMax = 1;

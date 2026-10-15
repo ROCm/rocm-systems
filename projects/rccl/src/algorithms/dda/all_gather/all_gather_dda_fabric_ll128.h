@@ -33,6 +33,34 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
                        (size_t)kDdaLL128WireWordsPerSlice);
 }
 
+// Packs this warp's L slices s0 + u * wstride (u < L) and pushes them to the
+// peer's slot. Kept free of branches between the loads and the stores: any branch
+// there makes each slice's loads land before the next slice's are issued.
+template <int L>
+__device__ __forceinline__ void ddaLL128AgSendSlices(const int8_t* srcBytes, uint64_t* scatterSlot,
+                                                     size_t perRankBytes, size_t s0, size_t wstride,
+                                                     uint64_t flag, int lane, bool flagLane) {
+  uint64_t regs[L][kDdaLL128WordsPerThread];
+#pragma unroll
+  for (int u = 0; u < L; ++u) {
+    const size_t dataByte = (s0 + (size_t)u * wstride) * (size_t)kDdaLL128DataBytesPerSlice;
+    const size_t rem = perRankBytes - dataByte;
+    const int eltInSlice = rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+    ddaLL128LoadRegsBeginBranchFree<int8_t>(regs[u], srcBytes + dataByte, eltInSlice, lane, flagLane);
+  }
+#if defined(__HIP_DEVICE_COMPILE__) && __has_builtin(__builtin_amdgcn_sched_barrier)
+  // Without it the scheduler moves the flag-lane shuffle up between the loads, and
+  // the loads after the shuffle wait for the ones before it.
+  __builtin_amdgcn_sched_barrier(0);
+#endif
+#pragma unroll
+  for (int u = 0; u < L; ++u) {
+    ddaLL128LoadRegsFinish(regs[u], flagLane);
+    ddaLL128StoreWire(scatterSlot + (s0 + (size_t)u * wstride) * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane,
+                      regs[u], flag, flagLane);
+  }
+}
+
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
 // peer; grid.y splits that peer's slices across blocks, and a warp takes UNROLL
 // of its slices per pass so that many are in flight at once. Each column packs
@@ -51,6 +79,7 @@ __launch_bounds__(1024)
                                           int epochLen, // number of cells in epochDev
                                           size_t slicesTotal, // slices this call uses
                                           size_t bankSize) { // scratch bank size (from host)
+  static_assert(UNROLL == 1 || UNROLL == 2 || UNROLL == 4, "Phase 1 dispatches passes of up to 4 slices");
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
 
@@ -86,28 +115,27 @@ __launch_bounds__(1024)
     (uint64_t)peer * (uint64_t)slotWords;
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perRankBytes;
 
-  // Phase 1: pack and push this column's slices to the one peer it owns.
+  // Phase 1: pack and push this column's slices to the one peer it owns. A
+  // warp's last pass can hold fewer than UNROLL of them.
   for (size_t s0 = gwarp; s0 < slicesTotal; s0 += pstride) {
-    uint64_t regs[UNROLL][kDdaLL128WordsPerThread];
+    int live = 1;
 #pragma unroll
-    for (int u = 0; u < UNROLL; ++u) {
-      const size_t s = s0 + (size_t)u * wstride;
-      if (s < slicesTotal) {
-        const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
-        const size_t rem = perRankBytes - dataByte;
-        const int eltInSlice =
-          rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-        ddaLL128LoadRegsBegin<int8_t>(regs[u], srcBytes + dataByte, eltInSlice, lane, flagLane);
-      }
+    for (int u = 1; u < UNROLL; ++u) {
+      if (s0 + (size_t)u * wstride < slicesTotal) live = u + 1;
     }
-#pragma unroll
-    for (int u = 0; u < UNROLL; ++u) {
-      const size_t s = s0 + (size_t)u * wstride;
-      if (s < slicesTotal) {
-        ddaLL128LoadRegsFinish(regs[u], flagLane);
-        ddaLL128StoreWire(
-          scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs[u], flag, flagLane);
-      }
+    switch (live) {
+    case 4:
+      ddaLL128AgSendSlices<4>(srcBytes, scatterSlot, perRankBytes, s0, wstride, flag, lane, flagLane);
+      break;
+    case 3:
+      ddaLL128AgSendSlices<3>(srcBytes, scatterSlot, perRankBytes, s0, wstride, flag, lane, flagLane);
+      break;
+    case 2:
+      ddaLL128AgSendSlices<2>(srcBytes, scatterSlot, perRankBytes, s0, wstride, flag, lane, flagLane);
+      break;
+    default:
+      ddaLL128AgSendSlices<1>(srcBytes, scatterSlot, perRankBytes, s0, wstride, flag, lane, flagLane);
+      break;
     }
   }
 

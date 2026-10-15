@@ -186,6 +186,24 @@ __device__ __forceinline__ void ddaLL128LoadRegsBegin(
   }
 }
 
+// ddaLL128LoadRegsBegin without the per-lane branches. A load behind a branch has
+// to land before the next one issues, so here every lane issues all four, and a
+// lane with no chunk of its own reads one that is in bounds instead: a flag lane's
+// odd pairs read the neighbouring lane's chunk, which ddaLL128LoadRegsFinish and
+// the flag word overwrite, and lanes past eltN read the slice's first chunk, which
+// the receiver never unpacks. `src` must hold at least 16 bytes.
+template <typename T>
+__device__ __forceinline__ void ddaLL128LoadRegsBeginBranchFree(
+    uint64_t (&regs)[kDdaLL128WordsPerThread], const T* src, int eltN, int wid, bool flag) {
+  constexpr int EltPer16B = 16 / sizeof(T);
+#pragma unroll
+  for (int g = 0; g < kDdaLL128Pairs; g++) {
+    const int ix = ddaLL128ChunkIx(g, (flag && g % 2 == 1) ? wid - 1 : wid);
+    const int elt = ix * EltPer16B < eltN ? ix * EltPer16B : 0;
+    ddaLL128Load16B(reinterpret_cast<const uint64_t*>(src + elt), regs[2 * g], regs[2 * g + 1]);
+  }
+}
+
 __device__ __forceinline__ void ddaLL128LoadRegsFinish(uint64_t (&regs)[kDdaLL128WordsPerThread], bool flag) {
 #pragma unroll
   for (int g = 1; g < kDdaLL128Pairs; g += 2)  // move flag-lane data out of odd regs
