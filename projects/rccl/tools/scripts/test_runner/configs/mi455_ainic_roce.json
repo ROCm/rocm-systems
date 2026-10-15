@@ -4040,6 +4040,11 @@
           "name": "AsymmetricVisibility.CommInitRankAllReduce",
           "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
           "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"
+        },
+        {
+          "name": "AsymmetricVisibility.OneGpuPerRankAllReduce",
+          "description": "Topology GPU dev index when each rank sees only its own GPU",
+          "test_filter": "AsymmetricVisibility.OneGpuPerRankAllReduce"
         }
       ]
     },
