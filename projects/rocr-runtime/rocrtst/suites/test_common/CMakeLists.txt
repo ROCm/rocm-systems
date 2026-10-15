@@ -723,6 +723,12 @@ set_tests_properties(intercept_queue_logic_test PROPERTIES
   LABELS "quick;standard;pr;pre-commit"
   TIMEOUT 60)
 
+# Queue event lifetime regression: real KFD or CPU emulation, no kernels.
+add_subdirectory(
+    "${ROCRTST_ROOT}/suites/functional/queue_event_lifetime"
+    "${PROJECT_BINARY_DIR}/queue_event_lifetime"
+)
+
 #Build kernels
 add_custom_target(rocrtst_kernels ALL DEPENDS ${HSACO_TARG_LIST})
 
@@ -793,6 +799,8 @@ if(EXISTS "${TEST_CATEGORIES_CMAKE}" AND EXISTS "${TEST_CATEGORIES_YAML}")
         APPEND
         "${INSTALL_TEST_FILE}"
         "\n"
+        "add_test(queue_event_lifetime_test \"../queue_event_lifetime_test\")\n"
+        "set_tests_properties(queue_event_lifetime_test PROPERTIES LABELS \"standard;stress\" TIMEOUT 60 SKIP_RETURN_CODE 77)\n\n"
         "add_test(intercept_queue_logic_test \"../intercept_queue_logic_test\")\n"
         "set_tests_properties(intercept_queue_logic_test PROPERTIES LABELS \"quick;standard;pr;pre-commit\" TIMEOUT 60)\n\n"
     )

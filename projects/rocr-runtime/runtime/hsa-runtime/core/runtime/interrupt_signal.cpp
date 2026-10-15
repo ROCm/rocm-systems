@@ -111,6 +111,12 @@ InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value, HsaEvent* use
   signal_.kind = AMD_SIGNAL_KIND_USER;
 }
 
+InterruptSignal::InterruptSignal(hsa_signal_value_t initial_value,
+                                 std::shared_ptr<HsaEvent> use_event)
+    : InterruptSignal(initial_value, use_event.get()) {
+  shared_event_ = std::move(use_event);
+}
+
 InterruptSignal::~InterruptSignal() {
   if (free_event_) Runtime::runtime_singleton_->GetEventPool()->free(event_);
 }

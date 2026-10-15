@@ -403,9 +403,11 @@ class AqlQueue : public core::Queue, private core::LocalSignal, public core::Doo
   metadata_prefetch_pkt_version barrier_version_;
 
   // Shared event used for queue errors
-  static __forceinline HsaEvent*& queue_event() {
-    static HsaEvent* queue_event_ = nullptr;
-    return queue_event_;
+  static __forceinline std::shared_ptr<HsaEvent>& queue_event() {
+    // Like queue_lock()/queue_count(), this holder must survive static teardown.
+    // Its event is still released when the final queue and retained signals end.
+    static auto* queue_event_ = new std::shared_ptr<HsaEvent>();
+    return *queue_event_;
   }
   // Queue count - used to ref count queue_event_
   static __forceinline std::atomic<uint32_t>& queue_count() {

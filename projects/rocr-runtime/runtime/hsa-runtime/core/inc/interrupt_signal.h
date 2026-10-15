@@ -100,6 +100,10 @@ class InterruptSignal : private LocalSignal, public Signal {
   explicit InterruptSignal(hsa_signal_value_t initial_value,
                            HsaEvent* use_event = NULL);
 
+  // Queue callbacks can retain a signal after its queue is destroyed. Keep the
+  // shared queue event alive for the full lifetime of each retained signal.
+  InterruptSignal(hsa_signal_value_t initial_value, std::shared_ptr<HsaEvent> use_event);
+
   ~InterruptSignal();
 
   // Below are various methods corresponding to the APIs, which load/store the
@@ -202,6 +206,8 @@ class InterruptSignal : private LocalSignal, public Signal {
   /// @variable Indicates whether the signal should release the event when it
   /// closes or not.
   bool free_event_;
+
+  std::shared_ptr<HsaEvent> shared_event_;
 
   /// Used to obtain a globally unique value (address) for rtti.
   static __forceinline int& rtti_id() {

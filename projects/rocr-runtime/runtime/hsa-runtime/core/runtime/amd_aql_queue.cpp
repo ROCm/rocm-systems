@@ -225,8 +225,7 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     std::lock_guard<std::mutex> _lock(queue_lock());
     queue_count()--;
     if (queue_count() == 0) {
-      core::InterruptSignal::DestroyEvent(queue_event());
-      queue_event() = nullptr;
+      queue_event().reset();
     }
   });
 
@@ -242,10 +241,11 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
     if (queue_event() == nullptr) {
       assert(queue_count() == 1 && "Inconsistency in queue event reference counting found.\n");
 
-      queue_event() = core::InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
-      if (queue_event() == nullptr)
+      HsaEvent* event = core::InterruptSignal::CreateEvent(HSA_EVENTTYPE_SIGNAL, false);
+      if (event == nullptr)
         throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                  "Queue event creation failed.\n");
+      queue_event().reset(event, core::InterruptSignal::DestroyEvent);
     }
     auto Signal = new core::InterruptSignal(0, queue_event());
     assert(Signal != nullptr && "Should have thrown!\n");
@@ -273,11 +273,9 @@ AqlQueue::AqlQueue(core::SharedQueue* shared_queue, GpuAgent* agent, size_t req_
   hsa_status_t status;
   if (core::Runtime::runtime_singleton_->KfdVersion().supports_exception_debugging) {
     queue_rsrc.ErrorReason = &exception_signal_->signal_.value;
-    status =
-        agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
-                                    ring_buf_, ring_buf_alloc_bytes_,
-                                    ring_buf_metadata_alloc_bytes_,
-                                    queue_event(), queue_rsrc);
+    status = agent->driver().CreateQueue(
+        node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0, ring_buf_, ring_buf_alloc_bytes_,
+        ring_buf_metadata_alloc_bytes_, queue_event().get(), queue_rsrc);
   } else {
     status = agent->driver().CreateQueue(node_id, HSA_QUEUE_COMPUTE_AQL, 100, priority_, 0,
                                          ring_buf_, ring_buf_alloc_bytes_,
@@ -403,8 +401,7 @@ AqlQueue::~AqlQueue() {
     std::lock_guard<std::mutex> lock(queue_lock());
     queue_count()--;
     if (queue_count() == 0) {
-      core::InterruptSignal::DestroyEvent(queue_event());
-      queue_event() = nullptr;
+      queue_event().reset();
     }
   }
   agent_->system_deallocator()(pm4_ib_buf_);
