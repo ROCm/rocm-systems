@@ -5,9 +5,55 @@
  ************************************************************************/
 
 #include <gtest/gtest.h>
+#include <csignal>
+#include <cstring>
+#include <execinfo.h>
 #include <fcntl.h>
+#include <unistd.h>
 #include "EnvVars.hpp"
 #include "TestBed.hpp"
+
+// DEBUG ONLY (revert before merge): a worker that dies on a signal otherwise only
+// shows up as "Child N pipe closed unexpectedly" in the parent.
+namespace
+{
+  int crashChildId = -1;
+
+  void WorkerCrashHandler(int sig)
+  {
+    char msg[160];
+    int const len = snprintf(msg, sizeof(msg), "[CHILD FATAL] child %d pid %d caught signal %d (%s); backtrace:\n",
+                             crashChildId, static_cast<int>(getpid()), sig, strsignal(sig));
+    if (len > 0) (void)!write(STDERR_FILENO, msg, static_cast<size_t>(len));
+    void* frames[64];
+    int const numFrames = backtrace(frames, 64);
+    backtrace_symbols_fd(frames, numFrames, STDERR_FILENO);
+    signal(sig, SIG_DFL);
+    raise(sig);
+  }
+
+  void InstallWorkerCrashHandler(int childId)
+  {
+    crashChildId = childId;
+    // backtrace() loads libgcc on first use, which is not async-signal-safe.
+    void* warmup[1];
+    (void)backtrace(warmup, 1);
+
+    static char altStack[64 * 1024];
+    stack_t ss = {};
+    ss.ss_sp = altStack;
+    ss.ss_size = sizeof(altStack);
+    sigaltstack(&ss, nullptr);
+
+    struct sigaction sa = {};
+    sa.sa_handler = WorkerCrashHandler;
+    sa.sa_flags = SA_ONSTACK;
+    sigemptyset(&sa.sa_mask);
+    for (int sig : {SIGSEGV, SIGBUS, SIGABRT, SIGFPE, SIGILL})
+      sigaction(sig, &sa, nullptr);
+  }
+}
+
 int main(int argc, char **argv)
 {
 // 1. Intercept Child Worker Mode immediately at startup
@@ -35,6 +81,8 @@ int main(int argc, char **argv)
                       << ") are invalid or closed in child process " << childId << std::endl;
             return 1;
         }
+
+        InstallWorkerCrashHandler(childId);
 
         // Instantiate child worker
         RcclUnitTesting::TestBedChild child(childId, verbose, printValues, useRankThreading);
