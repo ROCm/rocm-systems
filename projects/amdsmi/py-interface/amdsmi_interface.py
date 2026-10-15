@@ -2870,12 +2870,12 @@ def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, 
     Returns:
         Dict[str, Any]: with keys
 
-            primary (str): the primary CUID. Always "" in this release: every
-                CUID is temporary, and a temporary CUID has no primary. An
-                empty value is not an error.
+            primary (str): the primary CUID. "" for a temporary CUID, which
+                has no primary, and for any caller other than root. An empty
+                value is not an error.
             derived (str): the component's CUID: its DerivedID when it has a
-                permanent CUID, otherwise its temporary CUID (always, in this
-                release). It names the component without disclosing its serial.
+                permanent CUID, otherwise its temporary CUID. It names the
+                component without disclosing its serial.
             component_type (str): the component's type, reported beside the
                 CUID rather than decoded from it, by name (PLATFORM,
                 CPU, GPU, NIC, NPU, STORAGE, MEMORY, GENPCIE, GENC, RACKTRAY,

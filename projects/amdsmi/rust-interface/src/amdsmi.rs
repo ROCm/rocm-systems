@@ -6264,8 +6264,8 @@ pub fn amdsmi_get_link_topology(
 /// Retrieves the CUID of the GPU or GPU partition with the specified processor handle.
 ///
 /// `derived` is the component's CUID: its DerivedID when it has a permanent CUID, otherwise its
-/// temporary CUID (always, in this release). It names the component without disclosing its
-/// serial. `primary` is always empty in this release: a temporary CUID has no primary. A
+/// temporary CUID. It names the component without disclosing its serial. `primary` is empty for a
+/// temporary CUID, which has no primary, and for any caller other than root. A
 /// temporary CUID has `auxiliary` set (amd-smi shows it as `temporary`); do not record it
 /// alongside permanent CUIDs.
 ///

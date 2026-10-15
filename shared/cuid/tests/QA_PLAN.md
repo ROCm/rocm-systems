@@ -10,29 +10,37 @@ CTest discovers three wrappers: `cuid_unprivileged_tests`,
 `cuidtst.*` cases; some skip without root. Read skip reasons on each run: a
 green CTest result alone does not establish privileged or hardware coverage.
 
-**No partition-capable GPU has run this qualification.** Partition and VF unit
-tests use fixtures; they do not establish CPX/DPX or guest behavior on hardware.
+Partition and VF unit tests use fixtures; they do not establish CPX/DPX or
+guest behavior on hardware.
 
 ## Lookup configurations
 
-* **Tier 1:** the driver publishes `cuid_unit_id` and `cuid_primary`. A
-  partition takes its UnitID from `cuid_unit_id`; root reads its serial from
-  `cuid_primary`.
-* **Tier 2:** the driver publishes nothing. A partition takes its UnitID from
-  the KFD topology.
+* **Tier 1:** the driver publishes CUIDs. With a node key set, amd-smi reports
+  the derived value verbatim with source `DRIVER`, for root and ordinary users
+  alike. Before a key is set `cuid_derived` fails with `ENODATA`, which leaves
+  whole GPUs and partitions temporary, a partition's UnitID from
+  `cuid_unit_id`; root reads its serial from `cuid_primary`.
+* **Tier 2:** the driver publishes nothing. Whole GPUs and partitions get
+  temporary CUIDs with source `LIBRARY`, a partition's UnitID from the KFD
+  topology.
 
-The library holds no node key, so every CPU,
-NIC, NPU, Platform, GPU and partition CUID is temporary, with source
-`LIBRARY`, for root and ordinary users alike.
+CPU, NIC, NPU and Platform CUIDs are derived with the node key for root when
+amdgpu holds one (read from any `cuid_seed`) and are temporary otherwise.
 
 | Axis | Cases to distinguish |
 |---|---|
-| Privilege | Root and ordinary user get the same CUIDs |
+| Privilege | Root and ordinary user; the node key and primary identity are privileged |
 | Driver support | CUID attributes present and absent |
-| Hardware | Whole GPU, spatial partition, SR-IOV VF |
+| Node key | None (`cuid_seed` and `cuid_derived` fail with `ENODATA`), set by an administrator, no amdgpu |
+| Firmware identity | Adopted system UUID and constructed Platform identity |
+| Hardware | Whole GPU, no readable serial, spatial partition, SR-IOV VF |
 
-Every CUID is temporary: an HMAC keyed by the 32-octet structure S, which
-holds the machine-id. Nothing in this release builds or decodes a primary.
+A constructed primary encodes component identity. An adopted firmware primary
+is opaque and need not be UUIDv8. Canonical derived CUIDs depend on the node
+key; a temporary CUID is an HMAC keyed by the 32-octet structure S, which holds
+the machine-id, and does not change on node re-key. Do not decode adopted
+UUIDs as constructed payloads or expect every derived value to move after
+provisioning.
 
 ## Builds
 
@@ -88,6 +96,15 @@ ctest --test-dir "$W/build-cuid" --output-on-failure -V
 python3 -m pytest projects/amdsmi/tests/python/unit/gpu/test_cli_cuid_*.py -q
 ```
 
+**Setting the key re-keys the host.** A `cuid_seed` write replaces the key
+amdgpu holds and every derived CUID on the host. On the host, only
+`cuidtstPrivileged.HMAC` sets a key and amd-smi's
+`GpuUnit.CuidSetSeedRefreshFailureWithTheKeyAlreadyInPlace` writes the key in
+use back, both only with `AMDCUID_TEST_ALLOW_SET_KEY=1`; run them only on a
+host whose key may change.
+`cuid_gpu_paths` also sets keys, but only into its fixture `/sys` inside a
+private mount namespace.
+
 `AMDCUID_BUILD_LIFECYCLE_TESTS=ON` adds `cuid_gpu_paths`, which runs GPU
 discovery against a synthetic `/sys` in a private mount namespace as root. Its
 build directory must be outside `/tmp`, which the namespace replaces, and on a
@@ -95,10 +112,23 @@ filesystem that allows device nodes (not `nodev`); otherwise it skips. Run it
 with `sudo ctest --test-dir <build> -R cuid_gpu_paths --output-on-failure`.
 Besides GPU path resolution it covers partitions named by `cuid_unit_id` or
 by KFD, synthetic MI350X topology replays in SPX, DPX, QPX and
-CPX, and a non-AMD display device. A fixture that opts in
-also discovers a CPU (from the host's CPUID and `/proc/cpuinfo`), a NIC
-against synthetic PCI data, and the Platform from the host's machine-id alone,
-all temporary.
+CPX, node-key loading from `cuid_seed` (a key, `ENODATA`, a short read,
+`EPERM` for root without `CAP_SYS_ADMIN`, and a `cuid_seed` on a device bound
+to another driver, which is ignored), `amdcuid_set_hash_key()` through
+`cuid_seed`, its `UNSUPPORTED` without amdgpu and its `FILE_ERROR` when reading
+the new key back fails, no copy of the key left in a process after it drops
+root, after fingerprinting it, or in a child forked during a call or an HMAC,
+no key held where key storage cannot be protected from fork and core dumps
+while temporary CUIDs still work there, `cuidtstPrivileged.HMAC` setting a key
+only with `AMDCUID_TEST_ALLOW_SET_KEY=1`, `ENODATA` from `cuid_derived` on
+whole GPUs and partitions, a non-AMD display device, and a whole GPU before
+and after the driver publishes `cuid_derived`. The shim stands for `ENODATA`
+with an empty `cuid_seed` or `cuid_derived`, and fails a `cuid_seed` read with
+`EPERM` without `CAP_SYS_ADMIN`, as amdgpu does. A fixture that opts in also
+discovers a CPU (from the host's CPUID and `/proc/cpuinfo`), a NIC against
+synthetic PCI data, and the Platform from the host's machine-id; the node-key
+tests add a synthetic SMBIOS system UUID for the Platform's and CPU's
+PrimaryIDs.
 
 For tier 2 use a host without CUID attributes. The fixture tests do not
 require loading or unloading a GPU driver.
@@ -114,9 +144,10 @@ require loading or unloading a GPU driver.
   `n >= 2` has `n*(n-1)/2 + 1 + k`, from `cuid_unit_id` or KFD; an SR-IOV
   GPU VF's is 0 and a NIC function's, VF or not, is its function number. Values above `0x1fff` are refused, not masked. The suite checks unchanged output on refusal
   and propagation through GPU reconstruction.
-* A partition in DPX and above reports its own temporary CUID, never its
-  parent's; in SPX amd-smi reports the whole GPU's. A partition whose UnitID
-  cannot be determined reports none.
+* Compare every driver-published GPU derived CUID against both libamdcuid and
+  amd-smi. A partition in DPX and above must report its own driver value or
+  its own temporary CUID, never its parent's; in SPX amd-smi reports the whole
+  GPU's. Fixtures do not establish hardware coverage.
 * Handle tests require success for discovered devices and reject absent ones.
   `ColdLookupEnvironment` starts before the test fixtures enumerate, but later
   calls in that environment share the manager warmed by the first lookup; it
@@ -126,7 +157,10 @@ require loading or unloading a GPU driver.
   `component_type`, `source`, `temporary`, `bdf` and `device_path` per
   component; `list` reports `cuid`, `source`, `temporary` and
   `cuid_metadata_status`. No primary in any CLI output; the same field names
-  and order in human, JSON and CSV.
+  and order in human, JSON and CSV. Only `node --cuid` reports the node key's
+  state (`seed_provisioned`, `seed_fingerprint`). Python seed tests simulate
+  provisioning and do not establish real driver behavior.
+* The library reads `cuid_seed` end to end from a fixture in `cuid_gpu_paths`.
 * GPU discovery lists AMD GPUs (Vendor ID `0x1002`) only. `cuid_gpu_paths`
   checks this with a synthetic `0x1a03` display device; on a host with a BMC
   display device, `amdcuid_get_all_handles()` must not return it either.

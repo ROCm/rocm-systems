@@ -12,7 +12,7 @@ In a data center environment, a variety of devices, including GPUs, CPUs, and NI
 
 The Component Unified ID (CUID) library solves this problem by giving each component (the platform, AMD and Intel CPU packages, AMD GPUs and GPU partitions, AMD NPUs and network PCI functions) a deterministic ID. CUIDs are formatted as UUIDv8 values. This release produces temporary CUIDs: an HMAC (Keyed-Hash Message Authentication Code) of the host's machine-id and the component's PCIe address, IDs and UnitID. They read no hardware serial, are the same for every caller, and survive reboots and driver upgrades, but change when the machine-id changes, the component moves to another slot, or a GPU's compute partition mode changes. To learn more about CUID, see :ref:`what-is-cuid`.
 
-Administrators list CUIDs with amd-smi; programs link the static library.
+Administrators set the node key and list CUIDs with amd-smi; programs link the static library.
 
 The code is open and hosted at `<https://github.com/ROCm/rocm-systems/blob/develop/shared/cuid>`_.
 
@@ -27,7 +27,7 @@ The documentation is structured as follows:
 
   .. grid-item-card:: How to
 
-    * :ref:`read-cuids`
+    * :ref:`manage-node-key`
     * `Sample program using CUID API <https://github.com/ROCm/rocm-systems/blob/develop/shared/cuid/example/main.cc>`_
 
   .. grid-item-card:: API reference

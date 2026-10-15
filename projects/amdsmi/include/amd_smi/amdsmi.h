@@ -3614,10 +3614,10 @@ amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_han
 /**
  *  @brief Source that answered a CUID lookup.
  *
- *  In this release the library computes every CUID, so the source is
- *  ::AMDSMI_CUID_SOURCE_LIBRARY, or ::AMDSMI_CUID_SOURCE_UNKNOWN when the
- *  query fails. Whether a CUID is permanent is told by `auxiliary`, not by
- *  the source.
+ *  ::AMDSMI_CUID_SOURCE_DRIVER for a CUID amdgpu published,
+ *  ::AMDSMI_CUID_SOURCE_LIBRARY for one the library computed, or
+ *  ::AMDSMI_CUID_SOURCE_UNKNOWN when the query fails. Whether a CUID is
+ *  permanent is told by `auxiliary`, not by the source.
  */
 typedef enum {
   AMDSMI_CUID_SOURCE_UNKNOWN = 0,  //!< Source could not be determined
