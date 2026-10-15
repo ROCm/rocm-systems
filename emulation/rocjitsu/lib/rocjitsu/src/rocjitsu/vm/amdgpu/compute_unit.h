@@ -1482,7 +1482,7 @@ protected:
   };
   /// Only the scope pointer is thread-local; the snapshot itself lives on the
   /// quantum's stack and releases all backing references before returning.
-  static thread_local InstructionVmSnapshot *instruction_vm_snapshot_;
+  static constinit thread_local InstructionVmSnapshot *instruction_vm_snapshot_;
   /// @brief Restore the enclosing fetch scope after a quantum or nested issue.
   /// @details A null scope prevents nested memory requests from borrowing fetch access.
   class ScopedInstructionVmSnapshot {

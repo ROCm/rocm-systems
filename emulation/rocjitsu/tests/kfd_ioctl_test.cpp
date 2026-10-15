@@ -2094,18 +2094,22 @@ TEST_P(KfdGwsFailureTest, MultipleCuFailuresPublishWithoutAcknowledgment) {
     if (GetParam() == GwsFailureKind::SemaphoreTimeout)
       cus[i]->gws_sema_p(*waves[i], 0);
   }
-  // Queue both failures before either CU flushes, reproducing a pooled batch
-  // deterministically without relying on host scheduling or wall-time limits.
-  cus[0]->with_wave_state_locked([&] {
-    cus[1]->with_wave_state_locked([&] {
-      for (unsigned i = 0; i < waves.size(); ++i) {
-        if (GetParam() == GwsFailureKind::UninitializedBarrier)
-          cus[i]->gws_barrier_arrive(*waves[i], 0, 1);
-        else
-          cus[i]->step();
-      }
+  const auto fail_wave = [&](unsigned i) {
+    cus[i]->with_wave_state_locked([&] {
+      if (GetParam() == GwsFailureKind::UninitializedBarrier)
+        cus[i]->gws_barrier_arrive(*waves[i], 0, 1);
+      else
+        cus[i]->step();
     });
+  };
+  // Queue the second failure after the first CU unlocks but before it flushes.
+  // Holding a peer CU's lock during notification delivery would invert the CP's
+  // queue-lock -> wave-lock order, unlike the production pooled execution path.
+  cus[0]->set_notification_flush_hook_for_testing([&] {
+    EXPECT_EQ(publications.load(), 0u);
+    fail_wave(1);
   });
+  fail_wave(0);
   EXPECT_EQ(publications.load(), 2u);
   EXPECT_EQ(successful_deliveries.load(), 2u);
   for (auto *wave : waves) {

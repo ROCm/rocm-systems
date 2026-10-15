@@ -1670,8 +1670,8 @@ void ComputeUnitCore::issue_async_instruction(Wavefront *active, MmaAdmissionCac
     async_execution::stats.flush();
 }
 
-thread_local ComputeUnitCore::InstructionVmSnapshot *ComputeUnitCore::instruction_vm_snapshot_ =
-    nullptr;
+constinit thread_local ComputeUnitCore::InstructionVmSnapshot
+    *ComputeUnitCore::instruction_vm_snapshot_ = nullptr;
 
 template <bool EnableAsync>
 [[gnu::always_inline]] inline void ComputeUnitCore::issue_instruction_impl(
