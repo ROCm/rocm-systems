@@ -476,6 +476,10 @@ ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, siz
 ncclResult_t rcclDevrGinSegmentRegType(bool isHost, int maxGlobalNumSegments, int* ptrType, bool* needDmabuf);
 // True when NCCL_MULTI_SEGMENT_REGISTER is on and the RMA backend registers per segment (rccl_dev_runtime.cc).
 bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm);
+// RCCL: owner DMA-BUF fds for imported host segments, keyed by local VA. An imported handle cannot re-export one.
+void rcclHostSegmentFdRegister(void* base, size_t size, int fd);
+void rcclHostSegmentFdDeregister(int fd);
+int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset);
 #ifdef ENABLE_WARP_SPEED
 RCCL_PARAM_DECLARE(WarpSpeedARThreshold);
 RCCL_PARAM_DECLARE(WarpSpeedAutoMode);

@@ -45,6 +45,8 @@ struct HybridVmmBuffer
     int                                          exportFd  = -1;
     std::vector<hipMemGenericAllocationHandle_t> handles;
     std::vector<size_t>                          segSizes;
+    // Owner's DMA-BUF fd per segment (-1 for GPU and local); an imported handle cannot re-export one.
+    std::vector<int>                             segFds;
 
     bool valid() const
     {
@@ -55,7 +57,6 @@ struct HybridVmmBuffer
 struct HybridVmmRuntimeSupport
 {
     bool importedHostCpuAccess = false;
-    bool importedPosixReexport = false;
 };
 
 inline HybridVmmRuntimeSupport ProbeHybridVmmRuntimeSupport(int dev)
@@ -66,7 +67,6 @@ inline HybridVmmRuntimeSupport ProbeHybridVmmRuntimeSupport(int dev)
     hipDeviceptr_t va = 0;
     size_t bytes = 0;
     int fd = -1;
-    int reexportFd = -1;
     bool mapped = false;
     hipMemAccessDesc access = {};
 
@@ -91,10 +91,6 @@ inline HybridVmmRuntimeSupport ProbeHybridVmmRuntimeSupport(int dev)
             hipMemHandleTypePosixFileDescriptor) != hipSuccess)
         goto cleanup;
 
-    support.importedPosixReexport =
-        hipMemExportToShareableHandle(
-            &reexportFd, imported, hipMemHandleTypePosixFileDescriptor, 0) == hipSuccess;
-
     if (hipMemAddressReserve(&va, bytes, 0, 0, 0) != hipSuccess ||
         hipMemMap(va, bytes, 0, imported, 0) != hipSuccess)
         goto cleanup;
@@ -114,30 +110,22 @@ inline HybridVmmRuntimeSupport ProbeHybridVmmRuntimeSupport(int dev)
 cleanup:
     if (mapped) (void)hipMemUnmap(va, bytes);
     if (va != 0) (void)hipMemAddressFree(va, bytes);
-    if (reexportFd >= 0) (void)close(reexportFd);
     if (imported != 0) (void)hipMemRelease(imported);
     if (fd >= 0) (void)close(fd);
     if (original != 0) (void)hipMemRelease(original);
     return support;
 }
 
-inline bool CheckHybridVmmRuntimeSupport(int dev, bool requireReexport,
-                                         std::string* reason = nullptr)
+// Collective: every rank must call it. Skips on ROCM-29812. Imported handles are not re-exported.
+inline bool CheckHybridVmmRuntimeSupport(int dev, std::string* reason = nullptr)
 {
     HybridVmmRuntimeSupport local = ProbeHybridVmmRuntimeSupport(dev);
     bool cpuAccessSupported = MPIHelpers::allRanksTrue(local.importedHostCpuAccess);
-    bool reexportSupported = MPIHelpers::allRanksTrue(local.importedPosixReexport);
 
     // TODO(ROCM-29812): Remove this skip gate when imported host VMM CPU access is fixed.
     if (!cpuAccessSupported)
     {
         if (reason) *reason = "ROCM-29812: imported host VMM CPU access is unsupported";
-        return false;
-    }
-    // TODO(ROCM-29815): Remove this skip gate when imported POSIX VMM re-export is fixed.
-    if (requireReexport && !reexportSupported)
-    {
-        if (reason) *reason = "ROCM-29815: imported POSIX VMM re-export is unsupported";
         return false;
     }
     return true;
@@ -148,6 +136,8 @@ inline void FreeHybridVmm(HybridVmmBuffer& b)
     RCCLTestHelpers::ReleaseMappedVmm(b.base, b.totalSize, b.handles, b.segSizes,
                                       /*uniformSegSize=*/0);
     if (b.exportFd >= 0) (void)close(b.exportFd);
+    for (int fd : b.segFds)
+        if (fd >= 0) (void)close(fd);
     b = HybridVmmBuffer{};
 }
 
@@ -340,6 +330,7 @@ inline bool AllocHybridVmm(int dev, size_t gpuBytes, size_t localCpuBytes,
         {
             tmp.handles.push_back(gpuHandle);
             tmp.segSizes.push_back(gpuBytes);
+            tmp.segFds.push_back(-1);
         }
         else
         {
@@ -389,6 +380,7 @@ inline bool AllocHybridVmm(int dev, size_t gpuBytes, size_t localCpuBytes,
         tmp.handles.push_back(segmentHandle);
         if (isLocal) localCpuHandle = 0; // ownership transferred to tmp.handles
         tmp.segSizes.push_back(bytes);
+        tmp.segFds.push_back(isLocal ? -1 : dup(localFd));
         offset += bytes;
     }
     if (localCpuHandle != 0) (void)hipMemRelease(localCpuHandle);

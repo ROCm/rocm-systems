@@ -13,6 +13,10 @@
 #include "rocmwrap.h"
 #include "transport.h"
 
+#include <mutex>
+#include <unistd.h>
+#include <vector>
+
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags) {
   // Skip the probe when cuMem is off on any rank: ROCm 7.0.2.2 faults in hipMemRetainAllocationHandle.
@@ -122,4 +126,40 @@ ncclResult_t rcclDevrGinSegmentRegType(bool isHost, int maxGlobalNumSegments, in
 bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm) {
   // Only RMA backends that register one MR per physical segment can take a multi-segment window.
   return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy;
+}
+
+namespace {
+struct rcclHostSegmentFd {
+  uintptr_t base;
+  size_t size;
+  int fd;
+};
+std::mutex rcclHostSegmentFdsMutex;
+std::vector<rcclHostSegmentFd> rcclHostSegmentFds;
+} // namespace
+
+void rcclHostSegmentFdRegister(void* base, size_t size, int fd) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  rcclHostSegmentFds.push_back({(uintptr_t)base, size, fd});
+}
+
+void rcclHostSegmentFdDeregister(int fd) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  for (size_t i = 0; i < rcclHostSegmentFds.size(); i++) {
+    if (rcclHostSegmentFds[i].fd == fd) {
+      rcclHostSegmentFds.erase(rcclHostSegmentFds.begin() + i);
+      return;
+    }
+  }
+}
+
+int rcclHostSegmentFdLookup(uintptr_t addr, size_t len, uint64_t* offset) {
+  std::lock_guard<std::mutex> lock(rcclHostSegmentFdsMutex);
+  for (const rcclHostSegmentFd& e : rcclHostSegmentFds) {
+    if (addr >= e.base && addr + len <= e.base + e.size) {
+      *offset = addr - e.base;
+      return dup(e.fd);
+    }
+  }
+  return -1;
 }
