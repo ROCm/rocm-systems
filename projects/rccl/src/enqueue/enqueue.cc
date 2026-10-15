@@ -1327,18 +1327,17 @@ static bool rcclP2pBatchEligible(struct ncclComm* comm, ssize_t sendBytes, ssize
 }
 
 // Number of the p2pnChannelsPerPeer parts that a task of collAPI uses and connects.
-// On AINIC ncclTopoComputeP2pChannels raises p2pnChannelsPerPeer to 2 so one peer can saturate a NIC.
-// Scatter already drives all nRanks-1 peers at once from one root and loses 15-30% from 8 MB up with
-// two parts per peer, so it uses only part 0 once the peers cannot each own p2pnChannelsPerPeer
-// channels. It must not connect part 1 either: when scatter connects both parts itself, it stays at
+// Scatter drives all nRanks-1 peers at once from one root, so with p2pnChannelsPerPeer parts its flows
+// can exceed p2pnChannels (on 4 nodes of 8 GPUs with AINIC: 62 flows on 32 channels, 15-30% slower
+// from 16 MB up). ncclTopoComputeP2pChannels gives it p2pnChannelsPerPeerScatter instead: the most
+// parts whose flows fit the pool.
+// It must not connect the extra parts either: when scatter connects both parts itself, it stays at
 // or below the two-part speed even though it sends on part 0 only. Part 1 connected later by another
 // collective does not slow it down. The answer may depend only on values both ends of a pair share
 // (collAPI, comm-wide sizes), never on per-rank task counts, or sender and receiver would disagree on
 // the parts.
 int rcclP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI) {
-  if (collAPI == ncclFuncScatter && comm->nNodes > 1 && comm->p2pnChannelsPerPeer > 1 && rcclUseAinic() &&
-      (comm->nRanks - 1) * comm->p2pnChannelsPerPeer > comm->p2pnChannels)
-    return 1;
+  if (collAPI == ncclFuncScatter) return comm->p2pnChannelsPerPeerScatter;
   return comm->p2pnChannelsPerPeer;
 }
 
@@ -1348,11 +1347,12 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
     ncclFunc_t collAPI;
     int nChannels;
   };
-  // This workaround targets direct P2P/IPC traffic only. When P2P is disabled,
-  // preserve the normal channel selection for the fallback transport.
   if (task == nullptr) return -1;
+  // The Scatter part limit is about network flows, so it applies with P2P disabled too.
   int taskParts = rcclP2pTaskParts(comm, task->collAPI);
   if (taskParts < comm->p2pnChannelsPerPeer) return taskParts;
+  // The policies below target direct P2P/IPC traffic only. When P2P is disabled,
+  // preserve the normal channel selection for the fallback transport.
   if (ncclParamP2pDisable()) return -1;
   constexpr Policy policies[] = {
     // Two-channel full-mesh traffic has high variance on gfx110x. Keep the

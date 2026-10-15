@@ -821,6 +821,8 @@ struct ncclComm {
   // Channels (per peer) for p2p
   int p2pnChannels;
   int p2pnChannelsPerPeer;
+  // Parts per peer for Scatter, at most p2pnChannelsPerPeer (see ncclTopoComputeP2pChannels).
+  int p2pnChannelsPerPeerScatter;
   int p2pChannelShiftSize;
   int p2pSchedGroupSize;
   int p2pMaxPeers;
