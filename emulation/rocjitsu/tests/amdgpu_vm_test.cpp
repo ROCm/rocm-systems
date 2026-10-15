@@ -296,6 +296,32 @@ TEST(VmFixtureSetupTest, ReportsMalformedConfigAndLeavesFixtureEmpty) {
       "Failed to parse JSON config");
 }
 
+// Track each wave incarnation separately: a rollback may reuse the same slot.
+class CancellationLifecyclePlugin : public ExecutionPlugin {
+public:
+  CancellationLifecyclePlugin() : ExecutionPlugin("cancellation_lifecycle") {}
+  uint32_t launches = 0;
+  uint32_t cancellations = 0;
+  uint32_t halts = 0;
+  uint32_t completed_workgroups = 0;
+  uint32_t completed_dispatches = 0;
+  std::function<void(amdgpu::Wavefront &)> on_launch;
+
+  void onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wave) override {
+    ++launches;
+    if (on_launch)
+      on_launch(wave);
+  }
+  void onAmdgpuWavefrontCancelled(amdgpu::Wavefront &wave) override {
+    EXPECT_FALSE(wave.is_halted());
+    EXPECT_GT(wave.num_sgprs(), 0u);
+    ++cancellations;
+  }
+  void onAmdgpuWavefrontHalted(amdgpu::Wavefront &) override { ++halts; }
+  void onAmdgpuWorkgroupCompleted(uint32_t, uint32_t) override { ++completed_workgroups; }
+  void onAmdgpuDispatchExecutionEnd(uint32_t) override { ++completed_dispatches; }
+};
+
 TEST(CommandProcessorTest, LargeInternalWorkgroupsKeepCallbackOrderAndReclaimFailedSetup) {
   class WorkgroupWavesPlugin final : public ExecutionPlugin {
   public:
@@ -10207,66 +10233,148 @@ TEST(Pm4DispatchTest, BooleanPredicationOrdersReadsAndOnlySuppressesFlaggedPacke
 TEST(Pm4DispatchTest, InstructionFailureReclaimsWgpReservationsForOtherQueues) {
   using namespace rocr::llvm::amdhsa;
   constexpr uint32_t kSSubvectorLoopBegin = 0xBD800000u;
-  constexpr uint32_t kWgpLdsBytes = 128 * 1024;
+
   constexpr uint32_t kFirstQueue = 71;
   for (uint32_t dispatch_threads : {1u, 2u}) {
-    for (uint32_t failed_workgroups : {1u, 3u}) {
-      SCOPED_TRACE(std::format("threads={} workgroups={}", dispatch_threads, failed_workgroups));
-      VmFixture f("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
-      f.cp()->set_dispatch_threads(dispatch_threads);
-      auto *snapshots = f.capture_halts();
-      std::array<bool, 2> completed{};
-      std::array<bool, 2> succeeded{};
-      for (uint32_t index = 0; index < 2; ++index) {
-        amdgpu::ComputeQueueConfig queue;
-        queue.queue_id = kFirstQueue + index;
-        ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
+    for (uint32_t failed_workgroups : {1u, 2u, 3u}) {
+      for (uint32_t kWgpLdsBytes : {64u * 1024, 128u * 1024}) {
+        SCOPED_TRACE(std::format("threads={} workgroups={}", dispatch_threads, failed_workgroups));
+        VmFixture f("rdna1", 2, 10, /*lds_size_kb=*/64, /*sgprs_per_wf=*/128);
+        f.cp()->set_dispatch_threads(dispatch_threads);
+        auto *snapshots = f.capture_halts();
+        auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+        auto *observed = lifecycle.get();
+        ASSERT_TRUE(f.plugin_group_->add(std::move(lifecycle)));
+        std::array<bool, 2> completed{};
+        std::array<bool, 2> succeeded{};
+        for (uint32_t index = 0; index < 2; ++index) {
+          amdgpu::ComputeQueueConfig queue;
+          queue.queue_id = kFirstQueue + index;
+          ASSERT_TRUE(f.cp()->register_drm_queue(std::move(queue)));
 
-        const uint64_t code = 0x8000 + index * 0x1000;
-        const uint64_t ib = 0x4000 + index * 0x1000;
-        f.mem()->write32(code, index == 0 ? kSSubvectorLoopBegin : SOPP_S_ENDPGM);
-        std::vector<uint32_t> words;
-        const auto packet = [&](amdgpu::Pm4Opcode opcode, std::initializer_list<uint32_t> payload) {
-          words.push_back(0xC0000000u | ((payload.size() - 1) << 16) | (uint32_t(opcode) << 8));
-          words.insert(words.end(), payload.begin(), payload.end());
-        };
-        uint32_t rsrc1 = 0, rsrc2 = 0;
-        AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, 1);
-        AMDHSA_BITS_SET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, kWgpLdsBytes / 512);
-        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 64, 1, 1});
-        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
-        packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc1, rsrc1, rsrc2});
-        packet(amdgpu::Pm4Opcode::DispatchDirect,
-               {index == 0 ? failed_workgroups : 1u, 1, 1, 1u | (1u << 15)}); // Wave32.
-        for (uint32_t i = 0; i < words.size(); ++i)
-          f.mem()->write32(ib + i * 4, words[i]);
+          const uint64_t code = 0x8000 + index * 0x1000;
+          const uint64_t ib = 0x4000 + index * 0x1000;
+          f.mem()->write32(code, index == 0 ? kSSubvectorLoopBegin : SOPP_S_ENDPGM);
+          std::vector<uint32_t> words;
+          const auto packet = [&](amdgpu::Pm4Opcode opcode,
+                                  std::initializer_list<uint32_t> payload) {
+            words.push_back(0xC0000000u | ((payload.size() - 1) << 16) | (uint32_t(opcode) << 8));
+            words.insert(words.end(), payload.begin(), payload.end());
+          };
+          uint32_t rsrc1 = 0, rsrc2 = 0;
+          AMDHSA_BITS_SET(rsrc1, COMPUTE_PGM_RSRC1_WGP_MODE, 1);
+          AMDHSA_BITS_SET(rsrc2, COMPUTE_PGM_RSRC2_GRANULATED_LDS_SIZE, kWgpLdsBytes / 512);
+          packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 64, 1, 1});
+          packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
+          packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc1, rsrc1, rsrc2});
+          packet(amdgpu::Pm4Opcode::DispatchDirect,
+                 {index == 0 ? failed_workgroups : 1u, 1, 1, 1u | (1u << 15)}); // Wave32.
+          for (uint32_t i = 0; i < words.size(); ++i)
+            f.mem()->write32(ib + i * 4, words[i]);
 
-        amdgpu::Pm4Submission submission;
-        submission.buffers.push_back({ib, uint32_t(words.size())});
-        // Keep the second queue pending until the first reports failure. The
-        // first grid may also have workgroups that never found LDS capacity.
-        submission.ready = [&, index] { return index == 0 || completed[0]; };
-        f.engine->register_as_primary();
-        submission.complete = [&, index](bool success) {
-          EXPECT_FALSE(completed[index]);
-          completed[index] = true;
-          succeeded[index] = success;
-          EXPECT_TRUE(f.cu(0)->is_idle());
-          EXPECT_TRUE(f.cu(1)->is_idle());
-          f.engine->primary_release();
-        };
-        ASSERT_TRUE(f.cp()->submit_pm4(kFirstQueue + index, 0, std::move(submission)));
+          amdgpu::Pm4Submission submission;
+          submission.buffers.push_back({ib, uint32_t(words.size())});
+          // Keep the second queue pending until the first reports failure. The
+          // first grid may also have workgroups that never found LDS capacity.
+          submission.ready = [&, index] { return index == 0 || completed[0]; };
+          f.engine->register_as_primary();
+          submission.complete = [&, index](bool success) {
+            EXPECT_FALSE(completed[index]);
+            completed[index] = true;
+            succeeded[index] = success;
+            EXPECT_TRUE(f.cu(0)->is_idle());
+            EXPECT_TRUE(f.cu(1)->is_idle());
+            f.engine->primary_release();
+          };
+          ASSERT_TRUE(f.cp()->submit_pm4(kFirstQueue + index, 0, std::move(submission)));
+        }
+
+        f.engine->run();
+        EXPECT_EQ(completed, (std::array{true, true}));
+        EXPECT_EQ(succeeded, (std::array{false, true}));
+        EXPECT_TRUE(f.cp()->queue_faulted_for_test(kFirstQueue, 0));
+        EXPECT_FALSE(f.cp()->queue_faulted_for_test(kFirstQueue + 1, 0));
+        EXPECT_EQ(observed->halts, 2u);
+        EXPECT_EQ(observed->completed_workgroups, 1u);
+        EXPECT_EQ(observed->completed_dispatches, 1u);
+        EXPECT_GT(observed->cancellations, 0u);
+        EXPECT_EQ(observed->launches, observed->cancellations + observed->halts);
+        if (kWgpLdsBytes == 64 * 1024 && failed_workgroups == 2) {
+          EXPECT_EQ(observed->launches, 6u);
+          EXPECT_EQ(observed->cancellations, 4u);
+        }
+        ASSERT_EQ(snapshots->snapshots().size(), 2u);
+        for (const auto &wave : snapshots->snapshots())
+          EXPECT_GE(wave.lds_size_bytes, kWgpLdsBytes);
       }
-
-      f.engine->run();
-      EXPECT_EQ(completed, (std::array{true, true}));
-      EXPECT_EQ(succeeded, (std::array{false, true}));
-      EXPECT_TRUE(f.cp()->queue_faulted_for_test(kFirstQueue, 0));
-      EXPECT_FALSE(f.cp()->queue_faulted_for_test(kFirstQueue + 1, 0));
-      ASSERT_EQ(snapshots->snapshots().size(), 2u);
-      for (const auto &wave : snapshots->snapshots())
-        EXPECT_EQ(wave.lds_size_bytes, kWgpLdsBytes);
     }
+  }
+}
+
+TEST(AqlDispatchTest, ForcedCloseCancelsWavesAndReclaimsLdsWithoutCompletion) {
+  for (std::string_view arch : {"cdna4", "rdna1", "cdna5"}) {
+    SCOPED_TRACE(arch);
+    const bool wgp = arch == "rdna1";
+    const bool clustered = arch == "cdna5";
+    VmFixture f(arch, 2, 10, 64, 128);
+    auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+    auto *observed = lifecycle.get();
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::move(lifecycle)));
+    f.soc_ptr->set_plugin_group(group);
+    const uint32_t code[] = {SOPP_S_NOP, clustered ? 0xBFB00000u : SOPP_S_ENDPGM};
+    const uint32_t lds_bytes = wgp ? 128 * 1024 : 64 * 1024;
+    const uint64_t kernel = f.write_kernel(0x1000, code, sizeof(code), 128, 256, 2, lds_bytes, wgp);
+    const auto submit = [&](test::AqlQueue &queue, uint64_t signal) {
+      init_completion_signal(f.mem(), signal);
+      if (clustered) {
+        amdgpu::AmdExtKernelDispatchPacket packet{};
+        packet.header = HSA_PACKET_TYPE_VENDOR_SPECIFIC;
+        packet.amd_format = amdgpu::kHsaAmdPacketTypeExtKernelDispatch;
+        packet.setup = 1;
+        packet.workgroup_size_x = 32;
+        packet.workgroup_size_y = packet.workgroup_size_z = 1;
+        packet.cluster_count_x = packet.cluster_count_y = packet.cluster_count_z = 1;
+        packet.cluster_size_x = 2;
+        packet.cluster_size_y = packet.cluster_size_z = 1;
+        packet.group_segment_size = lds_bytes;
+        packet.kernel_object = kernel;
+        packet.completion_signal.handle = signal;
+        queue.submit(packet);
+      } else {
+        queue.submit(make_dispatch_packet(kernel, signal, 128, 64));
+      }
+    };
+    test::AqlQueue first(f.mem(), f.cp());
+    submit(first, 0x3000);
+    ASSERT_TRUE(f.engine->step());
+    ASSERT_EQ(observed->launches, 2u);
+    EXPECT_EQ(observed->halts, 0u);
+    f.cp()->unregister_queue(1, 0);
+    EXPECT_EQ(observed->cancellations, 2u);
+    EXPECT_EQ(observed->halts, 0u);
+    EXPECT_EQ(observed->completed_workgroups, 0u);
+    EXPECT_EQ(observed->completed_dispatches, 0u);
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x3000), 1);
+    EXPECT_TRUE(f.cu(0)->is_idle());
+    EXPECT_TRUE(f.cu(1)->is_idle());
+    EXPECT_TRUE(f.cp()->cluster_lds_targets(1, 0, 3).empty());
+
+    // Reuse the same queue storage and the entire LDS capacity after close.
+    test::AqlQueue second(f.mem(), f.cp(), test::AqlQueue::DEFAULT_RING_ADDR,
+                          test::AqlQueue::DEFAULT_RING_SIZE, test::AqlQueue::DEFAULT_READ_PTR_ADDR,
+                          test::AqlQueue::DEFAULT_WRITE_PTR_ADDR,
+                          test::AqlQueue::DEFAULT_DOORBELL_ADDR, false, 2);
+    submit(second, 0x4000);
+    for (uint32_t step = 0; step < 1000 && f.engine->step(); ++step) {
+    }
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x4000), 0);
+    EXPECT_FALSE(f.cp()->queue_faulted_for_test(2, 0));
+    EXPECT_EQ(observed->cancellations, 2u);
+    EXPECT_EQ(observed->halts, wgp ? 4u : 2u);
+    EXPECT_EQ(observed->completed_workgroups, 2u);
+    EXPECT_EQ(observed->completed_dispatches, 1u);
+    EXPECT_EQ(observed->launches, observed->cancellations + observed->halts);
   }
 }
 
