@@ -9,7 +9,10 @@ import sys
 from common import iter_group_configs, ERROR, RESET
 
 
-JIRA_RE = re.compile(r"AIRUNTIME-\d+")
+# Known Jira project keys accepted in a skip 'reason'. Add a new key here when
+# a new project starts tracking hip-tests skips.
+JIRA_PROJECTS = ("AIRUNTIME", "ROCM", "SWDEV", "EXSWHTEC", "AIRADSW")
+JIRA_RE = re.compile(r"(?:" + "|".join(JIRA_PROJECTS) + r")-\d+")
 
 
 def parse_args():
@@ -63,8 +66,9 @@ def main():
                 if targets and not (isinstance(reason, str) and reason.strip()):
                     missing_reasons.append(f"  {group}/{case_name}: '{field}'")
                 # A populated skip section with a real reason must cite a Jira
-                # reference (AIRUNTIME-<number>); a reason with no such ref (or a
-                # digitless placeholder) does not count as a real ref.
+                # reference (e.g. AIRUNTIME-2892 or ROCM-123, from a known
+                # project key); a reason with no such ref (or a digitless
+                # placeholder) does not count as a real ref.
                 elif targets and not JIRA_RE.search(reason):
                     missing_jira.append(f"  {group}/{case_name}: '{field}'")
 
@@ -97,7 +101,7 @@ def main():
 
     if missing_jira:
         print(
-            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' 'reason' with no real Jira reference. The reason must contain a real AIRUNTIME-<number> (the placeholder AIRUNTIME-XXXX does not count):{RESET}",
+            f"[check_config] {ERROR}ERROR: The following test cases have a 'disabled'/'unsupported' 'reason' with no real Jira reference. The reason must cite a real Jira reference from a known project ({', '.join(JIRA_PROJECTS)}), e.g. AIRUNTIME-2892; a digitless placeholder like AIRUNTIME-XXXX does not count:{RESET}",
             file=sys.stderr,
         )
         for entry in missing_jira:

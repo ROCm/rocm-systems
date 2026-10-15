@@ -74,8 +74,10 @@ Every test case has its own entry. Currently supported options are:
 `disabled` and `unsupported` share the same syntax and produce the same skip; they differ only in intent (temporary regression versus permanent capability gap).
 Each takes the mapping form `{targets: [...], reason: "..."}`. A section with a
 non-empty `targets` list **must** carry a non-empty `reason`, and that reason **must**
-cite a real Jira reference (`AIRUNTIME-<number>`); both are enforced by `check_config.py`
-in CI. The bare flat-list form (`disabled: [amd_wsl]`) is no longer accepted for a
+cite a real Jira reference from a known project key (**AIRUNTIME, ROCM, SWDEV, EXSWHTEC,
+AIRADSW**), e.g. `AIRUNTIME-2892`; both are enforced by `check_config.py` in CI. The known
+project keys are an allowlist; add a new one by editing the `JIRA_PROJECTS` tuple in
+`check_config.py`. The bare flat-list form (`disabled: [amd_wsl]`) is no longer accepted for a
 non-empty skip. An empty section (`targets: []`) is a no-op and needs no reason. If a
 skip has not yet been triaged, lead the reason with the tracking ticket, e.g.
 `AIRUNTIME-2744 - needs to be re-triaged`.
