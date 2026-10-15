@@ -2203,6 +2203,90 @@ TEST(InstrumentorProbePatch, AnchorExecHighDwordOnAWave64KernelIsAccepted) {
   ASSERT_EQ(result.patches.size(), 1u);
 }
 
+namespace {
+
+// gfx1200 `global_store_b32 v0, v1, s[2:3]`, 12 bytes, from
+// `llvm-mc -triple=amdgcn -mcpu=gfx1200 -show-encoding`.
+constexpr std::array<uint32_t, 3> kGfx12GlobalStoreV0V1S2{0xee068002u, 0x00800000u, 0x00000000u};
+
+// gfx1200 `image_store v[0:3], [v4, v5, v6], s[8:15] dmask:0xf dim:SQ_RSRC_IMG_3D`,
+// 12 bytes, from `llvm-mc -triple=amdgcn -mcpu=gfx1200 -show-encoding`.
+constexpr std::array<uint32_t, 3> kGfx12ImageStoreV4V5V6{0xd3c18002u, 0x00001000u, 0x00060504u};
+
+// The store, then a return. With @p define_base the body first writes the
+// store's SGPR base pair, s[2:3].
+std::vector<uint32_t> gfx12_store_probe_body(bool define_base) {
+  std::vector<uint32_t> body;
+  if (define_base)
+    body.push_back(build_s_mov_b64(2, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  body.insert(body.end(), kGfx12GlobalStoreV0V1S2.begin(), kGfx12GlobalStoreV0V1S2.end());
+  body.push_back(build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4));
+  return body;
+}
+
+// Patch @p body into a Wave32 gfx1200 kernel, passing @p arg_dwords immediate
+// arguments in v0 upward.
+InstrumentedCodeObjectDebug patch_gfx12_probe(const std::vector<uint32_t> &body,
+                                              size_t arg_dwords) {
+  auto target = make_gfx1200_wave32_kernel_elf({0xBF800000u, 0xBF800000u}, /*private_bytes=*/0);
+  auto probe = make_gfx1200_probe_elf("rj_test_probe", body);
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_RDNA4);
+  InstrumentationPoint pt;
+  pt.anchor_offset = 0;
+  pt.probe_obj = &probe_obj;
+  pt.probe_symbol = "rj_test_probe";
+  pt.probe_args.assign(arg_dwords, probe_arg_imm(0));
+  instr.add_point(pt);
+  return instr.patch_with_debug_summaries();
+}
+
+} // namespace
+
+// A probe built around a 12-byte RDNA4 store, with every input defined or
+// passed, is admitted and copied into the patched .text word for word.
+TEST(InstrumentorProbePatch, Rdna4TwelveByteStoreProbeIsCopiedWhole) {
+  const std::vector<uint32_t> body = gfx12_store_probe_body(/*define_base=*/true);
+  const auto result = patch_gfx12_probe(body, /*arg_dwords=*/2);
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  ASSERT_EQ(result.patches.size(), 1u);
+
+  AmdGpuCodeObject patched(result.elf_bytes.data(), result.elf_bytes.size());
+  ASSERT_TRUE(patched.is_valid());
+  const std::vector<uint32_t> text = section_words(patched, ".text");
+  const size_t first = result.patches[0].probe_target_offset / sizeof(uint32_t);
+  ASSERT_LE(first + body.size(), text.size());
+  EXPECT_TRUE(std::equal(body.begin(), body.end(), text.begin() + first));
+}
+
+// Without the definition, the store reads s[2:3] before anything writes it, and
+// two argument dwords supply only v0 and v1.
+TEST(InstrumentorProbePatch, Rdna4TwelveByteStoreProbeWithAnUndefinedBaseIsRefused) {
+  const auto result =
+      patch_gfx12_probe(gfx12_store_probe_body(/*define_base=*/false), /*arg_dwords=*/2);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("reads s2, s3 before defining it"), std::string::npos)
+      << result.errors.front();
+}
+
+// An RDNA4 image store whose address registers, v4..v6, nothing defines. Its
+// decoder names no address register, and the four arguments supply the data
+// registers v0..v3, so without the image check this probe would be admitted.
+TEST(InstrumentorProbePatch, Rdna4ImageProbeIsRefused) {
+  std::vector<uint32_t> body;
+  for (const uint16_t sgpr : {8, 10, 12, 14}) // s[8:15], the image descriptor
+    body.push_back(build_s_mov_b64(sgpr, scalar_positive_inline_u32(0), ROCJITSU_CODE_ARCH_RDNA4));
+  body.insert(body.end(), kGfx12ImageStoreV4V5V6.begin(), kGfx12ImageStoreV4V5V6.end());
+  body.push_back(build_s_setpc_b64(/*s[30:31]=*/30, ROCJITSU_CODE_ARCH_RDNA4));
+
+  const auto result = patch_gfx12_probe(body, /*arg_dwords=*/4);
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("image instruction"), std::string::npos)
+      << result.errors.front();
+}
+
 // The ABI fixes the argument VGPRs at v0 upward, so unlike the envelope's SGPR
 // temps they cannot be re-picked to fit. The default fixture allocates 8 unified
 // VGPRs with the AGPR window at v4, leaving v0..v3 ordinary, so a fifth argument
@@ -2332,7 +2416,66 @@ std::optional<uint16_t> storage_base_from_argument(const std::vector<uint32_t> &
   return std::nullopt;
 }
 
+// Five argument dwords: the buffer pointer, the Wave64 anchor mask, and a site
+// immediate, one more than the kernarg fixture's default allocation leaves
+// ordinary on CDNA.
+std::vector<ProbeArgValue> five_log_buffer_args() {
+  return {{ProbeArgSource::LogBufferPtrLo, 0},
+          {ProbeArgSource::LogBufferPtrHi, 0},
+          {ProbeArgSource::AnchorExecLo, 0},
+          {ProbeArgSource::AnchorExecHi, 0},
+          probe_arg_imm(0)};
+}
+
+InstrumentedCodeObjectDebug patch_five_log_buffer_args(const std::vector<uint8_t> &target) {
+  auto probe = make_gfx950_probe_elf("rj_test_probe", {kProbeSetpcS30S31});
+  AmdGpuCodeObject obj(target.data(), target.size());
+  AmdGpuCodeObject probe_obj(probe.data(), probe.size());
+
+  Instrumentor instr(obj, ROCJITSU_CODE_ARCH_CDNA4);
+  InstrumentationPoint pt = log_buffer_point(probe_obj, /*anchor_offset=*/0);
+  pt.probe_args = five_log_buffer_args();
+  instr.add_point(pt);
+  return instr.patch_with_debug_summaries();
+}
+
 } // namespace
+
+// A kernarg kernel that declares a wider VGPR window admits the fifth argument:
+// 16 unified VGPRs with the AGPR window at v8 leaves v0..v7 ordinary.
+TEST(InstrumentorEntryPrologue, AWiderVgprAllocationAdmitsAFifthArgument) {
+  namespace kd = rocr::llvm::amdhsa;
+  const auto target = test::make_kernarg_kernel_elf(
+      {0xBF800000u, 0xBF800000u}, /*private_bytes=*/0, EF_AMDGPU_MACH_AMDGCN_GFX950,
+      kTestKernargSize, /*wave32=*/false, /*granulated_sgpr_count=*/3, /*entry_text_offset=*/0,
+      /*granulated_vgpr_count=*/1, /*accum_offset=*/1);
+
+  // The patch outcome turns on the AGPR window alone, so check that the helper
+  // wrote both fields.
+  AmdGpuCodeObject obj(target.data(), target.size());
+  ASSERT_TRUE(obj.is_valid());
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(target, text->sectionOffset(), text->size());
+  ASSERT_EQ(kernels.size(), 1u);
+  const kd::kernel_descriptor_t &desc = kernels.front().descriptor;
+  EXPECT_EQ(
+      AMDHSA_BITS_GET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT),
+      1u);
+  EXPECT_EQ(AMDHSA_BITS_GET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET), 1u);
+
+  const auto result = patch_five_log_buffer_args(target);
+  ASSERT_TRUE(result.errors.empty()) << result.errors.front();
+  EXPECT_EQ(result.patches.size(), 1u);
+}
+
+// Control: the default allocation refuses the same point.
+TEST(InstrumentorEntryPrologue, TheDefaultVgprAllocationRefusesAFifthArgument) {
+  const auto result = patch_five_log_buffer_args(make_gfx950_kernarg_kernel_elf());
+  ASSERT_FALSE(result.errors.empty());
+  EXPECT_NE(result.errors.front().find("v0..v4"), std::string::npos) << result.errors.front();
+  EXPECT_NE(result.errors.front().find("only 4 ordinary VGPRs"), std::string::npos)
+      << result.errors.front();
+}
 
 // The prologue loads its pointer out of the kernarg wrapper the CP delivers, so
 // a kernel that never receives a kernarg pointer has nothing to load through.
