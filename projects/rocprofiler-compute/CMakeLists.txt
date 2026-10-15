@@ -1003,7 +1003,7 @@ add_test(
 )
 
 # -----------------------------------
-# Single-pass metric (single-pass metric) + bucket helper unit tests
+# Single-pass metric allocator + bucket helper unit tests
 # -----------------------------------
 
 add_test(
