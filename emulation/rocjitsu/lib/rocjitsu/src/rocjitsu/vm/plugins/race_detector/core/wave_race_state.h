@@ -8,6 +8,7 @@
 #include "rocjitsu/vm/plugins/race_detector/core/profiler_interface.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include <array>
+#include <bit>
 #include <cstdint>
 #include <optional>
 #include <span>
@@ -41,6 +42,10 @@ struct CounterCapacities {
 class WaveRaceState {
 public:
   WaveRaceState(int vgprCount, int sgprCount, WaveId, RaceDetector *, CounterCapacities);
+
+  /// Return to the freshly constructed state while keeping the allocated
+  /// storage, so a finished workgroup's detector can be recycled.
+  void reset();
 
   /// Apply the issue backpressure required before an instruction adds one
   /// token to a finite hardware counter. Call before operand checks when the
@@ -214,6 +219,25 @@ private:
   void regEventCountDec(MemoryEventType type, int reg) {
     regEventCount[static_cast<int>(type)][reg]--;
   }
+
+  /// One bit per register that has ever had an event since the last reset(), so
+  /// that reset() clears only the registers that were used instead of scanning
+  /// the whole register file.
+  struct DirtyRegisters {
+    void resize(size_t count) { words.assign((count + 63) / 64, 0); }
+    void mark(uint32_t reg) { words[reg / 64] |= uint64_t{1} << (reg % 64); }
+    template <typename Fn> void drain(Fn &&fn) {
+      for (size_t w = 0; w < words.size(); ++w) {
+        for (uint64_t bits = words[w]; bits != 0; bits &= bits - 1)
+          fn(static_cast<uint32_t>(w * 64 + std::countr_zero(bits)));
+        words[w] = 0;
+      }
+    }
+    std::vector<uint64_t> words;
+  };
+  DirtyRegisters dirtyVgprs;
+  DirtyRegisters dirtySgprs;
+  DirtyRegisters dirtyTtmps;
 
   std::vector<std::vector<EventId>> vgprMemoryEvents;
   std::vector<std::vector<EventId>> sgprMemoryEvents;

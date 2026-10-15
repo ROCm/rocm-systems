@@ -28,6 +28,7 @@
 #include <array>
 #include <gtest/gtest.h>
 #include <limits>
+#include <vector>
 
 using namespace rocjitsu::plugins::race_detector;
 namespace amdgpu = rocjitsu::amdgpu;
@@ -67,6 +68,52 @@ TEST(RaceDetectorDefaults, CoversEveryMemoryEventType) {
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_SGPR), MemoryOrderClass::UNORDERED);
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::GLOBAL_TO_TTMP), MemoryOrderClass::UNORDERED);
   EXPECT_EQ(defaultMemoryOrder(MemoryEventType::SCALAR_TO_GLOBAL), MemoryOrderClass::UNORDERED);
+}
+
+// ---- Detector reuse ----
+
+TEST(RaceDetector, ResetBehavesLikeAFreshDetector) {
+  // The plugin recycles the detector of a finished workgroup for the next one.
+  // Whatever the previous workgroup left pending, whether register events or LDS
+  // history, must not be visible afterwards, and reports must go to the new handler.
+  std::vector<RaceViolation> first;
+  std::vector<RaceViolation> second;
+  RaceDetector detector(/*nWaves=*/
+                        2, /*vgprCount=*/8, /*sgprCount=*/8, Dim3d(0),
+                        [&first](RaceViolation v) { first.push_back(v); },
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        /*ldsSizeBytes=*/65536);
+  WaveRaceState &wave0 = detector.getWaveRaceState(0);
+
+  // Leave a global load into v1 and an LDS write at byte 100 outstanding.
+  const auto leavePendingState = [&] {
+    wave0.registerEvent(/*pc=*/0, MemoryEventType::GLOBAL_TO_VGPR, {1}, /*execMask=*/1, 0xF,
+                        amdgpu::WaitCounterType::VMCNT, MemoryOrderClass::VMEM);
+    const std::array<uint32_t, 64> ldsAddresses{100};
+    wave0.registerLdsEvent(/*pc=*/4, MemoryEventType::VGPR_TO_LDS, {}, /*execMask=*/1,
+                           /*waveSize=*/64, ldsAddresses, /*bytesPerLane=*/4, 0xF,
+                           amdgpu::WaitCounterType::LGKMCNT, MemoryOrderClass::LDS);
+  };
+  leavePendingState();
+  wave0.checkVgprRead(/*reg=*/1, /*lane=*/0, 0xF);
+  detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
+  ASSERT_EQ(first.size(), 2u);
+
+  detector.reset(Dim3d(3), [&second](RaceViolation v) { second.push_back(v); });
+  EXPECT_EQ(detector.events().totalAllocated(), 0);
+  EXPECT_TRUE(detector.getLdsWriteEvents().empty());
+  wave0.checkVgprRead(/*reg=*/1, /*lane=*/0, 0xF);
+  detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
+  EXPECT_TRUE(second.empty());
+
+  // The recycled detector still detects the same hazards, tagged with the new
+  // workgroup, and the old handler stays silent.
+  leavePendingState();
+  wave0.checkVgprRead(/*reg=*/1, /*lane=*/0, 0xF);
+  detector.validateRead(/*addr=*/100, WaveId{1}, /*lane=*/0, /*nBytes=*/4);
+  ASSERT_EQ(second.size(), 2u);
+  EXPECT_EQ(second[0].workgroupId.x, 3);
+  EXPECT_EQ(first.size(), 2u);
 }
 
 // ---- VGPR races (vmcnt) ----

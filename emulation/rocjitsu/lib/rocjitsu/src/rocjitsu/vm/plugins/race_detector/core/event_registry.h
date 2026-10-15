@@ -164,6 +164,13 @@ public:
     return (entries_[index(id)].execMask >> lane) & 1;
   }
 
+  /// Drop every event and restart numbering at zero. Keeps the storage capacity
+  /// so a recycled registry does not reallocate while it grows again.
+  void clear() {
+    entries_.clear();
+    base_offset_ = 0;
+  }
+
   // -- Test helpers --
 
   /// Number of events currently stored (live + not-yet-trimmed dead).
