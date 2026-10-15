@@ -1338,7 +1338,8 @@ typedef struct {
  */
 typedef struct {
   char driver_version[AMDSMI_MAX_STRING_LENGTH];
-  char driver_date[AMDSMI_MAX_STRING_LENGTH];
+  char driver_date[AMDSMI_MAX_STRING_LENGTH];  //!< Driver release date, such as 2015/01/01
+                                               //!< 00:00; empty when the kernel reports none
   char driver_name[AMDSMI_MAX_STRING_LENGTH];
 } amdsmi_driver_info_t;
 
