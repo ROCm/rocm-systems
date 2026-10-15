@@ -3690,8 +3690,10 @@ TEST_F(NetRegisterMicrotest, GraphRegister_Registered_QueuesCleanupThatDeregiste
     *handle = &reg_;
     return ncclSuccess;
   });
+  ncclComm* deregComm = nullptr;
   ncclReg* deregistered = nullptr;
-  ScopedHook graphDereg(g_commGraphDeregister, [&](ncclComm*, ncclReg* r) {
+  ScopedHook graphDereg(g_commGraphDeregister, [&](ncclComm* c, ncclReg* r) {
+    deregComm = c;
     deregistered = r;
     return ncclSuccess;
   });
@@ -3706,7 +3708,9 @@ TEST_F(NetRegisterMicrotest, GraphRegister_Registered_QueuesCleanupThatDeregiste
   EXPECT_EQ(graphDereg.calls, 0);
   ncclCommCallback* cb = ncclIntruQueueDequeue(&cleanup_);
   ASSERT_NE(cb, nullptr);
-  EXPECT_EQ(cb->fn(&comm_, cb), ncclSuccess);  // frees cb
+  // The callback must use the comm it recorded, not the one it is handed.
+  EXPECT_EQ(cb->fn(reinterpret_cast<ncclComm*>(&flag_), cb), ncclSuccess);  // frees cb
+  EXPECT_EQ(deregComm, &comm_);
   EXPECT_EQ(deregistered, &reg_);
 }
 
@@ -3795,12 +3799,13 @@ class NetProxyRegBufferMicrotest : public NetMicrotestBase {
     sendConn_.transportResources = &sendRes_;
     recvConn_.transportResources = &recvRes_;
     g_exportedFds.clear();
+    g_nextExportFd = 200;
   }
 
   void TearDown() override {
-    for (auto* q : {&sendConn_.proxyMemHandleQueue, &recvConn_.proxyMemHandleQueue})
+    for (auto* q : {&sendConn_.proxyMemHandleQueue, &recvConn_.proxyMemHandleQueue}) {
       while (!ncclIntruQueueEmpty(q)) free(ncclIntruQueueDequeue(q));
-    ResetRocmWrapFakes();
+    }
     NetMicrotestBase::TearDown();
   }
 
@@ -3951,6 +3956,9 @@ TEST_F(NetProxyRegBufferCuMemMicrotest, Reg_DmaBufRegistrationFails_ClosesFdAndF
 
     ASSERT_EQ(Reg(send), ncclSuccess);
 
+    ASSERT_FALSE(exports_.empty());
+    ASSERT_FALSE(net_.regMrDmaBufs.empty());
+    EXPECT_EQ(net_.regMrDmaBufs.back().fd, exports_.back().fd);
     EXPECT_EQ(fcntl(exports_.back().fd, F_GETFD), -1);
     EXPECT_EQ(resp_, reinterpret_cast<void*>(0x10000));
   }
