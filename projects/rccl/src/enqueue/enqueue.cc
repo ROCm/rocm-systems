@@ -1368,12 +1368,11 @@ static int rcclP2pPolicyChannels(struct ncclComm* comm, struct ncclTaskP2p* task
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
-// No-op's are encoded with a -1 size. "channelRound" selects the channels and must be the same for
-// both directions: p2pRound, or rcclP2pNodeMajorRound for a Scatter on its own layout.
+// No-op's are encoded with a -1 size.
 static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannelsMin, int nChannelsMax,
-                                 int p2pRound, int channelRound, int sendRank, void* sendAddr, ssize_t sendBytes,
-                                 int recvRank, void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount,
-                                 uint64_t recvOpCount, const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
+                                 int p2pRound, int sendRank, void* sendAddr, ssize_t sendBytes, int recvRank,
+                                 void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
+                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
   ncclResult_t ret = ncclSuccess;
   int connIndex[2] = {1, 1};
   bool selfSend = (sendRank == comm->rank);
@@ -1398,7 +1397,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   // communicator flag. Keying the map to eligibility collapsed large AllToAll
   // onto the flags-off layout and forced a dual pre-connect. Channel base must
   // also match task_posttuning / init, which have no per-op size.
-  uint8_t base = ncclP2pChannelBaseForRound(comm, channelRound, rcclEffectiveP2pBatchEnable(comm));
+  uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, rcclEffectiveP2pBatchEnable(comm));
   struct ncclProxyOp proxyOps[2] = {};
   int nProxyOps = selfSend ? 0 : 2;
   // Latency-bound send/recv uses one of two separately-generated kernel variants:
@@ -1870,29 +1869,10 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
                             plan->workBytes + 2 * sizeof(struct ncclDevWorkP2p))) {
           return ncclSuccess;
         }
-        int recvChannelRound = recv && rcclP2pScatterNodeMajor(comm, recv->collAPI) ?
-                                 rcclP2pNodeMajorRound(comm, recvRank, comm->rank) :
-                                 *p2pRound;
-        int sendChannelRound = send && rcclP2pScatterNodeMajor(comm, send->collAPI) ?
-                                 rcclP2pNodeMajorRound(comm, comm->rank, sendRank) :
-                                 *p2pRound;
-        if (send != nullptr && recv != nullptr && sendChannelRound != recvChannelRound) {
-          // One work carries one channel base, so directions on different channels get a work each.
-          struct ncclTaskP2p* sendOnly[2] = {nullptr, send};
-          struct ncclTaskP2p* recvOnly[2] = {recv, nullptr};
-          NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendChannelRound, sendRank,
-                                 sendBuff, sendBytes, recvRank, nullptr, -1, send->opCount, 0, planTotalTasks,
-                                 sendOnly));
-          NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, recvChannelRound, sendRank,
-                                 nullptr, -1, recvRank, recvBuff, recvBytes, 0, recv->opCount, planTotalTasks,
-                                 recvOnly));
-        } else {
-          struct ncclTaskP2p* p2pTasks[2] = {recv, send};
-          NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound,
-                                 send ? sendChannelRound : recvChannelRound, sendRank, sendBuff, sendBytes, recvRank,
-                                 recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0,
-                                 planTotalTasks, p2pTasks));
-        }
+        struct ncclTaskP2p* p2pTasks[2] = {recv, send};
+        NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
+                               recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0,
+                               planTotalTasks, p2pTasks));
         if (send != nullptr) {
           ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
           // Profiler - We can overwrite groupAPI event handles here since all operations here belong to the same group
@@ -3895,23 +3875,16 @@ static ncclResult_t p2pTaskAppend(struct ncclComm* comm, struct ncclInfo* info, 
 
   // Mark channels that need pre-connect
   if (comm->rank != peer) {
-    // send/recvSeen covers the channels of the schedule round only, so a Scatter on its own layout
-    // neither relies on it nor sets it.
-    bool ownLayout = rcclP2pScatterNodeMajor(comm, collAPI);
-    if (ownLayout || !(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen)) {
+    if (!(isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen)) {
       int nParts = rcclP2pTaskParts(comm, collAPI);
       // planner->peers[peer].send/recvSeen is private to each comm, so we need to set it anyway.
       // Leave it clear when only some parts are connected, so a later task to this peer that uses
       // all of them still connects the rest.
-      if (!ownLayout && nParts == comm->p2pnChannelsPerPeer)
+      if (nParts == comm->p2pnChannelsPerPeer)
         (isSendNotRecv ? planner->peers[peer].sendSeen : planner->peers[peer].recvSeen) = true;
       int round = 0;
-      if (ownLayout) {
-        round = rcclP2pNodeMajorRound(comm, isSendNotRecv ? comm->rank : peer, isSendNotRecv ? peer : comm->rank);
-      } else {
-        while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
-          round += 1;
-        }
+      while (peer != (isSendNotRecv ? comm->p2pSchedule[round].sendRank : comm->p2pSchedule[round].recvRank)) {
+        round += 1;
       }
       uint8_t base = ncclP2pChannelBaseForRound(comm, round, rcclEffectiveP2pBatchEnable(comm));
       for (int c = 0; c < nParts; c++) {
