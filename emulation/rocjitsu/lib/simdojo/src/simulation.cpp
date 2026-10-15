@@ -13,9 +13,33 @@
 #include <string>
 #include <thread>
 
+#if defined(__linux__)
+#include <sched.h>
+#endif
+
 namespace simdojo {
 
 namespace {
+
+bool can_spin_epoch_wait(uint32_t workers) {
+#if defined(__linux__)
+  cpu_set_t available;
+  if (sched_getaffinity(0, sizeof(available), &available) == 0)
+    return workers <= static_cast<uint32_t>(CPU_COUNT(&available));
+#endif
+  const uint32_t host_threads = std::thread::hardware_concurrency();
+  return host_threads != 0 && workers <= host_threads;
+}
+
+void relax_epoch_wait() {
+#if defined(__i386__) || defined(__x86_64__)
+  __builtin_ia32_pause();
+#elif defined(__aarch64__)
+  __asm__ volatile("yield");
+#else
+  std::this_thread::yield();
+#endif
+}
 
 std::string link_endpoints(const Link &link) {
   return link.src()->full_path() + " -> " + link.dst()->full_path();
@@ -333,6 +357,7 @@ bool SimulationEngine::step() {
 void SimulationEngine::worker_loop(PartitionID partition_id) {
   PartitionContext &ctx = *contexts_[partition_id];
   uint32_t num_threads = config_.num_threads;
+  const bool spin_epoch = num_threads > 1 && can_spin_epoch_wait(num_threads);
 
   while (true) {
     if (done_.load(std::memory_order_acquire) && num_threads == 1)
@@ -454,8 +479,10 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // a finite LBTS, and the next epoch processes it. The cost is one extra
       // epoch per idle-to-busy transition.
       Tick lbts = global_lbts_.load(std::memory_order_acquire);
+      bool processed_events = false;
       while (lbts != TICK_MAX && !ctx.event_queue.empty() &&
              ctx.event_queue.next_event_time() <= lbts) {
+        processed_events = true;
         auto entry = ctx.event_queue.pop();
         process_event(ctx, entry);
         if (done_.load(std::memory_order_acquire)) {
@@ -471,7 +498,21 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       ctx.local_min_outgoing = TICK_MAX;
 
       // Phase 4: Barrier (completion function computes new global_lbts).
-      barrier_->arrive_and_wait();
+      auto arrival = barrier_->arrive();
+      // Busy epochs are short enough that sleeping peers can cost more than
+      // the work itself. Give the completion a bounded chance to publish its
+      // next horizon before entering the library's blocking wait. The horizon
+      // is only a hint: it can stay unchanged, and it is published before the
+      // barrier finishes. Always wait on the actual arrival token below.
+      // Only otherwise-idle partitions spin, leaving CPUs available for work
+      // when multiple partitions are busy. Quiescent and oversubscribed
+      // workers retain the blocking path.
+      if (spin_epoch && lbts != TICK_MAX && !processed_events) {
+        for (uint32_t spin = 0;
+             spin < 8192 && global_lbts_.load(std::memory_order_relaxed) == lbts; ++spin)
+          relax_epoch_wait();
+      }
+      barrier_->wait(std::move(arrival));
       if (done_.load(std::memory_order_acquire)) {
         // request_exit() can set done_ while peers released from the same phase
         // are already entering the next one. Contribute this worker's arrival
