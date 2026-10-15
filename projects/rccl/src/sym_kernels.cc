@@ -35,6 +35,7 @@ constexpr uint32_t kernelMask_LL = 1 << ncclSymkKernelId_AllReduce_AGxLL_R | 1 <
 constexpr uint32_t kernelMask_AG = 1 << ncclSymkKernelId_AllGather_LL | 1 << ncclSymkKernelId_AllGather_LLMC |
                                    1 << ncclSymkKernelId_AllGather_ST | 1 << ncclSymkKernelId_AllGather_STMC |
                                    1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
+                                   1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_AR = 1 << ncclSymkKernelId_AllReduce_AGxLLMC_R | 1 << ncclSymkKernelId_AllReduce_AGxLL_R |
@@ -58,6 +59,7 @@ constexpr uint32_t kernelMask_LSA =
 
 constexpr uint32_t kernelMask_Gin = 1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLD |
                                     1 << ncclSymkKernelId_ReduceScatter_RailA2A_LsaLDMC |
+                                    1 << ncclSymkKernelId_AllGather_RailRing_LsaST |
                                     1 << ncclSymkKernelId_AllGather_RailRing_LsaSTMC;
 
 constexpr uint32_t kernelMask_Tma = 1 << ncclSymkKernelId_AllGather_TmaST | 1 << ncclSymkKernelId_AllGather_TmaSTMC |
@@ -421,7 +423,7 @@ static constexpr size_t ncclSymkArLLWideBytes = 64 << 10;
 static constexpr size_t ncclSymkAgLLWideBusBytes = 512 << 10;
 static constexpr size_t ncclSymkAgWideBlockBusBytes = 64 << 20;
 // Where AllGather's store kernel overtakes LL, which the shared cost model places past 8 MB.
-static constexpr size_t ncclSymkAgStoreMinBusBytes = 4 << 20;
+static constexpr size_t ncclSymkAgStoreMinBusBytes = 1 << 20;
 // Block widths those thresholds select between. 1024 is the widest workgroup gfx950 will launch.
 static constexpr int ncclSymkGfx950NarrowThreads = 256;
 static constexpr int ncclSymkGfx950WideThreads = 512;
