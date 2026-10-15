@@ -114,6 +114,7 @@ namespace {
 struct ProxyInitCall {
   std::vector<ncclSocketAddress> addrs;
   std::vector<uint64_t> uds;
+  ncclSocketAddress own;  // the proxy listen socket's
 };
 std::mutex g_seamMu;
 std::map<ncclComm*, ProxyInitCall> g_proxyInits;
@@ -132,7 +133,7 @@ ncclResult_t ncclProxyInit(struct ncclComm* comm, struct ncclSocket* sock, union
   {
     std::lock_guard<std::mutex> lock(g_seamMu);
     g_proxyInits[comm] = {std::vector<ncclSocketAddress>(peerAddresses, peerAddresses + comm->nRanks),
-                          std::vector<uint64_t>(peerUDS, peerUDS + comm->nRanks)};
+                          std::vector<uint64_t>(peerUDS, peerUDS + comm->nRanks), sock->addr};
     if (g_proxyInitResult != ncclSuccess) return g_proxyInitResult;
   }
   (void)ncclSocketClose(sock);
@@ -1288,9 +1289,15 @@ TEST_F(BootstrapMicrotest, Init_FourRanks_AllGathersEveryRanksAddresses) {
 
   ASSERT_EQ(4u, g_proxyInits.size());
   const auto& addrs = g_proxyInits[Comm(0)].addrs;
+  const auto& uds = g_proxyInits[Comm(0)].uds;
+  EXPECT_EQ(4u, std::set<uint64_t>(uds.begin(), uds.end()).size());
+  auto* p2p = static_cast<struct bootstrapState*>(State(0))->peerP2pAddresses;
   for (int r = 0; r < 4; r++) {
     EXPECT_EQ(0, std::memcmp(addrs.data(), g_proxyInits[Comm(r)].addrs.data(), 4 * sizeof(ncclSocketAddress)));
-    EXPECT_EQ(g_proxyInits[Comm(0)].uds, g_proxyInits[Comm(r)].uds);
+    EXPECT_EQ(uds, g_proxyInits[Comm(r)].uds);
+    EXPECT_EQ(0, std::memcmp(&addrs[r], &g_proxyInits[Comm(r)].own, sizeof(ncclSocketAddress))) << r;
+    auto* state = static_cast<struct bootstrapState*>(State(r));
+    EXPECT_EQ(0, std::memcmp(&p2p[r], &state->listen.peerSocket.addr, sizeof(ncclSocketAddress))) << r;
   }
   ASSERT_EQ(4u, g_rasAdded.size());
   EXPECT_EQ(13, g_rasAdded[3].nvmlDev);
@@ -1925,24 +1932,24 @@ TEST_F(BootstrapMicrotest, IntraNodeAllGather_EncryptedConnectsOnAHelperThread) 
   int local[3] = {0, 1, 2};
   char data[3][3] = {};
   for (int r = 0; r < 3; r++) data[r][r] = char('a' + r);
-  std::mutex mu;
-  std::set<std::thread::id> rankThreads, connectThreads;
+  // Thread ids get reused, so mark the rank threads themselves.
+  static thread_local bool onRankThread = false;
+  std::atomic<int> connects(0), connectsOnRankThreads(0);
   SetSockFault([&](const char* op, struct ncclSocket*) {
-    std::lock_guard<std::mutex> lock(mu);
-    if (std::strcmp(op, "connect") == 0) connectThreads.insert(std::this_thread::get_id());
+    if (std::strcmp(op, "connect") == 0) {
+      connects++;
+      if (onRankThread) connectsOnRankThreads++;
+    }
     return ncclSuccess;
   });
   EXPECT_TRUE(AllOk(OnRanks([&](int r) {
-    {
-      std::lock_guard<std::mutex> lock(mu);
-      rankThreads.insert(std::this_thread::get_id());
-    }
+    onRankThread = true;
     return bootstrapIntraNodeAllGather(State(r), local, r, 3, data[r], 1);
   })));
   SetSockFault(nullptr);
   for (int r = 0; r < 3; r++) EXPECT_EQ("abc", std::string(data[r], 3)) << r;
-  EXPECT_EQ(3u, connectThreads.size());
-  for (auto id : connectThreads) EXPECT_EQ(0u, rankThreads.count(id));
+  EXPECT_EQ(3, connects.load());
+  EXPECT_EQ(0, connectsOnRankThreads.load());
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 
