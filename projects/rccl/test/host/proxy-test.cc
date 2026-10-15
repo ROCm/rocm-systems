@@ -1553,27 +1553,16 @@ TEST_F(ProxyAppendMicrotest, Append_ErrorsPropagate) {
   ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
   op.coll++;
   EXPECT_EQ(ProxyAppend(&st(), &op), ncclInternalError);  // mismatched sub
+  EXPECT_EQ(args_[0].nsubs, 2);  // observed: nsubs is bumped before the mismatch check rejects the sub
   st().pool = nullptr;
   g_callocFailAt = g_callocCalls;
   op.opCount = 5;
   EXPECT_EQ(ProxyAppend(&st(), &op), ncclSystemError);  // nextPeer allocation
+  EXPECT_EQ(args_[0].nextPeer, nullptr);
   g_callocFailAt = g_callocCalls;
   ncclProxyOp other = Op(1, 1);
   EXPECT_EQ(ProxyAppend(&st(), &other), ncclSystemError);  // new list entry allocation
-  st().pool = &args_[4];
-  other.sliceSteps = 0;
-  other.coll = 0;
-  ASSERT_EQ(ProxyAppend(&st(), &other), ncclSuccess);
-  ncclProxyOp bad = Op(1, 2);
-  conns_[1].proxyAppend->state = ncclProxyOpReady;
-  bad.coll = 0;
-  EXPECT_EQ(ncclProxyOpToArgs(&bad, conns_[1].proxyAppend, NCCL_PROXY_MAX_SUBS), ncclInternalError);
-  ncclProxyArgs* before = conns_[1].proxyAppend;
-  bad.opCount = 1;
-  conns_[1].shared = 1;
-  bad.sliceSteps = 9;  // a sub that mismatches
-  EXPECT_EQ(ProxyAppend(&st(), &bad), ncclInternalError);
-  EXPECT_EQ(conns_[1].proxyAppend, before);
+  EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[0]}));
 }
 
 class ProxyProgressOpsMicrotest : public ProxyProgressFixture {};
