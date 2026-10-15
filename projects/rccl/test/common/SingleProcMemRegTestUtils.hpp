@@ -42,8 +42,8 @@ namespace RcclUnitTesting
     ScopedEnvVar winEnable("NCCL_WIN_ENABLE", "1");
     ScopedEnvVar lsaTeamSize("NCCL_LSA_TEAM_SIZE", "0");
     // DEBUG ONLY (revert before merge): surface the failing HIP VMM call in CI logs.
-    ScopedEnvVar ncclDebug("NCCL_DEBUG", "INFO");
-    ScopedEnvVar ncclDebugSubsys("NCCL_DEBUG_SUBSYS", "ALLOC,REG");
+    ScopedEnvVar ncclDebug("NCCL_DEBUG", "WARN");
+    ScopedEnvVar ncclDebugSubsys("NCCL_DEBUG_SUBSYS", "INIT,ALLOC,REG");
     // DEBUG ONLY (revert before merge): abort the exec'd workers at the first
     // detected heap corruption. glibc >= 2.34 ignores MALLOC_CHECK_ unless
     // libc_malloc_debug is preloaded; a missing library is only a loader warning.
