@@ -150,8 +150,10 @@ and no other metric.
 Each `metric` is the name of a metric in the memory chart panel (panel 3). Names are
 unique within panel 3. They can repeat in other panels, so look only in panel 3.
 
-In the analysis database (`analyze --output-format db`), each metric of a workload has a
-row in `compute_metric_definition`. For a layout metric, use the workload's row whose
+In the analysis database (`analyze --output-format db`), each workload's layout file is
+stored unchanged in the `memory_chart_layout_extdata` column of `compute_workload`. It
+is null when the workload's GPU has no layout. Each metric of a workload has a row in
+`compute_metric_definition`. For a layout metric, use the workload's row whose
 `name` is the metric name and whose `metric_id` starts with `3.`. That row has the unit.
 The value the terminal chart shows is in `compute_workload_metric_value`, in the row
 for that definition with `value_name` `Value`. `compute_kernel_metric_value` has the
