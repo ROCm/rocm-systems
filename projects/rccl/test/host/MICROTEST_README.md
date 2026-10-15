@@ -273,8 +273,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   single-node comm, with the real `rings.cc`, `trees.cc`, `rccl_graph_gen.cc` and
   `archinfo.cc` linked in. Its own binary because every other micro target links
   `topo_stubs.cc`, whose Preset/Postset stubs would be duplicate symbols; the few
-  remaining dependencies (logging, params, `bootstrapAllGather`) are faked in
-  `connect-test.cc` itself. See `test_categories_micro_connect.yaml`.
+  remaining dependencies (logging, params, `bootstrapAllGather`, and the
+  WarpSpeed channel helpers `rcclGetMaxWarpsPerBlock` /
+  `rcclWarpSpeedComputeNChannels`) are faked in `connect-test.cc` itself.
+  The WarpSpeed helpers are referenced only when gfx950 CI copies
+  `ENABLE_WARP_SPEED` onto this binary; the scenes leave `warpSpeedEnabled`
+  false, so the stubs exist to link. See `test_categories_micro_connect.yaml`.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
   `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not

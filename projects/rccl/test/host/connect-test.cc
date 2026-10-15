@@ -49,6 +49,13 @@ int64_t ncclParamWorkArgsBytes() { return INT64_MAX; }
 
 ncclResult_t bootstrapAllGather(void*, void*, int) { return ncclInternalError; }
 
+// gfx950 CI copies ENABLE_WARP_SPEED from the rccl target onto this binary, so Postset
+// references these rccl_wrap.cc helpers. This binary does not link rccl_wrap.cc. The
+// scenes leave warpSpeedEnabled false, so Postset takes the non-WarpSpeed channel path
+// and never calls them; identity stubs keep a later call from changing the counts below.
+int rcclGetMaxWarpsPerBlock(struct ncclComm*) { return 1; }
+int rcclWarpSpeedComputeNChannels(struct ncclComm*, int nc, int, int, int, bool) { return nc; }
+
 namespace {
 
 constexpr int kRanks = 4;
