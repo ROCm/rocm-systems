@@ -51,7 +51,8 @@ public:
         static_cast<int>(wavefronts.size()), static_cast<int>(physical_vgpr_count),
         static_cast<int>(physical_sgpr_count), Dim3d(static_cast<int>(wg_id)),
         [this](RaceViolation v) { violations.push_back(v); },
-        counterCapacitiesForArch(wavefronts.front()->cu().arch()));
+        counterCapacitiesForArch(wavefronts.front()->cu().arch()),
+        wavefronts.front()->lds().size_bytes());
     wf_ = wavefronts.front();
     state_ = &detector_->getWaveRaceState(0);
   }
@@ -906,7 +907,7 @@ TEST(RaceDetectorPluginTest, MixedFlatChecksAndRecordsOnlySharedLaneIntervals) {
   }
 }
 
-TEST(RaceDetectorPluginTest, FlatDdsLanesKeepDependenciesWithoutLdsIntervals) {
+TEST(RaceDetectorPluginTest, FlatInvalidSharedLanesKeepDependenciesWithoutLdsIntervals) {
   constexpr uint64_t shared_base = uint64_t{1} << 48;
   constexpr uint64_t dds_address = shared_base + 0x80000040;
   constexpr uint64_t lds_address = shared_base + 64;
@@ -919,7 +920,11 @@ TEST(RaceDetectorPluginTest, FlatDdsLanesKeepDependenciesWithoutLdsIntervals) {
   const std::array cases = {Case{{0x2000, dds_address, 0}, 3, true, false},
                             Case{{dds_address, 0x2000, 0}, 3, true, false},
                             Case{{0x2000, dds_address, lds_address}, 7, true, true},
-                            Case{{dds_address, 0, 0}, 1, false, false}};
+                            Case{{dds_address, 0, 0}, 1, false, false},
+                            Case{{0x2000, shared_base + 0x100000, 0}, 3, true, false},
+                            Case{{0x2000, shared_base + 0x70000000, 0}, 3, true, false},
+                            Case{{shared_base + 0x100000, 0, 0}, 1, false, false},
+                            Case{{0x2000, shared_base + 64 * 1024 - 256, 0}, 3, true, false}};
   for (const auto &test : cases) {
     for (bool load : {false, true}) {
       SCOPED_TRACE(testing::Message() << "first_address=" << test.addresses[0]
@@ -2001,7 +2006,8 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
 TEST(FindConflictTest, UsesRecordedConflictingEvent) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        /*ldsSizeBytes=*/64 * 1024);
   EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/0x100, MemoryEventType::GLOBAL_TO_VGPR,
                                            {2}, /*execMask=*/1);
   EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/0x200,
@@ -2017,7 +2023,8 @@ TEST(FindConflictTest, UsesRecordedConflictingEvent) {
 TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        /*ldsSizeBytes=*/64 * 1024);
   RaceViolation violation{RaceViolation::Space::VGPR, 2, 0, 0, true, Dim3d(0), EventId{}};
 
   EXPECT_THROW(findConflict(violation, detector), std::out_of_range);
@@ -2026,7 +2033,8 @@ TEST(FindConflictTest, RejectsUnavailableConflictingEvent) {
 TEST(DecorateExceptionTest, UsesRecordedConflictingEvent) {
   RaceDetector detector(/*nWaves=*/
                         1, /*vgprCount=*/4, /*sgprCount=*/4, Dim3d(0), [](RaceViolation) {},
-                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4));
+                        counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA4),
+                        /*ldsSizeBytes=*/64 * 1024);
   EventId first = detector.allocateEventId(WaveId{0}, /*pc=*/10, MemoryEventType::GLOBAL_TO_VGPR,
                                            {2}, /*execMask=*/1);
   EventId second = detector.allocateEventId(WaveId{0}, /*pc=*/20, MemoryEventType::GLOBAL_TO_VGPR,
