@@ -108,6 +108,9 @@ CXXFLAGS = -g -ffunction-sections -fdata-sections -DROCM_VERSION=$(ROCM_VERSION)
 
 TOPO_EXPL_FILES = src/$(EXE).cpp src/topo_expl_api.cpp src/model.cpp src/topo_expl_impl.cpp src/utils.cpp src/stubs.cc test/topo_expl_tests.cpp
 
+# rccl_wrap.cc's rcclRingTreeTable() calls rcclGetArchThresholds(), and
+# enqueue.cc keeps that function live. The definition is in
+# rccl_arch_thresholds.cc; without it the gfx90a topo_expl link fails.
 RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/rings.cc \
 			hipify_rccl/graph/paths.cc \
@@ -121,6 +124,7 @@ RCCL_FILES = hipify_rccl/graph/topo.cc \
 			hipify_rccl/graph/rccl_graph_gen.cc \
 			../../src/misc/param.cc \
 			../../src/misc/nvmlwrap_stub.cc \
+			../../src/rccl_arch_thresholds.cc \
 			hipify_rccl/rccl_wrap.cc \
 			hipify_rccl/collectives.cc \
 			hipify_rccl/register.cc \
