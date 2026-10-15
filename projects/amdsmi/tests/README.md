@@ -260,10 +260,9 @@ the `requires_root` label. Run those categories with `sudo`; adding
 > `amd_smi_test/amdsmitst.exclude` (the `detect_asic_filter.sh` runtime path).
 > Update both together until they are consolidated into a single source.
 
-Each category is generated once per GPU arch that has a known-issue list, so a
-bare `-L <category>` selects **every** per-arch suite (7 today) — 6 of which
-skip the wrong ASIC's tests and go red. Always narrow to your GPU with a second
-`-L ^ex_gpu_<arch>$` label, which is exactly what CI does:
+Each category has a generic suite and a suite per GPU arch with a known-issue
+list. A bare `-L <category>` runs all these copies, including filters for other
+GPUs. Narrow to your GPU with a second `-L ^ex_gpu_<arch>$` label, as CI does:
 
 ```
 # Pick the suite for your GPU (this is what TheRock CI does):
@@ -271,6 +270,9 @@ ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^standard$' -L '^ex_gpu
 
 # Discover which ex_gpu_* labels exist for your build:
 ctest --test-dir <install>/share/amd_smi/tests/ctest --print-labels
+
+# GPUs without an exclusion label (for example gfx950, gfx1103 and gfx12xx):
+ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^standard$' -LE ex_gpu
 ```
 
 Installed tree (how TheRock CI runs it):
@@ -278,12 +280,13 @@ Installed tree (how TheRock CI runs it):
 ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^<category>$' -L '^ex_gpu_<arch>$'
 ```
 
-Local dev build (the amdsmi top-level `enable_testing()` is not set, so `ctest`
-from the build root won't discover these — run from the test dir):
+Standalone amd-smi build (`cmake -S projects/amdsmi -B <build> -DBUILD_TESTS=ON`):
+the top-level `enable_testing()` is not set, so run from the test dir. Python
+runners are registered only in the installed tree.
 ```
-cd <build>/projects/amdsmi/tests/amd_smi_test
+cd <build>/tests/amd_smi_test
 ctest -L '^quick$' -L '^ex_gpu_gfx90a$'
-# or: ctest --test-dir <build>/projects/amdsmi/tests/amd_smi_test -L '^quick$' -L '^ex_gpu_gfx90a$'
+# or: ctest --test-dir <build>/tests/amd_smi_test -L '^quick$' -L '^ex_gpu_gfx90a$'
 ```
 
 ## How to Run Summary Report

@@ -25,13 +25,13 @@
 #
 # Running the categories:
 #   - TheRock CI: test_runner.py drives the installed tree with
-#       ctest --test-dir <install>/share/amd_smi/tests/ctest -L <category>
+#       ctest --test-dir <install>/share/amd_smi/tests/ctest -L '^<category>$' -L '^ex_gpu_<arch>$'
+#     Use -LE ex_gpu instead of the second -L for GPUs without an arch label.
 #     which is self-contained (no top-level enable_testing() needed).
 #   - Local dev: enable_testing() is only called in this test subdir, not at the
 #     amdsmi top-level CMakeLists.txt, so `ctest` from the build root won't
 #     discover these. Run from the test build dir (or point ctest at it):
-#       cd <build>/projects/amdsmi/tests/amd_smi_test && ctest -L quick
-#       # or: ctest --test-dir <build>/projects/amdsmi/tests/amd_smi_test -L quick
+#       ctest --test-dir <build>/tests/amd_smi_test -L '^quick$' -L '^ex_gpu_<arch>$'
 
 # Cross-ASIC exclusions. amdsmitst.exclude currently keeps both
 # PERMANENT_BLACKLIST_ALL_ASICS and TEMPORARY_BLACKLIST_ALL_ASICS empty, so the
@@ -126,7 +126,6 @@ exclude_gpu:
       - "GpuFunctionalReadOnly.TestVoltCurvRead"
       - "GpuFunctionalReadOnly.TestFrequenciesRead"
       - "GpuFunctionalReadWrite.FanReadWrite"
-      - "GpuFunctionalReadWrite.TestFrequenciesReadWrite"
       - "GpuFunctionalReadWrite.TestPciReadWrite"
       - "GpuFunctionalReadWrite.TestPowerReadWrite"
     labels:
@@ -163,12 +162,9 @@ exclude_gpu:
       - "full"
       - "ex_gpu_gfx103X"
 
-  # gfx110X (RDNA3 / RDNA3.5 APU): temperature + frequency.
-  # Covers gfx1100 (strix_point filter) and gfx1103 (hawk_point filter, added in
-  # develop #10695) -- both resolve to ex_gpu_gfx110X via prefix back-off in
-  # test_runner.py (find_matching_gpu_arch) and the parser's gpu_arch_matches(),
-  # so no separate gfx1103 block is needed.
-  exclude_gpu_gfx110X:
+  # Keep the legacy gfx1100 -> strix_point mapping. gfx1103's exclusions were
+  # removed after the APU metrics fix; a gfx110X label would reapply them there.
+  exclude_gpu_gfx1100:
     test_patterns:
       - "GpuFunctionalReadOnly.TempRead"
       - "GpuFunctionalReadOnly.TestFrequenciesRead"
@@ -178,7 +174,7 @@ exclude_gpu:
       - "standard"
       - "comprehensive"
       - "full"
-      - "ex_gpu_gfx110X"
+      - "ex_gpu_gfx1100"
 
   exclude_gpu_gfx115X:
     test_patterns:

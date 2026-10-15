@@ -11,6 +11,7 @@ replays both selections against share/amd_smi/tests/ctest/CTestTestfile.cmake.
 """
 
 import re
+import subprocess
 import unittest
 from pathlib import Path
 
@@ -82,3 +83,35 @@ class CtestCategoryLabelsTest(unittest.TestCase):
             with self.subTest(runner=name):
                 self.assertFalse(labels & unprivileged)
                 self.assertIn("requires_root", labels)
+
+    def test_asic_exclusions_match_legacy(self):
+        archs = {
+            "gfx906": "vega20",
+            "gfx908": "arcturus",
+            "gfx90a": "aldebaran",
+            "gfx94X": "90400",
+            "gfx103X": "sienna_cichlid",
+            "gfx1100": "strix_point",
+            "gfx115X": "strix_point",
+        }
+        for arch, asic in archs.items():
+            with self.subTest(arch=arch):
+                legacy = subprocess.check_output(
+                    [
+                        "bash",
+                        "-c",
+                        'source "$1"; printf "%s" "${FILTER[$2]}"',
+                        "bash",
+                        str(_CTEST_FILE.parent.parent / "amdsmitst.exclude"),
+                        asic,
+                    ],
+                    universal_newlines=True,
+                )
+                expected = set(filter(None, legacy.split(":"))) | {"*DISABLED*"}
+                for category in ("quick", "standard", "comprehensive", "full"):
+                    name = f"amdsmitst_{category}_{arch}_suite"
+                    self.assertIn(name, self.tests)
+                    command = self.tests[name][0]
+                    excluded = command.split("--gtest_filter=", 1)[1].split("-", 1)[1]
+                    self.assertEqual(set(excluded.split(":")), expected)
+        self.assertNotIn("ex_gpu_gfx110X", self.archs)
