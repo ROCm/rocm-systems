@@ -2,7 +2,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 #
-# Remote worker: SPP metric health test report on one GPU architecture.
+# Remote worker: Metric Health test report on one GPU architecture.
 #
 # Default workload iterations: 500 (median-stable). Override with ITERS=.
 #   vcopy:       -n 81920 -b 256 -i ${ITERS}
@@ -20,17 +20,17 @@
 #
 # Usage (on the GPU host, after syncing rocprofiler-compute):
 #   ARCH=gfx942 TAG=261001-gfx942-500med THEROCK=/path/to/therock \
-#     bash scripts/run_spp_health.sh
-#   ARCH=gfx1151 THEROCK=/path/to/rocm bash scripts/run_spp_health.sh
-#   ARCH=gfx908  THEROCK=/opt/rocm-7.2.0 bash scripts/run_spp_health.sh
-#   ARCH=gfx90a  THEROCK=/opt/rocm-7.2.0 bash scripts/run_spp_health.sh
-#   ARCH=gfx950  THEROCK=/opt/rocm-7.1.0 bash scripts/run_spp_health.sh
+#     bash scripts/run_metric_health_test_report.sh
+#   ARCH=gfx1151 THEROCK=/path/to/rocm bash scripts/run_metric_health_test_report.sh
+#   ARCH=gfx908  THEROCK=/opt/rocm-7.2.0 bash scripts/run_metric_health_test_report.sh
+#   ARCH=gfx90a  THEROCK=/opt/rocm-7.2.0 bash scripts/run_metric_health_test_report.sh
+#   ARCH=gfx950  THEROCK=/opt/rocm-7.1.0 bash scripts/run_metric_health_test_report.sh
 #
 # 500-iter medians are ITERS=500, including gfx942.
 #
 # One invocation profiles one build of rocprof-compute. The health report
 # compares two separate runs: this branch and rocprofiler-compute-develop.
-#   RUN            name in output paths (default spp). Use RUN=develop for the
+#   RUN            name in output paths (default single-pass). Use RUN=develop for the
 #                  baseline run.
 #   PROFILER_ROOT  rocprofiler-compute checkout whose src/rocprof-compute runs
 #                  profile and analyze (default ROOT). For the baseline, point
@@ -38,7 +38,7 @@
 #                  build from ROOT so both runs profile the same binaries.
 #
 #   RUN=develop PROFILER_ROOT=/path/to/develop/projects/rocprofiler-compute \
-#     ARCH=gfx942 TAG=261011-gfx942-500-develop bash scripts/run_spp_health.sh
+#     ARCH=gfx942 TAG=261011-gfx942-500-develop bash scripts/run_metric_health_test_report.sh
 #
 # Produces under $ROOT/workloads/:
 #   {vcopy,nbody,mega_kernel}_${TAG}_${RUN}/
@@ -121,7 +121,7 @@ apply_worker_profile() {
       SKIP_MEGA_ON_BUILD_FAIL=1
       CDNA1_SMOKE_WARN=1
       SOC_LEAVES=(MI100)
-      VENV_KIND=site-spp-first
+      VENV_KIND=site-single-pass-first
       ROOF_NOTE="; MI100 has no roofline microbenchmarks"
       META_SITE=1
       ;;
@@ -139,7 +139,7 @@ apply_worker_profile() {
       NATIVE_MODE=force
       THEROCK_STYLE=rocm71
       SOC_LEAVES=(MI350 MI350X MI355X)
-      VENV_KIND=site-spp-first
+      VENV_KIND=site-single-pass-first
       META_SITE=1
       ;;
     *)
@@ -155,7 +155,7 @@ apply_worker_profile
 TAG=${TAG:-$(date +%y%m%d)-${ARCH}-500}
 ROOT=${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
 PROFILER_ROOT=${PROFILER_ROOT:-$ROOT}
-RUN=${RUN:-spp}
+RUN=${RUN:-single-pass}
 ITERS=${ITERS:-500}
 NO_ROOF=${NO_ROOF:-1}
 MEGA_BATCH=${MEGA_BATCH:-$MEGA_BATCH_DEFAULT}
@@ -194,9 +194,9 @@ case "$THEROCK_STYLE" in
 esac
 
 if [[ "$LOG_STYLE" == "therock" ]]; then
-  LOG=${LOG:-/home/AMD/${USER}/workdir/spp_health_${TAG}.log}
+  LOG=${LOG:-/home/AMD/${USER}/workdir/metric_health_${TAG}.log}
 else
-  LOG=${LOG:-${HOME}/spp_health_${TAG}.log}
+  LOG=${LOG:-${HOME}/metric_health_${TAG}.log}
 fi
 
 : >"$LOG"
@@ -240,13 +240,13 @@ source_site_venvs() {
   if [[ "$VENV_KIND" == "site-865-first" ]]; then
     venvs=(
       "${HOME}/workdir-venv/bin/activate"
-      "${HOME}/workdir/venv-spp/bin/activate"
+      "${HOME}/workdir/venv-single-pass/bin/activate"
       "${HOME}/rocm-systems/projects/rocprofiler-compute/venv/bin/activate"
       /tmp/rpc_venv/bin/activate
     )
   else
     venvs=(
-      "${HOME}/workdir/venv-spp/bin/activate"
+      "${HOME}/workdir/venv-single-pass/bin/activate"
       "${HOME}/workdir-venv/bin/activate"
       "${HOME}/rocm-systems/projects/rocprofiler-compute/venv/bin/activate"
       /tmp/rpc_venv/bin/activate
