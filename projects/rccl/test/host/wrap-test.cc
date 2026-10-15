@@ -4125,20 +4125,17 @@ TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotChosenWhenEligibleAndStagin
       });
 }
 
-// ceAllReduceAllowed's final conjunct is `force || symReg`; every prior
-// test drove it true via one side or the other, but never both false at
-// once. Same setup as above (staging buffer ready, rcclUseCeAr2Shot
-// otherwise eligible), but neither RCCL_FORCE_CE_ALLREDUCE nor a CE-
-// available seam is set -- CE 2-shot must not fire despite the buffer
-// being ready.
-TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNorSymRegEligible) {
+// ceAllReduceAllowed requires (ctaZero || force); rcclUseCeAr2Shot enforces the
+// same gate internally (line 1405), so ceAr2ShotEligible is false when neither
+// CTAPolicy=ZERO nor RCCL_FORCE_CE_ALLREDUCE is set, regardless of buffer state.
+TEST(WrapMicrotestIsolated, SelectAllReduce_CeTwoShotNotChosenWhenNeitherCtaZeroNorForce) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenNeitherForceNorSymRegEligible",
+      "Wrap_SelectAllReduce_CeTwoShotNotChosenWhenNeitherCtaZeroNorForce",
       []() {
         g_loadParam = ForceParam("RCCL_CE_ALLREDUCE", int64_t(1));
         ncclComm* comm = MakeSelectComm();
         comm->symmetricSupport = 1;
-        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO; // rcclUseCeAr2Shot itself still eligible
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // not ZERO, not force -> rcclUseCeAr2Shot returns false
         uint8_t stagingBuf[16];
         comm->ceColl.ceARTmpBuf = stagingBuf;
         rcclCollDecision decision{};

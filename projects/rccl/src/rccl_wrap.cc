@@ -1577,11 +1577,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
 
   // develop's single "will CE AllReduce service this call" gate (collectives.cc
-  // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE; symReg probes whether the
-  // buffers are CE-registrable symmetric windows (uses ncclDevSum, matching develop).
+  // ncclAllReduce_impl). force = RCCL_FORCE_CE_ALLREDUCE.
   const bool ceArArchDefault = rcclCeCollArchDefault(comm);
   const bool force = rcclForceCeAllReduceEnabledDef(ceArArchDefault);
-  const bool symReg = ncclCeAvailable(comm, ncclFuncAllReduce, (int)ncclDevSum, datatype, winRegType, sendWin, recvWin);
   // 2-shot message-size window: [twoShotMin, twoShotMax], mirroring agCeNonRegWindow
   // for AllGather. Computed here so the bounds are visible in selector-level logs
   // alongside symMaxR2/symMinR2, rather than buried inside rcclUseCeAr2Shot.
@@ -1593,14 +1591,14 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
   const bool ceAr2ShotEligible = rcclUseCeAr2Shot(comm, count, datatype, op, /*acc=*/nullptr);
   const bool ctaZero = comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO;
   const bool ceAllReduceAllowed = ncclGroupDepth == 0 && ceArGraphAllowed &&
-      ceAr2ShotEligible && twoShotWindow && (ctaZero || force || symReg);
+      ceAr2ShotEligible && twoShotWindow && (ctaZero || force);
   if (!query)
     INFO(NCCL_TUNING,
          "AR CE-2SHOT symkRequested=%d criteria:ceAllReduceAllowed=%d"
-         " twoShotWindow=%d [min=%zu max=%zu] (force=%d symReg=%d ctaZero=%d)"
+         " twoShotWindow=%d [min=%zu max=%zu] (force=%d ctaZero=%d)"
          " rcclUseCeAr2Shot=%d ceARTmpBuf!=NULL:%d",
          (int)symkRequested, (int)ceAllReduceAllowed, (int)twoShotWindow,
-         arTwoShotMin, arTwoShotMax, (int)force, (int)symReg, (int)ctaZero,
+         arTwoShotMin, arTwoShotMax, (int)force, (int)ctaZero,
          (int)ceAr2ShotEligible, (int)(comm->ceColl.ceARTmpBuf != NULL));
     // (3) Eager CE 2-shot (staging buffer). Requires !symkRequested and an
     // initialized ceARTmpBuf (first call, before init, falls through to enqueue).
