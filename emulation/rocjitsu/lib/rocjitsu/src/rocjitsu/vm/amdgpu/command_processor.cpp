@@ -1508,16 +1508,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
     if (!retry_close) {
       queue_id = queue->queue_id;
       process_id = queue->process_id;
-      for (auto *cu : cus_) {
-        cu->with_wave_state_locked([&] {
-          for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-            auto *wave = cu->wf(slot);
-            if (wave && !wave->is_halted() && wave->process_id() == process_id &&
-                wave->queue_id() == queue_id)
-              wave->halt();
-          }
-        });
-      }
+      cancel_queue_dispatches(*queue);
       drop_replicas = queue->xcd_fanout;
       for (const DispatchEntry &entry : queue->entries)
         dispatch_launch_metadata_.erase(entry.dispatch_id);
@@ -3361,6 +3352,35 @@ util::Result CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4
   return util::Result::success();
 }
 
+void CommandProcessor::cancel_queue_dispatches(const ComputeQueueRecord &queue) {
+  // Include queued and reserved workgroups as well as resident waves. A CU may
+  // already have aborted every wave before the CP observes the failure.
+  std::unordered_set<uint32_t> dispatch_ids;
+  for (const auto &entry : queue.entries)
+    dispatch_ids.insert(entry.dispatch_id);
+  for (const auto &entry : queue.dispatches.entries)
+    dispatch_ids.insert(entry.dispatch_id);
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (wave && !wave->is_halted() && wave->process_id() == queue.process_id &&
+            wave->queue_id() == queue.queue_id)
+          dispatch_ids.insert(wave->dispatch_id());
+      }
+    });
+  }
+  // Abort all waves without successful completion notifications. The CP owns
+  // cluster pins and SPI reservations, which normal retirement would release.
+  for (uint32_t dispatch_id : dispatch_ids) {
+    erase_cluster_workgroups(dispatch_id);
+    for (auto *cu : cus_)
+      cu->abort_dispatch(dispatch_id);
+    for (auto *spi : spis_)
+      spi->release_wgp_dispatch(dispatch_id);
+  }
+}
+
 void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
   queue.faulted = true;
   for (auto &entry : queue.entries)
@@ -3368,21 +3388,7 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
       entry.grid_completion->mark_faulted();
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
   // waves before releasing the submission's BO references or publishing failure.
-  for (auto *cu : cus_) {
-    cu->with_wave_state_locked([&] {
-      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-        auto *wave = cu->wf(slot);
-        if (wave && !wave->is_halted() && wave->process_id() == queue.process_id &&
-            wave->queue_id() == queue.queue_id)
-          wave->halt();
-      }
-    });
-  }
-  // An instruction failure can abort every wave before this CP sees it, so
-  // release SPI reservations using the dispatch records, not resident waves.
-  for (const auto &entry : qs.entries)
-    for (auto *spi : spis_)
-      spi->release_wgp_dispatch(entry.dispatch_id);
+  cancel_queue_dispatches(queue);
   flush_gpu_caches();
   qs.entries.clear();
   for (auto &submission : queue.commands.submissions)

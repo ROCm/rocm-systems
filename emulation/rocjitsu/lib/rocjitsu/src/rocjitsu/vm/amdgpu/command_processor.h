@@ -670,6 +670,7 @@ private:
   [[nodiscard]] DispatchWorkgroupResult dispatch_workgroups(DispatchEntry &entry);
   [[nodiscard]] bool execute_aql_pm4(ComputeQueueRecord &queue, DispatchEntry &entry,
                                      simdojo::Tick now);
+  void cancel_queue_dispatches(const ComputeQueueRecord &queue);
   void fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs);
   void fetch_pm4(ComputeQueueRecord &queue, Pm4DispatchState &qs, simdojo::Tick now);
   util::Result dispatch_pm4(const ComputeQueueRecord &queue, Pm4DispatchState &qs,
