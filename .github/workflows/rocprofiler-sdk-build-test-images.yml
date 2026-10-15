@@ -1,0 +1,81 @@
+name: rocprofiler-sdk Build Test Images (PR 13323)
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - users/lamikr/rocprofiler_sdk_pr13323_test_push_docker_images
+    paths:
+      - '.github/workflows/rocprofiler-sdk-build-test-images.yml'
+      - 'projects/rocprofiler-sdk/docker/Dockerfile.ci'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  build-test-images:
+    name: Build Test Image • ${{ matrix.gpu }} • ${{ matrix.os }}
+    runs-on: azure-linux-scale-rocm
+    strategy:
+      fail-fast: false
+      matrix:
+        # Test all OS variants with gfx94X
+        os: [ 'ubuntu-22.04', 'rhel-8.8', 'rhel-9.5', 'sles-15.6' ]
+        gpu: [ 'gfx94X' ]
+    steps:
+      - name: Checkout (shallow)
+        uses: actions/checkout@v6
+        with:
+          sparse-checkout: |
+            projects/rocprofiler-sdk/requirements.txt
+            projects/rocprofiler-sdk/docker/Dockerfile.ci
+
+      - name: Get the latest therock build
+        id: therock
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y python3-pip python3-venv
+          python3 -m venv /tmp/awscli-venv
+          /tmp/awscli-venv/bin/python -m pip install -U pip awscli
+          KEY=$(/tmp/awscli-venv/bin/aws s3api list-objects-v2 \
+                --bucket therock-nightly-tarball \
+                --no-sign-request \
+                --prefix "v4/tarball/" \
+                --output json \
+                --query "sort_by(Contents[?contains(Key, 'linux-${{ matrix.gpu }}') && !contains(Key, 'asan') && !contains(Key, '-tests-')], &LastModified)[-1].Key")
+          KEY=${KEY//\"/}
+          if [[ -z "$KEY" || "$KEY" == "null" || "$KEY" == "None" ]]; then
+            echo "No ${{ matrix.gpu }} tarball found"; exit 1
+          fi
+          echo "tarball=${KEY}" >> $GITHUB_OUTPUT
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@4907a6ddec9925e35a0a9e82d7399ccc52663121 # v4.1.0
+        with:
+          registry: docker.io
+          username: ${{ secrets.ROCPROFILER_AZURE_CI_USER }}
+          password: ${{ secrets.ROCPROFILER_AZURE_CI_PASS }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd # v4.0.0
+
+      - name: Build & Push (to GitHub Container Registry)
+        uses: docker/build-push-action@bcafcacb16a39f128d818304e6c9c0c18556b85f # v7.1.0
+        with:
+          context: .
+          file: projects/rocprofiler-sdk/docker/Dockerfile.ci
+          platforms: linux/amd64
+          push: true
+          build-args: |
+            BASE_TAG=${{ matrix.os }}
+            GPU_TYPE=${{ matrix.gpu }}
+            GPU_TARBALL=${{ steps.therock.outputs.tarball }}
+          tags: |
+            docker.io/rocm/rocprofiler-private:${{ matrix.os }}-${{ matrix.gpu }}-test-pr-13323
+          cache-from: type=gha,scope=rocprofiler-ci-test-${{ matrix.os }}-${{ matrix.gpu }}
+          cache-to: type=gha,mode=max,scope=rocprofiler-ci-test-${{ matrix.os }}-${{ matrix.gpu }}
