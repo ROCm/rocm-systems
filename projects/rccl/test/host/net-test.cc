@@ -2234,6 +2234,23 @@ class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
     return ret;
   }
 
+  // Lets the free path release a cuMem device bank; freeing the VA returns it to the allocator.
+  struct CuMemReleaseHooks {
+    explicit CuMemReleaseHooks(NetProxyConnectMicrotest* t)
+        : addrFree(g_hipMemAddressFree, [t](void* p, size_t) {
+            t->Release(p);
+            return hipSuccess;
+          }) {}
+    ScopedHook<ncclResult_t(ncclIpcDesc*)> ipcFree{g_ncclP2pFreeShareableBuffer,
+                                                   [](ncclIpcDesc*) { return ncclSuccess; }};
+    ScopedHook<hipError_t(hipMemGenericAllocationHandle_t*, void*)> retain{
+        g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) { return hipSuccess; }};
+    ScopedHook<hipError_t(hipMemGenericAllocationHandle_t)> release{
+        g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; }};
+    ScopedHook<hipError_t(void*, size_t)> unmap{g_hipMemUnmap, [](void*, size_t) { return hipSuccess; }};
+    ScopedHook<hipError_t(void*, size_t)> addrFree;
+  };
+
   static char* Buffer(Res* r, int p) { return NCCL_NET_MAP_GET_POINTER(&r->map, cpu, buffs[p]); }
   static bool InDeviceMemory(Res* r, int p) { return NCCL_NET_MAP_DEV_MEM(&r->map, buffs[p]); }
   int RegMrType(void* data) {
@@ -3039,6 +3056,17 @@ TEST_F(NetRecvProxyConnectMicrotest, HsaDmaBufWithHostStaging_KeepsHostBufferOnR
   EXPECT_EQ(net_.regMrDmaBufs.size(), 2u);
 }
 
+TEST_F(NetRecvProxyConnectMicrotest, DmaBufNotSelected_UsesRegMr) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  proxyState_.dmaBufSupport = true;
+  AddRecvConn(0, 1);  // useDmaBuf stays 0
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_TRUE(net_.regMrDmaBufs.empty());
+  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
+}
+
 TEST_F(NetRecvProxyConnectMicrotest, DmaBufUnavailable_FallsBackToRegMr) {
   proxyState_.dmaBufSupport = true;
   AddRecvConn(0, 1)->useDmaBuf = 1;
@@ -3205,18 +3233,11 @@ TEST_F(NetSendProxyFreeMicrotest, CuMemDeviceBank_ReleasesShareableBuffer) {
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   AddConn(0, 1);
   ASSERT_EQ(Connect(), ncclSuccess);
-  ScopedHook ipcFree(g_ncclP2pFreeShareableBuffer, [](ncclIpcDesc*) { return ncclSuccess; });
-  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) { return hipSuccess; });
-  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
-  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
-  ScopedHook addrFree(g_hipMemAddressFree, [this](void* p, size_t) {
-    Release(p);
-    return hipSuccess;
-  });
+  CuMemReleaseHooks hooks(this);
 
   ASSERT_EQ(Free(), ncclSuccess);
 
-  EXPECT_EQ(ipcFree.calls, 1);
+  EXPECT_EQ(hooks.ipcFree.calls, 1);
   EXPECT_TRUE(live_.empty());
 #if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
   ASSERT_EQ(exports_.size(), 1u);
@@ -3331,8 +3352,9 @@ class NetRecvProxyFreeMicrotest : public NetRecvProxyConnectMicrotest {
 };
 
 TEST_F(NetRecvProxyFreeMicrotest, Connected_DeregistersClosesAndReleasesEverything) {
-  AddRecvConn(0, 1);
+  recvNetResources* r = AddRecvConn(0, 1);
   ASSERT_EQ(Connect(), ncclSuccess);
+  std::vector<void*> mhandles(r->mhandles, r->mhandles + NCCL_NUM_PROTOCOLS);
   auto* mh = static_cast<proxyMemHandle*>(calloc(1, sizeof(proxyMemHandle)));
   mh->handle = reinterpret_cast<void*>(0x100);
   ncclIntruQueueEnqueue(&conns_[0].proxyMemHandleQueue, mh);
@@ -3341,6 +3363,7 @@ TEST_F(NetRecvProxyFreeMicrotest, Connected_DeregistersClosesAndReleasesEverythi
 
   ASSERT_EQ(net_.deregMrs.size(), 1u + NCCL_NUM_PROTOCOLS);
   EXPECT_EQ(net_.deregMrs[0].second, reinterpret_cast<void*>(0x100));
+  for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) EXPECT_EQ(net_.deregMrs[1 + p].second, mhandles[p]);
   for (const auto& d : net_.deregMrs) EXPECT_EQ(d.first, &net_.recvComm);
   ASSERT_EQ(net_.closedRecvs.size(), 1u);
   EXPECT_EQ(net_.closedRecvs[0], &net_.recvComm);
@@ -3360,18 +3383,11 @@ TEST_F(NetRecvProxyFreeMicrotest, CuMemDeviceBankAndDmaBufFd_Released) {
   int fd = open("/dev/null", O_RDONLY);
   static_cast<recvNetResources*>(conns_[0].transportResources)->map.mems[NCCL_NET_MAP_DEVMEM].dmaBufFd = fd;
 #endif
-  ScopedHook ipcFree(g_ncclP2pFreeShareableBuffer, [](ncclIpcDesc*) { return ncclSuccess; });
-  ScopedHook retain(g_hipMemRetainAllocationHandle, [](hipMemGenericAllocationHandle_t*, void*) { return hipSuccess; });
-  ScopedHook release(g_hipMemRelease, [](hipMemGenericAllocationHandle_t) { return hipSuccess; });
-  ScopedHook unmap(g_hipMemUnmap, [](void*, size_t) { return hipSuccess; });
-  ScopedHook addrFree(g_hipMemAddressFree, [this](void* p, size_t) {
-    Release(p);
-    return hipSuccess;
-  });
+  CuMemReleaseHooks hooks(this);
 
   ASSERT_EQ(Free(), ncclSuccess);
 
-  EXPECT_EQ(ipcFree.calls, 1);
+  EXPECT_EQ(hooks.ipcFree.calls, 1);
   EXPECT_EQ(fcntl(fd, F_GETFD), -1);
   EXPECT_TRUE(live_.empty());
 }
