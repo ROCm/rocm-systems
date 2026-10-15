@@ -1729,6 +1729,8 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
 
   auto cdna4_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
   ASSERT_NE(cdna4_decoder, nullptr);
+  // CDNA4 reserves GDS=1 (ISA Table 57). Verify fallback metadata for the
+  // unsupported encoding, not executable CDNA4 GDS behavior.
   const auto cdna4_gds_words = cdna4::build_ds(cdna4::kDsReadB32Ds, {.gds = 1});
   std::unique_ptr<Instruction> cdna4_gds(decode_valid(*cdna4_decoder, cdna4_gds_words.data()));
   ASSERT_NE(cdna4_gds, nullptr);

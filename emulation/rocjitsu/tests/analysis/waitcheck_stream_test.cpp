@@ -586,6 +586,8 @@ TEST(WaitcheckStream, LegacyTargetsDecodeTheirOwnPackedWaitLayouts) {
 }
 
 TEST(WaitcheckStream, CdnaGdsSourceReuseNeedsExpcntOnlyBeforeCdna4) {
+  // GDS=1 is reserved on CDNA4 (ISA Table 57); that half of the test checks
+  // defensive classification rather than an executable CDNA4 GDS contract.
   for (auto arch : {ROCJITSU_CODE_ARCH_CDNA3, ROCJITSU_CODE_ARCH_CDNA4}) {
     SCOPED_TRACE(arch);
     // ds_read_b32 v0, v1 gds; s_waitcnt lgkmcnt(0); read v0; overwrite v1.
