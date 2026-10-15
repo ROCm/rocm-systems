@@ -83,12 +83,7 @@ class PartitionCommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     profile_type = "N/A"
                     profile_index = "N/A"
-                    partition_id = (
-                        str(partition_dict["partition_id"])
-                        .replace("[", "")
-                        .replace("]", "")
-                        .replace(" ", "")
-                    )
+                    partition_id = "N/A"
                     logging.debug(
                         "Failed to get accelerator partition profile for GPU %s | %s",
                         gpu_id,
@@ -208,7 +203,7 @@ class PartitionCommands:
                     "profile_index": "N/A",
                     "memory_partition_caps": "N/A",
                     "accelerator_type": "N/A",
-                    "partition_id": "0",
+                    "partition_id": "N/A",
                     "num_partitions": "N/A",
                     "num_resources": "N/A",
                     "resource_index": "N/A",
@@ -237,7 +232,7 @@ class PartitionCommands:
                 except amdsmi_exception.AmdSmiLibraryException as e:
                     profile_type = "N/A"
                     profile_index = "N/A"
-                    partition_id = "0"
+                    partition_id = "N/A"
                     mem_caps_str = "N/A"
                     num_partitions = 0
                     current_accelerator_type = "N/A"
