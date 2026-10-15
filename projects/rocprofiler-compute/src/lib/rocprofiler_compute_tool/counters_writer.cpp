@@ -4,6 +4,7 @@
 
 #include "compression/gzip_output_stream.h"
 
+#include <algorithm>
 #include <filesystem>
 #include <iostream>
 #include <sstream>
@@ -52,6 +53,28 @@ bool format_counters_csv(const tool_data_t& tool_data, const std::function<bool(
     }
 
     return flush_batch();
+}
+
+void CountersWriter::write(tool_data_t& tool_data)
+{
+    // Dispatches before the kernel to be filtered was registered may have been
+    // profiled. Remove any records whose kernel id does not match the
+    // target_kernel_ids
+    if (!tool_data.target_kernel_ids.empty())
+    {
+        auto& records = tool_data.counter_records;
+        records.erase(std::remove_if(records.begin(),
+                                     records.end(),
+                                     [&tool_data](const counter_info_record_t& record)
+                                     {
+                                         return tool_data.target_kernel_ids.find(record.kernel_id) ==
+                                                tool_data.target_kernel_ids.end();
+                                     }),
+                      records.end());
+    }
+
+    if (!tool_data.counter_records.empty() && !tool_data.output_filename.empty())
+        write_counters(&tool_data);
 }
 
 void CsvCountersWriter::write_counters(tool_data_t* tool_data)
