@@ -8615,7 +8615,7 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  * (including ::AMDSMI_STATUS_INVAL), and the list is not filled. Without KFD the list is empty. A
  * process whose KFD statistics cannot be read is still listed, with cu_occupancy, evicted_time and
  * sdma_usage all-ones (not available) and memory sizes from its fdinfo only (0 if unreadable).
- * A running process whose GPUs cannot be read from KFD makes the listing fail.
+ * A running process whose GPUs cannot be read from KFD is left out, with a warning in the log.
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);

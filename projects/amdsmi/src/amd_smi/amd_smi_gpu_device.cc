@@ -310,9 +310,16 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
     const auto gpus_status = rsmi_compute_process_gpus_get(
         rsmi_proc_info.process_id, list_device_ptr.get(), &list_device_allocation_size);
     if (gpus_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      // Only a process that exited after the listing may be left out.
-      return KfdProcessExists(rsmi_proc_info.process_id) ? gpus_status
-                                                         : rsmi_status_t::RSMI_STATUS_SUCCESS;
+      // Without its GPUs the process cannot be placed on any GPU's list. Leave it out
+      // rather than failing the list for every other process; say so if it still runs.
+      if (KfdProcessExists(rsmi_proc_info.process_id)) {
+        std::ostringstream ss;
+        ss << __PRETTY_FUNCTION__ << " | Leaving out pid " << rsmi_proc_info.process_id
+           << ": its GPUs could not be read from KFD (" << getRSMIStatusString(gpus_status, false)
+           << ")";
+        LOG_WARN(ss);
+      }
+      return;
     }
 
     for (auto device_idx = uint32_t(0); device_idx < list_device_allocation_size; ++device_idx) {
@@ -337,18 +344,13 @@ int32_t AMDSmiGPUDevice::get_compute_process_list_impl(
         compute_process_list.emplace(rsmi_proc_info.process_id, amdsmi_proc_info);
       }
     }
-
-    return rsmi_status_t::RSMI_STATUS_SUCCESS;
   };
 
   /**
    *  Transfer/Save the ones linked to this device.
    */
   for (const auto& rsmi_proc_info : procs) {
-    const auto process_status = update_list_by_running_device(rsmi_proc_info);
-    if (process_status != rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      return static_cast<int32_t>(process_status);
-    }
+    update_list_by_running_device(rsmi_proc_info);
   }
   cache_ptr->list = compute_process_list;
   cache_ptr->updated = std::chrono::steady_clock::now();
