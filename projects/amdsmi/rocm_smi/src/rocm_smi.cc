@@ -489,8 +489,6 @@ rsmi_status_t rsmi_shut_down(void) {
     return RSMI_STATUS_INIT_ERROR;
   }
 
-  // Device mutexes are always acquired/released within a single call via
-  // ScopedPthread/DEVICE_MUTEX, so none can still be held here; no unlock pass needed.
   (void)smi.ref_count_dec();
 
   if (smi.ref_count() == 0) {
