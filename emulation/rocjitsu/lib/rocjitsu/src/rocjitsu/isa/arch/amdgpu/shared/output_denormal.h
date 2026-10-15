@@ -25,6 +25,7 @@ struct Policy {
 };
 
 /// @brief Flush a subnormal result to a zero of the same sign when enabled.
+/// @details NaN, infinity, zero and normal encodings pass through unchanged.
 template <typename Fmt, typename V> constexpr V flush_output(V bits, const Policy &policy) {
   return policy.flush_outputs ? denormal::flush<Fmt>(bits) : bits;
 }

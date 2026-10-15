@@ -3,6 +3,9 @@
 
 #pragma once
 
+/// @file simd_path_test_hooks.h
+/// @brief Test-only SIMD path observation; production execution code must not include it.
+
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 
 #include <atomic>

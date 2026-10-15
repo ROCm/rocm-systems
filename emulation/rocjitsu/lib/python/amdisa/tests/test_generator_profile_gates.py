@@ -61,6 +61,7 @@ from amdisa.isa_profile import (
 )
 from amdisa.parser import Parser
 from amdisa.semantics import (
+    INTEGER_RESULT_OPERATIONS,
     InstructionSemantics,
     derive_all_semantics,
     derive_semantics,
@@ -8790,13 +8791,41 @@ def test_ds_subtraction_keeps_underflow_policy(profile_type, returning):
         assert sem.operation == operation
 
 
-@pytest.mark.parametrize(
-    'operation',
-    ['frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'],
-)
+@pytest.mark.parametrize('operation', sorted(INTEGER_RESULT_OPERATIONS))
 def test_sdwa_integer_results_ignore_float_modifiers(operation):
     sem = SimpleNamespace(name='V_INTEGER_RESULT', operation=operation, data_type='f16')
     assert CodeGenerator._sdwa_result_format(sem) == 'amdgpu::sdwa::ResultFormat::NONE'
+
+
+@pytest.mark.parametrize('arch_name', ['cdna3', 'rdna4'])
+@pytest.mark.parametrize(
+    'name',
+    [
+        'V_FREXP_EXP_I16_F16',
+        'V_FREXP_EXP_I32_F32',
+        'V_FREXP_EXP_I32_F64',
+        'V_CVT_NORM_I16_F16',
+        'V_CVT_NORM_U16_F16',
+    ],
+)
+def test_vop3_integer_results_ignore_output_modifiers(
+    amdgpu_generated_root, execute_shared_path, arch_name, name
+):
+    sem = derive_semantics(name, 'ENC_VOP3', _profile_for_arch(arch_name))
+    assert sem is not None and sem.operation in INTEGER_RESULT_OPERATIONS
+    class_name = ''.join(part.title() for part in name.split('_')) + 'Vop3'
+    vop3 = (amdgpu_generated_root / arch_name / 'vop3_exec.cpp').read_text()
+    start = vop3.index(f'void {class_name}::execute_impl(')
+    body = vop3[start : vop3.index('\n}\n', start)]
+    shared = f'execute_{name.lower()}_vop3('
+    if shared in body:
+        source = execute_shared_path.read_text()
+        start = source.index(f'inline void {shared}')
+        body = source[start : source.index('\n}\n', start)]
+    assert 'inst_.omod' not in body
+    assert 'inst_.clamp' not in body
+    assert 'output_modifier' not in body
+    assert 'f32_to_f16' not in body
 
 
 def test_sdwa_conversion_result_formats():

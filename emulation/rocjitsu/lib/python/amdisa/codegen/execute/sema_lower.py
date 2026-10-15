@@ -1416,9 +1416,10 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' : static_cast<uint32_t>(std::countl_zero(a)); }}()',
     'prng_advance': 'util::prng_advance({0})',
     'frexp_exp_f32': 'static_cast<uint32_t>(amdgpu::frexp_f32({0}, wf.fp_denorm_mode_f32()).exponent)',
-    'frexp_exp_f16': '[&]() {{ float s = {0}; int exp = 0;'
+    # Signed 16-bit exponent in the low half.
+    'frexp_exp_f16': '[&]() -> uint32_t {{ float s = {0}; int exp = 0;'
     ' if (s != 0.0f && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'
-    ' return static_cast<uint32_t>(exp); }}()',
+    ' return static_cast<uint16_t>(exp); }}()',
     'frexp_exp_f64': '[&]() {{ double s = {0};'
     ' int exp = 0;'
     ' if (s != 0.0 && !std::isnan(s) && !std::isinf(s)) std::frexp(s, &exp);'

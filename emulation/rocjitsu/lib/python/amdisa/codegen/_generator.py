@@ -53,6 +53,7 @@ from amdisa.fieldless_policy import (
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
+    INTEGER_RESULT_OPERATIONS,
     InstructionSemantics,
     SemanticsSpec,
 )
@@ -1043,12 +1044,7 @@ class CodeGenerator:
             return 'amdgpu::sdwa::ResultFormat::NONE'
         if sem and (conversion := re.match(r'^V_CVT_(F16|F32)_', sem.name)):
             return f'amdgpu::sdwa::ResultFormat::{conversion.group(1)}'
-        if sem and sem.operation in (
-            'frexp_exp_f32',
-            'frexp_exp_f16',
-            'cvt_norm_i16_f16',
-            'cvt_norm_u16_f16',
-        ):
+        if sem and sem.operation in INTEGER_RESULT_OPERATIONS:
             return 'amdgpu::sdwa::ResultFormat::NONE'
         if sem and (
             sem.name == 'V_PK_FMAC_F16'
@@ -6681,9 +6677,12 @@ class CodeGenerator:
                     if has_abs and not is_integer_to_float:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    if 'clamp' in inst_fields and not is_f32_to_integer:
+                    integer_result = (
+                        is_f32_to_integer or op in INTEGER_RESULT_OPERATIONS
+                    )
+                    if 'clamp' in inst_fields and not integer_result:
                         ef.add('clamp')
-                    if 'omod' in inst_fields and not is_f32_to_integer:
+                    if 'omod' in inst_fields and not integer_result:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand

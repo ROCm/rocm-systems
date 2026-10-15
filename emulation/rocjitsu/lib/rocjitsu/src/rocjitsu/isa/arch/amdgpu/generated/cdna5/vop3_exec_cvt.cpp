@@ -1084,35 +1084,23 @@ void VFrexpExpI16F16Vop3::execute_impl(amdgpu::Wavefront &wf) {
     execute_modifier_impl(wf);
     return;
   }
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) {
-    return util::stdx::static_simd_cast<util::native<float>>(
-        util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a)));
-  });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-              static_cast<uint32_t>(util::f32_to_f16_mode(
-                  [&]() {
-                    float s = [&]() {
-                      float sv = util::f16_to_f32(static_cast<uint16_t>(
-                          ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                      return amdgpu::source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg);
-                    }();
-                    int exp = 0;
-                    if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-                      std::frexp(s, &exp);
-                    return static_cast<uint32_t>(exp);
-                  }(),
-                  wf.fp16_ovfl())),
-              output_policy)));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
+        float s = [&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+          return amdgpu::source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg);
+        }();
+        int exp = 0;
+        if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
+          std::frexp(s, &exp);
+        return static_cast<uint16_t>(exp);
+      }()));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }
@@ -1136,35 +1124,23 @@ RJ_NOINLINE void VFrexpExpI16F16Vop3::execute_modifier_impl(amdgpu::Wavefront &w
   if (inst_.src0 == amdgpu::SRC_DPP)
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
-  auto &inst = *this;
-  ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16([](auto a) {
-    return util::stdx::static_simd_cast<util::native<float>>(
-        util::frexp_exp_f32_simd(std::bit_cast<util::native<uint32_t>>(a)));
-  });
   uint64_t exec = wf.exec();
   [[maybe_unused]] uint32_t opsel = amdgpu::vop3_opsel(inst_);
-  const auto output_policy =
-      amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst_.omod, inst_.clamp);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     {
-      uint32_t src_half = static_cast<uint32_t>(
-          static_cast<uint16_t>(amdgpu::output_modifier::apply<amdgpu::fp_format::F16>(
-              static_cast<uint32_t>(util::f32_to_f16_mode(
-                  [&]() {
-                    float s = [&]() {
-                      float sv = util::f16_to_f32(static_cast<uint16_t>(
-                          ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
-                      return amdgpu::source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg);
-                    }();
-                    int exp = 0;
-                    if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
-                      std::frexp(s, &exp);
-                    return static_cast<uint32_t>(exp);
-                  }(),
-                  wf.fp16_ovfl())),
-              output_policy)));
+      uint32_t src_half = static_cast<uint32_t>(static_cast<uint16_t>([&]() -> uint32_t {
+        float s = [&]() {
+          float sv = util::f16_to_f32(static_cast<uint16_t>(
+              ::rocjitsu::amdgpu::read_vop3_true16_src(src0, wf, lane, opsel, 0)));
+          return amdgpu::source_modifier::apply_to_float(sv, 0, inst_.abs, inst_.neg);
+        }();
+        int exp = 0;
+        if (s != 0.0f && !std::isnan(s) && !std::isinf(s))
+          std::frexp(s, &exp);
+        return static_cast<uint16_t>(exp);
+      }()));
       ::rocjitsu::amdgpu::write_vop3_true16_dst(vdst, wf, lane, opsel, src_half, true);
     }
   }

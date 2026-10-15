@@ -17,6 +17,7 @@
 #include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/comparison.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/denormal_value.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/division.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/dpp_sdwa_ops.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/floating_operation.h"
@@ -1717,72 +1718,6 @@ template <typename Tin, typename Inst, typename CvtOp>
 /// Unconstrained fallback for the b32->f64 cvt path; see the binary-path note.
 template <typename Tin, typename Inst, typename CvtOp>
 [[nodiscard]] bool try_execute_cvt_b32_to_f64_simd(Inst &, Wavefront &, CvtOp) {
-  return false;
-}
-
-/// VOP3 mixed-width f64-source -> 32-bit-fp-dst fast path: the 64-bit-in /
-/// 32-bit-out counterpart of the f64 unary FP glue, for v_frexp_exp_i32_f64
-/// (the lone f64 VOP3 cvt whose body keeps the modifiers around an
-/// f64 -> float(exp) -> bit_cast tail). Reads src0 as native<double>
-/// (native_width64 lanes), applies src0 abs/neg in the f64 domain, runs cvt_op
-/// (native<double> -> narrow32<float> = the exponent as float), then applies the
-/// result omod/clamp INLINE at narrow32 width (apply_vop3_dst_mod_f32 is
-/// native<float>-wide — a different width than narrow32<float>), and stores the
-/// 32-bit results. All steps bit-exact: frexp_exp_f64_simd is the proven VOP1
-/// helper (op 48), apply_vop3_src_mod_f64 is the same helper the tested f64
-/// unary ops use, and the (float)(uint32) cast + power-of-two omod + ordered
-/// clamp mirror the scalar tail (the exp is always finite, so NaN handling is
-/// moot).
-template <typename Inst, typename CvtOp>
-  requires(util::has_stdx_simd)
-[[nodiscard]] inline bool try_execute_cvt_vop3_f64_to_b32_fp_simd(Inst &inst, Wavefront &wf,
-                                                                  CvtOp cvt_op) {
-  if (simd_force_scalar() || !sdwa::supports_direct_simd_store(inst) || !inst.src0.simd_capable() ||
-      !inst.vdst.simd_capable())
-    return false;
-  const uint32_t abs = inst.inst_.abs;
-  const uint32_t neg = inst.inst_.neg;
-  const uint32_t omod = effective_vop3_omod_f32(wf, inst.inst_.omod);
-  const uint32_t clamp = inst.inst_.clamp;
-  constexpr std::size_t W = util::native_width64;
-  const uint64_t chunk_full = util::mask<uint64_t>(static_cast<int>(W));
-  const uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  RegisterAccess regs(wf);
-  auto src0 = regs.read_operand64(inst.src0, exec);
-  auto dst = regs.write_operand(inst.vdst, exec);
-  for (uint32_t base = 0; base < wf.wf_size(); base += static_cast<uint32_t>(W)) {
-    const uint64_t chunk = (exec >> base) & chunk_full;
-    if (chunk == 0)
-      continue;
-    const auto s = apply_vop3_src_mod_f64<0>(src0.template load_native<double>(base), abs, neg);
-    util::narrow32<float> v = cvt_op(s);
-    // Inline omod/clamp at narrow32<float> width (mirrors apply_vop3_dst_mod):
-    // IEEE-exact power-of-two scale, ordered-compare saturation to [0,1].
-    if (omod == 1)
-      v = v * 2.0f;
-    else if (omod == 2)
-      v = v * 4.0f;
-    else if (omod == 3)
-      v = v * 0.5f;
-    if (clamp) {
-      if (floating_clamp_nan_to_zero(wf))
-        util::stdx::where(util::stdx::isnan(v), v) = 0.0f;
-      util::stdx::where(v <= 0.0f, v) = 0.0f;
-      util::stdx::where(v > 1.0f, v) = 1.0f;
-    }
-    if (omod != 0) {
-      // fixed_size_simd is not guaranteed to be trivially copyable, so avoid
-      // whole-vector bit_cast here. This predicate selects both subnormals and
-      // either signed zero, which OMOD maps to canonical +0.
-      util::stdx::where(util::stdx::abs(v) < std::numeric_limits<float>::min(), v) = 0.0f;
-    }
-    dst.template store_narrow<float>(base, v, chunk);
-  }
-  return true;
-}
-
-template <typename Inst, typename CvtOp>
-[[nodiscard]] bool try_execute_cvt_vop3_f64_to_b32_fp_simd(Inst &, Wavefront &, CvtOp) {
   return false;
 }
 
@@ -4997,16 +4932,6 @@ template <bool Vop3, typename Inst>
 #else
 #define ROCJITSU_TRY_SIMD_CVT_B32_TO_F64(Tin, ...)                                                 \
   if (::rocjitsu::amdgpu::try_execute_cvt_b32_to_f64_simd<Tin>(inst, wf, __VA_ARGS__))             \
-  return
-#endif
-
-/// VOP3 f64-source -> 32-bit-fp-dst cvt counterpart (src0 abs/neg + result
-/// omod/clamp; for v_frexp_exp_i32_f64). Functor: native<double> -> narrow32<float>.
-#if UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
-#define ROCJITSU_TRY_SIMD_CVT_VOP3_F64_TO_B32_FP(...) static_cast<void>(inst)
-#else
-#define ROCJITSU_TRY_SIMD_CVT_VOP3_F64_TO_B32_FP(...)                                              \
-  if (::rocjitsu::amdgpu::try_execute_cvt_vop3_f64_to_b32_fp_simd(inst, wf, __VA_ARGS__))          \
   return
 #endif
 
