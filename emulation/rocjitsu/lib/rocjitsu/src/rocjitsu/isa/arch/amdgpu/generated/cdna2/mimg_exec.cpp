@@ -27,11 +27,14 @@ void ImageLoadMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
   d->dst_reg_base = wf.vgpr_alloc().base + (inst_.acc ? 256u : 0u) + inst_.vdata;
-  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr, inst_.dmask,
-                                        inst_.a16, inst_.d16, inst_.lwe)
+  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
+                                        {.dmask = inst_.dmask,
+                                         .a16 = bool(inst_.a16),
+                                         .d16 = bool(inst_.d16),
+                                         .lwe = bool(inst_.lwe),
+                                         .da = bool(inst_.da),
+                                         .unorm = bool(inst_.unorm)})
           .failed()) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
   set_data(std::move(d));
@@ -67,11 +70,14 @@ void ImageStoreMimg::execute_impl(amdgpu::Wavefront &wf) {
   d->is_load = false;
   d->mtype = amdgpu::mtype_from_flags_gfx9(inst_.glc);
   d->wait_counter_type = amdgpu::WaitCounterType::VMCNT;
-  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr, inst_.dmask,
-                                        inst_.a16, inst_.d16, inst_.lwe)
+  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, inst_.vaddr,
+                                        {.dmask = inst_.dmask,
+                                         .a16 = bool(inst_.a16),
+                                         .d16 = bool(inst_.d16),
+                                         .lwe = bool(inst_.lwe),
+                                         .da = bool(inst_.da),
+                                         .unorm = bool(inst_.unorm)})
           .failed()) {
-    wf.report_instruction_execution_error(
-        amdgpu::InstructionExecutionError::UnimplementedInstruction);
     return;
   }
   amdgpu::capture_buffer_format_store(wf, *d,

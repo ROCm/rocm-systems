@@ -25,10 +25,11 @@ struct BufferFormat {
   BufferNumberFormat number = BufferNumberFormat::Uint;
 };
 
+/// @brief Decode @p state format/encoding, retaining channel widths and texel size.
+/// @returns False for an invalid resource format and failure for reserved encodings.
+util::FailureOr<bool> prepare_buffer_format_state(VectorMemState &state);
+
 /// GFX9 combines DFMT | (NFMT << 4); RDNA uses its generation's FORMAT table.
-/// Fails for a reserved encoding. Format 0 decodes with no channels.
-util::FailureOr<BufferFormat>
-decode_buffer_format(uint32_t format, BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);
 /// The memory footprint is independent of the instruction's VGPR count.
 util::FailureOr<uint32_t>
 buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding = BufferFormatEncoding::Gfx11);

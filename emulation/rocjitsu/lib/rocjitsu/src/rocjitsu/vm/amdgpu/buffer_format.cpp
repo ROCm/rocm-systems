@@ -194,10 +194,6 @@ uint32_t pack(uint32_t value, uint32_t width, Number n) {
 }
 } // namespace
 
-util::FailureOr<Format> decode_buffer_format(uint32_t format, BufferFormatEncoding encoding) {
-  return decode(format, encoding);
-}
-
 util::FailureOr<uint32_t> buffer_format_bytes(uint32_t format, BufferFormatEncoding encoding) {
   const auto decoded = decode(format, encoding);
   if (decoded.failed())
@@ -275,6 +271,20 @@ util::Result pack_buffer_format(uint32_t format, uint32_t selectors,
   return util::Result::success();
 }
 
+util::FailureOr<bool> prepare_buffer_format_state(VectorMemState &d) {
+  const auto decoded = decode(d.buffer_format, d.buffer_format_encoding);
+  if (decoded.failed())
+    return util::Result::failure();
+  d.decoded_buffer_format = decoded.value();
+  uint32_t bits = 0;
+  for (uint32_t width : d.decoded_buffer_format.widths)
+    bits += width;
+  if (!bits)
+    return false;
+  d.elem_size = bits / 8;
+  return true;
+}
+
 util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, uint32_t resource,
                                             int format, uint32_t components) {
   d.buffer_components = components;
@@ -302,17 +312,7 @@ util::FailureOr<bool> prepare_buffer_format(Wavefront &wf, VectorMemState &d, ui
           : (word3 >> 12) & (arch == ROCJITSU_CODE_ARCH_RDNA4 ? 63 : 127);
   if (resource_format == 0)
     return false;
-  const auto decoded = decode(d.buffer_format, d.buffer_format_encoding);
-  if (decoded.failed())
-    return util::Result::failure();
-  d.decoded_buffer_format = decoded.value();
-  uint32_t bits = 0;
-  for (uint32_t width : d.decoded_buffer_format.widths)
-    bits += width;
-  if (!bits)
-    return false;
-  d.elem_size = bits / 8;
-  return true;
+  return prepare_buffer_format_state(d);
 }
 
 void capture_buffer_format_store(Wavefront &wf, VectorMemState &d, uint32_t data_base) {
