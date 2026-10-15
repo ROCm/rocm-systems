@@ -2219,6 +2219,7 @@ protected:
     // 2.31 registers with the proxy only for a communicator-wide single-segment
     // layout, so the register step is unreachable without this.
     mem.maxGlobalNumSegments = 1;
+    mem.minGlobalNumSegments = 1;
   }
   void TearDown() override { ResetDevRuntimeMicroFakes(); }
 };
@@ -2266,6 +2267,7 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOff_ConnectsWithoutRegister
 // whole range, so hierarchical CE puts have an RMA handle.
 TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_RegistersWholeRange) {
   mem.maxGlobalNumSegments = 2;
+  mem.minGlobalNumSegments = 2;
   comm->rmaState.rmaProxyState.ncclRma = &ncclRmaIbProxy;
   ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
     return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
@@ -2299,6 +2301,29 @@ TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_BackendWithoutPerSegment
   EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
   EXPECT_EQ(connect.calls, 1);
   EXPECT_EQ(reg.calls, 0);
+}
+
+// Branch: layouts the IB proxy would reject (unequal per-rank counts, or more
+// segments than its MR table) skip RMA on every rank instead of failing the window.
+TEST_F(SymMemoryRegisterRmaTest, MultiSegmentRegisterOn_UnsupportedLayout_SkipsRegister) {
+  comm->rmaState.rmaProxyState.ncclRma = &ncclRmaIbProxy;
+  ScopedHook loadParam(g_loadParam, [](const char* env, int64_t deftVal) -> int64_t {
+    return std::string(env) == "MULTI_SEGMENT_REGISTER" ? 1 : deftVal;
+  });
+  ScopedHook connect(g_devrRmaProxyConnectOnce, [](ncclComm*) { return ncclSuccess; });
+  ScopedHook reg(g_devrRmaProxyRegister, [](ncclComm*, void*, size_t, void*[]) { return ncclSuccess; });
+  const int layouts[][2] = {{1, 2}, {2, 3}, {NCCL_RMA_MAX_SEGMENTS + 1, NCCL_RMA_MAX_SEGMENTS + 1}};
+  for (const auto& layout : layouts) {
+    mem.minGlobalNumSegments = layout[0];
+    mem.maxGlobalNumSegments = layout[1];
+    EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess) << layout[0] << ".." << layout[1];
+  }
+  EXPECT_EQ(connect.calls, 3);
+  EXPECT_EQ(reg.calls, 0);
+
+  mem.minGlobalNumSegments = mem.maxGlobalNumSegments = NCCL_RMA_MAX_SEGMENTS;
+  EXPECT_EQ(symMemoryRegisterRma(comm, &mem), ncclSuccess);
+  EXPECT_EQ(reg.calls, 1) << "the cap itself still registers";
 }
 
 // Branch: teardown releases a multi-segment window's RMA MR; rmaHostWins[0] is
@@ -2444,6 +2469,7 @@ TEST_F(SymMemoryObtainSetupTest, AggregatesMaxSegmentsAcrossRanks) {
 
   ASSERT_EQ(Obtain(/*numSegments=*/1), ncclSuccess);
   EXPECT_EQ(obtained->maxGlobalNumSegments, 3);
+  EXPECT_EQ(obtained->minGlobalNumSegments, 1);
   EXPECT_EQ(obtained->numSegments, 1);  // our own count is unchanged
 }
 

@@ -13,6 +13,9 @@
 
 static_assert(NCCL_RMA_SEND_QP_WRS == 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
               "NCCL_RMA_SEND_QP_WRS must match the multi-segment sender depth");
+// RCCL: credits wait until a chain fits, so one RMA flush chain must fit the flush QP.
+static_assert(NCCL_RMA_MAX_FLUSH_WRS <= NET_IB_MAX_REQUESTS,
+              "one RMA flush chain must fit the flush QP");
 
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -453,6 +456,7 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   ncclIbWqeLatMonInit(&qp->latMon);
+  qp->maxSendWrs = createQpAttrs->maxSendWorkRequest;
   if (createQpAttrs->oooRq) {
     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
     return ncclSuccess;

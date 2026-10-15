@@ -12,6 +12,7 @@
 #include "rma.h"
 #include "rocmwrap.h"
 #include "transport.h"
+#include "transport/net_ib/rma_multiseg.h"
 
 #include <mutex>
 #include <unistd.h>
@@ -123,9 +124,11 @@ ncclResult_t rcclDevrGinSegmentRegType(bool isHost, int maxGlobalNumSegments, in
 }
 #endif
 
-bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm) {
-  // Only RMA backends that register one MR per physical segment can take a multi-segment window.
-  return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy;
+bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments) {
+  // Only RMA backends that register one MR per physical segment can take a multi-segment window,
+  // and the IB proxy needs the same count on every rank within its MR table.
+  return ncclParamMultiSegmentRegister() && comm->rmaState.rmaProxyState.ncclRma == &ncclRmaIbProxy &&
+         minGlobalNumSegments == maxGlobalNumSegments && maxGlobalNumSegments <= NCCL_RMA_MAX_SEGMENTS;
 }
 
 namespace {

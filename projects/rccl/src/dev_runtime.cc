@@ -873,9 +873,13 @@ fail:
 static ncclResult_t symMemoryRegisterRma(struct ncclComm* comm, struct ncclDevrMemory* mem) {
   if (!ncclDevrWinRegEnabled(mem->winFlags, ncclDevrRegisterRma)) return ncclSuccess;
   NCCLCHECK(ncclRmaProxyConnectOnce(comm));
-  // Multi-segment windows need an RMA backend that registers one MR per segment.
-  if (mem->maxGlobalNumSegments == 1 || rcclDevrRmaRegistersMultiSegment(comm)) {
+  // RCCL: inputs are communicator-wide, so every rank takes the same branch and skips registration together.
+  if (mem->maxGlobalNumSegments == 1 ||
+      rcclDevrRmaRegistersMultiSegment(comm, mem->minGlobalNumSegments, mem->maxGlobalNumSegments)) {
     NCCLCHECK(ncclRmaProxyRegister(comm, mem->primaryAddr, mem->size, mem->rmaHostWins));
+  } else {
+    INFO(NCCL_INIT, "Skipping RMA registration for window %p with %d..%d segments per rank", mem->primaryAddr,
+         mem->minGlobalNumSegments, mem->maxGlobalNumSegments);
   }
   return ncclSuccess;
 }
@@ -957,6 +961,7 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
   uint64_t candidateRegistryId = invalidRegistryId;
   uint64_t registryId = invalidRegistryId;
   int maxGlobalNumSegments = 0;
+  int minGlobalNumSegments = numSegments;
   bool globalHasSysmemSegment = false;
 
   // Look for an existing registration of the same backing allocation with compatible flags. memHead
@@ -994,6 +999,7 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
     if (maxGlobalNumSegments < globalSegmentInfo[r].numSegments) {
       maxGlobalNumSegments = globalSegmentInfo[r].numSegments;
     }
+    minGlobalNumSegments = std::min(minGlobalNumSegments, globalSegmentInfo[r].numSegments);
     if (globalSegmentInfo[r].hasSysmemSegment) globalHasSysmemSegment = true;
     // Reuse only if every rank found the same registration. A rank which found none has
     // mem == nullptr already, so its invalidRegistryId only has to veto reuse on the others.
@@ -1028,6 +1034,7 @@ static ncclResult_t symMemoryObtain(struct ncclComm* comm, CUmemGenericAllocatio
   mem->hasSysmemSegment = hasSysmemSegment;
   mem->numSegments = numSegments;
   mem->maxGlobalNumSegments = maxGlobalNumSegments;
+  mem->minGlobalNumSegments = minGlobalNumSegments;
   mem->globalHasSysmemSegment = globalHasSysmemSegment;
 
   NCCLCHECKGOTO(ncclCalloc(&mem->segmentSizes, numSegments), ret, fail_mem);

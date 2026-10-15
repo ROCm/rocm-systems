@@ -78,6 +78,7 @@ struct ncclDevrMemory {
   size_t* segmentSizes;    // size of each segment, length numSegments
   // Communicator-wide aggregates over all nRanks, populated via bootstrapAllGather.
   int maxGlobalNumSegments;    // max(numSegments) across all communicator ranks
+  int minGlobalNumSegments;    // RCCL: min(numSegments) across all communicator ranks
   bool globalHasSysmemSegment; // true if any communicator rank has a sysmem segment
   // LSA-team aggregates, derived from a global allgather.
   int* lsaNumSegments;   // numSegments for each LSA rank, length lsaSize

@@ -474,8 +474,9 @@ inline int rcclAllocP2pNetLLBuffers(int cudaArch, int nNodes, int nRanks, int64_
 ncclResult_t rcclDevrProbeNonSymWindow(struct ncclComm* comm, void* userPtr, size_t userSize, int winFlags);
 // GIN MR pointer type for a symmetric segment; host VMM needs DMA-BUF (rccl_dev_runtime.cc).
 ncclResult_t rcclDevrGinSegmentRegType(bool isHost, int maxGlobalNumSegments, int* ptrType, bool* needDmabuf);
-// True when NCCL_MULTI_SEGMENT_REGISTER is on and the RMA backend registers per segment (rccl_dev_runtime.cc).
-bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm);
+// True when NCCL_MULTI_SEGMENT_REGISTER is on, the RMA backend registers per segment, and all ranks
+// share one segment count within its cap (rccl_dev_runtime.cc).
+bool rcclDevrRmaRegistersMultiSegment(struct ncclComm* comm, int minGlobalNumSegments, int maxGlobalNumSegments);
 // RCCL: owner DMA-BUF fds for imported host segments, keyed by local VA. An imported handle cannot re-export one.
 void rcclHostSegmentFdRegister(void* base, size_t size, int fd);
 void rcclHostSegmentFdDeregister(int fd);
