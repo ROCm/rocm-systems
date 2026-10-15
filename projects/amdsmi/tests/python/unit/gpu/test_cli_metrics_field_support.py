@@ -117,7 +117,7 @@ class TestVersionFieldTable(unittest.TestCase):
             self.assertIn(present, v16)
         self.assertNotIn("xcp_stats.temperature_xcd", v16)
         self.assertNotIn("xcp_stats.gfx_busy_inst", self.fields(1, 5))
-        self.assertIn("xcp_stats.temperature_xcd", self.fields(1, 8))
+        self.assertNotIn("xcp_stats.temperature_xcd", self.fields(1, 8))
         self.assertIn("xcp_stats.temperature_xcd", self.fields(1, 9))
 
     def test_apu_versions_differ(self):
