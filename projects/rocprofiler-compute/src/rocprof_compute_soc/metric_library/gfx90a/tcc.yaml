@@ -1,0 +1,68 @@
+inherit: ../gfx908/tcc.yaml
+mem.l2_bw:
+  formula: 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp)
+mem.fabric_rd_bw:
+  formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
+mem.fabric_wr_atomic_bw:
+  formula: SUM(TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
+mem.fabric_rd_lat:
+  formula: SUM(TCC_EA_RDREQ_LEVEL_sum) / SUM(TCC_EA_RDREQ_sum)
+mem.fabric_wr_lat:
+  formula: SUM(TCC_EA_WRREQ_LEVEL_sum) / SUM(TCC_EA_WRREQ_sum)
+mem.hbm_bw:
+  formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64 + TCC_EA_WRREQ_64B_sum * 64 + (TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) * 32) / SUM(End_Timestamp - Start_Timestamp)
+mem.l2_peak_bw:
+  formula: 100 * 128 * SUM(TCC_REQ_sum) / SUM(End_Timestamp - Start_Timestamp) / ($max_sclk / 1000 * 128 * TO_INT($total_l2_chan))
+mem.fabric_rd_bw_norm:
+  formula: SUM(TCC_EA_RDREQ_32B_sum * 32 + (TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) * 64) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GB/s
+mem.fabric_hbm_rd_traffic:
+  formula: 100 * SUM(TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
+mem.fabric_remote_rd_traffic:
+  formula: 100 * SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum) / SUM(TCC_EA_RDREQ_sum)
+mem.fabric_uncached_rd_traffic:
+  formula: 100 * SUM(TCC_EA_RD_UNCACHED_32B_sum) / SUM(TCC_EA_RDREQ_sum)
+mem.fabric_hbm_wr_atomic_traffic:
+  formula: 100 * SUM(TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
+mem.fabric_remote_wr_atomic_traffic:
+  formula: 100 * SUM(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum) / SUM(TCC_EA_WRREQ_sum)
+mem.fabric_atomic_traffic:
+  formula: 100 * SUM(TCC_EA_ATOMIC_sum) / SUM(TCC_EA_WRREQ_sum)
+mem.fabric_uncached_wr_atomic_traffic:
+  formula: 100 * SUM(TCC_EA_WR_UNCACHED_32B_sum) / SUM(TCC_EA_WRREQ_sum)
+mem.fabric_atomic_lat:
+  formula: SUM(TCC_EA_ATOMIC_LEVEL_sum) / SUM(TCC_EA_ATOMIC_sum)
+mem.fabric_rd_32b:
+  formula: SUM(TCC_EA_RDREQ_32B_sum) / SUM($denom)
+mem.fabric_rd_64b:
+  formula: SUM(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_32B_sum) / SUM($denom)
+mem.fabric_rd_uncached:
+  formula: SUM(TCC_EA_RD_UNCACHED_32B_sum) / SUM($denom)
+mem.fabric_hbm_rd:
+  formula: SUM(TCC_EA_RDREQ_DRAM_sum) / SUM($denom)
+mem.fabric_remote_rd:
+  formula: SUM(NOISE_CLAMP(TCC_EA_RDREQ_sum - TCC_EA_RDREQ_DRAM_sum, TCC_EA_RDREQ_sum)) / SUM($denom)
+mem.fabric_wr_atomic_32b:
+  formula: AVG(NOISE_CLAMP((TCC_EA_WRREQ_sum - TCC_EA_WRREQ_64B_sum) / $denom, TCC_EA_WRREQ_sum))
+mem.fabric_wr_atomic_uncached:
+  formula: SUM(TCC_EA_WR_UNCACHED_32B_sum) / SUM($denom)
+mem.fabric_wr_atomic_64b:
+  formula: SUM(TCC_EA_WRREQ_64B_sum) / SUM($denom)
+mem.fabric_hbm_wr_atomic:
+  formula: SUM(TCC_EA_WRREQ_DRAM_sum) / SUM($denom)
+mem.fabric_remote_wr_atomic:
+  formula: SUM(NOISE_CLAMP(TCC_EA_WRREQ_sum - TCC_EA_WRREQ_DRAM_sum, TCC_EA_WRREQ_sum)) / SUM($denom)
+mem.fabric_atomic:
+  formula: SUM(TCC_EA_ATOMIC_sum) / SUM($denom)
+mem.l2_chan_fabric_rd:
+  formula: SUM(TO_INT(TCC_EA_RDREQ[::_1])) / SUM($denom)
+mem.l2_chan_fabric_wr_atomic:
+  formula: SUM(TO_INT(TCC_EA_WRREQ[::_1])) / SUM($denom)
+mem.l2_chan_fabric_atomic:
+  formula: SUM(TO_INT(TCC_EA_ATOMIC[::_1])) / SUM($denom)
+mem.l2_chan_fabric_rd_lat_cycles:
+  formula: TCC_EA_RDREQ_LEVEL[::_1] / TCC_EA_RDREQ[::_1]
+mem.l2_chan_fabric_wr_atomic_lat_cycles:
+  formula: TCC_EA_WRREQ_LEVEL[::_1] / TCC_EA_WRREQ[::_1]
+mem.l2_chan_fabric_atomic_lat_cycles:
+  formula: TCC_EA_ATOMIC_LEVEL[::_1] / TCC_EA_ATOMIC[::_1] if TCC_EA_ATOMIC[::_1] != 0 else 0

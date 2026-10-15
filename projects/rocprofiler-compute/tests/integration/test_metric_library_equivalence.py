@@ -59,7 +59,10 @@ _CDNA_DISPLAY_VARIANTS = {
 # Time in seconds (Bytes/s rows) and in nanoseconds (GB/s).
 SECONDS_SCALE = "/(SUM(End_Timestamp-Start_Timestamp)/1e9)"
 NANOSECONDS = "/SUM(End_Timestamp-Start_Timestamp)"
-DISPLAY_VARIANTS = {"gfx908": _CDNA_DISPLAY_VARIANTS}
+DISPLAY_VARIANTS = {
+    "gfx908": _CDNA_DISPLAY_VARIANTS,
+    "gfx90a": {**_CDNA_DISPLAY_VARIANTS, "11.2.7": "MFMA Utilization"},
+}
 
 
 def gpu_series(arch):
