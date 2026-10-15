@@ -3580,9 +3580,9 @@ template <typename Inst> [[nodiscard]] bool try_execute_lshl_add_u64_simd(Inst &
 
 /// VOP3 wide 32x32->64 multiply-add fast path (v_mad_u64_u32 / v_mad_i64_i32).
 /// src0/src1 are 32-bit multiplicands (read as narrow lanes), src2 is the 64-bit
-/// addend, dst is 64-bit, and sdst is the per-lane overflow/carryout mask.
+/// addend, dst is 64-bit, and sdst is the per-lane unsigned carry-out or signed bit-64 mask.
 /// `mad_op(s0, s1, c)` receives the two narrow operands and the 64-bit addend
-/// and returns both the low 64-bit result and carry/overflow mask.
+/// and returns both the low 64-bit result and unsigned carry-out or signed bit-64 mask.
 template <typename Inst, typename MadOp, typename WriteResult>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_mad_wide64_vop3_result_simd(Inst &inst, Wavefront &wf,

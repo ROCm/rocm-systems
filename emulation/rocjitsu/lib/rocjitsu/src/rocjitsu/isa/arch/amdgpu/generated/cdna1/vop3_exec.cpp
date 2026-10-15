@@ -6440,6 +6440,14 @@ void VCmpxTU64Vop3::execute_impl(amdgpu::Wavefront &wf) {
   commit_result(result);
 }
 
+void VExpLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_exp_legacy_f32_vop3(*this, wf);
+}
+
+void VLogLegacyF32Vop3::execute_impl(amdgpu::Wavefront &wf) {
+  amdgpu::execute_v_log_legacy_f32_vop3(*this, wf);
+}
+
 void VAddCoU32Vop3SdstEnc::execute_impl(amdgpu::Wavefront &wf) {
   auto commit_result = [&](uint64_t raw_result) {
     uint64_t final_result = raw_result;
