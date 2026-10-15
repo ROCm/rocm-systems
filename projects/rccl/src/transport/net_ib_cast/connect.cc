@@ -1318,6 +1318,15 @@ static ncclResult_t IbCastQpSharingSenderRegisterPrimary(
   return ncclSuccess;
 }
 
+// Earlier qps[] entry backed by the same QP, or -1. A QP-sharing secondary can
+// map several entries to one shared QP; they share its telemetry slot.
+static int IbCastTelSameQp(const struct ncclIbNetCommBase* base, int q) {
+  for (int j = 0; j < q; j++) {
+    if (base->qps[j].qp == base->qps[q].qp) return j;
+  }
+  return -1;
+}
+
 ncclResult_t IbCastConnectImpl(void* ctx, int dev, void* opaqueHandle, void** sendComm,
                                ncclNetDeviceHandle_t** sendDevComm, int envTrafficClass) {
   ncclResult_t ret = ncclSuccess;
@@ -1497,25 +1506,29 @@ ib_recv_dev_list:
   comm->telChId = channelId;
   comm->telChStats = NULL;
 
-  // Telemetry-only: skip when off. IbCastQpCreate() left every telQpStats NULL,
-  // the untracked value the hooks expect.
+  // Telemetry-only: skip when off. telQpStats starts NULL (IbCastQpCreate()
+  // or the zeroed comm), the untracked value the hooks expect.
   if (rcclTelemetryOn()) {
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       int ibDevN = comm->base.vProps.devs[i];
       int numQpsForDev = 0;
       for (int q = 0; q < comm->base.nqps; q++)
-        if (comm->base.qps[q].devIndex == i) numQpsForDev++;
+        if (comm->base.qps[q].devIndex == i && IbCastTelSameQp(&comm->base, q) < 0) numQpsForDev++;
       int numSlots = 0;
       int startSlot = rcclTelemetrySetupChannel(ibDevN, channelId, numQpsForDev, &numSlots);
       if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(ibDevN);
       int slotOffset = 0;
       for (int q = 0; q < comm->base.nqps && slotOffset < numSlots; q++) {
-        if (comm->base.qps[q].devIndex != i) continue;
+        if (comm->base.qps[q].devIndex != i || IbCastTelSameQp(&comm->base, q) >= 0) continue;
         // QPs past the granted slots keep telQpStats == NULL (untracked).
         int telSlot = startSlot + slotOffset++;
         rcclTelemetrySetQpRole(ibDevN, channelId, telSlot, comm->base.qps[q].isDataQp);
         comm->base.qps[q].telQpStats = rcclTelemetryResolveQp(ibDevN, channelId, telSlot);
       }
+    }
+    for (int q = 0; q < comm->base.nqps; q++) {
+      int j = IbCastTelSameQp(&comm->base, q);
+      if (j >= 0) comm->base.qps[q].telQpStats = comm->base.qps[j].telQpStats;
     }
     // Request completions are charged to the comm's first device.
     comm->telChStats = rcclTelemetryResolveChannel(comm->base.vProps.devs[0], channelId);
@@ -2485,19 +2498,23 @@ ib_recv:
       int telIbDevN = rComm->base.vProps.devs[i];
       int numQpsForDev = 0;
       for (int q = 0; q < rComm->base.nqps; q++)
-        if (rComm->base.qps[q].devIndex == i) numQpsForDev++;
+        if (rComm->base.qps[q].devIndex == i && IbCastTelSameQp(&rComm->base, q) < 0) numQpsForDev++;
       int numSlots = 0;
       int startSlot = rcclTelemetrySetupChannel(telIbDevN, channelId, numQpsForDev, &numSlots);
       if (!telChannelIdKnown) rcclTelemetryMarkChannelsUnknown(telIbDevN);
       int slotOffset = 0;
       for (int q = 0; q < rComm->base.nqps && slotOffset < numSlots; q++) {
-        if (rComm->base.qps[q].devIndex != i) continue;
+        if (rComm->base.qps[q].devIndex != i || IbCastTelSameQp(&rComm->base, q) >= 0) continue;
         // QPs past the granted slots keep telQpStats == NULL (untracked).
         int telSlot = startSlot + slotOffset++;
         // isDataQp is always false on receiver QPs; classify by CTS role.
         rcclTelemetrySetQpRole(telIbDevN, channelId, telSlot, !IbCastRecvCommIsCtsQp(rComm, q));
         rComm->base.qps[q].telQpStats = rcclTelemetryResolveQp(telIbDevN, channelId, telSlot);
       }
+    }
+    for (int q = 0; q < rComm->base.nqps; q++) {
+      int j = IbCastTelSameQp(&rComm->base, q);
+      if (j >= 0) rComm->base.qps[q].telQpStats = rComm->base.qps[j].telQpStats;
     }
     rComm->telChStats = rcclTelemetryResolveChannel(rComm->base.vProps.devs[0], channelId);
   }
