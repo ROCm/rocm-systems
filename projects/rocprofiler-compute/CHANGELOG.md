@@ -28,6 +28,7 @@ Full documentation for ROCm Compute Profiler is available at [https://rocm.docs.
   * Panel and arrow sizes now follow their content.
   * The gfx115x SQC panel shows separate instruction and scalar data cache read bandwidth to GL1.
   * The LDS instruction arrow uses the default color.
+  * Block labels such as the memory type are part of the block title, for example `DRAM (DDR5/LPDDR5)` on gfx115x and `HDM (CXL)` on gfx1250.
   * Percent values, including stall rates, show a progress bar, and missing values show `N/A`, on every architecture.
 
 * Every CDNA (gfx9) Memory Chart metric now reports a unit, and the Memory Chart metric descriptions in the documentation link to the related hardware sections.

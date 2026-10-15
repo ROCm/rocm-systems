@@ -3,6 +3,7 @@
 
 """Terminal rendering of every memory chart layout."""
 
+import json
 import re
 import zlib
 
@@ -10,7 +11,7 @@ import common
 import pytest
 
 from membw_analysis.models import BottleneckNode, MemBwAnalysisResult, SupportingMetric
-from memory_chart.loader import Layouts, PanelConfigs
+from memory_chart.loader import Layouts, PanelConfigs, load_layout
 from memory_chart.render import MemChart, plot_mem_chart, progress_bar
 from memory_chart.units import display_unit, panel_units
 from utils.utils_common import strip_ansi
@@ -60,6 +61,19 @@ def make_chart(arch, values, membw=None):
     return MemChart(Layouts.for_arch(arch), values, units, membw)
 
 
+def render_layout(tmp_path, arch, data):
+    """Plain-text chart of *arch* drawn from the layout *data*."""
+    path = tmp_path / "layout.json"
+    path.write_text(json.dumps(data), encoding="utf-8")
+    units = panel_units(PanelConfigs.for_arch(arch))
+    chart = MemChart(load_layout(path), sample_values(arch), units)
+    return strip_ansi(chart.render(DEFAULT_TITLE))
+
+
+def count_bars(output):
+    return len(re.findall("[█░]{10}", output))
+
+
 def box_rows(lines, title):
     """Top and bottom border rows and left edge of the box titled *title*."""
     top = next(
@@ -87,14 +101,13 @@ VALUE_SETS = {
 
 
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
-def test_full_metrics_render_every_block_label_and_note(gpu_arch):
+def test_full_metrics_render_every_block_and_label(gpu_arch):
     output = render(gpu_arch)
     assert output.splitlines()[0] == DEFAULT_TITLE
     assert "N/A" not in output
     layout = Layouts.for_arch(gpu_arch)
     for block in layout.blocks():
         assert block.title in output
-        assert (block.note or "").split(" ")[0] in output
         for item in block.items:
             assert item.title in output
     for arrow in layout.arrows:
@@ -216,6 +229,21 @@ def test_stall_metrics_get_a_bar(gpu_arch, label):
     row = next(i for i, line in enumerate(lines) if label in line)
     col = lines[row].index(label)
     assert set(lines[row + 1][col : col + 10]) <= set("█░")
+
+
+def test_item_bar_follows_the_layout(tmp_path):
+    data = common.memory_chart_layout_data("gfx942")
+    no_bar = common.with_metric_change(data, "L2 Hit", bar=False)
+    assert count_bars(render_layout(tmp_path, "gfx942", no_bar)) == (
+        count_bars(render("gfx942")) - 1
+    )
+
+
+def test_arrow_style_follows_the_layout(tmp_path):
+    data = common.memory_chart_layout_data("gfx942")
+    inline = common.with_metric_change(data, "VL1_L2 Read BW", style="inline")
+    assert not re.search(r"Read BW\s+: ", render("gfx942"))
+    assert re.search(r"Read BW\s+: ", render_layout(tmp_path, "gfx942", inline))
 
 
 @pytest.mark.parametrize(

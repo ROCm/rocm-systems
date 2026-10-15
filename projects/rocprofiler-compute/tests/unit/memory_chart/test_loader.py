@@ -5,6 +5,7 @@
 
 import copy
 import json
+import random
 import re
 from collections import Counter
 
@@ -32,11 +33,22 @@ LAYOUT_ARCH_IDS = [f"{path.stem}-{arch}" for path, arch in LAYOUT_ARCHS]
 READ_ARROW = {
     "from": "cu",
     "to": "vl1d",
+    "direction": "backward",
     "metric": "Flat Read",
     "title": "Read",
     "category": "read",
+    "style": "inline",
 }
-INNER = {"id": "inner", "title": "Inner"}
+INNER = {
+    "id": "inner",
+    "title": "Inner",
+    "column": 4,
+    "order": 0,
+    "position": "grid",
+    "style": "panel",
+}
+NESTED = {**INNER, "parent": "mall"}
+ABOVE = {**INNER, "column": 3, "position": "above", "host": "data_fabric"}
 
 
 def panel_metric_names(arch):
@@ -50,7 +62,7 @@ def panel_metric_names(arch):
 
 
 def gfx950_data():
-    return json.loads(Layouts.for_arch("gfx950").path.read_text(encoding="utf-8"))
+    return common.memory_chart_layout_data("gfx950")
 
 
 def write_layout(tmp_path, data, name="layout.json"):
@@ -65,19 +77,26 @@ def changed(**fields):
 
 
 def with_block_change(block_id, **fields):
-    """gfx950's layout with fields added to one column block."""
+    """gfx950's layout with fields of one block replaced; None removes a field."""
     data = gfx950_data()
-    for column in data["columns"]:
-        for block in column:
-            if block["id"] == block_id:
-                block.update(copy.deepcopy(fields))
+    for block in data["blocks"]:
+        if block["id"] == block_id:
+            block.update(copy.deepcopy(fields))
+            for key in [k for k, v in fields.items() if v is None]:
+                del block[key]
     return data
 
 
-def with_duplicate_block():
+def with_blocks(*blocks):
+    """gfx950's layout with extra blocks."""
     data = gfx950_data()
-    data["columns"][1].append(dict(data["columns"][1][0]))
+    data["blocks"] += [copy.deepcopy(block) for block in blocks]
     return data
+
+
+def with_metric_change(metric, **fields):
+    """gfx950's layout with fields set on the items and arrows of *metric*."""
+    return common.with_metric_change(gfx950_data(), metric, **fields)
 
 
 # ---------------------------------------------------------------------------
@@ -116,6 +135,34 @@ def test_every_shown_unit_has_a_display_rule(path, arch):
     assert not unknown
 
 
+@pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
+def test_arrow_style_fits_the_metric_unit(path, arch):
+    # A count reads best as one "title : value" line; a rate as title, value, arrow
+    units = panel_units(PanelConfigs.for_arch(arch))
+    layout = load_layout(path)
+    grid = {b.id for b in layout.blocks() if b.position == "grid"}
+    wrong = [
+        arrow.metric
+        for arrow in layout.arrows
+        if arrow.target in grid
+        and (arrow.style == "inline")
+        != (display_unit(units[arrow.metric]).kind == "count")
+    ]
+    assert not wrong
+
+
+@pytest.mark.parametrize(("path", "arch"), LAYOUT_ARCHS, ids=LAYOUT_ARCH_IDS)
+def test_bars_are_only_on_percent_metrics(path, arch):
+    units = panel_units(PanelConfigs.for_arch(arch))
+    wrong = [
+        item.metric
+        for block in load_layout(path).blocks()
+        for item in block.items
+        if item.bar and display_unit(units[item.metric]).kind != "percent"
+    ]
+    assert not wrong
+
+
 @pytest.mark.parametrize(
     ("gpu_arch", "layout"),
     [("gfx1150", "gfx115x"), ("gfx1153", "gfx115x"), ("gfx941", "gfx94x")],
@@ -146,21 +193,16 @@ def test_a_broken_layout_is_skipped_and_others_still_load(tmp_path, monkeypatch)
 
 
 # ---------------------------------------------------------------------------
-# Resolution
+# Format rules
 # ---------------------------------------------------------------------------
 
 
-def test_attached_blocks_take_their_host_column_and_side():
-    blocks = {b.id: b for b in Layouts.for_arch("gfx950").blocks()}
-    xgmi, pcie = blocks["xgmi"], blocks["pcie"]
-    assert (xgmi.position, xgmi.host, xgmi.column) == ("above", "data_fabric", 3)
-    assert (pcie.position, pcie.host) == ("below", "data_fabric")
-
-
-def test_nested_blocks_take_their_parent_and_column():
-    blocks = {b.id: b for b in Layouts.for_arch("gfx1250").blocks()}
-    assert [c.id for c in blocks["tcp"].children] == ["lds", "gl0"]
-    assert (blocks["gl0"].parent, blocks["gl0"].column) == ("tcp", 1)
+def test_block_list_order_does_not_matter(tmp_path):
+    data = gfx950_data()
+    random.Random(0).shuffle(data["blocks"])
+    assert load_layout(write_layout(tmp_path, data)).columns == (
+        Layouts.for_arch("gfx950").columns
+    )
 
 
 @pytest.mark.parametrize(
@@ -169,53 +211,66 @@ def test_nested_blocks_take_their_parent_and_column():
         (changed(schema_version=3), "unknown keys"),
         ({k: v for k, v in gfx950_data().items() if k != "scope"}, "missing ['scope']"),
         (changed(scope={"labels": ["a"], "split": "l2"}), "two labels"),
-        (changed(columns=[*gfx950_data()["columns"], []]), "every column"),
-        (changed(arrows=[{**READ_ARROW, "category": "hit"}]), "category"),
+        (changed(scope={"labels": ["a", "b"], "split": "cu"}), "scope split"),
+        (with_block_change("vl1d", note="x"), "unknown keys"),
+        (with_block_change("vl1d", order=True), "order of 'vl1d'"),
+        (with_block_change("vl1d", stall_level="L3"), "stall_level"),
+        (with_block_change("mall", column=7), "with no gaps"),
+        (with_block_change("lds", order=0), "orders 0, 1"),
+        (with_blocks(gfx950_data()["blocks"][1]), "duplicate block id"),
+        (with_block_change("vl1d", host="cu"), "has no host"),
+        (with_block_change("xgmi", host=None), "needs a host"),
+        (with_blocks({**ABOVE, "content": []}), "needs a host"),
+        (with_blocks({**NESTED, "parent": "nowhere"}), "unknown block 'nowhere'"),
+        (with_blocks({**NESTED, "parent": "xgmi", "column": 3}), "hang off a block"),
+        (with_blocks({**ABOVE, "host": "xgmi"}), "hang off a block"),
+        (with_blocks({**NESTED, "column": 2}), "the column of 'mall'"),
+        (with_blocks({**NESTED, "parent": "inner"}), "nest inside each other"),
+        (with_blocks({**NESTED, "parent": "vl1d", "column": 1}), "nested blocks"),
+        (with_metric_change("VGPR", bar=True), "compact list"),
+        (with_metric_change("L2 Hit", category="x"), "category"),
+        (with_metric_change("L2 Hit", bar=1), "bar of 'L2 Hit'"),
+        (with_metric_change("Flat Read", category="hit"), "category"),
+        (with_metric_change("Flat Read", direction="up"), "direction"),
         (changed(arrows=[{**READ_ARROW, "to": "nowhere"}]), "unknown block"),
         (changed(arrows=[{**READ_ARROW, "to": "l2"}]), "next column"),
-        (changed(scope={"labels": ["a", "b"], "split": "cu"}), "scope split"),
-        (with_block_change("vl1d", childs=[]), "unknown keys"),
-        (with_block_change("vl1d", stall_level="L3"), "stall_level"),
-        (
-            with_block_change(
-                "l2", metrics=[{"metric": "L2 Hit", "title": "Hit", "category": "x"}]
-            ),
-            "category",
-        ),
-        (
-            with_block_change("data_fabric", above=[{**INNER, "metrics": []}]),
-            "unknown keys",
-        ),
-        (with_block_change("vl1d", children=[INNER]), "nested blocks"),
-        (
-            with_block_change("mall", children=[{**INNER, "above": [INNER]}]),
-            "unknown keys",
-        ),
-        (with_block_change("mall", children=[INNER]), "nested in 'mall'"),
-        (with_duplicate_block(), "duplicate block id"),
         (
             changed(arrows=[{**READ_ARROW, "from": "xgmi", "to": "mall"}]),
             "must start at a block in a column",
         ),
+        (with_blocks(NESTED), "nested in 'mall'"),
+        (with_metric_change("xGMI Read BW", style="stacked"), "must be inline"),
     ],
     ids=[
         "unknown-top-level-key",
         "missing-key",
         "scope-labels",
-        "empty-column",
-        "arrow-category",
-        "arrow-unknown-block",
-        "arrow-skips-a-column",
         "scope-split-in-first-column",
         "unknown-block-key",
+        "order-not-a-number",
         "stall-level",
-        "metric-category",
-        "content-on-attached-block",
-        "metrics-on-a-parent-block",
-        "attached-block-on-a-nested-block",
-        "arrow-to-a-parent-block",
+        "column-gap",
+        "order-repeated",
         "duplicate-block-id",
+        "grid-block-with-host",
+        "attached-block-without-host",
+        "attached-block-with-content",
+        "unknown-parent",
+        "parent-is-attached",
+        "host-is-attached",
+        "nested-block-in-another-column",
+        "parent-cycle",
+        "parent-has-metrics",
+        "bar-in-a-list",
+        "metric-category",
+        "bar-not-a-bool",
+        "arrow-category",
+        "arrow-direction",
+        "arrow-unknown-block",
+        "arrow-skips-a-column",
         "arrow-from-an-attached-block",
+        "arrow-to-a-parent-block",
+        "stacked-arrow-to-an-attached-block",
     ],
 )
 def test_malformed_layout_is_rejected(tmp_path, data, message):

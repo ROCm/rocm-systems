@@ -1,8 +1,10 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import copy
 import gzip
 import inspect
+import json
 import os
 import re
 import shutil
@@ -14,7 +16,7 @@ from typing import Set
 from unittest.mock import Mock
 
 import config
-from memory_chart.loader import PanelConfigs
+from memory_chart.loader import Layouts, PanelConfigs
 from utils import csv_compression
 
 ROOT = os.path.dirname(os.path.dirname(__file__))
@@ -45,6 +47,21 @@ def memory_chart_archs() -> list[str]:
         for path in config.analysis_configs_dir.iterdir()
         if path.is_dir() and PanelConfigs.for_arch(path.name)
     )
+
+
+def memory_chart_layout_data(arch: str) -> dict:
+    """The parsed layout file of an arch's memory chart."""
+    return json.loads(Layouts.for_arch(arch).path.read_text(encoding="utf-8"))
+
+
+def with_metric_change(data: dict, metric: str, **fields) -> dict:
+    """A copy of layout *data* with *fields* set on every item and arrow of *metric*."""
+    data = copy.deepcopy(data)
+    items = [item for block in data["blocks"] for item in block.get("content", [])]
+    for entry in (*items, *data["arrows"]):
+        if entry["metric"] == metric:
+            entry.update(fields)
+    return data
 
 
 def check_resource_allocation():

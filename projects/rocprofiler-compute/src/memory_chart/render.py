@@ -7,7 +7,6 @@ README.md describes the layout files. tools/memory_chart_preview.py draws a layo
 without a GPU or a profile.
 """
 
-import textwrap
 from collections import defaultdict
 from dataclasses import dataclass
 from io import StringIO
@@ -53,9 +52,6 @@ _LEGEND_ENTRIES: tuple[tuple[str, str, str], ...] = (
 )
 
 _ARROW_GLYPHS = {"backward": "<{}", "forward": "{}>", "both": "<{}>"}
-
-# Categories that get a progress bar under a percent value
-_BAR_CATEGORIES = frozenset({"util", "hit", "stall", "neutral"})
 
 # Columns reserved for a value when sizing a panel, so typical values fit on the
 # label's line; a longer value moves to its own line.
@@ -150,9 +146,6 @@ class MemChart:
     def _shown(self, metric: str) -> str:
         return format_value(self.values.get(metric), self._unit(metric))
 
-    def _is_request(self, arrow: LayoutArrow) -> bool:
-        return self._unit(arrow.metric).kind == "count"
-
     # -- panel content -----------------------------------------------------
 
     def _needed_width(self, block: LayoutBlock) -> int:
@@ -166,7 +159,6 @@ class MemChart:
             len(row.label) + 1 + _VALUE_RESERVE["percent"]
             for row in self.stalls[block.id]
         ]
-        widths += [len(word) for word in (block.note or "").split()]
         widths += [self._needed_width(child) + _PANEL_FRAME for child in block.children]
         return max(widths)
 
@@ -206,16 +198,11 @@ class MemChart:
         for child in block.children:
             self._assign_width(child, width - _PANEL_FRAME, widths)
 
-    def _note_lines(self, block: LayoutBlock) -> list[str]:
-        """A block's note, wrapped to its text width."""
-        lines = textwrap.wrap(block.note or "", self.text_width[block.id])
-        return [f"[dim]{line}[/dim]" for line in lines]
-
     def _lines(self, block: LayoutBlock) -> list[str]:
         """Markup lines inside a block without nested blocks."""
         width = self.text_width[block.id]
-        lines = self._note_lines(block)
-        compact = block.column == 0
+        lines: list[str] = []
+        compact = block.style == "list"
         for item in block.items:
             if lines and not compact:
                 lines.append("")
@@ -225,12 +212,7 @@ class MemChart:
                 lines += [item.title, _colored(shown, color)]
             else:
                 lines.append(f"{item.title} {_colored(shown, color)}")
-            unit = self._unit(item.metric)
-            if (
-                unit.kind == "percent"
-                and item.category in _BAR_CATEGORIES
-                and not compact
-            ):
+            if item.bar:
                 lines.append(f"[dim]{progress_bar(self.values.get(item.metric))}[/dim]")
         for row in self.stalls[block.id]:
             if lines:
@@ -267,7 +249,7 @@ class MemChart:
     ) -> int:
         """Label width that lines up the values of an edge's request arrows."""
         arrows = [
-            a for group in segments.values() for a in group if self._is_request(a)
+            a for group in segments.values() for a in group if a.style == "inline"
         ]
         return max((len(a.title) for a in arrows), default=0)
 
@@ -279,7 +261,7 @@ class MemChart:
         label_width = self._request_label_width(segments)
         widths = [_MIN_EDGE_WIDTH]
         for arrow in arrows:
-            if self._is_request(arrow):
+            if arrow.style == "inline":
                 widths.append(label_width + 3 + _VALUE_RESERVE["count"])
             else:
                 widths += [len(arrow.title), len(self._shown(arrow.metric))]
@@ -297,10 +279,10 @@ class MemChart:
             color = COLORS[arrow.category]
             if arrow.group and arrow.group != group:
                 lines.append(f"[white]{arrow.group}[/white]")
-            elif lines and not self._is_request(arrow):
+            elif lines and arrow.style != "inline":
                 lines.append("")
             group = arrow.group
-            if self._is_request(arrow):
+            if arrow.style == "inline":
                 shown = self._shown(arrow.metric)
                 value_width = _VALUE_RESERVE["count"]
                 lines.append(
@@ -331,8 +313,8 @@ class MemChart:
         The heights keep every arrow beside the box it belongs to:
         - A box of height h at row top has interior rows [top + 1, top + h - 1).
         - Arrows anchored on a box start at top + 1, and h >= 2 + their line count.
-        - A nested box starts below its parent's border, note, and earlier
-          children; the parent's height is 2 + note lines + its children's heights.
+        - A nested box starts below its parent's border and earlier children; the
+          parent's height is 2 + its children's heights.
         - Centred arrows sit in the middle of the grid interior [1, H - 1).
         """
         needs = self._segment_lengths()
@@ -355,9 +337,7 @@ class MemChart:
     ) -> int:
         """Record the height of a block and its nested blocks; return its own."""
         if block.children:
-            inner = len(self._note_lines(block)) + sum(
-                self._size(child, needs, heights) for child in block.children
-            )
+            inner = sum(self._size(child, needs, heights) for child in block.children)
         else:
             inner = len(self._lines(block))
         heights[block.id] = max(inner, needs.get(block.id, 0), 1) + 2
@@ -365,13 +345,14 @@ class MemChart:
 
     # -- drawing -----------------------------------------------------------
 
-    def _panel(self, block: LayoutBlock, color: str) -> Panel:
-        stalled = bool(self.stalls[block.id])
-        border = COLORS["stall"] if stalled else color
+    def _panel(self, block: LayoutBlock) -> Panel:
+        if self.stalls[block.id]:
+            border = COLORS["stall"]
+        else:
+            border = COLORS["cu"] if block.style == "list" else COLORS["block"]
         if block.children:
             body: RenderableType = Group(
-                *self._note_lines(block),
-                *(self._panel(child, COLORS["block"]) for child in block.children),
+                *(self._panel(child) for child in block.children)
             )
         else:
             body = "\n".join(self._lines(block))
@@ -396,7 +377,7 @@ class MemChart:
     def _place(self, block: LayoutBlock, top: int, tops: dict[str, int]) -> None:
         """Record the first row of a block and of its nested blocks."""
         tops[block.id] = top
-        row = top + 1 + len(self._note_lines(block))
+        row = top + 1
         for child in block.children:
             self._place(child, row, tops)
             row += self.height[child.id]
@@ -489,8 +470,7 @@ class MemChart:
         for i, column in enumerate(self.layout.columns):
             if i:
                 cells.append(self._edge_column(i - 1))
-            color = COLORS["cu"] if i == 0 else COLORS["block"]
-            cells.append(Group(*(self._panel(block, color) for block in column)))
+            cells.append(Group(*(self._panel(block) for block in column)))
         # Rich gives even an empty column a cell, so leave out unused edges
         kept = [(cell, width) for cell, width in zip(cells, widths) if width]
         for _, width in kept:

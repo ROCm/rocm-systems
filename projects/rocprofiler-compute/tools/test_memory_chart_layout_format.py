@@ -20,7 +20,9 @@ def reversed_keys(value):
     return value
 
 
-def test_keys_are_written_in_loader_order_at_every_level():
+def test_keys_and_blocks_are_written_in_canonical_order():
     for path in layout_files():
         text = path.read_text(encoding="utf-8")
-        assert format_layout(reversed_keys(json.loads(text))) == text, path.name
+        data = reversed_keys(json.loads(text))
+        data["blocks"].reverse()
+        assert format_layout(data) == text, path.name

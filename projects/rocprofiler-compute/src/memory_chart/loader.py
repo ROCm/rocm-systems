@@ -1,14 +1,14 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Load memory chart layouts and resolve them into blocks and arrows.
+"""Load memory chart layouts and check them against the format rules in README.md.
 
-A layout file states blocks, nesting, and the metric on each block and arrow.
-This module checks the file and derives the rest: each block's column, parent
-and position, and each arrow's direction.
+A layout states where every block goes and how every part is drawn, so loading only
+checks the file and groups its blocks for the renderer.
 """
 
 import json
+from collections import defaultdict
 from collections.abc import Iterator
 from dataclasses import dataclass
 from pathlib import Path
@@ -39,36 +39,23 @@ class Keys:
         return self.required + self.optional
 
 
-LAYOUT_KEYS = Keys(("archs", "description", "scope", "columns", "arrows"))
+LAYOUT_KEYS = Keys(("archs", "description", "scope", "blocks", "arrows"))
 SCOPE_KEYS = Keys(("labels", "split"))
 BLOCK_KEYS = Keys(
-    ("id", "title"),
-    ("note", "stall_level", "metrics", "children", "above", "below"),
+    ("id", "title", "column", "order", "position", "style"),
+    ("parent", "host", "stall_level", "content"),
 )
-NESTED_BLOCK_KEYS = Keys(
-    ("id", "title"), ("note", "stall_level", "metrics", "children")
+ITEM_KEYS = Keys(("metric", "title", "category", "bar"))
+ARROW_KEYS = Keys(
+    ("from", "to", "direction", "metric", "title", "category", "style"), ("group",)
 )
-ATTACHED_BLOCK_KEYS = Keys(("id", "title"))  # above/below blocks are labelled boxes
-ITEM_KEYS = Keys(("metric", "title", "category"))
-ARROW_KEYS = Keys(("from", "to", "metric", "title", "category"), ("group",))
 
-_ITEM_CATEGORIES = frozenset({
-    "util",
-    "hit",
-    "stall",
-    "neutral",
-    "bw",
-    "read",
-    "write",
-    "atomic",
-})
-# Arrow category -> direction it implies
-_ARROW_DIRECTIONS = {
-    "read": "backward",
-    "write": "forward",
-    "atomic": "both",
-    "neutral": "both",
-}
+_POSITIONS = ("grid", "above", "below")
+_BLOCK_STYLES = ("panel", "list")
+_ITEM_CATEGORIES = ("util", "hit", "stall", "neutral", "bw", "read", "write", "atomic")
+_ARROW_CATEGORIES = ("read", "write", "atomic", "neutral")
+_DIRECTIONS = ("forward", "backward", "both")
+_ARROW_STYLES = ("inline", "stacked")
 
 
 @dataclass(frozen=True)
@@ -78,6 +65,7 @@ class LayoutItem:
     metric: str
     title: str
     category: str
+    bar: bool  # draw a progress bar under the value
 
 
 @dataclass(frozen=True)
@@ -88,9 +76,9 @@ class LayoutBlock:
     title: str
     column: int
     position: str  # "grid", "above", or "below"
+    style: str  # "panel", or "list" for a compact list
     parent: Optional[str]  # enclosing block of a nested block
     host: Optional[str]  # block that an above/below block hangs off
-    note: Optional[str]
     stall_level: Optional[str]  # membw level whose active stalls are listed here
     items: tuple[LayoutItem, ...]
     children: tuple["LayoutBlock", ...]
@@ -104,23 +92,24 @@ class LayoutArrow:
 
     source: str
     target: str
+    direction: str
     metric: str
     title: str
     category: str
-    direction: str
+    style: str  # "inline": one "title : value" line; "stacked": title, value, arrow
     group: Optional[str]
 
 
 @dataclass(frozen=True)
 class Layout:
-    """A resolved layout file."""
+    """A checked layout file."""
 
     path: Path
     archs: tuple[str, ...]
     description: str
     scope_labels: tuple[str, str]
     scope_split: str
-    columns: tuple[tuple[LayoutBlock, ...], ...]
+    columns: tuple[tuple[LayoutBlock, ...], ...]  # top-level grid blocks
     arrows: tuple[LayoutArrow, ...]
 
     def blocks(self) -> Iterator[LayoutBlock]:
@@ -184,20 +173,44 @@ def layout_files() -> list[Path]:
 
 
 def load_layout(path: Path) -> Layout:
-    """Read and resolve a layout file; raise LayoutError if missing or malformed."""
+    """Read and check a layout file; raise LayoutError if missing or malformed."""
     try:
         layout_json = json.loads(path.read_text(encoding="utf-8"))
     except (OSError, ValueError) as error:  # ValueError covers invalid JSON
         _fail(path, f"cannot read the layout: {error}")
     if not isinstance(layout_json, dict):
         _fail(path, "the layout must be a JSON object")
-    layout = _resolve(path, layout_json)
-    _check_references(layout)
+    return layout_from_json(path, layout_json)
+
+
+def layout_from_json(path: Path, data: dict[str, Any]) -> Layout:
+    """Check a parsed layout file and index its blocks; *path* names it in errors."""
+    _check_keys(path, data, LAYOUT_KEYS, "the layout")
+    _check_keys(path, data["scope"], SCOPE_KEYS, "scope")
+    if len(data["scope"]["labels"]) != 2:
+        _fail(path, "scope needs two labels")
+    raw_blocks = _raw_blocks(path, data["blocks"])
+    groups = _sibling_groups(path, raw_blocks)
+    columns = tuple(
+        tuple(_block(path, raw, groups) for raw in groups[("column", column)])
+        for column in range(len([k for k in groups if k[0] == "column"]))
+    )
+    left, right = data["scope"]["labels"]
+    layout = Layout(
+        path=path,
+        archs=tuple(data["archs"]),
+        description=data["description"],
+        scope_labels=(left, right),
+        scope_split=data["scope"]["split"],
+        columns=columns,
+        arrows=tuple(_arrow(path, raw) for raw in data["arrows"]),
+    )
+    _check_references(layout, raw_blocks)
     return layout
 
 
 # ---------------------------------------------------------------------------
-# Resolution
+# Reading the file
 # ---------------------------------------------------------------------------
 
 
@@ -240,91 +253,145 @@ def _check_keys(path: Path, raw: dict[str, Any], keys: Keys, where: str) -> None
         _fail(path, f"unknown keys {sorted(unknown)} in {where}")
 
 
-def _resolve(path: Path, data: dict[str, Any]) -> Layout:
-    _check_keys(path, data, LAYOUT_KEYS, "the layout")
-    _check_keys(path, data["scope"], SCOPE_KEYS, "scope")
-    if len(data["scope"]["labels"]) != 2:
-        _fail(path, "scope needs two labels")
-    if not data["columns"] or not all(data["columns"]):
-        _fail(path, "every column must have a block")
-    left, right = data["scope"]["labels"]
-    return Layout(
-        path=path,
-        archs=tuple(data["archs"]),
-        description=data["description"],
-        scope_labels=(left, right),
-        scope_split=data["scope"]["split"],
-        columns=tuple(
-            tuple(_block(path, raw, col) for raw in column)
-            for col, column in enumerate(data["columns"])
-        ),
-        arrows=tuple(_arrow(path, raw) for raw in data["arrows"]),
-    )
+def _check_choice(
+    path: Path, value: object, choices: tuple[object, ...], what: str
+) -> None:
+    if value not in choices:
+        _fail(path, f"{what} is {value!r}, not one of {list(choices)}")
+
+
+def _check_index(path: Path, value: object, what: str) -> None:
+    # bool is an int in Python, but not a column or an order
+    if isinstance(value, bool) or not isinstance(value, int) or value < 0:
+        _fail(path, f"{what} must be a whole number of at least 0, not {value!r}")
+
+
+def _raw_blocks(path: Path, entries: list[dict[str, Any]]) -> dict[str, dict[str, Any]]:
+    """The file's blocks by id, each checked on its own."""
+    by_id: dict[str, dict[str, Any]] = {}
+    for raw in entries:
+        where = repr(raw.get("id"))
+        _check_keys(path, raw, BLOCK_KEYS, where)
+        if raw["id"] in by_id:
+            _fail(path, f"duplicate block id {raw['id']!r}")
+        _check_index(path, raw["column"], f"column of {where}")
+        _check_index(path, raw["order"], f"order of {where}")
+        _check_choice(path, raw["position"], _POSITIONS, f"position of {where}")
+        _check_choice(path, raw["style"], _BLOCK_STYLES, f"style of {where}")
+        _check_choice(
+            path,
+            raw.get("stall_level"),
+            (None, *sorted(BOTTLENECK_LEVELS)),
+            f"stall_level of {where}",
+        )
+        if raw["position"] == "grid" and "host" in raw:
+            _fail(path, f"{where} is in the grid, so it has no host")
+        if raw["position"] != "grid":
+            extra = {"parent", "content", "stall_level"} & set(raw)
+            if "host" not in raw or extra or raw["style"] != "panel":
+                _fail(
+                    path,
+                    f"{where} is drawn {raw['position']} a block: it needs a host, "
+                    "the panel style, and no parent, content, or stall_level",
+                )
+        by_id[raw["id"]] = raw
+    return by_id
+
+
+def _sibling_groups(
+    path: Path, raw_blocks: dict[str, dict[str, Any]]
+) -> dict[tuple[Any, ...], list[dict[str, Any]]]:
+    """Blocks grouped with the blocks they are stacked with, sorted by order.
+
+    A group is the top-level grid blocks of a column, the children of a parent, or
+    the above (or below) blocks of a host.
+    """
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]] = defaultdict(list)
+    for raw in raw_blocks.values():
+        owner_id = raw.get("parent") or raw.get("host")
+        if owner_id is None:
+            groups[("column", raw["column"])].append(raw)
+            continue
+        owner = raw_blocks.get(owner_id)
+        if owner is None:
+            _fail(path, f"{raw['id']!r} refers to unknown block {owner_id!r}")
+        if owner["position"] != "grid" or ("host" in raw and "parent" in owner):
+            _fail(path, f"{raw['id']!r} must hang off a block in a column")
+        if owner["column"] != raw["column"]:
+            _fail(path, f"{raw['id']!r} must have the column of {owner_id!r}")
+        groups[
+            ("parent", owner_id)
+            if "parent" in raw
+            else ("host", owner_id, raw["position"])
+        ].append(raw)
+    columns = sorted(key[1] for key in groups if key[0] == "column")
+    if columns != list(range(len(columns))) or not columns:
+        _fail(path, f"columns must be numbered 0, 1, ... with no gaps, not {columns}")
+    for key, members in groups.items():
+        members.sort(key=lambda raw: raw["order"])
+        if [raw["order"] for raw in members] != list(range(len(members))):
+            ids = [raw["id"] for raw in members]
+            _fail(path, f"blocks {ids} must have orders 0, 1, ... with no gaps")
+    return groups
 
 
 def _block(
     path: Path,
     raw: dict[str, Any],
-    column: int,
-    position: str = "grid",
-    parent: Optional[str] = None,
-    host: Optional[str] = None,
+    groups: dict[tuple[Any, ...], list[dict[str, Any]]],
 ) -> LayoutBlock:
-    where = repr(raw.get("id"))
-    if position != "grid":
-        keys = ATTACHED_BLOCK_KEYS
-    else:
-        keys = NESTED_BLOCK_KEYS if parent else BLOCK_KEYS
-    _check_keys(path, raw, keys, where)
-    if raw.get("stall_level") not in (None, *BOTTLENECK_LEVELS):
-        _fail(path, f"unknown stall_level {raw['stall_level']!r} on {where}")
-    if "children" in raw and ({"metrics", "stall_level"} & set(raw)):
-        _fail(path, f"{where} has nested blocks, so its metrics go in them")
     block_id = raw["id"]
+    children = groups.get(("parent", block_id), [])
+    if children and {"content", "stall_level"} & set(raw):
+        _fail(path, f"{block_id!r} has nested blocks, so its metrics go in them")
+    items = tuple(_item(path, entry) for entry in raw.get("content", []))
+    if raw["style"] == "list" and any(item.bar for item in items):
+        _fail(path, f"{block_id!r} is a compact list, so its metrics have no bar")
     return LayoutBlock(
         id=block_id,
         title=raw["title"],
-        column=column,
-        position=position,
-        parent=parent,
-        host=host,
-        note=raw.get("note"),
+        column=raw["column"],
+        position=raw["position"],
+        style=raw["style"],
+        parent=raw.get("parent"),
+        host=raw.get("host"),
         stall_level=raw.get("stall_level"),
-        items=tuple(_item(path, entry) for entry in raw.get("metrics", [])),
-        children=tuple(
-            _block(path, child, column, parent=block_id)
-            for child in raw.get("children", [])
-        ),
+        items=items,
+        children=tuple(_block(path, child, groups) for child in children),
         above=tuple(
-            _block(path, sub, column, "above", host=block_id)
-            for sub in raw.get("above", [])
+            _block(path, sub, groups)
+            for sub in groups.get(("host", block_id, "above"), [])
         ),
         below=tuple(
-            _block(path, sub, column, "below", host=block_id)
-            for sub in raw.get("below", [])
+            _block(path, sub, groups)
+            for sub in groups.get(("host", block_id, "below"), [])
         ),
     )
 
 
 def _item(path: Path, raw: dict[str, Any]) -> LayoutItem:
-    _check_keys(path, raw, ITEM_KEYS, repr(raw.get("metric")))
-    if raw["category"] not in _ITEM_CATEGORIES:
-        _fail(path, f"unknown category {raw['category']!r} for {raw['metric']!r}")
-    return LayoutItem(raw["metric"], raw["title"], raw["category"])
+    where = repr(raw.get("metric"))
+    _check_keys(path, raw, ITEM_KEYS, where)
+    _check_choice(path, raw["category"], _ITEM_CATEGORIES, f"category of {where}")
+    if not isinstance(raw["bar"], bool):
+        _fail(path, f"bar of {where} must be true or false, not {raw['bar']!r}")
+    return LayoutItem(raw["metric"], raw["title"], raw["category"], raw["bar"])
 
 
 def _arrow(path: Path, raw: dict[str, Any]) -> LayoutArrow:
-    _check_keys(path, raw, ARROW_KEYS, f"arrow {raw.get('metric')!r}")
-    category = raw["category"]
-    if category not in _ARROW_DIRECTIONS:
-        _fail(path, f"arrow {raw['metric']!r} has category {category!r}")
+    where = f"arrow {raw.get('metric')!r}"
+    _check_keys(path, raw, ARROW_KEYS, where)
+    _check_choice(path, raw["direction"], _DIRECTIONS, f"direction of {where}")
+    _check_choice(path, raw["category"], _ARROW_CATEGORIES, f"category of {where}")
+    _check_choice(path, raw["style"], _ARROW_STYLES, f"style of {where}")
     return LayoutArrow(
         source=raw["from"],
         target=raw["to"],
+        direction=raw["direction"],
         metric=raw["metric"],
         title=raw["title"],
-        category=category,
-        direction=_ARROW_DIRECTIONS[category],
+        category=raw["category"],
+        style=raw["style"],
         group=raw.get("group"),
     )
 
@@ -334,25 +401,21 @@ def _arrow(path: Path, raw: dict[str, Any]) -> LayoutArrow:
 # ---------------------------------------------------------------------------
 
 
-def _check_references(layout: Layout) -> None:
-    by_id = _unique_blocks(layout)
+def _check_references(layout: Layout, raw_blocks: dict[str, dict[str, Any]]) -> None:
+    by_id = {block.id: block for block in layout.blocks()}
+    # A block left out was in a parent cycle, so no column reaches it
+    unplaced = sorted(set(raw_blocks) - set(by_id))
+    if unplaced:
+        _fail(layout.path, f"blocks {unplaced} nest inside each other")
     for arrow in layout.arrows:
         _check_arrow(layout.path, arrow, by_id)
     after_first = {b.id for column in layout.columns[1:] for b in column}
     if layout.scope_split not in after_first:
         _fail(
             layout.path,
-            f"scope split {layout.scope_split!r} must be after the first column",
+            f"scope split {layout.scope_split!r} must be a top-level block "
+            "after the first column",
         )
-
-
-def _unique_blocks(layout: Layout) -> dict[str, LayoutBlock]:
-    by_id: dict[str, LayoutBlock] = {}
-    for block in layout.blocks():
-        if block.id in by_id:
-            _fail(layout.path, f"duplicate block id {block.id!r}")
-        by_id[block.id] = block
-    return by_id
 
 
 def _check_arrow(path: Path, arrow: LayoutArrow, by_id: dict[str, LayoutBlock]) -> None:
@@ -375,3 +438,5 @@ def _check_arrow(path: Path, arrow: LayoutArrow, by_id: dict[str, LayoutBlock]) 
             f"arrow {arrow.metric!r} must go to a block in the next column "
             "or to a block attached to its source",
         )
+    if attached and arrow.style != "inline":
+        _fail(path, f"arrow {arrow.metric!r} to an attached block must be inline")
