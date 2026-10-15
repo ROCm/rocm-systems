@@ -12,12 +12,13 @@
 #include <cstdint>
 #include <limits>
 #include <optional>
-#include <sstream>
-#include <string>
 #include <string_view>
 
 namespace rocjitsu {
 class Instruction;
+} // namespace rocjitsu
+
+namespace rocjitsu::amdgpu {
 
 /// @brief Architectural wait-counter domains.
 ///
@@ -68,11 +69,11 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
   }
 }
 
-[[nodiscard]] inline bool uses_legacy_waitcnt(WaitcntModel model) {
+[[nodiscard]] constexpr bool uses_legacy_waitcnt(WaitcntModel model) {
   return model != WaitcntModel::SplitGfx12;
 }
 
-[[nodiscard]] inline bool has_legacy_vscnt(WaitcntModel model) {
+[[nodiscard]] constexpr bool has_legacy_vscnt(WaitcntModel model) {
   return model == WaitcntModel::LegacyVscnt;
 }
 
@@ -86,11 +87,11 @@ enum class WaitcntModel { LegacyNoVscnt, LegacyVscnt, SplitGfx12 };
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5;
 }
 
-[[nodiscard]] inline WaitCounterKind smem_wait_counter(WaitcntModel model) {
+[[nodiscard]] constexpr WaitCounterKind smem_wait_counter(WaitcntModel model) {
   return uses_legacy_waitcnt(model) ? WaitCounterKind::Ds : WaitCounterKind::Km;
 }
 
-[[nodiscard]] inline WaitCounterKind vmem_store_wait_counter(WaitcntModel model) {
+[[nodiscard]] constexpr WaitCounterKind vmem_store_wait_counter(WaitcntModel model) {
   return model == WaitcntModel::LegacyNoVscnt ? WaitCounterKind::Load : WaitCounterKind::Store;
 }
 
@@ -134,62 +135,29 @@ struct LegacyWaitcnt {
   return fields;
 }
 
-[[nodiscard]] inline util::FailureOr<std::string>
-wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t arch) {
-  const auto model = waitcnt_model(arch);
-  if (model.failed())
-    return util::Result::failure();
-  std::ostringstream os;
-  if (uses_legacy_waitcnt(model.value())) {
-    switch (counter) {
-    case WaitCounterKind::Load:
-      os << "s_waitcnt vmcnt(" << required_count << ")";
-      return os.str();
-    case WaitCounterKind::Ds:
-      os << "s_waitcnt lgkmcnt(" << required_count << ")";
-      return os.str();
-    case WaitCounterKind::Exp:
-      os << "s_waitcnt expcnt(" << required_count << ")";
-      return os.str();
-    case WaitCounterKind::Store:
-      if (has_legacy_vscnt(model.value())) {
-        os << "s_waitcnt_vscnt null, " << required_count;
-        return os.str();
-      }
-      break;
-    default:
-      break;
-    }
-  }
-  if (counter == WaitCounterKind::X) {
-    os << "s_wait_xcnt " << required_count;
-  } else if (counter == WaitCounterKind::VmVsrc || counter == WaitCounterKind::VaVdst) {
-    os << (has_legacy_vscnt(model.value()) ? "s_waitcnt_depctr " : "s_wait_alu ")
-       << (counter == WaitCounterKind::VmVsrc ? "depctr_vm_vsrc(" : "depctr_va_vdst(")
-       << required_count << ")";
-  } else {
-    os << "s_wait_" << wait_counter_name(counter) << " <= " << required_count;
-  }
-  return os.str();
-}
-
 /// Map a runtime memory-pipeline counter to its architectural diagnostic domain.
-/// The runtime retains split event subsets even on targets with combined waits.
-[[nodiscard]] constexpr WaitCounterKind canonical_wait_counter(amdgpu::WaitCounterType counter,
+/// Requires a runtime tag supported by the model:
+/// - LegacyNoVscnt: VMCNT, LGKMCNT, EXPCNT.
+/// - LegacyVscnt: those tags plus VSCNT and the GFX11 internal LOADCNT,
+///   STORECNT, DSCNT, KMCNT subsets.
+/// - SplitGfx12: LOADCNT, STORECNT, DSCNT, KMCNT, EXPCNT, and CDNA5's
+///   ASYNCCNT/TENSORCNT. Aggregate VMCNT/VSCNT/LGKMCNT tags are not supported.
+/// Mapping a supported tag back with memory_wait_counter_type produces a wait
+/// that covers the original event, including subsets of aggregate counters.
+[[nodiscard]] constexpr WaitCounterKind canonical_wait_counter(WaitCounterType counter,
                                                                WaitcntModel model) {
-  using amdgpu::WaitCounterType;
   switch (counter) {
   case WaitCounterType::VMCNT:
   case WaitCounterType::LOADCNT:
     return WaitCounterKind::Load;
   case WaitCounterType::VSCNT:
   case WaitCounterType::STORECNT:
-    return model == WaitcntModel::LegacyNoVscnt ? WaitCounterKind::Load : WaitCounterKind::Store;
+    return vmem_store_wait_counter(model);
   case WaitCounterType::LGKMCNT:
   case WaitCounterType::DSCNT:
     return WaitCounterKind::Ds;
   case WaitCounterType::KMCNT:
-    return model == WaitcntModel::SplitGfx12 ? WaitCounterKind::Km : WaitCounterKind::Ds;
+    return smem_wait_counter(model);
   case WaitCounterType::EXPCNT:
     return WaitCounterKind::Exp;
   case WaitCounterType::ASYNCCNT:
@@ -201,9 +169,10 @@ wait_expression(WaitCounterKind counter, uint32_t required_count, rj_code_arch_t
 }
 
 /// Returns nullopt for domains without a corresponding memory-pipeline counter.
-[[nodiscard]] constexpr std::optional<amdgpu::WaitCounterType>
+/// Callers must leave unrelated counters unchanged for those domains; Sample
+/// and Bvh waits must not be aliased to ordinary LOADCNT events.
+[[nodiscard]] constexpr std::optional<WaitCounterType>
 memory_wait_counter_type(WaitCounterKind counter, WaitcntModel model) {
-  using amdgpu::WaitCounterType;
   switch (counter) {
   case WaitCounterKind::Load:
     return model == WaitcntModel::SplitGfx12 ? WaitCounterType::LOADCNT : WaitCounterType::VMCNT;
@@ -281,4 +250,4 @@ struct WaitCounterPolicy {
   [[nodiscard]] static uint32_t depctr_field(uint32_t value, uint32_t shift, uint32_t width);
 };
 
-} // namespace rocjitsu
+} // namespace rocjitsu::amdgpu

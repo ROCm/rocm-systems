@@ -385,7 +385,7 @@ race_detector/
     └── profiler_interface.h  optional hook profiling
 ```
 
-Wait decoding is in `isa/arch/amdgpu/shared/wait_counter_policy.h`.
+Wait decoding is in `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h`.
 
 ## Tests
 

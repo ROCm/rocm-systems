@@ -1,6 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -218,9 +219,10 @@ TYPED_TEST(WaitHazardTest, TargetWaitEncodingsRetireTheirCounter) {
 }
 
 TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
-  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4,
+                    ROCJITSU_CODE_ARCH_CDNA5}) {
     for (uint32_t word : {0xbf890000u, 0xbf89fc07u, 0xbf89ffffu, 0xbf8a0000u}) {
-      if (arch == ROCJITSU_CODE_ARCH_CDNA5 && word != 0xbf8a0000u)
+      if (arch != ROCJITSU_CODE_ARCH_RDNA4 && word != 0xbf8a0000u)
         continue;
       SCOPED_TRACE(static_cast<unsigned>(arch));
       SCOPED_TRACE(word);
@@ -239,18 +241,156 @@ TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
       for (const auto counter : counters) {
         if (!TypeParam::supports(counter))
           continue;
-        if (arch == ROCJITSU_CODE_ARCH_RDNA4 &&
+        if (arch != ROCJITSU_CODE_ARCH_CDNA5 &&
             (counter.core == WaitCounterKind::Async || counter.core == WaitCounterKind::Tensor))
           continue;
-        if (arch == ROCJITSU_CODE_ARCH_CDNA5 &&
+        if (arch != ROCJITSU_CODE_ARCH_RDNA4 &&
             (counter.core == WaitCounterKind::Sample || counter.core == WaitCounterKind::Bvh))
           continue;
-        backend.load(counter, reg++, true);
+        // GFX11 scalar-memory results belong to the combined LGKM domain.
+        auto domain = counter;
+        if ((arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5) &&
+            domain.core == WaitCounterKind::Km)
+          domain.core = WaitCounterKind::Ds;
+        backend.load(domain, reg++, true);
       }
       backend.wait(word);
       backend.expect_drained();
       for (unsigned i = 0; i < reg; ++i)
         EXPECT_FALSE(backend.reports(i)) << "register " << i;
+    }
+  }
+}
+
+TEST(WaitCounterPolicy, SupportedRuntimeTagsRoundTripToCoveringWaits) {
+  struct Case {
+    WaitcntModel model;
+    WaitCounterType tag;
+    WaitCounterKind domain;
+    WaitCounterType wait;
+  };
+  using enum WaitcntModel;
+  using enum WaitCounterType;
+  const Case cases[] = {
+      {LegacyNoVscnt, VMCNT, WaitCounterKind::Load, VMCNT},
+      {LegacyNoVscnt, LGKMCNT, WaitCounterKind::Ds, LGKMCNT},
+      {LegacyNoVscnt, EXPCNT, WaitCounterKind::Exp, EXPCNT},
+      {LegacyVscnt, VMCNT, WaitCounterKind::Load, VMCNT},
+      {LegacyVscnt, LGKMCNT, WaitCounterKind::Ds, LGKMCNT},
+      {LegacyVscnt, EXPCNT, WaitCounterKind::Exp, EXPCNT},
+      {LegacyVscnt, VSCNT, WaitCounterKind::Store, VSCNT},
+      {LegacyVscnt, LOADCNT, WaitCounterKind::Load, VMCNT},
+      {LegacyVscnt, STORECNT, WaitCounterKind::Store, VSCNT},
+      {LegacyVscnt, DSCNT, WaitCounterKind::Ds, LGKMCNT},
+      {LegacyVscnt, KMCNT, WaitCounterKind::Ds, LGKMCNT},
+      {SplitGfx12, LOADCNT, WaitCounterKind::Load, LOADCNT},
+      {SplitGfx12, STORECNT, WaitCounterKind::Store, STORECNT},
+      {SplitGfx12, DSCNT, WaitCounterKind::Ds, DSCNT},
+      {SplitGfx12, KMCNT, WaitCounterKind::Km, KMCNT},
+      {SplitGfx12, EXPCNT, WaitCounterKind::Exp, EXPCNT},
+      {SplitGfx12, ASYNCCNT, WaitCounterKind::Async, ASYNCCNT},
+      {SplitGfx12, TENSORCNT, WaitCounterKind::Tensor, TENSORCNT},
+  };
+  for (const auto &c : cases) {
+    SCOPED_TRACE(static_cast<unsigned>(c.model));
+    SCOPED_TRACE(static_cast<unsigned>(c.tag));
+    const auto domain = canonical_wait_counter(c.tag, c.model);
+    EXPECT_EQ(domain, c.domain);
+    const auto wait = memory_wait_counter_type(domain, c.model);
+    ASSERT_TRUE(wait);
+    EXPECT_EQ(*wait, c.wait);
+    EXPECT_TRUE(wait_counter_covers(*wait, c.tag));
+  }
+}
+
+TEST(WaitCounterPolicy, UnmappedDomainsHaveNoMemoryPipelineWait) {
+  for (auto model :
+       {WaitcntModel::LegacyNoVscnt, WaitcntModel::LegacyVscnt, WaitcntModel::SplitGfx12}) {
+    for (auto domain : {WaitCounterKind::Sample, WaitCounterKind::Bvh, WaitCounterKind::X,
+                        WaitCounterKind::VmVsrc, WaitCounterKind::VaVdst, WaitCounterKind::Depctr,
+                        WaitCounterKind::Count}) {
+      SCOPED_TRACE(static_cast<unsigned>(model));
+      SCOPED_TRACE(static_cast<unsigned>(domain));
+      EXPECT_FALSE(memory_wait_counter_type(domain, model));
+    }
+  }
+}
+
+TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
+  for (const uint32_t word : {0xbfc20000u, 0xbfc30000u}) { // Sample/Bvh waits.
+    SCOPED_TRACE(word);
+    TypeParam backend(ROCJITSU_CODE_ARCH_RDNA4);
+    ASSERT_TRUE(backend.ready());
+    backend.load(kLoad, 5);
+    backend.load(kDs, 6);
+    backend.wait(word);
+    EXPECT_TRUE(backend.reports(5));
+    EXPECT_TRUE(backend.reports(6));
+  }
+}
+
+TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel) {
+  struct Case {
+    rj_code_arch_t arch;
+    uint32_t opcode;
+    uint32_t mask;
+    CounterDomain counter;
+  };
+  const Case cases[] = {
+      {ROCJITSU_CODE_ARCH_RDNA1,
+       0xbc800000u,
+       0x7u,
+       {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
+      {ROCJITSU_CODE_ARCH_RDNA2,
+       0xbc800000u,
+       0x7u,
+       {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
+      {ROCJITSU_CODE_ARCH_RDNA3,
+       0xbd7c0000u,
+       0x7u,
+       {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
+      {ROCJITSU_CODE_ARCH_RDNA3_5,
+       0xbd7c0000u,
+       0x7u,
+       {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
+      {ROCJITSU_CODE_ARCH_RDNA4,
+       0xbfc40000u,
+       0x7u,
+       {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
+      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc00000u, 0x3fu, kLoad},
+      {ROCJITSU_CODE_ARCH_RDNA4,
+       0xbfc10000u,
+       0x3fu,
+       {WaitCounterKind::Store, WaitCounterType::STORECNT}},
+      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc60000u, 0x3fu, kDs},
+      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc20000u, 0x3fu, {WaitCounterKind::Sample, std::nullopt}},
+      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc30000u, 0x7u, {WaitCounterKind::Bvh, std::nullopt}},
+      {ROCJITSU_CODE_ARCH_RDNA4, 0xbfc70000u, 0x1fu, {WaitCounterKind::Km, WaitCounterType::KMCNT}},
+      {ROCJITSU_CODE_ARCH_CDNA5,
+       0xbfca0000u,
+       0x3fu,
+       {WaitCounterKind::Async, WaitCounterType::ASYNCCNT}},
+      {ROCJITSU_CODE_ARCH_CDNA5,
+       0xbfcb0000u,
+       0x3fu,
+       {WaitCounterKind::Tensor, WaitCounterType::TENSORCNT}},
+  };
+  for (const auto &c : cases) {
+    if (!TypeParam::supports(c.counter))
+      continue;
+    for (uint32_t count : {0u, 1u, c.mask}) {
+      // Check both the bit just above the counter field and a higher SIMM16 bit.
+      for (uint32_t upper : {c.mask + 1u, 0x100u}) {
+        SCOPED_TRACE(static_cast<unsigned>(c.arch));
+        SCOPED_TRACE(c.opcode | upper | count);
+        TypeParam backend(c.arch);
+        ASSERT_TRUE(backend.ready());
+        backend.load(c.counter, 5);
+        backend.load(c.counter, 6);
+        backend.wait(c.opcode | upper | count);
+        EXPECT_EQ(backend.reports(5, 1, 0xf, true), count == c.mask);
+        EXPECT_EQ(backend.reports(6, 1, 0xf, true), count != 0);
+      }
     }
   }
 }
