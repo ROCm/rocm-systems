@@ -22,6 +22,8 @@ add_library(
     dispatch_writer.cpp
     kernel_symbols_writer.h
     kernel_symbols_writer.cpp
+    agent_writer.h
+    agent_writer.cpp
     sdk_wrapper.h
     sdk_wrapper.cpp
     pc_sampling_feature.h
