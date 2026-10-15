@@ -2547,7 +2547,8 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
     extra_waves.push_back(extra);
   }
   cu->step();
-  const bool engine_failed = GetParam().kind != RejectionKind::Decode || !GetParam().status_mapped;
+  const bool engine_failed = GetParam().kind != RejectionKind::Decode || !GetParam().debugger ||
+                             !GetParam().runtime_signal || !GetParam().status_mapped;
   EXPECT_EQ(engine_->last_exit().code, engine_failed ? 1 : 0);
   if (!GetParam().runtime_signal || !GetParam().registered) {
     EXPECT_EQ(deliveries.load(), 0u);
