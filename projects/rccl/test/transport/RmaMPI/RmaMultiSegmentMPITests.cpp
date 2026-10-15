@@ -15,6 +15,7 @@
 #include "HybridVmmHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "transport/net_ib/rma_multiseg.h"
+#include "rccl_common.h"
 
 #include <algorithm>
 #include <cstdint>
@@ -97,7 +98,11 @@ protected:
             FreeMultiSegmentVmm(*b);
         vmmBuffers_.clear();
         for (auto& b : hybridBuffers_)
+        {
+            for (int fd : b->segFds)
+                if (fd >= 0) rcclHostSegmentFdDeregister(fd);
             RCCLHybridVmmTests::FreeHybridVmm(*b);
+        }
         hybridBuffers_.clear();
         logCtx_.reset();
         debugSubsysGuard_.reset();
@@ -159,13 +164,20 @@ protected:
         int dev = 0;
         if (hipGetDevice(&dev) != hipSuccess)
             return nullptr;
-        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(
-                dev, /*requireReexport=*/true, reason))
+        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason))
             return nullptr;
         auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
         if (!RCCLHybridVmmTests::AllocHybridVmm(
                 dev, gpuBytes, localCpuBytes, buf.get(), reason))
             return nullptr;
+        // Plugin registration has no window, so the importer publishes the owner's DMA-BUF fds.
+        uintptr_t va = reinterpret_cast<uintptr_t>(buf->ptr);
+        for (size_t s = 0; s < buf->segSizes.size(); ++s)
+        {
+            if (buf->segFds[s] >= 0)
+                rcclHostSegmentFdRegister(reinterpret_cast<void*>(va), buf->segSizes[s], buf->segFds[s]);
+            va += buf->segSizes[s];
+        }
         hybridBuffers_.push_back(std::move(buf));
         return hybridBuffers_.back().get();
     }
