@@ -103,8 +103,8 @@ typedef enum {
   AMDCUID_STATUS_UNSUPPORTED = 5,        ///< Operation or device type not supported on system
   AMDCUID_STATUS_WRONG_DEVICE_TYPE = 6,  ///< Incorrect device type for function
   AMDCUID_STATUS_INSUFFICIENT_SIZE = 7,  ///< Provided buffer or array is too small
-  AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND = 8,  ///< No identity input: in this release, the
-                                                ///< host has no usable machine-id
+  AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND = 8,  ///< No identity input: no serial for a
+                                                ///< permanent CUID, or no usable machine-id
   AMDCUID_STATUS_KEY_ERROR = 9,                 ///< An error occurred related to the hash key
   AMDCUID_STATUS_HMAC_ERROR = 10,               ///< An error occurred during HMAC computation
   AMDCUID_STATUS_FILE_ERROR = 11,               ///< File I/O error
@@ -342,17 +342,14 @@ typedef enum {
 typedef enum {
   AMDCUID_QUERY_NONE = 0,          ///< No query
   AMDCUID_QUERY_PRIMARY_CUID = 1,  ///< Query the primary CUID (amdcuid_id_t). UNSUPPORTED for a
-                                   ///< component with a temporary CUID, which has no primary; in
-                                   ///< this release that is every component and every caller. The
+                                   ///< component with a temporary CUID, which has no primary. The
                                    ///< buffer is then left untouched.
-  AMDCUID_QUERY_DERIVED_CUID =
-      2,  ///< Query the component's CUID (amdcuid_id_t): its DerivedID where one
-          ///< exists, otherwise its temporary CUID; always temporary in this
-          ///< release. The name predates temporary CUIDs.
+  AMDCUID_QUERY_DERIVED_CUID = 2,  ///< Query the component's CUID (amdcuid_id_t): its DerivedID
+                                   ///< where one exists, otherwise its temporary CUID. The name
+                                   ///< predates temporary CUIDs.
   AMDCUID_QUERY_HARDWARE_FINGERPRINT =
       3,  ///< Query the hardware fingerprint (aka serial number/id) (uint64_t).
-          ///< UNSUPPORTED for a component with a temporary CUID, which in this
-          ///< release is every component.
+          ///< UNSUPPORTED for a component with a temporary CUID; root only.
   AMDCUID_QUERY_DEVICE_PATH = 4,  ///< Query the device path (string).
   AMDCUID_QUERY_DEVICE_TYPE = 5,  ///< Query the device type (amdcuid_device_type_t).
   AMDCUID_QUERY_VENDOR_ID = 6,    ///< Query the vendor ID (uint16_t). Not for the platform, which

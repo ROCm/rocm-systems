@@ -8,7 +8,7 @@ subtrees:
 
 - caption: How to
   entries:
-  - file: how-to/read-cuids
+  - file: how-to/manage-node-key
   - url: https://github.com/ROCm/rocm-systems/blob/develop/shared/cuid/example/main.cc
     title: Sample program using CUID API
 
