@@ -50,6 +50,7 @@ struct Rec {
   ncclProfilerCallback_t proffn = nullptr;
   ncclResult_t propsResult = ncclSuccess;
   int n = 0;
+  void* comm = nullptr;
   void* ptr = nullptr;
   size_t sizes[3] = {};
 };
@@ -154,8 +155,9 @@ ncclCollNet_v11_t MakeCollNet() {
   c.iallreduce = [](void*, void*, void*, size_t, ncclDataType_t, ncclRedOp_t, void*, void*, void**) {
     return ncclSuccess;
   };
-  c.iallgather = [](void*, void*, int nParts, ncclNetSGE_v11_t* parts, size_t bytesPerRank, size_t offset,
+  c.iallgather = [](void* comm, void*, int nParts, ncclNetSGE_v11_t* parts, size_t bytesPerRank, size_t offset,
                     size_t windowBytes, void*, void**) {
+    g_coll.comm = comm;
     g_coll.n = nParts;
     g_coll.ptr = parts;
     g_coll.sizes[0] = bytesPerRank;
@@ -163,8 +165,9 @@ ncclCollNet_v11_t MakeCollNet() {
     g_coll.sizes[2] = windowBytes;
     return ncclSuccess;
   };
-  c.ireducescatter = [](void*, int nParts, ncclNetSGE_v11_t* parts, void*, size_t bytesPerRank, size_t offset,
+  c.ireducescatter = [](void* comm, int nParts, ncclNetSGE_v11_t* parts, void*, size_t bytesPerRank, size_t offset,
                         size_t windowBytes, ncclDataType_t, ncclRedOp_t, void*, void**) {
+    g_coll.comm = comm;
     g_coll.n = nParts;
     g_coll.ptr = parts;
     g_coll.sizes[0] = bytesPerRank;
@@ -365,6 +368,7 @@ TEST_F(PluginNetV11Microtest, CollNetSgeCallsForwardEverything) {
   char comm;
   ncclNetSGE_t parts[2] = {};
   ASSERT_EQ(coll->iallgather(&comm, nullptr, 2, parts, 64, 128, 256, nullptr, nullptr), ncclSuccess);
+  EXPECT_EQ(g_coll.comm, &comm);
   EXPECT_EQ(g_coll.n, 2);
   EXPECT_EQ(g_coll.ptr, parts);
   EXPECT_EQ(g_coll.sizes[0], 64u);
@@ -374,6 +378,7 @@ TEST_F(PluginNetV11Microtest, CollNetSgeCallsForwardEverything) {
   g_coll = Rec{};
   ASSERT_EQ(coll->ireducescatter(&comm, 2, parts, nullptr, 64, 128, 256, ncclFloat, ncclSum, nullptr, nullptr),
             ncclSuccess);
+  EXPECT_EQ(g_coll.comm, &comm);
   EXPECT_EQ(g_coll.n, 2);
   EXPECT_EQ(g_coll.ptr, parts);
   EXPECT_EQ(g_coll.sizes[0], 64u);

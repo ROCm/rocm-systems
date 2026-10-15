@@ -190,6 +190,30 @@ ncclCollNet_v8_t MakeCollNet() {
 
 void TestLogger(ncclDebugLogLevel, unsigned long, const char*, int, const char*, ...) {}
 
+// The fields v8 cannot report are filled with fixed defaults.
+void ExpectProps(const ncclNetProperties_t& props, int dev, ncclNetDeviceType type, int version) {
+  EXPECT_STREQ(props.name, "mlx5_0");
+  EXPECT_STREQ(props.pciPath, "/sys/pci0");
+  EXPECT_EQ(props.guid, 0x1234u);
+  EXPECT_EQ(props.ptrSupport, NCCL_PTR_HOST | NCCL_PTR_CUDA);
+  EXPECT_EQ(props.regIsGlobal, 1);
+  EXPECT_EQ(props.forceFlush, 0);
+  EXPECT_EQ(props.speed, 400000);
+  EXPECT_EQ(props.port, 1);
+  EXPECT_EQ(props.maxComms, 64);
+  EXPECT_EQ(props.maxRecvs, 8);
+  EXPECT_FLOAT_EQ(props.latency, 1.5f);
+  EXPECT_EQ(props.netDeviceType, type);
+  EXPECT_EQ(props.netDeviceVersion, version);
+  EXPECT_EQ(props.vProps.ndevs, 1);
+  EXPECT_EQ(props.vProps.devs[0], dev);
+  EXPECT_EQ(props.maxP2pBytes, size_t(MAX_NET_SIZE));
+  EXPECT_EQ(props.maxCollBytes, size_t(MAX_COLLNET_SIZE));
+  EXPECT_EQ(props.maxMultiRequestSize, 1);
+  EXPECT_EQ(props.railId, NCCL_NET_ID_UNDEF);
+  EXPECT_EQ(props.planeId, NCCL_NET_ID_UNDEF);
+}
+
 class PluginNetV8Microtest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -287,26 +311,7 @@ TEST_F(PluginNetV8Microtest, GetPropertiesFillsWhatV8CannotReport) {
   std::memset(&props, 0xff, sizeof(props));
   ASSERT_EQ(net->getProperties(3, &props), ncclSuccess);
 
-  EXPECT_STREQ(props.name, "mlx5_0");
-  EXPECT_STREQ(props.pciPath, "/sys/pci0");
-  EXPECT_EQ(props.guid, 0x1234u);
-  EXPECT_EQ(props.ptrSupport, NCCL_PTR_HOST | NCCL_PTR_CUDA);
-  EXPECT_EQ(props.regIsGlobal, 1);
-  EXPECT_EQ(props.forceFlush, 0);
-  EXPECT_EQ(props.speed, 400000);
-  EXPECT_EQ(props.port, 1);
-  EXPECT_EQ(props.maxComms, 64);
-  EXPECT_EQ(props.maxRecvs, 8);
-  EXPECT_FLOAT_EQ(props.latency, 1.5f);
-  EXPECT_EQ(props.netDeviceType, NCCL_NET_DEVICE_UNPACK);
-  EXPECT_EQ(props.netDeviceVersion, 7);
-  EXPECT_EQ(props.vProps.ndevs, 1);
-  EXPECT_EQ(props.vProps.devs[0], 3);
-  EXPECT_EQ(props.maxP2pBytes, size_t(MAX_NET_SIZE));
-  EXPECT_EQ(props.maxCollBytes, size_t(MAX_COLLNET_SIZE));
-  EXPECT_EQ(props.maxMultiRequestSize, 1);
-  EXPECT_EQ(props.railId, NCCL_NET_ID_UNDEF);
-  EXPECT_EQ(props.planeId, NCCL_NET_ID_UNDEF);
+  ExpectProps(props, 3, NCCL_NET_DEVICE_UNPACK, 7);
 
   g_net.propsResult = ncclSystemError;
   EXPECT_EQ(net->getProperties(3, &props), ncclSystemError);
@@ -404,26 +409,8 @@ TEST_F(PluginNetV8Microtest, CollNetGetPropertiesFillsWhatV8CannotReport) {
   std::memset(&props, 0xff, sizeof(props));
   ASSERT_EQ(coll->getProperties(5, &props), ncclSuccess);
 
-  EXPECT_STREQ(props.name, "mlx5_0");
-  EXPECT_STREQ(props.pciPath, "/sys/pci0");
-  EXPECT_EQ(props.guid, 0x1234u);
-  EXPECT_EQ(props.ptrSupport, NCCL_PTR_HOST | NCCL_PTR_CUDA);
-  EXPECT_EQ(props.regIsGlobal, 1);
-  EXPECT_EQ(props.forceFlush, 0);
-  EXPECT_EQ(props.speed, 400000);
-  EXPECT_EQ(props.port, 1);
-  EXPECT_EQ(props.maxComms, 64);
-  EXPECT_EQ(props.maxRecvs, 8);
-  EXPECT_FLOAT_EQ(props.latency, 1.5f);
-  EXPECT_EQ(props.netDeviceType, NCCL_NET_DEVICE_HOST);  // collnet ignores the plugin's device type
-  EXPECT_EQ(props.netDeviceVersion, NCCL_NET_DEVICE_INVALID_VERSION);
-  EXPECT_EQ(props.vProps.ndevs, 1);
-  EXPECT_EQ(props.vProps.devs[0], 5);
-  EXPECT_EQ(props.maxP2pBytes, size_t(MAX_NET_SIZE));
-  EXPECT_EQ(props.maxCollBytes, size_t(MAX_COLLNET_SIZE));
-  EXPECT_EQ(props.maxMultiRequestSize, 1);
-  EXPECT_EQ(props.railId, NCCL_NET_ID_UNDEF);
-  EXPECT_EQ(props.planeId, NCCL_NET_ID_UNDEF);
+  // collnet ignores the plugin's device type
+  ExpectProps(props, 5, NCCL_NET_DEVICE_HOST, NCCL_NET_DEVICE_INVALID_VERSION);
 
   g_coll.propsResult = ncclSystemError;
   EXPECT_EQ(coll->getProperties(5, &props), ncclSystemError);

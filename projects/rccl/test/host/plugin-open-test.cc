@@ -9,9 +9,6 @@
 
 #include <gtest/gtest.h>
 
-#include <sys/prctl.h>
-#include <sys/resource.h>
-
 #include <csignal>
 #include <cstdlib>
 #include <cstring>
@@ -26,6 +23,15 @@
 
 using RcclUnitTesting::CaptureLog;
 using RcclUnitTesting::LogHas;
+
+void DisableCoreDumpsForExpectedCrash();  // plugin-net-test.cc
+
+// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it.
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
+#else
+#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
+#endif
 
 namespace {
 
@@ -262,7 +268,12 @@ TEST_F(PluginOpenMicrotest, GinThenNetIntoOneSlotLeaksTheGinReference) {
   ASSERT_EQ(ncclOpenNetPluginLib(nullptr), kNet);
   ASSERT_EQ(ncclOpenGinPluginLib(nullptr), kGin);
   ASSERT_EQ(ncclGetGinPluginLib(ncclPluginTypeRma), kGin);
+  // The next call drops these copies; free them here so the leak under test stays out of LeakSanitizer.
+  char* ginName = libNames[ncclPluginTypeRma];
+  char* ginPath = ncclPluginLibPaths[ncclPluginTypeRma];
   ASSERT_EQ(ncclGetNetPluginLib(ncclPluginTypeRma), kNet);
+  free(ginName);
+  free(ginPath);
   EXPECT_STREQ(ncclGetPluginLibName(ncclPluginTypeRma), "librccl-net.so");
 
   ASSERT_EQ(ncclClosePluginLib(kGin, ncclPluginTypeRma), ncclSuccess);
@@ -279,10 +290,10 @@ TEST_F(PluginOpenMicrotest, SharingCrashesWhenTheNetLibraryHasNoPath) {
   ASSERT_EQ(ncclOpenNetPluginLib(nullptr), kNet);
   EXPECT_EXIT(
       {
-        prctl(PR_SET_DUMPABLE, 0);
+        DisableCoreDumpsForExpectedCrash();
         (void)ncclGetNetPluginLib(ncclPluginTypeTuner);
       },
-      ::testing::KilledBySignal(SIGSEGV), "");
+      DEATH_BY_SEGV, "");
 }
 
 }  // namespace

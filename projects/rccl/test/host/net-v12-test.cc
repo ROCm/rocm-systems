@@ -15,6 +15,7 @@
 #include <vector>
 
 #include "nccl_net.h"
+#include "proxy.h"
 
 namespace {
 
@@ -33,7 +34,8 @@ void* FakeDlsym(void* lib, const char* symbol) {
 
 }  // namespace
 
-// net_v12.cc calls dlsym directly rather than ncclOsDlsym.
+// net_v12.cc calls dlsym directly rather than ncclOsDlsym. Its headers are included above so the rename
+// only reaches net_v12.cc itself.
 #define dlsym FakeDlsym
 #include NET_V12_CC_PATH
 #undef dlsym

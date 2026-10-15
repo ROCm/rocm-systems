@@ -68,6 +68,20 @@ static int64_t g_loadParam(const char* env, int64_t deftVal) {
   return std::strcmp(env, "NET_PLUGIN_REF_COUNT") == 0 ? g_netPluginRefCount : deftVal;
 }
 
+// Shared with plugin-open-test.cc: an expected crash would otherwise dump a core.
+void DisableCoreDumpsForExpectedCrash() {
+  prctl(PR_SET_DUMPABLE, 0);
+  const struct rlimit noCore = {0, 0};
+  setrlimit(RLIMIT_CORE, &noCore);
+}
+
+// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it.
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
+#else
+#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
+#endif
+
 bool rcclUseAinic() { return g_useAinic; }
 int rcclTelemetryInit(void) { return g_telemetryInitResult; }
 ncclResult_t ncclProfilerCallback(void**, int, void*, int64_t, void*) { return ncclSuccess; }
@@ -249,13 +263,6 @@ template <int Index>
 ncclCollNet_t* FakeGetCollNet(void* lib) {
   g_collNetProbes.push_back(ncclNetVersion[Index]);
   return LibFor(lib).collNetVersion == ncclNetVersion[Index] ? &g_extCollNet[LibFor(lib).slot] : nullptr;
-}
-
-// An expected crash would otherwise dump a core.
-void DisableCoreDumps() {
-  prctl(PR_SET_DUMPABLE, 0);
-  const struct rlimit noCore = {0, 0};
-  setrlimit(RLIMIT_CORE, &noCore);
 }
 
 template <int... I>
@@ -886,10 +893,10 @@ TEST_F(PluginNetMicrotest, InitFromParentCrashesWhenOnlyTheChildHasANetName) {
   comm_->config.netName = "IB";
   EXPECT_EXIT(
       {
-        DisableCoreDumps();
+        DisableCoreDumpsForExpectedCrash();
         (void)ncclNetInitFromParent(comm_.get(), parent.get());
       },
-      ::testing::KilledBySignal(SIGSEGV), "");
+      DEATH_BY_SEGV, "");
 }
 
 // Device counts
