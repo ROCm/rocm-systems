@@ -91,7 +91,7 @@ def generate_alltoall_wg_api():
  *
  * This function must be called as a work-group collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -141,7 +141,7 @@ def generate_alltoall_wave_api():
  *
  * This function must be called as a wave collective.
  *
- * @param[in] ctx          The ROCSHMEM context associated with this operation.    
+ * @param[in] ctx          The ROCSHMEM context associated with this operation.
  * @param[in] team         The team participating in the collective.
  * @param[in] dest         Destination address. Must be an address on the
  *                         symmetric heap.
@@ -477,7 +477,7 @@ def generate_reducescatter_wg_api():
  * @return int (Zero on successful local completion. Nonzero otherwise.)
  */\n"""
 
-    
+
     int_types = [
         ("short", "short"),
         ("int", "int"),
@@ -524,7 +524,7 @@ def generate_reducescatter_wave_api():
  * Only the wave (wavefront) participates. Returns ROCSHMEM_SUCCESS on success.
  */\n"""
 
-    
+
     int_types = [
         ("short", "short"),
         ("int", "int"),
@@ -570,7 +570,7 @@ def generate_reducescatter_host_api():
  * of source[i*nreduce..(i+1)*nreduce-1] across all PEs.
  */\n"""
 
-    
+
     int_types = [
         ("short", "short"),
         ("int", "int"),
@@ -1062,7 +1062,7 @@ namespace rocshmem {
         generate_reducescatter_wg_api() +
         generate_reducescatter_wave_api() +
         generate_reducescatter_host_api() +
-        generate_reduction_api() + 
+        generate_reduction_api() +
         generate_reduction_wave_api() +
         add_misc() +
         generate_reduce_on_stream_api()
