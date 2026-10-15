@@ -47,7 +47,11 @@ extern "C" {
 //! UnitID 0. The platform needs no SMBIOS. No query discloses a serial of a
 //! component with a temporary CUID. A malformed component is left out of the
 //! inventory, and a lookup returns why it failed.
-#define AMDCUID_LIB_VERSION_MINOR 2
+//!
+//! 2.3.0: a GPU or partition is driver-published when amdgpu exposes
+//! cuid_unit_id, and its primary CUID is the driver's cuid_primary, read by
+//! root.
+#define AMDCUID_LIB_VERSION_MINOR 3
 
 //! Patch version should be updated for each bug fix or non-API change
 //!
