@@ -9212,6 +9212,47 @@ TEST(AqlDispatchTest, DebuggerCanHandleDecodeRejectionWithoutCancellingDispatch)
   EXPECT_EQ(completion_signal_value(f.mem(), kCompletionSignal), 1);
 }
 
+TEST(AqlDispatchTest, RuntimeDecodeClaimStillFailsDispatchAndPreservesBarrier) {
+  constexpr uint32_t kUndecodable = 0xBFFF0000u;
+  VmFixture f("cdna4", 2);
+  auto lifecycle = std::make_unique<CancellationLifecyclePlugin>();
+  auto *observed = lifecycle.get();
+  auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+  ASSERT_TRUE(group->add(std::move(lifecycle)));
+  f.soc_ptr->set_plugin_group(group);
+  uint32_t handled = 0;
+  for (uint32_t cu = 0; cu < 2; ++cu)
+    f.cu(cu)->set_illegal_inst_handler([&](amdgpu::Wavefront &wave) {
+      ++handled;
+      // Queue-owner publication pauses waves without an architectural debug halt.
+      wave.set_debug_suspended(true);
+      return true;
+    });
+  const uint64_t kernel = f.write_kernel(0x1000, &kUndecodable, sizeof(kUndecodable));
+  test::AqlQueue queue(f.mem(), f.cp());
+  init_completion_signal(f.mem(), 0x3000);
+  init_completion_signal(f.mem(), 0x4000);
+  queue.submit(make_dispatch_packet(kernel, 0x3000, 128, 64));
+  hsa_barrier_and_packet_t barrier{};
+  barrier.header = HSA_PACKET_TYPE_BARRIER_AND | (1u << HSA_PACKET_HEADER_BARRIER);
+  barrier.completion_signal.handle = 0x4000;
+  hsa_kernel_dispatch_packet_t raw{};
+  std::memcpy(&raw, &barrier, sizeof(raw));
+  queue.submit(raw);
+  f.engine->run();
+  EXPECT_EQ(handled, 1u);
+  EXPECT_EQ(f.engine->last_exit().code, 1);
+  EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+  EXPECT_FALSE(f.cp()->has_dispatch_for_test(1, 0, 1));
+  EXPECT_EQ(completion_signal_value(f.mem(), 0x3000), 1);
+  EXPECT_EQ(completion_signal_value(f.mem(), 0x4000), 1);
+  EXPECT_EQ(observed->launches, 2u);
+  EXPECT_EQ(observed->cancellations, 2u);
+  EXPECT_EQ(observed->halts, 0u);
+  EXPECT_EQ(observed->completed_workgroups, 0u);
+  EXPECT_EQ(observed->completed_dispatches, 0u);
+}
+
 class ThrowingIssuePlugin final : public ExecutionPlugin {
 public:
   enum Hook { Before, After, Halt };
