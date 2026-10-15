@@ -282,6 +282,18 @@ def decode_marker_name(name: str) -> str:
     return name.replace("%2F", "/").replace("%25", "%")
 
 
+def decode_marker_args(args: str) -> str:
+    """Decode percent-encoded argument text back to '|', ';', CR, LF, and '%'."""
+    return (
+        args
+        .replace("%7C", "|")
+        .replace("%3B", ";")
+        .replace("%0D", "\r")
+        .replace("%0A", "\n")
+        .replace("%25", "%")
+    )
+
+
 def split_operator_args(args_blob: str) -> list[str]:
     """Split a parenthesized operator-args blob into top-level argument tokens."""
     args_text = args_blob.strip()
@@ -379,7 +391,7 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
             continue
         key, value = token.split("=", 1)
         if key == "args":
-            parsed_keys["args"] = value.replace("%7C", "|")
+            parsed_keys["args"] = decode_marker_args(value)
         elif key in parsed_keys:
             parsed_keys[key] = value
     launcher_thread_id = ""
