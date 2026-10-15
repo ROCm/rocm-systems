@@ -412,7 +412,7 @@ rocprofsys_preinit_cache()
         { .pid         = getpid(),
           .ppid        = getppid(),
           .command     = _command,
-          .environment = process_environment_info().to_json(),
+          .environment = dump_environment(capture_process_environment()),
           .extdata     = _extdata_stream.str(),
           .start       = 0,
           .end         = 0 });
@@ -745,10 +745,13 @@ rocprofsys_init_tooling_hidden(void)
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 
         component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
-            auto environment = process_environment_info();
-            environment.add_mpi_identity(rank, size);
+            // Captured again rather than reusing the preinit snapshot: it is a cheap walk
+            // of environ, and MPI_Init replaces the stored environment as a whole.
+            auto environment                   = capture_process_environment();
+            environment["MPI_COMM_WORLD_RANK"] = rank;
+            environment["MPI_COMM_WORLD_SIZE"] = size;
 
-            set_metadata_environment_json(environment.to_json());
+            set_metadata_environment_json(dump_environment(environment));
         });
 #endif
 

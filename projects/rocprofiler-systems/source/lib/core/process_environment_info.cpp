@@ -5,15 +5,18 @@
 
 #include "common/environment.hpp"
 
+#include <nlohmann/json.hpp>
+#include <nlohmann/json_fwd.hpp>
+
 #include <unistd.h>
 
 #include <algorithm>
 #include <array>
+#include <cstddef>
 #include <iterator>
 #include <span>
 #include <string>
 #include <string_view>
-#include <utility>
 
 namespace rocprofsys
 {
@@ -22,8 +25,6 @@ namespace
 constexpr char             k_assignment     = '=';
 constexpr char             k_path_separator = '/';
 constexpr std::string_view k_home_alias     = "~";
-constexpr std::string_view k_mpi_rank_name  = "MPI_COMM_WORLD_RANK";
-constexpr std::string_view k_mpi_size_name  = "MPI_COMM_WORLD_SIZE";
 
 // Single reviewable source of truth for which variables may be stored in a shared
 // database. Everything not listed here is dropped, never filtered by keyword.
@@ -34,6 +35,7 @@ constexpr auto k_allowed_prefixes = std::to_array<std::string_view>({
 });
 
 constexpr auto k_allowed_names = std::to_array<std::string_view>({
+    "PATH",
     "HIP_VISIBLE_DEVICES",
     "ROCR_VISIBLE_DEVICES",
     "HSA_OVERRIDE_GFX_VERSION",
@@ -47,70 +49,108 @@ constexpr auto k_allowed_names = std::to_array<std::string_view>({
     "SLURM_NODEID",
 });
 
-}  // namespace
-
-process_environment_info::process_environment_info()
+[[nodiscard]] constexpr bool
+is_allowed(std::string_view name) noexcept
 {
-    const auto end       = std::ranges::find(environ, std::unreachable_sentinel, nullptr);
-    const auto env_block = std::span<const char* const>{ environ, end };
+    const auto has_prefix = [name](std::string_view prefix) {
+        return name.starts_with(prefix);
+    };
+    return std::ranges::find(k_allowed_names, name) != k_allowed_names.end() ||
+           std::ranges::any_of(k_allowed_prefixes, has_prefix);
+}
 
-    auto home = rocprofsys::get_env<std::string>("HOME", "");
+// A name character continues a path component, so a home directory that is followed or
+// preceded by one is a different path ("/home/bobby", "/mnt/home/bob").
+[[nodiscard]] constexpr bool
+is_name_char(char character) noexcept
+{
+    return (character >= 'a' && character <= 'z') ||
+           (character >= 'A' && character <= 'Z') ||
+           (character >= '0' && character <= '9') || character == '_' ||
+           character == '-' || character == '.';
+}
 
-    // HOME unset or "/" must not be redacted: it would rewrite every path.
-    while(home.ends_with(k_path_separator))
+[[nodiscard]] constexpr bool
+is_whole_component(std::string_view value, std::size_t pos, std::size_t length) noexcept
+{
+    const auto end = pos + length;
+    return (pos == 0 || !is_name_char(value[pos - 1])) &&
+           (end == value.size() || !is_name_char(value[end]));
+}
+
+// Replaces every occurrence of @p home that is a whole path component with "~". An empty
+// @p home matches everywhere and is never replaced.
+[[nodiscard]] std::string
+redact_home(std::string_view value, std::string_view home)
+{
+    if(home.empty())
     {
-        home.pop_back();
+        return std::string{ value };
     }
 
-    for(const char* raw_entry : env_block)
+    std::string redacted;
+    std::size_t copied = 0;  // value[0, copied) is already in redacted
+    for(auto hit = value.find(home); hit != std::string_view::npos;
+        hit      = value.find(home, hit + 1))
     {
-        // Split at the first '=' so values may contain '='; entries without one, or with
-        // an empty name, are not valid environment entries.
-        const std::string_view entry{ raw_entry };
-        const auto             assignment = entry.find(k_assignment);
+        if(hit < copied || !is_whole_component(value, hit, home.size()))
+        {
+            continue;
+        }
+        redacted.append(value.substr(copied, hit - copied)).append(k_home_alias);
+        copied = hit + home.size();
+    }
+    return redacted.append(value.substr(copied));
+}
+}  // namespace
+
+nlohmann::json
+filter_environment(std::span<const char* const> entries, std::string_view home)
+{
+    // Unset or "/" must not be redacted: it would rewrite every path.
+    while(home.ends_with(k_path_separator))
+    {
+        home.remove_suffix(1);
+    }
+
+    auto environment = nlohmann::json::object();
+    for(const std::string_view entry : entries)
+    {
+        const auto assignment = entry.find(k_assignment);
         if(assignment == std::string_view::npos || assignment == 0)
         {
             continue;
         }
 
-        const auto name       = entry.substr(0, assignment);
-        const auto has_prefix = [name](std::string_view prefix) {
-            return name.starts_with(prefix);
-        };
-        if(std::ranges::find(k_allowed_names, name) == k_allowed_names.end() &&
-           !std::ranges::any_of(k_allowed_prefixes, has_prefix))
+        const auto name = entry.substr(0, assignment);
+        if(!is_allowed(name))
         {
             continue;
         }
 
-        // Replace every occurrence of the home directory with "~" so the user name is
-        // not leaked, including from free-form values. An empty home matches everywhere,
-        // hence the guard in the loop condition.
-        std::string      value;
-        std::string_view rest = entry.substr(assignment + 1);
-        for(auto pos = home.empty() ? std::string_view::npos : rest.find(home);
-            pos != std::string_view::npos; pos = rest.find(home))
-        {
-            value.append(rest.substr(0, pos)).append(k_home_alias);
-            rest.remove_prefix(pos + home.size());
-        }
-        value.append(rest);
-        m_entries[std::string{ name }] = std::move(value);
+        environment[std::string{ name }] =
+            redact_home(entry.substr(assignment + 1), home);
     }
+    return environment;
 }
 
-void
-process_environment_info::add_mpi_identity(int rank, int size)
+nlohmann::json
+capture_process_environment()
 {
-    m_entries[std::string{ k_mpi_rank_name }] = rank;
-    m_entries[std::string{ k_mpi_size_name }] = size;
+    if(environ == nullptr)
+    {
+        return nlohmann::json::object();
+    }
+    const auto end = std::ranges::find(environ, std::unreachable_sentinel, nullptr);
+    return filter_environment(std::span<const char* const>{ environ, end },
+                              get_env<std::string>("HOME", ""));
 }
 
 std::string
-process_environment_info::to_json() const
+dump_environment(const nlohmann::json& environment)
 {
     // Environment values are arbitrary bytes; the default strict handler would throw on
     // invalid UTF-8, and this runs during process start-up.
-    return m_entries.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
+    return environment.dump(-1, ' ', false, nlohmann::json::error_handler_t::replace);
 }
 }  // namespace rocprofsys

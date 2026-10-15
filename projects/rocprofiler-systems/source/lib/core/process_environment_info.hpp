@@ -3,37 +3,42 @@
 
 #pragma once
 
-#include <nlohmann/json.hpp>
 #include <nlohmann/json_fwd.hpp>
 
+#include <span>
 #include <string>
+#include <string_view>
 
 namespace rocprofsys
 {
-class process_environment_info
-{
-public:
-    /** Snapshots the calling process's environment, redacting $HOME. */
-    process_environment_info();
+/**
+ * Keeps the allowlisted variables of an environment block and rewrites the user's home
+ * directory in their values to "~".
+ *
+ * Only variables named by an explicit allowlist are kept, so nothing unlisted can reach
+ * a shared database. Redaction is best effort: values such as PATH can still embed
+ * other user names (e.g. /scratch/bobby), so the result must not be treated as
+ * anonymised.
+ *
+ * @param entries "NAME=value" entries; entries without '=' or with an empty name are
+ *                skipped.
+ * @param home    Home directory to redact. Empty or "/" disables redaction.
+ * @return A JSON object mapping variable names to redacted values; empty when nothing
+ *         is allowlisted.
+ */
+[[nodiscard]] nlohmann::json
+filter_environment(std::span<const char* const> entries, std::string_view home);
 
-    ~process_environment_info()                                              = default;
-    process_environment_info(const process_environment_info&)                = default;
-    process_environment_info(process_environment_info&&) noexcept            = default;
-    process_environment_info& operator=(const process_environment_info&)     = default;
-    process_environment_info& operator=(process_environment_info&&) noexcept = default;
+/**
+ * Snapshots the calling process's environment with @ref filter_environment, using $HOME.
+ */
+[[nodiscard]] nlohmann::json
+capture_process_environment();
 
-    /**
-     * Records which MPI process this snapshot belongs to.
-     * These keys are synthesized at MPI_Init, not read from the environment, and are
-     * stored as JSON numbers.
-     * @param rank Rank in MPI_COMM_WORLD.
-     * @param size Size of MPI_COMM_WORLD.
-     */
-    void add_mpi_identity(int rank, int size);
-
-    [[nodiscard]] std::string to_json() const;
-
-private:
-    nlohmann::json m_entries = nlohmann::json::object();
-};
+/**
+ * @return @p environment as compact JSON. Bytes that are not valid UTF-8 are replaced
+ *         with U+FFFD; this never throws on them.
+ */
+[[nodiscard]] std::string
+dump_environment(const nlohmann::json& environment);
 }  // namespace rocprofsys
