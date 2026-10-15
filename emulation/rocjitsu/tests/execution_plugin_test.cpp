@@ -5766,12 +5766,8 @@ protected:
   }
 
   void wait() {
-    wave->set_wait_target_loadcnt(0);
-    TestWaitcntInstruction load_wait("s_wait_loadcnt");
-    fixture->plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 4, load_wait, *wave);
-    wave->set_wait_target_dscnt(0);
-    TestWaitcntInstruction ds_wait("s_wait_dscnt");
-    fixture->plugin_group_->onAmdgpuAfterExecuteInstruction(wave->pc + 8, ds_wait, *wave);
+    execute_wait(*fixture->plugin_group_, *wave, 0xbfc00000u); // s_wait_loadcnt 0.
+    execute_wait(*fixture->plugin_group_, *wave, 0xbfc60000u); // s_wait_dscnt 0.
   }
 
   bool probe(uint32_t destination, bool write, uint64_t lanes = 1) {
