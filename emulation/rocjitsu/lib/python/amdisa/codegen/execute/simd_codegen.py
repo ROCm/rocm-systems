@@ -27,7 +27,7 @@ min/max functors remain separate, with their documented NaN/signed-zero limits.
 
 from __future__ import annotations
 
-from amdisa.codegen.execute import float_compare, float_minmax
+from amdisa.codegen.execute import float_compare, float_minmax, input_policy
 from amdisa.codegen.execute.floating_policy import (
     FLUSH_NEAREST_F32_OPS,
     ROUNDED_F16_OPS,
@@ -1859,6 +1859,18 @@ SIMD_VOP3_BINARY_TRUE16_SRC: dict[str, tuple[str, str]] = {
         ' return ((hi & 0xFFFFu) << 16) | (lo & 0xFFFFu); }',
     ),
 }
+# GFX9 and RDNA1/2 spell the F16 normalized packs *_PKNORM_*. They read the
+# same op_sel-selected halves, so they share the RDNA3+ fast path.
+SIMD_VOP3_BINARY_TRUE16_SRC.update(
+    {
+        'v_cvt_pknorm_i16_f16_vop3': SIMD_VOP3_BINARY_TRUE16_SRC[
+            'v_cvt_pk_norm_i16_f16_vop3'
+        ],
+        'v_cvt_pknorm_u16_f16_vop3': SIMD_VOP3_BINARY_TRUE16_SRC[
+            'v_cvt_pk_norm_u16_f16_vop3'
+        ],
+    }
+)
 
 # True16 VOP3 scalar semantics select 16-bit source halves and merge a selected
 # destination half. The generic 32-bit VOP3 SIMD glue overwrites the whole dword.
@@ -2433,8 +2445,8 @@ SIMD_LSHL_ADD_U64: set[str] = {'v_lshl_add_u64_vop3'}
 # --- VOP3 wide 32x32->64 multiply-add (v_mad_u64_u32 / v_mad_i64_i32) -------
 #
 # 32-bit src0/src1 multiplicands widened to 64 (zero-/sign-extend), 64-bit
-# low-half product, plus the 64-bit src2 addend, with the carry/overflow mask
-# written to sdst. Routed through
+# low-half product, plus the 64-bit src2 addend. SDST holds unsigned carry-out
+# or signed bit 64 of the 65-bit sum, independently of saturation. Routed through
 # try_execute_mad_wide64_vop3_simd; the functor receives the two narrow operands
 # and the 64-bit addend and returns SimdCarry<native<uint64_t>, mask>.
 SIMD_MAD_WIDE64: dict[str, str] = {
@@ -2456,7 +2468,7 @@ SIMD_MAD_WIDE64: dict[str, str] = {
         ' auto product = wa * wb;'
         ' auto result = product + c;'
         ' return make_simd_carry(result,'
-        ' ((~(product ^ c) & (product ^ result)) & (1ULL << 63)) != 0); }'
+        ' (((product ^ c) >> 63) != 0) ^ (result < product)); }'
     ),
 }
 
@@ -2495,6 +2507,8 @@ _PACKED_NORMALIZED_VOP3 = (
     'v_cvt_pknorm_u16_f32_vop3',
     'v_cvt_pk_norm_i16_f32_vop3',
     'v_cvt_pk_norm_u16_f32_vop3',
+    'v_cvt_pknorm_i16_f16_vop3',
+    'v_cvt_pknorm_u16_f16_vop3',
     'v_cvt_pk_norm_i16_f16_vop3',
     'v_cvt_pk_norm_u16_f16_vop3',
 )
@@ -2517,6 +2531,21 @@ def _modified_conversion_op(cpp_op: str, *, bits: int, arity: int = 2) -> str:
         f'[&inst]({parameters}) {{'
         + modifiers
         + f' return ({cpp_op})({", ".join(operands)}); }}'
+    )
+
+
+def _prepared_f16_conversion_op(cpp_op: str) -> str:
+    """Apply shared ABS/NEG, then MODE input flushing, to two raw F16 sources."""
+    prepare = ''.join(
+        f' {operand} = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+        f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+        f'{operand}, {i}, inst.inst_.abs, inst.inst_.neg), {input_policy.NAME});'
+        for i, operand in enumerate(('a', 'b'))
+    )
+    return (
+        f'[&inst, {input_policy.NAME} = {input_policy.policy_expr("f16")}](auto a, auto b) {{'
+        + prepare
+        + f' return ({cpp_op})(a, b); }}'
     )
 
 
@@ -2946,7 +2975,7 @@ def _simd_probe_line(
     if spec3bin16 is not None:
         cpp_t, cpp_op = spec3bin16
         if template_name in _PACKED_NORMALIZED_VOP3:
-            cpp_op = _modified_conversion_op(cpp_op, bits=16)
+            cpp_op = _prepared_f16_conversion_op(cpp_op)
         return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_SRC({cpp_t}, {cpp_op});'
     spec3binx = SIMD_VOP3_BINARY_INT_EXTRA.get(template_name)
     if spec3binx is not None:

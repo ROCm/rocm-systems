@@ -100,7 +100,7 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index. Repair writes through a checked directory descriptor to a new, unpredictably named file and renames it into place; it never follows a symbolic link, and refuses an archive whose `events.bin`, `manifest.json` or `pid-*` directory is one (a link in the path you name on the command line is resolved), and keeps the permissions of the files it replaces. The reader still follows links when it reads. On Windows a link or directory junction (any reparse point) is refused by checking the file attributes, but the write is not made through a checked directory handle, so a link swapped in between the check and the write is not caught |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
@@ -133,6 +133,27 @@ On Linux the archive is readable only by the user who captured it (directories 0
 | `--guard-min-bytes N` / `--guard-max-bytes N` | Size window for `--guard-blocks` |
 | `--guard-budget-mb N` | Cap guarded memory per launch (default `4096`) |
 | `--guard-exact-align` | Reproduce each guarded pointer's offset within an allocation granule bit for bit, at the cost of a larger unguarded tail |
+
+### Archive integers reach HIP only through translation
+
+An archive is untrusted input, so replay never hands the runtime a recorded
+integer as a pointer or an opaque handle unless it was translated through the
+replay's own maps. The playback generator enforces this: an API with a pointer
+or handle argument that has no translation is refused as unreplayable, by name,
+with `hipErrorNotSupported`. That covers texture references, external memory and
+semaphores, execution contexts, graphics resources and `hipLibraryGetGlobal`/
+`hipLibraryGetManaged`. `hipLinkAddFile` is refused because the path would be one
+the archive chose, `hipLinkCreate` is refused when a JIT option carries a
+pointer (a log buffer or a symbol table), and `hipStreamSetAttribute` and
+`hipGraphKernelNodeSetAttribute` translate the base pointer of an access policy
+window like `hipLaunchKernelExC` does. A 2D device copy whose source or destination
+is in no replay map is refused instead of run against the recorded address; a
+zero-extent or host-to-host 2D copy is a no-op. A fixed-size string in a record is
+copied into a bounded, NUL-terminated buffer before it is used.
+`tools/tests/test_gen_raw_slots.py` regenerates the handlers and fails if a raw
+cast of a recorded pointer or handle remains.
+`tools/tests/test_generated_files_current.py` fails if a checked-in generated
+source or the matrix expectations header is stale against the generator.
 
 ### External region annotations
 

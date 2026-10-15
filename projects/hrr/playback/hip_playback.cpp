@@ -14,6 +14,7 @@
 #include "hip_playback.h"
 #include "hrr/hrr_api_args.h"
 #include "hrr_reader.h"   // hrr::hash_hex, hrr::read_file_capped
+#include "hrr_payload_bounds.h"
 #include "hrr_replay_limits.h"
 
 #include <hip/hip_runtime.h>
@@ -1641,7 +1642,10 @@ hipError_t playback___hipRegisterVar(PlaybackContext& ctx,
     const auto* a = reinterpret_cast<const hrr_args___hipRegisterVar*>(payload);
     if (!a->deviceVar_present || a->deviceVar_bytes[0] == '\0') return hipSuccess;
 
-    const char* name = reinterpret_cast<const char*>(a->deviceVar_bytes);
+    // The record's name field need not end in a NUL: copy it out bounded.
+    const std::string name_str =
+        hrr::bounded_cstr(a->deviceVar_bytes, sizeof(a->deviceVar_bytes));
+    const char* name = name_str.c_str();
     size_t live_size = 0;
     void* live = ctx.resolve_symbol_by_name(name, &live_size);
     if (!live) {
@@ -1718,15 +1722,39 @@ hipError_t playback_hipGetSymbolSize(PlaybackContext& ctx,
 // the resolved device address, which is what the symbol spelling decays to
 // inside the runtime anyway.
 
-static hipGraphNode_t* dep_array(PlaybackContext& ctx, const uint8_t* bytes,
-                                 uint8_t present, uint32_t n,
-                                 std::vector<hipGraphNode_t>& out) {
-    if (!present || n == 0) return nullptr;
+// Resolve a recorded dependency list into live nodes for the hand-written
+// graph handlers. The record holds its dependencies inline, so a count above
+// what the field holds is a malformed record: it is refused with the API name
+// and the event's sequence number, and nothing is read past the field. Returns false then;
+// on success *ptr is the array to hand to HIP (null when there are none).
+static bool dep_array(PlaybackContext& ctx, const char* api, const uint8_t* bytes,
+                      size_t field_bytes, uint8_t present, uint32_t n, uint64_t recorded_n,
+                      std::vector<hipGraphNode_t>& out, hipGraphNode_t** ptr) {
+    *ptr = nullptr;
+    out.clear();
+    if (!present || n == 0) return true;
+    if (!hrr::deps_complete(recorded_n, n)) {
+        fprintf(stderr,
+                "[HRR] %s: event with sequence number %llu was built with %llu dependencies but its record "
+                "holds %u; the others were dropped at capture, so the ordering cannot "
+                "be reproduced; refusing the call\n",
+                api, (unsigned long long)hrr_dispatch_seq, (unsigned long long)recorded_n, n);
+        return false;
+    }
+    if (!hrr::inline_count_fits(n, field_bytes, sizeof(hipGraphNode_t))) {
+        fprintf(stderr,
+                "[HRR] %s: event with sequence number %llu records %u dependencies but its record holds "
+                "at most %zu; refusing the call\n",
+                api, (unsigned long long)hrr_dispatch_seq, n,
+                hrr::inline_capacity(field_bytes, sizeof(hipGraphNode_t)));
+        return false;
+    }
     out.resize(n);
-    std::memcpy(out.data(), bytes, n * sizeof(hipGraphNode_t));
+    std::memcpy(out.data(), bytes, static_cast<size_t>(n) * sizeof(hipGraphNode_t));
     for (auto& node : out)
         node = ctx.translate_graph_node(reinterpret_cast<uint64_t>(node));
-    return out.data();
+    *ptr = out.data();
+    return true;
 }
 
 hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
@@ -1764,9 +1792,13 @@ hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx,
     }
 
     std::vector<hipGraphNode_t> deps;
-    hipGraphNode_t* dep_ptr = dep_array(ctx, a->pDependencies_bytes,
-                                        a->pDependencies_present,
-                                        a->pDependencies_n, deps);
+    hipGraphNode_t* dep_ptr = nullptr;
+    if (!dep_array(ctx, "hipGraphAddMemcpyNodeToSymbol", a->pDependencies_bytes,
+                   sizeof(a->pDependencies_bytes), a->pDependencies_present,
+                   a->pDependencies_n, a->numDependencies, deps, &dep_ptr)) {
+        ctx.mark_graph_incomplete(a->graph, "hipGraphAddMemcpyNodeToSymbol");
+        return hipSuccess;
+    }
     hipGraphNode_t node = nullptr;
     hipError_t r = hipGraphAddMemcpyNode1D(
         &node, ctx.translate_graph(a->graph), dep_ptr, deps.size(),
@@ -1811,9 +1843,13 @@ hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
     }
 
     std::vector<hipGraphNode_t> deps;
-    hipGraphNode_t* dep_ptr = dep_array(ctx, a->pDependencies_bytes,
-                                        a->pDependencies_present,
-                                        a->pDependencies_n, deps);
+    hipGraphNode_t* dep_ptr = nullptr;
+    if (!dep_array(ctx, "hipGraphAddMemcpyNodeFromSymbol", a->pDependencies_bytes,
+                   sizeof(a->pDependencies_bytes), a->pDependencies_present,
+                   a->pDependencies_n, a->numDependencies, deps, &dep_ptr)) {
+        ctx.mark_graph_incomplete(a->graph, "hipGraphAddMemcpyNodeFromSymbol");
+        return hipSuccess;
+    }
     hipGraphNode_t node = nullptr;
     hipError_t r = hipGraphAddMemcpyNode1D(
         &node, ctx.translate_graph(a->graph), dep_ptr, deps.size(), dst,
@@ -2026,11 +2062,13 @@ hipError_t playback_hipLinkAddData(PlaybackContext& ctx,
         }
     }
 
+    // The record's name field need not end in a NUL: copy it out bounded.
+    const std::string link_name =
+        hrr::bounded_cstr(a->name_bytes, sizeof(a->name_bytes));
     hipError_t r = hipLinkAddData(
         state, static_cast<hipJitInputType>(a->type), const_cast<void*>(image),
         blob_sz,
-        a->name_present ? reinterpret_cast<const char*>(a->name_bytes)
-                        : nullptr,
+        a->name_present ? link_name.c_str() : nullptr,
         n_opts, n_opts ? options : nullptr, n_opts ? option_values : nullptr);
     if (hrr_replayed_recorded_error(ctx, "hipLinkAddData", a->ret, r))
         return hipSuccess;
@@ -4871,12 +4909,27 @@ static hipError_t replay_memcpy2d(PlaybackContext& ctx, const T* a,
                                   });
     }
 
-    // D2D / H2H: translate both ends (host ptrs translate to themselves-as-null
-    // and fall through to the recorded value, matching the generated behavior).
+    // ihipMemcpy2D returns success for a zero width or height before it looks at
+    // either pointer, so a zero-extent copy can be recorded with ends that are
+    // null or in no map. It does nothing at replay either.
+    if (width == 0 || height == 0) return hipSuccess;
+    // A host-to-host copy is a no-op, as in the 1D path (replay_memcpy_impl):
+    // plain host memory is in no map, and the copy touches nothing replay tracks.
+    if (kind == hipMemcpyHostToHost) return hipSuccess;
+
+    // D2D / H2H: translate both ends. An end that is in no map is an address
+    // from the capturing process: it is not used as is, since the archive would
+    // be choosing where the copy reads or writes.
     void* dst = ctx.translate_ptr(a->dst);
     void* src = ctx.translate_ptr(a->src);
-    if (!dst) dst = reinterpret_cast<void*>(a->dst);
-    if (!src) src = reinterpret_cast<void*>(a->src);
+    if (!dst || !src) {
+        fprintf(stderr,
+                "[HRR] hipMemcpy2D%s: %s 0x%llx is not mapped at replay, so the copy "
+                "is refused rather than run against a recorded address\n",
+                is_async ? "Async" : "", !dst ? "destination" : "source",
+                (unsigned long long)(!dst ? a->dst : a->src));
+        return hipErrorInvalidValue;
+    }
     if (is_async)
         return hipMemcpy2DAsync(dst, dpitch, src, spitch, width, height, kind, stream);
     return hipMemcpy2D(dst, dpitch, src, spitch, width, height, kind);
@@ -4952,6 +5005,13 @@ hipError_t playback_hipStreamSetAttribute(PlaybackContext& ctx, const uint8_t* p
     hipStream_t stream = ctx.translate_stream(a->stream);
     hipStreamAttrValue val{};
     std::memcpy(&val, a->stream_attr_bytes, sizeof(val));
+    // The access policy window's base_ptr is a device address of the capturing
+    // process; translate it as hipLaunchKernelExC does. CLR only stores the
+    // window, and rejects num_bytes above accessPolicyMaxWindowSize (0 on AMD),
+    // so a recorded window has num_bytes == 0 and replays like any other.
+    if (a->attr == hipStreamAttributeAccessPolicyWindow)
+        val.accessPolicyWindow.base_ptr = ctx.translate_ptr(
+            reinterpret_cast<uint64_t>(val.accessPolicyWindow.base_ptr));
     return hipStreamSetAttribute(stream, static_cast<hipStreamAttrID>(a->attr), &val);
 }
 
@@ -5167,10 +5227,13 @@ hipError_t playback_hipStreamBatchMemOp(PlaybackContext& ctx, const uint8_t* pl)
 // Manual playback: IPC memory handles
 //
 // The handle is 64 opaque bytes naming an export in the process that made it.
-// Replay re-exports the live allocation and pairs the recorded bytes with the
-// live ones, so an import later in the same archive has something to open. An
-// import whose export is in another process (the cross-rank case) has no such
-// pairing and says so rather than opening a handle from a dead process.
+// Replay re-exports the live allocation. Capture now leaves the handle field
+// zero, and such an export is paired with nothing. Only a legacy archive, whose
+// field holds the handle bytes, has its recorded bytes paired with the live
+// ones, so an import later in the same archive has something to open. An
+// import with no paired export (always the case for a current archive, and
+// the cross-rank case for a legacy one) says so rather than opening a handle
+// from a dead process.
 // ---------------------------------------------------------------------------
 hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* pl) {
     const auto* a = reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(pl);
@@ -5185,7 +5248,12 @@ hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* pl) 
     hipIpcMemHandle_t live{};
     hipError_t r = hipIpcGetMemHandle(&live, live_ptr);
     if (r != hipSuccess) return r;
-    if (a->handle_present)
+    // Capture no longer records the handle and leaves the field zero. Such an
+    // export pairs with nothing, so every import is reported as unmatched,
+    // which is what it was: a process cannot open its own handle.
+    const bool recorded = std::any_of(std::begin(a->handle_bytes), std::end(a->handle_bytes),
+                                      [](uint8_t b) { return b != 0; });
+    if (a->handle_present && recorded)
         ctx.record_ipc_handle(
             PlaybackContext::ipc_key(a->handle_bytes, sizeof(live)),
             PlaybackContext::ipc_key(&live, sizeof(live)));
@@ -5230,11 +5298,32 @@ hipError_t playback_hipIpcOpenMemHandle(PlaybackContext& ctx, const uint8_t* pl)
 // would be silently dropped, which is the class of bug the node map exists to
 // prevent, so the caller marks the graph incomplete instead.
 static bool translate_node_deps(PlaybackContext& ctx, const char* api,
-                                const uint8_t* bytes, uint32_t n,
-                                uint8_t present,
+                                const uint8_t* bytes, size_t field_bytes,
+                                uint32_t n, uint8_t present, uint64_t recorded_n,
                                 std::vector<hipGraphNode_t>& out) {
     out.clear();
     if (!present || n == 0) return true;
+    // Capture stores at most what the inline field holds and does not say so,
+    // but the record also carries the caller's own count. A stored list shorter
+    // than that count is missing ordering edges, so refuse it rather than
+    // replay the node with fewer dependencies than it was built with.
+    if (!hrr::deps_complete(recorded_n, n)) {
+        fprintf(stderr,
+                "[HRR] %s: event with sequence number %llu was built with %llu dependencies but its record "
+                "holds %u; the others were dropped at capture, so the ordering cannot "
+                "be reproduced; refusing the call\n",
+                api, (unsigned long long)hrr_dispatch_seq, (unsigned long long)recorded_n, n);
+        return false;
+    }
+    // The record holds its dependencies inline; a larger count is malformed.
+    if (!hrr::inline_count_fits(n, field_bytes, sizeof(hipGraphNode_t))) {
+        fprintf(stderr,
+                "[HRR] %s: event with sequence number %llu records %u dependencies but its record holds "
+                "at most %zu; refusing the call\n",
+                api, (unsigned long long)hrr_dispatch_seq, n,
+                hrr::inline_capacity(field_bytes, sizeof(hipGraphNode_t)));
+        return false;
+    }
     out.resize(n);
     std::memcpy(out.data(), bytes, static_cast<size_t>(n) * sizeof(hipGraphNode_t));
     for (auto& node : out) {
@@ -5341,8 +5430,9 @@ hipError_t playback_hipGraphAddKernelNode(PlaybackContext& ctx,
                                     a->pNodeParams_present, knp, arg_ptrs,
                                     arg_storage) ||
         !translate_node_deps(ctx, "hipGraphAddKernelNode",
-                             a->pDependencies_bytes, a->pDependencies_n,
-                             a->pDependencies_present, deps)) {
+                             a->pDependencies_bytes, sizeof(a->pDependencies_bytes),
+                             a->pDependencies_n, a->pDependencies_present,
+                             a->numDependencies, deps)) {
         ctx.mark_graph_incomplete(a->graph, "hipGraphAddKernelNode");
         return hipSuccess;
     }
@@ -5484,8 +5574,9 @@ hipError_t playback_hipGraphAddBatchMemOpNode(PlaybackContext& ctx,
                                     sizeof(*a), a->nodeParams_bytes,
                                     a->nodeParams_present, bnp, ops) ||
         !translate_node_deps(ctx, "hipGraphAddBatchMemOpNode",
-                             a->dependencies_bytes, a->dependencies_n,
-                             a->dependencies_present, deps)) {
+                             a->dependencies_bytes, sizeof(a->dependencies_bytes),
+                             a->dependencies_n, a->dependencies_present,
+                             a->numDependencies, deps)) {
         ctx.mark_graph_incomplete(a->hGraph, "hipGraphAddBatchMemOpNode");
         return hipSuccess;
     }
@@ -5547,8 +5638,9 @@ hipError_t playback_hipGraphAddMemAllocNode(PlaybackContext& ctx,
     std::vector<hipGraphNode_t> deps;
     if (!a->pNodeParams_present ||
         !translate_node_deps(ctx, "hipGraphAddMemAllocNode",
-                             a->pDependencies_bytes, a->pDependencies_n,
-                             a->pDependencies_present, deps)) {
+                             a->pDependencies_bytes, sizeof(a->pDependencies_bytes),
+                             a->pDependencies_n, a->pDependencies_present,
+                             a->numDependencies, deps)) {
         ctx.mark_graph_incomplete(a->graph, "hipGraphAddMemAllocNode");
         return hipSuccess;
     }
@@ -5638,8 +5730,9 @@ hipError_t playback_hipDrvGraphAddMemcpyNode(PlaybackContext& ctx,
     std::memcpy(&copy, a->copyParams_bytes, sizeof(copy));
     if (!translate_drv_memcpy3d(ctx, "hipDrvGraphAddMemcpyNode", copy) ||
         !translate_node_deps(ctx, "hipDrvGraphAddMemcpyNode",
-                             a->dependencies_bytes, a->dependencies_n,
-                             a->dependencies_present, deps)) {
+                             a->dependencies_bytes, sizeof(a->dependencies_bytes),
+                             a->dependencies_n, a->dependencies_present,
+                             a->numDependencies, deps)) {
         ctx.mark_graph_incomplete(a->hGraph, "hipDrvGraphAddMemcpyNode");
         return hipSuccess;
     }
