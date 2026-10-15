@@ -84,8 +84,13 @@ struct NetworkCounterContext {
 // Detect NIC type from IB device driver symlink
 NicType NetCounterDetectNicType(const std::string& ib_device);
 
-// Most common known NIC type (ties: first seen); mixed=true if known types differ
+// Most common known NIC type (ties: non-MLX5, then first seen); mixed=true if
+// known types differ
 NicType NetCounterDominantNicType(const std::vector<NicType>& types, bool& mixed);
+
+// Devices to collect: all for an explicit NCCL_IB_HCA list, else those of the
+// dominant or an unknown type
+std::vector<bool> NetCounterKeepDevices(const std::vector<NicType>& types, NicType dominant, bool explicit_list);
 
 // Scan snapshots and return the dominant NIC type; sets mixed=true if types differ
 NicType DetectNicTypeFromSnapshots(

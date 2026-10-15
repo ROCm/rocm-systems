@@ -16,7 +16,6 @@
 #include <cstdio>
 #include <cstdlib>
 #include <ctime>
-#include <set>
 #include <dirent.h>
 #include <unistd.h>
 
@@ -148,9 +147,9 @@ static const std::string& LookupKey(const CounterDescriptor& d) {
 }
 
 static std::string Trim(const std::string& s) {
-  size_t b = s.find_first_not_of(" \t");
+  size_t b = s.find_first_not_of(" \t\r");
   if (b == std::string::npos) { return ""; }
-  return s.substr(b, s.find_last_not_of(" \t") - b + 1);
+  return s.substr(b, s.find_last_not_of(" \t\r") - b + 1);
 }
 
 // Comma-separated list, trimmed, empty entries dropped.
@@ -439,11 +438,23 @@ NicType NetCounterDominantNicType(const std::vector<NicType>& types, bool& mixed
     if (count[t]++ == 0) { order.push_back(t); }
   }
   mixed = order.size() > 1;
+  // On a tie prefer a non-MLX5 type: mlx5 is usually the frontend NIC.
   NicType best = NIC_UNKNOWN;
   for (NicType t : order) {
-    if (best == NIC_UNKNOWN || count[t] > count[best]) { best = t; }
+    if (best == NIC_UNKNOWN || count[t] > count[best] || (count[t] == count[best] && best == NIC_MLX5)) {
+      best = t;
+    }
   }
   return best;
+}
+
+std::vector<bool> NetCounterKeepDevices(const std::vector<NicType>& types, NicType dominant, bool explicit_list) {
+  std::vector<bool> keep(types.size(), true);
+  if (explicit_list) { return keep; }
+  for (size_t i = 0; i < types.size(); i++) {
+    keep[i] = types[i] == NIC_UNKNOWN || types[i] == dominant;
+  }
+  return keep;
 }
 
 NicType DetectNicTypeFromSnapshots(
@@ -539,16 +550,12 @@ static void CollectIbHwCounters(const std::string& ib_device,
 void NetCounterParseDebugfs(const std::string& text, const std::set<std::string>& wanted,
                             std::map<std::string, uint64_t>& out) {
   ForEachLine(text, [&](const std::string& line) {
-    for (const auto& name : wanted) {
-      if (line.find(name) == std::string::npos) { continue; }
-      unsigned long long tmp = 0;
-      char key[256] = {0};
-      if (sscanf(line.c_str(), " %255[^:=] %*[:=] %llu", key, &tmp) == 2 ||
-          sscanf(line.c_str(), " %255s %llu", key, &tmp) == 2) {
-        std::string k = Trim(key);
-        if (wanted.count(k)) { out[k] = (uint64_t)tmp; }
-      }
-      break;
+    unsigned long long tmp = 0;
+    char key[256] = {0};
+    if (sscanf(line.c_str(), " %255[^:=] %*[:=] %llu", key, &tmp) == 2 ||
+        sscanf(line.c_str(), " %255s %llu", key, &tmp) == 2) {
+      std::string k = Trim(key);
+      if (wanted.count(k)) { out[k] = (uint64_t)tmp; }
     }
   });
 }
@@ -558,7 +565,8 @@ static std::set<std::string> DebugfsWanted(const std::vector<CounterDescriptor>&
                                            const std::map<std::string, uint64_t>& out) {
   std::set<std::string> wanted;
   for (const auto& d : selected) {
-    if (d.debugfs && out.count(d.name) == 0) { wanted.insert(d.name); }
+    bool debugfs = d.debugfs || d.source == COUNTER_SRC_DEBUGFS;
+    if (debugfs && !d.is_prefix && out.count(d.name) == 0) { wanted.insert(d.name); }
   }
   return wanted;
 }
