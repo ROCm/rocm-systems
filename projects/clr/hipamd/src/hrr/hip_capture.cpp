@@ -130,8 +130,11 @@ const char* hip_capture_output_dir() {
 
 // HIP_HRR_DEBUG_ARGS also enables provenance tracing: every H2D memcpy
 // destination is logged so a kernel pointer arg can be matched to the copy that
-// filled it. Routed through the CLR flags registry (flags.hpp) like every other
-// HRR flag, so it is discoverable and honors AMD_LOG_LEVEL log routing.
+// filled it. Routed through the CLR flags registry (flags.hpp), so it is
+// discoverable and honors AMD_LOG_LEVEL log routing. HIP_HRR_HOST_SNAPSHOTS and
+// HIP_HRR_HOST_SNAPSHOT_MAX_MB are the exception: they only tune capture, so they
+// are read here (hrr_host_snapshots_enabled, hrr_host_snapshot_cap_bytes) and
+// stay with the HRR code and its reviewers rather than in flags.hpp.
 static bool hrr_dbg_args_enabled() {
   return HIP_HRR_DEBUG_ARGS;
 }
@@ -221,8 +224,29 @@ static void pinned_install_atfork() {
 #endif
 }
 
+// HIP_HRR_HOST_SNAPSHOTS, on unless set to something other than "true" or a
+// non-zero number, and HIP_HRR_HOST_SNAPSHOT_MAX_MB, 64 unless set. Parsed as
+// the CLR flags registry parses a bool and a uint, and read once: every launch
+// asks.
+static bool hrr_host_snapshots_enabled() {
+  static const bool on = [] {
+    const char* v = std::getenv("HIP_HRR_HOST_SNAPSHOTS");
+    return !v || std::strcmp(v, "true") == 0 || std::atoi(v) != 0;
+  }();
+  return on;
+}
+
+static size_t hrr_host_snapshot_cap_bytes() {
+  static const size_t cap = [] {
+    const char* v = std::getenv("HIP_HRR_HOST_SNAPSHOT_MAX_MB");
+    const unsigned int mb = v ? static_cast<unsigned int>(std::atoi(v)) : 64u;
+    return static_cast<size_t>(mb) << 20;
+  }();
+  return cap;
+}
+
 static void pinned_scan_locked(const uint8_t* bytes, size_t sz) {
-  const size_t cap = static_cast<size_t>(HIP_HRR_HOST_SNAPSHOT_MAX_MB) << 20;
+  const size_t cap = hrr_host_snapshot_cap_bytes();
   for (size_t j = 0; bytes && j + sizeof(uint64_t) <= sz; j += sizeof(uint64_t)) {
     uint64_t v;
     std::memcpy(&v, bytes + j, sizeof(v));
@@ -262,7 +286,7 @@ struct PinnedSnapshot {
   PinnedSnapshot(hipFunction_t f, void** params, void** extra,
                  const void* kbuf = nullptr, size_t ksz = 0) {
     t_snaps.clear();
-    if (!f || !HIP_HRR_HOST_SNAPSHOTS || g_pinned_count.load(std::memory_order_relaxed) == 0)
+    if (!f || !hrr_host_snapshots_enabled() || g_pinned_count.load(std::memory_order_relaxed) == 0)
       return;
     if (!params && !kbuf && extra) parse_kernel_extra(extra, kbuf, ksz);
     const amd::KernelSignature& sig = hip::asKernel(f)->signature();
@@ -293,7 +317,7 @@ struct PinnedSnapshot {
 // The kernel behind a host stub, looked up before the launch only when there
 // is pinned memory to snapshot, without changing the application's last error.
 static hipFunction_t pinned_stub_fn(const void* stub) {
-  if (!HIP_HRR_HOST_SNAPSHOTS || g_pinned_count.load(std::memory_order_relaxed) == 0 ||
+  if (!hrr_host_snapshots_enabled() || g_pinned_count.load(std::memory_order_relaxed) == 0 ||
       !g_real_table.hipGetFuncBySymbol_fn)
     return nullptr;
   const hipError_t saved_cmd = hip::tls.last_command_error_;

@@ -214,9 +214,11 @@ cases:
   Unit_HRR_PinnedHostFork_Direct: {}
   Unit_HRR_PinnedHostFreedRoundtrip: {}
   Unit_HRR_PinnedHostFreed_Direct: {}
+  Unit_HRR_PinnedHostLarge_Direct: {}
   Unit_HRR_PinnedHostMalloc_Direct: {}
   Unit_HRR_PinnedHostRegister_Direct: {}
   Unit_HRR_PinnedHostRoundtrip: {}
+  Unit_HRR_PinnedHostSnapshotCap: {}
   Unit_HRR_PinnedHostStructLowBits_Direct: {}
   Unit_HRR_PinnedHostStruct_Direct: {}
   Unit_HRR_PitchedD2HBlobEdits: {}

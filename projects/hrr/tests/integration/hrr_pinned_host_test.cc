@@ -107,6 +107,15 @@ TEST_CASE("Unit_HRR_PinnedHostStruct_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipHostFree(in));
 }
 
+// A 2 MiB allocation: over HIP_HRR_HOST_SNAPSHOT_MAX_MB=1, within 2.
+TEST_CASE("Unit_HRR_PinnedHostLarge_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  int* in = nullptr;
+  HRR_HIP_CHECK(hipHostMalloc(reinterpret_cast<void**>(&in), size_t{2} << 20, 0));
+  hrr_pinned_workload(in);
+  HRR_HIP_CHECK(hipHostFree(in));
+}
+
 // A freed allocation's address passed on as a plain number: capture must not
 // snapshot memory that is gone.
 TEST_CASE("Unit_HRR_PinnedHostFreed_Direct", "[.][hrr-direct]") {
@@ -231,6 +240,38 @@ HRR_TEST_CASE(Unit_HRR_PinnedHostRoundtrip) {
         CHECK(ret != 0);
         CHECK(fail > 0);
       }
+    }
+  }
+}
+
+// An allocation larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB is not snapshotted and
+// is listed as unreplayable, so replay cannot match. Within the cap it is.
+HRR_TEST_CASE(Unit_HRR_PinnedHostSnapshotCap) {
+  for (const char* max_mb : {"2", "1"}) {
+    const bool over = *max_mb == '1';
+    INFO("HIP_HRR_HOST_SNAPSHOT_MAX_MB=" << max_mb);
+    ScopedDir cap{fs::temp_directory_path() / "hrr_pinned_host_cap"};
+    hrr_capture_direct("Unit_HRR_PinnedHostLarge_Direct", cap.path, 5,
+                       {{"HIP_HRR_HOST_SNAPSHOT_MAX_MB", max_mb}});
+    const std::string manifest =
+        read_text_file(hrr_single_process_archive(cap.path) / "manifest.json");
+    INFO("manifest.json:\n" << manifest);
+    CHECK((manifest.find("larger than HIP_HRR_HOST_SNAPSHOT_MAX_MB") != std::string::npos) ==
+          over);
+    auto [ret, out] = hrr_playback_env(cap.path, {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback exit " << ret << ", stdout:\n" << out);
+    int pass = 0, fail = 0;
+    REQUIRE(hrr_parse_d2h_summary(out, pass, fail));
+    if (over) {
+      CHECK(ret != 0);
+      CHECK(fail > 0);
+      CHECK(out.find("Pinned host snapshots") == std::string::npos);
+    } else {
+      CHECK(ret == 0);
+      CHECK(pass == kPinnedIters);
+      CHECK(fail == 0);
+      CHECK(out.find("Pinned host snapshots: 2 restored, 0 refused, 1 skipped") !=
+            std::string::npos);
     }
   }
 }
