@@ -76,10 +76,8 @@ std::function<ncclResult_t(struct ncclComm*, struct ncclKernelPlan*, struct nccl
 static int DefaultEffectiveP2pBatchEnable(struct ncclComm*) { return 0; }
 std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable = DefaultEffectiveP2pBatchEnable;
 
-// Same field choice as enqueue.cc's rcclP2pTaskParts.
-static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t collAPI) {
-  return collAPI == ncclFuncScatter ? comm->p2pnChannelsPerPeerScatter : comm->p2pnChannelsPerPeer;
-}
+// enqueue.cc's answer for every task outside multi-node AINIC Scatter.
+static int DefaultP2pTaskParts(struct ncclComm* comm, ncclFunc_t) { return comm->p2pnChannelsPerPeer; }
 std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts = DefaultP2pTaskParts;
 
 // enqueue.cc:437-441 splits the default on ROCm version; mirrored rather than pinned to one arm.

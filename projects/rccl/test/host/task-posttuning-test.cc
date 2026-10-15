@@ -1184,7 +1184,6 @@ class TaskPostTuning_P2pScene {
     comm->connectRecv = connectRecv_.data();
     comm->p2pnChannels = nP2pChannels;
     comm->p2pnChannelsPerPeer = nChannelsPerPeer;
-    comm->p2pnChannelsPerPeerScatter = nChannelsPerPeer;
     comm->p2pChannelShiftSize = kNoChannelShift;
     for (int channelId = 0; channelId < nP2pChannels; channelId++) {
       for (int peer = 0; peer < kRanks; peer++) {
@@ -1381,7 +1380,9 @@ TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_FreshRecvPeer_ClaimsItsRecvC
 // unseen, so a later task to the same peer that uses every part still claims the rest.
 TEST_F(TaskPostTuningMicrotest, P2pRecordPreconnect_ScatterWithFewerParts_ClaimsItsPartsAndLeavesTheRestForLater) {
   TaskPostTuning_P2pScene p2p;
-  p2p.comm()->p2pnChannelsPerPeerScatter = 1;
+  ScopedHook scatterParts(g_rcclP2pTaskParts, [](struct ncclComm* comm, ncclFunc_t collAPI) {
+    return collAPI == ncclFuncScatter ? 1 : comm->p2pnChannelsPerPeer;
+  });
   const std::vector<int> sendChannels = p2p.Channels(kIsSend);
   ASSERT_EQ(2u, sendChannels.size());
   bool needPreconnect = false;

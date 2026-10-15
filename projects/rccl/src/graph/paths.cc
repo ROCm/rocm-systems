@@ -1504,19 +1504,9 @@ ncclResult_t ncclTopoComputeP2pChannels(struct ncclComm* comm) {
     NCCLCHECK(ncclTopoReconcileGrowChannels(comm, &comm->p2pnChannels));
     comm->p2pnChannelsPerPeer = std::min(comm->p2pnChannelsPerPeer, comm->p2pnChannels);
   }
-  // Scatter drives all nRanks-1 peers from one root at once. On multi-node AINIC, give it the most parts
-  // per peer whose flows still fit the pool; more parts oversubscribe it. A user-set
-  // nChannelsPerNetPeer is kept as is.
-  comm->p2pnChannelsPerPeerScatter = comm->p2pnChannelsPerPeer;
-  if (comm->nNodes > 1 && comm->config.nChannelsPerNetPeer == NCCL_CONFIG_UNDEF_INT && rcclUseAinic()) {
-    int partsThatFit = comm->p2pnChannels / (comm->nRanks - 1);
-    partsThatFit = partsThatFit >= 1 ? pow2Down(partsThatFit) : 1;
-    comm->p2pnChannelsPerPeerScatter = std::min(comm->p2pnChannelsPerPeer, partsThatFit);
-  }
 
-  INFO(NCCL_INIT | NCCL_TUNING,
-       "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d p2pnChannelsPerPeerScatter=%d maxP2pPeers=%d",
-       comm->p2pnChannels, comm->p2pnChannelsPerPeer, comm->p2pnChannelsPerPeerScatter, maxP2pPeers);
+  INFO(NCCL_INIT | NCCL_TUNING, "P2P channels: p2pnChannels=%d p2pnChannelsPerPeer=%d maxP2pPeers=%d",
+       comm->p2pnChannels, comm->p2pnChannelsPerPeer, maxP2pPeers);
 
   // Init channels that weren't used so far
   for (int c = comm->nChannels; c < std::max(comm->nChannels, comm->p2pnChannels); c++) NCCLCHECK(initChannel(comm, c));
