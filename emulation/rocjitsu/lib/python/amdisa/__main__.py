@@ -4,7 +4,6 @@
 """CLI entry point: ``python -m amdisa``."""
 
 import argparse
-from pathlib import Path
 import re
 import sys
 from tempfile import TemporaryDirectory
@@ -28,10 +27,7 @@ from amdisa import (
 )
 from amdisa import xml_schema as xs
 from amdisa.cross_isa import CrossIsaAnalyzer
-from amdisa.codegen.dbt.rule_gen import (
-    emit_matrix_conversions_header,
-    generate_catalog_matrix_rules,
-)
+from amdisa.codegen.dbt.rule_gen import generate_matrix_conversions
 from amdisa.encoding_translator_codegen import (
     generate_encoding_fields,
     generate_encoding_translators,
@@ -362,11 +358,7 @@ def _run(args) -> None:
             )
         print(f'Generated {len(generated)} files in {dbt_output}', file=sys.stderr)
 
-        matrix_header = Path(dbt_output) / 'matrix_conversions.h'
-        matrix_header.write_text(
-            emit_matrix_conversions_header(generate_catalog_matrix_rules()),
-            encoding='utf-8',
-        )
+        matrix_header = generate_matrix_conversions(dbt_output)
         print(f'Generated {matrix_header}', file=sys.stderr)
 
         generate_encoding_fields(specs, dbt_output)

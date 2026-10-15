@@ -43,6 +43,11 @@ The matrix header is regenerated during DBT generation from the explicit
 in `layout_catalog.py`. This catalog describes layout permutations; adding an
 entry does not implement a new instruction translation or establish its ISA
 availability.
+The preserved I8 destination, `V_WMMA_I32_16X16X32_I8`, is a historical
+layout-only placeholder absent from the pinned RDNA4 XML. The current
+`cdna4_to_rdna4.cpp` consumer selects by source mnemonic and emits a fixed F16
+WMMA instruction without validating the catalog's destination names. See
+[`docs/codegen.md`](../../codegen.md) for the catalog and output-helper details.
 
 Hand-written files (`isa.h`, `insts.h`, `mma_exec.h`, `addr_calc.h/.cpp`) are
 not overwritten by the generator.
