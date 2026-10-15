@@ -572,7 +572,8 @@ Kept deliberately simple:
   stay in replay's buffer as they did at capture; a host store that puts back exactly the
   last recorded bytes after such a device write is missed.
 - Only the launch stream is synchronized before a restore; work on other streams reading
-  the buffer is not waited for.
+  the buffer is not waited for. The sync runs in relaxed capture mode, so a global-mode
+  capture open on another stream is not invalidated by it.
 
 **Threat model.** The snapshots put into the archive host memory the application never
 handed to a HIP call: for a serving stack, token IDs, sampling state and request metadata,

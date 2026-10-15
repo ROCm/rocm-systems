@@ -501,7 +501,15 @@ static void restore_host_snapshots(PlaybackContext& ctx, const uint8_t* rec,
                     compact_kernel_name(kernel_name).c_str(), i, why);
             continue;
         }
-        if (!synced) (void)HRR_HIP_CHECK(hipStreamSynchronize(stream));
+        if (!synced) {
+            // In global mode a sync during another stream's capture
+            // invalidates that capture. This stream is not capturing, so
+            // waiting for it is safe: relax the mode for the call only.
+            hipStreamCaptureMode mode = hipStreamCaptureModeRelaxed;
+            (void)hipThreadExchangeStreamCaptureMode(&mode);
+            (void)HRR_HIP_CHECK(hipStreamSynchronize(stream));
+            (void)hipThreadExchangeStreamCaptureMode(&mode);
+        }
         synced = true;
         uint64_t len;
         memcpy(&len, rec + 16, 8);
