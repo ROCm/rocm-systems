@@ -6,7 +6,7 @@
 """Generate a metric health HTML report that compares two health runs.
 
 The report reads two completed artifact directories written by
-scripts/run_spp_health_local_driver.sh --fetch:
+scripts/run_metric_health_test_report_local_driver.sh --fetch:
 
 * `--candidate`: a run of this branch.
 * `--baseline`: a separate run of rocprofiler-compute-develop.
@@ -89,7 +89,7 @@ DELTA_NEAR_ZERO = 1e-12
 DEFAULT_WORKLOADS: Tuple[str, ...] = ("vcopy", "nbody", "mega_kernel")
 DEFAULT_CANDIDATE_LABEL = "this branch"
 DEFAULT_BASELINE_LABEL = "rocprofiler-compute-develop"
-DEFAULT_CANDIDATE_RUN = "spp"
+DEFAULT_CANDIDATE_RUN = "single-pass"
 DEFAULT_BASELINE_RUN = "develop"
 
 ANSI = re.compile(r"\x1b\[[0-9;]*m")

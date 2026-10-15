@@ -2,20 +2,20 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 #
-# Local driver for the SPP metric health test report.
-# Syncs rocprofiler-compute to the GPU host, starts scripts/run_spp_health.sh,
+# Local driver for the Metric Health test report.
+# Syncs rocprofiler-compute to the GPU host, starts scripts/run_metric_health_test_report.sh,
 # and can wait, fetch, and regenerate the HTML report.
 #
-#   ARCH=gfx942 ./scripts/run_spp_health_local_driver.sh
+#   ARCH=gfx942 ./scripts/run_metric_health_test_report_local_driver.sh
 #   ARCH=gfx942 TAG=261001-gfx942-500med \
-#     ./scripts/run_spp_health_local_driver.sh --fetch --report
-#   ARCH=gfx1151 ./scripts/run_spp_health_local_driver.sh --wait --fetch --report
+#     ./scripts/run_metric_health_test_report_local_driver.sh --fetch --report
+#   ARCH=gfx1151 ./scripts/run_metric_health_test_report_local_driver.sh --wait --fetch --report
 #   ARCH=gfx908 TAG=261002-gfx908-500med \
-#     ./scripts/run_spp_health_local_driver.sh --wait --fetch --report
+#     ./scripts/run_metric_health_test_report_local_driver.sh --wait --fetch --report
 #   ARCH=gfx90a TAG=261002-gfx90a-500med \
-#     ./scripts/run_spp_health_local_driver.sh --fetch --report
+#     ./scripts/run_metric_health_test_report_local_driver.sh --fetch --report
 #   ARCH=gfx950 TAG=261002-gfx950-500med \
-#     ./scripts/run_spp_health_local_driver.sh --fetch --report
+#     ./scripts/run_metric_health_test_report_local_driver.sh --fetch --report
 #
 # 500-iter medians are the default ITERS=500, including gfx942. There is no
 # separate 500med script.
@@ -26,13 +26,13 @@
 #
 #   ARCH=gfx942 TAG=261011-gfx942-500-develop RUN=develop \
 #     PROFILER_ROOT=/path/on/host/develop/projects/rocprofiler-compute \
-#     ./scripts/run_spp_health_local_driver.sh --wait --fetch
+#     ./scripts/run_metric_health_test_report_local_driver.sh --wait --fetch
 #
 # Then report this branch's run against it:
 #
 #   ARCH=gfx942 TAG=261011-gfx942-500 \
-#     BASELINE=validation-artifacts/spp-health-261011-gfx942-500-develop \
-#     ./scripts/run_spp_health_local_driver.sh --report
+#     BASELINE=validation-artifacts/metric-health-261011-gfx942-500-develop \
+#     ./scripts/run_metric_health_test_report_local_driver.sh --report
 #
 # --report calls tools/generate_metric_health_report.py with
 # --candidate "$ARTIFACTS" --baseline "$BASELINE".
@@ -85,7 +85,7 @@ fi
 
 ITERS=${ITERS:-500}
 NO_ROOF=${NO_ROOF:-1}
-RUN=${RUN:-spp}
+RUN=${RUN:-single-pass}
 BASELINE_RUN=${BASELINE_RUN:-develop}
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
@@ -182,16 +182,16 @@ apply_driver_profile() {
   esac
 
   TAG=${TAG:-$(date +%y%m%d)-${ARCH}-${TAG_SUFFIX}}
-  ARTIFACTS=${ARTIFACTS:-${REPO_ROOT}/validation-artifacts/spp-health-${TAG}}
+  ARTIFACTS=${ARTIFACTS:-${REPO_ROOT}/validation-artifacts/metric-health-${TAG}}
   if [[ "$TRANSPORT" == "ssh-key" ]]; then
-    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/feizheng/aiprofcomp78/spp_health_${TAG}.log}
-    REMOTE_NOHUP=${REMOTE_NOHUP:-/home/AMD/feizheng/aiprofcomp78/spp_health_${TAG}.nohup}
+    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/feizheng/aiprofcomp78/metric_health_${TAG}.log}
+    REMOTE_NOHUP=${REMOTE_NOHUP:-/home/AMD/feizheng/aiprofcomp78/metric_health_${TAG}.nohup}
   elif [[ "$TRANSPORT" == "ssh-pass" ]]; then
-    REMOTE_LOG=${REMOTE_LOG:-/home/rocprof/spp_health_${TAG}.log}
-    REMOTE_NOHUP=${REMOTE_NOHUP:-/home/rocprof/spp_health_${TAG}.nohup}
+    REMOTE_LOG=${REMOTE_LOG:-/home/rocprof/metric_health_${TAG}.log}
+    REMOTE_NOHUP=${REMOTE_NOHUP:-/home/rocprof/metric_health_${TAG}.nohup}
   else
-    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/feizheng/spp_health_${TAG}.log}
-    SBATCH_OUT=${SBATCH_OUT:-/home/AMD/feizheng/spp_health_${TAG}.sbatch.out}
+    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/feizheng/metric_health_${TAG}.log}
+    SBATCH_OUT=${SBATCH_OUT:-/home/AMD/feizheng/metric_health_${TAG}.sbatch.out}
   fi
   if [[ "$REPORT_HOST_KIND" == "node" ]]; then
     REPORT_HOST=$NODE
@@ -315,9 +315,9 @@ launch_ssh() {
   else
     echo "=== start remote health run (TAG=${TAG} ITERS=${ITERS}) ==="
   fi
-  ssh_cmd "chmod +x '${REMOTE_ROOT}/scripts/run_spp_health.sh' && \
+  ssh_cmd "chmod +x '${REMOTE_ROOT}/scripts/run_metric_health_test_report.sh' && \
     nohup env ${env_s} \
-      bash '${REMOTE_ROOT}/scripts/run_spp_health.sh' \
+      bash '${REMOTE_ROOT}/scripts/run_metric_health_test_report.sh' \
       >'${REMOTE_NOHUP}' 2>&1 & echo PID=\$!"
   echo "Remote log: ${REMOTE_LOG}"
   if [[ "$TRANSPORT" == "ssh-pass" ]]; then
@@ -342,7 +342,7 @@ write_sbatch() {
   local root_path=$1 dest=$2
   cat >"$dest" <<SBATCH
 #!/bin/bash
-#SBATCH -J spp-health-${ARCH}
+#SBATCH -J metric-health-${ARCH}
 #SBATCH -p ${PARTITION}
 #SBATCH -w ${NODE}
 #SBATCH --gres=${GRES}
@@ -370,8 +370,8 @@ SBATCH
     echo "export PROFILER_ROOT='${PROFILER_ROOT}'" >>"$dest"
   fi
   cat >>"$dest" <<'SBATCH'
-chmod +x "${ROOT}/scripts/run_spp_health.sh"
-bash "${ROOT}/scripts/run_spp_health.sh"
+chmod +x "${ROOT}/scripts/run_metric_health_test_report.sh"
+bash "${ROOT}/scripts/run_metric_health_test_report.sh"
 SBATCH
 }
 
@@ -379,10 +379,10 @@ submit_sbatch() {
   local sbatch_local
   sbatch_local=$(mktemp)
   write_sbatch "$1" "$sbatch_local"
-  scp -o BatchMode=yes "${sbatch_local}" "${HOST_LOGIN}:/tmp/spp_health_${TAG}.sbatch"
+  scp -o BatchMode=yes "${sbatch_local}" "${HOST_LOGIN}:/tmp/metric_health_${TAG}.sbatch"
   rm -f "${sbatch_local}"
-  ssh_login "chmod +x /tmp/spp_health_${TAG}.sbatch && \
-    JOB=\$(sbatch /tmp/spp_health_${TAG}.sbatch | awk '{print \$NF}') && \
+  ssh_login "chmod +x /tmp/metric_health_${TAG}.sbatch && \
+    JOB=\$(sbatch /tmp/metric_health_${TAG}.sbatch | awk '{print \$NF}') && \
     echo JOBID=\$JOB && echo Remote log: ${REMOTE_LOG} && echo Sbatch out: ${SBATCH_OUT}"
   echo "Re-run: ARCH=${ARCH} TAG=${TAG} $(basename "$0") --wait --fetch --report"
 }
@@ -406,9 +406,9 @@ sync_slurm_austin() {
   ssh_login "tar czf - -C '${MARKHAM_ROOT}' \
       --exclude='workloads' --exclude='.git' --exclude='.venv*' \
       --exclude='graphify-out' --exclude='validation-artifacts' . \
-    | srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:20:00 -J spp-sync-${ARCH} \
+    | srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:20:00 -J metric-sync-${ARCH} \
       bash -lc 'mkdir -p \"${AUSTIN_ROOT}\" && tar xzf - -C \"${AUSTIN_ROOT}\" && \
-        test -f \"${AUSTIN_ROOT}/scripts/run_spp_health.sh\" && echo SYNC_OK'"
+        test -f \"${AUSTIN_ROOT}/scripts/run_metric_health_test_report.sh\" && echo SYNC_OK'"
 
   echo "=== sbatch health run TAG=${TAG} NODE=${NODE} ==="
   submit_sbatch "${AUSTIN_ROOT}"
@@ -460,7 +460,7 @@ wait_slurm_home() {
 wait_slurm_austin() {
   echo "=== waiting for ALL_DONE in ${REMOTE_LOG} (Austin home via srun) ==="
   while true; do
-    if ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:05:00 -J spp-poll \
+    if ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:05:00 -J metric-poll \
         bash -lc 'grep -q ALL_DONE \"${REMOTE_LOG}\" 2>/dev/null'"; then
       echo "ALL_DONE"
       ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:05:00 \
@@ -496,7 +496,7 @@ fetch_ssh() {
     "${ARTIFACTS}/${ARCH}/" || true
   remote_scp \
     "${REMOTE_USER}@${HOST}:${REMOTE_LOG}" \
-    "${ARTIFACTS}/spp_health_${TAG}.log" || true
+    "${ARTIFACTS}/metric_health_${TAG}.log" || true
 }
 
 fetch_slurm_home() {
@@ -511,22 +511,22 @@ fetch_slurm_home() {
     "${ARTIFACTS}/${ARCH}/" || true
   scp -o BatchMode=yes \
     "${HOST_LOGIN}:${REMOTE_LOG}" \
-    "${ARTIFACTS}/spp_health_${TAG}.log" || true
+    "${ARTIFACTS}/metric_health_${TAG}.log" || true
 }
 
 fetch_slurm_austin() {
   mkdir -p "${ARTIFACTS}/${ARCH}" "${ARTIFACTS}/logs/${ARCH}"
   echo "=== fetch via Austin home on ${NODE} ==="
-  ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:30:00 -J spp-fetch-${ARCH} \
+  ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:30:00 -J metric-fetch-${ARCH} \
     bash -lc 'tar czf - -C \"${AUSTIN_ROOT}/workloads\" \"logs_${ARCH}_${TAG}\" 2>/dev/null'" \
     | tar xzf - -C "${ARTIFACTS}/logs/" 2>/dev/null \
     && mv "${ARTIFACTS}/logs/logs_${ARCH}_${TAG}"/* "${ARTIFACTS}/logs/${ARCH}/" 2>/dev/null || true
   rmdir "${ARTIFACTS}/logs/logs_${ARCH}_${TAG}" 2>/dev/null || true
-  ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:45:00 -J spp-fetch-wl \
+  ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:45:00 -J metric-fetch-wl \
     bash -lc 'cd \"${AUSTIN_ROOT}/workloads\" && tar czf - --wildcards \"*_${TAG}_*\" 2>/dev/null'" \
     | tar xzf - -C "${ARTIFACTS}/${ARCH}/" 2>/dev/null || true
   ssh_login "srun -p '${PARTITION}' -w '${NODE}' --gres='${GRES}' -t 00:10:00 \
-    bash -lc 'cat \"${REMOTE_LOG}\"'" > "${ARTIFACTS}/spp_health_${TAG}.log" 2>/dev/null || true
+    bash -lc 'cat \"${REMOTE_LOG}\"'" > "${ARTIFACTS}/metric_health_${TAG}.log" 2>/dev/null || true
 }
 
 fetch_results() {
