@@ -20,7 +20,7 @@
 # SOFTWARE.
 #
 # ##############################################################################
-cmake_minimum_required(VERSION 3.10)
+cmake_minimum_required(VERSION 3.16)
 
 if(NOT DEFINED ENHANCED_MESSAGE)
   string(ASCII 27 Esc)
