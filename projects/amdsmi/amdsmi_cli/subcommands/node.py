@@ -70,7 +70,9 @@ class NodeCommands:
             "limit": "N/A",
             "status": "N/A",
             "threshold": "N/A",
+            "balancing_mode": "N/A",
             "current_node_power": "N/A",
+            "supported_balancing_modes": "N/A",
         }
         power_unit = "W"
         limit = "N/A"
@@ -110,6 +112,30 @@ class NodeCommands:
                 # Add current node power if available
                 if current_node_power != "N/A":
                     npm_dict["current_node_power"] = current_node_power
+
+            # Balancing mode queries are not gated on NPM being enabled, so
+            # they run regardless of whether npm_info came back as a dict.
+            if args.nodes is not None:
+                try:
+                    mode = amdsmi_interface.amdsmi_get_npm_balancing_mode(args.nodes)
+                    npm_dict["balancing_mode"] = self.helpers.NPM_BALANCING_MODE_TO_CLI.get(
+                        mode, mode
+                    )
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug("amdsmi_get_npm_balancing_mode failed: %s", e.get_error_info())
+
+                try:
+                    supported_modes = amdsmi_interface.amdsmi_get_npm_supported_balancing_modes(
+                        args.nodes
+                    )
+                    npm_dict["supported_balancing_modes"] = [
+                        self.helpers.NPM_BALANCING_MODE_TO_CLI.get(mode, mode)
+                        for mode in supported_modes
+                    ]
+                except amdsmi_exception.AmdSmiLibraryException as e:
+                    logging.debug(
+                        "amdsmi_get_npm_supported_balancing_modes failed: %s", e.get_error_info()
+                    )
 
         # Get base board temperatures using node_handle
         if args.base_board_temps:
@@ -165,8 +191,16 @@ class NodeCommands:
                 node_output.append(f"        STATUS: {npm_dict.get('status', 'N/A')}")
                 threshold = npm_dict.get("threshold", "N/A")
                 node_output.append(f"        THRESHOLD: {threshold} {power_unit}")
+                balancing_mode = npm_dict.get("balancing_mode", "N/A")
+                node_output.append(f"        BALANCING_MODE: {balancing_mode}")
                 current_node_power = npm_dict.get("current_node_power", "N/A")
                 node_output.append(f"        CURRENT_NODE_POWER: {current_node_power} {power_unit}")
+                supported_balancing_modes = npm_dict.get("supported_balancing_modes", "N/A")
+                if isinstance(supported_balancing_modes, list):
+                    supported_balancing_modes = ", ".join(supported_balancing_modes)
+                node_output.append(
+                    f"        SUPPORTED_BALANCING_MODES: {supported_balancing_modes}"
+                )
             if args.base_board_temps and base_board_temp_dict:
                 node_output.append("    BASEBOARD:")
                 node_output.append("        TEMPERATURE:")
@@ -183,7 +217,7 @@ class NodeCommands:
                     node_output.append(
                         f"        PENDING (after reboot): {p_gb:.2f} GB ({p_pages} pages)"
                     )
-            if args.tray and tray_dict:
+            if args.tray:
                 node_output.append("    TRAY:")
                 node_output.append(
                     f"        MAX_ACC_PER_TRAY: {tray_dict.get('max_acc_per_tray', 'N/A')}"
@@ -199,7 +233,12 @@ class NodeCommands:
                     csv_dict["limit"] = npm_dict.get("limit", "N/A")
                     csv_dict["status"] = npm_dict.get("status", "N/A")
                     csv_dict["threshold"] = npm_dict.get("threshold", "N/A")
+                    csv_dict["balancing_mode"] = npm_dict.get("balancing_mode", "N/A")
                     csv_dict["current_node_power"] = npm_dict.get("current_node_power", "N/A")
+                    supported_balancing_modes = npm_dict.get("supported_balancing_modes", "N/A")
+                    if isinstance(supported_balancing_modes, list):
+                        supported_balancing_modes = ";".join(supported_balancing_modes)
+                    csv_dict["supported_balancing_modes"] = supported_balancing_modes
                 if args.base_board_temps and base_board_temp_dict:
                     csv_dict.update(base_board_temp_dict)
                 if args.gtt and gtt_dict:
@@ -208,7 +247,7 @@ class NodeCommands:
                     if "pending_size_gb" in gtt_dict:
                         csv_dict["gtt_pending_gb"] = gtt_dict["pending_size_gb"]
                         csv_dict["gtt_pending_pages"] = gtt_dict["pending_size_pages"]
-                if args.tray and tray_dict:
+                if args.tray:
                     csv_dict["max_acc_per_tray"] = tray_dict.get("max_acc_per_tray", "N/A")
                     csv_dict["tray_type"] = tray_dict.get("tray_type", "N/A")
                 self.logger.output = csv_dict
@@ -232,8 +271,11 @@ class NodeCommands:
                     node_output["base_board"] = {"temperature": base_board_temp_dict}
                 if args.gtt and gtt_dict:
                     node_output["gtt"] = gtt_dict
-                if args.tray and tray_dict:
-                    node_output["tray"] = tray_dict
+                if args.tray:
+                    node_output["tray"] = {
+                        "max_acc_per_tray": tray_dict.get("max_acc_per_tray", "N/A"),
+                        "tray_type": tray_dict.get("tray_type", "N/A"),
+                    }
                 self.logger.output = {"node": node_output}
                 if multiple_devices:
                     self.logger.store_multiple_device_output()

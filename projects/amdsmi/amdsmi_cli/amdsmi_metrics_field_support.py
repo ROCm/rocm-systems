@@ -52,6 +52,17 @@ def _fields(names: str) -> FieldSet:
     return frozenset(names.split())
 
 
+# Public members the APU v2.4 layout fills. Named because the v2.1-v2.3 prefixes
+# below are expressed against it rather than copied, so the four cannot drift apart.
+_APU_V24_FIELDS: FieldSet = _fields(
+    """
+    average_dclk0_frequency average_gfx_activity average_gfxclk_frequency average_mm_activity
+    average_socclk_frequency average_socket_power average_uclk_frequency average_vclk0_frequency
+    current_dclk0 current_gfxclk current_socclk current_uclk current_vclk0 indep_throttle_status
+    system_clock_counter throttle_status
+    """
+)
+
 # Public ``amdsmi_gpu_metrics_t`` members each header version can populate.
 _VERSION_FIELDS: Dict[VersionKey, FieldSet] = {
     (1, 0): _fields(
@@ -176,15 +187,15 @@ _VERSION_FIELDS: Dict[VersionKey, FieldSet] = {
         xgmi_link_status xgmi_link_width xgmi_read_data_acc xgmi_write_data_acc
         """
     ),
-    # APU v2.4 and v3.0 share ApuMetricsBase_v30_t but fill different public members.
-    (2, 4): _fields(
-        """
-        average_dclk0_frequency average_gfx_activity average_gfxclk_frequency average_mm_activity
-        average_socclk_frequency average_socket_power average_uclk_frequency average_vclk0_frequency
-        current_dclk0 current_gfxclk current_socclk current_uclk current_vclk0 indep_throttle_status
-        system_clock_counter throttle_status
-        """
-    ),
+    # APU v2.x and v3.0 share ApuMetricsBase_v30_t but fill different public members.
+    # v2.1-v2.3 are byte-prefix subsets read through the v2.4 branch, so they carry
+    # the same members except the ones their shorter table stops before: v2.1 ends
+    # where indep_throttle_status begins, and v2.2 onwards reach it. v2.0 orders its
+    # fields differently and is not read at all, so it stays unmapped.
+    (2, 1): _APU_V24_FIELDS - frozenset({"indep_throttle_status"}),
+    (2, 2): _APU_V24_FIELDS,
+    (2, 3): _APU_V24_FIELDS,
+    (2, 4): _APU_V24_FIELDS,
     (3, 0): _fields(
         """
         average_gfx_activity average_gfxclk_frequency average_socclk_frequency average_socket_power

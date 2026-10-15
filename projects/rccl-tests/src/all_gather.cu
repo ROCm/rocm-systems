@@ -88,6 +88,9 @@ testResult_t AllGatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // Cover both the -V/deviceCtaCount launch and the size-adaptive CTA count the
       // kernel self-selects (allGatherCtas, clamped to allGatherPoolCtas()), decoupled
       // from -V -- the kernel indexes barrier/lsaBarrier/signal by blockIdx.x.

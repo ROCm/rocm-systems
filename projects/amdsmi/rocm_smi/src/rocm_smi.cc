@@ -2085,19 +2085,35 @@ rsmi_status_t rsmi_dev_firmware_version_get(uint32_t dv_ind, rsmi_fw_block_t blo
   CATCH
 }
 
-static std::string bitfield_to_freq_string(uint64_t bitf, uint32_t num_supported) {
-  std::string bf_str;
-  std::bitset<RSMI_MAX_NUM_FREQUENCIES> bs(bitf);
-
+// Build the space-separated DPM-level string for pp_dpm_* from a bitmask: bit N
+// selects level N (e.g. 0b101 -> "0 2 "). Bits above the highest settable level
+// are dropped before writing so an out-of-range level never gets requested.
+// The deep-sleep level ('S') is counted in num_supported but is not writable,
+// so it is excluded from the settable range. Throws RSMI_STATUS_UNEXPECTED_DATA
+// if the device reports zero settable levels (this should not happen on any
+// supported ASIC), or RSMI_STATUS_INVALID_ARGS if the mask selects no
+// settable level.
+static std::string bitfield_to_freq_string(uint64_t bitf, uint32_t num_supported,
+                                           bool has_deep_sleep = false) {
   if (num_supported > RSMI_MAX_NUM_FREQUENCIES) {
     throw amd::smi::rsmi_exception(RSMI_STATUS_INVALID_ARGS, __FUNCTION__);
   }
 
-  for (uint32_t i = 0; i < num_supported; ++i) {
+  uint32_t settable = (has_deep_sleep && num_supported > 0) ? num_supported - 1 : num_supported;
+  if (settable == 0) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_UNEXPECTED_DATA, __FUNCTION__);
+  }
+
+  std::string bf_str;
+  std::bitset<RSMI_MAX_NUM_FREQUENCIES> bs(bitf);
+  for (uint32_t i = 0; i < settable; ++i) {
     if (bs[i]) {
       bf_str += std::to_string(i);
       bf_str += " ";
     }
+  }
+  if (bf_str.empty()) {
+    throw amd::smi::rsmi_exception(RSMI_STATUS_INVALID_ARGS, __FUNCTION__);
   }
   return bf_str;
 }
@@ -2125,6 +2141,18 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_INVALID_ARGS;
   }
 
+  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
+  assert(dv_ind < smi.devices().size());
+  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
+  assert(dev != nullptr);
+
+  std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
+  bool read_only = false;
+  // Dont try to set on pp_dpm* files that are read only
+  if (amd::smi::isReadOnlyForAll(sysfs_path, &read_only) == 0 && read_only) {
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
   ret = rsmi_dev_gpu_clk_freq_get(dv_ind, clk_type, &freqs);
 
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2136,46 +2164,26 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
     return RSMI_STATUS_UNEXPECTED_SIZE;
   }
 
-  // Deep sleep entry (index 0 in pp_dpm_sclk marked with 'S') is not a real
-  // DPM level; subtract it from the valid count so the bitmask only covers
-  // actual DPM levels.  Bitmask bit i maps to sysfs DPM level i, which
-  // corresponds to freqs.frequency[i] when has_deep_sleep is false, or
-  // freqs.frequency[i+1] when has_deep_sleep is true.
-  if (freqs.num_supported > 0) {
-    uint32_t max_levels = freqs.num_supported;
-    if (freqs.has_deep_sleep) {
-      max_levels--;
-    }
-    uint64_t valid_mask = (max_levels > 0) ? (1ULL << max_levels) - 1 : 0;
-    if (freq_bitmask == 0 || (freq_bitmask & ~valid_mask)) {
-      return RSMI_STATUS_INVALID_ARGS;
-    }
+  // Logged before bitfield_to_freq_string()/perf-level-set so this context is
+  // captured even if a later step fails or throws (e.g. no settable level).
+  std::string clock_name = kClkStateMap.find(clk_type)->second;
+  ss << __PRETTY_FUNCTION__ << " | Requested clock frequency set for device " << dv_ind << "for "
+     << clock_name << "\n : mask=0x" << std::hex << freq_bitmask << std::dec
+     << ", num_supported=" << freqs.num_supported
+     << ", deep_sleep=" << (freqs.has_deep_sleep ? "Y" : "N") << ", current=" << freqs.current
+     << " | freqs[0.." << freqs.num_supported << "):";
+  for (uint32_t fi = 0; fi < freqs.num_supported && fi < RSMI_MAX_NUM_FREQUENCIES; ++fi) {
+    ss << " [" << fi << "]=" << freqs.frequency[fi];
   }
+  LOG_DEBUG(ss);
 
-  amd::smi::RocmSMI& smi = amd::smi::RocmSMI::getInstance();
-
-  // Above call to rsmi_dev_get_gpu_clk_freq should have emitted an error if
-  // assert below is not true
-  assert(dv_ind < smi.devices().size());
-
-  std::shared_ptr<amd::smi::Device> dev = smi.devices()[dv_ind];
-  assert(dev != nullptr);
-
-  // If the sysfs node is read-only, force DPM level is not supported
-  std::string sysfs_path = dev->get_sys_file_path_by_type(dev_type, true);
-  bool read_only = false;
-  int ro_ret = amd::smi::isReadOnlyForAll(sysfs_path, &read_only);
-  if (ro_ret != 0) {
-    return amd::smi::ErrnoToRsmiStatus(ro_ret);
-  }
-  if (read_only) {
-    return RSMI_STATUS_NOT_SUPPORTED;
-  }
-
-  // bitfield_to_freq_string iterates [0, num_supported), but the validation
-  // above already guarantees no bits are set beyond the valid DPM range, so
-  // the extra iteration over the deep sleep index (if present) is harmless.
-  std::string freq_enable_str = bitfield_to_freq_string(freq_bitmask, freqs.num_supported);
+  // The deep-sleep pseudo-level ('S') is counted in freqs.num_supported but is
+  // not a writable pp_dpm_* label, so it is excluded from the settable range.
+  std::string freq_enable_str =
+      bitfield_to_freq_string(freq_bitmask, freqs.num_supported, freqs.has_deep_sleep);
+  ss << __PRETTY_FUNCTION__ << " | About to try writing clock frequency mask for device " << dv_ind
+     << " for " << clock_name << ": freq_enable_str=|" << freq_enable_str << "|";
+  LOG_DEBUG(ss);
 
   ret = rsmi_dev_perf_level_set_v1(dv_ind, RSMI_DEV_PERF_LEVEL_MANUAL);
   if (ret != RSMI_STATUS_SUCCESS) {
@@ -2184,14 +2192,10 @@ rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_typ
 
   rsmi_status_t status;
   status = amd::smi::ErrnoToRsmiStatus(dev->writeDevInfo(dev_type, freq_enable_str));
-
-  if (status == RSMI_STATUS_PERMISSION) {
-    bool post_read_only = false;
-    amd::smi::isReadOnlyForAll(sysfs_path, &post_read_only);
-    if (post_read_only) {
-      return RSMI_STATUS_NOT_SUPPORTED;
-    }
-  }
+  ss << __PRETTY_FUNCTION__ << " | Wrote clock frequency mask for device " << dv_ind << " for "
+     << clock_name << ": freq_enable_str=|" << freq_enable_str << "|"
+     << "; returned: " << amd::smi::getRSMIStatusString(status, false);
+  LOG_DEBUG(ss);
 
   return status;
 
@@ -3297,6 +3301,140 @@ rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
   CATCH
 }
 
+rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t* mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (mode == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  CHK_SUPPORT_NAME_ONLY(mode)
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string mode_str;
+  rsmi_status_t ret = amd::smi::get_npm_board_mode(*board_path_str, &mode_str);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_board_mode failed: " << getRSMIStatusString(ret);
+    LOG_INFO(ss);
+    return ret;
+  }
+
+  *mode = (mode_str == "2") ? RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING
+                            : RSMI_NPM_BALANCING_MODE_POWER_BALANCING;
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t mode) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind << ", mode=" << mode;
+  LOG_TRACE(ss);
+
+  REQUIRE_ROOT_ACCESS
+
+  CHECK_DV_IND_RANGE
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  if (mode != RSMI_NPM_BALANCING_MODE_POWER_BALANCING &&
+      mode != RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) {
+    ss << __PRETTY_FUNCTION__ << " | invalid mode=" << mode << " -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  // supported_mode is not yet implemented on all platforms, so its absence
+  // (RSMI_STATUS_NOT_SUPPORTED) must not block the write. Any other read
+  // failure (e.g. corrupt content) fails closed with RSMI_STATUS_SETTING_UNAVAILABLE,
+  // since we can't confirm the requested mode is allowed.
+  uint64_t supported_modes = 0;
+  rsmi_status_t supported_ret =
+      amd::smi::get_npm_supported_modes(*board_path_str, &supported_modes);
+  if (supported_ret != RSMI_STATUS_NOT_SUPPORTED) {
+    if (supported_ret != RSMI_STATUS_SUCCESS) {
+      ss << __PRETTY_FUNCTION__
+         << " | get_npm_supported_modes failed: " << getRSMIStatusString(supported_ret, false)
+         << " -> rejecting write (fail closed)";
+      LOG_ERROR(ss);
+      return RSMI_STATUS_SETTING_UNAVAILABLE;
+    }
+    if ((supported_modes & (1ULL << static_cast<unsigned>(mode))) == 0) {
+      ss << __PRETTY_FUNCTION__ << " | mode=" << mode
+         << " not in supported_modes bitmask=" << supported_modes << " -> returning "
+         << getRSMIStatusString(RSMI_STATUS_SETTING_UNAVAILABLE);
+      LOG_ERROR(ss);
+      return RSMI_STATUS_SETTING_UNAVAILABLE;
+    }
+  }
+
+  // Fail closed and NEVER touch sysfs when NPM is disabled on this node.
+  // Unlike rsmi_dev_npm_limit_set()'s analogous check (which returns
+  // RSMI_STATUS_INVALID_ARGS), balancing mode requires RSMI_STATUS_NOT_SUPPORTED
+  // here so it surfaces as AMDSMI_STATUS_NOT_SUPPORTED at the public API.
+  bool npm_enabled = false;
+  rsmi_status_t status_ret = amd::smi::get_npm_board_status(*board_path_str, &npm_enabled);
+  if (status_ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__
+       << " | get_npm_board_status failed: " << getRSMIStatusString(status_ret, false)
+       << " -> rejecting write (fail closed)";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (!npm_enabled) {
+    ss << __PRETTY_FUNCTION__ << " | NPM disabled on this node -> returning "
+       << getRSMIStatusString(RSMI_STATUS_NOT_SUPPORTED);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  std::string mode_str = (mode == RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING) ? "2" : "1";
+  rsmi_status_t ret = amd::smi::set_npm_board_mode(*board_path_str, mode_str);
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(ret, false);
+  LOG_TRACE(ss);
+  return ret;
+  CATCH
+}
+
 rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit) {
   TRY std::ostringstream ss;
   ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind << ", limit=" << limit;
@@ -3373,6 +3511,48 @@ rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uin
      << getRSMIStatusString(ret, false);
   LOG_TRACE(ss);
   return ret;
+  CATCH
+}
+
+rsmi_status_t rsmi_dev_npm_supported_balancing_modes_get(uint32_t dv_ind, uintptr_t node_handle,
+                                                         uint64_t* bitmask) {
+  TRY std::ostringstream ss;
+  ss << __PRETTY_FUNCTION__ << "| ======= start =======, dv_ind=" << dv_ind;
+  LOG_TRACE(ss);
+
+  if (bitmask == nullptr) {
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  CHK_SUPPORT_NAME_ONLY(bitmask)
+
+  DEVICE_MUTEX
+
+  if (node_handle == 0) {
+    ss << __PRETTY_FUNCTION__ << " | node_handle == 0 -> returning "
+       << getRSMIStatusString(RSMI_STATUS_INVALID_ARGS);
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  std::string* board_path_str = reinterpret_cast<std::string*>(node_handle);
+  if (board_path_str == nullptr || board_path_str->empty()) {
+    ss << __PRETTY_FUNCTION__ << " | invalid/empty board path in node_handle";
+    LOG_ERROR(ss);
+    return RSMI_STATUS_INVALID_ARGS;
+  }
+
+  rsmi_status_t ret = amd::smi::get_npm_supported_modes(*board_path_str, bitmask);
+  if (ret != RSMI_STATUS_SUCCESS) {
+    ss << __PRETTY_FUNCTION__ << " | get_npm_supported_modes failed: " << getRSMIStatusString(ret);
+    LOG_INFO(ss);
+    return ret;
+  }
+
+  ss << __PRETTY_FUNCTION__ << " | ======= end ======= | returning "
+     << getRSMIStatusString(RSMI_STATUS_SUCCESS);
+  LOG_TRACE(ss);
+  return RSMI_STATUS_SUCCESS;
   CATCH
 }
 

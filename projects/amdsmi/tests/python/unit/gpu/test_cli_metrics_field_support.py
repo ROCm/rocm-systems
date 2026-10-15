@@ -138,6 +138,24 @@ class TestVersionFieldTable(unittest.TestCase):
         # reader, so a newer content revision is mapped rather than unknown.
         self.assertEqual(self.fields(1, 99999), self.fields(1, 9))
 
+    def test_apu_prefix_revisions_track_the_v24_layout(self):
+        """v2.1-v2.3 read the v2.4 layout, minus what their shorter table stops
+        before: v2.1 ends where indep_throttle_status begins, v2.2 onwards reach it.
+        """
+        v24 = self.fields(2, 4)
+        self.assertEqual(
+            self.fields(2, 1),
+            v24 - {"indep_throttle_status"},
+            "v2.1's table stops at indep_throttle_status, so it cannot carry it",
+        )
+        for content_revision in (2, 3):
+            with self.subTest(version=(2, content_revision)):
+                self.assertEqual(self.fields(2, content_revision), v24)
+
+    def test_apu_v20_stays_unmapped(self):
+        """v2.0 orders its fields differently, so the reader rejects it."""
+        self.assertIsNone(self.fields(2, 0))
+
 
 @unittest.skipUnless(_RUNNABLE, _SKIP_REASON)
 class TestSuppressionSet(unittest.TestCase):

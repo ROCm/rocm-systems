@@ -123,24 +123,61 @@ struct backend
     static constexpr callback_phase_t CALLBACK_PHASE_NONE = Wrapper::CALLBACK_PHASE_NONE;
 
     // ─── Callback tracing kind constants ─────────────────────────────────────────
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_CORE_API =
         Wrapper::CALLBACK_TRACING_HSA_CORE_API;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_AMD_EXT_API =
         Wrapper::CALLBACK_TRACING_HSA_AMD_EXT_API;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_IMAGE_EXT_API =
         Wrapper::CALLBACK_TRACING_HSA_IMAGE_EXT_API;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HSA_FINALIZE_EXT_API =
         Wrapper::CALLBACK_TRACING_HSA_FINALIZE_EXT_API;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HIP_RUNTIME_API =
         Wrapper::CALLBACK_TRACING_HIP_RUNTIME_API;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_HIP_COMPILER_API =
         Wrapper::CALLBACK_TRACING_HIP_COMPILER_API;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_CODE_OBJECT =
         Wrapper::CALLBACK_TRACING_CODE_OBJECT;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_MARKER_CORE_API =
         Wrapper::CALLBACK_TRACING_MARKER_CORE_API;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr callback_tracing_kind_t CALLBACK_TRACING_MARKER_CONTROL_API =
+        Wrapper::CALLBACK_TRACING_MARKER_CONTROL_API;
+    // NOLINTNEXTLINE(readability-identifier-naming)
     static constexpr callback_tracing_kind_t CALLBACK_TRACING_RCCL_API =
         Wrapper::CALLBACK_TRACING_RCCL_API;
+
+    // ─── Marker (roctx) payload and operation constants ──────────────────────────
+    using marker_payload_t = Wrapper::marker_payload_t;
+
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxMarkA =
+        Wrapper::MARKER_CORE_API_ID_roctxMarkA;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangePushA =
+        Wrapper::MARKER_CORE_API_ID_roctxRangePushA;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangePop =
+        Wrapper::MARKER_CORE_API_ID_roctxRangePop;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangeStartA =
+        Wrapper::MARKER_CORE_API_ID_roctxRangeStartA;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr tracing_operation_t MARKER_CORE_API_ID_roctxRangeStop =
+        Wrapper::MARKER_CORE_API_ID_roctxRangeStop;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr tracing_operation_t MARKER_CONTROL_API_ID_roctxProfilerPause =
+        Wrapper::MARKER_CONTROL_API_ID_roctxProfilerPause;
+    // NOLINTNEXTLINE(readability-identifier-naming)
+    static constexpr tracing_operation_t MARKER_CONTROL_API_ID_roctxProfilerResume =
+        Wrapper::MARKER_CONTROL_API_ID_roctxProfilerResume;
 
     // ─── RCCL / NCCL types and constants ─────────────────────────────────────────
     using rccl_api_data    = Wrapper::rccl_api_data;

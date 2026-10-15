@@ -549,6 +549,32 @@
         }
       ]
     },
+    "fault_inject_multithread": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "command_args": "--net_ib_nthreads=4",
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
+        "RCCL_IB_FAULT_INJECTION": "0"
+      },
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_IsolationAcrossWorkers",
+          "description": "One worker breaks its own connection while the others keep transferring cleanly",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorClearRecovers",
+          "description": "Each worker breaks one connection, clears the fault and must move data on a second one",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        }
+      ]
+    },
     "net_ib_initialization": {
       "extends": "net_ib_base",
       "timeout": 60,
@@ -904,6 +930,11 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "P2pPxnLevel1NetId",
+          "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
+          "test_filter": "P2pPxnLevel1NetId.*"
+        },
+        {
           "name": "TopoNicFusionTests",
           "description": "NIC fusion input validation in the topology layer",
           "test_filter": "TopoNicFusionTests.*"
@@ -932,6 +963,11 @@
           "name": "CeAlltoAllvEligibilityTest",
           "description": "CE AlltoAllv eligibility, metadata layout, and ncclCeImplemented/ncclCeAvailable gating tests",
           "test_filter": "CeAlltoAllvEligibilityTest.*"
+        },
+        {
+          "name": "CeHierAlltoAllvEligibilityTest",
+          "description": "Hierarchical CE AlltoAllv eligibility and gating tests",
+          "test_filter": "CeHierAlltoAllvEligibilityTest.*"
         },
         {
           "name": "CeAlltoAllEligibilityTest",
@@ -997,6 +1033,7 @@
         {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
         {"name": "HostApi_LargePut", "description": "Host API: large put", "test_filter": "HostApiTest.LargePut"},
         {"name": "HostApi_AllToAllPut", "description": "Host API: all-to-all put", "test_filter": "HostApiTest.AllToAllPut"},
+        {"name": "HostApi_DenseAllToAllPutSignal", "description": "Host API: dense all-to-all put/signal, uniform and uneven sizes", "test_filter": "HostApiTest.DenseAllToAllPutSignal"},
         {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
         {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
         {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
@@ -1059,6 +1096,20 @@
       "tests": [
         {"name": "HostApi_RmaDisableCrossNodePutFails_Sym", "description": "Host API: NCCL_RMA_DISABLE=1, symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of hanging", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails"},
         {"name": "HostApi_RmaDisableCrossNodePutFails_NonSym", "description": "Host API: NCCL_RMA_DISABLE=1, non-symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of using the proxy", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails", "env_variables": {"NCCL_CUMEM_ENABLE": "0"}}
+      ]
+    },
+
+    "gin_connect_leak": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "description": "ncclGinConnectOnce must release the comms it opened when a later connect fails",
+      "tests": [
+        {"name": "GinConnectLeak_FailedConnectReleasesOpenedComms", "description": "second connect is made to fail; the first GIN comm and the listen comm must be closed", "test_filter": "GinConnectLeakMPITest.FailedConnectReleasesOpenedComms"}
       ]
     },
 
@@ -1825,6 +1876,11 @@
           "name": "Cast_SendRecvZeroSize",
           "description": "Zero-byte send: WRR oneQp path taken (dataPerQp=0 < splitDataMin), 1 token consumed, received size==0",
           "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        },
+        {
+          "name": "Cast_RegistrationRejectsBadArguments",
+          "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
+          "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
       ]
     },
@@ -2863,6 +2919,11 @@
           "test_filter": "CeMPI_AlltoAll.TwoRanks"
         },
         {
+          "name": "CE_AlltoAllv_2Ranks",
+          "description": "AlltoAllv CE correctness and 'Init CE' log marker (2 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.TwoRanks"
+        },
+        {
           "name": "CE_Fallback_AllReduce",
           "description": "AllReduce must NOT take CE path; verifies SM fallback",
           "test_filter": "CeMPI_Fallback.AllReduceNeverUsesCE"
@@ -2888,6 +2949,16 @@
           "description": "Interleaved CE AllGather and SM AllReduce on same comm; validates no state corruption",
           "test_filter": "CeMPI_Stress.InterleavedCEAllGatherAndSMAllReduce",
           "timeout": 300
+        },
+        {
+          "name": "CE_AllReduce_MaxOp_2Ranks",
+          "description": "128 MiB Max AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MaxOp128MiB"
+        },
+        {
+          "name": "CE_AllReduce_MinOp_2Ranks",
+          "description": "128 MiB Min AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MinOp128MiB"
         }
       ]
     },
@@ -2902,6 +2973,11 @@
           "name": "CE_AlltoAll_3Ranks",
           "description": "AlltoAll CE correctness with odd (non-power-of-two) rank count",
           "test_filter": "CeMPI_AlltoAll.ThreeRanks"
+        },
+        {
+          "name": "CE_AlltoAllv_3Ranks",
+          "description": "AlltoAllv CE correctness with odd (non-power-of-two) rank count",
+          "test_filter": "CeMPI_AlltoAllv.ThreeRanks"
         },
         {
           "name": "CE_AllReduce_3Ranks",
@@ -2932,6 +3008,11 @@
           "name": "CE_AlltoAll_4Ranks",
           "description": "AlltoAll CE correctness and 'Init CE' log marker (4 ranks)",
           "test_filter": "CeMPI_AlltoAll.FourRanks"
+        },
+        {
+          "name": "CE_AlltoAllv_4Ranks",
+          "description": "AlltoAllv CE correctness and 'Init CE' log marker (4 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.FourRanks"
         },
         {
           "name": "CE_Scatter_4Ranks_Root0",
@@ -2973,6 +3054,11 @@
           "test_filter": "CeMPI_AlltoAll.EightRanks"
         },
         {
+          "name": "CE_AlltoAllv_8Ranks",
+          "description": "AlltoAllv CE correctness — default production topology (8 ranks)",
+          "test_filter": "CeMPI_AlltoAllv.EightRanks"
+        },
+        {
           "name": "CE_Scatter_8Ranks",
           "description": "Scatter CE correctness, root=0 — default production topology (8 ranks)",
           "test_filter": "CeMPI_Scatter.EightRanksRoot0"
@@ -2997,6 +3083,31 @@
           "description": "AllReduce CE multi-chunk pipeline at a power-of-two rank count: 512 MiB yields 4 chunks per shard with no tail, covering slot recycling and the drain loop where slotChunkBytes == maxChunkBytes",
           "test_filter": "CeMPI_AllReduce.PipelinedMultiChunk",
           "timeout": 300
+        }
+      ]
+    },
+    "ce_hier_alltoallv": {
+      "extends": "ce_base",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "tests": [
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchical",
+          "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): intra-node CE plus inter-node RMA",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchical"
+        },
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchicalChunkBoundary",
+          "description": "Hierarchical CE AlltoAllv with a 68 MiB pair that crosses the 64 MiB chunk boundary",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchicalChunkBoundary",
+          "timeout": 600
+        },
+        {
+          "name": "CE_AlltoAllv_MultiNodeHierarchicalSparse",
+          "description": "Hierarchical CE AlltoAllv with zero-byte remote and local pairs",
+          "test_filter": "CeMPI_AlltoAllv.MultiNodeHierarchicalSparse"
         }
       ]
     },
@@ -3041,6 +3152,15 @@
           "test_filter": "DdaMPI_AllReduce.CapturedOnGraphOriginJoinsSerialEvent",
           "env_variables": {
             "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
+        },
+        {
+          "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
+          "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
+          "test_filter": "HostApiTest.DenseAllToAllPutSignal",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1",
+            "RCCL_CE_BATCH_ASYNC_ENABLE": "1"
           }
         }
       ]
@@ -4094,7 +4214,7 @@
         {
           "name": "GIN_DeviceMPI_AllTests",
           "description": "GIN proxy device-side MPI tests over IB across two nodes (put/signal/counter/barrier/alltoall/recycle/splitShare)",
-          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong",
+          "test_filter": "GinMPIDeviceTests.*:GinProxyNthreadsSplitTests.*-GinMPIDeviceTests.MultiContext_NonPowerOf2:GinMPIDeviceTests.RailConnection_Create:GinMPIDeviceTests.*_MultiContext:GinMPIDeviceTests.Signal_ExplicitWeak:GinMPIDeviceTests.Signal_ExplicitStrong:GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
           "timeout": 600
         },
         {
@@ -4145,6 +4265,15 @@
           "test_filter": "GinMPIDeviceTests.Recycle_*:GinProxyNthreadsSplitTests.SplitShare_SecondDevCommPut:GinMPIDeviceTests.Put_BasicAndOffsets:GinBarrierTimeoutMPITest.HealthyBarrierReturnsSuccess",
           "env_variables": {
             "NCCL_GIN_PROXY_NTHREADS": "4"
+          }
+        },
+        {
+          "name": "GIN_QpCount_StaysAtOne",
+          "description": "GIN proxy IB links stay at one QP per device while collective links follow NCCL_IB_QPS_PER_CONNECTION and P2P links follow RCCL_IB_QPS_PER_P2P",
+          "test_filter": "GinMPIDeviceTests.QpCount_GinStaysBelowConnectionEnv",
+          "env_variables": {
+            "NCCL_IB_QPS_PER_CONNECTION": "4",
+            "RCCL_IB_QPS_PER_P2P": "2"
           }
         }
       ]
@@ -4279,6 +4408,28 @@
         }
       ]
     },
+    "gin_allgather_sym": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_AllGather_Symmetric",
+          "description": "Symmetric-memory multi-node AllGather (RailRing_LsaST): GIN ring over the rail team + LSA store broadcast; requires >=2 ranks/node across >=2 nodes",
+          "test_filter": "GinMPIDeviceTests.AllGather_Symmetric*"
+        }
+      ]
+    },
     "gin_negative": {
       "extends": "default",
       "is_gtest": true,
@@ -4317,6 +4468,29 @@
           "env_variables": {
             "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000"
           }
+        }
+      ]
+    },
+    "gin_devcomm_requirements": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_DevComm_GroupedCreateKeepsGinRequirements",
+          "description": "Grouped ncclDevCommCreate keeps GIN signal/counter requests from caller-built requirement nodes on the GIN proxy",
+          "test_filter": "GinMPIDeviceTests.DevComm_GroupedCreateKeepsGinRequirements"
         }
       ]
     },
@@ -4417,8 +4591,13 @@
         },
         {
           "name": "Symk_AllGatherStoreCrossover",
-          "description": "AllGather switches from LL to the store kernel at 4 MB on gfx950, skipped on other architectures",
-          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom4MB"
+          "description": "AllGather switches from LL to the store kernel at 1 MB on gfx950, skipped on other architectures",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom1MB"
+        },
+        {
+          "name": "Symk_AllGatherStoreData",
+          "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
         }
       ]
     }
@@ -4464,6 +4643,12 @@
       "name": "NET IB - CAST Multithread (4)",
       "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
       "config": "cast_multithread",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (4)",
+      "description": "Per-communicator fault injection across concurrent workers, including cross-worker isolation",
+      "config": "fault_inject_multithread",
       "enabled": true
     },
     {
@@ -4875,6 +5060,12 @@
       "enabled": true
     },
     {
+      "name": "CE Tests - Hierarchical AlltoAllv (multi-node)",
+      "description": "Hierarchical CE AlltoAllv on 2 nodes (2 ranks/node): MultiNodeHierarchical, ChunkBoundary, and Sparse. Skips when scale-out CE prerequisites are absent.",
+      "config": "ce_hier_alltoallv",
+      "enabled": true
+    },
+    {
       "name": "MPI Tests (8-rank, single-node)",
       "description": "MPI unit tests that need eight ranks on one node, one rank per process",
       "config": "mpi_8rank_single_node",
@@ -5200,9 +5391,21 @@
       "enabled": true
     },
     {
+      "name": "GIN AllGather - Symmetric",
+      "description": "Symmetric-memory AllGather (RailRing_LsaST) with 2 ranks/node across 2 nodes",
+      "config": "gin_allgather_sym",
+      "enabled": true
+    },
+    {
       "name": "GIN Negative / Pool Limits",
       "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
       "config": "gin_negative",
+      "enabled": true
+    },
+    {
+      "name": "GIN DevComm Requirements - Proxy",
+      "description": "Grouped ncclDevCommCreate with caller-built GIN signal/counter requirement nodes on the GIN proxy over IB across two nodes",
+      "config": "gin_devcomm_requirements",
       "enabled": true
     },
     {
@@ -5280,6 +5483,12 @@
       "name": "RMA External Plugin - Put Signal",
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
       "config": "rma_external_plugin_put_signal",
+      "enabled": true
+    },
+    {
+      "name": "GIN Connect Leak",
+      "description": "Resource release when GIN connection setup fails",
+      "config": "gin_connect_leak",
       "enabled": true
     }
   ]

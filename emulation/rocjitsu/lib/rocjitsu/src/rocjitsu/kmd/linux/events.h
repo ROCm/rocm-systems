@@ -163,6 +163,9 @@ public:
   /// the way a direct read of the `page_` field can.
   [[nodiscard]] bool has_page() const;
 
+  /// @brief Check whether a host range overlaps the adopted event page under mutex_.
+  [[nodiscard]] bool overlaps_page(const void *addr, size_t length) const;
+
 private:
   int memfd_ = -1;       ///< memfd backing the KFD signal event page.
   void *page_ = nullptr; ///< Mapped signal page (libhsakmt polls slots here).
