@@ -137,8 +137,12 @@ static ncclResult_t ReturnFoundCommAndWindow(ncclWindow_t, ncclComm_t* foundComm
 }
 void UseFoundCommAndWindow() { g_findCommAndHostWindowFromDeviceWindow = ReturnFoundCommAndWindow; }
 
-// Floors for the LSA addressing ce_coll.cc's copy paths reach.
-ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm*, int, int*) {
+// One LSA team: world rank is the LSA rank. A split team has no fake mapping.
+ncclResult_t ncclDevrWorldToLsaRank(struct ncclComm*, int worldRank, int* lsaRank) {
+  if (g_devrIsOneLsaTeamValue) {
+    if (lsaRank) *lsaRank = worldRank;
+    return ncclSuccess;
+  }
   FailLoudUnfaked("dev_runtime_fakes", "ncclDevrWorldToLsaRank");
 }
 ncclResult_t ncclDevrGetLsaTeamPtrMC(struct ncclComm*, struct ncclDevrWindow*, size_t, struct ncclTeam, void**) {
