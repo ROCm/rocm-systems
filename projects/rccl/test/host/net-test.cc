@@ -17,8 +17,12 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <functional>
 #include <initializer_list>
+#include <mutex>
 #include <string>
+#include <utility>
+#include <vector>
 
 #include "ScopedHook.h"
 #include "fakes/env_fakes.h"
@@ -71,8 +75,9 @@ struct FakeNet {
 std::function<int64_t(const char*, int64_t)> ParamOverride(std::initializer_list<std::pair<const char*, int64_t>> kv) {
   std::vector<std::pair<std::string, int64_t>> table(kv.begin(), kv.end());
   return [table](const char* env, int64_t deft) {
-    for (const auto& [name, value] : table)
+    for (const auto& [name, value] : table) {
       if (name == env) return value;
+    }
     return deft;
   };
 }
@@ -145,7 +150,7 @@ class NetIbNicDetectMicrotest : public NetMicrotestBase {
 };
 
 TEST_F(NetIbNicDetectMicrotest, ReadIbNicRate_SeveralPorts_ReturnsHighestParsableRate) {
-  AddDevice("mlx5_0", "0x15b3", "0x1021", {"100 Gb/sec (4X EDR)", "garbage", "400 Gb/sec (4X NDR)"});
+  AddDevice("mlx5_0", "0x15b3", "0x1021", {"100 Gb/sec (4X EDR)", "400 Gb/sec (4X NDR)", "garbage", "200 Gb/sec"});
 
   EXPECT_EQ(readIBNicRate("mlx5_0"), 400);
 }
@@ -215,11 +220,22 @@ TEST_F(NetIbNicDetectMicrotest, Detect_UnknownVendors_ReportsDefaultWithCount) {
 TEST_F(NetIbNicDetectMicrotest, Detect_MissingPciIds_IgnoresDevice) {
   AddDevice("mlx5_0", "0x15b3", "0x1021");
   std::filesystem::create_directories(root_ / "broken0" / "device");
+  WriteFile(root_ / "broken1" / "device" / "vendor", "0x15b3");  // device id missing
 
   rcclDetectIBNics();
 
   EXPECT_EQ(rcclPrimaryNicInfo.type, rcclIBNicTypeMLX);
   EXPECT_EQ(rcclPrimaryNicInfo.count, 1);
+}
+
+TEST_F(NetIbNicDetectMicrotest, Detect_KnownVendorUnknownDevice_CountsAsDefault) {
+  AddDevice("ionic_0", "0x1dd8", "0x2001");
+  AddDevice("bnxt_re0", "0x14e4", "0x1751");
+
+  rcclDetectIBNics();
+
+  EXPECT_EQ(rcclPrimaryNicInfo.type, rcclIBNicTypeDefault);
+  EXPECT_EQ(rcclPrimaryNicInfo.count, 2);
 }
 
 TEST_F(NetIbNicDetectMicrotest, Detect_AinicRoceDisabled_CountsAinicAsDefault) {

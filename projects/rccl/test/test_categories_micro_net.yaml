@@ -1,6 +1,6 @@
 # rccl-UnitTestsMicroNet — shared/ctest schema.
-# Host-only micro-tests for src/transport/net.cc -- net transport setup, connect, proxy
-# progress and shared buffer pools, driven through a fake ncclNet_t (no GPU, no librccl).
+# Host-only micro-tests for src/transport/net.cc, driven through a fake ncclNet_t
+# (no GPU, no librccl).
 # RCCL does not support Windows: exclude_windows matches all tests so generated suites are empty on Windows.
 
 test_categories:
