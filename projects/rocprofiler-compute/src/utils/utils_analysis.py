@@ -618,7 +618,7 @@ def nest_marker_intervals(
     if trace_df.empty:
         return forest
     ordered = trace_df.sort_values(
-        by=["Thread_Id", "Start_Timestamp", "End_Timestamp"],
+        by=["Thread_Id", "Start_Timestamp"],
         kind="mergesort",
     )
     for thread_id, group in ordered.groupby("Thread_Id", sort=False):
