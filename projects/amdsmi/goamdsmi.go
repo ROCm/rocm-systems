@@ -737,7 +737,7 @@ func GO_gpu_uma_carveout_info_get(device_index int, current_index *uint32, num_o
 		C.uint32_t(device_index),
 		(*C.uint32_t)(current_index),
 		(*C.uint32_t)(num_options),
-		(*[16][256]C.char)(unsafe.Pointer(options))))
+		(*[256]C.char)(unsafe.Pointer(&options[0]))))
 }
 
 // ``GO_gpu_uma_carveout_set`` sets the UMA carveout size for the specified GPU
