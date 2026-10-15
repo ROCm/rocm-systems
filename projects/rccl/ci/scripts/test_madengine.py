@@ -1416,6 +1416,36 @@ def run_ab_in_one_allocation(
         'echo "Allocation: job=${SLURM_JOB_ID} nodes=${SLURM_JOB_NODELIST}"',
         'printf "%s\\n%s\\n" "${SLURM_JOB_ID}" "${SLURM_JOB_NODELIST}" > '
         + shlex.quote(str(alloc_info)),
+        "",
+        # Every node must be able to reach the Docker daemon before either
+        # phase starts. Not every node in this partition has it up, and the
+        # failure is otherwise unrecognisable: the nodes that do have it start
+        # their container and sit in the launcher's rendezvous until it times
+        # out, so the log blames the distributed runtime --
+        #
+        #   F client.h:80] Terminating process because the JAX distributed
+        #   service detected fatal errors ... DEADLINE_EXCEEDED
+        #
+        # -- on the healthy nodes, while the real message ("dial unix
+        # /var/run/docker.sock: connect: no such file or directory") sits in a
+        # different node's log. Run 38602462914 lost both phases and five
+        # minutes of a four-node allocation to exactly that, with two of four
+        # nodes affected. The wider the job, the likelier it is to catch one.
+        #
+        # Try to start it, then check. Reported per node and failed fast, so
+        # the allocation is released instead of burning its time limit.
+        'echo "===== preflight: docker daemon on every allocated node ====="',
+        'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+        '--overlap bash -c \''
+        'sudo -n systemctl start docker >/dev/null 2>&1; '
+        'if docker info >/dev/null 2>&1 || sudo -n docker info >/dev/null 2>&1; then '
+        'echo "  ok   $(hostname -s)"; '
+        'else echo "  DOWN $(hostname -s)"; exit 1; fi\' || {',
+        '  echo "::error::Docker is unreachable on at least one allocated '
+        'node (see DOWN above). Releasing the allocation rather than letting '
+        'the launcher time out."',
+        "  exit 3",
+        "}",
     ]
     for phase, run_dir in phases:
         script_lines += [
