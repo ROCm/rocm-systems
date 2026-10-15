@@ -850,6 +850,7 @@ void Buffer::destroy() {
 
 // ================================================================================================
 bool Buffer::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
+  (void)errorCode;  // Currently not used but kept for signature parity
   bool success = false;
   OwningAgentGuard guard(this, &success);
 
@@ -1642,6 +1643,9 @@ bool Image::create(bool alloc_local, amd::Memory::ErrorCode* errorCode) {
 }
 
 bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) {
+  if (errorCode != nullptr) {
+    *errorCode = amd::Memory::kErrorUnknown;
+  }
   deviceMemory_ = parent.getDeviceMemory();
 
   originalDeviceMemory_ = (parent.owner()->asBuffer() != nullptr)
@@ -1774,7 +1778,7 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
           hsaStatus = HSA_STATUS_SUCCESS;
         } else {
           LogWarning("[OCL] copy image fail during validation");
-          hsaStatus = HSA_STATUS_ERROR;
+          return false;
         }
       }
     }
@@ -1793,8 +1797,8 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
             dev().getBackendDevice(), &ancestor_image->hsaImageObject_,
             parentOwner->asImage()->getBaseMipLevel(), &imageDescriptor_, &hsaImageObject_);
       } else {
-        // This is an impossible view on leveled image
-        hsaStatus = HSA_STATUS_ERROR_INVALID_REGION;
+        LogPrintfError("Failed to allocate image memory. Impossible view on leveled image\n");
+        return false;
       }
   } else if (kind_ == MEMORY_KIND_INTEROP) {
     // This is a view on interop regular image or mipmap image.
@@ -1808,12 +1812,9 @@ bool Image::createView(const Memory& parent, amd::Memory::ErrorCode* errorCode) 
   }
 
   if (hsaStatus != HSA_STATUS_SUCCESS) {
-    LogPrintfError("[OCL] Fail to allocate image memory with status: %d \n", hsaStatus);
-    if (errorCode != nullptr) {
-      *errorCode =
-          (hsaStatus == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED))
-              ? amd::Memory::kErrorImagePitchUnsupported
-              : amd::Memory::kErrorUnknown;
+    LogPrintfError("Failed to allocate image memory with status: %d \n", hsaStatus);
+    if (errorCode != nullptr && hsaStatus == static_cast<hsa_status_t>(HSA_EXT_STATUS_ERROR_IMAGE_PITCH_UNSUPPORTED)) {
+      *errorCode = amd::Memory::kErrorImagePitchUnsupported;
     }
     return false;
   }

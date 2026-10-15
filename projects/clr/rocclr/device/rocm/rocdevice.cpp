@@ -2129,7 +2129,7 @@ Memory* Device::getRocMemory(amd::Memory* mem) const {
 device::Memory* Device::createMemory(
     amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const {
   if (errorCode != nullptr) {
-    *errorCode = amd::Memory::kErrorNone;
+    *errorCode = amd::Memory::kErrorUnknown;
   }
 
   roc::Memory* memory = nullptr;
@@ -2142,9 +2142,6 @@ device::Memory* Device::createMemory(
   }
 
   if (memory == nullptr) {
-    if (errorCode != nullptr) {
-      *errorCode = amd::Memory::kErrorUnknown;
-    }
     return nullptr;
   }
 
@@ -2178,9 +2175,6 @@ device::Memory* Device::createMemory(
 
     if (imageView == nullptr) {
       LogError("[OCL] Fail to allocate view of image object");
-      if (errorCode != nullptr) {
-        *errorCode = amd::Memory::kErrorUnknown;
-      }
       return nullptr;
     }
 
@@ -2188,9 +2182,6 @@ device::Memory* Device::createMemory(
     if (devImageView == nullptr) {
       LogError("[OCL] Fail to allocate device mem object for the view");
       imageView->release();
-      if (errorCode != nullptr) {
-        *errorCode = amd::Memory::kErrorUnknown;
-      }
       return nullptr;
     }
 
@@ -2228,9 +2219,6 @@ device::Memory* Device::createMemory(
   if (!result) {
     delete memory;
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_RESOURCE, "Cannot Write Image");
-    if (errorCode != nullptr) {
-      *errorCode = amd::Memory::kErrorUnknown;
-    }
     return nullptr;
   }
 

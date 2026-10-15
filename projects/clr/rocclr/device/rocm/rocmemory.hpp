@@ -216,7 +216,7 @@ class Buffer : public roc::Memory {
   virtual ~Buffer();
 
   // Create device memory according to OpenCL memory flag.
-  virtual bool create(bool local_alloc, amd::Memory::ErrorCode* errorCode);
+  virtual bool create(bool local_alloc = false, amd::Memory::ErrorCode* errorCode = nullptr);
 
   virtual bool ExportHandle(void* handle) const final;
 
@@ -253,10 +253,10 @@ class Image : public roc::Memory {
   virtual ~Image();
 
   //! Create device memory according to OpenCL memory flag.
-  virtual bool create(bool local_alloc, amd::Memory::ErrorCode* errorCode);
+  virtual bool create(bool local_alloc = false, amd::Memory::ErrorCode* errorCode = nullptr);
 
   //! Create an image view
-  bool createView(const Memory& parent, amd::Memory::ErrorCode* errorCode);
+  bool createView(const Memory& parent, amd::Memory::ErrorCode* errorCode = nullptr);
 
   //! Gets a pointer to a region of host-visible memory for use as the target
   //! of an indirect map for a given memory object

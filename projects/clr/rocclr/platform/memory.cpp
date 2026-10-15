@@ -562,6 +562,7 @@ void Buffer::initDeviceMemory() {
 
 bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool forceAlloc,
                     ErrorCode* errorCode) {
+  (void)errorCode;  // Currently not used but kept for signature parity
   if ((getMemFlags() & CL_MEM_EXTERNAL_PHYSICAL_AMD) && (initFrom != NULL)) {
     busAddress_ = *(reinterpret_cast<cl_bus_address_amd*>(initFrom));
     initFrom = NULL;
@@ -569,7 +570,7 @@ bool Buffer::create(void* initFrom, bool sysMemAlloc, bool skipAlloc, bool force
     busAddress_.surface_bus_address = 0;
     busAddress_.marker_bus_address = 0;
   }
-  return Memory::create(initFrom, sysMemAlloc, skipAlloc, forceAlloc, errorCode);
+  return Memory::create(initFrom, sysMemAlloc, skipAlloc, forceAlloc, nullptr);
 }
 
 bool Buffer::isEntirelyCovered(const Coord3D& origin, const Coord3D& region) const {
