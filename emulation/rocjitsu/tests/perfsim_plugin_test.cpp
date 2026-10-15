@@ -459,6 +459,40 @@ TEST_F(PerfsimPluginTest, CancellationRetainsFailureReasonAndReleasesWaveIdentit
   EXPECT_NE(line_with_prefix(trace, "end 47 "), trace.size());
 }
 
+TEST_F(PerfsimPluginTest, SetupRollbackCanRetryTheSameLogicalWave) {
+  WaveFixture fixture(1);
+  testing::internal::CaptureStderr();
+  {
+    auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+    ASSERT_TRUE(group->add(std::make_unique<PerfsimPlugin>(plugin_config().c_str())));
+    fixture.cu->set_plugin_group(group);
+    group->onInit();
+    constexpr uint32_t dispatch = 46;
+    group->onAmdgpuDispatchPacketProcessed(dispatch_info(dispatch));
+    group->onAmdgpuDispatchExecutionBegin(dispatch);
+    for (uint32_t retry = 0; retry < 2; ++retry) {
+      Wavefront &wave = fixture.wave(dispatch, 0, {0, 0, 0}, 0);
+      group->onAmdgpuWavefrontDispatched(wave);
+      fixture.cu->abort_workgroup(dispatch, 0);
+      EXPECT_TRUE(wave.is_halted());
+    }
+    Wavefront &wave = fixture.wave(dispatch, 0, {0, 0, 0}, 0);
+    group->onAmdgpuWavefrontDispatched(wave);
+    const std::array<uint32_t, 1> words{0xBF810000};
+    SyntheticInstruction end("s_endpgm", words, PROGRAM_TERMINATOR);
+    group->onAmdgpuBeforeExecuteInstruction(0x5000, end, wave);
+    wave.halt();
+    group->onAmdgpuDispatchExecutionEnd(dispatch);
+    group->onShutdown();
+  }
+  const std::string diagnostic = testing::internal::GetCapturedStderr();
+  EXPECT_EQ(diagnostic.find("skipped dispatch"), std::string::npos);
+  const auto trace = lines(read_file(trace_.path()));
+  EXPECT_NE(line_with_prefix(trace, "begin 46 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "instruction 46 "), trace.size());
+  EXPECT_NE(line_with_prefix(trace, "end 46 "), trace.size());
+}
+
 TEST_F(PerfsimPluginTest, ReclaimsFaultAbortedWaveStateBeforePhysicalSlotReuse) {
   WaveFixture fixture(1);
   testing::internal::CaptureStderr();
