@@ -1,0 +1,252 @@
+compute.mfma_flops_bf16:
+  name: MFMA FLOPs (BF16)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_BF16) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total number of 16-bit brain floating point MFMA operations executed per second.
+    Note: this does not include any 16-bit brain floating point operations from VALU
+    instructions. This is also presented as a percent of the peak theoretical BF16
+    MFMA operations achievable on the specific accelerator.
+  peak: $max_sclk * $cu_per_gpu * 512 / 1000
+compute.mfma_flops_f16:
+  name: MFMA FLOPs (F16)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F16) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total number of 16-bit floating point MFMA operations executed per second.
+    Note: this does not include any 16-bit floating point operations from VALU instructions.
+    This is also presented as a percent of the peak theoretical F16 MFMA operations
+    achievable on the specific accelerator.
+  peak: $max_sclk * $cu_per_gpu * 1024 / 1000
+compute.mfma_flops_f32:
+  name: MFMA FLOPs (F32)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F32) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total number of 32-bit floating point MFMA operations executed per second.
+    Note: this does not include any 32-bit floating point operations from VALU instructions.
+    This is also presented as a percent of the peak theoretical F32 MFMA operations
+    achievable on the specific accelerator.
+  peak: $max_sclk * $cu_per_gpu * 256 / 1000
+compute.mfma_flops_f64:
+  name: MFMA FLOPs (F64)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F64) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total number of 64-bit floating point MFMA operations executed per second.
+    Note: this does not include any 64-bit floating point operations from VALU instructions.
+    This is also presented as a percent of the peak theoretical F64 MFMA operations
+    achievable on the specific accelerator.
+  peak: $max_sclk * $cu_per_gpu * 256 / 1000
+compute.mfma_iops_int8:
+  name: MFMA IOPs (INT8)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_I8) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GIOP/s
+  description: >-
+    The total number of 8-bit integer MFMA operations executed per second. Note: this
+    does not include any 8-bit integer operations from VALU instructions. This is
+    also presented as a percent of the peak theoretical INT8 MFMA operations achievable
+    on the specific accelerator.
+  peak: $max_sclk * $cu_per_gpu * 1024 / 1000
+compute.salu_util:
+  name: SALU Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_SCA) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Indicates what percent of the kernel's duration the SALU was busy executing instructions.
+    Computed as the ratio of the total number of cycles spent by the scheduler issuing
+    SALU or SMEM instructions over the total CU cycles.
+  peak: 100
+compute.valu_util:
+  name: VALU Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    Indicates what percent of the kernel's duration the VALU was busy executing instructions.
+    Does not include VMEM operations. Computed as the ratio of the total number of
+    cycles spent by the scheduler issuing VALU instructions over the total CU cycles.
+  peak: 100
+compute.valu_active_threads:
+  name: VALU Active Threads
+  formula: SUM(SQ_THREAD_CYCLES_VALU) / SUM(SQ_ACTIVE_INST_VALU)
+  unit: Work-items
+  description: >-
+    Indicates the average level of divergence within a wavefront over the lifetime
+    of the kernel. The number of work-items that were active in a wavefront during
+    execution of each VALU instruction, time-averaged over all VALU instructions run
+    on all wavefronts in the kernel.
+  peak: $wave_size
+compute.ipc:
+  name: IPC
+  formula: SUM(SQ_INSTS) / SUM(SQ_BUSY_CU_CYCLES)
+  unit: Instructions per Cycle
+  description: >-
+    The ratio of the total number of instructions executed on the CU over the total
+    active CU cycles. This is also presented as a percent of the peak theoretical
+    bandwidth achievable on the specific accelerator.
+  peak: 5
+wave.occupancy:
+  name: Wavefront Occupancy
+  formula: SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Wavefronts
+  description: >-
+    The time-averaged number of wavefronts resident on the accelerator over the lifetime
+    of the kernel. Note: this metric may be inaccurate for short-running kernels (less
+    than 1ms). This is also presented as a percent of the peak theoretical occupancy
+    achievable on the specific accelerator.
+  peak: $max_waves_per_cu * $cu_per_gpu
+  coll_level: SQ_LEVEL_WAVES
+compute.cu_util:
+  name: CU Utilization
+  formula: 100 * SUM(SQ_BUSY_CU_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)
+  unit: Percent
+  description: >-
+    The percent of total SIMD cycles in the kernel where any SIMD on a CU was actively
+    doing any work, summed over all CUs. Low values (less than 100%) indicate that
+    the accelerator was not fully saturated by the kernel, or a potential load-imbalance
+    issue.
+  peak: 100
+wave.occupancy_pct:
+  name: Wavefront Occupancy
+  formula: 100 * SUM(SQ_LEVEL_WAVES_ACCUM) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $numActiveCUs * $max_waves_per_cu)
+  unit: Percent
+  description: >-
+    Resident wavefronts per active CU, averaged over GPU-active cycles, as a percent
+    of the maximum wavefronts per CU.
+compute.valu_flops_f16:
+  name: VALU FLOPs (F16)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total 16-bit floating-point operations executed per second on the VALU. This
+    is presented with the value of the peak empirical F16 FLOPs achievable on the
+    specific accelerator. Note: this does not include any F16 operations from MFMA
+    instructions.
+  peak: $FP16Flops_empirical_peak
+compute.valu_flops_f32:
+  name: VALU FLOPs (F32)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total 32-bit floating-point operations executed per second on the VALU. This
+    is presented with the value of the peak empirical F32 FLOPs achievable on the
+    specific accelerator. Note: this does not include any F32 operations from MFMA
+    instructions.
+  peak: $FP32Flops_empirical_peak
+compute.valu_flops_f64:
+  name: VALU FLOPs (F64)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64)) / SUM(End_Timestamp - Start_Timestamp)
+  unit: GFLOP/s
+  description: >-
+    The total 64-bit floating-point operations executed per second on the VALU. This
+    is presented with the value of the peak empirical F64 FLOPs achievable on the
+    specific accelerator. Note: this does not include any F64 operations from MFMA
+    instructions.
+  peak: $FP64Flops_empirical_peak
+compute.total_flops:
+  name: Performance (GFLOPs)
+  formula: SUM($wave_size * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + 2 * SQ_INSTS_VALU_FMA_F16 + SQ_INSTS_VALU_TRANS_F16 + SQ_INSTS_VALU_ADD_F32 + SQ_INSTS_VALU_MUL_F32 + 2 * SQ_INSTS_VALU_FMA_F32 + SQ_INSTS_VALU_TRANS_F32 + SQ_INSTS_VALU_ADD_F64 + SQ_INSTS_VALU_MUL_F64 + 2 * SQ_INSTS_VALU_FMA_F64 + SQ_INSTS_VALU_TRANS_F64) + SQ_INSTS_VALU_MFMA_MOPS_F16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_BF16 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F32 * 512 + SQ_INSTS_VALU_MFMA_MOPS_F64 * 512) / (SUM(End_Timestamp - Start_Timestamp) / 1e9) / 1e9
+  unit: GFLOP/s
+  description: >-
+    The overall achieved performance, measured in GigaFLOPs per second (GFLOP/s).
+    This is calculated as the sum of all VALU and MFMA floating-point operations divided
+    by the total execution time. This value is used as the y-coordinate for the kernel's
+    point on the Roofline plot.
+compute.se_util:
+  name: Shader Engine Utilization
+  formula: 100 * SUM(SQ_BUSY_CYCLES) / SUM($GRBM_GUI_ACTIVE_PER_XCD * $se_per_gpu)
+  unit: Percent
+  description: >-
+    The percent of total shader engine cycles in the kernel where any CU in a shader-engine
+    was actively doing any work, normalized over all shader-engines. Low values (e.g.,
+    << 100%) indicate that the accelerator was not fully saturated by the kernel,
+    or a potential load-imbalance issue.
+wave.saved:
+  name: Saved Wavefronts
+  formula: AVG(SQ_WAVES_SAVED)
+  unit: Wavefronts
+  description: The total number of wavefronts saved at a context-save.
+wave.restored:
+  name: Restored Wavefronts
+  formula: AVG(SQ_WAVES_RESTORED)
+  unit: Wavefronts
+  description: The total number of wavefronts restored from a context-save.
+compute.insts_per_wave:
+  name: Instructions per wavefront
+  formula: SUM(SQ_INSTS) / SUM(SQ_WAVES)
+  unit: Instructions per Wavefront
+  description: >-
+    The average number of instructions (of all types) executed per wavefront. This
+    is averaged over all wavefronts in a kernel dispatch.
+wave.cycles:
+  name: Wave Cycles
+  formula: 4 * SUM(SQ_WAVE_CYCLES) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles a wavefront in the kernel dispatch spent resident on a compute
+    unit per normalization unit. This is averaged over all wavefronts in a kernel
+    dispatch.
+wave.dep_wait_cycles:
+  name: Dependency Wait Cycles
+  formula: 4 * SUM(SQ_WAIT_ANY) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles a wavefront in the kernel dispatch spent resident on a compute
+    unit per normalization unit. This is averaged over all wavefronts in a kernel
+    dispatch.
+wave.issue_wait_cycles:
+  name: Issue Wait Cycles
+  formula: 4 * SUM(SQ_WAIT_INST_ANY) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The number of cycles a wavefront in the kernel dispatch was unable to issue an
+    instruction for any reason (e.g., execution pipe back-pressure, arbitration loss,
+    etc.) per normalization unit. This counter is incremented at every cycle by all
+    wavefronts on a CU unable to issue an instruction. As such, it is most useful
+    to get a sense of how waves were spending their time, rather than identification
+    of a precise limiter because another wave could be actively executing while a
+    wave is issue stalled. The sum of this metric, Dependency Wait Cycles and Active
+    Cycles should be equal to the total Wave Cycles metric.
+wave.active_cycles:
+  name: Active Cycles
+  formula: 4 * SUM(SQ_ACTIVE_INST_ANY) / SUM($denom)
+  unit: (Cycles + $normUnit)
+  description: >-
+    The average number of cycles a wavefront in the kernel dispatch was actively executing
+    instructions per normalization unit. This measurement is made on a per-wavefront
+    basis, and may include cycles that another wavefront spent actively executing
+    (on another execution unit, for example) or was stalled. As such, it is most useful
+    to get a sense of how waves were spending their time, rather than identification
+    of a precise limiter. The sum of this metric, Issue Wait Cycles and Active Wait
+    Cycles should be equal to the total Wave Cycles metric.
+compute.inst_mix_salu:
+  name: SALU
+  formula: SUM(SQ_INSTS_SALU) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of scalar arithmetic logic unit (SALU) operations issued. Typically
+    these are used for address calculations, literal constants, and other operations
+    that are provably uniform across a wavefront. Although scalar memory (SMEM) operations
+    are issued by the SALU, they are counted separately in this section.
+compute.inst_mix_smem:
+  name: SMEM
+  formula: SUM(SQ_INSTS_SMEM) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of scalar memory (SMEM) operations issued. These are typically
+    used for loading kernel arguments, base-pointers and loads from HIP's __constant__
+    memory.
+compute.inst_mix_branch:
+  name: Branch
+  formula: SUM(SQ_INSTS_BRANCH) / SUM($denom)
+  unit: (Instructions + $normUnit)
+  description: >-
+    The total number of branch operations issued. These typically consist of jump
+    or branch operations and are used to implement control flow.
+compute.ipc_issued:
+  name: IPC (Issued)
+  formula: SUM(SQ_INSTS_VALU + SQ_INSTS_VMEM + SQ_INSTS_SALU + SQ_INSTS_SMEM + SQ_INSTS_BRANCH + SQ_INSTS_SENDMSG + SQ_INSTS_VSKIPPED + SQ_INSTS_LDS) / SUM(SQ_ACTIVE_INST_ANY)
+  unit: Instructions per Cycle
+  description: >-
+    The ratio of the total number of (non-internal) instructions issued over the number
+    of cycles where the scheduler was actively working on issuing instructions.

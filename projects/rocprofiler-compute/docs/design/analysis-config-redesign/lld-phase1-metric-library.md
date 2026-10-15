@@ -10,8 +10,13 @@ Parent: [LLD index](lld-index.md)
 
 ### Layer 2 metric schema
 
-New module `src/utils/layer2_schema.py`. Defines the structure of a Layer 2 metric
-definition file via dataclasses.
+New developer tool `tools/validate_metric_library.py`, following the existing
+`tools/validate_*.py` checks: it loads each arch's metric library through the
+inheritance loader, collects every schema error, and exits 1 if there are any. It runs
+as a pre-commit hook on `metric_library/` files and from
+`master_config_workflow_script.py --validate-only`. It lands with the first metric
+library files (Stage 4), not with the loader. As with today's panel files, the runtime
+does not re-validate the files it loads.
 
 `MetricDefinition` fields:
 
@@ -19,12 +24,12 @@ definition file via dataclasses.
 |---|---|---|---|
 | `id` | str | yes | Stable hierarchical string, e.g. `mem.l2_hit_rate` |
 | `name` | str | yes | Canonical display name, e.g. `"L2 Cache Hit Rate"` |
-| `formula` | str | yes | Base expression without aggregation wrappers |
-| `unit` | str | yes | e.g. `"Percent"`, `"GFLOPs"` |
-| `description` | str | yes | Human-readable metric description |
+| `formula` | str | yes | Base expression without aggregation wrappers; never empty, in the canonical form of `tools/format_yaml.py`. A metric an arch cannot compute does not exist on that arch; a later arch adds it. |
+| `unit` | str | yes | One canonical spelling per unit (e.g. `"GB/s"`, `"GFLOP/s"`; aliases such as `Gbps` are rejected); a display scale such as Bytes/s is a view concern (D8 Kind 2); may be empty |
+| `description` | str | yes | Human-readable metric description; may be empty |
 | `peak` | str (formula) | no | Performance ceiling expression. Required for speed-of-light metrics. |
 | `coll_level` | str | no | Accumulation level, e.g. `SQ_LEVEL_WAVES` |
-| `avg_mode` | str | no | Default `weighted` (`SUM(X)/SUM(Y)`). Set to `simple` for metrics that use `AVG()` instead. |
+| `avg_mode` | str | no | Phase 2, with runtime wrapper generation; not in Phase A. Default `weighted` (`SUM(X)/SUM(Y)`). Set to `simple` for metrics that use `AVG()` instead. |
 
 **Aggregation is not a metric field.** The metric defines a single base formula
 without aggregation wrappers (`SUM`, `AVG`, `MIN`, `MAX`). Aggregation is a display
@@ -37,31 +42,33 @@ formula three times with different wrappers. The `simple_box` tables already pro
 this pattern works -- they auto-generate `MIN/Q1/MEDIAN/Q3/MAX` from a single `expr`.
 
 Percent-of-peak is not a schema field. In the target state it is computed automatically
-when a metric has a `peak` formula and `unit: Percent`. During the transition, the legacy
-mapping keeps today's explicit `pct_of_peak` per table row, so output does not change.
+when a metric has a `peak` formula and `unit: Percent`. During the transition, the
+analysis configs keep today's explicit `pct_of_peak` per table row, so output does not
+change.
 
 A metric's numeric positional ID (`legacy_id`) is not a metric field either. The same
 metric appears in several tables, at a different position in each, so the positional IDs
-belong to the transition-only legacy mapping (see
-[Transition mechanism](lld-index.md#transition-mechanism-legacy_id)). One metric can
-appear in several tables of the mapping.
+are positions in today's analysis configs (see
+[Transition mechanism](lld-index.md#transition-mechanism-legacy_id)). The metric library
+does not say where a metric is shown; in Phase A the analysis configs stay the display
+source, and the Phase 2 views place metrics by id.
 
 A metric concept has one `id` on every architecture. Each family base (gfx908 for CDNA,
 gfx115x for RDNA, and gfx1250) defines the id with that family's formula, as the HLD's
 end-to-end example does for `mem.l2_hit_rate`. Within one architecture, every appearance
 of an id uses the same formula.
 
+A file maps each metric `id` to its fields, so the `id` is the key rather than a field:
+
 ```yaml
-SALU Utilization:
-  id: compute.salu_util
+compute.salu_util:
   name: "SALU Utilization"
   formula: "100 * SQ_ACTIVE_INST_SCA / ($GRBM_GUI_ACTIVE_PER_XCD * $cu_per_gpu)"
   unit: Percent
   description: >-
     The percentage of time the SALU was busy executing instructions.
 
-VALU FLOPs:
-  id: compute.valu_flops
+compute.valu_flops:
   name: "VALU FLOPs"
   formula: "64 * (SQ_INSTS_VALU_ADD_F16 + SQ_INSTS_VALU_MUL_F16 + ...) / (End_Timestamp - Start_Timestamp)"
   unit: GFLOPs
@@ -70,40 +77,40 @@ VALU FLOPs:
     The total number of vector ALU floating-point operations per second.
 ```
 
-**Typed variants** for fabric stall tables (`xfer`, `coherency`, `expr`, `type`,
-`transaction` fields) are handled as a `FabricStallMetric` sub-schema. These table types
-have fixed column structures that differ from general metric tables. The general
-`MetricDefinition` does not accommodate them -- they use a separate validation path.
+**Typed row fields** of fabric stall and per-channel tables (`xfer`, `coherency`,
+`expr`, `type`, `transaction`, `read req`, `ea read stall - hbm`, ...) are display
+columns, so they stay as display data in the analysis config rows, not on
+`MetricDefinition`. There is no separate `FabricStallMetric` schema.
 
 `VariableDefinition` fields:
 
 | Field | Type | Required | Notes |
 |---|---|---|---|
-| `name` | str | yes | Variable name without `$`, e.g. `GRBM_GUI_ACTIVE_PER_XCD` |
+| `name` | str | yes | The key: variable name without `$`, e.g. `GRBM_GUI_ACTIVE_PER_XCD` |
 | `formula` | str | yes | Expression, e.g. `"(GRBM_GUI_ACTIVE / $num_xcd)"` |
-| `depends_on` | list[str] | no | Other variables this depends on, for eval ordering |
+
+Evaluation order stays in code: `calc_builtin_vars()` evaluates the `PER_XCD` variables
+first.
 
 ```yaml
 # gfx908/variables.yaml
-variables:
-  GRBM_GUI_ACTIVE_PER_XCD:
-    formula: "(GRBM_GUI_ACTIVE / $num_xcd)"
-  GRBM_COUNT_PER_XCD:
-    formula: "(GRBM_COUNT / $num_xcd)"
-  GRBM_SPI_BUSY_PER_XCD:
-    formula: "(GRBM_SPI_BUSY / $num_xcd)"
-  numActiveCUs:
-    formula: >-
-      TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) /
-      SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 +
-      MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) /
-      SUM($GRBM_GUI_ACTIVE_PER_XCD), 0),
-      $max_waves_per_cu), 8), $cu_per_gpu))
-    depends_on: [GRBM_GUI_ACTIVE_PER_XCD]
-  kernelBusyCycles:
-    formula: "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)"
-  hbmBandwidth:
-    formula: "($max_mclk / 1000 * 32 * $num_memory_channels)"
+GRBM_GUI_ACTIVE_PER_XCD:
+  formula: "(GRBM_GUI_ACTIVE / $num_xcd)"
+GRBM_COUNT_PER_XCD:
+  formula: "(GRBM_COUNT / $num_xcd)"
+GRBM_SPI_BUSY_PER_XCD:
+  formula: "(GRBM_SPI_BUSY / $num_xcd)"
+numActiveCUs:
+  formula: >-
+    TO_INT(MIN(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) /
+    SUM($GRBM_GUI_ACTIVE_PER_XCD), 0) / $max_waves_per_cu * 8 +
+    MIN(MOD(ROUND(SUM(4 * SQ_BUSY_CU_CYCLES) /
+    SUM($GRBM_GUI_ACTIVE_PER_XCD), 0),
+    $max_waves_per_cu), 8), $cu_per_gpu))
+kernelBusyCycles:
+  formula: "ROUND(AVG((((End_Timestamp - Start_Timestamp) / 1000) * $max_sclk)), 0)"
+hbmBandwidth:
+  formula: "($max_mclk / 1000 * 32 * $num_memory_channels)"
 ```
 
 ### Layer 1.5 -- Collectables
@@ -261,8 +268,10 @@ base arch YAML files.
 
 ### Inheritance loader
 
-New module `src/utils/yaml_inherit_loader.py`. Implements a custom PyYAML loader
-for the `!inherit <path>` tag. The tag must appear as the first line of a YAML file.
+New module `src/utils/yaml_inherit_loader.py`. A metric library file names its parent
+with a top-level `inherit: <path>` key. (A `!inherit <path>` tag on the first line, as
+first proposed, is not valid YAML: a document cannot hold a tagged scalar followed by a
+mapping.)
 
 GitLab CI's `extends` keyword uses the same approach -- deep merge across files,
 multi-level inheritance, later values override earlier ones.
@@ -271,25 +280,24 @@ Native YAML anchors (`&`/`*`) and merge keys (`<<`) are insufficient -- they onl
 perform shallow merge, do not work across files, and the merge key is semi-deprecated
 in the YAML spec.
 
-**Implementation:** Vendor the [`deepmerge`](https://pypi.org/project/deepmerge/)
-Python library (pure Python, MIT license) or implement the merge logic inline
-(~30 lines for our specific merge rules). The merge must work in profile mode,
-which prohibits pip dependencies (`ProfileModeImportGuard` enforces stdlib-only
-imports). The vendored PyYAML is precedent for this approach. Import yaml from
-the vendored copy (`from vendored import yaml`) for profile-mode compatibility.
+**Implementation:** The merge logic is inline, with no new dependency. It must work in
+profile mode, which prohibits pip dependencies (`ProfileModeImportGuard` enforces
+stdlib-only imports), so yaml is imported from the vendored copy
+(`from vendored import yaml`).
 
-`InheritLoader` subclasses `yaml.SafeLoader` and registers constructors for two
-custom tags:
-- `!inherit <path>` -- file-level inheritance (loads and merges the referenced file)
-- `!remove` -- marks a key for deletion during merge
+`InheritLoader` subclasses `yaml.SafeLoader`. It registers one custom tag, `!remove`,
+which marks a key for deletion during the merge, and it rejects a key that appears twice
+in one mapping (plain YAML would silently keep the last one, hiding a duplicate metric
+id). The repo's `check-yaml`
+pre-commit hook needs `--unsafe` for the metric library files because of this tag.
 
-When `!inherit` fires:
+To load a file:
 
-1. Resolve `<path>` relative to the current file's directory.
-2. Load the base file recursively (supporting chains:
+1. Resolve the `inherit` path relative to the current file's directory.
+2. Load the parent file recursively (supporting chains:
    `gfx950 -> gfx942 -> gfx940 -> gfx90a -> gfx908`).
-3. Deep-merge the current file's content on top of the base.
-4. After merge, scan for any `!remove` markers and delete those keys.
+3. Merge the current file's content on top of the parent, applying `!remove` as it
+   goes. Removing a key that the parent does not have is an error.
 
 **Merge operations:**
 
@@ -297,32 +305,34 @@ When `!inherit` fires:
 |---|---|---|
 | Modify | Scalar in override | Override replaces base value. |
 | Add | New key in override | Appended to the merged map. Supports adding new metrics, tables, or fields that the parent arch does not have. |
-| Remove | Value set to `!remove` | Key is deleted from the merged result. Used when a child arch drops a metric or field that existed in the parent. |
-| Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved. |
-| List merge | `data source` list | Matched by `metric_table.id` (not position), then deep-merged per entry. New entries appended. |
+| Remove | `key: !remove` | The key is deleted from the merged result. Used when a child arch drops a metric (keyed by its id) or a field of one. |
+| Deep merge | Map + map | Recursive deep merge. Override keys win; base-only keys preserved, in file order. A metric in a child file lists only the fields that change. |
+| Replace | List in override | A list replaces the base list as a whole. |
 
 Example of all three operations:
 
 ```yaml
-# gfx90a/0200_system_speed_of_light.yaml
-!inherit ../gfx908/0200_system_speed_of_light.yaml
+# gfx90a/sq.yaml
+inherit: ../gfx908/sq.yaml
 
-metric:
-  # Modify: change the formula for an existing metric
-  VALU FLOPs:
-    formula: "64 * (SQ_INSTS_VALU_ADD_F16 + ...) / (End_Timestamp - Start_Timestamp)"
+# Modify: change the formula for an existing metric
+compute.valu_flops:
+  formula: "64 * (SQ_INSTS_VALU_ADD_F16 + ...) / (End_Timestamp - Start_Timestamp)"
 
-  # Add: new metric not present in gfx908
-  MFMA FLOPs (BF16):
-    id: compute.mfma_flops_bf16
-    name: "MFMA FLOPs (BF16)"
-    formula: "512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 / (End_Timestamp - Start_Timestamp)"
-    unit: GFLOPs
-    description: >-
-      BF16 matrix fused multiply-add operations per second.
+# Add: new metric not present in gfx908
+compute.mfma_flops_bf16:
+  name: "MFMA FLOPs (BF16)"
+  formula: "512 * SQ_INSTS_VALU_MFMA_MOPS_BF16 / (End_Timestamp - Start_Timestamp)"
+  unit: GFLOPs
+  description: >-
+    BF16 matrix fused multiply-add operations per second.
 
-  # Remove: metric that existed in gfx908 but is not valid for gfx90a
-  Some Deprecated Metric: !remove
+# Remove: metric that existed in gfx908 but is not valid for gfx90a
+compute.some_deprecated_metric: !remove
+
+# Remove a field: drop the parent's peak
+compute.salu_util:
+  peak: !remove
 ```
 
 **Cycle detection:** Maintain a set of resolved absolute paths during the recursive
@@ -334,21 +344,21 @@ is exercised by tests only (Stage 3 validation) until the cutover.
 
 ### Tests
 
-- Schema validation: required fields produce valid objects, missing required fields
-  raise validation errors, typed variant fields accepted only for fabric stall metrics.
-- Collectable schema: valid collectable definitions pass validation, missing `id` or
-  `formula` raises errors, counter list is inferred from formula when not explicit.
+- Schema validation (`tools/validate_metric_library.py`): valid files pass; missing
+  required fields, unknown fields, bad ids, duplicate ids and a child file that does not
+  inherit from its parent's file are reported.
 - Inheritance loader: single-level inheritance, multi-level chain (4+ deep, matching
   the real `gfx908 -> gfx90a -> gfx940 -> gfx942` chain), cycle detection error.
 - Merge operations: key modification (override), key addition (new metric in child),
-  key removal (`!remove` deletes from merged result), deep-merge of maps,
-  `data source` list matched by `metric_table.id`, new list entry appended.
+  removal of a metric or a field (`!remove` deletes from merged result), deep-merge of
+  maps, lists replaced, and errors for removing a missing key, for a duplicate key and
+  for `!remove` with a value.
 - Round-trip: a minimal synthetic YAML family (base + chain of overrides with
   additions, modifications, and removals) loads correctly and produces the expected
   merged structure.
-- Golden-file comparison infrastructure: note this is a new testing pattern for the
-  project. The test framework for serializing and comparing `panel_configs` output
-  needs to be built as part of this stage.
+- Golden comparison infrastructure: the Stage 3 equivalence test is a new testing
+  pattern for the project (a snapshot test whose reference side is today's tree, read
+  in the same run).
 
 ### Dependencies
 
@@ -359,13 +369,13 @@ None. This is the foundation stage.
 
 ### MetricLibrary
 
-New module `src/utils/layer2_parser.py`.
+New module `src/utils/metric_library.py`.
 
 `load_metric_library(metric_dir: Path, arch: str) -> MetricLibrary`:
 
 1. Resolve the architecture's base arch and inheritance chain:
    ```python
-   ARCH_INHERITANCE = {
+   METRIC_LIBRARY_PARENT_ARCH = {
        "gfx908": None,         # CDNA base -- no parent
        "gfx90a": "gfx908",
        "gfx940": "gfx90a",     # each arch inherits from its immediate predecessor
@@ -378,16 +388,18 @@ New module `src/utils/layer2_parser.py`.
    ```
    gfx1150-gfx1153 map to the `gfx115x` directory through `canonical_config_arch()`.
 2. Load YAML files from `{metric_dir}/{arch}/`. Each file either stands alone (base
-   arch) or begins with `!inherit` pointing to the parent arch's file.
-3. The `InheritLoader` (Stage 1) resolves the `!inherit` chain recursively and
+   arch) or has an `inherit` key pointing to the parent arch's file.
+3. The `InheritLoader` (Stage 1) resolves the `inherit` chain recursively and
    deep-merges overrides on top of the base.
-4. Validate each loaded metric definition against `layer2_schema`.
-5. Collect all metrics into `MetricLibrary.metrics: dict[str, MetricDefinition]`,
-   keyed by string `id`. Raise on duplicate ids.
-6. Load `variables.yaml` from the base arch directory (walked via `ARCH_INHERITANCE`)
-   into `MetricLibrary.variables: dict[str, VariableDefinition]`.
+4. Do not re-validate: `tools/validate_metric_library.py` checks the files at commit
+   time.
+5. Collect all metrics into `MetricLibrary.metrics`, keyed by string `id`. Raise on
+   duplicate ids. In Phase A the entries are the loaded mappings, as
+   `load_panel_configs()` returns today; a typed model can come with the cutover.
+6. Load `variables.yaml` (inherited like the metric files) into
+   `MetricLibrary.variables`, in file order.
 
-7. Load `sets.yaml` from the arch directory (inherited along `ARCH_INHERITANCE` like the
+7. Load `sets.yaml` from the arch directory (inherited along `METRIC_LIBRARY_PARENT_ARCH` like the
    metric files) into `MetricLibrary.sets: dict[str, SetDefinition]`. Sets only reference
    metric ids; see [Sets migration](#sets-migration).
 
@@ -397,11 +409,10 @@ Collectables (Layer 1.5, separate epic) are not loaded in Phase A.
 
 ```python
 class MetricLibrary:
-    metrics: dict[str, MetricDefinition]
-    variables: dict[str, VariableDefinition]
-    sets: dict[str, SetDefinition]
+    metrics: dict[str, dict]        # metric id -> its fields
+    variables: dict[str, dict]      # variable name -> {formula}, in file order
+    sets: dict[str, SetDefinition]  # Stage 4, sets migration
 
-    def get_metric(self, id: str) -> MetricDefinition: ...
     def get_counters_for_metrics(
         self, metric_ids: list[str], gpu_series: str
     ) -> set[str]: ...
@@ -415,7 +426,7 @@ class MetricLibrary:
    would be parsed as variable `collect` + stray text `.l2_hit_miss`.
 2. **Concatenate formula strings** for the requested metrics (including expanded
    collectables).
-3. **Include `coll_level` values** in the text passed to the extractor. The current
+3. **Include `coll_level` and `peak` values** in the text passed to the extractor. The current
    `detect_counters()` scans raw YAML text which incidentally picks up
    `coll_level: SQ_LEVEL_WAVES` as a counter name. The MetricLibrary approach must
    explicitly add `coll_level` values to maintain equivalence. The raw-text scan also
@@ -440,138 +451,51 @@ class MetricLibrary:
 Stage 1.
 
 
-## Stage 3 -- Compatibility adapter
+## Stage 3 -- Equivalence with the analysis configs
 
-This is the critical integration piece. The adapter sits between the new Layer 2 output
-and the existing pipeline. It produces exactly the same `panel_configs` structure that
-`load_panel_configs()` returns today so that `build_dfs()`, `eval_metric()`, and
-`show_all()` require zero changes.
-
-### Adapter
-
-New module `src/utils/compat_adapter.py`.
-
-`layer2_to_panel_configs(library: MetricLibrary, arch: str) -> OrderedDict[int, dict]`:
-
-The output must match the exact dict shape that `_build_metric_table_df()` in
-`parser.py` consumes:
-
-```python
-{
-    panel_id: {
-        "id": int,           # e.g. 1100
-        "title": str,        # e.g. "Compute Units - Compute Pipeline"
-        "data source": [
-            {"metric_table": {
-                "id": int,     # e.g. 1101
-                "title": str,
-                "header": {"metric": str, "value"|"avg": str, ...},
-                "metric": OrderedDict({
-                    "VALU FLOPs": {"value": "formula...", "unit": "GFLOPs", ...},
-                    ...
-                }),
-                "cli_style": str,  # optional
-            }},
-        ],
-        "metrics_description": {"VALU FLOPs": "description...", ...},
-    }
-}
-```
-
-The adapter reconstructs this shape from `MetricLibrary` and the transition-only legacy
-mapping by:
-
-1. Placing metrics into panels and tables from the legacy mapping. Each table row in
-   the mapping references a metric id and carries the row's `legacy_id` (e.g. `"11.1.0"`
-   is panel 1100, table 1101, row 0). The `legacy_id` is the bridge between string ids
-   and the numeric structure. A metric shown in several tables has one row per table,
-   and rows are ordered by `legacy_id`.
-2. Building the `header` dict from the table's column layout (determined by the
-   view in the final design, or from a legacy mapping during transition).
-3. Building the `metric` OrderedDict with metric name as key and formula fields as
-   value dict. During the initial migration (Stage 4), the migration tooling
-   pre-computes the aggregation-wrapped formulas (avg/min/max) from the base formula
-   and stores them alongside the base formula. The adapter reads these pre-computed
-   values rather than generating them at runtime. Runtime auto-generation of
-   aggregation wrappers is a future optimization (the wrapping logic is more complex
-   than a simple prefix/suffix -- it involves constant factoring, numerator/denominator
-   decomposition, and handling of inner functions like NOISE_CLAMP).
-4. Taking `pct_of_peak` from the legacy mapping. Computing it automatically from `peak`
-   and `unit: Percent` is the target state, after the transition.
-5. Placing descriptions into `metrics_description`.
-
-`layer2_vars_to_builtin_vars(library: MetricLibrary) -> dict[str, str]`:
-
-Converts `MetricLibrary.variables` to the `dict[str, str]` format that
-`get_build_in_vars()` returns (variable name -> formula string). This allows
-`calc_builtin_vars()` in `evaluation_pipeline.py` to use variables from YAML
-without changing its evaluation logic.
+Phase A ships no compatibility adapter. The metric library says what each metric is, not
+where it is shown: the analysis configs stay the display source and the production
+loader, and nothing links a panel row to a metric id until the Phase 2 views do. The
+adapter to the existing pipeline comes with the views, as `views_to_panel_configs()`
+([Phase 2](lld-phase2-display-view.md)). A Phase A adapter would need a full copy of the
+panel layout with each row linked to its metric, kept in sync with the analysis configs
+until Stage 8 deletes both; nothing in production would read it.
 
 ### Integration point
 
-In Phase A the adapter is not wired into production. `generate_configs()` in
-`analysis_base.py` keeps calling `load_panel_configs()`, and `detect_counters()` in
-`soc_base.py` keeps scanning the panel YAMLs. The equivalence tests call the Layer 2
-functions directly and compare them with the old path. The adapter is never wired into
-production: production switches once, at Stage 8, through the Layer 3 views
-(`load_views()` / `views_to_panel_configs()`, see
-[Stage 8](lld-phase2-display-view.md#stage-8----adapter-retirement)), and the adapter is
-then removed.
+In Phase A nothing in production changes. `generate_configs()` in `analysis_base.py`
+keeps calling `load_panel_configs()`, `detect_counters()` in `soc_base.py` keeps scanning
+the panel YAMLs, and `get_build_in_vars()` keeps its hardcoded dicts. Production switches
+once, at Stage 8, through the Layer 3 views
+([Stage 8](lld-phase2-display-view.md#stage-8----adapter-retirement)).
 
 The Layer 2 files live in a sibling tree, `src/rocprof_compute_soc/metric_library/`
-(`METRIC_LIBRARY_DIR`), not in `analysis_configs/{arch}/`. The old loader requires a
-`Panel Config` key in every `*.yaml` of an arch directory, so mixing the two formats there
-would break it. A user-supplied `--config-dir` keeps using the old loader.
+(`default_metric_library_dir()`), not in `analysis_configs/{arch}/`. The old loader
+requires a `Panel Config` key in every `*.yaml` of an arch directory, so mixing the two
+formats there would break it. A user-supplied `--config-dir` keeps using the old loader.
 
-Everything downstream -- `build_dfs()`, `eval_metric()`, `show_all()` -- sees the
-same `ArchConfig` regardless of which path produced it.
-
-```mermaid
-flowchart LR
-    subgraph old_path["Production path (Phase A)"]
-        LPC["load_panel_configs()"]
-    end
-
-    subgraph new_path["Layer 2 path (tests in Phase A)"]
-        LML["load_metric_library()"]
-        ADAPT["layer2_to_panel_configs()"]
-        LML --> ADAPT
-    end
-
-    LPC -->|"OrderedDict[int, dict]"| BD["build_dfs()"]
-    ADAPT -->|"OrderedDict[int, dict]"| BD
-
-    BD --> AC["ArchConfig"]
-    AC --> EM["eval_metric()"]
-    EM --> SA["show_all()"]
-```
-
-### Profile mode integration
-
-At the cutover, `detect_counters()` in `soc_base.py` takes its counters from the
-library. In Phase A the equivalence tests call the same code directly:
-
-```python
-library = load_metric_library(METRIC_LIBRARY_DIR, arch)
-if filter_blocks:
-    # Resolve filter tokens to metric ids
-    metric_ids = resolve_filter_to_metric_ids(filter_blocks, library)
-    counters = library.get_counters_for_metrics(metric_ids, gpu_series)
-else:
-    all_ids = list(library.metrics.keys())
-    counters = library.get_counters_for_metrics(all_ids, gpu_series)
-```
+At the cutover, counters come from the metrics that the selected views place
+(`get_counters_for_metrics()`). Phase A checks only the no-filter counter set, because
+`-b` tokens and sets select rows, and rows are not linked to metric ids yet.
 
 ### Validation
 
-- **Golden-file test:** For each architecture, produce `panel_configs` via both old
-  and new paths, serialize to JSON, assert structural equality.
-- **Counter extraction equivalence:** `detect_counters()` returns the same counter
-  set via both paths.
-- **End-to-end:** Full analyze pipeline (load -> build_dfs -> eval_metric -> show_all)
-  with the Layer 2 path produces identical text output to the old path for a
-  reference workload. The test substitutes the Layer 2 path for `load_panel_configs()`
-  with pytest's `monkeypatch`, so production code needs no switch.
+`tests/integration/test_metric_library_equivalence.py`, for every arch that has a metric
+library tree, compares sets with today's analysis configs:
+
+- **Formulas:** every equation a row shows (its `avg`, `value` or `expr` form, or each
+  column of a multi-column row, without display-only `ROUND()`) is a library formula,
+  except rows listed as display variants by positional id and label (another unit, or
+  the same equation written differently); every library formula is shown by some row.
+- **Counters:** the counters the whole library selects equal the counters
+  `detect_counters()` selects with no filter (with `--membw-analysis` where the arch has
+  panel 3000).
+- **Built-in variables:** the library variables equal `get_build_in_vars()`.
+
+The reference side is today's tree, read through the production loaders in the same run,
+so there are no snapshot files. The test runs in ctest and as a pre-commit hook on the
+analysis configs, the metric library files and the modules they use; the schema itself is
+checked by `tools/validate_metric_library.py`.
 
 ### Dependencies
 
@@ -590,38 +514,32 @@ built-in variables and sets.
 metric_library/          # sibling of analysis_configs/ (see Stage 3)
   gfx908/                # CDNA base (first arch) -- complete standalone definitions
     variables.yaml
-    sets.yaml
-    0000_top_stats.yaml
-    0100_system_info.yaml
-    0200_system_speed_of_light.yaml
-    0300_memory_chart.yaml
-    0400_roofline.yaml
-    0500_command_processor_cpc_cpf.yaml
-    0600_workgroup_manager_spi.yaml
-    0700_wavefront.yaml
-    1000_compute_units_instruction_mix.yaml
-    1100_compute_units_compute_pipeline.yaml
-    1200_local_data_share_lds.yaml
-    1300_instruction_cache.yaml
-    1400_scalar_l1_data_cache.yaml
-    1500_address_processing_unit_and_data_return_path_ta_td.yaml
-    1600_vector_l1_data_cache.yaml
-    1700_l2_cache.yaml
-    1800_l2_cache_per_channel.yaml
-    2100_pc_sampling.yaml
+    sets.yaml            # Stage 4, sets migration
+    cp.yaml              # CPC/CPF
+    spi.yaml
+    sq.yaml              # compute.* (instructions, execution) and wave.* (wave state)
+    dispatch.yaml        # launch parameters and kernel time from the dispatch record
+    grbm.yaml
+    lds.yaml
+    sqc_icache.yaml      # L1I
+    sqc_dcache.yaml      # scalar L1D
+    ta_td.yaml
+    tcp.yaml             # vector L1D
+    tcc.yaml             # L2, L2-Fabric, per channel
+    derived.yaml         # results that combine blocks (arithmetic intensity)
   gfx90a/                # inherits gfx908, overrides only what differs
   gfx940/                # inherits gfx90a
-  gfx941/                # inherits gfx940 (2 files differ)
+  gfx941/                # inherits gfx940
   gfx942/                # inherits gfx940
-  gfx950/                # inherits gfx942, adds 3000_mem_bw.yaml
+  gfx950/                # inherits gfx942
   gfx115x/               # RDNA base -- complete standalone definitions
-    variables.yaml
-    ... (13 RDNA panel files)
   gfx1250/               # own base -- complete standalone definitions
-    variables.yaml
-    ... (19 panel files)
-  _legacy_layout/        # transition-only legacy mapping, one directory per arch
 ```
+
+Files are grouped by hardware block, as the HLD's Layer 2 asks ("one file per hardware
+concept"), not by today's panels: a summary panel such as Speed-of-Light has no hardware
+meaning, and where a metric is shown is a Layer 3 concern. A metric lives in the file of
+its id category (table below). The RDNA and gfx1250 bases add their own block files.
 
 No abstract `_base/` directories. The first architecture in each family (gfx908 for
 CDNA, gfx115x for RDNA, and gfx1250, which shares no file with gfx115x) serves as the
@@ -646,34 +564,45 @@ express only what changed. This chain-based pattern applies to future families
 6. **gfx115x** -- RDNA base. Separate standalone definitions, no inheritance from CDNA.
 7. **gfx1250** -- own base. Separate standalone definitions.
 
-Each step is validated: run the golden-file comparison (old path vs new path) for the
-migrated architecture before proceeding to the next.
+Each step is validated: run the Stage 3 equivalence test for the migrated architecture
+before proceeding to the next.
 
 ### Metric ID assignment
 
 Convention: `{category}.{subcategory}_{name}`, all lowercase, underscores for
 word separation.
 
-| Category | Derived from | Example IDs |
-|---|---|---|
-| `system` | Panel 0200 | `system.gpu_util`, `system.gpu_busy` |
-| `roofline` | Panel 0400 | `roofline.hbm_bw`, `roofline.l2_bw` |
-| `cp` | Panel 0500 | `cp.load_util`, `cp.stall` |
-| `spi` | Panel 0600 | `spi.shader_processor_util` |
-| `wavefront` | Panel 0700 | `wavefront.occupancy`, `wavefront.vgprs` |
-| `compute.inst_mix` | Panel 1000 | `compute.inst_mix_valu` |
-| `compute` | Panel 1100 | `compute.valu_flops`, `compute.salu_util`, `compute.ipc` |
-| `lds` | Panel 1200 | `lds.util`, `lds.bank_conflicts` |
-| `mem.l1i` | Panel 1300 | `mem.l1i_hit_rate`, `mem.l1i_fetch_lat` |
-| `mem.sl1d` | Panel 1400 | `mem.sl1d_hit_rate` |
-| `ta` | Panel 1500 | `ta.global_insts` |
-| `mem.l1d` | Panel 1600 | `mem.l1d_cache_bw`, `mem.l1d_hit_rate` |
-| `mem.l2` | Panel 1700 | `mem.l2_hit_rate`, `mem.l2_cache_bw` |
-| `mem.fabric` | Panel 1700 (L2-Fabric tables) | `mem.fabric_rd_lat`, `mem.fabric_stall_rd` |
-| `mem.l2_chan` | Panel 1800 | `mem.l2_chan_hit_rate` |
+Categories name hardware (or the data source), never a view: `system`, `memchart`,
+`roofline` and `wavefront` (today's panels) are not categories, and the validator rejects
+them. A metric's category follows the block of the counters it uses, not the panel that
+shows it: a metric shown only in a summary panel takes the category of the block it
+measures, and SQ instruction counters (`SQ_*INST*`) are `compute`.
 
-The numeric positional IDs (e.g. `"11.2.2"`) are kept in the legacy mapping for the
-compatibility adapter, one per table row. They are removed with the mapping in Stage 8.
+**Identity across archs (row continuity).** A child arch keeps its parent's id for every
+metric it still shows; a changed equation is an override of that id, never a new id. Two
+placements of one id that disagree within an arch are a Kind 3 case for review, and two
+ids that come to show the same equation are reported, not merged.
+
+| Category | Hardware | File | Example IDs |
+|---|---|---|---|
+| `cp` | CPC/CPF | `cp.yaml` | `cp.cpf_util`, `cp.cpc_stall_rate` |
+| `spi` | SPI | `spi.yaml` | `spi.workgroups_per_cu` |
+| `compute` | SQ instruction issue and execution (`SQ_*INST*`, execution-unit busy, CU busy) | `sq.yaml` | `compute.valu_util`, `compute.mfma_util`, `compute.cu_util`, `compute.inst_mix_valu` |
+| `wave` | SQ wave state: occupancy, wave cycles and their wait/active breakdown, save/restore | `sq.yaml` | `wave.occupancy`, `wave.cycles`, `wave.issue_wait_cycles` |
+| `dispatch` | The dispatch record (launch parameters, resource allocation, kernel time); no counters | `dispatch.yaml` | `dispatch.grid_size`, `dispatch.vgprs`, `dispatch.kernel_time` |
+| `grbm` | GRBM | `grbm.yaml` | `grbm.gui_active_cycles` |
+| `lds` | LDS | `lds.yaml` | `lds.util`, `lds.theoretical_bw` |
+| `mem.l1i` | SQC instruction cache | `sqc_icache.yaml` | `mem.l1i_hit_rate_incl_dup`, `mem.l1i_fetch_lat` |
+| `mem.sl1d` | SQC scalar data cache | `sqc_dcache.yaml` | `mem.sl1d_bw`, `mem.sl1d_l2_rd_bw` |
+| `ta` | TA (address processing) | `ta_td.yaml` | `ta.global_insts`, `ta.busy` |
+| `td` | TD (data return) | `ta_td.yaml` | `td.busy`, `td.spi_stall` |
+| `mem.l1d` | TCP (with TA inputs, e.g. coalescing: AMD defines the vL1D as TA + TC + TD) | `tcp.yaml` | `mem.l1d_cache_bw`, `mem.l1d_l2_rd_bw` |
+| `mem.l2`, `mem.l2_chan` | TCC, per channel | `tcc.yaml` | `mem.l2_hit_rate`, `mem.l2_chan_hit_rate_per_chan` |
+| `mem.fabric`, `mem.hbm` | TCC-EA (Infinity Fabric, HBM) | `tcc.yaml` | `mem.fabric_rd_lat`, `mem.hbm_bw` |
+| `derived` | Results that combine blocks | `derived.yaml` | `derived.ai_hbm`, `derived.ai_l2` |
+
+The numeric positional IDs (e.g. `"11.2.2"`) are row positions in `analysis_configs`;
+the metric library does not store them.
 
 ### OQ3 resolution -- metrics with both description and formula drift
 
@@ -695,7 +624,7 @@ today's YAMLs differ between tables:
   table 201 and as a percent in 301) gets separate ids.
 - **The same quantity at a different unit scale** (e.g. `L2-Fabric Read BW` in GB/s vs
   Bytes/s) keeps one id with one uniform definition (formula and unit). A different
-  display unit is a view concern: the scaled form stays in the legacy mapping until
+  display unit is a view concern: the scaled form stays in the analysis configs until
   Phase 2, where a view may request its own display unit (see `ViewMetricRef.unit`).
 - **The same quantity with a different formula** (e.g. the gfx1250 cache hit rates,
   HITS/REQ vs HITS/(HITS+MISSES)) is unified to one formula in both the old and the new
@@ -711,8 +640,8 @@ descriptions are shared by more than one name.
 
 1. Select the **most specific, unambiguous name** as the canonical `name` in Layer 2.
    Prefer names that self-document the metric's scope without being excessively verbose.
-2. All other names become view-level `label` overrides in Layer 3. Until then they are
-   per-row labels in the legacy mapping.
+2. All other names become view-level `label` overrides in Layer 3. Until then they stay
+   the row names in the analysis configs.
 
 | Description group | Current names | Canonical `name` |
 |---|---|---|
@@ -758,7 +687,7 @@ sets:
 - **References only.** A set entry references a metric id and carries no metric fields,
   so a metric is still defined exactly once per architecture. Every referenced id must
   exist on that architecture.
-- **Inheritance.** `sets.yaml` follows the same `!inherit` chain as the metric files; for
+- **Inheritance.** `sets.yaml` follows the same `inherit` chain as the metric files; for
   example, gfx941 and gfx942 use gfx940's sets unchanged.
 - **Single-pass check.** Validation uses `get_counters_for_metrics()` to confirm that each
   set's counters fit in one pass.
@@ -769,8 +698,9 @@ sets:
 ### Built-in variable migration
 
 The built-in variables move into each base arch's `variables.yaml`. In Phase A,
-`get_build_in_vars()` in `utils_counter_defs.py` keeps its hardcoded dicts, and a test
-asserts that `layer2_vars_to_builtin_vars()` returns the same dict for every GPU series.
+`get_build_in_vars()` in `utils_counter_defs.py` keeps its hardcoded dicts, and the
+Stage 3 equivalence test asserts that the library variables equal `get_build_in_vars()`
+for every arch.
 At the cutover, `get_build_in_vars()` loads from `MetricLibrary.variables` and the
 hardcoded dicts are removed.
 
@@ -782,33 +712,34 @@ unchanged -- it receives the same `dict[str, str]` regardless of source.
 | Tool | What changes |
 |---|---|
 | `validate_sets_metric_ids.py` | Validate `metric_library/{arch}/sets.yaml`: references resolve through `MetricLibrary`, and each set fits one pass. The numeric files keep their positional check until the cutover. |
-| `format_yaml.py` | Recognize Layer 2 YAML structure (metric list with `id`, `name`, aggregation fields). Core equation formatting logic (factoring constants out of aggregation) is unchanged -- same equation keys (`value`, `avg`, `min`, `max`, `peak`). |
+| `format_yaml.py` | Also checks `metric_library/gfx*` files (its pre-commit hook covers them): the `formula` and `peak` keys, with the `!remove` tag accepted. Core equation formatting logic (factoring constants out of aggregation) is unchanged. Done in Stage 1 (task 03). |
 | `hash_manager.py` | Include base arch directories in hash database. Path discovery expands to cover `gfx908/*.yaml` and `gfx115x/*.yaml` as base arch files. |
-| `verify_against_config_template.py` | Validate Layer 2 files against `layer2_schema.py` instead of the Panel Config template. During transition, both templates checked depending on file location. |
+| `verify_against_config_template.py` | No change: `tools/validate_metric_library.py` checks the metric library files, and this script keeps checking the old panel files until the cutover. |
 | `metric_description_manager.py` | No change in Phase A: the old panel YAMLs stay the documentation source until the cutover (Stage 8), when it reads descriptions from Layer 2. Output format for docs YAMLs is unchanged. |
 
 ### Migration tooling
 
-One-time script `tools/migrate_to_layer2.py`:
+A one-time local script converts each arch. It is not committed; each PR commits its
+output unedited and says how the files were generated.
 
 1. Read each current panel config YAML for a given architecture.
 2. For each metric: generate the Layer 2 format with string `id`, canonical `name`,
-   formula, `unit` and `description`, plus the legacy mapping rows (`legacy_id`,
-   display name, aggregation fields).
+   formula, `unit` and `description`.
 3. Report every metric whose formula differs between tables of the same architecture,
    for the review described under OQ3.
 4. Generate the family base files and arch override files.
-5. Validate round-trip: run `layer2_to_panel_configs()` on the generated files and
-   compare output to the original `load_panel_configs()` result.
+5. Keep its row -> metric id decisions locally, keyed by positional id, for the sets
+   migration and for generating the Phase 2 views.
+
+The generated files are checked by the Stage 3 equivalence test and by
+`tools/validate_metric_library.py`; there is no round trip through an adapter.
 
 ### Validation
 
-- Per-arch golden-file comparison: old path vs new path, for analyze output.
-- Variable equivalence: variables from YAML produce the same evaluation results as
-  the hardcoded `get_build_in_vars()`.
-- Counter extraction equivalence: `detect_counters()` via Layer 2 path returns the
-  same counter set.
+- Per-arch equivalence test (Stage 3): formulas, no-filter counters and built-in
+  variables match today's analysis configs.
+- Schema check: `tools/validate_metric_library.py` passes.
 
 ### Dependencies
 
-Stages 1, 2. Stage 3 needed for validation (golden-file comparison).
+Stages 1, 2. Stage 3 needed for validation (equivalence test).

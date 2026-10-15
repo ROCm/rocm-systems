@@ -1,0 +1,155 @@
+# Copyright (c) Advanced Micro Devices, Inc.
+# SPDX-License-Identifier:  MIT
+
+"""Load metric library YAML files with file-level inheritance.
+
+A file names its parent with a top-level "inherit: <path>" key, relative to the file.
+The child is deep-merged onto the parent:
+- mappings merge key by key, so a child metric lists only the fields that change;
+- scalars and lists replace the parent's value;
+- "key: !remove" deletes the key.
+
+Duplicate keys and removing a missing key are errors. Uses the vendored PyYAML, so it
+is safe in profile mode.
+"""
+
+import copy
+from pathlib import Path
+from typing import Any
+
+from vendored import yaml
+
+INHERIT_KEY = "inherit"
+REMOVE_TAG = "!remove"
+
+
+def load_inherited_yaml(path: Path) -> dict[str, Any]:
+    """Load a YAML file merged with its "inherit" chain.
+
+    Args:
+        path: The file to load.
+
+    Returns:
+        The merged document, without the "inherit" key.
+    """
+    return _load_chain(Path(path).resolve(), [])
+
+
+def merge_documents(
+    base: dict[str, Any], override: dict[str, Any], source: str
+) -> dict[str, Any]:
+    """Merge an override document onto its base document.
+
+    Neither input is modified.
+
+    Args:
+        base: The parent document, already merged.
+        override: The child document, without its "inherit" key.
+        source: The child file, used in error messages.
+
+    Returns:
+        The merged document.
+    """
+    return _merge_mappings(base, override, source)
+
+
+def _load_chain(path: Path, chain: list[Path]) -> dict[str, Any]:
+    if path in chain:
+        raise InheritanceCycleError(chain + [path])
+    document = _read_document(path)
+    parent = document.pop(INHERIT_KEY, None)
+    if parent is None:
+        return merge_documents({}, document, str(path))
+    if not isinstance(parent, str) or not parent:
+        raise InheritanceError(f"{path}: '{INHERIT_KEY}' must be a relative file path")
+    parent_path = (path.parent / parent).resolve()
+    if not parent_path.is_file():
+        raise InheritanceError(f"{path}: parent file not found: {parent_path}")
+    base = _load_chain(parent_path, chain + [path])
+    return merge_documents(base, document, str(path))
+
+
+def _read_document(path: Path) -> dict[str, Any]:
+    try:
+        with open(path, encoding="utf-8") as stream:
+            document = yaml.load(stream, Loader=InheritLoader)
+    except InheritanceError as error:
+        raise InheritanceError(f"{path}: {error}") from error
+    if not isinstance(document, dict):
+        raise InheritanceError(f"{path}: the top level must be a mapping")
+    return document
+
+
+def _merge_mappings(
+    base: dict[str, Any], override: dict[str, Any], source: str
+) -> dict[str, Any]:
+    merged = copy.deepcopy(base)
+    for key, value in override.items():
+        if isinstance(value, Remove):
+            _remove_key(merged, key, source)
+            continue
+        merged[key] = _merge_value(merged.get(key), value, key, source)
+    return merged
+
+
+def _remove_key(mapping: dict[str, Any], key: str, source: str) -> None:
+    if key not in mapping:
+        raise InheritanceError(
+            f"{source}: cannot remove '{key}': the parent has no such key"
+        )
+    del mapping[key]
+
+
+def _merge_value(base: object, override: object, key: str, source: str) -> object:
+    if isinstance(override, dict):
+        return _merge_mappings(base if isinstance(base, dict) else {}, override, source)
+    if isinstance(override, list) and any(
+        isinstance(item, Remove) for item in override
+    ):
+        raise InheritanceError(f"{source}: '{REMOVE_TAG}' is not allowed in '{key}'")
+    return copy.deepcopy(override)
+
+
+def _construct_remove(loader: "InheritLoader", node: yaml.Node) -> "Remove":
+    if not isinstance(node, yaml.ScalarNode) or loader.construct_scalar(node):
+        raise InheritanceError(
+            f"line {node.start_mark.line + 1}: '{REMOVE_TAG}' takes no value"
+        )
+    return Remove()
+
+
+class Remove:
+    """Marks a key to delete during the merge."""
+
+    def __repr__(self) -> str:
+        return "Remove()"
+
+
+class InheritLoader(yaml.SafeLoader):
+    """SafeLoader with the "!remove" tag that rejects duplicate keys."""
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        keys = [self.construct_object(key, deep=deep) for key, _ in node.value]
+        duplicates = sorted({str(key) for key in keys if keys.count(key) > 1})
+        if duplicates:
+            raise InheritanceError(
+                f"line {node.start_mark.line + 1}: duplicate keys {duplicates}"
+            )
+        return super().construct_mapping(node, deep=deep)
+
+
+InheritLoader.add_constructor(REMOVE_TAG, _construct_remove)
+
+
+class InheritanceError(Exception):
+    """A metric library file cannot be loaded or merged."""
+
+
+class InheritanceCycleError(InheritanceError):
+    """A file's "inherit" chain leads back to itself."""
+
+    def __init__(self, chain: list[Path]) -> None:
+        self.chain = chain
+        super().__init__(
+            "inheritance cycle: " + " -> ".join(str(path) for path in chain)
+        )
