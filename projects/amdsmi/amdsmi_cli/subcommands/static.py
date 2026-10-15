@@ -1755,6 +1755,9 @@ class StaticCommands:
             args.nic = nic
 
         if self._static_nics(args, multiple_devices, nic):
+            # Returning here skips the combined JSON printed at the end of static().
+            if self.logger.is_json_format():
+                self.logger.combine_arrays_to_json()
             return True  # we do not want to print cpu or gpu if user only wanted nic
 
         if (hasattr(args, "cpu") and args.cpu) or (hasattr(args, "gpu") and args.gpu):
