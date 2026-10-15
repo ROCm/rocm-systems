@@ -1,0 +1,75 @@
+name: Scoped Formatting
+# Identify the exact PR comparison, including retargets with an unchanged head.
+run-name: >-
+  ${{ github.event_name == 'pull_request' && format('PR #{0}: {1}@{2}', github.event.number, github.base_ref, github.event.pull_request.base.sha) || format('Push {0}', github.sha) }}
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, ready_for_review, edited]
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/cuid/**'
+      - 'projects/rocprofiler-compute/**'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: ${{ matrix.check-name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: ${{ matrix.timeout-minutes || 360 }}
+    strategy:
+      # Every named check must report its own result, even if another fails.
+      fail-fast: false
+      matrix:
+        include:
+          - scope: runtimes
+            check-name: pre-commit / runtimes
+            timeout-minutes: 10
+            include: '^(runtimes/|\.pre-commit-config\.yaml\Z)'
+          - scope: rocjitsu
+            # The base-branch PR bot still requires this name during rollout.
+            check-name: pre-commit
+            include: '^(emulation/(mirage|rocjitsu)/|\.github/workflows/rocjitsu-[^/]*\.yml\Z|\.pre-commit-config\.yaml\Z)'
+            sparse-checkout: |
+              emulation/mirage
+              emulation/rocjitsu
+              .github
+          - scope: cuid
+            check-name: pre-commit / cuid
+            include: '^projects/cuid/'
+            exclude: '(\.(md|rst|rtf)\Z|(^|/)\.readthedocs\.yaml\Z|^projects/cuid/docs/)'
+            config: projects/cuid/.pre-commit-config.yaml
+          - scope: rocprofiler-compute
+            check-name: pre-commit / rocprofiler-compute
+            include: '^projects/rocprofiler-compute/'
+            exclude: '(\.(md|rst|rtf)\Z|(^|/)\.(readthedocs|markdownlint-ci2|spellcheck\.local)\.yaml\Z|(^|/)\.wordlist\.txt\Z|^docs/|^projects/[^/]+/docs/)'
+            config: projects/rocprofiler-compute/.pre-commit-config.yaml
+            submodules: recursive
+    steps:
+      # Every scope inspects the complete diff, on every target branch.
+      - name: Checkout scope inspector
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          filter: blob:none
+          sparse-checkout: |
+            .github/actions/changed-files
+            .github/actions/scoped-formatting
+
+      - name: Format changed files in this scope
+        uses: ./.github/actions/scoped-formatting
+        with:
+          include: ${{ matrix.include }}
+          # Documentation exclusions apply only to presubmit formatting.
+          exclude: ${{ github.event_name == 'pull_request' && matrix.exclude || '' }}
+          config: ${{ matrix.config || '.pre-commit-config.yaml' }}
+          sparse-checkout: ${{ matrix.sparse-checkout }}
+          submodules: ${{ matrix.submodules || 'false' }}
