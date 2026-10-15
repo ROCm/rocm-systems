@@ -136,17 +136,17 @@ uint32_t Vopd::execute_slot(const Slot &slot, amdgpu::Wavefront &wf, uint32_t la
   case kVopdMovB32:
     return src0;
   case kVopdCndmaskB32: {
-    uint64_t condition = slot.uses_vcc ? wf.vcc_mask(uint64_t{1} << lane)
-                                       : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
+    uint64_t condition =
+        slot.uses_vcc ? wf.vcc_mask() : amdgpu::read_wave_mask_scalar(*slot.src2, wf);
     return ((condition >> lane) & 1u) ? src1 : src0;
   }
   case kVopdMaxNumF32: {
-    float result = std::fmax(std::bit_cast<float>(src0), std::bit_cast<float>(src1));
-    return std::bit_cast<uint32_t>(result);
+    return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
+        amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
   }
   case kVopdMinNumF32: {
-    float result = std::fmin(std::bit_cast<float>(src0), std::bit_cast<float>(src1));
-    return std::bit_cast<uint32_t>(result);
+    return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
+        amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
   }
   case kVopdAddNcU32:
     return src0 + src1;

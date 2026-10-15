@@ -14,10 +14,34 @@
 #include <optional>
 #include <string>
 #include <unordered_map>
+#include <utility>
+#include <vector>
+
+#include <unistd.h>
 
 #include "nccl.h"
 
 namespace {
+struct MicroEnvironState {
+  bool active = false;
+  char** original = nullptr;
+  std::vector<std::string> entries;
+  std::vector<char*> pointers;
+};
+
+MicroEnvironState& microEnvironState() {
+  static MicroEnvironState state;
+  return state;
+}
+
+void PublishMicroEnviron() {
+  auto& state = microEnvironState();
+  state.pointers.clear();
+  for (auto& entry : state.entries) state.pointers.push_back(entry.data());
+  state.pointers.push_back(nullptr);
+  environ = state.pointers.data();
+}
+
 // A nullopt entry means "absent". Unmapped names read as unset via micro_getenv, real via the getenv interposer.
 std::unordered_map<std::string, std::optional<std::string>>& microEnvMap() {
   static std::unordered_map<std::string, std::optional<std::string>> m;
@@ -54,11 +78,53 @@ void SetMicroEnv(const char* name, const char* value) {
   if (name == nullptr) return;
   if (value == nullptr) microEnvMap()[name] = std::nullopt;
   else microEnvMap()[name] = value;
+  auto& state = microEnvironState();
+  if (state.active) {
+    const std::string prefix = std::string(name) + "=";
+    std::vector<std::string> entries;
+    bool replaced = false;
+    for (const auto& entry : state.entries) {
+      if (entry.compare(0, prefix.size(), prefix) != 0) {
+        entries.push_back(entry);
+      } else if (!replaced && value != nullptr) {
+        entries.push_back(prefix + value);
+        replaced = true;
+      }
+    }
+    if (!replaced && value != nullptr) entries.push_back(prefix + value);
+    state.entries = std::move(entries);
+    PublishMicroEnviron();
+  }
 }
 
 void SetMicroEnvAbsent(const char* name) { SetMicroEnv(name, nullptr); }
 
-void ClearMicroEnv() { microEnvMap().clear(); }
+void SetMicroEnviron(const std::vector<std::string>& entries) {
+  auto& state = microEnvironState();
+  if (!state.active) state.original = environ;
+  state.active = true;
+  state.entries = entries;
+  auto& values = microEnvMap();
+  values.clear();
+  for (const auto& entry : entries) {
+    const auto separator = entry.find('=');
+    if (separator != std::string::npos)
+      values.emplace(entry.substr(0, separator), entry.substr(separator + 1));
+  }
+  PublishMicroEnviron();
+}
+
+void ClearMicroEnv() {
+  auto& state = microEnvironState();
+  if (state.active) {
+    environ = state.original;
+    state.active = false;
+    state.original = nullptr;
+    state.entries.clear();
+    state.pointers.clear();
+  }
+  microEnvMap().clear();
+}
 
 void ResetEnvFakes() { ClearMicroEnv(); }
 

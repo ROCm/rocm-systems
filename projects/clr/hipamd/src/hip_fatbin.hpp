@@ -13,6 +13,7 @@
 #include "platform/program.hpp"
 
 #include <optional>
+#include <vector>
 
 namespace hip {
 
@@ -31,7 +32,8 @@ class FatBinaryInfo {
   explicit FatBinaryInfo(KpackParams kpack_params);
   ~FatBinaryInfo();
 
-  hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices);
+  hipError_t ExtractFatBinaryUsingCOMGR(const std::vector<hip::Device*>& devices,
+                                        std::vector<char>* image_storage = nullptr);
   hipError_t ExtractKpackBinary(const std::vector<hip::Device*>& devices);
   hipError_t AddDevProgram(hip::Device* device, const void* binary_image, size_t binary_size,
                            amd::Os::FileDesc fdesc);

@@ -39,6 +39,15 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # CPU-only Makefile scan: NCCL PR #1806 (-M -> -MM) must stay in force.
+  # Registered here for local `ctest` only; CI gates via the `guards` phase of
+  # test/host/run_host_tests.sh.
+  add_test(
+    NAME rccl-makefile-depflags
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/test/test_makefile_depflags.py"
+  )
+
   # The kernel-count leak guards and the __hip_atomic_* poison probe
   # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
   # ctest cases here: nothing in RCCL CI runs `ctest`, so an add_test() would
@@ -229,8 +238,16 @@ if(BUILD_TESTS)
     dl
     fmt::fmt-header-only
   )
+  set(RCCL_COMMON_BUILD_RPATH "")
   if(OPENMP_TESTS_ENABLED)
-    list(APPEND RCCL_COMMON_LINK_LIBS "${OpenMP_CXX_FLAGS}")
+    list(APPEND RCCL_COMMON_LINK_LIBS OpenMP::OpenMP_CXX)
+    foreach(openmpLibrary IN LISTS OpenMP_CXX_LIBRARIES)
+      if(IS_ABSOLUTE "${openmpLibrary}" AND NOT "${openmpLibrary}" MATCHES "\\.a$")
+        get_filename_component(openmpLibraryDir "${openmpLibrary}" DIRECTORY)
+        list(APPEND RCCL_COMMON_BUILD_RPATH "${openmpLibraryDir}")
+      endif()
+    endforeach()
+    list(REMOVE_DUPLICATES RCCL_COMMON_BUILD_RPATH)
   endif()
   if(ENABLE_MPI_TESTS AND MPI_CXX_LIBRARIES)
     list(APPEND RCCL_COMMON_LINK_LIBS ${MPI_CXX_LIBRARIES})
@@ -268,6 +285,7 @@ if(BUILD_TESTS)
     CollImplInfoTests.cpp
     DeviceResourceRequirementTests.cpp
     DoneEventOrderingTests.cpp
+    Fp8VerifiableTests.cpp
     GatherTests.cpp
     GroupCallTests.cpp
     NonBlockingTests.cpp
@@ -278,6 +296,7 @@ if(BUILD_TESTS)
     ScatterTests.cpp
     TeamTopologyTests.cpp
     P2pChannelScalingTests.cpp
+    PipeUtilsTests.cpp
     VersionGateTests.cpp
     SendRecvTests.cpp
     StandaloneTests.cpp
@@ -300,6 +319,8 @@ if(BUILD_TESTS)
     common/TestBed.cpp
     common/TestBedChild.cpp
     common/StandaloneUtils.cpp
+    common/VerifiableData.cpp
+    common/VerifiableFp8.cpp
     proxy_trace/ProxyTraceUnitTests.cpp
     ../src/misc/proxy_trace/proxy_trace.cc
     latency_profiler/LatencyProfilerUnitTest.cpp
@@ -382,8 +403,10 @@ if(BUILD_TESTS)
       device/TestAsyncCopy.cpp
       device/TestLdsTransfer.cpp
       device/GinDeviceTests.cpp
+      device/GinBackendMaskDispatch_test.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
+      device/ChannelMaskMapTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -757,6 +780,7 @@ if(BUILD_TESTS)
       ProxyTests.cpp
       PatAlgorithmTests.cpp
       RcclWrapTests.cpp
+      SymkBlockWidthTests.cpp
       SocketPollTests.cpp
       TransportTests.cpp
       TimeoutTests.cpp
@@ -765,6 +789,7 @@ if(BUILD_TESTS)
       graph/TuningTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
+      graph/P2pPxnLevel1NetIdTests.cpp
       graph/TopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
@@ -987,6 +1012,7 @@ if(BUILD_TESTS)
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
+      transport/GinNicFusionMPITests.cpp
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
@@ -995,6 +1021,7 @@ if(BUILD_TESTS)
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
+      GinConnectLeakMPITests.cpp
       RmaExternalPluginPutSignalMPITests.cpp
       plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
@@ -1042,6 +1069,20 @@ if(BUILD_TESTS)
       "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
+
+    # Loadable GIN plugin for GinConnectLeakMPITest, built and installed beside the test binary.
+    add_library(rccl-test-gin-fault-plugin SHARED plugin/gin_fault_plugin.cpp)
+    target_include_directories(rccl-test-gin-fault-plugin PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+    target_link_libraries(rccl-test-gin-fault-plugin PRIVATE hip::host)
+    if(TARGET rccl)
+      add_dependencies(rccl-test-gin-fault-plugin rccl)
+    endif()
+    add_dependencies(rccl-UnitTestsMPI rccl-test-gin-fault-plugin)
+    target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+      RCCL_TEST_GIN_FAULT_PLUGIN_NAME="$<TARGET_FILE_NAME:rccl-test-gin-fault-plugin>")
+    install(TARGETS rccl-test-gin-fault-plugin
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT tests)
 
     # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
     # load a profiler without the caller setting NCCL_INSPECTOR_PLUGIN_SO.
@@ -1095,6 +1136,9 @@ if(BUILD_TESTS)
       target_compile_definitions(${test_executable} PRIVATE RCCL_DEVICE_LINKER)
     endif()
     target_link_libraries(${test_executable} PRIVATE ${RCCL_COMMON_LINK_LIBS})
+    if(RCCL_COMMON_BUILD_RPATH)
+      set_property(TARGET ${test_executable} APPEND PROPERTY BUILD_RPATH ${RCCL_COMMON_BUILD_RPATH})
+    endif()
     if(BUILD_ADDRESS_SANITIZER)
       target_compile_options(${test_executable} PRIVATE -fsanitize=address)
       target_link_options(${test_executable} PRIVATE -fsanitize=address -shared-libasan)

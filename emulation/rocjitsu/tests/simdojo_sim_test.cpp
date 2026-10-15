@@ -66,6 +66,13 @@ private:
   Event timer_event_{this, EventType::TIMER_CALLBACK};
 };
 
+/// Leaf kept alive until an external producer finishes posting events.
+class AsyncPrimaryComponent : public Component {
+public:
+  explicit AsyncPrimaryComponent(std::string name) : Component(std::move(name)) {}
+  void startup() override { engine()->register_as_primary(); }
+};
+
 /// Component with IN/OUT ports that replies to each received message.
 /// Optionally registers as primary (default: true).
 class PingPongComponent : public Component {
@@ -1450,6 +1457,51 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   }
 
   EXPECT_GE(injected_tick.load(), before);
+}
+
+// Regression: draining a handler's async self-post can leave its wake flag set.
+// Clearing that stale notification must acquire any concurrent producer's
+// publication, or the worker can sleep with an event stranded in the async queue.
+TEST(AsyncCausalityTest, StaleWakeDoesNotHideConcurrentPublication) {
+  constexpr uint32_t kEvents = 2000;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *target = root->add_child(std::make_unique<AsyncPrimaryComponent>("target"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  std::atomic<uint32_t> processed{0};
+  Event noop{target, EventType::TIMER_CALLBACK, [](Tick, Message *) {}};
+  Event test_event{target, EventType::TIMER_CALLBACK, [&](Tick, Message *) {
+                     // Self-posting leaves a stale wake flag after the no-op is
+                     // drained, so idle entry can race the next publication.
+                     engine.schedule_event_now(&noop);
+                     if (processed.fetch_add(1, std::memory_order_release) + 1 == kEvents)
+                       engine.primary_release();
+                   }};
+  ExitStatus exit_status;
+  std::thread runner([&]() { exit_status = engine.run(); });
+  const bool started = engine.wait_until_started();
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  uint32_t sent = 0;
+  if (started) {
+    // Only one producer event may be outstanding: a later publication must not
+    // rescue a lost wake.
+    while (sent < kEvents && std::chrono::steady_clock::now() < deadline) {
+      engine.schedule_event_now(&test_event);
+      ++sent;
+      while (processed.load(std::memory_order_acquire) < sent &&
+             std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    }
+  }
+  const bool completed = processed.load(std::memory_order_acquire) == kEvents;
+  if (!completed)
+    engine.request_exit("async notification timeout", /*code=*/1);
+  runner.join();
+  EXPECT_TRUE(started);
+  EXPECT_TRUE(completed) << "sent " << sent << ", processed " << processed.load();
+  EXPECT_EQ(exit_status.reason, ExitReason::COMPLETED);
 }
 
 TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgress) {

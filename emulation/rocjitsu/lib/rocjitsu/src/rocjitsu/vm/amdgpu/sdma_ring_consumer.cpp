@@ -22,6 +22,8 @@ SdmaRingStatus map(VmAccessOutcome outcome) {
     return SdmaRingStatus::Faulted;
   case VmAccessOutcome::Malformed:
     return SdmaRingStatus::Malformed;
+  case VmAccessOutcome::Revoked:
+    return SdmaRingStatus::Faulted;
   }
   return SdmaRingStatus::Malformed;
 }

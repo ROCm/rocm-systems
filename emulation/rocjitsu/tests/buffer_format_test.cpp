@@ -177,6 +177,7 @@ TEST(BufferFormatTest, Cdna4FormattedLoadCanWriteLdsWithoutClobberingVgprs) {
   auto *wf = cu->dispatch_wf(0, 0, 32, 32);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(1);
+  wf->set_lds_size(128);
   wf->set_m0(64);
   const auto sb = wf->sgpr_alloc().base, vb = wf->vgpr_alloc().base;
   cu->write_sgpr(sb + 4, 0x1000);
