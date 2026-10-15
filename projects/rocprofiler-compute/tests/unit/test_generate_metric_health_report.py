@@ -53,7 +53,7 @@ def test_discover_missing_baseline_dir_is_clear_error(tmp_path: Path) -> None:
 
 
 def test_discover_dir_without_run_logs_is_clear_error(tmp_path: Path) -> None:
-    root = write_artifact_dir(tmp_path / "candidate", "spp", 10.0)
+    root = write_artifact_dir(tmp_path / "candidate", "single-pass", 10.0)
 
     with pytest.raises(SystemExit, match=r"no \*_develop\.log"):
         report.discover_run_artifacts(
@@ -64,7 +64,7 @@ def test_discover_dir_without_run_logs_is_clear_error(tmp_path: Path) -> None:
 def test_report_compares_candidate_dir_against_develop_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
-    candidate = write_artifact_dir(tmp_path / "candidate", "spp", 10.0)
+    candidate = write_artifact_dir(tmp_path / "candidate", "single-pass", 10.0)
     baseline = write_artifact_dir(tmp_path / "develop", "develop", 5.0)
     out = tmp_path / "health.html"
     monkeypatch.setattr(report, "compute_medians_for_workload", lambda *_: {})
