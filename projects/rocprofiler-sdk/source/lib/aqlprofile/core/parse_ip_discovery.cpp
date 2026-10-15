@@ -83,20 +83,26 @@ read_sysfs_single_int(const fs::path& path)
  *         if successful, or `std::nullopt` if the file does not exist, cannot be opened,
  *         or contains invalid data.
  */
-std::optional<base_addr_segments_t>
+struct parsed_base_addr_segments
+{
+    base_addr_segments_t values{};
+    size_t               count = 0;
+};
+
+std::optional<parsed_base_addr_segments>
 read_sysfs_base_addr_segments(const fs::path& path)
 {
     std::ifstream file(path);
     if(!file.is_open()) return std::nullopt;  // Failed to open file
 
-    base_addr_segments_t segments{0};
-    std::string          databuf;
-    size_t               x = 0;
-    while(std::getline(file, databuf) && x < segments.size())
+    parsed_base_addr_segments segments{};
+    std::string               databuf;
+    while(std::getline(file, databuf) && segments.count < segments.values.size())
     {
         std::stringstream ss(databuf);
-        ss >> std::hex >> segments[x++];
+        ss >> std::hex >> segments.values[segments.count];
         if(ss.fail()) return std::nullopt;  // Failed to parse data
+        ++segments.count;
     }
 
     return segments;
@@ -134,13 +140,17 @@ parse_ip_instances(int die_num, const fs::path& diepath, const std::string& ipna
 
         discovery_table_entry_t table_entry{};
         table_entry.die = die_num;
+        table_entry.id  = std::stoi(dir_entry.path().filename());
 
         // "/sys/bus/pci/devices/{domain_bdf_str}/ip_discovery/die{die_num}/{ipname}/{instance_num}"
         fs::path instance_path = dir_path / dir_entry.path().filename();
 
         // base_addr list
         if(auto segments = read_sysfs_base_addr_segments(instance_path / "base_addr"))
-            table_entry.segments = *segments;
+        {
+            table_entry.segments      = segments->values;
+            table_entry.segment_count = segments->count;
+        }
         else
             throw std::runtime_error("Failed to read IP base_addr segments for ipname=" + ipname +
                                      " die=" + std::to_string(die_num));

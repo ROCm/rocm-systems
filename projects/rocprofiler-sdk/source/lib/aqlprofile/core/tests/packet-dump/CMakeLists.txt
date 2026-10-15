@@ -1,5 +1,5 @@
 set(AQLPROFILE_PACKET_GOLDEN_TEST_SOURCES packet_golden_tests.cpp packet_golden_main.cpp
-                                          packet_golden_utils.cpp)
+                                          packet_golden_utils.cpp packet_golden_json.cpp)
 
 find_package(Python3 REQUIRED COMPONENTS Interpreter)
 set(AQLPROFILE_PACKET_ARGS_OUTPUT)
@@ -45,7 +45,8 @@ target_link_libraries(
             rocprofiler-sdk::rocprofiler-sdk-amd-comgr
             rocprofiler-sdk::rocprofiler-sdk-drm
             aqlprofile-core-tests-flags
-            GTest::gtest)
+            GTest::gtest
+            nlohmann_json::nlohmann_json)
 
 rocprofiler_add_unit_test(
     TARGET aqlprofile-packet-golden-tests

@@ -24,6 +24,7 @@
 #define SRC_CORE_IP_DISCOVERY_H_
 
 #include <array>
+#include <cstddef>
 #include <vector>
 #include <string>
 #include <unordered_map>
@@ -37,13 +38,15 @@ using base_addr_segments_t = std::array<uint32_t, HWIP_MAX_SEGMENT>;
 // block.
 struct discovery_table_entry_t
 {
-    int                  die{0};       // Die index
-    base_addr_segments_t segments{};   // Base address segments
-    int                  major{0};     // Major version of the IP
-    int                  minor{0};     // Minor version of the IP
-    int                  revision{0};  // Revision number of the IP
-    int                  instance{0};  // Instance ID of the IP
-    std::string          ipname{};     // Name of the IP block
+    int                  die{0};            // Die index
+    base_addr_segments_t segments{};        // Base address segments
+    size_t               segment_count{0};  // Number of segments present in base_addr
+    int                  major{0};          // Major version of the IP
+    int                  minor{0};          // Minor version of the IP
+    int                  revision{0};       // Revision number of the IP
+    int                  id{0};             // Instance directory ID
+    int                  instance{0};       // Value from the num_instance file
+    std::string          ipname{};          // Name of the IP block
 };
 
 using discovery_table_t = std::vector<discovery_table_entry_t>;

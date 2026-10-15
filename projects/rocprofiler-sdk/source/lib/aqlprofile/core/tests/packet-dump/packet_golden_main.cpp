@@ -26,7 +26,7 @@ parse_event_id(const std::string& value)
 }
 
 void
-append_events(packet_test_case& test_case, const std::string& csv)
+append_events(std::vector<packet_test_event>& events, const std::string& csv)
 {
     size_t begin = 0;
     while(begin <= csv.size())
@@ -35,10 +35,19 @@ append_events(packet_test_case& test_case, const std::string& csv)
         const auto   token = csv.substr(begin, end - begin);
         if(token.empty()) throw std::invalid_argument{"empty event ID in: " + csv};
 
-        const uint32_t event = parse_event_id(token);
-        if(std::find(test_case.events.begin(), test_case.events.end(), event) ==
-           test_case.events.end())
-            test_case.events.emplace_back(event);
+        const size_t separator = token.rfind(':');
+        if(separator == std::string::npos || separator == 0 || separator + 1 == token.size())
+            throw std::invalid_argument{"event must use name:id format: " + token};
+
+        const packet_test_event event{
+            token.substr(0, separator),
+            parse_event_id(token.substr(separator + 1)),
+        };
+        const auto duplicate =
+            std::find_if(events.begin(), events.end(), [&event](const auto& candidate) {
+                return candidate.name == event.name && candidate.id == event.id;
+            });
+        if(duplicate == events.end()) events.emplace_back(event);
 
         if(end == std::string::npos) break;
         begin = end + 1;
@@ -65,6 +74,7 @@ parse_packet_test_options(int argc, char** argv)
         {"gfx", required_argument, nullptr, 'g'},
         {"block", required_argument, nullptr, 'b'},
         {"events", required_argument, nullptr, 'e'},
+        {"skipped-events", required_argument, nullptr, 's'},
         {nullptr, 0, nullptr, 0},
     };
 
@@ -72,7 +82,7 @@ parse_packet_test_options(int argc, char** argv)
     optind = 1;
     while(true)
     {
-        const int parsed_option = getopt_long(argc, argv, ":g:b:e:", long_options, nullptr);
+        const int parsed_option = getopt_long(argc, argv, ":g:b:e:s:", long_options, nullptr);
         if(parsed_option == -1) break;
 
         switch(parsed_option)
@@ -91,7 +101,12 @@ parse_packet_test_options(int argc, char** argv)
             case 'e':
                 if(!current_case)
                     throw std::invalid_argument{"--events must follow a --block option"};
-                append_events(*current_case, optarg);
+                append_events(current_case->events, optarg);
+                break;
+            case 's':
+                if(!current_case)
+                    throw std::invalid_argument{"--skipped-events must follow a --block option"};
+                append_events(current_case->skipped_events, optarg);
                 break;
             case ':':
                 throw std::invalid_argument{"missing value for option " +
