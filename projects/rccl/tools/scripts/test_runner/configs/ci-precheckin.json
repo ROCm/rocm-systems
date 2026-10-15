@@ -279,6 +279,17 @@
       "tests": [
         {"name": "AllocatorMicrotests", "description": "Host-only allocator microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_mnnvl": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroMnnvl",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "MnnvlMicrotests", "description": "Host-only mnnvl microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -352,6 +363,12 @@
       "name": "RCCL Microtests - allocator",
       "description": "rccl-UnitTestsMicroAllocator (host-only allocator microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_allocator",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - mnnvl",
+      "description": "rccl-UnitTestsMicroMnnvl (host-only mnnvl microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_mnnvl",
       "enabled": true
     }
   ]

@@ -318,6 +318,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `allocator-test.cc`); suite `Allocator*`. Its own binary because every other binary that
   needs `ncclShadowPoolToHost` links `fakes/allocator_fakes.cc` instead. See
   `test_categories_micro_allocator.yaml`.
+- **`rccl-UnitTestsMicroMnnvl`** — `mnnvl.cc` (via `MNNVL_CC_PATH`, from `mnnvl-test.cc`);
+  suite `Mnnvl*`. Its own binary because the test defines the `ncclCuMemEnable`, `getBusId`
+  and memory-manager symbols that `rccl-UnitTestsMicro` gets from its shared fakes. See
+  `test_categories_micro_mnnvl.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -840,6 +844,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
 `rccl-UnitTestsMicroMemManager`,
 `rccl-UnitTestsMicroAllocator`,
+`rccl-UnitTestsMicroMnnvl`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -882,6 +887,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroMemManager         # src/mem_manager.cc tests
 ./build/rccl-UnitTestsMicroAllocator          # src/allocator.cc tests
+./build/rccl-UnitTestsMicroMnnvl              # src/mnnvl.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests

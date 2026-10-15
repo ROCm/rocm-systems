@@ -404,6 +404,14 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroMnnvl -- src/mnnvl.cc. Own binary: the test defines the ncclCuMemEnable, getBusId
+  # and memory-manager symbols that rccl-UnitTestsMicro gets from its shared fakes.
+  set(TEST_MICRO_MNNVL_SOURCE_FILES
+    mnnvl-test.cc
+    fakes/hip_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1090,6 +1098,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroAllocator
     ${_MICRO_MODE_DEFS}
     ALLOCATOR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/allocator.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_allocator.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMnnvl
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMnnvl
+  SOURCES ${TEST_MICRO_MNNVL_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    MNNVL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mnnvl.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mnnvl.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
