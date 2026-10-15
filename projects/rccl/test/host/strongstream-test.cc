@@ -47,8 +47,9 @@ struct LoggedMessage {
 std::vector<LoggedMessage> g_logged;
 
 bool Logged(ncclDebugLogLevel level, const char* needle) {
-  for (const auto& m : g_logged)
+  for (const auto& m : g_logged) {
     if (m.level == level && m.text.find(needle) != std::string::npos) return true;
+  }
   return false;
 }
 
@@ -235,8 +236,9 @@ int Count(const std::string& fn) {
 }
 std::vector<Call> CallsTo(const std::string& fn) {
   std::vector<Call> out;
-  for (const auto& c : g_calls)
+  for (const auto& c : g_calls) {
     if (c.fn == fn) out.push_back(c);
+  }
   return out;
 }
 

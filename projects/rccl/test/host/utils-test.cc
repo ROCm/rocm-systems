@@ -169,8 +169,9 @@ namespace {
 constexpr size_t kHunk = 64 << 10;
 
 bool Logged(ncclDebugLogLevel level, const char* needle) {
-  for (const auto& m : g_utilsLog)
+  for (const auto& m : g_utilsLog) {
     if (m.level == level && m.text.find(needle) != std::string::npos) return true;
+  }
   return false;
 }
 
@@ -666,8 +667,9 @@ TEST_F(UtilsMicrotest, AddressMap_InsertFindRemove) {
 TEST_F(UtilsMicrotest, AddressMap_CollidingKeysChainInOneBucket) {
   std::vector<Entry> entries;
   for (uintptr_t k = 1; entries.size() < 4; k++) {
-    if (ncclHashPointer(4, reinterpret_cast<void*>(k << 12)) == 3)
+    if (ncclHashPointer(4, reinterpret_cast<void*>(k << 12)) == 3) {
       entries.push_back({reinterpret_cast<void*>(k << 12), nullptr});
+    }
   }
   for (auto& e : entries) ASSERT_EQ(ncclSuccess, Insert(&e));
   for (auto& e : entries) EXPECT_EQ(&e, Find(e.key));
@@ -690,9 +692,11 @@ TEST_F(UtilsMicrotest, AddressMap_GrowsAtTwoEntriesPerBucket) {
   EXPECT_EQ(5, map_.base.hbits);
   EXPECT_EQ(33, map_.base.count);
   for (auto& e : entries) EXPECT_EQ(&e, Find(e.key));
-  for (int b = 0; b < 32; b++)
-    for (Entry* e = static_cast<Entry*>(map_.base.table[b]); e; e = e->next)
+  for (int b = 0; b < 32; b++) {
+    for (Entry* e = static_cast<Entry*>(map_.base.table[b]); e; e = e->next) {
       EXPECT_EQ((uint64_t)b, ncclHashPointer(5, e->key));
+    }
+  }
   EXPECT_EQ(1u, g_live.size());
 }
 

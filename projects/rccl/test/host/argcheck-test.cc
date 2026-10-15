@@ -81,8 +81,9 @@ ncclResult_t bootstrapAllGather(void*, void* allData, int size) {
   g_gatherSize = size;
   SymBufInfo* all = static_cast<SymBufInfo*>(allData);
   g_gathered.assign(all + 2 * g_myRank, all + 2 * g_myRank + 2);
-  for (int i = 0; i < (int)g_peerInfo.size(); i++)
+  for (int i = 0; i < (int)g_peerInfo.size(); i++) {
     if (i / 2 != g_myRank) all[i] = g_peerInfo[i];
+  }
   return g_gatherResult;
 }
 
@@ -177,8 +178,9 @@ class ArgcheckMicrotest : public ::testing::Test {
     return ncclArgsGlobalCheck(&args_);
   }
   bool Logged(ncclDebugLogLevel level, const char* needle) {
-    for (const auto& m : g_argcheckLog)
+    for (const auto& m : g_argcheckLog) {
       if (m.level == level && m.text.find(needle) != std::string::npos) return true;
+    }
     return false;
   }
   // The op a user would pass for userRedOps_[index] on this comm.

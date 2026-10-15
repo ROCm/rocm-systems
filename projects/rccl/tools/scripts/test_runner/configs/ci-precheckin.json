@@ -376,31 +376,31 @@
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - misc/crypt.cc",
+      "name": "RCCL Microtests - crypt.cc",
       "description": "rccl-UnitTestsMicroCrypt (host-only misc/crypt.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_crypt",
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - misc/strongstream.cc",
+      "name": "RCCL Microtests - strongstream.cc",
       "description": "rccl-UnitTestsMicroStrongstream (host-only misc/strongstream.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_strongstream",
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - misc/utils.cc",
+      "name": "RCCL Microtests - utils.cc",
       "description": "rccl-UnitTestsMicroUtils (host-only misc/utils.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_utils",
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - misc/argcheck.cc",
+      "name": "RCCL Microtests - argcheck.cc",
       "description": "rccl-UnitTestsMicroArgcheck (host-only misc/argcheck.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_argcheck",
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - include/cpuset.h",
+      "name": "RCCL Microtests - cpuset.h",
       "description": "rccl-UnitTestsMicroCpuset (host-only include/cpuset.h microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_cpuset",
       "enabled": true

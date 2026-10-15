@@ -9,12 +9,13 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstdarg>
+#include <cstddef>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
-#include <functional>
 #include <mutex>
 #include <string>
 #include <vector>
@@ -37,8 +38,9 @@ struct LoggedMessage {
 std::vector<LoggedMessage> g_logged;
 
 bool Logged(ncclDebugLogLevel level, const char* needle) {
-  for (const auto& m : g_logged)
+  for (const auto& m : g_logged) {
     if (m.level == level && m.text.find(needle) != std::string::npos) return true;
+  }
   return false;
 }
 }  // namespace
@@ -78,8 +80,9 @@ ncclResult_t ncclOsSocketProgressOpt(int op, struct ncclSocket* /*sock*/, void* 
   g_progressCalls.push_back({op, size, *offset});
   if (g_progressResult != ncclSuccess) return g_progressResult;
   int n = std::min(g_progressBytes, size - *offset);
-  if (op == NCCL_SOCKET_RECV && n > 0 && (size_t)(*offset + n) <= g_peerBytes.size())
+  if (op == NCCL_SOCKET_RECV && n > 0 && (size_t)(*offset + n) <= g_peerBytes.size()) {
     std::memcpy((char*)ptr + *offset, g_peerBytes.data() + *offset, n);
+  }
   *offset += n;
   *closed = g_progressClosed;
   return ncclSuccess;
@@ -140,6 +143,11 @@ class CryptMicrotest : public ::testing::Test {
 // Encryption mode API
 
 TEST_F(CryptMicrotest, SetEncryption_NullConfigIsPlaintext) {
+  ncclEncryptionConfig_t config = Config(NCCL_ENCRYPTION_MODE_PSK, kPsk32);
+  ASSERT_EQ(ncclSetEncryption(&config), ncclSuccess);
+  ASSERT_EQ(ncclSetEncryption(nullptr), ncclSuccess);
+  EXPECT_EQ(ncclCryptApiPsk, nullptr);
+  EXPECT_EQ(ncclCryptApiPskLen, 0u);
   bool encrypted = true;
   ASSERT_EQ(ncclGetCryptConnectionMode(&encrypted), ncclSuccess);
   EXPECT_FALSE(encrypted);
@@ -475,9 +483,12 @@ TEST_F(CryptMicrotest, SocketSendAndRecv_WithoutTlsSupportAreInternalErrors) {
   EXPECT_TRUE(g_progressCalls.empty());
 }
 
-TEST_F(CryptMicrotest, FreeAndRebind_AreSafeWithoutTlsState) {
+// Without TLS state there is nothing to free or rebind, so the socket is left byte-for-byte alone.
+TEST_F(CryptMicrotest, FreeAndRebind_LeaveAPlainSocketUntouched) {
   ncclCryptFree(nullptr);
+  ncclSocket before = sock;
   ncclCryptRebindSocket(&sock);
+  EXPECT_EQ(0, std::memcmp(&before, &sock, sizeof(sock)));
   EXPECT_EQ(sock.crypto, nullptr);
 }
 

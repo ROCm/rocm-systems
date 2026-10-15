@@ -37,8 +37,9 @@ class CpusetMicrotest : public ::testing::Test {
   }
   std::vector<int> Cpus() {
     std::vector<int> cpus;
-    for (int cpu = 0; cpu < CPU_SETSIZE; cpu++)
+    for (int cpu = 0; cpu < CPU_SETSIZE; cpu++) {
       if (CPU_ISSET(cpu, &set_)) cpus.push_back(cpu);
+    }
     return cpus;
   }
   static std::string Words(const std::vector<std::string>& words) {
