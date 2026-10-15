@@ -169,6 +169,7 @@ do_host_tests() {
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
     "rccl-UnitTestsMicroCrypt:$SCRIPT_DIR/host_tests_micro_crypt.xml"
+    "rccl-UnitTestsMicroStrongstream:$SCRIPT_DIR/host_tests_micro_strongstream.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs

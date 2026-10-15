@@ -395,6 +395,13 @@ function(rccl_define_micro_source_lists)
     crypt-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroStrongstream -- src/misc/strongstream.cc. Own binary: the test defines the HIP
+  # calls it records, and strongstream_stubs.cc / nccl_fakes.cc already define this unit's symbols.
+  set(TEST_MICRO_STRONGSTREAM_SOURCE_FILES
+    strongstream-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1071,6 +1078,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCrypt
     ${_MICRO_MODE_DEFS}
     CRYPT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_crypt.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroStrongstream
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroStrongstream
+  SOURCES ${TEST_MICRO_STRONGSTREAM_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    STRONGSTREAM_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/strongstream.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_strongstream.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
