@@ -1114,8 +1114,8 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
     uint64_t lanes;
     uint8_t bytes;
   };
-  // Instruction has at most three explicit destinations, plus a special result.
-  std::array<Destination, 4> destinations;
+  // A block load can select any subset of its DWORD destinations.
+  std::array<Destination, kBlockDwordCount> destinations;
   size_t num_destinations = 0;
   auto append = [&](RegisterRef reg, uint64_t lanes, uint8_t bytes) {
     assert(num_destinations < destinations.size());
@@ -1142,11 +1142,22 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
     if (scalar_result) {
       append(*scalar_result, ~uint64_t{0}, MemoryWaitScoreboard::kFullDwordByteMask);
     } else {
-      std::array<RegisterRef, 3> registers{};
+      std::array<RegisterRef, kBlockDwordCount> registers{};
       unsigned count = 0;
       const RegisterAccess access(wf);
+      RegisterModifiers modifiers;
+      inst.amdgpu_register_modifiers(modifiers);
       for (int i = 0; i < inst.num_dst_operands(); ++i) {
         const auto &operand = *inst.dst_operand(i);
+        if (&operand == modifiers.block_data) {
+          for (uint32_t word = 0; word < kBlockDwordCount; ++word)
+            if (block_dword_enabled(wf.m0(), word))
+              if (const auto reg = access.block_data_register(operand, word, /*write=*/true)) {
+                assert(count < registers.size());
+                registers[count++] = *reg;
+              }
+          continue;
+        }
         const auto reg = access.destination_register(operand);
         if (operand.decoded_vgpr() && !reg) {
           // Completion validates every vector destination together.
@@ -1158,8 +1169,6 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           registers[count++] = *reg;
         }
       }
-      RegisterModifiers modifiers;
-      inst.amdgpu_register_modifiers(modifiers);
       const uint8_t bytes =
           sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask : modifiers.memory_result_bytes;
       const uint8_t tail = sram_ecc() ? MemoryWaitScoreboard::kFullDwordByteMask
@@ -1225,7 +1234,15 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
           inst.amdgpu_register_modifiers(modifiers);
           for (int i = 0; i < inst.num_src_operands(); ++i) {
             const auto *operand = inst.src_operand(i);
-            if (operand && operand == modifiers.buffer_resource) {
+            if (operand && operand == modifiers.block_data) {
+              // Resolve data before whole-operand ownership validation. Address
+              // operands remain separate, even when they overlap masked data.
+              for (uint32_t word = 0; word < kBlockDwordCount; ++word)
+                if (block_dword_enabled(wf.m0(), word))
+                  if (const auto reg =
+                          registers.block_data_register(*operand, word, /*write=*/false))
+                    add_source(*reg);
+            } else if (operand && operand == modifiers.buffer_resource) {
               for (const auto reg :
                    registers.buffer_resource_registers(*operand, modifiers.scalar_buffer_words))
                 if (reg)
@@ -1344,6 +1361,7 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
     const auto &state = *inst.data_as<ScalarMemState>();
     access.route = MemoryRoute::SCALAR;
     access.is_load = state.is_load;
+    access.atomic_op = state.atomic_op;
     access.mtype = state.mtype;
     access.wait_counter = state.wait_counter_type;
     access.element_size_bytes = state.elem_size;
@@ -1954,7 +1972,8 @@ template <bool EnableAsync>
   if (debug_probe) {
     if (inst->data()->tag() == SCALAR_MEM) {
       auto &d = *inst->data_as<ScalarMemState>();
-      dbg_is_write = !d.is_load;
+      dbg_is_atomic = d.atomic_op != AtomicOp::NONE;
+      dbg_is_write = !d.is_load || dbg_is_atomic;
       dbg_bytes = std::max(1u, d.num_dwords * d.elem_size);
       dbg_addrs.push_back(d.addr);
     } else {
