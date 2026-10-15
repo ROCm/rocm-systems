@@ -20,6 +20,8 @@ on:
       - 'projects/rccl/src/include/socket.h'
       - 'projects/rccl/src/bootstrap.cc'
       - 'projects/rccl/CMakeLists.txt'
+      - 'projects/rccl/src/CMakeLists.txt'
+      - 'projects/rccl/src/misc/CMakeLists.txt'
       - 'projects/rccl/makefiles/common.mk'
       - '.github/workflows/rccl-tls-build.yml'
 
