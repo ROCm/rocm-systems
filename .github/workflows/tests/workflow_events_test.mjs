@@ -60,7 +60,7 @@ for (const [filename, jobName] of [
     for (const action of ['opened', 'synchronize', 'reopened', 'ready_for_review']) {
       assert(workflow.on.pull_request.types.includes(action));
       const event = { ...github, event: { number: 42, action } };
-      assert.equal(evaluate(`!!(${job.if})`, event).coerceString(), 'true');
+      assert.equal(evaluate(`!!(${job.if || 'true'})`, event).coerceString(), 'true');
       assert.equal(render(workflow.concurrency.group, event), validationGroup);
     }
     assert(workflow.on.pull_request.types.includes('edited'));
@@ -72,7 +72,7 @@ for (const [filename, jobName] of [
         changes: { base: { ref: { from: 'release' } } },
       },
     };
-    assert.equal(evaluate(`!!(${job.if})`, retarget).coerceString(), 'true');
+    assert.equal(evaluate(`!!(${job.if || 'true'})`, retarget).coerceString(), 'true');
     assert.equal(render(workflow.concurrency.group, retarget), validationGroup);
     assert.deepEqual(
       job.strategy.matrix.include.map(matrix => render(job.name, retarget, matrix)),
@@ -80,17 +80,26 @@ for (const [filename, jobName] of [
     );
     assert(workflow.on.push.branches.includes('develop'));
     const push = { ...github, event: { before: 'base' } };
-    assert.equal(evaluate(`!!(${job.if})`, push).coerceString(), 'true');
+    assert.equal(evaluate(`!!(${job.if || 'true'})`, push).coerceString(), 'true');
   });
 
-  test(`${filename}: metadata edits neither cancel nor replace validation`, () => {
+  test(`${filename}: metadata edits preserve the declared validation contract`, () => {
     for (const changes of [{ title: { from: 'old' } }, { body: { from: 'old' } }, {}]) {
       const metadata = {
         ...github,
         run_id: 2,
         event: { number: 42, action: 'edited', changes },
       };
-      assert.equal(evaluate(`!!(${job.if})`, metadata).coerceString(), 'false');
+      if (filename === 'scoped-formatting.yml') {
+        assert.equal(evaluate(`!!(${job.if || 'true'})`, metadata).coerceString(), 'true');
+        assert.equal(render(workflow.concurrency.group, metadata), validationGroup);
+        assert.deepEqual(
+          job.strategy.matrix.include.map(matrix => render(job.name, metadata, matrix)),
+          requiredNames,
+        );
+        continue;
+      }
+      assert.equal(evaluate(`!!(${job.if || 'true'})`, metadata).coerceString(), 'false');
       assert.notEqual(render(workflow.concurrency.group, metadata), validationGroup);
       // Job conditions are evaluated before matrix expansion. The skipped
       // job must also be nonrequired with no matrix context at all.
@@ -101,3 +110,39 @@ for (const [filename, jobName] of [
     }
   });
 }
+
+const formatting = parse(
+  readFileSync(new URL('../scoped-formatting.yml', import.meta.url), 'utf8'),
+);
+
+test('every formatting event pins its exact PR target', () => {
+  const github = {
+    event_name: 'pull_request',
+    base_ref: 'develop',
+    sha: 'merge-sha',
+    event: {
+      number: 42,
+      action: 'synchronize',
+      pull_request: { base: { sha: 'base-sha' } },
+    },
+  };
+  assert.equal(render(formatting['run-name'], github), 'PR #42: develop@base-sha');
+  for (const changes of [{ title: { from: 'old' } }, { body: { from: 'old' } }]) {
+    const metadata = {
+      ...github,
+      event: { ...github.event, action: 'edited', changes },
+    };
+    assert.equal(render(formatting['run-name'], metadata), 'PR #42: develop@base-sha');
+  }
+  const retarget = {
+    ...github,
+    base_ref: 'release',
+    event: {
+      ...github.event,
+      action: 'edited',
+      changes: { base: { ref: { from: 'develop' } } },
+      pull_request: { base: { sha: 'new-base' } },
+    },
+  };
+  assert.equal(render(formatting['run-name'], retarget), 'PR #42: release@new-base');
+});
