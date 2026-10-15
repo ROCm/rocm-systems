@@ -9,6 +9,34 @@ import unittest
 import common.common as common
 from common.common import amdsmi
 
+# amdsmi_get_esmi_err_msg() reads its argument as an esmi_status_t code and returns the
+# amdsmi status that code maps to (esmi_status_map in amd_smi_common.h), so an input
+# inside the esmi enum range comes back as that mapped status rather than SUCCESS.
+# Keyed by esmi_status_t ordinal (e_smi.h).
+_ESMI_CODE_TO_STATUS = {
+    0: amdsmi.AmdSmiStatus.SUCCESS,  # ESMI_SUCCESS / ESMI_INITIALIZED
+    1: amdsmi.AmdSmiStatus.NO_ENERGY_DRV,
+    2: amdsmi.AmdSmiStatus.NO_MSR_DRV,
+    3: amdsmi.AmdSmiStatus.NO_HSMP_DRV,
+    4: amdsmi.AmdSmiStatus.NO_HSMP_SUP,
+    5: amdsmi.AmdSmiStatus.NO_DRV,
+    6: amdsmi.AmdSmiStatus.FILE_NOT_FOUND,
+    7: amdsmi.AmdSmiStatus.BUSY,
+    8: amdsmi.AmdSmiStatus.NO_PERM,
+    9: amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+    10: amdsmi.AmdSmiStatus.FILE_ERROR,
+    11: amdsmi.AmdSmiStatus.INTERRUPT,
+    12: amdsmi.AmdSmiStatus.IO,
+    13: amdsmi.AmdSmiStatus.UNEXPECTED_SIZE,
+    14: amdsmi.AmdSmiStatus.UNKNOWN_ERROR,
+    15: amdsmi.AmdSmiStatus.ARG_PTR_NULL,
+    16: amdsmi.AmdSmiStatus.OUT_OF_RESOURCES,
+    17: amdsmi.AmdSmiStatus.NOT_INIT,
+    18: amdsmi.AmdSmiStatus.INVAL,
+    19: amdsmi.AmdSmiStatus.HSMP_TIMEOUT,
+    20: amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+}
+
 
 class TestCpuHsmp(unittest.TestCase):
     @classmethod
@@ -23,6 +51,7 @@ class TestCpuHsmp(unittest.TestCase):
             pass
 
     def setUp(self):
+        self.raise_exception = None
         self.common.amdsmi_smart_init()
 
     def tearDown(self):
@@ -59,33 +88,27 @@ class TestCpuHsmp(unittest.TestCase):
 
     def test_get_esmi_err_msg(self):
         self.common.print_func_name("")
-        # Pure status-code -> message-string mapper, no processor handle. Its
-        # valid input domain is a real ESMI status: SUCCESS maps to its string,
-        # while the native mapper rejects everything else (the old test only
-        # appeared to cover all AmdSmiStatus members because it skipped itself on
-        # CPU-less hosts). So: POSITIVE a known-good status, NEGATIVE a None.
-        failures = []
-        # POSITIVE: a valid status maps to a non-empty message, status SUCCESS.
-        try:
-            msg = "\t### amdsmi_get_esmi_err_msg(status_type=SUCCESS):"
-            val = "N/A"
-            with self.common.expect_status(msg, [amdsmi.AmdSmiStatus.SUCCESS]):
-                val = amdsmi.amdsmi_get_esmi_err_msg(amdsmi.AmdSmiStatus.SUCCESS)
-            self.common.print(f"\t    data: {val}")
-            self.assertIsInstance(val, str)
-            self.assertTrue(val)
-        except Exception as e:  # noqa: BLE001 - collected and re-raised together
-            failures.append(e)
-        # NEGATIVE: None is rejected by the wrapper with AmdSmiParameterException.
-        try:
-            msg = "\t### amdsmi_get_esmi_err_msg(status_type=None):"
-            with self.assertRaises(amdsmi.AmdSmiParameterException):
-                amdsmi.amdsmi_get_esmi_err_msg(None)
-            self.common.print(f"{msg}\n\tTEST SUCCESS, raised AmdSmiParameterException as expected")
-        except Exception as e:  # noqa: BLE001 - collected and re-raised together
-            failures.append(e)
-        if failures:
-            raise AssertionError("\n\n".join(str(f) for f in failures)) from failures[0]
+        for _, status_type, _ in common.STATUS_TYPES:
+            # Inputs outside the esmi enum range match no entry and return SUCCESS.
+            expected = _ESMI_CODE_TO_STATUS.get(status_type.value, amdsmi.AmdSmiStatus.SUCCESS)
+            status_cond = f"AMDSMI_STATUS_{expected.name}"
+            msg = f"\t### amdsmi_get_esmi_err_msg(status_type={status_type}):"
+            try:
+                ret = amdsmi.amdsmi_get_esmi_err_msg(status_type)
+                self.common.print(msg, ret)
+                if expected != amdsmi.AmdSmiStatus.SUCCESS:
+                    self.raise_exception = AssertionError(
+                        f"{msg} returned SUCCESS, expected {status_cond}"
+                    )
+                    self.common.print(f"\tTEST FAILURE, expected {status_cond}")
+                else:
+                    self.common.check_ret("", "", self.common.PASS)
+            except amdsmi.AmdSmiLibraryException as e:
+                if self.common.check_ret(msg, e, status_cond):
+                    self.raise_exception = e
+            self.common.print("")
+        if self.raise_exception:
+            raise self.raise_exception
         return
 
     def test_get_hsmp_metrics_table(self):
