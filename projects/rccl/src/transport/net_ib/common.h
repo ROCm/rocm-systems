@@ -309,6 +309,10 @@ struct alignas(64) ncclIbSegLayout {
   uint64_t idx; // last store; sender waits on this as the slot arrival flag
 };
 
+// Byte sizes of the sender CTS FIFO and the side table that follows it in one block.
+#define NCCL_IB_CTS_FIFO_BYTES (sizeof(struct ncclIbSendFifo) * (size_t)NET_IB_MAX_REQUESTS * (size_t)NCCL_NET_IB_MAX_RECVS)
+#define NCCL_IB_SEG_LAYOUT_FIFO_BYTES (sizeof(struct ncclIbSegLayout) * (size_t)NET_IB_MAX_REQUESTS * (size_t)NCCL_NET_IB_MAX_RECVS)
+
 // Worst-case work requests posted for one multi-recv send on a single QP: each
 // request's chunk may be split at every local and remote segment boundary it
 // spans. Single-segment sends use exactly one WR per request.
@@ -559,17 +563,15 @@ static inline ncclResult_t ncclIbPostRecvWorkRequest(struct ibv_qp* qp, struct i
 
 struct ncclIbSendComm {
   struct ncclIbNetCommBase base;
-  // Start with CTS FIFO and ibv structs as they have alignment restrictions
-
   // CTS FIFO from which the sender reads the Clear-to-Send (CTS) messages that
   // are written by the receiver (The receiver side writes into it upon
   // issuing a (multi-)receive request). Each row in the 2D array corresponds
   // to a single CTS message but can describe multiple recv-requests issued
   // on the receiver side.
-  struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
-  // RCCL: side table immediately after ctsFifo so one covering MR registers both.
-  // The receiver writes a slot only when NCCL_IB_CTS_NREQS_SIDE_TABLE is set.
-  struct ncclIbSegLayout segLayoutFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
+  // RCCL: page-aligned block. The side table is appended only when this rank advertises.
+  struct ncclIbSendFifo (*ctsFifo)[NCCL_NET_IB_MAX_RECVS];
+  struct ncclIbSegLayout (*segLayoutFifo)[NCCL_NET_IB_MAX_RECVS];
+  char ctsRegionPad[16]; // two pointers are 16 bytes; keeps sges 32-byte aligned
   // A multi-segment send may split one request's per-QP chunk into up to one WR
   // per local+remote segment boundary crossing. Size the WR/SGE pools
   // for the worst case; single-segment sends use exactly one WR per request.
@@ -604,14 +606,11 @@ struct ncclIbSendComm {
 // written out of order when IB Relaxed Ordering is enabled
 static_assert((sizeof(struct ncclIbNetCommBase) % 32) == 0,
               "ncclIbNetCommBase size must be 32-byte multiple to ensure ctsFifo is at proper offset");
-static_assert((offsetof(struct ncclIbSendComm, ctsFifo) % 32) == 0, "ncclIbSendComm ctsFifo must be 32-byte aligned");
 static_assert((sizeof(struct ncclIbSendFifo) % 32) == 0, "ncclIbSendFifo element size must be 32-byte multiples");
 static_assert((sizeof(struct ncclIbSegLayout) % 32) == 0, "ncclIbSegLayout element size must be 32-byte multiples");
 // 16 segments × 8 devices, 64-byte aligned. The peer RDMA-writes this many bytes.
 static_assert(sizeof(struct ncclIbSegLayout) == 704, "side slot size is the RDMA write length");
-static_assert(offsetof(struct ncclIbSendComm, segLayoutFifo) ==
-                offsetof(struct ncclIbSendComm, ctsFifo) + sizeof(((struct ncclIbSendComm*)0)->ctsFifo),
-              "segLayoutFifo must immediately follow ctsFifo for a covering MR");
+static_assert(NCCL_IB_CTS_FIFO_BYTES % 64 == 0, "CTS FIFO size must keep the following side table 64-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, sges) % 32) == 0, "sges must be 32-byte aligned");
 static_assert((offsetof(struct ncclIbSendComm, wrs) % 32) == 0, "wrs must be 32-byte aligned");
 

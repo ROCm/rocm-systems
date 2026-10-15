@@ -14,6 +14,19 @@
 
 // NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata, CTS MR and QP depths.
 static bool ncclIbAdvertiseMultiSeg() { return ncclParamMultiSegmentRegister() != 0; }
+
+// RCCL: one page-aligned block. The side table is appended only when advertising.
+static ncclResult_t ncclIbSendCommAllocCts(struct ncclIbSendComm* comm) {
+  size_t bytes = NCCL_IB_CTS_FIFO_BYTES;
+  if (ncclIbAdvertiseMultiSeg()) bytes += NCCL_IB_SEG_LAYOUT_FIFO_BYTES;
+  void* region = NULL;
+  NCCLCHECK(ncclIbMalloc(&region, bytes));
+  comm->ctsFifo = (struct ncclIbSendFifo (*)[NCCL_NET_IB_MAX_RECVS])region;
+  comm->segLayoutFifo = ncclIbAdvertiseMultiSeg()
+                            ? (struct ncclIbSegLayout (*)[NCCL_NET_IB_MAX_RECVS])((uint8_t*)region + NCCL_IB_CTS_FIFO_BYTES)
+                            : NULL;
+  return ncclSuccess;
+}
 static_assert(NCCL_RMA_SEND_QP_WRS == NCCL_IB_MAX_SEND_WRS, "rma_multiseg.h restates NCCL_IB_MAX_SEND_WRS");
 static_assert(NCCL_IB_MAX_SEND_WRS >= 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
               "multi-segment sender QP must also fit GIN iput signal WRs");
@@ -911,6 +924,7 @@ ncclResult_t ncclIbConnectImpl(void* ctx, int dev, void* opaqueHandle, void** se
 
   NCCLCHECK(ncclIbMalloc((void**)&comm, sizeof(struct ncclIbSendComm)));
   NCCLCHECKGOTO(ncclIbSendCommInit(comm), ret, fail);
+  NCCLCHECKGOTO(ncclIbSendCommAllocCts(comm), ret, fail);
   NCCLCHECKGOTO(ncclIbStatsInit(&comm->base.stats), ret, fail);
   NCCLCHECKGOTO(ncclSocketInit(&comm->base.sock, &handle->connectAddr, handle->magic, ncclSocketTypeNetIb, NULL, 1),
                 ret, fail);
@@ -1024,7 +1038,7 @@ ib_recv_dev_list:
     // RCCL: one covering MR for the CTS FIFO and the side table. Peer cap is not
     // known yet, so the extra bytes follow local advertise.
     NCCLCHECKGOTO(wrap_ibv_reg_mr(&commDev->ctsFifoMr, commDev->base.pd, comm->ctsFifo,
-                                  sizeof(comm->ctsFifo) + (ncclIbAdvertiseMultiSeg() ? sizeof(comm->segLayoutFifo) : 0),
+                                  NCCL_IB_CTS_FIFO_BYTES + (ncclIbAdvertiseMultiSeg() ? NCCL_IB_SEG_LAYOUT_FIFO_BYTES : 0),
                                   IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     devInfo->rkey = commDev->ctsFifoMr->rkey;
@@ -1182,6 +1196,7 @@ exit:
   stage->state = ncclIbCommStateStart;
   return ret;
 fail:
+  if (comm) free(comm->ctsFifo);
   free(comm);
   goto exit;
 }
@@ -1730,7 +1745,7 @@ ib_recv:
   rComm->peerCaps = ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName));
   if (rComm->peerCaps & NCCL_IB_CAP_MULTISEG) {
     NCCLCHECKGOTO(ncclIbMalloc((void**)&rComm->remSegLayout, sizeof(*rComm->remSegLayout)), ret, fail);
-    rComm->remSegLayout->addr = remMeta.addr + sizeof(((struct ncclIbSendComm*)0)->ctsFifo);
+    rComm->remSegLayout->addr = remMeta.addr + NCCL_IB_CTS_FIFO_BYTES;
   }
 
   NCCLCHECKGOTO(ncclIbReceiverQpsCreateToRts(rComm, &remMeta, &meta), ret, fail);
@@ -1988,6 +2003,7 @@ ncclResult_t ncclIbCloseSend(void* sendComm) {
     if (comm->base.resiliency) {
       NCCLCHECK(ncclIbResiliencyDestroy(&comm->base.resiliency));
     }
+    free(comm->ctsFifo);
     free(comm);
   }
   TIME_PRINT("IB");
