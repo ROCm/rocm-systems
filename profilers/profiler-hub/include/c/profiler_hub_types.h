@@ -191,7 +191,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t             id;
+        uint32_t             id; /**< type_index. Not rocpd_info_agent.id. */
         const char*          agent_type;
         const char*          name;
         const char*          model_name;
@@ -202,6 +202,7 @@ extern "C"
         ph_optional_uint64_t absolute_index;
         ph_optional_uint64_t logical_index;
         ph_optional_uint64_t uuid;
+        uint64_t             row_id; /**< rocpd_info_agent.id. */
     } ph_agent_t;
 
     /** @brief A list of agents; same lifetime rule as ph_track_list_t. */
@@ -218,7 +219,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t             id; /**< Process id. */
+        uint32_t             id; /**< OS process id. Not rocpd_info_process.id. */
         const char*          command;
         const char*          environment;
         const char*          extdata;
@@ -227,6 +228,7 @@ extern "C"
         ph_optional_uint64_t fini;
         ph_optional_uint64_t start;
         ph_optional_uint64_t end;
+        uint64_t             row_id; /**< rocpd_info_process.id. */
     } ph_process_t;
 
     /** @brief A list of processes; same lifetime rule as ph_track_list_t. */
@@ -242,12 +244,13 @@ extern "C"
      */
     typedef struct
     {
-        uint64_t             thread_id;
+        uint64_t             thread_id; /**< OS thread id. Not rocpd_info_thread.id. */
         const char*          name;
         const char*          extdata;
         ph_optional_uint64_t parent_process_id;
         ph_optional_uint64_t start;
         ph_optional_uint64_t end;
+        uint64_t             row_id; /**< rocpd_info_thread.id. */
     } ph_thread_t;
 
     /** @brief A list of threads; same lifetime rule as ph_track_list_t. */
@@ -266,6 +269,8 @@ extern "C"
         uint64_t    stream_id;
         const char* name;
         const char* extdata;
+        uint32_t    nid; /**< rocpd_info_node.id. */
+        uint32_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
     } ph_stream_t;
 
     /** @brief A list of streams; same lifetime rule as ph_track_list_t. */
@@ -284,6 +289,8 @@ extern "C"
         uint64_t    queue_id;
         const char* name;
         const char* extdata;
+        uint32_t    nid; /**< rocpd_info_node.id. */
+        uint32_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
     } ph_queue_t;
 
     /** @brief A list of queues; same lifetime rule as ph_track_list_t. */
@@ -315,6 +322,7 @@ extern "C"
         ph_optional_uint64_t instance_id;
         ph_optional_uint64_t is_constant;
         ph_optional_uint64_t is_derived;
+        uint64_t             id; /**< rocpd_info_pmc.id. Not a list index. */
     } ph_pmc_info_t;
 
     /** @brief A list of PMC descriptions; same lifetime rule as ph_track_list_t. */

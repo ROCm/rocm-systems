@@ -22,6 +22,18 @@ downstream consumer of the library.
 
 ### Added
 
+- `ph_pmc_info_t.id` is `rocpd_info_pmc.id`, not the index of the counter in
+  the PMC list. `reader_types::pmc_info_t` carries the same id.
+- `reader_types::agent_info_t::id` is `rocpd_info_agent.id`, and
+  `reader_types::process_info_t::id` is `rocpd_info_process.id`.
+  `ph_agent_t.row_id` and `ph_process_t.row_id` carry the same values.
+  `ph_agent_t.id` remains `type_index`, and `ph_process_t.id` remains the OS
+  process id.
+- `reader_types::thread_info_t::id` is `rocpd_info_thread.id`.
+  `ph_thread_t.row_id` carries the same value. `ph_thread_t.thread_id` remains
+  the OS thread id.
+- `ph_stream_t` and `ph_queue_t` carry `nid` (`rocpd_info_node.id`) and `pid`
+  (`rocpd_info_process.id`, not the OS process id).
 - `reader_t::get_histogram()` and `ph_get_histogram()` return one histogram per
   track on a shared time grid. Duration tracks count events that overlap each
   bucket and sum that overlap. PMC tracks average the samples in each bucket

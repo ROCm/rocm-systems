@@ -524,6 +524,7 @@ ph_ctx::initialize_node_agents()
             .absolute_index = optional_uint64(agent->absolute_index),
             .logical_index  = optional_uint64(agent->logical_index),
             .uuid           = optional_uint64(agent->uuid),
+            .row_id         = static_cast<std::uint64_t>(agent->id),
         });
     }
 }
@@ -546,6 +547,7 @@ ph_ctx::initialize_node_processes()
             .fini        = optional_uint64(process->fini),
             .start       = optional_uint64(process->start),
             .end         = optional_uint64(process->end),
+            .row_id      = static_cast<std::uint64_t>(process->id),
         });
     }
 }
@@ -565,6 +567,7 @@ ph_ctx::initialize_node_threads()
             .parent_process_id = optional_uint64(thread->parent_process_id),
             .start             = optional_uint64(thread->start),
             .end               = optional_uint64(thread->end),
+            .row_id            = static_cast<uint64_t>(thread->id),
         });
     }
 }
@@ -581,6 +584,8 @@ ph_ctx::initialize_node_streams()
             .stream_id = static_cast<uint64_t>(stream->stream_id),
             .name      = stream->name.c_str(),
             .extdata   = stream->extdata.c_str(),
+            .nid       = static_cast<uint32_t>(stream->nid),
+            .pid       = static_cast<uint32_t>(stream->pid),
         });
     }
 }
@@ -597,6 +602,8 @@ ph_ctx::initialize_node_queues()
             .queue_id = static_cast<uint64_t>(queue->queue_id),
             .name     = queue->name.c_str(),
             .extdata  = queue->extdata.c_str(),
+            .nid      = static_cast<uint32_t>(queue->nid),
+            .pid      = static_cast<uint32_t>(queue->pid),
         });
     }
 }
@@ -625,6 +632,7 @@ ph_ctx::initialize_node_pmc_infos()
             .instance_id      = optional_uint64(pmc_info->instance_id),
             .is_constant      = optional_uint64(pmc_info->is_constant),
             .is_derived       = optional_uint64(pmc_info->is_derived),
+            .id               = static_cast<uint64_t>(pmc_info->id),
         });
     }
 }

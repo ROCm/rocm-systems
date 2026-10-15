@@ -81,6 +81,7 @@ reader_catalog_t::build_processes(data_storage::schema_v3::read_statements& stmt
     for(const auto& process_info : process_info_list)
     {
         auto process_info_ptr         = std::make_shared<reader_types::process_info_t>();
+        process_info_ptr->id          = process_info.id;
         process_info_ptr->ppid        = process_info.ppid;
         process_info_ptr->pid         = process_info.pid;
         process_info_ptr->init        = process_info.init;
@@ -112,6 +113,7 @@ reader_catalog_t::build_threads(data_storage::schema_v3::read_statements& stmts)
     for(const auto& thread_info : thread_info_list)
     {
         auto thread_info_ptr = std::make_shared<reader_types::thread_info_t>();
+        thread_info_ptr->id  = thread_info.id;
         thread_info_ptr->parent_process_id = thread_info.ppid;
         thread_info_ptr->thread_id         = thread_info.tid;
         thread_info_ptr->name              = thread_info.name.value_or("");
@@ -154,6 +156,7 @@ reader_catalog_t::build_agents(data_storage::schema_v3::read_statements& stmts)
         }
 
         auto agent_info_ptr            = std::make_shared<reader_types::agent_info_t>();
+        agent_info_ptr->id             = agent_info.id;
         agent_info_ptr->agent_type     = agent_info.type.value();
         agent_info_ptr->type_index     = agent_info.type_index.value();
         agent_info_ptr->absolute_index = agent_info.absolute_index;
@@ -727,6 +730,8 @@ reader_catalog_t::build_streams(data_storage::schema_v3::read_statements& stmts)
     {
         auto stream_info_ptr       = std::make_shared<reader_types::stream_info_t>();
         stream_info_ptr->stream_id = stream_info.id;
+        stream_info_ptr->nid       = stream_info.nid;
+        stream_info_ptr->pid       = stream_info.pid;
         stream_info_ptr->name      = stream_info.name.value_or("");
         stream_info_ptr->extdata   = stream_info.extdata;
 
@@ -757,6 +762,8 @@ reader_catalog_t::build_queues(data_storage::schema_v3::read_statements& stmts)
     {
         auto queue_info_ptr      = std::make_shared<reader_types::queue_info_t>();
         queue_info_ptr->queue_id = queue_info.id;
+        queue_info_ptr->nid      = queue_info.nid;
+        queue_info_ptr->pid      = queue_info.pid;
         queue_info_ptr->name     = queue_info.name.value_or("");
         queue_info_ptr->extdata  = queue_info.extdata;
 
@@ -786,6 +793,7 @@ reader_catalog_t::build_pmc_infos(data_storage::schema_v3::read_statements& stmt
     for(const auto& pmc_info : pmc_info_list)
     {
         auto pmc_info_ptr  = std::make_shared<reader_types::pmc_info_t>();
+        pmc_info_ptr->id   = pmc_info.id;
         pmc_info_ptr->name = pmc_info.name;
 
         pmc_info_ptr->target_arch      = pmc_info.target_arch.value_or("");
