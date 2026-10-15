@@ -21,6 +21,15 @@ SRC = src_candidate if os.path.isdir(src_candidate) else ROOT
 if SRC not in sys.path:
     sys.path.insert(0, SRC)
 
+# Arch chain of write_metric_library_family().
+METRIC_LIBRARY_FAMILY_PARENTS = {
+    "gfx_base": None,
+    "gfx_c1": "gfx_base",
+    "gfx_c2": "gfx_c1",
+    "gfx_c3": "gfx_c2",
+    "gfx_c4": "gfx_c3",
+}
+
 SUPPORTED_ARCHS = {
     "gfx908": {"mi100": ["MI100"]},
     "gfx90a": {"mi200": ["MI210", "MI250", "MI250X"]},
