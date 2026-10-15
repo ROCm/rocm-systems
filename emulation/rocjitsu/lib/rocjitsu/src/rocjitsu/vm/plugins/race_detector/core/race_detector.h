@@ -6,6 +6,8 @@
 #include "rocjitsu/vm/plugins/race_detector/core/event_registry.h"
 #include "rocjitsu/vm/plugins/race_detector/core/types.h"
 #include "rocjitsu/vm/plugins/race_detector/core/wave_race_state.h"
+#include <algorithm>
+#include <cstddef>
 #include <cstdint>
 #include <functional>
 #include <optional>
@@ -38,6 +40,8 @@ class RaceDetector {
   friend class Workgroup;
 
 public:
+  /// ldsSizeBytes is the CU backing capacity, independent of workgroup
+  /// allocation metadata and the lazily materialized byte count.
   RaceDetector(int nWaves, int vgprCount, int sgprCount, Dim3d workgroupId,
                std::function<void(RaceViolation)> raceHandler, CounterCapacities,
                size_t ldsSizeBytes);
@@ -91,7 +95,13 @@ public:
     return bytes != 0 && address < ldsSizeBytes_ && bytes <= ldsSizeBytes_ - address;
   }
 
-  size_t ldsSizeBytes() const { return ldsSizeBytes_; }
+  /// Bytes in complete elements that fit the LDS backing. Vector transfers
+  /// can retain a valid prefix when later elements are dropped as out of bounds.
+  uint64_t ldsBytesInRange(uint64_t address, uint64_t bytes, uint64_t elementBytes) const {
+    if (elementBytes == 0 || !validLdsRange(address, elementBytes))
+      return 0;
+    return std::min(bytes, ldsSizeBytes_ - address) / elementBytes * elementBytes;
+  }
 
   const EventRegistry &events() const { return events_; }
 
