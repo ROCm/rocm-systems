@@ -21,7 +21,7 @@ import re
 from pathlib import Path
 
 import pytest
-from conftest import RocprofsysTest, check_use_rocpd
+from conftest import RocprofsysTest, assert_resolved_settings, check_use_rocpd
 
 pytestmark = [pytest.mark.mpi, pytest.mark.rank_filter]
 
@@ -82,6 +82,12 @@ def rocpd_env() -> dict[str, str]:
     return {}
 
 
+@pytest.fixture
+def mpi_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    """Validation rules for MPI ROCpd database checks."""
+    return [validation_rules_dir / "mpi" / "validation-rules.json"]
+
+
 # =============================================================================
 # Tests
 # =============================================================================
@@ -91,7 +97,7 @@ def rocpd_env() -> dict[str, str]:
 @pytest.mark.rocpd("rocpd_env")
 @pytest.mark.sys_run
 class TestRankFilter(RocprofsysTest):
-    """MPI rank-filter through rocprof-sys-run (shared CLI path with sample)."""
+    """End-to-end tests for the MPI rank-based output filtering feature."""
 
     @pytest.mark.parametrize(
         "filter_source",
@@ -325,7 +331,6 @@ class TestRankFilter(RocprofsysTest):
                     r"\[--rank-filter-logs, --rank-filter-output\]"
                 )
             ],
-            use_abort_fail_regex=False,
         )
         assert (
             banner_count(result.test_output) == 0
@@ -346,7 +351,7 @@ class TestRankFilter(RocprofsysTest):
 class TestRankFilterSample(RocprofsysTest):
     """Smoke test: rank-filter file output via rocprof-sys-sample + MPI."""
 
-    def test_output_range(self, rocpd_env):
+    def test_output_range(self, rocpd_env, mpi_rocpd_rules):
         result = self.run_test(
             "sampling",
             TARGET,
@@ -356,6 +361,7 @@ class TestRankFilterSample(RocprofsysTest):
             num_procs=NUM_PROCS,
         )
         self.assert_regex(result)
+        assert_resolved_settings(result, {"ROCPROFSYS_RANK_FILTER_OUTPUT": "0-1"})
         assert (
             banner_count(result.test_output) == 3
         ), f"Expected 3 banners, got {banner_count(result.test_output)}"
@@ -364,3 +370,4 @@ class TestRankFilterSample(RocprofsysTest):
             ranks_with_output=[0, 1],
             ranks_without_output=[2],
         )
+        self.assert_rocpd(result, rules_files=mpi_rocpd_rules)

@@ -2189,11 +2189,10 @@ def validation_rules_dir(rocprof_config) -> Path:
     return rocprof_config.rocpd_validation_rules
 
 
-# Shared by test_domain_flags.py / test_backend_flags.py: both exercise the
-# same transpose GPU workload, so the launch args and baseline env/rules are
-# defined once here instead of being duplicated per module.
+# Shared by the domain-flag (test_presets.py) and backend-flag
+# (test_tool_runner.py) transpose tests, so the launch args and baseline
+# env/rules live in one place.
 DOMAIN_BACKEND_TRANSPOSE_ARGS = ["2", "100", "50"]
-DOMAIN_BACKEND_SAMPLING_VERBOSE_ARGS = ["-v", "2"]
 
 
 @pytest.fixture
@@ -2482,13 +2481,13 @@ class RocprofsysTest:
     ) -> object:
         """Run the transpose HIP workload via rocprof-sys-sample.
 
-        Shared by test_domain_flags.py / test_backend_flags.py.
+        Shared by the domain-flag and backend-flag artifact tests.
         """
         return self.run_test(
             "sampling",
             target="transpose",
             env=env,
-            sampling_args=[*sampling_args, *DOMAIN_BACKEND_SAMPLING_VERBOSE_ARGS],
+            sampling_args=sampling_args,
             run_args=DOMAIN_BACKEND_TRANSPOSE_ARGS,
             check_target_arch=True,
         )

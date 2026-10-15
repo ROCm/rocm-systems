@@ -10,11 +10,11 @@
             ],
             "validation_queries": [
                 {
-                    "comparison": "greater_than_or_equal",
-                    "description": "AMD-SMI samples recorded for GPU 0 (short transpose run)",
-                    "error_message": "--gpu --gpus=0 produced fewer than 5 AMD-SMI PMC event samples",
-                    "expected_result": 5,
-                    "query": "SELECT COUNT(*) as count FROM {table_name}"
+                    "comparison": "equals",
+                    "description": "Device sampling is limited to a single GPU agent",
+                    "error_message": "--gpus=0 did not limit PMC sampling to exactly one GPU agent",
+                    "expected_result": 1,
+                    "query": "SELECT COUNT(DISTINCT info.agent_id) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.target_arch = 'GPU'"
                 }
             ]
         }
