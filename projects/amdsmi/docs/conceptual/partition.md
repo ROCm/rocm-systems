@@ -358,8 +358,9 @@ Changing partition settings has strict requirements:
 The memory partition set call alone does not apply the change. Until the driver reloads, the system
 keeps using the old configuration.
 
-Setting the current memory partition again cancels a pending change if the driver supports it;
-otherwise the next reload still applies the change. amd-smi cannot show whether a change is pending.
+Setting the current memory partition again cancels a pending change only on drivers that support
+cancelling; current amdgpu releases don't, so the next reload still applies the change. amd-smi
+cannot show whether a change is pending.
 
 Before [ROCm 7.0](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/CHANGELOG.md#amd_smi_lib-for-rocm-700),
 the set API reloaded the driver itself. Since

@@ -6916,7 +6916,8 @@ rsmi_status_t rsmi_dev_memory_partition_set(uint32_t dv_ind,
   }
   if (status != RSMI_STATUS_SUCCESS) {
     if (status == RSMI_STATUS_PERMISSION) {
-      status = RSMI_STATUS_NOT_SUPPORTED;  // already verified permissions
+      // Root was checked above, so the driver or a read-only /sys refused the write.
+      status = RSMI_STATUS_NOT_SUPPORTED;
     }
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "

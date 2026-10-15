@@ -7716,7 +7716,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition(amdsmi_processor_handle processo
  *  the new memory partition setting.
  *
  *  Requesting the current mode cancels a different mode requested since the driver was
- *  loaded, if the driver supports it; otherwise the next driver reload still applies it.
+ *  loaded, if the driver supports it (current amdgpu releases don't); otherwise the next
+ *  driver reload still applies it.
  *
  *  @param[in] processor_handle Device which to query
  *
@@ -7773,7 +7774,8 @@ amdsmi_status_t amdsmi_get_gpu_memory_partition_config(amdsmi_processor_handle p
  *  the new memory partition setting.
  *
  *  Requesting the current mode cancels a different mode requested since the driver was
- *  loaded, if the driver supports it; otherwise the next driver reload still applies it.
+ *  loaded, if the driver supports it (current amdgpu releases don't); otherwise the next
+ *  driver reload still applies it.
  *
  *  @param[in] processor_handle A processor handle
  *
