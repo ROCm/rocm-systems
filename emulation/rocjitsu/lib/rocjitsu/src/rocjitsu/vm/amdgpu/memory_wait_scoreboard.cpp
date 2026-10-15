@@ -97,6 +97,19 @@ RegisterAccess::buffer_resource_registers(const Operand &op, unsigned scalar_wor
   return result;
 }
 
+std::optional<RegisterRef> RegisterAccess::block_data_register(const Operand &op, uint32_t word,
+                                                               bool write) const {
+  assert(word < kBlockDwordCount);
+  const auto &wf = wavefront();
+  const auto base = write ? op.simd_vgpr_base_mut(mutable_wavefront()) : op.simd_vgpr_base(wf);
+  if (!base)
+    return std::nullopt;
+  const uint32_t physical = write ? *base + word : block_store_source_vgpr(*base + word);
+  if (!owns_vgpr_range(physical, 1))
+    return std::nullopt;
+  return RegisterRef{RegClass::VGPR, static_cast<uint16_t>(physical - wf.vgpr_alloc().base), 1};
+}
+
 bool MemoryWaitScoreboard::result_is_written(const Instruction &inst, Wavefront &wf) {
   if (inst.mnemonic() == "lds_direct_load" || inst.mnemonic() == "ds_direct_load")
     return valid_lds_direct_operand(wf.m0());
@@ -428,6 +441,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     const bool split = name.starts_with("s_movrelsd_2");
     const bool source_relative = name.starts_with("s_movrels");
     const bool destination_relative = split || name.starts_with("s_movreld");
+    const auto &destination = *inst.dst_operand(0);
+    if (destination_relative &&
+        !relative_scalar_selector(wf, destination.encoding_value(), wf.m0(),
+                                  std::max(1, destination.size_bits() / 32), true, split))
+      return;
     auto check_relative = [&](const Operand &operand, bool relative, bool write) {
       if (!relative) {
         if (auto reg = resolve(operand, write))
@@ -436,19 +454,11 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
       }
       const unsigned width = std::max(1, operand.size_bits() / 32);
       const auto selector =
-          relative_scalar_selector(operand.encoding_value(), width, wf.m0(), write, split);
-      if (auto range = resolve_scalar_register_range(wf, selector, width)) {
+          relative_scalar_selector(wf, operand.encoding_value(), wf.m0(), width, write, split)
+              .value_or(0);
+      if (auto range = resolve_scalar_register_range(wf, selector, width))
         if (auto reg = range->register_ref())
           access(*reg, ~uint64_t{0}, 0xf, write);
-      } else if (!write) {
-        // Indexed sources can select scalar condition aliases or constants.
-        if (selector == 251 || selector == 252)
-          access({selector == 251 ? RegClass::VCC : RegClass::EXEC, 0,
-                  static_cast<uint8_t>(wf.wf_size() / 32)},
-                 ~uint64_t{0}, 0xf, false);
-        else if (selector == 253)
-          access({RegClass::SCC, 0, 1}, ~uint64_t{0}, 0xf, false);
-      }
     };
     check_relative(*inst.src_operand(0), source_relative, false);
     check_relative(*inst.dst_operand(0), destination_relative, true);
@@ -535,6 +545,13 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
     if (mix_preservation || !op || op == hwreg || op == modifiers.buffer_resource ||
         (!pending_scalar_ && !op->is_vgpr()))
       return;
+    if (op == modifiers.block_data) {
+      for (uint32_t word = 0; word < kBlockDwordCount; ++word)
+        if (block_dword_enabled(wf.m0(), word))
+          if (const auto reg = registers.block_data_register(*op, word, write))
+            access(*reg, lanes, 0xf, write);
+      return;
+    }
     const auto reg = resolve(*op, write);
     if (!reg || reg->cls == RegClass::ACC_VGPR)
       return;
@@ -633,11 +650,21 @@ void MemoryWaitScoreboard::check_memory_result(const Instruction &inst, Wavefron
   const RegisterAccess registers(wf);
   if (!result_is_written(inst, wf))
     return;
-  std::array<RegisterRef, 3> results{};
+  std::array<RegisterRef, kBlockDwordCount> results{};
   unsigned count = 0;
   bool pending = false;
   for (int i = 0; i < inst.num_dst_operands(); ++i) {
     const auto &operand = *inst.dst_operand(i);
+    if (&operand == modifiers.block_data) {
+      for (uint32_t word = 0; word < kBlockDwordCount; ++word)
+        if (block_dword_enabled(wf.m0(), word))
+          if (const auto reg = registers.block_data_register(operand, word, /*write=*/true)) {
+            assert(count < results.size());
+            results[count++] = *reg;
+            pending |= pending_.pending(*reg, true);
+          }
+      continue;
+    }
     auto reg = registers.destination_register(operand);
     if (!reg && operand.is_fieldless())
       if (auto special = operand.to_special_reg_class())

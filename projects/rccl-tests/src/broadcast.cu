@@ -320,6 +320,9 @@ testResult_t BroadcastGetDevCommRequirements(int deviceImpl, ncclDevCommRequirem
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInternalError;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // Barriers must cover BOTH the size-adaptive hybrid/SAG grids (pool =
       // max(-V, ladder peak)) and the ring's own (larger) CTA count.
       {

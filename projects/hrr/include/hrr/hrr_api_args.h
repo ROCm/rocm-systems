@@ -2230,7 +2230,7 @@ typedef struct {
     int32_t ret;
     uint64_t handle;
     uint64_t devPtr;
-    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t inline copy */
+    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t not recorded, zeros */
     uint8_t handle_present;  /* 1 when handle was non-null */
 } hrr_args_hipIpcGetMemHandle;
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
@@ -2242,7 +2242,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t event;
-    uint8_t handle_bytes[64];  /* hipIpcEventHandle_t passed by value, inline copy */
+    uint8_t handle_bytes[64];  /* hipIpcEventHandle_t passed by value, not recorded, zeros */
 } hrr_args_hipIpcOpenEventHandle;
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
 static_assert(sizeof(hipIpcEventHandle_t) <= 64, "hrr_args_hipIpcOpenEventHandle::handle_bytes too small for hipIpcEventHandle_t");
@@ -2253,7 +2253,7 @@ typedef struct {
     hrr_event_header hdr;
     int32_t ret;
     uint64_t devPtr;
-    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t passed by value, inline copy */
+    uint8_t handle_bytes[64];  /* hipIpcMemHandle_t passed by value, not recorded, zeros */
     uint32_t flags;
 } hrr_args_hipIpcOpenMemHandle;
 #ifdef HIP_INCLUDE_HIP_HIP_RUNTIME_H
