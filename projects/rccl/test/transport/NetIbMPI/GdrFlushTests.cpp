@@ -21,6 +21,10 @@
 
 #include <hsa/hsa_ext_amd.h>
 
+#ifdef ENABLE_FAULT_INJECTION
+#include "net_ib_flush_inspect.h"
+#endif
+
 #ifdef MPI_TESTS_ENABLED
 
 namespace {
@@ -42,6 +46,52 @@ protected:
     static bool scratchpadFlushEnabled() {
         const char* v = getenv("RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING");
         return !v || atoi(v) != 0;
+    }
+
+    static bool gdrFlushDisabledEnv() {
+        const char* v = getenv("NCCL_GDR_FLUSH_DISABLE");
+        return v && atoi(v) != 0;
+    }
+
+    static bool forceDmaBufEnv() {
+        const char* v = getenv("RCCL_FORCE_ENABLE_DMABUF");
+        return v && atoi(v) != 0;
+    }
+
+#ifdef ENABLE_FAULT_INJECTION
+    // Rank 0's recv comm state as left by accept, captured by RunRecvFlushBurst.
+    bool flushStateCaptured_ = false;
+    ncclIbFlushState flushState_{};
+#endif
+
+    // Checks the flush scratchpad on every device of rank 0's recv comm. A missing
+    // scratchpad does not fail the flush (it falls back to reading the receive
+    // buffer), so the flush tests alone cannot tell the two paths apart.
+    void ExpectScratchpad(bool registered, bool requireDmaBuf, bool requirePeermem) {
+#ifdef ENABLE_FAULT_INJECTION
+        if (MPIEnvironment::world_rank != 0) return;
+        if (net_ != &ncclNetIb) {
+            TEST_INFO("Scratchpad state is only inspectable on %s", ncclNetIb.name);
+            return;
+        }
+        if (gdrFlushDisabledEnv()) {
+            TEST_INFO("NCCL_GDR_FLUSH_DISABLE is set; scratchpad state not checked");
+            return;
+        }
+        ASSERT_TRUE(flushStateCaptured_) << "ncclIbFlushGetState failed";
+        EXPECT_EQ(flushState_.flushEnabled, 1) << "GDR flush must be enabled on a GDR-capable device";
+        ASSERT_GT(flushState_.ndevs, 0);
+        for (int i = 0; i < flushState_.ndevs; ++i) {
+            EXPECT_EQ(flushState_.scratchpadRegistered[i], registered) << "comm device " << i;
+            if (!registered) continue;
+            if (requireDmaBuf) EXPECT_TRUE(flushState_.scratchpadDmaBuf[i]) << "comm device " << i;
+            if (requirePeermem) EXPECT_FALSE(flushState_.scratchpadDmaBuf[i]) << "comm device " << i;
+        }
+#else
+        (void)registered;
+        (void)requireDmaBuf;
+        (void)requirePeermem;
+#endif
     }
 
     int gdrPtrSupport() {
@@ -94,6 +144,11 @@ protected:
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
         ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
+
+#ifdef ENABLE_FAULT_INJECTION
+        if (rank == 0 && net_ == &ncclNetIb)
+            flushStateCaptured_ = ncclIbFlushGetState(pair.recvComm, &flushState_) == ncclSuccess;
+#endif
 
         const size_t bufferSize = kSmallBufferSize;
         void* buffer = nullptr;
@@ -170,14 +225,17 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
                                               &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "write+read flush over dma-buf scratchpad must not fault";
+    // Only registration is required: a failed cuMem export may fall back to an HSA buffer.
+    ExpectScratchpad(scratchpadFlushEnabled(), /*requireDmaBuf=*/false, /*requirePeermem=*/false);
 }
 
-// Legacy peermem (ibv_reg_mr) scratchpad. Confirms Option 2a keeps the peermem
-// RO=0 read path working (never regressed).
+// Legacy peermem (ibv_reg_mr) scratchpad. Without it the flush still succeeds via
+// the read-only fallback, so the registration itself is asserted.
 TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
     SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
                                           false, kMinGpusPerNode, kNoNodeLimit);
-    if (cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=0 (peermem scratchpad path)";
+    if (ncclCuMemEnable()) GTEST_SKIP() << "Requires cuMem disabled (peermem scratchpad path)";
+    if (forceDmaBufEnv()) GTEST_SKIP() << "RCCL_FORCE_ENABLE_DMABUF=1 selects the dma-buf scratchpad";
     AssertInitAndGetDevices(nullptr);
     if (!(gdrPtrSupport() & NCCL_PTR_CUDA))
         GTEST_SKIP() << "peermem (NCCL_PTR_CUDA) not available for the reg_mr scratchpad";
@@ -187,6 +245,7 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
                                               &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "peermem RO=0 scratchpad flush must succeed";
+    ExpectScratchpad(scratchpadFlushEnabled(), /*requireDmaBuf=*/false, /*requirePeermem=*/true);
 }
 
 // Feature disabled: ncclIbIflush falls back to reading the received buffer
@@ -204,6 +263,7 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
                                               &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "fallback flush (read recv buffer) must succeed";
+    ExpectScratchpad(/*registered=*/false, /*requireDmaBuf=*/false, /*requirePeermem=*/false);
 }
 
 // Repeated-flush burst. An intermittent async-fatal would surface as a
