@@ -5,7 +5,7 @@ the full per-file reference, see
 [../docs/conceptual/test-design.md](../docs/conceptual/test-design.md) and
 [python/README.md](python/README.md).
 
-## Three test families
+## Test families
 
 ```text
                         AMD SMI test estate
@@ -13,20 +13,21 @@ the full per-file reference, see
         ┌───────────────────────┼───────────────────────────┐
         │                       │                           │
    ┌────▼─────┐         ┌───────▼────────┐         ┌────────▼─────────┐
-   │  C++     │         │    Python      │         │   Packaging /    │
+   │  C++     │         │    Python      │         │   Go / Packaging │
    │ amdsmitst│         │  3 runners     │         │   Build / ABI    │
-   │ (GTest)  │         │  (unittest)    │         │   (stdlib only)  │
+   │ (GTest)  │         │  (unittest)    │         │   (auxiliary)    │
    └────┬─────┘         └───────┬────────┘         └────────┬─────────┘
         │                       │                           │
  tests/amd_smi_test/     tests/python/            tests/abi_check/
                                                   tests/amdsmi_build/
                                                   tests/dme_integration/
+                                                  tests/go/
                                                   tests/python/test_*_guard.py
                                                   tests/run_amdsmi_*.py
 ```
 
-Only the first two families touch hardware. The third is pure logic plus
-package-manager harnesses.
+Only the C++ and Python functional suites touch hardware. Auxiliary suites cover
+Go/CGO fixtures, tooling, and package-manager checks without GPU access.
 
 ## C++ — one binary, filtered by suite name
 
@@ -172,11 +173,42 @@ tests/
 ├── abi_check/          abi_check.py + abi_check_test.py   header ABI diff vs develop
 ├── amdsmi_build/       run_amdsmi_build.py + tests        distro/pkg-mgr build driver
 ├── dme_integration/    metrics/services/submodules + tests
+├── go/                 Go/CGO fixtures, contract/tooling tests, staged consumer
 ├── python/test_*_guard.py, test_packaging_scriptlets.py, test_abi_compat.py
 │                       static assertions on CPack/DEBIAN/RPM templates
 ├── run_amdsmi_*.py     live package-manager harnesses (install/upgrade/remove/conflict)
 └── api_summary.py      parses amdsmi.h + test logs → api_summary.{csv,txt}
 ```
+
+### Go CGO tests (no GPU)
+
+From the project root on Linux, use the Python stdlib runner with a local Go
+1.20+ and C compiler. The runner compiles a controlled native fixture against the
+public header; no installed AMD SMI library, GPU, root, or network is needed.
+
+Use the [module test guide](../go/README.md#repository-tests) for the fixture,
+tooling, sanitizer, native, and staged-consumer commands.
+
+`--cgocheck2` needs Go 1.21+. `--asan` uses GCC and cannot be combined with
+`--race`. The `amdsmi_mock` tag needs the runner-built fixture; invoking `go test`
+with that tag alone does not build or link it. Test assets are not installed.
+
+| Check | What it verifies |
+| --- | --- |
+| Default runner | Go wrappers across the real CGO boundary into controlled native responses |
+| `--asan` | AddressSanitizer checks for the Go binary and C fixture |
+| Python tooling tests | Parsing, environment/cache safety, API-contract and install guards; real subprocess smoke tests for default fixtures, ASAN, vet, and example builds |
+| actionlint hook | Actions syntax and expression contexts in the Go and GPU build workflows |
+| External-package contract | Common Host names, signatures, fields, and `Init(AMDSMI_INIT_AMD_GPUS)` compile without private-package access; BM extensions are checked separately |
+| Lifecycle, index, and flag cases | Native header/library compatibility, independently of the Go toolchain floor; filtered GPU discovery order, bounds and lifetime checks, rejection of unsupported flags |
+| `--native --include-dir ... --library-dir ... --run '^TestNativeVersion$'` | Fresh matching 27.1 header/library linkage and runtime version, without initialization |
+| `--native --include-dir ... --library-dir ... --build-example` | Example links against the real library; it is not executed |
+| `python3 -B tests/go/test_install.py --build-dir "$AMDSMI_NATIVE_BUILD_DIR"` | Temporary `DESTDIR` install, exact source contents, build from staged sources, independent local-replacement consumer against staged headers/library |
+
+The native build must already exist and match the source tree. The staged check
+does not configure/build native code, run package scriptlets, or access GPUs.
+Local smoke tests visibly skip when Linux, Go, or GCC is missing; the Go CI job
+provides those prerequisites.
 
 ## Where it all gets triggered
 
@@ -185,7 +217,8 @@ tests/
             └─► clang-format, ruff-format, gersemi, codespell
 
  CI (.github/workflows/)
-   amdsmi-build.yml ──► run_amdsmi_build.py → build+install
+   amdsmi-go.yml ──► CPU-only Go 1.20.14/1.24.1 fixture, contract, tooling, native/staged checks
+   amdsmi-build.yml ──► run_amdsmi_build.py → GPU build+install+test
                         └─► source amdsmitst.exclude; detect_asic_filter.sh
                             ./amdsmitst --gtest_filter="-$GTEST_EXCLUDE"
                             ./integration_test.py -v
@@ -196,6 +229,9 @@ tests/
    amdsmi-upgrade-downgrade.yml ► run_amdsmi_upgrade_downgrade_test.py
                                   run_amdsmi_component_removal_test.py
 ```
+
+Workflow paths above are relative to the repository root. This describes
+configured coverage, not a hosted CI pass.
 
 # API Summary Report
 ## Overview

@@ -84,6 +84,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
   - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
 
+- **Added a read-only Linux Go module**.
+  - Provides GPU discovery, identity, telemetry, current partition metadata, and ECC/RAS queries with native units and field availability preserved.
+
 ### Changed
 
 - **Use fwupd daemon to read and write UMA carveout information**.  
@@ -261,6 +264,12 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
+
+- **Fixed nearest-GPU topology results**.
+  - Uses a strict comparator for ascending hop count, then ascending link weight. Equal-hop, equal-weight peers compare equal; their relative order is unspecified.
+  - Reports only the stored handle count. The former count could exceed the fixed array capacity and cause downstream consumers to read out of bounds.
+  - Resets processor discovery capacity for each socket so an earlier socket's device count does not limit later sockets.
+  - Rejects a discovery count exceeding its buffer capacity with `AMDSMI_STATUS_UNEXPECTED_SIZE` before reading entries.
 
 ## amd_smi_lib for ROCm 10.1.0
 

@@ -7,6 +7,8 @@ on:
       - develop
     paths:
       - ".github/workflows/lstt-formatting.yml"
+      - ".github/workflows/amdsmi-build.yml"
+      - ".github/workflows/amdsmi-go.yml"
       - "projects/rdc/**"
       - "projects/amdsmi/**"
       - "projects/rocm-smi-lib/**"
@@ -17,6 +19,8 @@ on:
   pull_request:
     paths:
       - ".github/workflows/lstt-formatting.yml"
+      - ".github/workflows/amdsmi-build.yml"
+      - ".github/workflows/amdsmi-go.yml"
       - "projects/rdc/**"
       - "projects/amdsmi/**"
       - "projects/rocm-smi-lib/**"
@@ -47,7 +51,9 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
         with:
-          sparse-checkout: projects/${{ matrix.project }}
+          sparse-checkout: |
+            projects/${{ matrix.project }}
+            .github/workflows
           fetch-depth: 0
 
       - name: Set up Python
