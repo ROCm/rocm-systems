@@ -19,15 +19,13 @@ permissions:
   contents: read
 
 concurrency:
-  # Metadata edits get an isolated group and cannot cancel validation.
-  group: ${{ github.workflow }}-${{ github.event.action == 'edited' && !github.event.changes.base && format('metadata-{0}', github.run_id) || github.event.number || github.sha }}
+  # Every PR edit validates its pinned head and base comparison.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
   cancel-in-progress: true
 
 jobs:
   pre-commit:
-    # Skipped metadata jobs have a separate name, preserving required results.
-    if: github.event.action != 'edited' || github.event.changes.base
-    name: ${{ github.event.action == 'edited' && !github.event.changes.base && 'metadata-only / pre-commit' || matrix.check-name }}
+    name: ${{ matrix.check-name }}
     runs-on: ubuntu-24.04
     timeout-minutes: ${{ matrix.timeout-minutes || 15 }}
     strategy:
