@@ -6496,25 +6496,36 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_PosixFdCloseFails_ReleasesAndRec
 
 // A successful legacy import whose record bookkeeping allocation fails
 // propagates the error: the mapped address is not recorded (the caller sees
-// the failure rather than a half-built queue entry).
+// the failure rather than a half-built queue entry), and the import is closed
+// at its base (the request offset subtracted back out) so it does not leak.
 TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_RecordAllocFails_Propagates)
 {
-    constexpr uintptr_t kBase = 0x8000;
+    constexpr uintptr_t kBase   = 0x8000;
+    constexpr uintptr_t kOffset = 0x40;
 
     p2pIpcExpInfo req{};
     req.legacyIpcCap = true;
     req.size         = 0x1000;
+    req.offset       = kOffset;
 
     ScopedHook open(g_hipIpcOpenMemHandle,
         [](void** devPtr, hipIpcMemHandle_t, unsigned int) -> hipError_t {
             if (devPtr) *devPtr = reinterpret_cast<void*>(kBase);
             return hipSuccess;
         });
+    int   closeCalls = 0;
+    void* closedPtr  = nullptr;
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [&](void* devPtr) -> hipError_t {
+            ++closeCalls;
+            closedPtr = devPtr;
+            return hipSuccess;
+        });
     // The record wrapper (proxyMemHandle) is the first ncclCalloc in the
     // exit-bookkeeping block; starve it.
     SetP2pCallocFailSize(sizeof(proxyMemHandle));
 
-    void* resp = nullptr;
+    void* resp = reinterpret_cast<void*>(0xDEAD);
     int   done = 0;
     auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
                                              sizeof(p2pIpcExpInfo), &resp,
@@ -6523,21 +6534,35 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_RecordAllocFails_Propagates)
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(QueueHead(conn_), nullptr);    // no record enqueued
     EXPECT_EQ(done, 1);
+    EXPECT_EQ(resp, nullptr);
+    EXPECT_EQ(closeCalls, 1);
+    EXPECT_EQ(closedPtr, reinterpret_cast<void*>(kBase));
 }
 
 // The impInfo payload allocation (the second ncclCalloc in the bookkeeping
-// block) failing likewise propagates without enqueuing a record.
+// block) failing likewise propagates without enqueuing a record and closes
+// the import at its base.
 TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
 {
-    constexpr uintptr_t kBase = 0x8000;
+    constexpr uintptr_t kBase   = 0x8000;
+    constexpr uintptr_t kOffset = 0x40;
 
     p2pIpcExpInfo req{};
     req.legacyIpcCap = true;
     req.size         = 0x1000;
+    req.offset       = kOffset;
 
     ScopedHook open(g_hipIpcOpenMemHandle,
         [](void** devPtr, hipIpcMemHandle_t, unsigned int) -> hipError_t {
             if (devPtr) *devPtr = reinterpret_cast<void*>(kBase);
+            return hipSuccess;
+        });
+    int   closeCalls = 0;
+    void* closedPtr  = nullptr;
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [&](void* devPtr) -> hipError_t {
+            ++closeCalls;
+            closedPtr = devPtr;
             return hipSuccess;
         });
     // proxyMemHandle and ncclIpcImpInfo differ in size; starving the latter
@@ -6545,7 +6570,7 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
     ASSERT_NE(sizeof(proxyMemHandle), sizeof(ncclIpcImpInfo));
     SetP2pCallocFailSize(sizeof(ncclIpcImpInfo));
 
-    void* resp = nullptr;
+    void* resp = reinterpret_cast<void*>(0xDEAD);
     int   done = 0;
     auto r = p2pTransport.send.proxyRegister(&conn_, &state_, &req,
                                              sizeof(p2pIpcExpInfo), &resp,
@@ -6554,7 +6579,89 @@ TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_ImpInfoAllocFails_Propagates)
     EXPECT_NE(r, ncclSuccess);
     EXPECT_EQ(QueueHead(conn_), nullptr);
     EXPECT_EQ(done, 1);
+    EXPECT_EQ(resp, nullptr);
+    EXPECT_EQ(closeCalls, 1);
+    EXPECT_EQ(closedPtr, reinterpret_cast<void*>(kBase));
 }
+
+#if ROCM_VERSION >= 70000
+
+// A cuMem register whose record bookkeeping allocation fails after the
+// request offset was applied to regAddr unwinds from the reserved base: every
+// segment is unmapped at base + its running offset, each handle released, and
+// the VA reservation freed at base.
+TEST_F(P2pProxyRegisterMicrotest, ProxyRegister_CuMemRecordAllocFails_UnwindsFromReservedBase)
+{
+    conn_.sameProcess = 1;
+
+    // Three segments keeps the per-segment callocs (bool[3], handle[3]) from
+    // matching sizeof(proxyMemHandle), which is the allocation starved below.
+    constexpr int       kNumSegments = 3;
+    constexpr uintptr_t kBase        = 0x600000;
+    constexpr uintptr_t kOffset      = 0x80;
+    constexpr size_t    kSegSize     = 0x1000;
+
+    std::array<p2pIpcExpInfo, kNumSegments> req{};
+    for (auto& seg : req) seg.size = kSegSize;
+    req[0].offset = kOffset;
+
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [](void** ptr, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            if (ptr) *ptr = reinterpret_cast<void*>(kBase);
+            return hipSuccess;
+        });
+    ScopedHook map(g_hipMemMap,
+        [](void*, std::size_t, std::size_t,
+           hipMemGenericAllocationHandle_t, unsigned long long) -> hipError_t {
+            return hipSuccess;
+        });
+    ScopedHook access(g_hipMemSetAccess,
+        [](void*, std::size_t, const hipMemAccessDesc*, std::size_t) -> hipError_t {
+            return hipSuccess;
+        });
+    std::vector<void*> unmapped;
+    ScopedHook unmap(g_hipMemUnmap, [&](void* p, size_t) -> hipError_t {
+        unmapped.push_back(p);
+        return hipSuccess;
+    });
+    int releaseCalls = 0;
+    ScopedHook release(g_hipMemRelease,
+        [&releaseCalls](hipMemGenericAllocationHandle_t) -> hipError_t {
+            ++releaseCalls;
+            return hipSuccess;
+        });
+    int    addrFreeCalls = 0;
+    void*  freedAddr     = nullptr;
+    size_t freedSize     = 0;
+    ScopedHook addrFree(g_hipMemAddressFree, [&](void* p, size_t size) -> hipError_t {
+        ++addrFreeCalls;
+        freedAddr = p;
+        freedSize = size;
+        return hipSuccess;
+    });
+    SetP2pCallocFailSize(sizeof(proxyMemHandle));
+
+    void* resp = reinterpret_cast<void*>(0xDEAD);
+    int   done = 0;
+    auto r = p2pTransport.send.proxyRegister(&conn_, &state_, req.data(),
+                                             sizeof(p2pIpcExpInfo) * kNumSegments,
+                                             &resp, sizeof(void*), &done);
+
+    EXPECT_NE(r, ncclSuccess);
+    EXPECT_EQ(resp, nullptr);
+    EXPECT_EQ(done, 1);
+    EXPECT_EQ(QueueHead(conn_), nullptr);
+    ASSERT_EQ(unmapped.size(), static_cast<size_t>(kNumSegments));
+    for (int segment = 0; segment < kNumSegments; segment++) {
+        EXPECT_EQ(unmapped[segment], reinterpret_cast<void*>(kBase + segment * kSegSize));
+    }
+    EXPECT_EQ(releaseCalls, kNumSegments);
+    EXPECT_EQ(addrFreeCalls, 1);
+    EXPECT_EQ(freedAddr, reinterpret_cast<void*>(kBase));
+    EXPECT_EQ(freedSize, kSegSize * kNumSegments);
+}
+
+#endif  // ROCM_VERSION >= 70000
 
 class P2pProxyDeregisterMicrotest : public P2pProxyRegisterMicrotest {};
 

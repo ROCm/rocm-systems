@@ -198,18 +198,8 @@ namespace RcclUnitTesting
       for (int localRank = 0; localRank < static_cast<int>(this->collArgs[groupId].size()); ++localRank)
       {
         if (localRank < static_cast<int>(this->comms.size()))
-        {
           (void)this->DeregisterMemInternal(groupId, /*collId=*/-1, localRank);
-          (void)this->DeallocateMemInternal(groupId, /*collId=*/-1, localRank);
-        }
-        else
-        {
-          for (CollectiveArgs& collArg : this->collArgs[groupId][localRank])
-          {
-            (void)collArg.DeallocateMem();
-            collArg.options.scalarMode = -1;
-          }
-        }
+        (void)this->DeallocateMemInternal(groupId, /*collId=*/-1, localRank);
       }
     }
     this->collArgs.clear();
@@ -1341,9 +1331,8 @@ namespace RcclUnitTesting
 
       if (collArg.options.scalarMode >= 0)
       {
-        ncclResult_t const result = this->comms[localRank] == nullptr
-                                      ? ncclSuccess
-                                      : ncclRedOpDestroy(collArg.options.redOp, this->comms[localRank]);
+        ncclComm_t const comm = localRank < static_cast<int>(this->comms.size()) ? this->comms[localRank] : nullptr;
+        ncclResult_t const result = comm == nullptr ? ncclSuccess : ncclRedOpDestroy(collArg.options.redOp, comm);
         if (result != ncclSuccess)
         {
           TEST_ERROR("Child process %d fails NCCL call ncclRedOpDestroy with code %d", this->childId, result);

@@ -3692,6 +3692,7 @@ struct CollTaskComm {
   CollTaskComm() {
     storage->nRanks = 4;
     ncclMemoryStackConstruct(&storage->memScoped);
+    // memPermanent is load-bearing, not decorative; see BatchPlanComm for why.
     ncclMemoryStackConstruct(&storage->memPermanent);
   }
   ~CollTaskComm() {

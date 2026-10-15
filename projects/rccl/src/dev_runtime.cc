@@ -277,8 +277,7 @@ fail_lsaRankList:
 static ncclResult_t symTeamDestroyAll(struct ncclComm* comm); // Further down
 static void symMemoryDestroy(struct ncclComm* comm, struct ncclDevrMemory* mem); // Further down
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm,
-                                           struct ncclWindow_vidmem* winDev,
+static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWindow_vidmem* winDev,
                                            bool forceCleanup = false); // Further down
 #endif
 
@@ -316,8 +315,8 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       int before = devr->winSortedCount;
       struct ncclDevrWindow* win = devr->winSorted[0].win;
       NCCLCHECKIGNORE(windowDeregisterNonSym(comm, win->vidmem, /*forceCleanup=*/true), ret);
-      // windowDeregisterNonSym only removes the entry on success; drop it on
-      // failure too so abort-time finalize always makes progress.
+      // forceCleanup drops the entry on nearly every failure path; this guard
+      // covers the two early exits (shadow decode, stale handle) that return first.
       if (devr->winSortedCount >= before) {
         listRemove(devr->winSorted, &devr->winSortedCount, 0);
       }
@@ -1239,10 +1238,10 @@ static ncclResult_t symWindowCreate(struct ncclComm* comm, struct ncclDevrMemory
       break;
     }
     if (tableHost->next == nullptr) {
-      NCCLCHECKGOTO(
-          ncclShadowPoolAlloc<ncclDevCommWindowTable>(&devr->shadows, &unpublishedTable, nullptr, stream), ret, fail);
-      CUDACHECKGOTO(cudaMemcpyAsync(&tableDev->next, &unpublishedTable, sizeof(unpublishedTable), cudaMemcpyHostToDevice,
-                                   stream),
+      NCCLCHECKGOTO(ncclShadowPoolAlloc<ncclDevCommWindowTable>(&devr->shadows, &unpublishedTable, nullptr, stream),
+                    ret, fail);
+      CUDACHECKGOTO(cudaMemcpyAsync(&tableDev->next, &unpublishedTable, sizeof(unpublishedTable),
+                                    cudaMemcpyHostToDevice, stream),
                     ret, fail);
       tableHost->next = unpublishedTable;
       unpublishedTable = nullptr;
@@ -2404,8 +2403,7 @@ fail:
 
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
 // RCCL: deregister mirror of windowRegisterNonSym
-static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWindow_vidmem* winDev,
-                                           bool forceCleanup) {
+static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWindow_vidmem* winDev, bool forceCleanup) {
   ncclResult_t ret = ncclSuccess;
   struct ncclDevrState* devr = &comm->devrState;
   cudaStream_t stream = nullptr;
@@ -2439,7 +2437,7 @@ static ncclResult_t windowDeregisterNonSym(struct ncclComm* comm, struct ncclWin
   if (win->rmaHostWins[0] != nullptr) {
     ncclResult_t cleanupRet = ncclRmaProxyDeregister(comm, win->rmaHostWins);
     if (cleanupRet != ncclSuccess) {
-      ret = cleanupRet;
+      if (ret == ncclSuccess) ret = cleanupRet;
       if (!forceCleanup) goto fail;
     }
   }

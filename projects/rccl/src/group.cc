@@ -418,15 +418,15 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
   while (!ncclIntruQueueEmpty(&comm->devrState.regTaskQueue)) {
     struct ncclDevrRegTask* task = ncclIntruQueueDequeue(&comm->devrState.regTaskQueue);
     ncclResult_t taskRet =
-        ncclDevrWindowRegisterInGroup(comm, task->userPtr, task->userSize, task->winFlags, task->outWinDev);
+      ncclDevrWindowRegisterInGroup(comm, task->userPtr, task->userSize, task->winFlags, task->outWinDev);
     free(task);
     NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
     struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
-    ncclResult_t taskRet = ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false,
-                                                      task->deviceCodeVersion);
+    ncclResult_t taskRet =
+      ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false, task->deviceCodeVersion);
     freeDevCommRequirements(task->reqs); // free additional task memory for reqs
     free(task);
     NCCLCHECKGOTO(taskRet, ret, fail);

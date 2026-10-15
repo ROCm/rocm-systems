@@ -2894,21 +2894,34 @@ TEST_F(SymWindowCreateTest, SegmentWindowsFail_ReturnsErrorWithoutPublishing) {
 TEST_F(SymWindowCreateTest, DescriptorAllocFails_ReturnsError) {
   ScopedHook alloc(g_devrShadowPoolAlloc,
                    [](ncclShadowPool*, size_t, void**, void**, hipStream_t) { return ncclSystemError; });
+  ScopedHook poolFree(g_devrShadowPoolFree, [](ncclShadowPool*, void*, hipStream_t) { return ncclSuccess; });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  EXPECT_EQ(poolFree.calls, 0);  // no descriptor was handed out, so fail: has nothing to return
 }
 
 // Branch: the descriptor copy to the device fails. It is the first copy the
 // function makes, so the window table is never reached and the sorted list
-// never grows.
+// never grows. fail: hands the descriptor back to the shadow pool.
 TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
-  ScopedHook copy(g_hipMemcpyAsync,
-                  [](void*, const void*, size_t, hipMemcpyKind, hipStream_t) { return hipErrorInvalidValue; });
+  void* winDev = nullptr;
+  ScopedHook copy(g_hipMemcpyAsync, [&](void* dst, const void*, size_t, hipMemcpyKind, hipStream_t) {
+    winDev = dst;
+    return hipErrorInvalidValue;
+  });
+  // Records only: the fake's reset reclaims whatever the pool still holds.
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(copy.calls, 1);  // failed on the descriptor, before the table copy
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  ASSERT_NE(winDev, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({winDev}));
 }
 
 // Branch: the descriptor copy lands but publishing the entry into the window
@@ -2917,18 +2930,70 @@ TEST_F(SymWindowCreateTest, DescriptorCopyFails_ReturnsErrorWithoutPublishing) {
 // DescriptorCopyFails above.
 TEST_F(SymWindowCreateTest, TablePublishCopyFails_ReturnsErrorWithoutPublishing) {
   int n = 0;
+  void* winDev = nullptr;
   ScopedHook copy(g_hipMemcpyAsync,
-                  [&n](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
-                    if (++n == 2) return hipErrorInvalidValue;
+                  [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+                    if (++n == 1) winDev = dst;
+                    if (n == 2) return hipErrorInvalidValue;
                     // Mirrors the fake's default: the earlier copies must still
                     // land, or the table walk reads uninitialised entries.
                     if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
                     return hipSuccess;
                   });
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
 
   EXPECT_NE(Create(reinterpret_cast<void*>(0x100000), 4096), ncclSuccess);
   EXPECT_EQ(n, 2);
   EXPECT_EQ(comm->devrState.winSortedCount, 0);
+  ASSERT_NE(winDev, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({winDev}));
+  // The host shadow is written only after its device copy lands.
+  ASSERT_NE(comm->devrState.windowTable, nullptr);
+  EXPECT_EQ(comm->devrState.windowTable->entries[0].window, nullptr);
+}
+
+// Branch: the first table is full, so a new table is allocated, but linking it
+// into the chain fails. Both the unlinked table and the descriptor go back to
+// the pool, and the chain is left as it was.
+TEST_F(SymWindowCreateTest, ChainLinkCopyFails_FreesUnpublishedTableAndDescriptor) {
+  for (int i = 0; i < 32; i++) {
+    ASSERT_EQ(Create(reinterpret_cast<void*>(0x100000 + i * 0x1000), 4096), ncclSuccess);
+  }
+  ncclDevCommWindowTable* first = comm->devrState.windowTable;
+  ASSERT_NE(first, nullptr);
+
+  // Copy 1 is the descriptor; with the first table full, copy 2 is the
+  // next-pointer link, whose source holds the freshly allocated table.
+  int n = 0;
+  void* winDev = nullptr;
+  void* unpublished = nullptr;
+  ScopedHook copy(g_hipMemcpyAsync,
+                  [&](void* dst, const void* src, size_t size, hipMemcpyKind, hipStream_t) {
+                    if (++n == 1) winDev = dst;
+                    if (n == 2) {
+                      if (size == sizeof(void*)) unpublished = *static_cast<void* const*>(src);
+                      return hipErrorInvalidValue;
+                    }
+                    if (dst != nullptr && src != nullptr && dst != src) memcpy(dst, src, size);
+                    return hipSuccess;
+                  });
+  std::vector<void*> freed;
+  ScopedHook poolFree(g_devrShadowPoolFree, [&](ncclShadowPool*, void* obj, hipStream_t) {
+    freed.push_back(obj);
+    return ncclSuccess;
+  });
+
+  EXPECT_NE(Create(reinterpret_cast<void*>(0x200000), 4096), ncclSuccess);
+  EXPECT_EQ(n, 2);
+  EXPECT_EQ(comm->devrState.winSortedCount, 32);
+  EXPECT_EQ(first->next, nullptr);
+  ASSERT_NE(winDev, nullptr);
+  ASSERT_NE(unpublished, nullptr);
+  EXPECT_EQ(freed, std::vector<void*>({unpublished, winDev}));
 }
 
 

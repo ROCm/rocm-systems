@@ -153,6 +153,7 @@ extern "C" const char* __asan_default_options() {
 // Must stay below #undef malloc/#undef free, or these bodies are rewritten into the UUT's seams.
 static const void* g_deleteWatchPtr = nullptr;
 static int g_deleteWatchHits = 0;
+static std::size_t g_deleteWatchNewSize = 0;  // 0 = disarmed; else watch the next nothrow new of this size
 
 static void MicroOperatorDelete(void* p) noexcept {
   if (p != nullptr && p == g_deleteWatchPtr) ++g_deleteWatchHits;
@@ -165,7 +166,14 @@ void* operator new(std::size_t n) {
   return p;
 }
 void* operator new[](std::size_t n) { return ::operator new(n); }
-void* operator new(std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
+void* operator new(std::size_t n, const std::nothrow_t&) noexcept {
+  void* p = std::malloc(n != 0 ? n : 1);
+  if (p != nullptr && g_deleteWatchNewSize != 0 && n == g_deleteWatchNewSize) {
+    g_deleteWatchPtr = p;
+    g_deleteWatchNewSize = 0;
+  }
+  return p;
+}
 void* operator new[](std::size_t n, const std::nothrow_t&) noexcept { return std::malloc(n != 0 ? n : 1); }
 void operator delete(void* p) noexcept { MicroOperatorDelete(p); }
 void operator delete[](void* p) noexcept { MicroOperatorDelete(p); }
@@ -180,13 +188,23 @@ class DeleteWatch {
     g_deleteWatchPtr = p;
     g_deleteWatchHits = 0;
   }
-  ~DeleteWatch() { g_deleteWatchPtr = nullptr; }
+  ~DeleteWatch() {
+    g_deleteWatchPtr = nullptr;
+    g_deleteWatchNewSize = 0;
+  }
   DeleteWatch(const DeleteWatch&) = delete;
   DeleteWatch& operator=(const DeleteWatch&) = delete;
   void Arm(const void* p) {
     g_deleteWatchPtr = p;
     g_deleteWatchHits = 0;
   }
+  // For an object the UUT allocates itself with new (std::nothrow), e.g. NEW_NOTHROW_GOTO.
+  void ArmOnNextNothrowNew(std::size_t size) {
+    g_deleteWatchPtr = nullptr;
+    g_deleteWatchHits = 0;
+    g_deleteWatchNewSize = size;
+  }
+  bool armed() const { return g_deleteWatchPtr != nullptr; }
   int hits() const { return g_deleteWatchHits; }
 };
 
@@ -236,6 +254,7 @@ class InitMicrotest : public ::testing::Test {
     g_mallocFailSize = 0;
     g_deleteWatchPtr = nullptr;
     g_deleteWatchHits = 0;
+    g_deleteWatchNewSize = 0;
     g_tunerFinalizeCalls = 0;
     g_tunerFinalizeLastContext = nullptr;
     g_tunerFinalizeResult = ncclSuccess;
@@ -3963,6 +3982,34 @@ TEST_F(InitMicrotest, SetCommAbortFlags_NullChildDev_SkipsDetachedChildPair) {
   EXPECT_EQ(1u, c.parent());
   EXPECT_EQ(1u, c.parentDev());
   EXPECT_EQ(AbortFlagsComm::kChildSentinel, c.child());
+}
+
+// A comm whose own abort pair was never allocated (an early init failure) must not be dereferenced; the
+// child pair is still written, which is the positive anchor for the two untouched parent slots.
+TEST_F(InitMicrotest, SetCommAbortFlags_NullParentPair_WritesOnlyChildFlags) {
+  AbortFlagsComm c;
+  c.get()->abortFlag = nullptr;
+  c.get()->abortFlagDev = nullptr;
+
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  EXPECT_EQ(AbortFlagsComm::kParentSentinel, c.parent());
+  EXPECT_EQ(AbortFlagsComm::kParentDevSentinel, c.parentDev());
+  EXPECT_EQ(1u, c.child());
+  EXPECT_EQ(1u, c.childDev());
+}
+
+// Same with the child detached too: nothing is written and the call still succeeds.
+TEST_F(InitMicrotest, SetCommAbortFlags_NullParentPairChildDetached_WritesNothing) {
+  AbortFlagsComm c;
+  c.get()->abortFlag = nullptr;
+  c.get()->abortFlagDev = nullptr;
+  c.detachChild();
+
+  EXPECT_EQ(ncclSuccess, setCommAbortFlags(c.get(), 1));
+  EXPECT_EQ(AbortFlagsComm::kParentSentinel, c.parent());
+  EXPECT_EQ(AbortFlagsComm::kParentDevSentinel, c.parentDev());
+  EXPECT_EQ(AbortFlagsComm::kChildSentinel, c.child());
+  EXPECT_EQ(AbortFlagsComm::kChildDevSentinel, c.childDev());
 }
 // ---------------------------------------------------------------------------
 // ncclGetUniqueId_impl (init.cc:358) -- the standalone public-API id minter.
@@ -9087,11 +9134,25 @@ TEST_F(InitMicrotest, InitChildComm_ExcludeListAllocFails_ReturnsSystemErrorAndS
   Grow_LaunchSpy spy;
   g_callocFailAt = g_callocCallIndex + 3;
   ncclComm_t out = kGrow_NewcommPoison;
+  DeleteWatch watch(nullptr);
+  watch.ArmOnNextNothrowNew(sizeof(ncclCommInitRankAsyncJob));
+  ncclResult_t res = ncclSuccess;
+  std::vector<void*> freed;
+  {
+    Grow_FreeSpy frees;
+    res = Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 2, &out);
+    freed = frees.freed();
+  }
 
-  EXPECT_EQ(ncclSystemError, Grow_RunShrink(parent.get(), NCCL_SHRINK_DEFAULT, exclude, 2, &out));
-
+  EXPECT_EQ(ncclSystemError, res);
   EXPECT_EQ(nullptr, out);
   EXPECT_EQ(0, spy.calls());
+  ASSERT_TRUE(watch.armed()) << "the job was never allocated";
+  EXPECT_EQ(1, watch.hits()) << "fail: must delete the job it still owns before launch";
+  EXPECT_EQ(1, std::count(freed.begin(), freed.end(), nullptr)) << "the job's never-allocated exclude list";
+  for (void* p : freed) {
+    ::free(p);
+  }
 }
 
 TEST_F(InitMicrotest, InitChildComm_AsyncLaunchFails_ClearsNewcommRestoresDeviceAndLeavesTheJobAllocated) {
@@ -9311,6 +9372,34 @@ TEST_F(InitMicrotest, InitTransportsRank_Gfx906AllXgmi_RaisesChannelCountToFour)
   });
   EXPECT_EQ(kTrPostsetReached, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_EQ(4, g_ncclTopoPostsetNc);
+}
+
+// A link-type probe failure must leave through exit:, not return past it. At that point localBusIds is
+// the only buffer exit: has to release (allGather3Data and everything after it are still NULL).
+TEST_F(InitMicrotest, InitTransportsRank_LinkTypeFails_PropagatesAndFreesLocalBusIds) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  Tr_ReachAllGather3(c, "gfx906");
+  g_hipDeviceGetPCIBusIdResult = hipSuccess;
+  const auto gathers = Tr_InstallGathers(c);
+  ScopedHook canAccess(g_hipDeviceCanAccessPeer, [](int* p, int, int) {
+    *p = 1;
+    return hipSuccess;
+  });
+  bool probeFailed = false;
+  std::vector<void*> freedAfterFailure;
+  ScopedHook microFree(g_microFree, [&](void* p) {
+    if (probeFailed && p != nullptr) freedAfterFailure.push_back(p);
+    ::free(p);
+  });
+  ScopedHook linkType(g_ncclTopoGetLinkType, [&probeFailed](int, int, bool*, int) {
+    probeFailed = true;
+    return ncclSystemError;
+  });
+
+  EXPECT_EQ(ncclSystemError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(1, linkType.calls);
+  EXPECT_EQ(0, g_ncclTopoPostsetCalls);
+  EXPECT_EQ(1u, freedAfterFailure.size()) << "exit: must free localBusIds";
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_Gfx906OneNonXgmiLink_KeepsTwoChannels) {
