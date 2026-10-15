@@ -1481,6 +1481,96 @@ TEST(EffectiveConfigTest, ReportsAnUnknownFieldNameEscape) {
   EXPECT_EQ(diagnostic.message(), "unknown escape code in string constant");
 }
 
+TEST(EffectiveConfigTest, CombinesWaitCheckingAndBudgetWithoutChangingOtherFields) {
+  const std::string json = R"({
+  // Keep omitted automatic settings and unknown fields intact.
+  wait_checking: 'off',
+  cpu_thread_budget: 32,
+  future: {wait_checking: 'off'}
+})";
+  auto rewritten = config::json_with_launch_overrides(
+      json, {.cpu_thread_budget = 4, .wait_checking = config::WaitChecking::All});
+  ASSERT_TRUE(rewritten.succeeded());
+  std::string expected = json;
+  ASSERT_TRUE(replace_exactly_once(expected, "wait_checking: 'off',", "wait_checking: \"all\","));
+  ASSERT_TRUE(replace_exactly_once(expected, "cpu_thread_budget: 32", "cpu_thread_budget: 4"));
+  EXPECT_EQ(rewritten.value(), expected);
+
+  auto unchanged = config::json_with_launch_overrides(json, {});
+  ASSERT_TRUE(unchanged.succeeded());
+  EXPECT_EQ(unchanged.value(), json);
+  EXPECT_TRUE(
+      config::json_with_launch_overrides("[1]", {.wait_checking = config::WaitChecking::Off})
+          .failed());
+}
+
+TEST(ConfigLoaderTest, WaitCheckingOverridesEveryCuAndGpu) {
+  using amdgpu::MemoryWaitDiagnostics;
+  using config::WaitChecking;
+  for (const auto *name : {"gfx1250_mi455x_kmd_4gpu.json", "gfx1201_r9700.json"}) {
+    std::string source = config::read_config_file(test::config_path(name));
+    const auto cu_pos = source.find("\"type\": \"compute_unit\"");
+    ASSERT_NE(cu_pos, std::string::npos);
+    const auto entries = source.find('[', source.find("\"config\"", cu_pos));
+    ASSERT_NE(entries, std::string::npos);
+    source.insert(entries + 1, R"(
+      {"key": "memory_wait_diagnostics", "value": "off"},
+      {"key": "xcnt_diagnostics", "value": "warn"},)");
+    for (auto mode : {std::optional<WaitChecking>{}, std::optional{WaitChecking::Off},
+                      std::optional{WaitChecking::On}, std::optional{WaitChecking::All}}) {
+      SCOPED_TRACE(name);
+      SCOPED_TRACE(mode ? static_cast<int>(*mode) : -1);
+      auto json = config::json_with_launch_overrides(source, {.wait_checking = mode});
+      ASSERT_TRUE(json.succeeded());
+      auto loaded = config::load_config_from_string(json.value(), kEmbeddedSchema);
+      std::vector<simdojo::Component *> components;
+      loaded.build_result.root->collect_components(components);
+      for (auto &build : loaded.extra_gpu_builds)
+        build.root->collect_components(components);
+      unsigned count = 0;
+      for (auto *component : components) {
+        auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component);
+        if (!cu)
+          continue;
+        ++count;
+        const auto &config = cu->config();
+        EXPECT_EQ(config.memory_wait_diagnostics, mode && *mode != WaitChecking::Off
+                                                      ? MemoryWaitDiagnostics::Warn
+                                                      : MemoryWaitDiagnostics::Off);
+        EXPECT_EQ(config.xcnt_diagnostics, !mode || *mode == WaitChecking::All
+                                               ? MemoryWaitDiagnostics::Warn
+                                               : MemoryWaitDiagnostics::Off);
+        EXPECT_EQ(config.xcnt_checks_enabled(),
+                  config.arch == ROCJITSU_CODE_ARCH_CDNA5 && (!mode || *mode == WaitChecking::All));
+      }
+      EXPECT_GT(count, loaded.num_gpus);
+    }
+  }
+}
+
+TEST(ConfigLoaderTest, RejectsInvalidWaitChecking) {
+  std::string json = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+  json.insert(json.find('{') + 1, R"("wait_checking": "invalid",)");
+  EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
+}
+
+TEST(ConfigLoaderTest, WaitCheckingStillRejectsInvalidPerCuSettings) {
+  for (const char *key : {"memory_wait_diagnostics", "xcnt_diagnostics"}) {
+    for (const char *mode : {"on", "off", "all"}) {
+      SCOPED_TRACE(key);
+      SCOPED_TRACE(mode);
+      std::string json = config::read_config_file(test::config_path("gfx942_cdna3.json"));
+      const auto cu_pos = json.find("\"type\": \"compute_unit\"");
+      ASSERT_NE(cu_pos, std::string::npos);
+      const auto entries = json.find('[', json.find("\"config\"", cu_pos));
+      ASSERT_NE(entries, std::string::npos);
+      json.insert(entries + 1, std::format(R"({{"key":"{}","value":"invalid"}},)", key));
+      json.insert(json.find('{') + 1, std::format(R"("wait_checking":"{}",)", mode));
+      EXPECT_THROW(config::load_config_from_string(json, kEmbeddedSchema), std::invalid_argument);
+    }
+  }
+}
+
 TEST(EffectiveConfigTest, RejectsInputThatIsNotASimulationConfigObject) {
   util::StringDiagnostic diagnostic;
   FailureOr<std::string> rewritten =
@@ -1495,7 +1585,8 @@ TEST(EffectiveConfigTest, WritesTheLaunchCopyBesideTheInvocationHandoff) {
   const std::string source = test::config_path("gfx942_cdna3.json");
   const std::string source_before = config::read_config_file(source);
 
-  FailureOr<std::string> copy = config::write_effective_config(source, 12, getpid());
+  FailureOr<std::string> copy =
+      config::write_effective_config(source, {.cpu_thread_budget = 12}, getpid());
   ASSERT_TRUE(copy.succeeded());
 
   EXPECT_EQ(copy.value(),
@@ -1513,8 +1604,9 @@ TEST(EffectiveConfigTest, ReportsAnUnwritableRuntimeDirectory) {
   test::ScopedEnvironmentVariable runtime_dir("ROCJITSU_RUNTIME_DIR", blocked_root.string());
 
   util::StringDiagnostic diagnostic;
-  FailureOr<std::string> written = config::write_effective_config(
-      test::config_path("gfx942_cdna3.json"), 12, getpid(), diagnostic.emitter());
+  FailureOr<std::string> written =
+      config::write_effective_config(test::config_path("gfx942_cdna3.json"),
+                                     {.cpu_thread_budget = 12}, getpid(), diagnostic.emitter());
   EXPECT_TRUE(written.failed());
   EXPECT_THAT(diagnostic.message(), testing::HasSubstr("cannot create runtime directory"));
 }
@@ -1550,6 +1642,16 @@ TEST(EffectiveConfigTest, ReadsNativeLaunchConfigHandoff) {
       config::load_execution_thread_settings(effective_path, rocjitsu::kEmbeddedSchema);
 
   EXPECT_EQ(effective_settings.request.budget, 4u);
+  auto loaded = config::load_config(effective_path, kEmbeddedSchema);
+  std::vector<simdojo::Component *> components;
+  loaded.build_result.root->collect_components(components);
+  unsigned cus = 0;
+  for (auto *component : components)
+    if (auto *cu = dynamic_cast<amdgpu::ComputeUnitCore *>(component)) {
+      ++cus;
+      EXPECT_FALSE(cu->config().memory_wait_checks_enabled());
+    }
+  EXPECT_GT(cus, 0u);
   EXPECT_EQ(config::read_config_file(source_path), source_before);
 }
 
@@ -2004,6 +2106,10 @@ TEST(CheckpointTest, LegacyAbsentFunctionalQuantumUsesNativeDefault) {
   ASSERT_NE(cu, nullptr);
   EXPECT_EQ(cu->config().functional_quantum, amdgpu::ComputeUnitCore::kFunctionalQuantum);
   EXPECT_EQ(cu->scratch_slots_per_cu(), cu->num_wf_slots());
+  EXPECT_EQ(cu->config().memory_wait_diagnostics, amdgpu::MemoryWaitDiagnostics::Warn);
+  EXPECT_EQ(cu->config().xcnt_diagnostics, amdgpu::MemoryWaitDiagnostics::Off);
+  EXPECT_FALSE(checkpoint->compute_units()->Get(0)->memory_wait_checks().has_value());
+  EXPECT_FALSE(checkpoint->compute_units()->Get(0)->xcnt_checks().has_value());
 }
 
 TEST(CheckpointTest, RoundTripsCdna5ScratchAndDispatchCapacity) {
@@ -2285,6 +2391,60 @@ TEST(CheckpointTest, RoundTripsHeterogeneousFunctionalQuantum) {
   auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
   EXPECT_EQ(restored_se->compute_unit(0)->config().functional_quantum, 7u);
   EXPECT_EQ(restored_se->compute_unit(1)->config().functional_quantum, 37u);
+}
+
+TEST(CheckpointTest, RoundTripsWaitCheckingModes) {
+  using amdgpu::MemoryWaitDiagnostics;
+  for (const auto mode :
+       {config::WaitChecking::Off, config::WaitChecking::On, config::WaitChecking::All}) {
+    SCOPED_TRACE(static_cast<int>(mode));
+    auto json = config::json_with_launch_overrides(
+        config::read_config_file(test::config_path("gfx1250_mi455x.json")),
+        {.wait_checking = mode});
+    ASSERT_TRUE(json.succeeded());
+    auto source = config::load_config_from_string(json.value(), kEmbeddedSchema);
+    auto *source_cu = source.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    ASSERT_NE(source_cu->dispatch_wf(0, 0, 32, 32), nullptr);
+    test::ScopedTempFile checkpoint("rocjitsu-wait-mode-checkpoint-");
+    config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                            source.cpu_dispatch_threads);
+    auto restored = config::restore_checkpoint(checkpoint.path());
+    for (auto *xcd : restored.soc()->xcds()) {
+      for (auto *se : xcd->shader_engines()) {
+        for (auto *cu : se->compute_units()) {
+          EXPECT_EQ(cu->config().memory_wait_diagnostics, mode == config::WaitChecking::Off
+                                                              ? MemoryWaitDiagnostics::Off
+                                                              : MemoryWaitDiagnostics::Warn);
+          EXPECT_EQ(cu->config().xcnt_diagnostics, mode == config::WaitChecking::All
+                                                       ? MemoryWaitDiagnostics::Warn
+                                                       : MemoryWaitDiagnostics::Off);
+        }
+      }
+    }
+    auto *restored_cu = restored.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+    ASSERT_NE(restored_cu->wf(0), nullptr);
+    EXPECT_EQ(restored_cu->wf(0)->memory_wait_checks_enabled(), mode != config::WaitChecking::Off);
+  }
+}
+
+TEST(CheckpointTest, RoundTripsIndependentPerCuWaitSettings) {
+  std::string json = functional_quantum_checkpoint_config(7, 37);
+  ASSERT_TRUE(replace_exactly_once(json, "\"arch\":\"cdna3\"", "\"arch\":\"cdna5\""));
+  ASSERT_TRUE(replace_exactly_once(json, R"({"key":"functional_quantum","value":"7"})",
+                                   R"({"key":"memory_wait_diagnostics","value":"off"},
+         {"key":"xcnt_diagnostics","value":"warn"})"));
+  auto source = config::load_config_from_string(json, kEmbeddedSchema);
+  test::ScopedTempFile checkpoint("rocjitsu-per-cu-wait-checkpoint-");
+  config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *se = restored.soc()->xcd(0)->shader_engine(0);
+  EXPECT_EQ(se->compute_unit(0)->config().memory_wait_diagnostics,
+            amdgpu::MemoryWaitDiagnostics::Off);
+  EXPECT_EQ(se->compute_unit(0)->config().xcnt_diagnostics, amdgpu::MemoryWaitDiagnostics::Warn);
+  EXPECT_EQ(se->compute_unit(1)->config().memory_wait_diagnostics,
+            amdgpu::MemoryWaitDiagnostics::Warn);
+  EXPECT_EQ(se->compute_unit(1)->config().xcnt_diagnostics, amdgpu::MemoryWaitDiagnostics::Off);
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {

@@ -292,6 +292,21 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``RCCL_TUNER_EMBEDDED_CONFIG``
+        | Controls whether the built-in CSV tuner uses the tuning configurations
+          compiled into ``librccl.so`` from the source tree's ``tuner/*.csv``.
+          These are the stock defaults, so no file has to be staged on each node.
+          ``NCCL_TUNER_CONFIG_FILE`` and a CSV in ``<librccl.so dir>/tuner/`` or
+          ``${ROCM_PATH}/share/rccl/tuner/`` take precedence over them. When the
+          GPU architecture is known, only an architecture-specific
+          (``rccl_tuner_<arch>.csv``) or generic (``rccl_tuner.csv``)
+          configuration is used; another architecture's configuration is never
+          applied. When the architecture cannot be determined, any embedded
+          configuration may be used. To disable the tuner entirely, embedded
+          or not, use ``NCCL_TUNER_PLUGIN=none``.
+      - | ``1``: Use the embedded configurations when no file is found (default).
+        | ``0``: Ignore the embedded configurations. File-based tuning is unaffected.
+
 Network and topology
 ====================
 
@@ -888,20 +903,21 @@ threshold table introduced for gfx1250.
 
     * - | ``RCCL_CE_REDUCESCATTER``
         | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
-          the CE AllReduce staging buffer (``ceARTmpBuf``). Single-node symmetric
-          communicators only. Unless force mode is enabled, the message cap is the
-          same 2-shot window as CE AllReduce (``RCCL_CE_AR_MAX_MSG_BYTES`` or the
-          arch table).
+          the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
+          symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``)
+          unless ``RCCL_FORCE_CE_REDUCESCATTER=1``. Single-node symmetric
+          communicators only. There is no message-size cap; large messages are
+          pipelined through the staging slots.
       - | ``0``: Disabled (default).
         | ``1``: Enabled, subject to the other eligibility checks.
 
     * - | ``RCCL_FORCE_CE_REDUCESCATTER``
-        | Runs CE ReduceScatter without ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``)
-          and without a symmetric window on the user buffer. Force mode also
-          bypasses the tuned 2-shot size cap; larger messages are chunked through
-          the shared staging allocation. Requires ``RCCL_CE_REDUCESCATTER=1``.
+        | Runs CE ReduceScatter without ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+          Requires ``RCCL_CE_REDUCESCATTER=1``. Force mode also preempts an
+          otherwise-eligible symmetric kernel so Primus-style registered buffers
+          still take the CE path when requested.
       - | ``0``: Disabled (default).
-        | ``1``: Force-enabled (CTA-policy, registration, and tuned-size gates bypassed).
+        | ``1``: Force-enabled (CTA-policy gate bypassed; preempts symk).
 
     * - | ``RCCL_CE_REDUCE_PER_CHUNK``
         | Selects a finite reducer for each staged ReduceScatter chunk instead of

@@ -243,18 +243,16 @@ static std::vector<std::pair<fs::path, ProcessInfo>> collect_process_dirs(
 
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
-    const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) != 0) continue;
+    const uint64_t dir_pid = hrr::pid_from_archive_dir_name(ent.path().filename().string());
+    if (dir_pid == 0) continue;
     // A pid-* directory with no events.bin is not a capture: leftover empty
     // dirs must not be treated as repair failures or listed in the root index.
     if (!fs::exists(ent.path() / "events.bin")) continue;
     ProcessInfo info{};
     if (!read_process_manifest(ent.path() / "manifest.json", info)) {
       // Keep incomplete/crashed directories visible even if their manifest was
-      // never written; derive pid from the directory name when possible.
-      char* end = nullptr;
-      unsigned long long pid = std::strtoull(name.c_str() + 4, &end, 10);
-      if (end && *end == '\0') info.pid = static_cast<uint64_t>(pid);
+      // never written; the pid comes from the directory name.
+      info.pid = dir_pid;
     }
     processes.emplace_back(ent.path(), info);
   }
@@ -287,10 +285,13 @@ static bool print_root_info(const std::string& archive_path) {
   printf("  %-12s %-12s %-10s %-12s %-10s %s\n",
          "---", "----------", "--------", "------", "-----", "----");
   for (const auto& [path, info] : processes) {
+    // The manifest says the process finalized; the trailer must also count the
+    // records before it, as load_archive requires.
+    const bool complete = info.complete && hrr::has_clean_trailer(path.string());
     printf("  %-12llu %-12llu %-10s %-12llu %-10llu %s\n",
            static_cast<unsigned long long>(info.pid),
            static_cast<unsigned long long>(info.parent_pid),
-           info.complete ? "yes" : "NO",
+           complete ? "yes" : "NO",
            static_cast<unsigned long long>(info.event_count),
            static_cast<unsigned long long>(info.blob_count),
            path.string().c_str());
@@ -302,13 +303,21 @@ static bool print_root_info(const std::string& archive_path) {
 static void print_info(const hrr::Archive& archive, bool show_events) {
   printf("HRR Archive: %s\n", archive.path.c_str());
   printf("========================================\n");
-  printf("Complete:     %s\n",
-         archive.complete ? "yes (clean shutdown)"
-                          : (archive.truncated
-                               ? "NO (crash-truncated; trailing torn record discarded)"
-                               : "NO (no shutdown trailer; capture likely crashed)"));
+  if (archive.trailer && !archive.complete)
+    printf("Complete:     NO (shutdown trailer counts %llu events; %zu precede it)\n",
+           static_cast<unsigned long long>(archive.trailer_events),
+           archive.event_count);
+  else
+    printf("Complete:     %s\n",
+           archive.complete ? "yes (clean shutdown)"
+                            : (archive.truncated
+                                 ? "NO (crash-truncated; trailing torn record discarded)"
+                                 : "NO (no shutdown trailer; capture likely crashed)"));
   printf("Recovered:    %zu events\n", archive.event_count);
   printf("Events:       %zu\n", archive.event_count);
+  if (archive.skipped_after_trailer)
+    printf("Ignored:      %zu records after the shutdown trailer (not replayed)\n",
+           archive.skipped_after_trailer);
   printf("Kernels:      %zu\n", archive.kernel_count);
   printf("Blobs:        %zu\n", archive.blob_count);
   printf("Code Objects: %zu\n", archive.code_object_count);
@@ -909,13 +918,16 @@ static bool run_pass(PlaybackContext& ctx,
 // ---------------------------------------------------------------------------
 
 // ---------------------------------------------------------------------------
-// --repair mode: rewrite a crash-truncated archive into a clean one.
+// --repair mode: rewrite an incomplete archive into a clean one.
 //
-// Loads the archive with the tolerant reader (recovering all complete records),
-// then rewrites events.bin trimmed to the last complete record, appends the
-// clean-shutdown trailer, and writes a complete manifest.json. After repair the
-// archive looks exactly like one produced by a normal process exit. Replay
-// works on truncated archives without repair too; this just "blesses" them.
+// An archive is incomplete when its tail is torn, its trailer is missing, or
+// its trailer does not count the records before it. Loads the archive with the
+// tolerant reader (recovering all complete records), then rewrites events.bin
+// with the records before the torn tail or the trailer, appends a
+// clean-shutdown trailer that counts them, and writes a complete manifest.json.
+// After repair the archive looks exactly like one produced by a normal process
+// exit. Replay works on incomplete archives without repair too; this just
+// "blesses" them.
 //
 // repair_archive() below handles one process; repair_root() fans it out across
 // every pid-<pid>/ directory when the tool is pointed at an archive root.
@@ -926,13 +938,7 @@ static bool write_u(FILE* f, const void* p, size_t n) {
 }
 
 static uint64_t pid_from_archive_dir(const fs::path& archive_dir) {
-  const std::string name = archive_dir.filename().string();
-  if (name.rfind("pid-", 0) != 0) return 0;
-
-  char* end = nullptr;
-  unsigned long long pid = std::strtoull(name.c_str() + 4, &end, 10);
-  if (!end || *end != '\0') return 0;
-  return static_cast<uint64_t>(pid);
+  return hrr::pid_from_archive_dir_name(archive_dir.filename().string());
 }
 
 static int repair_archive(const hrr::Archive& archive) {
@@ -951,7 +957,8 @@ static int repair_archive(const hrr::Archive& archive) {
     return 1;
   }
 
-  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, 0};
+  // The flags say how the blobs were laid out, and repair keeps every blob.
+  hrr_file_header fh{HRR_MAGIC, HRR_VERSION, archive.flags};
   bool ok = write_u(out, &fh, sizeof(fh));
 
   uint64_t max_seq = 0;
@@ -1025,29 +1032,6 @@ static int repair_archive(const hrr::Archive& archive) {
   printf("[HRR] Repaired archive: %zu events kept, clean trailer + manifest written\n",
          archive.events.size());
   return 0;
-}
-
-// Cheap completeness probe: a cleanly finalized events.bin ends with the
-// trailer record, so checking the last 44 bytes answers the question without
-// parsing the file. Used only to skip work when repairing a root that is
-// already clean — a false negative just costs a full load that repair_archive
-// then no-ops on, so this can never turn a good archive into a rewritten one.
-static bool has_clean_trailer(const fs::path& archive_dir) {
-  const fs::path events_path = archive_dir / "events.bin";
-  std::error_code ec;
-  const auto size = fs::file_size(events_path, ec);
-  if (ec || size < sizeof(hrr_file_header) + sizeof(hrr_eof_record)) return false;
-
-  FILE* f = fopen(events_path.string().c_str(), "rb");
-  if (!f) return false;
-  hrr_eof_record rec{};
-  const bool read_ok = fseek(f, -static_cast<long>(sizeof(rec)), SEEK_END) == 0 &&
-                       fread(&rec, sizeof(rec), 1, f) == 1;
-  fclose(f);
-
-  return read_ok && rec.hdr.event_type == HRR_EOF_MARKER &&
-         rec.hdr.payload_length == static_cast<uint16_t>(sizeof(hrr_eof_record)) &&
-         rec.eof_magic == HRR_EOF_MAGIC;
 }
 
 // Rebuild the root index from the per-process manifests. Mirrors the schema the
@@ -1124,7 +1108,7 @@ static bool repair_root(const std::string& archive_path, int& exit_code) {
     // ahead of the whole run by block buffering when output is piped.
     fflush(stdout);
 
-    if (has_clean_trailer(dir)) {
+    if (hrr::has_clean_trailer(dir.string())) {
       printf("[HRR] Archive already complete; nothing to repair\n");
       already_clean++;
       continue;
@@ -1191,7 +1175,8 @@ static void print_usage(const char* argv0) {
     "\n"
     "Options:\n"
     "  --info                Print archive summary and exit (no GPU required)\n"
-    "  --repair              Rewrite a crash-truncated archive as a clean one and exit.\n"
+    "  --repair              Rewrite an incomplete archive (torn tail, missing or\n"
+    "                        miscounting trailer) as a clean one and exit.\n"
     "                        Given an archive root, repairs every process capture\n"
     "                        under it and rebuilds the root index.\n"
     "  --events              With --info: also print the full event log\n"
@@ -1225,6 +1210,8 @@ static void print_usage(const char* argv0) {
     "  --progress-seconds S  Print heartbeat at most every S seconds\n"
     "  --version             Print the archive format version this build reads and\n"
     "                        the revision it was built from, then exit\n"
+    "  --no-placement        Do not place hipMalloc/hipMallocAsync allocations at\n"
+    "                        their recorded addresses (see DESIGN.md)\n"
     "  --warn-untranslated-args\n"
     "                        Report kernel-argument pointers that resolve in no\n"
     "                        allocation, VMM reservation or annotated region.\n"
@@ -1289,6 +1276,7 @@ int main(int argc, char** argv) {
   bool show_events   = false;
   bool do_repair     = false;
   bool no_regions    = false;
+  bool no_placement  = false;
 
   for (int i = 1; i < argc; i++) {
     if      (!strcmp(argv[i], "--info"))              show_info              = true;
@@ -1313,6 +1301,7 @@ int main(int argc, char** argv) {
     else if (!strcmp(argv[i], "--trace-kernels"))     ctx.trace_kernels      = true;
     else if (!strcmp(argv[i], "--trace-sync"))        ctx.trace_sync         = true;
     else if (!strcmp(argv[i], "--no-regions"))        no_regions             = true;
+    else if (!strcmp(argv[i], "--no-placement"))      no_placement           = true;
     else if (!strcmp(argv[i], "--regions-strict"))    ctx.regions_strict     = true;
     else if (!strcmp(argv[i], "--warn-untranslated-args"))
       ctx.warn_untranslated_args = true;
@@ -1422,17 +1411,38 @@ int main(int argc, char** argv) {
     return 0;
   }
 
-  // --repair: rewrite a crash-truncated archive as a clean one and exit
+  // --repair: rewrite an incomplete archive as a clean one and exit
   if (do_repair) {
     return repair_archive(archive);
   }
 
   ctx.archive_dir = archive.path;
+  ctx.packed_host_rects = (archive.flags & HRR_FILE_FLAG_PACKED_HOST_RECTS) != 0;
 
   printf("[HRR] Archive : %zu events, %zu kernels, %zu blobs, %zu code objects\n",
          archive.event_count, archive.kernel_count,
          archive.blob_count, archive.code_object_count);
   printf("[HRR] Threads : %zu captured\n", archive.threads.size());
+
+  // Capture-address placement: hold every recorded hipMalloc and
+  // hipMallocAsync range before hipInit, so the runtime cannot take it.
+  if (!no_placement && !ctx.guard_segments) {
+    std::vector<HrrVaRange> allocs;
+    std::vector<uint64_t> exported;
+    for (const auto& ev : archive.events) {
+      const auto t = ev.header().event_type;
+      if (t == HRR_API_HIPMALLOC)
+        allocs.push_back({ev.malloc_ev.ptr_handle, ev.malloc_ev.ptr_handle + ev.malloc_ev.size});
+      else if (t == HRR_API_HIPMALLOCASYNC)
+        allocs.push_back({ev.malloc_async_ev.ptr_handle,
+                          ev.malloc_async_ev.ptr_handle + ev.malloc_async_ev.size});
+      else if (t == HRR_API_HIPIPCGETMEMHANDLE &&
+               ev.raw_payload.size() >= sizeof(hrr_args_hipIpcGetMemHandle))
+        exported.push_back(
+            reinterpret_cast<const hrr_args_hipIpcGetMemHandle*>(ev.raw_payload.data())->devPtr);
+    }
+    hrr_place_hold(ctx, hrr_place_plan(std::move(allocs), exported));
+  }
 
   HIP_CHECK(hipInit(0));
 
@@ -1549,6 +1559,7 @@ int main(int argc, char** argv) {
     ctx.region_oob_ptrs.store(0, std::memory_order_relaxed);
     ctx.guard_blocks_relocated.store(0, std::memory_order_relaxed);
     ctx.guard_blind_max.store(0, std::memory_order_relaxed);
+    hrr_place_reset(ctx);
     printf("[HRR] Warm-up done. Running filtered pass...\n");
   }
 
@@ -1687,6 +1698,11 @@ int main(int argc, char** argv) {
     // when the caller asked for that.
     if (oob > 0 && ctx.regions_strict) ok = false;
   }
+
+  if (ctx.place)
+    printf("[HRR]   Placement      : %llu placed at capture address, %llu fell back\n",
+           (unsigned long long)ctx.placed.load(),
+           (unsigned long long)ctx.place_fell_back.load());
 
   if (ctx.guard_blocks || ctx.guard_segments) {
     printf("[HRR]   Guard          : %s%s%llu block relocation(s), largest "

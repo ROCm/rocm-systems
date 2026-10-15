@@ -146,6 +146,15 @@ ncclResult_t rcclOverrideProtocol(const char* ncclProtoStr[], float table[][NCCL
 ncclResult_t rcclOverrideAlgorithm(const char* ncclAlgoStr[], float table[][NCCL_NUM_PROTOCOLS],
                                    struct ncclTaskColl* info);
 void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
+// Arch-table AllReduce Tree-over-Ring switch (rcclArchThresholds::arTreeMaxPerRank;
+// single-node comms of rankScaledMinRanks+ ranks, NCCL_ALGO / NCCL_PROTO unset, cost
+// table offering Tree LL and LL128). Call before rcclUpdateCollectiveProtocol, which
+// then picks the Tree protocol.
+void rcclUpdateCollectiveAlgorithm(struct ncclComm* comm, size_t nBytes, struct ncclTaskColl* info,
+                                   float table[][NCCL_NUM_PROTOCOLS]);
+// Arch-table channel cap for Ring Simple ReduceScatter
+// (rcclArchThresholds::rsRingSimpleCapped*). NCCL_MIN/MAX_NCHANNELS turn it off.
+void rcclUpdateCollectiveChannels(struct ncclComm* comm, size_t nBytes, const struct ncclTaskColl* info, int& nc);
 void rcclUpdateThreadThreshold(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info,
                                int& threadThreshold);
 void rcclSetPipelining(struct ncclComm* comm, size_t const& nBytes, struct ncclTaskColl* info);
@@ -191,9 +200,9 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
                                  ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
-// Single source of truth for ReduceScatter selection: symmetric -> CE 2-shot ->
-// DDA fabric (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> CE registered
-// -> symmetric -> native ring/pat kernel.
+// Single source of truth for ReduceScatter selection: symmetric -> CE (eager /
+// enqueue-init) -> DDA fabric (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct
+// -> CE registered -> symmetric -> native ring/pat kernel.
 // Live enqueue carries the decision so taskAppend honors RCCL_SYMMETRIC / CE
 // vs ring (symkExtract) instead of re-deriving it.
 // graphCapturingHint is used only when query=true (rcclGetCollImplInfo). The live
@@ -239,10 +248,11 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
-// Opt-in CE ReduceScatter 2-shot gate (RCCL_CE_REDUCESCATTER=1). Size cap is the
-// same 2-shot window as CE AllReduce (rcclCeAr2ShotMax). Pipeline chunks are
-// rounded to 16 bytes in ncclCeAllReduceChooseChunkBytes, and the reduce kernel
-// scalar-reduces the tail, so a shard that is not a multiple of 16 still runs.
+// Opt-in CE ReduceScatter gate (RCCL_CE_REDUCESCATTER=1). Staging path (scatter
+// into ceARTmpBuf, then local reduce). No message-size cap: large messages are
+// pipelined through staging slots. Pipeline chunks are rounded to 16 bytes in
+// ncclCeAllReduceChooseChunkBytes, and the reduce kernel scalar-reduces the
+// tail, so a shard that is not a multiple of 16 still runs.
 bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
@@ -255,7 +265,6 @@ bool rcclCeArGraphSafe(struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
 RCCL_PARAM_DECLARE(CeReduceScatter);
-RCCL_PARAM_DECLARE(ForceCeReduceScatter);
 // Is CE AllReduce enabled for this comm? RCCL_CE_ALLREDUCE wins when set;
 // otherwise CE AllReduce is on only for the arch it is tuned for (gfx1250) and
 // off elsewhere, independent of that arch table's ceNonRegMax/ceRegMax entries.
@@ -263,6 +272,10 @@ bool rcclCeAllReduceEnabled(const struct ncclComm* comm);
 // Same resolution for RCCL_FORCE_CE_ALLREDUCE, which lets CE AllReduce (2-shot
 // and registered) run without CTAPolicy=ZERO.
 bool rcclForceCeAllReduceEnabled(const struct ncclComm* comm);
+// Is CE-Scratch forced for unregistered AllGather / AlltoAll / Gather / Scatter?
+// RCCL_FORCE_CE=0 turns it off; otherwise NCCL_CTA_POLICY_ZERO forces it and
+// the arch table's forceCeScratch decides.
+bool rcclForceCeScratchEnabled(const struct ncclComm* comm);
 RCCL_PARAM_DECLARE(CeArMaxMsgBytes);     // -1 = use ceNonRegMax[AR] (2-shot) from arch table
 RCCL_PARAM_DECLARE(CeArRegMaxMsgBytes);  // -1 = use ceRegMax[AR] (registered) from arch table
 RCCL_PARAM_DECLARE(CeArStagingBytes);    // -1 = use NCCL_CE_AR_STAGING_BYTES; sizes ceARTmpBuf, not the cap
@@ -340,6 +353,16 @@ constexpr size_t  kDdaVmmBaseDefault  = 134217728;  // 128 MiB
 size_t rcclDdaLLThreshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaLL128Threshold(const ncclComm* comm, ncclFunc_t func);
 size_t rcclDdaVmmThreshold(const ncclComm* comm, ncclFunc_t func);
+// Ceiling for the DDA LL128 two-shot AllReduce: RCCL_DDA_LL128_TWOSHOT_THRESHOLD
+// when set, else the AllReduce LL128 tier cap where the arch table has that tier,
+// else the env var's default.
+size_t rcclDdaLL128TwoShotThreshold(const ncclComm* comm);
+// Ceiling for the DDA LL two-shot AllReduce: RCCL_DDA_LL_TWOSHOT_THRESHOLD when
+// set; on rank-scaled comms the AllReduce LL tier cap; else the env var's default.
+size_t rcclDdaLLTwoShotThreshold(const ncclComm* comm);
+// Blocks the DDA VMM AllReduce / ReduceScatter kernels launch: the init cap,
+// lowered on large comms per rcclArchThresholds::ddaVmmBlockBudget.
+int rcclDdaFabricVmmBlocks(const ncclComm* comm);
 
 // Cap for the DDA entry gate: the max of the LL, LL128 and VMM caps above,
 // skipping tiers turned off by RCCL_DDA_LL / RCCL_DDA_LL128. Pass this to

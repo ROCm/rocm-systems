@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// End-to-end MPI tests for CE collectives via the public RCCL API (AllGather, AlltoAll, Scatter, Gather, Fallback, Stress).
+// End-to-end MPI tests for CE collectives via the public RCCL API (AllGather, AlltoAll, AlltoAllv, Scatter, Gather, Fallback, Stress).
 
 #include "CeTestHelpers.hpp"
 #include "DeviceBufferHelpers.hpp"
@@ -24,7 +24,9 @@
 
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
+#include <algorithm>
 #include <string>
+#include <vector>
 
 #ifdef MPI_TESTS_ENABLED
 
@@ -55,6 +57,14 @@ constexpr size_t kChunkBoundaryCount = (68ull * 1024 * 1024) / sizeof(float);
 // two chunk-boundary cases at the two-node shape they are meant to cover; past
 // it the host mirror alone would throw out of its vector constructor.
 constexpr int kChunkBoundaryMaxRanks = 16;
+// Single-node AlltoAllv intra-batch sync needs more than kCeIntraBatchSyncFreq
+// destinations and at least 512 MiB of sends. pairCount keeps 1/2, 3/4, or all
+// of `count` (three of each across 9 peers), so 9 ranks send 27/4 * count
+// elements. 20 Mi elements clears 512 MiB at that minimum; the cap keeps the
+// buffers near the chunk-boundary cases.
+constexpr size_t kIntraBatchCount = 20ull * 1024 * 1024;
+constexpr int kIntraBatchMinRanks = 9;
+constexpr int kIntraBatchMaxRanks = 16;
 // Coarse offset applied to the upper half of every sent slice, so a chunk landing
 // at the wrong offset changes the received bytes. It has to be coarse: at this
 // element count a per-element term would exceed the range float represents
@@ -98,7 +108,7 @@ protected:
     // Returns true when all CE prerequisites are met (driver + env vars).
     // Delegates to isCeDispatchConfigured() in CeTestHelpers.hpp — the single
     // source of truth shared with CeInternalMPITests.cpp.
-    // Hierarchical CE (multi-node) only implements AllGather and AlltoAll; Scatter,
+    // Hierarchical CE (multi-node) only implements AllGather, AlltoAll and AlltoAllv; Scatter,
     // Gather, and AllReduce fall back to SM kernels when nNodes > 1.
     virtual bool isCeExpected() const { return isCeDispatchConfigured(); }
 
@@ -580,6 +590,170 @@ TEST_F(CeMPI_AlltoAll, MultiNodeHierarchicalChunkBoundary)
     runAlltoAll(kMinRanks4, kChunkBoundaryCount,
                 "CeMPI_AlltoAll/MultiNodeHierarchicalChunkBoundary", true, 1,
                 kChunkBoundaryMaxRanks);
+}
+
+// ===========================================================================
+// CeMPI_AlltoAllv – ncclAlltoAllv CE correctness + log verification
+// ===========================================================================
+
+class CeMPI_AlltoAllv : public CeMPITest
+{
+protected:
+    static constexpr float kRecvSentinel = -1.0f;
+
+    // Elements rank src sends to rank dst. Asymmetric in (src, dst), so
+    // sendcounts and recvcounts differ and a swap of sendSizes[peer] with
+    // recvSizes[peer] fails the data check. Sparse additionally zeroes some
+    // non-self pairs.
+    static size_t pairCount(int src, int dst, size_t count, bool sparse)
+    {
+        const int phase = (src + 2 * dst) % 3;
+        if(sparse && phase == 1 && src != dst)
+            return 0;
+        return count - static_cast<size_t>(phase) * (count / 4);
+    }
+
+    // Slice owning element i: the last displacement <= i. Zero-count slices
+    // share the next slice's displacement and sort before it, so they never win.
+    static int sliceOf(const std::vector<size_t>& displs, size_t i)
+    {
+        return static_cast<int>(std::upper_bound(displs.begin(), displs.end(), i) - displs.begin()) - 1;
+    }
+
+    // count is the largest per-pair element count; buffers are sized count * nRanks.
+    void runAlltoAllv(int minRanks, size_t count, const char* testId,
+                      bool requireScaleOut = false, int scaleOutIters = kScaleOutIters,
+                      int maxRanks = MPITestConstants::kNoProcessLimit, bool sparse = false)
+    {
+        if(!validateTestPrerequisites(minRanks, maxRanks))
+            GTEST_SKIP() << "Need >= " << minRanks << " MPI ranks"
+                         << (maxRanks != MPITestConstants::kNoProcessLimit
+                                 ? " and <= " + std::to_string(maxRanks)
+                                 : std::string());
+        if(requireScaleOut && !isScaleOutTopology())
+            GTEST_SKIP() << "Need at least 2 nodes and 2 MPI ranks per node";
+
+        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+
+        if(requireScaleOut && !scaleOutPrerequisitesMet())
+            GTEST_SKIP() << "Hierarchical CE prerequisites absent on this communicator; "
+                            "needs symmetric memory (GIN backend) and an RMA context";
+
+        int rank{}, nRanks{};
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+
+        std::vector<size_t> sendcounts(nRanks), sdispls(nRanks), recvcounts(nRanks), rdispls(nRanks);
+        size_t sendTotal = 0, recvTotal = 0, nonEmptySends = 0;
+        for(int peer = 0; peer < nRanks; ++peer)
+        {
+            sendcounts[peer] = pairCount(rank, peer, count, sparse);
+            sdispls[peer]    = sendTotal;
+            sendTotal += sendcounts[peer];
+            recvcounts[peer] = pairCount(peer, rank, count, sparse);
+            rdispls[peer]    = recvTotal;
+            recvTotal += recvcounts[peer];
+            if(sendcounts[peer] != 0)
+                ++nonEmptySends;
+        }
+
+        const size_t totalElem = count * static_cast<size_t>(nRanks);
+
+        SymBuf sendSym, recvSym;
+        ASSERT_EQ(ncclSuccess, allocSymBuf(totalElem * sizeof(float), sendSym));
+        ASSERT_EQ(ncclSuccess, allocSymBuf(totalElem * sizeof(float), recvSym));
+
+        const int iterations = requireScaleOut ? scaleOutIters : 1;
+        for(int iter = 0; iter < iterations; ++iter)
+        {
+            const int epoch = iter * nRanks;
+            // Same value scheme as CeMPI_AlltoAll: sender s writes epoch + s*nRanks + d + 1
+            // into the slice bound for rank d, with kUpperHalfBias on the upper half of
+            // each slice so a chunk at the wrong offset within a slice is detectable.
+            ASSERT_EQ(
+                hipSuccess,
+                initializeBufferWithPattern<float>(
+                    sendSym.ptr, totalElem,
+                    [&, rank, nRanks, epoch](size_t i) {
+                        if(i >= sendTotal)
+                            return 0.0f;
+                        const int    d = sliceOf(sdispls, i);
+                        const size_t j = i - sdispls[d];
+                        return static_cast<float>(epoch + rank * nRanks + d + 1) +
+                               (j >= sendcounts[d] / 2 ? kUpperHalfBias : 0.0f);
+                    }));
+            // The tail past the last received slice must survive untouched.
+            ASSERT_EQ(hipSuccess,
+                      initializeBufferWithPattern<float>(recvSym.ptr, totalElem,
+                                                         [](size_t) { return kRecvSentinel; }));
+
+            ASSERT_EQ(ncclSuccess,
+                      ncclAlltoAllv(sendSym.ptr, sendcounts.data(), sdispls.data(),
+                                    recvSym.ptr, recvcounts.data(), rdispls.data(), ncclFloat32,
+                                    getActiveCommunicator(), getActiveStream()));
+            ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+            ASSERT_TRUE(verifyBufferData<float>(
+                recvSym.ptr, totalElem,
+                [&, rank, nRanks, epoch](size_t i) {
+                    if(i >= recvTotal)
+                        return kRecvSentinel;
+                    const int    s = sliceOf(rdispls, i);
+                    const size_t j = i - rdispls[s];
+                    return static_cast<float>(epoch + s * nRanks + rank + 1) +
+                           (j >= recvcounts[s] / 2 ? kUpperHalfBias : 0.0f);
+                }))
+                << "Rank " << rank << ": AlltoAllv data verification failed at iteration "
+                << iter;
+        }
+
+        assertCEPathTaken(testId);
+        if(requireScaleOut)
+            assertHierarchicalCEPathTaken(rank, testId);
+        // The hierarchical path leaves intraBatchSync at its initialized false. Off
+        // that path ncclCeAlltoAllv issues one copy per non-empty destination and
+        // compares the rank's total send bytes against the threshold.
+        const bool expectIntraBatchSync =
+            !requireScaleOut && nonEmptySends > kCeIntraBatchSyncFreq &&
+            sendTotal * sizeof(float) >= kCeIntraBatchSyncMsgThreshold;
+        assertCEBatchPath(expectIntraBatchSync, testId);
+    }
+};
+
+// CE-MPI-A2AV-01: 2 ranks, small buffers.
+TEST_F(CeMPI_AlltoAllv, TwoRanks)   { runAlltoAllv(kMinRanks2, kSmallCount,  "CeMPI_AlltoAllv/TwoRanks"); }
+// CE-MPI-A2AV-02: 4 ranks, medium buffers.
+TEST_F(CeMPI_AlltoAllv, FourRanks)  { runAlltoAllv(kMinRanks4, kMediumCount, "CeMPI_AlltoAllv/FourRanks"); }
+// CE-MPI-A2AV-03: 8 ranks (default production topology), medium buffers.
+TEST_F(CeMPI_AlltoAllv, EightRanks) { runAlltoAllv(kMinRanks8, kMediumCount, "CeMPI_AlltoAllv/EightRanks"); }
+// CE-MPI-A2AV-04: Odd rank count (3) — non-power-of-two op layout vs 2/4/8 ranks.
+TEST_F(CeMPI_AlltoAllv, ThreeRanks) { runAlltoAllv(3,          kSmallCount,  "CeMPI_AlltoAllv/ThreeRanks"); }
+// CE-MPI-A2AV-04b: more than 8 destinations and >= 512 MiB of sends, so the
+// single-node batch takes the intraBatchSync path. Smaller cases only assert
+// the negative.
+TEST_F(CeMPI_AlltoAllv, IntraBatchSync)
+{
+    runAlltoAllv(kIntraBatchMinRanks, kIntraBatchCount, "CeMPI_AlltoAllv/IntraBatchSync",
+                 /*requireScaleOut=*/false, /*scaleOutIters=*/1, kIntraBatchMaxRanks);
+}
+// CE-MPI-A2AV-05: Multi-node RMA proxy + intra-node CE path.
+TEST_F(CeMPI_AlltoAllv, MultiNodeHierarchical)
+{
+    runAlltoAllv(kMinRanks4, kSmallCount, "CeMPI_AlltoAllv/MultiNodeHierarchical", true);
+}
+// CE-MPI-A2AV-06: 68 MiB largest pair crosses the 64 MiB hierarchical chunk boundary;
+// smaller pairs stay single-chunk, so chunk width must come from the global max.
+TEST_F(CeMPI_AlltoAllv, MultiNodeHierarchicalChunkBoundary)
+{
+    runAlltoAllv(kMinRanks4, kChunkBoundaryCount,
+                 "CeMPI_AlltoAllv/MultiNodeHierarchicalChunkBoundary", true, 1,
+                 kChunkBoundaryMaxRanks);
+}
+// CE-MPI-A2AV-07: Zero-byte remote and local pairs; puts and waits must skip the same peers.
+TEST_F(CeMPI_AlltoAllv, MultiNodeHierarchicalSparse)
+{
+    runAlltoAllv(kMinRanks4, kSmallCount, "CeMPI_AlltoAllv/MultiNodeHierarchicalSparse", true,
+                 kScaleOutIters, MPITestConstants::kNoProcessLimit, /*sparse=*/true);
 }
 
 // ===========================================================================

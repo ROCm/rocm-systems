@@ -5,12 +5,17 @@ This directory contains the public web applications for Rocjitsu.
 | Directory | Purpose | Published path |
 | --- | --- | --- |
 | [dashboard/](dashboard/README.md) | Simulation-performance dashboard (React + Vite) | `/rocjitsu-dashboard/` |
+| [handbook/](handbook/README.md) | Markdown documentation and blog (MkDocs) | `/rocjitsu/` |
 
 Each application owns its dependencies, build configuration, and tests. See its
-README for local development instructions. Canonical technical documentation
-lives in [../docs/](../docs/).
+README for local development instructions. The handbook reads its content
+directly from [../docs/](../docs/), with [../README.md](../README.md) supplying
+the homepage. These are the maintained sources; the website has no content copy.
 
 The [publishing workflow](../../../.github/workflows/rocjitsu-publish-website.yml)
-publishes the dashboard from `develop` to `gh-pages/rocjitsu-dashboard/`. Moving
-the source directory does not change that public URL or the benchmark-data
-location on `gh-pages-rocjitsu`.
+compares current `develop` with each site's last publication and builds only affected
+sites to their separate directories on `gh-pages`. Manual runs and changes to
+the shared publishing workflow rebuild both. Benchmark data remains on
+`gh-pages-rocjitsu`. See the
+[handbook publishing setup](handbook/README.md#verification-and-publishing)
+for the shared GitHub App and Pages configuration.

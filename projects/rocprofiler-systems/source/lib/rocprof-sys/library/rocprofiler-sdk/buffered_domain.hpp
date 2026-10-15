@@ -87,6 +87,14 @@ public:
     }
     [[nodiscard]] SdkBackend::buffer_id_t buffer_id() const noexcept { return m_buffer; }
 
+    void finalize()
+    {
+        if(m_definition.on_finalize)
+        {
+            m_definition.on_finalize();
+        }
+    }
+
 private:
     [[nodiscard]] static bool is_valid(const SdkBackend::buffer_id_t& buf) noexcept
     {

@@ -32,8 +32,8 @@ inline bool isCeRuntimeDriverSupported()
 // ceArStagingBytes / nRanks, which defaults to NCCL_CE_AR_STAGING_BYTES and is
 // overridden by RCCL_CE_AR_STAGING_BYTES. Tests pass that capacity in.
 
-// 2-shot size cap rcclUseCeReduceScatter() applies when the comm has no arch
-// table (rcclCeAr2ShotMax fallback), which is the case for the mock comm below.
+// Former AllReduce 2-shot / staging default size. CE ReduceScatter no longer
+// uses this as a selector cap; tests still use it as a "large message" size.
 constexpr size_t kCeRsMaxMsgBytesDefault = NCCL_CE_AR_TMPBUF_DEFAULT_BYTES;
 
 // Minimal ncclComm stand-in for CE ReduceScatter eligibility unit tests.

@@ -216,6 +216,10 @@ static inline int ncclFuncTrafficPerByte(ncclFunc_t func, int nRanks) {
 rccl_static int rcclKernelPackedChannels(struct ncclComm* comm, ncclFunc_t func, size_t count, ncclDataType_t datatype,
                                          int protocol, int nMaxChannels) {
   if (nMaxChannels <= 0 || count == 0) return nMaxChannels;
+  // scheduleCollTasksToPlan caps tuner/CSV nMaxChannels against comm->nChannels.
+  // Without this, CsvTuner can report 32/56 while the kernel
+  // launches on channel{Lo..Hi}={0..3}. Host microtests leave nChannels=0.
+  if (comm->nChannels > 0) nMaxChannels = std::min(nMaxChannels, comm->nChannels);
   constexpr size_t MinTrafficPerChannel = 16 << 10;
   size_t elementSize = ncclTypeSize(datatype);
   int trafficPerByte = ncclFuncTrafficPerByte(func, comm->nRanks);
@@ -3070,6 +3074,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
   }
   // Honor Tuner config if available
   if (!isTunerMatchFound && info->algorithm != NCCL_ALGO_PAT) {
+    rcclUpdateCollectiveAlgorithm(comm, nBytes, info, table);
     rcclUpdateCollectiveProtocol(comm, nBytes, info);
   }
   rcclSetPipelining(comm, nBytes, info);
@@ -3122,6 +3127,7 @@ static ncclResult_t topoGetAlgoInfo(struct ncclComm* comm, struct ncclTaskColl* 
     }
     INFO(NCCL_TUNING, "post-adjustment based on threadThreshold:%i nBytes:%lu nc:%i", threadThreshold, nBytes, nc);
     rcclOverrideChannels(comm, info->func, nBytes, nc);
+    rcclUpdateCollectiveChannels(comm, nBytes, info, nc);
   }
 
 #ifdef ENABLE_ROCSHMEM
@@ -4092,6 +4098,11 @@ static ncclResult_t ceCollTaskAppend(struct ncclComm* comm, struct ncclInfo* inf
     comm->ceColl.initialized = true;
     ceTask = nullptr; // ceTask is now owned by the ceInitTaskQueue
   }
+  // Staging setup is collective: at launch it deadlocks when one thread drives several ranks (rccl-tests -g N).
+  if (ncclCeCollNeedsStaging(info->coll) && comm->ceColl.ceARTmpBuf == nullptr) {
+    comm->ceColl.stagingPending = true;
+    ncclGroupCommJoin(comm, ncclGroupTaskTypeSymRegister);
+  }
 
   // Must be in thread local group before tasks can be alloc'd in `comm->memScoped`.
   ncclGroupCommJoin(info->comm, ncclGroupTaskTypeCollective);
@@ -4693,11 +4704,11 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
         if (!ceArGraphAllowed || !ceReduceScatterOpSupported || !rcclParamCeReduceScatter()) {
           ceAvailable = false;
         } else if (ceReduceScatterOpSupported) {
-          size_t totalBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
-          const size_t twoShotMax = rcclCeAr2ShotMax(comm);
-          if (twoShotMax == 0 || totalBytes > twoShotMax || totalBytes > comm->ceColl.ceArMaxBytes ||
-              !rcclParamForceCeReduceScatter() ||
-              !comm->symmetricSupport || comm->nNodes > 1) {
+          // Unregistered CE ReduceScatter. Staging is always used and pipelined,
+          // so there is no message-size cap and user-buffer registration is not
+          // required. CTA_POLICY_ZERO + single-node symmetricSupport still apply.
+          if (!(comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || !comm->symmetricSupport ||
+              comm->nNodes > 1) {
             ceReduceScatterFits = false;
           } else {
             ceReduceScatterFits = true;
@@ -4708,11 +4719,10 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
       // Append CE collective task if CE is supported and requested by user
       bool CeScratchAvailable =
         !ceCapturing && ncclCeScratchAvailable(comm, info->coll, info->op, info->datatype, winRegType);
-      // Uncapped sym-window CE AllReduce / ReduceScatter (-R 2), without flipping whole comm to CE mode
+      // Uncapped sym-window CE AllReduce (-R 2), without flipping whole comm to CE mode.
+      // CE ReduceScatter always stages through ceARTmpBuf, so it does not use this path.
       bool ceArSymRegistered =
-        (info->coll == ncclFuncAllReduce && rcclForceCeAllReduceEnabled(comm) && ceAvailable && !hasSysmemSegment) ||
-        (info->coll == ncclFuncReduceScatter && rcclParamForceCeReduceScatter() && ceAvailable &&
-         !hasSysmemSegment);
+        (info->coll == ncclFuncAllReduce && rcclForceCeAllReduceEnabled(comm) && ceAvailable && !hasSysmemSegment);
       size_t recvBytes = (size_t)comm->nRanks * info->count * ncclTypeSize(info->datatype);
       // Sym-window CE AllGather (-R 2) above the symk/CE crossover, without requiring
       // CTAPolicy=ZERO to flip the whole comm to CE mode. Same predicate the
@@ -4735,7 +4745,7 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
           INFO(NCCL_INIT, "Taking kernel-based collective path");
           NCCLCHECK(collTaskAppend(comm, info, opDev));
         }
-        // hierCeAvailable is AllGather/AlltoAll-only (ncclHierCeAvailable rejects
+        // hierCeAvailable is AllGather/AlltoAll/AlltoAllv-only (ncclHierCeAvailable rejects
         // AllReduce / ReduceScatter), so it never affects this branch.
       } else if ((allGatherDecided || alltoAllDecided) &&
                  (info->decision.algo == RCCL_CE_REGISTERED || info->decision.algo == RCCL_CE_SCRATCH)) {
@@ -4762,8 +4772,8 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
                                    opDev));
 
       } else if (!rcclNcclAlgoEnvIsSet() && !allGatherDecided && !alltoAllDecided &&
-                 rcclParamForceCe() && CeScratchAvailable && !hasSysmemSegment && comm->ddaScratch != nullptr &&
-                 recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce &&
+                 rcclForceCeScratchEnabled(comm) && CeScratchAvailable && !hasSysmemSegment &&
+                 comm->ddaScratch != nullptr && recvBytes <= comm->ddaScratchBytes && info->coll != ncclFuncAllReduce &&
                  info->coll != ncclFuncReduceScatter) {
         INFO(NCCL_TUNING, "Using DDA scratch for CE collective, count=%zu, recvBytes=%zu", info->count, recvBytes);
         NCCLCHECK(ceCollTaskAppend(comm, info, /*sendWin=*/nullptr, /*recvWin=*/nullptr, comm->ddaScratch,

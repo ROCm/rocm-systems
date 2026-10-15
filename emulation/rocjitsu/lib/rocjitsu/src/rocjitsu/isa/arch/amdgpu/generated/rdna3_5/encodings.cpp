@@ -1708,7 +1708,7 @@ Flat::Flat(std::string_view mnemonic, const FlatMachineInst *inst, ExecuteFn exe
 }
 
 void Flat::implicit_uses(RegisterSet &uses) const {
-  if (inst_.saddr == 0x7F)
+  if (inst_.saddr == 0x7C)
     return;
   if (inst_.seg == 1) {
     uses.expand(RegisterRef{RegClass::SGPR, static_cast<uint16_t>(inst_.saddr), 1});

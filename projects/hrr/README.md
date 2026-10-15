@@ -93,12 +93,14 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `HIP_HRR_CAPTURE_OUTPUT` | *(unset)* | Enable capture; path to the `.hrr` archive directory. An empty or blank value leaves capture off. Ignored, with one line on stderr, when Linux starts the program in secure-execution mode (set-user-ID, set-group-ID, file capabilities or an LSM transition) |
 | `HIP_HRR_DEBUG_ARGS` | off | Dump every captured kernel arg to the log (debug / provenance) |
 
+On Linux the archive is readable only by the user who captured it (directories 0700, files 0600). If the archive cannot be set up, capture is disabled with a `[HRR capture] Capture disabled` message on stderr and the application runs normally.
+
 ### `hrr-playback` CLI options
 
 | Option | Purpose |
 |--------|---------|
 | `--info` | Print archive summary and exit (no GPU) |
-| `--repair` | Rewrite a crash-truncated archive with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
+| `--repair` | Rewrite an incomplete archive (torn tail, missing or miscounting trailer) with a clean trailer; on an archive root, repairs every process capture and rebuilds the root index |
 | `--events` | With `--info`: print the full event log |
 | `--verbose` | Print each event as it is replayed |
 | `--skip-device-sync` | Skip `hipDeviceSynchronize` / `hipStreamSynchronize` events |
@@ -116,6 +118,7 @@ User-facing capture, replay, and validation knobs. Implementation details can be
 | `--progress-seconds S` | Heartbeat at most every `S` seconds |
 | `--version` | Print the archive format version this build reads, the revision it was built from, and the HIP runtime it is linked against, then exit (no GPU) |
 | `--warn-untranslated-args` | Report kernel-arg pointers that resolve in no allocation, VMM reservation or region (they reach the GPU as null) — the measurement that says a capture lost allocations below the HIP API |
+| `--no-placement` | Let `hipMalloc`/`hipMallocAsync` return fresh addresses instead of the recorded ones (placement is on by default on Linux; see DESIGN.md) |
 | `--no-regions` | Ignore any external region annotations in the archive |
 | `--regions-strict` | Count intra-segment out-of-bounds findings toward the exit code (default: report only) |
 | `--guard-segments` | VMM-back every device allocation and leave an unmapped span after it (diagnostic) |
@@ -135,7 +138,8 @@ outside the runtime writes those ranges down as
 `pid-<pid>/regions/<name>.hrrr`; `hrr-playback` loads them automatically. See
 [`producers/README.md`](producers/README.md) for the format and
 [`producers/pytorch/hrr_torch_regions.py`](producers/pytorch/hrr_torch_regions.py)
-for the reference PyTorch producer.
+for the reference PyTorch producer. That producer is opt-in: set
+`HRR_REGIONS_AUTOSTART=1` or call its `start()`.
 
 **Fidelity.** With annotations present and no guard flag, replay's memory layout
 is exactly what it would have been without them; the annotations are read, not
