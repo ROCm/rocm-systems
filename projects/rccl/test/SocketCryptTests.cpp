@@ -23,6 +23,7 @@
 #include "crypt.h"
 #include "socket.h"
 
+#include "common/EncryptionTestHelpers.hpp"
 #include "common/ErrCode.hpp"
 #include "common/ProcessIsolatedTestRunner.hpp"
 #include "gtest/gtest.h"
@@ -50,25 +51,10 @@ constexpr const char* kPskB = "rccl-socket-crypt-test-key-B-0123456789";
 constexpr uint64_t kMagic = NCCL_SOCKET_MAGIC;
 constexpr enum ncclSocketType kType = ncclSocketTypeBootstrap;
 
-#if defined(NCCL_TLS_BACKEND_OPENSSL3)
-constexpr bool kTlsBuild = true;
-#else
-constexpr bool kTlsBuild = false;
-#endif
-
 #define SKIP_UNLESS_TLS_BUILD()                                                   \
   do {                                                                            \
     if (!kTlsBuild) GTEST_SKIP() << "RCCL was built without TLS_BACKEND=OPENSSL3"; \
   } while (0)
-
-ncclResult_t SetPsk(const char* psk) {
-  ncclEncryptionConfig_t cfg = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
-  cfg.mode = NCCL_ENCRYPTION_MODE_PSK;
-  cfg.psk = psk;
-  return ncclSetEncryption(&cfg);
-}
-
-ncclResult_t ClearPsk() { return ncclSetEncryption(nullptr); }
 
 union ncclSocketAddress LoopbackAddr() {
   union ncclSocketAddress addr;
@@ -182,8 +168,9 @@ public:
     a.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
     socklen_t len = sizeof(a);
     if (listenFd_ < 0 || bind(listenFd_, (struct sockaddr*)&a, sizeof(a)) != 0 || listen(listenFd_, 4) != 0 ||
-        getsockname(listenFd_, (struct sockaddr*)&a, &len) != 0)
+        getsockname(listenFd_, (struct sockaddr*)&a, &len) != 0) {
       return false;
+    }
     memset(&addr_, 0, sizeof(addr_));
     addr_.sin = a;
     thread_ = std::thread([this]() { Run(); });
@@ -204,8 +191,9 @@ private:
   void Run() {
     struct pollfd lp = {listenFd_, POLLIN, 0};
     int cfd = -1;
-    while (!stop_ && cfd < 0)
+    while (!stop_ && cfd < 0) {
       if (poll(&lp, 1, 50) > 0) cfd = accept(listenFd_, nullptr, nullptr);
+    }
     if (cfd < 0) return;
     int sfd = socket(AF_INET, SOCK_STREAM, 0);
     if (sfd >= 0 && connect(sfd, &target_.sa, sizeof(struct sockaddr_in)) == 0) Pump(cfd, sfd);
@@ -415,16 +403,18 @@ TEST(SocketCrypt, WriteOnlyClientCloseKeepsQueuedData) {
     std::atomic<bool> clientClosed{false}, done{false};
     std::thread watchdog([&]() {
       auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(20);
-      while (!done && std::chrono::steady_clock::now() < deadline)
+      while (!done && std::chrono::steady_clock::now() < deadline) {
         std::this_thread::sleep_for(std::chrono::milliseconds(10));
+      }
       if (!done) {
         clientAbort = 1;
         l.abortFlag = 1;
       }
     });
     std::thread receiver([&]() {
-      if (ncclSocketInit(&server) != ncclSuccess || (acceptRes = ncclSocketAccept(&server, &l.sock)) != ncclSuccess)
+      if (ncclSocketInit(&server) != ncclSuccess || (acceptRes = ncclSocketAccept(&server, &l.sock)) != ncclSuccess) {
         return;
+      }
       while (!clientClosed && !l.abortFlag) std::this_thread::sleep_for(std::chrono::milliseconds(1));
       std::this_thread::sleep_for(std::chrono::milliseconds(100));
       recvRes = ncclSocketRecv(&server, in.data(), (int)size);
@@ -612,8 +602,9 @@ TEST(SocketCrypt, WrongKeyPeerIsRejected) {
     });
     int status = -1;
     auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(30);
-    while (waitpid(child, &status, WNOHANG) == 0 && std::chrono::steady_clock::now() < deadline)
+    while (waitpid(child, &status, WNOHANG) == 0 && std::chrono::steady_clock::now() < deadline) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
+    }
     if (!WIFEXITED(status)) {
       kill(child, SIGKILL);
       waitpid(child, &status, 0);
