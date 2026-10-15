@@ -48,6 +48,12 @@ typedef struct abce_signal_ref_t {
   // ATOMIC decrements from completion_value + 1, so a client using the atomic
   // path arms the signal to that pending value before submitting.
   uint64_t completion_value;
+  // The client armed the signal to completion_value + 1 for this copy alone, so
+  // its completion is the only update the signal gets. The engine then writes
+  // completion_value with a FENCE — a plain write — instead of an atomic
+  // decrement, which needs a read-modify-write across the bus when the signal
+  // is in host memory. Leave false when anything else may count the signal down.
+  bool sole_update;
   void* event_mailbox;  // non-null => emit interrupt after completion.
   uint32_t event_id;
   // Device-visible 64-bit scratch word, private to ABCE, holding the fan-in
@@ -68,6 +74,7 @@ static inline abce_signal_ref_t abce_signal_ref_make(void* value, uint64_t compl
   abce_signal_ref_t ref;
   ref.value = value;
   ref.completion_value = completion_value;
+  ref.sole_update = false;
   ref.event_mailbox = event_mailbox;
   ref.event_id = event_id;
   ref.coordination_scratch = coordination_scratch;
@@ -515,9 +522,17 @@ static inline size_t abce_frame_prologue_bytes(const abce_frame_composer_t* comp
   return bytes;
 }
 
+// The final completion update is a decrement only when other updates may land
+// on the same signal and the platform can do one; otherwise a FENCE writes the
+// done value.
+static inline bool abce_frame_completion_decrements(const abce_frame_composer_t* composer,
+                                                    const abce_signal_ref_t* target) {
+  return composer->caps.device_atomic_support && !target->sole_update;
+}
+
 static inline uint32_t abce_frame_completion_bytes(const abce_frame_composer_t* composer,
                                                    const abce_signal_ref_t* target) {
-  if (composer->caps.device_atomic_support) return ABCE_FRAME_ATOMIC_BYTES;
+  if (abce_frame_completion_decrements(composer, target)) return ABCE_FRAME_ATOMIC_BYTES;
   if (composer->is_gfx125plus) return ABCE_FRAME_FENCE64_BYTES;
   return (target->completion_value > UINT32_MAX) ? 2 * ABCE_FRAME_FENCE32_BYTES
                                                  : ABCE_FRAME_FENCE32_BYTES;
@@ -719,7 +734,7 @@ static inline size_t abce_frame_write_fan_in_poll(const abce_frame_composer_t* c
 
 static inline size_t abce_frame_write_completion(const abce_frame_composer_t* composer, char* out,
                                                  const abce_signal_ref_t* target) {
-  if (composer->caps.device_atomic_support) {
+  if (abce_frame_completion_decrements(composer, target)) {
     abce_builder_build_atomic_decrement(composer->builder, out, target->value);
     return ABCE_FRAME_ATOMIC_BYTES;
   }

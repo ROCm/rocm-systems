@@ -384,7 +384,7 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Primaries still active so wait for an async event. With wall-clock
       // sync, use a timed sleep+check loop so we can advance sim time
       // proportionally to elapsed wall time during idle periods. Without
-      // pacing, use atomic::wait() for an efficient unbounded wait.
+      // pacing, sleep briefly between wake-flag and exit checks.
       pacer_.pause();
       {
         auto timeout = pacer_.idle_wait_duration();
@@ -407,7 +407,13 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       }
       if (done_.load(std::memory_order_acquire))
         break;
-      ctx.idle_wakeup_.store(false, std::memory_order_release);
+      // Consume the notification atomically with respect to producers. A plain
+      // store can overwrite a concurrent wake without acquiring the producer's
+      // preceding writes (async work or a primary-count decrement), leaving the
+      // event or termination checks stale and the worker asleep. An exchange
+      // either acquires those writes or leaves a later producer's notification
+      // set for the next idle wait.
+      ctx.idle_wakeup_.exchange(false, std::memory_order_acq_rel);
 
       // After waking from idle, resume the pacing clock.
       pacer_.resume();
@@ -647,7 +653,9 @@ void SimulationEngine::wake_partition_locked(PartitionID pid) {
   if (config_.num_threads != 1 || pid >= contexts_.size())
     return;
   PartitionContext &ctx = *contexts_[pid];
-  ctx.idle_wakeup_.store(true, std::memory_order_release);
+  // Keep concurrent producers in one release sequence so consuming the wake
+  // acquires every publication, including one followed by a delayed older wake.
+  ctx.idle_wakeup_.exchange(true, std::memory_order_release);
   ctx.idle_wakeup_.notify_one();
 }
 

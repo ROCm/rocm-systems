@@ -766,7 +766,9 @@ class VirtualGPU : public device::VirtualDevice {
   //! Ring the queue doorbell via direct UC store or ROCr signal.
   void ringQueueDoorbell(uint64_t index);
 
-  //! Snapshot shared barrier state before atomically reserving AQL queue slots.
+  //! Snapshot shared barrier state before atomically reserving AQL queue slots. Spins until
+  //! the ring has room for all \p packet_count slots, so the write index never leads the read
+  //! index by a full ring and the reserved slots are free to write on return.
   AqlSlotReservation ReserveAqlSlots(size_t packet_count);
 
   //! Clear a caller-requested barrier when prior queue state already preserves stream ordering.
@@ -858,23 +860,6 @@ class VirtualGPU : public device::VirtualDevice {
   //! Attach a ProfilingSignal to a command as its HwEvent, releasing any prior
   //! one and retaining the new one. No-op if cmd or hw_event is null.
   static void AttachHwEvent(amd::Command* cmd, void* hw_event);
-
-  //! Spin-wait until queue has space for a packet at \p write_index.
-  //! Uses cached_read_dispatch_id_ to avoid DRAM traffic on the fast path;
-  //! only re-reads the hardware read_dispatch_id when the cached value
-  //! indicates the queue might be full.
-  void WaitForQueueSlot(uint64_t write_index, uint32_t capacity) {
-    if ((write_index - cached_read_dispatch_id_) < capacity) {
-      return;
-    }
-    do {
-      cached_read_dispatch_id_ = Hsa::queue_load_read_index_scacquire(gpu_queue_);
-      if ((write_index - cached_read_dispatch_id_) < capacity) {
-        return;
-      }
-      amd::Os::yield();
-    } while (true);
-  }
 
   //! Queue state flags — using atomic with bit operations to handle concurrent
   //! access from multiple threads under different locks (or no locks).
