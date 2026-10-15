@@ -14,7 +14,11 @@
 namespace rocjitsu::plugins::race_detector {
 namespace {
 void appendLdsInterval(IntervalSet &intervals, uint32_t address, int bytes,
-                       const RaceDetector &detector) {
+                       const RaceDetector &detector, int elementBytes = 0) {
+  if (bytes <= 0 || elementBytes < 0)
+    return;
+  bytes = static_cast<int>(
+      detector.ldsBytesInRange(address, bytes, elementBytes ? elementBytes : bytes));
   // Intervals must fit the CU's logical LDS backing and the signed index type.
   // Rejected addresses retain their event's register/counter dependencies.
   if (bytes <= 0 || !detector.validLdsRange(address, bytes) ||
@@ -236,10 +240,10 @@ void WaveRaceState::registerLdsEvent(
     uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers, uint64_t execMask,
     int waveSize, std::span<const uint32_t> laneBaseAddresses, int bytesPerLane, uint8_t byteMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder, uint64_t ldsLaneMask) {
+    MemoryOrderClass memoryOrder, uint64_t ldsLaneMask, int elementBytes) {
   IntervalSet intervals;
   forEachActiveLane(execMask & ldsLaneMask, waveSize, [&](int lane) {
-    appendLdsInterval(intervals, laneBaseAddresses[lane], bytesPerLane, *detector);
+    appendLdsInterval(intervals, laneBaseAddresses[lane], bytesPerLane, *detector, elementBytes);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,
@@ -251,11 +255,11 @@ void WaveRaceState::registerLdsEvent(
     int waveSize, std::span<const uint32_t> firstLaneBaseAddresses,
     std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane, uint8_t byteMask,
     std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-    MemoryOrderClass memoryOrder) {
+    MemoryOrderClass memoryOrder, int elementBytes) {
   IntervalSet intervals;
   forEachActiveLane(execMask, waveSize, [&](int lane) {
     for (const auto addresses : {firstLaneBaseAddresses, secondLaneBaseAddresses})
-      appendLdsInterval(intervals, addresses[lane], bytesPerLane, *detector);
+      appendLdsInterval(intervals, addresses[lane], bytesPerLane, *detector, elementBytes);
   });
   intervals.finalize();
   registerEventWithIntervals(pc, type, std::move(registers), execMask, byteMask,

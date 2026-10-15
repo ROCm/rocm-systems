@@ -283,6 +283,26 @@ TEST(RaceDetector, PositiveOutOfBoundsLdsKeepsDependencies) {
   }
 }
 
+TEST(RaceDetector, LdsVectorIntervalsRetainOnlyCompleteElementsAtBackingEnd) {
+  constexpr uint32_t capacity = 64 * 1024;
+  RaceDetector detector(
+      1, 8, 8, Dim3d(0), [](RaceViolation) {}, counterCapacitiesForArch(ROCJITSU_CODE_ARCH_CDNA5),
+      capacity);
+  auto &wave = detector.getWaveRaceState(0);
+  const std::array<uint32_t, 3> addresses{capacity - 8, capacity - 2, capacity};
+  wave.registerLdsEvent(0, MemoryEventType::LDS_TO_VGPR, {1, 2, 3, 4}, 7, 3, addresses,
+                        /*bytesPerLane=*/16, 0xf, kMixedOrderGenericFlatLoadObligations,
+                        MemoryOrderClass::UNORDERED, /*ldsLaneMask=*/7, /*elementBytes=*/4);
+  const auto &events = detector.events();
+  EXPECT_EQ(events.ldsIntervals(EventId{0}).getTotalBytes(), 8);
+  EXPECT_TRUE(events.ldsIntervals(EventId{0}).contains(capacity - 1));
+  EXPECT_FALSE(events.ldsIntervals(EventId{0}).contains(capacity));
+  EXPECT_EQ(events.registers(EventId{0}).size(), 4u);
+  EXPECT_EQ(events.execMask(EventId{0}), 7u);
+  EXPECT_EQ(events.pendingCounterIncrement(EventId{0}, amdgpu::WaitCounterType::LOADCNT), 1);
+  EXPECT_EQ(events.pendingCounterIncrement(EventId{0}, amdgpu::WaitCounterType::DSCNT), 1);
+}
+
 TEST(RaceDetector, LdsCounterAccountingIgnoresNegativeIntervals) {
   for (const auto type : {MemoryEventType::LDS_TO_VGPR, MemoryEventType::VGPR_TO_LDS}) {
     SCOPED_TRACE(static_cast<int>(type));

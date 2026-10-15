@@ -98,19 +98,22 @@ public:
   /// FLAT). Register dependencies still use all execMask lanes, and the whole
   /// instruction occupies one event with one set of counter obligations.
   /// Bits outside execMask are ignored; zero records no LDS intervals.
+  /// elementBytes selects the execution granularity at the backing boundary;
+  /// zero treats the whole per-lane access as one element.
   void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> laneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0});
+                        MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
+                        int elementBytes = 0);
   void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> firstLaneBaseAddresses,
                         std::span<const uint32_t> secondLaneBaseAddresses, int bytesPerLane,
                         uint8_t byteMask,
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
-                        MemoryOrderClass memoryOrder);
+                        MemoryOrderClass memoryOrder, int elementBytes = 0);
 
   /// Register an LDS event with dual-offset intervals. Each active lane
   /// contributes two 8-byte intervals at laneBaseAddresses[lane] + offset0*8
