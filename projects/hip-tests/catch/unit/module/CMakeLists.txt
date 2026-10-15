@@ -59,6 +59,29 @@ if (HIP_PLATFORM MATCHES "amd")
                ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
 endif()
 
+if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+                  COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+                  -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                  COMMENT "Compiling coopKernel.code")
+else()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+                  COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                  -x cu ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
+                  -I${HIP_INCLUDE_DIR}
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
+                  COMMENT "Compiling coopKernel.code")
+endif()
+add_custom_target(coopKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
+set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+             ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
+
 if (NOT WIN32)
   if (HIP_PLATFORM MATCHES "amd")
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
@@ -67,14 +90,6 @@ if (NOT WIN32)
                      -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
                      -o launch_kernel_module.code
                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
-                    -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
-                    COMMENT "Compiling coopKernel.code")
   else()
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
                      COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
@@ -82,20 +97,10 @@ if (NOT WIN32)
                      -I${HIP_INCLUDE_DIR}
                      -o launch_kernel_module.code
                      DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
-                    COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
-                    -x cu ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
-                    -I${HIP_INCLUDE_DIR}
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                    DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
-                    COMMENT "Compiling coopKernel.code")
   endif()
   add_custom_target(launch_kernel_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
-  add_custom_target(coopKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
   set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
-  ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-  ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
+  ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
 endif()
 
 
@@ -429,8 +434,8 @@ hip_add_exe_to_target(NAME ModuleTest
   LINKER_LIBS ${RTCLIB}
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
+add_dependencies(ModuleTest coopKernel_code)
 if(NOT WIN32)
-  add_dependencies(ModuleTest coopKernel_code)
   add_dependencies(ModuleTest launch_kernel_module)
 endif()
 
