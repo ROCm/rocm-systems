@@ -11,10 +11,13 @@
 // through process-isolated tests to keep global pool state clean.
 
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
+#include <filesystem>
 #include <fstream>
 #include <sstream>
 #include <string>
+#include <system_error>
 #include <unistd.h>
 
 #include <gtest/gtest.h>
@@ -43,15 +46,56 @@ namespace RcclUnitTesting {
 // Shared helpers for the lifecycle tests
 // =========================================================================
 
-// Returns the plugin's whole JSONL output for `commHashHex`, or "" if absent.
-// Must be called inside the isolated child, since the filename embeds its pid.
-static std::string ReadProfilerOutput(const char* dir, const char* commHashHex) {
+// A fresh ACCL_PROFILER_OUTPUT_DIR per test, removed when the test ends. A fixed
+// shared path breaks as soon as another user owns it. The re-exec'd child
+// re-enters the same TEST body, so there it reuses the parent's directory from
+// its environment instead of creating (and leaking) one of its own.
+class AcclOutputDir {
+public:
+    AcclOutputDir() {
+        if (std::getenv(ProcessIsolatedTestRunner::kReexecMarkerEnvVar)) {
+            const char* inherited = std::getenv("ACCL_PROFILER_OUTPUT_DIR");
+            path_ = inherited ? inherited : "";
+            return;
+        }
+        std::string tmpl = ::testing::TempDir() + "accl_test_XXXXXX";
+        if (mkdtemp(&tmpl[0]) == nullptr) {
+            ADD_FAILURE() << "mkdtemp failed under " << ::testing::TempDir();
+            return;
+        }
+        path_ = tmpl;
+        owned_ = true;
+    }
+    ~AcclOutputDir() {
+        if (owned_) {
+            std::error_code ec;
+            std::filesystem::remove_all(path_, ec);
+        }
+    }
+    AcclOutputDir(const AcclOutputDir&) = delete;
+    AcclOutputDir& operator=(const AcclOutputDir&) = delete;
+    const std::string& path() const { return path_; }
+
+private:
+    std::string path_;
+    bool owned_ = false;
+};
+
+// Path of the plugin's JSONL output for `commHashHex`. Must be called inside the
+// isolated child, since the filename embeds its pid.
+static std::string ProfilerOutputPath(const char* commHashHex) {
+    const char* dir = std::getenv("ACCL_PROFILER_OUTPUT_DIR");
     char hostname[256] = {0};
     gethostname(hostname, sizeof(hostname) - 1);
     char path[1024];
     snprintf(path, sizeof(path), "%s/accl_profiler_rank0_%s_pid%d_%s.jsonl",
-             dir, hostname, (int)getpid(), commHashHex);
-    std::ifstream ifs(path);
+             dir ? dir : "", hostname, (int)getpid(), commHashHex);
+    return path;
+}
+
+// Returns the plugin's whole JSONL output for `commHashHex`, or "" if absent.
+static std::string ReadProfilerOutput(const char* commHashHex) {
+    std::ifstream ifs(ProfilerOutputPath(commHashHex));
     if (!ifs.good()) return std::string();
     std::stringstream ss;
     ss << ifs.rdbuf();
@@ -152,6 +196,7 @@ TEST(AcclBusBwFactor, EdgeCases) {
 // Plugin init/finalize lifecycle (process-isolated due to global pools)
 // =========================================================================
 TEST(AcclProfilerInit, InitAndFinalize) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerInit.InitAndFinalize",
         []() {
@@ -167,7 +212,7 @@ TEST(AcclProfilerInit, InitAndFinalize) {
             EXPECT_TRUE(mask & ncclProfileProxyStep);
             EXPECT_EQ(acclPluginFinalize(ctx), 0);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -175,6 +220,7 @@ TEST(AcclProfilerInit, InitAndFinalize) {
 // Full lifecycle: Coll → KernelCh → stop → finalize → check output JSONL
 // =========================================================================
 TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.CollWithKernelChProducesOutput",
         []() {
@@ -231,12 +277,7 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify output file contains valid JSONL
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_lifecycle/accl_profiler_rank0_%s_pid%d_0xbeef.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath("0xbeef");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -253,7 +294,7 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
             EXPECT_NE(line.find("\"coll_timing_source\":\"gpu_globaltimer\""),
                        std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_lifecycle"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -261,6 +302,7 @@ TEST(AcclProfilerLifecycle, CollWithKernelChProducesOutput) {
 // ProxyOp refcount: verify proxy ops don't cause use-after-free
 // =========================================================================
 TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.ProxyOpAfterKernelStopIsValid",
         []() {
@@ -320,12 +362,7 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify the output JSONL carries proxy op data
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_proxy/accl_profiler_rank0_%s_pid%d_0xcafe.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath("0xcafe");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -334,7 +371,7 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
                 << "Record must carry the proxy op that stopped after the kernel";
             EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_proxy"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -342,6 +379,7 @@ TEST(AcclProfilerLifecycle, ProxyOpAfterKernelStopIsValid) {
 // Pool exhaustion: full pool returns NULL and drops the collective
 // =========================================================================
 TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.PoolFullReturnsNull",
         []() {
@@ -388,7 +426,7 @@ TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_pool"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -396,6 +434,7 @@ TEST(AcclProfilerLifecycle, PoolFullReturnsNull) {
 // Coll stop before KernelCh: verify no corrupt/duplicate records
 // =========================================================================
 TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.CollStopBeforeAllChannels",
         []() {
@@ -455,12 +494,7 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             // Verify exactly one record with both channels
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_ordering/accl_profiler_rank0_%s_pid%d_0xface.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath("0xface");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
 
@@ -483,7 +517,7 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
             EXPECT_NE(line.find("\"coll_timing_source\":\"gpu_globaltimer\""),
                        std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ordering"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -491,6 +525,7 @@ TEST(AcclProfilerLifecycle, CollStopBeforeAllChannels) {
 // ProxyStep lifecycle: Coll → KernelCh → ProxyOp → ProxyStep → stop all
 // =========================================================================
 TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.FullProxyStepDecomposition",
         []() {
@@ -572,12 +607,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_proxystep/accl_profiler_rank0_%s_pid%d_0xa1b2.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath("0xa1b2");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -585,7 +615,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
             EXPECT_NE(line.find("\"n_proxy_ops\":1"), std::string::npos);
             EXPECT_NE(line.find("\"n_send_ops\":1"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_proxystep"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -595,6 +625,7 @@ TEST(AcclProfilerLifecycle, FullProxyStepDecomposition) {
 // launch gets channelIds starting where the first left off)
 // =========================================================================
 TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.AbsoluteChannelIdAboveNChannelsAccepted",
         []() {
@@ -654,7 +685,7 @@ TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_chbound"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -662,6 +693,7 @@ TEST(AcclProfilerLifecycle, AbsoluteChannelIdAboveNChannelsAccepted) {
 // Kernel timing assertions: verify gpu_kernel_avg/min/max_us in output
 // =========================================================================
 TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerLifecycle.KernelTimingFieldsPresent",
         []() {
@@ -715,12 +747,7 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
 
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
-            char hostname[256] = {0};
-            gethostname(hostname, sizeof(hostname) - 1);
-            char path[1024];
-            snprintf(path, sizeof(path),
-                "/tmp/accl_test_ktime/accl_profiler_rank0_%s_pid%d_0xd1d2.jsonl",
-                hostname, (int)getpid());
+            const std::string path = ProfilerOutputPath("0xd1d2");
             std::ifstream ifs(path);
             ASSERT_TRUE(ifs.good()) << "Output file not found: " << path;
             std::string line;
@@ -730,7 +757,7 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
             EXPECT_NE(line.find("\"gpu_kernel_min_us\":100.00"), std::string::npos);
             EXPECT_NE(line.find("\"gpu_kernel_max_us\":200.00"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_ktime"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -740,6 +767,7 @@ TEST(AcclProfilerLifecycle, KernelTimingFieldsPresent) {
 // channels is delivered to the plugin as nChannels == 0.
 // =========================================================================
 TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerNChannels.Wrapped256IsProfiledNotDropped",
         []() {
@@ -783,7 +811,7 @@ TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_nch256", "0x2601");
+                ReadProfilerOutput("0x2601");
             ASSERT_FALSE(out.empty()) << "No profiler output produced";
             EXPECT_NE(out.find("\"coll_sn\":70"), std::string::npos)
                 << "The 256-channel collective must produce a record";
@@ -793,7 +821,7 @@ TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
                       std::string::npos)
                 << "The raw ABI value must stay visible so 0 is never ambiguous";
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_nch256"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -802,6 +830,7 @@ TEST(AcclProfilerNChannels, Wrapped256IsProfiledNotDropped) {
 // while the proxy thread is still delivering KernelCh events into it, which is
 // a use-after-free on a recycled slot. Leaking the slot is the safe direction.
 TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerNChannels.Wrapped256DoesNotFinalizeEarly",
         []() {
@@ -839,7 +868,7 @@ TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_nch_early", "0x2602");
+                ReadProfilerOutput("0x2602");
             ASSERT_FALSE(out.empty()) << "Summary line should still be written";
             EXPECT_EQ(out.find("\"coll_perf\""), std::string::npos)
                 << "1 of 256 channels reported: the collective must not be "
@@ -847,7 +876,7 @@ TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
             EXPECT_NE(out.find("\"leaked_collectives\":1"), std::string::npos)
                 << "The unfinalized slot must be counted as leaked, not hidden";
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_nch_early"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
@@ -855,6 +884,7 @@ TEST(AcclProfilerNChannels, Wrapped256DoesNotFinalizeEarly) {
 // End-of-run summary: data loss must be visible in the output itself
 // =========================================================================
 TEST(AcclProfilerSummary, CleanRunReportsComplete) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerSummary.CleanRunReportsComplete",
         []() {
@@ -887,7 +917,7 @@ TEST(AcclProfilerSummary, CleanRunReportsComplete) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_sum_clean", "0x5101");
+                ReadProfilerOutput("0x5101");
             ASSERT_FALSE(out.empty());
             // Emitted even when nothing was lost: a missing summary must mean
             // "the run died before finalize", never "the run was clean".
@@ -895,11 +925,12 @@ TEST(AcclProfilerSummary, CleanRunReportsComplete) {
             EXPECT_NE(out.find("\"dropped_collectives\":0"), std::string::npos);
             EXPECT_NE(out.find("\"leaked_collectives\":0"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_clean"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
 TEST(AcclProfilerSummary, LeakedSlotsAreCounted) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerSummary.LeakedSlotsAreCounted",
         []() {
@@ -922,17 +953,18 @@ TEST(AcclProfilerSummary, LeakedSlotsAreCounted) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_sum_leak", "0x5102");
+                ReadProfilerOutput("0x5102");
             ASSERT_FALSE(out.empty());
             EXPECT_NE(out.find("\"leaked_collectives\":3"), std::string::npos)
                 << "Every slot the drain reclaims must be counted";
             EXPECT_NE(out.find("\"complete\":false"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_leak"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
 TEST(AcclProfilerSummary, PoolExhaustionIsCounted) {
+    AcclOutputDir outDir;
     RUN_ISOLATED_TEST_WITH_ENV(
         "AcclProfilerSummary.PoolExhaustionIsCounted",
         []() {
@@ -962,7 +994,7 @@ TEST(AcclProfilerSummary, PoolExhaustionIsCounted) {
             ASSERT_EQ(acclPluginFinalize(ctx), 0);
 
             std::string out =
-                ReadProfilerOutput("/tmp/accl_test_sum_pool", "0x5103");
+                ReadProfilerOutput("0x5103");
             ASSERT_FALSE(out.empty());
             EXPECT_NE(out.find("\"dropped_collectives\":2"), std::string::npos)
                 << "Both rejected allocations must be counted";
@@ -970,7 +1002,7 @@ TEST(AcclProfilerSummary, PoolExhaustionIsCounted) {
                 << "The pinned slots the drain reclaims are leaks, not drops";
             EXPECT_NE(out.find("\"complete\":false"), std::string::npos);
         },
-        {{"ACCL_PROFILER_OUTPUT_DIR", "/tmp/accl_test_sum_pool"}}
+        {{"ACCL_PROFILER_OUTPUT_DIR", outDir.path()}}
     );
 }
 
