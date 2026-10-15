@@ -21,6 +21,7 @@
 #include <regex>
 #include <string>
 #include <thread>
+#include <utility>
 #include <vector>
 
 #include <ctype.h>
@@ -211,7 +212,8 @@ class DiagnosticsMicrotest : public ::testing::Test {
     peerMasks_.assign(nRanks, 0);
   }
 
-  // GPU node i holds rank gpuRanks[i]; node 0 reaches node j over paths[j].
+  // GPU node i holds rank gpuRanks[i]; this rank's node, if any, reaches node j over paths[j]. Other rows stay
+  // PATH_LOC, so reading any row but this rank's shows up in the mask.
   void BuildTopo(const std::vector<int>& gpuRanks, const std::vector<int>& paths) {
     topo_ = std::make_unique<ncclTopoSystem>();
     const int n = static_cast<int>(gpuRanks.size());
@@ -220,7 +222,11 @@ class DiagnosticsMicrotest : public ::testing::Test {
     for (int i = 0; i < n; i++) {
       topo_->nodes[GPU].nodes[i].gpu.rank = gpuRanks[i];
       topo_->nodes[GPU].nodes[i].paths[GPU] = links_[i].data();
-      links_[0][i].type = paths[i];
+      if (gpuRanks[i] == comm_->rank) {
+        for (int j = 0; j < n; j++) {
+          links_[i][j].type = paths[j];
+        }
+      }
     }
     comm_->topo = topo_.get();
   }
@@ -391,20 +397,30 @@ TEST_F(DiagnosticsMicrotest, ChildRun_ReturnsExitCodeOnlyForNormalExit) {
 
 // The only tests that spawn: the shell wrapper itself is what is under test.
 TEST_F(DiagnosticsMicrotest, ChildRun_RealChildLosesMpiEnvAndStdinAndMergesStderr) {
-  setenv("OMPI_COMM_WORLD_RANK", "3", 1);
-  setenv("PMI_RANK", "3", 1);
-  setenv("PERFTEST_FORCE_MPI", "1", 1);
-  setenv("PERFTEST_FORCE_MPIX", "kept", 1);
-  setenv("KEEP_OMPI_X", "kept", 1);
+  // Under mpirun these may already be set; put them back afterwards.
+  const std::vector<std::pair<const char*, const char*>> vars = {{"OMPI_COMM_WORLD_RANK", "3"},
+                                                                 {"PMI_RANK", "3"},
+                                                                 {"PERFTEST_FORCE_MPI", "1"},
+                                                                 {"PERFTEST_FORCE_MPIX", "kept"},
+                                                                 {"KEEP_OMPI_X", "kept"}};
+  std::vector<std::pair<std::string, bool>> saved;
+  for (const auto& [name, value] : vars) {
+    const char* old = std::getenv(name);
+    saved.emplace_back(old != nullptr ? old : "", old != nullptr);
+    setenv(name, value, 1);
+  }
   char output[128];
   bool truncated = true;
   const int exitCode = DiagnosticsChildRun(
       "sh -c 'echo ${OMPI_COMM_WORLD_RANK-unset} ${PMI_RANK-unset} ${PERFTEST_FORCE_MPI-unset} "
       "${PERFTEST_FORCE_MPIX-unset} ${KEEP_OMPI_X-unset}; cat; echo err >&2; exit 5'",
       kTimeoutSec, output, sizeof(output), &truncated);
-  for (const char* name : {"OMPI_COMM_WORLD_RANK", "PMI_RANK", "PERFTEST_FORCE_MPI", "PERFTEST_FORCE_MPIX",
-                           "KEEP_OMPI_X"}) {
-    unsetenv(name);
+  for (std::size_t i = 0; i < vars.size(); i++) {
+    if (saved[i].second) {
+      setenv(vars[i].first, saved[i].first.c_str(), 1);
+    } else {
+      unsetenv(vars[i].first);
+    }
   }
   EXPECT_EQ(exitCode, 5);
   EXPECT_STREQ(output, "unset unset unset kept kept\nerr\n");
@@ -436,12 +452,12 @@ TEST_F(DiagnosticsMicrotest, DetectTransportMask_OwnGpuMissingFromTopoIsNotNet) 
 
 TEST_F(DiagnosticsMicrotest, DetectTransportMask_ClassifiesPeersByPathAndAbsentPeersAsNet) {
   BuildComm(4, 2, 2);
-  BuildTopo({2, 3}, {PATH_LOC, PATH_NVL});
+  BuildTopo({3, 2}, {PATH_NVL, PATH_LOC});
   ncclResult_t ret;
   EXPECT_EQ(Detect(&ret), Bit(PATH_LOC) | Bit(PATH_NVL) | Bit(PATH_NET));
   EXPECT_EQ(ret, ncclSuccess);
-  BuildComm(2, 0, 1);
-  BuildTopo({0, 1}, {PATH_LOC, PATH_SYS});
+  BuildComm(2, 1, 1);
+  BuildTopo({0, 1}, {PATH_SYS, PATH_LOC});
   EXPECT_EQ(Detect(&ret), Bit(PATH_LOC) | Bit(PATH_SYS));
 }
 
