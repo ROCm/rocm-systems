@@ -375,20 +375,22 @@ testResult_t AllGatherDeviceTime(struct threadArgs* args, ncclDataType_t type, n
 #endif
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-// Tier report for -D 3. The hybrid kernel picks per-rank, keyed on the same
-// chunkBytes-vs-threshold crossover the device evaluates (chunkUsesLsaTier):
-// <= threshold -> direct-LSA all-peers store; > threshold -> GIN-put (Anvil-SDMA).
-// `count` here is the per-rank input-chunk element count (args->nbytes/eltSize),
-// matching gin_sdma_allgather::chunkBytes.
+// Tier report for -D 3. An all-peers DIRECT allgather whose transport the hybrid
+// kernel picks per-rank, keyed on the same chunkBytes-vs-threshold crossover the
+// device evaluates (chunkUsesLsaTier): <= threshold -> direct-LSA all-peers store;
+// > threshold -> GIN-put (Anvil-SDMA). `count` here is the per-rank input-chunk
+// element count (args->nbytes/eltSize), matching gin_sdma_allgather::chunkBytes.
 testResult_t AllGatherGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
-    int /*nRanks*/, int /*lsaSize*/, char* protoOut) {
+    int /*nRanks*/, int /*lsaSize*/, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
   const size_t sdmaThreshold = AllGatherResolveSdmaThreshold();
   const size_t chunkBytes = gin_sdma_allgather::chunkBytes(count, (size_t)wordSize(type));
-  snprintf(protoOut, 16, "%s", gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "GIN-DIRECT");
+  snprintf(protoOut, 16, "%s", gin_sdma_allgather::chunkUsesLsaTier(chunkBytes, sdmaThreshold) ? "LSA" : "GIN");
   return testSuccess;
 }
 #else
-testResult_t AllGatherGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* protoOut) {
+testResult_t AllGatherGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
   snprintf(protoOut, 16, "%s", "GIN");
   return testSuccess;
 }

@@ -1357,9 +1357,11 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
 // here; both read the same env/defaults, so the report tracks the dispatch) and
 // mirrors its precedence:
 //   large tier first -- RING (direct LSA stores) / SAG (gin.put scatter+allgather),
-//   else the hybrid kernel's own LL / LSA-direct / GIN-DIRECT choice.
+//   else the hybrid kernel's own LL / LSA-direct / flat-GIN (DIRECT) choice.
+// algo names the movement pattern (T-RING / T-SAG / T-DIRECT; "T-" marks a
+// rccl-Test device kernel), proto the transport (LSA / GIN / LL).
 testResult_t BroadcastGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
-    int nRanks, int lsaSize, char* protoOut) {
+    int nRanks, int lsaSize, char* algoOut, char* protoOut) {
   static const size_t bcastThr = testResolveSdmaThreshold("NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST", gin_sdma::kBroadcastSdmaThresholdDefault);
   static const size_t bcastSagMin = []() {
     size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES");
@@ -1373,20 +1375,24 @@ testResult_t BroadcastGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDa
   const gin_sdma::BcastLargeTier largeTier =
       gin_sdma::bcastLargeTier(msgBytes, count, nRanks, lsaSize, bcastRingMin, bcastSagMin);
   if (largeTier == gin_sdma::BcastLargeTier::Ring) {
-    snprintf(protoOut, 16, "%s", "RING-LSA");
+    snprintf(algoOut, 16, "%s", "T-RING");
+    snprintf(protoOut, 16, "%s", "LSA");
   } else if (largeTier == gin_sdma::BcastLargeTier::ScatterAG) {
-    snprintf(protoOut, 16, "%s", "GIN-SAG");
+    snprintf(algoOut, 16, "%s", "T-SAG");
+    snprintf(protoOut, 16, "%s", "GIN");
   } else {
+    snprintf(algoOut, 16, "%s", "T-DIRECT");
     switch (gin_sdma::bcastKernelTier(msgBytes, bcastThr, g_bcastLLHandle.nSlots, g_bcastLLMaxBytes)) {
-      case gin_sdma::BcastTier::LL:        snprintf(protoOut, 16, "%s", "LL"); break;
+      case gin_sdma::BcastTier::LL:        snprintf(protoOut, 16, "%s", "LL");  break;
       case gin_sdma::BcastTier::LSADirect: snprintf(protoOut, 16, "%s", "LSA"); break;
-      case gin_sdma::BcastTier::Flat:      snprintf(protoOut, 16, "%s", "GIN-DIRECT"); break;
+      case gin_sdma::BcastTier::Flat:      snprintf(protoOut, 16, "%s", "GIN"); break;
     }
   }
   return testSuccess;
 }
 #else
-testResult_t BroadcastGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* protoOut) {
+testResult_t BroadcastGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
   snprintf(protoOut, 16, "%s", "GIN");
   return testSuccess;
 }

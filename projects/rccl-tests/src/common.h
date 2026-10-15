@@ -136,11 +136,13 @@ struct testColl {
   testResult_t (*deviceTime)(struct threadArgs* args, ncclDataType_t type, ncclRedOp_t op, int root, int in_place, double* outDeltaSec);
   // Optional: for -D != 0 runs, report which device-kernel tier actually serves a
   // message of `count` elements, given the env-resolved thresholds the kernel uses.
-  // Writes a short proto string (<=15 chars) naming the data path, e.g. GIN-DIRECT
-  // / GIN-SAG / RING-LSA / LSA / LL. The caller owns the algo column (DEV-D<n>).
-  // NULL for collectives without a tiered device kernel. deviceImpl is the -D value.
+  // Writes both columns (each <=8 chars, fitting the fixed layout): algo names the
+  // movement pattern with a "T-" prefix marking a rccl-Test device kernel (e.g.
+  // T-DIRECT / T-SAG / T-RING), proto names the transport (GIN / LSA / LL /
+  // LSA/GIN). NULL for collectives without a tiered device kernel. deviceImpl is
+  // the -D value.
   testResult_t (*getDeviceImplInfo)(int deviceImpl, size_t count, ncclDataType_t type,
-      int nRanks, int lsaSize, char* protoOut);
+      int nRanks, int lsaSize, char* algoOut, char* protoOut);
 };
 extern struct testColl allReduceTest;
 extern struct testColl allGatherTest;

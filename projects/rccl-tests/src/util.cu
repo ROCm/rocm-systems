@@ -510,7 +510,7 @@ void writeBenchmarkLineBody(double timeUsec, double algBw, double busBw, bool re
   if (reportErrors) {
     PRINT("  %7s  %6s  %6s  %6g", timeStr, algBwStr, busBwStr, (double)wrongElts);
   } else {
-    PRINT("  %7s  %6s  %6s    N/A", timeStr, algBwStr, busBwStr);
+    PRINT("  %7s  %6s  %6s  %6s", timeStr, algBwStr, busBwStr, "N/A");
   }
 
   if (!out_of_place && report_timestamps && !per_iter_timing) writeTimestamp();
@@ -752,7 +752,7 @@ void writeResultHeader(bool report_cputime, bool report_timestamps, bool enable_
     extra_col_str[0] = "algo";
     extra_col_str[1] = "proto";
     extra_col_str[2] = "nchannels";
-    extraPad = 30; // 8 + 10 + 10 + 2 spaces (proto is 10 to fit GIN-DIRECT etc.)
+    extraPad = 28; // 8 + 8 + 10 + 2 spaces
   }
   
   PRINT("#\n");
@@ -774,7 +774,7 @@ void writeResultHeader(bool report_cputime, bool report_timestamps, bool enable_
     PRINT("  %7s  %6s  %6s  %6s", timeStr, "algbw", "busbw", "#wrong");
     if (per_iter_timing) PRINT("  %7s  %7s  %7s  %7s", "i_min", "i_max", "i_p99", "i_cv%");
   }
-  if (output_algo_proto_channels) PRINT("  %8s  %10s  %10s", extra_col_str[0], extra_col_str[1], extra_col_str[2]);
+  if (output_algo_proto_channels) PRINT("  %8s  %8s  %10s", extra_col_str[0], extra_col_str[1], extra_col_str[2]);
   PRINT(" %*s\n", tsPad, tsLbl);
 
   PRINT("# %10s  %12s  %8s  %6s  %6s", "(B)", "(elements)", "", "", "");
