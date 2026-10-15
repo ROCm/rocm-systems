@@ -489,6 +489,7 @@ TEST_F(DiagnosticsMicrotest, DetectTransportMask_AllGatherFailureLeavesMaskZero)
 }
 
 // Bug: peers are in the allgather this rank skips, so every later diagnostics collective pairs up wrongly.
+// Pinned as observed: AICOMRCCL-2982.
 TEST_F(DiagnosticsMicrotest, DetectTransportMask_CallocFailureSkipsTheAllGatherPeersEnter) {
   BuildComm(2, 0, 2);
   g_diagnosticsCallocFailAt = 1;
