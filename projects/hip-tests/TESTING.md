@@ -48,8 +48,6 @@ Contract tests live in `catch/contract/` and are built ON by default through `BU
 
 Unit and functional tests live under `catch/unit/` feature-area directories and are built ON by default through `BUILD_UNIT_TESTS`. They validate functional correctness of individual HIP APIs and features across many feature areas, including memory, stream, graph, module, texture, cooperative groups, peer-to-peer, RTC, and virtual memory: arguments accepted or rejected, values returned, and observable side effects such as data movement and synchronization. Tests use the in-tree `HIP_CHECK` and `HIP_ASSERT` helpers, are discovered with `catch_discover_tests`, and run under CTest as one process per case. Workload size is parameterized by level. Explicitly setting `HIP_TEST_LEVEL=level_N` (or a Catch2 filter such as `[level_0]`) both selects which tests run and their parameters, while the unset default only sets parameters; `catch/config/configs/definitions.yaml` holds the generated per-level parameters and `catch/README.md` is the canonical reference for level semantics.
 
-The unit and functional suites are being incrementally reorganized into focused behavioral domains. See [HIP Test Restructuring](TEST_RESTRUCTURING.md) for the motivation, scope, and expected benefits of this work.
-
 ### Integration testing
 
 Integration coverage is currently distributed across the unit, interop, multi-GPU, multiprocess, RTC, loader, and graph areas rather than a separate top-level tier. It exercises the runtime, compiler-facing paths, HIPRTC, and loader together against a full ROCm/HIP install on real hardware: cross-component interop validated against graphics and external producers, multi-GPU and peer paths that skip cleanly on single-GPU hosts, and an architecture matrix spanning supported CDNA and RDNA families on Linux and Windows. Some groups and cases are platform- or capability-gated, so the matrix describes where the suite runs rather than guaranteeing every case runs on every platform.
@@ -137,6 +135,7 @@ Use `isQuickLevel()` inside the test function to trim workload size at `level_0`
 | Device-side code coverage is not fully captured by host coverage tools | Medium | A high host coverage number can still miss device-only behavior | Contract, functional, integration, and stress tests execute behavior on real devices |
 | Flaky and quarantined tracking should keep converging toward owner plus issue plus expiry | Medium | Suppressed failures can age into permanent blind spots | Treat flaky/quarantined cases as unstable signal until each has a tracking issue and removal plan |
 | Sanitizer coverage of device-side paths is inherently partial and is not part of the default per-PR gate | Low | Memory or race issues can escape sanitizer lanes | Use sanitizers as an additional signal, not a replacement for device-executed tests |
+| Legacy unit tests contain broad mixed-responsibility files, duplicated setup, and overlapping behavioral coverage | Medium | Test intent, ownership, and retirement decisions are harder to audit and maintain | Incrementally reorganize coverage into focused behavioral domains while preserving contract, integration, stress, and performance responsibilities; see [HIP test restructuring](TEST_RESTRUCTURING.md) |
 
 ## Why we test this way
 
@@ -226,9 +225,3 @@ Review this document when:
 - a supported configuration changes in a way that affects test coverage.
 
 The lower-level references remain `CONTRIBUTING.md` for hip-tests contribution guidance, `catch/README.md` for the current Catch2 harness mechanics, and `catch/contract/AUTHORING.md` for the contract-tier how-to. Update this strategy document when those docs change behavior that affects test policy.
-
-## Upcoming work
-
-### HIP test restructuring
-
-The HIP Catch2 suite is being incrementally reorganized into focused behavioral domains. This is planned work and does not change the current test-layer guidance above; the tiers, gates, and workflows described in this document remain authoritative today. See [HIP Test Restructuring](TEST_RESTRUCTURING.md) for the motivation, four-tier scope, incremental legacy-retention approach, and expected benefits.
