@@ -144,7 +144,7 @@ static inline void IbCastQpCreateAttrInitSharing(struct ncclIbQpCreateAttr* attr
 // Multi-segment iflush posts one RDMA_READ per recv per segment; the switch off keeps the legacy depth.
 static inline int IbCastFlushQpSendDepth(const struct ncclIbNetCommBase* base) {
   if (!IbCastAdvertiseMultiSeg()) return NET_IB_MAX_REQUESTS;
-  return base->isRma ? NCCL_IB_RMA_MAX_FLUSH_WRS : NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS;
+  return base->isRma ? NCCL_RMA_MAX_FLUSH_QP_WRS : NET_IB_MAX_REQUESTS + NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS;
 }
 
 ncclResult_t IbCastQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);

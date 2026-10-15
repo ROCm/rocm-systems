@@ -884,7 +884,7 @@ static uint64_t IbCastRmaCreditTimeoutNs() {
 
 static ncclResult_t IbCastRmaReserveWrs(struct ncclIbNetCommBase* base, struct ncclIbNetCommDevBase* devBase,
                                        int devIndex, struct ncclIbRequest* req, int nWrs) {
-  int maxWrs = base->isSend ? NCCL_IB_RMA_MAX_SEND_WRS : NCCL_IB_RMA_MAX_FLUSH_WRS;
+  int maxWrs = base->isSend ? NCCL_RMA_MAX_SEND_QP_WRS : NCCL_RMA_MAX_FLUSH_QP_WRS;
   if (nWrs < 0 || nWrs > maxWrs) return ncclInternalError;
   struct timespec start;
   const uint64_t kTimeoutNs = IbCastRmaCreditTimeoutNs();
@@ -1159,6 +1159,8 @@ static ncclResult_t rcclIbCastRmaIbProxyTest(void* collComm, void* request, int*
 
   if (req->type == NCCL_NET_IB_REQ_FAILED) {
     *done = 1;
+    // RCCL: a mid-chain post failure only happens on a dead QP and its unsignaled prefix never completes,
+    // so return those credits with the slot rather than holding them forever.
     IbCastRmaReleaseWrs(req);
     NCCLCHECK(IbCastFreeRequest(req));
     return ncclRemoteError;

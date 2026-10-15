@@ -540,11 +540,8 @@ struct ncclIbQp {
 #define NET_IB_MAX_REQUESTS (NCCL_NET_MAX_REQUESTS * NCCL_NET_IB_MAX_RECVS)
 static_assert(NET_IB_MAX_REQUESTS <= 256,
               "request id are encoded in wr_id and we need up to 8 requests ids per completion");
-// Preserve two send WQEs (data + signal) and one flush WQE per request, plus
-// enough room to replace one regular request with the largest segmented chain.
-// Runtime credits prevent multiple large chains from exceeding these depths.
-#define NCCL_IB_RMA_MAX_SEND_WRS NCCL_RMA_MAX_SEND_QP_WRS
-#define NCCL_IB_RMA_MAX_FLUSH_WRS NCCL_RMA_MAX_FLUSH_QP_WRS
+// RCCL: multi-segment RMA QPs use NCCL_RMA_MAX_{SEND,FLUSH}_QP_WRS: two send WQEs and one flush WQE per request
+// plus one largest segmented chain. Runtime credits keep several large chains within these depths.
 static_assert(NET_IB_MAX_REQUESTS == NCCL_RMA_MAX_INFLIGHT_REQUESTS,
               "CAST RMA QP request depth must match NCCL_RMA_MAX_INFLIGHT_REQUESTS");
 

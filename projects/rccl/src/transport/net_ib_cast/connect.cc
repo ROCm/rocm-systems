@@ -554,7 +554,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
-    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_SEND_WRS;
+    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_RMA_MAX_SEND_QP_WRS;
   } else {
     if (base->resiliency) {
       IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
@@ -565,7 +565,7 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
     // IbCastResiliencyDataRqSizeGet dereferences resiliency, so skip it when NULL (AINIC recovery also rebuilds here).
     out->maxSendWorkRequest =
       IbCastAdvertiseMultiSeg() ? NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2 : NET_IB_MAX_REQUESTS;
-    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_IB_RMA_MAX_FLUSH_WRS;
+    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_RMA_MAX_FLUSH_QP_WRS;
   }
 }
 
