@@ -171,6 +171,20 @@ extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*byt
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, hipStream_t /*stream*/)>
     g_hipMemsetAsync;
 
+// Stream-ordered pool calls (allocator.cc's shadow pool). Alloc/free default to hipErrorInvalidValue;
+// create follows g_hipMemPoolResult and destroy succeeds, as the plain stubs did.
+extern std::function<hipError_t(hipMemPool_t* /*pool*/, const hipMemPoolProps* /*props*/)> g_hipMemPoolCreate;
+extern std::function<hipError_t(hipMemPool_t /*pool*/)> g_hipMemPoolDestroy;
+extern std::function<hipError_t(void** /*ptr*/, size_t /*size*/, hipMemPool_t /*pool*/, hipStream_t /*stream*/)>
+    g_hipMallocFromPoolAsync;
+extern std::function<hipError_t(void* /*ptr*/, hipStream_t /*stream*/)> g_hipFreeAsync;
+extern std::function<hipError_t(void)> g_hipDeviceSynchronize;
+
+// Default range is [0, 0]; priority-stream creation follows g_hipStreamCreateResult.
+extern std::function<hipError_t(int* /*least*/, int* /*greatest*/)> g_hipDeviceGetStreamPriorityRange;
+extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/, int /*priority*/)>
+    g_hipStreamCreateWithPriority;
+
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamDestroy;

@@ -388,6 +388,14 @@ function(rccl_define_micro_source_lists)
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroMemManager -- src/mem_manager.cc. Own binary: the test defines mem_manager.cc's
+  # bootstrap, proxy and group callees, which the shared fakes also define.
+  set(TEST_MICRO_MEM_MANAGER_SOURCE_FILES
+    mem-manager-test.cc
+    fakes/hip_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1054,6 +1062,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMemManager
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMemManager
+  SOURCES ${TEST_MICRO_MEM_MANAGER_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    MEM_MANAGER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mem_manager.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mem_manager.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
