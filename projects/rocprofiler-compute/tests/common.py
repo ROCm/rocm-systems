@@ -222,3 +222,68 @@ def normalize_kernel_name(name: str) -> str:
 def normalize_kernel_names(names: Set[str]) -> Set[str]:
     """Return the normalized form of each name in ``names``."""
     return {normalize_kernel_name(name) for name in names}
+
+
+def write_text_file(path: Path, text: str) -> Path:
+    """Write a text file, creating its directory, and return its path."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(text, encoding="utf-8")
+    return path
+
+
+def write_metric_library_family(root: Path) -> dict[str, Path]:
+    """Write a synthetic family: a base and a four-deep chain, one file per arch.
+
+    gfx_base defines three metrics; each child changes one thing: gfx_c1 a unit, gfx_c2
+    adds a metric, gfx_c3 removes one, gfx_c4 changes a formula and removes a field.
+
+    Returns:
+        Each arch's file, keyed by arch.
+    """
+    yaml_by_arch = {
+        "gfx_base": """\
+compute.valu_util:
+  name: VALU Utilization
+  formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD)
+  unit: Percent
+  description: How busy the VALU was.
+  peak: 100
+mem.l2_hit_rate:
+  name: L2 Cache Hit Rate
+  formula: 100 * SUM(TCC_HIT_sum) / SUM(TCC_HIT_sum + TCC_MISS_sum)
+  unit: Percent
+  description: L2 hit ratio.
+mem.l1_access_lat:
+  name: L1 Access Latency
+  formula: SUM(TCP_TCC_READ_REQ_LATENCY_sum) / SUM(TCP_TCC_READ_REQ_sum)
+  unit: Cycles
+  description: ""
+""",
+        "gfx_c1": """\
+inherit: ../gfx_base/0200_sol.yaml
+mem.l2_hit_rate:
+  unit: Pct
+""",
+        "gfx_c2": """\
+inherit: ../gfx_c1/0200_sol.yaml
+compute.mfma_flops_f8:
+  name: MFMA FLOPs (F8)
+  formula: 512 * SUM(SQ_INSTS_VALU_MFMA_MOPS_F8) / SUM($denom)
+  unit: FLOP
+  description: F8 MFMA operations per normUnit.
+""",
+        "gfx_c3": """\
+inherit: ../gfx_c2/0200_sol.yaml
+mem.l1_access_lat: !remove
+""",
+        "gfx_c4": """\
+inherit: ../gfx_c3/0200_sol.yaml
+compute.valu_util:
+  formula: 100 * SUM(SQ_ACTIVE_INST_VALU) / SUM($GRBM_GUI_ACTIVE_PER_XCD * 2)
+  peak: !remove
+""",
+    }
+    return {
+        arch: write_text_file(root / arch / "0200_sol.yaml", text)
+        for arch, text in yaml_by_arch.items()
+    }
