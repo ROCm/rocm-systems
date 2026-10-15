@@ -456,7 +456,9 @@ const IsaRegistry::IsaMap& IsaRegistry::GetSupportedIsas() {
   ISAREG_ENTRY_GEN("gfx1171",                11, 7, 1, unsupported, unsupported, 32, "gfx11-7-generic")
   ISAREG_ENTRY_GEN("gfx1200",                12, 0, 0, unsupported, unsupported, 32, "gfx12-generic")
   ISAREG_ENTRY_GEN("gfx1201",                12, 0, 1, unsupported, unsupported, 32, "gfx12-generic")
-  ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
+  ISAREG_ENTRY_GEN("gfx1250",                12, 5, 0, unsupported, any,         32, "gfx12-5-generic")
+  ISAREG_ENTRY_GEN("gfx1250:xnack-",         12, 5, 0, unsupported, disabled,    32, "gfx12-5-generic:xnack-")
+  ISAREG_ENTRY_GEN("gfx1250:xnack+",         12, 5, 0, unsupported, enabled,     32, "gfx12-5-generic:xnack+")
   ISAREG_ENTRY_GEN("gfx1250-strict",         12, 5, 0, unsupported, unsupported, 32, "gfx12-5-generic")
 #undef ISAREG_ENTRY_GEN
 
