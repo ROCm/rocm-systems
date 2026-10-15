@@ -2084,9 +2084,13 @@ TEST_F(NetConnectMicrotest, RecvFree_ReleasesMap) {
 // Proxy-side send connect (sendProxyConnect)
 // ---------------------------------------------------------------------------
 
+// Each export gets a higher fd number than any before it, so a stale fd can't match by reuse.
 std::vector<int> g_exportedFds;
+int g_nextExportFd = 200;
 hsa_status_t FakeExportDmaBuf(const void*, size_t, int* fd, uint64_t* offset) {
-  *fd = open("/dev/null", O_RDONLY);
+  int devNull = open("/dev/null", O_RDONLY);
+  *fd = fcntl(devNull, F_DUPFD, g_nextExportFd++);
+  close(devNull);
   *offset = 0x40;
   g_exportedFds.push_back(*fd);
   return HSA_STATUS_SUCCESS;
@@ -2114,8 +2118,9 @@ struct CuMemExportRecorder : std::vector<CuMemExport> {
   }
   // Closes what the code under test left open, e.g. a bank fd no free released.
   void CloseOpen() {
-    for (const auto& e : *this)
+    for (const auto& e : *this) {
       if (fcntl(e.fd, F_GETFD) != -1) close(e.fd);
+    }
   }
 };
 #endif
@@ -2144,6 +2149,7 @@ class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
     for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) proxyState_.buffSizes[p] = kSizes[p];
     rcclPrimaryNicInfo = {rcclIBNicTypeDefault, 0, 0};
     g_exportedFds.clear();
+    g_nextExportFd = 200;
   }
 
   void TearDown() override {
@@ -2181,8 +2187,9 @@ class NetProxyConnectMicrotest : public NetAllocMicrotestBase {
   static char* Buffer(Res* r, int p) { return NCCL_NET_MAP_GET_POINTER(&r->map, cpu, buffs[p]); }
   static bool InDeviceMemory(Res* r, int p) { return NCCL_NET_MAP_DEV_MEM(&r->map, buffs[p]); }
   int RegMrType(void* data) {
-    for (const auto& m : net_.regMrs)
+    for (const auto& m : net_.regMrs) {
       if (m.data == data) return m.type;
+    }
     return 0;
   }
 };
@@ -2292,7 +2299,13 @@ TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
     policyP2p = p2p;
     return ncclSuccess;
   });
-  ScopedHook cast(g_rcclCastNetP2pPolicy, [](void*, int) { return ncclSuccess; });
+  void* castHandle = nullptr;
+  int castP2p = -1;
+  ScopedHook cast(g_rcclCastNetP2pPolicy, [&](void* h, int p2p) {
+    castHandle = h;
+    castP2p = p2p;
+    return ncclSuccess;
+  });
 
   proxyState_.ncclNet = &ncclNetIb;
   EXPECT_EQ(Connect(), ncclSuccess);
@@ -2300,10 +2313,12 @@ TEST_F(NetSendProxyConnectMicrotest, IbPlugins_ApplyP2pPolicy) {
   EXPECT_EQ(policyP2p, 1);
   EXPECT_EQ(cast.calls, 0);
 
-  AddConn();
+  AddConn()->isP2p = 1;
   proxyState_.ncclNet = &netIbCast;
   EXPECT_EQ(Connect(1), ncclSuccess);
   EXPECT_EQ(cast.calls, 1);
+  EXPECT_EQ(castHandle, args_.handle);
+  EXPECT_EQ(castP2p, 1);
   EXPECT_EQ(ib.calls, 1);
 }
 
@@ -2501,8 +2516,9 @@ TEST_F(NetSendProxyConnectMicrotest, GdrCopyNotApplicable_HeadStaysInHostMemory)
   }
   ASSERT_EQ(Connect(0), ncclSuccess);
 
-  for (size_t i = 0; i < 2; i++)
+  for (size_t i = 0; i < 2; i++) {
     EXPECT_EQ(static_cast<sendNetResources*>(conns_[i].transportResources)->gdcSync, nullptr);
+  }
 }
 
 TEST_F(NetSendProxyConnectMicrotest, DeviceOffload_ExportsDeviceMhandles) {
@@ -2510,6 +2526,7 @@ TEST_F(NetSendProxyConnectMicrotest, DeviceOffload_ExportsDeviceMhandles) {
   handle.needsProxyProgress = 0;
   net_.offloadHandle = &handle;
   sendNetResources* r = AddConn();
+  conns_[0].needsProxyProgress = 1;  // must come from the handle
 
   ASSERT_EQ(Connect(), ncclSuccess);
 
@@ -2541,6 +2558,17 @@ TEST_F(NetSendProxyConnectMicrotest, HsaDmaBuf_RegistersDeviceBuffersByFd) {
   EXPECT_EQ(net_.regMrDmaBufs[1].data, Buffer(r, NCCL_PROTO_SIMPLE));
   EXPECT_EQ(net_.regMrDmaBufs[1].fd, g_exportedFds[1]);
   for (int fd : g_exportedFds) EXPECT_EQ(fcntl(fd, F_GETFD), -1) << "fd " << fd << " left open";
+}
+
+TEST_F(NetSendProxyConnectMicrotest, DmaBufNotSelected_UsesRegMr) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  proxyState_.dmaBufSupport = true;
+  AddConn(0, 1);  // useDmaBuf stays 0
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_TRUE(net_.regMrDmaBufs.empty());
+  EXPECT_EQ(net_.regMrs.size(), (size_t)NCCL_NUM_PROTOCOLS);
 }
 
 TEST_F(NetSendProxyConnectMicrotest, DmaBufUnavailable_FallsBackToRegMr) {
