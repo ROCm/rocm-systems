@@ -3,6 +3,7 @@
 
 #include "rocjitsu/vm/plugins/plugin_loader.h"
 #include "rocjitsu/vm/plugins/plugin_sink.h"
+#include "rocjitsu/vm/rj_vm.h"
 #include "scoped_temp.h"
 
 #include <gtest/gtest.h>
@@ -10,6 +11,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <memory>
 #include <stdexcept>
 #include <string>
 
@@ -47,6 +49,35 @@ TEST_F(PluginLoaderTest, LoadsPluginAndDispatchesLifecycle) {
   EXPECT_NE(trace().find("good:create\n"), std::string::npos);
   group.onInit();
   EXPECT_NE(trace().find("good:init\n"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, VmReplacementDetachesBeforeShuttingDownOutgoingGroup) {
+  const std::string config_path = std::string(CONFIG_DIR) + "/gfx942_cdna3.json";
+  rj_vm_t *raw_vm = nullptr;
+  ASSERT_EQ(rj_vm_create(config_path.c_str(), RJ_VM_MODE_DEFAULT, &raw_vm),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_NE(raw_vm, nullptr);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> vm(raw_vm, &rj_vm_destroy);
+
+  constexpr const char *PluginConfig = R"({"plugins":{"good":{}}})";
+  ASSERT_EQ(rj_vm_load_plugins(vm.get(), PluginConfig, PLUGIN_LOADER_FIXTURE_DIR),
+            ROCJITSU_STATUS_SUCCESS);
+  ASSERT_EQ(rj_vm_load_plugins(vm.get(), PluginConfig, PLUGIN_LOADER_FIXTURE_DIR),
+            ROCJITSU_STATUS_SUCCESS);
+
+  const std::string events = trace();
+  const size_t first_init = events.find("good:init\n");
+  const size_t detach = events.find("good:detach\n", first_init);
+  const size_t shutdown = events.find("good:shutdown\n", detach);
+  const size_t replacement_init = events.find("good:init\n", shutdown);
+  ASSERT_NE(first_init, std::string::npos) << events;
+  ASSERT_NE(detach, std::string::npos) << events;
+  ASSERT_NE(shutdown, std::string::npos) << events;
+  ASSERT_NE(replacement_init, std::string::npos) << events;
+  EXPECT_LT(first_init, detach) << events;
+  EXPECT_LT(detach, shutdown) << events;
+  EXPECT_LT(shutdown, replacement_init) << events;
+  EXPECT_EQ(events.find("good:detach\n", shutdown), std::string::npos) << events;
 }
 
 TEST_F(PluginLoaderTest, WarnsAndLoadsWhenRemovedProfiledConfigIsPresent) {

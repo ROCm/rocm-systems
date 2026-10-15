@@ -4,6 +4,7 @@
 #include "rocjitsu/vm/plugins/throughput/plugin.h"
 
 #include <algorithm>
+#include <cassert>
 #include <format>
 #include <memory>
 #include <string>
@@ -110,7 +111,9 @@ void ThroughputPlugin::finish_instruction(ThroughputWavefrontState &state, Clock
 }
 
 void ThroughputPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) {
-  dispatches_[info.dispatch_id].info = info;
+  auto &state = dispatches_[info.dispatch_id];
+  state.info = info;
+  state.observation_complete = true;
 }
 
 void ThroughputPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
@@ -120,13 +123,22 @@ void ThroughputPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
   state.begun = true;
 }
 
+bool ThroughputPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
+  return wf != nullptr && wavefront_state<ThroughputWavefrontState>(*wf) != nullptr;
+}
+
 void ThroughputPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
-  wf.set_plugin_state(slot_index(), std::make_unique<ThroughputWavefrontState>());
+  const auto dispatch = dispatches_.find(wf.dispatch_id());
+  if (dispatch == dispatches_.end() || !dispatch->second.begun ||
+      !dispatch->second.observation_complete)
+    return;
+  set_wavefront_state(wf, std::make_unique<ThroughputWavefrontState>());
 }
 
 void ThroughputPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                         amdgpu::Wavefront &wf) {
-  auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
+  auto *state = wavefront_state<ThroughputWavefrontState>(wf);
+  assert(state != nullptr);
   const InstructionFamily family = count_instruction(*state, inst);
   state->active_family = family;
   // Start after classification and accounting so their profiler cost is not
@@ -137,7 +149,8 @@ void ThroughputPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/, const I
 
 void ThroughputPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const Instruction &inst,
                                                       amdgpu::Wavefront &wf) {
-  auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
+  auto *state = wavefront_state<ThroughputWavefrontState>(wf);
+  assert(state != nullptr);
   const size_t family = family_index(count_instruction(*state, inst));
   ++state->untimed_instructions[family];
 }
@@ -146,19 +159,31 @@ void ThroughputPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/,
                                                        const Instruction & /*inst*/,
                                                        amdgpu::Wavefront &wf) {
   const Clock::time_point end = Clock::now();
-  auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
+  auto *state = wavefront_state<ThroughputWavefrontState>(wf);
+  assert(state != nullptr);
   finish_instruction(*state, end);
 }
 
 void ThroughputPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
   const Clock::time_point end = Clock::now();
-  auto *state = static_cast<ThroughputWavefrontState *>(wf.plugin_state(slot_index()));
+  auto *state = wavefront_state<ThroughputWavefrontState>(wf);
+  if (!state)
+    return;
   // Program terminators intentionally have no after-execute callback.
   finish_instruction(*state, end);
   auto &dispatch = dispatches_[wf.dispatch_id()];
   add(dispatch.counts, state->counts);
   add(dispatch.execution_nanoseconds, state->execution_nanoseconds);
   add(dispatch.untimed_instructions, state->untimed_instructions);
+  clear_wavefront_state(wf);
+}
+
+void ThroughputPlugin::onAmdgpuPluginGroupDetached() {
+  for (auto &[dispatch_id, state] : dispatches_) {
+    (void)dispatch_id;
+    if (state.begun)
+      state.observation_complete = false;
+  }
 }
 
 void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
@@ -168,7 +193,15 @@ void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
     return;
 
   DispatchState &state = iter->second;
-  const double wall_seconds = state.begun ? seconds_between(state.begin, end) : 0.0;
+  // Packet metadata is delivered before the command processor's lazy
+  // execution-begin callback. If the group was detached across that boundary,
+  // the retained packet-only state has no valid timing or coverage window and
+  // must not be published as a completed zero-work dispatch.
+  if (!state.begun || !state.observation_complete) {
+    dispatches_.erase(iter);
+    return;
+  }
+  const double wall_seconds = seconds_between(state.begin, end);
   emit_record("dispatch", &state.info, state.counts, state.execution_nanoseconds,
               state.untimed_instructions, wall_seconds);
 
@@ -178,9 +211,9 @@ void ThroughputPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   dispatch_seconds_sum_ += wall_seconds;
   ++completed_dispatches_;
   if (!have_active_window_) {
-    first_begin_ = state.begun ? state.begin : end;
+    first_begin_ = state.begin;
     have_active_window_ = true;
-  } else if (state.begun) {
+  } else {
     first_begin_ = std::min(first_begin_, state.begin);
   }
   last_end_ = std::max(last_end_, end);

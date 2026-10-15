@@ -252,7 +252,7 @@ std::optional<amdgpu::ComputeQueueBindingPlan> SoC::make_pm4(uint32_t /*queue_or
 void SoC::set_plugin_group(std::shared_ptr<ExecutionPluginGroup> plugin_group) {
   plugin_group_ = plugin_group ? plugin_group : ExecutionPluginGroup::empty_group();
   for (auto *xcd : xcds_)
-    xcd->set_plugin_group(plugin_group_);
+    xcd->set_plugin_group_from_soc(plugin_group_);
 }
 
 void SoC::set_dispatch_threads(uint32_t threads) {

@@ -97,6 +97,9 @@ public:
 
   bool observes_sgpr_reads() const override { return true; }
   bool observes_memory_routing() const override { return true; }
+  bool observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const override {
+    return wf != nullptr && wavefront_state<RaceWavefrontState>(*wf) != nullptr;
+  }
 
   void onAmdgpuDispatchPacketProcessed(const KernelDispatchInfo &info) override;
 
@@ -143,7 +146,7 @@ private:
   };
 
   RaceWavefrontState *get_state(const amdgpu::Wavefront &wf) {
-    return static_cast<RaceWavefrontState *>(wf.plugin_state(slot_index()));
+    return wavefront_state<RaceWavefrontState>(wf);
   }
   RaceWavefrontState *get_state(const amdgpu::Wavefront *wf) {
     return wf ? get_state(*wf) : nullptr;

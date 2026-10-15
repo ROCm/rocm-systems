@@ -20,6 +20,8 @@
 namespace rocjitsu {
 namespace amdgpu {
 
+class Xcd;
+
 /// @brief A shader engine containing compute units.
 ///
 /// @details Mirrors the AMDGPU hardware hierarchy where each shader engine is an
@@ -52,12 +54,6 @@ public:
 
   void add_compute_unit(ComputeUnitCore *cu) { cus_.push_back(cu); }
 
-  /// @brief Set the execution plugin group on all CUs (shared ownership).
-  void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    for (auto *cu : cus_)
-      cu->set_plugin_group(pg);
-  }
-
   /// @brief Return the number of compute units.
   /// @returns Number of CUs in this shader engine.
   uint32_t num_compute_units() const { return static_cast<uint32_t>(cus_.size()); }
@@ -87,8 +83,17 @@ public:
   }
 
 private:
+  /// Apply an XCD-level replacement to every CU without exposing a partial
+  /// shader-engine replacement boundary.
+  void set_plugin_group_from_xcd(std::shared_ptr<ExecutionPluginGroup> pg) {
+    for (auto *cu : cus_)
+      cu->set_plugin_group_from_shader_engine(pg);
+  }
+
   std::vector<ComputeUnitCore *> cus_;
   std::unique_ptr<ShaderProcessorInput> spi_;
+
+  friend class Xcd;
 };
 
 } // namespace amdgpu

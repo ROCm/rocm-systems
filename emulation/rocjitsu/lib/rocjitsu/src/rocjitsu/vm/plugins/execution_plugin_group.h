@@ -453,6 +453,25 @@ public:
     });
   }
 
+  /// Invalidate dispatch-scoped observations before this group is detached.
+  void onAmdgpuPluginGroupDetached() {
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuPluginGroupDetached();
+    });
+  }
+
+  /// Notify every outgoing plugin before replacement discards state for a
+  /// resident wave. A plugin that owns no state can still account for an
+  /// unobserved resident lifetime.
+  void onAmdgpuWavefrontStateInvalidated(amdgpu::Wavefront &wf) {
+    invalidate_hot_hook_subscription_cache(wf);
+    dispatch_with_plugin_lock([&]() {
+      for (auto &entry : plugins_)
+        entry.plugin->onAmdgpuWavefrontStateInvalidated(wf);
+    });
+  }
+
   static std::shared_ptr<ExecutionPluginGroup> empty_group() {
     // Immortal singleton: the shared_ptr is heap-allocated and deliberately never
     // deleted, so its control block outlives process teardown. In local-mode

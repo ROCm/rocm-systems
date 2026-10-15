@@ -455,17 +455,67 @@ all high-frequency callbacks for one wavefront. After every plugin's
 `onAmdgpuWavefrontDispatched()` callback completes, the group samples and caches
 that predicate on the wavefront until halt. Reentrant hooks during dispatch or
 halt, hooks without a wavefront, and hooks on a resident wave after live plugin-
-group replacement use the current group's live predicate instead. The predicate
-must therefore be lock-free, thread-safe, and stable for the subscribed portion
-of a wavefront's lifetime. Lifecycle, dispatch, workgroup, wavefront, and barrier
-callbacks are not filtered by this predicate.
+group replacement use the current group's live predicate instead.
 
-Live replacement refreshes subscriptions for resident waves, but does not
-replay their dispatch callbacks or migrate or clear their wave-local plugin
-state. A newly attached stateful plugin therefore has no dispatch-initialized
-state for those waves, while a replacement that reuses a plugin slot can see
-state left by the previous plugin. Stateful plugin groups should be replaced at
-a quiescent boundary unless they explicitly tolerate both cases.
+Per-wave state is owned by the concrete plugin instance that installed it;
+slot indices alone are not identities because every group numbers its plugins
+from zero. Use `wavefront_state<T>()`, `set_wavefront_state()`, and
+`clear_wavefront_state()` rather than accessing a slot directly. Replacing a
+group first calls `onAmdgpuPluginGroupDetached()` even when no wave is resident,
+so dispatch-scoped observers can invalidate every active dispatch that crosses
+the observation gap. A shared group can receive that notification once per
+detaching compute unit, so the callback must be idempotent. For every resident
+wave, the group then calls `onAmdgpuWavefrontStateInvalidated()` on every
+outgoing plugin before discarding the old group's state. An owner can retrieve
+its still-live state during the callback and release retained references; a
+stateful plugin with no state can record that it was attached after the wave
+became resident. Neither callback is a synthetic halt. Replacement does not
+synthesize `onAmdgpuWavefrontDispatched()` for waves already resident.
+
+`SoC::set_plugin_group()` is the coherent replacement boundary for a complete
+device; `Xcd::set_plugin_group()` provides the same boundary for a standalone
+XCD. An SoC-owned XCD, command processor, or compute unit rejects independent
+replacement because it could otherwise route one dispatch through two plugin
+groups. `ComputeUnit::set_plugin_group()` remains available for standalone CU
+fixtures. These direct replacement APIs do not themselves shut down the
+outgoing group.
+
+The public C API has a narrower contract. `rj_vm_load_plugins()` must complete
+before the first `rj_vm_step()` or `rj_vm_run()` call, so mid-run host
+replacement is not supported. During a permitted pre-run replacement it
+delivers all detach and state-invalidation callbacks to the outgoing group
+before calling its `onShutdown()`; no plugin callback is delivered after
+shutdown begins.
+
+Dispatch completeness is determined at observation boundaries, not merely by
+whether packet metadata was seen:
+
+| Callback sequence | Required coverage result |
+| --- | --- |
+| packet → detach → restore → begin | May remain complete when begin and all later callbacks are observed. |
+| packet → detach → begin while detached → restore | Incomplete because execution-begin was missed. |
+| begin → detach → restore | Incomplete because execution callbacks can be missed after observation began. |
+| attach while a dispatch or wave is resident | Incomplete for a newly attached stateful plugin. |
+| packet → begin → execution → end | Complete when every required callback is observed. |
+
+Plugins expose incomplete coverage according to their report contract.
+Throughput discards incomplete dispatch results. InstructionMix retains any
+collected mnemonic counts in an incomplete summary but emits no completed
+dispatch record. Perfsim reports a skipped dispatch and replays no incomplete
+trace when an observation it started is interrupted, or when replacement hides
+the begin after Perfsim saw packet metadata. A dispatch whose packet, begin,
+and earlier work all predate this Perfsim instance is entirely unobserved and
+is ignored, including any later workgroups and completion callbacks it receives.
+
+A stateful plugin must therefore return `false` while `wavefront_state()` is
+null. It starts ordinary observation when the next wave dispatch initializes
+state. It must also tolerate infrequent callbacks, including wavefront halt and
+barrier resolution, for a resident wave it did not initialize. Stateless
+plugins may return `true` and observe the remainder of a resident wave
+immediately after replacement. The predicate must be lock-free, thread-safe,
+and stable for the subscribed portion of a wavefront's lifetime. Lifecycle,
+dispatch, workgroup, wavefront, and barrier callbacks are not filtered by this
+predicate.
 
 ### Observing memory accesses
 
@@ -549,13 +599,16 @@ concurrently.
    high-frequency and infrequent callbacks. Override
    `requires_serial_hot_hooks()` when that state cannot be protected within the
    plugin.
-6. Override the per-hook `observes_*()` methods for the high-frequency hooks the
-   plugin consumes. Use `observes_hot_hooks_for_wavefront()` when subscription
-   also depends on the dispatched wavefront; keep that predicate lock-free,
-   thread-safe, and stable after dispatch. A consumer of
+6. The ordinary high-frequency per-hook `observes_*()` methods default to
+   `true` for compatibility; override each unused hook to return `false`. Use
+   `observes_hot_hooks_for_wavefront()` when subscription also depends on the
+   dispatched wavefront; keep that predicate lock-free, thread-safe, and stable
+   after dispatch. If hot hooks depend on per-wave state, install it with
+   `set_wavefront_state()` and return false when `wavefront_state()` is null so
+   live group replacement cannot expose an uninitialized wave. A consumer of
    `onAmdgpuMemoryAccessRouted` or `onAmdgpuTensorDmaMemoryAccess` must explicitly
    return `true` from the corresponding interest method because those two
-   conservative defaults are `false`.
+   hooks are exceptions whose defaults are `false`.
 7. Enable it by adding `"myname": { ... }` to the `plugins` section of
    the config file.
 8. Return `true` from `supports_async_instructions()` only when the plugin accepts

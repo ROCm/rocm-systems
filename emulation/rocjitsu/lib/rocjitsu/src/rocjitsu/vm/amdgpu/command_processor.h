@@ -48,6 +48,7 @@
 #include <memory>
 #include <mutex>
 #include <shared_mutex>
+#include <stdexcept>
 #include <string>
 #include <thread>
 #include <unordered_map>
@@ -70,6 +71,7 @@ namespace amdgpu {
 
 class GpuVm;
 class GpuVmAccess;
+class Xcd;
 class CommandProcessorCloseTestAccess;
 enum class VmAccessOutcome : uint8_t;
 enum class QueueReconfigureStatus : uint8_t;
@@ -241,10 +243,10 @@ public:
                                bool wait_for_ack = true);
 
   void set_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
-    plugin_group_ = pg ? pg : ExecutionPluginGroup::empty_group();
-    if (completion_) {
-      completion_->set_plugin_group(plugin_group_);
-    }
+    if (parent() != nullptr)
+      throw std::logic_error(
+          "hierarchy-owned command-processor plugins must be replaced through the XCD or SoC");
+    replace_plugin_group(std::move(pg));
   }
 
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
@@ -510,6 +512,17 @@ public:
   }
 
 private:
+  void set_plugin_group_from_xcd(std::shared_ptr<ExecutionPluginGroup> pg) {
+    replace_plugin_group(std::move(pg));
+  }
+
+  void replace_plugin_group(std::shared_ptr<ExecutionPluginGroup> pg) {
+    plugin_group_ = pg ? std::move(pg) : ExecutionPluginGroup::empty_group();
+    if (completion_)
+      completion_->set_plugin_group(plugin_group_);
+  }
+
+  friend class Xcd;
   friend class CommandProcessorCloseTestAccess;
   friend class CommandProcessorPlacementTestAccess;
 

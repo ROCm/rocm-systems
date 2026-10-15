@@ -111,10 +111,29 @@ void InstructionMixPlugin::onAmdgpuDispatchPacketProcessed(const KernelDispatchI
   dispatches_[info.dispatch_id].info = info;
 }
 
+void InstructionMixPlugin::onAmdgpuDispatchExecutionBegin(uint32_t dispatch_id) {
+  auto iter = dispatches_.find(dispatch_id);
+  if (iter == dispatches_.end())
+    return;
+  DispatchState &state = iter->second;
+  if (!state.begun)
+    state.observation_complete = true;
+  state.begun = true;
+}
+
+bool InstructionMixPlugin::observes_hot_hooks_for_wavefront(const amdgpu::Wavefront *wf) const {
+  return wf != nullptr && wavefront_state<InstructionMixWavefrontState>(*wf) != nullptr;
+}
+
 void InstructionMixPlugin::onAmdgpuWavefrontDispatched(amdgpu::Wavefront &wf) {
+  const auto dispatch = dispatches_.find(wf.dispatch_id());
+  if (dispatch == dispatches_.end() || !dispatch->second.begun)
+    return;
   // Wavefront::reset() does not clear plugin state, so a recycled wave slot
   // still holds the previous wavefront's map. Replace it rather than reuse it.
-  wf.set_plugin_state(slot_index(), std::make_unique<InstructionMixWavefrontState>());
+  auto state = std::make_unique<InstructionMixWavefrontState>();
+  state->dispatch_id = wf.dispatch_id();
+  set_wavefront_state(wf, std::move(state));
 }
 
 void InstructionMixPlugin::count_instruction(InstructionMixWavefrontState &state,
@@ -136,7 +155,9 @@ void InstructionMixPlugin::count_instruction(InstructionMixWavefrontState &state
 void InstructionMixPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t /*pc*/,
                                                             const Instruction &inst,
                                                             amdgpu::Wavefront &wf) {
-  auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
+  auto *state = wavefront_state<InstructionMixWavefrontState>(wf);
+  if (!state)
+    return;
   count_instruction(*state, inst, wf.dispatch_id());
 }
 
@@ -145,21 +166,66 @@ void InstructionMixPlugin::onAmdgpuAsyncInstructionIssued(uint64_t /*pc*/, const
   // An offloaded instruction replaces the before/after pair, so this is the
   // only notification it produces. Count it identically: the mix describes what
   // executed, not how the simulator chose to execute it.
-  auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
+  auto *state = wavefront_state<InstructionMixWavefrontState>(wf);
+  if (!state)
+    return;
   count_instruction(*state, inst, wf.dispatch_id());
 }
 
 void InstructionMixPlugin::onAmdgpuWavefrontHalted(amdgpu::Wavefront &wf) {
-  auto *state = static_cast<InstructionMixWavefrontState *>(wf.plugin_state(slot_index()));
-  merge(dispatches_[wf.dispatch_id()].counts, state->counts);
+  auto *state = wavefront_state<InstructionMixWavefrontState>(wf);
+  if (!state) {
+    const auto dispatch = dispatches_.find(wf.dispatch_id());
+    if (dispatch != dispatches_.end())
+      dispatch->second.observation_complete = false;
+    else
+      unobserved_dispatches_.insert(wf.dispatch_id());
+    return;
+  }
+  const uint32_t dispatch_id = state->dispatch_id;
+  const auto dispatch = dispatches_.find(dispatch_id);
+  if (dispatch != dispatches_.end())
+    merge(dispatch->second.counts, state->counts);
+  else
+    unobserved_dispatches_.insert(dispatch_id);
+  clear_wavefront_state(wf);
+}
+
+void InstructionMixPlugin::onAmdgpuPluginGroupDetached() {
+  for (auto &[dispatch_id, state] : dispatches_) {
+    (void)dispatch_id;
+    state.observation_complete = false;
+  }
+}
+
+void InstructionMixPlugin::onAmdgpuWavefrontStateInvalidated(amdgpu::Wavefront &wf) {
+  auto *state = wavefront_state<InstructionMixWavefrontState>(wf);
+  if (!state) {
+    // Wavefront objects outlive their executions. A normal halt has already
+    // cleared this plugin's state and reset the slot's dispatch id to zero;
+    // replacing while the CU is idle must not invent an unobserved dispatch.
+    if (!wf.is_halted())
+      unobserved_dispatches_.insert(wf.dispatch_id());
+    return;
+  }
+  const uint32_t dispatch_id = state->dispatch_id;
+  const auto dispatch = dispatches_.find(dispatch_id);
+  if (dispatch != dispatches_.end())
+    merge(dispatch->second.counts, state->counts);
+  else
+    unobserved_dispatches_.insert(dispatch_id);
 }
 
 void InstructionMixPlugin::onAmdgpuDispatchExecutionEnd(uint32_t dispatch_id) {
   auto iter = dispatches_.find(dispatch_id);
-  if (iter == dispatches_.end())
+  if (iter == dispatches_.end()) {
+    unobserved_dispatches_.insert(dispatch_id);
     return;
+  }
 
   DispatchState &state = iter->second;
+  if (!state.begun || !state.observation_complete)
+    return;
   state.info.dispatch_id = dispatch_id;
   emit_record("dispatch", &state.info, state.counts);
   merge(aggregate_, state.counts);
@@ -182,7 +248,13 @@ void InstructionMixPlugin::onShutdown() {
   // live in wavefront-local plugin state and the plugin has no way to
   // enumerate live wavefronts. `incomplete_dispatches` is what tells a reader
   // the summary may be a subset; a run that ends cleanly reports zero.
-  incomplete_dispatches_ = dispatches_.size();
+  std::unordered_set<uint32_t> incomplete_ids = unobserved_dispatches_;
+  incomplete_ids.reserve(incomplete_ids.size() + dispatches_.size());
+  for (const auto &[dispatch_id, state] : dispatches_) {
+    (void)state;
+    incomplete_ids.insert(dispatch_id);
+  }
+  incomplete_dispatches_ = incomplete_ids.size();
   for (const auto &[dispatch_id, state] : dispatches_)
     merge(aggregate_, state.counts);
 
