@@ -357,6 +357,8 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         )
     if name == 'S_BRANCH':
         return InstructionSemantics(name, 'branch', branch_condition='always')
+    if name == 'S_SETKILL':
+        return InstructionSemantics(name, 'setkill')
     if name.startswith('S_ENDPGM'):
         return InstructionSemantics(name, 'endpgm')
     if name == 'S_TRAP':
@@ -772,7 +774,7 @@ _VOP1_OP_MAP = {
     'V_NOP': ('true_nop', None),
     'V_CLREXCP': ('true_nop', None),
     'V_SAT_PK_U8_I16': ('vector_sat_pack', 'u8_i16'),
-    'V_SCREEN_PARTITION_4SE': ('nop', None),
+    'V_SCREEN_PARTITION_4SE': ('vector_unary', 'screen_partition_4se'),
     'V_ACCVGPR_MOV': ('vector_mov', None),
     'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
     'V_CVT_F32_BF8': ('vector_unary', 'cvt_f32_bf8'),
@@ -1811,7 +1813,11 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    # S_ATOMIC_* are scalar atomics — not currently simulated.
+    if upper == 'S_ATOMIC_DEC':
+        return InstructionSemantics(
+            name, 'smem_atomic', operation='dec', elem_size=4, num_elems=1
+        )
+    # Other scalar atomics are not currently simulated.
     if '_ATOMIC_' in upper:
         return InstructionSemantics(name, 'nop')
 
@@ -2358,6 +2364,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
             num_elems=1,
             operation='st64' if is_st64 else None,
         )
+    # Classify ADDTID before the ordinary DS write/read suffix tables.
+    if 'ADDTID' in upper:
+        if is_write:
+            return InstructionSemantics(
+                name, 'ds_write_addtid', elem_size=4, num_elems=1
+            )
+        if is_read:
+            return InstructionSemantics(
+                name, 'ds_read_addtid', elem_size=4, num_elems=1
+            )
+        return InstructionSemantics(name, 'nop')
     if is_write:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
@@ -2380,17 +2397,6 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                 num_elems=ne,
                 transpose_kind=transpose_kind,
             )
-    # ADDTID instructions: address = thread_id * M0_stride + offset.
-    if 'ADDTID' in upper:
-        if is_write:
-            return InstructionSemantics(
-                name, 'ds_write_addtid', elem_size=4, num_elems=1
-            )
-        if is_read:
-            return InstructionSemantics(
-                name, 'ds_read_addtid', elem_size=4, num_elems=1
-            )
-        return InstructionSemantics(name, 'nop')
     if is_read:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
@@ -2709,6 +2715,18 @@ def derive_semantics(
             sem = fallback(name)
             if sem is not None:
                 break
+
+    if (
+        sem is not None
+        and profile is not None
+        and sem.semantic_class in ('ds_read_tr_b4', 'ds_read_tr_b6')
+    ):
+        kind = (
+            profile.ds_b4_transpose_kind
+            if sem.semantic_class == 'ds_read_tr_b4'
+            else profile.ds_b6_transpose_kind
+        )
+        sem = replace(sem, transpose_kind=kind)
 
     if (
         sem is not None

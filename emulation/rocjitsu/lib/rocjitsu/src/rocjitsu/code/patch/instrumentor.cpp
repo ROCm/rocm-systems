@@ -145,10 +145,7 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
 // (kernel_descriptor_translator.cpp's arch_has_accvgpr / uses_gfx90a_accum_offset)
 // and code_object_patcher.cpp (target_uses_gfx90a_accum_offset). They should be
 // consolidated into isa/isa_traits.h alongside arch_is_cdna_4_or_lower/arch_is_rdna,
-// but the
-// arch_has_accvgpr copies disagree on CDNA1 (this one follows the physical AGPR file;
-// DBT's follows the HasAccVgpr trait, which models CDNA1 as zero), so unifying needs a
-// deliberate CDNA1-semantics decision. Kept DBI-local until then.
+// preserving the separate gfx908 allocation and the gfx90a unified allocation.
 
 // All CDNA generations (gfx908/gfx90a/gfx942/gfx950) have an AccVGPR file.
 // RDNA/gfx1250 have none.

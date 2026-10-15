@@ -1235,6 +1235,44 @@ TEST_F(EnqueueMicrotest, PackedChannels_TinyTransfer_PacksIntoOneChannel) {
                                         ncclFloat32, NCCL_PROTO_SIMPLE, 32));
 }
 
+TEST_F(EnqueueMicrotest, PackedChannels_CapsToCommNChannels) {
+  // nChannels == 0 skips the cap. Count 10240 / max 32 packs to 5.
+  {
+    RankComm rc(8);
+    EXPECT_EQ(0, rc.get()->nChannels);
+    EXPECT_EQ(5, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+  // nMaxChannels > nChannels: the cap is applied before the packer arithmetic.
+  // 3 with the cap, 5 without it, 4 if the cap were applied after the arithmetic.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 4;
+    EXPECT_EQ(3, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+  // nMaxChannels <= nChannels: the cap does not change the answer.
+  {
+    RankComm uncapped(8);
+    RankComm capped(8);
+    capped.get()->nChannels = 16;
+    const size_t count = size_t(1) << 24;
+    int plain = rcclKernelPackedChannels(uncapped.get(), ncclFuncAllReduce, count,
+                                         ncclFloat32, NCCL_PROTO_SIMPLE, 8);
+    int limited = rcclKernelPackedChannels(capped.get(), ncclFuncAllReduce, count,
+                                           ncclFloat32, NCCL_PROTO_SIMPLE, 8);
+    EXPECT_EQ(8, plain);
+    EXPECT_EQ(plain, limited);
+  }
+  // nChannels == 1 is the first value where the cap bites; a > 1 guard would return 5.
+  {
+    RankComm rc(8);
+    rc.get()->nChannels = 1;
+    EXPECT_EQ(1, rcclKernelPackedChannels(rc.get(), ncclFuncAllReduce, 10240,
+                                          ncclFloat32, NCCL_PROTO_SIMPLE, 32));
+  }
+}
+
 TEST_F(EnqueueMicrotest, PackedChannels_LargeTransfer_SaturatesToMaxChannels) {
   // Far above the floor, the divUp(cells, cellsPerChannel) term exceeds
   // nMaxChannels and the final min() clamps it.

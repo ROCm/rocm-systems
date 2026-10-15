@@ -543,6 +543,9 @@ public:
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdst;
   Operand src0;
+
+private:
+  void execute_modifier_impl(amdgpu::Wavefront &wf);
 };
 
 class VCvtF16U16Vop1 : public Vop1 {
