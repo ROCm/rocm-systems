@@ -1369,7 +1369,6 @@ TEST(GpuVmPipeline, MixedFlatAtomicRetryPreservesLdsAndCompletedGlobalLanes) {
   auto &wf = *context.wf;
   wf.set_exec(0x7);
   wf.set_lds_base(context.cu->allocate_lds(256));
-  constexpr uint64_t shared_base = 0x100000;
   constexpr uint32_t lds_offset = 64;
   constexpr std::array<uint32_t, 3> initial = {10, 20, 30};
   constexpr std::array<uint32_t, 3> source = {1, 2, 3};
@@ -1385,11 +1384,10 @@ TEST(GpuVmPipeline, MixedFlatAtomicRetryPreservesLdsAndCompletedGlobalLanes) {
   state->atomic_op = amdgpu::AtomicOp::ADD;
   state->wf_size = wf.wf_size();
   state->exec_mask = state->lane_mask = 0x7;
-  state->flat_shared_lane_mask = 0x2;
-  state->flat_shared_aperture_base = shared_base;
+  state->flat_local_lane_mask = 0x2;
   state->dst_reg_base = wf.vgpr_alloc().base + 4;
   state->per_lane_addr[0] = 0x100;
-  state->per_lane_addr[1] = shared_base + lds_offset;
+  state->per_lane_addr[1] = wf.lds_base() + lds_offset;
   state->per_lane_addr[2] = 0x200;
   state->store_data.resize(wf.wf_size() * sizeof(uint32_t));
   std::memcpy(state->store_data.data(), source.data(), sizeof(source));
@@ -1424,7 +1422,6 @@ TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {
     auto &wf = *context.wf;
     wf.set_exec(0x7);
     wf.set_lds_base(context.cu->allocate_lds(256));
-    constexpr uint64_t shared_base = 0x100000;
     constexpr uint32_t lds_offset = 64;
     constexpr std::array<uint32_t, 3> initial = {10, 20, 30};
     constexpr std::array<uint32_t, 3> source = {1, 2, 3};
@@ -1440,11 +1437,10 @@ TEST(GpuVmPipeline, MixedFlatLegacyAtomicRetryRefreshesVmSnapshot) {
     state->atomic_op = amdgpu::AtomicOp::ADD;
     state->wf_size = wf.wf_size();
     state->exec_mask = state->lane_mask = 0x7;
-    state->flat_shared_lane_mask = uint64_t{1} << local_lane;
-    state->flat_shared_aperture_base = shared_base;
+    state->flat_local_lane_mask = uint64_t{1} << local_lane;
     state->dst_reg_base = wf.vgpr_alloc().base + 4;
     state->per_lane_addr[first_global_lane] = 0x100;
-    state->per_lane_addr[local_lane] = shared_base + lds_offset;
+    state->per_lane_addr[local_lane] = wf.lds_base() + lds_offset;
     state->per_lane_addr[2] = 0x200;
     state->store_data.resize(wf.wf_size() * sizeof(uint32_t));
     std::memcpy(state->store_data.data(), source.data(), sizeof(source));

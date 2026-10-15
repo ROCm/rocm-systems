@@ -847,7 +847,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   EXPECT_EQ(access.addresses[0], 0x80000440u);
   EXPECT_EQ(access.addresses[1], 0x420u);
   EXPECT_EQ(access.addresses[2], 0x2000u);
-  EXPECT_EQ(access.execution_addresses, access.pre_routing_addresses);
+  EXPECT_EQ(access.execution_addresses, access.addresses);
   auto *scoreboard = wave->memory_wait_scoreboard();
   ASSERT_NE(scoreboard, nullptr);
   EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);
@@ -902,7 +902,7 @@ TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChang
     }
     // An active but invalid lane does not acquire an effective LDS address.
     EXPECT_EQ(access.addresses[3], kSharedBase + 0x2c);
-    EXPECT_EQ(access.execution_addresses, access.pre_routing_addresses);
+    EXPECT_EQ(access.execution_addresses, access.addresses);
     auto *scoreboard = wave->memory_wait_scoreboard();
     ASSERT_NE(scoreboard, nullptr);
     EXPECT_EQ(scoreboard->outstanding(WaitCounterKind::Load), 1u);

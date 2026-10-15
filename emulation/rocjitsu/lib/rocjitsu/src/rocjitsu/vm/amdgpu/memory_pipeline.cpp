@@ -1083,7 +1083,13 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   auto &d = *inst.data_as<VectorMemState>();
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
-  const uint64_t shared_lanes = d.flat_shared_lane_mask & d.lane_mask;
+  // DDS requires a separate backing implementation. Reject the complete
+  // instruction before global or LDS side effects rather than narrowing a
+  // DDS address into another workgroup's LDS allocation.
+  if (d.flat_dds_lane_mask & transpose_request_lane_mask(d, wf.wf_size()))
+    return VmAccessOutcome::Faulted;
+  const uint64_t shared_lanes =
+      d.flat_local_lane_mask & transpose_request_lane_mask(d, wf.wf_size());
   const auto outcome =
       initiate_global_access(d, wf, transpose_request_lane_mask(d, wf.wf_size()) & ~shared_lanes);
   if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
@@ -1091,12 +1097,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
 
   // Commit LDS only after all retryable global work completes. In particular,
   // a global retry must not repeat an LDS atomic or discard either result set.
-  auto addresses = d.per_lane_addr;
-  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
-    if (shared_lanes & (uint64_t{1} << lane))
-      addresses[lane] = d.flat_shared_address_in_lds(lane, wf.lds_base());
-  }
-  execute_lds_access(d, wf.lds(), addresses, shared_lanes, d.store_data, d.response_data);
+  execute_lds_access(d, wf.lds(), d.per_lane_addr, shared_lanes, d.store_data, d.response_data);
   return VmAccessOutcome::Complete;
 }
 
@@ -1201,6 +1202,9 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   auto &d = *inst.data_as<VectorMemState>();
   auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
+  // Uniform shared-aperture FLAT must reject unsupported DDS too.
+  if (d.flat_dds_lane_mask & transpose_request_lane_mask(d, wf.wf_size()))
+    return VmAccessOutcome::Faulted;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
   if (d.lds_stack_inputs) {

@@ -366,7 +366,8 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     const uint64_t execMask = d.exec_mask;
     // DDS participates in the instruction's dependencies, but its addresses
     // do not describe bytes in the ordinary LDS allocation.
-    const uint64_t ldsMask = mixedFlat ? execMask & access.flat_local_lane_mask : execMask;
+    const uint64_t ldsMask =
+        (mixedFlat ? execMask & access.flat_local_lane_mask : execMask) & ~d.flat_dds_lane_mask;
     if (execMask == 0)
       return;
     auto type = d.is_load ? MemoryEventType::LDS_TO_VGPR : MemoryEventType::VGPR_TO_LDS;
@@ -381,25 +382,26 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     }
 
     uint32_t laneAddrs[64]{};
+    uint32_t secondLaneAddrs[64]{};
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(ldsMask & (1ULL << lane)))
         continue;
-      const uint64_t address = mixedFlat ? access.addresses[lane] : d.per_lane_addr[lane];
-      laneAddrs[lane] = detector->validLdsRange(address, perLaneBytes)
-                            ? static_cast<uint32_t>(address)
-                            : amdgpu::kInvalidLdsAddress;
-      int addr = static_cast<int>(laneAddrs[lane]);
-      if (d.is_load)
-        detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
-      else
-        detector->validateWrite(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
-      if (d.ds2_active) {
-        addr = static_cast<int>(d.ds2_per_lane_addr[lane]);
+      auto validate = [&](uint64_t address) {
+        const auto bytes = detector->ldsBytesInRange(address, perLaneBytes, d.elem_size);
+        if (bytes == 0)
+          return amdgpu::kInvalidLdsAddress;
+        const auto addr = static_cast<uint32_t>(address);
         if (d.is_load)
-          detector->validateRead(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
+          detector->validateRead(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
+                                 memoryOrder);
         else
-          detector->validateWrite(addr, waveId, static_cast<int>(lane), perLaneBytes, memoryOrder);
-      }
+          detector->validateWrite(static_cast<int>(addr), waveId, static_cast<int>(lane), bytes,
+                                  memoryOrder);
+        return addr;
+      };
+      laneAddrs[lane] = validate(d.per_lane_addr[lane]);
+      if (d.ds2_active)
+        secondLaneAddrs[lane] = validate(d.ds2_per_lane_addr[lane]);
     }
     uint8_t byte_mask = vector_memory_byte_mask(d, wf);
     if (d.is_load) {
@@ -409,17 +411,14 @@ void RaceDetectorPlugin::onAmdgpuMemoryAccessRouted(const amdgpu::MemoryAccessOb
     if (obligations.empty())
       return;
     if (d.ds2_active) {
-      uint32_t secondLaneAddrs[64];
-      for (uint32_t lane = 0; lane < wf.wf_size(); ++lane)
-        secondLaneAddrs[lane] = static_cast<uint32_t>(d.ds2_per_lane_addr[lane]);
       rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()),
                            std::span<const uint32_t>(secondLaneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder);
+                           byte_mask, obligations, memoryOrder, d.elem_size);
     } else {
       rs->registerLdsEvent(wf.pc, type, std::move(registers), execMask, wf.wf_size(),
                            std::span<const uint32_t>(laneAddrs, wf.wf_size()), perLaneBytes,
-                           byte_mask, obligations, memoryOrder, ldsMask);
+                           byte_mask, obligations, memoryOrder, ldsMask, d.elem_size);
     }
     // A mixed instruction has one counter entry, with all register lanes but
     // only the ordinary LDS lanes' intervals. Do not also register a global event.

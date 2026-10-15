@@ -1418,11 +1418,13 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
     state->dst_reg_base = wf->vgpr_alloc().base;
     state->exec_mask = state->lane_mask = 3;
     state->wf_size = 64;
-    state->flat_shared_lane_mask = shared_lanes;
-    state->flat_shared_aperture_base = shared_lanes ? shared_base : 0;
+    state->flat_local_lane_mask = shared_lanes;
     std::array<uint64_t, 64> effective_addresses{};
+    std::array<uint64_t, 64> original_addresses{};
     for (uint32_t lane = 0; lane < 2; ++lane) {
       state->per_lane_addr[lane] =
+          (shared_lanes & (uint64_t{1} << lane) ? wf->lds_base() + 0x40 : 0x1000) + lane * 4;
+      original_addresses[lane] =
           (shared_lanes & (uint64_t{1} << lane) ? shared_base + 0x40 : 0x1000) + lane * 4;
       effective_addresses[lane] =
           (shared_lanes & (uint64_t{1} << lane) ? wf->lds_base() + 0x40 : 0x1000) + lane * 4;
@@ -1440,8 +1442,7 @@ TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCou
       access.flat_local_lane_mask = shared_lanes;
       access.wavefront_size = wf->wf_size();
       access.addresses = {effective_addresses.data(), wf->wf_size()};
-      access.pre_routing_addresses = {flat.data_as<VectorMemState>()->per_lane_addr.data(),
-                                      wf->wf_size()};
+      access.pre_routing_addresses = {original_addresses.data(), wf->wf_size()};
     }
     f.plugin_group_->onAmdgpuMemoryAccessRouted(access, flat, *wf);
 
@@ -1503,7 +1504,7 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           ASSERT_NE(load, nullptr);
 
           // Model routing after aperture resolution. Only uniform shared
-          // requests use LOCAL and have their addresses rewritten into LDS.
+          // requests use LOCAL; all shared addresses are rewritten into LDS.
           constexpr uint64_t shared_base = uint64_t{1} << 48;
           wf->set_lds_base(0x200);
           const bool local_route = shared_lanes == 3;
@@ -1514,8 +1515,7 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           data->elem_size = 4;
           data->num_elems = 1;
           data->dst_reg_base = wf->vgpr_alloc().base + 8;
-          data->flat_shared_lane_mask = local_route ? 0 : shared_lanes;
-          data->flat_shared_aperture_base = data->flat_shared_lane_mask ? shared_base : 0;
+          data->flat_local_lane_mask = local_route ? 0 : shared_lanes;
           std::array<uint64_t, 64> original_addresses{};
           std::array<uint64_t, 64> effective_addresses{};
           for (uint32_t lane = 0; lane < 2; ++lane) {
@@ -1523,8 +1523,7 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
                 (shared_lanes & (uint64_t{1} << lane) ? shared_base + 0x40 : 0x1000) + lane * 4;
             effective_addresses[lane] =
                 (shared_lanes & (uint64_t{1} << lane) ? wf->lds_base() + 0x40 : 0x1000) + lane * 4;
-            data->per_lane_addr[lane] =
-                local_route ? effective_addresses[lane] : original_addresses[lane];
+            data->per_lane_addr[lane] = effective_addresses[lane];
           }
           cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
           for (unsigned lane = 0; lane < 2; ++lane) {

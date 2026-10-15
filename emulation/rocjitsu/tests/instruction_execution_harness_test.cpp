@@ -867,6 +867,69 @@ TEST(InstructionExecutionHarness, Gfx1250) {
 
 #undef RUN_HARNESS
 
+TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAllocation) {
+  for (uint32_t dds_lane : {0u, 1u}) {
+    for (bool mixed : {false, true}) {
+      for (uint32_t offset : {0x80000040u, 0xffffffc0u}) {
+        for (uint16_t opcode :
+             {cdna5::kFlatLoadB32, cdna5::kFlatStoreB32, cdna5::kFlatAtomicAddU32}) {
+          SCOPED_TRACE(testing::Message() << "DDS lane=" << dds_lane << " mixed=" << mixed
+                                          << " offset=" << offset << " opcode=" << opcode);
+          amdgpu::GpuMemory memory("dds_memory");
+          amdgpu::L2Cache l2("dds_l2");
+          amdgpu::ComputeUnitCore::Config cfg{};
+          cfg.arch = ROCJITSU_CODE_ARCH_CDNA5;
+          cfg.num_wf_slots = 1;
+          cfg.sgprs_per_wf = 128;
+          cfg.vgprs_per_wf = 256;
+          cfg.lds_size_kb = 64;
+          Gfx1250MemoryTestCu cu("dds", cfg, &memory, &l2);
+          constexpr uint64_t shared_base = uint64_t{1} << 48;
+          cu.set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          auto *wf = cu.dispatch_wf(0, 0, 128, 256, 32);
+          ASSERT_NE(wf, nullptr);
+          const uint64_t exec = mixed ? 3 : uint64_t{1} << dds_lane;
+          wf->set_exec(exec);
+          // The first allocation belongs to a different workgroup. The upper
+          // DDS offset used to wrap into its word at 0xc0 after adding 0x100.
+          const uint32_t other_base = cu.allocate_lds(256);
+          ASSERT_EQ(other_base, 0u);
+          const uint32_t own_base = cu.allocate_lds(256);
+          ASSERT_EQ(own_base, 0x100u);
+          wf->set_lds_base(own_base);
+          constexpr uint32_t canary = 0xdeadbeef;
+          for (uint32_t address = 0; address < 512; address += 4)
+            wf->lds().write32(address, canary);
+          memory.write32(0x2000, canary);
+          const uint32_t vb = wf->vgpr_alloc().base;
+          for (uint32_t lane = 0; lane < 2; ++lane) {
+            const uint64_t address = lane == dds_lane ? shared_base + offset : 0x2000;
+            cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+            cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+            cu.write_vgpr(vb + 8, lane, 1);
+            cu.write_vgpr(vb + 16, lane, canary);
+          }
+          const bool store = opcode == cdna5::kFlatStoreB32;
+          const auto words = cdna5::build_vflat(
+              opcode, {.saddr = 124, .vdst = uint8_t(store ? 0 : 16), .vsrc = 8, .vaddr = 0});
+          auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA5);
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+          EXPECT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Faulted);
+          EXPECT_TRUE(wf->wait_counters().empty());
+          EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+          for (uint32_t address = 0; address < 512; address += 4)
+            EXPECT_EQ(wf->lds().read32(address), canary);
+          EXPECT_EQ(memory.read32(0x2000), canary);
+          for (uint32_t lane = 0; lane < 2; ++lane)
+            EXPECT_EQ(cu.read_vgpr(vb + 16, lane), canary);
+        }
+      }
+    }
+  }
+}
+
 TEST(Gfx1250MemoryExecutionHarness, MixedFlatLdsAndGlobalLanesPreserveEachResult) {
   struct Case {
     uint16_t opcode;
@@ -979,10 +1042,11 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
       const uint32_t scratch_lane = (first_space + 1) % 3;
       const uint32_t shared_lane = (first_space + 2) % 3;
       const uint32_t vb = wf->vgpr_alloc().base;
-      const bool cdna = arch == ROCJITSU_CODE_ARCH_CDNA5;
+      const bool is_cdna5 = arch == ROCJITSU_CODE_ARCH_CDNA5;
       auto scratch_address = [&](uint32_t lane, uint32_t word) {
         // CDNA5 interleaves DWORDs across lanes; RDNA4 uses per-lane backing.
-        return scratch_base + (cdna ? (word * wf->wf_size() + lane) * 4 : lane * 128 + word * 4);
+        return scratch_base +
+               (is_cdna5 ? (word * wf->wf_size() + lane) * 4 : lane * 128 + word * 4);
       };
       auto initial = [](uint32_t lane, uint32_t word) { return 0xabc00000u + lane * 16 + word; };
       auto source = [](uint32_t lane, uint32_t word) { return 0x12300000u + lane * 16 + word; };
@@ -997,7 +1061,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
         // CDNA5 private pointers encode the lane above bit 51. RDNA4 pointers
         // instead identify the private aperture; the issuing lane selects backing.
         const uint64_t private_address =
-            cdna ? scratch_base + offset + (uint64_t{lane} << 52) : private_base + offset;
+            is_cdna5 ? scratch_base + offset + (uint64_t{lane} << 52) : private_base + offset;
         const uint64_t address = lane == global_lane   ? global_base + lane * 128 + offset
                                  : lane == shared_lane ? shared_base + lane * 128 + offset
                                                        : private_address;
@@ -1017,7 +1081,7 @@ template <typename Isa> void check_mixed_flat_global_scratch_lds(rj_code_arch_t 
         }
       }
       std::array<uint32_t, 3> words;
-      if (cdna)
+      if (is_cdna5)
         words = cdna5::build_vflat(load ? cdna5::kFlatLoadB128Vflat : cdna5::kFlatStoreB128Vflat,
                                    {.saddr = 124,
                                     .vdst = uint8_t(load ? 16 : 0),
