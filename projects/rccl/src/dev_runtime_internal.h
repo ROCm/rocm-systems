@@ -85,8 +85,6 @@ struct ncclDevrMemory {
   bool globalHasSysmemSegment; // true if any communicator rank has a sysmem segment
   // LSA-team aggregates, derived from a global allgather.
   int* lsaNumSegments;   // numSegments for each LSA rank, length lsaSize
-  size_t* lsaSegmentSizes; // per-rank segment sizes, indexed by rank * maxGlobalNumSegments + segment
-  int* lsaMappedSegments;  // mapped prefix length for each LSA rank, used for precise teardown/rollback
   size_t lsaMinSize; // min size across ranks in the LSA team
   size_t lsaMaxSize; // max size across LSA ranks, used for ncclSpaceAlloc/Free
   // GIN registration state.
