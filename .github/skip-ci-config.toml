@@ -90,6 +90,12 @@ common = [
     "*/.markdownlint-ci2.yaml",
     "tools/systems_pr_bot/*",
 
+    # Formatting infrastructure and lightweight tests have their own CI.
+    ".github/workflows/*-formatting.yml",
+    ".github/workflows/unit-tests.yml",
+    ".github/actions/changed-files/*",
+    ".github/actions/scoped-formatting/*",
+
     # Documentation files
     "docs/*",
     "*.md",
