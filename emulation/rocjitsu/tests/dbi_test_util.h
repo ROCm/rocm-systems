@@ -163,7 +163,7 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
     uint32_t e_flags, uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
     bool unterminated_kd_name = false, bool wrap_section_header_table = false,
     bool wrap_symtab_range = false, bool kd_crosses_section = false, bool wave32 = false,
-    bool kernarg_segment_ptr = false, uint32_t kernarg_size = 0) {
+    bool kernarg_segment_ptr = false, uint32_t kernarg_size = 0, uint64_t entry_text_offset = 0) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -237,11 +237,12 @@ inline std::vector<uint8_t> make_amdgpu_kernel_elf(
 
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
-  // Entry at .text offset 0; scratch and SGPR granulation set for spilling.
+  // Entry at .text offset @p entry_text_offset; scratch and SGPR granulation
+  // set for spilling.
   KD desc{};
   desc.private_segment_fixed_size = private_bytes;
   desc.kernel_code_entry_byte_offset =
-      static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
+      static_cast<int64_t>(text_vaddr + entry_text_offset) - static_cast<int64_t>(rodata_vaddr);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   granulated_sgpr_count);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
@@ -375,17 +376,19 @@ inline std::vector<uint8_t> make_gfx1200_wave32_kernel_elf(const std::vector<uin
 
 // Target ELF for any of the three DBI-supported ISAs whose descriptor advertises a
 // kernarg segment pointer. The entry prologue rejects a kernel without one, so this
-// is the only builder here that reaches the splice rather than a rejection path.
+// is the only builder here that reaches prologue placement rather than a rejection
+// path.
 inline std::vector<uint8_t> make_kernarg_kernel_elf(const std::vector<uint32_t> &text_words,
                                                     uint32_t private_bytes, uint32_t e_flags,
                                                     uint32_t kernarg_size, bool wave32 = false,
-                                                    uint32_t granulated_sgpr_count = 3) {
+                                                    uint32_t granulated_sgpr_count = 3,
+                                                    uint64_t entry_text_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count, e_flags,
                                 /*granulated_vgpr_count=*/0, /*accum_offset=*/0,
                                 /*unterminated_kd_name=*/false,
                                 /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
                                 /*kd_crosses_section=*/false, wave32,
-                                /*kernarg_segment_ptr=*/true, kernarg_size);
+                                /*kernarg_segment_ptr=*/true, kernarg_size, entry_text_offset);
 }
 
 // gfx950 target ELF whose `.kd` symbol name runs to the end of its string table
@@ -723,6 +726,20 @@ inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
       {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
       text->sectionOffset(), text->size());
   return kernels.size() == 1 ? kernels.front().descriptor.private_segment_fixed_size : 0xFFFFFFFFu;
+}
+
+/// @brief .text-relative entry of a patched object's single kernel, or nullopt
+///        unless exactly one kernel is found.
+inline std::optional<uint64_t> patched_entry_text_offset(const AmdGpuCodeObject &obj) {
+  if (obj.text_sections().empty())
+    return std::nullopt;
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(
+      {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+      text->sectionOffset(), text->size());
+  if (kernels.size() != 1)
+    return std::nullopt;
+  return kernels.front().entry_text_offset;
 }
 
 } // namespace rocjitsu::test

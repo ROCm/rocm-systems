@@ -83,49 +83,31 @@ static hipError_t playback_hipArrayGetInfo(PlaybackContext& ctx, const uint8_t* 
 }
 
 static hipError_t playback_hipBindTexture(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipBindTexture*>(payload);
-  size_t _out_offset{};
-  const hipChannelFormatDesc* _s_desc{};
-  hipError_t _r = (hipError_t)hipBindTexture(&_out_offset, (const textureReference*)a->tex, ctx.translate_ptr(a->devPtr), _s_desc, (size_t)a->size);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipBindTexture", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipBindTexture",
+                        "argument tex (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipBindTexture2D(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipBindTexture2D*>(payload);
-  size_t _out_offset{};
-  const hipChannelFormatDesc* _s_desc{};
-  hipError_t _r = (hipError_t)hipBindTexture2D(&_out_offset, (const textureReference*)a->tex, ctx.translate_ptr(a->devPtr), _s_desc, (size_t)a->width, (size_t)a->height, (size_t)a->pitch);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipBindTexture2D", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipBindTexture2D",
+                        "argument tex (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipBindTextureToArray(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipBindTextureToArray*>(payload);
-  const hipChannelFormatDesc* _s_desc{};
-  hipError_t _r = (hipError_t)hipBindTextureToArray((const textureReference*)a->tex, (hipArray_t)ctx.translate_array(a->array), _s_desc);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipBindTextureToArray", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipBindTextureToArray",
+                        "argument tex (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipBindTextureToMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipBindTextureToMipmappedArray*>(payload);
-  const hipChannelFormatDesc* _s_desc{};
-  hipError_t _r = (hipError_t)hipBindTextureToMipmappedArray((const textureReference*)a->tex, (hipMipmappedArray_t)ctx.translate_mipmapped(a->mipmappedArray), _s_desc);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipBindTextureToMipmappedArray", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipBindTextureToMipmappedArray",
+                        "argument tex (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipChooseDevice(PlaybackContext& ctx, const uint8_t* payload) {
@@ -169,17 +151,10 @@ static hipError_t playback_hipConfigureCall(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipCreateSurfaceObject(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCreateSurfaceObject*>(payload);
-  hipSurfaceObject_t _out_pSurfObject = 0;
-  hipError_t _r = (hipError_t)hipCreateSurfaceObject(&_out_pSurfObject, (const hipResourceDesc*)a->pResDesc);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipCreateSurfaceObject", a->ret);
-    return hipSuccess;
-  }
-  if (_r == hipSuccess) {
-    ctx.record_surface(a->pSurfObject, _out_pSurfObject);
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipCreateSurfaceObject",
+                        "argument pResDesc (const hipResourceDesc*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipCreateTextureObject(PlaybackContext& ctx, const uint8_t* payload) {
@@ -369,23 +344,17 @@ static hipError_t playback_hipCtxSynchronize(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipDestroyExternalMemory(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDestroyExternalMemory*>(payload);
-  hipError_t _r = (hipError_t)hipDestroyExternalMemory((hipExternalMemory_t)a->extMem);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipDestroyExternalMemory", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipDestroyExternalMemory",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipDestroyExternalSemaphore(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDestroyExternalSemaphore*>(payload);
-  hipError_t _r = (hipError_t)hipDestroyExternalSemaphore((hipExternalSemaphore_t)a->extSem);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipDestroyExternalSemaphore", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipDestroyExternalSemaphore",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipDestroySurfaceObject(PlaybackContext& ctx, const uint8_t* payload) {
@@ -893,14 +862,10 @@ static hipError_t playback_hipExtStreamGetCUMask(PlaybackContext& ctx, const uin
 }
 
 static hipError_t playback_hipExternalMemoryGetMappedBuffer(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExternalMemoryGetMappedBuffer*>(payload);
-  void* _out_devPtr = nullptr;
-  hipError_t _r = (hipError_t)hipExternalMemoryGetMappedBuffer((void**)&_out_devPtr, (hipExternalMemory_t)a->extMem, (const hipExternalMemoryBufferDesc*)a->bufferDesc);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExternalMemoryGetMappedBuffer", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExternalMemoryGetMappedBuffer",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 extern hipError_t playback_hipFree(PlaybackContext& ctx, const uint8_t* payload);
@@ -909,15 +874,7 @@ extern hipError_t playback_hipFreeArray(PlaybackContext& ctx, const uint8_t* pay
 
 extern hipError_t playback_hipFreeAsync(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static std::atomic<bool> warned{false};
-  if (!warned.exchange(true)) {
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipFreeHost — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipFreeHost(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipFreeMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
   (void)ctx; (void)payload;
@@ -1098,14 +1055,10 @@ extern hipError_t playback_hipGetSymbolAddress(PlaybackContext& ctx, const uint8
 extern hipError_t playback_hipGetSymbolSize(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipGetTextureAlignmentOffset(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetTextureAlignmentOffset*>(payload);
-  size_t _out_offset{};
-  hipError_t _r = (hipError_t)hipGetTextureAlignmentOffset(&_out_offset, (const textureReference*)a->texref);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGetTextureAlignmentOffset", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGetTextureAlignmentOffset",
+                        "argument texref (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGetTextureObjectResourceDesc(PlaybackContext& ctx, const uint8_t* payload) {
@@ -1986,6 +1939,10 @@ static hipError_t playback_hipGraphKernelNodeSetAttribute(PlaybackContext& ctx, 
   hipKernelNodeAttrValue _d_value{};
   if (a->value_present)
     std::memcpy(&_d_value, a->value_bytes, sizeof(_d_value));
+  if (a->attr == hipKernelNodeAttributeAccessPolicyWindow) {
+    _d_value.accessPolicyWindow.base_ptr = ctx.translate_ptr(
+        reinterpret_cast<uint64_t>(_d_value.accessPolicyWindow.base_ptr));
+  }
   hipError_t _r = (hipError_t)hipGraphKernelNodeSetAttribute((hipGraphNode_t)ctx.translate_graph_node(a->hNode), (hipKernelNodeAttrID)a->attr, (a->value_present ? (const hipKernelNodeAttrValue*)&_d_value : (const hipKernelNodeAttrValue*)nullptr));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipGraphKernelNodeSetAttribute", a->ret);
@@ -2279,26 +2236,17 @@ static hipError_t playback_hipGraphicsMapResources(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipGraphicsResourceGetMappedPointer(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphicsResourceGetMappedPointer*>(payload);
-  void* _out_devPtr = nullptr;
-  size_t _out_size{};
-  hipError_t _r = (hipError_t)hipGraphicsResourceGetMappedPointer((void**)&_out_devPtr, &_out_size, (hipGraphicsResource_t)a->resource);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphicsResourceGetMappedPointer", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphicsResourceGetMappedPointer",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGraphicsSubResourceGetMappedArray(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphicsSubResourceGetMappedArray*>(payload);
-  hipArray_t _out_array = nullptr;
-  hipError_t _r = (hipError_t)hipGraphicsSubResourceGetMappedArray(&_out_array, (hipGraphicsResource_t)a->resource, (unsigned int)a->arrayIndex, (unsigned int)a->mipLevel);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphicsSubResourceGetMappedArray", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphicsSubResourceGetMappedArray",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGraphicsUnmapResources(PlaybackContext& ctx, const uint8_t* payload) {
@@ -2313,13 +2261,10 @@ static hipError_t playback_hipGraphicsUnmapResources(PlaybackContext& ctx, const
 }
 
 static hipError_t playback_hipGraphicsUnregisterResource(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphicsUnregisterResource*>(payload);
-  hipError_t _r = (hipError_t)hipGraphicsUnregisterResource((hipGraphicsResource_t)a->resource);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphicsUnregisterResource", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphicsUnregisterResource",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* payload) {
@@ -2359,44 +2304,24 @@ static hipError_t playback_hipHostGetFlags(PlaybackContext& ctx, const uint8_t* 
   return hipSuccess;
 }
 
-static hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipHostMalloc*>(payload);
-  void* _out_ptr = nullptr;
-  hipError_t _r = (hipError_t)hipHostMalloc((void**)&_out_ptr, (size_t)a->size, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipHostMalloc", a->ret);
-    return hipSuccess;
-  }
-  if (_r == hipSuccess) {
-    ctx.record_alloc(a->ptr, _out_ptr, static_cast<size_t>(a->size), AllocKind::HostMalloc);
-  }
-  return _r;
-}
+extern hipError_t playback_hipHostMalloc(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipHostRegister(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipHostUnregister(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipImportExternalMemory(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipImportExternalMemory*>(payload);
-  hipExternalMemory_t _out_extMem_out{};
-  hipError_t _r = (hipError_t)hipImportExternalMemory(&_out_extMem_out, (const hipExternalMemoryHandleDesc*)a->memHandleDesc);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipImportExternalMemory", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipImportExternalMemory",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipImportExternalSemaphore(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipImportExternalSemaphore*>(payload);
-  hipExternalSemaphore_t _out_extSem_out{};
-  hipError_t _r = (hipError_t)hipImportExternalSemaphore(&_out_extSem_out, (const hipExternalSemaphoreHandleDesc*)a->semHandleDesc);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipImportExternalSemaphore", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipImportExternalSemaphore",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipInit(PlaybackContext& ctx, const uint8_t* payload) {
@@ -2523,15 +2448,7 @@ extern hipError_t playback_hipMallocAsync(PlaybackContext& ctx, const uint8_t* p
 
 extern hipError_t playback_hipMallocFromPoolAsync(PlaybackContext& ctx, const uint8_t* payload);
 
-static hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* payload) {
-  (void)ctx; (void)payload;
-  static std::atomic<bool> warned{false};
-  if (!warned.exchange(true)) {
-    fprintf(stderr, "[HRR] NOOP playback handler called for hipMallocHost — "
-            "this API is not replayed; results may differ from capture.\n");
-  }
-  return hipSuccess;
-}
+extern hipError_t playback_hipMallocHost(PlaybackContext& ctx, const uint8_t* payload);
 
 extern hipError_t playback_hipMallocManaged(PlaybackContext& ctx, const uint8_t* payload);
 
@@ -3384,13 +3301,10 @@ static hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipSignalExternalSemaphoresAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipSignalExternalSemaphoresAsync*>(payload);
-  hipError_t _r = (hipError_t)hipSignalExternalSemaphoresAsync((const hipExternalSemaphore_t*)a->extSemArray, (const hipExternalSemaphoreSignalParams*)a->paramsArray, (unsigned int)a->numExtSems, (hipStream_t)ctx.translate_stream(a->stream));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipSignalExternalSemaphoresAsync", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipSignalExternalSemaphoresAsync",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipStreamAddCallback(PlaybackContext& ctx, const uint8_t* payload) {
@@ -3647,36 +3561,24 @@ static hipError_t playback_hipTexRefGetAddress(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipTexRefGetAddressMode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetAddressMode*>(payload);
-  enum hipTextureAddressMode _out_pam{};
-  hipError_t _r = (hipError_t)hipTexRefGetAddressMode(&_out_pam, (const textureReference*)a->texRef, (int)a->dim);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetAddressMode", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetAddressMode",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefGetFilterMode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetFilterMode*>(payload);
-  enum hipTextureFilterMode _out_pfm{};
-  hipError_t _r = (hipError_t)hipTexRefGetFilterMode(&_out_pfm, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetFilterMode", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetFilterMode",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefGetFlags(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetFlags*>(payload);
-  unsigned int _out_pFlags{};
-  hipError_t _r = (hipError_t)hipTexRefGetFlags(&_out_pFlags, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetFlags", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetFlags",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefGetFormat(PlaybackContext& ctx, const uint8_t* payload) {
@@ -3690,59 +3592,38 @@ static hipError_t playback_hipTexRefGetFormat(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipTexRefGetMaxAnisotropy(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetMaxAnisotropy*>(payload);
-  int _out_pmaxAnsio{};
-  hipError_t _r = (hipError_t)hipTexRefGetMaxAnisotropy(&_out_pmaxAnsio, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetMaxAnisotropy", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetMaxAnisotropy",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefGetMipMappedArray(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetMipMappedArray*>(payload);
-  hipMipmappedArray_t _out_pArray = nullptr;
-  hipError_t _r = (hipError_t)hipTexRefGetMipMappedArray(&_out_pArray, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetMipMappedArray", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetMipMappedArray",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefGetMipmapFilterMode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetMipmapFilterMode*>(payload);
-  enum hipTextureFilterMode _out_pfm{};
-  hipError_t _r = (hipError_t)hipTexRefGetMipmapFilterMode(&_out_pfm, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetMipmapFilterMode", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetMipmapFilterMode",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefGetMipmapLevelBias(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetMipmapLevelBias*>(payload);
-  float _out_pbias{};
-  hipError_t _r = (hipError_t)hipTexRefGetMipmapLevelBias(&_out_pbias, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetMipmapLevelBias", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetMipmapLevelBias",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefGetMipmapLevelClamp(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetMipmapLevelClamp*>(payload);
-  float _out_pminMipmapLevelClamp{};
-  float _out_pmaxMipmapLevelClamp{};
-  hipError_t _r = (hipError_t)hipTexRefGetMipmapLevelClamp(&_out_pminMipmapLevelClamp, &_out_pmaxMipmapLevelClamp, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetMipmapLevelClamp", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetMipmapLevelClamp",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefSetAddress(PlaybackContext& ctx, const uint8_t* payload) {
@@ -3758,14 +3639,10 @@ static hipError_t playback_hipTexRefSetAddress(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipTexRefSetAddress2D(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetAddress2D*>(payload);
-  textureReference _out_texRef{};
-  hipError_t _r = (hipError_t)hipTexRefSetAddress2D(&_out_texRef, (const HIP_ARRAY_DESCRIPTOR*)a->desc, (hipDeviceptr_t)ctx.translate_ptr(a->dptr), (size_t)a->Pitch);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefSetAddress2D", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefSetAddress2D",
+                        "argument desc (const HIP_ARRAY_DESCRIPTOR*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefSetAddressMode(PlaybackContext& ctx, const uint8_t* payload) {
@@ -3898,13 +3775,10 @@ static hipError_t playback_hipThreadExchangeStreamCaptureMode(PlaybackContext& c
 }
 
 static hipError_t playback_hipUnbindTexture(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipUnbindTexture*>(payload);
-  hipError_t _r = (hipError_t)hipUnbindTexture((const textureReference*)a->tex);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipUnbindTexture", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipUnbindTexture",
+                        "argument tex (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipUserObjectCreate(PlaybackContext& ctx, const uint8_t* payload) {
@@ -3935,13 +3809,10 @@ static hipError_t playback_hipUserObjectRetain(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipWaitExternalSemaphoresAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipWaitExternalSemaphoresAsync*>(payload);
-  hipError_t _r = (hipError_t)hipWaitExternalSemaphoresAsync((const hipExternalSemaphore_t*)a->extSemArray, (const hipExternalSemaphoreWaitParams*)a->paramsArray, (unsigned int)a->numExtSems, (hipStream_t)ctx.translate_stream(a->stream));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipWaitExternalSemaphoresAsync", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipWaitExternalSemaphoresAsync",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipCreateChannelDesc(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4385,43 +4256,17 @@ static hipError_t playback_hipGraphAddExternalSemaphoresSignalNode(PlaybackConte
 }
 
 static hipError_t playback_hipGraphExternalSemaphoresSignalNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExternalSemaphoresSignalNodeSetParams*>(payload);
-  if (a->hNode != 0 && ctx.translate_graph_node(a->hNode) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphExternalSemaphoresSignalNodeSetParams: hNode 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->hNode);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipGraphExternalSemaphoresSignalNodeSetParams((hipGraphNode_t)ctx.translate_graph_node(a->hNode), (const hipExternalSemaphoreSignalNodeParams*)a->nodeParams);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphExternalSemaphoresSignalNodeSetParams", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphExternalSemaphoresSignalNodeSetParams",
+                        "argument nodeParams (const hipExternalSemaphoreSignalNodeParams*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGraphExternalSemaphoresWaitNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExternalSemaphoresWaitNodeSetParams*>(payload);
-  if (a->hNode != 0 && ctx.translate_graph_node(a->hNode) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphExternalSemaphoresWaitNodeSetParams: hNode 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->hNode);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipGraphExternalSemaphoresWaitNodeSetParams((hipGraphNode_t)ctx.translate_graph_node(a->hNode), (const hipExternalSemaphoreWaitNodeParams*)a->nodeParams);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphExternalSemaphoresWaitNodeSetParams", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphExternalSemaphoresWaitNodeSetParams",
+                        "argument nodeParams (const hipExternalSemaphoreWaitNodeParams*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGraphExternalSemaphoresSignalNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4467,63 +4312,17 @@ static hipError_t playback_hipGraphExternalSemaphoresWaitNodeGetParams(PlaybackC
 }
 
 static hipError_t playback_hipGraphExecExternalSemaphoresSignalNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExecExternalSemaphoresSignalNodeSetParams*>(payload);
-  if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphExecExternalSemaphoresSignalNodeSetParams: hGraphExec 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->hGraphExec);
-    }
-    return hipSuccess;
-  }
-  if (a->hNode != 0 && ctx.translate_graph_node(a->hNode) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphExecExternalSemaphoresSignalNodeSetParams: hNode 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->hNode);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipGraphExecExternalSemaphoresSignalNodeSetParams((hipGraphExec_t)ctx.translate_graph_exec(a->hGraphExec), (hipGraphNode_t)ctx.translate_graph_node(a->hNode), (const hipExternalSemaphoreSignalNodeParams*)a->nodeParams);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphExecExternalSemaphoresSignalNodeSetParams", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphExecExternalSemaphoresSignalNodeSetParams",
+                        "argument nodeParams (const hipExternalSemaphoreSignalNodeParams*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGraphExecExternalSemaphoresWaitNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExecExternalSemaphoresWaitNodeSetParams*>(payload);
-  if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphExecExternalSemaphoresWaitNodeSetParams: hGraphExec 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->hGraphExec);
-    }
-    return hipSuccess;
-  }
-  if (a->hNode != 0 && ctx.translate_graph_node(a->hNode) == nullptr) {
-    static bool warned = false;
-    if (!warned) {
-      warned = true;
-      fprintf(stderr, "[HRR] hipGraphExecExternalSemaphoresWaitNodeSetParams: hNode 0x%llx was "
-              "never built at replay, so this call is skipped.\n",
-              (unsigned long long)a->hNode);
-    }
-    return hipSuccess;
-  }
-  hipError_t _r = (hipError_t)hipGraphExecExternalSemaphoresWaitNodeSetParams((hipGraphExec_t)ctx.translate_graph_exec(a->hGraphExec), (hipGraphNode_t)ctx.translate_graph_node(a->hNode), (const hipExternalSemaphoreWaitNodeParams*)a->nodeParams);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGraphExecExternalSemaphoresWaitNodeSetParams", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGraphExecExternalSemaphoresWaitNodeSetParams",
+                        "argument nodeParams (const hipExternalSemaphoreWaitNodeParams*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGraphAddNode(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4567,32 +4366,30 @@ static hipError_t playback_hipExtGetLastError(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipTexRefGetBorderColor(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetBorderColor*>(payload);
-  float _out_pBorderColor{};
-  hipError_t _r = (hipError_t)hipTexRefGetBorderColor(&_out_pBorderColor, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetBorderColor", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetBorderColor",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipTexRefGetArray(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefGetArray*>(payload);
-  hipArray_t _out_pArray = nullptr;
-  hipError_t _r = (hipError_t)hipTexRefGetArray(&_out_pArray, (const textureReference*)a->texRef);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipTexRefGetArray", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipTexRefGetArray",
+                        "argument texRef (const textureReference*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipGetProcAddress(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipGetProcAddress*>(payload);
+  static_assert(sizeof(a->symbol_bytes) == 256, "hipGetProcAddress: symbol_bytes is not 256 bytes");
+  char _str_symbol[256]{};
+  if (a->symbol_present) {
+    std::memcpy(_str_symbol, a->symbol_bytes, sizeof(_str_symbol));
+    _str_symbol[sizeof(_str_symbol) - 1] = '\0';
+  }
   void* _out_pfn = nullptr;
   hipDriverProcAddressQueryResult _out_symbolStatus{};
-  hipError_t _r = (hipError_t)hipGetProcAddress((a->symbol_present ? (const char*)a->symbol_bytes : (const char*)nullptr), (void**)&_out_pfn, (int)a->hipVersion, (uint64_t)a->flags, &_out_symbolStatus);
+  hipError_t _r = (hipError_t)hipGetProcAddress((a->symbol_present ? (const char*)_str_symbol : (const char*)nullptr), (void**)&_out_pfn, (int)a->hipVersion, (uint64_t)a->flags, &_out_symbolStatus);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipGetProcAddress", a->ret);
     return hipSuccess;
@@ -4816,14 +4613,10 @@ static hipError_t playback_hipGraphExecNodeSetParams(PlaybackContext& ctx, const
 }
 
 static hipError_t playback_hipExternalMemoryGetMappedMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExternalMemoryGetMappedMipmappedArray*>(payload);
-  hipMipmappedArray_t _out_mipmap = nullptr;
-  hipError_t _r = (hipError_t)hipExternalMemoryGetMappedMipmappedArray(&_out_mipmap, (hipExternalMemory_t)a->extMem, (const hipExternalMemoryMipmappedArrayDesc*)a->mipmapDesc);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExternalMemoryGetMappedMipmappedArray", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExternalMemoryGetMappedMipmappedArray",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipDrvGraphMemcpyNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4883,23 +4676,10 @@ extern hipError_t playback_hipGraphExecBatchMemOpNodeSetParams(PlaybackContext& 
 extern hipError_t playback_hipLinkAddData(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipLinkAddFile(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkAddFile*>(payload);
-  hipJitOption _d_options[32]{};
-  uint32_t _d_options_n = a->options_n > 32u ? 32u : a->options_n;
-  (void)_d_options_n;
-  if (a->options_present)
-    std::memcpy(_d_options, a->options_bytes, static_cast<size_t>(_d_options_n) * sizeof(hipJitOption));
-  void* _d_optionValues[32]{};
-  uint32_t _d_optionValues_n = a->optionValues_n > 32u ? 32u : a->optionValues_n;
-  (void)_d_optionValues_n;
-  if (a->optionValues_present)
-    std::memcpy(_d_optionValues, a->optionValues_bytes, static_cast<size_t>(_d_optionValues_n) * sizeof(void*));
-  hipError_t _r = (hipError_t)hipLinkAddFile((hipLinkState_t)ctx.translate_link_state(a->state), (hipJitInputType)a->type, (a->path_present ? (const char*)a->path_bytes : (const char*)nullptr), (unsigned int)_d_options_n, (hipJitOption*)(_d_options_n ? _d_options : nullptr), (void**)(_d_optionValues_n ? _d_optionValues : nullptr));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLinkAddFile", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLinkAddFile",
+                        "the recorded path names a file the archive chose, and replay would open whatever that names on this machine; an archive must not decide which file the replayer reads");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipLinkComplete(PlaybackContext& ctx, const uint8_t* payload) {
@@ -4927,6 +4707,14 @@ static hipError_t playback_hipLinkCreate(PlaybackContext& ctx, const uint8_t* pa
   if (a->optionValues_present)
     std::memcpy(_d_optionValues, a->optionValues_bytes, static_cast<size_t>(_d_optionValues_n) * sizeof(void*));
   hipLinkState_t _out_stateOut = nullptr;
+  if (hrr::jit_options_carry_pointer(_d_options, _d_options_n)) {
+    hrr_note_unreplayable(ctx, "hipLinkCreate",
+        "a JIT or link option carries a pointer (a log buffer or a symbol "
+        "table) that points into the capturing process; replay cannot supply "
+        "one, and passing the recorded value would let the archive choose "
+        "what the runtime writes to");
+    return hipErrorNotSupported;
+  }
   hipError_t _r = (hipError_t)hipLinkCreate((unsigned int)_d_options_n, (hipJitOption*)(_d_options_n ? _d_options : nullptr), (void**)(_d_optionValues_n ? _d_optionValues : nullptr), &_out_stateOut);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipLinkCreate", a->ret);
@@ -5373,9 +5161,15 @@ static hipError_t playback_hipOccupancyAvailableDynamicSMemPerBlock(PlaybackCont
 
 static hipError_t playback_hipGetProcAddress_spt(PlaybackContext& ctx, const uint8_t* payload) {
   const auto* a = reinterpret_cast<const hrr_args_hipGetProcAddress_spt*>(payload);
+  static_assert(sizeof(a->symbol_bytes) == 256, "hipGetProcAddress_spt: symbol_bytes is not 256 bytes");
+  char _str_symbol[256]{};
+  if (a->symbol_present) {
+    std::memcpy(_str_symbol, a->symbol_bytes, sizeof(_str_symbol));
+    _str_symbol[sizeof(_str_symbol) - 1] = '\0';
+  }
   void* _out_pfn = nullptr;
   hipDriverProcAddressQueryResult _out_symbolStatus{};
-  hipError_t _r = (hipError_t)hipGetProcAddress_spt((a->symbol_present ? (const char*)a->symbol_bytes : (const char*)nullptr), (void**)&_out_pfn, (int)a->hipVersion, (uint64_t)a->flags, &_out_symbolStatus);
+  hipError_t _r = (hipError_t)hipGetProcAddress_spt((a->symbol_present ? (const char*)_str_symbol : (const char*)nullptr), (void**)&_out_pfn, (int)a->hipVersion, (uint64_t)a->flags, &_out_symbolStatus);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipGetProcAddress_spt", a->ret);
     return hipSuccess;
@@ -5528,35 +5322,24 @@ static hipError_t playback_hipOccupancyMaxActiveClusters(PlaybackContext& ctx, c
 }
 
 static hipError_t playback_hipGreenCtxCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGreenCtxCreate*>(payload);
-  hipExecutionCtx_t _out_ctx{};
-  hipError_t _r = (hipError_t)hipGreenCtxCreate(&_out_ctx, (hipDevResourceDesc_t)a->desc, (int)a->device, (unsigned int)a->flags);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipGreenCtxCreate", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipGreenCtxCreate",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxDestroy(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExecutionCtxDestroy*>(payload);
-  hipError_t _r = (hipError_t)hipExecutionCtxDestroy((hipExecutionCtx_t)a->ctx);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExecutionCtxDestroy", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExecutionCtxDestroy",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxStreamCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExecutionCtxStreamCreate*>(payload);
-  hipStream_t _out_stream = nullptr;
-  hipError_t _r = (hipError_t)hipExecutionCtxStreamCreate(&_out_stream, (hipExecutionCtx_t)a->greenctx, (unsigned int)a->flags, (int)a->priority);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExecutionCtxStreamCreate", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExecutionCtxStreamCreate",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipDeviceGetDevResource(PlaybackContext& ctx, const uint8_t* payload) {
@@ -5571,29 +5354,17 @@ static hipError_t playback_hipDeviceGetDevResource(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipDevSmResourceSplitByCount(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDevSmResourceSplitByCount*>(payload);
-  hipDevResource _out_result{};
-  unsigned int _out_nbGroups{};
-  hipDevResource _out_remainder{};
-  hipError_t _r = (hipError_t)hipDevSmResourceSplitByCount(&_out_result, &_out_nbGroups, (const hipDevResource*)a->input, &_out_remainder, (unsigned int)a->flags, (unsigned int)a->minCount);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipDevSmResourceSplitByCount", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipDevSmResourceSplitByCount",
+                        "argument input (const hipDevResource*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipDevSmResourceSplit(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDevSmResourceSplit*>(payload);
-  hipDevResource _out_result{};
-  hipDevResource _out_remainder{};
-  hipDevSmResourceGroupParams _out_groupParams{};
-  hipError_t _r = (hipError_t)hipDevSmResourceSplit(&_out_result, (unsigned int)a->nbGroups, (const hipDevResource*)a->input, &_out_remainder, (unsigned int)a->flags, &_out_groupParams);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipDevSmResourceSplit", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipDevSmResourceSplit",
+                        "argument input (const hipDevResource*) is a pointer recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipDevResourceGenerateDesc(PlaybackContext& ctx, const uint8_t* payload) {
@@ -5620,36 +5391,24 @@ static hipError_t playback_hipDeviceGetExecutionCtx(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipExecutionCtxGetDevResource(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExecutionCtxGetDevResource*>(payload);
-  hipDevResource _out_resource{};
-  hipError_t _r = (hipError_t)hipExecutionCtxGetDevResource((hipExecutionCtx_t)a->ctx, &_out_resource, (hipDevResourceType)a->type);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExecutionCtxGetDevResource", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExecutionCtxGetDevResource",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxGetDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExecutionCtxGetDevice*>(payload);
-  int _out_device{};
-  hipError_t _r = (hipError_t)hipExecutionCtxGetDevice(&_out_device, (hipExecutionCtx_t)a->ctx);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExecutionCtxGetDevice", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExecutionCtxGetDevice",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxGetId(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExecutionCtxGetId*>(payload);
-  unsigned long long _out_ctxId{};
-  hipError_t _r = (hipError_t)hipExecutionCtxGetId((hipExecutionCtx_t)a->ctx, &_out_ctxId);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExecutionCtxGetId", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExecutionCtxGetId",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipStreamGetDevResource(PlaybackContext& ctx, const uint8_t* payload) {
@@ -5664,57 +5423,38 @@ static hipError_t playback_hipStreamGetDevResource(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipExecutionCtxRecordEvent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExecutionCtxRecordEvent*>(payload);
-  hipError_t _r = (hipError_t)hipExecutionCtxRecordEvent((hipExecutionCtx_t)a->ctx, (hipEvent_t)ctx.translate_event(a->event));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExecutionCtxRecordEvent", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExecutionCtxRecordEvent",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxSynchronize(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExecutionCtxSynchronize*>(payload);
-  hipError_t _r = (hipError_t)hipExecutionCtxSynchronize((hipExecutionCtx_t)a->ctx);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExecutionCtxSynchronize", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExecutionCtxSynchronize",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipExecutionCtxWaitEvent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExecutionCtxWaitEvent*>(payload);
-  hipError_t _r = (hipError_t)hipExecutionCtxWaitEvent((hipExecutionCtx_t)a->ctx, (hipEvent_t)ctx.translate_event(a->event));
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipExecutionCtxWaitEvent", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipExecutionCtxWaitEvent",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipLibraryGetGlobal(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLibraryGetGlobal*>(payload);
-  void* _out_dptr = nullptr;
-  size_t _out_bytes{};
-  hipError_t _r = (hipError_t)hipLibraryGetGlobal((void**)&_out_dptr, &_out_bytes, (hipLibrary_t)a->library, (const char*)a->name);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLibraryGetGlobal", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLibraryGetGlobal",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipLibraryGetManaged(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLibraryGetManaged*>(payload);
-  void* _out_dptr = nullptr;
-  size_t _out_bytes{};
-  hipError_t _r = (hipError_t)hipLibraryGetManaged((void**)&_out_dptr, &_out_bytes, (hipLibrary_t)a->library, (const char*)a->name);
-  if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
-    hrr_note_recorded_error(ctx, "hipLibraryGetManaged", a->ret);
-    return hipSuccess;
-  }
-  return _r;
+  (void)payload;
+  hrr_note_unreplayable(ctx, "hipLibraryGetManaged",
+                        "the recorded argument is a handle recorded as an address from the capturing process; replay has no translation for it, so passing it to HIP would let the archive choose what the runtime dereferences");
+  return hipErrorNotSupported;
 }
 
 static hipError_t playback_hipMemDiscardBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
@@ -5824,6 +5564,16 @@ static hipError_t playback_hipLibraryGetModule(PlaybackContext& ctx, const uint8
   static std::atomic<bool> warned{false};
   if (!warned.exchange(true)) {
     fprintf(stderr, "[HRR] NOOP playback handler called for hipLibraryGetModule — "
+            "this API is not replayed; results may differ from capture.\n");
+  }
+  return hipSuccess;
+}
+
+static hipError_t playback_hipKernelSetAttributeForDevice(PlaybackContext& ctx, const uint8_t* payload) {
+  (void)ctx; (void)payload;
+  static std::atomic<bool> warned{false};
+  if (!warned.exchange(true)) {
+    fprintf(stderr, "[HRR] NOOP playback handler called for hipKernelSetAttributeForDevice — "
             "this API is not replayed; results may differ from capture.\n");
   }
   return hipSuccess;
@@ -6422,15 +6172,16 @@ const uint32_t hrr_api_min_payload_size[HRR_API_COUNT] = {
     static_cast<uint32_t>(sizeof(hrr_args_hipModuleEnumerateFunctions)),  // [544] HRR_API_HIPMODULEENUMERATEFUNCTIONS
     static_cast<uint32_t>(sizeof(hrr_args_hipDeviceFlushGPUDirectRDMAWrites)),  // [545] HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES
     static_cast<uint32_t>(sizeof(hrr_args_hipLibraryGetModule)),  // [546] HRR_API_HIPLIBRARYGETMODULE
-    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [547] HRR_API_HIPPOPCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [548] HRR_API_HIPPUSHCALLCONFIGURATION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [549] HRR_API_HIPREGISTERFATBINARY
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [550] HRR_API_HIPREGISTERFUNCTION
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [551] HRR_API_HIPREGISTERMANAGEDVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [552] HRR_API_HIPREGISTERSURFACE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [553] HRR_API_HIPREGISTERTEXTURE
-    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [554] HRR_API_HIPREGISTERVAR
-    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [555] HRR_API_HIPUNREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args_hipKernelSetAttributeForDevice)),  // [547] HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE
+    static_cast<uint32_t>(sizeof(hrr_args___hipPopCallConfiguration)),  // [548] HRR_API_HIPPOPCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipPushCallConfiguration)),  // [549] HRR_API_HIPPUSHCALLCONFIGURATION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFatBinary)),  // [550] HRR_API_HIPREGISTERFATBINARY
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterFunction)),  // [551] HRR_API_HIPREGISTERFUNCTION
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterManagedVar)),  // [552] HRR_API_HIPREGISTERMANAGEDVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterSurface)),  // [553] HRR_API_HIPREGISTERSURFACE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterTexture)),  // [554] HRR_API_HIPREGISTERTEXTURE
+    static_cast<uint32_t>(sizeof(hrr_args___hipRegisterVar)),  // [555] HRR_API_HIPREGISTERVAR
+    static_cast<uint32_t>(sizeof(hrr_args___hipUnregisterFatBinary)),  // [556] HRR_API_HIPUNREGISTERFATBINARY
 };
 
 // ============================================================
@@ -6984,13 +6735,14 @@ hrr_playback_fn_t hrr_playback_dispatch[HRR_API_COUNT] = {
     playback_hipModuleEnumerateFunctions,  // [544] HRR_API_HIPMODULEENUMERATEFUNCTIONS
     playback_hipDeviceFlushGPUDirectRDMAWrites,  // [545] HRR_API_HIPDEVICEFLUSHGPUDIRECTRDMAWRITES
     playback_hipLibraryGetModule,  // [546] HRR_API_HIPLIBRARYGETMODULE
-    playback___hipPopCallConfiguration,  // [547] HRR_API_HIPPOPCALLCONFIGURATION
-    playback___hipPushCallConfiguration,  // [548] HRR_API_HIPPUSHCALLCONFIGURATION
-    playback___hipRegisterFatBinary,  // [549] HRR_API_HIPREGISTERFATBINARY
-    playback___hipRegisterFunction,  // [550] HRR_API_HIPREGISTERFUNCTION
-    playback___hipRegisterManagedVar,  // [551] HRR_API_HIPREGISTERMANAGEDVAR
-    playback___hipRegisterSurface,  // [552] HRR_API_HIPREGISTERSURFACE
-    playback___hipRegisterTexture,  // [553] HRR_API_HIPREGISTERTEXTURE
-    playback___hipRegisterVar,  // [554] HRR_API_HIPREGISTERVAR
-    playback___hipUnregisterFatBinary,  // [555] HRR_API_HIPUNREGISTERFATBINARY
+    playback_hipKernelSetAttributeForDevice,  // [547] HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE
+    playback___hipPopCallConfiguration,  // [548] HRR_API_HIPPOPCALLCONFIGURATION
+    playback___hipPushCallConfiguration,  // [549] HRR_API_HIPPUSHCALLCONFIGURATION
+    playback___hipRegisterFatBinary,  // [550] HRR_API_HIPREGISTERFATBINARY
+    playback___hipRegisterFunction,  // [551] HRR_API_HIPREGISTERFUNCTION
+    playback___hipRegisterManagedVar,  // [552] HRR_API_HIPREGISTERMANAGEDVAR
+    playback___hipRegisterSurface,  // [553] HRR_API_HIPREGISTERSURFACE
+    playback___hipRegisterTexture,  // [554] HRR_API_HIPREGISTERTEXTURE
+    playback___hipRegisterVar,  // [555] HRR_API_HIPREGISTERVAR
+    playback___hipUnregisterFatBinary,  // [556] HRR_API_HIPUNREGISTERFATBINARY
 };

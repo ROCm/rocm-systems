@@ -285,7 +285,7 @@ void SStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 1; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -304,7 +304,7 @@ void SStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 2; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -323,7 +323,7 @@ void SStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 4; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -342,7 +342,7 @@ void SScratchStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 1; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -361,7 +361,7 @@ void SScratchStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 2; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -380,7 +380,7 @@ void SScratchStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 4; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -399,7 +399,7 @@ void SBufferStoreDwordSmem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 1; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -418,7 +418,7 @@ void SBufferStoreDwordx2Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 2; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -437,7 +437,7 @@ void SBufferStoreDwordx4Smem::execute_impl(amdgpu::Wavefront &wf) {
     return;
   for (uint32_t i = 0; i < 4; ++i)
     d->store_data[i] = amdgpu::read_scalar_register(wf, *src_register, i);
-  auto address = smem_calculate_address(inst_, wf);
+  auto address = smem_calculate_address(inst_, wf, d.get());
   if (!address)
     return;
   d->addr = *address;
@@ -675,8 +675,23 @@ void SAtomicIncSmem::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SAtomicDecSmem::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  auto data_register = amdgpu::resolve_scalar_register_range(wf, inst_.sdata, 1u);
+  if (!data_register)
+    return;
+  auto d = std::make_unique<amdgpu::ScalarMemState>();
+  d->dst_register = *data_register;
+  d->num_dwords = 1;
+  d->elem_size = 4;
+  d->atomic_op = amdgpu::AtomicOp::DEC;
+  d->is_load = inst_.glc != 0;
+  d->mtype = amdgpu::Mtype::UC;
+  d->store_data[0] = amdgpu::read_scalar_register(wf, *data_register, 0);
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  auto address = smem_calculate_address(inst_, wf);
+  if (!address)
+    return;
+  d->addr = *address;
+  set_data(std::move(d));
 }
 
 void SAtomicSwapX2Smem::execute_impl(amdgpu::Wavefront &wf) {

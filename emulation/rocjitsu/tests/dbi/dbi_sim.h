@@ -22,6 +22,10 @@
 /// from the patched descriptor's enable bits. set_kernarg() is what makes the
 /// synthesized descriptor carry the same properties word, so the CP writes the
 /// pointer where the prologue expects it rather than where it happens to land.
+/// The entry is another: the DBI entry prologue is a stub the patched descriptor
+/// is redirected to, so set_entry_offset() has to name it or the dispatch
+/// starts at the original entry and skips the prologue. The simulator does not
+/// check the entry's 256-byte alignment, so this cannot catch a misplaced stub.
 ///
 /// Wave size is a place they do **not** agree: the synthesized descriptor never
 /// sets ENABLE_WAVEFRONT_SIZE32, so kernel_wavefront_size() reports 64 and an
@@ -124,15 +128,21 @@ public:
     user_sgpr_count_ = user_sgpr_count;
   }
 
-  /// @brief Write a kernel_descriptor_t (entry at code start) followed by
-  ///        @p code, with @p private_bytes of per-lane scratch.
+  /// @brief Offset into the code passed to run_*() that dispatch enters at, as
+  ///        the patched descriptor's .text-relative entry. Defaults to 0.
+  void set_entry_offset(uint64_t offset) { entry_offset_ = offset; }
+
+  /// @brief Write a kernel_descriptor_t (entry at the set_entry_offset() offset
+  ///        into the code) followed by @p code, with @p private_bytes of
+  ///        per-lane scratch.
   /// @return The kernel_object address.
   /// @note The descriptor is synthesized, not the patched object's -- see the
   ///   file-level warning.
   uint64_t write_kernel(uint64_t addr, const std::vector<uint32_t> &code, uint32_t private_bytes) {
     using namespace rocr::llvm::amdhsa;
     kernel_descriptor_t kd{};
-    kd.kernel_code_entry_byte_offset = sizeof(kernel_descriptor_t);
+    kd.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(sizeof(kernel_descriptor_t) + entry_offset_);
     AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                     ((256 / 8) - 1));
     // 104 SGPRs is ample for the probe link pair s[30:31] and envelope temps.
@@ -223,6 +233,7 @@ private:
 
   uint32_t wave_size_ = 64;
   uint32_t queue_seq_ = 0;
+  uint64_t entry_offset_ = 0;
   uint32_t kernarg_properties_ = 0;
   uint32_t user_sgpr_count_ = 2;
   std::vector<uint8_t> kernarg_bytes_;

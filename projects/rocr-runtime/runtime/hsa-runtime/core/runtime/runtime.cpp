@@ -225,13 +225,19 @@ void Runtime::RegisterAgent(Agent* agent, bool Enabled) {
       // Default system pool must support kernarg
       for (auto pool : system_regions_fine_) {
         if (pool->kernarg()) {
-          system_allocator_ = [pool](size_t size, size_t alignment,
-                                     MemoryRegion::AllocateFlags alloc_flags,
-                                     int agent_node_id) -> void* {
+          // Capture a raw pointer (not the shared_ptr) so the closure state is
+          // trivially destructible and stored inline in std::function.  The
+          // region outlives the closure via system_regions_fine_ and the owning
+          // CPU agent, and this avoids a heap-buffer-overflow when the closure
+          // copy held by BaseShared is torn down during Unload().
+          const core::MemoryRegion* pool_ptr = pool.get();
+          system_allocator_ = [pool_ptr](size_t size, size_t alignment,
+                                         MemoryRegion::AllocateFlags alloc_flags,
+                                         int agent_node_id) -> void* {
             assert(alignment <= 4096);
             void* ptr = NULL;
             return (HSA_STATUS_SUCCESS ==
-                    core::Runtime::runtime_singleton_->AllocateMemory(pool.get(), size, alloc_flags,
+                    core::Runtime::runtime_singleton_->AllocateMemory(pool_ptr, size, alloc_flags,
                                                                       &ptr, agent_node_id))
                 ? ptr
                 : NULL;
@@ -889,10 +895,7 @@ hsa_status_t Runtime::GetSystemInfo(hsa_system_info_t attribute, void* value) {
       break;
     }
     case HSA_AMD_SYSTEM_INFO_SVM_ACCESSIBLE_BY_DEFAULT: {
-      bool ret = true;
-      for (auto agent : gpu_agents_)
-        ret &= (agent->supported_isas()[0]->GetXnack() == IsaFeature::Enabled);
-      *(bool*)value = ret;
+      *(bool*)value = core::Runtime::runtime_singleton_->XnackEnabled();
       break;
     }
     case HSA_AMD_SYSTEM_INFO_MWAITX_ENABLED: {
@@ -2172,17 +2175,6 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
       // once per outer-loop iteration (one per new wait batch), so the backoff
       // only compounds within a single idle wait and every new wait starts
       // again at the floor -- the escalated value cannot carry across waits.
-      // The ceiling depends on why we would be polling: with interrupts
-      // unavailable globally (WSL/dxg, DTIF, KFD 1.0, HSA_ENABLE_INTERRUPT=0)
-      // every signal is polling-only and a long nap costs only the napping
-      // wait's own observation latency. With interrupts available, polling can
-      // still be forced by a single EopEvent-less signal in the batch (an IPC
-      // signal or an internal DefaultSignal such as gang-copy signals); the
-      // nap then delays unrelated interrupt-backed handlers on this shared
-      // thread, so it is capped at the interrupt path's 200us active-poll
-      // window instead.
-      const int poll_nap_ceiling_us =
-          g_use_interrupt_wait ? kPollNapCeilingMixedUs : kPollNapCeilingUs;
       int poll_nap_us = kPollNapFloorUs;
 
       while (!finish) {
@@ -2273,7 +2265,7 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
             }
             break;
           }
-        } else if (polling && !finish) {
+        } else if (polling && !finish && !g_use_interrupt_wait) {
           // No interrupt-backed event is available for at least one pending
           // signal (PrepareInterrupt forced polling) -- on the WSL/dxg thunk
           // that is every signal, since it implements no KFD events at all.
@@ -2283,15 +2275,13 @@ void Runtime::AsyncEventsLoop(void* _eventsInfo) {
           // process that has merely touched the GPU
           // (https://github.com/ROCm/librocdxg/issues/60). Nap between scans,
           // doubling from 20us up to poll_nap_ceiling_us (2ms when the whole
-          // runtime is polling-only, 200us when a mixed batch also carries
-          // interrupt-backed handlers this nap would delay -- see the ceiling
-          // selection above), so a wait that completes quickly keeps low
+          // runtime is polling-only, so a wait that completes quickly keeps low
           // observation latency while a long-lived idle wait costs almost no
           // CPU. The nap is re-initialized at the outer-loop boundary (see
           // poll_nap_us above), so the escalation only compounds within a
           // single idle wait batch.
           os::uSleep(poll_nap_us);
-          poll_nap_us = NextPollNapUs(poll_nap_us, poll_nap_ceiling_us);
+          poll_nap_us = NextPollNapUs(poll_nap_us, kPollNapCeilingUs);
         }
       }
     }
@@ -2949,6 +2939,13 @@ void Runtime::Unload() {
   // contain allocations from memory regions owned by agents.
   SharedSignalPool.clear();
   EventPool.clear();
+
+  // Release static allocators while agents and the thunk are still valid so
+  // system memory regions kept alive by the allocator closures can run
+  // fragment heap teardown safely.
+  system_allocator_ = {};
+  system_deallocator_ = {};
+  BaseShared::SetAllocateAndFree({}, {});
 
   // Clear system regions before destroying agents to prevent use-after-free
   // when agent destructors access region memory.

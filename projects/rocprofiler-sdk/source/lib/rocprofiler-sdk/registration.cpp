@@ -1185,7 +1185,7 @@ finalize()
         // completion monitor that runs these completions, and correlation_id_finalize
         // consults the loss ledger this populates. Its drain waits on the in-flight counter,
         // so it still works when an application hsa_shut_down stopped the monitor first.
-        // No-op unless signal-less is active.
+        // No-op in a process that never brought the dispatch log up.
         kfd::signal_less_teardown();
 
         hsa::async_copy_fini();
@@ -1569,6 +1569,13 @@ rocprofiler_set_api_table(const char* name,
         if(runtime_pc_sampling_table)
             rocprofiler::hsa::copy_table(hsa_api_table->pc_sampling_ext_, lib_instance);
 #endif
+
+        // Enable before profiling resources take clock samples. ROCr keeps this mode enabled
+        // for the process lifetime; API-only tools do not need the additional sampling.
+        if(!rocprofiler::context::get_registered_contexts(
+                rocprofiler::hsa::needs_high_precision_timestamps)
+                .empty())
+            rocprofiler::hsa::enable_high_precision_timestamps(hsa_api_table->amd_ext_);
 
         rocprofiler::aqlprofile::hsa_rsrc_factory_init(hsa_api_table);
 
