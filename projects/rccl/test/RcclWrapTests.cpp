@@ -3315,7 +3315,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 
     rcclCollDecision dec{};
     ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
-    EXPECT_EQ(dec.algo, RCCL_DIRECT_ALLTOALL);
+    EXPECT_EQ(dec.algo, RCCL_DDA_FABRIC_LL128);
 }
 
 // gfx1250, message above all DDA caps (ddaVmmMax[A2A] = 0, ddaLL128Max[A2A] = 1 MiB):
@@ -3333,7 +3333,7 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 
     // One alignment step above the LL128 ceiling; VMM disabled, so this falls to Direct.
     const size_t align      = 16u * (size_t)comm->nRanks;
-    const size_t totalBytes = ((llMax + align) / align) * align;
+    const size_t totalBytes = ((ll128Max + align) / align) * align;
 
     rcclCollDecision dec{};
     ASSERT_EQ(SelectA2A(*comm, totalBytes, dec), ncclSuccess);
