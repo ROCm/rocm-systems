@@ -131,6 +131,8 @@ class MemChart:
         self.units = units
         self.stalls = {b.id: _stall_rows(membw, b.stall_level) for b in layout.blocks()}
         self.blocks = {b.id: b for b in layout.blocks()}
+        # The bordered blocks in the columns, which share one width
+        self.panels = [b for b in layout.top_level_blocks() if b.style == "panel"]
         self.text_width = self._text_widths()
         self.edges = [self._edge(i) for i in range(len(layout.columns) - 1)]
         self._fit_scope_labels()
@@ -163,21 +165,26 @@ class MemChart:
         return max(widths)
 
     def _text_widths(self) -> dict[str, int]:
-        """Text width of every block: the widest need in its column."""
+        """Text width of every block.
+
+        Panel blocks in the columns share the widest one's width, so the grid is
+        even; a list block keeps its own.
+        """
         widths: dict[str, int] = {}
-        for column in self.layout.columns:
-            width = max(self._needed_width(block) for block in column)
-            for block in column:
-                self._assign_width(block, width, widths)
+        panel_width = max(self._needed_width(block) for block in self.panels)
+        for block in self.layout.top_level_blocks():
+            width = panel_width if block in self.panels else self._needed_width(block)
+            self._assign_width(block, width, widths)
         for block in self.layout.blocks():
             for sub in (*block.above, *block.below):
                 widths[sub.id] = max(len(sub.title), _MIN_TEXT_WIDTH)
         return widths
 
     def _fit_scope_labels(self) -> None:
-        """Widen the last column of a scope region whose label does not fit.
+        """Widen a scope region whose label does not fit.
 
-        A region shows " label " with at least one dash on each side.
+        A region shows " label " with at least one dash on each side. A region that
+        ends in a panel column widens every panel, so panels keep one width.
         """
         split = self.blocks[self.layout.scope_split].column
         left, right = self.layout.scope_labels
@@ -186,7 +193,11 @@ class MemChart:
             split_x = sum(widths[: 2 * split])
             span = split_x - 1 if column < split else sum(widths) - split_x - 2
             deficit = len(label) + 4 - span
-            for block in self.layout.columns[column] if deficit > 0 else ():
+            if deficit <= 0:
+                continue
+            last = self.layout.columns[column]
+            widened = self.panels if last[0] in self.panels else last
+            for block in widened:
                 self._assign_width(
                     block, self.text_width[block.id] + deficit, self.text_width
                 )

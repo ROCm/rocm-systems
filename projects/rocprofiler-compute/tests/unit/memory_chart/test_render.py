@@ -61,13 +61,22 @@ def make_chart(arch, values, membw=None):
     return MemChart(Layouts.for_arch(arch), values, units, membw)
 
 
-def render_layout(tmp_path, arch, data):
-    """Plain-text chart of *arch* drawn from the layout *data*."""
+def chart_from_layout(tmp_path, arch, data):
+    """The chart of *arch* drawn from the layout *data*."""
     path = tmp_path / "layout.json"
     path.write_text(json.dumps(data), encoding="utf-8")
     units = panel_units(PanelConfigs.for_arch(arch))
-    chart = MemChart(load_layout(path), sample_values(arch), units)
-    return strip_ansi(chart.render(DEFAULT_TITLE))
+    return MemChart(load_layout(path), sample_values(arch), units)
+
+
+def render_layout(tmp_path, arch, data):
+    """Plain-text chart of *arch* drawn from the layout *data*."""
+    return strip_ansi(chart_from_layout(tmp_path, arch, data).render(DEFAULT_TITLE))
+
+
+def panel_widths(chart):
+    """The distinct text widths of the panel blocks in the columns."""
+    return {chart.text_width[block.id] for block in chart.panels}
 
 
 def count_bars(output):
@@ -140,10 +149,24 @@ def test_rows_have_one_width(gpu_arch):
 
 
 @pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
+def test_panel_blocks_in_the_columns_share_one_width(gpu_arch):
+    assert len(panel_widths(make_chart(gpu_arch, sample_values(gpu_arch)))) == 1
+
+
+@pytest.mark.parametrize("gpu_arch", MEMORY_CHART_ARCHS)
 def test_typical_values_stay_on_their_label_line(gpu_arch):
     output = render(gpu_arch)
     assert re.search(r"Scratch/Wave \d+\.\d{3} KB", output)
     assert re.search(r"Wave Occ \d+\.\d%", output)
+
+
+def test_a_long_scope_label_widens_every_panel(tmp_path):
+    # gfx115x's right region is a single column with little room to spare
+    data = common.memory_chart_layout_data("gfx115x")
+    data["scope"]["labels"][1] = "A much longer memory label"
+    chart = chart_from_layout(tmp_path, "gfx115x", data)
+    assert len(panel_widths(chart)) == 1
+    assert "A much longer memory label" in strip_ansi(chart.render(DEFAULT_TITLE))
 
 
 def test_legend_lists_only_what_the_chart_uses():
