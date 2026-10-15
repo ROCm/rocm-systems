@@ -12,7 +12,7 @@ from membw_analysis.engine import run_membw_analysis
 from rocprof_compute_analyze.analysis_base import OmniAnalyze_Base
 from roofline.roofline_main import ROOFLINE_SUPPORTED, Roofline
 from utils import file_io, parser, schema, tty
-from utils.logger import console_log, console_warning, demarcate
+from utils.logger import console_error, console_log, console_warning, demarcate
 from utils.roofline_calc import calc_ai_analyze
 from utils.utils_analysis import (
     CallTreeNode,
@@ -360,12 +360,10 @@ class cli_analysis(OmniAnalyze_Base):
                 for patterns in framewise_patterns.values()
                 for pattern in patterns
             )
-            console_warning(
+            console_error(
                 "ml api trace",
                 f"No {labels} operators matched the pattern(s): {all_patterns}",
             )
-            workload.ml_api_call_trees = {}
-            return
         workload.ml_api_call_trees = copy_matched_operator_subtree(
             confined_forest, matched_nodes
         )
@@ -380,12 +378,10 @@ class cli_analysis(OmniAnalyze_Base):
             for root in roots:
                 kernel_ids.update(_assign_kernel_ids_from_top(root, name_to_id))
         if not kernel_ids:
-            console_warning(
+            console_error(
                 "ml api trace",
                 f"No {labels} kernels mapped to kernel-top IDs",
             )
-            workload.ml_api_call_trees = {}
-            return
         selected_ids = sorted(kernel_ids)
         if workload.filter_kernel_ids:
             existing_ids = set(workload.filter_kernel_ids)
@@ -393,12 +389,10 @@ class cli_analysis(OmniAnalyze_Base):
                 kernel_id for kernel_id in selected_ids if kernel_id in existing_ids
             ]
             if not selected_ids:
-                console_warning(
+                console_error(
                     "ml api trace",
                     f"No {labels} operators matched the -k filter: {args.gpu_kernel}",
                 )
-                workload.ml_api_call_trees = {}
-                return
         workload.filter_kernel_ids = selected_ids
 
         console_log(
