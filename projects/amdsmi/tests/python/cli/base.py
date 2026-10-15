@@ -360,7 +360,7 @@ class TestCliBase(unittest.TestCase):
         self.clk_levels = ["SCLK", "MCLK", "FCLK", "SOCCLK", "PCIE"]
 
         # When parsing, ignore these entries as they are abnormal
-        self.cmd_arg_exceptions = ["--voltage"]
+        self.cmd_arg_exceptions = ["--voltage", "--cuid-seed"]
 
         # When parsing, change these args into something else or add to arg
         self.cmd_arg_changes = [
