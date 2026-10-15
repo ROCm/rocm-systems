@@ -645,6 +645,9 @@ struct ncclPeerInfo {
   bool gpuCftMulticastSupport;
   bool gpuCftCountedSupport;
   uint32_t gitVersionHash;
+  // [RCCL] The rcclTuningPartition this rank asks for (RCCL_TUNING_PARTITION_MODE). The comm
+  // uses DPX only when every rank asks for it. Append later fields after this one.
+  int tuningPartition;
 };
 
 typedef enum ncclGroupTaskType {

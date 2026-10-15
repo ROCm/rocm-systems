@@ -1818,11 +1818,14 @@ TEST_F(InitMicrotest, FillInfo_FunctionAboveMloPartMax_LeavesMloPartUndefined) {
   FillInfoComm c;
   c.get()->busId = kHighFnBusId;
   g_pciDeviceClass = "";  // no sysfs entry, so only the fn bound can reject the stamp
+  g_pciComputePartition = "DPX";
   ncclPeerInfo info{};
   EXPECT_EQ(ncclSuccess, fillInfo(c.get(), &info, 0));
   // 0xf does not fit the 3-bit overlay index, so it must not be stamped even though sysfs is empty.
   EXPECT_EQ(NCCL_TOPO_UNDEF, info.mloPart);
   EXPECT_EQ(0, g_pciDeviceClassCalls);
+  // The tuning request does not depend on the MLOPart bound: the mode is still read and used.
+  EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, info.tuningPartition);
 }
 
 TEST_F(InitMicrotest, FillInfo_CpxPartitionZero_StampsMloPartZero) {
@@ -1882,6 +1885,179 @@ TEST_F(InitMicrotest, FillInfo_NoPartitionModeReported_FunctionZeroLeavesMloPart
   // The blind spot of the fallback: with no mode reported, partition 0 is indistinguishable from an
   // unpartitioned GPU, and staying undefined is the safe answer of the two.
   EXPECT_EQ(NCCL_TOPO_UNDEF, info.mloPart);
+}
+
+// RCCL_TUNING_PARTITION_MODE: each rank asks for the gfx1250 tuning table of the mode its GPU
+// reports, from the same sysfs read the MLOPart probe uses; only DPX asks for the DPX table. The
+// env var forces a table either way, and "auto" or an empty value follow the GPU.
+TEST_F(InitMicrotest, FillInfo_TuningPartitionRequest) {
+  struct Case {
+    const char* env;  // nullptr = unset
+    const char* gpu;
+    int want;
+  };
+  const Case cases[] = {{nullptr, "SPX", RCCL_TUNING_PARTITION_SPX},
+                        {nullptr, "DPX", RCCL_TUNING_PARTITION_DPX},
+                        {nullptr, "CPX", RCCL_TUNING_PARTITION_SPX},
+                        {nullptr, "", RCCL_TUNING_PARTITION_SPX},
+                        {"SPX", "DPX", RCCL_TUNING_PARTITION_SPX},
+                        {"DPX", "SPX", RCCL_TUNING_PARTITION_DPX},
+                        {"dpx", "", RCCL_TUNING_PARTITION_DPX},
+                        {"Auto", "DPX", RCCL_TUNING_PARTITION_DPX},
+                        {"", "DPX", RCCL_TUNING_PARTITION_DPX}};
+  for (const Case& tc : cases) {
+    const std::string label = std::string("env '") + (tc.env ? tc.env : "<unset>") + "', GPU '" + tc.gpu + "'";
+    SetMicroEnv("RCCL_TUNING_PARTITION_MODE", tc.env);
+    FillInfoComm c;
+    c.get()->busId = kAliasBusId;
+    g_pciComputePartition = tc.gpu;
+    g_pciComputePartitionCalls = 0;
+    ncclPeerInfo info{};
+    info.tuningPartition = -1;
+    ncclResult_t res = ncclInternalError;
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    const std::string log = RcclUnitTesting::CaptureLog([&] { res = fillInfo(c.get(), &info, 0); });
+    EXPECT_EQ(ncclSuccess, res);
+    EXPECT_EQ(tc.want, info.tuningPartition) << label;
+    EXPECT_EQ(1, g_pciComputePartitionCalls) << "one read serves MLOPart and tuning, " << label;
+    EXPECT_EQ("0000:11:00.0", g_lastPciComputePartitionBusId) << "the mode lives on function 0";
+    EXPECT_FALSE(LogHas(log, "RCCL_TUNING_PARTITION_MODE")) << "a valid value must not be reported:\n" << log;
+  }
+}
+
+// An unknown value is ignored with one notice per process, and the GPU's mode decides. Isolated:
+// the report-once flag is a function-local static.
+TEST_F(InitMicrotestIsolated, FillInfo_InvalidTuningPartitionMode_ReportsOnceAndFollowsGpuMode) {
+  RUN_ISOLATED_TEST(
+      "Init_FillInfo_InvalidTuningPartitionMode",
+      []() {
+        SetMicroEnv("RCCL_TUNING_PARTITION_MODE", "QPX");
+        g_pciComputePartition = "DPX";
+        FillInfoComm c;
+        c.get()->busId = kPhysGpuBusId;
+        ncclPeerInfo first{};
+        ncclPeerInfo second{};
+        ncclResult_t r1 = ncclInternalError;
+        ncclResult_t r2 = ncclInternalError;
+        ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+        const std::string log = RcclUnitTesting::CaptureLog([&] {
+          r1 = fillInfo(c.get(), &first, 0);
+          r2 = fillInfo(c.get(), &second, 0);
+        });
+        EXPECT_EQ(ncclSuccess, r1);
+        EXPECT_EQ(ncclSuccess, r2);
+        EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, first.tuningPartition);
+        EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, second.tuningPartition);
+        const std::string needle = "Invalid value QPX for RCCL_TUNING_PARTITION_MODE";
+        const size_t at = log.find(needle);
+        EXPECT_NE(std::string::npos, at) << "actual log:\n" << log;
+        EXPECT_EQ(std::string::npos, log.find(needle, at + needle.size())) << "reported twice:\n" << log;
+      });
+}
+
+namespace {
+// AllGather1 output for ranks that asked for `requests`.
+std::vector<ncclPeerInfo> PeersAsking(std::initializer_list<int> requests) {
+  std::vector<ncclPeerInfo> peers(requests.size());
+  size_t i = 0;
+  for (int request : requests) peers[i++].tuningPartition = request;
+  return peers;
+}
+
+rcclTuningPartition TuningPartitionFor(std::initializer_list<int> requests, bool* mixed) {
+  std::vector<ncclPeerInfo> peers = PeersAsking(requests);
+  return rcclTuningPartitionForComm(peers.data(), static_cast<int>(peers.size()), mixed);
+}
+
+// Distinct tables for the rcclGetArchThresholds fake to hand out, so a test sees which one a comm got.
+const rcclArchThresholds kFakeSpxTable{};
+const rcclArchThresholds kFakeDpxTable{};
+void InstallFakeTuningTables() {
+  g_archThresholdsTable[RCCL_TUNING_PARTITION_SPX] = &kFakeSpxTable;
+  g_archThresholdsTable[RCCL_TUNING_PARTITION_DPX] = &kFakeDpxTable;
+}
+}  // namespace
+
+// Every rank must read the same table, so the comm is DPX only when all ranks ask for DPX.
+TEST_F(InitMicrotest, TuningPartitionForComm_DpxOnlyWhenEveryRankAsks) {
+  constexpr int kSpx = RCCL_TUNING_PARTITION_SPX;
+  constexpr int kDpx = RCCL_TUNING_PARTITION_DPX;
+  bool mixed = true;
+  EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, TuningPartitionFor({kDpx, kDpx, kDpx}, &mixed));
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_DPX, TuningPartitionFor({kDpx}, &mixed));
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kSpx, kSpx}, &mixed));
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kDpx, kSpx, kDpx}, &mixed));
+  EXPECT_TRUE(mixed);
+  EXPECT_EQ(RCCL_TUNING_PARTITION_SPX, TuningPartitionFor({kSpx, kDpx}, &mixed));
+  EXPECT_TRUE(mixed);
+}
+
+namespace {
+// A gfx1250 comm whose ranks asked for `requests`, as rcclSetTuningPartition sees it after AllGather1.
+struct TuningPartitionComm {
+  explicit TuningPartitionComm(std::initializer_list<int> requests, const char* arch = "gfx1250", int rank = 0)
+      : peers(PeersAsking(requests)) {
+    comm.get()->peerInfo = peers.data();
+    comm.get()->nRanks = static_cast<int>(peers.size());
+    comm.get()->rank = rank;
+    comm.get()->archName = const_cast<char*>(arch);
+    comm.get()->archThresholds = nullptr;
+    InstallFakeTuningTables();
+  }
+  ~TuningPartitionComm() {
+    comm.get()->peerInfo = nullptr;
+    comm.get()->archName = nullptr;
+    comm.get()->archThresholds = nullptr;
+  }
+  std::string Run() {
+    ScopedDebugLogging dbg(NCCL_LOG_INFO, NCCL_ALL);
+    return RcclUnitTesting::CaptureLog([&] { rcclSetTuningPartition(comm.get()); });
+  }
+  FillInfoComm comm;
+  std::vector<ncclPeerInfo> peers;
+};
+}  // namespace
+
+TEST_F(InitMicrotest, SetTuningPartition_AllDpxPicksTheDpxTable) {
+  TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_DPX});
+  const std::string log = t.Run();
+  EXPECT_EQ(&kFakeDpxTable, t.comm.get()->archThresholds);
+  EXPECT_EQ(1, g_archThresholdsCalls);
+  EXPECT_TRUE(LogHas(log, "gfx1250 tuning table: DPX")) << "actual log:\n" << log;
+  EXPECT_FALSE(LogHas(log, "ask for different tables")) << "actual log:\n" << log;
+}
+
+TEST_F(InitMicrotest, SetTuningPartition_MixedRanksUseSpxAndSayWhy) {
+  TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX});
+  const std::string log = t.Run();
+  EXPECT_EQ(&kFakeSpxTable, t.comm.get()->archThresholds);
+  EXPECT_TRUE(LogHas(log, "ask for different tables (RCCL_TUNING_PARTITION_MODE")) << "actual log:\n" << log;
+  EXPECT_TRUE(LogHas(log, "gfx1250 tuning table: SPX")) << "actual log:\n" << log;
+}
+
+// Only rank 0 of a gfx1250 comm logs, but every rank and arch still re-picks its table.
+TEST_F(InitMicrotest, SetTuningPartition_OnlyRankZeroOfGfx1250Logs) {
+  {
+    TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_DPX}, "gfx1250", /*rank=*/1);
+    const std::string log = t.Run();
+    EXPECT_EQ(&kFakeDpxTable, t.comm.get()->archThresholds);
+    EXPECT_FALSE(LogHas(log, "tuning table")) << "actual log:\n" << log;
+  }
+  {
+    TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}, "gfx1250", /*rank=*/1);
+    const std::string log = t.Run();
+    EXPECT_EQ(&kFakeSpxTable, t.comm.get()->archThresholds);
+    EXPECT_FALSE(LogHas(log, "tuning table")) << "a mixed comm is reported by rank 0 only:\n" << log;
+  }
+  {
+    TuningPartitionComm t({RCCL_TUNING_PARTITION_DPX, RCCL_TUNING_PARTITION_SPX}, "gfx950");
+    const std::string log = t.Run();
+    EXPECT_EQ(&kFakeSpxTable, t.comm.get()->archThresholds);
+    EXPECT_FALSE(LogHas(log, "tuning")) << "actual log:\n" << log;
+  }
 }
 
 TEST_F(InitMicrotest, CommInitAll_GetDeviceFault_StopsBeforeCount) {
@@ -2533,6 +2709,7 @@ struct PeerSpec {
   int uuidTag = -1;     // -1 = its own UUID; equal values (>=1) make two peers the same GPU
   int64_t busId = 0;    // equal values are the same PCI function, i.e. the same partition
   int compCap = -1;     // -1 = same as self
+  int tuningPartition = -1;  // -1 = same as self
   ncclComm* comm = nullptr;  // only read for same-process peers (:1527, :1549)
 };
 
@@ -2576,6 +2753,7 @@ void InstallPeerInfoAllGather(TransportsRankComm& c, std::vector<PeerSpec> specs
       reinterpret_cast<unsigned char*>(&info[i].gpuUuid)[0] =
           static_cast<unsigned char>(s.uuidTag < 0 ? i + 1 : s.uuidTag);  // 1-based: never matches self's zeros
       info[i].cudaCompCap = s.compCap < 0 ? self.cudaCompCap : s.compCap;
+      info[i].tuningPartition = s.tuningPartition < 0 ? self.tuningPartition : s.tuningPartition;
       info[i].comm = s.comm;
     }
     return ncclSuccess;
@@ -2668,6 +2846,32 @@ TEST_F(InitMicrotest, InitTransportsRank_PeerWithMloPart_SetsHasMloPart) {
   InstallPeerInfoAllGather(c, specs);
   EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
   EXPECT_TRUE(c.get()->hasMloPart);
+}
+
+// RCCL_TUNING_PARTITION_MODE: after AllGather1 the comm re-picks its tuning table from every
+// rank's request -- DPX only when all of them ask for it.
+TEST_F(InitMicrotest, InitTransportsRank_EveryRankAsksDpx_PicksTheDpxTable) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  g_pciComputePartition = "DPX";  // fillInfo's own slot asks for DPX; peers copy it
+  InstallPeerInfoAllGather(c, std::vector<PeerSpec>(4));
+  InstallFakeTuningTables();
+  c.get()->archThresholds = nullptr;
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(&kFakeDpxTable, c.get()->archThresholds);
+  EXPECT_EQ(1, g_archThresholdsCalls);
+}
+
+// Rank 0 itself asks for DPX, so only counting every peer's slot can pick SPX.
+TEST_F(InitMicrotest, InitTransportsRank_OnePeerAsksSpx_PicksTheSpxTable) {
+  TransportsRankComm c(/*nRanks=*/4, /*rank=*/0);
+  g_pciComputePartition = "DPX";
+  std::vector<PeerSpec> specs(4);
+  specs[2].tuningPartition = RCCL_TUNING_PARTITION_SPX;
+  InstallPeerInfoAllGather(c, specs);
+  InstallFakeTuningTables();
+  c.get()->archThresholds = &kFakeDpxTable;
+  EXPECT_EQ(ncclRemoteError, initTransportsRank(c.get(), nullptr, c.timers()));
+  EXPECT_EQ(&kFakeSpxTable, c.get()->archThresholds);
 }
 
 TEST_F(InitMicrotest, InitTransportsRank_NoPeerWithMloPart_LeavesHasMloPartUnset) {
