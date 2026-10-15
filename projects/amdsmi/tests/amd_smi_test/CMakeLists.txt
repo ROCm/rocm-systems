@@ -172,6 +172,11 @@ endif()
 set(_AMDSMI_TEST_CATEGORIES_CMAKE "${ROCM_SYSTEMS_ROOT}/shared/ctest/TestCategories.cmake")
 set(_AMDSMI_TEST_CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/test_categories.yaml")
 
+# Build-time switch. ON registers the three Python runners in the install
+# CTestTestfile. Run time can still drop them: AMDSMI_PYTHON_TESTS=0 makes
+# test_runner.py pass -LE ^amdsmi_python$.
+option(AMDSMI_CTEST_PYTHON_TESTS "Register AMD SMI Python runners (unit, functional, CLI) in the install ctest file" ON)
+
 if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORIES_YAML}")
     include("${_AMDSMI_TEST_CATEGORIES_CMAKE}")
     enable_testing()
@@ -194,6 +199,55 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
         "${CMAKE_CURRENT_BINARY_DIR}"
         "${_AMDSMI_INSTALL_TEST_FILE}"
     )
+
+    # Python runners live in share/amd_smi/tests/python_unittest, one directory
+    # above this CTestTestfile, same as ../amdsmitst. They are unittest scripts,
+    # not gtest, so they are not generated from test_categories.yaml.
+    #
+    # test_runner.py selects with -L ^<category>$ -L ^ex_gpu_<arch>$. Each
+    # runner therefore carries every category label and every ex_gpu_* label
+    # (keep that list in sync with exclude_gpu in test_categories.yaml) plus
+    # amdsmi_python, which is the run-time off switch.
+    if(AMDSMI_CTEST_PYTHON_TESTS)
+        set(_AMDSMI_PYTHON_LABELS
+            "quick"
+            "pre-commit"
+            "smoke"
+            "standard"
+            "pr"
+            "precheckin"
+            "comprehensive"
+            "nightly"
+            "extended"
+            "full"
+            "all"
+            "ex_gpu_gfx906"
+            "ex_gpu_gfx908"
+            "ex_gpu_gfx90a"
+            "ex_gpu_gfx94X"
+            "ex_gpu_gfx103X"
+            "ex_gpu_gfx110X"
+            "ex_gpu_gfx115X"
+            "amdsmi_python"
+        )
+        list(JOIN _AMDSMI_PYTHON_LABELS ";" _AMDSMI_PYTHON_LABEL_STRING)
+        # Pipe, not semicolon: CMake splits unescaped semicolons into list items.
+        set(_AMDSMI_PYTHON_TESTS
+            "amdsmi_python_unit|unit_tests.py"
+            "amdsmi_python_functional|integration_test.py"
+            "amdsmi_python_cli|cli_unit_test.py"
+        )
+        foreach(_entry IN LISTS _AMDSMI_PYTHON_TESTS)
+            string(REPLACE "|" ";" _parts "${_entry}")
+            list(GET _parts 0 _py_name)
+            list(GET _parts 1 _py_script)
+            file(
+                APPEND "${_AMDSMI_INSTALL_TEST_FILE}"
+                "add_test(${_py_name} ../python_unittest/${_py_script} -v)\n"
+                "set_tests_properties(${_py_name} PROPERTIES LABELS \"${_AMDSMI_PYTHON_LABEL_STRING}\" TIMEOUT 180)\n\n"
+            )
+        endforeach()
+    endif()
 
     # Install one directory below the binary so "../amdsmitst" resolves.
     install(
