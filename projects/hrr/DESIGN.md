@@ -1280,7 +1280,6 @@ in `alloc_map`:
 | API | Playback handler |
 |-----|-----------------|
 | `hipHostAlloc` | no-op |
-| `hipMallocHost` | no-op |
 | `hipMemAllocHost` | no-op |
 | `hipMalloc3DArray` | no-op |
 | `hipMallocArray` | no-op |
@@ -1313,8 +1312,8 @@ no-op won, so nothing was allocated or recorded and every derived pointer transl
 
 **What does not work:**
 
-- **Kernel launches** that pass the device-side alias of a `hipHostAlloc` /
-  `hipMallocHost` buffer as a kernel argument. The alias is obtained at capture
+- **Kernel launches** that pass the device-side alias of a `hipHostAlloc`
+  buffer as a kernel argument. The alias is obtained at capture
   time via `hipHostGetDevicePointer`, and that device address is never recorded
   in `alloc_map`. At replay, `translate_ptr` returns `nullptr` for that argument,
   and the kernel receives a null pointer — producing wrong results or a GPU fault.
@@ -1323,7 +1322,7 @@ no-op won, so nothing was allocated or recorded and every derived pointer transl
 D2H transfers (the common case) replay correctly. Workloads that pass pinned memory
 pointers directly to GPU kernels will produce incorrect output.
 
-**Workaround:** replace `hipHostAlloc` / `hipMallocHost` with `hipHostRegister` on
+**Workaround:** replace `hipHostAlloc` with `hipHostRegister` on
 an existing `malloc` buffer — `hipHostRegister` _is_ fully captured and replayed,
 including the device alias registration.
 
