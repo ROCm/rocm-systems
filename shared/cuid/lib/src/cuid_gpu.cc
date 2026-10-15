@@ -762,6 +762,20 @@ amdcuid_status_t CuidGpu::driver_attribute_path(const std::string& attribute,
   return CuidDevice::driver_attribute_path(attribute, path);
 }
 
+amdcuid_status_t CuidGpu::get_derived_cuid(amdcuid_derived_id& id, cuid_hmac* hmac) const {
+  if (m_info.partition_attr_dir.empty()) return CuidDevice::get_derived_cuid(id, hmac);
+  auto status = read_driver_published(CuidUtilities::kDriverDerivedAttribute,
+                                      id.UUIDv8_representation, id.raw_bits);
+  if (status == AMDCUID_STATUS_SUCCESS) {
+    cuid::get_hash_from_raw(id.raw_bits, id.hash);
+    last_source_ = AMDCUID_SOURCE_DRIVER;
+    return status;
+  }
+  if (status == AMDCUID_STATUS_UNSUPPORTED) status = get_temporary_cuid(id);
+  last_source_ = status == AMDCUID_STATUS_SUCCESS ? AMDCUID_SOURCE_LIBRARY : AMDCUID_SOURCE_UNKNOWN;
+  return status;
+}
+
 amdcuid_status_t CuidGpu::partition_parent(const std::string& attr_dir, const std::string& pci_root,
                                            const std::string& kfd_nodes,
                                            CuidPartitionParent& parent) {
@@ -793,10 +807,18 @@ uint16_t CuidGpu::partition_unit_id(const CuidPartitionParent& parent) const {
   return published_unit_id(m_info.partition_attr_dir, unit_id) ? unit_id : parent.kfd_unit_id;
 }
 
-// A partition's temporary input: its parent's routing and IDs plus its own
-// UnitID, which is what keeps it apart from the whole GPU and its siblings.
+// A partition with no usable cuid_derived, because the driver has no key yet,
+// publishes none, or is a stock amdgpu: its parent's routing and IDs plus its
+// own UnitID, which is what keeps it apart from the whole GPU and its siblings.
 amdcuid_status_t CuidGpu::partition_temporary_input(CuidUtilities::AuxiliaryInput& aux) const {
   if (m_info.unnamed_vf) return AMDCUID_STATUS_UNSUPPORTED;
+  amdcuid_id_t published = {};
+  uint8_t raw[16] = {};
+  const auto derived =
+      read_driver_published(CuidUtilities::kDriverDerivedAttribute, published, raw);
+  if (derived == AMDCUID_STATUS_SUCCESS) return AMDCUID_STATUS_UNSUPPORTED;
+  if (derived != AMDCUID_STATUS_UNSUPPORTED) return derived;
+
   CuidPartitionParent parent;
   const auto status = partition_parent(
       m_info.partition_attr_dir, m_info.pci_root.empty() ? kPciDevices : m_info.pci_root,
