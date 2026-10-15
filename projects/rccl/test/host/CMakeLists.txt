@@ -388,6 +388,13 @@ function(rccl_define_micro_source_lists)
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroCrypt -- src/misc/crypt.cc. Own binary: the test supplies its own ncclDebugLog
+  # and socket-layer seams, which would collide with the shared fakes rccl-UnitTestsMicro links.
+  set(TEST_MICRO_CRYPT_SOURCE_FILES
+    crypt-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1054,6 +1061,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroCrypt
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroCrypt
+  SOURCES ${TEST_MICRO_CRYPT_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    CRYPT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_crypt.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
