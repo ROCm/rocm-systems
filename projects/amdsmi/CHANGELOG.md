@@ -84,6 +84,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
   - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
 
+- **Added `amd-smi metric --usage-fields` to select usage fields**.  
+  - Returns only the named usage fields, in the requested order, for human, JSON, and CSV output. Named fields are always printed, as `N/A` when unavailable.
+
 ### Changed
 
 - **Use fwupd daemon to read and write UMA carveout information**.  
@@ -183,6 +186,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
   - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
 
+- **`amd-smi metric --usage` always reports `usage` as a set of fields**.  
+  - When every source fails, JSON `usage` is an object with each field set to `N/A` instead of the string `N/A`, and CSV has one column per field. Scripts that checked for a single `N/A` should check each field.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
@@ -261,6 +267,17 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 - **Fixed a segmentation fault in the DRM example when run without root**.  
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
+
+- **Fixed `amd-smi metric --usage` discarding readable values when one source failed**.  
+  - A failed average-activity query no longer turns the whole usage section into `N/A`; partition and VCN readings from other sources are kept.
+  - Errors other than AMD SMI library errors now stop the command instead of printing `USAGE: N/A`.
+
+- **Fixed `amd-smi metric --watch --file` losing samples**.  
+  - GPU CSV and human-readable watch files, and NIC and switch watch files in every format, kept every sample except the last one. They now keep all of them, including when the watch is stopped with Ctrl-C or SIGTERM.
+  - A watch stopped before its first sample now leaves an existing `--file` unchanged. `--append` does not apply to watch output.
+
+- **Fixed unstable CSV column order when rows have different fields**.  
+  - Columns that appear only in later rows were added in a random order; they now follow the order they first appear.
 
 ## amd_smi_lib for ROCm 10.1.0
 
