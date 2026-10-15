@@ -1975,3 +1975,97 @@ TEST(XcdDistributionTest, CrossXcdGwsPDoesNotEscapeWhilePeerXcdProducerRunnable)
   if (!consumer->is_halted())
     consumer->halt();
 }
+
+// Cross-XCD GWS fan-out owner share (config-loaded CDNA3), driven through the real
+// fan-out path. When a dispatch fans out, the owner registers its OWN local share as
+// an unplaced producer before exposing any peer shard, so a peer that parks a P cannot
+// be declared deadlocked while the owner's V producer has merely not reached its
+// placement pass yet. Here the real fan_out_dispatch() registers every XCD's share;
+// draining every peer (none has the queue registered) drops their shards, leaving only
+// the owner's share deferring; a P parked on a peer CU must stay parked until the owner
+// runs its placement pass and its producer signals a V. Regression: leaving the owner's
+// local share unregistered let the backstop escape the peer's P one quiescence pass
+// before the owner's producer could run.
+TEST(XcdDistributionTest, FanoutOwnerShareDefersPeerQuiescenceUntilProducerSignals) {
+  XcdDistributionFixture fx(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH);
+  ASSERT_GE(fx.soc->num_xcds(), 2u);
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
+  constexpr uint64_t kPc = 0x200000;
+  fx.memory->write32(kPc, cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]);
+
+  auto *owner = fx.soc->xcd(0)->command_processor();
+  auto *peer = fx.soc->xcd(1)->command_processor();
+  auto *owner_cu = owner->compute_units().front();
+  auto *peer_cu = peer->compute_units().front();
+  ASSERT_NE(owner_cu, nullptr);
+  ASSERT_NE(peer_cu, nullptr);
+  ASSERT_EQ(&owner_cu->gws_device(), &peer_cu->gws_device());
+  auto &gws = peer_cu->gws_device();
+
+  constexpr uint32_t kProcess = 0;
+  constexpr uint32_t kDispatch = 77;
+  const uint32_t num_xcds = static_cast<uint32_t>(fx.soc->num_xcds());
+
+  // Run the REAL fan-out: the owner registers its own local share Pending before
+  // exposing peer shards, and each peer's accept registers its shard Pending -- one
+  // placement shard per XCD.
+  amdgpu::DispatchEntry dp{};
+  dp.dispatch_id = kDispatch;
+  dp.queue_id = 1;
+  dp.process_id = kProcess;
+  dp.kind = amdgpu::DispatchPacketKind::Kernel;
+  dp.total_wgs = num_xcds; // One workgroup per XCD.
+  owner->fan_out_dispatch_for_test(dp);
+  EXPECT_EQ(gws.tracked_shard_count(kDispatch), num_xcds)
+      << "fan-out did not register the owner's own share alongside the peers'";
+
+  // Every peer drains with no queue registered, so each peer shard is dropped and its
+  // mark cleared -- leaving ONLY the owner's own share deferring.
+  for (uint32_t xi = 1; xi < num_xcds; ++xi)
+    fx.soc->xcd(xi)->command_processor()->drain_fanout_inbox_for_test();
+  EXPECT_EQ(gws.tracked_shard_count(kDispatch), 1u)
+      << "only the owner's local share should remain after the peers drained";
+
+  // A consumer P parks on the peer CU for this dispatch/process. It must NOT be escaped
+  // while the owner's producer share is still unplaced.
+  auto *consumer = peer_cu->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
+  ASSERT_NE(consumer, nullptr);
+  consumer->set_dispatch_id(kDispatch);
+  peer_cu->begin_workgroup(/*dispatch_id=*/kDispatch, /*wg_id=*/1, /*wf_count=*/1,
+                           /*num_named_barriers=*/0, kProcess, /*dispatch_total_waves=*/0);
+  consumer->set_exec(0x1);
+  consumer->set_m0(0);
+  gws_cdna3::issue(*peer_cu, *decoder, gws_cdna3::kSemaP, *consumer, /*has_count=*/false,
+                   /*count=*/0);
+  ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
+  for (int i = 0; i < 16; ++i)
+    peer_cu->step();
+  EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT)
+      << "consumer escaped while the owner's unplaced producer share was still pending";
+
+  // The owner runs its placement pass; with its local share fully placed it publishes
+  // Resolved, dropping the last deferring shard.
+  dp.dispatched_wgs = dp.total_wgs;
+  (void)owner->dispatch_workgroups_for_test(dp);
+  EXPECT_EQ(gws.tracked_shard_count(kDispatch), 0u);
+
+  // The owner's producer now signals; the consumer wakes on the credit (a real V),
+  // applied by its own CU on the next step -- never a premature escape.
+  auto *producer = owner_cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
+  ASSERT_NE(producer, nullptr);
+  producer->set_dispatch_id(kDispatch);
+  owner_cu->begin_workgroup(/*dispatch_id=*/kDispatch, /*wg_id=*/0, /*wf_count=*/1,
+                            /*num_named_barriers=*/0, kProcess, /*dispatch_total_waves=*/0);
+  producer->set_exec(0x1);
+  producer->set_m0(0);
+  gws_cdna3::issue(*owner_cu, *decoder, gws_cdna3::kSemaV, *producer, /*has_count=*/false,
+                   /*count=*/0);
+  for (int i = 0; i < 8 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
+    peer_cu->step();
+  EXPECT_NE(consumer->state(), amdgpu::WfState::GWS_WAIT)
+      << "consumer not released by the owner's producer V";
+
+  producer->halt();
+  if (!consumer->is_halted())
+    consumer->halt();
+}

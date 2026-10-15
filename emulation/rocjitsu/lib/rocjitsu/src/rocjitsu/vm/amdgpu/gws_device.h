@@ -12,7 +12,6 @@
 #include <cstdint>
 #include <mutex>
 #include <unordered_map>
-#include <unordered_set>
 #include <vector>
 
 namespace rocjitsu {
@@ -117,24 +116,31 @@ class Wavefront;
 ///    at once, so a placeable producer immediately becomes a resident, runnable wave
 ///    (covered by the quiescence scan above). The store therefore never re-derives
 ///    placement (which would both race the owning CU's allocator and misjudge the
-///    WGP/PM4 constraints it cannot see). Instead the command processor publishes,
-///    per fan-out shard, whether that shard still has workgroups it has not yet
-///    *attempted* to place (@ref set_shard_pending): a shard is marked pending when
-///    it is accepted into a CP's fan-out inbox and cleared once that CP has run its
-///    placement pass for it. Escape is blocked while any shard of the process's
-///    dispatches is still pending -- its not-yet-attempted workgroups may still
-///    produce a signaler. Once every shard has attempted placement (whatever it
-///    could place is resident; whatever it could not is genuinely unplaceable behind
-///    the parked waves being judged), only the quiescence scan governs: if no
-///    resident wave can still signal, escape proceeds. Blocking unconditionally on
-///    unadmitted work would forfeit termination (a parked GWS wave counts as
-///    runnable, so its CU would spin on it forever). A dispatch with no pending
-///    shard published (a single-CP cooperative grid, or standalone/test use) is
-///    governed by the quiescence scan alone. (Bound: because placement is evaluated
-///    at CP-pass granularity, a producer that becomes placeable only after a sibling
-///    retires can, in the step between that retirement and the next CP placement
-///    pass, momentarily look unplaceable; the last-resort backstop may then abandon
-///    the wait one step early -- an observable, recoverable event, see below.)
+///    WGP/PM4 constraints it cannot see). Instead the command processor publishes
+///    each shard's placement state (@ref set_shard_placement), tagged against the
+///    capacity version @ref summary_epoch_ (which advances whenever free capacity
+///    could change -- a wave placed, retired, or a CU added/removed):
+///     * @c Pending -- accepted but not yet attempted (a fan-out shard still in an
+///       inbox, or the owner's own local share registered before fan-out). Always
+///       defers: its producer may still be placed once the CP reaches it.
+///     * @c Unplaced -- the CP attempted placement and some workgroup did not fit,
+///       recorded at the capacity version of that attempt. Defers only while that
+///       record is stale (capacity has changed since, so the CP must re-attempt
+///       against the freed room before the wait is abandoned); once the CP
+///       re-attempts at the current version and still cannot place, the work is
+///       genuinely unplaceable behind the parked waves and escape proceeds.
+///     * @c Resolved -- fully placed or discarded; drops the shard.
+///    Escape is blocked while any shard of the process's dispatches is Pending or
+///    has a stale Unplaced record. This re-arms on capacity changes for single-CP
+///    grids too: retiring a sibling advances the version, so a parked waiter is not
+///    abandoned in the step between that retirement and the CP's next placement pass
+///    on the freed slot. Blocking unconditionally on unadmitted work would forfeit
+///    termination (a parked GWS wave counts as runnable, so its CU would spin on it
+///    forever); tying the Unplaced record to a monotonic capacity version keeps the
+///    deadlock case terminating (with no capacity change the record stays current,
+///    so escape fires) while deferring across every real re-placement opportunity.
+///    A dispatch with no shard state published (standalone/test use) is governed by
+///    the quiescence scan alone.
 ///
 ///    Recovery is observable: when the backstop abandons a wait it emits a
 ///    rate-limited diagnostic (process, resource, wave location) so a genuine
@@ -200,20 +206,32 @@ public:
   /// then bounded only by currently-resident waves, as before.
   void add_resident(uint32_t process_id, uint32_t dispatch_id, uint32_t count,
                     uint32_t expected_total_waves);
-  /// @brief Mark (or clear) a fan-out shard as having workgroups not yet attempted
-  /// for placement, so the quiescence backstop defers while a not-yet-admitted
-  /// producer may still arrive (see @ref escape_ready and the pending-work note in
-  /// the class doc).
-  /// @details Placement lives entirely in the command processor, which calls this:
-  /// it marks a shard pending (@p pending true) when it accepts the shard into its
-  /// fan-out inbox, and clears it (@p pending false) once it has run a placement
-  /// pass for it (greedy placement means whatever was placeable is now resident, and
-  /// whatever remains is genuinely unplaceable). @p shard_key is an opaque,
-  /// never-dereferenced identity for the shard's owning command processor, so each
-  /// fan-out shard of one dispatch is tracked independently. A dispatch with no
-  /// pending shard published is governed by the quiescence scan alone.
-  void set_shard_pending(uint32_t dispatch_id, uint32_t process_id, const void *shard_key,
-                         bool pending);
+  /// @brief Placement state a command processor publishes for one shard.
+  /// @details See the escape-policy note in the class doc for the full semantics.
+  enum class ShardPlacement {
+    /// Accepted but not yet attempted for placement (defers unconditionally).
+    Pending,
+    /// Attempted; some workgroup did not fit (defers only while the record is
+    /// stale against the current capacity version @ref summary_epoch_).
+    Unplaced,
+    /// Fully placed or discarded (drops the shard).
+    Resolved,
+  };
+  /// @brief Publish a shard's placement state so the quiescence backstop defers
+  /// while a not-yet-placed producer may still arrive (see @ref escape_ready and
+  /// the escape-policy note in the class doc).
+  /// @details Placement lives entirely in the command processor, which calls this
+  /// as it works a dispatch: @c Pending when it accepts a fan-out shard into its
+  /// inbox (or registers its own local share before fan-out), @c Unplaced when a
+  /// placement pass could not fit every workgroup (recorded at the current capacity
+  /// version so escape re-arms when a sibling retirement frees room), and
+  /// @c Resolved once the shard is fully placed or discarded. @p shard_key is an
+  /// opaque, never-dereferenced identity for the shard's owning command processor,
+  /// so each shard of one dispatch is tracked independently. Argument order matches
+  /// @ref add_resident (process then dispatch). A dispatch with no state published
+  /// is governed by the quiescence scan alone.
+  void set_shard_placement(uint32_t process_id, uint32_t dispatch_id, const void *shard_key,
+                           ShardPlacement state);
   /// @brief Drop @p count resident waves of a dispatch (clamped at zero).
   void remove_resident(uint32_t dispatch_id, uint32_t count);
   /// @brief Un-admit @p count waves of a dispatch rolled back before execution.
@@ -259,6 +277,11 @@ public:
   /// entry was cleared (so it no longer lingers after teardown).
   size_t tracked_dispatch_count();
 
+  /// @brief Number of unresolved placement shards recorded for @p dispatch_id
+  /// (test/diagnostic). Zero if the dispatch has no accounting. Lets a regression
+  /// observe shard registration/clearing through the real CP fan-out/drain paths.
+  size_t tracked_shard_count(uint32_t dispatch_id);
+
 private:
   /// @brief Per-resource barrier/semaphore state.
   struct Resource {
@@ -286,14 +309,18 @@ private:
     uint32_t process_id = 0; ///< Owning process (so the scan can find a process's dispatches).
     uint32_t expected = 0;   ///< Total waves the dispatch will ever admit (grid size).
     uint32_t admitted = 0;   ///< Cumulative waves admitted so far.
-    /// Fan-out shards (identified by their owning command processor) that still have
-    /// workgroups the command processor has not yet attempted to place (@ref
-    /// set_shard_pending): populated when a shard is accepted into a CP's inbox and
-    /// emptied once that CP runs its placement pass. While non-empty the quiescence
-    /// backstop defers -- a not-yet-attempted shard may still place a producer. The
-    /// keys are opaque and never dereferenced (placement lives in the CP, not here).
-    std::unordered_set<const void *> unattempted_shards;
+    /// Shards (identified by their owning command processor) with workgroups the CP
+    /// has not yet placed (@ref set_shard_placement). The value is the capacity
+    /// version (@ref summary_epoch_) at which the CP last attempted placement, or
+    /// @ref kShardNeverAttempted for a shard accepted but not yet attempted. While
+    /// any entry is unattempted, or attempted at a stale version, the quiescence
+    /// backstop defers (the CP may still place a producer, possibly only after a
+    /// sibling retirement frees room). The keys are opaque and never dereferenced
+    /// (placement lives in the CP, not here).
+    std::unordered_map<const void *, uint64_t> shard_attempt_epoch;
   };
+  /// @brief Sentinel attempt-version for a shard accepted but not yet attempted.
+  static constexpr uint64_t kShardNeverAttempted = ~uint64_t{0};
 
   /// @brief Drop a parked semaphore P-waiter's queued arrival stamp from @p res
   /// (no-op if absent). Requires @ref mutex_.
@@ -344,13 +371,18 @@ private:
   std::unordered_map<uint32_t, uint32_t> parked_;
   /// Total parked waves across all processes; lock-free fast-path gate.
   std::atomic<uint32_t> parked_total_{0};
-  /// Monotonic version for the per-CU quiescence snapshots below. Bumped whenever
-  /// a potential signaler may have appeared -- a 0 -> positive parked transition,
-  /// a wave waking (wake_wave), or new resident work (add_resident). escape_ready
+  /// Monotonic version for the per-CU quiescence snapshots below, doubling as the
+  /// capacity version for shard placement records (@ref DispatchAdmission). Bumped
+  /// whenever a potential signaler may have appeared or free capacity may have
+  /// changed -- a 0 -> positive parked transition, a wave waking (wake_wave), new
+  /// resident work (add_resident), or a wave retiring (remove_resident). escape_ready
   /// trusts a CU's published summary only if it was refreshed at the current
   /// version, which closes the workgroup-turnover gap: a parked wave replaced by
   /// (or joined by) a runnable producer advances the version, so a peer's earlier
-  /// zero-runnable summary cannot survive to drive a false escape.
+  /// zero-runnable summary cannot survive to drive a false escape. A shard's
+  /// Unplaced record is likewise re-armed: once a retirement advances the version,
+  /// the CP's stale attempt record forces a deferral until it re-attempts placement
+  /// against the freed capacity.
   uint64_t summary_epoch_ = 0;
   /// Per-CU published count of signalable (can-still-run) waves, per process,
   /// refreshed each step by the owning CU. Absent/stale CUs block escape.

@@ -158,27 +158,46 @@ void GwsDevice::add_resident(uint32_t process_id, uint32_t dispatch_id, uint32_t
   ++summary_epoch_;
 }
 
-void GwsDevice::set_shard_pending(uint32_t dispatch_id, uint32_t process_id, const void *shard_key,
-                                  bool pending) {
+void GwsDevice::set_shard_placement(uint32_t process_id, uint32_t dispatch_id,
+                                    const void *shard_key, ShardPlacement state) {
   std::lock_guard<std::mutex> lock(mutex_);
-  if (pending) {
+  switch (state) {
+  case ShardPlacement::Pending: {
+    // Accepted but not yet attempted: a future signaler whose placement the CP has
+    // not even tried. Record the never-attempted sentinel so escape defers
+    // unconditionally until the CP works it.
     DispatchAdmission &adm = admission_[dispatch_id];
     adm.process_id = process_id;
-    adm.unattempted_shards.insert(shard_key);
-    // A newly pending shard is a future signaler; force peers to republish before
-    // any escape decision trusts a snapshot taken before it was known.
+    adm.shard_attempt_epoch[shard_key] = kShardNeverAttempted;
+    // Force peers to republish before any escape decision trusts a snapshot taken
+    // before this shard was known.
     ++summary_epoch_;
     return;
   }
-  // Clearing: the shard's command processor has run its placement pass. Drop it from
-  // the pending set (no-op if the dispatch was already torn down or never pending).
-  auto it = admission_.find(dispatch_id);
-  if (it == admission_.end())
+  case ShardPlacement::Unplaced: {
+    // The CP attempted placement and some workgroup did not fit. Record the current
+    // capacity version: escape defers while this stays current (genuinely stuck ->
+    // terminates) and re-arms if a later retirement advances the version before the
+    // CP re-attempts against the freed room.
+    DispatchAdmission &adm = admission_[dispatch_id];
+    adm.process_id = process_id;
+    adm.shard_attempt_epoch[shard_key] = summary_epoch_;
     return;
-  if (it->second.unattempted_shards.erase(shard_key) != 0)
-    // Removing a pending shard may unblock a previously-deferred escape; force peers
-    // to republish so the quiescence scan re-evaluates against the cleared state.
-    ++summary_epoch_;
+  }
+  case ShardPlacement::Resolved: {
+    // Fully placed or discarded: drop the shard (no-op if the dispatch was already
+    // torn down or the shard was never published).
+    auto it = admission_.find(dispatch_id);
+    if (it == admission_.end())
+      return;
+    if (it->second.shard_attempt_epoch.erase(shard_key) != 0)
+      // Removing a deferring shard may unblock a previously-deferred escape; force
+      // peers to republish so the quiescence scan re-evaluates against the cleared
+      // state.
+      ++summary_epoch_;
+    return;
+  }
+  }
 }
 
 void GwsDevice::remove_resident(uint32_t dispatch_id, uint32_t count) {
@@ -189,6 +208,11 @@ void GwsDevice::remove_resident(uint32_t dispatch_id, uint32_t count) {
   if (it == resident_waves_.end())
     return;
   it->second = it->second > count ? it->second - count : 0;
+  // A retirement frees CU capacity, so a producer the CP previously could not place
+  // may now fit. Advance the capacity version: any shard recorded Unplaced at an
+  // older version is now stale and must defer escape until the CP re-attempts
+  // placement against the freed room (see set_shard_placement / escape_ready).
+  ++summary_epoch_;
   if (it->second == 0) {
     resident_waves_.erase(it);
     // A dispatch that has admitted its whole grid and now holds no resident wave
@@ -255,6 +279,12 @@ size_t GwsDevice::tracked_process_count() {
 size_t GwsDevice::tracked_dispatch_count() {
   std::lock_guard<std::mutex> lock(mutex_);
   return admission_.size();
+}
+
+size_t GwsDevice::tracked_shard_count(uint32_t dispatch_id) {
+  std::lock_guard<std::mutex> lock(mutex_);
+  auto it = admission_.find(dispatch_id);
+  return it == admission_.end() ? 0 : it->second.shard_attempt_epoch.size();
 }
 
 void GwsDevice::release_sema_waiter(Resource &res, uint64_t seq) {
@@ -367,17 +397,25 @@ bool GwsDevice::escape_ready(uint32_t process_id) const {
   auto parked_it = parked_.find(process_id);
   if (parked_it == parked_.end() || parked_it->second == 0)
     return false;
-  // A dispatch of this process with a fan-out shard whose workgroups the command
-  // processor has not yet attempted to place may still produce a signaler, so defer.
-  // Placement lives in the CP (it alone knows eligible CUs, WGP/PM4 capacity, and it
-  // places greedily so a placeable producer is already resident -- see the class
-  // doc); the store only reads the CP-published pending set, never re-deriving
-  // placement (which would race the owning CU's allocator). A dispatch with no
-  // pending shard published is governed by the quiescence scan below.
+  // A dispatch of this process with a shard the command processor has not yet
+  // placed may still produce a signaler, so defer. Placement lives in the CP (it
+  // alone knows eligible CUs, WGP/PM4 capacity, and it places greedily so a
+  // placeable producer is already resident -- see the class doc); the store only
+  // reads the CP-published placement records, never re-deriving placement (which
+  // would race the owning CU's allocator). A shard defers escape while it is either
+  // never-attempted (Pending) or recorded Unplaced at a stale capacity version --
+  // the latter means a retirement has freed room since the CP last tried, so it must
+  // re-attempt before the wait is abandoned. A dispatch with no shard published is
+  // governed by the quiescence scan below.
   for (const auto &[dispatch_id, adm] : admission_) {
     (void)dispatch_id;
-    if (adm.process_id == process_id && !adm.unattempted_shards.empty())
-      return false; // A not-yet-attempted shard may still place a producer.
+    if (adm.process_id != process_id)
+      continue;
+    for (const auto &[shard_key, attempt_epoch] : adm.shard_attempt_epoch) {
+      (void)shard_key;
+      if (attempt_epoch != summary_epoch_)
+        return false; // Never-attempted (sentinel) or stale: the CP may still place.
+    }
   }
   uint64_t total_runnable = 0;
   for (ComputeUnitCore *cu : cus_) {

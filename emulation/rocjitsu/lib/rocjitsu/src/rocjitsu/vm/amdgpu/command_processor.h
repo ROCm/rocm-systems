@@ -488,6 +488,20 @@ public:
     drain_fanout_inbox();
   }
 
+  /// @brief Drive the real fan-out path (owner-share registration + peer exposure).
+  void fan_out_dispatch_for_test(DispatchEntry &dp) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    fan_out_dispatch(dp, DispatchLaunchMetadata{});
+  }
+
+  /// @brief Run a real placement pass for @p entry (publishes its shard state).
+  [[nodiscard]] std::pair<uint32_t, VmAccessOutcome>
+  dispatch_workgroups_for_test(DispatchEntry &entry) {
+    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+    const auto result = dispatch_workgroups(entry);
+    return {result.dispatched, result.outcome};
+  }
+
   [[nodiscard]] bool queue_exception_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     auto queue =

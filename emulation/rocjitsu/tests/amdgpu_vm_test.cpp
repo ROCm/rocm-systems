@@ -5884,6 +5884,55 @@ TEST(CommandProcessorAqlTest, CuIdleDoesNotExecutePm4AfterPeerGridFault) {
   }
 }
 
+// Discarding a fan-out shard during drain must release the GWS placement mark the
+// shard registered when it was accepted into the inbox. Only the owning CP's placement
+// pass clears that mark, and a discarded shard never runs one, so a dropped shard would
+// otherwise wedge the deadlock backstop forever. Faulted-queue path: a peer emits a
+// second shard before it observes the shared terminal fault; the drain drops it against
+// the now-faulted queue and must clear its mark. Driven through the real accept/fault/
+// drain methods on a CP that owns a CU (so the device-global store is actually touched).
+TEST(CommandProcessorGwsFanoutTest, FaultedQueueDrainClearsShardPlacementMark) {
+  VmFixture f("cdna3");
+  auto &gws = f.cu()->gws_device();
+  constexpr uint32_t kProcess = 0;
+  constexpr uint32_t kQueue = 1;
+
+  amdgpu::ComputeQueueConfig queue{};
+  queue.queue_id = kQueue;
+  queue.process_id = kProcess;
+  queue.ring_base_va = test::AqlQueue::DEFAULT_RING_ADDR;
+  queue.ring_size = test::AqlQueue::DEFAULT_RING_SIZE;
+  queue.read_ptr_va = test::AqlQueue::DEFAULT_READ_PTR_ADDR;
+  queue.write_ptr_va = test::AqlQueue::DEFAULT_WRITE_PTR_ADDR;
+  queue.doorbell_mode = amdgpu::QueueDoorbellMode::Explicit;
+  ASSERT_NE(f.cp()->register_queue(std::move(queue)), 0u);
+
+  // A first shard lands in the queue, then a VM fault faults that queue.
+  amdgpu::DispatchEntry first{};
+  first.dispatch_id = 10;
+  first.queue_id = kQueue;
+  first.process_id = kProcess;
+  first.kind = amdgpu::DispatchPacketKind::Kernel;
+  first.total_wgs = 1;
+  f.cp()->accept_fanout_shard(first);
+  f.cp()->drain_fanout_inbox_for_test();
+  ASSERT_TRUE(f.cp()->has_dispatch_for_test(kQueue, kProcess, 10));
+  f.cp()->notify_dispatch_vm_fault(kQueue, kProcess, 10, amdgpu::VmAccessOutcome::Faulted);
+  f.cp()->drain_fanout_inbox_for_test();
+  ASSERT_TRUE(f.cp()->queue_faulted_for_test(kQueue, kProcess));
+
+  // A second shard arrives after the fault: accept registers its pending placement
+  // mark, and the drain must drop it against the faulted queue AND clear that mark.
+  amdgpu::DispatchEntry late = first;
+  late.dispatch_id = 11;
+  f.cp()->accept_fanout_shard(late);
+  EXPECT_EQ(gws.tracked_shard_count(11), 1u);
+  f.cp()->drain_fanout_inbox_for_test();
+  EXPECT_FALSE(f.cp()->has_dispatch_for_test(kQueue, kProcess, 11));
+  EXPECT_EQ(gws.tracked_shard_count(11), 0u)
+      << "faulted-queue drain left the dropped shard's GWS placement mark set";
+}
+
 TEST(CommandProcessorAqlTest, InvalidPm4IbFaultsWithoutCompletionOrSuccessorExecution) {
   for (const auto *arch : {"cdna3", "cdna4"}) {
     SCOPED_TRACE(arch);
