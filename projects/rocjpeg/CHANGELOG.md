@@ -13,12 +13,7 @@ Documentation for rocJPEG is available at
 
 ### Changed
 
-* The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image. Previously, the crop rectangle was handled inconsistently:
-  * A rectangle that fit the image size but was positioned past its right or bottom edge, or that had a negative left or top coordinate, was accepted. The part of the output outside the image held undefined data.
-  * A rectangle that was larger than the image, inverted, or zero-area was silently ignored, and the full image was decoded.
-
-  To decode the full image, set all four coordinates of the crop rectangle to 0. A batched decode with an invalid crop rectangle for any image is rejected before any image is decoded.
-* The samples now decode the full image, and print a message, for an image that the `-crop` rectangle does not fit, instead of passing the rectangle to rocJPEG.
+* The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
 
 ## rocJPEG 1.12.0
 
