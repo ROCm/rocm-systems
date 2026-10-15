@@ -53,16 +53,21 @@ View the help menu of ``rocprof-sys-attach`` using the ``-h`` or ``--help`` opti
 
    Options:
      -p, --pid PID[,PID,...]
-                          Process ID(s) to attach to (required, repeatable)
+                          Process ID(s) to attach to (required, repeatable;
+                          quote the list if it contains spaces)
      -o, --output PATH    Output path for profiling results
      -F, --format FORMAT[,FORMAT,...]
                           Output format(s): perfetto, rocpd
+     -d, --detach-after SECONDS
+                          Detach from all processes after SECONDS
+                          (non-interactive). When omitted, waits on stdin.
      -h, --help           Show this help message
 
+   Prerequisites:
+     Target processes must be started with ROCP_TOOL_ATTACH=1.
+     Appropriate ptrace permissions are also required.
+
    Environment variables:
-     ROCPROFSYS_OUTPUT_PATH       Output directory for profiling data
-     ROCPROFSYS_TRACE             Enable perfetto trace output
-     ROCPROFSYS_USE_ROCPD         Enable rocpd database output
      ROCPROF_ATTACH_TOOL_LIBRARY  Path to the tool library
 
    Once attached, enter a session id to detach from that process, 'a' to
@@ -218,7 +223,11 @@ At the prompt:
   left, ENTER only redisplays the list.
 * End of input (for example, ``Ctrl+D``) detaches from all remaining processes.
 
-Each process writes its own output, named after its PID. ``rocprof-sys-attach``
+If detaching from a process fails, its session stays in the list so you can retry.
+
+Each process writes its own output, named after its PID. Keep
+``ROCPROFSYS_USE_PID`` enabled (the default) when attaching to several processes;
+otherwise their output files can share a name and overwrite each other. ``rocprof-sys-attach``
 exits once the last session is detached, with a non-zero exit status if attaching
 to or detaching from any of the processes failed.
 
