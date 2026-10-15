@@ -4917,6 +4917,10 @@ amdsmi_status_t amdsmi_get_clk_freq(amdsmi_processor_handle processor_handle,
       amdsmi_clk_info_t clk_info = {};
       amdsmi_status_t ret = b->GetClockInfo(clk_type, &clk_info);
       if (ret != AMDSMI_STATUS_SUCCESS) return ret;
+      // amdsmi_frequencies_t has no N/A translation downstream (unlike
+      // amdsmi_get_clock_info()'s clk field), so an unavailable sensor must
+      // surface as NOT_SUPPORTED rather than a bogus ~4.29e9 MHz reading.
+      if (clk_info.clk == std::numeric_limits<uint32_t>::max()) return AMDSMI_STATUS_NOT_SUPPORTED;
       if (f == nullptr) return AMDSMI_STATUS_INVAL;
       std::memset(f, 0, sizeof(*f));
       f->num_supported = 1;
@@ -5197,6 +5201,14 @@ amdsmi_status_t amdsmi_reset_gpu(amdsmi_processor_handle processor_handle) {
 
 amdsmi_status_t amdsmi_get_gpu_busy_percent(amdsmi_processor_handle processor_handle,
                                             uint32_t* gpu_busy_percent) {
+#ifdef ENABLE_WSL_BACKEND
+  {
+    amd::smi::AMDSmiGPUDevice* gpu_device = nullptr;
+    amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &gpu_device);
+    if (r != AMDSMI_STATUS_SUCCESS) return r;
+    if (auto* b = gpu_device->backend()) return b->GetBusyPercent(gpu_busy_percent);
+  }
+#endif
   return rsmi_wrapper(rsmi_dev_busy_percent_get, processor_handle, 0, gpu_busy_percent);
 }
 

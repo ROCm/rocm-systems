@@ -424,8 +424,17 @@ class CodeGenerator:
         'ds_read_tr_b6': 'local',
         # Internal variant selected by the ds_barrier_arrive generator.
         'ds_barrier_arrive_async': 'async_local',
+        # Only the instructions in _GFX9_IMAGE_MEMORY_INSTRUCTIONS issue these.
+        'image_load': 'vmem_load',
+        'image_store': 'vmem_store',
     }
     _MEMORY_CLASSES = frozenset(_MEMORY_ISSUE_KINDS) - {'ds_barrier_arrive_async'}
+
+    # Image instructions whose generated bodies issue a memory access. Every
+    # other image instruction keeps its stub, which must not claim a pipeline.
+    _GFX9_IMAGE_MEMORY_INSTRUCTIONS = frozenset(
+        {('cdna2', 'IMAGE_LOAD'), ('cdna2', 'IMAGE_STORE')}
+    )
 
     # Shared scalar execution uses these encoding values without including one
     # ISA's generated operand enums. Validate the corresponding OPR_SSRC
@@ -488,6 +497,12 @@ class CodeGenerator:
         # class. The matching immutable callback table is emitted after all
         # instruction classes have been generated.
         self._split_execution_classes: list[str] = []
+
+    def _issues_image_memory(self, name: str) -> bool:
+        return (
+            self.isa_spec.arch_name,
+            name.upper(),
+        ) in self._GFX9_IMAGE_MEMORY_INSTRUCTIONS
 
     @property
     def generated_dir_name(self) -> str:
@@ -5548,10 +5563,26 @@ class CodeGenerator:
     def _mimg_operand_size_expr(
         self, enc_name: str, inst_name: str, opnd_name: str
     ) -> str | None:
+        if enc_name.upper() != 'ENC_MIMG':
+            return None
         if (
-            not self.isa_spec.profile.renders_gfx11_image_syntax
-            or enc_name.upper() != 'ENC_MIMG'
+            self.isa_spec.arch_name == 'cdna2'
+            and inst_name.upper() == 'IMAGE_GET_RESINFO'
+            and opnd_name == 'vdata'
         ):
+            return '(32 * std::max(1, std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})))'
+        if self._issues_image_memory(inst_name):
+            if opnd_name == 'vdata':
+                fields = 'reinterpret_cast<const OpEncoding *>(inst)'
+                return (
+                    f'(32 * ((std::max(1, std::popcount(uint32_t{{{fields}->dmask}})) + '
+                    f'{fields}->d16) >> {fields}->d16))'
+                )
+            if opnd_name == 'vaddr':
+                # GFX9 dimensions come from T#, unavailable at decode time.
+                # Three coordinates cover every supported load/store shape.
+                return '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)'
+        if not self.isa_spec.profile.renders_gfx11_image_syntax:
             return None
         if opnd_name == 'vdata':
             fixed_words = self.isa_spec.profile.gfx11_mimg_fixed_vdata_words.get(
@@ -7883,7 +7914,7 @@ class CodeGenerator:
         if inst.name.upper() in ('LDS_DIRECT_LOAD', 'DS_DIRECT_LOAD'):
             return '  amdgpu::execute_lds_direct_load(*this, wf, inst_.vdst);'
 
-        # ── Image pipeline stubs ──────────────────────────────────────────
+        # ── Image execution and pipeline stubs ──────────────────────────────────────────
         # NOTE for image execution: the image ADDRESS is carried as the
         # fieldless ``vaddr`` operand (OPR_VGPR), currently emitted as an
         # inert placeholder. The real gfx12 address is NSA -- up to
@@ -7891,6 +7922,33 @@ class CodeGenerator:
         # single base+width Operand cannot express -- so decode it from the
         # machine-inst fields here. ``vdata`` and ``rsrc`` are field-bearing
         # and already modeled.
+        if cls in ('image_load', 'image_store') and self._issues_image_memory(
+            inst.name
+        ):
+            is_load = cls == 'image_load'
+            data_base = self._vgpr_base_expr('vdata')
+            L.append(
+                '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::GLOBAL_MEM);'
+            )
+            L.append(f'  d->is_load = {"true" if is_load else "false"};')
+            L.append(f'  d->mtype = {self._mtype_expr()};')
+            self._append_wait_counter_type(L, sem)
+            if is_load:
+                L.append(f'  d->dst_reg_base = {data_base};')
+            L.append(
+                '  if (amdgpu::prepare_gfx9_image_access(wf, *d, inst_.srsrc * 4, '
+                'inst_.vaddr, {.dmask = inst_.dmask, .a16 = bool(inst_.a16), '
+                '.d16 = bool(inst_.d16), .lwe = bool(inst_.lwe), '
+                '.da = bool(inst_.da), .unorm = bool(inst_.unorm)})'
+                '.failed()) {'
+            )
+            L.append('    return;')
+            L.append('  }')
+            if not is_load:
+                L.append(f'  amdgpu::capture_buffer_format_store(wf, *d, {data_base});')
+            L.append('  set_data(std::move(d));')
+            return '\n'.join(L)
+
         if cls == 'image_load':
             # Minimal image load: treat as a flat read from the image resource base address.
             # Full image addressing (texture coordinates, dimensions) not yet implemented.
@@ -10794,7 +10852,10 @@ class CodeGenerator:
                                 )
                             )
                             if (
-                                profile.renders_gfx11_image_syntax
+                                (
+                                    profile.renders_gfx11_image_syntax
+                                    or self.isa_spec.arch_name == 'cdna2'
+                                )
                                 and enc.enc_name.upper() == 'ENC_MIMG'
                                 and opnd.name in ('srsrc', 'ssamp')
                             ):
@@ -12522,7 +12583,14 @@ class CodeGenerator:
                                     f'amdgpu::true16_source_byte_mask(amdgpu::vop3_opsel(inst_), {bit}) : 0xf);'
                                 )
 
-                    if _mem_sem and _mem_sem.semantic_class in self._MEMORY_CLASSES:
+                    if (
+                        _mem_sem
+                        and _mem_sem.semantic_class in self._MEMORY_CLASSES
+                        and (
+                            not _mem_sem.semantic_class.startswith('image_')
+                            or self._issues_image_memory(inst.name)
+                        )
+                    ):
                         ctor_body_parts.append(
                             self._memory_issue_initializer(_mem_sem, inst_field_names)
                         )
@@ -13839,6 +13907,19 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/image_resource.h', False)
                     )
+                if any(self._issues_image_memory(i.name) for i in all_insts):
+                    cpp_includes.extend(
+                        (header, False) for header in self._cache_flags_includes()
+                    )
+                    cpp_includes.extend(
+                        [
+                            (
+                                'rocjitsu/isa/arch/amdgpu/shared/gfx9_image_access.h',
+                                False,
+                            ),
+                            ('memory', True),
+                        ]
+                    )
                 if enc.enc_name.upper() in ('ENC_LDSDIR', 'ENC_VDSDIR'):
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
@@ -14227,6 +14308,8 @@ class CodeGenerator:
                 model_impl_text = '\n'.join(
                     str(impl) for impl in class_func_impls.model
                 )
+                if 'std::popcount' in model_impl_text:
+                    model_cpp_includes.extend([('algorithm', True), ('bit', True)])
                 if 'std::make_unique' in model_impl_text:
                     model_cpp_includes.append(('memory', True))
 
