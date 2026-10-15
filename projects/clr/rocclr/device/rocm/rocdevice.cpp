@@ -1889,6 +1889,13 @@ device::VirtualDevice* Device::createVirtualDevice(amd::CommandQueue* queue) {
   if (queue == nullptr) {
     // In HIP mode the device queue will be allocated for the cooperative launches only
     cooperative = amd::IS_HIP && settings().enableCoopGroups_;
+    // WAR: gfx1171 ROCr bug — hsa_executable_freeze hangs when a cooperative
+    // HSA queue is registered on the agent.  Disable cooperative queue creation
+    // on affected hardware; software grid sync works on regular queues.
+    // TODO: Remove once ROCr is fixed.
+    if (cooperative && isa().versionMajor() == 11 && isa().versionMinor() == 7) {
+      cooperative = false;
+    }
     profiling = amd::IS_HIP;
   }
   // Initialization of heap and other resources occur during the command
