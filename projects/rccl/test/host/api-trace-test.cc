@@ -9,23 +9,16 @@
 
 #include <gtest/gtest.h>
 
-#include <cstdarg>
 #include <cstdint>
-#include <cstdio>
 #include <cstring>
 #include <string>
 #include <type_traits>
 #include <vector>
 
 #include "nccl.h"
-#include "debug.h"
-
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
+#include "fakes/debug_fakes.h"
 
 namespace {
-std::vector<std::string> g_warnings;
 std::vector<std::string> g_recorded;
 std::vector<std::string> g_rangeNames;
 std::vector<size_t> g_rangeBytes;
@@ -56,16 +49,6 @@ ncclResult_t Hit(const char* name, A... a) {
 }
 }  // namespace
 
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long /*flags*/, const char* /*filefunc*/, int /*line*/,
-                  const char* fmt, ...) {
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  if (level == NCCL_LOG_WARN) g_warnings.push_back(buf);
-}
-
 #include API_TRACE_CC_PATH
 
 namespace rccl {
@@ -85,7 +68,7 @@ roctx_scoped_range_in::roctx_scoped_range_in(const nvtxPayloadSchemaEntry_t* /*s
   g_rangeBytes.push_back(static_cast<const NcclNvtxParamsMSCCL*>(data[0].payload)->bytes);
   ++g_rangesOpen;
 }
-roctx_scoped_range_in::~roctx_scoped_range_in() { --g_rangesOpen; }
+roctx_scoped_range_in::~roctx_scoped_range_in() noexcept { --g_rangesOpen; }
 
 // clang-format off
 ncclResult_t ncclAllGather_impl(const void* s, void* r, size_t n, ncclDataType_t t, ncclComm_t c, hipStream_t st) {
@@ -218,12 +201,12 @@ const auto kStream = H<hipStream_t>(0x57);
 const auto kSend = H<const void*>(0x5e);
 const auto kRecv = H<void*>(0x4e);
 
-#define EXPECT_FORWARDED(expr, fn, ...)                                     \
-  do {                                                                      \
-    g_calls.clear();                                                        \
-    EXPECT_EQ((expr), kResult) << #expr;                                    \
-    ASSERT_EQ(g_calls.size(), 1u) << #expr;                                 \
-    EXPECT_EQ(g_calls[0].name, fn) << #expr;                                \
+#define EXPECT_FORWARDED(expr, fn, ...) \
+  do { \
+    g_calls.clear(); \
+    EXPECT_EQ((expr), kResult) << #expr; \
+    ASSERT_EQ(g_calls.size(), 1u) << #expr; \
+    EXPECT_EQ(g_calls[0].name, fn) << #expr; \
     EXPECT_EQ(g_calls[0].args, (std::vector<uintptr_t>{__VA_ARGS__})) << #expr; \
   } while (0)
 
@@ -231,7 +214,7 @@ class ApiTraceMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     g_calls.clear();
-    g_warnings.clear();
+    ResetDebugLog();
     g_recorded.clear();
     g_rangeNames.clear();
     g_rangeBytes.clear();
@@ -328,28 +311,30 @@ TEST_F(ApiTraceMicrotest, Dispatch_Collectives) {
                    18, t, op, W(kComm), W(kStream));
   EXPECT_FORWARDED(ncclScatter(kSend, kRecv, 19, t, 5, kComm, kStream), "Scatter", W(kSend), W(kRecv), 19, t, 5,
                    W(kComm), W(kStream));
-  EXPECT_TRUE(g_warnings.empty());
+  EXPECT_TRUE(DebugLogLines(NCCL_LOG_WARN).empty());
 }
 
 TEST_F(ApiTraceMicrotest, Dispatch_AlltoAllv) {
   size_t sc[1], sd[1], rc[1], rd[1];
   EXPECT_FORWARDED(ncclAlltoAllv(kSend, sc, sd, kRecv, rc, rd, ncclInt64, kComm, kStream), "AlltoAllv", W(kSend),
                    W(sc), W(sd), W(kRecv), W(rc), W(rd), ncclInt64, W(kComm), W(kStream));
-  EXPECT_TRUE(g_warnings.empty());
+  EXPECT_TRUE(DebugLogLines(NCCL_LOG_WARN).empty());
 }
 
+#pragma clang diagnostic push
+#pragma clang diagnostic ignored "-Wdeprecated-declarations"
 TEST_F(ApiTraceMicrotest, Dispatch_DeprecatedAllToAllWarnsAndForwards) {
   EXPECT_FORWARDED(ncclAllToAll(kSend, kRecv, 7, ncclInt8, kComm, kStream), "AlltoAll", W(kSend), W(kRecv), 7,
                    ncclInt8, W(kComm), W(kStream));
-  ASSERT_EQ(g_warnings.size(), 1u);
-  EXPECT_NE(g_warnings[0].find("ncclAllToAll is deprecated, please use ncclAlltoAll"), std::string::npos);
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "ncclAllToAll is deprecated, please use ncclAlltoAll"));
 
   size_t sc[1], sd[1], rc[1], rd[1];
   EXPECT_FORWARDED(ncclAllToAllv(kSend, sc, sd, kRecv, rc, rd, ncclInt8, kComm, kStream), "AlltoAllv", W(kSend),
                    W(sc), W(sd), W(kRecv), W(rc), W(rd), ncclInt8, W(kComm), W(kStream));
-  ASSERT_EQ(g_warnings.size(), 2u);
-  EXPECT_NE(g_warnings[1].find("ncclAllToAllv is deprecated, please use ncclAlltoAllv"), std::string::npos);
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "ncclAllToAllv is deprecated, please use ncclAlltoAllv"));
+  EXPECT_EQ(DebugLogLines(NCCL_LOG_WARN).size(), 2u);
 }
+#pragma clang diagnostic pop
 
 TEST_F(ApiTraceMicrotest, Dispatch_PointToPointAndSignals) {
   const auto win = H<ncclWindow_t>(0x3d);
@@ -447,9 +432,10 @@ TEST_F(ApiTraceMicrotest, Msccl_LoadAndUnloadAreRecordedNoOps) {
   EXPECT_EQ(mscclUnloadAlgo(handle), ncclSuccess);
   EXPECT_EQ(handle, 77);
   EXPECT_EQ(g_recorded, (std::vector<std::string>{"mscclLoadAlgo", "mscclUnloadAlgo"}));
-  ASSERT_EQ(g_warnings.size(), 2u);
-  EXPECT_NE(g_warnings[0].find("mscclLoadAlgo has no effect"), std::string::npos);
-  EXPECT_NE(g_warnings[1].find("mscclUnloadAlgo has no effect"), std::string::npos);
+  std::vector<std::string> warnings = DebugLogLines(NCCL_LOG_WARN);
+  ASSERT_EQ(warnings.size(), 2u);
+  EXPECT_NE(warnings[0].find("mscclLoadAlgo has no effect"), std::string::npos);
+  EXPECT_NE(warnings[1].find("mscclUnloadAlgo has no effect"), std::string::npos);
   EXPECT_TRUE(g_calls.empty());
 }
 
@@ -459,8 +445,9 @@ TEST_F(ApiTraceMicrotest, Msccl_RunIsARecordedNoOp) {
                          kStream),
             ncclSuccess);
   EXPECT_EQ(g_recorded, std::vector<std::string>{"mscclRunAlgo"});
-  ASSERT_EQ(g_warnings.size(), 1u);
-  EXPECT_NE(g_warnings[0].find("mscclRunAlgo has no effect"), std::string::npos);
+  std::vector<std::string> warnings = DebugLogLines(NCCL_LOG_WARN);
+  ASSERT_EQ(warnings.size(), 1u);
+  EXPECT_NE(warnings[0].find("mscclRunAlgo has no effect"), std::string::npos);
   EXPECT_EQ(g_rangeNames, std::vector<std::string>{"RCCL_MSCCL"});
   EXPECT_EQ(g_rangeBytes, std::vector<size_t>{64 * sizeof(float)});
   EXPECT_EQ(g_rangesOpen, 0);

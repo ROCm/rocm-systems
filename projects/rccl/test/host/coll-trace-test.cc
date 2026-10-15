@@ -12,7 +12,6 @@
 
 #include <atomic>
 #include <chrono>
-#include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstring>
@@ -26,14 +25,10 @@
 
 #include "comm.h"
 #include "latency_profiler/CollTraceFunc.h"
-
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
+#include "fakes/debug_fakes.h"
 
 namespace {
 std::mutex g_mutex;  // the worker thread reaches most of these seams
-std::vector<std::pair<ncclDebugLogLevel, std::string>> g_logs;
 std::map<std::string, int64_t> g_params;
 std::map<std::string, std::string> g_env;
 uintptr_t g_nextEvent = 0x100;
@@ -59,17 +54,6 @@ std::vector<AllGatherCall> g_allGathers;
 ncclResult_t g_allGatherResult = ncclSuccess;
 float g_peerLatency = 5.0f;  // every other rank reports this for every collective
 }  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long /*flags*/, const char* /*filefunc*/, int /*line*/,
-                  const char* fmt, ...) {
-  char buf[1024];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  std::lock_guard<std::mutex> lock(g_mutex);
-  g_logs.push_back({level, buf});
-}
 
 int64_t ncclLoadParam(char const* env, int64_t deftVal, int64_t, int64_t*, int8_t*) {
   std::lock_guard<std::mutex> lock(g_mutex);
@@ -134,9 +118,10 @@ ncclResult_t bootstrapIntraNodeAllGather(void*, int* ranks, int rank, int nranks
   int per = size / (int)sizeof(float);
   g_allGathers.push_back({ranks, rank, nranks, size, std::vector<float>(data + rank * per, data + (rank + 1) * per)});
   if (g_allGatherResult != ncclSuccess) return g_allGatherResult;
-  for (int r = 0; r < 8; ++r)
-    if (r != rank)
-      for (int i = 0; i < per; ++i) data[r * per + i] = g_peerLatency;
+  for (int r = 0; r < 8; ++r) {
+    if (r == rank) continue;
+    for (int i = 0; i < per; ++i) data[r * per + i] = g_peerLatency;
+  }
   return ncclSuccess;
 }
 
@@ -158,21 +143,6 @@ const char* ncclDatatypeToString(ncclDataType_t type) {
 namespace {
 
 using namespace latency_profiler;
-
-bool Logged(ncclDebugLogLevel level, const std::string& needle) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  for (const auto& l : g_logs)
-    if (l.first == level && l.second.find(needle) != std::string::npos) return true;
-  return false;
-}
-
-std::vector<std::string> Logs(const std::string& needle) {
-  std::lock_guard<std::mutex> lock(g_mutex);
-  std::vector<std::string> out;
-  for (const auto& l : g_logs)
-    if (l.second.find(needle) != std::string::npos) out.push_back(l.second);
-  return out;
-}
 
 size_t AllGatherCount() {
   std::lock_guard<std::mutex> lock(g_mutex);
@@ -198,7 +168,7 @@ class CollTraceMicrotest : public ::testing::Test {
  protected:
   void SetUp() override {
     std::lock_guard<std::mutex> lock(g_mutex);
-    g_logs.clear();
+    ResetDebugLog();
     g_params = {{"NCCL_COLLTRACE_CHECK_INTERVAL_MS", 0}};
     g_env.clear();
     g_eventCreateResult = hipSuccess;
@@ -317,7 +287,7 @@ TEST_F(CollTraceMicrotest, Utils_ReportLogsOneLinePerCollective) {
 
   reportToFile(stats, "hash");
 
-  std::vector<std::string> lines = Logs("coll_id");
+  std::vector<std::string> lines = DebugLogMatching("coll_id");
   ASSERT_EQ(lines.size(), 2u);
   EXPECT_EQ(lines[0], "coll_id 3, percent 25, min_latency_us 1.500000, max_latency_us 2.500000, op_name AllReduce, "
                       "data_type ncclFloat64, count 131072, message_size_MB 1.000000, comm_hash hash");
@@ -364,7 +334,7 @@ TEST_F(CollTraceMicrotest, Event_ElapsedTimeIsMeasuredFromTheStartEvent) {
   EXPECT_FLOAT_EQ(*ms, 2.5f);
   g_elapsedResult = hipErrorInvalidValue;
   EXPECT_EQ(stop.getElapsedTimeSinceEvent(&start), nullptr);
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "get elapsed time failed error: fake hip error"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "get elapsed time failed error: fake hip error"));
 }
 
 TEST_F(CollTraceMicrotest, Event_DestroysItsHipEvent) {
@@ -403,24 +373,24 @@ TEST_F(CollTraceMicrotest, Event_DefaultsToACommEventAndMoves) {
 
 TEST_F(CollTraceMicrotest, Trace_WorkerRunsOnTheCommDeviceUntilDestroyed) {
   comm_->cudaDev = 3;
-  auto* trace = new CollTrace(comm_.get());
-  ASSERT_TRUE(WaitUntil([] { return Logged(NCCL_LOG_INFO, "worker thread STARTED"); }));
+  auto trace = std::make_unique<CollTrace>(comm_.get());
+  ASSERT_TRUE(WaitUntil([] { return DebugLogged(NCCL_LOG_INFO, "worker thread STARTED"); }));
 
-  delete trace;
+  trace.reset();
 
   EXPECT_EQ(g_setDevices, std::vector<int>{3});
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "COLLTRACE: commHash 2748 rank 0 - worker thread TERMINATE"));
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "COLLTRACE: commHash 2748 rank 0 - Destroy COMPLETE"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "COLLTRACE: commHash 2748 rank 0 - worker thread TERMINATE"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "COLLTRACE: commHash 2748 rank 0 - Destroy COMPLETE"));
 }
 
 TEST_F(CollTraceMicrotest, Trace_WorkerExitsWhenTheDeviceCannotBeSet) {
   g_setDeviceResult = hipErrorInvalidDevice;
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  delete trace;
+  trace.reset();
 
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Cuda failure 'fake hip error'"));
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "worker thread STARTED"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Cuda failure 'fake hip error'"));
+  EXPECT_FALSE(DebugLogged(NCCL_LOG_INFO, "worker thread STARTED"));
 }
 
 TEST_F(CollTraceMicrotest, Trace_CreateEventMakesStartAndStopEvents) {
@@ -444,17 +414,17 @@ TEST_F(CollTraceMicrotest, Trace_EventCreateFailureIsOnlyLogged_Observed) {
 
   ASSERT_NE(event, nullptr);
   EXPECT_EQ(event->start->getCudaEvent(), nullptr);
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Cuda failure 'fake hip error'"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "Cuda failure 'fake hip error'"));
 }
 
 TEST_F(CollTraceMicrotest, Trace_RingBoundaryAllGathersAndReports) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 2);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f, 1 << 18);
-  Enqueue(trace, 10.0f, 1 << 18);
-  delete trace;
+  Enqueue(trace.get(), 2.0f, 1 << 18);
+  Enqueue(trace.get(), 10.0f, 1 << 18);
+  trace.reset();
 
   ASSERT_EQ(g_allGathers.size(), 1u);
   EXPECT_EQ(g_allGathers[0].ranks, localRankToRank_);
@@ -462,7 +432,7 @@ TEST_F(CollTraceMicrotest, Trace_RingBoundaryAllGathersAndReports) {
   EXPECT_EQ(g_allGathers[0].nranks, 2);
   EXPECT_EQ(g_allGathers[0].size, (int)(2 * sizeof(float)));
   EXPECT_EQ(g_allGathers[0].mine, (std::vector<float>{2.0f, 10.0f}));
-  std::vector<std::string> lines = Logs("coll_id");
+  std::vector<std::string> lines = DebugLogMatching("coll_id");
   ASSERT_EQ(lines.size(), 2u);
   EXPECT_EQ(lines[0], "coll_id 0, percent 150, min_latency_us 2000.000000, max_latency_us 5000.000000, op_name "
                       "AllReduce, data_type ncclFloat32, count 262144, message_size_MB 1.000000, comm_hash 2748");
@@ -474,14 +444,14 @@ TEST_F(CollTraceMicrotest, Trace_RingBoundaryAllGathersAndReports) {
 TEST_F(CollTraceMicrotest, Trace_RingBufferKeepsTheLastRecordMaxCollectives) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 2);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  for (float ms : {1.0f, 2.0f, 3.0f, 4.0f, 6.0f}) Enqueue(trace, ms);
-  delete trace;
+  for (float ms : {1.0f, 2.0f, 3.0f, 4.0f, 6.0f}) Enqueue(trace.get(), ms);
+  trace.reset();
 
   ASSERT_EQ(g_allGathers.size(), 2u);
   EXPECT_EQ(g_allGathers[1].mine, (std::vector<float>{3.0f, 4.0f}));
-  std::vector<std::string> lines = Logs("coll_id");
+  std::vector<std::string> lines = DebugLogMatching("coll_id");
   ASSERT_EQ(lines.size(), 4u);
   EXPECT_EQ(lines[2].find("coll_id 2,"), 0u);
   EXPECT_EQ(lines[3].find("coll_id 3,"), 0u);
@@ -492,110 +462,110 @@ TEST_F(CollTraceMicrotest, Trace_OnlyDeviceZeroAggregates_Observed) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
   comm_->cudaDev = 1;
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f);
-  delete trace;
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
 
   EXPECT_EQ(g_allGathers.size(), 1u);
-  EXPECT_TRUE(Logs("coll_id").empty());
+  EXPECT_TRUE(DebugLogMatching("coll_id").empty());
 }
 
 TEST_F(CollTraceMicrotest, Trace_StatsWaitForTheIntervalOrDumpSize) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 3);
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f);
-  Enqueue(trace, 2.0f);
+  Enqueue(trace.get(), 2.0f);
+  Enqueue(trace.get(), 2.0f);
   ASSERT_TRUE(WaitUntil([] { return AllGatherCount() == 2; }));
   std::this_thread::sleep_for(std::chrono::milliseconds(20));
-  EXPECT_TRUE(Logs("coll_id").empty());
-  Enqueue(trace, 2.0f);
-  ASSERT_TRUE(WaitUntil([] { return Logs("coll_id").size() == 3; }));
-  delete trace;
+  EXPECT_TRUE(DebugLogMatching("coll_id").empty());
+  Enqueue(trace.get(), 2.0f);
+  ASSERT_TRUE(WaitUntil([] { return DebugLogMatching("coll_id").size() == 3; }));
+  trace.reset();
 
-  EXPECT_EQ(Logs("coll_id").size(), 3u);
+  EXPECT_EQ(DebugLogMatching("coll_id").size(), 3u);
 }
 
 TEST_F(CollTraceMicrotest, Trace_ZeroIntervalReportsEveryAggregation) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   SetParam("NCCL_COLLTRACE_DUMP_INTERVAL_SEC", 0);
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f);
-  ASSERT_TRUE(WaitUntil([] { return Logs("coll_id").size() == 1; }));
-  delete trace;
+  Enqueue(trace.get(), 2.0f);
+  ASSERT_TRUE(WaitUntil([] { return DebugLogMatching("coll_id").size() == 1; }));
+  trace.reset();
 }
 
 TEST_F(CollTraceMicrotest, Trace_DestroyReportsWhatIsLeftOnRankZeroOnly) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
-  auto* trace = new CollTrace(comm_.get());
-  Enqueue(trace, 2.0f);
-  delete trace;
-  EXPECT_EQ(Logs("coll_id").size(), 1u);
+  auto trace = std::make_unique<CollTrace>(comm_.get());
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
+  EXPECT_EQ(DebugLogMatching("coll_id").size(), 1u);
 
   comm_->rank = 1;
-  trace = new CollTrace(comm_.get());
-  Enqueue(trace, 2.0f);
-  delete trace;
-  EXPECT_EQ(Logs("coll_id").size(), 1u);
+  trace = std::make_unique<CollTrace>(comm_.get());
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
+  EXPECT_EQ(DebugLogMatching("coll_id").size(), 1u);
 }
 
 TEST_F(CollTraceMicrotest, Trace_ZeroDumpSizeDropsEveryAggregation) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 0);
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f);
-  delete trace;
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
 
   EXPECT_EQ(g_allGathers.size(), 1u);
-  EXPECT_TRUE(Logs("coll_id").empty());
-  EXPECT_FALSE(Logs("seconds passed since last report, stats size = 0").empty());
+  EXPECT_TRUE(DebugLogMatching("coll_id").empty());
+  EXPECT_FALSE(DebugLogMatching("seconds passed since last report, stats size = 0").empty());
 }
 
 TEST_F(CollTraceMicrotest, Trace_AllGatherFailureSkipsTheAggregation) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   g_allGatherResult = ncclSystemError;
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f);
-  delete trace;
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
 
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "CollTrace: All gather exchange latency data failed"));
-  EXPECT_TRUE(Logs("coll_id").empty());
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "CollTrace: All gather exchange latency data failed"));
+  EXPECT_TRUE(DebugLogMatching("coll_id").empty());
 }
 
 TEST_F(CollTraceMicrotest, Trace_AggregationErrorIsLogged) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   g_peerLatency = 0;
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f);
-  delete trace;
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
 
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Aggregating error: CollTrace: latency value cannot be zero"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Aggregating error: CollTrace: latency value cannot be zero"));
 }
 
 TEST_F(CollTraceMicrotest, Trace_ReportErrorAtDestroyIsLogged) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f, 8, "ncclUint8");
-  delete trace;
+  Enqueue(trace.get(), 2.0f, 8, "ncclUint8");
+  trace.reset();
 
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "COLLTRACE: commHash 2748 rank 0 - Destroy FAILED: CollTrace: unsupported data "
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "COLLTRACE: commHash 2748 rank 0 - Destroy FAILED: CollTrace: unsupported data "
                                     "type ncclUint8"));
 }
 
 TEST_F(CollTraceMicrotest, Trace_FailedStopEventRecordsMinusOne) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   g_queryResults = {hipSuccess, hipErrorInvalidValue};  // start, stop
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f);
-  delete trace;
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
 
   ASSERT_EQ(g_allGathers.size(), 1u);
   EXPECT_EQ(g_allGathers[0].mine, std::vector<float>{-1.0f});
@@ -604,15 +574,15 @@ TEST_F(CollTraceMicrotest, Trace_FailedStopEventRecordsMinusOne) {
 TEST_F(CollTraceMicrotest, Trace_ElapsedTimeFailureStopsTheWorker) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   g_elapsedResult = hipErrorInvalidValue;
-  auto* trace = new CollTrace(comm_.get());
+  auto trace = std::make_unique<CollTrace>(comm_.get());
 
-  Enqueue(trace, 2.0f);
-  Enqueue(trace, 2.0f);
-  delete trace;
+  Enqueue(trace.get(), 2.0f);
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
 
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "getElapsedTimeSinceEvent failed, aborting worker thread"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "getElapsedTimeSinceEvent failed, aborting worker thread"));
   EXPECT_TRUE(g_allGathers.empty());
-  EXPECT_FALSE(Logged(NCCL_LOG_INFO, "worker thread TERMINATE"));
+  EXPECT_FALSE(DebugLogged(NCCL_LOG_INFO, "worker thread TERMINATE"));
 }
 
 TEST_F(CollTraceMicrotest, Func_InitNeedsTheEnvSetToOne) {
@@ -621,7 +591,7 @@ TEST_F(CollTraceMicrotest, Func_InitNeedsTheEnvSetToOne) {
   g_env["RCCL_LATENCY_PROFILER"] = "0";
   EXPECT_EQ(collTraceInit(comm_.get()), ncclSuccess);
   EXPECT_EQ(comm_->ctrace, nullptr);
-  EXPECT_TRUE(Logged(NCCL_LOG_INFO, "RCCL_LATENCY_PROFILER set by environment to 0."));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_INFO, "RCCL_LATENCY_PROFILER set by environment to 0."));
 
   g_env["RCCL_LATENCY_PROFILER"] = "1";
   EXPECT_EQ(collTraceInit(comm_.get()), ncclSuccess);
@@ -629,7 +599,7 @@ TEST_F(CollTraceMicrotest, Func_InitNeedsTheEnvSetToOne) {
   ASSERT_NE(first, nullptr);
   EXPECT_EQ(collTraceInit(comm_.get()), ncclSuccess);  // replaces the previous tracer
   EXPECT_NE(comm_->ctrace, nullptr);
-  EXPECT_EQ(Logs("Destroy COMPLETE").size(), 1u);
+  EXPECT_EQ(DebugLogMatching("Destroy COMPLETE").size(), 1u);
 }
 
 TEST_F(CollTraceMicrotest, Func_DestroyDeletesTheTracer) {
@@ -639,19 +609,20 @@ TEST_F(CollTraceMicrotest, Func_DestroyDeletesTheTracer) {
   EXPECT_EQ(collTraceDestroy(comm_.get()), ncclSuccess);
 
   EXPECT_EQ(comm_->ctrace, nullptr);
-  EXPECT_EQ(Logs("Destroy COMPLETE").size(), 1u);
+  EXPECT_EQ(DebugLogMatching("Destroy COMPLETE").size(), 1u);
 }
 
 TEST_F(CollTraceMicrotest, Func_RecordEventsOnlyWithATracerAndEvent) {
   auto stream = reinterpret_cast<hipStream_t>(0x57);
-  CollTrace* trace = new CollTrace(comm_.get());
+  auto owned = std::make_unique<CollTrace>(comm_.get());
+  CollTrace* trace = owned.get();
   auto event = trace->createEvent();
   hipEvent_t start = event->start->getCudaEvent(), stop = event->stop->getCudaEvent();
 
   EXPECT_EQ(collTraceRecordStartEvent(comm_.get(), stream, event.get()), ncclSuccess);  // no tracer yet
   EXPECT_EQ(collTraceRecordEndEvent(comm_.get(), nullptr, stream, trace->createEvent()), ncclSuccess);
   EXPECT_TRUE(g_recordedEvents.empty());
-  comm_->ctrace = trace;
+  comm_->ctrace = owned.release();
   EXPECT_EQ(collTraceRecordStartEvent(comm_.get(), stream, nullptr), ncclSuccess);
   EXPECT_EQ(collTraceRecordEndEvent(comm_.get(), nullptr, stream, nullptr), ncclSuccess);
   EXPECT_TRUE(g_recordedEvents.empty());
@@ -707,7 +678,7 @@ TEST_F(CollTraceAcquireMicrotest, NoTracerOrCommGivesNothing) {
   plan_->comm = nullptr;
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
   EXPECT_EQ(collTraceAquireEventCommon(comm_.get(), CollTraceEvent::EventType::COMM, stream_), nullptr);
-  EXPECT_FALSE(Logged(NCCL_LOG_WARN, "no coll task"));
+  EXPECT_FALSE(DebugLogged(NCCL_LOG_WARN, "no coll task"));
 }
 
 TEST_F(CollTraceAcquireMicrotest, EmptyPlanGivesNothing) {
@@ -715,7 +686,7 @@ TEST_F(CollTraceAcquireMicrotest, EmptyPlanGivesNothing) {
 
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
 
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "CollTrace: no coll task in this plan, this plan is empty"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "CollTrace: no coll task in this plan, this plan is empty"));
 }
 
 TEST_F(CollTraceAcquireMicrotest, EventCarriesTheFirstTasksInfo) {
@@ -743,8 +714,8 @@ TEST_F(CollTraceAcquireMicrotest, GraphCaptureIsNotTraced) {
 
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
 
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "COLLTRACE: does not support cuda graph. Collectives from comm abc will be skipped"));
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "COLLTRACE: failed to aquire event"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "COLLTRACE: does not support cuda graph. Collectives from comm abc will be skipped"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "COLLTRACE: failed to aquire event"));
 }
 
 TEST_F(CollTraceAcquireMicrotest, CaptureQueryFailureIsNotTraced) {
@@ -754,7 +725,7 @@ TEST_F(CollTraceAcquireMicrotest, CaptureQueryFailureIsNotTraced) {
 
   EXPECT_EQ(collTraceAquireEventBaseline(plan_.get(), stream_), nullptr);
 
-  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Internal error: ncclCudaGetCapturingGraph failed by 3"));
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Internal error: ncclCudaGetCapturingGraph failed by 3"));
 }
 
 }  // namespace

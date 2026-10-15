@@ -34,14 +34,9 @@
 #include <vector>
 
 #include "nccl.h"
-#include "debug.h"
-
-uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;  // log everything
-uint64_t ncclDebugMask = ~uint64_t(0);
-thread_local int ncclDebugNoWarn = 0;
+#include "fakes/debug_fakes.h"
 
 namespace {
-std::vector<std::string> g_errors;
 int g_device = 0;
 hipError_t g_addressRangeResult = hipSuccess;
 hipError_t g_captureInfoResult = hipSuccess;
@@ -52,16 +47,6 @@ std::vector<hipHostNodeParams> g_hostNodes;
 std::vector<hipGraph_t> g_hostNodeGraphs;
 const auto kGraph = reinterpret_cast<hipGraph_t>(0x6a);
 }  // namespace
-
-void ncclDebugLog(ncclDebugLogLevel level, unsigned long /*flags*/, const char* /*filefunc*/, int /*line*/,
-                  const char* fmt, ...) {
-  char buf[512];
-  va_list ap;
-  va_start(ap, fmt);
-  std::vsnprintf(buf, sizeof(buf), fmt, ap);
-  va_end(ap);
-  if (level == NCCL_LOG_ERROR) g_errors.push_back(buf);
-}
 
 hipError_t hipGetDevice(int* dev) {
   *dev = g_device;
@@ -162,7 +147,7 @@ class RecorderMicrotest : public ::testing::Test {
     char dirTemplate[] = "/tmp/rccl-recorder-test-XXXXXX";
     ASSERT_NE(mkdtemp(dirTemplate), nullptr);
     dir_ = dirTemplate;
-    g_errors.clear();
+    ResetDebugLog();
     g_device = 2;
     g_addressRangeResult = hipSuccess;
     g_captureInfoResult = hipSuccess;
@@ -735,8 +720,7 @@ TEST_F(RecorderMicrotest, Capture_QueryFailureIsReturnedAndNothingIsWritten) {
   EXPECT_EQ(r.record(rccl::rrAllReduce, info), ncclUnhandledCudaError);
 
   EXPECT_TRUE(BinaryCalls().empty());
-  ASSERT_FALSE(g_errors.empty());
-  EXPECT_NE(g_errors[0].find("HIP failure"), std::string::npos);
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_ERROR, "HIP failure"));
 }
 
 TEST_F(RecorderMicrotest, Capture_HostNodeFailureIsReturnedAndNothingIsWritten) {

@@ -699,22 +699,35 @@ TEST_F(DebugMicrotest, Reset_DeprecatedPublicEntryPointsStillReset) {
 #pragma clang diagnostic pop
 
 TEST_F(DebugMicrotest, Env_WithoutTheEnvPluginReadsTheProcessEnvironment) {
+  // Clear whatever NCCL_DEBUG* the test run inherited, and put it back afterwards.
+  std::map<std::string, std::string> saved;
+  for (const char* key : {"NCCL_DEBUG", "NCCL_DEBUG_LEVELS", "NCCL_DEBUG_SUBSYS", "NCCL_WARN_ENABLE_DEBUG_INFO",
+                          "NCCL_DEBUG_TIMESTAMP_LEVELS", "NCCL_DEBUG_TIMESTAMP_FORMAT", "NCCL_DEBUG_FILE"}) {
+    if (const char* value = std::getenv(key)) saved[key] = value;
+    unsetenv(key);
+  }
   g_envPluginReady = false;
   g_env["NCCL_DEBUG"] = "TRACE";  // ignored
+  g_env["NCCL_DEBUG_SUBSYS"] = "NET";  // ignored
   setenv("NCCL_DEBUG", "WARN", 1);
+
   Init();
+
   unsetenv("NCCL_DEBUG");
+  for (const auto& kv : saved) setenv(kv.first.c_str(), kv.second.c_str(), 1);
   EXPECT_EQ(ncclDebugLevelMask, kError | kVersion | kWarn);
+  EXPECT_EQ(ncclDebugMask, kDefaultSubsys);
 }
 
 TEST_F(DebugMicrotest, Log_ConcurrentLinesAreNotInterleaved) {
   g_env["NCCL_DEBUG"] = "INFO";
   Init();
   std::vector<std::thread> threads;
-  for (int t = 0; t < 4; ++t)
+  for (int t = 0; t < 4; ++t) {
     threads.emplace_back([t] {
       for (int i = 0; i < 200; ++i) ncclDebugLog(NCCL_LOG_INFO, NCCL_INIT, "f", 1, "t%d-%s", t, "payload-payload");
     });
+  }
   for (auto& th : threads) th.join();
   std::istringstream lines(Output());
   std::string line;
@@ -743,8 +756,9 @@ TEST_F(DebugMicrotest, Log_WritesUnderTheDebugLock) {
 TEST_F(DebugMicrotest, Params_DebugSettingsAreRegistered) {
   std::set<std::string> keys(g_registeredKeys.begin(), g_registeredKeys.end());
   for (const char* key : {"NCCL_DEBUG", "NCCL_DEBUG_LEVELS", "NCCL_DEBUG_SUBSYS", "NCCL_WARN_ENABLE_DEBUG_INFO",
-                          "NCCL_DEBUG_TIMESTAMP_LEVELS", "NCCL_DEBUG_TIMESTAMP_FORMAT", "NCCL_DEBUG_FILE"})
+                          "NCCL_DEBUG_TIMESTAMP_LEVELS", "NCCL_DEBUG_TIMESTAMP_FORMAT", "NCCL_DEBUG_FILE"}) {
     EXPECT_EQ(keys.count(key), 1u) << key;
+  }
 }
 
 std::string ThreadName(pthread_t t) {

@@ -402,6 +402,7 @@ function(rccl_define_micro_source_lists)
   # NCCL_API entry points that fakes/api_trace_fakes.cc supplies elsewhere.
   set(TEST_MICRO_API_TRACE_SOURCE_FILES
     api-trace-test.cc
+    fakes/debug_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -409,6 +410,7 @@ function(rccl_define_micro_source_lists)
   # rccl::Recorder, which fakes/recorder_fakes.cc supplies elsewhere.
   set(TEST_MICRO_RECORDER_SOURCE_FILES
     recorder-test.cc
+    fakes/debug_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -416,6 +418,7 @@ function(rccl_define_micro_source_lists)
   # HIP event and bootstrap seams would collide with the shared fakes.
   set(TEST_MICRO_COLL_TRACE_SOURCE_FILES
     coll-trace-test.cc
+    fakes/debug_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
