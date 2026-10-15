@@ -290,6 +290,17 @@
       "tests": [
         {"name": "UtilsMicrotests", "description": "Host-only misc/utils.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_argcheck": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroArgcheck",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "ArgcheckMicrotests", "description": "Host-only misc/argcheck.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -369,6 +380,12 @@
       "name": "RCCL Microtests - misc/utils.cc",
       "description": "rccl-UnitTestsMicroUtils (host-only misc/utils.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_utils",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - misc/argcheck.cc",
+      "description": "rccl-UnitTestsMicroArgcheck (host-only misc/argcheck.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_argcheck",
       "enabled": true
     }
   ]
