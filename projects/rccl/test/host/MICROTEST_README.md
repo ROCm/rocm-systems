@@ -319,6 +319,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `onerank-test.cc`); suite `Onerank*`. Its own binary because `fakes/sched_stubs.cc` fakes
   `ncclLaunchOneRank`, and this test seams the HIP launch calls itself. See
   `test_categories_micro_onerank.yaml`.
+- **`rccl-UnitTestsMicroMgmtTaskEnq`** — `enqueue/mgmt_task_enq.cc` (via `MGMT_TASK_ENQ_CC_PATH`,
+  from `mgmt-task-enq-test.cc`); suite `MgmtTaskEnq*`. Its own binary because
+  `fakes/nccl_stubs.cc` fakes `ncclMgmtTaskEnqueue`, and this test defines `group.cc`'s
+  thread-locals itself. See `test_categories_micro_mgmt_task_enq.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -838,7 +842,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
-`rccl-UnitTestsMicroCollectives`, `rccl-UnitTestsMicroOnerank`,
+`rccl-UnitTestsMicroCollectives`, `rccl-UnitTestsMicroOnerank`, `rccl-UnitTestsMicroMgmtTaskEnq`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -881,6 +885,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroCollectives        # src/collectives.cc tests
 ./build/rccl-UnitTestsMicroOnerank            # src/device/onerank.cu tests
+./build/rccl-UnitTestsMicroMgmtTaskEnq        # src/enqueue/mgmt_task_enq.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests

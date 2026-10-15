@@ -402,6 +402,13 @@ function(rccl_define_micro_source_lists)
     onerank-test.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroMgmtTaskEnq -- src/enqueue/mgmt_task_enq.cc. Own binary: fakes/nccl_stubs.cc
+  # fakes ncclMgmtTaskEnqueue, and this test defines group.cc's thread-locals itself.
+  set(TEST_MICRO_MGMT_TASK_ENQ_SOURCE_FILES
+    mgmt-task-enq-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1096,6 +1103,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroOnerank
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_onerank.yaml")
 # onerank.cu defines kernels too; see rccl-UnitTestsMicroCollectives.
 target_compile_options(rccl-UnitTestsMicroOnerank PRIVATE "SHELL:-Xclang -fcuda-include-gpubinary -Xclang /dev/null")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMgmtTaskEnq
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMgmtTaskEnq
+  SOURCES ${TEST_MICRO_MGMT_TASK_ENQ_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    MGMT_TASK_ENQ_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/enqueue/mgmt_task_enq.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mgmt_task_enq.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
