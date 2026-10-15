@@ -498,11 +498,10 @@ rdc_status_t RdcWatchTableImpl::rdc_health_set(rdc_gpu_group_t group_id, unsigne
         auto fallback = fallbacks.find(field);
         auto fb_probe = (fallback != fallbacks.end()) ? probe.find(fallback->second) : probe.end();
         if (fb_probe != probe.end() && fb_probe->second == RDC_ST_OK) {
-          RDC_LOG(RDC_ERROR, "Health field " << field_id_string(field)
-                                             << " is not supported on GPU " << gpu_index
-                                             << " (status " << status << "); using "
-                                             << field_id_string(fallback->second)
-                                             << " for this health component instead.");
+          RDC_LOG(RDC_INFO, "Health field " << field_id_string(field) << " is not supported on GPU "
+                                            << gpu_index << " (status " << status << "); using "
+                                            << field_id_string(fallback->second)
+                                            << " for this health component instead.");
         } else {
           RDC_LOG(RDC_ERROR, "Health field " << field_id_string(field)
                                              << " is not supported on GPU " << gpu_index
