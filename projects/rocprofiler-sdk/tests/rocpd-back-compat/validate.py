@@ -77,6 +77,16 @@ def _csv_columns(csv_path: Path) -> list:
         return [c.strip().lower() for c in next(csv_mod.reader(fh), [])]
 
 
+def _csv_column_values(csv_path: Path, column: str) -> list:
+    """Return values from one CSV column. ``column`` is matched case-insensitively."""
+    with open(csv_path, newline="") as fh:
+        rows = list(csv_mod.DictReader(fh))
+    if not rows:
+        return []
+    key = next(name for name in rows[0] if name.strip().lower() == column.lower())
+    return [row[key] for row in rows]
+
+
 def _otf2_location_names(otf2_path: Path) -> list:
     """Return all location names from an OTF2 trace archive."""
     from rocprofiler_sdk.pytest_utils.otf2_reader import OTF2Reader
@@ -258,6 +268,47 @@ def test_csv_for_schema_3_0_4_changes_present(output_root, latest_schema):
         ), f"Column '{expected}' missing from hip_event CSV for schema {latest_schema}"
 
 
+def test_csv_for_schema_3_0_5_changes_absent(output_root, old_schema):
+    """Shader array and WGP stay out of the SPM counter name before 3.0.5."""
+    if tuple(map(int, old_schema.split("."))) >= (3, 0, 5):
+        return test_csv_for_schema_3_0_5_changes_present(output_root, old_schema)
+    if tuple(map(int, old_schema.split("."))) < (3, 0, 3):
+        return
+
+    spm_counters_csv = (
+        output_root / old_schema / "csv" / "out_spm_counter_collection_trace.csv"
+    )
+    assert (
+        spm_counters_csv.exists()
+    ), f"out_spm_counter_collection_trace.csv not found for schema {old_schema}"
+    names = _csv_column_values(spm_counters_csv, "counter_name")
+    assert names, f"SPM counter CSV has no rows for schema {old_schema}"
+    for name in names:
+        assert (
+            "SA:" not in name and "WGP:" not in name
+        ), f"schema {old_schema} counter name includes shader array or WGP: {name}"
+
+
+def test_csv_for_schema_3_0_5_changes_present(output_root, latest_schema):
+    """Shader array and WGP appear in the SPM counter name from schema 3.0.5."""
+    spm_counters_csv = (
+        output_root / latest_schema / "csv" / "out_spm_counter_collection_trace.csv"
+    )
+    assert (
+        spm_counters_csv.exists()
+    ), f"out_spm_counter_collection_trace.csv not found for schema {latest_schema}"
+    names = _csv_column_values(spm_counters_csv, "counter_name")
+    assert names, f"SPM counter CSV has no rows for schema {latest_schema}"
+    assert any(
+        "SA:" in name and "WGP:" in name for name in names
+    ), f"schema {latest_schema} counter names omit shader array or WGP: {names}"
+    assert all(
+        "XCC: ," in name for name in names
+    ), f"schema {latest_schema} counter names do not leave absent XCC blank: {names}"
+    assert any("SE: 0" in name and "SA: 1" in name and "WGP: 2" in name for name in names)
+    assert any("SE: 1" in name and "SA: 0" in name and "WGP: 3" in name for name in names)
+
+
 def test_csv_counter_collection_averages_replay_passes(output_root, latest_schema):
     """counters_collection must average a counter over kernel-replay passes, not sum them.
 
@@ -283,7 +334,7 @@ def test_csv_counter_collection_averages_replay_passes(output_root, latest_schem
     }, f"unexpected counter_collection values for schema {latest_schema}: {values}"
 
 
-def test_counters_collection_schema_unchanged_from_3_0_4(output_root, latest_schema):
+def test_counters_collection_schema_unchanged_from_3_0_5(output_root, latest_schema):
     """Replay averaging must not change the counters_collection columns."""
 
     def columns(version):
@@ -298,10 +349,10 @@ def test_counters_collection_schema_unchanged_from_3_0_4(output_root, latest_sch
                 row[1] for row in connection.execute("PRAGMA table_info(counters_collection)")
             ]
 
-    assert columns(latest_schema) == columns("3.0.4")
+    assert columns(latest_schema) == columns("3.0.5")
 
 
-def test_pmc_events_replay_pass_absent_before_3_0_5(output_root, old_schema):
+def test_pmc_events_replay_pass_absent_before_3_0_6(output_root, old_schema):
     """Archived schemas must retain their original pmc_events columns."""
     db_path = (
         output_root

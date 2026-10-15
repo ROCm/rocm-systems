@@ -495,11 +495,13 @@ static ncclResult_t commFree(ncclComm_t comm) {
   NCCLCHECK(ncclCeFinalize(comm));
   NCCLCHECK(ncclRmaCeFinalize(comm));
 
-  if (comm->nNodes == 1) {
+  // AlltoAllv staging is allocated for single-node CE and multi-node hier CE.
+  if (comm->localSizes != nullptr) {
     NCCLCHECK(ncclMemFree(comm->localSizes));
-    NCCLCHECK(ncclMemFree(comm->gatheredSizes));
-
     comm->localSizes = nullptr;
+  }
+  if (comm->gatheredSizes != nullptr) {
+    NCCLCHECK(ncclMemFree(comm->gatheredSizes));
     comm->gatheredSizes = nullptr;
   }
   // tempBuff is allocated per-communicator for direct ReduceScatter on gfx950.
@@ -1262,6 +1264,46 @@ static const char* mnnvlDegradedBwStr(unsigned int healthMask) {
 }
 #endif
 
+// RCCL_TUNING_PARTITION_MODE: the gfx1250 tuning table this rank asks for. "auto" (or unset)
+// follows the compute-partition mode the GPU reports; "SPX" / "DPX" force one. It only picks
+// tuning thresholds. Any mode other than DPX (CPX, or none reported) asks for SPX. An invalid
+// value is reported once and treated as "auto".
+static rcclTuningPartition rcclTuningPartitionRequest(const char* computePartition) {
+  const char* mode = ncclGetEnv("RCCL_TUNING_PARTITION_MODE");
+  if (mode != nullptr && mode[0] != '\0' && strcasecmp(mode, "auto") != 0) {
+    if (strcasecmp(mode, "SPX") == 0) return RCCL_TUNING_PARTITION_SPX;
+    if (strcasecmp(mode, "DPX") == 0) return RCCL_TUNING_PARTITION_DPX;
+    static std::once_flag invalidModeOnce;
+    std::call_once(invalidModeOnce, [mode] {
+      ATTN("Invalid value %s for RCCL_TUNING_PARTITION_MODE (expected auto, SPX or DPX), using auto", mode);
+    });
+  }
+  return computePartition != nullptr && strcasecmp(computePartition, "DPX") == 0 ? RCCL_TUNING_PARTITION_DPX
+                                                                                  : RCCL_TUNING_PARTITION_SPX;
+}
+
+// Ranks pick algorithms on their own, so every rank of a comm must read the same table: DPX only
+// when all of them ask for it, SPX otherwise. *mixed reports ranks that disagree.
+static rcclTuningPartition rcclTuningPartitionForComm(const struct ncclPeerInfo* peers, int nRanks, bool* mixed) {
+  int nDpx = 0;
+  for (int i = 0; i < nRanks; i++) nDpx += peers[i].tuningPartition == RCCL_TUNING_PARTITION_DPX;
+  *mixed = nDpx > 0 && nDpx < nRanks;
+  return nDpx == nRanks ? RCCL_TUNING_PARTITION_DPX : RCCL_TUNING_PARTITION_SPX;
+}
+
+// Re-picks comm->archThresholds once every rank's request is known (after AllGather1).
+static void rcclSetTuningPartition(struct ncclComm* comm) {
+  bool mixed = false;
+  const rcclTuningPartition partition = rcclTuningPartitionForComm(comm->peerInfo, comm->nRanks, &mixed);
+  comm->archThresholds = rcclGetArchThresholds(comm->archName, partition);
+  if (comm->rank != 0 || !IsArchMatch(comm->archName, "gfx1250")) return;
+  if (mixed) {
+    ATTN("gfx1250 tuning table: ranks ask for different tables (RCCL_TUNING_PARTITION_MODE or GPU partition mode), "
+         "using SPX on every rank");
+  }
+  INFO(NCCL_INIT | NCCL_TUNING, "gfx1250 tuning table: %s", partition == RCCL_TUNING_PARTITION_DPX ? "DPX" : "SPX");
+}
+
 static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, uint64_t commHash) {
   cudaDeviceProp prop;
   info->rank = comm->rank;
@@ -1309,18 +1351,19 @@ static ncclResult_t fillInfo(struct ncclComm* comm, struct ncclPeerInfo* info, u
   // partition 0 are both function 0 with an accelerator class, so read the mode from sysfs and
   // leave mloPart undefined on an unpartitioned GPU, which must not get the DEV overlay (it breaks
   // Rome gpuId matching and disables GIN/GDR).
+  // The partition mode lives on the physical device. A CPX alias at .1-.7 is usually absent
+  // from sysfs entirely, so ask function 0 rather than our own BDF.
+  char physBusIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
+  char partition[MAX_STR_LEN];
+  partition[0] = '\0';
+  if (int64ToBusId(info->busId & ~0xfLL, physBusIdStr) == ncclSuccess) {
+    (void)ncclOsGetPciDeviceComputePartitionByBusId(physBusIdStr, partition, sizeof(partition));
+  }
+  info->tuningPartition = rcclTuningPartitionRequest(partition);
   if (info->mloPart == NCCL_TOPO_UNDEF) {
     int fn = (int)(info->busId & 0xf);
     if (fn < NCCL_TOPO_MLOPART_DEV_MAX) {
       char busIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
-      // The partition mode lives on the physical device. A CPX alias at .1-.7 is usually absent
-      // from sysfs entirely, so ask function 0 rather than our own BDF.
-      char physBusIdStr[NVML_DEVICE_PCI_BUS_ID_BUFFER_SIZE];
-      char partition[MAX_STR_LEN];
-      partition[0] = '\0';
-      if (int64ToBusId(info->busId & ~0xfLL, physBusIdStr) == ncclSuccess) {
-        (void)ncclOsGetPciDeviceComputePartitionByBusId(physBusIdStr, partition, sizeof(partition));
-      }
       // A partitioned device makes every function a partition, function 0 included: partition 0 is
       // a partition, not an unpartitioned GPU, and must carry index 0 so all of a device's
       // partitions share one DEV overlay group. An empty string means the platform does not report
@@ -1821,10 +1864,16 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
         comm->hasMloPart = true;
     }
     for (int j = 0; j < i; j++) {
-      // NVML device is agnostic to MloPart being used. With MloPart, each partition has a different GPU UUID.
+      // NVML device is agnostic to MloPart being used. On NVIDIA MLOPart, each partition has a different GPU UUID.
       comm->hasMultiRankNvml |= (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
                                 (comm->peerInfo[i].nvmlDev == comm->peerInfo[j].nvmlDev);
+      // The UUID alone does not identify a partition on AMD. hipDeviceGetUuid returns ROCr's
+      // HSA_AMD_AGENT_INFO_UUID, which is KFD's per-device unique_id, so all 8 CPX partitions of one
+      // MI300X OAM report one UUID. busId separates them: HIP reports the KFD location_id function
+      // (0000:1b:00.0-.7), unique per partition. Two ranks really on one partition still match both
+      // terms and are still refused, which is what NCCL_MULTI_RANK_GPU_ENABLE=1 gives up wholesale.
       if (!ncclParamMultiRankGpuEnable() && (comm->peerInfo[i].hostHash == comm->peerInfo[j].hostHash) &&
+          (comm->peerInfo[i].busId == comm->peerInfo[j].busId) &&
           memcmp(&comm->peerInfo[i].gpuUuid, &comm->peerInfo[j].gpuUuid, sizeof(cudaUUID_t)) == 0) {
         WARN("Multiple Ranks are using the same GPU/Partition. Set NCCL_MULTI_RANK_GPU_ENABLE=1 to enable this "
              "configuration.");
@@ -1846,6 +1895,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       }
     }
   }
+  rcclSetTuningPartition(comm);
 
   // AllGather1 - end
   timers[TIMER_INIT_ALLGATHER] = clockNano() - timers[TIMER_INIT_ALLGATHER];
@@ -2767,8 +2817,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
       comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
     }
   }
-  comm->globalRmaProxySupport =
-    globalRmaPluginSupport && globalCrossNicSupport && !globalNicFused && comm->cuMemGdrSupport;
+  comm->globalRmaProxySupport = globalRmaPluginSupport && globalCrossNicSupport && comm->cuMemGdrSupport;
   isOneLsaTeams = ncclDevrIsOneLsaTeam(comm);
   comm->symmetricSupport = comm->isAllCudaP2p && ncclParamWinEnable() && ncclCuMemEnable() &&
                            (comm->globalGinSupport != NCCL_GIN_CONNECTION_NONE || isOneLsaTeams);
@@ -2776,13 +2825,12 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // (globalRmaProxySupport) has no all-P2P symmetric window, and enqueue.cc has a
   // dedicated non-symmetric hostRma path for it. The numRmaCtx gate is upstream 2.31's.
   comm->hostRmaSupport = comm->config.numRmaCtx > 0 && (isOneLsaTeams || comm->globalRmaProxySupport);
-  if (!comm->symmetricSupport || comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE) {
-    INFO(NCCL_INIT,
-         "symmetricSupport %d, cuMemEnable %d, globalGinSupport %d, globalNicFused %d, cuMemGdrSupport %d, "
-         "contiguousRanksPerHost %d, crossNicSupport %d",
-         comm->symmetricSupport, ncclCuMemEnable(), comm->globalGinSupport, globalNicFused, comm->cuMemGdrSupport,
-         comm->contiguousRanksPerHost, globalCrossNicSupport);
-  }
+  INFO(NCCL_INIT | NCCL_NET,
+       "GIN/RMA support: ginConnection %d hostRma %d symmetric %d (ginTypeMask 0x%lx mloPart %d nicFused %d "
+       "crossNic %d railable %d rmaPlugin %d cuMemGdr %d cuMemEnable %d oneLsaTeam %d numRmaCtx %d)",
+       comm->globalGinSupport, comm->hostRmaSupport, comm->symmetricSupport, (unsigned long)globalGinTypeBitMask,
+       comm->hasMloPart, globalNicFused, globalCrossNicSupport, comm->contiguousRanksPerHost != INT_MAX,
+       globalRmaPluginSupport, comm->cuMemGdrSupport, ncclCuMemEnable(), isOneLsaTeams, comm->config.numRmaCtx);
 
   comm->ceColl.baseUCSymReadyPtr = NULL;
   comm->ceColl.baseUCSymComplPtr = NULL;
@@ -3103,6 +3151,7 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   comm->ll128LineElems = rcclLL128LineElemsFromArch(comm->archName);
   comm->ll128DataElems = rcclLL128DataElemsFromArch(comm->archName);
   comm->ll128ShmemElemsPerThread = rcclLL128ShmemElemsPerThreadFromArch(comm->archName);
+  // SPX until initTransportsRank knows every rank's RCCL_TUNING_PARTITION_MODE request (rcclSetTuningPartition).
   comm->archThresholds = rcclGetArchThresholds(comm->archName);
   comm->maxSharedMemOptin = maxSharedMem;
 
@@ -3203,14 +3252,6 @@ static ncclResult_t ncclCommInitRankFunc(struct ncclAsyncJob* job_) {
   }
   // update communicator state
   COMPILER_ATOMIC_STORE(&comm->initState, ncclSuccess, std::memory_order_release);
-
-  if (comm->nNodes == 1 && (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
-    const size_t nLocal = 4 * (size_t)comm->nRanks;
-    const size_t nGather = nLocal * (size_t)comm->nRanks;
-
-    NCCLCHECK(ncclMemAlloc((void**)&comm->localSizes, nLocal * sizeof(size_t)));
-    NCCLCHECK(ncclMemAlloc((void**)&comm->gatheredSizes, nGather * sizeof(size_t)));
-  }
 
   // Initialize hierarchical sub-communicators and temp buffers
   if (!job->parent && !comm->isGrow && comm->nNodes >= 8 && comm->maxLocalRanks > 1 &&

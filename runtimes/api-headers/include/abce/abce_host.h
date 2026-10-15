@@ -1448,9 +1448,18 @@ static inline abce_status_t abce_copy_orchestrator_validate_request(
 
     switch (copy->kind) {
       case ABCE_OP_KIND_LINEAR:
-      case ABCE_OP_KIND_SWAP:
         if (!copy->src || !copy->dst) return ABCE_STATUS_INVALID_ARGUMENT;
         break;
+      case ABCE_OP_KIND_SWAP: {
+        if (!copy->src || !copy->dst) return ABCE_STATUS_INVALID_ARGUMENT;
+        if (!abce_builder_swap_supported(orchestrator->builder)) return ABCE_STATUS_UNIMPLEMENTED;
+        // The packet builders only assert on this, which is compiled out of release and
+        // device builds.
+        const uintptr_t misalignment_mask = abce_builder_swap_alignment(orchestrator->builder) - 1;
+        if ((((uintptr_t)copy->src | (uintptr_t)copy->dst) & misalignment_mask) != 0)
+          return ABCE_STATUS_INVALID_ARGUMENT;
+        break;
+      }
       case ABCE_OP_KIND_INDIRECT:
         if (!orchestrator->is_gfx125plus) return ABCE_STATUS_UNIMPLEMENTED;
         if (!copy->src || !copy->dst || copy->size > (((uint64_t)1) << 30))

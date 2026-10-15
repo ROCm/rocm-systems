@@ -15,6 +15,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
 #include "rocjitsu/vm/amdgpu/instruction_cache.h"
+#include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l1_vector_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
@@ -127,6 +128,7 @@ public:
   static constexpr uint32_t kDebugFunctionalQuantum = 64;
   static constexpr uint32_t kMaxNamedBarriers = 16;
   static constexpr uint32_t kMaxMemoryWaitDiagnostics = 16;
+  static constexpr uint32_t kMaxIsaDiagnostics = 16;
 
   /// @brief Configuration for a compute unit.
   struct Config {
@@ -161,6 +163,20 @@ public:
   uint64_t memory_wait_diagnostic_count() const { return memory_wait_diagnostic_count_; }
   /// @brief Number of replay-source hazards, including suppressed reports.
   uint64_t xcnt_diagnostic_count() const { return xcnt_diagnostic_count_; }
+  /// @brief Number of ISA diagnostics, including suppressed reports.
+  uint64_t isa_diagnostic_count() const {
+    return isa_diagnostic_count_.load(std::memory_order_relaxed);
+  }
+  /// @brief Report static encoding restrictions on the issuing thread.
+  void check_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf) {
+    constexpr uint64_t mask = INVALID_MFMA_BROADCAST | INVALID_VOPD_OPERANDS |
+                              INVALID_IU_MODIFIERS | MISALIGNED_SCALAR_DATA;
+    if (inst.flags() & mask) [[unlikely]]
+      report_static_isa_diagnostics(inst, wf);
+  }
+  void report_static_isa_diagnostics(const Instruction &inst, const Wavefront &wf);
+  /// @brief Report only conditions explicitly undefined for the executing architecture.
+  void report_undefined_behavior(const Wavefront &wf, std::string_view reason);
   /// @brief Register a producer using planned FLAT lanes before execution.
   void track_memory_wait(Instruction &inst, Wavefront &wf);
   /// @brief Format a scoreboard hazard using its owning wavefront context.
@@ -340,7 +356,8 @@ public:
   }
 
   using QueueExceptionHandler = std::function<bool(
-      uint32_t queue_id, uint32_t process_id, uint64_t status, bool retain_failure_for_debugger)>;
+      uint32_t queue_id, uint32_t process_id, uint64_t status, bool retain_failure_for_debugger,
+      QueueExceptionDeliveryPolicy delivery_policy)>;
   void set_queue_exception_handler(QueueExceptionHandler cb) {
     queue_exception_handler_ = std::move(cb);
   }
@@ -367,6 +384,14 @@ public:
 
   using IllegalInstHandler = std::function<bool(Wavefront &wf)>;
   void set_illegal_inst_handler(IllegalInstHandler cb) { illegal_inst_handler_ = std::move(cb); }
+
+  /// @brief Notify a frontend of a simulator instruction support failure.
+  /// @returns True if the frontend holds the wave for queue-error delivery.
+  /// @details The engine retains its nonzero exit status regardless of ownership.
+  using InstructionFailureHandler = std::function<bool(Wavefront &wf)>;
+  void set_instruction_failure_handler(InstructionFailureHandler cb) {
+    instruction_failure_handler_ = std::move(cb);
+  }
 
   using MemoryViolationHandler =
       std::function<bool(Wavefront &wf, uint64_t address, bool is_write)>;
@@ -1111,6 +1136,7 @@ public:
     const bool drop_set_vgpr_msb = wf.consume_setreg_vgpr_msb_hazard();
     if (drop_set_vgpr_msb && std::string_view(inst->mnemonic()) == "s_set_vgpr_msb")
       return util::Result::success();
+    check_static_isa_diagnostics(*inst, wf);
     // The decoded instruction already selects its ISA execution callback.
     inst->execute(*inst, &wf);
     return wf.instruction_execution_failed() ? util::Result::failure() : util::Result::success();
@@ -1123,11 +1149,14 @@ protected:
   /// here would invert that order against queue dispatch and destruction.
   bool defer_queue_exception(Wavefront *wave, uint32_t queue_id, uint32_t process_id,
                              uint64_t status, bool clear_debug_stop_on_success = false,
-                             bool retain_failure_for_debugger = true) {
+                             bool retain_failure_for_debugger = true,
+                             QueueExceptionDeliveryPolicy delivery_policy =
+                                 QueueExceptionDeliveryPolicy::WaitForAcknowledgment) {
     if (!cp_ || status == 0)
       return false;
     pending_queue_exceptions_.push_back({queue_id, process_id, status, wave,
-                                         clear_debug_stop_on_success, retain_failure_for_debugger});
+                                         clear_debug_stop_on_success, retain_failure_for_debugger,
+                                         delivery_policy});
     return true;
   }
 
@@ -1288,6 +1317,7 @@ protected:
     Wavefront *wave;
     bool clear_debug_stop_on_success;
     bool retain_failure_for_debugger;
+    QueueExceptionDeliveryPolicy delivery_policy;
   };
 
   /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
@@ -1348,6 +1378,7 @@ protected:
   SingleStepHandler single_step_handler_;
   WatchpointHandler watchpoint_handler_;
   IllegalInstHandler illegal_inst_handler_;
+  InstructionFailureHandler instruction_failure_handler_;
   MemoryViolationHandler memory_violation_handler_;
   AluExceptionHandler alu_exception_handler_;
   std::atomic<bool> debug_active_{false};
@@ -1416,6 +1447,8 @@ protected:
   uint64_t memory_wait_diagnostic_count_ = 0;
   std::vector<waitcheck_detail::ClassifiedEvent> memory_wait_classification_;
   uint64_t xcnt_diagnostic_count_ = 0;
+  // Reports come only from the CU issuing thread; helpers must not report.
+  std::atomic<uint64_t> isa_diagnostic_count_{0};
 
   /// @brief Resolve the owner of a physical SGPR from its allocation block.
   /// @details Power-of-two block sizes use a shift on the instruction read path;

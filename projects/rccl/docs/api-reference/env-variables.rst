@@ -292,6 +292,21 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``RCCL_TUNER_EMBEDDED_CONFIG``
+        | Controls whether the built-in CSV tuner uses the tuning configurations
+          compiled into ``librccl.so`` from the source tree's ``tuner/*.csv``.
+          These are the stock defaults, so no file has to be staged on each node.
+          ``NCCL_TUNER_CONFIG_FILE`` and a CSV in ``<librccl.so dir>/tuner/`` or
+          ``${ROCM_PATH}/share/rccl/tuner/`` take precedence over them. When the
+          GPU architecture is known, only an architecture-specific
+          (``rccl_tuner_<arch>.csv``) or generic (``rccl_tuner.csv``)
+          configuration is used; another architecture's configuration is never
+          applied. When the architecture cannot be determined, any embedded
+          configuration may be used. To disable the tuner entirely, embedded
+          or not, use ``NCCL_TUNER_PLUGIN=none``.
+      - | ``1``: Use the embedded configurations when no file is found (default).
+        | ``0``: Ignore the embedded configurations. File-based tuning is unaffected.
+
 Network and topology
 ====================
 
@@ -824,6 +839,19 @@ threshold table introduced for gfx1250.
       - | ``0``: Use the per-architecture table for threshold defaults (default).
         | ``1``: Ignore the table; fall back to pre-table compile-time constants.
           This matches the behavior before the arch table was introduced.
+
+    * - | ``RCCL_TUNING_PARTITION_MODE``
+        | Selects which gfx1250 per-architecture table (SPX or DPX) is used for
+          tuning thresholds. It only changes tuning, not results. A communicator
+          uses the DPX table only when every rank selects DPX; otherwise every rank
+          uses the SPX table. Other architectures have one table for every mode.
+          Has no effect when ``RCCL_IGNORE_ARCH_TABLE=1``.
+      - | ``auto`` (default): Follow the compute-partition mode the GPU reports.
+          ``DPX`` selects the DPX table; ``SPX``, ``CPX``, or no reported mode
+          selects the SPX table. Any other value is reported once and treated
+          as ``auto``.
+        | ``SPX``: Use the SPX table.
+        | ``DPX``: Use the DPX table.
 
     * - | ``RCCL_DDA_THRESHOLD``
         | Upper bound in bytes for the DDA VMM/Simple tier per collective.
