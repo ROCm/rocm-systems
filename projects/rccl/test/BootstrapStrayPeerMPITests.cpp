@@ -63,11 +63,13 @@ protected:
     int rank = MPIEnvironment::world_rank, nranks = MPIEnvironment::world_size;
     ncclUniqueId id = {};
     int strayFd = -1;
+    int setup = 0; // 1: ncclGetUniqueId failed, 2: the root listener was unreachable
     if (rank == 0) {
-      ASSERT_EQ(ncclSuccess, ncclGetUniqueId(&id));
-      strayFd = ConnectStrayPeer(id);
-      ASSERT_GE(strayFd, 0) << "could not reach the bootstrap root listener";
+      if (ncclGetUniqueId(&id) != ncclSuccess) setup = 1;
+      else if ((strayFd = ConnectStrayPeer(id)) < 0) setup = 2;
     }
+    MPI_Bcast(&setup, 1, MPI_INT, 0, MPI_COMM_WORLD);
+    ASSERT_EQ(0, setup) << "rank 0 setup failed (1: ncclGetUniqueId, 2: could not reach the bootstrap root listener)";
     MPI_Bcast(&id, sizeof(id), MPI_BYTE, 0, MPI_COMM_WORLD);
     ncclComm_t comm = nullptr;
     EXPECT_EQ(ncclSuccess, ncclCommInitRank(&comm, nranks, id, rank));
