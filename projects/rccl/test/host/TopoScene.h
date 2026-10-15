@@ -26,6 +26,9 @@
 #include "graph/topo.h"
 #include "graph/xml.h"
 
+// Defined in topo-test.cc, which owns topo.cc's NCCL_NETDEVS_POLICY statics.
+void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num);
+
 namespace topo_scene {
 
 constexpr int kXmlNodes = 512;

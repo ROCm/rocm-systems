@@ -1025,4 +1025,164 @@ TEST_F(PathsP2pChannelsMicrotest, PerPeer_RemoteRankWithoutNicGetsTwo) {
   EXPECT_EQ(2, comm_->p2pnChannelsPerPeer);
 }
 
+// --- Trim
+
+class PathsTrimMicrotest : public PathsCommMicrotest {
+ protected:
+  ncclResult_t Trim() { return ncclTopoTrimSystem(system_.get(), comm_.get()); }
+
+  std::vector<int> Ranks() {
+    std::vector<int> ranks;
+    for (int g = 0; g < system_->nodes[GPU].count; g++) ranks.push_back(system_->nodes[GPU].nodes[g].gpu.rank);
+    return ranks;
+  }
+};
+
+TEST_F(PathsTrimMicrotest, TrimSystem_DropsGpusOutsideMyDomain) {
+  Use(BuildWithPaths(XgmiSystem(4, 1, true)), 2);
+  g_p2pCanConnect = [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo* src, ncclPeerInfo* dst) {
+    *ret = src->rank / 2 == dst->rank / 2;
+    return ncclSuccess;
+  };
+  g_shmCanConnect = [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo*, ncclPeerInfo*) {
+    *ret = 0;
+    return ncclSuccess;
+  };
+  ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), comm_.get()));
+
+  ASSERT_EQ(ncclSuccess, Trim());
+
+  EXPECT_EQ(std::vector<int>({2, 3}), Ranks());
+  EXPECT_EQ(2, comm_->localRanks);
+  EXPECT_EQ(1, system_->inter);
+  EXPECT_EQ(4, system_->nodes[NET].count);
+  EXPECT_EQ(nullptr, system_->nodes[GPU].nodes[0].paths[GPU]);  // the caller recomputes them
+}
+
+TEST_F(PathsTrimMicrotest, TrimSystem_SingleNodeXgmiDropsTheNics) {
+  Use(BuildWithPaths(XgmiSystem(2, 1, true)));
+
+  ASSERT_EQ(ncclSuccess, Trim());
+
+  EXPECT_EQ(0, system_->nodes[NET].count);
+  EXPECT_EQ(0, system_->inter);
+  EXPECT_TRUE(system_->type & RCCL_TOPO_XGMI_ALL);
+  EXPECT_FALSE(system_->type & RCCL_TOPO_GDR_ALL);
+}
+
+// Two GPUs with no XGMI, each next to its own NIC.
+std::string GdrPcieSystem() {
+  return System(Cpu(0, Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0))) +
+                           Pci(SwitchBus(1), GpuPci(GpuBus(1), 1, 1) + NicPci(NicBus(1), Net("a", 1)))));
+}
+
+TEST_F(PathsTrimMicrotest, TrimSystem_GdrOnEveryGpuWithoutXgmiKeepsTheNics) {
+  Use(BuildWithPaths(GdrPcieSystem()));
+
+  ASSERT_EQ(ncclSuccess, Trim());
+
+  EXPECT_TRUE(system_->type & RCCL_TOPO_GDR_ALL);
+  EXPECT_FALSE(system_->type & RCCL_TOPO_XGMI_ALL);
+  EXPECT_EQ(2, system_->nodes[NET].count);
+  EXPECT_EQ(0, system_->inter);
+  EXPECT_TRUE(Logged("GDR is available on all GPUs"));
+}
+
+TEST_F(PathsTrimMicrotest, TrimSystem_OneGpuWithoutGdrDropsTheNics) {
+  Use(BuildWithPaths(GdrPcieSystem()));
+  system_->nodes[GPU].nodes[0].gpu.gdrSupport = 0;
+
+  ASSERT_EQ(ncclSuccess, Trim());
+
+  EXPECT_FALSE(system_->type & RCCL_TOPO_GDR_ALL);
+  EXPECT_EQ(0, system_->nodes[NET].count);
+}
+
+TEST_F(PathsTrimMicrotest, TrimSystem_EnableIntranetKeepsTheNics) {
+  g_params["RCCL_ENABLE_INTRANET"] = 1;
+  Use(BuildWithPaths(XgmiSystem(2, 1, true)));
+
+  ASSERT_EQ(ncclSuccess, Trim());
+
+  EXPECT_TRUE(system_->type & RCCL_TOPO_FORCE_INTRA);
+  EXPECT_EQ(2, system_->nodes[NET].count);
+  EXPECT_EQ(0, system_->inter);
+}
+
+TEST_F(PathsTrimMicrotest, TrimSystem_SlowerPortOfTheSameAsicIsDropped) {
+  Peers(4);
+  Use(BuildWithPaths(XgmiSystem(2, 1, true)));
+  ncclTopoNode* nets = system_->nodes[NET].nodes;
+  nets[1].net.asic = nets[0].net.asic;
+  nets[1].net.bw = nets[0].net.bw / 2;
+  int64_t fast = nets[0].id;
+
+  ASSERT_EQ(ncclSuccess, Trim());
+
+  ASSERT_EQ(1, system_->nodes[NET].count);
+  EXPECT_EQ(fast, system_->nodes[NET].nodes[0].id);
+  EXPECT_EQ(1, system_->inter);
+
+  Use(BuildWithPaths(XgmiSystem(2, 1, true)));
+  system_->nodes[NET].nodes[1].net.asic = system_->nodes[NET].nodes[0].net.asic;
+  ASSERT_EQ(ncclSuccess, Trim());
+  EXPECT_EQ(2, system_->nodes[NET].count);  // equally fast ports both stay
+}
+
+TEST_F(PathsTrimMicrotest, TrimSystem_MnnvlCliquePeersOnAnotherHostStay) {
+  std::string twoHosts = System(Cpu(0, GpuPci(GpuBus(0), 0, 0)) + Cpu(1, GpuPci(GpuBus(1), 1, 1), "host_hash=\"0x5\""));
+  Peers(2);
+  for (ncclPeerInfo& p : peers_) {
+    p.fabricInfo.clusterUuid[0] = 0xab;
+    p.fabricInfo.cliqueId = 3;
+  }
+  peers_[1].hostHash = 2;
+  Use(BuildWithPaths(twoHosts));
+  ASSERT_EQ(ncclSuccess, Trim());
+  EXPECT_EQ(std::vector<int>({0}), Ranks());
+
+  comm_->MNNVL = 1;
+  Use(BuildWithPaths(twoHosts));
+  ASSERT_EQ(ncclSuccess, Trim());
+  EXPECT_EQ(std::vector<int>({0, 1}), Ranks());
+  EXPECT_TRUE(Logged("MNNVL enabled, checking clique membership for 2 ranks"));
+}
+
+// --- PXN ranks
+
+TEST_F(PathsCommMicrotest, GetPxnRanks_TheXgmiPeersNextToEachRemoteRanksNic) {
+  comm_->pxnDisable = 0;
+  Peers(4);
+  for (int r = 0; r < 4; r++) peers_[r].nvmlDev = r % 2;
+  Use(BuildWithPaths(XgmiSystem(2, 2, true)), 1);
+  ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), comm_.get()));
+  system_->inter = 1;
+  int* ranks = nullptr;
+  int n = -1;
+
+  ASSERT_EQ(ncclSuccess, ncclTopoGetPxnRanks(comm_.get(), &ranks, &n));
+
+  ASSERT_EQ(1, n);  // remote ranks 0 and 2 both relay through local rank 0
+  EXPECT_EQ(0, ranks[0]);
+  free(ranks);
+}
+
+TEST_F(PathsCommMicrotest, GetPxnRanks_NoneWithoutGdrReadsOrOffNode) {
+  comm_->pxnDisable = 0;
+  Peers(4);
+  for (int r = 0; r < 4; r++) peers_[r].nvmlDev = r % 2;
+  Use(BuildWithPaths(XgmiSystem(2, 2, true)), 1);
+  ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), comm_.get()));
+  int* ranks = nullptr;
+  int n = -1;
+  ASSERT_EQ(ncclSuccess, ncclTopoGetPxnRanks(comm_.get(), &ranks, &n));
+  EXPECT_EQ(0, n);  // inter == 0
+  EXPECT_EQ(nullptr, ranks);
+
+  system_->inter = 1;
+  g_params["NET_GDR_READ"] = 0;
+  ASSERT_EQ(ncclSuccess, ncclTopoGetPxnRanks(comm_.get(), &ranks, &n));
+  EXPECT_EQ(0, n);
+}
+
 }  // namespace

@@ -395,6 +395,8 @@ function(rccl_define_micro_source_lists)
     xml-test.cc
     topo-test.cc
     paths-test.cc
+    search-test.cc
+    rome-models-test.cc
     fakes/graph_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
@@ -1078,6 +1080,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroTopo
     XML_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc"
     TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc"
     PATHS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc"
+    SEARCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc"
+    ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
 
 # ---------------------------------------------------------------------------

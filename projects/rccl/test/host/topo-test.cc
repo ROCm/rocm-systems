@@ -9,6 +9,8 @@
 
 #include <gtest/gtest.h>
 
+#include <csignal>
+
 #include <algorithm>
 #include <deque>
 #include <memory>
@@ -25,7 +27,22 @@
 
 using namespace topo_scene;
 
+// The NETDEVS policy lives in this TU's statics; the other graph TUs set it through here.
+void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num) {
+  int unused;
+  ncclTopoGetNetDevsPolicy(nullptr, &unused);  // consume the call_once first
+  netDevsPolicy = policy;
+  netDevsPolicyNum = num;
+}
+
 namespace {
+
+// ASan turns a SIGSEGV into a report plus exit(1), so KilledBySignal never matches under it.
+#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
+#define DEATH_BY_SEGV ::testing::ExitedWithCode(1)
+#else
+#define DEATH_BY_SEGV ::testing::KilledBySignal(SIGSEGV)
+#endif
 
 constexpr int64_t kBus0 = 0x10000;  // GpuBus(0), as an int
 
@@ -749,17 +766,11 @@ std::string SharedSwitchSystem(const std::vector<std::string>& nets) {
 class TopoLocalMicrotest : public TopoMicrotest {
  protected:
   void TearDown() override {
-    netDevsPolicy = NETDEVS_POLICY_AUTO;
-    netDevsPolicyNum = -1;
+    TopoSetNetDevsPolicy(NETDEVS_POLICY_AUTO, -1);
     TopoMicrotest::TearDown();
   }
 
-  static void SetPolicy(enum netDevsPolicy policy, int num = -1) {
-    int unused;
-    ASSERT_EQ(ncclSuccess, ncclTopoGetNetDevsPolicy(nullptr, &unused));  // consume the call_once first
-    netDevsPolicy = policy;
-    netDevsPolicyNum = num;
-  }
+  static void SetPolicy(enum netDevsPolicy policy, int num = -1) { TopoSetNetDevsPolicy(policy, num); }
 
   static int LocalNetDev(ncclTopoSystem* system, int rank, int channel, int type = NET) {
     int dev = -1;
@@ -1791,8 +1802,9 @@ TEST_F(TopoMicrotest, GetXmlCpuArch_TakesTheFirstCpuThatHasOne) {
 TEST_F(TopoMicrotest, GetXmlCpuArch_NoCpuArchCrashes) {
   XmlPtr xml = MustParseXml(System("<cpu numaid=\"0\"/>"));
   int arch = -1;
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
-  EXPECT_DEATH(ncclTopoGetXmlCpuArch(xml.get(), &arch), "");
+  EXPECT_EXIT(ncclTopoGetXmlCpuArch(xml.get(), &arch), DEATH_BY_SEGV, "");
 }
 
 // Observed: a <gpu> without a gcn attribute (any NVIDIA-style topology file) crashes the system build.
@@ -1801,8 +1813,9 @@ TEST_F(TopoMicrotest, GetSystemFromXml_GpuWithoutGcnCrashes) {
                                           "link_width=\"16\"><gpu dev=\"0\" sm=\"90\" arch=\"0\" rank=\"0\" "
                                           "gdr=\"1\"/></pci>")));
   ncclTopoSystem* system = nullptr;
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
 
-  EXPECT_DEATH(ncclTopoGetSystemFromXml(xml.get(), &system, 0), "");
+  EXPECT_EXIT(ncclTopoGetSystemFromXml(xml.get(), &system, 0), DEATH_BY_SEGV, "");
 }
 
 TEST_F(TopoMicrotest, GetFusionEnv_ReadsEnvOrDefaultsByPlatform) {
