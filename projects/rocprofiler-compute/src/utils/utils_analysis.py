@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import math
+import re
 from collections.abc import Sequence
 from dataclasses import dataclass, field
 from pathlib import Path
@@ -394,6 +395,9 @@ def parse_marker_function(function_value: object) -> dict[str, Any]:
     }
 
 
+_STACKED_MARKER_WIRE = re.compile(r":#\d+@")
+
+
 def _stacked_marker_function_cell(function_value: object) -> Optional[str]:
     """Return the raw cell when it uses legacy stacked wire, else None."""
     if function_value is None or (
@@ -402,7 +406,7 @@ def _stacked_marker_function_cell(function_value: object) -> Optional[str]:
         return None
     raw = str(function_value)
     first_token = raw.split("|", 1)[0] if raw else ""
-    if ":#" in first_token or "@" in first_token:
+    if _STACKED_MARKER_WIRE.search(first_token):
         return raw
     return None
 
