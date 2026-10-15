@@ -16,12 +16,9 @@ set(CP_SOURCES
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/dispatch_entry.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/completion_tracker.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/completion_tracker.cpp
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_ring_consumer.h
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_ring_consumer.cpp
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.cpp
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.h
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_queue_binding_factory.cpp
+    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h
 )
 
 foreach(SOURCE_FILE IN LISTS CP_SOURCES)
@@ -38,8 +35,7 @@ set(PACKET_PROCESSOR_SOURCES
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/aql/aql_packet_types.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/aql/aql_packet_processor.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/aql/aql_packet_processor.cpp
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h
-    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.cpp
+    lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_types.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/sdma_packet_processor.h
     lib/rocjitsu/src/rocjitsu/vm/amdgpu/sdma_packet_processor.cpp
 )
@@ -122,14 +118,13 @@ foreach(SOURCE_FILE IN LISTS QUEUE_FRONTEND_SOURCES)
         IN
         ITEMS
             "AqlPacketProcessor"
-            "Pm4PacketProcessor"
+            "process_pm4_packets"
+            "Pm4ExecutionContext"
             "SdmaPacketProcessor"
             "PacketProcessResult"
-            "Pm4RingConsumer"
             "SdmaRingConsumer"
             "CircularRingReader"
             "ConsumerCursorJournal"
-            "Pm4QueueController"
             "SdmaExecutor"
             "SdmaQueueRunner"
             "SdmaQueueBackend"
@@ -143,4 +138,34 @@ foreach(SOURCE_FILE IN LISTS QUEUE_FRONTEND_SOURCES)
             )
         endif()
     endforeach()
+endforeach()
+
+# CP schedules command streams; PM4 opcode semantics belong to pm4/.
+file(
+    READ
+        "${ROCJITSU_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/vm/amdgpu/command_processor.cpp"
+    CP_CONTENT
+)
+string(FIND "${CP_CONTENT}" "Pm4Opcode::" PM4_OPCODE_POSITION)
+if(NOT PM4_OPCODE_POSITION EQUAL -1)
+    message(
+        FATAL_ERROR
+        "command_processor.cpp contains PM4 opcode interpretation"
+    )
+endif()
+foreach(
+    SOURCE_FILE
+    IN
+    ITEMS
+        lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.h
+        lib/rocjitsu/src/rocjitsu/vm/amdgpu/pm4/pm4_packet_processor.cpp
+)
+    file(READ "${ROCJITSU_SOURCE_DIR}/${SOURCE_FILE}" SOURCE_CONTENT)
+    string(FIND "${SOURCE_CONTENT}" "command_processor.h" CP_INCLUDE_POSITION)
+    if(NOT CP_INCLUDE_POSITION EQUAL -1)
+        message(
+            FATAL_ERROR
+            "${SOURCE_FILE} depends directly on CommandProcessor"
+        )
+    endif()
 endforeach()

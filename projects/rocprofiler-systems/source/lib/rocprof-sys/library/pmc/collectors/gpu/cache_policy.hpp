@@ -24,8 +24,6 @@ namespace rocprofsys::pmc::collectors::gpu
  * rocprofiler-systems trace cache for later analysis and visualization.
  * It manages category metadata initialization and per-device PMC metadata
  * registration.
- *
- * @see perfetto_policy for direct Perfetto trace output
  */
 struct cache_policy
 {

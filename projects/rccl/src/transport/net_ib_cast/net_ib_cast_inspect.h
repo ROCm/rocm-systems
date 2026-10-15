@@ -42,6 +42,9 @@ struct ncclIbCastSchedState {
  * Returns ncclInvalidArgument on null pointers. */
 ncclResult_t ncclIbCastGetSchedState(void* sendComm, struct ncclIbCastSchedState* out);
 
+/* *out is 1 when optional recv completion is enabled. */
+ncclResult_t ncclIbCastGetOptRecvCompletion(void* comm, int* out);
+
 /* Force-initialize the WRR token table, bypassing RTT-driven scheduling.
  * nqps must match the connection's nqps. */
 ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
@@ -49,6 +52,14 @@ ncclResult_t ncclIbCastSetTokens(void* sendComm, const int* qpTokens, int nqps);
 /* Override schedParms; takes effect on the next isend, no reconnect needed. */
 ncclResult_t ncclIbCastSetSchedParms(void* sendComm, bool schedEnable, bool doWrr, bool splitData,
                                      uint32_t splitDataMin);
+
+/* ── Hardware capabilities of a vNic device, probed once and cached. ── */
+struct ncclIbCastDeviceCaps {
+  bool udSupported;
+  bool rdmaReadSupported;
+};
+
+ncclResult_t ncclIbCastGetDeviceCaps(int dev, struct ncclIbCastDeviceCaps* out);
 
 /* ── Test-only wrappers over internal static helpers (host-only, no HW). ── */
 ncclResult_t ncclIbCastTestGetPlaneIndex(int devPlane, int16_t* count, int16_t* planes, int16_t* idx);

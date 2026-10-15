@@ -11,7 +11,9 @@
 #include "rocjitsu/code/code_object.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/code_object_patcher.h"
+#include "rocjitsu/code/patch/entry_prologue.h"
 #include "rocjitsu/code/patch/error_report.h"
+#include "rocjitsu/code/patch/kernarg_extension.h"
 #include "rocjitsu/code/patch/kernel_text_layout.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
@@ -27,6 +29,7 @@
 #include <array>
 #include <cstring>
 #include <optional>
+#include <span>
 #include <string>
 #include <string_view>
 #include <unordered_set>
@@ -142,10 +145,7 @@ uint32_t max_scratch_offset_bytes(rj_code_arch_t arch) {
 // (kernel_descriptor_translator.cpp's arch_has_accvgpr / uses_gfx90a_accum_offset)
 // and code_object_patcher.cpp (target_uses_gfx90a_accum_offset). They should be
 // consolidated into isa/isa_traits.h alongside arch_is_cdna_4_or_lower/arch_is_rdna,
-// but the
-// arch_has_accvgpr copies disagree on CDNA1 (this one follows the physical AGPR file;
-// DBT's follows the HasAccVgpr trait, which models CDNA1 as zero), so unifying needs a
-// deliberate CDNA1-semantics decision. Kept DBI-local until then.
+// preserving the separate gfx908 allocation and the gfx90a unified allocation.
 
 // All CDNA generations (gfx908/gfx90a/gfx942/gfx950) have an AccVGPR file.
 // RDNA/gfx1250 have none.
@@ -383,6 +383,31 @@ RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
   return live_at_anchor & instrumentation_clobbers;
 }
 
+bool compute_probe_reserved_registers(std::span<const ProbeCallable> probes,
+                                      std::span<const ProbeClobberSummary> summaries,
+                                      RegisterSet &out, std::string *error_out) {
+  if (probes.size() != summaries.size()) {
+    report(error_out, "internal: probe registry and clobber summaries have different sizes");
+    return false;
+  }
+  RegisterSet reserved;
+  for (size_t i = 0; i < probes.size(); ++i) {
+    reserved |= summaries[i].ordinary_clobbers;
+    // The link pair holds the return address across the call, but it is written
+    // by the envelope's s_swappc rather than by the body, so no summary reports
+    // it. Skipping an ABI that names no usable pair would under-reserve silently.
+    if (!is_valid_probe_abi(probes[i].abi)) {
+      report(error_out, ("probe '" + probes[i].symbol +
+                         "' has an unusable ABI; cannot name the pair it returns through")
+                            .c_str());
+      return false;
+    }
+    reserved.expand(probe_link_pair(probes[i].abi));
+  }
+  out = std::move(reserved);
+  return true;
+}
+
 bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills, rj_code_arch_t arch,
                       std::vector<SpillSlot> &out, std::string *error_out) {
   out.clear();
@@ -603,6 +628,51 @@ TrampolinePlan make_base_plan(const ResolvedInstrumentationSite &site, rj_code_a
   return plan;
 }
 
+// Declare the kernarg wrapper the entry prologue reads from, so a runtime can
+// build one without knowing how the prologue was encoded.
+//
+// The record carries the wrapper's inputs (the guest's kernarg size and the
+// payload's size and alignment) rather than the offsets themselves. A consumer
+// runs make_kernarg_extension_layout over them and lands on the offsets the
+// prologue encoded, because the prologue derived those from the same helper and
+// the same descriptor.
+//
+// An object that already carries this section is refused: the loader-side
+// reader stops at the first match, so a second one would be unreachable. The
+// check reads the input object rather than the patcher, which is sound only
+// because this is the instrumentor's one append_nonalloc_section call.
+bool append_dbi_kernarg_record(CodeObjectPatcher &patcher, const AmdGpuCodeObject &obj,
+                               const KernelDescriptorInfo &kernel, std::string *error_out) {
+  for (const auto &section : obj.all_sections()) {
+    if (section->name() != kKernargExtensionMetadataSectionName)
+      continue;
+    report(error_out, ("the code object already carries a " +
+                       std::string(kKernargExtensionMetadataSectionName) +
+                       " section, and a second one would be unreachable to the loader; "
+                       "instrumenting a code object that already declares a kernarg extension "
+                       "is not supported")
+                          .c_str());
+    return false;
+  }
+
+  const KernargExtensionMetadata extension{
+      .kernel_name = kernel.kernel_name,
+      .variant_name = std::string(kDbiKernargVariantName),
+      .original_kernarg_size = kernel.descriptor.kernarg_size,
+      .payloads = {{
+          .size = kDbiEntryPayloadLayout.size,
+          .alignment = kDbiEntryPayloadLayout.alignment,
+          .name = std::string(kDbiEntryPayloadName),
+      }},
+  };
+  const std::vector<uint8_t> bytes = serialize_kernarg_extension_metadata(std::span{&extension, 1});
+  if (!patcher.append_nonalloc_section(kKernargExtensionMetadataSectionName, bytes)) {
+    report(error_out, "failed to append the .rocjitsu.kernarg section");
+    return false;
+  }
+  return true;
+}
+
 } // namespace
 
 TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_code_arch_t arch,
@@ -612,6 +682,105 @@ TrampolinePlan make_trampoline_plan(const ResolvedInstrumentationSite &site, rj_
   plan.after_items = {};
   plan.emit_original = true;
   return plan;
+}
+
+namespace {
+
+// Does any probe declare an argument sourced from the framework's entry storage?
+// The declaration lives on the probe rather than the point, so this is the whole
+// question of whether the patch needs an entry prologue.
+[[nodiscard]] bool probes_read_entry_storage(const std::vector<ProbeCallable> &probes) {
+  return std::any_of(probes.begin(), probes.end(), [](const ProbeCallable &probe) {
+    return std::any_of(probe.arg_sources.begin(), probe.arg_sources.end(), reads_entry_storage);
+  });
+}
+
+// The probes whose arguments made a prologue necessary, named so a rejection
+// does not read as an unprompted failure on an otherwise ordinary kernel.
+[[nodiscard]] std::string entry_storage_reader_list(const std::vector<ProbeCallable> &probes) {
+  std::string names;
+  for (const ProbeCallable &probe : probes) {
+    if (!std::any_of(probe.arg_sources.begin(), probe.arg_sources.end(), reads_entry_storage))
+      continue;
+    if (!names.empty())
+      names += ", ";
+    names += "'" + probe.symbol + "'";
+  }
+  return names;
+}
+
+} // namespace
+
+std::optional<Instrumentor::EntryProloguePatch> Instrumentor::plan_entry_prologue(
+    const std::vector<KernelDescriptorInfo> &kernels, std::optional<uint32_t> kernel_sgpr_count,
+    const std::vector<BasicBlock *> &scope, const std::vector<ProbeCallable> &probes,
+    const std::vector<ProbeClobberSummary> &summaries, uint64_t cave_offset,
+    std::string *error_out) {
+  // DBI does not support multiple kernels, so neither does the prologue. Every
+  // site that can ask for the storage passes an argument, and that path already
+  // requires a single kernel to bound VGPR selection; this gate reports it
+  // earlier and names the reason.
+  if (kernels.size() != 1) {
+    report(error_out, ("a probe reads the framework's entry storage, which instrumentation does "
+                       "not yet support on a multi-kernel code object; this one has " +
+                       std::to_string(kernels.size()) + " kernels")
+                          .c_str());
+    return std::nullopt;
+  }
+  if (!kernel_sgpr_count) {
+    report(error_out, "a probe reads the framework's entry storage, but no kernel SGPR "
+                      "allocation was discovered to reserve it from");
+    return std::nullopt;
+  }
+
+  const KernelDescriptorInfo &kernel = kernels.front();
+  const uint64_t entry_offset = kernel.entry_text_offset;
+  if (find_instruction_at_offset(entry_offset) == nullptr) {
+    report(error_out, ("no decoded instruction starts at the kernel entry, .text offset " +
+                       std::to_string(entry_offset))
+                          .c_str());
+    return std::nullopt;
+  }
+
+  std::string err;
+  RegisterSet reserved;
+  if (!compute_probe_reserved_registers(probes, summaries, reserved, error_out))
+    return std::nullopt;
+
+  const std::optional<DbiEntryProloguePlan> planned = plan_dbi_entry_prologue(
+      KernelBlockScope(scope), kernel.descriptor, arch_, *kernel_sgpr_count, reserved, &err);
+  if (!planned) {
+    // Every rejection the planner reports is a property of the kernel, so its
+    // message alone does not say why this kernel was asked to carry a prologue
+    // at all. Naming the readers is what makes the failure actionable, and it
+    // holds for the storage-exhaustion case and the descriptor ones alike.
+    report(
+        error_out,
+        (err + "; the entry prologue is required by " + entry_storage_reader_list(probes)).c_str());
+    return std::nullopt;
+  }
+
+  // Dispatch enters at the stub, and nothing else in the kernel can: the
+  // original entry keeps its bytes, so a later transfer to it runs guest code
+  // only. The prologue is not idempotent, which is why it must not sit on the
+  // entry itself.
+  EntryProloguePatch patch;
+  patch.padding_bytes =
+      padding_for_residue(cave_offset, entry_offset % kKernelEntryAlignment, kKernelEntryAlignment);
+  patch.stub_offset = cave_offset + patch.padding_bytes;
+  patch.storage_base = planned->storage.persistent_base;
+  patch.words = planned->prologue.words;
+  const uint64_t branch_pc = patch.stub_offset + patch.words.size() * sizeof(uint32_t);
+  const auto simm16 = compute_sopp_branch_simm16(branch_pc, entry_offset);
+  if (!simm16) {
+    report(error_out, ("the entry-prologue stub is out of branch range of the kernel entry; the "
+                       "entry prologue is required by " +
+                       entry_storage_reader_list(probes))
+                          .c_str());
+    return std::nullopt;
+  }
+  patch.words.push_back(build_s_branch(*simm16, arch_));
+  return patch;
 }
 
 Instrumentor::Instrumentor(const AmdGpuCodeObject &obj, rj_code_arch_t arch)
@@ -878,6 +1047,32 @@ Instrumentor::ValidationResult Instrumentor::validate_points() {
 }
 
 InstrumentedCodeObject Instrumentor::patch() {
+  // The entry prologue loads through a kernarg wrapper that only a dispatch-time
+  // runtime can build, and no runtime builds one for DBI. Without it both loads
+  // read past the kernarg allocation and the guest's kernarg pointer is
+  // overwritten, so patch() refuses any point that would need the prologue.
+  // patch_with_debug_summaries() still plans it, for callers that supply the
+  // wrapper themselves.
+  std::string readers;
+  for (const InstrumentationPoint &pt : points_) {
+    if (std::none_of(pt.probe_args.begin(), pt.probe_args.end(),
+                     [](const ProbeArgValue &arg) { return reads_entry_storage(arg.source); }))
+      continue;
+    if (readers.find("'" + pt.probe_symbol + "'") != std::string::npos)
+      continue;
+    if (!readers.empty())
+      readers += ", ";
+    readers += "'" + pt.probe_symbol + "'";
+  }
+  if (!patched_ && !readers.empty()) {
+    patched_ = true;
+    InstrumentedCodeObject result;
+    result.errors.emplace_back("a probe reads the framework's entry storage, which needs a kernarg "
+                               "wrapper that no runtime builds yet; requested by " +
+                               readers);
+    return result;
+  }
+
   // Slice off the debug summaries; move the base subobject into the return.
   auto debug = patch_with_debug_summaries();
   return std::move(static_cast<InstrumentedCodeObject &>(debug));
@@ -922,10 +1117,11 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     liveness_scope.push_back(block.get());
   const LivenessAnalysis liveness{KernelBlockScope(liveness_scope)};
 
-  // Lay out the appended region as [probe bodies][trampolines]. Each distinct
-  // probe body is copied once, ahead of the trampolines that call into it, so a
-  // trampoline's target address is known before it is emitted and sites sharing
-  // a probe share its single body.
+  // Lay out the appended region as [probe bodies][s_nop padding][entry stub]
+  // [trampolines], the padding and stub only when the kernel has an entry
+  // prologue. Each distinct probe body is copied once, ahead of the trampolines
+  // that call into it, so a trampoline's target address is known before it is
+  // emitted and sites sharing a probe share its single body.
   const auto &sites = resolved.sites;
   // Allocate offsets for each probe body, starting at the local cave (the first
   // byte after the original .text). The site loop below continues advancing this
@@ -959,6 +1155,42 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
   const KernelVgprBounds vgpr_bounds = kernels.size() == 1
                                            ? kernel_vgpr_bounds(arch_, kernels.front().descriptor)
                                            : KernelVgprBounds{};
+  // What each probe body overwrites. Keyed on the probe, not the site, so it is
+  // decoded once per distinct body and indexed alongside resolved.probes.
+  std::vector<ProbeClobberSummary> probe_summaries;
+  probe_summaries.reserve(resolved.probes.size());
+  for (const ProbeCallable &probe : resolved.probes) {
+    std::string probe_err;
+    auto summary = build_probe_clobber_summary(probe, &probe_err);
+    if (!summary) {
+      result.errors.push_back(std::move(probe_err));
+      continue;
+    }
+    probe_summaries.push_back(std::move(*summary));
+  }
+  // The site loop indexes this by probe_index, so a short vector would
+  // misattribute one probe's clobbers to another.
+  if (!result.errors.empty())
+    return result;
+
+  // The kernel-entry prologue, planned only for kernels whose probes ask for the
+  // framework's entry storage. It runs before every site because dispatch
+  // enters at it. The prologue needs a kernarg wrapper that no runtime
+  // builds yet, which patch() enforces by refusing these probes.
+  std::optional<EntryProloguePatch> entry_patch;
+  std::optional<uint16_t> entry_storage_base;
+  if (probes_read_entry_storage(resolved.probes)) {
+    std::string err;
+    entry_patch = plan_entry_prologue(kernels, kernel_sgpr_count, liveness_scope, resolved.probes,
+                                      probe_summaries, cave_cursor, &err);
+    if (!entry_patch) {
+      result.errors.push_back(std::move(err));
+      return result;
+    }
+    entry_storage_base = entry_patch->storage_base;
+    cave_cursor = entry_patch->stub_offset + entry_patch->words.size() * sizeof(uint32_t);
+  }
+
   std::optional<SpillManager> spills;
   uint64_t spill_descriptor_file_offset = 0;
 
@@ -1049,11 +1281,7 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
 
       // Callee clobbers (probe body) + liveness at the anchor feed envelope
       // resource selection and the no-spill policy gate.
-      auto summary = build_probe_clobber_summary(probe, &err);
-      if (!summary) {
-        result.errors.push_back(std::move(err));
-        continue;
-      }
+      const ProbeClobberSummary *summary = &probe_summaries[*site.probe_index];
 
       // Check for special machine state that has no save/restore path yet
       if (!check_probe_special_state(*summary, &err)) {
@@ -1091,6 +1319,10 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
       plan.kernel_sgpr_count = *kernel_sgpr_count;
       plan.probe_args = site.probe_args;
       plan.force_full_exec = probe.force_full_exec;
+      // Set on every site of a kernel that has a prologue, not only the ones
+      // passing the pointer on: the pair has to reach them all, so the envelope
+      // has to stay off it everywhere.
+      plan.entry_storage_base = entry_storage_base;
       // Given liveness, clobbers, and calling convention, select registers
       // for trampoline and determine how big the trampoline will be
       if (!TrampolineBuilder::plan_probe_call(plan, probe.abi, live, summary->ordinary_clobbers,
@@ -1208,12 +1440,21 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
     }
   }
 
+  // Like the scratch growth above, written at the descriptor's original file
+  // offset; replace_text then shifts the entry field with everything else.
+  if (entry_patch &&
+      !patcher.redirect_kernel_entry(kernels.front().descriptor_file_offset,
+                                     kernels.front().entry_text_offset, entry_patch->stub_offset)) {
+    result.errors.emplace_back("failed to redirect the kernel entry to the entry-prologue stub");
+    return result;
+  }
+
   // Every per-site validation, branch-range check, and trampoline-byte
   // construction has succeeded up to this point. Assemble the new .text in one
   // buffer: the original bytes with each anchor spliced to its forward branch,
-  // followed by every trampoline appended as the local cave. replace_text()
-  // grows .text in place and fixes up the surrounding ELF (section/segment
-  // sizes, moved symbols, descriptor entries).
+  // followed by the local cave. replace_text() grows .text in place and fixes
+  // up the surrounding ELF (section/segment sizes, moved symbols, descriptor
+  // entries).
   const auto text_span = patcher.text_bytes();
   std::vector<uint8_t> new_text(text_span.begin(), text_span.end());
   for (const auto &a : applied) {
@@ -1221,14 +1462,26 @@ InstrumentedCodeObjectDebug Instrumentor::patch_with_debug_summaries() {
                 a.site->original_size);
   }
   // Append in the laid-out order: probe bodies first (one per distinct probe),
-  // then trampolines.
+  // then the padding and the entry stub, then the per-site trampolines.
   for (const ProbeCallable &probe : resolved.probes)
     append_words(new_text, probe.body_words);
+  if (entry_patch) {
+    append_nop_padding(new_text, entry_patch->padding_bytes, arch_);
+    append_words(new_text, entry_patch->words);
+  }
   for (const auto &a : applied)
     append_words(new_text, a.bytes.trampoline_words);
   if (!patcher.replace_text(new_text)) {
     result.errors.emplace_back("failed to replace .text with the instrumented code");
     return result;
+  }
+
+  if (entry_patch) {
+    std::string err;
+    if (!append_dbi_kernarg_record(patcher, obj_, kernels.front(), &err)) {
+      result.errors.push_back(std::move(err));
+      return result;
+    }
   }
 
   // Emit and build patch summaries.
