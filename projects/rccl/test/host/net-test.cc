@@ -4639,6 +4639,12 @@ class NetRecvProgressMicrotest : public NetProgressMicrotestBase<recvNetResource
     return sub;
   }
 
+  // GDR receive buffers that need a flush after every receive.
+  void NeedGdrFlush() {
+    res_.useGdr = ncclTopoGdrModeDefault;
+    res_.needFlush = ncclTopoFlushAlways;
+  }
+
   // Runs passes until the op has posted its first receive and the network has completed it.
   void PostAndReceive(int bytes) {
     net_.testSizes = {bytes};
@@ -4718,7 +4724,7 @@ TEST_F(NetRecvProgressMicrotest, Post_Dedicated_PostsSliceSizedSlot) {
   ASSERT_EQ(net_.irecvs.size(), 1u);
   const auto& r = net_.irecvs[0];
   EXPECT_EQ(r.comm, &net_.recvComm);
-  EXPECT_EQ(r.data[0], Local() + (sub.base % NCCL_STEPS) * kStepBytes);
+  EXPECT_EQ(r.data[0], Slot(sub));
   EXPECT_EQ(r.sizes[0], 2u * kStepBytes);
   EXPECT_EQ(r.tags[0], 9);
   EXPECT_EQ(r.mhandles[0], mhandles_[NCCL_PROTO_SIMPLE]);
@@ -4790,7 +4796,7 @@ TEST_F(NetRecvProgressMicrotest, Post_SharedRegistered_WaitsForKernelThenPostsUs
 
 TEST_F(NetRecvProgressMicrotest, Post_RingRegistered_WaitsForKernelThenPostsRingSlice) {
   std::vector<uint8_t> user(256);
-  FakeRingAlgo ring(1);
+  FakeRingAlgo ring(2);  // the op's own reference plus ours
   ring.buff = user.data();
   ring.size = 256;
   ring.mhandle = reinterpret_cast<void*>(0xCAFE);
@@ -4808,7 +4814,6 @@ TEST_F(NetRecvProgressMicrotest, Post_RingRegistered_WaitsForKernelThenPostsRing
   EXPECT_EQ(net_.irecvs[0].data[0], user.data());
   EXPECT_EQ(net_.irecvs[0].sizes[0], 256u);
   EXPECT_EQ(net_.irecvs[0].mhandles[0], reinterpret_cast<void*>(0xCAFE));
-  sub.ringAlgo = nullptr;
 }
 
 TEST_F(NetRecvProgressMicrotest, Post_SharedLl_UsesDedicatedSlotWithCompletionHint) {
@@ -4819,7 +4824,7 @@ TEST_F(NetRecvProgressMicrotest, Post_SharedLl_UsesDedicatedSlotWithCompletionHi
   ASSERT_EQ(Progress(), ncclSuccess);
 
   ASSERT_EQ(net_.irecvs.size(), 1u);
-  EXPECT_EQ(net_.irecvs[0].data[0], Local(NCCL_PROTO_LL) + (sub.base % NCCL_STEPS) * kStepBytes);
+  EXPECT_EQ(net_.irecvs[0].data[0], Slot(sub, NCCL_PROTO_LL));
   EXPECT_EQ(net_.irecvs[0].requestIn, reinterpret_cast<void*>(NCCL_NET_OPTIONAL_RECV_COMPLETION));
 }
 
@@ -4882,7 +4887,7 @@ TEST_F(NetRecvProgressMicrotest, Receive_Completed_ReleasesFifoSlotAndRecordsSiz
   ncclProxySubArgs& sub = AddSub(1);
   Fifo(res_.step).size = 99;  // the slot of the op's first step
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   ASSERT_EQ(net_.tested.size(), 1u);
   EXPECT_EQ(net_.tested[0], sub.recvRequestsCache[0]);  // requests are indexed by the op-relative step
@@ -4897,81 +4902,80 @@ TEST_F(NetRecvProgressMicrotest, Receive_NotYetComplete_Waits) {
   ncclProxySubArgs& sub = AddSub(1);
   net_.testDone = 0;
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   EXPECT_EQ(sub.received, 0u);
   EXPECT_EQ(args_->idle, 1);
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_GdrDataNeedingFlush_FlushesReceivedSlot) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   ncclProxySubArgs& sub = AddSub(1);
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   ASSERT_EQ(net_.iflushes.size(), 1u);
   EXPECT_EQ(net_.iflushes[0].comm, &net_.recvComm);
-  EXPECT_EQ(net_.iflushes[0].data[0], Local() + (sub.base % NCCL_STEPS) * kStepBytes);
+  EXPECT_EQ(net_.iflushes[0].data[0], Slot(sub));
   EXPECT_EQ(net_.iflushes[0].sizes[0], 64u);
   EXPECT_EQ(net_.iflushes[0].mhandles[0], mhandles_[NCCL_PROTO_SIMPLE]);
   EXPECT_NE(sub.requests[0], nullptr);
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_ZeroBytes_SkipsFlush) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
-  AddSub(1);
+  NeedGdrFlush();
+  ncclProxySubArgs& sub = AddSub(1);
 
-  PostAndReceive(0);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(0));
 
+  EXPECT_EQ(sub.received, 1u);
   EXPECT_TRUE(net_.iflushes.empty());
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_FlushNotRequired_SkipsFlush) {
   res_.useGdr = ncclTopoGdrModeDefault;
-  AddSub(1);
+  ncclProxySubArgs& sub = AddSub(1);
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
+  EXPECT_EQ(sub.received, 1u);
   EXPECT_TRUE(net_.iflushes.empty());
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_HostMemoryBuffers_SkipFlush) {
   res_.needFlush = ncclTopoFlushAlways;
-  AddSub(1);
+  ncclProxySubArgs& sub = AddSub(1);
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
+  EXPECT_EQ(sub.received, 1u);
   EXPECT_TRUE(net_.iflushes.empty());
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_Ll128_SkipsFlush) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   args_->protocol = NCCL_PROTO_LL128;
-  AddSub(1);
+  ncclProxySubArgs& sub = AddSub(1);
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
+  EXPECT_EQ(sub.received, 1u);
   EXPECT_TRUE(net_.iflushes.empty());
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_SharedPool_FlushesPoolSlot) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   MakeShared();
   ncclProxySubArgs& sub = AddSub(1);
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   ASSERT_EQ(net_.iflushes.size(), 1u);
   EXPECT_EQ(net_.iflushes[0].data[0], Local() + Fifo(sub.base).offset);
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_SharedRegistered_FlushesUserBuffer) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   MakeShared();
   std::vector<uint8_t> user(64);
   ncclProxySubArgs& sub = AddSub(1);
@@ -4980,17 +4984,16 @@ TEST_F(NetRecvProgressMicrotest, Receive_SharedRegistered_FlushesUserBuffer) {
   sub.nbytes = 64;
   Fifo(res_.step).size = 0;  // the kernel started the op's first step
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   ASSERT_EQ(net_.iflushes.size(), 1u);
   EXPECT_EQ(net_.iflushes[0].data[0], user.data());
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_RingRegistered_FlushesRingSlice) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   std::vector<uint8_t> user(64);
-  FakeRingAlgo ring(1);
+  FakeRingAlgo ring(2);  // the op's own reference plus ours
   ring.buff = user.data() + 8;
   ring.size = 32;
   ncclProxySubArgs& sub = AddSub(1);
@@ -4998,21 +5001,19 @@ TEST_F(NetRecvProgressMicrotest, Receive_RingRegistered_FlushesRingSlice) {
   sub.ringAlgo = &ring;
   Fifo(res_.step).size = 0;  // the kernel started the op's first step
 
-  PostAndReceive(32);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(32));
 
   ASSERT_EQ(net_.iflushes.size(), 1u);
   EXPECT_EQ(net_.iflushes[0].data[0], user.data() + 8);
-  sub.ringAlgo = nullptr;
 }
 
 TEST_F(NetRecvProgressMicrotest, Receive_GdcFlushWord_ReplacesPluginFlush) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   uint64_t flushWord = 0;
   res_.gdcFlush = &flushWord;
   ncclProxySubArgs& sub = AddSub(1);
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   EXPECT_TRUE(net_.iflushes.empty());
   EXPECT_EQ(sub.requests[0], nullptr);
@@ -5020,35 +5021,45 @@ TEST_F(NetRecvProgressMicrotest, Receive_GdcFlushWord_ReplacesPluginFlush) {
 
 TEST_F(NetRecvProgressMicrotest, Receive_HdpFlushEnabled_KicksHdpRegisterAlongsideFlush) {
   ScopedHook param(g_loadParam, ParamOverride({{"RCCL_NET_HDP_FLUSH", 1}}));
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   uint32_t hdp = 0;
   res_.curr_hdp_reg = &hdp;
   AddSub(1);
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   EXPECT_EQ(hdp, 1u);
   EXPECT_EQ(net_.iflushes.size(), 1u);
 }
 
-TEST_F(NetRecvProgressMicrotest, Receive_HdpFlushDisabled_LeavesRegister) {
+TEST_F(NetRecvProgressMicrotest, Receive_HdpFlushEnabledButNoFlushNeeded_LeavesRegister) {
+  ScopedHook param(g_loadParam, ParamOverride({{"RCCL_NET_HDP_FLUSH", 1}}));
   res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  uint32_t hdp = 0;
+  res_.curr_hdp_reg = &hdp;
+  ncclProxySubArgs& sub = AddSub(1);
+
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
+
+  EXPECT_EQ(sub.received, 1u);
+  EXPECT_EQ(hdp, 0u);
+}
+
+TEST_F(NetRecvProgressMicrotest, Receive_HdpFlushDisabled_LeavesRegister) {
+  NeedGdrFlush();
   uint32_t hdp = 0;
   res_.curr_hdp_reg = &hdp;
   AddSub(1);
 
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   EXPECT_EQ(hdp, 0u);
 }
 
 TEST_F(NetRecvProgressMicrotest, Tail_PublishedOnceFlushCompletes) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   ncclProxySubArgs& sub = AddSub(1);
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
   void* flushRequest = sub.requests[0];
   net_.testDone = 0;
 
@@ -5066,7 +5077,7 @@ TEST_F(NetRecvProgressMicrotest, Tail_GdrCopy_PublishedToGdcWord) {
   uint64_t gdc = 0;
   res_.gdcSync = &gdc;
   ncclProxySubArgs& sub = AddSub(1);
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
 
   ASSERT_EQ(Progress(), ncclSuccess);
 
@@ -5080,7 +5091,7 @@ TEST_F(NetRecvProgressMicrotest, Done_GpuConsumedStep_ReleasesMultiRecvAndEndsOp
   ring->deleted = &deleted;
   ncclProxySubArgs& sub = AddSub(1);
   sub.ringAlgo = ring;
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
   void* request = sub.recvRequestsCache[0];
   res_.sendMem->head = sub.base + 1;  // the GPU is done with the step
 
@@ -5099,7 +5110,7 @@ TEST_F(NetRecvProgressMicrotest, Done_GpuConsumedStep_ReleasesMultiRecvAndEndsOp
 
 TEST_F(NetRecvProgressMicrotest, Done_GpuNotDoneWithStep_KeepsIt) {
   ncclProxySubArgs& sub = AddSub(1);
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
   res_.sendMem->head = sub.base;  // the GPU has not consumed the step
 
   for (int i = 0; i < 4; i++) ASSERT_EQ(Progress(), ncclSuccess);
@@ -5112,7 +5123,7 @@ TEST_F(NetRecvProgressMicrotest, Done_GpuNotDoneWithStep_KeepsIt) {
 TEST_F(NetRecvProgressMicrotest, Done_PluginWithoutConsumedHook_StillCompletes) {
   vtable_.irecvConsumed = nullptr;
   ncclProxySubArgs& sub = AddSub(1);
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
   ASSERT_EQ(Progress(), ncclSuccess);
   res_.sendMem->head = sub.base + 1;
 
@@ -5131,8 +5142,7 @@ TEST_F(NetRecvProgressMicrotest, TestFails_ReturnsError) {
 }
 
 TEST_F(NetRecvProgressMicrotest, FlushFails_ReturnsError) {
-  res_.useGdr = ncclTopoGdrModeDefault;
-  res_.needFlush = ncclTopoFlushAlways;
+  NeedGdrFlush();
   net_.testSizes = {64};
   AddSub(1);
   ASSERT_EQ(Progress(), ncclSuccess);
@@ -5143,7 +5153,7 @@ TEST_F(NetRecvProgressMicrotest, FlushFails_ReturnsError) {
 
 TEST_F(NetRecvProgressMicrotest, ConsumedNotificationFails_ReturnsError) {
   ncclProxySubArgs& sub = AddSub(1);
-  PostAndReceive(64);
+  ASSERT_NO_FATAL_FAILURE(PostAndReceive(64));
   ASSERT_EQ(Progress(), ncclSuccess);
   res_.sendMem->head = sub.base + 1;
   net_.consumedResult = ncclInternalError;
