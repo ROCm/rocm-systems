@@ -168,7 +168,7 @@ def keep_copies_groups_still_need(
         if rebuilt is None:
             console_warning(
                 "profiling",
-                "single-pass-packable: orphan TCC EA REQ strip rebuild failed "
+                "single-pass metric: orphan TCC EA REQ strip rebuild failed "
                 f"for bucket {bucket.name!r}; leaving bucket unchanged.",
             )
             continue
@@ -180,7 +180,7 @@ def keep_copies_groups_still_need(
         if required_groups and _required_group_missing(trial, required_groups):
             console_debug(
                 "profiling",
-                "single-pass-packable: kept EA request copies so a "
+                "single-pass metric: kept EA request copies so a "
                 "multi-column request row stays complete in one pass.",
             )
             continue
@@ -199,7 +199,7 @@ def keep_copies_groups_still_need(
     if changed:
         console_debug(
             "profiling",
-            "single-pass-packable: stripped orphan TCC EA REQ series from "
+            "single-pass metric: stripped orphan TCC EA REQ series from "
             f"non-home passes ({sorted(home_bases)}).",
         )
     return updated
