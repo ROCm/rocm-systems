@@ -6752,7 +6752,31 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredPreemptsSymmetri
       });
 }
 
-// The late arm rebuilds its own gate and must reject Float8 (no CE reduce kernel).
+// Late arm must reuse ceReduceScatterAllowed (incl. nNodes==1). On a multi-node
+// CTA-ZERO comm where DDA/hier/Direct decline, CE must not be selected.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredDeclinedOnMultiNode) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_LateCeRegisteredDeclinedOnMultiNode",
+      []() {
+        g_loadParam = EnabledCeReduceScatterParams;
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return false; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = kCeRsRegisteredArmRanks;
+        comm->nNodes = 2;
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Late arm shares rcclUseCeReduceScatter, which rejects Float8 (no CE reduce kernel).
 TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsFloat8) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_LateCeRegisteredRejectsFloat8",
@@ -7018,8 +7042,8 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 
 // RCCL_CE_REDUCESCATTER at 0 keeps every CE arm out even with every CE seam forced true, the exact
 // combination that WOULD give CE_REGISTERED in rcclSelectAllReduce/AllGather. The param does it,
-// not an absent call: rcclUseCeReduceScatter returns on its first guard, clearing
-// ceReduceScatterAllowed, and the late arm clears ceAvailable on `!rcclParamCeReduceScatter()`.
+// not an absent call: rcclUseCeReduceScatter returns on its first guard, so
+// ceReduceScatterAllowed is false for both the early and late CE arms.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff",

@@ -2117,20 +2117,12 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     }
 
     // (5) CE ReduceScatter via enqueue when an earlier CE arm did not return
-    // (e.g. symEligible skipped the eager arms). Always stages through
-    // ceARTmpBuf and pipelines arbitrary sizes; no message-size cap.
-    // Opt-in: RCCL_CE_REDUCESCATTER=0 must keep this path closed. Reject
-    // ncclAvg / PreMulSum / Float8 -- ncclCeLaunchPersistentReduce only supports
-    // Sum/Prod/Min/Max on non-fp8 types. CE intentionally has priority over
-    // symk when both are eligible; symk remains the fallback when CE is not.
-    bool ceAvailable = ceArGraphAllowed && !hasSysmemSegment && ncclGroupDepth == 0;
-    if (!rcclParamCeReduceScatter()) ceAvailable = false;
-    const bool ceReduceScatterOpSupported =
-      (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
-    const bool ceReduceScatterTypeSupported =
-      (datatype != ncclFloat8e4m3 && datatype != ncclFloat8e5m2);
-    if (ceAvailable && ceReduceScatterOpSupported && ceReduceScatterTypeSupported &&
-        (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO)) {
+    // (e.g. symEligible skipped the eager arms). Reuse ceReduceScatterAllowed so
+    // this arm keeps the same gates as rcclUseCeReduceScatter (nNodes==1,
+    // symmetricSupport, recvcount, op, datatype, CTA ZERO) instead of rebuilding
+    // a weaker subset. CE intentionally has priority over symk when both are
+    // eligible; symk remains the fallback when CE is not.
+    if (ceReduceScatterAllowed && !hasSysmemSegment) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
