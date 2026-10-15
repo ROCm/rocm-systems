@@ -24,6 +24,7 @@ THE SOFTWARE.
 #include <grpcpp/grpcpp.h>
 
 #include <atomic>
+#include <condition_variable>  // NOLINT
 #include <future>
 #include <map>
 #include <memory>
@@ -159,16 +160,39 @@ class RdcStandaloneHandler : public RdcHandler {
     std::atomic<bool> stop{false};
     ::grpc::ClientContext context;  // TryCancel() ends a blocked Read()
     std::thread reader;
+    // Guards the fields below. The reader signals cv when rdcd admits the
+    // stream or the stream ends; unregister and the destructor set cancel.
+    std::mutex mutex;
+    std::condition_variable cv;
+    bool admitted = false;    // rdcd admitted the stream (admission key)
+    bool old_server = false;  // a notification came first: rdcd predates admission
+    bool ended = false;       // the stream is over; status says how
+    bool cancel = false;      // given up by rdc_policy_unregister() or the destructor
+    bool returned = false;    // rdc_policy_register() returned before the stream ended
+    ::grpc::Status status;
   };
   // Makes the reader leave its loop; it does not wait for it.
   static void stop_policy_stream(policy_stream* stream);
+  // Joins and drops the streams in draining_ whose reader has ended (not the
+  // calling thread's own). Caller holds policy_streams_mutex_.
+  void reap_draining_locked();
+  // The RDC status of a RegisterPolicy stream that rdcd ended.
+  static rdc_status_t policy_stream_status(const ::grpc::Status& status);
 
-  // Guards policy_streams_ and draining_. A stream is in one of them, or
-  // held by the rdc_policy_unregister() call that joins it.
+  // Guards policy_streams_, draining_ and the waiter state below. A stream is
+  // in one of the containers, or held by the call that joins it.
   std::mutex policy_streams_mutex_;
   std::map<uint32_t, std::shared_ptr<policy_stream>> policy_streams_;
-  // Streams unregistered from a callback, joined by the destructor.
+  // Streams unregistered from a callback, joined later.
   std::vector<std::shared_ptr<policy_stream>> draining_;
+  // rdc_policy_register() calls waiting for admission; the destructor waits
+  // on waiters_cv_ until there are none.
+  size_t in_flight_waiters_ = 0;
+  std::condition_variable waiters_cv_;
+  bool destructing_ = false;
+  // An rdcd that predates admission never admits a stream: after one wait
+  // without an answer, registrations no longer wait.
+  bool policy_server_old_ = false;
 };
 
 }  // namespace rdc

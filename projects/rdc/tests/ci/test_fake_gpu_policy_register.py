@@ -135,8 +135,8 @@ def test_callbacks_can_unregister_groups(rdcd):
 
     disconnected = None
     try:
-        # rdcd keeps a context per group once registered; make both now, so
-        # the steps below only reuse them.
+        # Each group delivers a notification and unregisters once before the
+        # callbacks below unregister groups.
         for group in (a, b):
             assert register(group, lambda: None).wait(wait), f"no callback for group {group}"
             assert lib.rdc_policy_unregister(handle, group) == 0

@@ -23,12 +23,12 @@ THE SOFTWARE.
 #define SERVER_INCLUDE_RDC_RDC_API_SERVICE_H_
 
 #include <grpcpp/server_context.h>
-#include <pthread.h>
 
-#include <atomic>
+#include <condition_variable>  // NOLINT
 #include <map>
+#include <memory>
 #include <mutex>  // NOLINT
-#include <thread>
+#include <vector>
 
 #include "rdc.grpc.pb.h"  // NOLINT
 #include "rdc/rdc.h"
@@ -131,13 +131,13 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   ::grpc::Status RemoveAllJob(::grpc::ServerContext* context, const ::rdc::Empty* request,
                               ::rdc::RemoveAllJobResponse* reply) override;
 
-  ::grpc::Status DiagnosticRun(
-      ::grpc::ServerContext* context, const ::rdc::DiagnosticRunRequest* request,
-      ::grpc::ServerWriter< ::rdc::DiagnosticRunResponse>* writer) override;
+  ::grpc::Status DiagnosticRun(::grpc::ServerContext* context,
+                               const ::rdc::DiagnosticRunRequest* request,
+                               ::grpc::ServerWriter<::rdc::DiagnosticRunResponse>* writer) override;
 
   ::grpc::Status DiagnosticTestCaseRun(
       ::grpc::ServerContext* context, const ::rdc::DiagnosticTestCaseRunRequest* request,
-      ::grpc::ServerWriter< ::rdc::DiagnosticTestCaseRunResponse>* writer) override;
+      ::grpc::ServerWriter<::rdc::DiagnosticTestCaseRunResponse>* writer) override;
 
   ::grpc::Status GetMixedComponentVersion(::grpc::ServerContext* context,
                                           const ::rdc::GetMixedComponentVersionRequest* request,
@@ -155,7 +155,7 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
 
   ::grpc::Status RegisterPolicy(
       ::grpc::ServerContext* context, const ::rdc::RegisterPolicyRequest* request,
-      ::grpc::ServerWriter< ::rdc::RegisterPolicyResponse>* stream) override;
+      ::grpc::ServerWriter<::rdc::RegisterPolicyResponse>* stream) override;
 
   ::grpc::Status UnRegisterPolicy(::grpc::ServerContext* context,
                                   const ::rdc::UnRegisterPolicyRequest* request,
@@ -204,20 +204,32 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);
   rdc_handle_t rdc_handle_;
 
-  struct policy_thread_context {
-    pthread_mutex_t mutex;
-    pthread_cond_t cond;
+  // The most RegisterPolicy streams rdcd serves at once, over all clients and groups.
+  static constexpr size_t kMaxPolicyStreams = 64;
+
+  // One RegisterPolicy stream. PolicyCallback() leaves the latest notification in it; the
+  // stream's own handler thread writes it to the client.
+  struct PolicyStream {
+    std::mutex mutex;  // guards the fields below
+    std::condition_variable cv;
     rdc_policy_callback_response_t response;
-    bool pending = false;  // a response not sent yet; guarded by mutex
-    std::atomic<bool> start{false};
+    bool pending = false;   // response is not written yet
+    bool stop = false;      // UnRegisterPolicy or shutdown ends the stream
+    bool shutdown = false;  // shutdown ended it: the client learns that rdcd stops
   };
-  // map for group_id and thread context; contexts are never freed
-  static std::map<uint32_t, struct policy_thread_context*> policy_threads_;
-  // guards policy_threads_: RPC threads and RDC's policy thread use it
-  static std::mutex policy_threads_mutex_;
-  static policy_thread_context* find_policy_thread(uint32_t group_id);
-  static void stop_policy_stream(policy_thread_context* ctx);
+  static void stop_policy_stream(PolicyStream* stream);
+  // Removes a stream that ended; the last stream of a group drops its library registration.
+  void end_policy_stream(uint32_t group_id, const std::shared_ptr<PolicyStream>& stream);
   static int PolicyCallback(rdc_policy_callback_response_t* userData);
+
+  // Guards the policy state below, and RDC's policy register and unregister calls. RDC never
+  // calls PolicyCallback() while it holds its own policy lock, so PolicyCallback() can take it.
+  // The state is static because PolicyCallback() is; rdcd has one RdcAPIServiceImpl.
+  static std::mutex policy_mutex_;
+  // The streams of each group with a library registration.
+  static std::map<uint32_t, std::vector<std::shared_ptr<PolicyStream>>> policy_streams_;
+  static size_t policy_stream_count_;  // streams over all groups
+  static bool policy_shutdown_;        // set by Shutdown(); no stream starts after it
 };
 
 }  // namespace rdc
