@@ -3604,6 +3604,14 @@ TEST(CApiTest, RejectsMalformedCheckpoints) {
   EXPECT_EQ(restored, nullptr);
 }
 
+TEST(CApiTest, MissingConfigFileReturnsInvalidFile) {
+  test::ScopedTempDirectory directory("rocjitsu-c-api-missing-config-");
+  const std::string path = directory.path() + "/missing.json";
+  rj_vm_t *handle = nullptr;
+  EXPECT_EQ(rj_vm_create(path.c_str(), RJ_VM_MODE_DEFAULT, &handle), ROCJITSU_STATUS_INVALID_FILE);
+  EXPECT_EQ(handle, nullptr);
+}
+
 TEST(CApiTest, InvalidArguments) {
   rj_vm_t *handle = nullptr;
   EXPECT_EQ(rj_vm_create_from_string(nullptr, RJ_VM_MODE_DEFAULT, &handle),

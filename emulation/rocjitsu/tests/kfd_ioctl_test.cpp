@@ -20,7 +20,6 @@
 #include "rocjitsu/vm/virtual_machine.h"
 #include "scoped_temp.h"
 #include "util/diagnostic.h"
-#include <stdexcept>
 
 #include "embedded_schema.h"
 #include "rocjitsu/kmd/linux/amdgpu_properties.h"

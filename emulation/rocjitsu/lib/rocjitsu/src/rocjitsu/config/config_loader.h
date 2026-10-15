@@ -177,7 +177,8 @@ struct TopologyBuildResult {
 ///   #include "rocjitsu/vm/amdgpu/partitioning.h"
 ///
 ///   util::StringDiagnostic diagnostic;
-///   auto result = load_config("config.json", kEmbeddedSchema, diagnostic.emitter());
+///   util::FailureOr<config::LoadedConfig> result =
+///       load_config("config.json", kEmbeddedSchema, diagnostic.emitter());
 ///   if (result.failed()) {
 ///     // Report diagnostic.message() and stop before accessing the value.
 ///     return;

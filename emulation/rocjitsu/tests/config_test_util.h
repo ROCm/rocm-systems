@@ -1,8 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#ifndef ROCJITSU_TESTS_CONFIG_TEST_UTIL_H_
-#define ROCJITSU_TESTS_CONFIG_TEST_UTIL_H_
+#pragma once
 
 #include "embedded_schema.h"
 #include "rocjitsu/config/config_loader.h"
@@ -49,5 +48,3 @@ load_valid_config_from_string(const std::string &json, config::LoadedConfig &out
 }
 
 } // namespace rocjitsu::test
-
-#endif // ROCJITSU_TESTS_CONFIG_TEST_UTIL_H_
