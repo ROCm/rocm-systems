@@ -601,6 +601,14 @@ add_test(
         ${COV_OPTION} tests/integration/test_list_metrics_cli.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_metric_library_equivalence
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest
+        --junitxml=tests/test_metric_library_equivalence.xml ${COV_OPTION}
+        tests/integration/test_metric_library_equivalence.py ${WORKING_DIR_OPTION}
+)
+
 # rocprofv3 avail library interface — no GPU required
 add_test(
     NAME test_rocprofv3_avail_interface
@@ -768,6 +776,14 @@ add_test(
     COMMAND
         ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_metric_library.xml
         ${COV_OPTION} tests/unit/utils/test_metric_library.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_validate_metric_library
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_validate_metric_library.xml
+        ${COV_OPTION} tests/unit/tools/test_validate_metric_library.py
+        ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1087,6 +1103,7 @@ if(${ENABLE_COVERAGE})
         test_utils_counter_defs
         test_yaml_inherit_loader
         test_metric_library
+        test_validate_metric_library
         test_parser
         test_argparser
         test_L1_cache_counters
@@ -1104,6 +1121,7 @@ if(${ENABLE_COVERAGE})
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
+        test_metric_library_equivalence
         test_mem_chart_common
         test_mem_chart_gfx9
         test_mem_chart_gfx11

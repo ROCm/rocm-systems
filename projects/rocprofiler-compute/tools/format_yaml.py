@@ -23,6 +23,7 @@ import yaml
 # Path patterns that contain metric equations to check (substrings matched against path)
 EQUATION_FILE_PATTERNS = [
     "analysis_configs/gfx",
+    "metric_library/gfx",
 ]
 
 # Path suffixes to exclude from equation checking
@@ -36,8 +37,8 @@ SKIP_FILE_PATTERNS = [
     "profiling_config.yaml",
 ]
 
-# YAML keys that contain metric equations
-EQUATION_KEYS = {"value", "avg", "min", "max", "peak"}
+# YAML keys that contain metric equations ("formula" in metric library files)
+EQUATION_KEYS = {"value", "avg", "min", "max", "peak", "formula"}
 
 # Literal string values that should not be parsed as equations
 LITERAL_VALUES = {"N/A", "None", "null", "true", "false", "Peak (Empirical)"}
@@ -440,6 +441,13 @@ def _should_skip_file(path: Path) -> bool:
     return False
 
 
+class _EquationLoader(yaml.SafeLoader):
+    """SafeLoader that accepts the metric library's "!remove" tag."""
+
+
+_EquationLoader.add_constructor("!remove", lambda loader, node: None)
+
+
 def _apply_fixes(content: str, equations: list[tuple[str, str, str]]) -> str:
     """Apply equation normalizations using regex to handle multi-line YAML."""
     result = content
@@ -461,7 +469,7 @@ def check_file(
     try:
         with open(path, encoding="utf-8") as f:
             content = f.read()
-        data = yaml.safe_load(content)
+        data = yaml.load(content, Loader=_EquationLoader)
     except (yaml.YAMLError, OSError) as e:
         return False, [f"Failed to parse YAML: {e}"]
 

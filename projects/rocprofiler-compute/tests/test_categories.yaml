@@ -10,6 +10,7 @@ test_categories:
       - test_utils_counter_defs
       - test_yaml_inherit_loader
       - test_metric_library
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_profile_section
@@ -27,6 +28,7 @@ test_categories:
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
+      - test_metric_library_equivalence
       - test_pc_sampling_analysis
       - test_pc_sampling_analyze_cli
       - test_analysis_db
@@ -107,6 +109,7 @@ test_categories:
       - test_utils_counter_defs
       - test_yaml_inherit_loader
       - test_metric_library
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -125,6 +128,7 @@ test_categories:
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
+      - test_metric_library_equivalence
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -207,6 +211,7 @@ test_categories:
       - test_utils_counter_defs
       - test_yaml_inherit_loader
       - test_metric_library
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -225,6 +230,7 @@ test_categories:
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
+      - test_metric_library_equivalence
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze
@@ -307,6 +313,7 @@ test_categories:
       - test_utils_counter_defs
       - test_yaml_inherit_loader
       - test_metric_library
+      - test_validate_metric_library
       - test_parser
       - test_argparser
       - test_analyze_commands
@@ -325,6 +332,7 @@ test_categories:
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
+      - test_metric_library_equivalence
       - test_L1_cache_counters
       - test_roofline_calc
       - test_roofline_analyze

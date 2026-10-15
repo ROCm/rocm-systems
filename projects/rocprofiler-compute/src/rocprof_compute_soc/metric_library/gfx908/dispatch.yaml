@@ -1,0 +1,69 @@
+dispatch.vgprs:
+  name: VGPRs
+  formula: AVG(Arch_VGPR)
+  unit: Registers
+  description: >-
+    The number of architected vector general-purpose registers allocated for the kernel,
+    see VALU. Note: this may not exactly match the number of VGPRs requested by the
+    compiler due to allocation granularity.
+dispatch.sgprs:
+  name: SGPRs
+  formula: AVG(SGPR)
+  unit: Registers
+  description: >-
+    The number of scalar general-purpose registers allocated for the kernel, see SALU.
+    Note: this may not exactly match the number of SGPRs requested by the compiler
+    due to allocation granularity.
+dispatch.lds_allocation:
+  name: LDS Allocation
+  formula: AVG(LDS_Per_Workgroup)
+  unit: Bytes
+  description: >-
+    The number of bytes of LDS memory (or, shared memory) allocated per workgroup.
+    Note: This may also be larger than what was requested at compile time due to both
+    allocation granularity and dynamic per-dispatch LDS allocations.
+dispatch.scratch_allocation_per_wave:
+  name: Scratch Allocation
+  formula: AVG(Scratch_Per_Workitem) * $wave_size / 1024
+  unit: KB per Wave
+  description: >-
+    The amount of scratch memory requested per wavefront, in KB: the scratch bytes
+    requested per work-item multiplied by the wavefront size. Scratch memory is used
+    for stack memory on the accelerator, as well as for register spills and restores.
+dispatch.grid_size:
+  name: Grid Size
+  formula: AVG(Grid_Size)
+  unit: Work-items
+  description: >-
+    The total number of work-items (or, threads) launched as a part of the kernel
+    dispatch. In HIP, this is equivalent to the total grid size multiplied by the
+    total workgroup (or, block) size.
+dispatch.workgroup_size:
+  name: Workgroup Size
+  formula: AVG(Workgroup_Size)
+  unit: Work-items
+  description: >-
+    The total number of work-items (or, threads) in each workgroup (or, block) launched
+    as part of the kernel dispatch. In HIP, this is equivalent to the total block
+    size.
+dispatch.agprs:
+  name: AGPRs
+  formula: AVG(Accum_VGPR)
+  unit: Registers
+  description: >-
+    The number of accumulation vector general-purpose registers allocated for the
+    kernel, see AGPRs. Note: this may not exactly match the number of AGPRs requested
+    by the compiler due to allocation granularity.
+dispatch.scratch_allocation:
+  name: Scratch Allocation
+  formula: AVG(Scratch_Per_Workitem)
+  unit: Bytes per Work-item
+  description: >-
+    The number of bytes of scratch memory requested per work-item for this kernel.
+    Scratch memory is used for stack memory on the accelerator, as well as for register
+    spills and restores.
+dispatch.kernel_time:
+  name: Kernel Time
+  formula: AVG(End_Timestamp - Start_Timestamp)
+  unit: Nanoseconds
+  description: The total duration of the executed kernel.
