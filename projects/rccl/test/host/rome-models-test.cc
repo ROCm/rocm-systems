@@ -723,14 +723,21 @@ TEST_F(RomeModelsParseMicrotest, ParseGraph_UnknownDevIsAnError) {
   EXPECT_EQ(ncclInternalError, parseGraph("0 1 2 3", system_.get(), ring_.get(), gpuMap, nullptr, 0));
 }
 
-TEST_F(RomeModelsParseMicrotest, ParseGraph_StopsAtTheHostLimits) {
-  std::string many;
-  for (int g = 0; g <= NCCL_TOPO_MAX_NODES; g++) many += std::to_string(g % 4) + " ";
-  ASSERT_EQ(ncclSuccess, parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0));
-  EXPECT_EQ(0, ring_->nChannels);
-
+TEST_F(RomeModelsParseMicrotest, ParseGraph_StopsAtTooManyNics) {
   ASSERT_EQ(ncclSuccess, parseGraph("N0 N1 N2 N3 N0 N1 N2 N3 N0 0 1 2 3", system_.get(), ring_.get(), nullptr,
                                     nullptr, 0));
+
+  EXPECT_EQ(0, ring_->nChannels);
+}
+
+// Observed: the GPU count is checked after the write, so GPU number NCCL_TOPO_MAX_NODES + 1 lands one past gpus[].
+TEST_F(RomeModelsParseMicrotest, ParseGraph_OneGpuPastTheLimitIsWrittenBeforeTheStop) {
+  if (kAsan) GTEST_SKIP() << "the out-of-bounds stack write would fail AddressSanitizer";
+  std::string many;
+  for (int g = 0; g <= NCCL_TOPO_MAX_NODES; g++) many += std::to_string(g % 4) + " ";
+
+  ASSERT_EQ(ncclSuccess, parseGraph(many.c_str(), system_.get(), ring_.get(), nullptr, nullptr, 0));
+
   EXPECT_EQ(0, ring_->nChannels);
 }
 

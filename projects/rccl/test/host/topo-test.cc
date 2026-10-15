@@ -1802,8 +1802,8 @@ TEST_F(TopoMicrotest, GetXmlCpuArch_TakesTheFirstCpuThatHasOne) {
   EXPECT_EQ(NCCL_TOPO_CPU_ARCH_ARM, arch);
 }
 
-TEST_F(TopoMicrotest, DevToRankAndIdToNetDev_StayOnTheGivenSystem) {
-  SystemPtr system = BuildSystem(System(Cpu(0, GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 0))) +
+TEST_F(TopoMicrotest, Lookups_StayOnTheirSystemAndWarnOnlyWhenAsked) {
+  SystemPtr system = BuildSystem(System(Cpu(0, GpuPci(GpuBus(0), 0, 0) + NicPci(NicBus(0), Net("a", 3))) +
                                         Cpu(1, GpuPci(GpuBus(1), 1, 1), "host_hash=\"0x5\"")));
   int g = GpuIndexOfRank(system.get(), 0);
   int systemId = NCCL_TOPO_ID_SYSTEM_ID(system->nodes[GPU].nodes[g].id);
@@ -1818,6 +1818,15 @@ TEST_F(TopoMicrotest, DevToRankAndIdToNetDev_StayOnTheGivenSystem) {
   EXPECT_EQ(ncclInternalError, ncclTopoIdToNetDev(system.get(), 0x99, &netDev));
   EXPECT_EQ(-1, netDev);
   EXPECT_TRUE(Logged("Could not find NET with id 99"));
+  ASSERT_EQ(ncclSuccess, ncclTopoIdToNetDev(system.get(), system->nodes[NET].nodes[0].id, &netDev));
+  EXPECT_EQ(3, netDev);  // the plugin's dev, not the node index
+
+  int index = 7;
+  EXPECT_EQ(ncclInternalError, ncclTopoRankToIndex(system.get(), 9, &index, false));
+  EXPECT_EQ(-1, index);
+  EXPECT_FALSE(Logged("ncclTopoRankToIndex could not find rank 9"));
+  EXPECT_EQ(ncclInternalError, ncclTopoRankToIndex(system.get(), 9, &index, true));
+  EXPECT_TRUE(Logged("ncclTopoRankToIndex could not find rank 9"));
 }
 
 // Observed: the "str == NULL will return NCCL_TOPO_CPU_ARCH_UNDEF" comment does not hold, kvConvertToInt
