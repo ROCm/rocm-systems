@@ -1422,6 +1422,20 @@ TEST_F(SymUnbindTeamMemoryTest, IsANoOpOnThisBuild) {
 }
 
 
+// symTeamObtain mallocs teams onto devrState.teamHead. symTeamDestroyAll also
+// unmaps CUDA multicast and destroys CFT logical endpoints, and a
+// value-initialized comm has le.baseId == 0 rather than NCCL_LE_ID_INVALID,
+// so these fixtures free only the malloc'd list.
+static void FreeMallocdDevrTeams(ncclComm* comm) {
+  ncclDevrTeam* t = comm->devrState.teamHead;
+  while (t != nullptr) {
+    ncclDevrTeam* next = t->next;
+    free(t);
+    t = next;
+  }
+  comm->devrState.teamHead = nullptr;
+}
+
 // ---------------------------------------------------------------------------
 // symTeamObtain looks up a team by (rank, nRanks, stride) and creates one if
 // the list has no match, pushing it onto devrState.teamHead.
@@ -1447,13 +1461,7 @@ protected:
 
   // Teams are malloc'd by the unit under test and linked onto teamHead.
   void TearDown() override {
-    ncclDevrTeam* t = comm->devrState.teamHead;
-    while (t != nullptr) {
-      ncclDevrTeam* next = t->next;
-      free(t);
-      t = next;
-    }
-    comm->devrState.teamHead = nullptr;
+    FreeMallocdDevrTeams(comm);
     ResetDevRuntimeMicroFakes();
   }
 
@@ -5505,17 +5513,15 @@ protected:
     comm = commStorage.get();
     comm->nRanks = 1;
     comm->devrState.lsaSize = 1;
-    // idivRcp32(cftMcSize) runs before GIN setup. A zero size is a divide by zero.
+    // This fixture skips ncclDevrInitOnce, which sets cftMcSize from
+    // computeCftMcSize. That helper returns at least 1, so production does
+    // not pass 0 to idivRcp32. A value-initialized comm would.
     comm->devrState.cftMcSize = 1;
     comm->devrState.granularity = 4096;
   }
 
   void TearDown() override {
-    while (comm->devrState.teamHead != nullptr) {
-      struct ncclDevrTeam* team = comm->devrState.teamHead;
-      comm->devrState.teamHead = team->next;
-      free(team);
-    }
+    FreeMallocdDevrTeams(comm);
     NcclVersionCompatTest::TearDown();
   }
 
@@ -5566,19 +5572,22 @@ TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   EXPECT_EQ(Create(), ncclInvalidArgument);
 }
 
-// NCCL 2.31.2 (PR #2229): ncclDevrCommCreateInternal switches the thread to
-// relaxed stream-capture mode before GIN setup. A failure in
-// ncclGinDevCommSetup must take the shared fail path, which exchanges the
-// mode back. Returning directly from the setup call leaves the thread relaxed
-// and later graph capture on that thread sees the wrong mode.
+// ginSignalCount stays at its initializer value of 0. The barrier fakes also
+// zero their ginSignalCount, so ginSignalTotal stays 0 and the sharedRes
+// walk is not taken. This fixture never assigns sharedRes.
 TEST_F(DevrCommCreateInternalTest, GinSetupFails_RestoresStreamCaptureMode) {
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
-  reqs.ginSignalCount = 0;  // skip the sharedRes ginState walk
   comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
 
   hipStreamCaptureMode threadMode = hipStreamCaptureModeGlobal;
+  hipStreamCaptureMode requested = hipStreamCaptureModeGlobal;
+  bool sawRequest = false;
   ScopedHook exchange(g_hipThreadExchangeStreamCaptureMode, [&](hipStreamCaptureMode* mode) {
     if (mode == nullptr) return hipErrorInvalidValue;
+    if (!sawRequest) {
+      requested = *mode;
+      sawRequest = true;
+    }
     hipStreamCaptureMode previous = threadMode;
     threadMode = *mode;
     *mode = previous;
@@ -5591,8 +5600,8 @@ TEST_F(DevrCommCreateInternalTest, GinSetupFails_RestoresStreamCaptureMode) {
 
   EXPECT_EQ(Create(), ncclInternalError);
   EXPECT_EQ(ginSetup.calls, 1);
-  // Once to enter relaxed mode, once on the fail label to put the caller's mode back.
-  EXPECT_EQ(exchange.calls, 2);
+  EXPECT_TRUE(sawRequest);
+  EXPECT_EQ(requested, hipStreamCaptureModeRelaxed);
   EXPECT_EQ(threadMode, hipStreamCaptureModeGlobal);
 }
 
