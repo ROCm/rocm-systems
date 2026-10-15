@@ -104,8 +104,8 @@ public:
     MockPackets(aqlprofile_handle_t _handle,
                 query_status_t      _query,
                 query_clock_t       _clock,
-                int                 shader_engine_id = 0)
-    : hsa::SQTTBufferingPackets(_handle, shader_engine_id)
+                int                 _shader_engine_id = 0)
+    : hsa::SQTTBufferingPackets(_handle, _shader_engine_id)
     , query_fn(std::move(_query))
     , clock_fn(std::move(_clock)){};
 
@@ -171,11 +171,11 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
 
     auto running_flag = std::make_shared<std::atomic<int>>(WORKER_FLAG_RUNNING);
 
-    auto params              = thread_trace_parameter_pack{};
-    params.num_buffers       = MOCK_NUM_BUFFERS;
-    params.buffer_size       = MOCK_BUFFER_SIZE;
-    params.shader_cb_fn      = cb_fn;
-    params.callback_userdata = userdata;
+    auto params               = thread_trace_parameter_pack{};
+    params.num_buffers        = MOCK_NUM_BUFFERS;
+    params.buffer_size        = MOCK_BUFFER_SIZE;
+    params.shader_cb_fn       = cb_fn;
+    params.callback_userdata  = userdata;
     params.shader_engine_mask = (uint64_t{1} << shader_engine_count) - 1;
 
     auto factory        = std::make_unique<aql::ThreadTraceAQLPacketFactory>(agent_id, params);
@@ -207,15 +207,15 @@ start_threads(rocprofiler_thread_trace_shader_data_callback_t cb_fn,
     for(size_t i = 0; i < worker_data->num_buffers; i++)
         worker_data->buffers[i].memory = mock_queue->cpu_buffers.at(i);
 
-    auto producer_data             = triple_buffer_producer_data_t{};
-    producer_data.producer_running = running_flag;
-    producer_data.submit_signal    = make_signal(*mock_queue);
-    producer_data.control_packet   = std::move(control_packet);
-    producer_data.copy_data_fn     = copy_data_mock;
-    producer_data.shared           = worker_data;
+    auto producer_data               = triple_buffer_producer_data_t{};
+    producer_data.producer_running   = running_flag;
+    producer_data.submit_signal      = make_signal(*mock_queue);
+    producer_data.control_packet     = std::move(control_packet);
+    producer_data.copy_data_fn       = copy_data_mock;
+    producer_data.shared             = worker_data;
     producer_data.num_shader_engines = agent->get_rocp_agent()->num_shader_banks;
     producer_data.buffer_packets     = std::move(mock_buffer);
-    producer_data.restart_trace    = [queue = mock_queue.get()](auto& packet) {
+    producer_data.restart_trace      = [queue = mock_queue.get()](auto& packet) {
         return att_queue_submit_packets(*queue, packet->before_krn_pkt);
     };
 
@@ -366,15 +366,15 @@ TEST(thread_trace, multi_se_final_drain_preserves_data_and_end)
         };
         auto callback = [](rocprofiler_thread_trace_shader_data_t data,
                            rocprofiler_user_data_t                userdata) {
-            auto& state = *static_cast<state_t*>(userdata.ptr);
-            auto  lock  = std::lock_guard{state.mut};
-            ASSERT_LT(data.shader_engine_id, state.chunks.size());
-            EXPECT_TRUE(state.chunks[data.shader_engine_id]
+            auto& callback_state = *static_cast<state_t*>(userdata.ptr);
+            auto  lock           = std::lock_guard{callback_state.mut};
+            ASSERT_LT(data.shader_engine_id, callback_state.chunks.size());
+            EXPECT_TRUE(callback_state.chunks[data.shader_engine_id]
                             .emplace(data.chunk_index, data.data_size)
                             .second);
             if(data.flags & ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END)
             {
-                state.end_flags[data.shader_engine_id] = data.flags;
+                callback_state.end_flags[data.shader_engine_id] = data.flags;
                 for(size_t i = 0; i < data.data_size; ++i)
                     EXPECT_EQ(static_cast<const unsigned char*>(data.data)[i],
                               0x5A + data.shader_engine_id);

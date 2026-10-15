@@ -71,9 +71,9 @@ namespace
 {
 struct trace_callback_data_t
 {
-    void*        data{};
-    uint64_t     size{};
-    uint32_t     se_id{};
+    void*    data{};
+    uint64_t size{};
+    uint32_t se_id{};
 };
 
 std::vector<trace_callback_data_t>
