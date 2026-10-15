@@ -255,3 +255,16 @@ control the behavior of rocSHMEM.
       - ``0``
       - | ``0``: Apply wf_id spreading only for the default (shared) context.
         | ``1``: Apply wf_id spreading for all contexts.
+
+    * - | ``ROCSHMEM_TDM_TILE_BYTES``
+        | TDM (Tensor Data Mover) tile size in bytes for LDS-staged work-group
+        | put/get on gfx1250 (requires ``USE_TDM`` build option). Doubled
+        | internally for double buffering; see ``rocshmem_query_tdm_lds_bytes()``.
+      - ``0``
+      - | ``0`` (default): auto-size the tile to use all LDS available per
+        | block on this device.
+        | Nonzero: use this tile size explicitly. Must be a multiple of 8
+        | bytes (the TDM element size); non-multiples are rounded down with
+        | a warning. If the requested size (doubled) doesn't fit in this
+        | device's shared memory per block, falls back to the auto-sized
+        | value instead.

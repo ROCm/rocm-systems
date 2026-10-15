@@ -31,7 +31,6 @@
 
 #include "gda/gda_enums.hpp"
 #include "rocshmem/rocshmem_common.hpp"
-#include "util.hpp"
 
 namespace rocshmem {
 
@@ -46,10 +45,13 @@ struct constmem_t {
   int ipc_shm_size;
   uintptr_t heap_base;  // Local symmetric heap base
   size_t heap_size;     // Local symmetric heap size in bytes
+  uint32_t tdm_tile_bytes;
 } __attribute__ ((aligned (16)));
 
 extern __constant__ constmem_t constmem;
 void init_constant_memory(void);
+
+extern uint32_t tdm_resolved_tile_bytes;
 
 }  // namespace rocshmem
 
