@@ -38,7 +38,7 @@ struct TwoRankComm {
 
 TEST(P2pDirectMaxChannelsTests, DirectApisUseRequestedPoolWhenEnabled)
 {
-    TwoRankComm comm(64, 16, 64);
+    TwoRankComm comm(64, 16, 80);
 
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, kPeer, 128), 64);
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, kPeer, 128), 64);
@@ -57,7 +57,7 @@ TEST(P2pDirectMaxChannelsTests, DisabledAndP2pBackedCollectivesKeepPeerSplit)
 
 TEST(P2pDirectMaxChannelsTests, OnlyPeersOnTheSameHostOrMnnvlCliqueAreWidened)
 {
-    TwoRankComm comm(64, 16, 64);
+    TwoRankComm comm(64, 16, 80);
     comm.peerInfo[kPeer].hostHash = 0x5678;
 
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, kPeer, 128), 16);
@@ -73,11 +73,27 @@ TEST(P2pDirectMaxChannelsTests, OnlyPeersOnTheSameHostOrMnnvlCliqueAreWidened)
     comm.get()->clique.ranks = nullptr;
 }
 
-TEST(P2pDirectMaxChannelsTests, RequestedPoolRespectsKernelArgsBudget)
+TEST(P2pDirectMaxChannelsTests, RequestedPoolLeavesRoomForASplitRound)
 {
-    TwoRankComm comm(64, 16, 32);
-
+    // A round split into a widened and a per-peer work needs both tiles in one empty plan.
+    TwoRankComm comm(64, 16, 48);
     EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 128), 32);
+
+    TwoRankComm tight(64, 16, 32);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(tight.get(), ncclFuncSendRecv, kPeer, 128), 16);
+}
+
+TEST(P2pDirectMaxChannelsTests, ShiftedMultiNodeMappingCapsTheWidenedTile)
+{
+    // With more than two nodes and a shift size, only p2pnChannels >> shift parts map to distinct
+    // channels.
+    TwoRankComm comm(128, 16, 256);
+    comm.get()->nNodes              = 4;
+    comm.get()->p2pChannelShiftSize = 1;
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 128), 64);
+
+    comm.get()->p2pChannelShiftSize = -1;  // bit-reversed mapping
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSendRecv, kPeer, 128), 128);
 }
 
 TEST(P2pDirectMaxChannelsTests, RequestedPoolIsCappedAtValidatedMaximum)

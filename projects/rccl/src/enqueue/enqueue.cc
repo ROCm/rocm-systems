@@ -1381,9 +1381,15 @@ int rcclP2pChannelStrideForApi(struct ncclComm* comm, ncclFunc_t collAPI, int pe
   bool directApi = collAPI == ncclFuncSend || collAPI == ncclFuncRecv || collAPI == ncclFuncSendRecv;
   if (directMaxChannels <= 0 || !directApi || useMemcpy || !rcclP2pPeerIsLocal(comm, peer))
     return comm->p2pnChannelsPerPeer;
-  int argsLimit = pow2Down(ncclDevMaxChannelsForArgsBytes(comm->workArgsBytes));
-  int requested = pow2Down(std::min(directMaxChannels, 128));
-  return std::max(comm->p2pnChannelsPerPeer, std::min(std::min(comm->p2pnChannels, argsLimit), requested));
+  // A split round needs batches for the widened plus the per-peer tile, and must fit an empty plan.
+  int argsRoom = ncclDevMaxChannelsForArgsBytes(comm->workArgsBytes) - comm->p2pnChannelsPerPeer;
+  // The shifted multi-node mapping only tells p2pnChannels >> shift parts apart.
+  int poolParts = (comm->nNodes > 2 && comm->p2pChannelShiftSize >= 0)
+                    ? comm->p2pnChannels >> comm->p2pChannelShiftSize
+                    : comm->p2pnChannels;
+  int limit = std::min(std::min(poolParts, argsRoom), std::min(directMaxChannels, 128));
+  if (limit <= comm->p2pnChannelsPerPeer) return comm->p2pnChannelsPerPeer;
+  return std::max(comm->p2pnChannelsPerPeer, pow2Down(limit));
 }
 
 static int rcclP2pChannelStride(struct ncclComm* comm, const struct ncclTaskP2p* task) {
