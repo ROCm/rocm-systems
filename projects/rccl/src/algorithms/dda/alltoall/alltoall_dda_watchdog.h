@@ -69,6 +69,8 @@ enum : uint32_t {
   kDdaWdPushCuReady = 5,
   kDdaWdDirectEntry = 11,
   kDdaWdDirectDone = 12,
+  kDdaWdHybridConsumed = 13,  // Direct with staged pairs: receiver has not copied a round out
+  kDdaWdHybridDone = 14,      // Direct with staged pairs: sender has not staged a round
   kDdaWdLL = 21,
   kDdaWdLL128V2 = 23,
   // Two push/direct kernels of one communicator in flight at once (ordering violation by the caller).

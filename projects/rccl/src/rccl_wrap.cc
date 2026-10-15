@@ -2085,6 +2085,10 @@ static inline size_t rcclA2aWindow(int64_t knob, size_t tableValue) { return kno
 //   Direct    out of place, recvbuff in a symmetric window (NCCL_WIN_COLL_SYMMETRIC, LSA), nRanks
 //             <= 16 on one LSA team, P % 16 == 0, 16B-aligned buffers, P > a2aDirectPerPeerCut and
 //             a2aDirectMin <= T <= a2aDirectMax. Takes the call ahead of LL128 V2.
+//             Implicit (the agreed opt-in part, RCCL_DDA_A2A_IMPLICIT=1 on every rank): the same
+//             window for a recvbuff NOT in a symmetric window, hybrid kernel (per-pair zero-copy or
+//             staging, decided by each receiver at run time). Never a lazy-creation trigger: the
+//             part exists only once a push- or window-shaped call created the buffers.
 //             Two ranks on one physical GPU (topology siblings, rcclDdaA2aTopoSibling): never above
 //             a2aDirectMin; those calls take the push rule below (stock path above a2aPushMax).
 //   LL128 V2  T <= ddaLL128Max[A2A]
@@ -2098,7 +2102,8 @@ static inline size_t rcclA2aWindow(int64_t knob, size_t tableValue) { return kno
 // keep the same on every rank (collective contract, as for the symmetric kernels; a mismatch selects
 // different kernels and the call hangs until ncclCommAbort or the A2A watchdog's opt-in timeout).
 // ncclCommRegister is never an input: it is a per-rank hint (one rank may register and its peer
-// not), so registered-but-not-windowed buffers take the same path as unregistered ones.
+// not), so registered-but-not-windowed buffers take the same path as unregistered ones (with the
+// implicit part, the registration only changes what the hybrid kernel's receiver posts per pair).
 // The push and Direct buffers are created by the first live call that push or Direct would take
 // once they exist (ncclDdaA2aLazyInit, collective): the same rules minus the buffer-state checks, so
 // no call that neither path can take allocates them, and every rank creates them on the same call.
@@ -2148,8 +2153,13 @@ static ncclResult_t rcclSelectAlltoAllFabric(struct ncclComm* comm, const rcclAr
                             ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype);
     if (!ll128Holds) NCCLCHECK(ncclDdaA2aLazyInit(comm));
   }
+  // Not windowed: the implicit part's hybrid kernel takes the same window (comm-uniform: the
+  // agreed part, the shape; "windowed" is uniform under the symmetric contract).
+  const bool directWindow = !inPlace && directMax > 0 && totalBytes >= directMin && totalBytes <= directMax &&
+                            perPeer > directCut;
   const bool directTakes =
-    directShape && ncclAllToAllDdaFabricDirectEligible(comm, sendbuff, recvbuff, count, datatype);
+    directShape ? ncclAllToAllDdaFabricDirectEligible(comm, sendbuff, recvbuff, count, datatype)
+                : directWindow && ncclAllToAllDdaFabricDirectImplicitEligible(comm, sendbuff, recvbuff, count, datatype);
 
   if (!directTakes && ll128Max > 0 && totalBytes <= ll128Max &&
       ncclAllToAllDdaFabricLL128Eligible(comm, sendbuff, recvbuff, count, datatype)) {

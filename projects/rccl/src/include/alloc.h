@@ -39,6 +39,36 @@ struct ncclComm;
 #include <unistd.h>
 #endif
 
+// RCCL workaround for a HIP (clr) VMM thread-safety defect. hipMemAddressFree hands
+// the VA range back to ROCr (hsa_amd_vmem_address_free) before the HIP memory
+// object's destructor erases its VirtualMemObjMap / MemObjMap entries, and that
+// erase is by address key only. A hipMemAddressReserve on another thread inside the
+// window gets the same VA back, its map entry is dropped as a duplicate key, and the
+// stale destructor then erases the new owner's entry, so the new owner's hipMemMap /
+// hipMemSetAccess / hipMemRetainAllocationHandle / hipMemAddressFree fail with
+// 'invalid argument'. RCCL reserves and frees VA on the user thread, the proxy thread
+// and the p2p async closer, so every RCCL reserve and free goes through these two
+// wrappers and one process-wide mutex: no RCCL reserve can land inside an RCCL free.
+// Reserves made outside RCCL in the same process are not covered, nor are the VA inserts of
+// hipMalloc / hipIpcOpenMemHandle: a partial, empirical mitigation (D01 churn: ~150 WARN -> 0), not
+// a fix of the HIP race. The lock is held
+// for the single call only, uncontended in the common case.
+inline std::mutex& rcclVaMutex() {
+  static std::mutex m;
+  return m;
+}
+
+static inline CUresult rcclMemAddressReserve(CUdeviceptr* ptr, size_t size, size_t alignment, CUdeviceptr addr,
+                                             unsigned long long flags) {
+  std::lock_guard<std::mutex> lock(rcclVaMutex());
+  return cuMemAddressReserve(ptr, size, alignment, addr, flags);
+}
+
+static inline CUresult rcclMemAddressFree(CUdeviceptr ptr, size_t size) {
+  std::lock_guard<std::mutex> lock(rcclVaMutex());
+  return cuMemAddressFree(ptr, size);
+}
+
 // Global flag to detect process shutdown. Set by atexit handler before
 // HIP runtime static destructors run. This prevents use-after-free crashes
 // when RCCL proxy threads try to free GPU memory during process exit.
@@ -326,7 +356,7 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
   CUCHECKGOTO(cuMemCreate(&handle, size, &prop, 0), result, fail);
   handleCreated = true;
   /* Reserve a virtual address range */
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
+  CUCHECKGOTO(rcclMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
   addressReserved = true;
   /* Map the virtual address range to the physical allocation */
   CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, size, 0, handle, 0), result, fail);
@@ -356,7 +386,7 @@ static inline ncclResult_t ncclCuMemHostAlloc(void** ptr, CUmemGenericAllocation
 fail:
   WARN("ncclCuMemHostAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
   if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
+  if (addressReserved) (void)rcclMemAddressFree((CUdeviceptr)*ptr, size);
   if (handleCreated) (void)cuMemRelease(handle);
   *ptr = nullptr;
   return result;
@@ -378,7 +408,7 @@ static inline ncclResult_t ncclCuMemHostFree(void* ptr) {
   TRACE(NCCL_ALLOC, "CUMEM Host Free Size %zi pointer %p handle %p", size, ptr, (void*)(uintptr_t)handle);
   CUCHECK(cuMemUnmap((CUdeviceptr)ptr, size));
   CUCHECK(cuMemRelease(handle));
-  CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, size));
+  CUCHECK(rcclMemAddressFree((CUdeviceptr)ptr, size));
   return result;
 }
 
@@ -554,7 +584,7 @@ static inline ncclResult_t ncclCuMemAllocAddr(void** ptr, CUmemGenericAllocation
   CUCHECK(cuMemGetAllocationGranularity(&granularity, &prop, CU_MEM_ALLOC_GRANULARITY_MINIMUM));
   ALIGN_SIZE(size, granularity);
   /* Reserve a virtual address range */
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
+  CUCHECKGOTO(rcclMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
   addressReserved = true;
   /* Map the virtual address range to the physical allocation */
   CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, size, 0, *handleIn, 0), result, fail);
@@ -575,7 +605,7 @@ static inline ncclResult_t ncclCuMemAllocAddr(void** ptr, CUmemGenericAllocation
 fail:
   WARN("ncclCuMemAllocAddr failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
   if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
+  if (addressReserved) (void)rcclMemAddressFree((CUdeviceptr)*ptr, size);
   *ptr = nullptr;
   return result;
 }
@@ -632,7 +662,7 @@ static inline ncclResult_t ncclCuMemFreeAddr(void* ptr, struct ncclMemManager* m
   }
 
 fail:
-  CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
+  CUCHECK(rcclMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
   size_t trackSize = totalSize;
@@ -688,7 +718,7 @@ static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHand
   CUCHECKGOTO(cuMemCreate(&handle, size, &prop, 0), result, fail);
   handleCreated = true;
   /* Reserve a virtual address range */
-  CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
+  CUCHECKGOTO(rcclMemAddressReserve((CUdeviceptr*)ptr, size, granularity, 0, 0), result, fail);
   addressReserved = true;
   /* Map the virtual address range to the physical allocation */
   CUCHECKGOTO(cuMemMap((CUdeviceptr)*ptr, size, 0, handle, 0), result, fail);
@@ -745,7 +775,7 @@ static inline ncclResult_t ncclCuMemAlloc(void** ptr, CUmemGenericAllocationHand
 fail:
   WARN("ncclCuMemAlloc failed (size %zu, dev %d): cleaning up partial allocation", size, cudaDev);
   if (mapped) (void)cuMemUnmap((CUdeviceptr)*ptr, size);
-  if (addressReserved) (void)cuMemAddressFree((CUdeviceptr)*ptr, size);
+  if (addressReserved) (void)rcclMemAddressFree((CUdeviceptr)*ptr, size);
   if (handleCreated) (void)cuMemRelease(handle);
   *ptr = nullptr;
   return result;
@@ -808,7 +838,7 @@ static inline ncclResult_t ncclCuMemFree(void* ptr, struct ncclMemManager* manag
   }
 
 fail:
-  CUCHECK(cuMemAddressFree((CUdeviceptr)ptr, totalSize));
+  CUCHECK(rcclMemAddressFree((CUdeviceptr)ptr, totalSize));
 
   int dev;
   CUDACHECK(hipGetDevice(&dev));

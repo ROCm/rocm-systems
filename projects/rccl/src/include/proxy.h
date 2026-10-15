@@ -414,7 +414,13 @@ struct ncclProxyState {
   // [RCCL] Host mirrors of device side NCCL_LL128_LINEELEMS / NCCL_LL128_DATAELEMS
   int ll128LineElems;
   int ll128DataElems;
+
+  // [RCCL] Closer thread of asynchronous p2p import closes (transport/p2p.cc), or nullptr.
+  void* p2pAsyncCloser;
 };
+
+// [RCCL] Finishes the queued asynchronous p2p import closes and joins their thread (transport/p2p.cc).
+void ncclP2pAsyncCloserJoin(struct ncclProxyState* proxyState);
 
 enum proxyConnectState {
   connUninitialized = 0,

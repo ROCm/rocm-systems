@@ -108,6 +108,10 @@ struct p2pCuMemProxyInfo {
 };
 
 #include <sys/types.h>
+#include <condition_variable>
+#include <deque>
+#include <mutex>
+#include <thread>
 
 NCCL_PARAM(LegacyCudaRegister, "LEGACY_CUDA_REGISTER", 0);
 #define NCCL_P2P_MAX_PHYSICAL_SEGMENTS 8192
@@ -364,7 +368,7 @@ ncclResult_t ncclP2pImportShareableBuffer(struct ncclComm* comm, int peer, size_
 #endif
       CUCHECK(cuMemImportFromShareableHandle(&handle, (void*)cuDesc, type));
     }
-    CUCHECK(cuMemAddressReserve(&dptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
+    CUCHECK(rcclMemAddressReserve(&dptr, size, /* alignment */ 0, /* addr */ 0, /* flags */ 0));
     CUCHECK(cuMemMap(dptr, size, /* offset */ 0, handle, /* flags */ 0));
 
     TRACE(NCCL_P2P, "Imported shareable buffer size %zu handle %p dptr %p", size, (void*)(uintptr_t)handle,
@@ -1413,6 +1417,181 @@ fail:
   goto exit;
 }
 
+// RCCL: implicit, ASYNCHRONOUS registration of one whole allocation with a set of peers, for the
+// DDA fabric AllToAll zero-copy path. Private to the caller (not in comm->regCache). Nothing here
+// waits on a peer proxy's import/close: those can block behind the peer's device work (e.g.
+// hipIpcCloseMemHandle synchronizes the peer's device), which may itself wait for a collective
+// kernel this rank has not launched yet. Register/deregister requests are posted with
+// ncclProxyCallAsync and completed by later non-blocking polls. Legacy hipIpc export is used for
+// hipMalloc memory regardless of NCCL_LEGACY_CUDA_REGISTER.
+namespace {
+enum { kImpNone = 0, kImpRegPending, kImpMapped, kImpDeregPending, kImpDone };
+}
+struct ncclIpcImplicitPeer {
+  int state;
+  struct ncclProxyConnector* conn;
+  void* opId;
+  void* resp;
+  struct ncclIpcImpInfo imp;
+};
+struct ncclIpcImplicitReg {
+  int nRanks;
+  int legacy;
+  struct ncclIpcImplicitPeer* peers;  // [nRanks]
+};
+
+ncclResult_t ncclIpcImplicitRegStart(ncclComm* comm, void* base, size_t size, int* peerRanks, int nPeers,
+                                     struct ncclIpcImplicitReg** out) {
+  struct ncclIpcImplicitReg* reg = nullptr;
+  *out = nullptr;
+  NCCLCHECK(ncclCalloc(&reg, 1));
+  reg->nRanks = comm->nRanks;
+  if (ncclCalloc(&reg->peers, comm->nRanks) != ncclSuccess) {
+    free(reg);
+    return ncclSystemError;
+  }
+  *out = reg;
+  for (int i = 0; i < nPeers; ++i) {
+    const int peer = peerRanks[i];
+    struct ncclIpcImplicitPeer* pp = reg->peers + peer;
+    struct p2pIpcExpInfo exp;
+    memset(&exp, 0, sizeof(exp));
+    if (comm->gproxyConn[peer].initialized == false) {
+      if (ncclProxyConnect(comm, TRANSPORT_P2P, 1, peer, &comm->gproxyConn[peer]) != ncclSuccess) continue;
+    }
+    pp->conn = &comm->gproxyConn[peer];
+    bool ok = false;
+    // Only a FABRIC handle can reach a peer on another host (UALoE clique spanning trays): a POSIX fd
+    // travels over a host-local UDS, and a legacy hipIpc handle names a host-local ROCr IPC server
+    // (importing a foreign one can block the peer's proxy forever, see A11). Such pairs stay staged;
+    // the result is cached with the entry, so nothing is retried per call.
+    const bool sameHost = p2pPeerOnSameHost(comm, peer);
+#if ROCM_VERSION >= 70000
+    CUmemGenericAllocationHandle handle;
+    if (ncclCuMemEnable() && CUPFN(cuMemRetainAllocationHandle(&handle, base)) == CUDA_SUCCESS) {
+      exp.legacyIpcCap = false;
+      if (pp->conn->sameProcess) {
+        memcpy(&exp.ipcDesc.memHandle, &handle, sizeof(CUmemGenericAllocationHandle));
+        ok = true;
+      } else {
+        ncclIpcFd expFd = NCCL_INVALID_IPC_FD;
+        if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) {
+          ok = sameHost && CUPFN(cuMemExportToShareableHandle(&expFd, handle, ncclCuMemHandleType, 0)) == CUDA_SUCCESS;
+        } else if (CUPFN(cuMemExportToShareableHandle(&exp.ipcDesc.cuDesc.handle, handle, ncclCuMemHandleType, 0)) ==
+                   CUDA_SUCCESS) {
+          ok = true;
+        } else {
+          (void)cudaGetLastError();
+          exp.fdFallback = true;
+          ok = sameHost &&
+               CUPFN(cuMemExportToShareableHandle(&expFd, handle, CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR, 0)) ==
+                 CUDA_SUCCESS;
+        }
+        if (ok && expFd != NCCL_INVALID_IPC_FD) {
+          // fd passing through the peer's UDS service (no device work on the peer)
+          ok = ncclProxyClientQueryFdBlocking(comm, pp->conn, expFd, &exp.impFd) == ncclSuccess;
+          (void)ncclIpcFdClose(expFd);
+        }
+      }
+      (void)cuMemRelease(handle);
+    } else
+#endif
+    {
+      (void)cudaGetLastError();
+      if (sameHost && !comm->directMode && cudaIpcGetMemHandle(&exp.ipcDesc.devIpc, base) == cudaSuccess) {
+        exp.legacyIpcCap = true;
+        reg->legacy = 1;
+        ok = true;
+      }
+    }
+    (void)cudaGetLastError();
+    if (!ok) continue;
+    exp.size = size;
+    exp.offset = 0;
+    pp->opId = malloc(1);
+    if (pp->opId == nullptr) continue;
+    pp->imp.legacyIpcCap = exp.legacyIpcCap;
+    pp->imp.offset = 0;
+    pp->imp.numSegments = 1;
+    if (ncclProxyCallAsync(comm, pp->conn, ncclProxyMsgRegister, &exp, sizeof(exp), sizeof(void*), pp->opId) !=
+        ncclSuccess) {
+      free(pp->opId);
+      pp->opId = nullptr;
+      continue;
+    }
+    pp->state = kImpRegPending;
+  }
+  return ncclSuccess;
+}
+
+static void ipcImplicitPollReg(ncclComm* comm, struct ncclIpcImplicitPeer* pp) {
+  void* addr = nullptr;
+  const ncclResult_t r = ncclPollProxyResponse(comm, pp->conn, &addr, pp->opId);
+  if (r == ncclInProgress) return;
+  free(pp->opId);
+  pp->opId = nullptr;
+  if (r == ncclSuccess && addr != nullptr) {
+    pp->imp.rmtRegAddr = addr;
+    pp->state = kImpMapped;
+  } else {
+    pp->state = kImpDone;
+  }
+}
+
+int ncclIpcImplicitIsLegacy(struct ncclIpcImplicitReg* reg) { return reg != nullptr && reg->legacy; }
+
+ncclResult_t ncclIpcImplicitRegPoll(ncclComm* comm, struct ncclIpcImplicitReg* reg, uintptr_t* addrs, int* pending) {
+  *pending = 0;
+  for (int p = 0; p < reg->nRanks; ++p) {
+    struct ncclIpcImplicitPeer* pp = reg->peers + p;
+    if (pp->state == kImpRegPending) ipcImplicitPollReg(comm, pp);
+    if (pp->state == kImpRegPending) ++*pending;
+    if (addrs) addrs[p] = pp->state == kImpMapped ? (uintptr_t)pp->imp.rmtRegAddr : 0;
+  }
+  return ncclSuccess;
+}
+
+// Posts deregistration for every mapped peer (and for still-pending registrations once they land).
+// Call only when no kernel of this rank that advertised the mapping is still running. asyncClose:
+// the peer's proxy closes the import on a helper thread (the close waits for its device to idle).
+ncclResult_t ncclIpcImplicitDeregPoll(ncclComm* comm, struct ncclIpcImplicitReg* reg, int* pending, bool asyncClose) {
+  *pending = 0;
+  for (int p = 0; p < reg->nRanks; ++p) {
+    struct ncclIpcImplicitPeer* pp = reg->peers + p;
+    if (pp->state == kImpRegPending) ipcImplicitPollReg(comm, pp);
+    if (pp->state == kImpMapped) {
+      pp->imp.asyncClose = asyncClose ? 1 : 0;
+      pp->opId = malloc(1);
+      if (pp->opId == nullptr ||
+          ncclProxyCallAsync(comm, pp->conn, ncclProxyMsgDeregister, &pp->imp, sizeof(pp->imp), 0, pp->opId) !=
+            ncclSuccess) {
+        free(pp->opId);
+        pp->opId = nullptr;
+        pp->state = kImpDone;
+      } else {
+        pp->state = kImpDeregPending;
+      }
+    }
+    if (pp->state == kImpDeregPending) {
+      const ncclResult_t r = ncclPollProxyResponse(comm, pp->conn, nullptr, pp->opId);
+      if (r != ncclInProgress) {
+        free(pp->opId);
+        pp->opId = nullptr;
+        pp->state = kImpDone;
+      }
+    }
+    if (pp->state == kImpRegPending || pp->state == kImpDeregPending) ++*pending;
+  }
+  return ncclSuccess;
+}
+
+void ncclIpcImplicitFree(struct ncclIpcImplicitReg* reg) {
+  if (reg == nullptr) return;
+  for (int p = 0; p < reg->nRanks; ++p) free(reg->peers[p].opId);
+  free(reg->peers);
+  free(reg);
+}
+
 struct ncclIpcCleanupCallback {
   struct ncclCommCallback base;
   struct ncclComm* comm;
@@ -1526,7 +1705,8 @@ static ncclResult_t p2pProxyRegister(struct ncclProxyConnection* connection, str
     regAddr = (void*)((uintptr_t)regAddr + ipcExpInfo->offset);
   } else {
 #if ROCM_VERSION >= 70000
-    CUCHECKGOTO(cuMemAddressReserve((CUdeviceptr*)&regAddr, totalSize, /* alignment */ 0, /* addr */ 0, /* flags */ 0),
+    CUCHECKGOTO(rcclMemAddressReserve((CUdeviceptr*)&regAddr, totalSize, /* alignment */ 0, /* addr */ 0,
+                                      /* flags */ 0),
                 ret, fail);
     size_t offset = 0;
     for (int segment = 0; segment < numSegments; segment++) {
@@ -1604,7 +1784,7 @@ fail:
       }
       offset += ipcExpInfo[segment].size;
     }
-    if (regAddr) CUCHECKIGNORE(cuMemAddressFree((CUdeviceptr)regAddr, totalSize));
+    if (regAddr) CUCHECKIGNORE(rcclMemAddressFree((CUdeviceptr)regAddr, totalSize));
 #endif
   }
   regAddr = NULL;
@@ -1616,6 +1796,80 @@ static bool p2pHandleCmp(struct proxyMemHandle* a, struct proxyMemHandle* b) {
   struct ncclIpcImpInfo* ipcInfoB = (struct ncclIpcImpInfo*)b->handle;
   return ipcInfoA->rmtRegAddr == ipcInfoB->rmtRegAddr && ipcInfoA->offset == ipcInfoB->offset &&
          ipcInfoA->legacyIpcCap == ipcInfoB->legacyIpcCap && ipcInfoA->numSegments == ipcInfoB->numSegments;
+}
+
+// RCCL (DDA A2A implicit registration): closing an import (hipIpcCloseMemHandle / hipMemUnmap)
+// blocks until this device is idle, so asynchronous closes run on one closer thread per proxy
+// state (created on first use from the proxy service thread, the only producer), joined by
+// ncclP2pAsyncCloserJoin when the proxy service exits -- never a detached thread that could
+// outlive the proxy or the process' HIP context.
+struct p2pAsyncCloser {
+  std::mutex mu;
+  std::condition_variable cv;
+  std::deque<struct ncclIpcImpInfo> queue;
+  bool stop = false;
+  std::thread thread;
+};
+
+static void p2pAsyncCloseOne(const struct ncclIpcImpInfo& info) {
+  if (info.legacyIpcCap) {
+    (void)cudaIpcCloseMemHandle((void*)((uintptr_t)info.rmtRegAddr - info.offset));
+  } else {
+    (void)ncclCudaFree((void*)((uintptr_t)info.rmtRegAddr - info.offset), nullptr, info.numSegments);
+  }
+  (void)cudaGetLastError();
+}
+
+static void p2pAsyncCloserMain(struct p2pAsyncCloser* c, int dev) {
+  const bool devOk = cudaSetDevice(dev) == cudaSuccess;
+  std::unique_lock<std::mutex> lk(c->mu);
+  for (;;) {
+    c->cv.wait(lk, [c] { return c->stop || !c->queue.empty(); });
+    if (c->queue.empty()) break;  // stop and drained
+    const struct ncclIpcImpInfo info = c->queue.front();
+    c->queue.pop_front();
+    lk.unlock();
+    if (devOk) p2pAsyncCloseOne(info);
+    lk.lock();
+  }
+}
+
+static void p2pAsyncClose(struct ncclProxyState* proxyState, const struct ncclIpcImpInfo& info) {
+  auto* c = static_cast<struct p2pAsyncCloser*>(proxyState->p2pAsyncCloser);
+  if (c == nullptr) {
+    c = new (std::nothrow) p2pAsyncCloser();
+    if (c != nullptr) {
+      try {
+        c->thread = std::thread(p2pAsyncCloserMain, c, proxyState->cudaDev);
+      } catch (...) {
+        delete c;
+        c = nullptr;
+      }
+    }
+    if (c == nullptr) {  // no thread: close inline (blocks this proxy until the device idles)
+      p2pAsyncCloseOne(info);
+      return;
+    }
+    proxyState->p2pAsyncCloser = c;
+  }
+  {
+    std::lock_guard<std::mutex> lk(c->mu);
+    c->queue.push_back(info);
+  }
+  c->cv.notify_one();
+}
+
+void ncclP2pAsyncCloserJoin(struct ncclProxyState* proxyState) {
+  auto* c = static_cast<struct p2pAsyncCloser*>(proxyState->p2pAsyncCloser);
+  if (c == nullptr) return;
+  {
+    std::lock_guard<std::mutex> lk(c->mu);
+    c->stop = true;
+  }
+  c->cv.notify_one();
+  if (c->thread.joinable()) c->thread.join();  // finishes every queued close first
+  delete c;
+  proxyState->p2pAsyncCloser = nullptr;
 }
 
 static ncclResult_t p2pProxyDeregister(struct ncclProxyConnection* connection, struct ncclProxyState* proxyState,
@@ -1634,6 +1888,12 @@ static ncclResult_t p2pProxyDeregister(struct ncclProxyConnection* connection, s
   free(deletedHandle->handle);
   free(deletedHandle);
 
+  if (ipcInfo->asyncClose && !connection->sameProcess) {
+    // RCCL (DDA A2A implicit registration): done inline, the close stalls this proxy thread behind
+    // collective kernels that may wait for a peer whose host is waiting on this proxy -> closer thread.
+    p2pAsyncClose(proxyState, *ipcInfo);
+    goto exit;
+  }
   NCCLCHECKGOTO(p2pDeregisterMemHandle(connection, proxyState, ipcInfo), ret, fail);
 
 exit:

@@ -108,6 +108,8 @@ test_categories:
       - "DdaA2aLazyMicrotest.*"
       # algorithms/dda/alltoall/dda_alltoall.h push host helpers
       - "DdaA2aPushHostMicrotest.*"
+      # algorithms/dda/alltoall/dda_alltoall_implicit_policy.h
+      - "DdaA2aImplicitMicrotest.*"
       # misc/gdr_probe.cc
       - "GdrProbeTest.*"
       # ce_coll.cc (rccl-UnitTestsMicroCe)

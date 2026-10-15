@@ -6,6 +6,11 @@
 
 #include <gtest/gtest.h>
 
+#include <atomic>
+#include <chrono>
+#include <mutex>
+#include <thread>
+
 #include <unistd.h>
 
 #include <array>
@@ -4783,6 +4788,108 @@ TEST_F(P2pShareableBufferMicrotest,
     EXPECT_EQ(devMem_, kReserved);
 }
 
+// HIP VMM VA race workaround (alloc.h rcclMemAddressReserve / rcclMemAddressFree).
+// hipMemAddressFree returns the VA to ROCr before HIP erases its own map entry, so a
+// reserve on another thread inside that window corrupts HIP's bookkeeping. Every RCCL
+// reserve and free is serialized by one process-wide mutex. The fakes below sleep inside
+// the call and record whether a second reserve / free entered meanwhile.
+namespace {
+struct VaOverlapProbe {
+    std::atomic<int> inside{0};
+    std::atomic<int> overlaps{0};
+    void Enter()
+    {
+        if (inside.fetch_add(1) != 0) ++overlaps;
+        std::this_thread::sleep_for(std::chrono::microseconds(50));
+        inside.fetch_sub(1);
+    }
+};
+}  // namespace
+
+TEST_F(P2pMicrotest, VaReserveAndFreeWrappers_NeverOverlapAcrossThreads)
+{
+    VaOverlapProbe probe;
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [&](void** p, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            probe.Enter();
+            if (p) *p = reinterpret_cast<void*>(0xE0000);
+            return hipSuccess;
+        });
+    ScopedHook addrFree(g_hipMemAddressFree,
+        [&](void*, std::size_t) -> hipError_t { probe.Enter(); return hipSuccess; });
+
+    constexpr int kThreads = 4, kIters = 100;
+    std::vector<std::thread> threads;
+    for (int t = 0; t < kThreads; ++t) {
+        threads.emplace_back([t] {
+            for (int i = 0; i < kIters; ++i) {
+                void* va = nullptr;
+                if ((t + i) % 2 == 0) (void)rcclMemAddressReserve(&va, 1 << 20, 0, 0, 0);
+                else (void)rcclMemAddressFree(reinterpret_cast<void*>(0xE0000), 1 << 20);
+            }
+        });
+    }
+    for (auto& th : threads) th.join();
+
+    EXPECT_EQ(reserve.calls + addrFree.calls, kThreads * kIters);
+    EXPECT_EQ(probe.overlaps.load(), 0);
+}
+
+// The production import site (ncclP2pImportShareableBuffer, the proxy-thread reserve)
+// takes the same lock as a free on another thread (the p2p async closer's
+// ncclCuMemFree ends in rcclMemAddressFree).
+TEST_F(P2pShareableBufferMicrotest, Import_ReserveIsSerializedAgainstConcurrentVaFree)
+{
+    ScopedCuMemHandleType handleType(hipMemHandleTypeWin32);  // != POSIX_FD: no fd round trip
+
+    VaOverlapProbe probe;
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook gran(g_hipMemGetAllocationGranularity, GranularitySucceeds());
+    ScopedHook import(g_hipMemImportFromShareableHandle,
+        [](hipMemGenericAllocationHandle_t* h, void*, hipMemAllocationHandleType) -> hipError_t {
+            if (h) *h = nullptr;
+            return hipSuccess;
+        });
+    ScopedHook reserve(g_hipMemAddressReserve,
+        [&](void** p, std::size_t, std::size_t, void*, unsigned long long) -> hipError_t {
+            probe.Enter();
+            if (p) *p = reinterpret_cast<void*>(0xF0000);
+            return hipSuccess;
+        });
+    ScopedHook addrFree(g_hipMemAddressFree,
+        [&](void*, std::size_t) -> hipError_t { probe.Enter(); return hipSuccess; });
+    ScopedHook map(g_hipMemMap,
+        [](void*, std::size_t, std::size_t, hipMemGenericAllocationHandle_t,
+           unsigned long long) -> hipError_t { return hipSuccess; });
+    ScopedHook access(g_hipMemSetAccess,
+        [](void*, std::size_t, const hipMemAccessDesc*, std::size_t) -> hipError_t {
+            return hipSuccess;
+        });
+    ScopedHook track(g_memTrackImportFromPeer,
+        [](struct ncclMemManager*, void*, size_t, hipMemGenericAllocationHandle_t,
+           hipMemAllocationHandleType, ncclMemType_t, int, int, void*) -> ncclResult_t {
+            return ncclSuccess;
+        });
+
+    constexpr int kIters = 50;
+    std::atomic<bool> stop{false};
+    std::thread closer([&] {
+        while (!stop.load()) {
+            (void)rcclMemAddressFree(reinterpret_cast<void*>(0xF0000), 1 << 20);
+            std::this_thread::yield();
+        }
+    });
+    int imports = 0;
+    for (int i = 0; i < kIters; ++i) imports += CallImport() == ncclSuccess;
+    stop = true;
+    closer.join();
+
+    EXPECT_EQ(imports, kIters);
+    EXPECT_EQ(reserve.calls, kIters);
+    EXPECT_GT(addrFree.calls, 0);
+    EXPECT_EQ(probe.overlaps.load(), 0);
+}
+
 // cuMem arm, POSIX_FD handle type: the remote handle is converted to a local
 // fd via ncclProxyClientGetFdBlocking, then imported from that fd (the plain
 // hipMemImportFromShareableHandle(cuDesc) branch is skipped).
@@ -6760,6 +6867,55 @@ TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_ReleaseFails_PropagatesButSt
     EXPECT_NE(r, ncclSuccess);                   // release failure propagated
     EXPECT_EQ(done, 1);                          // reply still latched
     EXPECT_EQ(QueueHead(conn_), nullptr);        // record already removed
+}
+
+// Asynchronous close (DDA A2A implicit registration, asyncClose from a cross-process peer): the
+// record is removed and the reply latched at once; the close itself runs on the proxy's single
+// closer thread, and ncclP2pAsyncCloserJoin (proxy service exit) finishes every queued close and
+// joins that thread -- no detached thread outlives the proxy.
+TEST_F(P2pProxyDeregisterMicrotest, ProxyDeregister_AsyncClose_RunsOnJoinedCloserThread)
+{
+    void* const kAddrs[] = {reinterpret_cast<void*>(0x8040), reinterpret_cast<void*>(0x9040),
+                            reinterpret_cast<void*>(0xa040)};
+    constexpr uintptr_t kOffset = 0x40;
+    conn_.sameProcess = 0;
+
+    std::mutex mu;
+    std::vector<void*> closed;
+    std::thread::id proxyThread = std::this_thread::get_id();
+    bool offThread = true;
+    ScopedHook close(g_hipIpcCloseMemHandle,
+        [&](void* devPtr) -> hipError_t {
+            std::lock_guard<std::mutex> lk(mu);
+            closed.push_back(devPtr);
+            if (std::this_thread::get_id() == proxyThread) offThread = false;
+            return hipSuccess;
+        });
+
+    for (void* a : kAddrs) {
+        EnqueueRecordedHandle(conn_, a, kOffset, /*legacy=*/true, /*segs=*/1);
+        ncclIpcImpInfo reqInfo{};
+        reqInfo.rmtRegAddr   = a;
+        reqInfo.offset       = kOffset;
+        reqInfo.legacyIpcCap = true;
+        reqInfo.numSegments  = 1;
+        reqInfo.asyncClose   = 1;
+        int done = 0;
+        EXPECT_EQ(ncclSuccess, p2pTransport.send.proxyDeregister(&conn_, &state_, &reqInfo,
+                                                                  sizeof(ncclIpcImpInfo), &done));
+        EXPECT_EQ(done, 1);
+    }
+    EXPECT_EQ(QueueHead(conn_), nullptr);
+    EXPECT_NE(state_.p2pAsyncCloser, nullptr);  // one closer for all three
+
+    ncclP2pAsyncCloserJoin(&state_);
+    EXPECT_EQ(state_.p2pAsyncCloser, nullptr);
+    ASSERT_EQ(closed.size(), 3u);  // every queued close done before the join returned
+    for (int i = 0; i < 3; ++i) {
+        EXPECT_EQ(closed[i], reinterpret_cast<void*>(reinterpret_cast<uintptr_t>(kAddrs[i]) - kOffset));
+    }
+    EXPECT_TRUE(offThread);
+    ncclP2pAsyncCloserJoin(&state_);  // idempotent
 }
 
 // Coverage gap (AICOMRCCL-2417): the no-match deregister path is not exercised

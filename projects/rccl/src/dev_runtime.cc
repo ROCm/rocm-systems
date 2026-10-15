@@ -363,7 +363,7 @@ ncclResult_t ncclDevrFinalize(struct ncclComm* comm) {
       // masking with CUCHECKIGNORE — a regression in the drain path should
       // not be silently swallowed (AICOMRCCL-835).
       CUdeviceptr flatAddr = reinterpret_cast<CUdeviceptr>(devr->lsaFlatBase);
-      CUCHECKGOTO(cuMemAddressFree(flatAddr, devr->lsaSize * devr->bigSize), fatalRet, cleanup);
+      CUCHECKGOTO(rcclMemAddressFree(flatAddr, devr->lsaSize * devr->bigSize), fatalRet, cleanup);
     }
     ncclSpaceDestruct(&devr->bigSpace);
   }
@@ -525,7 +525,7 @@ static ncclResult_t symMemoryMapLsaTeam(struct ncclComm* comm, struct ncclDevrMe
   if (devr->lsaFlatBase == nullptr) {
     // Create on first need.
     CUdeviceptr addr;
-    CUCHECKGOTO(cuMemAddressReserve(&addr, devr->lsaSize * devr->bigSize, NCCL_MAX_PAGE_SIZE, 0, 0), ret, fail);
+    CUCHECKGOTO(rcclMemAddressReserve(&addr, devr->lsaSize * devr->bigSize, NCCL_MAX_PAGE_SIZE, 0, 0), ret, fail);
     devr->lsaFlatBase = reinterpret_cast<void*>(addr);
   }
 
@@ -643,7 +643,7 @@ ncclResult_t symTeamObtain(struct ncclComm* comm, struct ncclTeam team, bool mul
       }
 
       CUCHECKGOTO(cuMulticastAddDevice(mcHandle, comm->cudaDev), ret, fail_mcHandle);
-      CUCHECKGOTO(cuMemAddressReserve(&mcAddr, devr->bigSize, NCCL_MAX_PAGE_SIZE, 0, 0), ret, fail_mcHandle);
+      CUCHECKGOTO(rcclMemAddressReserve(&mcAddr, devr->bigSize, NCCL_MAX_PAGE_SIZE, 0, 0), ret, fail_mcHandle);
       // NOTE(preexisting): cuMemMap blocks until every device has been added, and no
       // abort-aware barrier precedes it, so a peer failing before its addDevice can
       // strand survivors here during abort. ncclMcGroupBuildPartitions guards its map with one.
@@ -674,7 +674,7 @@ ncclResult_t symTeamObtain(struct ncclComm* comm, struct ncclTeam team, bool mul
         CUCHECKIGNORE(cuMemUnmap(mcAddr, devr->bigSize));
         goto fail_mcHandle_mcAddr; // silence unused label warning
       fail_mcHandle_mcAddr:
-        CUCHECKIGNORE(cuMemAddressFree(mcAddr, devr->bigSize));
+        CUCHECKIGNORE(rcclMemAddressFree(mcAddr, devr->bigSize));
         goto fail_mcHandle; // silence unused label warning
       fail_mcHandle:
         CUCHECKIGNORE(cuMemRelease(mcHandle));
@@ -725,7 +725,7 @@ static ncclResult_t symTeamDestroyAll(struct ncclComm* comm) {
     if (t->mcBasePtr != nullptr) {
       CUdeviceptr mcAddr = reinterpret_cast<CUdeviceptr>(t->mcBasePtr);
       CUCHECKIGNORE(cuMemUnmap(mcAddr, devr->bigSize));
-      CUCHECKIGNORE(cuMemAddressFree(mcAddr, devr->bigSize));
+      CUCHECKIGNORE(rcclMemAddressFree(mcAddr, devr->bigSize));
       CUCHECKIGNORE(cuMemRelease(t->mcHandle));
     }
 #if CUDA_VERSION >= 13030

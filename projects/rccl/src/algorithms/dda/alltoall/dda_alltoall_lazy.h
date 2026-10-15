@@ -2,7 +2,8 @@
  * Copyright (c) 2026, Advanced Micro Devices, Inc. All rights reserved.
  *
  * Lazy, collective creation of the DDA AllToAll fabric buffers (push staging buffer, Direct flag
- * buffer): the agreement protocol, independent of HIP so host tests can drive it with fakes.
+ * buffer, implicit-path staging buffer): the agreement protocol, independent of HIP so host tests
+ * can drive it with fakes.
  * The HIP side (allocation, export, import, peer tables) is DdaA2aLazyOps in
  * dda_alltoall_fabric_lazy_host.h.
  * See LICENSE.txt for license information.
@@ -22,6 +23,12 @@ namespace dda_a2a_lazy {
 // Parts (bit mask).
 constexpr uint32_t kPush = 1u;    // push staging buffer ([flags | data])
 constexpr uint32_t kDirect = 2u;  // Direct flag buffer
+constexpr uint32_t kImplicit = 4u;  // Direct staging buffer for pairs that are not mapped (needs kDirect)
+
+// Implicit path's staging buffer per rank (with kImplicit only): one slot per source rank, 8 MiB at
+// 8 ranks and 4 MiB at 16 ranks; a staged pair moves its chunk in rounds of one slot (at most 256
+// rounds inside a2aDirectMax = 16 GiB). See dda_alltoall_implicit_policy.h stagingSlot.
+constexpr int64_t kImplicitScratchBytes = 64ll << 20;
 
 // ncclComm::ddaA2aLazy
 constexpr int kUntried = 0;  // fabric path up, buffers not created yet
@@ -102,13 +109,14 @@ ncclResult_t agree(Ops& ops, uint32_t want, int64_t wantPushBytes, Result* out) 
     ops.release(mine.ok);
     return r;
   }
-  uint32_t parts = kPush | kDirect;
+  uint32_t parts = kPush | kDirect | kImplicit;
   int64_t pushBytes = 0;
   for (int i = 0; i < n; ++i) {
     parts &= all[i].ok;
     if (all[i].ok & kPush) pushBytes = (pushBytes == 0 || all[i].pushBytes < pushBytes) ? all[i].pushBytes : pushBytes;
   }
   if (!(parts & kPush)) pushBytes = 0;
+  if (!(parts & kDirect)) parts &= ~kImplicit;  // the staging buffer serves the Direct kernels only
   if (parts == 0) {
     ops.release(mine.ok);
     return ncclSuccess;
@@ -121,6 +129,7 @@ ncclResult_t agree(Ops& ops, uint32_t want, int64_t wantPushBytes, Result* out) 
     return r;
   }
   for (int i = 0; i < n; ++i) parts &= mapped[i];
+  if (!(parts & kDirect)) parts &= ~kImplicit;
   ops.release(mine.ok & ~parts);
   out->parts = parts;
   out->pushBytes = (parts & kPush) ? pushBytes : 0;

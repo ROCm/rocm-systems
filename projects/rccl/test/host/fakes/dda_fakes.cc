@@ -70,6 +70,7 @@ DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricPushEligible, ncclAllToAllDdaFabr
 DEFINE_DDA_BLOCKS(allToAllDdaFabricPushBlocks, ncclAllToAllDdaFabricPushBlocks, 145)
 DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricDirectWindowed, ncclAllToAllDdaFabricDirectWindowed)
 DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricDirectEligible, ncclAllToAllDdaFabricDirectEligible)
+DEFINE_DDA_ALLGATHER_ELIGIBLE(allToAllDdaFabricDirectImplicitEligible, ncclAllToAllDdaFabricDirectImplicitEligible)
 std::function<uint32_t(ncclComm*)> g_allToAllDdaFabricDirectBlocks = [](ncclComm*) { return 146u; };
 uint32_t ncclAllToAllDdaFabricDirectBlocks(ncclComm* comm) { return g_allToAllDdaFabricDirectBlocks(comm); }
 // Lazy creation of the push / Direct buffers (dda_alltoall_fabric_lazy_host.h); default: no-op success.

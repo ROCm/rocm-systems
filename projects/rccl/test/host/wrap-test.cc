@@ -7757,6 +7757,18 @@ void InstallA2aFabricFakes() {
            r == reinterpret_cast<void*>(0x30000000);
   };
   g_allToAllDdaFabricDirectEligible = g_allToAllDdaFabricDirectWindowed;
+  g_allToAllDdaFabricDirectImplicitEligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+    return false;  // RCCL_DDA_A2A_IMPLICIT unset (default): no implicit part
+  };
+}
+
+// The agreed implicit part: shape only (the per-rank registration state is not an input).
+void InstallA2aImplicitFake(int* calls = nullptr) {
+  g_allToAllDdaFabricDirectImplicitEligible = [calls](ncclComm* comm, const void* s, void* r, size_t c,
+                                                      ncclDataType_t t) {
+    if (calls != nullptr) ++*calls;
+    return s != r && comm->nRanks <= 16 && A2aPerPeer16(c, t) && A2aPtrs16(s, r);
+  };
 }
 
 const void* const kA2aSend = reinterpret_cast<const void*>(0x10000000);
@@ -8244,6 +8256,132 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DirectNeedsWindow) {
         ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 4u << 20, kA2aSend, kA2aWinRecv, false, &d));
         EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_DIRECT, d.algo);
         EXPECT_EQ(1, eligibleCalls);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Implicit zero-copy (agreed opt-in part): a receive buffer NOT in a symmetric window takes the
+// Direct window too (hybrid kernel, same algo id and block count), ahead of LL128; everything outside
+// the window keeps the unwindowed rules. Windowed calls never consult the implicit predicate.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DirectImplicitTable) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250DirectImplicitTable",
+      []() {
+        InstallA2aFabricFakes();
+        int implicitCalls = 0;
+        InstallA2aImplicitFake(&implicitCalls);
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        struct Case {
+          int n;
+          size_t perPeer;
+          int algo;
+        } cases[] = {
+            {8, 512, RCCL_DDA_FABRIC_LL},                  // T = 4 KiB
+            {8, 1u << 20, RCCL_DDA_FABRIC_LL128},          // T = 8 MiB < a2aDirectMin, P == cut
+            {8, 2u << 20, RCCL_DDA_FABRIC_A2A_DIRECT},     // T = 16 MiB, P = 2 MiB > cut: ahead of LL128
+            {16, 1u << 20, RCCL_DDA_FABRIC_LL128},         // T = 16 MiB, P == cut
+            {16, 3u << 19, RCCL_DDA_FABRIC_A2A_DIRECT},    // T = 24 MiB
+            {8, 16u << 20, RCCL_DDA_FABRIC_A2A_DIRECT},    // T = 128 MiB (push window)
+            {8, 256u << 20, RCCL_DDA_FABRIC_A2A_DIRECT},   // T = 2 GiB > a2aPushMax
+            {8, 2ull << 30, RCCL_DDA_FABRIC_A2A_DIRECT},   // T = 16 GiB == a2aDirectMax
+            {8, 4ull << 30, RCCL_DIRECT_ALLTOALL},         // T = 32 GiB > a2aDirectMax: p2p
+            {32, 1u << 20, RCCL_DDA_FABRIC_A2A_PUSH},      // T = 32 MiB, no Direct above 16 ranks
+        };
+        for (const Case& c : cases) {
+          comm->nRanks = c.n;
+          for (bool query : {true, false}) {
+            rcclCollDecision d{};
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, c.perPeer, kA2aSend, kA2aRecv, query, &d));
+            EXPECT_EQ(c.algo, d.algo) << "n=" << c.n << " P=" << c.perPeer << " query=" << query;
+            if (c.algo == RCCL_DDA_FABRIC_A2A_DIRECT) EXPECT_EQ(146u, d.nMaxChannels);
+          }
+        }
+        comm->nRanks = 8;
+        rcclCollDecision d{};
+        // In place never takes Direct (the selector's shape test, not the predicate).
+        g_allToAllDdaFabricDirectImplicitEligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t) {
+          return true;
+        };
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 4u << 20, kA2aRecv, kA2aRecv, false, &d));
+        EXPECT_NE((int)RCCL_DDA_FABRIC_A2A_DIRECT, d.algo);
+        // Windowed calls: the window predicate only; an unusable window state never falls to implicit.
+        implicitCalls = 0;
+        InstallA2aImplicitFake(&implicitCalls);
+        g_allToAllDdaFabricDirectEligible = [](ncclComm*, const void*, void*, size_t, ncclDataType_t) { return false; };
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 4u << 20, kA2aSend, kA2aWinRecv, false, &d));
+        EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_PUSH, d.algo);
+        EXPECT_EQ(0, implicitCalls);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The implicit part is never a lazy-creation trigger (RCCL_DDA_A2A_IMPLICIT is per-rank env; the
+// trigger must be comm-uniform): an unwindowed call above the push window creates nothing, a call in
+// the push window does (as without implicit).
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DirectImplicitNotATrigger) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250DirectImplicitNotATrigger",
+      []() {
+        InstallA2aFabricFakes();
+        InstallA2aImplicitFake();
+        int lazyCalls = 0;
+        g_ddaA2aLazyInit = [&lazyCalls](ncclComm*) {
+          ++lazyCalls;
+          return ncclSuccess;
+        };
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        comm->nRanks = 8;
+        comm->ddaA2aLazy = 0;
+        rcclCollDecision d{};
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 256u << 20, kA2aSend, kA2aRecv, false, &d));  // T = 2 GiB
+        EXPECT_EQ(0, lazyCalls);
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 2u << 20, kA2aSend, kA2aRecv, false, &d));  // T = 16 MiB
+        EXPECT_EQ(0, lazyCalls);
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 4u << 20, kA2aSend, kA2aRecv, false, &d));  // T = 32 MiB: push
+        EXPECT_EQ(1, lazyCalls);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Sibling pairs keep #5's path above a2aDirectMin with implicit too.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250DirectImplicitSiblingPairUsesPush) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250DirectImplicitSiblingPairUsesPush",
+      []() {
+        InstallA2aFabricFakes();
+        InstallA2aImplicitFake();
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        comm->nRanks = 2;
+        ncclPeerInfo peers[2];
+        std::memset(peers, 0, sizeof(peers));
+        peers[0].hostHash = peers[1].hostHash = 0x1234;
+        peers[0].busId = 0x104000;
+        peers[1].busId = 0x104001;
+        comm->peerInfo = peers;
+        for (int rank : {0, 1}) {
+          comm->rank = rank;
+          rcclCollDecision d{};
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 16u << 20, kA2aSend, kA2aRecv, true, &d));
+          EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_PUSH, d.algo) << rank;  // T = 32 MiB
+          d = rcclCollDecision{};
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 1u << 30, kA2aSend, kA2aRecv, true, &d));
+          EXPECT_NE((int)RCCL_DDA_FABRIC_A2A_DIRECT, d.algo) << rank;  // T = 2 GiB: stock
+          EXPECT_NE((int)RCCL_DDA_FABRIC_A2A_PUSH, d.algo) << rank;
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 8u << 20, kA2aSend, kA2aRecv, true, &d));
+          EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_DIRECT, d.algo) << rank;  // T = 16 MiB == a2aDirectMin
+        }
+        comm->rank = 0;
+        peers[1].busId = 0x204000;  // another physical GPU
+        rcclCollDecision d{};
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 16u << 20, kA2aSend, kA2aRecv, true, &d));
+        EXPECT_EQ((int)RCCL_DDA_FABRIC_A2A_DIRECT, d.algo);
+        comm->peerInfo = nullptr;
         DeleteCommWithArch(comm);
       });
 }
