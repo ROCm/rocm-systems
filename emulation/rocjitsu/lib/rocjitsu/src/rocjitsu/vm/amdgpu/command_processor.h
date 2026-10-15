@@ -113,19 +113,17 @@ public:
   void set_gpu_vm(GpuVm *gpu_vm, AddressSpaceHandle default_address_space = {});
   [[nodiscard]] AddressSpaceHandle default_address_space() const { return default_address_space_; }
 
-  /// @brief Wire the device-global GWS store this CP and its CUs share.
-  /// @details Centralizes the shared-store dependency: the CP forwards @p device to
-  /// every CU it currently dispatches to (and to each CU added later via
-  /// @ref add_compute_unit), and uses it directly for the per-shard placement
-  /// bookkeeping the GWS deadlock backstop reads. Mirrors @ref set_gpu_vm /
-  /// @ref add_compute_unit. CUs must be drained when this is called (topology
-  /// construction time); a non-drained CU rejects the re-point (see
-  /// ComputeUnitCore::set_gws_device). Passing nullptr leaves each CU on its private
-  /// default store (standalone CP).
+  /// @brief Replace the GWS store across this CP's drained compute units.
+  /// @details The caller serializes topology changes. Preflights every CU and
+  /// throws std::logic_error if any active CU would change stores, before
+  /// updating any CU or the CP's shared owner.
   void set_gws_device(std::shared_ptr<GwsDevice> device) {
-    gws_device_ = std::move(device);
     for (ComputeUnitCore *cu : cus_)
-      cu->set_gws_device(gws_device_);
+      if (!cu->can_set_gws_device(device))
+        throw std::logic_error("Cannot replace GWS store with active waves or workgroups");
+    for (ComputeUnitCore *cu : cus_)
+      (void)cu->set_gws_device(device);
+    gws_device_ = std::move(device);
   }
   void add_l2_cache(L2Cache *l2) {
     // Idempotent: the config-driven builder and the Xcd full constructor may
@@ -265,6 +263,8 @@ public:
   void add_spi(ShaderProcessorInput *spi) { spis_.push_back(spi); }
 
   void add_compute_unit(ComputeUnitCore *cu) {
+    if (gws_device_ && !cu->can_set_gws_device(gws_device_))
+      throw std::logic_error("Cannot attach an active CU to a different GWS store");
     auto port_id = static_cast<simdojo::PortID>(dispatch_ports_.size());
     auto port = std::make_unique<simdojo::Port>("req_" + cu->name(), port_id, this,
                                                 simdojo::PortDirection::OUT,
@@ -296,6 +296,11 @@ public:
 
   /// @brief WG completion notification from CU refcount reaching zero.
   void notify_wg_complete(uint32_t dispatch_id, uint32_t wg_id);
+
+  /// @brief Cancel all replicas of a failed queue before reporting VM failure.
+  /// @details Thread-safe publication; callbacks and cancellation execute on
+  /// each CP's engine partition after its current worker batch rejoins.
+  void notify_execution_failure(uint32_t queue_id, uint32_t process_id, std::string reason);
 
   /// @brief Terminate a dispatch after a CU observes a non-retryable VM fault.
   /// @details The caller must have released the CU wave-state lock. The owning
@@ -507,20 +512,6 @@ public:
     drain_fanout_inbox();
   }
 
-  /// @brief Drive the real fan-out path (owner-share registration + peer exposure).
-  void fan_out_dispatch_for_test(DispatchEntry &dp) {
-    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    fan_out_dispatch(dp, DispatchLaunchMetadata{});
-  }
-
-  /// @brief Run a real placement pass for @p entry (publishes its shard state).
-  [[nodiscard]] std::pair<uint32_t, VmAccessOutcome>
-  dispatch_workgroups_for_test(DispatchEntry &entry) {
-    std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-    const auto result = dispatch_workgroups(entry);
-    return {result.dispatched, result.outcome};
-  }
-
   [[nodiscard]] bool queue_exception_suspended_for_test(uint32_t queue_id, uint32_t process_id) {
     std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
     auto queue =
@@ -705,6 +696,7 @@ private:
     uint32_t process_id = 0;
     uint64_t dispatch_id = 0;
     VmAccessOutcome outcome;
+    std::function<void()> on_cancelled = {};
   };
   void accept_dispatch_fault(DispatchFaultNotification fault);
   void drain_dispatch_fault_inbox();
@@ -845,12 +837,8 @@ private:
   std::unordered_map<uint32_t, DispatchLaunchMetadata> dispatch_launch_metadata_;
   std::vector<ComputeUnitCore *> cus_;
   std::vector<simdojo::Port *> dispatch_ports_;
-  /// Device-global GWS store shared by every CU this CP dispatches to, wired by the
-  /// XCD/SoC (see @ref set_gws_device). The CP forwards it to each CU and uses it
-  /// directly for the per-shard placement bookkeeping the GWS deadlock backstop
-  /// reads, so those sites do not reach through a CU. Null for a standalone CP with
-  /// no store wired, in which case each CU falls back to its own private default
-  /// store and the CP skips the placement publications.
+  /// XCD/SoC store forwarded to every attached CU. Null on a standalone CP,
+  /// whose CUs retain their private defaults.
   std::shared_ptr<GwsDevice> gws_device_;
 
   uint32_t xcd_rank_ = 0;

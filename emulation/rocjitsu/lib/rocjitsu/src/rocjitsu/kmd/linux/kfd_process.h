@@ -580,6 +580,7 @@ public:
     /// CREATE_QUEUE supplied an exception-status address; the interrupt event is optional.
     bool has_runtime_exception_signal = false;
     uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+    bool gws_allocated = false;    ///< Owns the process/GPU GWS grant until release or destruction.
     /// Exception bits whose ROCr ownership decision is still in flight.
     uint64_t runtime_exception_pending_status = 0;
     /// Runtime publications per bit; identical concurrent events may overlap.

@@ -1861,13 +1861,6 @@ TEST(XcdDistributionTest, ConfigLoaderSharesOneGwsStoreAcrossXcds) {
   EXPECT_EQ(stores.size(), 1u);
 }
 
-// Cross-XCD GWS barrier rendezvous (config-loaded CDNA3). Two waves of the same
-// dispatch land on CUs of *different* XCDs. The barrier's residency bound is
-// summed across the participating XCDs via the shared store, so a barrier(1)
-// (two participants) parks the first arrival instead of taking the residency
-// fallback -- which a per-XCD store, seeing only one resident participant, would
-// have done, letting the first arrival proceed before its peer. The releasing
-// arrival on the other XCD then wakes the parked peer.
 TEST(XcdDistributionTest, CrossXcdGwsBarrierRendezvous) {
   XcdDistributionFixture fx(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH);
   ASSERT_GE(fx.soc->num_xcds(), 2u);
@@ -1889,7 +1882,6 @@ TEST(XcdDistributionTest, CrossXcdGwsBarrierRendezvous) {
   auto *wf1 = cu1->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
   ASSERT_NE(wf0, nullptr);
   ASSERT_NE(wf1, nullptr);
-  // One resident wave per XCD, same dispatch: the shared residency bound is two.
   cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
   cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
   for (auto *wf : {wf0, wf1}) {
@@ -1897,8 +1889,7 @@ TEST(XcdDistributionTest, CrossXcdGwsBarrierRendezvous) {
     wf->set_m0(0);
   }
 
-  // wf0 (XCD0) arrives first at a two-participant barrier and parks: proof the
-  // residency bound crossed the XCD boundary (a per-XCD bound of 1 would not park).
+  cu0->gws_init(*wf0, 0, 1);
   gws_cdna3::issue(*cu0, *decoder, test::GwsOp::kBarrier, *wf0, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT)
       << "cross-XCD barrier arrival proceeded before its peer (per-XCD residency)";
@@ -1917,12 +1908,7 @@ TEST(XcdDistributionTest, CrossXcdGwsBarrierRendezvous) {
   wf1->halt();
 }
 
-// Cross-XCD GWS quiescence (config-loaded CDNA3). A P parked on a CU of XCD0 must
-// not be released by the deadlock backstop while a runnable producer of the same
-// process is resident on a CU of XCD1: the quiescence scan spans XCDs through the
-// shared store. A per-XCD store would scan only XCD0, see no runnable wave, and
-// escape the P prematurely; here the P proceeds only once the producer issues a V.
-TEST(XcdDistributionTest, CrossXcdGwsPDoesNotEscapeWhilePeerXcdProducerRunnable) {
+TEST(XcdDistributionTest, CrossXcdGwsPWaitsForProducerSignal) {
   XcdDistributionFixture fx(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH);
   ASSERT_GE(fx.soc->num_xcds(), 2u);
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
@@ -1955,18 +1941,11 @@ TEST(XcdDistributionTest, CrossXcdGwsPDoesNotEscapeWhilePeerXcdProducerRunnable)
   gws_cdna3::issue(*cu0, *decoder, test::GwsOp::kSemaP, *consumer);
   ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
 
-  // Running XCD0's GWS maintenance must NOT escape the P: the shared quiescence
-  // scan spans XCDs, so the runnable producer on XCD1 (registered in the one
-  // device-global store) keeps the process from looking quiescent. A per-XCD
-  // store would not list XCD1's CU at all and would escape the P. XCD1 is never
-  // stepped, so its producer stays RUNNING (as in OverlappingDispatch...).
   for (int i = 0; i < 8; ++i)
     cu0->step();
   EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT)
-      << "parked P was escaped while a producer on another XCD was still runnable";
+      << "parked P resumed before the producer signaled";
 
-  // The producer signals; XCD0 then releases the consumer with a credit on its
-  // next step -- a real V, never a cross-XCD premature escape.
   gws_cdna3::issue(*cu1, *decoder, test::GwsOp::kSemaV, *producer);
   for (int i = 0; i < 4 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu0->step();
@@ -1977,17 +1956,7 @@ TEST(XcdDistributionTest, CrossXcdGwsPDoesNotEscapeWhilePeerXcdProducerRunnable)
     consumer->halt();
 }
 
-// Cross-XCD GWS fan-out owner share (config-loaded CDNA3), driven through the real
-// fan-out path. When a dispatch fans out, the owner registers its OWN local share as
-// an unplaced producer before exposing any peer shard, so a peer that parks a P cannot
-// be declared deadlocked while the owner's V producer has merely not reached its
-// placement pass yet. Here the real fan_out_dispatch() registers every XCD's share;
-// draining every peer (none has the queue registered) drops their shards, leaving only
-// the owner's share deferring; a P parked on a peer CU must stay parked until the owner
-// runs its placement pass and its producer signals a V. Regression: leaving the owner's
-// local share unregistered let the backstop escape the peer's P one quiescence pass
-// before the owner's producer could run.
-TEST(XcdDistributionTest, FanoutOwnerShareDefersPeerQuiescenceUntilProducerSignals) {
+TEST(XcdDistributionTest, CrossXcdGwsPWaitsForLaterProducerDispatch) {
   XcdDistributionFixture fx(Threading::Single, /*dispatch_threads=*/1, CDNA3_CONFIG_PATH);
   ASSERT_GE(fx.soc->num_xcds(), 2u);
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA3);
@@ -2001,39 +1970,13 @@ TEST(XcdDistributionTest, FanoutOwnerShareDefersPeerQuiescenceUntilProducerSigna
   ASSERT_NE(owner_cu, nullptr);
   ASSERT_NE(peer_cu, nullptr);
   ASSERT_EQ(&owner_cu->gws_device(), &peer_cu->gws_device());
-  auto &gws = peer_cu->gws_device();
 
-  constexpr uint32_t kProcess = 0;
   constexpr uint32_t kDispatch = 77;
-  const uint32_t num_xcds = static_cast<uint32_t>(fx.soc->num_xcds());
-
-  // Run the REAL fan-out: the owner registers its own local share Pending before
-  // exposing peer shards, and each peer's accept registers its shard Pending -- one
-  // placement shard per XCD.
-  amdgpu::DispatchEntry dp{};
-  dp.dispatch_id = kDispatch;
-  dp.queue_id = 1;
-  dp.process_id = kProcess;
-  dp.kind = amdgpu::DispatchPacketKind::Kernel;
-  dp.total_wgs = num_xcds; // One workgroup per XCD.
-  owner->fan_out_dispatch_for_test(dp);
-  EXPECT_EQ(gws.tracked_shard_count(kDispatch), num_xcds)
-      << "fan-out did not register the owner's own share alongside the peers'";
-
-  // Every peer drains with no queue registered, so each peer shard is dropped and its
-  // mark cleared -- leaving ONLY the owner's own share deferring.
-  for (uint32_t xi = 1; xi < num_xcds; ++xi)
-    fx.soc->xcd(xi)->command_processor()->drain_fanout_inbox_for_test();
-  EXPECT_EQ(gws.tracked_shard_count(kDispatch), 1u)
-      << "only the owner's local share should remain after the peers drained";
-
-  // A consumer P parks on the peer CU for this dispatch/process. It must NOT be escaped
-  // while the owner's producer share is still unplaced.
   auto *consumer = peer_cu->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
   ASSERT_NE(consumer, nullptr);
   consumer->set_dispatch_id(kDispatch);
   peer_cu->begin_workgroup(/*dispatch_id=*/kDispatch, /*wg_id=*/1, /*wf_count=*/1,
-                           /*num_named_barriers=*/0, kProcess, /*dispatch_total_waves=*/0);
+                           /*num_named_barriers=*/0);
   consumer->set_exec(0x1);
   consumer->set_m0(0);
   gws_cdna3::issue(*peer_cu, *decoder, test::GwsOp::kSemaP, *consumer);
@@ -2041,21 +1984,13 @@ TEST(XcdDistributionTest, FanoutOwnerShareDefersPeerQuiescenceUntilProducerSigna
   for (int i = 0; i < 16; ++i)
     peer_cu->step();
   EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT)
-      << "consumer escaped while the owner's unplaced producer share was still pending";
+      << "consumer resumed before the producer was dispatched";
 
-  // The owner runs its placement pass; with its local share fully placed it publishes
-  // Resolved, dropping the last deferring shard.
-  dp.dispatched_wgs = dp.total_wgs;
-  (void)owner->dispatch_workgroups_for_test(dp);
-  EXPECT_EQ(gws.tracked_shard_count(kDispatch), 0u);
-
-  // The owner's producer now signals; the consumer wakes on the credit (a real V),
-  // applied by its own CU on the next step -- never a premature escape.
   auto *producer = owner_cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(producer, nullptr);
   producer->set_dispatch_id(kDispatch);
   owner_cu->begin_workgroup(/*dispatch_id=*/kDispatch, /*wg_id=*/0, /*wf_count=*/1,
-                            /*num_named_barriers=*/0, kProcess, /*dispatch_total_waves=*/0);
+                            /*num_named_barriers=*/0);
   producer->set_exec(0x1);
   producer->set_m0(0);
   gws_cdna3::issue(*owner_cu, *decoder, test::GwsOp::kSemaV, *producer);

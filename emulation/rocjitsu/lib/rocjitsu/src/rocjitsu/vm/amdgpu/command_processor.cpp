@@ -938,22 +938,8 @@ void CommandProcessor::accept_fanout_shard(DispatchEntry shard,
     // hw_queue_mutex_ is acquired while holding this one, and it is held only for
     // the push so a peer's engine thread never blocks on it for long.
     std::lock_guard<std::mutex> lock(fanout_inbox_mutex_);
-    if (!shard.is_non_kernel()) {
+    if (!shard.is_non_kernel())
       fanout_launch_metadata_inbox_.insert_or_assign(shard.dispatch_id, std::move(launch_metadata));
-      // Publish this shard's placement as Pending in the device-global GWS store
-      // before it is even drained, so a peer shard already parked at a GWS wait
-      // cannot be declared deadlocked while this shard's producer is still sitting in
-      // the inbox (the backstop would otherwise escape it one quiescence pass too
-      // early). The owning CP resolves the mark once it runs its placement pass
-      // (dispatch_workgroups). Keyed by this CP's identity so each fan-out shard is
-      // tracked independently. Only the opaque store leaf-lock is taken here (no peer
-      // CP lock), preserving the fan-out lock-order contract; the mark is resolved on
-      // teardown regardless. See GwsDevice for the three-state placement policy.
-      shard.gws_shard_unresolved = true;
-      if (gws_device_)
-        gws_device_->set_shard_placement(shard.process_id, shard.dispatch_id,
-                                         /*shard_key=*/this, GwsDevice::ShardPlacement::Pending);
-    }
     fanout_inbox_.push_back(std::move(shard));
   }
   // Cross-thread and cross-partition safe: the engine buffers the event and drains
@@ -961,6 +947,23 @@ void CommandProcessor::accept_fanout_shard(DispatchEntry shard,
   // would reach into another partition's compute units.
   if (engine())
     engine()->schedule_event_now(doorbell_event());
+}
+
+void CommandProcessor::notify_execution_failure(uint32_t queue_id, uint32_t process_id,
+                                                std::string reason) {
+  std::vector<CommandProcessor *> peers = xcd_peers_;
+  if (peers.empty())
+    peers.push_back(this);
+  auto remaining = std::make_shared<std::atomic<size_t>>(peers.size());
+  auto completed = [remaining, sim = engine(), reason = std::move(reason)] {
+    if (remaining->fetch_sub(1, std::memory_order_acq_rel) == 1 && sim)
+      sim->request_exit(reason, 1);
+  };
+  for (auto *peer : peers)
+    peer->accept_dispatch_fault({.queue_id = queue_id,
+                                 .process_id = process_id,
+                                 .outcome = VmAccessOutcome::Malformed,
+                                 .on_cancelled = completed});
 }
 
 void CommandProcessor::accept_dispatch_fault(DispatchFaultNotification fault) {
@@ -979,7 +982,44 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
     faults.swap(dispatch_fault_inbox_);
   }
   for (const DispatchFaultNotification &fault : faults) {
-    (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id, fault.outcome);
+    if (!fault.on_cancelled) {
+      (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id,
+                                 fault.outcome);
+      continue;
+    }
+    {
+      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+      auto queue = std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
+        return candidate.queue_id == fault.queue_id && candidate.process_id == fault.process_id;
+      });
+      if (queue != compute_queues_.end()) {
+        queue->faulted = true;
+        for (auto &entry : queue->entries) {
+          entry.terminal_faulted = true;
+          dispatch_launch_metadata_.erase(entry.dispatch_id);
+          erase_cluster_workgroups(entry.dispatch_id);
+          if (entry.grid_completion)
+            entry.grid_completion->mark_faulted();
+        }
+        // Abort, rather than halt, so no workgroup completion can publish success.
+        for (auto *cu : cus_) {
+          cu->with_wave_state_locked([&] {
+            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+              auto *wave = cu->wf(slot);
+              if (wave && !wave->is_halted() && wave->queue_id() == fault.queue_id &&
+                  wave->process_id() == fault.process_id)
+                cu->abort_dispatch(wave->dispatch_id());
+            }
+          });
+        }
+        // Native PM4 submissions deliver their failed callback/fence here, before
+        // the last replica acknowledges cancellation and stops the engine.
+        fail_pm4_queue(*queue, queue->dispatches);
+        queue->entries.clear();
+        queue->next_dispatch_idx = 0;
+      }
+    }
+    fault.on_cancelled();
   }
 }
 
@@ -1002,15 +1042,6 @@ void CommandProcessor::drain_fanout_inbox() {
   stall_recheck_backoff_ = 1;
 
   std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
-  // Resolve the unresolved placement mark accept_fanout_shard() published for a shard
-  // that is being discarded instead of enqueued. Without this, a dropped shard's mark
-  // would wedge the deadlock backstop forever: it is keyed by this CP's identity and
-  // only this CP's placement pass resolves it, but a discarded shard never runs one.
-  const auto resolve_discarded_mark = [&](const DispatchEntry &shard) {
-    if (!shard.is_non_kernel() && shard.gws_shard_unresolved && gws_device_)
-      gws_device_->set_shard_placement(shard.process_id, shard.dispatch_id,
-                                       /*shard_key=*/this, GwsDevice::ShardPlacement::Resolved);
-  };
   for (DispatchEntry &shard : inbox) {
     const std::vector<ComputeQueueRecord>::iterator queue =
         std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
@@ -1029,16 +1060,13 @@ void CommandProcessor::drain_fanout_inbox() {
       // teardown is what reaches this window -- for_each_cp removes replicas in
       // XCD order while a later owner is still registered, and an
       // already-scheduled peer doorbell can drain concurrently.
-      resolve_discarded_mark(shard);
       continue;
     }
     // A terminal VM fault closes execution admission for the queue. A peer may
     // already have emitted another shard before it observed the shared fault;
     // dropping it here prevents future work from appearing behind the fault.
-    if (queue->faulted) {
-      resolve_discarded_mark(shard);
+    if (queue->faulted)
       continue;
-    }
     // Honour the packet's acquire fence on this XCD too. The owner invalidated
     // only its own CUs; this runs on our partition's thread, so ours are safe
     // to touch here and the peer ends up with the same view the owner has.
@@ -1049,7 +1077,6 @@ void CommandProcessor::drain_fanout_inbox() {
           launch_metadata.find(shard.dispatch_id);
       if (metadata == launch_metadata.end()) {
         queue->faulted = true;
-        resolve_discarded_mark(shard);
         continue;
       }
       dispatch_launch_metadata_.insert_or_assign(shard.dispatch_id, std::move(metadata->second));
@@ -1091,21 +1118,6 @@ void CommandProcessor::fan_out_dispatch(DispatchEntry &dp,
   const uint32_t grid_wgs = dp.total_wgs;
   auto grid = std::make_shared<GridCompletion>();
   grid->grid_wgs = grid_wgs;
-
-  // Publish the owner's own local share as Pending BEFORE exposing any peer shard
-  // below. accept_fanout_shard() publishes each peer's mark, but the owner's producer
-  // workgroups are just as able to be the signaler a peer's parked GWS waiter depends
-  // on. Without this, a peer that parks a P could be declared deadlocked while the
-  // owner's V producer has merely not reached its placement pass yet. Keyed by this
-  // CP's identity; the owner's dispatch_workgroups() pass resolves it (Resolved once
-  // fully placed, or Unplaced while stalled) -- an empty owner share resolves
-  // immediately on that pass. Peer-first ordering (publish before the loop) ensures no
-  // peer waiter can observe the owner's share as absent.
-  if (!dp.is_non_kernel() && gws_device_) {
-    dp.gws_shard_unresolved = true;
-    gws_device_->set_shard_placement(dp.process_id, dp.dispatch_id,
-                                     /*shard_key=*/this, GwsDevice::ShardPlacement::Pending);
-  }
 
   const auto apply_share = [&](DispatchEntry &entry, uint32_t physical_rank) {
     if (!entry.enabled_cus) {
@@ -2468,14 +2480,8 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     }
 
     // All fallible per-wave work succeeded: commit WG bookkeeping and the cluster pin.
-    // Report the whole-grid wave count (not this shard's) so the device-global GWS
-    // store can account for participants not yet admitted; fan-out shards admit
-    // independently, every XCD reports the same total, and the store keeps the max.
-    const uint64_t grid_total_waves =
-        static_cast<uint64_t>(entry.grid_total_wgs()) * entry.wfs_per_workgroup;
     cu->begin_workgroup(entry.dispatch_id, global_wg_id, entry.wfs_per_workgroup,
-                        entry.num_named_barriers, entry.process_id,
-                        static_cast<uint32_t>(std::min<uint64_t>(grid_total_waves, UINT32_MAX)));
+                        entry.num_named_barriers);
     register_cluster_workgroup(entry, local_wg_id, global_wg_id, cu, lds_base);
 
     plugin_group_->onAmdgpuWorkgroupDispatched(entry.dispatch_id, global_wg_id,
@@ -2601,34 +2607,6 @@ CommandProcessor::dispatch_workgroups(DispatchEntry &entry) {
     if (placement_outcome != VmAccessOutcome::Complete)
       return {.dispatched = dispatched, .outcome = placement_outcome};
   }
-  // Reaching here means this placement pass finished: the while loop either placed
-  // the whole shard or broke out having placed all it currently could. Publish this
-  // shard's placement state to the GWS deadlock backstop so it defers correctly on
-  // our behalf (keyed by this CP's identity, so each shard is tracked independently):
-  //   * Fully placed -> Resolved: drop our mark (whatever existed is now resident and
-  //     visible to the quiescence scan). Only emitted when we had a mark published,
-  //     so a grid that always fits on its first pass adds no store traffic.
-  //   * Not fully placed (stalled on capacity) -> Unplaced, tagged at the current
-  //     capacity version: a parked GWS waiter must not be abandoned until we have
-  //     re-attempted placement against any room a later retirement frees. Published
-  //     on every stalled pass -- including for a single-CP grid -- so the backstop
-  //     re-arms whenever capacity changes (a retirement advances the version, making
-  //     this record stale until we re-run and either place the producer or confirm it
-  //     is still stuck). A genuinely unplaceable shard keeps the same version with no
-  //     capacity change, so escape still terminates.
-  // Transient/fault exits above skip this: a retry re-runs this pass, and a fault
-  // tears the dispatch down (clearing its admission wholesale).
-  if (gws_device_) {
-    if (entry.dispatched_wgs < entry.total_wgs) {
-      entry.gws_shard_unresolved = true;
-      gws_device_->set_shard_placement(entry.process_id, entry.dispatch_id, /*shard_key=*/this,
-                                       GwsDevice::ShardPlacement::Unplaced);
-    } else if (entry.gws_shard_unresolved) {
-      entry.gws_shard_unresolved = false;
-      gws_device_->set_shard_placement(entry.process_id, entry.dispatch_id, /*shard_key=*/this,
-                                       GwsDevice::ShardPlacement::Resolved);
-    }
-  }
   return {.dispatched = dispatched, .outcome = VmAccessOutcome::Complete};
 }
 
@@ -2748,7 +2726,7 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   if (state.packet_format == QueuePacketFormat::Aql && !state.commands.submissions.empty())
     fail_pm4_queue(state, state.dispatches);
   util::Logger::cp([&](auto &os) {
-    os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
+    os << std::format("{}: terminal dispatch fault pid={} qid={} dispatch={} outcome={}", name(),
                       process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
   });
   erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
@@ -2998,7 +2976,7 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
   for (size_t i = 0; i < active_cu_scratch_.size(); ++i) {
     auto *cu = active_cu_scratch_[i];
     if (cu->has_runnable_wfs())
-      pooled_due_ticks_[cu] = now + std::max<uint64_t>(1, quantum_result_scratch_[i].iterations);
+      pooled_due_ticks_[cu] = now + quantum_result_scratch_[i].next_tick_delay();
     else
       pooled_due_ticks_.erase(cu);
   }
@@ -3349,27 +3327,8 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
   for (auto &entry : queue.entries)
     if (entry.grid_completion)
       entry.grid_completion->mark_faulted();
-  // Clear every dropped dispatch's device-global GWS participant accounting before
-  // discarding the queue's entries. This must cover entries with no live wave --
-  // one that never admitted a wave, or whose last wave already retired -- which the
-  // resident-wave halt loop below cannot reach. remove_resident() deliberately
-  // keeps an admitted<expected entry, so a dropped dispatch would otherwise leave a
-  // stale admission entry that blocks the quiescence backstop from ever escaping
-  // this process. Residency and parked state are settled by each halted wave's
-  // free_wavefront_resources()/release_wf() below; only the whole-dispatch accounting
-  // is cleared here (notify_dispatch_gone is idempotent).
-  if (gws_device_) {
-    for (const DispatchEntry &entry : qs.entries)
-      gws_device_->notify_dispatch_gone(entry.dispatch_id);
-    for (const DispatchEntry &entry : queue.entries)
-      gws_device_->notify_dispatch_gone(entry.dispatch_id);
-  }
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
   // waves before releasing the submission's BO references or publishing failure.
-  // halt() frees the wave's SGPR/VGPR, resets the slot, reconciles its GWS
-  // parked/residency state (free_wavefront_resources()/release_wf()), fires the
-  // wavefront-halted hook, and notifies workgroup completion -- matching the
-  // non-fault teardown, so observers and completion bookkeeping stay consistent.
   for (auto *cu : cus_) {
     cu->with_wave_state_locked([&] {
       for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {

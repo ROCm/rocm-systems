@@ -46,10 +46,11 @@ namespace rocjitsu {
 namespace amdgpu {
 bool InstructionComputeUnitView::signal_queue_exception(
     uint32_t queue_id, uint32_t process_id, uint64_t status, bool clear_debug_stop_on_success,
-    bool retain_failure_for_debugger, QueueExceptionDeliveryPolicy delivery_policy) {
-  return raw_cu().defer_queue_exception(&raw_wavefront(), queue_id, process_id, status,
-                                        clear_debug_stop_on_success, retain_failure_for_debugger,
-                                        delivery_policy);
+    bool retain_failure_for_debugger, QueueExceptionDeliveryPolicy delivery_policy,
+    bool retain_wave) {
+  return raw_cu().defer_queue_exception(retain_wave ? &raw_wavefront() : nullptr, queue_id,
+                                        process_id, status, clear_debug_stop_on_success,
+                                        retain_failure_for_debugger, delivery_policy);
 }
 
 uint32_t Wavefront::debug_read_sgpr(uint32_t reg) const {
@@ -187,40 +188,12 @@ ComputeUnitCore::ComputeUnitCore(std::string name, const Config &config, GpuMemo
   scalar_mem_pipeline_.set_fault_handler(vm_fault_handler);
   global_mem_pipeline_.set_fault_handler(vm_fault_handler);
   tensor_dma_pipeline_.set_fault_handler(std::move(vm_fault_handler));
-
-  // Participate in the (initially private) device-global GWS store so its waves
-  // are visible to shared wakeups and the quiescence backstop. set_gws_device()
-  // re-registers with a shared store when CUs of one device are wired together.
-  gws_device_->register_compute_unit(this);
 }
 
 ComputeUnitCore::~ComputeUnitCore() {
-  // Drop this CU from whichever GWS store it joined so a shared store does not
-  // retain a dangling pointer after the CU is destroyed.
-  //
-  // ComputeUnitCore is a base class, so this body runs after the derived
-  // subobjects have already been destroyed; the window in which the store still
-  // lists a half-destroyed `this` is nonetheless safe:
-  //   - A shared store's peer-CU scan (escape_ready / wakeups) dereferences only
-  //     the base-class wave_activity_ atomic. Its per-CU residency and park-epoch
-  //     bookkeeping is keyed by the pointer and lives in GwsDevice, not in the CU,
-  //     and the self-CU maintenance that touches wfs_/cycle_counter_ runs on this
-  //     CU's own thread. The store never reads derived state, and wave_activity_
-  //     is still alive here -- the base subobject is torn down only after this
-  //     body returns.
-  //   - unregister_compute_unit() also reconciles THIS CU's still-parked /
-  //     still-resident GWS contributions by scanning its own wfs_ / active_wgs_.
-  //     Those are base-class members (alive during this body) and are read on this
-  //     CU's own thread under the store mutex_, so the self-reconcile is safe here
-  //     too; it stops a CU torn down with GWS waves still parked from leaving the
-  //     shared store's parked/residency bookkeeping inflated.
-  //   - unregister_compute_unit() takes the store mutex_, the same lock every
-  //     peer scan holds, and removes `this` before any base member dies, so no
-  //     later scan can observe a freed CU.
-  // Because unregister and every peer scan serialize on that one mutex_, these
-  // guarantees hold even if a peer CU is mid-scan on another thread: correctness
-  // here does not depend on teardown being quiescent.
-  gws_device_->unregister_compute_unit(this);
+  for (const auto &wave : wfs_)
+    if (wave && wave->state() == WfState::GWS_WAIT)
+      gws_device_->notify_parked_wave_gone(*wave);
 }
 
 template <GpuIsa Isa>
@@ -426,22 +399,29 @@ void ComputeUnitCore::flush_cp_notifications() {
   // notification behind it; draining to empty keeps that from waiting for whatever
   // takes the wave-state lock next.
   for (;;) {
+    bool capacity_changed = false;
+    std::vector<PendingExecutionFailure> execution_failures;
     std::vector<PendingVmFault> faults;
     std::vector<PendingQueueException> exceptions;
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
       if (pending_vm_faults_.empty() && pending_queue_exceptions_.empty() &&
-          pending_wg_completions_.empty())
+          pending_wg_completions_.empty() && !pending_capacity_change_ &&
+          pending_execution_failures_.empty())
         return;
       faults.swap(pending_vm_faults_);
+      execution_failures.swap(pending_execution_failures_);
       exceptions.swap(pending_queue_exceptions_);
       ready.swap(pending_wg_completions_);
+      capacity_changed = std::exchange(pending_capacity_change_, false);
     }
     // The lock is released here, so taking hw_queue_mutex_ below cannot invert
     // against the CP's dispatch path.
     if (!cp_)
       return;
+    for (const auto &failure : execution_failures)
+      cp_->notify_execution_failure(failure.queue_id, failure.process_id, failure.reason);
     for (const PendingVmFault &fault : faults)
       cp_->notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id,
                                     fault.outcome);
@@ -481,6 +461,10 @@ void ComputeUnitCore::flush_cp_notifications() {
     }
     for (const auto &[dispatch_id, wg_id] : ready)
       cp_->notify_wg_complete(dispatch_id, wg_id);
+    // A wave can free enough registers/slots for another workgroup before its
+    // own workgroup retires. Retry only after dropping the wave-state lock.
+    if (capacity_changed && cp_->dispatch_threads() <= 1 && engine())
+      engine()->schedule_event_now(cp_->doorbell_event());
   }
 }
 
@@ -507,14 +491,38 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
   abort_dispatch(wf.dispatch_id());
 }
 
+void ComputeUnitCore::fail_gws_wait(Wavefront &wf, std::string_view reason) {
+  util::Logger::warn(reason, ": process=", wf.process_id(), " queue=", wf.queue_id(),
+                     " dispatch=", wf.dispatch_id(), " cu=", name(), " wave=", wf.wf_id(),
+                     " resource=", wf.gws_wait_rid_, " pc=", std::format("{:#x}", wf.pc),
+                     " gws_wait_limit=", config_.gws_wait_limit);
+  const uint32_t dispatch_id = wf.dispatch_id();
+  const bool pm4_failed = wf.fail_pm4_submission();
+  if (!pm4_failed &&
+      !(execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/false))) {
+    defer_queue_exception(nullptr, wf.queue_id(), wf.process_id(), kAqlQueueWaveAbort,
+                          /*clear_debug_stop_on_success=*/false,
+                          /*retain_failure_for_debugger=*/false,
+                          QueueExceptionDeliveryPolicy::PublishAndCancel);
+  }
+  if (cp_ && engine())
+    pending_execution_failures_.push_back({wf.queue_id(), wf.process_id(), std::string(reason)});
+  abort_dispatch(dispatch_id);
+  if (!cp_ || !engine()) {
+    if (engine())
+      engine()->request_exit(std::string(reason), 1);
+    else if (!pm4_failed)
+      throw std::runtime_error(std::string(reason));
+  }
+}
+
 void ComputeUnitCore::maybe_reset_lds_alloc() {
   if (!has_active_wfs() && !lds_allocation_pinned())
     reset_lds_alloc();
 }
 
 void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
-                                      uint32_t num_named_barriers, uint32_t process_id,
-                                      uint32_t dispatch_total_waves) {
+                                      uint32_t num_named_barriers) {
   // The driver's s_icache_inv rides the launch packet, so it lands once per
   // dispatch, not once per wave: a kernel VA reused by a later dispatch still
   // sees fresh code, while the sibling waves of one dispatch keep filling a
@@ -526,12 +534,6 @@ void ComputeUnitCore::begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint
 
   const uint64_t key = wg_key(dispatch_id, wg_id);
   active_wgs_[key] = wf_count;
-  // Mirror the resident wave count into the device-global GWS store so the GWS
-  // barrier's provable-participant bound is summed across CUs without racing on
-  // peer CU state, and (when the whole-grid size is known) record the dispatch's
-  // participant accounting so the bound and quiescence scan account for waves not
-  // yet admitted (see GwsDevice).
-  gws_device_->add_resident(process_id, dispatch_id, wf_count, dispatch_total_waves);
   if (wf_count <= 1) {
     // Single-wave workgroups are not allocated workgroup or named barriers.
     barrier_wgs_.erase(key);
@@ -738,7 +740,10 @@ void ComputeUnitCore::gws_init(Wavefront &wf, uint32_t rid, uint32_t count) {
 }
 
 void ComputeUnitCore::gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count) {
-  gws_device_->barrier_arrive(*this, wf, rid, count);
+  if (!gws_device_->barrier_arrive(*this, wf, rid, count)) {
+    wf.gws_wait_rid_ = rid;
+    fail_gws_wait(wf, "GWS barrier used before initialization");
+  }
 }
 
 void ComputeUnitCore::gws_sema_v(Wavefront &wf, uint32_t rid) {
@@ -759,6 +764,8 @@ void ComputeUnitCore::gws_sema_release_all(Wavefront &wf, uint32_t rid) {
 
 void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
                                  Wavefront::CpCompletionNotice notice) {
+  if (cp_ && notice == Wavefront::CpCompletionNotice::Send)
+    pending_capacity_change_ = true;
   auto key = wg_key(dispatch_id, wg_id);
   auto group = barrier_wgs_.find(key);
   if (group != barrier_wgs_.end()) {
@@ -779,21 +786,15 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
   }
 
   auto it = active_wgs_.find(key);
-  if (it != active_wgs_.end()) {
-    // One wave of this dispatch retired: drop it from the GWS residency bound.
-    // GWS resource state itself is device-global and persists across dispatches
-    // (see GwsDevice), so only the residency accounting is updated here.
-    gws_device_->remove_resident(dispatch_id, 1);
-    if (--it->second == 0) {
-      active_wgs_.erase(it);
-      barrier_wgs_.erase(key);
-      // Queued rather than sent: notify_wg_complete() takes the CP's
-      // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
-      // takes in the other order when it dispatches. WaveStateGuard delivers it
-      // once the lock is dropped.
-      if (cp_ && notice == Wavefront::CpCompletionNotice::Send)
-        pending_wg_completions_.emplace_back(dispatch_id, wg_id);
-    }
+  if (it != active_wgs_.end() && --it->second == 0) {
+    active_wgs_.erase(it);
+    barrier_wgs_.erase(key);
+    // Queued rather than sent: notify_wg_complete() takes the CP's
+    // hw_queue_mutex_, and this runs under the wave-state lock, which the CP
+    // takes in the other order when it dispatches. WaveStateGuard delivers it
+    // once the lock is dropped.
+    if (cp_ && notice == Wavefront::CpCompletionNotice::Send)
+      pending_wg_completions_.emplace_back(dispatch_id, wg_id);
   }
   // The whole workgroup's per-WG LDS region can be reclaimed once the CU has fully
   // drained and no cluster peer can still multicast into it.
@@ -811,19 +812,8 @@ void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
     if (w && !w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
       free_wavefront_resources(*w);
   }
-  const uint64_t key = wg_key(dispatch_id, wg_id);
-  auto it = active_wgs_.find(key);
-  if (it != active_wgs_.end()) {
-    // Drop the WG's not-yet-retired waves from the GWS residency bound. GWS
-    // resource state is device-global and persists across dispatches. This WG was
-    // committed but never executed and will be re-admitted on retry, so also
-    // un-admit its waves from the participant accounting (unlike a normal retire)
-    // to avoid double-counting and a premature admitted==expected (see GwsDevice).
-    gws_device_->remove_resident(dispatch_id, it->second);
-    gws_device_->remove_admitted(dispatch_id, it->second);
-    active_wgs_.erase(it);
-  }
-  barrier_wgs_.erase(key);
+  active_wgs_.erase(wg_key(dispatch_id, wg_id));
+  barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
   maybe_reset_lds_alloc();
 }
 
@@ -834,19 +824,6 @@ void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
       free_wavefront_resources(*wavefront);
   }
 
-  // Drop only this CU's contribution to the dispatch's device-global GWS
-  // residency bound (peers abort their own share); GWS resource state is
-  // device-global and persists across dispatches (see GwsDevice), so a faulted
-  // dispatch does not reset the device's shared GWS resources.
-  uint32_t resident_here = 0;
-  for (const auto &entry : active_wgs_)
-    if (static_cast<uint32_t>(entry.first >> 32) == dispatch_id)
-      resident_here += entry.second;
-  gws_device_->remove_resident(dispatch_id, resident_here);
-  // A faulted dispatch will never admit its remaining grid, so drop its GWS
-  // participant accounting; otherwise its never-to-arrive waves would keep the
-  // quiescence scan from ever escaping this process (see GwsDevice).
-  gws_device_->notify_dispatch_gone(dispatch_id);
   std::erase_if(active_wgs_, [dispatch_id](const auto &entry) {
     return static_cast<uint32_t>(entry.first >> 32) == dispatch_id;
   });
@@ -1581,14 +1558,42 @@ void ComputeUnitCore::update_wf_states() {
     }
   }
 
-  // GWS per-step maintenance (runs on this CU's own thread, under the wave-state
-  // lock held by step_impl): apply cross-CU wakeups to this CU's own parked waves
-  // (credits/generation left by signals on other CUs), publish this CU's
-  // signalable-wave snapshot, and run the process-wide genuine-deadlock backstop
-  // for this CU's own parked waves. A lock-free fast path makes this a no-op when
-  // nothing is parked anywhere, so no-GWS workloads pay only one atomic load. See
-  // GwsDevice (gws_device.h) for the authoritative policy and thread-safety model.
-  gws_device_->step_maintenance(*this);
+  // Ordinary kernels have no GWS waiters. Avoid an extra wavefront scan on
+  // every step until a synchronization operation actually parks a wave.
+  if (!gws_device_->any_parked()) {
+    gws_step_progress_processes_.clear();
+    return;
+  }
+
+  // Poll real releases before charging the wait budget. Neither quiescence nor
+  // insufficient residency is permission to release a synchronization operation.
+  gws_device_->poll_waits(*this);
+  bool has_waiter = false, has_other_wave = false;
+  for (const auto &wave : wfs_) {
+    if (!wave || wave->is_halted() || wave->debug_paused() || wave->status_halt())
+      continue;
+    if (wave->state() != WfState::GWS_WAIT) {
+      // Workgroup barriers cannot progress while all remaining waves are parked.
+      // In a cooperative grid, sibling waves wait here for wave 0's GWS arrival.
+      has_other_wave |= wave->state() != WfState::BARRIER;
+      continue;
+    }
+    has_waiter = true;
+    // Local progress is visible on the next step even before the quantum batch
+    // is published to peers, so small budgets do not reject co-resident producers.
+    if (std::ranges::find(gws_step_progress_processes_, wave->process_id()) !=
+        gws_step_progress_processes_.end())
+      wave->gws_wait_steps_ = 0;
+    if (config_.gws_wait_limit != 0 && ++wave->gws_wait_steps_ >= config_.gws_wait_limit)
+      fail_gws_wait(*wave, "GWS inactivity limit exceeded");
+  }
+  gws_step_progress_processes_.clear();
+  if (has_waiter && !has_other_wave) {
+    // Return even for unlimited quanta, without shortening a co-resident producer's
+    // quantum. The drivers poll a stalled CU at the normal quantum cadence.
+    gws_wait_yield_requested_ = true;
+    request_functional_yield();
+  }
 }
 
 AsyncInstructionWindow::AsyncInstructionWindow(ComputeUnitCore &cu, Wavefront &wf,
@@ -1862,6 +1867,7 @@ template <bool EnableAsync>
         if (observes_async_instruction_issued_)
           plugin_group_->onAmdgpuAsyncInstructionIssued(active->pc, *inst, *active);
         active->pc += inst_size;
+        record_gws_instruction_progress(active->process_id());
         return;
       }
     }
@@ -2008,6 +2014,7 @@ template <bool EnableAsync>
   // transition rather than a per-ISA mnemonic list. See its use.
   const bool was_in_trap_handler = active->in_trap_handler();
 
+  const uint32_t executing_process = active->process_id();
   const util::Result execution_result = execute_instruction(inst, *active);
 
   if (execution_result.failed()) [[unlikely]] {
@@ -2025,7 +2032,8 @@ template <bool EnableAsync>
       // Notify the queue owner without hiding the simulator's failure status.
       // WaveStateGuard flushes deferred notifications before this step returns,
       // even after request_exit records the terminal engine result.
-      const bool claimed = instruction_failure_handler_ && instruction_failure_handler_(*active);
+      const bool claimed =
+          execution_failure_handler_ && execution_failure_handler_(*active, /*retain_wave=*/true);
       if (auto *sim_engine = this->engine())
         sim_engine->request_exit(failure, /*code=*/1);
       if (claimed)
@@ -2034,6 +2042,8 @@ template <bool EnableAsync>
     active->halt();
     return;
   }
+
+  record_gws_instruction_progress(executing_process);
 
   // A terminating instruction (s_endpgm with no pending waits) halts the wave
   // inside execute_instruction, which frees and resets its slot. Its registers,
@@ -2302,6 +2312,9 @@ template <bool EnableAsync>
         single_step_handler_(*wf);
     }
   }
+
+  if (!gws_progress_batch_active_)
+    publish_gws_instruction_progress();
 
   ++step_count_;
   if constexpr (util::Logger::group_enabled(util::Logger::GROUP_CP)) {

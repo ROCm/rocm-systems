@@ -2568,6 +2568,12 @@ class TestDeriveDsGws:
         assert sem.semantic_class == 'nop'
 
 
+def test_ds_ordered_count_stays_unimplemented():
+    sem = derive_semantics('DS_ORDERED_COUNT', 'ENC_DS')
+    assert sem is not None
+    assert sem.semantic_class == 'nop'
+
+
 @pytest.mark.parametrize('dtype', ['f16', 'bf16'])
 @pytest.mark.parametrize(
     ('prefix', 'encoding', 'semantic_class'),

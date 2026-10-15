@@ -614,9 +614,9 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
-    ds_gws_test.cpp
     lds_test.cpp
     lds_counter_test.cpp
     l2_cache_test.cpp
@@ -3570,6 +3570,7 @@ set(RJ_ENABLE_HIP_TESTS ON)
 find_library(HIP_RUNTIME64 amdhip64 PATHS "${ROCM_PATH}" PATH_SUFFIXES lib)
 set(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX950 FALSE)
+set(RJ_HIP_RUNTIME_SUPPORTS_GFX90A FALSE)
 set(RJ_HIP_RUNTIME_SUPPORTS_GFX942 FALSE)
 
 function(rj_hip_runtime_supports_arch out_var arch)
@@ -3610,6 +3611,7 @@ if(RJ_ENABLE_HIP_TESTS)
         "${RJ_HIP_TEST_ARCH}"
     )
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX950 "gfx950")
+    rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX90A "gfx90a")
     rj_hip_runtime_supports_arch(RJ_HIP_RUNTIME_SUPPORTS_GFX942 "gfx942")
 endif()
 
@@ -3798,6 +3800,17 @@ if(RJ_ENABLE_HIP_TESTS)
         endif()
         rj_add_test(${_test_args})
     endfunction()
+
+    # Cooperative GWS requires a gfx90a guest supported by the installed runtime.
+    if(RJ_HIP_RUNTIME_SUPPORTS_GFX90A)
+        rj_add_hip_test(hip_gws_test ARCH gfx90a)
+        rj_add_hip_test_case(
+            hip_gws_test
+            "HipGwsTest.CooperativeGridPublishesBeforeNeighborReads"
+            CONFIG ${CMAKE_CURRENT_SOURCE_DIR}/../configs/gfx90a_mi210_kmd.json
+            TIMEOUT 60
+        )
+    endif()
 
     if(RJ_HIP_RUNTIME_SUPPORTS_TEST_ARCH)
         rj_add_hip_test(hip_memcpy_test ARCH ${RJ_HIP_TEST_ARCH})

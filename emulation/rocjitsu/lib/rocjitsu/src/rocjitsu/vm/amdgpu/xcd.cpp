@@ -63,20 +63,16 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 }
 
 void Xcd::wire_gws_to_cus() {
-  // Wire every CU the command processor can dispatch to, not just those reached
-  // through shader_engines_: a custom topology can attach CUs directly below the
-  // XCD (config_loader registers them with the CP but under no shader engine), and
-  // those CP-visible CUs must share the one device-global store too or they would
-  // keep a private default and miss cross-CU wakeups / the quiescence backstop.
-  // cp_ is set before this runs in both the full constructor and the config path.
-  // Hand the store to the command processor, which both forwards it to every CU it
-  // dispatches to and keeps it for its own GWS placement bookkeeping (one owner of
-  // the shared-store dependency instead of each site reaching through a CU).
+  // Include CUs attached directly to the CP by custom topologies.
   if (cp_) {
     cp_->set_gws_device(gws_device_);
     return;
   }
   // Standalone-XCD fallback: no command processor, so wire the CUs directly.
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      if (!compute_unit->can_set_gws_device(gws_device_))
+        throw std::logic_error("Cannot wire GWS store with active waves or workgroups");
   for (ShaderEngine *shader_engine : shader_engines_)
     for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
       compute_unit->set_gws_device(gws_device_);
@@ -85,8 +81,19 @@ void Xcd::wire_gws_to_cus() {
 void Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store) {
   if (!store || store == gws_device_)
     return;
+  // Preflight the entire XCD before changing any owner. Topology changes require
+  // external serialization and drained CUs, as for the CP wiring API.
+  for (ShaderEngine *se : shader_engines_)
+    for (ComputeUnitCore *cu : se->compute_units())
+      if (!cu->can_set_gws_device(store))
+        throw std::logic_error("Cannot replace XCD GWS store with active waves or workgroups");
+  if (cp_)
+    cp_->set_gws_device(store);
+  else
+    for (ShaderEngine *se : shader_engines_)
+      for (ComputeUnitCore *cu : se->compute_units())
+        (void)cu->set_gws_device(store);
   gws_device_ = std::move(store);
-  wire_gws_to_cus();
 }
 
 void Xcd::set_l2_cache(L2Cache *l2) {

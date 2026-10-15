@@ -316,7 +316,7 @@ public:
   /// @brief Leave the currently joined named barrier.
   bool barrier_leave();
 
-  /// @brief Seed a Global Wave Sync resource (init count / credits).
+  /// @brief Seed a Global Wave Sync resource's shared barrier/semaphore counter.
   void gws_init(uint32_t rid, uint32_t count);
 
   /// @brief Arrive at a GWS barrier; may park the wave. The resource is process-
@@ -1044,6 +1044,8 @@ public:
     gws_wait_is_barrier_ = false;
     gws_wait_generation_ = 0;
     gws_wait_seq_ = 0;
+    gws_wait_steps_ = 0;
+    gws_wait_progress_ = 0;
     if (memory_wait_scoreboard_)
       memory_wait_scoreboard_->clear();
     wait_counters_ = {};
@@ -1172,6 +1174,9 @@ private:
   /// CUs), so a later P cannot jump an earlier parked one (see GwsDevice). Unused
   /// by barrier waiters (they wake via the release generation).
   uint64_t gws_wait_seq_ = 0;
+  uint64_t gws_wait_progress_ = 0; ///< Last observed process instruction progress.
+  uint32_t gws_wait_steps_ =
+      0; ///< Unpaused CU steps since this process last executed an instruction.
   WfState state_ = WfState::HALTED; ///< Current execution state.
   MemoryWaitShadow memory_wait_shadow_;
   std::unique_ptr<MemoryWaitScoreboard> memory_wait_scoreboard_;

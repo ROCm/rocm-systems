@@ -90,11 +90,15 @@ struct FunctionalQuantumResult {
   bool ran = false;
   bool yielded = false;
   uint64_t iterations = 0;
+  uint64_t retry_delay = 0; ///< Minimum delay before polling a stalled CU again.
+
+  uint64_t next_tick_delay() const { return std::max({uint64_t{1}, iterations, retry_delay}); }
 
   void merge(const FunctionalQuantumResult &other) {
     ran |= other.ran;
     yielded |= other.yielded;
     iterations = std::max(iterations, other.iterations);
+    retry_delay = std::max(retry_delay, other.retry_delay);
   }
 };
 
@@ -142,6 +146,9 @@ public:
     /// Maximum CU step() iterations per functional slice. One step can issue
     /// one instruction for every runnable wavefront resident on the CU.
     uint32_t functional_quantum = kFunctionalQuantum;
+    /// Maximum unpaused CU steps without process instruction progress; zero disables this
+    /// inactivity budget.
+    uint32_t gws_wait_limit = 1'000'000;
     /// Shared VM resources; null preserves direct-construction environment controls.
     std::shared_ptr<matrix_coexecution::ExecutionResources> async_resources = nullptr;
     /// Report premature memory-result accesses by default.
@@ -269,6 +276,8 @@ public:
 
   /// @brief Restore the raw configured functional quantum (0 = unbounded).
   void set_functional_quantum(uint32_t quantum) { config_.functional_quantum = quantum; }
+  /// @brief Set unpaused steps without process instruction progress; zero disables the budget.
+  void set_gws_wait_limit(uint32_t limit) { config_.gws_wait_limit = limit; }
 
   /// @brief Restore wait policies before populating checkpoint wavefront slots.
   void restore_wait_diagnostics(MemoryWaitDiagnostics memory, MemoryWaitDiagnostics xcnt) {
@@ -285,6 +294,23 @@ public:
   /// @returns Whether wavefronts ran and whether one requested an event-loop yield.
   FunctionalQuantumResult run_quantum() {
     const GpuVmAccessBatchGuard vm_access_batch;
+    // Publish progress once per process per quantum, outside the instruction hot path.
+    class ProgressBatch {
+    public:
+      explicit ProgressBatch(ComputeUnitCore &cu)
+          : cu_(cu), nested_(std::exchange(cu.gws_progress_batch_active_, true)) {}
+      ProgressBatch(const ProgressBatch &) = delete;
+      ProgressBatch &operator=(const ProgressBatch &) = delete;
+      ~ProgressBatch() {
+        cu_.gws_progress_batch_active_ = nested_;
+        if (!nested_)
+          cu_.publish_gws_instruction_progress();
+      }
+
+    private:
+      ComputeUnitCore &cu_;
+      bool nested_;
+    } progress_batch{*this};
     // Reuse instruction-fetch snapshots only within this execution quantum.
     // Restore the outer scope on exceptions and nested quantum execution too.
     InstructionVmSnapshot snapshot;
@@ -292,6 +318,7 @@ public:
     ScopedInstructionVmSnapshot scope(&snapshot);
     // A request left by direct step() execution must not shorten this quantum.
     functional_yield_requested_ = false;
+    gws_wait_yield_requested_ = false;
     FunctionalQuantumResult result;
     const uint32_t quantum = debug_active() ? kDebugFunctionalQuantum : functional_quantum();
     for (uint32_t i = 0; i < quantum; ++i) {
@@ -303,6 +330,8 @@ public:
       ++result.iterations;
       if (std::exchange(functional_yield_requested_, false)) {
         result.yielded = true;
+        if (gws_wait_yield_requested_)
+          result.retry_delay = std::min(quantum, kFunctionalQuantum);
         break;
       }
     }
@@ -386,12 +415,13 @@ public:
   using IllegalInstHandler = std::function<bool(Wavefront &wf)>;
   void set_illegal_inst_handler(IllegalInstHandler cb) { illegal_inst_handler_ = std::move(cb); }
 
-  /// @brief Notify a frontend of a simulator instruction support failure.
-  /// @returns True if the frontend holds the wave for queue-error delivery.
+  /// @brief Notify a frontend of a non-architectural execution failure.
+  /// @param retain_wave Whether delivery may retain the wave; false before dispatch abort.
+  /// @returns True if the frontend owns queue-error delivery.
   /// @details The engine retains its nonzero exit status regardless of ownership.
-  using InstructionFailureHandler = std::function<bool(Wavefront &wf)>;
-  void set_instruction_failure_handler(InstructionFailureHandler cb) {
-    instruction_failure_handler_ = std::move(cb);
+  using ExecutionFailureHandler = std::function<bool(Wavefront &wf, bool retain_wave)>;
+  void set_execution_failure_handler(ExecutionFailureHandler cb) {
+    execution_failure_handler_ = std::move(cb);
   }
 
   using MemoryViolationHandler =
@@ -447,25 +477,17 @@ public:
     return *cluster_lds_multicast_engine_;
   }
 
-  /// @brief Inject the device-global GWS store this CU participates in (see
-  /// GwsDevice for the scheduling policy).
-  /// @details Unregisters from the current store and registers with @p device.
-  /// Holding the shared_ptr keeps the store alive past this CU, so the destructor
-  /// can unregister regardless of component teardown order. Passing nullptr
-  /// restores this CU's embedded private default store (standalone use); this is
-  /// the sole injection path.
-  ///
-  /// Only a drained CU may be re-pointed. A GWS resource's phase (barrier
-  /// generation / semaphore credits) lives in the store, not on the wave, so a live
-  /// parked or resident wave cannot carry its rendezvous across stores: migrating it
-  /// would compare its old generation against the destination's unrelated one and
-  /// wake it without its peers arriving. Production wires stores during topology
-  /// construction, before any dispatch, so the CU is empty then. A replacement
-  /// requested while the CU still hosts active waves is therefore rejected (the CU
-  /// keeps its current store) rather than performing an unsafe partial migration;
-  /// callers must drain the CU first.
-  /// @returns true if the store was changed (or was already @p device); false if the
-  /// replacement was rejected because the CU is not drained.
+  /// @brief Whether a drained-topology operation may replace this CU's GWS store.
+  bool can_set_gws_device(const std::shared_ptr<GwsDevice> &device) const {
+    const auto *replacement = device ? device.get() : &default_gws_device_;
+    return replacement == gws_device_ || (!has_active_wfs() && active_wgs_.empty());
+  }
+
+  /// @brief Replace the GWS store while this CU is drained.
+  /// @details The caller serializes topology changes. Shared ownership pins the
+  /// store through CU teardown. A null pointer restores the private default.
+  /// Resource counters and credits cannot migrate with active waves/workgroups.
+  /// @returns True if accepted, including an unchanged store; false if active.
   bool set_gws_device(std::shared_ptr<GwsDevice> device) {
     GwsDevice *replacement = device ? device.get() : &default_gws_device_;
     if (replacement == gws_device_) {
@@ -474,13 +496,11 @@ public:
     }
     if (has_active_wfs() || !active_wgs_.empty()) {
       util::Logger::warn("set_gws_device rejected: CU ", name(),
-                         " still hosts active GWS waves; drain it before re-pointing");
+                         " still hosts active waves or workgroups; drain it before re-pointing");
       return false;
     }
-    gws_device_->unregister_compute_unit(this);
     gws_device_owner_ = std::move(device);
     gws_device_ = replacement;
-    gws_device_->register_compute_unit(this);
     return true;
   }
 
@@ -490,15 +510,8 @@ public:
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
   /// Initializes the refcount so release_wf() can detect WG completion.
-  /// @param process_id Owning process; forwarded to the GWS store so a grid's
-  /// participant accounting is attributed to the right process.
-  /// @param dispatch_total_waves Whole-grid wave count of the dispatch, reported
-  /// identically by every CU/XCD running it. Lets the GWS barrier bound and
-  /// quiescence scan account for waves not yet admitted (see GwsDevice). Pass 0
-  /// (the default, for standalone/test use) to bound GWS only by resident waves.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
-                       uint32_t num_named_barriers = 0, uint32_t process_id = 0,
-                       uint32_t dispatch_total_waves = 0);
+                       uint32_t num_named_barriers = 0);
 
   /// @brief Initialize a named barrier's member count and clear its signals.
   void named_barrier_init(Wavefront &wf, int32_t barrier_id, uint32_t member_count);
@@ -521,7 +534,7 @@ public:
   // GWS hooks called by the generated DS execute bodies. These forward to the
   // device-global GWS store this CU participates in; see GwsDevice (gws_device.h)
   // for the authoritative scheduling policy.
-  /// @brief Seed a GWS resource's barrier count / semaphore credits.
+  /// @brief Seed a GWS resource's shared barrier/semaphore counter.
   void gws_init(Wavefront &wf, uint32_t rid, uint32_t count);
   /// @brief Arrive at a GWS barrier (may park the wave).
   void gws_barrier_arrive(Wavefront &wf, uint32_t rid, uint32_t count);
@@ -1386,6 +1399,8 @@ protected:
 
   /// @brief Cancel local dispatch state and queue one terminal VM fault for CP delivery.
   void handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome outcome);
+  /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
+  void fail_gws_wait(Wavefront &wf, std::string_view reason);
 
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
@@ -1395,6 +1410,7 @@ protected:
   /// @brief Workgroups that finished while the wave-state lock was held.
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
+  bool pending_capacity_change_ = false;
   struct PendingVmFault {
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
@@ -1402,6 +1418,12 @@ protected:
     VmAccessOutcome outcome = VmAccessOutcome::Faulted;
   };
   std::vector<PendingVmFault> pending_vm_faults_;
+  struct PendingExecutionFailure {
+    uint32_t queue_id;
+    uint32_t process_id;
+    std::string reason;
+  };
+  std::vector<PendingExecutionFailure> pending_execution_failures_;
   /// @brief Runtime queue exceptions raised while the wave-state lock was held.
   /// @details Drained before workgroup completions so an error cannot race a
   /// successful completion from a later instruction.
@@ -1442,7 +1464,7 @@ protected:
   SingleStepHandler single_step_handler_;
   WatchpointHandler watchpoint_handler_;
   IllegalInstHandler illegal_inst_handler_;
-  InstructionFailureHandler instruction_failure_handler_;
+  ExecutionFailureHandler execution_failure_handler_;
   MemoryViolationHandler memory_violation_handler_;
   AluExceptionHandler alu_exception_handler_;
   std::atomic<bool> debug_active_{false};
@@ -1495,10 +1517,8 @@ protected:
   /// @details GWS state is device-global in hardware (see GwsDevice), so in
   /// production every CU that can run a dispatch shares one injected store (via
   /// set_gws_device). A standalone CU with no injected store falls back to this
-  /// embedded instance, so single-CU use needs no wiring. The active store reads
-  /// this CU's wfs_ / active_wgs_ / wave activity for shared wakeups and the
-  /// process-wide quiescence backstop, always on this CU's own thread, so
-  /// GwsDevice is a friend.
+  /// embedded instance, so single-CU use needs no wiring. GwsDevice is a friend
+  /// so local polling can update this CU's parked waves under its wave lock.
   GwsDevice default_gws_device_;
   /// @brief Pins an injected shared store so it outlives this CU (see
   /// set_gws_device); null while the CU uses its private fallback.
@@ -1559,10 +1579,33 @@ protected:
   simdojo::Port *req_ = nullptr; ///< Requester port: L2 cache request (structural).
   uint64_t step_count_ = 0;
   bool functional_yield_requested_ = false;
+  bool gws_wait_yield_requested_ = false;
+  bool gws_progress_batch_active_ = false;
+  // Peer CUs observe the quantum batch; local waiters need progress next step,
+  // before that batch is published. The no-waiter fast path drops only local
+  // step history, leaving any accumulated peer progress for the quantum flush.
+  std::vector<uint32_t> gws_progress_processes_;
+  std::vector<uint32_t> gws_step_progress_processes_;
+
+  void record_gws_instruction_progress(uint32_t process_id) {
+    if (!gws_device_->any_parked())
+      return;
+    if (std::ranges::find(gws_progress_processes_, process_id) == gws_progress_processes_.end())
+      gws_progress_processes_.push_back(process_id);
+    if (std::ranges::find(gws_step_progress_processes_, process_id) ==
+        gws_step_progress_processes_.end())
+      gws_step_progress_processes_.push_back(process_id);
+  }
+
+  void publish_gws_instruction_progress() {
+    for (uint32_t process_id : gws_progress_processes_)
+      gws_device_->note_instruction_progress(process_id);
+    gws_progress_processes_.clear();
+  }
 
   friend class CommandProcessor;
   friend class InstructionComputeUnitView;
-  friend class GwsDevice; // Shared GWS store scans this CU's waves for wake/quiescence.
+  friend class GwsDevice; // Shared GWS store polls only this CU's waiters.
   friend class ::rocjitsu::test::ComputeUnitTestAccess;
 };
 
@@ -1653,7 +1696,7 @@ public:
       return false;
     }
     if constexpr (Mode == simdojo::ExecMode::FUNCTIONAL) {
-      last_quantum_executed_ = this->run_quantum().iterations;
+      last_quantum_delay_ = this->run_quantum().next_tick_delay();
     } else {
       /// @todo: Support CLOCKED pipeline cycle.
     }
@@ -1729,7 +1772,8 @@ private:
   // component's published state is observed promptly rather than leaping a full
   // quantum ahead. Note this counts loop iterations, not instructions issued —
   // step() advances even when every wave is WAITCNT/BARRIER-stalled — so a fully
-  // stalled CU still advances by the full quantum. max(1,...) keeps the event
+  // stalled CU still advances by the full quantum. A GWS-only yield explicitly
+  // retains that normal polling interval. max(1,...) keeps the event
   // strictly in the future so re-entries never collapse onto one tick.
   simdojo::Event tick_event_{this, simdojo::EventType::TIMER_CALLBACK,
                              [this](simdojo::Tick now, simdojo::Message *message) {
@@ -1738,7 +1782,7 @@ private:
                                scheduled_tick_ = simdojo::TICK_MAX;
                                if (execute_quantum())
                                  schedule_next_tick(now +
-                                                    std::max<uint64_t>(1, last_quantum_executed_));
+                                                    std::max<uint64_t>(1, last_quantum_delay_));
                              }};
   // Cross-thread debugger resumes first enter this event. Its handler runs on
   // the CU/CP partition and wakes whichever driver currently owns execution.
@@ -1749,7 +1793,7 @@ private:
                                  else
                                    schedule_work();
                                }};
-  uint64_t last_quantum_executed_ = 0;
+  uint64_t last_quantum_delay_ = 0;
   simdojo::Tick scheduled_tick_ = simdojo::TICK_MAX;
   uintptr_t driver_generation_ = 0;
   bool executing_ = false;

@@ -12,6 +12,7 @@
 #include "rocjitsu/vm/amdgpu/compute_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
+#include "rocjitsu/vm/amdgpu/gws_device.h"
 #include "rocjitsu/vm/amdgpu/hwreg.h"
 #include "rocjitsu/vm/amdgpu/sdma_queue_binding_factory.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
@@ -1180,8 +1181,9 @@ void SimulatedKfd::init_command_processors_locked() {
         });
         cu->set_illegal_inst_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_illegal_instruction(wf); });
-        cu->set_instruction_failure_handler(
-            [this](amdgpu::Wavefront &wf) { return on_wave_instruction_failure(wf); });
+        cu->set_execution_failure_handler([this](amdgpu::Wavefront &wf, bool retain_wave) {
+          return on_wave_execution_failure(wf, retain_wave);
+        });
         cu->set_alu_exception_handler(
             [this](amdgpu::Wavefront &wf) { return on_wave_alu_exception(wf); });
         cu->set_memory_violation_handler(
@@ -1816,6 +1818,8 @@ int SimulatedKfd::dispatch_ioctl(KfdProcess &proc, unsigned long request, void *
       return set_xnack_mode_ioctl(arg);
     case AMDKFD_IOC_SET_MEMORY_POLICY:
       return set_memory_policy_ioctl(proc, arg);
+    case AMDKFD_IOC_ALLOC_QUEUE_GWS:
+      return alloc_queue_gws_ioctl(proc, arg);
     case AMDKFD_IOC_SET_CU_MASK:
       return set_cu_mask_ioctl(proc, arg);
     case AMDKFD_IOC_AVAILABLE_MEMORY:
@@ -3096,6 +3100,49 @@ int SimulatedKfd::set_cu_mask_ioctl(KfdProcess &proc, void *arg) {
   gpu->soc->for_each_cp([&](amdgpu::CommandProcessor *cp) {
     cp->set_queue_cu_selection(args->queue_id, proc.process_id(), selected);
   });
+  return 0;
+}
+
+bool SimulatedKfd::debugger_supports_gws(uint32_t gpu_id) const {
+  const auto &info = gpu_infos_[gpu_ordinal(gpu_id)];
+  const uint32_t gc = kmd::gc_ip_version_for_gfx_target_version(info.gfx_target_version);
+  // Advertising 64 GWS resources assumes firmware supporting GWS and its debugger
+  // save/restore. fw_version is an unmodeled topology placeholder, not MEC2 firmware.
+  // Retain the firmware-independent CWSR restriction from kfd_dbg_has_gws_support().
+  return !(gc >= kmd::make_gc_ip_version(11, 0, 0) && gc <= kmd::make_gc_ip_version(11, 0, 3));
+}
+
+int SimulatedKfd::alloc_queue_gws_ioctl(KfdProcess &proc, void *arg) {
+  auto *args = static_cast<kfd_ioctl_alloc_queue_gws_args *>(arg);
+  // Same lock order as debugger attach, making the two admission checks atomic.
+  std::lock_guard session_lock(debug_sessions_mutex_);
+  std::lock_guard lock(proc.alloc_mutex_);
+  auto queue = proc.queue_snapshot_map_.find(args->queue_id);
+  if (queue == proc.queue_snapshot_map_.end())
+    return -EINVAL;
+  auto &info = queue->second;
+  if (info.queue_type != KFD_IOC_QUEUE_TYPE_COMPUTE &&
+      info.queue_type != KFD_IOC_QUEUE_TYPE_COMPUTE_AQL)
+    return -EINVAL;
+  const auto session = debug_sessions_.find(proc.client_pid());
+  if (session != debug_sessions_.end() && session->second.enabled &&
+      !debugger_supports_gws(info.gpu_id))
+    return -EBUSY;
+  args->first_gws = 0;
+  if (args->num_gws == 0) {
+    if (!info.gws_allocated)
+      return -EINVAL;
+    info.gws_allocated = false;
+  } else {
+    // KFD grants the whole namespace to one queue on each process/GPU pair.
+    // GwsDevice documents the instruction model's relaxed ownership checks.
+    for (const auto &[_, other] : proc.queue_snapshot_map_) {
+      if (other.gpu_id == info.gpu_id && other.gws_allocated)
+        return -EBUSY;
+    }
+    info.gws_allocated = true;
+  }
+  args->first_gws = 0;
   return 0;
 }
 
@@ -4582,16 +4629,17 @@ bool SimulatedKfd::notify_debug_event(const std::shared_ptr<KfdProcess> &proc, u
 bool SimulatedKfd::defer_wave_exception_to_runtime(
     amdgpu::Wavefront &wave, uint64_t exception_mask, bool suspend_while_pending,
     bool clear_debug_stop_on_success, bool runtime_already_reserved,
-    bool runtime_failure_debuggable, amdgpu::QueueExceptionDeliveryPolicy delivery_policy) {
+    bool runtime_failure_debuggable, amdgpu::QueueExceptionDeliveryPolicy delivery_policy,
+    bool retain_wave) {
   auto proc = find_process(wave.process_id());
   if (proc && !runtime_already_reserved)
     reserve_runtime_queue_exception(proc, wave.queue_id(), exception_mask);
   wave.set_fatal_exception_pending(true);
   if (suspend_while_pending)
     wave.set_debug_suspended(true);
-  const bool queued = wave.cu().signal_queue_exception(wave.queue_id(), wave.process_id(),
-                                                       exception_mask, clear_debug_stop_on_success,
-                                                       runtime_failure_debuggable, delivery_policy);
+  const bool queued = wave.cu().signal_queue_exception(
+      wave.queue_id(), wave.process_id(), exception_mask, clear_debug_stop_on_success,
+      runtime_failure_debuggable, delivery_policy, retain_wave);
   if (!queued && proc) {
     if (runtime_exception_result_hook_for_testing_)
       runtime_exception_result_hook_for_testing_(false);
@@ -4600,11 +4648,11 @@ bool SimulatedKfd::defer_wave_exception_to_runtime(
   }
   if (!queued && delivery_policy == amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail) {
     if (auto *sim_engine = wave.cu().engine())
-      sim_engine->request_exit("Failed to queue an instruction-rejection notification", /*code=*/1);
+      sim_engine->request_exit("Failed to queue an execution-failure notification", /*code=*/1);
   }
-  // Once a fatal path reaches this helper, the wave is either held here or in
-  // its trap handler until the deferred result is known. The originating
-  // instruction is therefore claimed even if no CP notification can be queued.
+  // The frontend owns the notification even if it cannot be queued. Retained
+  // waves stay held until delivery; callers passing retain_wave=false abort the
+  // dispatch and must not leave a borrowed wave pointer in the notification.
   return true;
 }
 
@@ -4820,7 +4868,7 @@ bool SimulatedKfd::on_wave_illegal_instruction(amdgpu::Wavefront &wave) {
   return true;
 }
 
-bool SimulatedKfd::on_wave_instruction_failure(amdgpu::Wavefront &wave) {
+bool SimulatedKfd::on_wave_execution_failure(amdgpu::Wavefront &wave, bool retain_wave) {
   auto proc = find_process(wave.process_id());
   if (!proc)
     return false;
@@ -4830,18 +4878,21 @@ bool SimulatedKfd::on_wave_instruction_failure(amdgpu::Wavefront &wave) {
     if (queue == proc->queue_snapshot_map_.end() || !queue->second.has_runtime_exception_signal)
       return false;
   }
-  // A simulator capability failure has no architectural wave-stop reason.
+  // A simulator capability failure or GWS timeout has no architectural wave-stop reason.
   // dbgapi cannot surface or forward a queue abort without such a wave stop;
   // giving it ownership would strand the queue. Deliver directly to ROCr even
   // with a debugger attached, preserving TRAPSTS and the debugger stop state.
   // ROCr acknowledges only once per queue and may run an error callback or
   // core dump first. Successful publication transfers ownership without waiting.
-  return defer_wave_exception_to_runtime(wave, KFD_EC_MASK(EC_QUEUE_WAVE_ABORT),
-                                         /*suspend_while_pending=*/true,
-                                         /*clear_debug_stop_on_success=*/false,
-                                         /*runtime_already_reserved=*/false,
-                                         /*runtime_failure_debuggable=*/false,
-                                         amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail);
+  return defer_wave_exception_to_runtime(
+      wave, KFD_EC_MASK(EC_QUEUE_WAVE_ABORT),
+      /*suspend_while_pending=*/retain_wave,
+      /*clear_debug_stop_on_success=*/false,
+      /*runtime_already_reserved=*/false,
+      /*runtime_failure_debuggable=*/false,
+      retain_wave ? amdgpu::QueueExceptionDeliveryPolicy::PublishOrFail
+                  : amdgpu::QueueExceptionDeliveryPolicy::PublishAndCancel,
+      retain_wave);
 }
 
 bool SimulatedKfd::on_wave_memory_violation(amdgpu::Wavefront &wave, uint64_t, bool) {
@@ -5999,6 +6050,13 @@ int SimulatedKfd::debug_trap_ioctl(KfdProcess &caller, void *arg, int *target_me
   case KFD_IOC_DBG_TRAP_ENABLE: {
     if (enabled)
       return -EALREADY; // target process is already debug enabled
+
+    if (target_proc) {
+      std::lock_guard allocation_lock(target_proc->alloc_mutex_);
+      for (const auto &[_, queue] : target_proc->queue_snapshot_map_)
+        if (queue.gws_allocated && !debugger_supports_gws(queue.gpu_id))
+          return -EBUSY;
+    }
 
     const int dbg_fd = static_cast<int>(args->enable.dbg_fd);
     // Validate the notifier before trusting it. In daemon mode the fd was
