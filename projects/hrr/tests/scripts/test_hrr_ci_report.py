@@ -130,48 +130,161 @@ class RenderTest(unittest.TestCase):
             self.assertIn(f"Configure: {result}, so nothing else ran", out.getvalue())
 
 
+class GhApiTest(unittest.TestCase):
+    def test_reads_every_value_across_pages(self):
+        out = subprocess.CompletedProcess([], 0, stdout='{"a": 1}\n{"a": 2}{"a": 3}\n7\n')
+        with mock.patch.object(rpt.subprocess, "run", return_value=out) as run:
+            self.assertEqual(rpt.gh_api("p", ".x[]"), [{"a": 1}, {"a": 2}, {"a": 3}, 7])
+        self.assertEqual(run.call_args.args[0], ["gh", "api", "--paginate", "p", "--jq", ".x[]"])
+
+    def test_empty_output_is_no_values(self):
+        out = subprocess.CompletedProcess([], 0, stdout="\n")
+        with mock.patch.object(rpt.subprocess, "run", return_value=out):
+            self.assertEqual(rpt.gh_api("p", ".x[]"), [])
+
+    def test_unreadable_workflow_id_fails_the_summary(self):
+        with mock.patch.object(rpt, "gh_api", return_value=[]), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = rpt.main(["--repo", "R", "--pass-through", "true", "--head-sha", "abc",
+                           "--run-id", "100"])
+        self.assertEqual(rc, 1)
+        self.assertIn("could not find the HRR CI run that tested abc", out.getvalue())
+
+
 class PassThroughTest(unittest.TestCase):
     """A label run with nothing to run reports the run that tested the
     commit; it must never report greener than that run."""
-    LABEL_ARGS = ["--pass-through", "--upstream-run", "99", "--upstream-attempt", "1",
+    LABEL_ARGS = ["--pass-through", "true", "--head-sha", "abc",
                   "--run-id", "100", "--run-attempt", "1"]
     GREEN = [JOBS[1], JOBS[2], JOBS[5]]  # generated, unit ubuntu, integration gfx94x
+    SUMMARY_OK = {"name": "HRR CI Summary", "conclusion": "success", "html_url": "s0"}
+    SUMMARY_RED = {"name": "HRR CI Summary", "conclusion": "failure", "html_url": "s1"}
+    GREEN = GREEN + [SUMMARY_OK]
+    # What a run whose configure selected nothing lists: its jobs, skipped.
+    LABEL_ONLY = [
+        {"name": "Configure", "conclusion": "success", "html_url": "u0"},
+        {"name": "Generated sources", "conclusion": "skipped", "html_url": "k1"},
+        {"name": "HRR script tests", "conclusion": "skipped", "html_url": "k2"},
+        {"name": "Unit (${{ matrix.os }})", "conclusion": "skipped", "html_url": "k3"},
+        {"name": "GPU", "conclusion": "skipped", "html_url": "k4"},
+        SUMMARY_OK,
+    ]
 
-    def run_main(self, jobs, extra=()):
+    def run_main(self, runs, extra=()):
+        """runs: [(run id, attempt, created_at, jobs[, run_started_at])], as
+        the API lists them."""
+        listing = [{"id": rid, "run_attempt": att, "created_at": at,
+                    "run_started_at": started[0] if started else at, "html_url": f"r{rid}"}
+                   for rid, att, at, _, *started in runs]
+        jobs = {(str(rid), str(att)): j for rid, att, _, j, *_ in runs}
+
+        def gh_api(path, jq):
+            if path == "repos/R/actions/runs/100":
+                return [7]
+            if path.startswith("repos/R/actions/workflows/7/runs?event=pull_request&head_sha=abc&"):
+                return listing
+            rid, att = path.split("/runs/")[1].split("/attempts/")
+            return jobs[(rid, att.split("/")[0])]
+
         tmp = tempfile.TemporaryDirectory()
         self.addCleanup(tmp.cleanup)
-        with mock.patch.object(rpt, "list_jobs", return_value=jobs) as listed, \
+        with mock.patch.object(rpt, "gh_api", side_effect=gh_api), \
                 mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
                 contextlib.redirect_stdout(io.StringIO()) as out:
-            rc = rpt.main(["--results-dir", tmp.name, *self.LABEL_ARGS, *extra])
-        return rc, out.getvalue(), listed
+            rc = rpt.main(["--results-dir", tmp.name, "--repo", "R",
+                           *self.LABEL_ARGS, *extra])
+        return rc, out.getvalue()
 
     def test_delivers_the_earlier_run_jobs(self):
-        rc, text, listed = self.run_main(self.GREEN)
+        rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", self.GREEN)])
         self.assertEqual(rc, 0, text)
-        listed.assert_called_once_with(mock.ANY, "99", "1")
+        self.assertIn("[run 99 attempt 1](r99)", text)
         self.assertIn("| Generated sources | — | [success](c0) |", text)
 
     def test_fails_when_the_earlier_run_failed(self):
-        rc, text, _ = self.run_main(JOBS)  # windows unit failed, gfx950 cancelled
+        rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", JOBS + [self.SUMMARY_RED])])
         self.assertEqual(rc, 1)
         self.assertIn("a label event must not turn it into a pass", text)
 
+    def test_fails_when_only_the_earlier_summary_failed(self):
+        # e.g. a family that never reported: every HRR job is green.
+        jobs = self.GREEN[:-1] + [self.SUMMARY_RED]
+        rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", jobs)])
+        self.assertEqual(rc, 1)
+        self.assertIn("HRR CI Summary is failure", text)
+
+    def test_skips_label_runs_and_takes_the_newest_tested_run(self):
+        rc, text = self.run_main([
+            (98, 1, "2026-10-15T09:00:00Z", self.GREEN),
+            (99, 2, "2026-10-15T10:00:00Z", JOBS + [self.SUMMARY_RED]),  # newest that tested
+            (101, 1, "2026-10-15T11:00:00Z", self.LABEL_ONLY),  # an earlier label run
+            # This run, still in progress, with a green-looking job of its own.
+            (100, 1, "2026-10-15T12:00:00Z", self.GREEN[:-1]),
+        ])
+        self.assertEqual(rc, 1, text)
+        self.assertIn("[run 99 attempt 2](r99)", text)
+
     def test_fails_on_a_job_that_has_not_finished(self):
-        jobs = [{"name": "HRR script tests", "conclusion": "in_progress", "html_url": "u9"}]
-        rc, text, _ = self.run_main(jobs)
+        jobs = [{"name": "HRR script tests", "conclusion": None, "status": "in_progress",
+                 "html_url": "u9"},
+                {"name": "HRR CI Summary", "conclusion": None, "status": "queued"}]
+        rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", jobs)])
         self.assertEqual(rc, 1)
         self.assertIn("is in_progress", text)
 
-    def test_fails_when_no_earlier_run_was_found(self):
-        rc, text, _ = self.run_main(self.GREEN, extra=["--upstream-attempt", ""])
-        self.assertEqual(rc, 1)
-        self.assertIn("no earlier run of HRR CI found", text)
+    def test_fails_when_the_earlier_configure_failed(self):
+        jobs = [{**j, "conclusion": "failure"} if j["name"] == "Configure" else j
+                for j in self.LABEL_ONLY if j["name"] != "HRR CI Summary"] + [self.SUMMARY_RED]
+        rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", jobs)])
+        self.assertEqual(rc, 1, text)
+        self.assertIn("[run 99 attempt 1](r99)", text)
+        self.assertIn("HRR CI Summary is failure", text)
 
-    def test_fails_when_the_earlier_run_has_no_hrr_jobs(self):
-        rc, text, _ = self.run_main([JOBS[0]])  # only Configure matches nothing
+    def test_an_unfinished_configure_has_a_verdict_to_wait_for(self):
+        jobs = [{"name": "Configure", "conclusion": None, "status": "in_progress"},
+                {"name": "HRR CI Summary", "conclusion": None, "status": "queued"}]
+        rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", jobs)])
+        self.assertEqual(rc, 1, text)
+        self.assertIn("[run 99 attempt 1](r99)", text)
+
+    def test_a_rerun_counts_from_its_latest_attempt(self):
+        rc, text = self.run_main([
+            (98, 2, "2026-10-15T09:00:00Z", JOBS + [self.SUMMARY_RED], "2026-10-15T12:00:00Z"),
+            (99, 1, "2026-10-15T10:00:00Z", self.GREEN),
+        ])
+        self.assertEqual(rc, 1, text)
+        self.assertIn("[run 98 attempt 2](r98)", text)
+
+    def test_needs_the_head_sha(self):
+        with self.assertRaises(SystemExit), contextlib.redirect_stderr(io.StringIO()):
+            rpt.main(["--repo", "R", "--pass-through", "true", "--run-id", "100"])
+
+    def test_passes_when_no_run_tested_the_commit(self):
+        # A pull request that touches no HRR path: no run ran an HRR job.
+        rc, text = self.run_main([(99, 1, "2026-10-15T10:00:00Z", self.LABEL_ONLY)])
+        self.assertEqual(rc, 0, text)
+        self.assertIn("nothing to report", text)
+
+    def test_fails_when_the_lookup_fails(self):
+        err = subprocess.CalledProcessError(1, "gh", stderr="HTTP 502")
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(rpt, "gh_api", side_effect=err), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = rpt.main(["--results-dir", tmp.name, "--repo", "R", *self.LABEL_ARGS])
         self.assertEqual(rc, 1)
-        self.assertIn("lists no HRR jobs", text)
+        self.assertIn("HTTP 502", out.getvalue())
+
+    def test_ordinary_run_reports_its_own_jobs(self):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(rpt, "list_jobs", return_value=self.GREEN) as listed, \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()):
+            rc = rpt.main(["--results-dir", tmp.name, "--repo", "R", "--pass-through", "false",
+                           "--run-id", "100", "--run-attempt", "2"])
+        self.assertEqual(rc, 0)
+        listed.assert_called_once_with("R", "100", "2")
 
 
 if __name__ == "__main__":

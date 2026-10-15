@@ -13,6 +13,10 @@ The summary has three parts:
 
 Exits 1 when the configure job did not succeed, any HRR job failed or was
 cancelled, or a results file could not be read.
+
+With --pass-through true (a label run that ran no HRR job) it reports the
+newest other run on --head-sha that has a verdict instead, and exits 1 unless
+that run's HRR jobs and its own summary succeeded, or when it cannot be read.
 """
 
 from __future__ import annotations
@@ -103,37 +107,112 @@ def overall_ok(rows: list[dict], missing: list[str]) -> bool:
     return not missing and not any(r["conclusion"] in BAD_CONCLUSIONS for r in rows)
 
 
-def pass_through_ok(rows: list[dict]) -> tuple[bool, str]:
-    """Verdict on an earlier run's jobs. A job that has not finished or is
-    something other than a plain success is not allowed to count as pass: a
-    label run must never turn a failing HRR CI into a passing one."""
-    if not rows:
-        return False, "the run that tested this commit lists no HRR jobs"
+SUMMARY_JOB = "HRR CI Summary"
+
+
+def tested_commit(jobs: list[dict], rows: list[dict]) -> bool:
+    """A run whose configure selected nothing still lists its HRR jobs, as
+    skipped, and tested nothing. One whose configure failed, or has not
+    finished, skipped them too but has a verdict of its own to report. A run
+    that lists no jobs yet is passed over; its own summary comes later and is
+    the newer check."""
+    configure = next((j for j in jobs if j.get("name") == "Configure"), {})
+    if (configure.get("conclusion") or configure.get("status")) not in (None, "success", "skipped"):
+        return True
+    return any(r["conclusion"] != "skipped" for r in rows)
+
+
+def pass_through_ok(rows: list[dict], summary_conclusion: str) -> tuple[bool, str]:
+    """Verdict on an earlier run. Its own summary decides, since that is the
+    check a label run would otherwise hide, and every HRR job must also have
+    finished without failing: a label run must never turn a failing HRR CI
+    into a passing one."""
     for row in rows:
         if row["conclusion"] not in ("success", "skipped", "neutral"):
             return False, f"{row['kind']} {row['name'] or row['conclusion']} is {row['conclusion']}"
+    if summary_conclusion != "success":
+        return False, f"{SUMMARY_JOB} is {summary_conclusion or 'missing'}"
     return True, ""
 
 
-def list_jobs(repo: str, run_id: str, attempt: str) -> list[dict]:
+def gh_api(path: str, jq: str) -> list:
+    """The values `gh api --paginate --jq` prints for path, one per jq result."""
     out = subprocess.run(
-        [
-            "gh", "api", "--paginate",
-            f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs",
-            "--jq", ".jobs[]",
-        ],
+        ["gh", "api", "--paginate", path, "--jq", jq],
         check=True, capture_output=True, text=True,
     ).stdout
     decoder = json.JSONDecoder()
-    jobs, pos = [], 0
+    values, pos = [], 0
     while pos < len(out):
         while pos < len(out) and out[pos].isspace():
             pos += 1
         if pos >= len(out):
             break
-        job, pos = decoder.raw_decode(out, pos)
-        jobs.append(job)
-    return jobs
+        value, pos = decoder.raw_decode(out, pos)
+        values.append(value)
+    return values
+
+
+def list_jobs(repo: str, run_id: str, attempt: str) -> list[dict]:
+    return gh_api(f"repos/{repo}/actions/runs/{run_id}/attempts/{attempt}/jobs", ".jobs[]")
+
+
+def find_tested_run(repo: str, run_id: str, head_sha: str) -> tuple[dict, list[dict], str] | None:
+    """The newest other pull_request run of this workflow on head_sha that
+    tested it, with its HRR jobs and its summary's conclusion. Its latest
+    attempt counts, as it does for the checks GitHub shows. Label runs that
+    ran nothing themselves are passed over."""
+    [workflow_id] = gh_api(f"repos/{repo}/actions/runs/{run_id}", ".workflow_id")
+    runs = gh_api(
+        f"repos/{repo}/actions/workflows/{workflow_id}/runs"
+        f"?event=pull_request&head_sha={head_sha}&per_page=100",
+        ".workflow_runs[]",
+    )
+    runs = [r for r in runs if str(r["id"]) != str(run_id)]
+    # A re-run keeps created_at; run_started_at moves with the latest attempt,
+    # whose check runs are the newest on the commit.
+    runs.sort(key=lambda r: r.get("run_started_at") or r["created_at"], reverse=True)
+    for run in runs:
+        jobs = list_jobs(repo, str(run["id"]), str(run["run_attempt"]))
+        rows = classify_jobs(jobs)
+        if tested_commit(jobs, rows):
+            summary = next((j for j in jobs if j.get("name") == SUMMARY_JOB), {})
+            return run, rows, summary.get("conclusion") or summary.get("status") or ""
+    return None
+
+
+def pass_through(repo: str, run_id: str, head_sha: str) -> int:
+    """Summary for a label run that ran no HRR job: the verdict of the run
+    that tested the commit, and never greener than it. Passes when no run
+    tested the commit, since there is then no failure to hide. Fails while
+    that run is still in progress; its own summary, written later, is then
+    the newer check."""
+    try:
+        found = find_tested_run(repo, run_id, head_sha)
+    except (subprocess.CalledProcessError, ValueError) as e:
+        detail = (getattr(e, "stderr", "") or "").strip() or str(e)
+        print(f"::error::could not find the HRR CI run that tested {head_sha}: {detail}")
+        return 1
+    if found is None:
+        print(f"No earlier HRR CI run ran HRR jobs on {head_sha}; nothing to report.")
+        return 0
+    run, rows, summary_conclusion = found
+    markdown = (
+        f"## HRR CI\n\n- This label changes nothing that runs; the verdict is that of "
+        f"[run {run['id']} attempt {run['run_attempt']}]({run.get('html_url', '')}), "
+        f"which tested this commit.\n\n"
+    ) + render_jobs(rows, [])
+    sys.stdout.write(markdown)
+    summary = os.environ.get("GITHUB_STEP_SUMMARY")
+    if summary:
+        with open(summary, "a", encoding="utf-8") as out:
+            out.write(markdown)
+    ok, why = pass_through_ok(rows, summary_conclusion)
+    if not ok:
+        print(f"::error::HRR CI on this commit reported {why}; "
+              f"a label event must not turn it into a pass")
+        return 1
+    return 0
 
 
 def main(argv: list[str] | None = None) -> int:
@@ -148,11 +227,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     parser.add_argument("--run-attempt", default=os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
-    parser.add_argument("--pass-through", action="store_true",
-                        help="deliver the verdict of the run that tested this commit")
-    parser.add_argument("--upstream-run", default="",
-                        help="that run's id; empty when no earlier run was found")
-    parser.add_argument("--upstream-attempt", default="")
+    parser.add_argument("--pass-through", choices=("true", "false"), default="false",
+                        help="true: report the earlier run that tested --head-sha instead")
+    # Not GITHUB_SHA: on a pull request that is the merge commit, which no
+    # earlier run is listed under.
+    parser.add_argument("--head-sha", default="")
     args = parser.parse_args(argv)
 
     run_gpu = args.run_gpu == "true"
@@ -162,33 +241,19 @@ def main(argv: list[str] | None = None) -> int:
     if args.base_json and args.base_json.is_file():
         base = json.loads(args.base_json.read_text())
 
-    job_run, job_attempt, exiting = args.run_id, args.run_attempt, False
-    if args.pass_through:
-        job_run = args.upstream_run or args.run_id
-        job_attempt = args.upstream_attempt
-        if not job_attempt:
-            # Nothing before this run, or the lookup failed: leave with a red
-            # summary, which a later re-run resolves, rather than green.
-            print(f"::error::no earlier run of HRR CI found for this commit; "
-                  f"a label event cannot verify it, so this summary fails for run {args.run_id}")
-            return 1
-        exiting = True
+    if args.pass_through == "true":
+        if not args.head_sha:
+            parser.error("--pass-through true needs --head-sha, the pull request head")
+        return pass_through(args.repo, args.run_id, args.head_sha)
 
     try:
-        jobs = list_jobs(args.repo, job_run, job_attempt)
+        jobs = list_jobs(args.repo, args.run_id, args.run_attempt)
     except subprocess.CalledProcessError as e:
         detail = (e.stderr or "").strip() or f"gh api exited {e.returncode}"
-        print(f"::error::could not list the jobs of run {job_run}: {detail}")
+        print(f"::error::could not list the jobs of run {args.run_id}: {detail}")
         return 1
     rows = classify_jobs(jobs)
     missing = missing_families(families, rows)
-
-    if exiting:
-        ok, why = pass_through_ok(rows)
-        if not ok:
-            print(f"::error::HRR CI on this commit reported {why}; "
-                  f"a label event must not turn it into a pass")
-            return 1
 
     configured = args.configure_result == "success"
     markdown = render_header(args.reason, run_gpu, families, base, args.configure_result)

@@ -409,21 +409,16 @@ class LabelEventTest(unittest.TestCase):
         # And it answers with an actual verdict, never a skip of its own.
         self.assertNotIn("needs.configure.result != 'success' || needs.configure.outputs.run_cpu == 'true' ||",
                          summary)
-        self.assertIn("--pass-through", summary)
-        self.assertIn("--upstream-run", summary)
-        # The lookup step feeds --upstream-run and only runs for a label
-        # run that configured soly nothing; a run that did fetch its verdict
-        # failing is what closes the hole, so the fetch may not be fatal.
-        lookup = summary[summary.index("Find the run this commit was actually tested by"):]
-        lookup = lookup[:lookup.index("- name: Summarize")]
-        self.assertIn("steps.upstream.outputs.run_id", summary)
-        self.assertIn("run_cpu == 'false'", lookup)
-        self.assertIn("run_gpu == 'false'", lookup)
-        self.assertIn("continue-on-error: true", lookup)
-        self.assertIn("run_attempt == 1", lookup)
-        self.assertIn("head_sha == env.GITHUB_SHA", lookup)
-        # No earlier run found -> empty outputs -> the report exits 1.
-        self.assertIn("if [ -n", lookup)
+        # Only a label run that configured nothing passes the verdict through;
+        # every other run reports its own jobs.
+        step = summary[summary.index("PASS_THROUGH:"):summary.index("run: >-")]
+        self.assertIn("github.event.action == 'labeled'", step)
+        self.assertIn("needs.configure.result == 'success'", step)
+        self.assertIn("run_cpu == 'false'", step)
+        self.assertIn("run_gpu == 'false'", step)
+        self.assertIn('--pass-through "${PASS_THROUGH}"', summary)
+        # The runs API keys a run by the pull request head, not the merge commit.
+        self.assertIn("github.event.pull_request.head.sha", summary)
 
     def test_concurrency_group_makes_the_same_test(self):
         text = self.WORKFLOW.read_text(encoding="utf-8")
