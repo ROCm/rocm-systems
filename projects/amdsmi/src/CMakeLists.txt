@@ -147,7 +147,7 @@ else()
 endif()
 set(AMDCUID_HINT_DIR "${_amdsmi_rocm_dir}/core" CACHE PATH "Additional prefix searched for the amdcuid CMake package")
 unset(_amdsmi_rocm_dir)
-set(AMDSMI_AMDCUID_MIN_VERSION 2.1 CACHE INTERNAL "Oldest installed libamdcuid amd-smi builds against")
+set(AMDSMI_AMDCUID_MIN_VERSION 2.2 CACHE INTERNAL "Oldest installed libamdcuid amd-smi builds against")
 
 # Build the monorepo sibling when no installed package is found, so every
 # packaging channel ships CUID without a separate libamdcuid install.
@@ -173,8 +173,8 @@ if(_amdsmi_cuid_request STREQUAL "OFF")
 else()
     # An installed package wins, so a distribution that ships libamdcuid
     # separately gets the one it shipped rather than a second copy built here.
-    # 2.1 gives every component and partition a temporary CUID; an older
-    # install is passed over in favour of the in-tree sources.
+    # 2.2 takes GPUs from the driver's cuid_unit_id and cuid_primary; an
+    # older install is passed over in favour of the in-tree sources.
     find_package(amdcuid ${AMDSMI_AMDCUID_MIN_VERSION} CONFIG QUIET HINTS "${AMDCUID_HINT_DIR}")
 
     if(NOT amdcuid_FOUND AND EXISTS "${AMDCUID_SOURCE_DIR}/CMakeLists.txt")
