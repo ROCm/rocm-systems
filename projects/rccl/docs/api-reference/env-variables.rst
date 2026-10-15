@@ -348,27 +348,17 @@ in the following table.
         | ``1``: Enabled.
 
     * - | ``NCCL_GIN_MLOPART``
-        | Allows GPU-initiated networking (GIN) on a communicator that contains
-          a rank running on a GPU partition. An MI300X CPX partition is exposed
-          as PCI function ``.1`` through ``.7`` of the physical device, and
-          RCCL marks every such rank as partitioned; without this variable one
-          partitioned rank turns GIN off for the whole communicator. Doing so
-          can also clear symmetric memory support, which sends
-          ``ncclCommWindowRegister`` down a non-symmetric path. A partition
-          reaches xGMI and the network over the physical device's paths, so GIN
-          is as available to a partition as it is to the whole GPU. This
-          mirrors ``NCCL_NET_GDR_MLOPART``, which already lets a partition keep
-          GDR. See :ref:`device-api-gin` and :ref:`nps4_cpx_mi300_rccl`.
-        | The default is scoped to the shape this was validated on, a single
-          node. Past one node, admitting a partition also reaches the
-          hierarchical Copy Engine path, which has not been validated on
-          partitioned hardware; set ``1`` to opt in.
-      - | Unset: Allow GIN on partitions on a single-node communicator, and
-          disable GIN on a partitioned communicator spanning several nodes
-          (default). The latter is reported through ``NCCL_DEBUG=INFO``.
+        | Allows GPU-initiated networking (GIN) on a communicator that includes
+          a rank on a GPU partition. Without this variable, one partitioned
+          rank turns GIN off for the whole communicator. The default allows
+          partitions on a single-node communicator only; set ``1`` to allow
+          them across nodes. See :ref:`device-api-gin` and
+          :ref:`nps4_cpx_mi300_rccl`.
+      - | Unset: Allow GIN on partitions on a single-node communicator; disable
+          GIN on a partitioned communicator spanning several nodes (default).
+          The latter is reported through ``NCCL_DEBUG=INFO``.
         | ``1``: Allow GIN on partitions on any number of nodes.
-        | ``0``: Disable GIN whenever any rank of the communicator runs on a
-          partition, restoring the behavior from before this variable existed.
+        | ``0``: Disable GIN whenever any rank runs on a partition.
         | A communicator with no partitioned rank is unaffected by any value.
 
     * - | ``NCCL_SOCKET_IFNAME``
