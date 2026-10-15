@@ -5,10 +5,17 @@
 
 import os
 from pathlib import Path
+import shutil
 import subprocess
 import sys
 
 import pytest
+
+from amdisa.codegen.dbt.rule_gen import (
+    emit_matrix_conversions_header,
+    generate_catalog_matrix_rules,
+    generate_matrix_conversions,
+)
 
 _REPO = Path(__file__).resolve().parents[6]
 _ROCJITSU = _REPO / 'emulation' / 'rocjitsu'
@@ -20,6 +27,7 @@ _MRISA = Path(
 @pytest.mark.parametrize('output_option', ['--dbt-output', '--isa-output'])
 @pytest.mark.parametrize('existing_header', [False, True], ids=['missing', 'stale'])
 def test_dbt_cli_regenerates_matrix_header(tmp_path, output_option, existing_header):
+    shutil.copyfile(_ROCJITSU / '.clang-format', tmp_path / '.clang-format')
     output = tmp_path / 'generated'
     header = output / 'matrix_conversions.h'
     if existing_header:
@@ -49,9 +57,61 @@ def test_dbt_cli_regenerates_matrix_header(tmp_path, output_option, existing_hea
     checked_in = (
         _ROCJITSU / 'lib/rocjitsu/src/rocjitsu/code/dbt/generated/matrix_conversions.h'
     )
-    # The CLI emits unformatted C++; the whole-tree helper runs clang-format.
     # The committed header is the compatibility oracle for the catalog's
     # complete contents, including the derived lane permutation values.
-    assert ''.join(header.read_text(encoding='utf-8').split()) == ''.join(
-        checked_in.read_text(encoding='utf-8').split()
+    if shutil.which('clang-format') is not None:
+        assert header.read_bytes() == checked_in.read_bytes()
+    else:
+        # The output helper leaves formatting to the caller without clang-format.
+        assert ''.join(header.read_text(encoding='utf-8').split()) == ''.join(
+            checked_in.read_text(encoding='utf-8').split()
+        )
+
+
+def test_matrix_output_creates_directory_without_formatter(tmp_path, monkeypatch):
+    monkeypatch.setenv('PATH', '')
+    output = tmp_path / 'nested' / 'generated'
+    header = generate_matrix_conversions(output)
+    assert header == output / 'matrix_conversions.h'
+    assert header.read_text(encoding='utf-8') == emit_matrix_conversions_header(
+        generate_catalog_matrix_rules()
     )
+
+
+def test_matrix_output_matches_tracked_formatting(tmp_path):
+    if shutil.which('clang-format') is None:
+        pytest.skip('clang-format is unavailable')
+    shutil.copyfile(_ROCJITSU / '.clang-format', tmp_path / '.clang-format')
+    output = tmp_path / 'nested' / 'generated'
+    header = generate_matrix_conversions(output)
+    checked_in = (
+        _ROCJITSU / 'lib/rocjitsu/src/rocjitsu/code/dbt/generated/matrix_conversions.h'
+    )
+    assert header.read_bytes() == checked_in.read_bytes()
+    header.write_text('// stale output must be replaced\n', encoding='utf-8')
+    generate_matrix_conversions(output)
+    assert header.read_bytes() == checked_in.read_bytes()
+
+
+def test_emitted_matrix_header_compiles_standalone(tmp_path):
+    compiler = shutil.which('clang++') or shutil.which('c++')
+    if compiler is None:
+        pytest.skip('C++ compiler is unavailable')
+    header = tmp_path / 'matrix_conversions.h'
+    header.write_text(
+        emit_matrix_conversions_header(generate_catalog_matrix_rules()),
+        encoding='utf-8',
+    )
+    source = tmp_path / 'matrix_conversions.cpp'
+    source.write_text(
+        '#include "matrix_conversions.h"\n'
+        'static_assert(rocjitsu::kMatrixConversionCount == 4);\n',
+        encoding='utf-8',
+    )
+    result = subprocess.run(
+        [compiler, '-std=c++20', '-pedantic-errors', '-fsyntax-only', str(source)],
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    assert result.returncode == 0, result.stdout + result.stderr
