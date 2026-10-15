@@ -15,7 +15,7 @@
                     "error_message": "--gpu=busy collected no device_busy_gfx samples",
                     "expected_result": 0,
                     "query": "SELECT COUNT(*) as count FROM {table_name} event JOIN rocpd_info_pmc info ON event.pmc_id = info.id WHERE info.name = 'device_busy_gfx'",
-                    "requires": "busy"
+                    "requires": "gfx_activity"
                 },
                 {
                     "comparison": "equals",

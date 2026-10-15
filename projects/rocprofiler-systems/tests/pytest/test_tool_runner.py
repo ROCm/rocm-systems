@@ -10,6 +10,7 @@ argparse env handling, or conflict detection.
 
 from __future__ import annotations
 import json
+from pathlib import Path
 import pytest
 from conftest import RocprofsysTest
 
@@ -706,3 +707,245 @@ class TestDeviceSamplingArtifacts(RocprofsysTest):
         assert (
             b"GFX Busy" in trace
         ), f"-D trace at {result.perfetto_file} has no GPU device counters"
+
+
+# ============================================================================
+# Backend -I / -E flags: env on rocprof-sys-run, GPU artifacts on
+# rocprof-sys-sample. These share the same CLI/backend parsing path tested
+# above, so the env-mapping half runs on the cheap rocprof-sys-run + ls path;
+# only the GPU-artifact half needs a real transpose workload.
+# ============================================================================
+
+RUN_TARGET = "rocprof-sys-run"
+VERBOSE_LS = ["-v", "2", "--", "ls"]
+
+_LOCKS_ON = {
+    "ROCPROFSYS_TRACE_THREAD_LOCKS": "ON",
+    "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "ON",
+    "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "ON",
+}
+
+_INCLUDE_ALL_OFF = {
+    "ROCPROFSYS_USE_MPIP": "OFF",
+    "ROCPROFSYS_USE_OMPT": "OFF",
+    "ROCPROFSYS_USE_KOKKOSP": "OFF",
+    "ROCPROFSYS_USE_RCCLP": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_LOCKS": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_RW_LOCKS": "OFF",
+    "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS": "OFF",
+}
+
+BACKEND_ENV_CASES = [
+    pytest.param(
+        ["-I", "all"],
+        [
+            "ROCPROFSYS_USE_MPIP=true",
+            "ROCPROFSYS_USE_OMPT=true",
+            "ROCPROFSYS_USE_KOKKOSP=true",
+            "ROCPROFSYS_USE_RCCLP=true",
+            "ROCPROFSYS_TRACE_THREAD_LOCKS=true",
+            "ROCPROFSYS_TRACE_THREAD_RW_LOCKS=true",
+            "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=true",
+        ],
+        _INCLUDE_ALL_OFF,
+        marks=pytest.mark.mpi,
+        id="include-all",
+    ),
+    pytest.param(
+        ["-I", "mpip"],
+        ["ROCPROFSYS_USE_MPIP=true"],
+        {"ROCPROFSYS_USE_MPIP": "OFF"},
+        marks=pytest.mark.mpi,
+        id="mpip",
+    ),
+    pytest.param(
+        ["-I", "ompt"],
+        ["ROCPROFSYS_USE_OMPT=true"],
+        {"ROCPROFSYS_USE_OMPT": "OFF"},
+        marks=pytest.mark.backend_include_ompt,
+        id="ompt",
+    ),
+    pytest.param(
+        ["-I", "kokkosp"],
+        ["ROCPROFSYS_USE_KOKKOSP=true"],
+        {"ROCPROFSYS_USE_KOKKOSP": "OFF"},
+        id="kokkosp",
+    ),
+    pytest.param(
+        ["-I", "rcclp"],
+        ["ROCPROFSYS_USE_RCCLP=true"],
+        {"ROCPROFSYS_USE_RCCLP": "OFF"},
+        # argparse.cpp drops 'rcclp' from -I/-E choices when gpu::device_count()==0
+        marks=[pytest.mark.mpi, pytest.mark.gpu],
+        id="rcclp",
+    ),
+    pytest.param(
+        ["-I", "mpip", "-I", "ompt"],
+        ["ROCPROFSYS_USE_MPIP=true", "ROCPROFSYS_USE_OMPT=true"],
+        {"ROCPROFSYS_USE_MPIP": "OFF", "ROCPROFSYS_USE_OMPT": "OFF"},
+        marks=[pytest.mark.mpi, pytest.mark.backend_include_ompt],
+        id="mpip-ompt",
+    ),
+    pytest.param(
+        ["-E", "mutex-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_LOCKS=false"],
+        _LOCKS_ON,
+        id="mutex-locks",
+    ),
+    pytest.param(
+        ["-E", "rw-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_RW_LOCKS=false"],
+        _LOCKS_ON,
+        id="rw-locks",
+    ),
+    pytest.param(
+        ["-E", "spin-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=false"],
+        _LOCKS_ON,
+        id="spin-locks",
+    ),
+    pytest.param(
+        ["-E", "mutex-locks", "rw-locks", "spin-locks"],
+        [
+            "ROCPROFSYS_TRACE_THREAD_LOCKS=false",
+            "ROCPROFSYS_TRACE_THREAD_RW_LOCKS=false",
+            "ROCPROFSYS_TRACE_THREAD_SPIN_LOCKS=false",
+        ],
+        _LOCKS_ON,
+        id="all-locks",
+    ),
+]
+
+BACKEND_GPU_ARTIFACT_CASES = [
+    pytest.param(
+        ["-I", "amd-smi"],
+        ["ROCPROFSYS_USE_AMD_SMI=true"],
+        {"ROCPROFSYS_USE_AMD_SMI": "OFF"},
+        id="include-amd-smi",
+    ),
+    pytest.param(
+        ["-E", "amd-smi"],
+        ["ROCPROFSYS_USE_AMD_SMI=false"],
+        {"ROCPROFSYS_USE_AMD_SMI": "ON"},
+        id="exclude-amd-smi",
+    ),
+    pytest.param(
+        ["-E", "mutex-locks"],
+        ["ROCPROFSYS_TRACE_THREAD_LOCKS=false"],
+        _LOCKS_ON,
+        id="mutex-locks",
+    ),
+]
+
+
+_ROCM_KERNEL_ARGS = ["--rocm=hip,kernel"]
+_PERFETTO_HIP = ["hip_runtime_api"]
+
+
+def _backend_rocpd_rules(
+    *,
+    validation_rules_dir: Path,
+    transpose_baseline_rules: list[Path],
+    pass_regex: list[str],
+) -> list[Path]:
+    files = [*transpose_baseline_rules]
+    amd_smi_disabled = any("ROCPROFSYS_USE_AMD_SMI=false" in p for p in pass_regex)
+    if not amd_smi_disabled:
+        files.append(validation_rules_dir / "transpose" / "amd-smi-rules.json")
+    return files
+
+
+@pytest.mark.timeout(60)
+@pytest.mark.sys_run
+@pytest.mark.backend_flags
+@pytest.mark.class_name("backend-flags-env")
+class TestBackendFlagsEnv(RocprofsysTest):
+    @pytest.mark.parametrize("flag_args, pass_regex, seed_env", BACKEND_ENV_CASES)
+    def test_on_ls(self, domain_backend_flag_env, flag_args, pass_regex, seed_env):
+        env = {**domain_backend_flag_env, **(seed_env or {})}
+        result = self.run_test(
+            "baseline",
+            target=RUN_TARGET,
+            env=env,
+            run_args=[*flag_args, *VERBOSE_LS],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(result, pass_regex=pass_regex)
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.gpu
+@pytest.mark.hip
+@pytest.mark.transpose
+@pytest.mark.sampling
+@pytest.mark.backend_flags
+@pytest.mark.rocpd("domain_backend_flag_env")
+@pytest.mark.class_name("backend-flags-artifacts")
+class TestBackendFlagsGpuArtifacts(RocprofsysTest):
+    @pytest.mark.parametrize(
+        "flag_args, pass_regex, seed_env", BACKEND_GPU_ARTIFACT_CASES
+    )
+    def test_on_transpose(
+        self,
+        domain_backend_flag_env,
+        validation_rules_dir,
+        transpose_baseline_rules,
+        flag_args,
+        pass_regex,
+        seed_env,
+    ):
+        env = {**domain_backend_flag_env, **(seed_env or {})}
+        result = self.run_transpose_sample(env, [*flag_args, *_ROCM_KERNEL_ARGS])
+        self.assert_regex(result, pass_regex=pass_regex)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto HIP API",
+            categories=_PERFETTO_HIP,
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=_backend_rocpd_rules(
+                validation_rules_dir=validation_rules_dir,
+                transpose_baseline_rules=transpose_baseline_rules,
+                pass_regex=pass_regex,
+            ),
+        )
+
+
+@pytest.mark.timeout(180)
+@pytest.mark.gpu
+@pytest.mark.hip
+@pytest.mark.transpose
+@pytest.mark.sys_run
+@pytest.mark.backend_flags
+@pytest.mark.rocpd("domain_backend_flag_env")
+@pytest.mark.class_name("backend-flags-artifacts-run")
+class TestBackendFlagsGpuArtifactsViaRun(RocprofsysTest):
+    """One representative case proving the backend -I amd-smi GPU-artifact
+    check also holds via rocprof-sys-run, not just rocprof-sys-sample."""
+
+    def test_include_amd_smi_on_transpose(
+        self,
+        domain_backend_flag_env,
+        validation_rules_dir,
+        transpose_baseline_rules,
+    ):
+        pass_regex = ["ROCPROFSYS_USE_AMD_SMI=true"]
+        env = {**domain_backend_flag_env, "ROCPROFSYS_USE_AMD_SMI": "OFF"}
+        result = self.run_transpose(env, ["-I", "amd-smi", *_ROCM_KERNEL_ARGS])
+        self.assert_regex(result, pass_regex=pass_regex)
+        self.assert_perfetto(
+            result,
+            subtest_name="Perfetto HIP API",
+            categories=_PERFETTO_HIP,
+        )
+        self.assert_rocpd(
+            result,
+            subtest_name="RocPD validation",
+            rules_files=_backend_rocpd_rules(
+                validation_rules_dir=validation_rules_dir,
+                transpose_baseline_rules=transpose_baseline_rules,
+                pass_regex=pass_regex,
+            ),
+        )

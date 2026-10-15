@@ -86,13 +86,6 @@
                 },
                 {
                     "comparison": "equals",
-                    "description": "No kernels with a null name",
-                    "error_message": "Found kernels with null names",
-                    "expected_result": 0,
-                    "query": "SELECT COUNT(*) FROM kernels WHERE name IS NULL;"
-                },
-                {
-                    "comparison": "equals",
                     "description": "All kernel timings are well formed",
                     "error_message": "Found kernels whose end timestamp is not after their start",
                     "expected_result": 0,

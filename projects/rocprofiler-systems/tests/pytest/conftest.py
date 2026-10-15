@@ -2408,6 +2408,21 @@ class RocprofsysTest:
             check_target_arch=True,
         )
 
+    def run_transpose(self, env: dict[str, str], run_flag_args: list[str]) -> object:
+        """Run the transpose HIP workload via rocprof-sys-run.
+
+        Shared by test_domain_flags.py / test_backend_flags.py for
+        rocprof-sys-run artifact-parity coverage of run_transpose_sample.
+        """
+        return self.run_test(
+            "sys_run",
+            target="transpose",
+            env=env,
+            sys_run_args=[*run_flag_args, *DOMAIN_BACKEND_SAMPLING_VERBOSE_ARGS],
+            run_args=DOMAIN_BACKEND_TRANSPOSE_ARGS,
+            check_target_arch=True,
+        )
+
 
 # ============================================================================
 # Test run and assertion fixtures

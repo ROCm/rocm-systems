@@ -80,6 +80,12 @@ def rocpd_env() -> dict[str, str]:
     return {}
 
 
+@pytest.fixture
+def mpi_rocpd_rules(validation_rules_dir: Path) -> list[Path]:
+    """Validation rules for MPI ROCpd database checks."""
+    return [validation_rules_dir / "mpi" / "validation-rules.json"]
+
+
 # =============================================================================
 # Tests
 # =============================================================================
@@ -342,7 +348,7 @@ class TestRankFilter(RocprofsysTest):
 class TestRankFilterSample(RocprofsysTest):
     """Smoke test: rank-filter file output via rocprof-sys-sample + MPI."""
 
-    def test_output_range(self, rocpd_env):
+    def test_output_range(self, rocpd_env, mpi_rocpd_rules):
         result = self.run_test(
             "sampling",
             TARGET,
@@ -360,3 +366,4 @@ class TestRankFilterSample(RocprofsysTest):
             ranks_with_output=[0, 1],
             ranks_without_output=[2],
         )
+        self.assert_rocpd(result, rules_files=mpi_rocpd_rules)
