@@ -431,20 +431,26 @@ const char* NicTypeStr(NicType t) {
   }
 }
 
+NicType NetCounterDominantNicType(const std::vector<NicType>& types, bool& mixed) {
+  std::vector<NicType> order;
+  std::map<NicType, int> count;
+  for (NicType t : types) {
+    if (t == NIC_UNKNOWN) { continue; }
+    if (count[t]++ == 0) { order.push_back(t); }
+  }
+  mixed = order.size() > 1;
+  NicType best = NIC_UNKNOWN;
+  for (NicType t : order) {
+    if (best == NIC_UNKNOWN || count[t] > count[best]) { best = t; }
+  }
+  return best;
+}
+
 NicType DetectNicTypeFromSnapshots(
     const std::vector<NetworkCounterSnapshot>& snaps, bool& mixed) {
-  NicType nic_type = NIC_UNKNOWN;
-  mixed = false;
-  for (size_t i = 0; i < snaps.size(); i++) {
-    if (snaps[i].nic_type == NIC_UNKNOWN) continue;
-    if (nic_type == NIC_UNKNOWN) {
-      nic_type = snaps[i].nic_type;
-    } else if (snaps[i].nic_type != nic_type) {
-      mixed = true;
-      break;
-    }
-  }
-  return nic_type;
+  std::vector<NicType> types;
+  for (const auto& s : snaps) { types.push_back(s.nic_type); }
+  return NetCounterDominantNicType(types, mixed);
 }
 
 // =====================================================================

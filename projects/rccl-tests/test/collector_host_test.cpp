@@ -75,6 +75,19 @@ TEST(Collector, Tables_DisplayNamesHaveNoPattern) {
   }
 }
 
+TEST(Collector, NicType_MajorityWins) {
+  bool mixed = false;
+  std::vector<NicType> node = {NIC_MLX5};  // frontend NIC sorted first
+  node.insert(node.end(), 8, NIC_BNXT_RE);
+  EXPECT_EQ(NetCounterDominantNicType(node, mixed), NIC_BNXT_RE);
+  EXPECT_TRUE(mixed);
+  EXPECT_EQ(NetCounterDominantNicType({NIC_UNKNOWN, NIC_IONIC}, mixed), NIC_IONIC);
+  EXPECT_FALSE(mixed);
+  EXPECT_EQ(NetCounterDominantNicType({NIC_MLX5, NIC_BNXT_RE}, mixed), NIC_MLX5);  // tie: first seen
+  EXPECT_EQ(NetCounterDominantNicType({NIC_UNKNOWN}, mixed), NIC_UNKNOWN);
+  EXPECT_FALSE(mixed);
+}
+
 TEST(Collector, Unknown_UsesBnxtTable) {
   EXPECT_EQ(Names(NetCounterGetCounterList(NIC_UNKNOWN)), Names(NetCounterGetCounterList(NIC_BNXT_RE)));
 }
