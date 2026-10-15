@@ -54,10 +54,19 @@ std::string sha256_hex(const std::string& msg) {
   return to_hex(digest, sizeof(digest));
 }
 
+// The MAC from rocm::sha2, which must match the one cuid_hmac computes in its
+// own key storage for any key it accepts.
 std::string hmac_hex(const std::vector<uint8_t>& key, const std::vector<uint8_t>& msg) {
   uint8_t mac[rocm::sha2::SHA256_DIGEST_SIZE];
   rocm::sha2::hmac_sha256(key.data(), key.size(), msg.data(), msg.size(), mac);
-  return to_hex(mac, sizeof(mac));
+  const std::string hex = to_hex(mac, sizeof(mac));
+  if (key.empty()) return hex;
+  cuid_hmac hmac(reinterpret_cast<const char*>(key.data()), key.size());
+  uint8_t library[rocm::sha2::SHA256_DIGEST_SIZE] = {};
+  if (hmac.generate_hmac_sha256(msg.data(), msg.size(), library, nullptr) != AMDCUID_STATUS_SUCCESS)
+    return "cuid_hmac failed";
+  const std::string library_hex = to_hex(library, sizeof(library));
+  return library_hex == hex ? hex : "cuid_hmac: " + library_hex;
 }
 
 std::vector<uint8_t> repeated(uint8_t byte, size_t count) {
