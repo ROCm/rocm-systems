@@ -145,18 +145,13 @@ NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
 // Opt-in: enables GPU-resident NCCL progress counters when RAS is enabled. When disabled,
 // counter buffers remain null and profiler() skips progress-counter updates.
 NCCL_PARAM(ProgressCountersEnable, "PROGRESS_COUNTERS", 0);
-// A partition reaches the network, and xGMI, over the physical device's paths, so GIN is as
-// available to a partition as it is to the whole GPU, which is also how NCCL_NET_GDR_MLOPART
-// answers this for GDR. Tri-state, because the evidence behind that reasoning stops at one node:
-//   -1 (default) admit a partitioned communicator on a single node. That is the shape
-//      AICOMRCCL-2387 was verified on, 8 and 16 ranks across two OAMs of one host. That run set
-//      NCCL_LSA_TEAM_SIZE below its rank count, so it was not one LSA team and the gate reached
-//      symmetricSupport there rather than GIN alone.
-//    0 refuse every partitioned communicator, the behaviour from before this parameter existed.
-//    1 admit every partitioned communicator, multi-node included. Multi-node is the opt-in rather
-//      than the default because no partitioned run has covered it, and past one node admitting the
-//      partition additionally reaches the hierarchical CE path, which ncclHierCeAllowed gates on
-//      nNodes > 1 and symmetricSupport together.
+// A partition reaches the NIC and xGMI over the physical device's paths, so GIN is as available
+// to it as to the whole GPU — same reasoning as NCCL_NET_GDR_MLOPART for GDR. Tri-state because
+// only the single-node case has been validated:
+//   -1 (default) admit a partitioned communicator on one node; refuse across nodes.
+//    0 refuse every partitioned communicator (pre-parameter behaviour).
+//    1 admit on any node count (multi-node is opt-in: unvalidated, and it also reaches the
+//      hierarchical CE path gated by ncclHierCeAllowed).
 NCCL_PARAM(GinMloPart, "GIN_MLOPART", -1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
@@ -167,13 +162,10 @@ extern int64_t ncclParamRasEnable();
 extern int64_t ncclParamP2pLL128Enable();
 extern int64_t ncclParamTreeCompact();
 
-// Whether this communicator may use GIN at all. A partitioned communicator opts out unless
-// NCCL_GIN_MLOPART allows it: MI300X CPX stamps mloPart on every partition, so without the
-// parameter every CPX rank turns GIN off and falls back to a path that cannot export its buffers,
-// which is the AICOMRCCL-2387 failure. Named and lifted out of initTransportsRank so it can be
-// asserted on its own -- the host tests terminate several hundred lines before the call site, so a
-// change to the condition there is otherwise undetectable. Takes the communicator rather than the
-// adjacent bools so the sole call site cannot transpose cuMemGdrSupport and hasMloPart.
+// Whether this communicator may use GIN. MI300X CPX stamps mloPart on every partition, so without
+// NCCL_GIN_MLOPART every CPX rank would turn GIN off and fall back to a path that can't export its
+// buffers (AICOMRCCL-2387). Takes the whole comm, not the loose bools, so the call site can't
+// transpose cuMemGdrSupport and hasMloPart.
 static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) {
   if (ginTypeBitMask == 0 || !comm->cuMemGdrSupport) return false;
   if (!comm->hasMloPart) return true;

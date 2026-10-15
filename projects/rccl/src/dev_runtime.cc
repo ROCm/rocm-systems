@@ -1398,15 +1398,9 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
     ExchangeEntry* mine = &peers[teamSelf];
     // Zero both arms. The one this rank does not fill must not be read back as a handle.
     memset(mine, 0, sizeof(*mine));
-    // GIN requires NCCL_CUMEM_ENABLE=1, and cudaIpcGetMemHandle rejects a cuMem/VMM allocation with
-    // "invalid argument". Probe for a VMM allocation first and fall back to legacy IPC only for
-    // buffers that really came from cudaMalloc. Only POSIX_FILE_DESCRIPTOR exports the raw handle
-    // through the owner's proxy (same as p2p.cc); a FABRIC build needs the full 64-byte descriptor.
-    // ExchangeEntry carries one handle and one size, so a window that spans more than one VMM
-    // segment cannot be described by it. That case is refused below rather than approximated:
-    // legacy IPC is not a fallback for it either, because cudaIpcGetMemHandle would export only
-    // the first segment while userOffset + userSize still runs past it, which every importing peer
-    // rejects at the bound check below.
+    // cudaIpcGetMemHandle rejects VMM/cuMem allocations, so probe for cuMem first and fall back to
+    // legacy IPC only for real cudaMalloc buffers. cuMem export needs a POSIX fd handle; FABRIC
+    // builds can't use this single-descriptor path.
     exportCuMem = false;
     if (ncclCuMemEnable() && ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR &&
         CUPFN(cuMemRetainAllocationHandle(&localCuMemHandle,
@@ -1417,9 +1411,9 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
       size_t rangeSize = 0;
       const bool rangeOk =
           ncclCuMemGetAddressRange(userPtrCu, userSize, &rangeBase, &rangeSize, nullptr) == ncclSuccess;
-      // rangeOk false means a later segment of the window failed the walk: the first
-      // query already succeeded at the retain above, so a failure here is a multi-segment
-      // window that cannot be described by ExchangeEntry's single handle and size.
+      // rangeOk false means a later segment failed the walk after the retain succeeded: a
+      // multi-segment window ExchangeEntry's single handle+size can't describe. Legacy IPC is no
+      // fallback either — it would export only the first segment.
       if (!rangeOk || rangeSize > retainedSize) {
         WARN("windowRegisterNonSym: window at %p size=%zu spans multiple VMM segments (rangeOk=%d "
              "range %zu > segment %zu); this path publishes a single allocation handle and cannot "
@@ -1476,15 +1470,9 @@ static ncclResult_t windowRegisterNonSym(struct ncclComm* comm, void* userPtr, s
         }
       } else {
         void* peerBase = nullptr;
-        // userOffset + userSize wraps when the offset is near SIZE_MAX and would accept a range
-        // that does not fit. Compare each side against what remains in the allocation.
-        //
-        // The size compared here is the local one, not peers[r].userSize. What this rank can
-        // reach in the peer's mapping is ipcPeerPtrs[r] + offset for any offset the local
-        // winHost->size admits (ncclDevrGetLsaRankPtr), so the local size is the bound that has
-        // to fit; the peer's own size is never read again. Two ranks registering different sizes
-        // is enough to matter: a peer publishing userOffset = allocSize with userSize = 0 passes
-        // a check against its own size and still hands out pointers past the end of the mapping.
+        // Bound the LOCAL userSize against the peer's remaining allocation (ncclDevrGetLsaRankPtr
+        // indexes the peer mapping by the local window size, not the peer's). Written as subtraction
+        // so offset + size can't overflow past SIZE_MAX.
         if (peers[r].userOffset > peers[r].allocSize || userSize > peers[r].allocSize - peers[r].userOffset) {
           WARN("windowRegisterNonSym: peer %d userOffset=%zu with local userSize=%zu exceeds allocSize=%zu", r,
                peers[r].userOffset, userSize, peers[r].allocSize);
