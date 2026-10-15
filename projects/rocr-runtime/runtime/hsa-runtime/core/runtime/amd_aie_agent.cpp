@@ -49,6 +49,7 @@
 #include <string_view>
 
 #include "core/inc/amd_aie_kmq_queue.h"
+#include "core/inc/amd_aie_umq_queue.h"
 #include "core/inc/amd_memory_region.h"
 #include "core/inc/amd_xdna_driver.h"
 #include "core/inc/driver.h"
@@ -302,7 +303,12 @@ hsa_status_t AieAgent::QueueCreate(size_t size, hsa_queue_type32_t queue_type, u
 
   if (!shared_queue) return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
 
-  auto aql_queue(new AieKmqQueue(shared_queue, this, size, node_id(), event_callback, data, flags));
+  auto& xdna_driver = static_cast<XdnaDriver&>(driver());
+  core::Queue* aql_queue = xdna_driver.UsesUserModeQueue()
+      ? static_cast<core::Queue*>(
+            new AieUmqQueue(shared_queue, this, size, node_id(), event_callback, data, flags))
+      : static_cast<core::Queue*>(
+            new AieKmqQueue(shared_queue, this, size, node_id(), event_callback, data, flags));
   if (aql_queue == nullptr) {
     core::Runtime::runtime_singleton_->system_deallocator()(shared_queue);
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -327,6 +333,11 @@ void AieAgent::InitRegionList() {
   other_mem_props.HeapType = HSA_HEAPTYPE_SYSTEM;
   other_mem_props.SizeInBytes = total_system_memory;
 
+  // AIE devices support only coarse-grain memory regions that require explicit sync operations.
+  regions_.reserve(3);
+  regions_.push_back(
+      std::make_shared<MemoryRegion>(false, true, false, false, true, this, sys_mem_props));
+
   // For allocating memory for device instructions. These need to be mapped to the device so the
   // hardware can access them.
   // We use HSA_HEAPTYPE_DEVICE_SVM so that the recommended
@@ -334,16 +345,17 @@ void AieAgent::InitRegionList() {
   // is regular pool or dev heap.
   // The system will report the max allocatable size as MemoryRegion::max_sysmem_alloc_size_, but
   // this is incorrect. The pool is exactly XdnaDriver::GetDevHeapByteSize() bytes.
-  HsaMemoryProperties dev_mem_props = {};
-  dev_mem_props.HeapType = HSA_HEAPTYPE_DEVICE_SVM;
-  dev_mem_props.SizeInBytes = XdnaDriver::GetDevHeapByteSize();
+  // UMQ (AIE4) devices have no dev heap at all, so this pool is omitted for them rather than
+  // advertised with no capacity.
+  auto& xdna_driver = static_cast<XdnaDriver&>(driver());
+  if (xdna_driver.HasDevHeap()) {
+    HsaMemoryProperties dev_mem_props = {};
+    dev_mem_props.HeapType = HSA_HEAPTYPE_DEVICE_SVM;
+    dev_mem_props.SizeInBytes = XdnaDriver::GetDevHeapByteSize();
+    regions_.push_back(
+        std::make_shared<MemoryRegion>(false, false, false, false, true, this, dev_mem_props));
+  }
 
-  // AIE devices support only coarse-grain memory regions that require explicit sync operations.
-  regions_.reserve(3);
-  regions_.push_back(
-    std::make_shared<MemoryRegion>(false, true, false, false, true, this, sys_mem_props));
-  regions_.push_back(
-    std::make_shared<MemoryRegion>(false, false, false, false, true, this, dev_mem_props));
   regions_.push_back(
     std::make_shared<MemoryRegion>(false, false, false, false, true, this, other_mem_props));
 }
