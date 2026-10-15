@@ -41,6 +41,7 @@
 #include "fakes/collective_stubs.h"
 #include "fakes/ce_fakes.h"
 #include "fakes/hip_fakes.h"
+#include "fakes/sym_kernels_fakes.h"
 #include "fakes/transport_stubs.h"
 #include "ScopedHook.h"
 #include "WaitUntil.h"
@@ -392,6 +393,15 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   comm->intraRanks = 2;
   comm->symmetricSupport = 1;
   comm->p2pCrossClique = 0;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
 
   ncclIntruQueue<ncclAsyncJob, &ncclAsyncJob::next> asyncCollJobs;
   ncclIntruQueueConstruct(&asyncCollJobs);
@@ -413,6 +423,43 @@ TEST_F(GroupEndInternalTest, MultiRankSymmetricCommEnqueuesAsyncJob) {
   EXPECT_TRUE(ncclIntruQueueEmpty(&asyncCollJobs));
 
   queued->destructor(queued);
+}
+
+TEST_F(GroupEndInternalTest, MultiRankSymmetricCommWithoutEligibleTaskAvoidsAsyncJob) {
+  auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = 0;
+  ncclTaskColl task{};
+  task.func = ncclFuncAlltoAll;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return false; });
+
+  EXPECT_FALSE(ncclPlannerMayInitializeSymmetric(comm.get()));
+}
+
+TEST_F(GroupEndInternalTest, InitializedSymmetricStateAvoidsRepeatedAsyncJobs) {
+  auto comm = std::make_unique<ncclComm>();  // value-initialised => zeroed
+  comm->intraRanks = 2;
+  comm->symmetricSupport = 1;
+  comm->p2pCrossClique = 0;
+  comm->symkState.initialized = true;
+  ncclTaskColl task{};
+  task.func = ncclFuncAllReduce;
+  task.opHost = ncclSum;
+  task.opDev.op = ncclDevSum;
+  task.datatype = ncclFloat32;
+  task.count = 1024;
+  ncclTaskCollSorterInsert(&comm->planner.collSorter, &task, task.count * sizeof(float));
+  ScopedHook symkAvailable(g_symkAvailable,
+                           [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+
+  EXPECT_FALSE(ncclPlannerMayInitializeSymmetric(comm.get()));
 }
 
 TEST_F(GroupEndInternalTest, DepthZero_ReturnsInvalidUsage) {

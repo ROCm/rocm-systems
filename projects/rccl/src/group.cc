@@ -859,14 +859,32 @@ static void ncclGroupSymmetricJobFree(void* _job) {
   delete job;
 }
 
+// The bootstrap consensus that requires sibling local ranks to prepare concurrently is reached
+// only when the first symmetric kernel can actually be selected. Checking communicator capability
+// alone creates and joins one host thread per local rank for every ordinary collective.
+static bool ncclPlannerMayInitializeSymmetric(struct ncclComm* comm) {
+  if (comm->symkState.initialized) return false;
+  for (struct ncclTaskColl* task = comm->planner.collSorter.head; task != nullptr; task = task->next) {
+    if (task->symkExtract == RCCL_SYMK_EXTRACT_DENY) continue;
+    // A global forced selection wins over the task mask, matching ncclMakeSymmetricTaskList.
+    uint64_t effAlgMask = comm->tuningContext.forced[task->func] ? 0 : task->algMask;
+    if (effAlgMask != 0 && (effAlgMask & NCCL_TUNING_MASK_SYM_KERNELS) == 0) continue;
+    ncclDevRedOp_t symkOp = task->opHost == ncclAvg ? ncclDevSumPostDiv : task->opDev.op;
+    if (ncclSymkAvailable(comm, task->func, symkOp, task->datatype, task->count)) return true;
+  }
+  return false;
+}
+
 static ncclResult_t ncclPrepareTasksAndCollPreconnect(
   struct ncclComm* comm, ncclSimInfo_t* simInfo,
   struct ncclIntruQueue<struct ncclAsyncJob, &ncclAsyncJob::next>* asyncCollJobs) {
-  // Symmetric task selection performs a bootstrap consensus in ncclPrepareTasks.
-  // When this process owns multiple ranks, prepare them concurrently so the
-  // first rank cannot block before its sibling ranks enter the same consensus.
+  CUDACHECK(cudaSetDevice(comm->cudaDev));
+  // The first eligible symmetric task can perform bootstrap consensus in ncclPrepareTasks.
+  // When this process owns multiple ranks, prepare them concurrently so the first rank cannot
+  // block before its sibling ranks enter the same consensus.
   bool const needsConcurrentSymmetricPrepare =
-    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique;
+    comm->intraRanks > 1 && comm->symmetricSupport && !comm->p2pCrossClique &&
+    ncclPlannerMayInitializeSymmetric(comm);
   if (needsConcurrentSymmetricPrepare) {
     struct ncclPrepareTasksAndCollPreconnectJob* job;
     NEW_NOTHROW(job, ncclPrepareTasksAndCollPreconnectJob);
