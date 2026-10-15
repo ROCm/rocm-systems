@@ -28,6 +28,10 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 - Fixed the last library of a colon-delimited `ROCP_TOOL_LIBRARIES` list not being loaded.
 - Fixed the application aborting when a library in `ROCP_TOOL_LIBRARIES` could not be loaded. An error is logged, none of the listed libraries are used, and an attach to the process reports failure.
 - `rocprofiler_attach` and `rocprofiler_detach` return the attach and detach status instead of always reporting success. A tool without `tool_attach` succeeds only on the attach that loaded it, and a warning is logged for each tool that does not support attach or detach.
+- An attach now fails when no tool accepted configuration (every tool's `rocprofiler_configure` returned `NULL`).
+- Fixed `rocattach_attach_tree` reporting failure, and `rocprof-attach --attach-children` exiting without detaching, when only some processes in the tree attached. It now returns success when any process attached, and `rocattach_detach_tree` detaches those processes even if the root did not attach.
+- Fixed `rocattach` not unmapping the environment and tool-path buffers in the target when the attach call in the target reported failure.
+- Fixed the rocprofv3 tool library aborting on reattach after it disabled thread trace or kernel replay because the running rocprofiler-sdk does not support them, and fixed counter collection using kernel replay passes when kernel replay is unsupported.
 
 ### Known issues
 

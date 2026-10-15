@@ -2832,6 +2832,9 @@ write_attach_session(const fs::path& path, uint64_t session)
     set_attach_session_file_permissions(path);
     return true;
 }
+
+void
+apply_core_capability_gates(tool::config& cfg);
 }  // namespace
 
 // Checks for a file in /tmp to see if this is a re-attach to a process that was already profiled,
@@ -2883,6 +2886,10 @@ tool_attach(rocprofiler_client_detach_t /*detach_func*/,
 
     // reset config for attach (i.e. re-parse environment variables)
     tool::get_config() = tool::config{};
+
+    // re-parsing restores options that tool_init turned off, so turn them off again before the
+    // comparison
+    apply_core_capability_gates(tool::get_config());
 
     // ensure the config has not changed which services were requested.
     // NOTE: this is a temporary restriction
@@ -3058,6 +3065,61 @@ skip_if_unsupported(rocprofiler_status_t status, KindT kind)
     }
     return status;
 }
+
+// Turn off options this process cannot support. Runs in tool_init and again in tool_attach on the
+// re-parsed config, so both see the same config. Each warning is reported once.
+void
+apply_core_capability_gates(tool::config& cfg)
+{
+    static auto att_version_reported      = std::atomic_flag{};
+    static auto att_no_intercept_reported = std::atomic_flag{};
+    static auto replay_counters_reported  = std::atomic_flag{};
+
+    if(cfg.advanced_thread_trace && core_version < thread_trace_min_core_version)
+    {
+        if(!att_version_reported.test_and_set())
+        {
+            ROCP_WARNING << "thread trace is disabled: it requires rocprofiler-sdk v"
+                         << format_version(thread_trace_min_core_version)
+                         << " or newer but this process uses rocprofiler-sdk v"
+                         << format_version(core_version)
+                         << ". Use the rocprofv3 from that rocprofiler-sdk installation to collect "
+                            "thread trace.";
+        }
+        cfg.advanced_thread_trace = false;
+    }
+
+    if(cfg.advanced_thread_trace && cfg.att_no_intercept && !tool::att_no_intercept::is_supported())
+    {
+        if(!att_no_intercept_reported.test_and_set())
+        {
+            ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not "
+                            "include ATT quick-scan support. Falling back to --att.";
+        }
+        cfg.att_no_intercept = false;
+    }
+
+    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
+    // runs inside the profiled application's process during rocprofiler configuration, so exiting
+    // here would tear the application down mid-initialization and run static destructors and atexit
+    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
+    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
+    // skipping replay still produces a usable run, which beats killing the application.
+    if(cfg.kernel_replay && !cfg.counter_collection)
+    {
+        if(!replay_counters_reported.test_and_set())
+        {
+            ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
+                          "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
+        }
+        cfg.kernel_replay = false;
+    }
+
+    // the counter callbacks select a replay pass whenever kernel_replay is set, so it must be off
+    // before counter collection starts when the library cannot replay
+    if(cfg.kernel_replay && !core_supports_kind(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY))
+        cfg.kernel_replay = false;
+}
 }  // namespace
 
 int
@@ -3070,24 +3132,7 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
 
     client_finalizer = fini_func;
 
-    if(tool::get_config().advanced_thread_trace && core_version < thread_trace_min_core_version)
-    {
-        ROCP_WARNING << "thread trace is disabled: it requires rocprofiler-sdk v"
-                     << format_version(thread_trace_min_core_version)
-                     << " or newer but this process uses rocprofiler-sdk v"
-                     << format_version(core_version)
-                     << ". Use the rocprofv3 from that rocprofiler-sdk installation to collect "
-                        "thread trace.";
-        tool::get_config().advanced_thread_trace = false;
-    }
-
-    if(tool::get_config().advanced_thread_trace && tool::get_config().att_no_intercept &&
-       !tool::att_no_intercept::is_supported())
-    {
-        ROCP_WARNING << "--att-no-intercept is unavailable: this rocprofv3 build does not include "
-                        "ATT quick-scan support. Falling back to --att.";
-        tool::get_config().att_no_intercept = false;
-    }
+    apply_core_capability_gates(tool::get_config());
 
     const uint64_t buffer_size      = 16 * common::units::get_page_size();
     const uint64_t buffer_watermark = 15 * common::units::get_page_size();
@@ -3775,19 +3820,9 @@ tool_init(rocprofiler_client_finalize_t fini_func, void* tool_data)
     // supplies the pass count (= number of groups) via kernel_replay_callback during CONFIG
     // PHASE_ENTER, and counter_dispatch_callback selects the per-pass group.
     //
-    // Replay without counter collection degrades to a plain run rather than terminating. tool_init
-    // runs inside the profiled application's process during rocprofiler configuration, so exiting
-    // here would tear the application down mid-initialization and run static destructors and atexit
-    // handlers against a partially-initialized SDK. rocprofv3 rejects this combination before the
-    // application launches, so reaching this point means ROCPROF_KERNEL_REPLAY was set by hand --
-    // skipping replay still produces a usable run, which beats killing the application.
-    if(tool::get_config().kernel_replay && !tool::get_config().counter_collection)
-    {
-        ROCP_ERROR << "ROCPROF_KERNEL_REPLAY requires counter collection "
-                      "(ROCPROF_COUNTER_COLLECTION); continuing without kernel replay";
-    }
-    else if(tool::get_config().kernel_replay &&
-            core_supports_kind(ROCPROFILER_CALLBACK_TRACING_KERNEL_REPLAY))
+    // apply_core_capability_gates turned replay off when counter collection is off or the
+    // rocprofiler-sdk library cannot replay
+    if(tool::get_config().kernel_replay)
     {
         auto kernel_replay_ctx = rocprofiler_context_id_t{0};
 

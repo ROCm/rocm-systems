@@ -443,7 +443,9 @@ emplace_client(Tp&                                 data,
     return client;
 }
 
-// set when a ROCP_TOOL_LIBRARIES library could not be loaded
+// set when a ROCP_TOOL_LIBRARIES library could not be loaded. It is never reset: the clients are
+// found once per process (get_clients) and rocprofiler-register requires the same tool library on
+// every attach, so a later attach cannot load a different set of libraries.
 bool&
 get_tool_library_load_failed()
 {
@@ -767,14 +769,15 @@ invoke_client_configure(std::optional<client_library>& itr)
                                         itr->internal_client_id.handle - get_client_offset(),
                                         &itr->mutable_client_id);
 
-    // rocprofiler-register sets ROCPROFILER_REGISTER_TOOL_ATTACHED before it propagates the API
-    // tables during an attach, so a client configured while it is set was loaded by that attach
-    itr->configured_by_attach =
-        common::get_env_optional("ROCPROFILER_REGISTER_TOOL_ATTACHED").has_value();
-
     if(_result)
     {
         itr->configure_result = new rocprofiler_tool_configure_result_t{*_result};
+
+        // rocprofiler-register sets ROCPROFILER_REGISTER_TOOL_ATTACHED before it propagates the
+        // API tables during an attach, so a client configured while it is set was loaded by that
+        // attach. A client which declined configuration was not attached.
+        itr->configured_by_attach =
+            common::get_env_optional("ROCPROFILER_REGISTER_TOOL_ATTACHED").has_value();
 
         if(itr->configure_attach_func)
         {
@@ -1268,7 +1271,9 @@ attach()
 {
     if(get_clients() && get_tool_library_load_failed())
     {
-        ROCP_ERROR << "attach failed because a ROCP_TOOL_LIBRARIES library could not be loaded";
+        ROCP_ERROR << "attach failed because a ROCP_TOOL_LIBRARIES library could not be loaded "
+                      "when this process first configured rocprofiler-sdk. Restart the process "
+                      "to retry";
         return ROCPROFILER_STATUS_ERROR;
     }
 
