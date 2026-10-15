@@ -49,23 +49,22 @@ For example, this table indicates that ``/``, ``/home``, ``/data``, and ``/mnt/r
 | ``O_DIRECT``: Whether an ``O_DIRECT`` open succeeded on the volume.
 | ``HIPFILE``: Will be "yes" when the file system qualifies, the backing is direct local NVMe (raw, or LVM or a non-parity MD RAID array on local NVMe), and ``O_DIRECT`` works. Will be "no" otherwise.
 
-.. note::
 
-   For ``lvm`` and ``md`` backing, ``ais-check`` follows the block stack and
-   reports the volume as capable only when every layer is an LVM target or an
-   MD RAID array, every RAID layer runs a pass-through personality (``linear``,
-   ``raid0``, ``raid1``, ``raid10``), and all of the devices underneath them
-   are local NVMe. The two can be stacked on each other in either order. The
-   parity personalities (``raid4``, ``raid5``, ``raid6``) are reported as not
-   capable, because they stage the transfer in the MD stripe cache rather than
-   passing it to a member device. That applies to an LVM RAID logical volume
-   just as it does to an MD array, since LVM implements a RAID LV with the
-   ``dm-raid`` target, which runs the same personality code.
+For ``lvm`` and ``md`` backing, ``ais-check`` follows the block stack and
+reports the volume as capable only when every layer is an LVM target or an
+MD RAID array, every RAID layer runs a pass-through personality (``linear``,
+``raid0``, ``raid1``, ``raid10``), and all of the devices underneath them
+are local NVMe. The two can be stacked on each other in either order. The
+parity personalities (``raid4``, ``raid5``, ``raid6``) are reported as not
+capable, because they stage the transfer in the MD stripe cache rather than
+passing it to a member device. That applies to an LVM RAID logical volume
+just as it does to an MD array, since LVM implements a RAID LV with the
+``dm-raid`` target, which runs the same personality code.
 
-   The RAID level of an LVM volume is not exposed in sysfs, so ``ais-check``
-   reads it from the device-mapper table. When it cannot run ``dmsetup`` with
-   enough privilege, a RAID LV is reported as ``unverified``; linear and
-   striped volumes are classified from sysfs alone and are unaffected.
+The RAID level of an LVM volume is not exposed in sysfs, so ``ais-check``
+reads it from the device-mapper table. When it cannot run ``dmsetup`` with
+enough privilege, a RAID LV is reported as ``unverified``. Linear and
+striped volumes are classified from sysfs alone and are unaffected.
 
 The ``AIS support in`` table at the end of the report is a final pass or fail summary. It shows whether the four parts of the fastpath stack are
 present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, and at least one qualifying mounted volume. Each line reads ``True`` or
