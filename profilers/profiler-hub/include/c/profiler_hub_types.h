@@ -29,6 +29,13 @@ extern "C"
                                                  (out of memory). */
         PH_RESULT_CANCELLED,                 /**< The operation was cancelled through its
                                                  future before it finished. */
+        PH_RESULT_UNSUPPORTED_DATABASE,      /**< The file is not a database format
+                                                 profiler-hub can read. */
+        PH_RESULT_INVALID_DATABASE,          /**< The file is missing, unreadable, or its
+                                                 trace metadata is unusable. */
+        PH_RESULT_METADATA_MISSING, /**< The database has no trace metadata table. */
+        PH_RESULT_UNSUPPORTED_SCHEMA_VERSION, /**< The trace schema version is recognized
+                                                  but not supported. */
     } ph_result_t;
 
     struct ph_ctx;
@@ -49,6 +56,43 @@ extern "C"
         uint32_t minor;
         uint32_t patch;
     } ph_version_t;
+
+    /** @brief Physical database container recognized while probing a file. */
+    typedef enum
+    {
+        PH_DATABASE_KIND_UNKNOWN,
+        PH_DATABASE_KIND_SQLITE,
+    } ph_database_kind_t;
+
+    /** @brief Trace schema family found in a recognized database. */
+    typedef enum
+    {
+        PH_TRACE_SCHEMA_UNKNOWN,
+        PH_TRACE_SCHEMA_ROCPD,
+    } ph_trace_schema_t;
+
+    /** @brief Detailed outcome of probing a database without loading its trace. */
+    typedef enum
+    {
+        PH_PROBE_STATUS_UNKNOWN   = -1,
+        PH_PROBE_STATUS_SUPPORTED = 0,
+        PH_PROBE_STATUS_FILE_NOT_FOUND,
+        PH_PROBE_STATUS_UNREADABLE,
+        PH_PROBE_STATUS_UNKNOWN_FORMAT,
+        PH_PROBE_STATUS_METADATA_MISSING,
+        PH_PROBE_STATUS_METADATA_MALFORMED,
+        PH_PROBE_STATUS_AMBIGUOUS_TRACE,
+        PH_PROBE_STATUS_UNSUPPORTED_VERSION,
+    } ph_probe_status_t;
+
+    /** @brief Database and schema information returned by ph_probe_database(). */
+    typedef struct
+    {
+        ph_probe_status_t  status;
+        ph_database_kind_t database_kind;
+        ph_trace_schema_t  trace_schema;
+        ph_version_t       schema_version;
+    } ph_database_probe_t;
 
     /** @brief Distinguishes the identity columns a track was derived from. */
     typedef enum
@@ -148,7 +192,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t             id;
+        uint32_t             id; /**< type_index. Not rocpd_info_agent.id. */
         const char*          agent_type;
         const char*          name;
         const char*          model_name;
@@ -159,6 +203,7 @@ extern "C"
         ph_optional_uint64_t absolute_index;
         ph_optional_uint64_t logical_index;
         ph_optional_uint64_t uuid;
+        uint64_t             row_id; /**< rocpd_info_agent.id. */
     } ph_agent_t;
 
     /** @brief A list of agents; same lifetime rule as ph_track_list_t. */
@@ -175,7 +220,7 @@ extern "C"
      */
     typedef struct
     {
-        uint32_t             id; /**< Process id. */
+        uint32_t             id; /**< OS process id. Not rocpd_info_process.id. */
         const char*          command;
         const char*          environment;
         const char*          extdata;
@@ -184,6 +229,7 @@ extern "C"
         ph_optional_uint64_t fini;
         ph_optional_uint64_t start;
         ph_optional_uint64_t end;
+        uint64_t             row_id; /**< rocpd_info_process.id. */
     } ph_process_t;
 
     /** @brief A list of processes; same lifetime rule as ph_track_list_t. */
@@ -199,12 +245,13 @@ extern "C"
      */
     typedef struct
     {
-        uint64_t             thread_id;
+        uint64_t             thread_id; /**< OS thread id. Not rocpd_info_thread.id. */
         const char*          name;
         const char*          extdata;
         ph_optional_uint64_t parent_process_id;
         ph_optional_uint64_t start;
         ph_optional_uint64_t end;
+        uint64_t             row_id; /**< rocpd_info_thread.id. */
     } ph_thread_t;
 
     /** @brief A list of threads; same lifetime rule as ph_track_list_t. */
@@ -223,6 +270,8 @@ extern "C"
         uint64_t    stream_id;
         const char* name;
         const char* extdata;
+        uint32_t    nid; /**< rocpd_info_node.id. */
+        uint32_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
     } ph_stream_t;
 
     /** @brief A list of streams; same lifetime rule as ph_track_list_t. */
@@ -241,6 +290,8 @@ extern "C"
         uint64_t    queue_id;
         const char* name;
         const char* extdata;
+        uint32_t    nid; /**< rocpd_info_node.id. */
+        uint32_t    pid; /**< rocpd_info_process.id. Not the OS pid. */
     } ph_queue_t;
 
     /** @brief A list of queues; same lifetime rule as ph_track_list_t. */
@@ -272,6 +323,7 @@ extern "C"
         ph_optional_uint64_t instance_id;
         ph_optional_uint64_t is_constant;
         ph_optional_uint64_t is_derived;
+        uint64_t             id; /**< rocpd_info_pmc.id. Not a list index. */
     } ph_pmc_info_t;
 
     /** @brief A list of PMC descriptions; same lifetime rule as ph_track_list_t. */
@@ -377,6 +429,43 @@ extern "C"
         uint32_t     list_size;
         ph_sample_t* samples;
     } ph_sample_list_t;
+
+    /**
+     * @brief One histogram bucket.
+     *        For a duration track, event_count is the number of overlapping
+     *        events and value is their overlap in nanoseconds. For a PMC
+     *        track, event_count is the sample count and value is the average
+     *        sample value. A PMC gap has event_count 0 and the previous value.
+     */
+    typedef struct
+    {
+        uint32_t bucket_index;
+        uint64_t event_count;
+        double   value;
+    } ph_histogram_bucket_t;
+
+    /** @brief Histogram buckets for one track. buckets may be null when
+     *         list_size is 0. */
+    typedef struct
+    {
+        uint32_t               track_id;
+        uint32_t               list_size;
+        ph_histogram_bucket_t* buckets;
+    } ph_track_histogram_t;
+
+    /**
+     * @brief Histograms for every track, aligned to one time grid.
+     *        Bucket 0 begins at origin_ts and each bucket is bucket_size
+     *        nanoseconds wide. Missing duration buckets read as zero.
+     */
+    typedef struct
+    {
+        uint64_t              origin_ts;
+        uint64_t              bucket_size;
+        uint32_t              bucket_count;
+        uint32_t              track_count;
+        ph_track_histogram_t* tracks;
+    } ph_histogram_t;
 
     typedef ph_version_t ph_library_version_t;
     typedef ph_version_t ph_schema_version_t;

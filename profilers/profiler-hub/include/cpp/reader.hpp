@@ -308,6 +308,16 @@ struct reader_t
      * @brief Get time range of all data in the database
      * @return Time window spanning all events
      */
+    /**
+     * @brief Histogram for every track on one shared time grid.
+     * @param desired_bins Approximate number of buckets. Must be non-zero.
+     *        Duration tracks count overlapping events and sum the overlap.
+     *        PMC tracks average sample values and hold the last value across
+     *        empty buckets between samples.
+     */
+    [[nodiscard]] reader_types::histogram_t get_histogram(
+        size_t desired_bins = 500) const;
+
     [[nodiscard]] reader_types::time_window_t get_data_time_range() const;
 
     /**

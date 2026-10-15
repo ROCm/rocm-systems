@@ -220,6 +220,12 @@ reader_t::get_region_summary(const reader_types::time_window_t& window) const
     return {};
 }
 
+reader_types::histogram_t
+reader_t::get_histogram(size_t desired_bins) const
+{
+    return m_impl->get_histogram(desired_bins);
+}
+
 reader_types::time_window_t
 reader_t::get_data_time_range() const
 {

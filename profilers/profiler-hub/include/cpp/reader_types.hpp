@@ -116,6 +116,8 @@ using node_info_list_t = std::vector<node_info_ptr_t>;
 
 struct process_info_t
 {
+    size_t id{};  ///< rocpd_info_process.id. Not the OS pid.
+
     std::optional<size_t> ppid{};
     size_t                pid{};
     std::optional<size_t> init{};
@@ -134,6 +136,8 @@ using process_info_list_t = std::vector<process_info_ptr_t>;
 
 struct agent_info_t
 {
+    size_t id{};  ///< rocpd_info_agent.id. Not type_index.
+
     std::string           agent_type;
     size_t                type_index;
     std::optional<size_t> absolute_index{};
@@ -155,6 +159,8 @@ using agent_info_list_t = std::vector<agent_info_ptr_t>;
 
 struct pmc_info_t
 {
+    size_t id{};  ///< rocpd_info_pmc.id
+
     std::string                   name{};
     std::shared_ptr<agent_info_t> agent_info;
 
@@ -182,6 +188,8 @@ using pmc_info_list_t = std::vector<pmc_info_ptr_t>;
 
 struct thread_info_t
 {
+    size_t id{};  ///< rocpd_info_thread.id. Not the OS tid.
+
     std::optional<size_t> parent_process_id{};
     size_t                thread_id{};
     std::string           name{};
@@ -199,6 +207,8 @@ using thread_info_list_t = std::vector<thread_info_ptr_t>;
 struct stream_info_t
 {
     size_t      stream_id{};
+    size_t      nid{};  ///< rocpd_info_node.id
+    size_t      pid{};  ///< rocpd_info_process.id. Not the OS pid.
     std::string name{};
     std::string extdata{};
 
@@ -212,6 +222,8 @@ using stream_info_list_t = std::vector<stream_info_ptr_t>;
 struct queue_info_t
 {
     size_t      queue_id{};
+    size_t      nid{};  ///< rocpd_info_node.id
+    size_t      pid{};  ///< rocpd_info_process.id. Not the OS pid.
     std::string name{};
     std::string extdata{};
 
@@ -576,5 +588,30 @@ struct counter_timeline_event_t
 };
 
 using counter_timeline_event_list_t = std::vector<counter_timeline_event_t>;
+
+struct histogram_bucket_t
+{
+    size_t bucket_index{};
+    size_t event_count{};
+    double value{};
+};
+
+using histogram_bucket_list_t = std::vector<histogram_bucket_t>;
+
+struct track_histogram_t
+{
+    track_info_ptr_t        track;
+    histogram_bucket_list_t buckets;
+};
+
+using track_histogram_list_t = std::vector<track_histogram_t>;
+
+struct histogram_t
+{
+    timestamp_ns_t         origin_ts{};
+    timestamp_ns_t         bucket_size{};
+    size_t                 bucket_count{};
+    track_histogram_list_t tracks;
+};
 
 }  // namespace profiler_hub::reader_types

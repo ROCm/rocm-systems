@@ -3,6 +3,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #ifdef _WIN32
 #    include <windows.h>
 #else
@@ -482,9 +483,83 @@ on_load_finished(ph_future_t future, ph_future_status_t status, ph_result_t resu
     printf("loading trace finished: status %d, result %d\n", (int) status, (int) result);
 }
 
+static const char*
+probe_status_name(ph_probe_status_t status)
+{
+    switch(status)
+    {
+        case PH_PROBE_STATUS_UNKNOWN: return "unknown";
+        case PH_PROBE_STATUS_SUPPORTED: return "supported";
+        case PH_PROBE_STATUS_FILE_NOT_FOUND: return "file_not_found";
+        case PH_PROBE_STATUS_UNREADABLE: return "unreadable";
+        case PH_PROBE_STATUS_UNKNOWN_FORMAT: return "unknown_format";
+        case PH_PROBE_STATUS_METADATA_MISSING: return "metadata_missing";
+        case PH_PROBE_STATUS_METADATA_MALFORMED: return "metadata_malformed";
+        case PH_PROBE_STATUS_AMBIGUOUS_TRACE: return "ambiguous_trace";
+        case PH_PROBE_STATUS_UNSUPPORTED_VERSION: return "unsupported_version";
+    }
+    return "unknown";
+}
+
+static const char*
+database_kind_name(ph_database_kind_t kind)
+{
+    return kind == PH_DATABASE_KIND_SQLITE ? "sqlite" : "unknown";
+}
+
+static const char*
+trace_schema_name(ph_trace_schema_t schema)
+{
+    return schema == PH_TRACE_SCHEMA_ROCPD ? "rocpd" : "unknown";
+}
+
+static int
+probe_databases(int count, char** paths)
+{
+    int failed = 0;
+    for(int i = 0; i < count; ++i)
+    {
+        ph_database_probe_t probe = { 0 };
+        char                uuid[128];
+        char                message[1024];
+        const ph_result_t   result = ph_probe_database_details(
+            paths[i], &probe, uuid, sizeof(uuid), message, sizeof(message));
+        if(result != PH_RESULT_SUCCESS)
+        {
+            fprintf(stderr, "%s: probe call failed (%d)\n", paths[i], (int) result);
+            failed = 1;
+            continue;
+        }
+
+        printf("%s: status=%s database=%s schema=%s version=%u.%u.%u uuid=%s "
+               "message=%s\n",
+               paths[i],
+               probe_status_name(probe.status),
+               database_kind_name(probe.database_kind),
+               trace_schema_name(probe.trace_schema),
+               probe.schema_version.major,
+               probe.schema_version.minor,
+               probe.schema_version.patch,
+               uuid,
+               message);
+        if(probe.status != PH_PROBE_STATUS_SUPPORTED) failed = 1;
+    }
+    return failed;
+}
+
 int
 main(int argc, char** argv)
 {
+    if(argc > 1 && strcmp(argv[1], "--probe") == 0)
+    {
+        if(argc < 3)
+        {
+            fprintf(stderr, "usage: %s --probe DATABASE [DATABASE ...]\n", argv[0]);
+            return 2;
+        }
+        return probe_databases(argc - 2, argv + 2);
+    }
+
     const char* trace_path = argc > 1 ? argv[1] : "/home/amd/test_dbs/rocpd-3930708-0.db";
     ph_ctx_t    ctx        = NULL;
     ph_future_t load_future = NULL;

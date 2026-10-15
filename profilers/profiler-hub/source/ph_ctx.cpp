@@ -1,13 +1,13 @@
 #include "ph_ctx.hpp"
+#include "database_probe_failure.hpp"
 #include "debug.hpp"
 #include "ph_future.hpp"
 #include "populate_reader_catalog.hpp"
-#include "profiler-hub/cpp/storage.hpp"
+#include "profiler-hub/cpp/database_probe.hpp"
 #include "reader_catalog.hpp"
 #include "track_read_options.hpp"
 
 #include <algorithm>
-#include <filesystem>
 #include <limits>
 #include <mutex>
 #include <numeric>
@@ -17,17 +17,6 @@
 
 namespace
 {
-
-std::string
-existing_trace_path(std::string_view path)
-{
-    std::string file_path{ path };
-    if(!std::filesystem::is_regular_file(file_path))
-    {
-        throw std::runtime_error("trace file does not exist: " + file_path);
-    }
-    return file_path;
-}
 
 ph_track_category_t
 to_c_track_category(profiler_hub::reader_types::track_kind_t kind)
@@ -85,8 +74,27 @@ ph_ctx::default_connection_count()
     return 8;
 }
 
+ph_ctx::accepted_trace_t
+ph_ctx::accept_trace(std::string_view trace_path)
+{
+    const auto probe = profiler_hub::probe_database(std::string{ trace_path });
+    if(probe.status != profiler_hub::probe_status_t::supported)
+    {
+        throw profiler_hub::database_probe_failure{ probe };
+    }
+    return accepted_trace_t{ std::string{ trace_path },
+                             ph_schema_version_t{ .major = probe.schema_version.major,
+                                                  .minor = probe.schema_version.minor,
+                                                  .patch = probe.schema_version.patch } };
+}
+
 ph_ctx::ph_ctx(std::string_view trace_path)
-: m_file_path{ existing_trace_path(trace_path) }
+: ph_ctx{ accept_trace(trace_path) }
+{}
+
+ph_ctx::ph_ctx(accepted_trace_t accepted)
+: m_file_path{ std::move(accepted.path) }
+, m_schema_version{ accepted.version }
 , m_catalog{ std::make_shared<profiler_hub::reader_catalog_t>() }
 {}
 
@@ -221,11 +229,6 @@ ph_ctx::read_trace(const stop_requested_fn& stop_requested, const progress_fn& p
     if(stop_requested()) return false;
 
     if(progress) progress(0.0, "Reading schema version");
-    profiler_hub::storage_t version_probe{ m_file_path, "" };
-    const auto              version = version_probe.get_storage_version();
-    m_schema_version                = { .major = version.major,
-                                        .minor = version.minor,
-                                        .patch = version.patch };
 
     if(progress) progress(0.0, "Building reader catalog");
     populate_reader_catalog(m_thread_pool, m_connection_pool, *m_catalog);
@@ -304,6 +307,61 @@ ph_ctx::get_track_samples(uint32_t track_id, uint64_t start_ts, uint64_t end_ts)
     }
 
     return m_track_reader.samples(track_it->second, start_ts, end_ts);
+}
+
+namespace
+{
+std::uint32_t
+narrow_histogram_count(std::size_t value)
+{
+    if(value > std::numeric_limits<std::uint32_t>::max())
+    {
+        throw std::overflow_error{ "histogram value does not fit uint32_t" };
+    }
+    return static_cast<std::uint32_t>(value);
+}
+}  // namespace
+
+void
+ph_ctx::build_histogram(uint32_t desired_bins, ph_histogram_t& output)
+{
+    const auto source = m_connection_pool.with_connection(
+        [desired_bins](profiler_hub::common::connection& connection) {
+            return connection.reader().get_histogram(desired_bins);
+        });
+
+    auto storage = std::make_unique<c_histogram_storage_t>();
+    storage->tracks.resize(source.tracks.size());
+    storage->buckets.resize(source.tracks.size());
+
+    for(std::size_t track_index = 0; track_index < source.tracks.size(); ++track_index)
+    {
+        const auto& source_track = source.tracks[track_index];
+        auto&       destination  = storage->buckets[track_index];
+        destination.reserve(source_track.buckets.size());
+        for(const auto& bucket : source_track.buckets)
+        {
+            destination.push_back(
+                ph_histogram_bucket_t{ narrow_histogram_count(bucket.bucket_index),
+                                       static_cast<std::uint64_t>(bucket.event_count),
+                                       bucket.value });
+        }
+        storage->tracks[track_index] =
+            ph_track_histogram_t{ narrow_histogram_count(source_track.track->id),
+                                  narrow_histogram_count(destination.size()),
+                                  destination.empty() ? nullptr : destination.data() };
+    }
+
+    storage->histogram =
+        ph_histogram_t{ static_cast<std::uint64_t>(source.origin_ts),
+                        static_cast<std::uint64_t>(source.bucket_size),
+                        narrow_histogram_count(source.bucket_count),
+                        narrow_histogram_count(storage->tracks.size()),
+                        storage->tracks.empty() ? nullptr : storage->tracks.data() };
+    output = storage->histogram;
+
+    const std::lock_guard<std::mutex> lock{ m_histogram_mutex };
+    m_histograms.push_back(std::move(storage));
 }
 
 void
@@ -466,6 +524,7 @@ ph_ctx::initialize_node_agents()
             .absolute_index = optional_uint64(agent->absolute_index),
             .logical_index  = optional_uint64(agent->logical_index),
             .uuid           = optional_uint64(agent->uuid),
+            .row_id         = static_cast<std::uint64_t>(agent->id),
         });
     }
 }
@@ -488,6 +547,7 @@ ph_ctx::initialize_node_processes()
             .fini        = optional_uint64(process->fini),
             .start       = optional_uint64(process->start),
             .end         = optional_uint64(process->end),
+            .row_id      = static_cast<std::uint64_t>(process->id),
         });
     }
 }
@@ -507,6 +567,7 @@ ph_ctx::initialize_node_threads()
             .parent_process_id = optional_uint64(thread->parent_process_id),
             .start             = optional_uint64(thread->start),
             .end               = optional_uint64(thread->end),
+            .row_id            = static_cast<uint64_t>(thread->id),
         });
     }
 }
@@ -523,6 +584,8 @@ ph_ctx::initialize_node_streams()
             .stream_id = static_cast<uint64_t>(stream->stream_id),
             .name      = stream->name.c_str(),
             .extdata   = stream->extdata.c_str(),
+            .nid       = static_cast<uint32_t>(stream->nid),
+            .pid       = static_cast<uint32_t>(stream->pid),
         });
     }
 }
@@ -539,6 +602,8 @@ ph_ctx::initialize_node_queues()
             .queue_id = static_cast<uint64_t>(queue->queue_id),
             .name     = queue->name.c_str(),
             .extdata  = queue->extdata.c_str(),
+            .nid      = static_cast<uint32_t>(queue->nid),
+            .pid      = static_cast<uint32_t>(queue->pid),
         });
     }
 }
@@ -567,6 +632,7 @@ ph_ctx::initialize_node_pmc_infos()
             .instance_id      = optional_uint64(pmc_info->instance_id),
             .is_constant      = optional_uint64(pmc_info->is_constant),
             .is_derived       = optional_uint64(pmc_info->is_derived),
+            .id               = static_cast<uint64_t>(pmc_info->id),
         });
     }
 }
