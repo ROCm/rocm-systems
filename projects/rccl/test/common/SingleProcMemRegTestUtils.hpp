@@ -41,6 +41,9 @@ namespace RcclUnitTesting
     ScopedEnvVar cuMem("NCCL_CUMEM_ENABLE", "1");
     ScopedEnvVar winEnable("NCCL_WIN_ENABLE", "1");
     ScopedEnvVar lsaTeamSize("NCCL_LSA_TEAM_SIZE", "0");
+    // DEBUG ONLY (revert before merge): surface the failing HIP VMM call in CI logs.
+    ScopedEnvVar ncclDebug("NCCL_DEBUG", "WARN");
+    ScopedEnvVar ncclDebugSubsys("NCCL_DEBUG_SUBSYS", "INIT,ALLOC,REG");
     TestBed testBed;
     int const hipRuntimeVer = testBed.ev.GetHipRuntimeVersion();
     if (!NCCL_CUMEM_VERSION_SUPPORTED(hipRuntimeVer))
