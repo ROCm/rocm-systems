@@ -1405,8 +1405,10 @@ static int rcclP2pChannelStride(struct ncclComm* comm, const struct ncclTaskP2p*
 static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* plan, int nChannelsMin, int nChannelsMax,
                                  int p2pRound, int sendRank, void* sendAddr, ssize_t sendBytes, int recvRank,
                                  void* recvAddr, ssize_t recvBytes, uint64_t sendOpCount, uint64_t recvOpCount,
-                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks) {
+                                 const int planTotalTasks[], struct ncclTaskP2p** p2pTasks,
+                                 bool* recvFirstOut = nullptr) {
   ncclResult_t ret = ncclSuccess;
+  if (recvFirstOut) *recvFirstOut = false;
   int connIndex[2] = {1, 1};
   bool selfSend = (sendRank == comm->rank);
   // recv: dir=0, send: dir=1
@@ -1418,7 +1420,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
   bool proxied[2] = {false, false}; // connections progressed by the proxy thread
   bool proxySameProcess[2] = {true, true};
   void** handles[2] = {NULL, NULL};
-  uint64_t p2pDirChannelMask[2] = {0, 0}; // per-direction channels (idx 0 recv, 1 send)
+  struct channelMasks p2pDirChannelMask[2] = {}; // per-direction channels (idx 0 recv, 1 send)
   // Keep policy direction-local so a different task paired in the same planner
   // round cannot change the channel count selected by this task's peer.
   int kChannels[2] = {rcclP2pPolicyChannels(comm, p2pTasks[0]), rcclP2pPolicyChannels(comm, p2pTasks[1])};
@@ -1717,10 +1719,6 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
       ret = ncclInvalidUsage;
       goto cleanup;
     }
-    ++plan->p2pPairCounter;
-    for (int i = 0; i < 2; i++) {
-      if (p2pTasks[i]) p2pTasks[i]->p2pPairId = plan->p2pPairCounter;
-    }
 
     // A work maps its parts with one stride (see sendrecv.h), the larger of the per-peer tile and
     // its channel count.
@@ -1779,7 +1777,7 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
         // Each direction uses its first nChannels[dir] parts; track per-direction
         // channels so the profiler emits KernelCh per direction (see profiler.cc).
         for (int i = 0; i < 2; i++)
-          if (part < workChannels[i]) p2pDirChannelMask[i] |= uint64_t(1) << channelId;
+          if (part < workChannels[i]) p2pDirChannelMask[i].masks[channelId / 64] |= uint64_t(1) << (channelId % 64);
         // Add batch first.
         addWorkBatchToPlan(comm, plan, channelId, ncclDevWorkTypeP2p, funcIdx, NCCL_PROGRESS_P2P_COUNTER_INDEX,
                            workOffset, p2pRound, batchP2P, wideP2P);
@@ -1841,11 +1839,20 @@ static ncclResult_t addP2pToPlan(struct ncclComm* comm, struct ncclKernelPlan* p
     // on every rank so both ends see the same order on channels the two tiles share.
     int tile[2] = {std::max(comm->p2pnChannelsPerPeer, nChannels[0]),
                    std::max(comm->p2pnChannelsPerPeer, nChannels[1])};
+    // The profiler counts one KernelCh step per work and channel, so each work of a split round is a
+    // pair of its own, numbered in emission order.
     if (!selfSend && bytes[0] != -1 && bytes[1] != -1 && tile[0] != tile[1]) {
       bool recvFirst = tile[0] > tile[1];
+      p2pTasks[recvFirst ? 0 : 1]->p2pPairId = ++plan->p2pPairCounter;
       NCCLCHECKGOTO(addWork(recvFirst, !recvFirst), ret, cleanup);
+      p2pTasks[recvFirst ? 1 : 0]->p2pPairId = ++plan->p2pPairCounter;
       NCCLCHECKGOTO(addWork(!recvFirst, recvFirst), ret, cleanup);
+      if (recvFirstOut) *recvFirstOut = recvFirst;
     } else {
+      ++plan->p2pPairCounter;
+      for (int i = 0; i < 2; i++) {
+        if (p2pTasks[i]) p2pTasks[i]->p2pPairId = plan->p2pPairCounter;
+      }
       NCCLCHECKGOTO(addWork(true, true), ret, cleanup);
     }
   }
@@ -1937,9 +1944,10 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
                             plan->workBytes + roundWorks * sizeof(struct ncclDevWorkP2p))) {
           return ncclSuccess;
         }
+        bool recvFirst = false;
         NCCLCHECK(addP2pToPlan(comm, plan, nChannelsMin, nChannelsMax, *p2pRound, sendRank, sendBuff, sendBytes,
                                recvRank, recvBuff, recvBytes, send ? send->opCount : 0, recv ? recv->opCount : 0,
-                               planTotalTasks, p2pTasks));
+                               planTotalTasks, p2pTasks, &recvFirst));
         if (send != nullptr) {
           ncclIntruQueueDequeue(&peers[sendRank].sendQueue);
           // Profiler - We can overwrite groupAPI event handles here since all operations here belong to the same group
@@ -1947,7 +1955,6 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
           if (send->launchCompletionEvent != nullptr) {
             plan->launchCompletionEvent = send->launchCompletionEvent;
           }
-          ncclIntruQueueEnqueue(&plan->p2pTaskQueue, send);
           comm->planner.nTasksP2p -= 1;
           comm->planner.nTasksP2pSend -= 1;
         }
@@ -1958,10 +1965,12 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
           if (recv->launchCompletionEvent != nullptr) {
             plan->launchCompletionEvent = recv->launchCompletionEvent;
           }
-          ncclIntruQueueEnqueue(&plan->p2pTaskQueue, recv);
           comm->planner.nTasksP2p -= 1;
           comm->planner.nTasksP2pRecv -= 1;
         }
+        // The profiler posts KernelCh steps in p2pTaskQueue order, which must follow work emission.
+        for (struct ncclTaskP2p* task : {recvFirst ? recv : send, recvFirst ? send : recv})
+          if (task != nullptr) ncclIntruQueueEnqueue(&plan->p2pTaskQueue, task);
       }
     }
     *p2pRound = 0;

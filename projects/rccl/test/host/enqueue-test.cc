@@ -4187,11 +4187,11 @@ struct WidenedP2pScene {
     recv.buff = recvBuf;
   }
 
-  ncclResult_t add() {
+  ncclResult_t add(bool* recvFirst = nullptr) {
     struct ncclTaskP2p* tasks[2] = {&recv, &send};
     return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/kChannelsPerPeer, /*nChannelsMax=*/kChannelsPerPeer, kRound,
                         kSendRank, sendBuf, send.bytes, kRecvRank, recvBuf, recv.bytes, /*sendOpCount=*/0,
-                        /*recvOpCount=*/0, planTotalTasks, tasks);
+                        /*recvOpCount=*/0, planTotalTasks, tasks, recvFirst);
   }
 
   ncclResult_t schedule(ssize_t inArgsBytes) {
@@ -4234,6 +4234,40 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_WidenedSendWithPerPeerRecv_SplitsWidenedWo
                                    WidenedP2pScene::kChannelsPerPeer, 1, 0);
     ASSERT_EQ(2, sc.bp.queueLength(ch)) << "channel " << ch;
     EXPECT_EQ(0u, sc.bp.chan(ch)->workBatchQueue.head->batch.offsetBase) << "channel " << ch;
+  }
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_SplitRound_RecordsEachWorkForTheProfiler) {
+  // KernelCh steps are counted per work and channel: the two works of a split round need their own
+  // pair ids, in emission order, and channel masks that reach past channel 63.
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+  bool recvFirst = true;
+  ASSERT_EQ(ncclSuccess, sc.add(&recvFirst));
+  EXPECT_FALSE(recvFirst);
+  EXPECT_EQ(1, sc.send.p2pPairId);
+  EXPECT_EQ(2, sc.recv.p2pPairId);
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, countOneBits(sc.send.channelMask));
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, countOneBits(sc.recv.channelMask));
+  EXPECT_EQ(~uint64_t(0), sc.send.channelMask.masks[3]) << "the widened tile of round 3 is channels 128-255";
+  EXPECT_EQ(0u, sc.send.channelMask.masks[0]);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_SplitRound_QueuesTasksInWorkOrder) {
+  {
+    WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+    ASSERT_EQ(ncclSuccess, sc.schedule(512 * kBatch));
+    ncclTaskP2p* first = ncclIntruQueueHead(&sc.bp.p()->p2pTaskQueue);
+    ASSERT_EQ(&sc.send, first) << "the widened send is emitted first";
+    ASSERT_EQ(&sc.recv, first->next);
+    EXPECT_LT(sc.send.p2pPairId, sc.recv.p2pPairId);
+  }
+  {
+    WidenedP2pScene sc(ncclFuncAlltoAll, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+    ASSERT_EQ(ncclSuccess, sc.schedule(512 * kBatch));
+    ncclTaskP2p* first = ncclIntruQueueHead(&sc.bp.p()->p2pTaskQueue);
+    ASSERT_EQ(&sc.recv, first) << "the widened receive is emitted first";
+    ASSERT_EQ(&sc.send, first->next);
+    EXPECT_LT(sc.recv.p2pPairId, sc.send.p2pPairId);
   }
 }
 

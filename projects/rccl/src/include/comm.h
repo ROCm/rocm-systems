@@ -357,8 +357,9 @@ struct ncclTaskP2p {
   uint64_t profilerTag; // Per-call profiler annotation (0 == untagged)
   // Per-direction channels used by this task; read by the profiler to emit and
   // advertise KernelCh per direction (StartTaskEvents / PostPlanWork).
-  uint64_t channelMask;
-  // Shared by both tasks of an addP2pToPlan() pair; 0 = unassigned.
+  struct channelMasks channelMask;
+  // Shared by the tasks of one P2P work item; a round split into two works gives each task its own.
+  // 0 = unassigned.
   uint16_t p2pPairId;
 };
 
@@ -424,7 +425,7 @@ struct ncclKernelPlan {
   bool hasProxyOps; // does any channel have a non-empty proxyOpQueue
   // Any task with ncclProfileKernelCh; gates the captured host callback.
   bool hasProfilerOps;
-  // Source of ncclTaskP2p::p2pPairId; incremented per addP2pToPlan() call.
+  // Source of ncclTaskP2p::p2pPairId; incremented per P2P work item.
   uint16_t p2pPairCounter;
   int threadPerBlock;
   int cgaClusterSize;  // per-launch CGA cluster size; defaults to comm->config.cgaClusterSize
