@@ -97,6 +97,7 @@ static inline ibv_mr* ncclIbMrForRange(const struct ncclIbMrHandle* h, uintptr_t
 }
 
 static inline bool ncclIbCtsRemoteMultiSeg(const struct ncclIbSendComm* comm, int slot, int r) {
+  if (comm->segLayoutFifo == NULL) return false;
   const volatile struct ncclIbSendFifo* cts = &comm->ctsFifo[slot][r];
   const volatile struct ncclIbSegLayout* side = &comm->segLayoutFifo[slot][r];
   return (comm->peerCaps & NCCL_IB_CAP_MULTISEG) && ncclIbCtsHasSideTable(cts->nreqs) && side->idx == cts->idx &&
@@ -120,7 +121,7 @@ static inline uint32_t ncclIbQpChunkSize(int size, int64_t splitDataThreshold, i
 static inline ncclResult_t ncclIbMultiSendSegmented(struct ncclIbSendComm* comm, int slot) {
   struct ncclIbRequest** reqs = comm->sendReqs[slot];
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
-  volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
+  volatile struct ncclIbSegLayout* side = comm->segLayoutFifo ? comm->segLayoutFifo[slot] : NULL;
   int nreqs = ncclIbCtsNreqs(slots[0].nreqs);
   if (nreqs > NCCL_NET_IB_MAX_RECVS) return ncclInternalError;
 
@@ -393,15 +394,22 @@ static inline bool rcclIbMultiSendNeedsSegmented(struct ncclIbSendComm* comm, in
   return false;
 }
 
-// Side table and CTS are separate RDMA writes. Wait for the matching idx so
-// a late side table is not treated as single-segment.
-static inline void rcclIbIsendWaitSideTable(struct ncclIbSendComm* comm, int slot, int nreqs, uint64_t idx) {
+// RCCL: CTS slot 0 already returns so the proxy can retry. Do the same here.
+static inline bool rcclIbIsendSideTableReady(struct ncclIbSendComm* comm, int slot, int nreqs, uint64_t idx) {
   volatile struct ncclIbSendFifo* slots = comm->ctsFifo[slot];
-  if (!(comm->peerCaps & NCCL_IB_CAP_MULTISEG) || !ncclIbCtsHasSideTable(slots[0].nreqs)) return;
-  volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
-  for (int r = 0; r < nreqs; r++)
-    while (side[r].idx != idx);
-  std::atomic_thread_fence(std::memory_order_seq_cst);
+  const bool haveTable = comm->segLayoutFifo != NULL;
+  const bool peerMulti = (comm->peerCaps & NCCL_IB_CAP_MULTISEG) != 0;
+  const bool ctsSide = ncclIbCtsHasSideTable(slots[0].nreqs);
+  uint64_t seen[NCCL_NET_IB_MAX_RECVS];
+  const uint64_t* slotIdx = NULL;
+  if (haveTable && peerMulti && ctsSide) {
+    volatile struct ncclIbSegLayout* side = comm->segLayoutFifo[slot];
+    for (int r = 0; r < nreqs && r < NCCL_NET_IB_MAX_RECVS; r++) seen[r] = side[r].idx;
+    slotIdx = seen;
+  }
+  if (!ncclIbSideTableReady(haveTable, peerMulti, ctsSide, slotIdx, nreqs, idx)) return false;
+  if (haveTable && peerMulti && ctsSide) std::atomic_thread_fence(std::memory_order_seq_cst);
+  return true;
 }
 
 // Returns the WR chain to post: the side-table write chained before the CTS WR,
@@ -899,8 +907,11 @@ ncclResult_t ncclIbIsend(void* sendComm, void* data, size_t size, int tag, void*
   for (int r = 1; r < nreqs; r++)
     while (slots[r].idx != idx);
   std::atomic_thread_fence(std::memory_order_seq_cst); // order the nreqsPtr load against tag/rkey/addr loads below
-  // RCCL: wait for the side-table idx before reading per-segment rkeys.
-  rcclIbIsendWaitSideTable(comm, slot, nreqs, idx);
+  // RCCL: a missing side-table idx retries on the next proxy progress.
+  if (!rcclIbIsendSideTableReady(comm, slot, nreqs, idx)) {
+    *request = NULL;
+    return ncclSuccess;
+  }
   for (int r = 0; r < nreqs; r++) {
     if (reqs[r] != NULL || slots[r].tag != tag) continue;
 

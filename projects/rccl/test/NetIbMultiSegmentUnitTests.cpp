@@ -526,3 +526,24 @@ TEST(NetIbMultiSeg, HostVmmBaseZeroDoesNotWrapRemaining)
     EXPECT_EQ(ncclIbBytesRemainingInSegment(kBase, 0, segSize), segSize);
     EXPECT_EQ(ncclIbBytesRemainingInSegment(kBase + 4096, kBase, segSize), segSize - 4096);
 }
+
+TEST(NetIbSideTable, MissingIdxIsNotReady) {
+    const uint64_t slotIdx[] = {7, 7, 0};
+    EXPECT_FALSE(ncclIbSideTableReady(true, true, true, slotIdx, 3, 7));
+}
+
+TEST(NetIbSideTable, MatchingIdxIsReady) {
+    const uint64_t slotIdx[] = {7, 7};
+    EXPECT_TRUE(ncclIbSideTableReady(true, true, true, slotIdx, 2, 7));
+}
+
+TEST(NetIbSideTable, NoTableOrNoCapDoesNotWait) {
+    const uint64_t slotIdx[] = {0};
+    EXPECT_TRUE(ncclIbSideTableReady(false, true, true, slotIdx, 1, 9));
+    EXPECT_TRUE(ncclIbSideTableReady(true, false, true, slotIdx, 1, 9));
+    EXPECT_TRUE(ncclIbSideTableReady(true, true, false, slotIdx, 1, 9));
+}
+
+TEST(NetIbSideTable, NullIdxWithTableIsNotReady) {
+    EXPECT_FALSE(ncclIbSideTableReady(true, true, true, nullptr, 1, 1));
+}

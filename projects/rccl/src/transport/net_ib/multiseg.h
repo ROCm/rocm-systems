@@ -66,6 +66,17 @@ static inline bool ncclIbCtsHasSideTable(uint32_t nreqs) {
   return (nreqs & NCCL_IB_CTS_NREQS_SIDE_TABLE) != 0;
 }
 
+// RCCL: false means the caller retries. No table, no peer cap, or no side bit is ready.
+static inline bool ncclIbSideTableReady(bool haveTable, bool peerMultiSeg, bool ctsHasSide, const uint64_t* slotIdx,
+                                        int nreqs, uint64_t idx) {
+  if (!haveTable || !peerMultiSeg || !ctsHasSide) return true;
+  if (slotIdx == NULL || nreqs < 1) return false;
+  for (int r = 0; r < nreqs; r++) {
+    if (slotIdx[r] != idx) return false;
+  }
+  return true;
+}
+
 // RCCL: a recv multi-segment registration is usable only if the peer can parse
 // the CTS side table. Single-segment buffers keep the legacy wire format.
 static inline bool ncclIbDeclineMultiSegRegistration(uint32_t peerCaps, int nSegments) {
