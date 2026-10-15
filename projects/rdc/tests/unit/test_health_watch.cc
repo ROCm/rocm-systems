@@ -25,8 +25,11 @@ THE SOFTWARE.
 
 #include <gtest/gtest.h>
 
+#include <iostream>
 #include <map>
 #include <memory>
+#include <sstream>
+#include <string>
 #include <vector>
 
 #include "amd_smi/amdsmi.h"
@@ -108,6 +111,26 @@ class NoNotifications : public amd::rdc::RdcNotification {
   rdc_status_t stop_listening(uint32_t) override { return RDC_ST_OK; }
 };
 
+class CaptureLog {
+ public:
+  CaptureLog() : saved_(std::cout.rdbuf(out_.rdbuf())) {}
+  ~CaptureLog() { std::cout.rdbuf(saved_); }
+
+  bool has_error(const std::string& text) const {
+    std::istringstream lines(out_.str());
+    for (std::string line; std::getline(lines, line);) {
+      if (line.find(" ERROR ") != std::string::npos && line.find(text) != std::string::npos) {
+        return true;
+      }
+    }
+    return false;
+  }
+
+ private:
+  std::ostringstream out_;
+  std::streambuf* saved_;
+};
+
 class HealthWatchTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -136,7 +159,11 @@ class HealthWatchTest : public ::testing::Test {
 TEST_F(HealthWatchTest, XgmiFallsBackToWaflWhereLegacyStatusIsUnreadable) {
   fetcher_->set(kGpu, RDC_HEALTH_XGMI_ERROR, RDC_ST_BAD_PARAMETER);
   fetcher_->set(kGpu, RDC_FI_ECC_XGMI_WAFL_UE, RDC_ST_OK, 0);
-  ASSERT_EQ(RDC_ST_OK, table_->rdc_health_set(group_, RDC_HEALTH_WATCH_XGMI));
+  {
+    CaptureLog log;
+    ASSERT_EQ(RDC_ST_OK, table_->rdc_health_set(group_, RDC_HEALTH_WATCH_XGMI));
+    EXPECT_FALSE(log.has_error("is not supported on GPU"));
+  }
 
   EXPECT_EQ(0u, check().incidents_count);
   EXPECT_EQ(1, fetcher_->fetches(kGpu, RDC_HEALTH_XGMI_ERROR));
@@ -187,7 +214,11 @@ TEST_F(HealthWatchTest, TransientProbeFailureStaysWatched) {
 }
 
 TEST_F(HealthWatchTest, NothingReadableLeavesNoWatch) {
-  EXPECT_EQ(RDC_ST_NOT_SUPPORTED, table_->rdc_health_set(group_, RDC_HEALTH_WATCH_XGMI));
+  {
+    CaptureLog log;
+    EXPECT_EQ(RDC_ST_NOT_SUPPORTED, table_->rdc_health_set(group_, RDC_HEALTH_WATCH_XGMI));
+    EXPECT_TRUE(log.has_error("is not supported on GPU"));
+  }
   unsigned int components = 1;
   EXPECT_EQ(RDC_ST_OK, table_->rdc_health_get(group_, &components));
   EXPECT_EQ(0u, components);
