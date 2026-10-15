@@ -56,6 +56,7 @@
 #include "suites/functional/memory_alignment.h"
 #include "suites/functional/memory_atomics.h"
 #include "suites/functional/memory_allocation.h"
+#include "suites/functional/memory_fragment.h"
 #include "suites/functional/memory_fill.h"
 #include "suites/functional/deallocation_notifier.h"
 #include "suites/functional/virtual_memory.h"
@@ -567,6 +568,27 @@ TEST(rocrtstFunc, Memory_Atomic_Xchg_Test) {
     RunCustomTestEpilog(&ma);
 }
 
+TEST(rocrtstFunc, Memory_Fragment_Overlap_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentOverlapTest();
+    RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_ZeroInit_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentZeroInitTest();
+    RunCustomTestEpilog(&mf);
+}
+
+TEST(rocrtstFunc, Memory_Fragment_Coherence_Test) {
+    MemoryFragment mf;
+    if (!RunCustomTestProlog(&mf)) return;
+    mf.FragmentCoherenceTest();
+    RunCustomTestEpilog(&mf);
+}
+
 TEST(rocrtstFunc, DISABLED_DebugBasicTests) {
     DebugBasicTest mt;
     if (!RunCustomTestProlog(&mt)) return;
@@ -793,6 +815,13 @@ TEST(rocrtstFunc, VirtMemory_Imported_Handle_Pointer_Info_Test) {
   VirtMemoryTestBasic vmt;
   if (!RunCustomTestProlog(&vmt)) return;
   vmt.TestImportedHandlePointerInfo();
+  RunCustomTestEpilog(&vmt);
+}
+
+TEST(rocrtstFunc, VirtMemory_Host_Backed_Alloc_Import_Info_Test) {
+  VirtMemoryTestBasic vmt;
+  if (!RunCustomTestProlog(&vmt)) return;
+  vmt.TestHostBackedAllocImportInfo();
   RunCustomTestEpilog(&vmt);
 }
 

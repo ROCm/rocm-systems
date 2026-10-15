@@ -19,6 +19,7 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <vector>
 
 // busIdToInt64 is an internal helper (declared in utils.h).
 ncclResult_t busIdToInt64(const char* busId, int64_t* id);
@@ -110,9 +111,21 @@ protected:
     EXPECT_EQ(xmlSetAttrInt(link, "count", count), ncclSuccess);
   }
 
+  // Rebuild the fixture XML tree. Needed when one TEST_F walks several CPU
+  // model-id cases and each case has to start from an empty <system>.
+  void resetXml() {
+    free(xml);
+    xml = nullptr;
+    root = nullptr;
+    ASSERT_EQ(xmlAlloc(&xml, kMaxXmlNodes), ncclSuccess);
+    ASSERT_EQ(xmlAddNode(xml, nullptr, "system", &root), ncclSuccess);
+  }
+
   // <cpu> populated with the attributes ncclTopoGetSystemFromXml() requires to
-  // build a full system (numaid, host id, x86/AMD identification).
-  struct ncclXmlNode* addSystemCpu(uint64_t hostHash, int numaId = 0) {
+  // build a full system (numaid, host id, x86 vendor/family/model).
+  struct ncclXmlNode* addSystemCpu(uint64_t hostHash, int numaId = 0,
+                                   const char* vendor = "AuthenticAMD", int familyId = 25,
+                                   int modelId = 1) {
     struct ncclXmlNode* cpu = nullptr;
     EXPECT_EQ(xmlAddNode(xml, root, "cpu", &cpu), ncclSuccess);
     char hash[32];
@@ -121,9 +134,9 @@ protected:
     EXPECT_EQ(xmlSetAttr(cpu, "host_hash", hash), ncclSuccess);
     EXPECT_EQ(xmlSetAttrInt(cpu, "numaid", numaId), ncclSuccess);
     EXPECT_EQ(xmlSetAttr(cpu, "arch", "x86_64"), ncclSuccess);
-    EXPECT_EQ(xmlSetAttr(cpu, "vendor", "AuthenticAMD"), ncclSuccess);
-    EXPECT_EQ(xmlSetAttrInt(cpu, "familyid", 25), ncclSuccess);
-    EXPECT_EQ(xmlSetAttrInt(cpu, "modelid", 1), ncclSuccess);
+    EXPECT_EQ(xmlSetAttr(cpu, "vendor", vendor), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(cpu, "familyid", familyId), ncclSuccess);
+    EXPECT_EQ(xmlSetAttrInt(cpu, "modelid", modelId), ncclSuccess);
     return cpu;
   }
 
@@ -297,6 +310,44 @@ protected:
     return nullptr;
   }
 
+  static struct ncclTopoLink* findSysLink(struct ncclTopoNode* from, struct ncclTopoNode* to) {
+    if (from == nullptr || to == nullptr) return nullptr;
+    for (int i = 0; i < from->nlinks; i++) {
+      if (from->links[i].type == LINK_SYS && from->links[i].remNode == to) return &from->links[i];
+    }
+    return nullptr;
+  }
+
+  // Calls f(path, source, target) for every computed path entry of every node.
+  template <typename F>
+  static void forEachPath(struct ncclTopoSystem* s, F&& f) {
+    for (int t1 = 0; t1 < NCCL_TOPO_NODE_TYPES; t1++) {
+      for (int n = 0; n < s->nodes[t1].count; n++) {
+        struct ncclTopoNode* source = s->nodes[t1].nodes + n;
+        for (int t2 = 0; t2 < NCCL_TOPO_NODE_TYPES; t2++) {
+          struct ncclTopoLinkList* paths = source->paths[t2];
+          if (paths == nullptr) continue;
+          for (int i = 0; i < s->nodes[t2].count; i++) f(paths + i, source, s->nodes[t2].nodes + i);
+        }
+      }
+    }
+  }
+
+  // Each hop has to leave the node the previous hop reached, starting at source, and the last one
+  // has to reach target.
+  static void expectPathReaches(const struct ncclTopoLinkList* path,
+                                const struct ncclTopoNode* source,
+                                const struct ncclTopoNode* target) {
+    ASSERT_NE(path->list, nullptr);
+    for (int h = 0; h < path->count; h++) {
+      const struct ncclTopoNode* from = h == 0 ? source : path->list[h - 1]->remNode;
+      bool found = false;
+      for (int l = 0; l < from->nlinks; l++) found |= (from->links + l == path->list[h]);
+      EXPECT_TRUE(found) << "hop " << h << " does not leave the node it starts from";
+    }
+    EXPECT_EQ(path->list[path->count - 1]->remNode, target);
+  }
+
   struct ncclTopoSystem* system = nullptr;
   struct ncclXml* xml = nullptr;
   struct ncclXmlNode* root = nullptr;
@@ -311,6 +362,63 @@ TEST_F(TopoTest, MloPartBusId_DoesNotClobberPciFunction) {
   EXPECT_NE(enc7, enc0);
   EXPECT_EQ(enc0 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
   EXPECT_EQ(enc7 & ~NCCL_TOPO_MLOPART_MASK, busFn1);
+}
+
+// NCCL 2.31.2 (35671f4): Granite Rapids (0xAD/0xAE) and Sierra Forest (0xAF) have
+// lower CPUID model IDs than Emerald Rapids (0xCF). The old `modelId >= 0xCF` test
+// classified them as Sapphire Rapids, so dual-socket SYS (UPI) bandwidth was 22 GB/s
+// instead of 40 GB/s and graph search could under-count channels. Drive a two-NUMA
+// Intel XML through ncclTopoGetSystemFromXml() and check CPU model plus the SYS link.
+TEST_F(TopoTest, IntelCpu_GnrSrfMapToErpAndUseErpUpiBandwidth) {
+  struct Case {
+    const char* name;
+    int familyId;
+    int modelId;
+    int expectedModel;
+    float expectedSysBw;
+  };
+  const Case cases[] = {
+    {"GraniteRapids", 6, 0xAD, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"GraniteRapidsD", 6, 0xAE, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"SierraForest", 6, 0xAF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    // Pins the hole between 0xAF and 0xCF. A rewrite to `modelId >= 0xAD` would
+    // still pass GNR/SRF/ERP while promoting this id (and 0xB0..0xCE) to ERP.
+    {"RaptorLake", 6, 0xB7, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
+    {"EmeraldRapids", 6, 0xCF, NCCL_TOPO_CPU_MODEL_INTEL_ERP, ERP_QPI_BW},
+    {"SapphireRapids", 6, 0x8F, NCCL_TOPO_CPU_MODEL_INTEL_SRP, SRP_QPI_BW},
+    {"Skylake", 6, 0x55, NCCL_TOPO_CPU_MODEL_INTEL_SKL, SKL_QPI_BW},
+    {"Broadwell", 6, 0x3F, NCCL_TOPO_CPU_MODEL_INTEL_BDW, BDW_QPI_BW},
+    // Pins family 6. Dropping that conjunct would classify this GNR model id as ERP.
+    {"NetburstGnrModel", 15, 0xAD, NCCL_TOPO_CPU_MODEL_INTEL_BDW, BDW_QPI_BW},
+  };
+
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.name);
+    ASSERT_NO_FATAL_FAILURE(resetXml());
+    const uint64_t host = 0x2e31;
+    addSystemCpu(host, /*numaId=*/0, "GenuineIntel", c.familyId, c.modelId);
+    addSystemCpu(host, /*numaId=*/1, "GenuineIntel", c.familyId, c.modelId);
+
+    struct ncclTopoSystem* built = nullptr;
+    ASSERT_EQ(ncclTopoGetSystemFromXml(xml, &built, host), ncclSuccess);
+    ASSERT_NE(built, nullptr);
+    ASSERT_EQ(built->nodes[CPU].count, 2);
+
+    for (int i = 0; i < 2; i++) {
+      EXPECT_EQ(built->nodes[CPU].nodes[i].cpu.arch, NCCL_TOPO_CPU_ARCH_X86) << c.name;
+      EXPECT_EQ(built->nodes[CPU].nodes[i].cpu.vendor, NCCL_TOPO_CPU_VENDOR_INTEL) << c.name;
+      EXPECT_EQ(built->nodes[CPU].nodes[i].cpu.model, c.expectedModel) << c.name;
+    }
+
+    struct ncclTopoLink* sys01 = findSysLink(&built->nodes[CPU].nodes[0], &built->nodes[CPU].nodes[1]);
+    struct ncclTopoLink* sys10 = findSysLink(&built->nodes[CPU].nodes[1], &built->nodes[CPU].nodes[0]);
+    ASSERT_NE(sys01, nullptr) << c.name;
+    ASSERT_NE(sys10, nullptr) << c.name;
+    EXPECT_FLOAT_EQ(sys01->bw, c.expectedSysBw) << c.name;
+    EXPECT_FLOAT_EQ(sys10->bw, c.expectedSysBw) << c.name;
+
+    ncclTopoFree(built);
+  }
 }
 
 // ncclTopoAddXGMI() is only built on HIP/AMD platforms, so guard these tests
@@ -1059,6 +1167,193 @@ TEST_F(TopoTest, RingSearch_TwoRailNode_StaysOnTheLocalNicPathType) {
         ncclTopoFree(built);
       },
       {{"NCCL_CROSS_NIC", "2"}});
+}
+
+// Path link lists are sized to the hops they hold, not to NCCL_TOPO_MAX_HOPS (AICOMRCCL-2016).
+TEST_F(TopoTest, ComputePaths_SizesLinkListsToHopCount) {
+  const uint64_t host = 0x2016;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addRail(cpu, /*rail=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+
+  int nonEmpty = 0;
+  forEachPath(built, [&](struct ncclTopoLinkList* path, struct ncclTopoNode* source,
+                         struct ncclTopoNode* target) {
+    EXPECT_LE(path->count, path->capacity);
+    // This topology has no cycles, so a list is reserved once when the search reaches its node and
+    // grows at most once more, when a diversion rewrites it.
+    EXPECT_LE(path->capacity, 2 * path->count + 2);
+    if (path->count == 0) return;
+    nonEmpty++;
+    expectPathReaches(path, source, target);
+  });
+  EXPECT_GT(nonEmpty, 0);
+
+  ncclTopoFree(built);
+}
+
+// Without GDR the GPU-to-NIC path is rebuilt through the CPU, which is longer than the entries the
+// direct path reserved, so its link list has to grow (AICOMRCCL-2016).
+TEST_F(TopoTest, ComputePaths_GrowsDivertedPathBeyondInitialReserve) {
+  const uint64_t host = 0x2017;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  struct ncclXmlNode* pciSwitch = addPciBridge(addPciBridge(cpu, "0000:0a:00.0"), "0000:0b:00.0");
+  addGpuPci(addPciBridge(pciSwitch, "0000:0b:01.0"), "0000:0c:00.0", "gfx942", /*rank=*/0, /*dev=*/0);
+  struct ncclXmlNode* nicPci = addNic(addPciBridge(pciSwitch, "0000:0b:02.0"), "0000:0d:00.0", /*dev=*/0);
+
+  // With GDR the path stays direct, so its list keeps the size the search reserved.
+  struct ncclTopoSystem* direct = buildSystemWithPaths(host);
+  ASSERT_NE(direct, nullptr);
+  ASSERT_EQ(direct->nodes[GPU].count, 1);
+  ASSERT_EQ(direct->nodes[NET].count, 1);
+  ASSERT_LT(direct->nodes[GPU].nodes->paths[NET][0].type, PATH_PHB)
+      << "precondition: with GDR the path stays below the CPU";
+  const int reserved = direct->nodes[GPU].nodes->paths[NET][0].capacity;
+  ncclTopoFree(direct);
+
+  ASSERT_EQ(xmlSetAttrInt(nicPci->subs[0]->subs[0], "gdr", 0), ncclSuccess);
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[GPU].count, 1);
+  ASSERT_EQ(built->nodes[NET].count, 1);
+
+  struct ncclTopoNode* gpu = built->nodes[GPU].nodes;
+  struct ncclTopoNode* net = built->nodes[NET].nodes;
+  ASSERT_NE(gpu->gpu.parent, nullptr);
+  int localCpu = -1;
+  ASSERT_EQ(ncclGetLocalCpu(built, 0, &localCpu), ncclSuccess);
+  ASSERT_GE(localCpu, 0);
+
+  struct ncclTopoLinkList* path = gpu->paths[NET];
+  ASSERT_EQ(path->type, PATH_PHB) << "precondition: without GDR the path goes through the CPU";
+  EXPECT_EQ(path->count, gpu->paths[CPU][localCpu].count +
+                             built->nodes[CPU].nodes[localCpu].paths[NET][0].count);
+  EXPECT_GT(path->count, reserved) << "the diverted path must not fit in the list the search reserved";
+  EXPECT_LE(path->count, path->capacity);
+  expectPathReaches(path, gpu, net);
+
+  ncclTopoFree(built);
+}
+
+// Removing a node shifts the node array under every computed path, so it is refused until the
+// paths are dropped, and the topology must still recompute afterwards (AICOMRCCL-2016).
+TEST_F(TopoTest, RemoveNode_RefusedWhilePathsComputed) {
+  const uint64_t host = 0x2018;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addRail(cpu, /*rail=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+  ASSERT_EQ(built->nodes[NET].count, 2);
+
+  // Removing NET 0 shifts NET 1 down, so every link to it has to follow.
+  struct ncclTopoNode* survivor = built->nodes[NET].nodes + 1;
+  const int64_t survivorId = survivor->id;
+  std::vector<struct ncclTopoNode*> survivorPeers;
+  for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++) {
+    if (t == NET) continue;
+    for (int n = 0; n < built->nodes[t].count; n++) {
+      struct ncclTopoNode* node = built->nodes[t].nodes + n;
+      for (int l = 0; l < node->nlinks; l++) {
+        if (node->links[l].remNode == survivor) survivorPeers.push_back(node);
+      }
+    }
+  }
+  ASSERT_FALSE(survivorPeers.empty());
+
+  auto linkTargets = [&]() {
+    std::vector<std::vector<struct ncclTopoNode*>> targets;
+    for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++) {
+      for (int n = 0; n < built->nodes[t].count; n++) {
+        struct ncclTopoNode* node = built->nodes[t].nodes + n;
+        targets.emplace_back();
+        for (int l = 0; l < node->nlinks; l++) targets.back().push_back(node->links[l].remNode);
+      }
+    }
+    return targets;
+  };
+  const auto linksBefore = linkTargets();
+  ASSERT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclInternalError);
+  EXPECT_EQ(built->nodes[NET].count, 2);
+  EXPECT_EQ(linkTargets(), linksBefore) << "a refused removal must not touch any link";
+
+  ncclTopoRemovePaths(built);
+  for (int t1 = 0; t1 < NCCL_TOPO_NODE_TYPES; t1++) {
+    for (int n = 0; n < built->nodes[t1].count; n++) {
+      for (int t2 = 0; t2 < NCCL_TOPO_NODE_TYPES; t2++) {
+        EXPECT_EQ(built->nodes[t1].nodes[n].paths[t2], nullptr);
+      }
+    }
+  }
+  ASSERT_EQ(ncclTopoRemoveNode(built, NET, 0), ncclSuccess);
+  ASSERT_EQ(built->nodes[NET].count, 1);
+  EXPECT_EQ(built->nodes[NET].nodes[0].id, survivorId);
+  for (struct ncclTopoNode* peer : survivorPeers) {
+    bool linked = false;
+    for (int l = 0; l < peer->nlinks; l++) linked |= (peer->links[l].remNode == built->nodes[NET].nodes);
+    EXPECT_TRUE(linked) << "node " << peer->type << "/" << peer->id << " lost its link to the shifted NET";
+  }
+  for (int t = 0; t < NCCL_TOPO_NODE_TYPES; t++) {
+    for (int n = 0; n < built->nodes[t].count; n++) {
+      struct ncclTopoNode* node = built->nodes[t].nodes + n;
+      for (int l = 0; l < node->nlinks; l++) {
+        const struct ncclTopoNode* remNode = node->links[l].remNode;
+        const struct ncclTopoNodeSet* remSet = built->nodes + remNode->type;
+        EXPECT_LT(remNode - remSet->nodes, remSet->count)
+            << "node " << t << "/" << n << " still links past the live nodes of type " << remNode->type;
+      }
+    }
+  }
+  EXPECT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+
+  ncclTopoFree(built);
+}
+
+// Communicator init computes paths more than once, freeing and rebuilding every link list each
+// time; the result must not depend on the round (AICOMRCCL-2016).
+TEST_F(TopoTest, ComputePaths_RecomputeKeepsPaths) {
+  const uint64_t host = 0x2019;
+  struct ncclXmlNode* cpu = addSystemCpu(host);
+  addRail(cpu, /*rail=*/0);
+  addRail(cpu, /*rail=*/1);
+  struct ncclTopoSystem* built = buildSystemWithPaths(host);
+  ASSERT_NE(built, nullptr);
+
+  struct PathEntry {
+    int count;
+    int capacity;
+    int type;
+    float bw;
+    std::vector<struct ncclTopoLink*> hops;
+  };
+  auto snapshot = [&]() {
+    std::vector<PathEntry> entries;
+    forEachPath(built, [&](struct ncclTopoLinkList* path, struct ncclTopoNode*, struct ncclTopoNode*) {
+      entries.push_back({path->count, path->capacity, path->type, path->bw,
+                         std::vector<struct ncclTopoLink*>(path->list, path->list + path->count)});
+    });
+    return entries;
+  };
+
+  const std::vector<PathEntry> first = snapshot();
+  ASSERT_FALSE(first.empty());
+  for (int round = 1; round <= 2; round++) {
+    SCOPED_TRACE(testing::Message() << "recompute round " << round);
+    ASSERT_EQ(ncclTopoComputePaths(built, nullptr), ncclSuccess);
+    const std::vector<PathEntry> again = snapshot();
+    ASSERT_EQ(again.size(), first.size());
+    for (size_t i = 0; i < first.size(); i++) {
+      EXPECT_EQ(again[i].count, first[i].count) << "entry " << i;
+      EXPECT_EQ(again[i].capacity, first[i].capacity) << "entry " << i;
+      EXPECT_EQ(again[i].type, first[i].type) << "entry " << i;
+      EXPECT_FLOAT_EQ(again[i].bw, first[i].bw) << "entry " << i;
+      EXPECT_EQ(again[i].hops, first[i].hops) << "entry " << i;
+    }
+  }
+
+  ncclTopoFree(built);
 }
 
 #else // !(__HIP_PLATFORM_AMD__ || __HIPCC__)

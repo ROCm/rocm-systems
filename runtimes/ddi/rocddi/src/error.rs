@@ -1,3 +1,4 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
 //! Error taxonomy shared by discovery and native resource operations.
@@ -10,6 +11,11 @@
 use std::error::Error as StdError;
 use std::fmt;
 use std::io;
+
+/// Constructs a DDI validation or state error without a native I/O source.
+pub(crate) fn error(kind: ErrorKind, detail: &'static str) -> Error {
+    Error::Operation { kind, detail }
+}
 
 /// Stable, coarse error classification for programmatic recovery decisions.
 ///

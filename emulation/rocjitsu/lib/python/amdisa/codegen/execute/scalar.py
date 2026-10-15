@@ -478,12 +478,12 @@ def gen_scalar_binop(
             L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
             L.append('  wf.write_scc(s0 > s1);')
     elif op == 'absdiff':
-        # Use int64_t to avoid signed overflow UB when s0 and s1 are
-        # near INT32_MIN/INT32_MAX (e.g., INT32_MAX - INT32_MIN).
-        L.append('  int64_t wide_s0 = static_cast<int64_t>(s0);')
-        L.append('  int64_t wide_s1 = static_cast<int64_t>(s1);')
+        # The ISA wraps the signed subtraction before taking its magnitude.
         L.append(
-            '  uint32_t result = static_cast<uint32_t>(wide_s0 > wide_s1 ? (wide_s0 - wide_s1) : (wide_s1 - wide_s0));'
+            '  uint32_t difference = static_cast<uint32_t>(s0) - static_cast<uint32_t>(s1);'
+        )
+        L.append(
+            '  uint32_t result = difference & 0x80000000u ? 0u - difference : difference;'
         )
         L.append(f'  amdgpu::RegisterAccess(wf).write_scalar({dst[0]}, result);')
         L.append('  wf.write_scc(result != 0);')

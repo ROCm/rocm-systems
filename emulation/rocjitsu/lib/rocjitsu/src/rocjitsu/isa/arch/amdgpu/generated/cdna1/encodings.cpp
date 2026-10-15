@@ -270,8 +270,7 @@ bool Vop1::has_encoded_dpp() const {
   return inst_.op <= 1 || (inst_.op >= 5 && inst_.op <= 8) || (inst_.op >= 10 && inst_.op <= 14) ||
          (inst_.op >= 17 && inst_.op <= 20) || (inst_.op >= 27 && inst_.op <= 36) ||
          inst_.op == 39 || (inst_.op >= 41 && inst_.op <= 47) ||
-         (inst_.op >= 51 && inst_.op <= 52) || inst_.op == 55 ||
-         (inst_.op >= 57 && inst_.op <= 74) || (inst_.op >= 77 && inst_.op <= 79);
+         (inst_.op >= 51 && inst_.op <= 52) || inst_.op == 55 || (inst_.op >= 57 && inst_.op <= 79);
 }
 
 void Vop1::append_mnemonic(std::string &out) const {
@@ -354,6 +353,8 @@ bool Vop1::has_encoded_literal32() const {
   case 72:
   case 73:
   case 74:
+  case 75:
+  case 76:
   case 77:
   case 78:
   case 79:
@@ -369,8 +370,7 @@ bool Vop1::has_encoded_sdwa() const {
   return inst_.op <= 1 || (inst_.op >= 5 && inst_.op <= 8) || (inst_.op >= 10 && inst_.op <= 14) ||
          (inst_.op >= 17 && inst_.op <= 20) || (inst_.op >= 27 && inst_.op <= 36) ||
          inst_.op == 39 || (inst_.op >= 41 && inst_.op <= 47) ||
-         (inst_.op >= 51 && inst_.op <= 52) || inst_.op == 55 ||
-         (inst_.op >= 57 && inst_.op <= 74) || (inst_.op >= 77 && inst_.op <= 79);
+         (inst_.op >= 51 && inst_.op <= 52) || inst_.op == 55 || (inst_.op >= 57 && inst_.op <= 79);
 }
 
 Vop1::Vop1(std::string_view mnemonic, const Vop1MachineInst *inst, ExecuteFn exec_fn)
@@ -880,8 +880,9 @@ Vop3::Vop3(std::string_view mnemonic, const Vop3MachineInst *inst, ExecuteFn exe
 }
 
 bool Ds::uses_split_ds_offsets() const {
-  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 55 && inst_.op <= 56) ||
-         (inst_.op >= 78 && inst_.op <= 79) || (inst_.op >= 119 && inst_.op <= 120);
+  return (inst_.op >= 14 && inst_.op <= 15) || (inst_.op >= 46 && inst_.op <= 47) ||
+         (inst_.op >= 55 && inst_.op <= 56) || (inst_.op >= 78 && inst_.op <= 79) ||
+         (inst_.op >= 110 && inst_.op <= 111) || (inst_.op >= 119 && inst_.op <= 120);
 }
 
 Ds::Ds(std::string_view mnemonic, const DsMachineInst *inst, ExecuteFn exec_fn)

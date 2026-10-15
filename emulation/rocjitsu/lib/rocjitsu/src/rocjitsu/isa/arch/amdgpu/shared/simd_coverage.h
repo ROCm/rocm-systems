@@ -357,8 +357,7 @@ template <bool Extended, typename Slot>
     if (slot.op == 0)
       acc.emplace(regs.read_operand(*slot.dst, exec));
     const uint64_t condition =
-        slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask(exec) : read_wave_mask_scalar(*slot.src2, wf))
-                     : 0;
+        slot.op == 9 ? (slot.uses_vcc ? wf.vcc_mask() : read_wave_mask_scalar(*slot.src2, wf)) : 0;
     for (uint32_t base = 0; base < wf.wf_size(); base += W) {
       if (!((exec >> base) & util::mask<uint64_t>(W)))
         continue;
@@ -413,6 +412,15 @@ template <bool Extended, typename Slot>
       }
       case 10:
       case 11: {
+        // RDNA3 names these V_DUAL_MAX_F32/V_DUAL_MIN_F32; later targets have
+        // the IEEE maximumNumber/minimumNumber forms.
+        const rj_code_arch_t arch = wf.cu().arch();
+        if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5) {
+          const auto policy = input_denormal::Policy::make(wf.fp_denorm_mode_f32());
+          result = slot.op == 10 ? minmax::evaluate<fp_format::F32, minmax::MaxNum>(policy, av, bv)
+                                 : minmax::evaluate<fp_format::F32, minmax::MinNum>(policy, av, bv);
+          break;
+        }
         F selected = bf;
         if (slot.op == 10)
           util::stdx::where(af > bf, selected) = af;

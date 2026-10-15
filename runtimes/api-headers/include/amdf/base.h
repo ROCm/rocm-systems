@@ -64,7 +64,7 @@ static inline void amdf_abort(void) { abort(); }
 extern "C" {
 #endif
 
-/// Version number identifying compatible public API tables and structures.
+/// Version number identifying a compatible public API layout and contract.
 typedef uint32_t amdf_abi_version_t;
 
 /// The original libamdf ABI version.
@@ -76,8 +76,14 @@ typedef uint32_t amdf_abi_version_t;
 /// Exact prospective CREATE payload geometry in construction capabilities.
 #define AMDF_ABI_VERSION_3 ((amdf_abi_version_t)3)
 
+/// Final queue destruction consumes handles on native cleanup failure.
+#define AMDF_ABI_VERSION_4 ((amdf_abi_version_t)4)
+
+/// Activated kernel queue information includes native notification types.
+#define AMDF_ABI_VERSION_5 ((amdf_abi_version_t)5)
+
 /// The most recent ABI version described by this header.
-#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_3
+#define AMDF_ABI_VERSION_LATEST AMDF_ABI_VERSION_5
 
 /// The unmangled symbol used to acquire the immutable API table.
 #define AMDF_QUERY_API_SYMBOL "amdf_query_api"
@@ -270,52 +276,6 @@ typedef struct amdf_user_queue_mapping_t amdf_user_queue_mapping_t;
 /// Kernel-mediated publication and retirement of native commands.
 typedef struct amdf_kernel_queue_t amdf_kernel_queue_t;
 
-/// Allocates one uninitialized host-memory range.
-///
-/// `byte_length` is nonzero. `minimum_alignment` is a power of two and at
-/// least the platform's natural maximum alignment. Returns a suitably aligned
-/// allocation or `NULL` when storage is unavailable. The callback must be
-/// thread-safe and must not throw or unwind across the C ABI.
-typedef void*(AMDF_CALL* amdf_allocator_allocate_fn_t)(
-    void* user_data, uint64_t byte_length, uint64_t minimum_alignment);
-
-/// Resizes one host-memory allocation without changing it on failure.
-///
-/// `allocation` was returned by the same allocator. Success preserves the
-/// lesser of `old_byte_length` and `new_byte_length` bytes and returns a
-/// suitably aligned allocation. Returning `NULL` leaves `allocation` live and
-/// unchanged. The callback must be thread-safe and must not throw or unwind
-/// across the C ABI.
-typedef void*(AMDF_CALL* amdf_allocator_resize_fn_t)(
-    void* user_data, void* allocation, uint64_t old_byte_length,
-    uint64_t new_byte_length, uint64_t minimum_alignment);
-
-/// Frees one host-memory allocation returned by the same allocator.
-///
-/// `allocation` may be `NULL`. The callback is infallible, must be thread-safe,
-/// and must not throw or unwind across the C ABI.
-typedef void(AMDF_CALL* amdf_allocator_free_fn_t)(void* user_data,
-                                                  void* allocation);
-
-/// Instance-scoped host-memory allocator used by libamdf-owned metadata.
-///
-/// An all-zero value selects the built-in system allocator. Otherwise
-/// `allocate` and `free` are required. `resize` may be `NULL`, in which case
-/// libamdf implements resize with allocate-copy-free. The value is copied when
-/// the instance is created; `user_data` and callback code must remain valid
-/// until instance destruction succeeds. Native device backing and operating
-/// system allocations do not use this allocator.
-typedef struct amdf_allocator_t {
-  /// Opaque value passed to every callback.
-  void* user_data;
-  /// Required uninitialized allocation callback.
-  amdf_allocator_allocate_fn_t allocate;
-  /// Optional allocation-resize callback.
-  amdf_allocator_resize_fn_t resize;
-  /// Required infallible release callback.
-  amdf_allocator_free_fn_t free;
-} amdf_allocator_t;
-
 /// Maximum lifetime permitted for native state acquired by an instance.
 ///
 /// Resources may be released earlier. This policy neither changes public
@@ -348,8 +308,6 @@ typedef struct amdf_instance_create_info_t {
   amdf_native_lifetime_t native_lifetime;
   /// Reserved for compatible growth and must be zero.
   uint32_t reserved;
-  /// Host allocator copied and used by this instance and all of its children.
-  amdf_allocator_t host_allocator;
 } amdf_instance_create_info_t;
 
 /// Opaque provider identity used to reopen one enumerated endpoint.
