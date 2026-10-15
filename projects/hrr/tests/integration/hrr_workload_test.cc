@@ -4533,3 +4533,78 @@ TEST_CASE("Unit_HRR_FailedShimCalls_Direct", "[.][hrr-direct]") {
   HRR_HIP_CHECK(hipStreamDestroy(stream));
   HRR_HIP_CHECK(hipMemPoolDestroy(pool));
 }
+
+// ---------------------------------------------------------------------------
+// hipExtMemcpyBatchAsync with offset pointers, per-entry sizes, a zeroed
+// sizesDst array and two attribute ranges; D2H of both destinations. A second
+// batch issues an asymmetric swap (sizesDst != sizes) where swap is supported;
+// D2H covers both operands.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_ExtMemcpyBatch_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  constexpr size_t kBytes = 4096;
+  unsigned char *src = nullptr, *dst0 = nullptr, *dst1 = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&src, kBytes));
+  HRR_HIP_CHECK(hipMalloc(&dst0, kBytes));
+  HRR_HIP_CHECK(hipMalloc(&dst1, kBytes));
+  std::vector<unsigned char> h(kBytes);
+  for (size_t i = 0; i < kBytes; ++i) h[i] = static_cast<unsigned char>(i * 7 + 1);
+  HRR_HIP_CHECK(hipMemcpy(src, h.data(), kBytes, hipMemcpyHostToDevice));
+  HRR_HIP_CHECK(hipMemset(dst0, 0, kBytes));
+  HRR_HIP_CHECK(hipMemset(dst1, 0, kBytes));
+  hipStream_t stream = nullptr;
+  HRR_HIP_CHECK(hipStreamCreate(&stream));
+
+  void* dsts[] = {dst0, dst1 + 128};
+  void* srcs[] = {src + 64, src};
+  size_t sizes[] = {1024, 2048};
+  size_t sizes_dst[] = {0, 0};
+  hipExtMemcpyAttributes attrs[2] = {};
+  attrs[0].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  attrs[1].flags = hipMemcpyFlagExtPreferLinear;
+  size_t attr_idxs[] = {0, 1};
+  HRR_HIP_CHECK(hipExtMemcpyBatchAsync(dsts, srcs, sizes, sizes_dst, nullptr, nullptr, 2,
+                                       attrs, attr_idxs, 2, stream));
+  HRR_HIP_CHECK(hipStreamSynchronize(stream));
+
+  std::vector<unsigned char> out0(kBytes), out1(kBytes);
+  HRR_HIP_CHECK(hipMemcpy(out0.data(), dst0, kBytes, hipMemcpyDeviceToHost));
+  HRR_HIP_CHECK(hipMemcpy(out1.data(), dst1, kBytes, hipMemcpyDeviceToHost));
+  for (size_t i = 0; i < kBytes; ++i) {
+    REQUIRE(out0[i] == (i < 1024 ? h[i + 64] : 0));
+    REQUIRE(out1[i] == (i >= 128 && i < 128 + 2048 ? h[i - 128] : 0));
+  }
+
+  // Asymmetric swap: dst0[0, 2048) <- src[0, 2048), src[0, 1024) <- dst0[0, 1024).
+  HRR_HIP_CHECK(hipMemcpy(dst0, out0.data(), kBytes, hipMemcpyHostToDevice));
+  void* swap_dsts[] = {dst0};
+  void* swap_srcs[] = {src};
+  size_t swap_sizes[] = {2048};
+  size_t swap_sizes_dst[] = {1024};
+  hipExtMemcpyAttributes swap_attr{};
+  swap_attr.srcAccessOrder = hipMemcpySrcAccessOrderStream;
+  swap_attr.flags = hipMemcpyFlagExtOpSwap;
+  size_t swap_attr_idx[] = {0};
+  const hipError_t swap_err = hipExtMemcpyBatchAsync(swap_dsts, swap_srcs, swap_sizes,
+                                                     swap_sizes_dst, nullptr, nullptr, 1,
+                                                     &swap_attr, swap_attr_idx, 1, stream);
+  if (swap_err == hipErrorNotSupported) {
+    (void)hipGetLastError();
+  } else {
+    HRR_HIP_CHECK(swap_err);
+    HRR_HIP_CHECK(hipStreamSynchronize(stream));
+    std::vector<unsigned char> swapped_dst(kBytes), swapped_src(kBytes);
+    HRR_HIP_CHECK(hipMemcpy(swapped_dst.data(), dst0, kBytes, hipMemcpyDeviceToHost));
+    HRR_HIP_CHECK(hipMemcpy(swapped_src.data(), src, kBytes, hipMemcpyDeviceToHost));
+    for (size_t i = 0; i < kBytes; ++i) {
+      REQUIRE(swapped_dst[i] == (i < 2048 ? h[i] : out0[i]));
+      REQUIRE(swapped_src[i] == (i < 1024 ? out0[i] : h[i]));
+    }
+  }
+
+  HRR_HIP_CHECK(hipStreamDestroy(stream));
+  HRR_HIP_CHECK(hipFree(src));
+  HRR_HIP_CHECK(hipFree(dst0));
+  HRR_HIP_CHECK(hipFree(dst1));
+}
