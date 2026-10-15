@@ -257,17 +257,17 @@ producer_loop(
     // Drain remaining ATT data after a stop; waits for a free slot to land it in.
     auto iterate_trace = [&]() {
         hsa_status_t status = HSA_STATUS_SUCCESS;
-        auto data = iterate_data(*buffer_packets.at(0), status);
+        auto         data   = iterate_data(*buffer_packets.at(0), status);
         for(auto& packet : buffer_packets)
         {
             auto wptr = trace_callback_data_t{};
-            auto it = std::find_if(data.begin(), data.end(), [&](const auto& sample) {
+            auto it   = std::find_if(data.begin(), data.end(), [&](const auto& sample) {
                 return sample.se_id == static_cast<uint32_t>(packet->shader_engine_id);
             });
             if(it != data.end()) wptr = *it;
 
             auto& current_ts = current_timestamps.at(packet->shader_engine_id);
-            auto clock = packet->get_gpu_clock();
+            auto  clock      = packet->get_gpu_clock();
             if(current_ts.gpu_clock == 0)
                 current_ts = convert_timestamp(queue.agent_id, clock.start);
             auto end_ts = convert_timestamp(queue.agent_id, clock.latest);
@@ -287,8 +287,15 @@ producer_loop(
             }
             ROCP_INFO << "Iterate data for " << packet->shader_engine_id
                       << " with size: " << wptr.size;
-            send_to_consumer(wptr.data, wptr.size, flags, wait_for_free_slot(),
-                             packet->shader_engine_id, false, 0, current_ts, end_ts);
+            send_to_consumer(wptr.data,
+                             wptr.size,
+                             flags,
+                             wait_for_free_slot(),
+                             packet->shader_engine_id,
+                             false,
+                             0,
+                             current_ts,
+                             end_ts);
         }
     };
 
@@ -300,7 +307,7 @@ producer_loop(
         {
             if(packet->header == 0) continue;
             header_plus_zeros.at(0) = packet->header;
-            size_t hidx = wait_for_free_slot();
+            size_t hidx             = wait_for_free_slot();
             send_to_consumer(header_plus_zeros.data(),
                              sizeof(header_plus_zeros),
                              ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_NONE,
@@ -375,10 +382,10 @@ producer_loop(
             // The copy engine is not ordered by the AQL barrier bit; wait for the swap.
             if(!att_queue_submit(queue, &status.packet, &submit_signal)) return;
             signal_wait(submit_signal);
-            auto it = std::find_if(buffer_packets.begin(), buffer_packets.end(),
-                                   [&](const auto& packet) {
-                                       return packet->shader_engine_id == status.shader_engine_id;
-                                   });
+            auto it =
+                std::find_if(buffer_packets.begin(), buffer_packets.end(), [&](const auto& packet) {
+                    return packet->shader_engine_id == status.shader_engine_id;
+                });
             swap_timestamps.at(status.shader_engine_id) =
                 convert_timestamp(queue.agent_id, (*it)->get_gpu_clock().latest);
         }
@@ -400,7 +407,7 @@ producer_loop(
             }
 
             auto& current_ts = current_timestamps.at(status.shader_engine_id);
-            auto swap_ts = swap_timestamps.at(status.shader_engine_id);
+            auto  swap_ts    = swap_timestamps.at(status.shader_engine_id);
             send_to_consumer(status.data,
                              status.size,
                              flags,
@@ -421,7 +428,8 @@ producer_loop(
 
             if(!parameters.restart_trace(parameters.control_packet)) return;
             // Read each restarted engine's clock after the next query or final stop.
-            std::fill(current_timestamps.begin(), current_timestamps.end(),
+            std::fill(current_timestamps.begin(),
+                      current_timestamps.end(),
                       rocprofiler_thread_trace_timestamp_t{});
         }
     }

@@ -76,10 +76,9 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
     TraceMemoryManager* memorymgr = dynamic_cast<TraceMemoryManager*>(shared_memorymgr.get());
     if(!memorymgr) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
 
-    auto reset_swaps =
-        rocprofiler::common::scope_destructor{[memorymgr]() {
-            std::fill(memorymgr->buffer_swaps.begin(), memorymgr->buffer_swaps.end(), 0);
-        }};
+    auto reset_swaps = rocprofiler::common::scope_destructor{[memorymgr]() {
+        std::fill(memorymgr->buffer_swaps.begin(), memorymgr->buffer_swaps.end(), 0);
+    }};
 
     aql_profile::Pm4Factory* pm4_factory =
         aql_profile::Pm4Factory::Create(memorymgr->AgentHandle());
@@ -142,10 +141,10 @@ _internal_aqlprofile_att_iterate_data(aqlprofile_handle_t            handle,
 
         if(memorymgr->isDoubleBuffer())
         {
-            auto& buffer_swap = memorymgr->buffer_swaps.at(se_index);
-            auto& buffer_data = memorymgr->config.buffer_data.at(se_index);
-            size_t buf_num = buffer_data.size();
-            sample_ptr     = buffer_data[(buffer_swap + buf_num - 1) % buf_num];
+            auto&  buffer_swap   = memorymgr->buffer_swaps.at(se_index);
+            auto&  buffer_data   = memorymgr->config.buffer_data.at(se_index);
+            size_t buf_num       = buffer_data.size();
+            sample_ptr           = buffer_data[(buffer_swap + buf_num - 1) % buf_num];
             auto callback_status = callback(se_index, sample_ptr, sample_size, userdata);
             if(callback_status != HSA_STATUS_SUCCESS) return callback_status;
         }
@@ -295,8 +294,7 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
 
     pm4_builder::SqttBuilder* sqtt_builder = pm4_factory->GetSqttBuilder();
 
-    if(pm4_factory->GetGpuId() == aql_profile::GFX10_GPU_ID ||
-       pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID)
+    if(pm4_factory->GetGpuId() == aql_profile::GFX10_GPU_ID || pm4_factory->IsGFX11())
         trace_config.capacity_per_disabled_se = uint64_t(1) << sqtt_builder->BufferAlignment();
 
     const uint64_t TT_BUF_ALIGN_MASK = ~((uint64_t(1) << sqtt_builder->BufferAlignment()) - 1);
@@ -307,7 +305,7 @@ _internal_aqlprofile_att_create_packets(aqlprofile_handle_t*                  ha
 
     constexpr uint64_t MIN_BUFFER_SIZE = uint64_t(1) << 17;
     uint64_t           MAX_BUFFER_SIZE = uint64_t(1) << 34;
-    if(pm4_factory->GetGpuId() == aql_profile::GFX11_GPU_ID) MAX_BUFFER_SIZE = uint64_t(1) << 29;
+    if(pm4_factory->IsGFX11()) MAX_BUFFER_SIZE = uint64_t(1) << 29;
 
     if(trace_config.capacity_per_se >= MAX_BUFFER_SIZE) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     if(trace_config.capacity_per_se < MIN_BUFFER_SIZE) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
