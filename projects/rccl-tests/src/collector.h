@@ -25,8 +25,8 @@
  *   COUNTER_SRC_IB_HW    – /sys/class/infiniband/<dev>/ports/<port>/hw_counters/
  *                           (port parsed from NCCL_IB_HCA suffix, default 1;
  *                            falls back to device-level hw_counters/ if needed)
- *   COUNTER_SRC_DEBUGFS  – /sys/kernel/debug/bnxt_re/<dev>/info; also the
- *                           fallback for any counter not found above (needs root)
+ *   COUNTER_SRC_DEBUGFS  – /sys/kernel/debug/bnxt_re/<dev>/info (needs root);
+ *                           also the fallback for counters flagged 'debugfs'
  *
  * A counter not read in both snapshots prints N/A, never 0.
  *************************************************************************/
@@ -49,11 +49,12 @@ enum CounterSource {
 };
 
 struct CounterDescriptor {
-  std::string name;           // canonical/display key (also primary sysfs lookup name)
+  std::string name;           // column name; also the lookup key unless 'key' is set
   CounterSource source;
   bool is_prefix;             // true -> sum of keys matching the key ('*' = priority number)
-  std::string fallback_name;  // alternative sysfs key to try when 'name' is missing
+  std::string fallback_name;  // alternative key to try when the lookup key is missing
   std::string key = {};       // lookup key or pattern if it differs from name
+  bool debugfs = false;       // fall back to bnxt_re debugfs if not read
 };
 
 typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC, NIC_MLX5 } NicType;
@@ -64,6 +65,7 @@ struct NetworkCounterSnapshot {
   char    ib_device[256];
   int64_t timestamp_us;
   NicType nic_type;
+  std::set<std::string> debugfs_counters;  // counters read from debugfs
 };
 
 struct NetworkCounterContext {
@@ -95,7 +97,7 @@ bool NetCounterIsEnabled();
 // Return counter list for the given NIC type
 std::vector<CounterDescriptor> NetCounterGetCounterList(NicType nic_type);
 
-// Parse NCCL_IB_HCA into IB device names (empty if unset)
+// IB devices selected by NCCL_IB_HCA (empty if unset or nothing matches)
 std::vector<std::string> NetCounterParseIbHcaList();
 
 // Select from devs by an NCCL_IB_HCA value

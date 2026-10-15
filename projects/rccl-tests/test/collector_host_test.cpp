@@ -12,6 +12,8 @@
 #include <algorithm>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -140,6 +142,52 @@ TEST(Collector, Delta_MissingCounterIsNotZero) {
   EXPECT_EQ(delta, 4u);
 }
 
+TEST(Collector, Debugfs_OnlyFlaggedMissingCounters) {
+  auto bnxt = NetCounterGetCounterList(NIC_BNXT_RE);
+  std::map<std::string, uint64_t> read = {{"to_retransmits", 1}, {"rx_cnp_pkts", 2}};
+  EXPECT_EQ(DebugfsWanted(bnxt, read), (std::set<std::string>{"rx_stat_discards", "max_retry_exceeded",
+                                                              "oos_drop_count", "seq_err_naks_rcvd"}));
+  for (NicType t : {NIC_IONIC, NIC_MLX5}) {
+    EXPECT_TRUE(DebugfsWanted(NetCounterGetCounterList(t), {}).empty()) << NicTypeStr(t);
+  }
+}
+
+TEST(Collector, Delta_MixedSourcesIsNotAvailable) {
+  CounterDescriptor d{"to_retransmits", COUNTER_SRC_IB_HW, false, ""};
+  NetworkCounterSnapshot before = Snap({{"to_retransmits", 5}}, 0);
+  NetworkCounterSnapshot after = Snap({{"to_retransmits", 9}}, 1);
+  after.debugfs_counters.insert("to_retransmits");
+  uint64_t delta = 0;
+  EXPECT_FALSE(NetCounterComputeDelta(before, after, d, &delta));
+  before.debugfs_counters.insert("to_retransmits");
+  EXPECT_TRUE(NetCounterComputeDelta(before, after, d, &delta));
+  EXPECT_EQ(delta, 4u);
+}
+
+TEST(Collector, IbHw_LookupOrder) {
+  namespace fs = std::filesystem;
+  fs::path root = fs::temp_directory_path() / ("collector_ibhw_" + std::to_string(getpid()));
+  fs::create_directories(root / "port");
+  fs::create_directories(root / "dev");
+  auto put = [&](const char* dir, const char* key, int v) { std::ofstream(root / dir / key) << v << "\n"; };
+  put("port", "key_a", 1);  // key: port before device
+  put("dev", "key_a", 2);
+  put("dev", "key_b", 3);  // key in device before fallback
+  put("port", "fb_b", 4);
+  put("port", "fb_c", 5);  // fallback: port before device
+  put("dev", "fb_c", 6);
+  put("dev", "fb_d", 7);
+  std::vector<CounterDescriptor> sel = {{"a", COUNTER_SRC_IB_HW, false, "", "key_a"},
+                                        {"b", COUNTER_SRC_IB_HW, false, "fb_b", "key_b"},
+                                        {"c", COUNTER_SRC_IB_HW, false, "fb_c", "key_c"},
+                                        {"d", COUNTER_SRC_IB_HW, false, "fb_d", "key_d"},
+                                        {"e", COUNTER_SRC_IB_HW, false, "fb_e", "key_e"}};
+  std::map<std::string, uint64_t> out;
+  ReadIbHwCounters((root / "port").string() + "/", (root / "dev").string() + "/", sel, out);
+  fs::remove_all(root);
+  EXPECT_EQ(out, (std::map<std::string, uint64_t>{{"a", 1}, {"b", 3}, {"c", 5}, {"d", 7}}));
+}
+
 TEST(Collector, Delta_PriorityPatternSumsAllPriorities) {
   CounterDescriptor d{"pfc_rx_transitions", COUNTER_SRC_ETHTOOL, true, "", "pfc_pri*_rx_transitions"};
   std::map<std::string, uint64_t> before = {{"pfc_pri0_rx_transitions", 1},
@@ -218,6 +266,9 @@ TEST(Collector, IbHca_RcclEdgeCases) {
   // Port 0 or a non-number matches no port; rail/plane fields are ignored.
   EXPECT_EQ(NetCounterFilterIbHca("mlx5_0:0,bnxt_re0:x", devs), V{});
   EXPECT_EQ(NetCounterFilterIbHca("mlx5_0:1:3:0", devs), (V{"mlx5_0:1"}));
+  // A device without a port is port 1, so it is not selected twice.
+  EXPECT_EQ(NetCounterFilterIbHca("mlx5_0,mlx5_0:1", devs), (V{"mlx5_0"}));
+  EXPECT_EQ(NetCounterFilterIbHca("mlx5_0:1,mlx5_0", devs), (V{"mlx5_0:1"}));
   // An empty list selects every device; '^' alone selects none.
   EXPECT_EQ(NetCounterFilterIbHca(",", devs), (V{"bnxt_re0", "bnxt_re1", "mlx5_0"}));
   EXPECT_EQ(NetCounterFilterIbHca("^", devs), V{});
