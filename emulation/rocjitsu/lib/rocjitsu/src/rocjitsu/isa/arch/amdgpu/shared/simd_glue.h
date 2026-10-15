@@ -750,6 +750,8 @@ inline util::native<uint32_t> finalize_omod_f16_bits_simd(util::native<uint32_t>
 }
 
 /// @brief Apply F16 source modifiers and MODE input flushing to raw SIMD lanes.
+/// @details Reads the low 16 bits of each lane, applies ABS then NEG, then
+/// flushes input denormals; the result is zero-extended to 32 bits.
 inline util::native<uint32_t> prepare_f16_input_simd(util::native<uint32_t> value, bool absolute,
                                                      bool negate, uint32_t denorm_mode) {
   return util::native<uint32_t>([&](auto index) {

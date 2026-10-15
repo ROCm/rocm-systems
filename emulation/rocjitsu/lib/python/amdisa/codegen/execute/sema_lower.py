@@ -1443,7 +1443,8 @@ _INLINE_UNARY_OPS: dict[str, str] = {
     ' if (s < -32768.0f) return static_cast<uint32_t>(static_cast<uint16_t>(INT16_MIN));'
     ' return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(s))); }}()',
     # These arguments are decoded floats, including source modifiers. Conversion
-    # rounds once with ties to even, independently of MODE.ROUND.
+    # rounds once with ties to even, independently of MODE.ROUND. Unlike the
+    # packed forms, F16 sources are widened without MODE input flushing.
     'cvt_norm_i16_f16': '[&]() -> uint32_t {{ float s = {0};'
     ' if (std::isnan(s)) return 0u;'
     ' double scaled = util::rndne_scalar(std::clamp(static_cast<double>(s) * 32767.0, -32767.0, 32767.0));'

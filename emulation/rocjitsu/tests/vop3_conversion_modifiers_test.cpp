@@ -555,14 +555,16 @@ TEST_P(Vop3ConversionModifierTest, PackedNormalizedHalfFlushesSubnormalSourcesUn
   };
   // MODE[6] allows F16 input denormals. 0x30 allows only F32 denormals and
   // 0xc0 only F16/F64 ones, so reading the wrong MODE field changes the result.
-  // Source modifiers precede the flush. The signed cases are gfx1201 captures;
-  // the unsigned ones apply the same source policy. CDNA1-4 and RDNA1/2 reuse
-  // these results without hardware verification.
+  // 0x40 and 0x80 separate the input bit from the output bit. Source modifiers
+  // precede the flush. gfx1100 and gfx1201 match these results; CDNA1-5,
+  // RDNA1/2 and RDNA3.5 reuse them without hardware verification.
   constexpr Case cases[] = {
       {true, 0, 0x3c00, 0x83ff, 0x30, 0x00007fff},  {true, 0, 0x3c00, 0x83ff, 0xc0, 0xfffe7fff},
+      {true, 0, 0x3c00, 0x83ff, 0x40, 0xfffe7fff},  {true, 0, 0x3c00, 0x83ff, 0x80, 0x00007fff},
       {true, 0, 0x3c00, 0x83ff, 0x00, 0x00007fff},  {true, 0, 0x3c00, 0x83ff, 0x0f, 0x00007fff},
       {true, 2, 0x0000, 0x83ff, 0x00, 0x00000000},  {true, 2, 0x0000, 0x83ff, 0xf0, 0x00020000},
       {false, 0, 0x3c00, 0x03ff, 0x30, 0x0000ffff}, {false, 0, 0x3c00, 0x03ff, 0xc0, 0x0004ffff},
+      {false, 0, 0x3c00, 0x03ff, 0x40, 0x0004ffff}, {false, 0, 0x3c00, 0x03ff, 0x80, 0x0000ffff},
       {false, 1, 0x83ff, 0x3c00, 0x30, 0xffff0000}, {false, 1, 0x83ff, 0x3c00, 0xc0, 0xffff0004}};
   for (bool force_scalar : {false, true}) {
     ForceScalarGuard guard(force_scalar);
