@@ -27,6 +27,7 @@
 
 #include "amd_smi/impl/amd_smi_nic_testing.h"
 #include "smi_nic.h"
+#include "smi_nic_subsystem.h"
 
 namespace {
 
@@ -298,6 +299,25 @@ TEST_F(NicUnit, PortFileWithNothingToReadIsUnknown) {
   const SmiNicPort port("eth0", "0000:01:00.0", dir.path(), dir.path());
   EXPECT_EQ(port.carrier(), std::nullopt);
   EXPECT_EQ(port.mac_address(), std::nullopt);
+}
+
+// Exposes the protected PCI id reader that NIC discovery uses.
+class PciIdReader : public SmiNicSubsystemPensando {
+ public:
+  using SmiNicSubsystem::read_pci_ids;
+};
+
+// A PCI id that is not a number reads as 0, so only that device goes unrecognized. std::stoul
+// threw on it, and AI NIC discovery then reported no NICs at all.
+TEST_F(NicUnit, PciIdThatIsNotANumberIsZero) {
+  ScopedTempDir dir;
+  ASSERT_FALSE(dir.path().empty()) << "mkdtemp failed";
+  ASSERT_TRUE(WriteFile(dir.path() + "/vendor", "Unknown\n"));
+  ASSERT_TRUE(WriteFile(dir.path() + "/device", "0x1002\n"));
+
+  const auto [vendor_id, device_id] = PciIdReader().read_pci_ids(dir.path());
+  EXPECT_EQ(vendor_id, 0);
+  EXPECT_EQ(device_id, 0x1002);
 }
 
 }  // namespace
