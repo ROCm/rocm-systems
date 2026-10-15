@@ -2529,7 +2529,9 @@ testResult_t run() {
 
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,32,0)
   const char* tlsPsk = getenv("NCCL_TESTS_TLS_PSK");
-  if (tlsPsk && tlsPsk[0]) {
+  if (tlsPsk && tlsPsk[0] && test_ncclVersion < NCCL_VERSION(2,32,0)) {
+    if (proc == 0) printf("# NCCL_TESTS_TLS_PSK ignored: RCCL library older than 2.32\n");
+  } else if (tlsPsk && tlsPsk[0]) {
     ncclEncryptionConfig_t encryption = NCCL_ENCRYPTION_CONFIG_INITIALIZER;
     encryption.mode = NCCL_ENCRYPTION_MODE_PSK;
     encryption.psk = tlsPsk;
