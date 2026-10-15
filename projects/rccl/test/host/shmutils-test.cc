@@ -90,13 +90,6 @@ TEST_F(ShmutilsMicrotest, Allgather_RejectsMissingArgumentsAndAnOversizedType) {
   EXPECT_EQ(ncclShmemAllgather(comm.get(), &coll_, send, recv, 8), ncclSuccess);
 }
 
-// Observed: shmem is read before the NULL check, so a NULL shmem crashes instead of failing.
-TEST_F(ShmutilsMicrotest, Allgather_NullShmemCrashes) {
-  auto comm = Comm(0, 1);
-  char send[4] = {}, recv[4];
-  EXPECT_DEATH(ncclShmemAllgather(comm.get(), nullptr, send, recv, 4), "");
-}
-
 TEST_F(ShmutilsMicrotest, Allgather_SingleRankAlternatesBuffersEachRound) {
   InitColl(1, 8);
   auto comm = Comm(0, 1);

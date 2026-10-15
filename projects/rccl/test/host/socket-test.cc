@@ -184,12 +184,16 @@ TEST_F(SocketMicrotest, Move_TransfersOwnershipAndInvalidatesTheSource) {
   Pair();
   ncclSocket moved;
   int fd = client_.socketDescriptor;
+#ifndef NCCL_TLS_BACKEND_OPENSSL3  // a TLS backend would rebind this fake state
   client_.crypto = (ncclSocketCrypto*)0x1;
+#endif
   ncclSocketMove(&moved, &client_);
   EXPECT_EQ(moved.socketDescriptor, fd);
   EXPECT_EQ(moved.state, ncclSocketStateReady);
   EXPECT_EQ(moved.magic, kMagic);
+#ifndef NCCL_TLS_BACKEND_OPENSSL3
   EXPECT_EQ(moved.crypto, (ncclSocketCrypto*)0x1);
+#endif
   EXPECT_EQ(client_.socketDescriptor, NCCL_INVALID_SOCKET);
   EXPECT_EQ(client_.acceptSocketDescriptor, NCCL_INVALID_SOCKET);
   EXPECT_EQ(client_.state, ncclSocketStateNone);
@@ -854,7 +858,7 @@ TEST_F(SocketMicrotest, Accept_BlockingWaitsForTheWholeHello) {
     std::this_thread::sleep_for(std::chrono::milliseconds(20));
     ::send(raw, hello.data() + 3, hello.size() - 3, 0);
   });
-  ASSERT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);
+  EXPECT_EQ(ncclSocketAccept(&server_, &listen_), ncclSuccess);
   rest.join();
   EXPECT_EQ(server_.state, ncclSocketStateReady);
 }
@@ -977,7 +981,7 @@ TEST_F(SocketMicrotest, Wait_PollsUntilTheRestArrives) {
   };
   char in[4];
   int offset = 0;
-  ASSERT_EQ(ncclSocketWait(NCCL_SOCKET_RECV, &server_, in, sizeof(in), &offset), ncclSuccess);
+  EXPECT_EQ(ncclSocketWait(NCCL_SOCKET_RECV, &server_, in, sizeof(in), &offset), ncclSuccess);
   late.join();
   EXPECT_GE(polls, 1);
   EXPECT_EQ(offset, 4);
@@ -993,7 +997,7 @@ TEST_F(SocketMicrotest, SendRecv_ExchangesBothWaysAtOnce) {
     EXPECT_EQ(ncclSocketSendRecv(&server_, out.data(), out.size(), &server_, in.data(), in.size()), ncclSuccess);
     EXPECT_EQ(in, big);
   });
-  ASSERT_EQ(ncclSocketSendRecv(&client_, big.data(), big.size(), &client_, fromServer.data(), fromServer.size()),
+  EXPECT_EQ(ncclSocketSendRecv(&client_, big.data(), big.size(), &client_, fromServer.data(), fromServer.size()),
             ncclSuccess);
   peer.join();
   EXPECT_EQ(fromServer, std::vector<char>(1 << 20, 's'));
@@ -1045,7 +1049,7 @@ TEST_F(SocketMicrotest, MultiOp_RunsSendsAndReceivesToCompletion) {
   ncclSocketOp serverOps[2] = {{NCCL_SOCKET_RECV, &server_, gotA.data(), (int)gotA.size(), 0},
                                {NCCL_SOCKET_SEND, &server_, b.data(), (int)b.size(), 0}};
   std::thread peer([&] { EXPECT_EQ(ncclSocketMultiOp(serverOps, 2), ncclSuccess); });
-  ASSERT_EQ(ncclSocketMultiOp(clientOps, 3), ncclSuccess);
+  EXPECT_EQ(ncclSocketMultiOp(clientOps, 3), ncclSuccess);
   peer.join();
   EXPECT_EQ(clientOps[0].offset, (int)a.size());
   EXPECT_EQ(clientOps[2].offset, 0);
@@ -1075,7 +1079,7 @@ TEST_F(SocketMicrotest, TryRecv_NonBlockingReportsInProgress) {
     ::ioctl(server_.socketDescriptor, FIONREAD, &avail);
     if (avail) break;
   }
-  ASSERT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/false), ncclSuccess);
+  EXPECT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/false), ncclSuccess);
   rest.join();
   EXPECT_EQ(std::string(in, 4), "abcd");  // once data started, it finishes the message
 }
@@ -1088,7 +1092,7 @@ TEST_F(SocketMicrotest, TryRecv_BlockingWaitsForTheFirstBytes) {
   });
   char in[4];
   bool closed = true;
-  ASSERT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/true), ncclSuccess);
+  EXPECT_EQ(ncclSocketTryRecv(&server_, in, sizeof(in), &closed, /*blocking=*/true), ncclSuccess);
   late.join();
   EXPECT_FALSE(closed);
   EXPECT_EQ(std::string(in, 4), "wxyz");

@@ -26,6 +26,7 @@ namespace {
 std::function<sighandler_t(int, sighandler_t)> g_signal = ::signal;
 }
 
+#undef HAVE_BFD  // the libbfd backtrace needs libbfd, which this binary does not link
 #define signal(...) g_signal(__VA_ARGS__)
 #include SIGNALS_CC_PATH
 #undef signal

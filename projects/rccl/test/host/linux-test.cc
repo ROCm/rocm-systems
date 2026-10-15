@@ -909,7 +909,7 @@ TEST_F(LinuxSocketMicrotest, ProgressOpt_BlockingRecvWaitsForTheRest) {
   });
   char in[8];
   int offset = 0, closed = 0;
-  ASSERT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_RECV, &b, in, sizeof(in), &offset, 1, &closed), ncclSuccess);
+  EXPECT_EQ(ncclOsSocketProgressOpt(NCCL_SOCKET_RECV, &b, in, sizeof(in), &offset, 1, &closed), ncclSuccess);
   writer.join();
   EXPECT_EQ(offset, 8);
   EXPECT_EQ(std::string(in, 8), "abcdefgh");
@@ -1217,7 +1217,7 @@ TEST_F(LinuxSocketCloseMicrotest, WaitDrainsUntilThePeerCloses) {
   });
   ncclSocket sock = Sock(sv[0]);
   sock.state = ncclSocketStateReady;
-  ASSERT_EQ(ncclSocketClose(&sock, /*wait=*/true), ncclSuccess);
+  EXPECT_EQ(ncclSocketClose(&sock, /*wait=*/true), ncclSuccess);
   peer.join();
   EXPECT_FALSE(FdOpen(sv[0]));
 }
@@ -1771,6 +1771,7 @@ TEST_F(LinuxShmMicrotest, LastAttachUnlinkFailureIsOnlyLogged) {
   EXPECT_EQ(Open(path, 64, 0, &peer, &hp), ncclSuccess);
   EXPECT_TRUE(LinuxLogged("INFO unlink shared memory"));
   lx::unlink = ::unlink;
+  ::unlink(path);
 }
 
 TEST_F(LinuxShmMicrotest, DevicePointerRegistersTheMappingWithHip) {

@@ -174,6 +174,11 @@ TEST_F(LinuxIpcsocketMicrotest, SendFd_PassesADescriptorOverAPathSocket) {
   Open();
   EXPECT_EQ(access(b_.socketName, F_OK), 0);
   PassDescriptor();
+  for (auto* s : {&a_, &b_}) {
+    ASSERT_EQ(ncclIpcSocketClose(s), ncclSuccess);  // while the param still says path sockets: unlinks
+    EXPECT_NE(access(s->socketName, F_OK), 0);
+    s->fd = -1;
+  }
 }
 
 TEST_F(LinuxIpcsocketMicrotest, SendMsg_CarriesAHeaderWithOrWithoutADescriptor) {
