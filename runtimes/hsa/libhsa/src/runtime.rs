@@ -29,9 +29,9 @@ use rocddi::device::event::{
     DeviceEvent, DeviceEventSubscription, GpuHardwareException, GpuMemoryFault,
     GpuMemoryFaultCause, GpuResetCause, subscribe,
 };
-use rocddi::memory::Allocation;
+use rocddi::memory::device::Allocation;
 use rocddi::session::{DriverContextLifetime, Session};
-use rocddi::topology::{Endpoint, GpuInfo};
+use rocddi::topology::{Endpoint, EndpointDetailsKind, GpuInfo};
 
 use crate::callback_arg::CallbackArg;
 use crate::ffi::*;
@@ -686,8 +686,9 @@ impl Runtime {
     }
 
     pub(crate) fn create() -> Result<Self, InitFailure> {
-        let host_page_size = usize::try_from(rocddi::memory::host_page_size().map_err(map_error)?)
-            .map_err(|_| ERROR)?;
+        let host_page_size =
+            usize::try_from(rocddi::memory::host::host_page_size().map_err(map_error)?)
+                .map_err(|_| ERROR)?;
         if host_page_size < 4096 || !host_page_size.is_power_of_two() {
             return Err(ERROR.into());
         }
@@ -785,18 +786,29 @@ impl Runtime {
                     u32::try_from(cache.size_bytes()).unwrap_or(u32::MAX),
                 ));
             }
-            let presentation = session.gpu_presentation(&endpoint).map_err(map_error)?;
+            let details = session
+                .query_endpoint_details(&endpoint)
+                .map_err(map_error)?;
+            let (asic_family_id, timestamp_frequency_hz) = match details.kind {
+                EndpointDetailsKind::Gpu {
+                    asic_family_id,
+                    counter_frequency_hz,
+                    ..
+                } => (
+                    asic_family_id.unwrap_or(info.asic_family_id),
+                    counter_frequency_hz.unwrap_or(0),
+                ),
+                _ => return Err(ERROR),
+            };
             if lifetime == DriverContextLifetime::Process {
                 // Activation may retain a primary VM even when it returns an
                 // error. A later generation must use a private context.
                 PRIMARY_CONTEXT_USED.store(true, Ordering::Release);
             }
             let device = session.activate(&endpoint).map_err(map_error)?;
-            let product_name = presentation
+            let product_name = details
                 .product_name
                 .unwrap_or_else(|| "AMD Radeon Graphics".to_owned());
-            let asic_family_id = presentation.asic_family_id;
-            let timestamp_frequency_hz = presentation.gpu_counter_frequency_hz.unwrap_or(0);
             let mmio_remap = device.gpu().and_then(|gpu| gpu.map_mmio_remap()).ok();
             let hdp_flush = hdp_flush_pointers(
                 mmio_remap
@@ -1119,6 +1131,14 @@ impl RuntimeRegistry {
             runtime: None,
             generation: 0,
             phase: LifecyclePhase::Inactive,
+        }
+    }
+
+    /// Returns the generation of the currently published runtime.
+    pub(crate) fn active_generation(&self) -> Option<u64> {
+        match (self.phase, self.runtime.as_ref()) {
+            (LifecyclePhase::Active(generation), Some(_)) => Some(generation),
+            _ => None,
         }
     }
 
