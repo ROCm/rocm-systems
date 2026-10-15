@@ -6,6 +6,11 @@
 
 name: HRR CI
 
+# labeled stays in the types so that adding ci:hrr-capture or ci:gfx* can
+# still start a run; hrr_ci_configure.py decides from the label itself
+# whether anything runs, and the summary job reports the verdict of the run
+# that actually tested the commit (see `pass_through_ok`). A label that
+# changes nothing therefore cannot mask a failing run on the same commit.
 on:
   pull_request:
     types: [opened, synchronize, reopened, labeled]
@@ -330,7 +335,8 @@ jobs:
     if: >-
       ${{ always() && (needs.configure.result != 'success'
       || needs.configure.outputs.run_cpu == 'true'
-      || needs.configure.outputs.run_gpu == 'true') }}
+      || needs.configure.outputs.run_gpu == 'true'
+      || (github.event_name == 'pull_request' && github.event.action == 'labeled')) }}
     runs-on: ubuntu-24.04
     permissions:
       actions: read
@@ -351,6 +357,7 @@ jobs:
           pattern: results-*
           merge-multiple: true
           path: results
+          if-no-files-found: ignore
 
       - name: Download base build record
         if: ${{ needs.configure.outputs.run_gpu == 'true' }}
@@ -360,6 +367,36 @@ jobs:
           name: hrr-base-${{ github.sha }}
           path: base
 
+      # A labeled pull request run whose configure decided nothing runs no
+      # HRR job of its own to summarize. GitHub keeps the most recent check
+      # run of a name on a commit, so skipping this summary would let an
+      # unrelated label turn a failing HRR CI into a passing one: fetch the
+      # verdict of the run that actually tested this commit instead, and
+      # fail (not pass) when it cannot be read.
+      - name: Find the run this commit was actually tested by
+        if: >-
+          ${{ github.event_name == 'pull_request' && github.event.action == 'labeled'
+          && needs.configure.outputs.run_cpu == 'false'
+          && needs.configure.outputs.run_gpu == 'false' }}
+        continue-on-error: true
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          # The most recent earlier run of this workflow for this exact
+          # commit; attempt 1 of a re-run first, so that a passing re-run
+          # cannot hide the run that really failed.
+          line="$(gh api --paginate "repos/${GITHUB_REPOSITORY}/actions/runs?head_branch=${GITHUB_HEAD_REF}&per_page=100" \
+            --jq '[.workflow_runs[]
+                   | select(.id != env.GITHUB_RUN_ID
+                            and .head_sha == env.GITHUB_SHA
+                            and ((.name // "") | endswith(env.GITHUB_JOB))
+                            and .status != "queued")]
+                  | (map(select(.run_attempt == 1)) + .) | first | @tsv')" || line=""
+          if [ -n "${line}" ]; then
+            echo "run_id=$(printf '%s' "${line}" | cut -f1)" >> "${GITHUB_OUTPUT}"
+            echo "run_attempt=$(printf '%s' "${line}" | cut -f2)" >> "${GITHUB_OUTPUT}"
+          fi
+
       - name: Summarize
         env:
           GH_TOKEN: ${{ github.token }}
@@ -368,9 +405,13 @@ jobs:
           RUN_GPU: ${{ needs.configure.outputs.run_gpu }}
           FAMILIES: ${{ needs.configure.outputs.families }}
           SKIPPED: ${{ needs.configure.outputs.skipped_families }}
+          UPSTREAM_RUN: ${{ steps.upstream.outputs.run_id }}
+          UPSTREAM_ATTEMPT: ${{ steps.upstream.outputs.run_attempt }}
         run: >-
           python3 projects/hrr/tests/scripts/hrr_ci_report.py
           --configure-result "${CONFIGURE_RESULT}"
           --reason "${REASON}" --run-gpu "${RUN_GPU}" --families "${FAMILIES}"
           --skipped-families "${SKIPPED}"
           --results-dir results --base-json base/base.json
+          --pass-through --upstream-run "${UPSTREAM_RUN}"
+          --upstream-attempt "${UPSTREAM_ATTEMPT}"

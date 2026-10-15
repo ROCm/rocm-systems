@@ -5,6 +5,7 @@
 
 import contextlib
 import io
+import subprocess
 import sys
 import tempfile
 import unittest
@@ -94,7 +95,7 @@ class ApiCompatTest(Tree):
         self.regenerate()
         ok, _ = self.quiet(
             chk.check_api_compat, self.root, self.out, "abc",
-            self.runner, lambda root, sha: "base header\n",
+            self.runner, lambda root, sha: ("base header\n", None),
         )
         self.assertTrue(ok)
         cmd = self.calls[0]
@@ -107,7 +108,7 @@ class ApiCompatTest(Tree):
         self.rc["check_hrr_api_compat.py"] = 1
         ok, output = self.quiet(
             chk.check_api_compat, self.root, self.out, "abc",
-            self.runner, lambda root, sha: "base\n",
+            self.runner, lambda root, sha: ("base\n", None),
         )
         self.assertFalse(ok)
         self.assertIn("not compatible with abc", output)
@@ -116,19 +117,77 @@ class ApiCompatTest(Tree):
         self.regenerate()
         ok, output = self.quiet(
             chk.check_api_compat, self.root, self.out, "abc",
-            self.runner, lambda root, sha: None,
+            self.runner, lambda root, sha: (None, None),
         )
         self.assertTrue(ok)
         self.assertEqual(self.calls, [])
         self.assertIn("does not exist at abc", output)
 
+    def test_git_failure_fails_instead_of_passing(self):
+        # A base blob the blob:none clone cannot fetch, or a base commit it
+        # does not have: not "the file is absent", so no silent pass.
+        self.regenerate()
+        failure = (None, "cannot read projects/hrr/include/hrr/hrr_api_args.h "
+                         "at abc: fatal: could not read from remote repository")
+        ok, output = self.quiet(
+            chk.check_api_compat, self.root, self.out, "abc",
+            self.runner, lambda root, sha: failure,
+        )
+        self.assertFalse(ok)
+        self.assertEqual(self.calls, [])
+        self.assertIn("::error::cannot read", output)
+        self.assertIn("do not pass it silently", output)
+
     def test_needs_regenerated_header(self):
         ok, output = self.quiet(
             chk.check_api_compat, self.root, self.out, "abc",
-            self.runner, lambda root, sha: "x",
+            self.runner, lambda root, sha: ("x", None),
         )
         self.assertFalse(ok)
         self.assertIn("run the generated check first", output)
+
+
+class BaseHeaderTest(unittest.TestCase):
+    """base_header's telling "the path is absent" from "git broke"."""
+
+    def setUp(self):
+        self._tmp = tempfile.TemporaryDirectory()
+        self.root = Path(self._tmp.name)
+        self.addCleanup(self._tmp.cleanup)
+        for argv in (["init", "-q"], ["config", "user.email", "t@example.com"],
+                     ["config", "user.name", "t"]):
+            subprocess.run(["git", "-C", str(self.root), *argv], check=True,
+                           capture_output=True, text=True)
+
+    def commit(self, relpath: str, text: str) -> str:
+        path = self.root / relpath
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text(text, encoding="utf-8")
+        subprocess.run(["git", "-C", str(self.root), "add", relpath], check=True)
+        subprocess.run(["git", "-C", str(self.root), "commit", "-qm", relpath], check=True)
+        return subprocess.run(
+            ["git", "-C", str(self.root), "rev-parse", "HEAD"],
+            check=True, capture_output=True, text=True,
+        ).stdout.strip()
+
+    def test_content_at_base(self):
+        sha = self.commit(chk.API_ARGS_HEADER, "// base\n")
+        text, failure = chk.base_header(self.root, sha)
+        self.assertEqual(text, "// base\n")
+        self.assertIsNone(failure)
+
+    def test_path_genuinely_absent_passes_as_none(self):
+        # Committed, but never this path: the only "nothing to compare" case.
+        sha = self.commit("README.md", "x\n")
+        text, failure = chk.base_header(self.root, sha)
+        self.assertIsNone(text)
+        self.assertIsNone(failure)
+
+    def test_base_commit_the_clone_does_not_have_fails(self):
+        text, failure = chk.base_header(self.root, "0" * 40)
+        self.assertIsNone(text)
+        self.assertIn("cannot read", failure)
+        self.assertIn("at " + "0" * 40, failure)
 
 
 class ApiMatrixTest(Tree):

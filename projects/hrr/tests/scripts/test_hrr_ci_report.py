@@ -130,5 +130,49 @@ class RenderTest(unittest.TestCase):
             self.assertIn(f"Configure: {result}, so nothing else ran", out.getvalue())
 
 
+class PassThroughTest(unittest.TestCase):
+    """A label run with nothing to run reports the run that tested the
+    commit; it must never report greener than that run."""
+    LABEL_ARGS = ["--pass-through", "--upstream-run", "99", "--upstream-attempt", "1",
+                  "--run-id", "100", "--run-attempt", "1"]
+    GREEN = [JOBS[1], JOBS[2], JOBS[5]]  # generated, unit ubuntu, integration gfx94x
+
+    def run_main(self, jobs, extra=()):
+        tmp = tempfile.TemporaryDirectory()
+        self.addCleanup(tmp.cleanup)
+        with mock.patch.object(rpt, "list_jobs", return_value=jobs) as listed, \
+                mock.patch.dict(os.environ, {"GITHUB_STEP_SUMMARY": ""}), \
+                contextlib.redirect_stdout(io.StringIO()) as out:
+            rc = rpt.main(["--results-dir", tmp.name, *self.LABEL_ARGS, *extra])
+        return rc, out.getvalue(), listed
+
+    def test_delivers_the_earlier_run_jobs(self):
+        rc, text, listed = self.run_main(self.GREEN)
+        self.assertEqual(rc, 0, text)
+        listed.assert_called_once_with(mock.ANY, "99", "1")
+        self.assertIn("| Generated sources | — | [success](c0) |", text)
+
+    def test_fails_when_the_earlier_run_failed(self):
+        rc, text, _ = self.run_main(JOBS)  # windows unit failed, gfx950 cancelled
+        self.assertEqual(rc, 1)
+        self.assertIn("a label event must not turn it into a pass", text)
+
+    def test_fails_on_a_job_that_has_not_finished(self):
+        jobs = [{"name": "HRR script tests", "conclusion": "in_progress", "html_url": "u9"}]
+        rc, text, _ = self.run_main(jobs)
+        self.assertEqual(rc, 1)
+        self.assertIn("is in_progress", text)
+
+    def test_fails_when_no_earlier_run_was_found(self):
+        rc, text, _ = self.run_main(self.GREEN, extra=["--upstream-attempt", ""])
+        self.assertEqual(rc, 1)
+        self.assertIn("no earlier run of HRR CI found", text)
+
+    def test_fails_when_the_earlier_run_has_no_hrr_jobs(self):
+        rc, text, _ = self.run_main([JOBS[0]])  # only Configure matches nothing
+        self.assertEqual(rc, 1)
+        self.assertIn("lists no HRR jobs", text)
+
+
 if __name__ == "__main__":
     unittest.main()

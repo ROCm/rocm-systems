@@ -103,6 +103,18 @@ def overall_ok(rows: list[dict], missing: list[str]) -> bool:
     return not missing and not any(r["conclusion"] in BAD_CONCLUSIONS for r in rows)
 
 
+def pass_through_ok(rows: list[dict]) -> tuple[bool, str]:
+    """Verdict on an earlier run's jobs. A job that has not finished or is
+    something other than a plain success is not allowed to count as pass: a
+    label run must never turn a failing HRR CI into a passing one."""
+    if not rows:
+        return False, "the run that tested this commit lists no HRR jobs"
+    for row in rows:
+        if row["conclusion"] not in ("success", "skipped", "neutral"):
+            return False, f"{row['kind']} {row['name'] or row['conclusion']} is {row['conclusion']}"
+    return True, ""
+
+
 def list_jobs(repo: str, run_id: str, attempt: str) -> list[dict]:
     out = subprocess.run(
         [
@@ -136,6 +148,11 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--repo", default=os.environ.get("GITHUB_REPOSITORY", ""))
     parser.add_argument("--run-id", default=os.environ.get("GITHUB_RUN_ID", ""))
     parser.add_argument("--run-attempt", default=os.environ.get("GITHUB_RUN_ATTEMPT", "1"))
+    parser.add_argument("--pass-through", action="store_true",
+                        help="deliver the verdict of the run that tested this commit")
+    parser.add_argument("--upstream-run", default="",
+                        help="that run's id; empty when no earlier run was found")
+    parser.add_argument("--upstream-attempt", default="")
     args = parser.parse_args(argv)
 
     run_gpu = args.run_gpu == "true"
@@ -145,14 +162,33 @@ def main(argv: list[str] | None = None) -> int:
     if args.base_json and args.base_json.is_file():
         base = json.loads(args.base_json.read_text())
 
+    job_run, job_attempt, exiting = args.run_id, args.run_attempt, False
+    if args.pass_through:
+        job_run = args.upstream_run or args.run_id
+        job_attempt = args.upstream_attempt
+        if not job_attempt:
+            # Nothing before this run, or the lookup failed: leave with a red
+            # summary, which a later re-run resolves, rather than green.
+            print(f"::error::no earlier run of HRR CI found for this commit; "
+                  f"a label event cannot verify it, so this summary fails for run {args.run_id}")
+            return 1
+        exiting = True
+
     try:
-        jobs = list_jobs(args.repo, args.run_id, args.run_attempt)
+        jobs = list_jobs(args.repo, job_run, job_attempt)
     except subprocess.CalledProcessError as e:
         detail = (e.stderr or "").strip() or f"gh api exited {e.returncode}"
-        print(f"::error::could not list the jobs of run {args.run_id}: {detail}")
+        print(f"::error::could not list the jobs of run {job_run}: {detail}")
         return 1
     rows = classify_jobs(jobs)
     missing = missing_families(families, rows)
+
+    if exiting:
+        ok, why = pass_through_ok(rows)
+        if not ok:
+            print(f"::error::HRR CI on this commit reported {why}; "
+                  f"a label event must not turn it into a pass")
+            return 1
 
     configured = args.configure_result == "success"
     markdown = render_header(args.reason, run_gpu, families, base, args.configure_result)

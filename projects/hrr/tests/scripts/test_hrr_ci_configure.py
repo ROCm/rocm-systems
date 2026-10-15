@@ -7,6 +7,7 @@ import copy
 import io
 import os
 import sys
+import re
 import tempfile
 import unittest
 from contextlib import redirect_stdout
@@ -387,6 +388,42 @@ class LabelEventTest(unittest.TestCase):
                 CONFIG, MATRIX, pick_first, added_label=label,
             )
             self.assertTrue(d.run_gpu, label)
+
+    def test_labeled_trigger_and_summary_report_a_verdict(self):
+        """Regression for the label that can turn a failing HRR CI green.
+
+        github keeps the most recent check run of a name on a commit, and a
+        skipped check satisfies a required-status rule, so a labeled run
+        that configures nothing must not let its summary skip on top of the
+        run that failed: the summary must run for every labeled event and
+        answer with the verdict of the run that tested the commit (the
+        label run knows nothing itself), never a blanket pass.
+        """
+        text = self.WORKFLOW.read_text(encoding="utf-8")
+        types = re.search(r"types:\s*\[([^\]]*)\]", text).group(1)
+        self.assertIn("labeled", types)
+
+        summary = text[text.index("  summary:"):]
+        # The summary also runs when the label run configured nothing.
+        self.assertIn("github.event.action == 'labeled'", summary)
+        # And it answers with an actual verdict, never a skip of its own.
+        self.assertNotIn("needs.configure.result != 'success' || needs.configure.outputs.run_cpu == 'true' ||",
+                         summary)
+        self.assertIn("--pass-through", summary)
+        self.assertIn("--upstream-run", summary)
+        # The lookup step feeds --upstream-run and only runs for a label
+        # run that configured soly nothing; a run that did fetch its verdict
+        # failing is what closes the hole, so the fetch may not be fatal.
+        lookup = summary[summary.index("Find the run this commit was actually tested by"):]
+        lookup = lookup[:lookup.index("- name: Summarize")]
+        self.assertIn("steps.upstream.outputs.run_id", summary)
+        self.assertIn("run_cpu == 'false'", lookup)
+        self.assertIn("run_gpu == 'false'", lookup)
+        self.assertIn("continue-on-error: true", lookup)
+        self.assertIn("run_attempt == 1", lookup)
+        self.assertIn("head_sha == env.GITHUB_SHA", lookup)
+        # No earlier run found -> empty outputs -> the report exits 1.
+        self.assertIn("if [ -n", lookup)
 
     def test_concurrency_group_makes_the_same_test(self):
         text = self.WORKFLOW.read_text(encoding="utf-8")

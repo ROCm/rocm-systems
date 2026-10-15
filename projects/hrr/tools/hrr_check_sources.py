@@ -18,6 +18,7 @@ from __future__ import annotations
 
 import argparse
 import difflib
+import re
 import subprocess
 import sys
 from pathlib import Path
@@ -95,14 +96,49 @@ def check_generated(root: Path, out: Path, runner: Runner = run) -> bool:
     return True
 
 
-def base_header(root: Path, base_sha: str) -> str | None:
-    """hrr_api_args.h at base_sha, or None when the base has no copy."""
+def base_header(root: Path, base_sha: str) -> tuple[str | None, str | None]:
+    """hrr_api_args.h at base_sha.
+
+    Returns (content, None) on success, (None, None) when the path genuinely
+    does not exist at base_sha -- the only case with nothing to compare --
+    and (None, reason) for any other git failure. The base commit must be
+    verified to resolve first: in a plain checkout an unresolvable rev and
+    a missing path print the same 'does not exist in' text, and the
+    codegen job's ``blob:none`` clone can also report 'not our ref' for a
+    commit it does not have -- an unreadable base must fail the check
+    instead of passing an incompatible API-ID renumbering.
+    """
+    verify = subprocess.run(
+        ["git", "-C", str(root), "rev-parse", "--verify", "--quiet",
+         f"{base_sha}^{{commit}}"],
+        capture_output=True,
+        text=True,
+    )
+    if verify.returncode != 0:
+        detail = (verify.stderr or verify.stdout).strip()
+        return None, (
+            f"cannot read {API_ARGS_HEADER} at {base_sha}: the base commit does not "
+            f"resolve ({detail or f'git rev-parse exited {verify.returncode}'})"
+        )
     proc = subprocess.run(
         ["git", "-C", str(root), "show", f"{base_sha}:{API_ARGS_HEADER}"],
         capture_output=True,
         text=True,
     )
-    return proc.stdout if proc.returncode == 0 else None
+    if proc.returncode == 0:
+        return proc.stdout, None
+    detail = (proc.stderr or proc.stdout).strip()
+    if re.search(r"does not exist in|exists on disk, but not in", detail):
+        return None, None
+    if re.search(r"not our ref|error:Server does not allow request", detail):
+        return None, (
+            f"cannot read {API_ARGS_HEADER} at {base_sha}: "
+            f"the blob could not be fetched ({detail.splitlines()[-1]})"
+        )
+    return None, (
+        f"cannot read {API_ARGS_HEADER} at {base_sha}: "
+        f"{detail or f'git show exited {proc.returncode}'}"
+    )
 
 
 def resolve_base(root: Path, base_sha: str) -> str:
@@ -120,13 +156,17 @@ def check_api_compat(
     out: Path,
     base_sha: str,
     runner: Runner = run,
-    read_base: Callable[[Path, str], str | None] = base_header,
+    read_base: Callable[[Path, str], tuple[str | None, str | None]] = base_header,
 ) -> bool:
     current = out / GENERATED_FILES[API_ARGS_HEADER]
     if not current.is_file():
         error("api-compat needs the regenerated header; run the generated check first")
         return False
-    text = read_base(root, base_sha)
+    text, failure = read_base(root, base_sha)
+    if failure:
+        error(failure)
+        error("the API-ID compatibility with the base could not be verified; do not pass it silently")
+        return False
     if text is None:
         print(f"{API_ARGS_HEADER} does not exist at {base_sha}; nothing to compare")
         return True

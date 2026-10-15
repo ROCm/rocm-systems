@@ -219,6 +219,36 @@ class CheckTest(unittest.TestCase):
                 if os_name == "windows":
                     self.assertNotIn("PosixOnly", err.getvalue())
 
+    def test_supported_case_compiled_in_is_not_unexpected(self):
+        # An OS-wide unsupported rule (even an empty one) only relaxes the
+        # MISSING side: the case stays in the config, so a binary that still
+        # compiles it is correct and must not be reported UNEXPECTED.
+        self.write(suite({
+            "Kept": {},
+            "NoWhen": {"skip": [rule({})]},
+            "LinuxOnly": {"skip": [rule({"os": "linux"})]},
+        }))
+        payload = listing(("Kept", []), ("NoWhen", []), ("LinuxOnly", []))
+        with mock.patch.object(cfg, "detect_os", return_value="linux"), \
+                mock.patch.object(cfg.subprocess, "run", return_value=completed(payload)):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = cfg.main(["check", "--binary", "./bin", "--config", str(self.path)])
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertNotIn("UNEXPECTED", err.getvalue())
+        self.assertIn("OK: 3 test cases present", out.getvalue())
+
+    def test_case_not_in_the_config_is_still_unexpected(self):
+        self.write(suite({"Kept": {}, "LinuxOnly": {"skip": [rule({"os": "linux"})]}}))
+        payload = listing(("Kept", []), ("LinuxOnly", []), ("Bogus", []))
+        with mock.patch.object(cfg, "detect_os", return_value="linux"), \
+                mock.patch.object(cfg.subprocess, "run", return_value=completed(payload)):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = cfg.main(["check", "--binary", "./bin", "--config", str(self.path)])
+        self.assertEqual(rc, 1)
+        self.assertIn("UNEXPECTED (added without updating the config): Bogus", err.getvalue())
+
     def test_update_keeps_rules_and_adds_empty_entries(self):
         kept = rule({"os": "linux", "arch": "gfx1151"}, "disabled", "npu",
                     "https://github.com/ROCm/rocm-systems/issues/1")

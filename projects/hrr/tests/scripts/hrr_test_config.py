@@ -501,11 +501,16 @@ def _cmd_check(args: argparse.Namespace) -> int:
         for name in removed:
             print(f"  removed {name}")
     os_name = detect_os()
-    expected = {name for name in config["cases"]
-                if not compiled_out_here(config, name, os_name)}
+    # MISSING is measured against the cases an OS-wide unsupported rule may
+    # have compiled out here; UNEXPECTED against every case the config
+    # knows. Subtracting the relaxed set from the binary's list would blame
+    # a case that is legitimately still compiled into the binary.
+    unsupported = {name for name in config["cases"]
+                   if compiled_out_here(config, name, os_name)}
+    expected = {name for name in config["cases"] if name not in unsupported}
     actual = set(names)
     missing = sorted(expected - actual)
-    unexpected = sorted(actual - expected)
+    unexpected = sorted(actual - set(config["cases"]))
     errors = lint(config, cases=found)
     if not missing and not unexpected and not errors:
         print(f"OK: {len(actual)} test cases present, matching {args.config}")
