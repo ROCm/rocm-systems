@@ -177,8 +177,8 @@ if(NOT DEFINED HRR_RAW_TRACE_EXE)
   endif()
 endif()
 
-# CLR reads its debug() flags, HIP_HRR_DEBUG_ARGS among them, only in a build
-# without NDEBUG (CMAKE_BUILD_TYPE=Debug). Tell the tests which kind of runtime they run against.
+# Capture honours HIP_HRR_DEBUG_ARGS only in a CLR built without NDEBUG
+# (CMAKE_BUILD_TYPE=Debug). Tell the tests which kind of runtime they run against.
 option(HRR_TEST_CLR_DEBUG_FLAGS "The HIP runtime under test is a Debug build" OFF)
 if(HRR_TEST_CLR_DEBUG_FLAGS)
   target_compile_definitions(hrr-integration-tests PRIVATE HRR_TEST_CLR_DEBUG_FLAGS)

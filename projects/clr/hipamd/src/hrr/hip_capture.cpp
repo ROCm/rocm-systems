@@ -130,11 +130,17 @@ const char* hip_capture_output_dir() {
 
 // HIP_HRR_DEBUG_ARGS also enables provenance tracing: every H2D memcpy
 // destination is logged so a kernel pointer arg can be matched to the copy that
-// filled it. It is a debug() flag in flags.hpp: a release (NDEBUG) build cannot
-// set it, because the dumps put a second copy of the workload's kernel arguments in
-// the log, where log collection picks them up.
+// filled it. The flag stays a release() flag in flags.hpp, but only a Debug
+// build (DEBUG from rocclr/utils/macros.hpp, the macro that picks debug() over
+// release() there) honours it; any other build ignores it, because the dumps put
+// a second copy of the workload's kernel arguments in the log, where log
+// collection picks them up.
 static bool hrr_dbg_args_enabled() {
+#if defined(DEBUG)
   return HIP_HRR_DEBUG_ARGS;
+#else
+  return false;
+#endif
 }
 
 static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
@@ -2737,7 +2743,7 @@ void hip_capture_init() {
       if (AMD_LOG_LEVEL < amd::LOG_INFO) AMD_LOG_LEVEL = amd::LOG_INFO;
     }
 #if !defined(DEBUG)
-    // A release runtime cannot read the flag, so tell whoever set it why no
+    // A release runtime ignores the flag, so tell whoever set it why no
     // traces appear rather than leave them looking.
     else if (!amd::Os::getEnvironment("HIP_HRR_DEBUG_ARGS").empty()) {
       fprintf(stderr,
