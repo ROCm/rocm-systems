@@ -73,6 +73,14 @@ TEST(P2pDirectMaxChannelsTests, OnlyPeersOnTheSameHostOrMnnvlCliqueAreWidened)
     comm.get()->clique.ranks = nullptr;
 }
 
+TEST(P2pDirectMaxChannelsTests, SelfTransfersKeepThePerPeerTile)
+{
+    TwoRankComm comm(256, 64, 256);
+
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncSend, /*peer=*/0, 128), 64);
+    EXPECT_EQ(rcclP2pChannelStrideForApi(comm.get(), ncclFuncRecv, /*peer=*/0, 128), 64);
+}
+
 TEST(P2pDirectMaxChannelsTests, RequestedPoolLeavesRoomForASplitRound)
 {
     // A round split into a widened and a per-peer work needs both tiles in one empty plan.

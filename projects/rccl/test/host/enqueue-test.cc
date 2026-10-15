@@ -4312,9 +4312,30 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_PeerOnAnotherHost_IsNotWidened) {
   EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[1]->nSendChannels);
 }
 
+TEST_F(EnqueueMicrotest, AddP2pToPlan_MixedApiSelfTransfer_UsesOnePerPeerTile) {
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+  sc.send.root = 0;
+  sc.recv.root = 0;
+  struct ncclTaskP2p* tasks[2] = {&sc.recv, &sc.send};
+
+  ASSERT_EQ(ncclSuccess,
+            addP2pToPlan(sc.bp.c(), sc.bp.p(), WidenedP2pScene::kChannelsPerPeer,
+                         WidenedP2pScene::kChannelsPerPeer, /*p2pRound=*/0,
+                         /*sendRank=*/0, sc.sendBuf, sc.send.bytes,
+                         /*recvRank=*/0, sc.recvBuf, sc.recv.bytes,
+                         /*sendOpCount=*/0, /*recvOpCount=*/0, sc.planTotalTasks, tasks));
+
+  auto works = sc.works();
+  ASSERT_EQ(1u, works.size());
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nSendChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nRecvChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, countOneBits(sc.send.channelMask));
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, countOneBits(sc.recv.channelMask));
+}
+
 TEST_F(EnqueueMicrotest, ScheduleP2p_WidenedSendRecvToEveryPeer_SharesBatchesInOneLaunch) {
-  // ncclSend/ncclRecv to every peer, self included, as PyTorch all_to_all issues it. Rounds 0 and
-  // 2 use channels 0-127, rounds 1 and 3 channels 128-255; each pair shares one batch per channel.
+  // ncclSend/ncclRecv to every peer, self included, as PyTorch all_to_all issues it. The self round
+  // keeps a 64-channel tile. Non-self rounds widen, and overlapping widened rounds share batches.
   constexpr int kRanks = WidenedP2pScene::kRanks;
   constexpr ssize_t kBytes = ssize_t(256) << 20;
   WidenedP2pScene sc(ncclFuncSend, kBytes, ncclFuncRecv, kBytes);
@@ -4339,8 +4360,11 @@ TEST_F(EnqueueMicrotest, ScheduleP2p_WidenedSendRecvToEveryPeer_SharesBatchesInO
   int epoch = 0, round = 0;
   ASSERT_EQ(ncclSuccess, scheduleP2pTasksToPlan(c, &epoch, &round, sc.bp.p(), &budget));
   EXPECT_EQ(0, c->planner.nTasksP2p) << "every round must land in the first plan";
-  EXPECT_EQ(WidenedP2pScene::kP2pChannels, sc.bp.p()->nWorkBatches);
-  EXPECT_EQ(size_t(kRanks), sc.works().size());
+  EXPECT_EQ(320, sc.bp.p()->nWorkBatches);
+  auto works = sc.works();
+  ASSERT_EQ(size_t(kRanks), works.size());
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nSendChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nRecvChannels);
 }
 
 TEST_F(EnqueueMicrotest, ScheduleP2p_SplitRound_ReservesBothTiles) {
