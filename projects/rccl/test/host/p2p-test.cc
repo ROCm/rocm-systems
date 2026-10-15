@@ -185,15 +185,14 @@ inline ncclResult_t RecordCuMemFreeAddr(void* ptr, struct ncclMemManager* mgr,
 }
 template <typename T>
 inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
-                                   int numSegments = 1) {
+                                   int numSegments = 1, bool forceLegacy = false) {
     g_freeCalls.push_back({FreeKind::CudaFree, static_cast<const void*>(ptr)});
-    return ncclCudaFree(ptr, mgr, numSegments);
+    return ncclCudaFree(ptr, mgr, numSegments, forceLegacy);
 }
 }  // namespace
 
 // Route every call site in the included p2p.cc through the recording wrappers.
-// Variadic so both the 2-arg (manager only) and 3-arg (manager, numSegments)
-// call sites expand.
+// Variadic so the manager-only, numSegments, and forceLegacy call sites expand.
 // ncclCuMemFree has no bare call site in p2p.cc (every cuMem free goes through
 // ncclCuMemFreeAddr, and ncclCudaFree's internal ncclCuMemFree call was already
 // bound to the real inline when alloc.h was included above), so no intercept is
