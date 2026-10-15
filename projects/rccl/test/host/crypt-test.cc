@@ -93,6 +93,8 @@ const char* ncclSocketToString(const union ncclSocketAddress* /*addr*/, char* bu
   return buf;
 }
 
+// The no-TLS arm under test; a -DTLS_BACKEND=OPENSSL3 build defines this project-wide.
+#undef NCCL_TLS_BACKEND_OPENSSL3
 #include CRYPT_CC_PATH
 
 namespace {

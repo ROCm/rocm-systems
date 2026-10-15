@@ -214,7 +214,7 @@ class UtilsMicrotest : public ::testing::Test {
   }
 
   void WriteBootId(const std::string& id) {
-    bootIdFile_ = ::testing::TempDir() + "utils-test-boot-id";
+    bootIdFile_ = "/tmp/utils-test-boot-id-" + std::to_string(getpid());
     FILE* f = std::fopen(bootIdFile_.c_str(), "w");
     std::fputs(id.c_str(), f);
     std::fclose(f);
@@ -552,7 +552,7 @@ TEST_F(UtilsMicrotest, MemoryStack_DestructFreesOutOfHunkObjectsOfEveryFrame) {
 }
 
 TEST_F(UtilsMicrotest, MemoryStackDeathTest_MallocFailureAborts) {
-  GTEST_FLAG_SET(death_test_style, "threadsafe");
+  ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   EXPECT_DEATH(
       {
         g_utilsLogToStderr = true;
