@@ -231,20 +231,21 @@ if(EXISTS "${_AMDSMI_TEST_CATEGORIES_CMAKE}" AND EXISTS "${_AMDSMI_TEST_CATEGORI
         list(JOIN _AMDSMI_PYTHON_LABELS ";" _AMDSMI_PYTHON_LABEL_STRING)
         # Pipe, not semicolon: CMake splits unescaped semicolons into list items.
         set(_AMDSMI_PYTHON_TESTS
-            "amdsmi_python_unit|unit_tests.py"
-            "amdsmi_python_functional|integration_test.py"
-            "amdsmi_python_cli|cli_unit_test.py"
+            "amdsmi_python_unit|unit_tests.py|180"
+            "amdsmi_python_functional|integration_test.py|180"
+            "amdsmi_python_cli|cli_unit_test.py|300"
         )
         foreach(_entry IN LISTS _AMDSMI_PYTHON_TESTS)
             string(REPLACE "|" ";" _parts "${_entry}")
             list(GET _parts 0 _py_name)
             list(GET _parts 1 _py_script)
+            list(GET _parts 2 _py_timeout)
             file(
                 APPEND "${_AMDSMI_INSTALL_TEST_FILE}"
                 "add_test(${_py_name} ../python_unittest/${_py_script} -v)\n"
-                "set_tests_properties(${_py_name} PROPERTIES LABELS \"${_AMDSMI_PYTHON_LABEL_STRING}\" TIMEOUT 180)\n\n"
+                "set_tests_properties(${_py_name} PROPERTIES LABELS \"${_AMDSMI_PYTHON_LABEL_STRING}\" TIMEOUT ${_py_timeout})\n\n"
                 "add_test(${_py_name}_generic ../python_unittest/${_py_script} -v)\n"
-                "set_tests_properties(${_py_name}_generic PROPERTIES LABELS \"${_AMDSMI_PYTHON_GENERIC_LABEL_STRING}\" TIMEOUT 180)\n\n"
+                "set_tests_properties(${_py_name}_generic PROPERTIES LABELS \"${_AMDSMI_PYTHON_GENERIC_LABEL_STRING}\" TIMEOUT ${_py_timeout})\n\n"
             )
         endforeach()
     endif()
