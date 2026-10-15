@@ -24,8 +24,8 @@ namespace rocprofiler_compute_tool::test_knobs
 {
 void set_input_parameters(const std::shared_ptr<InputParameters>& parameters);
 void set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper);
-/// Call before rocprofiler_configure: that is where the writer is registered,
-/// and the registry keeps the writer it was given.
-void set_csv_writer(const std::shared_ptr<CountersWriter>& csv_writer);
+/// Call after rocprofiler_configure, which is where the writers are
+/// registered. Returns false when no writer of that name is registered.
+bool replace_writer(std::string_view name, const std::shared_ptr<OutputWriter>& writer);
 void reset_cfg();
 }  // namespace rocprofiler_compute_tool::test_knobs

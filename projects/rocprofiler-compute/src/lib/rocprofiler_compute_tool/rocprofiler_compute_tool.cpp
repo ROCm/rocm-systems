@@ -4,7 +4,9 @@
 #include "rocprofiler_compute_tool.h"
 
 #include "counters_writer.h"
+#include "dispatch_writer.h"
 #include "input_parameters.h"
+#include "kernel_symbols_writer.h"
 #include "output_registry.h"
 #include "sdk_callbacks.h"
 #include "sdk_wrapper.h"
@@ -29,8 +31,6 @@ static std::shared_ptr<SdkWrapper>& g_sdk_wrapper = *new std::shared_ptr<SdkWrap
     std::make_shared<SdkWrapperImpl>());
 static std::shared_ptr<SdkCallbacks>& g_sdk_callbacks = *new std::shared_ptr<SdkCallbacks>(
     std::make_shared<SdkCallbacksImpl>(g_sdk_wrapper));
-static std::shared_ptr<CountersWriter>& g_counters_writer = *new std::shared_ptr<CountersWriter>(
-    std::make_shared<CsvCountersWriter>());
 static std::shared_ptr<rocprofiler_tool_configure_result_t>& g_cfg =
     *new std::shared_ptr<rocprofiler_tool_configure_result_t>();
 static std::unique_ptr<tool_data_t>& g_tool_data       = *new std::unique_ptr<tool_data_t>();
@@ -48,9 +48,9 @@ void test_knobs::set_sdk_wrapper(const std::shared_ptr<SdkWrapper>& sdk_wrapper)
     g_sdk_wrapper = sdk_wrapper;
 }
 
-void test_knobs::set_csv_writer(const std::shared_ptr<CountersWriter>& csv_writer)
+bool test_knobs::replace_writer(std::string_view name, const std::shared_ptr<OutputWriter>& writer)
 {
-    g_counters_writer = csv_writer;
+    return g_output_registry.replace_writer(name, writer);
 }
 
 void test_knobs::reset_cfg()
@@ -104,6 +104,13 @@ void tool_tracing_callback(rocprofiler_callback_tracing_record_t record,
     g_sdk_callbacks->tool_tracing_callback(record, callback_data);
 }
 
+void kernel_dispatch_callback(rocprofiler_callback_tracing_record_t record,
+                              rocprofiler_user_data_t* /*user_data*/,
+                              void* callback_data)
+{
+    g_sdk_callbacks->kernel_dispatch_callback(record, callback_data);
+}
+
 void on_hsa_runtime_loaded(rocprofiler_intercept_table_t /*type*/,
                            uint64_t /*lib_version*/,
                            uint64_t /*lib_instance*/,
@@ -133,6 +140,15 @@ int tool_init(rocprofiler_client_finalize_t, void* user_data)
                                                       nullptr,
                                                       0,
                                                       tool_tracing_callback,
+                                                      user_data);
+
+    // Always on, so a run without counters still records its dispatches.
+    rocprofiler_tracing_operation_t dispatch_complete = ROCPROFILER_KERNEL_DISPATCH_COMPLETE;
+    g_sdk_wrapper->configure_callback_tracing_service(get_client_ctx(),
+                                                      ROCPROFILER_CALLBACK_TRACING_KERNEL_DISPATCH,
+                                                      &dispatch_complete,
+                                                      1,
+                                                      kernel_dispatch_callback,
                                                       user_data);
 
     // Declare counters before HSA loads so the SDK picks the legacy intercept path;
@@ -188,6 +204,9 @@ std::unique_ptr<tool_data_t> create_tool_data(rocprofiler_client_id_t* /*id*/)
 
     const auto output_path = g_input_parameters->get_output_path();
     tool_data->output_filename = generate_output_filename(output_path, CsvCountersWriter::kFileSuffix);
+    tool_data->dispatch_filename = generate_output_filename(output_path, DispatchWriter::kFileSuffix);
+    tool_data->kernel_symbols_filename = generate_output_filename(output_path,
+                                                                  KernelSymbolsWriter::kFileSuffix);
 
     const auto pc_sampling_method = g_input_parameters->get_pc_sampling_method();
     if (!pc_sampling_method.empty())
@@ -277,7 +296,9 @@ rocprofiler_tool_configure_result_t* rocprofiler_configure(uint32_t             
         g_tool_data         = create_tool_data(id);
         auto* tool_data_ptr = &g_tool_data;
 
-        g_output_registry.register_writer(g_counters_writer);
+        g_output_registry.register_writer(std::make_shared<CsvCountersWriter>());
+        g_output_registry.register_writer(std::make_shared<DispatchWriter>());
+        g_output_registry.register_writer(std::make_shared<KernelSymbolsWriter>());
         g_output_registry.register_writer(g_tool_data->pc_sampling);
 
         g_cfg = std::make_shared<rocprofiler_tool_configure_result_t>(
