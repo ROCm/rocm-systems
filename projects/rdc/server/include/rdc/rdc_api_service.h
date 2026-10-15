@@ -24,6 +24,7 @@ THE SOFTWARE.
 
 #include <grpcpp/server_context.h>
 
+#include <atomic>
 #include <condition_variable>  // NOLINT
 #include <map>
 #include <memory>
@@ -203,6 +204,27 @@ class RdcAPIServiceImpl final : public ::rdc::RdcAPI::Service {
  private:
   bool copy_gpu_usage_info(const rdc_gpu_usage_info_t& src, ::rdc::GpuUsageInfo* target);
   rdc_handle_t rdc_handle_;
+
+  // The most diagnostics rdcd runs at once, DiagnosticRun and DiagnosticTestCaseRun together,
+  // over all clients: any client can ask for one, and each keeps the GPUs busy. Another one
+  // gets RDC_ST_MAX_LIMIT.
+  static constexpr uint32_t kMaxDiagnosticRuns = 2;
+  // One of those runs: holds a slot from construction, if one is free, until destruction.
+  class DiagnosticSlot {
+   public:
+    explicit DiagnosticSlot(std::atomic<uint32_t>* runs);
+    ~DiagnosticSlot();
+    DiagnosticSlot(const DiagnosticSlot&) = delete;
+    DiagnosticSlot& operator=(const DiagnosticSlot&) = delete;
+    bool held() const { return held_; }
+
+   private:
+    std::atomic<uint32_t>* runs_;
+    bool held_ = false;
+  };
+  std::atomic<uint32_t> diagnostic_runs_{0};  // slots held
+  template <typename Response>
+  static ::grpc::Status reject_diagnostic(::grpc::ServerWriter<Response>* writer, const char* rpc);
 
   // The most RegisterPolicy streams rdcd serves at once, over all clients and groups.
   static constexpr size_t kMaxPolicyStreams = 64;
