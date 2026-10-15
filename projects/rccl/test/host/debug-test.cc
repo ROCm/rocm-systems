@@ -256,7 +256,6 @@ TEST_F(DebugMicrotest, WarnEnableDebugInfo_EmptyOrOutOfRangeKeepsThePreviousValu
   EXPECT_FALSE(ncclWarnSetDebugInfo);
 }
 
-// Unsetting it does not clear it either: a reset never returns it to false.
 TEST_F(DebugMicrotest, WarnEnableDebugInfo_SurvivesAResetWithoutIt_Observed) {
   g_env["NCCL_WARN_ENABLE_DEBUG_INFO"] = "1";
   Init();
@@ -387,7 +386,6 @@ TEST_F(DebugMicrotest, DebugFile_ExpandsHostPidAndPercent) {
   EXPECT_EQ(ReadFile(dir_ + "/log.node1.4242.%.%x"), "node1:4242:77 [3] NCCL INFO to file\n");
 }
 
-// The file is line-buffered: a line is on disk before the file is closed.
 TEST_F(DebugMicrotest, DebugFile_IsLineBuffered) {
   g_env["NCCL_DEBUG"] = "WARN";
   g_env["NCCL_DEBUG_FILE"] = dir_ + "/log";
@@ -437,7 +435,6 @@ TEST_F(DebugMicrotest, DebugFile_EmptyOrUnopenableStaysOnStdout) {
   EXPECT_EQ(ncclDebugFile, stdout);
 }
 
-// A name longer than PATH_MAX is cut at PATH_MAX, including mid-expansion, without overflowing.
 TEST_F(DebugMicrotest, DebugFile_LongNamesAreClampedToPathMax) {
   g_env["NCCL_DEBUG"] = "INFO";
   g_hostName = std::string(100, 'h');
@@ -449,7 +446,7 @@ TEST_F(DebugMicrotest, DebugFile_LongNamesAreClampedToPathMax) {
   }
 }
 
-// A path just under PATH_MAX is built exactly; "./" segments keep it valid.
+// "./" segments keep a path this long valid.
 TEST_F(DebugMicrotest, DebugFile_PathUpToPathMaxIsUsed) {
   g_env["NCCL_DEBUG"] = "INFO";
   std::string head = dir_ + "/";
@@ -636,7 +633,6 @@ TEST_F(DebugMicrotest, Timestamp_OnlyOnSelectedLevels) {
   EXPECT_EQ(Output(), "\nnode1:4242:77 [3] f:1 NCCL WARN w\n<00> node1:4242:77 [3] NCCL INFO i\n");
 }
 
-// NCCL_WARN_ENABLE_DEBUG_INFO turns INFO on once a WARN is logged.
 TEST_F(DebugMicrotest, Log_WarnEnablesInfoWhenRequested) {
   g_env["NCCL_DEBUG"] = "WARN";
   g_env["NCCL_WARN_ENABLE_DEBUG_INFO"] = "1";
@@ -659,7 +655,6 @@ TEST_F(DebugMicrotest, LazyInit_FirstLogReadsTheEnvironment) {
   EXPECT_EQ(ReadFile(dir_ + "/lazy"), "node1:4242:77 [3] NCCL INFO first\n");
 }
 
-// The first call initializes and then re-checks: a message the new settings filter out is dropped.
 TEST_F(DebugMicrotest, LazyInit_RechecksAfterInit) {
   g_env["NCCL_DEBUG"] = "INFO";
   g_env["NCCL_DEBUG_FILE"] = dir_ + "/lazy";
@@ -684,7 +679,6 @@ TEST_F(DebugMicrotest, Reset_ClosesTheOldFileAndRereadsTheEnvironment) {
   EXPECT_EQ(ReadFile(dir_ + "/two"), "node1:4242:77 [3] NCCL INFO 2\n");
 }
 
-// Only a reset closes the file: a fresh init with a file already open leaves it alone.
 TEST_F(DebugMicrotest, Reset_InitWithoutResetKeepsTheFileOpen) {
   ncclDebugFile = capture_;
   ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;

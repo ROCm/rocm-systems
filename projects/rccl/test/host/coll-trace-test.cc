@@ -435,7 +435,7 @@ TEST_F(CollTraceMicrotest, Trace_CreateEventMakesStartAndStopEvents) {
   EXPECT_NE(event->start->getCudaEvent(), event->stop->getCudaEvent());
 }
 
-// A failed hipEventCreate is only logged; the event is still handed out, with null HIP events.
+// The event is still handed out, with null HIP events.
 TEST_F(CollTraceMicrotest, Trace_EventCreateFailureIsOnlyLogged_Observed) {
   CollTrace trace(comm_.get());
   g_eventCreateResult = hipErrorOutOfMemory;
@@ -447,8 +447,6 @@ TEST_F(CollTraceMicrotest, Trace_EventCreateFailureIsOnlyLogged_Observed) {
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Cuda failure 'fake hip error'"));
 }
 
-// Every RECORD_MAX-th collective (by id) all-gathers this rank's ring buffer and, on device 0,
-// aggregates and reports it.
 TEST_F(CollTraceMicrotest, Trace_RingBoundaryAllGathersAndReports) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 2);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
@@ -489,7 +487,7 @@ TEST_F(CollTraceMicrotest, Trace_RingBufferKeepsTheLastRecordMaxCollectives) {
   EXPECT_EQ(lines[3].find("coll_id 3,"), 0u);
 }
 
-// The aggregation is gated on the CUDA device the worker runs on, not on the rank.
+// Gated on the worker's CUDA device, not on the rank.
 TEST_F(CollTraceMicrotest, Trace_OnlyDeviceZeroAggregates_Observed) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
@@ -544,7 +542,6 @@ TEST_F(CollTraceMicrotest, Trace_DestroyReportsWhatIsLeftOnRankZeroOnly) {
   EXPECT_EQ(Logs("coll_id").size(), 1u);
 }
 
-// With no room in the dump, a new aggregation is dropped before it can be reported.
 TEST_F(CollTraceMicrotest, Trace_ZeroDumpSizeDropsEveryAggregation) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 0);
@@ -592,7 +589,6 @@ TEST_F(CollTraceMicrotest, Trace_ReportErrorAtDestroyIsLogged) {
                                     "type ncclUint8"));
 }
 
-// A stop event that fails is recorded with latency -1 instead of a measured one.
 TEST_F(CollTraceMicrotest, Trace_FailedStopEventRecordsMinusOne) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   g_queryResults = {hipSuccess, hipErrorInvalidValue};  // start, stop

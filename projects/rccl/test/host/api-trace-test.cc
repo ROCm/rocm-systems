@@ -249,8 +249,7 @@ TEST_F(ApiTraceMicrotest, Table_IsBuiltOnceInPlace) {
   EXPECT_EQ(rccl::compute_table_offset(members - 1), offsetof(rcclApiFuncTable, ncclCommGrow_fn));
 }
 
-// Every slot holds the matching _impl, in the published order. The legacy ncclAllToAll(v) slots are
-// left empty: those entry points dispatch through the ncclAlltoAll(v) slots.
+// The legacy ncclAllToAll(v) entry points dispatch through the ncclAlltoAll(v) slots.
 TEST_F(ApiTraceMicrotest, Table_SlotsHoldTheMatchingImplementations) {
   const rcclApiFuncTable* t = rccl::RcclGetFunctionTable();
   EXPECT_EQ(t->ncclAllGather_fn, &ncclAllGather_impl);
@@ -339,7 +338,6 @@ TEST_F(ApiTraceMicrotest, Dispatch_AlltoAllv) {
   EXPECT_TRUE(g_warnings.empty());
 }
 
-// The legacy spellings still work, but warn and route to the ncclAlltoAll(v) implementation.
 TEST_F(ApiTraceMicrotest, Dispatch_DeprecatedAllToAllWarnsAndForwards) {
   EXPECT_FORWARDED(ncclAllToAll(kSend, kRecv, 7, ncclInt8, kComm, kStream), "AlltoAll", W(kSend), W(kRecv), 7,
                    ncclInt8, W(kComm), W(kStream));
@@ -442,7 +440,6 @@ TEST_F(ApiTraceMicrotest, Dispatch_ErrorStringsReturnTheImplementationsText) {
   EXPECT_EQ(g_calls[0].args, std::vector<uintptr_t>{W(kComm)});
 }
 
-// MSCCL was removed: the entry points remain, warn, record the call and succeed without doing anything.
 
 TEST_F(ApiTraceMicrotest, Msccl_LoadAndUnloadAreRecordedNoOps) {
   mscclAlgoHandle_t handle = 77;
