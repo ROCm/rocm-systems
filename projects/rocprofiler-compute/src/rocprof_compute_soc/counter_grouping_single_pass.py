@@ -1,18 +1,19 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Default allocator: single-bucket guarantee for every packable metric.
+"""Default allocator with a single-bucket guarantee for single-pass metrics.
 
-Every metric whose PMC set fits one CounterFile (single-pass packable, not
-SPU) has some perfmon bucket containing its full PMC set. The allocator
-minimizes the number of passes under that hard constraint. Counters not
-required by any packable set use ordinary first-fit. Remaining SPU PMCs
-are placed into existing buckets when possible, and new passes are opened
-only if needed. Short-term TCC channel rules live in counter_grouping_tcc:
-affinity pairs, the multi-column request row, and which extra copies to keep.
+A single-pass metric has some perfmon bucket containing its full PMC set.
+The allocator minimizes the number of passes under that hard constraint.
+Counters not required by any single-pass metric set use ordinary first-fit.
+Remaining multi-pass metric PMCs are placed into existing buckets when
+possible, and new passes are opened only if needed. Short-term TCC channel
+rules live in counter_grouping_tcc: affinity pairs, the multi-column request
+row, and which extra copies to keep.
 
-Overlapping packable sets that cannot share one bucket are handled by
-duplicating counters into an additional bucket (additive passes).
+Overlapping single-pass metric sets that cannot share one bucket are handled by
+duplicating counters into an additional bucket (additive passes). That
+may duplicate counters into an additional bucket.
 """
 
 from dataclasses import dataclass
@@ -46,97 +47,109 @@ if TYPE_CHECKING:
     from .soc_base import OmniSoC_Base
 
 
-def try_allocate_single_pass_packable(
+def try_allocate_single_pass_metrics(
     soc: "OmniSoC_Base",
     work_set: Set[str],
     perfmon_config: Dict[str, int],
     file_count_start: int = 0,
-) -> Optional[Tuple[List[CounterFile], int, "SinglePassPackableStats"]]:
-    """Allocate work_set with packable metrics forced into one bucket.
+) -> Optional[Tuple[List[CounterFile], int, "SinglePassMetricStats"]]:
+    """Allocate work_set with single-pass metrics forced into one bucket.
 
     On success, clears work_set.
 
     Returns:
-        (files, file_count, stats) when every packable set has a full bucket.
-        None when work_set is empty, when packable sets still lack a full
-        bucket after allocate, or when residual SPU fill drops that coverage.
+        (files, file_count, stats) when every single-pass metric set has a
+        full bucket. None when work_set is empty, when a single-pass metric
+        set still lacks a full bucket after allocation, or when multi-pass
+        metric fill drops that coverage.
     """
     if not work_set:
         return None
 
-    unions, packable_metric_count = collect_unique_packable_unions(
-        soc, work_set, perfmon_config
+    single_pass_metric_sets, single_pass_metric_count = (
+        collect_unique_single_pass_metric_sets(soc, work_set, perfmon_config)
     )
     files: List[CounterFile] = []
     file_count = file_count_start
-    for group in unions:
-        files, file_count = _ensure_packable_union(
+    for group in single_pass_metric_sets:
+        files, file_count = _ensure_single_pass_metric_set(
             files, group, perfmon_config, file_count
         )
 
     files, file_count = _first_fit_unplaced(files, work_set, perfmon_config, file_count)
-    files, merges = _reduce_passes(files, unions, perfmon_config)
-    files = keep_copies_groups_still_need(files, perfmon_config, unions)
+    files, merges = _reduce_passes(files, single_pass_metric_sets, perfmon_config)
+    files = keep_copies_groups_still_need(
+        files, perfmon_config, single_pass_metric_sets
+    )
 
-    packable_multi = _count_packable_multi(files, unions)
-    if packable_multi > 0:
+    single_pass_metric_sets_without_pass = _count_single_pass_metric_sets_without_pass(
+        files, single_pass_metric_sets
+    )
+    if single_pass_metric_sets_without_pass > 0:
         console_warning(
             "profiling",
-            "single-pass-packable: "
-            f"{packable_multi} packable metric set(s) still lack a full bucket "
-            "after allocate.",
+            "single-pass metric allocation: "
+            f"{single_pass_metric_sets_without_pass} single-pass metric set(s) "
+            "still lack a full bucket after allocation.",
         )
         return None
 
-    spu_unions, spu_metric_count = collect_unique_slot_limit_unions(
-        soc, work_set, perfmon_config
+    multi_pass_metric_sets, multi_pass_metric_count = (
+        collect_unique_multi_pass_metric_sets(soc, work_set, perfmon_config)
     )
-    files, file_count, spu_fill_stats = fill_slot_limit_into_existing_passes(
-        files,
-        spu_unions,
-        perfmon_config,
-        slot_limit_metric_count=spu_metric_count,
-        file_count_start=file_count,
+    files, file_count, multi_pass_fill_stats = (
+        fill_multi_pass_metrics_into_existing_passes(
+            files,
+            multi_pass_metric_sets,
+            perfmon_config,
+            multi_pass_metric_count=multi_pass_metric_count,
+            file_count_start=file_count,
+        )
     )
-    files = keep_copies_groups_still_need(files, perfmon_config, unions)
-    packable_multi = _count_packable_multi(files, unions)
-    if packable_multi > 0:
+    files = keep_copies_groups_still_need(
+        files, perfmon_config, single_pass_metric_sets
+    )
+    single_pass_metric_sets_without_pass = _count_single_pass_metric_sets_without_pass(
+        files, single_pass_metric_sets
+    )
+    if single_pass_metric_sets_without_pass > 0:
         console_warning(
             "profiling",
-            "single-pass-packable: "
-            f"{packable_multi} packable metric set(s) lost coverage after "
-            "residual fill.",
+            "single-pass metric allocation: "
+            f"{single_pass_metric_sets_without_pass} single-pass metric set(s) "
+            "lost coverage after multi-pass metric fill.",
         )
         return None
     file_count = _next_bucket_number(files, file_count_start)
 
-    stats = SinglePassPackableStats(
+    stats = SinglePassMetricStats(
         bucket_count=len(files),
-        packable_metric_count=packable_metric_count,
-        unique_packable_unions=len(unions),
-        packable_multi_after=packable_multi,
+        single_pass_metric_count=single_pass_metric_count,
+        unique_single_pass_metric_sets=len(single_pass_metric_sets),
+        single_pass_metric_sets_without_pass=single_pass_metric_sets_without_pass,
         merges_applied=merges,
-        slot_limit_metrics=spu_fill_stats.slot_limit_metrics,
-        unique_slot_limit_unions=spu_fill_stats.unique_slot_limit_unions,
-        slot_additional_passes=spu_fill_stats.additional_passes,
+        multi_pass_metric_count=multi_pass_fill_stats.multi_pass_metric_count,
+        unique_multi_pass_metric_sets=multi_pass_fill_stats.unique_multi_pass_metric_sets,
+        multi_pass_additional_passes=multi_pass_fill_stats.additional_passes,
     )
     console_debug(
         "profiling",
-        "single-pass-packable: "
+        "single-pass metric allocation: "
         f"{stats.bucket_count} bucket(s), "
-        f"{stats.packable_metric_count} packable metric(s), "
-        f"{stats.unique_packable_unions} unique union(s), "
-        f"packable_multi={stats.packable_multi_after}, "
+        f"{stats.single_pass_metric_count} single-pass metric(s), "
+        f"{stats.unique_single_pass_metric_sets} unique metric set(s), "
+        "single_pass_metric_sets_without_pass="
+        f"{stats.single_pass_metric_sets_without_pass}, "
         f"merges={stats.merges_applied}, "
-        f"slot_limit={stats.slot_limit_metrics}, "
-        f"slot_+passes={stats.slot_additional_passes}.",
+        f"multi_pass_metrics={stats.multi_pass_metric_count}, "
+        f"multi_pass_+passes={stats.multi_pass_additional_passes}.",
     )
 
     work_set.clear()
     return files, file_count, stats
 
 
-def collect_unique_packable_unions(
+def collect_unique_single_pass_metric_sets(
     soc: "OmniSoC_Base",
     profile_counters: Set[str],
     perfmon_config: Dict[str, int],
@@ -146,27 +159,27 @@ def collect_unique_packable_unions(
     Each set is adjusted by the short-term TCC rules before it is stored.
 
     Returns:
-        Groups sorted largest-first, and the packable metric count.
+        Groups sorted largest-first, and the single-pass metric count.
     """
     seen: Set[FrozenSet[str]] = set()
-    unions: List[FrozenSet[str]] = []
-    packable_metric_count = 0
+    metric_sets: List[FrozenSet[str]] = []
+    single_pass_metric_count = 0
     for _sort_key, group, _label in iter_metric_groups(soc, profile_counters):
         if not counters_fit_one_bucket(group, perfmon_config):
             continue
-        packable_metric_count += 1
+        single_pass_metric_count += 1
         for candidate in adjust_candidate_groups(group, profile_counters):
             if not counters_fit_one_bucket(candidate, perfmon_config):
                 candidate = group
             if candidate in seen:
                 continue
             seen.add(candidate)
-            unions.append(candidate)
-    unions.sort(key=lambda g: (-len(g), sorted(g)))
-    return unions, packable_metric_count
+            metric_sets.append(candidate)
+    metric_sets.sort(key=lambda group: (-len(group), sorted(group)))
+    return metric_sets, single_pass_metric_count
 
 
-def collect_unique_slot_limit_unions(
+def collect_unique_multi_pass_metric_sets(
     soc: "OmniSoC_Base",
     profile_counters: Set[str],
     perfmon_config: Dict[str, int],
@@ -174,34 +187,34 @@ def collect_unique_slot_limit_unions(
     """Unique PMC sets for metrics that cannot fit one hardware bucket.
 
     Returns:
-        Unions sorted largest-first, and the SPU metric count.
+        Metric sets sorted largest-first, and the multi-pass metric count.
     """
     seen: Set[FrozenSet[str]] = set()
-    unions: List[FrozenSet[str]] = []
-    slot_limit_metric_count = 0
+    metric_sets: List[FrozenSet[str]] = []
+    multi_pass_metric_count = 0
     for _sort_key, group, _label in iter_metric_groups(soc, profile_counters):
         if counters_fit_one_bucket(group, perfmon_config):
             continue
-        slot_limit_metric_count += 1
+        multi_pass_metric_count += 1
         if group in seen:
             continue
         seen.add(group)
-        unions.append(group)
-    unions.sort(key=lambda g: (-len(g), sorted(g)))
-    return unions, slot_limit_metric_count
+        metric_sets.append(group)
+    metric_sets.sort(key=lambda group: (-len(group), sorted(group)))
+    return metric_sets, multi_pass_metric_count
 
 
-def fill_slot_limit_into_existing_passes(
+def fill_multi_pass_metrics_into_existing_passes(
     files: List[CounterFile],
-    slot_limit_unions: List[FrozenSet[str]],
+    multi_pass_metric_sets: List[FrozenSet[str]],
     perfmon_config: Dict[str, int],
     *,
-    slot_limit_metric_count: int = 0,
+    multi_pass_metric_count: int = 0,
     file_count_start: Optional[int] = None,
-) -> Tuple[List[CounterFile], int, "SlotLimitFillStats"]:
-    """Place SPU PMCs into existing buckets; open new ones only if needed.
+) -> Tuple[List[CounterFile], int, "MultiPassMetricFillStats"]:
+    """Place multi-pass metric PMCs into existing buckets; open new ones only if needed.
 
-    For each unique SPU PMC set (the full set cannot fit one bucket):
+    For each unique multi-pass metric PMC set (the full set cannot fit one bucket):
     repeatedly pack the largest remaining subset into the best existing
     bucket, else open one new bucket with the largest subset that fits an
     empty bucket. A counter that fits no bucket, including a fresh empty
@@ -218,7 +231,7 @@ def fill_slot_limit_into_existing_passes(
     pmc_into_existing = 0
     pmc_into_new = 0
 
-    for group in slot_limit_unions:
+    for group in multi_pass_metric_sets:
         remaining = set(group)
         placed_anywhere = _counters_in_any_bucket(files)
         already = remaining & placed_anywhere
@@ -233,24 +246,24 @@ def fill_slot_limit_into_existing_passes(
 
             subset = _largest_subset_fitting_empty(need, perfmon_config)
             if not subset:
-                _raise_unplaceable_spu_counters(need)
+                _raise_unplaceable_multi_pass_metric_counters(need)
             new_bucket = rebuild_counter_file(
                 str(file_count), perfmon_config, set(subset)
             )
             if new_bucket is None:
-                _raise_unplaceable_spu_counters(set(subset))
+                _raise_unplaceable_multi_pass_metric_counters(set(subset))
             files.append(new_bucket)
             file_count += 1
             pmc_into_new += len(subset)
             need -= subset
 
     passes_after = len(files)
-    stats = SlotLimitFillStats(
+    stats = MultiPassMetricFillStats(
         passes_before=passes_before,
         passes_after=passes_after,
         additional_passes=passes_after - passes_before,
-        slot_limit_metrics=slot_limit_metric_count,
-        unique_slot_limit_unions=len(slot_limit_unions),
+        multi_pass_metric_count=multi_pass_metric_count,
+        unique_multi_pass_metric_sets=len(multi_pass_metric_sets),
         pmc_already_covered=pmc_already,
         pmc_placed_into_existing=pmc_into_existing,
         pmc_placed_into_new=pmc_into_new,
@@ -311,11 +324,11 @@ def _largest_subset_fitting_empty(
     return _largest_subset_fitting_bucket(empty, remaining, perfmon_config)
 
 
-def _raise_unplaceable_spu_counters(counters: Set[str]) -> None:
+def _raise_unplaceable_multi_pass_metric_counters(counters: Set[str]) -> None:
     """Stop residual fill when a counter exceeds a block budget alone."""
     names = ", ".join(sorted(counters))
     raise ValueError(
-        "single-pass-packable: SPU counter(s) exceed a block budget "
+        "multi-pass metric counter(s) exceed a block budget "
         f"even in an empty bucket: {names}"
     )
 
@@ -364,7 +377,7 @@ def _extend_best_existing_bucket(
     return best_subset
 
 
-def _ensure_packable_union(
+def _ensure_single_pass_metric_set(
     files: List[CounterFile],
     group: FrozenSet[str],
     perfmon_config: Dict[str, int],
@@ -395,7 +408,7 @@ def _ensure_packable_union(
     if new_bucket is None:
         console_warning(
             "profiling",
-            "single-pass-packable: cannot open bucket for a packable union.",
+            "single-pass metric allocation: cannot open a bucket for the set.",
         )
         return files, file_count
     files = list(files)
@@ -447,7 +460,7 @@ def _first_fit_unplaced(
         if not bucket.add(ctr):
             console_warning(
                 "profiling",
-                f"single-pass-packable: leftover {ctr!r} rejected by new bucket.",
+                f"single-pass metric allocation: leftover {ctr!r} was rejected.",
             )
             continue
         files.append(bucket)
@@ -456,12 +469,14 @@ def _first_fit_unplaced(
     return files, file_count
 
 
-def _count_packable_multi(
+def _count_single_pass_metric_sets_without_pass(
     files: List[CounterFile],
-    unions: List[FrozenSet[str]],
+    metric_sets: List[FrozenSet[str]],
 ) -> int:
-    """Count packable unions with no bucket containing the full PMC set."""
-    return sum(1 for group in unions if not _any_bucket_has_full_group(files, group))
+    """Count single-pass metric sets with no bucket containing the full PMC set."""
+    return sum(
+        1 for group in metric_sets if not _any_bucket_has_full_group(files, group)
+    )
 
 
 def _try_merge_bucket_indices(
@@ -495,12 +510,12 @@ def _first_coverage_preserving_merge(
     unions: List[FrozenSet[str]],
     perfmon_config: Dict[str, int],
 ) -> Optional[List[CounterFile]]:
-    """First pair, in combinations order, whose merge keeps packable coverage."""
+    """First pair whose merge keeps every single-pass metric set together."""
     for left, right in combinations(range(len(files)), 2):
         trial = _try_merge_bucket_indices(files, {left, right}, perfmon_config)
         if trial is None:
             continue
-        if _count_packable_multi(trial, unions) > 0:
+        if _count_single_pass_metric_sets_without_pass(trial, unions) > 0:
             continue
         return trial
     return None
@@ -508,13 +523,13 @@ def _first_coverage_preserving_merge(
 
 def _reduce_passes(
     files: List[CounterFile],
-    unions: List[FrozenSet[str]],
+    metric_sets: List[FrozenSet[str]],
     perfmon_config: Dict[str, int],
 ) -> Tuple[List[CounterFile], int]:
-    """Merge bucket pairs when the union fits and packable coverage stays intact."""
+    """Merge bucket pairs while every single-pass metric set stays together."""
     merges = 0
     while True:
-        trial = _first_coverage_preserving_merge(files, unions, perfmon_config)
+        trial = _first_coverage_preserving_merge(files, metric_sets, perfmon_config)
         if trial is None:
             return files, merges
         files = trial
@@ -522,28 +537,28 @@ def _reduce_passes(
 
 
 @dataclass(frozen=True)
-class SinglePassPackableStats:
-    """Outcome of the single-pass-packable allocator."""
+class SinglePassMetricStats:
+    """Outcome of the single-pass metric allocator."""
 
     bucket_count: int
-    packable_metric_count: int
-    unique_packable_unions: int
-    packable_multi_after: int
+    single_pass_metric_count: int
+    unique_single_pass_metric_sets: int
+    single_pass_metric_sets_without_pass: int
     merges_applied: int
-    slot_limit_metrics: int = 0
-    unique_slot_limit_unions: int = 0
-    slot_additional_passes: int = 0
+    multi_pass_metric_count: int = 0
+    unique_multi_pass_metric_sets: int = 0
+    multi_pass_additional_passes: int = 0
 
 
 @dataclass(frozen=True)
-class SlotLimitFillStats:
-    """Pass impact of filling SPU PMCs into an existing layout."""
+class MultiPassMetricFillStats:
+    """Pass impact of filling multi-pass metric PMCs into an existing layout."""
 
     passes_before: int
     passes_after: int
     additional_passes: int
-    slot_limit_metrics: int
-    unique_slot_limit_unions: int
+    multi_pass_metric_count: int
+    unique_multi_pass_metric_sets: int
     pmc_already_covered: int
     pmc_placed_into_existing: int
     pmc_placed_into_new: int

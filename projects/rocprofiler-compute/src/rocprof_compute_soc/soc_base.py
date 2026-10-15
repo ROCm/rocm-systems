@@ -17,7 +17,7 @@ from rocprof_compute_soc.counter_file import (
     LimitedSet as LimitedSet,
 )
 from rocprof_compute_soc.counter_grouping_single_pass import (
-    try_allocate_single_pass_packable,
+    try_allocate_single_pass_metrics,
 )
 from rocprof_compute_soc.counter_grouping_tcc import (
     collectable_tcc_channel_count,
@@ -395,10 +395,10 @@ class OmniSoC_Base:
         after its *_ACCUM charges 0. Legacy SQ_ACCUM_PREV_HIRES pairing and
         dedicated accum buckets are not used.
 
-        Single-pass packable is the only allocator: every metric whose PMC set
-        fits one CounterFile gets a full-bucket collection (counters may be
-        duplicated across passes), then SPU PMCs are filled into existing
-        buckets.
+        Single-pass metric packing is the only allocator. Every metric whose
+        PMC set fits one CounterFile gets a full-bucket collection; counters
+        may be copied across passes. Multi-pass metric PMCs are then filled
+        into existing buckets.
 
         Returns:
             output_files, file_count, and accu_file_count.
@@ -408,7 +408,7 @@ class OmniSoC_Base:
         if not counters:
             return [], 0, accu_file_count
 
-        single_pass = try_allocate_single_pass_packable(
+        single_pass = try_allocate_single_pass_metrics(
             self,
             set(counters),
             self.__perfmon_config,
@@ -416,7 +416,7 @@ class OmniSoC_Base:
         if single_pass is None:
             console_error(
                 "profiling",
-                "single-pass packing could not place every packable metric set",
+                "single-pass packing could not place every single-pass metric set",
             )
             raise AssertionError("single-pass packing failed")
         output_files, file_count, _stats = single_pass

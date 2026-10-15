@@ -1,6 +1,6 @@
 # Single-XCD L2 channel correction
 
-Problem statement for a workaround that stays off the single-pass packable
+Problem statement for a workaround that stays off the single-pass metric
 design. Health test report generation still needs it. The proper fix is in
 amd-smi.
 
@@ -53,7 +53,7 @@ did, `num_xcd` would already be 1 and this rewrite would not run.
 
 Single-XCD health workloads are profiled with `ROCR_VISIBLE_DEVICES` and then
 re-analyzed for the health test report. Median recompute in
-`tools/compare_spp_legacy_medians.py` loads `sysinfo.csv` through
+`tools/generate_metric_health_report.py` loads `sysinfo.csv` through
 `reconcile_sysinfo_l2_channels`. Without that, L2 metrics in the report are
 N/A or compared on the wrong channel count.
 
@@ -64,7 +64,7 @@ it in `OmniAnalyze_Base.initalize_runs` while loading `sysinfo.csv`.
 
 ## Scope
 
-This is outside the single-pass packable and unpackable design. Pull requests
+This is outside the single-pass metric and multi-pass metric design. Pull requests
 [#12709](https://github.com/ROCm/rocm-systems/pull/12709),
 [#12830](https://github.com/ROCm/rocm-systems/pull/12830),
 [#12712](https://github.com/ROCm/rocm-systems/pull/12712), and
@@ -76,4 +76,4 @@ for report generation only:
 
 - Profile: `MachineSpecsCDNA._reconcile_num_xcd_with_visible_cus`
 - Post-analysis: `reconcile_sysinfo_l2_channels` in `parser.py`
-- Health test report: `tools/compare_spp_legacy_medians.py`
+- Health test report: `tools/generate_metric_health_report.py`

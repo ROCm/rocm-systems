@@ -374,8 +374,8 @@ def load_df_pmc(
     """
     Read all raw pmc counters into one analysis df plus a ``PassLayout``.
 
-    When the same counter appears in multiple passes (SPP duplication), the
-    wide frame keeps a base column (first pass) and per-pass shadow columns.
+    When single-pass metric packing copies a counter across passes, the wide
+    frame keeps a base column (first pass) and per-pass shadow columns.
     """
     result_files = sorted(
         Path(raw_data_dir).glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}"),
