@@ -71,12 +71,14 @@ constexpr const char* k_unknown_kernel_name = "unknown_kernel";
 std::string
 get_counter_description(const client_data* tool_data, std::string_view _v)
 {
-    const auto& _info = tool_data->events_info;
-    for(const auto& itr : _info)
+    for(const auto& [_agent_id, _counters] : tool_data->agent_counter_info)
     {
-        if(itr.symbol().starts_with(_v) || itr.short_description().starts_with(_v))
+        for(const auto& itr : _counters)
         {
-            return itr.long_description();
+            if(!itr.is_constant && std::string_view{ itr.name }.starts_with(_v))
+            {
+                return std::string{ itr.description };
+            }
         }
     }
     return std::string{};
