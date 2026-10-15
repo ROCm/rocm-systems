@@ -9,21 +9,25 @@
 
 #include <fcntl.h>
 #include <poll.h>
+#include <signal.h>
 #include <sys/socket.h>
 #include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
+#include <chrono>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <deque>
+#include <functional>
 #include <map>
 #include <mutex>
 #include <string>
 #include <thread>
+#include <tuple>
 #include <vector>
 
 #include <gtest/gtest.h>
@@ -392,9 +396,10 @@ ncclResult_t FakeProxyDeregister(ncclProxyConnection*, ncclProxyState*, void*, i
   return g_tp.deregisterResult;
 }
 std::atomic<int> g_progressCalls;
-ncclResult_t FakeProxyProgress(ncclProxyState*, ncclProxyArgs*) {
+std::function<ncclResult_t(ncclProxyArgs*)> g_progressFn;  // default: progress nothing, stay busy
+ncclResult_t FakeProxyProgress(ncclProxyState*, ncclProxyArgs* args) {
   g_progressCalls++;
-  return ncclSuccess;
+  return g_progressFn ? g_progressFn(args) : ncclSuccess;
 }
 
 // Transport 0 has every hook; transport 1 has none (all null).
@@ -454,6 +459,7 @@ class ProxyFixture : public ::testing::Test {
     g_tp = TransportFakes{};
     g_tp.setupDone = g_tp.connectDone = g_tp.registerDone = g_tp.deregisterDone = 1;
     g_progressCalls = 0;
+    g_progressFn = nullptr;
     ncclTransportComm full = {};
     full.proxyFree = FakeProxyFree;
     full.proxySetup = FakeProxySetup;
@@ -1228,6 +1234,583 @@ TEST_F(ProxySavePatMicrotest, Pat_AllocationAndSaveErrorsPropagate) {
     EXPECT_EQ(Save(PatOp(p)), ncclInternalError);
     peers_[1].recv[0].transportComm = peers_[3].recv[0].transportComm = &g_transports[0].recv;
   }
+}
+
+// Progress side: args pool, ProxyAppend, removeOp, progressOps, ncclProxyGetPostedOps, the progress thread
+
+class ProxyProgressFixture : public ProxyFixture {
+ protected:
+  static constexpr int kArgs = 8;
+  void SetUp() override {
+    ProxyFixture::SetUp();
+    // A small pre-chained free list: allocateArgs' real pool is ~280 MB, which only its own test pays for.
+    args_ = (ncclProxyArgs*)calloc(kArgs, sizeof(ncclProxyArgs));
+    for (int i = 0; i < kArgs - 1; i++) args_[i].next = &args_[i + 1];
+    st().pool = args_;
+    st().nextOps = -1;
+    ps_.abortFlag = &abort_;
+    ps_.tpLocalnRanks = 2;
+    for (int i = 0; i < 4; i++) {
+      conns_[i].send = i % 2;
+      conns_[i].tcomm = &g_transports[0].send;
+      conns_[i].proxyAppendPtr = &conns_[i].proxyAppend;
+    }
+  }
+  void TearDown() override {
+    if (st().thread.joinable()) {
+      COMPILER_ATOMIC_STORE(&abort_, 1, std::memory_order_release);
+      st().stop.store(2);
+      if (opsPool_) opsPool_->cond.notify_all();
+      st().thread.join();
+    }
+    free(args_);
+    free(opsPool_);
+    ProxyFixture::TearDown();
+  }
+  ncclProxyProgressState& st() { return ps_.progressState; }
+  ncclProxyOp Op(int conn, uint64_t opCount) {
+    ncclProxyOp op = {};
+    op.connection = &conns_[conn];
+    op.opCount = opCount;
+    op.nsteps = 4;
+    op.sliceSteps = 2;
+    return op;
+  }
+  std::vector<ncclProxyArgs*> Active() {
+    std::vector<ncclProxyArgs*> out;
+    for (ncclProxyArgs* a = st().active; a; a = a->next) out.push_back(a);
+    return out;
+  }
+  int FreeCount() {
+    int n = 0;
+    for (ncclProxyArgs* a = st().pool; a; a = a->next) n++;
+    return n;
+  }
+  void MakeOpsPool() {
+    opsPool_ = (ncclProxyOpsPool*)calloc(1, sizeof(ncclProxyOpsPool));
+    InitFreeLists(opsPool_, 2);
+    st().opsPool = opsPool_;
+  }
+  // Fills pool slots the way clients do and returns {first, last}; slot = localRank * MAX_OPS_PER_PEER + i.
+  std::pair<int, int> Chain(std::vector<std::tuple<int, int, uint64_t>> ops) {  // (localRank, conn, opCount)
+    int first = -1, prev = -1;
+    std::map<int, int> used;
+    for (auto& [r, c, opCount] : ops) {
+      int idx = r * MAX_OPS_PER_PEER + 100 + used[r]++;
+      opsPool_->ops[idx] = Op(c, opCount);
+      opsPool_->ops[idx].next = -1;
+      if (prev == -1) first = idx;
+      else opsPool_->ops[prev].next = idx;
+      prev = idx;
+    }
+    return {first, prev};
+  }
+
+  ncclProxyState ps_ = {};
+  ncclProxyArgs* args_ = nullptr;
+  ncclProxyOpsPool* opsPool_ = nullptr;
+  ncclProxyConnection conns_[4] = {};
+  uint32_t abort_ = 0;
+};
+
+class ProxyArgsPoolMicrotest : public ProxyProgressFixture {
+ protected:
+  // Pools built here are calloc'd (lazily zeroed), not ncclCalloc'd, so they stay cheap.
+  ncclProxyPool* NewPool(ncclProxyPool* next) {
+    auto* p = (ncclProxyPool*)calloc(1, sizeof(ncclProxyPool));
+    p->next = next;
+    return p;
+  }
+};
+
+TEST_F(ProxyArgsPoolMicrotest, AllocateArgs_PopsTheFreeListAndGrowsByAWholePool) {
+  ncclProxyArgs* a = nullptr;
+  args_[0].nextPeer = &args_[3];
+  ASSERT_EQ(allocateArgs(&st(), &a), ncclSuccess);
+  EXPECT_EQ(a, &args_[0]);
+  EXPECT_EQ(a->next, nullptr);
+  EXPECT_EQ(a->nextPeer, nullptr);
+  EXPECT_EQ(st().pool, &args_[1]);
+  st().pool = nullptr;
+  g_callocFailAt = 0;
+  EXPECT_EQ(allocateArgs(&st(), &a), ncclSystemError);
+  g_callocFailAt = -1;
+  ASSERT_EQ(allocateArgs(&st(), &a), ncclSuccess);
+  ASSERT_NE(st().pools, nullptr);
+  EXPECT_EQ(a, st().pools->elems);
+  EXPECT_EQ(st().pool, st().pools->elems + 1);
+  EXPECT_EQ(st().pools->elems[PROXYARGS_ALLOCATE_SIZE - 2].next, st().pools->elems + PROXYARGS_ALLOCATE_SIZE - 1);
+  EXPECT_EQ(st().pools->elems[PROXYARGS_ALLOCATE_SIZE - 1].next, nullptr);
+  ASSERT_EQ(ncclProxyProgressDestroy(&ps_), ncclSuccess);  // no ops pool: just frees the args pools
+  EXPECT_EQ(st().pools, nullptr);
+}
+
+TEST_F(ProxyArgsPoolMicrotest, GetOpIndex_LocatesAnOpInAnyPool) {
+  st().pools = NewPool(NewPool(nullptr));
+  int pool = -1, op = -1;
+  ASSERT_EQ(getOpIndex(st().pools->next->elems + 9, &st(), &pool, &op), ncclSuccess);
+  EXPECT_EQ(pool, 1);
+  EXPECT_EQ(op, 9);
+  ASSERT_EQ(getOpIndex(st().pools->elems + PROXYARGS_ALLOCATE_SIZE - 1, &st(), &pool, &op), ncclSuccess);
+  EXPECT_EQ(pool, 0);
+  EXPECT_EQ(op, PROXYARGS_ALLOCATE_SIZE - 1);
+  EXPECT_EQ(getOpIndex(args_, &st(), &pool, &op), ncclInternalError);
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Could not find pool of op"));
+  st().pool = args_;
+  ASSERT_EQ(ncclProxyProgressDestroy(&ps_), ncclSuccess);
+}
+
+TEST_F(ProxyArgsPoolMicrotest, DumpProxyState_WalksActiveAndFreeListsAndClearsMarks) {
+  st().pools = NewPool(nullptr);
+  ncclProxyArgs* e = st().pools->elems;
+  auto freeFrom = [&](int i) {  // e[i..] is the free list
+    st().pool = &e[i];
+    for (; i < PROXYARGS_ALLOCATE_SIZE - 1; i++) e[i].next = &e[i + 1];
+  };
+  // active: e0 (nextPeer e1 -> e2), e3; free: e6..; e4 and e5 are in no list.
+  st().active = &e[0];
+  e[0].next = &e[3];
+  e[0].nextPeer = &e[1];
+  e[1].nextPeer = &e[2];
+  e[2].next = &e[3];
+  e[0].state = ncclProxyOpProgress;
+  e[0].nsubs = 1;
+  e[3].state = ncclProxyOpReady;
+  freeFrom(6);
+  ncclLastProxyState = &st();
+  ncclDumpProxyState(SIGUSR2);
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "Inactive op has next set!"));
+  EXPECT_FALSE(Logged(NCCL_LOG_ATTN, "List loop"));
+  for (int i = 0; i < PROXYARGS_ALLOCATE_SIZE; i++) ASSERT_EQ(e[i].state & OP_SEEN, 0) << i;
+  // Duplicates across lists are reported: e1 is both e0's nextPeer and active, then e3's nextPeer;
+  // e3 is both active and free.
+  e[1] = e[2] = ncclProxyArgs{};
+  e[0].next = &e[1];
+  e[1].next = &e[3];
+  e[3].nextPeer = &e[1];
+  freeFrom(4);
+  st().pool = &e[2];
+  e[2].next = &e[4];
+  e[PROXYARGS_ALLOCATE_SIZE - 1].next = &e[3];
+  ASSERT_EQ(dumpProxyState(&st()), ncclSuccess);
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "List loop at element 0-1"));
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "List loop at element 0-3"));
+  // Ops outside every pool abort the dump, whichever list they are on.
+  e[PROXYARGS_ALLOCATE_SIZE - 1].next = args_;
+  EXPECT_EQ(dumpProxyState(&st()), ncclInternalError);
+  e[3].nextPeer = args_;
+  EXPECT_EQ(dumpProxyState(&st()), ncclInternalError);
+  st().active = args_;
+  EXPECT_EQ(dumpProxyState(&st()), ncclInternalError);
+  st().active = nullptr;
+  st().pool = args_;
+  ASSERT_EQ(ncclProxyProgressDestroy(&ps_), ncclSuccess);
+}
+
+TEST_F(ProxyArgsPoolMicrotest, PrintProxyOp_ReportsEveryStatusLetter) {
+  ncclProxyArgs& a = args_[0];
+  a.nsubs = 1;
+  ncclProxySubArgs& s = a.subs[0];
+  a.state = ncclProxyOpProgress;
+  struct Case {
+    uint8_t pattern;
+    uint64_t posted, transmitted, received, done;
+    int nsteps;
+  };
+  for (const Case& c : std::vector<Case>{{ncclPatternRecv, 0, 0, 0, 0, 4},    // I
+                                         {ncclPatternRecv, 4, 0, 2, 0, 4},    // R: received < posted
+                                         {ncclPatternRecv, 4, 4, 4, 0, 4},    // G
+                                         {ncclPatternRecv, 4, 5, 4, 0, 4},    // R: received < transmitted
+                                         {ncclPatternRecv, 4, 3, 4, 3, 4},    // F
+                                         {ncclPatternRecv, 4, 4, 4, 4, 4},    // D
+                                         {ncclPatternSend, 0, 0, 0, 0, 4},    // I
+                                         {ncclPatternSend, 4, 2, 0, 0, 4},    // G
+                                         {ncclPatternSend, 4, 4, 0, 2, 4},    // S
+                                         {ncclPatternSend, 4, 4, 0, 4, 4},    // D
+                                         {ncclPatternRing, 1, 1, 1, 1, 4}}) {  // raw counters
+    a.pattern = c.pattern;
+    a.send = c.pattern == ncclPatternSend;
+    s.posted = c.posted;
+    s.transmitted = c.transmitted;
+    s.received = c.received;
+    s.done = c.done;
+    s.nsteps = c.nsteps;
+    EXPECT_EQ(printProxyOp(&a, 0, 0), ncclSuccess);
+  }
+  for (int state : {(int)ncclProxyOpNone, (int)ncclProxyOpReady, 7}) {
+    a.state = state;
+    EXPECT_EQ(printProxyOp(&a, 0, 0), ncclSuccess);
+  }
+}
+
+class ProxyAppendMicrotest : public ProxyProgressFixture {};
+
+TEST_F(ProxyAppendMicrotest, OpToArgs_FirstSubCopiesTheOpAndLaterSubsMustMatch) {
+  ncclProxyArgs& a = args_[0];
+  ncclProxyOp op = Op(1, 7);
+  op.nChannels = 4;
+  op.nPeers = 3;
+  op.prevRank = 5;
+  op.nextRank = 6;
+  op.commHash = 99;
+  op.channelId = 2;
+  ASSERT_EQ(ncclProxyOpToArgs(&op, &a, 0), ncclSuccess);
+  EXPECT_EQ(a.nsubs, 1);
+  EXPECT_EQ(a.opCount, 7u);
+  EXPECT_EQ(a.state, ncclProxyOpReady);
+  EXPECT_EQ(a.progress, FakeProxyProgress);
+  EXPECT_EQ(a.proxyAppendPtr, &conns_[1].proxyAppend);
+  EXPECT_EQ(a.send, 1);
+  EXPECT_EQ(a.prevRank, 5);
+  EXPECT_EQ(a.nextRank, 6);
+  EXPECT_EQ(a.subs[0].channelId, 2);
+  EXPECT_EQ(a.subs[0].nsteps, 4);
+  EXPECT_EQ(a.subs[0].commHash, 0u);  // profiler diag disabled
+  EXPECT_EQ(g_profOpStarts, 1);
+  g_proxyDiagEnabled = true;
+  op.nChannels = 2;
+  op.nPeers = 9;
+  op.totalBytes = 1234;
+  ASSERT_EQ(ncclProxyOpToArgs(&op, &a, 1), ncclSuccess);
+  EXPECT_EQ(a.nsubs, 2);
+  EXPECT_EQ(a.nChannels, 2);
+  EXPECT_EQ(a.nPeers, 3);
+  EXPECT_EQ(a.subs[1].commHash, 99u);
+  EXPECT_EQ(a.subs[1].profExtras.totalBytes, 1234u);
+  for (int field = 0; field < 6; field++) {
+    ncclProxyOp bad = op;
+    uint8_t* f[] = {&bad.sliceSteps, &bad.chunkSteps, &bad.protocol, &bad.dtype, &bad.redOp, &bad.coll};
+    (*f[field])++;
+    EXPECT_EQ(ncclProxyOpToArgs(&bad, &a, 2), ncclInternalError) << field;
+  }
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Proxy append mismatch"));
+  a.state = ncclProxyOpProgress;
+  EXPECT_EQ(ncclProxyOpToArgs(&op, &a, 2), ncclInternalError);
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Proxy append on running operation"));
+  EXPECT_EQ(ncclProxyOpToArgs(&op, &a, NCCL_PROXY_MAX_SUBS), ncclInternalError);
+  EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Proxy append out of bounds"));
+}
+
+TEST_F(ProxyAppendMicrotest, Append_NewPeersJoinTheActiveListInOrder) {
+  ncclProxyOp op0 = Op(0, 1), op1 = Op(1, 1), op2 = Op(2, 1);
+  ASSERT_EQ(ProxyAppend(&st(), &op0), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&st(), &op1), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&st(), &op2), ncclSuccess);
+  EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[0], &args_[1], &args_[2]}));
+  EXPECT_EQ(conns_[1].proxyAppend, &args_[1]);
+}
+
+TEST_F(ProxyAppendMicrotest, Append_SharedSameOpCountBecomesASubElseANextPeer) {
+  conns_[0].shared = 1;
+  ncclProxyOp op = Op(0, 3);
+  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  EXPECT_EQ(args_[0].nsubs, 2);
+  op.opCount = 4;
+  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  EXPECT_EQ(args_[0].nextPeer, &args_[1]);
+  EXPECT_EQ(conns_[0].proxyAppend, &args_[1]);
+  conns_[0].shared = 0;  // unshared connections never merge, even on equal opCount
+  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  EXPECT_EQ(args_[1].nextPeer, &args_[2]);
+  EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[0]}));
+}
+
+TEST_F(ProxyAppendMicrotest, Append_ErrorsPropagate) {
+  conns_[0].shared = 1;
+  ncclProxyOp op = Op(0, 3);
+  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  op.coll++;
+  EXPECT_EQ(ProxyAppend(&st(), &op), ncclInternalError);  // mismatched sub
+  st().pool = nullptr;
+  g_callocFailAt = g_callocCalls;
+  op.opCount = 5;
+  EXPECT_EQ(ProxyAppend(&st(), &op), ncclSystemError);  // nextPeer allocation
+  g_callocFailAt = g_callocCalls;
+  ncclProxyOp other = Op(1, 1);
+  EXPECT_EQ(ProxyAppend(&st(), &other), ncclSystemError);  // new list entry allocation
+  st().pool = &args_[4];
+  other.sliceSteps = 0;
+  other.coll = 0;
+  ASSERT_EQ(ProxyAppend(&st(), &other), ncclSuccess);
+  ncclProxyOp bad = Op(1, 2);
+  conns_[1].proxyAppend->state = ncclProxyOpReady;
+  bad.coll = 0;
+  EXPECT_EQ(ncclProxyOpToArgs(&bad, conns_[1].proxyAppend, NCCL_PROXY_MAX_SUBS), ncclInternalError);
+  ncclProxyArgs* before = conns_[1].proxyAppend;
+  bad.opCount = 1;
+  conns_[1].shared = 1;
+  bad.sliceSteps = 9;  // a sub that mismatches
+  EXPECT_EQ(ProxyAppend(&st(), &bad), ncclInternalError);
+  EXPECT_EQ(conns_[1].proxyAppend, before);
+}
+
+class ProxyProgressOpsMicrotest : public ProxyProgressFixture {};
+
+TEST_F(ProxyProgressOpsMicrotest, RemoveOp_PromotesNextPeerOrUnlinksAndRecycles) {
+  ncclProxyOp a = Op(0, 1), b = Op(1, 1), b2 = Op(1, 2), c = Op(2, 1);
+  for (ncclProxyOp* op : {&a, &b, &b2, &c}) ASSERT_EQ(ProxyAppend(&st(), op), ncclSuccess);
+  // active: A0 -> B1(nextPeer B2) -> C3
+  ncclProxyArgs *prev = &args_[0], *op = &args_[1];
+  ASSERT_EQ(removeOp(&st(), &op, &prev), ncclSuccess);
+  EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[0], &args_[2], &args_[3]}));
+  EXPECT_EQ(prev, &args_[2]);
+  EXPECT_EQ(op, &args_[3]);
+  EXPECT_EQ(st().pool, &args_[1]);
+  EXPECT_EQ(conns_[1].proxyAppend, &args_[2]);
+  prev = nullptr;
+  op = &args_[0];
+  ASSERT_EQ(removeOp(&st(), &op, &prev), ncclSuccess);  // head without nextPeer
+  EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[2], &args_[3]}));
+  EXPECT_EQ(conns_[0].proxyAppend, nullptr);
+  EXPECT_EQ(prev, nullptr);
+  prev = &args_[2];
+  op = &args_[3];
+  ASSERT_EQ(removeOp(&st(), &op, &prev), ncclSuccess);  // middle without nextPeer
+  EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[2]}));
+  ncclProxyOp b3 = Op(1, 3);
+  ASSERT_EQ(ProxyAppend(&st(), &b3), ncclSuccess);
+  prev = nullptr;
+  op = &args_[2];
+  ASSERT_EQ(removeOp(&st(), &op, &prev), ncclSuccess);  // head with nextPeer
+  EXPECT_EQ(st().active, conns_[1].proxyAppend);
+  EXPECT_EQ(FreeCount(), kArgs - 1);
+}
+
+TEST_F(ProxyProgressOpsMicrotest, ProgressOps_RemovesFinishedOrFailedOpsAndReportsTheFirstError) {
+  for (int c = 0; c < 4; c++) {
+    ncclProxyOp op = Op(c, 1);
+    ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  }
+  g_progressFn = [&](ncclProxyArgs* a) {
+    int i = a - args_;
+    a->idle = i != 1;
+    if (i == 0) a->state = ncclProxyOpNone;  // done
+    return i == 2 ? ncclRemoteError : i == 3 ? ncclSystemError : ncclSuccess;
+  };
+  int idle = 1;
+  EXPECT_EQ(progressOps(&ps_, &st(), st().active, &idle), ncclRemoteError);
+  EXPECT_EQ(idle, 0);
+  EXPECT_EQ(Active(), (std::vector<ncclProxyArgs*>{&args_[1]}));
+  EXPECT_EQ(args_[1].retry_total, 1);
+  idle = 1;
+  g_progressFn = [](ncclProxyArgs* a) {
+    a->idle = 1;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(progressOps(&ps_, &st(), st().active, &idle), ncclSuccess);
+  EXPECT_EQ(idle, 1);
+  EXPECT_EQ(args_[1].retry_total, 2);
+  args_[1].state = ncclProxyOpNone;
+  EXPECT_EQ(progressOps(&ps_, &st(), st().active, &idle), ncclInternalError);
+}
+
+class ProxyGetPostedOpsMicrotest : public ProxyProgressFixture {};
+
+TEST_F(ProxyGetPostedOpsMicrotest, NoOpsPoolIsAnInternalError) {
+  int added = 0;
+  EXPECT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclInternalError);
+}
+
+TEST_F(ProxyGetPostedOpsMicrotest, AppendsPostedOpsAndReturnsSlotsToEachPeerFreeList) {
+  MakeOpsPool();
+  auto [first, last] = Chain({{0, 0, 1}, {0, 1, 1}, {1, 2, 1}});
+  opsPool_->nextOps = first;
+  opsPool_->nextOpsEnd = last;
+  opsPool_->freeOps[0] = 7;  // the client still holds 7; returned slots go in front of it
+  opsPool_->freeOps[1] = -1;
+  int added = 0;
+  st().stop.store(1);  // must not block even with nothing active
+  ASSERT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSuccess);
+  EXPECT_EQ(added, 3);
+  EXPECT_EQ(Active().size(), 3u);
+  EXPECT_EQ(opsPool_->nextOps, -1);
+  EXPECT_EQ(opsPool_->nextOpsEnd, -1);
+  EXPECT_EQ(st().nextOps, -1);
+  EXPECT_EQ(opsPool_->freeOps[0], 101);  // last returned first
+  EXPECT_EQ(opsPool_->ops[101].next, 100);
+  EXPECT_EQ(opsPool_->ops[100].next, 7);
+  EXPECT_EQ(opsPool_->freeOps[1], MAX_OPS_PER_PEER + 100);
+  EXPECT_EQ(opsPool_->ops[MAX_OPS_PER_PEER + 100].next, -1);
+  EXPECT_EQ(g_profCtrlStates, (std::vector<int>{ncclProfilerProxyCtrlAppend, ncclProfilerProxyCtrlAppendEnd}));
+}
+
+TEST_F(ProxyGetPostedOpsMicrotest, StopsAtTheBatchSizeAndResumesWithoutTheLock) {
+  MakeOpsPool();
+  g_params["NCCL_PROXY_APPEND_BATCH_SIZE"] = 1;
+  auto [first, last] = Chain({{0, 0, 1}, {0, 0, 1}, {0, 1, 2}, {0, 2, 3}, {1, 3, 3}, {1, 3, 4}});
+  opsPool_->nextOps = first;
+  opsPool_->nextOpsEnd = last;
+  int added = 0;
+  ASSERT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSuccess);
+  EXPECT_EQ(added, 3);  // two groups (opCount 1, opCount 2); opCount 3 would start a third
+  EXPECT_EQ(st().nextOps, 103);
+  opsPool_->nextOps = 5;  // a fresh post must wait: the leftover chain is drained first, without the lock
+  std::unique_lock<std::mutex> held(opsPool_->mutex);
+  added = 0;
+  ASSERT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSuccess);
+  EXPECT_EQ(added, 2);  // a change of peer also starts a group
+  EXPECT_EQ(st().nextOps, MAX_OPS_PER_PEER + 101);
+  EXPECT_EQ(opsPool_->nextOps, 5);
+}
+
+TEST_F(ProxyGetPostedOpsMicrotest, WithActiveOpsNeverWaitsForNewPostsOrTheLock) {
+  MakeOpsPool();
+  ncclProxyOp op = Op(0, 1);
+  ASSERT_EQ(ProxyAppend(&st(), &op), ncclSuccess);
+  int added = 0;
+  ASSERT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSuccess);  // nothing posted
+  auto [first, last] = Chain({{0, 1, 1}});
+  opsPool_->nextOps = first;
+  opsPool_->nextOpsEnd = last;
+  {
+    std::unique_lock<std::mutex> held(opsPool_->mutex);
+    std::thread t([&] { EXPECT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSuccess); });
+    t.join();
+  }
+  EXPECT_EQ(added, 0);
+  EXPECT_EQ(opsPool_->nextOps, first);
+  ASSERT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSuccess);
+  EXPECT_EQ(added, 1);
+}
+
+TEST_F(ProxyGetPostedOpsMicrotest, IdleProxySleepsUntilAPost) {
+  MakeOpsPool();
+  auto [first, last] = Chain({{1, 1, 4}});
+  std::thread client([&, first = first, last = last] {
+    std::this_thread::sleep_for(std::chrono::milliseconds(20));
+    ncclProxyPost(opsPool_, first, last);
+  });
+  int added = 0;
+  ASSERT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSuccess);
+  client.join();
+  EXPECT_EQ(added, 1);
+  EXPECT_EQ(g_profCtrlStates, (std::vector<int>{ncclProfilerProxyCtrlSleep, ncclProfilerProxyCtrlWakeup,
+                                                ncclProfilerProxyCtrlAppend, ncclProfilerProxyCtrlAppendEnd}));
+}
+
+TEST_F(ProxyGetPostedOpsMicrotest, NullConnectionOrAppendErrorsFail) {
+  MakeOpsPool();
+  auto [first, last] = Chain({{0, 0, 1}});
+  opsPool_->ops[first].connection = nullptr;
+  opsPool_->nextOps = first;
+  opsPool_->nextOpsEnd = last;
+  int added = 0;
+  EXPECT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclInternalError);
+  opsPool_->ops[first].connection = &conns_[0];
+  st().pool = nullptr;
+  g_callocFailAt = 0;
+  EXPECT_EQ(ncclProxyGetPostedOps(&ps_, &added), ncclSystemError);
+  EXPECT_EQ(added, 0);
+}
+
+class ProxyProgressThreadMicrotest : public ProxyProgressFixture {
+ protected:
+  void Start() { st().thread = std::thread(ncclProxyProgress, &ps_); }
+  void Stop() { ASSERT_EQ(ncclProxyProgressDestroy(&ps_), ncclSuccess); }
+};
+
+TEST_F(ProxyProgressThreadMicrotest, RunsPostedOpsToCompletionThenStops) {
+  MakeOpsPool();
+  ps_.cudaDev = 3;
+  g_hipSetDeviceResult = hipErrorInvalidDevice;
+  std::atomic<int> finished{0};
+  g_progressFn = [&](ncclProxyArgs* a) {
+    a->idle = 0;
+    if (a->retry_total >= 3) {
+      a->state = ncclProxyOpNone;
+      finished++;
+    }
+    return ncclSuccess;
+  };
+  Start();
+  auto [first, last] = Chain({{0, 0, 1}, {0, 1, 1}});
+  ASSERT_EQ(ncclProxyPost(opsPool_, first, last), ncclSuccess);
+  while (finished < 2) std::this_thread::yield();
+  Stop();
+  EXPECT_EQ(g_hipSetDevices, std::vector<int>{3});
+  EXPECT_TRUE(Logged(NCCL_LOG_ATTN, "[Proxy Progress] Failed to set CUDA device 3"));
+  EXPECT_EQ(ps_.asyncResult, ncclSuccess);
+  EXPECT_EQ(st().active, nullptr);
+  EXPECT_EQ(opsPool_->freeOps[0], 101);
+  auto& s = g_profCtrlStates;
+  EXPECT_NE(std::find(s.begin(), s.end(), ncclProfilerProxyCtrlActive), s.end());
+  EXPECT_NE(std::find(s.begin(), s.end(), ncclProfilerProxyCtrlIdle), s.end());
+}
+
+TEST_F(ProxyProgressThreadMicrotest, StopWaitsForActiveOpsButAbortDoesNot) {
+  MakeOpsPool();
+  g_params["NCCL_PROGRESS_APPENDOP_FREQ"] = 2;
+  std::atomic<bool> release{false};
+  g_progressFn = [&](ncclProxyArgs* a) {
+    if (release) a->state = ncclProxyOpNone;
+    return ncclSuccess;
+  };
+  Start();
+  auto [first, last] = Chain({{0, 0, 1}});
+  ASSERT_EQ(ncclProxyPost(opsPool_, first, last), ncclSuccess);
+  while (g_progressCalls < 10) std::this_thread::yield();
+  {
+    std::lock_guard<std::mutex> lock(opsPool_->mutex);
+    st().stop.store(1);
+  }
+  std::this_thread::sleep_for(std::chrono::milliseconds(10));
+  EXPECT_TRUE(st().thread.joinable());
+  EXPECT_NE(st().active, nullptr);  // still progressing after stop
+  release = true;
+  st().thread.join();
+  EXPECT_EQ(st().active, nullptr);
+  st().stop.store(0);
+  release = false;
+  Start();
+  auto [f2, l2] = Chain({{0, 1, 1}});
+  ASSERT_EQ(ncclProxyPost(opsPool_, f2, l2), ncclSuccess);
+  while (st().active == nullptr) std::this_thread::yield();
+  COMPILER_ATOMIC_STORE(&abort_, 1, std::memory_order_release);
+  st().thread.join();
+  EXPECT_NE(st().active, nullptr);
+}
+
+TEST_F(ProxyProgressThreadMicrotest, ProgressErrorsAreRecordedAndEndTheThread) {
+  MakeOpsPool();
+  g_progressFn = [](ncclProxyArgs*) { return ncclRemoteError; };
+  Start();
+  auto [first, last] = Chain({{0, 0, 1}});
+  ASSERT_EQ(ncclProxyPost(opsPool_, first, last), ncclSuccess);
+  st().thread.join();
+  EXPECT_EQ(ps_.asyncResult, ncclRemoteError);
+}
+
+TEST_F(ProxyProgressThreadMicrotest, AppendErrorsAreRecordedButTheThreadKeepsRunning) {
+  MakeOpsPool();
+  Start();
+  auto [first, last] = Chain({{0, 0, 1}});
+  opsPool_->ops[first].connection = nullptr;
+  ASSERT_EQ(ncclProxyPost(opsPool_, first, last), ncclSuccess);
+  while (COMPILER_ATOMIC_LOAD(&ps_.asyncResult, std::memory_order_acquire) == ncclSuccess) std::this_thread::yield();
+  EXPECT_EQ(ps_.asyncResult, ncclInternalError);
+  EXPECT_TRUE(st().thread.joinable());
+  opsPool_->nextOps = -1;  // nothing left to append so the thread can sleep and be stopped
+  st().nextOps = -1;
+  Stop();
+}
+
+TEST_F(ProxyProgressThreadMicrotest, DumpSignalInstallsTheStateDumper) {
+  MakeOpsPool();
+  g_params["NCCL_PROXY_DUMP_SIGNAL"] = SIGUSR2;
+  Start();
+  Stop();
+  EXPECT_EQ(signal(SIGUSR2, SIG_DFL), ncclDumpProxyState);
+  EXPECT_EQ(ncclLastProxyState, &st());
+}
+
+TEST_F(ProxyProgressThreadMicrotest, CreateStartsOneNamedThread) {
+  MakeOpsPool();
+  ASSERT_EQ(ncclProxyProgressCreate(&ps_), ncclSuccess);
+  ASSERT_EQ(ncclProxyProgressCreate(&ps_), ncclSuccess);
+  EXPECT_EQ(g_threadNames, 1);
+  Stop();
+  EXPECT_FALSE(st().thread.joinable());
 }
 
 }  // namespace
