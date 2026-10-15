@@ -46,6 +46,11 @@ public:
                std::function<void(RaceViolation)> raceHandler, CounterCapacities,
                size_t ldsSizeBytes);
 
+  /// Reuse this detector for another workgroup with the same wave count and
+  /// register-file shape. Behaves like constructing a new detector, but keeps
+  /// the allocated storage.
+  void reset(Dim3d newWorkgroupId, std::function<void(RaceViolation)> newRaceHandler);
+
   /// Allocate an event using the counter and ordering implied by its type.
   EventId allocateEventId(WaveId wave, uint64_t pc, MemoryEventType type,
                           std::vector<uint32_t> registers, uint64_t execMask) {
