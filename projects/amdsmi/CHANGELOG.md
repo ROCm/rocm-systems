@@ -196,10 +196,7 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_get_gpu_metrics_info()` failed on APUs such as gfx1103, leaving PLX temperature and `amd-smi metric` empty. Those devices now report the values they provide with the rest marked N/A, and any GPU without a PLX sensor now reports N/A there instead of a placeholder reading.
 
 - **Fixed GPU and multimedia utilization reading 100 times too high on integrated GPUs**.  
-  - `amdsmi_get_gpu_activity()` and `amd-smi metric --usage` passed on the hundredths of a percent the APU firmware reports as if it were whole percent, so a GPU at 45% busy read as 4567. Discrete GPUs were not affected.
-
-- **Fixed per-metric queries reporting an unreadable metrics version as bad data**.  
-  - A device whose metrics revision amd-smi cannot read now reports it as unsupported from every metrics query, matching what the whole-table query already reported.
+  - `amdsmi_get_gpu_activity()` and `amdsmi_get_gpu_metrics_info()`, its APU metrics included, passed on the hundredths of a percent the APU firmware reports as whole percent, so a GPU at 45% busy read as 4545. In `amd-smi metric --usage` a GPU more than 1% busy showed N/A and lost its APU activity rows, and a nearly idle one read up to 100%. Discrete GPUs were not affected.
 
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.

@@ -2785,8 +2785,8 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
   // mark GfxActivity/UvdActivity "[centi]" for each ASIC that publishes one (smu_v13_0_4,
   // smu_v13_0_5 and yellow_carp for v2.1, renoir and vangogh for v2.2-v2.4), and amdgpu
   // stores it unscaled -- it only divides by 100 on the gpu_busy_percent path. The public
-  // field is a whole percent, so convert here. v3.0 firmware already reports [0-100], so
-  // the branch below leaves it alone.
+  // fields, in the APU sub-struct too, are whole percent, so convert here. v3.0 firmware
+  // already reports [0-100], so the branch below leaves it alone.
   auto convert_apu_activity_centi_to_public_percent = [](auto activity_centi) {
     using InputT = decltype(activity_centi);
     // The not-applicable sentinel is not a reading; scaling it would turn it into 655.
@@ -2811,10 +2811,10 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
                 std::min(static_cast<uint32_t>(RSMI_APU_MAX_L3),
                          static_cast<uint32_t>(std::size(apu.temperature_l3))),
                 apu.temperature_l3);
-    // Raw firmware units here, as with the power fields: hundredths of a percent. The
-    // whole-percent conversion belongs to the top-level fields assigned further down.
-    apu.average_gfx_activity = metrics.m_average_gfx_activity;
-    apu.average_mm_activity = metrics.m_average_mm_activity;
+    apu.average_gfx_activity =
+        convert_apu_activity_centi_to_public_percent(metrics.m_average_gfx_activity);
+    apu.average_mm_activity =
+        convert_apu_activity_centi_to_public_percent(metrics.m_average_mm_activity);
     apu.average_socket_power = metrics.m_average_socket_power;
     apu.average_cpu_power = metrics.m_average_cpu_power;
     apu.average_soc_power = metrics.m_average_soc_power;
@@ -5541,13 +5541,7 @@ auto Device::run_internal_gpu_metrics_query(AMDGpuMetricsUnitType_t metric_count
   //            /sys/class/drm/renderDXXX/device/xcp/xcp_metrics
   status_code = setup_gpu_metrics_reading(type);
   if ((status_code != rsmi_status_t::RSMI_STATUS_SUCCESS) || (!m_gpu_metrics_ptr)) {
-    // Keep the reason setup gave: a revision this library cannot model is
-    // NOT_SUPPORTED, and collapsing it here would contradict what the whole-table
-    // entry point reports for the same device. Only a setup that reported success
-    // yet left no object behind is a data inconsistency.
-    if (status_code == rsmi_status_t::RSMI_STATUS_SUCCESS) {
-      status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
-    }
+    status_code = rsmi_status_t::RSMI_STATUS_UNEXPECTED_DATA;
     ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
        << " | Fail "
        << " | Device #: " << index() << " | Type: " << Device::get_type_string(type)

@@ -540,8 +540,9 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
 
     // Present in every v2.x revision.
     EXPECT_EQ(apu.temperature_gfx, FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_gfx)));
+    // Converted from hundredths to whole percent; the fill never holds the sentinel.
     EXPECT_EQ(apu.average_gfx_activity,
-              FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfx_activity)));
+              (FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfx_activity)) + 50) / 100);
     EXPECT_EQ(apu.average_socket_power,
               FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_socket_power)));
     EXPECT_EQ(apu.average_gfxclk_frequency,
@@ -571,8 +572,8 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
 // for both modes: sizing the partition table as the GPU table would write past
 // the end of it.
 // Every v2.x table reports GFX and MM activity in hundredths of a percent, so the
-// public whole-percent fields have to be scaled while the APU sub-struct keeps the
-// units the driver published. The expected values are worked out by hand instead of
+// public fields have to be scaled to whole percent, in the APU sub-struct as well as
+// at the top level. The expected values are worked out by hand instead of
 // being recomputed from the production expression, so changing that expression
 // cannot quietly carry the expectation along with it.
 TEST(GpuUnit, ApuActivityReachesThePublicFieldsAsWholePercent) {
@@ -622,9 +623,9 @@ TEST(GpuUnit, ApuActivityReachesThePublicFieldsAsWholePercent) {
     EXPECT_EQ(metrics.average_gfx_activity, test_case.whole_percent);
     EXPECT_EQ(metrics.average_mm_activity, uint16_t{10});
 
-    // Documented to carry raw firmware units, as the power fields beside it do.
-    EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, test_case.hundredths);
-    EXPECT_EQ(metrics.apu_metrics->average_mm_activity, kMmHundredths);
+    // Python and the CLI print the APU sub-struct with a % sign too.
+    EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, test_case.whole_percent);
+    EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{10});
   }
 }
 
@@ -648,10 +649,13 @@ TEST(GpuUnit, NotApplicableApuActivityIsStillReportedAsNotApplicable) {
   ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
   const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
   ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ASSERT_NE(metrics.apu_metrics, nullptr);
 
   EXPECT_EQ(metrics.average_gfx_activity, uint16_t{UINT16_MAX});
   EXPECT_EQ(metrics.average_mm_activity, uint16_t{46})
       << "a live reading beside the sentinel proves the read populated these fields";
+  EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, uint16_t{UINT16_MAX});
+  EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{46});
 }
 
 TEST(GpuUnit, GPUMetricsV18TableSizeMatchesSelectedTable) {

@@ -2259,17 +2259,9 @@ typedef struct {
 
   /**
    * @brief Utilization
-   *
-   * On a v2.x table the GFX and MM activity below are in hundredths of a percent,
-   * the unit the APU firmware reports, and are not converted here -- the same
-   * arrangement as the power fields further down. The whole-percent values are in
-   * ::amdsmi_gpu_metrics_t.average_gfx_activity and
-   * ::amdsmi_gpu_metrics_t.average_mm_activity. A v3.0 table reports GFX
-   * activity in whole percent to begin with, so both forms match there; it
-   * carries no MM activity, which reads back as not applicable.
    */
-  uint16_t average_gfx_activity;                            //!< v2_4, v3_0
-  uint16_t average_mm_activity;                             //!< v2_4
+  uint16_t average_gfx_activity;                            //!< v2_4, v3_0 [%]
+  uint16_t average_mm_activity;                             //!< v2_4 [%]
   uint16_t average_vcn_activity;                            //!< v3_0
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
@@ -5144,10 +5136,9 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  including a GPU metrics table (v1.x) reported by an APU: the pointer
  *  tracks the table the device publishes, not whether the device is an APU.
  *
- *  The APU sub-struct reports GFX and MM activity in the raw unit its firmware
- *  uses, as its power fields stay in milliwatts: hundredths of a percent on a
- *  v2.x table, whole percent on v3.0. @p pgpu_metrics->average_gfx_activity and
- *  @p pgpu_metrics->average_mm_activity are whole percent for every revision.
+ *  GFX and MM activity are whole percent for every revision, in @p pgpu_metrics
+ *  and in its APU sub-struct alike. The APU sub-struct keeps its power fields in
+ *  milliwatts.
  *
  *  A field the reported revision does not carry reads back as the not-applicable
  *  sentinel, the maximum value of its type. The sentinel is never scaled, so a
