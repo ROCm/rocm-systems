@@ -1612,6 +1612,7 @@ def _build_ml_api_call_trees(workload: schema.Workload) -> None:
         )
     for pair in workload.ml_api_trace_pairs:
         marker_rows = pair.joined_df[pair.joined_df["Function"].notna()].copy()
+        marker_rows["Thread_Id"] = marker_rows["Thread_Id"].astype(int)
         pair.joined_df = _add_stitch_key_and_ordinal(
             _group_kernels_onto_markers(marker_rows)
         )
