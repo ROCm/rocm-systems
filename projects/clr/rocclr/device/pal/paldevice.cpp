@@ -2000,7 +2000,8 @@ bool Device::globalFreeMemory(size_t* freeMemory) const {
                                allocedMem[Pal::GpuHeapGartUswc] + cache_group_local -
                                resourceCache().cacheSize();
 
-  // globalMemSize_ credits the GART aperture only on an APU, so charge the aperture there
+  // fillDeviceInfo() adds the aperture to globalMemSize_ only on an APU, so charge it only
+  // there; on a discrete part the aperture is separate memory and must not reduce free VRAM
   const bool apu_system = settings().apuSystem_;
   Pal::gpusize total_alloced = local + invisible + (apu_system ? system_memory : 0);
 
