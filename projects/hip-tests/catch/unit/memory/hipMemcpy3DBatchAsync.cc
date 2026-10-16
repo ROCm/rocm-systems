@@ -50,8 +50,10 @@ hipMemcpy3DBatchOp MakeArrayToArrayOp(hipArray_t source, hipArray_t destination,
 /**
  * Test Description
  * ------------------------
- * - A pointer-to-pointer copy of a 4x3x2 uint32 volume whose extent width counts bytes: after
- *   stream sync, the destination matches the source.
+ * - A pointer-to-pointer copy of a 4x3x2 uint32 volume whose extent width counts bytes, with
+ *   tightly packed layers or with source and destination layer heights of 4 and 5 rows: after
+ *   stream sync, the destination layers match the source layers and the destination layer padding
+ *   is unchanged.
  * Test source
  * ------------------------
  * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
@@ -60,20 +62,33 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_PointerToPointer_MatchesSourceAfterSync
   constexpr size_t kWidth = 4;
   constexpr size_t kHeight = 3;
   constexpr size_t kDepth = 2;
-  constexpr size_t kElementCount = kWidth * kHeight * kDepth;
-  constexpr size_t kVolumeBytes = kElementCount * sizeof(uint32_t);
-  std::vector<uint32_t> pattern(kElementCount);
-  for (uint32_t i = 0; i < kElementCount; ++i) {
+  const size_t layer_padding = GENERATE(0, 1);
+  INFO("layer_padding: " << layer_padding);
+  const size_t source_layer_height = kHeight + layer_padding;
+  const size_t destination_layer_height = kHeight + 2 * layer_padding;
+  const size_t source_count = kWidth * source_layer_height * kDepth;
+  const size_t destination_count = kWidth * destination_layer_height * kDepth;
+  const size_t source_bytes = source_count * sizeof(uint32_t);
+  const size_t destination_bytes = destination_count * sizeof(uint32_t);
+  std::vector<uint32_t> pattern(source_count);
+  for (uint32_t i = 0; i < source_count; ++i) {
     pattern[i] = 0x11000000u + i;
   }
+  std::vector<uint32_t> expected(destination_count, 0xFFFFFFFFu);
+  for (size_t z = 0; z < kDepth; ++z) {
+    std::copy_n(pattern.begin() + z * kWidth * source_layer_height, kWidth * kHeight,
+                expected.begin() + z * kWidth * destination_layer_height);
+  }
   StreamGuard stream(Streams::created);
-  LinearAllocGuard<uint32_t> source(LinearAllocs::hipMalloc, kVolumeBytes);
-  LinearAllocGuard<uint32_t> destination(LinearAllocs::hipMalloc, kVolumeBytes);
-  HIP_CHECK(hipMemcpy(source.ptr(), pattern.data(), kVolumeBytes, hipMemcpyHostToDevice));
-  HIP_CHECK(hipMemset(destination.ptr(), 0xFF, kVolumeBytes));
+  LinearAllocGuard<uint32_t> source(LinearAllocs::hipMalloc, source_bytes);
+  LinearAllocGuard<uint32_t> destination(LinearAllocs::hipMalloc, destination_bytes);
+  HIP_CHECK(hipMemcpy(source.ptr(), pattern.data(), source_bytes, hipMemcpyHostToDevice));
+  HIP_CHECK(hipMemset(destination.ptr(), 0xFF, destination_bytes));
 
   hipMemcpy3DBatchOp op = MakePointerToPointerOp(
       source.ptr(), destination.ptr(), make_hipExtent(kWidth * sizeof(uint32_t), kHeight, kDepth));
+  op.src.op.ptr.layerHeight = source_layer_height;
+  op.dst.op.ptr.layerHeight = destination_layer_height;
 
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
   HIP_CHECK(hipGetLastError());
@@ -81,9 +96,9 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_PointerToPointer_MatchesSourceAfterSync
   HIP_CHECK(hipMemcpy3DBatchAsync(1, &op, &fail_idx, 0, stream.stream()));
   HIP_CHECK(hipStreamSynchronize(stream.stream()));
 
-  std::vector<uint32_t> copied(kElementCount);
-  HIP_CHECK(hipMemcpy(copied.data(), destination.ptr(), kVolumeBytes, hipMemcpyDeviceToHost));
-  REQUIRE(copied == pattern);
+  std::vector<uint32_t> copied(destination_count);
+  HIP_CHECK(hipMemcpy(copied.data(), destination.ptr(), destination_bytes, hipMemcpyDeviceToHost));
+  REQUIRE(copied == expected);
 }
 
 /**
@@ -775,6 +790,15 @@ HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_MismatchedArrayElementSize_ReportsThatO
  * - catch/unit/memory/hipMemcpy3DBatchAsync.cc
  */
 HIP_TEST_CASE(Unit_hipMemcpy3DBatchAsync_PartiallyRegisteredHostSource_IsRejected) {
+  int device = 0;
+  HIP_CHECK(hipGetDevice(&device));
+  int host_register = 0;
+  HIP_CHECK(
+      hipDeviceGetAttribute(&host_register, hipDeviceAttributeHostRegisterSupported, device));
+  if (host_register == 0) {
+    HIP_SKIP_TEST(HipTest::SkipReason::kHostPinnedMemoryUnsupported);
+  }
+
   constexpr size_t kRegisteredBytes = 4096;
   constexpr size_t kSourceBytes = 2 * kRegisteredBytes;
   StreamGuard stream(Streams::created);
