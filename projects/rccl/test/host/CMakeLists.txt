@@ -399,6 +399,7 @@ function(rccl_define_micro_source_lists)
     fakes/bootstrap_stubs.cc             # src/bootstrap.cc AllGather seam
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/os_fakes.cc                    # src/os/linux.cc proxy-thread affinity seams
+    fakes/topo_stubs.cc                  # src/graph/topo.cc ncclTopoGetLocalGinDevs seam
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
     

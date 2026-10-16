@@ -48,6 +48,7 @@
 #include "fakes/nccl_device_core_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/os_fakes.h"
+#include "fakes/topo_stubs.h"
 
 namespace {
 
@@ -61,6 +62,19 @@ ScriptedFailure g_failTopoGetLocalGinDevs;
 ScriptedFailure g_failBootstrapAllGather;
 int g_topoGetLocalGinDevsCalls = 0;
 int g_bootstrapAllGatherCalls = 0;
+
+// Behaviour installed on topo_stubs.cc's g_ncclTopoGetLocalGinDevs seam:
+// ncclGinConnectOnce sizes its connections from the device count this writes,
+// and the test needs to say both "this call fails" and "the node has N devices".
+ncclResult_t LocalGinDevs(struct ncclComm*, int* localGinDevs, int* localGinCount) {
+  ncclResult_t ret = g_failTopoGetLocalGinDevs.at(++g_topoGetLocalGinDevsCalls);
+  if (ret != ncclSuccess) return ret;
+  if (localGinCount) *localGinCount = g_nLocalGinDevs;
+  if (localGinDevs) {
+    for (int i = 0; i < g_nLocalGinDevs; i++) localGinDevs[i] = i;
+  }
+  return ncclSuccess;
+}
 
 // Behaviour installed on bootstrap_stubs.cc's g_bootstrapAllGather seam:
 // ncclGinConnectOnce's only AllGather exchanges the per-rank GIN connection
@@ -97,6 +111,10 @@ void ResetGinHostGlobals() {
   // behaviour the GIN connection-count exchange needs is installed here rather
   // than defined again in this TU.
   g_bootstrapAllGather = GinCommCountAllGather;
+  // Same for topo_stubs.cc's GIN device query: it owns src/graph/topo.cc and
+  // defaults this to fail-loud, since this is the only binary that reaches it.
+  ResetTopoStubs();
+  g_ncclTopoGetLocalGinDevs = LocalGinDevs;
   // Same for the team accessors nccl_device_core_fakes.cc owns. Its world-team
   // default already describes this comm, but its rail default is the zero team
   // ("no rail"), and gin_host.cc reads the rail stride on every setup.
@@ -106,25 +124,14 @@ void ResetGinHostGlobals() {
 
 }  // namespace
 
-// The two externals with no owning fakes file. ncclParamGinType is
-// NCCL_PARAM(GinType) in src/transport/net_ib/gin.cc and ncclTopoGetLocalGinDevs
-// lives in src/graph/topo.cc; neither subsystem's fakes file can link into this
-// binary, so they are defined here. Both production declarations ARE visible --
-// gin/gin_host.h:63 and graph.h:120, both included above -- so a signature change
-// upstream makes these definitions an unrelated overload and the real symbol goes
-// undefined at link. That is the same guarantee ASSERT_HOOK_MATCHES_PROD gives the
-// std::function seams in fakes/, which is why these do not need one.
+// The one external with no owning fakes file: NCCL_PARAM(GinType) in
+// src/transport/net_ib/gin.cc, whose only fakes file today (transport_net_ib_fakes.cc)
+// is named for a different TU in that directory. The production declaration IS visible
+// -- gin/gin_host.h:63, included above -- so a signature change upstream makes this
+// definition an unrelated overload and the real symbol goes undefined at link. That is
+// the same guarantee ASSERT_HOOK_MATCHES_PROD gives the std::function seams in fakes/,
+// which is why it does not need one.
 int64_t ncclParamGinType() { return g_paramGinType; }
-
-ncclResult_t ncclTopoGetLocalGinDevs(struct ncclComm*, int* localGinDevs, int* localGinCount) {
-  ncclResult_t ret = g_failTopoGetLocalGinDevs.at(++g_topoGetLocalGinDevsCalls);
-  if (ret != ncclSuccess) return ret;
-  if (localGinCount) *localGinCount = g_nLocalGinDevs;
-  if (localGinDevs) {
-    for (int i = 0; i < g_nLocalGinDevs; i++) localGinDevs[i] = i;
-  }
-  return ncclSuccess;
-}
 
 // The os_fakes.cc affinity seams (src/os/linux.cc) do double duty here.
 // ncclOsCpuCount is the first thing every progress thread calls and the progress
