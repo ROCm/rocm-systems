@@ -12,9 +12,9 @@
 #include <stdint.h>
 
 // Evaluate one complete matrix tile. Reject unsupported controls before accessing operands.
-int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
-                                               uint32_t *const *d, const uint32_t *const *a,
-                                               const uint32_t *const *b, const uint32_t *const *c) {
+template <bool Bf16>
+static int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d,
+                const uint32_t *const *a, const uint32_t *const *b, const uint32_t *const *c) {
   if (instruction_flags) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
@@ -40,13 +40,16 @@ int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruct
             left[j] = read(a, row, physical);
             right[j] = read(b, col, physical);
           }
-          acc_bits = rocjitsu::arith::gfx12_dot_bits<false, 4, false>(left, right, acc_bits);
+          acc_bits = rocjitsu::arith::gfx12_dot_bits<Bf16, 4, false>(left, right, acc_bits);
         }
       } else {
         float acc = rocjitsu::arith::as_float(c[row % 8][lane]);
         for (int k = 0; k < 16; ++k) {
-          acc = std::fma(rocjitsu::arith::f16_to_float(read(a, row, k)),
-                         rocjitsu::arith::f16_to_float(read(b, col, k)), acc);
+          acc = std::fma(Bf16 ? rocjitsu::arith::bf16_to_float(read(a, row, k))
+                              : rocjitsu::arith::f16_to_float(read(a, row, k)),
+                         Bf16 ? rocjitsu::arith::bf16_to_float(read(b, col, k))
+                              : rocjitsu::arith::f16_to_float(read(b, col, k)),
+                         acc);
         }
         acc_bits = rocjitsu::arith::as_bits(acc);
       }
@@ -59,4 +62,19 @@ int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruct
     }
   }
   return RJ_ARITH_SUCCESS;
+}
+
+// Evaluate one gfx12 Wave32 F16 tile into FP32 destination registers.
+int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  return wmma<false>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate one gfx12 Wave32 BF16 tile into FP32 destination registers.
+int rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b,
+                                                const uint32_t *const *c) {
+  return wmma<true>(flags, instruction_flags, d, a, b, c);
 }

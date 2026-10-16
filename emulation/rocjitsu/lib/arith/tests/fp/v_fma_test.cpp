@@ -105,3 +105,54 @@ TEST(FpFmaF16W32Gfx12, Arithmetic) {
     }
   }
 }
+
+// The existing rocjitsu FP32 FMA model agrees with std::fma on these inputs.
+TEST(FpFmaF32W32Gfx12, Arithmetic) {
+  using namespace rocjitsu::arith::test;
+  RegBank input;
+  std::minstd_rand random;
+  for (int reg = 0; reg < 5; ++reg) {
+    for (int lane = 0; lane < 32; ++lane) {
+      input.v[reg][lane] = random_f32_bits(random);
+    }
+  }
+  for (int reg = 0; reg < 3; ++reg) {
+    input.v[reg][2 * reg] = kF32QuietNaNBits;
+    input.v[reg][2 * reg + 1] = kF32PositiveInfinityBits;
+  }
+  expect_invalid_flags(
+      [&](uint64_t flags, uint64_t mode) {
+        return rj_arith_v_fma_f32_w32_gfx12(flags, 0xffffffffU, mode, nullptr, nullptr, nullptr,
+                                            nullptr, nullptr);
+      },
+      0);
+  for (uint64_t semantics : semantics_modes()) {
+    for (uint32_t exec_mask : {0U, 0xffffffffU, 0xaaaaaaaaU, 0x80000000U}) {
+      for (int aliasing_offset : {0, 1, 2, 3}) {
+        RegBank r = input;
+        uint32_t status = 0x80000000U;
+        int result = rj_arith_v_fma_f32_w32_gfx12(semantics, exec_mask, 0, r.v + aliasing_offset,
+                                                  r.v, r.v + 1, r.v + 2, &status);
+        EXPECT_EQ(status, 0x80000000U);
+        if (semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL) {
+          EXPECT_EQ(result, RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+          r.expect_preserved(input, 0, 0);
+          continue;
+        }
+        ASSERT_EQ(result, RJ_ARITH_SUCCESS);
+        r.expect_preserved(input, aliasing_offset, 1);
+        for (int lane = 0; lane < 32; ++lane) {
+          uint32_t actual = r.v[aliasing_offset][lane];
+          if (!((exec_mask >> lane) & 1)) {
+            EXPECT_EQ(actual, input.v[aliasing_offset][lane]);
+            continue;
+          }
+          float expected =
+              std::fma(bit_cast<float>(input.v[0][lane]), bit_cast<float>(input.v[1][lane]),
+                       bit_cast<float>(input.v[2][lane]));
+          expect_f32(actual, expected, semantics, /*atol=*/1e-6, /*rtol=*/1e-6);
+        }
+      }
+    }
+  }
+}

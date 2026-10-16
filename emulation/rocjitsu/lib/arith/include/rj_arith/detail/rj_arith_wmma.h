@@ -19,6 +19,10 @@ int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruct
                                                uint32_t *const *d, const uint32_t *const *a,
                                                const uint32_t *const *b, const uint32_t *const *c);
 
+int rj_arith_v_wmma_f32_16x16x16_bf16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                                uint32_t *const *d, const uint32_t *const *a,
+                                                const uint32_t *const *b, const uint32_t *const *c);
+
 #ifdef __cplusplus
 } // extern "C"
 #endif
