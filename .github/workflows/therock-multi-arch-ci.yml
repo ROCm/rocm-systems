@@ -103,7 +103,7 @@ jobs:
     name: Configure Changed Projects
     runs-on: ubuntu-24.04
     outputs:
-      changed_projects: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
+      changed_projects: ${{ steps.build_stages.outputs.changed_projects }}
       run_all_tests: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
       test_type: ${{ steps.configure-pr.outputs.test_type || steps.configure-manual.outputs.test_type }}
       # Allowlist of build stages this PR needs (fed to TheRock's build_stages).

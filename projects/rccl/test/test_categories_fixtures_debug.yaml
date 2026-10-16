@@ -55,6 +55,7 @@ test_categories:
       - "SymmetricMemP2pLevelTests.*"
       - "TopoTest.*"
       - "Mi350pPcieTopo.*"
+      - "TopoGpuDev.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "ChannelDefaults.*"

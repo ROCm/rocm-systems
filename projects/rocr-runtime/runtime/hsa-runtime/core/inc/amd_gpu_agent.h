@@ -403,6 +403,9 @@ class GpuAgent : public GpuAgentInt {
     return properties_;
   }
 
+  // @brief True when this node supports the native SDMA user queue AND it is enabled.
+  __forceinline bool sdma_native() const { return sdma_native_; }
+
   // @brief set rec_sdma_eng_override_
   __forceinline void SetRecSdmaEngOverride(bool flag) override { rec_sdma_eng_override_ = flag; }
 
@@ -1085,6 +1088,9 @@ class GpuAgent : public GpuAgentInt {
 
   bool uses_rec_sdma_eng_id_mask_;
   bool rec_sdma_eng_override_;
+
+  //!< True when SDMA copies go through the native WDDM SDMA user queue.
+  bool sdma_native_;
 
   // Round-robin index for assigning engines to user-created SDMA queues
   // (hsa_amd_queue_create) that request automatic engine selection.
