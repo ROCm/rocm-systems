@@ -115,7 +115,15 @@ void flat_calculate_addresses(const VflatMachineInst &inst, amdgpu::Wavefront &w
       vaddr = vaddr_region.lane64(0, lane);
     }
     uint64_t addr = saddr_val + vaddr + offset;
-    addr = amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Linear).value;
+    const auto translated =
+        amdgpu::translate_flat_address(wf, addr, lane, amdgpu::FlatPrivateLayout::Interleaved);
+    if (translated.private_address) {
+      addr = translated.value;
+      d.scratch_swizzle = true;
+      d.requires_scratch_backing = true;
+      d.scratch_addr_stride = wf.wf_size() * sizeof(uint32_t);
+      d.scratch_lane_mask |= uint64_t{1} << lane;
+    }
     d.per_lane_addr[lane] = addr;
   }
 }
@@ -155,14 +163,13 @@ void flat_calculate_addresses(const VglobalMachineInst &inst, amdgpu::Wavefront 
 
 void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront &wf,
                               amdgpu::VectorMemState &d) {
-  // GFX12 VSCRATCH: scratch_base + lane scratch slice + optional VGPR
-  // (32-bit) + optional saddr + signed 24-bit offset.
+  // GFX12 VSCRATCH: scratch_base + SWIZZLE(optional VGPR (32-bit) + optional
+  // saddr + signed 24-bit offset, lane), dword-interleaved across the wave.
   auto &cu = wf.cu();
   init_vector_mem_state(wf, d);
   uint64_t exec = d.exec_mask;
   int64_t offset = static_cast<int64_t>(static_cast<int32_t>(inst.ioffset << 8) >> 8);
   uint64_t scratch_base = wf.scratch_base();
-  uint32_t lane_stride = wf.scratch_lane_size();
   uint32_t saddr_val = 0;
   amdgpu::RegisterAccess regs(cu);
   if (has_saddr(inst.saddr)) {
@@ -178,12 +185,20 @@ void flat_calculate_addresses(const VscratchMachineInst &inst, amdgpu::Wavefront
   std::optional<amdgpu::RegisterAccess::VgprReadRegion> vaddr_region;
   if (inst.sve)
     vaddr_region.emplace(regs.read_vgpr_region(vbase, 1, exec));
+  constexpr uint32_t kScratchInterleave = sizeof(uint32_t);
+  const uint32_t lane_count = wf.wf_size();
+  d.scratch_swizzle = true;
+  d.requires_scratch_backing = true;
+  d.scratch_lane_mask = exec;
+  d.scratch_addr_stride = lane_count * kScratchInterleave;
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
     uint32_t vaddr = inst.sve ? vaddr_region->lane(0, lane) : 0;
+    const uint64_t private_offset = uint64_t{vaddr} + saddr_val + offset;
     d.per_lane_addr[lane] =
-        scratch_base + static_cast<uint64_t>(lane) * lane_stride + vaddr + saddr_val + offset;
+        scratch_base + (private_offset / kScratchInterleave) * lane_count * kScratchInterleave +
+        static_cast<uint64_t>(lane) * kScratchInterleave + (private_offset % kScratchInterleave);
   }
 }
 

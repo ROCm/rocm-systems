@@ -7,7 +7,7 @@
 
 namespace rocjitsu::amdgpu {
 
-enum class FlatPrivateLayout { None, Interleaved, Linear, EncodedLane };
+enum class FlatPrivateLayout { None, Interleaved, EncodedLane };
 
 struct FlatAddress {
   uint64_t value;
@@ -38,8 +38,6 @@ inline FlatAddress translate_flat_address(const Wavefront &wf, uint64_t address,
       return {address};
     offset = static_cast<uint32_t>(address);
   }
-  if (layout == FlatPrivateLayout::Linear)
-    return {wf.scratch_base() + uint64_t{lane} * wf.scratch_lane_size() + offset, true};
   return {wf.scratch_base() + (offset / 4) * wf.wf_size() * 4 + uint64_t{lane} * 4 + offset % 4,
           true, true};
 }
