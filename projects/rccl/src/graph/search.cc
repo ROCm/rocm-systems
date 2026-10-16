@@ -341,6 +341,19 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
 #define FORCED_ORDER_PCI 1
 #define FORCED_ORDER_REPLAY 2
 
+// Opt-in: pin ring search to the topology array's PCI order. Visitation order only -- the ring
+// still travels whatever paths the search validates, and other patterns are untouched.
+RCCL_PARAM_NCCL_ALIAS(PcieOrderedRing, "PCIE_ORDERED_RING", 0);
+
+// gfx1250 only, and only for a comm inside one MNNVL domain -- every rank is a GPU of this
+// topology (nNodes == 1; the domain may still span hosts). That is also the condition under
+// which the search stays on the intra-node path, so NET entry selection is left untouched.
+static int ringPcieOrdered(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
+  return rcclParamPcieOrderedRing() && graph->pattern == NCCL_TOPO_PATTERN_RING && graph->collNet == 0 &&
+         system->nodes[GPU].count > 0 && system->nodes[GPU].count == system->nRanks &&
+         IsArchMatch(system->nodes[GPU].nodes[0].gpu.gcn, "gfx1250");
+}
+
 ncclResult_t ncclTopoReplayGetGpu(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, int step, int* g) {
   *g = -1;
   if (graph->nChannels == 0) return ncclInternalError;
@@ -973,8 +986,9 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
       NCCLCHECK(ncclTopoSearchTryGpu(system, graph, saveGraph, 0, backToNet, backToFirstRank, FORCED_ORDER_REPLAY, time,
                                      -1, -1, g));
     }
-    if (graph->sameChannels == 0 || graph->nChannels == 0) {
-      // Finally, try all other possibilities unless we are forced to use the same channels
+    // Finally, try all other possibilities unless forced to the same channels, or pinned to PCI
+    // order -- these are exactly the arbitrary permutations.
+    if ((graph->sameChannels == 0 || graph->nChannels == 0) && !ringPcieOrdered(system, graph)) {
       for (int g = 0; g < system->nodes[GPU].count; g++) {
         NCCLCHECK(ncclTopoSearchTryGpu(system, graph, saveGraph, 0, backToNet, backToFirstRank, 0, time, -1, -1, g));
       }
@@ -1301,14 +1315,23 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
     NCCLCHECK(ncclTopoGetGraphFromXml(xml->nodes, system, graph, &nChannels));
     INFO(NCCL_GRAPH, "Search %d : %d channels loaded from XML graph", graph->id, nChannels);
     free(xml);
-    if (graph->nChannels > 0) return ncclSuccess;
+    // Conflict policy: an explicit user-supplied graph outranks RCCL_PCIE_ORDERED_RING, but say so.
+    if (graph->nChannels > 0) {
+      if (ringPcieOrdered(system, graph))
+        WARN("RCCL_PCIE_ORDERED_RING=1 ignored for pattern %d: NCCL_GRAPH_FILE supplies an explicit graph",
+             graph->pattern);
+      return ncclSuccess;
+    }
   }
 
   str = getenv("NCCL_RINGS");
   char* strTrees = getenv("RCCL_TREES");
 
   if (str || strTrees) {
-    // user supplied topo
+    // user supplied topo. Same conflict policy as NCCL_GRAPH_FILE: explicit ordering wins, loudly.
+    if (str && ringPcieOrdered(system, graph))
+      WARN("RCCL_PCIE_ORDERED_RING=1 ignored for pattern %d: NCCL_RINGS supplies an explicit ring order",
+           graph->pattern);
     if (strTrees) {
       NCCLCHECK(parseGraphLight(strTrees, system, graph, NULL));
       system->treeDefined = true;
@@ -1323,7 +1346,10 @@ ncclResult_t ncclTopoCompute(ncclTopoSystem* system, struct ncclTopoGraph* graph
         system->type |= RCCL_TOPO_4P2H_ROME;
       }
     }
-  } else if (!rcclParamModelMatchingDisable() && !graph->collNet && !system->skipPresetTopoMatching) {
+    // Automatic presets would silently win over the forced order, so skip them when pinned. Only
+    // the ring graph is affected; other patterns still match presets and still set system->type.
+  } else if (!rcclParamModelMatchingDisable() && !graph->collNet && !system->skipPresetTopoMatching &&
+             !ringPcieOrdered(system, graph)) {
     // try to match 8P6L
     NCCLCHECK(parseChordalRing(system, graph));
     if (graph->nChannels) return ncclSuccess;
@@ -1522,6 +1548,15 @@ done:
     int nets[NCCL_TOPO_MAX_NODES];
     int netCount;
 
+    // Reached only if no PCIe-ordered ring passed validation at any relaxation step. The fallback
+    // below is unvalidated, so fail instead of reporting success for a constraint we did not meet.
+    if (ringPcieOrdered(system, graph)) {
+      WARN("RCCL_PCIE_ORDERED_RING=1: no PCIe-ordered ring passed path validation for pattern %d (%d GPUs, "
+           "bwIntra %f typeIntra %s); unset it or relax the topology constraints",
+           graph->pattern, ngpus, graph->bwIntra, topoPathTypeStr[graph->typeIntra]);
+      ret = ncclInvalidUsage;
+      goto exit;
+    }
     INFO(NCCL_GRAPH, "Could not find a path for pattern %d, falling back to simple order", graph->pattern);
     for (int i = 0; i < ngpus; i++) graph->intra[i] = system->nodes[GPU].nodes[i].gpu.rank;
     graph->bwIntra = 0.1;

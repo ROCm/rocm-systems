@@ -233,4 +233,192 @@ TEST(SearchCheckNet, SameHost_MnnvlRailOn_DifferentAsic_Rejects)
         {{"NCCL_MNNVL_RAIL_PER_HOST", "1"}});
 }
 
+// ---------------------------------------------------------------------------
+// RCCL_PCIE_ORDERED_RING gating (ringPcieOrdered() in src/graph/search.cc).
+//
+// The knob pins ring search to the PCI order of the topology array by
+// suppressing the arbitrary-permutation attempts. It must be opt-in and must
+// reach ring patterns only: every other pattern, and CollNet, keeps the stock
+// search. These cases cover the gate itself; the ordering it produces is
+// checked on hardware by reading back the ring from NCCL_DEBUG_SUBSYS=GRAPH.
+//
+// rcclParamPcieOrderedRing() caches its env lookup in a function-local static,
+// so each case forks via RUN_ISOLATED_TEST(_WITH_ENV) to get a clean cache.
+// ---------------------------------------------------------------------------
+namespace
+{
+
+ncclTopoGraph* makeGraph(int pattern, int collNet = 0)
+{
+    auto* g    = new ncclTopoGraph{};
+    g->pattern = pattern;
+    g->collNet = collNet;
+    return g;
+}
+
+// nGpus == nRanks is the single-MNNVL-domain case the knob is scoped to; passing a smaller
+// nGpus models a comm whose ranks reach beyond the domain, where the search uses NET. The
+// gate also reads nodes[0]'s arch, so every GPU carries one.
+ncclTopoSystem* makeSystem(int nGpus, int nRanks, const char* gcn = "gfx1250")
+{
+    auto* s             = new ncclTopoSystem{};
+    s->nodes[GPU].count = nGpus;
+    s->nRanks           = nRanks;
+    for(int i = 0; i < nGpus; ++i)
+    {
+        auto& node = s->nodes[GPU].nodes[i];
+        node.type  = GPU;
+        snprintf(node.gpu.gcn, GCN_ARCH_NAME_LEN, "%s", gcn);
+    }
+    return s;
+}
+
+} // namespace
+
+// Default off: an unset knob must leave ring search exactly as it is today.
+TEST(SearchPcieOrderedRing, Unset_RingNotForced)
+{
+    RUN_ISOLATED_TEST("Unset_RingNotForced",
+                      []()
+                      {
+                          auto* s = makeSystem(8, 8);
+                          auto* g = makeGraph(NCCL_TOPO_PATTERN_RING);
+                          EXPECT_FALSE(ringPcieOrdered(s, g));
+                          delete s;
+                          delete g;
+                      });
+}
+
+TEST(SearchPcieOrderedRing, RcclPrefix_RingForced)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("RcclPrefix_RingForced",
+                               []()
+                               {
+                                   auto* s = makeSystem(8, 8);
+                                   auto* g = makeGraph(NCCL_TOPO_PATTERN_RING);
+                                   EXPECT_TRUE(ringPcieOrdered(s, g));
+                                   delete s;
+                                   delete g;
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// RCCL_PARAM_NCCL_ALIAS also accepts the NCCL_ spelling, which is what callers
+// reach for out of habit when passing vars through `mpirun -x`.
+TEST(SearchPcieOrderedRing, NcclAliasPrefix_RingForced)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("NcclAliasPrefix_RingForced",
+                               []()
+                               {
+                                   auto* s = makeSystem(8, 8);
+                                   auto* g = makeGraph(NCCL_TOPO_PATTERN_RING);
+                                   EXPECT_TRUE(ringPcieOrdered(s, g));
+                                   delete s;
+                                   delete g;
+                               },
+                               {{"NCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// Ring-only: trees keep the stock permutation search even when the knob is on.
+TEST(SearchPcieOrderedRing, Enabled_TreePatternNotForced)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("Enabled_TreePatternNotForced",
+                               []()
+                               {
+                                   auto* tree     = makeGraph(NCCL_TOPO_PATTERN_TREE);
+                                   auto* balanced = makeGraph(NCCL_TOPO_PATTERN_BALANCED_TREE);
+                                   auto* nvls     = makeGraph(NCCL_TOPO_PATTERN_NVLS);
+                                   auto* s        = makeSystem(8, 8);
+                                   EXPECT_FALSE(ringPcieOrdered(s, tree));
+                                   EXPECT_FALSE(ringPcieOrdered(s, balanced));
+                                   EXPECT_FALSE(ringPcieOrdered(s, nvls));
+                                   delete s;
+                                   delete nvls;
+                                   delete balanced;
+                                   delete tree;
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// A CollNet ring keeps its own head/tail selection; pinning the order would
+// fight it, so the gate excludes it.
+TEST(SearchPcieOrderedRing, Enabled_CollNetRingNotForced)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("Enabled_CollNetRingNotForced",
+                               []()
+                               {
+                                   auto* s = makeSystem(8, 8);
+                                   auto* g = makeGraph(NCCL_TOPO_PATTERN_RING, /*collNet=*/1);
+                                   EXPECT_FALSE(ringPcieOrdered(s, g));
+                                   delete s;
+                                   delete g;
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// Explicit 0 is honoured as off, so the knob can be force-disabled downstream.
+TEST(SearchPcieOrderedRing, ExplicitZero_RingNotForced)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("ExplicitZero_RingNotForced",
+                               []()
+                               {
+                                   auto* s = makeSystem(8, 8);
+                                   auto* g = makeGraph(NCCL_TOPO_PATTERN_RING);
+                                   EXPECT_FALSE(ringPcieOrdered(s, g));
+                                   delete s;
+                                   delete g;
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "0"}});
+}
+
+// Scope limit: the knob only applies inside one MNNVL domain (nNodes == 1), i.e. when every
+// rank is a GPU of this topology. A comm reaching past the domain uses the NET search, whose
+// entry-point selection this feature deliberately leaves alone.
+TEST(SearchPcieOrderedRing, Enabled_MultiDomainNotForced)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("Enabled_MultiDomainNotForced",
+                               []()
+                               {
+                                   // 4 local GPUs, 8 ranks => ranks live outside this domain.
+                                   auto* s = makeSystem(4, 8);
+                                   auto* g = makeGraph(NCCL_TOPO_PATTERN_RING);
+                                   EXPECT_FALSE(ringPcieOrdered(s, g));
+                                   delete s;
+                                   delete g;
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// Arch limit: other architectures keep the stock permutation search entirely.
+TEST(SearchPcieOrderedRing, Enabled_OtherArchNotForced)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("Enabled_OtherArchNotForced",
+                               []()
+                               {
+                                   auto* s = makeSystem(8, 8, "gfx942");
+                                   auto* g = makeGraph(NCCL_TOPO_PATTERN_RING);
+                                   EXPECT_FALSE(ringPcieOrdered(s, g));
+                                   delete s;
+                                   delete g;
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// A domain spanning several hosts is still one domain: all 8 ranks are GPUs here, so the knob
+// applies even though the topology was fused from two hosts.
+TEST(SearchPcieOrderedRing, Enabled_MultiHostSingleDomainForced)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("Enabled_MultiHostSingleDomainForced",
+                               []()
+                               {
+                                   auto* s = makeSystem(8, 8);
+                                   s->nHosts = 2;
+                                   auto* g   = makeGraph(NCCL_TOPO_PATTERN_RING);
+                                   EXPECT_TRUE(ringPcieOrdered(s, g));
+                                   delete s;
+                                   delete g;
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
 } // namespace RcclUnitTesting
