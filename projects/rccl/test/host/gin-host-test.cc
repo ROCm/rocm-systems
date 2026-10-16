@@ -212,6 +212,10 @@ struct FakeGin {
   // Team arguments of the last connect(), to check the strided-team math.
   int lastConnectNRanks = -1;
   int lastConnectRank = -1;
+  // The handle pointers of the last connect, in team-rank order. Production
+  // builds them from each team rank's *world* rank, so the gaps between them are
+  // what tells a strided team apart from a contiguous one.
+  std::vector<char*> lastConnectHandles;
   // Every ginConfig handed to createContext, in call order.
   std::vector<ncclGinConfig_t> createdConfigs;
   BadContext badContext = BadContext::None;
@@ -283,10 +287,11 @@ struct FakeGin {
     if (props) std::memset(props, 0, sizeof(*props));
     return failGetProperties.at(getPropertiesCalls);
   }
-  ncclResult_t connect(int nRanks, int rank, void** collComm) {
+  ncclResult_t connect(void** handles, int nRanks, int rank, void** collComm) {
     ++connectCalls;
     lastConnectNRanks = nRanks;
     lastConnectRank = rank;
+    lastConnectHandles.assign(reinterpret_cast<char**>(handles), reinterpret_cast<char**>(handles) + nRanks);
     ncclResult_t ret = failConnect.at(connectCalls);
     // One handle per connection, so a later call can be traced to the
     // connection it was made on.
@@ -393,9 +398,9 @@ struct FakeGin {
   static ncclResult_t Listen(void* ctx, int, void*, void** listenComm) {
     return fakeFrom(ctx, FakeHandle::Role::Instance)->listen(listenComm);
   }
-  static ncclResult_t Connect(void* ctx, void**, int nRanks, int rank, void* listenComm, void** collComm) {
+  static ncclResult_t Connect(void* ctx, void** handles, int nRanks, int rank, void* listenComm, void** collComm) {
     fakeFrom(listenComm, FakeHandle::Role::ListenComm);
-    return fakeFrom(ctx, FakeHandle::Role::Instance)->connect(nRanks, rank, collComm);
+    return fakeFrom(ctx, FakeHandle::Role::Instance)->connect(handles, nRanks, rank, collComm);
   }
   static ncclResult_t CloseListen(void* listenComm) {
     return fakeFrom(listenComm, FakeHandle::Role::ListenComm)->closeListen();
@@ -1167,6 +1172,10 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_RailOnlyComm_ConnectsOneRankPerH
   EXPECT_EQ(NCCL_GIN_CONNECTION_RAIL, gin()->ginConnectionType);
   EXPECT_EQ(2, fake_.lastConnectNRanks);  // 4 ranks / 2 ranks per host
   EXPECT_EQ(1, fake_.lastConnectRank);    // rank 2 is the second host
+  // Team rank 1 is world rank 2, so its handle sits two handles further into the
+  // gathered array -- a team built from team ranks would leave a gap of one.
+  ASSERT_EQ(2u, fake_.lastConnectHandles.size());
+  EXPECT_EQ(2 * NCCL_NET_HANDLE_MAXSIZE, fake_.lastConnectHandles[1] - fake_.lastConnectHandles[0]);
 }
 
 ////////////////////////////////////////////////////////////////////////////////
