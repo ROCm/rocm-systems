@@ -14,6 +14,7 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/qp_sharing.h
     src/transport/net_ib_cast/capability_cast.h
     src/transport/net_ib_cast/capability.cc
+    src/transport/net_ib_cast/wqe_lat_mon_cast.h
     src/transport/net_ib_cast/common.cc
     src/transport/net_ib_cast/connect.cc
     src/transport/net_ib_cast/gdr.cc
@@ -30,6 +31,7 @@ set(NET_IB_CAST_SOURCES
     src/transport/net_ib_cast/qp_sharing.cc
     src/transport/net_ib_cast/multiplane.h
     src/transport/net_ib_cast/multiplane.cc
+    src/transport/net_ib_cast/wqe_lat_mon_cast.cc
 )
 
 # The cast headers (common_cast.h, p2p_cast.h, etc.) live in this directory.
