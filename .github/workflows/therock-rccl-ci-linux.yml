@@ -316,6 +316,12 @@ jobs:
           - workload: llama-3.1-405b-maxtext
             nodes: '4'
             job_timeout_minutes: '450'
+          # 4 nodes: two prefill, two decode. 360 is its 3 h time_limit plus
+          # 120 minutes, because the head node also pulls the sglang base and
+          # builds both images before the allocation is requested.
+          - workload: deepseek-r1-sglang-disagg
+            nodes: '4'
+            job_timeout_minutes: '360'
     uses: ./.github/workflows/therock-rccl-test-madengine.yml
     secrets: inherit
     with:
