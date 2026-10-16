@@ -393,7 +393,6 @@ def create_df_pmc_with_slot_ids(
 
     df, slot_to_id = utils_analysis.process_rocpd_csv(counter_rows)
 
-
     utils_analysis.add_unit_counter(df)
 
     if verbose >= 2:
