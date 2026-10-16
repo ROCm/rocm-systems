@@ -33,9 +33,10 @@ def _load_summary() -> Any:
         raise AssertionError(f"{_FUNCTION_NAME} not found in amdsmi_interface.py")
     namespace: Dict[str, Any] = {
         "_format_bdf": lambda bdf: "bdf",
-        "_nic_type_from_value": lambda value: value,
         "_nic_type_label": lambda nic_type, vendor_name: vendor_name,
         "_decode_nic_capabilities": lambda bitmask: [],
+        "amdsmi_get_nic_type": lambda handle: 0,
+        "amdsmi_get_nic_capability": lambda handle: 0,
     }
     exec(compile(ast.Module(nodes, []), str(_INTERFACE_PATH), "exec"), namespace)
     return namespace[_FUNCTION_NAME]
@@ -43,15 +44,13 @@ def _load_summary() -> Any:
 
 def _nic_info(serial: bytes) -> types.SimpleNamespace:
     asic = types.SimpleNamespace(
-        type=0,
         vendor_name=b"AMD",
         permanent_address=b"00:11:22:33:44:55",
         product_name=b"Pollara",
         part_number=b"PN-1",
         serial_number=serial,
-        capability=0,
     )
-    return types.SimpleNamespace(bus=types.SimpleNamespace(bdf=0), asic=asic)
+    return types.SimpleNamespace(handle=object(), bus=types.SimpleNamespace(bdf=0), asic=asic)
 
 
 class TestNicSummaryText(unittest.TestCase):

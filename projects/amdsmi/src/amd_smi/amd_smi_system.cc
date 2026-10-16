@@ -456,15 +456,18 @@ amdsmi_status_t populate_amd_ainic_device(const smi_nic_ctx_t& ctx, uint64_t bdf
     CHK_AMDNIC_RET(status);
   }
 
-  static_assert(sizeof(smi_nic_asic_info_t) == sizeof(ai_nic_info.asic));
+  // The shim struct has two trailing members the public one lacks: copy the common prefix and
+  // keep type and capability on the device.
   static_assert(offsetof(smi_nic_asic_info_t, vendor_name) ==
                 offsetof(amdsmi_nic_asic_info_t, vendor_name));
-  static_assert(offsetof(smi_nic_asic_info_t, type) == offsetof(amdsmi_nic_asic_info_t, type));
-  static_assert(offsetof(smi_nic_asic_info_t, capability) ==
-                offsetof(amdsmi_nic_asic_info_t, capability));
-  status = g_nic_info_getters->asic(ctx, bdf_int,
-                                    reinterpret_cast<smi_nic_asic_info_t*>(&ai_nic_info.asic));
+  static_assert(sizeof(amdsmi_nic_asic_info_t) <= sizeof(smi_nic_asic_info_t));
+  static_assert(offsetof(smi_nic_asic_info_t, type) <= sizeof(amdsmi_nic_asic_info_t));
+  smi_nic_asic_info_t asic = {};
+  status = g_nic_info_getters->asic(ctx, bdf_int, &asic);
   CHK_AMDNIC_RET(status);
+  std::memcpy(&ai_nic_info.asic, &asic, sizeof(ai_nic_info.asic));
+  ai_nic_info.type = asic.type;
+  ai_nic_info.capability = asic.capability;
 
   static_assert(sizeof(smi_nic_numa_info_t) == sizeof(ai_nic_info.numa));
   static_assert(offsetof(smi_nic_numa_info_t, affinity) ==

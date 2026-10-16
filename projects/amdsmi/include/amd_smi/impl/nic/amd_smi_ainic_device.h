@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include <atomic>
 #include <memory>
 
 #include "amd_smi/amdsmi.h"
@@ -29,6 +30,8 @@ class AMDSmiAINICDevice : public AMDSmiProcessor {
     amdsmi_nic_fw_entry_t versions;
     amdsmi_nic_port_info_t port;
     amdsmi_nic_rdma_devices_info_t rdma_dev;
+    uint8_t type;         //!< SmiNicKind value
+    uint32_t capability;  //!< amdsmi_nic_capability_bits_t bitmask
   };
 
   explicit AMDSmiAINICDevice(const AINICInfo& ai_nic_info)
@@ -36,8 +39,18 @@ class AMDSmiAINICDevice : public AMDSmiProcessor {
   ~AMDSmiAINICDevice() = default;
   amdsmi_status_t amd_query_nic_info(AINICInfo& info) const;
 
+  // Single-field reads that avoid copying the whole AINICInfo, which is over 600 KB.
+  uint8_t nic_type() const { return ai_nic_info_.type; }
+  uint32_t capability() const { return ai_nic_info_.capability; }
+  uint64_t bdf() const { return ai_nic_info_.bus.bdf.as_uint; }
+
+  // The tier amdsmi_get_nic_vendor_statistics() reads; set by amdsmi_set_nic_stat_scope().
+  amdsmi_nic_stat_scope_t stat_scope() const { return stat_scope_.load(); }
+  void set_stat_scope(amdsmi_nic_stat_scope_t scope) { stat_scope_.store(scope); }
+
  private:
   AINICInfo ai_nic_info_;
+  std::atomic<amdsmi_nic_stat_scope_t> stat_scope_{AMDSMI_NIC_STAT_SCOPE_DEFAULT};
 };
 
 }  // namespace amd::smi
