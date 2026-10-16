@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Dense WMMA operand layouts and shared arithmetic, aliasing, and invalid-flag checks.
+// Matrix operand layouts, sparse indices, and shared arithmetic and API-contract checks.
 
 #pragma once
 
@@ -18,18 +18,20 @@
 #include <initializer_list>
 #include <random>
 #include <stdint.h>
+#include <vector>
 
 namespace rocjitsu::arith::test {
 
 // Check invalid flags with real storage (all preserved) and null operands
-// (rejected before access). Offsets identify the dense WMMA D/A/B/C operands.
+// (rejected before access). The last offset denotes C for WMMA or sparse
+// indices for SWMMAC; SWMMAC's D is also its accumulator input.
 template <typename Call, int RegistersCount, int Lanes>
 void expect_matrix_invalid_flags(Call call, const Registers<RegistersCount, Lanes> &input, int d,
-                                 int a, int b, int c, uint64_t supported_modifiers) {
+                                 int a, int b, int c_or_indices, uint64_t supported_modifiers) {
   expect_invalid_flags(
       [&](uint64_t flags, uint64_t modifiers) {
         auto r = input;
-        int result = call(flags, modifiers, r.v + d, r.v + a, r.v + b, r.v + c);
+        int result = call(flags, modifiers, r.v + d, r.v + a, r.v + b, r.v + c_or_indices);
         r.expect_preserved(input, 0, 0);
         EXPECT_EQ(call(flags, modifiers, nullptr, nullptr, nullptr, nullptr),
                   RJ_ARITH_ERROR_INVALID_FLAGS);
@@ -37,6 +39,80 @@ void expect_matrix_invalid_flags(Call call, const Registers<RegistersCount, Lane
       },
       supported_modifiers);
 }
+
+// Write one 16-bit gfx12 sparse A value; K is compressed for A.
+template <int WaveSize>
+void set_swmmac16_a(uint32_t *const *v, int coordinate, int k, uint32_t bits) {
+  static_assert(WaveSize == 32 || WaveSize == 64);
+  if constexpr (WaveSize == 32) {
+    auto &word = v[2 * (k / 8) + ((k / 2) & 1)][coordinate + 16 * ((k / 4) & 1)];
+    int shift = 16 * (k % 2);
+    word = (word & ~(0xffffU << shift)) | (bits << shift);
+  } else {
+    auto &word = v[(k % 4) / 2][coordinate + 16 * (k / 4)];
+    int shift = 16 * (k % 2);
+    word = (word & ~(0xffffU << shift)) | (bits << shift);
+  }
+}
+
+// Write one 16-bit gfx12 sparse B value; K is dense for B.
+template <int WaveSize>
+void set_swmmac16_b(uint32_t *const *v, int coordinate, int k, uint32_t bits) {
+  static_assert(WaveSize == 32 || WaveSize == 64);
+  if constexpr (WaveSize == 32) {
+    auto &word = v[4 * (k / 16) + (k / 2) % 4][coordinate + 16 * ((k / 8) & 1)];
+    int shift = 16 * (k % 2);
+    word = (word & ~(0xffffU << shift)) | (bits << shift);
+  } else {
+    auto &word = v[(k % 8) / 2][coordinate + 16 * (k / 8)];
+    int shift = 16 * (k % 2);
+    word = (word & ~(0xffffU << shift)) | (bits << shift);
+  }
+}
+
+// Write one 8-bit gfx12 sparse A value; K is compressed for A.
+template <int WaveSize>
+void set_swmmac8_a(uint32_t *const *v, int coordinate, int k, uint32_t bits) {
+  static_assert(WaveSize == 32 || WaveSize == 64);
+  if constexpr (WaveSize == 32) {
+    auto &word = v[(8 * (k / 16) + k % 8) * 8 / 32][coordinate + 16 * ((k / 8) & 1)];
+    int shift = (8 * (k / 16) + k % 8) * 8 % 32;
+    word = (word & ~(0xffU << shift)) | (bits << shift);
+  } else {
+    auto &word = v[0][coordinate + 16 * (k / 8) + 32 * ((k / 4) & 1)];
+    int shift = 8 * (k % 4);
+    word = (word & ~(0xffU << shift)) | (bits << shift);
+  }
+}
+
+// Write one 8-bit gfx12 sparse B value; K is dense for B.
+template <int WaveSize>
+void set_swmmac8_b(uint32_t *const *v, int coordinate, int k, uint32_t bits) {
+  static_assert(WaveSize == 32 || WaveSize == 64);
+  if constexpr (WaveSize == 32) {
+    auto &word = v[(16 * (k / 32) + k % 16) * 8 / 32][coordinate + 16 * ((k / 16) & 1)];
+    int shift = (16 * (k / 32) + k % 16) * 8 % 32;
+    word = (word & ~(0xffU << shift)) | (bits << shift);
+  } else {
+    auto &word = v[(k % 8) * 8 / 32][coordinate + 32 * ((k / 8) & 1) + 16 * (k / 16)];
+    int shift = (k % 8) * 8 % 32;
+    word = (word & ~(0xffU << shift)) | (bits << shift);
+  }
+}
+
+// Expected dot-plus-C results for A=(1,2), B=(1,4), C=-2.
+inline constexpr struct {
+  uint64_t mode;
+  float negative_c, positive_c;
+} kMatrixModifierCases[] = {{0, 70, 74},
+                            {RJ_ARITH_WMMA_NEG_LO_A, 54, 58},
+                            {RJ_ARITH_WMMA_NEG_HI_A, -58, -54},
+                            {RJ_ARITH_WMMA_NEG_LO_B, 54, 58},
+                            {RJ_ARITH_WMMA_NEG_HI_B, -58, -54},
+                            {RJ_ARITH_WMMA_NEG_LO_A | RJ_ARITH_WMMA_NEG_HI_A, -74, -70},
+                            {RJ_ARITH_WMMA_NEG_C, 74, 70},
+                            {RJ_ARITH_WMMA_ABS_C, 74, 74},
+                            {RJ_ARITH_WMMA_ABS_C | RJ_ARITH_WMMA_NEG_C, 70, 70}};
 
 // Isolate each factor-half sign and accumulator modifier with exactly representable
 // arithmetic. These cases supplement the varied-input per-instruction goldens.
@@ -56,18 +132,7 @@ void expect_matrix_modifiers(Call call) {
       input.v[reg][lane] = (Packed ? 0xc000c000U : std::bit_cast<uint32_t>(-2.0f));
     }
   }
-  const struct {
-    uint64_t mode;
-    float negative_c, positive_c;
-  } cases[] = {{0, 70, 74},
-               {RJ_ARITH_WMMA_NEG_LO_A, 54, 58},
-               {RJ_ARITH_WMMA_NEG_HI_A, -58, -54},
-               {RJ_ARITH_WMMA_NEG_LO_B, 54, 58},
-               {RJ_ARITH_WMMA_NEG_HI_B, -58, -54},
-               {RJ_ARITH_WMMA_NEG_LO_A | RJ_ARITH_WMMA_NEG_HI_A, -74, -70},
-               {RJ_ARITH_WMMA_NEG_C, 74, 70},
-               {RJ_ARITH_WMMA_ABS_C, 74, 74},
-               {RJ_ARITH_WMMA_ABS_C | RJ_ARITH_WMMA_NEG_C, 70, 70}};
+
   for (float accumulator : {-2.0f, 2.0f}) {
     for (int reg = 16; reg < 16 + outputs; ++reg) {
       std::fill_n(input.v[reg], Lanes,
@@ -76,7 +141,7 @@ void expect_matrix_modifiers(Call call) {
     }
     for (uint64_t cpu : supported_cpu_levels()) {
       for (uint64_t semantics : semantics_modes()) {
-        for (const auto &test : cases) {
+        for (const auto &test : kMatrixModifierCases) {
           SCOPED_TRACE(testing::Message() << cpu << '/' << semantics << '/' << test.mode);
           for (int selector = 0; selector < (Gfx11 && Packed ? 2 : 1); ++selector) {
             uint64_t high = selector ? RJ_ARITH_WMMA_HIGH_C_D : 0;
@@ -142,6 +207,155 @@ void expect_matrix_modifiers(Call call) {
                      actual.v + 24, actual.v, actual.v + 8, actual.v + 16),
                 RJ_ARITH_SUCCESS);
       EXPECT_EQ(actual.v[24][0], 0x3f800001U);
+    }
+  }
+}
+
+// Check tied C/D aliases against a disjoint snapshot of the same effective inputs.
+// Scratch registers [48, 48+outputs) must be disjoint from the operand ranges.
+// Numerical correctness is checked separately by each instruction's fixture.
+template <int RegistersCount, int Lanes, typename Call>
+void expect_sparse_aliasing(Call call, const Registers<RegistersCount, Lanes> &input, int outputs,
+                            int b, int index, std::initializer_list<int> offsets,
+                            const std::vector<uint64_t> &cpu_levels) {
+  static_assert(RegistersCount >= 56);
+  for (uint64_t cpu : cpu_levels) {
+    for (uint64_t semantics : {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL}) {
+      for (int aliasing_offset : offsets) {
+        SCOPED_TRACE(::testing::Message() << cpu << '/' << semantics << '/' << aliasing_offset);
+        auto r = input, reference = input;
+        for (int reg = 0; reg < outputs; ++reg) {
+          for (int lane = 0; lane < Lanes; ++lane) {
+            reference.v[48 + reg][lane] = r.v[aliasing_offset + reg][lane];
+          }
+        }
+        ASSERT_EQ(call(cpu | semantics, 0, reference.v + 48, reference.v, reference.v + b,
+                       reference.v + index),
+                  RJ_ARITH_SUCCESS);
+        ASSERT_EQ(call(cpu | semantics, 0, r.v + aliasing_offset, r.v, r.v + b, r.v + index),
+                  RJ_ARITH_SUCCESS);
+        for (int reg = 0; reg < outputs; ++reg) {
+          for (int lane = 0; lane < Lanes; ++lane) {
+            EXPECT_EQ(r.v[aliasing_offset + reg][lane], reference.v[48 + reg][lane]);
+          }
+        }
+        r.expect_preserved(input, aliasing_offset, outputs);
+      }
+    }
+  }
+}
+
+// Clear unused metadata banks so reading the wrong selector cannot pass by
+// observing the same pairs. Only the selected bank needs valid 2:4 pairs.
+template <int Lanes, int Width = Lanes == 64 ? 8 : 16>
+void isolate_sparse_selector(uint32_t *index, uint64_t mode) {
+  static_assert(Width == 8 || Width == 16);
+  constexpr int width = Width;
+  int key = int((mode >> 7) & (32 / Width - 1));
+  uint32_t mask = ((1U << width) - 1) << (width * key);
+  for (int lane = 0; lane < Lanes; ++lane) {
+    index[lane] &= mask;
+  }
+}
+
+// Select two increasing K positions per group of four, using high engine bits.
+// Draw order is row-major and part of the deterministic golden-input contract.
+template <int K> void make_sparse_indices(std::minstd_rand &random, int (&selected)[16][K]) {
+  static_assert(K % 2 == 0);
+  const uint32_t pairs[] = {0x4, 0x8, 0xc, 0x9, 0xd, 0xe};
+  for (int row = 0; row < 16; ++row) {
+    for (int k = 0; k < K; k += 2) {
+      uint32_t pair = pairs[(random() >> 16) % 6];
+      selected[row][k] = 2 * k + (pair & 3);
+      selected[row][k + 1] = 2 * k + (pair >> 2);
+    }
+  }
+}
+
+// Saturate each packed FP16 accumulation stage, without saturating input infinities.
+template <int WaveSize, typename Call> void expect_sparse_half_overflow(Call call) {
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics :
+         {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS}) {
+      for (bool saturate : {false, true}) {
+        for (bool infinity : {false, true}) {
+          Registers<32, WaveSize> r;
+          for (auto *reg : r.v) {
+            std::fill_n(reg, WaveSize, 0U);
+          }
+          for (int coordinate = 0; coordinate < 16; ++coordinate) {
+            for (int k = 0; k < 16; ++k) {
+              set_swmmac16_a<WaveSize>(r.v, coordinate, k,
+                                       infinity && k == 0 ? kF16PositiveInfinityBits
+                                       : k < 4            ? 0x5c00U
+                                       : k < 8            ? 0xbc00U
+                                                          : 0U);
+            }
+            for (int k = 0; k < 32; ++k) {
+              set_swmmac16_b<WaveSize>(r.v + 8, coordinate, k, 0x5c00U);
+            }
+          }
+          std::fill_n(r.v[16], WaveSize, 0x44444444U);
+          ASSERT_EQ(call(cpu | semantics | (saturate ? RJ_ARITH_FP16_OVFL : 0), 0, r.v + 24, r.v,
+                         r.v + 8, r.v + 16),
+                    RJ_ARITH_SUCCESS);
+          uint32_t expected = saturate && !infinity ? 0x7bdf7bdfU : 0x7c007c00U;
+          for (int reg = 24; reg < 24 + 128 / WaveSize; ++reg) {
+            for (int lane = 0; lane < WaveSize; ++lane) {
+              EXPECT_EQ(r.v[reg][lane], expected);
+            }
+          }
+        }
+      }
+    }
+  }
+}
+
+// Sparse factor signs use compressed-slot parity, not selected dense-K parity.
+// Select positions (1,2), reversing the parities. All sums here are exact in both formats.
+template <bool Bf16, int WaveSize, bool Packed, typename Call>
+void expect_sparse_modifiers(Call call) {
+  constexpr int outputs = 256 / WaveSize / (Packed ? 2 : 1);
+  Registers<32, WaveSize> input;
+  for (int coordinate = 0; coordinate < 16; ++coordinate) {
+    for (int k = 0; k < 16; ++k) {
+      set_swmmac16_a<WaveSize>(input.v, coordinate, k, k % 2 ? 0x4000U : Bf16 ? 0x3f80U : 0x3c00U);
+    }
+    for (int k = 0; k < 32; ++k) {
+      set_swmmac16_b<WaveSize>(input.v + 8, coordinate, k,
+                               k % 4 == 2 ? (Bf16 ? 0x4080U : 0x4400U)
+                                          : (Bf16 ? 0x3f80U : 0x3c00U));
+    }
+  }
+  std::fill_n(input.v[16], WaveSize, 0x99999999U); // Repeated (1,2) pairs in every selector bank.
+  for (uint64_t cpu : supported_cpu_levels()) {
+    for (uint64_t semantics : semantics_modes()) {
+      for (const auto &test : kMatrixModifierCases) {
+        for (float c : {-2.0f, 2.0f}) {
+          auto actual = input;
+          for (int reg = 24; reg < 24 + outputs; ++reg) {
+            std::fill_n(actual.v[reg], WaveSize,
+                        Packed ? (c < 0 ? 0xc000c000U : 0x40004000U) : std::bit_cast<uint32_t>(c));
+          }
+          ASSERT_EQ(call(cpu | semantics, test.mode, actual.v + 24, actual.v, actual.v + 8,
+                         actual.v + 16),
+                    RJ_ARITH_SUCCESS);
+          float expected = c < 0 ? test.negative_c : test.positive_c;
+          for (int reg = 24; reg < 24 + outputs; ++reg) {
+            for (int lane = 0; lane < WaveSize; ++lane) {
+              if constexpr (Packed) {
+                for (int half : {0, 1}) {
+                  uint16_t value = uint16_t(actual.v[reg][lane] >> (16 * half));
+                  EXPECT_EQ(Bf16 ? std::bit_cast<float>(uint32_t(value) << 16) : f16_value(value),
+                            expected);
+                }
+              } else {
+                EXPECT_EQ(actual.v[reg][lane], std::bit_cast<uint32_t>(expected));
+              }
+            }
+          }
+        }
+      }
     }
   }
 }
