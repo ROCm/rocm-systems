@@ -1,0 +1,114 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+#
+# C/C++ CodeQL on the HRR replay tool (hrr-playback). The repo-wide codeql.yml
+# covers only Python and Actions, and the ROCm security baseline runs no C/C++
+# CodeQL here. The capture side lives inside libamdhip64 and is scanned
+# separately.
+#
+# CodeQL's C/C++ extractor traces the real compiler, so init, build and analyze
+# run in one job inside a ROCm image that provides hip::host. The result is
+# filtered through projects/hrr/tools/codeql_gate.py before upload: reviewed
+# false positives are removed, reviewed open alerts are kept, and any other
+# alert fails this check while still being uploaded to code scanning.
+
+name: "HRR replay CodeQL"
+
+on:
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/hrr/**'
+      - '.github/workflows/hrr-replay-codeql.yml'
+  pull_request:
+    paths:
+      - 'projects/hrr/**'
+      - '.github/workflows/hrr-replay-codeql.yml'
+  workflow_dispatch:
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: "HRR replay: CodeQL (c-cpp)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    permissions:
+      contents: read
+      security-events: write
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644
+    steps:
+      # git before checkout, or checkout falls back to a tarball and the build's
+      # version stamp has no repository to read.
+      - name: Install build tools
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends cmake git ninja-build
+
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/hrr
+            projects/hip/include
+            projects/clr/hipamd/include
+          persist-credentials: false
+
+      - name: Configure Git safe directory
+        run: git config --global --add safe.directory '*'
+
+      - name: Test the alert gate
+        run: python3 -m unittest projects/hrr/tests/scripts/test_codeql_gate.py -v
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          languages: c-cpp
+          build-mode: manual
+          # security-and-quality adds about a dozen maintainability notes,
+          # mostly on the argv[++i] option parsing; not worth a failing check.
+          queries: security-extended
+
+      # Only the compiles matter to CodeQL; the binary is never run. The SDK's
+      # libamdhip64 lags the in-tree headers playback is compiled against (see
+      # HRR_HIP_INCLUDE_DIRS), so APIs newer than the SDK are left unresolved at
+      # link time rather than failing the build.
+      - name: Build hrr-playback
+        run: |
+          cmake -S projects/hrr -B /tmp/build -GNinja \
+            -DCMAKE_BUILD_TYPE=Debug \
+            -DCMAKE_PREFIX_PATH=/opt/rocm \
+            -DHRR_BUILD_PLAYBACK=ON \
+            -DHRR_BUILD_TESTS=OFF \
+            -DHRR_HIP_INCLUDE_DIRS="$PWD/projects/hip/include;$PWD/projects/clr/hipamd/include" \
+            -DCMAKE_EXE_LINKER_FLAGS=-Wl,--unresolved-symbols=ignore-all
+          cmake --build /tmp/build --target hrr-playback
+
+      - name: Perform CodeQL analysis
+        uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          category: "/hrr-replay/language:c-cpp"
+          upload: never
+          output: /tmp/sarif
+
+      - name: Check alerts against the reviewed list
+        id: gate
+        run: |
+          python3 projects/hrr/tools/codeql_gate.py \
+            --alerts projects/hrr/tools/codeql-replay-alerts.json \
+            --source-root . \
+            /tmp/sarif/cpp.sarif /tmp/hrr-replay.sarif
+
+      # Uploaded when the gate fails too, so a new alert shows on the PR.
+      - name: Upload SARIF
+        if: ${{ success() || steps.gate.outcome == 'failure' }}
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: /tmp/hrr-replay.sarif
+          category: "/hrr-replay/language:c-cpp"

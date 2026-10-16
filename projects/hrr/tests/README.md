@@ -141,7 +141,9 @@ python3 -m unittest discover -s projects/hrr/tests/scripts -p 'test_*.py' -v
 
 They cover `run_catch2.py`, `summarize_junit.py`, and `hrr_test_config.py`, plus
 the tools in `../tools`: the HRR API ID compatibility check, the playback-handler default
-in the generator, and the [api-matrix](../tools/api-matrix/README.md) scripts.
+in the generator, the [api-matrix](../tools/api-matrix/README.md) scripts, and
+`codeql_gate.py`, which checks the replay tool's CodeQL results against the reviewed
+alerts in `codeql-replay-alerts.json` (`.github/workflows/hrr-replay-codeql.yml`).
 
 ## Configuring where a case runs
 
