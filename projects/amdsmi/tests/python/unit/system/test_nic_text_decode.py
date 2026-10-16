@@ -81,7 +81,7 @@ def _stats_getter(function_name: str) -> Any:
     """A statistics getter whose fake library reports one counter with a bad name."""
 
     def fake_get_stats(handle: object, index: int, *rest: Any) -> int:
-        # The vendor getter takes a scope before the count and the buffer.
+        # The count and the buffer are the last two arguments of every statistics getter.
         num_stats, stats = rest[-2], rest[-1]
         num_stats._obj.value = 1
         if stats is not None:
@@ -93,6 +93,7 @@ def _stats_getter(function_name: str) -> Any:
         amdsmi_processor_handle=_FakeHandle,
         amdsmi_nic_stat_t=_Stat,
         AMDSMI_NIC_STAT_SCOPE_DEFAULT=0,
+        amdsmi_set_nic_stat_scope=lambda handle, scope: _STATUS_SUCCESS,
         **{function_name: fake_get_stats},
     )
     return _load([function_name], wrapper)[function_name]
