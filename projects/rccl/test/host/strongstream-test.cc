@@ -551,6 +551,7 @@ TEST_F(StrongstreamMicrotest, Destruct_HipFailuresPropagate) {
     FailNext("hipStreamDestroy", failing);
     EXPECT_EQ(ncclStrongStreamDestruct(&ss_), ncclUnhandledCudaError);
     EXPECT_EQ(Count("hipEventDestroy"), 0);
+    std::free(ss_.captureHead);  // the early return skips the entry's free
     g_failAt.clear();
   }
   Construct(&ss_);
