@@ -423,8 +423,7 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroCrypt -- src/misc/crypt.cc. Own binary: the test supplies its own ncclDebugLog
-  # and socket-layer seams, which would collide with the shared fakes rccl-UnitTestsMicro links.
+  # rccl-UnitTestsMicroCrypt -- src/misc/crypt.cc. Own binary: keeps crypt.cc's file-scope state isolated.
   set(TEST_MICRO_CRYPT_SOURCE_FILES
     crypt-test.cc
     ../common/main_altrsmi.cpp
@@ -451,8 +450,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroCpuset -- src/include/cpuset.h. Own binary: the test defines the ncclOsCpu*
-  # helpers from os/linux.cc, which no shared fake provides.
+  # rccl-UnitTestsMicroCpuset -- src/include/cpuset.h. Own binary: the test defines os/linux.cc's
+  # ncclOsCpu* one-liners, which would otherwise sit in the shared binary as test-TU definitions.
   set(TEST_MICRO_CPUSET_SOURCE_FILES
     cpuset-test.cc
     ../common/main_altrsmi.cpp

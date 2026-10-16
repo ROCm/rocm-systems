@@ -338,9 +338,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
 
 - **`rccl-UnitTestsMicroCrypt`** — `misc/crypt.cc` (via `CRYPT_CC_PATH`, from
-  `crypt-test.cc`); suite `Crypt*`. Its own binary because the test supplies its own
-  `ncclDebugLog` and socket-layer seams, which would collide with the shared fakes
-  `rccl-UnitTestsMicro` links. See `test_categories_micro_crypt.yaml`.
+  `crypt-test.cc`); suite `Crypt*`. Its own binary keeps `crypt.cc`'s file-scope
+  state isolated. See `test_categories_micro_crypt.yaml`.
 - **`rccl-UnitTestsMicroStrongstream`** — `misc/strongstream.cc` (via
   `STRONGSTREAM_CC_PATH`, from `strongstream-test.cc`); suite `Strongstream*`. Its own
   binary because the test defines the HIP stream, event and graph calls it records, and
@@ -355,8 +354,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclDevrFindWindow` and `bootstrapAllGather` around a unit other binaries link whole.
   See `test_categories_micro_argcheck.yaml`.
 - **`rccl-UnitTestsMicroCpuset`** — header-only `include/cpuset.h` (from `cpuset-test.cc`);
-  suite `Cpuset*`. Its own binary because the test defines the `ncclOsCpuZero` /
-  `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners from `os/linux.cc`. See
+  suite `Cpuset*`. Its own binary because the test defines `os/linux.cc`'s
+  `ncclOsCpuZero` / `ncclOsCpuSet` / `ncclOsCpuIsSet` one-liners, which would
+  otherwise sit in `rccl-UnitTestsMicro` as test-TU definitions. See
   `test_categories_micro_cpuset.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`

@@ -252,12 +252,12 @@ bool HeldElsewhere(std::mutex& m) {
   return !got;
 }
 
-// Runs `fn` while `m` is held by this thread: true when fn ran to completion without the lock.
+// Runs `fn` while `m` is held by this thread: true when fn finished within `wait` without the lock.
 template <class F>
-bool CompletesWhileLocked(std::mutex& m, F fn) {
+bool CompletesWhileLocked(std::mutex& m, std::chrono::milliseconds wait, F fn) {
   m.lock();
   auto done = std::async(std::launch::async, fn);
-  bool finished = done.wait_for(std::chrono::milliseconds(100)) == std::future_status::ready;
+  bool finished = done.wait_for(wait) == std::future_status::ready;
   m.unlock();
   done.get();
   return finished;
@@ -421,9 +421,8 @@ TEST_F(StrongstreamMicrotest, ContextTrack_GetDeviceFailureIsAHipError) {
   EXPECT_TRUE(Logged(NCCL_LOG_WARN, "HIP failure"));
 }
 
-// Observed: a failed launch-order stream construction is logged but still reported as success,
-// and the half-built context stays tracked.
-TEST_F(StrongstreamMicrotest, ContextTrack_ConstructFailureIsSwallowed) {
+// A failed launch-order stream build is logged, reported as success and stays tracked; a fix flips this pin.
+TEST_F(StrongstreamMicrotest, ContextTrack_KnownBug_ConstructFailureIsSwallowed) {
   FailNext("hipStreamCreateWithFlags");
   ncclCudaContext* cxt = nullptr;
   EXPECT_EQ(ncclCudaContextTrack(&cxt, 0, 0), ncclSuccess);
@@ -809,8 +808,8 @@ TEST_F(StrongstreamMicrotest, AcquireCapture_AllocationFailureIsASystemError) {
   ncclStrongStreamDestruct(&ss_);
 }
 
-// Observed: the calloc'd entry is not freed when its capture stream cannot be created.
-TEST_F(StrongstreamMicrotest, AcquireCapture_CaptureStreamCreateFailurePropagates) {
+// The error propagates, but the calloc'd entry is not freed; a fix flips this pin.
+TEST_F(StrongstreamMicrotest, AcquireCapture_KnownBug_CaptureStreamCreateFailureLeaksTheEntry) {
   Construct(&ss_);
   FailNext("hipStreamCreateWithFlags");
   hipStream_t work = nullptr;
@@ -870,13 +869,15 @@ TEST_F(StrongstreamMicrotest, ConcurrentLookupsWaitForTheMutex) {
   g_raceFatal = 0;
   for (bool concurrent : {true, false}) {
     SCOPED_TRACE(concurrent);
-    EXPECT_EQ(CompletesWhileLocked(ss_.mutex, [&] { ncclStrongStreamAcquire(Captured(1), &ss_, concurrent, &work); }),
+    // 100 ms is enough to show a call is blocked; proving one finishes gets a generous 10 s.
+    const std::chrono::milliseconds wait(concurrent ? 100 : 10000);
+    EXPECT_EQ(CompletesWhileLocked(ss_.mutex, wait,
+                                   [&] { ncclStrongStreamAcquire(Captured(1), &ss_, concurrent, &work); }),
               !concurrent);
-    EXPECT_EQ(CompletesWhileLocked(ss_.mutex,
+    EXPECT_EQ(CompletesWhileLocked(ss_.mutex, wait,
                                    [&] { ncclStrongStreamAcquiredWorkStream(Captured(1), &ss_, concurrent, &work); }),
               !concurrent);
-    EXPECT_EQ(CompletesWhileLocked(ss_.mutex,
-                                   [&] { ncclStrongStreamRelease(Captured(1), &ss_, concurrent); }),
+    EXPECT_EQ(CompletesWhileLocked(ss_.mutex, wait, [&] { ncclStrongStreamRelease(Captured(1), &ss_, concurrent); }),
               !concurrent);
   }
   ncclStrongStreamDestruct(&ss_);

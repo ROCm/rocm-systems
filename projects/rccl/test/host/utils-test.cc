@@ -522,9 +522,8 @@ TEST_F(UtilsMicrotest, MemoryStack_ReusesTheEmptyHunkLeftAboveByPop) {
   EXPECT_EQ(Addr(above) + above->size, stack_.topFrame.end);
 }
 
-// Observed: when the empty hunk above is too small and no proxy fits below it, a new hunk replaces
-// it in the chain and the old one is never freed.
-TEST_F(UtilsMicrotest, MemoryStack_ReplacingAnUnusableHunkAboveLeaksIt) {
+// A new hunk replaces a too-small empty hunk above in the chain, and the old one is never freed; a fix flips this pin.
+TEST_F(UtilsMicrotest, MemoryStack_KnownBug_ReplacingAnUnusableHunkAboveLeaksIt) {
   Alloc(100);
   FillTo(8);
   ncclMemoryStackPush(&stack_);  // the frame itself spills into a second hunk
@@ -592,8 +591,8 @@ TEST_F(UtilsMicrotest, BitsToString_JoinsSetBitsOrPrintsTheWildcard) {
   EXPECT_EQ(ncclInvalidArgument, ncclBitsToString(1, 1, BitName, buf, 0, nullptr));
 }
 
-// Observed: pos runs past bufLen once a name is truncated, so the next name is written past it.
-TEST_F(UtilsMicrotest, BitsToString_TruncationWritesPastBufLen) {
+// pos runs past bufLen once a name is truncated, so the next name is written past it; a fix flips this pin.
+TEST_F(UtilsMicrotest, BitsToString_KnownBug_TruncationWritesPastBufLen) {
   char buf[64];
   std::memset(buf, '#', sizeof(buf));
   ASSERT_EQ(ncclSuccess, ncclBitsToString(0x3, 0xf, BitName, buf, 4, nullptr));

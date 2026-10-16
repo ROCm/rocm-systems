@@ -86,9 +86,8 @@ TEST_F(CpusetMicrotest, StrToCpuset_RejectsAnOffsetOutsideTheSet) {
   EXPECT_EQ((std::vector<int>{CPU_SETSIZE - 1}), Cpus());
 }
 
-// Observed: past 32 words the trailing (lowest) words are dropped and every kept word lands one
-// word too high, so CPU 33 here reads back as CPU 1 and CPU 0 is lost.
-TEST_F(CpusetMicrotest, StrToCpuset_MoreThan32WordsShiftsTheMask) {
+// Past 32 words the lowest are dropped and the rest land one word low (CPU 33 reads as 1); a fix flips this pin.
+TEST_F(CpusetMicrotest, StrToCpuset_KnownBug_MoreThan32WordsShiftsTheMask) {
   std::vector<std::string> words(33, "0");
   words[31] = "2";
   words[32] = "1";
@@ -117,9 +116,8 @@ TEST_F(CpusetMicrotest, CpusetToRangeStr_StopsWhenTheBufferIsFull) {
   EXPECT_EQ(std::string(8, kGuard), std::string(buf_ + 4, 8));
 }
 
-// Observed: with len 0, len - 1 wraps, the stop check never fires and the second range is written
-// past the (empty) buffer.
-TEST_F(CpusetMicrotest, CpusetToRangeStr_ZeroLengthWritesPastTheBuffer) {
+// With len 0, len - 1 wraps and the second range is written past the empty buffer; a fix flips this pin.
+TEST_F(CpusetMicrotest, CpusetToRangeStr_KnownBug_ZeroLengthWritesPastTheBuffer) {
   Set({0, 2});
   ncclCpusetToRangeStr(&set_, buf_, 0);
   EXPECT_EQ(kGuard, buf_[0]);
@@ -142,9 +140,8 @@ TEST_F(CpusetMicrotest, StrListToCpuset_ParsesCIntegerLiterals) {
   EXPECT_EQ((std::vector<int>{8, 16}), Cpus());
 }
 
-// Observed: nothing is rejected, so NCCL_PROXY_CPUSET's "failed to decode" path in proxy.cc is
-// unreachable. A range keeps only its first CPU, junk becomes CPU 0, and out-of-set CPUs vanish.
-TEST_F(CpusetMicrotest, StrListToCpuset_AcceptsAnything) {
+// Nothing is rejected: a range keeps its first CPU, junk becomes CPU 0, out-of-set CPUs vanish; a fix flips this pin.
+TEST_F(CpusetMicrotest, StrListToCpuset_KnownBug_AcceptsAnything) {
   EXPECT_EQ(ncclSuccess, ncclStrListToCpuset("2-4", &set_));
   EXPECT_EQ((std::vector<int>{2}), Cpus());
   EXPECT_EQ(ncclSuccess, ncclStrListToCpuset("abc", &set_));
