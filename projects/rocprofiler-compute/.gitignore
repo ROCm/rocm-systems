@@ -34,3 +34,6 @@ _toc.yml
 
 # Backup directories
 .backups/
+
+# local metric-health site config (see scripts/.metric_health_sites.env.example)
+/scripts/.metric_health_sites.env

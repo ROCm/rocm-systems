@@ -79,8 +79,8 @@ Options:
   --run <name>              Run name in output paths (default: single-pass)
   --iterations <n>          Workload iterations (default: 500)
   --mega-batch <n>          mega_kernel batch (default: 4096 on gfx1151, else 65536)
-  --therock <dir>           ROCm prefix (default: per-architecture path)
-  --log <path>              Log file (default: per-architecture path)
+  --therock <dir>           ROCm prefix (required on gfx942; else per-architecture default)
+  --log <path>              Log file (default: ~/metric_health_<tag>.log)
   --local-prefix <dir>      Local pkg-config prefix (default: /tmp/rpc_local)
   --site-rocm <dir>         Site ROCm prefix for gfx908, gfx90a, and gfx950 (default: /opt/rocm)
   --roof                    Enable roofline collection (default: off)
@@ -193,7 +193,6 @@ apply_worker_profile() {
   ENV_FAMILY=""
   NATIVE_MODE=""
   THEROCK_STYLE=""
-  LOG_STYLE=home
   MEGA_BATCH_DEFAULT=65536
   SMOKE_FOLLOWS_MEGA_BATCH=0
   SKIP_MEGA_ON_BUILD_FAIL=0
@@ -219,7 +218,6 @@ apply_worker_profile() {
       ENV_FAMILY=therock
       NATIVE_MODE=probe
       THEROCK_STYLE=fixed
-      LOG_STYLE=therock
       WL_SEARCH=candidates
       WL_TREE_FALLBACK=1
       SOC_LEAVES=(MI300X_A1 MI300A_A0)
@@ -298,7 +296,11 @@ case "$THEROCK_STYLE" in
     fi
     ;;
   fixed)
-    THEROCK=${THEROCK_ARG:-${HOME}/workdir/therock-work/therock-rocm-7.15.0a20260728}
+    if [[ -z "$THEROCK_ARG" ]]; then
+      echo "--therock is required for --arch ${ARCH}" >&2
+      exit 1
+    fi
+    THEROCK=$THEROCK_ARG
     ;;
   rocm72)
     THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
@@ -312,11 +314,7 @@ case "$THEROCK_STYLE" in
     ;;
 esac
 
-if [[ "$LOG_STYLE" == "therock" ]]; then
-  LOG=${LOG_ARG:-${HOME}/workdir/metric_health_${TAG}.log}
-else
-  LOG=${LOG_ARG:-${HOME}/metric_health_${TAG}.log}
-fi
+LOG=${LOG_ARG:-${HOME}/metric_health_${TAG}.log}
 
 : >"$LOG"
 exec >>"$LOG" 2>&1
