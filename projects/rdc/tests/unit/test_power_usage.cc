@@ -54,6 +54,14 @@ struct FakeGpu {
 FakeGpu g_gpu;
 int g_socket;
 
+// The tests share one fetcher and never destroy it: ~RdcMetricFetcherImpl() can
+// fail to wake its worker thread and then wait for the thread forever. The
+// fetcher keeps no state for the field these tests fetch.
+amd::rdc::RdcMetricFetcherImpl& fetcher() {
+  static auto* const instance = new amd::rdc::RdcMetricFetcherImpl();
+  return *instance;
+}
+
 class PowerUsageTest : public ::testing::Test {
  protected:
   void SetUp() override {
@@ -64,7 +72,7 @@ class PowerUsageTest : public ::testing::Test {
   // Fetches RDC_FI_POWER_USAGE the way rdcd does when bulk fetch is off.
   rdc_status_t fetch(rdc_field_value* value) {
     *value = {};
-    return fetcher_.fetch_smi_field(0, RDC_FI_POWER_USAGE, value);
+    return fetcher().fetch_smi_field(0, RDC_FI_POWER_USAGE, value);
   }
 
   // Fetches RDC_FI_POWER_USAGE the way rdcd does with RDC_BULK_FETCH_ENABLED.
@@ -73,11 +81,9 @@ class PowerUsageTest : public ::testing::Test {
   std::vector<rdc_gpu_field_value_t> bulk_fetch() {
     rdc_gpu_field_t field = {0, RDC_FI_POWER_USAGE};
     std::vector<rdc_gpu_field_value_t> results;
-    EXPECT_EQ(fetcher_.bulk_fetch_smi_fields(&field, 1, results), RDC_ST_OK);
+    EXPECT_EQ(fetcher().bulk_fetch_smi_fields(&field, 1, results), RDC_ST_OK);
     return results;
   }
-
-  amd::rdc::RdcMetricFetcherImpl fetcher_;
 };
 
 }  // namespace
