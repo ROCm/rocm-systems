@@ -207,9 +207,25 @@ hsa_status_t DrmDriver::CreateQueue(const CreateQueueInParams *queueIn, CreateQu
   struct drm_amdgpu_userq_mqd_sdma_gfx11 sdma_mqd = { 0 };
 
   if (type == AQL_QUEUE) {
+    // For compute queues, CWSR size might need fallback calculation if not provided
+    uint32_t cwsr_size = drmQueueIn->cwsr_size;
+    uint64_t cwsr_va = drmQueueIn->cwsr_va;
+
+    // If CWSR size is 0, it means the caller couldn't get it from kernel ioctl
+    // Try fallback calculation
+    if (cwsr_size == 0 && cwsr_va != 0) {
+      struct drm_amdgpu_info_cwsr cwsr_info = {0};
+      if (ComputeCwsrSizeFallback(gpu_agent, &cwsr_info) == HSA_STATUS_SUCCESS) {
+        cwsr_size = cwsr_info.min_save_area_size;
+      } else {
+        debug_print("Failed to compute CWSR size fallback\n");
+        return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+      }
+    }
+
     compute_mqd.eop_va = drmQueueIn->extra_va;
-    compute_mqd.ctx_save_area_va = drmQueueIn->cwsr_va;
-    compute_mqd.ctx_save_area_size = drmQueueIn->cwsr_size;
+    compute_mqd.ctx_save_area_va = cwsr_va;
+    compute_mqd.ctx_save_area_size = cwsr_size;
     // queue_percentage=0 means suspended (AMDGPU_USERQ_IS_ACTIVE checks > 0);
     // default to fully scheduled, matching ModifyQueueInParams.
     compute_mqd.queue_percentage = AMDGPU_USERQ_MAX_QUEUE_PERCENTAGE;
@@ -1069,6 +1085,97 @@ hsa_status_t DrmDriver::SvmPrefetch(const core::Agent& dstAgent, void* base, siz
 
     DrmSvmOp(dev, AMDGPU_SVM_OP_SET_ATTR, reinterpret_cast<uint64_t>(base), size, 1, &attr);
   }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t DrmDriver::ComputeCwsrSizeFallback(const GpuAgent& gpu_agent,
+                                                 struct drm_amdgpu_info_cwsr* cwsr_info) const {
+  const HsaNodeProperties& properties_ = gpu_agent.properties();
+
+  // GFX version encoding: (Major << 16) | (Minor << 8) | Stepping
+  const uint32_t gfxv = (properties_.EngineId.ui32.Major << 16) |
+                         (properties_.EngineId.ui32.Minor << 8) |
+                          properties_.EngineId.ui32.Stepping;
+
+  // GFX version constants for GFX12+ (only versions supported by DRM fallback)
+  constexpr uint32_t GFX_VERSION_GFX1200     = 0x0C0000;  // GFX12.0.0
+  constexpr uint32_t GFX_VERSION_GFX1201     = 0x0C0001;  // GFX12.0.1
+  constexpr uint32_t GFX_VERSION_GFX1250     = 0x0C0500;  // GFX12.5.0
+
+  // If KFD topology already provides CWSR size, use it
+  if (properties_.CwsrSize > 0) {
+    cwsr_info->ctl_stack_size = properties_.CtlStackSize;
+    cwsr_info->min_save_area_size = properties_.CwsrSize;
+    cwsr_info->dbg_mem_size = 0;
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // Validate minimum requirements for fallback calculation
+  // Only support GFX12 and later for DRM fallback path
+  if (gfxv < GFX_VERSION_GFX1200 ||
+      properties_.NumFComputeCores == 0 ||
+      properties_.NumSIMDPerCU == 0 ||
+      properties_.MaxWavesPerSIMD == 0)
+    return HSA_STATUS_ERROR;
+
+  const uint32_t num_xcc = properties_.NumXcc ? properties_.NumXcc : 1;
+  const uint32_t cu_num = properties_.NumFComputeCores / properties_.NumSIMDPerCU / num_xcc;
+
+  // Calculate number of waves per GPU (GFX12+ uses GFX10+ formula)
+  const uint32_t wave_num = cu_num * properties_.NumSIMDPerCU * properties_.MaxWavesPerSIMD;
+
+  // Sanity check
+  if (wave_num == 0 || cu_num == 0) {
+    debug_warning("CWSR fallback: computed wave_num or cu_num is zero");
+    return HSA_STATUS_ERROR;
+  }
+
+  // GFX12+ uses 12 bytes per wave (GFX10+ value)
+  const uint32_t cntl_bytes_per_wave = 12;
+  const uint32_t ctx_header_size = 40;
+  const uint32_t page_size = 4096;
+
+  // Control stack size calculation
+  uint32_t ctl_stack_size = wave_num * cntl_bytes_per_wave + 8;
+  ctl_stack_size = (ctx_header_size + ctl_stack_size + page_size - 1) & ~(page_size - 1);
+
+  // GFX10 family has HW limit of 0x7000 for control stack (not applicable to GFX12+)
+
+  // VGPR size per CU for GFX12+ (matches hsakmt_get_vgpr_size_per_cu in thunk)
+  uint32_t vgpr_size;
+  if      (gfxv <= GFX_VERSION_GFX1201)    vgpr_size = 0x60000;  // GFX12.0.0-12.0.1
+  else if (gfxv <= GFX_VERSION_GFX1250)    vgpr_size = 0x80000;  // GFX12.5.0
+  else                                      vgpr_size = 0x80000;  // Future GFX12+ default
+
+  // SGPR size per CU (matches hsakmt_get_sgpr_size_per_cu in thunk)
+  const uint32_t sgpr_size = (gfxv >= GFX_VERSION_GFX1250) ? 0x8000 : 0x4000;
+
+  // HWREG size per CU (matches get_hwreg_size_per_cu in thunk)
+  uint32_t hwreg_size;
+  if (gfxv >= GFX_VERSION_GFX1250)
+    hwreg_size = properties_.MaxWavesPerSIMD * properties_.NumSIMDPerCU * 512;
+  else
+    hwreg_size = 0x1000;  // GFX12.0.x default
+
+  // Workgroup context data size
+  const uint32_t lds_size = properties_.LDSSizeInKB << 10;
+  uint32_t wg_data_size = cu_num * (vgpr_size + sgpr_size + lds_size + hwreg_size);
+  wg_data_size = (wg_data_size + page_size - 1) & ~(page_size - 1);
+
+  // Debug memory size (64-byte aligned)
+  const uint32_t debug_mem = (wave_num * 32 + 63) & ~63u;
+
+  // Final sizes (scaled by XCC count for multi-XCC GPUs)
+  cwsr_info->ctl_stack_size = ctl_stack_size * num_xcc;
+  cwsr_info->dbg_mem_size = debug_mem * num_xcc;
+  cwsr_info->min_save_area_size = (ctl_stack_size + wg_data_size + debug_mem) * num_xcc;
+
+  // Sanity check final result
+  if (cwsr_info->min_save_area_size == 0) {
+    debug_warning("CWSR fallback: computed min_save_area_size is zero!");
+    return HSA_STATUS_ERROR;
+  }
+
   return HSA_STATUS_SUCCESS;
 }
 
