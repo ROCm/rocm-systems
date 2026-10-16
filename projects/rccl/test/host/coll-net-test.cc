@@ -20,6 +20,7 @@
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/topo_net_stubs.h"
 #include "fakes/topo_stubs.h"
 
 // Routes every NCCL_PARAM / RCCL_PARAM in coll_net.cc through g_loadParam on each call.
@@ -658,6 +659,364 @@ TEST_F(CollNetSharedBuffersMicrotest, Destroy_FreeFails_ReturnsError) {
 
   EXPECT_NE(sharedBuffersDestroy(&shared_, &proxyState_), ncclSuccess);
   EXPECT_EQ(shared_.size, 2 * kChannels * kBuffSize);
+}
+
+// ---------------------------------------------------------------------------
+// Client-side setup (sendSetup, recvSetup)
+// ---------------------------------------------------------------------------
+
+class CollNetClientMicrotestBase : public CollNetMicrotestBase {
+ protected:
+  static constexpr int kRanks = 4;
+  static constexpr int kMyRank = 1;
+
+  ncclTopoSystem* topo_ = reinterpret_cast<ncclTopoSystem*>(0x70);  // only passed through
+  ncclComm comm_{};
+  ncclPeerInfo peerInfo_[kRanks]{};
+  int topParentLocalRanks_[kRanks] = {20, 21, 22, 23};
+  ncclCollNetSharedRes* shared_ = static_cast<ncclCollNetSharedRes*>(calloc(1, sizeof(ncclCollNetSharedRes)));
+  ncclConnector conn_{};
+  ncclConnect connectInfo_{};
+
+  void SetUp() override {
+    CollNetMicrotestBase::SetUp();
+    for (int r = 0; r < kRanks; r++) peerInfo_[r].rank = r;
+    comm_.rank = kMyRank;
+    comm_.nRanks = kRanks;
+    comm_.localRank = 2;
+    comm_.topo = topo_;
+    comm_.topParentLocalRanks = topParentLocalRanks_;
+    comm_.collNetSharedRes = shared_;
+    comm_.ncclCollNet = &vtable_;
+  }
+
+  void TearDown() override {
+    free(shared_);
+    CollNetMicrotestBase::TearDown();
+  }
+};
+
+class CollNetSetupMicrotest : public CollNetClientMicrotestBase {
+ protected:
+  static constexpr int kChannel = 3;
+  ncclTopoGraph graph_{};
+  ncclTopoGdrMode gdr_ = ncclTopoGdrModeDefault;
+  ncclTopoFlushType flush_ = ncclTopoFlushAlways;
+
+  ncclTopoGraph* getNetDevGraph_ = nullptr;
+  int getNetDevRank_ = -1, getNetDevChannel_ = -1, getNetDevPeer_ = 0;
+  int checkGdrRank_ = -1, checkGdrRead_ = -1;
+  int64_t checkGdrNetId_ = -1;
+  int flushCalls_ = 0, flushNetDev_ = -1, flushRank_ = -1;
+  int64_t flushNetId_ = -1;
+  int connectTransport_ = -1, connectSend_ = -1, connectProxyRank_ = -1;
+  ncclProxyConnector* connectProxyConn_ = nullptr;
+  int callType_ = -1, callRespSize_ = -1;
+  int sharedRefsAtCall_ = -1;
+  ncclProxyConnector* callProxyConn_ = nullptr;
+  void* callResp_ = nullptr;
+  setupReq req_{};
+
+  void SetUp() override {
+    CollNetClientMicrotestBase::SetUp();
+    g_ncclTopoGetNetDev = [this](ncclComm*, int rank, ncclTopoGraph* graph, int channelId, int peerRank,
+                                 int64_t* id, int* dev, int* proxyRank) {
+      getNetDevGraph_ = graph;
+      getNetDevRank_ = rank;
+      getNetDevChannel_ = channelId;
+      getNetDevPeer_ = peerRank;
+      *id = 0x77;
+      *dev = 5;
+      *proxyRank = 9;
+      return ncclSuccess;
+    };
+    g_ncclTopoCheckGdr = [this](ncclTopoSystem* topo, int rank, int64_t netId, int read, ncclTopoGdrMode* mode) {
+      EXPECT_EQ(topo, topo_);
+      checkGdrRank_ = rank;
+      checkGdrNetId_ = netId;
+      checkGdrRead_ = read;
+      *mode = gdr_;
+      return ncclSuccess;
+    };
+    g_ncclTopoNeedFlush = [this](ncclComm*, int64_t netId, int netDev, int rank, bool netManaged,
+                                 ncclTopoFlushType* flush) {
+      ++flushCalls_;
+      flushNetId_ = netId;
+      flushNetDev_ = netDev;
+      flushRank_ = rank;
+      EXPECT_FALSE(netManaged);
+      *flush = flush_;
+      return ncclSuccess;
+    };
+    g_proxyConnect = [this](ncclComm*, int transport, int send, int proxyRank, ncclProxyConnector* proxyConn) {
+      connectTransport_ = transport;
+      connectSend_ = send;
+      connectProxyRank_ = proxyRank;
+      connectProxyConn_ = proxyConn;
+      return ncclSuccess;
+    };
+    g_proxyCallBlocking = [this](ncclComm*, ncclProxyConnector* proxyConn, int type, void* reqBuff, int reqSize,
+                                 void* resp, int respSize) {
+      callProxyConn_ = proxyConn;
+      callType_ = type;
+      callResp_ = resp;
+      callRespSize_ = respSize;
+      sharedRefsAtCall_ = shared_->refCount;
+      EXPECT_EQ(reqSize, (int)sizeof(setupReq));
+      memcpy(&req_, reqBuff, sizeof(req_));
+      if (resp) memset(resp, 0x5A, respSize);
+      return ncclSuccess;
+    };
+  }
+
+  ncclResult_t SendSetup() {
+    return sendSetup(&comm_, &graph_, &peerInfo_[kMyRank], &peerInfo_[0], &connectInfo_, &conn_, kChannel, 1);
+  }
+  ncclResult_t RecvSetup() {
+    return recvSetup(&comm_, &graph_, &peerInfo_[kMyRank], &peerInfo_[0], &connectInfo_, &conn_, kChannel, 1);
+  }
+};
+
+TEST_F(CollNetSetupMicrotest, SendSetup_Gdr_AsksProxyToSetUpOnTopologyNicAndMarksDirectNic) {
+  ASSERT_EQ(SendSetup(), ncclSuccess);
+
+  EXPECT_EQ(getNetDevGraph_, &graph_);
+  EXPECT_EQ(getNetDevRank_, kMyRank);
+  EXPECT_EQ(getNetDevChannel_, kChannel);
+  EXPECT_EQ(getNetDevPeer_, -1);
+  EXPECT_EQ(checkGdrRank_, kMyRank);
+  EXPECT_EQ(checkGdrNetId_, 0x77);
+  EXPECT_EQ(checkGdrRead_, 1);
+  EXPECT_EQ(flushCalls_, 0);
+  EXPECT_EQ(conn_.conn.flags & NCCL_DIRECT_NIC, NCCL_DIRECT_NIC);
+  EXPECT_EQ(conn_.proxyConn.tpLocalRank, 22);
+  EXPECT_EQ(connectTransport_, TRANSPORT_COLLNET);
+  EXPECT_EQ(connectSend_, 1);
+  EXPECT_EQ(connectProxyRank_, kMyRank);
+  EXPECT_EQ(connectProxyConn_, &conn_.proxyConn);
+  EXPECT_EQ(callProxyConn_, &conn_.proxyConn);
+  EXPECT_EQ(callType_, ncclProxyMsgSetup);
+  EXPECT_EQ(callResp_, nullptr);
+  EXPECT_EQ(callRespSize_, 0);
+  EXPECT_EQ(req_.netDev, 5);
+  EXPECT_EQ(req_.useGdr, ncclTopoGdrModeDefault);
+  EXPECT_EQ(req_.collNet, shared_);
+  EXPECT_EQ(sharedRefsAtCall_, 1);  // the proxy's reference is taken before it can see the request
+}
+
+TEST_F(CollNetSetupMicrotest, RecvSetup_Gdr_AsksTopologyToFlushAndReturnsListenHandle) {
+  flush_ = ncclTopoFlushAlways;
+
+  ASSERT_EQ(RecvSetup(), ncclSuccess);
+
+  EXPECT_EQ(checkGdrRead_, 0);
+  EXPECT_EQ(flushCalls_, 1);
+  EXPECT_EQ(flushNetId_, 0x77);
+  EXPECT_EQ(flushNetDev_, 5);
+  EXPECT_EQ(flushRank_, kMyRank);
+  EXPECT_EQ(conn_.conn.flags & NCCL_DIRECT_NIC, NCCL_DIRECT_NIC);
+  EXPECT_EQ(conn_.proxyConn.tpLocalRank, 22);
+  EXPECT_EQ(connectTransport_, TRANSPORT_COLLNET);
+  EXPECT_EQ(connectSend_, 0);
+  EXPECT_EQ(connectProxyRank_, kMyRank);
+  EXPECT_EQ(callType_, ncclProxyMsgSetup);
+  EXPECT_EQ(req_.netDev, 5);
+  EXPECT_EQ(req_.needFlush, ncclTopoFlushAlways);
+  EXPECT_EQ(req_.collNet, shared_);
+  EXPECT_EQ(sharedRefsAtCall_, 1);
+  auto* info = reinterpret_cast<collNetRecvConnectInfo*>(&connectInfo_);
+  EXPECT_EQ(callResp_, &info->collNetHandle);
+  EXPECT_EQ(callRespSize_, (int)sizeof(collNetHandle_t));
+  EXPECT_EQ((unsigned char)info->collNetHandle[0], 0x5A);
+}
+
+TEST_F(CollNetSetupMicrotest, Setup_NoGdr_LeavesDirectNicClearAndSkipsFlushQuery) {
+  gdr_ = ncclTopoGdrModeDisable;
+
+  ASSERT_EQ(SendSetup(), ncclSuccess);
+  EXPECT_EQ(conn_.conn.flags & NCCL_DIRECT_NIC, 0);
+  conn_ = {};
+  ASSERT_EQ(RecvSetup(), ncclSuccess);
+  EXPECT_EQ(conn_.conn.flags & NCCL_DIRECT_NIC, 0);
+  EXPECT_EQ(flushCalls_, 0);
+  EXPECT_EQ(req_.needFlush, ncclTopoFlushNone);
+}
+
+TEST_F(CollNetSetupMicrotest, Setup_EachConnectionTakesSharedResourceReference) {
+  ASSERT_EQ(SendSetup(), ncclSuccess);
+  ASSERT_EQ(RecvSetup(), ncclSuccess);
+
+  EXPECT_EQ(shared_->refCount, 2);
+}
+
+TEST_F(CollNetSetupMicrotest, Setup_DependencyFails_ReturnsError) {
+  for (int failing = 0; failing < 5; failing++) {
+    SCOPED_TRACE(failing);
+    ScopedHook netDev(g_ncclTopoGetNetDev, [&, inner = g_ncclTopoGetNetDev](
+                                               ncclComm* c, int r, ncclTopoGraph* g, int ch, int p, int64_t* id,
+                                               int* dev, int* pr) {
+      return failing == 0 ? ncclSystemError : inner(c, r, g, ch, p, id, dev, pr);
+    });
+    ScopedHook gdr(g_ncclTopoCheckGdr, [&, inner = g_ncclTopoCheckGdr](ncclTopoSystem* t, int r, int64_t id, int rd,
+                                                                         ncclTopoGdrMode* m) {
+      return failing == 1 ? ncclSystemError : inner(t, r, id, rd, m);
+    });
+    ScopedHook flush(g_ncclTopoNeedFlush, [&, inner = g_ncclTopoNeedFlush](ncclComm* c, int64_t id, int d, int r,
+                                                                             bool nm, ncclTopoFlushType* f) {
+      return failing == 2 ? ncclSystemError : inner(c, id, d, r, nm, f);
+    });
+    ScopedHook connect(g_proxyConnect, [&, inner = g_proxyConnect](ncclComm* c, int t, int s, int pr,
+                                                                   ncclProxyConnector* pc) {
+      return failing == 3 ? ncclSystemError : inner(c, t, s, pr, pc);
+    });
+    ScopedHook call(g_proxyCallBlocking, [&, inner = g_proxyCallBlocking](ncclComm* c, ncclProxyConnector* pc, int t,
+                                                                          void* rq, int rqs, void* rs, int rss) {
+      return failing == 4 ? ncclSystemError : inner(c, pc, t, rq, rqs, rs, rss);
+    });
+
+    if (failing != 2) EXPECT_EQ(SendSetup(), ncclSystemError);
+    EXPECT_EQ(RecvSetup(), ncclSystemError);
+  }
+}
+
+// ---------------------------------------------------------------------------
+// Client-side connect and free (sendConnect, recvConnect, sendFree, recvFree)
+// ---------------------------------------------------------------------------
+
+class CollNetConnectMicrotest : public CollNetClientMicrotestBase {
+ protected:
+  connectMap map_{};
+  connectMap* resp_ = &map_;  // what the proxy answers the connect request with
+  std::vector<char> hostMem_;
+  char shared_buff_[64] = {};
+  uint64_t gdcWord_ = 0;
+  ncclResult_t callResult_ = ncclSuccess;
+  int callType_ = -1;
+  collNetConnectArgs args_{};
+
+  void SetUp() override {
+    CollNetClientMicrotestBase::SetUp();
+    NCCL_NET_MAP_ADD_POINTER(&map_, 0, 0, sizeof(ncclSendMem), sendMem);
+    NCCL_NET_MAP_ADD_POINTER(&map_, 0, 0, sizeof(ncclRecvMem), recvMem);
+    NCCL_NET_MAP_ADD_POINTER(&map_, 1, 1, sizeof(shared_buff_), buffs[NCCL_PROTO_SIMPLE]);
+    hostMem_.assign(map_.mems[NCCL_NET_MAP_HOSTMEM].size, 0);
+    map_.mems[NCCL_NET_MAP_HOSTMEM].cpuPtr = map_.mems[NCCL_NET_MAP_HOSTMEM].gpuPtr = hostMem_.data();
+    map_.mems[NCCL_NET_MAP_SHARED_DEVMEM] = {shared_buff_, shared_buff_ + 1, (int)sizeof(shared_buff_)};  // {gpu, cpu}
+    g_proxyCallBlocking = [this](ncclComm*, ncclProxyConnector* proxyConn, int type, void* req, int reqSize,
+                                 void* resp, int respSize) {
+      EXPECT_EQ(proxyConn, &conn_.proxyConn);
+      callType_ = type;
+      EXPECT_EQ(reqSize, (int)sizeof(collNetConnectArgs));
+      memcpy(&args_, req, sizeof(args_));
+      EXPECT_EQ(respSize, (int)sizeof(connectMap*));
+      memcpy(resp, &resp_, sizeof(resp_));
+      return callResult_;
+    };
+  }
+
+  ncclResult_t SendConnect() { return sendConnect(&comm_, &connectInfo_, kRanks, kMyRank, &conn_); }
+  ncclResult_t RecvConnect() { return recvConnect(&comm_, &connectInfo_, kRanks, kMyRank, &conn_); }
+  void UseGdcWord() { map_.mems[NCCL_NET_MAP_GDCMEM] = {(char*)&gdcWord_, (char*)&gdcWord_, sizeof(gdcWord_)}; }
+
+  ncclSendMem* SendMem() { return reinterpret_cast<ncclSendMem*>(hostMem_.data()); }
+  ncclRecvMem* RecvMem() { return reinterpret_cast<ncclRecvMem*>(hostMem_.data() + sizeof(ncclSendMem)); }
+};
+
+TEST_F(CollNetConnectMicrotest, SendConnect_ProxyMap_WiresConnectorAndResetsFifo) {
+  for (int i = 0; i < NCCL_STEPS; i++) {
+    RecvMem()->connFifo[i].mode = NCCL_MODE_NORMAL;
+    RecvMem()->connFifo[i].size = 456;
+  }
+  void* mhandle = reinterpret_cast<void*>(0x1234);
+  conn_.conn.mhandles[0] = mhandle;
+
+  ASSERT_EQ(SendConnect(), ncclSuccess);
+
+  EXPECT_EQ(callType_, ncclProxyMsgConnect);
+  EXPECT_EQ(args_.rank, kMyRank);
+  EXPECT_EQ(args_.nranks, kRanks);
+  EXPECT_EQ(args_.connectInfos, &connectInfo_);
+  EXPECT_EQ(conn_.conn.head, &SendMem()->head);
+  EXPECT_EQ(conn_.conn.tail, &RecvMem()->tail);
+  EXPECT_EQ(conn_.conn.connFifo, RecvMem()->connFifo);
+  for (int i = 0; i < NCCL_STEPS; i++) {
+    EXPECT_EQ(RecvMem()->connFifo[i].size, -1);
+    EXPECT_EQ(RecvMem()->connFifo[i].mode, NCCL_MODE_OFFSET);
+  }
+  EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_SIMPLE], shared_buff_);  // the GPU-side pointer
+  EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_LL], nullptr);
+  EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_LL128], nullptr);
+  EXPECT_EQ(conn_.proxyConn.proxyProgress, sendProxyProgress);
+  EXPECT_EQ(RecvMem()->flush, 0);  // nothing past the FIFO or the buffers is written
+  EXPECT_EQ(conn_.conn.mhandles[0], mhandle);
+}
+
+TEST_F(CollNetConnectMicrotest, RecvConnect_ProxyMap_WiresConnectorAndKeepsFifoSizes) {
+  for (int i = 0; i < NCCL_STEPS; i++) {
+    RecvMem()->connFifo[i].mode = NCCL_MODE_NORMAL;
+    RecvMem()->connFifo[i].size = 456;
+  }
+  void* mhandle = reinterpret_cast<void*>(0x1234);
+  conn_.conn.mhandles[0] = mhandle;
+
+  ASSERT_EQ(RecvConnect(), ncclSuccess);
+
+  EXPECT_EQ(callType_, ncclProxyMsgConnect);
+  EXPECT_EQ(args_.rank, kMyRank);
+  EXPECT_EQ(args_.nranks, kRanks);
+  EXPECT_EQ(args_.connectInfos, &connectInfo_);
+  EXPECT_EQ(conn_.conn.head, &SendMem()->head);
+  EXPECT_EQ(conn_.conn.tail, &RecvMem()->tail);
+  EXPECT_EQ(conn_.conn.connFifo, RecvMem()->connFifo);
+  for (int i = 0; i < NCCL_STEPS; i++) {
+    EXPECT_EQ(RecvMem()->connFifo[i].size, 456);
+    EXPECT_EQ(RecvMem()->connFifo[i].mode, NCCL_MODE_OFFSET);
+  }
+  EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_SIMPLE], shared_buff_);
+  EXPECT_EQ(conn_.conn.buffs[NCCL_PROTO_LL], nullptr);
+  EXPECT_EQ(conn_.proxyConn.proxyProgress, recvProxyProgress);
+  EXPECT_EQ(RecvMem()->flush, 0);
+  EXPECT_EQ(conn_.conn.mhandles[0], mhandle);
+}
+
+TEST_F(CollNetConnectMicrotest, SendConnect_GdcSyncWord_UsedAsHead) {
+  UseGdcWord();
+
+  ASSERT_EQ(SendConnect(), ncclSuccess);
+
+  EXPECT_EQ(conn_.conn.head, &gdcWord_);
+  EXPECT_EQ(conn_.conn.tail, &RecvMem()->tail);
+}
+
+TEST_F(CollNetConnectMicrotest, RecvConnect_GdcSyncWord_UsedAsTail) {
+  UseGdcWord();
+
+  ASSERT_EQ(RecvConnect(), ncclSuccess);
+
+  EXPECT_EQ(conn_.conn.tail, &gdcWord_);
+  EXPECT_EQ(conn_.conn.head, &SendMem()->head);
+}
+
+TEST_F(CollNetConnectMicrotest, Connect_ProxyReturnsNoMap_FailsSoCallerFallsBack) {
+  resp_ = nullptr;
+
+  EXPECT_EQ(SendConnect(), ncclSystemError);
+  EXPECT_EQ(RecvConnect(), ncclSystemError);
+  EXPECT_EQ(conn_.proxyConn.proxyProgress, nullptr);
+}
+
+TEST_F(CollNetConnectMicrotest, Connect_ProxyCallFails_ReturnsError) {
+  callResult_ = ncclRemoteError;
+
+  EXPECT_EQ(SendConnect(), ncclRemoteError);
+  EXPECT_EQ(RecvConnect(), ncclRemoteError);
+  EXPECT_EQ(conn_.proxyConn.proxyProgress, nullptr);
+}
+
+TEST_F(CollNetConnectMicrotest, Free_EitherSide_ReleasesNothing) {
+  EXPECT_EQ(sendFree(&comm_, &conn_), ncclSuccess);
+  EXPECT_EQ(recvFree(&comm_, &conn_), ncclSuccess);
+  EXPECT_EQ(hostFrees_ + devFrees_, 0);
 }
 
 }  // namespace
