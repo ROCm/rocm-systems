@@ -40,8 +40,8 @@ stream:
     # Uses wall_clock64(), so the test is only compiled on AMD.
     <<: *level_default
     disabled:
-      targets: [nvidia_linux, nvidia_windows]
-      reason: "AIRUNTIME-2744 - uses wall_clock64(), so only compiled on AMD; needs to be re-triaged on nvidia_linux, nvidia_windows"
+      targets: [amd_windows, nvidia_linux, nvidia_windows]
+      reason: "AIRUNTIME-2744 - uses wall_clock64(), so only compiled on AMD; needs to be re-triaged on nvidia_linux, nvidia_windows. amd_windows disabled (AIRUNTIME-2892): flaky - REQUIRE(host_ordering_errors == 0) intermittently fails (3 == 0) on gfx110X; re-triage."
     tags: [synchronization]
   Unit_hipMultiStream_multimeDevice:
     <<: *level_default

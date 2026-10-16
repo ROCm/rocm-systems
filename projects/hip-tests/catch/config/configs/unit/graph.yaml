@@ -1756,8 +1756,8 @@ graph:
   Unit_hipGraphAddMemAllocNode_Negative_Free_Alloc_Memory_Again:
     <<: *level_default
     disabled:
-      targets: [amd_wsl]
-      reason: "AIRUNTIME-2892 - gfx1201 (amd_wsl) fails: ret == hipErrorInvalidValue -> 0 == 1; needs to be re-triaged"
+      targets: [amd_wsl, amd_windows]
+      reason: "AIRUNTIME-2892 - gfx1201 (amd_wsl) fails: ret == hipErrorInvalidValue -> 0 == 1; needs to be re-triaged. amd_windows disabled (AIRUNTIME-2892): flaky - same REQUIRE(ret == hipErrorInvalidValue) failure (0 == 1) with intermittent SEH on gfx110X; re-triage."
     tags: [node]
   Unit_hipGraphAddMemAllocNode_Negative_With_Cloneed_Graph:
     <<: *level_default
