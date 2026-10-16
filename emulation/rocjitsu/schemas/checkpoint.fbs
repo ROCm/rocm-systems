@@ -64,6 +64,7 @@ table ComputeUnitState {
   // Unpaused CU steps without process instruction progress; zero disables the budget.
   // Absent legacy values keep the CU configuration default.
   gws_wait_limit: uint32 = null;
+  arithmetic: ArithmeticPolicyConfig;
 }
 
 /// Serialized state of a command processor.
