@@ -35,8 +35,11 @@ NAME_SUFFIX ?=
 # Set to 1 to create and use libverifiable.so to reduce binary size
 DSO ?= 0
 
-HIP_MAJOR = $(shell sed -n 's/#define HIP_VERSION_MAJOR[[:space:]]*//p' $(ROCM_PATH)/include/hip/hip_version.h 2>/dev/null)
-HIP_MINOR = $(shell sed -n 's/#define HIP_VERSION_MINOR[[:space:]]*//p' $(ROCM_PATH)/include/hip/hip_version.h 2>/dev/null)
+# Bare '#' inside $(shell …) is eaten as a comment by Make < 4.3.
+# Indirect it through a variable so every Make version sees the literal.
+_hash := \#
+HIP_MAJOR = $(shell sed -n 's/$(_hash)define HIP_VERSION_MAJOR[[:space:]]*//p' $(ROCM_PATH)/include/hip/hip_version.h 2>/dev/null)
+HIP_MINOR = $(shell sed -n 's/$(_hash)define HIP_VERSION_MINOR[[:space:]]*//p' $(ROCM_PATH)/include/hip/hip_version.h 2>/dev/null)
 
 # Better define GPU_TARGETS in your environment to the minimal set
 # of archs to reduce compile time.
