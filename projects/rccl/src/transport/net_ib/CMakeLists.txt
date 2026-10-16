@@ -5,6 +5,7 @@ set(NET_IB_SOURCES
     ${CMAKE_CURRENT_SOURCE_DIR}/gdr.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/init.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_gid_inspect.cc
+    ${CMAKE_CURRENT_SOURCE_DIR}/net_ib_wqe_lat_inspect.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/p2p.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency.cc
     ${CMAKE_CURRENT_SOURCE_DIR}/p2p_resiliency_recovery.cc

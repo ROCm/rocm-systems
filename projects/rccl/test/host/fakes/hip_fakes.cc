@@ -42,6 +42,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipMemRetainAllocationHandle,  hipMemRetainAllocation
 ASSERT_HOOK_MATCHES_PROD(g_hipMemExportToShareableHandle, hipMemExportToShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemRelease,                 hipMemRelease);
 ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute);
+ASSERT_HOOK_MATCHES_PROD(g_hipDriverGetVersion,           hipDriverGetVersion);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitEvent,            hipStreamWaitEvent);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationGranularity, hipMemGetAllocationGranularity);
@@ -55,6 +56,10 @@ ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamBatchMemOp,           hipStreamBatchMemOp);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWriteValue64,         hipStreamWriteValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
+#endif
+ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -130,6 +135,15 @@ static hipError_t DefaultHipRuntimeGetVersion(int* version)
     return hipSuccess;
 }
 std::function<hipError_t(int*)> g_hipRuntimeGetVersion = DefaultHipRuntimeGetVersion;
+
+static hipError_t DefaultHipDriverGetVersion(int* version)
+{
+    if (version) {
+        *version = 70002000;
+    }
+    return hipSuccess;
+}
+std::function<hipError_t(int*)> g_hipDriverGetVersion = DefaultHipDriverGetVersion;
 
 static hipError_t DefaultHipGetDeviceProperties(hipDeviceProp_t* prop, int)
 {
@@ -339,6 +353,17 @@ static hipError_t DefaultHipMemsetAsync(void*, int, size_t, hipStream_t)
     return g_hipAsyncOpsResult;
 }
 
+// Synchronous memset. Unlike the async form (which answers to the shared
+// g_hipAsyncOpsResult gate), this really writes: the allocation seams above
+// hand out std::malloc'd host memory, so production code that memsets a buffer
+// and later reads it back -- ncclRmaProxyCtxAllocGraph zeroing flushBufDev, for
+// one -- sees the zeros it wrote rather than uninitialised bytes.
+static hipError_t DefaultHipMemset(void* dst, int value, size_t bytes)
+{
+    if (dst != nullptr && bytes > 0) std::memset(dst, value, bytes);
+    return hipSuccess;
+}
+
 static hipError_t DefaultHipStreamCreateWithFlags(hipStream_t* stream, unsigned)
 {
     if (stream) *stream = (g_hipStreamCreateResult == hipSuccess)
@@ -378,6 +403,7 @@ std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_hipMemcpy
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
+std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
 std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDestroy;
@@ -546,6 +572,17 @@ static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
 std::function<hipError_t(hipStream_t, unsigned int, hipStreamBatchMemOpParams*, unsigned int)>
     g_hipStreamBatchMemOp = DefaultHipStreamBatchMemOp;
 
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+static hipError_t DefaultHipMemcpyBatchAsync(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*,
+                                             size_t, size_t*, hipStream_t)
+{
+    return g_hipAsyncOpsResult;
+}
+std::function<hipError_t(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*, size_t, size_t*,
+                         hipStream_t)>
+    g_hipMemcpyBatchAsync = DefaultHipMemcpyBatchAsync;
+#endif
+
 static hipError_t DefaultHipStreamWriteValue64(hipStream_t, void*, std::uint64_t,
                                                unsigned int)
 {
@@ -573,6 +610,7 @@ void ResetHipFakes()
     g_hipPointerGetAttribute        = DefaultHipPointerGetAttribute;
     // init.cc device-model seams
     g_hipRuntimeGetVersion          = DefaultHipRuntimeGetVersion;
+    g_hipDriverGetVersion           = DefaultHipDriverGetVersion;
     g_hipGetDeviceProperties        = DefaultHipGetDeviceProperties;
     g_hipExtMallocWithFlags         = DefaultHipExtMallocWithFlags;
     g_hipHostMalloc                 = DefaultHipHostMalloc;
@@ -617,6 +655,7 @@ void ResetHipFakes()
     g_hipMemcpy                     = DefaultHipMemcpy;
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
+    g_hipMemset                     = DefaultHipMemset;
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
     g_hipStreamDestroy              = DefaultHipStreamDestroy;
@@ -627,6 +666,9 @@ void ResetHipFakes()
     g_hipEventQueryRequiresRecord   = false;
     g_recordedEvents.clear();
     g_hipStreamBatchMemOp           = DefaultHipStreamBatchMemOp;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+    g_hipMemcpyBatchAsync           = DefaultHipMemcpyBatchAsync;
+#endif
     g_hipStreamWriteValue64         = DefaultHipStreamWriteValue64;
     g_hipStreamWaitValue64          = DefaultHipStreamWaitValue64;
 }
@@ -927,10 +969,10 @@ hipError_t hipStreamWriteValue32(hipStream_t, void*, std::uint32_t, unsigned int
 
 // ce_coll.cc's batch path; in-RCCL builds inherit CE_BATCH_ASYNC_SUPPORTED, standalone ones compile the call out.
 #ifdef CE_BATCH_ASYNC_SUPPORTED
-hipError_t hipMemcpyBatchAsync(void**, void**, size_t*, size_t, hipMemcpyAttributes*, size_t*, size_t, size_t*,
-                               hipStream_t)
+hipError_t hipMemcpyBatchAsync(void** dsts, void** srcs, size_t* sizes, size_t count, hipMemcpyAttributes* attrs,
+                               size_t* attrsIdxs, size_t numAttrs, size_t* failIdx, hipStream_t stream)
 {
-    FailLoudUnfaked("hip_fakes", "hipMemcpyBatchAsync");
+    return g_hipMemcpyBatchAsync(dsts, srcs, sizes, count, attrs, attrsIdxs, numAttrs, failIdx, stream);
 }
 #endif
 
@@ -946,7 +988,7 @@ hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
     return g_hipMallocManaged(p, size, flags);
 }
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
-hipError_t hipMemset(void*, int, size_t) { return hipErrorInvalidValue; }
+hipError_t hipMemset(void* dst, int value, size_t bytes) { return g_hipMemset(dst, value, bytes); }
 hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
 // We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
 // rather than the unversioned hipGetDeviceProperties. Callers write
@@ -958,7 +1000,7 @@ hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int device)
 {
     return g_hipGetDeviceProperties(prop, device);
 }
-hipError_t hipDriverGetVersion(int* v) { if (v) *v = 70002000; return hipSuccess; }
+hipError_t hipDriverGetVersion(int* version) { return g_hipDriverGetVersion(version); }
 hipError_t hipStreamWaitEvent(hipStream_t stream, hipEvent_t event, unsigned int flags)
 {
     return g_hipStreamWaitEvent(stream, event, flags);

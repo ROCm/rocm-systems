@@ -6,6 +6,41 @@
 // Capability implementations share the concrete driver's types and helpers.
 #[allow(clippy::wildcard_imports)]
 use super::*;
+use crate::memory::storage::TryPush;
+
+pub(super) fn query_endpoint_details(endpoint: &Endpoint) -> EndpointDetails {
+    let mut details = EndpointDetails::empty_for(endpoint);
+    let EndpointDetailsKind::Gpu {
+        asic_family_id,
+        counter_frequency_hz,
+    } = &mut details.kind
+    else {
+        return details;
+    };
+    let Some(pci) = endpoint.pci else {
+        return details;
+    };
+    let Some(native) = endpoint.linux_kfd_drm_info() else {
+        return details;
+    };
+    let device_info = native
+        .render_minor
+        .and_then(|minor| sysfs::open_render(minor).ok())
+        .and_then(|render| drm::device_info_prefix(&render).ok())
+        .filter(|info| info.device_id == pci.device_id);
+    if let Some(info) = device_info.filter(|info| info.family_id != 0) {
+        *asic_family_id = Some(info.family_id);
+    }
+    *counter_frequency_hz = device_info
+        .filter(|info| info.gpu_counter_frequency_khz != 0)
+        .map(|info| u64::from(info.gpu_counter_frequency_khz) * 1000);
+    details.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
+        .ok()
+        .filter(|metadata| metadata.len() <= 1024 * 1024)
+        .and_then(|_| std::fs::read_to_string("/usr/share/libdrm/amdgpu.ids").ok())
+        .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id));
+    details
+}
 
 impl GpuDriver for LinuxKfdDriver {
     type UserQueue = KfdQueue;
@@ -85,36 +120,6 @@ impl GpuDriver for LinuxKfdDriver {
             .map_err(|source| native_error("KFD available memory query", source))
     }
 
-    fn gpu_presentation(&self, endpoint: &Endpoint) -> GpuPresentation {
-        let mut presentation = GpuPresentation {
-            product_name: None,
-            asic_family_id: endpoint.gpu().map_or(0, |gpu| gpu.asic_family_id),
-            gpu_counter_frequency_hz: None,
-        };
-        let Some(pci) = endpoint.pci else {
-            return presentation;
-        };
-        let Some(native) = endpoint.linux_kfd_drm_info() else {
-            return presentation;
-        };
-        let device_info = native
-            .render_minor
-            .and_then(|minor| sysfs::open_render(minor).ok())
-            .and_then(|render| drm::device_info_prefix(&render).ok())
-            .filter(|info| info.device_id == pci.device_id);
-        if let Some(info) = device_info.filter(|info| info.family_id != 0) {
-            presentation.asic_family_id = info.family_id;
-        }
-        presentation.gpu_counter_frequency_hz = device_info
-            .filter(|info| info.gpu_counter_frequency_khz != 0)
-            .map(|info| u64::from(info.gpu_counter_frequency_khz) * 1000);
-        presentation.product_name = std::fs::metadata("/usr/share/libdrm/amdgpu.ids")
-            .ok()
-            .filter(|metadata| metadata.len() <= 1024 * 1024)
-            .and_then(|_| std::fs::read_to_string("/usr/share/libdrm/amdgpu.ids").ok())
-            .and_then(|contents| marketing_name(&contents, pci.device_id, pci.revision_id));
-        presentation
-    }
     fn set_persisting_l2_cache_size(
         &self,
         device: &DeviceState,
@@ -277,11 +282,11 @@ impl AllocationOperations for LinuxKfdDriver {
         allocation: &mut LinuxAllocation,
         devices: &[&DeviceState],
     ) -> Result<(), Error> {
-        let mut vms = Vec::new();
-        vms.try_reserve(devices.len())
-            .map_err(|_| error(ErrorKind::ResourceExhausted, "access VM list is exhausted"))?;
-        vms.extend(devices.iter().map(|device| &device.vm));
-        allocation.set_access(&vms)
+        let mut vms = crate::memory::storage::try_vec_with_capacity(devices.len())?;
+        for device in devices {
+            vms.try_push(&device.vm)?;
+        }
+        allocation.set_access(vms.as_slice())
     }
     fn allocation_device_address(
         allocation: &LinuxAllocation,
@@ -299,13 +304,12 @@ impl AllocationOperations for LinuxKfdDriver {
         &self,
         device: &DeviceState,
         peers: &[&DeviceState],
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         alignment: u64,
         permissions: DeviceAccess,
     ) -> Result<Owned<LinuxAllocation>, Error> {
         let desc = checked_allocation_desc(size, alignment)?;
-        let kind = kind.get();
         if device.lifetime == DriverContextLifetime::Session
             && matches!(kind, MemoryKind::OwnedHost { .. })
         {
@@ -317,12 +321,6 @@ impl AllocationOperations for LinuxKfdDriver {
         let native_kind = match kind {
             MemoryKind::System => memory::BufferKind::Gtt,
             MemoryKind::OwnedHost { policy } => memory::BufferKind::OwnedUserptr { cache: policy },
-            MemoryKind::RegisteredHost { .. } => {
-                return Err(error(
-                    ErrorKind::DriverContract,
-                    "owned request contains a borrowed host address",
-                ));
-            }
             MemoryKind::DeviceLocal {
                 host_visible,
                 coherent,
@@ -360,6 +358,7 @@ impl AllocationOperations for LinuxKfdDriver {
             desc,
             native_kind,
             permissions,
+            None,
         )
     }
 
@@ -376,6 +375,7 @@ impl AllocationOperations for LinuxKfdDriver {
             size,
             alignment,
             permissions,
+            backing,
         } = request;
         let desc = checked_allocation_desc(size, alignment)?;
         if device.lifetime == DriverContextLifetime::Session {
@@ -391,8 +391,8 @@ impl AllocationOperations for LinuxKfdDriver {
             }
             // On GFX1201 the KFD extended USERPTR allocation and a DRM
             // USERPTR object with the default VM page type both map as NC.
-            // SAFETY: The driver caller retains the page cover and access
-            // synchronization required by this registration contract.
+            // SAFETY: Raw callers retain the page cover; owned registrations
+            // transfer a lease into the resulting native allocation.
             unsafe {
                 LinuxAllocation::create_registered_host(
                     device.vm.clone(),
@@ -401,11 +401,12 @@ impl AllocationOperations for LinuxKfdDriver {
                     address,
                     permissions,
                     policy == HostMappingPolicy::Uncached,
+                    backing,
                 )
             }
         } else {
-            // SAFETY: The driver caller retains these pages until cleanup or
-            // process exit, including an ambiguous KFD result.
+            // SAFETY: Raw callers retain these pages through cleanup; owned
+            // registrations transfer a lease into the native allocation.
             let pages = unsafe { memory::BorrowedHostPages::new(address, policy) };
             LinuxAllocation::create_with_peers(
                 device.vm.clone(),
@@ -413,6 +414,7 @@ impl AllocationOperations for LinuxKfdDriver {
                 desc,
                 memory::BufferKind::Userptr(pages),
                 permissions,
+                backing,
             )
         }
     }
@@ -450,7 +452,7 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         address: u64,
     ) -> Result<Owned<KfdVirtualAddress>, Error> {
         self.ensure_open()?;
-        KfdVirtualAddress::reserve(bounds, size, alignment, address, self.allocator)
+        KfdVirtualAddress::reserve(bounds, size, alignment, address)
     }
     fn free_virtual_address(address: &mut KfdVirtualAddress) -> Result<(), Error> {
         address.free()
@@ -458,13 +460,13 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
     fn create_virtual_memory(
         &self,
         device: &DeviceState,
-        kind: OwnedMemoryKind,
+        kind: MemoryKind,
         size: u64,
         pinned: bool,
         uncached: bool,
     ) -> Result<Owned<KfdVirtualMemory>, Error> {
         self.ensure_open()?;
-        KfdVirtualMemory::create(device.vm.clone(), kind.get(), size, pinned, uncached)
+        KfdVirtualMemory::create(device.vm.clone(), kind, size, pinned, uncached)
     }
     fn free_virtual_memory(memory: &mut KfdVirtualMemory) -> Result<(), Error> {
         memory.free()
@@ -498,17 +500,8 @@ impl VirtualMemoryOperations for LinuxKfdDriver {
         offset: u64,
         size: u64,
         permissions: DeviceAccess,
-        allocator: Allocator,
     ) -> Result<Owned<KfdVirtualHostMapping>, Error> {
-        KfdVirtualHostMapping::create(
-            memory,
-            reservation,
-            address,
-            offset,
-            size,
-            permissions,
-            allocator,
-        )
+        KfdVirtualHostMapping::create(memory, reservation, address, offset, size, permissions)
     }
     fn free_virtual_host_mapping(mapping: &mut KfdVirtualHostMapping) -> Result<(), Error> {
         mapping.free()

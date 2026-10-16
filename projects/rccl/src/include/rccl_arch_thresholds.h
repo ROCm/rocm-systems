@@ -79,8 +79,64 @@ struct rcclArchThresholds {
   // 0 means no suppression (symk may win at any size for that collective).
   size_t symMinR2[RCCL_DDA_FUNC_COUNT];
 
+  // Rank-scaled tier caps, bytes per rank. On a comm of at least
+  // rankScaledMinRanks ranks, a non-zero entry replaces the matching
+  // ddaLLMax / ddaLL128Max / ddaVmmMax total with nRanks * entry, clipped to
+  // rankScaledMaxBytes (which must not exceed the largest total above: fabric
+  // scratch is sized from the totals). Smaller comms, and entries of 0, keep the
+  // totals. The RCCL_DDA_*_THRESHOLD env vars still win over both.
+  size_t ddaLLMaxPerRank[RCCL_DDA_FUNC_COUNT];
+  size_t ddaLL128MaxPerRank[RCCL_DDA_FUNC_COUNT];
+  size_t ddaVmmMaxPerRank[RCCL_DDA_FUNC_COUNT];
+  int rankScaledMinRanks;     // 0 = no rank scaling
+  size_t rankScaledMaxBytes;
+
+  // AllReduce only: on comms of at least ddaArVmmFirstMinRanks ranks, DDA VMM
+  // takes unregistered messages in (ddaArVmmFirstMinBytes, nRanks *
+  // ddaArVmmFirstMaxPerRank] ahead of the LL tier, provided the VMM path is
+  // eligible. 0 ranks = off.
+  int ddaArVmmFirstMinRanks;
+  size_t ddaArVmmFirstMinBytes;
+  size_t ddaArVmmFirstMaxPerRank;
+
+  // DDA VMM (AllReduce / ReduceScatter) launches min(init block cap,
+  // clamp(ddaVmmBlockBudget / nRanks, ddaVmmMinBlocks, ddaVmmMaxBlocks)) blocks
+  // on comms of at least rankScaledMinRanks ranks. Budget 0 = the init block cap.
+  int ddaVmmBlockBudget;
+  int ddaVmmMinBlocks;
+  int ddaVmmMaxBlocks;
+
+  // Ring / Tree crossovers that replace the tuning model's ranges on single-node
+  // comms (nNodes == 1). Sizes are per rank as rcclGetSizePerRank() reports them
+  // (AllReduce: the whole message, hence nRanks x the entry). 0 = keep the
+  // model's range. The two AllReduce LL128 entries apply at any rank count, the
+  // rest from rankScaledMinRanks ranks.
+  size_t arRingLL128MaxPerRank;   // Ring AllReduce LL128 up to nRanks x this
+  bool arTreeLL128Unlimited;      // Tree AllReduce keeps LL128 at every size
+  size_t arTreeMaxPerRank;        // AllReduce runs Tree instead of Ring up to nRanks x this,
+  size_t arTreeLLMaxPerRank;      // with LL up to nRanks x this and LL128 above
+  size_t agRingLL128MaxPerRank;   // AllGather Ring LL128 up to this per rank
+  size_t rsRingLL128MinPerRank;   // ReduceScatter Ring LL128 above this per rank,
+  size_t rsRingLL128MaxPerRank;   // up to this (2- and 4-byte types)
+  size_t rsRingLL128MaxPerRank1B; // or this (1-byte types)
+  size_t rsRingSimpleCappedMaxPerRank;  // Ring Simple ReduceScatter above the LL128 band,
+  int rsRingSimpleCappedChannels;       // up to this per rank, runs on at most this many channels
+
+  // Force CE-Scratch for unregistered AllGather / AlltoAll / Gather / Scatter
+  // whenever the receive fits ddaScratch, on top of the ceNonRegMin/Max window.
+  // NCCL_CTA_POLICY_ZERO forces it on every arch (it is the one zero-CU path for
+  // unregistered buffers). RCCL_FORCE_CE=0 turns it off everywhere. A null table forces it.
+  bool forceCeScratch;
 };
 
-const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);
+// Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks
+// the table only; other archs have one table for every mode.
+enum rcclTuningPartition {
+  RCCL_TUNING_PARTITION_SPX = 0,
+  RCCL_TUNING_PARTITION_DPX = 1,
+};
+
+const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,
+                                                rcclTuningPartition partition = RCCL_TUNING_PARTITION_SPX);
 
 #endif  // RCCL_ARCH_THRESHOLDS_H_

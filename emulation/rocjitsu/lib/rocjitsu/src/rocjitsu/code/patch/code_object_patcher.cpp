@@ -166,12 +166,10 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   return text_index;
 }
 
-[[nodiscard]] bool target_has_wavefront_size_bit(rj_code_arch_t arch) {
-  // ENABLE_WAVEFRONT_SIZE32 selects between two supported wave sizes. Wave32-only
-  // gfx125x reserves the bit and requires it to be zero.
+[[nodiscard]] bool target_supports_wave32(rj_code_arch_t arch) {
   return arch == ROCJITSU_CODE_ARCH_RDNA1 || arch == ROCJITSU_CODE_ARCH_RDNA2 ||
          arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5 ||
-         arch == ROCJITSU_CODE_ARCH_RDNA4;
+         arch == ROCJITSU_CODE_ARCH_RDNA4 || arch == ROCJITSU_CODE_ARCH_CDNA5;
 }
 
 [[nodiscard]] bool target_uses_gfx10_plus_mode_bits(rj_code_arch_t arch) {
@@ -246,6 +244,10 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   translation.target_sgpr_granulated);
 
+  // LLVM's GFX6-GFX9 descriptor ABI reserves RSRC3; CDNA1 has no ACCUM_OFFSET.
+  if (rsrc3_layout(target_arch) == Rsrc3Layout::Reserved)
+    desc.compute_pgm_rsrc3 = 0;
+
   if (target_uses_gfx90a_accum_offset(target_arch) && translation.target_accvgpr_base != 0) {
     // GFX90A-style descriptors encode the first AccVGPR as (field + 1) * 4.
     // KernelDescriptorTranslator may move this base upward when semantic
@@ -267,7 +269,7 @@ void insert_file_bytes(std::vector<uint8_t> &image, Elf64_Ehdr &ehdr,
     AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_FWD_PROGRESS, 1);
   }
 
-  if (target_has_wavefront_size_bit(target_arch)) {
+  if (target_supports_wave32(target_arch)) {
     const uint32_t wave32 = translation.target_wave_size == 32 ? 1u : 0u;
     AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
                     wave32);
