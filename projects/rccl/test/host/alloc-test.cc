@@ -30,6 +30,13 @@
 #include "debug.h"
 #include "fakes/hip_fakes.h"
 
+// hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
+#ifdef CU_MEM_HANDLE_TYPE_FABRIC
+const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
+#else
+const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
+#endif
+
 uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
 uint64_t ncclDebugMask = ~uint64_t(0);
 thread_local int ncclDebugNoWarn = 0;
@@ -788,13 +795,13 @@ TEST_F(AllocMicrotest, FreeAddr_FailureFreesTheRangeWithThePartialSize) {
 TEST_F(AllocMicrotest, CuMemAlloc_ZeroesTheMappingOnAPrivateStream) {
   void* p = nullptr;
   hipMemGenericAllocationHandle_t h = nullptr;
-  ASSERT_EQ(ncclCuMemAlloc(&p, &h, CU_MEM_HANDLE_TYPE_FABRIC, 100), ncclSuccess);
+  ASSERT_EQ(ncclCuMemAlloc(&p, &h, kFabricHandle, 100), ncclSuccess);
   EXPECT_EQ(p, Va());
   EXPECT_EQ(h, kHandle);
   EXPECT_EQ(createProp_.type, kVmmType);
   EXPECT_EQ(createProp_.location.type, hipMemLocationTypeDevice);
   EXPECT_EQ(createProp_.location.id, kHipDev);
-  EXPECT_EQ(createProp_.requestedHandleType, CU_MEM_HANDLE_TYPE_FABRIC);
+  EXPECT_EQ(createProp_.requestedHandleType, kFabricHandle);
   EXPECT_EQ(createProp_.allocFlags.gpuDirectRDMACapable, 1);
   EXPECT_EQ(sizes_["create"], kGran);
   EXPECT_EQ(access_, (std::vector<std::pair<hipMemLocationType, int>>{{hipMemLocationTypeDevice, kHipDev}}));
@@ -1030,7 +1037,7 @@ TEST_F(AllocMicrotest, CudaCallocAsync_WithoutCuMemZeroesOnTheCallersStream) {
 // With cuMem every helper goes through ncclCuMemAlloc, passing the manager and memory type on.
 TEST_F(AllocMicrotest, CudaAllocs_WithCuMemDispatchToCuMemAlloc) {
   g_cuMemEnable = 1;
-  ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;
+  ncclCuMemHandleType = kFabricHandle;
   ncclMemManager mgr{};
   char* a = nullptr;
   char* b = nullptr;
@@ -1042,7 +1049,7 @@ TEST_F(AllocMicrotest, CudaAllocs_WithCuMemDispatchToCuMemAlloc) {
   EXPECT_EQ(g_tracked[0].memType, ncclMemScratch);
   EXPECT_EQ(g_tracked[1].memType, ncclMemOffload);
   EXPECT_EQ(g_tracked[2].memType, ncclMemPersist);
-  for (const TrackCall& t : g_tracked) EXPECT_EQ(t.type, CU_MEM_HANDLE_TYPE_FABRIC);
+  for (const TrackCall& t : g_tracked) EXPECT_EQ(t.type, kFabricHandle);
   EXPECT_EQ(Count("extMalloc"), 0);
   EXPECT_EQ(Count("memset"), 3);  // ncclCuMemAlloc's own zeroing only
 }

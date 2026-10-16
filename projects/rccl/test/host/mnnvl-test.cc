@@ -89,6 +89,13 @@ hipError_t hipDrvGetErrorString(hipError_t, const char** str) {
 #include MNNVL_CC_PATH
 #undef ncclCalloc
 
+// hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
+#ifdef CU_MEM_HANDLE_TYPE_FABRIC
+const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
+#else
+const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
+#endif
+
 namespace {
 
 constexpr uint32_t kCliqueA = 0xa;
@@ -133,7 +140,7 @@ class MnnvlMicrotest : public ::testing::Test {
     g_hipMemsetAsync = [](void*, int, size_t, hipStream_t) { return hipSuccess; };
     g_hipMemExportToShareableHandle = [this](void*, hipMemGenericAllocationHandle_t, hipMemAllocationHandleType type,
                                              unsigned long long) {
-      EXPECT_EQ(type, CU_MEM_HANDLE_TYPE_FABRIC);
+      EXPECT_EQ(type, kFabricHandle);
       exports_++;
       return exportResult_;
     };
@@ -276,8 +283,8 @@ TEST_F(MnnvlMicrotest, Probe_EnablesMnnvlAndSwitchesToFabricHandles) {
   Build(0, 2);
   ASSERT_EQ(ncclMnnvlCheck(comm_.get()), ncclSuccess);
   EXPECT_EQ(comm_->MNNVL, 1);
-  EXPECT_EQ(ncclCuMemHandleType, CU_MEM_HANDLE_TYPE_FABRIC);
-  EXPECT_EQ(handleTypes_, std::vector<hipMemAllocationHandleType>{CU_MEM_HANDLE_TYPE_FABRIC});
+  EXPECT_EQ(ncclCuMemHandleType, kFabricHandle);
+  EXPECT_EQ(handleTypes_, std::vector<hipMemAllocationHandleType>{kFabricHandle});
   EXPECT_EQ(exports_, 1);
   EXPECT_EQ(addressFrees_, std::vector<size_t>{reserved_});
 }

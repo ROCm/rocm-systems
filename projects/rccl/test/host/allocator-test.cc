@@ -84,6 +84,18 @@ ncclResult_t ncclMemUntrackPersist(struct ncclMemManager*, void*, size_t) {
 #include "fakes/nvtx_redirect.h"
 #include ALLOCATOR_CC_PATH
 
+// hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
+#ifdef CU_MEM_HANDLE_TYPE_FABRIC
+const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
+#else
+const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
+#endif
+#ifdef CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED
+const hipDeviceAttribute_t kFabricSupportedAttr = (hipDeviceAttribute_t)CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED;
+#else
+const hipDeviceAttribute_t kFabricSupportedAttr = hipDeviceAttributeHandleTypeFabricSupported;
+#endif
+
 namespace {
 
 constexpr int kDev = 3;
@@ -331,14 +343,14 @@ TEST_F(AllocatorMicrotest, MemAlloc_MapsAlignedVmmMemoryForEveryPeerThatCanReach
 
 TEST_F(AllocatorMicrotest, MemAlloc_FabricHandlesOnlyWhenTheDeviceSupportsThem) {
   g_cuMemEnable = 1;
-  ncclCuMemHandleType = CU_MEM_HANDLE_TYPE_FABRIC;
+  ncclCuMemHandleType = kFabricHandle;
   InstallVmm();
   void* p = nullptr;
   fabricSupported_ = 1;
   ASSERT_EQ(ncclMemAlloc_impl(&p, 1), ncclSuccess);
-  EXPECT_EQ(prop_.requestedHandleType, CU_MEM_HANDLE_TYPE_FABRIC);
+  EXPECT_EQ(prop_.requestedHandleType, kFabricHandle);
   ASSERT_EQ(attrs_.size(), 1u);
-  EXPECT_EQ(attrs_[0], (hipDeviceAttribute_t)CU_DEVICE_ATTRIBUTE_HANDLE_TYPE_FABRIC_SUPPORTED);
+  EXPECT_EQ(attrs_[0], kFabricSupportedAttr);
 
   fabricSupported_ = 0;
   ASSERT_EQ(ncclMemAlloc_impl(&p, 1), ncclSuccess);

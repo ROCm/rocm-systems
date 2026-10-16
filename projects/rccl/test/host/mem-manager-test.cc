@@ -128,6 +128,13 @@ void* MemManagerMalloc(size_t n) {
 #include MEM_MANAGER_CC_PATH
 #undef malloc
 
+// hipify renames the CUDA FABRIC names wherever HIP has them; p2p.h only defines them otherwise.
+#ifdef CU_MEM_HANDLE_TYPE_FABRIC
+const hipMemAllocationHandleType kFabricHandle = CU_MEM_HANDLE_TYPE_FABRIC;
+#else
+const hipMemAllocationHandleType kFabricHandle = hipMemHandleTypeFabric;
+#endif
+
 namespace {
 
 constexpr int kDev = 2;
@@ -259,7 +266,7 @@ class MemManagerMicrotest : public ::testing::Test {
     };
     g_hipMemExportToShareableHandle = [this](void* shareable, hipMemGenericAllocationHandle_t,
                                              hipMemAllocationHandleType type, unsigned long long) {
-      EXPECT_EQ(type, CU_MEM_HANDLE_TYPE_FABRIC);
+      EXPECT_EQ(type, kFabricHandle);
       std::memset(shareable, 0xab, sizeof(hipMemFabricHandle_compat_t));
       return exportResult_;
     };
@@ -459,7 +466,7 @@ TEST_F(MemManagerMicrotest, Destroy_LeavesFdsThatAreNotLiveLocalPosixHandles) {
   ASSERT_EQ(pipe(fds), 0);
   ncclDynMemEntry* notValid = Track(Addr(0x1000), ncclMemScratch, 0x11);
   notValid->desc.local.shareableHandle.fd = fds[0];
-  ncclDynMemEntry* fabric = Track(Addr(0x2000), ncclMemScratch, 0x12, CU_MEM_HANDLE_TYPE_FABRIC);
+  ncclDynMemEntry* fabric = Track(Addr(0x2000), ncclMemScratch, 0x12, kFabricHandle);
   fabric->desc.local.shareableHandleValid = true;
   fabric->desc.local.shareableHandle.fd = fds[1];
   ncclDynMemEntry* negative = Track(Addr(0x3000), ncclMemScratch, 0x13);
@@ -813,7 +820,7 @@ TEST_F(MemManagerMicrotest, Resume_BackupRestoreFailureKeepsTheMappingButStaysRe
 }
 
 TEST_F(MemManagerMicrotest, Resume_ReexportsFabricHandles) {
-  ncclDynMemEntry* e = Track(Addr(0x1000), ncclMemScratch, 0x11, CU_MEM_HANDLE_TYPE_FABRIC);
+  ncclDynMemEntry* e = Track(Addr(0x1000), ncclMemScratch, 0x11, kFabricHandle);
   MarkSuspended({e});
   ASSERT_EQ(ncclCommMemResume(comm_.get()), ncclSuccess);
   EXPECT_TRUE(e->desc.local.shareableHandleValid);
@@ -821,7 +828,7 @@ TEST_F(MemManagerMicrotest, Resume_ReexportsFabricHandles) {
 }
 
 TEST_F(MemManagerMicrotest, Resume_FabricExportFailureUndoesTheMapping) {
-  ncclDynMemEntry* e = Track(Addr(0x1000), ncclMemScratch, 0x11, CU_MEM_HANDLE_TYPE_FABRIC);
+  ncclDynMemEntry* e = Track(Addr(0x1000), ncclMemScratch, 0x11, kFabricHandle);
   MarkSuspended({e});
   exportResult_ = hipErrorInvalidValue;
   EXPECT_EQ(ncclCommMemResume(comm_.get()), ncclUnhandledCudaError);
@@ -863,7 +870,7 @@ TEST_F(MemManagerMicrotest, Resume_WithoutBootstrapSkipsBarriersAndExchange) {
 TEST_F(MemManagerMicrotest, Exchange_SendsExportedLocalHandlesToEveryPeer) {
   Regroup(1, 3);
   Track(Addr(0x1000), ncclMemScratch, 0x11);
-  ncclDynMemEntry* fabric = Track(Addr(0x2000), ncclMemOffload, 0x12, CU_MEM_HANDLE_TYPE_FABRIC);
+  ncclDynMemEntry* fabric = Track(Addr(0x2000), ncclMemOffload, 0x12, kFabricHandle);
   Track(Addr(0x3000), ncclMemScratch, 0x13);  // never exported: not broadcast
   ASSERT_EQ(ncclDynMemMarkExportToPeer(mgr_, Addr(0x1000), 0), ncclSuccess);
   ASSERT_EQ(ncclDynMemMarkExportToPeer(mgr_, Addr(0x2000), 2), ncclSuccess);
@@ -883,7 +890,7 @@ TEST_F(MemManagerMicrotest, Exchange_SendsExportedLocalHandlesToEveryPeer) {
   EXPECT_EQ(f.ownerRank, 1);
   EXPECT_EQ(f.ownerDev, 6);
   EXPECT_EQ(f.size, kSize);
-  EXPECT_EQ(f.handleType, CU_MEM_HANDLE_TYPE_FABRIC);
+  EXPECT_EQ(f.handleType, kFabricHandle);
   EXPECT_EQ(f.fabricHandle.data[63], 0x5c);
   const ncclDynMemP2pHandleInfo& p = sent_[0][1];
   EXPECT_EQ(p.ptr, Addr(0x1000));
@@ -897,7 +904,7 @@ TEST_F(MemManagerMicrotest, Exchange_SendsExportedLocalHandlesToEveryPeer) {
 // A FABRIC entry without a valid exported handle is still broadcast, with its handle bytes unset.
 TEST_F(MemManagerMicrotest, Exchange_FabricEntryWithoutAnExportedHandleIsSentAnyway) {
   Regroup(0, 2);
-  ncclDynMemEntry* fabric = Track(Addr(0x2000), ncclMemScratch, 0x12, CU_MEM_HANDLE_TYPE_FABRIC);
+  ncclDynMemEntry* fabric = Track(Addr(0x2000), ncclMemScratch, 0x12, kFabricHandle);
   ASSERT_EQ(ncclDynMemMarkExportToPeer(mgr_, Addr(0x2000), 1), ncclSuccess);
   std::memset(&fabric->desc.local.shareableHandle.fabricHandle, 0x5c, sizeof(hipMemFabricHandle_compat_t));
   mgr_->released = 1;
@@ -993,11 +1000,11 @@ TEST_F(MemManagerMicrotest, Reimport_FabricPeerBufferFromTheExchangedHandle) {
   Regroup(0, 2);
   ncclDynMemEntry* imported = Import(Addr(0x3000), ncclMemScratch, 0x13, 1, Addr(0x9000));
   MarkSuspended({imported});
-  inbox_[1] = {Info(1, Addr(0x9000), CU_MEM_HANDLE_TYPE_FABRIC, 0)};
+  inbox_[1] = {Info(1, Addr(0x9000), kFabricHandle, 0)};
   inbox_[1][0].fabricHandle.data[0] = 0x42;
   g_hipMemImportFromShareableHandle = [this](hipMemGenericAllocationHandle_t* h, void* shareable,
                                              hipMemAllocationHandleType type) {
-    EXPECT_EQ(type, CU_MEM_HANDLE_TYPE_FABRIC);
+    EXPECT_EQ(type, kFabricHandle);
     EXPECT_EQ(static_cast<unsigned char*>(shareable)[0], 0x42);
     *h = Handle(0x200);
     return hipSuccess;
@@ -1059,7 +1066,7 @@ TEST_F(MemManagerMicrotest, Reimport_KeepsTheFirstErrorAcrossEntries) {
   ncclDynMemEntry* noInfo = Import(Addr(0x3000), ncclMemScratch, 0x13, 1, Addr(0x9000));
   ncclDynMemEntry* unknownType = Import(Addr(0x4000), ncclMemScratch, 0x14, 1, Addr(0x9100));
   MarkSuspended({importFails, noInfo, unknownType});
-  inbox_[1] = {Info(1, Addr(0x9100), 3, 0), Info(1, Addr(0x8000), CU_MEM_HANDLE_TYPE_FABRIC, 0)};
+  inbox_[1] = {Info(1, Addr(0x9100), 3, 0), Info(1, Addr(0x8000), kFabricHandle, 0)};
   importResult_ = hipErrorInvalidValue;
   EXPECT_EQ(ncclCommMemResume(comm_.get()), ncclInvalidUsage);
   EXPECT_EQ(imports_.size(), 1u);
