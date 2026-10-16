@@ -287,9 +287,8 @@ class VirtualGPU : public device::VirtualDevice {
     //! Wait for the curent active signal. Can idle the queue
     bool WaitCurrent();
 
-    //! Wait for the provided signal and process its timing. With wait_only the timing isn't
-    //! processed, then the execution() lock isn't required, but the caller must keep the signal
-    bool CpuWaitForSignal(ProfilingSignal* signal, bool wait_only = false);
+    //! Process the timing of the completed signal before its reuse. Requires the execution() lock
+    void ProcessSignalTiming(ProfilingSignal* signal);
 
     //! Update current active engine
     void SetActiveEngine(HwQueueEngine engine = HwQueueEngine::Compute) { engine_ = engine; }
@@ -322,6 +321,9 @@ class VirtualGPU : public device::VirtualDevice {
 
     //! Wait for the next active signal
     void WaitNext();
+
+    //! Wait for the provided signal
+    bool CpuWaitForSignal(ProfilingSignal* signal);
 
     HwQueueEngine engine_ = HwQueueEngine::Unknown;  //!< Engine used in the current operations
     std::stack<ProfilingSignal*> signal_pool_irq_;   //!< The pool of free signals with interrupts
