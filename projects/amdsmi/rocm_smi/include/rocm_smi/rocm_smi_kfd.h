@@ -8,6 +8,7 @@
 #include <map>
 #include <memory>
 #include <string>
+#include <string_view>
 #include <unordered_set>
 #include <vector>
 
@@ -89,9 +90,10 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
 int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
                          std::unordered_set<uint64_t>* gpu_set);
 
-// Whether KFD has a process directory named pid, which it removes when the
-// process exits. Only meaningful outside a PID namespace: inside one, pid is
-// not the PID that KFD uses.
+// Whether process pid still runs as a KFD process: KFD has a directory named
+// pid, which it removes when the process exits. In a PID namespace other than
+// the initial one, where KFD does not name processes by this namespace's PIDs,
+// whether this namespace's process pid runs with /dev/kfd open.
 bool KfdProcessExists(uint32_t pid);
 
 int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_count);
@@ -102,6 +104,22 @@ int get_gpu_id(uint32_t node, uint64_t* gpu_id);
 
 // Replaces the contents of *out with the KFD GPU ids for pid (clears first).
 int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out);
+
+// A /proc/<pid>/maps line: the file offset it maps, and the device and inode
+// number of the file.
+struct MapsLine {
+  uint64_t offset = 0;
+  uint32_t dev_major = 0;
+  uint32_t dev_minor = 0;
+  uint64_t inode = 0;
+};
+
+// Parses a /proc/<pid>/maps line into `out`; false if it is not one.
+bool ParseMapsLine(std::string_view line, MapsLine* out);
+
+// The KFD id of the GPU whose queue doorbells KFD maps at mmap offset `offset`,
+// or 0 if the offset maps something else.
+uint64_t KfdDoorbellGpuId(uint64_t offset);
 
 }  // namespace amd::smi
 

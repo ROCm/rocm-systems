@@ -5391,8 +5391,8 @@ rsmi_status_t rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group
 
 // Whether a GetProcessInfoForPID() error means that the process exited during
 // the read: KFD removes its files (ENODEV), then its directory (ESRCH, or any
-// error once the directory is gone). That function fails only outside a PID
-// namespace, where pid names the KFD directory.
+// error once the directory is gone). In a PID namespace other than the initial
+// one, ESRCH means that no process pid of that namespace has /dev/kfd open.
 static bool KfdProcessExitedDuringRead(uint32_t pid, int err) {
   return err == ESRCH || err == ENODEV || (err != 0 && !amd::smi::KfdProcessExists(pid));
 }

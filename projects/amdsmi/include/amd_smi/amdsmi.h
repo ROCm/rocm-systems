@@ -7011,6 +7011,13 @@ amdsmi_status_t amdsmi_get_gpu_available_counters(amdsmi_processor_handle proces
  *  to determine how much memory should be allocated for when @p procs is not
  *  NULL.
  *
+ *  @note KFD knows a process by its PID in the host's PID namespace. In another PID
+ *  namespace, such as that of a container that does not share the host's, this
+ *  function lists the processes of that namespace that have /dev/kfd open, by their
+ *  PIDs there, with vram_usage, sdma_usage, cu_occupancy and evicted_time all-ones
+ *  (not available). It leaves out the processes whose open files the caller may not
+ *  read, such as another user's when the caller lacks CAP_SYS_PTRACE.
+ *
  *  @param[in,out] procs a pointer to memory provided by the caller to which
  *  process information will be written. This may be NULL in which case only @p
  *  num_items will be updated with the number of processes found.
@@ -7048,6 +7055,11 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs
  *  @p pid, this function will write the process information for @p pid, if
  *  available, to the memory pointed to by @p proc.
  *
+ *  @note In a PID namespace other than the host's, such as that of a container that
+ *  does not share the host's, @p pid is a process of that namespace. It is not found
+ *  unless it has /dev/kfd open, and its vram_usage, sdma_usage, cu_occupancy and
+ *  evicted_time are all-ones (not available).
+ *
  *  @param[in] pid The process ID for which process information is being
  *  requested
  *
@@ -7056,10 +7068,10 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info(amdsmi_process_info_t* procs
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
  *                            | ::AMDSMI_STATUS_NOT_FOUND if @p pid has no KFD process or it
- *                              exited during the read, non-zero on other failures. When the
- *                              library detects that it runs in a container's PID namespace,
- *                              it does not look @p pid up and returns all-ones statistics
- *                              (not available).
+ *                              exited during the read,
+ *                            | ::AMDSMI_STATUS_NO_PERM if, in a PID namespace other than the
+ *                              host's, the caller may not read the open files of @p pid,
+ *                              non-zero on other failures.
  */
 amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
                                                            amdsmi_process_info_t* proc);
@@ -7081,6 +7093,11 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
  *  dv_indices being NULL is a way to determine how much memory is required
  *  for when @p dv_indices is not NULL.
  *
+ *  @note In a PID namespace other than the host's, such as that of a container that
+ *  does not share the host's, @p pid is a process of that namespace, and its GPUs are
+ *  read from its /proc files: those it created queues on or, if none is found, those
+ *  whose render node it holds open. A @p pid without /dev/kfd open uses no GPUs.
+ *
  *  @param[in] pid The process id of the process for which the number of gpus
  *  currently being used is requested
  *
@@ -7099,11 +7116,11 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_info_by_pid(uint32_t pid,
  *                            | ::AMDSMI_STATUS_INSUFFICIENT_SIZE if the process uses more GPUs
  *                              than *@p num_devices; the call fills @p dv_indices and leaves
  *                              *@p num_devices unchanged. Count again and repeat the call,
- *                            | ::AMDSMI_STATUS_INVAL if @p num_devices is NULL, non-zero on
- *                              other failures. A @p pid without a KFD process uses no GPUs.
- *                              When the library detects that it runs in a container's PID
- *                              namespace, it does not look @p pid up and reports the GPUs of
- *                              the first KFD process found.
+ *                            | ::AMDSMI_STATUS_INVAL if @p num_devices is NULL,
+ *                            | ::AMDSMI_STATUS_NO_PERM if, in a PID namespace other than the
+ *                              host's, the caller may not read the open files of @p pid,
+ *                              non-zero on other failures. A @p pid without a KFD process
+ *                              uses no GPUs.
  */
 amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_indices,
                                                     uint32_t* num_devices);
@@ -8616,6 +8633,14 @@ amdsmi_status_t amdsmi_get_violation_status(amdsmi_processor_handle processor_ha
  * process whose KFD statistics cannot be read is still listed, with cu_occupancy, evicted_time and
  * sdma_usage all-ones (not available) and memory sizes from its fdinfo only (0 if unreadable).
  * A running process whose GPUs cannot be read from KFD is left out, with a warning in the log.
+ *
+ *  @note In a PID namespace other than the host's, such as that of a container that does not
+ *  share the host's, the list holds the processes of that namespace that have /dev/kfd open,
+ *  by their PIDs there, on the GPUs amdsmi_get_gpu_compute_process_gpus() reports for them. It
+ *  leaves out the processes whose open files the caller may not read, such as another user's
+ *  when the caller lacks CAP_SYS_PTRACE. Their name, container_name, memory_usage and
+ *  engine_usage come from their own files, mem is the sum of their memory_usage values, and
+ *  cu_occupancy, evicted_time and sdma_usage are all-ones (not available).
  */
 amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_handle,
                                             uint32_t* max_processes, amdsmi_proc_info_t* list);

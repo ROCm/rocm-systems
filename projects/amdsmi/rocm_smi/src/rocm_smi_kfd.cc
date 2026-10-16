@@ -13,8 +13,11 @@
 #include <atomic>
 #include <cassert>
 #include <cctype>
+#include <cerrno>
+#include <charconv>
 #include <chrono>
 #include <cstdint>
+#include <cstdio>
 #include <cstdlib>
 #include <cstring>
 #include <fstream>
@@ -23,6 +26,7 @@
 #include <mutex>
 #include <sstream>
 #include <string>
+#include <string_view>
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>
@@ -41,122 +45,246 @@ static bool is_number(const std::string& s);
 static const char* kKFDProcPathRoot = "/sys/class/kfd/kfd/proc";
 static const char* kKFDVramPrefix = "vram_";
 
-// Tri-state result of inspecting a PID's open file descriptors for /dev/kfd.
-// kInaccessible means we could not read /proc/<pid>/fd at all (the process
-// belongs to another user, or exited) — the outcome is unknown, not negative.
-enum class KfdOpenState { kHasKfd, kNoKfd, kInaccessible };
-
-// Inspect a PID's fd links to determine whether it has /dev/kfd open.
-static KfdOpenState PidKfdOpenState(const std::string& pid_str) {
-  std::string fd_dir_path = "/proc/" + pid_str + "/fd";
-  DIR* fd_dir = opendir(fd_dir_path.c_str());
-  // EACCES/EPERM (another user's process) or ENOENT (process exited) leave the
-  // answer undetermined; callers must not treat this as "no KFD open".
-  if (!fd_dir) return KfdOpenState::kInaccessible;
-
-  bool found = false;
-  struct dirent* fd_entry;
-  while ((fd_entry = readdir(fd_dir)) != nullptr) {
-    if (fd_entry->d_name[0] == '.') continue;
-    std::string fd_link = fd_dir_path + "/" + fd_entry->d_name;
-    char target[PATH_MAX];
-    ssize_t len = readlink(fd_link.c_str(), target, sizeof(target) - 1);
-    if (len > 0) {
-      target[len] = '\0';
-      if (strcmp(target, "/dev/kfd") == 0) {
-        found = true;
-        break;
-      }
-    }
-  }
-  closedir(fd_dir);
-  return found ? KfdOpenState::kHasKfd : KfdOpenState::kNoKfd;
-}
-
-// Check whether a given PID definitively has /dev/kfd open.
-static bool PidHasKfdOpen(const std::string& pid_str) {
-  return PidKfdOpenState(pid_str) == KfdOpenState::kHasKfd;
-}
-
-// Detect whether KFD sysfs PIDs are in a different PID namespace from ours.
-// KFD names its process directories by PID in the initial PID namespace, so
-// in that namespace they are our PIDs. Elsewhere, e.g. in a container with its
-// own PID namespace, KFD sysfs reports host PIDs that are not visible in the
-// container's /proc. We detect this by checking numeric entries under
-// kKFDProcPathRoot against /proc.
-// For each numeric KFD PID: if it exists in /proc and has /dev/kfd open we
-// share its namespace; if it exists but lacks /dev/kfd, a container-local PID
-// reused the number (namespaced). A PID that is gone (exited) or whose fd dir
-// is unreadable (another user's process) is inconclusive and skipped, so a
-// permission error is never mistaken for namespace isolation.
-// If all KFD entries are inconclusive, we conservatively assume we are not
-// namespaced (the KFD entries will be cleaned up shortly anyway).
-// Result is cached for the lifetime of the process; PID namespace is assumed stable.
+// Whether this process runs in a PID namespace other than the initial one, by
+// whose PIDs KFD names its process directories. In another, as in a container
+// that does not share the host's, such a directory can be another process's,
+// so processes are read from this namespace's /proc instead. A
+// /proc/self/ns/pid that cannot be read counts as another namespace.
 static bool IsKfdPidNamespaced() {
-  static std::atomic<int> cached{-1};
-  int val = cached.load(std::memory_order_acquire);
-  if (val >= 0) return val;
-
   // The initial PID namespace has a fixed inode number (PROC_PID_INIT_INO).
   constexpr char kInitPidNamespace[] = "pid:[4026531836]";
-  char pid_ns[32] = {};
-  if (readlink("/proc/self/ns/pid", pid_ns, sizeof(pid_ns) - 1) > 0 &&
-      strcmp(pid_ns, kInitPidNamespace) == 0) {
-    cached.store(0, std::memory_order_release);
-    return false;
+  constexpr size_t kInitLen = sizeof(kInitPidNamespace) - 1;
+  // Kept per PID: a child forked after unshare(CLONE_NEWPID) is in a new one.
+  static std::atomic<uint64_t> cached{0};  // (pid << 1) | namespaced; 0 when unset
+  const auto self = static_cast<uint64_t>(getpid());
+  const uint64_t entry = cached.load(std::memory_order_relaxed);
+  if ((entry >> 1) == self) return (entry & 1) != 0;
+
+  char pid_ns[kInitLen + 1] = {};
+  const ssize_t len = readlink("/proc/self/ns/pid", pid_ns, sizeof(pid_ns));
+  const bool namespaced =
+      len != static_cast<ssize_t>(kInitLen) || memcmp(pid_ns, kInitPidNamespace, kInitLen) != 0;
+  if (namespaced) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | Not in the initial PID namespace: GPU processes are read "
+       << "from /proc, without their KFD statistics";
+    LOG_INFO(ss);
   }
-
-  DIR* kfd_dir = opendir(kKFDProcPathRoot);
-  if (!kfd_dir) {
-    cached.store(0, std::memory_order_release);
-    return false;
-  }
-
-  bool namespaced = false;
-  bool determined = false;
-  struct dirent* de;
-  while ((de = readdir(kfd_dir)) != nullptr) {
-    std::string name(de->d_name);
-    if (!is_number(name)) continue;
-
-    std::string proc_path = "/proc/" + name;
-    struct stat st;
-    if (stat(proc_path.c_str(), &st) != 0) {
-      // PID not in /proc: it exited, or it is a host PID that a container's
-      // /proc does not show. Either way this entry proves nothing.
-      continue;
-    }
-    // PID exists in /proc; check whether the same process has /dev/kfd open.
-    KfdOpenState state = PidKfdOpenState(name);
-    if (state == KfdOpenState::kInaccessible) {
-      // /proc/<pid>/fd unreadable (another user's process, e.g. a root-owned
-      // GPU job seen by a non-root caller). Cannot determine namespace from
-      // this entry, so skip it rather than falsely flagging namespaced.
-      continue;
-    }
-    // Absence of /dev/kfd here means a container-local process reused this host
-    // PID number, i.e. a different namespace.
-    if (state == KfdOpenState::kNoKfd) {
-      namespaced = true;
-    }
-    determined = true;
-    break;
-  }
-  closedir(kfd_dir);
-
-  // If no KFD entry was conclusive (none in /proc, or none readable), assume we
-  // are not namespaced. That is also the outcome in a container whose /proc
-  // shows none of KFD's host PIDs.
-  if (!determined) {
-    namespaced = false;
-  }
-
-  cached.store(namespaced ? 1 : 0, std::memory_order_release);
+  cached.store((self << 1) | (namespaced ? 1 : 0), std::memory_order_relaxed);
   return namespaced;
 }
 
-// Enumerate container-local PIDs that have /dev/kfd open by scanning /proc.
-// Used as a fallback when KFD sysfs PIDs are not visible in this namespace.
+// The character device majors of /dev/kfd and of DRM nodes, as /proc/devices
+// lists them; 0 if it does not.
+struct GpuCharMajors {
+  uint32_t kfd = 0;
+  uint32_t drm = 0;
+};
+
+static GpuCharMajors ReadGpuCharMajors() {
+  GpuCharMajors majors;
+  std::ifstream devices("/proc/devices");
+  // Character devices come first; block devices reuse their numbers.
+  for (std::string line; std::getline(devices, line) && line != "Block devices:";) {
+    std::istringstream fields(line);
+    uint32_t major_num = 0;
+    std::string name;
+    if (!(fields >> major_num >> name)) continue;
+    if (name == "kfd") majors.kfd = major_num;
+    if (name == "drm") majors.drm = major_num;
+  }
+  if (majors.kfd == 0 || majors.drm == 0) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | /proc/devices lists no kfd or drm character device: no "
+       << "process of a PID namespace other than the initial one is found using a GPU";
+    LOG_ERROR(ss);
+  }
+  return majors;
+}
+
+// Read once: amdgpu registers both majors when it loads and keeps them.
+static const GpuCharMajors& GetGpuCharMajors() {
+  static const GpuCharMajors majors = ReadGpuCharMajors();
+  return majors;
+}
+
+bool ParseMapsLine(std::string_view line, MapsLine* out) {
+  // "<start>-<end> <perms> <offset> <major>:<minor> <inode>[ <path>]": skip
+  // two fields, then read the numbers, all hexadecimal but the inode.
+  size_t pos = 0;
+  for (int field = 0; field < 2; ++field) {
+    pos = line.find(' ', pos);
+    if (pos == std::string_view::npos) return false;
+    ++pos;
+  }
+  // Reads the number at pos up to `stop`, or up to the end of the line if
+  // `stop` is a space, and moves pos past `stop`.
+  auto read_number = [&line, &pos](char stop, int base, auto* value) {
+    if (pos > line.size()) return false;
+    size_t end = line.find(stop, pos);
+    if (end == std::string_view::npos) {
+      if (stop != ' ') return false;
+      end = line.size();
+    }
+    const char* last = line.data() + end;
+    const auto [ptr, ec] = std::from_chars(line.data() + pos, last, *value, base);
+    pos = end + 1;
+    return ec == std::errc() && ptr == last;
+  };
+  return read_number(' ', 16, &out->offset) && read_number(':', 16, &out->dev_major) &&
+         read_number(' ', 16, &out->dev_minor) && read_number(' ', 10, &out->inode);
+}
+
+uint64_t KfdDoorbellGpuId(uint64_t offset) {
+  // KFD maps a queue's doorbells at an mmap offset (KFD_MMAP_TYPE_DOORBELL with
+  // KFD_MMAP_GPU_ID() in the kernel's kfd_priv.h): type 3 in bits 62-63, the
+  // GPU's KFD id in bits 46-61.
+  constexpr int kTypeShift = 62;
+  constexpr uint64_t kTypeDoorbell = 3;
+  constexpr int kGpuIdShift = 46;
+  constexpr uint64_t kGpuIdMask = 0xffff;
+  if ((offset >> kTypeShift) != kTypeDoorbell) return 0;
+  return (offset >> kGpuIdShift) & kGpuIdMask;
+}
+
+// A file by the device of its file system and its inode number, which statx()
+// and /proc/<pid>/maps both report, whatever the file's path.
+struct FileId {
+  uint32_t dev_major = 0;
+  uint32_t dev_minor = 0;
+  uint64_t inode = 0;
+  bool operator==(const FileId& other) const {
+    return dev_major == other.dev_major && dev_minor == other.dev_minor && inode == other.inode;
+  }
+};
+
+// The KFD ids of the GPUs whose queue doorbells a process maps from its open
+// /dev/kfd files `kfd_files`, read from its maps through `proc_fd`, an open
+// /proc/<pid>. The path that maps shows is not used: it depends on the mount
+// namespace. Returns 0 or errno.
+static int ReadLocalQueueGpus(int proc_fd, const std::vector<FileId>& kfd_files,
+                              std::unordered_set<uint64_t>* gpus) {
+  const int maps_fd = openat(proc_fd, "maps", O_RDONLY | O_CLOEXEC);
+  if (maps_fd < 0) return errno;
+  FILE* maps = fdopen(maps_fd, "r");
+  if (maps == nullptr) {
+    const int err = errno;
+    close(maps_fd);
+    return err;
+  }
+  // KFD's offset layout is internal to the kernel: an id that names no GPU here
+  // means it changed, and never places a process. 0 names no GPU.
+  std::unordered_set<uint64_t> known;
+  for (const auto& dev : RocmSMI::getInstance().devices()) {
+    if (dev->kfd_gpu_id() != 0) known.insert(dev->kfd_gpu_id());
+  }
+  static std::atomic<bool> unknown_logged{false};
+  char* line = nullptr;
+  size_t line_size = 0;
+  ssize_t len = 0;
+  while ((len = getline(&line, &line_size, maps)) > 0) {
+    std::string_view maps_line(line, static_cast<size_t>(len));
+    if (maps_line.back() == '\n') maps_line.remove_suffix(1);
+    MapsLine mapping;
+    if (!ParseMapsLine(maps_line, &mapping) ||
+        std::find(kfd_files.begin(), kfd_files.end(),
+                  FileId{mapping.dev_major, mapping.dev_minor, mapping.inode}) == kfd_files.end()) {
+      continue;
+    }
+    const uint64_t gpu_id = KfdDoorbellGpuId(mapping.offset);
+    if (gpu_id == 0) continue;
+    if (known.count(gpu_id) != 0) {
+      gpus->insert(gpu_id);
+    } else if (!unknown_logged.exchange(true)) {
+      std::ostringstream ss;
+      ss << __PRETTY_FUNCTION__ << " | KFD GPU id " << gpu_id << " of a queue doorbell mapping "
+         << "names no GPU here: KFD's mmap offset layout may have changed";
+      LOG_DEBUG(ss);
+    }
+  }
+  // getline() also returns -1 on a read error, which ferror() tells apart.
+  const int err = ferror(maps) ? EIO : 0;
+  free(line);
+  fclose(maps);
+  return err;
+}
+
+// What process `pid` of this PID namespace shows of its GPU use in its own
+// /proc files, since KFD does not name it by `pid`.
+struct LocalGpuUse {
+  std::vector<FileId> kfd_files;        // The /dev/kfd files it holds open
+  std::unordered_set<uint64_t> held;    // KFD ids of the GPUs whose render node it holds open
+  std::unordered_set<uint64_t> queues;  // KFD ids of the GPUs it created queues on
+  bool has_kfd() const { return !kfd_files.empty(); }
+};
+
+// How much of a process's GPU use to read: whether it holds /dev/kfd open;
+// also the GPUs whose render node it holds open; also its queues' GPUs.
+enum class LocalGpuRead { kKfd, kHeld, kQueues };
+
+// Reads as much of `use` for process `pid` as `what` asks, through one open
+// /proc/<pid>, so that a PID reused meanwhile fails rather than reads another
+// process. Returns 0, or the errno of the reads: ENOENT or ESRCH once the
+// process has exited, EACCES when the caller may not read its open files.
+static int ReadLocalGpuUse(uint32_t pid, LocalGpuRead what, LocalGpuUse* use) {
+  const GpuCharMajors& majors = GetGpuCharMajors();
+  const std::string proc_path = "/proc/" + std::to_string(pid);
+  const int proc_fd = open(proc_path.c_str(), O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  if (proc_fd < 0) return errno;
+  const int fd_dir_fd = openat(proc_fd, "fd", O_RDONLY | O_DIRECTORY | O_CLOEXEC);
+  DIR* fd_dir = fd_dir_fd < 0 ? nullptr : fdopendir(fd_dir_fd);
+  if (fd_dir == nullptr) {
+    const int err = errno;
+    if (fd_dir_fd >= 0) close(fd_dir_fd);
+    close(proc_fd);
+    return err;
+  }
+  std::unordered_set<uint32_t> drm_minors;
+  while (const dirent* entry = readdir(fd_dir)) {
+    if (entry->d_name[0] == '.') continue;
+    // An fd's file by device number, whatever its name in the process's mount
+    // namespace. AT_STATX_DONT_SYNC: a network or FUSE file system that an fd
+    // points into must not block the read.
+    struct statx stx{};
+    if (statx(dirfd(fd_dir), entry->d_name, AT_STATX_DONT_SYNC, STATX_TYPE | STATX_INO, &stx) !=
+            0 ||
+        !S_ISCHR(stx.stx_mode)) {
+      continue;
+    }
+    if (majors.kfd != 0 && stx.stx_rdev_major == majors.kfd) {
+      const FileId kfd_file{stx.stx_dev_major, stx.stx_dev_minor, stx.stx_ino};
+      // More fds for the same file add nothing to match maps against.
+      if (std::find(use->kfd_files.begin(), use->kfd_files.end(), kfd_file) ==
+          use->kfd_files.end()) {
+        use->kfd_files.push_back(kfd_file);
+      }
+      if (what == LocalGpuRead::kKfd) break;
+    } else if (majors.drm != 0 && stx.stx_rdev_major == majors.drm) {
+      drm_minors.insert(stx.stx_rdev_minor);
+    }
+  }
+  closedir(fd_dir);
+  const int err = use->has_kfd() && what == LocalGpuRead::kQueues
+                      ? ReadLocalQueueGpus(proc_fd, use->kfd_files, &use->queues)
+                      : 0;
+  close(proc_fd);
+  if (what != LocalGpuRead::kKfd) {
+    for (const auto& dev : RocmSMI::getInstance().devices()) {
+      // A device whose render node is unknown has minor 0, which is card0's.
+      const uint32_t render_minor = dev->drm_render_minor();
+      if (render_minor != 0 && dev->kfd_gpu_id() != 0 && drm_minors.count(render_minor) != 0) {
+        use->held.insert(dev->kfd_gpu_id());
+      }
+    }
+  }
+  return err;
+}
+
+// The processes of this PID namespace that have /dev/kfd open, read from /proc,
+// for a PID namespace other than the initial one (see IsKfdPidNamespaced()).
+// Unlike KFD's list, it holds a child that inherited /dev/kfd through fork()
+// without opening it, which KFD does not count as a process of its own. A
+// process whose open files the caller may not read is left out.
 static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated,
                               uint32_t* num_found) {
   *num_found = 0;
@@ -164,61 +292,49 @@ static int ScanProcForKfdPids(rsmi_process_info_t* procs, uint32_t num_allocated
   DIR* proc_dir = opendir("/proc");
   if (!proc_dir) return errno;
 
-  const pid_t self = getpid();
-  struct dirent* dentry;
-
-  while ((dentry = readdir(proc_dir)) != nullptr) {
-    std::string pid_str(dentry->d_name);
+  uint32_t unreadable = 0;
+  while (const dirent* dentry = readdir(proc_dir)) {
+    const std::string pid_str(dentry->d_name);
     if (!is_number(pid_str)) continue;
 
-    uint32_t pid = static_cast<uint32_t>(strtoul(pid_str.c_str(), nullptr, 10));
-    if (pid == static_cast<uint32_t>(self)) continue;
-
-    if (PidHasKfdOpen(pid_str)) {
-      if (procs && *num_found < num_allocated) {
-        procs[*num_found] = {};
-        procs[*num_found].process_id = pid;
-      }
-      ++(*num_found);
+    const auto pid = static_cast<uint32_t>(strtoul(pid_str.c_str(), nullptr, 10));
+    LocalGpuUse use;
+    const int err = ReadLocalGpuUse(pid, LocalGpuRead::kKfd, &use);
+    if (err == EACCES) {
+      ++unreadable;
+    } else if (err != 0 && err != ENOENT && err != ESRCH) {
+      closedir(proc_dir);
+      return err;
     }
+    if (!use.has_kfd()) continue;
+    if (procs && *num_found < num_allocated) {
+      procs[*num_found] = {};
+      procs[*num_found].process_id = pid;
+    }
+    ++(*num_found);
   }
 
   closedir(proc_dir);
+  if (unreadable != 0) {
+    std::ostringstream ss;
+    ss << __PRETTY_FUNCTION__ << " | Left out " << unreadable
+       << " processes whose open files cannot be read";
+    LOG_DEBUG(ss);
+  }
   return 0;
 }
 
-// Collect GPU IDs from KFD vram_* files for any host-PID KFD entry.
-// Used as a namespace fallback when container-local PIDs have no KFD sysfs entry.
-// NOTE: Uses the first host-PID entry found; assumes all container processes
-// share the same GPU set (valid for typical single-container deployments).
-static void CollectGpuIdsFromKfdVram(std::unordered_set<uint64_t>* gpu_set) {
-  DIR* kfd_proc_dir = opendir(kKFDProcPathRoot);
-  if (!kfd_proc_dir) return;
-
-  struct dirent* de;
-  while ((de = readdir(kfd_proc_dir)) != nullptr) {
-    std::string entry(de->d_name);
-    if (!is_number(entry)) continue;
-
-    std::string host_proc = std::string(kKFDProcPathRoot) + "/" + entry;
-    DIR* pd = opendir(host_proc.c_str());
-    if (!pd) continue;
-
-    struct dirent* pe;
-    while ((pe = readdir(pd)) != nullptr) {
-      std::string fname(pe->d_name);
-      if (fname.rfind("vram_", 0) != 0) continue;
-      std::string gpu_id_str = fname.substr(strlen(kKFDVramPrefix));
-      if (!gpu_id_str.empty() && std::all_of(gpu_id_str.begin(), gpu_id_str.end(),
-                                             [](unsigned char ch) { return std::isdigit(ch); })) {
-        gpu_set->insert(strtoull(gpu_id_str.c_str(), nullptr, 10));
-      }
-    }
-    closedir(pd);
-
-    if (!gpu_set->empty()) break;
-  }
-  closedir(kfd_proc_dir);
+// The GPUs, by KFD id, that process `pid` of this PID namespace uses: those it
+// created queues on or, if none is found, those whose render node it holds
+// open. A process without /dev/kfd open, or that exits during the read, uses
+// none.
+static int GetLocalProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpus) {
+  LocalGpuUse use;
+  const int err = ReadLocalGpuUse(pid, LocalGpuRead::kQueues, &use);
+  if (err == ENOENT || err == ESRCH) return 0;
+  if (err != 0) return err;
+  if (use.has_kfd()) gpus->merge(use.queues.empty() ? use.held : use.queues);
+  return 0;
 }
 
 static const char* kKFDContextPrefix = "context_";  // Prefix for secondary KFD contexts
@@ -612,7 +728,8 @@ int GetProcessInfo(rsmi_process_info_t* procs, uint32_t num_allocated, uint32_t*
 
   *num_procs_found = 0;
 
-  // In a PID namespace, KFD sysfs PIDs are not local; scan /proc instead.
+  // In a PID namespace, KFD's directories are not named by this namespace's
+  // PIDs (see IsKfdPidNamespaced()): list its processes that have /dev/kfd open.
   if (IsKfdPidNamespaced()) {
     return ScanProcForKfdPids(procs, num_allocated, num_procs_found);
   }
@@ -700,9 +817,15 @@ int GetKfdGpuIdsForPid(long pid, std::unordered_set<uint64_t>* out) {
   if (!out) return EINVAL;
   out->clear();
 
-  // In a PID namespace, pid does not name KFD's directories (see
-  // GetProcessInfoForPID()). An empty set lets callers use other sources.
+  // In a PID namespace, KFD's directory named pid is not this process's (see
+  // IsKfdPidNamespaced()). KFD has files for each GPU that a process binds, so
+  // report each GPU whose render node it holds open.
   if (IsKfdPidNamespaced()) {
+    LocalGpuUse use;
+    const int err = ReadLocalGpuUse(static_cast<uint32_t>(pid), LocalGpuRead::kHeld, &use);
+    if (err == ENOENT || err == ESRCH || (err == 0 && !use.has_kfd())) return ESRCH;
+    if (err != 0) return err;
+    *out = std::move(use.held);
     return 0;
   }
 
@@ -780,16 +903,10 @@ int GetProcessGPUs(uint32_t pid, std::unordered_set<uint64_t>* gpu_set) {
     return RSMI_STATUS_INVALID_ARGS;
   }
 
-  // In a PID namespace, pid does not name KFD's directories (see
-  // GetProcessInfoForPID()): report the GPUs of the first KFD process found,
-  // as before (see CollectGpuIdsFromKfdVram()).
+  // In a PID namespace, KFD's directory named pid is not this process's (see
+  // IsKfdPidNamespaced()): read its GPUs from its own files.
   if (IsKfdPidNamespaced()) {
-    std::ostringstream ss;
-    ss << __PRETTY_FUNCTION__ << " | PID namespace detected, falling back to "
-       << "KFD vram_* files for GPU discovery (pid=" << pid << ")";
-    LOG_DEBUG(ss);
-    CollectGpuIdsFromKfdVram(gpu_set);
-    return 0;
+    return GetLocalProcessGPUs(pid, gpu_set);
   }
 
   std::string proc_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
@@ -960,6 +1077,12 @@ static int GetProcessKFDStats(std::string path, uint32_t& val) {
 }
 
 bool KfdProcessExists(uint32_t pid) {
+  if (IsKfdPidNamespaced()) {
+    LocalGpuUse use;
+    const int err = ReadLocalGpuUse(pid, LocalGpuRead::kKfd, &use);
+    // A process whose open files cannot be read still runs.
+    return err == 0 ? use.has_kfd() : !(err == ENOENT || err == ESRCH);
+  }
   const std::string path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
   return FileExists(path.c_str());
 }
@@ -975,11 +1098,14 @@ int GetProcessInfoForPID(uint32_t pid, rsmi_process_info_t* proc,
 
   std::string proc_str_path = std::string(kKFDProcPathRoot) + "/" + std::to_string(pid);
 
-  // In a PID namespace, pid is this namespace's PID while KFD names its
-  // directories by host PID, so a directory named pid can be another
-  // process's. Return sentinel values so callers can distinguish "unavailable"
-  // from "zero usage".
+  // In a PID namespace, KFD's directory named pid is not this process's (see
+  // IsKfdPidNamespaced()), so a KFD process of this namespace has its KFD
+  // statistics all ones, which callers read as "not available".
   if (IsKfdPidNamespaced()) {
+    LocalGpuUse use;
+    const int use_err = ReadLocalGpuUse(pid, LocalGpuRead::kKfd, &use);
+    if (use_err == ENOENT || use_err == ESRCH || (use_err == 0 && !use.has_kfd())) return ESRCH;
+    if (use_err != 0) return use_err;
     proc->process_id = pid;
     proc->vram_usage = std::numeric_limits<uint64_t>::max();
     proc->sdma_usage = std::numeric_limits<uint64_t>::max();

@@ -210,6 +210,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed the Rust `amdsmi_get_gpu_compute_process_info()` returning invalid entries**.  
   - When processes exited between its count and its read, the list ended with entries of undefined content.
 
+- **Fixed process information in containers showing other processes' data**.  
+  - In a container with its own PID namespace, `amd-smi process` and the process APIs could show host PIDs or another process's name, memory or GPUs. They now show only the container's processes (other users' only with `CAP_SYS_PTRACE`) by their container PIDs, and the driver's per-process statistics, such as CU occupancy and SDMA usage, are N/A unless the container shares the host's PID namespace (`docker run --pid=host`).
+
 - **Fixed `amd-smi` printing a Python traceback when an unknown NIC or switch is selected**.  
   - `amd-smi static --nic 999` and `--switch 999` failed while building the "device not found" error, so the command exited `1` with a traceback and no readable message. `--json` and `--csv` produced no parseable output.
   - Both now report `Can not find a device: NIC '999'` (or `SWITCH`) and exit `196`, matching `--gpu`, `--cpu`, and `--core`.

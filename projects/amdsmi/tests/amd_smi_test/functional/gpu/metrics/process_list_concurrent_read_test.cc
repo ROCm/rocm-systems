@@ -33,9 +33,11 @@
 
 namespace {
 
+using amdsmi_test::DrmVramBytes;
 using amdsmi_test::FindHelperKfdPids;
 using amdsmi_test::HelperReport;
 using amdsmi_test::HelperStopper;
+using amdsmi_test::InInitialPidNamespace;
 using amdsmi_test::IsEnvironmentFailure;
 using amdsmi_test::KfdVram;
 using amdsmi_test::kIocAcquireVm;
@@ -61,7 +63,8 @@ struct HelperGpu {
 };
 
 // Runs in the forked helper, system calls only: allocates HelperVram(i, tag)
-// on GPU i through KFD, writes {step, errno} to `fd`, then waits to be killed.
+// on GPU i through KFD and maps it there, so that its DRM client on GPU i
+// reports it too, writes {step, errno} to `fd`, then waits to be killed.
 [[noreturn]] void RunHelper(const std::vector<HelperGpu>& gpus, uint32_t tag, pid_t parent,
                             int fd) {
   // Never outlive the test, even if it crashes. The signal follows the forking
@@ -83,12 +86,19 @@ struct HelperGpu {
     mem.flags =
         static_cast<uint32_t>(KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE |
                               KFD_IOC_ALLOC_MEM_FLAGS_NO_SUBSTITUTE);
+    uint32_t map_gpu_id = gpus[i].kfd_gpu_id;
+    kfd_ioctl_map_memory_to_gpu_args map{};
+    map.device_ids_array_ptr = reinterpret_cast<uint64_t>(&map_gpu_id);
+    map.n_devices = 1;
     if (drm < 0) {
       report.step = HelperReport::kOpenRenderNode;
     } else if (ioctl(kfd, kIocAcquireVm, &vm) != 0) {
       report.step = HelperReport::kAcquireVm;
     } else if (ioctl(kfd, kIocAllocMemoryOfGpu, &mem) != 0) {
       report.step = HelperReport::kAllocVram;
+    } else {
+      map.handle = mem.handle;
+      if (ioctl(kfd, AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map) != 0) report.step = HelperReport::kMapVram;
     }
   }
   if (report.step != HelperReport::kReady) report.err = errno;
@@ -100,8 +110,17 @@ struct HelperGpu {
 
 enum Outcome { kRight, kWrongVram, kMissing, kEmpty, kError, kNumOutcomes };
 
+// The VRAM one GPU's list must report for the helper. In the initial PID
+// namespace, mem holds the VRAM KFD reports for it. In another, KFD's
+// statistics are not available, and vram_mem holds what its DRM client on that
+// GPU reports, the helper's VRAM there and the GPU's page tables for it.
+struct ExpectedVram {
+  bool from_kfd;
+  uint64_t bytes;
+};
+
 // Looks the helper up in one GPU's process list.
-Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, uint64_t vram,
+Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, const ExpectedVram& vram,
                   std::vector<amdsmi_proc_info_t>* procs) {
   uint32_t count = static_cast<uint32_t>(procs->size());
   amdsmi_status_t status = amdsmi_get_gpu_process_list(gpu, &count, procs->data());
@@ -113,8 +132,10 @@ Outcome QueryOnce(amdsmi_processor_handle gpu, pid_t pid, uint64_t vram,
   if (status != AMDSMI_STATUS_SUCCESS) return kError;
   if (count == 0) return kEmpty;
   for (uint32_t i = 0; i < count && i < procs->size(); ++i) {
-    if ((*procs)[i].pid == static_cast<uint32_t>(pid)) {
-      return (*procs)[i].mem == vram ? kRight : kWrongVram;
+    const amdsmi_proc_info_t& proc = (*procs)[i];
+    if (proc.pid == static_cast<uint32_t>(pid)) {
+      return (vram.from_kfd ? proc.mem : proc.memory_usage.vram_mem) == vram.bytes ? kRight
+                                                                                   : kWrongVram;
     }
   }
   return kMissing;
@@ -233,6 +254,16 @@ void TestProcessListConcurrentRead::Run(void) {
   ASSERT_EQ(kfd_pids.size(), 1u) << "KFD does not report exactly the helper's VRAM";
   const pid_t kfd_pid = kfd_pids[0];
   stopper.kfd_pid = kfd_pid;
+  const bool initial_pid_namespace = InInitialPidNamespace();
+  std::vector<ExpectedVram> vram(num_gpus);
+  for (size_t i = 0; i < num_gpus; ++i) {
+    if (initial_pid_namespace) {
+      vram[i] = {true, HelperVram(i, tag)};
+    } else {
+      vram[i] = {false, DrmVramBytes(helper, gpus[i].render_node)};
+      ASSERT_GE(vram[i].bytes, HelperVram(i, tag)) << "GPU " << i << "'s fdinfo misses the helper";
+    }
+  }
 
   // Lists cached before the helper started are served for up to
   // AMDSMI_PROCESS_INFO_CACHE_MS, so wait until every GPU lists it.
@@ -242,17 +273,10 @@ void TestProcessListConcurrentRead::Run(void) {
       std::chrono::milliseconds(cache_ms ? std::strtoul(cache_ms, nullptr, 10) : 0);
   std::vector<amdsmi_proc_info_t> procs(kMaxProcs);
   for (size_t i = 0; i < num_gpus; ++i) {
-    Outcome outcome = QueryOnce(processor_handles_[i], kfd_pid, HelperVram(i, tag), &procs);
+    Outcome outcome = QueryOnce(processor_handles_[i], helper, vram[i], &procs);
     while (outcome != kRight && Clock::now() < listed_by) {
       std::this_thread::sleep_for(std::chrono::milliseconds(10));
-      outcome = QueryOnce(processor_handles_[i], kfd_pid, HelperVram(i, tag), &procs);
-    }
-    // In a container rocm_smi may list this namespace's PIDs instead of KFD's.
-    const Outcome by_own_pid =
-        kfd_pid == helper ? kMissing
-                          : QueryOnce(processor_handles_[i], helper, HelperVram(i, tag), &procs);
-    if (outcome != kRight && (by_own_pid == kRight || by_own_pid == kWrongVram)) {
-      GTEST_SKIP() << "The library lists the helper by this PID namespace's PID";
+      outcome = QueryOnce(processor_handles_[i], helper, vram[i], &procs);
     }
     ASSERT_EQ(outcome, kRight) << "GPU " << i << " does not list the helper with its VRAM";
   }
@@ -266,7 +290,7 @@ void TestProcessListConcurrentRead::Run(void) {
   int rounds_done = 0;
   for (; rounds_done < rounds && Clock::now() < in_turn_end; ++rounds_done) {
     for (size_t i = 0; i < num_gpus; ++i) {
-      ++in_turn.count[QueryOnce(processor_handles_[i], kfd_pid, HelperVram(i, tag), &procs)];
+      ++in_turn.count[QueryOnce(processor_handles_[i], helper, vram[i], &procs)];
     }
   }
   EXPECT_EQ(in_turn.failures(), 0) << "Queries in turn: " << in_turn.str();
@@ -282,8 +306,7 @@ void TestProcessListConcurrentRead::Run(void) {
     readers.emplace_back([&, gpu = r % num_gpus] {
       std::vector<amdsmi_proc_info_t> list(kMaxProcs);
       for (int c = 0; c < calls && Clock::now() < concurrent_end; ++c) {
-        ++concurrent
-              .count[QueryOnce(processor_handles_[gpu], kfd_pid, HelperVram(gpu, tag), &list)];
+        ++concurrent.count[QueryOnce(processor_handles_[gpu], helper, vram[gpu], &list)];
       }
     });
   }
