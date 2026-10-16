@@ -70,24 +70,6 @@ void TestFabricRead::Run(void) {
     GTEST_SKIP() << "No GPU devices found";
   }
 
-  /**
-   *    IFoE capability gate: fabric-less systems report NOT_SUPPORTED from
-   *    amdsmi_get_gpu_fabric_info(); skip the whole test rather than exercise the
-   *    hardware paths below (matches the Fabric Write test)
-   *    Probes device 0 only, assuming a homogeneous fabric config across devices;
-   *    a mixed host (some devices fabric-capable, some not) would skip on device 0.
-   */
-  {
-    amdsmi_fabric_info_t probe = {};
-    probe.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
-    if (amdsmi_get_gpu_fabric_info(processor_handles_[0], &probe) == AMDSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Fabric (IFoE) not supported on this system; skipping test" << std::endl;
-      }
-      GTEST_SKIP() << "Fabric (IFoE) not supported on this system";
-    }
-  }
-
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     auto device = processor_handles_[dv_ind];
     PrintDeviceHeader(device);
@@ -150,7 +132,6 @@ void TestFabricRead::Run(void) {
                      " on this system"
                   << std::endl;
       }
-      continue;
     } else if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_NO_DATA) {
       CHK_ERR_ASRT(err)
     } else {
@@ -335,6 +316,19 @@ void TestFabricRead::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
+    // Null-pointer validation for alloc/free; runs before the NOT_SUPPORTED early-continue below
+    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    err = amdsmi_free_fabric_telemetry(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
     /**
      * Test amdsmi_alloc_fabric_telemetry(), amdsmi_get_fabric_telemetry_data(),
      * amdsmi_free_fabric_telemetry()
@@ -406,6 +400,8 @@ void TestFabricRead::Run(void) {
             DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=" + std::to_string(it.id),
                                VERB(STANDARD));
             err = amdsmi_fabric_telem_id_to_string(it.id, &name);
+            DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                                  AMDSMI_STATUS_NOT_FOUND);
             // Unmapped telemetry ids return NOT_FOUND with a "UNKNOWN" name;
             // tolerate them so a single unknown id does not fail the test.
             if (err != AMDSMI_STATUS_NOT_FOUND) {
@@ -423,22 +419,11 @@ void TestFabricRead::Run(void) {
     }
 
     // amdsmi_free_fabric_telemetry
+    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_free_fabric_telemetry(device, tel);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
-
-    // Null-pointer validation for alloc/free
-    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    err = amdsmi_free_fabric_telemetry(device, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }
 

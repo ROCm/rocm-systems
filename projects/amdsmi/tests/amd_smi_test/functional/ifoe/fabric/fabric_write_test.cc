@@ -10,8 +10,10 @@
 #include <iostream>
 #include <iterator>
 #include <limits>
+#include <string>
 
 #include "amd_smi/amdsmi.h"
+#include "test_common.h"
 
 TestFabricWrite::TestFabricWrite() : TestBase() {
   set_title("AMDSMI Fabric Write Test");
@@ -70,6 +72,8 @@ static auto make_minimal_station_config() -> amdsmi_fabric_station_config_t {
  *  Run the test
  */
 void TestFabricWrite::Run() {
+  amdsmi_status_t err;
+
   TestBase::Run();
   if (setup_failed_) {
     IF_VERB(STANDARD) { std::cout << "** SetUp Failed for this test. Skipping.**" << "\n"; }
@@ -83,49 +87,63 @@ void TestFabricWrite::Run() {
   auto device = processor_handles_[0];
 
   /**
-   *    IFoE capability gate: fabric-less systems report NOT_SUPPORTED from
-   *    amdsmi_get_gpu_fabric_info(); skip the whole test rather than exercise the
-   *    hardware paths below (matches the Fabric Read test)
-   *    Probes device 0 only, assuming a homogeneous fabric config across devices;
-   *    a mixed host (some devices fabric-capable, some not) would skip on device 0.
-   */
-  {
-    auto probe = amdsmi_fabric_info_t{};
-    probe.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
-    if (amdsmi_get_gpu_fabric_info(device, &probe) == AMDSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Fabric (IFoE) not supported on this system; skipping test" << "\n";
-      }
-      GTEST_SKIP() << "Fabric (IFoE) not supported on this system";
-    }
-  }
-
-  /**
    *    Null handle rejection (no device required)
    */
   {
     auto ppod = make_minimal_ppod_config();
-    ASSERT_EQ(amdsmi_set_gpu_fabric_ppod_config(nullptr, &ppod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(null handle)", "gpu=nullptr",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_ppod_config(nullptr, &ppod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     auto vpod = make_minimal_vpod_config();
-    ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(nullptr, &vpod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(null handle)", "gpu=nullptr",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_vpod_config(nullptr, &vpod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     auto station = make_minimal_station_config();
-    ASSERT_EQ(amdsmi_set_gpu_fabric_station_config(nullptr, &station), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_station_config(null handle)", "gpu=nullptr",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_station_config(nullptr, &station);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     amdsmi_fabric_info_t info_rd = {};
-    ASSERT_EQ(amdsmi_get_gpu_fabric_info(nullptr, &info_rd), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(null handle)", "gpu=nullptr", VERB(STANDARD));
+    err = amdsmi_get_gpu_fabric_info(nullptr, &info_rd);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   /**
    *    Null struct pointer rejection
    */
   {
-    ASSERT_EQ(amdsmi_set_gpu_fabric_ppod_config(device, nullptr), AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(device, nullptr), AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(amdsmi_set_gpu_fabric_station_config(device, nullptr), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(null struct pointer)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_ppod_config(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(null struct pointer)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_vpod_config(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_station_config(null struct pointer)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_station_config(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
-    ASSERT_EQ(amdsmi_get_gpu_fabric_info(device, nullptr), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(null struct pointer)", "gpu=0", VERB(STANDARD));
+    err = amdsmi_get_gpu_fabric_info(device, nullptr);
+
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   /**
@@ -134,15 +152,27 @@ void TestFabricWrite::Run() {
   {
     auto ppod = make_minimal_ppod_config();
     ppod.version = 0;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_ppod_config(device, &ppod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(version mismatch)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_ppod_config(device, &ppod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     auto vpod = make_minimal_vpod_config();
     vpod.version = 0;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(device, &vpod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(version mismatch)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_vpod_config(device, &vpod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     auto station = make_minimal_station_config();
     station.version = 0;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_station_config(device, &station), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_station_config(version mismatch)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_station_config(device, &station);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   /**
@@ -152,17 +182,27 @@ void TestFabricWrite::Run() {
     auto ppod = make_minimal_ppod_config();
     ppod.mask = 0;
     ppod.commit = false;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_ppod_config(device, &ppod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(no-op request)", "gpu=0", VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_ppod_config(device, &ppod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     auto vpod = make_minimal_vpod_config();
     vpod.mask = 0;
     vpod.commit = false;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(device, &vpod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(no-op request)", "gpu=0", VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_vpod_config(device, &vpod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     auto station = make_minimal_station_config();
     station.mask = 0;
     station.commit = false;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_station_config(device, &station), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_station_config(no-op request)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_station_config(device, &station);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   /**
@@ -171,15 +211,25 @@ void TestFabricWrite::Run() {
   {
     auto ppod = make_minimal_ppod_config();
     ppod.mask = 0xFFFFFFFF;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_ppod_config(device, &ppod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(invalid mask)", "gpu=0", VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_ppod_config(device, &ppod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     auto vpod = make_minimal_vpod_config();
     vpod.mask = 0xFFFFFFFF;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(device, &vpod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(invalid mask)", "gpu=0", VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_vpod_config(device, &vpod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
     auto station = make_minimal_station_config();
     station.mask = 0xFFFFFFFF;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_station_config(device, &station), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_station_config(invalid mask)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_station_config(device, &station);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   /**
@@ -189,7 +239,11 @@ void TestFabricWrite::Run() {
     auto ppod = make_minimal_ppod_config();
     ppod.mask = AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS;
     ppod.data.local_accelerator_count = 0;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_ppod_config(device, &ppod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(local accels count=0)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_ppod_config(device, &ppod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   /**
@@ -199,7 +253,11 @@ void TestFabricWrite::Run() {
     auto ppod = make_minimal_ppod_config();
     ppod.mask = AMDSMI_FABRIC_PPOD_FIELD_LOCAL_ACCELS;
     ppod.data.local_accelerator_count = (AMDSMI_FABRIC_MAX_LOCAL_GPUS + 1);
-    ASSERT_EQ(amdsmi_set_gpu_fabric_ppod_config(device, &ppod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(local accels count>max)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_ppod_config(device, &ppod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   /**
@@ -209,7 +267,11 @@ void TestFabricWrite::Run() {
     auto vpod = make_minimal_vpod_config();
     vpod.mask = (AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID | AMDSMI_FABRIC_VPOD_FIELD_ADDR_MODE);
     vpod.data.addr_mode = AMDSMI_FABRIC_NPA_ADDRESS_MODE_UNKNOWN;
-    ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(device, &vpod), AMDSMI_STATUS_INVAL);
+    DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(invalid addr_mode)", "gpu=0",
+                       VERB(STANDARD));
+    err = amdsmi_set_gpu_fabric_vpod_config(device, &vpod);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 
   /**
@@ -223,7 +285,11 @@ void TestFabricWrite::Run() {
 
     {
       auto ppod = make_minimal_ppod_config();
+      DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
       auto status_code = amdsmi_set_gpu_fabric_ppod_config(dev, &ppod);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, status_code, AMDSMI_STATUS_SUCCESS,
+                            AMDSMI_STATUS_NOT_SUPPORTED);
       if (status_code == AMDSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
           std::cout << "\t**amdsmi_set_gpu_fabric_ppod_config() not supported on this system"
@@ -236,7 +302,11 @@ void TestFabricWrite::Run() {
 
     {
       auto vpod = make_minimal_vpod_config();
+      DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
       auto status_code = amdsmi_set_gpu_fabric_vpod_config(dev, &vpod);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, status_code, AMDSMI_STATUS_SUCCESS,
+                            AMDSMI_STATUS_NOT_SUPPORTED);
       if (status_code == AMDSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
           std::cout << "\t**amdsmi_set_gpu_fabric_vpod_config() not supported on this system"
@@ -249,7 +319,11 @@ void TestFabricWrite::Run() {
 
     {
       auto station = make_minimal_station_config();
+      DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_station_config", "gpu=" + std::to_string(dv_ind),
+                         VERB(STANDARD));
       auto status_code = amdsmi_set_gpu_fabric_station_config(dev, &station);
+      DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, status_code, AMDSMI_STATUS_SUCCESS,
+                            AMDSMI_STATUS_NOT_SUPPORTED);
       if (status_code == AMDSMI_STATUS_NOT_SUPPORTED) {
         IF_VERB(STANDARD) {
           std::cout << "\t**amdsmi_set_gpu_fabric_station_config() not supported on this system"
@@ -278,7 +352,12 @@ void TestFabricWrite::Run() {
 
     auto baseline_info = amdsmi_fabric_info_t{};
     baseline_info.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
+    DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(round-trip baseline)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
     auto baseline_status = amdsmi_get_gpu_fabric_info(dev, &baseline_info);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, baseline_status,
+                          AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NO_DATA,
+                          AMDSMI_STATUS_NOT_SUPPORTED);
     if (baseline_status == AMDSMI_STATUS_NOT_SUPPORTED) {
       IF_VERB(STANDARD) {
         std::cout << "\t**Fabric round-trip not supported on this system" << "\n";
@@ -306,14 +385,21 @@ void TestFabricWrite::Run() {
         wr.mask = AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID;
         wr.commit = true;
         wr.data.accelerator_id = 7;
+        DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(round-trip set)",
+                           "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
         auto set_status = amdsmi_set_gpu_fabric_ppod_config(dev, &wr);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, set_status, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED);
         if (set_status != AMDSMI_STATUS_NOT_SUPPORTED) {
           ASSERT_EQ(set_status, AMDSMI_STATUS_SUCCESS);
           ++round_trips_verified;
 
           auto post = amdsmi_fabric_info_t{};
           post.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(round-trip read-back)",
+                             "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
           auto rd = amdsmi_get_gpu_fabric_info(dev, &post);
+          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, rd, AMDSMI_STATUS_SUCCESS);
           ASSERT_EQ(rd, AMDSMI_STATUS_SUCCESS);
           ASSERT_EQ(post.fabric_info.v2.ppod.accelerator_id, 7u);
 
@@ -321,7 +407,11 @@ void TestFabricWrite::Run() {
           restore.mask = AMDSMI_FABRIC_PPOD_FIELD_ACCEL_ID;
           restore.commit = true;
           restore.data.accelerator_id = baseline_accel_id;
-          ASSERT_EQ(amdsmi_set_gpu_fabric_ppod_config(dev, &restore), AMDSMI_STATUS_SUCCESS);
+          DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_ppod_config(round-trip restore)",
+                             "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+          err = amdsmi_set_gpu_fabric_ppod_config(dev, &restore);
+          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+          ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
         }
       }
     }
@@ -342,14 +432,21 @@ void TestFabricWrite::Run() {
         wr.mask = AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID;
         wr.commit = true;
         wr.data.vpod_id = 3;
+        DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(round-trip set)",
+                           "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
         auto set_status = amdsmi_set_gpu_fabric_vpod_config(dev, &wr);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, set_status, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED);
         if (set_status != AMDSMI_STATUS_NOT_SUPPORTED) {
           ASSERT_EQ(set_status, AMDSMI_STATUS_SUCCESS);
           ++round_trips_verified;
 
           auto post = amdsmi_fabric_info_t{};
           post.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(round-trip read-back)",
+                             "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
           auto rd = amdsmi_get_gpu_fabric_info(dev, &post);
+          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, rd, AMDSMI_STATUS_SUCCESS);
           ASSERT_EQ(rd, AMDSMI_STATUS_SUCCESS);
           ASSERT_EQ(post.fabric_info.v2.vpod.vpod_id, 3u);
 
@@ -357,7 +454,11 @@ void TestFabricWrite::Run() {
           restore.mask = AMDSMI_FABRIC_VPOD_FIELD_VPOD_ID;
           restore.commit = true;
           restore.data.vpod_id = baseline_vpod_id;
-          ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(dev, &restore), AMDSMI_STATUS_SUCCESS);
+          DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(round-trip restore)",
+                             "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+          err = amdsmi_set_gpu_fabric_vpod_config(dev, &restore);
+          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+          ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
         }
       }
     }
@@ -384,14 +485,21 @@ void TestFabricWrite::Run() {
                   std::end(wr.data.vpod_active_accelerators), std::numeric_limits<uint32_t>::max());
         wr.data.vpod_active_accelerators[0] = 2;
         wr.data.vpod_active_accelerators[1] = 5;
+        DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(round-trip set)",
+                           "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
         auto set_status = amdsmi_set_gpu_fabric_vpod_config(dev, &wr);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, set_status, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED);
         if (set_status != AMDSMI_STATUS_NOT_SUPPORTED) {
           ASSERT_EQ(set_status, AMDSMI_STATUS_SUCCESS);
           ++round_trips_verified;
 
           auto post = amdsmi_fabric_info_t{};
           post.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(round-trip read-back)",
+                             "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
           auto rd = amdsmi_get_gpu_fabric_info(dev, &post);
+          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, rd, AMDSMI_STATUS_SUCCESS);
           ASSERT_EQ(rd, AMDSMI_STATUS_SUCCESS);
           const auto& accels = post.fabric_info.v2.vpod.vpod_active_accelerators;
           ASSERT_EQ(accels[0], 2u);
@@ -404,7 +512,11 @@ void TestFabricWrite::Run() {
           std::copy(std::begin(baseline_v2.vpod.vpod_active_accelerators),
                     std::end(baseline_v2.vpod.vpod_active_accelerators),
                     std::begin(restore.data.vpod_active_accelerators));
-          ASSERT_EQ(amdsmi_set_gpu_fabric_vpod_config(dev, &restore), AMDSMI_STATUS_SUCCESS);
+          DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_vpod_config(round-trip restore)",
+                             "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+          err = amdsmi_set_gpu_fabric_vpod_config(dev, &restore);
+          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+          ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
         }
       }
     }
@@ -425,14 +537,21 @@ void TestFabricWrite::Run() {
         wr.mask = AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS;
         wr.commit = true;
         wr.data.station_flags = 1;
+        DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_station_config(round-trip set)",
+                           "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
         auto set_status = amdsmi_set_gpu_fabric_station_config(dev, &wr);
+        DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, set_status, AMDSMI_STATUS_SUCCESS,
+                              AMDSMI_STATUS_NOT_SUPPORTED);
         if (set_status != AMDSMI_STATUS_NOT_SUPPORTED) {
           ASSERT_EQ(set_status, AMDSMI_STATUS_SUCCESS);
           ++round_trips_verified;
 
           auto post = amdsmi_fabric_info_t{};
           post.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
+          DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(round-trip read-back)",
+                             "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
           auto rd = amdsmi_get_gpu_fabric_info(dev, &post);
+          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, rd, AMDSMI_STATUS_SUCCESS);
           ASSERT_EQ(rd, AMDSMI_STATUS_SUCCESS);
           ASSERT_EQ(post.fabric_info.v2.station.station_flags, 1u);
 
@@ -440,7 +559,11 @@ void TestFabricWrite::Run() {
           restore.mask = AMDSMI_FABRIC_DF_FIELD_STATION_FLAGS;
           restore.commit = true;
           restore.data.station_flags = baseline_station_flags;
-          ASSERT_EQ(amdsmi_set_gpu_fabric_station_config(dev, &restore), AMDSMI_STATUS_SUCCESS);
+          DISPLAY_AMDSMI_API("amdsmi_set_gpu_fabric_station_config(round-trip restore)",
+                             "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+          err = amdsmi_set_gpu_fabric_station_config(dev, &restore);
+          DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+          ASSERT_EQ(err, AMDSMI_STATUS_SUCCESS);
         }
       }
     }
