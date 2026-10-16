@@ -53,13 +53,19 @@ std::vector<DiagP2pLaunch> g_launches;
 // rather than to hipLaunchKernel, which hip_fakes.cc pins to abort, and registers the unsuffixed __hip_fatbin. That
 // is defined in asm: a C definition clashes with the compiler's own declaration of it.
 asm(".pushsection .data\n.globl __hip_fatbin\n__hip_fatbin:\n.byte 0\n.popsection");
+// Weak, so a strong copy in hip_fakes.cc wins.
 extern "C" {
-void** __hipRegisterFatBinary(const void*) {
+__attribute__((weak)) void** __hipRegisterFatBinary(const void*) {
   static void* module;
   return &module;
 }
-void __hipRegisterFunction(void**, const void*, char*, const char*, unsigned int, void*, void*, void*, void*, int*) {}
-void __hipUnregisterFatBinary(void**) {}
+__attribute__((weak)) void __hipRegisterFunction(void**, const void*, char*, const char*, unsigned int, void*, void*,
+                                                 void*, void*, int*) {}
+__attribute__((weak)) void __hipUnregisterFatBinary(void**) {}
+__attribute__((weak)) void __hipRegisterVar(void**, char*, char*, const char*, int, size_t, int, int) {}
+// clang >= 23 registers per-kernel profile shadows under -fprofile-instr-generate.
+__attribute__((weak)) void __llvm_profile_offload_register_shadow_variable(void*) {}
+__attribute__((weak)) void __llvm_profile_offload_register_section_shadow_variable(void*) {}
 }  // extern "C"
 
 hipError_t hipConfigureCall(dim3 grid, dim3 block, size_t sharedMem, hipStream_t stream) {

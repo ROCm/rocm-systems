@@ -488,9 +488,8 @@ TEST_F(DiagnosticsMicrotest, DetectTransportMask_AllGatherFailureLeavesMaskZero)
   EXPECT_EQ(ret, ncclRemoteError);
 }
 
-// Bug: peers are in the allgather this rank skips, so every later diagnostics collective pairs up wrongly.
-// Pinned as observed: AICOMRCCL-2982.
-TEST_F(DiagnosticsMicrotest, DetectTransportMask_CallocFailureSkipsTheAllGatherPeersEnter) {
+// Peers enter the allgather this rank skips, so later diagnostics collectives pair up wrongly; a fix flips this pin.
+TEST_F(DiagnosticsMicrotest, DetectTransportMask_KnownBug_CallocFailureSkipsAllGather) {
   BuildComm(2, 0, 2);
   g_diagnosticsCallocFailAt = 1;
   ncclResult_t ret;
