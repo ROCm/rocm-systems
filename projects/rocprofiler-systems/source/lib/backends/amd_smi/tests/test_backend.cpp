@@ -98,7 +98,7 @@ TEST_F(BackendTest, get_lib_version_returns_version_fields)
     EXPECT_CALL(*testing::g_mock_backend, get_version(NotNull()))
         .WillOnce(DoAll(SetArgPointee<0>(raw), Return(k_ok)));
 
-    auto ver = m_session.get_lib_version();
+    auto const ver = m_session.get_lib_version();
     EXPECT_EQ(ver.major, 26U);
     EXPECT_EQ(ver.minor, 3U);
     EXPECT_EQ(ver.release, 0U);

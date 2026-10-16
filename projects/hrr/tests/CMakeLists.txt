@@ -1,0 +1,59 @@
+# Copyright (c) Advanced Micro Devices, Inc., or its affiliates.
+#
+# SPDX-License-Identifier: MIT
+
+# HRR project tests.
+#
+#   unit/        CPU-focused format, recovery, and playback-invariant tests.
+#   integration/ GPU capture/replay round-trip tests (require an AMD GPU and a
+#                capture-enabled HIP runtime).
+#   config/      One YAML file per suite: every case, and where it runs.
+#   include/     The Catch2 harness headers both suites include.
+#   scripts/     CI helpers that run a suite and report on it, and the unittest
+#                suites for those helpers and for ../tools (not built).
+#
+# tests/config/<suite>.yaml lists every case the binary must contain and where
+# it runs; scripts/hrr_test_config.py enforces the list.
+#
+# The HRR tests use a small local harness (hrr_test_common.hh / hrr_test_process.hh)
+# instead of the hip-tests Catch2 infrastructure.
+
+option(HRR_BUILD_INTEGRATION_TESTS "Build HRR GPU capture/replay integration tests" OFF)
+
+# Catch2 test framework. Prefer an installed Catch2 (as the hip-tests suite
+# does); fall back to fetching the pinned tarball used across rocm-systems.
+find_package(Catch2 3.8.1 QUIET)
+if(NOT Catch2_FOUND)
+  include(FetchContent)
+  FetchContent_Declare(
+    Catch2
+    URL "https://rocm-third-party-deps.s3.us-east-2.amazonaws.com/Catch2-3.8.1.tar.gz"
+  )
+  FetchContent_MakeAvailable(Catch2)
+endif()
+
+# HIP is needed for the HIP headers pulled in by the local test harness and the
+# playback helper header, and for hip::host linkage in the integration tests.
+# The unit tests make no HIP runtime calls, but their sources still include
+# <hip/hip_runtime.h>, so the HIP package (headers) is required to build them.
+find_package(hip CONFIG REQUIRED)
+
+add_subdirectory(unit)
+
+# Generator rules: regenerate the playback handlers and fail if
+# one still casts an archive field to a pointer or an opaque handle.
+# Also fails if a checked-in generated source or the API matrix header is
+# stale against the generator (test_generated_files_current.py).
+find_package(Python3 COMPONENTS Interpreter)
+if(Python3_Interpreter_FOUND)
+  add_test(NAME hrr-generator-rules
+    COMMAND ${Python3_EXECUTABLE} -m unittest discover -s ${CMAKE_CURRENT_SOURCE_DIR}/../tools/tests
+    WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..)
+endif()
+
+if(HRR_BUILD_INTEGRATION_TESTS)
+  if(NOT HRR_BUILD_PLAYBACK)
+    message(FATAL_ERROR "HRR_BUILD_INTEGRATION_TESTS requires HRR_BUILD_PLAYBACK because integration tests spawn hrr-playback")
+  endif()
+  add_subdirectory(integration)
+endif()

@@ -892,6 +892,74 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchDifferentMachineStillFails) {
                                    "does not expose a non-empty .text section"));
 }
 
+TEST(BinaryTranslatorE2E, FormattedAccessesRequireCrossFamilySemanticExpansion) {
+  for (bool typed : {false, true})
+    for (uint16_t opcode : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 38, 39}) {
+      if (typed && opcode > 15)
+        continue;
+      const auto store =
+          typed ? cdna4::build_mtbuf(
+                      opcode, {.dfmt = 10, .nfmt = 4, .vdata = 8, .srsrc = 1, .soffset = 128})
+                : cdna4::build_mubuf(opcode, {.vdata = 8, .srsrc = 1, .soffset = 128});
+      const auto image =
+          make_minimal_amdgpu_elf_with_descriptor_after_text({store[0], store[1], 0xbf810000u});
+      AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+      const auto result = translator.translate(source);
+      EXPECT_FALSE(result.ok()) << "typed=" << typed << " opcode=" << opcode;
+      EXPECT_EQ(result.elf_bytes, image);
+      EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                       "no expansion rule is implemented"));
+    }
+}
+
+TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
+  for (uint16_t opcode : {cdna4::kDsMinF32Ds, cdna4::kDsMaxF32Ds}) {
+    // Legacy SNaN propagation differs from RDNA4 MIN_NUM/MAX_NUM. Refuse the
+    // translation before executing a target atomic with a different policy.
+    const std::array<uint32_t, 2> atomic = cdna4::build_ds(opcode, {.addr = 4, .data0 = 0});
+    const std::array<uint32_t, 3> words = {atomic[0], atomic[1], 0xbf810000u};
+    const std::vector<uint8_t> image =
+        make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1], words[2]});
+    AmdGpuCodeObject source(image.data(), image.size());
+    ASSERT_TRUE(source.is_valid());
+    BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+    const TranslatedCodeObject result = translator.translate(source);
+    std::string diagnostics;
+    for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+      diagnostics += diagnostic.message + "\n";
+    EXPECT_FALSE(result.ok());
+    EXPECT_EQ(result.elf_bytes, image);
+    EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                     "no expansion rule is implemented"))
+        << diagnostics;
+  }
+}
+
+TEST(BinaryTranslatorE2E, LegacyCacheAtomicAddRequiresSemanticExpansion) {
+  // Input denormals flush on CDNA4 and survive on RDNA4. A direct opcode
+  // substitution changes 0x00000001 + 0x00000001 from zero to 0x00000002.
+  const std::array<uint32_t, 2> atomic =
+      cdna4::build_flat(cdna4::kFlatAtomicAddF32Flat,
+                        {.seg = 2, .sc0 = 1, .addr = 4, .data = 0, .saddr = 4, .vdst = 6});
+  const std::array<uint32_t, 3> words = {atomic[0], atomic[1], 0xbf810000u};
+  const std::vector<uint8_t> image =
+      make_minimal_amdgpu_elf_with_descriptor_after_text({words[0], words[1], words[2]});
+  AmdGpuCodeObject source(image.data(), image.size());
+  ASSERT_TRUE(source.is_valid());
+  BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+  const TranslatedCodeObject result = translator.translate(source);
+  std::string diagnostics;
+  for (const TranslationDiagnostic &diagnostic : result.diagnostics)
+    diagnostics += diagnostic.message + "\n";
+  EXPECT_FALSE(result.ok());
+  EXPECT_EQ(result.elf_bytes, image);
+  EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                   "no expansion rule is implemented"))
+      << diagnostics;
+}
+
 TEST(BinaryTranslatorE2E, EmptyTextGfx1250StillRequiresRevisions) {
   const auto image = make_minimal_gfx1250_elf_with_empty_text_and_rodata();
   AmdGpuCodeObject source(image.data(), image.size());
@@ -2918,9 +2986,8 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   EXPECT_LE(phdrs[0].p_vaddr + phdrs[0].p_memsz, phdrs[1].p_vaddr)
       << "expanded RX LOAD must not overlap the following LOAD in virtual memory";
 
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   ASSERT_EQ(symtab->sh_entsize, sizeof(Elf64_Sym));
   ASSERT_GE(symtab->sh_size / symtab->sh_entsize, 3u);
@@ -2951,9 +3018,8 @@ TEST(CodeObjectPatcher, ReplaceTextRelocatesTextSymbolsWithExactOffsetMap) {
   const auto patched_bytes = patcher.emit();
   const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched_bytes, 0);
   const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(patched_bytes, ehdr.e_shoff, ehdr.e_shnum);
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched_bytes, symtab->sh_offset,
                                                           symtab->sh_size / symtab->sh_entsize);
@@ -3658,7 +3724,7 @@ TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
-  const bool diagnosed = std::any_of(
+  const bool diagnosed = std::ranges::any_of(
       result.diagnostics.begin(), result.diagnostics.end(),
       [](const TranslationDiagnostic &diagnostic) {
         return diagnostic.severity == DiagnosticSeverity::Error &&
@@ -3812,7 +3878,8 @@ TEST(BinaryTranslator, SynthesizesKernargPreloadEntrySkipWindowWithDescriptorPro
 
   const uint32_t workgroup_id_x_prologue =
       build_s_mov_b32(0, kScalarOperandTtmpBase + kTtmpRdna4GridX, ROCJITSU_CODE_ARCH_RDNA4);
-  const uint32_t prologue_delay = build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4);
+  const uint32_t prologue_delay =
+      build_s_delay_alu(kDelayAluSaluDep1, ROCJITSU_CODE_ARCH_RDNA4).value();
   const auto expect_launch_stub = [&](size_t word_index, int16_t branch_offset) {
     EXPECT_EQ(target_words[word_index], workgroup_id_x_prologue)
         << "the synthesized kernarg-preload launch stub must materialize descriptor ABI SGPRs "
@@ -4028,7 +4095,7 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
   // stale value the fail-closed path exists to prevent.
   expect_builder_targets_endpgm(kBypassSreg);
 
-  EXPECT_NE(std::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
+  EXPECT_NE(std::ranges::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
             target_words + word_count)
       << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
 }

@@ -245,6 +245,17 @@ config::config()
 
     if(kernel_filter_include.empty()) kernel_filter_include = std::string{".*"};
 
+    const std::unordered_map<std::string_view, rocprofiler_thread_trace_resource_mode_t>
+        att_resource_modes = {
+            {"default", ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_DEFAULT},
+            {"hsa", ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_HSA},
+            {"code-object", ROCPROFILER_THREAD_TRACE_PARAMETER_RESOURCE_MODE_CODE_OBJECT}};
+    auto resource_mode = att_resource_modes.find(att_resource_mode);
+    ROCP_FATAL_IF(resource_mode == att_resource_modes.end())
+        << "Invalid value for ROCPROF_ATT_PARAM_RESOURCE_MODE: " << att_resource_mode
+        << ". Valid choices are: default, hsa, code-object";
+    att_resource_mode_value = resource_mode->second;
+
     std::unordered_map<std::string_view, rocprofiler_pc_sampling_unit_t> pc_sampling_unit_map = {
         {"none", ROCPROFILER_PC_SAMPLING_UNIT_NONE},
         {"instructions", ROCPROFILER_PC_SAMPLING_UNIT_INSTRUCTIONS},
@@ -258,7 +269,8 @@ config::config()
 
     std::unordered_map<std::string_view, rocprofiler_spm_parameter_type_t> spm_type_map = {
         {"none", ROCPROFILER_SPM_PARAMETER_TYPE_NONE},
-        {"sclk_cycles", ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES}};
+        {"sclk_cycles", ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES},
+        {"refclk_cycles", ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES}};
 
     try
     {
@@ -302,7 +314,7 @@ config::config()
     {
         ROCP_FATAL << "Invalid value for ROCPROF_SPM_SAMPLE_INTERVAL_UNIT: "
                    << spm_sample_interval_unit << ". "
-                   << "Valid choices are: sclk_cycles\n";
+                   << "Valid choices are: sclk_cycles, refclk_cycles\n";
     }
 
     // Benchmarking Enable/Disable

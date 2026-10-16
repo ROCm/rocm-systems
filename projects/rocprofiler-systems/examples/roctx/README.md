@@ -13,12 +13,14 @@ This example suite demonstrates the ROCTx tracing API for annotating GPU workloa
 - `selective-region-pause-1.cpp` - Pause and resume both occur **inside** the target region. Expected profiled with `Region1` filter: `{CodeBlock_A, CodeBlock_C}`.
 - `selective-region-pause-2.cpp` - Pause occurs **before** the target region (ignored by region filtering). Expected profiled with `Region1` filter: `{CodeBlock_A, CodeBlock_B, CodeBlock_C}`.
 - `selective-region-pause-3.cpp` - Pause occurs **inside** the region, resume occurs **outside** after region stop. Expected profiled with `Region1` filter: `{CodeBlock_A}`.
+- `mpi-with-selective-regions.cpp` - roctx region-filtering example (`ROCPROFSYS_SELECTED_REGIONS`) which is making sure that the region filters work properly also when MPI is enabled.
 
 ## Prerequisites
 
 - CMake 3.25+
 - HIP runtime and `hipcc` compiler
 - rocprofiler-sdk-roctx library
+- MPI implementation (OpenMPI, MPICH, etc.) for `mpi-with-selective-regions.cpp`
 
 ## Building
 

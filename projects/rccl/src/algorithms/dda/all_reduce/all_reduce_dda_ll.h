@@ -29,9 +29,16 @@
 
 namespace dda::common {
 
-// LL is for small-message, so the full payload is well under the staging cap.
-// each packet takes 16 bytes.
-constexpr size_t kDdaLLArSlotStridePkts = kDdaLLMaxBytes / sizeof(LLPacket16);
+// Packets one per-rank slot holds, derived from the scratch bank the host picked
+// rather than a fixed constant, so the tier's reach follows the allocation. A
+// packet is 16B and the slot is floored to a whole 16 of them, so the slot base
+// stays aligned for any nRanks.
+//
+// Both the kernel and the eligibility check call this, so the size the host
+// admits is exactly the geometry the kernel addresses.
+constexpr size_t ddaLLArSlotPkts(size_t bankSize, int nRanks) {
+  return ddaLLSlotPkts(bankSize, sizeof(LLPacket16) * (size_t)nRanks, 16);
+}
 
 // LL flat all-reduce kernel. 1D grid over packets (8B payload each).
 //
@@ -55,15 +62,16 @@ __launch_bounds__(512)
                                      size_t count,                          // full-message element count
                                      int selfRank, int nRanksRt,
                                      uint32_t* __restrict__ epochDev,       // per-block LL epoch cells (shared AG+AR)
-                                     int epochLen) {                        // number of cells in epochDev
+                                     int epochLen,                          // number of cells in epochDev
+                                     size_t bankSize) {                     // scratch bank size (from host)
 
   const int nRanks = NRANKS_CT ? NRANKS_CT : nRanksRt;
   const size_t bytes = count * sizeof(T);
   const size_t nPk = bytes >> 3;           // 8 payload bytes per packet
-  const size_t slot = kDdaLLArSlotStridePkts;
+  const size_t slot = ddaLLArSlotPkts(bankSize, nRanks);
 
   const uint32_t flag = ddaGetLLEpochInc(epochDev, blockIdx.x, 1);
-  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (size_t)nRanks * slot;
+  const size_t bankOffsetPkts = (size_t)(flag & 1u) * (bankSize / sizeof(LLPacket16));
 
   const size_t gtid = (size_t)blockIdx.x * blockDim.x + threadIdx.x;
   const size_t stride = (size_t)gridDim.x * blockDim.x;

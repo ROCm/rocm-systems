@@ -3,201 +3,181 @@
 
 #pragma once
 
-#include "common/defines.h"
-
+#include <cstddef>
 #include <iterator>
-#include <type_traits>
 
-#define ROCPROFSYS_IMPORT_TEMPLATE2(template_name)
-#define ROCPROFSYS_IMPORT_TEMPLATE1(template_name)
-
-// Import a 2-type-argument operator template into boost (if necessary) and
-// provide a specialization of 'is_chained_base<>' for it.
-#define ROCPROFSYS_OPERATOR_TEMPLATE2(template_name2)                                    \
-    ROCPROFSYS_IMPORT_TEMPLATE2(template_name2)                                          \
-    template <typename T, typename U, typename B>                                        \
-    struct is_chained_base<::rocprofsys::container::template_name2<T, U, B>>             \
-    {                                                                                    \
-        using value = ::rocprofsys::container::true_t;                                   \
-    };
-
-// Import a 1-type-argument operator template into boost (if necessary) and
-// provide a specialization of 'is_chained_base<>' for it.
-#define ROCPROFSYS_OPERATOR_TEMPLATE1(template_name1)                                    \
-    ROCPROFSYS_IMPORT_TEMPLATE1(template_name1)                                          \
-    template <typename T, typename B>                                                    \
-    struct is_chained_base<::rocprofsys::container::template_name1<T, B>>                \
-    {                                                                                    \
-        using value = ::rocprofsys::container::true_t;                                   \
-    };
-
-#define ROCPROFSYS_OPERATOR_TEMPLATE(template_name)                                      \
-    template <typename T, typename U = T, typename B = empty_base<T>,                    \
-              typename O = typename is_chained_base<U>::value>                           \
-    struct template_name;                                                                \
-                                                                                         \
-    template <typename T, typename U, typename B>                                        \
-        struct template_name<T, U, B, false_t> : template_name##2 < T                    \
-    , U                                                                                  \
-    , B >                                                                                \
-    {};                                                                                  \
-                                                                                         \
-    template <typename T, typename U>                                                    \
-        struct template_name<T, U, empty_base<T>, true_t> : template_name##1 < T         \
-    , U >                                                                                \
-    {};                                                                                  \
-                                                                                         \
-    template <typename T, typename B>                                                    \
-        struct template_name<T, T, B, false_t> : template_name##1 < T                    \
-    , B >                                                                                \
-    {};                                                                                  \
-                                                                                         \
-    template <typename T, typename U, typename B, typename O>                            \
-    struct is_chained_base<template_name<T, U, B, O>>                                    \
-    {                                                                                    \
-        using value = ::rocprofsys::container::true_t;                                   \
-    };                                                                                   \
-                                                                                         \
-    ROCPROFSYS_OPERATOR_TEMPLATE2(template_name##2)                                      \
-    ROCPROFSYS_OPERATOR_TEMPLATE1(template_name##1)
-
-#define ROCPROFSYS_BINARY_OPERATOR_COMMUTATIVE(NAME, OP)                                 \
-    template <typename T, typename U, typename B = empty_base<T>>                        \
-    struct NAME##2                                                                       \
-    : B{ friend T operator OP(T lhs, const U& rhs){ return lhs OP## = rhs;               \
-    }                                                                                    \
-    friend T operator OP(const U& lhs, T rhs) { return rhs OP## = lhs; }                 \
-    }                                                                                    \
-    ;                                                                                    \
-                                                                                         \
-    template <typename T, typename B = empty_base<T>>                                    \
-    struct NAME##1                                                                       \
-    : B{ friend T operator OP(T lhs, const T& rhs){ return lhs OP## = rhs;               \
-    }                                                                                    \
-    }                                                                                    \
-    ;
-
-#define ROCPROFSYS_BINARY_OPERATOR_NON_COMMUTATIVE(NAME, OP)                             \
-    template <typename T, typename U, typename B = empty_base<T>>                        \
-    struct NAME##2                                                                       \
-    : B{ friend T operator OP(T lhs, const U& rhs){ return lhs OP## = rhs;               \
-    }                                                                                    \
-    }                                                                                    \
-    ;
-
-namespace rocprofsys
+namespace rocprofsys::container
 {
-namespace container
-{
-struct true_t
-{};
-
-struct false_t
-{};
-
+// Sentinel base class terminating a chain of mixins below - each mixin derives from
+// its `B` template parameter so mixins can be stacked (CRTP-style) without every
+// combination needing its own hand-written base case.
 template <typename T>
 class empty_base
 {};
 
-template <typename T>
-struct is_chained_base
+// Synthesizes the heterogeneous, commutative `operator+` (T+U and U+T) from T's
+// existing `operator+=(const U&)`.
+template <typename T, typename U, typename B = empty_base<T>>
+struct addable2 : B
 {
-    using value = true_t;
+    friend constexpr T operator+(T lhs, const U& rhs)
+        requires requires(T& val, const U& other) { val += other; }
+    {
+        return lhs += rhs;
+    }
+    friend constexpr T operator+(const U& lhs, T rhs)
+        requires requires(T& val, const U& other) { val += other; }
+    {
+        return rhs += lhs;
+    }
 };
 
-ROCPROFSYS_BINARY_OPERATOR_COMMUTATIVE(addable, +)
-ROCPROFSYS_BINARY_OPERATOR_NON_COMMUTATIVE(subtractable, -)
+// Synthesizes the heterogeneous `operator-` (T-U only; subtraction is not
+// commutative) from T's existing `operator-=(const U&)`.
+template <typename T, typename U, typename B = empty_base<T>>
+struct subtractable2 : B
+{
+    friend constexpr T operator-(T lhs, const U& rhs)
+        requires requires(T& val, const U& other) { val -= other; }
+    {
+        return lhs -= rhs;
+    }
+};
 
-ROCPROFSYS_OPERATOR_TEMPLATE(addable)
-
+// Synthesizes postfix `operator++(T&, int)` from T's existing prefix `operator++`.
 template <typename T, typename B = empty_base<T>>
 struct incrementable : B
 {
-    friend T operator++(T& x, int)
+    friend constexpr T operator++(T& self, int)
+        requires requires(T& val) { ++val; }
     {
-        incrementable_type nrv(x);
-        ++x;
+        incrementable_type nrv(self);
+        ++self;
         return nrv;
     }
 
-private:  // The use of this typedef works around a Borland bug
-    typedef T incrementable_type;
+private:  // The use of this alias works around a Borland bug
+    using incrementable_type = T;
 };
 
+// Synthesizes postfix `operator--(T&, int)` from T's existing prefix `operator--`.
 template <typename T, typename B = empty_base<T>>
 struct decrementable : B
 {
-    friend T operator--(T& x, int)
+    friend constexpr T operator--(T& self, int)
+        requires requires(T& val) { --val; }
     {
-        decrementable_type nrv(x);
-        --x;
+        decrementable_type nrv(self);
+        --self;
         return nrv;
     }
 
-private:  // The use of this typedef works around a Borland bug
-    typedef T decrementable_type;
+private:  // The use of this alias works around a Borland bug
+    using decrementable_type = T;
 };
 
+// Synthesizes `operator->` from T's existing `operator*`.
 template <typename T, typename P, typename B = empty_base<T>>
 struct dereferenceable : B
 {
-    P operator->() const { return ::std::addressof(*static_cast<const T&>(*this)); }
+    constexpr P operator->() const
+        requires requires(const T& val) { *val; }
+    {
+        return ::std::addressof(*static_cast<const T&>(*this));
+    }
 };
 
+// Synthesizes `operator[]` from T's existing `operator+` and `operator*`.
 template <typename T, typename I, typename R, typename B = empty_base<T>>
 struct indexable : B
 {
-    R operator[](I n) const { return *(static_cast<const T&>(*this) + n); }
+    constexpr R operator[](I n) const
+        requires requires(const T& val, I idx) { *(val + idx); }
+    {
+        return *(static_cast<const T&>(*this) + n);
+    }
 };
 
+// Synthesizes `operator!=` from T's existing `operator==`.
 template <typename T, typename B = empty_base<T>>
 struct equality_comparable1 : B
 {
-    friend bool operator!=(const T& x, const T& y) { return !static_cast<bool>(x == y); }
+    friend constexpr bool operator!=(const T& lhs, const T& rhs)
+        requires requires(const T& val) { val == val; }
+    {
+        return !static_cast<bool>(lhs == rhs);
+    }
 };
 
+// Minimal operator set for an input iterator: equality/inequality, prefix/postfix
+// `++`, and `->` - all synthesized from `operator==`, `operator++`, and `operator*`.
 template <typename T, typename P, typename B = empty_base<T>>
 struct input_iteratable
 : equality_comparable1<T, incrementable<T, dereferenceable<T, P, B>>>
 {};
 
-template <typename T, typename B = empty_base<T>>
-struct output_iteratable : incrementable<T, B>
-{};
-
+// Forward iterators require nothing beyond the input iterator operator set.
 template <typename T, typename P, typename B = empty_base<T>>
 struct forward_iteratable : input_iteratable<T, P, B>
 {};
 
+// Adds prefix/postfix `operator--` to forward_iteratable's operator set.
 template <typename T, typename P, typename B = empty_base<T>>
 struct bidirectional_iteratable : forward_iteratable<T, P, decrementable<T, B>>
 {};
 
-// template <typename T, typename U, typename B = empty_base<T>>
-// struct subtractable2;
-
+// Full `operator+`/`operator-` support (both operand orders for `+`) synthesized
+// from T's `operator+=` and `operator-=`.
 template <typename T, typename U, typename B = empty_base<T>>
 struct additive2 : addable2<T, U, subtractable2<T, U, B>>
 {};
 
+// Synthesizes `operator>`, `operator<=`, `operator>=` from T's existing `operator<`.
+//
+// NOTE: this deliberately does NOT synthesize `operator<=>` from `<`. Doing so
+// would make the synthesized `<=>` an ADL-visible rewrite source for `<` on T (base
+// class friends participate in ADL for the derived type), so any `lhs < rhs` used
+// to *implement* that `<=>` becomes ambiguous with - and can resolve to - the
+// rewritten form derived from itself. Confirmed as a real, compiler-observable bug,
+// not just a style concern: GCC 13 happened to pick T's direct `operator<` and
+// compiled; Clang picked the self-referential rewritten candidate and blew the
+// constexpr recursion limit evaluating `operator<=>(origin, unit)` against itself.
+// A type that wants `<=>` should define it directly - the compiler then derives
+// `<`, `>`, `<=`, `>=` for free, no mixin needed.
 template <typename T, typename B = empty_base<T>>
 struct less_than_comparable1 : B
 {
-    friend bool operator>(const T& x, const T& y) { return y < x; }
-    friend bool operator<=(const T& x, const T& y) { return !static_cast<bool>(y < x); }
-    friend bool operator>=(const T& x, const T& y) { return !static_cast<bool>(x < y); }
+    friend constexpr bool operator>(const T& lhs, const T& rhs)
+        requires requires(const T& val) { val < val; }
+    {
+        return rhs < lhs;
+    }
+    friend constexpr bool operator<=(const T& lhs, const T& rhs)
+        requires requires(const T& val) { val < val; }
+    {
+        return !static_cast<bool>(rhs < lhs);
+    }
+    friend constexpr bool operator>=(const T& lhs, const T& rhs)
+        requires requires(const T& val) { val < val; }
+    {
+        return !static_cast<bool>(lhs < rhs);
+    }
 };
 
 //  To avoid repeated derivation from equality_comparable,
 //  which is an indirect base typename of bidirectional_iterable,
 //  random_access_iteratable must not be derived from totally_ordered1
 //  but from less_than_comparable1 only. (Helmut Zeisel, 02-Dec-2001)
+//
+// Full random-access iterator operator set: bidirectional_iteratable's operators,
+// plus ordering (`<`, `>`, `<=`, `>=`) and pointer arithmetic (`+`, `-`, `[]`).
 template <typename T, typename P, typename D, typename R, typename B = empty_base<T>>
 struct random_access_iteratable
 : bidirectional_iteratable<
       T, P, less_than_comparable1<T, additive2<T, D, indexable<T, D, R, B>>>>
 {};
 
+// Nested typedefs required by std::iterator_traits.
 template <typename CategoryT, typename Tp, typename DistanceT = std::ptrdiff_t,
           typename PointerT = Tp*, typename ReferenceT = Tp&>
 struct iterator_helper
@@ -209,13 +189,18 @@ struct iterator_helper
     using reference         = ReferenceT;
 };
 
+// Convenience mixin combining random_access_iteratable's synthesized operators with
+// the std::iterator_traits typedefs and the `operator-` (difference) that a random
+// access iterator must provide directly (it cannot be synthesized generically).
 template <typename T, typename V, typename D = std::ptrdiff_t, typename P = V*,
           typename R = V&>
 struct random_access_iterator_helper
 : random_access_iteratable<T, P, D, R,
                            iterator_helper<std::random_access_iterator_tag, V, D, P, R>>
 {
-    friend D requires_difference_operator(const T& x, const T& y) { return x - y; }
+    friend constexpr D requires_difference_operator(const T& lhs, const T& rhs)
+    {
+        return lhs - rhs;
+    }
 };  // random_access_iterator_helper
-}  // namespace container
-}  // namespace rocprofsys
+}  // namespace rocprofsys::container

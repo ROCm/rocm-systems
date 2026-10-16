@@ -228,4 +228,76 @@ TEST(GpuUnit, OdClkRangeReadsSingleLevelSection) {
   EXPECT_EQ(min, 1500u);
 }
 
+// --- smi_amdgpu_parse_dpm_ranges(): the pp_dpm_* fold + bounds guard ---
+
+// A pp_dpm_sclk stream with dpm levels but no "S:" sleep line: the sleep freq
+// keeps its UINT_MAX "unavailable" sentinel, which must NOT be rejected as out
+// of bounds. Regression: a prior guard failed the whole call on that sentinel,
+// so amdsmi_get_clock_info() returned INPUT_OUT_OF_BOUNDS on every GPU without a
+// deep-sleep level.
+constexpr char kDpmSclkNoSleep[] =
+    "0: 500Mhz\n"
+    "1: 1500Mhz *\n"
+    "2: 2100Mhz\n";
+
+TEST(GpuUnit, DpmRangesUnavailableSleepSentinelNotRejected) {
+  std::istringstream dpm(kDpmSclkNoSleep);
+  // GFX min/max come from the OD range (500..2100); there is no "S:" line.
+  SmiAmdgpuOdClkRange od_range{true, 2100u, 500u};
+  SmiAmdgpuClkRanges ranges;
+  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(ranges.max_freq, 2100);
+  EXPECT_EQ(ranges.min_freq, 500);
+  // Unset sleep state surfaces as the unavailable marker (UINT_MAX -> -1 as int).
+  EXPECT_EQ(ranges.sleep_state_freq, -1);
+}
+
+// An empty pp_dpm_* stream with no overdrive range: min keeps its UINT_MAX
+// "unavailable" sentinel and surfaces as -1 rather than failing the call.
+TEST(GpuUnit, DpmRangesEmptyStreamKeepsUnavailableMin) {
+  std::istringstream dpm("");
+  SmiAmdgpuOdClkRange od_range;  // not present -> derive from the (absent) levels
+  SmiAmdgpuClkRanges ranges;
+  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(ranges.max_freq, 0);
+  EXPECT_EQ(ranges.min_freq, -1);
+}
+
+// A genuinely out-of-range value (> INT_MAX, not the sentinel) is still
+// rejected, preserving the protection added in #9549.
+constexpr char kDpmSclkHugeFreq[] = "0: 3000000000Mhz\n";  // 3e9 > INT_MAX
+
+TEST(GpuUnit, DpmRangesRealOutOfRangeStillRejected) {
+  std::istringstream dpm(kDpmSclkHugeFreq);
+  SmiAmdgpuOdClkRange od_range;  // not present -> derive min/max from the level
+  SmiAmdgpuClkRanges ranges;
+  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
+}
+
+// With an "S:" sleep line present the deep-sleep frequency is parsed and returned.
+constexpr char kDpmSclkWithSleep[] =
+    "S: 100Mhz\n"
+    "0: 500Mhz\n"
+    "1: 2100Mhz *\n";
+
+TEST(GpuUnit, DpmRangesReadsSleepStateWhenPresent) {
+  std::istringstream dpm(kDpmSclkWithSleep);
+  SmiAmdgpuOdClkRange od_range{true, 2100u, 500u};
+  SmiAmdgpuClkRanges ranges;
+  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(ranges.sleep_state_freq, 100);
+}
+// A real (non-sentinel) sleep value above INT_MAX is rejected too: the guard
+// covers the "S:" sleep line, not just the dpm levels.
+constexpr char kDpmSclkHugeSleep[] =
+    "S: 3000000000Mhz\n"
+    "0: 500Mhz\n";
+
+TEST(GpuUnit, DpmRangesHugeSleepValueRejected) {
+  std::istringstream dpm(kDpmSclkHugeSleep);
+  SmiAmdgpuOdClkRange od_range;  // not present -> derive min/max from the level
+  SmiAmdgpuClkRanges ranges;
+  EXPECT_EQ(smi_amdgpu_parse_dpm_ranges(dpm, od_range, ranges), AMDSMI_STATUS_INPUT_OUT_OF_BOUNDS);
+}
+
 }  // namespace

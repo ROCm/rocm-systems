@@ -242,7 +242,10 @@ std::pair<const Isa*, const Isa*> Isa::supportedIsas() {
       {"gfx1151", true, true, 11, 5, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1152", true, true, 11, 5, 2, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1153", true, true, 11, 5, 3, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1170", true, true, 11, 7, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx1171", true, true, 11, 7, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx11-generic", true, true, 11, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
+      {"gfx11-7-generic", true, true, 11, 7, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1200", true, true, 12, 0, 0, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1201", true, true, 12, 0, 1, NONE, NONE, 2, 32, 1, 256, 64 * Ki, 32, 1024},
       {"gfx1250", true, true, 12, 5, 0, NONE, NONE, 4, 32, 1, 256, 320* Ki, 64, 1024},
@@ -812,10 +815,8 @@ bool Device::BlitProgram::create(amd::Device* device, const std::string& extraKe
   if (device->settings().kernel_arg_opt_) {
     opt += " -Wb,-amdgpu-kernarg-preload-count=8 ";
   }
-#if defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   opt += " -fsanitize=address ";
-#endif
 #endif
   if ((retval = program_->build(devices, opt.c_str(), nullptr, nullptr, GPU_DUMP_BLIT_KERNELS)) !=
       CL_SUCCESS) {
@@ -908,11 +909,9 @@ bool Device::init() {
 
 // ================================================================================================
 void Device::tearDown() {
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
   // Scan for device-side leaks before ~Device frees the heap slabs.
   reportAllDeviceMemoryLeaks();
-#endif
 #endif
   if (devices_ != nullptr) {
     for (uint i = 0; i < devices_->size(); ++i) {
@@ -1370,7 +1369,8 @@ std::vector<amd::CommandQueue*> Device::getActiveQueues() {
 }
 
 // =================================================================================================
-bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) {
+HandleExportResult Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle,
+                                                    unsigned long long flags) {
   // Check if the ptr is created through VMM APIs, if true we use different ROCr APIs.
   amd::Memory* amd_base_obj = amd::MemObjMap::FindVirtualMemObj(dev_ptr);
   bool VmmPtr = (amd_base_obj != nullptr) ? true : false;
@@ -1380,12 +1380,12 @@ bool Device::GetHandleForAddressRange(void* dev_ptr, size_t size, void* handle) 
   amd::Memory* amd_mem_obj = amd::MemObjMap::FindMemObj(dev_ptr);
   if (amd_mem_obj == nullptr) {
     ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-             "Cannot retrieve amd_mem_obj for dev_ptr: 0x%x", dev_ptr);
-    return false;
+             "Cannot retrieve amd_mem_obj for dev_ptr: %p", dev_ptr);
+    return HandleExportResult::kError;
   }
-
+  
   device::Memory* dev_mem = amd_mem_obj->getDeviceMemory(*this);
-  return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle);
+  return dev_mem->GetFDHandleForMem(dev_ptr, size, VmmPtr, handle, flags);
 }
 
 // ================================================================================================
@@ -1405,8 +1405,7 @@ void Device::RemoveHostcallMemory(amd::Memory* memory) {
 void Device::ClearHostcallMemories() { hostcall_allocated_memories_.clear(); }
 
 // ================================================================================================
-#if defined(__linux__) && defined(__clang__)
-#if __has_feature(address_sanitizer)
+#if DEVICE_ADDRESS_SANITIZER
 
 extern "C" void __asan_report_nonself_leak(uint64_t alloc_pc, uint64_t alloc_size,
                                            int device_id, const char* device_name,
@@ -1595,8 +1594,7 @@ void Device::reportAllDeviceMemoryLeaks() {
   }
 }
 
-#endif
-#endif
+#endif  // DEVICE_ADDRESS_SANITIZER
 
 // ================================================================================================
 void Device::AddDevMemObj(const void* k, amd::Memory* memObj) {

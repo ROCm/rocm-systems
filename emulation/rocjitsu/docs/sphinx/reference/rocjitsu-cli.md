@@ -7,7 +7,7 @@ myst:
 
 # rocjitsu CLI reference
 
-The `rocjitsu` command is the primary entry point for running applications on a simulated GPU. It supports three execution modes---local, daemon, and attach---and manages the simulation engine, interposer setup, and RPC transport on your behalf.
+The `rocjitsu` command is the primary entry point for running applications on a simulated GPU. It supports local, daemon, attach, and VFIO-user modes and manages the relevant simulation engine and transport.
 
 For details on how KMD emulation and the interposer layer work, see [GPU virtual machine design](/conceptual/gpu-vm-design.md).
 
@@ -15,6 +15,7 @@ For details on how KMD emulation and the interposer layer work, see [GPU virtual
 
 ``` text
 rocjitsu --config <config.json> [--daemon|--attach] [--] <app> [args...]
+rocjitsu --config <config.json> --vfio-socket <path>
 ```
 
 | Option | Description |
@@ -22,6 +23,8 @@ rocjitsu --config <config.json> [--daemon|--attach] [--] <app> [args...]
 | `--config <path>` | Path to the simulation configuration JSON file. Required for all modes. |
 | `--daemon` | Run in daemon mode: fork a daemon process hosting the simulation engine, then launch the application with the interposer. Without `-- <app>`, runs the daemon server only (no application is launched). |
 | `--attach` | Attach to a running daemon. The socket path is resolved as described in [Environment variables and socket path resolution](#socket-path-resolution). |
+| `--vfio-socket <path>` | Serve the configured GPU as a PCI function over VFIO-user. Requires a build configured with `ROCJITSU_ENABLE_VFIO=ON` and a VMM that shares guest RAM through mmap-able file descriptors. |
+| `--check-vfio-user` | Exit successfully only when the selected binary includes VFIO-user support. |
 | `--help`, `-h` | Print usage information and exit. |
 | `--version`, `-v` | Print the version string and exit. |
 | `--` | Separator between rocJITsu options and the target application command line. |
@@ -31,7 +34,7 @@ rocjitsu --config <config.json> [--daemon|--attach] [--] <app> [args...]
 ### Local mode
 
 ``` bash
-rocjitsu --config configs/amdgpu_cdna4_kmd.json -- ./app
+rocjitsu --config configs/gfx950_mi355x_kmd.json -- ./app
 ```
 
 The simulator runs in-process. `rocjitsu` sets `LD_PRELOAD` and calls `execve` on the target application. The interposer routes `/dev/kfd` operations to a `SimulatedDriver` within the same process, and a background thread runs the simulation engine.
@@ -42,10 +45,10 @@ This mode corresponds to `RJ_VM_MODE_LOCAL` in the C API.
 
 ``` bash
 # Fork daemon + launch application
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json -- ./app args...
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json -- ./app args...
 
 # Daemon-only (no application launched)
-rocjitsu --daemon --config configs/amdgpu_cdna4_kmd.json
+rocjitsu --daemon --config configs/gfx950_mi355x_kmd.json
 ```
 
 A child daemon process is forked to host the simulation engine and `SimulatedDriver`. The parent then `execve`'s the target application with `LD_PRELOAD` set. Client processes communicate with the daemon over a Unix domain socket using the RPC protocol described below.
@@ -57,10 +60,24 @@ This mode corresponds to `RJ_VM_MODE_DAEMON` in the C API. It supports multi-pro
 ### Attach mode
 
 ``` bash
-rocjitsu --attach --config configs/amdgpu_cdna4_kmd.json -- ./app
+rocjitsu --attach --config configs/gfx950_mi355x_kmd.json -- ./app
 ```
 
 Connects to an already-running daemon. The socket path is resolved using the environment variables described in [Environment variables and socket path resolution](#socket-path-resolution).
+
+### VFIO-user mode
+
+``` bash
+rocjitsu --config configs/gfx1250_mi455x.json \
+  --vfio-socket /tmp/rocjitsu-vfio/vfio-user.sock
+```
+
+rocJITsu exposes the configured gfx1250 GPU as a PCI function to an external
+VMM. The guest AMDGPU driver owns queue setup through BAR and DMA operations;
+the PCI adapter routes that state into the same GPU VM, command processor, MES,
+SDMA scheduler, and compute units used by the other front ends. See
+[Run a QEMU VFIO-user compute guest](/how-to/qemu-vfio.md) for the complete
+host and guest contract.
 
 (socket-path-resolution)=
 ## Environment variables and socket path resolution
@@ -133,4 +150,3 @@ File descriptors (`memfd` handles) are passed via `sendmsg()`/`recvmsg()` with `
 4.  The runtime calls `DESTROY_QUEUE`, `DESTROY_EVENT`, and `close(kfd_fd)`.
 5.  The client's `RemoteDriver` sends `RPC_CLOSE` to the daemon.
 6.  The daemon closes the client connection and, when all clients have disconnected, shuts down the simulation engine.
-

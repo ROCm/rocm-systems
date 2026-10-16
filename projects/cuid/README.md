@@ -183,7 +183,7 @@ sphinx-build docs docs/_build/html
 
 #### Notes
 
-- No third-party crypto dependency: SHA-256 and HMAC-SHA-256 are built from `lib/src/sha256.cc`, so the library links no TLS stack on any platform
+- No third-party crypto dependency: SHA-256 and HMAC-SHA-256 are built from source out of the shared `shared/sha256` component, whose objects are absorbed into `libamdcuid_static.a`, so the shipped archive is self-contained and the library links no TLS stack on any platform
 - Root/administrator privileges are required for full functionality (ACPI tables, SMBIOS UUID, PCI config space access)
 - systemd is only needed for `udevd` reloads and optional service management; the daemon can also be started using other mechanisms such as an `@reboot` cron job
 

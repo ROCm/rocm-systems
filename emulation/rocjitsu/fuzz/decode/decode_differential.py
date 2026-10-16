@@ -34,6 +34,7 @@ LLVM_CPUS = {
     "gfx1200": "gfx1200",
     "gfx1201": "gfx1201",
     "gfx1250": "gfx1250",
+    "gfx1251": "gfx1251",
 }
 SUPPORTED_TARGETS = tuple(LLVM_CPUS)
 ENCODING_RE = re.compile(r";\s*encoding:\s*\[([^]]+)\]")

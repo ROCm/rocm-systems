@@ -90,7 +90,7 @@
       "tests": [
         {
           "name": "GdrFlush_CuMemDmaBuf_NoAsyncFatal",
-          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The read-only flush (RDMA_READ fence, WRITE removed) must complete cleanly with correct data.",
+          "description": "Whitebox ncclIbIflush over a dma-buf (cuMem/UBR) RO=0 flush scratchpad - the exact path that used to raise the mlx5 'invalid request local work queue error'. The RO=0 write+read fence must complete cleanly with correct data.",
           "test_filter": "GdrFlushTest.CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal"
         },
         {
@@ -113,11 +113,6 @@
           "name": "GdrFlush_RepeatedFlushBurst",
           "description": "50-iteration GPU recv+flush burst over the dma-buf scratchpad; an intermittent QP async-fatal would surface as a non-success flush. The whole burst must stay clean.",
           "test_filter": "GdrFlushTest.RepeatedFlush_NoFaultBurst"
-        },
-        {
-          "name": "GdrFlush_ForcedScratchpadWrite_ReproducesFault",
-          "description": "Regression guard (ENABLE_FAULT_INJECTION debug builds only): forces the removed scratchpad RDMA_WRITE back on a dma-buf buffer and asserts the flush QP faults, proving the WRITE was the culprit. Absent/skipped when fault injection is not compiled in.",
-          "test_filter": "GdrFlushTest.ForcedScratchpadWrite_ReproducesFault"
         }
       ]
     },
@@ -507,6 +502,11 @@
           "name": "Cast_SendRecvZeroSize",
           "description": "Zero-byte send: WRR oneQp path taken (dataPerQp=0 < splitDataMin), 1 token consumed, received size==0",
           "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        },
+        {
+          "name": "Cast_RegistrationRejectsBadArguments",
+          "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
+          "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
       ]
     },
@@ -735,6 +735,25 @@
           "name": "FaultInj_Cast_QpErrorClearRecovers",
           "description": "CAST path: after FaultClear on a faulted connection, a fresh connection completes 20 sends with no corruption and fatalCount==0",
           "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        }
+      ]
+    },
+
+    "resiliency_gid_change": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1",
+        "NCCL_IB_MERGE_NICS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "Resiliency_GidChangeRefresh",
+          "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+          "test_filter": "Transport/NetIbGidChangeTest.*"
         }
       ]
     },
@@ -980,6 +999,54 @@
         { "name": "NetIB_GIN_DmaBuf_MixedIPutIGetIPutSignal_Ctx2_1MiB", "description": "GIN dmabuf: mixed iput/iget/iput-signal (Ctx2, 1MiB, DmaBuf)", "test_filter": "CtxAndSize/RmaMPITest.MixedIPutIGetIPutSignal/Ctx2_1MiB_DmaBuf" }
       ]
     },
+    "net_ib_host_api_fused": {
+      "extends": "net_ib_base",
+      "timeout": 900,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_NET": "ib",
+        "NCCL_NET_MERGE_LEVEL": "PHB"
+      },
+      "description": "The host one-sided RMA API itself with NIC fusion active and GIN on -- the surface the proxy fix unblocks",
+      "tests": [
+        {"name": "NetIB_HostApi_Fused", "description": "Whole HostApiTest suite under NIC fusion, minus GraphCaptureReplayPutWait which fails independently of fusion", "test_filter": "HostApiTest.*-HostApiTest.GraphCaptureReplayPutWait"}
+      ]
+    },
+
+    "net_ib_rma_fused_gin_off": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "0",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_NET": "ib",
+        "NCCL_NET_MERGE_LEVEL": "PHB"
+      },
+      "description": "Host RMA must stay available with fusion on and GIN off, where the proxy is the sole RMA user",
+      "tests": [
+        {"name": "NetIB_RmaFusedGinOff_WindowRegister", "description": "ncclCommWindowRegister with NIC fusion active and GIN disabled", "test_filter": "HostApiTest.WindowRegisterDeregister"}
+      ]
+    },
+
+    "net_ib_gin_nic_fusion": {
+      "extends": "net_ib_base",
+      "timeout": 120,
+      "env_variables": {
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_NET": "ib",
+        "NCCL_NET_MERGE_LEVEL": "PHB"
+      },
+      "tests": [
+        { "name": "NetIB_GIN_NicFusion_HostRma", "description": "GIN nic fusion: host RMA proxy stays available when NICs are fused", "test_filter": "GinNicFusionMPITest.HostRmaSurvivesNicFusion" },
+        { "name": "NetIB_GIN_NicFusion_GinType", "description": "GIN nic fusion: communicator keeps a usable GIN backend when NICs are fused", "test_filter": "GinNicFusionMPITest.GinTypeSurvivesNicFusion" },
+        { "name": "NetIB_GIN_NicFusion_IPut", "description": "Robustness: RMA proxy iput over a hand-built fused vNIC, which production never hands it", "test_filter": "RmaMPIFusedNicTest.IPutOverFusedVNic" },
+        { "name": "NetIB_GIN_NicFusion_IGet", "description": "Robustness: RMA proxy iget over a hand-built fused vNIC, which production never hands it", "test_filter": "RmaMPIFusedNicTest.IGetOverFusedVNic" },
+        { "name": "NetIB_GIN_NicFusion_IPutSignal", "description": "Robustness: RMA proxy iput+signal over a hand-built fused vNIC, which production never hands it", "test_filter": "RmaMPIFusedNicTest.IPutSignalOverFusedVNic" }
+      ]
+    },
     "net_ib_cast_gin_peermem": {
       "extends": "net_ib_gin_peermem",
       "env_variables": {
@@ -994,7 +1061,7 @@
     },
     "net_ib_multithread_base": {
       "extends": "net_ib_base",
-      "timeout": 300,
+      "timeout": 600,
       "description": "Shared environment for the threaded suites. Deliberately carries no tests: extends merges test lists rather than replacing them, so a threaded suite that extended a suite with tests would also run those tests, at whatever worker count it sets.",
       "env_variables": {
         "NCCL_DEBUG": "INFO",
@@ -1015,9 +1082,122 @@
           "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
         },
         {
+          "name": "NetIB_MultiThread_MultipleSizes",
+          "description": "Concurrent workers sweep the size ladder, filling the shared per-device MR cache with registrations of many sizes",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
           "name": "NetIB_MultiThread_ProgressDoesNotSerialize",
           "description": "Gate: the same transfer loop at one worker and at all of them, so a lock held across a progress call shows up as time that scales with the worker count. Skips below four workers",
           "test_filter": "NetIbMPITest.ThreadedProgressDoesNotSerialize"
+        },
+        {
+          "name": "NetIB_MultiThread_LargeTransfer",
+          "description": "Concurrent 16 MB transfers keep several large registrations live on one device",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "NetIB_MultiThread_MemoryRegistrationStorm",
+          "description": "Concurrent register/deregister storms race the insert, lookup and release paths of the per-device MR cache",
+          "test_filter": "NetIbMPITest.MemoryRegistrationStorm"
+        },
+        {
+          "name": "NetIB_MultiThread_MrCacheRefCount",
+          "description": "All workers register the same address, contending on one cache entry's refcount",
+          "test_filter": "NetIbMPITest.MrCacheRefCount"
+        },
+        {
+          "name": "NetIB_MultiThread_MixedSizeBarrage",
+          "description": "Concurrent workers walk the ladder steps that fit their share of the sweep registration budget, so the top step falls as the worker count rises (16 MB at 2 and 4 workers, 4 MB at 16); the serial arm covers the whole ladder to 64 MB",
+          "test_filter": "NetIbMPITest.MixedSizeBarrage"
+        },
+        {
+          "name": "NetIB_MultiThread_TagZeroReuse",
+          "description": "Every worker reuses tag 0 on its own connection, so a misrouted completion shows up as a data mismatch",
+          "test_filter": "NetIbMPITest.TagZeroReuse"
+        },
+        {
+          "name": "NetIB_MultiThread_RequestSlotExhaustion",
+          "description": "Concurrent workers hold 32 requests each in flight on one NIC and verify slot recycling",
+          "test_filter": "NetIbMPITest.RequestSlotExhaustion"
+        },
+        {
+          "name": "NetIB_MultiThread_RapidRecvPostDrain",
+          "description": "Concurrent post-and-drain batches, so recycling holds up while other communicators drain",
+          "test_filter": "NetIbMPITest.RapidRecvPostDrain"
+        },
+        {
+          "name": "NetIB_MultiThread_FifoPressure",
+          "description": "N slow receivers against N tight senders, with the backpressure assertion kept per connection",
+          "test_filter": "NetIbMPITest.FifoPressureSenderFast"
+        },
+        {
+          "name": "NetIB_MultiThread_LongRunningEndurance",
+          "description": "Sustained concurrent traffic with the RDMA leak check taken around the whole run",
+          "test_filter": "NetIbMPITest.LongRunningEndurance"
+        },
+        {
+          "name": "NetIB_MultiThread_GpuMemoryTransfer",
+          "description": "Concurrent GPU-buffer registrations drive the peer-memory path into the shared MR cache",
+          "test_filter": "NetIbMPITest.GpuMemoryTransferStress"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicRegDeregCycling",
+          "description": "Concurrent register/deregister cycling on a fused device, fanning out across both members' protection domains",
+          "test_filter": "NetIbMPITest.RegDeregCycling_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicSequentialTransfers",
+          "description": "Concurrent long-lived registrations on one fused device",
+          "test_filter": "NetIbMPITest.SequentialTransfers_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicMixedSizes",
+          "description": "Concurrent uneven QP splits across a fused device",
+          "test_filter": "NetIbMPITest.MixedSizes_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicLargeTransfer",
+          "description": "Concurrent striped transfers over a fused device, 64 MB divided by the worker count so the registrations stay within the device limits",
+          "test_filter": "NetIbMPITest.LargeTransfer_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicUnalignedSizes",
+          "description": "Concurrent transfers at the 128-byte striping boundary of a fused device",
+          "test_filter": "NetIbMPITest.UnalignedSizeTransfer_VNic"
+        },
+        {
+          "name": "NetIB_MultiThread_VNicFlushRepeated",
+          "description": "Concurrent GPU receives and flushes on one fused device",
+          "test_filter": "NetIbMPITest.FlushRepeated_VNic"
+        }
+      ]
+    },
+    "net_ib_multithread_multiqp": {
+      "extends": "net_ib_multithread_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "8",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_MultiQpSplitData",
+          "description": "Concurrent workers multiply the QPs in flight per device while each checks its own split payloads",
+          "test_filter": "NetIbMPITest.MultiQpSplitDataStress"
+        }
+      ]
+    },
+    "net_ib_multithread_multiqp_nosplit": {
+      "extends": "net_ib_multithread_base",
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "0"
+      },
+      "tests": [
+        {
+          "name": "NetIB_MultiThread_MultiQpNoSplit",
+          "description": "Same concurrent sweep on the nDataQps path",
+          "test_filter": "NetIbMPITest.MultiQpNoSplitStress"
         }
       ]
     },
@@ -1033,6 +1213,143 @@
       "extends": "net_ib_multithread_independent",
       "command_args": "--net_ib_nthreads=16"
     },
+    "net_ib_multithread_multiqp_4": {
+      "extends": "net_ib_multithread_multiqp",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "net_ib_multithread_multiqp_nosplit_4": {
+      "extends": "net_ib_multithread_multiqp_nosplit",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "cast_multithread": {
+      "extends": "cast_base",
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "10000000"
+      },
+      "tests": [
+        {
+          "name": "Cast_MultiThread_StressMultiRound",
+          "description": "Every worker drives its own CAST connection, so the WRR schedulers advance simultaneously instead of one after another",
+          "test_filter": "NetIbMPITest.CastStressMultiRoundTwoConns"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvMultipleSizes",
+          "description": "Concurrent schedulers sweep both sides of the WRR/split boundary, each auditing its own token ledger",
+          "test_filter": "NetIbMPITest.CastSendRecvMultipleSizes"
+        },
+        {
+          "name": "Cast_MultiThread_LargeTransfer",
+          "description": "Concurrent 16 MB split-path transfers, each confirming its scheduler consumed no tokens",
+          "test_filter": "NetIbMPITest.CastLargeTransfer"
+        },
+        {
+          "name": "Cast_MultiThread_SendRecvZeroSize",
+          "description": "Zero-byte sends still take the WRR path on every worker's scheduler",
+          "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        },
+        {
+          "name": "Cast_MultiThread_SplitDataThresholdBoundary",
+          "description": "Concurrent schedulers decide the split boundary at the same time, each auditing its own tokens",
+          "test_filter": "NetIbMPITest.CastSplitDataThresholdBoundary"
+        }
+      ]
+    },
+    "cast_multithread_2": {
+      "extends": "cast_multithread",
+      "command_args": "--net_ib_nthreads=2"
+    },
+    "cast_multithread_4": {
+      "extends": "cast_multithread",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "cast_multithread_16": {
+      "extends": "cast_multithread",
+      "command_args": "--net_ib_nthreads=16"
+    },
+    "cast_opt_recv": {
+      "extends": "net_ib_base",
+      "timeout": 300,
+      "description": "Optional recv completion enabled: QP sched off, RCCL_IB_OPTIONAL_RECV_COMPLETION=1, CTS offload pinned off so the flag is attributable to the control param.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "RCCL_IB_QP_SCHED_ENABLE": "0",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1",
+        "RCCL_CTS_OFFLOAD_ENABLED": "0",
+        "NCCL_IB_QPS_PER_CONNECTION": "1",
+        "NCCL_DEBUG": "INFO",
+        "NCCL_DEBUG_SUBSYS": "NET,INIT"
+      },
+      "tests": [
+        {
+          "name": "Cast_OptRecv_SimpleSendRecv",
+          "description": "Basic send/recv with optRecvCompletion enabled (no hint from this test)",
+          "test_filter": "NetIbMPITest.SimpleSendRecv"
+        },
+        {
+          "name": "Cast_OptRecv_MultipleSizes",
+          "description": "Multiple buffer sizes with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.SendRecvMultipleSizes"
+        },
+        {
+          "name": "Cast_OptRecv_LargeTransfer",
+          "description": "Large transfer with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.LargeTransfer"
+        },
+        {
+          "name": "Cast_OptRecv_MultipleSequential",
+          "description": "Sequential transfers with optRecvCompletion enabled",
+          "test_filter": "NetIbMPITest.MultipleSequentialTransfers"
+        },
+        {
+          "name": "Cast_OptRecv_FlagEnabled",
+          "description": "White-box: commBase.optRecvCompletion is 1 when control=1 and QP sched=0",
+          "test_filter": "NetIbMPITest.OptRecvCompletionFlagEnabled"
+        },
+        {
+          "name": "Cast_OptRecv_SkipWritePath",
+          "description": "1-req send/recv with NCCL_NET_OPTIONAL_RECV_COMPLETION hint; data matches after send CQE",
+          "test_filter": "NetIbMPITest.OptRecvCompletionSkipWritePath"
+        },
+        {
+          "name": "Cast_OptRecv_MultiRecvNoHint",
+          "description": "n>1 irecv without the optional-recv hint still transfers correctly",
+          "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvNoHint"
+        },
+        {
+          "name": "Cast_OptRecv_MultiRecvWithHint",
+          "description": "n>1 with the optional-recv hint degrades to WRITE_WITH_IMM and completes",
+          "test_filter": "NetIbMPITest.OptRecvCompletionMultiRecvWithHint"
+        }
+      ]
+    },
+
+    "cast_opt_recv_disabled_sched": {
+      "extends": "cast_base",
+      "timeout": 120,
+      "description": "QP scheduler on (cast_base): optRecvCompletion must stay off.",
+      "env_variables": {
+        "NCCL_NET": "IB-CAST",
+        "NCCL_IB_QPS_PER_CONNECTION": "2",
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "RCCL_IB_OPTIONAL_RECV_COMPLETION": "1"
+      },
+      "tests": [
+        {
+          "name": "Cast_OptRecv_FlagDisabledByQpSched",
+          "description": "White-box: commBase.optRecvCompletion is 0 when QP scheduling is enabled",
+          "test_filter": "NetIbMPITest.OptRecvCompletionFlagDisabledByQpSched"
+        },
+        {
+          "name": "Cast_OptRecv_DisabledKeepsRecvSize",
+          "description": "1-req hinted send/recv with the gate forced off: receiver reports the posted size, not the skip path's 0",
+          "test_filter": "NetIbMPITest.OptRecvCompletionDisabledKeepsRecvSize"
+        }
+      ]
+    },
+
     "cast_wrr_split_long_interval": {
       "extends": "cast_base",
       "timeout": 120,
@@ -1076,6 +1393,102 @@
           "test_filter": "NetIbMPITest.CastEnableDisableSplitData"
         }
       ]
+    },
+    "fault_multithread_base": {
+      "extends": "cast_base",
+      "timeout": 600,
+      "description": "IB-CAST fault environment for the threaded suites, carrying no tests of its own for the reason given in net_ib_multithread_base. Port failover is on and port recovery is left at its default of off: the failover tests here assert that failover absorbed the error and that the device is no longer Ok, which recovery would undo underneath them. Concurrent recovery is covered by fault_recovery_multithread_2 and the nightly drift suite, which enable it. RCCL_IB_FAULT_INJECTION stays off: these tests use the per-communicator pre-call hooks and have no use for the libibverbs ops shims, which add two acquisitions of one process-global mutex to every poll_cq and whose registry is per device, so one worker's clear disarms every other worker's faults.",
+      "env_variables": {
+        "NCCL_IB_SPLIT_DATA_ON_QPS": "1",
+        "NCCL_IB_QPS_PER_CONNECTION": "4",
+        "RCCL_IB_QP_SCHED_UPDATE_INTERVAL": "100",
+        "RCCL_IB_QP_SCHED_RESET_INTERVAL": "1000",
+        "RCCL_IB_QP_SCHED_SPLIT_DATA_MIN": "2000",
+        "NCCL_IB_RETURN_ASYNC_EVENTS": "1",
+        "NCCL_IB_RESILIENCY_PORT_FAILOVER": "1",
+        "RCCL_IB_FAULT_INJECTION": "0"
+      }
+    },
+    "fault_inject_multithread": {
+      "extends": "fault_multithread_base",
+      "tests": [
+        {
+          "name": "FaultInj_ShimsAbsentUnlessRequested",
+          "description": "With RCCL_IB_FAULT_INJECTION off, arming an ops-level fault must be refused: if it succeeds the libibverbs shims are installed, and their poll_cq takes one process-global mutex per call, serializing progress for the whole process",
+          "test_filter": "NetIbMPITest.FaultInjectionShimsAbsentUnlessRequested"
+        },
+        {
+          "name": "FaultInj_MultiThread_IsolationAcrossWorkers",
+          "description": "One worker breaks its own connection while the others keep transferring: the bystanders' transfers must all verify while the fault is live",
+          "test_filter": "NetIbMPITest.FaultIsolationAcrossWorkers"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorIsFatal",
+          "description": "Every worker arms error injection on its own QPs and must observe the failure itself",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorIsFatal"
+        },
+        {
+          "name": "FaultInj_MultiThread_DelayDataIntegrity",
+          "description": "Every worker slows its own QP 0 and still delivers intact data while the others load the device",
+          "test_filter": "NetIbMPITest.FaultInjCastDelayDataIntegrity"
+        },
+        {
+          "name": "FaultInj_MultiThread_QpErrorClearRecovers",
+          "description": "Each worker breaks one connection, clears the fault and must move data cleanly on a second connection",
+          "test_filter": "NetIbMPITest.FaultInjCastQpErrorClearRecovers"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverCqeErrorRecovered",
+          "description": "N workers break their own QP 0 at the same moment on one fused device, so the failovers overlap and each worker must keep routing over the surviving member. Port recovery is off in this suite, so the recovery thread is not involved -- the recovery configurations below cover that",
+          "test_filter": "NetIbMPITest.FailoverCqeErrorRecovered"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverLargeMessage",
+          "description": "Concurrent 64 KB messages survive their own link failure byte for byte",
+          "test_filter": "NetIbMPITest.FailoverLargeMessageDataIntegrity"
+        },
+        {
+          "name": "FaultInj_MultiThread_FailoverMultiRequest",
+          "description": "Every worker posts several messages, then breaks its own QP 0, then requires all of them to arrive intact with no fatal error, while the other workers do the same to their own connections. Whether a request was still on the wire at the transition is not observable from a worker, so it is not asserted; the repost count is logged as diagnostics",
+          "test_filter": "NetIbMPITest.FailoverMultiRequestInFlight"
+        }
+      ]
+    },
+    "fault_inject_multithread_2": {
+      "extends": "fault_inject_multithread",
+      "command_args": "--net_ib_nthreads=2"
+    },
+    "fault_inject_multithread_4": {
+      "extends": "fault_inject_multithread",
+      "command_args": "--net_ib_nthreads=4"
+    },
+    "fault_recovery_base": {
+      "extends": "fault_multithread_base",
+      "timeout": 900,
+      "command_args": "--net_ib_nthreads=2",
+      "env_variables": {
+        "NCCL_IB_RESILIENCY_PORT_RECOVERY": "1"
+      }
+    },
+    "fault_recovery_nightly_drift": {
+      "extends": "fault_recovery_base",
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_PostRecoveryPingPongHoldsSync",
+          "description": "Open finding: ten blocking messages on a recovered connection must not leave the ranks a message apart; disabled in this generic plan",
+          "test_filter": "NetIbMPITest.PostRecoveryPingPongHoldsSync"
+        }
+      ]
+    },
+    "fault_recovery_multithread_2": {
+      "extends": "fault_recovery_base",
+      "tests": [
+        {
+          "name": "FaultInj_MultiThread_RecoverySuccessRestoresTraffic",
+          "description": "Concurrent recoveries share one global recovery thread, then every worker's traffic must resume",
+          "test_filter": "NetIbMPITest.RecoverySuccessRestoresTraffic"
+        }
+      ]
     }
   },
   "test_suites": [
@@ -1093,7 +1506,7 @@
     },
     {
       "name": "NET IB - GDR Flush (Whitebox ncclIbIflush)",
-      "description": "Whitebox coverage of the NET/IB GDR flush fix: dma-buf and peermem RO=0 scratchpad reads, feature-disabled fallback, repeated-flush burst, and the fault-injection regression guard",
+      "description": "Whitebox coverage of the NET/IB GDR flush: dma-buf and peermem RO=0 scratchpad fence, feature-disabled fallback, and repeated-flush burst",
       "config": "net_ib_gdr_flush",
       "enabled": true
     },
@@ -1272,6 +1685,12 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Resiliency GID Change Refresh",
+      "description": "AICOMRCCL-2022: GID cache refresh on IBV_EVENT_GID_CHANGE and during port recovery (net_ib and net_ib_cast)",
+      "config": "resiliency_gid_change",
+      "enabled": true
+    },
+    {
       "name": "NET IB - Stress (2-rank)",
       "description": "Resource exhaustion, connection lifecycle, endurance, bidirectional, GPU stress",
       "config": "net_ib_stress",
@@ -1332,6 +1751,24 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Host RMA API on fused NICs",
+      "description": "The unblocked host one-sided RMA API exercised with NIC fusion active and GIN enabled",
+      "config": "net_ib_host_api_fused",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - RMA on fused NICs with GIN off",
+      "description": "Regression for host RMA window registration with fused NICs and GIN disabled",
+      "config": "net_ib_rma_fused_gin_off",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - GIN NIC Fusion",
+      "description": "GIN capabilities with NIC fusion active",
+      "config": "net_ib_gin_nic_fusion",
+      "enabled": true
+    },
+    {
       "name": "NET IB-CAST - GIN Peermem",
       "description": "GIN plugin tests with peermem support",
       "config": "net_ib_cast_gin_peermem",
@@ -1362,6 +1799,48 @@
       "enabled": true
     },
     {
+      "name": "NET IB - Multithread Multi-QP Split (4)",
+      "description": "4 worker threads/rank with 8 QPs per connection and data split across QPs",
+      "config": "net_ib_multithread_multiqp_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Multithread Multi-QP NoSplit (4)",
+      "description": "4 worker threads/rank with 4 QPs per connection on the nDataQps path",
+      "config": "net_ib_multithread_multiqp_nosplit_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (2)",
+      "description": "2 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (4)",
+      "description": "4 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Multithread (16)",
+      "description": "16 worker threads/rank driving independent IB-CAST connections and WRR schedulers",
+      "config": "cast_multithread_16",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST optional recv completion",
+      "description": "optRecvCompletion enabled (QP sched off): transfer sanity plus skip-CQ WRITE path",
+      "config": "cast_opt_recv",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST optional recv completion disabled by QP sched",
+      "description": "White-box: QP scheduler forces optRecvCompletion off",
+      "config": "cast_opt_recv_disabled_sched",
+      "enabled": true
+    },
+    {
       "name": "NET IB - CAST WRR+Split, long update interval",
       "description": "Scheduler toggle tests that need RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= 10 s; they skip in every other config",
       "config": "cast_wrr_split_long_interval",
@@ -1372,6 +1851,30 @@
       "description": "Scheduler toggle tests that need RCCL_IB_QP_SCHED_UPDATE_INTERVAL >= 10 s; they skip in every other config",
       "config": "cast_wrr_no_split_long_interval",
       "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (2)",
+      "description": "2 worker threads/rank injecting per-communicator faults, including cross-worker isolation",
+      "config": "fault_inject_multithread_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Injection Multithread (4)",
+      "description": "4 worker threads/rank injecting per-communicator faults, including cross-worker isolation",
+      "config": "fault_inject_multithread_4",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - Fault Recovery Multithread (2)",
+      "description": "Concurrent link recoveries through the single process-global recovery thread",
+      "config": "fault_recovery_multithread_2",
+      "enabled": true
+    },
+    {
+      "name": "NET IB - CAST Recovery Nightly Drift (2)",
+      "description": "Open finding: post-recovery ping-pong drifts a message apart",
+      "config": "fault_recovery_nightly_drift",
+      "enabled": false
     }
   ]
 }

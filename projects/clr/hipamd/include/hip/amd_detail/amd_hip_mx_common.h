@@ -10,12 +10,12 @@
 #else
 #define HIP_ENABLE_GFX950_OCP_BUILTINS 0
 #endif
-#if defined(__gfx1250__)
+#if defined(__gfx1250__) || defined(__gfx1250_strict__)
 #define HIP_ENABLE_GFX1250_OCP_BUILTINS 1
 #else
 #define HIP_ENABLE_GFX1250_OCP_BUILTINS 0
 #endif
-#if !defined(__gfx950__) && !defined(__gfx1250__)
+#if !defined(__gfx950__) && !defined(__gfx1250__) && !defined(__gfx1250_strict__)
 #define HIP_ENABLE_HOST_OCP_CONVERSIONS 1
 #else
 #define HIP_ENABLE_HOST_OCP_CONVERSIONS 0

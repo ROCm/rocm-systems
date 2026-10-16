@@ -127,12 +127,13 @@ script must run it before parsing the XML and fail closed if the delta contains
 unrecorded metadata or no longer reconstructs from those inputs. The CDNA5
 gfx1251 manifest and verifier next to its delta are the reference pattern.
 
-## ISA variant capabilities
+## Generated ISA variant features
 
-An optional JSON manifest assigns semantic capability bits to concrete targets
-within one generated ISA family. It is deliberately separate from additive XML
-deltas: the XML describes which instruction forms can be decoded, while the
-manifest describes which concrete targets may use them. For example:
+An optional JSON manifest assigns instruction-and-encoding legality bits to
+concrete targets within one generated ISA family. It is deliberately separate
+from additive XML deltas: the XML describes which instruction forms can be
+decoded, while the manifest describes which concrete targets may use them. For
+example:
 
 ```json
 {
@@ -175,6 +176,12 @@ instruction-plus-encoding requirement with its concrete target mask before
 returning it. Entries in `model_only_instructions` are emitted without execute
 declarations, definitions, execution IDs, or callbacks; they can be decoded and
 inspected but cannot accidentally acquire placeholder execution semantics.
+
+These generated feature masks do not describe runtime behavior differences
+between targets that share an instruction form. Model those differences as
+fail-closed, provider-authored fields in `IsaTargetCapabilities`, and have the
+execution or analysis consumer query the selected concrete binding. This keeps
+handwritten target semantics separate from the generated legality contract.
 
 Attach at most one manifest to each logical ISA name. It is applied after the
 base XML and all ISA additions are parsed, and before semantics derivation and
@@ -267,6 +274,15 @@ appropriate relative or absolute path. It discovers the active environment
 through `VIRTUAL_ENV` or the active Python interpreter, then formats changed
 generated files through the repository's pre-commit configuration.
 
+The CDNA1 through CDNA4 additions provide LLVM-supported legacy EXP/LOG encodings
+missing from the published base XML, while preserving those upstream inputs.
+The legacy EXP/LOG executors use the shared transcendental approximation and
+explicit flush/nearest output policy. The CDNA1/CDNA2 manuals specify base-2
+operations with unspecified legacy semantics. The CDNA3/CDNA4 manuals list the
+legacy names among transcendental operations but omit their opcode and operation
+definitions; their encodings come from LLVM. Bit-for-bit agreement for arbitrary
+inputs has not been qualified on CDNA hardware.
+
 The manual commands below are useful for focused generator development and are
 run from the rocjitsu project root. Set `MRISA` to the shared MR ISA directory:
 
@@ -284,6 +300,12 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
+  --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   --include-root lib/rocjitsu/src \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
@@ -306,6 +328,12 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
+  --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-isas \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
   --include-root lib/rocjitsu/src
@@ -328,6 +356,12 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
+  --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
+  --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-dbt \
   --dbt-output lib/rocjitsu/src/rocjitsu/code/dbt/generated
 

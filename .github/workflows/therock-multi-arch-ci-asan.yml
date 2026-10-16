@@ -61,7 +61,7 @@ concurrency:
 
 jobs:
   setup:
-    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+    uses: ROCm/TheRock/.github/workflows/setup_multi_arch.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
     with:
       build_variant: "host-asan"
       build_stages: "compiler-runtime,runtime-tests"
@@ -76,8 +76,17 @@ jobs:
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       baseline_repository: ${{ inputs.baseline_repository || (inputs.baseline_run_id != '' && github.repository) || '' }}
       repository: ROCm/TheRock
-      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
-      external_repo: '{"repository":"${{ github.repository }}","ref":"${{ github.sha }}"}'
+      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
+      external_repo: >-
+        {
+          "repository": "${{ github.repository }}",
+          "ref": "${{ github.sha }}",
+          "base_sha": "${{ github.event.pull_request.base.sha || github.event.before }}",
+          "head_sha": "${{ github.sha }}",
+          "pr_number": ${{ github.event.pull_request.number || 'null' }},
+          "event_name": "${{ github.event_name }}",
+          "skip_ci_config": ".github/skip-ci-config.toml"
+        }
 
   linux_build_and_test:
     name: Linux::${{ fromJSON(needs.setup.outputs.linux_build_config || '{}').build_variant_label || 'skip' }}
@@ -87,7 +96,7 @@ jobs:
         needs.setup.outputs.linux_build_config != '' &&
         needs.setup.outputs.enable_build_jobs == 'true'
       }}
-    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+    uses: ROCm/TheRock/.github/workflows/multi_arch_ci_linux.yml@c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
     with:
       build_config: ${{ needs.setup.outputs.linux_build_config }}
       test_labels: ${{ needs.setup.outputs.linux_test_labels }}
@@ -97,13 +106,13 @@ jobs:
       test_type: ${{ needs.setup.outputs.test_type }}
       external_repo_config: ${{ needs.setup.outputs.external_repo_config }}
       repository: ROCm/TheRock
-      ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+      ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
     permissions:
       contents: read
       id-token: write
 
-  multi_arch_ci_summary:
-    name: Multi-Arch CI Summary
+  multi_arch_ci_asan_summary:
+    name: Multi-Arch CI ASAN Summary
     # always() is needed to show the job statuses regardless of failure
     if: always()
     needs:
@@ -115,13 +124,14 @@ jobs:
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           repository: "ROCm/TheRock"
-          ref: 3c4ec014374d4d32243334ef229093fe7b38c5b2 # 2026-08-31
+          ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
           sparse-checkout: build_tools/github_actions
           sparse-checkout-cone-mode: true
 
       - name: Evaluate workflow results
         env:
           GITHUB_TOKEN: ${{ github.token }}
+          NEEDS_JSON: ${{ toJSON(needs) }}
         run: |
           python build_tools/github_actions/workflow_summary.py \
-            --needs-json '${{ toJSON(needs) }}'
+            --needs-json "${NEEDS_JSON}"

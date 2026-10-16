@@ -7,9 +7,11 @@
 
 #include <algorithm>
 #include <cassert>
+#include <chrono>
 #include <exception>
 #include <stdexcept>
 #include <string>
+#include <thread>
 
 namespace simdojo {
 
@@ -320,6 +322,8 @@ bool SimulationEngine::step() {
       running_ = false;
       return false;
     }
+    if (async_queues_[0]->pending.load(std::memory_order_acquire))
+      drain_async_events();
   }
 
   current_time_.store(step_tick, std::memory_order_release);
@@ -339,13 +343,13 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       drain_async_events();
 
       // Single-threaded: drain all events in timestamp order.
-      // Drain async events at each tick boundary so that events from other
-      // threads (e.g. doorbell poll threads) are merged promptly instead of
-      // waiting for the main queue to empty — which may never happen when
-      // CU work events continuously reschedule.
-      //
-      // Within a tick, defer pushes so that handler reschedules don't
-      // interleave with pops (avoids O(N log N) heap churn per tick).
+      // Drain async events at each tick boundary and after every event that
+      // observes a pending async insertion. A same-tick batch can contain a
+      // small number of very expensive handlers (for example, functional CU
+      // quanta), so deferring an externally injected doorbell until the next
+      // tick can starve peer work for an unbounded amount of wall-clock time.
+      // The pending load keeps the ordinary event path lock-free; heap work is
+      // incurred only when a producer actually queued an async event.
       Tick last_drained_tick = 0;
       while (!ctx.event_queue.empty()) {
         Tick next_tick = ctx.event_queue.next_event_time();
@@ -357,6 +361,8 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
         process_event(ctx, entry);
         if (done_.load(std::memory_order_acquire))
           return;
+        if (async_queues_[0]->pending.load(std::memory_order_acquire))
+          drain_async_events();
       }
 
       // Queue drained now update global time for external observers.
@@ -378,7 +384,7 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Primaries still active so wait for an async event. With wall-clock
       // sync, use a timed sleep+check loop so we can advance sim time
       // proportionally to elapsed wall time during idle periods. Without
-      // pacing, use atomic::wait() for an efficient unbounded wait.
+      // pacing, sleep briefly between wake-flag and exit checks.
       pacer_.pause();
       {
         auto timeout = pacer_.idle_wait_duration();
@@ -401,7 +407,13 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       }
       if (done_.load(std::memory_order_acquire))
         break;
-      ctx.idle_wakeup_.store(false, std::memory_order_release);
+      // Consume the notification atomically with respect to producers. A plain
+      // store can overwrite a concurrent wake without acquiring the producer's
+      // preceding writes (async work or a primary-count decrement), leaving the
+      // event or termination checks stale and the worker asleep. An exchange
+      // either acquires those writes or leaves a later producer's notification
+      // set for the next idle wait.
+      ctx.idle_wakeup_.exchange(false, std::memory_order_acq_rel);
 
       // After waking from idle, resume the pacing clock.
       pacer_.resume();
@@ -430,8 +442,20 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       drain_async_for_partition(ctx);
 
       // Phase 2: Process all events with timestamp <= global LBTS.
+      //
+      // TICK_MAX is the absence of a horizon, not an infinite one: it says every
+      // partition published "nothing scheduled" at the last barrier, so this
+      // epoch has no bound to process against. Treating it as one lets a
+      // partition whose handlers keep re-arming (the command processor's stall
+      // re-check does, once per doorbell wait) run the entire simulation inside
+      // a single epoch while every peer sits in the barrier waiting for it --
+      // which is the multi-partition hang. Skip processing instead: whatever the
+      // drain above just pulled in is published below, the barrier turns it into
+      // a finite LBTS, and the next epoch processes it. The cost is one extra
+      // epoch per idle-to-busy transition.
       Tick lbts = global_lbts_.load(std::memory_order_acquire);
-      while (!ctx.event_queue.empty() && ctx.event_queue.next_event_time() <= lbts) {
+      while (lbts != TICK_MAX && !ctx.event_queue.empty() &&
+             ctx.event_queue.next_event_time() <= lbts) {
         auto entry = ctx.event_queue.pop();
         process_event(ctx, entry);
         if (done_.load(std::memory_order_acquire)) {
@@ -475,10 +499,51 @@ void SimulationEngine::barrier_completion() {
 
   if (check_termination(new_lbts))
     return;
+
+  if (new_lbts == TICK_MAX)
+    idle_wait_quiescent();
+}
+
+void SimulationEngine::idle_wait_quiescent() {
+  // Every partition published TICK_MAX, so nothing in the simulation can advance
+  // until a foreign thread posts an async event -- a doorbell, a primary
+  // releasing, or request_exit(). Without a wait here the epoch loop runs flat
+  // out, and an idle engine pins one host core per partition. That is not just
+  // waste: rocjitsu's own suite runs many emulators at once under `ctest -j`, and
+  // the spinning partitions starve the guest process that has to ring the
+  // doorbell, so a run that is merely idle never becomes busy again.
+  //
+  // This runs in the barrier's completion function, which means every other
+  // worker is already parked inside the barrier -- so one bounded sleep here
+  // idles the whole engine, with no wakeup to lose and no peer left waiting on a
+  // partition that decided to sleep on its own.
+  //
+  // Bounded rather than unbounded: the loop must come back often enough to keep
+  // re-checking termination, and the exit paths that set done_ do not all post an
+  // async event. A 1ms cap costs an idle engine a thousand near-empty epochs a
+  // second, and the 50us poll keeps the added doorbell latency well inside the
+  // 100us cadence the command processor's own poll thread already runs at.
+  using namespace std::chrono_literals;
+  const auto deadline = std::chrono::steady_clock::now() + 1ms;
+  while (!done_.load(std::memory_order_acquire) && !any_async_pending()) {
+    if (std::chrono::steady_clock::now() >= deadline)
+      return;
+    std::this_thread::sleep_for(50us);
+  }
+}
+
+bool SimulationEngine::any_async_pending() const {
+  for (const auto &aq : async_queues_) {
+    if (aq->pending.load(std::memory_order_acquire))
+      return true;
+  }
+  return false;
 }
 
 void SimulationEngine::process_event(PartitionContext &ctx, EventQueueEntry &entry) {
   ctx.event_queue.set_current_tick(entry.timestamp);
+  if (config_.num_threads == 1)
+    current_time_.store(entry.timestamp, std::memory_order_release);
 
   if (entry.event->has_handler())
     entry.event->execute(entry.timestamp, entry.message.get());
@@ -547,6 +612,11 @@ bool SimulationEngine::all_primaries_done() const {
 }
 
 bool SimulationEngine::check_termination(Tick lbts) {
+  // Async events posted during this epoch are absent from the published LBTS.
+  // Drain them in the next epoch before deciding that work is finished or that
+  // the next event exceeds the tick limit (notably terminal CP cancellation).
+  if (any_async_pending())
+    return false;
   if (all_primaries_done()) {
     // All primaries have signaled done. Enter draining phase: continue
     // processing until the system is fully quiescent (all incoming queues
@@ -560,7 +630,7 @@ bool SimulationEngine::check_termination(Tick lbts) {
   }
   // Multi-threaded max_ticks: terminate when global LBTS reaches max_ticks.
   if (config_.max_ticks > 0 && config_.num_threads > 1) {
-    if (lbts >= config_.max_ticks) {
+    if (lbts != TICK_MAX && lbts >= config_.max_ticks) {
       set_exit(ExitReason::COMPLETED, config_.max_ticks, "max ticks reached");
       done_.store(true, std::memory_order_release);
       return true;
@@ -588,7 +658,9 @@ void SimulationEngine::wake_partition_locked(PartitionID pid) {
   if (config_.num_threads != 1 || pid >= contexts_.size())
     return;
   PartitionContext &ctx = *contexts_[pid];
-  ctx.idle_wakeup_.store(true, std::memory_order_release);
+  // Keep concurrent producers in one release sequence so consuming the wake
+  // acquires every publication, including one followed by a delayed older wake.
+  ctx.idle_wakeup_.exchange(true, std::memory_order_release);
   ctx.idle_wakeup_.notify_one();
 }
 
@@ -639,7 +711,7 @@ void SimulationEngine::schedule_event_async(Event *event, Tick timestamp,
   auto &aq = *async_queues_[pid];
   {
     std::lock_guard<std::mutex> qlock(aq.mutex);
-    aq.events.push_back(EventQueueEntry{timestamp, 0, event, std::move(message)});
+    aq.events.push_back(EventQueueEntry{timestamp, 0, event, std::move(message), true});
     aq.pending.store(true, std::memory_order_release);
   }
 
@@ -654,14 +726,26 @@ void SimulationEngine::schedule_event_now(Event *event, std::unique_ptr<Message>
   schedule_event_async(event, timestamp, std::move(message));
 }
 
+void SimulationEngine::schedule_event_next_tick(Event *event, std::unique_ptr<Message> message) {
+  Tick timestamp =
+      pacer_.enabled() ? pacer_.sim_tick_now() : current_time_.load(std::memory_order_acquire);
+  if (timestamp != TICK_MAX)
+    ++timestamp;
+  schedule_event_async(event, timestamp, std::move(message));
+}
+
 void SimulationEngine::drain_async_events() {
   for (uint32_t i = 0; i < async_queues_.size(); ++i) {
     auto &aq = *async_queues_[i];
     if (!aq.pending.load(std::memory_order_acquire))
       continue;
     std::lock_guard<std::mutex> lock(aq.mutex);
-    for (auto &e : aq.events)
+    const Tick floor = contexts_[i]->event_queue.current_tick();
+    for (auto &e : aq.events) {
+      if (e.timestamp < floor)
+        e.timestamp = floor;
       contexts_[i]->event_queue.push(std::move(e));
+    }
     aq.events.clear();
     aq.pending.store(false, std::memory_order_release);
   }

@@ -149,7 +149,16 @@ public:
     virtual bool spi_ttmps_setup_enabled () const = 0;
     /* Return the globally unique wave identifier.  */
     virtual amd_dbgapi_wave_id_t id () const = 0;
-    /* The 3-dimensional workgroup coordinates.  */
+    /* The 3-dimensional cluster coordinates within the grid.  If a
+       dispatch could not be associated, this is nullopt.  */
+    virtual std::optional<std::array<uint32_t, 3>> cluster_ids () const;
+    /* The number of workgroups in each of 3-dimensions in the cluster
+       that this wave belongs to.  Even when the dispatch is not in
+       cluster mode, we imagine that each workgroup belongs to a
+       cluster, which is (1, 1, 1) in size.  */
+    virtual std::array<uint32_t, 3> nwg_in_cluster () const;
+    /* The 3-dimensional workgroup coordinates within the grid.  If a
+       dispatch could not be associated, this is nullopt.  */
     virtual std::optional<std::array<uint32_t, 3>> group_ids () const = 0;
     /* Return the record's position in the workgroup.  */
     virtual std::optional<uint32_t> position_in_group () const = 0;
@@ -160,6 +169,10 @@ public:
     virtual bool is_last_wave () const = 0;
     /* First wave of threadgroup.  */
     virtual bool is_first_wave () const = 0;
+    /* Last wave of cluster.  */
+    virtual bool is_last_of_cluster () const { return false; }
+    /* First wave of cluster  */
+    virtual bool is_first_of_cluster () const { return false; }
 
     /* Size of the local data share.  */
     virtual size_t lds_size () const = 0;
@@ -169,9 +182,6 @@ public:
 
     virtual std::optional<agent_address_t>
     register_address (amdgpu_regnum_t regnum) const = 0;
-
-    /* Return true if a scratch slot is allocated for this record.  */
-    virtual bool is_scratch_enabled () const = 0;
 
     /* The shader engine ID this wave was created on.  */
     virtual uint32_t shader_engine_id () const = 0;
@@ -242,9 +252,21 @@ public:
 
   virtual std::pair<amd_dbgapi_size_t /* offset  */,
                     amd_dbgapi_size_t /* size  */>
-  scratch_memory_region (const agent_t &,
-                         uint32_t compute_tmpring_size_register,
-                         const cwsr_record_t &cwsr_record) const
+  scratch_memory_region (
+    const agent_t &,
+    uint32_t compute_tmpring_size_register,
+    amd_dbgapi_global_address_t scratch_backing_memory_address,
+    const cwsr_record_t &cwsr_record) const
+    = 0;
+
+  /* Total size of allocated scratch memory.  The unit is number of waves.  */
+  virtual amd_dbgapi_size_t
+  scratch_memory_allocation (uint32_t compute_tmpring_size_register) const
+    = 0;
+
+  /* Size, in bytes, of the scratch memory allocated per wave.  */
+  virtual amd_dbgapi_size_t
+  scratch_memory_size (uint32_t compute_tmpring_size_register) const
     = 0;
 
   virtual bool
@@ -403,6 +425,8 @@ public:
 
   void get_info (amd_dbgapi_architecture_info_t query, size_t value_size,
                  void *value) const;
+
+  virtual bool supports_clusters () const { return false; }
 
   template <typename Object, typename... Args> auto &create (Args &&...args)
   {
