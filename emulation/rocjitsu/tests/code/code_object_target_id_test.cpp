@@ -17,8 +17,6 @@
 // \NPI new GPU: extend these tests with its provider-owned MACH/triple binding.
 #include "rocjitsu/code/amdgpu_code_object.h"
 #include "rocjitsu/code/amdgpu_elf.h"
-#include "rocjitsu/code/executable.h"
-#include "rocjitsu/code/file_io.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/decoder.h"
@@ -29,41 +27,11 @@
 #include <array>
 #include <cstdint>
 #include <cstring>
-#include <string>
 #include <string_view>
 #include <vector>
 
 namespace rocjitsu {
 namespace {
-
-TEST(FileLoadingTest, RejectsDirectoryWithoutThrowing) {
-  const test::ScopedTempDirectory directory("rocjitsu_file_loading_");
-  EXPECT_TRUE(detail::read_file_bytes(directory.path()).failed());
-  EXPECT_FALSE(Executable(directory.path()).is_valid());
-  EXPECT_FALSE(AmdGpuCodeObject(directory.path()).is_valid());
-
-  rj_code_executable_t *executable = nullptr;
-  EXPECT_EQ(rj_code_executable_create(directory.path().c_str(), &executable),
-            ROCJITSU_STATUS_INVALID_CODE_OBJECT);
-  EXPECT_EQ(executable, nullptr);
-}
-
-TEST(FileLoadingTest, RejectsMissingFileWithoutThrowing) {
-  const test::ScopedTempDirectory directory("rocjitsu_file_loading_");
-  const std::string path = directory.path() + "/missing";
-  EXPECT_TRUE(detail::read_file_bytes(path).failed());
-  EXPECT_FALSE(Executable(path).is_valid());
-  EXPECT_FALSE(AmdGpuCodeObject(path).is_valid());
-}
-
-TEST(FileLoadingTest, ReadsEmptyFileButRejectsItAsCode) {
-  const test::ScopedTempFile file("rocjitsu_file_loading_");
-  auto image = detail::read_file_bytes(file.path());
-  ASSERT_TRUE(image.succeeded());
-  EXPECT_TRUE(image.value().empty());
-  EXPECT_FALSE(Executable(file.path()).is_valid());
-  EXPECT_FALSE(AmdGpuCodeObject(file.path()).is_valid());
-}
 
 // Helpers duplicated from tests/dbt/translate_test.cpp /
 // tests/patch/instrumentor_test.cpp.

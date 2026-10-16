@@ -14,6 +14,10 @@
 
 namespace rocjitsu::detail {
 
+/// @brief Read the contents of a regular file.
+/// @returns The file contents, or failure if the path is missing, is not a regular
+/// file, or an I/O error occurs. An empty regular file succeeds with an empty vector.
+/// @throws std::bad_alloc if memory allocation fails.
 util::FailureOr<std::vector<char>> read_file_bytes(std::string_view path);
 
 bool fits_in_bounds(uint64_t offset, uint64_t size, size_t limit);
