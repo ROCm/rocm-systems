@@ -2879,9 +2879,10 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
 }
 
 // SUB and SUBREV add the negated subtrahend, keeping the sources in operand
-// order: a NaN subtrahend comes out quieted with its sign flipped, and with two
-// NaNs src0's NaN wins. Lanes and MODE values are gfx1201 captures. F16
-// sources keep their captured high halves; the destination's high half stays.
+// order: a NaN subtrahend comes out with its sign flipped, and with two NaNs
+// src0's NaN wins. Lanes and MODE values are gfx1201 captures, plus gfx1100
+// IEEE=0 captures, where signaling NaNs stay unquieted. F16 sources keep their
+// captured high halves; the destination's high half stays.
 std::vector<ArithmeticCase> subtraction_nan_cases() {
   struct Lane {
     const char *name;
@@ -2890,6 +2891,7 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
     uint32_t result;
   };
   struct Form {
+    rj_code_arch_t arch;
     const char *name;
     std::array<uint32_t, 2> words;
     std::array<uint32_t, 2> modes;
@@ -2903,65 +2905,100 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
     return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257, .neg = neg});
   };
   // The E32 captures cover MODE 0x30 and 0xc0; the E64 ones cover 0x00 and 0xf0.
-  const std::array<Form, 8> forms = {{
-      {"SubF32E32",
+  // llvm-mc gives gfx1100 the same VOP2 F32 SUB/SUBREV encodings as gfx1201.
+  constexpr rj_code_arch_t kGfx1201 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rj_code_arch_t kGfx1100 = ROCJITSU_CODE_ARCH_RDNA3;
+  const std::array<Form, 10> forms = {{
+      {kGfx1201,
+       "SubF32E32",
        vop2(rdna4::kVSubF32Vop2),
        {0x30u, 0xc0u},
        {{"NanSubtrahend", 0x80000000u, 0x7fc00000u, 0xffc00000u},
         {"SignalingSubtrahend", 0x00000000u, 0x7f800001u, 0xffc00001u},
         {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0x7fc00000u}}},
-      {"SubrevF32E32",
+      {kGfx1201,
+       "SubrevF32E32",
        vop2(rdna4::kVSubrevF32Vop2),
        {0x30u, 0xc0u},
        {{"NanSubtrahend", 0x7fc00000u, 0x80000000u, 0xffc00000u},
         {"SignalingSubtrahend", 0x7f800001u, 0x00000000u, 0xffc00001u},
         {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0xffc00000u}}},
-      {"SubF16E32",
+      {kGfx1201,
+       "SubF16E32",
        vop2(rdna4::kVSubF16Vop2),
        {0x30u, 0xc0u},
        {{"NanSubtrahend", 0xedc48000u, 0x1b937e00u, 0xa5a5fe00u},
         {"SignalingSubtrahend", 0x7a990000u, 0x0e867c01u, 0xa5a5fe01u},
         {"TwoNans", 0x034c7e00u, 0x4ec77e00u, 0xa5a57e00u}}},
-      {"SubrevF16E32",
+      {kGfx1201,
+       "SubrevF16E32",
        vop2(rdna4::kVSubrevF16Vop2),
        {0x30u, 0xc0u},
        {{"NanSubtrahend", 0x6fb27e00u, 0xd04c8000u, 0xa5a5fe00u},
         {"SignalingSubtrahend", 0xa4e67c01u, 0x42b40000u, 0xa5a5fe01u},
         {"TwoNans", 0xbc067e00u, 0x926d7e00u, 0xa5a5fe00u}}},
       // NEG on the subtrahend cancels the subtraction's sign flip.
-      {"SubF32E64Neg1",
+      {kGfx1201,
+       "SubF32E64Neg1",
        vop3(rdna4::kVSubF32Vop3, 2),
        {0x00u, 0xf0u},
        {{"NanSubtrahend", 0x80000000u, 0x7fc00000u, 0x7fc00000u}}},
-      {"SubrevF32E64Neg0",
+      {kGfx1201,
+       "SubrevF32E64Neg0",
        vop3(rdna4::kVSubrevF32Vop3, 1),
        {0x00u, 0xf0u},
        {{"NanSubtrahend", 0x7fc00000u, 0x80000000u, 0x7fc00000u}}},
-      {"SubF16E64Neg1",
+      {kGfx1201,
+       "SubF16E64Neg1",
        vop3(rdna4::kVSubF16Vop3, 2),
        {0x00u, 0xf0u},
        {{"NanSubtrahend", 0x913b8000u, 0x72617e00u, 0xa5a57e00u}}},
-      {"SubrevF16E64Neg0",
+      {kGfx1201,
+       "SubrevF16E64Neg0",
        vop3(rdna4::kVSubrevF16Vop3, 1),
        {0x00u, 0xf0u},
        {{"NanSubtrahend", 0x6c027e00u, 0x840c8000u, 0xa5a57e00u}}},
+      {kGfx1100,
+       "SubF32E32",
+       vop2(rdna4::kVSubF32Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x00000000u, 0x7fc00000u, 0xffc00000u},
+        {"SignalingSubtrahend", 0x00000000u, 0x7f800001u, 0xff800001u},
+        {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0x7fc00000u}}},
+      {kGfx1100,
+       "SubrevF32E32",
+       vop2(rdna4::kVSubrevF32Vop2),
+       {0x30u, 0xc0u},
+       {{"NanSubtrahend", 0x7fc00000u, 0x00000000u, 0xffc00000u},
+        {"SignalingSubtrahend", 0x7f800001u, 0x00000000u, 0xff800001u},
+        {"TwoNans", 0x7fc00000u, 0x7fc00000u, 0xffc00000u}}},
   }};
   constexpr uint32_t kHigh = 0xa5a50000u;
   std::vector<ArithmeticCase> cases;
   for (const Form &form : forms) {
     const bool half = std::string_view(form.name).find("F16") != std::string_view::npos;
+    // VOP3 F16 SUB/SUBREV share ADD's MODE-aware SIMD route, including NEG.
+    const SimdPathExpectation simd =
+        std::string_view(form.name).find("F16E64") != std::string_view::npos
+            ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)
+            : SimdPathExpectation{};
     for (const Lane &lane : form.lanes) {
       for (const uint32_t mode : form.modes) {
         std::vector<std::pair<uint32_t, uint32_t>> sources{{0, lane.src0}, {1, lane.src1}};
         if (half)
           sources.emplace_back(6, kHigh);
-        cases.push_back({std::format("{}{}Mode{:02X}", form.name, lane.name, mode),
-                         ROCJITSU_CODE_ARCH_RDNA4,
-                         {form.words[0], form.words[1], 0u},
-                         std::move(sources),
-                         {{6, lane.result}},
-                         mode,
-                         FE_TONEAREST});
+        cases.push_back(
+            {std::format("{}{}{}Mode{:02X}", form.arch == kGfx1100 ? "Gfx1100" : "Gfx1201",
+                         form.name, lane.name, mode),
+             form.arch,
+             {form.words[0], form.words[1], 0u},
+             std::move(sources),
+             {{6, lane.result}},
+             mode,
+             FE_TONEAREST,
+             0u,
+             0u,
+             simd});
       }
     }
   }
@@ -2969,23 +3006,33 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
 }
 
 // V_CNDMASK_B16 applies ABS/NEG to the selected half's sign bit, without
-// flushing or quieting it. Lanes are gfx1201 captures of
-// v_cndmask_b16 v6, -v0, |v1|, s[10:11], which gave the same result under all
-// 16 MODE denormal settings. The selector picks the captured source in every lane.
+// flushing or quieting it. Lanes are captures of
+// v_cndmask_b16 v6, -v0, |v1|, s[10:11]: gfx1201 gave the same result under all
+// 16 MODE denormal settings, and all 8,192 gfx1100 IEEE=0 lanes at MODE 0xf0
+// follow the same rule. llvm-mc gives both targets the same encoding. The
+// selector picks the captured source in every lane.
 std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
   struct Lane {
+    rj_code_arch_t arch;
     const char *name;
     uint32_t src0;
     uint32_t src1;
     bool select_src1;
     uint32_t result;
   };
-  constexpr std::array<Lane, 5> lanes = {{
-      {"NegSubnormal", 0x7ac50200u, 0xe8ea0000u, false, 0xa5a58200u},
-      {"NegNegativeSubnormal", 0x2eff83ffu, 0xc24b0000u, false, 0xa5a503ffu},
-      {"NegSignalingNan", 0xe9eb7d55u, 0xed760000u, false, 0xa5a5fd55u},
-      {"AbsNegativeSubnormal", 0x0c140000u, 0x56f883ffu, true, 0xa5a503ffu},
-      {"AbsNegativeNan", 0x24ed8000u, 0x2835fe00u, true, 0xa5a57e00u},
+  constexpr rj_code_arch_t kGfx1201 = ROCJITSU_CODE_ARCH_RDNA4;
+  constexpr rj_code_arch_t kGfx1100 = ROCJITSU_CODE_ARCH_RDNA3;
+  constexpr std::array<Lane, 10> lanes = {{
+      {kGfx1201, "NegSubnormal", 0x7ac50200u, 0xe8ea0000u, false, 0xa5a58200u},
+      {kGfx1201, "NegNegativeSubnormal", 0x2eff83ffu, 0xc24b0000u, false, 0xa5a503ffu},
+      {kGfx1201, "NegSignalingNan", 0xe9eb7d55u, 0xed760000u, false, 0xa5a5fd55u},
+      {kGfx1201, "AbsNegativeSubnormal", 0x0c140000u, 0x56f883ffu, true, 0xa5a503ffu},
+      {kGfx1201, "AbsNegativeNan", 0x24ed8000u, 0x2835fe00u, true, 0xa5a57e00u},
+      {kGfx1100, "NegNegativeSubnormal", 0x2eff83ffu, 0xc24b0000u, false, 0xa5a503ffu},
+      {kGfx1100, "NegNegativeSignalingNan", 0xa66dfc01u, 0x00ed0000u, false, 0xa5a57c01u},
+      {kGfx1100, "NegNegativeZero", 0x68688000u, 0x14df0001u, false, 0xa5a50000u},
+      {kGfx1100, "AbsNegativeSubnormal", 0x0c140000u, 0x56f883ffu, true, 0xa5a503ffu},
+      {kGfx1100, "AbsNegativeSignalingNan", 0xa26e8000u, 0xa9e3fc01u, true, 0xa5a57c01u},
   }};
   constexpr uint32_t kHigh = 0xa5a50000u;
   std::vector<ArithmeticCase> cases;
@@ -2994,18 +3041,21 @@ std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
                         {.vdst = 6, .abs = 2, .src0 = 256, .src1 = 257, .src2 = 10, .neg = 1});
   for (const Lane &lane : lanes) {
     const uint32_t selector = lane.select_src1 ? ~0u : 0u;
-    for (const uint32_t mode : {0x00u, 0x30u, 0xc0u}) {
-      cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
-                       ROCJITSU_CODE_ARCH_RDNA4,
-                       {words[0], words[1], 0u},
-                       {{0, lane.src0}, {1, lane.src1}, {6, kHigh}},
-                       {{6, lane.result}},
-                       mode,
-                       FE_TONEAREST,
-                       0u,
-                       0u,
-                       {},
-                       {{10, selector}, {11, selector}}});
+    const bool gfx1100 = lane.arch == kGfx1100;
+    for (const uint32_t mode :
+         gfx1100 ? std::vector<uint32_t>{0xf0u} : std::vector<uint32_t>{0x00u, 0x30u, 0xc0u}) {
+      cases.push_back(
+          {std::format("{}{}Mode{:02X}", gfx1100 ? "Gfx1100" : "Gfx1201", lane.name, mode),
+           lane.arch,
+           {words[0], words[1], 0u},
+           {{0, lane.src0}, {1, lane.src1}, {6, kHigh}},
+           {{6, lane.result}},
+           mode,
+           FE_TONEAREST,
+           0u,
+           0u,
+           {},
+           {{10, selector}, {11, selector}}});
     }
   }
   return cases;
@@ -3292,7 +3342,7 @@ INSTANTIATE_TEST_SUITE_P(F16BinaryModifiers, ValuF16BinaryModifierTest,
 
 class ValuSubtractionNanTest : public testing::TestWithParam<ArithmeticCase> {};
 
-TEST_P(ValuSubtractionNanTest, MatchesGfx1201WithSimdEnabledAndForcedScalar) {
+TEST_P(ValuSubtractionNanTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
@@ -3301,7 +3351,7 @@ TEST_P(ValuSubtractionNanTest, MatchesGfx1201WithSimdEnabledAndForcedScalar) {
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuSubtractionNanTest,
+INSTANTIATE_TEST_SUITE_P(Captures, ValuSubtractionNanTest,
                          testing::ValuesIn(subtraction_nan_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
@@ -3309,7 +3359,7 @@ INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuSubtractionNanTest,
 
 class ValuCndmaskB16ModifierTest : public testing::TestWithParam<ArithmeticCase> {};
 
-TEST_P(ValuCndmaskB16ModifierTest, MatchesGfx1201WithSimdEnabledAndForcedScalar) {
+TEST_P(ValuCndmaskB16ModifierTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
@@ -3318,7 +3368,7 @@ TEST_P(ValuCndmaskB16ModifierTest, MatchesGfx1201WithSimdEnabledAndForcedScalar)
   }
 }
 
-INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuCndmaskB16ModifierTest,
+INSTANTIATE_TEST_SUITE_P(Captures, ValuCndmaskB16ModifierTest,
                          testing::ValuesIn(cndmask_b16_modifier_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;

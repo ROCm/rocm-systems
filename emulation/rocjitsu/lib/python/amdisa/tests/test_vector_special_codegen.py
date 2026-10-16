@@ -254,12 +254,25 @@ def test_vop3_f16_simd_probes_split_true16_from_generic():
 
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(false,' in add_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(true,' in add_true16
-    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_generic
-    assert 'amdgpu::fp_mode::Arithmetic::ADD' in add_true16
+    assert add_generic.endswith('amdgpu::fp_mode::Arithmetic::ADD, -1);')
+    assert add_true16.endswith('amdgpu::fp_mode::Arithmetic::ADD, -1);')
     assert 'if (!wf.fp16_ovfl())' not in rcp_generic
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_FP16' in rcp_generic
     assert 'if (!wf.fp16_ovfl())' not in rcp_true16
     assert 'ROCJITSU_TRY_SIMD_VOP3_UNARY_TRUE16_FP16' in rcp_true16
+
+
+@pytest.mark.parametrize('true16', [False, True])
+@pytest.mark.parametrize(('mnemonic', 'negated'), [('sub', 1), ('subrev', 0)])
+def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true16):
+    probe = simd_probe_line(f'v_{mnemonic}_f16_vop3', true16_vop3=true16)
+
+    # SUB/SUBREV share ADD's MODE-aware route, negating the subtrahend after
+    # ABS/NEG; no native-environment gate or host subtraction remains.
+    assert probe == (
+        '  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16('
+        f'{str(true16).lower()}, amdgpu::fp_mode::Arithmetic::ADD, {negated});'
+    )
     fma_generic = simd_probe_line('v_fma_f16_vop3')
     fma_true16 = simd_probe_line('v_fma_f16_vop3', true16_vop3=True)
     assert fma_generic == '  ROCJITSU_TRY_SIMD_FMA_VOP3_FP16();'

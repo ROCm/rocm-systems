@@ -2282,20 +2282,28 @@ template <bool True16, typename T, typename Inst, typename BinOp>
   return false;
 }
 
-/// @brief Execute VOP3 F16 ADD/MUL with MODE and source/output modifiers.
+/// @brief Execute VOP3 F16 ADD/SUB/SUBREV/MUL with MODE and source/output modifiers.
 /// @details Guest RNE only; denormal controls are applied explicitly on half encodings.
 /// The wrapper applies raw ABS/NEG before the operation and OMOD/CLAMP afterward.
-/// Signed input flushing commutes with ABS/NEG. True16 selection and stores use
-/// the existing F16 register glue; other guest rounding modes fall back.
-template <fp_mode::Arithmetic operation, bool True16, typename Inst>
+/// Signed input flushing commutes with ABS/NEG. SUB and SUBREV pass ADD with
+/// `negated_source` 1 or 0: that source's sign flips after ABS/NEG, keeping the
+/// sources in operand order, as in scalar lowering. True16 selection and stores
+/// use the existing F16 register glue; other guest rounding modes fall back.
+template <fp_mode::Arithmetic operation, bool True16, int negated_source = -1, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_binary_vop3_f16_arithmetic_simd(Inst &inst, Wavefront &wf) {
+  static_assert(negated_source == -1 || (operation == fp_mode::Arithmetic::ADD &&
+                                         (negated_source == 0 || negated_source == 1)));
   // binary_f16_simd establishes nearest-even host rounding and restores the
   // caller's environment. Only the guest rounding mode restricts this route.
   if (wf.fp_round_mode_f16_f64() != 0)
     return false;
   const auto raw_operation = [denorm = wf.fp_denorm_mode_f16_f64(), ovfl = wf.fp16_ovfl()](auto a,
                                                                                            auto b) {
+    if constexpr (negated_source == 0)
+      a ^= fp_format::F16::kSign;
+    else if constexpr (negated_source == 1)
+      b ^= fp_format::F16::kSign;
     return binary_f16_simd<operation>(a, b, denorm, ovfl);
   };
   return try_execute_binary_vop3_f16_simd<True16, uint32_t>(
@@ -2303,7 +2311,7 @@ template <fp_mode::Arithmetic operation, bool True16, typename Inst>
       SimdFastPath::VOP3_BINARY_MODE_FP16);
 }
 
-template <fp_mode::Arithmetic operation, bool True16, typename Inst>
+template <fp_mode::Arithmetic operation, bool True16, int negated_source = -1, typename Inst>
 [[nodiscard]] bool try_execute_binary_vop3_f16_arithmetic_simd(Inst &, Wavefront &) {
   return false;
 }
@@ -5034,8 +5042,10 @@ template <bool Vop3, typename Inst>
   return
 
 /// MODE-aware F16 arithmetic owns rounding/flushing; the wrapper owns modifiers.
-#define ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(TRUE16, OP)                                        \
-  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_arithmetic_simd<OP, TRUE16>(inst, wf))       \
+/// NEGATED is the source whose sign SUB/SUBREV flip, or -1.
+#define ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16(TRUE16, OP, NEGATED)                               \
+  if (::rocjitsu::amdgpu::try_execute_binary_vop3_f16_arithmetic_simd<OP, TRUE16, NEGATED>(inst,   \
+                                                                                           wf))    \
   return
 
 /// Raw floating-point paths apply source and output modifiers around the operation.

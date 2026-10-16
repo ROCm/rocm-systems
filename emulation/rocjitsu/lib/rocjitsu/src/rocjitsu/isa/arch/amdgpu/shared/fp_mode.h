@@ -900,6 +900,9 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
 /// S1 equal to -MAX_FLOAT, -INF or NaN, or S2 that is zero, negative or NaN,
 /// gives -MAX_FLOAT. Otherwise the result is the legacy product: +0 if either
 /// factor is zero, else S0 * S1 rounded and output-flushed under MODE.
+/// Measured on gfx1201. gfx1100 with IEEE=0 returns a signaling-NaN S0
+/// unquieted, which this product does not model, as for V_MUL_DX9_ZERO_F32.
+/// Other targets with V_MULLIT_F32 inherit the gfx1201 rule without measurement.
 inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
                            uint32_t denorm_mode) {
   using F32 = fp_format::F32;
