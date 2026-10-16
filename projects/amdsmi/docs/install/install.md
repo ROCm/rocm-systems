@@ -301,8 +301,9 @@ removing packages that other ROCm tools depend on.
    example `env -u ROCM_HOME ROCM_PATH=<root> python3 my_script.py`. Check that
    `AMDSMI_LIB_OVERRIDE` is unset unless you deliberately want another library.
 
-`amd-smi` always uses the wrapper from its own installation. `ROCM_PATH` and
-`ROCM_HOME` do not change which copy it loads.
+`amd-smi` prefers the wrapper in its own installation's `share/amd_smi` and
+otherwise uses the normal Python import path. `ROCM_PATH` and `ROCM_HOME` are
+not consulted for that selection.
 
 :::{warning}
 The community-built `amdsmi` PyPI releases through 7.0.2 bundle no native
