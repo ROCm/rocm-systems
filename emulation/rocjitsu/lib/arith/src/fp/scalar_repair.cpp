@@ -17,9 +17,9 @@ namespace rocjitsu::arith {
 
 // Apply the scalar FP16 model after the SIMD caller selects operand halves.
 [[gnu::noinline]] uint16_t repair_fma_f16(uint16_t a, uint16_t b, uint16_t c, uint32_t mode,
-                                          uint64_t flags, bool rdna3) {
-  return rdna3 ? half_fma_value<true>(a, b, c, mode, flags)
-               : half_fma_value<false>(a, b, c, mode, flags);
+                                          uint64_t flags, bool rdna3, uint32_t *status) {
+  return rdna3 ? half_fma_value<true>(a, b, c, mode, flags, status)
+               : half_fma_value<false>(a, b, c, mode, flags, status);
 }
 
 } // namespace rocjitsu::arith
