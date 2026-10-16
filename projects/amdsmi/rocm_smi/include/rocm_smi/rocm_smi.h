@@ -1358,7 +1358,7 @@ struct amdgpu_xcp_metrics_t {
  * **Sentinel Values:**
  * Fields not applicable to the current version are initialized to the maximum value
  * of their respective type: 0xFFFF for uint16_t fields, 0xFFFFFFFF for uint32_t fields,
- * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.4-only fields
+ * and UINT64_MAX for uint64_t fields. For example, on v3.0 hardware, v2.x-only fields
  * like `average_mm_activity` and `temperature_l3` will contain 0xFFFF. Similarly,
  * array elements beyond the version-specific count (e.g., elements 8-15 of
  * `temperature_core` on v2.4) will contain 0xFFFF. However, uint32_t elements such as

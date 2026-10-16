@@ -183,6 +183,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
   - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
 
+- **GPU metrics calls report why a metrics read failed**.  
+  - `amdsmi_get_gpu_metrics_info()` and `amdsmi_get_gpu_partition_metrics_info()` now report a busy GPU (suspended or resetting), missing permission, an interrupted read, a short read, or an unreadable metrics revision or empty metrics node, instead of a generic unexpected-data error.
+
 ### Removed
 
 - **Removed the internal `amd-smi` CLI exception classes `AmdSmiParameterNotSupportedException` and `AmdSmiUnknownErrorException`**.  
