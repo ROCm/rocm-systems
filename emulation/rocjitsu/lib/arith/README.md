@@ -2,8 +2,8 @@
 
 ## Current implementation
 
-Scalar WMMA and FP16 FMA support loose semantics and allow-loose fallback.
-FP status support is not implemented yet.
+Both entry points support loose and empirical bit-exact semantics with default controls.
+FMA accepts modes 0–2; WMMA accepts modes 0–3 and has no FP-status output.
 CPU implementations are scalar; SIMD backends are planned.
 Compatibility and instruction modifiers are planned; mode 7 is currently rejected.
 
@@ -17,7 +17,7 @@ multiply-accumulate and elementwise fused multiply-add using portable code.
 numerical semantics, implementation principles, and testing policy.
 
 The semantics field selects numerical requirements; this first implementation
-supports loose arithmetic and allow-loose fallback. rj-arith is not a GPU runtime or instruction decoder.
+supports loose and empirical bit-exact arithmetic. rj-arith is not a GPU runtime or instruction decoder.
 
 See [coverage per architecture](COVERAGE.md) for instruction-family support.
 
@@ -62,7 +62,7 @@ or FP status output.
 `flags` combines CPU capabilities from `rj_arith_init_cpu_flags()` with the
 semantics selection. Cache the CPU flags when making repeated calls.
 `instruction_flags = 0` selects unmodified operands. This initial implementation
-supports `RJ_ARITH_SEMANTICS_LOOSE` and rejects requests requiring exact arithmetic.
+accepts modes 0–3. WMMA has no FP-status side effects, so mode 3 has the same numeric contract as mode 2.
 The host FP environment must be in its default state; the library never explicitly
 changes it. The function returns `RJ_ARITH_SUCCESS` (zero) on success and leaves
 outputs unchanged on error.
