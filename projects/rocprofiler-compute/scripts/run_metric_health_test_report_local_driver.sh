@@ -399,10 +399,12 @@ launch_ssh() {
   else
     echo "=== start remote health run (TAG=${TAG} ITERS=${ITERS}) ==="
   fi
-  ssh_cmd "chmod +x '${REMOTE_ROOT}/scripts/run_metric_health_test_report.sh' && \
+  # Only the nohup command may go to the background: "a && b &" forks a
+  # subshell that keeps the ssh channel open until the worker exits.
+  ssh_cmd "chmod +x '${REMOTE_ROOT}/scripts/run_metric_health_test_report.sh' && { \
     nohup env ROCR_VISIBLE_DEVICES='${gpu}' HIP_VISIBLE_DEVICES='0' \
       ${remote_command} \
-      </dev/null >'${REMOTE_NOHUP}' 2>&1 & echo PID=\$!"
+      </dev/null >'${REMOTE_NOHUP}' 2>&1 & echo PID=\$!; }"
   echo "Remote log: ${REMOTE_LOG}"
   if [[ "$TRANSPORT" == "ssh-pass" ]]; then
     echo "Re-run: REMOTE_PASS=… $(basename "$0") --arch ${ARCH} --tag ${TAG} --wait --fetch --report"
