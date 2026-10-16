@@ -499,6 +499,76 @@ bool packed_fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, const uint32
   return true;
 }
 
+// DIV_FMAS without conditional post-scaling. This admitted exponent range permits only
+// INEXACT in the existing classifier. FastTwoSum retains a small addend lost
+// by FP64 addition, so reporting never mistakes a rounded FP64 sum for exact.
+bool div_fmas_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t *d, const uint32_t *a,
+                              const uint32_t *b, const uint32_t *c, uint32_t *state,
+                              uint32_t mode) {
+  const uint32_t *inputs[] = {a, b, c};
+  for (const auto *input : inputs) {
+    for (int lane = 0; lane < 32; lane += 16) {
+      auto magnitude =
+          _mm512_and_si512(_mm512_loadu_si512(input + lane), _mm512_set1_epi32(0x7fffffff));
+      auto exponent = _mm512_srli_epi32(magnitude, 23);
+      if (_mm512_cmp_epu32_mask(_mm512_sub_epi32(exponent, _mm512_set1_epi32(96)),
+                                _mm512_set1_epi32(62), _MM_CMPINT_GT) &
+          _mm512_cmpneq_epi32_mask(magnitude, _mm512_setzero_si512())) {
+        return false;
+      }
+    }
+  }
+  // Stage numeric results so reporting still sees original aliased sources.
+  uint32_t result[32];
+  if (!fma_exact_x86_64_v4(flags, ~0U, mode, result, a, b, c)) {
+    return false;
+  }
+  uint32_t causes = 0;
+  if (reports_fp_status(flags) && !(mode & (RJ_ARITH_ALU_CLAMP | RJ_ARITH_ALU_OMOD_HALF))) {
+    for (int lane = 0; lane < 32; lane += 8) {
+      // Apply source modifiers to FP32 inputs, then widen to FP64.
+      auto widen = [mode](const uint32_t *p, int operand) {
+        auto bits = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(p));
+        if (mode & (RJ_ARITH_ALU_ABS_A << operand)) {
+          bits = _mm256_and_si256(bits, _mm256_set1_epi32(0x7fffffff));
+        }
+        if (mode & (RJ_ARITH_ALU_NEG_A << operand)) {
+          bits = _mm256_xor_si256(bits, _mm256_set1_epi32(INT32_MIN));
+        }
+        return _mm512_cvtps_pd(_mm256_castsi256_ps(bits));
+      };
+      auto product = _mm512_mul_pd(widen(a + lane, 0), widen(b + lane, 1));
+      auto addend = widen(c + lane, 2);
+      // Return the absolute FP64 values.
+      auto magnitude = [](__m512d value) {
+        return _mm512_castsi512_pd(
+            _mm512_and_si512(_mm512_castpd_si512(value), _mm512_set1_epi64(0x7fffffffffffffffLL)));
+      };
+      auto swap = _mm512_cmp_pd_mask(magnitude(product), magnitude(addend), _CMP_LT_OQ);
+      auto big = _mm512_mask_blend_pd(swap, product, addend);
+      auto small = _mm512_mask_blend_pd(swap, addend, product);
+      auto sum = _mm512_add_pd(big, small);
+      auto residual = _mm512_sub_pd(small, _mm512_sub_pd(sum, big));
+      auto inexact = _mm512_cmp_pd_mask(sum,
+                                        _mm512_cvtps_pd(_mm256_castsi256_ps(_mm256_loadu_si256(
+                                            reinterpret_cast<const __m256i *>(result + lane)))),
+                                        _CMP_NEQ_OQ) |
+                     _mm512_cmp_pd_mask(residual, _mm512_setzero_pd(), _CMP_NEQ_OQ);
+      if (inexact & __mmask8(exec_mask >> lane)) {
+        causes |= RJ_ARITH_EXCEPTION_INEXACT;
+      }
+    }
+  }
+  for (int lane = 0; lane < 32; lane += 16) {
+    _mm512_mask_storeu_epi32(d + lane, __mmask16(exec_mask >> lane),
+                             _mm512_loadu_si512(result + lane));
+  }
+  if (reports_fp_status(flags)) {
+    *state |= causes;
+  }
+  return true;
+}
+
 // Evaluate mixed fma exact for the caller-selected operation. Preserve destination lanes
 // outside exec_mask.
 // Requires the named CPU features and validated instruction controls.

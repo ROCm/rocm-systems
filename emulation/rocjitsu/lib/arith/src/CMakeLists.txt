@@ -6,6 +6,9 @@ add_library(rj_arith STATIC
   common/cpu_decode.cpp
   fp/arithmetic.cpp
   fp/binary.cpp
+  fp/div_fixup.cpp
+  fp/div_fmas.cpp
+  fp/div_scale.cpp
   fp/fp64.cpp
   fp/frexp_exp.cpp
   fp/half_binary.cpp
