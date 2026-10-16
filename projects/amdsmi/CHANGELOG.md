@@ -288,6 +288,19 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
   - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
 
+- **Fixed `amdsmi_get_gpu_total_ecc_count()` reading RAS state up to 39 times per call, and reporting `0` instead of an error when that read failed**.  
+  - RAS state is now read once per call instead of once per block, avoiding the repeated `.../ras/features` reads that could trip host-side RAS request throttling on SR-IOV guests with RAS enabled.
+  - A failed RAS state read is now reported as an error (`N/A` in the CLI) instead of a misleading `0`.
+  - A GPU with RAS present but genuinely disabled (a cleanly-read, all-zero RAS state) still correctly reports `0`, not `N/A` -- only an actual read/parse failure reports `N/A`.
+  - Affects the default `amd-smi` output (`UEC` column), `amd-smi monitor --ecc`, and `amd-smi metric --ecc`.
+  - Example default output, one GPU where the read succeeds (`UEC: 0`) next to one where it fails (`UEC: N/A`), instead of both previously reading `0`:
+    ```
+    | 0000:0c:00.0            AMD Instinct MI...  | 12 %     45 °C   0       300/750 W    |
+    | 1     0       0       NA                    | 34 %     30 %    2048/196608 MB       |
+    | 0000:2f:00.0           AMD Radeon RX ...    | 8 %      41 °C   N/A     280/300 W    |
+    | 2     1       1       NA                    | 22 %     28 %    1024/32768 MB        |
+    ```
+
 ## amd_smi_lib for ROCm 10.1.0
 
 ### Added
