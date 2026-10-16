@@ -126,7 +126,8 @@ class KernelStats:
     """Aggregated kernel launch stats for one kernel name.
 
     min_duration_ns and max_duration_ns are None until a dispatch with a
-    non-zero duration is observed.
+    non-zero duration is observed. pmc_group_keys holds one
+    process_rocpd_csv group key per launch of this name.
     """
 
     launches: int = 0
@@ -134,6 +135,7 @@ class KernelStats:
     min_duration_ns: Optional[float] = None
     max_duration_ns: Optional[float] = None
     kernel_id: Optional[int] = None
+    pmc_group_keys: list[tuple] = field(default_factory=list)
 
 
 @dataclass
@@ -502,7 +504,13 @@ def _kernel_stats_from_marker_row(
     kernel_names = _sequence_from_cell(getattr(row, "Kernel_Names", []))
     kernel_starts = _sequence_from_cell(getattr(row, "Kernel_Start_Timestamps", []))
     kernel_ends = _sequence_from_cell(getattr(row, "Kernel_End_Timestamps", []))
-    if not (len(kernel_names) == len(kernel_starts) == len(kernel_ends)):
+    pmc_group_keys = _sequence_from_cell(getattr(row, "Kernel_Pmc_Group_Keys", []))
+    if not (
+        len(kernel_names)
+        == len(kernel_starts)
+        == len(kernel_ends)
+        == len(pmc_group_keys)
+    ):
         _record_ml_api_trace_error(
             errors,
             KernelSequenceLengthMismatchError(
@@ -514,8 +522,8 @@ def _kernel_stats_from_marker_row(
         )
         return {}
     kernels: dict[str, KernelStats] = {}
-    for kernel_name, kernel_start, kernel_end in zip(
-        kernel_names, kernel_starts, kernel_ends
+    for kernel_name, kernel_start, kernel_end, pmc_group_key in zip(
+        kernel_names, kernel_starts, kernel_ends, pmc_group_keys
     ):
         duration_ns = 0.0
         try:
@@ -528,6 +536,7 @@ def _kernel_stats_from_marker_row(
         stats = kernels[name]
         stats.launches += 1
         stats.total_duration_ns += duration_ns
+        stats.pmc_group_keys.append(tuple(pmc_group_key))
         if duration_ns > 0:
             if stats.min_duration_ns is None or duration_ns < stats.min_duration_ns:
                 stats.min_duration_ns = duration_ns
@@ -851,6 +860,7 @@ def clone_call_tree_node(node: CallTreeNode) -> CallTreeNode:
                 min_duration_ns=stats.min_duration_ns,
                 max_duration_ns=stats.max_duration_ns,
                 kernel_id=stats.kernel_id,
+                pmc_group_keys=list(stats.pmc_group_keys),
             )
             for kernel_name, stats in node.kernels.items()
         },
@@ -900,6 +910,7 @@ def _add_kernel_stats(
             min_duration_ns=stats.min_duration_ns,
             max_duration_ns=stats.max_duration_ns,
             kernel_id=stats.kernel_id,
+            pmc_group_keys=list(stats.pmc_group_keys),
         )
         return
     mins = [
@@ -918,6 +929,7 @@ def _add_kernel_stats(
     existing.max_duration_ns = max(maxes) if maxes else None
     if existing.kernel_id is None:
         existing.kernel_id = stats.kernel_id
+    existing.pmc_group_keys.extend(stats.pmc_group_keys)
 
 
 def _merge_args_invocations(
@@ -1281,6 +1293,9 @@ _REQUIRED_COUNTER_COLUMNS = (
     "Correlation_ID",
     "Dispatch_ID",
     "Kernel_Name",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
     "Start_Timestamp",
     "End_Timestamp",
 )
@@ -1291,6 +1306,9 @@ _DISPATCH_KEEP_COLUMNS = (
     "Correlation_ID",
     "Dispatch_ID",
     "GUID",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
 )
 
 
@@ -1430,6 +1448,7 @@ _COLLAPSED_MARKER_COLUMNS = (
     "Kernel_Names",
     "Kernel_Start_Timestamps",
     "Kernel_End_Timestamps",
+    "Kernel_Pmc_Group_Keys",
 )
 
 
@@ -1524,6 +1543,7 @@ def _collapse_matching_markers_across_passes(
                 "Kernel_Names": first["Kernel_Names"],
                 "Kernel_Start_Timestamps": first["Kernel_Start_Timestamps"],
                 "Kernel_End_Timestamps": first["Kernel_End_Timestamps"],
+                "Kernel_Pmc_Group_Keys": first["Kernel_Pmc_Group_Keys"],
             })
         collapsed = (
             pd.DataFrame.from_records(records)
@@ -1559,6 +1579,7 @@ def _group_kernels_onto_markers(joined_df: pd.DataFrame) -> pd.DataFrame:
         kernel_names: list[str] = []
         kernel_starts: list[object] = []
         kernel_ends: list[object] = []
+        pmc_group_keys: list[tuple] = []
         for row in group.itertuples(index=False):
             kernel_name = row.Kernel_Name
             if pd.isna(kernel_name):
@@ -1566,6 +1587,13 @@ def _group_kernels_onto_markers(joined_df: pd.DataFrame) -> pd.DataFrame:
             kernel_names.append(str(kernel_name))
             kernel_starts.append(row.Kernel_Start_Timestamp)
             kernel_ends.append(row.Kernel_End_Timestamp)
+            pmc_group_keys.append((
+                row.Dispatch_ID,
+                str(kernel_name),
+                row.Grid_Size,
+                row.Workgroup_Size,
+                row.LDS_Per_Workgroup,
+            ))
         record: dict[str, Any] = {
             "Function": first["Function"],
             "Thread_Id": first["Thread_Id"],
@@ -1575,6 +1603,7 @@ def _group_kernels_onto_markers(joined_df: pd.DataFrame) -> pd.DataFrame:
             "Kernel_Names": kernel_names,
             "Kernel_Start_Timestamps": kernel_starts,
             "Kernel_End_Timestamps": kernel_ends,
+            "Kernel_Pmc_Group_Keys": pmc_group_keys,
         }
         if "GUID" in group.columns:
             record["GUID"] = first["GUID"]
