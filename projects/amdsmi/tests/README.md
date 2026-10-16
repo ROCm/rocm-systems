@@ -87,7 +87,7 @@ Suite names are the only selection mechanism — `<Component><Type>[<Operation>]
   Currently registered:
     GpuUnit          GpuFunctionalReadOnly     GpuFunctionalReadWrite
     SystemUnit       SystemFunctionalReadOnly
-                     IfoeFunctionalReadOnly
+    IfoeUnit         IfoeFunctionalReadOnly
                      WslFunctionalReadOnly   (gated)
 ```
 
