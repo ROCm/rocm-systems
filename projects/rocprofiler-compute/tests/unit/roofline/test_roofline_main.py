@@ -663,7 +663,7 @@ def test_precision_controller_remains_single_and_does_not_reset_view() -> None:
 
 def test_the_dark_theme_is_named_the_same_in_every_asset() -> None:
     """The page sets this class before its first paint, the stylesheet colors it,
-    and the toggle flips it. Both stylesheets must use the same selector."""
+    and the toggle flips it. All assets must use the same dark theme class name."""
     dark_class = DARK_THEME_CLASS
     page = report_shell.build_document(
         title="Roofline",
