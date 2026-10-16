@@ -4,12 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Host-only microtests for src/graph/search.cc's XML-graph import path:
-// ncclTopoGetChannelFromXml and its caller ncclTopoGetGraphFromXmlSub.
-//
-// The input is attacker-controllable: NCCL_GRAPH_FILE names an XML file that
-// ncclTopoGetXmlGraphFromFile parses into an ncclXml before these functions
-// transcribe it into an ncclTopoGraph.
+// Host-only microtests for src/graph/search.cc
 
 #include <gtest/gtest.h>
 
@@ -108,70 +103,6 @@ class SearchXmlChannelMicrotest : public ::testing::Test {
   std::unique_ptr<ncclTopoGraph> graph_;
   std::deque<ncclXmlNode> nodes_;
 };
-
-// ---------------------------------------------------------------------------
-// What this pass found (ROCM-31973).
-//
-// Accepted-input contracts -- these are what stop any bound below being
-// tightened into rejecting a topology file RCCL itself would write:
-//
-//   WellFormedChannel_TranscribesGpuDevsToRanksInOrder
-//   WellFormedChannel_TranscribesNetDevsToInter
-//   ExplicitRankAttribute_IsUsedInsteadOfDevLookup
-//   ChannelIndex_SelectsItsOwnSliceOfIntraAndInter
-//   UnknownGpuDev_IsRejected
-//   SubnodesThatAreNeitherNetNorGpu_AreIgnored
-//   GraphGeneratedByNcclTopoGetXmlFromGraph_RoundTripsBackToTheSameGraph
-//       RCCL ships no graph XML of its own, so the format its own writer
-//       emits is the "our own input still parses" contract. That writer is
-//       also where the per-channel bounds below come from: it emits exactly
-//       two <net> and exactly ngpus <gpu> per channel.
-//   ...plus one tightest-accepted-input test per bound:
-//   LastValidChannelIndex_IsStillAccepted, ExactlyTwoNetSubs_AreStillAccepted,
-//   ExactlyNgpusGpuSubs_AreStillAccepted, ZeroRankAttribute_IsStillAccepted,
-//   LargestRepresentableRankAttribute_IsStillAccepted,
-//   NchannelsMatchingTheChannelsPresent_IsStillAccepted,
-//   TheLargestPermittedNchannels_IsStillAccepted,
-//   GraphForAnotherIdIsIgnoredWithoutBeingValidated.
-//
-// Bounds added, each its own commit, each pinned from both directions:
-//
-//   [A] ChannelIndexBeyondMaxChannels_IsRejected, NegativeChannelIndex_IsRejected
-//       c was unchecked against MAXCHANNELS. The overrun lands on the next
-//       fields of the same ncclTopoGraph (nIntraChannels, intraNets), so
-//       AddressSanitizer cannot see it -- the assertion is on those fields.
-//       The c < 0 half was initially unpinned; branch coverage found it.
-//   [B] MoreNetSubsThanTheChannelHolds_IsRejected    (inter: 2 slots/channel)
-//   [C] MoreGpuSubsThanTheSystemHasGpus_IsRejected   (intra: ngpus slots/channel)
-//       Also an intra-object overrun, so also ASan-invisible.
-//   [D] RankAttributeTooWideForAnInt_IsRejected, NegativeRankAttribute_IsRejected
-//       strtol into an int truncated silently: rank="4294967296" became 0.
-//   [F] NchannelsOne{More,Fewer}ThanThePresentChannels_IsRejected and
-//       NchannelsClaimingMoreChannelsThanArePresent_IsRejected
-//       the caller copied nchannels into graph->nChannels unvalidated.
-//
-// Reclassified, deliberately NOT guarded:
-//
-//   [E] A dev= attribute too wide for the id space. For <gpu> it is
-//       UNREACHABLE: the existing dev-not-found arm rejects it first. For
-//       <net>, strtol saturates to LONG_MAX and that value is stored, but
-//       inter holds int64 device ids, so it is a wrong value and not an
-//       out-of-bounds write -- outside this ticket's scope.
-//   [F, second half] A range check of nchannels against MAXCHANNELS is
-//       SUBSUMED: with the counts required to agree, nchannels > MAXCHANNELS
-//       implies more than MAXCHANNELS <channel> subs, which guard [A] rejects
-//       first. The test for it passed against unfixed code, so it was deleted
-//       rather than keep a guard that guards nothing.
-//
-// Not pinned: nothing. No test here is sanitizer-only -- every assertion is
-// visible to the ordinary build, so all of them protect CI.
-// ---------------------------------------------------------------------------
-
-// --- Accepted-input contracts ---------------------------------------------
-//
-// A valid channel is still accepted and still produces the right graph. These
-// are what stop any of the bounds below being tightened into rejecting a
-// topology file RCCL itself would write.
 
 TEST_F(SearchXmlChannelMicrotest, WellFormedChannel_TranscribesGpuDevsToRanksInOrder) {
   // Devs deliberately out of order, and ranks are kRankBase+dev, so neither a

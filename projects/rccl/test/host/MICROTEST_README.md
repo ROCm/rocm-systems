@@ -458,8 +458,7 @@ had become before this map existed.
 
 `src/graph/search.cc` has two rows for the same reason as `src/rccl_wrap.cc` below:
 `rccl-UnitTestsMicroSearch` compiles it and fakes its dependencies (`topo_stubs.cc`),
-while every other target fakes its own entry points (`search_fakes.cc`). The two never
-define the same symbol, so no target needs an `RCCL_STUBS_OMIT_` macro for them.
+while every other target fakes its own entry points (`search_fakes.cc`).
 
 `src/rccl_wrap.cc` has two rows because it is both a unit under test
 (`rccl-UnitTestsMicro` compiles it and fakes its dependencies) and a
