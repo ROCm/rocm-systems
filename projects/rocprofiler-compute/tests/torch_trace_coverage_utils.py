@@ -3288,6 +3288,7 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
         # Set before ``import torch``; HIP reads it at runtime init.
         'os.environ.setdefault("AMD_SERIALIZE_KERNEL", "3")',
         "import torch",
+        "import roctx",
         "",
         'device = "cuda"',
         "",
@@ -3370,8 +3371,12 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
         "file=sys.stderr, flush=True)"
     )
     lines.append("        try:")
-    lines.append("            fn()")
-    lines.append("            torch.cuda.synchronize()")
+    lines.append("            roctx.rangePush(op_label)")
+    lines.append("            try:")
+    lines.append("                fn()")
+    lines.append("                torch.cuda.synchronize()")
+    lines.append("            finally:")
+    lines.append("                roctx.rangePop()")
     lines.append("        except Exception as exc:")
     lines.append(
         '            print(f"[torch-trace-cov] FAIL  {op_label} '
@@ -3914,11 +3919,25 @@ def _iter_subtree(node: Any):
         yield from _iter_subtree(child)
 
 
-def nodes_matching_op(forest: Dict[str, List[Any]], op_name: str) -> List[Any]:
-    """Return forest nodes whose name matches ``op_name``."""
+def op_run_subtrees(forest: Dict[str, List[Any]], op_name: str) -> List[Any]:
+    """Return user-range nodes named ``op_name`` that wrap one op run."""
     return [
-        node for node in iter_nodes(forest) if marker_matches_op(op_name, node.name)
+        node
+        for node in iter_nodes(forest)
+        if node.name == op_name and node.backend == "user"
     ]
+
+
+def nodes_matching_op(forest: Dict[str, List[Any]], op_name: str) -> List[Any]:
+    """Return matching nodes under that op's user-range run."""
+    matched: List[Any] = []
+    for run_root in op_run_subtrees(forest, op_name):
+        for node in _iter_subtree(run_root):
+            if node is run_root:
+                continue
+            if marker_matches_op(op_name, node.name):
+                matched.append(node)
+    return matched
 
 
 def inclusive_kernel_names(node: Any) -> Set[str]:
