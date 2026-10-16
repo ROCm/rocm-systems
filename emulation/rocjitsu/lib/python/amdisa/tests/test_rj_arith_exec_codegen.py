@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from pathlib import Path
+import re
 
 import pytest
 
@@ -30,3 +32,16 @@ def test_exec_boolean_updates_snapshot_then_commit_in_order(name):
         assert offsets == sorted(offsets)
         assert 'if (!exec' not in body
     assert gen_scalar('cdna5', name, ['d'], ['a']) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_every_exec_boolean_method_uses_rj_arith(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    body = (root / arch / 'sop1_exec.cpp').read_text()
+    assert len(EXEC_UPDATES) == 24
+    for name in EXEC_UPDATES:
+        assert len(re.findall(r'\b' + 'rj_arith_' + name.lower() + r'\(', body)) == 1
+        assert 'amdgpu::execute_' + name.lower() not in body

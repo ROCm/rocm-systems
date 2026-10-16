@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from pathlib import Path
+import re
 
 import pytest
 
@@ -45,3 +47,30 @@ def test_interp_operand_controls_and_policy(arch, name):
     assert ('RJ_ARITH_ALU_HIGH_D' in body) == ('F16' in name and '_P2_' in name)
     assert gen_interp('cdna5', name, ['d'], ['a', 'b', 'c'], 'ENC_VINTERP') is None
     assert gen_interp(arch, name, ['d'], ['a', 'b'], 'ENC_VINTERP') is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_graphics_arithmetic_routes(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    count = 0
+    for file, pattern, bridge in (
+        ('vinterp_exec.cpp', r'VInterp\w+', 'arith::execute_interp<'),
+        ('vop3_exec.cpp', 'VMullitF32Vop3', 'arith::execute_float_ternary32'),
+    ):
+        source = (root / arch / file).read_text()
+        for match in re.finditer(
+            r'void (' + pattern + r')::execute(?:_modifier)?_impl\([^)]*\)\s*\{', source
+        ):
+            end, depth = match.end(), 1
+            while depth:
+                depth += (source[end] == '{') - (source[end] == '}')
+                end += 1
+            body = source[match.end() : end - 1]
+            assert bridge in body
+            assert 'no-op' not in body
+            assert 'execute_v_mullit' not in body
+            count += 1
+    assert count == 8

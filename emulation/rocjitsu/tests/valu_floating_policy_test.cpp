@@ -649,7 +649,7 @@ TEST(ValuFloatingPolicy, PackedF16FmaZeroSignUsesGuestRounding) {
   }
 }
 
-TEST(ValuFloatingPolicy, F16Dot2HostIndependence) {
+TEST(ValuFloatingPolicy, F16Dot2HostContract) {
   for (rj_code_arch_t arch :
        {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
     InstructionPolicyMachine machine(arch);
@@ -658,10 +658,17 @@ TEST(ValuFloatingPolicy, F16Dot2HostIndependence) {
     const int saved = std::fegetround();
     std::fesetround(FE_TONEAREST);
     const uint32_t nearest = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
-    std::fesetround(FE_UPWARD);
-    const uint32_t upward = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
+    // FP32 addition first ties to even at 1 + 2^-11, then FP16 narrowing
+    // ties to 1. rj-arith's RDNA3/4 paths require default host FP controls.
+    witness("dot2_f16_default_host", arch, nearest & 0xffffu, 0x3c00u);
+    EXPECT_EQ(std::fegetround(), FE_TONEAREST);
+    if (arch == ROCJITSU_CODE_ARCH_RDNA3_5) {
+      // This architecture still uses the legacy builtin implementation.
+      std::fesetround(FE_UPWARD);
+      const uint32_t upward = machine.run(words, 0x10003c00, 0x3c003c00, 0x0001);
+      witness("dot2_f16_host_independence", arch, upward, nearest);
+    }
     std::fesetround(saved);
-    witness("dot2_f16_host_independence", arch, upward, nearest);
   }
 }
 TEST(ValuFloatingPolicy, F32UnaryDenormControls) {

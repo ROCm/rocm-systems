@@ -1,6 +1,8 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+from pathlib import Path
+import re
 
 import pytest
 
@@ -41,3 +43,31 @@ def test_division_operands_and_guest_policy(arch, name):
     assert gen_division('cdna5', name, dst, ['a', 'b', 'c'], True) is None
     assert gen_division(arch, name, dst, ['a', 'b'], True) is None
     assert gen_division(arch, name, dst, ['a', 'b', 'c'], False) is None
+
+
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_division_handlers_use_rj_arith(arch):
+    root = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+    )
+    source = (root / arch / 'vop3_exec.cpp').read_text()
+    checked = 0
+    for match in re.finditer(
+        r'void (VDiv(?:Scale|Fmas|Fixup)F(?:16|32|64)Vop3\w*)::execute(?:_modifier)?_impl\([^)]*\)\s*\{',
+        source,
+    ):
+        end, depth = match.end(), 1
+        while depth:
+            depth += (source[end] == '{') - (source[end] == '}')
+            end += 1
+        body = source[match.end() : end - 1]
+        assert (
+            'arith::execute_float_ternary16'
+            if 'F16' in match[1]
+            else 'arith::execute_division<'
+        ) in body, match[1]
+        assert 'try_execute_' not in body
+        assert 'amdgpu::execute_v_' not in body
+        checked += 1
+    assert checked == 8

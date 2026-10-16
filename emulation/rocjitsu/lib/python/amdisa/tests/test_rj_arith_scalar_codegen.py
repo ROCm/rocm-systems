@@ -3,6 +3,7 @@
 
 from rj_arith_headers import public_headers
 
+from pathlib import Path
 import re
 
 import pytest
@@ -111,6 +112,28 @@ def test_select_observes_only_selected_source(bits):
     assert '&result, input0, input1, input_scc)' in body
 
 
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_generated_scalar_selection_bit_updates_and_masks_route_to_rj_arith(arch):
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated'
+        / arch
+    )
+    text = '\n'.join(
+        (generated / f'{encoding}_exec.cpp').read_text()
+        for encoding in ('sop1', 'sop2')
+    )
+    names = set(BITSET)
+    names.update(
+        f'S_{op}_B{bits}' for op in ('CSELECT', 'QUADMASK', 'WQM') for bits in (32, 64)
+    )
+    if arch == 'rdna4':
+        names.add('S_MUL_U64')
+    for name in names:
+        assert text.count(f'rj_arith_{name.lower()}(') == 1, name
+        assert f'amdgpu::execute_{name.lower()}_' not in text, name
+
+
 @pytest.mark.parametrize(
     'name,bits', sorted((FLOAT_COMPARISONS | FLOAT_ROUNDING).items())
 )
@@ -145,6 +168,20 @@ def test_scalar_float_bindings_preserve_results_and_optional_state(name, bits):
     ]
 
 
+def test_generated_rdna4_scalar_float_comparisons_and_rounding_route_to_rj_arith():
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/rdna4'
+    )
+    text = '\n'.join(
+        (generated / f'{encoding}_exec.cpp').read_text()
+        for encoding in ('sop1', 'sopc')
+    )
+    for name in FLOAT_COMPARISONS | FLOAT_ROUNDING:
+        assert text.count(f'rj_arith_{name.lower()}(') == 1, name
+        assert f'amdgpu::execute_{name.lower()}_' not in text, name
+
+
 @pytest.mark.parametrize('name', sorted(FLOAT_ARITHMETIC))
 def test_scalar_float_arithmetic_api_shape_and_policy(name):
     operation = FLOAT_ARITHMETIC[name]
@@ -177,6 +214,20 @@ def test_scalar_float_arithmetic_api_shape_and_policy(name):
     assert types == ['uint64_t', 'uint64_t', 'uint32_t *'] + [
         'uint32_t'
     ] * operation.inputs + ['uint32_t *']
+
+
+def test_generated_rdna4_scalar_float_arithmetic_routes_to_rj_arith():
+    generated = (
+        Path(__file__).resolve().parents[3]
+        / 'rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated/rdna4'
+    )
+    text = '\n'.join(
+        (generated / f'{encoding}_exec.cpp').read_text()
+        for encoding in ('sop1', 'sop2')
+    )
+    for name in FLOAT_ARITHMETIC:
+        assert text.count(f'rj_arith_{name.lower()}(') == 1, name
+        assert f'amdgpu::execute_{name.lower()}_' not in text, name
 
 
 @pytest.mark.parametrize('name', ['S_ROUND_MODE', 'S_DENORM_MODE'])

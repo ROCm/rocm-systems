@@ -8,6 +8,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/execute_shared.h"
 #include "rocjitsu/isa/arch/amdgpu/rdna3/addr_calc.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/gfx11_cache_flags.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_read.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -1290,7 +1291,8 @@ void DsWrapRtnB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsSwizzleB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_swizzle_b32_ds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_swizzle(wf, wf.cu().arithmetic_flags(), vdst, addr, offset);
 }
 
 void DsLoadB32Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2983,11 +2985,17 @@ void DsLoadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsPermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_permute_b32_ds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<false, false>(
+      wf, rj_arith_ds_permute_b32_w32, rj_arith_ds_permute_b32_w64, wf.cu().arithmetic_flags(),
+      vdst, addr, data0, offset);
 }
 
 void DsBpermuteB32Ds::execute_impl(amdgpu::Wavefront &wf) {
-  amdgpu::execute_ds_bpermute_b32_ds(*this, wf);
+  const uint16_t offset = inst_.offset0 | (inst_.offset1 << 8);
+  amdgpu::arith::execute_ds_permute<true, false>(
+      wf, rj_arith_ds_bpermute_b32_w32, rj_arith_ds_bpermute_b32_w64, wf.cu().arithmetic_flags(),
+      vdst, addr, data0, offset);
 }
 
 void DsStoreB96Ds::execute_impl(amdgpu::Wavefront &wf) {
