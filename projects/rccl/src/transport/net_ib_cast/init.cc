@@ -663,7 +663,7 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
 
       int64_t udmaPolicy = rcclParamIbCastUDMAPolicy();
-      if (udmaPolicy < (int64_t)ncclIbCastUDMAPolicy::First || udmaPolicy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+      if (!ncclIbCastUDMAPolicyIsValid(udmaPolicy)) {
         WARN("NET/IB : RCCL_IB_UDMA_POLICY=%ld is invalid (must be %d-%d). Using RCCL_IB_UDMA_POLICY=%d.", udmaPolicy,
              (int)ncclIbCastUDMAPolicy::First, (int)ncclIbCastUDMAPolicy::Last,
              (int)ncclIbCastUDMAPolicy::ChannelAffinity);
