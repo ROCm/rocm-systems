@@ -40,6 +40,11 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   path is now validated against the target's mount namespace before attaching, failing
   cleanly with a diagnostic instead.
 
+- Fixed `rocpd_info_agent.name` being `"N/A"` for AI NIC agents. The network
+  interface name (for example, `enp229s0`) is now stored in the `name` column,
+  making it possible to identify a NIC device in the ROCpd database without
+  additional tools. See `nic-profiling` documentation for a query example.
+
 ### Removed
 
 - Legacy direct Perfetto tracing mode. Perfetto traces are now always generated from the
