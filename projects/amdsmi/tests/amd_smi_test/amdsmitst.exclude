@@ -92,3 +92,11 @@ FILTER[gfx1150]=${FILTER[strix_point]}
 FILTER[gfx1151]=${FILTER[strix_point]}
 FILTER[gfx1152]=${FILTER[strix_point]}
 FILTER[gfx1153]=${FILTER[strix_point]}
+
+# gfx1103 APUs (Phoenix, Hawk Point) can expose an empty pp_dpm_* clock file,
+# which the frequency write test cannot handle. KFD reports gfx1103 as 110003.
+FILTER[hawk_point]=\
+$BLACKLIST_ALL_ASICS\
+"GpuFunctionalReadWrite.TestFrequenciesReadWrite"
+FILTER[gfx1103]=${FILTER[hawk_point]}
+FILTER[110003]=${FILTER[hawk_point]}
