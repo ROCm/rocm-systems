@@ -17,7 +17,9 @@ add_library(
     fp/half_binary.cpp
     fp/half_exponent.cpp
     fp/half_fma.cpp
+    fp/half_minmax.cpp
     fp/ldexp.cpp
+    fp/minmax.cpp
     fp/mixed_fma.cpp
     fp/packed_fma.cpp
     dot/scalar_repair.cpp

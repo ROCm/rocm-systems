@@ -42,7 +42,9 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_binary_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_exponent_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_minmax_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/ldexp_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/minmax_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_fma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/packed_fma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v3.cpp

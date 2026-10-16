@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// FP32 add/subtract/multiply and DX9-zero multiplication.
+// FP32 add/subtract/multiply and DX9-zero multiplication and min/max selection.
 // Operation selectors and backend declarations shared by dispatch and SIMD code.
 
 #pragma once
@@ -16,6 +16,12 @@ enum class Binary {
   Subrev,
   Mul,
   MulDx9Zero,
+  MinNum,
+  MaxNum,
+  Minimum,
+  Maximum,
+  MinLegacy,
+  MaxLegacy
 };
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)

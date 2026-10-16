@@ -28,20 +28,29 @@ inline __m256 prepare_omod_f16(__m256 value, uint32_t mode) {
   return value;
 }
 
-// Widen the selected FP16 halves and apply ABS then NEG.
-inline __m256 half_input(__m256i words, int shift, uint32_t mode) {
+// Widen the selected halves with ABS then NEG. PreserveNan retains signaling
+// bits through x86 conversion for selection operations.
+template <bool PreserveNan = false> __m256 half_input(__m256i words, int shift, uint32_t mode) {
   auto halves = _mm256_and_si256(_mm256_srl_epi32(words, _mm_cvtsi32_si128(shift)),
                                  _mm256_set1_epi32(mode & RJ_ARITH_ALU_ABS_A ? 0x7fff : 0xffff));
   halves = _mm256_xor_si256(halves, _mm256_set1_epi32(mode & RJ_ARITH_ALU_NEG_A ? 0x8000 : 0));
 
   auto value = _mm256_cvtph_ps(
       _mm_packus_epi32(_mm256_castsi256_si128(halves), _mm256_extracti128_si256(halves, 1)));
-
+  if constexpr (PreserveNan) {
+    // All exponent bits set, quiet bit clear: sNaN or infinity. F16C only
+    // changes the former's quiet bit; clearing that bit is harmless for infinity.
+    auto signaling = _mm256_cmpeq_epi32(_mm256_and_si256(halves, _mm256_set1_epi32(0x7e00)),
+                                        _mm256_set1_epi32(0x7c00));
+    auto clear_quiet = _mm256_and_si256(signaling, _mm256_set1_epi32(0x00400000));
+    value = _mm256_andnot_ps(_mm256_castsi256_ps(clear_quiet), value);
+  }
   return value;
 }
 
-// Narrow to FP16 with optional saturation of finite overflow.
-inline __m256i half_narrow(__m256 value, bool saturate) {
+// Narrow to FP16 with optional finite-overflow saturation. PreserveNan leaves
+// the selection operation in control of NaN quieting.
+template <bool PreserveNan = false> __m256i half_narrow(__m256 value, bool saturate) {
   auto bits = _mm256_castps_si256(value);
   auto magnitude = _mm256_and_si256(bits, _mm256_set1_epi32(INT32_MAX));
 
@@ -53,7 +62,13 @@ inline __m256i half_narrow(__m256 value, bool saturate) {
                                        _mm256_set1_epi32(0x7c00));
     result = _mm256_add_epi32(result, _mm256_and_si256(finite, infinity));
   }
-
+  if constexpr (PreserveNan) {
+    // These NaNs originate in FP16, so narrowing retains their payload.
+    auto signaling = _mm256_cmpeq_epi32(_mm256_and_si256(bits, _mm256_set1_epi32(0x7fc00000)),
+                                        _mm256_set1_epi32(0x7f800000));
+    auto clear_quiet = _mm256_and_si256(signaling, _mm256_set1_epi32(0x0200));
+    result = _mm256_andnot_si256(clear_quiet, result);
+  }
   return result;
 }
 
