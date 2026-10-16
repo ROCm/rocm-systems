@@ -9,8 +9,8 @@ subtree_to_project_map = {
     "projects/aqlprofile": "profiler",
     "projects/clr": "runtimes",
     "projects/hrr": "hrr",
-
-    "projects/cuid": "rdc",
+    # amd-smi compiles shared/cuid in-tree when no installed amdcuid is found.
+    "shared/cuid": "amdsmi",
     "projects/hipfile": "storage_libs",
     "projects/hip": "runtimes",
     "projects/hip-tests": "runtimes",
@@ -36,7 +36,11 @@ subtree_to_project_map = {
 
 project_map = {
     "core": {
-        "cmake_options": ["-DTHEROCK_ENABLE_CORE=ON", "-DTHEROCK_ENABLE_ALL=OFF", "-DTHEROCK_ENABLE_PROFILER=ON"],
+        "cmake_options": [
+            "-DTHEROCK_ENABLE_CORE=ON",
+            "-DTHEROCK_ENABLE_ALL=OFF",
+            "-DTHEROCK_ENABLE_PROFILER=ON",
+        ],
         "projects_to_test": "amdsmi, aqlprofile, rocprofiler-compute, rocprofiler-sdk, rocprofiler-systems",  # will run sanity test to cover rocminfo
     },
     # amdsmi changes fan out to its downstream dependents across rocm-systems

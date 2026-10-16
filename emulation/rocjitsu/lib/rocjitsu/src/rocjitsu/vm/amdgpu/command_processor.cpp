@@ -949,6 +949,23 @@ void CommandProcessor::accept_fanout_shard(DispatchEntry shard,
     engine()->schedule_event_now(doorbell_event());
 }
 
+void CommandProcessor::notify_execution_failure(uint32_t queue_id, uint32_t process_id,
+                                                std::string reason) {
+  std::vector<CommandProcessor *> peers = xcd_peers_;
+  if (peers.empty())
+    peers.push_back(this);
+  auto remaining = std::make_shared<std::atomic<size_t>>(peers.size());
+  auto completed = [remaining, sim = engine(), reason = std::move(reason)] {
+    if (remaining->fetch_sub(1, std::memory_order_acq_rel) == 1 && sim)
+      sim->request_exit(reason, 1);
+  };
+  for (auto *peer : peers)
+    peer->accept_dispatch_fault({.queue_id = queue_id,
+                                 .process_id = process_id,
+                                 .outcome = VmAccessOutcome::Malformed,
+                                 .on_cancelled = completed});
+}
+
 void CommandProcessor::accept_dispatch_fault(DispatchFaultNotification fault) {
   {
     std::lock_guard<std::mutex> lock(dispatch_fault_inbox_mutex_);
@@ -965,7 +982,44 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
     faults.swap(dispatch_fault_inbox_);
   }
   for (const DispatchFaultNotification &fault : faults) {
-    (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id, fault.outcome);
+    if (!fault.on_cancelled) {
+      (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id,
+                                 fault.outcome);
+      continue;
+    }
+    {
+      std::lock_guard<std::recursive_mutex> lock(hw_queue_mutex_);
+      auto queue = std::ranges::find_if(compute_queues_, [&](const ComputeQueueRecord &candidate) {
+        return candidate.queue_id == fault.queue_id && candidate.process_id == fault.process_id;
+      });
+      if (queue != compute_queues_.end()) {
+        queue->faulted = true;
+        for (auto &entry : queue->entries) {
+          entry.terminal_faulted = true;
+          dispatch_launch_metadata_.erase(entry.dispatch_id);
+          erase_cluster_workgroups(entry.dispatch_id);
+          if (entry.grid_completion)
+            entry.grid_completion->mark_faulted();
+        }
+        // Abort, rather than halt, so no workgroup completion can publish success.
+        for (auto *cu : cus_) {
+          cu->with_wave_state_locked([&] {
+            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+              auto *wave = cu->wf(slot);
+              if (wave && !wave->is_halted() && wave->queue_id() == fault.queue_id &&
+                  wave->process_id() == fault.process_id)
+                cu->abort_dispatch(wave->dispatch_id());
+            }
+          });
+        }
+        // Native PM4 submissions deliver their failed callback/fence here, before
+        // the last replica acknowledges cancellation and stops the engine.
+        fail_pm4_queue(*queue, queue->dispatches);
+        queue->entries.clear();
+        queue->next_dispatch_idx = 0;
+      }
+    }
+    fault.on_cancelled();
   }
 }
 
@@ -2672,7 +2726,7 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   if (state.packet_format == QueuePacketFormat::Aql && !state.commands.submissions.empty())
     fail_pm4_queue(state, state.dispatches);
   util::Logger::cp([&](auto &os) {
-    os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
+    os << std::format("{}: terminal dispatch fault pid={} qid={} dispatch={} outcome={}", name(),
                       process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
   });
   erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
@@ -2922,7 +2976,7 @@ FunctionalQuantumResult CommandProcessor::run_active_cus_once(simdojo::Tick now)
   for (size_t i = 0; i < active_cu_scratch_.size(); ++i) {
     auto *cu = active_cu_scratch_[i];
     if (cu->has_runnable_wfs())
-      pooled_due_ticks_[cu] = now + std::max<uint64_t>(1, quantum_result_scratch_[i].iterations);
+      pooled_due_ticks_[cu] = now + quantum_result_scratch_[i].next_tick_delay();
     else
       pooled_due_ticks_.erase(cu);
   }

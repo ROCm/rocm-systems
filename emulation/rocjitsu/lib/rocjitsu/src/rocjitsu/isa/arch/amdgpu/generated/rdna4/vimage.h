@@ -109,6 +109,7 @@ public:
   ImageAtomicSwapVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -120,6 +121,7 @@ public:
   ImageAtomicCmpswapVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -131,6 +133,7 @@ public:
   ImageAtomicAddUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -142,6 +145,7 @@ public:
   ImageAtomicSubUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -153,6 +157,7 @@ public:
   ImageAtomicMinIntVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -164,6 +169,7 @@ public:
   ImageAtomicMinUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -175,6 +181,7 @@ public:
   ImageAtomicMaxIntVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -186,6 +193,7 @@ public:
   ImageAtomicMaxUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -197,6 +205,7 @@ public:
   ImageAtomicAndVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -208,6 +217,7 @@ public:
   ImageAtomicOrVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -219,6 +229,7 @@ public:
   ImageAtomicXorVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -230,6 +241,7 @@ public:
   ImageAtomicIncUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -241,6 +253,7 @@ public:
   ImageAtomicDecUintVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -297,6 +310,7 @@ public:
   ImageAtomicAddFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -308,6 +322,7 @@ public:
   ImageAtomicMinFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -319,6 +334,7 @@ public:
   ImageAtomicMaxFltVimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -330,6 +346,7 @@ public:
   ImageAtomicPkAddF16Vimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
@@ -341,6 +358,7 @@ public:
   ImageAtomicPkAddBf16Vimage(const MachineInst *inst);
   void execute_impl(amdgpu::Wavefront &wf);
   Operand vdata;
+  Operand vdata_return;
   Operand vaddr;
   Operand rsrc;
   Operand gpumem;
