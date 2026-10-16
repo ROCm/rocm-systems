@@ -141,6 +141,10 @@ extern int HIP_TRACE_API;
 #endif /* Device feature flags */
 
 
+// Early clang 24 builds and older accept launch_bounds (so __has_attribute is 1) but ignore it.
+#if __clang_major__ >= 25
+#define __launch_bounds__(...) __attribute__((launch_bounds(__VA_ARGS__)))
+#else
 #define launch_bounds_impl0(requiredMaxThreadsPerBlock)                                            \
   __attribute__((amdgpu_flat_work_group_size(1, requiredMaxThreadsPerBlock)))
 #define launch_bounds_impl1(requiredMaxThreadsPerBlock, minBlocksPerMultiprocessor)                \
@@ -149,6 +153,7 @@ extern int HIP_TRACE_API;
 #define select_impl_(_1, _2, impl_, ...) impl_
 #define __launch_bounds__(...)                                                                     \
   select_impl_(__VA_ARGS__, launch_bounds_impl1, launch_bounds_impl0, )(__VA_ARGS__)
+#endif
 
 #if !defined(__HIPCC_RTC__)
 __host__ inline void* __get_dynamicgroupbaseptr() { return nullptr; }
@@ -244,20 +249,17 @@ typedef struct dim3 {
 #pragma push_macro("__DEVICE__")
 #define __DEVICE__ static __device__ __forceinline__
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_local_id(unsigned int);
-__DEVICE__ unsigned int __hip_get_thread_idx_x() { return __ockl_get_local_id(0); }
-__DEVICE__ unsigned int __hip_get_thread_idx_y() { return __ockl_get_local_id(1); }
-__DEVICE__ unsigned int __hip_get_thread_idx_z() { return __ockl_get_local_id(2); }
+__DEVICE__ unsigned int __hip_get_thread_idx_x() { return __builtin_amdgcn_workitem_id_x(); }
+__DEVICE__ unsigned int __hip_get_thread_idx_y() { return __builtin_amdgcn_workitem_id_y(); }
+__DEVICE__ unsigned int __hip_get_thread_idx_z() { return __builtin_amdgcn_workitem_id_z(); }
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_group_id(unsigned int);
-__DEVICE__ unsigned int __hip_get_block_idx_x() { return __ockl_get_group_id(0); }
-__DEVICE__ unsigned int __hip_get_block_idx_y() { return __ockl_get_group_id(1); }
-__DEVICE__ unsigned int __hip_get_block_idx_z() { return __ockl_get_group_id(2); }
+__DEVICE__ unsigned int __hip_get_block_idx_x() { return __builtin_amdgcn_workgroup_id_x(); }
+__DEVICE__ unsigned int __hip_get_block_idx_y() { return __builtin_amdgcn_workgroup_id_y(); }
+__DEVICE__ unsigned int __hip_get_block_idx_z() { return __builtin_amdgcn_workgroup_id_z(); }
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_local_size(unsigned int);
-__DEVICE__ unsigned int __hip_get_block_dim_x() { return __ockl_get_local_size(0); }
-__DEVICE__ unsigned int __hip_get_block_dim_y() { return __ockl_get_local_size(1); }
-__DEVICE__ unsigned int __hip_get_block_dim_z() { return __ockl_get_local_size(2); }
+__DEVICE__ unsigned int __hip_get_block_dim_x() { return __builtin_amdgcn_workgroup_size_x(); }
+__DEVICE__ unsigned int __hip_get_block_dim_y() { return __builtin_amdgcn_workgroup_size_y(); }
+__DEVICE__ unsigned int __hip_get_block_dim_z() { return __builtin_amdgcn_workgroup_size_z(); }
 
 extern "C" __device__ __attribute__((const)) size_t __ockl_get_num_groups(unsigned int);
 __DEVICE__ unsigned int __hip_get_grid_dim_x() { return __ockl_get_num_groups(0); }
@@ -380,9 +382,30 @@ __DEFINE_HCC_FUNC(group_size, blockDim)
 __DEFINE_HCC_FUNC(num_groups, gridDim)
 #pragma pop_macro("__DEFINE_HCC_FUNC")
 
-extern "C" __device__ __attribute__((const)) size_t __ockl_get_global_id(unsigned int);
 inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_absolute_id(int dim) {
-  return (unsigned int)__ockl_get_global_id(dim);
+  unsigned int local_id, group_id, group_size;
+
+  switch (dim) {
+    case 0:
+      local_id = __builtin_amdgcn_workitem_id_x();
+      group_id = __builtin_amdgcn_workgroup_id_x();
+      group_size = __builtin_amdgcn_workgroup_size_x();
+      break;
+    case 1:
+      local_id = __builtin_amdgcn_workitem_id_y();
+      group_id = __builtin_amdgcn_workgroup_id_y();
+      group_size = __builtin_amdgcn_workgroup_size_y();
+      break;
+    case 2:
+      local_id = __builtin_amdgcn_workitem_id_z();
+      group_id = __builtin_amdgcn_workgroup_id_z();
+      group_size = __builtin_amdgcn_workgroup_size_z();
+      break;
+    default:
+      return 0;
+  }
+
+  return group_id * group_size + local_id;
 }
 
 #endif
@@ -394,13 +417,13 @@ inline __device__ __attribute__((always_inline)) unsigned int hc_get_workitem_ab
 #pragma push_macro("__CUDA__")
 #define __CUDA__
 #include <__clang_cuda_math_forward_declares.h>
-#include <__clang_cuda_complex_builtins.h>
 // Workaround for using libc++ with HIP-Clang.
 // The following headers requires clang include path before standard C++ include path.
 // However libc++ include path requires to be before clang include path.
 // To workaround this, we pass -isystem with the parent directory of clang include
 // path instead of the clang include path itself.
 #include <include/cuda_wrappers/algorithm>
+#include <__clang_cuda_complex_builtins.h>
 #include <include/cuda_wrappers/complex>
 #include <include/cuda_wrappers/new>
 #undef __CUDA__

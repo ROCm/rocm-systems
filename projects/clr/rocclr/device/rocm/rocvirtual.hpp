@@ -18,6 +18,7 @@
 #include "os/os.hpp"
 #include <atomic>
 #include <condition_variable>
+#include <memory>
 #include <mutex>
 #include <stack>
 #include <string>
@@ -29,6 +30,14 @@ class Device;
 class Memory;
 struct ProfilingSignal;
 class Timestamp;
+
+constexpr static uint64_t kInvalidAqlSlot = std::numeric_limits<uint64_t>::max();
+
+struct AqlSlotReservation {
+  uint64_t start_slot;
+  size_t packet_count;
+  uint64_t barrier_bit_slot_before_reservation;
+};
 
 //! True while the calling thread is inside HsaAmdSignalHandler (async-events thread).
 bool InAsyncSignalHandler();
@@ -609,6 +618,11 @@ class VirtualGPU : public device::VirtualDevice {
   //! Set the active HW queue and keep the metadata preloader in sync.
   void SetGpuQueue(hsa_queue_t* queue);
 
+  //! Ensure a HW queue is held, acquiring one (with the last_hwq_ affinity hint) if a
+  //! dynamic-queue reclaim released it. No-op for dedicated queues or when one is already held.
+  //! Caller must hold the execution() lock.
+  void AcquireHwQueueIfNeeded();
+
   //! Snapshot the current HW queue as preferred for future re-acquisition (used by graph launch).
   //! Only updates if the queue is still valid — avoids clobbering a hint saved by ReleaseHwQueue.
   void SetPreferredQueue() override {
@@ -650,10 +664,10 @@ class VirtualGPU : public device::VirtualDevice {
 
   void enableSyncBlit() const;
 
-  void hasPendingDispatch() { hasPendingDispatch_ = true; }
-  bool IsPendingDispatch() const { return (hasPendingDispatch_) ? true : false; }
+  void hasPendingDispatch() { SetStateFlag(kHasPendingDispatch); }
+  bool IsPendingDispatch() const { return GetStateFlag(kHasPendingDispatch); }
   void addSystemScope() override {
-    addSystemScope_ = true;
+    SetStateFlag(kAddSystemScope);
     fence_state_ = amd::Device::CacheState::kCacheStateInvalid;
   }
   void SetCopyCommandType(cl_command_type type) { copy_command_type_ = type; }
@@ -664,6 +678,8 @@ class VirtualGPU : public device::VirtualDevice {
   amd::Command* command() const { return command_; }
 
   void* allocKernArg(size_t size, size_t alignment);
+  //! Returns the size of one managed kernarg pool chunk.
+  size_t KernArgPoolChunkSize() const;
   bool isFenceDirty() const { return fence_dirty_.load(std::memory_order_acquire); }
   void setFenceDirty(bool state) { fence_dirty_.store(state, std::memory_order_release); }
   void WaitCompleteSignal(hsa_signal_t signal);
@@ -692,7 +708,11 @@ class VirtualGPU : public device::VirtualDevice {
   //! Analyzes a crashed AQL queue to find a broken AQL packet.
   //! Returns the faulting kernel name ("<not identified>" if not found).
   std::string AnalyzeAqlQueue() const;
-  bool ForceIrq() const { return force_irq_; }
+
+  //! Emits the hang report itself. Called by AnalyzeAqlQueue, which brackets it
+  //! with the banner.
+  std::string AnalyzeAqlQueueBody() const;
+  bool ForceIrq() const { return GetStateFlag(kForceIrq); }
 
   //! SDMA engine affinity management
   uint32_t AssignedSdmaEngine() const {
@@ -729,11 +749,9 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! Dispatch (or capture, when graph-capturing) a kernel dispatch packet.
   //! Handles both hsa_kernel_dispatch_packet_t and hsa_amd_ext_kernel_dispatch_packet_t.
-  template <typename AqlPacket>
-  bool dispatchAqlPacket(AqlPacket* packet, uint16_t header, uint16_t rest,
-                         bool blocking = true, bool attach_signal = false);
-  bool dispatchAqlPacket(hsa_barrier_and_packet_t* packet, uint16_t header, uint16_t rest,
-                         bool blocking = true, bool attach_signal = false);
+  template <typename AqlPacket> bool dispatchAqlPacket(AqlPacket* packet, uint16_t header,
+                                                       uint16_t rest, bool blocking = true,
+                                                       bool attach_signal = false);
 
   //! Fast-path dispatch: pre-built flat contiguous buffer
   bool dispatchAqlPacketBatchFlat(const amd::AlignedVector64<uint8_t>& flatPacketData,
@@ -746,8 +764,7 @@ class VirtualGPU : public device::VirtualDevice {
 
   template <typename AqlPacket> bool dispatchGenericAqlPacket(AqlPacket* packet, uint16_t header,
                                                               uint16_t rest, bool blocking,
-                                                              bool attach_signal = false,
-                                                              bool cluster_launch = false);
+                                                              bool attach_signal = false);
 
   bool dispatchCounterAqlPacket(hsa_ext_amd_aql_pm4_packet_t* packet, const uint32_t gfxVersion,
                                 bool blocking, const hsa_ven_amd_aqlprofile_1_00_pfn_t* extApi);
@@ -770,6 +787,22 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! Ring the queue doorbell via direct UC store or ROCr signal.
   void ringQueueDoorbell(uint64_t index);
+
+  //! Snapshot shared barrier state before atomically reserving AQL queue slots. Spins until
+  //! the ring has room for all \p packet_count slots, so the write index never leads the read
+  //! index by a full ring and the reserved slots are free to write on return.
+  AqlSlotReservation ReserveAqlSlots(size_t packet_count);
+
+  //! Clear a caller-requested barrier when prior queue state already preserves stream ordering.
+  void OptimizeStreamOrderingBarrier(uint16_t& header,
+                                     const AqlSlotReservation& reservation) const;
+
+  //! Record a final packet header in the shared HW-queue barrier state.
+  void RecordAqlPacketHeader(const AqlSlotReservation& reservation, size_t packet_offset,
+                             uint16_t header);
+
+  //! Record the final slot in a submission as this VirtualGPU's previous packet.
+  void CompleteAqlSubmission(const AqlSlotReservation& reservation);
 
   void resetKernArgPool() { managed_kernarg_buffer_.ResetPool(); }
 
@@ -850,36 +883,35 @@ class VirtualGPU : public device::VirtualDevice {
   //! one and retaining the new one. No-op if cmd or hw_event is null.
   static void AttachHwEvent(amd::Command* cmd, void* hw_event);
 
-  //! Spin-wait until queue has space for a packet at \p write_index.
-  //! Uses cached_read_dispatch_id_ to avoid DRAM traffic on the fast path;
-  //! only re-reads the hardware read_dispatch_id when the cached value
-  //! indicates the queue might be full.
-  void WaitForQueueSlot(uint64_t write_index, uint32_t capacity) {
-    if ((write_index - cached_read_dispatch_id_) < capacity) {
-      return;
-    }
-    do {
-      cached_read_dispatch_id_ = Hsa::queue_load_read_index_scacquire(gpu_queue_);
-      if ((write_index - cached_read_dispatch_id_) < capacity) {
-        return;
-      }
-      amd::Os::yield();
-    } while (true);
+  //! Queue state flags — using atomic with bit operations to handle concurrent
+  //! access from multiple threads under different locks (or no locks).
+  enum StateFlags : uint8_t {
+    kHasPendingDispatch = 1 << 0,
+    kProfiling = 1 << 1,
+    kCooperative = 1 << 2,
+    kAddSystemScope = 1 << 3,
+    kTrackingCreated = 1 << 4,
+    kRetainExternalSignals = 1 << 5,
+    kForceIrq = 1 << 6,
+  };
+
+  void SetStateFlag(StateFlags flag) {
+    state_.fetch_or(flag, std::memory_order_release);
   }
 
-  //! Queue state flags
-  union {
-    struct {
-      uint32_t hasPendingDispatch_ : 1;     //!< A kernel dispatch is outstanding
-      uint32_t profiling_ : 1;              //!< Profiling is enabled
-      uint32_t cooperative_ : 1;            //!< Cooperative launch is enabled
-      uint32_t addSystemScope_ : 1;         //!< Insert a system scope to the next aql
-      uint32_t tracking_created_ : 1;       //!< Enabled if tracking object was properly initialized
-      uint32_t retainExternalSignals_ : 1;  //!< Indicate to retain external signal array
-      uint32_t force_irq_ : 1;              //!< Forces interrupt on the signal completion
-    };
-    uint32_t state_;
-  };
+  void ClearStateFlag(StateFlags flag) {
+    state_.fetch_and(~flag, std::memory_order_release);
+  }
+
+  bool GetStateFlag(StateFlags flag) const {
+    return (state_.load(std::memory_order_acquire) & flag) != 0;
+  }
+
+  bool TestAndClearStateFlag(StateFlags flag) {
+    return (state_.fetch_and(static_cast<uint8_t>(~flag), std::memory_order_acq_rel) & flag) != 0;
+  }
+
+  std::atomic<uint8_t> state_{0};
 
   Timestamp* timestamp_;
   bool sdma_profiling_for_cmd_ = false;  //!< SDMA profiling enabled for current command
@@ -897,6 +929,10 @@ class VirtualGPU : public device::VirtualDevice {
   //! Cached hardware doorbell for the active queue (UC MMIO). Non-null only when
   //! DEBUG_CLR_DIRECT_DOORBELL is enabled and the doorbell id query succeeded.
   volatile uint64_t* doorbell_ptr_ = nullptr;
+  //! Largest barrier-bit slot shared by every VirtualGPU using the physical HW queue.
+  std::shared_ptr<std::atomic<uint64_t>> largest_aql_barrier_bit_slot_;
+  //! Final AQL slot submitted by this stream, or kInvalidAqlSlot before its first packet.
+  uint64_t last_aql_packet_slot_ = kInvalidAqlSlot;
   alignas(64) hsa_barrier_and_packet_t barrier_packet_ {};
   alignas(64) hsa_amd_barrier_value_packet_t barrier_value_packet_ {};
 

@@ -13,18 +13,56 @@
 #include "xml.h"
 #include "net.h"
 #include "os.h"
+#include "nvmlwrap.h"
 #include "archinfo.h"
 #include <string.h>
+#include <map>
 
 #define LOC_BW 5000.0
+// Bw of the path between the compute partitions of one physical device. Partitions share HBM
+// rather than crossing a link, so a sibling access measures the same as a local one: 529 GB/s on
+// an MI300X CPX partition, against 48 GB/s for a real XGMI hop. They share one pool rather than
+// owning independent links -- eight concurrent sibling pairs reach 1877 GB/s in aggregate, 235
+// each. The figure has to stay well clear of what ncclTopoSearch spends on one hop, which an XGMI
+// width does not -- see ncclTopoConnectMloPartSiblings() -- and 2618 is the measured aggregate
+// rounded up past the top of speedArrayIntra by enough that a channel never exhausts a hop.
+//
+// It is not free to move within that range: on the 8 partitions of one device, 529, 1877 and 2618
+// all search out the same 128 channels of the same type, but the tree rates them 4, 12 and 20 GB/s
+// respectively, and that rating is what ncclTopoTuneModel() turns into the threshold where tree
+// gives way to ring. (The ring is pinned at 24 either way, and a comm spanning devices does not
+// move at all, since its slowest hop is a real XGMI link.) An earlier version of this comment
+// claimed the three were interchangeable; that was measured while parseRome4P2H() was still
+// capping the ring at 2 channels, which left the search no room to show the difference.
+//
+// ncclTopoSearchInit() does sum these across siblings into system->totalBw -- 7 * 2618 on an
+// 8-partition device, against the 1877 the fabric actually delivers -- but nothing downstream can
+// see the difference. The starting-speed loop compares against speedArrayIntra, whose largest
+// entry is 48, so both figures clear it identically, and the only other reader is the refinement
+// early-exit in ncclTopoCompute(), which runs after a solution is already in hand. Charging
+// siblings once instead of per-link was tried: same graphs at 8, 16 and 64 partitions, and 1 GiB
+// allreduce and sendrecv within run-to-run noise of each other.
+#define MLOPART_LOC_BW 2618.0
+// P2P channels to ask for per peer across that path. ncclTopoGetNchannels() recovers a link count
+// for a real XGMI hop by dividing the path bw by one XGMI width; an on-package hop has no link
+// width to recover, and dividing MLOPART_LOC_BW that way reads it as a ~54-link stack. The count
+// is genuinely large -- eight partitions of one MI300X run a 1 GiB sendrecv at 59 GB/s with 4
+// channels per peer, 89 at 8, 121 at 16 and 114 at 32 -- it just cannot be derived from a width,
+// so state it. ncclTopoComputeP2pChannels() rounds up and doubles this on single-node gfx94x/95x,
+// then clamps it to the channel pool. Only a comm whose every peer is a sibling sees this: one
+// that also spans physical devices takes the smaller cross-device count instead.
+#define MLOPART_P2P_NCHANNELS 32
 #define SM60_NVLINK_BW 18.0
 #define SM70_NVLINK_BW 20.0
 #define SM80_NVLINK_BW 20.0
 #define SM90_NVLINK_BW 20.6
 #define SM86_NVLINK_BW 12.0
 #define SM100_NVLINK_BW 40.1
+#define RUBIN_NVLINK_BW 31.2
 #define PCI_BW 12.0           // PCI Gen3 x16
-#define AMD_BW 16.0
+#define AMD_ZEN12_BW 16.0
+#define AMD_ZEN34_BW 24.0
+#define AMD_ZEN5_BW 32.0
 #define BDW_QPI_BW 6.0
 #define SKL_QPI_BW 10.0
 #define SRP_QPI_BW 22.0
@@ -44,7 +82,7 @@
 // to GPU traffic consumes more PCI bandwidth.
 #define INTEL_P2P_OVERHEAD(bw) (bw * 6 / 5)
 
-#define NCCL_TOPO_NODE_TYPES 8
+#define NCCL_TOPO_NODE_TYPES 10
 #define GPU 0
 #define PCI 1
 #define NVS 2
@@ -52,7 +90,9 @@
 #define NIC 4
 #define NET 5
 #define GIN 6
-#define DEV 7
+#define RMA 7
+#define DEV 8
+#define CXB 9 // C2C Cross-Bridge: shared C2C bus node for GPUs split with mlopart
 extern const char* topoNodeTypeStr[];
 
 // We want link types and path types to match as much as possible
@@ -82,13 +122,15 @@ struct ncclTopoLink {
 #define NCCL_TOPO_MAX_HOPS (NCCL_TOPO_MAX_NODES * NCCL_TOPO_NODE_TYPES)
 
 struct ncclTopoLinkList {
-  struct ncclTopoLink* list[NCCL_TOPO_MAX_HOPS];
-  int count;
+  struct ncclTopoLink** list;
+  int count;     // Number of links stored in list.
+  int capacity;  // Number of entries allocated for list.
   float bw;
   int type;
 };
 
 #define NCCL_TOPO_UNDEF (-1)
+#define NCCL_TOPO_UNDEF_BIT (0x1 << 16)
 
 #define NCCL_TOPO_ID_LOCAL_ID_MASK 0x00ffffffffffffff
 #define NCCL_TOPO_ID_SYSTEM_ID(id) (id >> 56)
@@ -113,6 +155,21 @@ struct ncclTopoLinkList {
 #define RCCL_ROME_TOPO_PRESET_MODEL_IDX_4H4P (1000001)
 
 #define GCN_ARCH_NAME_LEN 16
+// The MLOPart partition index is overlaid on the DEV node's busId. These bits must sit above
+// the 36-bit PCI busId (domain[35:20] bus[19:12] device[11:4] function[3:0], see int64ToBusId)
+// and below NCCL_TOPO_GPU_LOCAL_RANK_SHIFT. AMD compute partitions expose HIP logical GPUs as
+// functions of the physical device: DPX/XCP use .0/.1, CPX uses .0 through .7. Only function
+// .0 exists in sysfs as a GPU; the rest are HIP aliases and share that PCI node via mlopart.
+#define NCCL_TOPO_MLOPART_SHIFT (36)
+#define NCCL_TOPO_MLOPART_DEV_MAX (8)
+#define NCCL_TOPO_MLOPART_MASK (((int64_t)0xf) << NCCL_TOPO_MLOPART_SHIFT) // enable bit + 3-bit index
+#define NCCL_TOPO_MLOPART(mloPart) \
+  (((((int64_t)(mloPart) << 1) | 0x1) << NCCL_TOPO_MLOPART_SHIFT) & NCCL_TOPO_MLOPART_MASK)
+#define NCCL_TOPO_MLOPART_BUSID(busId, mloPart) \
+  ((mloPart) != NCCL_TOPO_UNDEF ? ((busId) | NCCL_TOPO_MLOPART(mloPart)) : (busId))
+static_assert(NCCL_TOPO_MLOPART_SHIFT >= 36, "MLOPart bits must sit above the 36-bit PCI busId");
+static_assert(NCCL_TOPO_MLOPART_SHIFT + 4 <= NCCL_TOPO_GPU_LOCAL_RANK_SHIFT,
+              "MLOPart bits overlap GPU local rank");
 
 struct ncclTopoNode {
   int type;
@@ -127,6 +184,7 @@ struct ncclTopoNode {
       char gcn[GCN_ARCH_NAME_LEN];
       hipDeviceArch_t arch;
       int cu;
+      int mloPart; // MLOPart partition index, or NCCL_TOPO_UNDEF if not MLOPart
       struct ncclTopoNode* parent; // parent DEV node
     } gpu;
     struct {
@@ -135,9 +193,12 @@ struct ncclTopoNode {
       int cudaCompCap;
       int gdrSupport;
       char gcn[GCN_ARCH_NAME_LEN]; // RCCL: GCN arch mirrored from the device's GPU rank, used for XGMI link BW
+      int nGpus; // number of GPU partitions attached to this DEV node
     } dev;
     struct {
       int dev; // Plugin dev number
+      uint64_t vendor; // PCI vendor ID
+      uint64_t device; // PCI device ID
       uint64_t pciId;
       uint64_t asic;
       int port;
@@ -148,6 +209,8 @@ struct ncclTopoNode {
       int maxChannels;
       int localGpu;
       int64_t busId;
+      int railId;
+      int planeId;
     } net;
     struct {
       int arch;
@@ -167,9 +230,22 @@ struct ncclTopoNode {
   uint64_t used;
 };
 
+// Whether two GPU nodes are compute partitions of one physical device. Partitions get a DEV node
+// each, with the partition index overlaid on the busId, so masking it off recovers the device they
+// share. A non-partitioned busId has those bits clear (ncclTopoCheckMloPartBusId), so distinct
+// devices stay distinct here.
+static inline bool ncclTopoIsMloPartSibling(struct ncclTopoNode* a, struct ncclTopoNode* b) {
+  if (a->gpu.parent == NULL || b->gpu.parent == NULL || a->gpu.parent == b->gpu.parent) return false;
+  return (a->gpu.parent->id & ~NCCL_TOPO_MLOPART_MASK) == (b->gpu.parent->id & ~NCCL_TOPO_MLOPART_MASK);
+}
+
 struct ncclTopoNodeSet {
   int count;
   struct ncclTopoNode nodes[NCCL_TOPO_MAX_NODES];
+};
+
+struct ncclTopoNetRailKeyList {
+  std::map<uint64_t, int> keys;
 };
 
 struct ncclTopoSystem {
@@ -201,22 +277,35 @@ struct ncclTopoSystem {
   int romeTopoModelIdx;
   /* Preset matchers assume uniform ranks per host; otherwise use generic search in ncclTopoCompute */
   bool skipPresetTopoMatching;
+  // mirrors the comm's values
+  bool cuMemGdrSupport;  // global cuMem GDR support
+  int minDriverVersion;  // min CUDA driver version across ranks
 };
 
 ncclResult_t ncclTopoGetNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
 ncclResult_t ncclTopoCreateNode(struct ncclTopoSystem* system, struct ncclTopoNode** node, int type, uint64_t id);
+// Removing a node invalidates computed paths. Callers must remove any paths before calling this
+// function and recompute them before using the topology for path-dependent operations.
 ncclResult_t ncclTopoRemoveNode(struct ncclTopoSystem* system, int type, int id);
+void ncclTopoRemovePaths(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoConnectNodes(struct ncclTopoNode* node, struct ncclTopoNode* remNode, int type, float bw);
 ncclResult_t ncclTopoPrintPaths(struct ncclTopoSystem* system);
 ncclResult_t ncclTopoLoadSystem(const char* xmlTopoFile, struct ncclTopoSystem* system);
 ncclResult_t ncclTopoGetIntermediateRank(struct ncclTopoSystem* system, int rank, int64_t netId, int* intermediateRank);
 ncclResult_t ncclTopoGetGpuMinPath(struct ncclTopoSystem* system, int type, int* min);
 ncclResult_t ncclTopoGetGpuMaxPath(struct ncclTopoSystem* system, int type, int* max);
+ncclResult_t ncclTopoGetGpuMaxLocalNetPath(struct ncclTopoSystem* system, int* max);
 ncclResult_t ncclTopoSplitNvLink(struct ncclTopoSystem* system, int* splitNvLink);
+
+enum {
+  NCCL_NET_MERGE_POLICY_ALL = 0,
+  NCCL_NET_MERGE_POLICY_RAIL = 1
+};
 
 struct ncclTopoNetInfo {
   bool coll;
   bool gin;
+  bool rma;
   bool net;
   // communicator-specific information
   int netPluginIndex;
@@ -224,6 +313,7 @@ struct ncclTopoNetInfo {
   bool dmaBufSupport;
   // NIC fusion
   int mergeLevel;
+  int mergePolicy;
   const char* forceMerge;
   // dev count tracking functions (not part of ncclNet)
   ncclResult_t (*getDevCount)(int, int*, int*);
@@ -233,10 +323,32 @@ struct ncclTopoNetInfo {
   ncclResult_t (*getProperties)(int, ncclNetProperties_t*);
   ncclResult_t (*makeVDevice)(int*, ncclNetVDeviceProps_t*);
   ncclResult_t (*devices)(int*);
+
+  // system-wide list of unique rail keys
+  struct ncclTopoNetRailKeyList* railKeyList;
 };
 
 ncclResult_t ncclTopoProcessNet(ncclXml* xml, const char* dumpXmlFile, struct ncclTopoNetInfo* net);
-ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge);
+ncclResult_t ncclTopoForceMerge(struct ncclXml* xml, struct ncclTopoNetInfo* netInfo, int* placedDevs,
+                                ncclNetProperties_t* propsList, struct ncclXmlNode** physNetNodes, int nPhysDevs);
+ncclResult_t ncclTopoGetXmlCpuArch(ncclXml* xml, int* cpuArch);
+ncclResult_t ncclTopoGetFusionEnv(int* mergeLevel, const char** forceMerge, int cudaCompCap, int cpuArch);
+
+// Owned subset of network properties that remains valid after the topology lock is released.
+struct ncclTopoNetPropertiesSnapshot {
+  bool propertiesValid;
+  ncclNetVDeviceProps_t vProps;
+  int speed;
+  int port;
+  ncclNetDeviceType netDeviceType;
+  char name[PATH_MAX];
+  char pciPath[PATH_MAX];
+};
+
+// Caller keeps comm and its network plugin alive. When requireCommInitialized is true, the plugin is queried only
+// after communicator initialization succeeds. The caller owns *snapshots.
+ncclResult_t ncclTopoGetNetPropertiesSnapshot(struct ncclComm* comm, bool requireCommInitialized,
+                                              struct ncclTopoNetPropertiesSnapshot** snapshots, int* nSnapshots);
 
 #define NCCL_TOPO_XML_MAX_NODES 8192
 #define NCCL_GRAPH_XML_MAX_NODES 8192
@@ -311,15 +423,22 @@ static float ncclTopoXGMISpeed(const char* gcn) {
   else return VEGA_XGMI_WIDTH;
 }
 
+// [RCCL] Upstream gets RUBIN_AND_LATER from cudawrap.h. topo.h does not include it here: cudawrap.h
+// redefines CUPFN, which the host unit tests override through rocmwrap.h. Keep in sync with cudawrap.h.
+#ifndef RUBIN_AND_LATER
+#define RUBIN_AND_LATER(sm) (sm >= 107 && sm != 110 && sm != 120 && sm != 121)
+#endif
+
 // Returns NVLink bw in GB/s
 static float ncclTopoNVLinkBw(int cudaCompCap) {
-  return cudaCompCap >= 100 ? SM100_NVLINK_BW :
-         cudaCompCap >= 90  ? SM90_NVLINK_BW :
-         cudaCompCap == 86  ? SM86_NVLINK_BW :
-         cudaCompCap >= 80  ? SM80_NVLINK_BW :
-         cudaCompCap >= 70  ? SM70_NVLINK_BW :
-         cudaCompCap >= 60  ? SM60_NVLINK_BW :
-                              SM80_NVLINK_BW;
+  return RUBIN_AND_LATER(cudaCompCap) ? RUBIN_NVLINK_BW :
+         cudaCompCap >= 100           ? SM100_NVLINK_BW :
+         cudaCompCap >= 90            ? SM90_NVLINK_BW :
+         cudaCompCap == 86            ? SM86_NVLINK_BW :
+         cudaCompCap >= 80            ? SM80_NVLINK_BW :
+         cudaCompCap >= 70            ? SM70_NVLINK_BW :
+         cudaCompCap >= 60            ? SM60_NVLINK_BW :
+                                        SM80_NVLINK_BW;
 }
 
 // Mirror bits

@@ -2,7 +2,7 @@
 #
 # SPDX-License-Identifier: MIT
 
-include(AISAddExecutable)
+include(HipFileAddExecutable)
 find_package(Threads REQUIRED)
 
 set(SHARED_SOURCE_FILES
@@ -30,6 +30,7 @@ set(TEST_SOURCE_FILES
     mountinfo.cpp
     stats.cpp
     stream.cpp
+    thread-pool.cpp
 )
 
 set(TEST_SYSINCLS
@@ -40,7 +41,7 @@ set(TEST_SYSINCLS
     ${HIPFILE_THIRD_PARTY_PATH}
 )
 
-ais_add_test_executable(
+hipfile_add_test_executable(
     NAME internal_tests
     DEPS hipfile
     SRCS ${TEST_SOURCE_FILES} ${SHARED_SOURCE_FILES}
@@ -53,7 +54,7 @@ target_link_libraries(internal_tests PRIVATE GTest::gtest)
 target_compile_options(internal_tests PRIVATE -pthread)
 target_link_options(internal_tests PRIVATE -pthread)
 
-ais_gtest_discover_tests(
+hipfile_gtest_discover_tests(
     internal_tests
     PROPERTIES "LABELS;unit;LABELS;internal"
     TEST_LIST internal_unit_tests
@@ -65,7 +66,7 @@ ais_gtest_discover_tests(
 # so test failures may not be due to the commit in which you
 # observe the failure.
 
-ais_add_test_executable(
+hipfile_add_test_executable(
     NAME state_mt
     DEPS hipfile
     SRCS "state_mt.cpp"
@@ -80,7 +81,7 @@ add_test(
 )
 set_tests_properties(state_mt_test PROPERTIES LABELS "stress;internal")
 
-ais_add_test_executable(
+hipfile_add_test_executable(
     NAME batch_mt
     DEPS hipfile
     SRCS "batch/batch_mt.cpp"

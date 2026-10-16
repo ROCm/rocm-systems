@@ -257,34 +257,30 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeType) {
 }
 
 // Function to verify node Type
-static void ChkNodeType(hipGraph_t graph, const std::map<hipGraphNodeType, int>* nodeTypeToQuery) {
+static void ChkNodeType(hipGraph_t graph, const std::map<hipGraphNodeType, int>* nodeTypeToQuery,
+                        bool threadSafe = false) {
   size_t numNodes{};
   hipGraphNodeType nodeType;
-  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphGetNodes(graph, nullptr, &numNodes));
   int numBytes = sizeof(hipGraphNode_t) * numNodes;
   hipGraphNode_t* nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
-  REQUIRE(nodes != nullptr);
-  HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes));
+  REQUIRE_OPT_THREAD(threadSafe, nodes != nullptr);
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphGetNodes(graph, nodes, &numNodes));
   std::map<hipGraphNodeType, int> cntNode;
   for (size_t i = 0; i < numNodes; i++) {
-    HIP_CHECK(hipGraphNodeGetType(nodes[i], &nodeType));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipGraphNodeGetType(nodes[i], &nodeType));
     cntNode[nodeType] += 1;
   }
-  std::map<hipGraphNodeType, int>::iterator iter;
-  std::map<hipGraphNodeType, int>::const_iterator iter1 = nodeTypeToQuery->begin();
-  for (iter = cntNode.begin(); iter != cntNode.end(); iter++) {
-    REQUIRE(iter->first == iter1->first);
-    REQUIRE(iter->second == iter1->second);
-    if (iter1 == nodeTypeToQuery->end())
-      break;
-    else
-      iter1++;
-  }
+  // Compare the counted node types directly against the expected map. std::map
+  // equality checks both the size and every key/value pair, which avoids walking
+  // two iterators in lock-step and the resulting end() dereference when the maps
+  // differ in size.
+  REQUIRE_OPT_THREAD(threadSafe, cntNode == *nodeTypeToQuery);
   free(nodes);
 }
 // Thread Function
 static void thread_func(hipGraph_t graph, std::map<hipGraphNodeType, int>* numNode) {
-  ChkNodeType(graph, numNode);
+  ChkNodeType(graph, numNode, true);
 }
 /*
  * 1.Create a graph with different types of nodes. Clone the graph. Verify the types
@@ -396,6 +392,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfClonedGraph_NodeTypeInThread) {
   SECTION("Node Type In The Thread") {
     std::thread t(thread_func, graph, &numNode);
     t.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
 
   HIP_CHECK(hipStreamDestroy(stream1));
@@ -520,7 +517,8 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_NodeTypeOfChildGraph) {
 }
 enum graphType { Parent, Child };
 // Function to verify node Type
-static void ChkNodeTypeWithDependency(hipGraph_t graph, enum graphType Type) {
+static void ChkNodeTypeWithDependency(hipGraph_t graph, enum graphType Type,
+                                      bool threadSafe = false) {
   size_t numNodes{};
   hipGraphNodeType nodeType;
   hipGraphNodeType Arr[] = {hipGraphNodeTypeHost,   hipGraphNodeTypeMemcpy,
@@ -531,18 +529,18 @@ static void ChkNodeTypeWithDependency(hipGraph_t graph, enum graphType Type) {
   hipGraphNodeType childArr[] = {hipGraphNodeTypeMemset, hipGraphNodeTypeWaitEvent,
                                  hipGraphNodeTypeEmpty, hipGraphNodeTypeEventRecord};
 
-  HIP_CHECK(hipGraphGetNodes(graph, nullptr, &numNodes));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphGetNodes(graph, nullptr, &numNodes));
   int numBytes = sizeof(hipGraphNode_t) * numNodes;
   hipGraphNode_t* nodes = reinterpret_cast<hipGraphNode_t*>(malloc(numBytes));
-  REQUIRE(nodes != nullptr);
+  REQUIRE_OPT_THREAD(threadSafe, nodes != nullptr);
 
-  HIP_CHECK(hipGraphGetNodes(graph, nodes, &numNodes));
+  HIP_CHECK_OPT_THREAD(threadSafe, hipGraphGetNodes(graph, nodes, &numNodes));
   for (size_t i = 0; i < numNodes; i++) {
-    HIP_CHECK(hipGraphNodeGetType(nodes[i], &nodeType));
+    HIP_CHECK_OPT_THREAD(threadSafe, hipGraphNodeGetType(nodes[i], &nodeType));
     if (Type == Parent) {
-      REQUIRE(nodeType == Arr[i]);
+      REQUIRE_OPT_THREAD(threadSafe, nodeType == Arr[i]);
     } else if (Type == Child) {
-      REQUIRE(nodeType == childArr[i]);
+      REQUIRE_OPT_THREAD(threadSafe, nodeType == childArr[i]);
     }
   }
   free(nodes);
@@ -550,7 +548,7 @@ static void ChkNodeTypeWithDependency(hipGraph_t graph, enum graphType Type) {
 
 // Thread Function
 static void thread_func1(hipGraph_t graph, enum graphType type) {
-  ChkNodeTypeWithDependency(graph, type);
+  ChkNodeTypeWithDependency(graph, type, true);
 }
 /*
  * 1.Create a graph with different types of nodes along with dependencies between
@@ -639,6 +637,7 @@ HIP_TEST_CASE(Unit_hipGraphNodeGetType_ClonedGraph_InThread_WithDependencies) {
   SECTION("Node Type In The Thread") {
     std::thread t(thread_func1, graph, Parent);
     t.join();
+    HIP_CHECK_THREAD_FINALIZE();
   }
   HIP_CHECK(hipStreamDestroy(stream1));
   HIP_CHECK(hipEventDestroy(event1));

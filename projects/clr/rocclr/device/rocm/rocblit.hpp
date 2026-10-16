@@ -228,12 +228,6 @@ class DmaBlitManager : public device::HostBlitManager {
                              size_t& partial       //!< Extra offset for memory alignment
   ) const;
 
-  //! Resolves the real HSA agents for a src/dst memory pair.
-  //! Handles IPC shared memory where dev() may not reflect the true owning agent.
-  inline void resolveAgents(const Memory& srcMem, const Memory& dstMem,
-                            address srcAddr, address dstAddr,
-                            hsa_agent_t& srcAgent, hsa_agent_t& dstAgent) const;
-
   //! Assits in transferring data from Host to Local or vice versa
   //! taking into account the Hsail profile supported by Hsa Agent
   bool hsaCopy(const Memory& srcMemory, const Memory& dstMemory, const amd::Coord3D& srcOrigin,

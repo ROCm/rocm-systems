@@ -1,40 +1,24 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #ifndef ROCM_SMI_ROCM_SMI_H_
 #define ROCM_SMI_ROCM_SMI_H_
 
 #ifdef __cplusplus
-extern "C" {
-#include <stddef.h>
-#include <stdint.h>
-#else
 #include <cstddef>
 #include <cstdint>
+#else
+#include <stddef.h>
+#include <stdint.h>
 #endif  // __cplusplus
 
 #include <stdbool.h>
 
 #include "rocm_smi/kfd_ioctl.h"
+
+#ifdef __cplusplus
+extern "C" {
+#endif  // __cplusplus
 
 /** \file rocm_smi.h
  *  Main header file for the ROCm SMI library.
@@ -637,11 +621,59 @@ typedef enum { RSMI_NPM_STATUS_DISABLED, RSMI_NPM_STATUS_ENABLED } rsmi_npm_stat
  *
  */
 typedef struct {
-  rsmi_npm_status_t status;      //!< NPM status (enabled/disabled).
-  uint64_t limit;                //!< Node-level power limit in Watts.
-  uint32_t ubb_power_threshold;  //!< The UBB node power threshold in Watts.
-  uint64_t reserved[5];
+  rsmi_npm_status_t status;       //!< NPM status (enabled/disabled).
+  uint64_t limit;                 //!< Node-level power limit in Watts.
+  uint32_t ubb_power_threshold;   //!< The UBB node power threshold in Watts.
+  uint64_t max_node_power_limit;  //!< Platform max node-level power limit in Watts
+                                  //!< (board/max_node_power_limit).
+  uint32_t current_node_power;    //!< The current (instantaneous) node power in Watts
+                                  //!< (board/node_power).
+  uint64_t reserved[3];           //!< Reduced from reserved[4] to accommodate
+                                  //!< current_node_power.
 } rsmi_npm_info_t;
+
+//! Maximum length for AMPP string buffers. Must stay equal to
+//! AMDSMI_MAX_STRING_LENGTH (amd_smi/amdsmi.h) -- the two structs below
+//! mirror amdsmi_ampp_field_t/amdsmi_ampp_profile_t byte-for-byte so
+//! amd_smi.cc can translate between them with a single sizeof-guarded
+//! memcpy/reinterpret_cast.
+#define RSMI_AMPP_MAX_STRING_LENGTH 256
+
+/**
+ * @brief A single AMPP profile field (name/value/unit/limits).
+ */
+typedef struct {
+  char name[RSMI_AMPP_MAX_STRING_LENGTH];
+  char unit[RSMI_AMPP_MAX_STRING_LENGTH];
+  int64_t value;
+  int64_t limit_min;
+  int64_t limit_max;
+  bool has_limits;
+  uint32_t reserved[4];
+} rsmi_ampp_field_t;
+
+/**
+ * @brief A single AMPP profile descriptor.
+ */
+typedef struct {
+  char name[RSMI_AMPP_MAX_STRING_LENGTH];
+  uint32_t index;
+  bool is_active;
+  bool is_writable;
+  bool is_configured;
+  uint32_t reserved[4];
+} rsmi_ampp_profile_t;
+
+/**
+ * @brief NPM balancing mode
+ *
+ */
+typedef enum {
+  RSMI_NPM_BALANCING_MODE_INVALID = 0,
+  RSMI_NPM_BALANCING_MODE_POWER_BALANCING = 1,
+  RSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING = 2,
+  RSMI_NPM_BALANCING_MODE_MAX = 3
+} rsmi_npm_balancing_mode_t;
 
 /**
  * @brief Activity (Utilization) Metrics.  This enum is used to identify
@@ -1332,7 +1364,8 @@ struct amdgpu_xcp_metrics_t {
  * `temperature_core` on v2.4) will contain 0xFFFF. However, uint32_t elements such as
  * 'throttle_status' will contain 0xFFFFFFFF and UINT64_MAX for uint64_t elements such
  * as 'indep_throttle_status'. Callers should check the version and treat maximum values
- * as invalid/not applicable.
+ * as invalid/not applicable. On v3.0, a `temperature_core` or `temperature_skin`
+ * reading of 0 (not measured) is also returned as 0xFFFF.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
@@ -2651,6 +2684,9 @@ rsmi_status_t rsmi_dev_pci_replay_counter_get(uint32_t dv_ind, uint64_t* counter
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_INVALID_ARGS @p bw_bitmask selects no settable bandwidth
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA the device reports zero settable
+ *  bandwidths
  *
  */
 rsmi_status_t rsmi_dev_pci_bandwidth_set(uint32_t dv_ind, uint64_t bw_bitmask);
@@ -3184,7 +3220,102 @@ rsmi_status_t rsmi_dev_fan_speed_max_get(uint32_t dv_ind, uint32_t sensor_ind, u
 rsmi_status_t rsmi_dev_npm_info_get(uint32_t dv_ind, uintptr_t node_handle,
                                     rsmi_npm_info_t* npm_info);
 
+rsmi_status_t rsmi_dev_npm_balancing_mode_get(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t* mode);
+
+rsmi_status_t rsmi_dev_npm_balancing_mode_set(uint32_t dv_ind, uintptr_t node_handle,
+                                              rsmi_npm_balancing_mode_t mode);
+
+rsmi_status_t rsmi_dev_npm_limit_set(uint32_t dv_ind, uintptr_t node_handle, uint64_t limit);
+
+rsmi_status_t rsmi_dev_npm_supported_balancing_modes_get(uint32_t dv_ind, uintptr_t node_handle,
+                                                         uint64_t* bitmask);
+
 rsmi_status_t rsmi_dev_baseboard_power_get(uint32_t dv_ind, uint64_t* power);
+
+/**
+ *  @brief Get the list of AMPP (amdsmi power profile) profiles currently
+ *  published by the driver for the given device, along with the AMPP ABI
+ *  version string.
+ *
+ *  @details If @p profiles is nullptr, @p num_profiles will be set to the
+ *  number of profiles currently available and ::RSMI_STATUS_SUCCESS is
+ *  returned. Otherwise, @p num_profiles is treated as the capacity of the
+ *  @p profiles array; if that capacity is smaller than the number of
+ *  profiles available, ::RSMI_STATUS_OUT_OF_RESOURCES is returned and
+ *  *num_profiles is set to the required capacity, without partially
+ *  filling @p profiles.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[out] version optional buffer of size RSMI_AMPP_MAX_STRING_LENGTH
+ *  to receive the AMPP ABI version string, or nullptr to skip
+ *  @param[inout] num_profiles capacity of @p profiles on input, count on
+ *  output
+ *  @param[inout] profiles buffer to receive the profile list, or nullptr
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS num_profiles is nullptr
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED AMPP is not supported on this device
+ *  @retval ::RSMI_STATUS_OUT_OF_RESOURCES @p profiles capacity too small
+ */
+rsmi_status_t rsmi_dev_ampp_profiles_get(uint32_t dv_ind, char version[RSMI_AMPP_MAX_STRING_LENGTH],
+                                         uint32_t* num_profiles, rsmi_ampp_profile_t* profiles);
+
+/**
+ *  @brief Get the fields (name/value/unit/limits) of a single AMPP profile.
+ *
+ *  @details Same two-call sizing convention as rsmi_dev_ampp_profiles_get:
+ *  if @p fields is nullptr, only *num_fields is filled in.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] profile_name name of the profile (e.g. "profile_2")
+ *  @param[inout] num_fields capacity of @p fields on input, count on output
+ *  @param[inout] fields buffer to receive the field list, or nullptr
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS profile_name/num_fields invalid, or
+ *  profile_name does not name a currently published profile
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED AMPP is not supported on this device
+ *  @retval ::RSMI_STATUS_OUT_OF_RESOURCES @p fields capacity too small
+ *  @retval ::RSMI_STATUS_NO_DATA the profile is writable but not yet
+ *  configured (has no fields yet)
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA a field file's content did not
+ *  parse as expected; on this return, *num_fields still reflects the
+ *  required count but @p fields itself is only partially filled -- treat
+ *  its contents as undefined and discard
+ */
+rsmi_status_t rsmi_dev_ampp_fields_get(uint32_t dv_ind, const char* profile_name,
+                                       uint32_t* num_fields, rsmi_ampp_field_t* fields);
+
+/**
+ *  @brief Activate an AMPP profile.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] profile_name name of the profile (e.g. "profile_2")
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS profile_name invalid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED AMPP is not supported
+ *  @retval ::RSMI_STATUS_PERMISSION insufficient permission to write
+ */
+rsmi_status_t rsmi_dev_ampp_profile_activate(uint32_t dv_ind, const char* profile_name);
+
+/**
+ *  @brief Stage/commit field values into a writable custom profile slot.
+ *
+ *  @param[in] dv_ind a device index
+ *  @param[in] profile_name name of the profile (e.g. "profile_5")
+ *  @param[in] fields fields to stage
+ *  @param[in] num_fields number of entries in @p fields
+ *
+ *  @retval ::RSMI_STATUS_SUCCESS call was successful
+ *  @retval ::RSMI_STATUS_INVALID_ARGS profile_name/fields/num_fields invalid
+ *  @retval ::RSMI_STATUS_NOT_SUPPORTED AMPP, or CONFIGURE on this slot, is
+ *  not supported
+ *  @retval ::RSMI_STATUS_PERMISSION insufficient permission to write
+ */
+rsmi_status_t rsmi_dev_ampp_profile_configure(uint32_t dv_ind, const char* profile_name,
+                                              const rsmi_ampp_field_t* fields, uint32_t num_fields);
 
 /**
  *  @brief Get the temperature metric value for the specified metric, from the
@@ -3534,7 +3665,7 @@ rsmi_status_t rsmi_dev_mem_overdrive_level_get(uint32_t dv_ind, uint32_t* od);
  *  arguments and ::RSMI_STATUS_NOT_SUPPORTED if it is not supported with the
  *  provided arguments.
  *  If multiple current frequencies are found, a warning is shown. If no
- *  current frequency is found, it is reflected as -1. If frequencies are not
+ *  current frequency is found, it is reflected as UINT32_MAX. If frequencies are not
  *  read from low to high a warning is shown as well.
  *
  *  @retval ::RSMI_STATUS_SUCCESS call was successful
@@ -4027,34 +4158,43 @@ rsmi_status_t rsmi_dev_overdrive_level_set_v1(uint32_t dv_ind, uint32_t od);
  * @brief Control the set of allowed frequencies that can be used for the
  * specified clock.
  *
- * @details Given a device index @p dv_ind, a clock type @p clk_type, and a
- * 64 bit bitmask @p freq_bitmask, this function will limit the set of
- * allowable frequencies. If a bit in @p freq_bitmask has a value of 1, then
- * the frequency (as ordered in an ::rsmi_frequencies_t returned by
- * rsmi_dev_gpu_clk_freq_get()) corresponding to that bit index will be
- * allowed.
+ * @details Given a device index @p dv_ind, this function will restrict clock
+ * @p clk_type to the frequencies selected in @p freq_bitmask. Bit N maps to
+ * DPM level N in the order returned by rsmi_dev_gpu_clk_freq_get(). Set a bit
+ * to 1 to enable and 0 to disable that level.
  *
- * This function will change the performance level to
- * ::RSMI_DEV_PERF_LEVEL_MANUAL in order to modify the set of allowable
- * frequencies. Caller will need to set to ::RSMI_DEV_PERF_LEVEL_AUTO in order
- * to get back to default state.
+ * Only settable DPM levels can be enabled. Bits outside the settable range are
+ * dropped before the request is sent, so an out-of-range level is never
+ * requested; the remaining in-range bits are still applied. The deep-sleep
+ * frequency (see ::rsmi_frequencies_t::has_deep_sleep)
+ * is not settable, so when it is present the settable level count is
+ * ::rsmi_frequencies_t::num_supported minus one. Without a deep-sleep
+ * frequency, all ::rsmi_frequencies_t::num_supported levels (0 to
+ * num_supported - 1) are settable. The call returns ::RSMI_STATUS_INVALID_ARGS
+ * if @p freq_bitmask selects no settable level, or ::RSMI_STATUS_UNEXPECTED_DATA
+ * if the device reports zero settable levels for @p clk_type.
  *
- * All bits with indices greater than or equal to
- * ::rsmi_frequencies_t::num_supported will be ignored.
+ * This call sets the performance level to ::RSMI_DEV_PERF_LEVEL_MANUAL. Set it
+ * back to ::RSMI_DEV_PERF_LEVEL_AUTO to restore the default behavior.
  *
  *  @param[in] dv_ind a device index
  *
- *  @param[in] clk_type the type of clock for which the set of frequencies
- *  will be modified
+ *  @param[in] clk_type the type of clock to modify
  *
- *  @param[in] freq_bitmask A bitmask indicating the indices of the
- *  frequencies that are to be enabled (1) and disabled (0). Only the lowest
- *  ::rsmi_frequencies_t.num_supported bits of this mask are relevant.
+ *  @param[in] freq_bitmask Bitmask selecting which DPM levels to allow, where
+ *  bit N enables (1) or disables (0) DPM level N. Bits above the highest settable
+ *  level are ignored. See notes above on settable levels.
  *
  *  @retval ::RSMI_STATUS_SUCCESS is returned upon successful call.
  *  @retval ::RSMI_STATUS_NOT_SUPPORTED installed software or hardware does not
  *  support this function with the given arguments
  *  @retval ::RSMI_STATUS_PERMISSION function requires root access
+ *  @retval ::RSMI_STATUS_INVALID_ARGS @p clk_type is not a valid ::rsmi_clk_type_t,
+ *  or @p freq_bitmask selects no settable DPM level
+ *  @retval ::RSMI_STATUS_UNEXPECTED_SIZE the device reports more supported
+ *  frequencies than RSMI_MAX_NUM_FREQUENCIES
+ *  @retval ::RSMI_STATUS_UNEXPECTED_DATA the device reports zero settable DPM
+ *  levels for @p clk_type
  *
  */
 rsmi_status_t rsmi_dev_gpu_clk_freq_set(uint32_t dv_ind, rsmi_clk_type_t clk_type,
@@ -5928,56 +6068,6 @@ rsmi_status_t rsmi_read_supported_ptl_formats(uint32_t dv_ind, char* supported, 
 rsmi_status_t rsmi_dev_metrics_log_get(uint32_t dv_ind);
 
 /** @} */  // end of DevMetricsHeaderInfoGet
-
-/*****************************************************************************/
-/** @defgroup DriverControl Driver control mechanisms
- *  These functions provide control over the driver. Users should use with
- *  caution as they may cause the driver to become unstable.
- *  @{
- */
-/**
- *  @brief Restart the device driver (kmod module) for all AMD GPUs on the
- *  system.
- *
- *  @details This function will reload the AMD GPU driver as described in
- *  the Linux kernel documentation -
- *  https://docs.kernel.org/admin-guide/sysctl/kernel.html#modprobe
- *  with no extra parameters as specified in
- *  https://docs.kernel.org/gpu/amdgpu/module-parameters.html.
- *
- *  Use this function with caution, as it will unload and reload the AMD GPU
- *  driver: `modprobe -r amdgpu && modprobe amdgpu`.
- *
- *  Any process or workload using the AMD GPU driver is REQUIRED to be
- *  stopped before calling this function. Otherwise, function will return
- *  ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *  the amdgpu driver.
- *
- *  User is REQUIRED to have root/admin privileges to call this function.
- *  Otherwise, this function will return ::RSMI_STATUS_PERMISSION.
- *
- *  This API will take time to complete, as we are checking the driver's
- *  loading status to confirm it reloaded properly. If
- *  ::RSMI_STATUS_AMDGPU_RESTART_ERR is returned, it means the driver
- *  did not reload properly and the user should check dmesg logs.
- *
- *  This function has been created in order to conveniently reload the
- *  AMD GPU driver once `rsmi_dev_memory_partition_set()`
- *  successfully has been changed on Baremetal systems.
- *  Now users can control the reload once all GPU processes/workloads
- *  have been stopped on the AMD GPU driver. A (AMD GPU) driver reload
- *  is REQUIRED to complete changing to the new memory partition
- *  configuration (`rsmi_dev_memory_partition_set()`) operation MUST
- *  be successful. This function WILL EFFECT all GPUs in the hive to
- *  be reconfigured with the specified memory partition configuration.
- *
- *  @retval ::RSMI_STATUS_SUCCESS call was successful
- *  @retval ::RSMI_STATUS_PERMISSION function requires root access
- *  @retval ::RSMI_STATUS_AMDGPU_RESTART_ERR could not successfully restart
- *            the amdgpu driver.
- */
-rsmi_status_t rsmi_dev_amdgpu_driver_reload(void);
-/** @} */  // end of DriverControl
 
 #ifdef __cplusplus
 }

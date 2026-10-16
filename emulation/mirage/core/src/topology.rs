@@ -21,7 +21,10 @@ fn one() -> u32 {
 
 /// System-level topology: node/GPU counts plus the agent
 /// definition each GPU instantiates.
+///
+/// Unknown fields are rejected; see [`crate::profile`] for why.
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+#[serde(deny_unknown_fields)]
 pub struct TopologyDef {
     /// Number of nodes. Defaults to 1.
     #[serde(default = "one")]
@@ -49,9 +52,18 @@ impl TopologyDef {
 }
 
 /// On-disk topology store backed by `<MIRAGE_CONFIG>/topology/`.
+///
+/// [`crate::store::topology_get`] is where a `MaybeRef::Ref` on a profile is
+/// followed, so it is
+/// also where that reference is checked: a name that arrived inside a
+/// document, rather than from a command line, is interpolated into
+/// `<config>/topology/<name>.json` by exactly the same rule and escapes
+/// the config directory just as easily. It is also where a reference that
+/// resolves to nothing is reported as the dangling reference it is.
 pub mod store {
     use super::TopologyDef;
     use crate::error::{MirageError, Result};
+    use crate::store::{DocKind, Referrer, dangling_ref, validate_name};
     use std::path::PathBuf;
 
     /// List the names of all topology files on disk.
@@ -78,14 +90,52 @@ pub mod store {
         Ok(out)
     }
 
-    /// Read a topology by name.
+    /// Read a topology by name, for a caller that cannot say which
+    /// profile sent it.
+    ///
+    /// Prefer [`get_referred_by`] wherever the referring profile is in
+    /// scope: a user with a dozen profiles cannot act on "a profile
+    /// refers to a topology that is not there" without grepping for the
+    /// one that does.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is not a single path component, if
+    /// there is no such topology — reported as the dangling reference it
+    /// is, since a profile is what brought the name here — or if the
+    /// document is malformed.
     pub fn get(name: &str) -> Result<TopologyDef> {
+        get_referred_by(Referrer::anonymous(DocKind::Profile), name)
+    }
+
+    /// Read a topology by name on behalf of the document that named it.
+    ///
+    /// The referrer is carried in rather than assumed because it is the
+    /// half of a dangling-reference error the reader recognises — usually
+    /// the very word they typed on the command line — and it is known one
+    /// frame up from here and nowhere else.
+    ///
+    /// # Errors
+    ///
+    /// As [`get`], with the referring document named in a dangling
+    /// reference.
+    pub fn get_referred_by(referrer: Referrer<'_>, name: &str) -> Result<TopologyDef> {
+        validate_name(DocKind::Topology, name)?;
         let p = crate::paths::topology_path(name);
+        if !p.exists() {
+            return Err(dangling_ref(referrer, DocKind::Topology, name));
+        }
         crate::state::read_json(&p)
     }
 
     /// Write a topology to disk.
+    ///
+    /// # Errors
+    ///
+    /// Returns an error if `name` is not a single path component or the
+    /// document cannot be written.
     pub fn put(name: &str, topology: &TopologyDef) -> Result<PathBuf> {
+        validate_name(DocKind::Topology, name)?;
         let p = crate::paths::topology_path(name);
         crate::state::write_json(&p, topology)?;
         Ok(p)
@@ -94,6 +144,8 @@ pub mod store {
 
 #[cfg(test)]
 mod tests {
+    #![allow(clippy::unwrap_used, clippy::expect_used, clippy::panic)]
+
     use super::*;
 
     #[test]
@@ -101,7 +153,7 @@ mod tests {
         let t = TopologyDef {
             num_nodes: 4,
             gpus_per_node: 8,
-            agent: MaybeRef::Ref("noop".to_string()),
+            agent: MaybeRef::Ref("MI350X".to_string()),
         };
         assert_eq!(t.total_nodes(), 4);
         assert_eq!(t.total_gpus(), 32);

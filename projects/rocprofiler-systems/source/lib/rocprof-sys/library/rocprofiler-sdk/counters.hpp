@@ -4,7 +4,6 @@
 #pragma once
 
 #include "common/synchronized.hpp"
-#include "core/perfetto.hpp"
 #include "core/timemory.hpp"
 #include "library/rocprofiler-sdk/fwd.hpp"
 #include <cstdint>
@@ -25,9 +24,7 @@
 #include <unordered_map>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace rocprofiler_sdk
+namespace rocprofsys::rocprofiler_sdk
 {
 struct counter_dispatch_record
 {
@@ -41,9 +38,8 @@ struct counter_data_tag
 {};
 
 using counter_data_tracker = component::data_tracker<double, counter_data_tag>;
-using counter_storage_type = typename counter_data_tracker::storage_type;
+using counter_storage_type = counter_data_tracker::storage_type;
 using counter_bundle_t     = tim::lightweight_tuple<counter_data_tracker>;
-using counter_track_type   = ::perfetto::CounterTrack;
 
 struct counter_event
 {
@@ -51,8 +47,7 @@ struct counter_event
     : record{ _v }
     {}
 
-    void operator()(const client_data* tool_data, counter_track_type*,
-                    const std::string& track_name, timing_interval _timing,
+    void operator()(const std::string& track_name, timing_interval _timing,
                     scope::config _scope) const;
 
     counter_dispatch_record record = {};
@@ -60,17 +55,16 @@ struct counter_event
 
 struct counter_storage
 {
-    const client_data*                    tool_data          = nullptr;
-    std::uint64_t                         device_id          = 0;
-    std::uint32_t                         device_type_index  = 0;
-    std::int64_t                          index              = 0;
-    std::string                           metric_name        = {};
-    std::string                           metric_description = {};
-    std::string                           storage_name       = {};
-    std::string                           track_name         = {};
-    tim::manager::pointer_t               manager            = {};
-    std::unique_ptr<counter_storage_type> storage            = {};
-    std::unique_ptr<counter_track_type>   track              = {};
+    const client_data*                    tool_data         = nullptr;
+    std::uint64_t                         device_id         = 0;
+    std::uint32_t                         device_type_index = 0;
+    std::int64_t                          index             = 0;
+    std::string                           metric_name;
+    std::string                           metric_description;
+    std::string                           storage_name;
+    std::string                           track_name;
+    tim::manager::pointer_t               manager;
+    std::unique_ptr<counter_storage_type> storage;
 
     counter_storage(const client_data* _tool_data, std::uint64_t _devid,
                     std::uint32_t _device_type_index, size_t _idx,
@@ -96,12 +90,9 @@ struct counter_storage
     static void write(counter_storage_type* storage, const std::string& metric_name,
                       const std::string& metric_description);
 };
-}  // namespace rocprofiler_sdk
-}  // namespace rocprofsys
+}  // namespace rocprofsys::rocprofiler_sdk
 
-namespace tim
-{
-namespace operation
+namespace tim::operation
 {
 template <>
 struct set_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
@@ -135,7 +126,7 @@ struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 
     auto operator()() const
     {
-        type _obj{};
+        const type _obj{};
         return (*this)(_obj);
     }
 
@@ -146,8 +137,7 @@ struct get_storage<::rocprofsys::rocprofiler_sdk::counter_data_tracker>
 
     auto operator()(type&, size_t _idx) const { return (*this)(_idx); }
 };
-}  // namespace operation
-}  // namespace tim
+}  // namespace tim::operation
 
 // Add columns for MIN, MAX, VAR, STDDEV
 TIMEMORY_STATISTICS_TYPE(rocprofsys::rocprofiler_sdk::counter_data_tracker, double)

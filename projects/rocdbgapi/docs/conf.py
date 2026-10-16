@@ -37,3 +37,13 @@ external_projects_current_project = "rocdbgapi"
 
 for sphinx_var in ROCmDocs.SPHINX_VARS:
     globals()[sphinx_var] = getattr(docs_core, sphinx_var)
+
+html_theme_options.update(
+    {
+        "repository_url": "https://github.com/ROCm/rocm-systems",
+        "path_to_docs": "projects/rocdbgapi/docs",
+        "use_repository_button": True,
+        "use_issues_button": True,
+        "use_download_button": True,
+    }
+)

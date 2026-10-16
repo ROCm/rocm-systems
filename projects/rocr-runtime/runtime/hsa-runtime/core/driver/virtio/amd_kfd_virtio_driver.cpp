@@ -57,17 +57,16 @@ namespace rocr {
 namespace AMD {
 
 __forceinline uint64_t drm_perm(hsa_access_permission_t perm) {
-  switch (perm) {
-  case HSA_ACCESS_PERMISSION_RO:
-    return AMDGPU_VM_PAGE_READABLE;
-  case HSA_ACCESS_PERMISSION_WO:
-    return AMDGPU_VM_PAGE_WRITEABLE;
-  case HSA_ACCESS_PERMISSION_RW:
-    return AMDGPU_VM_PAGE_READABLE | AMDGPU_VM_PAGE_WRITEABLE;
-  case HSA_ACCESS_PERMISSION_NONE:
-  default:
-    return 0;
-  }
+  uint64_t flags = 0;
+
+  if (perm & HSA_ACCESS_PERMISSION_RO)
+    flags |= AMDGPU_VM_PAGE_READABLE;
+  if (perm & HSA_ACCESS_PERMISSION_WO)
+    flags |= AMDGPU_VM_PAGE_WRITEABLE;
+  if (perm & HSA_ACCESS_PERMISSION_EX)
+    flags |= AMDGPU_VM_PAGE_EXECUTABLE;
+
+  return flags;
 }
 
 KfdVirtioDriver::KfdVirtioDriver(std::string devnode_name)
@@ -236,6 +235,8 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
     handle->handle = reinterpret_cast<uint64_t>(mem);
     handle->vaddr = mem;
     handle->size = size;
+    handle->owner = this;
+    handle->owns_allocation = true;
   };
 
   kmt_alloc_flags.ui32.ExecuteAccess =
@@ -322,7 +323,7 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
     // no need to map
     // For local memory, only map it to the owning GPU. Mapping to other GPU,
     // if the access is allowed, is performed on AllowAccess.
-    HsaMemMapFlags map_flag = m_region.map_flags();
+    HsaMemFlags mem_flags = m_region.mem_flags();
     size_t map_node_count = 1;
     const uint32_t owner_node_id = m_region.owner()->node_id();
     const uint32_t* map_node_id = &owner_node_id;
@@ -348,7 +349,7 @@ hsa_status_t KfdVirtioDriver::AllocateMemory(const core::MemoryRegion& mem_regio
 
     uint64_t alternate_va = 0;
     const bool is_resident =
-        (MakeMemoryResident(mem, size, &alternate_va, &map_flag, map_node_count, map_node_id) ==
+        (MakeMemoryResident(mem, size, &alternate_va, &mem_flags, map_node_count, map_node_id) ==
          HSA_STATUS_SUCCESS);
 
     const bool require_pinning =
@@ -422,7 +423,7 @@ hsa_status_t KfdVirtioDriver::AvailableMemory(uint32_t node_id, uint64_t* availa
 
 hsa_status_t KfdVirtioDriver::MakeMemoryResident(const void* mem, size_t size,
                                                  uint64_t* alternate_va,
-                                                 const HsaMemMapFlags* mem_flags,
+                                                 const HsaMemFlags* mem_flags,
                                                  uint32_t num_nodes, const uint32_t* nodes) const {
   assert(mem != nullptr);
   assert(size != 0);
@@ -530,6 +531,9 @@ hsa_status_t KfdVirtioDriver::ImportMemoryHandle(const core::Agent& agent, core:
 
     *handle = core::DriverMemoryHandle{reinterpret_cast<uint64_t>(res.buf_handle)};
     handle->size = res.alloc_size;
+    handle->owner = this;
+    // vamdgpu_bo_import creates a distinct bo per import, so this handle owns it.
+    handle->owns_allocation = true;
     return HSA_STATUS_SUCCESS;
   }
   case core::ShareType::FABRIC_HANDLE:

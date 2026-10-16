@@ -142,6 +142,30 @@ public:
 /// \returns true if emulator mode is detected
 bool isEmuModeEnabled();
 
+/// Check if running under Windows Subsystem for Linux (WSL / DXG backend).
+/// \returns true if a WSL environment is detected
+bool isWslEnvironment();
+
+/// Record the current test as skipped: register it with SkippedTestTracker
+/// (end-of-run summary) and print a "[ SKIPPED ]" line. Use for runtime skip
+/// conditions that the platform filter doesn't cover, since the vendored gtest
+/// predates GTEST_SKIP().
+/// \param reason Why the test is skipped
+/// \returns true (so callers can `return` in one line)
+bool SkipCurrentTest(const char* reason);
+
+/// If running on WSL/DXG, print a "[ SKIPPED ]" line with the reason and return
+/// true so the caller can return early; returns false otherwise.
+/// \param reason Why the test is skipped on WSL
+/// \returns true if the test should be skipped (WSL detected)
+bool SkipOnWsl(const char* reason);
+
+/// The inverse of SkipOnWsl, for tests that only mean something on the DXG
+/// backend: skips everywhere that is not WSL.
+/// \param reason Why the test only applies to WSL
+/// \returns true if the test should be skipped (i.e. this is NOT WSL)
+bool SkipIfNotWsl(const char* reason);
+
 /// Fill in the pool_info_t structure for the provided pool.
 /// \param[in] pool Pool for which information will be retrieved
 /// \param[out] pool_i Pointer to structure where pool info will be stored
@@ -237,6 +261,24 @@ hsa_status_t GetKernArgMemoryPool(hsa_amd_memory_pool_t pool, void* data);
 ///      -else return an appropriate error code for any error encountered
 hsa_status_t FindStandardPool(hsa_amd_memory_pool_t pool, void* data);
 hsa_status_t FindAPUStandardPool(hsa_amd_memory_pool_t pool, void* data);
+
+/// Find a "fine-grained" pool. By this, we mean not a kernel args pool that
+/// is fine-grained (coherent). Iterated on a CPU agent this yields the
+/// fine-grain system pool that backs, e.g., hipHostMalloc.
+/// The pool found will have the following properties:
+///     HSA_AMD_MEMORY_POOL_INFO_ACCESSIBLE_BY_ALL: Don't care
+///     HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT: Off
+///     HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_FINE_GRAINED: On
+/// This function is meant to be the call-back function used
+/// with hsa_amd_agent_iterate_memory_pools.
+/// \param[in] pool Pool to evaluate for required properties
+/// \param[in] data If pool meets criteria, this pointer will point
+///  to the pool upon return
+/// \returns hsa_status_t
+///      -HSA_STATUS_INFO_BREAK - we found a pool that meets criteria
+///      -HSA_STATUS_SUCCESS - we did not find a pool that meets the criteria
+///      -else return an appropriate error code for any error encountered
+hsa_status_t FindFineGrainedPool(hsa_amd_memory_pool_t pool, void* data);
 
 /// Find a "kernel arg" pool.
 /// The pool found will have the following properties:

@@ -43,6 +43,8 @@
 #ifndef EXT_IMAGE_IMAGE_MANAGER_GFX12_H_
 #define EXT_IMAGE_IMAGE_MANAGER_GFX12_H_
 
+#include <optional>
+
 #include "addrlib/inc/addrinterface.h"
 #include "image_lut_gfx11.h"
 #include "image_manager_kv.h"
@@ -98,13 +100,26 @@ class ImageManagerGfx12 : public ImageManagerKv {
   virtual void printSwizzleMode(uint32_t sw_mode) const;
 
  protected:
+  /// @brief Compute ADDR3 surface info. If forced_sw_mode is empty, addrlib's best-fit swizzle is
+  /// chosen (native allocation); otherwise the given Addr3SwizzleMode is forced so the computed
+  /// tiling matches an imported surface whose layout is dictated externally (Vulkan image interop).
+  /// Returns the swizzle mode used, or (uint32_t)-1 on failure.
   uint32_t GetAddrlibSurfaceInfoNv(hsa_agent_t component,
                              const hsa_ext_image_descriptor_t& desc,
                              uint32_t num_mipmap_levels,
                              Image::TileMode tileMode,
                              size_t image_data_row_pitch,
                              size_t image_data_slice_pitch,
-                             ADDR3_COMPUTE_SURFACE_INFO_OUTPUT& out) const;
+                             ADDR3_COMPUTE_SURFACE_INFO_OUTPUT& out,
+                             std::optional<uint32_t> forced_sw_mode = std::nullopt) const;
+
+  /// @brief Build a mipmapped-array image SRD. If meta is null the native path runs (addrlib's
+  /// best-fit swizzle, mipmap.tile_mode). Otherwise the surface metadata's ADDR3 swizzle is forced,
+  /// its tile_swizzle (pipe-bank-XOR) is injected into the base address, and its gfx12 compression
+  /// state is applied, reconstructing the SRD of an imported surface whose layout is dictated
+  /// externally (Vulkan image interop on Windows, where the AMD Vulkan driver exposes no extension to
+  /// query the SRD).
+  hsa_status_t BuildMipmapSrd(MipmappedArray& mipmap, const HsaWddmSurfaceMetadata* meta) const;
 
   bool IsLocalMemory(const void* address) const;
   virtual const ImageLutGfx11& ImageLut() const { return image_lut_gfx11; };

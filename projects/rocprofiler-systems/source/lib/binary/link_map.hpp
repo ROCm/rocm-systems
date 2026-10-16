@@ -11,9 +11,7 @@
 #include <string_view>
 #include <vector>
 
-namespace rocprofsys
-{
-namespace binary
+namespace rocprofsys::binary
 {
 using open_modes_vec_t = std::vector<int>;
 
@@ -23,11 +21,11 @@ struct link_file
     : name{ _v }
     {}
 
-    std::string_view base() const;
-    std::string      real() const;
-    bool             operator<(const link_file&) const;
+    std::string base() const;
+    std::string real() const;
+    bool        operator<(const link_file&) const;
 
-    std::string name = {};
+    std::string name;
 };
 
 // helper function for translating generic lib name to resolved path
@@ -41,5 +39,4 @@ get_link_map(const char*        _lib               = nullptr,
              const std::string& _exclude_linked_by = "librocprof-sys.so",
              const std::string& _exclude_re        = "librocprof-sys-([a-zA-Z]+)\\.so",
              open_modes_vec_t&& _open_modes        = {});
-}  // namespace binary
-}  // namespace rocprofsys
+}  // namespace rocprofsys::binary

@@ -19,7 +19,8 @@ class ExternalMemory : public InteropObject {
     D3D12Heap = 4,
     D3D12Resource = 5,
     D3D11Resource = 6,
-    D3D11ResourceKmt = 7
+    D3D11ResourceKmt = 7,
+    VkImage = 8
   };
 
   ExternalMemory(amd::Os::FileDesc handle, const void* name, ExternalMemory::HandleType handle_type)

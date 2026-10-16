@@ -93,12 +93,10 @@ void ExpectFileLoadRejected(const std::vector<uint8_t>& bundle) {
 HIP_TEST_CASE(Unit_hipModuleLoad_Negative_MalformedFatBinaryBounds) {
   HIP_CHECK(hipFree(nullptr));
 
+  // hipModuleLoadData is not checked here: it has no length parameter, so a
+  // malformed image on that path is undefined behavior.
   SECTION("code object offset is outside the readable image") {
-    const auto bundle = BuildBundle(kOutOfBoundsOffset, kCodeObjectSize);
-
-    hipModule_t module = nullptr;
-    HIP_CHECK_ERROR(hipModuleLoadData(&module, bundle.data()), hipErrorInvalidImage);
-    ExpectFileLoadRejected(bundle);
+    ExpectFileLoadRejected(BuildBundle(kOutOfBoundsOffset, kCodeObjectSize));
   }
 
   SECTION("code object size crosses the mapped file boundary") {

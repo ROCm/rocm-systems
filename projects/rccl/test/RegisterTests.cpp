@@ -47,6 +47,23 @@ static bool isArchSupportedForP2pCollTest(const char* gcnArchName) {
     return false;
 }
 
+// cuMem VMM (Virtual Memory Management) is required by the symmetric window
+// register path and also by the non-symmetric fallback exercised with
+// NCCL_CUMEM_ENABLE=0.  On architectures that lack VMM support in the HIP/ROCr
+// driver stack (e.g. gfx908 / MI100), the non-symmetric window register path
+// hangs indefinitely during ncclCommWindowRegister.
+static bool deviceSupportsCuMemVmm(int deviceId = 0) {
+    hipDeviceProp_t prop;
+    if (hipGetDeviceProperties(&prop, deviceId) != hipSuccess)
+        return false;
+    static const char* kVmmArchs[] = {"gfx942", "gfx950", "gfx1250"};
+    for (const char* arch : kVmmArchs) {
+        if (strncmp(prop.gcnArchName, arch, strlen(arch)) == 0)
+            return true;
+    }
+    return false;
+}
+
 // Queries every visible device and returns true only if all of them are a
 // supported architecture for the P2P+collective registration test.
 static bool allDevicesSupportP2pCollTest(int numDevices, char* unsupportedArchOut,
@@ -556,6 +573,12 @@ static void testDeregisterNullHandle() {
  */
 static void testWindowRegisterSingleRankNonSymTeardown() {
     SKIP_IF_NO_GPU();
+
+    if (!deviceSupportsCuMemVmm(0)) {
+        GTEST_SKIP() << "Non-symmetric window register path requires cuMem VMM "
+                        "support; skipping on this GPU.";
+        return;
+    }
 
     HIPCALL(hipSetDevice(0));
 

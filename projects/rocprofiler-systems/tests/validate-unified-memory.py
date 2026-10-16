@@ -257,7 +257,10 @@ def validate_json_data(data: dict[str, Any]) -> bool:
 
 def resolve_perfetto_trace(output_dir: Path) -> Optional[Path]:
     """Resolve a Perfetto trace in output_dir when one was generated."""
-    matches = sorted(output_dir.glob("perfetto-trace*.proto"))
+    matches = sorted(output_dir.glob("perfetto-trace*.pftrace"))
+    if not matches:
+        matches = sorted(output_dir.glob("perfetto*.pftrace"))
+    # this script is also run standalone against older output directories
     if not matches:
         matches = sorted(output_dir.glob("perfetto*.proto"))
 

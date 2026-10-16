@@ -1,27 +1,12 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
+#include "amd_smi/impl/amd_smi_ualoe.h"
+
+#include "amd_smi/impl/amd_smi_common.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_gpu_mutex.h"
+#include "amd_smi/impl/amd_smi_socket.h"
 #include "amd_smi/impl/amd_smi_system.h"
 #include "amd_smi/impl/amd_smi_utils.h"
 #include "rocm_smi/rocm_smi_logger.h"
@@ -38,7 +23,10 @@ extern "C" {
 }
 
 #include <algorithm>
+#include <cstdint>
+#include <limits>
 #include <unordered_map>
+#include <vector>
 
 /**
  * @brief Complete telemetry ID to string mapping using unordered_map for O(1) lookup
@@ -561,12 +549,17 @@ static const std::unordered_map<uint64_t, const char*> telemetry_id_map = {
      "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE"},
 };
 
-const char* amdsmi_fabric_telem_id_to_string(uint64_t telem_id) {
+amdsmi_status_t amdsmi_fabric_telem_id_to_string(uint64_t telem_id, const char** telem_name) {
+  if (telem_name == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
   auto it = telemetry_id_map.find(telem_id);
   if (it != telemetry_id_map.end()) {
-    return it->second;
+    *telem_name = it->second;
+    return AMDSMI_STATUS_SUCCESS;
   }
-  return "UNKNOWN";
+  *telem_name = "UNKNOWN";
+  return AMDSMI_STATUS_NOT_FOUND;
 }
 
 // Note: AMDSMI and UALoE telemetry structures are now designed to be binary compatible
@@ -599,6 +592,19 @@ static amdsmi_status_t convert_errno_to_amdsmi_status(int errno_val) {
   }
 }
 
+// The reinterpret_cast in amdsmi_alloc_fabric_telemetry() below aliases the UALoE
+// telemetry allocation onto the amdsmi structs. These guards fail the build if a
+// UALoE re-sync diverges the element layouts or drops below amd-smi's category count.
+static_assert(static_cast<int>(AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX) <=
+                  static_cast<int>(UALOE_TELEMETRY_CATEGORY_MAX),
+              "amdsmi fabric telemetry categories must not exceed UALoE categories");
+static_assert(sizeof(amdsmi_fabric_telemetry_item_t) == sizeof(ualoe_telemetry_item_t),
+              "amdsmi/UALoE telemetry item layout diverged");
+static_assert(sizeof(amdsmi_fabric_telemetry_instance_t) == sizeof(ualoe_telemetry_instance_t),
+              "amdsmi/UALoE telemetry instance layout diverged");
+static_assert(sizeof(amdsmi_fabric_telemetry_dataset_t) == sizeof(ualoe_telemetry_dataset_t),
+              "amdsmi/UALoE telemetry dataset layout diverged");
+
 amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_handle,
                                               uint32_t category_mask,
                                               amdsmi_fabric_telemetry_t** telemetry) {
@@ -610,6 +616,12 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->AllocFabricTelemetry(category_mask, telemetry);
+  }
+#endif
 
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
@@ -630,7 +642,9 @@ amdsmi_status_t amdsmi_alloc_fabric_telemetry(amdsmi_processor_handle processor_
     return convert_errno_to_amdsmi_status(ret);
   }
 
-  // Cast UALoE telemetry directly to AMDSMI telemetry since structures are now binary compatible
+  // Element layouts match (see the static_asserts above) and UALoE owns the
+  // allocation; amd-smi reads only categories [0, AMDSMI_FABRIC_TELEMETRY_CATEGORY_MAX),
+  // so aliasing the larger UALoE struct onto the amdsmi struct is safe.
   *telemetry = reinterpret_cast<amdsmi_fabric_telemetry_t*>(ualoe_tel);
 
   return AMDSMI_STATUS_SUCCESS;
@@ -646,6 +660,12 @@ amdsmi_status_t amdsmi_get_fabric_telemetry_data(amdsmi_processor_handle process
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->GetFabricTelemetryData(telemetry);
+  }
+#endif
 
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
@@ -679,6 +699,12 @@ amdsmi_status_t amdsmi_free_fabric_telemetry(amdsmi_processor_handle processor_h
   amd::smi::AMDSmiGPUDevice* device = nullptr;
   amdsmi_status_t r = get_gpu_device_from_handle(processor_handle, &device);
   if (r != AMDSMI_STATUS_SUCCESS) return r;
+
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->FreeFabricTelemetry(telemetry);
+  }
+#endif
 
   // Acquire device mutex for UALoE API protection
   SMIGPUDEVICE_MUTEX(device->get_mutex());
@@ -726,6 +752,12 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
   outstream << __PRETTY_FUNCTION__ << " | get_gpu_device_from_handle(): " << device;
   LOG_DEBUG(outstream);
 
+#ifdef ENABLE_WSL_BACKEND
+  if (auto* backend = device->backend()) {
+    return backend->GetGpuFabricInfo(info);
+  }
+#endif
+
   // Serialize with other per-GPU UALoE/fabric paths; fabric info is 'sysfs-only'
   // and does not require a successful ualoe_open() netlink session (telemetry does)
   // ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
@@ -733,4 +765,392 @@ amdsmi_status_t amdsmi_get_gpu_fabric_info(amdsmi_processor_handle processor_han
   status_code = device->get_fabric_info_from_ualoe(*info);
 
   return status_code;
+}
+
+// ualoe HELIOS_P=0/HELIOS_R=1/TITAN=2 do NOT numerically match
+// amdsmi UNKNOWN=0/HELIOS_P=1/HELIOS_R=2/TITAN=3 (UNKNOWN sentinel shifts by +1).
+// These static_asserts catch either enum being renumbered without updating the
+// switch below.
+static_assert(UALOE_COMPUTE_TRAY_TYPE_HELIOS_P == 0, "map_ualoe_tray_type assumes this value");
+static_assert(UALOE_COMPUTE_TRAY_TYPE_HELIOS_R == 1, "map_ualoe_tray_type assumes this value");
+static_assert(UALOE_COMPUTE_TRAY_TYPE_TITAN == 2, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN == 0, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P == 1, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R == 2, "map_ualoe_tray_type assumes this value");
+static_assert(AMDSMI_COMPUTE_TRAY_TYPE_TITAN == 3, "map_ualoe_tray_type assumes this value");
+
+static amdsmi_compute_tray_type_t map_ualoe_tray_type(uint32_t raw_tray_type) {
+  switch (static_cast<ualoe_compute_tray_type_e>(raw_tray_type)) {
+    case UALOE_COMPUTE_TRAY_TYPE_HELIOS_P:
+      return AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_P;
+    case UALOE_COMPUTE_TRAY_TYPE_HELIOS_R:
+      return AMDSMI_COMPUTE_TRAY_TYPE_HELIOS_R;
+    case UALOE_COMPUTE_TRAY_TYPE_TITAN:
+      return AMDSMI_COMPUTE_TRAY_TYPE_TITAN;
+    default:
+      return AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN;
+  }
+}
+
+static amdsmi_status_t get_gpu_identity_via_ualoe(amd::smi::AMDSmiGPUDevice* device,
+                                                  uint32_t& phys_id,
+                                                  amdsmi_tray_info_t& tray_info) {
+  if (device == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  phys_id = std::numeric_limits<uint32_t>::max();
+  tray_info.max_acc_per_tray = std::numeric_limits<uint32_t>::max();
+  tray_info.tray_type = AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN;
+
+  // Trigger the lazy IFoE/UALoE session open (see get_ualoe_handle()).
+  ualoe_handle_t handle = device->get_ualoe_handle();
+  if (handle == -1) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  ualoe_gpu_identity_t identity{};
+  int ret = ualoe_get_gpu_identity(handle, &identity);
+  if (ret == ENOTSUP || ret == EOPNOTSUPP) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+  if (ret != 0) {
+    return convert_errno_to_amdsmi_status(ret);
+  }
+
+  phys_id = identity.phys_id;
+  tray_info.max_acc_per_tray = identity.num_gpus;
+  tray_info.tray_type = map_ualoe_tray_type(static_cast<uint32_t>(identity.tray_type));
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t get_physical_acc_id_from_ualoe(amd::smi::AMDSmiGPUDevice* device,
+                                               uint32_t* phys_id) {
+  if (device == nullptr || phys_id == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amdsmi_tray_info_t unused_tray_info{};
+  return get_gpu_identity_via_ualoe(device, *phys_id, unused_tray_info);
+}
+
+// Isolates the per-device mutex guard so a busy device only drops out of the
+// amdsmi_get_tray_info() scan below, instead of the embedded `return
+// AMDSMI_STATUS_BUSY;` in SMIGPUDEVICE_MUTEX aborting the whole multi-GPU scan.
+static amdsmi_status_t get_gpu_identity_via_ualoe_locked(amd::smi::AMDSmiGPUDevice* device,
+                                                         uint32_t& phys_id,
+                                                         amdsmi_tray_info_t& tray_info) {
+#ifdef ENABLE_WSL_BACKEND
+  // get_mutex() indexes into the Linux RSMI device list, which WSL devices
+  // are never registered in; skip rather than lock a null mutex.
+  if (device->backend()) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+#endif
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+  return get_gpu_identity_via_ualoe(device, phys_id, tray_info);
+}
+
+amdsmi_status_t amdsmi_get_tray_info(amdsmi_node_handle node_handle, amdsmi_tray_info_t* info) {
+  AMDSMI_CHECK_INIT();
+
+  // node_handle is reserved for future use and must be NULL.
+  if (node_handle != nullptr || info == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  memset(info, 0, sizeof(*info));
+  info->max_acc_per_tray = std::numeric_limits<uint32_t>::max();
+  info->tray_type = AMDSMI_COMPUTE_TRAY_TYPE_UNKNOWN;
+
+  for (auto* socket : amd::smi::AMDSmiSystem::getInstance().get_sockets()) {
+    for (auto* processor : socket->get_processors(AMDSMI_PROCESSOR_TYPE_AMD_GPU)) {
+      auto* device = static_cast<amd::smi::AMDSmiGPUDevice*>(processor);
+
+      uint32_t phys_id = 0;
+      amdsmi_status_t status = get_gpu_identity_via_ualoe_locked(device, phys_id, *info);
+      if (status == AMDSMI_STATUS_SUCCESS) {
+        return AMDSMI_STATUS_SUCCESS;
+      }
+    }
+  }
+
+  return AMDSMI_STATUS_NOT_SUPPORTED;
+}
+
+// Convert POSIX timespec to the BCD-encoded timestamp UEFI CPER records use.
+static bool timespec_to_cper_timestamp(const struct timespec* ts, amdsmi_cper_timestamp_t* out) {
+  static constexpr auto to_bcd = [](int v) -> uint8_t {
+    return static_cast<uint8_t>(((v / 10) << 4) | (v % 10));
+  };
+
+  struct tm utc;
+  if (gmtime_r(&ts->tv_sec, &utc) == nullptr) {
+    memset(out, 0, sizeof(*out));
+    return false;
+  }
+
+  out->seconds = to_bcd(utc.tm_sec);
+  out->minutes = to_bcd(utc.tm_min);
+  out->hours = to_bcd(utc.tm_hour);
+  out->day = to_bcd(utc.tm_mday);
+  out->month = to_bcd(utc.tm_mon + 1);
+
+  int year = utc.tm_year + 1900;
+  out->year = to_bcd(year % 100);
+  out->century = to_bcd(year / 100);
+  out->flag = 0;
+  return true;
+}
+
+// Synthesize a full amdsmi_cper_hdr_t from a UALoE ualoe_cper_hdr_t
+static void synthesize_amdsmi_cper_header(const ualoe_cper_hdr_t* ualoe_hdr, uint32_t payload_size,
+                                          amdsmi_cper_hdr_t* amdsmi_hdr) {
+  memset(amdsmi_hdr, 0, sizeof(*amdsmi_hdr));
+
+  memcpy(amdsmi_hdr->signature, "CPER", 4);
+  amdsmi_hdr->revision = 0x0100;  // CPER v1.0
+  amdsmi_hdr->signature_end = 0xFFFFFFFF;
+  amdsmi_hdr->sec_cnt = 1;
+
+  // The UALoE and amdsmi severity enumerators share their values.
+  amdsmi_hdr->error_severity = static_cast<amdsmi_cper_sev_t>(ualoe_hdr->severity);
+
+  amdsmi_hdr->record_length = static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + payload_size);
+
+  if (timespec_to_cper_timestamp(&ualoe_hdr->timestamp, &amdsmi_hdr->timestamp)) {
+    amdsmi_hdr->cper_valid_bits.valid_bits.timestamp = 1;
+  }
+
+  // creator_id and notify_type are 16-byte fields; the memset above zero-pads them.
+  memcpy(amdsmi_hdr->creator_id, "IFoE", 4);
+  static const unsigned char ifoe_guid[16] = AMDSMI_CPER_NOTIFY_TYPE_IFOE_GUID;
+  memcpy(amdsmi_hdr->notify_type.b, ifoe_guid, 16);
+}
+
+amdsmi_status_t amdsmi_get_fabric_cper_entries(amdsmi_processor_handle processor_handle,
+                                               uint32_t severity_mask, char* cper_data,
+                                               uint64_t* buf_size, amdsmi_cper_hdr_t** cper_hdrs,
+                                               uint64_t* entry_count, uint64_t* cursor) {
+  if (processor_handle == nullptr || cper_data == nullptr || buf_size == nullptr ||
+      cper_hdrs == nullptr || entry_count == nullptr || cursor == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  constexpr uint64_t kMaxUaloeEntries = 4096;
+  if (*entry_count == 0 || *entry_count > kMaxUaloeEntries) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  amdsmi_status_t status = get_gpu_device_from_handle(processor_handle, &device);
+  if (status != AMDSMI_STATUS_SUCCESS || device == nullptr) {
+    return status;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+
+  ualoe_handle_t ualoe_handle = device->get_ualoe_handle();
+  if (ualoe_handle == -1) {
+    return AMDSMI_STATUS_NOT_SUPPORTED;
+  }
+
+  const size_t max_ualoe_entries = static_cast<size_t>(*entry_count);
+
+  // The library advances *cursor past every record it packs into our intermediate
+  // buffer, but each 24-byte ualoe header grows to a 128-byte amdsmi_cper_hdr_t in
+  // the caller's buffer. Reserve that per-record growth so the library can only
+  // return records that still fit after expansion; the rest stay behind the cursor
+  // for the next paged call instead of being silently dropped.
+  constexpr uint64_t kAmdsmiHdrExpansion = sizeof(amdsmi_cper_hdr_t) - sizeof(ualoe_cper_hdr_t);
+  const uint64_t expansion_headroom =
+      static_cast<uint64_t>(max_ualoe_entries) * kAmdsmiHdrExpansion;
+  if (*buf_size <= expansion_headroom) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+  constexpr uint64_t kMaxUaloeBufSize = 1048576;  // 1 MB cap on the intermediate buffer
+  const size_t ualoe_buf_size =
+      static_cast<size_t>(std::min<uint64_t>(*buf_size - expansion_headroom, kMaxUaloeBufSize));
+
+  // Allocation sizes derive from caller-supplied counts; a bad_alloc must not
+  // escape this extern "C" entry point as an exception.
+  std::vector<char> ualoe_buf;
+  std::vector<ualoe_cper_hdr_t*> ualoe_hdrs;
+  try {
+    ualoe_buf.resize(ualoe_buf_size);
+    ualoe_hdrs.resize(max_ualoe_entries);
+  } catch (const std::bad_alloc&) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  uint64_t ualoe_buf_size_var = ualoe_buf_size;
+  uint64_t ualoe_entry_count = max_ualoe_entries;
+
+  // UALoE defines only severity bits 0-2; map the "all" guard onto them.
+  uint32_t ualoe_severity_mask = severity_mask;
+  if (severity_mask == (1U << AMDSMI_CPER_SEV_NUM)) {
+    ualoe_severity_mask = (1U << AMDSMI_CPER_SEV_NUM) - 1U;
+  }
+
+  int ret = ualoe_get_ifoe_cper_entries(ualoe_handle, ualoe_severity_mask, ualoe_buf.data(),
+                                        &ualoe_buf_size_var, ualoe_hdrs.data(), &ualoe_entry_count,
+                                        cursor);
+
+  if (ret != 0 && ret != ENOBUFS) {
+    if (ret == ENOSPC) {
+      return AMDSMI_STATUS_OUT_OF_RESOURCES;
+    }
+    return convert_errno_to_amdsmi_status(ret);
+  }
+
+  // Clamp ualoe_buf_size_var to prevent OOB read
+  if (ualoe_buf_size_var > ualoe_buf_size) {
+    ualoe_buf_size_var = ualoe_buf_size;
+  }
+
+  // Clamp the returned count to the ualoe_hdrs capacity: a library that reports
+  // more entries than requested would otherwise drive an OOB read on ualoe_hdrs[i].
+  ualoe_entry_count = std::min<uint64_t>(ualoe_entry_count, max_ualoe_entries);
+
+  uint64_t amdsmi_offset = 0;
+  uint64_t transformed_entries = 0;
+  bool entries_dropped = false;
+
+  for (uint64_t i = 0; i < ualoe_entry_count; i++) {
+    const ualoe_cper_hdr_t* ualoe_hdr = ualoe_hdrs[i];
+    if (ualoe_hdr == nullptr) {
+      entries_dropped = true;
+      break;
+    }
+
+    // Validate the header lies within ualoe_buf before dereferencing record_length.
+    // Cross-object pointer subtraction is UB, and a header below the buffer start
+    // would wrap to a huge offset that slips past a naive "+ sizeof()" check, so
+    // compare as uintptr_t with the subtraction kept on the size side to avoid both
+    // underflow and overflow.
+    const auto ualoe_buf_begin = reinterpret_cast<uintptr_t>(ualoe_buf.data());
+    const auto ualoe_hdr_addr = reinterpret_cast<uintptr_t>(ualoe_hdr);
+    if ((ualoe_buf_size_var < sizeof(ualoe_cper_hdr_t)) || (ualoe_hdr_addr < ualoe_buf_begin) ||
+        ((ualoe_hdr_addr - ualoe_buf_begin) > (ualoe_buf_size_var - sizeof(ualoe_cper_hdr_t)))) {
+      entries_dropped = true;
+      break;
+    }
+    const size_t ualoe_offset = static_cast<size_t>(ualoe_hdr_addr - ualoe_buf_begin);
+
+    if (ualoe_hdr->record_length < sizeof(ualoe_cper_hdr_t)) {
+      entries_dropped = true;
+      break;
+    }
+
+    const uint32_t ualoe_payload_size =
+        static_cast<uint32_t>(ualoe_hdr->record_length - sizeof(ualoe_cper_hdr_t));
+    const uint32_t amdsmi_record_length =
+        static_cast<uint32_t>(sizeof(amdsmi_cper_hdr_t) + ualoe_payload_size);
+
+    if (ualoe_hdr->record_length > ualoe_buf_size_var - ualoe_offset) {
+      entries_dropped = true;
+      break;
+    }
+
+    if (amdsmi_offset + amdsmi_record_length > *buf_size) {
+      entries_dropped = true;
+      break;
+    }
+
+    if (transformed_entries >= max_ualoe_entries) {
+      entries_dropped = true;
+      break;
+    }
+
+    amdsmi_cper_hdr_t* amdsmi_hdr = reinterpret_cast<amdsmi_cper_hdr_t*>(cper_data + amdsmi_offset);
+    synthesize_amdsmi_cper_header(ualoe_hdr, ualoe_payload_size, amdsmi_hdr);
+
+    const char* ualoe_payload = reinterpret_cast<const char*>(ualoe_hdr) + sizeof(ualoe_cper_hdr_t);
+    memcpy(cper_data + amdsmi_offset + sizeof(amdsmi_cper_hdr_t), ualoe_payload,
+           ualoe_payload_size);
+
+    cper_hdrs[transformed_entries] = amdsmi_hdr;
+    transformed_entries++;
+    amdsmi_offset += amdsmi_record_length;
+  }
+
+  *buf_size = amdsmi_offset;
+  *entry_count = transformed_entries;
+
+  if (transformed_entries == 0 && ualoe_entry_count > 0) {
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  if (entries_dropped) {
+    if (transformed_entries > 0) {
+      return AMDSMI_STATUS_MORE_DATA;
+    }
+    return AMDSMI_STATUS_OUT_OF_RESOURCES;
+  }
+
+  if (ret == ENOBUFS) {
+    // No forward progress is possible if nothing was transformed: signaling
+    // MORE_DATA here would make a paging caller re-request the same cursor
+    // forever. Report the buffer shortfall instead.
+    if (transformed_entries == 0) {
+      return AMDSMI_STATUS_OUT_OF_RESOURCES;
+    }
+    return AMDSMI_STATUS_MORE_DATA;
+  }
+
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_set_gpu_fabric_ppod_config(amdsmi_processor_handle processor_handle,
+                                                  const amdsmi_fabric_ppod_config_t* config) {
+  AMDSMI_CHECK_INIT();
+
+  if (!processor_handle || !config) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  const auto handle_status = get_gpu_device_from_handle(processor_handle, &device);
+  if (handle_status != AMDSMI_STATUS_SUCCESS) {
+    return handle_status;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+  return device->apply_fabric_ppod_config(*config);
+}
+
+amdsmi_status_t amdsmi_set_gpu_fabric_vpod_config(amdsmi_processor_handle processor_handle,
+                                                  const amdsmi_fabric_vpod_config_t* config) {
+  AMDSMI_CHECK_INIT();
+
+  if (!processor_handle || !config) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  const auto handle_status = get_gpu_device_from_handle(processor_handle, &device);
+  if (handle_status != AMDSMI_STATUS_SUCCESS) {
+    return handle_status;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+  return device->apply_fabric_vpod_config(*config);
+}
+
+amdsmi_status_t amdsmi_set_gpu_fabric_station_config(amdsmi_processor_handle processor_handle,
+                                                     const amdsmi_fabric_station_config_t* config) {
+  AMDSMI_CHECK_INIT();
+
+  if (!processor_handle || !config) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiGPUDevice* device = nullptr;
+  const auto handle_status = get_gpu_device_from_handle(processor_handle, &device);
+  if (handle_status != AMDSMI_STATUS_SUCCESS) {
+    return handle_status;
+  }
+
+  SMIGPUDEVICE_MUTEX(device->get_mutex());
+  return device->apply_fabric_station_config(*config);
 }

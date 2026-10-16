@@ -34,7 +34,10 @@ struct LinkSpec {
 /// @brief A partition of the simulation topology.
 ///
 /// @details Each Partition holds the set of components assigned to a single
-/// worker thread, along with the links internal to and crossing this partition.
+/// event queue, along with the links internal to and crossing this partition.
+/// Membership determines scheduled-event ownership and link classification;
+/// it does not dispatch direct component calls or lifecycle hooks to the
+/// partition's worker thread.
 struct Partition {
   PartitionID id = 0;                  ///< Partition identifier.
   std::vector<Component *> components; ///< Components assigned to this partition.
@@ -69,9 +72,12 @@ public:
 
 /// @brief The simulation compound graph.
 ///
-/// @details Topology owns all components (via the root CompositeComponent), all links,
-/// and all partitions. It provides component creation, link creation,
-/// graph traversal, and partitioning into sub-graphs for parallel execution.
+/// @details Topology owns the component tree reachable from the root
+/// CompositeComponent, all links, and all partitions. Link-endpoint owners
+/// outside the root tree are borrowed; they and their ports must remain alive
+/// through every repartition and SimulationEngine create/run/shutdown operation
+/// that retains them. Topology provides component creation, link creation, graph
+/// traversal, and partitioning into sub-graphs for parallel execution.
 class Topology {
 public:
   Topology() = default;
@@ -85,6 +91,11 @@ public:
   CompositeComponent *root() const { return root_.get(); }
 
   /// @brief Create a link between two ports with a given latency.
+  ///
+  /// @details Topology owns the link but borrows @p src, @p dst, and their
+  /// owners. An endpoint owner outside the root component tree and its ports
+  /// must remain alive through every repartition and SimulationEngine
+  /// create/run/shutdown operation that retains them.
   /// @param src Source port.
   /// @param dst Destination port.
   /// @param latency Propagation delay in simulation ticks.
@@ -92,10 +103,29 @@ public:
   /// @returns Raw pointer to the created link.
   Link *add_link(Port *src, Port *dst, Tick latency, uint32_t weight = 1);
 
+  /// @brief Create a queued link between two ports.
+  ///
+  /// @details Topology owns links, so topology builders use this factory when
+  /// bounded-capacity transport is required. Queued links may only connect
+  /// components in the same topology partition. SimulationEngine::create()
+  /// rejects cross-partition queued links. Topology borrows @p src, @p dst,
+  /// and their owners; an endpoint owner outside the root component tree and
+  /// its ports must remain alive through every repartition and SimulationEngine
+  /// create/run/shutdown operation that retains them.
+  /// @param src Source port.
+  /// @param dst Destination port.
+  /// @param latency Propagation delay in simulation ticks.
+  /// @param capacity Maximum number of buffered messages.
+  /// @param weight Partitioning cut weight for this link.
+  /// @returns Raw pointer to the created queued link.
+  QueuedLink *add_queued_link(Port *src, Port *dst, Tick latency, size_t capacity,
+                              uint32_t weight = 1);
+
   /// @brief Create two unidirectional links for bidirectional communication.
   ///
   /// @details Wires a_out -> b_in (forward, fwd_latency) and b_out -> a_in (reverse,
-  /// rev_latency). Equivalent to calling add_link() twice.
+  /// rev_latency). Equivalent to calling add_link() twice, including its
+  /// endpoint-owner lifetime requirements.
   /// @param a_out Output port on component A.
   /// @param b_in Input port on component B.
   /// @param b_out Output port on component B.
@@ -143,9 +173,16 @@ public:
   /// @returns Const reference to the clock domain vector.
   const std::vector<std::unique_ptr<ClockDomain>> &clock_domains() const { return clock_domains_; }
 
-  /// @brief Partition the topology for parallel execution.
+  /// @brief Balance the topology across partitions for parallel execution.
+  ///
+  /// @details This invokes the generic Fiduccia-Mattheyses partitioner. Callers
+  /// with hardware or ownership constraints should use partition_manual().
+  /// External link-endpoint owners retained in the resulting partitions are
+  /// borrowed and must remain alive through every subsequent repartition and
+  /// SimulationEngine create/run/shutdown operation that retains them.
   /// @param num_partitions Number of partitions to create (one per thread).
-  void partition(uint32_t num_partitions);
+  /// @throws std::invalid_argument if @p num_partitions is zero.
+  void partition_balanced(uint32_t num_partitions);
 
   /// @brief Resolve a dotted path (e.g., "xcd0.se1.cu3") to a Component.
   Component *resolve_component(const std::string &path) const;
@@ -158,14 +195,24 @@ public:
 
   /// @brief Partition the topology with explicit partition assignments.
   ///
-  /// @details Bypasses the FM partitioner. Each component is assigned a
-  /// partition ID by the caller's callback. Used by tests that need
-  /// deterministic partition layouts.
+  /// @details Bypasses the FM partitioner. The caller's callback assigns every
+  /// component in the topology tree and every external link-endpoint owner.
+  /// This is the explicit policy entry point for hardware or ownership
+  /// constraints and deterministic partition layouts. External endpoint owners
+  /// retained in the resulting partitions are borrowed and must remain alive
+  /// through every subsequent repartition and SimulationEngine
+  /// create/run/shutdown operation that retains them.
   /// @param num_partitions Number of partitions to create.
   /// @param assigner Callback returning the partition ID for each component.
+  /// @throws std::invalid_argument if @p num_partitions is zero or @p assigner
+  /// returns an out-of-range partition ID.
   void partition_manual(uint32_t num_partitions, std::function<PartitionID(Component *)> assigner);
 
 private:
+  /// @brief Append unique owners of registered link endpoints.
+  /// @param components Existing component list to extend without duplicates.
+  void append_link_endpoint_owners(std::vector<Component *> &components) const;
+
   /// @brief Classify links as internal or boundary for each partition.
   void classify_links();
 

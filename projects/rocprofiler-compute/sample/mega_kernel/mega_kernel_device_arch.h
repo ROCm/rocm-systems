@@ -50,6 +50,17 @@
 #    define HAS_HW_FP64_ATOMICS 0
 #    define HAS_FP8             1
 #    define HAS_ASYNC_LDS       1
+#    define HAS_TDM             0
+#endif
+
+// gfx1250
+#if defined(__gfx1250__)
+#    define ARCH_GFX1250        1
+#    define ARCH_NAME           "gfx1250"
+#    define HAS_HW_FP64_ATOMICS 1
+#    define HAS_FP8             1
+#    define HAS_ASYNC_LDS       1
+#    define HAS_TDM             1
 #endif
 
 #ifndef ARCH_NAME

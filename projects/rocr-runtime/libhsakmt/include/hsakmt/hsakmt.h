@@ -32,8 +32,14 @@
 extern "C" {
 #endif
 
-/* Forward declaration for debug trap ioctl arguments */
+/* Forward declarations for the KFD ioctl arguments the entry points below take
+ * by pointer. linux/kfd_ioctl.h defines them and the dev package excludes it,
+ * so without these a consumer's C compiler invents a type scoped to the
+ * prototype and the pointer it passes is a different one.
+ */
 struct kfd_ioctl_dbg_trap_args;
+struct kfd_runtime_info;
+struct kfd_dbg_device_info_entry;
 
 /**
   "Opens" the HSA kernel driver for user-kernel mode communication.
@@ -784,7 +790,7 @@ hsaKmtMapMemoryToGPUNodes(
     void*           MemoryAddress,         //IN (page-aligned)
     HSAuint64       MemorySizeInBytes,     //IN (page-aligned)
     HSAuint64*      AlternateVAGPU,        //OUT (page-aligned)
-    HsaMemMapFlags  MemMapFlags,           //IN
+    HsaMemFlags     MemFlags,              //IN
     HSAuint64       NumberOfNodes,         //IN
     HSAuint32*      NodeArray              //IN
     );
@@ -997,6 +1003,21 @@ hsaKmtDebugTrapIoctl(
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtGetClockCounters(
+    HSAuint32         NodeId,  //IN
+    HsaClockCounters* Counters //OUT
+    );
+
+/**
+  Gets GPU and CPU clock counters for particular Node.
+
+  GPU nodes are queried several times and the shortest complete sample is
+  returned. That reduces GPU/CPU clock correlation error from a delay between
+  the counter reads. CPU-only nodes are read once.
+*/
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtGetClockCountersPrecise(
     HSAuint32         NodeId,  //IN
     HsaClockCounters* Counters //OUT
     );
@@ -1424,6 +1445,18 @@ hsaKmtHandleImport(
     HsaHandleImportFlags* Flags
 );
 
+/**
+  Queries the placement and size of an allocation from its DMA-BUF fd.
+  The fd is not consumed. Returns HSAKMT_STATUS_NOT_SUPPORTED when the
+  kernel cannot describe the buffer.
+*/
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtQueryDmaBufInfo(
+    int DMABufFd,           // IN
+    HsaDmaBufInfo* Info     // OUT
+);
+
 HSAKMT_STATUS
 HSAKMTAPI
 hsaKmtHandleExport(
@@ -1491,6 +1524,22 @@ hsaKmtGetAmdGPUDeviceFd(
   HsaAMDGPUDeviceHandle DeviceHandle, //IN
   int *fd //OUT
 );
+
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetPersistingCacheSizeCtx(
+    HsaKFDContext *ctx,
+    HSAuint32 Node,
+    HSAuint64 CacheSize
+    );
+
+HSAKMT_STATUS
+HSAKMTAPI
+hsaKmtSetPersistingCacheSize(
+    HSAuint32 Node,
+    HSAuint64 CacheSize
+    );
 
 #ifdef __cplusplus
 }   //extern "C"

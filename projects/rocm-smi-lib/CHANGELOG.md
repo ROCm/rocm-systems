@@ -4,6 +4,13 @@ Full documentation for rocm_smi_lib is available at [https://rocm.docs.amd.com/]
 
 ***All information listed below is for reference and subject to change.***
 
+## rocm_smi_lib for ROCm 10.0.0
+
+### Changed
+
+- **Added `ROCM_SMI_DISABLE` build gate**.
+  - Setting `ROCM_SMI_DISABLE=True` (environment or CMake cache variable) skips building and installing rocm-smi-lib entirely. rocm-smi-lib is no longer included in TheRock builds; it can still be built from source if desired. Use [AMD SMI](https://github.com/ROCm/amdsmi) instead.
+
 ## rocm_smi_lib for ROCm 7.2.0
 
 ### Added

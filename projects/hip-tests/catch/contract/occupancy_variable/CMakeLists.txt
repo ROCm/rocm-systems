@@ -1,0 +1,10 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+set(TEST_SRC
+    test_hip_occupancy_variable_contract.cc
+)
+
+hip_add_exe_to_target(NAME ContractOccupancyVariableTest
+                      TEST_SRC ${TEST_SRC}
+                      TEST_TARGET_NAME contract_tests)

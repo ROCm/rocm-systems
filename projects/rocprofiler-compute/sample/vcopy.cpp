@@ -12,6 +12,24 @@ using namespace std;
 
 #define HIP_ASSERT(x) (assert((x)==hipSuccess))
 
+// Unlike HIP_ASSERT, this reports the failing call and error string, and stays
+// active when NDEBUG is defined.
+#define HIP_CHECK(x)                                                           \
+  do {                                                                         \
+    hipError_t _hip_check_err = (x);                                           \
+    if (_hip_check_err != hipSuccess) {                                        \
+      fflush(stdout); /* keep the error in sequence when stdout is a pipe */   \
+      fprintf(stderr, "HIP error at %s:%d in '%s': %s (%d)\n", __FILE__,       \
+              __LINE__, #x, hipGetErrorString(_hip_check_err),                 \
+              (int)_hip_check_err);                                            \
+      exit(EXIT_FAILURE);                                                      \
+    }                                                                          \
+  } while (0)
+
+// Cap on how many individual mismatches are printed. A failed launch leaves
+// every element mismatched, which is millions of lines for a typical -n.
+#define MAX_REPORTED_ERRORS 10
+
 // HIP kernel. Each thread takes care of one element of c
 __global__ void vecCopy(double *a, double *b, double *c, int n, int stride) {
     // Get our global thread ID
@@ -66,8 +84,6 @@ int main(int argc, char* argv[]) {
   int stride = 1;
   int devId = 0;
   int numIter = 1;
-
-  hipError_t hip_status;
 
   for (int i = 0; i < argc; i++){
     std::string arg = argv[i];
@@ -151,12 +167,16 @@ int main(int argc, char* argv[]) {
   // Execute the kernel
   for(int i = 0; i < numIter; i++){
     hipLaunchKernelGGL(vecCopy, dim3(gridSize), dim3(blockSize), 0, 0, d_a, d_b, d_c, n, stride);
-    hip_status = hipDeviceSynchronize();
+    // Catches launch-time failures (e.g. no kernel image for this device);
+    // hipDeviceSynchronize() catches failures during execution.
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
     printf("Finished executing kernel\n");
     // Optionally, launch a second kernel. Only here for testing purposes
     if (multiKernel){
       hipLaunchKernelGGL(vecCopy_2, dim3(gridSize), dim3(blockSize), 0, 0, d_a, d_b, d_c, n, stride);
-      hip_status = hipDeviceSynchronize();
+      HIP_CHECK(hipGetLastError());
+      HIP_CHECK(hipDeviceSynchronize());
       printf("Finished executing kernel\n");
     }
   }
@@ -172,10 +192,19 @@ int main(int argc, char* argv[]) {
   }
 
   // Verfiy results
+  int numErrors = 0;
   for(int i = 0; i < n; i++) {
-    if (abs(h_verify_c[i*stride] - h_c[i*stride]) > 1e-5)
-      printf("Error at position i %d, Expected: %f, Found: %f \n", i, h_c[i], d_c[i]);
+    if (abs(h_verify_c[i*stride] - h_c[i*stride]) > 1e-5) {
+      if (numErrors < MAX_REPORTED_ERRORS)
+        printf("Error at position i %d, Expected: %f, Found: %f \n", i,
+               h_verify_c[i*stride], h_c[i*stride]);
+      numErrors++;
+    }
   }
+  if (numErrors > MAX_REPORTED_ERRORS)
+    printf("... %d further mismatches not shown\n", numErrors - MAX_REPORTED_ERRORS);
+  if (numErrors > 0)
+    printf("Verification FAILED: %d of %d elements mismatched\n", numErrors, n);
   //printf("Printing few elements from the output vector\n");
   for(int i = 0; i < 20; i++) {
     //printf("Output[%d]:%f\n",i, h_c[i]);
@@ -194,5 +223,5 @@ int main(int argc, char* argv[]) {
   free(h_b);
   free(h_c);
 
-  return 0;
+  return numErrors > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }

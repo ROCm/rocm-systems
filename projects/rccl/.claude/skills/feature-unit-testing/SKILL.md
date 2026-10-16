@@ -14,6 +14,12 @@ feature, no stack archaeology. The suite is the acceptance criterion for every P
 **Central discipline:** measure coverage first, plan second. Verify assumptions against
 real data before writing a single test.
 
+## Modules
+
+- [multithread-validation.md](multithread-validation.md) — covering concurrent use of a
+  net plugin: which production threading to reproduce, which concurrency is not worth
+  testing, worker-option parsing, and how to make overlap an assertion.
+
 ---
 
 ## Feature Testing Lifecycle

@@ -112,11 +112,18 @@ cmake_policy( SET CMP0074 NEW )
 # Try CONFIG mode first (TheRock), fall back to manual discovery (standalone)
 find_package(NUMA CONFIG QUIET)
 if(NUMA_FOUND)
-    # Normalize: ensure NUMA::NUMA target exists even if CONFIG only provides variables
-    if(NOT TARGET NUMA::NUMA)
-        add_library(NUMA::NUMA UNKNOWN IMPORTED)
+    # CONFIG mode provides numa::numa (lowercase)
+    # Use it directly if it exists, otherwise create NUMA::NUMA from variables
+    if(NOT TARGET numa::numa AND NOT TARGET NUMA::NUMA)
+        # CONFIG provided variables but no target - forward to NUMA_LIBRARIES
+        add_library(NUMA::NUMA INTERFACE IMPORTED)
         set_target_properties(NUMA::NUMA PROPERTIES
-            IMPORTED_LOCATION "${NUMA_LIBRARY}")
+            INTERFACE_LINK_LIBRARIES "${NUMA_LIBRARIES}")
+    elseif(TARGET numa::numa AND NOT TARGET NUMA::NUMA)
+        # Create NUMA::NUMA as an alias for compatibility
+        # Note: We use the lowercase target directly in target_link_libraries
+        add_library(NUMA::NUMA INTERFACE IMPORTED)
+        target_link_libraries(NUMA::NUMA INTERFACE numa::numa)
     endif()
 else()
     find_library(NUMA_LIBRARY NAMES numa PATHS /usr/lib /usr/local/lib)
@@ -223,6 +230,11 @@ include_directories(${PROJECT_SOURCE_DIR}/../../libhsakmt/include)
 
 include_directories(${DRM_INCLUDE_DIRS})
 
+# Platform specific includes (i.e kfd_ioct.h on Linux)
+if (CMAKE_SYSTEM_NAME MATCHES "Linux")
+      include_directories(${PROJECT_SOURCE_DIR}/../../include/hsakmt/linux)
+endif()
+
 set (SRC_FILES gtest-1.6.0/gtest-all.cpp
 
   src/AqlQueue.cpp
@@ -270,7 +282,8 @@ set (SRC_FILES gtest-1.6.0/gtest-all.cpp
   src/KFDRASTest.cpp
   src/KFDPCSamplingTest.cpp
   src/KFDNegativeTest.cpp
-  src/RDMATest.cpp)
+  src/RDMATest.cpp
+  src/KFDAISTest.cpp)
 
 message( STATUS "PROJECT_SOURCE_DIR:" ${PROJECT_SOURCE_DIR} )
 #message( STATUS "SRC_FILES: ")

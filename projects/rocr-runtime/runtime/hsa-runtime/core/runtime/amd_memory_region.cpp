@@ -80,7 +80,6 @@ MemoryRegion::MemoryRegion(bool fine_grain, bool kernarg, bool full_profile,
   assert(!(fine_grain && extended_scope_fine_grain));
 
   mem_flag_.Value = 0;
-  map_flag_.Value = 0;
   static const HSAuint64 kGpuVmSize = (1ULL << 40);
 
   // Bind the memory region based on whether it is
@@ -152,7 +151,7 @@ hsa_status_t MemoryRegion::AllocateImpl(size_t& size, AllocateFlags alloc_flags,
 
   // Skip the per-region cap on Windows/DXG so over-commit requests can
   // reach WDDM; system memory still enforces the cap.
-  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsWinDxg();
+  const bool is_windxg = core::Runtime::runtime_singleton_->thunkLoader()->IsDXG();
   if (IsSystem() && (size > max_sysmem_alloc_size_)) {
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
@@ -516,14 +515,14 @@ hsa_status_t MemoryRegion::AllowAccess(uint32_t num_agents,
     whitelist_nodes.push_back(owner()->node_id());
   }
 
-  HsaMemMapFlags map_flag = map_flag_;
-  map_flag.ui32.HostAccess |= (cpu_in_list) ? 1 : 0;
+  HsaMemFlags mem_flags = mem_flag_;
+  mem_flags.ui32.HostAccess |= (cpu_in_list) ? 1 : 0;
 
   {  // Sequence with pointer info since queries to other fragments of the block may be adjusted by
      // this call.
     std::shared_lock<std::shared_mutex> lock(core::Runtime::runtime_singleton_->memory_lock_);
     uint64_t alternate_va = 0;
-    if (owner()->driver().MakeMemoryResident(ptr, size, &alternate_va, &map_flag,
+    if (owner()->driver().MakeMemoryResident(ptr, size, &alternate_va, &mem_flags,
                                              whitelist_nodes.size(),
                                              whitelist_nodes.data()) != HSA_STATUS_SUCCESS) {
       return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
@@ -600,7 +599,7 @@ hsa_status_t MemoryRegion::Lock(uint32_t num_agents, const hsa_agent_t* agents,
   if (owner()->driver().RegisterMemory(host_ptr, size, local_mem_flag) ==
       HSA_STATUS_SUCCESS) {
     uint64_t alternate_va = 0;
-    if (owner()->driver().MakeMemoryResident(host_ptr, size, &alternate_va, &map_flag_,
+    if (owner()->driver().MakeMemoryResident(host_ptr, size, &alternate_va, &local_mem_flag,
                                              whitelist_nodes.size(),
                                              whitelist_nodes.data()) == HSA_STATUS_SUCCESS) {
       if (alternate_va != 0) {
@@ -624,6 +623,16 @@ hsa_status_t MemoryRegion::Unlock(void* host_ptr) const {
   }
 
   if (full_profile()) {
+    return HSA_STATUS_SUCCESS;
+  }
+
+  // Lock leaves a userptr registration or an SVM registration (no thunk
+  // object). Any other object at host_ptr reserved this VA after the lock's
+  // registration was retired as stale; unmapping would tear down its mapping.
+  // The registration is already gone, so there is nothing left to unlock.
+  HsaPointerInfo info = {};
+  if (HSAKMT_CALL(hsaKmtQueryPointerInfo(host_ptr, &info)) == HSAKMT_STATUS_SUCCESS &&
+      info.Type != HSA_POINTER_REGISTERED_USER && info.Type != HSA_POINTER_UNKNOWN) {
     return HSA_STATUS_SUCCESS;
   }
 
@@ -651,8 +660,10 @@ void* MemoryRegion::BlockAllocator::alloc(size_t request_size, size_t& allocated
   // The block's driver identity is reconstructed from base address and length
   // on free (see BlockAllocator::free), so the handle is not retained here.
   core::DriverMemoryHandle handle{};
-  hsa_status_t err = region_.AllocateImpl(
-      bsize, core::MemoryRegion::AllocateRestrict | core::MemoryRegion::AllocateDirect, 0, &handle);
+  core::MemoryRegion::AllocateFlags flags = core::MemoryRegion::AllocateDirect;
+  if (region_.IsLocalMemory()) flags |= core::MemoryRegion::AllocateRestrict;
+
+  hsa_status_t err = region_.AllocateImpl(bsize, flags, 0, &handle);
   if (err != HSA_STATUS_SUCCESS)
     throw AMD::hsa_exception(err, "MemoryRegion::BlockAllocator::alloc failed.");
   assert(handle.vaddr != nullptr && "Region returned nullptr on success.");

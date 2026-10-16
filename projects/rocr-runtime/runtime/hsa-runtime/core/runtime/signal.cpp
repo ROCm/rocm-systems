@@ -255,11 +255,7 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
   const timer::fast_clock::duration kMaxElapsed = std::chrono::microseconds(200);
 
   // Convert timeout value into the fast_clock domain
-  uint64_t hsa_freq = 0;
-  HSA::hsa_system_get_info(HSA_SYSTEM_INFO_TIMESTAMP_FREQUENCY, &hsa_freq);
-  const timer::fast_clock::duration fast_timeout =
-      timer::duration_from_seconds<timer::fast_clock::duration>(
-          double(timeout) / double(hsa_freq));
+  const timer::fast_clock::duration fast_timeout = timer::GetFastTimeout(timeout);
 
   std::vector<uint32_t> unmet_condition_ids(signal_count);
   std::iota(unmet_condition_ids.begin(), unmet_condition_ids.end(), 0);
@@ -297,10 +293,13 @@ uint32_t Signal::WaitMultiple(uint32_t signal_count, const hsa_signal_t* hsa_sig
       }
       if (condition_met) {
         it = unmet_condition_ids.erase(it);
-        satisfying_values[i] = value;
-        if (!wait_on_all)
+        if (!wait_on_all) {
+          // wait-any callers only need satisfying_values[0] per WaitMultiple()'s contract.
+          satisfying_values[0] = value;
           return i;
-        else if (unmet_condition_ids.empty())
+        }
+        satisfying_values[i] = value;
+        if (unmet_condition_ids.empty())
           return 0;
       } else {
         ++it;

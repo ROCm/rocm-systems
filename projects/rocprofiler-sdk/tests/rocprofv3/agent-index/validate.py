@@ -24,7 +24,6 @@
 
 import sys
 import pytest
-import re
 
 
 def get_type(id_type):
@@ -39,7 +38,6 @@ def get_type(id_type):
 def check_kernel_traces(json_data, kernels_data, id_type):
     data = json_data["rocprofiler-sdk-tool"]
     agents = data["agents"]
-    kernels = data["buffer_records"]["kernel_dispatch"]
     _type = get_type(id_type)
 
     for row in kernels_data:
@@ -53,7 +51,6 @@ def check_kernel_traces(json_data, kernels_data, id_type):
 def check_memory_allocation_traces(json_data, mem_alloc, id_type):
     data = json_data["rocprofiler-sdk-tool"]
     agents = data["agents"]
-    mem_alloc_record = data["buffer_records"]["memory_allocation"]
     _type = get_type(id_type)
 
     for row in mem_alloc:
@@ -69,7 +66,6 @@ def check_memory_allocation_traces(json_data, mem_alloc, id_type):
 def check_memory_copy_traces(json_data, mem_copy, id_type):
     data = json_data["rocprofiler-sdk-tool"]
     agents = data["agents"]
-    mem_copy_record = data["buffer_records"]["memory_copy"]
     _type = get_type(id_type)
 
     for row in mem_copy:

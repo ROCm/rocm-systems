@@ -21,11 +21,13 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
       * :doc:`Build hipFile from source <install/build-from-source>`
       * :doc:`Install the hipFile Python bindings <install/python-bindings>`
 
-.. grid:: 2
-   :gutter: 3
+   .. grid-item-card:: Conceptual
+
+      * :doc:`AMD Infinity Storage <conceptual/amd-infinity-storage>`
 
    .. grid-item-card:: How to
 
+      * :doc:`Check for fastpath compatibility <how-to/checking-system-compatibility>`
       * :doc:`Set up a local NVMe drive <how-to/setup-local-nvme>`
       * :doc:`Set up an NVMe-oF disk <how-to/setup-nvmeof>`
       * :doc:`Set up an NFSoRDMA share <how-to/setup-nfsordma>`
@@ -37,6 +39,7 @@ hipFile is delivered as part of `TheRock <https://github.com/ROCm/TheRock>`_. Th
 
       * :doc:`Copy a file via GPU memory using hipFile <tutorials/copy-a-file>`
       * :doc:`Async multistream I/O <tutorials/async-multistream-io>`
+      * :doc:`Batch I/O <tutorials/batch-io>`
       * :doc:`Query the hipFile version <tutorials/get-version>`
       * :doc:`Perform GPU I/O with the Python bindings <tutorials/python-gpu-io>`
 

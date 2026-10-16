@@ -39,7 +39,8 @@ class Settings : public device::Settings {
       uint queue_pipe_dist_ : 1;       //!< gfx94x queue pipe distribution
       uint ext_dispatch_packet_ : 1;      //!< Uses new ext dispatch packet for all launches
       uint ext_dispatch_packet_ld_ : 1;   //!< Format 4 (DISPATCH_LD) supported by CP ucode
-      uint reserved_ : 17;
+      uint aql_barrier_opt_ : 1;       //!< Per-stream barrier-bit optimization
+      uint reserved_ : 16;
     };
     uint value_;
   };
@@ -70,7 +71,7 @@ class Settings : public device::Settings {
 
   //! Creates settings
   bool create(bool fullProfile, const amd::Isa& isa, bool enableXNACK, bool coop_groups = false,
-              bool isXgmi = false);
+              bool isXgmi = false, bool isAPU = false);
 
  private:
   //! Disable copy constructor

@@ -511,9 +511,12 @@ hsa_status_t ImageRuntime::CreateImageHandleWithLayout(
   if(!IsMultipleOf(image_data, 256))
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
 
-  if(image_layout->version!=1)
+  // Accept a small SRD-format version (1) or the WDDM surface-metadata sentinel (the descriptor tail
+  // then carries a HsaWddmSurfaceMetadata blob to reconstruct from); reject anything else.
+  if (image_layout->version != 1 &&
+      image_layout->version != HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA)
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
-  
+
   uint32_t id;
   HSA::hsa_agent_get_info(component, (hsa_agent_info_t)HSA_AMD_AGENT_INFO_CHIP_ID, &id);
 
@@ -553,7 +556,10 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandleWithLayout(
     return HSA_STATUS_ERROR_INVALID_ALLOCATION;
   }
 
-  if (image_layout->version != 1) {
+  // Accept a small SRD-format version (1) or the WDDM surface-metadata sentinel (the descriptor tail
+  // then carries a HsaWddmSurfaceMetadata blob to reconstruct from); reject anything else.
+  if (image_layout->version != 1 &&
+      image_layout->version != HSA_AMD_IMAGE_DESC_VERSION_WDDM_SURFACE_METADATA) {
     return (hsa_status_t)HSA_EXT_STATUS_ERROR_IMAGE_FORMAT_UNSUPPORTED;
   }
 
@@ -581,7 +587,6 @@ hsa_status_t ImageRuntime::CreateMipmapArrayHandleWithLayout(
   mipmap_array->num_levels = num_mipmap_levels;
   mipmap_array->data = const_cast<void*>(image_data);
   mipmap_array->flags = 0;
-
   ImageManager* manager = image_manager(component);
   if (!manager) {
     MipmappedArray::Destroy(mipmap_array);

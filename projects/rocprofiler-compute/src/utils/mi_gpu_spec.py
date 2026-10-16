@@ -275,7 +275,7 @@ class MIGPUSpecs:
     ) -> bool:
         """Return True if the GPU supports compute partitions."""
         try:
-            partition_supported_series = {"mi300", "mi350"}
+            partition_supported_series = {"mi300", "mi350", "gfx1250_series"}
             if bool(gpu_arch):
                 series = cls.get_gpu_series(gpu_arch.lower().strip())
             elif bool(gpu_model):
@@ -384,7 +384,7 @@ class MIGPUSpecs:
         """
         Return a list of the cache and memory levels supported by the specific gpu model
         """
-        return cls._gpu_design[gpu_model.lower()].get("memory_levels", [])
+        return cls._gpu_design.get(gpu_model.lower(), {}).get("memory_levels", [])
 
     @classmethod
     def get_chip_id_dict(cls) -> dict[int, str]:

@@ -19,15 +19,16 @@
 ///         |  make_trampoline_plan() + TrampolineBuilder::build()
 ///         v
 ///   (preflight: per-site plan + built bytes, accumulated locally)
-///         |  splice anchors + append trampoline caves into .text + emit()
+///         |  splice anchors + append probe bodies, entry stub and trampolines
+///         |  into .text + redirect the entry to the stub + emit()
 ///         v
 ///   InstrumentedCodeObject      -- patched ELF + per-site InstrumentationPatch
 ///
 /// Current pipeline is all-or-nothing across all queued points: any per-site
 /// failure aborts the whole patch.
 /// Future work: predicate-based anchor selection (Instrumentor walks blocks
-/// itself), per-site failure tolerance, probe-call bodies,
-/// AfterInst / BlockEntry / BlockExit kinds, EXEC policy management.
+/// itself), per-site failure tolerance,
+/// AfterInst / BlockEntry / BlockExit kinds.
 /// As that lands the per-stage types will thicken
 /// (e.g. ResolvedInstrumentationSite probably gains an ordered list of bodies)
 /// and a layout/negotiation stage will appear between planning and splicing.
@@ -39,8 +40,10 @@
 
 #pragma once
 
+#include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/patch/probe_callable.h"
 #include "rocjitsu/code/patch/probe_clobber.h"
+#include "rocjitsu/code/patch/spill_manager.h"
 #include "rocjitsu/code/patch/trampoline_builder.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/isa/register_set.h"
@@ -87,16 +90,33 @@ struct InstrumentationPoint {
 
   InstrumentationKind kind = InstrumentationKind::BeforeInst;
 
-  // filter_flags / force_full_exec are not used yet. The validator rejects any
-  // non-default value to keep the contract honest until each field is actually
-  // implemented.
-  // TODO: consume force_full_exec when EXEC policy management lands; consume
-  // filter_flags to filter based on InstFlags.
+  // filter_flags is not used yet. The validator rejects any non-default value
+  // to keep the contract honest until the field is actually implemented.
+  // TODO: consume filter_flags to filter based on InstFlags.
   uint32_t filter_flags = 0;
   // probe_obj / probe_symbol are consumed: set both to request a probe-call
   // trampoline, or leave both empty for the inline nop.
   const AmdGpuCodeObject *probe_obj = nullptr;
   std::string probe_symbol;
+  // Argument dwords to hand the probe, one per VGPR from the ABI's
+  // arg_vgpr_base. Each names where the trampoline gets the value; use
+  // probe_arg_imm() for a constant. Empty means a probe called with no
+  // arguments. Only meaningful alongside probe_obj / probe_symbol.
+  //
+  // The list's *shape* (its size and each slot's source) belongs to the probe,
+  // not to this point, which is only the channel the declaration arrives
+  // through until a probe descriptor carries it. Two points
+  // naming one probe and describing it differently is an error, not two probes.
+  // Only the immediate values are per-site.
+  std::vector<ProbeArgValue> probe_args;
+  // Run the probe body with every lane enabled rather than under the mask the
+  // guest had at the anchor. For a uniform probe whose work does not depend on
+  // which lanes were active; a probe that reads per-lane guest state wants the
+  // anchor mask instead, which is the default. Declared per probe, like the
+  // argument shape, and relayed through this point for the same reason.
+  //
+  // The envelope already widens EXEC around the spill and argument writes; this
+  // holds that window open across the call instead of closing it first.
   bool force_full_exec = false;
   // TODO: SCC will eventually need a per-point knob mirroring force_full_exec
   // (e.g. probe_consumes_scc) since the probe call clobbers it
@@ -113,6 +133,12 @@ struct ResolvedInstrumentationSite {
   // Index into the probe registry produced by resolve_points()
   // (ResolvedPoints::probes); nullopt if no probes
   std::optional<size_t> probe_index;
+
+  // Argument values for this site, copied from the request. Only the immediates
+  // are genuinely per-site: two sites can call one probe body with different
+  // constants. The shape they must conform to, and the mask policy, live on the
+  // ProbeCallable that probe_index names.
+  std::vector<ProbeArgValue> probe_args;
 
   [[nodiscard]] bool is_probe_call() const { return probe_index.has_value(); }
 };
@@ -189,14 +215,17 @@ struct InstrumentedCodeObjectDebug : InstrumentedCodeObject {
 /// (the free-function form lets test fixtures use synthetic TestInstruction
 /// objects without standing up an AmdGpuCodeObject). The anchor identity is
 /// already resolved by the caller; @p pt is read for `filter_flags`, `kind`,
-/// and reserved fields. See is_relocatable_anchor for rules.
+/// and the probe fields. See is_relocatable_anchor for rules.
 ///
 /// Temporary rules enforced here:
 ///   - @p pt.filter_flags is zero.
 ///   - @p pt.kind is BeforeInst (other kinds are unsupported in this milestone).
 ///   - @p pt.probe_obj and @p pt.probe_symbol are consistent: both set (a probe
 ///     call) or both empty (the inline nop). Setting only one is rejected.
-///   - @p pt.force_full_exec is false.
+///   - @p pt.probe_args is empty without a probe: an inline-nop site has
+///     nowhere to put arguments.
+///   - @p pt.force_full_exec is not set without a probe: an inline-nop site
+///     has no call envelope whose mask could be widened.
 [[nodiscard]] std::optional<ResolvedInstrumentationSite>
 validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
                 std::span<const uint8_t> text_bytes, const InstrumentationPoint &pt,
@@ -214,11 +243,12 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 ///        exactly one `before_items` entry containing `s_nop 0`, empty
 ///        `after_items`, and `emit_original == true`.
 ///
-/// One of several places where temporary inlined nop constraints are enforced.
-/// The others: validate_anchor() rejects reserved InstrumentationPoint fields,
-/// and Instrumentor::patch() rejects multi-text code objects and the multi-
-/// point case. This one lives at the orchestrator boundary rather than inside
-/// TrampolineBuilder so the builder stays generic.
+/// One of several places where temporary constraints are enforced. The others:
+/// validate_anchor() rejects a non-zero `filter_flags`, the only
+/// InstrumentationPoint field still reserved, and any `kind` other than
+/// BeforeInst; Instrumentor::patch() rejects multi-text code objects. This one
+/// lives at the orchestrator boundary rather than inside TrampolineBuilder so
+/// the builder stays generic.
 /// Called by Instrumentor::patch() as a defense-check (make sure users/agents
 /// do not misinterpret current DBI support) and also directly by tests
 ///
@@ -238,40 +268,89 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 // The two inputs come from different owners: `probe_clobbers` is the callee fact
 // from ProbeClobberSummary (probe_clobber.h); `builder_clobbers` is the
 // call-envelope fact the builder's resource plan reports (link pair,
-// target-address pair, SCC temp, ...). That builder plan and its dead-register
-// selection land in a later slice; these helpers take `builder_clobbers` as a
-// plain RegisterSet so the formula and v0 policy are testable now. Combining the
-// two and applying policy is the Instrumentor's job, so it lives here rather
-// than in the callee-only probe_clobber unit.
+// target-address pair, SCC temp, ...). These helpers take `builder_clobbers` as
+// a plain RegisterSet rather than reaching into the builder's plan, so the
+// formula is testable on its own. Combining the two and applying policy is the
+// Instrumentor's job, so it lives here rather than in the callee-only
+// probe_clobber unit.
 //==============================================================================
-
-/// @brief What the builder will do about registers that are simultaneously live
-///        at the anchor and clobbered by instrumentation.
-///
-/// Currently implements only the no-spill path: a non-empty spill set is a hard
-/// failure rather than something the builder saves and restores. The enum exists
-/// now so the contract has a name and a later spill-capable slice can add a
-/// value without a rename.
-enum class SpillPolicy {
-  NoSpillsSupported, ///< Any non-empty spill set is a hard failure.
-  // TODO: SpillsSupported once a bootstrap save/restore sequence exists.
-};
 
 /// @brief instrument_clobbers = probe body clobbers | builder envelope clobbers.
 [[nodiscard]] RegisterSet compute_instrumentation_clobbers(const ProbeClobberSummary &probe_summary,
                                                            const RegisterSet &builder_clobbers);
 
+/// @brief Registers a probe call overwrites independently of any per-site
+///        choice: every probe body's ordinary clobbers, plus the link pair each
+///        one returns through.
+///
+/// @details The set framework storage that must outlive a probe call has to
+/// avoid. The envelope's own temps are absent because they are picked per site,
+/// after this set has already constrained such storage.
+///
+/// Unioned over *every* probe in the patch rather than the ones a given site
+/// calls: storage written at kernel entry and read at a later site has to
+/// survive each probe call in between, whichever probe that is.
+///
+/// @param probes    The patch's probe registry.
+/// @param summaries One clobber summary per entry of @p probes, in the same
+///                  order. A size mismatch is a caller error and fails closed.
+/// @param out       Filled with the union on success; untouched on failure.
+/// @returns false when the inputs disagree in size or a probe's ABI names no
+///          usable link pair.
+[[nodiscard]] bool compute_probe_reserved_registers(std::span<const ProbeCallable> probes,
+                                                    std::span<const ProbeClobberSummary> summaries,
+                                                    RegisterSet &out,
+                                                    std::string *error_out = nullptr);
+
 /// @brief spill_set = live_at_anchor & instrumentation_clobbers.
 [[nodiscard]] RegisterSet compute_spill_set(const RegisterSet &live_at_anchor,
                                             const RegisterSet &instrumentation_clobbers);
 
-/// @brief Enforce the current spill policy, NoSpillsSupported.
+/// @brief Reserve a scratch slot per VGPR in @p spill_set and fill @p out.
 ///
-/// Under @ref SpillPolicy::NoSpillsSupported a non-empty @p spill_set fails
-/// closed: returns false and writes a diagnostic naming the live, clobbered
-/// registers. An empty spill set always succeeds.
-[[nodiscard]] bool check_spill_policy(const RegisterSet &spill_set, SpillPolicy policy,
-                                      std::string *error_out = nullptr);
+/// Fails closed (returns false, @p out empty) on a non-VGPR register, an arch
+/// with no scratch emitter, a slot past the scratch limit, or an offset that
+/// does not fit the scratch offset field.
+[[nodiscard]] bool plan_vgpr_spills(const RegisterSet &spill_set, SpillManager &spills,
+                                    rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                                    std::string *error_out = nullptr);
+
+/// @brief Reserve a scratch slot per SGPR in @p spill_set, pick a bridge VGPR
+///        (lowest of the @p kernel_vgpr_count allocated VGPRs that is in neither
+///        @p bridge_unavailable nor @p vgpr_spills), and fill @p out and
+///        @p out_bridge.
+///
+/// @p bridge_unavailable is the set the bridge must avoid, and it **must include
+/// everything live at the anchor**. The prologue's `v_writelane` destroys the
+/// bridge's incoming value, and the epilogue reloads the *spilled SGPR's* slot
+/// into it, not its own -- so a bridge that was live and is not itself in
+/// @p vgpr_spills is never restored. Callers may pass a superset (registers the
+/// envelope will write, say), never a subset.
+///
+/// Fails closed (returns false, @p out empty) on a non-SGPR register, no free
+/// bridge VGPR within the kernel's allocation, an arch with no scratch emitter, a
+/// slot past the scratch limit, or an offset that does not fit the offset field.
+[[nodiscard]] bool plan_sgpr_spills(const RegisterSet &spill_set,
+                                    const RegisterSet &bridge_unavailable,
+                                    const std::vector<SpillSlot> &vgpr_spills,
+                                    uint32_t kernel_vgpr_count, SpillManager &spills,
+                                    rj_code_arch_t arch, std::vector<SpillSlot> &out,
+                                    uint16_t &out_bridge, std::string *error_out = nullptr);
+
+/// @brief Reserve a scratch slot per AccVGPR in @p spill_set and fill @p out.
+///
+/// AccVGPRs store/load directly out of the accumulator file via the CDNA scratch
+/// `acc` bit -- no bridge VGPR needed. @p acc_count is the kernel's allocated
+/// AccVGPR count (unified VGPR budget minus the ACCUM_OFFSET window base); an index
+/// at or past it is rejected so we never spill an AGPR the kernel did not allocate.
+///
+/// Fails closed (returns false, @p out empty) on a non-AccVGPR register, a target
+/// with no AccVGPR file (non-CDNA), an AGPR index past @p acc_count, an arch with no
+/// scratch emitter, a slot past the scratch limit, or an offset that does not fit the
+/// scratch offset field.
+[[nodiscard]] bool plan_acc_spills(const RegisterSet &spill_set, uint32_t acc_count,
+                                   SpillManager &spills, rj_code_arch_t arch,
+                                   std::vector<SpillSlot> &out, std::string *error_out = nullptr);
 
 /// @brief Does a kernel that allocates @p kernel_sgpr_count SGPRs own the fixed
 ///        return-link pair s[link_base : link_base+1]?
@@ -287,6 +366,23 @@ enum class SpillPolicy {
 [[nodiscard]] constexpr bool probe_link_pair_fits_in_kernel(uint32_t kernel_sgpr_count,
                                                             uint16_t link_base) {
   return kernel_sgpr_count >= static_cast<uint32_t>(link_base) + 2;
+}
+
+/// @brief Does a kernel whose ordinary VGPRs end at @p ordinary_vgpr_bound own
+///        the argument VGPRs @p abi names?
+///
+/// The same coarse ownership question as probe_link_pair_fits_in_kernel, for the
+/// other set of registers the ABI fixes rather than picks. An index at or past
+/// the bound is either unallocated or aliases an AGPR, and the envelope would
+/// write it before the call. Renaming the probe's argument registers would mean
+/// rewriting the probe body, and growing the allocation is deferred, so a site
+/// that does not fit fails closed.
+///
+/// An @p abi passing no arguments always fits.
+[[nodiscard]] constexpr bool probe_args_fit_in_kernel(uint32_t ordinary_vgpr_bound,
+                                                      const ProbeAbi &abi) {
+  return ordinary_vgpr_bound >=
+         static_cast<uint32_t>(abi.arg_vgpr_base) + static_cast<uint32_t>(abi.num_arg_vgprs);
 }
 
 /// @brief DBI orchestrator. Collects InstrumentationPoints, validates each
@@ -349,9 +445,16 @@ public:
   /// Requires at least one queued InstrumentationPoint; queuing zero is a fatal
   /// error. Shares the single-attempt budget with patch_with_debug_summaries();
   /// see the class-level note.
+  ///
+  /// Refuses any point whose probe reads a `LogBufferPtr*` argument: the entry
+  /// prologue those need loads through a kernarg wrapper that no runtime builds
+  /// yet.
   [[nodiscard]] InstrumentedCodeObject patch();
 
   /// @brief Same as patch(), plus per-site InstrumentationPatch summaries.
+  ///
+  /// Unlike patch(), accepts `LogBufferPtr*` arguments, for callers that supply
+  /// the kernarg wrapper themselves.
   ///
   /// Currently intended for tests and debugging, although could eventually
   /// be used to communicate important information for the host (an ordering
@@ -383,6 +486,26 @@ private:
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
+
+  // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor
+  // is redirected to it, and it branches to the untouched original entry. Not
+  // one of the caller's points: it exists because a probe asked for the
+  // framework's entry storage, and it is what defines that storage.
+  struct EntryProloguePatch {
+    uint64_t padding_bytes = 0;  ///< s_nop fill ahead of the stub, for entry alignment.
+    uint64_t stub_offset = 0;    ///< .text offset the descriptor enters at.
+    uint16_t storage_base = 0;   ///< Persistent pair every later site reads.
+    std::vector<uint32_t> words; ///< Prologue, then s_branch to the original entry.
+  };
+
+  // Gate the kernel, choose the storage, and build the stub for a cave that
+  // currently ends at @p cave_offset. Fails closed with a diagnostic rather
+  // than patching a kernel the prologue could not cover.
+  [[nodiscard]] std::optional<EntryProloguePatch> plan_entry_prologue(
+      const std::vector<KernelDescriptorInfo> &kernels, std::optional<uint32_t> kernel_sgpr_count,
+      const std::vector<BasicBlock *> &scope, const std::vector<ProbeCallable> &probes,
+      const std::vector<ProbeClobberSummary> &summaries, uint64_t cave_offset,
+      std::string *error_out);
 
   // Everything one resolution pass produces.
   struct ResolvedPoints {

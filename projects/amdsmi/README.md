@@ -8,8 +8,7 @@ For information on available features, installation steps, API reference materia
 documentation at [rocm.docs.amd.com/projects/amdsmi](https://rocm.docs.amd.com/projects/amdsmi/en/latest/)
 
 >[!NOTE]
->This project is a successor to [rocm-smi-lib](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib)
->and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
+>This project is a successor to [rocm-smi-lib](https://github.com/ROCm/rocm-systems/tree/develop/projects/rocm-smi-lib) and [esmi_ib_library](https://github.com/amd/esmi_ib_library).
 >This project is applicable to Linux Baremetal and Linux VM(Guest). To use AMD SMI for Virtualization, please refer to [AMD-SMI Virtualization](https://github.com/amd/MxGPU-Virtualization/tree/mainline/smi-lib).
 
 ## Supported platforms
@@ -30,7 +29,9 @@ for more information.
 
 The following are required to install and use the AMD SMI library through its language interfaces and CLI.
 
-* `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to work. Refer to the [Instinct documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html) for installation instructions.
+* On native Linux, the `amdgpu` driver must be loaded for [`amdsmi_init()`](./docs/how-to/amdsmi-cpp-lib#hello-amd-smi) to find GPUs. CPU-only and NIC-only initialization do not need it. Either the driver included in your distribution's kernel or AMD's `amdgpu-dkms` package works. To install `amdgpu-dkms`, refer to the [Instinct documentation](https://instinct.docs.amd.com/projects/amdgpu-docs/en/latest/install/detailed-install/prerequisites.html).
+
+* AMD EPYC™ CPU support additionally requires the `amd_hsmp` (or `hsmp_acpi`) kernel module with the HSMP interface enabled in BIOS. Without it, CPU discovery is skipped (non-fatal). See the [installation requirements](https://rocm.docs.amd.com/projects/amdsmi/en/latest/install/install.html).
 * Export `LD_LIBRARY_PATH` to the `amdsmi` installation directory.
 
   ```bash
@@ -42,7 +43,7 @@ The following are required to install and use the AMD SMI library through its la
 * Python 3.6.8+ (64-bit)
 
 ### Note: No module named more_itertools warning on Azure Linux 3
-During the driver installation process on Azure Linux 3, you might encounter the `ModuleNotFoundError: No module named 'more_itertools'` warning. This warning is a result of the reintroduction of `python3-wheel` and `python3-setuptools` dependencies in the CMake of AMD SMI, which requires `more_itertools` to build these Python libraries. This issue will be fixed in a future ROCm release. As a workaround, use the following command before installation:
+When installing an `amd-smi-lib` package from ROCm 7.2.x or earlier, or one built from source before ROCm 10.1, on Azure Linux 3, you might encounter the `ModuleNotFoundError: No module named 'more_itertools'` warning. Those packages run `pip` with `setuptools` and `wheel` during installation, which requires `more_itertools`. The ROCm Core SDK `amdrocm-amdsmi` packages do not run `pip` and are not affected. For `amd-smi-lib`, use the following command before installation:
 ```
 sudo python3 -m pip install more_itertools
 ```
@@ -128,7 +129,9 @@ during development; earlier versions are not guaranteed to work.
 * CMake (v3.20.0 or later) -- `python3 -m pip install cmake`
 * g++ (v5.4.0 or later)
 * libdrm-dev (for Ubuntu and Debian)
+* libssl-dev (for Ubuntu and Debian)
 * libdrm-devel (for RPM-based distributions)
+* openssl-devel (for RPM-based distributions)
 
 In order to build the AMD SMI Python package, the following components are required:
 

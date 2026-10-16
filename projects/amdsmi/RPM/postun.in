@@ -1,8 +1,11 @@
 #!/bin/bash
 
 # second term originates from ENABLE_LDCONFIG = ON/OFF at package build
-if [ "$1" -le 1 ] && [ "@ENABLE_LDCONFIG@" == "ON" ]; then
-    # perform the below actions for rpm remove($1=0) or upgrade($1=1) operations
+if [ "$1" -eq 0 ] && [ "@ENABLE_LDCONFIG@" == "ON" ]; then
+    # Only remove the linker entry on final erase ($1=0), NOT on upgrade
+    # ($1=1): RPM runs the new package's %post (which re-creates the entry)
+    # BEFORE the old package's %postun, so removing it here on upgrade would
+    # delete the new package's own linker registration.
     rm -f /etc/ld.so.conf.d/x86_64-libamd_smi_lib.conf
     ldconfig
 fi

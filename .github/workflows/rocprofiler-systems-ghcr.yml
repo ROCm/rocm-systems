@@ -35,6 +35,9 @@ on:
       - '!docs/**'
       - '!projects/*/docs/**'
 
+permissions:
+  contents: read
+
 jobs:
   prepare_matrix_ci:
     if: github.repository == 'ROCm/rocm-systems'

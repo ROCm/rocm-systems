@@ -118,6 +118,13 @@ if(rocjpeg_FOUND)
         add_library(rocjpeg::rocjpeg INTERFACE IMPORTED)
         target_link_libraries(rocjpeg::rocjpeg INTERFACE ${rocjpeg_LIBRARY})
         target_include_directories(rocjpeg::rocjpeg INTERFACE ${rocjpeg_INCLUDE_DIR})
+    else()
+        # rocjpeg config doesn't set this...
+        get_target_property(_rocjpeg_include_dirs rocjpeg::rocjpeg
+                            INTERFACE_INCLUDE_DIRECTORIES)
+        if(NOT _rocjpeg_include_dirs)
+            target_include_directories(rocjpeg::rocjpeg INTERFACE ${rocjpeg_INCLUDE_DIR})
+        endif()
     endif()
 endif()
 

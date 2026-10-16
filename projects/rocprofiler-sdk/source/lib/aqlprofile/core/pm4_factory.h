@@ -77,6 +77,7 @@ enum gpu_id_t
     GFX10_GPU_ID,    // generic Gfx10 id
     GFX11_GPU_ID,    // generic Gfx11 id
     GFX115X_GPU_ID,  // Gfx11.5x id
+    GFX117X_GPU_ID,  // Gfx11.7x id
     GFX12_GPU_ID,    // generic Gfx12 id
     MI450_GPU_ID,    // Mi450 GPU id
 };
@@ -171,6 +172,19 @@ public:
     virtual bool IsGFX11() const { return false; }
     virtual bool IsGFX12() const { return false; }
     virtual bool IsGFX1250() const { return false; }
+
+    virtual uint32_t EncodeSpmBlockIndex(uint32_t inst_index,
+                                         uint32_t sa_index,
+                                         uint32_t wgp_index) const
+    {
+        return inst_index;
+    }
+    virtual uint32_t DecodeSpmInstanceIndex(const GpuBlockInfo* block_info,
+                                            uint32_t            block_index) const
+    {
+        return block_index;
+    }
+
     // Return number of XCC on the GPU
     uint32_t GetXccNumber() const { return agent_info_->xcc_num; }
     // Return number of XCC per AID
@@ -184,7 +198,8 @@ public:
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
         if(info == nullptr) throw std::runtime_error("Bad Block");
         // Checking that the block index is in proper range
-        if(event->block_index >= info->instance_count) throw std::runtime_error("Bad Index");
+        if(DecodeSpmInstanceIndex(info, event->block_index) >= info->instance_count)
+            throw std::runtime_error("Bad Index");
             // Checking that the counter event index is in proper range
 #if 0
     if (event->counter_id > info->event_id_max)
@@ -199,7 +214,7 @@ public:
         const GpuBlockInfo* info = block_map_.Get(event->block_name);
         if(info == nullptr) throw event_exception(std::string("Bad block, "), *event);
         // Checking that the block index is in proper range
-        if(event->block_index >= info->instance_count)
+        if(DecodeSpmInstanceIndex(info, event->block_index) >= info->instance_count)
             throw event_exception(std::string("Bad block index, "), *event);
             // Checking that the counter event index is in proper range
 #if 0
@@ -311,6 +326,8 @@ private:
     static Pm4Factory* Gfx11Create(const AgentInfo* agent_info);
     // Create GFX11.5 factory
     static Pm4Factory* Gfx115xCreate(const AgentInfo* agent_info);
+    // Create GFX11.7 factory
+    static Pm4Factory* Gfx117xCreate(const AgentInfo* agent_info);
     // Create GFX12 generic factory
     static Pm4Factory* Gfx12Create(const AgentInfo* agent_info);
     // Create MI100 factory
@@ -337,6 +354,9 @@ private:
 inline Pm4Factory*
 Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent)
 {
+    // Serialize all access to the shared instance map and static mode flags.
+    std::lock_guard<mutex_t> lck(mutex_);
+
     // Check if we have the instance already created
     if(instances_ == nullptr) instances_ = new instances_t;
     const auto            ret = instances_->insert({*agent_info, nullptr});
@@ -360,6 +380,8 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
             case GFX11_GPU_ID: it->second = Gfx11Create(agent_info); break;
             // Create Gfx11.5 factory
             case GFX115X_GPU_ID: it->second = Gfx115xCreate(agent_info); break;
+            // Create Gfx11.7 factory
+            case GFX117X_GPU_ID: it->second = Gfx117xCreate(agent_info); break;
             case GFX12_GPU_ID: it->second = Gfx12Create(agent_info); break;
             // Create MI100 generic factory
             case MI100_GPU_ID: it->second = Mi100Create(agent_info); break;
@@ -380,8 +402,9 @@ Pm4Factory::Create(const AgentInfo* agent_info, gpu_id_t gpu_id, bool concurrent
 inline Pm4Factory*
 Pm4Factory::Create(const hsa_agent_t agent, bool concurrent)
 {
-    std::lock_guard<mutex_t> lck(mutex_);
-    const AgentInfo*         agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
+    // Note: locking is handled by Create(const AgentInfo*, gpu_id_t, bool) below, which is
+    // the single chokepoint that mutates the shared instance map.
+    const AgentInfo* agent_info = HsaRsrcFactory::Instance().GetAgentInfo(agent);
     // Get GPU id for a given agent
 
     hsa_status_t      status = HSA_STATUS_ERROR;
@@ -451,20 +474,19 @@ inline gpu_id_t
 Pm4Factory::GetGpuId(std::string_view gfx_ip)
 {
     // More specific GPU IDs must come before less specific IDs.
-    std::vector<std::pair<std::string, gpu_id_t>> gfxip_map = {
-        {"gfx908", MI100_GPU_ID},
-        {"gfx90a", MI200_GPU_ID},
-        {"gfx900", GFX9_GPU_ID},
-        {"gfx902", GFX9_GPU_ID},
-        {"gfx906", GFX9_GPU_ID},
-        {"gfx94", MI300_GPU_ID},
-        {"gfx95", MI350_GPU_ID},
-        {"gfx10", GFX10_GPU_ID},
-        {"gfx115", GFX115X_GPU_ID},
-        {"gfx11", GFX11_GPU_ID},
-        {"gfx125", MI450_GPU_ID},
-        {"gfx12", GFX12_GPU_ID},
-    };
+    std::vector<std::pair<std::string, gpu_id_t>> gfxip_map = {{"gfx908", MI100_GPU_ID},
+                                                               {"gfx90a", MI200_GPU_ID},
+                                                               {"gfx900", GFX9_GPU_ID},
+                                                               {"gfx902", GFX9_GPU_ID},
+                                                               {"gfx906", GFX9_GPU_ID},
+                                                               {"gfx94", MI300_GPU_ID},
+                                                               {"gfx95", MI350_GPU_ID},
+                                                               {"gfx10", GFX10_GPU_ID},
+                                                               {"gfx115", GFX115X_GPU_ID},
+                                                               {"gfx117", GFX117X_GPU_ID},
+                                                               {"gfx11", GFX11_GPU_ID},
+                                                               {"gfx125", MI450_GPU_ID},
+                                                               {"gfx12", GFX12_GPU_ID}};
 
     for(const auto& [name, id] : gfxip_map)
     {

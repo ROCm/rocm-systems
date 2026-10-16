@@ -44,9 +44,9 @@ repos:
         files: \.(c|cpp|h.*)$
 
   - repo: https://github.com/BlankSpruce/gersemi
-    rev: 0.23.1
+    rev: 0.25.1
     hooks:
-    - id: gersemi
+      - id: gersemi
 
   - repo: https://github.com/DavidAnson/markdownlint-cli2
     rev: v0.22.1
@@ -70,3 +70,10 @@ repos:
         language: script
         files: \.(cpp|hpp)$
         exclude: ^\.|^external/|^examples/
+
+      - id: check-banned-includes
+        name: banned-includes
+        entry: ./projects/rocprofiler-systems/scripts/check-banned-includes.py
+        language: script
+        files: ^projects/rocprofiler-systems/(source|examples|tests)/.*\.(h|hpp|c|cpp)(\.in)?$
+        exclude: /(external|tpls)/

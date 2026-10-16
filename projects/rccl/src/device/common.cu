@@ -31,6 +31,18 @@ __launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__
   void ncclDevKernel_Generic_4(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
   ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 4>(&argsStorage.args);
 }
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__
+  void ncclDevKernel_Generic_8(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 8>(&argsStorage.args);
+}
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__
+  void ncclDevKernel_Generic_16(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 16>(&argsStorage.args);
+}
+__launch_bounds__(NCCL_MAX_NTHREADS, 1) __global__
+  void ncclDevKernel_Generic_32(ncclDevKernelArgsDefaultStorage NCCL_GRID_CONSTANT const argsStorage) {
+  ncclKernelMain<-1, RunWorkNop, /*Unroll*/ 32>(&argsStorage.args);
+}
 
 #if defined(USE_INDIRECT_FUNCTION_CALL) || defined(RCCL_DEVICE_LINKER)
 __device__ void ncclDevFunc_Nop();
@@ -43,3 +55,8 @@ __device__ __attribute__((noinline)) void ncclDevFunc_Nop();
 // per-impl/specialized files, so the definition must live here (as in upstream and
 // the v2.29.7-1 base). The generated ncclDevFuncTable references this symbol.
 __device__ void ncclDevFunc_Nop() {}
+
+// Capture %globaltimer for optional CPU/GPU clock calibration in init.cc.
+__global__ void ncclProgressCounterCaptureGpuTime(uint64_t* out) {
+  if (threadIdx.x == 0) *out = globaltimer();
+}

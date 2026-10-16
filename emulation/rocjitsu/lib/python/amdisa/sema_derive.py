@@ -14,7 +14,7 @@ Covers scalar semantic classes:
   scalar_bitcmp, scalar_saveexec, scalar_mov, scalar_cmov
 
 Covers vector ALU + cmp semantic classes:
-  vector_mov, vector_unary, vector_binop, vector_ternary,
+  vector_mov, vector_unary, pseudo_scalar_unary, vector_binop, vector_ternary,
   vector_cmp, vector_cmpx, vector_cmp_class, vector_cmpx_class,
   vector_add_co, vector_cndmask, vector_readfirstlane, vector_readlane,
   vector_writelane, vector_swap, vector_fmaak, vector_fmamk
@@ -33,9 +33,41 @@ from amdisa.sema_ast import (
 )
 from amdisa.sema_effects import inline_binary_op_effects
 from amdisa.sema_properties import InstructionProperty, derive_properties
+from amdisa.semantics import (
+    F16_INPUT_CONVERSION_DTYPES,
+    F32_TO_INTEGER_DTYPES,
+    is_float_relation,
+)
 
 if TYPE_CHECKING:
     from amdisa.semantics import InstructionSemantics
+
+# Call name prefix of a floating VOPC relation; the relation mnemonic follows.
+FLOAT_COMPARE_CALL = 'float_compare_'
+
+# Semantic call prefix for IEEE 754-2019 min/max forms, e.g. float_minmax_min_num.
+FLOAT_MINMAX_CALL = 'float_minmax_'
+
+# Three-source min/max forms recognized directly by their operation name.
+_IEEE_MINMAX3 = (
+    'minimum3',
+    'maximum3',
+    'minimummaximum',
+    'maximumminimum',
+    'minmax_num',
+    'maxmin_num',
+)
+
+
+def _float_minmax(form: str, ty: SemaType, *sources: SemaNode) -> SemaNode:
+    """Create a min/max call for lowering to shared/minmax.h.
+
+    Callers supply typed sources so enrichment can attach VOP3 ABS/NEG modifiers.
+    """
+    name = f'{FLOAT_MINMAX_CALL}{form}'
+    return SemaNode(
+        SemaNodeKind.CALL, ty=ty, call_name=name, children=(_id(name), *sources)
+    )
 
 
 def _src(idx: int, ty: SemaType = SemaType.B32) -> SemaNode:
@@ -359,7 +391,7 @@ class _ScalarUnary(_ScalarDeriver):
             }
             k = kind_map[op]
             if k == SemaNodeKind.CALL:
-                fn = 'std::ceil' if op == 'ceil' else 'std::nearbyint'
+                fn = 'std::ceil' if op == 'ceil' else 'util::rndne_scalar'
                 result = SemaNode(
                     SemaNodeKind.CALL,
                     ty=ty,
@@ -477,6 +509,10 @@ class _ScalarBinop(_ScalarDeriver):
                     SemaNode(SemaNodeKind.BITNEG, ty=ty, children=(src1,)),
                 ),
             )
+        elif ty.base == 'F' and op in ('min_num', 'max_num', 'minimum', 'maximum'):
+            # SALU float min/max match their VALU counterparts (RDNA4 ISA 6.8);
+            # gfx1201 captures agree, including the VALU ISA discrepancies.
+            result = _float_minmax(op, ty, src0, src1)
         elif op in ('min', 'max', 'min_num', 'max_num', 'minimum', 'maximum'):
             fn = f'std::{op}' if op in ('min', 'max') else op
             result = SemaNode(
@@ -531,8 +567,14 @@ class _ScalarBinop(_ScalarDeriver):
             result_ty = result.ty or result_ty
         if ty.base in ('F', 'BF') and ty.size == 16:
             result_ty = SemaType.F32
-        stmts.append(_assign(_id('result', result_ty), result))
-        stmts.append(_assign(_cast(_dst(0), ty), _id('result', result_ty)))
+        if result.kind == SemaNodeKind.CALL and (result.call_name or '').startswith(
+            FLOAT_MINMAX_CALL
+        ):
+            # Write the selected encoding directly, without a float round trip.
+            stmts.append(_assign(_cast(_dst(0), ty), result))
+        else:
+            stmts.append(_assign(_id('result', result_ty), result))
+            stmts.append(_assign(_cast(_dst(0), ty), _id('result', result_ty)))
 
         if sem.sets_scc and sem.sets_scc != 'none' and not scc_handled_by_template:
             if sem.sets_scc == 'carry':
@@ -1043,6 +1085,17 @@ class _VectorUnary(_ScalarDeriver):
         op = sem.operation
         dtype = sem.data_type
 
+        if op == 'frexp_exp_f32' and dtype == 'f32':
+            src0 = _cast(_src(0, SemaType.F32), SemaType.F32)
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.U32,
+                call_name='frexp_exp_f32',
+                children=(_id('frexp_exp_f32'), src0),
+            )
+            body = _assign(_cast(_dst(0), SemaType.U32), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
         if op == 'frexp_exp_f32' and dtype == 'f64':
             src0 = _cast(_src(0, SemaType.F64), SemaType.F64)
             result = SemaNode(
@@ -1052,6 +1105,17 @@ class _VectorUnary(_ScalarDeriver):
                 children=(_id('frexp_exp_f64'), src0),
             )
             body = _assign(_cast(_dst(0), SemaType.U32), result)
+            return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+        if op == 'frexp_exp_f16':
+            src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
+            result = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.B32,
+                call_name='frexp_exp_f16',
+                children=(_id('frexp_exp_f16'), src0),
+            )
+            body = _assign(_cast(_dst(0), SemaType.B32), result)
             return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
         if op == 'frexp_mant_f32' and dtype == 'f64':
@@ -1081,6 +1145,58 @@ class _VectorUnary(_ScalarDeriver):
         if op == 'cvt' and dtype:
             call_name = f'cvt_{dtype}'
             src0 = _src(0)
+            if dtype in F16_INPUT_CONVERSION_DTYPES:
+                # Expose the floating F16 source to VOP3 modifier enrichment.
+                src0 = _cast(_src(0, SemaType.F16), SemaType.F16)
+                if dtype == 'f32_f16':
+                    call_name = 'cvt_f32_f16_valu'
+            elif dtype in F32_TO_INTEGER_DTYPES:
+                # Expose the floating source to VOP3 modifier enrichment, then
+                # pass register bits to the conversion helper.
+                src0 = SemaNode(
+                    SemaNodeKind.CALL,
+                    ty=SemaType.B32,
+                    call_name='std::bit_cast<uint32_t>',
+                    children=(
+                        _id('std::bit_cast<uint32_t>'),
+                        _cast(_src(0, SemaType.F32), SemaType.F32),
+                    ),
+                )
+            float_result = {
+                'f32_f16': SemaType.F32,
+                'f32_i32': SemaType.F32,
+                'f32_u32': SemaType.F32,
+                'f32_ubyte0': SemaType.F32,
+                'f32_ubyte1': SemaType.F32,
+                'f32_ubyte2': SemaType.F32,
+                'f32_ubyte3': SemaType.F32,
+                'f64_i32': SemaType.F64,
+                'f64_u32': SemaType.F64,
+            }.get(dtype)
+            if float_result is not None:
+                # The conversion helper returns register bits. Expose the
+                # floating result so VOP3 output modifiers operate on its value.
+                is_f64 = float_result == SemaType.F64
+                bit_cast = 'std::bit_cast<double>' if is_f64 else 'std::bit_cast<float>'
+                result = SemaNode(
+                    SemaNodeKind.CALL,
+                    ty=SemaType.B64 if is_f64 else SemaType.B32,
+                    call_name=call_name,
+                    children=(_id(call_name), src0),
+                )
+                return SemaBlock(
+                    sem.name,
+                    ExecModel.VECTOR,
+                    _assign(
+                        _cast(_dst(0), float_result),
+                        SemaNode(
+                            SemaNodeKind.CALL,
+                            ty=float_result,
+                            call_name=bit_cast,
+                            children=(_id(bit_cast), result),
+                        ),
+                    ),
+                )
             body = _assign(
                 _cast(_dst(0), SemaType.B32),
                 SemaNode(
@@ -1098,7 +1214,13 @@ class _VectorUnary(_ScalarDeriver):
             'cvt_norm_i16_f16',
             'cvt_norm_u16_f16',
         ):
-            src0 = _src(0)
+            # Normalized conversions take a decoded float for ABS/NEG enrichment;
+            # packed FP8/BF8 conversions still take register bits.
+            src0 = (
+                _cast(_src(0, SemaType.F16), SemaType.F16)
+                if op in ('cvt_norm_i16_f16', 'cvt_norm_u16_f16')
+                else _src(0)
+            )
             body = _assign(
                 _cast(_dst(0), SemaType.B32),
                 SemaNode(
@@ -1117,6 +1239,25 @@ class _VectorUnary(_ScalarDeriver):
         result = _vec_unary_expr(op, src0, ty)
         body = _assign(_cast(_dst(0, ty), ty), result)
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
+
+
+@_register('pseudo_scalar_unary')
+class _PseudoScalarUnary(_ScalarDeriver):
+    """VALU unary expression that executes once on SGPRs and ignores EXEC."""
+
+    @staticmethod
+    def derive(sem: InstructionSemantics) -> SemaBlock:
+        ty = _dtype_to_sema(sem.data_type)
+        src0 = _cast(_src(0, ty), ty)
+        call_name = f'pseudo_scalar_{sem.operation}_{sem.data_type}'
+        result = SemaNode(
+            SemaNodeKind.CALL,
+            ty=SemaType.B32,
+            call_name=call_name,
+            children=(_id(call_name), src0),
+        )
+        body = _assign(_cast(_dst(0), SemaType.B32), result)
+        return SemaBlock(sem.name, ExecModel.SCALAR, body)
 
 
 @_register('vector_binop')
@@ -1207,7 +1348,12 @@ class _VectorBinop(_ScalarDeriver):
 
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
-        result = _vec_binop_expr(op, src0, src1, ty)
+        if op in ('minimum', 'maximum'):
+            result = _float_minmax(op, ty, src0, src1)
+        elif op in ('min', 'max') and ty.base == 'F' and '_num_' in name_lower:
+            result = _float_minmax(f'{op}_num', ty, src0, src1)
+        else:
+            result = _vec_binop_expr(op, src0, src1, ty)
         body = _assign(_cast(_dst(0), ty), result)
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
@@ -1285,6 +1431,10 @@ class _VectorTernary(_ScalarDeriver):
             result = SemaNode(SemaNodeKind.ADD, ty=ty, children=(mul, src2))
         elif op in ('fma', 'fmac'):
             result = SemaNode(SemaNodeKind.FMA, ty=ty, children=(src0, src1, src2))
+        elif op in _IEEE_MINMAX3:
+            result = _float_minmax(op, ty, src0, src1, src2)
+        elif op in ('min3', 'max3', 'med3') and '_NUM_F' in sem.name:
+            result = _float_minmax(f'{op}_num', ty, src0, src1, src2)
         else:
             result = SemaNode(
                 SemaNodeKind.CALL,
@@ -1303,7 +1453,19 @@ class _VectorCmp(_ScalarDeriver):
         ty = _dtype_to_sema(sem.data_type)
         src0 = _cast(_src(0), ty)
         src1 = _cast(_src(1), ty)
-        cmp = _make_cmp(sem.operation or "", src0, src1)
+        op = sem.operation or ""
+        if is_float_relation(sem.data_type, op):
+            # comparison.h evaluates float relations on the raw encodings. The
+            # typed casts stay so enrichment still attaches the VOP3 modifiers.
+            name = f'{FLOAT_COMPARE_CALL}{op}'
+            cmp = SemaNode(
+                SemaNodeKind.CALL,
+                ty=SemaType.U1,
+                call_name=name,
+                children=(_id(name), src0, src1),
+            )
+        else:
+            cmp = _make_cmp(op, src0, src1)
         body = _assign(
             SemaNode(
                 SemaNodeKind.ARRAYDEREF,
@@ -2767,6 +2929,11 @@ class _Gl1Inv(_DcacheInv):
     pass
 
 
+@_register('icache_inv')
+class _IcacheInv(_DcacheInv):
+    pass
+
+
 @_register('gl1_wbinv')
 class _Gl1Wbinv(_DcacheInv):
     pass
@@ -2798,6 +2965,7 @@ class _Interp(_ScalarDeriver):
         return SemaBlock(sem.name, ExecModel.VECTOR, body)
 
 
+@_register('lds_direct_load')
 @_register('lds_direct')
 class _LdsDirect(_ScalarDeriver):
     @staticmethod

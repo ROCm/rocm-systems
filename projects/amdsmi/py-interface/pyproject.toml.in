@@ -10,7 +10,7 @@ name = "amdsmi"
 authors = [
     {name = "AMD", email = "amd-smi.support@amd.com"},
 ]
-version = "@amd_smi_lib_VERSION_STRING@"
+version = "@amd_smi_lib_WHEEL_VERSION@"
 license = {file = "amdsmi/LICENSE"}
 readme = {file = "amdsmi/README.md", content-type = "text/markdown"}
 description = "AMDSMI Python LIB - AMD GPU Monitoring Library"
@@ -19,7 +19,8 @@ classifiers = [
     "Programming Language :: Python :: 3"
 ]
 [project.urls]
-"Homepage" = "https://github.com/RadeonOpenCompute/amdsmi"
+"Homepage" = "https://github.com/ROCm/rocm-systems/tree/develop/projects/amdsmi"
+"Documentation" = "https://rocm.docs.amd.com/projects/amdsmi/en/latest/"
 
 [tool.setuptools]
 packages = ["amdsmi"]
@@ -27,10 +28,11 @@ zip-safe = false
 include-package-data = true
 
 [tool.setuptools.package-data]
-amdsmi = ["*.so"]
+# Notices ship as package data, not PEP 639 `license-files`, which would need
+# setuptools >= 77. Same glob the bundled .so already relies on.
+amdsmi = ["*.so", "THIRD_PARTY_LICENSES/*"]
 
 [tool.pytest.ini_options]
-pythonpath = "/opt/rocm/share/amd_smi"
 addopts = [
     "--import-mode=importlib",
 ]

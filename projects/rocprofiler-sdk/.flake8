@@ -9,8 +9,6 @@ ignore =
 exclude =
     .git,
     __pycache__,
-    scripts,
     external,
-    tests,
     build,
     build-*

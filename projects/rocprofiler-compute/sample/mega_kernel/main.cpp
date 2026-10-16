@@ -17,6 +17,7 @@
  *   - gfx1153 (RDNA 3.5)
  *   - gfx1200 (RX 9060/RDNA4)
  *   - gfx1201 (RX 9070 XT/RDNA4)
+ *   - gfx1250 (gfx1250)
  *
  * Build: make (default GPU_ARCH=gfx1151; override e.g. GPU_ARCH=gfx1201 make) or manual:
  *   hipcc -O2 -g -std=c++17 -Wall -Wextra -fPIC --offload-arch=gfx1151 -I. -o
@@ -30,7 +31,15 @@
 #include <cstring>
 #include <getopt.h>
 #include <hip/hip_runtime.h>
+#if __has_include(<hip/hip_version.h>)
+#    include <hip/hip_version.h>
+#endif
 #include <vector>
+
+// Cluster launch requires HIP 7.2+ (hipLaunchKernelEx + clusterDim attribute).
+#if defined(HIP_VERSION) && (HIP_VERSION >= 70200000)
+#    define MEGA_KERNEL_HAS_CLUSTER_LAUNCH 1
+#endif
 
 #include "atomic_global_buffers.h"
 #include "mega_kernel_host_arch.hpp"
@@ -39,7 +48,9 @@
 // Default configuration
 #define DEFAULT_BATCH_SIZE     1024
 #define DEFAULT_BLOCK_SIZE     256
-#define DEFAULT_NUM_ITERATIONS 10
+#define DEFAULT_NUM_ITERATIONS 5
+// rocprof-compute gfx1250 metric-health profile workload (block size stays default).
+#define GFX1250_HEALTH_BATCH_SIZE 655360
 #define MIN_BATCH_SIZE         64
 #define MAX_BATCH_SIZE         (1024 * 1024 * 16)  // 16M elements max
 #define MAX_NUM_ITERATIONS     10000
@@ -79,8 +90,10 @@ print_usage(const char* prog_name)
     printf("\nExamples:\n");
     printf("  %s                     # Run with default settings\n", prog_name);
     printf("  %s -b 4096             # Run with 4096 elements\n", prog_name);
-    printf("  %s -b 65536 -t 512     # Run with 64K elements, 512 threads/block\n",
+    printf("  %s -b 65536 -t 256     # Run with 64K elements, 256 threads/block\n",
            prog_name);
+    printf("  %s -b %d           # gfx1250 metric-health profile (default block %d)\n",
+           prog_name, GFX1250_HEALTH_BATCH_SIZE, DEFAULT_BLOCK_SIZE);
     printf("  %s -n 100              # Run kernel 100 times\n", prog_name);
     printf("  %s --mfma-mode asm     # Test MFMA using inline assembly only\n",
            prog_name);
@@ -231,8 +244,104 @@ print_test_result(const char* test_name, int passed, int expected = 1)
 
 // Global variable to store detected architecture for later use
 static char g_arch_name[64] = "";
-// 0=unknown, 1=gfx90a, 2=gfx942, 3=gfx950, 4=gfx1200, 5=gfx1201, 6=gfx115x
+// 0=unknown, 1=gfx90a, 2=gfx942, 3=gfx950, 4=gfx1200, 5=gfx1201, 6=gfx115x, 7=gfx1250
 static int g_arch_type = 0;
+
+namespace {
+
+constexpr unsigned kClusterDimX = 2;
+constexpr unsigned kClusterDimY = 1;
+constexpr unsigned kClusterDimZ = 1;
+
+unsigned
+round_up_grid_x_for_cluster(int num_blocks)
+{
+    unsigned grid_x = static_cast<unsigned>(num_blocks > 0 ? num_blocks : 1);
+    if(grid_x % kClusterDimX != 0)
+    {
+        grid_x += kClusterDimX - (grid_x % kClusterDimX);
+    }
+    return grid_x;
+}
+
+void
+launch_mega_kernel(dim3                          grid,
+                   dim3                          block,
+                   size_t                        shared_mem_bytes,
+                   TestResults*                  d_results,
+                   float*                        d_global_float,
+                   double*                       d_global_double,
+                   int*                          d_global_int,
+                   float*                        d_input,
+                   float*                        d_output,
+                   float*                        d_async_lds_src,
+                   float*                        d_async_lds_dst,
+                   int*                          d_tdm_src,
+                   int*                          d_tdm_dst,
+                   int                           buffer_size,
+                   int                           mfma_mode,
+                   hipTextureObject_t            tex_obj,
+                   hipSurfaceObject_t            surf_obj)
+{
+#if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
+    if(g_arch_type == 7)
+    {
+        hipLaunchAttribute cluster_attr{};
+        cluster_attr.id                     = hipLaunchAttributeClusterDimension;
+        cluster_attr.value.clusterDim.x     = kClusterDimX;
+        cluster_attr.value.clusterDim.y     = kClusterDimY;
+        cluster_attr.value.clusterDim.z     = kClusterDimZ;
+
+        hipLaunchConfig_t launch_config{};
+        launch_config.gridDim           = grid;
+        launch_config.blockDim          = block;
+        launch_config.dynamicSmemBytes  = shared_mem_bytes;
+        launch_config.stream            = nullptr;
+        launch_config.attrs             = &cluster_attr;
+        launch_config.numAttrs          = 1;
+
+        HIP_CHECK(hipLaunchKernelEx(&launch_config,
+                                    mega_kernel,
+                                    d_results,
+                                    d_global_float,
+                                    d_global_double,
+                                    d_global_int,
+                                    d_input,
+                                    d_output,
+                                    d_async_lds_src,
+                                    d_async_lds_dst,
+                                    d_tdm_src,
+                                    d_tdm_dst,
+                                    buffer_size,
+                                    mfma_mode,
+                                    tex_obj,
+                                    surf_obj));
+        return;
+    }
+#endif
+    hipLaunchKernelGGL(mega_kernel,
+                       grid,
+                       block,
+                       shared_mem_bytes,
+                       0,
+                       d_results,
+                       d_global_float,
+                       d_global_double,
+                       d_global_int,
+                       d_input,
+                       d_output,
+                       d_async_lds_src,
+                       d_async_lds_dst,
+                       d_tdm_src,
+                       d_tdm_dst,
+                       buffer_size,
+                       mfma_mode,
+                       tex_obj,
+                       surf_obj);
+    HIP_CHECK(hipGetLastError());
+}
+
+}  // namespace
 
 void
 print_device_info()
@@ -284,6 +393,9 @@ main(int argc, char** argv)
     const int BUFFER_SIZE = config.batch_size;
     const int BLOCK_SIZE  = config.block_size;
     const int NUM_BLOCKS  = (BUFFER_SIZE + BLOCK_SIZE - 1) / BLOCK_SIZE;
+    const unsigned GRID_X =
+        (g_arch_type == 7) ? round_up_grid_x_for_cluster(NUM_BLOCKS)
+                           : static_cast<unsigned>(NUM_BLOCKS > 0 ? NUM_BLOCKS : 1);
 
     // Global atomic scratch: sizes and index layout — see atomic_global_buffers.h
     const int GLOBAL_INT_SIZE    = MEGA_KERNEL_GLOBAL_INT_ELEMENTS;
@@ -293,8 +405,20 @@ main(int argc, char** argv)
     printf("Test Configuration:\n");
     printf("  Batch/Buffer Size:     %d elements\n", BUFFER_SIZE);
     printf("  Block Size:            %d threads\n", BLOCK_SIZE);
-    printf("  Number of Blocks:      %d\n", NUM_BLOCKS);
-    printf("  Total Threads:         %d\n", NUM_BLOCKS * BLOCK_SIZE);
+    printf("  Number of Blocks:      %d", NUM_BLOCKS);
+    if(g_arch_type == 7 && GRID_X != static_cast<unsigned>(NUM_BLOCKS))
+    {
+        printf(" (grid x padded to %u for cluster launch)", GRID_X);
+    }
+    printf("\n");
+    printf("  Total Threads:         %u\n", GRID_X * static_cast<unsigned>(BLOCK_SIZE));
+#if defined(MEGA_KERNEL_HAS_CLUSTER_LAUNCH)
+    if(g_arch_type == 7)
+    {
+        printf("  Cluster Launch:        enabled (%u,%u,%u)\n", kClusterDimX, kClusterDimY,
+               kClusterDimZ);
+    }
+#endif
     const char* mfma_mode_str = (config.mfma_mode == MFMA_MODE_ASM)       ? "asm"
                                 : (config.mfma_mode == MFMA_MODE_BUILTIN) ? "builtin"
                                                                           : "both";
@@ -329,8 +453,11 @@ main(int argc, char** argv)
     float*       d_output;
     float*       d_async_lds_src;
     float*       d_async_lds_dst;
+    int*         d_tdm_src;
+    int*         d_tdm_dst;
 
     const int ASYNC_LDS_SIZE = 256;  // Size for async LDS test buffers
+    const int TDM_SIZE       = 256;  // Size for TDM test buffers (16x16 tensor)
 
     HIP_CHECK(hipMalloc(&d_results, sizeof(TestResults)));
     HIP_CHECK(hipMalloc(&d_global_float, GLOBAL_FLOAT_SIZE * sizeof(float)));
@@ -340,6 +467,8 @@ main(int argc, char** argv)
     HIP_CHECK(hipMalloc(&d_output, BUFFER_SIZE * sizeof(float)));
     HIP_CHECK(hipMalloc(&d_async_lds_src, ASYNC_LDS_SIZE * sizeof(float)));
     HIP_CHECK(hipMalloc(&d_async_lds_dst, ASYNC_LDS_SIZE * sizeof(float)));
+    HIP_CHECK(hipMalloc(&d_tdm_src, TDM_SIZE * sizeof(int)));
+    HIP_CHECK(hipMalloc(&d_tdm_dst, TDM_SIZE * sizeof(int)));
 
     // Host-prepared zeros for global atomic buffers (kernel CAS etc. expect initial 0).
     std::vector<int>    h_global_int(static_cast<size_t>(GLOBAL_INT_SIZE), 0);
@@ -359,8 +488,10 @@ main(int argc, char** argv)
     HIP_CHECK(hipMemset(d_output, 0, BUFFER_SIZE * sizeof(float)));
     HIP_CHECK(hipMemset(d_async_lds_src, 0, ASYNC_LDS_SIZE * sizeof(float)));
     HIP_CHECK(hipMemset(d_async_lds_dst, 0, ASYNC_LDS_SIZE * sizeof(float)));
+    HIP_CHECK(hipMemset(d_tdm_src, 0, TDM_SIZE * sizeof(int)));
+    HIP_CHECK(hipMemset(d_tdm_dst, 0, TDM_SIZE * sizeof(int)));
 
-    // Create texture and surface objects for Strix (gfx1150/1151/1152) to exercise
+    // Create texture and surface objects for gfx115x to exercise
     // INSTS_TEX_LOAD (tex1Dfetch) and INSTS_TEX_STORE (surf1Dwrite).
     hipTextureObject_t tex_obj       = 0;
     hipSurfaceObject_t surf_obj      = 0;
@@ -438,15 +569,24 @@ main(int argc, char** argv)
             HIP_CHECK(hipMemset(d_output, 0, BUFFER_SIZE * sizeof(float)));
         }
 
-        // Launch kernel
-        hipLaunchKernelGGL(mega_kernel, dim3(NUM_BLOCKS), dim3(BLOCK_SIZE),
-                           sharedMemBytes, 0, d_results, d_global_float, d_global_double,
-                           d_global_int, d_input, d_output, d_async_lds_src,
-                           d_async_lds_dst, BUFFER_SIZE, (int) config.mfma_mode, tex_obj,
+        // Launch kernel (gfx1250 uses cluster dispatch when HIP 7.2+ is available)
+        launch_mega_kernel(dim3(GRID_X, 1, 1),
+                           dim3(BLOCK_SIZE),
+                           sharedMemBytes,
+                           d_results,
+                           d_global_float,
+                           d_global_double,
+                           d_global_int,
+                           d_input,
+                           d_output,
+                           d_async_lds_src,
+                           d_async_lds_dst,
+                           d_tdm_src,
+                           d_tdm_dst,
+                           BUFFER_SIZE,
+                           (int) config.mfma_mode,
+                           tex_obj,
                            surf_obj);
-
-        // Check for launch errors
-        HIP_CHECK(hipGetLastError());
     }
 
     // Wait for all iterations to complete
@@ -505,8 +645,9 @@ main(int argc, char** argv)
     print_test_result("Warp Reduce (shuffle-based reduction)",
                       h_results.warp_reduce_passed);
 
-    printf("\n[Category: FP8/BF8 Conversions (gfx942+/RDNA4)]\n");
+    printf("\n[Category: FP8/BF8 Conversions (gfx942+/RDNA4/gfx1250)]\n");
     print_test_result("FP8 E4M3 Conversion", h_results.fp8_convert_passed);
+    print_test_result("FP8 E5M3 Conversion (gfx1250)", h_results.fp8_e5m3_convert_passed);
     print_test_result("BF8 E5M2 Conversion", h_results.bf8_convert_passed);
 
     printf("\n[Category: FP16/BF16 Operations]\n");
@@ -579,13 +720,29 @@ main(int argc, char** argv)
     print_test_result("Async LDS Store (global_store_async_from_lds)",
                       h_results.async_lds_store_passed);
 
-    printf("\n[Category: WMMA Operations (RDNA4/gfx12 - Wave32)]\n");
+    printf("\n[Category: TDM (Tensor Data Mover) Operations (gfx1250 only)]\n");
+    print_test_result("TDM Tensor Load to LDS", h_results.tdm_load_passed);
+    print_test_result("TDM Tensor Store from LDS", h_results.tdm_store_passed);
+
+    printf("\n[Category: Cluster Group Operations (gfx1250 only)]\n");
+    print_test_result("Cluster Barrier (s_barrier_signal/wait)",
+                      h_results.cluster_barrier_passed);
+    print_test_result("Cluster Workgroup Info", h_results.cluster_info_passed);
+    print_test_result("Cluster Load (cluster_load_b32)", h_results.cluster_load_passed);
+
+    printf("\n[Category: WMMA Operations (RDNA4/gfx12/gfx1250 - Wave32)]\n");
     print_test_result("WMMA FP16 → FP32 (wmma_f32_16x16x16_f16)",
                       h_results.wmma_f16_passed);
     print_test_result("WMMA BF16 → FP32 (wmma_f32_16x16x16_bf16)",
                       h_results.wmma_bf16_passed);
     print_test_result("WMMA INT8 → INT32 (wmma_i32_16x16x16_iu8)",
                       h_results.wmma_i8_passed);
+
+    printf("\n[Category: Cooperative Atomic Operations (gfx1250 only)]\n");
+    print_test_result("Cooperative Atomic Load (32x4B/16x8B/8x16B)",
+                      h_results.coop_atomic_load_passed);
+    print_test_result("Cooperative Atomic Store (32x4B/16x8B/8x16B)",
+                      h_results.coop_atomic_store_passed);
 
     printf("\n[Category: VMEM (Vector Memory) Operations - Inline ASM]\n");
     print_test_result("Flat Load/Store (flat_load_b32/flat_store_b32)",
@@ -622,6 +779,11 @@ main(int argc, char** argv)
     print_test_result("Packed BF16 Atomics (global_atomic_pk_add_bf16)",
                       h_results.atomic_pk_bf16_passed);
     print_test_result("CAS Atomics (global_atomic_cmpswap)", h_results.atomic_cas_passed);
+    print_test_result("Buffer Load (buffer_load_b32, gfx1250)", h_results.buffer_load_passed);
+    print_test_result("Buffer Store (buffer_store_b32, gfx1250)",
+                      h_results.buffer_store_passed);
+    print_test_result("Multicast Load (broadcast read, all threads same addr)",
+                      h_results.multicast_load_passed);
 
     print_separator();
 
@@ -645,6 +807,7 @@ main(int argc, char** argv)
     COUNT_TEST(h_results.warp_permute_passed);
     COUNT_TEST(h_results.warp_reduce_passed);
     COUNT_TEST(h_results.fp8_convert_passed);
+    COUNT_TEST(h_results.fp8_e5m3_convert_passed);
     COUNT_TEST(h_results.bf8_convert_passed);
     COUNT_TEST(h_results.fp16_convert_passed);
     COUNT_TEST(h_results.bf16_convert_passed);
@@ -685,9 +848,16 @@ main(int argc, char** argv)
     COUNT_TEST(h_results.wavefront_passed);
     COUNT_TEST(h_results.async_lds_load_passed);
     COUNT_TEST(h_results.async_lds_store_passed);
+    COUNT_TEST(h_results.tdm_load_passed);
+    COUNT_TEST(h_results.tdm_store_passed);
+    COUNT_TEST(h_results.cluster_barrier_passed);
+    COUNT_TEST(h_results.cluster_info_passed);
+    COUNT_TEST(h_results.cluster_load_passed);
     COUNT_TEST(h_results.wmma_f16_passed);
     COUNT_TEST(h_results.wmma_bf16_passed);
     COUNT_TEST(h_results.wmma_i8_passed);
+    COUNT_TEST(h_results.coop_atomic_load_passed);
+    COUNT_TEST(h_results.coop_atomic_store_passed);
     COUNT_TEST(h_results.vmem_flat_passed);
     COUNT_TEST(h_results.vmem_global_passed);
     COUNT_TEST(h_results.vmem_buffer_passed);
@@ -705,6 +875,9 @@ main(int argc, char** argv)
     COUNT_TEST(h_results.atomic_pk_f16_passed);
     COUNT_TEST(h_results.atomic_pk_bf16_passed);
     COUNT_TEST(h_results.atomic_cas_passed);
+    COUNT_TEST(h_results.buffer_load_passed);
+    COUNT_TEST(h_results.buffer_store_passed);
+    COUNT_TEST(h_results.multicast_load_passed);
     if(memory_verified)
         passed_categories++;
     else
@@ -794,11 +967,22 @@ main(int argc, char** argv)
 
         case 6:  // Strix/Strix Halo (RDNA 3.5)
             printf("  - RDNA 3.5 APU iGPU: Strix Point (gfx1150) / Strix Halo (gfx1151) / "
-                   "Krackan (gfx1152)\n");
+                   "Krackan (gfx1152) / Gorgon Point (gfx1153)\n");
             printf("  - Wave32 native, WMMA (FP16/BF16/INT8) 16x16x16\n");
             printf("  - VOPD same-wave dual-issue VALU\n");
             printf("  - No CDNA-style FP8/BF8 cvt builtins; scalar FP; s_singleuse_vdst\n");
             printf("  - Async LDS, WGP architecture\n");
+            break;
+
+        case 7:  // gfx1250
+            printf("  - FP8/BF8 OCP format conversions (E4M3 and E5M3)\n");
+            printf("  - WMMA matrix operations (16x16x32 / 16x16x64, gfx1250 builtins)\n");
+            printf("  - TDM (Tensor Data Mover) load/store\n");
+            printf("  - Cluster group barriers and workgroup info\n");
+            printf("  - Cooperative atomic load/store\n");
+            printf("  - Async LDS with split wait instructions\n");
+            printf("  - Hardware FP64 atomics\n");
+            printf("  - Buffer descriptor load/store\n");
             break;
 
         default:
@@ -821,6 +1005,8 @@ main(int argc, char** argv)
     HIP_CHECK(hipFree(d_output));
     HIP_CHECK(hipFree(d_async_lds_src));
     HIP_CHECK(hipFree(d_async_lds_dst));
+    HIP_CHECK(hipFree(d_tdm_src));
+    HIP_CHECK(hipFree(d_tdm_dst));
     free(h_input);
     free(h_output);
 

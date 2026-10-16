@@ -39,6 +39,16 @@ control the behavior of rocSHMEM.
         |
         | Examples: ``trace:noversion``, ``env:full``, ``api:noenv``, ``trace:nocolor``
 
+    * - | ``ROCSHMEM_HEAP_ALLOCATOR_TYPE``
+        | Selects the GPU memory allocator used for the symmetric heap.
+      - arch-dependent
+      - | ``uncached``: GPU memory in uncached mode (default on most architectures).
+        | ``finegrained``: Fine-grained coherent GPU memory (default on gfx1100, gfx1201).
+        | ``coarsegrained``: Coarse-grained coherent GPU memory.
+        | ``vmm_posix``: VMM with POSIX fd-based IPC (requires ROCm 7.2+, Linux 5.6+, TCP bootstrap).
+        | ``vmm_fabric``: VMM with fabric handle IPC (requires ROCm 7.14+, gfx1250/MI455 only).
+        | Values are case-insensitive.
+
     * - | ``ROCSHMEM_HEAP_SIZE``
         | Defines the size of the rocSHMEM symmetric heap in bytes (per PE).
       - ``1073741824`` (1 GB)
@@ -212,15 +222,17 @@ control the behavior of rocSHMEM.
       -
 
     * - | ``ROCSHMEM_SDMA_ENABLED``
-        | Enable or disable the SDMA transport at runtime (requires ``USE_SDMA`` build option).
-      - ``1``
-      - | ``0``: Disabled. All transfers use GPU load/store (IPC path).
+        | Enable or disable the SDMA transport at runtime. (build option ``USE_SDMA=OFF`` disables this feature).
+      - ``0``
+      - | ``0``: Disabled. All transfers use load/store (IPC path).
         | ``1``: Enabled. Transfers at or above ``ROCSHMEM_SDMA_THRESHOLD`` use the SDMA engine.
 
     * - | ``ROCSHMEM_SDMA_THRESHOLD``
-        | Minimum transfer size in bytes to route through the SDMA engine.
-        | Transfers smaller than this threshold use GPU load/store instead.
-      - ``256``
+        | Minimum transfer size in bytes to route through the SDMA engine for
+        | per-lane operations. Wave and workgroup operations automatically scale
+        | the threshold by the wavefront size (e.g., 1024 × 64 = 64KB on gfx9).
+        | Transfers smaller than the effective threshold use load/store (IPC path) instead.
+      - ``1024``
       - Size in bytes.
 
     * - | ``ROCSHMEM_SDMA_NUM_CHANNELS``

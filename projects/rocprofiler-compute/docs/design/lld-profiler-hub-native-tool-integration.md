@@ -11,7 +11,8 @@ both loaded via `LD_PRELOAD` into the target application
    and an empty `rocpd_pmc_event` table). It is told NOT to collect counters
    (`ROCPROF_COUNTER_COLLECTION=0`).
 2. The rocprofiler-compute "native tool" (`src/lib/rocprofiler_compute_tool`) collects the
-   hardware counters and currently writes a CSV (`<pid>_native_counter_collection.csv`),
+   hardware counters and currently writes a gzip-compressed CSV
+   (`<pid>_native_counter_collection.csv.gz`),
    which the Python layer parses and injects row by row into the SDK rocpd's
    `rocpd_pmc_event` table (`src/utils/rocpd_data.py`, `src/utils/utils_profile.py`).
 
@@ -145,7 +146,7 @@ The `symbol` + `target_arch` join key is unique: in the verified rocflop rocpd a
 ## Packaging changes
 
 Build profiler-hub from source in-repo via `ExternalProject_Add`, linked statically into
-the single `librocprofiler-compute-tool.so`. `add_subdirectory` (one CMake configure) will
+`librocprofiler-compute-tool.so`. `add_subdirectory` (one CMake configure) will
 not work: profiler-hub FetchContent's its own fmt, spdlog, nlohmann_json, and sqlite3,
 which collide with the fmt, json, and googletest under `src/lib/external/` and duplicate
 those targets. A separate CMake invocation isolates its dependency resolution.

@@ -450,4 +450,4 @@ Timing information: rocprofv3 versus rocprof and rocprofv2
 Default behavior: rocprofv3 versus rocprof and rocprofv2
 =========================================================
 
-When run without an option, ``rocprofv3`` behaves differently than ``rocprof`` and ``rocprofv2``. The default behavior of ``rocprofv3`` is to collect all available agents on the system and output them in ``CSV`` format, while ``rocprof`` and ``rocprofv2`` output the kernel traces in ``CSV`` format by default. On ``rocprofv3``, kernel traces are generated using ``--kernel-trace`` option.
+When run without an option, ``rocprofv3`` behaves differently than ``rocprof`` and ``rocprofv2``. The default behavior of ``rocprofv3`` is to collect all available agents on the system and output them in the ``rocpd`` SQLite3 database format, while ``rocprof`` and ``rocprofv2`` output kernel traces in CSV format by default. On ``rocprofv3``, kernel traces are generated using the ``--kernel-trace`` option. To obtain CSV from ``rocprofv3``, collect in the default rocpd format and run ``rocpd convert -i <output-file>_results.db --output-format csv``.

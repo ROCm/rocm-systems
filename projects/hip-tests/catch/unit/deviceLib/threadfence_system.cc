@@ -74,17 +74,19 @@ HIP_TEST_CASE(Unit_threadfence_system) {
   // launch one kernel per device for the round robin
   for (; next_id < num_dev; ++next_id) {
     threads.push_back(std::thread([=]() {
-      HIP_CHECK(hipSetDevice(next_id - 1));
+      HIP_CHECK_THREAD(hipSetDevice(next_id - 1));
       hipLaunchKernelGGL(gpu_round_robin, dim_grid, dim_block, 0, 0x0, next_id, num_dev, num_iter,
                          data, flag);
-      HIP_CHECK(hipGetLastError());
-      HIP_CHECK(hipDeviceSynchronize());
+      HIP_CHECK_THREAD(hipGetLastError());
+      HIP_CHECK_THREAD(hipDeviceSynchronize());
     }));
   }
 
   for (auto& t : threads) {
     t.join();
   }
+
+  HIP_CHECK_THREAD_FINALIZE();
 
   int expected_data = init_data + num_dev * num_iter;
   int expected_flag = num_dev * num_iter;

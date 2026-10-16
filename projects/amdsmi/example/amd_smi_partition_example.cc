@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include <array>
 #include <iostream>
@@ -41,7 +22,7 @@
 // invalid and must not be used.
 //
 //   Memory partition (NPS mode):
-//     Requires amdsmi_gpu_driver_reload() to take effect. The driver reload
+//     Requires driver reload to take effect. The driver reload
 //     tears down and rebuilds all kernel device objects, which also destroys
 //     any existing handles. amdsmi_shut_down() + amdsmi_init() is therefore
 //     mandatory before querying or changing anything further.
@@ -363,18 +344,6 @@ static void print_available_partition_modes(const std::vector<amdsmi_processor_h
   return ret == AMDSMI_STATUS_SUCCESS;
 }
 
-// Returns true if the driver was reloaded successfully.
-[[nodiscard]] static bool reload_driver() {
-  print_separator("Reload driver");
-  // Mandatory to apply memory partition change. All GPU activity must be
-  // stopped first. The reload may reset the accelerator partition to default.
-  // Root privileges (sudo) are required for driver reload.
-  std::cout << "  Reloading driver, this may take some time...\n";
-  auto ret = amdsmi_gpu_driver_reload();
-  std::cout << "  amdsmi_gpu_driver_reload: " << status_str(ret) << '\n';
-  return ret == AMDSMI_STATUS_SUCCESS;
-}
-
 // For each GPU: build the NPS→profiles map, print every entry, then demonstrate
 // iterating over only the profiles compatible with the currently active NPS mode.
 static void print_profiles_by_nps(const std::vector<amdsmi_processor_handle>& gpus) {
@@ -514,9 +483,8 @@ int main() {
     } else {
       mem_changed = set_memory_partition(gpus.front(), target_memory_partition);
       if (mem_changed) {
-        if (!reload_driver())
-          std::cout << "[warn] Driver reload failed; memory partition change may not have "
-                       "taken effect.\n";
+        std::cout << "  Memory partition staged. Run to apply:\n"
+                  << "    sudo modprobe -r amdgpu && sudo modprobe amdgpu\n";
       } else {
         std::cout << "\n[info] Memory partition unchanged; skipping driver reload.\n";
       }

@@ -9,6 +9,9 @@ env:
   SUPER_REPO_URL: github.com/ROCm/rocm-systems.git
   SUPER_REPO_BRANCH: release/rocm-rel-7.0
 
+permissions:
+  contents: read
+
 concurrency:
   group: pr-update-subtrees-release
   cancel-in-progress: false

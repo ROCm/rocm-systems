@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #include "rocm_smi/rocm_smi_device.h"
 
@@ -28,6 +9,7 @@
 
 #include <algorithm>
 #include <cassert>
+#include <cerrno>
 #include <chrono>
 #include <cstdint>
 #include <cstring>
@@ -691,7 +673,19 @@ static const std::map<const char*, dev_depends_t> kDevFuncDependsMap = {
   }
 
 Device::Device(std::string p, RocmSMI_env_vars const* e)
-    : monitor_(nullptr), path_(p), env_(e), evt_notif_anon_fd_(-1), m_gpu_metrics_header{0, 0, 0} {
+    : monitor_(nullptr),
+      path_(p),
+      card_indx_(0),
+      drm_render_minor_(0),
+      env_(e),
+      bdfid_(UINT64_MAX),
+      kfd_gpu_id_(0),
+      evt_notif_anon_fd_(-1),
+      evt_notif_anon_file_ptr_(nullptr),
+      m_gpu_metrics_header{0, 0, 0},
+      m_gpu_metrics_updated_timestamp(0),
+      m_device_id(0),
+      m_partition_id(0) {
 #ifndef DEBUG
   env_ = nullptr;
 #endif
@@ -721,6 +715,14 @@ Device::~Device() { shared_mutex_close(mutex_); }
 std::string Device::get_gpu_od_fan_min_pwm_path(void) const {
   return path_ + "/device/" + kDevGpuOdFanMinPwmFName;
 }
+
+/**
+ * @brief Get the full sysfs path to the AMPP (amdsmi power profile)
+ * app_modes/ root directory
+ * @return Full path to the app_modes/ directory (e.g.,
+ * /sys/class/drm/card0/device/app_modes/)
+ */
+std::string Device::get_ampp_root_path(void) const { return path_ + "/device/app_modes/"; }
 
 template <typename T>
 int Device::openDebugFileStream(DevInfoTypes type, T* fs, const char* str) {
@@ -1184,15 +1186,33 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
     return errno;
   }
 
-  size_t num = fread(p_binary_data, b_size, 1, ptr);
+  // Count bytes, not items: an empty node must be told from a short one.
+  errno = 0;
+  const std::size_t bytes_read = fread(p_binary_data, 1, b_size, ptr);
+  const int read_errno = errno;
+  // Only the stream says which of the three it was. Ask before fclose().
+  const bool read_failed = (std::ferror(ptr) != 0);
   fclose(ptr);
-  if ((num * b_size) != b_size) {
+  if (bytes_read != b_size) {
+    auto result = EIO;
+    const auto* cause = "the node came up short of the size it declared";
+    if (read_failed) {
+      // Suspended or resetting answers EBUSY, runtime-inactive EPERM: pass
+      // it on, so each keeps reaching the caller as the state it is.
+      result = (read_errno != 0) ? read_errno : EIO;
+      cause = "the driver refused the read";
+    } else if (bytes_read == 0) {
+      // A driver with no metrics callback publishes an empty node: nothing
+      // to report, not a bad table, so it stays NOT_SUPPORTED.
+      result = ENOENT;
+      cause = "the node is empty";
+    }
     ss << "Could not read DevInfoBinary for DevInfoType (" << get_type_string(type) << ") - SYSFS ("
-       << sysfs_path << "), binary size error; "
-       << "[buff: " << p_binary_data << " size: " << b_size << " read: " << num << "]"
-       << ", returning ENOENT (" << std::strerror(ENOENT) << ")";
+       << sysfs_path << "), " << cause << "; [buff: " << p_binary_data << " size: " << b_size
+       << " read: " << bytes_read << "]"
+       << ", returning " << std::to_string(result) << " (" << std::strerror(result) << ")";
     LOG_ERROR(ss);
-    return ENOENT;
+    return result;
   }
 
   if (ROCmLogging::Logger::getInstance()->isLoggerEnabled()) {
@@ -1662,147 +1682,6 @@ bool Device::DeviceAPISupported(std::string name, uint64_t variant, uint64_t sub
     return false;
   }
   return subvariant_match(&(var_it->second), sub_variant);
-}
-
-rsmi_status_t Device::restartAMDGpuDriver(void) {
-  REQUIRE_ROOT_ACCESS
-  std::ostringstream ss;
-  bool restartSuccessful = true;
-  bool success = false;
-  std::string out;
-  bool wasGdmServiceActive = false;
-  bool isRestartInProgress = true;
-  bool isAMDGPUModuleLive = false;
-  bool restartGDM = false;
-  std::string captureRestartErr;
-  // 1 sec = 1000 ms = 1000000 us
-  const int kTimeToWaitForDriverMSec = 1000;
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-
-  // sudo systemctl is-active gdm
-  // we do not care about the success of checking if gdm is active
-  std::tie(success, out) = executeCommand("systemctl is-active gdm 2>/dev/null", true);
-  (out == "active") ? (restartGDM = true) : (restartGDM = false);
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | systemctl is-active gdm: out = " << out
-       << "; success = " << (success ? "True" : "False")
-       << "; restartGDM = " << (restartGDM ? "True" : "False");
-    LOG_INFO(ss);
-  }
-
-  // if gdm is active -> sudo systemctl stop gdm
-  // TODO(AMD_SMI_team): are are there other display manager's we need to take into account?
-  // see https://help.gnome.org/admin/gdm/stable/overview.html.en_GB
-  if (success && (out == "active") && (restartGDM)) {
-    wasGdmServiceActive = true;
-    std::tie(success, out) = executeCommand("systemctl stop gdm& 2>/dev/null", true);
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__ << " | systemctl stop gdm&: out = " << out
-         << "; success = " << (success ? "True" : "False");
-      LOG_INFO(ss);
-    }
-  } else {
-    success = true;  // ignore failures to restart gdm
-  }
-
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | B4 modprobing anything!!! out = " << out
-       << "; success = " << (success ? "True" : "False")
-       << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
-       << "; captureRestartErr = " << captureRestartErr;
-    LOG_INFO(ss);
-  }
-
-  // sudo modprobe -r amdgpu
-  // sudo modprobe amdgpu
-  std::tie(success, out) = executeCommand(
-      "modprobe -r -v amdgpu >/dev/null 2>&1 && modprobe -v amdgpu >/dev/null 2>&1", true);
-  restartSuccessful &= success;
-  captureRestartErr = out;
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | modprobe -r -v amdgpu && modprobe -v amdgpu: out = " << out
-       << "; success = " << (success ? "True" : "False")
-       << "; restartSuccessful = " << (restartSuccessful ? "True" : "False")
-       << "; captureRestartErr = " << captureRestartErr;
-    LOG_INFO(ss);
-  }
-
-  // if gdm was active -> sudo systemctl start gdm
-  // We don't care if successful or not, just try to restart as a courtesy
-  if (wasGdmServiceActive && restartGDM) {
-    std::tie(success, out) = executeCommand("systemctl start gdm& 2>/dev/null", true);
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__ << " | systemctl start gdm&: out = " << out
-         << "; success = " << (success ? "True" : "False");
-      LOG_INFO(ss);
-    }
-  }
-
-  // Return early if there was an issue restarting amdgpu
-  if (!restartSuccessful) {
-    if (is_logger_enabled) {
-      ss << __PRETTY_FUNCTION__
-         << " | [ERROR] Issue found during amdgpu restart: " << captureRestartErr
-         << "; retartSuccessful: " << (restartSuccessful ? "True" : "False");
-      LOG_ERROR(ss);
-    }
-    return RSMI_STATUS_AMDGPU_RESTART_ERR;
-  }
-
-  // wait for amdgpu module to come back up
-  rsmi_status_t status = Device::isRestartInProgress(&isRestartInProgress, &isAMDGPUModuleLive);
-  int maxLoops = 10;  // wait a max of 10 sec
-  while (status != RSMI_STATUS_SUCCESS) {
-    maxLoops -= 1;
-    if (maxLoops == 0) {
-      break;
-    }
-    amd::smi::system_wait(kTimeToWaitForDriverMSec);
-    status = Device::isRestartInProgress(&isRestartInProgress, &isAMDGPUModuleLive);
-  }
-
-  return ((restartSuccessful && (!isRestartInProgress && isAMDGPUModuleLive))
-              ? RSMI_STATUS_SUCCESS
-              : RSMI_STATUS_AMDGPU_RESTART_ERR);
-}
-
-rsmi_status_t Device::isRestartInProgress(bool* isRestartInProgress, bool* isAMDGPUModuleLive) {
-  REQUIRE_ROOT_ACCESS
-  std::ostringstream ss;
-  bool success = false;
-  std::string out;
-  bool deviceRestartInProgress = true;    // Assume in progress, we intend to disprove
-  bool isSystemAMDGPUModuleLive = false;  // Assume AMD GPU module is not live,
-                                          //  we intend to disprove
-  // Attempting to speed up processing time
-  bool is_logger_enabled = ROCmLogging::Logger::getInstance()->isLoggerEnabled();
-
-  // wait for amdgpu module to come back up
-  std::tie(success, out) = executeCommand("cat /sys/module/amdgpu/initstate", true);
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__ << " | success = " << (success ? "True" : "False")
-       << " | out = " << out;
-    LOG_DEBUG(ss);
-  }
-  if ((success == true) && (!out.empty())) {
-    isSystemAMDGPUModuleLive = containsString(out, "live");
-  }
-  if (isSystemAMDGPUModuleLive) {
-    deviceRestartInProgress = false;
-  }
-  *isRestartInProgress = deviceRestartInProgress;
-  *isAMDGPUModuleLive = isSystemAMDGPUModuleLive;
-  if (is_logger_enabled) {
-    ss << __PRETTY_FUNCTION__
-       << " | *isRestartInProgress = " << (*isRestartInProgress ? "True" : "False")
-       << " | *isAMDGPUModuleLive = " << (*isAMDGPUModuleLive ? "True" : "False")
-       << " | out = " << out;
-    LOG_DEBUG(ss);
-  }
-
-  return ((*isAMDGPUModuleLive && !*isRestartInProgress) ? RSMI_STATUS_SUCCESS
-                                                         : RSMI_STATUS_AMDGPU_RESTART_ERR);
 }
 
 template <typename T>

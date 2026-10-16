@@ -1,0 +1,23 @@
+# ThreadSanitizer suppressions for running RCCL under TSAN.
+#
+# Only src/proxy.cc is instrumented (see build_tsan_proxy_lib.sh), but the
+# sanitizer still intercepts pthread/malloc globally and therefore reports races
+# inside the uninstrumented ROCm/HIP runtime and the C++ runtime. Those are not
+# the subject of this test and would otherwise bury the RCCL findings, so they
+# are suppressed here by originating library.
+#
+# Nothing in RCCL itself is suppressed: a race in proxy.cc must still be
+# reported, which is what the test asserts.
+
+called_from_lib:libamdhip64.so
+called_from_lib:libhsa-runtime64.so
+called_from_lib:libamd_comgr.so
+called_from_lib:librocprofiler-register.so
+called_from_lib:libamdsmi.so
+called_from_lib:libmpi.so
+called_from_lib:libopen-pal.so
+called_from_lib:libopen-rte.so
+
+race:^libamdhip64
+race:^libhsa-runtime64
+race:^libstdc\+\+

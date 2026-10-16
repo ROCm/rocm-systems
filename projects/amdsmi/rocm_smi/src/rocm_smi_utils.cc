@@ -1,24 +1,5 @@
-/*
- * Copyright (c) Advanced Micro Devices, Inc. All rights reserved.
- *
- * Permission is hereby granted, free of charge, to any person obtaining a copy
- * of this software and associated documentation files (the "Software"), to deal
- * in the Software without restriction, including without limitation the rights
- * to use, copy, modify, merge, publish, distribute, sublicense, and/or sell
- * copies of the Software, and to permit persons to whom the Software is
- * furnished to do so, subject to the following conditions:
- *
- * The above copyright notice and this permission notice shall be included in
- * all copies or substantial portions of the Software.
- *
- * THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
- * IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
- * FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
- * AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
- * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
- * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
- * THE SOFTWARE.
- */
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
 
 #define _GNU_SOURCE \
   1  // REQUIRED: to utilize some GNU features/functions, see
@@ -88,7 +69,7 @@ bool FileExists(char const* filename) {
   return (stat(filename, &buf) == 0);
 }
 
-static inline void debugFilesDiscovered(std::vector<std::string> files) {
+[[maybe_unused]] static inline void debugFilesDiscovered(std::vector<std::string> files) {
   std::ostringstream ss;
   int numberOfFilesFound = static_cast<int>(files.size());
   ss << "fileName.size() = " << numberOfFilesFound << "; Files discovered = {";
@@ -427,48 +408,6 @@ int ParseGpuOdFanRange(const std::string& path, uint64_t* min_pwm, uint64_t* max
   return 0;
 }
 
-int ParseGpuOdFanCurrentPwm(const std::string& path, uint64_t* current_pwm) {
-  // Read fan_minimum_pwm sysfs file and parse the current FAN_MINIMUM_PWM value.
-  // File format (multi-line):
-  //   FAN_MINIMUM_PWM:
-  //   <value>
-  //   OD_RANGE:
-  //   MINIMUM_PWM: <min> <max>
-  std::vector<std::string> lines;
-  int ret = ReadSysfsLines(path, &lines);
-  if (ret != 0) {
-    return ret;
-  }
-
-  if (lines.empty()) {
-    return EINVAL;
-  }
-
-  // Use TextFileTagContents_t for structured parsing
-  amd::smi::TextFileTagContents_t parser(lines);
-  parser.set_title_terminator(":", amd::smi::TagSplitterPositional_t::kLAST)
-      .set_key_data_splitter(":", amd::smi::TagSplitterPositional_t::kBETWEEN)
-      .structure_content();
-
-  // Check if FAN_MINIMUM_PWM section exists
-  if (!parser.contains_title_key("FAN_MINIMUM_PWM:")) {
-    return EINVAL;
-  }
-
-  // Get the first value under FAN_MINIMUM_PWM section
-  auto current_str = parser.get_structured_data_subkey_first("FAN_MINIMUM_PWM:");
-
-  // Parse the value
-  uint64_t val;
-  std::istringstream iss(current_str);
-  if (!(iss >> val)) {
-    return EINVAL;
-  }
-
-  if (current_pwm) *current_pwm = val;
-  return 0;
-}
-
 rsmi_status_t WriteGpuOdFanPwm(const std::string& path, const std::string& value) {
   int write_ret = WriteSysfsStr(path, value);
   if (write_ret != 0) {
@@ -590,39 +529,6 @@ std::string removeString(const std::string origStr, const std::string& removeMe)
     modifiedStr.erase(i, l);
   }
   return modifiedStr;
-}
-
-// defaults to trim stdOut
-std::pair<bool, std::string> executeCommand(std::string command, bool stdOut) {
-  char buffer[128];
-  std::string stdoutAndErr;
-  bool successfulRun = true;
-  command = "stdbuf -i0 -o0 -e0 " + command;  // remove stdOut and err buffering
-
-  FILE* pipe = popen(command.c_str(), "r");
-  if (!pipe) {
-    stdoutAndErr = "[ERROR] popen failed to call " + command;
-    successfulRun = false;
-  } else {
-    // read until end of process
-    while (!feof(pipe)) {
-      // use buffer to read and add to stdoutAndErr
-      if (fgets(buffer, sizeof(buffer), pipe) != nullptr) {
-        stdoutAndErr += buffer;
-      }
-    }
-  }
-
-  // any return code other than 0, is a failed execution
-  if (pipe && pclose(pipe) != 0) {
-    successfulRun = false;
-  }
-
-  if (stdOut) {
-    // remove leading and trailing spaces of output and new lines
-    stdoutAndErr = trim(stdoutAndErr);
-  }
-  return std::make_pair(successfulRun, stdoutAndErr);
 }
 
 // originalString - string to search for substring
@@ -976,9 +882,9 @@ void logHexDump(const char* desc, const void* addr, const size_t len, size_t byt
   std::ostringstream ss;
   // Silently ignore per-line values.
   if (bytesPerLine < 4 || bytesPerLine > 64) bytesPerLine = 16;
+  unsigned char buff[65];  // Using largest possible value as bounded by [4,64]
 
   size_t i;
-  unsigned char buff[bytesPerLine + 1];
   const unsigned char* pc  // ptr to data (char, 1 byte sized data)
       = (const unsigned char*)addr;
 
@@ -1402,7 +1308,7 @@ void system_wait(int milli_seconds) {
     LOG_DEBUG(ss);
   }
 
-  usleep(waitTime);
+  usleep(static_cast<unsigned int>(waitTime));
   auto stop = std::chrono::high_resolution_clock::now();
   auto duration = std::chrono::duration_cast<std::chrono::microseconds>(stop - start);
   if (is_logger_enabled) {

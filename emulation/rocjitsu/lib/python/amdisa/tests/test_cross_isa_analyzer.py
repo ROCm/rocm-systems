@@ -35,8 +35,9 @@ def _get_profiles():
     global _PROFILES
     if _PROFILES is None:
         from amdisa.isa_profile import (
-            CdnaProfile,
             Cdna1Profile,
+            Cdna4Profile,
+            CdnaProfile,
             Rdna1Profile,
             Rdna2Profile,
             Rdna3Profile,
@@ -46,7 +47,7 @@ def _get_profiles():
 
         _PROFILES = {
             'cdna1': Cdna1Profile(),
-            'cdna4': CdnaProfile(),
+            'cdna4': Cdna4Profile(),
             'rdna1': Rdna1Profile(),
             'rdna2': Rdna2Profile(),
             'rdna3': Rdna3Profile(),

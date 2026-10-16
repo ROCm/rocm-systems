@@ -16,6 +16,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <array>
 #include <cstdint>
 #include <cstring>
@@ -54,9 +55,10 @@ KD make_kd(uint32_t granulated) {
 // A minimal gfx950 code object exporting one `<name>.kd` object symbol per entry
 // in `kernels`, each pointing at a kernel descriptor with the given granulated
 // SGPR count. The descriptors live in an SHF_ALLOC .rodata section with a real
-// sh_addr, and each .kd symbol's st_value is that descriptor's virtual address,
-// so min_kernel_sgpr_count() can locate and decode them via Section::vaddr().
-// Sections: [1]=.text [2]=.rodata [3]=.strtab [4]=.symtab [5]=.shstrtab.
+// sh_addr, and each .kd symbol's st_value is that descriptor's virtual address.
+// Each descriptor's entry byte offset points into .text so the shared scanner
+// (scan_kernel_descriptors) -- the discovery path min_kernel_sgpr_count() uses --
+// accepts it. Sections: [1]=.text [2]=.rodata [3]=.strtab [4]=.symtab [5]=.shstrtab.
 std::vector<uint8_t>
 make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) {
   constexpr uint64_t kTextAddr = 0x1000;
@@ -75,20 +77,27 @@ make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) 
   std::vector<uint8_t> strtab{'\0'};
   std::vector<Elf64_Sym> syms(1); // mandatory null symbol
   for (size_t i = 0; i < kernels.size(); ++i) {
-    const KD desc = make_kd(kernels[i].second);
+    KD desc = make_kd(kernels[i].second);
+    const uint64_t kd_vaddr = kRodataAddr + i * sizeof(KD);
+    // Point the entry into .text (one word per kernel). The offset is relative to
+    // the descriptor's own vaddr and is signed, since .text sits below .rodata.
+    const uint64_t entry_vaddr = kTextAddr + i * sizeof(uint32_t);
+    desc.kernel_code_entry_byte_offset =
+        static_cast<int64_t>(entry_vaddr) - static_cast<int64_t>(kd_vaddr);
     std::memcpy(rodata.data() + i * sizeof(KD), &desc, sizeof(KD));
     Elf64_Sym sym{};
     sym.st_name = add_elf_name(strtab, kernels[i].first + ".kd");
     sym.st_info = static_cast<uint8_t>((1u << 4) | kElfSymbolTypeObject); // global object
     sym.st_shndx = 2;                                                     // .rodata
-    sym.st_value = kRodataAddr + i * sizeof(KD);
+    sym.st_value = kd_vaddr;
     sym.st_size = sizeof(KD);
     syms.push_back(sym);
   }
 
   const uint32_t text_word = 0xbf800000u; // s_nop 0
   const uint64_t text_offset = 0x100;
-  const uint64_t text_size = sizeof(text_word);
+  // One word per kernel so every descriptor's entry lands inside .text.
+  const uint64_t text_size = (kernels.empty() ? 1 : kernels.size()) * sizeof(text_word);
   const uint64_t rodata_offset = align_up(text_offset + text_size, 8);
   const uint64_t strtab_offset = rodata_offset + rodata.size();
   const uint64_t symtab_offset = align_up(strtab_offset + strtab.size(), 8);
@@ -113,7 +122,7 @@ make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) 
   ehdr.e_shstrndx = 5;
   std::memcpy(image.data(), &ehdr, sizeof(ehdr));
 
-  std::memcpy(image.data() + text_offset, &text_word, text_size);
+  std::memcpy(image.data() + text_offset, &text_word, sizeof(text_word));
   if (!rodata.empty())
     std::memcpy(image.data() + rodata_offset, rodata.data(), rodata.size());
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
@@ -162,6 +171,18 @@ make_elf_with_kds(const std::vector<std::pair<std::string, uint32_t>> &kernels) 
   return image;
 }
 
+void set_section_type_and_offset(std::vector<uint8_t> &image, size_t section_index, uint32_t type,
+                                 uint64_t offset) {
+  Elf64_Ehdr ehdr{};
+  std::memcpy(&ehdr, image.data(), sizeof(ehdr));
+  Elf64_Shdr shdr{};
+  const size_t shdr_offset = ehdr.e_shoff + section_index * sizeof(Elf64_Shdr);
+  std::memcpy(&shdr, image.data() + shdr_offset, sizeof(shdr));
+  shdr.sh_type = type;
+  shdr.sh_offset = offset;
+  std::memcpy(image.data() + shdr_offset, &shdr, sizeof(shdr));
+}
+
 // CDNA: a granulated field of 0 encodes a real 8-SGPR allocation.
 TEST(AmdGpuCodeObjectSgpr, CdnaGranulatedZeroIsEightSgprs) {
   const auto image = make_elf_with_kds({{"k", 0}});
@@ -207,6 +228,37 @@ TEST(AmdGpuCodeObjectSgpr, NoKernelDescriptorReturnsNullopt) {
   AmdGpuCodeObject obj(image.data(), image.size());
   ASSERT_TRUE(obj.is_valid());
   EXPECT_FALSE(obj.min_kernel_sgpr_count(ROCJITSU_CODE_ARCH_CDNA2).has_value());
+}
+
+TEST(AmdGpuCodeObjectSections, RetainsAllocatedExecutableNobitsForLayoutValidation) {
+  std::vector<uint8_t> image = make_elf_with_kds({});
+  set_section_type_and_offset(image, 1, SHT_NOBITS, image.size() + 0x1000);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  EXPECT_TRUE(obj.text_sections().empty());
+  ASSERT_EQ(obj.allocated_executable_sections().size(), 1u);
+  const Section *section = obj.allocated_executable_sections().front();
+  ASSERT_NE(section, nullptr);
+  EXPECT_EQ(section->name(), ".text");
+  EXPECT_EQ(section->sectionHeaderIndex(), std::optional<size_t>(1));
+  EXPECT_EQ(section->data(), nullptr);
+  EXPECT_TRUE(std::ranges::none_of(obj.all_sections(), [](const auto &candidate) {
+    return candidate != nullptr && candidate->name() == ".text";
+  }));
+}
+
+TEST(AmdGpuCodeObjectSections, ContinuesToSkipOrdinaryNobits) {
+  std::vector<uint8_t> image = make_elf_with_kds({});
+  set_section_type_and_offset(image, 2, SHT_NOBITS, image.size() + 0x1000);
+
+  AmdGpuCodeObject obj(image.data(), image.size());
+  ASSERT_TRUE(obj.is_valid());
+  ASSERT_EQ(obj.text_sections().size(), 1u);
+  EXPECT_TRUE(obj.rodata_sections().empty());
+  EXPECT_TRUE(std::ranges::none_of(obj.all_sections(), [](const auto &section) {
+    return section != nullptr && section->name() == ".rodata";
+  }));
 }
 
 } // namespace

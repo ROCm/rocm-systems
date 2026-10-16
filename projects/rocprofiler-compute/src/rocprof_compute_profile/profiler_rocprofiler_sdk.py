@@ -10,8 +10,25 @@ from typing import Optional, Union
 from rocprof_compute_profile.profiler_base import RocProfCompute_Base
 from rocprof_compute_soc.soc_base import OmniSoC_Base
 from utils.logger import console_debug, console_error, console_log, demarcate
-from utils.utils_common import resolve_rocm_library_path
+from utils.utils_common import (
+    PROFILE_OUTPUT_FORMAT,
+    resolve_rocm_library_path,
+)
 from utils.utils_profile import pc_sampling_unit
+
+
+def _resolve_sdk_roctx_library(rocprofiler_sdk_tool_path: str) -> Optional[str]:
+    """Locate the rocprofiler-sdk ROCTX library for LD_PRELOAD.
+
+    src/lib/torch_trace_collector links it in CMake, but framework runtimes load
+    the legacy libroctx64 first and win the symbol lookup.
+    """
+    return resolve_rocm_library_path(
+        str(
+            Path(rocprofiler_sdk_tool_path).parent.parent
+            / "librocprofiler-sdk-roctx.so"
+        )
+    )
 
 
 class rocprofiler_sdk_profiler(RocProfCompute_Base):
@@ -36,6 +53,12 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             args.rocprofiler_sdk_tool_path,  # Our rocprofiler-sdk tool
             native_tool_path,  # Native tool (if provided)
         ]
+        if getattr(self, "_selected_frameworks", set()):
+            # Without this the marker tier's ROCTX calls bind to legacy
+            # libroctx64, which rocprofiler-sdk does not trace.
+            ld_preload_parts.append(
+                _resolve_sdk_roctx_library(args.rocprofiler_sdk_tool_path)
+            )
         # Filter out None and empty string values and join with ':'
         ld_preload_value = ":".join(part for part in ld_preload_parts if part)
 
@@ -51,7 +74,7 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         options.update({
             "LD_PRELOAD": ld_preload_value,
             "ROCPROF_KERNEL_TRACE": "1",
-            "ROCPROF_OUTPUT_FORMAT": args.format_rocprof_output,
+            "ROCPROF_OUTPUT_FORMAT": PROFILE_OUTPUT_FORMAT,
             "ROCPROF_OUTPUT_PATH": f"{args.output_directory}/out/pmc_1",
         })
 
@@ -121,20 +144,20 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
         if args.kernel:
             options["ROCPROF_KERNEL_FILTER_INCLUDE_REGEX"] = "|".join(args.kernel)
 
-        # Dispatch filtering
-        dispatch = []
-        # rocprof sdk dispatch indexing is inclusive and starts from 1
-        if args.dispatch:
-            for dispatch_id in args.dispatch:
-                if ":" in dispatch_id:
+        # Kernel iteration filtering
+        iterations = []
+        # rocprof sdk iteration indexing is inclusive and starts from 1
+        if args.kernel_iteration_range:
+            for iteration in args.kernel_iteration_range:
+                if ":" in iteration:
                     # 4:7 -> 4-7
-                    start, end = dispatch_id.split(":")
-                    dispatch.append(f"{start}-{end}")
+                    start, end = iteration.split(":")
+                    iterations.append(f"{start}-{end}")
                 else:
                     # 4 -> 4
-                    dispatch.append(f"{dispatch_id}")
-        if dispatch:
-            options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(dispatch)}]"
+                    iterations.append(f"{iteration}")
+        if iterations:
+            options["ROCPROF_KERNEL_FILTER_RANGE"] = f"[{','.join(iterations)}]"
         if not args.attach_pid:
             options["APP_CMD"] = app_cmd
         return options
@@ -152,7 +175,8 @@ class rocprofiler_sdk_profiler(RocProfCompute_Base):
             "ROCPROF_KERNEL_TRACE": "1",
             "ROCPROF_OUTPUT_FORMAT": "json",
             "ROCPROF_OUTPUT_PATH": args.output_directory,
-            "ROCPROF_OUTPUT_FILE_NAME": "ps_file",
+            # %pid% is expanded by rocprofiler-sdk, not by rocprof-compute.
+            "ROCPROF_OUTPUT_FILE_NAME": "%pid%_ps_file",
             "ROCPROFILER_PC_SAMPLING_BETA_ENABLED": "1",
             "ROCPROF_PC_SAMPLING_UNIT": pc_sampling_unit(method),
             "ROCPROF_PC_SAMPLING_INTERVAL": str(args.pc_sampling_interval),
