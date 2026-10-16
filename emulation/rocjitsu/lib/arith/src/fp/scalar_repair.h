@@ -15,8 +15,8 @@ namespace rocjitsu::arith {
 uint32_t repair_fma_f32(uint32_t a, uint32_t b, uint32_t c, uint64_t flags, uint32_t mode,
                         bool rdna3);
 
-// Return one selected FP16 FMA lane, without accumulating FP status.
+// Return one selected FP16 FMA lane, accumulating status when requested.
 uint16_t repair_fma_f16(uint16_t a, uint16_t b, uint16_t c, uint32_t mode, uint64_t flags,
-                        bool rdna3);
+                        bool rdna3, uint32_t *status = nullptr);
 
 } // namespace rocjitsu::arith
