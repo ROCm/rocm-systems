@@ -1121,6 +1121,13 @@ struct SendSide {
     return sendProxyConnect(c, ps, req, reqSize, resp, respSize, done);
   }
   static ncclResult_t Free(ncclProxyConnection* c, ncclProxyState* ps) { return sendProxyFree(c, ps); }
+  static ncclResult_t RegBuffer(ncclProxyConnection* c, ncclProxyState* ps, void* req, int reqSize, void* resp,
+                                int respSize, int* done) {
+    return sendProxyRegBuffer(c, ps, req, reqSize, resp, respSize, done);
+  }
+  static ncclResult_t DeregBuffer(ncclProxyConnection* c, ncclProxyState* ps, void* req, int reqSize, int* done) {
+    return sendProxyDeregBuffer(c, ps, req, reqSize, done);
+  }
   static void** Mhandles(Res* r) { return r->sendMhandles; }
 };
 struct RecvSide {
@@ -1131,6 +1138,13 @@ struct RecvSide {
     return recvProxyConnect(c, ps, req, reqSize, resp, respSize, done);
   }
   static ncclResult_t Free(ncclProxyConnection* c, ncclProxyState* ps) { return recvProxyFree(c, ps); }
+  static ncclResult_t RegBuffer(ncclProxyConnection* c, ncclProxyState* ps, void* req, int reqSize, void* resp,
+                                int respSize, int* done) {
+    return recvProxyRegBuffer(c, ps, req, reqSize, resp, respSize, done);
+  }
+  static ncclResult_t DeregBuffer(ncclProxyConnection* c, ncclProxyState* ps, void* req, int reqSize, int* done) {
+    return recvProxyDeregBuffer(c, ps, req, reqSize, done);
+  }
   static void** Mhandles(Res* r) { return r->mhandles; }
 };
 
@@ -1573,6 +1587,546 @@ TYPED_TEST(CollNetProxyConnectBothMicrotest, Free_DeregistrationFails_ReturnsErr
   free(registered);  // dequeued before the failing deregistration
   this->net_.deregMrResult = ncclSuccess;
   ASSERT_EQ(this->Free(), ncclSuccess);
+}
+
+// ---------------------------------------------------------------------------
+// Proxy-side buffer registration (sendProxyRegBuffer, recvProxyRegBuffer, *ProxyDeregBuffer)
+// ---------------------------------------------------------------------------
+
+template <typename Side>
+class CollNetProxyRegMicrotest : public CollNetProxyConnectMicrotest<Side> {
+ protected:
+  char user_[256] = {};
+  collnetRegInfo info_{reinterpret_cast<uintptr_t>(user_), sizeof(user_)};
+  void* handle_ = reinterpret_cast<void*>(0x1);
+
+  void SetUp() override {
+    CollNetProxyConnectMicrotest<Side>::SetUp();
+    this->R()->collNetComm = &this->net_.collComm;
+  }
+
+  void TearDown() override {
+    while (!ncclIntruQueueEmpty(&this->conn_.proxyMemHandleQueue)) {
+      free(ncclIntruQueueDequeue(&this->conn_.proxyMemHandleQueue));
+    }
+    CollNetProxyConnectMicrotest<Side>::TearDown();
+  }
+
+  ncclResult_t Reg(int reqSize = sizeof(collnetRegInfo), int respSize = sizeof(void*)) {
+    this->done_ = 0;
+    return Side::RegBuffer(&this->conn_, &this->proxyState_, &info_, reqSize, &handle_, respSize, &this->done_);
+  }
+  ncclResult_t Dereg(void* handle, int reqSize = sizeof(void*)) {
+    this->done_ = 0;
+    return Side::DeregBuffer(&this->conn_, &this->proxyState_, &handle, reqSize, &this->done_);
+  }
+  std::vector<void*> Tracked() {
+    std::vector<void*> out;
+    for (proxyMemHandle* h = ncclIntruQueueHead(&this->conn_.proxyMemHandleQueue); h; h = h->next) {
+      out.push_back(h->handle);
+    }
+    return out;
+  }
+};
+
+template <typename Side>
+using CollNetProxyRegBothMicrotest = CollNetProxyRegMicrotest<Side>;
+TYPED_TEST_SUITE(CollNetProxyRegBothMicrotest, CollNetSides);
+
+TYPED_TEST(CollNetProxyRegBothMicrotest, WrongSizes_RejectedWithoutRegistering) {
+  EXPECT_EQ(this->Reg(sizeof(collnetRegInfo) - 1), ncclInternalError);
+  EXPECT_EQ(this->Reg(sizeof(collnetRegInfo), sizeof(void*) + 1), ncclInternalError);
+  EXPECT_EQ(this->Dereg(nullptr, sizeof(void*) - 1), ncclInternalError);
+  EXPECT_TRUE(this->net_.regMrs.empty());
+  EXPECT_TRUE(this->net_.deregMrs.empty());
+  EXPECT_EQ(this->done_, 0);
+}
+
+TYPED_TEST(CollNetProxyRegBothMicrotest, Reg_UserBuffer_RegistersAsCudaAndTracksHandle) {
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+
+  ASSERT_EQ(this->net_.regMrs.size(), 1u);
+  EXPECT_EQ(this->net_.regMrs[0].comm, &this->net_.collComm);
+  EXPECT_EQ(this->net_.regMrs[0].data, this->user_);
+  EXPECT_EQ(this->net_.regMrs[0].size, sizeof(this->user_));
+  EXPECT_EQ(this->net_.regMrs[0].type, NCCL_PTR_CUDA);
+  EXPECT_EQ(this->handle_, this->user_);
+  EXPECT_EQ(this->Tracked(), std::vector<void*>{this->user_});
+  EXPECT_EQ(this->done_, 1);
+}
+
+TYPED_TEST(CollNetProxyRegBothMicrotest, Reg_PluginFails_AnswersNoHandle) {
+  this->net_.regMrResult = ncclSystemError;
+
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+
+  EXPECT_EQ(this->handle_, nullptr);
+  EXPECT_TRUE(this->Tracked().empty());
+  EXPECT_EQ(this->done_, 1);
+}
+
+TYPED_TEST(CollNetProxyRegBothMicrotest, Reg_HsaDmaBuf_RegistersByExportedFd) {
+  this->UseGdr(/*dmaBuf=*/true);
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  ASSERT_EQ(this->net_.regMrDmaBufs.size(), 1u);
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].data, this->user_);
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].size, sizeof(this->user_));
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].type, NCCL_PTR_CUDA);
+  EXPECT_TRUE(this->net_.regMrs.empty());
+  ASSERT_EQ(g_exportedFds.size(), 1u);
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].fd, g_exportedFds[0]);
+  EXPECT_EQ(this->handle_, this->user_);
+
+  this->net_.regMrDmaBufResult = ncclSystemError;  // falls back to regMr
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  EXPECT_EQ(this->net_.regMrs.size(), 1u);
+  EXPECT_EQ(this->Tracked().size(), 2u);
+}
+
+TYPED_TEST(CollNetProxyRegBothMicrotest, Reg_DmaBufNotUsable_RegistersWithRegMr) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  this->UseGdr(/*dmaBuf=*/false);
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  this->R()->useGdr = ncclTopoGdrModeDisable;
+  this->R()->useDmaBuf = 1;
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  this->UseGdr(/*dmaBuf=*/true);
+  this->vtable_.regMrDmaBuf = nullptr;
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  this->vtable_ = this->net_.vtable();
+  pfn_hsa_amd_portable_export_dmabuf = nullptr;
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+
+  EXPECT_EQ(this->net_.regMrs.size(), 4u);
+  EXPECT_TRUE(g_exportedFds.empty());
+}
+
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+TYPED_TEST(CollNetProxyRegBothMicrotest, Reg_CuMemDmaBuf_RegistersByCuMemFdWithFallbacks) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  this->UseGdr(/*dmaBuf=*/true);
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  ASSERT_EQ(this->exports_.size(), 1u);
+  EXPECT_EQ(this->exports_[0].ptr, this->user_);
+  EXPECT_EQ(this->exports_[0].size, sizeof(this->user_));
+  EXPECT_EQ(this->exports_[0].flags, (unsigned long long)getHandleForAddressRangeFlags(ncclTopoGdrModePci));
+  ASSERT_EQ(this->net_.regMrDmaBufs.size(), 1u);
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].fd, this->exports_[0].fd);
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].offset, 0u);
+  EXPECT_FALSE(FdOpen(this->exports_[0].fd));
+  EXPECT_TRUE(this->net_.regMrs.empty());
+
+  this->net_.regMrDmaBufResult = ncclSystemError;  // registration refused: plain regMr
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  ASSERT_EQ(this->exports_.size(), 2u);
+  EXPECT_FALSE(FdOpen(this->exports_[1].fd));
+  EXPECT_EQ(this->net_.regMrs.size(), 1u);
+
+  this->exports_.result = hipErrorNotSupported;  // export refused: the HSA exporter
+  this->net_.regMrDmaBufResult = ncclSuccess;
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  EXPECT_EQ(g_exportedFds.size(), 1u);
+  EXPECT_EQ(this->net_.regMrDmaBufs.size(), 3u);
+  EXPECT_EQ(this->net_.regMrs.size(), 1u);
+  EXPECT_EQ(this->Tracked().size(), 3u);
+}
+#endif
+
+TYPED_TEST(CollNetProxyRegBothMicrotest, Dereg_TrackedHandle_DeregistersAndForgetsOnlyIt) {
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+  this->info_.buffer += 128;
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+
+  ASSERT_EQ(this->Dereg(this->user_), ncclSuccess);
+
+  EXPECT_EQ(this->Tracked(), std::vector<void*>{this->user_ + 128});
+  std::vector<std::pair<void*, void*>> want = {{&this->net_.collComm, this->user_}};
+  EXPECT_EQ(this->net_.deregMrs, want);
+  EXPECT_EQ(this->done_, 1);
+}
+
+TYPED_TEST(CollNetProxyRegBothMicrotest, Dereg_NullHandle_StillAsksPlugin) {
+  ASSERT_EQ(this->Reg(), ncclSuccess);
+
+  ASSERT_EQ(this->Dereg(nullptr), ncclSuccess);
+
+  EXPECT_EQ(this->Tracked().size(), 1u);
+  std::vector<std::pair<void*, void*>> want = {{&this->net_.collComm, nullptr}};
+  EXPECT_EQ(this->net_.deregMrs, want);
+}
+
+TYPED_TEST(CollNetProxyRegBothMicrotest, Dereg_PluginFails_ReturnsError) {
+  this->net_.deregMrResult = ncclSystemError;
+
+  EXPECT_EQ(this->Dereg(this->user_), ncclSystemError);
+  EXPECT_EQ(this->done_, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Client-side buffer registration (collnetRegisterBuffer, ncclCollnetLocalRegisterBuffer,
+// ncclCollnetGraphRegisterBuffer, ncclCollnetDeregBuffer)
+// ---------------------------------------------------------------------------
+
+class CollNetRegisterMicrotest : public CollNetMicrotestBase {
+ protected:
+  static constexpr int kRanks = 4;
+  static constexpr size_t kSize = 1 << 12;
+
+  ncclComm comm_{};
+  ncclChannelPeer collNetPeer_{};
+  ncclChannelPeer* peers_[kRanks + 1] = {};
+  ncclReg reg_{};
+  ncclReg* slots_[1] = {&reg_};
+  alignas(64) char buf_[2 * kSize] = {};
+  char* user_ = buf_ + 64;
+  void* handle_ = reinterpret_cast<void*>(0x9000);  // what the proxy hands back
+  int flag_ = -1;
+  void* out_ = reinterpret_cast<void*>(0x1);
+  ncclProxyConnector* callConn_ = nullptr;
+  int callType_ = -1;
+  collnetRegInfo callInfo_{};
+  ncclResult_t callResult_ = ncclSuccess;
+
+  void SetUp() override {
+    CollNetMicrotestBase::SetUp();
+    comm_.nRanks = kRanks;
+    peers_[kRanks] = &collNetPeer_;
+    comm_.channels[0].peers = peers_;
+    comm_.regCache.slots = slots_;
+    comm_.regCache.population = 1;
+    reg_.begAddr = reinterpret_cast<uintptr_t>(buf_);
+    reg_.endAddr = reinterpret_cast<uintptr_t>(buf_) + sizeof(buf_);
+    DirectNic(collNetRecv);
+    DirectNic(collNetSend);
+    g_proxyCallBlocking = [this](ncclComm*, ncclProxyConnector* conn, int type, void* req, int reqSize, void* resp,
+                                 int respSize) {
+      callConn_ = conn;
+      callType_ = type;
+      EXPECT_EQ(reqSize, (int)sizeof(collnetRegInfo));
+      EXPECT_EQ(respSize, (int)sizeof(void*));
+      memcpy(&callInfo_, req, sizeof(callInfo_));
+      memcpy(resp, &handle_, sizeof(void*));
+      return callResult_;
+    };
+  }
+
+  void DirectNic(int type) {
+    ncclConnector& c = type == collNetRecv ? collNetPeer_.recv[type] : collNetPeer_.send[type];
+    c.conn.flags |= NCCL_DIRECT_NIC;
+  }
+  ncclProxyConnector* ProxyConn(int type) {
+    return type == collNetRecv ? &collNetPeer_.recv[type].proxyConn : &collNetPeer_.send[type].proxyConn;
+  }
+  ncclResult_t Register(int type, ncclReg* reg) {
+    return collnetRegisterBuffer(&comm_, user_, kSize, type, reg, &flag_, &out_);
+  }
+};
+
+TEST_F(CollNetRegisterMicrotest, Register_DirectNic_RegistersRecordRangeThroughSidesProxy) {
+  for (int type : {collNetRecv, collNetSend}) {
+    SCOPED_TRACE(type);
+    reg_.state = 0;
+
+    ASSERT_EQ(Register(type, &reg_), ncclSuccess);
+
+    EXPECT_EQ(callConn_, ProxyConn(type));
+    EXPECT_EQ(callType_, ncclProxyMsgRegister);
+    EXPECT_EQ(callInfo_.buffer, reg_.begAddr);
+    EXPECT_EQ(callInfo_.size, sizeof(buf_));
+    EXPECT_EQ(flag_, 1);
+    EXPECT_EQ(out_, handle_);
+    EXPECT_EQ(reg_.collnetHandle, handle_);
+    EXPECT_EQ(reg_.collnetProxyconn, ProxyConn(type));
+    EXPECT_TRUE(reg_.state & COLLNET_REG_COMPLETE);
+  }
+}
+
+TEST_F(CollNetRegisterMicrotest, Register_AlreadyRegistered_ReusesHandleWithoutProxyCall) {
+  reg_.state = COLLNET_REG_COMPLETE;
+  reg_.collnetHandle = handle_;
+
+  ASSERT_EQ(Register(collNetSend, &reg_), ncclSuccess);
+
+  EXPECT_EQ(flag_, 2);
+  EXPECT_EQ(out_, handle_);
+  EXPECT_EQ(callType_, -1);
+}
+
+TEST_F(CollNetRegisterMicrotest, Register_NoRecord_LeavesOutputs) {
+  ASSERT_EQ(Register(collNetRecv, nullptr), ncclSuccess);
+
+  EXPECT_EQ(flag_, -1);
+  EXPECT_EQ(out_, reinterpret_cast<void*>(0x1));
+  EXPECT_EQ(callType_, -1);
+}
+
+TEST_F(CollNetRegisterMicrotest, Register_NoDirectNic_ReportsUnregistered) {
+  collNetPeer_.send[collNetSend].conn.flags = 0;
+
+  ASSERT_EQ(Register(collNetSend, &reg_), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(out_, nullptr);
+  EXPECT_EQ(callType_, -1);
+  EXPECT_FALSE(reg_.state & COLLNET_REG_COMPLETE);
+}
+
+TEST_F(CollNetRegisterMicrotest, Register_ProxyAnswersNoHandle_LeavesRecordUnregistered) {
+  handle_ = nullptr;
+
+  ASSERT_EQ(Register(collNetRecv, &reg_), ncclSuccess);
+
+  EXPECT_EQ(flag_, -1);  // callers preset the outputs; nothing to report
+  EXPECT_EQ(out_, reinterpret_cast<void*>(0x1));
+  EXPECT_FALSE(reg_.state & COLLNET_REG_COMPLETE);
+  EXPECT_EQ(reg_.collnetProxyconn, nullptr);
+}
+
+TEST_F(CollNetRegisterMicrotest, Register_ProxyFails_ReturnsErrorAndClearsOutputs) {
+  callResult_ = ncclRemoteError;
+
+  EXPECT_EQ(Register(collNetRecv, &reg_), ncclRemoteError);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(out_, nullptr);
+  EXPECT_FALSE(reg_.state & COLLNET_REG_COMPLETE);
+}
+
+TEST_F(CollNetRegisterMicrotest, LocalRegister_ValidRecordCoveringBuffer_Registers) {
+  ScopedHook valid(g_regLocalIsValid, [this](ncclReg* reg, bool* isValid) {
+    EXPECT_EQ(reg, &reg_);
+    *isValid = true;
+    return ncclSuccess;
+  });
+  g_hipMemGetAddressRange = [this](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
+    EXPECT_EQ(ptr, (hipDeviceptr_t)user_);
+    *base = buf_;
+    *size = sizeof(buf_);
+    return hipSuccess;
+  };
+
+  ASSERT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, user_, kSize, collNetSend, &flag_, &out_), ncclSuccess);
+
+  EXPECT_EQ(flag_, 1);
+  EXPECT_EQ(out_, handle_);
+}
+
+TEST_F(CollNetRegisterMicrotest, LocalRegister_AllocationShorterThanBuffer_SkipsRegistration) {
+  ScopedHook valid(g_regLocalIsValid, [](ncclReg*, bool* isValid) {
+    *isValid = true;
+    return ncclSuccess;
+  });
+  g_hipMemGetAddressRange = [this](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t) {
+    *base = buf_;
+    *size = 64 + kSize - 1;
+    return hipSuccess;
+  };
+
+  ASSERT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, user_, kSize, collNetSend, &flag_, &out_), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(out_, nullptr);
+  EXPECT_EQ(callType_, -1);
+
+  g_hipMemGetAddressRange = [this](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t) {
+    *base = buf_;
+    *size = 64 + kSize;  // exactly covers it
+    return hipSuccess;
+  };
+  ASSERT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, user_, kSize, collNetSend, &flag_, &out_), ncclSuccess);
+  EXPECT_EQ(flag_, 1);
+}
+
+TEST_F(CollNetRegisterMicrotest, LocalRegister_RecordNotLocallyValid_RegistersWithoutRangeCheck) {
+  g_hipMemGetAddressRange = [](hipDeviceptr_t*, size_t*, hipDeviceptr_t) { return hipErrorInvalidValue; };
+
+  ASSERT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, user_, kSize, collNetRecv, &flag_, &out_), ncclSuccess);
+
+  EXPECT_EQ(flag_, 1);
+}
+
+TEST_F(CollNetRegisterMicrotest, LocalRegister_NoBufferOrNoRecord_ReportsUnregistered) {
+  EXPECT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, nullptr, kSize, collNetRecv, &flag_, &out_), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(out_, nullptr);
+  flag_ = -1;
+  EXPECT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, user_, 0, collNetRecv, &flag_, &out_), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  flag_ = -1;
+  EXPECT_EQ(ncclCollnetLocalRegisterBuffer(nullptr, user_, kSize, collNetRecv, &flag_, &out_), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  comm_.regCache.population = 0;
+  EXPECT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, user_, kSize, collNetRecv, &flag_, &out_), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(callType_, -1);
+}
+
+TEST_F(CollNetRegisterMicrotest, LocalRegister_DependencyFails_ReturnsErrorUnregistered) {
+  ScopedHook valid(g_regLocalIsValid, [](ncclReg*, bool*) { return ncclSystemError; });
+  EXPECT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, user_, kSize, collNetRecv, &flag_, &out_), ncclSystemError);
+  EXPECT_EQ(flag_, 0);
+
+  g_regLocalIsValid = [](ncclReg*, bool* isValid) {
+    *isValid = true;
+    return ncclSuccess;
+  };
+  g_hipMemGetAddressRange = [](hipDeviceptr_t*, size_t*, hipDeviceptr_t) { return hipErrorInvalidValue; };
+  EXPECT_NE(ncclCollnetLocalRegisterBuffer(&comm_, user_, kSize, collNetRecv, &flag_, &out_), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+
+  callResult_ = ncclRemoteError;
+  ScopedHook unchecked(g_regLocalIsValid, [](ncclReg*, bool* isValid) {
+    *isValid = false;
+    return ncclSuccess;
+  });
+  flag_ = 1;
+  EXPECT_EQ(ncclCollnetLocalRegisterBuffer(&comm_, user_, kSize, collNetRecv, &flag_, &out_), ncclRemoteError);
+  EXPECT_EQ(flag_, 0);
+}
+
+class CollNetGraphRegisterMicrotest : public CollNetRegisterMicrotest {
+ protected:
+  ncclIntruQueue<ncclCommCallback, &ncclCommCallback::next> cleanup_{};
+  int nCleanup_ = 3;
+  std::vector<ncclReg*> deregistered_;
+  size_t allocSize_ = sizeof(buf_);  // the allocation user_ sits in starts at buf_
+
+  void SetUp() override {
+    CollNetRegisterMicrotest::SetUp();
+    g_hipMemGetAddressRange = [this](hipDeviceptr_t* base, size_t* size, hipDeviceptr_t ptr) {
+      EXPECT_EQ(ptr, (hipDeviceptr_t)user_);
+      *base = buf_;
+      *size = allocSize_;
+      return hipSuccess;
+    };
+    g_commGraphRegister = [this](ncclComm* comm, void* buff, size_t size, void** handle) {
+      EXPECT_EQ(comm, &comm_);
+      EXPECT_EQ(buff, buf_);
+      EXPECT_EQ(size, allocSize_);
+      *handle = &reg_;
+      return ncclSuccess;
+    };
+    g_commGraphDeregister = [this](ncclComm* comm, ncclReg* reg) {
+      EXPECT_EQ(comm, &comm_);
+      deregistered_.push_back(reg);
+      return ncclSuccess;
+    };
+  }
+
+  void TearDown() override {
+    while (!ncclIntruQueueEmpty(&cleanup_)) free(ncclIntruQueueDequeue(&cleanup_));
+    CollNetRegisterMicrotest::TearDown();
+  }
+
+  ncclResult_t GraphRegister(int type = collNetSend, const void* buf = nullptr, size_t size = kSize) {
+    return ncclCollnetGraphRegisterBuffer(&comm_, buf ? buf : user_, size, type, &flag_, &out_, &cleanup_,
+                                          &nCleanup_);
+  }
+};
+
+TEST_F(CollNetGraphRegisterMicrotest, Registered_QueuesCleanupThatDeregistersRecord) {
+  ASSERT_EQ(GraphRegister(), ncclSuccess);
+
+  EXPECT_EQ(flag_, 1);
+  EXPECT_EQ(out_, handle_);
+  EXPECT_EQ(nCleanup_, 4);
+  ASSERT_FALSE(ncclIntruQueueEmpty(&cleanup_));
+  ncclCommCallback* cb = ncclIntruQueueDequeue(&cleanup_);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&cleanup_));
+  EXPECT_TRUE(deregistered_.empty());
+
+  ASSERT_EQ(cb->fn(nullptr, cb), ncclSuccess);  // deregisters on the comm it recorded, then frees cb
+  EXPECT_EQ(deregistered_, std::vector<ncclReg*>{&reg_});
+}
+
+TEST_F(CollNetGraphRegisterMicrotest, CleanupDeregisterFails_ReturnsError) {
+  ASSERT_EQ(GraphRegister(), ncclSuccess);
+  ncclCommCallback* cb = ncclIntruQueueDequeue(&cleanup_);
+  g_commGraphDeregister = [](ncclComm*, ncclReg*) { return ncclSystemError; };
+
+  EXPECT_EQ(cb->fn(&comm_, cb), ncclSystemError);
+  free(cb);
+}
+
+TEST_F(CollNetGraphRegisterMicrotest, NotRegistered_DropsGraphRecordAtOnce) {
+  collNetPeer_.send[collNetSend].conn.flags = 0;
+
+  ASSERT_EQ(GraphRegister(), ncclSuccess);
+
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(nCleanup_, 3);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&cleanup_));
+  EXPECT_EQ(deregistered_, std::vector<ncclReg*>{&reg_});
+}
+
+TEST_F(CollNetGraphRegisterMicrotest, AllocationShorterThanBuffer_SkipsRegistration) {
+  allocSize_ = 64 + kSize - 1;
+
+  ASSERT_EQ(GraphRegister(), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(out_, reinterpret_cast<void*>(0x1));
+  EXPECT_TRUE(deregistered_.empty());
+  EXPECT_EQ(callType_, -1);
+
+  allocSize_ = 64 + kSize;  // exactly covers it
+  ASSERT_EQ(GraphRegister(), ncclSuccess);
+  EXPECT_EQ(flag_, 1);
+}
+
+TEST_F(CollNetGraphRegisterMicrotest, NoBuffer_ReportsUnregistered) {
+  EXPECT_EQ(ncclCollnetGraphRegisterBuffer(&comm_, nullptr, kSize, collNetSend, &flag_, &out_, &cleanup_, &nCleanup_),
+            ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  flag_ = -1;
+  EXPECT_EQ(GraphRegister(collNetSend, user_, 0), ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  flag_ = -1;
+  EXPECT_EQ(ncclCollnetGraphRegisterBuffer(nullptr, user_, kSize, collNetSend, &flag_, &out_, &cleanup_, &nCleanup_),
+            ncclSuccess);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(callType_, -1);
+}
+
+TEST_F(CollNetGraphRegisterMicrotest, DependencyFails_ReturnsErrorUnregistered) {
+  callResult_ = ncclRemoteError;
+  EXPECT_EQ(GraphRegister(), ncclRemoteError);
+  EXPECT_EQ(flag_, 0);
+  EXPECT_EQ(out_, nullptr);
+
+  callResult_ = ncclSuccess;
+  collNetPeer_.send[collNetSend].conn.flags = 0;
+  g_commGraphDeregister = [](ncclComm*, ncclReg*) { return ncclSystemError; };
+  EXPECT_EQ(GraphRegister(), ncclSystemError);
+
+  g_commGraphRegister = [](ncclComm*, void*, size_t, void**) { return ncclSystemError; };
+  EXPECT_EQ(GraphRegister(), ncclSystemError);
+
+  g_hipMemGetAddressRange = [](hipDeviceptr_t*, size_t*, hipDeviceptr_t) { return hipErrorInvalidValue; };
+  out_ = reinterpret_cast<void*>(0x1);
+  EXPECT_NE(GraphRegister(), ncclSuccess);
+  EXPECT_EQ(out_, nullptr);
+  EXPECT_EQ(nCleanup_, 3);
+}
+
+TEST_F(CollNetRegisterMicrotest, Dereg_AsksRegisteringProxyToDropHandle) {
+  ncclProxyConnector* conn = ProxyConn(collNetSend);
+  void* sent = nullptr;
+  g_proxyCallBlocking = [&](ncclComm*, ncclProxyConnector* c, int type, void* req, int reqSize, void* resp,
+                            int respSize) {
+    EXPECT_EQ(c, conn);
+    EXPECT_EQ(type, ncclProxyMsgDeregister);
+    EXPECT_EQ(reqSize, (int)sizeof(void*));
+    memcpy(&sent, req, sizeof(sent));
+    EXPECT_EQ(resp, nullptr);
+    EXPECT_EQ(respSize, 0);
+    return callResult_;
+  };
+
+  ASSERT_EQ(ncclCollnetDeregBuffer(&comm_, conn, handle_), ncclSuccess);
+  EXPECT_EQ(sent, handle_);
+
+  callResult_ = ncclRemoteError;
+  EXPECT_EQ(ncclCollnetDeregBuffer(&comm_, conn, handle_), ncclRemoteError);
 }
 
 }  // namespace
