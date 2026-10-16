@@ -34,6 +34,20 @@ add_library(
     fp/minmax.cpp
     fp/mixed_fma.cpp
     fp/packed_fma.cpp
+    integer/bit_count.cpp
+    integer/bitfield.cpp
+    integer/boolean.cpp
+    integer/carry.cpp
+    integer/integer16.cpp
+    integer/integer16_ternary.cpp
+    integer/integer_add.cpp
+    integer/integer_mad.cpp
+    integer/integer_minmax.cpp
+    integer/integer_mul.cpp
+    integer/integer_ternary.cpp
+    integer/mad64.cpp
+    integer/sad.cpp
+    integer/shift.cpp
     math/half_trig.cpp
     math/half_unary.cpp
     math/rcp_iflag.cpp
