@@ -8,7 +8,14 @@
 #include "connect.h"
 #include "common.h"
 #include "p2p.h"
+#include "rma_multiseg.h"
 #include "p2p_resiliency.h"
+
+static_assert(NCCL_RMA_SEND_QP_WRS == 2 * NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_SIGNAL_WRS,
+              "NCCL_RMA_SEND_QP_WRS must match the multi-segment sender depth");
+// RCCL: credits wait until a chain fits, so one RMA flush chain must fit the flush QP.
+static_assert(NCCL_RMA_MAX_FLUSH_WRS <= NET_IB_MAX_REQUESTS,
+              "one RMA flush chain must fit the flush QP");
 
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -449,6 +456,7 @@ static ncclResult_t ncclIbCreateQpMlx5(struct ncclIbQpCreateAttr* createQpAttrs,
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs) {
   ncclIbWqeLatMonInit(&qp->latMon);
+  qp->maxSendWrs = createQpAttrs->maxSendWorkRequest;
   if (createQpAttrs->oooRq) {
     NCCLCHECK(ncclIbCreateQpMlx5(createQpAttrs, qp));
     return ncclSuccess;
@@ -720,8 +728,8 @@ static ncclResult_t ncclIbSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
   memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
   qpCreateAttrs.type = IBV_QPT_RC;
   qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Send requests are sent using at most 2 messages (RDMA Write and RDMA Write with Immediate)
-  qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
+  // Extra signal WRs only while multi-segment RMA is on. =0 keeps develop's depth.
+  qpCreateAttrs.maxSendWorkRequest = rcclRmaMultiSegEnabled() ? NCCL_RMA_SEND_QP_WRS : 2 * NET_IB_MAX_REQUESTS;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -1382,9 +1390,14 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+    // Extra flush WRs only while multi-segment RMA is on. =0 keeps develop's depth.
+    qpCreateAttrs.maxSendWorkRequest =
+      rcclRmaMultiSegEnabled() ? NET_IB_MAX_REQUESTS + NCCL_RMA_MAX_FLUSH_WRS : NET_IB_MAX_REQUESTS;
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
+    // Loopback flush QP: local and remote device indices are this recv device.
+    flushQp->devIndex = i;
+    flushQp->remDevIdx = i;
     INFO(NCCL_NET, "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
          __func__, ibDev->portNum, rCommDev->base.ibDevN, ncclIbDevs[rCommDev->base.ibDevN].devName, ncclNIbDevs,
          ncclNMergedIbDevs, flushQp->qp->qp_num, (uint16_t)rCommDev->base.pkeyIndex, rCommDev->base.pd);

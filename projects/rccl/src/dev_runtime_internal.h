@@ -78,6 +78,7 @@ struct ncclDevrMemory {
   size_t* segmentSizes;    // size of each segment, length numSegments
   // Communicator-wide aggregates over all nRanks, populated via bootstrapAllGather.
   int maxGlobalNumSegments;    // max(numSegments) across all communicator ranks
+  int minGlobalNumSegments;    // RCCL: min(numSegments) across all communicator ranks
   bool globalHasSysmemSegment; // true if any communicator rank has a sysmem segment
   // LSA-team aggregates, derived from a global allgather.
   int* lsaNumSegments;   // numSegments for each LSA rank, length lsaSize
@@ -86,6 +87,8 @@ struct ncclDevrMemory {
   // GIN registration state.
   int numGinSegments;                              // 1 unless GIN needs multiple per-segment windows
   struct ncclDevrGinSegmentInfo* ginSegmentInfos;  // per-GIN-segment info
+  // RCCL: owner's DMA-BUF fd per imported host segment (-1 otherwise); closed when the memory is destroyed.
+  int* hostOwnerFds;
 };
 
 ncclResult_t ncclDevrPopulateSegmentSizes(struct ncclDevrMemory* mem, int numSegments);

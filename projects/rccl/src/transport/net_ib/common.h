@@ -336,6 +336,9 @@ struct ncclIbQp {
   // The index of the device on the remote side to which this QP is connected
   // to.
   int remDevIdx;
+  // RCCL: send-queue depth requested at creation. RMA WR credits stop here, so a later depth change
+  // cannot post past the QP; the HCA may round the live cap up.
+  int maxSendWrs;
   struct ncclIbWqeLatMon latMon;
 };
 
