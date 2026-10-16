@@ -220,6 +220,7 @@ set(SRC_FILES
   include/gin/gin_host_proxy.h
   include/gin/gin_host_rocshmem_gda.h
   include/gin/gin_rocshmem_gda_factory.h
+  include/dv_dlopen.h
   include/gin/gin_host_anvil_sdma.h
   include/gin/gin_anvil_sdma_factory.h
   include/git_version.h
@@ -1010,7 +1011,8 @@ add_library(rccl ${HIP_SOURCES})
 
 ## Set RCCL dependencies
 ## Ensure git version is updated before building rccl
-add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks rma_header_symlinks)
+add_dependencies(rccl update_git_version copy_nccl_device_headers net_ib_header_symlinks rma_header_symlinks
+                      rccl_embedded_tuner_configs)
 
 ## Set RCCL include directories
 target_include_directories(rccl PRIVATE ${PROJECT_BINARY_DIR}/include)        # for generated rccl.h header

@@ -2641,7 +2641,7 @@ TEST(Rcclwrap, Gfx1250_CeEligible_StillTakesDda)
 {
     auto comm = std::make_unique<ncclComm>();
     InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/true);
-    size_t   count = CountForBytes(16ull * 1024 * 1024, ncclFloat32); // CE-eligible (4-256 MiB window) and within DDA entry cap (32 MiB), divisible by 8
+    size_t   count = CountForBytes(16ull * 1024 * 1024, ncclFloat32); // CE-eligible (4-256 MiB window) and within the DDA entry cap, divisible by 8
     EXPECT_TRUE(rcclAllReduceShouldTakeDdaPath(comm.get(), count, ncclFloat32,
                                                /*symEligible=*/false, /*ceAllReduceAllowed=*/true, /*query=*/false));
 }
@@ -2900,9 +2900,9 @@ TEST(SkipPresetTopoMatching, Gfx1250_SkipsRomeModelMatching)
 // test_runner/configs), and Rcclwrap.* is the only listed pattern this file
 // matches. A suite of their own would never be run.
 // ---------------------------------------------------------------------------
-// Which unroll factors are arch-pinned is a build property, not a constant:
-// BUILD_ALL_UNROLLS compiles every one for the targeted archs and pins none. Ask
-// the table for a pinned factor rather than hardcoding 32.
+// Which unroll factors are arch-pinned is a build property, not a constant.
+// BUILD_ALL_UNROLLS adds unroll 8 and 16 and leaves an existing pin in place.
+// Ask the table for a pinned factor rather than hardcoding 32.
 constexpr char kOtherArch[] = "gfx1200";
 
 TEST(Rcclwrap, UnrollFactor_RejectsArchRestrictedUnrollOnOtherArch)
@@ -3008,17 +3008,121 @@ TEST(RcclDdaTierThresholds, Gfx1250_NoEnv_UsesArchTable)
             InitDdaDecisionComm(*comm, "gfx1250", 8, 1, /*symmetricSupport=*/false);
             comm->archThresholds = rcclGetArchThresholds("gfx1250");
             ASSERT_NE(comm->archThresholds, nullptr);
-            // LL and LL128 ceilings for AR are both 32 MiB on gfx1250;
-            // VMM ceiling is 16 MiB (above this, Ring/CE takes over).
+            // On an 8-rank gfx1250 comm the AR LL ceiling is rank-scaled to 8 MiB
+            // (1 MiB per rank) and the LL128 ceiling is 256 MiB; VMM ceiling is
+            // 16 MiB (above this, Ring/CE takes over).
             EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce),
-                      32ULL * 1024 * 1024);
+                      8ULL * 1024 * 1024);
             EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce),
-                      32ULL * 1024 * 1024);
+                      256ULL * 1024 * 1024);
             EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce),
                       16ULL * 1024 * 1024);
         },
         {});
 }
+
+// The rank-scaled caps from the 8-64 rank H13 sweep (AICOMRCCL-1756): below 8 ranks
+// the totals stay in force, from 8 ranks each tier grows with the comm and is
+// clipped at 256 MiB.
+TEST(RcclDdaTierThresholds, Gfx1250_RankScaledCaps)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "Gfx1250_RankScaledCaps",
+        []()
+        {
+            constexpr size_t KiB = 1024, MiB = 1024 * KiB;
+            auto comm = std::make_unique<ncclComm>();
+            InitDdaDecisionComm(*comm, "gfx1250", 4, 1, /*symmetricSupport=*/false);
+            comm->archThresholds = rcclGetArchThresholds("gfx1250");
+            ASSERT_NE(comm->archThresholds, nullptr);
+            // 4 ranks: totals.
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), 32 * MiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), 128 * KiB);
+            EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), 16 * MiB);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), 128 * MiB);
+            EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), 2 * MiB);
+            EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), 0ul);
+            for (int nRanks : {8, 16, 32, 64}) {
+                comm->nRanks = nRanks;
+                const size_t n = static_cast<size_t>(nRanks);
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllReduce), n * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), n * 16 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncReduceScatter), n * 256 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllGather), std::min(n * 16 * MiB, 256 * MiB))
+                    << nRanks;
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncReduceScatter), n * 512 * KiB) << nRanks;
+                EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), n * 2 * MiB) << nRanks;
+                // Unscaled tiers keep their totals.
+                EXPECT_EQ(rcclDdaLL128Threshold(comm.get(), ncclFuncAllReduce), 256 * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncAllReduce), 16 * MiB) << nRanks;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAlltoAll), 64 * KiB) << nRanks;
+            }
+        },
+        {});
+}
+
+// Only gfx1250 scales its caps with the comm: on gfx942/gfx950 a 64-rank comm resolves
+// the same caps as an 8-rank one, and the two-shot ceilings keep the env defaults.
+// On gfx1250 both two-shot ceilings follow their tier caps.
+TEST(RcclDdaTierThresholds, RankScalingOnlyOnGfx1250)
+{
+    RUN_ISOLATED_TEST_WITH_ENV(
+        "RankScalingOnlyOnGfx1250",
+        []()
+        {
+            constexpr size_t MiB = 1024 * 1024;
+            auto comm = std::make_unique<ncclComm>();
+            for (const char* arch : {"gfx942", "gfx950"})
+            {
+                InitDdaDecisionComm(*comm, arch, 8, 1, /*symmetricSupport=*/false);
+                comm->archThresholds = rcclGetArchThresholds(arch);
+                const size_t vmm8 = rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter);
+                const size_t ll8 = rcclDdaLLThreshold(comm.get(), ncclFuncAllGather);
+                comm->nRanks = 64;
+                EXPECT_EQ(rcclDdaVmmThreshold(comm.get(), ncclFuncReduceScatter), vmm8) << arch;
+                EXPECT_EQ(rcclDdaLLThreshold(comm.get(), ncclFuncAllGather), ll8) << arch;
+                EXPECT_EQ(rcclDdaLLTwoShotThreshold(comm.get()), 2 * MiB) << arch;
+                EXPECT_EQ(rcclDdaLL128TwoShotThreshold(comm.get()), 64 * MiB) << arch;
+            }
+            InitDdaDecisionComm(*comm, "gfx1250", 16, 1, /*symmetricSupport=*/false);
+            comm->archThresholds = rcclGetArchThresholds("gfx1250");
+            EXPECT_EQ(rcclDdaLLTwoShotThreshold(comm.get()), 16 * MiB);
+            EXPECT_EQ(rcclDdaLL128TwoShotThreshold(comm.get()), 256 * MiB);
+        },
+        {});
+}
+
+// CE-Scratch is forced on gfx942/gfx950 as before and left to the kernel paths on
+// gfx1250 (AICOMRCCL-2876).
+TEST(RcclDdaTierThresholds, ForceCeScratchPerArch)
+{
+    EXPECT_FALSE(rcclGetArchThresholds("gfx1250")->forceCeScratch);
+    EXPECT_TRUE(rcclGetArchThresholds("gfx950")->forceCeScratch);
+    EXPECT_TRUE(rcclGetArchThresholds("gfx942")->forceCeScratch);
+}
+
+// RCCL_TUNING_PARTITION_MODE: gfx1250 has its own DPX table, tuned on DPX nodes apart from
+// the SPX one; the other archs return one table for every mode.
+TEST(RcclDdaTierThresholds, TuningPartitionTablePerArch)
+{
+    const rcclArchThresholds* spx = rcclGetArchThresholds("gfx1250");
+    const rcclArchThresholds* dpx = rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_DPX);
+    ASSERT_NE(spx, nullptr);
+    ASSERT_NE(dpx, nullptr);
+    EXPECT_EQ(spx, rcclGetArchThresholds("gfx1250", RCCL_TUNING_PARTITION_SPX));
+    EXPECT_NE(spx, dpx);
+    EXPECT_NE(0, std::memcmp(spx, dpx, sizeof(*spx))) << "the DPX table carries its own tuning";
+    // A few of the DPX-only entries, so a DPX value copied back over SPX shows up here.
+    EXPECT_EQ(dpx->agRingLL128MaxPerRank, (size_t)16 * 1024 * 1024);
+    EXPECT_EQ(dpx->arTreeLLMaxPerRank, (size_t)256 * 1024);
+    EXPECT_EQ(dpx->ddaLLMax[ncclFuncAlltoAll], (size_t)2 * 1024 * 1024);
+    EXPECT_NE(spx->agRingLL128MaxPerRank, dpx->agRingLL128MaxPerRank);
+    for (const char* arch : {"gfx950", "gfx942"})
+    {
+        EXPECT_EQ(rcclGetArchThresholds(arch), rcclGetArchThresholds(arch, RCCL_TUNING_PARTITION_DPX)) << arch;
+    }
+}
+
 
 TEST(RcclDdaTierThresholds, Gfx1250_EnvOverridesArchTable)
 {

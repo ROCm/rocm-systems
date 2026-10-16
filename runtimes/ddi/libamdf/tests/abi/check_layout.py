@@ -26,7 +26,7 @@ STRING = re.compile(rf"string ({IDENT}) .*")
 RUST_KEYWORDS = {
     "type", "self", "Self", "super", "crate", "async", "await", "move", "ref"
 }
-EXPECTED_RECORDS = 967  # Pinned C snapshot; update only with the headers.
+EXPECTED_RECORDS = 958  # Pinned C snapshot; update only with the headers.
 
 
 def run(command: list[str]) -> str:

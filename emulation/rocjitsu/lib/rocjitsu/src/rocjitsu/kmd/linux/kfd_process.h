@@ -38,6 +38,10 @@
 
 namespace rocjitsu {
 
+/// @brief DRM BO state (create info, placement, UMD metadata); defined by the interposer.
+/// @details The KFD code only stores and copies pointers to it.
+struct GemObject;
+
 /// @brief Per-process KFD state.
 ///
 /// @details Mirrors the kernel's kfd_process + kfd_process_device for a
@@ -103,15 +107,21 @@ public:
     uint32_t flags = 0;
     uint64_t handle = 0;
     int memfd = -1;
+    // Public dma-buf access mode retained across IPC import and re-export.
+    int export_access_mode = -1;
     uint32_t gpu_id = 0;
     bool user_va = false;
     bool imported = false;
+    bool shared = false; ///< Simulator cache policy; does not alter requested ABI flags.
     int dmabuf_fd = -1;
     // True when the driver created host_ptr (mmap it itself) and must munmap it
     // on teardown. False for caller-owned pages (e.g. reused MAP_FIXED pages
     // from the thunk) that the driver must never unmap, since unmapping them
     // races with the owning process still accessing the memory.
     bool host_ptr_owned = false;
+    // DRM BO state (create info, placement, UMD metadata) for this backing. The
+    // kernel BO keeps it after every GEM handle and dmabuf fd closes.
+    std::shared_ptr<GemObject> bo_state;
   };
 
   /// @brief Memory policy descriptor.
@@ -567,7 +577,10 @@ public:
     uint32_t queue_type = 0;
     uint32_t gpu_id = 0;
     uint32_t xcc_id = 0;
+    /// CREATE_QUEUE supplied an exception-status address; the interrupt event is optional.
+    bool has_runtime_exception_signal = false;
     uint64_t exception_status = 0; ///< Raised exceptions on this queue (KFD_EC_MASK bits).
+    bool gws_allocated = false;    ///< Owns the process/GPU GWS grant until release or destruction.
     /// Exception bits whose ROCr ownership decision is still in flight.
     uint64_t runtime_exception_pending_status = 0;
     /// Runtime publications per bit; identical concurrent events may overlap.
