@@ -11,9 +11,9 @@
 #include "common/env_vars.hpp"
 #include "common/path.hpp"
 #include "core/agent_manager.hpp"
+#include "core/clocks/timeline.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/node_info.hpp"
 #include "core/trace_cache/cache_manager.hpp"
 #include "core/trace_cache/sample_type.hpp"
@@ -762,7 +762,7 @@ extern "C"
             return;
         }
 
-        auto const timestamp = rocprofsys::control::clocks::timeline_ns();
+        auto const timestamp = rocprofsys::clocks::timeline_ns();
 
         auto const _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
@@ -789,7 +789,7 @@ extern "C"
             return;
         }
 
-        auto const timestamp = rocprofsys::control::clocks::timeline_ns();
+        auto const timestamp = rocprofsys::clocks::timeline_ns();
         auto const _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
         if(rocprofsys::config::get_use_causal())

@@ -3,6 +3,7 @@
 
 #include "library/components/backtrace_metrics.hpp"
 #include "common/units/data_size.hpp"
+#include "core/clocks/thread_cputime.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -43,14 +44,12 @@
 #include <array>
 #include <chrono>
 #include <cstring>
-#include <ctime>
 #include <initializer_list>
 #include <mutex>
 #include <regex>
 #include <sstream>
 #include <string>
 #include <string_view>
-#include <time.h>
 #include <type_traits>
 #include <vector>
 
@@ -293,18 +292,6 @@ cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t time
         });
     }
 }
-
-std::chrono::nanoseconds
-thread_cputime() noexcept
-{
-    struct timespec cpu_time = {};
-    if(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_time) != 0)
-    {
-        return std::chrono::nanoseconds::zero();
-    }
-    return std::chrono::seconds{ cpu_time.tv_sec } +
-           std::chrono::nanoseconds{ cpu_time.tv_nsec };
-}
 }  // namespace
 
 void
@@ -325,7 +312,7 @@ backtrace_metrics::sample(int)
     }
 
     auto const _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu_time        = thread_cputime();
+    m_cpu_time        = clocks::thread_cputime();
     m_mem_peak        = _cache.get_peak_rss();
     m_ctx_swch        = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();

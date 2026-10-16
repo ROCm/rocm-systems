@@ -3,22 +3,22 @@
 
 #include "steady.hpp"
 
-#include "core/control/clock.hpp"
+#include "core/clocks/waitable/clock.hpp"
 #include "core/state.hpp"
 
 #include <chrono>
 #include <mutex>
 
-namespace rocprofsys::control::clocks
+namespace rocprofsys::clocks::waitable
 {
-clock_time_point
+time_point
 steady::now() const noexcept
 {
-    return std::chrono::time_point_cast<clock_duration>(std::chrono::steady_clock::now());
+    return std::chrono::time_point_cast<duration>(std::chrono::steady_clock::now());
 }
 
 bool
-steady::sleep_until(clock_time_point deadline)
+steady::sleep_until(time_point deadline)
 {
     const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     std::unique_lock<std::mutex> clk_lcoks{ m_mutex };
@@ -45,4 +45,4 @@ steady::reset() noexcept
     const std::scoped_lock clk_lcoks{ m_mutex };
     m_interrupted = false;
 }
-}  // namespace rocprofsys::control::clocks
+}  // namespace rocprofsys::clocks::waitable

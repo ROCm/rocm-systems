@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/components/backtrace_timestamp.hpp"
-#include "core/control/clocks/timeline.hpp"
+#include "core/clocks/timeline.hpp"
 #include "library/thread_info.hpp"
 #include <cstdint>
 
@@ -25,7 +25,7 @@ void
 backtrace_timestamp::sample(int)
 {
     m_tid  = tim::threading::get_id();
-    m_real = control::clocks::timeline_ns();
+    m_real = clocks::timeline_ns();
 }
 }  // namespace rocprofsys::component
 

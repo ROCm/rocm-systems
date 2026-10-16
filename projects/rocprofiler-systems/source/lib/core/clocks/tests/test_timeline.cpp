@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/control/clocks/timeline.hpp"
+#include "core/clocks/timeline.hpp"
 
 #include <cstdint>
 #include <gtest/gtest.h>
@@ -10,9 +10,9 @@
 
 namespace
 {
-using rocprofsys::control::clocks::timeline_available;
-using rocprofsys::control::clocks::timeline_now;
-using rocprofsys::control::clocks::timeline_ns;
+using rocprofsys::clocks::timeline_available;
+using rocprofsys::clocks::timeline_now;
+using rocprofsys::clocks::timeline_ns;
 
 std::uint64_t
 read_boottime_ns()

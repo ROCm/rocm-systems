@@ -4,10 +4,10 @@
 #pragma once
 
 #include "common/defines.h"
+#include "core/clocks/timeline.hpp"
 #include "core/common.hpp"
 #include "core/concepts.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -73,7 +73,7 @@ template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
-    return control::clocks::timeline_ns<Tp>();
+    return clocks::timeline_ns<Tp>();
 }
 
 inline auto&

@@ -4,10 +4,10 @@
 #include "library/sampling.hpp"
 #include "common/env_vars.hpp"
 #include "common/units/power.hpp"
+#include "core/clocks/timeline.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
@@ -1813,7 +1813,7 @@ pause()
     }
 
     LOG_DEBUG("Pausing sampling...");
-    pending_pause_ts.store(control::clocks::timeline_ns());
+    pending_pause_ts.store(clocks::timeline_ns());
     block_samples();
     set_sampler_timers(timer_state::stopped);
 }
@@ -1832,7 +1832,7 @@ resume()
 
     LOG_DEBUG("Resuming sampling...");
     auto const pause_ts  = pending_pause_ts.exchange(0);
-    auto const resume_ts = control::clocks::timeline_ns();
+    auto const resume_ts = clocks::timeline_ns();
     if(pause_ts > 0)
     {
         auto const _lk = std::lock_guard<std::mutex>{ pause_mutex };

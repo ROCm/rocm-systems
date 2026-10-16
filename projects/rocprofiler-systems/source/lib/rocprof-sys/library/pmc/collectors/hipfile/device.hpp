@@ -128,7 +128,7 @@ public:
 
         // The first sample has no interval behind it, so it has no rate. Reporting the
         // lifetime total over a zero interval would open every run with a false spike.
-        // The stamp is the process sampler's tick (control::clocks::timeline_ns() →
+        // The stamp is the process sampler's tick (clocks::timeline_ns() →
         // CLOCK_BOOTTIME), the same value every PMC collector gets that interval.
         // It does not step backward with NTP, so the unsigned subtraction cannot wrap
         // from a wall-clock rewind. A repeated stamp is already treated as zero elapsed.

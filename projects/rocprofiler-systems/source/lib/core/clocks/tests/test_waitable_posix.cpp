@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/control/clocks/posix.hpp"
+#include "core/clocks/waitable/posix.hpp"
 #include "core/control/session.hpp"
 
-#include "core/control/clock.hpp"
+#include "core/clocks/waitable/clock.hpp"
 #include "core/control/triggers/time_window.hpp"
 #include <atomic>
 #include <chrono>
@@ -14,9 +14,9 @@
 
 namespace
 {
-using rocprofsys::control::clock_duration;
+using rocprofsys::clocks::waitable::duration;
+using rocprofsys::clocks::waitable::posix;
 using rocprofsys::control::session;
-using rocprofsys::control::clocks::posix;
 using time_window_t = rocprofsys::control::triggers::time_window<posix>;
 
 // Polls the session's active state until it reaches @p expected or a
@@ -39,7 +39,7 @@ wait_until_active(session& sess, bool expected)
 }
 }  // namespace
 
-TEST(posix_clock_test, now_returns_advancing_time_points)
+TEST(waitable_posix_test, now_returns_advancing_time_points)
 {
     using namespace std::chrono_literals;
     const posix clk{ CLOCK_REALTIME };  // NOLINT
@@ -51,13 +51,13 @@ TEST(posix_clock_test, now_returns_advancing_time_points)
     EXPECT_GT(later, earlier) << "now() should advance over time";
 }
 
-TEST(posix_clock_test, interrupt_makes_sleep_until_return_false)
+TEST(waitable_posix_test, interrupt_makes_sleep_until_return_false)
 {
     using namespace std::chrono_literals;
     posix clk{ CLOCK_REALTIME };
 
     // Schedule a deadline far in the future; interrupt from another thread.
-    const auto deadline = clk.now() + clock_duration{ 30'000'000'000LL };  // 30s
+    const auto deadline = clk.now() + duration{ 30'000'000'000LL };  // 30s
 
     std::atomic<bool> result{ true };
     std::thread       sleeper{ [&] { result.store(clk.sleep_until(deadline)); } };
@@ -69,18 +69,18 @@ TEST(posix_clock_test, interrupt_makes_sleep_until_return_false)
     EXPECT_FALSE(result.load()) << "sleep_until should return false when interrupted";
 }
 
-TEST(posix_clock_test, reset_allows_reuse_after_interrupt)
+TEST(waitable_posix_test, reset_allows_reuse_after_interrupt)
 {
     posix clk{ CLOCK_REALTIME };
     clk.interrupt();
     clk.reset();
 
     // After reset, a deadline already in the past should return true (no interrupt).
-    const auto past = clk.now() - clock_duration{ 1 };
+    const auto past = clk.now() - duration{ 1 };
     EXPECT_TRUE(clk.sleep_until(past));
 }
 
-TEST(posix_clock_test, time_window_with_posix_clock_drives_session)
+TEST(waitable_posix_test, time_window_with_posix_clock_drives_session)
 {
     const auto s_ptr = std::make_shared<session>();
     auto&      sess  = *s_ptr;
@@ -90,8 +90,8 @@ TEST(posix_clock_test, time_window_with_posix_clock_drives_session)
     // jitter. Don't shrink the timeout to "tighten" this; shrink the
     // windows if faster tests are needed instead.
     posix          clk{ CLOCK_REALTIME };
-    constexpr auto k_delay = clock_duration{ 20'000'000 };  // 20 ms
-    constexpr auto k_dur   = clock_duration{ 40'000'000 };  // 40 ms
+    constexpr auto k_delay = duration{ 20'000'000 };  // 20 ms
+    constexpr auto k_dur   = duration{ 40'000'000 };  // 40 ms
     time_window_t  window{ s_ptr, clk, { .delay = k_delay, .duration = k_dur } };
 
     EXPECT_FALSE(sess.is_active()) << "initial action should be paused when delay > 0";

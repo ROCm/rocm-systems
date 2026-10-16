@@ -4,9 +4,9 @@
 #pragma once
 
 #include "common/defines.h"
+#include "core/clocks/timeline.hpp"
 #include "core/common_types.hpp"
 #include "core/config.hpp"
-#include "core/control/clocks/timeline.hpp"
 #include "core/demangler.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -86,7 +86,7 @@ inline constexpr std::size_t renumber_growth_slack = 16;
 
 struct wall_clock_source
 {
-    [[nodiscard]] timestamp_t now() const { return control::clocks::timeline_ns(); }
+    [[nodiscard]] timestamp_t now() const { return clocks::timeline_ns(); }
 };
 
 struct trace_cache_region_sink

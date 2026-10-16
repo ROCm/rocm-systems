@@ -8,7 +8,7 @@
 #include <ctime>
 #include <time.h>
 
-namespace rocprofsys::control::clocks
+namespace rocprofsys::clocks
 {
 /// Absolute timeline clock for CPU and call-stack event stamps.
 /// Matches the host domain used by rocprofiler-sdk (`CLOCK_BOOTTIME`).
@@ -37,4 +37,4 @@ timeline_ns() noexcept
 {
     return static_cast<Tp>(timeline_now().count());
 }
-}  // namespace rocprofsys::control::clocks
+}  // namespace rocprofsys::clocks

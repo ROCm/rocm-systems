@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/control/clock.hpp"
+#include "core/clocks/waitable/clock.hpp"
 #include "core/state.hpp"
 
 #include "logger/debug.hpp"
@@ -16,7 +16,7 @@
 #include <system_error>
 #include <time.h>
 
-namespace rocprofsys::control::clocks
+namespace rocprofsys::clocks::waitable
 {
 /// Clock backed by a POSIX clock (clock_gettime / clock_nanosleep).
 /// Used for time-window delay/duration sleeps, not absolute event stamps.
@@ -42,7 +42,7 @@ public:
     posix(posix&&)                 = delete;
     posix& operator=(posix&&)      = delete;
 
-    [[nodiscard]] clock_time_point now() const noexcept
+    [[nodiscard]] time_point now() const noexcept
     {
         struct timespec specs = {};
         if(clock_gettime(m_clock_id, &specs) != 0)
@@ -50,10 +50,10 @@ public:
             LOG_WARNING("clock_gettime failed for clock id {}: {}", m_clock_id,
                         std::system_category().message(errno));
         }
-        return clock_time_point{ clock_duration{ to_nanoseconds(specs) } };
+        return time_point{ duration{ to_nanoseconds(specs) } };
     }
 
-    [[nodiscard]] bool sleep_until(clock_time_point deadline)
+    [[nodiscard]] bool sleep_until(time_point deadline)
     {
         if(!m_usable)
         {
@@ -103,7 +103,7 @@ private:
         return m_interrupted;
     }
 
-    void sleep_one_chunk(clock_time_point current, std::int64_t remaining_ns)
+    void sleep_one_chunk(time_point current, std::int64_t remaining_ns)
     {
         const auto this_chunk_ns    = std::min(remaining_ns, k_chunk_ns);
         const auto next_ns          = current.time_since_epoch().count() + this_chunk_ns;
@@ -136,4 +136,4 @@ private:
     std::mutex m_mutex;
     bool       m_interrupted{ false };
 };
-}  // namespace rocprofsys::control::clocks
+}  // namespace rocprofsys::clocks::waitable

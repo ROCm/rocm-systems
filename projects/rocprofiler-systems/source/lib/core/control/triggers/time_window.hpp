@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/control/clock.hpp"
+#include "core/clocks/waitable/clock.hpp"
 #include "core/control/session.hpp"
 #include "core/state.hpp"
 
@@ -19,11 +19,11 @@ namespace rocprofsys::control::triggers
 /// can be handed to a time_window<Clock> for any Clock.
 struct time_window_specs
 {
-    clock_duration delay{};
-    clock_duration duration{};
+    clocks::waitable::duration delay{};
+    clocks::waitable::duration duration{};
 };
 
-template <clock_policy Clock>
+template <clocks::waitable::clock Clock>
 class time_window
 {
 public:
@@ -98,11 +98,11 @@ private:
 
     [[nodiscard]] static action initial_action(const time_window_specs& specs) noexcept
     {
-        if(specs.delay > clock_duration::zero())
+        if(specs.delay > clocks::waitable::duration::zero())
         {
             return action::pause;
         }
-        if(specs.duration > clock_duration::zero())
+        if(specs.duration > clocks::waitable::duration::zero())
         {
             return action::trace;
         }
@@ -111,8 +111,8 @@ private:
 
     [[nodiscard]] bool has_window() const noexcept
     {
-        return m_specs.delay > clock_duration::zero() ||
-               m_specs.duration > clock_duration::zero();
+        return m_specs.delay > clocks::waitable::duration::zero() ||
+               m_specs.duration > clocks::waitable::duration::zero();
     }
 
     void worker()
@@ -120,8 +120,8 @@ private:
         const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
 
         const auto current_ts   = m_clock.now();
-        const bool has_delay    = m_specs.delay > clock_duration::zero();
-        const bool has_duration = m_specs.duration > clock_duration::zero();
+        const bool has_delay    = m_specs.delay > clocks::waitable::duration::zero();
+        const bool has_duration = m_specs.duration > clocks::waitable::duration::zero();
 
         if(has_delay)
         {

@@ -1,10 +1,10 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/control/clock.hpp"
-#include "core/control/clocks/steady.hpp"
+#include "core/clocks/waitable/steady.hpp"
 #include "core/control/session.hpp"
 
+#include "core/clocks/waitable/clock.hpp"
 #include "core/control/triggers/time_window.hpp"
 #include <memory>
 
@@ -14,9 +14,9 @@
 
 namespace
 {
-using rocprofsys::control::clock_duration;
+using rocprofsys::clocks::waitable::duration;
+using rocprofsys::clocks::waitable::steady;
 using rocprofsys::control::session;
-using rocprofsys::control::clocks::steady;
 using time_window_t = rocprofsys::control::triggers::time_window<steady>;
 
 bool
@@ -36,26 +36,26 @@ wait_until_active(session& sess, bool expected)
 }
 }  // namespace
 
-TEST(steady_clock_test, reset_allows_reuse_after_interrupt)
+TEST(waitable_steady_test, reset_allows_reuse_after_interrupt)
 {
     steady clk{};
     clk.interrupt();
     clk.reset();
 
-    EXPECT_TRUE(clk.sleep_until(clk.now() - clock_duration{ 1 }));
+    EXPECT_TRUE(clk.sleep_until(clk.now() - duration{ 1 }));
 }
 
 // A clock outlives the windows driven by it, so stopping one window must not
 // make the next one bail out of its first sleep. The two windows share a clock
 // sequentially - the first is joined and destroyed before the second exists -
 // which is the arrangement production uses across a stop/restart.
-TEST(steady_clock_test, window_started_on_a_stopped_clock_still_runs)
+TEST(waitable_steady_test, window_started_on_a_stopped_clock_still_runs)
 {
     const auto sess_ptr = std::make_shared<session>();
     auto&      sess     = *sess_ptr;
     steady     clk{};
 
-    constexpr auto long_delay = clock_duration{ 10'000'000'000LL };  // 10 s
+    constexpr auto long_delay = duration{ 10'000'000'000LL };  // 10 s
     {
         time_window_t first{ sess_ptr, clk, { .delay = long_delay, .duration = {} } };
         first.start();
@@ -63,7 +63,7 @@ TEST(steady_clock_test, window_started_on_a_stopped_clock_still_runs)
     }
 
     // No duration: the active state is terminal, so the poll cannot miss it.
-    constexpr auto delay = clock_duration{ 20'000'000 };  // 20 ms
+    constexpr auto delay = duration{ 20'000'000 };  // 20 ms
     time_window_t  second{ sess_ptr, clk, { .delay = delay, .duration = {} } };
 
     ASSERT_FALSE(sess.is_active()) << "a pending delay should leave the session paused";
