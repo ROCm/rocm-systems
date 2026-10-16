@@ -160,10 +160,6 @@ class Bench_base(ABC):
 
         print(f"\r{int(pct * 100):3d}% {bar}", end="", flush=True)
 
-    def calc_stats(self, samples: list) -> float:
-        """Returns the peak (max) value from the samples."""
-        return max(samples)
-
     class Program:
         """Helper class for loading and compiling kernels."""
 
@@ -444,7 +440,7 @@ class Bench_base(ABC):
             [d_src, c_int64(num_steps)],
         )
 
-        peak = self.calc_stats(samples)
+        peak = max(samples)
 
         event_ms = total_bytes / peak / 1e6
 
@@ -499,7 +495,7 @@ class Bench_base(ABC):
             [mem_block, dummy, iters],
         )
 
-        peak = self.calc_stats(samples)
+        peak = max(samples)
 
         event_ms = total_bytes / peak / 1e6
 
@@ -562,7 +558,7 @@ class Bench_base(ABC):
             [iters, dummy],
         )
 
-        peak = self.calc_stats(samples)
+        peak = max(samples)
 
         event_ms = total_bytes / peak / 1e6
 
@@ -625,7 +621,7 @@ class Bench_base(ABC):
             [memblock, iterations],
         )
 
-        peak = self.calc_stats(samples)
+        peak = max(samples)
 
         event_ms = total_flops / peak / 1e6
 
@@ -690,7 +686,7 @@ class Bench_base(ABC):
             [iters, dummy],
         )
 
-        peak = self.calc_stats(samples)
+        peak = max(samples)
 
         event_ms = total_flops / peak / 1e6
 

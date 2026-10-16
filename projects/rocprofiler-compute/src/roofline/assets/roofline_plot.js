@@ -1189,15 +1189,18 @@
     return entries;
   }
 
+  function peakLabel(peak) {
+    if (peak === ALL_PEAKS_VALUE) {
+      return ALL_PEAKS_LABEL;
+    }
+    if (peak === LIMITING_PEAK_VALUE) {
+      return LIMITING_PEAK_LABEL;
+    }
+    return peak;
+  }
+
   function exportViewSubtitle() {
-    var peak = effectivePeak();
-    var peakLabel =
-      peak === ALL_PEAKS_VALUE
-        ? ALL_PEAKS_LABEL
-        : peak === LIMITING_PEAK_VALUE
-        ? LIMITING_PEAK_LABEL
-        : peak;
-    var parts = ["AI axis: " + peakLabel];
+    var parts = ["AI axis: " + peakLabel(effectivePeak())];
     if (hasRuntimeData && isFinite(state.runtimeThreshold)) {
       parts.push("runtime shown: " + state.runtimeThreshold.toFixed(3) + "%");
     }

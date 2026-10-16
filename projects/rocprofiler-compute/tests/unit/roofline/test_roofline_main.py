@@ -11,7 +11,7 @@ import json
 import math
 import re
 from pathlib import Path
-from typing import TYPE_CHECKING, Dict, List, Tuple
+from typing import Dict, List, Tuple
 
 import plotly.graph_objects as go
 import pytest
@@ -20,9 +20,7 @@ import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import truncate_kernel_name, wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
-
-if TYPE_CHECKING:
-    from roofline.roofline_main import Roofline
+from roofline.roofline_main import Roofline, _default_precisions
 
 _ASSETS = Path(roofline_html.__file__).parent / "assets"
 
@@ -36,11 +34,9 @@ class MockMspec:
     gpu_arch = "gfx90a"
 
 
-def make_roofline(datatypes: List[str], **run_parameters: object) -> "Roofline":
+def make_roofline(datatypes: List[str], **run_parameters: object) -> Roofline:
     """A Roofline for the unit tests. It never reads its ``args`` on the
     cli_generate_plot / generate_plot paths, so a bare Namespace suffices."""
-    from roofline.roofline_main import Roofline
-
     parameters: Dict[str, object] = {
         "workload_dir": "",
         "device_id": 0,
@@ -717,8 +713,6 @@ def test_dash_figures_keep_every_ceiling(benchmarked_roofline) -> None:
 
 
 def test_default_precisions_fp32_fp16_fp8_present__orders_fp32_first() -> None:
-    from roofline.roofline_main import _default_precisions
-
     assert _default_precisions(["FP16", "FP32", "FP8", "FP64"]) == [
         "FP32",
         "FP16",
@@ -728,8 +722,6 @@ def test_default_precisions_fp32_fp16_fp8_present__orders_fp32_first() -> None:
 
 
 def test_default_precisions_no_preferred__falls_back_to_first_datatype() -> None:
-    from roofline.roofline_main import _default_precisions
-
     assert _default_precisions(["FP64", "BF16"]) == ["FP64"]
 
 
