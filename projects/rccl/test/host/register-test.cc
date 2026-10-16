@@ -26,6 +26,7 @@
 #include "fakes/nccl_fakes.h"
 #include "fakes/recorder_fakes.h"
 #include "fakes/transport_p2p_reg_fakes.h"
+#include "fakes/transport_stubs.h"
 
 // Routes every NCCL_PARAM in register.cc through g_loadParam on each call.
 #include "fakes/param_redirect.h"
@@ -46,6 +47,7 @@
 namespace {
 
 constexpr uintptr_t kPage = 0x1000;
+constexpr int kCommDev = 3;
 
 void* Ptr(uintptr_t addr) { return reinterpret_cast<void*>(addr); }
 
@@ -99,6 +101,7 @@ class RegisterMicrotestBase : public ::testing::Test {
 
   void SetUp() override {
     comm_->regCache.pageSize = kPage;
+    comm_->cudaDev = kCommDev;
     ncclIntruQueueMpscConstruct(&comm_->callbackQueue);
   }
 
@@ -111,6 +114,7 @@ class RegisterMicrotestBase : public ::testing::Test {
     ResetNcclFakes();
     ResetRecorderFakes();
     ResetTransportP2pRegFakes();
+    ResetTransportStubs();
   }
 
   // Appends a record straight into the cache, as production allocates it (calloc, freed with free()).
@@ -127,6 +131,13 @@ class RegisterMicrotestBase : public ::testing::Test {
     reg->graphRefs = graphRefs;
     cache->slots[cache->population++] = reg;
     return reg;
+  }
+
+  // Runs ncclRegCleanup and, on success, forgets the cache it freed.
+  ncclResult_t CleanupAll() {
+    ncclResult_t res = ncclRegCleanup(comm_.get());
+    if (res == ncclSuccess) comm_->regCache = {nullptr, 0, 0, kPage};
+    return res;
   }
 
   int Population() const { return comm_->regCache.population; }
@@ -548,6 +559,333 @@ TEST_F(RegisterCommRegisterMicrotest, GraphRegisterInvalidComm_ReturnsError) {
   g_commCheck = [](ncclComm*, const char*, const char*) { return ncclInvalidArgument; };
   void* handle = nullptr;
   EXPECT_EQ(micro_ncclCommGraphRegister(comm_.get(), Ptr(0x10000), kPage, &handle), ncclInvalidArgument);
+}
+
+// ---------------------------------------------------------------------------
+// ncclCommDeregister / ncclCommGraphDeregister
+// ---------------------------------------------------------------------------
+
+using RegisterDeregisterMicrotest = RegisterMicrotestBase;
+
+TEST_F(RegisterDeregisterMicrotest, NullHandle_SucceedsWithoutTouchingDevice) {
+  ScopedHook setDevice(g_hipSetDevice, [](int) { return hipSuccess; });
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), nullptr), ncclSuccess);
+  EXPECT_EQ(setDevice.calls, 0);
+}
+
+TEST_F(RegisterDeregisterMicrotest, UnknownHandle_ReturnsInvalidUsage) {
+  Seed(0x10000, 0x11000);
+  ncclReg stranger{};
+  stranger.localRefs = 1;
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), &stranger), ncclInvalidUsage);
+  EXPECT_EQ(Population(), 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, SharedRecord_DropsOneRefAndKeepsRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000, /*localRefs=*/2);
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclSuccess);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(Slot(0), reg);
+  EXPECT_EQ(reg->localRefs, 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, GraphRefStillHeld_KeepsRecordAfterLocalRelease) {
+  ncclReg* reg = Seed(0x10000, 0x11000, /*localRefs=*/1, /*graphRefs=*/1);
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclSuccess);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(reg->localRefs, 0);
+  EXPECT_EQ(reg->graphRefs, 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, LocalRefStillHeld_KeepsRecordAfterGraphRelease) {
+  ncclReg* reg = Seed(0x10000, 0x11000, /*localRefs=*/1, /*graphRefs=*/1);
+  EXPECT_EQ(micro_ncclCommGraphDeregister(comm_.get(), reg), ncclSuccess);
+  ASSERT_EQ(Population(), 1);
+  EXPECT_EQ(reg->localRefs, 1);
+  EXPECT_EQ(reg->graphRefs, 0);
+}
+
+TEST_F(RegisterDeregisterMicrotest, LastRef_RemovesRecordAndKeepsOthersInOrder) {
+  ncclReg* first = Seed(0x10000, 0x11000);
+  ncclReg* middle = Seed(0x20000, 0x21000);
+  ncclReg* last = Seed(0x30000, 0x31000);
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), middle), ncclSuccess);
+  ASSERT_EQ(Population(), 2);
+  EXPECT_EQ(Slot(0), first);
+  EXPECT_EQ(Slot(1), last);
+}
+
+TEST_F(RegisterDeregisterMicrotest, LastGraphRef_RemovesRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000, /*localRefs=*/0, /*graphRefs=*/1);
+  EXPECT_EQ(micro_ncclCommGraphDeregister(comm_.get(), reg), ncclSuccess);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterDeregisterMicrotest, LastRef_ReleasesOnCommDeviceAndRestoresCaller) {
+  g_currentDevice = 5;
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = COLLNET_REG_COMPLETE;
+  int deviceDuringRelease = -1;
+  g_ncclCollnetDeregBuffer = [&](ncclComm*, ncclProxyConnector*, void*) {
+    deviceDuringRelease = g_currentDevice;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclSuccess);
+  EXPECT_EQ(deviceDuringRelease, kCommDev);
+  EXPECT_EQ(g_currentDevice, 5);
+}
+
+TEST_F(RegisterDeregisterMicrotest, SetDeviceFails_ReturnsCudaErrorAndKeepsRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  g_hipSetDevice = [](int) { return hipErrorInvalidDevice; };
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclUnhandledCudaError);
+  EXPECT_EQ(Population(), 1);
+  EXPECT_EQ(reg->localRefs, 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, GetDeviceFails_ReturnsCudaErrorAndKeepsRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  g_hipGetDevice = [](int*) { return hipErrorInvalidDevice; };
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclUnhandledCudaError);
+  EXPECT_EQ(Population(), 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, CleanupFails_ReturnsErrorAndKeepsRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = NVLS_REG_COMPLETE;
+  g_ncclNvlsUbDeregister = [](ncclComm*, ncclReg*) { return ncclInternalError; };
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclInternalError);
+  EXPECT_EQ(Population(), 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, PendingCallbacks_RunBeforeLookup) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  ProbeCallback probe;
+  ncclIntruQueueMpscEnqueue(&comm_->callbackQueue, &probe.base);
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclSuccess);
+  EXPECT_EQ(probe.calls, 1);
+  EXPECT_EQ(probe.populationSeen, 1);
+  EXPECT_EQ(Population(), 0);
+}
+
+TEST_F(RegisterDeregisterMicrotest, CallbackFails_ReturnsErrorAndKeepsRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  ProbeCallback probe;
+  probe.result = ncclInternalError;
+  ncclIntruQueueMpscEnqueue(&comm_->callbackQueue, &probe.base);
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclInternalError);
+  EXPECT_EQ(Population(), 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, InvalidComm_ReturnsErrorAndKeepsRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  g_commCheck = [](ncclComm*, const char*, const char*) { return ncclInvalidArgument; };
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclInvalidArgument);
+  EXPECT_EQ(Population(), 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, GraphDeregisterInvalidComm_ReturnsErrorAndKeepsRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000, /*localRefs=*/0, /*graphRefs=*/1);
+  g_commCheck = [](ncclComm*, const char*, const char*) { return ncclInvalidArgument; };
+  EXPECT_EQ(micro_ncclCommGraphDeregister(comm_.get(), reg), ncclInvalidArgument);
+  EXPECT_EQ(Population(), 1);
+}
+
+TEST_F(RegisterDeregisterMicrotest, InvalidComm_LeavesCallbacksPending) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  g_commCheck = [](ncclComm*, const char*, const char*) { return ncclInvalidArgument; };
+  ProbeCallback probe;
+  ncclIntruQueueMpscEnqueue(&comm_->callbackQueue, &probe.base);
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclInvalidArgument);
+  EXPECT_EQ(probe.calls, 0);
+}
+
+TEST_F(RegisterDeregisterMicrotest, RecorderFails_ReturnsErrorAndKeepsRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  g_recorderResult = ncclSystemError;
+  EXPECT_EQ(ncclCommDeregister_impl(comm_.get(), reg), ncclSystemError);
+  EXPECT_EQ(Population(), 1);
+}
+
+// ---------------------------------------------------------------------------
+// Record teardown (regCleanup via ncclRegCleanup)
+// ---------------------------------------------------------------------------
+
+class RegisterCleanupMicrotest : public RegisterMicrotestBase {
+ protected:
+  ncclProxyConnector proxyA_{};
+  ncclProxyConnector proxyB_{};
+
+  // Prepends a NET handle node; production frees the nodes.
+  void AddNetHandle(ncclReg* reg, void* handle, ncclProxyConnector* proxy) {
+    auto* node = static_cast<ncclRegNetHandles*>(calloc(1, sizeof(ncclRegNetHandles)));
+    node->handle = handle;
+    node->proxyConn = proxy;
+    node->next = reg->netHandleHead;
+    reg->netHandleHead = node;
+  }
+
+  // An ipcInfos array of `size` slots; production frees the array and every entry.
+  std::vector<ncclIpcRegInfo*> AddIpcInfos(ncclReg* reg, std::initializer_list<bool> present) {
+    reg->ipcInfosSize = static_cast<int>(present.size());
+    reg->ipcInfos = static_cast<ncclIpcRegInfo**>(calloc(present.size(), sizeof(ncclIpcRegInfo*)));
+    std::vector<ncclIpcRegInfo*> infos;
+    int i = 0;
+    for (bool p : present) {
+      if (p) {
+        reg->ipcInfos[i] = static_cast<ncclIpcRegInfo*>(calloc(1, sizeof(ncclIpcRegInfo)));
+        infos.push_back(reg->ipcInfos[i]);
+      }
+      ++i;
+    }
+    return infos;
+  }
+};
+
+TEST_F(RegisterCleanupMicrotest, EmptyCache_Succeeds) { EXPECT_EQ(CleanupAll(), ncclSuccess); }
+
+TEST_F(RegisterCleanupMicrotest, NetRegistered_DeregistersEveryNetHandle) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = NET_REG_COMPLETE;
+  AddNetHandle(reg, Ptr(0xa1), &proxyA_);
+  AddNetHandle(reg, Ptr(0xb2), &proxyB_);
+  std::vector<std::pair<void*, ncclProxyConnector*>> seen;
+  g_ncclNetDeregBuffer = [&](ncclComm* c, ncclProxyConnector* p, void* h) {
+    EXPECT_EQ(c, comm_.get());
+    seen.emplace_back(h, p);
+    return ncclSuccess;
+  };
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  std::vector<std::pair<void*, ncclProxyConnector*>> expected{{Ptr(0xb2), &proxyB_}, {Ptr(0xa1), &proxyA_}};
+  EXPECT_EQ(seen, expected);
+}
+
+TEST_F(RegisterCleanupMicrotest, NetDeregisterFails_StillDeregistersRemainingHandles) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = NET_REG_COMPLETE;
+  AddNetHandle(reg, Ptr(0xa1), &proxyA_);
+  AddNetHandle(reg, Ptr(0xb2), &proxyB_);
+  ScopedHook dereg(g_ncclNetDeregBuffer, [](ncclComm*, ncclProxyConnector*, void*) { return ncclSystemError; });
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(dereg.calls, 2);
+}
+
+TEST_F(RegisterCleanupMicrotest, NvlsRegistered_DeregistersRecord) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = NVLS_REG_COMPLETE;
+  ncclReg* seen = nullptr;
+  g_ncclNvlsUbDeregister = [&](ncclComm*, ncclReg* r) {
+    seen = r;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(seen, reg);
+}
+
+TEST_F(RegisterCleanupMicrotest, NvlsDeregisterFails_ReturnsError) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = NVLS_REG_COMPLETE;
+  g_ncclNvlsUbDeregister = [](ncclComm*, ncclReg*) { return ncclInternalError; };
+  EXPECT_EQ(CleanupAll(), ncclInternalError);
+}
+
+TEST_F(RegisterCleanupMicrotest, CollnetRegistered_DeregistersHandle) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = COLLNET_REG_COMPLETE;
+  reg->collnetHandle = Ptr(0xc3);
+  reg->collnetProxyconn = &proxyA_;
+  ScopedHook dereg(g_ncclCollnetDeregBuffer, [&](ncclComm*, ncclProxyConnector* p, void* h) {
+    EXPECT_EQ(p, &proxyA_);
+    EXPECT_EQ(h, Ptr(0xc3));
+    return ncclSuccess;
+  });
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(dereg.calls, 1);
+}
+
+TEST_F(RegisterCleanupMicrotest, CollnetDeregisterFails_StillSucceeds) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = COLLNET_REG_COMPLETE;
+  reg->collnetProxyconn = &proxyA_;
+  g_ncclCollnetDeregBuffer = [](ncclComm*, ncclProxyConnector*, void*) { return ncclSystemError; };
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+}
+
+TEST_F(RegisterCleanupMicrotest, NoTransportRegistered_DeregistersNothing) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->state = NVLS_REG_POSSIBLE | IPC_REG_COMPLETE;
+  AddNetHandle(reg, Ptr(0xa1), &proxyA_);
+  ncclRegNetHandles* netNode = reg->netHandleHead;  // only freed once NET registration completed
+  reg->collnetHandle = Ptr(0xc3);
+  reg->collnetProxyconn = &proxyA_;
+  ScopedHook net(g_ncclNetDeregBuffer, [](ncclComm*, ncclProxyConnector*, void*) { return ncclSuccess; });
+  ScopedHook nvls(g_ncclNvlsUbDeregister, [](ncclComm*, ncclReg*) { return ncclSuccess; });
+  ScopedHook collnet(g_ncclCollnetDeregBuffer, [](ncclComm*, ncclProxyConnector*, void*) { return ncclSuccess; });
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(net.calls, 0);
+  EXPECT_EQ(nvls.calls, 0);
+  EXPECT_EQ(collnet.calls, 0);
+  free(netNode);
+}
+
+TEST_F(RegisterCleanupMicrotest, IpcInfosWithoutCompleteFlag_DeregistersEveryPresentPeer) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  std::vector<ncclIpcRegInfo*> infos = AddIpcInfos(reg, {true, false, true});
+  std::vector<ncclIpcRegInfo*> seen;
+  g_ncclIpcDeregBuffer = [&](ncclComm*, ncclIpcRegInfo* info) {
+    seen.push_back(info);
+    return ncclSuccess;
+  };
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(seen, infos);
+}
+
+TEST_F(RegisterCleanupMicrotest, IpcDeregisterFails_StillDeregistersRemainingPeers) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  AddIpcInfos(reg, {true, true});
+  ScopedHook dereg(g_ncclIpcDeregBuffer, [](ncclComm*, ncclIpcRegInfo*) { return ncclSystemError; });
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(dereg.calls, 2);
+}
+
+TEST_F(RegisterCleanupMicrotest, PeerAddressTables_FreesDeviceCopy) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->regIpcAddrs.hostPeerRmtAddrs = static_cast<uintptr_t*>(calloc(4, sizeof(uintptr_t)));
+  reg->regIpcAddrs.devPeerRmtAddrs = reinterpret_cast<uintptr_t*>(0xd0000);
+  g_hipMemGetAddressRange = WholeAllocation;
+  g_hipAsyncOpsResult = hipSuccess;
+  void* freed = nullptr;
+  g_hipFree = [&](void* p) {
+    freed = p;
+    return hipSuccess;
+  };
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(freed, Ptr(0xd0000));
+}
+
+TEST_F(RegisterCleanupMicrotest, DeviceFreeFails_ReturnsError) {
+  ncclReg* reg = Seed(0x10000, 0x11000);
+  reg->regIpcAddrs.devPeerRmtAddrs = reinterpret_cast<uintptr_t*>(0xd0000);
+  g_hipMemGetAddressRange = WholeAllocation;
+  g_hipAsyncOpsResult = hipSuccess;
+  g_hipFree = [](void*) { return hipErrorInvalidValue; };
+  EXPECT_EQ(CleanupAll(), ncclUnhandledCudaError);
+}
+
+TEST_F(RegisterCleanupMicrotest, EveryRecord_IsTornDown) {
+  for (uintptr_t base : {0x10000, 0x20000, 0x30000}) {
+    ncclReg* reg = Seed(base, base + kPage);
+    reg->state = COLLNET_REG_COMPLETE;
+    reg->collnetHandle = Ptr(base);
+    reg->collnetProxyconn = &proxyA_;
+  }
+  std::vector<void*> seen;
+  g_ncclCollnetDeregBuffer = [&](ncclComm*, ncclProxyConnector*, void* h) {
+    seen.push_back(h);
+    return ncclSuccess;
+  };
+  EXPECT_EQ(CleanupAll(), ncclSuccess);
+  EXPECT_EQ(seen, (std::vector<void*>{Ptr(0x10000), Ptr(0x20000), Ptr(0x30000)}));
 }
 
 }  // namespace
