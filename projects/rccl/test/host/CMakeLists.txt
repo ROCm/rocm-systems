@@ -422,6 +422,13 @@ function(rccl_define_micro_source_lists)
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroGinHostProxy -- src/gin/gin_host_proxy.cc + src/gin/proxy_gpucontext/. Own
+  # binary: it defines the HIP and logging symbols the shared fakes also define.
+  set(TEST_MICRO_GIN_HOST_PROXY_SOURCE_FILES
+    gin-host-proxy-test.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1114,6 +1121,22 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroGinHostProxy
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroGinHostProxy
+  SOURCES ${TEST_MICRO_GIN_HOST_PROXY_SOURCE_FILES}
+  EXTRA_INCLUDES
+    ${RCCL_HOST_HIPIFY_DIR}/src/include/plugin
+    ${RCCL_HOST_HIPIFY_DIR}/src/include/nccl_device
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    GIN_HOST_PROXY_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host_proxy.cc"
+    GPUCONTEXT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext.cc"
+    GPUCONTEXT_V1_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext_v1.cc"
+    GPUCONTEXT_V2_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/proxy_gpucontext/gpucontext_v2.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host_proxy.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
