@@ -97,8 +97,9 @@ systemctl cat "${RUNNER_UNIT}"
 
 The drop-in places the runner in `benchmark.slice` with initial affinity
 `0-15`, leaving the wrapper able to select `16-63` for benchmark children. It
-also disables swap and waits for Bpfland before starting the runner. If Bpfland
-stops, the runner stops too; restart the runner after scheduler maintenance.
+inherits the slice's swap limit and waits for Bpfland before starting the
+runner. If Bpfland stops, the runner stops too; restart the runner after
+scheduler maintenance.
 
 Reboot after installing the files so existing background processes pick up the
 CPU restrictions. Bpfland starts at boot and applies the CPU policy before the

@@ -3,3 +3,5 @@ Description=Benchmark runner CPU allocation
 
 [Slice]
 AllowedCPUs=0-63
+# Covers both the Actions runner and Docker container scopes.
+MemorySwapMax=0
