@@ -1150,12 +1150,12 @@ bool WDDMDevice::CreateHwQueue(WDDMQueue *queue) {
   // returns nullptr -> resource=0. resource must NOT be gated on is_aql (that zeroed it -> KMD c0000001).
   GpuMemory* queue_memory = queue->GetAmdQueueMemory();
   D3DKMT_HANDLE resource = 0;
-  bool is_aql = false;
+  Wkmi::HwQueueKind kind = Wkmi::kHwQueueSdma;
   if (queue_memory != nullptr) {
     resource = queue_memory->KmtHandle();
-    is_aql = IsAqlSupported();
+    kind = IsAqlSupported() ? Wkmi::kHwQueueAql : Wkmi::kHwQueuePm4;
   }
-  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, is_aql,
+  Wkmi::FillinHwQueuePrivData(priv_data, FwManagedGfxState, queue->prio, kind,
       queue->cmdbuf_addr, queue->cmdbuf_size, reinterpret_cast<uintptr_t>(queue->ring_wptr),
       reinterpret_cast<uintptr_t>(queue->ring_rptr), resource, &doorbell_loc,
       queue->cwsr_mem_handle_);
