@@ -72,7 +72,10 @@ private:
   /// local_next values to compute the new global LBTS.
   std::atomic<Tick> local_next{TICK_MAX};
 
-  /// @brief Single-threaded idle wait (atomic wait/notify for async wakeup).
+  /// @brief Publication flag for the single-threaded sleep-loop waiter.
+  /// @details Producers exchange true with release ordering. The worker consumes
+  /// the flag with an acquire-release exchange before rechecking event and exit
+  /// state. Replacing the sleep mechanism must preserve that publication handshake.
   std::atomic<bool> idle_wakeup_{false};
 
   /// @brief Drain all incoming queues into the local event queue.
@@ -87,7 +90,7 @@ private:
 /// **Single-threaded mode** (`num_threads == 1`): drains events directly from
 /// the priority queue in timestamp order. No LBTS computation, no barriers,
 /// no epoch structure. When the queue empties, drains async buffers and either
-/// terminates or blocks on a condition variable for external events.
+/// terminates or waits in a sleep loop for external event publications.
 ///
 /// **Multi-threaded mode** (`num_threads > 1`): runs a conservative
 /// barrier-based Parallel Discrete Event Simulation (PDES) loop. Each epoch:
@@ -101,7 +104,7 @@ private:
 /// Functional\<Base\> CRTP mixin, which self-schedules a timer callback and
 /// re-enqueues after each advance(). If no events are ever scheduled and no
 /// primaries are registered, the simulation terminates via quiescence. If
-/// primaries are registered, the engine blocks until async events arrive or
+/// primaries are registered, the engine waits until async events arrive or
 /// all primaries signal completion.
 ///
 /// Typical usage:
@@ -256,6 +259,12 @@ public:
   /// @brief Return the exit event from the last completed run() or step().
   /// @returns Const reference to the stored exit event.
   const ExitStatus &last_exit() const { return exit_status_; }
+
+  /// @brief Read the exit code safely while a host thread may request exit.
+  int exit_code() const {
+    std::lock_guard<std::mutex> lock(exit_mutex_);
+    return exit_status_.code;
+  }
 
   /// @brief Enqueue an event from any thread (thread-safe).
   ///
@@ -537,7 +546,7 @@ private:
   };
   std::vector<std::unique_ptr<AsyncQueue>> async_queues_; ///< One per partition.
 
-  std::mutex exit_mutex_; ///< Protects exit_status_ and exit_set_ (first-writer-wins).
+  mutable std::mutex exit_mutex_; ///< Protects exit_status_ and exit_set_ (first-writer-wins).
   bool exit_set_ = false; ///< True once exit_status_ has been written (sentinel for set_exit).
 };
 

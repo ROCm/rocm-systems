@@ -6,17 +6,18 @@
 
 // Accelerated Blit Copy Engine (ABCE) — device-initiated copy submission.
 //
-// A GPU kernel hands this header one source, one destination and a pre-armed
-// completion signal. It forms the SDMA packets into a device ring
-// (abce_ring_device.h) and rings that ring's doorbell, so a copy is launched
-// from a shader with no host round trip.
+// A GPU kernel hands this header one source, one destination, a completion
+// token and optionally a token to wait on. It forms the SDMA packets into a
+// device ring (abce_ring_device.h) and rings that ring's doorbell, so a copy is
+// launched from a shader with no host round trip.
 //
 // SCOPE: one linear copy per call, and deliberately nothing else. No batching,
-// no multi-destination fan-out, no dependency gating, no interrupt. One copy is
-// one frame on one ring, which keeps the submitter a short scalar routine with
-// no scratch and no LDS, and removes every reason for a coordinator: with a
-// single frame the caller's arming is exact and that frame's one decrement
-// retires the signal. The wide cases are the host planner's (abce_host.h).
+// no multi-destination fan-out, no interrupt, and at most one dependency. One
+// copy is one frame on one ring, which keeps the submitter a short scalar
+// routine with no scratch and no LDS, and removes every reason for a
+// coordinator: with a single frame the submit's arming is exact and that
+// frame's one completion update retires the signal. The wide cases are the host
+// planner's (abce_host.h).
 //
 // What it still decides is which ring. The host precomputes, from its own SDMA
 // policy, a route per transfer class — host to this device, this device to
@@ -31,11 +32,11 @@
 // a HIP translation unit: one included first keeps its functions host-only, and
 // calling them from a kernel then fails to compile.
 //
-// CONCURRENCY: the ring protocol is multi-producer, so several submitters —
-// including the host orchestrator sharing a ring — may run concurrently, all
-// through the ring's one abce_shared_ring_control_t. Any number of lanes may
-// submit at once, but lanes of one wave take turns inside the submit; see
-// abce_device_submit_linear().
+// CONCURRENCY: the ring protocol is multi-producer, so any number of waves may
+// submit concurrently through a ring's abce_ring_control_t, but lanes of one
+// wave take turns inside the submit; see abce_device_submit_linear(). The rings
+// are the device's own — the host submits to rings of its own — so a kernel's
+// copy never queues behind host work.
 
 #ifndef ABCE_DEVICE_H_
 #define ABCE_DEVICE_H_
@@ -76,7 +77,7 @@ extern "C" {
 // view instead of misreading it.
 #define ABCE_DEVICE_ABI_VERSION 1u
 
-// One ring per registered SDMA engine.
+// At most one device ring per SDMA engine, indexed by engine.
 #define ABCE_DEVICE_MAX_ENGINES ABCE_MAX_ENGINES
 
 // Agent ids a class route covers: KFD node ids, the numbering the host policy
@@ -97,39 +98,33 @@ extern "C" {
 #define ABCE_DEVICE_AGENT_UNKNOWN ((int8_t)-2)
 
 // What the host policy says about one transfer class: an affinity anchor, and
-// the registered rings it ruled out. A ring missing from the policy's ranked
-// list is forbidden for that class — that is how a reservation such as
-// gfx90a's H2D-only SDMA0 is enforced — so a forbidden ring is never used even
-// as a fallback. Rings kept out of the host orchestrator (device-owned ones)
-// are unknown to the policy and so never forbidden.
+// the engines it ruled out. An engine missing from the policy's ranked list is
+// forbidden for that class — that is how a reservation such as gfx90a's
+// H2D-only SDMA0 is enforced — so a forbidden engine's ring is never used even
+// as a fallback.
 typedef struct abce_device_route_t {
   uint64_t forbidden;
   uint32_t preferred;  // ABCE_DEVICE_MAX_ENGINES when the policy named none.
 } abce_device_route_t;
 
 // Read-only from the device: the host publishes every field before the view
-// reaches a kernel, and the submitter writes only through the rings' pointers.
-// That lets the host keep this in ordinary memory and put only the shared ring
-// cursors — which host and device CAS concurrently — in an uncached pool.
+// reaches a kernel, and the submitter writes only through the rings' pointers —
+// into the ring buffers, and into each ring's control block, which the host
+// allocates apart from this view.
 typedef struct abce_device_engine_set_t {
   ABCE_ALIGNAS(64) uint32_t abi_version;
+  // SDMA engines the host routes over; engines[i] is the ring on engine i.
   uint32_t num_engines;
   // Whether SDMA can retire the completion signal with an atomic packet.
   bool device_atomic_support;
   // Agent these rings belong to, so a kernel can tag the local end of a copy.
   int8_t local_agent;
 
-  // Rings a KERNEL may submit to (bit i => ring i). Not every registered ring:
-  // a ring whose doorbell a shader store does not reach is withheld here while
-  // staying available to host copies. A bit also asserts engines[i] is
-  // complete, so the submitter treats this as the whole answer.
+  // Engines with a ring a kernel may submit to (bit i => engines[i]). Not every
+  // engine: the host may not have been able to create a queue on it, or a
+  // shader store may not reach that queue's doorbell. A bit also asserts
+  // engines[i] is complete, so the submitter treats this as the whole answer.
   uint64_t device_usable_engines;
-
-  // Rings no host producer submits to, always a subset of the above. With a
-  // kernel the only producer their cursors can live in device memory, which
-  // makes a submit through them materially cheaper, so automatic ring choice
-  // prefers them. Zero is the normal state.
-  uint64_t device_owned_engines;
 
   abce_builder_t builder;
   abce_device_ring_t engines[ABCE_DEVICE_MAX_ENGINES];
@@ -152,14 +147,16 @@ typedef struct abce_device_engine_set_t {
   int8_t agent_for_device[ABCE_DEVICE_MAX_PEERS];
 } abce_device_engine_set_t;
 
-// Handle a kernel receives as a launch argument.
+// Handle a kernel receives as a launch argument. Only kernels on the device the
+// rings belong to may use it: the cursors are in its memory, at agent scope.
 typedef struct abce_device_handle_t {
   abce_device_engine_set_t* engine_set;
   uint32_t abi_version;
 } abce_device_handle_t;
 
-// What a caller polls to learn a copy has retired: the completion signal and
-// the value it lands on.
+// A copy's completion: a signal word the caller owns and the value the engine
+// lands it on when the copy retires. A submit takes one as its completion and
+// may take an earlier copy's as its dependency.
 typedef struct abce_device_token_t {
   uint64_t* signal;
   uint64_t reference;
@@ -234,7 +231,6 @@ typedef struct abce_device_submit_view_t {
   abce_device_engine_set_t* engine_set;
   abce_builder_t builder;
   uint64_t usable_engines;
-  uint64_t owned_engines;
   int8_t local_agent;
 } abce_device_submit_view_t;
 
@@ -244,7 +240,6 @@ static inline void abce_device_submit_view_load(abce_device_engine_set_t* engine
   out_view->builder = engine_set->builder;
   out_view->usable_engines =
       engine_set->device_usable_engines & ((1ull << ABCE_DEVICE_MAX_ENGINES) - 1u);
-  out_view->owned_engines = engine_set->device_owned_engines;
   out_view->local_agent = engine_set->local_agent;
 }
 
@@ -273,8 +268,7 @@ static inline const abce_device_route_t* abce_device_route(const abce_device_sub
 // A named ring is honoured or refused, never silently substituted: a caller
 // that named one is placing the copy on purpose and would rather hear that it
 // cannot than have the work land elsewhere. ABCE_DEVICE_AUTO_ENGINE takes the
-// route's preferred ring when permitted, then a device-owned ring, then the
-// lowest permitted one.
+// route's preferred ring when permitted, otherwise the lowest permitted one.
 //
 // Returns ABCE_STATUS_NO_ENGINE when no ring a kernel may use qualifies, and
 // ABCE_STATUS_NO_LEGAL_ENGINE when rings exist but the route forbids them all.
@@ -299,8 +293,7 @@ static inline abce_status_t abce_device_resolve_engine(const abce_device_submit_
     *out_engine = route->preferred;
     return ABCE_STATUS_OK;
   }
-  const uint64_t owned = allowed & view->owned_engines;
-  *out_engine = (uint32_t)abce_count_trailing_zeros_u64(owned ? owned : allowed);
+  *out_engine = (uint32_t)abce_count_trailing_zeros_u64(allowed);
   return ABCE_STATUS_OK;
 }
 
@@ -308,17 +301,22 @@ static inline abce_status_t abce_device_resolve_engine(const abce_device_submit_
 // Submission
 //===----------------------------------------------------------------------===//
 
-// Emits one linear copy that retires |completion_signal| onto |ring|.
+// Emits one linear copy onto |ring| that waits for |dependency| when it is not
+// null, then retires |completion|, which it arms before reserving.
 //
-// Two packet forms, one decrement either way, so arming is identical: gfx125+
-// emits COPY_LINEAR_WAITSIGNAL, which carries its own completion; everything
-// else emits COPY_LINEAR plus an atomic decrement. The packet count follows from the size — the builder
-// chunks against its per-packet maximum — so a large copy becomes several
-// packets in one frame and callers never reason about packet counts.
+// Two packet forms. gfx125+ emits COPY_LINEAR_WAITSIGNAL, which carries its own
+// wait and a completion decrement; everything else emits POLL_REGMEM for the
+// wait, COPY_LINEAR, and a FENCE that writes the reference. The submit arms the
+// word for this copy alone, so a plain write retires it as surely as a
+// decrement would, without an atomic read-modify-write across the bus. The
+// packet count follows from the size — the builder chunks against its
+// per-packet maximum — so a large copy becomes several packets in one frame and
+// callers never reason about packet counts.
 static inline abce_status_t abce_device_emit_linear(const abce_builder_t* builder,
                                                     const abce_device_ring_t* view_ring, void* dst,
                                                     const void* src, uint64_t size,
-                                                    void* completion_signal) {
+                                                    const abce_device_token_t* dependency,
+                                                    const abce_device_token_t* completion) {
   // A register copy, for the reason abce_device_submit_view_t is one: read
   // through the view, the ring's pointers would be reloaded after the packet
   // stores.
@@ -327,15 +325,37 @@ static inline abce_status_t abce_device_emit_linear(const abce_builder_t* builde
   const uint64_t num_packets = abce_builder_num_copy_packets(builder, (size_t)size);
   if (num_packets > ABCE_MAX_OP_PACKETS) return ABCE_STATUS_OUT_OF_RANGE;
   const bool fused = abce_builder_is_gfx125plus(builder);
-  const uint64_t copy_bytes = num_packets * sizeof(SDMA_PKT_COPY_LINEAR);
-  // Fused packets are compacted — header plus body per chunk, with the single
-  // signal block on the last chunk. Same accounting as abce_frame_fused_bytes().
-  const uint64_t frame_bytes = fused ? (num_packets * (1u + 6u) + 5u) * sizeof(uint32_t)
-                                     : copy_bytes + sizeof(SDMA_PKT_ATOMIC);
 
-  // Past the packet cap, reserve is the authority on whether a frame fits: it
-  // fails only with OUT_OF_RANGE when the frame can never fit, and otherwise
-  // blocks until the engine has freed room.
+  // A dependency that has already retired costs nothing. POLL_REGMEM compares
+  // 32 bits, so the high word gets a poll of its own only where it still
+  // differs, as abce_frame_emit_dep_waits() does for host frames.
+  const uint64_t observed =
+      dependency ? abce_ring_atomic_load_acquire(dependency->signal) : 0;
+  const bool wait = dependency && observed != dependency->reference;
+  const bool wait_high_word = wait && (observed >> 32) != (dependency->reference >> 32);
+  const uint32_t num_polls = fused || !wait ? 0u : (wait_high_word ? 2u : 1u);
+  // FENCE writes 32 bits, and arming touched the high word only if it carried.
+  const bool complete_high_word =
+      (completion->reference >> 32) != ((completion->reference + 1) >> 32);
+  const uint32_t num_fences = fused ? 0u : (complete_high_word ? 2u : 1u);
+
+  const uint64_t copy_bytes = num_packets * sizeof(SDMA_PKT_COPY_LINEAR);
+  const uint64_t poll_bytes = num_polls * sizeof(SDMA_PKT_POLL_REGMEM);
+  const uint64_t fence_bytes = num_fences * sizeof(SDMA_PKT_FENCE);
+  // Fused packets are compacted — header plus body per chunk, with the single
+  // wait block on the first chunk and the single signal block on the last.
+  // Same accounting as abce_frame_fused_bytes().
+  const uint64_t frame_bytes =
+      fused ? (num_packets * (1u + 6u) + (wait ? 7u : 0u) + 5u) * sizeof(uint32_t)
+            : poll_bytes + copy_bytes + fence_bytes;
+
+  // The one way reserve fails, checked here so the submit cannot fail once the
+  // completion word is armed; past it, reserve only blocks until there is room.
+  if (frame_bytes >= ring->size) return ABCE_STATUS_OUT_OF_RANGE;
+  // Armed this early so the store's trip to the word, often in host memory,
+  // overlaps the reserve and packet stores instead of holding up the publish's
+  // release fence, which orders it ahead of the engine seeing the frame.
+  *completion->signal = completion->reference + 1;
   abce_ring_reservation_t reservation;
   const abce_status_t status = abce_device_ring_reserve(ring, frame_bytes, &reservation);
   if (!abce_status_is_ok(status)) return status;
@@ -347,11 +367,26 @@ static inline abce_status_t abce_device_emit_linear(const abce_builder_t* builde
   // the reservation zeroed first and a ring-memory round trip per field.
   if (fused) {
     abce_wait_signal_params_t params = abce_wait_signal_none();
-    params.signal_addr = completion_signal;
+    if (wait) {
+      params.wait_addr = dependency->signal;
+      params.wait_reference = dependency->reference;
+    }
+    params.signal_addr = completion->signal;
     params.boundary_wait_signal = true;
     abce_builder_build_wait_signal_copy(builder, frame, dst, src, (size_t)size, &params);
   } else {
-    SDMA_PKT_COPY_LINEAR* copy_packets = (SDMA_PKT_COPY_LINEAR*)frame;
+    SDMA_PKT_POLL_REGMEM* poll_packets = (SDMA_PKT_POLL_REGMEM*)frame;
+    uint32_t* dependency_words = wait ? (uint32_t*)dependency->signal : NULL;
+    for (uint32_t poll_idx = 0; poll_idx < num_polls; ++poll_idx) {
+      const bool high_word = wait_high_word && poll_idx == 0;
+      SDMA_PKT_POLL_REGMEM poll;
+      memset(&poll, 0, sizeof(poll));
+      abce_builder_build_poll(builder, (char*)&poll, &dependency_words[high_word ? 1 : 0],
+                              (uint32_t)(dependency->reference >> (high_word ? 32 : 0)),
+                              UINT32_MAX);
+      poll_packets[poll_idx] = poll;
+    }
+    SDMA_PKT_COPY_LINEAR* copy_packets = (SDMA_PKT_COPY_LINEAR*)(frame + poll_bytes);
     uint64_t copied = 0;
     for (uint64_t packet_idx = 0; packet_idx < num_packets; ++packet_idx) {
       const uint32_t chunk_size =
@@ -363,46 +398,60 @@ static inline abce_status_t abce_device_emit_linear(const abce_builder_t* builde
       copy_packets[packet_idx] = packet;
       copied += chunk_size;
     }
-    SDMA_PKT_ATOMIC completion;
-    memset(&completion, 0, sizeof(completion));
-    abce_builder_build_atomic_decrement(builder, (char*)&completion, completion_signal);
-    *(SDMA_PKT_ATOMIC*)(frame + copy_bytes) = completion;
+    // High word first: until the low word lands the value still differs from
+    // the reference, so a poller never sees it retire early.
+    SDMA_PKT_FENCE* fence_packets = (SDMA_PKT_FENCE*)(frame + poll_bytes + copy_bytes);
+    uint32_t* completion_words = (uint32_t*)completion->signal;
+    for (uint32_t fence_idx = 0; fence_idx < num_fences; ++fence_idx) {
+      const bool high_word = complete_high_word && fence_idx == 0;
+      SDMA_PKT_FENCE fence;
+      memset(&fence, 0, sizeof(fence));
+      abce_builder_build_fence(builder, (char*)&fence, &completion_words[high_word ? 1 : 0],
+                               (uint32_t)(completion->reference >> (high_word ? 32 : 0)));
+      fence_packets[fence_idx] = fence;
+    }
   }
   return abce_device_ring_submit(ring, &reservation);
+}
+
+static inline bool abce_device_token_well_formed(const abce_device_token_t* token) {
+  return token->signal && ((uintptr_t)token->signal % sizeof(uint64_t)) == 0;
 }
 
 // One lane's submission, in its turn; abce_device_submit_linear() is the entry
 // point.
 static inline abce_status_t abce_device_submit_linear_lane(
     const abce_device_submit_view_t* view, void* dst, const void* src, uint64_t size,
-    int8_t src_agent, int8_t dst_agent, uint32_t engine, uint64_t* completion_signal,
-    uint64_t completion_reference, abce_device_token_t* out_token) {
-  if (!out_token || !dst || !src || size == 0 || !completion_signal ||
-      ((uintptr_t)completion_signal % sizeof(uint64_t)) != 0)
+    int8_t src_agent, int8_t dst_agent, uint32_t engine, const abce_device_token_t* dependency,
+    const abce_device_token_t* completion) {
+  if (!dst || !src || size == 0 || !completion || !abce_device_token_well_formed(completion) ||
+      (dependency && !abce_device_token_well_formed(dependency)))
     return ABCE_STATUS_INVALID_ARGUMENT;
 
   uint32_t ring_index = ABCE_DEVICE_MAX_ENGINES;
-  abce_status_t status =
+  const abce_status_t status =
       abce_device_resolve_engine(view, engine, src_agent, dst_agent, &ring_index);
   if (!abce_status_is_ok(status)) return status;
-  status = abce_device_emit_linear(&view->builder, &view->engine_set->engines[ring_index], dst,
-                                   src, size, completion_signal);
-  if (!abce_status_is_ok(status)) return status;
-
-  out_token->signal = completion_signal;
-  out_token->reference = completion_reference;
-  return ABCE_STATUS_OK;
+  return abce_device_emit_linear(&view->builder, &view->engine_set->engines[ring_index], dst, src,
+                                 size, dependency, completion);
 }
 
-// Submits one linear copy of |size| bytes and fills |out_token| to poll on.
+// Submits one linear copy of |size| bytes that retires |completion|, after
+// |dependency| when that is not null.
 //
 // The whole device-side API: form the packets, ring the doorbell, return. The
 // copy is published, not complete.
 //
-// SIGNAL OWNERSHIP. |completion_signal| must be 8-byte aligned and SDMA-visible,
-// and the caller arms it to |completion_reference| + 1. That arming is exact: one
-// copy is one frame, so exactly one 64-bit decrement lands and this never adds
-// to the signal.
+// COMPLETION. |completion| names an 8-byte aligned, SDMA-visible signal word the
+// caller owns, and the value the copy lands it on. The submit arms the word one
+// above that value and the copy's single completion update retires it, so the caller
+// polls |completion| itself with abce_device_token_retired() or
+// abce_device_token_wait(). The word must not be reused until its copy has
+// retired. A failed submit leaves it untouched.
+//
+// DEPENDENCY. |dependency| is an earlier copy's completion, on any ring. The
+// engine holds this copy until that one has retired; the calling thread does
+// not wait. A dependency that has already retired costs nothing.
 //
 // RING CHOICE. |src_agent| and |dst_agent| steer which ring serves the copy;
 // ABCE_DEVICE_AGENT_UNKNOWN is always safe and routes the copy as one between
@@ -413,8 +462,8 @@ static inline abce_status_t abce_device_submit_linear_lane(
 // of one wave have no independent forward progress — a lane spinning on the
 // commit cursor holds its whole wave in the loop, so a sibling lane whose turn
 // it is never gets to publish — so the wave's active lanes take turns, each
-// running its whole submission while the others are masked off. Waves and the
-// host still submit concurrently.
+// running its whole submission while the others are masked off. Waves still
+// submit concurrently.
 //
 // MEMORY VISIBILITY. This call is a SYSTEM-SCOPE RELEASE POINT, and owning that
 // is deliberately the API's job rather than the caller's. Everything the calling
@@ -431,24 +480,34 @@ static inline abce_status_t abce_device_submit_linear_lane(
 // Blocks while the ring is full and while earlier reservations publish, so it
 // must not be called from a thread the completion of this copy depends on.
 //
-// Returns ABCE_STATUS_INVALID_ARGUMENT for a bad handle, pointer, size or signal
-// address; ABCE_STATUS_UNIMPLEMENTED when SDMA cannot retire the signal on this
-// device or its copies need GCR; the resolve statuses above; or
+// Returns ABCE_STATUS_INVALID_ARGUMENT for a bad handle, pointer, size or token
+// signal address; ABCE_STATUS_UNIMPLEMENTED when SDMA cannot retire the signal
+// on this device or its copies need GCR; the resolve statuses above; or
 // ABCE_STATUS_OUT_OF_RANGE when the copy's frame can never fit in its ring.
 static inline abce_status_t abce_device_submit_linear(const abce_device_handle_t* handle,
                                                       void* dst, const void* src, uint64_t size,
                                                       int8_t src_agent, int8_t dst_agent,
-                                                      uint32_t engine, uint64_t* completion_signal,
-                                                      uint64_t completion_reference,
-                                                      abce_device_token_t* out_token) {
-  if (!abce_device_handle_valid(handle)) return ABCE_STATUS_INVALID_ARGUMENT;
+                                                      uint32_t engine,
+                                                      const abce_device_token_t* dependency,
+                                                      const abce_device_token_t* completion) {
+  if (!handle || !handle->engine_set) return ABCE_STATUS_INVALID_ARGUMENT;
   abce_device_engine_set_t* engine_set = handle->engine_set;
-  // The frame carries no GCR packets, so a part whose copies need them is not
-  // one this submitter can serve.
-  if (!engine_set->device_atomic_support || abce_builder_requires_gcr(&engine_set->builder))
-    return ABCE_STATUS_UNIMPLEMENTED;
+  // Fields from the view's leading part, which every version shares, loaded
+  // before any is checked: checking each as it arrives would make every load
+  // wait on the one before it.
+  const uint32_t view_abi_version = engine_set->abi_version;
+  const bool device_atomic_support = engine_set->device_atomic_support;
   abce_device_submit_view_t view;
   abce_device_submit_view_load(engine_set, &view);
+  if (handle->abi_version != ABCE_DEVICE_ABI_VERSION ||
+      view_abi_version != ABCE_DEVICE_ABI_VERSION)
+    return ABCE_STATUS_INVALID_ARGUMENT;
+  // Only the fused packet's completion is an atomic, and the frame carries no
+  // GCR packets, so a part whose copies need them is not one this submitter can
+  // serve.
+  if ((abce_builder_is_gfx125plus(&view.builder) && !device_atomic_support) ||
+      abce_builder_requires_gcr(&view.builder))
+    return ABCE_STATUS_UNIMPLEMENTED;
 
 #if defined(__HIP_DEVICE_COMPILE__)
   const uint32_t lane = __builtin_amdgcn_mbcnt_hi(~0u, __builtin_amdgcn_mbcnt_lo(~0u, 0u));
@@ -456,16 +515,16 @@ static inline abce_status_t abce_device_submit_linear(const abce_device_handle_t
   for (uint64_t waiting = __builtin_amdgcn_read_exec(); waiting != 0; waiting &= waiting - 1) {
     if ((uint32_t)abce_count_trailing_zeros_u64(waiting) == lane)
       status = abce_device_submit_linear_lane(&view, dst, src, size, src_agent, dst_agent, engine,
-                                              completion_signal, completion_reference, out_token);
+                                              dependency, completion);
   }
   return status;
 #else
   return abce_device_submit_linear_lane(&view, dst, src, size, src_agent, dst_agent, engine,
-                                        completion_signal, completion_reference, out_token);
+                                        dependency, completion);
 #endif  // __HIP_DEVICE_COMPILE__
 }
 
-// Whether the copy behind a token filled by a successful submit has retired.
+// Whether the copy behind a successful submit's completion token has retired.
 static inline bool abce_device_token_retired(const abce_device_token_t* token) {
   return abce_ring_atomic_load_acquire(token->signal) == token->reference;
 }
