@@ -1068,14 +1068,15 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
 
 // Dispatch ordinary LDS loads, stores and atomics for uniform and mixed routes.
 // Callers prepare buffers and complete retryable global work before entering.
-// FLAT addresses include the workgroup base: reject out-of-backing lanes before
-// the LDS helpers narrow to 32 bits, preserving zero reads and discarded writes.
+// FLAT LDS addresses include the workgroup base: reject out-of-backing FLAT
+// lanes before the LDS helpers narrow to 32 bits, preserving zero reads and
+// discarded writes. Ordinary DS lanes retain the existing LDS helper behavior.
 void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 64> &addresses,
                         uint64_t lane_mask, const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
   uint64_t out_of_bounds = 0;
   for (uint64_t lanes = lane_mask & d.flat_local_lane_mask; lanes; lanes &= lanes - 1) {
-    const auto lane = std::countr_zero(lanes);
+    const uint32_t lane = std::countr_zero(lanes);
     if (addresses[lane] >= lds.size_bytes())
       out_of_bounds |= uint64_t{1} << lane;
   }
@@ -1115,7 +1116,7 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
   const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
-  const auto outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
+  const VmAccessOutcome outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
   if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
     return outcome;
 
@@ -1226,8 +1227,9 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   auto &d = *inst.data_as<VectorMemState>();
   auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
+  const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
-  if (rejects_flat_dds(inst, wf, transpose_request_lane_mask(d, wf.wf_size())))
+  if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
@@ -1241,8 +1243,6 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
     if (d.ds2_active)
       d.ds2_response_data.resize(d.wf_size * d.num_elems * d.elem_size);
   }
-  const uint64_t request_lanes =
-      plain_load ? transpose_request_lane_mask(d, wf.wf_size()) : d.lane_mask;
   execute_lds_access(d, lds, d.per_lane_addr, request_lanes, d.store_data, d.response_data);
   if (d.ds2_active)
     execute_lds_access(d, lds, d.ds2_per_lane_addr, d.lane_mask, d.ds2_store_data,
