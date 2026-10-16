@@ -1458,40 +1458,42 @@ OP_SPECS: Dict[str, OpSpec] = {
 # per-operator overrides in ``OP_SPECS``.
 
 
+# dense unary-float name list
+# fmt: off
+_UNARY_FLOAT_ELEMENTWISE_NAMES = (
+    # trig / inverse trig / hyperbolic
+    "acos", "acosh", "asin", "asinh", "atan", "atanh",
+    "cos", "cosh", "sin", "sinh", "tan", "tanh", "sinc",
+    # exponentials / logarithms / power
+    "exp", "exp2", "expm1", "log", "log10", "log1p", "log2",
+    "logit",
+    "reciprocal", "rsqrt", "sqrt", "square",
+    # rounding / sign / fractional
+    "ceil", "floor", "trunc", "round", "neg", "frac", "sgn", "sign",
+    "signbit", "positive",
+    # gamma / Bessel-ish
+    "digamma", "erf", "erfc", "erfinv", "i0", "lgamma",
+    # complex / angle helpers
+    "angle", "conj_physical",
+    # predicates (BoolTensor)
+    "isfinite", "isinf", "isnan", "isneginf", "isposinf", "isreal",
+    # angle conversion
+    "deg2rad", "rad2deg",
+    # activations
+    "elu", "gelu", "glu", "hardshrink", "hardsigmoid", "hardswish",
+    "hardtanh", "leaky_relu", "mish", "relu", "sigmoid", "silu",
+    "softplus", "softshrink",
+)
+# fmt: on
+
+
 def _register_bulk_unary_float_builders() -> None:
     """Register builders for unary float ``Tensor -> Tensor`` operators."""
 
     def template(device: str) -> Tuple[List[Any], Dict[str, Any]]:
         return ([float_tensor(device, 8, 8)], {})
 
-    # dense unary-float name list
-    # fmt: off
-    bulk_short_names = (
-        # trig / inverse trig / hyperbolic
-        "acos", "acosh", "asin", "asinh", "atan", "atanh",
-        "cos", "cosh", "sin", "sinh", "tan", "tanh", "sinc",
-        # exponentials / logarithms / power
-        "exp", "exp2", "expm1", "log", "log10", "log1p", "log2",
-        "logit",
-        "reciprocal", "rsqrt", "sqrt", "square",
-        # rounding / sign / fractional
-        "ceil", "floor", "trunc", "round", "neg", "frac", "sgn", "sign",
-        "signbit", "positive",
-        # gamma / Bessel-ish
-        "digamma", "erf", "erfc", "erfinv", "i0", "lgamma",
-        # complex / angle helpers
-        "angle", "conj_physical",
-        # predicates (BoolTensor)
-        "isfinite", "isinf", "isnan", "isneginf", "isposinf", "isreal",
-        # angle conversion
-        "deg2rad", "rad2deg",
-        # activations
-        "elu", "gelu", "glu", "hardshrink", "hardsigmoid", "hardswish",
-        "hardtanh", "leaky_relu", "mish", "relu", "sigmoid", "silu",
-        "softplus", "softshrink",
-    )
-    # fmt: on
-    for name in bulk_short_names:
+    for name in _UNARY_FLOAT_ELEMENTWISE_NAMES:
         OP_SPECS.setdefault(name, OpSpec(build=template))
 
 
@@ -3760,82 +3762,7 @@ def missing_builder_family(op_name: str) -> str:
 
 
 # Curated short-name allowlists for the family classifier.
-_KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset({
-    # trig / hyperbolic
-    "acos",
-    "acosh",
-    "asin",
-    "asinh",
-    "atan",
-    "atanh",
-    "cos",
-    "cosh",
-    "sin",
-    "sinc",
-    "sinh",
-    "tan",
-    "tanh",
-    # exponentials / logs
-    "exp",
-    "exp2",
-    "expm1",
-    "log",
-    "log10",
-    "log1p",
-    "log2",
-    "logit",
-    # roots, powers, reciprocals
-    "reciprocal",
-    "rsqrt",
-    "sqrt",
-    "square",
-    # rounding / sign
-    "ceil",
-    "floor",
-    "frac",
-    "neg",
-    "round",
-    "sgn",
-    "sign",
-    "trunc",
-    "positive",
-    # gamma / bessel-ish
-    "digamma",
-    "erf",
-    "erfc",
-    "erfinv",
-    "i0",
-    "lgamma",
-    # complex / angle
-    "angle",
-    "conj_physical",
-    # predicates -> BoolTensor
-    "isfinite",
-    "isinf",
-    "isnan",
-    "isneginf",
-    "isposinf",
-    "isreal",
-    "signbit",
-    # angle conversion
-    "deg2rad",
-    "rad2deg",
-    # activations
-    "elu",
-    "gelu",
-    "glu",
-    "hardshrink",
-    "hardsigmoid",
-    "hardswish",
-    "hardtanh",
-    "leaky_relu",
-    "mish",
-    "relu",
-    "sigmoid",
-    "silu",
-    "softplus",
-    "softshrink",
-})
+_KNOWN_UNARY_FLOAT_ELEMENTWISE: frozenset = frozenset(_UNARY_FLOAT_ELEMENTWISE_NAMES)
 
 _KNOWN_WHOLE_TENSOR_REDUCTIONS: frozenset = frozenset({
     "all",
