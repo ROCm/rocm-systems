@@ -33,9 +33,10 @@ namespace tensor_dma_detail {
 // hip/amd_detail/amd_gfx1250_TDM.h. Descriptors produced from MLIR follow
 // LLVM's AMDGPUToROCDL make_dma_descriptor lowering.
 //
-// rocJITsu consumes encoded descriptor values literally: null optional groups
-// read as zero, zero strides alias coordinates, gather is rank two, and a zero
-// active tensor extent masks the whole transfer. Masked loads zero-fill LDS;
+// read_descriptor treats VADDR3 == VADDR2 as an unused D3 outside gather mode.
+// parse_descriptor consumes the resulting arrays literally: null optional
+// groups read as zero, zero strides alias coordinates, and gather is rank two.
+// A zero active tensor extent masks the whole transfer. Masked loads zero-fill LDS;
 // masked stores suppress global writes while completion effects still retire.
 constexpr int kSgprNull = 124;
 constexpr uint32_t kGlobalHighBitsMask = (1u << 25) - 1u;
@@ -698,7 +699,14 @@ util::FailureOr<TensorDmaDescriptor> read_descriptor(const Inst &inst, const Wav
   auto d2 = read_sgpr_group<4>(wf, inst.vaddr2.encoding_value(), true);
   if (d2.failed()) [[unlikely]]
     return util::Result::failure();
-  auto d3 = read_sgpr_group<4>(wf, inst.vaddr3.encoding_value(), true);
+  // CDNA5 10.11.1 permits VADDR3 == VADDR2 when D3 is unused. Interpret
+  // that encoding before its aliased stride bits can become a fifth dimension.
+  // Gather groups hold row indices; preserve their existing literal decoding.
+  const bool gather = (d0.value()[0] & (1u << 31)) != 0;
+  const int d3_encoding = !gather && inst.vaddr3.encoding_value() == inst.vaddr2.encoding_value()
+                              ? kSgprNull
+                              : inst.vaddr3.encoding_value();
+  auto d3 = read_sgpr_group<4>(wf, d3_encoding, true);
   if (d3.failed()) [[unlikely]]
     return util::Result::failure();
   return parse_descriptor(d0.value(), d1.value(), d2.value(), d3.value());

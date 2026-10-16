@@ -13,6 +13,7 @@
 #include "debug.h"
 #include "algorithms/dda/dda_init_detail.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "rccl_common.h"
 
 #include <cuda_runtime.h>
 #include <hip/hip_ext.h>
@@ -40,8 +41,8 @@ static ncclResult_t ncclReduceScatterDdaFabricTyped(const void* sendbuff, void* 
     return ncclInvalidArgument;
   }
 
-  // Use the block cap chosen at init (barrier flag buffer is sized for it).
-  const int nBlocksMax = comm->ddaFabricMaxBlocks;
+  // At most the block cap chosen at init (barrier flag buffer is sized for it).
+  const int nBlocksMax = rcclDdaFabricVmmBlocks(comm);
   // For reduce-scatter we use recvcount for grid calculation since each rank
   // processes its own shard.
   auto gridBlock = dda::common::getGridAndBlockDims(recvcount, sizeof(T), nBlocksMax);

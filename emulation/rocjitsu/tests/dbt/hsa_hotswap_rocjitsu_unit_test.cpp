@@ -1151,6 +1151,18 @@ protected:
     return waiters;
   }
 
+  // Publishing a claim lets peers wait before its owner reaches the translation
+  // gate. Observe the owner's progress separately before sampling the count.
+  static uint64_t wait_for_translations(uint64_t expected) {
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    uint64_t translations = rj_test_translation_count();
+    while (translations < expected && std::chrono::steady_clock::now() < deadline) {
+      std::this_thread::sleep_for(std::chrono::milliseconds(1));
+      translations = rj_test_translation_count();
+    }
+    return translations;
+  }
+
   // Build a second object of the SAME size as @p base whose sampled windows are
   // identical but whose bytes are not, by disturbing one byte of trailing padding
   // that the sampling happens to miss. Returns empty if no such byte exists, so a
@@ -1372,7 +1384,7 @@ TEST_F(HsaHotswapMemoTest, ConcurrentLoadsOfOneObjectTranslateOnce) {
   // here while threads were still held would abort the process instead of failing
   // the case.
   const uint64_t waiters = wait_for_memo_waiters(kThreadCount - 1);
-  const uint64_t translations_while_held = rj_test_translation_count();
+  const uint64_t translations_while_held = wait_for_translations(1);
   rj_test_open_translation_gate();
   for (auto &worker : workers)
     worker.join();
@@ -1421,10 +1433,7 @@ TEST_F(HsaHotswapMemoTest, ObjectsThatShareAFingerprintDoNotWaitForEachOther) {
 
   // Both should reach the gate, so two translations are in flight and nobody is
   // waiting. Sample, then release regardless of what was seen.
-  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
-  while (rj_test_translation_count() < 2 && std::chrono::steady_clock::now() < deadline)
-    std::this_thread::sleep_for(std::chrono::milliseconds(1));
-  const uint64_t translations_while_held = rj_test_translation_count();
+  const uint64_t translations_while_held = wait_for_translations(2);
   const uint64_t waiters = rj_test_translation_waiters();
   rj_test_open_translation_gate();
   for (auto &worker : workers)
