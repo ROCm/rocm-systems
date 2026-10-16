@@ -3,10 +3,13 @@
 
 #pragma once
 
+#include <fmt/format.h>
+
 #include <algorithm>
 #include <array>
 #include <cctype>
 #include <charconv>
+#include <cstddef>
 #include <cstdint>
 #include <string>
 #include <string_view>
@@ -166,6 +169,32 @@ clock_name(std::string_view value)
     return name;
 }
 
+/// @brief Strip ANSI escape (SGR/color) sequences from a string.
+/// @param value The string to strip, potentially containing "\033[...m" sequences.
+/// @return A copy of @p value with every "\033...m" escape sequence removed.
+[[nodiscard]] inline std::string
+strip_ansi(std::string_view value)
+{
+    std::string result;
+    result.reserve(value.size());
+    bool in_escape = false;
+    for(const char chr : value)
+    {
+        if(in_escape)
+        {
+            in_escape = (chr != 'm');
+            continue;
+        }
+        if(chr == '\033')
+        {
+            in_escape = true;
+            continue;
+        }
+        result += chr;
+    }
+    return result;
+}
+
 /// @brief Strip the "rocprofsys_" prefix from an environment/setting name.
 /// @param value The environment variable or setting name.
 /// @return The lowercased name with the "rocprofsys_" prefix removed, if present.
@@ -180,6 +209,19 @@ strip_rocprofsys_prefix(std::string_view value)
         return name.substr(k_rocprofsys_prefix.length());
     }
     return name;
+}
+
+inline constexpr size_t k_default_hex_width = 16;
+
+/// @brief Format an integral value as a zero-padded, "0x"-prefixed hex string.
+/// @param value The integral value to format.
+/// @param width The minimum number of hex digits to zero-pad to.
+/// @return @p value formatted as e.g. "0x0000000000000010" (width 16, value 16).
+template <typename Tp>
+[[nodiscard]] inline std::string
+hex_padded(Tp value, size_t width = k_default_hex_width)
+{
+    return fmt::format("0x{:0{}x}", value, width);
 }
 
 }  // namespace rocprofsys::utility::string

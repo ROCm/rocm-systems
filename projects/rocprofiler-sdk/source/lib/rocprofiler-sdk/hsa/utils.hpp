@@ -34,6 +34,7 @@
 #include <hsa/hsa_ext_finalize.h>
 #include <hsa/hsa_ext_image.h>
 
+#include <cstddef>
 #include <cstdint>
 #include <sstream>
 #include <string_view>
@@ -130,14 +131,24 @@ struct formatter<hsa_access_permission_t>
     auto format(hsa_access_permission_t v, Ctx& ctx) const
     {
         auto label = [v]() -> std::string_view {
-            switch(v)
+            using value_type = std::underlying_type_t<hsa_access_permission_t>;
+
+            // Older HSA headers do not define HSA_ACCESS_PERMISSION_EX (1 << 2).
+            // Use the integer value to support those headers and combined permissions.
+            constexpr value_type execute = 1U << 2;
+
+            switch(static_cast<value_type>(v))
             {
                 case HSA_ACCESS_PERMISSION_NONE: return "NONE";
                 case HSA_ACCESS_PERMISSION_RO: return "READ_ONLY";
                 case HSA_ACCESS_PERMISSION_WO: return "WRITE_ONLY";
                 case HSA_ACCESS_PERMISSION_RW: return "READ_WRITE";
+                case execute: return "EXECUTE";
+                case HSA_ACCESS_PERMISSION_RO | execute: return "READ_EXECUTE";
+                case HSA_ACCESS_PERMISSION_WO | execute: return "WRITE_EXECUTE";
+                case HSA_ACCESS_PERMISSION_RW | execute: return "READ_WRITE_EXECUTE";
+                default: return "UNKNOWN";
             }
-            return "NONE";
         }();
         return fmt::format_to(ctx.out(), "{}", label);
     }
@@ -244,5 +255,34 @@ template <>
 struct formatter<hsa_fabric_handle_t>
 : rocprofiler::hsa::utils::handle_formatter<hsa_fabric_handle_t>
 {};
+}  // namespace fmt
+#endif
+
+#if ROCPROFILER_HSA_RUNTIME_EXT_AMD_VERSION >= 13400
+namespace fmt
+{
+// Not a handle struct, so handle_formatter does not apply.
+template <>
+struct formatter<hsa_amd_vmem_handle_info_t>
+{
+    template <typename ParseContext>
+    constexpr auto parse(ParseContext& ctx)
+    {
+        return ctx.begin();
+    }
+
+    // ROCr fills only the members that fit in v.size, so anything past it is
+    // memory the caller never provided.
+    template <typename Ctx>
+    auto format(const hsa_amd_vmem_handle_info_t& v, Ctx& ctx) const
+    {
+        auto out = fmt::format_to(ctx.out(), "size={}", v.size);
+        if(v.size >= offsetof(hsa_amd_vmem_handle_info_t, alloc_size) + sizeof(v.alloc_size))
+            out = fmt::format_to(out, ", alloc_size={}", v.alloc_size);
+        if(v.size >= offsetof(hsa_amd_vmem_handle_info_t, agent) + sizeof(v.agent))
+            out = fmt::format_to(out, ", agent={}", v.agent);
+        return out;
+    }
+};
 }  // namespace fmt
 #endif

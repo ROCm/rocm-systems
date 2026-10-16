@@ -45,14 +45,14 @@ static const std::vector<size_t> kMultiQpAlignmentSizes = {
 // E0.  InvalidRecvCount — ncclIbIrecv with n > NCCL_NET_IB_MAX_RECVS (8)
 //      must reject the request without crashing on a live recvComm.
 TEST_F(NetIbMPITest, InvalidRecvCount) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(/*dev=*/0, cp, guard));
 
     if (rank == 0) {
         // n=9 > NCCL_NET_IB_MAX_RECVS (8) — must return ncclInternalError
@@ -75,8 +75,8 @@ TEST_F(NetIbMPITest, InvalidRecvCount) {
 //      SAME address from its own communicator, so all of them contend on one
 //      cache entry's refcount rather than merely on the cache mutex.
 TEST_F(NetIbMPITest, MrCacheRefCount) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -96,7 +96,6 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
         // for a worker that is never coming and the reported cause stays the real
         // one rather than "only K of N".
         std::atomic<bool> registerFailed{false};
-        static constexpr int kRendezvousPolls = 3000;  // 3000 * 10ms = 30s
 
         RunThreadedBody(
             ThreadDevPolicy::Fixed(0), nThreads,
@@ -122,7 +121,7 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
                     release(mh1);
                     return result;
                 }
-                if (!WorkerRendezvous(bothHeld, nThreads, kRendezvousPolls, &registerFailed)) {
+                if (!WorkerRendezvous(bothHeld, nThreads, kWorkerGatePolls, &registerFailed)) {
                     release(mh1);
                     release(mh2);
                     result.ok = false;
@@ -152,7 +151,7 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(/*dev=*/0, cp, guard));
 
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
 
@@ -182,14 +181,14 @@ TEST_F(NetIbMPITest, MrCacheRefCount) {
 // E2.  SendSizeClamping — sender posts a buffer larger than the receiver's
 //      posted size; isend must clamp to recv_size and complete cleanly.
 TEST_F(NetIbMPITest, SendSizeClamping) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(/*dev=*/0, cp, guard));
 
     static constexpr size_t kRecvSize = 4096;
     static constexpr size_t kSendSize = 65536;  // larger than kRecvSize — will be clamped
@@ -251,8 +250,8 @@ TEST_F(NetIbMPITest, SendSizeClamping) {
 // E3.  NullCommClose — ncclIbCloseSend/Recv on NULL must return
 //      ncclSuccess without crashing (null-guard branch).
 TEST_F(NetIbMPITest, NullCommClose) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
 
     EXPECT_EQ(CloseSendComm(nullptr), ncclSuccess);
@@ -268,8 +267,8 @@ TEST_F(NetIbMPITest, NullCommClose) {
 //      tag 0 on its own connection, a completion routed to the wrong comm shows
 //      up as a data mismatch instead of passing silently.
 TEST_F(NetIbMPITest, TagZeroReuse) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -315,7 +314,7 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(/*dev=*/0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(/*dev=*/0, cp, guard));
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -339,8 +338,8 @@ TEST_F(NetIbMPITest, TagZeroReuse) {
 //      When AR is enabled and size > threshold, ncclIbMultiSend appends a
 //      0-byte RDMA_WRITE_WITH_IMM work request.
 TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     const char* arEnv = getenv("NCCL_IB_ADAPTIVE_ROUTING");
     if (!arEnv || atoi(arEnv) == 0) {
         GTEST_SKIP() << "Set NCCL_IB_ADAPTIVE_ROUTING=1 to run this test";
@@ -350,7 +349,7 @@ TEST_F(NetIbMPITest, AdaptiveRoutingThresholdBoundary) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     const size_t maxSz = 16384;
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -384,14 +383,14 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
         GTEST_SKIP() << "Requires NCCL_IB_USE_INLINE=1";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     const size_t maxSz = 1024 * 1024; // 1 MB
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -421,8 +420,8 @@ TEST_F(NetIbMPITest, InlineSendBoundary) {
 //      below at 2 or 4 workers, 4 MB and below at 16 -- so the largest steps are
 //      covered by the serial body.
 TEST_F(NetIbMPITest, MixedSizeBarrage) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -435,7 +434,7 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     // From the shared ladder, not a constant beside it: a size added to
     // kBarrageSizes would otherwise send DoSendRecv past the end of this buffer.
@@ -471,8 +470,8 @@ TEST_F(NetIbMPITest, MixedSizeBarrage) {
 //      tight senders replace an idle fabric with genuine queue contention, while
 //      the backpressure assertion stays per-connection.
 TEST_F(NetIbMPITest, FifoPressureSenderFast) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -589,7 +588,7 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -658,8 +657,8 @@ TEST_F(NetIbMPITest, FifoPressureSenderFast) {
 //      also cycles more than a whole pool through each comm, which is what makes
 //      recycling assertable rather than assumed -- see kRounds below.
 TEST_F(NetIbMPITest, RequestSlotExhaustion) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -726,7 +725,7 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     const size_t sz = 256;
     auto buf = makeHostBufferAutoGuard(malloc(sz * kMaxReqsPerComm));
@@ -784,8 +783,8 @@ TEST_F(NetIbMPITest, RequestSlotExhaustion) {
 //      device behind a single mutex, so concurrent storms are the only way to
 //      race its insert, lookup and release paths against each other.
 TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -881,7 +880,7 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     void* comm = (rank == 0) ? cp.recvComm : cp.sendComm;
 
@@ -952,8 +951,8 @@ TEST_F(NetIbMPITest, MemoryRegistrationStorm) {
 // C1.  ConcurrentMultiConnectionStress — 4 connections on same device,
 //      concurrent I/O with independent tag spaces.
 TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1055,8 +1054,8 @@ TEST_F(NetIbMPITest, ConcurrentMultiConnectionStress) {
 // C2.  ConnectionChurnUnderLoad — 1000 connect→transfer→close cycles,
 //      with RDMA resource leak detection.
 TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1167,8 +1166,8 @@ TEST_F(NetIbMPITest, ConnectionChurnUnderLoad) {
 //      all, close all, repeat 100 times (1000 lifecycles total).
 //      RDMA checkpoints at batches 25, 50, 75, 100.
 TEST_F(NetIbMPITest, ConnectionBatchCreateDestroy) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1300,8 +1299,8 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
         GTEST_SKIP() << "Requires NCCL_IB_QPS_PER_CONNECTION>=2, NCCL_IB_SPLIT_DATA_ON_QPS=1";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1322,7 +1321,7 @@ TEST_F(NetIbMPITest, MultiQpSplitDataStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     const size_t maxSz = 1024 * 1024; // 1 MB
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -1353,8 +1352,8 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
         GTEST_SKIP() << "Requires NCCL_IB_QPS_PER_CONNECTION>=2, NCCL_IB_SPLIT_DATA_ON_QPS=0";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1369,7 +1368,7 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     const size_t maxSz = 1024 * 1024;
     auto buf = makeHostBufferAutoGuard(malloc(maxSz));
@@ -1400,8 +1399,8 @@ TEST_F(NetIbMPITest, MultiQpNoSplitStress) {
 
 // B1.  FanInStress — ranks 1,2,3 each send to rank 0, 100 iterations.
 TEST_F(NetIbMPITest, FanInStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1459,8 +1458,8 @@ TEST_F(NetIbMPITest, FanInStress) {
 
 // B2.  FanOutStress — rank 0 sends to ranks 1,2,3, 100 iterations.
 TEST_F(NetIbMPITest, FanOutStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1517,8 +1516,8 @@ TEST_F(NetIbMPITest, FanOutStress) {
 
 // B3.  AllToAllStress — full mesh (12 connections for 4 ranks), 50 iters.
 TEST_F(NetIbMPITest, AllToAllStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     int nranks = MPIEnvironment::world_size;
     AssertInitAndGetDevices(nullptr);
@@ -1582,8 +1581,8 @@ TEST_F(NetIbMPITest, MultiQpFanIn) {
         GTEST_SKIP() << "Requires NCCL_IB_QPS_PER_CONNECTION>=2, NCCL_IB_SPLIT_DATA_ON_QPS=1";
     }
 
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1640,8 +1639,8 @@ TEST_F(NetIbMPITest, MultiQpFanIn) {
 
 // B5.  BidirectionalMultiRank — all pairs bidirectional, 4 ranks, 50 iters.
 TEST_F(NetIbMPITest, BidirectionalMultiRank) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     int nranks = MPIEnvironment::world_size;
     AssertInitAndGetDevices(nullptr);
@@ -1700,8 +1699,8 @@ TEST_F(NetIbMPITest, BidirectionalMultiRank) {
 
 // B6.  LongRunningMultiRank — fan-in 3→1, 1000 iterations, RDMA checkpoints.
 TEST_F(NetIbMPITest, LongRunningMultiRank) {
-    ASSERT_TRUE(validateTestPrerequisites(kMinFourProcesses, kMinFourProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kMinFourProcesses, kMinFourProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1772,8 +1771,8 @@ TEST_F(NetIbMPITest, LongRunningMultiRank) {
 // G1.  BidirectionalSaturation — two opposing connections, full-duplex,
 //      50 iterations.
 TEST_F(NetIbMPITest, BidirectionalSaturation) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1836,8 +1835,8 @@ TEST_F(NetIbMPITest, BidirectionalSaturation) {
 //      the main thread around the whole run: an in-loop snapshot would see the
 //      other workers' live QPs and report a false leak.
 TEST_F(NetIbMPITest, LongRunningEndurance) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -1873,7 +1872,7 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     const size_t sz = kSmallBufferSize;
     auto buf = makeHostBufferAutoGuard(malloc(sz));
@@ -1907,8 +1906,8 @@ TEST_F(NetIbMPITest, LongRunningEndurance) {
 
 // H1.  GpuMemoryTransferStress — 5 alloc/transfer/flush/verify/free cycles.
 TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -2028,7 +2027,7 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     static constexpr int kCycles = 5;
     const size_t sizes[] = {512 * 1024, 1024 * 1024, 2 * 1024 * 1024, 4 * 1024 * 1024, 1024 * 1024};
@@ -2089,8 +2088,8 @@ TEST_F(NetIbMPITest, GpuMemoryTransferStress) {
 //      in flight on one NIC at once, so recycling has to hold up while other
 //      communicators are draining their own batches.
 TEST_F(NetIbMPITest, RapidRecvPostDrain) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     int rank = MPIEnvironment::world_rank;
     AssertInitAndGetDevices(nullptr);
 
@@ -2125,7 +2124,7 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
 
     ConnectionPair cp;
     NetConnectionGuard guard(net_);
-    SetupConnectionWithGuard(0, cp, guard);
+    ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, cp, guard));
 
     static constexpr int kCycles = 100;
     const size_t sz = 256;
@@ -2178,8 +2177,8 @@ TEST_F(NetIbMPITest, RapidRecvPostDrain) {
 //      Placed after Group J (not adjacent to E0-E7) because it was added in a later
 //      coverage iteration; the test number is kept to preserve git blame continuity.
 TEST_F(NetIbMPITest, SetNetAttrNoOp) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                         false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                         false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
     ASSERT_NE(net_->setNetAttr, nullptr);
     EXPECT_EQ(net_->setNetAttr(initCtx_, nullptr), ncclSuccess);
@@ -2354,52 +2353,91 @@ TEST_F(NetIbMPITest, ThreadedProgressDoesNotSerialize) {
     const double serialized = measure(nThreads);
     serialize = false;
 
-    // A worker can fail on one rank only, and the harness reports that on both
-    // ranks already. What must not happen here is a fatal assertion: this rank
-    // would leave the test while the peer, whose own timings are fine, waits in
-    // the barrier below forever. So a missing measurement is reported and the
-    // verdict skipped, and both ranks reach the barrier either way.
-    const bool measured = singleBefore > 0.0 && singleAfter > 0.0 && parallel > 0.0
-                          && serialized > 0.0;
-    EXPECT_TRUE(measured)
-        << "a phase produced no timing on this rank (single " << singleBefore << "/"
-        << singleAfter << " ms, parallel " << parallel << " ms, serialized " << serialized
-        << " ms), so the scaling verdict is skipped";
+    // Phases are gathered so the rank that is read prints every rank's numbers and both share one verdict.
+    struct PhaseTimes {
+        double singleBefore;
+        double singleAfter;
+        double parallel;
+        double serialized;
+    };
+    const PhaseTimes mine{singleBefore, singleAfter, parallel, serialized};
+    std::array<PhaseTimes, kExactTwoProcesses> gathered{};
+    // MPI_BYTE over doubles is safe: both ranks run the same build.
+    const bool gatheredOk =
+        MPI_Gather(&mine, sizeof(PhaseTimes), MPI_BYTE, gathered.data(), sizeof(PhaseTimes),
+                   MPI_BYTE, 0, MPI_COMM_WORLD)
+        == MPI_SUCCESS;
 
-    if (measured) {
-        const double single = (singleBefore + singleAfter) / 2.0;
-        const double factor = parallel / single;
-        const double budget = kSerializedFraction * nThreads;
-        const double serializedFactor = serialized / single;
+    const double budget = kSerializedFraction * nThreads;
+    int verdict = 1;
+    std::string why;
+    if (rank == 0) {
+        auto f2 = [](double v) {
+            char buf[32];
+            snprintf(buf, sizeof(buf), "%.2f", v);
+            return std::string(buf);
+        };
+        if (!gatheredOk) {
+            verdict = 0;
+            why = "the phase timings could not be gathered, so no rank's scaling was judged";
+        }
+        for (int r = 0; gatheredOk && r < kExactTwoProcesses; r++) {
+            const PhaseTimes& p = gathered[r];
+            const std::string at = "rank " + std::to_string(r) + ": ";
+            if (!(p.singleBefore > 0.0 && p.singleAfter > 0.0 && p.parallel > 0.0
+                  && p.serialized > 0.0)) {
+                verdict = 0;
+                why += at + "a phase produced no timing (single " + f2(p.singleBefore) + "/"
+                       + f2(p.singleAfter) + " ms, parallel " + f2(p.parallel)
+                       + " ms, serialized " + f2(p.serialized) + " ms). ";
+                continue;
+            }
+            const double single = (p.singleBefore + p.singleAfter) / 2.0;
+            const double factor = p.parallel / single;
+            const double serializedFactor = p.serialized / single;
+            // A machine that changed speed under us would invalidate the ratio.
+            const double drift =
+                std::max(p.singleBefore, p.singleAfter) / std::min(p.singleBefore, p.singleAfter);
 
-        TEST_INFO("progress scaling: %d workers, single %.1f/%.1f ms, parallel %.1f ms, "
-                  "factor %.2f; deliberately serialized %.1f ms, factor %.2f; budget %.2f",
-                  nThreads, singleBefore, singleAfter, parallel, factor, serialized,
-                  serializedFactor, budget);
+            TEST_INFO("progress scaling: rank %d, %d workers, single %.1f/%.1f ms, parallel "
+                      "%.1f ms, factor %.2f; deliberately serialized %.1f ms, factor %.2f; "
+                      "calibration drift %.2f; budget %.2f",
+                      r, nThreads, p.singleBefore, p.singleAfter, p.parallel, factor,
+                      p.serialized, serializedFactor, drift, budget);
 
-        // Without this the gate could pass by being blind: a wait that sleeps, or a
-        // workload that spends its time off the progress path, would report a flat
-        // factor no matter what. The same measurement has to flag a lock it knows is
-        // there before its verdict on the plugin means anything.
-        EXPECT_GT(serializedFactor, budget)
-            << "the measurement did not notice a mutex held across every transfer (factor "
-            << serializedFactor << ", budget " << budget
-            << "), so it cannot be trusted to notice one inside the plugin either";
-
-        EXPECT_LT(factor, budget)
-            << nThreads << " workers each moved " << kIters << " messages in " << parallel
-            << " ms while one worker needed " << single << " ms, a factor of " << factor
-            << " where full serialization is " << nThreads << ". Concurrent progress is being "
-            << "serialized somewhere under isend/irecv/test: a lock held across a progress "
-            << "call would do exactly this.";
-
-        // A machine that changed speed under us would invalidate the ratio above.
-        const double drift =
-            std::max(singleBefore, singleAfter) / std::min(singleBefore, singleAfter);
-        EXPECT_LT(drift, 1.5) << "single-worker calibration drifted between " << singleBefore
-                              << " ms and " << singleAfter
-                              << " ms, so the scaling factor cannot be trusted";
+            // Control: the gate must flag a known lock before its verdict on the plugin means anything.
+            if (!(serializedFactor > budget)) {
+                verdict = 0;
+                why += at + "the measurement did not notice a mutex held across every transfer "
+                            "(factor " + f2(serializedFactor) + ", budget " + f2(budget)
+                       + "), so it cannot be trusted to notice one inside the plugin either. ";
+            }
+            if (!(factor < budget)) {
+                verdict = 0;
+                why += at + std::to_string(nThreads) + " workers each moved "
+                       + std::to_string(kIters) + " messages in " + f2(p.parallel)
+                       + " ms while one worker needed " + f2(single) + " ms, a factor of "
+                       + f2(factor) + " where full serialization is "
+                       + std::to_string(nThreads)
+                       + ". Concurrent progress is being serialized somewhere under "
+                         "isend/irecv/test: a lock held across a progress call would do "
+                         "exactly this. ";
+            }
+            if (!(drift < 1.5)) {
+                verdict = 0;
+                why += at + "single-worker calibration drifted between " + f2(p.singleBefore)
+                       + " ms and " + f2(p.singleAfter)
+                       + " ms, so its scaling factor cannot be trusted. ";
+            }
+        }
     }
+
+    // Both ranks leave with the same verdict.
+    if (MPI_Bcast(&verdict, 1, MPI_INT, 0, MPI_COMM_WORLD) != MPI_SUCCESS) verdict = 0;
+    EXPECT_EQ(verdict, 1)
+        << (rank == 0 ? why
+                      : std::string("the progress-scaling verdict failed; rank 0's report "
+                                    "carries the per-rank numbers"));
 
     MPI_Barrier(MPI_COMM_WORLD);
 }

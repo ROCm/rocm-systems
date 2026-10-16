@@ -209,6 +209,19 @@ bool IsValidQueuePriority(hsa_amd_queue_priority_t priority) {
          priority == HSA_AMD_QUEUE_PRIORITY_HIGH;
 }
 
+core::MemoryRegion::AllocateFlags MemoryPoolFlagsToAllocateFlags(uint64_t flags) {
+  core::MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateNoFlags;
+  if (flags & HSA_AMD_MEMORY_POOL_PCIE_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocatePCIeRW;
+  if (flags & HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateContiguous;
+  if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateExecutable;
+  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
+    alloc_flag |= core::MemoryRegion::AllocateUncached;
+  return alloc_flag;
+}
+
 }  // namespace
 
 hsa_status_t handleException() {
@@ -1374,19 +1387,8 @@ hsa_status_t hsa_amd_memory_pool_allocate(hsa_amd_memory_pool_t memory_pool, siz
     return (hsa_status_t)HSA_STATUS_ERROR_INVALID_MEMORY_POOL;
   }
 
-  MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateRestrict;
-
-  if (flags & HSA_AMD_MEMORY_POOL_PCIE_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocatePCIeRW;
-
-  if (flags & HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateContiguous;
-
-  if (flags & HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateExecutable;
-
-  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateUncached;
+  MemoryRegion::AllocateFlags alloc_flag =
+      core::MemoryRegion::AllocateRestrict | MemoryPoolFlagsToAllocateFlags(flags);
 
 #ifdef SANITIZER_AMDGPU
   if (mem_region->owner()->device_type() == core::Agent::kAmdGpuDevice)
@@ -1676,6 +1678,15 @@ hsa_status_t hsa_amd_queue_intercept_register(hsa_queue_t* queue,
   CATCH;
 }
 
+// For use by tools only - not in library export table.
+hsa_status_t hsa_amd_enable_high_precision_timestamps() {
+  TRY;
+  IS_OPEN();
+  core::Runtime::runtime_singleton_->flag().set_enable_high_precision_timestamps(true);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
 hsa_status_t hsa_amd_register_system_event_handler(hsa_amd_system_event_callback_t callback,
                                                    void* data) {
   TRY;
@@ -1849,6 +1860,25 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
   CATCH;
 }
 
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                  hsa_amd_agent_attribute_t attribute,
+                                                  void* value) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(value);
+  const rocr::core::Agent* base_agent = rocr::core::Agent::Convert(agent);
+  if (base_agent == NULL || !base_agent->IsValid() ||
+      base_agent->device_type() != rocr::core::Agent::kAmdGpuDevice)
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+
+  rocr::AMD::GpuAgent* agent =
+      const_cast<rocr::AMD::GpuAgent*>(
+          static_cast<const rocr::AMD::GpuAgent*>(base_agent));
+  return agent->SetAgentAttribute(
+      static_cast<hsa_agent_info_t>(attribute), value);
+  CATCH;
+}
+
 hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf,
   uint64_t* offset) {
 TRY;
@@ -1958,11 +1988,9 @@ hsa_status_t hsa_amd_vmem_handle_create(hsa_amd_memory_pool_t memory_pool, size_
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
   }
 
-  MemoryRegion::AllocateFlags alloc_flag = core::MemoryRegion::AllocateMemoryOnly;
+  MemoryRegion::AllocateFlags alloc_flag =
+      core::MemoryRegion::AllocateMemoryOnly | MemoryPoolFlagsToAllocateFlags(flags);
   if (type == MEMORY_TYPE_PINNED) alloc_flag |= core::MemoryRegion::AllocatePinned;
-
-  if (flags & HSA_AMD_MEMORY_POOL_UNCACHED_FLAG)
-    alloc_flag |= core::MemoryRegion::AllocateUncached;
 
   if (mem_region->owner()->device_type() == core::Agent::kAmdCpuDevice)
     alloc_flag |= core::MemoryRegion::AllocateNonPaged;
@@ -2073,6 +2101,20 @@ hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_ha
   }
 
   return ret;
+  CATCH;
+}
+
+hsa_status_t hsa_amd_vmem_get_vmem_info(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                        hsa_amd_vmem_handle_info_t* info) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(info);
+
+  /* The caller must provide a structure large enough to hold at least the size member. */
+  if (info->size < sizeof(hsa_amd_vmem_handle_info_t))
+    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+  return core::Runtime::runtime_singleton_->VMemoryGetHandleInfo(allocHandle, info);
   CATCH;
 }
 
@@ -2628,12 +2670,25 @@ hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
 // ====================================================================================
 
 hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_create(
+    hsa_agent_t agent_handle,
     amd_launch_descriptor_t* launch_descriptor) {
   TRY;
   IS_OPEN();
   IS_BAD_PTR(launch_descriptor);
 
-  core::LaunchDescriptor* desc = new core::LaunchDescriptor();
+  const core::Agent* agent = core::Agent::Convert(agent_handle);
+  IS_VALID(agent);
+
+  if (agent->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  uint8_t version = core::GetDescriptorVersion(agent);
+  if (version == AMD_LAUNCH_DESCRIPTOR_VERSION_NONE) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  core::LaunchDescriptor* desc = new core::LaunchDescriptor(version);
   *launch_descriptor = core::LaunchDescriptor::Convert(desc);
   return HSA_STATUS_SUCCESS;
   CATCH;
@@ -2645,10 +2700,6 @@ hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_destroy(
   IS_OPEN();
 
   core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
-  if (desc == nullptr) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   delete desc;
   return HSA_STATUS_SUCCESS;
   CATCH;
@@ -2662,10 +2713,6 @@ hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_set(
   IS_OPEN();
 
   core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
-  if (desc == nullptr) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   core::SetDescriptorField(desc, field, value);
   return HSA_STATUS_SUCCESS;
   CATCH;
@@ -2679,10 +2726,6 @@ hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_set_prefetch(
   IS_OPEN();
 
   core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
-  if (desc == nullptr) {
-    return HSA_STATUS_ERROR_INVALID_ARGUMENT;
-  }
-
   core::SetDescriptorPrefetch(desc, index, prefetch);
   return HSA_STATUS_SUCCESS;
   CATCH;

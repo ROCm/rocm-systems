@@ -18,7 +18,7 @@ all_unrolls   = ["1", "2", "4", "8", "16", "32"]
 # Unroll factors whose device functions are compiled for one arch only, and the single
 # source of truth for that restriction: get_arch_guard(), the specialized_files.txt guard
 # the device linker filters on, the local-arch unroll set, and the ncclDevFuncUnrollArch[]
-# table the host checks before selecting an unroll. --all_unrolls clears it.
+# table the host checks before selecting an unroll. --all_unrolls does not clear it.
 unroll_arch_requirement = {
   "32": "gfx1250",
 }
@@ -51,8 +51,8 @@ def reg_values_of(coll, proto):
   # SendRecv is generated as two latency-protocol kernel variants, selected on the
   # host by ncclDevFuncId_P2p(useLL128) (see src/enqueue.cc / src/include/device.h):
   #   reg "0" = legacy LL latency path (built on every arch; the default)
-  #   reg "1" = LL128 latency path (activated on gfx942/gfx950 only; used when
-  #             NCCL_ALLOC_P2P_NET_LL_BUFFERS=1). The reg value is threaded into the
+  #   reg "1" = LL128 latency path (gfx942/gfx950 via NCCL_ALLOC_P2P_NET_LL_BUFFERS,
+  #             gfx1250 via NCCL_P2P_LL128_ENABLE). The reg value is threaded into the
   #             SendRecv RunWorkBatch specialization as UserRegMode to pick LL vs LL128.
   if coll == "SendRecv":
     return ["0", "1"]
@@ -111,6 +111,20 @@ else:
 # make ONLY_FUNCS="AllReduce RING SIMPLE|ReduceScatter RING LL * f32"
 # make ONLY_FUNCS="AllReduce RING/TREE LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|AllGather RING LL/SIMPLE Sum i8|AlltoAllPivot RING SIMPLE Sum i8|Broadcast RING LL/SIMPLE Sum i8|Reduce RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|ReduceScatter RING LL/SIMPLE Sum/MinMax i8/u8/f16/f32/f64/bf16/f8e4m3/f8e5m2|SendRecv RING SIMPLE Sum i8"
 
+################################################################################
+# NCCL_EXACT_KERNEL_NAMES selects upstream's exact kernel naming, which only
+# applies to the representative-ncclDevKernel mapping. RCCL emits one
+# ncclDevFunc_* per primary variant plus a per-function specialized kernel, so
+# every variant already has a distinct name and the option has no effect here.
+def str_to_bool(s):
+  s = s.lower()
+  if s in ("1", "true", "on", "yes"):
+    return True
+  if s in ("", "0", "false", "off", "no"):
+    return False
+  raise ValueError("Invalid boolean value: " + s)
+exact_kernel_names = str_to_bool(os.environ.get("NCCL_EXACT_KERNEL_NAMES", "0"))
+
 # Paste all non-None arguments together with `sep`.
 def paste(sep, *args):
   return sep.join(x for x in args if x is not None)
@@ -118,7 +132,8 @@ def paste(sep, *args):
 is_ifc             = 1 if sys.argv[2] == "ON" else 0
 is_local_arch_only = 1 if sys.argv[4] == "ON" else 0
 is_rocshmem        = 1 if sys.argv[5] == "ON" else 0
-# BUILD_ALL_UNROLLS / install.sh --all_unrolls: generate every unroll for the targeted archs.
+# BUILD_ALL_UNROLLS / install.sh --all_unrolls: also generate unroll 8 and 16.
+# Off by default, so a normal build does not compile those factors.
 build_all_unrolls  = 1 if sys.argv[6] == "ON" else 0
 
 func_pattern = sys.argv[7:8]
@@ -279,7 +294,7 @@ def calc_unroll_and_pipeline_for_local_arch():
       return (["1", "2"], ["0"])  # Disable pipelining for gfx950
     elif "gfx908" == gfx_name or ("gfx942" == gfx_name and cu_count > 80):
       return (["2"], all_pipelines)
-    elif "gfx1250" == gfx_name:
+    elif gfx_name.startswith("gfx1250"):
       # gfx1250 (MI450/MI455) runs unroll 32. Unroll 8 was once noted as required for the FP8
       # launch; nothing in src/ depends on it now. Use --all_unrolls to build 8 and 16.
       return (unrolls_requiring_arch("gfx1250"), all_pipelines)
@@ -292,12 +307,16 @@ def calc_unroll_and_pipeline_for_local_arch():
 # except for gfx950. For gfx950, we also disable pipelining.
 local_unroll, local_pipeline = calc_unroll_and_pipeline_for_local_arch()
 
-# --all_unrolls widens the unroll set and compiles every one for the targeted archs, so the
-# pin no longer holds. The arch's pipeline decision stands. Must follow the call above, the
-# only reader of unrolls_requiring_arch.
+# --all_unrolls appends the unrolls the multi-arch default skips (8 and 16). The
+# per-arch set and any arch pin stay as calc_unroll_and_pipeline_for_local_arch
+# decided them, and the arch's pipeline decision stands. A build without the flag
+# does not compile the skipped factors. Must follow the call above, the only
+# reader of unrolls_requiring_arch.
 if build_all_unrolls:
-  local_unroll = all_unrolls
-  unroll_arch_requirement.clear()
+  local_unroll = list(local_unroll)
+  for unroll in [u for u in all_unrolls if u not in default_unrolls]:
+    if unroll not in local_unroll:
+      local_unroll.append(unroll)
 
 # rocSHMEM/GDA-based collectives: only generated when ENABLE_ROCSHMEM build is requested
 gda_colls = {"AlltoAllGda", "AlltoAllvGda"}
@@ -433,19 +452,21 @@ def get_arch_guard(fn):
   cond = None
 
   if fn.coll == "SendRecv" and fn.reg == "1":
-      # LL128 SendRecv kernel. Only gfx942/gfx950 activate it, but gfx1250 builds it too
-      # or its unroll-32 slot would be a nullptr in the one table gfx1250 indexes.
-      cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      # LL128 SendRecv kernel. gfx942/gfx950 activate it via ALLOC_P2P_NET_LL_BUFFERS;
+      # gfx1250 activates it via NCCL_P2P_LL128_ENABLE. Built for all three so the
+      # unroll-32 slot is not a nullptr in the table gfx1250 indexes.
+      cond = "(defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.unroll in unroll_arch_requirement:
-      cond = "defined(__%s__)" % unroll_arch_requirement[fn.unroll]
+      arch = unroll_arch_requirement[fn.unroll]
+      cond = "(defined(__%s__) || defined(__%s_strict__))" % (arch, arch)
       if fn.proto == "LL128":
         cond += " && defined(ENABLE_LL128)"
   elif fn.proto == "LL128" and fn.acc == "1":
-      cond = "(defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.proto == "LL128":
-      cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)) && defined(ENABLE_LL128)"
+      cond = "(defined(__gfx90a__) || defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))) && defined(ENABLE_LL128)"
   elif fn.acc == "1":
-      cond = "defined(__gfx942__) || defined(__gfx950__) || defined(__gfx1250__)"
+      cond = "defined(__gfx942__) || defined(__gfx950__) || (defined(__gfx1250__) || defined(__gfx1250_strict__))"
   return cond
 
 # Build the mangled function symbol suffix. The user-buffer registration mode is
@@ -558,6 +579,14 @@ with open(os.path.join(gensrc, "host_table.cpp"), "w") as f:
 
   out = f.write
   out('#include "device.h"\n')
+  out("\n")
+
+  # funcId travels in an NCCL_DEV_WORK_BATCH_FUNC_ID_BITS-wide ncclDevWorkBatch
+  # field. RCCL indexes a per-unroll table, so the largest per-unroll function
+  # count must fit.
+  max_funcs_per_unroll = max([sum(1 for fn in primary_funcs if fn.unroll == u) for u in all_unrolls] + [0])
+  out("static_assert(%d <= (1 << NCCL_DEV_WORK_BATCH_FUNC_ID_BITS), " % max_funcs_per_unroll)
+  out('"Device function IDs must fit in ncclDevWorkBatch");\n')
   out("\n")
   out("// The key for the ncclDevFuncNameToId map is a 64-bit unsigned integer.\n")
   out("// Each field (coll, algo, proto, redop, ty, acc, pipeline) is packed into 4 bits,\n")
@@ -701,7 +730,7 @@ for name in name_to_funcs.keys():
 
     out = f.write
     out(
-      '#include "common.h"\n'
+      '#include "device/common.h"\n'
       '#include "{lower_coll}.h"\n'
       .format(lower_coll=coll_camel_to_lower[coll])
     )
@@ -747,7 +776,7 @@ for fn in primary_funcs:
 
   with open(filepath, "w") as f:
     out = f.write
-    out('#include "common.h"\n')
+    out('#include "device/common.h"\n')
     out('#include "%s.h"\n\n' % lower_coll)
     if guard:
       out("#if %s\n" % guard)

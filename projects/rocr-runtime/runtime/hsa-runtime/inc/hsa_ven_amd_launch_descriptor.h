@@ -74,7 +74,9 @@ extern "C" {
  */
 typedef enum {
   /**
-   * Version field. Specifies the descriptor format version.
+   * Version field. Read-only; automatically set by
+   * hsa_ven_amd_launch_descriptor_create() based on the target agent.
+   * Attempts to set this field will return HSA_STATUS_ERROR_INVALID_ARGUMENT.
    * Type: uint8_t
    * Valid values: AMD_LAUNCH_DESCRIPTOR_VERSION_*
    */
@@ -130,20 +132,28 @@ typedef enum {
 } hsa_ven_amd_launch_descriptor_field_t;
 
 /**
- * @brief Create a launch descriptor.
+ * @brief Create a launch descriptor for a specific agent.
  *
- * Allocates and initializes a new launch descriptor. The descriptor is
- * zero-initialized. The application must call
- * hsa_ven_amd_launch_descriptor_destroy() to free the descriptor when done.
+ * Allocates and initializes a new launch descriptor whose version is
+ * determined by the target agent's GPU architecture. The descriptor is
+ * zero-initialized with the version field set automatically.
+ * The application must call hsa_ven_amd_launch_descriptor_destroy() to
+ * free the descriptor when done.
  *
+ * @param[in] agent GPU agent that this descriptor targets. The runtime
+ *            uses the agent's ISA to select the appropriate descriptor
+ *            version. Must be a GPU agent.
  * @param[out] launch_descriptor Pointer to receive the descriptor handle.
  *
  * @retval HSA_STATUS_SUCCESS The descriptor was created successfully.
  * @retval HSA_STATUS_ERROR_NOT_INITIALIZED The HSA runtime is not initialized.
+ * @retval HSA_STATUS_ERROR_INVALID_AGENT The agent is not a valid GPU agent
+ *         or does not support launch descriptors.
  * @retval HSA_STATUS_ERROR_INVALID_ARGUMENT launch_descriptor is NULL.
  * @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES Failed to allocate memory.
  */
 hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_create(
+    hsa_agent_t agent,
     amd_launch_descriptor_t* launch_descriptor);
 
 /**

@@ -59,6 +59,12 @@ uint16_t append_elf_section_for_test(std::vector<uint8_t> &image, Elf64_Shdr sec
     std::optional<size_t> function_pointer_table_target_words = std::nullopt,
     bool name_function_pointer_table_with_symbol = true, bool export_text_function = false);
 [[nodiscard]] std::vector<uint8_t> make_minimal_amdgpu_elf_with_descriptor_after_text();
+/// @brief Build the single-kernel fixture for one concrete AMDGPU ELF machine.
+/// @details The caller-provided descriptor supplies resource allocation fields;
+/// the helper preserves the fixture's computed text-entry displacement.
+[[nodiscard]] std::vector<uint8_t>
+make_minimal_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t elf_machine,
+                               const TestKernelDescriptor &kernel_descriptor);
 /// @brief One sized `STT_FUNC` body in the fixture's `.text`.
 struct TestTextFunction {
   size_t offset_word = 0;

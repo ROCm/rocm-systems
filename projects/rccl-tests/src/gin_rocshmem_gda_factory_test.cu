@@ -22,7 +22,7 @@
 #include <cassert>
 
 #include <gin/gin_rocshmem_gda_factory.h>
-#include <nccl_device/gin/rocshmem_gda/queue_pair_device.h>
+#include <nccl_device/gin/rocshmem_gda/gda/queue_pair_provider.hpp>
 
 #define HIP_CHECK(cmd) do {                                      \
   hipError_t e = (cmd);                                          \
@@ -54,7 +54,9 @@ __global__ void gin_put_kernel(rocshmem::QueuePair **qps,
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
     printf("gin_put_kernel: peer=%d dst=%p src=%p bytes=%zu rkey=0x%x lkey=0x%x\n",
            peer, dst, src, nbytes, dst_rkey, src_lkey);
-    qps[peer]->put_nbi(dst, dst_rkey, src, src_lkey, nbytes, wf_info);
+    uintptr_t dst_raddr = reinterpret_cast<uintptr_t>(dst);
+    uintptr_t src_laddr = reinterpret_cast<uintptr_t>(src);
+    qps[peer]->put_nbi(dst_raddr, dst_rkey, src_laddr, src_lkey, nbytes, wf_info);
     printf("gin_put_kernel: put posted, calling quiet\n");
     qps[peer]->quiet(wf_info);
     printf("gin_put_kernel: quiet done\n");
@@ -69,7 +71,8 @@ __global__ void gin_atomic_kernel(rocshmem::QueuePair **qps,
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
     printf("gin_atomic_kernel: peer=%d addr=%p rkey=0x%x val=%lld\n",
            peer, remote_addr, rkey, (long long)value);
-    qps[peer]->atomic_add(remote_addr, rkey, value, wf_info);
+    uintptr_t raddr = reinterpret_cast<uintptr_t>(remote_addr);
+    qps[peer]->atomic_add(raddr, rkey, value, wf_info);
     printf("gin_atomic_kernel: atomic posted, calling quiet\n");
     qps[peer]->quiet(wf_info);
     printf("gin_atomic_kernel: quiet done\n");
@@ -85,11 +88,15 @@ __global__ void gin_put_signal_kernel(rocshmem::QueuePair **qps,
                                        int peer) {
   if (threadIdx.x == 0 && blockIdx.x == 0) {
     rocshmem::ActiveWFInfo wf_info(peer, rocshmem::ThreadScope::thread);
+    static constexpr auto post_options = rocshmem::PostOpt{rocshmem::RingDB<false>};
     printf("gin_put_signal: peer=%d put dst=%p rkey=0x%x src=%p lkey=0x%x bytes=%zu\n",
            peer, dst, dst_rkey, src, src_lkey, nbytes);
-    qps[peer]->put_nbi(dst, dst_rkey, src, src_lkey, nbytes, wf_info, /*ring_db=*/false);
+    uintptr_t dst_raddr = reinterpret_cast<uintptr_t>(dst);
+    uintptr_t src_laddr = reinterpret_cast<uintptr_t>(src);
+    uintptr_t signal_raddr = reinterpret_cast<uintptr_t>(signal_addr);
+    qps[peer]->put_nbi(dst_raddr, dst_rkey, src_laddr, src_lkey, nbytes, wf_info, post_options);
     printf("gin_put_signal: atomic signal=%p rkey=0x%x\n", signal_addr, signal_rkey);
-    qps[peer]->atomic_add(signal_addr, signal_rkey, 1, wf_info);
+    qps[peer]->atomic_add(signal_raddr, signal_rkey, 1, wf_info);
     printf("gin_put_signal: calling quiet\n");
     qps[peer]->quiet(wf_info);
     printf("gin_put_signal: done\n");

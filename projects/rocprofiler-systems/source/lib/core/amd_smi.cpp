@@ -16,9 +16,7 @@
 
 #include <string_view>
 
-namespace rocprofsys
-{
-namespace amd_smi
+namespace rocprofsys::amd_smi
 {
 namespace
 {
@@ -41,7 +39,10 @@ namespace
 void
 config_settings(const std::shared_ptr<settings>& _config)
 {
-    if(!get_use_amd_smi() || !gpu::initialize_amdsmi()) return;
+    if(!get_use_amd_smi() || !gpu::initialize_amdsmi())
+    {
+        return;
+    }
 
     std::string default_metrics =
         "busy, temp, power, mem_usage, sdma_usage, gfx_clock, mem_clock";
@@ -97,5 +98,4 @@ config_settings(const std::shared_ptr<settings>& _config)
             "An empty value implies 'all' and 'none' suppresses all.",
         "busy, temp, power, mem_usage", "backend", "amd_smi", "rocm", "process_sampling");
 }
-}  // namespace amd_smi
-}  // namespace rocprofsys
+}  // namespace rocprofsys::amd_smi

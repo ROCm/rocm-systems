@@ -49,6 +49,7 @@ struct RocrEntryPoints {
   decltype(hsa_queue_load_write_index_scacquire)* hsa_queue_load_write_index_scacquire_;
   decltype(hsa_queue_load_write_index_relaxed)* hsa_queue_load_write_index_relaxed_;
   decltype(hsa_queue_add_write_index_screlease)* hsa_queue_add_write_index_screlease_;
+  decltype(hsa_queue_cas_write_index_screlease)* hsa_queue_cas_write_index_screlease_;
   decltype(hsa_memory_register)* hsa_memory_register_;
   decltype(hsa_memory_deregister)* hsa_memory_deregister_;
   decltype(hsa_memory_copy)* hsa_memory_copy_;
@@ -122,6 +123,7 @@ struct RocrEntryPoints {
   decltype(hsa_amd_vmem_address_reserve)* hsa_amd_vmem_address_reserve_;
   decltype(hsa_amd_vmem_address_free)* hsa_amd_vmem_address_free_;
   decltype(hsa_amd_vmem_handle_create)* hsa_amd_vmem_handle_create_;
+  decltype(hsa_amd_vmem_get_vmem_info)* hsa_amd_vmem_get_vmem_info_;
   decltype(hsa_amd_vmem_handle_release)* hsa_amd_vmem_handle_release_;
   decltype(hsa_amd_vmem_map)* hsa_amd_vmem_map_;
   decltype(hsa_amd_vmem_unmap)* hsa_amd_vmem_unmap_;
@@ -160,10 +162,15 @@ struct RocrEntryPoints {
   }
 #define GET_ROCR_OPTIONAL_SYMBOL(NAME)                                                            \
   cep_.NAME##_ = reinterpret_cast<NAME##_fn*>(Os::getSymbol(cep_.handle, #NAME));
+// Same as GET_ROCR_OPTIONAL_SYMBOL, for entry points declared with decltype()
+// in RocrEntryPoints rather than a hand-written NAME_fn typedef.
+#define GET_ROCR_OPTIONAL_SYMBOL_DECLTYPE(NAME)                                                   \
+  cep_.NAME##_ = reinterpret_cast<decltype(NAME)*>(Os::getSymbol(cep_.handle, #NAME));
 #else
 #define ROCR_DYN(NAME) NAME
 #define GET_ROCR_SYMBOL(NAME)
 #define GET_ROCR_OPTIONAL_SYMBOL(NAME)
+#define GET_ROCR_OPTIONAL_SYMBOL_DECLTYPE(NAME)
 #endif
 
 class Hsa : public amd::AllStatic {
@@ -215,6 +222,10 @@ class Hsa : public amd::AllStatic {
   }
   static uint64_t queue_add_write_index_screlease(const hsa_queue_t* queue, uint64_t value) {
     return ROCR_DYN(hsa_queue_add_write_index_screlease)(queue, value);
+  }
+  static uint64_t queue_cas_write_index_screlease(const hsa_queue_t* queue, uint64_t expected,
+                                                  uint64_t value) {
+    return ROCR_DYN(hsa_queue_cas_write_index_screlease)(queue, expected, value);
   }
   static hsa_status_t memory_register(void* ptr, size_t size) {
     return ROCR_DYN(hsa_memory_register)(ptr, size);
@@ -517,6 +528,27 @@ class Hsa : public amd::AllStatic {
   static hsa_status_t vmem_handle_create(hsa_amd_memory_pool_t pool, size_t size,
     hsa_amd_memory_type_t type, uint64_t flags, hsa_amd_vmem_alloc_handle_t* memory_handle) {
     return ROCR_DYN(hsa_amd_vmem_handle_create)(pool, size, type, flags, memory_handle);
+  }
+  // hsa_amd_vmem_get_vmem_info is an enhancement: an older ROCr will not export
+  // it, and callers fall back to their legacy behaviour rather than failing.
+  static bool vmem_get_vmem_info_available() {
+#ifdef ROCR_DYN_DLL
+    return ROCR_DYN(hsa_amd_vmem_get_vmem_info) != nullptr;
+#else
+    return true;
+#endif
+  }
+  static hsa_status_t vmem_get_vmem_info(
+    hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_vmem_handle_info_t* info) {
+#ifdef ROCR_DYN_DLL
+    auto fn = ROCR_DYN(hsa_amd_vmem_get_vmem_info);
+    if (fn == nullptr) {
+      return HSA_STATUS_ERROR;
+    }
+    return fn(memory_handle, info);
+#else
+    return hsa_amd_vmem_get_vmem_info(memory_handle, info);
+#endif
   }
   static hsa_status_t vmem_handle_release(hsa_amd_vmem_alloc_handle_t memory_handle) {
     return ROCR_DYN(hsa_amd_vmem_handle_release)(memory_handle);

@@ -1,0 +1,101 @@
+{
+  "evaluations": [
+    {
+      "id": "kb-profile-hip-application",
+      "skill_should_trigger": true,
+      "prompt": "profile my HIP application with rocprof-compute and tell me where the time goes",
+      "expected_behavior": [
+        "asks for the launch command and a workload name before profiling",
+        "runs rocprof-compute profile --name <name> -- <application>",
+        "runs analyze with --list-stats to find the hottest kernel"
+      ],
+      "unexpected_behavior": [
+        "invents a profiling flag instead of checking --help",
+        "opens the GUI or TUI"
+      ],
+      "logs_contain": ["rocprof-compute profile", "--list-stats"]
+    },
+    {
+      "id": "kb-which-kernel-is-slow",
+      "skill_should_trigger": true,
+      "prompt": "which kernel is the hotspot in ./workloads/my_app and why is it slow?",
+      "expected_behavior": [
+        "points --path at the directory containing profiling_config.yaml rather than a parent directory",
+        "uses --list-stats first, then narrows to one kernel id with -k",
+        "reads the System Speed-of-Light panel before opening a detailed block"
+      ],
+      "logs_contain": ["--list-stats", "-k"]
+    },
+    {
+      "id": "kb-occupancy-limited",
+      "skill_should_trigger": true,
+      "prompt": "is occupancy limiting this rocprof-compute kernel?",
+      "expected_behavior": [
+        "opens the wavefront block for the selected kernel",
+        "compares achieved occupancy against the theoretical occupancy printed in the report",
+        "ties any VGPR, SGPR, or LDS advice to numbers read from the report"
+      ],
+      "unexpected_behavior": [
+        "calls low occupancy a defect without checking whether the kernel already saturates another resource"
+      ],
+      "logs_contain": ["wavefront"]
+    },
+    {
+      "id": "kb-expensive-replay-fallback",
+      "skill_should_trigger": true,
+      "prompt": "a full rocprof-compute replay of this workload is too expensive, collect something cheaper",
+      "expected_behavior": [
+        "offers a single-pass option such as --set, a narrowed -b, or --iteration-multiplexing",
+        "runs --list-sets before selecting a set",
+        "warns which analysis panels will be empty afterwards"
+      ],
+      "logs_contain": ["--list-sets"]
+    },
+    {
+      "id": "kb-unsafe-to-replay",
+      "skill_should_trigger": true,
+      "prompt": "profile this one-shot ROCm job that writes to the production database",
+      "expected_behavior": [
+        "warns that counter profiling replays the application multiple times",
+        "does not start profiling until replay safety is settled",
+        "offers a single-pass collection as an alternative"
+      ],
+      "unexpected_behavior": [
+        "runs a multi-pass profile of a workload the user described as unsafe to repeat"
+      ]
+    },
+    {
+      "id": "kb-kernel-name-filter",
+      "skill_should_trigger": true,
+      "prompt": "profile only the gemm kernels in my ROCm application",
+      "expected_behavior": [
+        "uses rocprof-compute profile -k to filter by kernel name",
+        "treats the profile-time -k value as a regex matched against kernel names"
+      ],
+      "logs_contain": ["-k"]
+    },
+    {
+      "id": "kb-cuda-application",
+      "skill_should_trigger": false,
+      "note": "Profiling request, but CUDA tooling is out of scope.",
+      "prompt": "profile my CUDA application with nsys"
+    },
+    {
+      "id": "kb-windows-request",
+      "skill_should_trigger": false,
+      "note": "rocprof-compute is named, but the platform is unsupported.",
+      "prompt": "profile my application on Windows with rocprof-compute"
+    },
+    {
+      "id": "kb-install-question",
+      "skill_should_trigger": false,
+      "prompt": "how do I install ROCm on Ubuntu?"
+    },
+    {
+      "id": "kb-write-a-kernel",
+      "skill_should_trigger": false,
+      "note": "GPU performance adjacent, but this skill does not author kernel source.",
+      "prompt": "write me a faster HIP matrix multiply kernel"
+    }
+  ]
+}

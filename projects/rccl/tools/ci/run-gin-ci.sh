@@ -22,7 +22,7 @@
 #   GIN_PYTEST_TIMEOUT Wall-clock cap for pytest matrix entries (default: 1800s)
 #   GIN_PYTEST_HW_CASES  mpirun cases under -k GinSdma (default: 9). Offline
 #                  parser/tier guards do not launch and are not counted.
-#   RCCL_TESTS_BCAST_GIN_TYPE  NCCL_GIN_TYPE for Broadcast pytest (default: 6)
+#   RCCL_TESTS_BCAST_GIN_TYPE  NCCL_GIN_TYPE for Broadcast pytest (default: 7)
 #   RCCL_TESTS_BCAST_TIMEOUT_S / RCCL_TESTS_BCAST_CONN_RETRIES
 #                  Inner pytest launch budget. Unset → derived so
 #                  HW_CASES * retries * TIMEOUT_S is strictly under
@@ -245,7 +245,7 @@ run_test() {
         RCCL_TESTS_GIN_SDMA_BCAST=1 \
         RCCL_TESTS_BCAST_EXE="${bcast_exe}" \
         RCCL_TESTS_BCAST_NP="${NP}" \
-        RCCL_TESTS_BCAST_GIN_TYPE="${RCCL_TESTS_BCAST_GIN_TYPE:-6}" \
+        RCCL_TESTS_BCAST_GIN_TYPE="${RCCL_TESTS_BCAST_GIN_TYPE:-7}" \
         RCCL_TESTS_BCAST_TIMEOUT_S="${RCCL_TESTS_BCAST_TIMEOUT_S}" \
         RCCL_TESTS_BCAST_CONN_RETRIES="${RCCL_TESTS_BCAST_CONN_RETRIES}" \
         RCCL_TESTS_BCAST_XENV="${bcast_xenv}" \

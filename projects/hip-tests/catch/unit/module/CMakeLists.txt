@@ -19,6 +19,7 @@ set(TEST_SRC
     hipGetFuncBySymbol.cc
     hipDrvLaunchKernelEx.cc
     hipModuleGetFunctionCount.cc
+    hipModuleEnumerateFunctions.cc
     hipModuleLoadFatBinary.cc
     test_fatbin_mixed_arch.cc
 )
@@ -241,7 +242,7 @@ if(HIP_PLATFORM MATCHES "amd")
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN} --cuda-device-only --offload-arch=amdgcnspirv
                     --no-gpu-bundle-output
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv
@@ -252,7 +253,7 @@ if(HIP_PLATFORM MATCHES "amd")
     add_custom_target(addKernel_spv DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/addKernel.spv)
 
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
-                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_SPIRV} --cuda-device-only --offload-arch=amdgcnspirv
+                    COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH_NO_ASAN} --cuda-device-only --offload-arch=amdgcnspirv
                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/addKernel.cc
                     -o ${CMAKE_CURRENT_BINARY_DIR}/addKernel-bundle.spv
                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
@@ -280,10 +281,12 @@ if(HIP_PLATFORM MATCHES "amd")
   --offload-arch=gfx9-generic
   --offload-arch=gfx9-4-generic:sramecc+:xnack-
   --offload-arch=gfx9-4-generic:sramecc-:xnack-
-  --offload-arch=gfx9-4-generic:xnack+
+  --offload-arch=gfx9-4-generic:sramecc+:xnack+
+  --offload-arch=gfx9-4-generic:sramecc-:xnack+
   --offload-arch=gfx10-1-generic
   --offload-arch=gfx10-3-generic
   --offload-arch=gfx11-generic
+  --offload-arch=gfx11-7-generic
   --offload-arch=gfx12-generic
   --offload-arch=gfx12-5-generic
 )

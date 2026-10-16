@@ -7,34 +7,6 @@ include(GNUInstallDirs)
 set(VERSION_MAJOR_AMDHIP ${HIP_VERSION_MAJOR})
 set(VERSION_MINOR_AMDHIP ${HIP_VERSION_MINOR})
 
-if(NOT DEFINED THEROCK_SANITIZER)
-  set(THEROCK_SANITIZER)
-endif()
-
-if(ADDRESS_SANITIZER OR THEROCK_SANITIZER STREQUAL "ASAN" OR THEROCK_SANITIZER STREQUAL "HOST_ASAN")
-  message(STATUS "Building with sanitizer")
-  set(ASAN_LINKER_FLAGS "-fsanitize=address")
-  set(ASAN_COMPILER_FLAGS "-fno-omit-frame-pointer -fsanitize=address")
-
-  if(NOT CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
-    if(BUILD_SHARED_LIBS)
-      set(ASAN_COMPILER_FLAGS "${ASAN_COMPILER_FLAGS} -shared-libsan")
-      set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -shared-libsan")
-    else()
-      set(ASAN_LINKER_FLAGS "${ASAN_LINKER_FLAGS} -static-libsan")
-    endif()
-  endif()
-
-  # If its being built by TheRock, CMAKE_<LANG>_FLAGS should have the sanitizer flags
-  # If not, we append it.
-  if(ADDRESS_SANITIZER)
-    set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} ${ASAN_COMPILER_FLAGS}")
-    set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} ${ASAN_COMPILER_FLAGS}")
-    set(CMAKE_EXE_LINKER_FLAGS "${CMAKE_EXE_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -s -Wl,--build-id=sha1")
-    set(CMAKE_SHARED_LINKER_FLAGS "${CMAKE_SHARED_LINKER_FLAGS} ${ASAN_LINKER_FLAGS} -Wl,--build-id=sha1")
-  endif()
-endif()
-
 if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Werror")
   set(CMAKE_C_FLAGS "${CMAKE_C_FLAGS} -Wno-error=deprecated-declarations")
@@ -124,7 +96,6 @@ target_sources(amdhip64 PRIVATE
   hip_vm.cpp
   hip_api_trace.cpp
   hip_table_interface.cpp
-  hip_table_interface_c.cpp
   hip_deprecated_abi.cpp
   hip_comgr_helper.cpp
   hip_library.cpp
@@ -157,6 +128,11 @@ if(BUILD_SHARED_LIBS)
     target_link_options(amdhip64 PRIVATE "/DEF:${AMDHIP_DEF_OUTPUT_NATIVE}")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${AMDHIP_DEF_OUTPUT}")
   else()
+    # Unix compiler and linker default visibility to visible. Let's change to
+    # hidden so we only expose what we need.
+    set_target_properties(amdhip64 PROPERTIES
+      CXX_VISIBILITY_PRESET hidden
+      VISIBILITY_INLINES_HIDDEN ON)
     target_link_libraries(amdhip64 PRIVATE "-Wl,--version-script=${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
     set_target_properties(amdhip64 PROPERTIES LINK_DEPENDS "${CMAKE_CURRENT_LIST_DIR}/hip_hcc.map.in")
   endif()

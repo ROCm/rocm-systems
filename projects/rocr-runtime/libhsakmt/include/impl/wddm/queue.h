@@ -191,7 +191,7 @@ public:
   }
 
   hsa_status_t Process(void);
-  uint64_t * GetDoorbellPtr() const { return (uint64_t *)&doorbell_signal_value_; }
+  uint64_t * GetDoorbellPtr() const { return doorbell_ptr_; }
   void RingDoorbell(uint64_t value);
   GpuMemory* GetAmdQueueMemory() const override { return amd_queue_memory_; }
 
@@ -225,7 +225,12 @@ public:
   // ib_size is the current ib size.
   uint64_t ib_size;
 
-  // record the last submitted aql frame write index
+  // This queue's submission ordinal: the number of PM4 frames it has submitted,
+  // which is also the fence value the most recent submission signals and, once
+  // the GPU reaches it, the value *sync_addr holds. It counts submissions
+  // rather than AQL packets, because one submission owns one physical frame
+  // however many merged packets that frame ended up holding. See
+  // impl/wddm/cmdbuf_frame_ring.h for the reuse invariant it indexes.
   uint64_t sync_point;
 
   uint64_t cmdbuf_aql_frame_write_index;
@@ -258,18 +263,18 @@ private:
   uint32_t ScratchSizePerWave() { return scratch_size_per_wave_; }
   uint64_t GetKernelObjAddr(uint64_t addr) const;
   void InitScratchSRD();
-  GpuMemoryHandle amd_queue_mem_;
   GpuMemory* amd_queue_memory_;     //!< Memory object associated with amd_queue_t structure from ROCr
-  amd_queue_v2_t *amd_queue_;
   amd_queue_v2_t *amd_queue_rocr_;  //!< AQL queue, allocated in rocr and pointing to the header
   uint64_t amd_queue_size_rocr_;    //!< Size of the AQL queue allocated in ROCR, including header
-  uint64_t doorbell_signal_value_;
-  volatile std::atomic<int64_t> *error_code_;
+  GpuMemoryHandle doorbell_mem_;
+  uint64_t *doorbell_ptr_;          //!< amd_signal_t::hardware_doorbell_ptr exposed to ROCr
   std::thread aql_to_pm4_thread_;
-  bool thread_stop_;
+  std::thread fault_monitor_thread_;
+  std::atomic<bool> thread_stop_;
   std::mutex thread_cond_lock_;
   std::condition_variable thread_cond_;
   static void AqlToPm4Thread(ComputeQueue *queue);
+  static void FaultMonitorThread(ComputeQueue *queue);
 
   uint64_t scratch_waves_;
   uint64_t dispatch_waves_;

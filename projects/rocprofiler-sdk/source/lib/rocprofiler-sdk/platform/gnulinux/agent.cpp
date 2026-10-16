@@ -22,6 +22,7 @@
 
 #include "lib/rocprofiler-sdk/platform/gnulinux/agent.hpp"
 
+#include "lib/common/defines.hpp"
 #include "lib/common/environment.hpp"
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
@@ -177,7 +178,9 @@ parse_cpu_info()
                     }
                 }
 
-                if(itr.find("vendor_id") == 0)
+                if(itr.find("processor") == 0) info_v.processor = get_stol(value);
+#if defined(__x86_64__) || defined(_M_X64)
+                else if(itr.find("vendor_id") == 0)
                     info_v.vendor_id = value;
                 else if(itr.find("model name") == 0)
                 {
@@ -186,8 +189,6 @@ parse_cpu_info()
                     info_v.model_name =
                         sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
                 }
-                else if(itr.find("processor") == 0)
-                    info_v.processor = get_stol(value);
                 else if(itr.find("cpu family") == 0)
                     info_v.family = get_stol(value);
                 else if(itr.find("model") == 0 && itr.find("model name") != 0)
@@ -198,6 +199,15 @@ parse_cpu_info()
                     info_v.core_id = get_stol(value);
                 else if(itr.find("apicid") == 0)
                     info_v.apicid = get_stol(value);
+#elif defined(__powerpc64__) || defined(__PPC64__)
+                // On POWER, "cpu" holds the model name (e.g. "POWER10, altivec supported")
+                else if(itr.find("cpu") == 0)
+                {
+                    info_v.model_name = value;
+                    info_v.model_name =
+                        sdk::parse::strip(std::string{info_v.model_name}, " \t\n\v\f\r");
+                }
+#endif
             }
             else
             {
@@ -211,6 +221,24 @@ parse_cpu_info()
                     << fmt::format("Encountered unexpected /proc/cpuinfo line format: '{}'", itr);
             }
         }
+
+#if !defined(__x86_64__) && !defined(_M_X64)
+        // Default x86-specific fields that have no equivalent on this architecture.
+        // Use processor index as a proxy for apicid to allow CPU agent matching.
+        if(info_v.family < 0) info_v.family = 0;
+        if(info_v.model < 0) info_v.model = 0;
+        if(info_v.physical_id < 0) info_v.physical_id = 0;
+        if(info_v.core_id < 0) info_v.core_id = 0;
+        if(info_v.apicid < 0) info_v.apicid = info_v.processor;
+        if(info_v.vendor_id.empty()) info_v.vendor_id = "Unknown";
+        if(info_v.model_name.empty()) info_v.model_name = "Unknown";
+#    if !defined(__powerpc64__) && !defined(__PPC64__)
+        ROCP_CI_LOG(WARNING) << fmt::format(
+            "Some /proc/cpuinfo fields could not be parsed for processor {} on this "
+            "architecture; using defaults",
+            info_v.processor);
+#    endif  // !ppc64le
+#endif
 
         if(info_v.is_valid())
             processor_info.emplace_back(info_v);
@@ -632,9 +660,9 @@ enumerate()
                         agent_info.node_id,
                         agent_info.gfx_target_version);
 
-                    auto major = (agent_info.gfx_target_version / 10000) % 100;
-                    auto minor = (agent_info.gfx_target_version / 100) % 100;
-                    auto step  = (agent_info.gfx_target_version % 100);
+                    auto major = ROCPROFILER_GFXIP_MAJOR(agent_info.gfx_target_version);
+                    auto minor = ROCPROFILER_GFXIP_MINOR(agent_info.gfx_target_version);
+                    auto step  = ROCPROFILER_GFXIP_STEPPING(agent_info.gfx_target_version);
                     agent_info.name =
                         common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))
                             ->c_str();
@@ -675,9 +703,9 @@ enumerate()
                         major_version,
                         minor_version);
 
-                    auto major = (agent_info.gfx_target_version / 10000) % 100;
-                    auto minor = (agent_info.gfx_target_version / 100) % 100;
-                    auto step  = (agent_info.gfx_target_version % 100);
+                    auto major = ROCPROFILER_GFXIP_MAJOR(agent_info.gfx_target_version);
+                    auto minor = ROCPROFILER_GFXIP_MINOR(agent_info.gfx_target_version);
+                    auto step  = ROCPROFILER_GFXIP_STEPPING(agent_info.gfx_target_version);
 
                     agent_info.name =
                         common::get_string_entry(fmt::format("gfx{}{}{:x}", major, minor, step))

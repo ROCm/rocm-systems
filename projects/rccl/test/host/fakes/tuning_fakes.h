@@ -18,6 +18,8 @@
 #include "nccl.h"
 
 struct ncclComm;
+struct ncclTuningInput_t;
+struct ncclTuningResult_t;
 
 // -------------------------------------------------------------------------
 // ncclTopoGetAlgoTime (tuning.cc:1599) fills the cost table that a caller's
@@ -34,17 +36,17 @@ extern std::function<ncclResult_t(struct ncclComm*, int coll, int algorithm, int
     g_topoGetAlgoTime;
 extern int g_topoGetAlgoTimeCalls;
 
-// Min/max channel clamps. These do NOT mirror production: NCCL_PARAM defaults
-// both to -2 (graph/connect.cc:832-833), the sentinel meaning "unset". The fakes
-// default to 0/MAXCHANNELS instead, i.e. the already-resolved clamps, so a test
-// sees an inert clamp without going through ncclMinNchannels/ncclMaxNchannels.
-extern int64_t g_paramMinNchannels;  // UNDRIVEN
-extern int64_t g_paramMaxNchannels;  // UNDRIVEN
+// Min/max channel-clamp parameter defaults from graph/connect.cc:832-833.
+// Both use -2, the production sentinel meaning "unset".
+extern int64_t g_paramMinNchannels;
+extern int64_t g_paramMaxNchannels;
 
 // rcclGetTuningIndexForArch (tuning.cc:1637). Records the arch it was handed:
 // a caller forwarding "" instead of comm->archName is invisible without it.
 extern int g_tuningIndexValue;
 extern std::string g_tuningIndexLastArch;
+
+extern std::function<ncclResult_t(struct ncclTuningInput_t*, struct ncclTuningResult_t*)> g_tuningCompute;
 
 void ResetTuningFakes();
 

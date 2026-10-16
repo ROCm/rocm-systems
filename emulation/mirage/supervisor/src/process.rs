@@ -620,7 +620,7 @@ pub fn spawn(spec: &SpawnSpec, output: mpsc::Sender<OutputChunk>) -> Result<Spaw
 }
 
 /// The environment a process should see, given the spec.
-fn resolved_env(spec: &SpawnSpec) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
+pub(crate) fn resolved_env(spec: &SpawnSpec) -> Vec<(std::ffi::OsString, std::ffi::OsString)> {
     let mut env: Vec<(std::ffi::OsString, std::ffi::OsString)> = Vec::new();
     if !spec.inherit_env {
         for key in INHERITED_ENV {

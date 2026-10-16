@@ -9,8 +9,8 @@
 ///        flag; `make_gfx942_*` (CDNA3), `make_gfx950_*` (CDNA4), and
 ///        `make_gfx1200_*` (RDNA4) are thin wrappers over them.
 ///
-/// Lives at the tests/ root (not a test slice) because it is shared across
-/// tests/patch, tests/dbi, and tests/code. Everything is in namespace
+/// Lives at the tests/ root rather than in one subdirectory because it is shared
+/// across tests/patch, tests/dbi, and tests/code. Everything is in namespace
 /// rocjitsu::test so a TU that needs to both patch (Instrumentor) and execute
 /// (simulator) a code object can share one copy.
 
@@ -52,6 +52,8 @@ inline constexpr uint32_t kMovV5V1 = 0x7E0A0301u;   // v_mov_b32 v5, v1 -> reads
 inline constexpr uint32_t kMovV5V2 = 0x7E0A0302u;   // v_mov_b32 v5, v2 -> reads v2 into v5.
 inline constexpr uint32_t kMovV5V3 = 0x7E0A0303u;   // v_mov_b32 v5, v3 -> reads v3 into v5.
 inline constexpr uint32_t kMovV6S8 = 0x7E0C0208u;   // v_mov_b32 v6, s8 -> reads s8 into v6.
+inline constexpr uint32_t kMovV1V0 = 0x7E020300u;   // v_mov_b32 v1, v0 -> reads v0 into v1.
+inline constexpr uint32_t kMovV3V0 = 0x7E060300u;   // v_mov_b32 v3, v0 -> reads v0 into v3.
 
 // v_mov_b32 v{dst}, <inline const K> for K in [0, 64]. vdst occupies bits [24:17];
 // inline constant 0 is encoded as 128, and 1..64 as 129..192, in the src0 field (bits [8:0]).
@@ -154,12 +156,14 @@ inline uint64_t align_up_for_test(uint64_t value, uint64_t alignment) {
 // `wrap_symtab_range` sets the .symtab sh_offset so sh_offset + sh_size overflows;
 // `kd_crosses_section` shrinks the .rodata sh_size below sizeof(KD) so the 64-byte `.kd`
 // descriptor extends past its owning section into the adjacent one.
-inline std::vector<uint8_t>
-make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes,
-                       uint32_t granulated_sgpr_count, uint32_t e_flags,
-                       uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
-                       bool unterminated_kd_name = false, bool wrap_section_header_table = false,
-                       bool wrap_symtab_range = false, bool kd_crosses_section = false) {
+// `kernarg_segment_ptr` enables ENABLE_SGPR_KERNARG_SEGMENT_PTR with USER_SGPR_COUNT = 2 and
+// records `kernarg_size`, which is what the DBI entry prologue requires of a kernel.
+inline std::vector<uint8_t> make_amdgpu_kernel_elf(
+    const std::vector<uint32_t> &text_words, uint32_t private_bytes, uint32_t granulated_sgpr_count,
+    uint32_t e_flags, uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0,
+    bool unterminated_kd_name = false, bool wrap_section_header_table = false,
+    bool wrap_symtab_range = false, bool kd_crosses_section = false, bool wave32 = false,
+    bool kernarg_segment_ptr = false, uint32_t kernarg_size = 0, uint64_t entry_text_offset = 0) {
   namespace kd = rocr::llvm::amdhsa;
   using KD = kd::kernel_descriptor_t;
 
@@ -233,16 +237,35 @@ make_amdgpu_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private
 
   std::memcpy(image.data() + text_offset, text_words.data(), text_size);
 
-  // Entry at .text offset 0; scratch and SGPR granulation set for spilling.
+  // Entry at .text offset @p entry_text_offset; scratch and SGPR granulation
+  // set for spilling.
   KD desc{};
   desc.private_segment_fixed_size = private_bytes;
   desc.kernel_code_entry_byte_offset =
-      static_cast<int64_t>(text_vaddr) - static_cast<int64_t>(rodata_vaddr);
+      static_cast<int64_t>(text_vaddr + entry_text_offset) - static_cast<int64_t>(rodata_vaddr);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
                   granulated_sgpr_count);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc1, kd::COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT,
                   granulated_vgpr_count);
   AMDHSA_BITS_SET(desc.compute_pgm_rsrc3, kd::COMPUTE_PGM_RSRC3_GFX90A_ACCUM_OFFSET, accum_offset);
+  // RDNA opts into Wave32 through this bit; a clear bit is Wave64. CDNA has no
+  // such field, so setting it there would describe a kernel that cannot exist.
+  // Braced deliberately: AMDHSA_BITS_SET expands to two unbraced statements, so
+  // an unbraced `if` would run the second one unconditionally.
+  if (wave32) {
+    AMDHSA_BITS_SET(desc.kernel_code_properties, kd::KERNEL_CODE_PROPERTY_ENABLE_WAVEFRONT_SIZE32,
+                    1);
+  }
+  // The kernarg pointer is the only enabled user-SGPR property, so it occupies
+  // s[0:1] and USER_SGPR_COUNT is 2. Both halves matter: the prologue reads the
+  // pointer out of the slot the enable bits imply, and it treats the user-SGPR
+  // count as the floor its reserved storage must sit above.
+  if (kernarg_segment_ptr) {
+    AMDHSA_BITS_SET(desc.kernel_code_properties,
+                    kd::KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
+    AMDHSA_BITS_SET(desc.compute_pgm_rsrc2, kd::COMPUTE_PGM_RSRC2_USER_SGPR_COUNT, 2);
+    desc.kernarg_size = kernarg_size;
+  }
   std::memcpy(image.data() + rodata_offset, &desc, sizeof(desc));
   std::memcpy(image.data() + strtab_offset, strtab.data(), strtab.size());
 
@@ -333,6 +356,40 @@ inline std::vector<uint8_t> make_gfx1200_kernel_elf(const std::vector<uint32_t> 
                                                     uint32_t accum_offset = 0) {
   return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
                                 EF_AMDGPU_MACH_AMDGCN_GFX1200, granulated_vgpr_count, accum_offset);
+}
+
+// The same target ELF with the descriptor's Wave32 bit set. A separate builder
+// rather than a parameter: make_gfx1200_kernel_elf is taken by address as part
+// of a per-arch factory triple, so its signature is pinned by that use. RDNA is
+// the only family with a wave size to choose, so there is no CDNA counterpart.
+inline std::vector<uint8_t> make_gfx1200_wave32_kernel_elf(const std::vector<uint32_t> &text_words,
+                                                           uint32_t private_bytes,
+                                                           uint32_t granulated_sgpr_count = 3,
+                                                           uint32_t granulated_vgpr_count = 0,
+                                                           uint32_t accum_offset = 0) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count,
+                                EF_AMDGPU_MACH_AMDGCN_GFX1200, granulated_vgpr_count, accum_offset,
+                                /*unterminated_kd_name=*/false,
+                                /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
+                                /*kd_crosses_section=*/false, /*wave32=*/true);
+}
+
+// Target ELF for any of the three DBI-supported ISAs whose descriptor advertises a
+// kernarg segment pointer. The entry prologue rejects a kernel without one, so this
+// is the only builder here that reaches prologue placement rather than a rejection
+// path. The VGPR defaults leave v0..v3 ordinary on CDNA, as make_amdgpu_kernel_elf's
+// do; a probe taking more argument dwords needs a wider window.
+inline std::vector<uint8_t>
+make_kernarg_kernel_elf(const std::vector<uint32_t> &text_words, uint32_t private_bytes,
+                        uint32_t e_flags, uint32_t kernarg_size, bool wave32 = false,
+                        uint32_t granulated_sgpr_count = 3, uint64_t entry_text_offset = 0,
+                        uint32_t granulated_vgpr_count = 0, uint32_t accum_offset = 0) {
+  return make_amdgpu_kernel_elf(text_words, private_bytes, granulated_sgpr_count, e_flags,
+                                granulated_vgpr_count, accum_offset,
+                                /*unterminated_kd_name=*/false,
+                                /*wrap_section_header_table=*/false, /*wrap_symtab_range=*/false,
+                                /*kd_crosses_section=*/false, wave32,
+                                /*kernarg_segment_ptr=*/true, kernarg_size, entry_text_offset);
 }
 
 // gfx950 target ELF whose `.kd` symbol name runs to the end of its string table
@@ -649,6 +706,18 @@ inline std::vector<uint32_t> section_words(const AmdGpuCodeObject &obj, std::str
   return {};
 }
 
+// Copy a named section's raw bytes, for the `.rocjitsu.*` metadata sections,
+// which are byte payloads rather than instruction words.
+inline std::vector<uint8_t> section_bytes(const AmdGpuCodeObject &obj, std::string_view name) {
+  for (const auto &sec : obj.all_sections()) {
+    if (sec->name() != name)
+      continue;
+    const auto *data = reinterpret_cast<const uint8_t *>(sec->data());
+    return std::vector<uint8_t>(data, data + sec->size());
+  }
+  return {};
+}
+
 // Read back the (single) kernel's scratch size from a patched ELF.
 inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
   if (obj.text_sections().empty())
@@ -658,6 +727,20 @@ inline uint32_t patched_private_segment_size(const AmdGpuCodeObject &obj) {
       {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
       text->sectionOffset(), text->size());
   return kernels.size() == 1 ? kernels.front().descriptor.private_segment_fixed_size : 0xFFFFFFFFu;
+}
+
+/// @brief .text-relative entry of a patched object's single kernel, or nullopt
+///        unless exactly one kernel is found.
+inline std::optional<uint64_t> patched_entry_text_offset(const AmdGpuCodeObject &obj) {
+  if (obj.text_sections().empty())
+    return std::nullopt;
+  const Section *text = obj.text_sections().front();
+  const auto kernels = scan_kernel_descriptors(
+      {reinterpret_cast<const uint8_t *>(obj.image_data()), obj.image_size()},
+      text->sectionOffset(), text->size());
+  if (kernels.size() != 1)
+    return std::nullopt;
+  return kernels.front().entry_text_offset;
 }
 
 } // namespace rocjitsu::test

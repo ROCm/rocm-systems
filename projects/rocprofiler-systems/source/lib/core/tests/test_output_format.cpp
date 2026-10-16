@@ -18,6 +18,40 @@ TEST(output_format, proto_enables_only_perfetto)
     EXPECT_FALSE(sel.text);
 }
 
+TEST(output_format, pftrace_enables_only_perfetto)
+{
+    const auto sel = resolve_output_format(strset_t{ "pftrace" });
+    EXPECT_TRUE(sel.perfetto);
+    EXPECT_FALSE(sel.rocpd);
+    EXPECT_FALSE(sel.profile());
+    EXPECT_FALSE(sel.json);
+    EXPECT_FALSE(sel.text);
+}
+
+TEST(output_format, proto_aliases_pftrace)
+{
+    // 'proto' is retained as a deprecated alias for 'pftrace'; both must
+    // produce an identical selection.
+    const auto from_proto   = resolve_output_format(strset_t{ "proto" });
+    const auto from_pftrace = resolve_output_format(strset_t{ "pftrace" });
+    EXPECT_EQ(from_proto.perfetto, from_pftrace.perfetto);
+    EXPECT_EQ(from_proto.rocpd, from_pftrace.rocpd);
+    EXPECT_EQ(from_proto.profile(), from_pftrace.profile());
+    EXPECT_EQ(from_proto.json, from_pftrace.json);
+    EXPECT_EQ(from_proto.text, from_pftrace.text);
+}
+
+TEST(output_format, pftrace_and_proto_together_are_idempotent)
+{
+    // passing both tokens must not differ from passing either one alone
+    const auto sel = resolve_output_format(strset_t{ "pftrace", "proto" });
+    EXPECT_TRUE(sel.perfetto);
+    EXPECT_FALSE(sel.rocpd);
+    EXPECT_FALSE(sel.profile());
+    EXPECT_FALSE(sel.json);
+    EXPECT_FALSE(sel.text);
+}
+
 TEST(output_format, rocpd_disables_perfetto_and_profile)
 {
     const auto sel = resolve_output_format(strset_t{ "rocpd" });

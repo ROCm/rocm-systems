@@ -6,6 +6,52 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 ## ROCm Systems Profiler 1.10.0 for ROCm 10.2 (unreleased)
 
+### Added
+
+- `rocsys` unified CLI entry point. `rocsys -- ./app` and `rocsys profile -- ./app`
+  produce a full trace profile. `rocsys rewrite` runs `rocprof-sys-instrument`
+  in binary-rewrite mode (`-o`). Other subcommands (`instrument`, `causal`,
+  `avail`, `python`, `attach`) forward to the existing tools. The
+  `rocprof-sys-*` binaries are unchanged.
+- AMD Infinity Storage I/O telemetry. Per-GPU I/O counters are sampled into
+  the profiler output. Enable collection with `ROCPROFSYS_USE_HIPFILE` and select metrics with
+  `ROCPROFSYS_HIPFILE_METRICS`. See
+  [hipFile Infinity Storage I/O telemetry](./docs/how-to/hipfile-telemetry.rst).
+- `--detach-after <seconds>` flag on `rocprof-sys-attach` for non-interactive use; the binary
+  sleeps for the given duration after attach instead of waiting for `ENTER` on stdin.
+- `rocprof-sys-attach` finds the tool library in the target's own ROCm installation when the
+  target cannot see this installation's library (for example, inside a container), so
+  `ROCPROF_ATTACH_TOOL_LIBRARY` is no longer needed there.
+- Agent skills for choosing a profiling preset, discovering configuration options, and
+  instrumenting binaries are now installed in `share/rocprofiler-systems/skills`. Run the
+  bundled `install-skills.sh --agent <claude|codex|cursor>` to copy them into your AI coding
+  agent's personal skills folder.
+
+### Resolved issues
+
+- Fixed a crash (`SIGSEGV`) in `rocprof-sys-instrument` when instrumenting Fortran+HIP
+  programs compiled with `gfortran -g` or `-g -O0`. gfortran encodes assumed-shape and
+  allocatable array bounds as DWARF location expression blocks rather than integer
+  constants at debug optimization levels; DynInst was treating these block-form
+  attributes as errors and dereferencing a null pointer in `parseSubrange()`.
+  Fixed in [ROCm/dyninst#33](https://github.com/ROCm/dyninst/pull/33).
+- Fixed `rocprof-sys-attach` aborting the target process when attaching to a process
+  running in a different mount namespace (for example, a container). The tool library
+  path is now validated against the target's mount namespace before attaching, failing
+  cleanly with a diagnostic instead.
+
+### Removed
+
+- Legacy direct Perfetto tracing mode. Perfetto traces are now always generated from the
+  trace cache. `ROCPROFSYS_TRACE_LEGACY` and `--trace-legacy` / `-L` were removed (passing `-L` is
+  now an unknown-argument error); the `tracing.legacy` key was removed from JSON
+  configuration export.
+- Timemory component annotations (for example `thread_cpu_clock` and PAPI counter
+  values) are no longer attached to Perfetto slices. They will be available through the
+  timemory output formats.
+
+## ROCm Systems Profiler 1.9.0 for ROCm 10.1 (unreleased)
+
 ### Changed
 
 - Minimum supported GCC raised from 10 to **GCC 11**, the first release with the
@@ -15,11 +61,23 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 - `ROCPROFSYS_MONOCHROME` and `MONOCHROME` now treat any value other than a recognized
   false token (`off`/`false`/`no`/`n`/`f`/`0`) as `true`, instead of only recognizing a
   fixed set of true tokens.
+- Perfetto trace output now defaults to the `.pftrace` extension instead of
+  `.proto`, and `--output-format pftrace` is the canonical token for
+  requesting it (`proto` is kept as a permanent backward-compatible alias).
+- Remove oneTBB as a Dyninst dependency by replacing TBB concurrent containers
+  with C++ standard library equivalents; the bundled oneTBB submodule and the
+  `ROCPROFSYS_BUILD_TBB` CMake option are removed.
 
 ### Resolved issues
 
 - Fixed per-link XGMI and device-level JPEG AMD SMI metrics missing from rocpd output
   because PMC metadata names did not match the sample insertion path.
+- `--trace-clock-id` no longer crashes the profiled process; the option is
+  now restricted to its two documented, supported values (realtime,
+  cputime), and an invalid value now fails cleanly at startup instead of
+  aborting mid-run.
+- Fix a deadlock that may occur in libunwind when call-stack sampling is enabled.
+  Timemory commit: [ROCm/timemory@8fefbca](https://github.com/ROCm/timemory/commit/8fefbca)
 
 ## ROCm Systems Profiler 1.9.0 for ROCm 10.1
 
@@ -50,6 +108,19 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
   loaded, so its settings take effect. A configuration file already named by
   `ROCPROFSYS_CONFIG_FILE` is preserved, and the one given on the command line is
   appended to it.
+
+- Pausing sampling now stops the underlying per-thread timers instead of only
+  discarding the samples they produce. Previously a paused sampler kept delivering
+  timer signals, so the profiled application's sleeps were still interrupted
+  throughout a window in which no data was being collected.
+
+### Fixed
+
+- `ROCPROFSYS_TRACE_DELAY`/`ROCPROFSYS_TRACE_DURATION` now actually gate GPU context
+  startup, producing a real gap in cached GPU/RocPD data. Previously they only
+  suppressed downstream category emission. For GPU-only tracing with no marker
+  domain or trace region configured, the configured delay had no effect at all on
+  when GPU data collection actually began.
 
 ### Removed
 
@@ -112,6 +183,10 @@ Full documentation for ROCm Systems Profiler is available at [https://rocm.docs.
 
 - Introduced the new `profiler-hub` writer backend for trace persistence, as a
   replacement for the existing SQLite3/rocpd backend.
+
+- Output Summary now renders a process tree distinguishing multiple processes
+  in a single run by size and role, replacing the old flat per-process
+  listing that repeated identical blocks for fork-heavy workloads.
 
 ### Removed
 

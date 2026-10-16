@@ -2,6 +2,7 @@
 # SPDX-License-Identifier: MIT
 
 set(trace_cache_tests_sources
+    test_agent_info_json.cpp
     test_args_serialization.cpp
     test_buffer_storage.cpp
     test_cache_integration.cpp
@@ -28,7 +29,6 @@ target_link_libraries(
         rocprofiler-systems-core-library
         rocprofiler-systems-profiler-hub
         rocprofiler-systems-logger
-        rocprofiler-systems-ghc-filesystem
         rocprofiler-systems-headers
         rocprofiler-systems-rocm
         rocprofiler-systems-json
@@ -39,6 +39,7 @@ target_include_directories(
     trace-cache-tests
     PRIVATE
         ${PROJECT_SOURCE_DIR}/source/lib
+        ${PROJECT_SOURCE_DIR}/source/lib/core
         ${PROJECT_SOURCE_DIR}/source/lib/rocprof-sys
         ${CMAKE_BINARY_DIR}/source/lib/
 )

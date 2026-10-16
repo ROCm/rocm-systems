@@ -213,7 +213,7 @@ Legend: . = pass, s = skipped, F = fail, E = error
 
 [----------] 40 tests ran. (512 ms total)
 [  PASSED  ] 38 tests.
-[  FAILED  ] 1 test, listed below:
+[  FAILED  ] 1 failure, listed below:
 [  FAILED  ] TestPower.test_power_cap
 [  SKIPPED ] 1 test, listed below:
 [  SKIPPED ] TestOverdrive.test_overdrive_write
@@ -237,7 +237,10 @@ prints one character per test:
 
 - `[----------] N tests ran. (X ms total)` — total count and wall-clock time.
 - `[  PASSED  ] N tests.` — count that passed.
-- `[  FAILED  ] ...` — one line per failing test, listed by `Class.method`.
+- `[  FAILED  ] ...` — one line per failure, listed by `Class.method`. Counted in
+  failures rather than tests: one test can report several (a cleanup failing
+  after the body, or one per `subTest`), and class-level `setUpClass` /
+  `tearDownClass` errors appear here without being tests at all.
   Errors and unexpected `@expectedFailure` successes are counted here too.
 - `[  SKIPPED ] ...` — one line per skipped test.
 

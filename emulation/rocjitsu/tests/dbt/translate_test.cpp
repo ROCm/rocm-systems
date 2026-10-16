@@ -892,6 +892,28 @@ TEST(BinaryTranslatorE2E, EmptyTextSameArchDifferentMachineStillFails) {
                                    "does not expose a non-empty .text section"));
 }
 
+TEST(BinaryTranslatorE2E, FormattedAccessesRequireCrossFamilySemanticExpansion) {
+  for (bool typed : {false, true})
+    for (uint16_t opcode : {0, 1, 2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12, 13, 14, 15, 38, 39}) {
+      if (typed && opcode > 15)
+        continue;
+      const auto store =
+          typed ? cdna4::build_mtbuf(
+                      opcode, {.dfmt = 10, .nfmt = 4, .vdata = 8, .srsrc = 1, .soffset = 128})
+                : cdna4::build_mubuf(opcode, {.vdata = 8, .srsrc = 1, .soffset = 128});
+      const auto image =
+          make_minimal_amdgpu_elf_with_descriptor_after_text({store[0], store[1], 0xbf810000u});
+      AmdGpuCodeObject source(image.data(), image.size());
+      ASSERT_TRUE(source.is_valid());
+      BinaryTranslator translator(ROCJITSU_CODE_ARCH_CDNA4, ROCJITSU_CODE_ARCH_RDNA4);
+      const auto result = translator.translate(source);
+      EXPECT_FALSE(result.ok()) << "typed=" << typed << " opcode=" << opcode;
+      EXPECT_EQ(result.elf_bytes, image);
+      EXPECT_TRUE(has_error_containing(result, DiagnosticKind::ExpandMissing,
+                                       "no expansion rule is implemented"));
+    }
+}
+
 TEST(BinaryTranslatorE2E, LegacyAtomicMinMaxRequiresSemanticExpansion) {
   for (uint16_t opcode : {cdna4::kDsMinF32Ds, cdna4::kDsMaxF32Ds}) {
     // Legacy SNaN propagation differs from RDNA4 MIN_NUM/MAX_NUM. Refuse the
@@ -2964,9 +2986,8 @@ TEST(CodeObjectPatcher, ReplaceTextPreservesLoadSegmentAlignment) {
   EXPECT_LE(phdrs[0].p_vaddr + phdrs[0].p_memsz, phdrs[1].p_vaddr)
       << "expanded RX LOAD must not overlap the following LOAD in virtual memory";
 
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   ASSERT_EQ(symtab->sh_entsize, sizeof(Elf64_Sym));
   ASSERT_GE(symtab->sh_size / symtab->sh_entsize, 3u);
@@ -2997,9 +3018,8 @@ TEST(CodeObjectPatcher, ReplaceTextRelocatesTextSymbolsWithExactOffsetMap) {
   const auto patched_bytes = patcher.emit();
   const auto ehdr = read_elf_struct_for_test<Elf64_Ehdr>(patched_bytes, 0);
   const auto shdrs = read_elf_array_for_test<Elf64_Shdr>(patched_bytes, ehdr.e_shoff, ehdr.e_shnum);
-  const auto symtab = std::find_if(shdrs.begin(), shdrs.end(), [](const Elf64_Shdr &shdr) {
-    return shdr.sh_type == SHT_SYMTAB;
-  });
+  const auto symtab = std::ranges::find_if(
+      shdrs, [](const Elf64_Shdr &shdr) { return shdr.sh_type == SHT_SYMTAB; });
   ASSERT_NE(symtab, shdrs.end());
   const auto symbols = read_elf_array_for_test<Elf64_Sym>(patched_bytes, symtab->sh_offset,
                                                           symtab->sh_size / symtab->sh_entsize);
@@ -3704,7 +3724,7 @@ TEST(BinaryTranslator, InlineExpansionAvoidsCaveBranchOverflow) {
 
   ASSERT_TRUE(result.ok()) << (result.diagnostics.empty() ? ""
                                                           : result.diagnostics.front().message);
-  const bool diagnosed = std::any_of(
+  const bool diagnosed = std::ranges::any_of(
       result.diagnostics.begin(), result.diagnostics.end(),
       [](const TranslationDiagnostic &diagnostic) {
         return diagnostic.severity == DiagnosticSeverity::Error &&
@@ -4075,7 +4095,7 @@ TEST(BinaryTranslatorE2E, IncompleteIndirectConsumerTranslatesWhenScopeHasNoStal
   // stale value the fail-closed path exists to prevent.
   expect_builder_targets_endpgm(kBypassSreg);
 
-  EXPECT_NE(std::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
+  EXPECT_NE(std::ranges::find(target_words, target_words + word_count, pack_sop1(0x1d, 0, kPcSreg)),
             target_words + word_count)
       << "an incomplete consumer must keep its dynamic transfer, not become a direct window";
 }
