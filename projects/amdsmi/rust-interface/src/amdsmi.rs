@@ -1422,9 +1422,9 @@ pub fn amdsmi_get_gpu_memory_reserved_pages(
 /// Retrieves the fan speed for a given GPU handle and sensor index.
 ///
 /// This function returns the fan speed for the specified GPU handle and sensor index. The fan speed
-/// is a value relative to the per-device maximum. For legacy hwmon GPUs the maximum is
-/// AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs interface, use
-/// `amdsmi_get_gpu_fan_speed_max()` to query the actual maximum.
+/// is the hwmon pwm1 duty cycle, whose maximum is AMDSMI_MAX_FAN_SPEED (255). On GPUs with the
+/// gpu_od sysfs interface, the range accepted by `amdsmi_set_gpu_fan_speed()` is the gpu_od
+/// OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -1482,8 +1482,9 @@ pub fn amdsmi_get_gpu_fan_speed(
 ///
 /// Given a processor handle `processor_handle` and a sensor index `sensor_ind`, this function returns
 /// the maximum fan speed for the specified GPU.
-/// For legacy hwmon GPUs this is AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs
-/// interface, the maximum is read from the OD_RANGE (e.g. 100).
+/// This is the hwmon pwm1_max ceiling, AMDSMI_MAX_FAN_SPEED (255), and pairs with
+/// `amdsmi_get_gpu_fan_speed()`. On GPUs with the gpu_od sysfs interface, the range accepted by
+/// `amdsmi_set_gpu_fan_speed()` is the gpu_od OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///

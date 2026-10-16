@@ -157,7 +157,7 @@ class TestEventTimestamp(unittest.TestCase):
             "        PROCESS: started\n",
         )
 
-    def test_multiple_gpus_use_one_event_reader_thread(self):
+    def test_multiple_gpus_read_through_one_shared_thread(self):
         if self.event_cls is None:
             self.skipTest("event.py not found in source or install")
 
@@ -225,8 +225,11 @@ class TestEventTimestamp(unittest.TestCase):
             stack.enter_context(mock.patch("builtins.print"))
             command.event(args)
 
+        # event() opens one AmdSmiEventReader per device (_open_listeners) but
+        # reads through a single thread given the whole listener list --
+        # _event_thread itself indexes listeners[0] (a global poll).
         self.assertEqual(len(threads), 1)
-        self.assertEqual(threads[0].args[1], command.device_handles)
+        self.assertEqual(threads[0].args[1], readers)
         self.assertEqual([reader.read_count for reader in readers], [1, 0])
         self.assertEqual(
             [event["event"] for event in stored_events], ["PROCESS_START", "PROCESS_END"]

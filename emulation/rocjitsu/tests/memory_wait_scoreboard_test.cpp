@@ -1437,6 +1437,67 @@ TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLa
   }
 }
 
+TEST(MemoryWaitExecutionTest, Gfx12LoadDestinationsUseTheirActualWidth) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool overlap : {false, true}) {
+      SCOPED_TRACE(static_cast<unsigned>(arch));
+      SCOPED_TRACE(overlap);
+      GpuMemory memory("load_width_memory");
+      L2Cache l2("load_width_l2");
+      ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 32;
+      auto cu = ComputeUnitCore::create("load_width_cu", config, &memory, &l2);
+      auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      auto decoder = Decoder::create(arch);
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      for (bool second : {false, true}) {
+        // RADV's vkQuake shader loads RGBA into v[4:7], then R into v3.
+        // gfx1250 has tensor VIMAGE operations rather than image_load; use
+        // its corresponding four-word and one/two-word buffer loads.
+        const uint8_t data = second ? 3 : 4;
+        const uint8_t mask = second ? (overlap ? 3 : 1) : 15;
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_RDNA4
+                ? rdna4::build_vimage(rdna4::kImageLoadVimage,
+                                      {.dim = 5,
+                                       .dmask = mask,
+                                       .vdata = data,
+                                       .rsrc = static_cast<uint16_t>(second ? 8 : 0),
+                                       .vaddr0 = 3,
+                                       .vaddr1 = 0,
+                                       .vaddr2 = 2})
+                : cdna5::build_vbuffer(second ? (overlap ? cdna5::kBufferLoadB64Vbuffer
+                                                         : cdna5::kBufferLoadB32Vbuffer)
+                                              : cdna5::kBufferLoadB128Vbuffer,
+                                       {.vdata = data});
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        EXPECT_EQ(decoded.value()->dst_operand(0)->size_bits(), second ? (overlap ? 64 : 32) : 128);
+        state.check_instruction(*decoded.value(), *wf);
+        cu->track_memory_wait(*decoded.value(), *wf);
+        wf->pc += 12;
+      }
+      // A genuine overlapping destination still needs a wait on both gfx12
+      // targets: counter order does not imply ordered VGPR writeback.
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), overlap ? 1u : 0u);
+      if (!overlap) {
+        state.wait(WaitCounterKind::Load, 1);
+        state.access({RegClass::VGPR, 4, 4}, 1, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+        state.access({RegClass::VGPR, 3, 1}, 1, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+      }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionClass) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA3_5})
@@ -4060,10 +4121,8 @@ TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
       util::StringDiagnostic error;
       auto decoded = decoder->decode_window(words, 0, error.emitter());
       ASSERT_TRUE(decoded.succeeded()) << error.message();
-      for (uint32_t m0 : {0u, 3u, 35u, 37u, 74u, 92u, 102u, 104u, 0x2303u}) {
-        if ((op == 1 && (m0 & 0xffu) > 100) || (op == 3 && (m0 & 0xffu) >= 48) ||
-            (op == 2 && (m0 & 0xffu) >= 96))
-          continue;
+      for (uint32_t m0 :
+           {0u, 3u, 35u, 37u, 74u, 92u, 102u, 104u, 0x230003u, 0x100u, 0x80000002u, 0xffffffffu}) {
         SCOPED_TRACE(m0);
         wf->set_exec_raw(~uint64_t{0});
         wf->set_m0(m0);
@@ -4075,25 +4134,24 @@ TEST(MemoryWaitFootprintTest, ScalarRelativeAccessesMatchExecution) {
         // Named-register getters/setters do not issue scalar-observer callbacks.
         // Supplement those aliases from the documented scalar selector map.
         const unsigned width = op == 1 || op == 3 ? 2 : 1;
-        const unsigned src = 4 + (op < 2 || op == 4 ? (m0 & 0xffu) * width : 0);
-        const unsigned dst = 32 + (op == 4   ? (m0 >> 8) & 0xffu
-                                   : op >= 2 ? (m0 & 0xffu) * width
-                                             : 0);
-        auto named = [&](unsigned selector, auto &accesses) {
-          for (unsigned word = 0; word < width; ++word) {
-            const auto current = selector + word;
-            if (current == 106 || current == 107)
-              accesses.push_back({RegClass::VCC, static_cast<uint16_t>(current - 106), 1});
-            else if (current == 126 || current == 127)
-              accesses.push_back({RegClass::EXEC, static_cast<uint16_t>(current - 126), 1});
-            else if (arch == ROCJITSU_CODE_ARCH_CDNA4 && (current == 102 || current == 103))
-              accesses.push_back({RegClass::FLAT_SCRATCH, static_cast<uint16_t>(current - 102), 1});
-            else if (current == (arch == ROCJITSU_CODE_ARCH_CDNA4 ? 124u : 125u))
-              accesses.push_back({RegClass::M0, 0, 1});
-          }
+        const uint64_t offset = width == 2 ? m0 & ~1u : m0;
+        uint64_t src = 4 + (op == 4 ? m0 & 0x3ffu : op < 2 ? offset : 0);
+        const uint64_t dst = 32 + (op == 4 ? (m0 >> 16) & 0x3ffu : op >= 2 ? offset : 0);
+        const auto valid = [&](uint64_t selector) {
+          return selector + width <= 108 &&
+                 !(arch == ROCJITSU_CODE_ARCH_CDNA4 && selector >= 102 && selector < 104);
         };
-        named(src, reads);
-        named(dst, writes);
+        if (!valid(src))
+          src = 0;
+        auto named = [&](uint64_t selector, auto &accesses) {
+          for (unsigned word = 0; word < width; ++word)
+            if (selector + word == 106 || selector + word == 107)
+              accesses.push_back({RegClass::VCC, static_cast<uint16_t>(selector + word - 106), 1});
+        };
+        if (valid(dst)) {
+          named(src, reads);
+          named(dst, writes);
+        }
         wf->set_exec_raw(~uint64_t{0});
         wf->set_m0(m0);
         auto &state = wf->ensure_memory_wait_scoreboard();
