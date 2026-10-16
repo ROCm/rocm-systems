@@ -52,6 +52,22 @@ inline bool hrr_zero_init_needs_drain(bool zero_init_enabled,
     return zero_init_enabled && !in_graph_capture;
 }
 
+// How D2H validation compares a read-back with its recorded blob. Byte-exact by
+// default: a recorded blob carries no element type, and reading arbitrary bytes
+// as floats lets small integers match zero. HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>
+// opts a replay whose outputs really are floats of <type> (f32, bf16, f16, f64)
+// into |actual - expected| <= atol + rtol*|expected| for every element.
+struct HrrD2HTol {
+    enum Type { kExact, kF32, kBF16, kF16, kF64 };
+    Type   type = kExact;
+    double atol = 0.0;
+    double rtol = 0.0;
+};
+
+// Parses a HIP_HRR_D2H_TOL value. False, leaving *out alone, for anything but a
+// known type and two finite non-negative tolerances.
+bool hrr_parse_d2h_tol(const char* spec, HrrD2HTol* out);
+
 // ---- Capture-address placement (DESIGN.md, "GPU Allocator Address
 // Non-Determinism"). Half-open [base, end).
 struct HrrVaRange { uint64_t base = 0, end = 0; };
@@ -241,6 +257,7 @@ struct PlaybackContext {
     bool audit_host_args = false;
     bool verbose           = false;
     bool validate_d2h      = false;  // perform D2H validation against captured expected data
+    HrrD2HTol d2h_tol;               // byte-exact unless HIP_HRR_D2H_TOL opts a float type in
     // The archive header has HRR_FILE_FLAG_PACKED_HOST_RECTS: the host blobs of
     // the pitched copies hold only the copied rows, packed end to end.
     bool packed_host_rects = false;
@@ -329,10 +346,10 @@ struct PlaybackContext {
     double              total_kernel_ms  = 0.0;  // guarded by map_mutex when ctx.timing
     double              total_graph_ms   = 0.0;  // guarded by map_mutex when ctx.timing
     std::atomic<size_t> d2h_pass{0};
-    // Subset of d2h_pass that were NOT byte-exact but matched within numeric
-    // tolerance (benign floating-point nondeterminism from non-associative GPU
-    // reductions). Tracked separately so the summary can distinguish exact
-    // replay fidelity from "numerically equivalent".
+    // Subset of d2h_pass that were NOT byte-exact but matched within the
+    // HIP_HRR_D2H_TOL tolerance (floating-point nondeterminism from
+    // non-associative GPU reductions). Tracked separately so the summary can
+    // distinguish exact replay fidelity from "numerically equivalent".
     std::atomic<size_t> d2h_pass_tol{0};
     std::atomic<size_t> d2h_fail{0};
     // Incremented for every D2H event that had a captured blob hash (i.e., validation

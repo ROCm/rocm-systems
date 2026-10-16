@@ -1520,6 +1520,9 @@ static void print_usage(const char* argv0) {
     "  HIP_HRR_REPLAY_PROGRESS_KERNELS=N    same as --progress-kernels N\n"
     "  HIP_HRR_REPLAY_PROGRESS_SECONDS=S    same as --progress-seconds S\n"
     "  HIP_HRR_REPLAY_SYNC_WATCHDOG_MS=N    same as --sync-watchdog-ms N\n"
+    "  HIP_HRR_D2H_TOL=T:A:R  Accept a D2H read-back that differs from its blob when\n"
+    "                        every element, read as T (f32, bf16, f16 or f64), is\n"
+    "                        within A + R*|expected|. Default: byte-exact.\n"
     "\n"
     "Default mode: single-threaded, serialize GPU after pass, abort on first error.\n"
     "Use --sync-after-event to pinpoint the exact event causing a GPU fault or hang.\n",
@@ -1681,6 +1684,14 @@ int main(int argc, char** argv) {
   // collects, so asking for one implies the other.
   if (ctx.scan_args_ordinal && !ctx.dump_ptrs_ordinal)
     ctx.dump_ptrs_ordinal = ctx.scan_args_ordinal;
+
+  if (const char* tol = std::getenv("HIP_HRR_D2H_TOL")) {
+    if (!hrr_parse_d2h_tol(tol, &ctx.d2h_tol)) {
+      fprintf(stderr, "[HRR] HIP_HRR_D2H_TOL expects <f32|bf16|f16|f64>:<atol>:<rtol> "
+                      "with finite non-negative tolerances, got \"%s\"\n", tol);
+      return 1;
+    }
+  }
 
   if (archive_path.empty()) {
     fprintf(stderr, "[HRR] No archive path specified\n");

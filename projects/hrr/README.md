@@ -209,9 +209,15 @@ the next event, so the divergence is confined to the launch under examination.
 
 | Variable | Default | Purpose |
 |----------|---------|---------|
-| `HIP_HRR_D2H_ATOL` | tuned for bf16/fp16 | Absolute tolerance for float D2H compare |
-| `HIP_HRR_D2H_RTOL` | tuned for bf16/fp16 | Relative tolerance for float D2H compare |
-| `HIP_HRR_D2H_EXACT` | off | Require byte-exact D2H match (disable tolerance) |
+| `HIP_HRR_D2H_TOL` | unset (byte-exact) | `<type>:<atol>:<rtol>`, type one of `f32`, `bf16`, `f16`, `f64`: a read-back that differs from its blob passes if every element, read as `<type>`, is within `atol + rtol·|expected|` |
+
+D2H checks are byte-exact by default: a blob has no element type, and reading
+integers as floats lets small values match zero, so a replay that wrote nothing
+would pass. Opt into `HIP_HRR_D2H_TOL` only for an archive whose read-backs are
+floats of that type produced by nondeterministic kernels (atomic or split-K
+reductions); the summary counts those passes as `within tol`, apart from exact
+ones. A blob shorter than its linear copy is a skipped check, and a replay whose
+every check is skipped fails.
 
 **Exit codes:** `0` pass; `1` D2H failure; `2` early divergence abort.
 

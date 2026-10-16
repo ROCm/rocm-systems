@@ -828,16 +828,20 @@ For each D2H memcpy event that has a captured expected-data blob:
 4. Increments `ctx.d2h_pass` (byte-exact), `ctx.d2h_pass_tol` (within tolerance),
    or `ctx.d2h_fail`
 
-**Tolerance-based validation.** A byte-exact `memcmp` is tried first as a fast path.
-On mismatch, the validator interprets both buffers as each candidate float encoding
-(fp32, bf16, fp16, fp64) and passes when every element satisfies
-`|live − expected| ≤ atol + rtol·|expected|`. Thresholds: see README D2H table.
+**Byte-exact by default.** A buffer passes when it matches its blob byte for byte.
+Blobs carry no dtype, and reading integers as floats lets any int32 below about
+9.8e8 match zero within 1e-3, so a guessed tolerance would let a no-op handler pass
+its round-trip. A replay whose outputs really are nondeterministic floats opts in
+with `HIP_HRR_D2H_TOL=<type>:<atol>:<rtol>`, naming one of fp32, bf16, fp16, fp64:
+a mismatching buffer then passes when every element, read as that type, satisfies
+`|live − expected| ≤ atol + rtol·|expected|`. A linear copy whose blob is shorter
+than the copy is skipped, not compared on the prefix.
 
 On failure the validator reports element counts, max absolute/relative error, and
 64-bit FNV-1a content hashes (useful for replay-vs-replay determinism comparison).
 The summary distinguishes exact passes, within-tolerance passes, and failures.
 
-**Exit codes:** `0` if all checks pass or are within tolerance (or no D2H blobs);
+**Exit codes:** `0` if all checks pass or are within an opted-in tolerance (or no D2H blobs);
 `1` on any unexplained D2H failure; `2` for an early "replay diverged" abort triggered
 once accumulated failures cross `HIP_HRR_REPLAY_DIVERGENCE_ABORT` (`note_d2h_fail`).
 
@@ -1570,11 +1574,12 @@ dispatch before the create populates the translation map and silently
 
 D2H validation can pass when replay actually diverged:
 
-- **Length clamp.** Linear copies compare `min(copy_size, blob_size)`; a truncated or crash-recovered blob validates only a prefix (the corrupted tail is unchecked) and still counts as PASS. A zero-length compare counts as pass. The 2D, 3D and driver copies do not clamp: a blob shorter than the host rect replay reads it as is not validated.
-- **Float-dtype guessing.** Blobs carry no dtype. On a byte mismatch the validator
-  tries `{fp32, bf16, fp16, fp64}` and passes on the first encoding within tolerance,
-  so integer/index/pointer output buffers can silently false-pass; both-NaN counts as
-  equal.
+- **Short blobs.** A blob shorter than its copy (linear) or host rect (2D, 3D and
+  driver copies) is not validated; the check counts as skipped, and a replay whose
+  every check is skipped fails. A zero-length compare counts as pass.
+- **Opted-in tolerance.** `HIP_HRR_D2H_TOL` applies its type to every read-back in
+  the replay, so an integer/index/pointer buffer in the same archive can false-pass
+  against a near-zero float reading; both-NaN counts as equal.
 - **Zero-init masks OOB.** Replay zero-initialises each (possibly over-allocated)
   device allocation, so an out-of-bounds-reading kernel reads deterministic zeros
   instead of faulting and may still validate. It also diverges from non-zero original
