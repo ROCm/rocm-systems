@@ -261,6 +261,7 @@ target_compile_definitions(
 add_subdirectory(headers)
 
 # Standalone utilities.
+add_subdirectory(benchmark)
 add_subdirectory(cpuinfo)
 
 if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
