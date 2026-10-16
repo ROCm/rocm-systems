@@ -10,7 +10,7 @@ bandwidth, caches, or data movement directly.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
-Before the first analyze, follow
+Before analyzing, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 
 ## 1. Start with the Memory Chart

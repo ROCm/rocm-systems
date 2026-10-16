@@ -55,7 +55,7 @@ combined with a PC-sampling-only profile.
 When counters are being spread thin across many short operator kernels,
 `--iteration-multiplexing kernel` collects more per pass.
 
-Before the first analyze, follow
+Before analyzing, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 That is separate from the PyTorch version check above.
 

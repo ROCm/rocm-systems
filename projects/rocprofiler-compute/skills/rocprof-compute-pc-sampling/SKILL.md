@@ -60,7 +60,7 @@ PC sampling does not collect counters. A PC-sampling-only profile cannot be
 combined with the framework tracing options, and it will not populate the
 counter panels. When the user needs both, collect two workloads.
 
-Before the first analyze, follow
+Before analyzing, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 
 ## 4. Analyze

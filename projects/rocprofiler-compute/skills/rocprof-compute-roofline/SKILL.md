@@ -40,7 +40,7 @@ See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
 application.
 
-Before the first analyze, follow
+Before analyzing, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 
 ## 2. Read the table

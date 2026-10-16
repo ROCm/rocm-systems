@@ -41,7 +41,7 @@ folders, so install for one agent only if you use Cursor alongside them.
 
 ## Analyze dependencies
 
-Before the first analyze, follow
+Before analyzing, follow
 [Install the analyze mode dependencies](../docs/install/core-install.rst).
 That section is the source for `rocprof-compute analyze --verify-deps` and
 for installing those packages into their own virtual environment.

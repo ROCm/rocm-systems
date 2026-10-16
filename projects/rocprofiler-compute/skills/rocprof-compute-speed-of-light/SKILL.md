@@ -11,7 +11,7 @@ says whether a kernel is near any limit at all.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
-Before the first analyze, follow
+Before analyzing, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 
 ## 1. Get the panel

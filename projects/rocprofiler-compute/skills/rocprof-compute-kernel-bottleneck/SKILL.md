@@ -49,7 +49,7 @@ Not every feature works on every architecture. Check there before promising a
 result, and let the tool's own error message stand when a feature is
 unavailable.
 
-Before the first analyze, follow
+Before analyzing, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 
 ## 2. Collect what you need before profiling
