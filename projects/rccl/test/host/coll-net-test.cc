@@ -78,6 +78,25 @@ struct FakeCollNet {
   std::vector<std::pair<void*, void*>> deregMrs;  // (comm, mhandle)
   ncclResult_t deregMrResult = ncclSuccess;
 
+  // Collectives. A request is a token address; issueReady=false models a busy plugin.
+  struct CollCall {
+    void* comm;
+    void* send;
+    void* recv;
+    size_t count;
+    ncclDataType_t dtype;
+    ncclRedOp_t op;
+    void* sendMhandle;
+    void* recvMhandle;
+    std::vector<ncclNetSGE_t> parts;
+    size_t bytesPerRank, windowOffset, windowBytes;
+  };
+  std::vector<CollCall> iallreduces, iallgathers, ireducescatters;
+  bool issueReady = true;
+  ncclResult_t issueResult = ncclSuccess;
+  char requestTokens[64] = {};
+  int nextToken = 0;
+
   static ncclNetProperties_t DefaultProps() {
     ncclNetProperties_t p{};
     p.ptrSupport = NCCL_PTR_HOST | NCCL_PTR_CUDA;
@@ -134,6 +153,33 @@ struct FakeCollNet {
     return deregMrResult;
   }
 
+  void* Issue(void** request) {
+    *request = issueReady ? &requestTokens[nextToken++ % 64] : nullptr;
+    return *request;
+  }
+  ncclResult_t iallreduce(void* comm, void* send, void* recv, size_t count, ncclDataType_t dtype, ncclRedOp_t op,
+                          void* sendMh, void* recvMh, void** request) {
+    iallreduces.push_back({comm, send, recv, count, dtype, op, sendMh, recvMh, {}, 0, 0, 0});
+    Issue(request);
+    return issueResult;
+  }
+  ncclResult_t iallgather(void* comm, void* send, int nParts, ncclNetSGE_t* parts, size_t bytesPerRank,
+                          size_t windowOffset, size_t windowBytes, void* sendMh, void** request) {
+    iallgathers.push_back({comm, send, nullptr, 0, ncclNumTypes, ncclNumOps, sendMh, nullptr,
+                           std::vector<ncclNetSGE_t>(parts, parts + nParts), bytesPerRank, windowOffset, windowBytes});
+    Issue(request);
+    return issueResult;
+  }
+  ncclResult_t ireducescatter(void* comm, int nParts, ncclNetSGE_t* parts, void* recv, size_t bytesPerRank,
+                              size_t windowOffset, size_t windowBytes, ncclDataType_t dtype, ncclRedOp_t op,
+                              void* recvMh, void** request) {
+    ireducescatters.push_back({comm, nullptr, recv, 0, dtype, op, nullptr, recvMh,
+                               std::vector<ncclNetSGE_t>(parts, parts + nParts), bytesPerRank, windowOffset,
+                               windowBytes});
+    Issue(request);
+    return issueResult;
+  }
+
   ncclCollNet_t vtable() {
     ncclCollNet_t v{};
     v.name = "FakeCollNet";
@@ -145,6 +191,9 @@ struct FakeCollNet {
     v.regMr = &FakeCollNet::TrampRegMr;
     v.regMrDmaBuf = &FakeCollNet::TrampRegMrDmaBuf;
     v.deregMr = &FakeCollNet::TrampDeregMr;
+    v.iallreduce = &FakeCollNet::TrampIallreduce;
+    v.iallgather = &FakeCollNet::TrampIallgather;
+    v.ireducescatter = &FakeCollNet::TrampIreducescatter;
     return v;
   }
 
@@ -168,6 +217,21 @@ struct FakeCollNet {
     return g_activeCollNet->regMrDmaBuf(comm, data, size, type, offset, fd, mhandle);
   }
   static ncclResult_t TrampDeregMr(void* comm, void* mhandle) { return g_activeCollNet->deregMr(comm, mhandle); }
+  static ncclResult_t TrampIallreduce(void* comm, void* send, void* recv, size_t count, ncclDataType_t dtype,
+                                      ncclRedOp_t op, void* sendMh, void* recvMh, void** request) {
+    return g_activeCollNet->iallreduce(comm, send, recv, count, dtype, op, sendMh, recvMh, request);
+  }
+  static ncclResult_t TrampIallgather(void* comm, void* send, int nParts, ncclNetSGE_t* parts, size_t bytesPerRank,
+                                      size_t windowOffset, size_t windowBytes, void* sendMh, void** request) {
+    return g_activeCollNet->iallgather(comm, send, nParts, parts, bytesPerRank, windowOffset, windowBytes, sendMh,
+                                       request);
+  }
+  static ncclResult_t TrampIreducescatter(void* comm, int nParts, ncclNetSGE_t* parts, void* recv,
+                                          size_t bytesPerRank, size_t windowOffset, size_t windowBytes,
+                                          ncclDataType_t dtype, ncclRedOp_t op, void* recvMh, void** request) {
+    return g_activeCollNet->ireducescatter(comm, nParts, parts, recv, bytesPerRank, windowOffset, windowBytes, dtype,
+                                           op, recvMh, request);
+  }
 };
 
 // Every device and host buffer goes through this ledger, so TearDown releases exactly
@@ -2127,6 +2191,342 @@ TEST_F(CollNetRegisterMicrotest, Dereg_AsksRegisteringProxyToDropHandle) {
 
   callResult_ = ncclRemoteError;
   EXPECT_EQ(ncclCollnetDeregBuffer(&comm_, conn, handle_), ncclRemoteError);
+}
+
+// ---------------------------------------------------------------------------
+// Shared-buffer offsets (calcAlgoOffset, calcRegionOffset)
+// ---------------------------------------------------------------------------
+
+// 3 subs of 128-byte chunks; 4 nodes of 512 bytes per rank, this one node 1; a 2-channel
+// pool of 8 KiB per direction and channel, so 1 KiB per step slot.
+class CollNetOffsetsMicrotest : public ::testing::Test {
+ protected:
+  ncclCollNetSharedRes shared_{};
+  ncclProxyConnection conn_{};
+  ncclProxyArgs args_{};
+
+  void SetUp() override {
+    shared_.buffSize = 8 << 10;
+    shared_.nChannels = 2;
+    conn_.collNet = &shared_;
+    args_.subs[0].connection = &conn_;
+    args_.nsubs = 3;
+    args_.chunkSize = 128;
+    args_.specifics.collnetDirect.nNodes = 4;
+    args_.specifics.collnetDirect.node = 1;
+    args_.specifics.collnetDirect.sizePerRank = 512;
+  }
+  ssize_t Region(ncclFunc_t coll, int isRecv, int sub, uint64_t step, int side) {
+    args_.coll = coll;
+    return calcRegionOffset(&args_, isRecv, sub, step, side);
+  }
+};
+
+TEST_F(CollNetOffsetsMicrotest, AlgoOffset_WholeWindow_StepMajorChunksCappedAtWindowEnd) {
+  EXPECT_EQ(calcAlgoOffset(&args_, 1, /*sub=*/1, /*step=*/2), 896u);  // (2*3+1)*128
+  EXPECT_EQ(calcAlgoOffset(&args_, 1, 2, 5), 2048u);                  // 2176 capped at 4*512
+}
+
+TEST_F(CollNetOffsetsMicrotest, AlgoOffset_OwnRankWindow_ClampedToThisNodesSlice) {
+  EXPECT_EQ(calcAlgoOffset(&args_, 0, 1, 0), 512u);   // 128 raised to node 1's start
+  EXPECT_EQ(calcAlgoOffset(&args_, 0, 2, 1), 640u);   // inside
+  EXPECT_EQ(calcAlgoOffset(&args_, 0, 2, 2), 1024u);  // exactly the end
+  EXPECT_EQ(calcAlgoOffset(&args_, 0, 0, 3), 1024u);  // 1152 lowered to node 1's end
+}
+
+TEST_F(CollNetOffsetsMicrotest, RegionOffset_AllReduce_ChunkSlotsWithinStepSlot) {
+  EXPECT_EQ(Region(ncclFuncAllReduce, 0, /*sub=*/1, /*step=*/9, /*side=*/0), 2176);  // slot 1: 1*2*1024 + 128
+  EXPECT_EQ(Region(ncclFuncAllReduce, 0, 1, 9, 1), 2304);
+  EXPECT_EQ(Region(ncclFuncAllReduce, 1, 1, 9, 0), 18560);  // recv half starts NCCL_STEPS slots in
+}
+
+TEST_F(CollNetOffsetsMicrotest, RegionOffset_GatherAndScatter_SendOwnSliceRecvWholeWindowOrBack) {
+  EXPECT_EQ(Region(ncclFuncAllGather, 0, 1, 1, 0), 2048);       // send: own slice, empty below 512
+  EXPECT_EQ(Region(ncclFuncAllGather, 0, 1, 1, 1), 2176);
+  EXPECT_EQ(Region(ncclFuncAllGather, 1, 1, 1, 1), 18688);      // recv: whole window
+  EXPECT_EQ(Region(ncclFuncReduceScatter, 0, 1, 1, 1), 2304);   // send: whole window
+  EXPECT_EQ(Region(ncclFuncReduceScatter, 1, 1, 1, 1), 18560);  // recv: own slice
+}
+
+TEST_F(CollNetOffsetsMicrotest, RegionOffset_SecondGroup_StartsAtItsFirstSubsSlot) {
+  args_.nsubs = 10;
+
+  EXPECT_EQ(Region(ncclFuncAllGather, 1, /*sub=*/9, 0, 0), 24704);  // 16384 + 8*1024 + (1152-1024)
+  EXPECT_EQ(Region(ncclFuncAllGather, 1, 9, 0, 1), 24832);
+}
+
+// ---------------------------------------------------------------------------
+// Collective issue helpers (collNet[Reg]Iallreduce, collNet[Reg]Iallgather,
+// collNet[Reg]Ireducescatter)
+// ---------------------------------------------------------------------------
+
+class CollNetIssueMicrotest : public CollNetMicrotestBase {
+ protected:
+  sendResources res_{};
+  ncclProxyArgs args_{};
+  ncclProxySubArgs* sub_ = &args_.subs[0];
+  alignas(16) char region_[1 << 12] = {};
+  alignas(16) uint8_t send_[1 << 12] = {}, recv_[1 << 12] = {};
+  void* request_ = reinterpret_cast<void*>(0x1);
+  void* poolSendMh_ = reinterpret_cast<void*>(0x51);
+  void* poolRecvMh_ = reinterpret_cast<void*>(0x52);
+  void* userSendMh_ = reinterpret_cast<void*>(0x61);
+  void* userRecvMh_ = reinterpret_cast<void*>(0x62);
+
+  void SetUp() override {
+    CollNetMicrotestBase::SetUp();
+    res_.collNetComm = &net_.collComm;
+    res_.maxCollBytes = 1024;
+    res_.sendMhandles[NCCL_PROTO_SIMPLE] = poolSendMh_;
+    res_.recvMhandles[NCCL_PROTO_SIMPLE] = poolRecvMh_;
+    NCCL_NET_MAP_ADD_POINTER(&res_.map, 1, 1, sizeof(region_), buffs[NCCL_PROTO_SIMPLE]);
+    res_.map.mems[NCCL_NET_MAP_SHARED_DEVMEM] = {region_, nullptr, (int)sizeof(region_)};  // {gpu, cpu}
+    args_.dtype = ncclFloat32;
+    args_.redOp = ncclMax;
+    args_.chunkSize = 256;
+    args_.specifics.collnetDirect.sizePerRank = 1024;
+    args_.specifics.collnetDirect.node = 1;
+    sub_->sendbuff = send_;
+    sub_->recvbuff = recv_;
+    sub_->sendMhandle = userSendMh_;
+    sub_->recvMhandle = userRecvMh_;
+  }
+};
+
+TEST_F(CollNetIssueMicrotest, Iallreduce_ReducesPoolSlicesInPlaceOfElements) {
+  ASSERT_EQ(collNetIallreduce(&proxyState_, &res_, &args_, sub_, /*nBytes=*/512, /*sendBeg=*/64, /*recvBeg=*/2048,
+                              &request_),
+            ncclSuccess);
+
+  ASSERT_EQ(net_.iallreduces.size(), 1u);
+  const auto& c = net_.iallreduces[0];
+  EXPECT_EQ(c.comm, &net_.collComm);
+  EXPECT_EQ(c.send, region_ + 64);
+  EXPECT_EQ(c.recv, region_ + 2048);
+  EXPECT_EQ(c.count, 128u);
+  EXPECT_EQ(c.dtype, ncclFloat32);
+  EXPECT_EQ(c.op, ncclMax);
+  EXPECT_EQ(c.sendMhandle, poolSendMh_);
+  EXPECT_EQ(c.recvMhandle, poolRecvMh_);
+  EXPECT_EQ(request_, &net_.requestTokens[0]);
+}
+
+TEST_F(CollNetIssueMicrotest, RegIallreduce_OneRankPerNode_ReducesUserBuffersUpToMaxAndAdvances) {
+  sub_->isOneRPN = 1;
+  sub_->nbytes = 1500;
+  ssize_t nBytes = 7;  // ignored: the whole remaining user buffer, capped at maxCollBytes
+
+  ASSERT_EQ(collNetRegIallreduce(&proxyState_, &res_, &args_, sub_, /*groupStart=*/0, &nBytes, &request_),
+            ncclSuccess);
+
+  ASSERT_EQ(net_.iallreduces.size(), 1u);
+  const auto& c = net_.iallreduces[0];
+  EXPECT_EQ(c.send, send_);
+  EXPECT_EQ(c.recv, recv_);
+  EXPECT_EQ(c.count, 256u);
+  EXPECT_EQ(c.sendMhandle, userSendMh_);
+  EXPECT_EQ(c.recvMhandle, userRecvMh_);
+  EXPECT_EQ(nBytes, 1024);
+  EXPECT_EQ(sub_->nbytes, 476);
+  EXPECT_EQ(sub_->sendbuff, send_ + 1024);
+  EXPECT_EQ(sub_->recvbuff, recv_ + 1024);
+}
+
+TEST_F(CollNetIssueMicrotest, RegIallreduce_MultiRank_ReducesGroupWindowAndAdvancesByLoop) {
+  sub_->nbytes = 3000;
+  sub_->loopOffset = 512;
+  sub_->loopSize = 2048;
+  ssize_t nBytes = 2048;
+
+  ASSERT_EQ(collNetRegIallreduce(&proxyState_, &res_, &args_, sub_, /*groupStart=*/8, &nBytes, &request_),
+            ncclSuccess);
+
+  ASSERT_EQ(net_.iallreduces.size(), 1u);
+  EXPECT_EQ(net_.iallreduces[0].send, send_ + 512 + 8 * 256);
+  EXPECT_EQ(net_.iallreduces[0].recv, recv_ + 512 + 8 * 256);
+  EXPECT_EQ(net_.iallreduces[0].count, (3000u - 2560u) / 4);  // what is left past the window start
+  EXPECT_EQ(nBytes, 440);
+  EXPECT_EQ(sub_->nbytes, 3000 - 2048);
+  EXPECT_EQ(sub_->sendbuff, send_ + 2048);
+  EXPECT_EQ(sub_->recvbuff, recv_ + 2048);
+}
+
+TEST_F(CollNetIssueMicrotest, RegIallreduce_NothingLeftOrPluginBusy_LeavesBuffers) {
+  sub_->nbytes = 1024;
+  sub_->loopSize = 2048;
+  ssize_t nBytes = 2048;
+  ASSERT_EQ(collNetRegIallreduce(&proxyState_, &res_, &args_, sub_, /*groupStart=*/4, &nBytes, &request_),
+            ncclSuccess);
+  EXPECT_TRUE(net_.iallreduces.empty());  // the group's window starts at the end of the buffer
+  EXPECT_EQ(nBytes, 0);
+  EXPECT_EQ(request_, reinterpret_cast<void*>(0x1));
+
+  net_.issueReady = false;
+  sub_->isOneRPN = 1;
+  ASSERT_EQ(collNetRegIallreduce(&proxyState_, &res_, &args_, sub_, 0, &nBytes, &request_), ncclSuccess);
+  EXPECT_EQ(net_.iallreduces.size(), 1u);
+  EXPECT_EQ(request_, nullptr);
+  EXPECT_EQ(sub_->nbytes, 1024);
+  EXPECT_EQ(sub_->sendbuff, send_);
+  EXPECT_EQ(sub_->recvbuff, recv_);
+}
+
+TEST_F(CollNetIssueMicrotest, Iallgather_GathersPoolSliceIntoPoolWindow) {
+  ASSERT_EQ(collNetIallgather(&proxyState_, &res_, &args_, sub_, /*nBytes=*/768, /*allBeg=*/1280, /*sendBeg=*/64,
+                              /*recvBeg=*/2048, poolSendMh_, poolRecvMh_, &request_),
+            ncclSuccess);
+
+  ASSERT_EQ(net_.iallgathers.size(), 1u);
+  const auto& c = net_.iallgathers[0];
+  EXPECT_EQ(c.comm, &net_.collComm);
+  EXPECT_EQ(c.send, region_ + 64);
+  EXPECT_EQ(c.sendMhandle, poolSendMh_);
+  ASSERT_EQ(c.parts.size(), 1u);
+  EXPECT_EQ(c.parts[0].mhandle, poolRecvMh_);
+  EXPECT_EQ(c.parts[0].address, region_ + 2048);
+  EXPECT_EQ(c.parts[0].size, 768u);
+  EXPECT_EQ(c.bytesPerRank, 1024u);
+  EXPECT_EQ(c.windowOffset, 1280u);
+  EXPECT_EQ(c.windowBytes, 768u);
+  EXPECT_NE(request_, nullptr);
+}
+
+TEST_F(CollNetIssueMicrotest, RegIallgather_OneRankPerNode_GathersStraightIntoUserBufferAndAdvances) {
+  sub_->isOneRPN = 1;
+  sub_->nbytes = 1500;
+  sub_->offset = 1100;  // node 1's window: send from 76 bytes into the user send buffer
+
+  ASSERT_EQ(collNetRegIallgather(&proxyState_, &res_, &args_, sub_, /*nBytesIn=*/9, /*allBeg=*/9, /*recvBeg=*/9,
+                                 poolRecvMh_, &request_),
+            ncclSuccess);
+
+  ASSERT_EQ(net_.iallgathers.size(), 1u);
+  const auto& c = net_.iallgathers[0];
+  EXPECT_EQ(c.send, send_ + 76);
+  EXPECT_EQ(c.sendMhandle, userSendMh_);
+  ASSERT_EQ(c.parts.size(), 1u);
+  EXPECT_EQ(c.parts[0].mhandle, userRecvMh_);
+  EXPECT_EQ(c.parts[0].address, recv_);
+  EXPECT_EQ(c.parts[0].size, 1024u);
+  EXPECT_EQ(c.windowOffset, 1100u);
+  EXPECT_EQ(c.windowBytes, 1024u);
+  EXPECT_EQ(sub_->recvbuff, recv_ + 1024);
+  EXPECT_EQ(sub_->nbytes, 476);
+  EXPECT_EQ(sub_->offset, 2124u);
+  EXPECT_EQ(sub_->sendbuff, send_);
+}
+
+TEST_F(CollNetIssueMicrotest, RegIallgather_MultiRank_GathersIntoPoolWithoutAdvancing) {
+  sub_->nbytes = 1500;
+
+  ASSERT_EQ(collNetRegIallgather(&proxyState_, &res_, &args_, sub_, /*nBytesIn=*/512, /*allBeg=*/2304,
+                                 /*recvBeg=*/4000 - 1500, poolRecvMh_, &request_),
+            ncclSuccess);
+
+  const auto& c = net_.iallgathers.at(0);
+  EXPECT_EQ(c.send, send_);  // window starts on another node: send from the start
+  EXPECT_EQ(c.parts[0].mhandle, poolRecvMh_);
+  EXPECT_EQ(c.parts[0].address, region_ + 2500);
+  EXPECT_EQ(c.parts[0].size, 512u);
+  EXPECT_EQ(c.windowOffset, 2304u);
+  EXPECT_EQ(sub_->nbytes, 1500);
+  EXPECT_EQ(sub_->recvbuff, recv_);
+}
+
+TEST_F(CollNetIssueMicrotest, Ireducescatter_ScattersPoolWindowIntoPoolSlice) {
+  ASSERT_EQ(collNetIreducescatter(&proxyState_, &res_, &args_, sub_, /*nBytes=*/768, /*allBeg=*/1280,
+                                  /*sendBeg=*/64, /*recvBeg=*/2048, poolSendMh_, poolRecvMh_, &request_),
+            ncclSuccess);
+
+  ASSERT_EQ(net_.ireducescatters.size(), 1u);
+  const auto& c = net_.ireducescatters[0];
+  EXPECT_EQ(c.comm, &net_.collComm);
+  ASSERT_EQ(c.parts.size(), 1u);
+  EXPECT_EQ(c.parts[0].mhandle, poolSendMh_);
+  EXPECT_EQ(c.parts[0].address, region_ + 64);
+  EXPECT_EQ(c.parts[0].size, 768u);
+  EXPECT_EQ(c.recv, region_ + 2048);
+  EXPECT_EQ(c.recvMhandle, poolRecvMh_);
+  EXPECT_EQ(c.bytesPerRank, 1024u);
+  EXPECT_EQ(c.windowOffset, 1280u);
+  EXPECT_EQ(c.windowBytes, 768u);
+  EXPECT_EQ(c.dtype, ncclFloat32);
+  EXPECT_EQ(c.op, ncclMax);
+}
+
+TEST_F(CollNetIssueMicrotest, RegIreducescatter_OneRankPerNode_ScattersStraightFromUserBufferAndAdvances) {
+  sub_->isOneRPN = 1;
+  sub_->nbytes = 1500;
+  sub_->offset = 1100;
+
+  ASSERT_EQ(collNetRegIreducescatter(&proxyState_, &res_, &args_, sub_, /*nBytesIn=*/9, /*allBeg=*/9,
+                                     /*sendBeg=*/9, poolSendMh_, &request_),
+            ncclSuccess);
+
+  const auto& c = net_.ireducescatters.at(0);
+  EXPECT_EQ(c.parts[0].mhandle, userSendMh_);
+  EXPECT_EQ(c.parts[0].address, send_);
+  EXPECT_EQ(c.parts[0].size, 1024u);
+  EXPECT_EQ(c.recv, recv_ + 76);
+  EXPECT_EQ(c.recvMhandle, userRecvMh_);
+  EXPECT_EQ(c.windowOffset, 1100u);
+  EXPECT_EQ(c.windowBytes, 1024u);
+  EXPECT_EQ(c.dtype, ncclFloat32);
+  EXPECT_EQ(c.op, ncclMax);
+  EXPECT_EQ(sub_->sendbuff, send_ + 1024);
+  EXPECT_EQ(sub_->nbytes, 476);
+  EXPECT_EQ(sub_->offset, 2124u);
+  EXPECT_EQ(sub_->recvbuff, recv_);
+}
+
+TEST_F(CollNetIssueMicrotest, RegIreducescatter_MultiRank_ScattersFromPoolWithoutAdvancing) {
+  sub_->nbytes = 1500;
+
+  ASSERT_EQ(collNetRegIreducescatter(&proxyState_, &res_, &args_, sub_, /*nBytesIn=*/512, /*allBeg=*/2304,
+                                     /*sendBeg=*/96, poolSendMh_, &request_),
+            ncclSuccess);
+
+  const auto& c = net_.ireducescatters.at(0);
+  EXPECT_EQ(c.parts[0].mhandle, poolSendMh_);
+  EXPECT_EQ(c.parts[0].address, region_ + 96);
+  EXPECT_EQ(c.parts[0].size, 512u);
+  EXPECT_EQ(c.recv, recv_);
+  EXPECT_EQ(c.windowOffset, 2304u);
+  EXPECT_EQ(sub_->nbytes, 1500);
+  EXPECT_EQ(sub_->sendbuff, send_);
+}
+
+TEST_F(CollNetIssueMicrotest, RegGatherScatter_PluginBusy_LeavesUserBuffers) {
+  net_.issueReady = false;
+  sub_->isOneRPN = 1;
+  sub_->nbytes = 1500;
+
+  ASSERT_EQ(collNetRegIallgather(&proxyState_, &res_, &args_, sub_, 0, 0, 0, poolRecvMh_, &request_), ncclSuccess);
+  ASSERT_EQ(collNetRegIreducescatter(&proxyState_, &res_, &args_, sub_, 0, 0, 0, poolSendMh_, &request_),
+            ncclSuccess);
+
+  EXPECT_EQ(request_, nullptr);
+  EXPECT_EQ(sub_->nbytes, 1500);
+  EXPECT_EQ(sub_->offset, 0u);
+  EXPECT_EQ(sub_->sendbuff, send_);
+  EXPECT_EQ(sub_->recvbuff, recv_);
+}
+
+TEST_F(CollNetIssueMicrotest, Issue_PluginFails_ReturnsError) {
+  net_.issueResult = ncclSystemError;
+  sub_->isOneRPN = 1;
+  sub_->nbytes = 64;
+  ssize_t nBytes = 64;
+
+  EXPECT_EQ(collNetIallreduce(&proxyState_, &res_, &args_, sub_, 64, 0, 0, &request_), ncclSystemError);
+  EXPECT_EQ(collNetRegIallreduce(&proxyState_, &res_, &args_, sub_, 0, &nBytes, &request_), ncclSystemError);
+  EXPECT_EQ(collNetIallgather(&proxyState_, &res_, &args_, sub_, 64, 0, 0, 0, nullptr, nullptr, &request_),
+            ncclSystemError);
+  EXPECT_EQ(collNetRegIallgather(&proxyState_, &res_, &args_, sub_, 64, 0, 0, nullptr, &request_), ncclSystemError);
+  EXPECT_EQ(collNetIreducescatter(&proxyState_, &res_, &args_, sub_, 64, 0, 0, 0, nullptr, nullptr, &request_),
+            ncclSystemError);
+  EXPECT_EQ(collNetRegIreducescatter(&proxyState_, &res_, &args_, sub_, 64, 0, 0, nullptr, &request_),
+            ncclSystemError);
 }
 
 }  // namespace
