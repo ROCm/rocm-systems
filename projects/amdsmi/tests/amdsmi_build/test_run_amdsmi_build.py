@@ -5,7 +5,8 @@
 
 These tests deliberately avoid anything that requires root, a build env, or
 network access -- they cover argument parsing, /etc/os-release detection,
-package-manager/format inference, package globbing, and the summarize step.
+package-manager/format inference, package globbing, the Clang compiler
+check, and the summarize step.
 
 Run with:  python3 -m unittest discover -s projects/amdsmi/tests/amdsmi_build
 """
@@ -13,11 +14,14 @@ Run with:  python3 -m unittest discover -s projects/amdsmi/tests/amdsmi_build
 from __future__ import annotations
 
 import importlib.util
+import os
 import sys
 import tempfile
 import textwrap
+import types
 import unittest
 from pathlib import Path
+from unittest import mock
 
 
 def _load_module():
@@ -173,6 +177,119 @@ class LocatePackageTests(unittest.TestCase):
         with tempfile.TemporaryDirectory() as td:
             with self.assertRaises(FileNotFoundError):
                 rab.locate_package(Path(td), "deb")
+
+
+def _write_tool(directory: Path, name: str, body: str = "exit 0") -> None:
+    directory.mkdir(parents=True, exist_ok=True)
+    tool = directory / name
+    tool.write_text("#!/bin/sh\n" + body + "\n", encoding="utf-8")
+    tool.chmod(0o755)
+
+
+class ClangToolchainPresentTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.bin = Path(self.tmpdir.name) / "bin"
+        self.bin.mkdir()
+
+    def _present(self, **extra_env) -> bool:
+        env = {k: v for k, v in os.environ.items() if k not in ("CC", "CXX")}
+        env["PATH"] = str(self.bin)
+        env.update(extra_env)
+        with mock.patch.dict(os.environ, env, clear=True):
+            return rab.clang_toolchain_present()
+
+    def test_amdclang_on_path_alone_is_not_enough(self):
+        # CMake looks for amdclang only under ROCm's LLVM, so even a working
+        # amdclang++ on PATH does not count (the CI images carry ccache links
+        # by that name).
+        _write_tool(self.bin, "amdclang++")
+        _write_tool(self.bin, "amdclang")
+        self.assertFalse(self._present())
+
+    def test_system_clang_pair_is_present(self):
+        _write_tool(self.bin, "clang++")
+        _write_tool(self.bin, "clang")
+        self.assertTrue(self._present())
+
+    def test_clang_without_c_driver_is_missing(self):
+        _write_tool(self.bin, "clang++")
+        self.assertFalse(self._present())
+
+    def test_clang_pair_that_does_not_run_is_missing(self):
+        _write_tool(self.bin, "clang++", "exit 1")
+        _write_tool(self.bin, "clang", "exit 1")
+        self.assertFalse(self._present())
+
+    def test_hipconfig_without_a_path_searches_path(self):
+        _write_tool(self.bin, "hipconfig", "true")
+        _write_tool(self.bin, "clang++")
+        _write_tool(self.bin, "clang")
+        self.assertTrue(self._present())
+
+    def test_cc_cxx_from_environment_skip_the_search(self):
+        self.assertTrue(self._present(CC="gcc", CXX="g++"))
+
+    def test_rocm_install_searches_only_rocm_llvm(self):
+        rocm = Path(self.tmpdir.name) / "rocm"
+        _write_tool(self.bin, "hipconfig", f"echo {rocm}")
+        _write_tool(self.bin, "clang++")
+        _write_tool(self.bin, "clang")
+        self.assertFalse(self._present())
+        llvm_bin = rocm / "lib" / "llvm" / "bin"
+        _write_tool(llvm_bin, "amdclang++", "exit 1")
+        _write_tool(llvm_bin, "amdclang", "exit 1")
+        self.assertFalse(self._present())
+        _write_tool(llvm_bin, "clang++")
+        _write_tool(llvm_bin, "clang")
+        self.assertTrue(self._present())
+        _write_tool(llvm_bin, "amdclang++")
+        _write_tool(llvm_bin, "amdclang")
+        self.assertTrue(self._present())
+
+
+class InstallClangTests(unittest.TestCase):
+    def setUp(self):
+        self.tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self.tmpdir.cleanup)
+        self.bin = Path(self.tmpdir.name) / "bin"
+        self.bin.mkdir()
+        self.cfg = types.SimpleNamespace(
+            package_manager="apt", refresh_apt=False, retries=1, log_dir=Path(self.tmpdir.name)
+        )
+
+    def _install(self) -> mock.MagicMock:
+        env = {k: v for k, v in os.environ.items() if k not in ("CC", "CXX")}
+        env["PATH"] = str(self.bin)
+        with mock.patch.dict(os.environ, env, clear=True):
+            with mock.patch.object(rab, "run_command") as run_command:
+                rab.install_clang(self.cfg)
+        return run_command
+
+    def test_installs_distro_clang_when_none_works(self):
+        _write_tool(self.bin, "amdclang++", "exit 1")
+        _write_tool(self.bin, "amdclang", "exit 1")
+        run_command = self._install()
+        run_command.assert_called_once()
+        self.assertEqual(
+            run_command.call_args[0][0],
+            ["apt-get", "install", "-y", "--no-install-recommends", "clang"],
+        )
+
+    def test_dnf_installs_clang_with_the_shared_prefix(self):
+        self.cfg.package_manager = "dnf"
+        run_command = self._install()
+        run_command.assert_called_once()
+        self.assertEqual(
+            run_command.call_args[0][0],
+            ["dnf", "install", "-y", "--setopt=skip_if_unavailable=True", "clang"],
+        )
+
+    def test_skips_install_when_rocm_lacks_llvm(self):
+        # CMake searches only ROCm's LLVM once hipconfig finds ROCm.
+        _write_tool(self.bin, "hipconfig", f"echo {self.tmpdir.name}/rocm")
+        self._install().assert_not_called()
 
 
 class SummarizeTests(unittest.TestCase):
