@@ -1175,7 +1175,7 @@ def test_show_call_tree_prints_file_line_sort_and_kernel_id(capsys):
     show_call_tree({"1": [longer], "2": [shorter]})
     output = capsys.readouterr().out
     assert "Thread_Id" not in output
-    assert output.find("nn.Module.SimpleModel.forward") < output.find("aten::relu")
+    assert output.index("nn.Module.SimpleModel.forward") < output.index("aten::relu")
     assert "nn.Module.Linear.forward simple_torch_code.py:19" in output
     assert "aten::relu simple_torch_code.py" not in output
     assert "(id 4)" in output
