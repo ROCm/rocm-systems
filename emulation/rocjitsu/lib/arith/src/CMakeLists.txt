@@ -8,6 +8,16 @@ add_library(rj_arith STATIC
   compare/constant_compare.cpp
   compare/float_compare.cpp
   compare/integer_compare.cpp
+  conversion/byte_conversion.cpp
+  conversion/conversion16.cpp
+  conversion/conversion32.cpp
+  conversion/conversion64.cpp
+  conversion/fp8_conversion.cpp
+  conversion/fp8_narrow.cpp
+  conversion/integer_conversion.cpp
+  conversion/normalized.cpp
+  conversion/pack.cpp
+  conversion/packed_conversion.cpp
   dot/dot.cpp
   dot/fp8_dot.cpp
   dot/half_dot.cpp
