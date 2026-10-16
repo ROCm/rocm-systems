@@ -36,6 +36,9 @@ rsmi_status_t set_npm_board_mode(const std::string& board_path, const std::strin
 // Resolved via resolve_npm_dir(), same fallback as get_npm_board_status().
 rsmi_status_t get_npm_board_max_limit(const std::string& board_path, uint64_t* limit);
 
+// Checks NPM is enabled and 1 <= limit <= platform max, without writing.
+rsmi_status_t validate_npm_board_limit(const std::string& board_path, uint64_t limit);
+
 // NPM board limit set (cur_node_power_limit: Set NPM Limit request to GPU
 // PMFW via amdgpu driver). Resolved via resolve_npm_dir(), same fallback as
 // get_npm_board_status().

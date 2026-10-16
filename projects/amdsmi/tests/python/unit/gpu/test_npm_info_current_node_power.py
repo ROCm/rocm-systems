@@ -4,26 +4,14 @@
 
 """Unit tests for the "current_node_power" key in amdsmi_get_npm_info()'s dict.
 
-current_node_power moved from amdsmi_power_info_t (per-GPU, amd-smi metric
---power) to amdsmi_npm_info_t (per-node, amd-smi node -p /
-amdsmi_get_npm_info()) -- see the "Set npm power limit" design doc. This file
-replaces the previous test_power_info_node_power.py, which exercised the
-now-removed amdsmi_power_info_t.node_power field.
+Uses the real compiled amdsmi package (via `from common.common import amdsmi`)
+but mocks the ctypes call (`amdsmi_wrapper.amdsmi_get_npm_info`), so no
+hardware or root is needed.
 
-Uses the real compiled amdsmi package (same resolution as test_check_res.py /
-test_apu_metrics.py, via `from common.common import amdsmi`) but mocks the
-underlying ctypes call (`amdsmi_wrapper.amdsmi_get_npm_info`) to populate an
-`amdsmi_npm_info_t` struct directly -- no real hardware/root access needed.
-
-Per the frozen contract, `amdsmi_npm_info_t` gained a new `current_node_power`
-uint32 field (right after `max_node_power_limit`), and the Python dict
-returned by `amdsmi_get_npm_info()` gained a matching `"current_node_power"`
-key that follows the same UINT32_MAX -> "N/A" sentinel convention already
-used for `"ubb_power_threshold"`/`"max_node_power_limit"` (see
-`_validate_if_max_uint` usage in `amdsmi_get_npm_info()`, amdsmi_interface.py).
+`current_node_power` is a new uint32 field in `amdsmi_npm_info_t` (after
+`max_node_power_limit`) and follows the same UINT32_MAX -> "N/A" convention as
+`"ubb_power_threshold"`.
 """
-
-from __future__ import annotations
 
 import ctypes
 import unittest

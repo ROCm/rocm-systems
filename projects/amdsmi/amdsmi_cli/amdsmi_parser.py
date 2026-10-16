@@ -2847,8 +2847,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                 )
 
             # Node power limit is enabled on guest (1VF), maintain order
-            max_node_power_limit = self.helpers.get_max_node_power_limit()
-            set_node_power_limit_help = f"Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU.\n\tMax node power limit: {max_node_power_limit}"
+            set_node_power_limit_help = "Set the node-level (NPM) power limit in watts.\n\tThis is a node-wide setting, not per-GPU."
             set_value_exclusive_group.add_argument(
                 "-n",
                 "--node-power-limit",
@@ -3075,15 +3074,6 @@ class AMDSMIParser(argparse.ArgumentParser):
             set_value_parser,
             gtt_flags=("--node-balancing-mode",),
             reason="--node-balancing-mode is a system-wide setting, not per-GPU",
-        )
-        # Improve the --gpu error message if combined with --node-power-limit;
-        # actual rejection happens at runtime in set_value.py, since these two
-        # flags sit in separate argparse groups and argparse itself never
-        # raises for this combination.
-        self._guard_gtt_gpu_conflict(
-            set_value_parser,
-            gtt_flags=("--node-power-limit", "-n"),
-            reason="--node-power-limit is a node-wide setting, not per-GPU",
         )
 
         # Set accepts default devices of all
