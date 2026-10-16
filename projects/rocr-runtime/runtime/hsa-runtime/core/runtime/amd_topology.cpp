@@ -310,8 +310,10 @@ void SurfaceGpuList(std::vector<int32_t>& gpu_list, bool xnack_mode, bool enable
 
       // Obtain properties of the node
       hsa_status_t ret = gpu_driver->GetNodeProperties(node_prop, gpu_list[idx]);
-      assert(ret == HSA_STATUS_SUCCESS && "Error in getting Node Properties");
-      (void)ret;
+      if (ret != HSA_STATUS_SUCCESS) {
+        assert(false && "Error in getting Node Properties");
+        throw AMD::hsa_exception(ret, "Failed to get node properties during GPU enumeration.");
+      }
 
       // disable interrupt signal for DTIF platform
       if (core::Runtime::runtime_singleton_->flag().enable_dtif())
