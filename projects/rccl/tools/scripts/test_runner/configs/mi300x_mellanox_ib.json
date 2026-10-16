@@ -3071,8 +3071,8 @@
           "test_filter": "DdaMPI_AllReduce.StreamAlternationUngrouped"
         },
         {
-          "name": "DDA_AllReduceBitIdenticalAcrossRanks_8Ranks",
-          "description": "float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank; order-sensitive input catches a rank-dependent summation order",
+          "name": "DDA_BitIdenticalAcrossRanks_8Ranks",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank; order-sensitive input catches a rank-dependent summation order",
           "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
         },
         {

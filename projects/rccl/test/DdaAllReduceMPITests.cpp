@@ -119,7 +119,7 @@ size_t twoShotCountForRanks(int nRanks)
     return count;
 }
 
-// Rank i%n holds +big, the next -big, the rest 1.0: folding from +big cancels first, from -big absorbs the 1.0s first.
+// Rank i%n holds +big, the next -big, the rest 1.0, so the sum depends on the fold order.
 std::vector<uint8_t> makeOrderSensitiveInput(ncclDataType_t type, size_t count, int rank, int nRanks)
 {
     const float big = (type == ncclBfloat16) ? 1024.0f : 33554432.0f;
@@ -356,7 +356,7 @@ protected:
                       algoName ? algoName : "?");
     }
 
-    // Data-parallel replicas rely on every rank getting the same bits back; logNeedle pins the DDA tier, nullptr allows any.
+    // Every rank must get the same bits back; logNeedle pins the DDA tier, nullptr allows any.
     void runBitIdenticalAcrossRanks(const std::vector<ncclDataType_t>& types, const std::vector<size_t>& sizes,
                                     const char* logNeedle, const char* testId)
     {
@@ -383,7 +383,7 @@ protected:
             }
         }
 
-        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
         if(logNeedle != nullptr)
         {
@@ -410,16 +410,16 @@ protected:
                              + " bytes=" + std::to_string(bytes));
 
                 void* sendBuf = nullptr;
-                ASSERT_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
+                ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
                 DeviceBufferAutoGuard sendGuard(sendBuf);
                 void* recvBuf = nullptr;
-                ASSERT_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+                ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
                 DeviceBufferAutoGuard recvGuard(recvBuf);
 
                 const std::vector<uint8_t> input = makeOrderSensitiveInput(type, count, rank, nRanks);
-                ASSERT_EQ(hipSuccess, hipMemcpy(sendBuf, input.data(), bytes, hipMemcpyHostToDevice));
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, input.data(), bytes, hipMemcpyHostToDevice));
                 // A per-rank fill means an output the kernel never wrote cannot compare equal across ranks.
-                ASSERT_EQ(hipSuccess, hipMemset(recvBuf, rank + 1, bytes));
+                ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, rank + 1, bytes));
 
                 if(rank == 0)
                 {
@@ -437,12 +437,12 @@ protected:
                               algoName ? algoName : "?");
                 }
 
-                ASSERT_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, type, ncclSum,
-                                                     getActiveCommunicator(), getActiveStream()));
-                ASSERT_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+                ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, type, ncclSum,
+                                                         getActiveCommunicator(), getActiveStream()));
+                ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
 
                 std::vector<uint8_t> mine(bytes);
-                ASSERT_EQ(hipSuccess, hipMemcpy(mine.data(), recvBuf, bytes, hipMemcpyDeviceToHost));
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(mine.data(), recvBuf, bytes, hipMemcpyDeviceToHost));
                 std::vector<uint8_t> ref = mine;
                 ASSERT_EQ(MPI_SUCCESS, MPI_Bcast(ref.data(), static_cast<int>(bytes), MPI_BYTE, 0, MPI_COMM_WORLD));
 
@@ -563,7 +563,7 @@ TEST_F(DdaMPI_AllReduce, LLOneShotBitIdenticalAcrossRanks)
                                "DdaMPI_AllReduce/LLOneShotBitIdenticalAcrossRanks");
 }
 
-// Sets the same thresholds as LL128OneShotMultiRank, so run it under that test's LL128OneShot* filter in its own process.
+// Sets the same thresholds as LL128OneShotMultiRank, so it needs its own process (see the note above).
 TEST_F(DdaMPI_AllReduce, LL128OneShotBitIdenticalAcrossRanks)
 {
     MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");

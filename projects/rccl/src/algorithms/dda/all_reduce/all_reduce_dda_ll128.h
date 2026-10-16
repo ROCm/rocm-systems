@@ -114,8 +114,7 @@ __launch_bounds__(512)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 
-    // Fold in rank order 0..nRanks-1 on every rank: a per-rank order rounds differently and the replicas diverge.
-    // Own slice is loaded first so the load overlaps the polls; rank 0 seeds acc, so the sum is ((r0 + r1) + r2) + ...
+    // Own slice loads first to overlap the polls; rank 0 seeds acc (fixed order, see header).
     uint64_t self[kDdaLL128WordsPerThread] = {};
     ddaLL128LoadRegs<int8_t>(self, srcBytes + dataByte, eltInSlice, lane, flagLane);
     uint64_t acc[kDdaLL128WordsPerThread];

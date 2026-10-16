@@ -105,7 +105,6 @@ __launch_bounds__(1024)
     const size_t e = base + (size_t)lane;
     const bool hasWord = (lane < kDdaLL128DataElems) && (e < nWords);
     uint64_t acc = 0ull;
-    // Fold in rank order 0..nRanks-1 on every rank: a per-rank order rounds differently and the replicas diverge.
     for (int peer = 0; peer < nRanks; ++peer) {
       uint64_t d = 0ull;
       if (peer == selfRank) {

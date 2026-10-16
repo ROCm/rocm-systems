@@ -97,7 +97,6 @@ __launch_bounds__(512)
   for (size_t pk = gtid; pk < nPk; pk += stride) {
     uint32_t acc0 = 0;
     uint32_t acc1 = 0;
-    // Fold in rank order 0..nRanks-1 on every rank: a per-rank order rounds differently and the replicas diverge.
     for (int peer = 0; peer < nRanks; ++peer) {
       uint32_t d0, d1;
       if (peer == selfRank) {
