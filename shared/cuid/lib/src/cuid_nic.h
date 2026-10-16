@@ -1,0 +1,59 @@
+// Copyright Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+#ifndef CUID_NIC_H
+#define CUID_NIC_H
+
+#include <memory>
+#include <string>
+#include <vector>
+
+#include "include/amd_cuid.h"
+#include "src/cuid_device.h"
+#include "src/cuid_internal.h"
+
+struct amdcuid_nic_info {
+  amdcuid_cuid_public_fields header;
+  std::string bdf;
+  std::string network_interface;
+};
+
+class CuidNic : public CuidDevice {
+ public:
+  CuidNic(const amdcuid_nic_info& i);
+  amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_NIC; }
+  amdcuid_status_t get_primary_cuid(amdcuid_primary_id& id) const override;
+  bool key_gated_identity() const override { return true; }
+  amdcuid_status_t get_temporary_input(CuidUtilities::AuxiliaryInput& input) const override;
+  amdcuid_status_t get_hardware_fingerprint(uint64_t& fingerprint) const override;
+  static amdcuid_status_t discover(std::vector<DevicePtr>& nics);
+  // The same over a directory other than /sys/class/net, for tests.
+  static amdcuid_status_t discover(const std::string& nic_base_path, std::vector<DevicePtr>& nics);
+  static amdcuid_status_t discover_single(amdcuid_nic_info* nic_info,
+                                          const std::string& device_path);
+
+  // Virtual accessor overrides
+  amdcuid_status_t get_vendor_id(uint16_t& vendor_id) const override;
+  amdcuid_status_t get_device_id(uint16_t& device_id) const override;
+  amdcuid_status_t get_pci_class(uint16_t& pci_class) const override;
+  amdcuid_status_t get_revision_id(uint8_t& revision_id) const override;
+  // The PCI function number, 0 without a BDF, so that the functions of one
+  // card, which may report one serial number, have distinct identities.
+  amdcuid_status_t get_unit_id(uint16_t& unit_id) const override;
+  amdcuid_status_t get_bdf(std::string& bdf) const override;
+  amdcuid_status_t get_device_path(std::string& path) const override;
+
+  // MAC address accessor
+  amdcuid_status_t get_mac_address(std::string& mac_address) const;
+
+  // Decode a MAC into the hardware fingerprint; exposed for conformance tests.
+  static amdcuid_status_t fingerprint_from_mac(const std::string& mac_address,
+                                               uint64_t& fingerprint);
+
+  const amdcuid_nic_info& get_info() const;
+
+ private:
+  amdcuid_nic_info m_info;
+};
+
+#endif  // CUID_NIC_H
