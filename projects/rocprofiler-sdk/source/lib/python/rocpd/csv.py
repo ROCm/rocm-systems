@@ -548,16 +548,17 @@ def _pc_sampling_query_runs(importData, query: str) -> bool:
 def write_pc_sampling_host_trap_csv(importData, config) -> None:
     query = """
         SELECT
-            guid,
-            timestamp AS Sample_Timestamp,
-            exec_mask AS Exec_Mask,
-            dispatch_id AS Dispatch_Id,
-            instruction AS Instruction,
-            instruction_comment AS Instruction_Comment,
-            correlation_id AS Correlation_Id
-        FROM "rocpd_gpu_pc_sample_decoded"
-        WHERE wave_issued IS NULL
-        ORDER BY guid ASC, id ASC
+            sample.guid,
+            sample.timestamp AS Sample_Timestamp,
+            sample.exec_mask AS Exec_Mask,
+            sample.dispatch_id AS Dispatch_Id,
+            sample.instruction AS Instruction,
+            sample.instruction_comment AS Instruction_Comment,
+            event.stack_id AS Correlation_Id
+        FROM "rocpd_gpu_pc_sample_decoded" sample
+        JOIN rocpd_event event ON event.guid = sample.guid AND event.id = sample.event_id
+        WHERE sample.wave_issued IS NULL
+        ORDER BY sample.guid ASC, sample.id ASC
     """
     if not _pc_sampling_query_runs(importData, query):
         return
@@ -574,20 +575,21 @@ def write_pc_sampling_host_trap_csv(importData, config) -> None:
 def write_pc_sampling_stochastic_csv(importData, config) -> None:
     query = """
         SELECT
-            guid,
-            timestamp AS Sample_Timestamp,
-            exec_mask AS Exec_Mask,
-            dispatch_id AS Dispatch_Id,
-            instruction AS Instruction,
-            instruction_comment AS Instruction_Comment,
-            correlation_id AS Correlation_Id,
-            wave_issued AS Wave_Issued_Instruction,
-            inst_type_name AS Instruction_Type,
-            stall_reason_name AS Stall_Reason,
-            wave_count AS Wave_Count
-        FROM "rocpd_gpu_pc_sample_decoded"
-        WHERE wave_issued IS NOT NULL
-        ORDER BY guid ASC, id ASC
+            sample.guid,
+            sample.timestamp AS Sample_Timestamp,
+            sample.exec_mask AS Exec_Mask,
+            sample.dispatch_id AS Dispatch_Id,
+            sample.instruction AS Instruction,
+            sample.instruction_comment AS Instruction_Comment,
+            event.stack_id AS Correlation_Id,
+            sample.wave_issued AS Wave_Issued_Instruction,
+            sample.inst_type_name AS Instruction_Type,
+            sample.stall_reason_name AS Stall_Reason,
+            sample.wave_count AS Wave_Count
+        FROM "rocpd_gpu_pc_sample_decoded" sample
+        JOIN rocpd_event event ON event.guid = sample.guid AND event.id = sample.event_id
+        WHERE sample.wave_issued IS NOT NULL
+        ORDER BY sample.guid ASC, sample.id ASC
     """
     if not _pc_sampling_query_runs(importData, query):
         return

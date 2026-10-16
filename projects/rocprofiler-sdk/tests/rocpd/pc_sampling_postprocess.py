@@ -287,10 +287,11 @@ def build_db(path, *, code_objects=(), samples=(), regions=(), guid=None):
 
         for index, sample in enumerate(samples, start=1):
             event_id = sample.get("event_id", index)
+            correlation_id = sample.get("correlation_id", index)
             conn.execute(
-                f"INSERT OR IGNORE INTO {table('rocpd_event')} (id, guid, correlation_id) "
-                "VALUES (?, ?, ?)",
-                (event_id, guid, index),
+                f"INSERT OR IGNORE INTO {table('rocpd_event')} "
+                "(id, guid, correlation_id, stack_id) VALUES (?, ?, ?, ?)",
+                (event_id, guid, correlation_id, sample.get("stack_id", index)),
             )
             conn.execute(
                 f"INSERT INTO {table('rocpd_blob_event')} (guid, nid, pid, event_id, "
@@ -300,8 +301,8 @@ def build_db(path, *, code_objects=(), samples=(), regions=(), guid=None):
             conn.execute(
                 f"INSERT INTO {table('rocpd_gpu_pc_sample')} (id, guid, timestamp, nid, "
                 "pid, tid, agent_id, event_id, dispatch_id, correlation_id, exec_mask, "
-                "code_object_id, code_object_offset) "
-                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?)",
+                "code_object_id, code_object_offset, wave_issued) "
+                "VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1, ?, ?, ?, ?, ?)",
                 (
                     index,
                     guid,
@@ -311,10 +312,11 @@ def build_db(path, *, code_objects=(), samples=(), regions=(), guid=None):
                     TID,
                     AGENT_ID,
                     event_id,
-                    index,
+                    correlation_id,
                     sample.get("exec_mask", "1"),
                     sample.get("code_object_id", 1),
                     sample.get("offset", 0),
+                    sample.get("wave_issued"),
                 ),
             )
 
@@ -625,7 +627,8 @@ def test_merge_skips_views_bound_to_one_recording(tmp_path):
     assert query_db(merged, "SELECT COUNT(*) FROM rocpd_all_strings") == [(2,)]
 
 
-def test_pc_csv_identifies_recordings(tmp_path, fake_decoder):
+@pytest.mark.parametrize("method", ["host_trap", "stochastic"])
+def test_pc_csv_identifies_recordings(tmp_path, fake_decoder, method):
     import csv
     from rocpd import csv as rocpd_csv
 
@@ -633,23 +636,35 @@ def test_pc_csv_identifies_recordings(tmp_path, fake_decoder):
     path = tmp_path / "kernel.co"
     path.write_bytes(data)
     dbs = [tmp_path / "a.db", tmp_path / "b.db"]
-    guids = {
+    expected_correlations = {
         build_db(
             db,
             code_objects=[file_code_object(path, data)],
-            samples=[{"timestamp": 100, "offset": 5, "exec_mask": FULL_EXEC_MASK}],
-        )
-        for db in dbs
+            samples=[
+                {
+                    "timestamp": 100,
+                    "offset": 5,
+                    "exec_mask": FULL_EXEC_MASK,
+                    "correlation_id": 1000 + index,
+                    "stack_id": index,
+                    "wave_issued": 1 if method == "stochastic" else None,
+                }
+            ],
+        ): index
+        for index, db in enumerate(dbs, start=1)
     }
     out_dir = tmp_path / "out"
     with open_db(dbs) as connection:
         rocpd_csv.execute(connection, output_path=str(out_dir), output_file="out")
 
-    output = out_dir / "out_pc_sampling_host_trap_trace.csv"
+    output = out_dir / f"out_pc_sampling_{method}_trace.csv"
     with open(output, newline="") as ifs:
         rows = list(csv.DictReader(ifs))
     assert list(rows[0].keys())[0] == "Guid"
-    assert {row["Guid"] for row in rows} == guids
+    assert len(rows) == len(expected_correlations)
+    assert {
+        row["Guid"]: int(row["Correlation_Id"]) for row in rows
+    } == expected_correlations
     assert all(row["Instruction"] == insn(data, 5) for row in rows)
     # The full 64-bit mask is exported exactly and unquoted.
     assert f",{FULL_EXEC_MASK}," in output.read_text()
@@ -968,7 +983,7 @@ def test_open_without_decoding_does_not_scan_samples(tmp_path, monkeypatch, code
 
     def traced_connect(*args, **kwargs):
         connection = connect(*args, **kwargs)
-        connection.set_trace_callback(statements.append)
+        connection.set_trace_callback(lambda statement: statements.append(statement))
         return connection
 
     monkeypatch.setattr(importer.libpyrocpd, "connect", traced_connect)

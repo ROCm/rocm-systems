@@ -121,8 +121,8 @@ def _field_pairs(record, stochastic, gfx_target_version=0):
         ("exec_mask", record["exec_mask"], False),
         ("code_object_id", record["pc"]["code_object_id"], False),
         ("code_object_offset", record["pc"]["code_object_offset"], False),
-        ("correlation_id", corr["internal"], False),
-        ("external_correlation_id", corr["external"], False),
+        ("correlation_id", corr["external"], False),
+        ("stack_id", corr["internal"], False),
         ("wave_in_group", record["wave_in_grp"], False),
         ("workgroup_id_x", wg["x"], False),
         ("workgroup_id_y", wg["y"], False),
@@ -182,8 +182,8 @@ def _field_pairs(record, stochastic, gfx_target_version=0):
 
 
 def _decoded_rows(conn, stochastic):
-    # The decoded view's correlation_id is the *internal* id; join rocpd_event to
-    # also expose the user-facing *external* id.  Row order follows insertion order
+    # The decoded view's correlation_id is the external id; join rocpd_event to
+    # also expose the internal id as stack_id.  Row order follows insertion order
     # (autoincrement id), which matches the generator order the JSON is serialized
     # from, so the two sequences line up 1:1.
     #
@@ -196,9 +196,9 @@ def _decoded_rows(conn, stochastic):
     select_list = ", ".join(f'd."{name}"' for name in keep)
     null_test = "IS NOT NULL" if stochastic else "IS NULL"
     query = (
-        f"SELECT {select_list}, e.correlation_id AS external_correlation_id "
+        f"SELECT {select_list}, e.stack_id "
         "FROM rocpd_gpu_pc_sample_decoded d "
-        "JOIN rocpd_event e ON e.id = d.event_id "
+        "JOIN rocpd_event e ON e.guid = d.guid AND e.id = d.event_id "
         f"WHERE d.wave_issued {null_test} "
         "ORDER BY d.id ASC"
     )
@@ -213,6 +213,24 @@ def test_rocpd_tables_populated(rocpd_connection):
     assert _count_rows(rocpd_connection, "rocpd_info_blob_field") > 0
 
 
+def test_rocpd_code_object_content_hashes(rocpd_connection):
+    hashes = rocpd_connection.execute(
+        "SELECT DISTINCT S.guid, S.code_object_id, "
+        "json_extract(C.extdata, '$.content_hash') "
+        "FROM rocpd_gpu_pc_sample S "
+        "LEFT JOIN rocpd_info_code_object C "
+        "ON C.guid = S.guid AND C.id = S.code_object_id "
+        "WHERE S.code_object_id != 0"
+    ).fetchall()
+    assert hashes, "Expected samples with known code objects"
+    for guid, code_object_id, content_hash in hashes:
+        assert isinstance(
+            content_hash, str
+        ), f"Missing content hash for code object {code_object_id} in {guid}"
+        assert content_hash.startswith("fnv1a64:") and len(content_hash) == 24
+        assert all(character in "0123456789abcdef" for character in content_hash[8:])
+
+
 def test_rocpd_sample_count_matches_json(rocpd_connection, json_data):
     # Independent oracle: the ROCPD row count must equal the number of PC-sample
     # records emitted to JSON from the same generators.
@@ -222,6 +240,24 @@ def test_rocpd_sample_count_matches_json(rocpd_connection, json_data):
     )
     assert json_count > 0
     assert _count_rows(rocpd_connection, "rocpd_gpu_pc_sample") == json_count
+
+
+def test_rocpd_sample_event_metadata(rocpd_connection):
+    total, categorized, correlated, stacked = rocpd_connection.execute(
+        "SELECT COUNT(*), "
+        "COUNT(CASE WHEN C.string = 'PC_SAMPLING' THEN 1 END), "
+        "COUNT(CASE WHEN E.correlation_id = S.correlation_id THEN 1 END), "
+        "COUNT(E.stack_id) "
+        "FROM rocpd_gpu_pc_sample S "
+        "LEFT JOIN rocpd_event E ON E.guid = S.guid AND E.id = S.event_id "
+        "LEFT JOIN rocpd_string C ON C.guid = E.guid AND C.id = E.category_id"
+    ).fetchone()
+    assert total > 0
+    assert categorized == total, "PC-sampling events must use the PC_SAMPLING category"
+    assert (
+        correlated == total
+    ), "PC-sampling correlation_id must match the event's external correlation ID"
+    assert stacked == total, "PC-sampling events must retain an internal stack_id"
 
 
 def test_rocpd_parent_dispatch_linkage(rocpd_connection):
