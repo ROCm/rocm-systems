@@ -59,7 +59,7 @@
  * under ASan is expected and is not a defect.
  */
 
-#include "net_telemetry_internal.h"
+#include "net_telemetry.h"
 
 #include <cstdio>
 #include <cstdlib>
@@ -1034,6 +1034,48 @@ static std::string jsonDevice(const std::string& json, const std::string& dev) {
   return json.substr(at, json.find("\"roce_device\"", at + 1) - at);
 }
 
+/* hw_samples column local_ack_timeout_err (alternate to_retransmits) on a
+ * thor2 device without that counter, and ecn_marked_pkts (no alternate). */
+static void testSampledColRetry(void) {
+  std::printf("testSampledColRetry\n");
+  resetState();
+  const char* tmp = std::getenv("TMPDIR");
+  std::string tmpl = std::string(tmp && tmp[0] ? tmp : "/tmp") + "/rccl_tel_sample_XXXXXX";
+  std::vector<char> root(tmpl.begin(), tmpl.end());
+  root.push_back('\0');
+  CHECK(mkdtemp(root.data()) != NULL);
+  const std::string r(root.data());
+  for (const std::string& d : {r + "/class", r + "/class/infiniband", r + "/bnxt_en"})
+    CHECK_EQ(mkdir(d.c_str(), 0755), 0);
+  const std::string hwc = makeFakeBnxt(r, "bnxt_re0", {{"to_retransmits", 7, 7}, {"rx_ecn_marked_pkts", 3, 3}});
+  rcclTelemetrySysRoot = root.data();
+  CHECK_EQ(rcclTelemetryRegisterDevice(0, "bnxt_re0", "IB-CAST"), 0);
+
+  const int kLocalAck = 7, kEcn = 0; /* positions in rcclTelSampled */
+  RcclTelSampledCol col;
+  rcclTelemetrySampledColInit(0, kLocalAck, &col);
+  CHECK(col.nameIdx >= 0 && col.altIdx >= 0);
+  for (int t = 1; t <= RCCL_TEL_SAMPLE_PRIMARY_TRIES; t++) {
+    CHECK_EQ(rcclTelemetrySampledColRead(0, &col), 7);
+    CHECK_EQ(col.locked, t < RCCL_TEL_SAMPLE_PRIMARY_TRIES ? -2 : col.altIdx);
+  }
+
+  rcclTelemetrySampledColInit(0, kLocalAck, &col);
+  CHECK_EQ(rcclTelemetrySampledColRead(0, &col), 7);
+  writeFile(hwc + "local_ack_timeout_err", "4");
+  CHECK_EQ(rcclTelemetrySampledColRead(0, &col), 4);
+  CHECK_EQ(col.locked, col.nameIdx);
+
+  rcclTelemetrySampledColInit(0, kEcn, &col);
+  CHECK(col.altIdx < 0);
+  CHECK_EQ(col.locked, col.nameIdx);
+  CHECK_EQ(rcclTelemetrySampledColRead(0, &col), 3);
+
+  rcclTelemetrySysRoot = "/sys";
+  std::filesystem::remove_all(r);
+  resetState();
+}
+
 /* bnxt_re0 has the current names (plus two old ones, which must lose);
  * bnxt_re1 has only the old names, which must be read as fallbacks. */
 static void testThor2SysfsNames(void) {
@@ -1142,6 +1184,7 @@ int main(void) {
   testConcurrent();
   testEthtoolFallbackOrder();
   testSetupQpsSharedKeys();
+  testSampledColRetry();
   testThor2SysfsNames(); /* flushes: keep last */
 
   if (g_failures == 0) {

@@ -317,7 +317,6 @@ set(SRC_FILES
   include/nccl_device/utility.h
   include/net.h
   include/net_telemetry.h
-  include/net_telemetry_internal.h
   include/nvmlwrap.h
   include/nvtx.h
   include/nvtx3/nvToolsExt.h
