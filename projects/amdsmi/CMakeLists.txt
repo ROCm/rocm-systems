@@ -29,10 +29,19 @@ cmake_minimum_required(VERSION 3.20)
 #
 # Build fails if no suitable compiler found.
 #
+# Skipped when the compiler is already chosen: a toolchain file,
+# CMAKE_<LANG>_COMPILER, or the CC/CXX environment variables.
+#
 # See: cmake/toolchains/amdsmi-gcc-toolchain.cmake
 # See also: https://github.com/ROCm/TheRock/issues/3976
 #
-if(NOT CMAKE_TOOLCHAIN_FILE AND NOT DEFINED CMAKE_CXX_COMPILER AND NOT DEFINED CMAKE_C_COMPILER)
+if(
+    NOT CMAKE_TOOLCHAIN_FILE
+    AND NOT DEFINED CMAKE_CXX_COMPILER
+    AND NOT DEFINED CMAKE_C_COMPILER
+    AND "$ENV{CXX}" STREQUAL ""
+    AND "$ENV{CC}" STREQUAL ""
+)
     # Determine ROCm installation path using tool-based discovery
     # Uses hipconfig --path (per https://github.com/ROCm/TheRock/issues/3976)
     set(ROCM_DIR "")

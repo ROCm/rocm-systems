@@ -111,6 +111,9 @@ cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake
 # Or explicitly specify GCC
 cmake .. -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc
 
+# Or set CC/CXX when configuring a new build directory
+CC=gcc CXX=g++ cmake ..
+
 # Or explicitly specify ROCm clang++ (instead of amdclang++)
 cmake .. -DCMAKE_CXX_COMPILER=/opt/rocm-<version_number>/lib/llvm/bin/clang++ -DCMAKE_C_COMPILER=/opt/rocm-<version_number>/lib/llvm/bin/clang
 
