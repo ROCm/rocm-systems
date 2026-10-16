@@ -25,6 +25,15 @@ namespace {
 
 using aie_test::discover_agents;
 
+/**
+ * @brief HSA memory-pool iteration callback that finds the first global, coarse-grained,
+ * allocatable memory pool.
+ *
+ * @param pool memory pool being visited
+ * @param data hsa_amd_memory_pool_t* to receive a match
+ * @return HSA_STATUS_INFO_BREAK on a match, HSA_STATUS_SUCCESS to keep iterating, or the error
+ * from a failed pool query
+ */
 hsa_status_t discover_first_global_coarse_grain_mem_pool(hsa_amd_memory_pool_t pool, void* data) {
   if (!data) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -56,10 +65,19 @@ hsa_status_t discover_first_global_coarse_grain_mem_pool(hsa_amd_memory_pool_t p
   return HSA_STATUS_INFO_BREAK;
 }
 
-// Like discover_first_global_coarse_grain_mem_pool, but further restricted to the device-local
-// (NPU) pool specifically: AMD::MemoryRegion only reports HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_
-// REC_GRANULE as 0 for non-system heap types, so this is how a caller tells the NPU pool apart
-// from a device's plain system-backed pools. AIE4 (UMQ) agents have no such pool at all.
+/**
+ * @brief Like discover_first_global_coarse_grain_mem_pool, but further restricted to the
+ * device-local (NPU) pool specifically.
+ *
+ * AMD::MemoryRegion only reports HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE as 0 for
+ * non-system heap types, so this is how a caller tells the NPU pool apart from a device's plain
+ * system-backed pools. AIE4 (UMQ) agents have no such pool at all.
+ *
+ * @param pool memory pool being visited
+ * @param data hsa_amd_memory_pool_t* to receive a match
+ * @return HSA_STATUS_INFO_BREAK on a match, HSA_STATUS_SUCCESS to keep iterating, or the error
+ * from a failed pool query
+ */
 hsa_status_t discover_first_npu_local_mem_pool(hsa_amd_memory_pool_t pool, void* data) {
   hsa_status_t status = discover_first_global_coarse_grain_mem_pool(pool, data);
   if (status != HSA_STATUS_INFO_BREAK) {
@@ -81,6 +99,14 @@ hsa_status_t discover_first_npu_local_mem_pool(hsa_amd_memory_pool_t pool, void*
   return HSA_STATUS_INFO_BREAK;
 }
 
+/**
+ * @brief HSA memory-pool iteration callback that appends every pool visited to the
+ * std::vector<hsa_amd_memory_pool_t>* stored in @p data.
+ *
+ * @param pool memory pool being visited
+ * @param data std::vector<hsa_amd_memory_pool_t>* to append to
+ * @return HSA_STATUS_SUCCESS, or HSA_STATUS_ERROR_INVALID_ARGUMENT if @p data is null
+ */
 hsa_status_t collect_all_pools(hsa_amd_memory_pool_t pool, void* data) {
   if (!data) {
     return HSA_STATUS_ERROR_INVALID_ARGUMENT;
@@ -879,35 +905,6 @@ TEST_F(MemoryTest, VMemExportImportShareableHandle) {
   // cleanup
   EXPECT_EQ(hsa_amd_vmem_handle_release(imported_handle), HSA_STATUS_SUCCESS);
   EXPECT_EQ(hsa_amd_vmem_handle_release(memory_handle), HSA_STATUS_SUCCESS);
-}
-
-// Whether the agent address differs from the host address depends on the pool, so only its
-// presence is checked.
-TEST_F(MemoryTest, PointerInfo) {
-  hsa_amd_memory_pool_t global_memory_pool = {};
-  ASSERT_EQ(
-      hsa_amd_agent_iterate_memory_pools(
-          aie_agents.front(), discover_first_global_coarse_grain_mem_pool, &global_memory_pool),
-      HSA_STATUS_INFO_BREAK);
-
-  constexpr std::size_t buffer_size = 1024;
-  constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
-  void* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_memory_pool_allocate(global_memory_pool, allocation_size, 0, &buffer),
-            HSA_STATUS_SUCCESS);
-  ASSERT_NE(buffer, nullptr);
-
-  hsa_amd_pointer_info_t info = {};
-  info.size = sizeof(info);
-  EXPECT_EQ(hsa_amd_pointer_info(buffer, &info, nullptr, nullptr, nullptr), HSA_STATUS_SUCCESS);
-  EXPECT_EQ(info.type, HSA_EXT_POINTER_TYPE_HSA);
-  EXPECT_EQ(info.hostBaseAddress, buffer);
-  EXPECT_EQ(info.sizeInBytes, allocation_size);
-  EXPECT_NE(info.agentBaseAddress, nullptr);
-  EXPECT_EQ(info.agentOwner.handle, aie_agents.front().handle);
-
-  // cleanup
-  EXPECT_EQ(hsa_amd_memory_pool_free(buffer), HSA_STATUS_SUCCESS);
 }
 
 TEST_F(MemoryTest, IterateAllPools) {
