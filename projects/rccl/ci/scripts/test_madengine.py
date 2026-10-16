@@ -83,7 +83,7 @@ OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 MADENGINE_REPO = "https://github.com/ROCm/madengine.git"
 MADENGINE_REF = "00ee3e80c0a308599633caf74e5d91a72164a2fe"  # develop, has #190 and #213
 MAD_REPO = "https://github.com/ROCm/MAD.git"
-MAD_REF = "7a9a25e742ef60e8deffb6e5fd9b559857d2018d"  # mad-rccl, 2026-10-09
+MAD_REF = "7a9a25e742ef60e8deffb6e5fd9b559857d2018d"  # mad-rccl, has MAD#271
 MAD_BRANCH = "mad-rccl"
 
 WORKLOAD_CONFIGS = {
@@ -114,25 +114,25 @@ WORKLOAD_CONFIGS = {
             "--device=/dev/infiniband --cap-add IPC_LOCK "
             "--ulimit memlock=-1 -v /sys:/sys:ro -v /run/udev:/run/udev:ro",
     },
-    "llama-4-scout-training": {
+    "gpt-oss-120b-training": {
         "type": "training",
-        "model_repo": "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e",
-        "model_repo_aliases": [
-            "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_overlay",
-            "primus_pyt_megatron_lm_train_llama-4-scout-17b-16e_scaleout",
-        ],
+        "model_repo": "primus_pyt_megatron_lm_train_gpt-oss-120b",
         "base_image": "rocm/primus:v26.4",
         "gpu_target": "gfx950",
         "metric_key": "tokens_per_second_per_gpu",
-        "multiple_results": "perf_primus-megatron-Llama-4-Scout-17B-16E.csv",
-        "precisions": ["BF16"],  # what MAD's run.sh trains on gfx950
-        "reference_values": {
-            "2N": 2734,
-            "4N": 2337,
+        "multiple_results": "perf_primus-megatron-GPT-OSS-120B.csv",
+        "precisions": ["BF16", "FP8"],  # what MAD's run.sh trains on gfx950
+        # The shipped config profiles iterations 6-7, which at 2 nodes cost
+        # 3.2x (BF16) and 3.7x (FP8) a steady iteration and leave the next two
+        # elevated. Primus averages from iteration 3, so 15 iterations give 13
+        # measured ones at ~65 s (BF16) and ~116 s (FP8) each.
+        "env_vars": {
+            "PRIMUS_TRAIN_ITERS": "15",
+            "PRIMUS_DISABLE_PROFILE": "1",
         },
         "slurm_partition": "meta64",
         "gpus_per_node": 8,
-        "time_limit": "03:00:00",  # one allocation, two runs, plus image staging
+        "time_limit": "04:00:00",  # one allocation, two runs, plus image staging
         "docker_mounts": {"/dev/infiniband": "/dev/infiniband"},
         "docker_run_options": "--privileged --group-add render --shm-size 64G "
             "--device=/dev/infiniband --cap-add IPC_LOCK "
@@ -625,7 +625,11 @@ def generate_manifest(
         if "," in ifname:
             nccl_env["NCCL_SOCKET_IFNAME"] = ifname.split(",")[0]
 
-    socket_ifname = nccl_env.get("NCCL_SOCKET_IFNAME", "")
+    # Last over everything below, socket interfaces included.
+    workload_env = workload_config.get("env_vars", {})
+    socket_ifname = workload_env.get(
+        "NCCL_SOCKET_IFNAME", nccl_env.get("NCCL_SOCKET_IFNAME", "")
+    )
 
     # HF_TOKEN is passed via MAD_SECRETS_HFTOKEN in the process environment
     # (set in the workflow). Do NOT write it into the manifest — the manifest
@@ -646,8 +650,9 @@ def generate_manifest(
         "NCCL_IB_DISABLE": "0",
         "NCCL_TIMEOUT": "900",
         "IBV_SHOW_WARNINGS": "1",
+        **workload_env,
     }
-    if socket_ifname:
+    if socket_ifname and "GLOO_SOCKET_IFNAME" not in workload_env:
         docker_env_vars["GLOO_SOCKET_IFNAME"] = socket_ifname
 
     docker_mounts = dict(workload_config.get("docker_mounts", {}))

@@ -230,6 +230,17 @@ jobs:
     permissions:
       contents: read
       id-token: write
+    strategy:
+      # One workload failing says nothing about the others, and the scale
+      # reservation is already paid for by the time it does.
+      fail-fast: false
+      # Both legs want an exclusive 2-node salloc on the same partition, and
+      # queue time counts against the leg's --timeout-minutes.
+      max-parallel: 1
+      matrix:
+        workload:
+          - llama-3.1-70b-training
+          - gpt-oss-120b-training
     uses: ./.github/workflows/therock-rccl-test-madengine.yml
     secrets: inherit
     with:
@@ -237,7 +248,7 @@ jobs:
       artifact_group: ${{ inputs.artifact_group }}
       test_runs_on: ruby-linux-slurm-scale-runner
       artifact_run_id: ${{ inputs.artifact_run_id || github.run_id }}
-      workload: llama-3.1-70b-training
+      workload: ${{ matrix.workload }}
       nodes: ${{ inputs.madengine_nodes || '2' }}
       notify_email: ${{ inputs.notify_email }}
       teams_webhook: ${{ inputs.notify_webhook }}
