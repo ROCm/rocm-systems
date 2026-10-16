@@ -5,7 +5,9 @@
 // DX9 flushing and zero-product addition follow rocjitsu fp_mode::arithmetic.
 
 #include "common/alu.h"
+#include "common/exact_arithmetic.h"
 #include "common/internal.h"
+#include "common/simd.h"
 #include "fp/fma_scalar.h"
 #include "register/dpp.h"
 #include "rj_arith/rj_arith.h"
@@ -24,6 +26,20 @@ template <bool Rdna3, bool Dx9Zero>
   if constexpr (Dx9Zero) {
     flags |= RJ_ARITH_FP_FLUSH_INPUT_DENORMALS | RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS;
   }
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V4 &&
+      rocjitsu::arith::fma_exact_x86_64_v4(flags, exec_mask, mode, d[0], a[0], b[0], c[0], Dx9Zero,
+                                           Rdna3)) {
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3 &&
+      rocjitsu::arith::fma_exact_x86_64_v3(flags, exec_mask, mode, d[0], a[0], b[0], c[0], Dx9Zero,
+                                           Rdna3)) {
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
     result[lane] = rocjitsu::arith::fma_instruction_value(a[0][lane], b[0][lane], c[0][lane], flags,
@@ -53,6 +69,30 @@ int fma(uint64_t flags, uint32_t exec_mask, uint32_t instruction_flags, uint32_t
   if (rocjitsu::arith::is_exact(flags)) {
     return fma_exact<Rdna3, Dx9Zero>(flags, exec_mask, instruction_flags, d, a, b, c);
   }
+
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V4) {
+    if constexpr (Dx9Zero) {
+      rocjitsu::arith::fma_dx9_zero_x86_64_v4(flags, exec_mask, instruction_flags, d[0], a[0], b[0],
+                                              c[0]);
+    } else {
+      rocjitsu::arith::fma_x86_64_v4(flags, exec_mask, instruction_flags, d[0], a[0], b[0], c[0]);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
+    if constexpr (Dx9Zero) {
+      rocjitsu::arith::fma_dx9_zero_x86_64_v3(flags, exec_mask, instruction_flags, d[0], a[0], b[0],
+                                              c[0]);
+    } else {
+      rocjitsu::arith::fma_x86_64_v3(flags, exec_mask, instruction_flags, d[0], a[0], b[0], c[0]);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 
   uint32_t result[32];
   for (int lane = 0; lane < 32; ++lane) {

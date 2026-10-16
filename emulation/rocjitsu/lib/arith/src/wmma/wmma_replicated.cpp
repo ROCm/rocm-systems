@@ -7,8 +7,10 @@
 #include "common/float_formats.h"
 #include "common/internal.h"
 #include "common/packed16.h"
+#include "common/simd.h"
 #include "dot/gfx11_dot2.h"
 #include "rj_arith/rj_arith.h"
+#include "wmma/x86_64/wmma_exact.h"
 
 #include <algorithm>
 #include <cmath>
@@ -29,6 +31,38 @@ int wmma(uint64_t flags, uint64_t mode, uint32_t *const *d, const uint32_t *cons
           rocjitsu::arith::validate(flags, 0, true, rocjitsu::arith::matrix_ignored_fp_flags)) {
     return error;
   }
+#if defined(RJ_ARITH_HAVE_AVX512BF16)
+  if constexpr (Bf16) {
+    if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_ZEN4 &&
+        !rocjitsu::arith::is_exact(flags) &&
+        rocjitsu::arith::wmma_avx512bf16<Lanes, true, Packed>(uint32_t(mode), d, a, b, c)) {
+      return RJ_ARITH_SUCCESS;
+    }
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V4)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V4 && rocjitsu::arith::is_exact(flags)) {
+    rocjitsu::arith::wmma_exact_x86_64_v4<Bf16, Lanes, true, Packed>(
+        uint32_t(mode), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3 && rocjitsu::arith::is_exact(flags)) {
+    rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, Lanes, true, Packed>(
+        uint32_t(mode), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3 && !rocjitsu::arith::is_exact(flags)) {
+    if constexpr (Packed) {
+      rocjitsu::arith::wmma_packed_x86_64_v3<Bf16, Lanes, true>(
+          uint32_t(mode), flags & RJ_ARITH_FP16_OVFL, d, a, b, c);
+    } else {
+      rocjitsu::arith::wmma_f32_x86_64_v3<Bf16, Lanes, true>(uint32_t(mode), d, a, b, c);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
   // gfx11 layouts replicate A/B in each 16-lane group and interleave output
   // rows across groups (rocjitsu shared/mma_exec.h).
   constexpr int Groups = Lanes / 16, Registers = 256 / Lanes;
