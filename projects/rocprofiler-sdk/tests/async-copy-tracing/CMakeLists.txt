@@ -37,3 +37,18 @@ rocprofiler_add_integration_validate_test(
     TIMEOUT 45
     FIXTURES_REQUIRED async-copy-tracing
     ARGS --input ${CMAKE_CURRENT_BINARY_DIR}/async-copy-tracing-test.json)
+
+string(REPLACE "LD_PRELOAD=" "ROCPROF_PRELOAD=" ROCPROFV3_PRELOAD_ENV
+               "${ROCPROFILER_MEMCHECK_PRELOAD_ENV}")
+
+rocprofiler_add_integration_execute_test(
+    async-copy-tracing-app-copy-time
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --memory-copy-trace -d
+        ${CMAKE_CURRENT_BINARY_DIR}/%tag%-trace -o out --output-format csv --
+        $<TARGET_FILE:hsa-async-copy-time>
+    DEPENDS hsa-async-copy-time
+    TIMEOUT 45
+    WSL_TIMEOUT_SCALE
+    LABELS "integration-tests"
+    ENVIRONMENT "${ROCPROFV3_PRELOAD_ENV}")
