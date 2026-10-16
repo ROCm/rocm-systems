@@ -285,7 +285,7 @@ TEST_P(NetIbGidChangeTest, ConnectSnapshotsDeviceCache) {
     void* listenComm = nullptr;
     void* sendComm = nullptr;
     void* recvComm = nullptr;
-    SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(/*dev=*/0, &listenComm, &sendComm, &recvComm));
 
     std::vector<char> buf(kMsgSize, 0x5A);
     void* comm = (rank == 0) ? recvComm : sendComm;
@@ -324,7 +324,7 @@ TEST_P(NetIbGidChangeTest, PortRecoveryRefreshesStaleCommGid) {
     void* listenComm = nullptr;
     void* sendComm = nullptr;
     void* recvComm = nullptr;
-    SetupCastConnection(mergedDev, &listenComm, &sendComm, &recvComm);
+    ASSERT_NO_FATAL_FAILURE(SetupCastConnection(mergedDev, &listenComm, &sendComm, &recvComm));
 
     const size_t bufSize = kMsgSize * (kPostRecoveryMsgs + 1);
     std::vector<char> sendBuf(bufSize), recvBuf(bufSize, 0);

@@ -2,7 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 /// @file simulated_kfd_test.cpp
-/// @brief Tests for SimulatedKfd creation, open/close, and topology generation.
+/// @brief SimulatedKfd lifecycle, allocation, sharing, and topology tests.
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/kmd/linux/guest_kfd.h"
@@ -40,7 +40,10 @@ RJ_DIAGNOSTIC_POP
 #include <thread>
 #include <vector>
 
+#include <sys/eventfd.h>
 #include <sys/mman.h>
+#include <sys/resource.h>
+#include <sys/stat.h>
 #include <unistd.h>
 
 namespace {
@@ -73,9 +76,9 @@ struct TestVM {
   }
 };
 
-TestVM create_test_vm() {
+TestVM create_test_vm(const std::string &config_path = CONFIG_PATH, uint32_t gfx_target = 0) {
   TestVM t;
-  t.loaded = rocjitsu::config::load_config(CONFIG_PATH.c_str(), rocjitsu::kEmbeddedSchema);
+  t.loaded = rocjitsu::config::load_config(config_path.c_str(), rocjitsu::kEmbeddedSchema);
   auto *soc = t.loaded.soc();
 
   // These tests drive the engine directly and inspect single-partition state, so
@@ -89,6 +92,8 @@ TestVM create_test_vm() {
   auto root = t.loaded.take_root();
   root.release();
   auto vm = std::make_unique<rocjitsu::VirtualMachine>(std::unique_ptr<rocjitsu::SoC>(soc));
+  if (gfx_target != 0)
+    t.loaded.device.gfx_target_version = gfx_target;
   vm->driver()->setup_topology(t.loaded.device, soc->num_xcds());
 
   t.engine->topology().set_root(std::move(vm));
@@ -119,6 +124,297 @@ TEST_F(SimulatedKfdTest, OpenAndClose) {
 
   int ret = t.driver()->close();
   EXPECT_EQ(ret, 0);
+}
+
+TEST_F(SimulatedKfdTest, ExportedVramKeepsCoherenceAcrossMappings) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_GE(driver->open(), 0);
+  constexpr size_t kBytes = 4096;
+  void *reserved = ::mmap(nullptr, kBytes, PROT_NONE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(reserved, MAP_FAILED);
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(reserved);
+  alloc.size = kBytes;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  // The runtime reserves an inaccessible CPU VA; GPU accesses must still work.
+  ASSERT_EQ(driver->mmap(reserved, kBytes, PROT_NONE, MAP_SHARED | MAP_FIXED,
+                         static_cast<off_t>(alloc.mmap_offset)),
+            reserved);
+  const auto access = t.soc()->gpu_vm().snapshot_vmid(driver->local_process_id());
+  ASSERT_TRUE(access);
+  uint32_t value = 0x13572468;
+  EXPECT_EQ(access->write(alloc.va_addr, std::as_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  value = 0;
+  EXPECT_EQ(access->read(alloc.va_addr, std::as_writable_bytes(std::span(&value, 1))),
+            rocjitsu::amdgpu::VmAccessOutcome::Complete);
+  EXPECT_EQ(value, 0x13572468u);
+  EXPECT_EQ(access->query_mtype(alloc.va_addr), rocjitsu::amdgpu::Mtype::RW);
+  kfd_ioctl_export_dmabuf_args exported{};
+  exported.handle = alloc.handle;
+  struct rlimit original_limit {};
+  ASSERT_EQ(::getrlimit(RLIMIT_NOFILE, &original_limit), 0);
+  struct rlimit exhausted = original_limit;
+  exhausted.rlim_cur = 0;
+  ASSERT_EQ(::setrlimit(RLIMIT_NOFILE, &exhausted), 0);
+  const int failed_export = driver->ioctl(AMDKFD_IOC_EXPORT_DMABUF, &exported);
+  const int restored = ::setrlimit(RLIMIT_NOFILE, &original_limit);
+  ASSERT_EQ(restored, 0);
+  EXPECT_LT(failed_export, 0);
+  EXPECT_EQ(access->query_mtype(alloc.va_addr), rocjitsu::amdgpu::Mtype::RW);
+  EXPECT_EQ(driver->mapping_flags_for_handle(alloc.handle), alloc.flags);
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_EXPORT_DMABUF, &exported), 0);
+  auto process = driver->find_process(driver->local_process_id());
+  ASSERT_NE(process, nullptr);
+  EXPECT_EQ(process->allocations_.at(alloc.handle).flags, alloc.flags);
+  EXPECT_EQ(access->query_mtype(alloc.va_addr), rocjitsu::amdgpu::Mtype::CC);
+  kfd_ioctl_map_memory_to_gpu_args map{};
+  map.handle = alloc.handle;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_MAP_MEMORY_TO_GPU, &map), 0);
+  EXPECT_EQ(access->query_mtype(alloc.va_addr), rocjitsu::amdgpu::Mtype::CC);
+  ASSERT_EQ(driver->mmap(reserved, kBytes, PROT_NONE, MAP_SHARED | MAP_FIXED,
+                         static_cast<off_t>(alloc.mmap_offset)),
+            reserved);
+  EXPECT_EQ(access->query_mtype(alloc.va_addr), rocjitsu::amdgpu::Mtype::CC);
+  // PRIME imports receive these flags and pass them to GEM_VA mapping.
+  const uint32_t exported_flags = driver->mapping_flags_for_handle(alloc.handle);
+  EXPECT_NE(exported_flags & KFD_IOC_ALLOC_MEM_FLAGS_COHERENT, 0u);
+  constexpr uint64_t kImportVa = 0x600000000ull;
+  ASSERT_TRUE(driver->gem_va_map(kImportVa, reserved, kBytes, exported_flags));
+  EXPECT_EQ(access->query_mtype(kImportVa), rocjitsu::amdgpu::Mtype::CC);
+  EXPECT_TRUE(driver->gem_va_unmap(kImportVa, kBytes));
+  EXPECT_EQ(::close(exported.dmabuf_fd), 0);
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = alloc.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(driver->close(), 0);
+  EXPECT_EQ(::munmap(reserved, kBytes), 0);
+}
+
+TEST_F(SimulatedKfdTest, DoorbellExportIsRejected) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_GE(driver->open(), 0);
+  kfd_ioctl_alloc_memory_of_gpu_args doorbell{};
+  doorbell.size = 4096;
+  doorbell.gpu_id = driver->gpu_id();
+  doorbell.flags = KFD_IOC_ALLOC_MEM_FLAGS_DOORBELL | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &doorbell), 0);
+  kfd_ioctl_export_dmabuf_args exported{};
+  exported.handle = doorbell.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_EXPORT_DMABUF, &exported), -EINVAL);
+  kfd_ioctl_ipc_export_handle_args ipc{};
+  ipc.handle = doorbell.handle;
+  ipc.gpu_id = driver->gpu_id();
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &ipc), -EINVAL);
+
+  kfd_ioctl_free_memory_of_gpu_args free_args{};
+  free_args.handle = doorbell.handle;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  EXPECT_EQ(driver->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, ImportedDmabufReexportKeepsTheOriginalBacking) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_GE(driver->open(), 0);
+  kfd_ioctl_export_dmabuf_args exported{};
+  kfd_ioctl_ipc_export_handle_args ipc{};
+  ipc.gpu_id = driver->gpu_id();
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.size = 4096;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_VRAM | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  exported.handle = alloc.handle;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_EXPORT_DMABUF, &exported), 0);
+  kfd_ioctl_import_dmabuf_args imported{};
+  imported.dmabuf_fd = exported.dmabuf_fd;
+  imported.gpu_id = driver->gpu_id();
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_IMPORT_DMABUF, &imported), 0);
+  kfd_ioctl_export_dmabuf_args reexported{};
+  reexported.handle = imported.handle;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_EXPORT_DMABUF, &reexported), 0);
+  struct stat original {
+  }, again{};
+  ASSERT_EQ(::fstat(exported.dmabuf_fd, &original), 0);
+  ASSERT_EQ(::fstat(reexported.dmabuf_fd, &again), 0);
+  EXPECT_EQ(again.st_dev, original.st_dev);
+  EXPECT_EQ(again.st_ino, original.st_ino);
+  void *source = ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, exported.dmabuf_fd, 0);
+  void *view = ::mmap(nullptr, 4096, PROT_READ | PROT_WRITE, MAP_SHARED, reexported.dmabuf_fd, 0);
+  ASSERT_NE(source, MAP_FAILED);
+  ASSERT_NE(view, MAP_FAILED);
+  *static_cast<uint32_t *>(source) = 0xaaaa;
+  EXPECT_EQ(*static_cast<uint32_t *>(view), 0xaaaau);
+  *static_cast<uint32_t *>(view) = 0xbbbb;
+  EXPECT_EQ(*static_cast<uint32_t *>(source), 0xbbbbu);
+  EXPECT_EQ(::munmap(source, 4096), 0);
+  EXPECT_EQ(::munmap(view, 4096), 0);
+  EXPECT_EQ(::close(reexported.dmabuf_fd), 0);
+  ipc.handle = imported.handle;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_IPC_EXPORT_HANDLE, &ipc), 0);
+  kfd_ioctl_ipc_import_handle_args ipc_import{};
+  std::memcpy(ipc_import.share_handle, ipc.share_handle, sizeof(ipc.share_handle));
+  ipc_import.gpu_id = driver->gpu_id();
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_IPC_IMPORT_HANDLE, &ipc_import), 0);
+  EXPECT_EQ(::close(exported.dmabuf_fd), 0);
+  for (uint64_t handle : {ipc_import.handle, imported.handle, alloc.handle}) {
+    kfd_ioctl_free_memory_of_gpu_args free_args{};
+    free_args.handle = handle;
+    EXPECT_EQ(driver->ioctl(AMDKFD_IOC_FREE_MEMORY_OF_GPU, &free_args), 0);
+  }
+  EXPECT_EQ(driver->close(), 0);
+}
+
+TEST_F(SimulatedKfdTest, GwsAndDebuggerAdmissionAreMutuallyExclusiveOnGfx1100) {
+  const auto config_path =
+      (std::filesystem::path(CONFIG_PATH).parent_path() / "gfx1100_w7900.json").string();
+  auto t = create_test_vm(config_path);
+  auto *driver = t.driver();
+  ASSERT_GE(driver->open(), 0);
+  alignas(4096) std::array<uint8_t, 4096> ring{};
+  uint64_t read_pointer = 0, write_pointer = 0;
+  kfd_ioctl_create_queue_args queue{};
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = ring.size();
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  queue.gpu_id = driver->gpu_id();
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  kfd_ioctl_alloc_queue_gws_args grant{};
+  grant.queue_id = queue.queue_id;
+  grant.num_gws = 1;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_QUEUE_GWS, &grant), 0);
+  kfd_ioctl_dbg_trap_args debug{};
+  debug.pid = static_cast<uint32_t>(getpid());
+  debug.op = KFD_IOC_DBG_TRAP_ENABLE;
+  debug.enable.dbg_fd = notifier;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_DBG_TRAP, &debug), -EBUSY);
+  grant.num_gws = 0;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_QUEUE_GWS, &grant), 0);
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DBG_TRAP, &debug), 0);
+  grant.num_gws = 1;
+  grant.first_gws = 123;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_QUEUE_GWS, &grant), -EBUSY);
+  EXPECT_EQ(grant.first_gws, 123u);
+  debug.op = KFD_IOC_DBG_TRAP_DISABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DBG_TRAP, &debug), 0);
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_QUEUE_GWS, &grant), 0);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(driver->close(), 0);
+  ::close(notifier);
+}
+
+TEST_F(SimulatedKfdTest, GwsAndDebuggerCoexistOnGfx908) {
+  const auto config_path =
+      (std::filesystem::path(CONFIG_PATH).parent_path() / "gfx942_cdna3.json").string();
+  auto t = create_test_vm(config_path, 90008);
+  auto *driver = t.driver();
+  ASSERT_GE(driver->open(), 0);
+  alignas(4096) std::array<uint8_t, 4096> ring{};
+  uint64_t read_pointer = 0, write_pointer = 0;
+  kfd_ioctl_create_queue_args queue{};
+  queue.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+  queue.ring_size = ring.size();
+  queue.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+  queue.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+  queue.gpu_id = driver->gpu_id();
+  queue.queue_type = KFD_IOC_QUEUE_TYPE_COMPUTE_AQL;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &queue), 0);
+  const int notifier = eventfd(0, EFD_CLOEXEC | EFD_NONBLOCK);
+  ASSERT_GE(notifier, 0);
+  kfd_ioctl_alloc_queue_gws_args grant{};
+  grant.queue_id = queue.queue_id;
+  grant.num_gws = 1;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_QUEUE_GWS, &grant), 0);
+  kfd_ioctl_dbg_trap_args debug{};
+  debug.pid = static_cast<uint32_t>(getpid());
+  debug.op = KFD_IOC_DBG_TRAP_ENABLE;
+  debug.enable.dbg_fd = notifier;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DBG_TRAP, &debug), 0);
+  debug.op = KFD_IOC_DBG_TRAP_DISABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DBG_TRAP, &debug), 0);
+  debug.op = KFD_IOC_DBG_TRAP_ENABLE;
+  grant.num_gws = 0;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_QUEUE_GWS, &grant), 0);
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DBG_TRAP, &debug), 0);
+  grant.num_gws = 1;
+  grant.first_gws = 123;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_QUEUE_GWS, &grant), 0);
+  EXPECT_EQ(grant.first_gws, 0u);
+  debug.op = KFD_IOC_DBG_TRAP_DISABLE;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DBG_TRAP, &debug), 0);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = queue.queue_id;
+  EXPECT_EQ(driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  EXPECT_EQ(driver->close(), 0);
+  ::close(notifier);
+}
+
+TEST_F(SimulatedKfdTest, GwsAllocationValidatesAndReleasesQueueOwnership) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+  alignas(4096) std::array<uint8_t, 4096> ring{};
+  uint64_t read_pointer = 0;
+  uint64_t write_pointer = 0;
+  auto create = [&](uint32_t type) {
+    kfd_ioctl_create_queue_args args{};
+    args.ring_base_address = reinterpret_cast<uint64_t>(ring.data());
+    args.ring_size = ring.size();
+    args.read_pointer_address = reinterpret_cast<uint64_t>(&read_pointer);
+    args.write_pointer_address = reinterpret_cast<uint64_t>(&write_pointer);
+    args.gpu_id = driver->gpu_id();
+    args.queue_type = type;
+    EXPECT_EQ(driver->ioctl(AMDKFD_IOC_CREATE_QUEUE, &args), 0);
+    return args.queue_id;
+  };
+  const auto first = create(KFD_IOC_QUEUE_TYPE_COMPUTE_AQL);
+  const auto second = create(KFD_IOC_QUEUE_TYPE_COMPUTE);
+  const auto sdma = create(KFD_IOC_QUEUE_TYPE_SDMA);
+  auto grant = [&](uint32_t queue, uint32_t count, int expected) {
+    kfd_ioctl_alloc_queue_gws_args args{};
+    args.queue_id = queue;
+    args.num_gws = count;
+    args.first_gws = 123;
+    EXPECT_EQ(driver->ioctl(AMDKFD_IOC_ALLOC_QUEUE_GWS, &args), expected);
+    EXPECT_EQ(args.first_gws, queue == ~uint32_t{0} || queue == sdma ||
+                                      (queue == second && count == 1 && expected == -EINVAL)
+                                  ? 123u
+                                  : 0u);
+  };
+  grant(~uint32_t{0}, 1, -EINVAL);
+  grant(sdma, 1, -EINVAL);
+  grant(first, 65, 0);
+  grant(first, 0, 0);
+  grant(first, 0, -EINVAL);
+  grant(first, 1, 0);
+  grant(first, 64, -EBUSY);
+  grant(second, 1, -EBUSY);
+  grant(second, 0, -EINVAL);
+  grant(first, 0, 0);
+  grant(second, 64, 0);
+  kfd_ioctl_destroy_queue_args destroy{};
+  destroy.queue_id = second;
+  ASSERT_EQ(driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  grant(second, 1, -EINVAL);
+  grant(first, 64, 0);
+  grant(first, 0, 0);
+  for (auto queue : {first, sdma}) {
+    destroy.queue_id = queue;
+    EXPECT_EQ(driver->ioctl(AMDKFD_IOC_DESTROY_QUEUE, &destroy), 0);
+  }
+  EXPECT_EQ(driver->close(), 0);
 }
 
 TEST_F(SimulatedKfdTest, DoorbellClientRemapKeepsDriverAliasStableWhenOffsetRecycles) {
@@ -338,6 +634,39 @@ TEST_F(SimulatedKfdTest, AllocationMunmapWaitsForInFlightHostAccesses) {
   EXPECT_TRUE(completed.load(std::memory_order_acquire));
 
   EXPECT_EQ(driver->close(), 0);
+}
+
+/// @brief Final close must not unmap a caller-reserved range the caller still holds.
+/// @details A local allocation at a caller-provided VA is memfd-backed, and the
+/// MAP_FIXED mmap that follows installs the memfd view over the caller's own
+/// mapping. That range remains the caller's, so teardown must leave it mapped.
+TEST_F(SimulatedKfdTest, FinalCloseLeavesCallerReservedMappingMapped) {
+  auto t = create_test_vm();
+  auto *driver = t.driver();
+  ASSERT_NE(driver, nullptr);
+  ASSERT_GE(driver->open(), 0);
+
+  const size_t page_size = static_cast<size_t>(::sysconf(_SC_PAGESIZE));
+  void *target =
+      ::mmap(nullptr, page_size, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  ASSERT_NE(target, MAP_FAILED);
+
+  kfd_ioctl_alloc_memory_of_gpu_args alloc{};
+  alloc.va_addr = reinterpret_cast<uint64_t>(target);
+  alloc.size = page_size;
+  alloc.gpu_id = driver->gpu_id();
+  alloc.flags = KFD_IOC_ALLOC_MEM_FLAGS_GTT | KFD_IOC_ALLOC_MEM_FLAGS_WRITABLE;
+  ASSERT_EQ(driver->ioctl(driver->local_process_id(), AMDKFD_IOC_ALLOC_MEMORY_OF_GPU, &alloc), 0);
+  ASSERT_EQ(driver->mmap(target, page_size, PROT_READ | PROT_WRITE, MAP_SHARED | MAP_FIXED,
+                         static_cast<off_t>(alloc.mmap_offset)),
+            target);
+
+  EXPECT_EQ(driver->close(), 0);
+
+  unsigned char resident = 0;
+  EXPECT_EQ(::mincore(target, page_size, &resident), 0)
+      << "final close unmapped a range the caller still owns";
+  ::munmap(target, page_size);
 }
 
 /// @brief A doorbell MAP_FIXED must not replace a page an access is holding.

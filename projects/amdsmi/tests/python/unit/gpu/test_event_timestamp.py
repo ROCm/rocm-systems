@@ -4,6 +4,7 @@
 
 """Hardware-free regression tests for event receipt timestamps."""
 
+import contextlib
 import ctypes
 import importlib.util
 import os
@@ -156,7 +157,7 @@ class TestEventTimestamp(unittest.TestCase):
             "        PROCESS: started\n",
         )
 
-    def test_multiple_gpus_use_one_event_reader_thread(self):
+    def test_multiple_gpus_read_through_one_shared_thread(self):
         if self.event_cls is None:
             self.skipTest("event.py not found in source or install")
 
@@ -215,16 +216,20 @@ class TestEventTimestamp(unittest.TestCase):
         command.logger = FakeLogger()
         args = SimpleNamespace(gpu=None)
 
-        with (
-            mock.patch("event_under_test.threading.Thread", FakeThread),
-            mock.patch("event_under_test.amdsmi_interface.AmdSmiEventReader", FakeReader),
-            mock.patch("builtins.input", return_value="q"),
-            mock.patch("builtins.print"),
-        ):
+        with contextlib.ExitStack() as stack:
+            stack.enter_context(mock.patch("event_under_test.threading.Thread", FakeThread))
+            stack.enter_context(
+                mock.patch("event_under_test.amdsmi_interface.AmdSmiEventReader", FakeReader)
+            )
+            stack.enter_context(mock.patch("builtins.input", return_value="q"))
+            stack.enter_context(mock.patch("builtins.print"))
             command.event(args)
 
+        # event() opens one AmdSmiEventReader per device (_open_listeners) but
+        # reads through a single thread given the whole listener list --
+        # _event_thread itself indexes listeners[0] (a global poll).
         self.assertEqual(len(threads), 1)
-        self.assertEqual(threads[0].args[1], command.device_handles)
+        self.assertEqual(threads[0].args[1], readers)
         self.assertEqual([reader.read_count for reader in readers], [1, 0])
         self.assertEqual(
             [event["event"] for event in stored_events], ["PROCESS_START", "PROCESS_END"]
