@@ -968,9 +968,7 @@ void check_block_transfer_masks(rj_code_arch_t arch, bool general_completion = f
         }
         const uint32_t vb = wf->vgpr_alloc().base;
         auto address = [&](uint32_t lane, uint32_t word) {
-          return base + (scratch && arch == ROCJITSU_CODE_ARCH_CDNA5
-                             ? (word * wf->wf_size() + lane) * 4
-                             : lane * 128 + word * 4);
+          return base + (scratch ? (word * wf->wf_size() + lane) * 4 : lane * 128 + word * 4);
         };
         auto value = [](uint32_t lane, uint32_t word) { return 0xabc00000u + lane * 32 + word; };
         for (uint32_t lane = 0; lane < 3; ++lane) {
@@ -1081,9 +1079,7 @@ template <typename Isa> void check_block_transfer_ownership(rj_code_arch_t arch)
           wave->set_scratch_lane_size(128);
         }
         const auto address = [&](uint32_t lane, uint32_t word) {
-          return base + (scratch && arch == ROCJITSU_CODE_ARCH_CDNA5
-                             ? (word * wave->wf_size() + lane) * 4
-                             : lane * 128 + word * 4);
+          return base + (scratch ? (word * wave->wf_size() + lane) * 4 : lane * 128 + word * 4);
         };
         const auto value = [](uint32_t lane, uint32_t word) {
           return 0xabc00000u + lane * 32 + word;
