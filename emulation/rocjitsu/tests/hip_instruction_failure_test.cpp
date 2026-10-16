@@ -27,6 +27,31 @@ bool native_instruction_failure(int status) {
   return ::testing::ExitedWithCode(EXIT_FAILURE)(status) ||
          ::testing::KilledBySignal(SIGABRT)(status);
 }
+
+struct DaemonFailureDiagnostic {
+  using is_gtest_matcher = void;
+  const int &status;
+  FailureKind kind;
+
+  bool MatchAndExplain(const std::string &output, ::testing::MatchResultListener *listener) const {
+    // Match the diagnostic to the actual exit, so an unrelated abort cannot
+    // pass merely because the disconnect monitor also printed its message.
+    const char *pattern = "rocjitsu: daemon connection lost";
+    if (::testing::KilledBySignal(SIGABRT)(status))
+      pattern = kind == FailureKind::Decode ? "Queue error: HSA_STATUS_ERROR_ILLEGAL_INSTRUCTION:"
+                                            : "Queue error: HSA_STATUS_ERROR_EXCEPTION:";
+    const ::testing::Matcher<const std::string &> diagnostic = ::testing::ContainsRegex(pattern);
+    return diagnostic.MatchAndExplain(output, listener);
+  }
+
+  void DescribeTo(std::ostream *stream) const {
+    *stream << "contains the daemon disconnect or HIP queue-error diagnostic matching its exit";
+  }
+
+  void DescribeNegationTo(std::ostream *stream) const {
+    *stream << "does not contain the daemon diagnostic matching its exit";
+  }
+};
 } // namespace
 
 __global__ void unsupported_instruction() {
@@ -67,18 +92,28 @@ TEST(HipInstructionFailureTest, DecodeFailureExitsWithFailure) {
               "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000");
 }
 
-// The outer DaemonTest fixture owns the daemon. Its diagnostics stay in that
-// process; the client reports loss of the connection after the failed run.
+namespace {
+void expect_daemon_instruction_failure(FailureKind kind) {
+  // The outer fixture checks the daemon's own failure exit. Its instruction
+  // diagnostic stays there; this client can abort from HIP before disconnect.
+  int status = 0;
+  const auto fatal_exit = [&](int actual_status) {
+    status = actual_status;
+    return native_instruction_failure(status);
+  };
+  const ::testing::Matcher<const std::string &> diagnostic = DaemonFailureDiagnostic{status, kind};
+  EXPECT_EXIT(wait_for_instruction_failure(kind), fatal_exit, diagnostic);
+}
+} // namespace
+
 TEST(HipDaemonInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Unsupported),
-              ::testing::ExitedWithCode(EXIT_FAILURE), "rocjitsu: daemon connection lost");
+  expect_daemon_instruction_failure(FailureKind::Unsupported);
 }
 
 TEST(HipDaemonInstructionFailureTest, DecodeFailureExitsWithFailure) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Decode),
-              ::testing::ExitedWithCode(EXIT_FAILURE), "rocjitsu: daemon connection lost");
+  expect_daemon_instruction_failure(FailureKind::Decode);
 }
 
 int main(int argc, char **argv) {
