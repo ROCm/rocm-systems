@@ -23,8 +23,10 @@ Usage from GitHub Actions (on ruby-linux-slurm-scale-runner):
 from __future__ import annotations
 
 import argparse
+import copy
 import csv
 import fcntl
+import filecmp
 import hashlib
 import json
 import logging
@@ -1465,6 +1467,222 @@ def prepare_phase_dir(work_dir: Path, phase: str) -> Path:
     return run_dir
 
 
+# Uploaded as its own artifact so a night's result can be rerun by hand: the
+# phase manifests alone name a local-only image whose build context lives in
+# WORK_DIR, which the cleanup step deletes.
+REPRO_DIR = "repro"
+REPRO_MANIFESTS = {
+    CANDIDATE: "manifest.repro.json",
+    BASELINE: "manifest.baseline.repro.json",
+}
+# TheRock's bucket for runs of a ROCm/* repo that are not from a fork.
+THEROCK_ARTIFACT_BUCKET = "therock-ci-artifacts-external"
+
+
+def local_repo_digest(image: str) -> str:
+    """*image* pinned by digest as the local daemon knows it, or "" if it cannot tell.
+
+    Never pulls: this only records what the head node built from.
+    """
+    if "@sha256:" in image:
+        return image
+    result = subprocess.run(
+        ["docker", "image", "inspect", "--format", "{{index .RepoDigests 0}}", image],
+        capture_output=True, text=True,
+    )
+    digest = result.stdout.strip()
+    return digest if result.returncode == 0 and "@sha256:" in digest else ""
+
+
+def repro_manifest(manifest: dict, work_dir: Path) -> dict:
+    """*manifest* with its build paths made relative to the bundle root.
+
+    The CI manifest names the Dockerfile by an absolute path under WORK_DIR and
+    gives no build context, so madengine falls back to ``./docker`` whenever the
+    invocation directory has one -- which a MAD ``MODEL_DIR`` checkout does, and
+    the build then fails on ``COPY rccl_libs/``. In the bundle both point into its
+    own ``overlay_ctx/``; madengine resolves them against the directory it runs
+    from, and on every node against the node-local copy of that directory.
+    """
+    out = copy.deepcopy(manifest)
+    ctx = work_dir / OVERLAY_CTX
+    for key, image in out.get("built_images", {}).items():
+        dockerfile = image.get("dockerfile")
+        if not dockerfile:
+            continue
+        try:
+            rel = Path(dockerfile).relative_to(ctx)
+        except ValueError:
+            continue
+        image["dockerfile"] = f"{OVERLAY_CTX}/{rel.as_posix()}"
+        model = out.get("built_models", {}).get(key)
+        if model is not None:
+            model["dockercontext"] = OVERLAY_CTX
+    return out
+
+
+def copy_overlay_ctx(src: Path, dst: Path) -> None:
+    """Copy the build context without the duplicate librccl names.
+
+    build_rccl_overlay_image() stages every ``librccl*`` the artifact carries,
+    but each recipe reads only ``rccl_libs/librccl.so`` and ``rccl_libs/.kpack``,
+    and the other names are byte-identical copies of the same library.
+    """
+    lib = src / "rccl_libs" / "librccl.so"
+
+    def ignore(dirpath: str, names: list[str]) -> list[str]:
+        if Path(dirpath) != lib.parent or not lib.is_file():
+            return []
+        return [
+            n for n in names
+            if n.startswith("librccl") and n != lib.name
+            and (lib.parent / n).is_file()
+            and filecmp.cmp(lib, lib.parent / n, shallow=False)
+        ]
+
+    shutil.copytree(src, dst, symlinks=True, ignore=ignore)
+
+
+def repro_env(
+    workload_name: str,
+    workload_config: dict,
+    cluster_config: dict,
+    nodes: int,
+    rccl_fingerprint: dict,
+    images: dict[str, str],
+    base_digest: str,
+    env: dict,
+) -> dict[str, str]:
+    """Provenance of this run, plus the cluster setting the manifest cannot carry."""
+    repo = env.get("GITHUB_REPOSITORY", "")
+    run_id = env.get("GITHUB_RUN_ID", "")
+    artifact_run_id = env.get("ARTIFACT_RUN_ID", "") or run_id
+    s3_prefix = (
+        f"{repo.replace('/', '-')}/{artifact_run_id}-linux/"
+        if repo and artifact_run_id else ""
+    )
+    family = workload_config.get("family", "megatron")
+    values = {
+        "WORKLOAD": workload_name,
+        # REPRO_*, not SLURM_*: srun reads SLURM_PARTITION and friends as input.
+        "REPRO_NODES": str(nodes),
+        "CI_RUN_URL": (
+            f"{env.get('GITHUB_SERVER_URL', 'https://github.com')}/{repo}/actions/runs/{run_id}"
+            if repo and run_id else ""
+        ),
+        "CI_RUN_ID": run_id,
+        "CI_RUN_ATTEMPT": env.get("GITHUB_RUN_ATTEMPT", ""),
+        "CI_SHA": env.get("GITHUB_SHA", ""),
+        "THEROCK_ARTIFACT_RUN_ID": artifact_run_id,
+        # Provenance only: the library itself is in overlay_ctx/rccl_libs.
+        "RCCL_ARTIFACTS_S3": f"s3://{THEROCK_ARTIFACT_BUCKET}/{s3_prefix}" if s3_prefix else "",
+        "RCCL_ARTIFACTS_URL": (
+            f"https://{THEROCK_ARTIFACT_BUCKET}.s3.amazonaws.com/{s3_prefix}" if s3_prefix else ""
+        ),
+        "RCCL_MD5": rccl_fingerprint.get("md5", ""),
+        "RCCL_VERSION": rccl_fingerprint.get("version", ""),
+        "CANDIDATE_IMAGE": images.get(CANDIDATE, ""),
+        "BASELINE_IMAGE": images.get(BASELINE, ""),
+        "BASE_IMAGE": workload_config["base_image"],
+        "BASE_DIGEST": base_digest,
+        "MADENGINE_REPO": MADENGINE_REPO,
+        "MADENGINE_REF": MADENGINE_REF,
+        "MAD_REPO": MAD_REPO,
+        "MAD_BRANCH": MAD_BRANCH,
+        "MAD_REF": MAD_REF,
+        "PRIMUS_REF": PRIMUS_REF if family == "maxtext" else "",
+        "REPRO_PARTITION": cluster_config.get(
+            "slurm_partition", workload_config["slurm_partition"]
+        ),
+        "REPRO_TIME_LIMIT": workload_config["time_limit"],
+        # ruby's per-job /tmp is invisible to the Docker daemon; the workflow
+        # sets this, and a run by hand has to as well.
+        "SLURM_TMPDIR": env.get("SLURM_TMPDIR", ""),
+    }
+    return {k: v for k, v in values.items() if v}
+
+
+REPRO_README = """\
+# Reproduce `{WORKLOAD}` from CI run {CI_RUN_ID}
+
+{CI_RUN_URL}
+
+Everything the run needs is in this directory: the image's build context with
+the CI-built RCCL (`overlay_ctx/`), the MAD model scripts (`scripts/`), and one
+manifest per A/B phase with paths relative to this directory. `repro.env` holds
+the refs, image digests and cluster settings. The run's own numbers are in the
+`madengine-results-*` artifact of the same CI run.
+
+1. Unpack this directory on storage that every compute node sees, `cd` into it,
+   and `source repro.env`.
+2. In a Python 3.10+ environment the nodes can also see (conda on shared storage):
+   `pip install "git+$MADENGINE_REPO@$MADENGINE_REF"`
+3. `export MAD_DOCKER_BUILDS=<shared dir>` and `chmod 0777` it: node 0 saves the
+   image there for the others through `sudo docker`, which a root-squashed NFS
+   maps to `nobody`.
+4. `salloc -p "$REPRO_PARTITION" -N "$REPRO_NODES" --exclusive -t "$REPRO_TIME_LIMIT"`, then inside it:
+   `madengine run --manifest-file manifest.repro.json --live-output`
+   madengine runs in place in the allocation; node 0 builds the image from
+   `overlay_ctx/` and the other nodes load it.
+
+- The baseline phase is `manifest.baseline.repro.json`. Run it from a second copy
+  of this directory: each phase writes `perf.csv` and `slurm_output/` to its cwd.
+- To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
+  `context.docker_env_vars` and `deployment_config.env_vars`.
+- `BASE_DIGEST` is the base the CI head node built from. The nodes build from
+  `BASE_IMAGE` by tag; if the base has moved since, the image differs.
+"""
+
+
+def write_repro_bundle(
+    work_dir: Path,
+    phase_dirs: dict[str, Path],
+    workload_name: str,
+    workload_config: dict,
+    cluster_config: dict,
+    nodes: int,
+    rccl_fingerprint: dict,
+    images: dict[str, str],
+    base_digest: str,
+    env: dict | None = None,
+) -> Path:
+    """Write ``WORK_DIR/repro``: what a rerun by hand needs once WORK_DIR is gone.
+
+    The CI manifests are left exactly as the run uses them; the bundle carries
+    rewritten copies.
+    """
+    bundle = work_dir / REPRO_DIR
+    if bundle.exists():
+        shutil.rmtree(bundle)
+    bundle.mkdir(parents=True)
+
+    ctx = work_dir / OVERLAY_CTX
+    if ctx.is_dir():
+        copy_overlay_ctx(ctx, bundle / OVERLAY_CTX)
+    if (work_dir / "scripts").is_dir():
+        shutil.copytree(work_dir / "scripts", bundle / "scripts", symlinks=True)
+
+    for phase, run_dir in phase_dirs.items():
+        manifest = json.loads((run_dir / "manifest.json").read_text())
+        (bundle / REPRO_MANIFESTS[phase]).write_text(
+            json.dumps(repro_manifest(manifest, work_dir), indent=2) + "\n"
+        )
+
+    values = repro_env(
+        workload_name, workload_config, cluster_config, nodes,
+        rccl_fingerprint, images, base_digest,
+        os.environ if env is None else env,
+    )
+    (bundle / "repro.env").write_text(
+        "# Source before running; see REPRO.md.\n"
+        + "".join(f"export {k}={shlex.quote(v)}\n" for k, v in values.items())
+    )
+    readme_values = {"CI_RUN_URL": "", "CI_RUN_ID": "(local run)", **values}
+    (bundle / "REPRO.md").write_text(REPRO_README.format(**readme_values))
+    log.info("Repro bundle written to: %s", bundle)
+    return bundle
+
+
 def run_ab_in_one_allocation(
     phases: list[tuple[str, Path]],
     work_dir: Path,
@@ -2228,6 +2446,19 @@ def main() -> None:
         phases.append((phase, run_dir))
 
     phase_dirs = dict(phases)
+
+    # Step 4b: before the run, so a failing night can be rerun by hand too. It
+    # only copies what the run already produced, and a failure here must not
+    # cost the gate its result.
+    try:
+        write_repro_bundle(
+            work_dir, phase_dirs, args.workload, workload_config, cluster_config,
+            args.nodes, rccl_fingerprint,
+            images={BASELINE: baseline_image, CANDIDATE: overlay_image},
+            base_digest=base_ref or local_repo_digest(workload_config["base_image"]),
+        )
+    except Exception:
+        log.exception("Could not write the repro bundle; continuing without it")
 
     # Step 5: Run both phases on the same nodes, in one allocation
     allocation = run_ab_in_one_allocation(
