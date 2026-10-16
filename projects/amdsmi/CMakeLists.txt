@@ -7,33 +7,13 @@
 cmake_minimum_required(VERSION 3.20)
 
 #
-# --- Compiler detection (Clang family only) ---
-# Default: amdclang++ > clang++ (strict ROCm vs system separation)
-# GCC is not auto-selected. To build with GCC, use a toolchain file:
-#   cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake
-#
-# ROCm discovery:
-#   Uses hipconfig --path for tool-based discovery (per TheRock #3976)
-#   No hardcoded paths or ROCM_PATH fallback
-#
-# If ROCm installed (hipconfig found):
-#   Searches ONLY in ROCm paths (NO system PATH fallback):
-#     1. <rocm-path>/lib/llvm/bin/amdclang++  (current standard)
-#     2. <rocm-path>/llvm/bin/amdclang++      (legacy)
-#     3. <rocm-path>/lib/llvm/bin/clang++     (ROCm clang++)
-#     4. <rocm-path>/llvm/bin/clang++         (ROCm clang++ legacy)
-#
-# If ROCm NOT installed (hipconfig not found):
-#   Searches ONLY in system PATH:
-#     - /usr/bin/clang++ (or wherever system clang++ is)
-#
-# Build fails if no suitable compiler found.
-#
-# Skipped when the compiler is already chosen: a toolchain file,
-# CMAKE_<LANG>_COMPILER, or the CC/CXX environment variables.
-#
-# See: cmake/toolchains/amdsmi-gcc-toolchain.cmake
-# See also: https://github.com/ROCm/TheRock/issues/3976
+# --- Compiler selection ---
+# Prefer amdclang++, then clang++. When hipconfig finds ROCm, only its LLVM
+# directories are searched (no fixed /opt/rocm); otherwise PATH is. GCC is
+# opt-in through cmake/toolchains/amdsmi-gcc-toolchain.cmake, CC/CXX or
+# CMAKE_<LANG>_COMPILER, any of which skips this block.
+# Keep clang_toolchain_present() in tests/amdsmi_build/run_amdsmi_build.py in
+# sync. See https://github.com/ROCm/TheRock/issues/3976
 #
 if(
     NOT CMAKE_TOOLCHAIN_FILE
@@ -42,9 +22,7 @@ if(
     AND "$ENV{CXX}" STREQUAL ""
     AND "$ENV{CC}" STREQUAL ""
 )
-    # Determine ROCm installation path using tool-based discovery
-    # Uses hipconfig --path (per https://github.com/ROCm/TheRock/issues/3976)
-    set(ROCM_DIR "")
+    set(_AMDSMI_ROCM_PATH "")
 
     find_program(HIPCONFIG_EXECUTABLE hipconfig)
     if(HIPCONFIG_EXECUTABLE)
@@ -55,22 +33,20 @@ if(
             ERROR_QUIET
         )
         if(HIPCONFIG_PATH)
-            set(ROCM_DIR "${HIPCONFIG_PATH}")
-            message(STATUS "Found ROCm via hipconfig: ${ROCM_DIR}")
+            set(_AMDSMI_ROCM_PATH "${HIPCONFIG_PATH}")
+            message(STATUS "Found ROCm via hipconfig: ${_AMDSMI_ROCM_PATH}")
         endif()
     endif()
 
-    # Search for amdclang++ in ROCm installation
     # Prefer lib/llvm/bin (current) over llvm/bin (legacy)
     set(_AMDCLANG_HINTS "")
-    if(ROCM_DIR)
-        list(APPEND _AMDCLANG_HINTS "${ROCM_DIR}/lib/llvm/bin" "${ROCM_DIR}/llvm/bin")
+    if(_AMDSMI_ROCM_PATH)
+        list(APPEND _AMDCLANG_HINTS "${_AMDSMI_ROCM_PATH}/lib/llvm/bin" "${_AMDSMI_ROCM_PATH}/llvm/bin")
     endif()
 
     find_program(AMDCLANG_CXX_COMPILER NAMES amdclang++ HINTS ${_AMDCLANG_HINTS} NO_DEFAULT_PATH)
     find_program(AMDCLANG_C_COMPILER NAMES amdclang HINTS ${_AMDCLANG_HINTS} NO_DEFAULT_PATH)
 
-    # Helper function to validate compiler executability
     function(validate_compiler COMPILER_PATH RESULT_VAR)
         execute_process(COMMAND "${COMPILER_PATH}" --version RESULT_VARIABLE TEST_RESULT OUTPUT_QUIET ERROR_QUIET)
         if(TEST_RESULT EQUAL 0)
@@ -80,7 +56,6 @@ if(
         endif()
     endfunction()
 
-    # Try compilers in priority order: amdclang++ > clang++
     if(AMDCLANG_CXX_COMPILER AND AMDCLANG_C_COMPILER)
         validate_compiler("${AMDCLANG_CXX_COMPILER}" AMDCLANG_CXX_VALID)
         validate_compiler("${AMDCLANG_C_COMPILER}" AMDCLANG_C_VALID)
@@ -99,7 +74,7 @@ if(
         # Fall back to clang++.
         # ROCm installed -> ROCm paths only (no system fallback).
         # ROCm absent     -> system PATH.
-        if(ROCM_DIR)
+        if(_AMDSMI_ROCM_PATH)
             find_program(CLANG_CXX_COMPILER NAMES clang++ HINTS ${_AMDCLANG_HINTS} NO_DEFAULT_PATH)
             find_program(CLANG_C_COMPILER NAMES clang HINTS ${_AMDCLANG_HINTS} NO_DEFAULT_PATH)
         else()
@@ -120,7 +95,7 @@ if(
         if(CLANG_CXX_COMPILER AND CLANG_C_COMPILER)
             set(CMAKE_CXX_COMPILER "${CLANG_CXX_COMPILER}" CACHE FILEPATH "C++ compiler")
             set(CMAKE_C_COMPILER "${CLANG_C_COMPILER}" CACHE FILEPATH "C compiler")
-            if(ROCM_DIR)
+            if(_AMDSMI_ROCM_PATH)
                 message(STATUS "Using ROCm Clang compiler: ${CLANG_CXX_COMPILER}")
             else()
                 message(STATUS "Using system Clang compiler: ${CLANG_CXX_COMPILER}")
@@ -128,8 +103,8 @@ if(
         else()
             # No clang++ found in the searched location(s).
             # ROCm installed -> only ROCm dirs were searched, so system clang won't help.
-            if(ROCM_DIR)
-                set(_COMPILER_FIX_HINT "  1. Install ROCm's LLVM/clang component under ${ROCM_DIR}\n")
+            if(_AMDSMI_ROCM_PATH)
+                set(_COMPILER_FIX_HINT "  1. Install ROCm's LLVM/clang component under ${_AMDSMI_ROCM_PATH}\n")
             else()
                 set(_COMPILER_FIX_HINT
                     "  1. Install clang: sudo apt install clang (Ubuntu/Debian)\n"
@@ -142,7 +117,7 @@ if(
                 "\n"
                 "Current search status:\n"
                 "  hipconfig found: ${HIPCONFIG_EXECUTABLE}\n"
-                "  ROCM_DIR: ${ROCM_DIR}\n"
+                "  ROCm path: ${_AMDSMI_ROCM_PATH}\n"
                 "  ROCm search paths: ${_AMDCLANG_HINTS}\n"
                 "\n"
                 "To fix this:\n"
@@ -152,7 +127,9 @@ if(
                 "  - To build with GCC, use toolchain file:\n"
                 "      cmake .. -DCMAKE_TOOLCHAIN_FILE=../cmake/toolchains/amdsmi-gcc-toolchain.cmake\n"
                 "  - Or explicitly specify compiler:\n"
-                "      cmake .. -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc"
+                "      cmake .. -DCMAKE_CXX_COMPILER=g++ -DCMAKE_C_COMPILER=gcc\n"
+                "  - Or set CC/CXX for a new build directory:\n"
+                "      CC=gcc CXX=g++ cmake .."
             )
         endif()
     endif()
