@@ -183,12 +183,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **`amdsmi_get_gpu_fabric_info()` reports an over-length accelerator list as absent instead of truncating it**.  
   - `vpod_active_accelerators` and `local_accelerators` previously kept as many IDs as the array holds and dropped the rest. Neither field carries a count that covers the drop, so a truncated list was indistinguishable from a complete one. A list longer than the array now leaves the field at its sentinel with the corresponding `vpod_mask` / `ppod_mask` bit clear.
 
-- **Repeated `amd-smi` device options add to the selection, and each device is selected once**.  
-  - Applies to `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch`. `--vf` on virtualization hosts still uses only its last value.
-  - A later option no longer narrows an earlier one. For example, `amd-smi reset --gpureset -g all -g 0` now resets every GPU, where it previously reset only GPU 0.
-  - A device listed more than once is selected once. For example, `-g 0 0` previously ran the command on GPU 0 twice.
-  - Devices from repeated options keep the order in which they were first selected, so `-g 2 -g all` reports GPU 2 first.
-  - Single-value options in `amd-smi set` still use their last value, which now applies to every selected GPU. For example, `amd-smi set -g 0 -M NPS1 -g 1 -M NPS2` sets both GPUs to NPS2, where it previously set only GPU 1.
+- **Repeated `amd-smi` device options never narrow the selection; each device is selected once**.  
+  - Applies to `--gpu`, `--cpu`, `--core`, `--nic`, and `--switch`, in first-selected order. `--vf` and single-value settings still use their last value.
+
+  | Command | Before | Now |
+  | --- | --- | --- |
+  | `amd-smi reset --gpureset -g all -g 0` | Resets GPU 0 | Resets every GPU |
+  | `amd-smi list -g 0 0` | Lists GPU 0 twice | Lists GPU 0 once |
+  | `amd-smi list -g 2 -g all` | All GPUs, device order | All GPUs, GPU 2 first |
+  | `amd-smi set -g 0 -M NPS1 -g 1 -M NPS2` | Sets GPU 1 to NPS2 | Sets GPUs 0 and 1 to NPS2 |
 
 ### Removed
 

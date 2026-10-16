@@ -2,11 +2,7 @@
 # Copyright Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Unit tests for repeated device selections and repeated ``set`` values.
-
-Drives the real parser and ``set`` handler with library initialization stubbed
-and every device call mocked, so it runs without GPUs.
-"""
+"""Hardware-free tests for repeated device selections and single-value setters."""
 
 import inspect
 import os
