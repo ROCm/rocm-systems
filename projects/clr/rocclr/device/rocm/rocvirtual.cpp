@@ -5413,7 +5413,12 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
   // Wait without the execution() lock. The marker holds a reference to the signal,
   // so the tracker can't reuse it in the meantime
   constexpr bool kWaitOnly = true;
-  Barriers().CpuWaitForSignal(signal, kWaitOnly);
+  if (!Barriers().CpuWaitForSignal(signal, kWaitOnly)) {
+    // The GPU didn't complete the signal. Don't wait again under the lock and don't release the
+    // queue states, since the work may still be running. Complete the batch as before
+    updateCommandsState(cmd.GetBatchHead());
+    return;
+  }
 
   {
     std::scoped_lock lock(execution());
@@ -5425,8 +5430,10 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
       ResetQueueStates();
     }
   }
-  // The batch belongs to the marker only, so completing it (callbacks, release) needs no lock.
-  // The signal timing is already processed above
+  // Complete the batch without the lock: it belongs to the marker only, and the user callbacks
+  // it runs must not block the other threads submitting to this queue. It uses no VirtualGPU or
+  // tracker state, and the commands' Timestamps serialize with the tracker the same way as in
+  // HsaAmdSignalHandler. The signal timing is already processed above
   updateCommandsState(cmd.GetBatchHead());
 }
 
