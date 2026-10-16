@@ -835,7 +835,7 @@ template <typename T>
 __device__ void IPCContext::alltoall_wg(rocshmem_team_t team, T *dst,
                                      const T *src, int nelems) {
 #if defined(USE_SDMA)
-  if (sizeof(T) * nelems < 512 || ipcImpl_.sdmaImpl_.sdmaEnabled)
+  if (sizeof(T) * nelems < 512 || constmem.ipc_sdma_threshold != SDMA_THRESHOLD_DISABLED)
 #else
   if (sizeof(T) * nelems < 512)
 #endif

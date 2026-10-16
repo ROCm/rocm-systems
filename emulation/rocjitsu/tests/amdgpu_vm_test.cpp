@@ -7,11 +7,14 @@
 #include "throwing_instruction_test_util.h"
 
 #include "embedded_schema.h"
+#include "gws_test_encoding.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/kernel_descriptor_scan.h"
 #include "rocjitsu/code/kernel_symbol.h"
 #include "rocjitsu/config/config_loader.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/builders.h"
+#include "rocjitsu/isa/arch/amdgpu/generated/cdna3/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/cdna4/operand_types.h"
@@ -27,6 +30,7 @@
 #include "rocjitsu/vm/amdgpu/gpu_memory_access.h"
 #include "rocjitsu/vm/amdgpu/l1_scalar_cache.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/partitioning.h"
 #include "rocjitsu/vm/amdgpu/request_mtype_resolver.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 #include "rocjitsu/vm/amdgpu/wf_scheduler.h"
@@ -5224,6 +5228,80 @@ TEST_P(WavefrontSlotTest, WavefrontSlotsMaterializeOnDispatchAndRemainReusable) 
   EXPECT_EQ(rejected->wf_size(), wave_size);
 }
 
+TEST_P(WavefrontSlotTest, SparseSlotsExecuteAcrossRetirementWaitPauseAndReuse) {
+  const auto &[arch, wave_size] = GetParam();
+  constexpr uint32_t kSlots = 4;
+  VmFixture f(arch, 1, kSlots);
+  auto *cu = f.cu();
+  constexpr uint64_t kCode = 0x1000;
+  const std::array code = {
+      build_s_mov_b32(0, scalar_positive_inline_u32(1), cu->arch()),
+      build_s_mov_b32(0, scalar_positive_inline_u32(2), cu->arch()),
+      build_s_endpgm(cu->arch()),
+  };
+  f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kCode);
+
+  auto *high = cu->dispatch_wf_at(kSlots - 1, 7, kCode, 104, 256, wave_size);
+  auto *low = cu->dispatch_wf_at(0, 8, kCode, 104, 256, wave_size);
+  ASSERT_NE(high, nullptr);
+  ASSERT_NE(low, nullptr);
+  ASSERT_TRUE(cu->step());
+  EXPECT_EQ(high->pc, kCode + 4);
+  EXPECT_EQ(low->pc, kCode + 4);
+
+  // An active debugger stop must stay in the execution range. Retiring a
+  // higher slot must still leave the lower, paused slot available on resume.
+  low->set_debug_halted(true);
+  ASSERT_TRUE(cu->step());
+  EXPECT_EQ(low->pc, kCode + 4);
+  static_cast<void>(cu->step());
+  EXPECT_TRUE(high->is_halted());
+  EXPECT_FALSE(low->is_halted());
+  low->set_debug_halted(false);
+  low->set_state(amdgpu::WfState::WAITCNT);
+  ASSERT_TRUE(cu->step());
+  EXPECT_EQ(low->pc, kCode + 8);
+  EXPECT_EQ(low->debug_read_sgpr(0), 2u);
+  static_cast<void>(cu->step());
+  EXPECT_FALSE(cu->has_active_wfs());
+
+  // Both retained slot objects and an untouched hole must become executable
+  // after the CU has drained, including sparse placement above the old range.
+  high = cu->dispatch_wf_at(kSlots - 1, 9, kCode, 104, 256, wave_size);
+  auto *middle = cu->dispatch_wf_at(1, 10, kCode, 104, 256, wave_size);
+  ASSERT_NE(high, nullptr);
+  ASSERT_NE(middle, nullptr);
+  ASSERT_TRUE(cu->step());
+  EXPECT_EQ(high->debug_read_sgpr(0), 1u);
+  EXPECT_EQ(middle->debug_read_sgpr(0), 1u);
+}
+
+TEST_P(WavefrontSlotTest, LowerBarrierWaiterResumesAfterSparseHigherSlotRetires) {
+  const auto &[arch, wave_size] = GetParam();
+  constexpr uint32_t kSlots = 4;
+  VmFixture f(arch, 1, kSlots);
+  auto *cu = f.cu();
+  constexpr uint64_t kCode = 0x1000;
+  const std::array code = {
+      build_s_mov_b32(0, scalar_positive_inline_u32(7), cu->arch()),
+      build_s_endpgm(cu->arch()),
+  };
+  f.mem()->load_image(reinterpret_cast<const uint8_t *>(code.data()), sizeof(code), kCode);
+  auto *low = cu->dispatch_wf_at(0, 7, kCode, 104, 256, wave_size);
+  auto *high = cu->dispatch_wf_at(kSlots - 1, 7, kCode + 4, 104, 256, wave_size);
+  ASSERT_NE(low, nullptr);
+  ASSERT_NE(high, nullptr);
+  low->set_state(amdgpu::WfState::BARRIER);
+  ASSERT_TRUE(cu->step());
+  EXPECT_TRUE(high->is_halted());
+  EXPECT_EQ(low->state(), amdgpu::WfState::BARRIER);
+  ASSERT_TRUE(cu->step());
+  EXPECT_EQ(low->state(), amdgpu::WfState::RUNNING);
+  EXPECT_EQ(low->debug_read_sgpr(0), 7u);
+  static_cast<void>(cu->step());
+  EXPECT_FALSE(cu->has_active_wfs());
+}
+
 INSTANTIATE_TEST_SUITE_P(Cdna, WavefrontSlotTest,
                          ::testing::Values(WavefrontSlotTestParam{"cdna3", 64},
                                            WavefrontSlotTestParam{"cdna4", 64},
@@ -5881,6 +5959,87 @@ TEST(CommandProcessorAqlTest, CuIdleDoesNotExecutePm4AfterPeerGridFault) {
                 amdgpu::QueuePrepareCloseStatus::Ready)
           << "the canceled vendor stream must not pin a drained queue";
     }
+  }
+}
+
+TEST(CommandProcessorGwsPlacementTest, RetirementAdmitsPendingProducer) {
+  using namespace rocr::llvm::amdhsa;
+  for (const uint32_t threads : {1u, 2u}) {
+    SCOPED_TRACE(threads);
+    VmFixture f("cdna3", 1, 3, 64, 104, 256, 1, 100000);
+    f.cp()->set_dispatch_threads(threads);
+    const auto p = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaP),
+                                   {.gds = 1});
+    const auto v = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaV),
+                                   {.gds = 1});
+    // WG0 retires; WG1/2 wait; WG3 must enter the freed slot and signal both.
+    const uint32_t code[] = {
+        cdna3::build_sopc(cdna3::kSCmpEqU32Sopc, {.ssrc0 = 2, .ssrc1 = 128})[0],
+        cdna3::build_sopp(cdna3::kSCbranchScc1Sopp, {.simm16 = 9})[0],
+        cdna3::build_sopc(cdna3::kSCmpEqU32Sopc, {.ssrc0 = 2, .ssrc1 = 131})[0],
+        cdna3::build_sopp(cdna3::kSCbranchScc1Sopp, {.simm16 = 3})[0],
+        p[0],
+        p[1],
+        cdna3::build_sopp(cdna3::kSEndpgmSopp)[0],
+        v[0],
+        v[1],
+        v[0],
+        v[1],
+        cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]};
+    const auto ko = f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, 0, 0, false);
+    auto rs2 = f.mem()->read32(ko + offsetof(kernel_descriptor_t, compute_pgm_rsrc2));
+    AMDHSA_BITS_SET(rs2, COMPUTE_PGM_RSRC2_ENABLE_SGPR_WORKGROUP_ID_X, 1);
+    f.mem()->write32(ko + offsetof(kernel_descriptor_t, compute_pgm_rsrc2), rs2);
+    init_completion_signal(f.mem(), 0x7000);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(make_dispatch_packet(ko, 0x7000, 256, 64));
+    const auto exit = f.engine->run();
+    EXPECT_EQ(exit.code, 0);
+    EXPECT_FALSE(f.cu()->has_active_wfs());
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x7000), 0);
+    EXPECT_EQ(f.cp()->dispatched_workgroups(), 4u);
+  }
+}
+
+TEST(CommandProcessorGwsPlacementTest, UnsatisfiedGwsGridFailsWithoutCompletion) {
+  for (const uint32_t dispatch_threads : {1u, 2u}) {
+    SCOPED_TRACE(dispatch_threads == 1 ? "serial" : "pooled");
+    // Two wave slots, three single-wave workgroups: the third cannot be placed
+    // while the first two hold parked GWS waiters.
+    VmFixture f("cdna3", /*num_cus=*/1, /*num_wf_slots=*/2, /*lds_size_kb=*/64,
+                /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_shader_engines=*/1,
+                /*max_ticks=*/2'000'000);
+    f.cu()->set_gws_wait_limit(32);
+    std::atomic<uint64_t> exception_status = 0;
+    f.cu()->set_queue_exception_handler(
+        [&](uint32_t, uint32_t, uint64_t status, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+          exception_status.store(status);
+          return true;
+        });
+    if (dispatch_threads > 1)
+      f.cp()->set_dispatch_threads(dispatch_threads);
+
+    const std::array<uint32_t, 2> gws_p = cdna3::build_ds(
+        test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaP), {.gds = 1});
+    const uint32_t code[] = {gws_p[0], gws_p[1], cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]};
+    const uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), /*sgprs=*/104,
+                                       /*vgprs=*/256, /*user_sgprs=*/2,
+                                       /*group_segment_fixed_size=*/0, /*wgp_mode=*/false,
+                                       /*enable_vgpr_workitem_id=*/0,
+                                       /*extra_compute_pgm_rsrc1=*/0, /*wave32=*/false);
+
+    constexpr uint64_t kSignal = 0x7000;
+    init_completion_signal(f.mem(), kSignal);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(make_dispatch_packet(ko, kSignal, /*grid_size_x=*/192,
+                                      /*workgroup_size_x=*/64));
+
+    ASSERT_NO_THROW(f.engine->run());
+    EXPECT_FALSE(f.cu()->has_active_wfs());
+    EXPECT_EQ(completion_signal_value(f.mem(), kSignal), 1);
+    EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+    EXPECT_NE(f.engine->last_exit().code, 0);
+    EXPECT_EQ(exception_status.load(), amdgpu::kAqlQueueWaveAbort);
   }
 }
 
@@ -7685,7 +7844,7 @@ TEST(MubufLdsTest, LoadDwordLdsAppliesInstOffset) {
   for (std::string_view arch : {"cdna1", "cdna2", "cdna3", "cdna4"}) {
     SCOPED_TRACE(arch);
     VmFixture f(arch);
-    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code));
+    uint64_t ko = f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, kLdsBase + 2 * kRowBytes);
 
     for (uint32_t lane = 0; lane < 64; ++lane) {
       f.mem()->write32(kSrcAddr + lane * 4, 0xA0000000u | lane);
@@ -7804,7 +7963,8 @@ TEST(MubufRangeCheckTest, CdnaCountsSoffsetClampsPerDwordAndZeroFillsLds) {
     SCOPED_TRACE(arch);
     VmFixture f(arch);
     auto *snap = f.capture_halts();
-    uint64_t ko = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t));
+    uint64_t ko = f.write_kernel(0x1000, code.data(), code.size() * sizeof(uint32_t), 104, 256, 2,
+                                 2 * kLdsRow);
     for (uint32_t i = 0; i < 256; ++i)
       f.mem()->write32(kSrcAddr + i * 4, i);
     for (uint32_t i = 0; i < 512 + 16 * 64; i += 4)
@@ -9320,3 +9480,223 @@ TEST(Pm4DispatchTest, ScratchUsesTargetRegisterLayout) {
 }
 
 } // namespace
+
+TEST(AmdgpuVmTest, NativePm4ReportsFailureBeforeVmExit) {
+  for (uint32_t threads : {1u, 2u})
+    for (int variant : {0, 1, 2}) {
+      bool initialized = variant != 1;
+      SCOPED_TRACE(::testing::Message() << "threads=" << threads << " variant=" << variant);
+      VmFixture f("cdna3", 1, 8, 64, 104, 256, 1, 10000);
+      f.cp()->set_dispatch_threads(threads);
+      f.cu()->set_gws_wait_limit(8);
+      std::atomic<uint64_t> exception_status = 0;
+      f.cu()->set_queue_exception_handler(
+          [&](uint32_t, uint32_t, uint64_t s, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+            exception_status = s;
+            return true;
+          });
+      amdgpu::ComputeQueueConfig q;
+      q.queue_id = 71;
+      ASSERT_TRUE(f.cp()->register_drm_queue(std::move(q)));
+      constexpr uint64_t code = 0x8000, ib = 0x4000;
+      const auto op = cdna3::build_ds(
+          test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3,
+                           initialized ? test::GwsOp::kSemaP : test::GwsOp::kBarrier),
+          {.gds = 1});
+      size_t offset = 0;
+      if (variant == 2) {
+        auto v = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaV),
+                                 {.gds = 1});
+        f.mem()->write32(code, v[0]);
+        f.mem()->write32(code + 4, v[1]);
+        offset = 8;
+      }
+      f.mem()->write32(code + offset, op[0]);
+      f.mem()->write32(code + offset + 4, op[1]);
+      f.mem()->write32(code + offset + 8, SOPP_S_ENDPGM);
+      std::vector<uint32_t> words;
+      auto packet = [&](amdgpu::Pm4Opcode op, std::initializer_list<uint32_t> data) {
+        words.push_back(0xc0000000 | ((data.size() - 1) << 16) | (uint32_t(op) << 8));
+        words.insert(words.end(), data.begin(), data.end());
+      };
+      packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputeNumThreadX, 64, 1, 1});
+      packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmLo, uint32_t(code >> 8), 0});
+      packet(amdgpu::Pm4Opcode::SetShReg, {amdgpu::kPm4ComputePgmRsrc2, 0});
+      packet(amdgpu::Pm4Opcode::DispatchDirect, {1, 1, 1, 1});
+      packet(amdgpu::Pm4Opcode::Nop, {0});
+      for (size_t i = 0; i < words.size(); ++i)
+        f.mem()->write32(ib + i * 4, words[i]);
+      bool completed = false, succeeded = true;
+      amdgpu::Pm4Submission sub;
+      sub.buffers.push_back({ib, uint32_t(words.size())});
+      f.engine->register_as_primary();
+      sub.complete = [&](bool ok) {
+        completed = true;
+        succeeded = ok;
+        f.engine->primary_release();
+      };
+      ASSERT_TRUE(f.cp()->submit_pm4(71, 0, std::move(sub)));
+      auto exit = f.engine->run();
+      EXPECT_EQ(exit.code, variant == 2 ? 0 : 1);
+      EXPECT_TRUE(completed);
+      if (completed) {
+        EXPECT_EQ(succeeded, variant == 2);
+      }
+      EXPECT_EQ(f.cp()->queue_faulted_for_test(71, 0), variant != 2);
+      f.engine->shutdown();
+    }
+}
+
+TEST(AmdgpuVmTest, LaterHostProducerCompletesParkedAqlConsumer) {
+  for (uint32_t threads : {1u, 2u}) {
+    SCOPED_TRACE(threads);
+    VmFixture f("cdna3", 2, 2, 64, 104, 256, 1, 10000);
+    f.cp()->set_dispatch_threads(threads);
+    for (auto *cu : f.cp()->compute_units()) {
+      cu->set_functional_quantum(1);
+      cu->set_gws_wait_limit(0);
+    }
+    const auto p = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaP),
+                                   {.gds = 1});
+    const auto v = cdna3::build_ds(test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3, test::GwsOp::kSemaV),
+                                   {.gds = 1});
+    const uint32_t pc[] = {p[0], p[1], SOPP_S_ENDPGM}, vc[] = {v[0], v[1], SOPP_S_ENDPGM};
+    auto pk = f.write_kernel(0x1000, pc, sizeof(pc)), vk = f.write_kernel(0x2000, vc, sizeof(vc));
+    init_completion_signal(f.mem(), 0x7000);
+    init_completion_signal(f.mem(), 0x7100);
+    test::AqlQueue consumer(f.mem(), f.cp());
+    consumer.submit(make_dispatch_packet(pk, 0x7000, 64, 64));
+    for (int i = 0; i < 100; ++i)
+      (void)f.engine->step();
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x7000), 1);
+    EXPECT_TRUE(f.soc_ptr->gws_device()->any_parked());
+    test::AqlQueue producer(f.mem(), f.cp(), 0xf1000000, 4096, 0xf1010000, 0xf1010008, 0xf1010010,
+                            false, 2);
+    producer.submit(make_dispatch_packet(vk, 0x7100, 64, 64));
+    for (int i = 0; i < 1000 && (completion_signal_value(f.mem(), 0x7000) ||
+                                 completion_signal_value(f.mem(), 0x7100));
+         ++i)
+      (void)f.engine->step();
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x7000), 0);
+    EXPECT_EQ(completion_signal_value(f.mem(), 0x7100), 0);
+    EXPECT_EQ(f.engine->last_exit().code, 0);
+  }
+}
+
+TEST(AmdgpuVmTest, FanoutWaitTimeoutAbortsEveryShard) {
+  for (uint32_t partitions : {1u, 2u, 8u})
+    for (bool uninitialized : {false, true})
+      for (uint32_t threads : {1u, 2u}) {
+        SCOPED_TRACE(partitions);
+        SCOPED_TRACE(uninitialized);
+        SCOPED_TRACE(threads);
+        auto loaded = config::load_config((std::string(CONFIG_DIR) + "/gfx942_cdna3.json").c_str(),
+                                          rocjitsu::kEmbeddedSchema);
+        auto *soc = loaded.soc();
+        auto *mem = loaded.memory();
+        soc->set_dispatch_threads(threads);
+        loaded.engine_config.num_threads = partitions;
+        loaded.engine_config.max_ticks = 10000;
+        auto engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
+        engine->topology().set_root(loaded.take_root());
+        loaded.wire_links(engine->topology());
+        ASSERT_TRUE(amdgpu::partition_topology_by_xcds(engine->topology(), soc, partitions));
+        engine->create();
+        for (uint32_t x = 0; x < soc->num_xcds(); ++x)
+          for (auto *cu : soc->xcd(x)->command_processor()->compute_units()) {
+            cu->set_functional_quantum(1);
+            cu->set_gws_wait_limit(32);
+          }
+        using namespace rocr::llvm::amdhsa;
+        kernel_descriptor_t kd{};
+        kd.kernel_code_entry_byte_offset = sizeof(kd);
+        AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WORKITEM_VGPR_COUNT, 31);
+        AMDHSA_BITS_SET(kd.compute_pgm_rsrc1, COMPUTE_PGM_RSRC1_GRANULATED_WAVEFRONT_SGPR_COUNT,
+                        12);
+        mem->load_image(reinterpret_cast<const uint8_t *>(&kd), sizeof(kd), 0x1000);
+        auto p = cdna3::build_ds(
+            test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3,
+                             uninitialized ? test::GwsOp::kBarrier : test::GwsOp::kSemaP),
+            {.gds = 1});
+        mem->write32(0x1000 + sizeof(kd), p[0]);
+        mem->write32(0x1004 + sizeof(kd), p[1]);
+        mem->write32(0x1008 + sizeof(kd), SOPP_S_ENDPGM);
+        init_completion_signal(mem, 0x7000);
+        auto queue = test::make_fanout_queue(mem, soc->xcd(0)->command_processor());
+        queue->submit(make_dispatch_packet(0x1000, 0x7000, 64 * soc->num_xcds(), 64));
+        auto exit = engine->run();
+        uint32_t active = 0, faulted = 0;
+        for (uint32_t x = 0; x < soc->num_xcds(); ++x) {
+          auto *cp = soc->xcd(x)->command_processor();
+          faulted += cp->queue_faulted_for_test(1, 0);
+          for (auto *cu : cp->compute_units())
+            active += cu->num_wfs();
+        }
+        EXPECT_EQ(exit.code, 1);
+        EXPECT_EQ(completion_signal_value(mem, 0x7000), 1);
+        EXPECT_EQ(active, 0);
+        EXPECT_FALSE(soc->gws_device()->any_parked());
+        EXPECT_EQ(faulted, soc->num_xcds());
+      }
+}
+
+TEST(AmdgpuVmTest, AqlFailureDoesNotCompleteBarrierSuccessor) {
+  for (uint32_t threads : {1u, 2u})
+    for (bool uninitialized : {false, true}) {
+      SCOPED_TRACE(::testing::Message()
+                   << "threads=" << threads << " uninitialized=" << uninitialized);
+      VmFixture f("cdna3", 1, 2, 64, 104, 256, 1, 10000);
+      f.cp()->set_dispatch_threads(threads);
+      f.cu()->set_gws_wait_limit(8);
+      std::atomic<uint64_t> exceptions = 0;
+      f.cu()->set_queue_exception_handler(
+          [&](uint32_t, uint32_t, uint64_t st, bool, amdgpu::QueueExceptionDeliveryPolicy) {
+            exceptions = st;
+            return true;
+          });
+      auto op = cdna3::build_ds(
+          test::gws_opcode(ROCJITSU_CODE_ARCH_CDNA3,
+                           uninitialized ? test::GwsOp::kBarrier : test::GwsOp::kSemaP),
+          {.gds = 1});
+      uint32_t code[] = {op[0], op[1], SOPP_S_ENDPGM};
+      uint32_t successor[] = {SOPP_S_ENDPGM};
+      auto k = f.write_kernel(0x1000, code, sizeof(code)),
+           next = f.write_kernel(0x2000, successor, sizeof(successor));
+      init_completion_signal(f.mem(), 0x7000);
+      init_completion_signal(f.mem(), 0x7100);
+      test::AqlQueue q(f.mem(), f.cp());
+      q.submit(make_dispatch_packet(k, 0x7000, 64, 64));
+      auto packet = make_dispatch_packet(next, 0x7100, 64, 64);
+      packet.header |= 1u << HSA_PACKET_HEADER_BARRIER;
+      q.submit(packet);
+      auto exit = f.engine->run();
+      EXPECT_EQ(exit.code, 1);
+      EXPECT_EQ(completion_signal_value(f.mem(), 0x7000), 1);
+      EXPECT_EQ(completion_signal_value(f.mem(), 0x7100), 1);
+      EXPECT_TRUE(f.cp()->queue_faulted_for_test(1, 0));
+      EXPECT_EQ(exceptions.load(), amdgpu::kAqlQueueWaveAbort);
+      EXPECT_FALSE(f.cu()->has_active_wfs());
+    }
+}
+
+TEST(AmdgpuVmTest, DestroyQueueDoesNotPlaceRemainingWorkgroups) {
+  for (const uint32_t threads : {1u, 2u}) {
+    SCOPED_TRACE(threads == 1 ? "serial" : "pooled");
+    VmFixture f("cdna3", 1, 2, 64, 104, 256, 1, 2000);
+    if (threads > 1)
+      f.cp()->set_dispatch_threads(threads);
+    const uint32_t code[] = {cdna3::build_sopp(cdna3::kSBranchSopp, {.simm16 = 0xffff})[0],
+                             cdna3::build_sopp(cdna3::kSEndpgmSopp)[0]};
+    const auto ko = f.write_kernel(0x1000, code, sizeof(code), 104, 256, 2, 0, false, 0, 0, false);
+    init_completion_signal(f.mem(), 0x7000);
+    test::AqlQueue queue(f.mem(), f.cp());
+    queue.submit(make_dispatch_packet(ko, 0x7000, 256, 64));
+    (void)f.engine->run();
+    ASSERT_EQ(f.cp()->dispatched_workgroups(), 2u);
+    ASSERT_TRUE(f.cu()->has_active_wfs());
+    f.cp()->unregister_queue(1, 0);
+    EXPECT_EQ(f.cp()->dispatched_workgroups(), 2u)
+        << "destroying the queue placed more of its own workgroups";
+    EXPECT_FALSE(f.cu()->has_active_wfs()) << "waves of a destroyed queue remain resident";
+  }
+}

@@ -198,7 +198,7 @@ void RdciHealthSubSystem::get_watches() const {
   result = rdc_health_get(rdc_handle_, group_id_, &components);
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
-    if (result == RDC_ST_NOT_FOUND) {
+    if (result == RDC_ST_GROUP_NOT_FOUND) {
       error_msg = "Cannot find the group " + std::to_string(group_id_) + " or the field.";
     }
     throw RdcException(result, error_msg.c_str());
@@ -453,7 +453,7 @@ void RdciHealthSubSystem::health_check() const {
   result = rdc_health_get(rdc_handle_, group_id_, &components);
   if (result != RDC_ST_OK) {
     std::string error_msg = rdc_status_string(result);
-    if (result == RDC_ST_NOT_FOUND) {
+    if (result == RDC_ST_GROUP_NOT_FOUND) {
       error_msg = "Cannot find the group " + std::to_string(group_id_) + " or the field.";
     }
     throw RdcException(result, error_msg.c_str());

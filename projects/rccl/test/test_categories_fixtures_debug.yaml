@@ -55,6 +55,7 @@ test_categories:
       - "P2pPxnLevel1NetId.*"
       - "SymmetricMemP2pLevelTests.*"
       - "TopoTest.*"
+      - "TopoGpuDev.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "ChannelDefaults.*"
