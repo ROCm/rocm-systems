@@ -114,7 +114,6 @@ jobs:
       - name: Checkout repository config
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          persist-credentials: false
           sparse-checkout: |
             .github/repos-config.json
             .github/scripts/compute_build_stages.py
@@ -123,7 +122,6 @@ jobs:
       - name: Checkout TheRock for configure script
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          persist-credentials: false
           repository: ROCm/TheRock
           ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
           path: _therock
@@ -166,13 +164,10 @@ jobs:
       # project is disabled on Windows in the topology.
       - name: Compute build-stage allowlist
         id: build_stages
-        env:
-          CHANGED_PROJECTS: ${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}
-          RUN_ALL_TESTS: ${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}
         run: |
           python3 .github/scripts/compute_build_stages.py \
-            --changed-projects "${CHANGED_PROJECTS}" \
-            --run-all-tests "${RUN_ALL_TESTS}" \
+            --changed-projects "${{ steps.configure-pr.outputs.changed_projects || steps.configure-manual.outputs.changed_projects }}" \
+            --run-all-tests "${{ steps.configure-pr.outputs.run_all_tests || steps.configure-manual.outputs.run_all_tests }}" \
             --therock-path "_therock"
 
   setup:
@@ -192,7 +187,6 @@ jobs:
       # other stage outright (no build, no artifact copy). Empty = build all,
       # the fail-safe for fan-out / unknown-project / CI-infra changes.
       build_stages: ${{ needs.configure.outputs.build_stages }}
-      changed_projects: ${{ needs.configure.outputs.changed_projects }}
       prebuilt_stages: ${{ inputs.prebuilt_stages || '' }}
       baseline_run_id: ${{ inputs.baseline_run_id || '' }}
       build_python_packages: ${{ inputs.build_python_packages || false }}
@@ -213,7 +207,7 @@ jobs:
           "repository": "${{ github.repository }}",
           "ref": "${{ github.sha }}",
           "base_sha": "${{ github.event.pull_request.base.sha || github.event.before }}",
-          "head_sha": "${{ github.event_name == 'pull_request' && github.event.pull_request.head.sha || github.sha }}",
+          "head_sha": "${{ github.sha }}",
           "pr_number": ${{ github.event.pull_request.number || 'null' }},
           "event_name": "${{ github.event_name }}",
           "skip_ci_config": ".github/skip-ci-config.toml",
@@ -289,7 +283,6 @@ jobs:
       - name: Checkout TheRock repository
         uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
-          persist-credentials: false
           repository: "ROCm/TheRock"
           ref: c01e3a3f3f67966dd35612cf363b49964f33cd47 # 2026-10-12
           sparse-checkout: build_tools/github_actions
