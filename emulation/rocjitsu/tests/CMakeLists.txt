@@ -2000,6 +2000,8 @@ target_compile_definitions(
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     add_executable(standalone_plugin_abi_test standalone_plugin_abi_test.cpp)
+    # Keep this loader independent of core objects and librocjitsu.so so they
+    # cannot hide unresolved simulator symbols in the standalone module.
     target_link_libraries(
         standalone_plugin_abi_test
         PRIVATE util simdojo_headers ${CMAKE_DL_LIBS}
