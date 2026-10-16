@@ -8581,7 +8581,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredPreemptsSymmetri
       });
 }
 
-// Late arm must reuse ceReduceScatterAllowed (incl. nNodes==1). On a multi-node
+// Late arm must reuse ceReduceScatterEligible (incl. nNodes==1). On a multi-node
 // CTA-ZERO comm where DDA/hier/Direct decline, CE must not be selected.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredDeclinedOnMultiNode) {
   RUN_ISOLATED_TEST(
@@ -8630,10 +8630,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsFloat8) {
       });
 }
 
-// Both CE arms require ncclGroupDepth == 0.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCe) {
+// Eager CE_2SHOT requires ncclGroupDepth == 0; inside a group the call must
+// stay queued as CE_REGISTERED rather than falling through to the ring.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupSelectsRegisteredNotEager) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_InsideGroupExcludesCe",
+      "Wrap_SelectReduceScatter_InsideGroupSelectsRegisteredNotEager",
       []() {
         EnableCeReduceScatterForSelectTest();
         ncclComm* comm = MakeSelectComm();
@@ -8646,8 +8647,159 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCe) {
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                        ncclSum, /*query=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        ncclGroupDepth = 0;
+        DeleteCommWithArch(comm);
+      });
+}
+
+
+// Force bypasses CTAPolicy ZERO with staging ready -> eager CE (RCCL_CE_2SHOT).
+TEST(WrapMicrotestIsolated, SelectReduceScatter_CeTwoShotChosenWhenForcedAndStagingBufferReady) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_CeTwoShotChosenWhenForcedAndStagingBufferReady",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook localBlocks(g_ceLocalReduceBlocks, [](ncclDataType_t, size_t) { return 19; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // force must bypass this
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ(NCCL_PROTO_SIMPLE, decision.protocol);
+        EXPECT_EQ(19, decision.nMaxChannels);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// RCCL_FORCE_CE_REDUCESCATTER is a modifier, not an on-switch: at RCCL_CE_REDUCESCATTER=0 the
+// first guard returns and the late arm's `!rcclParamCeReduceScatter()` clears ceAvailable.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForceParamAloneDoesNotEnableCe) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_ForceParamAloneDoesNotEnableCe",
+      []() {
+        g_loadParam = ForceParam("RCCL_FORCE_CE_REDUCESCATTER", int64_t(1));
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Force + CTAPolicy DEFAULT + null staging -> RCCL_CE_REGISTERED (enqueue allocates).
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredBypassesCtaPolicy) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_ForcedCeRegisteredBypassesCtaPolicy",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Explicit force preempts an otherwise-eligible symmetric kernel when staging is ready.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeTwoShotPreemptsSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_ForcedCeTwoShotPreemptsSymmetric",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // force bypasses this
+        uint8_t stagingBuf[16];
+        comm->ceColl.ceARTmpBuf = stagingBuf;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Same force precedence while staging still needs to be initialized.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredPreemptsSymmetric) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_ForcedCeRegisteredPreemptsSymmetric",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                 size_t, const void*, void*, bool) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->symmetricSupport = 1;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_DEFAULT; // force bypasses this
+        // comm->ceColl.ceARTmpBuf left null, so the staging-allocation arm is the one in play.
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
+                                                       ncclSum, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// Primus coalesces the GPT-OSS gradient bucket into 139,370,448 BF16 values
+// per rank. CE ReduceScatter has no message-size cap and pipelines through
+// staging; force mode must still preempt an otherwise-eligible symk path and
+// accept BF16 Avg. Inside ncclGroupStart/End the call stays queued as
+// CE_REGISTERED rather than eager CE_2SHOT or symk.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgAboveCap) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgAboveCap",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        alignas(16) static uint8_t staging;
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->ceColl.graphModeSeen = false;
+        comm->ceColl.ceARTmpBuf = nullptr;
+        rcclCollDecision decision{};
+        constexpr size_t kPrimusRecvCount = 139370448;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+
+        comm->ceColl.ceARTmpBuf = &staging;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+
+        // Primus issues the same collective between ncclGroupStart/End. Eager
+        // 2-shot is closed; queued CE_REGISTERED must win over symk.
+        ncclGroupDepth = 1;
+        EXPECT_EQ(ncclSuccess,
+                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
+                                          /*query=*/false, &decision));
+        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        ncclGroupDepth = 0;
         DeleteCommWithArch(comm);
       });
 }
@@ -8874,7 +9026,7 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 // RCCL_CE_REDUCESCATTER at 0 keeps every CE arm out even with every CE seam forced true, the exact
 // combination that WOULD give CE_REGISTERED in rcclSelectAllReduce/AllGather. The param does it,
 // not an absent call: rcclUseCeReduceScatter returns on its first guard, so
-// ceReduceScatterAllowed is false for both the early and late CE arms.
+// ceReduceScatterEligible is false for both the early and late CE arms.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff",
@@ -8931,6 +9083,29 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenEage
       });
 }
 
+// Primus' default gradient collective is BF16 Avg. CE implements that by
+// accumulating the BF16 sum and applying the reciprocal rank count once.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_Bfloat16AvgSelectsCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectReduceScatter_Bfloat16AvgSelectsCeRegistered",
+      []() {
+        g_loadParam = ForcedCeReduceScatterParams;
+        ScopedHook ceAvailable(
+            g_ceAvailable,
+            [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t,
+               struct ncclDevrWindow*, struct ncclDevrWindow*) { return true; });
+        ncclComm* comm = MakeSelectComm();
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->symmetricSupport = true;
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+        rcclCollDecision decision{};
+        EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclBfloat16,
+                                                        ncclAvg, /*query=*/false, &decision));
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        DeleteCommWithArch(comm);
+      });
+}
 // symEligible's own query-mode reporting block (`if (query) { ... }` inside
 // `if (symEligible)`) had never been entered for ReduceScatter -- only
 // AllReduce/AllGather had a symmetric-reported query test. rcclSymkQuery
