@@ -92,7 +92,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
             std::streamsize file_size = input.tellg();
             input.seekg(0, std::ios::beg);
             // resize if buffer is too small
-            if (batch_images[index].size() < file_size) {
+            if (batch_images[index].size() < static_cast<size_t>(file_size)) {
                 batch_images[index].resize(file_size);
             }
             if (!input.read(batch_images[index].data(), file_size)) {
@@ -132,7 +132,7 @@ void DecodeImages(DecodeInfo &decode_info, RocJpegUtils rocjpeg_utils, RocJpegDe
 
             // Reuse pre-allocated GPU memory if it is large enough; only grow when the current
             // image's channel size exceeds the true allocated buffer size.
-            for (int n = 0; n < num_channels; n++) {
+            for (uint32_t n = 0; n < num_channels; n++) {
                 if (channel_sizes[n] > allocated_channel_sizes[current_batch_size][n]) {
                     if (output_images[current_batch_size].channel[n] != nullptr) {
                         CHECK_HIP(hipFree((void *)output_images[current_batch_size].channel[n]));
@@ -216,8 +216,8 @@ int main(int argc, char **argv) {
         return EXIT_FAILURE;
     }
 
-    if (num_threads > file_paths.size()) {
-        num_threads = file_paths.size();
+    if (static_cast<size_t>(num_threads) > file_paths.size()) {
+        num_threads = static_cast<int>(file_paths.size());
     }
 
     decode_info_per_thread.resize(num_threads);

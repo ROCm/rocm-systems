@@ -85,7 +85,7 @@ int main(int argc, char **argv) {
         std::streamsize file_size = input.tellg();
         input.seekg(0, std::ios::beg);
         // resize if buffer is too small
-        if (file_data.size() < file_size) {
+        if (file_data.size() < static_cast<size_t>(file_size)) {
             file_data.resize(file_size);
         }
         if (!input.read(file_data.data(), file_size)) {
@@ -144,7 +144,7 @@ int main(int argc, char **argv) {
         }
 
         // allocate memory for each channel and reuse them if the sizes remain unchanged for a new image.
-        for (int i = 0; i < num_channels; i++) {
+        for (uint32_t i = 0; i < num_channels; i++) {
             if (prior_channel_sizes[i] != channel_sizes[i]) {
                 if (output_image.channel[i] != nullptr) {
                     CHECK_HIP(hipFree((void *)output_image.channel[i]));

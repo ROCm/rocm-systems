@@ -628,7 +628,7 @@ public:
             if (widths[0] == output_image->pitch[0] && heights[0] == aliged_heights[0]) {
                 fwrite(hst_ptr, 1, channel0_size, fp);
             } else {
-                for (int i = 0; i < heights[0]; i++) {
+                for (uint32_t i = 0; i < heights[0]; i++) {
                     fwrite(tmp_hst_ptr, 1, widths[0], fp);
                     tmp_hst_ptr += output_image->pitch[0];
                 }
@@ -640,7 +640,7 @@ public:
                 if (widths[1] == output_image->pitch[1] && heights[1] == aliged_heights[1]) {
                     fwrite(channel1_hst_ptr, 1, channel1_size, fp);
                 } else {
-                    for (int i = 0; i < heights[1]; i++) {
+                    for (uint32_t i = 0; i < heights[1]; i++) {
                         fwrite(channel1_hst_ptr, 1, widths[1], fp);
                         channel1_hst_ptr += output_image->pitch[1];
                     }
@@ -653,7 +653,7 @@ public:
                 if (widths[2] == output_image->pitch[2] && heights[2] == aliged_heights[2]) {
                     fwrite(channel2_hst_ptr, 1, channel2_size, fp);
                 } else {
-                    for (int i = 0; i < heights[2]; i++) {
+                    for (uint32_t i = 0; i < heights[2]; i++) {
                         fwrite(channel2_hst_ptr, 1, widths[2], fp);
                         channel2_hst_ptr += output_image->pitch[2];
                     }
