@@ -338,15 +338,11 @@ def test_counters_collection_schema_unchanged_from_3_0_5(output_root, latest_sch
     """Replay averaging must not change the counters_collection columns."""
 
     def columns(version):
-        db_path = (
-            output_root
-            / version
-            / "db"
-            / f"schema_{version.replace('.', '_')}.db"
-        )
+        db_path = output_root / version / "db" / f"schema_{version.replace('.', '_')}.db"
         with sqlite3.connect(db_path) as connection:
             return [
-                row[1] for row in connection.execute("PRAGMA table_info(counters_collection)")
+                row[1]
+                for row in connection.execute("PRAGMA table_info(counters_collection)")
             ]
 
     assert columns(latest_schema) == columns("3.0.5")
@@ -355,15 +351,10 @@ def test_counters_collection_schema_unchanged_from_3_0_5(output_root, latest_sch
 def test_pmc_events_replay_pass_absent_before_3_0_6(output_root, old_schema):
     """Archived schemas must retain their original pmc_events columns."""
     db_path = (
-        output_root
-        / old_schema
-        / "db"
-        / f"schema_{old_schema.replace('.', '_')}.db"
+        output_root / old_schema / "db" / f"schema_{old_schema.replace('.', '_')}.db"
     )
     with sqlite3.connect(db_path) as connection:
-        columns = [
-            row[1] for row in connection.execute("PRAGMA table_info(pmc_events)")
-        ]
+        columns = [row[1] for row in connection.execute("PRAGMA table_info(pmc_events)")]
     assert "replay_pass" not in columns
 
 
