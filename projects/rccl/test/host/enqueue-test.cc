@@ -3991,3 +3991,417 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
 }
+
+// ===========================================================================
+// scheduleP2pTasksToPlan (enqueue.cc:1787) -- per-round kernel-argument budget.
+// A round emits one work item and at most one new batch per channel. Reserving
+// more than that moved the last round of a 4-rank, 64-channel-per-peer AllToAll
+// into a second kernel launch.
+// ===========================================================================
+
+namespace {
+struct AllToAllPlanScene {
+  static constexpr int kRanks = 4;
+  static constexpr int kChannelsPerPeer = 64;
+  static constexpr int kP2pChannels = kRanks * kChannelsPerPeer;
+
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/942};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclComm::P2pSchedulePair> rounds = std::vector<ncclComm::P2pSchedulePair>(kRanks);
+  std::vector<ncclKernelPlanner::Peer> plannerPeers = std::vector<ncclKernelPlanner::Peer>(kRanks);
+  std::vector<ncclChannelPeer> channelPeers = std::vector<ncclChannelPeer>(kRanks);
+  std::vector<ncclChannelPeer*> peerSlots = std::vector<ncclChannelPeer*>(kRanks);
+  std::vector<ncclTaskP2p> sends = std::vector<ncclTaskP2p>(kRanks);
+  std::vector<ncclTaskP2p> recvs = std::vector<ncclTaskP2p>(kRanks);
+  std::vector<char> sendBufs = std::vector<char>(kRanks);
+  std::vector<char> recvBufs = std::vector<char>(kRanks);
+
+  AllToAllPlanScene() {
+    InstallSendRecvDevFuncIds();
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = kRanks;
+    c->p2pnChannels = kP2pChannels;
+    c->p2pnChannelsPerPeer = kChannelsPerPeer;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 512 << 10;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 4 << 20;
+    SetSingleGpuArch(topo.get(), "gfx942");
+    c->topo = topo.get();
+
+    for (int round = 0; round < kRanks; ++round) {
+      rounds[round].sendRank = round;
+      rounds[round].recvRank = (kRanks - round) % kRanks;
+    }
+    c->p2pSchedule = rounds.data();
+    c->planner.peers = plannerPeers.data();
+    for (int peer = 0; peer < kRanks; ++peer) peerSlots[peer] = &channelPeers[peer];
+    for (int ch = 0; ch < kP2pChannels; ++ch) c->channels[ch].peers = peerSlots.data();
+
+    for (int peer = 0; peer < kRanks; ++peer) {
+      for (ncclTaskP2p* t : {&sends[peer], &recvs[peer]}) {
+        t->collAPI = ncclFuncAlltoAll;
+        t->bytes = size_t(1) << 30;
+      }
+      sends[peer].func = ncclFuncSend;
+      sends[peer].buff = &sendBufs[peer];
+      recvs[peer].func = ncclFuncRecv;
+      recvs[peer].buff = &recvBufs[peer];
+      ncclIntruQueueEnqueue(&plannerPeers[peer].sendQueue, &sends[peer]);
+      ncclIntruQueueEnqueue(&plannerPeers[peer].recvQueue, &recvs[peer]);
+    }
+    c->planner.nTasksP2p = 2 * kRanks;
+    c->planner.nTasksP2pSend = kRanks;
+    c->planner.nTasksP2pRecv = kRanks;
+  }
+
+  ncclResult_t schedule(ssize_t inArgsBytes) {
+    ncclKernelPlanBudget budget = MakeBudget(inArgsBytes, /*out=*/ssize_t(1) << 30);
+    int epoch = 0, round = 0;
+    return scheduleP2pTasksToPlan(bp.c(), &epoch, &round, bp.p(), &budget);
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_FourRoundsOf64Channels_FitOneKernelLaunch) {
+  AllToAllPlanScene sc;
+  const ssize_t inArgs = ssize_t(ncclMaxKernelArgsSize(sc.bp.c()->cudaArch)) - ssize_t(sizeof(struct ncclDevKernelArgs));
+  ASSERT_GE(inArgs, ssize_t(AllToAllPlanScene::kP2pChannels) * kBatch)
+      << "precondition: the kernel-argument budget holds one batch per channel";
+  ASSERT_EQ(ncclSuccess, sc.schedule(inArgs));
+  EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p) << "every AllToAll round must land in the first plan";
+  EXPECT_EQ(AllToAllPlanScene::kP2pChannels, sc.bp.p()->nWorkBatches);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_ReservesExactlyOneBatchPerChannelForTheNextRound) {
+  // Three rounds use 192 batches. The fourth needs 64 more: one batch short must
+  // defer it to the next plan, an exact fit must not.
+  const int used = 3 * AllToAllPlanScene::kChannelsPerPeer;
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule((used + AllToAllPlanScene::kChannelsPerPeer - 1) * kBatch));
+    EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p) << "the fourth round's send and recv must wait";
+    EXPECT_EQ(used, sc.bp.p()->nWorkBatches);
+  }
+  {
+    AllToAllPlanScene sc;
+    ASSERT_EQ(ncclSuccess, sc.schedule((used + AllToAllPlanScene::kChannelsPerPeer) * kBatch));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(used + AllToAllPlanScene::kChannelsPerPeer, sc.bp.p()->nWorkBatches);
+  }
+}
+
+// ===========================================================================
+// Widened direct P2P (RCCL_P2P_DIRECT_MAX_CHANNELS). Each direction of a round
+// uses the per-peer tile or the whole widened tile, chosen from its own size,
+// so both ends of a transfer pick the same channels whatever else is grouped.
+// ===========================================================================
+
+TEST_F(EnqueueMicrotest, AddWorkBatch_WidenedP2pOfDifferentEpochs_ShareABatch) {
+  // Widened tiles of rounds 1 and 3 overlap; sharing the batch runs both rounds at once.
+  BatchPlanComm bp;
+  const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/1,
+                     /*batchP2P=*/false, /*wideP2P=*/true);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), /*p2pRound=*/3,
+                     /*batchP2P=*/false, /*wideP2P=*/true);
+  EXPECT_EQ(1, bp.queueLength());
+  EXPECT_EQ(0b11ull, bp.tailBatch()->offsetBitset);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(2 * ws),
+                     /*p2pRound=*/5, /*batchP2P=*/false, /*wideP2P=*/true);
+  EXPECT_EQ(2, bp.queueLength()) << "at most NCCL_MAX_DEV_WORK_P2P_PER_BATCH works share a batch";
+}
+
+TEST_F(EnqueueMicrotest, AddWorkBatch_WidenedP2p_KeepsPerPeerWorkAndItsOwnRoundApart) {
+  BatchPlanComm bp;
+  const size_t ws = ncclDevWorkSize(ncclDevWorkTypeP2p);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, 0, /*p2pRound=*/1,
+                     /*batchP2P=*/false, /*wideP2P=*/false);
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(ws), /*p2pRound=*/3,
+                     /*batchP2P=*/false, /*wideP2P=*/true);
+  EXPECT_EQ(2, bp.queueLength()) << "a per-peer tile work keeps single-work batches";
+  addWorkBatchToPlan(bp.c(), bp.p(), 0, ncclDevWorkTypeP2p, 7, /*progressSlot=*/0, uint32_t(2 * ws),
+                     /*p2pRound=*/3, /*batchP2P=*/false, /*wideP2P=*/true);
+  EXPECT_EQ(3, bp.queueLength()) << "works of one round use the same connections";
+}
+
+namespace {
+// Rank 0 of 4 on one host, 64 channels per peer out of 256, widening to 128. In round 3 it sends
+// to rank 3 and receives from rank 1; the widened tile of that round (channels 128-255) overlaps
+// its per-peer tile (channels 192-255).
+struct WidenedP2pScene {
+  static constexpr int kRanks = 4;
+  static constexpr int kChannelsPerPeer = 64;
+  static constexpr int kP2pChannels = kRanks * kChannelsPerPeer;
+  static constexpr int kWideChannels = 128;
+  static constexpr int kRound = 3;
+  static constexpr int kSendRank = kRound;
+  static constexpr int kRecvRank = (kRanks - kRound) % kRanks;
+
+  BatchPlanComm bp{/*nNodes=*/1, /*cudaArch=*/942};
+  std::unique_ptr<ncclTopoSystem> topo{new ncclTopoSystem{}};
+  std::vector<ncclComm::P2pSchedulePair> rounds = std::vector<ncclComm::P2pSchedulePair>(kRanks);
+  std::vector<ncclKernelPlanner::Peer> plannerPeers = std::vector<ncclKernelPlanner::Peer>(kRanks);
+  std::vector<ncclChannelPeer> channelPeers = std::vector<ncclChannelPeer>(kRanks);
+  std::vector<ncclChannelPeer*> peerSlots = std::vector<ncclChannelPeer*>(kRanks);
+  std::vector<ncclPeerInfo> peerInfo = std::vector<ncclPeerInfo>(kRanks);
+  ncclTaskP2p send{};
+  ncclTaskP2p recv{};
+  char sendBuf[8]{};
+  char recvBuf[8]{};
+  int planTotalTasks[2]{1, 1};
+
+  WidenedP2pScene(ncclFunc_t sendApi, ssize_t sendBytes, ncclFunc_t recvApi, ssize_t recvBytes) {
+    InstallSendRecvDevFuncIds();
+    SetParam("RCCL_P2P_DIRECT_MAX_CHANNELS", kWideChannels);
+    ncclComm* c = bp.c();
+    c->rank = 0;
+    c->nRanks = kRanks;
+    c->p2pnChannels = kP2pChannels;
+    c->p2pnChannelsPerPeer = kChannelsPerPeer;
+    c->p2pChannelShiftSize = 0;
+    c->p2pChunkSize = 512 << 10;
+    c->buffSizes[NCCL_PROTO_SIMPLE] = 4 << 20;
+    c->workArgsBytes = sizeof(ncclDevKernelArgs) + kP2pChannels * sizeof(ncclDevWorkBatch);
+    SetSingleGpuArch(topo.get(), "gfx942");
+    c->topo = topo.get();
+    for (int r = 0; r < kRanks; ++r) {
+      rounds[r].sendRank = r;
+      rounds[r].recvRank = (kRanks - r) % kRanks;
+      peerSlots[r] = &channelPeers[r];
+    }
+    c->p2pSchedule = rounds.data();
+    c->planner.peers = plannerPeers.data();
+    c->peerInfo = peerInfo.data();
+    for (int ch = 0; ch < kP2pChannels; ++ch) c->channels[ch].peers = peerSlots.data();
+
+    send.func = ncclFuncSend;
+    send.collAPI = sendApi;
+    send.root = kSendRank;
+    send.bytes = sendBytes;
+    send.buff = sendBuf;
+    recv.func = ncclFuncRecv;
+    recv.collAPI = recvApi;
+    recv.root = kRecvRank;
+    recv.bytes = recvBytes;
+    recv.buff = recvBuf;
+  }
+
+  ncclResult_t add(bool* recvFirst = nullptr) {
+    struct ncclTaskP2p* tasks[2] = {&recv, &send};
+    return addP2pToPlan(bp.c(), bp.p(), /*nChannelsMin=*/kChannelsPerPeer, /*nChannelsMax=*/kChannelsPerPeer, kRound,
+                        kSendRank, sendBuf, send.bytes, kRecvRank, recvBuf, recv.bytes, /*sendOpCount=*/0,
+                        /*recvOpCount=*/0, planTotalTasks, tasks, recvFirst);
+  }
+
+  ncclResult_t schedule(ssize_t inArgsBytes) {
+    ncclComm* c = bp.c();
+    ncclIntruQueueEnqueue(&plannerPeers[kSendRank].sendQueue, &send);
+    ncclIntruQueueEnqueue(&plannerPeers[kRecvRank].recvQueue, &recv);
+    c->planner.nTasksP2p = 2;
+    c->planner.nTasksP2pSend = 1;
+    c->planner.nTasksP2pRecv = 1;
+    ncclKernelPlanBudget budget = MakeBudget(inArgsBytes, /*out=*/ssize_t(1) << 30);
+    int epoch = 0, round = 0;
+    return scheduleP2pTasksToPlan(c, &epoch, &round, bp.p(), &budget);
+  }
+
+  std::vector<ncclDevWorkP2p*> works() {
+    std::vector<ncclDevWorkP2p*> out;
+    for (auto* node = bp.p()->workQueue.head; node != nullptr; node = node->next) {
+      if (node->workType == ncclDevWorkTypeP2p) out.push_back(reinterpret_cast<ncclDevWorkP2p*>(node + 1));
+    }
+    return out;
+  }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_WidenedSendWithPerPeerRecv_SplitsWidenedWorkFirst) {
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+  ASSERT_EQ(ncclSuccess, sc.add());
+  auto works = sc.works();
+  ASSERT_EQ(2u, works.size()) << "one work has a single channel stride, so the tiles need two works";
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, works[0]->nSendChannels);
+  EXPECT_EQ(0, works[0]->nRecvChannels);
+  EXPECT_EQ(0, works[1]->nSendChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[1]->nRecvChannels);
+  EXPECT_EQ(0u, works[1]->sendBytes);
+  EXPECT_EQ(WidenedP2pScene::kWideChannels + WidenedP2pScene::kChannelsPerPeer, sc.bp.p()->nWorkBatches);
+  // On channels both tiles use, every rank runs the widened work first, so the peer that
+  // receives the widened transfer waits on the same order.
+  for (int part = 0; part < WidenedP2pScene::kChannelsPerPeer; ++part) {
+    int ch = ncclP2pChannelForPart(WidenedP2pScene::kP2pChannels, WidenedP2pScene::kRound, part,
+                                   WidenedP2pScene::kChannelsPerPeer, 1, 0);
+    ASSERT_EQ(2, sc.bp.queueLength(ch)) << "channel " << ch;
+    EXPECT_EQ(0u, sc.bp.chan(ch)->workBatchQueue.head->batch.offsetBase) << "channel " << ch;
+  }
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_SplitRound_RecordsEachWorkForTheProfiler) {
+  // KernelCh steps are counted per work and channel: the two works of a split round need their own
+  // pair ids, in emission order, and channel masks that reach past channel 63.
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+  bool recvFirst = true;
+  ASSERT_EQ(ncclSuccess, sc.add(&recvFirst));
+  EXPECT_FALSE(recvFirst);
+  EXPECT_EQ(1, sc.send.p2pPairId);
+  EXPECT_EQ(2, sc.recv.p2pPairId);
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, countOneBits(sc.send.channelMask));
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, countOneBits(sc.recv.channelMask));
+  EXPECT_EQ(~uint64_t(0), sc.send.channelMask.masks[3]) << "the widened tile of round 3 is channels 128-255";
+  EXPECT_EQ(0u, sc.send.channelMask.masks[0]);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_SplitRound_QueuesTasksInWorkOrder) {
+  {
+    WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+    ASSERT_EQ(ncclSuccess, sc.schedule(512 * kBatch));
+    ncclTaskP2p* first = ncclIntruQueueHead(&sc.bp.p()->p2pTaskQueue);
+    ASSERT_EQ(&sc.send, first) << "the widened send is emitted first";
+    ASSERT_EQ(&sc.recv, first->next);
+    EXPECT_LT(sc.send.p2pPairId, sc.recv.p2pPairId);
+  }
+  {
+    WidenedP2pScene sc(ncclFuncAlltoAll, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+    ASSERT_EQ(ncclSuccess, sc.schedule(512 * kBatch));
+    ncclTaskP2p* first = ncclIntruQueueHead(&sc.bp.p()->p2pTaskQueue);
+    ASSERT_EQ(&sc.recv, first) << "the widened receive is emitted first";
+    ASSERT_EQ(&sc.send, first->next);
+    EXPECT_LT(sc.recv.p2pPairId, sc.send.p2pPairId);
+  }
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_WidenedRecvWithPerPeerSend_SplitsWidenedWorkFirst) {
+  WidenedP2pScene sc(ncclFuncAlltoAll, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+  ASSERT_EQ(ncclSuccess, sc.add());
+  auto works = sc.works();
+  ASSERT_EQ(2u, works.size());
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, works[0]->nRecvChannels);
+  EXPECT_EQ(0, works[0]->nSendChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[1]->nSendChannels);
+  EXPECT_EQ(0, works[1]->nRecvChannels);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_BothDirectionsWidened_StayOneWork) {
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+  ASSERT_EQ(ncclSuccess, sc.add());
+  auto works = sc.works();
+  ASSERT_EQ(1u, works.size());
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, works[0]->nSendChannels);
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, works[0]->nRecvChannels);
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, sc.bp.p()->nWorkBatches);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_WidenedCountBetweenTiles_FallsBackToPerPeerTile) {
+  // 6 MiB asks for 96 channels, which is neither tile.
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(6) << 20, ncclFuncAlltoAll, ssize_t(1) << 30);
+  ASSERT_EQ(ncclSuccess, sc.add());
+  auto works = sc.works();
+  ASSERT_EQ(1u, works.size()) << "both directions are back on the per-peer tile";
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nSendChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nRecvChannels);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_PeerOnAnotherHost_IsNotWidened) {
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+  sc.peerInfo[WidenedP2pScene::kSendRank].hostHash = 1;
+  ASSERT_EQ(ncclSuccess, sc.add());
+  auto works = sc.works();
+  ASSERT_EQ(2u, works.size()) << "only the receive from the same-host peer is widened";
+  EXPECT_EQ(WidenedP2pScene::kWideChannels, works[0]->nRecvChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[1]->nSendChannels);
+}
+
+TEST_F(EnqueueMicrotest, AddP2pToPlan_MixedApiSelfTransfer_UsesOnePerPeerTile) {
+  WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+  sc.send.root = 0;
+  sc.recv.root = 0;
+  struct ncclTaskP2p* tasks[2] = {&sc.recv, &sc.send};
+
+  ASSERT_EQ(ncclSuccess,
+            addP2pToPlan(sc.bp.c(), sc.bp.p(), WidenedP2pScene::kChannelsPerPeer,
+                         WidenedP2pScene::kChannelsPerPeer, /*p2pRound=*/0,
+                         /*sendRank=*/0, sc.sendBuf, sc.send.bytes,
+                         /*recvRank=*/0, sc.recvBuf, sc.recv.bytes,
+                         /*sendOpCount=*/0, /*recvOpCount=*/0, sc.planTotalTasks, tasks));
+
+  auto works = sc.works();
+  ASSERT_EQ(1u, works.size());
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nSendChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nRecvChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, countOneBits(sc.send.channelMask));
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, countOneBits(sc.recv.channelMask));
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_WidenedSendRecvToEveryPeer_SharesBatchesInOneLaunch) {
+  // ncclSend/ncclRecv to every peer, self included, as PyTorch all_to_all issues it. The self round
+  // keeps a 64-channel tile. Non-self rounds widen, and overlapping widened rounds share batches.
+  constexpr int kRanks = WidenedP2pScene::kRanks;
+  constexpr ssize_t kBytes = ssize_t(256) << 20;
+  WidenedP2pScene sc(ncclFuncSend, kBytes, ncclFuncRecv, kBytes);
+  std::vector<ncclTaskP2p> sends(kRanks), recvs(kRanks);
+  std::vector<char> bufs(2 * kRanks);
+  ncclComm* c = sc.bp.c();
+  for (int peer = 0; peer < kRanks; ++peer) {
+    sends[peer] = sc.send;
+    sends[peer].root = peer;
+    sends[peer].buff = &bufs[2 * peer];
+    recvs[peer] = sc.recv;
+    recvs[peer].root = peer;
+    recvs[peer].buff = &bufs[2 * peer + 1];
+    ncclIntruQueueEnqueue(&sc.plannerPeers[peer].sendQueue, &sends[peer]);
+    ncclIntruQueueEnqueue(&sc.plannerPeers[peer].recvQueue, &recvs[peer]);
+  }
+  c->planner.nTasksP2p = 2 * kRanks;
+  c->planner.nTasksP2pSend = kRanks;
+  c->planner.nTasksP2pRecv = kRanks;
+  // One batch per channel for 508 channels: the 8 KiB ROCm argument buffer.
+  ncclKernelPlanBudget budget = MakeBudget(508 * kBatch, /*out=*/ssize_t(1) << 30);
+  int epoch = 0, round = 0;
+  ASSERT_EQ(ncclSuccess, scheduleP2pTasksToPlan(c, &epoch, &round, sc.bp.p(), &budget));
+  EXPECT_EQ(0, c->planner.nTasksP2p) << "every round must land in the first plan";
+  EXPECT_EQ(320, sc.bp.p()->nWorkBatches);
+  auto works = sc.works();
+  ASSERT_EQ(size_t(kRanks), works.size());
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nSendChannels);
+  EXPECT_EQ(WidenedP2pScene::kChannelsPerPeer, works[0]->nRecvChannels);
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_SplitRound_ReservesBothTiles) {
+  // The split round needs 128 + 64 batches: one short must defer it, an exact fit must not.
+  const int needed = WidenedP2pScene::kWideChannels + WidenedP2pScene::kChannelsPerPeer;
+  {
+    WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+    ASSERT_EQ(ncclSuccess, sc.schedule((needed - 1) * kBatch));
+    EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(0, sc.bp.p()->nWorkBatches);
+  }
+  {
+    WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncAlltoAll, ssize_t(1) << 30);
+    ASSERT_EQ(ncclSuccess, sc.schedule(needed * kBatch));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(needed, sc.bp.p()->nWorkBatches);
+  }
+}
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_EqualSizeMixedNetP2p_ReservesBothTiles) {
+  // Both direct tasks have a 128-channel policy cap and equal sizes, but the send connector is
+  // NET and is reduced to the 64-channel per-peer tile inside addP2pToPlan. The receive remains
+  // widened, so the round emits two works and needs 64 + 128 batches.
+  const int needed = WidenedP2pScene::kWideChannels + WidenedP2pScene::kChannelsPerPeer;
+  {
+    WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+    sc.channelPeers[WidenedP2pScene::kSendRank].send[1].transportComm = &netTransport.send;
+    ASSERT_EQ(ncclSuccess, sc.schedule((needed - 1) * kBatch));
+    EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(0, sc.bp.p()->nWorkBatches);
+  }
+  {
+    WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+    sc.channelPeers[WidenedP2pScene::kSendRank].send[1].transportComm = &netTransport.send;
+    ASSERT_EQ(ncclSuccess, sc.schedule(needed * kBatch));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(needed, sc.bp.p()->nWorkBatches);
+    ASSERT_EQ(2u, sc.works().size());
+  }
+}

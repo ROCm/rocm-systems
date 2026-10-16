@@ -357,8 +357,9 @@ struct ncclTaskP2p {
   uint64_t profilerTag; // Per-call profiler annotation (0 == untagged)
   // Per-direction channels used by this task; read by the profiler to emit and
   // advertise KernelCh per direction (StartTaskEvents / PostPlanWork).
-  uint64_t channelMask;
-  // Shared by both tasks of an addP2pToPlan() pair; 0 = unassigned.
+  struct channelMasks channelMask;
+  // Shared by the tasks of one P2P work item; a round split into two works gives each task its own.
+  // 0 = unassigned.
   uint16_t p2pPairId;
 };
 
@@ -424,7 +425,7 @@ struct ncclKernelPlan {
   bool hasProxyOps; // does any channel have a non-empty proxyOpQueue
   // Any task with ncclProfileKernelCh; gates the captured host callback.
   bool hasProfilerOps;
-  // Source of ncclTaskP2p::p2pPairId; incremented per addP2pToPlan() call.
+  // Source of ncclTaskP2p::p2pPairId; incremented per P2P work item.
   uint16_t p2pPairCounter;
   int threadPerBlock;
   int cgaClusterSize;  // per-launch CGA cluster size; defaults to comm->config.cgaClusterSize
@@ -530,7 +531,7 @@ struct ncclKernelPlanner {
   //////////////////////////////////////////////////////////////////////////////
 
   struct Peer {
-    bool sendSeen, recvSeen;
+    uint8_t sendSeen, recvSeen; // bitmask of pre-connected P2P tiles (bit 0 per-peer, bit 1 widened)
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> sendQueue;
     struct ncclIntruQueue<struct ncclTaskP2p, &ncclTaskP2p::next> recvQueue;
     struct ncclIntruQueue<struct ncclTaskBcast, &ncclTaskBcast::next> bcastQueue;
@@ -585,6 +586,7 @@ struct ncclKernelPlanner {
         int p2pEpoch;
         int p2pRounds[NCCL_MAX_DEV_WORK_P2P_PER_BATCH]; // which rounds are present in this batch.
         bool batchP2P; // whether this batch is eligible for batching multiple p2p operations.
+        bool wideP2P;  // whether this batch holds widened direct p2p works, which may share it.
       } wipBatch; // work-in-progress batch which will be next tail of workBatchQueue
       int nWorkBatchesP2p; // number of p2p batches for this channel.
       int nWorkBatchesBcast; // number of bcast batches for this channel.

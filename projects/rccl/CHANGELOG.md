@@ -19,6 +19,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Inspector plugin ring-buffer drop counters: a single warning per process when events are dropped, a `dump_stats` record with operation and drop counts in JSON output, and `NCCL_INSPECTOR_PROM_DUMP_STATS` (default `0`) to add the same counters to Prometheus output.
 * `NCCL_CE_CHUNK_SIZE` (default 8 MiB): chunk size for the round-robin chunking that host RMA Copy Engine batches use when per-peer transfer sizes differ.
 * `NCCL_CE_INTRA_GPU_MEMCPY_ENABLE` (default `1`): controls whether batched Copy Engine collective copies pass `hipMemcpyFlagPreferOverlapWithCompute`. RCCL previously always set this flag, so the default keeps the previous behavior; set `0` to omit it.
+* `RCCL_P2P_DIRECT_MAX_CHANNELS` (default `0`): lets large direct send/recv transfers to peers on the same node use up to 128 P2P channels without changing the per-peer split used by P2P-backed collectives.
 * `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE` (default `-1`): a positive value selects a ring for the inter-node rail phase of hierarchical Copy Engine `ncclAllGather`. The default keeps the direct path.
 * `NCCL_IB_SORT_MERGE_NICS`: sorts the sub-devices of a merged IB device by plane ID. RCCL defaults it to `0` (NCCL defaults to `1`), so merged-device order and names are unchanged.
 * `RCCL_FABRIC_TELEMETRY_ENABLE` (default `0`): samples every amd-smi fabric telemetry category for the GPUs this process opens communicators on and logs the counters that moved, plus a closing report over the whole sampled span when a device's last communicator is destroyed. Diagnostic only, and off by default. Also needs `RCCL_USE_AMD_SMI_LIB=1` and `render`-group access to the IFoE config character device; without either, RCCL logs why telemetry was skipped and initialization continues.
@@ -61,6 +62,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed virtual address space exhaustion when symmetric windows backed by the same physical allocation are registered repeatedly.
 * Fixed Copy Engine `ncclAlltoAllv` hanging on intra-node communicators of more than 8 ranks with uneven send sizes. Each rank decided from its own send sizes whether to add intra-batch barriers, so ranks could issue different barrier counts. The decision now uses the full send-size matrix, which every rank shares.
 * Fixed `NCCL_P2P_DISABLE` and `NCCL_P2P_LEVEL` being ignored on Intel, ARM and Zhaoxin hosts, where the CPU-based default P2P level overwrote the user setting. On such hosts `NCCL_P2P_DISABLE=1` now falls back to SHM as documented, and `NCCL_P2P_LEVEL` is honored.
+* Fixed a large-message `ncclAllToAll` bandwidth loss of about 21% on communicators whose P2P rounds fill most of the kernel-argument batch budget, such as 4 ranks with 64 P2P channels per peer. The P2P planner reserved room for two work items per round although a round always emits one, so the last round moved to a second kernel launch.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.

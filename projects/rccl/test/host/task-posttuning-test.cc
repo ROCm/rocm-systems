@@ -1212,7 +1212,7 @@ class TaskPostTuning_P2pScene {
     return isSendNotRecv ? connectSend_[peer] : connectRecv_[peer];
   }
 
-  bool& Seen(bool isSendNotRecv, int peer) {
+  uint8_t& Seen(bool isSendNotRecv, int peer) {
     return isSendNotRecv ? planPeers_[peer].sendSeen : planPeers_[peer].recvSeen;
   }
 

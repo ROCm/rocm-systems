@@ -574,6 +574,23 @@ in the following table.
         | ``ncclConfig_t`` are rejected with ``ncclInvalidArgument`` at
         | communicator initialization.
 
+    * - | ``RCCL_P2P_DIRECT_MAX_CHANNELS``
+        | Lets large direct ``ncclSend`` / ``ncclRecv`` / ``ncclSendRecv``
+        | transfers to peers on the same node or in the same MNNVL clique use
+        | a wider P2P channel tile. Each transfer uses either the normal
+        | per-peer channel split or the whole wider tile, depending on its
+        | size. P2P-backed collectives such as all-to-all, scatter, and
+        | gather, and peers reached over the network, keep the per-peer split.
+        | The wider tile is capped by the P2P pool, the kernel-argument
+        | budget, and the validated maximum of 128 channels.
+        | This option is useful for large pairwise transfers when the
+        | communicator contains more ranks than the operation uses.
+        | It does not widen the Copy Engine path selected by
+        | ``NCCL_P2P_USE_CUDA_MEMCPY=1``.
+      - | ``0`` (default): use the communicator's per-peer channel count.
+        | Positive integer: maximum channels for direct P2P operations;
+        | values above 128 are capped to 128.
+
     * - | ``NCCL_RINGS``
         | Defines custom ring topology.
       - | Ring topology specification string
