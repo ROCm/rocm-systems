@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-# Build the scalar arithmetic library with optional x86-64 CPU detection.
+# Build the arithmetic library with optional x86-64 SIMD backends.
 # Public include paths and implementation-only compiler settings are defined here.
 
 add_library(
@@ -10,8 +10,10 @@ add_library(
     common/cpu.cpp
     common/cpu_decode.cpp
     register/dpp.cpp
+    fp/scalar_repair.cpp
     fp/fma.cpp
     fp/half_fma.cpp
+    dot/scalar_repair.cpp
     wmma/wmma.cpp
     wmma/wmma_replicated.cpp
 )
@@ -30,4 +32,5 @@ if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
 endif()
 if(RJ_ARITH_ENABLE_X86_64)
     target_compile_definitions(rj_arith PRIVATE RJ_ARITH_X86_64_QUERY=1)
+    include(${CMAKE_CURRENT_SOURCE_DIR}/x86_64.cmake)
 endif()

@@ -6,6 +6,7 @@
 
 #include "common/float_formats.h"
 #include "common/internal.h"
+#include "common/simd.h"
 #include "dot/dot.h"
 #include "rj_arith/rj_arith.h"
 
@@ -25,6 +26,21 @@ int wmma(uint64_t flags, uint32_t instruction_flags, uint32_t *const *d, const u
           rocjitsu::arith::kMatrixIgnoredFpFlags)) {
     return error;
   }
+
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3 && rocjitsu::arith::is_exact(flags)) {
+    rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, WaveSize, false>(uint32_t(instruction_flags), d, a,
+                                                                 b, c);
+    return RJ_ARITH_SUCCESS;
+  }
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3 && !rocjitsu::arith::is_exact(flags)) {
+
+    rocjitsu::arith::wmma_f32_x86_64_v3<Bf16, WaveSize, false>(uint32_t(instruction_flags), d, a, b,
+                                                               c);
+
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 
   // Each source lane holds eight K elements in Wave32, four in Wave64;
   // output lanes select columns and row groups (rocjitsu shared/mma_exec.h).
