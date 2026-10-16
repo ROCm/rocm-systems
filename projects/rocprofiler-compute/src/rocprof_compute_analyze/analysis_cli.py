@@ -162,6 +162,50 @@ def _intersect_with_user_dispatch_filter(
     return sorted(selected_ids)
 
 
+def _apply_sliced_kernel_top(
+    workload: schema.Workload,
+    kernel_top_df: pd.DataFrame,
+    args: argparse.Namespace,
+    labels: str,
+) -> None:
+    name_to_id = {
+        str(kernel_name).strip(): idx
+        for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
+    }
+    for roots in workload.ml_api_call_trees.values():
+        for root in roots:
+            _assign_kernel_ids_from_top(root, name_to_id)
+
+    if not workload.filter_kernel_ids:
+        return
+
+    file_io.validate_kernel_filter_ids(
+        workload.filter_kernel_ids,
+        len(kernel_top_df["Kernel_Name"]),
+    )
+    selected_names = {
+        str(kernel_top_df.loc[kernel_id, "Kernel_Name"]).strip()
+        for kernel_id in workload.filter_kernel_ids
+    }
+    dispatch_names = {
+        int(dispatch_id): str(kernel_name).strip()
+        for dispatch_id, kernel_name in zip(
+            workload.raw_pmc["Dispatch_ID"].tolist(),
+            workload.raw_pmc["Kernel_Name"].tolist(),
+        )
+    }
+    workload.filter_dispatch_ids = [
+        dispatch_id
+        for dispatch_id in workload.filter_dispatch_ids
+        if dispatch_names.get(int(dispatch_id)) in selected_names
+    ]
+    if not workload.filter_dispatch_ids:
+        console_error(
+            "ml api trace",
+            f"No {labels} operators matched the -k filter: {args.gpu_kernel}",
+        )
+
+
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -278,6 +322,9 @@ class cli_analysis(OmniAnalyze_Base):
             )
             workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+
+            if active_operator_filters:
+                _apply_sliced_kernel_top(workload, kernel_top_df, args, labels)
 
             # create the loaded table
             gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
