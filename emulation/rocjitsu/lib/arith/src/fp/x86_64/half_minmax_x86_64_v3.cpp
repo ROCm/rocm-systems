@@ -35,11 +35,11 @@ void half_minmax3_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
   const float scales[] = {1, 2, 4, 0.5f};
   const auto scale = _mm256_set1_ps(scales[(mode >> 6) & 3]);
   for (int lane = 0; lane < 32; lane += 8) {
-    auto x = half_input<preserve_nan_inputs>(
+    auto x = half_input<false, preserve_nan_inputs>(
         _mm256_loadu_si256(reinterpret_cast<const __m256i *>(a + lane)), a_shift, mode);
-    auto y = half_input<preserve_nan_inputs>(
+    auto y = half_input<false, preserve_nan_inputs>(
         _mm256_loadu_si256(reinterpret_cast<const __m256i *>(b + lane)), b_shift, mode >> 1);
-    auto z = half_input<preserve_nan_inputs>(
+    auto z = half_input<false, preserve_nan_inputs>(
         _mm256_loadu_si256(reinterpret_cast<const __m256i *>(c + lane)), c_shift, mode >> 2);
     if (flags & RJ_ARITH_FP_FLUSH_INPUT_DENORMALS) {
       // Replace subnormal FP32 lanes with signed zero.
@@ -70,7 +70,7 @@ void half_minmax3_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, u
                   ? _mm256_blendv_ps(clamped, value, _mm256_cmp_ps(value, value, _CMP_UNORD_Q))
                   : clamped;
     }
-    auto result = _mm256_sll_epi32(half_narrow<Rdna3>(value, flags & RJ_ARITH_FP16_OVFL),
+    auto result = _mm256_sll_epi32(half_narrow<false, Rdna3>(value, flags & RJ_ARITH_FP16_OVFL),
                                    _mm_cvtsi32_si128(d_shift));
     auto old = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(d + lane));
     result = _mm256_or_si256(result, _mm256_and_si256(old, keep));

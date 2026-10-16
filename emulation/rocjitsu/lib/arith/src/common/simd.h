@@ -11,14 +11,49 @@
 #include <stdint.h>
 
 namespace rocjitsu::arith {
+// Evaluate half dot for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void half_dot_x86_64_v4(bool bf16, bool saturate, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c);
+
+// Evaluate fp8 dot for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void fp8_dot_x86_64_v4(bool bf8_a, bool bf8_b, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                       const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
+
+// Evaluate half dot for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void half_dot_x86_64_v3(bool bf16, bool saturate, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Evaluate fp8 wmma for the caller-selected operation.
 // Requires the named CPU features and validated instruction controls.
 template <bool Bf8A, bool Bf8B>
 void fp8_wmma_x86_64_v3(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
                         const uint32_t *const *c);
+
+// Evaluate fp8 dot for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void fp8_dot_x86_64_v3(bool bf8_a, bool bf8_b, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                       const uint32_t *a, const uint32_t *b, const uint32_t *c);
+
+// Evaluate dot2 for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void dot2_x86_64_v3(bool bf16, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                    const uint32_t *a, const uint32_t *b, const uint32_t *c);
+
+// Evaluate integer dot for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void integer_dot_x86_64_v3(int bits, bool unsigned_acc, uint32_t exec_mask, uint32_t modifiers,
+                           uint32_t *d, const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Evaluate integer wmma for the caller-selected operation.
 // Requires the named CPU features and validated instruction controls.
@@ -67,6 +102,11 @@ void fma_dx9_zero_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifie
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+// Evaluate dot2 bf16 for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void dot2_bf16_x86_64_v4(uint32_t exec_mask, uint32_t mode, uint32_t *d, const uint32_t *a,
+                         const uint32_t *b, const uint32_t *c);
 
 // Evaluate literal fma for the caller-selected operation. Preserve destination lanes outside
 // exec_mask.
