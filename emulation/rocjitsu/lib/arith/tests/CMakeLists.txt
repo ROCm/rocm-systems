@@ -242,7 +242,33 @@ endforeach()
 
 
 # Scalar families keep required SCC/EXEC results distinct from FP status.
-
+foreach(family IN ITEMS
+    boolean
+    shift
+    move
+    field
+    count
+    pack
+    arithmetic
+    compare_integer
+    compare_float
+    exec
+    fp
+    round
+    conversion
+    state
+    relative
+    pseudo
+)
+  set(target "rj_arith_scalar_${family}_test")
+  add_executable(${target} scalar/${family}_test.cpp)
+  target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -pedantic)
+  endif()
+  gtest_discover_tests(${target} TEST_PREFIX "rj_arith.")
+endforeach()
 
 # Math families share unary layouts, with independent loose and exact references.
 foreach(family IN ITEMS
