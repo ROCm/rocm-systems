@@ -397,7 +397,12 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
       copy_or_na(port_info->type, port.port_type());
       copy_or_na(port_info->flavour, port.flavour());
 
-      port_info->ifindex = port.ifindex().value_or(0);
+      // The public field is one byte; an index that does not fit reads 0, and
+      // smi_get_nic_port_ifindex() returns the whole value.
+      const auto ifindex = port.ifindex().value_or(0);
+      port_info->ifindex = (ifindex <= std::numeric_limits<uint8_t>::max())
+                               ? static_cast<uint8_t>(ifindex)
+                               : uint8_t{0};
 
       copy_or_na(port_info->mac_address, port.mac_address().value_or(""));
 
@@ -536,6 +541,32 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
     return SMI_NIC_STATUS_NO_DATA;
   }
 
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
+smi_nic_status_t smi_get_nic_port_ifindex(smi_nic_ctx_t ctx, uint64_t device, uint32_t port_index,
+                                          uint32_t* ifindex) {
+  if (!ctx || !ifindex) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+
+  auto* nic_system = get_nic_system_from_context(ctx);
+  if (!nic_system) {
+    return SMI_NIC_STATUS_NOT_INIT;
+  }
+
+  std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+  const SmiNic* nic = nic_system->get_nic_by_bdf(device);
+  if (!nic) {
+    return SMI_NIC_STATUS_NOT_FOUND;
+  }
+
+  const auto& ports = nic->nic_ports();
+  if (port_index >= ports.size()) {
+    return SMI_NIC_STATUS_NOT_FOUND;
+  }
+
+  *ifindex = ports[port_index].ifindex().value_or(0);
   return SMI_NIC_STATUS_SUCCESS;
 }
 

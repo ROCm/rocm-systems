@@ -24,6 +24,7 @@ _NIC_TYPE_AINIC = 1
 _NIC_TYPE_UALOE = 2
 _NIC_TYPE_OTHER = 3
 _UNDEFINED_NIC_TYPE = 9
+_CAPABILITY_BITMASK = 0x5
 _STATUS_SUCCESS = 0
 _STATUS_FAILURE = 1
 
@@ -202,12 +203,23 @@ class TestNicTypeLabel(unittest.TestCase):
 class TestAinicInfoSummaryType(unittest.TestCase):
     """The summary dict that list --nic renders carries the display name under "Type"."""
 
-    def _summary(self, reported_type: int, vendor_name: str) -> Dict[str, object]:
-        namespace = _namespace(0)
+    def _summary(
+        self, reported_type: int, vendor_name: str, capability: int = 0, info_handle: object = None
+    ) -> Dict[str, object]:
+        namespace = _namespace(reported_type)
+        self.wrapper = namespace["amdsmi_wrapper"]
+        info_handle = info_handle if info_handle is not None else _FakeHandle()
+
+        def fake_get_nic_capability(handle: object, out: ctypes.pointer) -> int:
+            self.assertIs(handle, info_handle)
+            out._obj.value = capability
+            return _STATUS_SUCCESS
+
+        namespace["amdsmi_wrapper"].amdsmi_get_nic_capability = fake_get_nic_capability
         namespace.update(
             {
                 "_format_bdf": lambda bdf: "0000:01:00.0",
-                "_decode_nic_capabilities": lambda bitmask: [],
+                "_decode_nic_capabilities": lambda bitmask: [bitmask],
             }
         )
         _load_definitions(
@@ -216,21 +228,34 @@ class TestAinicInfoSummaryType(unittest.TestCase):
                 "_NIC_TYPE_LABELS",
                 "_nic_type_from_value",
                 "_nic_type_label",
+                "amdsmi_get_nic_type",
+                "amdsmi_get_nic_capability",
                 "amdsmi_get_ainic_info_summary",
             ],
             namespace,
         )
+        # amdsmi_nic_asic_info_t no longer carries type or capability; the summary reads them
+        # through the getters, with the handle the info object was built from.
         asic = types.SimpleNamespace(
-            type=reported_type,
-            capability=0,
             permanent_address=b"aa:bb",
             product_name=b"product",
             part_number=b"part",
             serial_number=b"serial",
             vendor_name=vendor_name.encode("utf-8"),
         )
-        nic_info = types.SimpleNamespace(bus=types.SimpleNamespace(bdf=0), asic=asic)
+        nic_info = types.SimpleNamespace(
+            handle=info_handle, bus=types.SimpleNamespace(bdf=0), asic=asic
+        )
         return namespace["amdsmi_get_ainic_info_summary"](nic_info)
+
+    def test_the_type_getter_is_given_the_info_object_handle(self) -> None:
+        handle = _FakeHandle()
+        self._summary(_NIC_TYPE_AINIC, "AMD", info_handle=handle)
+        self.assertEqual(self.wrapper.calls, [handle])
+
+    def test_capability_comes_from_the_capability_getter(self) -> None:
+        summary = self._summary(_NIC_TYPE_AINIC, "AMD", capability=_CAPABILITY_BITMASK)
+        self.assertEqual(summary["Capability"], [_CAPABILITY_BITMASK])
 
     def test_ainic_reports_ainic(self) -> None:
         self.assertEqual(
