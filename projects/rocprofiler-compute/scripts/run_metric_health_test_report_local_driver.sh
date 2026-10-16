@@ -339,7 +339,7 @@ remote_rsync() {
 remote_scp() {
   if [[ "$TRANSPORT" == "ssh-pass" ]]; then
     if [[ -n "${REMOTE_PASS:-}" ]] && command -v sshpass >/dev/null 2>&1; then
-      SSHPASS="${REMOTE_PASS}" scp -o StrictHostKeyChecking=no \
+      SSHPASS="${REMOTE_PASS}" sshpass -e scp -o StrictHostKeyChecking=no \
         -o PreferredAuthentications=password -o PubkeyAuthentication=no \
         -o ProxyCommand="${PROXY}" "$@"
     else
