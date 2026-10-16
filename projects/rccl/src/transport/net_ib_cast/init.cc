@@ -662,10 +662,14 @@ ncclResult_t IbCastInitDevices(ncclDebugLogger_t logFunction, ncclProfilerCallba
            IbCastAinicCtsInlineData ? "Enabled" : "Disabled", IbCastOffloadEnabled ? "Enabled" : "Disabled",
            IbCastUseInline ? "Enabled" : "Disabled", IbCastGdrFlushDisable ? "Disabled" : "Enabled");
 
-      if (rcclParamIbCastUDMAPolicy() < 0 || rcclParamIbCastUDMAPolicy() > 3) {
-        WARN("NET/IB : RCCL_IB_UDMA_POLICY=%ld is invalid (must be 0-3). Using RCCL_IB_UDMA_POLICY=0.",
-             rcclParamIbCastUDMAPolicy());
+      int64_t udmaPolicy = rcclParamIbCastUDMAPolicy();
+      if (udmaPolicy < (int64_t)ncclIbCastUDMAPolicy::First || udmaPolicy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+        WARN("NET/IB : RCCL_IB_UDMA_POLICY=%ld is invalid (must be %d-%d). Using RCCL_IB_UDMA_POLICY=%d.", udmaPolicy,
+             (int)ncclIbCastUDMAPolicy::First, (int)ncclIbCastUDMAPolicy::Last,
+             (int)ncclIbCastUDMAPolicy::ChannelAffinity);
+        udmaPolicy = (int64_t)ncclIbCastUDMAPolicy::ChannelAffinity;
       }
+      INFO(NCCL_INIT | NCCL_NET, "NET/IB : AINIC uDMA policy: %ld", udmaPolicy);
     }
   }
 exit:

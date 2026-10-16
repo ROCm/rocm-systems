@@ -66,33 +66,43 @@ struct ncclChannelToUd {
   bool udAllocated;
 };
 
-// Controls AINIC QP-to-UDMA assignment:
-//  - 0 pins every QP of a channel to one pipeline, chosen as channels are first seen
-//  - 1 round-robins P2P QPs in creation order and keeps collective channel affinity
-//  - 2 leaves the PD mask unchanged so the driver round-robins eligible pipelines
-//  - 3 splits each connection across both pipelines. Channel-id parity picks the
-//    starting pipeline and consecutive per-device QP indexes alternate.
+// Controls AINIC QP-to-UDMA assignment, see ncclIbCastUDMAPolicy. Values outside
+// the enum behave as ChannelAffinity (init.cc warns about them).
 RCCL_PARAM(IbCastUDMAPolicy, "IB_UDMA_POLICY", 0);
 static ncclChannelToUd nccl_channel_ud_map[MAX_IB_DEVS][MAXCHANNELS][ncclIbChannelTypeMax];
 static bool nccl_channel_last_ud[MAX_IB_DEVS][ncclIbChannelTypeMax];
 static std::atomic<unsigned int> nccl_p2p_udma_idx[MAX_IB_DEVS] = {};
+// The PD is shared by all comms on a device and its uDMA mask takes effect at
+// QP creation. This lock spans selection through ibv_create_qp; it is separate
+// from ncclIbDev::mutex so QP creation does not serialize against MR registration.
+static std::mutex nccl_udma_mutex[MAX_IB_DEVS];
+static bool nccl_udma_mask_warned[MAX_IB_DEVS];
 
 constexpr int8_t ncclIbCastUDMANone = (int8_t)-1;
 constexpr int8_t ncclIbCastUDMALow = (int8_t)IONIC_UDMA_MASK_LOW;
 constexpr int8_t ncclIbCastUDMAHigh = (int8_t)IONIC_UDMA_MASK_HIGH;
 
+static ncclIbCastUDMAPolicy ncclIbCastGetUDMAPolicy() {
+  int64_t policy = rcclParamIbCastUDMAPolicy();
+  if (policy < (int64_t)ncclIbCastUDMAPolicy::First || policy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+    return ncclIbCastUDMAPolicy::ChannelAffinity;
+  }
+  return (ncclIbCastUDMAPolicy)policy;
+}
+
 static int8_t ncclIbCastSelectUDMA(const struct ncclIbQpCreateAttr* createQpAttrs) {
-  if (rcclParamIbCastUDMAPolicy() == 2) {
+  const ncclIbCastUDMAPolicy policy = ncclIbCastGetUDMAPolicy();
+  if (policy == ncclIbCastUDMAPolicy::DriverDefault) {
     return ncclIbCastUDMANone;
   }
 
-  if (rcclParamIbCastUDMAPolicy() == 3) {
+  if (policy == ncclIbCastUDMAPolicy::SplitConnection) {
     const bool highUd = __builtin_parity(static_cast<unsigned>(createQpAttrs->channelId)) ^
-                        (createQpAttrs->qpIndexInDev & 1);
+                        (createQpAttrs->qpIdx & 1);
     return highUd ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;
   }
 
-  if ((rcclParamIbCastUDMAPolicy() == 1) && createQpAttrs->isP2p) {
+  if ((policy == ncclIbCastUDMAPolicy::P2pRoundRobin) && createQpAttrs->isP2p) {
     unsigned int udmaIdx = nccl_p2p_udma_idx[createQpAttrs->ibDevN].fetch_add(1, std::memory_order_relaxed);
     bool useHighUdma = (udmaIdx & 1) != 0;
     return useHighUdma ? ncclIbCastUDMAHigh : ncclIbCastUDMALow;
@@ -547,17 +557,22 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
     qpInitAttr.sq_sig_all &= (~(1 << 25));
   }
 
-  // The PD is shared and its uDMA mask takes effect at QP creation. Hold the
-  // device lock from selection through ibv_create_qp so concurrent creators
-  // cannot overwrite the mask, and so policy 0's channel map stays consistent.
-  std::lock_guard<std::mutex> lock(IbCastDevs[createQpAttrs->ibDevN].mutex);
+  {
+    // Hold the uDMA lock from selection through ibv_create_qp so concurrent
+    // creators cannot overwrite the PD mask, and so the channel map stays consistent.
+    std::lock_guard<std::mutex> lock(nccl_udma_mutex[createQpAttrs->ibDevN]);
 
-  int8_t udma_id = ncclIbCastSelectUDMA(createQpAttrs);
-  if (udma_id != ncclIbCastUDMANone) {
-    wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, (uint8_t)udma_id);
+    int8_t udma_id = ncclIbCastSelectUDMA(createQpAttrs);
+    if (udma_id != ncclIbCastUDMANone &&
+        wrap_ionicdv_pd_set_udma_mask(createQpAttrs->pd, (uint8_t)udma_id) != ncclSuccess &&
+        !nccl_udma_mask_warned[createQpAttrs->ibDevN]) {
+      nccl_udma_mask_warned[createQpAttrs->ibDevN] = true;
+      WARN("NET/IB : %s: ionic_dv_pd_set_udma_mask failed, QPs keep the PD's current uDMA mask",
+           IbCastDevs[createQpAttrs->ibDevN].devName);
+    }
+
+    NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
   }
-
-  NCCLCHECK(wrap_ibv_create_qp(&qp->qp, createQpAttrs->pd, &qpInitAttr));
   if (wrap_ionicdv_qp_set_gda(qp->qp, false, true) != ncclSuccess) {
     static std::once_flag gdaWarnOnce;
     std::call_once(gdaWarnOnce, []() {
@@ -573,7 +588,7 @@ static ncclResult_t ncclIbCreateQpIonic(struct ncclIbQpCreateAttr* createQpAttrs
 // channelId and isDataQp from the saved ncclIbQp fields — these control
 // AINIC driver behavior (UDMA load balancing and sq_sig_all feature flags)
 // and differ between sender QPs (isDataQp=true) and receiver QPs (isDataQp=false).
-// UDMA policy 3 also requires qpIndexInDev (qpIndex / ndevs); flush QPs leave it 0.
+// UDMA SplitConnection also requires qpIdx (see IbCastQpStripe); flush QPs leave it 0.
 void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, struct ncclIbQpCreateAttr* out) {
   memset(out, 0, sizeof(*out));
   out->type = IBV_QPT_RC;
@@ -966,7 +981,8 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     // on the devices as follows:
     // Dev0 -> QP0, QP2
     // Dev1 -> QP1, QP3
-    uint devIndex = qpIndex % comm->base.vProps.ndevs;
+    int devIndex;
+    NCCLCHECK(IbCastQpStripe(qpIndex, comm->base.vProps.ndevs, &devIndex, &qpCreateAttrs.qpIdx));
     ncclIbSendCommDev* commDev = &comm->devs[devIndex];
     ncclIbDev* ibDev = &IbCastDevs[commDev->base.ibDevN];
     ncclIbQp* localQp = &comm->base.qps[qpIndex];
@@ -980,11 +996,9 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     qpCreateAttrs.isCtsEnabled = comm->useCtsOffload;
     qpCreateAttrs.isDataQp = true;
     qpCreateAttrs.channelId = channelId;
-    qpCreateAttrs.qpIndexInDev = qpIndex / comm->base.vProps.ndevs;
     qpCreateAttrs.ibDevN = commDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = comm->base.isP2p;
-    qpCreateAttrs.qpIdx = qpIndex / comm->base.vProps.ndevs;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
       if (ibDev->ar == 0) {
@@ -1777,7 +1791,8 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     // on the devices as follows:
     // Dev0 -> QP0, QP2
     // Dev1 -> QP1, QP3
-    uint devIndex = qpIndex % rComm->base.vProps.ndevs;
+    int devIndex;
+    NCCLCHECK(IbCastQpStripe(qpIndex, rComm->base.vProps.ndevs, &devIndex, &qpCreateAttrs.qpIdx));
     ncclIbRecvCommDev* rCommDev = &rComm->devs[devIndex];
     ncclIbDev* ibDev = &IbCastDevs[rCommDev->base.ibDevN];
     ncclIbQpInfo* remQpInfo = &remMeta->qpInfo[qpIndex];
@@ -1797,11 +1812,9 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
     qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
     qpCreateAttrs.isDataQp = false;
     qpCreateAttrs.channelId = channelId;
-    qpCreateAttrs.qpIndexInDev = qpIndex / rComm->base.vProps.ndevs;
     qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
     qpCreateAttrs.useIonic = IbCastAinicRoce;
     qpCreateAttrs.isP2p = rComm->base.isP2p;
-    qpCreateAttrs.qpIdx = qpIndex / rComm->base.vProps.ndevs;
 
     if (rComm->base.resiliency) {
       IbCastResiliencyDataRqSizeGet(rComm->base.resiliency, devIndex, &qpCreateAttrs.maxRecvWorkRequest);

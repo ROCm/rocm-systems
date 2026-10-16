@@ -55,16 +55,26 @@ struct ncclIbQpCreateAttr {
   bool isCtsEnabled;
   int8_t ctsQpSlot;
   int channelId;
-  // Per-device QP ordinal for policy 3. Unlike qpIdx, IbCastQpCreateAttrInitSharing does not reset it.
-  int qpIndexInDev;
   int ibDevN;
   bool useIonic;
   int isP2p;
   bool isQpSharingEnabled;
   int  cqDepthMultiplier;
   int  qpSharingGroupIdx;
-  int  qpIdx;               // Per-device QP ordinal (for intra-group UDMA alternation)
+  int  qpIdx;               // Per-device QP ordinal (for UDMA alternation)
 };
+
+// QPs are striped across a comm's devices: QP qpIndex lives on device
+// qpIndex % ndevs and is that device's (qpIndex / ndevs)-th QP.
+static inline ncclResult_t IbCastQpStripe(int qpIndex, int ndevs, int* devIndex, int* qpIdxInDev) {
+  if (ndevs <= 0) {
+    WARN("NET/IB : invalid device count %d while striping QP %d", ndevs, qpIndex);
+    return ncclInternalError;
+  }
+  *devIndex = qpIndex % ndevs;
+  *qpIdxInDev = qpIndex / ndevs;
+  return ncclSuccess;
+}
 
 // Per-QP connection metatdata
 struct ncclIbQpInfo {
