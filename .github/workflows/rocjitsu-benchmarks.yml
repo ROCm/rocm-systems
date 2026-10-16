@@ -75,6 +75,7 @@ jobs:
             libclang-rt-dev \
             libdrm-dev \
             libomp-dev \
+            libzstd-dev \
             ninja-build \
             python3-dev \
             zlib1g-dev
