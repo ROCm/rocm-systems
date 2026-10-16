@@ -1806,7 +1806,7 @@ write_rocpd(
     for(const auto& itr : tool_metadata.get_counter_dimension_info())
         add_string_entry(_metadata, itr.name);
 
-    add_string_entry(_metadata, "SPM");
+    add_string_entry(_metadata, "SPM", "PC_SAMPLING");
 
     auto thread_ids = std::set<rocprofiler_thread_id_t>{};
     auto stream_set = std::unordered_set<rocprofiler_stream_id_t>{};
@@ -3146,6 +3146,7 @@ write_rocpd(
     auto insert_pc_sampling_data = [&db,
                                     &cfg,
                                     &tool_metadata,
+                                    &string_entries,
                                     &disasm_seen,
                                     node_id,
                                     this_pid,
@@ -3153,8 +3154,9 @@ write_rocpd(
                                     &dispatch_pc_context](const auto& pc_sampling_gen) {
         if(pc_sampling_gen.empty()) return;
 
-        auto _sqlgenperf_rocpd = get_simple_timer("rocpd_gpu_pc_sample");
-        auto _deferred         = sql::deferred_transaction{db.conn};
+        auto       _sqlgenperf_rocpd = get_simple_timer("rocpd_gpu_pc_sample");
+        auto       _deferred         = sql::deferred_transaction{db.conn};
+        const auto category_id       = string_entries.at("PC_SAMPLING");
 
         // Method selects which reusable groups compose the layout: host-trap uses hw_id +
         // wave/workgroup; stochastic additionally appends the snapshot group.
@@ -3294,6 +3296,8 @@ write_rocpd(
                 const auto sample_event_id = create_event(
                     db,
                     {
+                        insert_value("category_id", category_id),
+                        insert_value("stack_id", record.correlation_id.internal),
                         insert_value("correlation_id", record.correlation_id.external.value),
                         insert_nullable_value("parent_id", parent_event_id),
                     });
@@ -3322,7 +3326,7 @@ write_rocpd(
                         insert_nullable_value("agent_id", agent_id),
                         insert_value("event_id", static_cast<int64_t>(sample_event_id)),
                         insert_value("dispatch_id", record.dispatch_id),
-                        insert_value("correlation_id", record.correlation_id.internal),
+                        insert_value("correlation_id", record.correlation_id.external.value),
                         insert_value("exec_mask", record.exec_mask),
                         insert_value("code_object_id", record.pc.code_object_id),
                         insert_value("code_object_offset", record.pc.code_object_offset),

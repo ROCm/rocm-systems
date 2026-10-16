@@ -851,9 +851,11 @@ metadata::get_instruction_index(rocprofiler_pc_t record)
 }
 
 void
-metadata::add_decoder(rocprofiler_code_object_info_t* obj_data)
+metadata::add_decoder(rocprofiler_code_object_info_t* obj_data, bool capture_content_hash)
 {
-    auto add_content_hash = [this](uint64_t code_object_id, const char* data, size_t size) {
+    auto add_content_hash = [this, capture_content_hash](
+                                uint64_t code_object_id, const char* data, size_t size) {
+        if(!capture_content_hash) return;
         code_object_content_hashes.wlock(
             [](auto& _hashes, uint64_t _id, std::string _hash) { _hashes[_id] = std::move(_hash); },
             code_object_id,
@@ -864,7 +866,7 @@ metadata::add_decoder(rocprofiler_code_object_info_t* obj_data)
     {
         if(obj_data->uri == nullptr) throw std::runtime_error("Empty filepath.");
 
-        // Read the object once: the same bytes are hashed and handed to the decoder.
+        // Read the object once: the same bytes are used for optional hashing and decoding.
         auto binary = rocprofiler::sdk::codeobj::disassembly::CodeObjectBinary{obj_data->uri};
         add_content_hash(obj_data->code_object_id, binary.buffer.data(), binary.buffer.size());
         decoder.wlock(
