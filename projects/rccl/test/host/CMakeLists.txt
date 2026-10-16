@@ -1077,6 +1077,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
 # ---------------------------------------------------------------------------
 rccl_add_micro_binary(rccl-UnitTestsMicroTopo
   SOURCES ${TEST_MICRO_TOPO_SOURCE_FILES}
+  REMOVE_DEFS ENABLE_WARP_SPEED
   EXTRA_DEFS
     ${_MICRO_MODE_DEFS}
     ${_MICRO_AMDSMI_DEF}
