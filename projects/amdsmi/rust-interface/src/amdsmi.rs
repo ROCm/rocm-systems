@@ -1,7 +1,11 @@
 // Copyright Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
+// Unit tests can provide mock C symbols in the test executable.
+#[cfg(any(not(feature = "dynamic-loading"), test))]
 use crate::amdsmi_wrapper;
+#[cfg(all(feature = "dynamic-loading", not(test)))]
+use crate::runtime as amdsmi_wrapper;
 use crate::utils::*;
 use libc::free;
 use std::mem::MaybeUninit;

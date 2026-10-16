@@ -84,6 +84,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - Adds `ppod_mask`, `vpod_mask`, and `station_mask`, reporting which fields the call actually read. A clear bit means the corresponding field holds its sentinel, which distinguishes "not published by the driver" from a real value that happens to equal the sentinel. The three words are carved from the existing `reserved` array, so `sizeof(amdsmi_fabric_info_v2_t)` is unchanged.
   - The Python `amdsmi_get_gpu_fabric_info()` requests the new layout automatically; its dictionary gains the three mask keys and is otherwise unchanged.
 
+- **Added an opt-in `dynamic-loading` feature to the Rust bindings**.  
+  - `libamd_smi.so` is loaded on the first API call instead of being linked at build time, so applications build and start without AMD SMI installed. `AMDSMI_LIB_DIR` selects the library directory at runtime.
+
 ### Changed
 
 - **Use fwupd daemon to read and write UMA carveout information**.  
