@@ -22,7 +22,6 @@
 #include <timemory/components/network/types.hpp>
 #include <timemory/components/papi/types.hpp>
 #include <timemory/components/rusage/components.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/timing/components.hpp>
 #include <timemory/enum.h>
 #include <timemory/hash/types.hpp>

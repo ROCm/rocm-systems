@@ -25,7 +25,6 @@
 #include <timemory/components/papi/papi_vector.hpp>
 #include <timemory/components/rusage/components.hpp>
 #include <timemory/components/rusage/types.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
 #include <timemory/math.hpp>
@@ -51,6 +50,7 @@
 #include <sstream>
 #include <string>
 #include <string_view>
+#include <time.h>
 #include <type_traits>
 #include <vector>
 
@@ -293,6 +293,21 @@ cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t time
         });
     }
 }
+
+// CPU time used so far by the calling thread, in nanoseconds; 0 if the clock fails.
+// Async-signal-safe: sample() calls it from the sampler's signal handler.
+std::int64_t
+thread_cputime_ns() noexcept
+{
+    struct timespec cpu_time = {};
+    if(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_time) != 0)
+    {
+        return 0;
+    }
+    return (std::chrono::seconds{ cpu_time.tv_sec } +
+            std::chrono::nanoseconds{ cpu_time.tv_nsec })
+        .count();
+}
 }  // namespace
 
 void
@@ -313,7 +328,7 @@ backtrace_metrics::sample(int)
     }
 
     auto const _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu             = tim::get_clock_thread_now<std::int64_t, std::nano>();
+    m_cpu             = thread_cputime_ns();
     m_mem_peak        = _cache.get_peak_rss();
     m_ctx_swch        = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();

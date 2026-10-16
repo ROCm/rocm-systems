@@ -35,7 +35,6 @@
 #include <timemory/components/papi/extern.hpp>
 #include <timemory/components/papi/papi_array.hpp>
 #include <timemory/components/papi/papi_vector.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/components/trip_count/extern.hpp>
 #include <timemory/macros.hpp>
 #include <timemory/math.hpp>
