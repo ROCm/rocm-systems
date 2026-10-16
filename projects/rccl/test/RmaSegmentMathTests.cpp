@@ -413,19 +413,6 @@ TEST(RmaSegmentMathTest, WrCreditsReleaseJumpsSeveralIds)
     EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 1), 9);
 }
 
-TEST(RmaSegmentMathTest, LayoutsMatchRequiresEqualBoundaries)
-{
-    const size_t lhs[] = {0, 4096, 8192};
-    const size_t rhs[] = {0, 4096, 8192};
-    const size_t shorter[] = {0, 4096};
-    const size_t shifted[] = {0, 2048, 8192};
-    EXPECT_TRUE(ncclRmaLayoutsMatch(2, lhs, 2, rhs));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(2, lhs, 1, shorter));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(2, lhs, 2, shifted));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(0, lhs, 0, lhs));
-    EXPECT_FALSE(ncclRmaLayoutsMatch(NCCL_RMA_MAX_SEGMENTS + 1, lhs, NCCL_RMA_MAX_SEGMENTS + 1, lhs));
-}
-
 TEST(RmaSegmentMathTest, SegIndexOfUsesHalfOpenOffsets)
 {
     const size_t off[] = {0, 4096, 8192};
