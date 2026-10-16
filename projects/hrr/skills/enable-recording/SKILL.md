@@ -37,7 +37,7 @@ Each of these changes the result silently, and the first two are the ones that w
 - **`HIP_VISIBLE_DEVICES`**: changes which devices the workload sees and therefore what gets recorded. This skill never sets it. HIP's ordering is not `rocm-smi`'s, so device 4 here is not necessarily GPU 4 there; if you pin a device, confirm which one you got.
 - **`LD_PRELOAD` and `LD_LIBRARY_PATH`**: decide which runtime loads. `LD_PRELOAD` wins over everything, including a binary's own `DT_RPATH`; `LD_LIBRARY_PATH` is the one that loses to it. Winning the link is not the same as working, which is why preloading a runtime into a framework wheel breaks it. See step 1.
 - **`HRR_PLAYBACK` and `ROCM_PATH`**: where `verify` looks for `hrr-playback` when `--playback` is not given, in the same order as `ensure_playback.sh`: `HRR_PLAYBACK`, then `$ROCM_PATH/bin`, then `PATH`. The first reader found is often the wrong one.
-- **`HIP_HRR_DEBUG_ARGS`**: turns on capture's own argument logging, and raises the runtime's log level for the whole process, so the workload's output changes shape.
+- **`HIP_HRR_DEBUG_ARGS`**: turns on capture's own argument logging, and raises the runtime's log level for the whole process, so the workload's output changes shape. Only a Debug build of the HIP runtime reads it. A release runtime, which is what an installed ROCm has, ignores it and says so on stderr.
 - **`PYTORCH_HIP_ALLOC_CONF`**: changes how PyTorch sub-allocates, which changes what HIP sees and therefore what the archive holds. Capture what the failing run uses, not a tidier configuration.
 
 ## References
