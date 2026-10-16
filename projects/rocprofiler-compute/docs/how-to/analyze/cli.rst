@@ -55,11 +55,62 @@ There are three high-level GPU analysis views:
 
 .. code-block:: shell-session
 
-   $ rocprof-compute analyze -p workloads/vcopy/MI200/ -b 3
+   $ rocprof-compute analyze -p workloads/vcopy/MI350/ -b 3
 
-.. image:: ../../data/analyze/cli/mem_chart.png
-   :align: left
-   :alt: Memory Chart
+.. code-block:: text
+
+   3. Memory Chart (Normalization: per_kernel)
+                                                                                                                   ╭──────────────────────╮
+                                                                                                                   │ xGMI (to Peer GPU)   │
+                                                                                                                   ╰──────────────────────╯
+                                                                                                                      ||  Read BW    0.000 GB/s
+                                                                                                                      ||  Write BW   0.000 GB/s
+                                                                                                                      ||  Atomic BW  0.000 GB/s
+   |-------------------------------------------------- GPU (XCD) --------------------------------------------------|------------------------------------------ Fabric / Memory ------------------------------------------|
+
+   ╭── Compute Units ───╮Non-buffer Request╭─────── VL1D ───────╮Read BW      ╭──────── L2 ────────╮               ╭─── Data Fabric ────╮               ╭─────── MALL ───────╮╭─────── UMC ────────╮╭─────── HBM ────────╮
+   │ Wave Occ 75.1%     │Read   : 1.64e+04 │ Hit 62.0%          │1513.097 GB/s│ Hit 34.0%          │               │                    │               │                    ││                    ││ Read BW            │
+   │ vGPRs 4.0          │<---------------  │ ██████░░░░         │<----------- │ ███░░░░░░░         │               │                    │               │                    ││                    ││ 1513.882 GB/s      │
+   │ sGPRs 16.0         │Write  : 1.64e+04 │                    │             │                    │               │                    │               │                    ││                    ││                    │
+   │ Scratch/Wave       │--------------->  │ Coalesce 25.0%     │Write BW     │                    │               │                    │               │                    ││                    ││ Write BW           │
+   │ 0.000 KB           │Atomic :       0  │ ██░░░░░░░░         │1513.097 GB/s│                    │               │                    │               │                    ││                    ││ 1513.097 GB/s      │
+   │ LDS Alloc 0.0 KB   │<-------------->  │                    │-----------> │                    │               │                    │               │                    ││                    ││                    │
+   │ Workgroups/CU 62.1 │Buffer Request    │                    │             │                    │               │                    │               │                    ││                    ││ Atomic BW          │
+   │                    │Read   :       0  │                    │Atomic BW    │                    │               │                    │               │                    ││                    ││ 0.000 GB/s         │
+   │                    │<---------------  │                    │0.000 GB/s   │                    │               │                    │               │                    ││                    ││                    │
+   │                    │Write  :       0  │                    │<----------> │                    │               │                    │               │                    ││                    ││                    │
+   │                    │--------------->  │                    │             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │Atomic :       0  │                    │             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │<-------------->  │                    │             │                    │Read BW        │                    │Read BW        │                    ││                    ││                    │
+   │                    │                  │                    │             │                    │1513.882 GB/s  │                    │1513.882 GB/s  │                    ││                    ││                    │
+   │                    │                  ╰────────────────────╯             │                    │<-----------   │                    │<-----------   │                    ││                    ││                    │
+   │                    │Read   :       0  ╭─────── LDS ────────╮             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │<---------------  │ Util 0.0%          │             │                    │Write/Atomic BW│                    │Write/Atomic BW│                    ││                    ││                    │
+   │                    │Write  :       0  │ ░░░░░░░░░░         │             │                    │1513.097 GB/s  │                    │1513.097 GB/s  │                    ││                    ││                    │
+   │                    │--------------->  │                    │             │                    │----------->   │                    │----------->   │                    ││                    ││                    │
+   │                    │Atomic :       0  │                    │             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │<-------------->  │                    │             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │Instr  :       0  │                    │             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │<-------------->  │                    │             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │                  │                    │             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │                  ╰────────────────────╯             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │SMEM              ╭─────── sL1D ───────╮Read BW      │                    │               │                    │               │                    ││                    ││                    │
+   │                    │Read   : 6.55e+04 │ Hit 93.0%          │1.674 GB/s   │                    │               │                    │               │                    ││                    ││                    │
+   │                    │<---------------  │ █████████░         │<----------- │                    │               │                    │               │                    ││                    ││                    │
+   │                    │                  ╰────────────────────╯             │                    │               │                    │               │                    ││                    ││                    │
+   │                    │ICACHE            ╭─────── L1I ────────╮Read BW      │                    │               │                    │               │                    ││                    ││                    │
+   │                    │Read   : 6.55e+04 │ Hit 93.0%          │6.696 GB/s   │                    │               │                    │               │                    ││                    ││                    │
+   │                    │<---------------  │ █████████░         │<----------- │                    │               │                    │               │                    ││                    ││                    │
+   ╰────────────────────╯                  ╰────────────────────╯             ╰────────────────────╯               ╰────────────────────╯               ╰────────────────────╯╰────────────────────╯╰────────────────────╯
+
+                                                                                                                      ||  Read BW    0.000 GB/s
+                                                                                                                      ||  Write BW   0.000 GB/s
+                                                                                                                      ||  Atomic BW  0.000 GB/s
+                                                                                                        ╭────────────────────────────────────────────╮
+                                                                                                        │ PCIe (to CPU or Non-xGMI connected GPU)    │
+                                                                                                        ╰────────────────────────────────────────────╯
+
+   Legend: <---- Read  ----> Write  <---> Atomic  █ Util  █ Hit%
 
 .. _cli-memory-chart-viewing:
 
@@ -365,6 +416,11 @@ More analysis options
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-stats
 
+.. note::
+
+   ``--list-stats`` supports the default ``stdout`` output and ``--output-format txt``.
+   Combining it with ``--output-format csv`` or ``--output-format db`` exits with an error.
+
 
 **List metrics**
 
@@ -633,6 +689,8 @@ Use the ``--output-format <format>`` analyze mode option to specify the output f
 analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``. The default output
 format is ``stdout``.
 
+``--list-stats`` is available only with ``stdout`` and ``txt`` output.
+
 * ``stdout`` format:
    * Print analysis report to the terminal.
    * NOTE: This option will not generate any file or folder.
@@ -730,9 +788,6 @@ PyTorch operator analysis
 =========================
 
 .. warning::
-
-   PyTorch operator analysis is currently available only in CLI mode. GUI and TUI
-   will provide different interfaces for operator selection and visualization.
 
    These options require ``--experimental``. After profiling with
    ``--experimental --torch-trace`` (see :ref:`torch-operator-profiling`),
@@ -843,8 +898,7 @@ Triton operator analysis
 
 .. warning::
 
-   Triton operator analysis is currently available only in CLI mode and
-   requires ``--experimental``. After profiling with
+   Triton operator analysis requires ``--experimental``. After profiling with
    ``--experimental --triton-trace`` (see :ref:`triton-trace`), use
    ``rocprof-compute analyze ... --experimental`` with
    ``--list-triton-operators`` or ``--triton-operator`` as needed.

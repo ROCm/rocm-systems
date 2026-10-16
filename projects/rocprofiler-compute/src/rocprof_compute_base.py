@@ -70,9 +70,8 @@ class RocProfCompute:
         assert self.__args is not None
         self.__mode = self.__args.mode
 
-        gui_value = getattr(self.__args, "gui", None)
         self.__loglevel = setup_logging_priority(
-            self.__args.verbose, self.__args.quiet, self.__mode, gui_value
+            self.__args.verbose, self.__args.quiet, self.__mode
         )
         setattr(self.__args, "loglevel", self.__loglevel)
         reconfigure_stdio_utf8()
@@ -139,19 +138,7 @@ class RocProfCompute:
             )
 
     def detect_analyze(self) -> None:
-        if self.__args.gui:
-            console_warning(
-                "--gui is deprecated and will be removed in a future release. "
-                "Use the default CLI analysis instead."
-            )
-            self.__analyze_mode = "web_ui"
-        elif self.__args.tui:
-            console_warning(
-                "--tui is deprecated and will be removed in a future release. "
-                "Use the default CLI analysis instead."
-            )
-            self.__analyze_mode = "tui"
-        elif self.__args.output_format in ("db", "csv"):
+        if self.__args.output_format in ("db", "csv"):
             self.__analyze_mode = "db"
         else:
             self.__analyze_mode = "cli"
@@ -308,28 +295,19 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        if args.list_stats and args.output_format in ("csv", "db"):
+            console_error(
+                "--list-stats cannot be used with --output-format "
+                f"{args.output_format}. "
+                "Use --output-format stdout or txt, or remove --list-stats."
+            )
+
         operator_filter = (
             args.torch_operator is not None or args.triton_operator is not None
         )
         operator_listing = args.list_torch_operators or args.list_triton_operators
 
         if operator_filter or operator_listing:
-            if args.gui is not None:
-                console_error(
-                    "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are not "
-                    "supported in --gui mode. Please remove --gui or run "
-                    "without the operator flags.",
-                )
-            if args.tui:
-                console_error(
-                    "ml api trace",
-                    "Operator flags (--torch-operator, --triton-operator, "
-                    "--list-torch-operators, --list-triton-operators) are not "
-                    "supported in --tui mode. Please remove --tui or run "
-                    "without the operator flags.",
-                )
             if args.output_format != "stdout":
                 console_error(
                     "ml api trace",
@@ -723,15 +701,6 @@ class RocProfCompute:
             from rocprof_compute_analyze.analysis_cli import cli_analysis
 
             analyzer = cli_analysis(self.__args, self.__supported_archs)
-        elif self.__analyze_mode == "web_ui":
-            from rocprof_compute_analyze.analysis_webui import webui_analysis
-
-            analyzer = webui_analysis(self.__args, self.__supported_archs)
-        elif self.__analyze_mode == "tui":
-            from rocprof_compute_tui.tui_app import run_tui
-
-            run_tui(self.__args, self.__supported_archs)
-            return
         elif self.__analyze_mode == "db":
             from rocprof_compute_analyze.analysis_db import db_analysis
 
