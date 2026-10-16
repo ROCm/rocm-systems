@@ -3,15 +3,8 @@
 (function () {
   "use strict";
 
-  var modelEl = document.getElementById("roofline-model");
-  if (!modelEl) {
-    return;
-  }
-
-  var model;
-  try {
-    model = JSON.parse(modelEl.textContent);
-  } catch (err) {
+  var model = window.HtmlReport.readModel("roofline-model");
+  if (!model) {
     return;
   }
 
@@ -83,7 +76,6 @@
   var applyingFrame = false;
   var rangeOperationCounter = 0;
   var activeRangeOperation = 0;
-  var themeIsReaderChoice = false;
 
   // ---- Data initialized from the model -------------------------------------
   var kernels = model.kernels;
@@ -534,45 +526,6 @@
         { "marker.line.color": theme.markerOutline },
         kernelTraceIndices
       );
-    }
-  }
-
-  function themeIsDark() {
-    return document.documentElement.classList.contains("roofline-theme-dark");
-  }
-
-  function syncThemeToggle() {
-    if (!themeToggleBtn) {
-      return;
-    }
-    var dark = themeIsDark();
-    themeToggleBtn.textContent = dark ? "Light mode" : "Dark mode";
-    themeToggleBtn.setAttribute("aria-pressed", String(dark));
-    themeToggleBtn.title = dark
-      ? "Switch the page and chart to light colors"
-      : "Switch the page and chart to dark colors";
-  }
-
-  function setTheme(dark) {
-    document.documentElement.classList.toggle("roofline-theme-dark", dark);
-    syncThemeToggle();
-    applyPlotTheme();
-  }
-
-  function watchSystemTheme() {
-    if (typeof window.matchMedia !== "function") {
-      return;
-    }
-    var query = window.matchMedia("(prefers-color-scheme: dark)");
-    var onChange = function (event) {
-      if (!themeIsReaderChoice) {
-        setTheme(event.matches);
-      }
-    };
-    if (typeof query.addEventListener === "function") {
-      query.addEventListener("change", onChange);
-    } else if (typeof query.addListener === "function") {
-      query.addListener(onChange);
     }
   }
 
@@ -1697,12 +1650,6 @@
     if (exportPngBtn) {
       exportPngBtn.addEventListener("click", exportPng);
     }
-    if (themeToggleBtn) {
-      themeToggleBtn.addEventListener("click", function () {
-        themeIsReaderChoice = true;
-        setTheme(!themeIsDark());
-      });
-    }
     if (gd && typeof gd.on === "function") {
       gd.on("plotly_doubleclick", resetView);
       gd.on("plotly_relayout", function (payload) {
@@ -1810,8 +1757,7 @@
       runtimeFilterEl.style.display = "none";
     }
     initRuntimeSlider();
-    syncThemeToggle();
-    watchSystemTheme();
+    window.HtmlReport.initTheme(themeToggleBtn, applyPlotTheme);
     whenPlotReady(function () {
       wireEvents();
       observePlotContainer();
