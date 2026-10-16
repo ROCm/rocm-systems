@@ -118,7 +118,7 @@ ncclResult_t bootstrapIntraNodeAllGather(void*, int* ranks, int rank, int nranks
   int per = size / (int)sizeof(float);
   g_allGathers.push_back({ranks, rank, nranks, size, std::vector<float>(data + rank * per, data + (rank + 1) * per)});
   if (g_allGatherResult != ncclSuccess) return g_allGatherResult;
-  for (int r = 0; r < 8; ++r) {
+  for (int r = 0; r < nranks; ++r) {
     if (r == rank) continue;
     for (int i = 0; i < per; ++i) data[r * per + i] = g_peerLatency;
   }
@@ -191,7 +191,7 @@ class CollTraceMicrotest : public ::testing::Test {
     comm_->rank = 0;
     comm_->cudaDev = 0;
     comm_->localRank = 1;
-    comm_->localRanks = 2;
+    comm_->localRanks = 8;  // CollTrace aggregates exactly eight local ranks
     comm_->localRankToRank = localRankToRank_;
     comm_->bootstrap = reinterpret_cast<void*>(0xb0);
   }
@@ -217,7 +217,7 @@ class CollTraceMicrotest : public ::testing::Test {
   }
 
   std::unique_ptr<ncclComm> comm_;
-  int localRankToRank_[2] = {4, 6};
+  int localRankToRank_[8] = {4, 6, 8, 10, 12, 14, 16, 18};
 };
 
 TEST_F(CollTraceMicrotest, Utils_SizeMbScalesByElementWidth) {
@@ -228,9 +228,8 @@ TEST_F(CollTraceMicrotest, Utils_SizeMbScalesByElementWidth) {
   for (const char* t : {"ncclInt64", "ncclUint64", "ncclFloat64"}) EXPECT_FLOAT_EQ(getSizeMb(t, n), 8.0f) << t;
 }
 
-// ncclDatatypeToString names FP8 "ncclFloat8e4m3"/"ncclFloat8e5m2", which the size table does not
-// know, so an FP8 (or Uint8) collective cannot be reported.
-TEST_F(CollTraceMicrotest, Utils_SizeMbRejectsUnknownTypes_Observed) {
+// The size table lacks ncclDatatypeToString's FP8 and Uint8 names; a fix flips this pin.
+TEST_F(CollTraceMicrotest, Utils_KnownBug_SizeMbRejectsUnknownTypes) {
   for (const char* t : {"ncclUint8", "ncclFloat8e4m3", "ncclFloat8e5m2"}) {
     try {
       getSizeMb(t, 1);
@@ -405,8 +404,8 @@ TEST_F(CollTraceMicrotest, Trace_CreateEventMakesStartAndStopEvents) {
   EXPECT_NE(event->start->getCudaEvent(), event->stop->getCudaEvent());
 }
 
-// The event is still handed out, with null HIP events.
-TEST_F(CollTraceMicrotest, Trace_EventCreateFailureIsOnlyLogged_Observed) {
+// The event is still handed out, with null HIP events; a fix flips this pin.
+TEST_F(CollTraceMicrotest, Trace_KnownBug_EventCreateFailureIsOnlyLogged) {
   CollTrace trace(comm_.get());
   g_eventCreateResult = hipErrorOutOfMemory;
 
@@ -429,7 +428,7 @@ TEST_F(CollTraceMicrotest, Trace_RingBoundaryAllGathersAndReports) {
   ASSERT_EQ(g_allGathers.size(), 1u);
   EXPECT_EQ(g_allGathers[0].ranks, localRankToRank_);
   EXPECT_EQ(g_allGathers[0].rank, 1);
-  EXPECT_EQ(g_allGathers[0].nranks, 2);
+  EXPECT_EQ(g_allGathers[0].nranks, 8);
   EXPECT_EQ(g_allGathers[0].size, (int)(2 * sizeof(float)));
   EXPECT_EQ(g_allGathers[0].mine, (std::vector<float>{2.0f, 10.0f}));
   std::vector<std::string> lines = DebugLogMatching("coll_id");
@@ -457,8 +456,8 @@ TEST_F(CollTraceMicrotest, Trace_RingBufferKeepsTheLastRecordMaxCollectives) {
   EXPECT_EQ(lines[3].find("coll_id 3,"), 0u);
 }
 
-// Gated on the worker's CUDA device, not on the rank.
-TEST_F(CollTraceMicrotest, Trace_OnlyDeviceZeroAggregates_Observed) {
+// Gated on the worker's CUDA device, not on the rank; a fix flips this pin.
+TEST_F(CollTraceMicrotest, Trace_KnownBug_OnlyDeviceZeroAggregates) {
   SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
   SetParam("NCCL_COLLTRACE_MAX_DUMP_SIZE", 1);
   comm_->cudaDev = 1;
@@ -546,6 +545,21 @@ TEST_F(CollTraceMicrotest, Trace_AggregationErrorIsLogged) {
   trace.reset();
 
   EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Aggregating error: CollTrace: latency value cannot be zero"));
+}
+
+// Aggregation reads eight ranks' slices, so the unfilled ones count as a failed all-gather; a fix flips this pin.
+TEST_F(CollTraceMicrotest, Trace_KnownBug_FewerThanEightLocalRanksReportNothing) {
+  SetParam("NCCL_COLLTRACE_RECORD_MAX", 1);
+  comm_->localRanks = 2;
+  auto trace = std::make_unique<CollTrace>(comm_.get());
+
+  Enqueue(trace.get(), 2.0f);
+  trace.reset();
+
+  ASSERT_EQ(g_allGathers.size(), 1u);
+  EXPECT_EQ(g_allGathers[0].nranks, 2);
+  EXPECT_TRUE(DebugLogged(NCCL_LOG_WARN, "Aggregating error: CollTrace: latency value cannot be zero"));
+  EXPECT_TRUE(DebugLogMatching("coll_id").empty());
 }
 
 TEST_F(CollTraceMicrotest, Trace_ReportErrorAtDestroyIsLogged) {

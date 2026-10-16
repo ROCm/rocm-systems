@@ -16,9 +16,12 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <chrono>
+#include <condition_variable>
 #include <ctime>
 #include <fstream>
 #include <map>
+#include <mutex>
 #include <set>
 #include <sstream>
 #include <string>
@@ -231,8 +234,8 @@ TEST_F(DebugMicrotest, Subsys_CaretExcludesTheListedNames) {
   EXPECT_EQ(SubsysFor("^INIT,NET"), ~(uint64_t)(NCCL_INIT | NCCL_NET));
 }
 
-// NCCL_DEBUG_SUBSYS documents ALLOC_HOST, but the runtime parser does not know it.
-TEST_F(DebugMicrotest, Subsys_AllocHostIsIgnored_Observed) {
+// NCCL_DEBUG_SUBSYS documents ALLOC_HOST, but the runtime parser does not know it; a fix flips this pin.
+TEST_F(DebugMicrotest, Subsys_KnownBug_AllocHostIsIgnored) {
   EXPECT_EQ(SubsysFor("ALLOC_HOST"), 0u);
 }
 
@@ -256,7 +259,8 @@ TEST_F(DebugMicrotest, WarnEnableDebugInfo_EmptyOrOutOfRangeKeepsThePreviousValu
   EXPECT_FALSE(ncclWarnSetDebugInfo);
 }
 
-TEST_F(DebugMicrotest, WarnEnableDebugInfo_SurvivesAResetWithoutIt_Observed) {
+// An unset variable keeps the previous value instead of the default; a fix flips this pin.
+TEST_F(DebugMicrotest, WarnEnableDebugInfo_KnownBug_SurvivesAResetWithoutIt) {
   g_env["NCCL_WARN_ENABLE_DEBUG_INFO"] = "1";
   Init();
   g_env.erase("NCCL_WARN_ENABLE_DEBUG_INFO");
@@ -264,8 +268,8 @@ TEST_F(DebugMicrotest, WarnEnableDebugInfo_SurvivesAResetWithoutIt_Observed) {
   EXPECT_TRUE(ncclWarnSetDebugInfo);
 }
 
-// The documented default is WARN,ATTN, but the runtime default is WARN only.
-TEST_F(DebugMicrotest, TimestampLevels_DefaultIsWarnOnly_Observed) {
+// The documented default is WARN,ATTN, but the runtime default is WARN only; a fix flips this pin.
+TEST_F(DebugMicrotest, TimestampLevels_KnownBug_DefaultIsWarnOnly) {
   Init();
   EXPECT_EQ(ncclDebugTimestampLevels, kWarn);
 }
@@ -284,8 +288,8 @@ TEST_F(DebugMicrotest, TimestampLevels_CaretExcludesTheListedLevels) {
   EXPECT_EQ(TimestampLevelsFor("^WARN,INFO"), ~(kWarn | kInfo));
 }
 
-// ATTN and ERROR are documented levels the runtime parser silently ignores.
-TEST_F(DebugMicrotest, TimestampLevels_AttnAndErrorAreIgnored_Observed) {
+// ATTN and ERROR are documented levels the runtime parser silently ignores; a fix flips this pin.
+TEST_F(DebugMicrotest, TimestampLevels_KnownBug_AttnAndErrorAreIgnored) {
   EXPECT_EQ(TimestampLevelsFor("ATTN,ERROR"), 0u);
 }
 
@@ -395,9 +399,8 @@ TEST_F(DebugMicrotest, DebugFile_IsLineBuffered) {
   EXPECT_EQ(ReadFile(dir_ + "/log"), "\nnode1:4242:77 [3] f:1 NCCL WARN w\n");
 }
 
-// A trailing '%' is echoed and ends the name. (The loop then reads past the string's NUL; this
-// value has a second NUL so that stays in bounds.)
-TEST_F(DebugMicrotest, DebugFile_TrailingPercentIsEchoed) {
+// A trailing '%' makes the loop read past the NUL (a second NUL keeps this in bounds); a fix flips this pin.
+TEST_F(DebugMicrotest, DebugFile_KnownBug_TrailingPercentReadsPastTheName) {
   g_env["NCCL_DEBUG"] = "INFO";
   g_env["NCCL_DEBUG_FILE"] = dir_ + "/log%";
   g_env["NCCL_DEBUG_FILE"].push_back('\0');
@@ -810,8 +813,8 @@ TEST_F(DebugThreadNameMicrotest, Pthread_NamedOnlyWhenEnabled) {
   EXPECT_EQ(NameOf([](std::thread& t) { ncclSetThreadName(t.native_handle(), "IB %s", "async"); }), initialName_);
 }
 
-// The two overloads disagree on a value other than 0 or 1: std::thread treats it as enabled.
-TEST_F(DebugThreadNameMicrotest, NonBinarySettingNamesOnlyStdThreads_Observed) {
+// The overloads disagree on values other than 0 and 1: only std::thread treats them as enabled; a fix flips this pin.
+TEST_F(DebugThreadNameMicrotest, SetThreadName_KnownBug_NonBinarySettingNamesOnlyStdThreads) {
   g_setThreadName = 2;
   EXPECT_EQ(NameOf([](std::thread& t) { ncclSetThreadName(t, "std"); }), "std");
   EXPECT_EQ(NameOf([](std::thread& t) { ncclSetThreadName(t.native_handle(), "posix"); }), initialName_);

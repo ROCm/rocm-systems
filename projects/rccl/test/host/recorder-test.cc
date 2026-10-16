@@ -33,6 +33,7 @@
 #include <unordered_map>
 #include <vector>
 
+#include "../common/LogCapture.hpp"
 #include "nccl.h"
 #include "fakes/debug_fakes.h"
 
@@ -75,7 +76,8 @@ hipError_t hipGraphAddHostNode(hipGraphNode_t*, hipGraph_t graph, const hipGraph
   return g_addHostNodeResult;
 }
 
-// The constructor reads the environment once per process; the tests re-run it on the singleton.
+// Recorder's constructor and state are private and it reads the environment once per process, so the tests
+// open them up to re-run the constructor on the singleton and read what it chose.
 #define private public
 #include RECORDER_CC_PATH
 #undef private
@@ -292,8 +294,8 @@ TEST_F(RecorderMicrotest, FileName_WithoutExtensionIsBinary) {
   EXPECT_EQ(ReadFile(path_), "");
 }
 
-// The extension is taken from the first '.' in the whole path, so a dotted directory breaks the name.
-TEST_F(RecorderMicrotest, FileName_DotInDirectorySplitsThePath_Observed) {
+// The extension starts at the first '.' in the whole path, so a dotted directory breaks it; a fix flips this pin.
+TEST_F(RecorderMicrotest, FileName_KnownBug_DotInDirectorySplitsThePath) {
   std::string dotted = dir_ + "/run.1";
   ASSERT_EQ(mkdir(dotted.c_str(), 0700), 0);
   Recorder& r = Restart((dotted + "/trace.json").c_str());
@@ -356,8 +358,8 @@ TEST_F(RecorderMicrotest, Json_EntriesAreCommaSeparatedAndGroupsNest) {
   EXPECT_EQ(Head(e[4]), Fmt("  CommFinalize : [comm : %p, context : [", comm_.get()));
 }
 
-// A dropped Broadcast does not update the last call, so every Broadcast until another call is dropped.
-TEST_F(RecorderMicrotest, Json_BroadcastsAfterBcastAreDropped) {
+// A dropped Broadcast leaves the last call as Bcast, so later Broadcasts drop too; a fix flips this pin.
+TEST_F(RecorderMicrotest, Json_KnownBug_BroadcastsAfterBcastAreDropped) {
   Recorder& r = StartJson();
   rcclApiCall bcast(rccl::rrBcast), broadcast(rccl::rrBroadcast), reduce(rccl::rrReduce);
 
@@ -429,9 +431,8 @@ TEST_F(RecorderMicrotest, Json_ConfigIsAppendedToInitRankConfig) {
     << e[0];
 }
 
-// The split format and its arguments are out of step: "color" prints the comm pointer's low bits,
-// "key" prints the color and "newcomm" the key.
-TEST_F(RecorderMicrotest, Json_SplitFieldsAreShiftedByOne_Observed) {
+// "color" prints the comm pointer's low bits, "key" the color and "newcomm" the key; a fix flips this pin.
+TEST_F(RecorderMicrotest, Json_KnownBug_SplitFieldsAreShiftedByOne) {
   Recorder& r = StartJson();
   ncclComm_t parent = reinterpret_cast<ncclComm_t>(0x1234);
   ncclUniqueId* asId = reinterpret_cast<ncclUniqueId*>(0x5678);
@@ -856,18 +857,17 @@ TEST_F(RecorderMicrotest, Parse_OtherCallsRoundTripUpToTheirContext) {
 
 TEST_F(RecorderMicrotest, Parse_MalformedEntriesAreSkipped) {
   std::vector<rcclApiCall> p;
-  testing::internal::CaptureStdout();
-  rccl::parseJsonEntry("", p);
-  rccl::parseJsonEntry("   ", p);
-  rccl::parseJsonEntry("  {", p);
-  rccl::parseJsonEntry(" : CommDestroy", p);
-  std::string out = testing::internal::GetCapturedStdout();
+  std::string out = RcclUnitTesting::CaptureStdout([&] {
+    rccl::parseJsonEntry("", p);
+    rccl::parseJsonEntry("   ", p);
+    rccl::parseJsonEntry("  {", p);
+    rccl::parseJsonEntry(" : CommDestroy", p);
+  });
   EXPECT_TRUE(p.empty());
   EXPECT_NE(out.find("parseJsonEntry: empty entry string"), std::string::npos) << out;
   EXPECT_NE(out.find("parseJsonEntry: invalid entry format: '   '"), std::string::npos) << out;
   EXPECT_NE(out.find("parseJsonEntry: invalid entry format: '  {'"), std::string::npos) << out;
   EXPECT_NE(out.find("invalid entry format: ' : CommDestroy'"), std::string::npos) << out;
-  rccl::parseBinLog();
 }
 
 TEST_F(RecorderMicrotest, Parse_UnknownCallNameExits) {
