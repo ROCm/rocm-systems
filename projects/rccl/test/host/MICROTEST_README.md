@@ -80,6 +80,8 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   - `dev_runtime.cc` (`DEV_RUNTIME_CC_PATH`, from `dev-runtime-test.cc`);
     suites `Alloc*`, `Comm*`, `Compute*`, `DeepCopy*`, `Dev*`, `Gin*`, `Nccl*`,
     `Sym*`, and `Win*`.
+  - `include/nccl_device/utility.h` (header-only, from `nccl-utility-test.cc`);
+    suite `NcclUtilityMicrotest.*`.
   - the generated `sym_kernels_host.cc` (`SYM_KERNELS_HOST_CC_PATH`, from
     `sym-kernels-index-test.cc`); suites `SymKernelIndex*`,
     `SymAllEmittedCombinations/*`, `SymUnhandledCombinations/*` (covered by the
@@ -248,6 +250,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
   the production source include, after system headers and before test
   helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
+- **`rccl-UnitTestsMicroNcclDevice`**: the requirement builders in
+  `src/nccl_device/{cft_barrier,gin_barrier,gin_scratch,ll_a2a,lsa_barrier}.cc`
+  (via `<STEM>_CC_PATH`, from `nccl-device-requirements-test.cc`); suite
+  `NcclDeviceRequirementsMicrotest.*`. Its own binary because
+  `fakes/dev_runtime_micro_fakes.cc` fakes three of these builders. See
+  `test_categories_micro_nccl_device.yaml`.
+- **`rccl-UnitTestsMicroCore`**: `src/nccl_device/core.cc` (via
+  `CORE_CC_PATH`, from `core-test.cc`); suite `CoreMicrotest.*`. Its
+  own binary because `fakes/dev_runtime_micro_fakes.cc` and
+  `fakes/devcomm_fakes.cc` fake five of its seven functions. See
+  `test_categories_micro_core.yaml`.
+- **`rccl-UnitTestsMicroCftDevRuntime`**: `src/cft_dev_runtime.cc` and
+  `src/nccl_device/core.cc` (via `CFT_DEV_RUNTIME_CC_PATH` / `CORE_CC_PATH`,
+  from `cft-dev-runtime-test.cc`); suites `CftDevRuntime*`. Its own binary because
+  `rccl-UnitTestsMicro` fakes most of `core.cc`, which the LE-info queries call. See
+  `test_categories_micro_cft_dev_runtime.yaml`.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -857,6 +875,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroNcclDevice`, `rccl-UnitTestsMicroCore`,
+`rccl-UnitTestsMicroCftDevRuntime`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
 `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
@@ -899,6 +919,9 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroNcclDevice         # nccl_device requirement builders tests
+./build/rccl-UnitTestsMicroCore               # nccl_device/core.cc tests
+./build/rccl-UnitTestsMicroCftDevRuntime      # cft_dev_runtime.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
