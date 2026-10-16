@@ -869,14 +869,70 @@ HRR_TEST_CASE(Unit_HRR_MemsetD2DRoundtrip) {
  *     hipMemsetD2D* variants at a hipMemAllocPitch destination.  That API is a
  *     playback no-op, so the recorded destination has no alloc_map entry at
  *     replay.
- *   - Replay must warn and skip those calls, not hand a null destination to the
- *     real API: a non-success handler return is fatal and would abort the whole
- *     replay.  The archive's other (translatable) D2H blob is only reached and
- *     validated if the replay survived, which is what this asserts.
+ *   - Under the default unmapped-pointer policy (playback/hip_playback.h)
+ *     replay skips those calls rather than abort the whole replay.  The
+ *     archive's other (translatable) D2H blob is only reached and validated if
+ *     the replay survived, which is what this asserts.
  */
 HRR_TEST_CASE(Unit_HRR_MemsetD2DPitchAllocRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_memsetd2dpitchalloc"};
   hrr_run_exact_roundtrip("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_MemsetD2DPitchAlloc_Direct again: its six hipMemsetD2D*
+ *     events write to a destination replay never maps.
+ *   - By default each is reported with its event index, API and recorded
+ *     pointer, the summary counts them on its Unmapped line, and the replay
+ *     still reaches and passes the D2H check after them.
+ *   - --strict-unmapped reports the first one the same way and ends the replay
+ *     there, before the summary.
+ */
+HRR_TEST_CASE(Unit_HRR_UnmappedPointerPolicy) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_unmapped_policy"};
+  hrr_capture_direct("Unit_HRR_MemsetD2DPitchAlloc_Direct", cap.path);
+
+  // The first hipMemsetD2D8 is the first unmapped event; the diagnostic must
+  // name its index in the archive and its recorded destination.
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  size_t idx = 0;
+  uint64_t dst = 0;
+  for (size_t i = 0; i < arc.events.size() && dst == 0; ++i) {
+    const auto& ev = arc.events[i];
+    if (ev.header().event_type != HRR_API_HIPMEMSETD2D8) continue;
+    REQUIRE(ev.raw_payload.size() >= sizeof(hrr_args_hipMemsetD2D8));
+    dst = reinterpret_cast<const hrr_args_hipMemsetD2D8*>(ev.raw_payload.data())->dst;
+    idx = i;
+  }
+  REQUIRE(dst != 0);
+  char diag[128];
+  snprintf(diag, sizeof(diag), "Event %zu (hipMemsetD2D8): recorded pointer 0x%llx ",
+           idx, static_cast<unsigned long long>(dst));
+
+  SECTION("by default the events are reported, counted and skipped") {
+    auto [ret, out] = hrr_playback_merged(cap.path, "", {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(out.find(diag) != std::string::npos);
+    CHECK(out.find("Unmapped       : 6 event(s) not replayed as recorded") !=
+          std::string::npos);
+    CHECK(out.find("D2H checks") != std::string::npos);
+#ifndef _WIN32
+    CHECK(ret == 0);
+#endif
+  }
+
+  SECTION("--strict-unmapped aborts at the first one") {
+    auto [ret, out] = hrr_playback_merged(cap.path, "--strict-unmapped",
+                                          {{"HIP_HRR_D2H_EXACT", "1"}});
+    INFO("Playback output:\n" << out);
+    CHECK(ret != 0);
+    CHECK(out.find(diag) != std::string::npos);
+    CHECK(out.find("aborting replay (--strict-unmapped)") != std::string::npos);
+    CHECK(out.find("D2H checks") == std::string::npos);
+  }
 }
 
 /**
