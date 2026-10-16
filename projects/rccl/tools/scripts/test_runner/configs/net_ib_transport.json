@@ -450,6 +450,7 @@
       "timeout": 600,
       "description": "Classic NET/IB multi-segment DMA-BUF path: per-segment registration, asymmetric offsets, boundary splitting and the segment cap. One rank per node so the DeepEP multi-node stress test is not skipped; the fixture needs DMA-BUF export (NCCL_DMABUF_ENABLE from net_ib_base) and GDR, and skips gracefully without them. The flush tests are in net_ib_multisegment_flush because they need a non-default RCCL_PARAM.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "NET,REG"
       },
@@ -563,6 +564,7 @@
       "timeout": 600,
       "description": "Classic NET/IB multi-segment transfers with 4 ranks on each of 2 nodes: 4 cross-node pairs, each on its own NIC, register and move multi-segment windows at once. Extends net_ib_base so it runs only the concurrent-pairs test.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "NET,REG"
       },
@@ -583,6 +585,7 @@
       "timeout": 300,
       "description": "Per-segment iflush chain. RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING defaults to 1, which routes ncclIbIflush through the RO=0 scratchpad and never reaches the segment-aware branch; 0 selects the direct GDR read per segment. RCCL_PARAM caches on first read, so this must be set before launch. Extends net_ib_base rather than net_ib_multisegment so it does not also re-run that suite's tests under this env.",
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "NET,REG",
         "RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING": "0"
