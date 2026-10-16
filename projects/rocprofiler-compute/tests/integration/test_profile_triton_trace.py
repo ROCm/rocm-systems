@@ -32,7 +32,11 @@ def triton_trace_profiled_workload(
 ):
     require_triton(gpu=True)
     if not triton_trace_workload_state["profiled"]:
-        workload_dir = common.get_output_dir(param_id="triton_trace")
+        from torch_trace_coverage_utils import unique_output_param_id
+
+        workload_dir = common.get_output_dir(
+            param_id=unique_output_param_id("triton_trace"),
+        )
         triton_trace_workload_state["dir"] = workload_dir
         profile_config = dict(config)
         profile_config["triton_test_app"] = [
