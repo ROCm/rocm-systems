@@ -55,7 +55,7 @@ env:
   PYTHON_VENV_PATH: ".venv-rocprofiler-sdk"
   CMAKE_VERSION_DEB: "4.4.3"
   CMAKE_VERSION_RPM: "3.28.4"
-  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1201"
+  GPU_TARGETS: "gfx906 gfx908 gfx90a gfx942 gfx950 gfx1030 gfx1100 gfx1101 gfx1102 gfx1200 gfx1201"
   PATH: "/usr/bin:$PATH"
 
   ## Submodule paths required by the rocprofiler-sdk build.
