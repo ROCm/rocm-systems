@@ -85,17 +85,17 @@ static ncclResult_t ncclAllGatherDdaFabricLLTyped(
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllGatherFabricLL<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize);
+                          perRankBytes, comm->rank, nRanks, epochDev, epochLen, bankSize, comm->abortFlagDev);
     break;
   }
 

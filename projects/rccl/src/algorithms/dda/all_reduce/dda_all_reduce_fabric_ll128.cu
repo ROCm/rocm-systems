@@ -108,17 +108,17 @@ static ncclResult_t ncclAllReduceDdaFabricLL128Typed(const void* sendbuff, void*
   case 4:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 4>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, comm->abortFlagDev);
     break;
   case 8:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 8>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, comm->abortFlagDev);
     break;
   default:
     hipExtLaunchKernelGGL((dda::common::ddaAllReduceFlatLL128<T, 0>), grid, block, 0, stream, /*startEvent=*/nullptr,
                           stopEvent, /*flags=*/0, peers, static_cast<T*>(recvbuff), static_cast<const T*>(sendbuff),
-                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines);
+                          count, comm->rank, nRanks, epochDev, epochLen, slotStrideLines, comm->abortFlagDev);
     break;
   }
 
