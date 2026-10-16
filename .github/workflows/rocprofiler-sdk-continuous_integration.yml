@@ -476,6 +476,52 @@ jobs:
           ccache-key: ccache-${{ matrix.system.os }}-${{ matrix.system.runner }}-${{ matrix.system.gpu }}
           ccache-variant: sccache
 
+      - name: Select Navi 4 GPU
+        if: ${{ matrix.system.gpu == 'navi4' }}
+        timeout-minutes: 2
+        shell: bash
+        run: |
+          # Some Navi 4 runners also expose a gfx1036 GPU. Select by UUID so GPU
+          # ordering does not determine which device the tests use.
+          navi4_uuid=$("${ROCM_PATH}/bin/rocminfo" | awk '
+            /^[[:space:]]+Name:/ { arch = $2 }
+            /^[[:space:]]+(Uuid|UUID):/ && arch ~ /^gfx120[0-9](-strict)?$/ && !selected {
+              if ($2 !~ /^GPU-[[:xdigit:]]+$/) {
+                print "::error::Navi 4 GPU has no usable UUID" > "/dev/stderr"
+                exit 1
+              }
+              print $2
+              selected = 1
+            }')
+          if [[ -z "$navi4_uuid" ]]; then
+            echo "::error::No visible gfx120x GPU found on this Navi 4 runner"
+            exit 1
+          fi
+
+          export ROCR_VISIBLE_DEVICES="$navi4_uuid"
+          # HIP indices are relative to the filtered ROCr device list.
+          export HIP_VISIBLE_DEVICES=0 CUDA_VISIBLE_DEVICES=0 GPU_DEVICE_ORDINAL=0
+          echo "Selected Navi 4 GPU: ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES"
+          "${ROCM_PATH}/bin/rocminfo" | awk -v expected="$navi4_uuid" '
+            /^[[:space:]]+Name:/ && $2 ~ /^gfx/ {
+              print "Visible GPU: " $2
+              ++gpu_count
+              if ($2 !~ /^gfx120[0-9](-strict)?$/) invalid = 1
+            }
+            /^[[:space:]]+(Uuid|UUID):/ && $2 == expected { matched = 1 }
+            END {
+              if (gpu_count != 1 || invalid || !matched) {
+                print "::error::ROCr did not isolate the selected Navi 4 GPU" > "/dev/stderr"
+                exit 1
+              }
+            }'
+          {
+            echo "ROCR_VISIBLE_DEVICES=$ROCR_VISIBLE_DEVICES"
+            echo "HIP_VISIBLE_DEVICES=$HIP_VISIBLE_DEVICES"
+            echo "CUDA_VISIBLE_DEVICES=$CUDA_VISIBLE_DEVICES"
+            echo "GPU_DEVICE_ORDINAL=$GPU_DEVICE_ORDINAL"
+          } >> "$GITHUB_ENV"
+
       - name: Enable PC Sampling
         if: ${{ contains(matrix.system.gpu, 'mi200') || contains(matrix.system.gpu, 'mi300a') }}
         shell: bash
