@@ -4,6 +4,7 @@
 
 """CLI leaf test: set command."""
 
+import common.common as common
 from common.common import amdsmi
 
 from cli.base import TestCliBase
@@ -38,11 +39,19 @@ class TestSet(TestCliBase):
         """Put the values the sweep changed back to what setUpClass recorded."""
         cmds = []
         for index, gpu in enumerate(self.common.processors):
-            # max fan speed is the hwmon pwm1_max ceiling on every interface
+            # Validate max fan speed is sensible; gpu_od GPUs must report <= 100
             fan_max = self.metric_data["gpu_data"][index]["fan"]["max"]
             if fan_max != "N/A":
                 self.assertGreater(fan_max, 0, f"GPU {index}: max fan speed must be > 0")
-                self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
+                # Detect gpu_od interface via sysfs for this GPU
+                gpu_bdf = self.list_data[index]["bdf"]
+                has_gpu_od = common.has_gpu_od_interface(gpu_bdf)
+                if has_gpu_od:
+                    self.assertLessEqual(
+                        fan_max, 100, f"GPU {index}: gpu_od max fan speed must be <= 100"
+                    )
+                else:
+                    self.assertLessEqual(fan_max, 255, f"GPU {index}: max fan speed must be <= 255")
 
             # reset --fans (works for both legacy hwmon and gpu_od interfaces)
             # A readable fan speed does not imply the fan can be controlled.
