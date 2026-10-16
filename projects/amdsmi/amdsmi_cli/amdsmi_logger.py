@@ -1425,7 +1425,7 @@ class AMDSMILogger:
             power_usage = gpu_info["power_usage"]
             if power_usage != "N/A":
                 power_limit = gpu_info["power_usage"]["power_limit"]
-                if power_limit != 0:
+                if power_limit not in (0, "N/A"):
                     power_limit = f"/{power_limit}"
                 else:
                     power_limit = ""

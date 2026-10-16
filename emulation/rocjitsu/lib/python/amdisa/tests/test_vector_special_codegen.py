@@ -38,6 +38,7 @@ from amdisa.codegen.config import CodegenConfig
 from amdisa.codegen._generator import CodeGenerator
 from amdisa.gpuisa import Instruction, Operand
 from amdisa.isa_profile import Cdna5Profile, Rdna3Profile, Rdna4Profile
+from amdisa.semantics import derive_semantics
 
 
 def test_cls_i32_codegen():
@@ -558,6 +559,26 @@ def test_vop3_pack_and_pknorm_f16_use_true16_source_halves():
     assert 'util::rndne_scalar(std::clamp(static_cast<double>(f) * 32767.0' in pknorm
 
 
+@pytest.mark.parametrize('op', ['i16', 'u16'])
+def test_pknorm_f16_spelling_matches_pk_norm(op):
+    # GFX9 and RDNA1/2 spell V_CVT_PK_NORM_*_F16 as V_CVT_PKNORM_*_F16.
+    pknorm = derive_semantics(f'V_CVT_PKNORM_{op.upper()}_F16', 'ENC_VOP3')
+    pk_norm = derive_semantics(f'V_CVT_PK_NORM_{op.upper()}_F16', 'ENC_VOP3')
+    assert (pknorm.semantic_class, pknorm.operation, pknorm.data_type) == (
+        'vector_cvt_pknorm',
+        op,
+        'f16',
+    )
+    assert (pknorm.semantic_class, pknorm.operation, pknorm.data_type) == (
+        pk_norm.semantic_class,
+        pk_norm.operation,
+        pk_norm.data_type,
+    )
+    assert simd_probe_line(f'v_cvt_pknorm_{op}_f16_vop3') == simd_probe_line(
+        f'v_cvt_pk_norm_{op}_f16_vop3'
+    )
+
+
 def test_true16_special_vop3_simd_routes_use_true16_glue():
     assert simd_probe_line('v_mad_u32_u16_vop3').startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_TERNARY_TRUE16_SRC01'
@@ -634,18 +655,50 @@ def test_normalized_conversion_modifiers_and_single_rounding(dtype, op, has_abs)
     abs_field = 'inst_.abs' if has_abs else '0u'
     assert 'util::rndne_scalar(std::clamp(static_cast<double>(f)' in cpp
     for source in (0, 1):
-        modifiers = (
-            f's{source} = amdgpu::source_modifier::apply_to_float('
-            f's{source}, {source}, {abs_field}, inst_.neg);'
+        if dtype == 'f16':
+            flushed = (
+                f's{source}_bits = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+                'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+            )
+            assert flushed in cpp
+            assert f'{source}, {abs_field}, inst_.neg), input_policy);' in cpp
+            widened = f'float s{source} = util::f16_to_f32(static_cast<uint16_t>(s{source}_bits));'
+            assert cpp.index(flushed) < cpp.index(widened)
+        else:
+            modifiers = (
+                f's{source} = amdgpu::source_modifier::apply_to_float('
+                f's{source}, {source}, {abs_field}, inst_.neg);'
+            )
+            assert modifiers in cpp
+            assert cpp.index(modifiers) < cpp.index('util::rndne_scalar')
+    assert ('apply_to_float' in cpp) == (dtype == 'f32')
+    assert 'fp_mode::detail::' not in cpp
+    if dtype == 'f16':
+        assert (
+            'input_policy = amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f16_f64())'
+            in cpp
         )
-        assert modifiers in cpp
-        assert cpp.index(modifiers) < cpp.index('util::rndne_scalar')
-    for prefix in (['pk_norm', 'pknorm'] if dtype == 'f32' else ['pk_norm']):
+    for prefix in ('pk_norm', 'pknorm'):
         probe = simd_probe_line(f'v_cvt_{prefix}_{op}_{dtype}_vop3')
         assert not probe.startswith('  if (!(inst.inst_.abs | inst.inst_.neg))')
-        sign = '0x80000000u' if dtype == 'f32' else '0x8000u'
         for index, source in enumerate(('a', 'b')):
-            absolute = f'if (inst.inst_.abs & {1 << index}u) {source} &= ~{sign};'
-            negative = f'if (inst.inst_.neg & {1 << index}u) {source} ^= {sign};'
-            assert probe.index(absolute) < probe.index(negative)
-            assert probe.index(negative) < probe.index(f'cvt_pknorm_{op}_f32_simd')
+            conversion = f'cvt_pknorm_{op}_f32_simd'
+            if dtype == 'f16':
+                prepared = (
+                    f'{source} = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+                    f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+                    f'{source}, {index}, inst.inst_.abs, inst.inst_.neg), input_policy);'
+                )
+                assert prepared in probe
+                assert probe.index(prepared) < probe.index(conversion)
+            else:
+                absolute = (
+                    f'if (inst.inst_.abs & {1 << index}u) ' f'{source} &= ~0x80000000u;'
+                )
+                negative = (
+                    f'if (inst.inst_.neg & {1 << index}u) ' f'{source} ^= 0x80000000u;'
+                )
+                assert probe.index(absolute) < probe.index(negative)
+                assert probe.index(negative) < probe.index(conversion)
+        if dtype == 'f16':
+            assert 'input_policy = amdgpu::input_denormal::Policy::make(' in probe

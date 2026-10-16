@@ -1239,6 +1239,14 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'vector_cvt_pknorm', operation='u16', data_type='f32'
         )
+    if name == 'V_CVT_PKNORM_I16_F16':
+        return InstructionSemantics(
+            name, 'vector_cvt_pknorm', operation='i16', data_type='f16'
+        )
+    if name == 'V_CVT_PKNORM_U16_F16':
+        return InstructionSemantics(
+            name, 'vector_cvt_pknorm', operation='u16', data_type='f16'
+        )
     if name == 'V_CVT_PKRTZ_F16_F32':
         return InstructionSemantics(name, 'vector_cvt_pkrtz_f16_f32')
     if name == 'V_CVT_PK_U16_U32':
@@ -1492,9 +1500,6 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     }
     if name in _CVT_FP8_MAP:
         return InstructionSemantics(name, 'cvt_fp8', operation=_CVT_FP8_MAP[name])
-
-    if name in ('V_CVT_PKNORM_I16_F16', 'V_CVT_PKNORM_U16_F16'):
-        return InstructionSemantics(name, 'nop')
 
     # Scaled FP8/BF8/FP6/FP4 conversions not covered by the exact gfx1250
     # mappings above still need per-encoding validation.
@@ -2555,13 +2560,28 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
     # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
     if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
         return InstructionSemantics(name, 'nop')
-    # GWS (Global Wave Sync). INIT programs a resource's arrival count; the
-    # runtime issues it before any kernel that synchronizes. GWS state is not
-    # modeled, so INIT retires and the barrier and semaphore ops stay
-    # unimplemented rather than returning before the grid has synchronized.
-    if upper == 'DS_GWS_INIT':
-        return InstructionSemantics(name, 'true_nop')
+    # GWS (Global Wave Sync) classification. Map each of the six GWS DS opcodes
+    # to its per-mnemonic operation so the generator can decode the operands and
+    # the matching ComputeUnitCore hook can apply the right semantics.
+    _DS_GWS_MAP = {
+        'DS_GWS_INIT': 'init',
+        'DS_GWS_SEMA_V': 'sema_v',
+        'DS_GWS_SEMA_P': 'sema_p',
+        'DS_GWS_SEMA_BR': 'sema_br',
+        'DS_GWS_SEMA_RELEASE_ALL': 'sema_release_all',
+        'DS_GWS_BARRIER': 'barrier',
+    }
     if upper.startswith('DS_GWS_'):
+        for prefix, op in _DS_GWS_MAP.items():
+            if upper == prefix or upper.startswith(prefix + '_'):
+                return InstructionSemantics(
+                    name, 'ds_gws', operation=op, elem_size=4, num_elems=0
+                )
+        # An unrecognized DS_GWS_* mnemonic matches none of the six supported
+        # operations. Classify it as an explicit (unsimulated) nop here instead of
+        # letting control reach the generic DS-atomic fallback below: a name like
+        # DS_GWS_ADD_* contains '_ADD', so the fallback would otherwise mis-decode a
+        # GWS opcode as a read-modify-write atomic and give it memory semantics.
         return InstructionSemantics(name, 'nop')
     # GDS ordered count.
     if upper == 'DS_ORDERED_COUNT':

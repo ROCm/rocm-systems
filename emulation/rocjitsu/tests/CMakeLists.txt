@@ -614,6 +614,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
@@ -673,6 +674,7 @@ add_executable(
     dbi/dbi_arg_sim_test.cpp
     dbi/dbi_mask_sim_test.cpp
     dbi/dbi_entry_prologue_sim_test.cpp
+    dbi/dbi_sim_memory_test.cpp
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp

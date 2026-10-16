@@ -42,6 +42,8 @@ add_subdirectory(unit)
 
 # Generator rules: regenerate the playback handlers and fail if
 # one still casts an archive field to a pointer or an opaque handle.
+# Also fails if a checked-in generated source or the API matrix header is
+# stale against the generator (test_generated_files_current.py).
 find_package(Python3 COMPONENTS Interpreter)
 if(Python3_Interpreter_FOUND)
   add_test(NAME hrr-generator-rules
