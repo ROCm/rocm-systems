@@ -1129,12 +1129,6 @@ SIMD_VOP3_CNDMASK: set[str] = {
     'v_cndmask_b32_vop3',
 }
 
-# 16-bit variant — RDNA3+. Low-16 of each source selected per lane, high-16
-# zero (matches scalar `uint32_t(uint16_t(...))` write pattern).
-SIMD_VOP3_CNDMASK_B16: set[str] = {
-    'v_cndmask_b16_vop3',
-}
-
 # VOP3 div_fmas: fused FMA and VCC-controlled scaling, rounded once using
 # the guest mode. Fixed-op / functorless.
 SIMD_VOP3_DIV_FMAS_FP32: set[str] = {
@@ -2732,10 +2726,6 @@ def _simd_probe_line(
         return '  ROCJITSU_TRY_SIMD_VOP2_CNDMASK();'
     if template_name in SIMD_VOP3_CNDMASK:
         return '  ROCJITSU_TRY_SIMD_VOP3_CNDMASK();'
-    if template_name in SIMD_VOP3_CNDMASK_B16:
-        if true16_vop3:
-            return None
-        return '  ROCJITSU_TRY_SIMD_VOP3_CNDMASK_B16();'
     spec2 = SIMD_VOP2_BINARY.get(template_name)
     if spec2 is not None:
         cpp_t, cpp_op = spec2

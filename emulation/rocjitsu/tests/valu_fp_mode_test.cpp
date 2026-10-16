@@ -3005,6 +3005,42 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
   return cases;
 }
 
+// High source/destination halves and ABS then NEG stay on the F16 SIMD route.
+// The arithmetic result is +/-32768; mul:2 overflows and FP16_OVFL saturates
+// it to +/-MAX_F16. The low destination half must retain its prior value.
+std::vector<ArithmeticCase> subtraction_simd_boundary_cases() {
+  struct Form {
+    const char *name;
+    uint16_t op;
+    uint32_t result;
+  };
+  constexpr std::array<Form, 2> forms = {{
+      {"SubF16HighAbsNegOmodOvfl", rdna4::kVSubF16Vop3, 0xfbff1357u},
+      {"SubrevF16HighAbsNegOmodOvfl", rdna4::kVSubrevF16Vop3, 0x7bff1357u},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Form &form : forms) {
+    const auto words = rdna4::build_vop3(form.op, {.vdst = 6,
+                                                   .abs = 1,
+                                                   .opsel = 0xb,
+                                                   .src0 = 256,
+                                                   .src1 = 257,
+                                                   .omod = 1,
+                                                   .neg = 1});
+    cases.push_back({form.name,
+                     ROCJITSU_CODE_ARCH_RDNA4,
+                     {words[0], words[1], 0u},
+                     {{0, 0xf4003c00u}, {1, 0x74004000u}, {6, 0xdead1357u}},
+                     {{6, form.result}},
+                     0x8000f0u,
+                     FE_TONEAREST,
+                     0u,
+                     0u,
+                     expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)});
+  }
+  return cases;
+}
+
 // V_CNDMASK_B16 applies ABS/NEG to the selected half's sign bit, without
 // flushing or quieting it. Lanes are captures of
 // v_cndmask_b16 v6, -v0, |v1|, s[10:11]: gfx1201 gave the same result under all
@@ -3054,7 +3090,8 @@ std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
            FE_TONEAREST,
            0u,
            0u,
-           {},
+           gfx1100 ? SimdPathExpectation{}
+                   : expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS),
            {{10, selector}, {11, selector}}});
     }
   }
@@ -3063,9 +3100,11 @@ std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
 
 // V_MULLIT_F32 flushes its sources and its product under the F32 MODE
 // denormal field, then applies OMOD and CLAMP. A subnormal S2 flushed to zero
-// selects -MAX_FLOAT. Lanes are gfx1201 captures, each under two MODE values.
+// selects -MAX_FLOAT. The base lanes are gfx1201 captures, each under two MODE
+// values; the mixed-mode lanes reuse their inputs to isolate the two MODE bits.
 // 0x30 keeps F32 denormals and 0xc0 flushes them, so reading the F16/F64
-// field fails.
+// field fails. The mixed modes below distinguish input and output flushing:
+// 0x10 keeps F32 inputs only, while 0x20 keeps F32 outputs only.
 std::vector<ArithmeticCase> mullit_cases() {
   struct Lane {
     const char *name;
@@ -3075,7 +3114,7 @@ std::vector<ArithmeticCase> mullit_cases() {
     std::array<uint32_t, 3> sources;
     std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
   };
-  constexpr std::array<Lane, 8> lanes = {{
+  constexpr std::array<Lane, 10> lanes = {{
       // min_normal * min_normal underflows to +0 unless S2 = 2^-149 is flushed.
       {"S2Subnormal",
        0,
@@ -3090,6 +3129,18 @@ std::vector<ArithmeticCase> mullit_cases() {
        0,
        {0x3f000000u, 0x00800000u, 0x00800000u},
        {{{0x30u, 0x00400000u}, {0xc0u, 0u}}}},
+      {"S2SubnormalMixed",
+       0,
+       0,
+       0,
+       {0x00800000u, 0x00800000u, 1u},
+       {{{0x10u, 0u}, {0x20u, 0xff7fffffu}}}},
+      {"SubnormalProductMixed",
+       0,
+       0,
+       0,
+       {0x3f000000u, 0x00800000u, 0x00800000u},
+       {{{0x10u, 0u}, {0x20u, 0x00400000u}}}},
       // A flushed S0 is a zero factor, which gives +0, not -0.
       {"S0Subnormal",
        0,
@@ -3353,6 +3404,23 @@ TEST_P(ValuSubtractionNanTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
 
 INSTANTIATE_TEST_SUITE_P(Captures, ValuSubtractionNanTest,
                          testing::ValuesIn(subtraction_nan_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuSubtractionSimdBoundaryTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuSubtractionSimdBoundaryTest, MatchesBoundaryWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuSubtractionSimdBoundaryTest,
+                         testing::ValuesIn(subtraction_simd_boundary_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

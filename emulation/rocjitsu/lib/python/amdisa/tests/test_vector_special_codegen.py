@@ -321,6 +321,7 @@ def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true1
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
     assert simd_probe_line('v_not_b16_vop3', true16_vop3=True) is None
     assert simd_probe_line('v_cndmask_b16_vop3', true16_vop3=True) is None
+    assert simd_probe_line('v_cndmask_b16_vop3', true16_vop3=False) is None
 
 
 def test_gfx1250_true16_execute_bodies_are_arch_local():
