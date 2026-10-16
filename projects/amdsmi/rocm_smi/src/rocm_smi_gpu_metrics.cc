@@ -2781,12 +2781,8 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     }
     return static_cast<PublicPowerT>(std::min<uint32_t>(rounded_watts, max_power));
   };
-  // Every v2.x table reports GFX/MM activity in hundredths of a percent: the SMU headers
-  // mark GfxActivity/UvdActivity "[centi]" for each ASIC that publishes one (smu_v13_0_4,
-  // smu_v13_0_5 and yellow_carp for v2.1, renoir and vangogh for v2.2-v2.4), and amdgpu
-  // stores it unscaled -- it only divides by 100 on the gpu_busy_percent path. The public
-  // fields, in the APU sub-struct too, are whole percent, so convert here. v3.0 firmware
-  // already reports [0-100], so the branch below leaves it alone.
+  // v2.1/v2.2 firmware reports GFX/MM activity in hundredths of a percent. v2.3/v2.4 come only
+  // from Van Gogh, whose current firmware interface reports whole percent, as v3.0 does.
   auto convert_apu_activity_centi_to_public_percent = [](auto activity_centi) {
     using InputT = decltype(activity_centi);
     // The not-applicable sentinel is not a reading; scaling it would turn it into 655.
@@ -2800,6 +2796,15 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     const auto& metrics = m_apu_metrics_v24_tbl;
     auto& apu = m_apu_metrics_tbl;
     set_common_header(metrics.m_common_header);
+    const bool activity_in_centi = metrics.m_common_header.m_content_revision <= 2;
+    const auto gfx_activity =
+        activity_in_centi
+            ? convert_apu_activity_centi_to_public_percent(metrics.m_average_gfx_activity)
+            : metrics.m_average_gfx_activity;
+    const auto mm_activity =
+        activity_in_centi
+            ? convert_apu_activity_centi_to_public_percent(metrics.m_average_mm_activity)
+            : metrics.m_average_mm_activity;
 
     apu.temperature_gfx = metrics.m_temperature_gfx;
     apu.temperature_soc = metrics.m_temperature_soc;
@@ -2811,10 +2816,8 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
                 std::min(static_cast<uint32_t>(RSMI_APU_MAX_L3),
                          static_cast<uint32_t>(std::size(apu.temperature_l3))),
                 apu.temperature_l3);
-    apu.average_gfx_activity =
-        convert_apu_activity_centi_to_public_percent(metrics.m_average_gfx_activity);
-    apu.average_mm_activity =
-        convert_apu_activity_centi_to_public_percent(metrics.m_average_mm_activity);
+    apu.average_gfx_activity = gfx_activity;
+    apu.average_mm_activity = mm_activity;
     apu.average_socket_power = metrics.m_average_socket_power;
     apu.average_cpu_power = metrics.m_average_cpu_power;
     apu.average_soc_power = metrics.m_average_soc_power;
@@ -2863,10 +2866,8 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     apu.average_soc_current = metrics.m_average_soc_current;
     apu.average_gfx_current = metrics.m_average_gfx_current;
 
-    metrics_public_init.average_gfx_activity =
-        convert_apu_activity_centi_to_public_percent(metrics.m_average_gfx_activity);
-    metrics_public_init.average_mm_activity =
-        convert_apu_activity_centi_to_public_percent(metrics.m_average_mm_activity);
+    metrics_public_init.average_gfx_activity = gfx_activity;
+    metrics_public_init.average_mm_activity = mm_activity;
     metrics_public_init.average_socket_power =
         convert_apu_power_mw_to_public_w(metrics.m_average_socket_power);
     metrics_public_init.system_clock_counter = metrics.m_system_clock_counter;

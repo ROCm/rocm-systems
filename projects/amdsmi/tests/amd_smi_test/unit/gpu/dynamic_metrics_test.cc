@@ -507,18 +507,19 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
     bool has_indep_throttle_status;  // added in v2.2
     bool has_average_temperature;    // added in v2.3
     bool has_average_voltage;        // added in v2.4
+    bool activity_in_hundredths;     // v2.1 and v2.2 only
   };
   static_assert(sizeof(ApuMetrics) + 4096 <= UINT16_MAX,
                 "the oversized case must still fit the uint16_t the header declares");
   const ReadCase cases[] = {
-      {"v2_1", 1, kApuV21Size, false, false, false},
-      {"v2_2", 2, kApuV22Size, true, false, false},
-      {"v2_3", 3, kApuV23Size, true, true, false},
-      {"v2_4", 4, kApuV24Size, true, true, true},
+      {"v2_1", 1, kApuV21Size, false, false, false, true},
+      {"v2_2", 2, kApuV22Size, true, false, false, true},
+      {"v2_3", 3, kApuV23Size, true, true, false, false},
+      {"v2_4", 4, kApuV24Size, true, true, true, false},
       // Header claims more than the layout we model, and the file really is that
       // long (see the blob size below), so a read that trusted the header would
       // write past our buffer instead of simply coming up short.
-      {"v2_4_header_exceeds_struct", 4, sizeof(ApuMetrics) + 4096, true, true, true},
+      {"v2_4_header_exceeds_struct", 4, sizeof(ApuMetrics) + 4096, true, true, true, false},
   };
 
   for (const auto& test_case : cases) {
@@ -540,9 +541,11 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
 
     // Present in every v2.x revision.
     EXPECT_EQ(apu.temperature_gfx, FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_gfx)));
-    // Converted from hundredths to whole percent; the fill never holds the sentinel.
+    // Scaled to whole percent only on v2.1/v2.2; the fill never holds the N/A value.
+    const auto filled_activity =
+        FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfx_activity));
     EXPECT_EQ(apu.average_gfx_activity,
-              (FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfx_activity)) + 50) / 100);
+              test_case.activity_in_hundredths ? (filled_activity + 50) / 100 : filled_activity);
     EXPECT_EQ(apu.average_socket_power,
               FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_socket_power)));
     EXPECT_EQ(apu.average_gfxclk_frequency,
@@ -571,7 +574,7 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
 // backs both the GPU table and the smaller partition table, so pin the pairing
 // for both modes: sizing the partition table as the GPU table would write past
 // the end of it.
-// Every v2.x table reports GFX and MM activity in hundredths of a percent, so the
+// v2.1 and v2.2 tables report GFX and MM activity in hundredths of a percent, so the
 // public fields have to be scaled to whole percent, in the APU sub-struct as well as
 // at the top level. The expected values are worked out by hand instead of
 // being recomputed from the production expression, so changing that expression
@@ -600,18 +603,53 @@ TEST(GpuUnit, ApuActivityReachesThePublicFieldsAsWholePercent) {
       {"12.34 %", 1234, 12},
       {"12.50 %", 1250, 13},
   };
+  // Both revisions that report hundredths, so the last one scaled is pinned too.
+  const std::pair<uint8_t, std::size_t> revisions[] = {{1, kApuV21Size}, {2, kApuV22Size}};
 
-  for (const auto& test_case : cases) {
-    SCOPED_TRACE(testing::Message() << "GFX activity " << test_case.name);
+  for (const auto& [content_revision, declared_size] : revisions) {
+    for (const auto& test_case : cases) {
+      SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision)
+                                      << " GFX activity " << test_case.name);
 
-    // Give MM a different reading, so a conversion that crossed the two fields
-    // over would not go unnoticed.
-    constexpr uint16_t kMmHundredths = 999;  // 9.99 %
-    auto blob = BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size));
-    WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), test_case.hundredths);
-    WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), kMmHundredths);
+      // Give MM a different reading, so a conversion that crossed the two fields
+      // over would not go unnoticed.
+      constexpr uint16_t kMmHundredths = 999;  // 9.99 %
+      auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+      WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), test_case.hundredths);
+      WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), kMmHundredths);
 
-    FakeMetricsDevice fake_device("apu_activity_scaled");
+      FakeMetricsDevice fake_device("apu_activity_scaled");
+      fake_device.WriteMetrics(blob);
+
+      amd::smi::Device device(fake_device.path(), nullptr);
+      ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+      const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+      ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+      ASSERT_NE(metrics.apu_metrics, nullptr);
+
+      EXPECT_EQ(metrics.average_gfx_activity, test_case.whole_percent);
+      EXPECT_EQ(metrics.average_mm_activity, uint16_t{10});
+
+      // Python and the CLI print the APU sub-struct with a % sign too.
+      EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, test_case.whole_percent);
+      EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{10});
+    }
+  }
+}
+
+// Van Gogh's current firmware interface publishes v2.3/v2.4 with activity already in
+// whole percent, so scaling it would turn 48 % GFX busy into 0.
+TEST(GpuUnit, ApuV23AndV24ActivityPassesThroughAsWholePercent) {
+  PRINT_VERBOSITY();
+
+  const std::pair<uint8_t, std::size_t> revisions[] = {{3, kApuV23Size}, {4, kApuV24Size}};
+  for (const auto& [content_revision, declared_size] : revisions) {
+    SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision));
+    auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+    WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), 45);
+    WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), 100);
+
+    FakeMetricsDevice fake_device("apu_activity_whole");
     fake_device.WriteMetrics(blob);
 
     amd::smi::Device device(fake_device.path(), nullptr);
@@ -620,12 +658,10 @@ TEST(GpuUnit, ApuActivityReachesThePublicFieldsAsWholePercent) {
     ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
     ASSERT_NE(metrics.apu_metrics, nullptr);
 
-    EXPECT_EQ(metrics.average_gfx_activity, test_case.whole_percent);
-    EXPECT_EQ(metrics.average_mm_activity, uint16_t{10});
-
-    // Python and the CLI print the APU sub-struct with a % sign too.
-    EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, test_case.whole_percent);
-    EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{10});
+    EXPECT_EQ(metrics.average_gfx_activity, uint16_t{45});
+    EXPECT_EQ(metrics.average_mm_activity, uint16_t{100});
+    EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, uint16_t{45});
+    EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{100});
   }
 }
 
