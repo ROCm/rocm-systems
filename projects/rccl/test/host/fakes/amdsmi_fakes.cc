@@ -7,6 +7,13 @@
 // Implementation of the src/misc/amdsmi_wrap.cc fakes. See amdsmi_fakes.h.
 
 #include "amdsmi_fakes.h"
+#include "signature-drift.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetDeviceIndexByPciBusId, amd_smi_getDeviceIndexByPciBusId);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFabricDeviceInfo,      amd_smi_getFabricDeviceInfo);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetNumDevice,             amd_smi_getNumDevice);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetDevicePciBusIdString,  amd_smi_getDevicePciBusIdString);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetLinkInfo,              amd_smi_getLinkInfo);
 
 ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
   if (deviceIndex) *deviceIndex = static_cast<uint32_t>(-1);  // -1 -> skip fabric block
