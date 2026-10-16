@@ -22,6 +22,7 @@
 #include <atomic>
 #include <cassert>
 #include <cerrno>
+#include <charconv>
 #include <cstdio>
 #include <cstring>
 #include <fcntl.h>
@@ -2347,12 +2348,25 @@ private:
       size_t line_begin = 0;
       for (size_t newline = pending.find('\n', line_begin); newline != std::string::npos;
            newline = pending.find('\n', line_begin)) {
-        const std::string line(pending, line_begin, newline - line_begin);
+        const char *line = pending.data() + line_begin;
+        const char *line_end = pending.data() + newline;
         line_begin = newline + 1;
         uintptr_t begin = 0;
         uintptr_t end = 0;
-        char permissions[5] = {};
-        if (std::sscanf(line.c_str(), "%zx-%zx %4s", &begin, &end, permissions) != 3)
+        // /proc/self/maps has hexadecimal bounds and four permission bytes.
+        // Parse its fixed prefix without allocating a string for every VMA or
+        // invoking the locale-aware scanf machinery. Keep the live read and
+        // mapping lease: no permission result is cached across accesses.
+        const auto first = std::from_chars(line, line_end, begin, 16);
+        if (first.ec != std::errc{} || first.ptr == line_end || *first.ptr != '-')
+          continue;
+        const auto last = std::from_chars(first.ptr + 1, line_end, end, 16);
+        if (last.ec != std::errc{} || last.ptr == line_end || *last.ptr != ' ')
+          continue;
+        const char *permissions = last.ptr;
+        while (permissions != line_end && *permissions == ' ')
+          ++permissions;
+        if (line_end - permissions < 4)
           continue;
         if (address < begin || address >= end)
           continue;

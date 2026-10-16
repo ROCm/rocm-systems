@@ -9700,3 +9700,31 @@ TEST(AmdgpuVmTest, DestroyQueueDoesNotPlaceRemainingWorkgroups) {
     EXPECT_FALSE(f.cu()->has_active_wfs()) << "waves of a destroyed queue remain resident";
   }
 }
+
+TEST(GpuMemoryTest, WritabilityReadsLargeMapsAndObservesProtectionChanges) {
+  constexpr size_t count = 512;
+  constexpr size_t bytes = count * KfdProcess::kPageSize;
+  auto *base = static_cast<uint8_t *>(
+      mmap(nullptr, bytes, PROT_READ | PROT_WRITE, MAP_PRIVATE | MAP_ANONYMOUS, -1, 0));
+  ASSERT_NE(base, MAP_FAILED);
+  struct Release {
+    void *base;
+    ~Release() { munmap(base, bytes); }
+  } release{base};
+  // Alternate permissions so the kernel retains hundreds of distinct VMAs.
+  // The mapping prefixes and lines cross the parser's 8 KiB read boundaries.
+  for (size_t i = 1; i < count; i += 2)
+    ASSERT_EQ(mprotect(base + i * KfdProcess::kPageSize, KfdProcess::kPageSize, PROT_READ), 0);
+  for (size_t i : {0u, 1u, 255u, 256u, 510u, 511u}) {
+    SCOPED_TRACE(i);
+    EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(base + i * KfdProcess::kPageSize),
+              i % 2 ? amdgpu::PageWritability::ReadOnly : amdgpu::PageWritability::Writable);
+  }
+  auto *last = base + (count - 1) * KfdProcess::kPageSize;
+  ASSERT_EQ(mprotect(last, KfdProcess::kPageSize, PROT_NONE), 0);
+  EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(last),
+            amdgpu::PageWritability::Inaccessible);
+  ASSERT_EQ(mprotect(last, KfdProcess::kPageSize, PROT_READ | PROT_WRITE), 0);
+  EXPECT_EQ(amdgpu::GpuMemoryTestAccess::page_writability(last),
+            amdgpu::PageWritability::Writable);
+}
