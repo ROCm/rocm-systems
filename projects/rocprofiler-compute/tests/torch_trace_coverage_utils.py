@@ -3042,32 +3042,13 @@ def build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
     registry: Dict[str, StructuralBuilder] = {}
 
     # Generic fallbacks used when no class-specific builder applies.
-    def _generic_nn_call(safe_var: str) -> Tuple[List[str], str, str]:
-        return (
-            [
-                "import torch.nn as nn",
-                f"_model_{safe_var} = nn.Linear(4, 4).cuda()",
-            ],
-            f"_model_{safe_var}",
-            "torch.randn(2, 4, device=device)",
-        )
-
-    def _generic_optimizer_step(safe_var: str) -> Tuple[List[str], str, str]:
-        return (
-            [
-                "import torch.nn as nn",
-                f"_m_{safe_var} = nn.Linear(4, 4).cuda()",
-                f"_opt_{safe_var} = torch.optim.SGD(",
-                f"    _m_{safe_var}.parameters(),",
-                "    lr=0.01,",
-                ")",
-                f"_m_{safe_var}(",
-                "    torch.randn(2, 4, device=device),",
-                ").sum().backward()",
-            ],
-            f"_opt_{safe_var}.step",
-            "",
-        )
+    registry["nn.Module.__call__"] = builder_nn_module_call(
+        "nn.Linear(4, 4)",
+        "torch.randn(2, 4, device=device)",
+    )
+    registry["Optimizer.step"] = builder_optimizer_step(
+        "torch.optim.SGD(PARAMS, lr=0.01)",
+    )
 
     def _generic_tensor_backward(safe_var: str) -> Tuple[List[str], str, str]:
         return (
@@ -3081,8 +3062,6 @@ def build_structural_builder_registry() -> Dict[str, StructuralBuilder]:
             "",
         )
 
-    registry["nn.Module.__call__"] = _generic_nn_call
-    registry["Optimizer.step"] = _generic_optimizer_step
     registry["torch.Tensor.backward"] = _generic_tensor_backward
 
     for name, (ctor, input_expr, extra_setup) in NN_MODULE_BUILDERS.items():
