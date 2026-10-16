@@ -2510,25 +2510,32 @@ def builder_optimizer_step(optimizer_ctor: str) -> StructuralBuilder:
 
 # Single-GPU process-group bootstrap inlined by distributed builders.
 # Uses a per-process ``file://`` rendezvous and destroys the group at
-# interpreter shutdown.
+# interpreter shutdown. The rendezvous directory is removed after shutdown
+# and if ``init_process_group`` fails.
 DISTRIBUTED_BOOTSTRAP_SETUP: Tuple[str, ...] = (
     "import atexit as _atexit",
+    "import shutil as _shutil",
     "import tempfile as _tempfile",
     "import torch.distributed as _dist",
     "if not _dist.is_initialized():",
     "    _dist_init_dir = _tempfile.mkdtemp(prefix='torch_trace_cov_dist_')",
-    "    _dist.init_process_group(",
-    '        backend="nccl",',
-    '        init_method=f"file://{_dist_init_dir}/init",',
-    "        rank=0,",
-    "        world_size=1,",
-    "    )",
+    "    try:",
+    "        _dist.init_process_group(",
+    '            backend="nccl",',
+    '            init_method=f"file://{_dist_init_dir}/init",',
+    "            rank=0,",
+    "            world_size=1,",
+    "        )",
+    "    except Exception:",
+    "        _shutil.rmtree(_dist_init_dir, ignore_errors=True)",
+    "        raise",
     "    def _shutdown_dist():",
     "        try:",
     "            if _dist.is_initialized():",
     "                _dist.destroy_process_group()",
     "        except Exception:",
     "            pass",
+    "        _shutil.rmtree(_dist_init_dir, ignore_errors=True)",
     "    _atexit.register(_shutdown_dist)",
 )
 
