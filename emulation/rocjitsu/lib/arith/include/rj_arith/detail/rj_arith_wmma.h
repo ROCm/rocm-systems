@@ -13,6 +13,159 @@
 extern "C" {
 #endif
 
+// Sparse integer 2:4 WMMA with signed 32-bit in/out accumulator D (8 VGPRs).
+// A/B use 2/4 VGPRs for K=32 IU8 and K=64 IU4, or 1/2 for K=32 IU4;
+// index uses one VGPR. Metadata pairs must select strictly increasing positions.
+// SIGNED_A/B select signed factors. CLAMP saturates after each of two product
+// groups: compressed positions 0..7 then 8..15 for K=32; positions 0..7 and
+// 16..23, then 8..15 and 24..31 for K=64. Without CLAMP results wrap modulo 2^32.
+// K=32 accepts RJ_ARITH_SWMMAC_INDEX_KEY_1; K=64 consumes all 32 metadata bits and
+// rejects it. Supports loose and empirical exact semantics; host FP state is
+// preserved. RJ_ARITH_FP16_OVFL has no effect. All inputs and D are read before
+// ascending destination-register stores; last store wins aliases. EXEC is ignored;
+// every lane is read and written, and operand pointers must be valid.
+// Errors leave destinations unchanged.
+int rj_arith_v_swmmac_i32_16x16x32_iu8_w32(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_i32_16x16x32_iu4_w32(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_i32_16x16x64_iu4_w32(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+// Wave64 integer SWMMAC: A one VGPR, B two (one for K=32 IU4), D four,
+// index one. IU8 selects four metadata bytes with KEY_1/KEY_2; IU4 selects
+// two metadata halfwords with KEY_1. K=32 IU4 uses only A/index lanes 0..31.
+// Saturation applies after the first and second halves of compressed K.
+// Both semantics and the Wave32 alias/error guarantees are preserved.
+int rj_arith_v_swmmac_i32_16x16x32_iu8_w64(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_i32_16x16x32_iu4_w64(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_i32_16x16x64_iu4_w64(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+// Sparse FP8/BF8 2:4 matrix multiply-accumulate into FP32 D. A uses two
+// VGPRs, B four, index one, and in/out D eight. FP8 is E4M3FN; BF8 is E5M2.
+// Metadata pairs must contain strictly increasing positions in each group of
+// four. RJ_ARITH_SWMMAC_INDEX_KEY_1 selects the upper 16 metadata bits per lane;
+// no other instruction modifiers apply. Loose semantics use FP32 FMA with
+// host nearest-even rounding and denormals enabled. Exception flags may change.
+// Exact semantics use two native DOT8 steps from the borrowed gfx1201 model,
+// independently of host FP state. RJ_ARITH_FP16_OVFL has no effect. All inputs and
+// D are read before ascending destination-register stores; last store wins
+// aliases. EXEC is ignored; every lane is read and written, and operand pointers
+// must be valid. Errors leave destinations unchanged.
+int rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b,
+                                               const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f32_16x16x32_fp8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b,
+                                               const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f32_16x16x32_bf8_fp8_w32(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b,
+                                               const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f32_16x16x32_bf8_bf8_w32(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b,
+                                               const uint32_t *const *index);
+
+// Wave64 FP8/BF8 SWMMAC: A one VGPR, B two, D four, index one.
+// KEY_1/KEY_2 combine to select one of four consecutive metadata bytes per
+// lane. Four compressed elements use four 2-bit indices from that byte.
+// Both semantics and alias/error guarantees match the Wave32 forms.
+int rj_arith_v_swmmac_f32_16x16x32_fp8_fp8_w64(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b,
+                                               const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f32_16x16x32_fp8_bf8_w64(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b,
+                                               const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f32_16x16x32_bf8_fp8_w64(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b,
+                                               const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f32_16x16x32_bf8_bf8_w64(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b,
+                                               const uint32_t *const *index);
+
+// Sparse 2:4 matrix multiply-accumulate. D is both the initial accumulator and
+// destination; A holds 16 compressed elements per row, B the dense 32x16 matrix,
+// and index holds packed 2-bit positions. Within each four-element K group the
+// two selected positions must be strictly increasing. A uses four VGPRs, B eight,
+// index one, and D eight for FP32 or four for packed FP16/BF16 output.
+// RJ_ARITH_SWMMAC_INDEX_KEY_1 selects the upper instead of lower 16 metadata bits in
+// each lane. Supports RJ_ARITH_WMMA_NEG_LO_A/B and RJ_ARITH_WMMA_NEG_HI_A/B; these negate
+// the first/second member of each selected pair, including B after selection.
+// RJ_ARITH_WMMA_ABS_C then RJ_ARITH_WMMA_NEG_C modify the tied accumulator. CLAMP does
+// not apply. Loose semantics accumulate selected products
+// with FP32 FMA, narrowing packed outputs after each four products (FP16 RNE,
+// BF16 truncation). Host FP state must
+// provide nearest-even rounding with denormals enabled; exception flags may change.
+// RJ_ARITH_FP16_OVFL saturates finite overflow when narrowing to FP16; otherwise it
+// has no effect. Exact semantics use four borrowed gfx1201 DOT4 steps, narrowing
+// after each step (FP16 RNE or BF16 truncation). All inputs and D are read
+// before ascending destination-register stores; the last store wins aliases.
+// EXEC is ignored; every lane is read and written, and operand pointers must
+// be valid. Errors leave all destinations unchanged.
+int rj_arith_v_swmmac_f32_16x16x32_f16_w32(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f32_16x16x32_bf16_w32(uint64_t flags, uint64_t instruction_flags,
+                                            uint32_t *const *d, const uint32_t *const *a,
+                                            const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f16_16x16x32_f16_w32(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_bf16_16x16x32_bf16_w32(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b,
+                                             const uint32_t *const *index);
+
+// Wave64 FP16/BF16 SWMMAC: A two VGPRs, B four, index one. D holds
+// four VGPRs for FP32 or two for packed FP16/BF16. KEY_1/KEY_2 select one
+// of four metadata bytes per lane. Sign flags, loose-only arithmetic,
+// packed rounding, aliasing and errors follow the Wave32 contracts above.
+int rj_arith_v_swmmac_f32_16x16x32_f16_w64(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f32_16x16x32_bf16_w64(uint64_t flags, uint64_t instruction_flags,
+                                            uint32_t *const *d, const uint32_t *const *a,
+                                            const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_f16_16x16x32_f16_w64(uint64_t flags, uint64_t instruction_flags,
+                                           uint32_t *const *d, const uint32_t *const *a,
+                                           const uint32_t *const *b, const uint32_t *const *index);
+
+int rj_arith_v_swmmac_bf16_16x16x32_bf16_w64(uint64_t flags, uint64_t instruction_flags,
+                                             uint32_t *const *d, const uint32_t *const *a,
+                                             const uint32_t *const *b,
+                                             const uint32_t *const *index);
+
 // Floating WMMA and SWMMAC accept but ignore guest input/output denormal flush
 // and IEEE flags in both semantics. Packed FP16 still honors RJ_ARITH_FP16_OVFL.
 // All semantics assume the default host FP environment.

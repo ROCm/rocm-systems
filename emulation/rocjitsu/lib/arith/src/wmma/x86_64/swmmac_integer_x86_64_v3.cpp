@@ -1,0 +1,50 @@
+// SPDX-License-Identifier: MIT
+
+// AVX2 integer SWMMAC accumulation over decoded sparse operands, processing
+// eight output columns at a time. Uses the shared compressed-K stage mapping
+// and applies CLAMP at stage boundaries before storing the output tile.
+
+#include "common/x86_64/alu_x86_64_v3.h"
+#include "wmma/swmmac_integer.h"
+
+#include <immintrin.h>
+#include <stdint.h>
+
+namespace rocjitsu::arith {
+
+// Accumulate decoded sparse INT8/INT4 operands and write eight 32-lane D
+// sections. k is the dense reduction size (32 or 64); clamp saturates each
+// stage, otherwise results wrap. Input snapshots must not overlap D.
+void swmmac_integer_x86_64_v3(int k, bool clamp, uint32_t *const *d,
+                              const SwmmacIntegerInputs &input) {
+  uint32_t result[8][32];
+  for (int row = 0; row < 16; ++row) {
+    for (int col = 0; col < 16; col += 8) {
+      auto acc = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(input.acc[row] + col));
+      for (int stage = 0; stage < 2; ++stage) {
+        auto sum = _mm256_setzero_si256();
+        for (int local = 0; local < k / 4; ++local) {
+          int ck = swmmac_integer_ck(stage, local);
+          auto b = _mm256_loadu_si256(
+              reinterpret_cast<const __m256i *>(input.b[input.selected[row][ck]] + col));
+          sum = _mm256_add_epi32(sum, _mm256_mullo_epi32(_mm256_set1_epi32(input.a[row][ck]), b));
+        }
+        // The stage sum fits int32; only its addition to C can overflow.
+        auto next = _mm256_add_epi32(acc, sum);
+        if (clamp) {
+          next = saturate_signed_sum(acc, sum, next);
+        }
+        acc = next;
+      }
+      _mm256_storeu_si256(reinterpret_cast<__m256i *>(result[row % 8] + col + 16 * (row / 8)), acc);
+    }
+  }
+  for (int reg = 0; reg < 8; ++reg) {
+    for (int lane = 0; lane < 32; lane += 8) {
+      auto value = _mm256_loadu_si256(reinterpret_cast<const __m256i *>(result[reg] + lane));
+      _mm256_storeu_si256(reinterpret_cast<__m256i *>(d[reg] + lane), value);
+    }
+  }
+}
+
+} // namespace rocjitsu::arith

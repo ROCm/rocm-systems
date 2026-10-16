@@ -1,0 +1,160 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// Tests for v_swmmac_i32_16x16x64_iu4_w64.
+// Keeps this instruction's matrix inputs and expected results beside its aliasing and flag
+// checks.
+
+#include "common/cpu.h"
+#include "common/integer.h"
+#include "common/registers.h"
+#include "common/semantics.h"
+#include "rj_arith/rj_arith.h"
+#include "wmma/helpers.h"
+#include <algorithm>
+
+#include <gtest/gtest.h>
+#include <random>
+#include <stdint.h>
+
+namespace {
+
+using Registers = rocjitsu::arith::test::Registers<64, 64>;
+
+// ISA operand packing, independent of the arithmetic oracle. Gfx11 repeats
+// logical input values across lane groups; gfx12 partitions K between groups.
+void set_a(uint32_t *const *v, int coordinate, int k, uint32_t bits) {
+  auto &word = v[0][coordinate + 32 * ((k / 8) & 1) + 16 * (k / 16)];
+  int shift = 4 * (k % 8);
+  word = (word & ~(0xfU << shift)) | (bits << shift);
+}
+
+// Place one B element at its matrix coordinate in this sparse WMMA register layout.
+void set_b(uint32_t *const *v, int coordinate, int k, uint32_t bits) {
+  auto &word = v[(k % 16) * 4 / 32][coordinate + 32 * ((k / 16) & 1) + 16 * (k / 32)];
+  int shift = (k % 16) * 4 % 32;
+  word = (word & ~(0xfU << shift)) | (bits << shift);
+}
+
+} // namespace
+
+// Check matrix results, operand aliases, and instruction-flag contracts across supported CPUs
+// and semantics.
+TEST(SwmmacI32Iu4K64W64, Arithmetic) {
+  std::minstd_rand random;
+  uint32_t a[16][32], b[64][16], c[16][16];
+  for (int row = 0; row < 16; ++row) {
+    for (int k = 0; k < 32; ++k) {
+      a[row][k] = uint32_t(random()) >> 27;
+    }
+  }
+  for (int k = 0; k < 64; ++k) {
+    for (int col = 0; col < 16; ++col) {
+      b[k][col] = uint32_t(random()) >> 27;
+    }
+  }
+  // Accumulators near both signed limits expose wraparound and staged CLAMP.
+  for (int row = 0; row < 16; ++row) {
+    for (int col = 0; col < 16; ++col) {
+      int64_t distance = (random() >> 16) % 128;
+      c[row][col] = uint32_t((row + col) % 2 ? 2147483647LL - distance : -2147483648LL + distance);
+    }
+  }
+  int selected[16][32];
+  rocjitsu::arith::test::make_sparse_indices(random, selected);
+
+  Registers input;
+  for (int row = 0; row < 16; ++row) {
+    for (int k = 0; k < 32; ++k) {
+      set_a(input.v, row, k, a[row][k]);
+    }
+  }
+  for (int k = 0; k < 64; ++k) {
+    for (int col = 0; col < 16; ++col) {
+      set_b(input.v + 1, col, k, b[k][col]);
+    }
+  }
+  // Map each logical accumulator to its destination register and lane.
+  for (int row = 0; row < 16; ++row) {
+    for (int col = 0; col < 16; ++col) {
+      input.v[3 + ((row % 8) % 4)][col + 16 * (row / 8) + 32 * ((row % 8) / 4)] = c[row][col];
+    }
+  }
+  // Each selector set encodes the same pairs, exercising KEY selection
+  // without additional golden matrices. Every pair is strictly increasing.
+  std::fill_n(input.v[7], 64, 0);
+  for (int row = 0; row < 16; ++row) {
+    for (int k = 0; k < 32; ++k) {
+      int lane = row + 32 * ((k / 8) & 1) + 16 * (k / 16), local = k % 8;
+      for (int key = 0; key < 32; key += 16) {
+        input.v[7][lane] |= uint32_t(selected[row][k] % 4) << (key + 2 * local);
+      }
+    }
+  }
+
+  rocjitsu::arith::test::expect_matrix_invalid_flags(
+      rj_arith_v_swmmac_i32_16x16x64_iu4_w64, input, 3, 0, 1, 7,
+      RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B | RJ_ARITH_WMMA_CLAMP |
+          RJ_ARITH_SWMMAC_INDEX_KEY_1);
+
+  // A occupies 1 registers, B 2, C/D 4. Reuse the same arithmetic
+  // data for overlapping and disjoint destination ranges.
+  const uint64_t modes[] = {
+      0,
+      RJ_ARITH_WMMA_SIGNED_A,
+      RJ_ARITH_WMMA_SIGNED_B,
+      RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B,
+      RJ_ARITH_WMMA_CLAMP,
+      RJ_ARITH_WMMA_CLAMP | RJ_ARITH_WMMA_SIGNED_A,
+      RJ_ARITH_WMMA_CLAMP | RJ_ARITH_WMMA_SIGNED_B,
+      RJ_ARITH_WMMA_CLAMP | RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B,
+      (RJ_ARITH_WMMA_CLAMP | RJ_ARITH_WMMA_SIGNED_A | RJ_ARITH_WMMA_SIGNED_B) |
+          RJ_ARITH_SWMMAC_INDEX_KEY_1};
+  const auto cpu_levels = rocjitsu::arith::test::supported_cpu_levels();
+  for (uint64_t cpu : cpu_levels) {
+    for (uint64_t semantics : rocjitsu::arith::test::semantics_modes()) {
+      for (uint64_t mode : modes) {
+        for (int aliasing_offset : {0, 1, 2, 3, 7, 8}) {
+          SCOPED_TRACE(::testing::Message()
+                       << cpu << '/' << semantics << '/' << mode << '/' << aliasing_offset);
+          Registers r = input;
+          // Exact ISA reference: wide signed sum, then clamp at each native
+          // accumulation boundary, or wrap to uint32 at the final store.
+          uint32_t expected[16][16];
+          for (int row = 0; row < 16; ++row) {
+            for (int col = 0; col < 16; ++col) {
+              int64_t acc = rocjitsu::arith::test::extend_bits(
+                  r.v[aliasing_offset + ((row % 8) % 4)]
+                     [col + 16 * (row / 8) + 32 * ((row % 8) / 4)],
+                  32, true);
+              for (int stage = 0; stage < 2; ++stage) {
+                for (int i = 0; i < 16; ++i) {
+                  int k = 16 * stage + i;
+                  acc += rocjitsu::arith::test::extend_bits(a[row][k], 4,
+                                                            mode & RJ_ARITH_WMMA_SIGNED_A) *
+                         rocjitsu::arith::test::extend_bits(b[selected[row][k]][col], 4,
+                                                            mode & RJ_ARITH_WMMA_SIGNED_B);
+                }
+                if (mode & RJ_ARITH_WMMA_CLAMP) {
+                  acc = std::clamp(acc, int64_t(-2147483648LL), int64_t(2147483647));
+                }
+              }
+              expected[row][col] = uint32_t(acc);
+            }
+          }
+          ASSERT_EQ(rj_arith_v_swmmac_i32_16x16x64_iu4_w64(
+                        cpu | semantics, mode, r.v + aliasing_offset, r.v, r.v + 1, r.v + 7),
+                    RJ_ARITH_SUCCESS);
+          for (int row = 0; row < 16; ++row) {
+            for (int col = 0; col < 16; ++col) {
+              uint32_t actual = r.v[aliasing_offset + ((row % 8) % 4)]
+                                   [col + 16 * (row / 8) + 32 * ((row % 8) / 4)];
+              EXPECT_EQ(actual, expected[row][col]);
+            }
+          }
+          r.expect_preserved(input, aliasing_offset, 4);
+        }
+      }
+    }
+  }
+}
