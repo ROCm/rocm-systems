@@ -81,6 +81,14 @@ OVERLAY_DOCKERFILE = "Dockerfile.rccl-overlay"
 # The maxtext family needs a second image: its A/B baseline cannot be the stock
 # registry tag, which carries no Primus. See build_maxtext_baseline_image().
 MAXTEXT_BASELINE_DOCKERFILE = "Dockerfile.maxtext-baseline"
+# Likewise for sglang-disagg, whose baseline is MAD's Dockerfile built here.
+SGLANG_BASELINE_DOCKERFILE = "Dockerfile.sglang-baseline"
+SGLANG_MAD_DOCKERFILE = "docker/sglang_disagg_inference_full_overlay.ubuntu.amd.Dockerfile"
+# Families whose baseline is built here rather than pulled as the stock tag.
+LOCAL_BASELINE_DOCKERFILES = {
+    "maxtext": MAXTEXT_BASELINE_DOCKERFILE,
+    "sglang-disagg": SGLANG_BASELINE_DOCKERFILE,
+}
 
 # The A/B below needs both runs in one allocation, which requires madengine to
 # execute a multi-node workload in place instead of submitting its own sbatch
@@ -277,6 +285,116 @@ WORKLOAD_CONFIGS = {
             "--ulimit memlock=-1 --ulimit nofile=1048576 "
             "-v /sys:/sys:ro -v /run/udev:/run/udev:ro",
     },
+    # The first inference workload: DeepSeek-R1 served disaggregated, two
+    # prefill and two decode nodes, KV cache moved by nixl. MoE all-to-all is
+    # left to RCCL (MOE_A2A_BACKEND=none) rather than MoRI, so expert traffic
+    # is what the candidate library carries.
+    #
+    # Both A/B images are MAD's sglang Dockerfile built here; see
+    # build_sglang_baseline_image().
+    "deepseek-r1-sglang-disagg": {
+        "type": "inference",
+        "family": "sglang-disagg",
+        # madengine names each result row <this>_2p2d_isl<I>_osl<O>_con<C>.
+        "model_repo": "sglang-disagg-deepseek-r1",
+        "base_image": "rocm/sgl-dev:v0.5.16-rocm720-mi35x-20260807",
+        "gpu_target": "gfx950",
+        "metric_key": "output_token_throughput_tok_s",
+        "metric_unit": "output tok/s of the whole 2P+2D deployment",
+        "multiple_results": "perf_sglang-disagg-DeepSeek-R1.csv",
+        # The sweep points that are scored, in place of precisions; the rest of
+        # the sweep is run and ignored. Only the highest concurrency: the lower
+        # ones are latency-bound and say little about the collectives.
+        "precisions": ["isl1024_osl1024_con64", "isl8192_osl1024_con64"],
+        "tags": ["pyt", "sglang", "disagg", "inference", "deepseek-r1"],
+        "model_args": "--model-name DeepSeek-R1 --model-path /models/DeepSeek-R1-0528 "
+            "--run-mori 1 --dp-mode 1 --xp 2 --yd 2 --gpus-per-node 8 "
+            "--kv-transfer-backend nixl",
+        "disagg": {"prefill_nodes": 2, "decode_nodes": 2},
+        "env_vars": {
+            "MODEL_NAME": "DeepSeek-R1",
+            "MODEL_PATH": "/models/DeepSeek-R1-0528",
+            "RUN_MORI": "1",
+            "DP_MODE": "1",
+            "MOE_A2A_BACKEND": "none",
+            "xP": "2",
+            "yD": "2",
+            "GPUS_PER_NODE": "8",
+            "KV_TRANSFER_BACKEND": "nixl",
+            # INFO for the same reason as the MaxText entry: at WARN only a
+            # communicator's rank 0 prints the version banner, and a server
+            # spanning two nodes has it on one of them.
+            "NCCL_DEBUG": "INFO",
+            "NCCL_DEBUG_SUBSYS": "INIT,NET",
+            # Thor2 settings the sglang stack runs with, over the cluster's.
+            "NCCL_IB_QPS_PER_CONNECTION": "1",
+            "NCCL_IB_USE_INLINE": "0",
+            "NCCL_IB_MERGE_NICS": "0",
+            "NCCL_IB_SPLIT_DATA_ON_QPS": "0",
+            "NCCL_IB_ADAPTIVE_ROUTING": "0",
+            "NCCL_GDR_FLUSH_DISABLE": "1",
+            "NCCL_DMABUF_ENABLE": "0",
+            "NCCL_IB_ROCE_VERSION_NUM": "2",
+            "IB_DEVICES": "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,"
+                "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7",
+            "MORI_RDMA_DEVICES": "bnxt_re0,bnxt_re1,bnxt_re2,bnxt_re3,"
+                "bnxt_re4,bnxt_re5,bnxt_re6,bnxt_re7",
+            "MORI_SOCKET_IFNAME": "fenic0",
+            "MORI_IB_GID_INDEX": "3",
+            "MORI_JIT_CACHE_DIR": "/tmp/mori_jit",
+            "MORI_SHMEM_HEAP_SIZE": "17179869184",
+            "RDMAV_DRIVERS": "bnxt_re",
+            "IBV_DRIVERS": "bnxt_re",
+            "GPU_MAX_HW_QUEUES": "2",
+            "HSA_ENABLE_SDMA": "0",
+            "HSA_FORCE_FINE_GRAIN_PCIE": "1",
+            # The common OMP/TORCH_NCCL settings reach only the deployment
+            # env, not the container, and without OMP_NUM_THREADS each of the
+            # eight server processes per node sizes its pool to every core.
+            "OMP_NUM_THREADS": "8",
+            "TORCH_NCCL_HIGH_PRIORITY": "1",
+            "TORCH_NCCL_ASYNC_ERROR_HANDLING": "1",
+            # Part of meta64 has less VRAM per GPU, and sglang refuses a TP
+            # group spanning both kinds ("The memory capacity is unbalanced").
+            # Off, it warns and sizes the KV pool by the smaller GPU; both A/B
+            # phases share the nodes, so the ratio is unaffected.
+            "SGLANG_ENABLE_TP_MEMORY_INBALANCE_CHECK": "0",
+            # A hang otherwise holds four nodes for two hours before failing.
+            "BARRIER_TIMEOUT_S": "1800",
+            "IP_SYNC_TIMEOUT": "1800",
+            "SMOKE": "0",
+            # A point is only 2 x concurrency requests, and one pass at
+            # isl1024 con64 moved 6.8% between two A/A phases on the same
+            # nodes. The parser keeps each point's best iteration, so three
+            # passes of just the gated points cost about what the full sweep
+            # did.
+            "BENCHMARK_ITR": "3",
+            "BENCHMARK_COMBINATIONS": "1024/1024 8192/1024",
+            "BENCHMARK_CONCURRENCY_LEVELS": "64",
+            "BENCHMARK_PRECHECK": "0",
+            "BENCHMARK_FAIL_FAST": "1",
+        },
+        # The image builds its own rdma-core 63 for Thor2; the host's 61
+        # mounted over it would put nixl and MoRI on a stack never run here.
+        "mount_host_ib_libs": False,
+        "required_nodes": 4,
+        "slurm_partition": "meta64",
+        "gpus_per_node": 8,
+        # One phase took 31 min by hand with the image cached; each phase here
+        # also builds, saves and loads it.
+        "time_limit": "03:00:00",
+        "docker_mounts": {
+            "/dev/infiniband": "/dev/infiniband",
+            "/sys/class/infiniband": "/sys/class/infiniband",
+        },
+        # --init: the launcher polls its servers with `kill -0`, which succeeds
+        # on a zombie, and without a reaping PID 1 every node exits 1 after a
+        # complete sweep.
+        "docker_run_options": "--init --privileged --group-add render --shm-size 64G "
+            "--device=/dev/infiniband --cap-add IPC_LOCK --ulimit memlock=-1 "
+            "--ulimit nofile=1048576:1048576 "
+            "-v /sys:/sys:ro -v /run/udev:/run/udev:ro -e SLURM_JOB_ID",
+    },
 }
 
 CLUSTER_CONFIGS = {
@@ -297,6 +415,8 @@ CLUSTER_CONFIGS = {
             "NCCL_DEBUG": "WARN",
         },
         "results_base": "/apps/rccl-ci/madengine/perf",
+        # Mounted read-only at /models for the inference workloads.
+        "models_dir": "/apps/data/models",
     },
 }
 
@@ -424,6 +544,9 @@ def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
     if family == "maxtext":
         scripts_src = mad_dir / "scripts" / "jax-maxtext"
         scripts_name = "jax-maxtext"
+    elif family == "sglang-disagg":
+        scripts_src = mad_dir / "scripts" / "sglang_disagg"
+        scripts_name = "sglang_disagg"
     else:
         scripts_src = mad_dir / "scripts" / "primus_megatron-lm"
         if not scripts_src.is_dir():
@@ -436,18 +559,28 @@ def install_madengine(work_dir: Path, family: str = "megatron") -> Path:
         subprocess.run(["cp", "-r", str(scripts_src), str(scripts_dst)], check=True)
         log.info("Copied MAD %s scripts to %s", scripts_name, scripts_dst)
     elif not scripts_src.is_dir():
-        # Fatal for maxtext: the manifest points `scripts` at run.sh, and a
-        # missing one surfaces as a container-side "no such file" on every
-        # node instead of here. The megatron path keeps its historical warning.
+        # Fatal for maxtext and sglang: the manifest points `scripts` at
+        # run.sh, and a missing one surfaces as a container-side "no such
+        # file" on every node instead of here. The megatron path keeps its
+        # historical warning.
         if family == "maxtext":
             raise RuntimeError(
                 f"MAD jax-maxtext scripts not found at {scripts_src} -- "
                 f"MAD pin {MAD_REF[:12]} predates ROCm/MAD#228"
             )
+        if family == "sglang-disagg":
+            raise RuntimeError(
+                f"MAD sglang_disagg scripts not found at {scripts_src} -- "
+                f"MAD pin {MAD_REF[:12]} does not carry them"
+            )
         log.error("MAD primus scripts not found — expected at %s", scripts_src)
 
     if family == "maxtext":
         fetch_primus(mad_dir)
+    if family == "sglang-disagg" and not (mad_dir / SGLANG_MAD_DOCKERFILE).is_file():
+        raise RuntimeError(
+            f"MAD pin {MAD_REF[:12]} has no {SGLANG_MAD_DOCKERFILE}"
+        )
 
     result = subprocess.run(
         ["madengine", "--version"],
@@ -610,11 +743,27 @@ def squash_log_spam(run_dir: Path) -> int:
     return saved
 
 
+def rccl_banner_logs(work_dir: Path) -> list[Path]:
+    """One log per node of a phase, the one its RCCL version banner lands in.
+
+    madengine's per-node logs, unless the phase has sglang server logs: that
+    launcher sends the servers' output, and with it the banner, to /run_logs
+    (one prefill or decode log per node) instead.
+    """
+    log_dir = work_dir / "slurm_output"
+    if not log_dir.is_dir():
+        return []
+    server_logs = sorted(
+        p for p in log_dir.glob("run_logs/*/*_NODE*.log")
+        if p.name.startswith(("prefill_", "decode_"))
+    )
+    return server_logs or sorted(log_dir.glob("*node_*.out"))
+
+
 def runtime_rccl_versions(work_dir: Path) -> list[str]:
     """Distinct ``RCCL version :`` banners across one phase's node logs."""
-    log_dir = work_dir / "slurm_output"
     versions: list[str] = []
-    for log_file in sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []:
+    for log_file in rccl_banner_logs(work_dir):
         for v in re.findall(r"RCCL version\s*:\s*(\S+)", log_file.read_text(errors="replace")):
             if v not in versions:
                 versions.append(v)
@@ -628,7 +777,7 @@ def verify_rccl_replacement(
 ) -> tuple[bool, str]:
     """Verify that every node used the CI-built RCCL, not its bundled copy.
 
-    Checks *all* ``*node_*.out`` logs for ``RCCL version :`` and compares
+    Checks every node's log (rccl_banner_logs) for ``RCCL version :`` and compares
     against the expected fingerprint.  A library that reached only one node
     still fails — this is the multi-node failure this job exists to catch.
 
@@ -638,8 +787,7 @@ def verify_rccl_replacement(
     if not expected.get("version"):
         return True, "No RCCL version to verify"
 
-    log_dir = work_dir / "slurm_output"
-    node_logs = sorted(log_dir.glob("*node_*.out")) if log_dir.is_dir() else []
+    node_logs = rccl_banner_logs(work_dir)
     if not node_logs:
         return False, "No node logs found — cannot verify RCCL"
 
@@ -1032,6 +1180,58 @@ def build_maxtext_baseline_image(
     return tag
 
 
+# MAD's Dockerfile ends with `dpkg -r --force-all` on the distro rdma-core,
+# which leaves apt unusable, so the swap's patchelf has to come from pip.
+SGLANG_SWAP_TOOLS = (
+    "RUN command -v patchelf >/dev/null || pip install --no-cache-dir patchelf\n"
+)
+
+
+def sglang_recipe(mad_dir: Path, from_ref: str) -> str:
+    """MAD's sglang Dockerfile on *from_ref*, plus what the RCCL swap needs.
+
+    The base becomes a literal FROM rather than the ARG default, so no build
+    argument can move it off the digest both A/B images were pinned to.
+    """
+    text = (mad_dir / SGLANG_MAD_DOCKERFILE).read_text()
+    pinned, count = re.subn(
+        r"(?m)^FROM \$\{?BASE_DOCKER\}?\s*$", f"FROM {from_ref}", text
+    )
+    if count != 1:
+        raise RuntimeError(
+            f"{SGLANG_MAD_DOCKERFILE} at MAD {MAD_REF[:12]} has {count} "
+            f"`FROM $BASE_DOCKER` lines, expected 1"
+        )
+    return f"{pinned}\n{SGLANG_SWAP_TOOLS}"
+
+
+def build_sglang_baseline_image(
+    base_image: str,
+    work_dir: Path,
+    run_token: str,
+    from_ref: str,
+) -> str:
+    """Build the A/B baseline for sglang-disagg: MAD's image, stock RCCL.
+
+    The base alone is not what MAD runs: its Dockerfile adds rdma-core 63,
+    without which queue-pair creation fails on Thor2. Built every run and
+    tagged like the MaxText baseline, for the same reasons.
+    """
+    ctx_dir = work_dir / OVERLAY_CTX
+    ctx_dir.mkdir(exist_ok=True)
+    dockerfile = ctx_dir / SGLANG_BASELINE_DOCKERFILE
+    dockerfile.write_text(sglang_recipe(work_dir / "MAD", from_ref))
+
+    tag = f"{base_image}-mad-{MAD_REF[:8]}-{run_token}-{base_identity(from_ref)}"
+    log.info("Building sglang baseline image (MAD recipe, stock RCCL): %s", tag)
+    subprocess.run(
+        ["docker", "build", "-t", tag, "-f", str(dockerfile), str(ctx_dir)],
+        check=True,
+    )
+    log.info("sglang baseline image built: %s", tag)
+    return tag
+
+
 def stage_rccl_overlay(
     rccl_lib: Path,
     base_image: str,
@@ -1054,7 +1254,7 @@ def stage_rccl_overlay(
     """
     rccl_commit = get_rccl_commit(rccl_lib)
     tag = f"{base_image}-rccl-{gpu_target}-{rccl_commit}"
-    if family == "maxtext" and from_ref:
+    if family in ("maxtext", "sglang-disagg") and from_ref:
         # Same identity the baseline carries, for the same reason: the run id
         # alone survives a re-run, so without this the candidate could hit the
         # previous attempt's image and skip its build while the baseline was
@@ -1127,6 +1327,18 @@ def stage_rccl_overlay(
         # ratio would then be measuring more than RCCL.
         dockerfile.write_text(
             f"FROM {from_ref or base_image}\n\n{MAXTEXT_PRIMUS_PAYLOAD}\n"
+            f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
+        )
+    elif family == "sglang-disagg":
+        # The baseline's recipe plus the swap, as for MaxText: the sgl-dev
+        # base does not have the Primus image's layout, so the targets are
+        # discovered rather than assumed.
+        swap = _librccl_swap_snippet(
+            bridge=_soname_bridge_discovered(rccl_needed),
+            kpack=has_kpack_files,
+        )
+        dockerfile.write_text(
+            f"{sglang_recipe(work_dir / 'MAD', from_ref or base_image)}\n"
             f"COPY rccl_libs/ /tmp/rccl_ci/\n{swap}\nENV NCCL_DEBUG=WARN\n"
         )
     elif uses_kpack:
@@ -1232,6 +1444,8 @@ def generate_manifest(
     family = workload_config.get("family", "megatron")
     if family == "maxtext":
         scripts_dir = work_dir / "scripts" / "jax-maxtext"
+    elif family == "sglang-disagg":
+        scripts_dir = work_dir / "scripts" / "sglang_disagg"
     else:
         scripts_dir = work_dir / "scripts" / "primus_megatron-lm"
         if not scripts_dir.is_dir():
@@ -1245,6 +1459,8 @@ def generate_manifest(
         extra_args = workload_config.get("model_args_extra", "")
         if extra_args:
             model_args += f" {extra_args}"
+    elif family == "sglang-disagg":
+        model_args = workload_config["model_args"]
     else:
         model_args = f"--model_repo {model_repo}"
 
@@ -1271,7 +1487,9 @@ def generate_manifest(
     # /usr/lib64/libibverbs/ so the providers must appear there.
     # The library itself replaces the container's copy so the linker
     # picks it up from the standard search path.
-    if cluster_config.get("mount_host_ib_libs"):
+    if cluster_config.get("mount_host_ib_libs") and workload_config.get(
+        "mount_host_ib_libs", True
+    ):
         docker_run_opts += (
             " -v /usr/lib64/libibverbs.so.1"
             ":/usr/lib/x86_64-linux-gnu/libibverbs.so.1:ro"
@@ -1279,6 +1497,20 @@ def generate_manifest(
             " -v /usr/lib64/libibumad.so.3"
             ":/usr/lib/x86_64-linux-gnu/libibumad.so.3:ro"
         )
+
+    if family == "sglang-disagg":
+        # The launcher writes its server logs, and the RCCL banner the
+        # candidate is verified by, to /run_logs/$SLURM_JOB_ID. Both phases
+        # share one job id, so each gets its own directory. It must be shared
+        # storage and world-writable: Docker runs as root, which a
+        # root-squashed NFS maps to nobody.
+        run_logs = (run_dir or work_dir) / "slurm_output" / "run_logs"
+        run_logs.mkdir(parents=True, exist_ok=True)
+        run_logs.chmod(0o777)
+        docker_run_opts += f" -v {run_logs}:/run_logs"
+        # Read-only: run.sh downloads the weights into MODEL_PATH when they
+        # look incomplete, and that must fail rather than fill shared storage.
+        docker_run_opts += f" -v {cluster_config['models_dir']}:/models:ro"
 
     # When --skip-overlay-build is used the base image still has its
     # bundled RCCL.  Bind-mount the CI-built librccl.so (and kpack
@@ -1289,9 +1521,9 @@ def generate_manifest(
         # do not exist, and `docker run -v` CREATES a missing source as an empty
         # root-owned directory rather than refusing -- so the run would look
         # healthy while measuring the image's own RCCL. Refuse instead.
-        if family == "maxtext":
+        if family in ("maxtext", "sglang-disagg"):
             raise RuntimeError(
-                "--skip-overlay-build is not supported for the maxtext family: "
+                f"--skip-overlay-build is not supported for the {family} family: "
                 "the bind-mount targets are Primus-image paths absent from "
                 + workload_config["base_image"] + ", and Docker would silently "
                 "mount empty directories over nothing. Build the overlay."
@@ -1397,7 +1629,7 @@ def generate_manifest(
             "target": "slurm",
             "slurm": slurm_config,
             "distributed": {
-                "launcher": "primus",
+                "launcher": "sglang-disagg" if family == "sglang-disagg" else "primus",
                 "backend": "nccl",
                 "port": 29500,
                 "nnodes": nodes,
@@ -1415,6 +1647,11 @@ def generate_manifest(
                         }
                     }
                     if family == "maxtext"
+                    else {}
+                ),
+                **(
+                    {"sglang_disagg": workload_config["disagg"]}
+                    if family == "sglang-disagg"
                     else {}
                 ),
             },
@@ -1515,6 +1752,14 @@ def repro_manifest(manifest: dict, work_dir: Path) -> dict:
         model = out.get("built_models", {}).get(key)
         if model is not None:
             model["dockercontext"] = OVERLAY_CTX
+    # The CI phase directory is gone by then; a rerun salloc's from its copy.
+    for model in out.get("built_models", {}).values():
+        if "additional_docker_run_options" in model:
+            model["additional_docker_run_options"] = re.sub(
+                r"-v \S+/slurm_output/run_logs:/run_logs",
+                "-v ${SLURM_SUBMIT_DIR}/slurm_output/run_logs:/run_logs",
+                model["additional_docker_run_options"],
+            )
     return out
 
 
@@ -1624,6 +1869,9 @@ the refs, image digests and cluster settings. The run's own numbers are in the
 
 - The baseline phase is `manifest.baseline.repro.json`. Run it from a second copy
   of this directory: each phase writes `perf.csv` and `slurm_output/` to its cwd.
+- An sglang-disagg run also needs `mkdir -m 0777 -p slurm_output/run_logs` in
+  each copy before `salloc`, and the weights under `/models` as the manifest
+  mounts them.
 - To shorten a Megatron run, add `"PRIMUS_TRAIN_ITERS": "15"` to both
   `context.docker_env_vars` and `deployment_config.env_vars`.
 - `BASE_DIGEST` is the base the CI head node built from. The nodes build from
@@ -1679,6 +1927,21 @@ def write_repro_bundle(
     log.info("Repro bundle written to: %s", bundle)
     return bundle
 
+
+# The sglang launcher reaches every node at the address DNS gives its name and
+# binds its barrier to the node's own one, so a stale record leaves rank 0
+# waiting out BARRIER_TIMEOUT_S for a node that is up and never answers.
+PREFLIGHT_DNS = """\
+#!/bin/bash
+h=$(hostname -s)
+ip=$(getent ahostsv4 "$h" | awk 'NR==1 {print $1}')
+if [ -n "$ip" ] && hostname -I | tr ' ' '\\n' | grep -qxF "$ip"; then
+    echo "  ok   $h -> $ip"
+else
+    echo "  BAD  $h -> ${ip:-unresolved}, not an address of this node"
+    exit 1
+fi
+"""
 
 # Run on every node once the phases are done. The images are per-run tags that
 # no later run can reuse, and each is tens of GB on a node's local disk.
@@ -1768,6 +2031,20 @@ def run_ab_in_one_allocation(
         "  exit 3",
         "}",
     ]
+    if workload_config.get("family") == "sglang-disagg":
+        dns_check = work_dir / "ab" / "preflight_dns.sh"
+        dns_check.parent.mkdir(parents=True, exist_ok=True)
+        dns_check.write_text(PREFLIGHT_DNS)
+        script_lines += [
+            'echo "===== preflight: every node resolves to an address it owns ====="',
+            'srun --ntasks="${SLURM_JOB_NUM_NODES}" --ntasks-per-node=1 '
+            f"--overlap bash {shlex.quote(str(dns_check))} || {{",
+            '  echo "::error::At least one allocated node resolves to an address '
+            'it does not have (see BAD above); the sglang barrier would wait for '
+            'it until timeout. Exclude it via MADENGINE_SLURM_EXCLUDE."',
+            "  exit 3",
+            "}",
+        ]
     for phase, run_dir in phases:
         script_lines += [
             "",
@@ -1806,6 +2083,15 @@ def run_ab_in_one_allocation(
     qos = cluster_config.get("slurm_qos", "")
     if qos:
         cmd += ["--qos", qos]
+    # Set from a repository variable by the workflow: the nodes to avoid are
+    # the cluster's business and their names do not belong in this file.
+    exclude = os.environ.get("MADENGINE_SLURM_EXCLUDE", "").strip()
+    if exclude:
+        if not re.fullmatch(r"[A-Za-z0-9_.,\[\]-]+", exclude):
+            raise RuntimeError(
+                f"MADENGINE_SLURM_EXCLUDE is not a SLURM hostlist: {exclude!r}"
+            )
+        cmd += ["--exclude", exclude]
     cmd += ["bash", str(script_path)]
 
     log.info("Running: %s", " ".join(cmd))
@@ -1979,17 +2265,38 @@ def parse_live_log_metrics(work_dir: Path) -> list[dict]:
     return runs
 
 
+_SWEEP_POINT_RE = re.compile(r"_(isl\d+_osl\d+_con\d+)$")
+
+
+def _row_precision(row: dict) -> str:
+    """The key a result row is paired on: its precision, or its sweep point.
+
+    An inference sweep has no precision; its rows are named
+    ``<model>_<xPyD>_isl<I>_osl<O>_con<C>``, and the point is what the two
+    phases have in common.
+    """
+    precision = (row.get("training_precision")
+                 or row.get("multi_results", {}).get("precision", ""))
+    if precision:
+        return precision
+    point = _SWEEP_POINT_RE.search(row.get("model", ""))
+    return point.group(1) if point else ""
+
+
 def collect_phase_results(
     run_dir: Path,
     metric_key: str,
     extra_aliases: set[str] | None = None,
     extra_tflops_aliases: set[str] | None = None,
+    only: list[str] | None = None,
 ) -> list[dict]:
     """Per-precision metrics for one phase.
 
     Prefers madengine's structured output and falls back to scraping the live
     log.  Each entry carries precision, metric value and a pass/fail status, so
     the A/B comparison and the datastore writes are driven from one list.
+
+    *only* keeps the rows of those precisions (sweep points) and drops the rest.
     """
     perf_results = parse_perf_results(run_dir)
     results: list[dict] = []
@@ -2012,8 +2319,9 @@ def collect_phase_results(
             if row.get("metric") not in accepted_metrics:
                 continue
             perf_val = row.get("performance", "")
-            precision = (row.get("training_precision")
-                         or row.get("multi_results", {}).get("precision", ""))
+            precision = _row_precision(row)
+            if only is not None and precision not in only:
+                continue
             row_status = row.get("status", "")
             if not perf_val:
                 continue
@@ -2041,8 +2349,7 @@ def collect_phase_results(
         for row in perf_results:
             if row.get("metric") not in accepted_tflops:
                 continue
-            prec = (row.get("training_precision")
-                    or row.get("multi_results", {}).get("precision", ""))
+            prec = _row_precision(row)
             try:
                 tflops_by_precision[prec] = float(row["performance"])
             except (KeyError, ValueError, TypeError):
@@ -2203,6 +2510,7 @@ def generate_summary_report(
     nodelist: str = "",
     job_id: str = "",
     phase_rccl: dict[str, str] | None = None,
+    unit: str = "tok/s/GPU",
 ) -> str:
     """Generate a plain-text summary report."""
     status = "PASSED" if exit_code == 0 else "FAILED"
@@ -2223,7 +2531,7 @@ def generate_summary_report(
         "Both numbers below were measured on those same nodes, back to back,",
         "inside one allocation. Baseline is the stock image; candidate is the",
         "same image with the CI-built RCCL laid over it. Throughput in",
-        "tok/s/GPU.",
+        f"{unit}.",
         "",
     ]
 
@@ -2369,7 +2677,7 @@ def main() -> None:
     # Resolved once and written into both A/B Dockerfiles, so the pair cannot
     # straddle a push to the mutable base tag between the two builds.
     base_ref = ""
-    if family == "maxtext" and not args.skip_overlay_build:
+    if family in ("maxtext", "sglang-disagg") and not args.skip_overlay_build:
         base_ref = resolve_base_digest(workload_config["base_image"])
 
     # Step 3: Stage the candidate image (or use pre-built). Images are built
@@ -2400,6 +2708,13 @@ def main() -> None:
             workload_config["base_image"], work_dir, primus_dir,
             # Same token the candidate tag carries, so the pair is unambiguously
             # from one run, and the same pinned base digest.
+            run_token=rccl_commit,
+            from_ref=base_ref or workload_config["base_image"],
+        )
+        baseline_pull_only = False
+    elif family == "sglang-disagg":
+        baseline_image = build_sglang_baseline_image(
+            workload_config["base_image"], work_dir,
             run_token=rccl_commit,
             from_ref=base_ref or workload_config["base_image"],
         )
@@ -2435,8 +2750,8 @@ def main() -> None:
             # and have it rebuild the swapped image under the baseline tag --
             # an A/B comparing the CI RCCL against itself.
             dockerfile_name=(
-                MAXTEXT_BASELINE_DOCKERFILE
-                if family == "maxtext" and phase == BASELINE
+                LOCAL_BASELINE_DOCKERFILES.get(family, OVERLAY_DOCKERFILE)
+                if phase == BASELINE
                 else OVERLAY_DOCKERFILE
             ),
         )
@@ -2505,6 +2820,9 @@ def main() -> None:
             run_dir, metric_key,
             extra_aliases=workload_config.get("metric_aliases"),
             extra_tflops_aliases=workload_config.get("tflops_aliases"),
+            # A sweep reports many points; only the configured ones are scored.
+            only=(workload_config["precisions"]
+                  if workload_config["type"] == "inference" else None),
         )
 
         # Matrix legs share GITHUB_RUN_ID, so the workload keeps them apart.
@@ -2604,7 +2922,10 @@ def main() -> None:
                     extra=phase_extra,
                     precision=c["precision"],
                     tflops=row.get("tflops_avg"),
-                    tokens_per_sec=row.get("metric_value"),
+                    # Per GPU for training only; inference scores the whole
+                    # deployment, and metric_value already carries that.
+                    tokens_per_sec=(row.get("metric_value")
+                                    if workload_config["type"] == "training" else None),
                 )
     else:
         append_result(
@@ -2629,6 +2950,7 @@ def main() -> None:
             phase: ", ".join(runtime_rccl_versions(run_dir))
             for phase, run_dir in phases
         },
+        unit=workload_config.get("metric_unit", "tok/s/GPU"),
     )
     log.info("\n%s", report)
     write_github_summary(report)

@@ -64,6 +64,7 @@ on:
           - llama-3.1-70b-pp4-training
           - gpt-oss-120b-training
           - llama-3.1-405b-maxtext
+          - deepseek-r1-sglang-disagg
         default: 'llama-3.1-70b-training'
       nodes:
         description: 'Number of SLURM nodes to allocate'
@@ -245,6 +246,8 @@ jobs:
           NCCL_DEBUG: WARN
           MAD_SECRETS_HFTOKEN: ${{ secrets.HF_TOKEN || '' }}
           JOB_TIMEOUT_MINUTES: ${{ inputs.job_timeout_minutes }}
+          # Nodes to keep out of the allocation, as a SLURM hostlist.
+          MADENGINE_SLURM_EXCLUDE: ${{ vars.RCCL_MADENGINE_SLURM_EXCLUDE || '' }}
         run: |
           export PYTHONPATH="rocm-systems/projects/rccl/ci/scripts:${PYTHONPATH}"
 
@@ -302,6 +305,7 @@ jobs:
             ${{ env.WORK_DIR }}/ab/*/manifest.json
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.out
             ${{ env.WORK_DIR }}/ab/*/slurm_output/*.err
+            ${{ env.WORK_DIR }}/ab/*/slurm_output/run_logs/*/*.log
           retention-days: 30
 
       # What a rerun by hand needs once the cleanup below has deleted WORK_DIR:
