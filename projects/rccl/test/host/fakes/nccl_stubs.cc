@@ -78,6 +78,12 @@ void ncclCudaContextDrop(struct ncclCudaContext* cxt) { ::abort(); }
 // ncclCudaContextTrack lives in strongstream_stubs.cc (v2.31 three-argument ABI).
 ncclResult_t ncclDdaFabricCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaFabricCommInit(struct ncclComm* comm) { ::abort(); }
+static ncclResult_t DefaultNcclDdaIpcCommClosePeerMappings(struct ncclComm*) { return ncclSuccess; }
+std::function<ncclResult_t(struct ncclComm*)> g_ncclDdaIpcCommClosePeerMappings =
+    DefaultNcclDdaIpcCommClosePeerMappings;
+ncclResult_t ncclDdaIpcCommClosePeerMappings(struct ncclComm* comm) {
+  return g_ncclDdaIpcCommClosePeerMappings(comm);
+}
 ncclResult_t ncclDdaIpcCommFini(struct ncclComm* comm) { return ncclSuccess; }
 ncclResult_t ncclDdaIpcCommInit(struct ncclComm* comm) { ::abort(); }
 bool ncclDdaUseFabricPath(struct ncclComm* comm) { return false; }
@@ -265,6 +271,7 @@ void ResetNcclStubs() {
   g_ncclCommDestroy = DefaultNcclCommDestroy;
   g_ncclCommSplit = DefaultNcclCommSplit;
   g_collTraceDestroy = DefaultCollTraceDestroy;
+  g_ncclDdaIpcCommClosePeerMappings = DefaultNcclDdaIpcCommClosePeerMappings;
   g_ncclProfilerThreadDestroy = DefaultNcclProfilerThreadDestroy;
   g_ncclProfilerPluginFinalize = DefaultNcclProfilerPluginFinalize;
   g_ncclTunerPluginUnload = DefaultNcclTunerPluginUnload;

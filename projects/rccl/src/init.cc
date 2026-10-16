@@ -4307,6 +4307,11 @@ static ncclResult_t commDestroySync(struct ncclAsyncJob* job_) {
              comm->commHash, comm->rank);
       }
     }
+    // Close imported DDA IPC mappings while commDestroySync is still running
+    // concurrently for every local rank. The existing intranode barrier below
+    // then guarantees all mappings are closed before serial commFree releases
+    // any rank's exported allocations.
+    (void)ncclDdaIpcCommClosePeerMappings(comm);
     if (COMPILER_ATOMIC_LOAD(comm->abortFlag, std::memory_order_acquire) == 0) {
       int* hostRanks;
       int hostRank = 0;
