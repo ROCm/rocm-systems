@@ -127,51 +127,127 @@ bool IsSameAffinity(const std::vector<uint64_t>& lhs, const std::vector<uint64_t
 }
 }  // namespace
 
-// Crash signal handling
+// Crash signal handling. Every component that flushes on a crash (async logging,
+// HRR capture) registers its own callback. The handler is installed once, runs
+// every callback, then passes the signal to the handler installed before it.
 static const int kCrashSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
 static constexpr size_t kNumCrashSignals = sizeof(kCrashSignals) / sizeof(kCrashSignals[0]);
+static constexpr size_t kMaxCrashCallbacks = 4;
 static struct sigaction oldCrashHandlers_[kNumCrashSignals];
-static Os::CrashCallback crashCallback_ = nullptr;
-static std::atomic<bool> crashHandlersInstalled_{false};
+static std::atomic<Os::CrashCallback> crashCallbacks_[kMaxCrashCallbacks];
+static std::mutex crashHandlersLock_;
+static bool crashHandlersInstalled_ = false;  // Guarded by crashHandlersLock_
 
-static void crashSignalHandler(int sig) {
-  if (crashCallback_ != nullptr) {
-    crashCallback_();
+static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
+  for (auto& slot : crashCallbacks_) {
+    Os::CrashCallback callback = slot.load(std::memory_order_acquire);
+    if (callback != nullptr) {
+      callback();
+    }
   }
 
+  size_t i = 0;
+  while (i < kNumCrashSignals && kCrashSignals[i] != sig) {
+    ++i;
+  }
+  if (i == kNumCrashSignals) {
+    return;
+  }
+
+  // Chain to the earlier handler. It may recover and return, and then a later
+  // fault reaches this handler again, so ours is not installed with SA_RESETHAND.
+  struct sigaction& old = oldCrashHandlers_[i];
+  if (old.sa_handler != SIG_DFL && old.sa_handler != SIG_IGN) {
+    const bool siginfo = (old.sa_flags & SA_SIGINFO) != 0;
+    void (*handler)(int) = old.sa_handler;
+    void (*action)(int, siginfo_t*, void*) = old.sa_sigaction;
+    if (old.sa_flags & SA_RESETHAND) {
+      old.sa_handler = SIG_DFL;
+      old.sa_flags &= ~SA_SIGINFO;
+    }
+    if (siginfo) {
+      action(sig, info, context);
+    } else {
+      handler(sig);
+    }
+    return;
+  }
+
+  // No earlier handler (an ignored crash signal is treated the same): die with
+  // the default action, so a core dump still records the original fault.
+  struct sigaction dfl;
+  memset(&dfl, 0, sizeof(dfl));
+  sigemptyset(&dfl.sa_mask);
+  dfl.sa_handler = SIG_DFL;
+  sigaction(sig, &dfl, nullptr);
   kill(getpid(), sig);
 }
 
 bool Os::installExceptionHandlers(CrashCallback callback) {
-  if (crashHandlersInstalled_.exchange(true)) {
-    return true;
-  }
+  std::lock_guard<std::mutex> lock(crashHandlersLock_);
 
-  crashCallback_ = callback;
-
-  struct sigaction sa;
-  sigemptyset(&sa.sa_mask);
-  sa.sa_handler = crashSignalHandler;
-  sa.sa_flags = SA_RESETHAND;
-
-  for (size_t i = 0; i < kNumCrashSignals; ++i) {
-    if (sigaction(kCrashSignals[i], &sa, &oldCrashHandlers_[i]) != 0) {
+  if (callback != nullptr) {
+    bool registered = false;
+    for (auto& slot : crashCallbacks_) {
+      if (slot.load() == callback) {
+        registered = true;
+        break;
+      }
+    }
+    for (size_t j = 0; !registered && j < kMaxCrashCallbacks; ++j) {
+      Os::CrashCallback empty = nullptr;
+      registered = crashCallbacks_[j].compare_exchange_strong(empty, callback);
+    }
+    if (!registered) {
       return false;
     }
   }
+
+  if (crashHandlersInstalled_) {
+    return true;
+  }
+
+  struct sigaction sa;
+  memset(&sa, 0, sizeof(sa));
+  sigemptyset(&sa.sa_mask);
+  sa.sa_sigaction = crashSignalHandler;
+  sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
+
+  for (size_t i = 0; i < kNumCrashSignals; ++i) {
+    if (sigaction(kCrashSignals[i], &sa, &oldCrashHandlers_[i]) != 0) {
+      while (i-- > 0) {
+        sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
+      }
+      for (auto& slot : crashCallbacks_) {
+        Os::CrashCallback expected = callback;
+        slot.compare_exchange_strong(expected, nullptr);
+      }
+      return false;
+    }
+  }
+  crashHandlersInstalled_ = true;
   return true;
 }
 
-void Os::uninstallExceptionHandlers() {
-  if (!crashHandlersInstalled_.load()) {
+void Os::uninstallExceptionHandlers(CrashCallback callback) {
+  std::lock_guard<std::mutex> lock(crashHandlersLock_);
+
+  bool inUse = false;
+  for (auto& slot : crashCallbacks_) {
+    if (callback == nullptr || slot.load() == callback) {
+      slot.store(nullptr);
+    } else if (slot.load() != nullptr) {
+      inUse = true;
+    }
+  }
+  if (inUse || !crashHandlersInstalled_) {
     return;
   }
 
   for (size_t i = 0; i < kNumCrashSignals; ++i) {
     sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
   }
-  crashCallback_ = nullptr;
-  crashHandlersInstalled_.store(false);
+  crashHandlersInstalled_ = false;
 }
 
 static struct sigaction oldSigAction;

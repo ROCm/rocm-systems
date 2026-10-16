@@ -122,7 +122,7 @@ class AsyncLogger {
       bool expected = true;
       if (crashHandlersInstalled_.compare_exchange_strong(expected, false,
                                                           std::memory_order_acq_rel)) {
-        Os::uninstallExceptionHandlers();
+        Os::uninstallExceptionHandlers(crashFlushCallback);
       }
     }
   }

@@ -71,6 +71,11 @@
 # HRR_TEST_FAKE_FS_TOTAL; every other call goes on to libc. Contains its own
 # hidden [.][hrr-direct] workloads. POSIX only.
 #
+# hrr_crash_chain_test.cc covers CLR's crash handler with a SIGSEGV handler the
+# application installed first: the archive is flushed, then that handler runs,
+# on every signal, also when asynchronous logging holds a crash callback too.
+# Contains its own hidden [.][hrr-direct] workload. POSIX only.
+#
 # hrr_clock_hook.cc defines clock_gettime for the binary, so a workload can run
 # a hook on one thread's clock reads, as the capture writer timestamps a record.
 # POSIX only.
@@ -78,9 +83,10 @@
 # The workload translation units carry __global__ kernels, device built-ins
 # (blockIdx/blockDim/threadIdx), hipLaunchKernelGGL, and HIP_SYMBOL, so they must
 # be compiled with the HIP device toolchain rather than a plain C++ compiler.
-# hrr_roundtrip_test.cc, hrr_api_matrix_test.cc, hrr_capture_access_test.cc and
-# hrr_secure_exec_test.cc are host-only drivers (subprocess orchestration +
-# host-side HIP and hipRTC calls) and stay plain C++ translation units.
+# hrr_roundtrip_test.cc, hrr_api_matrix_test.cc, hrr_capture_access_test.cc,
+# hrr_secure_exec_test.cc and hrr_crash_chain_test.cc are host-only drivers
+# (subprocess orchestration + host-side HIP and hipRTC calls) and stay plain C++
+# translation units.
 set(HRR_GPU_WORKLOAD_SOURCES
   hrr_workload_test.cc
   hrr_repro_workload_test.cc
@@ -111,6 +117,7 @@ add_executable(hrr-integration-tests
   hrr_fatbin_header_test.cc
   hrr_capture_capabilities_test.cc
   hrr_secure_exec_test.cc
+  hrr_crash_chain_test.cc
   hrr_clock_hook.cc
 )
 set_target_properties(hrr-integration-tests PROPERTIES

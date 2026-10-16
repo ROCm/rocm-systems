@@ -80,7 +80,10 @@ fault aborts the host, or a host SIGSEGV):
   Linux-only signal chain. On fatal signals/exceptions supported by CLR, the
   callback `writer::emergency_finalize()`s with `complete:false` and deliberately
   does **not** write the clean trailer — its absence is how the reader detects a
-  crash-truncated archive. Orderly shutdown is handled by the existing
+  crash-truncated archive. On Linux CLR keeps every component's callback (CLR's
+  asynchronous logging registers one too), then passes the signal to the handler
+  installed before its own; it stays installed, so a later fault flushes again.
+  Orderly shutdown is handled by the existing
   `std::atexit(hip_capture_shutdown)` path, which writes the clean trailer and
   `complete:true`.
 - **Clean-shutdown trailer.** A normal `writer::flush` appends an
