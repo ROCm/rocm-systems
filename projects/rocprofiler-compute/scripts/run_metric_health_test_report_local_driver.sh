@@ -402,7 +402,7 @@ launch_ssh() {
   ssh_cmd "chmod +x '${REMOTE_ROOT}/scripts/run_metric_health_test_report.sh' && \
     nohup env ROCR_VISIBLE_DEVICES='${gpu}' HIP_VISIBLE_DEVICES='0' \
       ${remote_command} \
-      >'${REMOTE_NOHUP}' 2>&1 & echo PID=\$!"
+      </dev/null >'${REMOTE_NOHUP}' 2>&1 & echo PID=\$!"
   echo "Remote log: ${REMOTE_LOG}"
   if [[ "$TRANSPORT" == "ssh-pass" ]]; then
     echo "Re-run: REMOTE_PASS=… $(basename "$0") --arch ${ARCH} --tag ${TAG} --wait --fetch --report"
