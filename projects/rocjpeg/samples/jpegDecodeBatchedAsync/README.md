@@ -8,11 +8,26 @@ The jpeg decode batched async sample illustrates asynchronous batch decoding of 
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir jpeg_decode_batched_async_sample && cd jpeg_decode_batched_async_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir jpeg_decode_batched_async_sample && cd jpeg_decode_batched_async_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running, and run
+> `Release\jpegdecodebatchedasync.exe` with the options below; see [Windows setup](../README.md#windows-setup).
 
 ## Run
 

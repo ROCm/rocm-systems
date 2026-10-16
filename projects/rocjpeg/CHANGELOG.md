@@ -10,10 +10,16 @@ Documentation for rocJPEG is available at
 * Added the `rocJpegGetDecoderCaps` API and the `RocJpegDecodeCaps` structure to query the decode capabilities of a rocJPEG handle, including the number of JPEG cores, the supported JPEG coding processes, image resolutions, chroma subsamplings, and output formats, the native output surface format of each chroma subsampling as verified with the VA-API driver, and the hardware ROI decode and color conversion support.
 * Added the `RocJpegSurfaceFormat` enum to describe the layout of the decoded image produced by the VCN JPEG decoder, and the `RocJpegCodingProcess` enum to report the supported JPEG coding processes.
 * Added the `jpegDecodeCaps` sample to demonstrate the `rocJpegGetDecoderCaps` API.
+* Initial Windows build support: the library is built with MSVC, the HIP color conversion kernels are compiled with amdclang++ and linked into `rocjpeg.dll`, and VA-API is provided by the vaon12 backend (Mesa's VA-API on D3D12 translation layer) from TheRock for Windows. The TheRock VA-API DLLs (`rocm_sysdeps_va_win32.dll`, `rocm_sysdeps_va.dll`) are loaded at run time, matching the Linux dlopen behavior, so `%ROCM_PATH%\lib\rocm_sysdeps\bin` does not need to be on `PATH`. Hardware JPEG decoding is not yet available on Windows: the vaon12 driver does not currently expose the JPEG baseline profile, so `rocJpegCreate` with `ROCJPEG_BACKEND_HARDWARE` returns `ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED`.
 
 ### Changed
 
 * The decode APIs (`rocJpegDecode`, `rocJpegDecodeAsync`, `rocJpegDecodeBatched`, and `rocJpegDecodeBatchedAsync`) now return `ROCJPEG_STATUS_INVALID_PARAMETER` when the crop rectangle in `RocJpegDecodeParams` does not lie within the image.
+* `rocJpegCreate` now returns `ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED` instead of `ROCJPEG_STATUS_EXECUTION_FAILED` when the VA-API driver does not support the JPEG profile.
+
+### Resolved issues
+
+* An idle memory pool entry is now fully released and removed when a VA-API or HIP release call fails, instead of being left half-released and possibly released a second time at teardown.
 
 ## rocJPEG 1.12.0
 

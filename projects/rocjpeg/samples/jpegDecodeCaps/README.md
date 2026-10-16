@@ -20,11 +20,27 @@ Unlike the other samples, this app does not decode an image, so it needs no inpu
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir jpeg_decode_caps_sample && cd jpeg_decode_caps_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir jpeg_decode_caps_sample && cd jpeg_decode_caps_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running, and run `Release\jpegdecodecaps.exe`
+> with the options below; see [Windows setup](../README.md#windows-setup). Hardware JPEG decoding is not yet
+> available on Windows, so the sample reports that JPEG decoding is not available.
 
 ## Run
 

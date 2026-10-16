@@ -27,3 +27,8 @@ on partitioned GPUs, the number of JPEG cores reported is the number of cores of
   "gfx942 - MI300X", "VCN 3.0", "32", "16384, 16384"
   "gfx1030, gfx1031, gfx1032 - Navi2x", "VCN 3.x", "1", "16384, 16384"
   "gfx1100, gfx1101, gfx1102 - Navi3x", "VCN 4.0", "1", "16384, 16384"
+
+.. note::
+
+  The capabilities in this table apply to Linux. Hardware JPEG decoding is not yet available on Windows,
+  where the VA-API on D3D12 (vaon12) driver doesn't currently expose a JPEG decode profile.

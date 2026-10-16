@@ -37,6 +37,14 @@ JPEG package (a subset of the ROCm Core SDK ``amdrocm-core-sdk``) without
 additional ROCm libraries and tools, install the ``amdrocm-jpeg`` package.
 This includes the ROCm runtime and system dependencies.
 
+.. note::
+
+   On Windows, rocJPEG is built and installed as part of
+   `TheRock <https://github.com/ROCm/TheRock>`__ for Windows.
+   Package manager installation (apt/dnf/zypper) is not available on Windows.
+   For building from source on Windows, see :doc:`./rocjpeg-build-and-install`.
+   Hardware JPEG decoding is not yet available on Windows.
+
 1. Complete the :doc:`ROCm installation prerequisites <rocm:install/rocm>` to
    install dependencies and configure GPU access permissions.
 

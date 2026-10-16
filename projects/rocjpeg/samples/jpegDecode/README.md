@@ -8,11 +8,26 @@ The jpeg decode sample illustrates decoding a JPEG images using rocJPEG library 
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir jpeg_decode_sample && cd jpeg_decode_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir jpeg_decode_sample && cd jpeg_decode_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running, and run `Release\jpegdecode.exe` with
+> the options below; see [Windows setup](../README.md#windows-setup).
 
 ## Run
 

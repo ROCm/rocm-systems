@@ -8,11 +8,26 @@ The jpeg decode batched sample illustrates decoding JPEG images by batches of sp
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir jpeg_decode_batched_sample && cd jpeg_decode_batched_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir jpeg_decode_batched_sample && cd jpeg_decode_batched_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running, and run `Release\jpegdecodebatched.exe`
+> with the options below; see [Windows setup](../README.md#windows-setup).
 
 ## Run
 

@@ -22,6 +22,8 @@ Handles need to be created to decode and parse JPEG streams.
       int device_id,
       RocJpegHandle *handle);
 
+If the VA-API driver doesn't support JPEG decoding, ``rocJpegCreate()`` with ``ROCJPEG_BACKEND_HARDWARE`` returns ``ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED``. This is currently the case on Windows, where hardware JPEG decoding is not yet available. See :doc:`../what-is-rocJPEG` for details.
+
 
 ``rocJpegStreamCreate()`` returns a ``rocJpegStreamHandle``, which is a pointer used to represent an instance of a JPEG stream. The instance of ``rocJpegStreamHandle`` is used to parse the JPEG stream and to store the JPEG stream parameters.
 

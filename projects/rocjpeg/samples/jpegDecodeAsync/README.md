@@ -8,11 +8,26 @@ The jpeg decode async sample illustrates decoding JPEG images asynchronously usi
 
 ## Build
 
+**Linux:**
+
 ```shell
 mkdir jpeg_decode_async_sample && cd jpeg_decode_async_sample
 cmake ../
 make -j
 ```
+
+**Windows:**
+
+```bat
+mkdir jpeg_decode_async_sample && cd jpeg_decode_async_sample
+set ROCM_PATH=<path-to-TheRock-build>
+cmake ..
+cmake --build . --config Release
+```
+
+> [!NOTE]
+> On Windows, set up `ROCM_PATH` and `PATH` before configuring and running, and run `Release\jpegdecodeasync.exe`
+> with the options below; see [Windows setup](../README.md#windows-setup).
 
 ## Run
 
