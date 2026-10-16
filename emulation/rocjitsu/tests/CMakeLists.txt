@@ -919,6 +919,7 @@ set(_rj_l2_mutex_cases
     PendingWriterClosesAdmissionAndWakesAfterLastReader
     CollidingReadersOverlapAndWriterWaitsForTheLastOwner
     ExclusiveUnlockWakesBlockingReaders
+    RepeatedMaintenanceWakesArrivingReaders
 )
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
