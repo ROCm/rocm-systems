@@ -178,8 +178,8 @@ jobs:
     steps:
       - name: Install base dependencies
         run: |
-          sudo -n apt-get update
-          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+          sudo -n apt-get -o Acquire::Retries=5 update
+          sudo -n DEBIAN_FRONTEND=noninteractive apt-get -o Acquire::Retries=5 install -y --no-install-recommends \
             build-essential \
             ca-certificates \
             curl \
