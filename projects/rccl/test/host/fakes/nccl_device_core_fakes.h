@@ -5,14 +5,12 @@
  ************************************************************************/
 
 // Seams nccl_device_core_fakes.cc OWNS (src/nccl_device/core.cc -- the host-side
-// ncclTeam* accessors), declared once so a signature change is a compile error
-// rather than a link mismatch.
+// ncclTeam* accessors).
 //
-// These are seams rather than fixed returns because ncclTeamRankIsMember /
-// ncclTeamRankToTeam are real inline code that divides by the team's stride, so a
-// zero-initialised ncclTeam_t SIGFPEs the moment a test reaches a strided arm. The
-// defaults describe the contiguous, stride-1 team the comm already says it has; a
-// test that needs a strided or offset team installs its own.
+// Seams rather than fixed returns: the real inline ncclTeamRankIsMember /
+// ncclTeamRankToTeam divide by the team's stride, so a zero-initialised ncclTeam_t
+// SIGFPEs. The defaults describe the contiguous, stride-1 team the comm already says
+// it has; a test needing a strided team installs its own.
 
 #ifndef RCCL_TEST_HOST_NCCL_DEVICE_CORE_FAKES_H_
 #define RCCL_TEST_HOST_NCCL_DEVICE_CORE_FAKES_H_

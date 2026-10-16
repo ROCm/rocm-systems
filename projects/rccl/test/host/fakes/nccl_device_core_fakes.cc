@@ -4,21 +4,13 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Fakes for the host-side ncclTeam* accessors src/nccl_device/core.cc owns,
-// shared by every host-only microtest binary whose unit under test asks a comm
-// for a team. Controllable seams throughout, not fixed returns: see
-// nccl_device_core_fakes.h for why a zero-initialised team is not a safe default.
+// Fakes for the host-side ncclTeam* accessors src/nccl_device/core.cc owns.
 //
-// The real declarations come from nccl_device/host.h via comm.h, which wraps them
-// in NCCL_EXTERN_C -- so these definitions get C linkage from the declaration, and
-// the ASSERT_HOOK_MATCHES_SIG lines check the signatures still agree. They name the
-// host overload by hand rather than using ASSERT_HOOK_MATCHES_PROD because each of
-// these symbols is also declared as a device entry point taking ncclDevComm const&,
-// which makes `&ncclTeamWorld` ambiguous.
+// ASSERT_HOOK_MATCHES_SIG rather than ASSERT_HOOK_MATCHES_PROD: each symbol is also
+// a device entry point taking ncclDevComm const&, so `&ncclTeamWorld` is ambiguous.
 //
-// ncclTeamLsa and ncclTeamRankToLsa are core.cc symbols too, but ncclTeamLsa is faked
-// in fakes/devcomm_fakes.cc and carries a trap comment the suites there depend on;
-// moving it is tracked separately.
+// ncclTeamLsa is a core.cc symbol too, but is faked in fakes/devcomm_fakes.cc; moving
+// it is tracked separately.
 
 #include "comm.h"
 #include "nccl_device/core.h"

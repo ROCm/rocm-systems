@@ -12,29 +12,11 @@
 #include <utility>
 #include <vector>
 
-// JoinThreadsOnExit -- spawn worker threads, stop and join them on scope exit
-//
-// Destroying a still-joinable std::thread calls std::terminate(), so a test that
-// spawns a worker and then trips a fatal `ASSERT_*` would abort the whole binary
-// rather than fail one test. Spawning through this type means the stop-and-join
-// happens on every exit path, including that one.
-//
-// The loop a worker runs is usually ended by a flag the unit under test owns
-// rather than by the thread returning on its own, so the stop action is a
-// callback supplied by the caller -- this type knows nothing about what makes
-// the workers finish, only that it must be done before joining them. Pass no
-// callback for workers that finish by themselves.
-//
-// Usage:
-//
-//   JoinThreadsOnExit workers([gs] { gs->stopSignal.store(true); });
-//   workers.spawn([gs] { ncclGinProgress(gs, 0); });
-//   ASSERT_TRUE(waitUntil([&] { return fake_.progressCalls.load() > 0; }));
-//   // workers' destructor raises the stop signal and joins, even on the ASSERT.
-//
-// Non-copyable and non-movable so the threads have exactly one owner; C++17
-// guaranteed copy elision still allows a factory that binds the stop callback to
-// return one by value (`auto workers = progressWorkers(gs);`).
+// Spawn worker threads; stop and join them on every scope exit, including a fatal
+// ASSERT_* (destroying a joinable std::thread would std::terminate the binary).
+// The stop action is a caller-supplied callback because the worker's loop is ended
+// by a flag the unit under test owns; omit it for workers that finish by themselves.
+// Non-copyable and non-movable so the threads have exactly one owner.
 class JoinThreadsOnExit {
 public:
     explicit JoinThreadsOnExit(std::function<void()> stop = {}) : stop_(std::move(stop)) {}

@@ -421,8 +421,8 @@ std::function<ncclResult_t(struct ncclDevrMemory*)> g_devrBuildGinSegmentInfos =
 
 ncclResult_t ncclDevrBuildGinSegmentInfos(struct ncclDevrMemory* mem) { return g_devrBuildGinSegmentInfos(mem); }
 
-// The host-side ncclTeam* accessors live in fakes/nccl_device_core_fakes.cc, named
-// for src/nccl_device/core.cc which defines them; this file's Reset chains theirs.
+// The host-side ncclTeam* accessors live in fakes/nccl_device_core_fakes.cc; this
+// file's Reset chains theirs.
 
 // ---------------------------------------------------------------------------
 // CFT logical endpoints (real in cft_dev_runtime.cc).

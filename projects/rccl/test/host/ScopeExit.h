@@ -9,28 +9,11 @@
 
 #include <utility>
 
-// ScopeExit -- run this cleanup on every exit from the scope
-//
-// A fatal assertion (`ASSERT_*`) returns from the test body immediately, so
-// cleanup written after the assertion simply does not run -- which in a host
-// test usually means a leaked allocation, a still-joinable std::thread (that
-// calls std::terminate from its destructor), or a fake left pointing at a dead
-// stack local, so one failing test takes the rest of the binary with it. Put
-// that cleanup in a ScopeExit at the point the resource is acquired and it runs
-// on the fatal path too.
-//
-// Usage (CTAD deduces the callable's type):
-//
-//   std::thread worker([&] { ... });
-//   ScopeExit joinWorker([&] { stop.store(true); worker.join(); });
-//   ASSERT_TRUE(waitUntil([&] { return started.load(); }));  // safe to bail here
-//
-// Prefer a purpose-built RAII type where one already exists (ScopedHook for a
-// std::function seam, JoinThreadsOnExit for a set of worker threads); ScopeExit
-// is for the one-off cleanup that does not have one.
-//
-// Non-copyable and non-movable so the cleanup cannot run twice; C++17 guaranteed
-// copy elision still allows a factory to return one by value.
+// Run this cleanup on every exit from the scope, including a fatal ASSERT_* (which
+// returns before any cleanup written after it, leaking the resource or leaving a
+// fake pointing at a dead stack local). Prefer a purpose-built RAII type where one
+// exists (ScopedHook, JoinThreadsOnExit); ScopeExit is for the one-off.
+// Non-copyable and non-movable so the cleanup cannot run twice.
 template <typename Fn>
 class ScopeExit {
 public:

@@ -31,8 +31,8 @@
 #include <cstdint>
 #include <functional>
 
-// The ncclTeam* accessors moved to fakes/nccl_device_core_fakes.h, named for
-// src/nccl_device/core.cc which defines them (g_ncclTeamWorld and friends).
+// The ncclTeam* accessors (g_ncclTeamWorld and friends) are in
+// fakes/nccl_device_core_fakes.h.
 
 extern std::function<ncclResult_t(void*, int, int, int)> g_devrBootstrapBarrier;
 extern std::function<ncclResult_t(struct ncclIntruAddressMap_untyped*, int, int, int, uintptr_t, void*)>
