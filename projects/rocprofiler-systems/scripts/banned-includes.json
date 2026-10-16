@@ -5,7 +5,7 @@
     },
     {
         "header": "timemory/components/timing/backends.hpp",
-        "hint": "use \"core/clocks/timeline.hpp\" for trace timestamps, \"core/clocks/thread_cputime.hpp\" for thread CPU time, or call clock_gettime directly"
+        "hint": "use \"core/clocks/timeline.hpp\" for trace timestamps, \"core/clocks/thread_cpu.hpp\" for thread CPU time, or call clock_gettime directly"
     },
     {
         "header": "timemory/defines.h",

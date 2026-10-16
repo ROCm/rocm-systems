@@ -1,7 +1,7 @@
 // Copyright (c) Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-#include "core/clocks/thread_cputime.hpp"
+#include "core/clocks/thread_cpu.hpp"
 
 #include <chrono>
 #include <gtest/gtest.h>
@@ -9,7 +9,7 @@
 
 namespace
 {
-using rocprofsys::clocks::thread_cputime;
+namespace thread_cpu = rocprofsys::clocks::thread_cpu;
 
 constexpr auto k_spin_time = std::chrono::milliseconds{ 20 };
 
@@ -24,29 +24,29 @@ spin_for(std::chrono::nanoseconds wall_time)
 }
 }  // namespace
 
-TEST(thread_cputime_test, never_decreases)
+TEST(thread_cpu_test, never_decreases)
 {
-    const auto earlier = thread_cputime();
-    const auto later   = thread_cputime();
+    const auto earlier = thread_cpu::now();
+    const auto later   = thread_cpu::now();
     EXPECT_LE(earlier, later);
 }
 
-TEST(thread_cputime_test, advances_while_the_thread_runs)
+TEST(thread_cpu_test, advances_while_the_thread_runs)
 {
-    const auto before = thread_cputime();
+    const auto before = thread_cpu::now();
     spin_for(k_spin_time);
-    EXPECT_GT(thread_cputime(), before);
+    EXPECT_GT(thread_cpu::now(), before);
 }
 
 // The sampler subtracts two reads of one thread, so another thread's work must not
 // show up in the reading.
-TEST(thread_cputime_test, counts_only_the_calling_thread)
+TEST(thread_cpu_test, counts_only_the_calling_thread)
 {
     spin_for(k_spin_time);
-    const auto spinning_thread_time = thread_cputime();
+    const auto spinning_thread_time = thread_cpu::now();
 
     auto        new_thread_time = std::chrono::nanoseconds::max();
-    std::thread new_thread{ [&new_thread_time] { new_thread_time = thread_cputime(); } };
+    std::thread new_thread{ [&new_thread_time] { new_thread_time = thread_cpu::now(); } };
     new_thread.join();
 
     EXPECT_LT(new_thread_time, spinning_thread_time);

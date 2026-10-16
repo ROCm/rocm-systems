@@ -165,7 +165,7 @@ record_thread_start_time()
 {
     static thread_local std::once_flag _once{};
     std::call_once(_once, []() {
-        thread_info::set_start(clocks::timeline_ns(),
+        thread_info::set_start(clocks::timeline::now_ns(),
                                get_mode() != state::process::Mode::sampling);
     });
 }

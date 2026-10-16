@@ -202,7 +202,7 @@ thread_info::init(bool _offset)
         _info                 = thread_info{};
         _info->is_offset      = threading::offset_this_id();
         _info->index_data     = init_index_data(_tid, _info->is_offset);
-        _info->lifetime.first = clocks::timeline_ns();
+        _info->lifetime.first = clocks::timeline::now_ns();
 
         const auto _sequent_tid = _info->index_data->sequent_value;
         _info->causal_count     = (!_info->is_offset && _sequent_tid < peak_num_threads)

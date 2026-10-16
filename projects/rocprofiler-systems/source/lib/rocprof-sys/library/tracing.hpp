@@ -73,7 +73,7 @@ template <typename Tp = std::uint64_t>
 ROCPROFSYS_INLINE auto
 now()
 {
-    return clocks::timeline_ns<Tp>();
+    return clocks::timeline::now_ns<Tp>();
 }
 
 inline auto&

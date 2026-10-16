@@ -8,7 +8,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:demangler-tests>
     $<TARGET_OBJECTS:containers-tests>
     $<TARGET_OBJECTS:tracing-config-tests>
-    $<TARGET_OBJECTS:clocks-thread-cputime-tests>
+    $<TARGET_OBJECTS:clocks-thread-cpu-tests>
     $<TARGET_OBJECTS:clocks-timeline-tests>
     $<TARGET_OBJECTS:clocks-waitable-posix-tests>
     $<TARGET_OBJECTS:clocks-waitable-steady-tests>

@@ -10,9 +10,7 @@
 
 namespace
 {
-using rocprofsys::clocks::k_timeline_clock_id;
-using rocprofsys::clocks::timeline_now;
-using rocprofsys::clocks::timeline_ns;
+namespace timeline = rocprofsys::clocks::timeline;
 
 std::uint64_t
 read_boottime_ns()
@@ -26,19 +24,19 @@ read_boottime_ns()
 
 TEST(timeline_clock_test, matches_rocprofiler_sdk_host_clock)
 {
-    EXPECT_EQ(k_timeline_clock_id, CLOCK_BOOTTIME);
+    EXPECT_EQ(timeline::k_clock_id, CLOCK_BOOTTIME);
 }
 
 TEST(timeline_clock_test, reads_the_timeline_clock)
 {
     const auto before_duration = read_boottime_ns();
-    const auto now_duration    = timeline_now();
+    const auto now_duration    = timeline::now();
     const auto after_duration  = read_boottime_ns();
     EXPECT_LE(before_duration, static_cast<std::uint64_t>(now_duration.count()));
     EXPECT_LE(static_cast<std::uint64_t>(now_duration.count()), after_duration);
 
     const auto before_ns = read_boottime_ns();
-    const auto now_ns    = timeline_ns();
+    const auto now_ns    = timeline::now_ns();
     const auto after_ns  = read_boottime_ns();
     EXPECT_LE(before_ns, now_ns);
     EXPECT_LE(now_ns, after_ns);

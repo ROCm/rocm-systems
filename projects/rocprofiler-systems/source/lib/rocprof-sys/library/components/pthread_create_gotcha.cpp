@@ -216,7 +216,7 @@ pthread_create_gotcha::wrapper::operator()() const
             {
                 return;
             }
-            thread_info::set_stop(clocks::timeline_ns());
+            thread_info::set_stop(clocks::timeline::now_ns());
             auto& _thr_bundle = thread_bundle_data_t::instance();
             if(_thr_bundle && _thr_bundle->get<comp::wall_clock>() &&
                _thr_bundle->get<comp::wall_clock>()->get_is_running())

@@ -25,7 +25,7 @@ void
 backtrace_timestamp::sample(int)
 {
     m_tid  = tim::threading::get_id();
-    m_real = clocks::timeline_ns();
+    m_real = clocks::timeline::now_ns();
 }
 }  // namespace rocprofsys::component
 

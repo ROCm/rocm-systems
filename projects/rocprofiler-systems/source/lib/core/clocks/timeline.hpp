@@ -8,17 +8,17 @@
 #include <ctime>
 #include <time.h>
 
-namespace rocprofsys::clocks
+namespace rocprofsys::clocks::timeline
 {
 /// Should match rocprofiler-sdk host events stamp clock
-inline constexpr clockid_t k_timeline_clock_id = CLOCK_BOOTTIME;
+inline constexpr clockid_t k_clock_id = CLOCK_BOOTTIME;
 
 /// Absolute timeline clock for CPU and call-stack event stamps.
 [[nodiscard]] inline std::chrono::nanoseconds
-timeline_now() noexcept
+now() noexcept
 {
     struct timespec specs = {};
-    if(clock_gettime(k_timeline_clock_id, &specs) != 0)
+    if(clock_gettime(k_clock_id, &specs) != 0)
     {
         return std::chrono::nanoseconds::zero();
     }
@@ -28,8 +28,8 @@ timeline_now() noexcept
 
 template <typename Tp = std::uint64_t>
 [[nodiscard]] inline Tp
-timeline_ns() noexcept
+now_ns() noexcept
 {
-    return static_cast<Tp>(timeline_now().count());
+    return static_cast<Tp>(now().count());
 }
-}  // namespace rocprofsys::clocks
+}  // namespace rocprofsys::clocks::timeline

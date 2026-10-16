@@ -762,7 +762,7 @@ extern "C"
             return;
         }
 
-        auto const timestamp = rocprofsys::clocks::timeline_ns();
+        auto const timestamp = rocprofsys::clocks::timeline::now_ns();
 
         auto const _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
@@ -789,7 +789,7 @@ extern "C"
             return;
         }
 
-        auto const timestamp = rocprofsys::clocks::timeline_ns();
+        auto const timestamp = rocprofsys::clocks::timeline::now_ns();
         auto const _thread_state_guard =
             rocprofsys::state::thread::scoped(rocprofsys::state::thread::Internal);
         if(rocprofsys::config::get_use_causal())

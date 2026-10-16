@@ -3,7 +3,7 @@
 
 #include "library/components/backtrace_metrics.hpp"
 #include "common/units/data_size.hpp"
-#include "core/clocks/thread_cputime.hpp"
+#include "core/clocks/thread_cpu.hpp"
 #include "core/common.hpp"
 #include "core/components/fwd.hpp"
 #include "core/config.hpp"
@@ -312,7 +312,7 @@ backtrace_metrics::sample(int)
     }
 
     auto const _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu_time        = clocks::thread_cputime();
+    m_cpu_time        = clocks::thread_cpu::now();
     m_mem_peak        = _cache.get_peak_rss();
     m_ctx_swch        = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
