@@ -7,22 +7,28 @@ Writes these GitHub Actions outputs:
 
   run_cpu           "true" when the generated-source, script and unit jobs run.
   run_gpu           "true" when the capture-enabled build and the GPU suite run.
-  families          JSON list of {"family", "runner"} for the GPU suite.
+  families          JSON list of {family, runner, backend, arch, config}.
+  simulator_families
+                    The subset whose backend is simulator.
+  gpu_families      The subset whose backend is gpu.
   skipped_families  JSON list of {"family", "reason"}: the other ci.yaml
-                    families, when the GPU suite runs.
+                    families, when the suite runs.
   reason            One line explaining the decision, shown in the summary.
   rocm_sdk_version  The ROCm SDK the unit job installs.
 
-The policy lives in projects/hrr/tests/config/ci.yaml. The GPU suite needs an
+The policy lives in projects/hrr/tests/config/ci.yaml. The suite needs an
 amdhip64 with HRR capture compiled in, which only the HRR GPU workflow builds.
-It runs when a change touches a capture path, on any pull request with the
-capture label, nightly and on workflow_dispatch.
+It runs when a change touches a capture or suite path, on any pull request
+with the capture label, nightly and on workflow_dispatch.
 
-It runs on every enabled family whose triggers include the event. A ci:gfx...
-label adds that family, the same label TheRock CI uses; the workflow_dispatch
-families input replaces the selection. Both can name a disabled family. The
-runner labels come from TheRock's family matrix unless ci.yaml overrides them;
-a family takes TheRock's multi-GPU runner only on its multi_gpu_triggers.
+The default backend is rocJitsu (simulator). Its jobs are
+simulator.default_families, not the families marked enabled. A ci:gfx... label
+adds a family, and the workflow_dispatch families input replaces the
+selection. A simulator family with no config is an error. The GPU backend
+runs every enabled family whose triggers include the event, on TheRock's
+runner unless ci.yaml overrides it, and takes the multi-GPU runner only on
+its multi_gpu_triggers. workflow_dispatch uses its backend input; any other
+event uses backend.default unless the event is in backend.gpu.triggers.
 """
 
 from __future__ import annotations
@@ -65,12 +71,28 @@ class Family:
 
 
 @dataclass(frozen=True)
+class Backend:
+    default: str
+    gpu_triggers: tuple[str, ...]
+
+
+@dataclass(frozen=True)
+class Simulator:
+    runner: str
+    default_families: tuple[str, ...]
+    configs: dict[str, str]
+
+
+@dataclass(frozen=True)
 class Config:
     rocm_sdk_version: str
     cpu_paths: tuple[str, ...]
     capture_paths: tuple[str, ...]
+    suite_paths: tuple[str, ...]
     excluded_paths: tuple[str, ...]
     capture_label: str
+    backend: Backend
+    simulator: Simulator
     families: dict[str, Family]
 
 
@@ -83,7 +105,9 @@ class Decision:
     skipped: list[dict] = field(default_factory=list)
 
 
-def _mapping(where: str, value, required: Iterable[str], optional: Iterable[str] = ()) -> dict:
+def _mapping(
+    where: str, value, required: Iterable[str], optional: Iterable[str] = ()
+) -> dict:
     if not isinstance(value, dict):
         raise ConfigError(f"{where}: expected a mapping")
     unknown = sorted(set(value) - set(required) - set(optional))
@@ -113,7 +137,9 @@ def _bool(where: str, value) -> bool:
     return value
 
 
-def _triggers(where: str, value) -> tuple[str, ...]:
+def _triggers(where: str, value, allow_empty: bool = False) -> tuple[str, ...]:
+    if allow_empty and isinstance(value, list) and not value:
+        return ()
     triggers = _strings(where, value)
     for trigger in triggers:
         if trigger not in EVENTS:
@@ -121,6 +147,47 @@ def _triggers(where: str, value) -> tuple[str, ...]:
                 f"{where}: unknown trigger {trigger!r} (expected {', '.join(EVENTS)})"
             )
     return triggers
+
+
+def _backend(value) -> Backend:
+    value = _mapping("backend", value, ("default", "gpu"))
+    default = _string("backend.default", value["default"])
+    if default not in ("simulator", "gpu"):
+        raise ConfigError(
+            f"backend.default: expected simulator or gpu, got {default!r}"
+        )
+    gpu = _mapping("backend.gpu", value["gpu"], ("triggers",))
+    return Backend(
+        default, _triggers("backend.gpu.triggers", gpu["triggers"], allow_empty=True)
+    )
+
+
+def _simulator(value, families: dict) -> Simulator:
+    value = _mapping("simulator", value, ("runner", "default_families", "configs"))
+    default_families = _strings("simulator.default_families", value["default_families"])
+    unknown = [key for key in default_families if key not in families]
+    if unknown:
+        raise ConfigError(
+            f"simulator.default_families: {', '.join(unknown)} not in families"
+        )
+    configs = value["configs"]
+    if not isinstance(configs, dict) or not configs:
+        raise ConfigError("simulator.configs: expected a mapping")
+    unknown = [key for key in configs if key not in families]
+    if unknown:
+        raise ConfigError(f"simulator.configs: {', '.join(unknown)} not in families")
+    parsed = {
+        _string("simulator.configs", key): _string(f"simulator.configs.{key}", path)
+        for key, path in configs.items()
+    }
+    missing = [key for key in default_families if key not in parsed]
+    if missing:
+        raise ConfigError(f"simulator.configs: missing {', '.join(missing)}")
+    return Simulator(
+        runner=_string("simulator.runner", value["runner"]),
+        default_families=default_families,
+        configs=parsed,
+    )
 
 
 def _family(where: str, value) -> Family:
@@ -133,31 +200,46 @@ def _family(where: str, value) -> Family:
         runner=_string(f"{where}.runner", value["runner"]) if "runner" in value else "",
         multi_gpu_triggers=(
             _triggers(f"{where}.multi_gpu_triggers", value["multi_gpu_triggers"])
-            if "multi_gpu_triggers" in value else ()
+            if "multi_gpu_triggers" in value
+            else ()
         ),
     )
 
 
 def parse_config(data) -> Config:
     data = _mapping(
-        "top level", data, ("version", "rocm_sdk_version", "paths", "capture_label", "families")
+        "top level",
+        data,
+        (
+            "version",
+            "rocm_sdk_version",
+            "paths",
+            "capture_label",
+            "backend",
+            "simulator",
+            "families",
+        ),
     )
     if type(data["version"]) is not int or data["version"] != 1:
         raise ConfigError(f"version: expected 1, got {data['version']!r}")
-    paths = _mapping("paths", data["paths"], ("cpu", "capture", "excluded"))
+    paths = _mapping("paths", data["paths"], ("cpu", "capture", "suite", "excluded"))
     families = data["families"]
     if not isinstance(families, dict) or not families:
         raise ConfigError("families: expected a mapping with at least one family")
+    parsed_families = {
+        _string("families", key): _family(f"families.{key}", value)
+        for key, value in families.items()
+    }
     return Config(
         rocm_sdk_version=_string("rocm_sdk_version", data["rocm_sdk_version"]),
         cpu_paths=_strings("paths.cpu", paths["cpu"]),
         capture_paths=_strings("paths.capture", paths["capture"]),
+        suite_paths=_strings("paths.suite", paths["suite"]),
         excluded_paths=_strings("paths.excluded", paths["excluded"]),
         capture_label=_string("capture_label", data["capture_label"]),
-        families={
-            _string("families", key): _family(f"families.{key}", value)
-            for key, value in families.items()
-        },
+        backend=_backend(data["backend"]),
+        simulator=_simulator(data["simulator"], parsed_families),
+        families=parsed_families,
     )
 
 
@@ -233,6 +315,10 @@ def touches_capture(paths: Iterable[str], config: Config) -> bool:
     return any(_matches(p, config.capture_paths) for p in relevant_paths(paths, config))
 
 
+def touches_suite(paths: Iterable[str], config: Config) -> bool:
+    return any(_matches(p, config.suite_paths) for p in relevant_paths(paths, config))
+
+
 def labelled_families(labels: Iterable[str], matrix: dict) -> list[str]:
     """Family keys named by ci:gfx... labels, e.g. ci:gfx110x or ci:gfx110X-all."""
     wanted = []
@@ -240,7 +326,7 @@ def labelled_families(labels: Iterable[str], matrix: dict) -> list[str]:
         label = label.strip().lower()
         if not label.startswith("ci:gfx"):
             continue
-        name = label[len("ci:"):]
+        name = label[len("ci:") :]
         for key, config in matrix.items():
             linux = config.get("linux", {})
             if name in (key.lower(), str(linux.get("family", "")).lower()):
@@ -270,6 +356,32 @@ def runner_for(
     return linux.get("test-runs-on", "")
 
 
+def resolve_backend(event: str, config: Config, backend_input: str) -> str:
+    """workflow_dispatch uses its input. Any other event uses the default,
+    unless that event is listed under backend.gpu.triggers."""
+    if event == "workflow_dispatch" and backend_input:
+        if backend_input not in ("simulator", "gpu"):
+            raise ConfigError(f"backend {backend_input!r} is not simulator or gpu")
+        return backend_input
+    if event in config.backend.gpu_triggers:
+        return "gpu"
+    return config.backend.default
+
+
+def _arch(matrix: dict, key: str) -> str:
+    return ",".join(family_targets(matrix.get(key, {}).get("linux", {})))
+
+
+def _job(family: str, runner: str, backend: str, arch: str, config: str = "") -> dict:
+    return {
+        "family": family,
+        "runner": runner,
+        "backend": backend,
+        "arch": arch,
+        "config": config,
+    }
+
+
 def select_families(
     event: str,
     config: Config,
@@ -290,7 +402,8 @@ def select_families(
         chosen = set(requested)
     else:
         chosen = {
-            key for key, family in config.families.items()
+            key
+            for key, family in config.families.items()
             if family.enabled and event in family.triggers
         }
     chosen |= set(labelled_families(labels, matrix)) & set(config.families)
@@ -312,7 +425,48 @@ def select_families(
         if not runner:
             skipped.append({"family": key, "reason": NO_RUNNER})
             continue
-        families.append({"family": key, "runner": runner})
+        families.append(_job(key, runner, "gpu", _arch(matrix, key)))
+    return families, skipped
+
+
+def select_simulator(
+    config: Config,
+    requested: list[str],
+    labels: list[str],
+    matrix: dict,
+) -> tuple[list[dict], list[dict]]:
+    """rocJitsu families. default_families, unless the dispatch input replaces
+    them. A ci:gfx... label adds a family. A family with no config is an error."""
+    if requested:
+        unknown = [key for key in requested if key not in config.families]
+        if unknown:
+            raise ConfigError(
+                f"requested families {', '.join(unknown)} are not in ci.yaml"
+                f" (known: {', '.join(config.families)})"
+            )
+        chosen = set(requested)
+    else:
+        chosen = set(config.simulator.default_families)
+    chosen |= set(labelled_families(labels, matrix)) & set(config.families)
+    missing = sorted(key for key in chosen if key not in config.simulator.configs)
+    if missing:
+        raise ConfigError(f"simulator has no config for {', '.join(missing)}")
+
+    families, skipped = [], []
+    for key in config.families:
+        if key not in chosen:
+            reason = "not requested" if requested else "not a default simulator family"
+            skipped.append({"family": key, "reason": reason})
+            continue
+        families.append(
+            _job(
+                key,
+                config.simulator.runner,
+                "simulator",
+                _arch(matrix, key),
+                config.simulator.configs[key],
+            )
+        )
     return families, skipped
 
 
@@ -326,6 +480,7 @@ def decide(
     matrix: dict,
     pick_weighted: Callable[[list, str], str],
     added_label: str | None = None,
+    backend: str = "",
 ) -> Decision:
     """paths is None when the change set could not be listed in full.
 
@@ -335,7 +490,9 @@ def decide(
     if event not in EVENTS:
         return Decision(False, False, f"event {event} does not run HRR CI")
     if added_label is not None and not label_matters(added_label, config):
-        return Decision(False, False, f"the label {added_label} does not change what HRR CI runs")
+        return Decision(
+            False, False, f"the label {added_label} does not change what HRR CI runs"
+        )
 
     if event in ("schedule", "workflow_dispatch"):
         run_cpu, capture, why = True, True, f"{event} run"
@@ -343,14 +500,25 @@ def decide(
         run_cpu, capture, why = True, True, "change set too large to list"
     else:
         run_cpu = touches_cpu(paths, config)
-        capture = touches_capture(paths, config)
-        why = "the change touches capture or replay" if capture else (
-            "the change touches HRR" if run_cpu else "the change does not touch HRR"
-        )
+        capture = touches_capture(paths, config) or touches_suite(paths, config)
+        if touches_capture(paths, config):
+            why = "the change touches capture or replay"
+        elif touches_suite(paths, config):
+            why = "the change touches the suite config"
+        elif run_cpu:
+            why = "the change touches HRR"
+        else:
+            why = "the change does not touch HRR"
 
-    labelled = event == "pull_request" and config.capture_label.lower() in {l.strip().lower() for l in labels}
+    labelled = event == "pull_request" and config.capture_label.lower() in {
+        l.strip().lower() for l in labels
+    }
     if labelled and not capture:
-        run_cpu, capture, why = True, True, f"the pull request is labelled {config.capture_label}"
+        run_cpu, capture, why = (
+            True,
+            True,
+            f"the pull request is labelled {config.capture_label}",
+        )
 
     # Capture paths that the CPU list omits (hip_context.cpp, hip_code_object.*)
     # still need the host unit suite.
@@ -358,14 +526,23 @@ def decide(
     if not capture:
         return Decision(run_cpu, False, why)
     if is_fork:
-        return Decision(run_cpu, False, why + "; GPU suite skipped for a fork pull request")
+        return Decision(
+            run_cpu, False, why + "; GPU suite skipped for a fork pull request"
+        )
 
-    families, skipped = select_families(event, config, requested, labels, matrix, pick_weighted)
+    if resolve_backend(event, config, backend) == "simulator":
+        families, skipped = select_simulator(config, requested, labels, matrix)
+    else:
+        families, skipped = select_families(
+            event, config, requested, labels, matrix, pick_weighted
+        )
     no_runner = [s["family"] for s in skipped if s["reason"] == NO_RUNNER]
     if no_runner:
         why += f"; no runner for {', '.join(no_runner)}"
     if not families:
-        return Decision(run_cpu, False, why + "; no GPU family with a runner was selected")
+        return Decision(
+            run_cpu, False, why + "; no GPU family with a runner was selected"
+        )
     return Decision(run_cpu, True, why, families, skipped)
 
 
@@ -377,10 +554,16 @@ def is_fork(event: str, head_repo: str, repo: str) -> bool:
 def list_pr_files(repo: str, number: str) -> list[str] | None:
     out = subprocess.run(
         [
-            "gh", "api", "--paginate", f"repos/{repo}/pulls/{number}/files",
-            "--jq", ".[] | .filename, (.previous_filename // empty)",
+            "gh",
+            "api",
+            "--paginate",
+            f"repos/{repo}/pulls/{number}/files",
+            "--jq",
+            ".[] | .filename, (.previous_filename // empty)",
         ],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
     files = [line for line in out.splitlines() if line]
     return None if len(files) >= MAX_LISTED_FILES else files
@@ -391,10 +574,15 @@ def list_push_files(repo: str, before: str, after: str) -> list[str] | None:
         return None
     out = subprocess.run(
         [
-            "gh", "api", f"repos/{repo}/compare/{before}...{after}",
-            "--jq", ".files[] | .filename, (.previous_filename // empty)",
+            "gh",
+            "api",
+            f"repos/{repo}/compare/{before}...{after}",
+            "--jq",
+            ".files[] | .filename, (.previous_filename // empty)",
         ],
-        check=True, capture_output=True, text=True,
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
     files = [line for line in out.splitlines() if line]
     # The compare API lists at most 300 files.
@@ -409,12 +597,22 @@ def load_matrix(therock_dir: Path):
     return families, amdgpu_family_matrix.select_weighted_label
 
 
-def write_outputs(decision: Decision, rocm_sdk_version: str, output_path: str | None) -> None:
+def _dump(rows: list[dict]) -> str:
+    return json.dumps(rows, separators=(",", ":"))
+
+
+def write_outputs(
+    decision: Decision, rocm_sdk_version: str, output_path: str | None
+) -> None:
+    simulator = [row for row in decision.families if row.get("backend") == "simulator"]
+    gpu = [row for row in decision.families if row.get("backend") == "gpu"]
     lines = [
         f"run_cpu={'true' if decision.run_cpu else 'false'}",
         f"run_gpu={'true' if decision.run_gpu else 'false'}",
-        f"families={json.dumps(decision.families, separators=(',', ':'))}",
-        f"skipped_families={json.dumps(decision.skipped, separators=(',', ':'))}",
+        f"families={_dump(decision.families)}",
+        f"simulator_families={_dump(simulator)}",
+        f"gpu_families={_dump(gpu)}",
+        f"skipped_families={_dump(decision.skipped)}",
         f"reason={decision.reason}",
         f"rocm_sdk_version={rocm_sdk_version}",
     ]
@@ -436,10 +634,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--action", default="", help="The pull_request event's action")
     parser.add_argument("--label", default="", help="The label a labeled event added")
     parser.add_argument(
-        "--head-repo", default="", help="owner/name of the pull request's head repository"
+        "--head-repo",
+        default="",
+        help="owner/name of the pull request's head repository",
     )
     parser.add_argument(
         "--families", default="", help="Comma-separated family keys (workflow_dispatch)"
+    )
+    parser.add_argument(
+        "--backend",
+        default="",
+        choices=("", "simulator", "gpu"),
+        help="workflow_dispatch backend; empty uses ci.yaml",
     )
     parser.add_argument("--therock-dir", type=Path, required=True)
     parser.add_argument("--config", type=Path, default=DEFAULT_CONFIG)
@@ -465,9 +671,16 @@ def main(argv: list[str] | None = None) -> int:
             paths = list_push_files(args.repo, args.before, args.after)
 
         decision = decide(
-            args.event, paths, labels, is_fork(args.event, args.head_repo, args.repo), requested,
-            config, matrix, pick_weighted,
+            args.event,
+            paths,
+            labels,
+            is_fork(args.event, args.head_repo, args.repo),
+            requested,
+            config,
+            matrix,
+            pick_weighted,
             added_label=args.label if args.action == "labeled" else None,
+            backend=args.backend,
         )
     except ConfigError as e:
         print(f"::error::{e}")

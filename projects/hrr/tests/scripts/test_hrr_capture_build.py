@@ -44,20 +44,30 @@ class PickBaseRunTest(unittest.TestCase):
 class CommandTest(unittest.TestCase):
     def test_fetch_command_uses_recorded_run(self):
         base = cb.pick_base_run(FINDER_FOUND)
-        cmd = [str(c) for c in cb.fetch_command(Path("/t"), base, Path("/d"), ("core-hip_lib",))]
+        cmd = [
+            str(c)
+            for c in cb.fetch_command(Path("/t"), base, Path("/d"), ("core-hip_lib",))
+        ]
         self.assertIn("--flatten", cmd)
         self.assertEqual(cmd[cmd.index("--run-id") + 1], "123")
         self.assertEqual(cmd[cmd.index("--run-github-repo") + 1], "ROCm/rocm-systems")
         self.assertEqual(cmd[-1], "core-hip_lib")
 
     def test_clr_compiles_capture_in(self):
-        cmd = [str(c) for c in cb.clr_configure_command(Path("/s"), Path("/b"), Path("/d"))]
+        cmd = [
+            str(c) for c in cb.clr_configure_command(Path("/s"), Path("/b"), Path("/d"))
+        ]
         self.assertIn("-DCMAKE_CXX_FLAGS=-DHIP_HRR_CAPTURE_ENABLED", cmd)
         self.assertIn("-DCMAKE_INSTALL_PREFIX=/d", cmd)
         self.assertIn("-DHIP_COMMON_DIR=/s/projects/hip", cmd)
 
     def test_hrr_builds_integration_suite_for_archs(self):
-        cmd = [str(c) for c in cb.hrr_configure_command(Path("/s"), Path("/b"), Path("/d"), "gfx942;gfx950")]
+        cmd = [
+            str(c)
+            for c in cb.hrr_configure_command(
+                Path("/s"), Path("/b"), Path("/d"), "gfx942;gfx950"
+            )
+        ]
         self.assertIn("-DGPU_TARGETS=gfx942;gfx950", cmd)
         self.assertIn("-DHRR_BUILD_INTEGRATION_TESTS=ON", cmd)
         self.assertIn("-DCMAKE_HIP_COMPILER=/d/lib/llvm/bin/clang++", cmd)
@@ -80,7 +90,9 @@ class EmbeddedTargetsTest(unittest.TestCase):
         self.assertEqual(cb.embedded_targets(self.OUTPUT), {"gfx942", "gfx1100"})
 
     def test_missing(self):
-        self.assertEqual(cb.missing_targets("gfx942;gfx950;gfx1100", self.OUTPUT), ["gfx950"])
+        self.assertEqual(
+            cb.missing_targets("gfx942;gfx950;gfx1100", self.OUTPUT), ["gfx950"]
+        )
 
     def test_none_missing(self):
         self.assertEqual(cb.missing_targets("gfx942;gfx1100", self.OUTPUT), [])
@@ -114,7 +126,12 @@ class LibraryOverlayTest(unittest.TestCase):
 
         self.assertEqual(
             sorted(copied),
-            ["libamdhip64.so", "libamdhip64.so.7", "libamdhip64.so.7.2.1", "libhiprtc.so.7"],
+            [
+                "libamdhip64.so",
+                "libamdhip64.so.7",
+                "libamdhip64.so.7.2.1",
+                "libhiprtc.so.7",
+            ],
         )
         self.assertFalse((dist / "libamdhip64.so.7.2.0").exists())
         self.assertEqual((dist / "libamdhip64.so").read_text(), "capture")
@@ -141,16 +158,23 @@ class LinkageTest(unittest.TestCase):
         )
 
     def test_both_from_dist(self):
-        self.assertEqual(cb.linkage_errors(self.ldd("/w/dist/lib/libhsa-runtime64.so.1"), self.LIB), [])
+        self.assertEqual(
+            cb.linkage_errors(self.ldd("/w/dist/lib/libhsa-runtime64.so.1"), self.LIB),
+            [],
+        )
 
     def test_rocr_from_elsewhere(self):
-        errors = cb.linkage_errors(self.ldd("/opt/rocm/lib/libhsa-runtime64.so.1"), self.LIB)
+        errors = cb.linkage_errors(
+            self.ldd("/opt/rocm/lib/libhsa-runtime64.so.1"), self.LIB
+        )
         self.assertEqual(len(errors), 1)
         self.assertIn("libhsa-runtime64.so", errors[0])
 
     def test_two_rocr_copies(self):
         extra = "\tlibhsa-runtime64.so.2 => /opt/rocm/lib/libhsa-runtime64.so.2 (0x0)\n"
-        errors = cb.linkage_errors(self.ldd("/w/dist/lib/libhsa-runtime64.so.1", extra), self.LIB)
+        errors = cb.linkage_errors(
+            self.ldd("/w/dist/lib/libhsa-runtime64.so.1", extra), self.LIB
+        )
         self.assertEqual(len(errors), 1)
 
     def test_missing_rocr(self):
@@ -174,14 +198,88 @@ class BuildTest(unittest.TestCase):
                     (dist / "lib" / "libamdhip64.so.7").write_text("capture")
 
             args = argparse.Namespace(
-                src=root / "src", build=root / "build", dist=dist,
-                capture_lib=root / "build" / "capture-lib", archs="gfx942",
+                src=root / "src",
+                build=root / "build",
+                dist=dist,
+                capture_lib=root / "build" / "capture-lib",
+                archs="gfx942",
             )
             cb.cmd_build(args, runner=runner)
             sources = [c[c.index("-S") + 1] for c in calls if "-S" in c]
-            self.assertEqual(sources, [f"{root}/src/projects/clr", f"{root}/src/projects/hrr"])
-            self.assertEqual([p.name for p in args.capture_lib.iterdir()], ["libamdhip64.so.7"])
-            self.assertEqual((dist / "lib" / "libhsa-runtime64.so.1").read_text(), "base")
+            self.assertEqual(
+                sources, [f"{root}/src/projects/clr", f"{root}/src/projects/hrr"]
+            )
+            self.assertEqual(
+                [p.name for p in args.capture_lib.iterdir()], ["libamdhip64.so.7"]
+            )
+            self.assertEqual(
+                (dist / "lib" / "libhsa-runtime64.so.1").read_text(), "base"
+            )
+
+
+class CacheKeyTest(unittest.TestCase):
+    def test_inputs_are_the_build_and_not_ci_yaml(self):
+        paths = cb.CACHE_SOURCE_PATHS
+        for required in (
+            "projects/clr",
+            "projects/hip",
+            "projects/hrr/CMakeLists.txt",
+            "projects/hrr/include",
+            "projects/hrr/playback",
+            "projects/hrr/tests/CMakeLists.txt",
+            "projects/hrr/tests/include",
+            "projects/hrr/tests/integration",
+            "projects/hrr/tests/scripts/hrr_capture_build.py",
+        ):
+            self.assertIn(required, paths)
+        self.assertNotIn("projects/hrr/tests/config/ci.yaml", paths)
+        self.assertFalse(any("ci.yaml" in path for path in paths))
+
+    def test_digest_tracks_base_pin_image_and_archs(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            src = Path(tmp)
+            for rel in cb.CACHE_SOURCE_PATHS:
+                path = src / rel
+                path.parent.mkdir(parents=True, exist_ok=True)
+                if rel.endswith(".py") or rel.endswith(".txt"):
+                    path.write_text("source")
+                else:
+                    path.mkdir(exist_ok=True)
+                    (path / "file.cpp").write_text("int x;")
+            (src / "projects/hrr/tests/config").mkdir(parents=True)
+            (src / "projects/hrr/tests/config/ci.yaml").write_text("families: {}\n")
+            base = {
+                "repo": "ROCm/rocm-systems",
+                "run_id": "1",
+                "commit": "abc",
+                "artifact_group": "gfx94X-dcgpu",
+            }
+            first = cb.cache_key_digest(src, base, "pin", "image@sha", "gfx950;gfx1250")
+            self.assertEqual(
+                first,
+                cb.cache_key_digest(src, base, "pin", "image@sha", "gfx950;gfx1250"),
+            )
+            self.assertNotEqual(
+                first,
+                cb.cache_key_digest(
+                    src, base, "other-pin", "image@sha", "gfx950;gfx1250"
+                ),
+            )
+            self.assertNotEqual(
+                first, cb.cache_key_digest(src, base, "pin", "image@sha", "gfx942")
+            )
+            (src / "projects/hrr/tests/config/ci.yaml").write_text(
+                "backend: simulator\n"
+            )
+            self.assertEqual(
+                first,
+                cb.cache_key_digest(src, base, "pin", "image@sha", "gfx950;gfx1250"),
+            )
+            (src / "projects/hrr/playback/file.cpp").write_text("int y;")
+            self.assertNotEqual(
+                first,
+                cb.cache_key_digest(src, base, "pin", "image@sha", "gfx950;gfx1250"),
+            )
 
 
 class ArchsTest(unittest.TestCase):
@@ -193,7 +291,9 @@ class ArchsTest(unittest.TestCase):
         self.assertEqual(args.archs, ";".join(config["targets"]["arch"]))
 
     def test_override(self):
-        args = cb.parse_args(["verify", "--src", str(self.SRC), "--archs", "gfx942;gfx1152"])
+        args = cb.parse_args(
+            ["verify", "--src", str(self.SRC), "--archs", "gfx942;gfx1152"]
+        )
         self.assertEqual(args.archs, "gfx942;gfx1152")
 
 

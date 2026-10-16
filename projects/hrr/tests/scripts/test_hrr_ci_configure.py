@@ -91,10 +91,32 @@ def config_data(**changes):
     data = copy.deepcopy(REPO_CONFIG)
     data["families"] = copy.deepcopy(FAMILIES)
     data.update(changes)
+    families = data.get("families")
+    simulator = data.get("simulator")
+    if isinstance(families, dict) and isinstance(simulator, dict):
+        present = [
+            key for key in simulator.get("default_families", []) if key in families
+        ]
+        if not present and families:
+            present = [next(iter(families))]
+        simulator["default_families"] = present
+        configs = simulator.setdefault("configs", {})
+        if isinstance(configs, dict):
+            for key in [key for key in configs if key not in families]:
+                del configs[key]
+            for key in present:
+                configs.setdefault(key, f"emulation/rocjitsu/configs/{key}.json")
     return data
 
 
-CONFIG = cfg.parse_config(config_data())
+def gpu_data(**changes):
+    """The family-selection tests predate the simulator default."""
+    data = config_data(**changes)
+    data["backend"] = {"default": "gpu", "gpu": {"triggers": []}}
+    return data
+
+
+CONFIG = cfg.parse_config(gpu_data())
 REPO = cfg.load_config(cfg.DEFAULT_CONFIG)
 
 
@@ -127,15 +149,15 @@ class RepoConfigTest(unittest.TestCase):
         for key, family in REPO.families.items():
             self.assertEqual(family.triggers, cfg.EVENTS, key)
 
-    def test_a_label_still_requests_a_disabled_family(self):
+    def test_a_label_adds_a_simulator_family(self):
         d = decide(
             "pull_request",
             ["projects/hrr/playback/x.cpp"],
             ["ci:gfx110x"],
             config=REPO,
         )
-        self.assertIn("gfx94x", family_keys(d))
-        self.assertIn("gfx110x", family_keys(d))
+        self.assertEqual(family_keys(d), ["gfx950", "gfx110x", "gfx125x"])
+        self.assertTrue(all(row["backend"] == "simulator" for row in d.families))
 
     def test_multi_gpu_runner_only_nightly(self):
         for key, family in REPO.families.items():
@@ -145,15 +167,22 @@ class RepoConfigTest(unittest.TestCase):
 
 class PathClassificationTest(unittest.TestCase):
     def test_playback_change_is_capture(self):
-        self.assertTrue(cfg.touches_capture(["projects/hrr/playback/hip_playback.cpp"], REPO))
+        self.assertTrue(
+            cfg.touches_capture(["projects/hrr/playback/hip_playback.cpp"], REPO)
+        )
 
     def test_capture_source_is_capture(self):
         self.assertTrue(
             cfg.touches_capture(["projects/clr/hipamd/src/hrr/hip_capture.cpp"], REPO)
         )
 
-    def test_ci_config_is_capture(self):
-        self.assertTrue(cfg.touches_capture(["projects/hrr/tests/config/ci.yaml"], REPO))
+    def test_ci_config_runs_the_suite_and_is_not_capture(self):
+        paths = ["projects/hrr/tests/config/ci.yaml"]
+        self.assertFalse(cfg.touches_capture(paths, REPO))
+        self.assertTrue(cfg.touches_suite(paths, REPO))
+        decision = decide("pull_request", paths, config=REPO)
+        self.assertTrue(decision.run_gpu)
+        self.assertEqual(family_keys(decision), ["gfx950", "gfx125x"])
 
     def test_public_header_is_cpu_only(self):
         paths = ["projects/hip/include/hip/hip_runtime_api.h"]
@@ -195,7 +224,9 @@ class ConfigValidationTest(unittest.TestCase):
 
     def test_unknown_family_option(self):
         families = {"gfx94x": {"runs_on": "x"}}
-        self.assertRejected(config_data(families=families), "families.gfx94x: unknown key runs_on")
+        self.assertRejected(
+            config_data(families=families), "families.gfx94x: unknown key runs_on"
+        )
 
     def test_unknown_trigger(self):
         families = {"gfx94x": {"triggers": ["nightly"]}}
@@ -204,7 +235,8 @@ class ConfigValidationTest(unittest.TestCase):
     def test_unknown_multi_gpu_trigger(self):
         families = {"gfx950": {"multi_gpu_triggers": ["nightly"]}}
         self.assertRejected(
-            config_data(families=families), "families.gfx950.multi_gpu_triggers: unknown trigger"
+            config_data(families=families),
+            "families.gfx950.multi_gpu_triggers: unknown trigger",
         )
 
     def test_enabled_must_be_a_bool(self):
@@ -226,21 +258,36 @@ class ConfigValidationTest(unittest.TestCase):
         self.assertIn("gfx999 not in TheRock's family matrix", str(caught.exception))
 
     def test_family_targets(self):
-        self.assertEqual(cfg.family_targets(MATRIX["gfx110x"]["linux"]), ["gfx1100", "gfx1101"])
+        self.assertEqual(
+            cfg.family_targets(MATRIX["gfx110x"]["linux"]), ["gfx1100", "gfx1101"]
+        )
         # gfx1150 lists no fetch targets; its family name is the target.
         self.assertEqual(cfg.family_targets(MATRIX["gfx1150"]["linux"]), ["gfx1150"])
         self.assertEqual(
-            cfg.family_targets({"fetch-gfx-targets": ["gfx942", "gfx942:xnack+"]}), ["gfx942"]
+            cfg.family_targets({"fetch-gfx-targets": ["gfx942", "gfx942:xnack+"]}),
+            ["gfx942"],
         )
         self.assertEqual(cfg.family_targets({"family": "gfx101X-dgpu"}), [])
 
     def test_targets_cover_every_family(self):
-        archs = ["gfx90a", "gfx942", "gfx950", "gfx1100", "gfx1101", "gfx1150", "gfx1250"]
+        archs = [
+            "gfx90a",
+            "gfx942",
+            "gfx950",
+            "gfx1100",
+            "gfx1101",
+            "gfx1150",
+            "gfx1250",
+        ]
         cfg.check_targets(CONFIG, MATRIX, archs)
         with self.assertRaises(cfg.ConfigError) as caught:
-            cfg.check_targets(CONFIG, MATRIX, [a for a in archs if a not in ("gfx1101", "gfx1250")])
+            cfg.check_targets(
+                CONFIG, MATRIX, [a for a in archs if a not in ("gfx1101", "gfx1250")]
+            )
         # gfx125x is disabled, but a label can still request it.
-        self.assertIn("gfx110x needs gfx1101; gfx125x needs gfx1250", str(caught.exception))
+        self.assertIn(
+            "gfx110x needs gfx1101; gfx125x needs gfx1250", str(caught.exception)
+        )
 
     def test_family_without_targets_is_an_error(self):
         config = cfg.parse_config(config_data(families={"gfx94x": {}}))
@@ -267,8 +314,16 @@ class ConfigValidationTest(unittest.TestCase):
             out = io.StringIO()
             with redirect_stdout(out):
                 status = cfg.main(
-                    ["--event", "schedule", "--repo", "r", "--therock-dir", tmp,
-                     "--config", str(path)]
+                    [
+                        "--event",
+                        "schedule",
+                        "--repo",
+                        "r",
+                        "--therock-dir",
+                        tmp,
+                        "--config",
+                        str(path),
+                    ]
                 )
         self.assertEqual(status, 1)
         self.assertIn("::error::", out.getvalue())
@@ -291,12 +346,24 @@ class DecideTest(unittest.TestCase):
         # gfx110x is not triggered by pull requests, gfx125x is disabled and
         # gfx1150 has no runner.
         self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950"])
-        self.assertEqual(d.families[1], {"family": "gfx94x", "runner": "gpu-94x-a"})
+        self.assertEqual(
+            d.families[1],
+            {
+                "family": "gfx94x",
+                "runner": "gpu-94x-a",
+                "backend": "gpu",
+                "arch": "gfx942",
+                "config": "",
+            },
+        )
         self.assertIn("no runner for gfx1150", d.reason)
         self.assertEqual(
             d.skipped,
             [
-                {"family": "gfx110x", "reason": "not run on pull_request (ci.yaml triggers)"},
+                {
+                    "family": "gfx110x",
+                    "reason": "not run on pull_request (ci.yaml triggers)",
+                },
                 {"family": "gfx1150", "reason": cfg.NO_RUNNER},
                 {"family": "gfx125x", "reason": "disabled in ci.yaml"},
             ],
@@ -304,16 +371,22 @@ class DecideTest(unittest.TestCase):
 
     def test_rename_out_of_capture_counts(self):
         # The files API lists previous_filename alongside filename.
-        d = decide("pull_request", ["projects/other/x.cpp", "projects/hrr/playback/x.cpp"])
+        d = decide(
+            "pull_request", ["projects/other/x.cpp", "projects/hrr/playback/x.cpp"]
+        )
         self.assertTrue(d.run_gpu)
 
     def test_label_requests_gpu_on_unrelated_pull_request(self):
-        d = decide("pull_request", ["projects/rocminfo/x.cc"], labels=["ci:hrr-capture"])
+        d = decide(
+            "pull_request", ["projects/rocminfo/x.cc"], labels=["ci:hrr-capture"]
+        )
         self.assertTrue(d.run_cpu)
         self.assertTrue(d.run_gpu)
 
     def test_label_match_ignores_case(self):
-        d = decide("pull_request", ["projects/rocminfo/x.cc"], labels=["CI:HRR-Capture"])
+        d = decide(
+            "pull_request", ["projects/rocminfo/x.cc"], labels=["CI:HRR-Capture"]
+        )
         self.assertTrue(d.run_gpu)
 
     def test_capture_only_path_also_runs_cpu(self):
@@ -327,10 +400,14 @@ class DecideTest(unittest.TestCase):
             ["projects/hrr/playback/x.cpp"],
             labels=["ci:gfx110X-all", "ci:gfx125x"],
         )
-        self.assertEqual(family_keys(d), ["gfx90a", "gfx94x", "gfx950", "gfx110x", "gfx125x"])
+        self.assertEqual(
+            family_keys(d), ["gfx90a", "gfx94x", "gfx950", "gfx110x", "gfx125x"]
+        )
 
     def test_label_for_family_not_in_config_is_ignored(self):
-        d = decide("pull_request", ["projects/hrr/playback/x.cpp"], labels=["ci:gfx103x"])
+        d = decide(
+            "pull_request", ["projects/hrr/playback/x.cpp"], labels=["ci:gfx103x"]
+        )
         self.assertNotIn("gfx103x", family_keys(d))
 
     def test_fork_skips_gpu(self):
@@ -357,10 +434,12 @@ class DecideTest(unittest.TestCase):
         nightly = {f["family"]: f["runner"] for f in decide("schedule", []).families}
         self.assertEqual(nightly["gfx950"], "gpu-950-8")
         pr = decide("pull_request", ["projects/hrr/playback/x.cpp"])
-        self.assertEqual({f["family"]: f["runner"] for f in pr.families}["gfx950"], "gpu-950-1")
+        self.assertEqual(
+            {f["family"]: f["runner"] for f in pr.families}["gfx950"], "gpu-950-1"
+        )
 
     def test_runner_override(self):
-        config = cfg.parse_config(config_data(families={"gfx94x": {"runner": "my-gpu"}}))
+        config = cfg.parse_config(gpu_data(families={"gfx94x": {"runner": "my-gpu"}}))
         d = decide("schedule", [], config=config)
         self.assertEqual(d.families[0]["runner"], "my-gpu")
 
@@ -381,20 +460,100 @@ class DecideTest(unittest.TestCase):
         self.assertFalse(d.run_gpu)
 
 
+class SimulatorBackendTest(unittest.TestCase):
+    def test_default_event_is_the_two_rocjitsu_jobs(self):
+        decision = decide("pull_request", ["projects/hrr/playback/x.cpp"], config=REPO)
+        self.assertEqual(family_keys(decision), ["gfx950", "gfx125x"])
+        by_family = {row["family"]: row for row in decision.families}
+        self.assertEqual(by_family["gfx950"]["runner"], "ubuntu-24.04")
+        self.assertEqual(by_family["gfx950"]["backend"], "simulator")
+        self.assertEqual(by_family["gfx950"]["arch"], "gfx950")
+        self.assertTrue(
+            by_family["gfx950"]["config"].endswith("gfx950_mi355x_kmd_2gpu.json")
+        )
+        self.assertEqual(by_family["gfx125x"]["runner"], "ubuntu-24.04")
+        self.assertEqual(by_family["gfx125x"]["arch"], "gfx1250")
+        self.assertTrue(
+            by_family["gfx125x"]["config"].endswith("gfx1250_mi455x_kmd_4gpu.json")
+        )
+        self.assertNotEqual(
+            by_family["gfx125x"]["runner"], MATRIX["gfx125x"]["linux"]["test-runs-on"]
+        )
+
+    def test_gpu_dispatch_selects_the_therock_runner(self):
+        decision = cfg.decide(
+            "workflow_dispatch",
+            [],
+            [],
+            False,
+            ["gfx94x"],
+            REPO,
+            MATRIX,
+            pick_first,
+            backend="gpu",
+        )
+        self.assertEqual(family_keys(decision), ["gfx94x"])
+        self.assertEqual(decision.families[0]["backend"], "gpu")
+        self.assertEqual(decision.families[0]["runner"], "gpu-94x-a")
+        self.assertNotIn("gfx125x", family_keys(decision))
+
+    def test_pull_request_gpu_triggers_select_real_runners(self):
+        data = config_data()
+        data["backend"]["gpu"]["triggers"] = ["pull_request"]
+        config = cfg.parse_config(data)
+        decision = decide(
+            "pull_request", ["projects/hrr/playback/x.cpp"], config=config
+        )
+        self.assertEqual(family_keys(decision), ["gfx90a", "gfx94x", "gfx950"])
+        self.assertTrue(all(row["backend"] == "gpu" for row in decision.families))
+        self.assertNotIn("gfx125x", family_keys(decision))
+
+    def test_simulator_rejects_a_family_without_a_config(self):
+        with self.assertRaises(cfg.ConfigError) as caught:
+            decide(
+                "pull_request",
+                ["projects/hrr/playback/x.cpp"],
+                labels=["ci:gfx103x"],
+                config=REPO,
+            )
+        self.assertIn("no config for gfx103x", str(caught.exception))
+
+    def test_unknown_backend_value(self):
+        data = config_data()
+        data["backend"]["default"] = "metal"
+        with self.assertRaises(cfg.ConfigError) as caught:
+            cfg.parse_config(data)
+        self.assertIn("backend.default", str(caught.exception))
+
+
 class LabelEventTest(unittest.TestCase):
     CAPTURE = ["projects/hrr/playback/x.cpp"]
-    WORKFLOW = Path(__file__).resolve().parents[4] / ".github" / "workflows" / "hrr-ci.yml"
+    WORKFLOW = (
+        Path(__file__).resolve().parents[4] / ".github" / "workflows" / "hrr-ci.yml"
+    )
 
     def test_which_labels_matter(self):
-        for label in ("ci:hrr-capture", "CI:HRR-Capture", "ci:gfx110x", "ci:gfx110X-all"):
+        for label in (
+            "ci:hrr-capture",
+            "CI:HRR-Capture",
+            "ci:gfx110x",
+            "ci:gfx110X-all",
+        ):
             self.assertTrue(cfg.label_matters(label, REPO), label)
         for label in ("documentation", "ci:skip", "hrr"):
             self.assertFalse(cfg.label_matters(label, REPO), label)
 
     def test_other_label_runs_nothing(self):
         d = cfg.decide(
-            "pull_request", self.CAPTURE, ["ci:hrr-capture", "documentation"], False, [],
-            CONFIG, MATRIX, pick_first, added_label="documentation",
+            "pull_request",
+            self.CAPTURE,
+            ["ci:hrr-capture", "documentation"],
+            False,
+            [],
+            CONFIG,
+            MATRIX,
+            pick_first,
+            added_label="documentation",
         )
         self.assertFalse(d.run_cpu)
         self.assertFalse(d.run_gpu)
@@ -403,8 +562,15 @@ class LabelEventTest(unittest.TestCase):
     def test_capture_or_family_label_reruns(self):
         for label in ("ci:hrr-capture", "ci:gfx110x"):
             d = cfg.decide(
-                "pull_request", self.CAPTURE, [label], False, [],
-                CONFIG, MATRIX, pick_first, added_label=label,
+                "pull_request",
+                self.CAPTURE,
+                [label],
+                False,
+                [],
+                CONFIG,
+                MATRIX,
+                pick_first,
+                added_label=label,
             )
             self.assertTrue(d.run_gpu, label)
 
@@ -422,15 +588,17 @@ class LabelEventTest(unittest.TestCase):
         types = re.search(r"types:\s*\[([^\]]*)\]", text).group(1)
         self.assertIn("labeled", types)
 
-        summary = text[text.index("  summary:"):]
+        summary = text[text.index("  summary:") :]
         # The summary also runs when the label run configured nothing.
         self.assertIn("github.event.action == 'labeled'", summary)
         # And it answers with an actual verdict, never a skip of its own.
-        self.assertNotIn("needs.configure.result != 'success' || needs.configure.outputs.run_cpu == 'true' ||",
-                         summary)
+        self.assertNotIn(
+            "needs.configure.result != 'success' || needs.configure.outputs.run_cpu == 'true' ||",
+            summary,
+        )
         # Only a label run that configured nothing passes the verdict through;
         # every other run reports its own jobs.
-        step = summary[summary.index("PASS_THROUGH:"):summary.index("run: >-")]
+        step = summary[summary.index("PASS_THROUGH:") : summary.index("run: >-")]
         self.assertIn("github.event.action == 'labeled'", step)
         self.assertIn("needs.configure.result == 'success'", step)
         self.assertIn("run_cpu == 'false'", step)
@@ -441,7 +609,7 @@ class LabelEventTest(unittest.TestCase):
 
     def test_concurrency_group_makes_the_same_test(self):
         text = self.WORKFLOW.read_text(encoding="utf-8")
-        group = text[text.index("concurrency:"):text.index("cancel-in-progress:")]
+        group = text[text.index("concurrency:") : text.index("cancel-in-progress:")]
         self.assertIn(f"github.event.label.name != '{REPO.capture_label}'", group)
         self.assertIn("!startsWith(github.event.label.name, 'ci:gfx')", group)
 
@@ -462,17 +630,32 @@ class ForkTest(unittest.TestCase):
         self.assertFalse(cfg.is_fork("push", "", self.REPO))
 
     def test_main_skips_gpu_for_a_deleted_head_repository(self):
-        with tempfile.TemporaryDirectory() as tmp, \
-                mock.patch.object(cfg, "list_pr_files", return_value=["projects/hrr/playback/x.cpp"]), \
-                mock.patch.object(cfg, "load_matrix", return_value=(MATRIX, pick_first)), \
-                mock.patch.dict(os.environ, {"GITHUB_OUTPUT": ""}):
+        with tempfile.TemporaryDirectory() as tmp, mock.patch.object(
+            cfg, "list_pr_files", return_value=["projects/hrr/playback/x.cpp"]
+        ), mock.patch.object(
+            cfg, "load_matrix", return_value=(MATRIX, pick_first)
+        ), mock.patch.dict(
+            os.environ, {"GITHUB_OUTPUT": ""}
+        ):
             path = Path(tmp) / "ci.yaml"
             path.write_text(yaml.safe_dump(config_data()))
             out = io.StringIO()
             with redirect_stdout(out):
                 status = cfg.main(
-                    ["--event", "pull_request", "--repo", self.REPO, "--pr-number", "1",
-                     "--head-repo", "", "--therock-dir", tmp, "--config", str(path)]
+                    [
+                        "--event",
+                        "pull_request",
+                        "--repo",
+                        self.REPO,
+                        "--pr-number",
+                        "1",
+                        "--head-repo",
+                        "",
+                        "--therock-dir",
+                        tmp,
+                        "--config",
+                        str(path),
+                    ]
                 )
         self.assertEqual(status, 0)
         self.assertIn("run_cpu=true\n", out.getvalue())
@@ -483,7 +666,10 @@ class ForkTest(unittest.TestCase):
 class OutputTest(unittest.TestCase):
     def test_write_outputs(self):
         d = cfg.Decision(
-            True, True, "why", [{"family": "gfx94x", "runner": "r"}],
+            True,
+            True,
+            "why",
+            [{"family": "gfx94x", "runner": "r"}],
             [{"family": "gfx125x", "reason": "disabled in ci.yaml"}],
         )
         with tempfile.TemporaryDirectory() as tmp:
@@ -493,7 +679,10 @@ class OutputTest(unittest.TestCase):
             text = out.read_text()
         self.assertIn("run_cpu=true\n", text)
         self.assertIn('families=[{"family":"gfx94x","runner":"r"}]\n', text)
-        self.assertIn('skipped_families=[{"family":"gfx125x","reason":"disabled in ci.yaml"}]\n', text)
+        self.assertIn(
+            'skipped_families=[{"family":"gfx125x","reason":"disabled in ci.yaml"}]\n',
+            text,
+        )
         self.assertIn("reason=why\n", text)
         self.assertIn("rocm_sdk_version=1.2.3\n", text)
 

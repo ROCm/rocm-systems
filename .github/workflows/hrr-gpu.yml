@@ -13,13 +13,25 @@ on:
   workflow_call:
     inputs:
       families:
-        description: JSON list of {family, runner} from hrr_ci_configure.py
+        description: JSON list of {family, runner, backend, arch, config} from hrr_ci_configure.py
         type: string
         required: true
+      simulator_families:
+        description: Simulator rows from that list. [] skips the rocJitsu jobs.
+        type: string
+        default: "[]"
+      gpu_families:
+        description: Real-GPU rows from that list. [] skips the GPU jobs.
+        type: string
+        default: "[]"
       ignore_test_config:
         description: Run the cases the suite config skips
         type: boolean
         default: false
+
+env:
+  THEROCK_PIN: c01e3a3f3f67966dd35612cf363b49964f33cd47
+  BUILD_IMAGE: ghcr.io/rocm/therock_build_manylinux_x86_64@sha256:cf4f6d9909056906e4a1c0bc4c245658a0af4c6a6174082a86adfa2d518b7aeb
 
 permissions:
   contents: read
@@ -63,7 +75,26 @@ jobs:
           GITHUB_TOKEN: ${{ github.token }}
         run: python3 projects/hrr/tests/scripts/hrr_capture_build.py fetch-base
 
+      - name: Capture cache key
+        id: cache_key
+        run: >-
+          python3 projects/hrr/tests/scripts/hrr_capture_build.py cache-key
+          --therock-pin "${THEROCK_PIN}" --image "${BUILD_IMAGE}"
+
+      # Exact key. A prefix restore could pair this tree with another base
+      # or another targets.arch.
+      - name: Restore capture build
+        id: capture_cache
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830  # v4.3.0
+        with:
+          path: |
+            build/capture-lib
+            build/hrr/playback/hrr-playback
+            build/hrr/tests/integration
+          key: hrr-capture-v1-${{ steps.cache_key.outputs.digest }}
+
       - name: Build
+        if: steps.capture_cache.outputs.cache-hit != 'true'
         run: python3 projects/hrr/tests/scripts/hrr_capture_build.py build
 
       - name: Verify
@@ -73,7 +104,7 @@ jobs:
         if: ${{ !cancelled() }}
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: hrr-base-${{ github.sha }}
+          name: hrr-base-${{ github.run_id }}
           path: build/base.json
           if-no-files-found: error
           retention-days: 7
@@ -81,7 +112,7 @@ jobs:
       - name: Upload build
         uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
         with:
-          name: hrr-capture-${{ github.sha }}
+          name: hrr-capture-${{ github.run_id }}
           path: |
             build/base.json
             build/capture-lib/
@@ -91,15 +122,115 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+  simulator:
+    name: rocJitsu (${{ matrix.family }})
+    needs: build
+    if: inputs.simulator_families != '[]'
+    runs-on: ubuntu-24.04
+    timeout-minutes: 180
+    strategy:
+      fail-fast: false
+      matrix:
+        include: ${{ fromJSON(inputs.simulator_families) }}
+    steps:
+      - name: Checkout
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            emulation/rocjitsu
+            projects/hrr/tests
+            shared/machine-readable-isa
+
+      - name: Checkout TheRock artifact tools
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          persist-credentials: false
+          repository: ROCm/TheRock
+          ref: ${{ env.THEROCK_PIN }} # 2026-10-12
+          path: therock
+          sparse-checkout: |
+            build_tools
+            cmake/therock_amdgpu_targets.cmake
+            requirements.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Install rocJitsu build packages
+        shell: bash
+        run: |
+          set -euo pipefail
+          sudo -n apt-get update
+          sudo -n DEBIAN_FRONTEND=noninteractive apt-get install -y --no-install-recommends \
+            build-essential ca-certificates clang libdrm-dev ninja-build
+
+      - uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
+        with:
+          python-version: "3.12"
+
+      - name: Install Python requirements
+        shell: bash
+        run: |
+          set -euo pipefail
+          python -m venv "${RUNNER_TEMP}/hrr-venv"
+          "${RUNNER_TEMP}/hrr-venv/bin/python" -m pip install --no-cache-dir \
+            -r therock/requirements.txt 'cmake==3.31.10' 'PyYAML==6.0.2'
+          echo "${RUNNER_TEMP}/hrr-venv/bin" >> "${GITHUB_PATH}"
+
+      - name: Build rocJitsu
+        shell: bash
+        run: |
+          set -euo pipefail
+          cmake -S emulation/rocjitsu -B build/rocjitsu -G Ninja -DCMAKE_BUILD_TYPE=Release
+          cmake --build build/rocjitsu --target rocjitsu_bin -j
+          echo "${GITHUB_WORKSPACE}/build/rocjitsu/tools/rocjitsu" >> "${GITHUB_PATH}"
+
+      - name: Download build
+        uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
+        with:
+          name: hrr-capture-${{ github.run_id }}
+          path: build
+
+      - name: Install base ROCm artifacts and the capture-enabled amdhip64
+        env:
+          GITHUB_TOKEN: ${{ github.token }}
+        run: python projects/hrr/tests/scripts/hrr_capture_build.py install-base
+
+      - name: Run integration suite
+        env:
+          FAMILY: ${{ matrix.family }}
+          ARCH: ${{ matrix.arch }}
+          # The config path stays data. The shell does not assemble the command.
+          LAUNCHER: ${{ format('rocjitsu --daemon --config {0} --', matrix.config) }}
+          HRR_TEST_IGNORE_CONFIG: ${{ inputs.ignore_test_config && '1' || '' }}
+        shell: bash
+        run: >-
+          python projects/hrr/tests/scripts/run_catch2.py
+          --xml "integration-${FAMILY}.xml"
+          --timeout 1200
+          --config projects/hrr/tests/config/integration.yaml
+          --os linux --arch "${ARCH}"
+          --launcher "${LAUNCHER}"
+          -- build/hrr/tests/integration/hrr-integration-tests
+
+      - name: Upload results
+        if: ${{ !cancelled() }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: results-integration-${{ matrix.family }}
+          path: integration-${{ matrix.family }}.xml
+          if-no-files-found: ignore
+          retention-days: 7
+
   test:
     name: Integration (${{ matrix.family }})
     needs: build
+    if: inputs.gpu_families != '[]'
     runs-on: ${{ matrix.runner }}
     timeout-minutes: 45
     strategy:
       fail-fast: false
       matrix:
-        include: ${{ fromJSON(inputs.families) }}
+        include: ${{ fromJSON(inputs.gpu_families) }}
     # The image and options TheRock's test_component.yml uses for GPU tests.
     # Running in a container also gives this job the build job's workspace
     # path, which the test binaries have compiled in.
@@ -159,7 +290,7 @@ jobs:
       - name: Download build
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: hrr-capture-${{ github.sha }}
+          name: hrr-capture-${{ github.run_id }}
           path: build
 
       - name: Install base ROCm artifacts and the capture-enabled amdhip64

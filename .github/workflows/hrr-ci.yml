@@ -25,6 +25,11 @@ on:
         description: "Comma-separated GPU families (TheRock keys, e.g. gfx94x,gfx110x). Empty: the families ci.yaml selects."
         type: string
         default: ""
+      backend:
+        description: "simulator runs rocJitsu on ubuntu-24.04. gpu runs the real runners."
+        type: choice
+        options: [simulator, gpu]
+        default: simulator
       ignore_test_config:
         description: "Run the cases the suite config skips"
         type: boolean
@@ -61,6 +66,8 @@ jobs:
       run_cpu: ${{ steps.decide.outputs.run_cpu }}
       run_gpu: ${{ steps.decide.outputs.run_gpu }}
       families: ${{ steps.decide.outputs.families }}
+      simulator_families: ${{ steps.decide.outputs.simulator_families }}
+      gpu_families: ${{ steps.decide.outputs.gpu_families }}
       skipped_families: ${{ steps.decide.outputs.skipped_families }}
       reason: ${{ steps.decide.outputs.reason }}
       rocm_sdk_version: ${{ steps.decide.outputs.rocm_sdk_version }}
@@ -123,11 +130,13 @@ jobs:
           # Empty when the head repository was deleted, which counts as a fork.
           HEAD_REPO: ${{ github.event.pull_request.head.repo.full_name }}
           FAMILIES: ${{ inputs.families }}
+          BACKEND: ${{ inputs.backend }}
         run: >-
           python projects/hrr/tests/scripts/hrr_ci_configure.py
           --event "${EVENT}" --repo "${REPO}" --pr-number "${PR_NUMBER}"
           --before "${BEFORE}" --after "${AFTER}" --labels "${LABELS}"
           --action "${ACTION}" --label "${LABEL}" --head-repo "${HEAD_REPO}" --families "${FAMILIES}"
+          --backend "${BACKEND}"
           --therock-dir therock
 
   codegen:
@@ -323,9 +332,11 @@ jobs:
     needs: configure
     if: ${{ needs.configure.outputs.run_gpu == 'true' }}
     uses: ./.github/workflows/hrr-gpu.yml
-    # No secrets: the GPU workflow reads public artifacts with the job token.
+    # Note: not using 'secrets: inherit' here; no secrets are needed.
     with:
       families: ${{ needs.configure.outputs.families }}
+      simulator_families: ${{ needs.configure.outputs.simulator_families }}
+      gpu_families: ${{ needs.configure.outputs.gpu_families }}
       ignore_test_config: ${{ inputs.ignore_test_config || false }}
 
   summary:
@@ -364,7 +375,7 @@ jobs:
         continue-on-error: true
         uses: actions/download-artifact@3e5f45b2cfb9172054b4087a40e8e0b5a5461e7c # v8.0.1
         with:
-          name: hrr-base-${{ github.sha }}
+          name: hrr-base-${{ github.run_id }}
           path: base
 
       - name: Summarize

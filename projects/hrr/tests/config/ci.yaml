@@ -33,7 +33,6 @@ paths:
     - projects/hrr/tests/CMakeLists.txt
     - projects/hrr/tests/include/
     - projects/hrr/tests/integration/
-    - projects/hrr/tests/config/ci.yaml
     - projects/hrr/tests/config/integration.yaml
     - projects/hrr/tests/scripts/run_catch2.py
     - projects/hrr/tests/scripts/hrr_test_config.py
@@ -43,6 +42,10 @@ paths:
     - projects/hrr/tests/scripts/hrr_ci_report.py
     - .github/workflows/hrr-ci.yml
     - .github/workflows/hrr-gpu.yml
+  # Runs the suite without changing the capture binary. The capture cache key
+  # does not include these paths.
+  suite:
+    - projects/hrr/tests/config/ci.yaml
   # Ignored by both lists; hrr-skills.yml covers these.
   excluded:
     - projects/hrr/skills/
@@ -51,6 +54,28 @@ paths:
 # A pull request with this label runs the GPU suite even when it touches no
 # capture path.
 capture_label: ci:hrr-capture
+
+# simulator runs rocJitsu on ubuntu-24.04. gpu runs TheRock's real runners.
+# workflow_dispatch passes its backend input. Any other event uses default,
+# unless the event is listed under backend.gpu.triggers.
+backend:
+  default: simulator
+  gpu:
+    triggers: []
+
+# Default simulator jobs. These do not consult families.*.enabled: gfx125x
+# stays disabled for the real MI455 runner and still runs here.
+simulator:
+  runner: ubuntu-24.04
+  default_families: [gfx950, gfx125x]
+  configs:
+    gfx94x: emulation/rocjitsu/configs/gfx942_cdna3_kmd.json
+    gfx950: emulation/rocjitsu/configs/gfx950_mi355x_kmd_2gpu.json
+    gfx90a: emulation/rocjitsu/configs/gfx90a_mi210_kmd.json
+    gfx110x: emulation/rocjitsu/configs/gfx1100_w7900.json
+    gfx1151: emulation/rocjitsu/configs/gfx1151.json
+    gfx120x: emulation/rocjitsu/configs/gfx1201_r9700.json
+    gfx125x: emulation/rocjitsu/configs/gfx1250_mi455x_kmd_4gpu.json
 
 # The GPU families the suite runs on, as TheRock family keys
 # (build_tools/github_actions/amdgpu_family_matrix.py). The integration binary
@@ -74,12 +99,14 @@ capture_label: ci:hrr-capture
 # runner pool and the summary waits for all of them, so to reduce GPU load or
 # take a pool out, set enabled: false or narrow triggers here.
 #
-# Only gfx94x runs by default for now; every other family is disabled but
-# still listed, so a `ci:gfx...` label or the workflow_dispatch `families`
-# input can request it. Delete an `enabled: false` line to make a family run
-# by default again. targets.arch in integration.yaml stays wide on purpose:
-# configure fails unless it covers every family listed here, and a requested
-# family needs its architecture compiled into the binary.
+# Real GPUs: only gfx94x is enabled. The other families stay listed and
+# disabled, so a ci:gfx... label or the workflow_dispatch families input can
+# still request one when the backend is gpu. Delete an `enabled: false` line
+# to make that family eligible for the GPU backend; it does not add a
+# simulator job. Simulator membership is simulator.default_families.
+# targets.arch in integration.yaml stays wide on purpose: configure fails
+# unless it covers every family listed here, and a requested family needs its
+# architecture compiled into the binary.
 families:
   gfx90a:
     enabled: false

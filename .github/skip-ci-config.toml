@@ -45,6 +45,14 @@ common = [
 
     # Changes to experimental code do not run standard build/test workflows.
     "experimental/*",
+
+    # HRR suite selection and its developer entry point. A source change under
+    # projects/hrr still builds.
+    ".github/workflows/hrr-ci.yml",
+    ".github/workflows/hrr-gpu.yml",
+    "projects/hrr/tests/config/ci.yaml",
+    "projects/hrr/tests/docker/*",
+    "projects/hrr/tests/scripts/hrr_dev.py",
 ]
 
 # Patterns that skip CI only on Linux (e.g., Windows-only projects)

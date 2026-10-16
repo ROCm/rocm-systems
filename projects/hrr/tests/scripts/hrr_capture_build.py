@@ -27,6 +27,7 @@ LD_LIBRARY_PATH.
 from __future__ import annotations
 
 import argparse
+import hashlib
 import json
 import os
 import re
@@ -48,19 +49,30 @@ BASE_ARTIFACT_GROUP = "gfx94X-dcgpu"
 
 # Artifacts needed to build CLR and projects/hrr.
 BUILD_ARTIFACTS = (
-    "amd-llvm_run", "amd-llvm_lib", "amd-llvm_dev",
-    "base_run", "base_lib", "base_dev",
-    "sysdeps_lib", "sysdeps_dev",
-    "core-runtime_run", "core-runtime_lib", "core-runtime_dev",
-    "core-hip_run", "core-hip_lib", "core-hip_dev",
+    "amd-llvm_run",
+    "amd-llvm_lib",
+    "amd-llvm_dev",
+    "base_run",
+    "base_lib",
+    "base_dev",
+    "sysdeps_lib",
+    "sysdeps_dev",
+    "core-runtime_run",
+    "core-runtime_lib",
+    "core-runtime_dev",
+    "core-hip_run",
+    "core-hip_lib",
+    "core-hip_dev",
 )
 
 # Artifacts the GPU suite loads at run time.
 RUNTIME_ARTIFACTS = (
     "amd-llvm_lib",
-    "base_run", "base_lib",
+    "base_run",
+    "base_lib",
     "sysdeps_lib",
-    "core-runtime_run", "core-runtime_lib",
+    "core-runtime_run",
+    "core-runtime_lib",
     "core-hip_lib",
 )
 
@@ -78,6 +90,20 @@ INTEGRATION_CONFIG = Path("projects/hrr/tests/config/integration.yaml")
 # What the GPU suite runs. The host unit suite is built and run by hrr-ci.yml.
 HRR_TARGETS = ("hrr-playback", "hrr-integration-tests", "hrr-test-dispatch-tool")
 
+# What the capture cache key hashes. ci.yaml is a suite-selection file and is
+# deliberately absent: a family or backend edit must restore this build.
+CACHE_SOURCE_PATHS = (
+    "projects/clr",
+    "projects/hip",
+    "projects/hrr/CMakeLists.txt",
+    "projects/hrr/include",
+    "projects/hrr/playback",
+    "projects/hrr/tests/CMakeLists.txt",
+    "projects/hrr/tests/include",
+    "projects/hrr/tests/integration",
+    "projects/hrr/tests/scripts/hrr_capture_build.py",
+)
+
 # Uploaded by hrr-gpu.yml's build job, relative to --build.
 EXECUTABLES = (
     "hrr/playback/hrr-playback",
@@ -93,7 +119,9 @@ def run(cmd: Sequence[str]) -> None:
 def pick_base_run(finder_json: dict) -> dict:
     """The base run from find_latest_artifacts.py --json output."""
     if finder_json.get("status") != "found" or not finder_json.get("results"):
-        raise SystemExit(f"no {BASE_BRANCH} run of {BASE_WORKFLOW} has the needed artifacts")
+        raise SystemExit(
+            f"no {BASE_BRANCH} run of {BASE_WORKFLOW} has the needed artifacts"
+        )
     result = finder_json["results"][0]
     return {
         "repo": result["github_repository_name"],
@@ -106,28 +134,42 @@ def pick_base_run(finder_json: dict) -> dict:
 
 def find_base_run(therock: Path) -> dict:
     cmd = [
-        sys.executable, therock / "build_tools" / "find_latest_artifacts.py",
-        "--repo", BASE_REPO,
-        "--workflow", BASE_WORKFLOW,
-        "--branch", BASE_BRANCH,
-        "--artifact-group", BASE_ARTIFACT_GROUP,
+        sys.executable,
+        therock / "build_tools" / "find_latest_artifacts.py",
+        "--repo",
+        BASE_REPO,
+        "--workflow",
+        BASE_WORKFLOW,
+        "--branch",
+        BASE_BRANCH,
+        "--artifact-group",
+        BASE_ARTIFACT_GROUP,
         "--json",
     ]
     for artifact in BUILD_ARTIFACTS:
         cmd += ["--require-artifact", f"{artifact}_generic"]
     print("+ " + " ".join(str(c) for c in cmd), flush=True)
     # Only stdout is captured: it carries the JSON, stderr the finder's log.
-    out = subprocess.run([str(c) for c in cmd], check=True, stdout=subprocess.PIPE, text=True)
+    out = subprocess.run(
+        [str(c) for c in cmd], check=True, stdout=subprocess.PIPE, text=True
+    )
     return pick_base_run(json.loads(out.stdout))
 
 
-def fetch_command(therock: Path, base: dict, dist: Path, artifacts: Sequence[str]) -> list:
+def fetch_command(
+    therock: Path, base: dict, dist: Path, artifacts: Sequence[str]
+) -> list:
     return [
-        sys.executable, therock / "build_tools" / "fetch_artifacts.py",
-        "--run-id", base["run_id"],
-        "--run-github-repo", base["repo"],
-        "--artifact-group", base["artifact_group"],
-        "--output-dir", dist,
+        sys.executable,
+        therock / "build_tools" / "fetch_artifacts.py",
+        "--run-id",
+        base["run_id"],
+        "--run-github-repo",
+        base["repo"],
+        "--artifact-group",
+        base["artifact_group"],
+        "--output-dir",
+        dist,
         "--flatten",
         *artifacts,
     ]
@@ -137,7 +179,13 @@ def clr_configure_command(src: Path, build: Path, dist: Path) -> list:
     # HIP_HRR_CAPTURE_ENABLED is what compiles capture into amdhip64; CLR has
     # no CMake option for it.
     return [
-        "cmake", "-S", src / "projects" / "clr", "-B", build / "clr", "-GNinja", "-Wno-dev",
+        "cmake",
+        "-S",
+        src / "projects" / "clr",
+        "-B",
+        build / "clr",
+        "-GNinja",
+        "-Wno-dev",
         "-DCMAKE_BUILD_TYPE=Release",
         "-DCMAKE_CXX_FLAGS=-DHIP_HRR_CAPTURE_ENABLED",
         f"-DCMAKE_PREFIX_PATH={dist}",
@@ -160,7 +208,13 @@ def hrr_configure_command(src: Path, build: Path, dist: Path, archs: str) -> lis
     # One compiler for C, C++ and HIP, as TheRock builds HRR: host objects from
     # the system compiler are not position independent, and the HIP link is.
     return [
-        "cmake", "-S", src / "projects" / "hrr", "-B", build / "hrr", "-GNinja", "-Wno-dev",
+        "cmake",
+        "-S",
+        src / "projects" / "hrr",
+        "-B",
+        build / "hrr",
+        "-GNinja",
+        "-Wno-dev",
         "-DCMAKE_BUILD_TYPE=Release",
         f"-DCMAKE_PREFIX_PATH={dist}",
         f"-DROCM_PATH={dist}",
@@ -221,7 +275,9 @@ def linkage_errors(ldd_output: str, lib_dir: Path) -> list[str]:
 
 
 def check_linkage(binary: Path, lib_dir: Path) -> int:
-    out = subprocess.run(["ldd", str(binary)], check=True, capture_output=True, text=True).stdout
+    out = subprocess.run(
+        ["ldd", str(binary)], check=True, capture_output=True, text=True
+    ).stdout
     errors = linkage_errors(out, lib_dir)
     for error in errors:
         print(f"::error::{binary.name}: {error}")
@@ -263,14 +319,23 @@ def cmd_build(args: argparse.Namespace, runner: Runner = run) -> int:
 
 def cmd_verify(args: argparse.Namespace) -> int:
     exe = args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests"
-    run([
-        sys.executable, args.src / "projects/hrr/tests/scripts/hrr_test_config.py", "check",
-        "--binary", exe,
-        "--config", args.src / "projects/hrr/tests/config/integration.yaml",
-    ])
+    run(
+        [
+            sys.executable,
+            args.src / "projects/hrr/tests/scripts/hrr_test_config.py",
+            "check",
+            "--binary",
+            exe,
+            "--config",
+            args.src / "projects/hrr/tests/config/integration.yaml",
+        ]
+    )
     objdump = args.dist / "lib" / "llvm" / "bin" / "llvm-objdump"
     out = subprocess.run(
-        [str(objdump), "--offloading", str(exe)], check=True, capture_output=True, text=True
+        [str(objdump), "--offloading", str(exe)],
+        check=True,
+        capture_output=True,
+        text=True,
     ).stdout
     missing = missing_targets(args.archs, out)
     print("embedded: " + " ".join(sorted(embedded_targets(out))))
@@ -278,6 +343,58 @@ def cmd_verify(args: argparse.Namespace) -> int:
         print(f"::error::missing from the fat binary: {' '.join(missing)}")
         return 1
     return check_linkage(exe, args.dist / "lib")
+
+
+def _tree_digest(path: Path) -> str:
+    digest = hashlib.sha256()
+    if path.is_file():
+        digest.update(path.read_bytes())
+        return digest.hexdigest()
+    if path.is_dir():
+        files = sorted(item for item in path.rglob("*") if item.is_file())
+        for item in files:
+            digest.update(item.relative_to(path).as_posix().encode())
+            digest.update(b"\0")
+            digest.update(item.read_bytes())
+            digest.update(b"\0")
+    return digest.hexdigest()
+
+
+def cache_key_digest(
+    src: Path, base: dict, therock_pin: str, image: str, archs: str
+) -> str:
+    """Content key for the capture build. Not the merge SHA."""
+    digest = hashlib.sha256()
+    header = "\n".join(
+        [
+            f"repo={base['repo']}",
+            f"run_id={base['run_id']}",
+            f"commit={base['commit']}",
+            f"artifact_group={base['artifact_group']}",
+            f"therock={therock_pin}",
+            f"image={image}",
+            f"archs={archs}",
+        ]
+    )
+    digest.update(header.encode())
+    for rel in CACHE_SOURCE_PATHS:
+        digest.update(b"\n")
+        digest.update(rel.encode())
+        digest.update(b"\n")
+        digest.update(_tree_digest(src / rel).encode())
+    return digest.hexdigest()
+
+
+def cmd_cache_key(args: argparse.Namespace) -> int:
+    base = json.loads(args.base_json.read_text())
+    digest = cache_key_digest(args.src, base, args.therock_pin, args.image, args.archs)
+    line = f"digest={digest}\n"
+    output = os.environ.get("GITHUB_OUTPUT", "")
+    if output:
+        with open(output, "a", encoding="utf-8") as handle:
+            handle.write(line)
+    sys.stdout.write(line)
+    return 0
 
 
 def restore_executable_bits(build: Path) -> None:
@@ -295,13 +412,17 @@ def cmd_install_base(args: argparse.Namespace, runner: Runner = run) -> int:
     copy_amdhip64(args.capture_lib, args.dist / "lib")
     restore_executable_bits(args.build)
     return check_linkage(
-        args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests", args.dist / "lib"
+        args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests",
+        args.dist / "lib",
     )
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser = argparse.ArgumentParser(description=__doc__.splitlines()[0])
-    parser.add_argument("command", choices=("fetch-base", "build", "verify", "install-base"))
+    parser.add_argument(
+        "command",
+        choices=("fetch-base", "build", "verify", "install-base", "cache-key"),
+    )
     parser.add_argument("--therock", type=Path, default=Path("therock"))
     parser.add_argument("--src", type=Path, default=Path.cwd())
     parser.add_argument("--dist", type=Path, default=Path("dist"))
@@ -309,13 +430,18 @@ def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
     parser.add_argument("--capture-lib", type=Path, default=Path("build/capture-lib"))
     parser.add_argument("--base-json", type=Path, default=Path("build/base.json"))
     parser.add_argument(
-        "--archs", default="",
+        "--archs",
+        default="",
         help=f"Semicolon-separated GPU targets; default targets.arch of {INTEGRATION_CONFIG}",
     )
+    parser.add_argument(
+        "--therock-pin", default="", help="TheRock commit the build tools came from"
+    )
+    parser.add_argument("--image", default="", help="Build container image digest")
     args = parser.parse_args(argv)
     for name in ("therock", "src", "dist", "build", "capture_lib", "base_json"):
         setattr(args, name, getattr(args, name).resolve())
-    if args.command in ("build", "verify") and not args.archs:
+    if args.command in ("build", "verify", "cache-key") and not args.archs:
         config = hrr_test_config.load(args.src / INTEGRATION_CONFIG)
         args.archs = ";".join(config["targets"]["arch"])
     return args
@@ -328,6 +454,7 @@ def main(argv: list[str] | None = None) -> int:
         "build": cmd_build,
         "verify": cmd_verify,
         "install-base": cmd_install_base,
+        "cache-key": cmd_cache_key,
     }[args.command](args)
 
 
