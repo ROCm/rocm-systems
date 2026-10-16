@@ -136,6 +136,14 @@ static bool hrr_dbg_args_enabled() {
   return HIP_HRR_DEBUG_ARGS;
 }
 
+// HIP_HRR_CAPTURE_CONTENT opts in to recording host buffer contents, kernel
+// argument values and code objects. Without it the archive holds the call
+// sequence, handles and sizes only. Independent of any consent to be recorded:
+// consenting does not change what is stored.
+static bool hrr_capture_content() {
+  return HIP_HRR_CAPTURE_CONTENT;
+}
+
 static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
   if (hrr_dbg_args_enabled())
     LogPrintfInfo("[HRR h2d] %s dst=0x%llx size=%zu", api,
@@ -383,11 +391,16 @@ static void serialize_kernel_launch(
   // single cached accessor rather than re-reading the env var here.
   const bool dbg = hrr_dbg_args_enabled();
 
+  // A by-value argument is application data, so metadata-only capture records
+  // its size and zeros. A pointer argument is an address, recorded either way.
+  const bool content = hrr_capture_content();
+
   // Serialize one argument: a whole-arg pointer (kind 1), or a scalar/struct
   // that we additionally scan for embedded device pointers (kind 3 if any are
   // found, else kind 0). `bytes` may be null (unavailable) -> zero-filled.
   auto emit_arg = [&](uint32_t idx, bool is_ptr,
                       const uint8_t* bytes, uint16_t sz) {
+    if (!is_ptr && !content) bytes = nullptr;
     if (is_ptr) {
       push_u8(1); push_u16(sz);
       if (bytes) push_bytes(bytes, sz);
@@ -569,8 +582,11 @@ static void append_kernel_node_tail(std::vector<uint8_t>& payload,
       if (!sig.at(i).info_.hidden_) num_args++;
   push_u16(num_args);
 
+  // As for a launch: by-value arguments are recorded as zeros without contents.
+  const bool content = hrr_capture_content();
   auto emit_arg = [&](uint32_t idx, bool is_ptr, const uint8_t* bytes,
                       uint16_t sz) {
+    if (!is_ptr && !content) bytes = nullptr;
     if (is_ptr) {
       push_u8(1); push_u16(sz);
       if (bytes) push_bytes(bytes, sz);
@@ -2726,6 +2742,8 @@ void hip_capture_init() {
       hip_capture_install();
     }
 
+    hrr_cap::writer::set_record_content(hrr_capture_content());
+
     // Open the events writer now — Flag::init() has run so output_dir is valid.
     // A refused open leaves capture off. Without a writer the shims would only
     // cost time, and the D2H ones still synchronize streams, so take them out
@@ -2760,9 +2778,13 @@ void hip_capture_init() {
     // directory writer::open() creates. A fork() child records to a sibling
     // pid-<pid> directory without printing, because hip::init() does not run again.
     fprintf(stderr,
-            "[HRR capture] Recording this process's HIP calls, with their host buffers, kernel "
-            "arguments and code objects, to %s/pid-%d (child processes record to their own "
-            "pid-* directories in %s)\n",
+            "[HRR capture] Recording this process's HIP calls (%s) to %s/pid-%d (child "
+            "processes record to their own pid-* directories in %s)\n",
+            hrr_capture_content()
+                ? "content mode: with their host buffers, kernel arguments and code objects"
+                : "metadata-only mode: call sequence, handles and sizes, no buffer contents, "
+                  "kernel argument values or code objects; set HIP_HRR_CAPTURE_CONTENT=1 to "
+                  "record them",
             hip_capture_output_dir(), amd::Os::getProcessId(), hip_capture_output_dir());
   #else
     // HRR capture is disabled

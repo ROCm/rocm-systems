@@ -279,9 +279,25 @@ static void maybe_trace_progress(PlaybackContext& ctx, size_t kernel_ordinal,
 // PlaybackContext: blob / code-object loading
 // ---------------------------------------------------------------------------
 
+// The capture ran in metadata-only mode and recorded no contents for this call.
+// Refuse it and end the replay: running on without them would replay different
+// data, or none, while looking like a faithful replay.
+bool PlaybackContext::refuse_withheld(uint64_t hash_lo, uint64_t hash_hi,
+                                      const char* what) const {
+    if (hash_lo != HRR_HASH_WITHHELD || hash_hi != HRR_HASH_WITHHELD) return false;
+    fprintf(stderr,
+            "[HRR] Refusing event seq=%llu: it needs a %s, which this archive does not "
+            "hold because it was captured in metadata-only mode. Content mode "
+            "(HIP_HRR_CAPTURE_CONTENT=1 at capture) would have recorded it.\n",
+            (unsigned long long)hrr_dispatch_seq, what);
+    fatal_error.store(true, std::memory_order_release);
+    return true;
+}
+
 const void* PlaybackContext::load_blob(uint64_t hash_lo, uint64_t hash_hi,
                                        size_t* sz_out) const {
     if (!hash_lo && !hash_hi) return nullptr;
+    if (refuse_withheld(hash_lo, hash_hi, "host buffer")) return nullptr;
     std::string key = hrr::hash_hex(hash_lo, hash_hi);
     {
         std::shared_lock lk(map_mutex);
@@ -326,6 +342,7 @@ const void* PlaybackContext::cache_file(const std::string& key, const std::strin
 const void* PlaybackContext::load_code_object(uint64_t hash_lo, uint64_t hash_hi,
                                               size_t* sz_out) const {
     if (!hash_lo && !hash_hi) return nullptr;
+    if (refuse_withheld(hash_lo, hash_hi, "code object")) return nullptr;
     // Prefix with "co:" to avoid colliding with blobs of the same hash in blob_cache_.
     std::string key = "co:" + hrr::hash_hex(hash_lo, hash_hi);
     {

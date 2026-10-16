@@ -62,15 +62,21 @@ sources reads archives recorded by the HIP runtime built from the same commit.
 Recording a workload
 =======================================================
 
-Set ``HIP_HRR_CAPTURE_OUTPUT`` to the archive you want written, and run the
+Set ``HIP_HRR_CAPTURE_OUTPUT`` to the archive you want written, and
+``HIP_HRR_CAPTURE_CONTENT=1`` to record what replay needs, then run the
 application as usual:
 
 .. code-block:: bash
 
-  HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
+  HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr HIP_HRR_CAPTURE_CONTENT=1 ./my_hip_app
 
-Capture is off whenever the variable is unset, so nothing changes for an ordinary
-run. The archive is a directory, not a single file, and it holds one
+Capture is off whenever ``HIP_HRR_CAPTURE_OUTPUT`` is unset, so nothing changes
+for an ordinary run. Without ``HIP_HRR_CAPTURE_CONTENT`` the capture is
+metadata-only: the archive holds the call sequence, handles and sizes, but no
+host buffer, no by-value kernel argument and no code object. ``--info`` reads
+such an archive as usual; a replay stops at the first call that needs the
+missing contents and says that content mode would have recorded them. The
+notice the capture prints on stderr names the mode it runs in. The archive is a directory, not a single file, and it holds one
 ``pid-<pid>/`` subdirectory per recorded process:
 
 .. code-block:: text
@@ -80,8 +86,8 @@ run. The archive is a directory, not a single file, and it holds one
     pid-<pid>/
       manifest.json     what this process recorded, and whether it ended cleanly
       events.bin        the recorded call sequence
-      blobs/            host buffers, addressed by content hash
-      code_objects/     the GPU code the run used
+      blobs/            host buffers, addressed by content hash (content mode only)
+      code_objects/     the GPU code the run used (content mode only)
       regions/          optional, and written by tooling outside the runtime:
                         memory a framework allocated without going through HIP
 

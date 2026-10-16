@@ -293,6 +293,7 @@ inline void hrr_run_roundtrip(const std::string& direct_case,
                               bool require_d2h = true) {
   { hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret);
@@ -338,6 +339,7 @@ inline void hrr_capture_direct(const std::string& direct_case,
                                size_t min_events = 5) {
   { hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap_path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
     { set_proc_search_path(proc); }
     int ret = proc.run("\"" + direct_case + "\"");
     INFO("Capture exit: " << ret);

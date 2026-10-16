@@ -105,6 +105,12 @@ typedef struct {
  * base pointer (3D and driver D2H, hipMemcpy3D H2D). */
 #define HRR_FILE_FLAG_PACKED_HOST_RECTS ((uint16_t)0x0001u)
 
+/* Stored in place of both halves of a blob or code-object hash when capture ran
+ * without HIP_HRR_CAPTURE_CONTENT: the call needed contents that the
+ * metadata-only mode does not record, so there is no file to load. A zero hash
+ * still means that the call had no contents (a zero-size copy, say). */
+#define HRR_HASH_WITHHELD ((uint64_t)0xFFFFFFFFFFFFFFFFull)
+
 #ifdef __cplusplus
 static_assert(sizeof(hrr_file_header) == 8, "hrr_file_header must be 8 bytes");
 #endif

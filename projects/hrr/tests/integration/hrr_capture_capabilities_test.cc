@@ -176,6 +176,7 @@ HRR_TEST_CASE(Unit_HRR_CaptureCapabilities) {
   std::string out;
   { hrr::test::SpawnProc proc(HRR_TEST_EXE, /*capture_stdout=*/true);
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
     set_proc_search_path(proc);
     int ret = proc.run("\"Unit_HRR_CaptureCapabilities_Direct\"");
     out = proc.getOutput();

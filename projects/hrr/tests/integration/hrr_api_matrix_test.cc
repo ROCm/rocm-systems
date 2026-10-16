@@ -196,6 +196,7 @@ void observe_workload(const std::string& direct_case, TierObservation& obs) {
   {
     hrr::test::SpawnProc proc(hrr_self_exe());
     proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
     set_proc_search_path(proc);
     const int ret = proc.run("\"" + direct_case + "\"");
     // Catch2 exits 4 when the selected case skipped. HRR_SKIP uses SKIP(), so

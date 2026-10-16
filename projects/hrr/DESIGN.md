@@ -11,8 +11,8 @@ User-facing quick start: [README.md](README.md).
 ## Quick Start
 
 ```bash
-# Capture
-HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
+# Capture (without HIP_HRR_CAPTURE_CONTENT=1 it is metadata-only and cannot replay)
+HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr HIP_HRR_CAPTURE_CONTENT=1 ./my_hip_app
 
 # Replay + D2H validation
 hrr-playback ./my_capture.hrr
@@ -234,7 +234,7 @@ kernel/code-object replay. Use the same install prefix or matching `LD_LIBRARY_P
 for both components.
 
 ```bash
-HIP_HRR_CAPTURE_OUTPUT=./out.hrr ./my_hip_app   # capture
+HIP_HRR_CAPTURE_OUTPUT=./out.hrr HIP_HRR_CAPTURE_CONTENT=1 ./my_hip_app   # capture
 hrr-playback ./out.hrr                           # replay + D2H validation
 hrr-playback ./out.hrr --timing                  # with kernel + graph GPU timing
 hrr-playback ./out.hrr --info --events           # inspect archive (no GPU)

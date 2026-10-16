@@ -1565,12 +1565,20 @@ class BlobClaim {
 // write_blob
 // ---------------------------------------------------------------------------
 
+// Not even the hash is recorded without contents: a hash of a four-byte token
+// identifier is as good as the identifier.
+static std::atomic<bool> g_record_content{false};
+static constexpr Hash128 kWithheld{HRR_HASH_WITHHELD, HRR_HASH_WITHHELD};
+
+void set_record_content(bool on) { g_record_content.store(on, std::memory_order_relaxed); }
+
 Hash128 write_blob(const void* data, size_t len) {
   reopen_after_fork();
   {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0 || g_events_finalized) return {};  // not open, or past the trailer
   }
+  if (!g_record_content.load(std::memory_order_relaxed)) return kWithheld;
 
   Hash128 h = hash_buffer(data, len);
 
@@ -1637,6 +1645,7 @@ Hash128 write_code_object(const void* image, size_t image_size) {
     std::lock_guard<std::mutex> lk(g_file_mu);
     if (g_events_fd < 0 || g_events_finalized) return {};  // not open, or past the trailer
   }
+  if (!g_record_content.load(std::memory_order_relaxed)) return kWithheld;  // as in write_blob()
 
   Hash128 h = hash_buffer(image, image_size);
   char hex[33];
