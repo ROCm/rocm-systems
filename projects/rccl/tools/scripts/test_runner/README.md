@@ -97,6 +97,14 @@ python test_runner.py --config mi300x_mellanox_ib.json --skip-mpi-check
 python test_runner.py --config unit_tests_only.json --skip-mpi-check
 ```
 
+### Check Test Filters
+
+`check_test_filters.py` is a manual lint that lists each built test binary once and reports any positive `test_filter` clause that matches no test. Run it after a build; it exits non-zero on a stale clause.
+
+```bash
+python check_test_filters.py --bin-dir ../../../build/release/test configs/mi300x_mellanox_ib.json
+```
+
 ## Environment Variables
 
 The test runner supports the following environment variables to customize behavior:

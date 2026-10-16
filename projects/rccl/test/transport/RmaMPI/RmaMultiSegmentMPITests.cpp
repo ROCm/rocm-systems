@@ -158,46 +158,26 @@ protected:
         return vmmBuffers_.back().get();
     }
 
-    RCCLHybridVmmTests::HybridVmmBuffer* AllocHybrid(
-        size_t gpuBytes, size_t localCpuBytes, std::string* reason)
+    // TearDown frees the buffer; AllocHybridCollective already freed it on a collective failure.
+    RCCLHybridVmmTests::HybridVmmStatus AllocHybridForLocalRanks(
+        size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
+        RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
     {
-        int dev = 0;
-        if (hipGetDevice(&dev) != hipSuccess)
-            return nullptr;
-        if (!RCCLHybridVmmTests::CheckHybridVmmRuntimeSupport(dev, reason))
-            return nullptr;
+        *out = nullptr;
         auto buf = std::make_unique<RCCLHybridVmmTests::HybridVmmBuffer>();
-        if (!RCCLHybridVmmTests::AllocHybridVmm(
-                dev, gpuBytes, localCpuBytes, buf.get(), reason))
-            return nullptr;
+        const auto status = RCCLHybridVmmTests::AllocHybridCollective(
+            gpuBytes, localCpuBytes, expectedLocalRanks, buf.get(), reason);
+        if (status != RCCLHybridVmmTests::HybridVmmStatus::Ok) return status;
         // Plugin registration has no window, so the importer publishes the owner's DMA-BUF fds.
         uintptr_t va = reinterpret_cast<uintptr_t>(buf->ptr);
-        for (size_t s = 0; s < buf->segSizes.size(); ++s)
-        {
+        for (size_t s = 0; s < buf->segSizes.size(); ++s) {
             if (buf->segFds[s] >= 0)
                 rcclHostSegmentFdRegister(reinterpret_cast<void*>(va), buf->segSizes[s], buf->segFds[s]);
             va += buf->segSizes[s];
         }
         hybridBuffers_.push_back(std::move(buf));
-        return hybridBuffers_.back().get();
-    }
-
-    bool AllocHybridForLocalRanks(
-        size_t gpuBytes, size_t localCpuBytes, int expectedLocalRanks,
-        RCCLHybridVmmTests::HybridVmmBuffer** out, std::string* reason)
-    {
-        *out = AllocHybrid(gpuBytes, localCpuBytes, reason);
-        if (SyncSkip(*out == nullptr)) {
-            if (reason && reason->empty())
-                *reason = "hybrid VMM allocation failed on another rank";
-            return false;
-        }
-        if (SyncSkip((*out)->localSize != expectedLocalRanks)) {
-            if (reason)
-                *reason = "unexpected number of shared-memory local ranks";
-            return false;
-        }
-        return true;
+        *out = hybridBuffers_.back().get();
+        return status;
     }
 
     bool AllocSymPair(MultiSegmentVmmBuffer** src, MultiSegmentVmmBuffer** dst,
@@ -684,9 +664,8 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridImportedCpuSegmentIGet)
 
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
-        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
 
     const size_t remoteOff = kGpuBytes + static_cast<size_t>(window->localRank) * kCpuBytes + 4096;
     const int peer = MPIHelpers::findRemotePeerForLocalRank(window->localRank);
@@ -734,9 +713,8 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridMultiNodeIGetStress)
 
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
-        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
@@ -793,9 +771,8 @@ TEST_F(RmaMultiSegmentMPITest, DeepEP_HybridOutOfRangeIGetRejected)
 
     std::string reason;
     RCCLHybridVmmTests::HybridVmmBuffer* window = nullptr;
-    if (!AllocHybridForLocalRanks(
-            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason))
-        GTEST_SKIP() << "DeepEP hybrid allocation unavailable: " << reason;
+    HYBRID_VMM_SKIP_OR_FAIL(AllocHybridForLocalRanks(
+            kGpuBytes, kCpuBytes, /*expectedLocalRanks=*/4, &window, &reason), reason);
 
     void *mh = nullptr, *gh = nullptr;
     ASSERT_EQ(ncclSuccess, RegMr(window->ptr, window->totalSize, &mh, &gh));
