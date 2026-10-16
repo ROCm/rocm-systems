@@ -3293,6 +3293,7 @@ class TestExecutor:
                        "rccl-UnitTestsMicroEnqueue",
                        "rccl-UnitTestsMicroSymKernels",
                        "rccl-UnitTestsMicroGinHost",
+                       "rccl-UnitTestsMicroRomeModels",
                        "rccl-UnitTestsMicroCollectives",
                        "rccl-UnitTestsMicroOnerank",
                        "rccl-UnitTestsMicroMgmtTaskEnq"]:

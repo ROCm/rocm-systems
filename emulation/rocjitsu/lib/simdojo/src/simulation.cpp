@@ -612,6 +612,11 @@ bool SimulationEngine::all_primaries_done() const {
 }
 
 bool SimulationEngine::check_termination(Tick lbts) {
+  // Async events posted during this epoch are absent from the published LBTS.
+  // Drain them in the next epoch before deciding that work is finished or that
+  // the next event exceeds the tick limit (notably terminal CP cancellation).
+  if (any_async_pending())
+    return false;
   if (all_primaries_done()) {
     // All primaries have signaled done. Enter draining phase: continue
     // processing until the system is fully quiescent (all incoming queues
@@ -625,7 +630,7 @@ bool SimulationEngine::check_termination(Tick lbts) {
   }
   // Multi-threaded max_ticks: terminate when global LBTS reaches max_ticks.
   if (config_.max_ticks > 0 && config_.num_threads > 1) {
-    if (lbts >= config_.max_ticks) {
+    if (lbts != TICK_MAX && lbts >= config_.max_ticks) {
       set_exit(ExitReason::COMPLETED, config_.max_ticks, "max ticks reached");
       done_.store(true, std::memory_order_release);
       return true;

@@ -1799,6 +1799,38 @@ HRR_TEST_CASE(Unit_HRR_ForkWhileNotingUnreplayable) {
 }
 
 /**
+ * Unit_HRR_ForkedChildStaysIncomplete
+ * -----------------------------------
+ *   - A forked child drops a record before its first one opens its archive.
+ *     The child's manifest says "complete": false, the parent's says true.
+ */
+HRR_TEST_CASE(Unit_HRR_ForkedChildStaysIncomplete) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_forked_child_stays_incomplete"};
+  {
+    hrr::test::SpawnProc proc(hrr_self_exe());
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.runWithTimeout("\"Unit_HRR_ForkedChildStaysIncomplete_Direct\"", 120);
+    INFO("Capture exit code: " << ret);
+    REQUIRE(ret == 0);
+  }
+  const std::vector<fs::path> archives = hrr_process_archives(cap.path);
+  REQUIRE(archives.size() == 2);
+  int children = 0;
+  for (const fs::path& archive : archives) {
+    const std::string manifest = read_text_file(archive / "manifest.json");
+    INFO("Process manifest:\n" << manifest);
+    const fs::path& other = archive == archives[0] ? archives[1] : archives[0];
+    const std::string other_pid = other.filename().string().substr(std::strlen("pid-"));
+    const bool child = manifest.find("\"parent_pid\": " + other_pid + ",") != std::string::npos;
+    children += child ? 1 : 0;
+    CHECK(manifest.find(child ? "\"complete\": false" : "\"complete\": true") !=
+          std::string::npos);
+  }
+  REQUIRE(children == 1);
+}
+
+/**
  * Unit_HRR_ForkedChildRecordsAfterShutdown
  * ----------------------------------------
  *   - A forked child that exits normally without recording leaves no archive,
