@@ -1,0 +1,44 @@
+name: Changed files
+description: Select work from a complete Git diff, without API or trigger path limits.
+
+inputs:
+  include:
+    description: Regex selecting changed paths in this scope.
+    required: true
+  exclude:
+    description: Regex excluding paths from this scope.
+    default: ''
+  always-include:
+    description: Regex for shared inputs that activate this scope regardless of exclusions.
+    default: ''
+
+outputs:
+  affected:
+    description: Whether the complete diff affects this scope.
+    value: ${{ steps.scope.outputs.affected }}
+  base:
+    description: Validated merge-base commit used for scope selection.
+    value: ${{ steps.scope.outputs.base }}
+  head:
+    description: Validated head commit used for scope selection.
+    value: ${{ steps.scope.outputs.head }}
+
+runs:
+  using: composite
+  steps:
+    - name: Inspect the complete change scope
+      id: scope
+      shell: bash
+      env:
+        SCOPE_SCRIPT: ${{ github.action_path }}/scope.py
+        BASE_SHA: ${{ github.event.pull_request.base.sha || github.event.before }}
+        HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
+        INCLUDE: ${{ inputs.include }}
+        EXCLUDE: ${{ inputs.exclude }}
+        ALWAYS_INCLUDE: ${{ inputs.always-include }}
+      run: >-
+        python3 "$SCOPE_SCRIPT"
+        --base "$BASE_SHA" --head "$HEAD_SHA"
+        --include "$INCLUDE" --exclude "$EXCLUDE"
+        --always-include "$ALWAYS_INCLUDE"
+        --output "$GITHUB_OUTPUT"
