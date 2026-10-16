@@ -317,6 +317,50 @@ uint32_t EnvOrDefault(const char *name, uint32_t fallback) {
     return fallback;
 }
 
+/**
+ * @brief A crop rectangle that the decode APIs must reject for the 16x16 ColorSeedJpeg.
+ */
+struct InvalidCropCase {
+    const char *name;
+    int16_t left;
+    int16_t top;
+    int16_t right;
+    int16_t bottom;
+};
+
+/**
+ * @brief Crop rectangles that do not lie within a 16x16 image.
+ *
+ * The offset case mirrors a crop sized to fit the image but positioned so that
+ * it runs past the right and bottom edges, which was previously accepted.
+ */
+const std::vector<InvalidCropCase> &InvalidCropCases() {
+    static const std::vector<InvalidCropCase> kCases = {
+        {"right past the image width", 0, 0, 32, 16},
+        {"bottom past the image height", 0, 0, 16, 32},
+        {"image-sized crop at an offset", 8, 8, 24, 24},
+        {"negative left", -2, 0, 8, 8},
+        {"negative top", 0, -2, 8, 8},
+        {"right before left", 8, 0, 4, 8},
+        {"bottom before top", 0, 8, 8, 4},
+        {"zero width", 4, 4, 4, 8},
+    };
+    return kCases;
+}
+
+/**
+ * @brief Builds decode parameters with the crop rectangle of the given case.
+ */
+RocJpegDecodeParams CropDecodeParams(const InvalidCropCase &crop_case) {
+    RocJpegDecodeParams decode_params = {};
+    decode_params.output_format = ROCJPEG_OUTPUT_NATIVE;
+    decode_params.crop_rectangle.left = crop_case.left;
+    decode_params.crop_rectangle.top = crop_case.top;
+    decode_params.crop_rectangle.right = crop_case.right;
+    decode_params.crop_rectangle.bottom = crop_case.bottom;
+    return decode_params;
+}
+
 }  // namespace
 
 RocJpegApiNegativeTests:: RocJpegApiNegativeTests() {};
@@ -645,11 +689,86 @@ int RocJpegApiNegativeTests::TestInvalidDecode() {
        return EXIT_FAILURE;
    }
 
+   // Scenario 5: Pass a crop rectangle that does not lie within the image, to rocJpegDecode and rocJpegDecodeAsync
+   const std::vector<uint8_t> &seed = ColorSeedJpeg();
+   rocjpeg_status = rocJpegStreamParse(seed.data(), seed.size(), rocjpeg_stream_handle_);
+   if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+       std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 16x16 seed JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+       return EXIT_FAILURE;
+   }
+   RocJpegImage destination = {};
+   for (const auto &crop_case : InvalidCropCases()) {
+       decode_params = CropDecodeParams(crop_case);
+       rocjpeg_status = rocJpegDecode(rocjpeg_handle_, rocjpeg_stream_handle_, &decode_params, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecode with crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+       rocjpeg_status = rocJpegDecodeAsync(rocjpeg_handle_, rocjpeg_stream_handle_, &decode_params, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecodeAsync with crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+       // A rejected submit must not leave a decode pending for the destination.
+       rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destination);
+       if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+           std::cerr << "rocJpegDecodeSync after a rejected crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                     << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+           return EXIT_FAILURE;
+       }
+   }
+
    return EXIT_SUCCESS;
 }
 
 int RocJpegApiNegativeTests::TestInvalidDecodeBatched() {
     std::cout << "info: Executing negative test cases for the rocJpegDecodeBatched API" << std::endl;
+    // Scenario 1: Pass a batch whose second image has a crop rectangle that does not lie within the image, to
+    // rocJpegDecodeBatched and rocJpegDecodeBatchedAsync. The first image requests no cropping, and the whole batch
+    // must be rejected before it is submitted.
+    const std::vector<uint8_t> &seed = ColorSeedJpeg();
+    RocJpegStatus rocjpeg_status = rocJpegStreamParse(seed.data(), seed.size(), rocjpeg_stream_handle_);
+    if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
+        std::cerr << "Expected ROCJPEG_STATUS_SUCCESS when parsing the 16x16 seed JPEG but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+        return EXIT_FAILURE;
+    }
+    RocJpegStreamHandle stream_handles[2] = {rocjpeg_stream_handle_, rocjpeg_stream_handle_};
+    RocJpegImage destinations[2] = {};
+    RocJpegDecodeParams decode_params[2] = {};
+    for (const auto &crop_case : InvalidCropCases()) {
+        decode_params[1] = CropDecodeParams(crop_case);
+        rocjpeg_status = rocJpegDecodeBatched(rocjpeg_handle_, stream_handles, 2, decode_params, destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatched with crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        rocjpeg_status = rocJpegDecodeBatchedAsync(rocjpeg_handle_, stream_handles, 2, decode_params, destinations);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatchedAsync with crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+        // A rejected submit must not leave decodes pending for any destination in the batch. Check each destination
+        // on its own first: rocJpegDecodeBatchedSync stops at the first destination with nothing pending, so on its
+        // own it would also pass if only some destinations of the batch were left pending.
+        for (int k = 0; k < 2; k++) {
+            rocjpeg_status = rocJpegDecodeSync(rocjpeg_handle_, &destinations[k]);
+            if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+                std::cerr << "rocJpegDecodeSync for destination " << k << " after a rejected crop rectangle (" << crop_case.name
+                          << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+                return EXIT_FAILURE;
+            }
+        }
+        rocjpeg_status = rocJpegDecodeBatchedSync(rocjpeg_handle_, destinations, 2);
+        if (rocjpeg_status != ROCJPEG_STATUS_INVALID_PARAMETER) {
+            std::cerr << "rocJpegDecodeBatchedSync after a rejected crop rectangle (" << crop_case.name << "): Expected ROCJPEG_STATUS_INVALID_PARAMETER but got "
+                      << rocJpegGetErrorName(rocjpeg_status) << std::endl;
+            return EXIT_FAILURE;
+        }
+    }
     return EXIT_SUCCESS;
 }
 

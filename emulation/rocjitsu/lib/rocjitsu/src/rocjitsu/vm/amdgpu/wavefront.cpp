@@ -111,6 +111,20 @@ void Wavefront::barrier_wait(int32_t barrier_id) { cu_.barrier_wait(*this, barri
 
 bool Wavefront::barrier_leave() { return cu_.named_barrier_leave(*this); }
 
+void Wavefront::gws_init(uint32_t rid, uint32_t count) { cu_.gws_init(*this, rid, count); }
+
+void Wavefront::gws_barrier_arrive(uint32_t rid, uint32_t count) {
+  cu_.gws_barrier_arrive(*this, rid, count);
+}
+
+void Wavefront::gws_sema_v(uint32_t rid) { cu_.gws_sema_v(*this, rid); }
+
+void Wavefront::gws_sema_p(uint32_t rid) { cu_.gws_sema_p(*this, rid); }
+
+void Wavefront::gws_sema_br(uint32_t rid, uint32_t count) { cu_.gws_sema_br(*this, rid, count); }
+
+void Wavefront::gws_sema_release_all(uint32_t rid) { cu_.gws_sema_release_all(*this, rid); }
+
 bool Wavefront::fail_pm4_submission() {
   if (!pm4_failure_)
     return false;
