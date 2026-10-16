@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// Integer FMA accumulation with FP64 round-to-odd intermediates.
+// Integer FMA accumulation with FP64 round-to-odd intermediates and FP32 narrowing.
 // Internal helpers shared by instruction implementations; not part of the public C API.
 
 #pragma once
