@@ -197,3 +197,12 @@ if(HIP_PLATFORM MATCHES "amd")
 endif()
 
 add_dependencies(build_tests add_Kernel.code)
+
+# HIP reads release flags at process initialization; use a separate process.
+if(HIP_PLATFORM MATCHES "amd")
+  add_test(NAME Unit_hipGraphLaunch_IndependentRootsCompletion_ForcedSegmented
+    COMMAND $<TARGET_FILE:GraphsTest2> Unit_hipGraphLaunch_IndependentRootsCompletion)
+  set_tests_properties(Unit_hipGraphLaunch_IndependentRootsCompletion_ForcedSegmented
+    PROPERTIES ENVIRONMENT "DEBUG_HIP_GRAPH_SEGMENT_SCHEDULING=2;DEBUG_HIP_FORCE_GRAPH_QUEUES=4"
+    TIMEOUT 600)
+endif()
