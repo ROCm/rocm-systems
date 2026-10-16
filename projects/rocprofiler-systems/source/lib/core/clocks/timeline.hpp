@@ -10,20 +10,15 @@
 
 namespace rocprofsys::clocks
 {
-/// Absolute timeline clock for CPU and call-stack event stamps.
-/// Matches the host domain used by rocprofiler-sdk (`CLOCK_BOOTTIME`).
-[[nodiscard]] inline bool
-timeline_available() noexcept
-{
-    struct timespec specs = {};
-    return clock_gettime(CLOCK_BOOTTIME, &specs) == 0;
-}
+/// Should match rocprofiler-sdk host events stamp clock
+inline constexpr clockid_t k_timeline_clock_id = CLOCK_BOOTTIME;
 
+/// Absolute timeline clock for CPU and call-stack event stamps.
 [[nodiscard]] inline std::chrono::nanoseconds
 timeline_now() noexcept
 {
     struct timespec specs = {};
-    if(clock_gettime(CLOCK_BOOTTIME, &specs) != 0)
+    if(clock_gettime(k_timeline_clock_id, &specs) != 0)
     {
         return std::chrono::nanoseconds::zero();
     }

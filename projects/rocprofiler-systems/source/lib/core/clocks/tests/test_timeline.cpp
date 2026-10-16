@@ -10,7 +10,7 @@
 
 namespace
 {
-using rocprofsys::clocks::timeline_available;
+using rocprofsys::clocks::k_timeline_clock_id;
 using rocprofsys::clocks::timeline_now;
 using rocprofsys::clocks::timeline_ns;
 
@@ -24,11 +24,13 @@ read_boottime_ns()
 }
 }  // namespace
 
-TEST(timeline_clock_test, available_on_linux) { EXPECT_TRUE(timeline_available()); }
-
-TEST(timeline_clock_test, uses_clock_boottime)
+TEST(timeline_clock_test, matches_rocprofiler_sdk_host_clock)
 {
-    ASSERT_TRUE(timeline_available());
+    EXPECT_EQ(k_timeline_clock_id, CLOCK_BOOTTIME);
+}
+
+TEST(timeline_clock_test, reads_the_timeline_clock)
+{
     const auto before_duration = read_boottime_ns();
     const auto now_duration    = timeline_now();
     const auto after_duration  = read_boottime_ns();
