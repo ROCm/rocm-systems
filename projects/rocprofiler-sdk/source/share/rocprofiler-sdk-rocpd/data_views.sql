@@ -402,7 +402,20 @@ SELECT
     PMC_I.name AS counter_name,
     PMC_E.value AS counter_value,
     -- Kernel-replay pass that collected the value. Rows without the tag are pass 0.
-    COALESCE(json_extract(PMC_E.extdata, '$.replay_pass'), 0) AS replay_pass
+    -- Parsed without json_extract so counters_collection works on SQLite builds that
+    -- omit the JSON1 extension (writer only emits {} or {"replay_pass":N}).
+    CASE
+        WHEN instr(COALESCE(PMC_E.extdata, '{}'), '"replay_pass":') > 0 THEN CAST(
+            trim(
+                substr(
+                    PMC_E.extdata,
+                    instr(PMC_E.extdata, '"replay_pass":') + 14
+                ),
+                ' }'
+            ) AS INTEGER
+        )
+        ELSE 0
+    END AS replay_pass
 FROM
     `rocpd_pmc_event` PMC_E
     INNER JOIN `rocpd_info_pmc` PMC_I ON PMC_I.id = PMC_E.pmc_id
@@ -789,8 +802,21 @@ SELECT
     -- Kernel replay records every pass of a dispatch under the same event and tags passes after
     -- the first with extdata.replay_pass. Sum the instances of each pass, then average over the
     -- passes that collected the counter instead of adding the passes together.
+    -- Pass id is parsed without json_extract (see pmc_events.replay_pass) for SQLite builds
+    -- that omit JSON1.
     SUM(PMC_E.value) / COUNT(
-        DISTINCT COALESCE(json_extract(PMC_E.extdata, '$.replay_pass'), 0)
+        DISTINCT CASE
+            WHEN instr(COALESCE(PMC_E.extdata, '{}'), '"replay_pass":') > 0 THEN CAST(
+                trim(
+                    substr(
+                        PMC_E.extdata,
+                        instr(PMC_E.extdata, '"replay_pass":') + 14
+                    ),
+                    ' }'
+                ) AS INTEGER
+            )
+            ELSE 0
+        END
     ) AS value,
     K.start,
     K.end,
