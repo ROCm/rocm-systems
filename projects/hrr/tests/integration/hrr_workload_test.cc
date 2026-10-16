@@ -3197,6 +3197,56 @@ TEST_CASE("Unit_HRR_GraphExplicit_Direct", "[.][hrr][direct]") {
 }
 
 // ---------------------------------------------------------------------------
+// Workload — a capture that fails at hipStreamEndCapture, then direct work on
+// the same stream. A fork onto a second stream that never joins back makes
+// EndCapture return hipErrorStreamCaptureUnjoined, which still ends the
+// capture on both streams. The H2D restore, kernel and D2H that follow run
+// directly; a replay that still thinks the stream is capturing records them
+// into a graph nobody launches and the D2H never sees the kernel's output.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_FailedEndCapture_Direct", "[.][hrr][direct]") {
+  // Warm-up first HIP call so the hipMalloc below is captured (see MiscAPIs).
+  HRR_HIP_CHECK(hipSetDevice(0));
+  float* d_in = nullptr;
+  float* d_out = nullptr;
+  float* d_side = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d_in, SZ));
+  HRR_HIP_CHECK(hipMalloc(&d_out, SZ));
+  HRR_HIP_CHECK(hipMalloc(&d_side, SZ));
+  hipStream_t s, side;
+  HRR_HIP_CHECK(hipStreamCreate(&s));
+  HRR_HIP_CHECK(hipStreamCreate(&side));
+  hipEvent_t fork;
+  HRR_HIP_CHECK(hipEventCreate(&fork));
+
+  hipGraph_t graph = nullptr;
+  HRR_HIP_CHECK(hipStreamBeginCapture(s, hipStreamCaptureModeGlobal));
+  HRR_HIP_CHECK(hipEventRecord(fork, s));
+  HRR_HIP_CHECK(hipStreamWaitEvent(side, fork, 0));
+  HRR_HIP_CHECK(hipMemsetAsync(d_side, 0, SZ, side));
+  REQUIRE(hipStreamEndCapture(s, &graph) == hipErrorStreamCaptureUnjoined);
+  (void)hipGetLastError();
+  REQUIRE(graph == nullptr);
+
+  std::vector<float> h_in(N), h_out(N, 0.0f);
+  for (int i = 0; i < N; ++i) h_in[i] = static_cast<float>(i + 1);
+  HRR_HIP_CHECK(hipMemcpyAsync(d_in, h_in.data(), SZ, hipMemcpyHostToDevice, s));
+  hipLaunchKernelGGL(hrr_vectorScale, dim3((N + 255) / 256), dim3(256), 0, s,
+                     d_in, d_out, 2.0f, N);
+  HRR_HIP_CHECK(hipGetLastError());
+  HRR_HIP_CHECK(hipMemcpyAsync(h_out.data(), d_out, SZ, hipMemcpyDeviceToHost, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+  for (int i = 0; i < N; ++i) REQUIRE(h_out[i] == 2.0f * static_cast<float>(i + 1));
+
+  HRR_HIP_CHECK(hipEventDestroy(fork));
+  HRR_HIP_CHECK(hipStreamDestroy(side));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  HRR_HIP_CHECK(hipFree(d_side));
+  HRR_HIP_CHECK(hipFree(d_out));
+  HRR_HIP_CHECK(hipFree(d_in));
+}
+
+// ---------------------------------------------------------------------------
 // Workload Y — hipHostRegister/Unregister + hipLaunchKernel
 // ---------------------------------------------------------------------------
 __global__ void hrr_fill(int* out, int val, int n) {

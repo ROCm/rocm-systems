@@ -1340,6 +1340,26 @@ HRR_TEST_CASE(Unit_HRR_GraphExplicitRoundtrip) {
   hrr_run_roundtrip("Unit_HRR_GraphExplicit_Direct", cap.path);
 }
 
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FailedEndCapture_Direct: a stream capture forked onto a
+ *     second stream and never joined, so hipStreamEndCapture fails with
+ *     hipErrorStreamCaptureUnjoined, then a direct H2D restore, kernel and D2H
+ *     on the stream that was capturing.
+ *   - The archive must hold the failed hipStreamEndCapture: it ended the
+ *     capture, so replay needs it to end its own.
+ *   - Replay with byte-exact D2H must match: the restore and launch run
+ *     directly instead of into a capture replay forgot to close.
+ */
+HRR_TEST_CASE(Unit_HRR_FailedEndCaptureRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_failedendcapture"};
+  hrr_run_exact_roundtrip("Unit_HRR_FailedEndCapture_Direct", cap.path,
+                          {HRR_API_HIPSTREAMBEGINCAPTURE,
+                           HRR_API_HIPSTREAMENDCAPTURE,
+                           HRR_API_HIPMEMCPYASYNC});
+}
+
 HRR_TEST_CASE(Unit_HRR_HostRegLaunchRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_hostreglch"};
   hrr_run_roundtrip("Unit_HRR_HostRegLaunch_Direct", cap.path);
