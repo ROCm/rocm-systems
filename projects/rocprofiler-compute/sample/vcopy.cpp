@@ -127,15 +127,17 @@ int main(int argc, char* argv[]) {
   // Size, in bytes, of each vector
   size_t bytes = n*sizeof(double)*stride;
 
-  // Allocate memory for each vector on host
-  h_a = (double*)malloc(bytes);
-  h_b = (double*)malloc(bytes);
-  h_c = (double*)malloc(bytes);
+  // Pin host staging buffers (H2D/D2H). Device buffers are allocated once
+  // below and reused for all -i iterations (no hipMalloc/hipFree in the loop).
+  HIP_ASSERT(hipHostMalloc(reinterpret_cast<void**>(&h_a), bytes));
+  HIP_ASSERT(hipHostMalloc(reinterpret_cast<void**>(&h_b), bytes));
+  HIP_ASSERT(hipHostMalloc(reinterpret_cast<void**>(&h_c), bytes));
+  // CPU-only verification buffer; pageable is fine.
   h_verify_c = (double*)malloc(bytes);
 
   printf("Finished allocating vectors on the CPU\n");
 
-  // Allocate memory for each vector on GPU
+  // Allocate memory for each vector on GPU (once; reused across iterations)
   HIP_ASSERT(hipMalloc(&d_a, bytes));
   HIP_ASSERT(hipMalloc(&d_b, bytes));
   HIP_ASSERT(hipMalloc(&d_c, bytes));
@@ -219,9 +221,10 @@ int main(int argc, char* argv[]) {
 
   // Release host memory
   printf("Releasing CPU memory\n");
-  free(h_a);
-  free(h_b);
-  free(h_c);
+  HIP_ASSERT(hipHostFree(h_a));
+  HIP_ASSERT(hipHostFree(h_b));
+  HIP_ASSERT(hipHostFree(h_c));
+  free(h_verify_c);
 
   return numErrors > 0 ? EXIT_FAILURE : EXIT_SUCCESS;
 }
