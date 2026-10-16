@@ -1,42 +1,17 @@
 # Rocjitsu Arithmetic Library
 
-## Current implementation
-
-Dense WMMA supports FP16/BF16, packed accumulators, gfx12 FP8/BF8 and
-integer formats, in both wave sizes. Sparse WMMA adds 2:4 metadata selection
-with tied accumulators. Fused arithmetic includes FP16/FP32, packed halves,
-literals and mixed precision. Add, subtract, multiply and exponent operations
-are also available. FP64 LDEXP supports exact results; selection and other basic FP64 arithmetic
-currently support loose results only. Division helpers cover SCALE, FMAS and FIXUP;
-Dot products cover integer, FP16/BF16 and FP8/BF8 formats.
-Math includes reciprocal/root, rounding, log/exp and trigonometric operations.
-Comparisons produce scalar predicate masks, with gfx12 FP-status reporting.
-Integer operations include arithmetic, packed halves, bit manipulation and carry results.
-Conversions cover integer, FP16/FP32/FP64, normalized and packed FP8 formats.
-Register operations provide movement, lane transfers and cross-lane routing.
-Graphics operations add cube-map selection, interpolation and lighting multiply.
-Scalar instructions include arithmetic, comparisons and explicit SCC/EXEC/state outputs.
-Decoded dual-issue operations reuse the corresponding Wave32 arithmetic.
-Family headers describe exact-result and FP-status support.
-FP status is available for gfx12 FP16 FMA under default guest rounding and denormals,
-and for gfx12 FP32 MUL under nearest-even rounding, preserved denormals, and no OMOD/CLAMP.
-WMMA has no FP-status output; mode 3 has the same numeric requirements as mode 2.
-Source/output modifiers and FMA DPP routing are supported. Compatibility selects
-the established instruction policy. CPU implementations are scalar, AVX2, AVX-512 and native BF16.
-
-Family headers state each entry point's supported controls.
-
 The Rocjitsu Arithmetic Library (`rj-arith`) provides a synchronous C interface to GPU arithmetic. Each call executes one GPU instruction for an entire wave on the
-calling CPU thread.
+calling CPU thread. It implements arithmetic, conversions, comparisons, matrix
+operations, and register routing, with portable code and x86 SIMD paths.
 
 [rocjitsu/docs/arith-design.md](../../docs/arith-design.md) describes the API,
 numerical semantics, implementation principles, and testing policy.
 
-The semantics field selects loose or empirical bit-exact arithmetic. rj-arith is not a GPU runtime or instruction decoder.
+Choose fast, approximate **loose** semantics or supported **empirically bit-exact**
+semantics. Coverage varies by instruction and mode; rj-arith is not a GPU runtime or
+instruction decoder.
 
 See [coverage per architecture](COVERAGE.md) for instruction-family support.
-
-Rocjitsu continues to use its existing instruction handlers.
 
 ## Build and run
 
@@ -49,10 +24,18 @@ cmake -S . -B ../rocjitsu-build -G Ninja -DCMAKE_BUILD_TYPE=Release
 cmake --build ../rocjitsu-build --parallel
 ctest --test-dir ../rocjitsu-build --parallel --output-on-failure -R '^rj_arith\.'
 ../rocjitsu-build/lib/arith/tests/cpuinfo/rj_arith_cpuinfo
+../rocjitsu-build/lib/arith/tests/benchmark/rj_arith_benchmark > results.csv
 ```
 
-Build directories must be outside the source tree. Link the `rj_arith` CMake
-target to use the library and its public include path.
+The benchmark writes CSV to stdout. On a terminal, stderr shows an updating
+completion percentage, elapsed time and estimated remaining time; redirected
+stderr logs repetition indices. Defaults
+are `--min-ms 1` and `--repetitions 5`. It covers all WMMA, DOT, FP and math
+entry points, reporting median latency over a fixed number of interleaved
+repetitions. Build directories must be
+outside the source tree. Link the `rj_arith` CMake target to use the library;
+it supplies the include path and a static, position-independent library with
+hidden symbols. Rocjitsu's `BUILD_TESTING` option controls tests and the benchmark.
 
 ## API example
 
@@ -75,13 +58,16 @@ or FP status output.
 
 `flags` combines CPU capabilities from `rj_arith_init_cpu_flags()` with the
 semantics selection. Cache the CPU flags when making repeated calls.
-`instruction_flags = 0` selects unmodified operands. This WMMA entry point
-accepts modes 0–3. With no FP-status output, mode 3 has the same numeric contract as mode 2.
-The host FP environment must be in its default state; the library never explicitly
-changes it. The function returns `RJ_ARITH_SUCCESS` (zero) on success and leaves
-outputs unchanged on error.
+`instruction_flags = 0` selects unmodified operands. Choose
+`RJ_ARITH_SEMANTICS_LOOSE` for approximate arithmetic or
+`RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS` to require the empirical
+bit-exact path. The host FP environment must be in its default state; the
+library never explicitly changes it. The function returns `RJ_ARITH_SUCCESS`
+(zero) on success and leaves outputs unchanged on error.
 
-The following C/C++ program uses loose semantics. It fills A and B with
+The following C/C++ program uses strict bit-exact semantics with FP status
+reporting required where applicable. WMMA has no FP status effects, so no status
+output is needed. It fills A and B with
 FP16 ones and C with zeros, then prints the resulting 16×16 FP32 matrix (every element is 16):
 
 ```c
@@ -111,7 +97,7 @@ int main(void) {
     d[i] = d_words[i];
   }
   int error = rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(
-      rj_arith_init_cpu_flags() | RJ_ARITH_SEMANTICS_LOOSE,
+      rj_arith_init_cpu_flags() | RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL,
       0, d, a, b, c);
   if (error != RJ_ARITH_SUCCESS) {
     fprintf(stderr, "WMMA failed: %d\n", error);

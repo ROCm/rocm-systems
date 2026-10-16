@@ -257,6 +257,7 @@ rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
 add_subdirectory(headers)
 
 # Standalone utilities.
+add_subdirectory(benchmark)
 add_subdirectory(cpuinfo)
 
 if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
