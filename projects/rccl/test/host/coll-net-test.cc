@@ -98,8 +98,18 @@ struct FakeCollNet {
   char requestTokens[64] = {};
   int nextToken = 0;
   int testDone = 1;
+  std::set<void*> pending;  // requests that stay incomplete whatever testDone says
   ncclResult_t testResult = ncclSuccess;
   std::vector<void*> tested;
+
+  struct FlushCall {
+    void* comm;
+    void* data;
+    int size;
+    void* mhandle;
+  };
+  std::vector<FlushCall> iflushes;
+  ncclResult_t iflushResult = ncclSuccess;
 
   static ncclNetProperties_t DefaultProps() {
     ncclNetProperties_t p{};
@@ -184,10 +194,15 @@ struct FakeCollNet {
     return issueResult;
   }
 
+  ncclResult_t iflush(void* comm, void* data, int size, void* mhandle, void** request) {
+    iflushes.push_back({comm, data, size, mhandle});
+    Issue(request);
+    return iflushResult;
+  }
   ncclResult_t test(void* request, int* done, int* size) {
     if (request == nullptr) ADD_FAILURE() << "test() on a null request";
     tested.push_back(request);
-    *done = testDone;
+    *done = testDone && !pending.count(request);
     if (size) *size = 0;
     return testResult;
   }
@@ -206,6 +221,7 @@ struct FakeCollNet {
     v.iallreduce = &FakeCollNet::TrampIallreduce;
     v.iallgather = &FakeCollNet::TrampIallgather;
     v.ireducescatter = &FakeCollNet::TrampIreducescatter;
+    v.iflush = &FakeCollNet::TrampIflush;
     v.test = &FakeCollNet::TrampTest;
     return v;
   }
@@ -238,6 +254,9 @@ struct FakeCollNet {
                                       size_t windowOffset, size_t windowBytes, void* sendMh, void** request) {
     return g_activeCollNet->iallgather(comm, send, nParts, parts, bytesPerRank, windowOffset, windowBytes, sendMh,
                                        request);
+  }
+  static ncclResult_t TrampIflush(void* comm, void* data, int size, void* mhandle, void** request) {
+    return g_activeCollNet->iflush(comm, data, size, mhandle, request);
   }
   static ncclResult_t TrampTest(void* request, int* done, int* size) {
     return g_activeCollNet->test(request, done, size);
@@ -3066,6 +3085,599 @@ TEST_F(CollNetSendProgressMicrotest, PluginFails_ReturnsError) {
 }
 
 TEST_F(CollNetSendProgressMicrotest, NotStarted_DoesNothing) {
+  Subs(1, 2);
+  args_.state = ncclProxyOpNone;
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(args_.subs[0].posted, 0u);
+  EXPECT_EQ(args_.idle, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Recv-side flush (collNetRecvFlush)
+// ---------------------------------------------------------------------------
+
+class CollNetRecvFlushMicrotest : public CollNetMicrotestBase {
+ protected:
+  recvResources res_{};
+  ncclProxyArgs args_{};
+  ncclProxySubArgs* sub_ = &args_.subs[0];
+  alignas(16) char region_[1 << 12] = {};
+  alignas(16) uint8_t recv_[1 << 13] = {};
+  void* request_ = reinterpret_cast<void*>(0x1);
+  void* poolMh_ = reinterpret_cast<void*>(0x52);
+  void* userMh_ = reinterpret_cast<void*>(0x62);
+
+  void SetUp() override {
+    CollNetMicrotestBase::SetUp();
+    res_.collNetComm = &net_.collComm;
+    res_.maxCollBytes = 1024;
+    res_.mhandles[NCCL_PROTO_SIMPLE] = poolMh_;
+    NCCL_NET_MAP_ADD_POINTER(&res_.map, 1, 1, sizeof(region_), buffs[NCCL_PROTO_SIMPLE]);
+    res_.map.mems[NCCL_NET_MAP_SHARED_DEVMEM] = {region_, nullptr, (int)sizeof(region_)};  // {gpu, cpu}
+    args_.coll = ncclFuncAllReduce;
+    args_.chunkSize = 256;
+    args_.specifics.collnetDirect.sizePerRank = 1000;
+    args_.specifics.collnetDirect.node = 2;
+    sub_->recvbuff = recv_;
+    sub_->recvMhandle = userMh_;
+    sub_->reg = 1;
+  }
+
+  ncclResult_t Flush(int groupStart, ssize_t nBytesIn, ssize_t recvBeg = 0) {
+    return collNetRecvFlush(&proxyState_, &res_, &args_, sub_, groupStart, nBytesIn, recvBeg, &request_);
+  }
+  void ExpectFlush(void* data, int size, void* mhandle) {
+    ASSERT_EQ(net_.iflushes.size(), 1u);
+    EXPECT_EQ(net_.iflushes[0].comm, &net_.collComm);
+    EXPECT_EQ(net_.iflushes[0].data, data);
+    EXPECT_EQ(net_.iflushes[0].size, size);
+    EXPECT_EQ(net_.iflushes[0].mhandle, mhandle);
+  }
+};
+
+TEST_F(CollNetRecvFlushMicrotest, Unregistered_FlushesGroupsPoolRange) {
+  sub_->reg = 0;
+
+  ASSERT_EQ(Flush(/*groupStart=*/8, /*nBytesIn=*/768, /*recvBeg=*/2048), ncclSuccess);
+
+  ExpectFlush(region_ + 2048, 768, poolMh_);
+  EXPECT_EQ(request_, &net_.requestTokens[0]);
+}
+
+TEST_F(CollNetRecvFlushMicrotest, RegisteredGatherSeveralRanksPerNode_FlushesPoolRange) {
+  args_.coll = ncclFuncAllGather;
+
+  ASSERT_EQ(Flush(0, 768, 2048), ncclSuccess);
+
+  ExpectFlush(region_ + 2048, 768, poolMh_);
+}
+
+TEST_F(CollNetRecvFlushMicrotest, RegisteredGatherOneRankPerNode_FlushesUserBuffer) {
+  args_.coll = ncclFuncAllGather;
+  sub_->isOneRPN = 1;
+  sub_->nbytes = 512;
+  sub_->offset = 128;
+
+  ASSERT_EQ(Flush(0, 9, 2048), ncclSuccess);
+
+  ExpectFlush(recv_ + 128, 512, userMh_);
+}
+
+TEST_F(CollNetRecvFlushMicrotest, RegisteredOneRankPerNode_FlushesUserBufferUpToMaxAndAdvances) {
+  sub_->isOneRPN = 1;
+  sub_->nbytes = 1500;
+  sub_->offset = 128;
+  sub_->loopOffset = 64;
+
+  ASSERT_EQ(Flush(/*groupStart=*/2, /*nBytesIn=*/9), ncclSuccess);
+
+  ExpectFlush(recv_ + 128 + 2 * 256 + 64, 1024, userMh_);
+  EXPECT_EQ(sub_->nbytes, 476);
+  EXPECT_EQ(sub_->offset, 128u + 1024u);
+}
+
+TEST_F(CollNetRecvFlushMicrotest, RegisteredAllReduceSeveralRanksPerNode_FlushesGroupWindowAndAdvancesByLoop) {
+  sub_->nbytes = 3000;
+  sub_->loopOffset = 2500;
+  sub_->loopSize = 2048;
+
+  ASSERT_EQ(Flush(/*groupStart=*/1, /*nBytesIn=*/768), ncclSuccess);
+
+  ExpectFlush(recv_ + 256 + 2500, 500, userMh_);  // what is left past the loop offset
+  EXPECT_EQ(sub_->nbytes, 3000 - 2048);
+  EXPECT_EQ(sub_->offset, 2048u);
+}
+
+TEST_F(CollNetRecvFlushMicrotest, RegisteredNothingLeftOrPluginBusy_DoesNotAdvance) {
+  sub_->nbytes = 1000;
+  sub_->loopOffset = 1000;
+  sub_->loopSize = 2048;
+  ASSERT_EQ(Flush(0, 768), ncclSuccess);
+  EXPECT_TRUE(net_.iflushes.empty());
+  EXPECT_EQ(request_, reinterpret_cast<void*>(0x1));
+
+  sub_->loopOffset = 0;
+  net_.issueReady = false;
+  ASSERT_EQ(Flush(0, 768), ncclSuccess);
+  EXPECT_EQ(net_.iflushes.size(), 1u);
+  EXPECT_EQ(request_, nullptr);
+  EXPECT_EQ(sub_->nbytes, 1000);
+  EXPECT_EQ(sub_->offset, 0u);
+}
+
+// ReduceScatter: this node (2) receives only its 1000-byte slice of the group's window.
+TEST_F(CollNetRecvFlushMicrotest, RegisteredScatter_FlushesOnlyThisNodesPartOfWindow) {
+  args_.coll = ncclFuncReduceScatter;
+  sub_->isOneRPN = 1;
+  sub_->loopSize = 4096;
+  struct Case {
+    size_t offset;
+    ssize_t nbytes;
+    size_t wantOffset;
+    int wantSize;
+  } cases[] = {
+      {2100, 1024, 100, 900},  // starts in this node's slice
+      {2100, 500, 100, 500},   // and ends there
+      {1500, 1024, 0, 524},    // ends in it
+      {1500, 2000, 0, 1000},   // covers it
+      {500, 1024, 0, 1024},    // ends before it: a dummy flush
+      {3100, 500, 0, 500},     // starts after it: a dummy flush
+  };
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.offset);
+    net_.iflushes.clear();
+    sub_->offset = c.offset - 2 * 256;  // the same windows, reached through a later group
+    sub_->nbytes = c.nbytes;
+    res_.maxCollBytes = c.nbytes;
+
+    ASSERT_EQ(Flush(/*groupStart=*/2, 0), ncclSuccess);
+
+    ExpectFlush(recv_ + c.wantOffset, c.wantSize, userMh_);
+  }
+  for (const Case& c : cases) {
+    SCOPED_TRACE(c.offset);
+    net_.iflushes.clear();
+    sub_->offset = c.offset;
+    sub_->nbytes = c.nbytes;
+    res_.maxCollBytes = c.nbytes;
+
+    ASSERT_EQ(Flush(0, 0), ncclSuccess);
+
+    ExpectFlush(recv_ + c.wantOffset, c.wantSize, userMh_);
+  }
+}
+
+TEST_F(CollNetRecvFlushMicrotest, PluginFails_ReturnsError) {
+  net_.iflushResult = ncclSystemError;
+  sub_->nbytes = 64;
+  EXPECT_EQ(Flush(0, 64), ncclSystemError);
+  sub_->reg = 0;
+  EXPECT_EQ(Flush(0, 64), ncclSystemError);
+}
+
+// ---------------------------------------------------------------------------
+// Recv proxy progress (recvProxyProgress)
+// ---------------------------------------------------------------------------
+
+class CollNetRecvProgressMicrotest : public CollNetProgressMicrotestBase {
+ protected:
+  recvResources res_[kMaxSubs]{};
+  void* poolMh_ = reinterpret_cast<void*>(0x52);
+
+  void SetUp() override {
+    CollNetProgressMicrotestBase::SetUp();
+    for (int s = 0; s < kMaxSubs; s++) {
+      recvResources& r = res_[s];
+      r.collNetComm = &net_.collComm;
+      r.sendMem = &sendMems_[s];
+      r.recvMem = &recvMems_[s];
+      r.step = kBase;
+      r.maxCollBytes = 1024;
+      r.mhandles[NCCL_PROTO_SIMPLE] = poolMh_;
+      NCCL_NET_MAP_ADD_POINTER(&r.map, 1, 1, (int)region_.size(), buffs[NCCL_PROTO_SIMPLE]);
+      r.map.mems[NCCL_NET_MAP_SHARED_DEVMEM].gpuPtr = region_.data();
+      conns_[s].transportResources = &r;
+    }
+  }
+
+  void Subs(int n, int nsteps) {
+    args_.nsubs = n;
+    for (int s = 0; s < n; s++) args_.subs[s].nsteps = nsteps;
+  }
+  ncclResult_t Progress() { return recvProxyProgress(&proxyState_, &args_); }
+  // Progresses until a call makes no progress.
+  void Run() {
+    for (int i = 0; i < 64; i++) {
+      ASSERT_EQ(Progress(), ncclSuccess);
+      if (args_.idle) return;
+    }
+    FAIL() << "never went idle";
+  }
+  reqSlot& Fifo(int s, uint64_t step) { return res_[s].reqFifo[s / COLLNET_GROUP_NSUBS][Slot(s, step)]; }
+  // The send proxy finished the collective in a slot the last sub of s's group handed it.
+  void SendDone(int s, uint64_t step, int recvBytes = kChunk) {
+    Fifo(s, step).size = recvBytes;
+    Fifo(s, step).turnIsSendNotRecv = false;
+  }
+  void UseGdrFlush() {
+    for (auto& r : res_) {
+      r.useGdr = ncclTopoGdrModeDefault;
+      r.needFlush = ncclTopoFlushAlways;
+    }
+  }
+  // The GPU consumed the data up to this step.
+  void GpuConsumed(int n, uint64_t steps) {
+    for (int s = 0; s < n; s++) sendMems_[s].head = args_.subs[s].base + steps;
+  }
+};
+
+TEST_F(CollNetRecvProgressMicrotest, Ready_StartsAtNextChunkBoundaryAndClearsRequests) {
+  Subs(2, 3);
+  res_[1].step = 21;
+  args_.chunkSteps = 4;
+  args_.subs[0].flushed = args_.subs[0].transmitted = args_.subs[0].done = 5;
+  args_.subs[1].requests[3] = reinterpret_cast<void*>(0x9);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(args_.state, ncclProxyOpProgress);
+  EXPECT_EQ(args_.subs[0].base, kBase);
+  EXPECT_EQ(res_[0].step, kBase + 3);
+  EXPECT_EQ(args_.subs[1].base, 24u);
+  EXPECT_EQ(res_[1].step, 27u);
+  EXPECT_EQ(args_.subs[0].flushed, 0u);
+  EXPECT_EQ(args_.subs[0].transmitted, 0u);
+  EXPECT_EQ(args_.subs[0].done, 0u);
+  EXPECT_EQ(args_.subs[1].requests[3], nullptr);
+  EXPECT_EQ(args_.subs[1].posted, 1u);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Ready_RegisteredOneRankPerNode_OneStepPerMaxCollBytes) {
+  Subs(3, 1);
+  for (int s = 0; s < 3; s++) args_.subs[s].nbytes = 2049;
+  args_.subs[0].reg = args_.subs[0].isOneRPN = 1;
+  args_.subs[1].reg = 1;       // several ranks per node
+  args_.subs[2].isOneRPN = 1;  // not registered
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(args_.subs[0].nsteps, 3);
+  EXPECT_EQ(args_.subs[1].nsteps, 1);
+  EXPECT_EQ(args_.subs[2].nsteps, 1);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Post_LastSubOfGroupHandsSlotsToSendProxyWindowAhead) {
+  Subs(2, 12);
+
+  for (int i = 0; i < 12; i++) ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(args_.subs[0].posted, 0u);
+  EXPECT_EQ(args_.subs[1].posted, (uint64_t)NCCL_STEPS);
+  for (int step = 0; step < NCCL_STEPS; step++) EXPECT_TRUE(Fifo(1, step).turnIsSendNotRecv);
+  EXPECT_EQ(args_.idle, 1);  // a full window, nothing else to do
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Post_ShortOp_PostsOnlyItsSteps) {
+  Subs(1, 2);
+
+  Run();
+
+  EXPECT_EQ(args_.subs[0].posted, 2u);
+  EXPECT_FALSE(Fifo(0, 2).turnIsSendNotRecv);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Receive_SendProxyStillOwnsSlot_Waits) {
+  Subs(1, 2);
+  Run();
+
+  EXPECT_EQ(args_.subs[0].received, 0u);
+  EXPECT_EQ(args_.subs[0].transmitted, 0u);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Transmit_EarlierSubCatchingUp_CountsAsProgress) {
+  Subs(2, 1);
+  ASSERT_EQ(Progress(), ncclSuccess);  // posts
+  SendDone(1, 0);
+  ASSERT_EQ(Progress(), ncclSuccess);  // receives
+  ASSERT_EQ(Progress(), ncclSuccess);  // flushes the group, publishes the last sub
+  ASSERT_EQ(args_.subs[0].transmitted, 0u);
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  EXPECT_EQ(args_.subs[0].transmitted, 1u);
+  EXPECT_EQ(args_.idle, 0);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Receive_NoFlushNeeded_PublishesSlotAndTailToGpu) {
+  Subs(2, 2);
+  args_.subs[0].isOneRPN = args_.subs[1].isOneRPN = 1;  // unregistered: still one GPU step per step
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(1, 0);
+
+  Run();
+
+  EXPECT_TRUE(net_.iflushes.empty());
+  for (int s = 0; s < 2; s++) {
+    EXPECT_EQ(args_.subs[s].flushed, 1u);
+    EXPECT_EQ(args_.subs[s].transmitted, 1u);
+    EXPECT_EQ(RecvMem(s)->connFifo[Slot(s, 0)].offset, (ssize_t)(NCCL_STEPS * 2 * kSlot + s * kChunk));
+    EXPECT_EQ(RecvMem(s)->tail, kBase + 1);
+  }
+  EXPECT_EQ(args_.subs[1].received, 1u);
+
+  SendDone(1, 1);
+  GpuConsumed(2, 1);
+  Run();
+  EXPECT_EQ(RecvMem(1)->tail, kBase + 2);
+  EXPECT_EQ(args_.subs[1].done, 1u);  // the GPU has not consumed step 1
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Receive_TwoGroups_EachFlushCompletesOnlyItsGroup) {
+  UseGdrFlush();
+  Subs(9, 1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(7, 0);
+  SendDone(8, 0);
+  net_.pending.insert(&net_.requestTokens[0]);  // group 0's flush
+
+  Run();
+
+  ASSERT_EQ(net_.iflushes.size(), 2u);
+  EXPECT_EQ(net_.iflushes[0].size, 8 * kChunk);
+  EXPECT_EQ(net_.iflushes[1].data, region_.data() + NCCL_STEPS * 2 * kSlot + 8 * kChunk);
+  EXPECT_EQ(net_.iflushes[1].size, kChunk);
+  for (int s = 0; s < 8; s++) EXPECT_EQ(args_.subs[s].flushed, 0u);
+  EXPECT_EQ(args_.subs[8].flushed, 1u);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Receive_GdrNeedsFlush_FlushesGroupRangeBeforeGpuSeesIt) {
+  UseGdrFlush();
+  Subs(2, 2);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(1, 0);
+  net_.testDone = 0;
+
+  Run();
+
+  ASSERT_EQ(net_.iflushes.size(), 1u);
+  EXPECT_EQ(net_.iflushes[0].data, region_.data() + NCCL_STEPS * 2 * kSlot);
+  EXPECT_EQ(net_.iflushes[0].size, 2 * kChunk);
+  EXPECT_EQ(net_.iflushes[0].mhandle, poolMh_);
+  EXPECT_EQ(args_.subs[1].flushed, 0u);
+  EXPECT_EQ(RecvMem(1)->tail, 0u);
+
+  net_.testDone = 1;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(net_.tested.back(), &net_.requestTokens[0]);
+  EXPECT_EQ(args_.subs[0].flushed, 1u);
+  EXPECT_EQ(args_.subs[1].flushed, 1u);
+  EXPECT_EQ(args_.subs[1].requests[Slot(1, 0)], nullptr);
+  EXPECT_EQ(args_.idle, 0);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Receive_NothingReceivedOrNoFlushRule_SkipsFlush) {
+  UseGdrFlush();
+  Subs(1, 4);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0, /*recvBytes=*/0);
+  Run();
+
+  res_[0].needFlush = ncclTopoFlushNone;
+  SendDone(0, 1);
+  Run();
+
+  res_[0].needFlush = ncclTopoFlushAlways;
+  res_[0].useGdr = ncclTopoGdrModeDisable;
+  SendDone(0, 2);
+  Run();
+
+  EXPECT_TRUE(net_.iflushes.empty());
+  EXPECT_EQ(args_.subs[0].transmitted, 3u);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Receive_GdcFlushWord_ReadInsteadOfPluginFlush) {
+  UseGdrFlush();
+  uint64_t flushWord = 0;
+  res_[0].gdcFlush = &flushWord;
+  Subs(1, 2);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0);
+
+  Run();
+
+  EXPECT_TRUE(net_.iflushes.empty());
+  EXPECT_EQ(args_.subs[0].transmitted, 1u);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Receive_RegisteredOneRankPerNode_FlushesUserBuffer) {
+  UseGdrFlush();
+  alignas(16) static uint8_t user[4096];
+  Subs(1, 1);
+  args_.subs[0].reg = 1;
+  args_.subs[0].isOneRPN = 1;
+  args_.subs[0].nbytes = 512;
+  args_.subs[0].recvbuff = user;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0, /*recvBytes=*/0);  // a registered step flushes whatever the slot size says
+
+  ASSERT_EQ(Progress(), ncclSuccess);
+
+  ASSERT_EQ(net_.iflushes.size(), 1u);
+  EXPECT_EQ(net_.iflushes[0].data, user);
+  EXPECT_EQ(net_.iflushes[0].size, 512);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Transmit_GdcSync_TailGoesToGdcWord) {
+  uint64_t gdc = 0;
+  res_[0].gdcSync = &gdc;
+  Subs(1, 2);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0);
+
+  Run();
+
+  EXPECT_EQ(gdc, kBase + 1);
+  EXPECT_EQ(RecvMem(0)->tail, 0u);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Transmit_RegisteredOneRankPerNode_SignalsGpuOnceAtTheEnd) {
+  Subs(1, 1);
+  args_.subs[0].reg = 1;
+  args_.subs[0].isOneRPN = 1;
+  args_.subs[0].nbytes = 2 * 1024;
+  for (auto& f : RecvMem(0)->connFifo) f.offset = -7;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0);
+  Run();
+  EXPECT_EQ(args_.subs[0].transmitted, 1u);
+  EXPECT_EQ(RecvMem(0)->tail, 0u);
+
+  SendDone(0, 1);
+  Run();
+
+  EXPECT_EQ(RecvMem(0)->tail, kBase + 1);
+  for (auto& f : RecvMem(0)->connFifo) EXPECT_EQ(f.offset, -7);
+
+  args_.state = ncclProxyOpReady;  // AllGather lands in the user buffer too
+  args_.coll = ncclFuncAllGather;
+  args_.subs[0].nsteps = 1;
+  args_.subs[0].nbytes = 512;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0);
+  Run();
+  ASSERT_EQ(args_.subs[0].transmitted, 1u);
+  for (auto& f : RecvMem(0)->connFifo) EXPECT_EQ(f.offset, -7);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Transmit_RegisteredSeveralRanksPerNode_StepByStepOffsetsOnlyForGather) {
+  Subs(1, 2);
+  args_.subs[0].reg = 1;
+  for (auto& f : RecvMem(0)->connFifo) f.offset = -7;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0);
+  Run();
+  EXPECT_EQ(RecvMem(0)->connFifo[Slot(0, 0)].offset, -7);
+  EXPECT_EQ(RecvMem(0)->tail, kBase + 1);  // per step, not once at the end
+  SendDone(0, 1);
+  GpuConsumed(1, 1);
+  Run();
+  EXPECT_EQ(args_.subs[0].done, 1u);  // the GPU consumed only step 0
+
+  args_.state = ncclProxyOpReady;
+  args_.coll = ncclFuncAllGather;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0);
+  Run();
+  EXPECT_EQ(RecvMem(0)->connFifo[Slot(0, 0)].offset, (ssize_t)(NCCL_STEPS * 2 * kSlot));
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Done_GpuConsumed_RetiresStepsInSubOrder) {
+  Subs(2, 2);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(1, 0);
+  Run();
+  EXPECT_EQ(args_.subs[0].done, 0u);  // the GPU still holds the slot
+
+  GpuConsumed(2, 0);  // head at base: nothing consumed yet
+  Run();
+  EXPECT_EQ(args_.subs[0].done, 0u);
+
+  sendMems_[1].head = args_.subs[1].base + 1;  // only the later sub's GPU side consumed it
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(args_.subs[1].done, 0u);
+
+  GpuConsumed(2, 1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  EXPECT_EQ(args_.subs[0].done, 1u);
+  EXPECT_EQ(args_.subs[1].done, 1u);
+  EXPECT_EQ(args_.idle, 0);
+  EXPECT_TRUE(Fifo(1, 1).turnIsSendNotRecv);  // done frees the window: the next slot goes out
+
+  GpuConsumed(2, 5);  // the GPU can't consume what was never handed over
+  Run();
+  EXPECT_EQ(args_.subs[1].done, 1u);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Done_EarlierSubFinishesFirst_KeepsOpRunning) {
+  Subs(2, 1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(1, 0);
+  Run();
+  sendMems_[0].head = args_.subs[0].base + 1;  // only sub 0's GPU side has consumed its step
+
+  Run();
+
+  EXPECT_EQ(args_.subs[0].done, 1u);
+  EXPECT_EQ(args_.subs[1].done, 0u);
+  EXPECT_EQ(args_.state, ncclProxyOpProgress);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, Done_RegisteredOneRankPerNode_GpuSignalsOnceForAllSteps) {
+  Subs(1, 1);
+  args_.subs[0].reg = 1;
+  args_.subs[0].isOneRPN = 1;
+  args_.subs[0].nbytes = 2 * 1024;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  for (uint64_t step = 0; step < 2; step++) {
+    SendDone(0, step);
+    Run();
+  }
+  GpuConsumed(1, 1);
+
+  Run();
+
+  EXPECT_EQ(args_.subs[0].done, 2u);
+  EXPECT_EQ(args_.state, ncclProxyOpNone);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, WholeOp_LongerThanWindow_RunsEveryStepThenStops) {
+  constexpr int kSteps = NCCL_STEPS + 3;
+  UseGdrFlush();
+  Subs(2, kSteps);
+  args_.subs[2].nsteps = 99;  // a stale sub past nsubs, left mid-op by an earlier one
+  args_.subs[2].flushed = 1;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  for (uint64_t step = 0; step < kSteps; step++) {
+    ASSERT_TRUE(Fifo(1, step).turnIsSendNotRecv);
+    SendDone(1, step);
+    Run();
+    ASSERT_EQ(args_.subs[1].transmitted, step + 1);
+    EXPECT_EQ(RecvMem(0)->connFifo[Slot(0, step)].offset, (ssize_t)((NCCL_STEPS + step % NCCL_STEPS) * 2 * kSlot));
+    GpuConsumed(2, step + 1);
+    ASSERT_EQ(Progress(), ncclSuccess);
+    ASSERT_EQ(args_.subs[1].done, step + 1);
+  }
+
+  EXPECT_EQ(args_.state, ncclProxyOpNone);
+  ASSERT_EQ(net_.iflushes.size(), (size_t)kSteps);
+  EXPECT_EQ(net_.iflushes[NCCL_STEPS + 1].data, region_.data() + (NCCL_STEPS + 1) * 2 * kSlot);
+  EXPECT_EQ(net_.tested.size(), (size_t)kSteps);  // every flush waited for
+  EXPECT_EQ(res_[2].step, kBase);
+  EXPECT_EQ(RecvMem(2)->tail, 0u);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, PluginFails_ReturnsError) {
+  UseGdrFlush();
+  Subs(1, 1);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0);
+  net_.iflushResult = ncclSystemError;
+  EXPECT_EQ(Progress(), ncclSystemError);
+
+  args_.state = ncclProxyOpReady;
+  net_.iflushResult = ncclSuccess;
+  ASSERT_EQ(Progress(), ncclSuccess);
+  SendDone(0, 0);
+  ASSERT_EQ(Progress(), ncclSuccess);
+  net_.testResult = ncclSystemError;
+  EXPECT_EQ(Progress(), ncclSystemError);
+}
+
+TEST_F(CollNetRecvProgressMicrotest, NotStarted_DoesNothing) {
   Subs(1, 2);
   args_.state = ncclProxyOpNone;
 
