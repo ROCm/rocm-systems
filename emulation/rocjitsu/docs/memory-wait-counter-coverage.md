@@ -142,10 +142,10 @@ wait for LGKM and the target's VMEM/store counters before a workgroup barrier,
 making the write visible to other waves without an EXP wait. The counter waits
 alone do not replace that barrier.
 
-Removing EXP can also change the whole-event ordering class. On gfx942,
-`memoryOrderForObligations` now gives returning GLOBAL atomics the `VMEM` class;
-combining VMEM with the former EXP/`UNORDERED` obligation made the whole event
-unordered. `WaveRaceState::checkVgprWrite` accepts overlapping destinations for
+Removing EXP can also change the whole-event ordering class. On gfx942, gfx950
+and gfx1151, `memoryOrderForObligations` now gives returning GLOBAL atomics the
+`VMEM` class. Combining VMEM with the former EXP/`UNORDERED` obligation made the
+whole event unordered. `WaveRaceState::checkVgprWrite` accepts overlapping destinations for
 producers in the same ordered class, independently of completion waits. A
 returning GLOBAL atomic followed by a GLOBAL load into the same VGPR can
 therefore use a final `vmcnt(0)` without a WAW report. A VALU overwrite before
@@ -181,9 +181,10 @@ The external
 runs compiler-generated returning atomics and explicit VM-only, no-wait and
 EXP-only sequences on gfx942, gfx950 and gfx1151. It also checks synchronized
 FLAT-to-LDS exchanges, missing-barrier controls and the atomic-to-GLOBAL/VALU
-ordering pair on all three targets. These are emulation tests. Generator tests cover the VMEM
-metadata contract across all ten profiles, while decoded C++ tests retain
-older-target GDS obligations and check the CDNA4 fallback policy.
+ordering pair on all three targets. Paired old/new-metadata validation of that
+ordering pair was performed on gfx942. These are emulation tests. Generator tests
+cover the VMEM metadata contract across all ten profiles, while decoded C++ tests
+retain older-target GDS obligations and check the CDNA4 fallback policy.
 
 ## FLAT register readiness
 
