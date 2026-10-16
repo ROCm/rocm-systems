@@ -62,6 +62,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 
 - GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values.
 
+- A compute partition's `RDC_FI_GPU_CLOCK` no longer reports an invalid reading (65535 or 0 MHz), or another partition's clock, when the GPU reports as many valid clock readings as partitions but invalid ones before them. RDC also no longer reads past the GPU's clock readings and reports a wrong clock when the GPU's partition count drops to the partition's index or below while the partition is watched, as when AMD SMI reports the GPU's partition profile as not supported; such a partition's clock now stops updating.
+
 ## RDC 1.3.1 for ROCm 7.14.0
 
 ### Added
