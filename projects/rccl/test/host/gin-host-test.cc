@@ -724,15 +724,23 @@ TEST_F(GinHostProgressMicrotest, Progress_PluginProgressFails_StoresTheStatusInA
   attachProgressList(1, 1, {1});
   fake_.slots[0]->progressResult = ncclSystemError;
   auto* gs = gin();
+  std::atomic<bool> returned{false};
   {
     // On the test thread a missed error return spins in while(1) until the
-    // whole binary's timeout. A worker plus waitUntil fails this case instead.
+    // whole binary's timeout. The worker records its own return instead, so the
+    // wait ends as soon as ncclGinProgress leaves of its own accord -- waiting on
+    // asyncResult alone would also be satisfied by a thread that stored the status
+    // and kept going, which the joiner's stop signal would then end.
     auto worker = progressWorkers(gs);
-    worker.spawn([gs] { ncclGinProgress(gs, 0); });
-    ASSERT_TRUE(waitUntil([&] { return gs->asyncResult == ncclSystemError; }))
-        << "ginProgress error did not stop the worker";
+    worker.spawn([gs, &returned] {
+      ncclGinProgress(gs, 0);
+      returned.store(true);
+    });
+    EXPECT_TRUE(waitUntil([&] { return returned.load(); }))
+        << "ginProgress error did not end the progress thread";
   }
   EXPECT_EQ(ncclSystemError, gs->asyncResult);
+  EXPECT_EQ(1, fake_.slots[0]->progressCalls.load());
   freeProgressList();
 }
 
