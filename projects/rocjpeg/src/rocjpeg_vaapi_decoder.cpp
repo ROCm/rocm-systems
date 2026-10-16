@@ -172,19 +172,29 @@ bool RocJpegVaapiMemoryPool::DeleteIdleEntry() {
     for (auto& pair : mem_pool_) {
         auto it = std::find_if(pair.second.begin(), pair.second.end(), [](const RocJpegVaapiMemPoolEntry& entry) {return entry.entry_status == kIdle;});
         if (it != pair.second.end()) {
-            auto index = std::distance(pair.second.begin(), it);
-            if (!pair.second[index].va_surface_ids.empty()) {
-                CHECK_VAAPI(vaDestroySurfaces(va_display_, pair.second[index].va_surface_ids.data(), pair.second[index].va_surface_ids.size()));
-                std::fill(pair.second[index].va_surface_ids.begin(), pair.second[index].va_surface_ids.end(), 0);
-            }
-            if (!pair.second[index].hip_interops.empty()) {
-                for(auto& hip_interop_entry : pair.second[index].hip_interops) {
-                    if (hip_interop_entry.hip_mapped_device_mem != nullptr)
-                        CHECK_HIP(hipFree(hip_interop_entry.hip_mapped_device_mem));
-                    if (hip_interop_entry.hip_ext_mem != nullptr)
-                        CHECK_HIP(hipDestroyExternalMemory(hip_interop_entry.hip_ext_mem));
-                    memset((void*)&hip_interop_entry, 0, sizeof(hip_interop_entry));
+            // Release everything on a best-effort basis and log failures, as ReleaseResources() does. This function
+            // returns bool, so the CHECK_* macros (which return a RocJpegStatus) cannot be used here. A failure must
+            // not leave a half-released entry in the pool: its handles would be released a second time later.
+            auto& entry = *it;
+            if (!entry.va_surface_ids.empty()) {
+                VAStatus va_status = vaDestroySurfaces(va_display_, entry.va_surface_ids.data(), entry.va_surface_ids.size());
+                if (va_status != VA_STATUS_SUCCESS) {
+                    ErrorLog(g_rocjpeg_logger, "vaDestroySurfaces failed!");
                 }
+                std::fill(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), 0);
+            }
+            for (auto& hip_interop_entry : entry.hip_interops) {
+                if (hip_interop_entry.hip_mapped_device_mem != nullptr) {
+                    if (hipFree(hip_interop_entry.hip_mapped_device_mem) != hipSuccess) {
+                        ErrorLog(g_rocjpeg_logger, "hipFree failed!");
+                    }
+                }
+                if (hip_interop_entry.hip_ext_mem != nullptr) {
+                    if (hipDestroyExternalMemory(hip_interop_entry.hip_ext_mem) != hipSuccess) {
+                        ErrorLog(g_rocjpeg_logger, "hipDestroyExternalMemory failed!");
+                    }
+                }
+                memset((void*)&hip_interop_entry, 0, sizeof(hip_interop_entry));
             }
             pair.second.erase(it);
             return true;
