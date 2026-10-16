@@ -107,7 +107,6 @@ ARGS_DISPLAY_MAX_CHARS = 160
 ARGS_DISPLAY_MAX_VARIANTS = 5
 
 
-
 def get_bw_scale_and_unit(value: float) -> tuple[float, str]:
     """Return the divisor and suffix for a bandwidth value in Bytes/s."""
     if value >= 1e12:
