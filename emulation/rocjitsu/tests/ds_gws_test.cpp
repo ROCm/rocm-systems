@@ -41,6 +41,7 @@
 #include <cstdint>
 #include <initializer_list>
 #include <memory>
+#include <stdexcept>
 #include <string>
 #include <string_view>
 #include <thread>
@@ -168,7 +169,97 @@ std::array<uint32_t, 2> build_gws_acc(rj_code_arch_t arch, uint16_t op, uint8_t 
 // ADDR VGPR that carries the resource count for INIT/SEMA_BR/BARRIER.
 constexpr uint8_t kAddrVgpr = 4;
 
-class DsGwsTest : public ::testing::TestWithParam<rj_code_arch_t> {};
+struct WorkgroupConfig {
+  uint32_t dispatch_id = 0;
+  uint32_t wg_id = 0;
+  uint32_t process_id = 0;
+  uint64_t pc = 0;
+};
+
+// Ordinary instruction tests start with lane 0 active and resource 0 selected.
+// Scheduling and lifetime tests can still dispatch and initialize waves directly.
+template <size_t N>
+std::array<amdgpu::Wavefront *, N> make_workgroup(amdgpu::ComputeUnitCore &cu,
+                                                  WorkgroupConfig config = {}) {
+  std::array<amdgpu::Wavefront *, N> waves{};
+  for (auto &wave : waves) {
+    wave = cu.dispatch_wf(config.wg_id, config.pc, 102, 16);
+    // A setup failure must stop the test before it dereferences a missing wave.
+    if (!wave)
+      throw std::runtime_error("Failed to allocate a GWS test wave");
+    wave->set_dispatch_id(config.dispatch_id);
+    wave->set_process_id(config.process_id);
+    wave->set_exec(0x1);
+    wave->set_m0(0);
+  }
+  cu.begin_workgroup(config.dispatch_id, config.wg_id, N);
+  return waves;
+}
+
+// Each context owns its memory, cache and decoder. Tests keep CUs local so
+// teardown and store-lifetime scenarios remain explicit.
+class GwsTestContext {
+public:
+  explicit GwsTestContext(rj_code_arch_t arch) : arch(arch), decoder(Decoder::create(arch)) {
+    l2.set_backing_memory(&mem);
+  }
+
+  amdgpu::ComputeUnitCore::Config cu_config(uint32_t wf_slots = 4) const {
+    amdgpu::ComputeUnitCore::Config cfg{};
+    cfg.arch = arch;
+    cfg.num_wf_slots = wf_slots;
+    cfg.sgprs_per_wf = 102;
+    cfg.vgprs_per_wf = 16;
+    cfg.lds_size_kb = 64;
+    return cfg;
+  }
+
+  std::unique_ptr<amdgpu::ComputeUnitCore> make_cu(uint32_t wf_slots = 4) {
+    return amdgpu::ComputeUnitCore::create("ds_gws_cu", cu_config(wf_slots), &mem, &l2);
+  }
+
+  const rj_code_arch_t arch;
+  amdgpu::GpuMemory mem{"ds_gws_mem"};
+  amdgpu::L2Cache l2{"ds_gws_l2"};
+  std::unique_ptr<Decoder> decoder;
+
+  // Decode one GWS op, publish @p count in lane 0 of the ADDR VGPR, and
+  // run it on @p wf through the CU execute path. @p offset0 feeds the rid decode.
+  void run_gws(amdgpu::ComputeUnitCore &cu, GwsOp op, amdgpu::Wavefront &wf, uint32_t count,
+               uint8_t offset0 = 0) {
+    const bool has_addr = gws_has_addr(op);
+    if (has_addr)
+      cu.write_vgpr(wf.vgpr_alloc().base + kAddrVgpr, /*lane=*/0, count);
+    const auto words =
+        build_gws(arch, gws_opcode(arch, op), /*gds=*/1, has_addr ? kAddrVgpr : 0, offset0);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu.execute_instruction(inst.get(), wf).succeeded());
+  }
+
+  // Like run_gws, but with an explicit EXEC mask and per-lane ADDR-VGPR counts so
+  // the EXEC=0 and nonzero-first-active-lane paths can be exercised. Each entry of
+  // @p lane_counts is (lane, value); @p exec is written verbatim onto the wave.
+  void run_gws_exec(amdgpu::ComputeUnitCore &cu, GwsOp op, amdgpu::Wavefront &wf, uint64_t exec,
+                    std::initializer_list<std::pair<uint32_t, uint32_t>> lane_counts,
+                    uint8_t offset0 = 0) {
+    const bool has_addr = gws_has_addr(op);
+    if (has_addr)
+      for (const auto &[lane, value] : lane_counts)
+        cu.write_vgpr(wf.vgpr_alloc().base + kAddrVgpr, lane, value);
+    wf.set_exec(exec);
+    const auto words =
+        build_gws(arch, gws_opcode(arch, op), /*gds=*/1, has_addr ? kAddrVgpr : 0, offset0);
+    std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+    ASSERT_NE(inst, nullptr);
+    ASSERT_TRUE(cu.execute_instruction(inst.get(), wf).succeeded());
+  }
+};
+
+class DsGwsTest : public ::testing::TestWithParam<rj_code_arch_t>, public GwsTestContext {
+public:
+  DsGwsTest() : GwsTestContext(GetParam()) {}
+};
 
 INSTANTIATE_TEST_SUITE_P(GwsArchitectures, DsGwsTest,
                          ::testing::Values(ROCJITSU_CODE_ARCH_CDNA1, ROCJITSU_CODE_ARCH_CDNA2,
@@ -181,17 +272,8 @@ INSTANTIATE_TEST_SUITE_P(GwsArchitectures, DsGwsTest,
 // participates in the arch's GWS wait counter (LGKMCNT on GFX9/GFX10, DSCNT on
 // GFX11) against the GDS completion class.
 TEST_P(DsGwsTest, StructuralModelExecutesAndAccounts) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_mem");
-  amdgpu::L2Cache l2("ds_gws_l2");
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = arch;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 102;
-  cfg.vgprs_per_wf = 16;
-  cfg.lds_size_kb = 64;
+  auto cfg = cu_config(1);
   auto cu = amdgpu::ComputeUnitCore::create("ds_gws", cfg, &mem, &l2);
-  auto decoder = Decoder::create(arch);
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
   ASSERT_NE(wf, nullptr);
   // Decode and memory-pipeline accounting are EXEC-independent on every target;
@@ -258,17 +340,8 @@ TEST_P(DsGwsTest, StructuralModelExecutesAndAccounts) {
 // gds=0, the mirror of the other DS classes rejecting gds=1) raises
 // UnimplementedInst at execution instead.
 TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_nogds_mem");
-  amdgpu::L2Cache l2("ds_gws_nogds_l2");
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = arch;
-  cfg.num_wf_slots = 1;
-  cfg.sgprs_per_wf = 102;
-  cfg.vgprs_per_wf = 16;
-  cfg.lds_size_kb = 64;
+  auto cfg = cu_config(1);
   auto cu = amdgpu::ComputeUnitCore::create("ds_gws_nogds", cfg, &mem, &l2);
-  auto decoder = Decoder::create(arch);
   auto *wf = cu->dispatch_wf(0, 0, cfg.sgprs_per_wf, 16);
   ASSERT_NE(wf, nullptr);
   wf->set_exec(0x1);
@@ -297,51 +370,6 @@ TEST_P(DsGwsTest, RejectsExecutionWithoutGdsBit) {
 // any CU, even a later dispatch -- releases a waiter parked by another.
 // ---------------------------------------------------------------------------
 
-// Decode one GWS op, publish @p count in the ADDR VGPR's first active lane, and
-// run it on @p wf through the CU execute path. @p offset0 feeds the rid decode.
-void run_gws(amdgpu::ComputeUnitCore &cu, Decoder &decoder, rj_code_arch_t arch, GwsOp op,
-             amdgpu::Wavefront &wf, uint32_t count, uint8_t offset0 = 0) {
-  const bool has_addr = gws_has_addr(op);
-  if (has_addr)
-    cu.write_vgpr(wf.vgpr_alloc().base + kAddrVgpr, /*lane=*/0, count);
-  const auto words =
-      build_gws(arch, gws_opcode(arch, op), /*gds=*/1, has_addr ? kAddrVgpr : 0, offset0);
-  std::unique_ptr<Instruction> inst(decode_valid(decoder, words.data()));
-  ASSERT_NE(inst, nullptr);
-  ASSERT_TRUE(cu.execute_instruction(inst.get(), wf).succeeded());
-}
-
-std::unique_ptr<amdgpu::ComputeUnitCore> make_gws_cu(amdgpu::GpuMemory &mem, amdgpu::L2Cache &l2,
-                                                     rj_code_arch_t arch, uint32_t wf_slots) {
-  l2.set_backing_memory(&mem);
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = arch;
-  cfg.num_wf_slots = wf_slots;
-  cfg.sgprs_per_wf = 102;
-  cfg.vgprs_per_wf = 16;
-  cfg.lds_size_kb = 64;
-  return amdgpu::ComputeUnitCore::create("ds_gws_cu", cfg, &mem, &l2);
-}
-
-// Like run_gws, but with an explicit EXEC mask and per-lane ADDR-VGPR counts so
-// the EXEC=0 and nonzero-first-active-lane paths can be exercised. Each entry of
-// @p lane_counts is (lane, value); @p exec is written verbatim onto the wave.
-void run_gws_exec(amdgpu::ComputeUnitCore &cu, Decoder &decoder, rj_code_arch_t arch, GwsOp op,
-                  amdgpu::Wavefront &wf, uint64_t exec,
-                  std::initializer_list<std::pair<uint32_t, uint32_t>> lane_counts,
-                  uint8_t offset0 = 0) {
-  const bool has_addr = gws_has_addr(op);
-  if (has_addr)
-    for (const auto &[lane, value] : lane_counts)
-      cu.write_vgpr(wf.vgpr_alloc().base + kAddrVgpr, lane, value);
-  wf.set_exec(exec);
-  const auto words =
-      build_gws(arch, gws_opcode(arch, op), /*gds=*/1, has_addr ? kAddrVgpr : 0, offset0);
-  std::unique_ptr<Instruction> inst(decode_valid(decoder, words.data()));
-  ASSERT_NE(inst, nullptr);
-  ASSERT_TRUE(cu.execute_instruction(inst.get(), wf).succeeded());
-}
-
 // RDNA3/RDNA3.5 (ISA "Global Wave Sync", section 13.4.2) run the count-carrying
 // GWS operations (INIT, BARRIER, SEMA_BR) even when EXEC selects no lane, taking
 // the count operand from lane 0. A barrier(count=1) issued with EXEC=0 must
@@ -350,26 +378,16 @@ void run_gws_exec(amdgpu::ComputeUnitCore &cu, Decoder &decoder, rj_code_arch_t 
 // (the pre-fix behavior) would instead leave the first arrival RUNNING. This is
 // RDNA3/3.5-specific, so the case is skipped on the other parameterized targets.
 TEST_P(DsGwsTest, Rdna3CountOpsHonorLaneZeroWhenExecEmpty) {
-  const auto arch = GetParam();
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
-  amdgpu::GpuMemory mem("ds_gws_exec0_mem");
-  amdgpu::L2Cache l2("ds_gws_exec0_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1})
-    wf->set_m0(0);
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   cu->gws_init(*wf0, 0, 1);
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*exec=*/0, {{0, 1}});
+  run_gws_exec(*cu, GwsOp::kBarrier, *wf0, /*exec=*/0, {{0, 1}});
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   // The co-resident arrival (also EXEC=0) releases it: a genuine rendezvous.
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*exec=*/0, {{0, 1}});
+  run_gws_exec(*cu, GwsOp::kBarrier, *wf1, /*exec=*/0, {{0, 1}});
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
@@ -378,29 +396,19 @@ TEST_P(DsGwsTest, Rdna3CountOpsHonorLaneZeroWhenExecEmpty) {
 }
 
 TEST_P(DsGwsTest, Rdna3InitSeedsCreditViaLaneZeroWhenExecEmpty) {
-  const auto arch = GetParam();
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
-  amdgpu::GpuMemory mem("ds_gws_init_exec0_mem");
-  amdgpu::L2Cache l2("ds_gws_init_exec0_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1})
-    wf->set_m0(0);
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // init(count=1) with EXEC=0 seeds one semaphore credit via lane 0.
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*exec=*/0, {{0, 1}});
+  run_gws_exec(*cu, GwsOp::kInit, *wf0, /*exec=*/0, {{0, 1}});
   // First P (live EXEC) consumes the seeded credit and stays RUNNING: the witness
   // that the EXEC=0 init took effect. An EXEC-gated init would leave no credit.
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*exec=*/0x1, {});
+  run_gws_exec(*cu, GwsOp::kSemaP, *wf0, /*exec=*/0x1, {});
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   // Second P (live EXEC) finds no credit left and parks: only one was seeded.
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kSemaP, *wf1, /*exec=*/0x1, {});
+  run_gws_exec(*cu, GwsOp::kSemaP, *wf1, /*exec=*/0x1, {});
   EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
 
   wf0->halt();
@@ -411,26 +419,16 @@ TEST_P(DsGwsTest, Rdna3InitSeedsCreditViaLaneZeroWhenExecEmpty) {
 // with EXEC=0 still releases parked waiters, taking the release count from lane 0.
 // (sema_p itself stays EXEC-gated, so the waiter is parked with a live lane.)
 TEST_P(DsGwsTest, Rdna3SemaBrReleasesViaLaneZeroWhenExecEmpty) {
-  const auto arch = GetParam();
   if (arch != ROCJITSU_CODE_ARCH_RDNA3 && arch != ROCJITSU_CODE_ARCH_RDNA3_5)
     GTEST_SKIP() << "EXEC=0 lane-0 count ops are specific to RDNA3/3.5";
-  amdgpu::GpuMemory mem("ds_gws_br_exec0_mem");
-  amdgpu::L2Cache l2("ds_gws_br_exec0_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1})
-    wf->set_m0(0);
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // sema_p parks wf0 (EXEC-gated op, so it uses a live lane).
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*exec=*/0x1, {{0, 0}});
+  run_gws_exec(*cu, GwsOp::kSemaP, *wf0, /*exec=*/0x1, {{0, 0}});
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   // sema_br(count=1) with EXEC=0 releases the waiter via the lane-0 count.
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kSemaBr, *wf1, /*exec=*/0, {{0, 1}});
+  run_gws_exec(*cu, GwsOp::kSemaBr, *wf1, /*exec=*/0, {{0, 1}});
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
 
   wf0->halt();
@@ -442,29 +440,19 @@ TEST_P(DsGwsTest, Rdna3SemaBrReleasesViaLaneZeroWhenExecEmpty) {
 // EXEC-gated structural no-op (no park). The identical op with a live lane still
 // parks normally, proving only the empty mask -- not the resource -- was gated.
 TEST_P(DsGwsTest, OlderTargetsSkipCountOpsWhenExecEmpty) {
-  const auto arch = GetParam();
   if (arch == ROCJITSU_CODE_ARCH_RDNA3 || arch == ROCJITSU_CODE_ARCH_RDNA3_5)
     GTEST_SKIP() << "RDNA3/3.5 run EXEC=0 count ops via lane 0 rather than gating";
-  amdgpu::GpuMemory mem("ds_gws_exec0_old_mem");
-  amdgpu::L2Cache l2("ds_gws_exec0_old_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1})
-    wf->set_m0(0);
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // EXEC=0: the barrier is skipped, so the first arrival does not park.
   cu->gws_init(*wf0, 0, 1);
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*exec=*/0, {{0, 1}});
+  run_gws_exec(*cu, GwsOp::kBarrier, *wf0, /*exec=*/0, {{0, 1}});
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   // With a live lane the identical op parks, then its co-resident releases it.
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*exec=*/0x1, {{0, 1}});
+  run_gws_exec(*cu, GwsOp::kBarrier, *wf0, /*exec=*/0x1, {{0, 1}});
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*exec=*/0x1, {{0, 1}});
+  run_gws_exec(*cu, GwsOp::kBarrier, *wf1, /*exec=*/0x1, {{0, 1}});
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
@@ -473,26 +461,16 @@ TEST_P(DsGwsTest, OlderTargetsSkipCountOpsWhenExecEmpty) {
 }
 
 TEST_P(DsGwsTest, CountOpsReadFirstActiveLaneNotLaneZero) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_firstlane_mem");
-  amdgpu::L2Cache l2("ds_gws_firstlane_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1})
-    wf->set_m0(0);
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // INIT and both barrier reloads must read lane 3. A wrong lane-0 read
   // leaves the barrier waiting for 100 arrivals instead of two.
-  run_gws_exec(*cu, *decoder, arch, GwsOp::kInit, *wf0, 0x8, {{0, 99}, {3, 1}});
+  run_gws_exec(*cu, GwsOp::kInit, *wf0, 0x8, {{0, 99}, {3, 1}});
   for (int phase = 0; phase < 2; ++phase) {
-    run_gws_exec(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, 0x8, {{0, 99}, {3, 1}});
+    run_gws_exec(*cu, GwsOp::kBarrier, *wf0, 0x8, {{0, 99}, {3, 1}});
     EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
-    run_gws_exec(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, 0x8, {{0, 99}, {3, 1}});
+    run_gws_exec(*cu, GwsOp::kBarrier, *wf1, 0x8, {{0, 99}, {3, 1}});
     EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
     EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
   }
@@ -504,28 +482,16 @@ TEST_P(DsGwsTest, CountOpsReadFirstActiveLaneNotLaneZero) {
 // arrival; the final arrival releases the co-resident set. GWS programs the
 // barrier value as (participants - 1), so two participants use a count of 1.
 TEST_P(DsGwsTest, BarrierParksUntilAllCoResidentWavesArrive) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_barrier_mem");
-  amdgpu::L2Cache l2("ds_gws_barrier_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // Explicitly initialize the resource for two participants (count = 1).
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/1);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf1, /*count=*/1);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
 
@@ -536,27 +502,15 @@ TEST_P(DsGwsTest, BarrierParksUntilAllCoResidentWavesArrive) {
 // After a barrier releases, the counter re-arms so the same resource serves a
 // second rendezvous phase.
 TEST_P(DsGwsTest, BarrierReusesCounterAcrossPhases) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_reuse_mem");
-  amdgpu::L2Cache l2("ds_gws_reuse_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/1);
 
   for (int phase = 0; phase < 2; ++phase) {
-    run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+    run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/1);
     EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT) << "phase " << phase;
-    run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+    run_gws(*cu, GwsOp::kBarrier, *wf1, /*count=*/1);
     EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING) << "phase " << phase;
     EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING) << "phase " << phase;
   }
@@ -570,38 +524,24 @@ TEST_P(DsGwsTest, BarrierReusesCounterAcrossPhases) {
 // three arrivals; the releasing barrier(1) then resizes the next phase to two.
 // (A fixed reload would keep requiring three arrivals and hang the second phase.)
 TEST_P(DsGwsTest, BarrierChangingPhaseSizeReusesArrivalCount) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_resize_mem");
-  amdgpu::L2Cache l2("ds_gws_resize_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf2 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  ASSERT_NE(wf2, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/3);
-  for (auto *wf : {wf0, wf1, wf2}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [wf0, wf1, wf2] = make_workgroup<3>(*cu);
 
   // Phase 1: three participants (init value 2). Two park, the third releases.
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/2);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/2);
+  run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf1, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf2, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf2, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf2->state(), amdgpu::WfState::RUNNING);
 
   // Phase 2: the reloaded counter (1) now needs only two arrivals.
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf1, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
@@ -611,11 +551,7 @@ TEST_P(DsGwsTest, BarrierChangingPhaseSizeReusesArrivalCount) {
 }
 
 TEST_P(DsGwsTest, BarrierWaitsWhenCountExceedsResident) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_fallback_mem");
-  amdgpu::L2Cache l2("ds_gws_fallback_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
+  auto cu = make_cu();
   auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(wf0, nullptr);
@@ -624,9 +560,9 @@ TEST_P(DsGwsTest, BarrierWaitsWhenCountExceedsResident) {
   wf0->set_exec(0x1);
   wf0->set_m0(0);
 
-  // participants (count + 1 = 3) > resident (2): structural no-op, keep running.
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/2);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/2);
+  // Three participants exceed the two resident waves: wait for a real arrival.
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/2);
+  run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/2);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
   wf0->halt();
@@ -634,11 +570,7 @@ TEST_P(DsGwsTest, BarrierWaitsWhenCountExceedsResident) {
 }
 
 TEST_P(DsGwsTest, BarrierHugeCountStillWaits) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_overflow_mem");
-  amdgpu::L2Cache l2("ds_gws_overflow_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
+  auto cu = make_cu();
   auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(wf0, nullptr);
@@ -647,8 +579,8 @@ TEST_P(DsGwsTest, BarrierHugeCountStillWaits) {
   wf0->set_exec(0x1);
   wf0->set_m0(0);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/0xffffffffu);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/0xffffffffu);
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/0xffffffffu);
+  run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/0xffffffffu);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
   wf0->halt();
@@ -658,25 +590,13 @@ TEST_P(DsGwsTest, BarrierHugeCountStillWaits) {
 // ds_gws_sema_p parks when no credit is available; ds_gws_sema_v then releases a
 // parked waiter within the dispatch.
 TEST_P(DsGwsTest, SemaphorePParksAndVReleases) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_sema_mem");
-  amdgpu::L2Cache l2("ds_gws_sema_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *wf1, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaV, *wf1, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
@@ -686,30 +606,16 @@ TEST_P(DsGwsTest, SemaphorePParksAndVReleases) {
 
 // ds_gws_sema_br releases up to @count parked waiters in one shot.
 TEST_P(DsGwsTest, SemaphoreBulkReleaseWakesWaiters) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_br_mem");
-  amdgpu::L2Cache l2("ds_gws_br_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf2 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  ASSERT_NE(wf2, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/3);
-  for (auto *wf : {wf0, wf1, wf2}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [wf0, wf1, wf2] = make_workgroup<3>(*cu);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf1, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf1, /*count=*/0);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
 
   // One SEMA_BR releases both parked waiters.
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaBr, *wf2, /*count=*/2);
+  run_gws(*cu, GwsOp::kSemaBr, *wf2, /*count=*/2);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
@@ -719,29 +625,15 @@ TEST_P(DsGwsTest, SemaphoreBulkReleaseWakesWaiters) {
 
 // ds_gws_sema_release_all wakes every parked waiter and clears the credits.
 TEST_P(DsGwsTest, SemaphoreReleaseAllWakesWaiters) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_relall_mem");
-  amdgpu::L2Cache l2("ds_gws_relall_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf2 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  ASSERT_NE(wf2, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/3);
-  for (auto *wf : {wf0, wf1, wf2}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [wf0, wf1, wf2] = make_workgroup<3>(*cu);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0);
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf1, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf1, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
 
-  run_gws(*cu, *decoder, arch, GwsOp::kReleaseAll, *wf2, /*count=*/0);
+  run_gws(*cu, GwsOp::kReleaseAll, *wf2, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
@@ -752,11 +644,7 @@ TEST_P(DsGwsTest, SemaphoreReleaseAllWakesWaiters) {
 // The rid is ((M0[21:16] + offset0) & 0x3f). A P on rid 0 (M0=0, offset0=0) is
 // released by a V whose (M0[21:16]=63, offset0=1) sum wraps back to rid 0.
 TEST_P(DsGwsTest, SemaphoreRidSumWrapsToSameResource) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_wrap_mem");
-  amdgpu::L2Cache l2("ds_gws_wrap_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
+  auto cu = make_cu();
   auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
   ASSERT_NE(wf0, nullptr);
@@ -766,11 +654,11 @@ TEST_P(DsGwsTest, SemaphoreRidSumWrapsToSameResource) {
   wf1->set_exec(0x1);
 
   wf0->set_m0(0); // rid = (0 + 0) & 0x3f = 0
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0, /*offset0=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0, /*offset0=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
   wf1->set_m0(63u << 16); // rid = (63 + 1) & 0x3f = 0
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *wf1, /*count=*/0, /*offset0=*/1);
+  run_gws(*cu, GwsOp::kSemaV, *wf1, /*count=*/0, /*offset0=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
 
   wf0->halt();
@@ -781,28 +669,16 @@ TEST_P(DsGwsTest, SemaphoreRidSumWrapsToSameResource) {
 // released by a V issued from another workgroup sharing the resource -- the
 // hardware rendezvous the workgroup-private model could not express.
 TEST_P(DsGwsTest, CrossWorkgroupSemaphorePWakesOnCrossWgV) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_xwg_mem");
-  amdgpu::L2Cache l2("ds_gws_xwg_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  wf0->set_exec(0x1);
-  wf0->set_m0(0);
-  wf1->set_exec(0x1);
-  wf1->set_m0(0);
+  auto cu = make_cu();
+  auto [wf0] = make_workgroup<1>(*cu);
+  auto [wf1] = make_workgroup<1>(*cu, {.wg_id = 1});
 
   // wf0 (wg0) waits with no credit and parks on the shared resource.
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
   // wf1 (wg1) signals the same shared process resource and wakes wf0.
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *wf1, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaV, *wf1, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
 
   wf0->halt();
@@ -813,31 +689,19 @@ TEST_P(DsGwsTest, CrossWorkgroupSemaphorePWakesOnCrossWgV) {
 // resident wave, the first P consumes that credit and keeps running, while the
 // second P finds no credit and parks. Guards the credit seed in GwsDevice::init.
 TEST_P(DsGwsTest, InitSeedsCreditFirstPConsumesSecondParks) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_initcredit_mem");
-  amdgpu::L2Cache l2("ds_gws_initcredit_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   // Seed exactly one credit.
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
 
   // First P consumes the seeded credit and stays running.
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf0, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf0, /*count=*/0);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
 
   // Second P finds no credit and parks.
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf1, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wf1, /*count=*/0);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
 
   wf0->halt();
@@ -845,32 +709,18 @@ TEST_P(DsGwsTest, InitSeedsCreditFirstPConsumesSecondParks) {
 }
 
 TEST_P(DsGwsTest, PollingSiblingDoesNotBlockCrossWgSemaphoreWake) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_poll_mem");
-  amdgpu::L2Cache l2("ds_gws_poll_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *consumer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *sibling = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *producer = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
-  ASSERT_NE(consumer, nullptr);
-  ASSERT_NE(sibling, nullptr);
-  ASSERT_NE(producer, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  for (auto *wf : {consumer, sibling, producer}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [consumer, sibling] = make_workgroup<2>(*cu);
+  auto [producer] = make_workgroup<1>(*cu, {.wg_id = 1});
 
   // Consumer (wg0) parks on P; its sibling stays RUNNING (a spin/poll loop).
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *consumer, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *consumer, /*count=*/0);
   EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
   EXPECT_EQ(sibling->state(), amdgpu::WfState::RUNNING);
 
   // Producer (wg1) signals: the consumer wakes even though the sibling is still
   // running, so the running poll loop cannot deadlock the rendezvous.
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaV, *producer, /*count=*/0);
   EXPECT_EQ(consumer->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(sibling->state(), amdgpu::WfState::RUNNING);
 
@@ -883,30 +733,18 @@ TEST_P(DsGwsTest, PollingSiblingDoesNotBlockCrossWgSemaphoreWake) {
 // arrive at a barrier programmed for two participants rendezvous across the
 // workgroup boundary (the early arrival parks, the second releases it).
 TEST_P(DsGwsTest, CrossWorkgroupBarrierReleasesBothParticipants) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_xwgbar_mem");
-  amdgpu::L2Cache l2("ds_gws_xwgbar_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  wf0->set_exec(0x1);
-  wf0->set_m0(0);
-  wf1->set_exec(0x1);
-  wf1->set_m0(0);
+  auto cu = make_cu();
+  auto [wf0] = make_workgroup<1>(*cu);
+  auto [wf1] = make_workgroup<1>(*cu, {.wg_id = 1});
 
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/1);
 
   // Two participants -> programmed value 1. wf0 (wg0) arrives first and parks.
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
   // wf1 (wg1) is the releasing arrival and wakes the cross-workgroup peer.
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf1, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::RUNNING);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
 
@@ -915,29 +753,15 @@ TEST_P(DsGwsTest, CrossWorkgroupBarrierReleasesBothParticipants) {
 }
 
 TEST_P(DsGwsTest, UnsatisfiedBarrierFailsAtWaitLimit) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_unsatisfied_mem");
-  amdgpu::L2Cache l2("ds_gws_unsatisfied_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu = make_cu();
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  auto *wf2 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  ASSERT_NE(wf2, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/3);
-  for (auto *wf : {wf0, wf1, wf2}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto [wf0, wf1, wf2] = make_workgroup<3>(*cu, {.pc = kPc});
 
   // Three participants (count = 2); two arrive and park, the third retires.
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/2);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/2);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/2);
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/2);
+  run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/2);
+  run_gws(*cu, GwsOp::kBarrier, *wf1, /*count=*/2);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::GWS_WAIT);
   wf2->halt();
@@ -953,26 +777,14 @@ TEST_P(DsGwsTest, UnsatisfiedBarrierFailsAtWaitLimit) {
 }
 
 TEST_P(DsGwsTest, MixedBarrierWaitFailsAtWaitLimit) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_mixed_mem");
-  amdgpu::L2Cache l2("ds_gws_mixed_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu = make_cu();
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto [wf0, wf1] = make_workgroup<2>(*cu, {.pc = kPc});
 
   // wf0 parks at a two-participant GWS barrier.
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/1);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kInit, *wf0, /*count=*/1);
+  run_gws(*cu, GwsOp::kBarrier, *wf0, /*count=*/1);
   ASSERT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
   // wf1 executes a plain workgroup s_barrier and stalls (wf0 never arrives).
@@ -1000,36 +812,24 @@ TEST_P(DsGwsTest, MixedBarrierWaitFailsAtWaitLimit) {
 // Both CUs share one GwsDevice (declared so it outlives them; CUs unregister on
 // destruction).
 TEST_P(DsGwsTest, CrossComputeUnitSemaphorePWakesOnCrossCuV) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_xcu_mem");
-  amdgpu::L2Cache l2("ds_gws_xcu_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu0 = make_cu();
+  auto cu1 = make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
-  auto *consumer = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  auto *producer = cu1->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
-  ASSERT_NE(consumer, nullptr);
-  ASSERT_NE(producer, nullptr);
-  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  for (auto *wf : {consumer, producer}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto [consumer] = make_workgroup<1>(*cu0, {.pc = kPc});
+  auto [producer] = make_workgroup<1>(*cu1, {.wg_id = 1});
 
   // Consumer parks on CU0's wave slot with no credit.
-  run_gws(*cu0, *decoder, arch, GwsOp::kSemaP, *consumer, /*count=*/0);
+  run_gws(*cu0, GwsOp::kSemaP, *consumer, /*count=*/0);
   EXPECT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
 
   // Producer signals from CU1: the credit lands in the shared store, and CU0
   // applies the cross-CU wake on its next step (consumer's PC is s_endpgm, so it
   // retires once released).
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaV, *producer, /*count=*/0);
   for (int i = 0; i < 4 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu0->step();
   EXPECT_NE(consumer->state(), amdgpu::WfState::GWS_WAIT);
@@ -1038,37 +838,25 @@ TEST_P(DsGwsTest, CrossComputeUnitSemaphorePWakesOnCrossCuV) {
 }
 
 TEST_P(DsGwsTest, CrossComputeUnitBarrierReleasesBothParticipants) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_xcubar_mem");
-  amdgpu::L2Cache l2("ds_gws_xcubar_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu0 = make_cu();
+  auto cu1 = make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  auto *wf1 = cu1->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  wf0->set_exec(0x1);
-  wf0->set_m0(0);
-  wf1->set_exec(0x1);
-  wf1->set_m0(0);
+  auto [wf0] = make_workgroup<1>(*cu0, {.pc = kPc});
+  auto [wf1] = make_workgroup<1>(*cu1, {.wg_id = 1});
 
-  run_gws(*cu0, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/1);
+  run_gws(*cu0, GwsOp::kInit, *wf0, /*count=*/1);
 
   // Two participants -> programmed value 1. wf0 (CU0) arrives first and parks.
-  run_gws(*cu0, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  run_gws(*cu0, GwsOp::kBarrier, *wf0, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT);
 
   // wf1 (CU1) is the releasing arrival: it stays running immediately, and the
   // peer parked on CU0 wakes when CU0 next steps.
-  run_gws(*cu1, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  run_gws(*cu1, GwsOp::kBarrier, *wf1, /*count=*/1);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
   for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu0->step();
@@ -1078,9 +866,6 @@ TEST_P(DsGwsTest, CrossComputeUnitBarrierReleasesBothParticipants) {
 }
 
 TEST_P(DsGwsTest, CrossCuSemaphoreWaitsForScalarBarrierProducer) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_xcusbar_mem");
-  amdgpu::L2Cache l2("ds_gws_xcusbar_l2");
   // Consumer retires at its own PC once released; CU1's two waves run real
   // streams: [s_barrier; ds_gws_sema_v; s_endpgm] and [s_barrier; s_endpgm].
   constexpr uint64_t kPcConsumer = 0x200000;
@@ -1098,18 +883,13 @@ TEST_P(DsGwsTest, CrossCuSemaphoreWaitsForScalarBarrierProducer) {
   mem.write32(kPcB + 4, endpgm);
 
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu0 = make_cu();
+  auto cu1 = make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
 
   // CU0: a single consumer parks on a P (same process/dispatch as CU1's waves).
-  auto *consumer = cu0->dispatch_wf(/*wg_id=*/0, kPcConsumer, 102, 16);
-  ASSERT_NE(consumer, nullptr);
-  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  consumer->set_exec(0x1);
-  consumer->set_m0(0);
+  auto [consumer] = make_workgroup<1>(*cu0, {.pc = kPcConsumer});
 
   // CU1: a two-wave workgroup that will rendezvous at an s_barrier, after which
   // wave A signals the semaphore.
@@ -1123,7 +903,7 @@ TEST_P(DsGwsTest, CrossCuSemaphoreWaitsForScalarBarrierProducer) {
     wf->set_m0(0);
   }
 
-  run_gws(*cu0, *decoder, arch, GwsOp::kSemaP, *consumer, /*count=*/0);
+  run_gws(*cu0, GwsOp::kSemaP, *consumer, /*count=*/0);
   ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
 
   // One CU1 step drives both waves into the s_barrier (fully arrived, but scalar-
@@ -1152,36 +932,22 @@ TEST_P(DsGwsTest, CrossCuSemaphoreWaitsForScalarBarrierProducer) {
 }
 
 TEST_P(DsGwsTest, OverlappingDispatchesShareProcessResources) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_overlap_mem");
-  amdgpu::L2Cache l2("ds_gws_overlap_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu0 = make_cu();
+  auto cu1 = make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
 
   // Dispatch 0's consumer parks on CU0.
-  auto *consumer = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  ASSERT_NE(consumer, nullptr);
-  consumer->set_dispatch_id(0);
-  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  consumer->set_exec(0x1);
-  consumer->set_m0(0);
+  auto [consumer] = make_workgroup<1>(*cu0, {.pc = kPc});
 
   // Dispatch 1's producer (same process) is resident and runnable on CU1 but has
   // not signaled yet; it is deliberately never stepped so it stays runnable.
-  auto *producer = cu1->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(producer, nullptr);
-  producer->set_dispatch_id(1);
-  cu1->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/0, /*wf_count=*/1);
-  producer->set_exec(0x1);
-  producer->set_m0(0);
+  auto [producer] = make_workgroup<1>(*cu1, {.dispatch_id = 1});
 
-  run_gws(*cu0, *decoder, arch, GwsOp::kSemaP, *consumer, /*count=*/0);
+  run_gws(*cu0, GwsOp::kSemaP, *consumer, /*count=*/0);
   ASSERT_EQ(consumer->state(), amdgpu::WfState::GWS_WAIT);
 
   for (int i = 0; i < 8; ++i)
@@ -1190,7 +956,7 @@ TEST_P(DsGwsTest, OverlappingDispatchesShareProcessResources) {
       << "parked P was released while a same-process producer was still runnable";
 
   // The producer finally signals; CU0 then releases the consumer with a credit.
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaV, *producer, /*count=*/0);
   for (int i = 0; i < 4 && consumer->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu0->step();
   EXPECT_NE(consumer->state(), amdgpu::WfState::GWS_WAIT);
@@ -1199,56 +965,37 @@ TEST_P(DsGwsTest, OverlappingDispatchesShareProcessResources) {
 }
 
 TEST_P(DsGwsTest, NewDispatchSignalsPreviouslyParkedWaiter) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_later_dispatch_mem");
-  amdgpu::L2Cache l2("ds_gws_later_dispatch_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu0 = make_cu();
+  auto cu1 = make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
 
   // Two consumers of the same process (dispatch 0) park on the same semaphore: C0
   // on CU0 and W1 on CU1. Each is the sole wave of its CU, so a step publishes a
   // zero-runnable summary for that CU.
-  auto *c0 = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  auto *w1 = cu1->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
-  ASSERT_NE(c0, nullptr);
-  ASSERT_NE(w1, nullptr);
-  c0->set_dispatch_id(0);
-  w1->set_dispatch_id(0);
-  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  for (auto *wf : {c0, w1}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto [c0] = make_workgroup<1>(*cu0, {.pc = kPc});
+  auto [w1] = make_workgroup<1>(*cu1, {.wg_id = 1, .pc = kPc});
 
-  run_gws(*cu0, *decoder, arch, GwsOp::kSemaP, *c0, /*count=*/0);
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaP, *w1, /*count=*/0);
+  run_gws(*cu0, GwsOp::kSemaP, *c0, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaP, *w1, /*count=*/0);
   ASSERT_EQ(c0->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_EQ(w1->state(), amdgpu::WfState::GWS_WAIT);
 
   // CU1 publishes its zero-runnable summary (its only wave, W1, is parked).
   cu1->step();
 
-  auto *producer = cu1->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(producer, nullptr);
-  producer->set_dispatch_id(1);
-  cu1->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/0, /*wf_count=*/1);
-  producer->set_exec(0x1);
-  producer->set_m0(0);
+  auto [producer] = make_workgroup<1>(*cu1, {.dispatch_id = 1});
 
   for (int i = 0; i < 8; ++i)
     cu0->step();
   EXPECT_EQ(c0->state(), amdgpu::WfState::GWS_WAIT)
       << "parked P resumed before its producer signaled";
 
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaV, *producer, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaV, *producer, /*count=*/0);
   for (int i = 0; i < 4 && c0->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu0->step();
   EXPECT_NE(c0->state(), amdgpu::WfState::GWS_WAIT);
@@ -1263,12 +1010,9 @@ TEST_P(DsGwsTest, NewDispatchSignalsPreviouslyParkedWaiter) {
 // zero, so a plain kernel runs to completion with the store reporting nothing
 // parked at every step.
 TEST_P(DsGwsTest, NoGwsWorkloadKeepsStoreIdle) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_nogws_mem");
-  amdgpu::L2Cache l2("ds_gws_nogws_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu = make_cu();
   auto *wf = cu->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
   ASSERT_NE(wf, nullptr);
   cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
@@ -1283,19 +1027,15 @@ TEST_P(DsGwsTest, NoGwsWorkloadKeepsStoreIdle) {
 }
 
 TEST_P(DsGwsTest, ConcurrentCrossCuSteppingIsRaceFree) {
-  const auto arch = GetParam();
   constexpr uint64_t kPc = 0x200000;
-  amdgpu::GpuMemory mem0("ds_gws_tsan_mem0");
-  amdgpu::GpuMemory mem1("ds_gws_tsan_mem1");
-  amdgpu::L2Cache l20("ds_gws_tsan_l20");
-  amdgpu::L2Cache l21("ds_gws_tsan_l21");
-  mem0.write32(kPc, gws_s_endpgm_word(arch));
-  mem1.write32(kPc, gws_s_endpgm_word(arch));
+  GwsTestContext consumer_context(arch), producer_context(arch);
+  consumer_context.mem.write32(kPc, gws_s_endpgm_word(arch));
+  producer_context.mem.write32(kPc, gws_s_endpgm_word(arch));
   // Each CU owns its memory/L2; the only shared mutable object is the store, so
   // any race TSan reports is a GWS store race.
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem0, l20, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem1, l21, arch, /*wf_slots=*/4);
+  auto cu0 = consumer_context.make_cu();
+  auto cu1 = producer_context.make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
 
@@ -1404,14 +1144,7 @@ TEST_P(DsGwsTest, ConcurrentCrossCuSteppingIsRaceFree) {
 // XCD's single device-global GWS store, so cross-CU GWS works for production
 // dispatches. Regression for CUs keeping their private default store.
 TEST_P(DsGwsTest, XcdConstructorSharesGwsStoreAcrossCus) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_xcd_mem");
-  amdgpu::ComputeUnitCore::Config cu_cfg{};
-  cu_cfg.arch = arch;
-  cu_cfg.num_wf_slots = 4;
-  cu_cfg.sgprs_per_wf = 102;
-  cu_cfg.vgprs_per_wf = 16;
-  cu_cfg.lds_size_kb = 64;
+  auto cu_cfg = cu_config(4);
   amdgpu::ShaderEngine::Config se_cfg{};
   se_cfg.num_compute_units = 2;
   se_cfg.compute_unit = cu_cfg;
@@ -1436,15 +1169,7 @@ TEST_P(DsGwsTest, XcdConstructorSharesGwsStoreAcrossCus) {
 }
 
 TEST_P(DsGwsTest, DirectlyAttachedCpCuSharesGwsStore) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_directcu_mem");
-  amdgpu::L2Cache l2("ds_gws_directcu_l2");
-  amdgpu::ComputeUnitCore::Config cu_cfg{};
-  cu_cfg.arch = arch;
-  cu_cfg.num_wf_slots = 4;
-  cu_cfg.sgprs_per_wf = 102;
-  cu_cfg.vgprs_per_wf = 16;
-  cu_cfg.lds_size_kb = 64;
+  auto cu_cfg = cu_config(4);
   amdgpu::ShaderEngine::Config se_cfg{};
   se_cfg.num_compute_units = 1;
   se_cfg.compute_unit = cu_cfg;
@@ -1459,7 +1184,7 @@ TEST_P(DsGwsTest, DirectlyAttachedCpCuSharesGwsStore) {
 
   // A CU attached straight to the command processor, with no shader engine -- as a
   // custom topology would produce.
-  auto direct_cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto direct_cu = make_cu();
   ASSERT_NE(&direct_cu->gws_device(), store); // Starts on its private default store.
   xcd.command_processor()->add_compute_unit(direct_cu.get());
   xcd.wire_gws_to_cus();
@@ -1472,28 +1197,16 @@ TEST_P(DsGwsTest, DirectlyAttachedCpCuSharesGwsStore) {
 // credit, the signaling workgroup fully retires, and a later workgroup's P still
 // finds the persisted credit. The dispatch-keyed per-CU model lost it here.
 TEST_P(DsGwsTest, WorkgroupTurnoverSemaphoreCreditPersists) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_turnover_mem");
-  amdgpu::L2Cache l2("ds_gws_turnover_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *producer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(producer, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  producer->set_exec(0x1);
-  producer->set_m0(0);
+  auto cu = make_cu();
+  auto [producer] = make_workgroup<1>(*cu);
 
   // Producer signals (no waiter), leaving one credit, then its workgroup retires.
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaV, *producer, /*count=*/0);
   producer->halt();
 
   // A later workgroup's P consumes the credit that survived the retirement.
-  auto *consumer = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
-  ASSERT_NE(consumer, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  consumer->set_exec(0x1);
-  consumer->set_m0(0);
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *consumer, /*count=*/0);
+  auto [consumer] = make_workgroup<1>(*cu, {.wg_id = 1});
+  run_gws(*cu, GwsOp::kSemaP, *consumer, /*count=*/0);
   EXPECT_EQ(consumer->state(), amdgpu::WfState::RUNNING);
 
   consumer->halt();
@@ -1504,52 +1217,26 @@ TEST_P(DsGwsTest, WorkgroupTurnoverSemaphoreCreditPersists) {
 // GWS resources are keyed by process and persist across dispatches, so the seed
 // survives the init dispatch's retirement.
 TEST_P(DsGwsTest, SeparateInitDispatchSeedsLaterDispatch) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_initdispatch_mem");
-  amdgpu::L2Cache l2("ds_gws_initdispatch_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
+  auto cu = make_cu();
 
   // Init dispatch (dispatch_id 0) seeds one credit, then fully retires.
-  auto *initer = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(initer, nullptr);
-  initer->set_dispatch_id(0);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  initer->set_exec(0x1);
-  initer->set_m0(0);
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *initer, /*count=*/1);
+  auto [initer] = make_workgroup<1>(*cu);
+  run_gws(*cu, GwsOp::kInit, *initer, /*count=*/1);
   initer->halt();
 
   // Main dispatch (dispatch_id 1) consumes the credit seeded by the init dispatch.
-  auto *user = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(user, nullptr);
-  user->set_dispatch_id(1);
-  cu->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/0, /*wf_count=*/1);
-  user->set_exec(0x1);
-  user->set_m0(0);
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *user, /*count=*/0);
+  auto [user] = make_workgroup<1>(*cu, {.dispatch_id = 1});
+  run_gws(*cu, GwsOp::kSemaP, *user, /*count=*/0);
   EXPECT_EQ(user->state(), amdgpu::WfState::RUNNING);
 
   user->halt();
 }
 
 TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
-  const auto arch = GetParam();
   if (arch != ROCJITSU_CODE_ARCH_CDNA2 && arch != ROCJITSU_CODE_ARCH_CDNA3)
     GTEST_SKIP() << "DS acc bit only exists on CDNA2/3";
-  amdgpu::GpuMemory mem("ds_gws_acc_mem");
-  amdgpu::L2Cache l2("ds_gws_acc_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *wf1 = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf0, nullptr);
-  ASSERT_NE(wf1, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/2);
-  for (auto *wf : {wf0, wf1}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto cu = make_cu();
+  auto [wf0, wf1] = make_workgroup<2>(*cu);
 
   const uint16_t op = gws_opcode(arch, GwsOp::kInit);
   cu->write_vgpr(wf0->vgpr_alloc().base + kAddrVgpr, /*lane=*/0, /*vgpr=*/5);
@@ -1603,9 +1290,7 @@ TEST_P(DsGwsTest, AccBitSelectsAgprCountOperand) {
 }
 
 TEST_P(DsGwsTest, BarrierRequiresExplicitInitialization) {
-  amdgpu::GpuMemory mem("uninitialized_gws");
-  amdgpu::L2Cache l2("l2");
-  auto cu = make_gws_cu(mem, l2, GetParam(), 4);
+  auto cu = make_cu();
   auto *wave = cu->dispatch_wf(0, 0, 102, 16);
   ASSERT_NE(wave, nullptr);
   cu->begin_workgroup(0, 0, 1);
@@ -1621,42 +1306,27 @@ TEST_P(DsGwsTest, BarrierRequiresExplicitInitialization) {
 // the reservation the later P would consume the V's credit and the earlier waiter
 // could stall. Two CUs share one store; cross-CU wakes are poll-applied.
 TEST_P(DsGwsTest, SemaphoreVReservedForEarlierParkedWaiter) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_reserve_mem");
-  amdgpu::L2Cache l2("ds_gws_reserve_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu0 = make_cu();
+  auto cu1 = make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
-  auto *waiter0 = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  // The producer sits at the s_endpgm PC so a single poll step retires it cleanly.
-  auto *producer = cu1->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
-  auto *waiter1 = cu1->dispatch_wf(/*wg_id=*/2, kPc, 102, 16);
-  ASSERT_NE(waiter0, nullptr);
-  ASSERT_NE(producer, nullptr);
-  ASSERT_NE(waiter1, nullptr);
-  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/2, /*wf_count=*/1);
-  for (auto *wf : {waiter0, producer, waiter1}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto [waiter0] = make_workgroup<1>(*cu0, {.pc = kPc});
+  auto [producer] = make_workgroup<1>(*cu1, {.wg_id = 1, .pc = kPc});
+  auto [waiter1] = make_workgroup<1>(*cu1, {.wg_id = 2, .pc = kPc});
 
   // waiter0 parks on CU0 with no credit -- the earlier waiter.
-  run_gws(*cu0, *decoder, arch, GwsOp::kSemaP, *waiter0, /*count=*/0);
+  run_gws(*cu0, GwsOp::kSemaP, *waiter0, /*count=*/0);
   ASSERT_EQ(waiter0->state(), amdgpu::WfState::GWS_WAIT);
 
   // producer V leaves one credit in the shared store (reserved for waiter0).
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaV, *producer, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaV, *producer, /*count=*/0);
 
   // waiter1's P (same CU as the V) is issued before waiter0 polls. It must NOT
   // steal the reserved credit; it parks instead.
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaP, *waiter1, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaP, *waiter1, /*count=*/0);
   EXPECT_EQ(waiter1->state(), amdgpu::WfState::GWS_WAIT)
       << "second P stole the credit owed to the earlier parked waiter";
 
@@ -1674,38 +1344,24 @@ TEST_P(DsGwsTest, SemaphoreVReservedForEarlierParkedWaiter) {
 }
 
 TEST_P(DsGwsTest, BarrierRendezvousWithLateAdmittedParticipant) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_late_mem");
-  amdgpu::L2Cache l2("ds_gws_late_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu0 = make_cu();
+  auto cu1 = make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
-  auto *wf0 = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  ASSERT_NE(wf0, nullptr);
   // Only CU0's wave is resident so far, but the grid has two waves.
-  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1,
-                       /*num_named_barriers=*/0);
-  wf0->set_exec(0x1);
-  wf0->set_m0(0);
+  auto [wf0] = make_workgroup<1>(*cu0, {.pc = kPc});
 
-  run_gws(*cu0, *decoder, arch, GwsOp::kInit, *wf0, /*count=*/1);
-  run_gws(*cu0, *decoder, arch, GwsOp::kBarrier, *wf0, /*count=*/1);
+  run_gws(*cu0, GwsOp::kInit, *wf0, /*count=*/1);
+  run_gws(*cu0, GwsOp::kBarrier, *wf0, /*count=*/1);
   EXPECT_EQ(wf0->state(), amdgpu::WfState::GWS_WAIT)
       << "early arrival fell back to a no-op instead of awaiting the late participant";
 
   // The second participant is admitted on CU1 and arrives: it releases the peer.
-  auto *wf1 = cu1->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf1, nullptr);
-  cu1->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1,
-                       /*num_named_barriers=*/0);
-  wf1->set_exec(0x1);
-  wf1->set_m0(0);
-  run_gws(*cu1, *decoder, arch, GwsOp::kBarrier, *wf1, /*count=*/1);
+  auto [wf1] = make_workgroup<1>(*cu1, {.wg_id = 1});
+  run_gws(*cu1, GwsOp::kBarrier, *wf1, /*count=*/1);
   EXPECT_EQ(wf1->state(), amdgpu::WfState::RUNNING);
   for (int i = 0; i < 4 && wf0->state() == amdgpu::WfState::GWS_WAIT; ++i)
     cu0->step();
@@ -1715,37 +1371,23 @@ TEST_P(DsGwsTest, BarrierRendezvousWithLateAdmittedParticipant) {
 }
 
 TEST_P(DsGwsTest, RemoteReleaseDoesNotReleaseUnrelatedResource) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_remote_release_mem");
-  amdgpu::L2Cache l2("ds_gws_remote_release_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu_a = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu_b = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu_c = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu_a = make_cu();
+  auto cu_b = make_cu();
+  auto cu_c = make_cu();
   cu_a->set_gws_device(gws);
   cu_b->set_gws_device(gws);
   cu_c->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
 
-  auto *waiter_a = cu_a->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  auto *waiter_b = cu_b->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
-  auto *producer_c = cu_c->dispatch_wf(/*wg_id=*/2, kPc, 102, 16);
-  ASSERT_NE(waiter_a, nullptr);
-  ASSERT_NE(waiter_b, nullptr);
-  ASSERT_NE(producer_c, nullptr);
-  cu_a->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  cu_b->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  cu_c->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/2, /*wf_count=*/1);
-  for (auto *wf : {waiter_a, waiter_b, producer_c}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto [waiter_a] = make_workgroup<1>(*cu_a, {.pc = kPc});
+  auto [waiter_b] = make_workgroup<1>(*cu_b, {.wg_id = 1, .pc = kPc});
+  auto [producer_c] = make_workgroup<1>(*cu_c, {.wg_id = 2, .pc = kPc});
 
   // waiter_a parks on rid 0; waiter_b parks on rid 1 (offset0 selects the rid).
-  run_gws(*cu_a, *decoder, arch, GwsOp::kSemaP, *waiter_a, /*count=*/0, /*offset0=*/0);
-  run_gws(*cu_b, *decoder, arch, GwsOp::kSemaP, *waiter_b, /*count=*/0, /*offset0=*/1);
+  run_gws(*cu_a, GwsOp::kSemaP, *waiter_a, /*count=*/0, /*offset0=*/0);
+  run_gws(*cu_b, GwsOp::kSemaP, *waiter_b, /*count=*/0, /*offset0=*/1);
   ASSERT_EQ(waiter_a->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_EQ(waiter_b->state(), amdgpu::WfState::GWS_WAIT);
 
@@ -1756,7 +1398,7 @@ TEST_P(DsGwsTest, RemoteReleaseDoesNotReleaseUnrelatedResource) {
 
   // CU C signals waiter_b's resource (leaving a credit B will consume on its next
   // poll) and then goes idle. The pending credit will make waiter_b runnable.
-  run_gws(*cu_c, *decoder, arch, GwsOp::kSemaV, *producer_c, /*count=*/0, /*offset0=*/1);
+  run_gws(*cu_c, GwsOp::kSemaV, *producer_c, /*count=*/0, /*offset0=*/1);
   producer_c->halt();
 
   cu_a->step();
@@ -1773,36 +1415,22 @@ TEST_P(DsGwsTest, RemoteReleaseDoesNotReleaseUnrelatedResource) {
 }
 
 TEST_P(DsGwsTest, RemoteInitDoesNotReleaseUnrelatedResource) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_remote_init_mem");
-  amdgpu::L2Cache l2("ds_gws_remote_init_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu_a = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu_b = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu_c = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu_a = make_cu();
+  auto cu_b = make_cu();
+  auto cu_c = make_cu();
   cu_a->set_gws_device(gws);
   cu_b->set_gws_device(gws);
   cu_c->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
 
-  auto *waiter_a = cu_a->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  auto *waiter_b = cu_b->dispatch_wf(/*wg_id=*/1, kPc, 102, 16);
-  auto *producer_c = cu_c->dispatch_wf(/*wg_id=*/2, kPc, 102, 16);
-  ASSERT_NE(waiter_a, nullptr);
-  ASSERT_NE(waiter_b, nullptr);
-  ASSERT_NE(producer_c, nullptr);
-  cu_a->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  cu_b->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/1, /*wf_count=*/1);
-  cu_c->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/2, /*wf_count=*/1);
-  for (auto *wf : {waiter_a, waiter_b, producer_c}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto [waiter_a] = make_workgroup<1>(*cu_a, {.pc = kPc});
+  auto [waiter_b] = make_workgroup<1>(*cu_b, {.wg_id = 1, .pc = kPc});
+  auto [producer_c] = make_workgroup<1>(*cu_c, {.wg_id = 2, .pc = kPc});
 
-  run_gws(*cu_a, *decoder, arch, GwsOp::kSemaP, *waiter_a, /*count=*/0, /*offset0=*/0);
-  run_gws(*cu_b, *decoder, arch, GwsOp::kSemaP, *waiter_b, /*count=*/0, /*offset0=*/1);
+  run_gws(*cu_a, GwsOp::kSemaP, *waiter_a, /*count=*/0, /*offset0=*/0);
+  run_gws(*cu_b, GwsOp::kSemaP, *waiter_b, /*count=*/0, /*offset0=*/1);
   ASSERT_EQ(waiter_a->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_EQ(waiter_b->state(), amdgpu::WfState::GWS_WAIT);
 
@@ -1812,7 +1440,7 @@ TEST_P(DsGwsTest, RemoteInitDoesNotReleaseUnrelatedResource) {
   ASSERT_EQ(waiter_b->state(), amdgpu::WfState::GWS_WAIT);
 
   // CU C seeds a credit on waiter_b's resource via init and then goes idle.
-  run_gws(*cu_c, *decoder, arch, GwsOp::kInit, *producer_c, /*count=*/1, /*offset0=*/1);
+  run_gws(*cu_c, GwsOp::kInit, *producer_c, /*count=*/1, /*offset0=*/1);
   producer_c->halt();
 
   // Step A before B. The credit belongs to B, so A must remain parked.
@@ -1829,22 +1457,14 @@ TEST_P(DsGwsTest, RemoteInitDoesNotReleaseUnrelatedResource) {
 }
 
 TEST_P(DsGwsTest, DestroyingCuReconcilesParkedWaveInSharedStore) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_destroy_mem");
-  amdgpu::L2Cache l2("ds_gws_destroy_l2");
   auto gws = std::make_shared<amdgpu::GwsDevice>();
   ASSERT_FALSE(gws->any_parked());
   {
-    auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+    auto cu = make_cu();
     cu->set_gws_device(gws);
-    auto decoder = Decoder::create(arch);
-    auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-    ASSERT_NE(wf, nullptr);
-    cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-    wf->set_exec(0x1);
-    wf->set_m0(0);
+    auto [wf] = make_workgroup<1>(*cu);
     // Park a semaphore P (no credit), then let the CU go out of scope unwoken.
-    run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf, /*count=*/0);
+    run_gws(*cu, GwsOp::kSemaP, *wf, /*count=*/0);
     ASSERT_EQ(wf->state(), amdgpu::WfState::GWS_WAIT);
     ASSERT_TRUE(gws->any_parked());
   }
@@ -1864,35 +1484,22 @@ TEST_P(DsGwsTest, DestroyingCuReconcilesParkedWaveInSharedStore) {
 // re-point is accepted. Regression: migrating the live waiter corrupted the
 // destination's parked accounting and could spuriously wake its unrelated waiter.
 TEST_P(DsGwsTest, ReplacingLiveCuStoreIsRejectedUntilDrained) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_replace_mem");
-  amdgpu::L2Cache l2("ds_gws_replace_l2");
   auto store_a = std::make_shared<amdgpu::GwsDevice>();
   auto store_b = std::make_shared<amdgpu::GwsDevice>();
-  auto decoder = Decoder::create(arch);
 
   // A resident waiter already parked in store B on its own CU (populated destination).
-  auto cu_b = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu_b = make_cu();
   ASSERT_TRUE(cu_b->set_gws_device(store_b)); // Drained CU: accepted.
-  auto *wf_b = cu_b->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf_b, nullptr);
-  wf_b->set_dispatch_id(1);
-  cu_b->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/0, /*wf_count=*/1);
-  wf_b->set_exec(0x1);
-  wf_b->set_m0(0);
-  run_gws(*cu_b, *decoder, arch, GwsOp::kSemaP, *wf_b, /*count=*/0);
+  auto [wf_b] = make_workgroup<1>(*cu_b, {.dispatch_id = 1});
+  run_gws(*cu_b, GwsOp::kSemaP, *wf_b, /*count=*/0);
   ASSERT_EQ(wf_b->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_TRUE(store_b->any_parked());
 
   // A second CU parks a waiter in store A.
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu = make_cu();
   ASSERT_TRUE(cu->set_gws_device(store_a)); // Drained CU: accepted.
-  auto *wf = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wf, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  wf->set_exec(0x1);
-  wf->set_m0(0);
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wf, /*count=*/0);
+  auto [wf] = make_workgroup<1>(*cu);
+  run_gws(*cu, GwsOp::kSemaP, *wf, /*count=*/0);
   ASSERT_EQ(wf->state(), amdgpu::WfState::GWS_WAIT);
   ASSERT_TRUE(store_a->any_parked());
 
@@ -1926,26 +1533,17 @@ TEST_P(DsGwsTest, ReplacingLiveCuStoreIsRejectedUntilDrained) {
 // queue). Regression: the new P parked behind the released waiter's stale
 // reservation despite the available credit, on all seven ISAs.
 TEST_P(DsGwsTest, ReleaseAllRetiresCreditReservationForDelayedPeerPoll) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_relall_mem");
-  amdgpu::L2Cache l2("ds_gws_relall_l2");
   constexpr uint64_t kPc = 0x200000;
   mem.write32(kPc, gws_s_endpgm_word(arch));
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu0 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto cu1 = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu0 = make_cu();
+  auto cu1 = make_cu();
   cu0->set_gws_device(gws);
   cu1->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
 
   // CU0 parks a P waiter on the resource (no credit): it queues an arrival stamp.
-  auto *p0 = cu0->dispatch_wf(/*wg_id=*/0, kPc, 102, 16);
-  ASSERT_NE(p0, nullptr);
-  p0->set_dispatch_id(0);
-  cu0->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  p0->set_exec(0x1);
-  p0->set_m0(0);
-  run_gws(*cu0, *decoder, arch, GwsOp::kSemaP, *p0, /*count=*/0);
+  auto [p0] = make_workgroup<1>(*cu0, {.pc = kPc});
+  run_gws(*cu0, GwsOp::kSemaP, *p0, /*count=*/0);
   ASSERT_EQ(p0->state(), amdgpu::WfState::GWS_WAIT);
 
   // CU1 runs release_all, then V, then a NEW P -- all before CU0 polls. release_all
@@ -1962,9 +1560,9 @@ TEST_P(DsGwsTest, ReleaseAllRetiresCreditReservationForDelayedPeerPoll) {
     wf->set_exec(0x1);
     wf->set_m0(0);
   }
-  run_gws(*cu1, *decoder, arch, GwsOp::kReleaseAll, *rel, /*count=*/0);
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaV, *rel, /*count=*/0);
-  run_gws(*cu1, *decoder, arch, GwsOp::kSemaP, *p1, /*count=*/0);
+  run_gws(*cu1, GwsOp::kReleaseAll, *rel, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaV, *rel, /*count=*/0);
+  run_gws(*cu1, GwsOp::kSemaP, *p1, /*count=*/0);
 
   // Core regression: the new P took the V credit instead of parking behind p0's
   // released-but-still-queued reservation.
@@ -1987,35 +1585,17 @@ TEST_P(DsGwsTest, ReleaseAllRetiresCreditReservationForDelayedPeerPoll) {
 // semaphore credit; releasing process A drops only A's table (a later P on A then
 // parks for lack of a credit), while B's seeded credit survives and is consumed.
 TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_release_mem");
-  amdgpu::L2Cache l2("ds_gws_release_l2");
   auto gws = std::make_shared<amdgpu::GwsDevice>();
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/8);
+  auto cu = make_cu(8);
   cu->set_gws_device(gws);
-  auto decoder = Decoder::create(arch);
   constexpr uint32_t kProcA = 11;
   constexpr uint32_t kProcB = 22;
 
-  auto *init_a = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  auto *init_b = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, 102, 16);
-  ASSERT_NE(init_a, nullptr);
-  ASSERT_NE(init_b, nullptr);
-  init_a->set_process_id(kProcA);
-  init_b->set_process_id(kProcB);
-  init_a->set_dispatch_id(0);
-  init_b->set_dispatch_id(1);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1,
-                      /*num_named_barriers=*/0);
-  cu->begin_workgroup(/*dispatch_id=*/1, /*wg_id=*/1, /*wf_count=*/1,
-                      /*num_named_barriers=*/0);
-  for (auto *wf : {init_a, init_b}) {
-    wf->set_exec(0x1);
-    wf->set_m0(0);
-  }
+  auto [init_a] = make_workgroup<1>(*cu, {.process_id = kProcA});
+  auto [init_b] = make_workgroup<1>(*cu, {.dispatch_id = 1, .wg_id = 1, .process_id = kProcB});
   // Both processes seed a credit; the store now tracks two process tables.
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *init_a, /*count=*/1);
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *init_b, /*count=*/1);
+  run_gws(*cu, GwsOp::kInit, *init_a, /*count=*/1);
+  run_gws(*cu, GwsOp::kInit, *init_b, /*count=*/1);
   EXPECT_EQ(gws->tracked_process_count(), 2u);
   init_a->halt();
   init_b->halt();
@@ -2025,28 +1605,14 @@ TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
   EXPECT_EQ(gws->tracked_process_count(), 1u);
 
   // A fresh P on process A finds no credit (its table was released) and parks.
-  auto *p_a = cu->dispatch_wf(/*wg_id=*/2, /*pc=*/0, 102, 16);
-  ASSERT_NE(p_a, nullptr);
-  p_a->set_process_id(kProcA);
-  p_a->set_dispatch_id(2);
-  cu->begin_workgroup(/*dispatch_id=*/2, /*wg_id=*/2, /*wf_count=*/1,
-                      /*num_named_barriers=*/0);
-  p_a->set_exec(0x1);
-  p_a->set_m0(0);
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *p_a, /*count=*/0);
+  auto [p_a] = make_workgroup<1>(*cu, {.dispatch_id = 2, .wg_id = 2, .process_id = kProcA});
+  run_gws(*cu, GwsOp::kSemaP, *p_a, /*count=*/0);
   EXPECT_EQ(p_a->state(), amdgpu::WfState::GWS_WAIT)
       << "released process A still had a lingering credit";
 
   // Process B was untouched: its seeded credit is still consumable.
-  auto *p_b = cu->dispatch_wf(/*wg_id=*/3, /*pc=*/0, 102, 16);
-  ASSERT_NE(p_b, nullptr);
-  p_b->set_process_id(kProcB);
-  p_b->set_dispatch_id(3);
-  cu->begin_workgroup(/*dispatch_id=*/3, /*wg_id=*/3, /*wf_count=*/1,
-                      /*num_named_barriers=*/0);
-  p_b->set_exec(0x1);
-  p_b->set_m0(0);
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *p_b, /*count=*/0);
+  auto [p_b] = make_workgroup<1>(*cu, {.dispatch_id = 3, .wg_id = 3, .process_id = kProcB});
+  run_gws(*cu, GwsOp::kSemaP, *p_b, /*count=*/0);
   EXPECT_EQ(p_b->state(), amdgpu::WfState::RUNNING)
       << "process B lost its credit when A was released";
 
@@ -2054,76 +1620,50 @@ TEST_P(DsGwsTest, ReleaseProcessDropsOnlyThatProcessTable) {
 }
 
 TEST_P(DsGwsTest, SemaphoreAndBarrierShareCounterAcrossTypeChanges) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_shared_counter_mem");
-  amdgpu::L2Cache l2("ds_gws_shared_counter_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wave, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  wave->set_exec(0x1);
-  wave->set_m0(0);
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wave, /*count=*/1);
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wave, /*count=*/0);
+  auto cu = make_cu();
+  auto [wave] = make_workgroup<1>(*cu);
+  run_gws(*cu, GwsOp::kInit, *wave, /*count=*/1);
+  run_gws(*cu, GwsOp::kSemaP, *wave, /*count=*/0);
   ASSERT_EQ(wave->state(), amdgpu::WfState::RUNNING);
   // P consumed the shared count: this arrival releases and reloads two credits.
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wave, /*count=*/2);
+  run_gws(*cu, GwsOp::kBarrier, *wave, /*count=*/2);
   ASSERT_EQ(wave->state(), amdgpu::WfState::RUNNING);
   for (int i = 0; i < 2; ++i) {
-    run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wave, /*count=*/0);
+    run_gws(*cu, GwsOp::kSemaP, *wave, /*count=*/0);
     ASSERT_EQ(wave->state(), amdgpu::WfState::RUNNING);
   }
-  run_gws(*cu, *decoder, arch, GwsOp::kSemaP, *wave, /*count=*/0);
+  run_gws(*cu, GwsOp::kSemaP, *wave, /*count=*/0);
   EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
   wave->halt();
 }
 
 TEST_P(DsGwsTest, SemaphoreSignalsAreVisibleToBarrier) {
-  const auto arch = GetParam();
   for (auto op : {GwsOp::kSemaV, GwsOp::kSemaBr}) {
     SCOPED_TRACE(static_cast<int>(op));
-    amdgpu::GpuMemory mem("ds_gws_signal_counter_mem");
-    amdgpu::L2Cache l2("ds_gws_signal_counter_l2");
-    auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-    auto decoder = Decoder::create(arch);
-    auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-    ASSERT_NE(wave, nullptr);
-    cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-    wave->set_exec(0x1);
-    wave->set_m0(0);
-    run_gws(*cu, *decoder, arch, GwsOp::kInit, *wave, /*count=*/0);
-    run_gws(*cu, *decoder, arch, op, *wave, /*count=*/1);
-    run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wave, /*count=*/0);
+    GwsTestContext context(arch);
+    auto cu = context.make_cu();
+    auto [wave] = make_workgroup<1>(*cu);
+    context.run_gws(*cu, GwsOp::kInit, *wave, /*count=*/0);
+    context.run_gws(*cu, op, *wave, /*count=*/1);
+    context.run_gws(*cu, GwsOp::kBarrier, *wave, /*count=*/0);
     EXPECT_EQ(wave->state(), amdgpu::WfState::GWS_WAIT);
     wave->halt();
   }
 }
 
 TEST_P(DsGwsTest, ReleaseAllClearsCounterBeforeBarrier) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_release_counter_mem");
-  amdgpu::L2Cache l2("ds_gws_release_counter_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto decoder = Decoder::create(arch);
-  auto *wave = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, 102, 16);
-  ASSERT_NE(wave, nullptr);
-  cu->begin_workgroup(/*dispatch_id=*/0, /*wg_id=*/0, /*wf_count=*/1);
-  wave->set_exec(0x1);
-  wave->set_m0(0);
-  run_gws(*cu, *decoder, arch, GwsOp::kInit, *wave, /*count=*/3);
-  run_gws(*cu, *decoder, arch, GwsOp::kReleaseAll, *wave, /*count=*/0);
-  run_gws(*cu, *decoder, arch, GwsOp::kBarrier, *wave, /*count=*/0);
+  auto cu = make_cu();
+  auto [wave] = make_workgroup<1>(*cu);
+  run_gws(*cu, GwsOp::kInit, *wave, /*count=*/3);
+  run_gws(*cu, GwsOp::kReleaseAll, *wave, /*count=*/0);
+  run_gws(*cu, GwsOp::kBarrier, *wave, /*count=*/0);
   EXPECT_EQ(wave->state(), amdgpu::WfState::RUNNING);
   wave->halt();
 }
 
 TEST_P(DsGwsTest, UnlimitedQuantumYieldsWithGwsAndWorkgroupBarrierWaiters) {
-  const auto arch = GetParam();
-  amdgpu::GpuMemory mem("ds_gws_mixed_wait_mem");
-  amdgpu::L2Cache l2("ds_gws_mixed_wait_l2");
-  auto cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
-  auto peer_cu = make_gws_cu(mem, l2, arch, /*wf_slots=*/4);
+  auto cu = make_cu();
+  auto peer_cu = make_cu();
   auto store = std::make_shared<amdgpu::GwsDevice>();
   ASSERT_TRUE(cu->set_gws_device(store));
   ASSERT_TRUE(peer_cu->set_gws_device(store));
@@ -2160,10 +1700,8 @@ TEST_P(DsGwsTest, UnlimitedQuantumYieldsWithGwsAndWorkgroupBarrierWaiters) {
 }
 
 TEST_P(DsGwsTest, UnlimitedQuantumYieldsToPeerBarrierArrival) {
-  amdgpu::GpuMemory mem("ds_gws_unlimited_quantum_mem");
-  amdgpu::L2Cache l2("ds_gws_unlimited_quantum_l2");
-  auto waiter_cu = make_gws_cu(mem, l2, GetParam(), 4);
-  auto producer_cu = make_gws_cu(mem, l2, GetParam(), 4);
+  auto waiter_cu = make_cu();
+  auto producer_cu = make_cu();
   auto store = std::make_shared<amdgpu::GwsDevice>();
   ASSERT_TRUE(waiter_cu->set_gws_device(store));
   ASSERT_TRUE(producer_cu->set_gws_device(store));
@@ -2195,9 +1733,7 @@ TEST_P(DsGwsTest, UnlimitedQuantumYieldsToPeerBarrierArrival) {
 }
 
 TEST_P(DsGwsTest, ParkedWaiterDoesNotShortenResidentProducerQuantum) {
-  amdgpu::GpuMemory mem("ds_gws_resident_producer_mem");
-  amdgpu::L2Cache l2("ds_gws_resident_producer_l2");
-  auto cu = make_gws_cu(mem, l2, GetParam(), 4);
+  auto cu = make_cu();
   cu->set_functional_quantum(16);
   cu->set_gws_wait_limit(4);
   constexpr uint64_t kPc = 0x200000;
@@ -2222,10 +1758,9 @@ TEST_P(DsGwsTest, ParkedWaiterDoesNotShortenResidentProducerQuantum) {
 TEST_P(DsGwsTest, OnlySameProcessInstructionProgressExtendsWaitBudget) {
   for (bool same_process : {false, true}) {
     SCOPED_TRACE(same_process);
-    amdgpu::GpuMemory mem("ds_gws_progress_mem");
-    amdgpu::L2Cache l2("ds_gws_progress_l2");
-    auto waiter_cu = make_gws_cu(mem, l2, GetParam(), 4);
-    auto producer_cu = make_gws_cu(mem, l2, GetParam(), 4);
+    GwsTestContext context(arch);
+    auto waiter_cu = context.make_cu();
+    auto producer_cu = context.make_cu();
     auto store = std::make_shared<amdgpu::GwsDevice>();
     ASSERT_TRUE(waiter_cu->set_gws_device(store));
     ASSERT_TRUE(producer_cu->set_gws_device(store));
@@ -2233,8 +1768,8 @@ TEST_P(DsGwsTest, OnlySameProcessInstructionProgressExtendsWaitBudget) {
     constexpr uint64_t kPc = 0x200000;
     // Real independent instructions continue long beyond the wait limit.
     for (int i = 0; i < 32; ++i)
-      mem.write32(kPc + 4 * i, 0xbf800000); // s_nop 0.
-    mem.write32(kPc + 0x100, gws_s_endpgm_word(GetParam()));
+      context.mem.write32(kPc + 4 * i, 0xbf800000); // s_nop 0.
+    context.mem.write32(kPc + 0x100, gws_s_endpgm_word(GetParam()));
     auto *waiter = waiter_cu->dispatch_wf(0, kPc + 0x100, 102, 16);
     auto *producer = producer_cu->dispatch_wf(0, kPc, 102, 16);
     ASSERT_NE(waiter, nullptr);
@@ -2265,9 +1800,7 @@ TEST_P(DsGwsTest, OnlySameProcessInstructionProgressExtendsWaitBudget) {
 }
 
 TEST_P(DsGwsTest, WaitBudgetPausesAndCanBeDisabled) {
-  amdgpu::GpuMemory mem("ds_gws_budget_mem");
-  amdgpu::L2Cache l2("ds_gws_budget_l2");
-  auto cu = make_gws_cu(mem, l2, GetParam(), 4);
+  auto cu = make_cu();
   auto *wave = cu->dispatch_wf(0, 0, 102, 16);
   ASSERT_NE(wave, nullptr);
   cu->begin_workgroup(0, 0, 1);
@@ -2293,13 +1826,7 @@ TEST_P(DsGwsTest, WaitBudgetPausesAndCanBeDisabled) {
 }
 
 TEST_P(DsGwsTest, XcdAndCpRejectStoreReplacementBeforeAnyMutation) {
-  amdgpu::GpuMemory mem("gws_wiring");
-  amdgpu::ComputeUnitCore::Config cfg{};
-  cfg.arch = GetParam();
-  cfg.num_wf_slots = 4;
-  cfg.sgprs_per_wf = 102;
-  cfg.vgprs_per_wf = 16;
-  cfg.lds_size_kb = 64;
+  auto cfg = cu_config(4);
   amdgpu::ShaderEngine::Config se{};
   se.num_compute_units = 2;
   se.cus_per_shader_array = 2;
