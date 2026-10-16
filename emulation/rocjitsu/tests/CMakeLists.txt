@@ -370,6 +370,7 @@ add_executable(
     config_test.cpp
     rj_arith_policy_test.cpp
     rj_arith_config_test.cpp
+    rj_arith_bridge_test.cpp
     gfx1251_compiled_kernel_test.cpp
     daemon_api_test.cpp
     matmul_test.cpp
