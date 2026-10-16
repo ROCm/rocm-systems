@@ -4301,6 +4301,39 @@ class CodeGenerator:
                     f'{{{size_line}}}'
                 )
             class_func_impls.append(cgen.Line(class_ctor_impl))
+            image_atomic_source_display = ''
+            if any(inst.name.startswith('IMAGE_ATOMIC') for inst in inst_enc.insts):
+                public_members.append(
+                    cgen.Line(
+                        'bool should_print_dst_operand(uint8_t operand_index) const override {\n'
+                        '  // Image atomics have one encoded VDATA tuple, printed as a source.\n'
+                        '  return !mnemonic_.starts_with("image_atomic_") &&\n'
+                        '         Instruction::should_print_dst_operand(operand_index);\n'
+                        '}'
+                    )
+                )
+                if 'tfe' in enc_field_names:
+                    image_atomic_source_display = (
+                        '  if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {\n'
+                        '    // VDATA is the first source. Assembly includes the status slot;\n'
+                        '    // the source dependency includes only the atomic payload.\n'
+                        '    const auto first = operand->encoding_value();\n'
+                        '    const auto last = first + operand->size_bits() / 32;\n'
+                        '    out += first == last ? "v" + std::to_string(first)\n'
+                        '                         : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";\n'
+                        '    return;\n'
+                        '  }\n'
+                    )
+                    if not profile.renders_gfx11_image_syntax:
+                        public_members.append(
+                            cgen.Line(
+                                'void append_src_operand(std::string &out, uint8_t operand_index) const override {\n'
+                                '  const ::rocjitsu::Operand *operand = src_operands_[operand_index];\n'
+                                + image_atomic_source_display
+                                + '  Instruction::append_src_operand(out, operand_index);\n'
+                                '}'
+                            )
+                        )
             if profile.has_gfx11_image_address_extension and enc_upper == 'ENC_MIMG':
                 public_members.append(
                     cgen.Line(
@@ -4313,8 +4346,9 @@ class CodeGenerator:
                         cgen.Line(
                             'void append_src_operand(std::string &out, '
                             'uint8_t operand_index) const override {\n'
-                            '  const Operand *operand = src_operands_[operand_index];\n'
-                            '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
+                            '  const ::rocjitsu::Operand *operand = src_operands_[operand_index];\n'
+                            + image_atomic_source_display
+                            + '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
                             '    Instruction::append_src_operand(out, operand_index);\n'
                             '    return;\n'
                             '  }\n'
@@ -5560,28 +5594,68 @@ class CodeGenerator:
             return None
         return 'vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
 
+    def _uses_image_vdata_helper(self, enc_name: str) -> bool:
+        # CDNA5 VIMAGE contains tensor transfers, not masked image operations.
+        return enc_name.upper() == 'ENC_MIMG' or (
+            self.isa_spec.arch_name == 'rdna4'
+            and enc_name.upper() in ('ENC_VIMAGE', 'ENC_VSAMPLE')
+        )
+
     def _mimg_operand_size_expr(
         self, enc_name: str, inst_name: str, opnd_name: str
     ) -> str | None:
+        if inst_name in ('IMAGE_LOAD_BY2', 'IMAGE_LOAD_BY4'):
+            # These multi-pixel operations do not use ordinary DMASK sizing.
+            # Keep the XML tuple until their result layout is qualified.
+            return None
+        if opnd_name == 'vdata' and inst_name.startswith('IMAGE_ATOMIC'):
+            # DMASK counts payload DWORDs, including both compare/swap inputs.
+            return (
+                '32u * std::popcount(uint32_t{'
+                'reinterpret_cast<const OpEncoding *>(inst)->dmask})'
+            )
+        # Derive data footprints independently of disassembly formatting and
+        # functional execution support. BVH and atomics have separate layouts.
+        if (
+            self._uses_image_vdata_helper(enc_name)
+            and opnd_name == 'vdata'
+            and (
+                inst_name.startswith(
+                    ('IMAGE_LOAD', 'IMAGE_STORE', 'IMAGE_SAMPLE', 'IMAGE_GATHER')
+                )
+                or inst_name
+                in ('IMAGE_MSAA_LOAD', 'IMAGE_GET_LOD', 'IMAGE_GET_RESINFO')
+            )
+        ):
+            gather4 = inst_name.startswith('IMAGE_GATHER') or (
+                inst_name == 'IMAGE_MSAA_LOAD'
+                and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
+            )
+            d16_allowed = '_PCK' not in inst_name and inst_name not in (
+                'IMAGE_GET_LOD',
+                'IMAGE_GET_RESINFO',
+            )
+            status_allowed = (
+                not inst_name.startswith('IMAGE_STORE')
+                and inst_name != 'IMAGE_GET_RESINFO'
+            )
+            sampler = (
+                inst_name.startswith(('IMAGE_SAMPLE', 'IMAGE_GATHER'))
+                or inst_name == 'IMAGE_GET_LOD'
+            )
+            flags = ', '.join(
+                str(flag).lower()
+                for flag in (gather4, d16_allowed, status_allowed, sampler)
+            )
+            return (
+                f'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), {flags})'
+            )
         if enc_name.upper() != 'ENC_MIMG':
             return None
-        if (
-            self.isa_spec.arch_name == 'cdna2'
-            and inst_name.upper() == 'IMAGE_GET_RESINFO'
-            and opnd_name == 'vdata'
-        ):
-            return '(32 * std::max(1, std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})))'
-        if self._issues_image_memory(inst_name):
-            if opnd_name == 'vdata':
-                fields = 'reinterpret_cast<const OpEncoding *>(inst)'
-                return (
-                    f'(32 * ((std::max(1, std::popcount(uint32_t{{{fields}->dmask}})) + '
-                    f'{fields}->d16) >> {fields}->d16))'
-                )
-            if opnd_name == 'vaddr':
-                # GFX9 dimensions come from T#, unavailable at decode time.
-                # Three coordinates cover every supported load/store shape.
-                return '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)'
+        if self._issues_image_memory(inst_name) and opnd_name == 'vaddr':
+            # GFX9 dimensions come from T#, unavailable at decode time.
+            # Three coordinates cover every supported load/store shape.
+            return '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)'
         if not self.isa_spec.profile.renders_gfx11_image_syntax:
             return None
         if opnd_name == 'vdata':
@@ -5590,15 +5664,7 @@ class CodeGenerator:
             )
             if fixed_words is not None:
                 return str(fixed_words * 32)
-            gather = str(
-                inst_name.upper().startswith('IMAGE_GATHER')
-                or inst_name
-                in self.isa_spec.profile.gfx11_mimg_gather_style_instructions
-            ).lower()
-            return (
-                'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), '
-                f'{gather})'
-            )
+            return None
         if opnd_name == 'vaddr':
             fixed_words = self.isa_spec.profile.gfx11_mimg_fixed_vaddr_words.get(
                 inst_name
@@ -5651,28 +5717,34 @@ class CodeGenerator:
         return result
 
     @staticmethod
-    def _emit_gfx11_mimg_helpers() -> str:
+    def _emit_mimg_vdata_helper() -> str:
         return textwrap.dedent('''\
             namespace {
             template <typename MimgMachineInst>
-            uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4) {
-              uint32_t words = gather4 ? 4u : 0u;
-              if (!gather4) {
-                uint32_t mask = inst->dmask & 0xfu;
-                while (mask) {
-                  words += mask & 1u;
-                  mask >>= 1;
-                }
-                if (words == 0)
-                  words = 1;
-              }
-              if (inst->d16)
+            uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4,
+                                      bool d16_allowed, bool status_allowed,
+                                      bool sampler) {
+              uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
+              if (d16_allowed && inst->d16)
                 words = (words + 1) / 2;
-              if (inst->tfe)
+              // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+              // can still return status for sampler operations. Both flags
+              // share one status word; stores do not consume that word.
+              bool status = false;
+              if constexpr (requires { inst->tfe; })
+                status = status_allowed && inst->tfe && inst->dmask;
+              if constexpr (requires { inst->lwe; })
+                status = status || (status_allowed && sampler && inst->lwe);
+              if (status)
                 ++words;
               return words * 32;
             }
+            } // namespace''')
 
+    @classmethod
+    def _emit_gfx11_mimg_helpers(cls) -> str:
+        return cls._emit_mimg_vdata_helper() + '\n\n' + textwrap.dedent('''\
+            namespace {
             bool mimg_name_has_token(std::string_view name, std::string_view token) {
               size_t pos = 0;
               while (pos < name.size()) {
@@ -10648,14 +10720,15 @@ class CodeGenerator:
                         ):
                             opnd_size_expr = '32'
                         operand_size_exprs[opnd.name] = opnd_size_expr
-                        # Some ISA XMLs describe a buffer atomic's vdata only
+                        # Some ISA XMLs describe a vector atomic's vdata only
                         # as an output even though it always supplies the
                         # atomic payload. Keep the source dependency
                         # independent of whether the old memory value is
                         # returned.
-                        _is_buffer_atomic_payload = (
+                        _is_vector_atomic_payload = (
                             inst_sem is not None
-                            and inst_sem.semantic_class == 'buffer_atomic'
+                            and inst_sem.semantic_class
+                            in ('buffer_atomic', 'image_atomic')
                             and opnd.name == 'vdata'
                         )
                         _is_optional_vflat_saddr = (
@@ -10667,7 +10740,7 @@ class CodeGenerator:
                             and opnd.fieldless
                             and opnd.operand_type == 'OPR_FLAT_SCRATCH'
                         )
-                        if (opnd.is_input or _is_buffer_atomic_payload) and not (
+                        if (opnd.is_input or _is_vector_atomic_payload) and not (
                             _is_optional_vflat_saddr or _is_optional_flat_scratch
                         ):
                             opnd_body.append(
@@ -10715,7 +10788,8 @@ class CodeGenerator:
                                     and opnd.name == 'vdst'
                                 )
                                 or (
-                                    inst_sem.semantic_class == 'buffer_atomic'
+                                    inst_sem.semantic_class
+                                    in ('buffer_atomic', 'image_atomic')
                                     and opnd.name == 'vdata'
                                 )
                                 or (
@@ -10724,14 +10798,25 @@ class CodeGenerator:
                                 )
                             )
                         )
-                        # Compare-swap consumes two elements through vdata but
-                        # returns only the old element. Keep the destination
-                        # metadata on a narrow view of the same encoded VGPR so
-                        # liveness does not kill the untouched payload half.
+                        # Compare-swap consumes two elements but returns one.
+                        # Image TFE adds a status destination, not a payload
+                        # input. Keep these result widths independent of VDATA
+                        # so def/use reflects the registers actually accessed.
                         _needs_atomic_return_view = (
                             _is_optional_atomic_return
-                            and inst_sem.semantic_class == 'buffer_atomic'
-                            and inst_sem.operation in ('cmpswap', 'fcmpswap')
+                            and (
+                                (
+                                    inst_sem.semantic_class == 'buffer_atomic'
+                                    and inst_sem.operation in ('cmpswap', 'fcmpswap')
+                                )
+                                or (
+                                    inst_sem.semantic_class == 'image_atomic'
+                                    and (
+                                        'CMPSWAP' in inst.name
+                                        or 'tfe' in enc_field_names
+                                    )
+                                )
+                            )
                             and opnd.name == 'vdata'
                         )
                         _needs_tied_destination_result_view = (
@@ -10882,8 +10967,16 @@ class CodeGenerator:
                                 private_members.append(
                                     cgen.Statement('Operand vdata_return')
                                 )
+                                if inst_sem.semantic_class == 'image_atomic':
+                                    return_size = f'({opnd_size_expr})'
+                                    if 'CMPSWAP' in inst.name:
+                                        return_size += ' / 2'
+                                    if 'tfe' in enc_field_names:
+                                        return_size += ' + 32u * inst_.tfe'
+                                else:
+                                    return_size = str((inst_sem.elem_size or 4) * 8)
                                 opnd_ctor_init.append(
-                                    f'vdata_return({(inst_sem.elem_size or 4) * 8}, '
+                                    f'vdata_return({return_size}, '
                                     f'OperandType::{opr_type}, {operand_value})'
                                 )
                                 if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
@@ -14208,6 +14301,10 @@ class CodeGenerator:
                 ):
                     class_func_impls.model.insert(
                         0, cgen.Line(self._emit_gfx11_mimg_helpers())
+                    )
+                elif self._uses_image_vdata_helper(enc.enc_name):
+                    class_func_impls.model.insert(
+                        0, cgen.Line(self._emit_mimg_vdata_helper())
                     )
 
                 if (
