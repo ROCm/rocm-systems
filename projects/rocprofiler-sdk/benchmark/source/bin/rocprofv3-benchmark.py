@@ -962,9 +962,7 @@ def find_rocprof_config_files(config_file, data_dir, output_name):
     pass_configs = glob.glob(
         os.path.join(data_dir, "pass_*", f"{output_name}_config.json")
     )
-    pass_configs.sort(
-        key=lambda path: int(os.path.basename(os.path.dirname(path))[5:])
-    )
+    pass_configs.sort(key=lambda path: int(os.path.basename(os.path.dirname(path))[5:]))
     return pass_configs or [config_file]
 
 
@@ -1098,9 +1096,7 @@ def execute_run(
         fatal_error("Application exited with non-zero exit code", exit_code)
 
     if _config_file is not None:
-        _config_files = find_rocprof_config_files(
-            _config_file, _data_dir, _rocprof_out
-        )
+        _config_files = find_rocprof_config_files(_config_file, _data_dir, _rocprof_out)
 
     if not is_warmup:
         with open(f"{_timem_file}.json", "r") as ifs:
