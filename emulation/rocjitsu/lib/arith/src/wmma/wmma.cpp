@@ -230,3 +230,73 @@ int rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12(uint64_t flags, uint64_t instruc
   }
   return wmma<true, 64>(flags, instruction_flags, d, a, b, c);
 }
+
+// Evaluate gfx12 Wave32 FP16 WMMA (K=16) into FP16 D.
+// C supplies the accumulator; D may overlap A, B, or C.
+// Errors leave D unchanged; EXEC does not restrict this operation.
+int rj_arith_v_wmma_f16_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return wmma<false, 32, true>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate gfx12 Wave32 BF16 WMMA (K=16) into BF16 D.
+// C supplies the accumulator; D may overlap A, B, or C.
+// Errors leave D unchanged; EXEC does not restrict this operation.
+int rj_arith_v_wmma_bf16_16x16x16_bf16_w32_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return wmma<true, 32, true>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate gfx12 Wave64 FP16 WMMA (K=16) into FP16 D.
+// C supplies the accumulator; D may overlap A, B, or C.
+// Errors leave D unchanged; EXEC does not restrict this operation.
+int rj_arith_v_wmma_f16_16x16x16_f16_w64_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                               uint32_t *const *d, const uint32_t *const *a,
+                                               const uint32_t *const *b, const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return wmma<false, 64, true>(flags, instruction_flags, d, a, b, c);
+}
+
+// Evaluate gfx12 Wave64 BF16 WMMA (K=16) into BF16 D.
+// C supplies the accumulator; D may overlap A, B, or C.
+// Errors leave D unchanged; EXEC does not restrict this operation.
+int rj_arith_v_wmma_bf16_16x16x16_bf16_w64_gfx12(uint64_t flags, uint64_t instruction_flags,
+                                                 uint32_t *const *d, const uint32_t *const *a,
+                                                 const uint32_t *const *b,
+                                                 const uint32_t *const *c) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (instruction_flags >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return wmma<true, 64, true>(flags, instruction_flags, d, a, b, c);
+}

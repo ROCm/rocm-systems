@@ -34,6 +34,14 @@ RJ_ARITH_INSTANTIATE(false, 32, true, false)
 RJ_ARITH_INSTANTIATE(false, 64, true, false)
 RJ_ARITH_INSTANTIATE(true, 32, true, false)
 RJ_ARITH_INSTANTIATE(true, 64, true, false)
+RJ_ARITH_INSTANTIATE(false, 32, false, true)
+RJ_ARITH_INSTANTIATE(false, 64, false, true)
+RJ_ARITH_INSTANTIATE(true, 32, false, true)
+RJ_ARITH_INSTANTIATE(true, 64, false, true)
+RJ_ARITH_INSTANTIATE(false, 32, true, true)
+RJ_ARITH_INSTANTIATE(false, 64, true, true)
+RJ_ARITH_INSTANTIATE(true, 32, true, true)
+RJ_ARITH_INSTANTIATE(true, 64, true, true)
 #undef RJ_ARITH_INSTANTIATE
 
 } // namespace rocjitsu::arith

@@ -191,4 +191,47 @@ template void wmma_f32_x86_64_v3<true, 64, true>(uint32_t, uint32_t *const *,
                                                  const uint32_t *const *, const uint32_t *const *,
                                                  const uint32_t *const *);
 
+// Compute loose WMMA with packed FP16/BF16 C/D and validated modifiers.
+// D may overlap inputs; preserve the unused gfx11 half. saturate controls
+// finite FP16 overflow at each narrowing stage.
+template <bool Bf16, int Lanes, bool Rdna3>
+void wmma_packed_x86_64_v3(uint32_t modifiers, bool saturate, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c) {
+  wmma<Bf16, true, Lanes, Rdna3, true>(modifiers, d, a, b, c, saturate);
+}
+
+template void wmma_packed_x86_64_v3<false, 32, false>(uint32_t, bool, uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *);
+template void wmma_packed_x86_64_v3<false, 32, true>(uint32_t, bool, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template void wmma_packed_x86_64_v3<false, 64, false>(uint32_t, bool, uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *,
+                                                      const uint32_t *const *);
+template void wmma_packed_x86_64_v3<false, 64, true>(uint32_t, bool, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template void wmma_packed_x86_64_v3<true, 32, false>(uint32_t, bool, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template void wmma_packed_x86_64_v3<true, 32, true>(uint32_t, bool, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
+template void wmma_packed_x86_64_v3<true, 64, false>(uint32_t, bool, uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *,
+                                                     const uint32_t *const *);
+template void wmma_packed_x86_64_v3<true, 64, true>(uint32_t, bool, uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *,
+                                                    const uint32_t *const *);
+
 } // namespace rocjitsu::arith
