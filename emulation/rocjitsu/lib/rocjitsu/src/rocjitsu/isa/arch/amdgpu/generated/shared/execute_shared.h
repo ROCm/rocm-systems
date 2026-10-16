@@ -16157,8 +16157,9 @@ inline void execute_v_mullit_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unuse
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::F32>(
         inst, wf, inst.vdst, lane,
         amdgpu::output_modifier::apply<amdgpu::fp_format::F32>(
-            amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(),
-                                        wf.fp_denorm_mode_f32()),
+            amdgpu::fp_mode::mullit_f32(
+                s0, s1, s2, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(),
+                amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())),
             output_policy));
   }
 }

@@ -166,7 +166,8 @@ def test_mullit_and_trig_preop_preserve_special_fp_rules():
     assert (
         'amdgpu::output_modifier::apply<amdgpu::fp_format::F32>('
         'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        'wf.fp_denorm_mode_f32()), output_policy)'
+        'wf.fp_denorm_mode_f32(), '
+        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode())), output_policy)'
     ) in mullit
     assert 'std::isnan' not in mullit
     assert '0xA2F983u' in trig

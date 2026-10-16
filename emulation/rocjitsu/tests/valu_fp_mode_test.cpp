@@ -3309,6 +3309,77 @@ std::vector<ArithmeticCase> mullit_cases() {
   return cases;
 }
 
+// A signaling-NaN S0 reaching the product is quieted on gfx1201 and on gfx1100
+// with IEEE=1, but returned unchanged on gfx1100 with IEEE=0. S1/S2 NaNs still
+// select -MAX_FLOAT, and a flushed subnormal S1 still gives +0. Lanes are
+// captures from gfx1201 and both gfx1100 IEEE settings; MODE bit 9 (0x200) is
+// IEEE. llvm-mc encodes v_mullit_f32 v6, [-]v0, v1, v2 identically for both.
+std::vector<ArithmeticCase> mullit_signaling_nan_cases() {
+  struct Lane {
+    const char *name;
+    bool neg0;
+    std::array<uint32_t, 3> sources;
+    uint32_t mode;
+    uint32_t quieted;
+    uint32_t unquieted;
+  };
+  constexpr std::array<Lane, 6> lanes = {{
+      {"S0Signaling",
+       false,
+       {0x7f800001u, 0x00800000u, 0x00800000u},
+       0x00u,
+       0x7fc00001u,
+       0x7f800001u},
+      {"NegS0Signaling",
+       true,
+       {0x7f800001u, 0x00800000u, 0x00800000u},
+       0x00u,
+       0xffc00001u,
+       0xff800001u},
+      {"S0SignalingS1Subnormal",
+       false,
+       {0x7f800001u, 1u, 0x00800000u},
+       0xf0u,
+       0x7fc00001u,
+       0x7f800001u},
+      {"S0SignalingS1Flushed", false, {0x7f800001u, 1u, 0x00800000u}, 0x00u, 0u, 0u},
+      {"S0SignalingS1Nan",
+       false,
+       {0x7f800001u, 0x7fc00000u, 0x00800000u},
+       0x00u,
+       0xff7fffffu,
+       0xff7fffffu},
+      {"NegS0SignalingS1Nan",
+       true,
+       {0x7f800001u, 0x7fc00000u, 0x00800000u},
+       0xf0u,
+       0xff7fffffu,
+       0xff7fffffu},
+  }};
+  struct Target {
+    const char *name;
+    rj_code_arch_t arch;
+    uint32_t ieee;
+    bool quiets;
+  };
+  constexpr std::array<Target, 3> targets = {{
+      {"Gfx1100Ieee0", ROCJITSU_CODE_ARCH_RDNA3, 0u, false},
+      {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x200u, true},
+      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0u, true},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Target &target : targets)
+    for (const Lane &lane : lanes)
+      cases.push_back({std::format("{}{}Mode{:02X}", target.name, lane.name, lane.mode),
+                       target.arch,
+                       {0xd6180006u, lane.neg0 ? 0x240a0300u : 0x040a0300u, 0u},
+                       {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
+                       {{6, target.quiets ? lane.quieted : lane.unquieted}},
+                       lane.mode | target.ieee,
+                       FE_TONEAREST});
+  return cases;
+}
+
 SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool force_scalar) {
   if (!util::has_stdx_simd || !test.simd.checked)
     return {};
@@ -3586,7 +3657,7 @@ INSTANTIATE_TEST_SUITE_P(OpSel, ValuCndmaskB16HalfSelectionTest,
 class ValuMullitModeTest : public testing::TestWithParam<ArithmeticCase> {};
 
 // V_MULLIT_F32 has no SIMD path; both settings check that it stays scalar-correct.
-TEST_P(ValuMullitModeTest, MatchesGfx1201WithSimdEnabledAndForcedScalar) {
+TEST_P(ValuMullitModeTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   ForceScalarGuard guard;
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
@@ -3596,6 +3667,12 @@ TEST_P(ValuMullitModeTest, MatchesGfx1201WithSimdEnabledAndForcedScalar) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuMullitModeTest, testing::ValuesIn(mullit_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(SignalingNan, ValuMullitModeTest,
+                         testing::ValuesIn(mullit_signaling_nan_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });

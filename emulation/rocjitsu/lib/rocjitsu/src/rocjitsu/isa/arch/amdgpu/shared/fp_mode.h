@@ -899,12 +899,12 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
 /// @details MODE flushes the sources first, so a subnormal S2 counts as zero.
 /// S1 equal to -MAX_FLOAT, -INF or NaN, or S2 that is zero, negative or NaN,
 /// gives -MAX_FLOAT. Otherwise the result is the legacy product: +0 if either
-/// factor is zero, else S0 * S1 rounded and output-flushed under MODE.
-/// Measured on gfx1201. gfx1100 with IEEE=0 returns a signaling-NaN S0
-/// unquieted, which this product does not model, as for V_MUL_DX9_ZERO_F32.
-/// Other targets with V_MULLIT_F32 inherit the gfx1201 rule without measurement.
+/// factor is zero, else S0 * S1 rounded and output-flushed under MODE. A NaN S0
+/// reaching the product is returned, quieted only when `quiet_nan` is set
+/// (see quiets_nan). Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets
+/// with V_MULLIT_F32 inherit these rules without measurement.
 inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
-                           uint32_t denorm_mode) {
+                           uint32_t denorm_mode, bool quiet_nan) {
   using F32 = fp_format::F32;
   constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);
   const auto input = input_denormal::Policy::make(denorm_mode);
@@ -916,6 +916,8 @@ inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round
   if (s1 == kNegativeMax || s1 == (F32::kSign | F32::kInfinity) || is_nan(s1) || !s2_positive ||
       is_nan(s2))
     return kNegativeMax;
+  if (is_nan(s0) && (s1 & F32::kMagnitude) != 0)
+    return s0 | (quiet_nan ? F32::kQuiet : 0u);
   return std::bit_cast<uint32_t>(arithmetic<Arithmetic::MUL_LEGACY>(
       std::bit_cast<float>(s0), std::bit_cast<float>(s1), 0.0f, round_mode, denorm_mode));
 }
