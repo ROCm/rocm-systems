@@ -234,10 +234,12 @@ function(rccl_define_micro_source_lists)
     # sym-kernels-index-test.cc: added conditionally below, only when GENERATE_SYM_KERNELS is ON.
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
     dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
+    register-test.cc                     # src/register/register.cc
     process-isolated-runner-test.cc
     rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
@@ -264,6 +266,7 @@ function(rccl_define_micro_source_lists)
     fakes/strongstream_stubs.cc
     fakes/sym_kernels_fakes.cc
     fakes/transport_stubs.cc
+    fakes/transport_p2p_reg_fakes.cc     # p2p.cc registration, renamed in by transport_p2p_reg_seam.h
     fakes/tuning_fakes.cc
     fakes/wrap_fakes.cc
     ../common/main_altrsmi.cpp
@@ -886,6 +889,7 @@ function(rccl_define_micro_source_lists)
     diag-ib-write-bw-test.cc
     diagnostics-test.cc
     diag-p2p-device-test.cc
+    fakes/argcheck_fakes.cc
     fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
     fakes/diagnostics_fakes.cc           # src/diagnostics.cc external-tool runners
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
@@ -1538,6 +1542,7 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEVCOMM_V22902_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22902.cc"
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
+    REGISTER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/register.cc"
     RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
     RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
