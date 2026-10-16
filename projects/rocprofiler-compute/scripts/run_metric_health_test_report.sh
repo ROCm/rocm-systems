@@ -4,74 +4,166 @@
 #
 # Remote worker: Metric Health test report on one GPU architecture.
 #
-# Default workload iterations: 500 (median-stable). Override with ITERS=.
-#   vcopy:       -n 81920 -b 256 -i ${ITERS}
-#   nbody:       mini-nbody-block 131072 ${ITERS}
-#   mega_kernel: -b ${MEGA_BATCH} -n ${ITERS}
+# Default workload iterations: 500 (median-stable). Override with --iterations.
+#   vcopy:       -n 81920 -b 256 -i <iterations>
+#   nbody:       mini-nbody-block 131072 <iterations>
+#   mega_kernel: -b <mega-batch> -n <iterations>
 #
-# ARCH selects the host profile. Differences that used to be copied scripts:
+# --arch selects the host profile. Differences that used to be copied scripts:
 #   gfx1151  mega_kernel profile batch 4096 (RDNA3.5); smoke uses that batch
 #   CDNA     mega_kernel profile batch 65536; smoke stays -b 4096
 #   gfx908   roofline note: MI100 has no roofline microbenchmarks
-#            (NO_ROOF=1 is the default on every arch)
+#            Roofline is off unless --roof is passed
 #   gfx908   gfx90a  skip mega_kernel when its build fails
 #   gfx942   gfx1151 attempt native-tool, then retry once with --no-native-tool
-#   gfx908   gfx90a gfx950  FORCE_NO_NATIVE_TOOL=1 (no retry)
+#   gfx908   gfx90a gfx950  native tool stays off (no retry)
 #
 # Usage (on the GPU host, after syncing rocprofiler-compute):
-#   ARCH=gfx942 TAG=261001-gfx942-500med THEROCK=/path/to/therock \
-#     bash scripts/run_metric_health_test_report.sh
-#   ARCH=gfx1151 THEROCK=/path/to/rocm bash scripts/run_metric_health_test_report.sh
-#   ARCH=gfx908  THEROCK=/opt/rocm-7.2.0 bash scripts/run_metric_health_test_report.sh
-#   ARCH=gfx90a  THEROCK=/opt/rocm-7.2.0 bash scripts/run_metric_health_test_report.sh
-#   ARCH=gfx950  THEROCK=/opt/rocm-7.1.0 bash scripts/run_metric_health_test_report.sh
+#   bash scripts/run_metric_health_test_report.sh \
+#     --arch gfx942 --tag 261001-gfx942-500med --therock /path/to/therock
+#   bash scripts/run_metric_health_test_report.sh --arch gfx1151 --therock /path/to/rocm
+#   bash scripts/run_metric_health_test_report.sh --arch gfx908 --therock /opt/rocm-7.2.0
+#   bash scripts/run_metric_health_test_report.sh --arch gfx90a --therock /opt/rocm-7.2.0
+#   bash scripts/run_metric_health_test_report.sh --arch gfx950 --therock /opt/rocm-7.1.0
 #
-# 500-iter medians are ITERS=500, including gfx942.
+# 500-iter medians are --iterations 500, including gfx942.
 #
 # One invocation profiles one build of rocprof-compute. The health report
 # compares two separate runs: this branch and rocprofiler-compute-develop.
-#   RUN            name in output paths (default single-pass). Use RUN=develop for the
-#                  baseline run.
-#   PROFILER_ROOT  rocprofiler-compute checkout whose src/rocprof-compute runs
-#                  profile and analyze (default ROOT). For the baseline, point
-#                  it at a rocprofiler-compute-develop checkout. Samples still
-#                  build from ROOT so both runs profile the same binaries.
+#   --run            name in output paths (default single-pass). Use --run develop
+#                    for the baseline run.
+#   --profiler-root  rocprofiler-compute checkout whose src/rocprof-compute runs
+#                    profile and analyze (default --root). For the baseline, point
+#                    it at a rocprofiler-compute-develop checkout. Samples still
+#                    build from --root so both runs profile the same binaries.
 #
-#   RUN=develop PROFILER_ROOT=/path/to/develop/projects/rocprofiler-compute \
-#     ARCH=gfx942 TAG=261011-gfx942-500-develop bash scripts/run_metric_health_test_report.sh
+#   bash scripts/run_metric_health_test_report.sh \
+#     --arch gfx942 --tag 261011-gfx942-500-develop --run develop \
+#     --profiler-root /path/to/develop/projects/rocprofiler-compute
 #
-# Produces under $ROOT/workloads/:
-#   {vcopy,nbody,mega_kernel}_${TAG}_${RUN}/
-#   logs_${ARCH}_${TAG}/{vcopy,nbody,mega_kernel}_${RUN}.log
-#   logs_${ARCH}_${TAG}/run_meta.env
-# Ends with ALL_DONE in $LOG.
+# Produces under <root>/workloads/:
+#   {vcopy,nbody,mega_kernel}_<tag>_<run>/
+#   logs_<arch>_<tag>/{vcopy,nbody,mega_kernel}_<run>.log
+#   logs_<arch>_<tag>/run_meta.env
+# Ends with ALL_DONE in the log file.
 
 set -euo pipefail
 
 usage() {
   cat <<EOF
-Usage: ARCH=<gfx> [ITERS=500] [NO_ROOF=1] [THEROCK=...] bash $(basename "$0")
-       bash $(basename "$0") <gfx942|gfx950|gfx90a|gfx908|gfx1151>
+Usage: bash $(basename "$0") --arch <gfx942|gfx950|gfx90a|gfx908|gfx1151> [options]
 
-Env: TAG ITERS NO_ROOF MEGA_BATCH THEROCK LOG ROOT RUN PROFILER_ROOT
-     FORCE_NO_NATIVE_TOOL (site arches default 1)
+Options:
+  --tag <name>              Output name (default: YYMMDD-<arch>-500)
+  --root <dir>              Sample tree (default: this repo)
+  --profiler-root <dir>     rocprof-compute tree used to profile (default: --root)
+  --run <name>              Run name in output paths (default: single-pass)
+  --iterations <n>          Workload iterations (default: 500)
+  --mega-batch <n>          mega_kernel batch (default: 4096 on gfx1151, else 65536)
+  --therock <dir>           ROCm prefix (default: per-architecture path)
+  --log <path>              Log file (default: per-architecture path)
+  --local-prefix <dir>      Local pkg-config prefix (default: /tmp/rpc_local)
+  --site-rocm <dir>         Site ROCm prefix for gfx908, gfx90a, and gfx950 (default: /opt/rocm)
+  --roof                    Enable roofline collection (default: off)
+  --no-native-tool          Skip the native counter tool (default on gfx908, gfx90a, gfx950)
+
+ROCR_VISIBLE_DEVICES and HIP_VISIBLE_DEVICES stay in the environment because the GPU runtime reads them.
 EOF
 }
 
-if [[ "${1:-}" == "-h" || "${1:-}" == "--help" ]]; then
-  usage
-  exit 0
-fi
-if [[ "${1:-}" == gfx* ]]; then
-  ARCH=$1
+require_option_value() {
+  local option_name=$1
+  local option_value=${2:-}
+  if [[ -z "$option_value" || "$option_value" == --* ]]; then
+    echo "${option_name} needs a value" >&2
+    usage >&2
+    exit 1
+  fi
+}
+
+ARCH=""
+TAG_ARG=""
+ROOT_ARG=""
+PROFILER_ROOT_ARG=""
+RUN_ARG=""
+ITERS_ARG=""
+MEGA_BATCH_ARG=""
+THEROCK_ARG=""
+LOG_ARG=""
+LOCAL_PREFIX_ARG=""
+SITE_ROCM_ARG=""
+ROOF=0
+NO_NATIVE_TOOL=0
+
+while [[ $# -gt 0 ]]; do
+  case "$1" in
+    --arch)
+      require_option_value "$1" "${2:-}"
+      ARCH=$2
+      shift
+      ;;
+    --tag)
+      require_option_value "$1" "${2:-}"
+      TAG_ARG=$2
+      shift
+      ;;
+    --root)
+      require_option_value "$1" "${2:-}"
+      ROOT_ARG=$2
+      shift
+      ;;
+    --profiler-root)
+      require_option_value "$1" "${2:-}"
+      PROFILER_ROOT_ARG=$2
+      shift
+      ;;
+    --run)
+      require_option_value "$1" "${2:-}"
+      RUN_ARG=$2
+      shift
+      ;;
+    --iterations)
+      require_option_value "$1" "${2:-}"
+      ITERS_ARG=$2
+      shift
+      ;;
+    --mega-batch)
+      require_option_value "$1" "${2:-}"
+      MEGA_BATCH_ARG=$2
+      shift
+      ;;
+    --therock)
+      require_option_value "$1" "${2:-}"
+      THEROCK_ARG=$2
+      shift
+      ;;
+    --log)
+      require_option_value "$1" "${2:-}"
+      LOG_ARG=$2
+      shift
+      ;;
+    --local-prefix)
+      require_option_value "$1" "${2:-}"
+      LOCAL_PREFIX_ARG=$2
+      shift
+      ;;
+    --site-rocm)
+      require_option_value "$1" "${2:-}"
+      SITE_ROCM_ARG=$2
+      shift
+      ;;
+    --roof) ROOF=1 ;;
+    --no-native-tool) NO_NATIVE_TOOL=1 ;;
+    -h|--help) usage; exit 0 ;;
+    *)
+      echo "Unknown: $1" >&2
+      usage >&2
+      exit 1
+      ;;
+  esac
   shift
-fi
-if [[ $# -gt 0 ]]; then
-  echo "Unknown: $1" >&2
-  usage >&2
-  exit 1
-fi
-ARCH=${ARCH:-}
+done
+
 if [[ -z "$ARCH" ]]; then
   usage >&2
   exit 1
@@ -152,40 +244,48 @@ apply_worker_profile() {
 
 apply_worker_profile
 
-TAG=${TAG:-$(date +%y%m%d)-${ARCH}-500}
-ROOT=${ROOT:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
-PROFILER_ROOT=${PROFILER_ROOT:-$ROOT}
-RUN=${RUN:-single-pass}
-ITERS=${ITERS:-500}
-NO_ROOF=${NO_ROOF:-1}
-MEGA_BATCH=${MEGA_BATCH:-$MEGA_BATCH_DEFAULT}
+TAG=${TAG_ARG:-$(date +%y%m%d)-${ARCH}-500}
+ROOT=${ROOT_ARG:-$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)}
+PROFILER_ROOT=${PROFILER_ROOT_ARG:-$ROOT}
+RUN=${RUN_ARG:-single-pass}
+ITERS=${ITERS_ARG:-500}
+if [[ "$ROOF" == "1" ]]; then
+  NO_ROOF=0
+else
+  NO_ROOF=1
+fi
+MEGA_BATCH=${MEGA_BATCH_ARG:-$MEGA_BATCH_DEFAULT}
+LOCAL_PREFIX=${LOCAL_PREFIX_ARG:-/tmp/rpc_local}
+SITE_ROCM_CORE=${SITE_ROCM_ARG:-/opt/rocm}
 if [[ "$SMOKE_FOLLOWS_MEGA_BATCH" == "1" ]]; then
   SMOKE_BATCH=$MEGA_BATCH
 else
   SMOKE_BATCH=4096
 fi
-if [[ "$NATIVE_MODE" == "force" ]]; then
-  FORCE_NO_NATIVE_TOOL=${FORCE_NO_NATIVE_TOOL:-1}
+if [[ "$NO_NATIVE_TOOL" == "1" || "$NATIVE_MODE" == "force" ]]; then
+  FORCE_NO_NATIVE_TOOL=1
+else
+  FORCE_NO_NATIVE_TOOL=0
 fi
 
 case "$THEROCK_STYLE" in
   apu)
-    if [[ -z "${THEROCK:-}" ]]; then
-      if [[ -d "${HOME}/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel" ]]; then
-        THEROCK=${HOME}/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel
-      else
-        THEROCK=${HOME}/rocm-venv
-      fi
+    if [[ -n "$THEROCK_ARG" ]]; then
+      THEROCK=$THEROCK_ARG
+    elif [[ -d "${HOME}/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel" ]]; then
+      THEROCK=${HOME}/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel
+    else
+      THEROCK=${HOME}/rocm-venv
     fi
     ;;
   fixed)
-    THEROCK=${THEROCK:-/home/AMD/${USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
+    THEROCK=${THEROCK_ARG:-/home/AMD/${USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
     ;;
   rocm72)
-    THEROCK=${THEROCK:-${ROCM_ROOT:-/opt/rocm-7.2.0}}
+    THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
     ;;
   rocm71)
-    THEROCK=${THEROCK:-${ROCM_ROOT:-/opt/rocm-7.1.0}}
+    THEROCK=${THEROCK_ARG:-/opt/rocm-7.1.0}
     ;;
   *)
     echo "Internal error: THEROCK_STYLE=${THEROCK_STYLE}" >&2
@@ -194,9 +294,9 @@ case "$THEROCK_STYLE" in
 esac
 
 if [[ "$LOG_STYLE" == "therock" ]]; then
-  LOG=${LOG:-/home/AMD/${USER}/workdir/metric_health_${TAG}.log}
+  LOG=${LOG_ARG:-/home/AMD/${USER}/workdir/metric_health_${TAG}.log}
 else
-  LOG=${LOG:-${HOME}/metric_health_${TAG}.log}
+  LOG=${LOG_ARG:-${HOME}/metric_health_${TAG}.log}
 fi
 
 : >"$LOG"
@@ -215,7 +315,6 @@ else
 fi
 
 link_pkg_config() {
-  LOCAL_PREFIX=${LOCAL_PREFIX:-/tmp/rpc_local}
   if [[ ! -x "${LOCAL_PREFIX}/bin/pkg-config" && -x "${LOCAL_PREFIX}/bin/pkgconf" ]]; then
     ln -sf pkgconf "${LOCAL_PREFIX}/bin/pkg-config"
   fi
@@ -300,7 +399,6 @@ setup_env() {
       fi
       ;;
     site)
-      SITE_ROCM_CORE=${SITE_ROCM_CORE:-/opt/rocm}
       export PATH="${LOCAL_PREFIX}/bin:${THEROCK}/bin:${SITE_ROCM_CORE}/bin:${PATH:-}"
       export LD_LIBRARY_PATH="${THEROCK}/lib:${THEROCK}/lib64:${SITE_ROCM_CORE}/lib${LD_LIBRARY_PATH:+:$LD_LIBRARY_PATH}"
       export_rocm_common
@@ -366,7 +464,7 @@ decide_native() {
   if [[ "$NATIVE_MODE" == "force" ]]; then
     if [[ "$FORCE_NO_NATIVE_TOOL" == "1" ]]; then
       PROFILE_EXTRA=(--no-native-tool)
-      echo "native-tool: forced off (FORCE_NO_NATIVE_TOOL=1)"
+      echo "native-tool: forced off (--no-native-tool)"
     elif ! command -v cmake >/dev/null 2>&1; then
       echo "WARN: cmake missing — using --no-native-tool"
       PROFILE_EXTRA=(--no-native-tool)
