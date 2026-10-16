@@ -1960,9 +1960,11 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         // Equal-size direct directions with the same cap make the same tuning decisions and stay
         // one work only when their effective transports also keep the same caps. Different caps,
         // sizes, or a NET direction can put one direction on each tile and must reserve two.
-        if (rcclP2pTaskUsesNetwork(comm, recv, *p2pRound, /*isSendNotRecv=*/false)) strides[0] = nChannelsMax;
-        if (rcclP2pTaskUsesNetwork(comm, send, *p2pRound, /*isSendNotRecv=*/true)) strides[1] = nChannelsMax;
-        maxStride = std::max(strides[0], strides[1]);
+        if (maxStride > nChannelsMax) {
+          if (rcclP2pTaskUsesNetwork(comm, recv, *p2pRound, /*isSendNotRecv=*/false)) strides[0] = nChannelsMax;
+          if (rcclP2pTaskUsesNetwork(comm, send, *p2pRound, /*isSendNotRecv=*/true)) strides[1] = nChannelsMax;
+          maxStride = std::max(strides[0], strides[1]);
+        }
         bool maySplit = recv && send && sendRank != comm->rank && maxStride > nChannelsMax &&
                         (strides[0] != strides[1] || recvBytes != sendBytes);
         int roundBatches = maySplit ? maxStride + nChannelsMax : maxStride;
