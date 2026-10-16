@@ -1700,11 +1700,11 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
                                                      : MemoryCompletionClass::UNORDERED);
   }
 
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
-  ASSERT_NE(decoder, nullptr);
+  auto cdna2_decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
+  ASSERT_NE(cdna2_decoder, nullptr);
   const auto image_store_words =
       cdna2::build_mimg(cdna2::kImageStoreMimg, {.dmask = 1, .unorm = 1, .vdata = 8});
-  std::unique_ptr<Instruction> image_store(decode_valid(*decoder, image_store_words.data()));
+  std::unique_ptr<Instruction> image_store(decode_valid(*cdna2_decoder, image_store_words.data()));
   ASSERT_NE(image_store, nullptr);
   const auto *image_issue = image_store->amdgpu_memory_issue_info();
   ASSERT_NE(image_issue, nullptr);
@@ -1715,8 +1715,8 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
 
   const auto lds_words = cdna2::build_ds(cdna2::kDsReadB32Ds, {.gds = 0});
   const auto gds_words = cdna2::build_ds(cdna2::kDsReadB32Ds, {.gds = 1});
-  std::unique_ptr<Instruction> lds(decode_valid(*decoder, lds_words.data()));
-  std::unique_ptr<Instruction> gds(decode_valid(*decoder, gds_words.data()));
+  std::unique_ptr<Instruction> lds(decode_valid(*cdna2_decoder, lds_words.data()));
+  std::unique_ptr<Instruction> gds(decode_valid(*cdna2_decoder, gds_words.data()));
   ASSERT_NE(lds, nullptr);
   ASSERT_NE(gds, nullptr);
   const auto lds_obligations = lds->amdgpu_memory_issue_info()->counter_obligations();
@@ -1731,7 +1731,7 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
 
   const auto flat_store_words = cdna2::build_flat(cdna2::kFlatStoreDwordFlat,
                                                   {.seg = 0, .addr = 0, .data = 1, .saddr = 0x7F});
-  std::unique_ptr<Instruction> flat_store(decode_valid(*decoder, flat_store_words.data()));
+  std::unique_ptr<Instruction> flat_store(decode_valid(*cdna2_decoder, flat_store_words.data()));
   ASSERT_NE(flat_store, nullptr);
   const auto flat_store_obligations = flat_store->amdgpu_memory_issue_info()->counter_obligations();
   ASSERT_EQ(flat_store_obligations.size(), 2u);
