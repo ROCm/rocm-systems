@@ -426,7 +426,7 @@ OP_SPECS: Dict[str, OpSpec] = {
             [
                 float_tensor(d, 10, 8),
                 int_vector(d, 6),
-                torch.tensor([0, 3], device=d, dtype=torch.int64),
+                CoverageTensorArg(shape=(1,), emit="cumsum_offsets", scale=3.0),
             ],
             {},
         ),
@@ -436,7 +436,7 @@ OP_SPECS: Dict[str, OpSpec] = {
             [
                 float_tensor(d, 10, 8),
                 int_vector(d, 6),
-                torch.tensor([0, 3], device=d, dtype=torch.int64),
+                CoverageTensorArg(shape=(1,), emit="cumsum_offsets", scale=3.0),
                 False,
                 0,
                 False,
