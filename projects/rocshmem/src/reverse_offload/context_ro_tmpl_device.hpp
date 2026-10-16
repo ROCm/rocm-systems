@@ -57,12 +57,12 @@ struct GetROType<signed char> {
 
 template <>
 struct GetROType<unsigned short> {
-  static constexpr ro_net_types Type{RO_NET_SHORT};
+  static constexpr ro_net_types Type{RO_NET_UNSIGNED_SHORT};
 };
 
 template <>
 struct GetROType<unsigned int> {
-  static constexpr ro_net_types Type{RO_NET_INT};
+  static constexpr ro_net_types Type{RO_NET_UNSIGNED_INT};
 };
 
 template <>
@@ -72,7 +72,7 @@ struct GetROType<unsigned long> {
 
 template <>
 struct GetROType<unsigned long long> {
-  static constexpr ro_net_types Type{RO_NET_LONG_LONG};
+  static constexpr ro_net_types Type{RO_NET_UNSIGNED_LONG_LONG};
 };
 
 template <>
