@@ -1437,6 +1437,67 @@ TEST(MemoryWaitExecutionTest, IncomingFlatOverwriteUsesItsOwnOrderingAndRoutedLa
   }
 }
 
+TEST(MemoryWaitExecutionTest, Gfx12LoadDestinationsUseTheirActualWidth) {
+  for (auto arch : {ROCJITSU_CODE_ARCH_RDNA4, ROCJITSU_CODE_ARCH_CDNA5}) {
+    for (bool overlap : {false, true}) {
+      SCOPED_TRACE(static_cast<unsigned>(arch));
+      SCOPED_TRACE(overlap);
+      GpuMemory memory("load_width_memory");
+      L2Cache l2("load_width_l2");
+      ComputeUnitCore::Config config{};
+      config.memory_wait_diagnostics = MemoryWaitDiagnostics::Warn;
+      config.arch = arch;
+      config.num_wf_slots = 1;
+      config.sgprs_per_wf = 128;
+      config.vgprs_per_wf = 32;
+      auto cu = ComputeUnitCore::create("load_width_cu", config, &memory, &l2);
+      auto *wf = cu->dispatch_wf(0, 0x100, 128, 32);
+      ASSERT_NE(wf, nullptr);
+      wf->set_exec(1);
+      auto decoder = Decoder::create(arch);
+      auto &state = wf->ensure_memory_wait_scoreboard();
+      for (bool second : {false, true}) {
+        // RADV's vkQuake shader loads RGBA into v[4:7], then R into v3.
+        // gfx1250 has tensor VIMAGE operations rather than image_load; use
+        // its corresponding four-word and one/two-word buffer loads.
+        const uint8_t data = second ? 3 : 4;
+        const uint8_t mask = second ? (overlap ? 3 : 1) : 15;
+        const auto words =
+            arch == ROCJITSU_CODE_ARCH_RDNA4
+                ? rdna4::build_vimage(rdna4::kImageLoadVimage,
+                                      {.dim = 5,
+                                       .dmask = mask,
+                                       .vdata = data,
+                                       .rsrc = static_cast<uint16_t>(second ? 8 : 0),
+                                       .vaddr0 = 3,
+                                       .vaddr1 = 0,
+                                       .vaddr2 = 2})
+                : cdna5::build_vbuffer(second ? (overlap ? cdna5::kBufferLoadB64Vbuffer
+                                                         : cdna5::kBufferLoadB32Vbuffer)
+                                              : cdna5::kBufferLoadB128Vbuffer,
+                                       {.vdata = data});
+        util::StringDiagnostic error;
+        auto decoded = decoder->decode_window(words, 0, error.emitter());
+        ASSERT_TRUE(decoded.succeeded()) << error.message();
+        EXPECT_EQ(decoded.value()->dst_operand(0)->size_bits(), second ? (overlap ? 64 : 32) : 128);
+        state.check_instruction(*decoded.value(), *wf);
+        cu->track_memory_wait(*decoded.value(), *wf);
+        wf->pc += 12;
+      }
+      // A genuine overlapping destination still needs a wait on both gfx12
+      // targets: counter order does not imply ordered VGPR writeback.
+      EXPECT_EQ(cu->memory_wait_diagnostic_count(), overlap ? 1u : 0u);
+      if (!overlap) {
+        state.wait(WaitCounterKind::Load, 1);
+        state.access({RegClass::VGPR, 4, 4}, 1, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 0u);
+        state.access({RegClass::VGPR, 3, 1}, 1, 0xf, false);
+        EXPECT_EQ(cu->memory_wait_diagnostic_count(), 1u);
+      }
+    }
+  }
+}
+
 TEST(MemoryWaitExecutionTest, LegacyImageOverwritesCheckTheIncomingCompletionClass) {
   for (auto arch : {ROCJITSU_CODE_ARCH_RDNA1, ROCJITSU_CODE_ARCH_RDNA2, ROCJITSU_CODE_ARCH_RDNA3,
                     ROCJITSU_CODE_ARCH_RDNA3_5})

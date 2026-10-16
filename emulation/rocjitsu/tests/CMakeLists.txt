@@ -614,6 +614,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
@@ -639,6 +640,7 @@ add_executable(
     buffer_operand_test.cpp
     buffer_descriptor_vcc_test.cpp
     buffer_format_test.cpp
+    image_access_test.cpp
     image_resource_test.cpp
     smem_sbase_operand_test.cpp
     shared_infra_test.cpp
@@ -672,6 +674,7 @@ add_executable(
     dbi/dbi_arg_sim_test.cpp
     dbi/dbi_mask_sim_test.cpp
     dbi/dbi_entry_prologue_sim_test.cpp
+    dbi/dbi_sim_memory_test.cpp
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
@@ -2138,9 +2141,29 @@ rj_add_interposer_test_suite(InterposerDupTest ${_rj_interposer_dup_tests})
 
 rj_add_interposer_test_suite(
     InterposerDrmTest
+    AllocationFailsWhenBackingDescriptorsAreExhausted
     CanonicalSysfsPathsRetainSimulatedDevice
+    CloseRangeOfAKfdExportLeavesTheRecycledDescriptorOrdinary
     DeviceInfoReportsActiveCuCount
+    DmabufExportKeepsADriverCpuMapping
+    DmabufExportKeepsAReservedCpuMapping
+    DmabufExportKeepsStoresMadeDuringTheExport
+    DmabufExportLeavesPagesPastAPartialMapping
+    DupRacingTheCloseOfAPrimeExportKeepsTheBoState
+    ExportOfAUserptrBufferFailsAndLeavesTheCallersMemoryAlone
+    GemMetadataRoundTripsOnABuffer
+    GemOpReportsTheCreateSize
+    GemOpSetPlacementChangesTheReportedDomain
+    IpcImportSharesThePagesOfTheExportedAllocation
+    KfdBufferKeepsItsMetadataAfterEveryHandleCloses
+    KfdExportFlagsSurviveDuplicationBeforeThePrimeImport
+    KfdExportKeepsItsMetadataAfterTheAllocationIsFreed
+    KfdImportsRetainMetadataAfterTheOriginalOwnerCloses
     OpensWithinCurrentDescriptorLimit
+    PrimeHandleToFdReturnsTheBuffer
+    PrimeImportKeepsTheBoStateAfterTheHandleCloses
+    PrimeImportRejectsADescriptorThatIsNotADmabuf
+    PrimeImportSharesTheBufferAndItsMetadata
     PrimaryNodePathHasCharacterDeviceMetadata
     RenderNodePathMetadataMatchesDescriptor
     TimestampUsesAdvertisedNanosecondClock

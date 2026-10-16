@@ -471,6 +471,7 @@ symbol.
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
 | `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
+| `src/rccl_arch_thresholds.cc` | `fakes/rccl_arch_thresholds_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |

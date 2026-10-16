@@ -14,6 +14,8 @@ ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetFabricDeviceInfo,      amd_smi_getFabricDevi
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetNumDevice,             amd_smi_getNumDevice);
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetDevicePciBusIdString,  amd_smi_getDevicePciBusIdString);
 ASSERT_HOOK_MATCHES_PROD(g_amdSmiGetLinkInfo,              amd_smi_getLinkInfo);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiFabricTelemetryAcquire,   amd_smi_fabricTelemetryAcquire);
+ASSERT_HOOK_MATCHES_PROD(g_amdSmiFabricTelemetryRelease,   amd_smi_fabricTelemetryRelease);
 
 ncclResult_t DefaultAmdSmiGetDeviceIndexByPciBusId(const char*, uint32_t* deviceIndex) {
   if (deviceIndex) *deviceIndex = static_cast<uint32_t>(-1);  // -1 -> skip fabric block
@@ -57,6 +59,22 @@ ncclResult_t amd_smi_getLinkInfo(int srcDev, int dstDev, amdsmi_link_type_t* typ
   return g_amdSmiGetLinkInfo(srcDev, dstDev, type, hops, count);
 }
 
+ncclResult_t DefaultAmdSmiFabricTelemetryAcquire(uint32_t, uint64_t, int, bool* acquired) {
+  if (acquired) *acquired = false;  // telemetry is opt-in and off by default
+  return ncclSuccess;
+}
+std::function<ncclResult_t(uint32_t, uint64_t, int, bool*)> g_amdSmiFabricTelemetryAcquire =
+    DefaultAmdSmiFabricTelemetryAcquire;
+ncclResult_t amd_smi_fabricTelemetryAcquire(uint32_t deviceIndex, uint64_t commHash, int rank, bool* acquired) {
+  return g_amdSmiFabricTelemetryAcquire(deviceIndex, commHash, rank, acquired);
+}
+
+ncclResult_t DefaultAmdSmiFabricTelemetryRelease(uint32_t) { return ncclSuccess; }
+std::function<ncclResult_t(uint32_t)> g_amdSmiFabricTelemetryRelease = DefaultAmdSmiFabricTelemetryRelease;
+ncclResult_t amd_smi_fabricTelemetryRelease(uint32_t deviceIndex) {
+  return g_amdSmiFabricTelemetryRelease(deviceIndex);
+}
+
 void ResetAmdSmiFakes() {
   g_amdSmiGetDeviceIndexByPciBusId = DefaultAmdSmiGetDeviceIndexByPciBusId;
   g_amdSmiGetFabricDeviceInfo = DefaultAmdSmiGetFabricDeviceInfo;
@@ -64,4 +82,6 @@ void ResetAmdSmiFakes() {
   g_amdSmiGetNumDevice = DefaultAmdSmiGetNumDevice;
   g_amdSmiGetDevicePciBusIdString = DefaultAmdSmiGetDevicePciBusIdString;
   g_amdSmiGetLinkInfo = DefaultAmdSmiGetLinkInfo;
+  g_amdSmiFabricTelemetryAcquire = DefaultAmdSmiFabricTelemetryAcquire;
+  g_amdSmiFabricTelemetryRelease = DefaultAmdSmiFabricTelemetryRelease;
 }

@@ -2530,11 +2530,22 @@ TEST(InstructionMixPluginTest, AgreesWithThroughputOnInstructionFamilies) {
       {"s_delay_alu", 0, InstructionFamily::Control},
       // LDS-pipe synchronisation and no-ops: named like LDS traffic, but they
       // move no data, so the control carve-out is checked before the memory
-      // fallback. None of them carries a flag on any architecture.
+      // fallback. GWS rows cover both pre-execute (no flags) and post-execute
+      // MEMORY_OP flags used for wait-counter accounting.
       {"ds_nop", 0, InstructionFamily::Control},
       {"ds_gws_barrier", 0, InstructionFamily::Control},
       {"ds_gws_init", 0, InstructionFamily::Control},
       {"ds_gws_sema_v", 0, InstructionFamily::Control},
+      {"ds_gws_sema_p", 0, InstructionFamily::Control},
+      {"ds_gws_sema_br", 0, InstructionFamily::Control},
+      {"ds_gws_sema_release_all", 0, InstructionFamily::Control},
+      {"ds_gws_init", MEMORY_OP, InstructionFamily::Control},
+      {"ds_gws_barrier", MEMORY_OP, InstructionFamily::Control},
+      {"ds_gws_sema_v", MEMORY_OP, InstructionFamily::Control},
+      {"ds_gws_sema_p", MEMORY_OP, InstructionFamily::Control},
+      {"ds_gws_sema_br", MEMORY_OP, InstructionFamily::Control},
+      {"ds_gws_sema_release_all", MEMORY_OP, InstructionFamily::Control},
+
       {"exp", 0, InstructionFamily::Other},
   };
 

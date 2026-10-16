@@ -10,6 +10,7 @@ saturating packs, arithmetic, lane permutations, and packed type conversion.
 
 from __future__ import annotations
 
+from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.fp8_formats import fp8_helper_name
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
@@ -1382,6 +1383,8 @@ def gen_vector_cvt_pk(
     """Generate pack/convert instructions."""
     L = []
     L.append('  uint64_t exec = wf.exec();')
+    if cls == 'vector_cvt_pknorm' and dtype == 'f16':
+        L.append(input_policy.policy_decl('f16'))
     L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     if cls == 'vector_cvt_pk_u8_f32':
@@ -1406,18 +1409,22 @@ def gen_vector_cvt_pk(
     elif cls == 'vector_cvt_pknorm':
         if dtype == 'f16':
             if is_vop3:
-                L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[0], opsel, 0)}));'
-                )
-                L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>({_read_vop3_true16_src(src[1], opsel, 1)}));'
-                )
+                reads = [_read_vop3_true16_src(src[i], opsel, i) for i in range(2)]
             else:
+                reads = [
+                    f'amdgpu::RegisterAccess(wf).read_lane({src[i]}, lane)'
+                    for i in range(2)
+                ]
+            abs_field = 'inst_.abs' if has_abs else '0u'
+            for i, read in enumerate(reads):
                 L.append(
-                    f'    float s0 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane)));'
+                    f'    uint32_t s{i}_bits = amdgpu::input_denormal::prepare<amdgpu::fp_format::F16>('
+                    f'amdgpu::source_modifier::apply<amdgpu::fp_format::F16>('
+                    f'static_cast<uint32_t>({read}), {i}, {abs_field}, inst_.neg), '
+                    f'{input_policy.NAME});'
                 )
                 L.append(
-                    f'    float s1 = util::f16_to_f32(static_cast<uint16_t>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane)));'
+                    f'    float s{i} = util::f16_to_f32(static_cast<uint16_t>(s{i}_bits));'
                 )
         else:
             L.append(
@@ -1426,9 +1433,15 @@ def gen_vector_cvt_pk(
             L.append(
                 f'    float s1 = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({src[1]}, lane));'
             )
-        if is_vop3:
+        if is_vop3 and dtype != 'f16':
             L.extend(vop3_src_mod('s0', 0, has_abs))
             L.extend(vop3_src_mod('s1', 1, has_abs))
+        # Round to nearest even under every MODE.FP_ROUND setting. The ISA applies
+        # FP_ROUND to VALU float operations, and the packed NORM entries
+        # (V_CVT_PK_NORM_* and V_CVT_PKNORM_*) give no exception. gfx1100 and
+        # gfx1201 captures of V_CVT_PK_NORM_{I,U}16_{F16,F32} nevertheless do not
+        # change with FP_ROUND. CDNA1-5, RDNA1-2 and RDNA3.5 reuse this rounding
+        # without hardware verification.
         if op == 'i16':
             L.append('    auto cvt_i16 = [](float f) -> int16_t {')
             L.append('      if (std::isnan(f)) return 0;')
