@@ -21,6 +21,7 @@
 #include "graph.h"
 #include "nccl.h"
 #include "nccl_fakes.h"  // g_loadParam, for the NCCL_PARAM default this floor stands in for
+#include "nvls_ub.h"
 #include "signature-drift.h"
 #include "transport.h"
 
@@ -28,6 +29,9 @@ ASSERT_HOOK_MATCHES_PROD(g_useAinic, rcclUseAinic);
 ASSERT_HOOK_MATCHES_PROD(g_pxnDisable, ncclPxnDisable);
 ASSERT_HOOK_MATCHES_PROD(g_ncclProxyStop, ncclProxyStop);
 ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pSetup, ncclTransportP2pSetup);
+ASSERT_HOOK_MATCHES_PROD(g_ncclNetDeregBuffer, ncclNetDeregBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_ncclCollnetDeregBuffer, ncclCollnetDeregBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_ncclNvlsUbDeregister, ncclNvlsUbDeregister);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclComm;
@@ -76,6 +80,32 @@ static ncclResult_t DefaultTransportP2pSetup(struct ncclComm*, struct ncclTopoGr
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
     g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
 
+static ncclResult_t DefaultNetDeregBuffer(struct ncclComm*, struct ncclProxyConnector*, void*) {
+  FailLoudUnfaked("transport_stubs", "ncclNetDeregBuffer");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*)> g_ncclNetDeregBuffer =
+  DefaultNetDeregBuffer;
+ncclResult_t ncclNetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyConn, void* handle) {
+  return g_ncclNetDeregBuffer(comm, proxyConn, handle);
+}
+
+static ncclResult_t DefaultCollnetDeregBuffer(struct ncclComm*, struct ncclProxyConnector*, void*) {
+  FailLoudUnfaked("transport_stubs", "ncclCollnetDeregBuffer");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclProxyConnector*, void*)> g_ncclCollnetDeregBuffer =
+  DefaultCollnetDeregBuffer;
+ncclResult_t ncclCollnetDeregBuffer(struct ncclComm* comm, struct ncclProxyConnector* proxyconn, void* handle) {
+  return g_ncclCollnetDeregBuffer(comm, proxyconn, handle);
+}
+
+static ncclResult_t DefaultNvlsUbDeregister(struct ncclComm*, struct ncclReg*) {
+  FailLoudUnfaked("transport_stubs", "ncclNvlsUbDeregister");
+}
+std::function<ncclResult_t(struct ncclComm*, struct ncclReg*)> g_ncclNvlsUbDeregister = DefaultNvlsUbDeregister;
+ncclResult_t ncclNvlsUbDeregister(struct ncclComm* comm, struct ncclReg* reg) {
+  return g_ncclNvlsUbDeregister(comm, reg);
+}
+
 void ResetTransportStubs() {
   g_rcclUseAinicValue = false;
   g_useAinic = DefaultUseAinic;
@@ -88,6 +118,9 @@ void ResetTransportStubs() {
   g_ncclNvlsTuningResult = ncclSuccess;
   g_ncclNvlsTuningCalls = 0;
   g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
+  g_ncclNetDeregBuffer = DefaultNetDeregBuffer;
+  g_ncclCollnetDeregBuffer = DefaultCollnetDeregBuffer;
+  g_ncclNvlsUbDeregister = DefaultNvlsUbDeregister;
 }
 
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
