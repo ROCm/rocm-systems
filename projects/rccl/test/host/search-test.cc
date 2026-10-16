@@ -135,11 +135,11 @@ TEST_F(SearchXmlChannelMicrotest, ExplicitRankAttribute_IsUsedInsteadOfDevLookup
   // dev=0 would look up kRankBase+0; the explicit rank attribute must win.
   ncclXmlNode* channel = NewNode("channel");
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
-  SetAttr(gpu, "rank", "5");
+  SetAttr(gpu, "rank", std::to_string(SearchXmlScene::kRankBase + 5).c_str());
 
   ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
 
-  EXPECT_EQ(graph()->intra[0], 5);
+  EXPECT_EQ(graph()->intra[0], SearchXmlScene::kRankBase + 5);
 }
 
 TEST_F(SearchXmlChannelMicrotest, ChannelIndex_SelectsItsOwnSliceOfIntraAndInter) {
@@ -347,30 +347,50 @@ TEST_F(SearchXmlChannelMicrotest, NegativeRankAttribute_IsRejected) {
   EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
 }
 
-TEST_F(SearchXmlChannelMicrotest, LargestRepresentableRankAttribute_IsStillAccepted) {
-  // The tightest accepted input at the top of the range. The rank= attribute
-  // exists so a file can name ranks the local dev lookup cannot resolve, so
-  // the bound must stay at INT_MAX rather than the local system's rank set.
+TEST_F(SearchXmlChannelMicrotest, RankAttributeNamingARankTheTopologyDoesNotHave_IsRejected) {
+  // intra[] feeds ncclTopoPreset's ringSend/ringRecv and then prev[]/next[] in
+  // connectRings, which are sized by the rank count, so a rank the topology
+  // does not contain is an out-of-bounds write there. The writer only ever
+  // emits ranks present in the system, so nothing legitimate is lost.
   ncclXmlNode* channel = NewNode("channel");
   ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
   SetAttr(gpu, "rank", std::to_string(INT_MAX).c_str());
 
-  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
-
-  EXPECT_EQ(graph()->intra[0], INT_MAX);
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
+  EXPECT_EQ(graph()->intra[0], 0);  // nothing was written
 }
 
-TEST_F(SearchXmlChannelMicrotest, ZeroRankAttribute_IsStillAccepted) {
-  // The tightest accepted input at the bottom of the range: rank 0 must not
-  // be swept up by a bound tightened from "< 0" to "<= 0".
+TEST_F(SearchXmlChannelMicrotest, LowestRankInTheTopology_IsStillAccepted) {
+  // The tightest accepted input at the bottom of the topology's rank set.
   ncclXmlNode* channel = NewNode("channel");
   ncclXmlNode* gpu = AddChild(channel, "gpu", "1");
-  SetAttr(gpu, "rank", "0");
+  SetAttr(gpu, "rank", std::to_string(SearchXmlScene::kRankBase).c_str());
   graph()->intra[0] = -7;  // dirty it: the fixture zeroes the graph
 
   ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
 
-  EXPECT_EQ(graph()->intra[0], 0);
+  EXPECT_EQ(graph()->intra[0], SearchXmlScene::kRankBase);
+}
+
+TEST_F(SearchXmlChannelMicrotest, HighestRankInTheTopology_IsStillAccepted) {
+  // The tightest accepted input at the top of the topology's rank set.
+  ncclXmlNode* channel = NewNode("channel");
+  ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
+  SetAttr(gpu, "rank", std::to_string(SearchXmlScene::kRankBase + kGpus - 1).c_str());
+
+  ASSERT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclSuccess);
+
+  EXPECT_EQ(graph()->intra[0], SearchXmlScene::kRankBase + kGpus - 1);
+}
+
+TEST_F(SearchXmlChannelMicrotest, RankJustOutsideTheTopologysRankSet_IsRejected) {
+  // One past the highest rank the system holds: the bound must follow the
+  // topology rather than merely being plausible.
+  ncclXmlNode* channel = NewNode("channel");
+  ncclXmlNode* gpu = AddChild(channel, "gpu", "0");
+  SetAttr(gpu, "rank", std::to_string(SearchXmlScene::kRankBase + kGpus).c_str());
+
+  EXPECT_EQ(ncclTopoGetChannelFromXml(channel, 0, system(), graph()), ncclInvalidUsage);
 }
 
 // --- The caller: ncclTopoGetGraphFromXmlSub -------------------------------
