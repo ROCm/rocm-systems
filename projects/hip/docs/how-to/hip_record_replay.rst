@@ -70,7 +70,17 @@ application as usual:
   HIP_HRR_CAPTURE_OUTPUT=./my_capture.hrr ./my_hip_app
 
 Capture is off whenever the variable is unset, so nothing changes for an ordinary
-run. The archive is a directory, not a single file, and it holds one
+run. It also needs your consent, given once per user: write the line ``yes`` to
+``${XDG_CONFIG_HOME:-$HOME/.config}/hrr/capture-consent``
+(``%APPDATA%\hrr\capture-consent`` on Windows). Where no such file can be kept,
+as in CI or a container, set ``HIP_HRR_CAPTURE_CONSENT=yes`` for the run instead.
+Without either, the application runs unrecorded and says why on stderr.
+
+.. code-block:: bash
+
+  mkdir -p ~/.config/hrr && echo yes > ~/.config/hrr/capture-consent
+
+ The archive is a directory, not a single file, and it holds one
 ``pid-<pid>/`` subdirectory per recorded process:
 
 .. code-block:: text

@@ -282,6 +282,74 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
 /**
  * Test Description
  * ----------------
+ *   - Spawns Unit_HRR_DeviceInfo_Direct with HIP_HRR_CAPTURE_OUTPUT set, without
+ *     HIP_HRR_CAPTURE_CONSENT and with an empty configuration directory. The
+ *     workload must still pass, record nothing, and say on stderr that capture
+ *     needs consent and which file records it.
+ *   - Writes yes to that consent file and captures again: the archive is
+ *     written and its metadata records capture_consent "file".
+ *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file: the
+ *     metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent"};
+  ScopedDir cfg{fs::temp_directory_path() / "hrr_capture_consent_cfg"};
+  fs::create_directories(cfg.path);
+  const fs::path consent_file = cfg.path / "hrr" / "capture-consent";
+
+  auto capture = [&](bool env_consent) {
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    // The consent file lives under XDG_CONFIG_HOME on POSIX and APPDATA on Windows.
+    proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
+    proc.setEnv("APPDATA", cfg.path.string());
+    if (!env_consent) proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_DeviceInfo_Direct\"");
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret == 0);
+    return out;
+  };
+  auto recorded_consent = [&]() {
+    const fs::path archive = hrr_single_process_archive(cap.path);
+    const std::string metadata =
+        json_object_value(read_text_file(archive / "manifest.json"), "metadata");
+    INFO("Metadata:\n" << metadata);
+    REQUIRE_FALSE(metadata.empty());
+    return json_string_value(metadata, "capture_consent");
+  };
+
+  {
+    const std::string out = capture(/*env_consent=*/false);
+    CHECK(out.find("[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent.") !=
+          std::string::npos);
+    CHECK(out.find("write the line yes to " + consent_file.string() + " once") !=
+          std::string::npos);
+    CHECK(out.find("set HIP_HRR_CAPTURE_CONSENT=yes") != std::string::npos);
+    CHECK(out.find("[HRR capture] Recording") == std::string::npos);
+    CHECK(hrr_process_archives(cap.path).empty());
+  }
+
+  {
+    fs::create_directories(consent_file.parent_path());
+    std::ofstream(consent_file) << "yes\n";
+    capture(/*env_consent=*/false);
+    CHECK(recorded_consent() == "file");
+  }
+
+  {
+    fs::remove_all(cap.path);
+    fs::remove(consent_file);
+    capture(/*env_consent=*/true);
+    CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
+  }
+}
+
+/**
+ * Test Description
+ * ----------------
  *   - Spawns Unit_HRR_GpuWorkload_Direct with HIP_HRR_CAPTURE_OUTPUT set and
  *     AMD_LOG_LEVEL=3, capturing stdout and stderr. The summary that
  *     hip_capture_shutdown() logs at exit must name the per-process pid-<pid>

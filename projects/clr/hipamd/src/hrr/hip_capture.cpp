@@ -60,6 +60,8 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <filesystem>
+#include <fstream>
 #include <mutex>
 #include <string>
 #include <map>
@@ -123,6 +125,42 @@ static bool hrr_capture_requested() {
 }
 
 bool hip_capture_enabled() { return hrr_capture_requested() && !hrr_secure_exec(); }
+
+// The per-user file that records consent to capture, or "" when the
+// environment names no home for it.
+static std::string hrr_consent_file() {
+#if defined(_WIN32)
+  const char* appdata = std::getenv("APPDATA");
+  if (appdata == nullptr || *appdata == '\0') return "";
+  return std::string(appdata) + "\\hrr\\capture-consent";
+#else
+  const char* xdg = std::getenv("XDG_CONFIG_HOME");
+  if (xdg != nullptr && xdg[0] == '/') return std::string(xdg) + "/hrr/capture-consent";
+  const char* home = std::getenv("HOME");
+  if (home == nullptr || home[0] != '/') return "";
+  return std::string(home) + "/.config/hrr/capture-consent";
+#endif
+}
+
+// The archive holds the recorded process's memory, so HIP_HRR_CAPTURE_OUTPUT
+// alone does not start capture: the user also has to say yes, once in the
+// consent file or per run in HIP_HRR_CAPTURE_CONSENT for CI and containers.
+// Returns where the yes came from for the manifest, "HIP_HRR_CAPTURE_CONSENT" or
+// "file" (not its path, which names the user), or "" when there is none.
+static std::string hrr_capture_consent() {
+  if (!flagIsDefault(HIP_HRR_CAPTURE_CONSENT) &&
+      std::strcmp(HIP_HRR_CAPTURE_CONSENT, "yes") == 0)
+    return "HIP_HRR_CAPTURE_CONSENT";
+  const std::string path = hrr_consent_file();
+  // Only a regular file: opening a FIFO planted there would block HIP's init.
+  std::error_code ec;
+  if (path.empty() || !std::filesystem::is_regular_file(path, ec)) return "";
+  std::ifstream in(path);
+  std::string line;
+  if (!std::getline(in, line)) return "";
+  while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
+  return line == "yes" ? "file" : "";
+}
 
 const char* hip_capture_output_dir() {
   return HIP_HRR_CAPTURE_OUTPUT;
@@ -2706,6 +2744,21 @@ void hip_capture_init() {
       return;
     }
 
+    // Deliberately not gated on AMD_LOG_LEVEL, like the start notice below: the
+    // user asked for an archive and must learn why there is none. Never prompts:
+    // the process may have no terminal, or many workers sharing one.
+    const std::string consent = hrr_capture_consent();
+    if (consent.empty()) {
+      const std::string file = hrr_consent_file();
+      fprintf(stderr,
+              "[HRR capture] HIP_HRR_CAPTURE_OUTPUT ignored: capture needs your consent. The "
+              "archive would hold this process's host buffers, kernel arguments and code "
+              "objects. To consent, %s%s%sset HIP_HRR_CAPTURE_CONSENT=yes for one run.\n",
+              file.empty() ? "" : "write the line yes to ", file.c_str(),
+              file.empty() ? "" : " once, or ");
+      return;
+    }
+
     // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
     // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
     // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
@@ -2736,7 +2789,7 @@ void hip_capture_init() {
     }
 
     hrr_cap::writer::set_capture_metadata_json(
-        hrr_cap::metadata::collect_json());
+        hrr_cap::metadata::collect_json(consent));
 
     hrr_install_clr_exception_handler();
 
@@ -2770,6 +2823,7 @@ void hip_capture_init() {
     (void)&record_fat_binary_blob;
     (void)&record_registered_var;
     (void)&hrr_install_clr_exception_handler;
+    (void)&hrr_capture_consent;
     (void)&g_hrr_atexit_once;
   #endif
 }
