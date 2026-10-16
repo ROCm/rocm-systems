@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/clocks/waitable/clock.hpp"
+#include "core/clocks/waitable/contract.hpp"
 
 #include <condition_variable>
 #include <mutex>

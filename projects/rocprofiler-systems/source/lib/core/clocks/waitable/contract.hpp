@@ -12,7 +12,7 @@ using duration   = std::chrono::nanoseconds;
 using time_point = std::chrono::time_point<std::chrono::steady_clock, duration>;
 
 template <typename Tp>
-concept clock = requires(Tp clk, time_point deadline) {
+concept contract = requires(Tp clk, time_point deadline) {
     { clk.now() } noexcept -> std::convertible_to<time_point>;
     { clk.sleep_until(deadline) } -> std::same_as<bool>;
     { clk.interrupt() } noexcept;

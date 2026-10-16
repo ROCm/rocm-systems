@@ -4,7 +4,7 @@
 #include "core/clocks/waitable/posix.hpp"
 #include "core/control/session.hpp"
 
-#include "core/clocks/waitable/clock.hpp"
+#include "core/clocks/waitable/contract.hpp"
 #include "core/control/triggers/time_window.hpp"
 #include <atomic>
 #include <chrono>

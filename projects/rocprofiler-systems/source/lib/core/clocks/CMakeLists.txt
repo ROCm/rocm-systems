@@ -6,7 +6,7 @@ set(clocks_sources ${CMAKE_CURRENT_LIST_DIR}/waitable/steady.cpp)
 set(clocks_headers
     ${CMAKE_CURRENT_LIST_DIR}/thread_cpu.hpp
     ${CMAKE_CURRENT_LIST_DIR}/timeline.hpp
-    ${CMAKE_CURRENT_LIST_DIR}/waitable/clock.hpp
+    ${CMAKE_CURRENT_LIST_DIR}/waitable/contract.hpp
     ${CMAKE_CURRENT_LIST_DIR}/waitable/posix.hpp
     ${CMAKE_CURRENT_LIST_DIR}/waitable/steady.hpp
 )

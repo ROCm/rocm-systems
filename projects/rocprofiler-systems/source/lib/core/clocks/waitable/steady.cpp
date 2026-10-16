@@ -3,7 +3,7 @@
 
 #include "steady.hpp"
 
-#include "core/clocks/waitable/clock.hpp"
+#include "core/clocks/waitable/contract.hpp"
 #include "core/state.hpp"
 
 #include <chrono>

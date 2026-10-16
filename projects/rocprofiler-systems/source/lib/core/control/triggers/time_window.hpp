@@ -3,7 +3,7 @@
 
 #pragma once
 
-#include "core/clocks/waitable/clock.hpp"
+#include "core/clocks/waitable/contract.hpp"
 #include "core/control/session.hpp"
 #include "core/state.hpp"
 
@@ -23,7 +23,7 @@ struct time_window_specs
     clocks::waitable::duration duration{};
 };
 
-template <clocks::waitable::clock Clock>
+template <clocks::waitable::contract Clock>
 class time_window
 {
 public:
