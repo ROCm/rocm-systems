@@ -267,13 +267,14 @@ Result skip_value(std::string_view json, size_t &at, const util::DiagnosticEmitt
   return Result::success();
 }
 
-/// @brief Return @p json with top-level @p field set to @p value, inserting it when absent.
-///
-/// @details Only the one field's text changes, so every other field keeps the
-/// spelling, ordering and formatting the author gave it and stays readable when a
-/// failing run is reproduced from the launch copy.
-FailureOr<std::string> set_top_level_field(std::string_view json, std::string_view field,
-                                           std::string_view value,
+struct FieldRange {
+  size_t begin;
+  size_t end;
+  bool insertion_needs_comma;
+};
+
+/// @brief Locate a top-level value, or the insertion point for an absent field.
+FailureOr<FieldRange> find_top_level_field(std::string_view json, std::string_view field,
                                            const util::DiagnosticEmitter &emit_error) {
   size_t at = 0;
   skip_filler(json, at);
@@ -317,10 +318,7 @@ FailureOr<std::string> set_top_level_field(std::string_view json, std::string_vi
     if (skipped_value.failed())
       return Result::failure();
     if (name == field) {
-      std::string rewritten(json.substr(0, value_begin));
-      rewritten.append(value);
-      rewritten.append(json.substr(at));
-      return rewritten;
+      return FieldRange{value_begin, at, false};
     }
 
     skip_filler(json, at);
@@ -328,15 +326,37 @@ FailureOr<std::string> set_top_level_field(std::string_view json, std::string_vi
       ++at;
   }
 
-  std::string rewritten(json.substr(0, fields_begin));
-  rewritten.append("\"").append(field).append("\": ").append(value);
-  if (has_fields)
+  return FieldRange{fields_begin, fields_begin, has_fields};
+}
+
+/// @brief Replace one top-level value, preserving all unrelated configuration text.
+FailureOr<std::string> set_top_level_field(std::string_view json, std::string_view field,
+                                           std::string_view value,
+                                           const util::DiagnosticEmitter &emit_error) {
+  auto found = find_top_level_field(json, field, emit_error);
+  if (found.failed())
+    return Result::failure();
+  const auto range = found.value();
+  std::string rewritten(json.substr(0, range.begin));
+  if (range.begin == range.end)
+    rewritten.append("\"").append(field).append("\": ");
+  rewritten.append(value);
+  if (range.insertion_needs_comma)
     rewritten.append(",");
-  rewritten.append(json.substr(fields_begin));
+  rewritten.append(json.substr(range.end));
   return rewritten;
 }
 
 } // namespace
+
+FailureOr<std::string> json_top_level_field(std::string_view json, std::string_view field,
+                                            const util::DiagnosticEmitter &emit_error) {
+  auto found = find_top_level_field(json, field, emit_error);
+  if (found.failed())
+    return Result::failure();
+  const auto range = found.value();
+  return std::string(json.substr(range.begin, range.end - range.begin));
+}
 
 FailureOr<std::string> json_with_cpu_thread_budget(std::string_view json, uint32_t budget,
                                                    const util::DiagnosticEmitter &emit_error) {

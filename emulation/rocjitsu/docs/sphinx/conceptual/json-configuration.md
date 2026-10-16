@@ -46,6 +46,7 @@ objects for the virtual machine and the topology.
 | `cpu_dispatch_threads` | int | Inclusive dispatch width per SoC; omitted/0 selects from preferred allocations, 1 forces serial. |
 | `cpu_thread_budget` | int | Selection ceiling; omitted/0 uses affinity and target allocations. Positive values override the budget. |
 | `async_helper_threads` | int | Shared MMA helpers: -1 selects the table, 0 disables, 1–128 overrides. |
+| `arithmetic` | object | CPU arithmetic policy; see [CPU arithmetic policy](../../configuration.md#cpu-arithmetic-policy). |
 | `wait_checking` | string | Override diagnostics on every CU and GPU: `on`, `off`, or `all`. Omission preserves per-CU settings and defaults. |
 | `thread_allocations` | array | Preferred engine, dispatch and helper allocations for this target. Largest fitting effective allocation wins. |
 | `exec_mode` | string | Execution mode: `"functional"` or `"clocked"`. |

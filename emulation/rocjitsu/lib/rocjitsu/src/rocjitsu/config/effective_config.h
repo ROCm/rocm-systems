@@ -33,6 +33,11 @@ struct LaunchOverrides {
   bool empty() const { return !cpu_thread_budget && !wait_checking && local_node.empty(); }
 };
 
+/// @brief Return a top-level field's original JSON value, or an empty string when absent.
+[[nodiscard]] FailureOr<std::string>
+json_top_level_field(std::string_view json, std::string_view field,
+                     const util::DiagnosticEmitter &emit_error = {});
+
 /// @brief Return @p json with its top-level `cpu_thread_budget` set to @p budget.
 ///
 /// @details Gives one launch its own ceiling without rewriting the input file or
