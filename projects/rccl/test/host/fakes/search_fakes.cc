@@ -4,13 +4,6 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Controllable seams for the entry points src/graph/search.cc DEFINES, for
-// targets that do not compile that file. See fakes/search_fakes.h for why this
-// is split out of topo_stubs.cc.
-//
-// Mostly _fakes rather than _stubs: every entry here is a driven seam with a
-// deterministic default, not a fail-loud floor.
-
 #include <functional>
 #include <vector>
 
@@ -20,8 +13,6 @@
 #include "graph.h"
 #include "graph/topo.h"
 
-// Controllable (was fail-loud). init.cc:1982; the value reaches the AllGather3
-// payload, so the default is deterministic.
 std::function<ncclResult_t(struct ncclComm*, bool*)> g_ncclTopoCheckNicFused =
     [](struct ncclComm*, bool* fused) { *fused = false; return ncclSuccess; };
 ncclResult_t ncclTopoCheckNicFused(struct ncclComm* comm, bool* fused) { return g_ncclTopoCheckNicFused(comm, fused); }
@@ -37,8 +28,6 @@ ncclResult_t ncclTopoSearchInit(struct ncclTopoSystem* system) { return g_ncclTo
 ncclResult_t g_ncclTopoComputeCommCPUResult = ncclSuccess;
 ncclResult_t ncclTopoComputeCommCPU(struct ncclComm* comm) { return g_ncclTopoComputeCommCPUResult; }
 
-// A std::function rather than a result knob: rung 3 needs it to SUCCEED and write graph->nChannels,
-// which init.cc:1671-1672 then read to size the tree graph. Default still fails, so rung 2 is unchanged.
 std::function<ncclResult_t(struct ncclTopoSystem*, struct ncclTopoGraph*)> g_ncclTopoCompute =
     [](struct ncclTopoSystem*, struct ncclTopoGraph*) { return ncclRemoteError; };  // rung-2 terminator
 int g_ncclTopoComputeCalls = 0;
@@ -49,9 +38,6 @@ ncclResult_t ncclTopoCompute(struct ncclTopoSystem* system, struct ncclTopoGraph
   return g_ncclTopoCompute(system, graph);
 }
 
-// Controllable (was fail-loud). Five call sites (init.cc:1649, :1674, :1691, :1693, :1703), each paired
-// with an ncclTopoCompute. Records the graph so a swapped pair -- printing the tree graph after computing
-// the ring one -- is visible; a result-only seam would not see it.
 ncclResult_t g_ncclTopoPrintGraphResult = ncclSuccess;
 std::vector<struct ncclTopoGraph*> g_ncclTopoPrintGraphGraphs;
 ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGraph* graph) {
@@ -59,20 +45,16 @@ ncclResult_t ncclTopoPrintGraph(struct ncclTopoSystem* system, struct ncclTopoGr
   return g_ncclTopoPrintGraphResult;
 }
 
-// Controllable (was fail-loud). init.cc:1764, gated on comm->rank == NCCL_GRAPH_DUMP_FILE_RANK. Records
-// ngraphs because the call site hardcodes 5 -- a count that must track the five graphs actually computed.
 ncclResult_t g_ncclTopoDumpGraphsResult = ncclSuccess;
 int g_ncclTopoDumpGraphsCalls = 0;
 int g_ncclTopoDumpGraphsNgraphs = -1;
 std::vector<struct ncclTopoGraph*> g_ncclTopoDumpGraphsArray;
 ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, struct ncclTopoGraph** graphs) {
   g_ncclTopoDumpGraphsCalls++;
-  g_ncclTopoDumpGraphsNgraphs = ngraphs;  // assert this, not the vector length, if :1764's 5 ever moves
-  // Clamp the read: the caller's array is dumpGraphs[kDumpGraphsCapacity] at :1757, so trusting a
-  // larger ngraphs would read off its stack rather than failing an assertion.
+  g_ncclTopoDumpGraphsNgraphs = ngraphs;
   const int kDumpGraphsCapacity = 5;
   const int n = ngraphs < kDumpGraphsCapacity ? ngraphs : kDumpGraphsCapacity;
-  g_ncclTopoDumpGraphsArray.assign(graphs, graphs + n);  // :1763 orders direct BEFORE chain
+  g_ncclTopoDumpGraphsArray.assign(graphs, graphs + n);
   return g_ncclTopoDumpGraphsResult;
 }
 

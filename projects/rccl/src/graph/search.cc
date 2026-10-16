@@ -12,7 +12,7 @@
 #include "topo.h"
 #include "transport.h"
 #include "xml.h"
-#include <limits.h>  // INT_MAX, for the rank= range check in ncclTopoGetChannelFromXml
+#include <limits.h>
 #include <math.h>
 #include <sys/time.h>
 #include "rome_models.h"
@@ -1021,9 +1021,6 @@ struct kvDict kvDictLinkType[] = {{"LOC", PATH_LOC}, {"NVL", PATH_NVL}, {"NVB", 
 ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, struct ncclTopoSystem* system,
                                        struct ncclTopoGraph* graph) {
   int ngpus = system->nodes[GPU].count;
-  // The caller indexes channels by XML sub position, which is bounded only by
-  // MAX_SUBS, so an untrusted NCCL_GRAPH_FILE can push c past the number of
-  // channels graph->intra and graph->inter are sized for.
   if (c < 0 || c >= MAXCHANNELS) {
     WARN("XML Import Channel : channel %d out of range (max %d).", c, MAXCHANNELS - 1);
     return ncclInvalidUsage;
@@ -1038,9 +1035,6 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
     NCCLCHECK(xmlGetAttrStr(sub, "dev", &str));
     dev = strtol(str, NULL, 16);
     if (strcmp(sub->name, "net") == 0) {
-      // A channel owns exactly two inter slots -- the leading and trailing
-      // <net> that ncclTopoGetXmlFromChannel emits. Without this, extra <net>
-      // subs run on into the next channel's slots.
       if (n >= 2) {
         WARN("XML Import Channel : too many net subnodes in channel %d (max %d).", c, 2);
         return ncclInvalidUsage;
@@ -1051,8 +1045,6 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
       int rankIndex = -1;
       NCCLCHECK(xmlGetAttrIndex(sub, "rank", &rankIndex));
       if (rankIndex != -1) {
-        // strtol yields a long; assigning it straight to an int truncates, so
-        // an attribute like rank="4294967296" would silently become rank 0.
         long rankValue = strtol(sub->attrs[rankIndex].value, NULL, 0);
         if (rankValue < 0 || rankValue > INT_MAX) {
           WARN("XML Import Channel : rank %ld out of range.", rankValue);
@@ -1070,9 +1062,6 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
           return ncclSystemError;
         }
       }
-      // A channel owns exactly ngpus intra slots -- one per GPU, which is what
-      // ncclTopoGetXmlFromChannel emits. Without this, extra <gpu> subs run on
-      // into the next channel's slots.
       if (g >= ngpus) {
         WARN("XML Import Channel : too many gpu subnodes in channel %d (max %d).", c, ngpus);
         return ncclInvalidUsage;
@@ -1095,12 +1084,6 @@ ncclResult_t ncclTopoGetGraphFromXmlSub(struct ncclXmlNode* xmlGraph, struct ncc
 
   NCCLCHECK(xmlGetAttrInt(xmlGraph, "pattern", &graph->pattern));
   NCCLCHECK(xmlGetAttrInt(xmlGraph, "nchannels", &graph->nChannels));
-  // graph->nChannels becomes the loop bound downstream code uses over the
-  // MAXCHANNELS-sized intra/inter arrays, so it may not simply be whatever the
-  // file says. ncclTopoGetXmlFromGraph emits exactly nChannels <channel>
-  // elements, so requiring agreement also rules out a file claiming channels
-  // that were never imported. The per-channel guard in
-  // ncclTopoGetChannelFromXml bounds the count itself against MAXCHANNELS.
   if (graph->nChannels != xmlGraph->nSubs) {
     WARN("XML Import Graph : nchannels %d does not match the %d channels present.",
          graph->nChannels, xmlGraph->nSubs);

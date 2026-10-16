@@ -270,7 +270,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/libc_fakes.cc
     fakes/ras_fakes.cc
     fakes/ras_net_fakes.cc
@@ -325,7 +325,7 @@ function(rccl_define_micro_source_lists)
     fakes/enqueue_fakes.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -406,7 +406,7 @@ function(rccl_define_micro_source_lists)
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib (GDR flush flag seams)
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -525,7 +525,7 @@ function(rccl_define_micro_source_lists)
     fakes/enqueue_test_deps.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -602,7 +602,7 @@ function(rccl_define_micro_source_lists)
     fakes/allocator_fakes.cc             # src/allocator.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -650,9 +650,9 @@ function(rccl_define_micro_source_lists)
     fakes/libc_fakes.cc
     fakes/ras_fakes.cc
     fakes/ras_param_fakes.cc
-    fakes/nccl_fakes.cc                  # ncclDebugLog/ncclDebugMask (checks.h logging macros)
-    fakes/search_fakes.cc                # src/graph/search.cc own entry points
-    fakes/collectives_fakes.cc           # ncclFuncToString
+    fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
+    fakes/collectives_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -662,7 +662,7 @@ function(rccl_define_micro_source_lists)
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/os_fakes.cc
     fakes/rma_fakes.cc
     fakes/rocmwrap_fakes.cc
@@ -677,7 +677,7 @@ function(rccl_define_micro_source_lists)
     sym-model-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -783,7 +783,7 @@ function(rccl_define_micro_source_lists)
     task-sched-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/channel_fakes.cc
@@ -875,7 +875,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
     fakes/nccl_fakes.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/bootstrap_stubs.cc             # src/bootstrap.cc AllGather seam
@@ -927,7 +927,7 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     fakes/topo_stubs.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
+    fakes/search_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
@@ -1020,9 +1020,9 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
-    fakes/search_fakes.cc        # src/graph/search.cc own entry points
-    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
-    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    fakes/search_fakes.cc
+    fakes/transport_net_ib_fakes.cc
+    fakes/transport_p2p_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
