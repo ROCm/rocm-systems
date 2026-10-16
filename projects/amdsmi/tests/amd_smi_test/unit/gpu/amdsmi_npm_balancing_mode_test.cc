@@ -41,6 +41,7 @@
 #include "amd_smi/amdsmi.h"
 #include "amd_smi/impl/amd_smi_test_internal.h"
 #include "rocm_smi/rocm_smi_utils.h"
+#include "test_common.h"
 
 #if defined(ENABLE_WSL_BACKEND)
 #include "amd_smi/impl/amd_smi_wsl_device.h"
@@ -132,6 +133,7 @@ class ScopedAmdSmiInit {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, GetNpmBalancingModeNullHandleIsInval) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -139,10 +141,15 @@ TEST(GpuUnit, GetNpmBalancingModeNullHandleIsInval) {
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_npm_balancing_mode_t mode;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(nullptr, &mode), AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode", "GetNpmBalancingModeNullHandleIsInval",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(nullptr, &mode);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, GetNpmBalancingModeNullModeIsInval) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -153,10 +160,15 @@ TEST(GpuUnit, GetNpmBalancingModeNullModeIsInval) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, nullptr), AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode", "GetNpmBalancingModeNullModeIsInval",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, nullptr);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, GetNpmBalancingModeDisabledStillReportsLastSelectedMode) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -174,11 +186,17 @@ TEST(GpuUnit, GetNpmBalancingModeDisabledStillReportsLastSelectedMode) {
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_INVALID;
   // Get is never gated on NPM enablement; it reflects board/mode even
   // while NPM is disabled.
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode",
+                     "GetNpmBalancingModeDisabledStillReportsLastSelectedMode",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, &mode);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(mode, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
 }
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -198,11 +216,16 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledDefaultsToPowerBalancing) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_INVALID;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode",
+                     "GetNpmBalancingModeEnabledDefaultsToPowerBalancing", GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, &mode);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(mode, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
 }
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsNotSupported) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -220,10 +243,17 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledMissingModeFileIsNotSupported) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_NOT_SUPPORTED);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode",
+                     "GetNpmBalancingModeEnabledMissingModeFileIsNotSupported",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, &mode);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -241,10 +271,16 @@ TEST(GpuUnit, GetNpmBalancingModeGarbageValueIsUnexpectedData) {
   // "0" is not a valid encoding ("1"/"2" only); this is a genuine
   // read/decode error, not the "missing file" N/A case.
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_UNEXPECTED_DATA);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode",
+                     "GetNpmBalancingModeGarbageValueIsUnexpectedData", GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, &mode);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_UNEXPECTED_DATA);
+  EXPECT_EQ(err, AMDSMI_STATUS_UNEXPECTED_DATA);
 }
 
 TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -260,7 +296,11 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_INVALID;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode",
+                     "GetNpmBalancingModeEnabledReadsFrequencyBalancing", GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, &mode);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(mode, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
 }
 
@@ -269,17 +309,22 @@ TEST(GpuUnit, GetNpmBalancingModeEnabledReadsFrequencyBalancing) {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, SetNpmBalancingModeNullHandleIsInval) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
   }
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(nullptr, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING),
-            AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode", "SetNpmBalancingModeNullHandleIsInval",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(nullptr, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, SetNpmBalancingModeInvalidModeIsInval) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -290,12 +335,16 @@ TEST(GpuUnit, SetNpmBalancingModeInvalidModeIsInval) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, static_cast<amdsmi_npm_balancing_mode_t>(
-                                                      AMDSMI_NPM_BALANCING_MODE_INVALID)),
-            AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode", "SetNpmBalancingModeInvalidModeIsInval",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(
+      handle, static_cast<amdsmi_npm_balancing_mode_t>(AMDSMI_NPM_BALANCING_MODE_INVALID));
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, SetNpmBalancingModeNonRootIsNoPerm) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -316,11 +365,15 @@ TEST(GpuUnit, SetNpmBalancingModeNonRootIsNoPerm) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_NO_PERM);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode", "SetNpmBalancingModeNonRootIsNoPerm",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_NO_PERM);
+  EXPECT_EQ(err, AMDSMI_STATUS_NO_PERM);
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootRejectsWhenNpmDisabled) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -342,13 +395,18 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsWhenNpmDisabled) {
   // Must not even open board/mode for write when NPM is disabled: this is
   // AMDSMI_STATUS_NOT_SUPPORTED, a deliberate divergence from
   // amdsmi_set_npm_limit()'s own disabled-check (AMDSMI_STATUS_INVAL).
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_NOT_SUPPORTED);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode",
+                     "SetNpmBalancingModeRootRejectsWhenNpmDisabled", GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
   // The file must be untouched.
   EXPECT_EQ(board.ReadFile("mode"), "1");
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -367,24 +425,39 @@ TEST(GpuUnit, SetNpmBalancingModeRootRoundTrip) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode", "SetNpmBalancingModeRootRoundTrip",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(board.ReadFile("mode"), "2");
 
   amdsmi_npm_balancing_mode_t readback = AMDSMI_NPM_BALANCING_MODE_INVALID;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &readback), AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode", "SetNpmBalancingModeRootRoundTrip",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, &readback);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(readback, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING),
-            AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode", "SetNpmBalancingModeRootRoundTrip",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(board.ReadFile("mode"), "1");
 
   readback = AMDSMI_NPM_BALANCING_MODE_INVALID;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &readback), AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode", "SetNpmBalancingModeRootRoundTrip",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, &readback);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(readback, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootMissingModeFileIsNotSupported) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -405,11 +478,17 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingModeFileIsNotSupported) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_NOT_SUPPORTED);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode",
+                     "SetNpmBalancingModeRootMissingModeFileIsNotSupported",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootMissingBoardDirIsNotSupported) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -434,11 +513,17 @@ TEST(GpuUnit, SetNpmBalancingModeRootMissingBoardDirIsNotSupported) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_NOT_SUPPORTED);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode",
+                     "SetNpmBalancingModeRootMissingBoardDirIsNotSupported",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -459,13 +544,19 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING),
-            AMDSMI_STATUS_SETTING_UNAVAILABLE);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode",
+                     "SetNpmBalancingModeRootRejectsModeAbsentFromSupportedBitmask",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_SETTING_UNAVAILABLE);
+  EXPECT_EQ(err, AMDSMI_STATUS_SETTING_UNAVAILABLE);
   // The file must be untouched.
   EXPECT_EQ(board.ReadFile("mode"), "1");
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -486,12 +577,17 @@ TEST(GpuUnit, SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode",
+                     "SetNpmBalancingModeRootAllowsModePresentInSupportedBitmask",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(board.ReadFile("mode"), "2");
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootRejectsCorruptSupportedModesFile) {
+  amdsmi_status_t err;
   // A read failure other than NOT_SUPPORTED (e.g. corrupt/unparsable
   // content) must fail closed as SETTING_UNAVAILABLE and reject the write --
   // it must not be treated like a missing file.
@@ -514,13 +610,19 @@ TEST(GpuUnit, SetNpmBalancingModeRootRejectsCorruptSupportedModesFile) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_SETTING_UNAVAILABLE);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode",
+                     "SetNpmBalancingModeRootRejectsCorruptSupportedModesFile",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_SETTING_UNAVAILABLE);
+  EXPECT_EQ(err, AMDSMI_STATUS_SETTING_UNAVAILABLE);
   // The file must be untouched.
   EXPECT_EQ(board.ReadFile("mode"), "1");
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
+  amdsmi_status_t err;
   // The supported_mode sysfs file is not yet implemented on all driver
   // versions; its absence must not block an otherwise-valid set.
   ScopedAmdSmiInit init;
@@ -542,8 +644,12 @@ TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode",
+                     "SetNpmBalancingModeRootToleratesMissingSupportedModesFile",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(board.ReadFile("mode"), "2");
 }
 
@@ -552,6 +658,7 @@ TEST(GpuUnit, SetNpmBalancingModeRootToleratesMissingSupportedModesFile) {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNullHandleIsInval) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -559,11 +666,15 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNullHandleIsInval) {
   ASSERT_EQ(init.status(), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_bit_field_t supported_modes;
-  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(nullptr, &supported_modes),
-            AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_supported_balancing_modes",
+                     "GetNpmSupportedBalancingModesNullHandleIsInval", GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_supported_balancing_modes(nullptr, &supported_modes);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNullOutputIsInval) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -574,10 +685,15 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNullOutputIsInval) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(&board_path);
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
-  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, nullptr), AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_supported_balancing_modes",
+                     "GetNpmSupportedBalancingModesNullOutputIsInval", GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_supported_balancing_modes(handle, nullptr);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesMissingFileIsNotSupported) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -593,11 +709,17 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesMissingFileIsNotSupported) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_bit_field_t supported_modes = 0;
-  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
-            AMDSMI_STATUS_NOT_SUPPORTED);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_supported_balancing_modes",
+                     "GetNpmSupportedBalancingModesMissingFileIsNotSupported",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(err, AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNotGatedOnNpmEnablement) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -613,12 +735,17 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNotGatedOnNpmEnablement) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_bit_field_t supported_modes = 0;
-  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
-            AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_supported_balancing_modes",
+                     "GetNpmSupportedBalancingModesNotGatedOnNpmEnablement",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(supported_modes, 0x6u);
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesDecodesHexBitmask) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -633,12 +760,16 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesDecodesHexBitmask) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_bit_field_t supported_modes = 0;
-  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
-            AMDSMI_STATUS_SUCCESS);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_supported_balancing_modes",
+                     "GetNpmSupportedBalancingModesDecodesHexBitmask", GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(err, AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(supported_modes, 0x2u);
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -653,8 +784,13 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_bit_field_t supported_modes = 0;
-  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
-            AMDSMI_STATUS_UNEXPECTED_DATA);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_supported_balancing_modes",
+                     "GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_UNEXPECTED_DATA);
+  EXPECT_EQ(err, AMDSMI_STATUS_UNEXPECTED_DATA);
 }
 
 // ---------------------------------------------------------------------
@@ -669,6 +805,7 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesGarbageValueIsUnexpectedData) {
 // ---------------------------------------------------------------------
 
 TEST(GpuUnit, GetNpmBalancingModeRejectsUnregisteredHandle) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -684,10 +821,15 @@ TEST(GpuUnit, GetNpmBalancingModeRejectsUnregisteredHandle) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(unregistered_board_path.get());
 
   amdsmi_npm_balancing_mode_t mode = AMDSMI_NPM_BALANCING_MODE_INVALID;
-  EXPECT_EQ(amdsmi_get_npm_balancing_mode(handle, &mode), AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_balancing_mode",
+                     "GetNpmBalancingModeRejectsUnregisteredHandle", GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_balancing_mode(handle, &mode);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, SetNpmBalancingModeRejectsUnregisteredHandle) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -700,11 +842,15 @@ TEST(GpuUnit, SetNpmBalancingModeRejectsUnregisteredHandle) {
 
   // AMDSMI_STATUS_INVAL must be returned regardless of caller privilege: the
   // registry check runs before REQUIRE_ROOT_ACCESS is ever reached.
-  EXPECT_EQ(amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING),
-            AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_set_npm_balancing_mode",
+                     "SetNpmBalancingModeRejectsUnregisteredHandle", GetTestVerbosity() >= 1);
+  err = amdsmi_set_npm_balancing_mode(handle, AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesRejectsUnregisteredHandle) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -716,11 +862,16 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesRejectsUnregisteredHandle) {
   amdsmi_node_handle handle = reinterpret_cast<amdsmi_node_handle>(unregistered_board_path.get());
 
   amdsmi_bit_field_t supported_modes = 0;
-  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
-            AMDSMI_STATUS_INVAL);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_supported_balancing_modes",
+                     "GetNpmSupportedBalancingModesRejectsUnregisteredHandle",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+  EXPECT_EQ(err, AMDSMI_STATUS_INVAL);
 }
 
 TEST(GpuUnit, GetNpmSupportedBalancingModesNegativeValueIsUnexpectedData) {
+  amdsmi_status_t err;
   ScopedAmdSmiInit init;
   if (init.status() == AMDSMI_STATUS_DRIVER_NOT_LOADED) {
     GTEST_SKIP_("No GPU driver loaded");
@@ -737,6 +888,11 @@ TEST(GpuUnit, GetNpmSupportedBalancingModesNegativeValueIsUnexpectedData) {
   ASSERT_EQ(amdsmi_test_register_node_handle(handle), AMDSMI_STATUS_SUCCESS);
 
   amdsmi_bit_field_t supported_modes = 0;
-  EXPECT_EQ(amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes),
-            AMDSMI_STATUS_UNEXPECTED_DATA);
+  DISPLAY_AMDSMI_API("amdsmi_get_npm_supported_balancing_modes",
+                     "GetNpmSupportedBalancingModesNegativeValueIsUnexpectedData",
+                     GetTestVerbosity() >= 1);
+  err = amdsmi_get_npm_supported_balancing_modes(handle, &supported_modes);
+  DISPLAY_AMDSMI_STATUS(GetTestVerbosity() >= 1, __FILE__, __LINE__, err,
+                        AMDSMI_STATUS_UNEXPECTED_DATA);
+  EXPECT_EQ(err, AMDSMI_STATUS_UNEXPECTED_DATA);
 }
