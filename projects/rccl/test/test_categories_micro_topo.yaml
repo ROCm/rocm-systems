@@ -11,7 +11,7 @@ test_categories:
       - "Topo*"
       - "Paths*"
       - "Search*"
-      - "RomeModels*"
+      - "GraphRomeModels*"
       - "GraphConnect*"
       - "Rings*"
       - "Trees*"
