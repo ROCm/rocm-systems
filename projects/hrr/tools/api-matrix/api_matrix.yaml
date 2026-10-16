@@ -243,7 +243,10 @@ tiers:
       - hipStreamWriteValue64
       - hipStreamWaitValue32
       - hipStreamWaitValue64
-      # Allocates nothing at replay; cudaHostAlloc hipifies to this spelling.
+      # Pinned host allocation. hipHostAlloc and hipMemAllocHost allocate
+      # nothing at replay (cudaHostAlloc hipifies to the former);
+      # hipMallocHost and hipFreeHost have real handlers charged to the host
+      # budget.
       - hipHostAlloc
       - hipFreeHost
       - hipMallocHost
@@ -574,6 +577,7 @@ unreachable:
       - hipMemGetDefaultMemPool
       - hipLibraryGetGlobal
       - hipLibraryGetManaged
+      - hipKernelSetAttributeForDevice
       - hipOccupancyMaxActiveClusters
       - hipOccupancyMaxPotentialClusterSize
       - hipDeviceFlushGPUDirectRDMAWrites
@@ -820,24 +824,25 @@ overrides:
     payload_loss: false
     note: >-
       The 64-byte handle used to be lowered to one uint64_t and replay
-      passed a null out-pointer, which is why it returned 1. It is now
-      recorded whole, re-exported from the live allocation at replay, and the
-      recorded bytes are paired with the live ones in ipc_handle_map so an
-      import later in the same archive resolves.
+      passed a null out-pointer, which is why it returned 1. The field now
+      keeps its 64 bytes but they stay zero, because the handle opens the
+      allocation from any process; replay re-exports from the live allocation
+      and pairs nothing on the zeroed field.
   hipIpcOpenMemHandle:
     payload_loss: false
     captured: false
     note: >-
-      hipIpcMemHandle_t is 64 bytes (HIP_IPC_HANDLE_SIZE) and is now carried
-      whole as inline bytes; the import resolves the recorded handle through
-      ipc_handle_map to the one this replay's exporter produced. Still never
-      captured here: HIP rejects a same-process open and the shim only records
-      successful calls, so exercising it needs a two-process capture.
+      hipIpcMemHandle_t is 64 bytes (HIP_IPC_HANDLE_SIZE); the field keeps
+      its size but stays zero, so replay reports the import as unmatched and
+      skips it. Still never captured here: HIP rejects a same-process open and
+      the shim only records successful calls, so exercising it needs a
+      two-process capture.
   hipIpcOpenEventHandle:
     payload_loss: false
     captured: false
-    note: Carried whole as inline bytes like hipIpcOpenMemHandle, and
-      unreachable here for the same same-process reason.
+    note: The handle field keeps its 64 bytes but stays zero, as for
+      hipIpcOpenMemHandle; replay calls the API with the zeroed handle and
+      reports its error. Unreachable here for the same same-process reason.
   hipMemCreate:
     payload_loss: false
     note: >-

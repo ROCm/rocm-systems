@@ -17,6 +17,7 @@
 
 #![allow(unsafe_code)]
 
+use crate::memory::storage::TryPush;
 use std::ffi::{c_int, c_long, c_ulong, c_void};
 use std::fs::File;
 use std::io;
@@ -38,7 +39,7 @@ use crate::session::DriverContextLifetime;
 /// DMA-BUF extent and metadata copied out of one synchronous KFD query.
 pub(super) struct DmaBufDetails {
     pub(super) info: uapi::DmaBufInfo,
-    pub(super) metadata: crate::host_storage::Buffer<u8>,
+    pub(super) metadata: Vec<u8>,
 }
 
 unsafe extern "C" {
@@ -90,7 +91,6 @@ pub(super) type IoctlHook = std::sync::Arc<dyn Fn(&mut Call<'_>) -> io::Result<(
 /// Runtime enable and disable are separately serialized here so no session can
 /// publish a partially enabled process state.
 pub(super) struct Kfd {
-    allocator: crate::host_storage::Allocator,
     file: Option<File>,
     process: u32,
     runtime: Mutex<RuntimeControl>,
@@ -127,9 +127,8 @@ pub(super) struct RuntimeGuard<'a> {
 }
 
 impl Kfd {
-    pub(super) fn new(file: File, allocator: crate::host_storage::Allocator) -> Self {
+    pub(super) fn new(file: File) -> Self {
         Self {
-            allocator,
             file: Some(file),
             process: std::process::id(),
             runtime: Mutex::new(RuntimeControl {
@@ -143,17 +142,7 @@ impl Kfd {
 
     #[cfg(test)]
     pub(super) fn with_hook(file: File, hook: IoctlHook) -> Self {
-        Self::with_hook_allocator(file, hook, crate::host_storage::Allocator::default())
-    }
-
-    #[cfg(test)]
-    pub(super) fn with_hook_allocator(
-        file: File,
-        hook: IoctlHook,
-        allocator: crate::host_storage::Allocator,
-    ) -> Self {
         Self {
-            allocator,
             file: Some(file),
             process: std::process::id(),
             runtime: Mutex::new(RuntimeControl {
@@ -199,7 +188,7 @@ impl Kfd {
             return hook(&mut call);
         }
         if let Call::Svm(args, attributes) = &mut call {
-            return self.call_svm(descriptor, args, attributes);
+            return Self::call_svm(descriptor, args, attributes);
         }
         let (request, body) = match &mut call {
             Call::Version(args) => (uapi::GET_VERSION, ptr::from_mut(*args).cast::<c_void>()),
@@ -278,7 +267,6 @@ impl Kfd {
     }
 
     fn call_svm(
-        &self,
         descriptor: c_int,
         args: &mut uapi::SvmArgs,
         attributes: &mut [uapi::SvmAttribute],
@@ -288,9 +276,8 @@ impl Kfd {
         let words = 3_usize
             .checked_add(attributes.len())
             .ok_or_else(|| io::Error::from(io::ErrorKind::InvalidInput))?;
-        let mut buffer =
-            crate::host_storage::Buffer::<u64>::try_with_capacity(words, self.allocator)
-                .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
+        let mut buffer = crate::memory::storage::try_vec_with_capacity::<u64>(words)
+            .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
         for _ in 0..words {
             buffer
                 .try_push(0)
@@ -353,11 +340,11 @@ impl Kfd {
         Ok(memory.available)
     }
 
-    pub(super) fn apertures(&self) -> io::Result<crate::host_storage::Buffer<uapi::Aperture>> {
+    pub(super) fn apertures(&self) -> io::Result<Vec<uapi::Aperture>> {
         let mut args = uapi::Apertures::default();
         self.call(Call::Apertures(&mut args, &mut []))?;
         let count = usize::try_from(args.count).map_err(invalid_data)?;
-        let mut entries = crate::host_storage::Buffer::try_with_capacity(count, self.allocator)
+        let mut entries = crate::memory::storage::try_vec_with_capacity(count)
             .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
         for _ in 0..count {
             entries
@@ -598,11 +585,11 @@ impl Kfd {
             first?;
             return Ok(DmaBufDetails {
                 info: args,
-                metadata: crate::host_storage::Buffer::new(self.allocator),
+                metadata: Vec::new(),
             });
         }
         let count = usize::try_from(args.metadata_size).map_err(invalid_data)?;
-        let mut metadata = crate::host_storage::Buffer::try_with_capacity(count, self.allocator)
+        let mut metadata = crate::memory::storage::try_vec_with_capacity(count)
             .map_err(|_| io::Error::from(io::ErrorKind::OutOfMemory))?;
         for _ in 0..count {
             metadata
