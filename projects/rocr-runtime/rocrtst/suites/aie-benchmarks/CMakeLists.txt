@@ -114,6 +114,13 @@ else()
   message(STATUS "NPU target: ${NPU_TARGET}")
 endif()
 
+# Full-ELF dispatch is aie2p only -- the design's npu_load_pdi has no aie2 equivalent -- so there
+# is nothing to build for an npu1 target even with a complete toolchain.
+if(AIE_FULL_ELF_SUPPORTED AND NOT NPU_TARGET STREQUAL "npu2")
+  set(AIE_FULL_ELF_SUPPORTED FALSE)
+  message(STATUS "Full-ELF kernel will not be built: it needs an npu2 target.")
+endif()
+
 # ---------------------------------------------------------------------------
 # Peano (llvm-aie) detection
 #
@@ -131,6 +138,14 @@ if(NOT EXISTS "${PEANO_INSTALL_DIR}")
                       "Set up the IRON environment with iron_env_setup.sh first.")
 endif()
 message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
+
+# aie-hsaco packages the kernel artifacts into an hsaco. It ships with mlir-aie, next to aiecc.
+find_program(AIE_HSACO aie-hsaco)
+if(NOT AIE_HSACO)
+  message(FATAL_ERROR "Could not find aie-hsaco, which packages the kernels into an hsaco. "
+                      "It ships with mlir-aie; set up the IRON environment first.")
+endif()
+message(STATUS "aie-hsaco: ${AIE_HSACO}")
 
 # ---------------------------------------------------------------------------
 # Kernel artifact build
@@ -264,20 +279,77 @@ if(AIE_FULL_ELF_SUPPORTED)
 endif()
 
 # ---------------------------------------------------------------------------
+# hsaco packaging
+#
+# Both HSA benchmarks dispatch by kernel object, so each needs an hsaco rather than the raw
+# artifacts. aie-hsaco names sections by architecture, which is what the loader matches against
+# the agent; NPU_TARGET is the aiecc spelling of the same thing. PDI+insts works on either
+# architecture, so this mapping is not gated on full-ELF support.
+# ---------------------------------------------------------------------------
+if(NPU_TARGET STREQUAL "npu2")
+  set(AIE_ARCH "aie2p")
+else()
+  set(AIE_ARCH "aie2")
+endif()
+
+# ---------------------------------------------------------------------------
 # HSA PDI/insts benchmark
 # ---------------------------------------------------------------------------
+
+# vsadd's kernarg buffer is 2 pointers + 2 sizes; the design uses a single NPU column.
+set(PDI_HSACO_KERNEL_NAME "vsadd")
+set(PDI_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd.hsaco")
+add_custom_command(
+  OUTPUT "${PDI_HSACO}"
+  COMMAND "${AIE_HSACO}" --hsaco "${PDI_HSACO}" --arch "${AIE_ARCH}"
+          --kernel "${PDI_HSACO_KERNEL_NAME}:${INSTS_BIN}:${DESIGN_PDI}:32:1"
+  # Depend on the target, not its outputs: two custom commands racing aiecc in one build
+  # directory produce concurrent runs that clobber each other's intermediates.
+  DEPENDS aie_kernel_artifacts
+  COMMENT "Packaging the vsadd PDI+insts artifacts into an hsaco for the benchmark"
+  VERBATIM)
+add_custom_target(vsadd_pdi_hsaco_bench DEPENDS "${PDI_HSACO}")
 
 add_executable(vector-scalar-add-hsa vector_scalar_add_hsa.cpp)
 target_compile_features(vector-scalar-add-hsa PRIVATE cxx_std_20)
 target_compile_definitions(vector-scalar-add-hsa PRIVATE
-  DEFAULT_PDI_PATH=${DESIGN_PDI}
-  DEFAULT_INSTS_PATH=${INSTS_BIN}
+  DEFAULT_HSACO_PATH=${PDI_HSACO}
+  DEFAULT_HSACO_KERNEL_NAME="${PDI_HSACO_KERNEL_NAME}"
 )
 target_link_libraries(vector-scalar-add-hsa PRIVATE
   benchmark::benchmark_main
   hsa-runtime64::hsa-runtime64
 )
-add_dependencies(vector-scalar-add-hsa aie_kernel_artifacts)
+add_dependencies(vector-scalar-add-hsa vsadd_pdi_hsaco_bench)
+
+# ---------------------------------------------------------------------------
+# HSA full-ELF benchmark
+# ---------------------------------------------------------------------------
+
+if(AIE_FULL_ELF_SUPPORTED)
+  # The application dispatches by kernel object, so it needs an hsaco rather than a bare ELF.
+  set(ELF_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd_elf.hsaco")
+  add_custom_command(
+    OUTPUT "${ELF_HSACO}"
+    COMMAND "${AIE_HSACO}" --hsaco "${ELF_HSACO}" --arch "${AIE_ARCH}"
+            --kernel "elf:${FULL_ELF}:0:1"
+    DEPENDS aie_full_elf
+    COMMENT "Packaging the full ELF into an hsaco for the benchmark"
+    VERBATIM)
+  add_custom_target(vsadd_elf_hsaco_bench DEPENDS ${ELF_HSACO})
+
+  add_executable(vector-scalar-add-hsa-elf vector_scalar_add_hsa_elf.cpp)
+  target_compile_features(vector-scalar-add-hsa-elf PRIVATE cxx_std_20)
+  target_compile_definitions(vector-scalar-add-hsa-elf PRIVATE
+    DEFAULT_ELF_HSACO_PATH=${ELF_HSACO}
+    DEFAULT_ELF_KERNEL_NAME="main:sequence"
+  )
+  target_link_libraries(vector-scalar-add-hsa-elf PRIVATE
+    benchmark::benchmark_main
+    hsa-runtime64::hsa-runtime64
+  )
+  add_dependencies(vector-scalar-add-hsa-elf vsadd_elf_hsaco_bench)
+endif()
 
 # ---------------------------------------------------------------------------
 # HSA vmem alloc/release microbenchmark
