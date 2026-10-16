@@ -53,6 +53,7 @@
 namespace {
 
 int g_nLocalGinDevs = 1;
+constexpr int kFirstLocalGinDev = 7;  // the node's GIN devices are 7, 8, ...
 int g_peerGinCommCount = -1;  // -1: AllGather is a no-op copy; else fill other ranks
 int g_peerGinCommCountRanks = 2;  // ranks the AllGather fake fills when g_peerGinCommCount >= 0
 int64_t g_paramGinType = -1;
@@ -71,7 +72,9 @@ ncclResult_t LocalGinDevs(struct ncclComm*, int* localGinDevs, int* localGinCoun
   if (ret != ncclSuccess) return ret;
   if (localGinCount) *localGinCount = g_nLocalGinDevs;
   if (localGinDevs) {
-    for (int i = 0; i < g_nLocalGinDevs; i++) localGinDevs[i] = i;
+    // Device numbers deliberately not equal to their index, so a connection that
+    // indexes the plugin by commIdx instead of by localGinDevs[] is visible.
+    for (int i = 0; i < g_nLocalGinDevs; i++) localGinDevs[i] = kFirstLocalGinDev + i;
   }
   return ncclSuccess;
 }
@@ -210,6 +213,11 @@ struct FakeGin {
   int queryCalls = 0;
 
   // Team arguments of the last connect(), to check the strided-team math.
+  // The GIN device each listen / getProperties was made on, and the properties
+  // slot each connection was given, in call order.
+  std::vector<int> listenDevs;
+  std::vector<int> getPropertiesDevs;
+  std::vector<ncclNetProperties_t*> getPropertiesProps;
   int lastConnectNRanks = -1;
   int lastConnectRank = -1;
   // The handle pointers of the last connect, in team-rank order. Production
@@ -276,14 +284,17 @@ struct FakeGin {
   }
   // A plugin that fails hands back no listenComm, so production's fail path sees
   // the NULL slot and skips closeListen for it.
-  ncclResult_t listen(void** listenComm) {
+  ncclResult_t listen(int dev, void** listenComm) {
     ++listenCalls;
+    listenDevs.push_back(dev);
     ncclResult_t ret = failListen.at(listenCalls);
     if (ret == ncclSuccess) *listenComm = &listenHandle;
     return ret;
   }
-  ncclResult_t getProperties(ncclNetProperties_t* props) {
+  ncclResult_t getProperties(int dev, ncclNetProperties_t* props) {
     ++getPropertiesCalls;
+    getPropertiesDevs.push_back(dev);
+    getPropertiesProps.push_back(props);
     if (props) std::memset(props, 0, sizeof(*props));
     return failGetProperties.at(getPropertiesCalls);
   }
@@ -392,11 +403,11 @@ struct FakeGin {
 
   // --- vtable-facing adapters: recover + forward, no logic ------------------
   static ncclResult_t Devices(int* ndev) { return handlelessInstance()->devices(ndev); }
-  static ncclResult_t GetProperties(int, ncclNetProperties_t* props) {
-    return handlelessInstance()->getProperties(props);
+  static ncclResult_t GetProperties(int dev, ncclNetProperties_t* props) {
+    return handlelessInstance()->getProperties(dev, props);
   }
-  static ncclResult_t Listen(void* ctx, int, void*, void** listenComm) {
-    return fakeFrom(ctx, FakeHandle::Role::Instance)->listen(listenComm);
+  static ncclResult_t Listen(void* ctx, int dev, void*, void** listenComm) {
+    return fakeFrom(ctx, FakeHandle::Role::Instance)->listen(dev, listenComm);
   }
   static ncclResult_t Connect(void* ctx, void** handles, int nRanks, int rank, void* listenComm, void** collComm) {
     fakeFrom(listenComm, FakeHandle::Role::ListenComm);
@@ -1100,6 +1111,27 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_SecondConnectFails_ClosesTheEarl
   EXPECT_EQ(1, fake_.closeCollCalls);
   EXPECT_EQ(nullptr, gin()->backends[0].ginComms[0]);
   EXPECT_FALSE(gin()->connected);
+}
+
+// Two local GIN devices, four connections: connections are spread round-robin
+// over the devices, and each one gets its own properties slot.
+TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_MoreConnectionsThanLocalDevs_SpreadsThemOverTheDevices) {
+  g_nLocalGinDevs = 2;
+  nconnParam_ = 4;
+  ASSERT_EQ(ncclSuccess, connectOnce());
+
+  ASSERT_EQ(4, gin()->backends[0].ginCommCount);
+  const std::vector<int> expectedDevs{kFirstLocalGinDev, kFirstLocalGinDev + 1, kFirstLocalGinDev,
+                                      kFirstLocalGinDev + 1};
+  EXPECT_EQ(expectedDevs, fake_.listenDevs);
+  EXPECT_EQ(expectedDevs, fake_.getPropertiesDevs);
+
+  // Per-connection properties: connection i describes the device it was opened on.
+  ASSERT_EQ(4u, fake_.getPropertiesProps.size());
+  for (int commIdx = 0; commIdx < 4; commIdx++) {
+    EXPECT_EQ(gin()->backends[0].ginProps + commIdx, fake_.getPropertiesProps[commIdx])
+        << "connection " << commIdx << " overwrote another connection's properties";
+  }
 }
 
 // A listen that fails hands back no listen comm, so the fail path must not try
