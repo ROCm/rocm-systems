@@ -865,9 +865,10 @@ TEST_F(GinHostProxyAffinityMicrotest, NonEmptyAffinity_PinsProxyThreadToThatCpuS
 
   RunProgressOnce();
 
-  ASSERT_EQ(1u, g_ncclOsSetAffinityMasks.size());
-  EXPECT_TRUE(CPU_ISSET(3, &g_ncclOsSetAffinityMasks[0]));
-  EXPECT_EQ(1, CPU_COUNT(&g_ncclOsSetAffinityMasks[0]));
+  const auto masks = ncclOsSetAffinityMasksSnapshot();
+  ASSERT_EQ(1u, masks.size());
+  EXPECT_TRUE(CPU_ISSET(3, &masks[0]));
+  EXPECT_EQ(1, CPU_COUNT(&masks[0]));
 }
 
 TEST_F(GinHostProxyAffinityMicrotest, EmptyAffinity_LeavesProxyThreadAffinityUnchanged) {
@@ -876,7 +877,7 @@ TEST_F(GinHostProxyAffinityMicrotest, EmptyAffinity_LeavesProxyThreadAffinityUnc
   RunProgressOnce();
 
   EXPECT_EQ(1, g_ncclOsCpuCountCalls.load());
-  EXPECT_TRUE(g_ncclOsSetAffinityMasks.empty());
+  EXPECT_TRUE(ncclOsSetAffinityMasksSnapshot().empty());
 }
 
 ////////////////////////////////////////////////////////////////////////////////
@@ -1538,10 +1539,12 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_SpawningTheProxyThreads_Stashe
   ASSERT_TRUE(gin()->proxyThreadsCreated);  // it took the spawn branch
   EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &gin()->cpuAffinity));  // stashed verbatim
 
-  // The worker writes the mask from its own thread, so read it only once joined.
+  // The worker writes the mask from its own thread. Joining is what makes the write
+  // have HAPPENED; the snapshot is what makes reading it safe.
   joinProgressThreads();
-  ASSERT_EQ(1u, g_ncclOsSetAffinityMasks.size());
-  EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &g_ncclOsSetAffinityMasks[0]));
+  const auto masks = ncclOsSetAffinityMasksSnapshot();
+  ASSERT_EQ(1u, masks.size());
+  EXPECT_TRUE(CPU_EQUAL(&comm_->cpuAffinity, &masks[0]));
 }
 
 // Progress threads are started once; a later devComm joins the existing list

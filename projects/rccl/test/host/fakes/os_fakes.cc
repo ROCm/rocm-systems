@@ -69,6 +69,16 @@ ncclResult_t ncclOsSetAffinity(const ncclAffinity& affinity) {
   return g_ncclOsSetAffinityResult;
 }
 
+std::vector<ncclAffinity> ncclOsCpuCountMasksSnapshot() {
+  std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+  return g_ncclOsCpuCountMasks;
+}
+
+std::vector<ncclAffinity> ncclOsSetAffinityMasksSnapshot() {
+  std::lock_guard<std::mutex> lock(g_ncclOsAffinityMutex);
+  return g_ncclOsSetAffinityMasks;
+}
+
 // Must be non-empty and multi-token: ncclInit() strstr()s the strtok_r() of this, and strtok_r("") returns NULL.
 // Also not "1" and not the Hyper-V BIOS string, so numa_balancing / bios_version stay on their benign arms.
 ncclResult_t g_ncclOsTopoGetStrFromSysResult = ncclSuccess;

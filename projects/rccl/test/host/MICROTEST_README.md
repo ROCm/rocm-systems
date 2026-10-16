@@ -329,9 +329,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   failure arm is reachable by failing a chosen call. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
-  Every line and every source-level branch in `gin_host.cc` is covered; what
-  `llvm-cov` still reports as missed branches is inside `NCCLCHECK`/`WARN`
-  macro expansions at call sites whose failure arm no test drives.
+  Every line and every function in `gin_host.cc` is covered (100% of both);
+  branch coverage is 74%. The residue is in three groups, none of them a
+  source-level decision the tests skip:
+  - the debug-level gate inside `INFO` / `INFO_LOC`, which host tests run with
+    logging off (4 call sites);
+  - the `while (1)` headers of the two progress loops, where `llvm-cov` records
+    an exit edge a literal `1` can never take (2 sites);
+  - `NCCLCHECK`-family call sites (21). At 13 of them the check's own failure
+    arm *is* driven and only the `WARN` inside the macro is left; at the other
+    8 the failure arm is undriven, and five of those are `ncclCalloc` sites
+    that would need an allocation injector this binary does not have.
+
+  Re-derive rather than trusting those numbers: `BRDA` records for the file in
+  `build/coverage/rccl-UnitTestsMicroGinHost/coverage.lcov` give the per-line
+  breakdown, and note that lcov and `llvm-cov` count branches differently, so
+  the two totals will not agree.
 
 - **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
   `RMA_PROXY_CC_PATH`, from `rma-proxy-test.cc`); suite
@@ -532,6 +545,17 @@ is a fail-loud floor. Several files are honestly both — `transport_stubs.cc` i
 owns one driven seam, and `os_fakes.cc` holds working implementations with no seam at all. Do not
 read the suffix as a guarantee; read the file's header comment, which states what it owns. If you
 add a file, pick the suffix matching its majority content and say so at the top.
+
+**Recorders a production thread can reach.** Most fakes are touched only by the test's own thread,
+so their counters and recording vectors are plain `int`s and `std::vector`s. A fake reached from a
+thread the unit under test spawns needs more: `os_fakes.cc`'s affinity pair is the current example
+(`gin_host.cc`'s proxy progress workers call `ncclOsCpuCount` / `ncclOsSetAffinity` from their own
+threads), so its counter is a `std::atomic<int>` and its mask vectors are written under
+`g_ncclOsAffinityMutex` and read through `ncclOs*MasksSnapshot()`. If you seam something a
+spawned thread reaches, do the same, and keep a direct-read path for the single-threaded suites
+rather than churning them. Note that joining the worker and reading safely are two different
+problems: the join is what makes the write have happened, the snapshot is what makes the read
+safe.
 
 **`// UNDRIVEN`.** A seam carrying this marker is declared so the binary links and so an accidental
 call is visible, NOT because its path is covered. It is a link-floor entry with a chosen default,

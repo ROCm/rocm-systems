@@ -26,9 +26,20 @@
 // the workers run) and the mask vectors below are written under g_ncclOsAffinityMutex.
 extern int g_ncclOsCpuCountValue;
 extern std::atomic<int> g_ncclOsCpuCountCalls;
-// Held across every write to the two mask vectors. Tests that read a vector back must either hold it or
-// have joined the threads that write it; the single-threaded suites need neither.
+// Held across every write to the two mask vectors, and by the Snapshot() accessors below.
+//
+// Reading a vector DIRECTLY is only safe when no thread but the test's own can be inside
+// ncclOsCpuCount / ncclOsSetAffinity -- true of every single-threaded suite, which is why
+// init-test.cc reads them as plain vectors. A suite that spawns production threads (today
+// gin-host-test.cc, whose proxy progress workers pin themselves through these) must go
+// through the Snapshot() accessors instead; joining the workers first is necessary either
+// way, to know the write has happened at all, but it is not what makes the READ safe.
 extern std::mutex g_ncclOsAffinityMutex;
+
+// Copies taken under g_ncclOsAffinityMutex. Prefer these to the raw vectors in any test that
+// has spawned a thread -- it is one call rather than a lock_guard the reader has to remember.
+std::vector<ncclAffinity> ncclOsCpuCountMasksSnapshot();
+std::vector<ncclAffinity> ncclOsSetAffinityMasksSnapshot();
 // Every mask ncclOsCpuCount was handed, in call order. Which index is which call site is PATH-DEPENDENT:
 // a path running :1607-1611 and reaching exit: gives [0]=:1608 and [1]=exit::2403; a path stopping before
 // :1607 gives [0]=exit::2403; a path bypassing exit: (:1618) gives only :1608. Check .size() first.
