@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "fp/fma.h"
+
 #include <stdint.h>
 
 namespace rocjitsu::arith {
@@ -47,15 +49,24 @@ void wmma_packed_x86_64_v3(uint32_t modifiers, bool saturate, uint32_t *const *d
                            const uint32_t *const *a, const uint32_t *const *b,
                            const uint32_t *const *c);
 
+// Evaluate literal fma for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+template <bool Multiply>
+void literal_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t literal, uint32_t *d,
+                           const uint32_t *a, const uint32_t *b);
+
 // Loose FP32 FMA with source/output modifiers and guest denormal controls.
 // Preserves inactive lanes and supports D/input aliasing.
 // Requires the named CPU features and validated instruction controls.
 void fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
                    const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
-// Nearest guest rounding; special/tiny results are repaired with the inherited model.
-void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                         const uint32_t *a, const uint32_t *b, const uint32_t *c, bool rdna3);
+// Evaluate fma dx9 zero for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void fma_dx9_zero_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                            const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Exact FP16 FMA with nearest guest rounding. Preserves inactive lanes and aliases.
 // The caller must disable status reporting or select CLAMP, which suppresses status
@@ -64,11 +75,6 @@ void half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode,
                               const uint32_t *a, const uint32_t *b, const uint32_t *c,
                               bool rdna3 = false);
 
-// Loose FP16 fused multiply-add. Preserve destination lanes outside exec_mask.
-// Requires the named CPU features and validated instruction controls.
-void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                        const uint32_t *a, const uint32_t *b, const uint32_t *c);
-
 // Compute empirical bit-exact FP16/BF16 A*B+C for the selected gfx layout
 // and wave size. Requires validated mode; D may alias inputs.
 template <bool Bf16, int Lanes, bool Rdna3, bool Packed>
@@ -76,9 +82,36 @@ void wmma_exact_x86_64_v3(uint32_t mode, bool saturate, uint32_t *const *d,
                           const uint32_t *const *a, const uint32_t *const *b,
                           const uint32_t *const *c);
 
+// Nearest guest rounding; special/tiny results are repaired with the inherited model.
+void fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                         const uint32_t *a, const uint32_t *b, const uint32_t *c, bool dx9_zero,
+                         bool rdna3);
+
+// Evaluate packed fma exact for the caller-selected operation. Preserve destination lanes
+// outside exec_mask.
+// Requires the named CPU features and validated instruction controls. Return false to request
+// fallback.
+bool packed_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, const uint32_t modes[2],
+                                uint32_t *d, const uint32_t *a, const uint32_t *b,
+                                const uint32_t *c, uint32_t *state, bool rdna3 = false);
+
+// Evaluate FP16 fused multiply-add. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+template <FmaOperands Operands = FmaOperands::Registers>
+void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                        const uint32_t *a, const uint32_t *b, const uint32_t *c,
+                        uint16_t literal = 0);
+
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+
+// Evaluate literal fma for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
+// Requires the named CPU features and validated instruction controls.
+template <bool Multiply>
+void literal_fma_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t literal, uint32_t *d,
+                           const uint32_t *a, const uint32_t *b);
 
 // Loose FP32 FMA with source/output modifiers and guest denormal controls.
 // Preserves inactive lanes and supports D/input aliasing.
@@ -86,16 +119,11 @@ void wmma_exact_x86_64_v3(uint32_t mode, bool saturate, uint32_t *const *d,
 void fma_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
                    const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
-// Loose FP32 FMA with modifiers and guest denormal controls. Supports D/input
-// aliases and preserves destination lanes outside exec_mask.
+// Evaluate fma dx9 zero for the caller-selected operation. Preserve destination lanes outside
+// exec_mask.
 // Requires the named CPU features and validated instruction controls.
-void fma_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
-                   const uint32_t *a, const uint32_t *b, const uint32_t *c);
-
-// All FP32 inputs and guest rounding modes; exceptional/tiny lanes use scalar repair.
-bool fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
-                         const uint32_t *a, const uint32_t *b, const uint32_t *c,
-                         bool rdna3 = false);
+void fma_dx9_zero_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                            const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // All FP16 inputs and numeric policies. Unsupported reporting policies decline
 // without changing outputs; nonfinite lanes use the inherited scalar model.
@@ -110,6 +138,19 @@ void wmma_exact_x86_64_v4(uint32_t mode, bool saturate, uint32_t *const *d,
                           const uint32_t *const *a, const uint32_t *const *b,
                           const uint32_t *const *c);
 
+// All FP32 inputs and guest rounding modes; exceptional/tiny lanes use scalar repair.
+bool fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *d,
+                         const uint32_t *a, const uint32_t *b, const uint32_t *c,
+                         bool dx9_zero = false, bool rdna3 = false);
+
+// Evaluate packed fma exact for the caller-selected operation. Preserve destination lanes
+// outside exec_mask.
+// Requires the named CPU features and validated instruction controls. Return false to request
+// fallback.
+bool packed_fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, const uint32_t modes[2],
+                                uint32_t *d, const uint32_t *a, const uint32_t *b,
+                                const uint32_t *c, uint32_t *state, bool rdna3 = false);
+
 #endif
 
 #if defined(RJ_ARITH_HAVE_AVX512BF16)
@@ -119,14 +160,6 @@ void wmma_exact_x86_64_v4(uint32_t mode, bool saturate, uint32_t *const *d,
 // flush subnormal partial sums, even before a normal result; loose semantics
 // permit this difference.
 template <int Lanes, bool Rdna3, bool Packed>
-bool wmma_avx512bf16(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
-                     const uint32_t *const *b, const uint32_t *const *c);
-
-// Accumulate loose BF16 WMMA using native DPBF16 when inputs are eligible.
-// May decline without writes for screened input ranges. Native DPBF16 can
-// flush subnormal partial sums, including cancellation before a normal result;
-// this numerical difference is permitted by loose semantics.
-template <int Lanes, bool Rdna3>
 bool wmma_avx512bf16(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
                      const uint32_t *const *b, const uint32_t *const *c);
 

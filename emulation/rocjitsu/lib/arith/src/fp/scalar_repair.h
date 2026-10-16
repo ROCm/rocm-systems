@@ -7,16 +7,25 @@
 
 #pragma once
 
+#include "fp/mixed_fma.h"
+
 #include <stdint.h>
 
 namespace rocjitsu::arith {
 
 // Return one FP32 FMA lane under validated instruction and guest controls.
 uint32_t repair_fma_f32(uint32_t a, uint32_t b, uint32_t c, uint64_t flags, uint32_t mode,
-                        bool rdna3);
+                        bool rdna3, bool dx9_zero);
 
 // Return one selected FP16 FMA lane, accumulating status when requested.
 uint16_t repair_fma_f16(uint16_t a, uint16_t b, uint16_t c, uint32_t mode, uint64_t flags,
                         bool rdna3, uint32_t *status = nullptr);
+
+// Repair one mixed FMA lane from raw operands, preserving the unselected D half.
+uint32_t repair_mixed_fma(MixedFma destination, bool rdna3, uint64_t flags, uint32_t mode,
+                          uint32_t a, uint32_t b, uint32_t c, uint32_t d);
+
+// Return the mixed-half model's NaN/infinity result for decoded FP32 inputs.
+uint16_t repair_mixed_special(uint32_t a, uint32_t b, uint32_t c);
 
 } // namespace rocjitsu::arith

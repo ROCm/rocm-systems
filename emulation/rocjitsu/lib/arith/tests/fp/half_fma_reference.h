@@ -6,6 +6,8 @@
 
 #pragma once
 
+#include "rj_arith/rj_arith.h"
+
 #include <algorithm>
 #include <bit>
 #include <cmath>

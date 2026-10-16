@@ -91,11 +91,16 @@ inline uint32_t fma_value_f32(uint32_t a, uint32_t b, uint32_t c, uint64_t flags
   return result;
 }
 
+// Clamp an FP32 result to [0,1], retaining NaNs only when DX10 clamping is disabled.
+inline uint32_t fma_clamp_f32(uint32_t value, uint64_t flags) {
+  return clamp_f32_bits(value, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
+}
+
 // Apply source modifiers, guest rounding, OMOD and CLAMP for ordinary FP32 FMA.
 [[gnu::always_inline]] inline uint32_t fma_instruction_value(uint32_t a, uint32_t b, uint32_t c,
                                                              uint64_t flags,
-                                                             uint32_t instruction_flags,
-                                                             bool rdna3) {
+                                                             uint32_t instruction_flags, bool rdna3,
+                                                             bool dx9_zero) {
   unsigned omod = (instruction_flags >> 6) & 3;
   uint32_t input[] = {a, b, c};
   for (int operand = 0; operand < 3; ++operand) {
@@ -109,7 +114,13 @@ inline uint32_t fma_value_f32(uint32_t a, uint32_t b, uint32_t c, uint64_t flags
       input[operand] &= 0x80000000;
     }
   }
-
+  if (dx9_zero) {
+    if (!(input[0] & 0x7fffffff) || !(input[1] & 0x7fffffff)) {
+      // DX9 supplies a positive zero product before adding C.
+      input[0] = 0;
+      input[1] = 0x3f800000;
+    }
+  }
   // OMOD flushes a tiny intermediate before scaling, independently of MODE.
   uint32_t value = rocjitsu::arith::fma_value_f32(
       input[0], input[1], input[2], flags | (omod ? RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS : 0), rdna3);
@@ -117,7 +128,7 @@ inline uint32_t fma_value_f32(uint32_t a, uint32_t b, uint32_t c, uint64_t flags
                                                unsigned((flags & RJ_ARITH_FP_ROUND_MASK) >> 24));
 
   if (instruction_flags & RJ_ARITH_ALU_CLAMP) {
-    value = rocjitsu::arith::clamp_f32_bits(value, flags & RJ_ARITH_FP_DX10_CLAMP_OFF);
+    value = fma_clamp_f32(value, flags);
   }
   return value;
 }

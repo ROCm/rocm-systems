@@ -1,0 +1,79 @@
+// Copyright (c) 2026 Advanced Micro Devices, Inc.
+// SPDX-License-Identifier: MIT
+
+// Tests for fMA with a literal multiplier.
+
+#include "fp/fma_reference.h"
+#include "fp/immediate_fma_test.h"
+#include "rj_arith/rj_arith.h"
+
+#include <gtest/gtest.h>
+#include <stdint.h>
+
+namespace {
+
+// Literal exception contributions from the inherited rocjitsu model and the
+// old suite's gfx1201-validated cases. Test each cause alone, then accumulated;
+// an inactive exceptional lane must not contribute. No host flags are read.
+using rocjitsu::arith::test::StatusCase;
+
+const StatusCase status_cases_f16[] = {
+    {0x3c00U, 0x0U, 0x0U, 0},
+    {0x7c00U, 0xfc00U, 0x0U, RJ_ARITH_EXCEPTION_INVALID},
+    {0x7bffU, 0x7bffU, 0x0U, RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+    {0x3c01U, 0x0U, 0x0U, RJ_ARITH_EXCEPTION_INEXACT},
+};
+
+} // namespace
+
+// Check fMA with a literal multiplier.
+TEST(FpFmamkF16W32Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_immediate_fma_f16<32, /*MultiplyConstant=*/true>(
+      rj_arith_v_fmamk_f16_w32_gfx12,
+      /*gfx12=*/true, status_cases_f16);
+}
+
+// Check fMA with a literal multiplier.
+TEST(FpFmamkF16W32Gfx11, Arithmetic) {
+  rocjitsu::arith::test::check_immediate_fma_f16<32, /*MultiplyConstant=*/true>(
+      rj_arith_v_fmamk_f16_w32,
+      /*gfx12=*/false, status_cases_f16);
+}
+
+// Check fMA with a literal multiplier.
+TEST(FpFmamkF16W64Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_immediate_fma_f16<64, /*MultiplyConstant=*/true>(
+      rj_arith_v_fmamk_f16_w64_gfx12,
+      /*gfx12=*/true, status_cases_f16);
+}
+
+// Check fMA with a literal multiplier.
+TEST(FpFmamkF16W64Gfx11, Arithmetic) {
+  rocjitsu::arith::test::check_immediate_fma_f16<64, /*MultiplyConstant=*/true>(
+      rj_arith_v_fmamk_f16_w64,
+      /*gfx12=*/false, status_cases_f16);
+}
+
+// Check fMA with a literal multiplier.
+TEST(FpFmamkF32W32Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_immediate_fma_f32<32, /*MultiplyConstant=*/true>(
+      rj_arith_v_fmamk_f32_w32_gfx12, /*gfx12=*/true);
+}
+
+// Check fMA with a literal multiplier.
+TEST(FpFmamkF32W32Gfx11, Arithmetic) {
+  rocjitsu::arith::test::check_immediate_fma_f32<32, /*MultiplyConstant=*/true>(
+      rj_arith_v_fmamk_f32_w32, /*gfx12=*/false);
+}
+
+// Check fMA with a literal multiplier.
+TEST(FpFmamkF32W64Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_immediate_fma_f32<64, /*MultiplyConstant=*/true>(
+      rj_arith_v_fmamk_f32_w64_gfx12, /*gfx12=*/true);
+}
+
+// Check fMA with a literal multiplier.
+TEST(FpFmamkF32W64Gfx11, Arithmetic) {
+  rocjitsu::arith::test::check_immediate_fma_f32<64, /*MultiplyConstant=*/true>(
+      rj_arith_v_fmamk_f32_w64, /*gfx12=*/false);
+}
