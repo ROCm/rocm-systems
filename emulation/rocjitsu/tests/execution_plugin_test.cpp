@@ -56,6 +56,7 @@
 #include "rocjitsu/isa/instruction.h"
 #include "rocjitsu/kmd/linux/kfd_process.h"
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/arithmetic_policy.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/dispatch_entry.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
@@ -3569,6 +3570,8 @@ TEST(ExecutionPluginTest, MultiplyClassificationPreservesActiveReadsAndException
   for (const auto &[arch, opcode] : targets) {
     SCOPED_TRACE(static_cast<int>(arch));
     Wave32PluginFixture f(arch);
+    // Explicitly require faithful FP status for this exception test.
+    f.cu->restore_arithmetic_policy({amdgpu::ArithmeticSemantics::BitExactEmpirical});
     auto *plugin = f.attach_ordering_plugin();
     auto *wf = f.cu->dispatch_wf(0, 0, 104, 32);
     ASSERT_NE(wf, nullptr);

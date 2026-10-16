@@ -197,9 +197,13 @@ def _register_handlers() -> None:
         c.supports_dpp8,
         c.supports_sdwa,
         c.profile.dpp_bound_ctrl_applies_to_inactive_sources,
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
     )
     DISPATCH['vector_swaprel'] = lambda c: gen_vector_swaprel(
-        c.dst_ops, c.src_ops, c.profile.uses_vgpr_msb_indexing
+        c.dst_ops,
+        c.src_ops,
+        c.profile.uses_vgpr_msb_indexing,
+        use_rj_arith=c.arch_name in ('rdna3', 'rdna4'),
     )
     DISPATCH['vector_sat_pack'] = lambda c: gen_vector_sat_pack(
         c.dst_ops, c.src_ops, c.op

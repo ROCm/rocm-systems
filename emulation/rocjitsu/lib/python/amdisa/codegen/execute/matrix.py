@@ -12,6 +12,8 @@ from __future__ import annotations
 from typing import TYPE_CHECKING, Literal
 
 from amdisa.codegen.execute.fp8_formats import FNUZ_FP8_ARCHES, fp8_helper_name
+from amdisa.codegen.execute.rj_arith_matrix import gen_dense_wmma
+from amdisa.codegen.execute.rj_arith_sparse_matrix import gen_sparse_wmma
 from amdisa.isa_profile import MatrixLayout, SwmmacLayout
 
 if TYPE_CHECKING:
@@ -122,6 +124,8 @@ def gen_mfma(ctx: ExecuteContext) -> str:
     hazard avoidance (buffered writes), and inline constant accumulator
     initialization without clobbering overlapping source operands.
     """
+    if (rj_arith_body := gen_dense_wmma(ctx) or gen_sparse_wmma(ctx)) is not None:
+        return rj_arith_body
     inst, dst, src = ctx.inst, ctx.dst_ops, ctx.src_ops
     arch_name = ctx.arch_name
     supports_gpr_idx = ctx.profile.supports_gpr_idx

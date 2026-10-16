@@ -2885,6 +2885,23 @@ class CodeGenerator:
             .replace('@VOPD_INTEGER_SIMD_PROBE@', vopd_integer_simd_probe)
         )
 
+        from amdisa.codegen.execute.rj_arith_vopd import gen_vopd_execution
+
+        rj_arith_vopd = gen_vopd_execution(logical_arch, vopd_slot_ops)
+        if rj_arith_vopd is not None:
+            execution_helpers = ''
+            execution_method = rj_arith_vopd
+            header = header.replace(
+                '  static bool uses_src_neg_modifier(uint16_t op);\n'
+                '  static uint32_t apply_neg(uint32_t value, uint8_t neg_bits, uint8_t src_idx);\n'
+                '  static uint32_t execute_slot(const Slot &slot, amdgpu::Wavefront &wf,\n'
+                '                               uint32_t lane);\n',
+                '',
+            ).replace(
+                '  static uint32_t bitop2(uint32_t src0, uint32_t src1, uint32_t truth_table);\n',
+                '',
+            )
+
         vopd_isa_diagnostics = cpp_block('''
             // Evaluate the qualified operand restrictions once, at decode.
             const bool vopd3 = @IS_VOPD3@;
@@ -3261,6 +3278,17 @@ class CodeGenerator:
                 f'}} // namespace {arch}\n'
                 '} // namespace rocjitsu\n'
             )
+            if rj_arith_vopd is not None:
+                execution_file = execution_file.replace(
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"\n',
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h"\n'
+                    '#include "rocjitsu/isa/arch/amdgpu/shared/rj_arith_vopd_exec.h"\n',
+                )
+                for legacy_header in ('gfx11_dot2.h', 'gfx12_dot.h'):
+                    execution_file = execution_file.replace(
+                        f'#include "rocjitsu/isa/arch/amdgpu/shared/{legacy_header}"\n',
+                        '',
+                    )
             with open(os.path.join(out_dir, 'vopd.cpp'), 'w') as f:
                 f.write(str(impl_outputs.model[0]))
             with open(os.path.join(out_dir, 'vopd_exec.cpp'), 'w') as f:
@@ -6575,6 +6603,236 @@ class CodeGenerator:
         has_abs = profile.has_abs_modifier(inst.enc_name)
         self._enc_name = enc_name
 
+        from amdisa.codegen.execute.rj_arith_compare import (
+            gen_integer_compare,
+            gen_float_compare,
+            gen_class_compare,
+        )
+
+        rj_arith_compare = gen_integer_compare(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_compare is not None:
+            return rj_arith_compare
+
+        rj_arith_compare = gen_float_compare(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_compare is not None:
+            return rj_arith_compare
+
+        rj_arith_compare = gen_class_compare(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_compare is not None:
+            return rj_arith_compare
+
+        from amdisa.codegen.execute.rj_arith_ds import gen_ds
+
+        rj_arith_ds = gen_ds(self.isa_spec.arch_name, inst.name, dst_ops, src_ops)
+        if rj_arith_ds is not None:
+            return rj_arith_ds
+
+        from amdisa.codegen.execute.rj_arith_lane import gen_lane
+
+        rj_arith_lane = gen_lane(self.isa_spec.arch_name, inst.name, dst_ops, src_ops)
+        if rj_arith_lane is not None:
+            return rj_arith_lane
+
+        from amdisa.codegen.execute.rj_arith_vector import (
+            gen_vector32,
+            gen_carry32,
+            gen_wide_integer,
+            gen_integer16,
+            gen_widening_integer,
+            gen_packed_integer,
+            gen_integer_dot,
+        )
+
+        rj_arith_carry = gen_carry32(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_carry is not None:
+            return rj_arith_carry
+        rj_arith_wide = gen_wide_integer(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_wide is not None:
+            return rj_arith_wide
+        from amdisa.codegen.execute.rj_arith_division import gen_division
+
+        rj_arith_division = gen_division(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3, result_writer
+        )
+        if rj_arith_division is not None:
+            return rj_arith_division
+
+        from amdisa.codegen.execute.rj_arith_float import (
+            gen_byte_nibble_conversion,
+            gen_bit_pack,
+            gen_fp8_widen,
+            gen_fp8_narrow,
+            gen_conversion64,
+            gen_conversion32,
+            gen_conversion16,
+            gen_packed_conversion,
+            gen_normalized,
+            gen_cube,
+            gen_float_unary32,
+            gen_float_unary64,
+            gen_float64_word,
+            gen_float_fma64,
+            gen_float_binary64,
+            gen_float_unary16,
+            gen_float_binary32,
+            gen_float_binary16,
+            gen_float_fma32,
+            gen_float_fma16,
+            gen_float_ternary_selection,
+            gen_mullit,
+            gen_packed_fma16,
+            gen_mixed_fma,
+            gen_pseudo_scalar,
+            gen_packed_binary16,
+            gen_float_dot32,
+            gen_half_dot,
+        )
+        from amdisa.codegen.execute.rj_arith_scalar import gen_scalar
+
+        if result_writer is None:
+            rj_arith_body = (
+                gen_scalar(self.isa_spec.arch_name, inst.name, dst_ops, src_ops)
+                or gen_pseudo_scalar(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_integer_dot(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, enc_name
+                )
+                or gen_packed_integer(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                    self._op_sel_hi_2_expr(inst.enc_name),
+                )
+                or gen_widening_integer(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_integer16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_vector32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_half_dot(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_dot32(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                )
+                or gen_packed_binary16(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                )
+                or gen_packed_fma16(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                    self._op_sel_hi_2_expr(inst.enc_name),
+                )
+                or gen_mixed_fma(
+                    self.isa_spec.arch_name,
+                    inst.name,
+                    dst_ops,
+                    src_ops,
+                    enc_name,
+                    self._vop3p_opsel_exprs(),
+                    self._op_sel_hi_2_expr(inst.enc_name),
+                )
+                or gen_float_unary16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_normalized(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_packed_conversion(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_conversion16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_conversion32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_conversion64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_fp8_narrow(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_fp8_widen(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_bit_pack(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_byte_nibble_conversion(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_cube(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_unary32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_unary64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_binary64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_fma64(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float64_word(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_binary16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_binary32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_mullit(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_ternary_selection(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_fma16(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+                or gen_float_fma32(
+                    self.isa_spec.arch_name, inst.name, dst_ops, src_ops, is_vop3
+                )
+            )
+            if rj_arith_body is not None:
+                return rj_arith_body
+
         # Try SemaAST pipeline for validated classes.
         from amdisa.sema_derive import derive_sema_block
         from amdisa.codegen.execute.sema_lower import (
@@ -8088,6 +8346,14 @@ class CodeGenerator:
         if cls in ('image_atomic', 'image_sample', 'image_query', 'image_bvh'):
             L.append('  (void)wf; // Image pipeline not yet implemented.')
             return '\n'.join(L)
+
+        from amdisa.codegen.execute.rj_arith_interp import gen_interp
+
+        rj_arith_interp = gen_interp(
+            self.isa_spec.arch_name, inst.name, dst_ops, src_ops, enc_name
+        )
+        if rj_arith_interp is not None:
+            return rj_arith_interp
 
         # ── Graphics-only stubs (no-ops in compute simulation) ───────────
         if cls == 'export':
@@ -13612,6 +13878,65 @@ class CodeGenerator:
                         _portable_probe = self._can_force_shared_simd_probe(
                             inst, enc.enc_name
                         )
+                        # rj-arith owns SIMD selection for migrated instructions. Never
+                        # run a legacy arithmetic probe ahead of the rj-arith body.
+                        from amdisa.codegen.execute.rj_arith_vector import (
+                            VECTOR32_NAMES,
+                            CARRY32_NAMES,
+                            WIDE_INTEGER_NAMES,
+                            INTEGER16_NAMES,
+                            WIDENING_INTEGER_NAMES,
+                            PACKED_INTEGER_NAMES,
+                            INTEGER_DOT_NAMES,
+                        )
+                        from amdisa.codegen.execute.rj_arith_ds import DS_NAMES
+                        from amdisa.codegen.execute.rj_arith_lane import LANE_NAMES
+                        from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES
+                        from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
+                        from amdisa.codegen.execute.rj_arith_scalar import SCALAR_NAMES
+                        from amdisa.codegen.execute.rj_arith_compare import (
+                            COMPARE_NAMES,
+                            FLOAT_COMPARISONS,
+                        )
+
+                        _rj_arith_arithmetic = self.isa_spec.arch_name in (
+                            'rdna3',
+                            'rdna4',
+                        ) and (
+                            inst.name in DS_NAMES
+                            or inst.name in LANE_NAMES
+                            or inst.name in DIVISION_NAMES
+                            or inst.name in COMPARE_NAMES
+                            or inst.name in CARRY32_NAMES
+                            or inst.name in WIDE_INTEGER_NAMES
+                            or inst.name in INTEGER16_NAMES
+                            or inst.name in WIDENING_INTEGER_NAMES
+                            or inst.name in PACKED_INTEGER_NAMES
+                            or inst.name in INTEGER_DOT_NAMES
+                            or (
+                                (
+                                    inst.name in VECTOR32_NAMES
+                                    or inst.name in FLOAT_NAMES
+                                    or inst.name in SCALAR_NAMES
+                                )
+                                and _mask_result_writer is None
+                            )
+                        )
+                        if _rj_arith_arithmetic:
+                            can_share = False
+                            _portable_probe = False
+                            if inst.name in FLOAT_COMPARISONS:
+                                _ordinary_result_commit_setup += (
+                                    '  const uint64_t exec_mask = wf.exec();\n'
+                                )
+                                _result_commit_setup += (
+                                    '  uint64_t exec_mask = wf.exec();\n'
+                                )
+                                if _has_dpp_encoding:
+                                    _result_commit_setup += (
+                                        '  if (inst_.src0 == amdgpu::SRC_DPP)\n'
+                                        '    exec_mask &= dpp_row_bank_mask_ & dpp_source_write_mask_;\n'
+                                    )
                         if not body_throws and (can_share or _portable_probe):
                             self._shared_execute_candidates[
                                 (inst.mnemonic, enc.enc_name)
@@ -13666,6 +13991,13 @@ class CodeGenerator:
                             _coverage_probe
                             or _local_true16_probe
                             or _renamed_vop3p_probe
+                        )
+                        if _rj_arith_arithmetic:
+                            _local_simd_probe = None
+                        _rj_arith_error_guard = (
+                            '  if (wf.instruction_execution_failed())\n    return;\n'
+                            if _rj_arith_arithmetic
+                            else ''
                         )
                         _local_simd_probe_body = ''
                         _local_scalar_body = _local_body
@@ -13833,6 +14165,7 @@ class CodeGenerator:
                                     f'{_local_simd_probe_body}'
                                     f'{_local_execute_body}\n'
                                     f'{_dpp_observation_restore}'
+                                    f'{_rj_arith_error_guard}'
                                     f'{_dpp_cleanup}'
                                     f'{_sdwa_postamble}}}'
                                 )
@@ -14162,13 +14495,90 @@ class CodeGenerator:
                     cpp_includes.append(
                         ('rocjitsu/isa/arch/amdgpu/shared/lds_direct.h', False)
                     )
+                from amdisa.codegen.execute.rj_arith_compare import COMPARE_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in COMPARE_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_compare_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_interp import INTERP_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in INTERP_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_interp_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_division import DIVISION_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DIVISION_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_division_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_ds import DS_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in DS_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_ds_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_lane import LANE_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in LANE_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_lane_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_float import FLOAT_NAMES
+
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in FLOAT_NAMES for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_float_exec.h', False)
+                    )
+                from amdisa.codegen.execute.rj_arith_vector import (
+                    VECTOR32_NAMES,
+                    CARRY32_NAMES,
+                    WIDE_INTEGER_NAMES,
+                    INTEGER16_NAMES,
+                    WIDENING_INTEGER_NAMES,
+                    PACKED_INTEGER_NAMES,
+                    INTEGER_DOT_NAMES,
+                )
+                from amdisa.codegen.execute.rj_arith_scalar import SCALAR_NAMES
+
+                has_rj_arith_scalar = self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in SCALAR_NAMES for i in all_insts
+                )
+                if has_rj_arith_scalar:
+                    cpp_includes.append(('rj_arith/rj_arith.h', False))
+                if self.isa_spec.arch_name in ('rdna3', 'rdna4') and any(
+                    i.name in VECTOR32_NAMES
+                    or i.name in CARRY32_NAMES
+                    or i.name in WIDE_INTEGER_NAMES
+                    or i.name in INTEGER16_NAMES
+                    or i.name in WIDENING_INTEGER_NAMES
+                    or i.name in PACKED_INTEGER_NAMES
+                    or i.name in INTEGER_DOT_NAMES
+                    for i in all_insts
+                ):
+                    cpp_includes.append(
+                        ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_vector_exec.h', False)
+                    )
                 has_matrix_exec = any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
                     and s.semantic_class == 'mfma'
                     for i in all_insts
                 )
-                requires_compute_unit = any(
+                requires_compute_unit = has_rj_arith_scalar or any(
                     self.semantics
                     and (s := self.semantics.instructions.get(i.name))
                     and s.semantic_class
@@ -14182,6 +14592,14 @@ class CodeGenerator:
                 if requires_compute_unit:
                     cpp_includes.append(('rocjitsu/vm/amdgpu/compute_unit.h', False))
                 if has_matrix_exec:
+                    if self.isa_spec.arch_name in ('rdna3', 'rdna4'):
+                        cpp_includes.append(
+                            ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_exec.h', False)
+                        )
+                    if self.isa_spec.arch_name == 'rdna4':
+                        cpp_includes.append(
+                            ('rocjitsu/isa/arch/amdgpu/shared/rj_arith_sparse_exec.h', False)
+                        )
                     cpp_includes.append(
                         (
                             self.config.handwritten_include(

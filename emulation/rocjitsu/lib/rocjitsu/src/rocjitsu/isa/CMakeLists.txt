@@ -48,6 +48,9 @@ function(rj_add_split_amdgpu_isa_library arch)
 
     rj_add_object_library(${_target}_model ${_model_sources})
     rj_add_object_library(${_target}_exec ${_execution_sources})
+    if(arch STREQUAL "rdna3" OR arch STREQUAL "rdna4")
+        target_link_libraries(${_target}_exec PUBLIC rj_arith)
+    endif()
 
     add_library(${_target} INTERFACE)
     target_sources(

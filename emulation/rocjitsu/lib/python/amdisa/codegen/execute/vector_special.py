@@ -137,6 +137,25 @@ def _resolved_vgpr_offset_call(opnd: str, uses_vgpr_msb_indexing: bool) -> str:
     return f'Isa::resolved_vgpr_offset({opnd}.opr_type_, {opnd}.encoding_value_)'
 
 
+def _move_lanes(dst: str, src: str, use_rj_arith: bool) -> str:
+    if use_rj_arith:
+        # Addressing and DPP source staging have already selected the operands.
+        return (
+            '  amdgpu::arith::execute_unary32(wf, rj_arith_v_mov_b32_w32, rj_arith_v_mov_b32_w64,\n'
+            '      wf.cu().arithmetic_flags(), 0,\n'
+            f'      {dst}, {src});'
+        )
+    return '\n'.join(
+        [
+            '  uint64_t exec = wf.exec();',
+            '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
+            '    if (!(exec & (1ULL << lane))) continue;',
+            f'    amdgpu::RegisterAccess(wf).write_lane({dst}, lane, amdgpu::RegisterAccess(wf).read_lane({src}, lane));',
+            '  }',
+        ]
+    )
+
+
 def gen_vector_movrel(
     dst: list[str],
     src: list[str],
@@ -146,6 +165,7 @@ def gen_vector_movrel(
     supports_dpp8: bool = False,
     supports_sdwa: bool = False,
     inactive_uses_bound_ctrl: bool = False,
+    use_rj_arith: bool = False,
 ) -> str:
     """Generate M0-relative VGPR move bodies."""
     if op not in ('src', 'dst', 'srcdst', 'srcdst2'):
@@ -170,13 +190,7 @@ def gen_vector_movrel(
         _stage_movrel_source(
             L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
         )
-        L.append('  uint64_t exec = wf.exec();')
-        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({dst[0]}, lane, amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));'
-        )
-        L.append('  }')
+        L.append(_move_lanes(dst[0], 'rel_src', use_rj_arith))
         return '\n'.join(L)
 
     if op in ('srcdst', 'srcdst2'):
@@ -217,14 +231,7 @@ def gen_vector_movrel(
         _stage_movrel_source(
             L, supports_dpp, supports_dpp8, supports_sdwa, inactive_uses_bound_ctrl
         )
-        L.append('  uint64_t exec = wf.exec();')
-        L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-        L.append('    if (!(exec & (1ULL << lane))) continue;')
-        L.append(
-            '    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane, '
-            'amdgpu::RegisterAccess(wf).read_lane(rel_src, lane));'
-        )
-        L.append('  }')
+        L.append(_move_lanes('rel_dst', 'rel_src', use_rj_arith))
         return '\n'.join(L)
 
     rel_dst_call = _resolved_vgpr_offset_call(dst[0], uses_vgpr_msb_indexing)
@@ -241,13 +248,7 @@ def gen_vector_movrel(
     L.append(
         f'  Operand rel_dst({dst[0]}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));'
     )
-    L.append('  uint64_t exec = wf.exec();')
-    L.append('  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {')
-    L.append('    if (!(exec & (1ULL << lane))) continue;')
-    L.append(
-        f'    amdgpu::RegisterAccess(wf).write_lane(rel_dst, lane, amdgpu::RegisterAccess(wf).read_lane({src[0]}, lane));'
-    )
-    L.append('  }')
+    L.append(_move_lanes('rel_dst', src[0], use_rj_arith))
     return '\n'.join(L)
 
 
@@ -301,7 +302,10 @@ def _stage_movrel_source(
 
 
 def gen_vector_swaprel(
-    dst: list[str], src: list[str], uses_vgpr_msb_indexing: bool = False
+    dst: list[str],
+    src: list[str],
+    uses_vgpr_msb_indexing: bool = False,
+    use_rj_arith: bool = False,
 ) -> str:
     """Generate V_SWAPREL_B32 using the two unsigned M0 index fields."""
     d, s = dst[0], src[0]
@@ -318,6 +322,13 @@ def gen_vector_swaprel(
         f'  if (!amdgpu::relative_vgpr_index(rel_dst_base, rel_dst_offset, {d}.vgpr_count(), wf.vgpr_alloc().count)) return;',
         f'  Operand rel_src({s}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_src_index));',
         f'  Operand rel_dst({d}.size_bits(), OperandType::OPR_VGPR, static_cast<int>(rel_dst_index));',
+    ]
+    if use_rj_arith:
+        L += [
+            '  amdgpu::arith::execute_swap<false>(wf, wf.cu().arithmetic_flags(), rel_dst, rel_src);',
+        ]
+        return '\n'.join(L)
+    L += [
         '  uint64_t exec = wf.exec();',
         '  for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {',
         '    if (!(exec & (1ULL << lane))) continue;',

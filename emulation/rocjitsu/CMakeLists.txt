@@ -347,7 +347,8 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
-# Configure arithmetic before applying the parent host CPU flags.
+# rj-arith selects its own baseline and runtime-dispatched SIMD implementations.
+# Configure it before applying rocjitsu's directory-wide host CPU flags.
 add_subdirectory(lib/arith)
 
 # Apply the host CPU policy to rocjitsu targets, after configuring dependencies.

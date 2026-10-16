@@ -298,7 +298,7 @@ void MemoryWaitScoreboard::check_instruction_pending(const Instruction &inst, Wa
         remaining &= remaining - 1;
         const bool swizzle = modifiers.ds_permutation == DsPermutation::Swizzle;
         const unsigned source =
-            swizzle ? ds_swizzle_lane(lane, modifiers.ds_offset)
+            swizzle ? ds_swizzle_lane(lane, modifiers.ds_offset, wf.cu().arch())
                     : ds_permute_lane(
                           lane,
                           address ? registers.vector_control_value(*address, lane).value_or(0) : 0,
