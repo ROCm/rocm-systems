@@ -5,7 +5,8 @@
 
 The page is the customer text for AIRUNTIME-2733. Its device table has to name
 exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
-that adds, removes or blanks one cannot land without updating the page.
+that adds, removes or blanks one cannot land without updating the page. Its
+inventory has to list the active marker and the hipHostRegister snapshot.
 
 Run: python3 -m unittest discover -s projects/hrr/tools/tests
 """
@@ -16,9 +17,8 @@ from pathlib import Path
 
 HRR = Path(__file__).resolve().parents[2]
 PRIVACY = HRR / "PRIVACY.md"
-METADATA_CPP = (
-    HRR.parent / "clr" / "hipamd" / "src" / "hrr" / "hip_capture_metadata.cpp"
-)
+CAPTURE_SRC = HRR.parent / "clr" / "hipamd" / "src" / "hrr"
+METADATA_CPP = CAPTURE_SRC / "hip_capture_metadata.cpp"
 
 # The tasks under AIRUNTIME-2733 that the page links, one per statement.
 EPIC_TASKS = (
@@ -38,6 +38,13 @@ def device_fields_written() -> set:
     return set(re.findall(r'\\"(\w+)\\": ', body)) - {"properties"}
 
 
+def inventory_rows() -> list:
+    """The rows of the page's "What an archive contains" table."""
+    text = PRIVACY.read_text(encoding="utf-8")
+    table = text.split("| Item | Where |", 1)[1].split("\n\n", 1)[0]
+    return table.splitlines()[2:]
+
+
 def device_fields_documented() -> set:
     """The backticked names in the first column of the page's device table."""
     text = PRIVACY.read_text(encoding="utf-8")
@@ -53,6 +60,22 @@ class PrivacyDocTest(unittest.TestCase):
         written = device_fields_written()
         self.assertIn("uuid", written)
         self.assertEqual(device_fields_documented(), written)
+
+    def test_inventory_lists_the_active_marker_capture_writes(self):
+        writer = (CAPTURE_SRC / "hip_capture_writer.cpp").read_text(encoding="utf-8")
+        name = re.search(r'kActiveMarker = "/(\w+)"', writer).group(1)
+        self.assertTrue(
+            any(row.split("|")[2].strip() == f"`{name}`" for row in inventory_rows())
+        )
+
+    def test_inventory_lists_the_host_register_snapshot(self):
+        capture = (CAPTURE_SRC / "hip_capture.cpp").read_text(encoding="utf-8")
+        body = capture.split("hipError_t capture_hipHostRegister(", 1)[1]
+        body = body.split("\n}\n", 1)[0]
+        self.assertIn("write_blob(", body)
+        self.assertTrue(
+            any("`hipHostRegister`" in row and "`blobs/`" in row for row in inventory_rows())
+        )
 
     def test_states_that_an_archive_is_untrusted_executable_input(self):
         text = PRIVACY.read_text(encoding="utf-8")

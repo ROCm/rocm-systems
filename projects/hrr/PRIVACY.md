@@ -16,8 +16,12 @@ An archive is untrusted executable input for the tool that replays it. `hrr-play
 the code objects stored in the archive and launches their kernels on the GPU. That code runs
 with the replaying process's access to device memory and to any host memory mapped for the
 GPU, and nothing in the replay tool can check what it does. The tool refuses malformed
-records, translates every recorded pointer and handle before HIP sees it, and caps memory,
-events and run time, but it cannot make the code itself safe.
+records and caps memory, events and run time, but it cannot make the code itself safe.
+Replay maps recorded pointers to the buffers it allocated so that the run can be rebuilt;
+this is reconstruction, not a safety boundary. Only a value that matches a recorded
+allocation is translated: a pointer argument that matches none is passed as null, and every
+other argument byte, including a pointer-sized word inside a struct that matches none, is
+passed as recorded, so a kernel can still receive addresses from the original process.
 
 Replay an archive only if you trust whoever produced it, as an unprivileged user, on a
 machine and GPU that hold no data you would not hand to that person. A container is a
@@ -43,11 +47,13 @@ every capture is a contents capture.
 | Kernel names, mangled but read back with `c++filt`; they describe the model's architecture and precision | `events.bin` | both | — kept, triage names the failing kernel |
 | Event timestamps, from a monotonic clock (not the date or time of day) | `events.bin` | both | — kept |
 | Host buffers copied to or from the device, byte for byte, unencrypted. For a serving stack this includes prompts and generated output as token ids, which the model's public tokeniser reverses, and the model weights | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
+| Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Kernel argument bytes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Whole fat binary bundles, including targets HIP never loads | `blobs/` | contents | [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858): only the code objects HIP loads |
 | Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): stripped |
 | Framework allocator layout, when a region producer ran beside capture | `regions/` | both | — kept, written only by an opt-in producer |
+| Marker that capture is running: on Linux the boot id and the process start time in clock ticks since boot; on Windows the process creation date and time. A normal exit removes it; a process that crashes or is killed leaves it | `active` | both | — kept, region producers read it |
 
 The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `event_count`,
 `blob_count`, the HIP and comgr versions, and one block per device:
@@ -62,12 +68,15 @@ The per-process `manifest.json` also holds `pid`, `parent_pid`, `complete`, `eve
 
 ## Never recorded
 
-Capture does not read the host name, the command line, environment variables, the user
-name or the time of day. A string reaches the archive only as a kernel name, inside a host
-buffer the workload copied, or inside a code object; a path in such a buffer, for example a
-compiler cache path under the user's home directory, is recorded with it. Memory that never
-crossed a HIP call is not recorded, and neither is a failed call, apart from the exceptions
-listed in [skills/enable-recording/SKILL.md](skills/enable-recording/SKILL.md).
+Capture does not read the host name, the command line, environment variables or the user
+name, and records a date and time of day only in the `active` marker on Windows. A string
+reaches the archive only as a kernel name; as a string argument of a HIP call (the path
+given to `hipLinkAddFile`, the name given to `hipLinkAddData`, the function name given to
+`hipGetProcAddress`); as the name of a device variable the program registers; inside a host
+buffer the workload copied or registered; or inside a code object. A path in such a buffer,
+for example a compiler cache path under the user's home directory, is recorded with it.
+Memory that never crossed a HIP call is not recorded, and neither is a failed call, apart
+from the exceptions listed in [skills/enable-recording/SKILL.md](skills/enable-recording/SKILL.md).
 
 ## What no mode can promise
 
