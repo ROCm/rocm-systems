@@ -11,6 +11,13 @@
 
 namespace rocjitsu::arith {
 
+// Sign-extend a low-bit field to a 32-bit raw register word.
+template <int Bits> uint32_t sign_extend_word(uint32_t value) {
+  static_assert(Bits > 0 && Bits <= 32);
+  constexpr uint32_t sign = 1U << (Bits - 1);
+  return ((value & (UINT32_MAX >> (32 - Bits))) ^ sign) - sign;
+}
+
 // Decode the low Bits bits as a signed or unsigned integer, discarding higher bits.
 template <int Bits, bool Signed> int64_t extend_integer(uint32_t value) {
   static_assert(Bits > 0 && Bits <= 32);
