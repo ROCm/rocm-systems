@@ -22,6 +22,30 @@ This section provides an overview of ROCm Compute Profiler's CLI analysis featur
 
 Run ``rocprof-compute analyze -h`` for more details.
 
+Debug options
+=============
+
+Use ``--debug`` for diagnostic behavior rather than regular analysis settings.
+Multiple selectors can be combined:
+
+.. code-block:: shell
+
+    rocprof-compute analyze -p workloads/vcopy/MI200/ --debug table-view ignore-amd-smi
+
+* ``table-view``: Print plain tables instead of the views specified by ``cli_style``.
+* ``ignore-amd-smi``: Skip AMD-SMI queries when probing local hardware.
+* ``single-metric``: Show metric evaluation and memory chart diagnostics.
+   This replaces the removed ``-g`` flag. Combine it with ``--block`` to
+   isolate a metric, for example ``--block 2.1.0 --debug single-metric``.
+* ``verify-deps``: Check analyze-mode Python dependencies, then exit without
+   analyzing a workload. The standalone ``--verify-deps`` spelling also works.
+
+The ``Debug Options`` help group also includes ``--specs-correction`` for
+overriding captured system specifications and ``--report-diff <percent>`` for
+warning when metric differences exceed a regression-check threshold.
+Filtering, normalization, output formats, and ordinary baseline comparisons
+remain regular analysis options.
+
 .. _cli-walkthrough:
 
 Walkthrough
