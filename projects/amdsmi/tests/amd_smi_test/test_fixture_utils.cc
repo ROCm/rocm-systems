@@ -44,8 +44,17 @@ void FakeSysfsTree::WriteFile(const std::string& relative_path, const std::strin
   fs::path full_path = fs::path(root_) / relative_path;
   std::error_code ec;
   fs::create_directories(full_path.parent_path(), ec);
+  if (ec) {
+    ADD_FAILURE() << "FakeSysfsTree::WriteFile(" << relative_path
+                  << "): create_directories() failed: " << ec.message();
+    return;
+  }
   std::ofstream out(full_path);
   out << content;
+  out.close();
+  if (!out) {
+    ADD_FAILURE() << "FakeSysfsTree::WriteFile(" << relative_path << "): write failed";
+  }
 }
 
 void FakeSysfsTree::RemoveFile(const std::string& relative_path) {
@@ -109,6 +118,9 @@ void ScopedFileWatch::Drain() {
   alignas(struct inotify_event) std::array<char, kBufferSize> buf;
   for (;;) {
     ssize_t len = read(inotify_fd_, buf.data(), buf.size());
+    if (len < 0 && errno == EINTR) {
+      continue;
+    }
     if (len <= 0) {
       // len < 0 with EAGAIN/EWOULDBLOCK just means no more events are
       // pending right now -- not an error worth distinguishing here.

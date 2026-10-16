@@ -91,6 +91,8 @@ That gives a clean two-layer split for any future device-type test:
 Reusable test infrastructure (not RAS-specific) lives in
 `tests/amd_smi_test/test_fixture_utils.h`/`.cc`:
 - `FakeSysfsTree`: builds a real, temporary, hardware-inert file tree.
+  `WriteFile()` fails the test if the fixture can't be written, so a missing
+  file can't pass a `NOT_SUPPORTED` assertion by accident.
 - A generic, header-only `ScopedOverride<T>` template: takes a getter, a setter, and
   a new value. Its constructor saves the current value and installs the new one;
   its destructor restores the saved value. Being fully templated/inline, it never
@@ -264,14 +266,20 @@ in any process's memory.
 
 ## Explicitly out of scope for this fix
 
-- Migrating the other ~12 `"/sys/class/drm/" + device->get_gpu_path()` call sites in
-  `amd_smi_utils.cc` to the sysfs-root seam. Structure supports it; not done now.
+- Migrating the other ~15 `"/sys/class/drm/" + device->get_gpu_path()` call sites in
+  `amd_smi_utils.cc` to the sysfs-root seam (tracked as AILITOOLS-333). Structure
+  supports it; not done now.
+- Propagating a failed per-block `amdsmi_get_gpu_ecc_count()` on a mask-enabled
+  block. It is logged but the total still returns `AMDSMI_STATUS_SUCCESS` and can
+  undercount (tracked as AILITOOLS-330).
 - Full success-path coverage of `amdsmi_get_gpu_total_ecc_count()` through the
-  public API for every RAS block. One block (UMC) is faked end-to-end —
-  `RAS_FEATURES__ValidMaskOverwritesStaleOutput` writes a real `ras/umc_err_count`
-  fixture to prove accumulation happens correctly and isn't contaminated by a
-  stale/un-zeroed `*ec` — but the other ~20 blocks' `amdsmi_get_gpu_ecc_count()`
-  dependencies remain unfaked; not needed beyond that one proof case.
+  public API for every RAS block. Only UMC
+  (`RAS_FEATURES__ValidMaskOverwritesStaleOutput`) and UMC plus SDMA
+  (`RAS_FEATURES__MultipleBlocksSumCorrectlyIgnoringUnreadableBlock`) are faked
+  end-to-end with real `ras/*_err_count` fixtures, proving accumulation is correct
+  and isn't contaminated by a stale/un-zeroed `*ec`. The remaining blocks'
+  `amdsmi_get_gpu_ecc_count()` dependencies stay unfaked; not needed beyond those
+  proof cases.
 - Actually adding CPU/NIC/switch/AI-NIC unit tests using the layer-1 seam — it's
   built and documented as reusable, but no such tests are added here.
 - A dual-language shared fake-sysfs mechanism. A true one would need a second,

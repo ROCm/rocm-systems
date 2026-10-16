@@ -30,6 +30,7 @@
 #include "amd_smi/impl/amd_smi_drm.h"
 #include "amd_smi/impl/amd_smi_gpu_device.h"
 #include "amd_smi/impl/amd_smi_test_overrides.h"
+#include "test_common.h"
 #include "test_fixture_utils.h"
 
 namespace {
@@ -61,13 +62,36 @@ constexpr char kAllOnesFeatureMaskLine[] = "feature mask: 0xffffffffffffffff\n";
 //   2. The fake rocm_smi::Device's own path (tree.root() + "/" + card), used
 //      only to satisfy SMIGPUDEVICE_MUTEX -- not read from in these tests.
 amdsmi_status_t CallTotalEccCount(const FakeSysfsTree& tree, const std::string& card,
-                                  amdsmi_error_count_t* ec) {
+                                  amdsmi_error_count_t* ec, amdsmi_status_t expected) {
   ScopedRocmSmiDevice rocm_device(tree.root() + "/" + card);
   AMDSmiDrm drm;
   AMDSmiGPUDevice gpu_device(rocm_device.index(), card, amdsmi_bdf_t{}, drm);
   ScopedProcessorRegistration registration(&gpu_device);
 
-  return amdsmi_get_gpu_total_ecc_count(registration.handle(), ec);
+  const bool verbose = GetTestVerbosity() >= TestBase::VERBOSE_STANDARD;
+  DISPLAY_AMDSMI_API("amdsmi_get_gpu_total_ecc_count", "card=" + card, verbose);
+  amdsmi_status_t ret = amdsmi_get_gpu_total_ecc_count(registration.handle(), ec);
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, expected);
+  return ret;
+}
+
+// Same synthetic device stack as CallTotalEccCount(), but calls
+// amdsmi_get_gpu_ras_block_features_enabled() for a single block.
+amdsmi_status_t CallFeaturesEnabled(const FakeSysfsTree& tree, const std::string& card,
+                                    amdsmi_gpu_block_t block, amdsmi_ras_err_state_t* state,
+                                    amdsmi_status_t expected) {
+  ScopedRocmSmiDevice rocm_device(tree.root() + "/" + card);
+  AMDSmiDrm drm;
+  AMDSmiGPUDevice gpu_device(rocm_device.index(), card, amdsmi_bdf_t{}, drm);
+  ScopedProcessorRegistration registration(&gpu_device);
+
+  const bool verbose = GetTestVerbosity() >= TestBase::VERBOSE_STANDARD;
+  DISPLAY_AMDSMI_API("amdsmi_get_gpu_ras_block_features_enabled",
+                     "card=" + card + ", block=" + GetBlockNameStr(block), verbose);
+  amdsmi_status_t ret =
+      amdsmi_get_gpu_ras_block_features_enabled(registration.handle(), block, state);
+  DISPLAY_AMDSMI_STATUS(verbose, __FILE__, __LINE__, ret, expected);
+  return ret;
 }
 
 // Skips the assertion (rather than failing) when the watch itself couldn't be
@@ -88,7 +112,7 @@ TEST(GpuUnit, RAS_FEATURES__ValidMaskSucceeds) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
 }
 
 // Regression test: the accumulation loop only adds to *ec via +=; if the function
@@ -115,14 +139,14 @@ TEST(GpuUnit, RAS_FEATURES__ValidMaskOverwritesStaleOutput) {
 
   amdsmi_error_count_t ec = {};
   ec.correctable_count = ec.uncorrectable_count = ec.deferred_count = kSentinelEccCount;
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
   // Neither the sentinel nor sentinel+real (accumulated onto stale data) --
   // exactly the real UMC counts, proving the reset happened before summing.
   constexpr const char* kLeakHint =
       "a result of sentinel + real count means *ec wasn't zeroed before accumulating";
   EXPECT_EQ(ec.correctable_count, kUmcCorrectable) << kLeakHint;
   EXPECT_EQ(ec.uncorrectable_count, kUmcUncorrectable) << kLeakHint;
-  EXPECT_EQ(ec.deferred_count, 0) << kLeakHint;
+  EXPECT_EQ(ec.deferred_count, 0u) << kLeakHint;
 }
 
 // Two real blocks (UMC, SDMA) with distinct counts must sum correctly -- not
@@ -150,10 +174,10 @@ TEST(GpuUnit, RAS_FEATURES__MultipleBlocksSumCorrectlyIgnoringUnreadableBlock) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(ec.uncorrectable_count, kUmcUncorrectable + kSdmaUncorrectable);
   EXPECT_EQ(ec.correctable_count, kUmcCorrectable + kSdmaCorrectable);
-  EXPECT_EQ(ec.deferred_count, 0);
+  EXPECT_EQ(ec.deferred_count, 0u);
 }
 
 // The PR's core performance claim: the mask is read exactly once per
@@ -179,7 +203,7 @@ TEST(GpuUnit, RAS_FEATURES__ReadsMaskExactlyOncePerCall) {
   }
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(watch.OpenCount(), 1u);
 }
 
@@ -194,10 +218,56 @@ TEST(GpuUnit, RAS_FEATURES__ZeroMaskSucceedsWithZeroedOutput) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_SUCCESS);
-  EXPECT_EQ(ec.correctable_count, 0);
-  EXPECT_EQ(ec.uncorrectable_count, 0);
-  EXPECT_EQ(ec.deferred_count, 0);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_SUCCESS), AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(ec.correctable_count, 0u);
+  EXPECT_EQ(ec.uncorrectable_count, 0u);
+  EXPECT_EQ(ec.deferred_count, 0u);
+}
+
+// 0x0 is a legitimate mask for the per-block API too: SUCCESS with every block DISABLED.
+TEST(GpuUnit, RAS_FEATURES__BlockFeaturesZeroMaskReportsDisabled) {
+  ScopedAmdsmiInit smi_init;
+  FakeSysfsTree tree;
+  tree.WriteFile("card0/device/ras/features", kZeroFeatureMaskLine);
+  ScopedOverride<std::string> root_guard(
+      smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
+
+  amdsmi_ras_err_state_t state = AMDSMI_RAS_ERR_STATE_INVALID;
+  EXPECT_EQ(CallFeaturesEnabled(tree, "card0", AMDSMI_GPU_BLOCK_UMC, &state, AMDSMI_STATUS_SUCCESS),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(state, AMDSMI_RAS_ERR_STATE_DISABLED);
+}
+
+// kValidFeatureMaskLine (0x1abf877) has bit 0 (UMC) set and bit 3 (MMHUB) clear.
+TEST(GpuUnit, RAS_FEATURES__BlockFeaturesValidMaskReportsPerBlockState) {
+  ScopedAmdsmiInit smi_init;
+  FakeSysfsTree tree;
+  tree.WriteFile("card0/device/ras/features", kValidFeatureMaskLine);
+  ScopedOverride<std::string> root_guard(
+      smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
+
+  amdsmi_ras_err_state_t state = AMDSMI_RAS_ERR_STATE_INVALID;
+  EXPECT_EQ(CallFeaturesEnabled(tree, "card0", AMDSMI_GPU_BLOCK_UMC, &state, AMDSMI_STATUS_SUCCESS),
+            AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(state, AMDSMI_RAS_ERR_STATE_ENABLED);
+  EXPECT_EQ(
+      CallFeaturesEnabled(tree, "card0", AMDSMI_GPU_BLOCK_MMHUB, &state, AMDSMI_STATUS_SUCCESS),
+      AMDSMI_STATUS_SUCCESS);
+  EXPECT_EQ(state, AMDSMI_RAS_ERR_STATE_DISABLED);
+}
+
+// A garbled mask now fails instead of silently reporting every block DISABLED.
+TEST(GpuUnit, RAS_FEATURES__BlockFeaturesNonHexTokenFails) {
+  ScopedAmdsmiInit smi_init;
+  FakeSysfsTree tree;
+  tree.WriteFile("card0/device/ras/features", "feature mask: garbage\n");
+  ScopedOverride<std::string> root_guard(
+      smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
+
+  amdsmi_ras_err_state_t state = AMDSMI_RAS_ERR_STATE_INVALID;
+  EXPECT_EQ(
+      CallFeaturesEnabled(tree, "card0", AMDSMI_GPU_BLOCK_UMC, &state, AMDSMI_STATUS_API_FAILED),
+      AMDSMI_STATUS_API_FAILED);
 }
 
 TEST(GpuUnit, RAS_FEATURES__UlongMaxMaskFails) {
@@ -208,7 +278,8 @@ TEST(GpuUnit, RAS_FEATURES__UlongMaxMaskFails) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_API_FAILED);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_API_FAILED),
+            AMDSMI_STATUS_API_FAILED);
 }
 
 TEST(GpuUnit, RAS_FEATURES__EmptyFileFails) {
@@ -219,7 +290,8 @@ TEST(GpuUnit, RAS_FEATURES__EmptyFileFails) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_API_FAILED);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_API_FAILED),
+            AMDSMI_STATUS_API_FAILED);
 }
 
 TEST(GpuUnit, RAS_FEATURES__MissingValueTokenFails) {
@@ -230,7 +302,8 @@ TEST(GpuUnit, RAS_FEATURES__MissingValueTokenFails) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_API_FAILED);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_API_FAILED),
+            AMDSMI_STATUS_API_FAILED);
 }
 
 TEST(GpuUnit, RAS_FEATURES__NonHexTokenFails) {
@@ -241,7 +314,8 @@ TEST(GpuUnit, RAS_FEATURES__NonHexTokenFails) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_API_FAILED);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_API_FAILED),
+            AMDSMI_STATUS_API_FAILED);
 }
 
 // No fixture file written at all: the real ifstream-open-fail branch, through
@@ -253,7 +327,8 @@ TEST(GpuUnit, RAS_FEATURES__MissingFileNeverWrittenIsNotSupported) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_NOT_SUPPORTED),
+            AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 // File present, then removed mid-scenario: same NOT_SUPPORTED path, reached a
@@ -267,7 +342,8 @@ TEST(GpuUnit, RAS_FEATURES__FileRemovedAfterCreationIsNotSupported) {
       smi_amdgpu_sysfs_drm_root, smi_amdgpu_set_sysfs_drm_root_for_testing, tree.root() + "/");
 
   amdsmi_error_count_t ec = {};
-  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_NOT_SUPPORTED);
+  EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_NOT_SUPPORTED),
+            AMDSMI_STATUS_NOT_SUPPORTED);
 }
 
 // Permission-denied read (EACCES). Real root bypasses file-mode checks via
@@ -307,7 +383,8 @@ TEST(GpuUnit, RAS_FEATURES__PermissionDeniedIsNotSupported) {
   if (geteuid() != 0) {
     // Non-root: the 0000 mode above already forces a real EACCES, no fork needed.
     amdsmi_error_count_t ec = {};
-    EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec), AMDSMI_STATUS_NOT_SUPPORTED);
+    EXPECT_EQ(CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_NOT_SUPPORTED),
+              AMDSMI_STATUS_NOT_SUPPORTED);
     ExpectNoFileOpens(watch);
   } else {
     // mkdtemp() makes tree.root() itself 0700 (owner-only); relax it so the
@@ -332,7 +409,7 @@ TEST(GpuUnit, RAS_FEATURES__PermissionDeniedIsNotSupported) {
         std::cerr << "setuid(" << kUnprivilegedId << ") failed: " << strerror(errno) << std::endl;
       } else {
         amdsmi_error_count_t ec = {};
-        status = CallTotalEccCount(tree, "card0", &ec);
+        status = CallTotalEccCount(tree, "card0", &ec, AMDSMI_STATUS_NOT_SUPPORTED);
       }
       ssize_t bytes_written = write(result_pipe[kWriteEnd], &status, sizeof(status));
       (void)bytes_written;
