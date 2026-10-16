@@ -17,6 +17,14 @@ from utils import csv_compression
 pytestmark = pytest.mark.ml_api_trace
 
 KERNEL_TOP_ID_PATTERN = re.compile(r"\(id (\d+)\)")
+RELU_MARKER_PATTERN = re.compile(
+    r"(?:aten::relu|torch\.ops\.aten\.relu)(?![A-Za-z0-9_])"
+)
+
+
+def output_has_relu_marker(output: str) -> bool:
+    """Return True for a relu marker. relu_backward does not count."""
+    return RELU_MARKER_PATTERN.search(output) is not None
 
 
 def kernel_ids_from_operator_output(output: str) -> list[int]:
@@ -105,7 +113,7 @@ def test_list_both_operators(
     captured = capsys.readouterr()
     out = captured.out + captured.err
     assert "PyTorch, Triton Operator Call Tree:" in out
-    assert "aten::relu" in out
+    assert output_has_relu_marker(out)
     assert "triton.JITFunction" in out
 
 
@@ -144,7 +152,7 @@ def test_list_triton_only_confines_tree_and_kernels(
     assert "PyTorch Operator Call Tree" not in out
     # relu is a torch sibling of the Triton launch, not an ancestor, so
     # backend confinement drops it. Kernel ids belong on the Triton node.
-    assert "aten::relu" not in out
+    assert not output_has_relu_marker(out)
     triton_idx = out.find("triton.JITFunction")
     assert triton_idx >= 0
     assert "(id " in out[triton_idx:]
