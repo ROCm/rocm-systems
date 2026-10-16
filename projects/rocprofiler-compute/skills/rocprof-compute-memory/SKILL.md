@@ -10,11 +10,7 @@ bandwidth, caches, or data movement directly.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
-Before the first analyze, run `rocprof-compute analyze --verify-deps`. If it
-reports a missing or wrong package, install the analyze dependencies into a
-virtual environment separate from the profiled application, then run analyze
-from that environment. Do not install them into the application's environment.
-The steps are in
+Before the first analyze, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 
 ## 1. Start with the Memory Chart

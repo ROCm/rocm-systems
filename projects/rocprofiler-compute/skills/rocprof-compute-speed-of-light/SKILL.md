@@ -11,11 +11,7 @@ says whether a kernel is near any limit at all.
 
 Run `rocprof-compute analyze --help` before choosing flags.
 
-Before the first analyze, run `rocprof-compute analyze --verify-deps`. Profile
-mode needs no extra Python packages. If the check reports a missing or wrong
-package, install the analyze dependencies into a virtual environment separate
-from the profiled application, then run analyze from that environment. Do not
-install them into the application's environment. The steps are in
+Before the first analyze, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 
 ## 1. Get the panel

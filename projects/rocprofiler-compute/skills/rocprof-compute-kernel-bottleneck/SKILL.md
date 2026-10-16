@@ -49,17 +49,7 @@ Not every feature works on every architecture. Check there before promising a
 result, and let the tool's own error message stand when a feature is
 unavailable.
 
-Before the first `rocprof-compute analyze`, check the Python packages that
-mode needs. Profile mode uses the standard library and does not need them.
-
-```bash
-rocprof-compute analyze --verify-deps
-```
-
-If that reports a missing or wrong package, install the analyze dependencies
-into a virtual environment separate from the profiled application, then run
-analyze from that environment. Do not install them into the application's
-environment. The steps are in
+Before the first analyze, follow
 [Install the analyze mode dependencies](../../docs/install/core-install.rst).
 
 ## 2. Collect what you need before profiling
