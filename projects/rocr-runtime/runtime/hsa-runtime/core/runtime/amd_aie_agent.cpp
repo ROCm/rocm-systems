@@ -70,6 +70,14 @@ AieAgent::AieAgent(uint32_t node, const HsaNodeProperties& node_props)
                   core::Agent::DeviceType::kAmdAieDevice),
       node_props_(node_props),
       arch_name_(GetArchName(node_props_)) {
+  // A UMQ queue can never hold more than XdnaDriver::UmqMaxCmds() packets in flight at once:
+  // CERT's own ring has exactly that many slots, and a slot only frees up once CERT has actually
+  // retired it (see AieUmqQueue's reaper thread) -- unlike KMQ, where 0x40 matches the driver's
+  // own per-batch chain limits instead.
+  if (static_cast<XdnaDriver&>(driver()).UsesUserModeQueue()) {
+    min_aql_size_ = XdnaDriver::UmqMaxCmds();
+    max_aql_size_ = XdnaDriver::UmqMaxCmds();
+  }
   InitRegionList();
   InitAllocators();
 }

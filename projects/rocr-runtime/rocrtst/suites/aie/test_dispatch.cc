@@ -2120,7 +2120,6 @@ TEST_F(FullElfDispatchTest, HsacoFullElfRejectsUnknownKernelName) {
 }
 
 TEST_F(FullElfDispatchTest, HsacoFullElfDispatches) {
-  if (is_aie4) GTEST_SKIP() << "aie4 UMQ has no completion-signal bridge yet";
   // End to end: load, dispatch, check the output buffer.
   hsa_queue_t* queue = nullptr;
   ASSERT_EQ(hsa_queue_create(aie_agents.front(), min_queue_size, HSA_QUEUE_TYPE_SINGLE, nullptr,
@@ -2131,7 +2130,6 @@ TEST_F(FullElfDispatchTest, HsacoFullElfDispatches) {
 }
 
 TEST_F(FullElfDispatchTest, SameKernelDifferentArgsInOneBatch) {
-  if (is_aie4) GTEST_SKIP() << "aie4 UMQ has no completion-signal bridge yet";
   // Two packets, one kernel, different argument buffers, ONE submission. Each needs its own
   // control-code buffer; sharing one runs both with the second packet's arguments, which shows up
   // as the first dispatch's output never being written.
@@ -2179,7 +2177,6 @@ TEST_F(FullElfDispatchTest, SameKernelDifferentArgsInOneBatch) {
 }
 
 TEST_F(FullElfDispatchTest, ElfFullQueueDispatch) {
-  if (is_aie4) GTEST_SKIP() << "aie4 UMQ has no completion-signal bridge yet";
   // A chain as long as the queue allows. A full-ELF command occupies 60 bytes of
   // the driver's 4 KiB chain buffer, so 68 would fit; the queue tops out first.
   // A one-packet queue would leave the chain path untested rather than failing.
@@ -2194,7 +2191,6 @@ TEST_F(FullElfDispatchTest, ElfFullQueueDispatch) {
 }
 
 TEST_F(FullElfDispatchTest, ElfRepatch) {
-  if (is_aie4) GTEST_SKIP() << "aie4 UMQ has no completion-signal bridge yet";
   // Dispatching one kernel repeatedly with different arguments has to give the right answer every
   // time. The shim-DMA patch scheme adds to the buffer descriptor already in the control code, so
   // a runtime that patched over the previous result instead of over a pristine copy gets the
@@ -2240,8 +2236,7 @@ TEST_F(FullElfDispatchTest, ElfRepatch) {
 TEST_F(FullElfDispatchTest, ElfNoPdiCeiling) {
   if (is_aie4) {
     GTEST_SKIP() << "the PDI-cache ceiling this test compares against is specific to the PDI + "
-                    "instruction sequence path aie2/aie2p use; aie4 always dispatches full-ELF, "
-                    "and aie4 UMQ has no completion-signal bridge yet";
+                    "instruction sequence path aie2/aie2p use; aie4 always dispatches full-ELF";
   }
   // The PDI + instruction sequence path can hold at most 32 distinct PDIs per hardware context,
   // because each one costs a compute-unit slot. Full-ELF loads the PDI from the control code
@@ -2328,8 +2323,7 @@ void ExpectRejected(const aie_test::dispatch_error& err, hsa_queue_t* queue, hsa
 
 TEST_F(FullElfDispatchTest, ControlCodeIsAlignedForDispatch) {
   if (is_aie4) {
-    GTEST_SKIP() << "needs the dev pool (aie4 has none) and a completion-signal bridge aie4 UMQ "
-                    "does not have yet";
+    GTEST_SKIP() << "needs the dev pool, which aie4 has none of";
   }
   // The driver rejects a control code whose device address is not 16 KiB aligned, so a completed
   // dispatch is the assertion: the runtime's own allocation satisfied it. A single dispatch would
@@ -2693,6 +2687,11 @@ TEST_F(FullElfDispatchTest, MixedModeBatchRejected) {
 // Full-ELF needs no such split: its commands take 60 bytes, so 68 fit and the queue
 // tops out first.
 TEST_F(DispatchTest, PdiChainSplit) {
+  // This chain-splitting ceiling is specific to the PDI + instruction sequence path's chain
+  // format; checked before min_queue_size, which aie4 (UMQ) reports as its own, smaller ring-slot
+  // cap and would otherwise fail this test's assertion before ever reaching the PDI-specific skip.
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+
   const std::uint32_t total_num_dispatches = 64;
 
   hsa_queue_t* queue = nullptr;
@@ -2701,7 +2700,6 @@ TEST_F(DispatchTest, PdiChainSplit) {
             HSA_STATUS_SUCCESS);
   ASSERT_GE(min_queue_size, total_num_dispatches);
 
-  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
   const std::uint64_t kernel_object = LoadAddKernel();
   ASSERT_NE(kernel_object, 0u);
 
@@ -2767,6 +2765,11 @@ TEST_F(DispatchTest, PdiChainSplit) {
 // output is the load-bearing one -- it is what would catch the runtime crediting a packet that
 // never executed.
 TEST_F(DispatchTest, PartiallyFailedBatchRetiresCompletedPackets) {
+  // This chain-splitting ceiling is specific to the PDI + instruction sequence path's chain
+  // format; checked before min_queue_size, which aie4 (UMQ) reports as its own, smaller ring-slot
+  // cap and would otherwise fail this test's assertion before ever reaching the PDI-specific skip.
+  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
+
   constexpr std::uint32_t total_num_dispatches = 64;
   constexpr std::uint32_t n = aie_vector_scalar_kernel::element_count;
 
@@ -2776,7 +2779,6 @@ TEST_F(DispatchTest, PartiallyFailedBatchRetiresCompletedPackets) {
             HSA_STATUS_SUCCESS);
   ASSERT_GE(min_queue_size, total_num_dispatches);
 
-  if (!hsaco_available()) GTEST_SKIP() << "hsaco was not built: " << kHsacoPath;
   const std::uint64_t kernel_object = LoadAddKernel();
   ASSERT_NE(kernel_object, 0u);
   // A second kernel whose instruction sequence the NPU cannot execute.
@@ -3147,7 +3149,19 @@ class FullElfInterleaveTest : public FullElfDispatchTest {
 // PDI it loads. What is checked is the other half of interleaving: that alternating designs in
 // one chain each run against their own control code and PDI rather than the previous packet's.
 TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
-  if (is_aie4) GTEST_SKIP() << "aie4 UMQ has no completion-signal bridge yet";
+  if (is_aie4) {
+    GTEST_SKIP()
+        << "multi-packet batch dispatch corruption, under investigation: alternating two "
+           "differently-compiled full-ELF kernels on one UMQ hardware context leaves "
+           "every mul-kernel output off by the same additive constant, even though the "
+           "host-side submission sequence (kernel_object, num_kernargs, CERT's own "
+           "read_index) was confirmed correct one packet at a time. A KMQ-mirroring fix "
+           "(destroy/recreate the hardware context whenever the dispatched kernel's "
+           "identity changes) was tried and made things worse: it turned the silent data "
+           "corruption into a deterministic hang specifically when rebuilding right before "
+           "a mul dispatch, with no available evidence to explain why. Reverted; root "
+           "cause remains open.";
+  }
   constexpr std::uint32_t num_pairs = 4;
   constexpr std::size_t n = aie_full_elf_kernel::element_count;
   static_assert(aie_full_elf_kernel::element_count == aie_full_elf_mul_kernel::element_count);
@@ -3212,8 +3226,7 @@ TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
 TEST_F(FullElfDispatchTest, ModeSwitchAlternatingBatches) {
   if (is_aie4) {
     GTEST_SKIP() << "this test alternates full-ELF batches with PDI + instruction sequence "
-                    "batches; aie4 always dispatches full-ELF, and aie4 UMQ has no "
-                    "completion-signal bridge yet";
+                    "batches; aie4 always dispatches full-ELF";
   }
   static_assert(aie_vector_scalar_kernel::element_count == aie_full_elf_kernel::element_count);
   constexpr std::size_t n = aie_vector_scalar_kernel::element_count;

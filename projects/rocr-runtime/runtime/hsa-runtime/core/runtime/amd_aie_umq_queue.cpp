@@ -44,12 +44,6 @@ struct HostQueueHeader {
 static_assert(sizeof(HostQueueHeader) == 128,
               "HostQueueHeader must match the kernel driver's struct host_queue_header exactly");
 
-/// @brief Matches aie4_host_queue.h's CTX_MAX_CMDS: the fixed slot count CERT itself validates
-/// write_index/read_index against (the kernel driver's get_read_index()/valid_queue_index()),
-/// regardless of whatever @ref HostQueueHeader::capacity we declare. The ring must be sized for
-/// exactly this many packets.
-constexpr uint32_t kCtxMaxCmds = 32;
-
 constexpr size_t kHostQueueHeaderSize = sizeof(HostQueueHeader);
 
 }  // namespace
@@ -60,11 +54,12 @@ AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
     : Queue(shared_queue, flags, agent),
       LocalSignal(0, false),
       DoorbellSignal(signal()),
-      // The ring the device reads is always kCtxMaxCmds packets, whatever req_size_pkts asks for
-      // (CERT's own read/write-index validity check hardcodes that count; see HostQueueHeader),
-      // plus the header the ring follows.
-      queue_size_bytes_(static_cast<uint32_t>(
-          kHostQueueHeaderSize + kCtxMaxCmds * sizeof(hsa_amd_aie_kernel_dispatch_packet_t))),
+      // The ring the device reads is always XdnaDriver::UmqMaxCmds() packets, whatever
+      // req_size_pkts asks for (CERT's own read/write-index validity check hardcodes that count;
+      // see HostQueueHeader), plus the header the ring follows.
+      queue_size_bytes_(static_cast<uint32_t>(kHostQueueHeaderSize +
+                                              XdnaDriver::UmqMaxCmds() *
+                                                  sizeof(hsa_amd_aie_kernel_dispatch_packet_t))),
       suspended_(false),
       errors_callback_(callback),
       errors_data_(err_data) {
@@ -72,12 +67,10 @@ AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
     throw hsa_exception(HSA_STATUS_ERROR_INVALID_AGENT,
                         "Attempting to create an AIE queue on a non-AIE agent.");
   }
-  if (req_size_pkts != kCtxMaxCmds) {
-    log_warning_n(10,
-                  "AIE: UMQ queue size is fixed at %u packets (CERT's own read/write-index check "
-                  "hardcodes it); the requested %zu is ignored.\n",
-                  kCtxMaxCmds, req_size_pkts);
-  }
+  // req_size_pkts is always XdnaDriver::UmqMaxCmds() here: AieAgent::QueueCreate already rejects
+  // any other size before constructing this queue, since min_aql_size_/max_aql_size_ are both
+  // XdnaDriver::UmqMaxCmds() for a UMQ agent.
+  assert(req_size_pkts == XdnaDriver::UmqMaxCmds());
 
   ring_buf_ =
       agent->system_allocator()(queue_size_bytes_, 4096, core::MemoryRegion::AllocateNoFlags);
@@ -94,7 +87,7 @@ AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   auto* header = static_cast<HostQueueHeader*>(ring_buf_);
   header->version_major = 1;
   header->version_minor = 0;
-  header->capacity = kCtxMaxCmds;
+  header->capacity = XdnaDriver::UmqMaxCmds();
   // Under PASID/SVA the device walks the submitting process's own page tables (see
   // XdnaDriver::CreateUserModeQueue's comment), so the address CERT dereferences is this
   // process's own -- no separate device-address translation, unlike a blob placed into the
@@ -105,7 +98,7 @@ AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   // Populate hsa_queue_t fields.
   amd_queue_.hsa_queue.type = HSA_QUEUE_TYPE_SINGLE;
   amd_queue_.hsa_queue.features = 0;  // UMQ queues do not support any features.
-  amd_queue_.hsa_queue.size = kCtxMaxCmds;
+  amd_queue_.hsa_queue.size = XdnaDriver::UmqMaxCmds();
   amd_queue_.hsa_queue.base_address = packet_ring;
   amd_queue_.hsa_queue.doorbell_signal = Signal::Convert(this);
   amd_queue_.hsa_queue.id = GetQueueId();
@@ -125,6 +118,10 @@ AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
   if (err != HSA_STATUS_SUCCESS) {
     throw hsa_exception(err, "Failed to create UMQ metadata for the AIE queue.");
   }
+  MAKE_NAMED_SCOPE_GUARD(umq_metadata_guard, [&] {
+    driver.DestroyUserModeQueue(umq_metadata_);
+    umq_metadata_ = nullptr;
+  });
   // Hardware doorbell supports AQL semantics, the same as a GPU queue. The UMQ doorbell register
   // is 32 bits (unlike signal_.hardware_doorbell_ptr's 64-bit pointee); this field is only used
   // for address reporting (HSA_AMD_QUEUE_INFO_DOORBELL_ID), never dereferenced through its own
@@ -133,6 +130,7 @@ AieUmqQueue::AieUmqQueue(core::SharedQueue* shared_queue, AieAgent* agent, size_
 
   active_ = true;
 
+  umq_metadata_guard.Dismiss();
   ring_buf_guard.Dismiss();
 }
 
@@ -252,27 +250,30 @@ void AieUmqQueue::SubmitPackets() {
 
   auto* ring =
       static_cast<hsa_amd_aie_kernel_dispatch_packet_t*>(amd_queue_.hsa_queue.base_address);
-  const hsa_status_t err = driver.TranslateUmqPackets(ring, kCtxMaxCmds, first_pkt_idx,
-                                                      last_pkt_idx - first_pkt_idx, agent);
+  auto* header = static_cast<HostQueueHeader*>(ring_buf_);
+
+  const uint64_t num_pkts = last_pkt_idx - first_pkt_idx;
+  uint64_t num_completed = 0;
+  hsa_status_t err = driver.SubmitUmqCmdChain(ring, XdnaDriver::UmqMaxCmds(), umq_metadata_,
+                                              doorbell_, &header->write_index, first_pkt_idx,
+                                              num_pkts, agent, &num_completed);
+
+  // Consume exactly the packets that executed. On success that is the whole batch. On a partial
+  // failure it is the prefix the device got through, whose completion signals have already been
+  // released -- leaving them in the ring would say they are still pending when they are not. The
+  // failing packet and everything behind it stay, so the ring still shows what did not run.
+  // Stored before the callback, so a handler that inspects the queue sees a settled read index.
+  atomic::Store(&amd_queue_.read_dispatch_id, first_pkt_idx + num_completed,
+                std::memory_order_release);
+
   if (err != HSA_STATUS_SUCCESS) {
-    // Rejected before reaching the device: no packet in this batch was readied, so none counts
-    // towards read_dispatch_id, and the doorbell is never rung.
-    debug_print("AIE UMQ queue: packet translation failed (0x%x)\n", err);
+    // Stop processing further packets on this queue and report the failure through the per-queue
+    // error callback (mirrors the GPU AqlQueue error path, and AieKmqQueue::SubmitPackets).
+    debug_print("AIE UMQ queue: command submission failed (0x%x)\n", err);
     suspended_ = true;
     InvokeErrorCallback(err);
     return;
   }
-  atomic::Store(&amd_queue_.read_dispatch_id, last_pkt_idx, std::memory_order_release);
-
-  // CERT's own write_index is a monotonic count of readied packets, i.e. last_pkt_idx itself (an
-  // index one past the last readied packet), the same convention amd_queue_.write_dispatch_id
-  // already uses.
-  auto* header = static_cast<HostQueueHeader*>(ring_buf_);
-  atomic::Store(&header->write_index, last_pkt_idx, std::memory_order_release);
-  store_fence();
-  // Hardware doorbell supports AQL semantics, the same as a GPU queue: the value rung is the
-  // index of the last readied packet, not a count.
-  *doorbell_ = static_cast<uint32_t>(last_pkt_idx - 1);
 }
 
 void AieUmqQueue::StoreRelaxed(hsa_signal_value_t value) { SubmitPackets(); }

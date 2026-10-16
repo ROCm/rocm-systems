@@ -859,6 +859,10 @@ static void FlushArguments(const hsa_amd_aie_kernel_dispatch_packet_t* pkt) {
 /// device never reached, must not be passed here: its completion signal stays untouched, because
 /// firing it would tell a waiter that output exists when nothing wrote any.
 ///
+/// Shared by KMQ's synchronous completion path (SubmitCmdChain, where the device is known to be
+/// done by the time the submitting ioctl returns) and UMQ's (SubmitUmqCmdChain, which confirms
+/// completion separately via WaitUmqCmd before calling this).
+///
 /// @param[in] queue base of the packet ring
 /// @param[in] mask ring index mask (queue size - 1)
 /// @param[in] first_pkt_idx ring index of the batch's first packet
@@ -1046,6 +1050,59 @@ static hsa_status_t WaitCommand(int fd, ert_start_kernel_cmd* cmd, uint32_t hw_c
     return HSA_STATUS_ERROR;
   }
   return HSA_STATUS_SUCCESS;
+}
+
+/// @brief Blocks until CERT has retired the UMQ command at index @p seq, or @p timeout_ms elapses.
+///
+/// Wraps DRM_IOCTL_AMDXDNA_WAIT_CMD directly rather than through the shared xdna_ioctl helper:
+/// that helper collapses every unmapped errno to a generic error, which would make an ordinary
+/// timeout indistinguishable from a real driver failure. @p seq is the same absolute write-index
+/// convention CERT's own read_index/write_index already use (see TranslateUmqPackets); CERT
+/// retiring the command at @p seq means its read_index becomes greater than @p seq, not equal to
+/// it (see this ioctl's own kernel-side check_cmd_done()).
+///
+/// @param[in] fd driver file descriptor
+/// @param[in] queue_metadata this queue's UMQ metadata, as created by CreateUserModeQueue
+/// @param[in] seq absolute index of the command to wait for
+/// @param[in] timeout_ms how long to wait before returning, in milliseconds; 0 waits forever
+/// @param[out] completed set true if CERT retired the command before the timeout; false on an
+/// ordinary timeout -- not an error, the caller should simply call again
+/// @retval HSA_STATUS_SUCCESS the wait itself succeeded, whether or not @p completed ended up true
+/// @retval (other) a real driver failure, or the hardware context woke on a disconnect/reset
+/// rather than on real completion (EAGAIN) -- unlike a plain timeout, retrying is not expected to
+/// ever make progress
+static hsa_status_t WaitUmqCmd(int fd, void* queue_metadata, uint64_t seq, uint32_t timeout_ms,
+                               bool* completed) {
+  const auto* umq_metadata = static_cast<const UmqMetadata*>(queue_metadata);
+
+  amdxdna_drm_wait_cmd args{};
+  args.hwctx = umq_metadata->hw_ctx_handle;
+  args.timeout = timeout_ms;
+  args.seq = seq;
+
+  // Not xdna_ioctl: it maps every errno it does not special-case to a single generic error, which
+  // would make an ordinary timeout indistinguishable from a real driver failure. The kernel driver
+  // (drivers/accel/amdxdna/aie4_ctx.c's aie4_cmd_wait, confirmed against the installed
+  // xrt-amdxdna-2.26.0 source) returns 0 once CERT's read_index has passed seq; ETIME when
+  // timeout_ms elapses first -- not an error, the caller should simply wait again. EAGAIN means the
+  // hardware context itself woke on a disconnect/reset rather than on real completion; unlike a
+  // plain timeout, waiting again on the same context is not expected to ever make progress, so this
+  // is treated as a real failure rather than something to retry.
+  int ret;
+  do {
+    ret = ioctl(fd, DRM_IOCTL_AMDXDNA_WAIT_CMD, &args);
+  } while (ret < 0 && errno == EINTR);
+
+  if (ret == 0) {
+    *completed = true;
+    return HSA_STATUS_SUCCESS;
+  }
+  if (errno == ETIME) {
+    *completed = false;
+    return HSA_STATUS_SUCCESS;
+  }
+  *completed = false;
+  return HSA_STATUS_ERROR;
 }
 
 /// @brief Creates a command BO with @p declared_dwords of payload and fills in its header.
@@ -1653,9 +1710,8 @@ hsa_status_t XdnaDriver::TranslateUmqPackets(hsa_amd_aie_kernel_dispatch_packet_
       return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
     }
 
-    // Leaked, not freed: nothing here tracks CERT's own completion (see the dispatch-completion
-    // signal this queue still does not implement), so there is no safe point yet to know the
-    // device is done reading this copy.
+    // Freed once CERT is confirmed done with it, by SubmitUmqCmdChain (it reads this address back
+    // out of kernel_object_low/high at retirement).
     void* ctrl_copy = aie_agent.system_allocator()(desc->static_ctrl_code_size, kCtrlCodeCopyAlign,
                                                    core::MemoryRegion::AllocateNoFlags);
     if (ctrl_copy == nullptr) {
@@ -1677,6 +1733,77 @@ hsa_status_t XdnaDriver::TranslateUmqPackets(hsa_amd_aie_kernel_dispatch_packet_
     pkt.kernel_object_low = static_cast<uint32_t>(ctrl_code_addr & 0xFFFFFFFF);
     pkt.kernel_object_high = static_cast<uint32_t>(ctrl_code_addr >> 32);
   }
+  return HSA_STATUS_SUCCESS;
+}
+
+hsa_status_t XdnaDriver::SubmitUmqCmdChain(hsa_amd_aie_kernel_dispatch_packet_t* ring,
+                                           uint32_t ring_capacity, void* queue_metadata,
+                                           volatile uint32_t* doorbell, uint64_t* write_index,
+                                           uint64_t first_pkt_idx, uint64_t num_pkts,
+                                           const core::Agent& agent,
+                                           uint64_t* num_completed) const {
+  // Every early return below only happens between packets, so this always reflects exactly how
+  // many of the batch's packets completed and were retired.
+  *num_completed = 0;
+
+  const auto& aie_agent = static_cast<const AieAgent&>(agent);
+
+  // One packet at a time, each rung and waited on individually, rather than publishing the whole
+  // batch's write index and ringing the doorbell once: CERT's CHAIN_FLG_NOT_LAST_CMD mechanism
+  // lets chained commands run with less separation than a real hardware barrier between them, and
+  // this kernel's design was only confirmed safe for fully sequential invocation -- a chained
+  // multi-packet batch under one doorbell corrupted the second-and-later packets' output on real
+  // hardware (confirmed: the mismatch location moved between otherwise-identical runs, pointing at
+  // an execution race rather than a fixed addressing bug).
+  for (uint64_t i = 0; i < num_pkts; ++i) {
+    const uint64_t idx = first_pkt_idx + i;
+    hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
+
+    const hsa_status_t translate_err = TranslateUmqPackets(ring, ring_capacity, idx, 1, agent);
+    if (translate_err != HSA_STATUS_SUCCESS) {
+      // Rejected before reaching the device: nothing in this packet was readied, so it does not
+      // count towards num_completed, and the doorbell is never rung.
+      return translate_err;
+    }
+
+    // CERT's own write_index is a monotonic count of readied packets, i.e. idx+1 itself (an index
+    // one past the last readied packet). Each packet is its own singleton chain, so chain_flag
+    // (packed into the high byte of this field -- see aie4_host_queue.h's common_header) stays
+    // CHAIN_FLG_LAST_CMD (0), the value the application already left it at.
+    atomic::Store(write_index, idx + 1, std::memory_order_release);
+    store_fence();
+    // Hardware doorbell supports AQL semantics, the same as a GPU queue: the value rung is the
+    // index of the last readied packet, not a count.
+    *doorbell = static_cast<uint32_t>(idx);
+
+    // Block until CERT actually retires this packet -- submission is synchronous on the calling
+    // thread here, same as KMQ's per-batch ioctl (which blocks inside the kernel driver instead of
+    // here, but the caller-visible contract is identical). A real device failure (not an ordinary
+    // timeout, which can't happen with an infinite wait) stops the chain the same way a rejected
+    // packet does.
+    bool completed = false;
+    hsa_status_t wait_err;
+    do {
+      wait_err = WaitUmqCmd(fd_, queue_metadata, idx, /*timeout_ms=*/0, &completed);
+    } while (wait_err == HSA_STATUS_SUCCESS && !completed);
+    if (wait_err != HSA_STATUS_SUCCESS) {
+      return wait_err;
+    }
+
+    // TranslateUmqPackets overwrote this packet's kernel_object with the address of a per-dispatch
+    // control-code copy it allocated through this same agent's system allocator (see its own
+    // comment); CERT is confirmed done reading that copy now, so this is the one place that both
+    // knows it is safe to free and still has the address, before the ring slot is reused by a
+    // future submission.
+    const uint64_t ctrl_copy_addr =
+        (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low;
+    if (ctrl_copy_addr != 0) {
+      aie_agent.system_deallocator()(reinterpret_cast<void*>(ctrl_copy_addr));
+    }
+    RetireCompletedPackets(ring, ring_capacity - 1, idx, /*num_pkts=*/1);
+    *num_completed = i + 1;
+  }
+
   return HSA_STATUS_SUCCESS;
 }
 

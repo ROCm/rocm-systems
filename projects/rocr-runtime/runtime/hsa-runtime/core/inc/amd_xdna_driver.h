@@ -77,6 +77,14 @@ public:
   /// devices do not, since the kernel driver rejects AMDXDNA_BO_DEV_HEAP creation for them.
   bool HasDevHeap() const { return has_dev_heap_; }
 
+  /// @brief Matches aie4_host_queue.h's CTX_MAX_CMDS: the fixed slot count CERT itself validates
+  /// write_index/read_index against (the kernel driver's get_read_index()/valid_queue_index()),
+  /// regardless of whatever HostQueueHeader::capacity a UMQ queue declares (see
+  /// amd_aie_umq_queue.cpp). A UMQ queue's ring must be sized for exactly this many packets, and no
+  /// HSA queue on a UMQ agent can be asked to hold more packets in flight than this at once (see
+  /// AieAgent's min_aql_size_/max_aql_size_, which this bounds).
+  static constexpr uint32_t UmqMaxCmds() { return 32; }
+
   hsa_status_t Init() override;
   hsa_status_t ShutDown() override;
   hsa_status_t QueryKernelModeDriver(core::DriverQuery query) override;
@@ -185,6 +193,34 @@ public:
   hsa_status_t TranslateUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring,
                                    uint32_t ring_capacity, uint64_t first_pkt_idx,
                                    uint64_t num_pkts, const core::Agent& agent) const;
+
+  /// @brief Submits a contiguous range of UMQ packets to CERT and blocks until they are retired.
+  /// Mirrors @ref SubmitCmdChain's caller contract (a batch of packets in, @p num_completed
+  /// packets' completion signals already released out, the failing packet and everything after it
+  /// left untouched on a failure) even though UMQ has no equivalent of KMQ's single ioctl that
+  /// chains a whole batch in the kernel: each packet gets its own doorbell ring and wait here,
+  /// one at a time. Confirmed necessary on real hardware -- CERT's own chain mechanism lets
+  /// packets chained under one doorbell run with less separation than a real hardware barrier,
+  /// which corrupted the second-and-later packets' output.
+  ///
+  /// @param[in,out] ring the queue's packet ring; translated in place, same as TranslateUmqPackets
+  /// @param[in] ring_capacity number of packet slots in @p ring
+  /// @param[in] queue_metadata this queue's UMQ metadata, as created by CreateUserModeQueue
+  /// @param[in] doorbell the mapped hardware doorbell to ring per packet
+  /// @param[in,out] write_index CERT's own write_index field, in the queue's HostQueueHeader, kept
+  /// in sync with each packet as it is readied -- the convention CERT validates its read/write
+  /// indices against (see TranslateUmqPackets)
+  /// @param[in] first_pkt_idx index of the first packet in the queue
+  /// @param[in] num_pkts number of packets to submit, starting at @p first_pkt_idx. Must be
+  /// greater than 0.
+  /// @param[in] agent agent that owns the queue
+  /// @param[out] num_completed how many packets, counting from @p first_pkt_idx, executed and had
+  /// their completion signals released. @p num_pkts on success. On failure this is the prefix that
+  /// completed before the failure, so the caller can consume exactly those and leave the rest.
+  hsa_status_t SubmitUmqCmdChain(hsa_amd_aie_kernel_dispatch_packet_t* ring, uint32_t ring_capacity,
+                                 void* queue_metadata, volatile uint32_t* doorbell,
+                                 uint64_t* write_index, uint64_t first_pkt_idx, uint64_t num_pkts,
+                                 const core::Agent& agent, uint64_t* num_completed) const;
 
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;
