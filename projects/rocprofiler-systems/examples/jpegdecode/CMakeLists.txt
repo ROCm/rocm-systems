@@ -146,16 +146,11 @@ if(HIP_FOUND AND rocjpeg_FOUND AND Threads_FOUND AND rocprofiler-register_FOUND)
             DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples
             COMPONENT rocprofiler-systems-examples
         )
-        # Sample images ship only in ROCm test builds. install(DIRECTORY) fails
-        # the whole examples install when that directory was never created.
-        if(EXISTS "${CMAKE_BINARY_DIR}/images")
-            install(
-                DIRECTORY ${CMAKE_BINARY_DIR}/images/
-                DESTINATION
-                    ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/images
-                COMPONENT rocprofiler-systems-examples
-            )
-        endif()
+        install(
+            DIRECTORY ${CMAKE_BINARY_DIR}/images/
+            DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/rocprofiler-systems/examples/images
+            COMPONENT rocprofiler-systems-examples
+        )
     endif()
 else()
     message(
