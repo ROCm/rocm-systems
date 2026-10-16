@@ -662,8 +662,8 @@ amdsmi_status_t smi_amdgpu_get_driver_version(amd::smi::AMDSmiGPUDevice* device,
 
 amdsmi_status_t smi_amdgpu_plx_temp_from_metrics(const amdsmi_gpu_metrics_t& metrics,
                                                  int64_t* temperature) {
-  // A max-value reading is the not-applicable sentinel (e.g. an APU with no
-  // PLX/VRSOC sensor); surface it as unsupported instead of a bogus reading.
+  // A max-value reading is N/A (e.g. an APU with no PLX/VRSOC sensor);
+  // surface it as unsupported instead of a bogus reading.
   if (metrics.temperature_vrsoc == std::numeric_limits<uint16_t>::max()) {
     return AMDSMI_STATUS_NOT_SUPPORTED;
   }
