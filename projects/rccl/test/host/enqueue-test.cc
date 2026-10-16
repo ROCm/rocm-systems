@@ -1318,6 +1318,52 @@ TEST_F(EnqueueMicrotest, CalcCollChunking_Ll128GrainIsNonZeroForTheFixture) {
          "WarpSize, ll128ShmemElemsPerThread or ll128DataElems makes calcCollChunking:3302 SIGFPE";
 }
 
+TEST_F(EnqueueMicrotest, CalcCollChunking_AmdOneRpnRegisteredRingAllGatherUsesKernelScheduleAtElevenMiB) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // ROCM-33020: the AMD kernel forces isNetOffload=false. Registered one-RPN
+  // AllGather must therefore retain the ordinary proxy schedule instead of
+  // switching to NCCL_MAX_NET_SIZE chunks. NCCL_LOCAL_REGISTER=0 and the legacy
+  // torch process group both reach the unregistered baseline below.
+  constexpr size_t kPerRankBytes = 11 * 1024 * 1024;
+  constexpr size_t kGlobalBytes = 2 * kPerRankBytes;
+  ChunkComm cc(/*protoSimpleBuf=*/1 << 22);
+  cc.comm.nRanks = 2;
+  cc.comm.nNodes = 2;
+  cc.comm.isOneRPN = true;
+
+  auto unregistered = MakeTask(ncclFuncAllGather, NCCL_ALGO_RING, NCCL_PROTO_SIMPLE);
+  unregistered.chunkSteps = ALLGATHER_CHUNKSTEPS;
+  unregistered.sliceSteps = ALLGATHER_SLICESTEPS;
+  auto registered = unregistered;
+  registered.regBufType = NCCL_NET_REG_BUFFER;
+
+  auto workaround = RunChunking(cc, unregistered, /*nChannels=*/1, kGlobalBytes);
+  auto zeroCopy = RunChunking(cc, registered, /*nChannels=*/1, kGlobalBytes);
+  ASSERT_EQ(ncclSuccess, workaround.rc);
+  ASSERT_EQ(ncclSuccess, zeroCopy.rc);
+  ASSERT_EQ(0, workaround.proxyOp.reg);
+  ASSERT_EQ(1, zeroCopy.proxyOp.reg);
+
+  const size_t expectedChunk =
+      size_t(cc.comm.buffSizes[NCCL_PROTO_SIMPLE]) / NCCL_STEPS * ALLGATHER_CHUNKSTEPS;
+  const size_t expectedSlice = expectedChunk / ALLGATHER_CHUNKSTEPS * ALLGATHER_SLICESTEPS;
+  const size_t expectedLoop = size_t(cc.comm.nRanks) * expectedChunk;
+  const int expectedSteps =
+      int((kGlobalBytes + expectedLoop - 1) / expectedLoop) * (cc.comm.nRanks - 1) * ALLGATHER_CHUNKSTEPS;
+
+  EXPECT_EQ(expectedChunk, zeroCopy.proxyOp.chunkSize);
+  EXPECT_EQ(expectedSlice, zeroCopy.proxyOp.sliceSize);
+  EXPECT_EQ(expectedLoop, zeroCopy.proxyOp.loopSize);
+  EXPECT_EQ(expectedSteps, zeroCopy.proxyOp.nsteps);
+  EXPECT_EQ(workaround.proxyOp.chunkSize, zeroCopy.proxyOp.chunkSize);
+  EXPECT_EQ(workaround.proxyOp.sliceSize, zeroCopy.proxyOp.sliceSize);
+  EXPECT_EQ(workaround.proxyOp.loopSize, zeroCopy.proxyOp.loopSize);
+  EXPECT_EQ(workaround.proxyOp.nsteps, zeroCopy.proxyOp.nsteps);
+#else
+  GTEST_SKIP() << "RCCL's AMD scheduling divergence is not active in this build";
+#endif
+}
+
 TEST_F(EnqueueMicrotest, CalcCollChunking_ChunkSizeIsAlwaysWritten) {
   // The out-param is poisoned to 0xFFFFFFFF before every call; a path that
   // returns success without writing it would show up as the poison value.
