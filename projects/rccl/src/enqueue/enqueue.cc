@@ -3637,6 +3637,9 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
         }
       }
     } else if (info->algorithm == NCCL_ALGO_RING) {
+      // AMD's ring AllGather kernel does not implement net offload; its proxy
+      // must keep the ordinary chunk schedule used by the device.
+#if !defined(__HIP_PLATFORM_AMD__) && !defined(__HIPCC__)
       if (proxyOp->isOneRPN && info->func == ncclFuncAllGather) {
         proxyOp->chunkSize = NCCL_MAX_NET_SIZE;
         proxyOp->sliceSize = NCCL_MAX_NET_SIZE;
@@ -3646,6 +3649,7 @@ static ncclResult_t calcCollChunking(struct ncclComm* comm, struct ncclTaskColl*
         proxyOp->nsteps = DIVUP(nBytes, proxyOp->loopSize) * nstepsPerLoop;
         proxyOp->loopOffset = 0;
       }
+#endif
     } else {
       WARN("Net registration invalid algorithm %s", ncclAlgoToString(info->algorithm));
       return ncclInternalError;
