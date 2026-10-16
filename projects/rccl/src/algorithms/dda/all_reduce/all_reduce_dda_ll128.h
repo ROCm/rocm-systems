@@ -40,13 +40,14 @@ constexpr size_t ddaLL128ArSlotWords(size_t bankSize, int nRanks) {
 //
 // Phase 1 (publish): pack this rank's slice into registers once, then push it
 // onto the wire in every peer's scratch at slot selfRank, flag word embedded.
-// Phase 2 (reduce): for each peer, poll that peer's slot in our own scratch and
-// fold the arriving words into an accumulator seeded with our own payload, then
-// unpack the accumulator into recvbuff. Flag polling supplies the cross-rank
-// ordering, so no GPU barrier is used.
+// Phase 2 (reduce): for each rank in order 0..nRanks-1, poll that rank's slot in
+// our own scratch and fold the arriving words into an accumulator, then unpack
+// the accumulator into recvbuff. The fixed order makes every rank round
+// identically. Flag polling supplies the cross-rank ordering, so no GPU barrier
+// is used.
 //
-// Self does not round-trip through scratch; its contribution seeds the
-// accumulator straight from sendbuff. Scratch is double buffered: bank = flag & 1.
+// Self does not round-trip through scratch; its contribution is folded in at its
+// rank position straight from sendbuff. Scratch is double buffered: bank = flag & 1.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
@@ -113,22 +114,36 @@ __launch_bounds__(512)
     const int eltInSlice =
       rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
 
-    // Seed with our own payload; peers are folded on top.
-    uint64_t acc[kDdaLL128WordsPerThread] = {};
-    ddaLL128LoadRegs<int8_t>(acc, srcBytes + dataByte, eltInSlice, lane, flagLane);
-
-    for (int r = 1; r < nRanks; ++r) {
-      const int peer = (selfRank + r) % nRanks;
-      const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
-      uint64_t vr[kDdaLL128WordsPerThread];
-      ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+    // Own slice loads first to overlap the polls; rank 0 seeds acc (fixed order, see header).
+    uint64_t self[kDdaLL128WordsPerThread] = {};
+    ddaLL128LoadRegs<int8_t>(self, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    uint64_t acc[kDdaLL128WordsPerThread];
+    if (selfRank == 0) {
+#pragma unroll
+      for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+        acc[u] = self[u];
+      }
+    } else {
+      ddaLL128PollWire(gatherBase + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, acc, flag, lane);
+    }
+    for (int peer = 1; peer < nRanks; ++peer) {
       // On a flag lane the odd words hold flags rather than payload, so the sums
       // landing there are meaningless -- ddaLL128StoreRegs re-derives those slots
       // from the even ones and never writes them out, so folding blind is cheaper
       // than predicating the loop.
+      if (peer == selfRank) {
 #pragma unroll
-      for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
-        acc[u] = ddaLL128AddWord<T>(acc[u], vr[u]);
+        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+          acc[u] = ddaLL128AddWord<T>(acc[u], self[u]);
+        }
+      } else {
+        const uint64_t* gatherSlot = gatherBase + (uint64_t)peer * (uint64_t)slotWords;
+        uint64_t vr[kDdaLL128WordsPerThread];
+        ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+#pragma unroll
+        for (int u = 0; u < kDdaLL128WordsPerThread; ++u) {
+          acc[u] = ddaLL128AddWord<T>(acc[u], vr[u]);
+        }
       }
     }
 

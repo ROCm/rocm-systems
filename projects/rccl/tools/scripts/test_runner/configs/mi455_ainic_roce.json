@@ -5798,6 +5798,32 @@
         }
       ]
     },
+    "dda_allreduce_bit_identical": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 1,
+      "num_gpus": 4,
+      "timeout": 240,
+      "tests": [
+        {
+          "name": "DDA_BitIdenticalAcrossRanks_4Ranks",
+          "description": "Float and bf16 AllReduce at 256 KiB to 4 MiB returns bit-identical output on every rank under the default selection",
+          "test_filter": "DdaMPI_AllReduce.BitIdenticalAcrossRanksDefaultSelection"
+        },
+        {
+          "name": "DDA_LLOneShotBitIdentical_4Ranks",
+          "description": "The DDA fabric LL one-shot kernel folds in rank order, so every rank gets the same bits back",
+          "test_filter": "DdaMPI_AllReduce.LLOneShotBitIdenticalAcrossRanks"
+        },
+        {
+          "name": "DDA_LL128OneShotBitIdentical_4Ranks",
+          "description": "The DDA fabric LL128 one-shot kernel folds in rank order, so every rank gets the same bits back; own entry because it zeroes the LL thresholds",
+          "test_filter": "DdaMPI_AllReduce.LL128OneShotBitIdenticalAcrossRanks"
+        }
+      ]
+    },
     "device_api_mpi_different_teams": {
       "extends": "default",
       "is_gtest": true,
@@ -6769,6 +6795,12 @@
       "name": "Device API MPI - ReduceSumCopy Different Teams [5.1e]",
       "description": "ncclLsaReduceSumCopy with different LSA sub-teams (full LSA src, innerFactor dst) on 4 co-located ranks, single node (NCCL_CUMEM_ENABLE=1)",
       "config": "device_api_mpi_different_teams",
+      "enabled": true
+    },
+    {
+      "name": "DDA AllReduce - Bit-Identical Across Ranks",
+      "description": "DDA fabric LL and LL128 one-shot AllReduce on gfx1250 return the same bits on every rank (single node, 4 ranks)",
+      "config": "dda_allreduce_bit_identical",
       "enabled": true
     },
     {

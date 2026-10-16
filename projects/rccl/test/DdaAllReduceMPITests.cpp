@@ -32,7 +32,9 @@
 #include <gtest/gtest.h>
 #include <hip/hip_runtime.h>
 
+#include <cstdint>
 #include <cstdio>
+#include <cstring>
 #include <set>
 #include <string>
 #include <vector>
@@ -115,6 +117,39 @@ size_t twoShotCountForRanks(int nRanks)
         return 0;
     }
     return count;
+}
+
+// Rank i%n holds +big, the next -big, the rest 1.0, so the sum depends on the fold order.
+std::vector<uint8_t> makeOrderSensitiveInput(ncclDataType_t type, size_t count, int rank, int nRanks)
+{
+    const float big = (type == ncclBfloat16) ? 1024.0f : 33554432.0f;
+    std::vector<uint8_t> host(count * (type == ncclBfloat16 ? sizeof(uint16_t) : sizeof(float)));
+    for(size_t i = 0; i < count; ++i)
+    {
+        const int owner = static_cast<int>(i % static_cast<size_t>(nRanks));
+        float     v     = 1.0f;
+        if(rank == owner)
+        {
+            v = big;
+        }
+        else if(rank == (owner + 1) % nRanks)
+        {
+            v = -big;
+        }
+        uint32_t bits = 0;
+        std::memcpy(&bits, &v, sizeof(bits));
+        if(type == ncclBfloat16)
+        {
+            // Every value here is a power of two, so dropping the low half is the exact bf16 value.
+            const uint16_t hi = static_cast<uint16_t>(bits >> 16);
+            std::memcpy(host.data() + i * sizeof(hi), &hi, sizeof(hi));
+        }
+        else
+        {
+            std::memcpy(host.data() + i * sizeof(bits), &bits, sizeof(bits));
+        }
+    }
+    return host;
 }
 
 bool logContainsNeedle(const MPIHelpers::TestLogAssertionContext& logCtx, const char* needle)
@@ -320,6 +355,127 @@ protected:
                       testId,
                       algoName ? algoName : "?");
     }
+
+    // Every rank must get the same bits back; logNeedle pins the DDA tier, nullptr allows any.
+    void runBitIdenticalAcrossRanks(const std::vector<ncclDataType_t>& types, const std::vector<size_t>& sizes,
+                                    const char* logNeedle, const char* testId)
+    {
+        if(!validateTestPrerequisites(kMinProcessesForMPI))
+        {
+            GTEST_SKIP() << "Need at least 2 MPI ranks";
+        }
+
+        // a + b == b + a exactly, so only a third operand can expose a rank-dependent fold order.
+        const std::string rankSkip
+            = mpiCoordinatedSkipReason(MPIEnvironment::world_size < 3, "Need at least 3 MPI ranks");
+        if(!rankSkip.empty())
+        {
+            GTEST_SKIP() << rankSkip;
+        }
+
+        if(logNeedle != nullptr)
+        {
+            const std::string archSkip
+                = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric LL requires gfx1250");
+            if(!archSkip.empty())
+            {
+                GTEST_SKIP() << archSkip;
+            }
+        }
+
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
+
+        if(logNeedle != nullptr)
+        {
+            const std::string fabricSkip
+                = mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
+                                           "DDA fabric path did not initialize");
+            if(!fabricSkip.empty())
+            {
+                GTEST_SKIP() << fabricSkip;
+            }
+        }
+
+        int rank{}, nRanks{};
+        ncclCommUserRank(getActiveCommunicator(), &rank);
+        ncclCommCount(getActiveCommunicator(), &nRanks);
+
+        for(const ncclDataType_t type : types)
+        {
+            for(const size_t bytes : sizes)
+            {
+                const size_t eltSize = (type == ncclBfloat16) ? sizeof(uint16_t) : sizeof(float);
+                const size_t count   = bytes / eltSize;
+                SCOPED_TRACE(std::string(testId) + " type=" + std::to_string(static_cast<int>(type))
+                             + " bytes=" + std::to_string(bytes));
+
+                void* sendBuf = nullptr;
+                ASSERT_MPI_EQ(hipSuccess, hipMalloc(&sendBuf, bytes));
+                DeviceBufferAutoGuard sendGuard(sendBuf);
+                void* recvBuf = nullptr;
+                ASSERT_MPI_EQ(hipSuccess, hipMalloc(&recvBuf, bytes));
+                DeviceBufferAutoGuard recvGuard(recvBuf);
+
+                const std::vector<uint8_t> input = makeOrderSensitiveInput(type, count, rank, nRanks);
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(sendBuf, input.data(), bytes, hipMemcpyHostToDevice));
+                // A per-rank fill means an output the kernel never wrote cannot compare equal across ranks.
+                ASSERT_MPI_EQ(hipSuccess, hipMemset(recvBuf, rank + 1, bytes));
+
+                if(rank == 0)
+                {
+                    int                algo = -1, protocol = -1, maxChannels = -1;
+                    const char*        algoName = nullptr;
+                    const ncclResult_t query
+                        = rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncAllReduce, count, type, ncclSum,
+                                              sendBuf, recvBuf, /*graphCapturing=*/0, &algo, &protocol,
+                                              &maxChannels);
+                    if(query == ncclSuccess)
+                    {
+                        rcclGetAlgoName(algo, &algoName);
+                    }
+                    TEST_INFO("%s: type %d, %zu bytes ran on %s", testId, static_cast<int>(type), bytes,
+                              algoName ? algoName : "?");
+                }
+
+                ASSERT_MPI_EQ(ncclSuccess, ncclAllReduce(sendBuf, recvBuf, count, type, ncclSum,
+                                                         getActiveCommunicator(), getActiveStream()));
+                ASSERT_MPI_EQ(hipSuccess, hipStreamSynchronize(getActiveStream()));
+
+                std::vector<uint8_t> mine(bytes);
+                ASSERT_MPI_EQ(hipSuccess, hipMemcpy(mine.data(), recvBuf, bytes, hipMemcpyDeviceToHost));
+                std::vector<uint8_t> ref = mine;
+                ASSERT_EQ(MPI_SUCCESS, MPI_Bcast(ref.data(), static_cast<int>(bytes), MPI_BYTE, 0, MPI_COMM_WORLD));
+
+                int64_t mismatches = 0;
+                size_t  firstBad   = count;
+                for(size_t i = 0; i < count; ++i)
+                {
+                    if(std::memcmp(mine.data() + i * eltSize, ref.data() + i * eltSize, eltSize) != 0)
+                    {
+                        if(mismatches == 0)
+                        {
+                            firstBad = i;
+                        }
+                        ++mismatches;
+                    }
+                }
+                int64_t totalMismatches = mismatches;
+                MPI_Allreduce(MPI_IN_PLACE, &totalMismatches, 1, MPI_INT64_T, MPI_SUM, MPI_COMM_WORLD);
+
+                EXPECT_EQ(0, mismatches) << "Rank " << rank << ": " << mismatches << " of " << count
+                                         << " elements differ from rank 0, first at index " << firstBad;
+                EXPECT_EQ(0, totalMismatches) << "Rank " << rank << ": AllReduce output is not bit-identical"
+                                              << " across ranks (" << totalMismatches << " element mismatches)";
+            }
+        }
+
+        if(logNeedle != nullptr)
+        {
+            EXPECT_TRUE(logContainsNeedle(*logCtx_, logNeedle))
+                << "Rank " << rank << ": " << testId << " did not log the expected DDA tier (needle: \""
+                << logNeedle << "\")";
+        }
+    }
 };
 
 class DdaMPI_AllReduce : public DdaAllReduceMPITest
@@ -391,6 +547,30 @@ TEST_F(DdaMPI_AllReduce, LL128TwoShotMultiRank)
         GTEST_SKIP() << "Could not find a two-shot-aligned element count for nRanks=" << nRanks;
 
     runAllReduce(count, kLL128TwoShotLogNeedle, "DdaMPI_AllReduce/LL128TwoShotMultiRank");
+}
+
+// Whatever backend the default selection picks for 256 KiB to 4 MiB, every rank must get the same bits back.
+TEST_F(DdaMPI_AllReduce, BitIdenticalAcrossRanksDefaultSelection)
+{
+    runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024, 1024 * 1024, 4 * 1024 * 1024},
+                               /*logNeedle=*/nullptr, "DdaMPI_AllReduce/BitIdenticalAcrossRanksDefaultSelection");
+}
+
+// 256 KiB is under the default LL one-shot threshold, so the LL one-shot kernel produces every byte compared.
+TEST_F(DdaMPI_AllReduce, LLOneShotBitIdenticalAcrossRanks)
+{
+    runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024}, kOneShotLogNeedle,
+                               "DdaMPI_AllReduce/LLOneShotBitIdenticalAcrossRanks");
+}
+
+// Sets the same thresholds as LL128OneShotMultiRank, so it needs its own process (see the note above).
+TEST_F(DdaMPI_AllReduce, LL128OneShotBitIdenticalAcrossRanks)
+{
+    MPIHelpers::MpiEnvGuard llOneShotGuard("RCCL_DDA_LL_ONESHOT_THRESHOLD", "0");
+    MPIHelpers::MpiEnvGuard llTwoShotGuard("RCCL_DDA_LL_TWOSHOT_THRESHOLD", "0");
+
+    runBitIdenticalAcrossRanks({ncclFloat32, ncclBfloat16}, {256 * 1024}, kLL128OneShotLogNeedle,
+                               "DdaMPI_AllReduce/LL128OneShotBitIdenticalAcrossRanks");
 }
 
 // AICOMRCCL-2184: RCCL selects the collective's device itself, and the device the caller left
