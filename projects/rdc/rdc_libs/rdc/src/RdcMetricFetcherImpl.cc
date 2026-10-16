@@ -921,14 +921,14 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
       }
     } break;
     case RDC_FI_GPU_PARTITION_COUNT: {
-      uint32_t partition_count = 0;
-      amdsmi_gpu_metrics_t metrics;
-      memset(&metrics, 0, sizeof(metrics));
-      value->status = get_metrics_info(processor_handle, &metrics);
-      partition_count = metrics.num_partition;
+      // Only some drivers fill the gpu_metrics partition count (none that publish
+      // gpu_metrics v1.9), so take the count from the GPU's partition profile, as
+      // rdci discovery does.
+      uint16_t num_partitions = 0;
+      value->status = get_num_partition(gpu_index, &num_partitions);
       value->type = INTEGER;
       if (value->status == AMDSMI_STATUS_SUCCESS) {
-        value->value.l_int = static_cast<int64_t>(partition_count);
+        value->value.l_int = static_cast<int64_t>(num_partitions);
       }
     } break;
     case RDC_FI_KFD_ID: {

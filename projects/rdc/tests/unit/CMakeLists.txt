@@ -182,3 +182,33 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# rdc_partition_count_tests: RDC_FI_GPU_PARTITION_COUNT against fake amdsmi
+# partition profiles. Compiles the metric fetcher into the test, which defines
+# the amdsmi calls the tests reach, so it runs on GPU-less CI. amd_smi provides
+# the calls the tests never make, librdc_bootstrap the logger.
+add_executable(
+    rdc_partition_count_tests
+    ${SRC_DIR}/test_partition_count.cc
+    ${PROJECT_SOURCE_DIR}/common/rdc_capabilities.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcMetricFetcherImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+)
+target_include_directories(
+    rdc_partition_count_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(
+    rdc_partition_count_tests
+    PRIVATE rdc_bootstrap amd_smi cap GTest::gtest_main pthread
+)
+set_target_properties(
+    rdc_partition_count_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:${AMD_SMI_LIB_DIR}"
+)
+add_test(NAME rdc_partition_count_tests COMMAND rdc_partition_count_tests)
+install(
+    TARGETS rdc_partition_count_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
