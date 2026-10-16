@@ -309,6 +309,58 @@ TEST(RegisterAccessTest, ReadRegionObservesAllRegistersAndReturnsLaneSpans) {
   EXPECT_EQ(region.lanes(1)[5], 0x4444u);
 }
 
+TEST(RegisterAccessTest, ReadRegionLoadsNativeLaneChunk) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  } else {
+    Fixture fx;
+    ASSERT_NE(fx.wf, nullptr);
+    constexpr uint32_t lane_base = 4;
+    constexpr std::size_t width = util::native_width_v<uint32_t>;
+    const uint64_t chunk_mask = util::mask<uint64_t>(static_cast<int>(width));
+    const uint64_t lane_mask = chunk_mask << lane_base;
+    const uint32_t base = fx.vgpr_base() + 3;
+    for (uint32_t lane = lane_base; lane < lane_base + width; ++lane) {
+      fx.cu->write_vgpr(base, lane, 0x1000u + lane);
+      fx.cu->write_vgpr(base + 1, lane, 0x2000u + lane);
+    }
+
+    auto region = RegisterAccess(*fx.wf).read_vgpr_region(base, 2, lane_mask);
+    const auto values = region.load_native<uint32_t>(/*relative_reg=*/1, lane_base);
+
+    ASSERT_EQ(fx.plugin->reads.size(), 2u);
+    EXPECT_EQ(fx.plugin->reads[0].lane_mask, lane_mask);
+    EXPECT_EQ(fx.plugin->reads[1].lane_mask, lane_mask);
+    for (std::size_t lane = 0; lane < width; ++lane)
+      EXPECT_EQ(values[lane], 0x2000u + lane_base + lane);
+  }
+}
+
+TEST(RegisterAccessTest, ReadRegionNativeLoadMasksUnobservedBytes) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  } else {
+    Fixture fx;
+    ASSERT_NE(fx.wf, nullptr);
+    constexpr uint32_t lane_base = 4;
+    constexpr std::size_t width = util::native_width_v<uint32_t>;
+    const uint64_t chunk_mask = util::mask<uint64_t>(static_cast<int>(width));
+    const uint64_t lane_mask = chunk_mask << lane_base;
+    const uint32_t reg = fx.vgpr_base() + 5;
+    for (uint32_t lane = lane_base; lane < lane_base + width; ++lane)
+      fx.cu->write_vgpr(reg, lane, 0xA1B2C3D4u + lane);
+
+    auto region = RegisterAccess(*fx.wf).read_vgpr_region(reg, /*reg_count=*/1, lane_mask,
+                                                          /*byte_mask=*/0b0110);
+    const auto values = region.load_native<uint32_t>(/*relative_reg=*/0, lane_base);
+
+    ASSERT_EQ(fx.plugin->reads.size(), 1u);
+    EXPECT_EQ(fx.plugin->reads[0].byte_mask, 0b0110);
+    for (std::size_t lane = 0; lane < width; ++lane)
+      EXPECT_EQ(values[lane], (0xA1B2C3D4u + lane_base + lane) & 0x00FFFF00u);
+  }
+}
+
 TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
   Fixture fx;
   ASSERT_NE(fx.wf, nullptr);
@@ -340,11 +392,12 @@ TEST(RegisterAccessTest, ReadRegionCopiesDwordsToLaneMajorStorage) {
   EXPECT_TRUE(std::ranges::all_of(masked_lane, [](uint8_t byte) { return byte == 0xAA; }));
 }
 
-// GCC 14+ inlines copy_dwords_lane_major and flags the memcpy as out-of-bounds,
+// GCC 13+ inlines copy_dwords_lane_major and flags the memcpy as out-of-bounds,
 // not realizing the exception guard makes it unreachable. Suppress the false positive.
 #if defined(__GNUC__) && !defined(__clang__)
 #pragma GCC diagnostic push
 #pragma GCC diagnostic ignored "-Warray-bounds"
+#pragma GCC diagnostic ignored "-Wstringop-overflow"
 #endif
 TEST(RegisterAccessTest, ReadRegionRejectsInvalidLaneMajorCopyBounds) {
   Fixture fx(ROCJITSU_CODE_ARCH_CDNA4, kSgprsPerWave, /*wavefront_slots=*/1, kVgprsPerWave,
@@ -435,6 +488,76 @@ TEST(RegisterAccessTest, WriteRegionObservesWritesAndHonorsLaneMask) {
   EXPECT_EQ(fx.cu->read_vgpr(base + 7, 0), 0x100u);
   EXPECT_EQ(fx.cu->read_vgpr(base + 7, 1), 0xAAAA0001u);
   EXPECT_EQ(fx.cu->read_vgpr(base + 7, 2), 0x300u);
+}
+
+TEST(RegisterAccessTest, WriteRegionStoresNativeOnlyInObservedLanesAndBytes) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  } else {
+    Fixture fx;
+    ASSERT_NE(fx.wf, nullptr);
+    constexpr uint32_t lane_base = 4;
+    constexpr std::size_t width = util::native_width_v<uint32_t>;
+    const uint64_t chunk_mask = uint64_t{1} | (uint64_t{1} << (width - 1));
+    const uint64_t lane_mask = chunk_mask << lane_base;
+    const uint32_t reg = fx.vgpr_base() + 7;
+    for (uint32_t lane = lane_base; lane < lane_base + width; ++lane)
+      fx.cu->write_vgpr(reg, lane, 0xAABB0000u | lane);
+
+    auto region = RegisterAccess(*fx.wf).write_vgpr_region(reg, /*reg_count=*/1, lane_mask,
+                                                           /*byte_mask=*/0b0110);
+    region.store_native<uint32_t>(/*relative_reg=*/0, lane_base,
+                                  util::native<uint32_t>(0x11223344u), chunk_mask);
+
+    EXPECT_TRUE(fx.plugin->reads.empty());
+    ASSERT_EQ(fx.plugin->writes.size(), 1u);
+    EXPECT_EQ(fx.plugin->writes[0].lane_mask, lane_mask);
+    EXPECT_EQ(fx.plugin->writes[0].byte_mask, 0b0110);
+    for (std::size_t lane = 0; lane < width; ++lane) {
+      const uint32_t old_value = 0xAABB0000u | (lane_base + lane);
+      const uint32_t expected = (chunk_mask & (uint64_t{1} << lane))
+                                    ? (old_value & ~0x00FFFF00u) | 0x00223300u
+                                    : old_value;
+      EXPECT_EQ(fx.cu->read_vgpr(reg, lane_base + lane), expected);
+    }
+  }
+}
+
+TEST(RegisterAccessTest, WriteRegionNativeStoreHonorsAcquiredWaveWriteMask) {
+  if constexpr (!util::has_stdx_simd) {
+    GTEST_SKIP() << "<experimental/simd> unavailable";
+  } else {
+    Fixture fx;
+    ASSERT_NE(fx.wf, nullptr);
+    constexpr uint32_t lane_base = 4;
+    constexpr uint64_t requested_chunk_mask = 0b1111;
+    constexpr uint64_t permitted_chunk_mask = 0b0101;
+    constexpr uint64_t requested_lane_mask = requested_chunk_mask << lane_base;
+    constexpr uint64_t permitted_lane_mask = permitted_chunk_mask << lane_base;
+    const uint32_t reg = fx.vgpr_base() + 9;
+
+    amdgpu::dpp::ScopedVgprWriteMask write_mask;
+    write_mask.bind(*fx.wf, permitted_lane_mask);
+    auto region =
+        RegisterAccess(*fx.wf).write_vgpr_region(reg, /*reg_count=*/1, requested_lane_mask);
+    write_mask.restore();
+
+    EXPECT_EQ(region.lane_mask(), permitted_lane_mask);
+    ASSERT_EQ(fx.plugin->writes.size(), 1u);
+    EXPECT_EQ(fx.plugin->writes[0].lane_mask, permitted_lane_mask);
+    region.store_native<uint32_t>(/*relative_reg=*/0, lane_base, util::native<uint32_t>(0xCAFEu),
+                                  permitted_chunk_mask);
+    EXPECT_THROW(region.store_native<uint32_t>(
+                     /*relative_reg=*/0, lane_base, util::native<uint32_t>(0xBADu),
+                     /*lane_mask=*/0b0010),
+                 std::logic_error);
+    EXPECT_TRUE(fx.plugin->reads.empty());
+
+    for (uint32_t lane = 0; lane < 4; ++lane) {
+      const uint32_t expected = (permitted_chunk_mask & (uint64_t{1} << lane)) ? 0xCAFEu : 0u;
+      EXPECT_EQ(fx.cu->read_vgpr(reg, lane_base + lane), expected);
+    }
+  }
 }
 
 TEST(RegisterAccessTest, WriteRegionStoresOnlyObservedBytes) {
