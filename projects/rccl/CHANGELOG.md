@@ -57,6 +57,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * The rocSHMEM GDA GIN backend (`NCCL_GIN_TYPE=6`) now sets the RoCE traffic class of its queue pairs from `NCCL_GIN_IB_TC`, then `NCCL_IB_TC`, then the communicator traffic class, matching the IB proxy backend. It previously read `ROCSHMEM_GDA_TRAFFIC_CLASS`, which no longer affects these queue pairs. The default remains traffic class 0 when none of these is set.
 * The AMD Pensando 'ionic' RDMA provider for the rocSHMEM GDA GIN backend (`NCCL_GIN_TYPE=6`) now properly enforces the required support for creation of 'collapsed' single-entry completion queues. If network driver and firmware support for this feature is unavailable, an initialization failure will occur rather than a silent fallback to plain completion queues.
 
+* A graph XML file supplied through `NCCL_GRAPH_FILE` is now rejected with `ncclInvalidUsage` if its `nchannels` attribute does not match the number of `<channel>` elements present, instead of reading uninitialized channel data.
+
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
 * `RCCL_DDA_LL128_RS_THREADS` removed (was default `1024`): reduce-scatter LL128 now launches a fixed 512-thread block, one warp per slice, so the thread count is no longer a tuning knob.
@@ -66,6 +68,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
 * Fixed P2P IPC registration reuse producing out-of-bounds remote addresses when a registered allocation spans multiple cuMem segments.
+* Fixed out-of-bounds writes when importing a graph from the file named by `NCCL_GRAPH_FILE`. Channel indices beyond `MAXCHANNELS`, more than two `<net>` sub-nodes in a channel, and more `<gpu>` sub-nodes than the system has GPUs now return `ncclInvalidUsage` instead of writing past the end of the graph's channel data.
+* Fixed the `rank` attribute in an `NCCL_GRAPH_FILE` graph being accepted without checking it against the topology. A rank the topology does not contain was written into the graph and later used as an array index during ring connection; such files now return `ncclInvalidUsage`.
 * Fixed non-thread-safe token parsing that could corrupt configuration parsed concurrently from multiple threads.
 * Fixed tuner plugins receiving uninitialized cost-model constants.
 * Fixed GIN proxy descriptor shared-memory sizing and alignment.
