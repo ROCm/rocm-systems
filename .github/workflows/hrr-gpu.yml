@@ -89,9 +89,12 @@ jobs:
         with:
           path: |
             build/capture-lib
-            build/hrr/playback/hrr-playback
-            build/hrr/tests/integration
-          key: hrr-capture-v1-${{ steps.cache_key.outputs.digest }}
+            build/hrr
+            dist/lib/librocm_kpack.so
+            dist/lib/librocm_kpack.so.0
+          # v2 adds the HRR build tree and librocm_kpack. v1 restored the test
+          # binary without that library, and verify could not start it.
+          key: hrr-capture-v2-${{ steps.cache_key.outputs.digest }}
 
       - name: Build
         if: steps.capture_cache.outputs.cache-hit != 'true'

@@ -274,6 +274,50 @@ def linkage_errors(ldd_output: str, lib_dir: Path) -> list[str]:
     return errors
 
 
+def staged_library_sources(ldd_output: str, lib_dir: Path) -> list[Path]:
+    """Libraries ldd resolved outside lib_dir and outside the system directories.
+
+    The integration binary's RUNPATH searches dist/lib, which is where it loads
+    amdhip64. A cache restore skips the build, so a dependency that the build
+    tree had and the base artifacts do not (librocm_kpack.so.0) has to be
+    copied here for the restored binary to start.
+    """
+    system_roots = (Path("/lib"), Path("/lib64"), Path("/usr/lib"), Path("/usr/lib64"))
+    sources: list[Path] = []
+    for match in re.finditer(r"^\s*\S+ => (\S+)", ldd_output, re.MULTILINE):
+        raw = match.group(1)
+        if raw == "not":
+            continue
+        src = Path(raw)
+        if src.parent == lib_dir:
+            continue
+        if any(src.is_relative_to(root) for root in system_roots):
+            continue
+        sources.append(src)
+    return sources
+
+
+def stage_runtime_libs(binary: Path, lib_dir: Path) -> list[str]:
+    """Copy non-system libraries the binary loads into lib_dir. Returns names copied."""
+    if not binary.is_file():
+        return []
+    out = subprocess.run(
+        ["ldd", str(binary)], check=True, capture_output=True, text=True
+    ).stdout
+    lib_dir.mkdir(parents=True, exist_ok=True)
+    copied: list[str] = []
+    for src in staged_library_sources(out, lib_dir):
+        if not src.is_file():
+            continue
+        dest = lib_dir / src.name
+        if dest.exists():
+            continue
+        shutil.copy2(src, dest, follow_symlinks=True)
+        copied.append(dest.name)
+        print(f"staged {dest.name} from {src}")
+    return copied
+
+
 def check_linkage(binary: Path, lib_dir: Path) -> int:
     out = subprocess.run(
         ["ldd", str(binary)], check=True, capture_output=True, text=True
@@ -314,6 +358,10 @@ def cmd_build(args: argparse.Namespace, runner: Runner = run) -> int:
     copy_amdhip64(args.dist / "lib", args.capture_lib)
     runner(hrr_configure_command(args.src, args.build, args.dist, args.archs))
     runner(["cmake", "--build", args.build / "hrr", "--target", *HRR_TARGETS])
+    stage_runtime_libs(
+        args.build / "hrr" / "tests" / "integration" / "hrr-integration-tests",
+        args.dist / "lib",
+    )
     return 0
 
 

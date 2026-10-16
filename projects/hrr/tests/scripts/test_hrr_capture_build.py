@@ -217,6 +217,20 @@ class BuildTest(unittest.TestCase):
             )
 
 
+class StageRuntimeLibsTest(unittest.TestCase):
+    def test_kpack_outside_the_install_is_staged(self):
+        text = "\n".join(
+            [
+                "libamdhip64.so.7 => /work/dist/lib/libamdhip64.so.7 (0x1)",
+                "libhsa-runtime64.so.1 => /work/dist/lib/libhsa-runtime64.so.1 (0x2)",
+                "librocm_kpack.so.0 => /work/build/clr/lib/librocm_kpack.so.0 (0x3)",
+                "libc.so.6 => /lib64/libc.so.6 (0x4)",
+            ]
+        )
+        sources = cb.staged_library_sources(text, Path("/work/dist/lib"))
+        self.assertEqual(sources, [Path("/work/build/clr/lib/librocm_kpack.so.0")])
+
+
 class CacheKeyTest(unittest.TestCase):
     def test_inputs_are_the_build_and_not_ci_yaml(self):
         paths = cb.CACHE_SOURCE_PATHS
