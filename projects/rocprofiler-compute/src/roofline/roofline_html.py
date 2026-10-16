@@ -12,7 +12,7 @@ from typing import Any, Dict, Final, List, Optional
 import plotly.graph_objects as go
 
 from roofline.roofline_hover import KERNEL_NAME_FONT_FAMILY
-from utils.html_report.document import build_document, read_asset
+from utils.html_report.report_shell import build_document, read_asset
 
 ALL_PEAKS_VALUE = "all"
 
@@ -20,7 +20,7 @@ ROOF_EXTRAP_MIN_AI = 1e-150
 ROOF_EXTRAP_MAX_AI = 1e150
 
 _PLOT_DIV_ID = "roofline-plot"
-ASSETS_DIR: Final[Path] = Path(__file__).parent / "assets"
+_ASSETS_DIR: Final[Path] = Path(__file__).parent / "assets"
 
 
 @dataclass
@@ -79,7 +79,7 @@ def build_interactive_document(
         },
     )
 
-    body_template = Template(read_asset(ASSETS_DIR, "roofline_plot.html"))
+    body_template = Template(read_asset(_ASSETS_DIR, "roofline_plot.html"))
     body_html = body_template.substitute(
         PEAK_TITLE=html.escape(
             "Plot each kernel at its arithmetic intensity for this memory level, "
@@ -96,8 +96,8 @@ def build_interactive_document(
     return build_document(
         title=title,
         body_html=body_html,
-        page_css=read_asset(ASSETS_DIR, "roofline_plot.css"),
-        page_js=read_asset(ASSETS_DIR, "roofline_plot.js"),
+        page_css=read_asset(_ASSETS_DIR, "roofline_plot.css"),
+        page_js=read_asset(_ASSETS_DIR, "roofline_plot.js"),
         model_id="roofline-model",
         model=view_model.to_payload(),
     )

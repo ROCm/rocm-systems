@@ -11,47 +11,14 @@ from pathlib import Path
 from string import Template
 from typing import Dict, Final
 
-import numpy as np
-
 DARK_THEME_CLASS: Final[str] = "report-theme-dark"
 _ASSETS_DIR = Path(__file__).parent / "assets"
 _MODEL_ID_PATTERN = re.compile(r"[a-z][a-z0-9-]*\Z")
 
 
-class _AssetCache:
-    """Keep UTF-8 report assets loaded once per interpreter."""
-
-    _contents: Dict[Path, str] = {}
-
-    @classmethod
-    def read(cls, path: Path) -> str:
-        if path not in cls._contents:
-            cls._contents[path] = path.read_text(encoding="utf-8")
-        return cls._contents[path]
-
-
 def read_asset(assets_dir: Path, name: str) -> str:
     """Read and cache an asset from the given page's assets directory."""
     return _AssetCache.read(assets_dir / name)
-
-
-def json_safe(value: object) -> object:
-    """Copy JSON containers while converting NumPy and non-finite numbers."""
-    if isinstance(value, np.integer):
-        return int(value)
-    if isinstance(value, (float, np.floating)):
-        number = float(value)
-        return number if math.isfinite(number) else None
-    if isinstance(value, dict):
-        return {key: json_safe(item) for key, item in value.items()}
-    if isinstance(value, (list, tuple)):
-        return [json_safe(item) for item in value]
-    return value
-
-
-def _embed_json(payload: object) -> str:
-    """Serialize a model safely inside an HTML script element."""
-    return json.dumps(json_safe(payload), allow_nan=False).replace("</", "<\\/")
 
 
 def build_document(
@@ -78,3 +45,31 @@ def build_document(
         BASE_JS=read_asset(_ASSETS_DIR, "report_base.js"),
         PAGE_JS=page_js,
     )
+
+
+def _json_safe(value: object) -> object:
+    """Copy JSON containers while converting non-finite Python floats."""
+    if isinstance(value, float):
+        return value if math.isfinite(value) else None
+    if isinstance(value, dict):
+        return {key: _json_safe(item) for key, item in value.items()}
+    if isinstance(value, (list, tuple)):
+        return [_json_safe(item) for item in value]
+    return value
+
+
+def _embed_json(payload: object) -> str:
+    """Serialize a model safely inside an HTML script element."""
+    return json.dumps(_json_safe(payload), allow_nan=False).replace("</", "<\\/")
+
+
+class _AssetCache:
+    """Keep UTF-8 report assets loaded once per interpreter."""
+
+    _contents: Dict[Path, str] = {}
+
+    @classmethod
+    def read(cls, path: Path) -> str:
+        if path not in cls._contents:
+            cls._contents[path] = path.read_text(encoding="utf-8")
+        return cls._contents[path]

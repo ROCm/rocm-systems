@@ -1,23 +1,22 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
-"""Unit tests for the shared standalone HTML report document."""
+"""Unit tests for the shared standalone HTML report shell."""
 
 import json
+import math
 from pathlib import Path
 
-import numpy as np
 import pytest
 
-from utils.html_report import document as report_document
-from utils.html_report.document import (
+from utils.html_report import report_shell
+from utils.html_report.report_shell import (
     DARK_THEME_CLASS,
     build_document,
-    json_safe,
     read_asset,
 )
 
-_ASSETS = Path(report_document.__file__).parent / "assets"
+_ASSETS = Path(report_shell.__file__).parent / "assets"
 
 
 def test_build_document_places_fragments_in_one_shell() -> None:
@@ -43,6 +42,7 @@ def test_build_document_places_fragments_in_one_shell() -> None:
     assert rendered.index("window.HtmlReport") < rendered.index("window.pageMarker")
     assert rendered.count("<script>") == 2
     assert f'classList.add("{DARK_THEME_CLASS}")' in rendered
+    assert f'"{DARK_THEME_CLASS}"' in read_asset(_ASSETS, "report_base.js")
 
 
 @pytest.mark.parametrize(
@@ -63,9 +63,12 @@ def test_build_document_rejects_invalid_model_id(model_id: str) -> None:
 
 def test_build_document_embeds_json_safely_without_mutation() -> None:
     payload = {
-        "integers": [np.int64(7), (np.int32(8),)],
-        "floats": [np.float32(1.5), float("nan"), np.float64("inf")],
+        "integers": [7, (8,)],
+        "floats": [1.5, float("nan"), float("inf"), float("-inf")],
         "name": "</script>",
+        "nested": {
+            "items": [(3, {"name": "already-json-safe", "value": float("-inf")})],
+        },
     }
 
     rendered = build_document(
@@ -82,73 +85,23 @@ def test_build_document_embeds_json_safely_without_mutation() -> None:
 
     assert json.loads(serialized) == {
         "integers": [7, [8]],
-        "floats": [1.5, None, None],
+        "floats": [1.5, None, None, None],
         "name": "</script>",
+        "nested": {
+            "items": [[3, {"name": "already-json-safe", "value": None}]],
+        },
     }
     assert "</" not in serialized
     assert r"<\/script>" in serialized
-
-
-@pytest.mark.parametrize(
-    ("value", "expected"),
-    [
-        pytest.param(
-            np.int64(3),
-            3,
-            id="numpy-integer",
-        ),
-        pytest.param(
-            1.5,
-            1.5,
-            id="python-finite-float",
-        ),
-        pytest.param(
-            np.float32(1.5),
-            1.5,
-            id="numpy-finite-float",
-        ),
-        pytest.param(
-            float("nan"),
-            None,
-            id="python-nan",
-        ),
-        pytest.param(
-            np.float64("inf"),
-            None,
-            id="numpy-infinity",
-        ),
-        pytest.param(
-            "already-json-safe",
-            "already-json-safe",
-            id="passthrough",
-        ),
-    ],
-)
-def test_json_safe_converts_supported_values(value: object, expected: object) -> None:
-    converted = json_safe(value)
-
-    assert converted == expected
-    assert type(converted) is type(expected)
-
-
-@pytest.mark.parametrize(
-    ("original", "expected"),
-    [
-        pytest.param(
-            {"nested": [np.int64(3)]},
-            {"nested": [3]},
-            id="dict-with-nested-list",
-        ),
-        pytest.param([np.int64(3)], [3], id="list"),
-        pytest.param((np.int32(3),), [3], id="tuple-to-list"),
-    ],
-)
-def test_json_safe_returns_new_containers(original: object, expected: object) -> None:
-    converted = json_safe(original)
-
-    assert converted == expected
-    assert type(converted) is type(expected)
-    assert converted is not original
+    assert payload["integers"] == [7, (8,)]
+    assert payload["floats"][0] == 1.5
+    assert math.isnan(payload["floats"][1])
+    assert payload["floats"][2] == float("inf")
+    assert payload["floats"][3] == float("-inf")
+    assert payload["name"] == "</script>"
+    assert payload["nested"] == {
+        "items": [(3, {"name": "already-json-safe", "value": float("-inf")})],
+    }
 
 
 def test_read_asset_caches_utf8(tmp_path: Path) -> None:

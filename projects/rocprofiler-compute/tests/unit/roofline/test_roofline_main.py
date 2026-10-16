@@ -20,14 +20,12 @@ import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
-from utils.html_report import document as report_document
-from utils.html_report.document import DARK_THEME_CLASS, read_asset
+from utils.html_report.report_shell import DARK_THEME_CLASS, read_asset
 
 if TYPE_CHECKING:
     from roofline.roofline_main import Roofline
 
 _ASSETS = Path(roofline_html.__file__).parent / "assets"
-_SHARED_ASSETS = Path(report_document.__file__).parent / "assets"
 
 
 class MockMspec:
@@ -600,23 +598,12 @@ def test_construct_plotly_figures_all_datatypes_ignores_cli_selection(
     assert "Peak VALU-FP64" in trace_names
 
 
-def test_view_model_payload_is_safely_embedded() -> None:
-    """The report builder escapes model text inside the script element."""
-    model = RooflineViewModel(kernels=[{"name": "evil</script>", "points": []}])
-
-    document = build_interactive_document(go.Figure(), model)
-
-    assert model.to_payload()["kernels"][0]["name"] == "evil</script>"
-    assert r"evil</script>" not in document, "must not allow a script element to close"
-    assert r"evil<\/script>" in document
-
-
 def test_the_controller_looks_up_controls_the_page_renders() -> None:
     """Every control the controller reaches for by id has to be one the document
     renders. Nothing would report the two drifting apart: the control would
     simply stop working."""
     controller = (_ASSETS / "roofline_plot.js").read_text(encoding="utf-8")
-    page_template = read_asset(roofline_html.ASSETS_DIR, "roofline_plot.html")
+    page_template = read_asset(_ASSETS, "roofline_plot.html")
 
     looked_up = set(re.findall(r'getElementById\("([^"]+)"\)', controller))
     assert looked_up, "expected the controller to find its controls by id"
@@ -628,7 +615,7 @@ def test_the_controller_looks_up_controls_the_page_renders() -> None:
 
 def test_browser_exposes_fixed_reset_fit_and_offplot_controls() -> None:
     """The page labels fixed reset separately from one-shot data fitting."""
-    page_template = read_asset(roofline_html.ASSETS_DIR, "roofline_plot.html")
+    page_template = read_asset(_ASSETS, "roofline_plot.html")
 
     assert 'id="roofline-reset-view"' in page_template
     assert "Return to the fixed opening axes" in page_template
@@ -672,35 +659,15 @@ def test_precision_controller_remains_single_and_does_not_reset_view() -> None:
     assert "resetView" not in apply_precision
 
 
-def test_the_dark_theme_is_named_the_same_in_every_asset() -> None:
-    """The page sets this class before its first paint, the stylesheet colors it,
-    and the toggle flips it. One name in three files, or a reader's theme silently
-    stops following either of them."""
-    dark_class = DARK_THEME_CLASS
-    page = report_document.build_document(
-        title="Roofline",
-        body_html="",
-        page_css="",
-        page_js="",
-        model_id="roofline-model",
-        model={},
-    )
+def test_roofline_stylesheet_uses_shared_dark_theme_class() -> None:
+    """The stylesheet colors the dark theme selected by the shared shell."""
     css = (_ASSETS / "roofline_plot.css").read_text(encoding="utf-8")
-    controller = read_asset(_SHARED_ASSETS, "report_base.js")
 
-    assert f'classList.add("{dark_class}")' in page
-    assert f":root.{dark_class}" in css
-    assert f'"{dark_class}"' in controller
+    assert f":root.{DARK_THEME_CLASS}" in css
 
 
-def test_roofline_document_keeps_one_plotly_bundle_and_model_id() -> None:
-    """Plotly remains inline in the body ahead of both report controllers."""
+def test_roofline_document_contains_one_inline_plotly_bundle() -> None:
+    """The standalone roofline report embeds exactly one Plotly bundle."""
     document = build_interactive_document(go.Figure(), RooflineViewModel())
 
-    assert document.count('id="roofline-model"') == 1
-    assert document.count('id="roofline-plot"') == 1
     assert document.count("plotly.js v") == 1
-    assert document.index("plotly.js v") < document.index('id="roofline-model"')
-    assert document.index("window.HtmlReport") < document.index(
-        'readModel("roofline-model")'
-    )

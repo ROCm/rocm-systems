@@ -654,10 +654,10 @@ add_test(
 )
 
 add_test(
-    NAME test_html_report
+    NAME test_report_shell
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_html_report.xml
-        ${COV_OPTION} tests/unit/utils/test_html_report.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_report_shell.xml
+        ${COV_OPTION} tests/unit/utils/test_report_shell.py ${WORKING_DIR_OPTION}
 )
 
 # -----------------------------------
@@ -1091,7 +1091,7 @@ if(${ENABLE_COVERAGE})
         test_roofline_calc
         test_roofline_analyze
         test_roofline_main
-        test_html_report
+        test_report_shell
         test_rocpd_data
         test_torch_trace_coverage
         test_profile_torch_trace
