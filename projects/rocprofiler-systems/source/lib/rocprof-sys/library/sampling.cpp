@@ -1572,10 +1572,12 @@ post_process_timemory(std::int64_t                               _tid,
 
                 if(_cc && _metrics && _metrics(category::thread_cpu_time{}))
                 {
-                    const double _elapsed_cc = _metrics.get_cpu_timestamp();
+                    const auto elapsed_cpu =
+                        static_cast<double>(_metrics.get_cpu_time().count()) /
+                        static_cast<double>(sampling_cpu_clock::get_unit());
 
-                    _cc->set_value(_elapsed_cc / sampling_cpu_clock::get_unit());
-                    _cc->set_accum(_elapsed_cc / sampling_cpu_clock::get_unit());
+                    _cc->set_value(elapsed_cpu);
+                    _cc->set_accum(elapsed_cpu);
                 }
             }
 

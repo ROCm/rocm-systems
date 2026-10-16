@@ -294,19 +294,16 @@ cache_backtrace_metrics_events(const std::uint32_t device_id, std::uint64_t time
     }
 }
 
-// CPU time used so far by the calling thread, in nanoseconds; 0 if the clock fails.
-// Async-signal-safe: sample() calls it from the sampler's signal handler.
-std::int64_t
-thread_cputime_ns() noexcept
+std::chrono::nanoseconds
+thread_cputime() noexcept
 {
     struct timespec cpu_time = {};
     if(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_time) != 0)
     {
-        return 0;
+        return std::chrono::nanoseconds::zero();
     }
-    return (std::chrono::seconds{ cpu_time.tv_sec } +
-            std::chrono::nanoseconds{ cpu_time.tv_nsec })
-        .count();
+    return std::chrono::seconds{ cpu_time.tv_sec } +
+           std::chrono::nanoseconds{ cpu_time.tv_nsec };
 }
 }  // namespace
 
@@ -328,7 +325,7 @@ backtrace_metrics::sample(int)
     }
 
     auto const _cache = tim::rusage_cache{ RUSAGE_THREAD };
-    m_cpu             = thread_cputime_ns();
+    m_cpu_time        = thread_cputime();
     m_mem_peak        = _cache.get_peak_rss();
     m_ctx_swch        = _cache.get_num_priority_context_switch() +
                  _cache.get_num_voluntary_context_switch();
@@ -437,7 +434,7 @@ backtrace_metrics::operator-=(const backtrace_metrics& _rhs)
 
     if(_lhs(category::thread_cpu_time{}))
     {
-        _lhs.m_cpu -= _rhs.m_cpu;
+        _lhs.m_cpu_time -= _rhs.m_cpu_time;
     }
 
     if(_lhs(category::thread_peak_memory{}))
@@ -476,9 +473,7 @@ backtrace_metrics::cache_backtrace_data(std::int64_t _tid, std::uint64_t _ts) co
     if(is_category_enabled(category::thread_cpu_time{}))
     {
         cache_backtrace_metrics_events<category::thread_cpu_time, double>(
-            0, _ts,
-            std::chrono::duration<double>{ std::chrono::nanoseconds{ m_cpu } }.count(),
-            _tid);
+            0, _ts, std::chrono::duration<double>{ m_cpu_time }.count(), _tid);
     }
 
     if(is_category_enabled(category::thread_peak_memory{}))
