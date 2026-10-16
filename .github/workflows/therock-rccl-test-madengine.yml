@@ -288,6 +288,9 @@ jobs:
         with:
           name: madengine-repro-${{ inputs.workload }}-${{ inputs.nodes }}N-${{ inputs.amdgpu_families }}
           path: ${{ env.WORK_DIR }}/repro
+          # The kpack GPU kernels sit in overlay_ctx/rccl_libs/.kpack, and
+          # upload-artifact drops dot-paths unless told otherwise.
+          include-hidden-files: true
           if-no-files-found: warn
           retention-days: 30
 
