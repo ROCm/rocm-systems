@@ -1037,13 +1037,13 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_PluginReportsZeroDevices_Returns
 // A failing devices() surfaces the plugin's own status, and stops the connect
 // before the backend is sized or anything is opened.
 TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_DevicesFails_PropagatesTheStatusAndOpensNothing) {
-  gin()->backends[0].ginCommCount = 7;  // poison: only a connect that got past devices() rewrites this
+  gin()->backends[0].ginCommCount = 3;  // poison: only a connect that got past devices() rewrites this
   fake_.failDevices = {ncclSystemError, 1};
 
   EXPECT_EQ(ncclSystemError, connectOnce());
 
   EXPECT_FALSE(gin()->connected);
-  EXPECT_EQ(7, gin()->backends[0].ginCommCount);
+  EXPECT_EQ(3, gin()->backends[0].ginCommCount);
   EXPECT_EQ(0, fake_.listenCalls);
   EXPECT_EQ(0, fake_.connectCalls);
 }
@@ -1088,14 +1088,14 @@ TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_ListenFails_DoesNotCloseAListenC
 
 // A topology query that fails stops the connect before the plugin is touched.
 TEST_F(GinHostConnectOnceMicrotest, ConnectOnce_TopologyQueryFails_PropagatesTheStatusBeforeTouchingThePlugin) {
-  gin()->backends[0].ginCommCount = 7;  // poison, as in the devices() failure above
+  gin()->backends[0].ginCommCount = 3;  // poison, as in the devices() failure above
   g_failTopoGetLocalGinDevs = {ncclSystemError, 1};
 
   EXPECT_EQ(ncclSystemError, connectOnce());
 
   EXPECT_EQ(0, fake_.devicesCalls);
   EXPECT_FALSE(gin()->connected);
-  EXPECT_EQ(7, gin()->backends[0].ginCommCount);
+  EXPECT_EQ(3, gin()->backends[0].ginCommCount);
   EXPECT_EQ(0, g_bootstrapAllGatherCalls);
 }
 
