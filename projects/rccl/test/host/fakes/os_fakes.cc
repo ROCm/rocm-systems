@@ -17,6 +17,8 @@
 #include <mutex>
 #include <sched.h>
 
+char* ncclOsStrSep(char** stringp, const char* delim) { return strsep(stringp, delim); }
+
 void* ncclOsAlignedAlloc(size_t alignment, size_t size) {
   void* p = nullptr;
   if (posix_memalign(&p, alignment, size) != 0) return nullptr;

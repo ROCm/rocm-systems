@@ -13,6 +13,12 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
+rccl_assert_source_line("${_rccl_src_root}/misc/rocmwrap.cc"
+  "RCCL_PARAM(ForceEnableDMABUF, \"FORCE_ENABLE_DMABUF\", 0);"
+  "fakes/rocmwrap_fakes.cc: rcclParamForceEnableDMABUF()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/rocmwrap_fakes.cc"
+  "int64_t rcclParamForceEnableDMABUF() { return g_loadParam(\"RCCL_FORCE_ENABLE_DMABUF\", 0); }"
+  "the ForceEnableDMABUF fake default")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -866,6 +872,26 @@ function(rccl_define_micro_source_lists)
     fakes/hip_fakes.cc
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc        # real GetGcnArchName/IsArchMatch
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/kernel_config.cc   # real option matching
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroNet -- src/transport/net.cc. Own binary: transport_stubs.cc, which most
+  # targets link, defines rcclUseAinic and netTransport, and net.cc defines both.
+  set(TEST_MICRO_NET_SOURCE_FILES
+    net-test.cc
+    fakes/collectives_fakes.cc           # func/algo/proto name tables
+    fakes/env_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/nccl_fakes.cc
+    fakes/nccl_stubs.cc                  # core floor, incl. proxy profiler hooks
+    fakes/os_fakes.cc
+    fakes/proxy_fakes.cc
+    fakes/rocmwrap_fakes.cc
+    fakes/topo_stubs.cc
+    fakes/transport_net_ib_fakes.cc      # ncclNetIb / netIbCast
+    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc  # real IsArchMatch
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc     # real parseStringList/matchIfList for NCCL_IB_HCA
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -2266,6 +2292,18 @@ rccl_add_micro_binary(rccl-UnitTestsMicroNetIbCastInit
     NET_IB_CAST_MULTIPLANE_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/multiplane.cc"
     NET_IB_CAST_GID_INSPECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_ib_cast/net_ib_cast_gid_inspect.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net_ib_cast_init.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroNet
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroNet
+  SOURCES ${TEST_MICRO_NET_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # net_tmp.cc, not net.cc: src/CMakeLists.txt lists plugin/net.cc first, so
+    # add_file_unique() renames this one. Re-check after any source-list reorder.
+    NET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/transport/net_tmp.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_net.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.
