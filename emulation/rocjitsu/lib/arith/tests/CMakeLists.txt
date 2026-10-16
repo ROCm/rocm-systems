@@ -29,5 +29,18 @@ rj_arith_add_test(rj_arith_v_wmma_f32_16x16x16_bf16_w64_test wmma/v_wmma_f32_16x
 rj_arith_add_test(rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12_test wmma/v_wmma_f32_16x16x16_bf16_w64_gfx12_test.cpp)
 rj_arith_add_test(rj_arith_v_fma_test fp/v_fma_test.cpp)
 rj_arith_add_test(rj_arith_cpu_test common/cpu_test.cpp)
+target_compile_definitions(
+    rj_arith_cpu_test
+    PRIVATE RJ_ARITH_IMPL_NAMESPACE=test_cpu
+)
 add_subdirectory(headers)
 add_subdirectory(cpuinfo)
+
+if(UNIX AND CMAKE_NM AND RJ_ARITH_ENABLE_X86_64)
+    add_test(
+        NAME rj_arith.baseline_linkage
+        COMMAND
+            ${CMAKE_COMMAND} -DNM=${CMAKE_NM} -DARCHIVE=$<TARGET_FILE:rj_arith>
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/common/baseline_linkage.cmake
+    )
+endif()

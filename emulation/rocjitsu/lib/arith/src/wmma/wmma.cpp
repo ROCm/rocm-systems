@@ -6,11 +6,10 @@
 
 #include "common/float_formats.h"
 #include "common/internal.h"
+#include "common/simd.h"
 #include "dot/dot.h"
 #include "rj_arith/rj_arith.h"
 
-#include <array>
-#include <cmath>
 #include <stdint.h>
 
 namespace {
@@ -25,6 +24,19 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
           rocjitsu::arith::kMatrixIgnoredFpFlags)) {
     return error;
   }
+
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if (rocjitsu::arith::cpu_level_at_least(flags, RJ_ARITH_CPU_X86_64_V3)) {
+    if (rocjitsu::arith::is_exact(flags)) {
+      rocjitsu::arith::wmma_exact_x86_64_v3<Bf16, WaveSize, false>(uint32_t(instruction_flags), d,
+                                                                   a, b, c);
+    } else {
+      rocjitsu::arith::wmma_f32_x86_64_v3<Bf16, WaveSize, false>(uint32_t(instruction_flags), d, a,
+                                                                 b, c);
+    }
+    return RJ_ARITH_SUCCESS;
+  }
+#endif
 
   // Each source lane holds eight K elements in Wave32, four in Wave64;
   // output lanes select columns and row groups (rocjitsu shared/mma_exec.h).
@@ -58,7 +70,7 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
       if (rocjitsu::arith::is_exact(flags)) {
         uint32_t acc = c_bits;
         for (int k = 0; k < 16; k += 4) {
-          std::array<uint16_t, 4> left, right;
+          uint16_t left[4], right[4];
           for (int j = 0; j < 4; ++j) {
             // GFX12 wave32 processes physical K chunks in order 0,8,4,12;
             // wave64 processes them in order 0,4,8,12.
@@ -84,7 +96,7 @@ int wmma(uint64_t flags, uint64_t instruction_flags, uint32_t *const *d, const u
               Bf16 ? rocjitsu::arith::bf16_to_float(left) : rocjitsu::arith::f16_to_float(left);
           float y =
               Bf16 ? rocjitsu::arith::bf16_to_float(right) : rocjitsu::arith::f16_to_float(right);
-          acc = std::fma(x, y, acc);
+          acc = __builtin_fmaf(x, y, acc);
         }
 
         result[reg][lane] = rocjitsu::arith::as_bits(acc);
