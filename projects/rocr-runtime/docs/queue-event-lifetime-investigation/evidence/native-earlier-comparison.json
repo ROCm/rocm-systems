@@ -1,0 +1,247 @@
+{
+  "host": "Shark52",
+  "gpu_architecture": "gfx1201",
+  "source_sha256": "9c98aa3d7f4641eb2f21cf7d036c4d24d547ef0068cee70e5956ad13c3ab39b6",
+  "detector_or_emulator_loaded": false,
+  "stress_delay_us": 100000,
+  "queue_creations": 4,
+  "results": [
+    {
+      "runtime": "original",
+      "attempt": 0,
+      "returncode": 1,
+      "output": "Delayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nQueue event lifetime: delayed writes=10, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n",
+      "environment": {
+        "LD_LIBRARY_PATH": "<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/library:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/tensilelite:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/llvm/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/host-math/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib",
+        "HSA_ENABLE_INTERRUPT": "1",
+        "ROCR_VISIBLE_DEVICES": "0"
+      },
+      "command": [
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/native/queue-event-repro"
+      ],
+      "loaded_libraries": [
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/libhsa-runtime64.so.1.21.0",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/librocprofiler-register.so.0.6.0",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_bz2.so",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_drm.so.2",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_drm_amdgpu.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_elf.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_liblzma.so.5.8.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_numa.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_z.so.1.3.2",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_zstd.so.1.5.7",
+        "/opt/rocm-7.1.0/lib/libhsa-amd-aqlprofile64.so.1.0.70100",
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "/usr/lib/x86_64-linux-gnu/libdl.so.2",
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6",
+        "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+        "/usr/lib/x86_64-linux-gnu/librt.so.1",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33"
+      ],
+      "runtime_files": [
+        {
+          "path": "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/libhsa-runtime64.so.1.21.0",
+          "sha256": "261534ef455ae4ff257a1e6704895c5b1f990375df963b57e2018d3bb3d8ff0f"
+        }
+      ]
+    },
+    {
+      "runtime": "original",
+      "attempt": 1,
+      "returncode": 1,
+      "output": "Delayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nQueue event lifetime: delayed writes=10, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n",
+      "environment": {
+        "LD_LIBRARY_PATH": "<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/library:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/tensilelite:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/llvm/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/host-math/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib",
+        "HSA_ENABLE_INTERRUPT": "1",
+        "ROCR_VISIBLE_DEVICES": "0"
+      },
+      "command": [
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/native/queue-event-repro"
+      ],
+      "loaded_libraries": [
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/libhsa-runtime64.so.1.21.0",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/librocprofiler-register.so.0.6.0",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_bz2.so",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_drm.so.2",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_drm_amdgpu.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_elf.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_liblzma.so.5.8.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_numa.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_z.so.1.3.2",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_zstd.so.1.5.7",
+        "/opt/rocm-7.1.0/lib/libhsa-amd-aqlprofile64.so.1.0.70100",
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "/usr/lib/x86_64-linux-gnu/libdl.so.2",
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6",
+        "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+        "/usr/lib/x86_64-linux-gnu/librt.so.1",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33"
+      ],
+      "runtime_files": [
+        {
+          "path": "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/libhsa-runtime64.so.1.21.0",
+          "sha256": "261534ef455ae4ff257a1e6704895c5b1f990375df963b57e2018d3bb3d8ff0f"
+        }
+      ]
+    },
+    {
+      "runtime": "original",
+      "attempt": 2,
+      "returncode": 1,
+      "output": "Delayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nQueue event lifetime: delayed writes=10, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n",
+      "environment": {
+        "LD_LIBRARY_PATH": "<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/library:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/tensilelite:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/llvm/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/host-math/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib",
+        "HSA_ENABLE_INTERRUPT": "1",
+        "ROCR_VISIBLE_DEVICES": "0"
+      },
+      "command": [
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/native/queue-event-repro"
+      ],
+      "loaded_libraries": [
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/libhsa-runtime64.so.1.21.0",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/librocprofiler-register.so.0.6.0",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_bz2.so",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_drm.so.2",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_drm_amdgpu.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_elf.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_liblzma.so.5.8.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_numa.so.1",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_z.so.1.3.2",
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib/librocm_sysdeps_zstd.so.1.5.7",
+        "/opt/rocm-7.1.0/lib/libhsa-amd-aqlprofile64.so.1.0.70100",
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "/usr/lib/x86_64-linux-gnu/libdl.so.2",
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6",
+        "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+        "/usr/lib/x86_64-linux-gnu/librt.so.1",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33"
+      ],
+      "runtime_files": [
+        {
+          "path": "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/libhsa-runtime64.so.1.21.0",
+          "sha256": "261534ef455ae4ff257a1e6704895c5b1f990375df963b57e2018d3bb3d8ff0f"
+        }
+      ]
+    },
+    {
+      "runtime": "fixed",
+      "attempt": 0,
+      "returncode": 0,
+      "output": "Queue event lifetime: delayed writes=10, overlapping destroys=0\n",
+      "environment": {
+        "LD_LIBRARY_PATH": "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/library:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/tensilelite:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/llvm/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/host-math/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib",
+        "HSA_ENABLE_INTERRUPT": "1",
+        "ROCR_VISIBLE_DEVICES": "0"
+      },
+      "command": [
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/native/queue-event-repro"
+      ],
+      "loaded_libraries": [
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/librocprofiler-register.so.0.6.0",
+        "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib/libhsa-runtime64.so.1.21.0",
+        "/opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.125.0",
+        "/opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0",
+        "/opt/rocm-7.1.0/lib/libhsa-amd-aqlprofile64.so.1.0.70100",
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "/usr/lib/x86_64-linux-gnu/libdl.so.2",
+        "/usr/lib/x86_64-linux-gnu/libelf-0.190.so",
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6",
+        "/usr/lib/x86_64-linux-gnu/libnuma.so.1.0.0",
+        "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33",
+        "/usr/lib/x86_64-linux-gnu/libz.so.1.3",
+        "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5"
+      ],
+      "runtime_files": [
+        {
+          "path": "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib/libhsa-runtime64.so.1.21.0",
+          "sha256": "e6a7b6c4b51a23deaad1b191d55449946c68ae674f03f85124d1f3afc3f28ece"
+        }
+      ]
+    },
+    {
+      "runtime": "fixed",
+      "attempt": 1,
+      "returncode": 0,
+      "output": "Queue event lifetime: delayed writes=10, overlapping destroys=0\n",
+      "environment": {
+        "LD_LIBRARY_PATH": "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/library:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/tensilelite:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/llvm/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/host-math/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib",
+        "HSA_ENABLE_INTERRUPT": "1",
+        "ROCR_VISIBLE_DEVICES": "0"
+      },
+      "command": [
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/native/queue-event-repro"
+      ],
+      "loaded_libraries": [
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/librocprofiler-register.so.0.6.0",
+        "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib/libhsa-runtime64.so.1.21.0",
+        "/opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.125.0",
+        "/opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0",
+        "/opt/rocm-7.1.0/lib/libhsa-amd-aqlprofile64.so.1.0.70100",
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "/usr/lib/x86_64-linux-gnu/libdl.so.2",
+        "/usr/lib/x86_64-linux-gnu/libelf-0.190.so",
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6",
+        "/usr/lib/x86_64-linux-gnu/libnuma.so.1.0.0",
+        "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33",
+        "/usr/lib/x86_64-linux-gnu/libz.so.1.3",
+        "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5"
+      ],
+      "runtime_files": [
+        {
+          "path": "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib/libhsa-runtime64.so.1.21.0",
+          "sha256": "e6a7b6c4b51a23deaad1b191d55449946c68ae674f03f85124d1f3afc3f28ece"
+        }
+      ]
+    },
+    {
+      "runtime": "fixed",
+      "attempt": 2,
+      "returncode": 0,
+      "output": "Queue event lifetime: delayed writes=10, overlapping destroys=0\n",
+      "environment": {
+        "LD_LIBRARY_PATH": "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/library:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/tensilelite:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/llvm/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/host-math/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib",
+        "HSA_ENABLE_INTERRUPT": "1",
+        "ROCR_VISIBLE_DEVICES": "0"
+      },
+      "command": [
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/native/queue-event-repro"
+      ],
+      "loaded_libraries": [
+        "<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/librocprofiler-register.so.0.6.0",
+        "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib/libhsa-runtime64.so.1.21.0",
+        "/opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2.125.0",
+        "/opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1.125.0",
+        "/opt/rocm-7.1.0/lib/libhsa-amd-aqlprofile64.so.1.0.70100",
+        "/usr/lib/x86_64-linux-gnu/ld-linux-x86-64.so.2",
+        "/usr/lib/x86_64-linux-gnu/libc.so.6",
+        "/usr/lib/x86_64-linux-gnu/libdl.so.2",
+        "/usr/lib/x86_64-linux-gnu/libelf-0.190.so",
+        "/usr/lib/x86_64-linux-gnu/libgcc_s.so.1",
+        "/usr/lib/x86_64-linux-gnu/libm.so.6",
+        "/usr/lib/x86_64-linux-gnu/libnuma.so.1.0.0",
+        "/usr/lib/x86_64-linux-gnu/libpthread.so.0",
+        "/usr/lib/x86_64-linux-gnu/libstdc++.so.6.0.33",
+        "/usr/lib/x86_64-linux-gnu/libz.so.1.3",
+        "/usr/lib/x86_64-linux-gnu/libzstd.so.1.5.5"
+      ],
+      "runtime_files": [
+        {
+          "path": "<TOGA_ROOT>/builds/rocm-systems/nightly-queue-event/rocr/lib/libhsa-runtime64.so.1.21.0",
+          "sha256": "e6a7b6c4b51a23deaad1b191d55449946c68ae674f03f85124d1f3afc3f28ece"
+        }
+      ]
+    }
+  ]
+}

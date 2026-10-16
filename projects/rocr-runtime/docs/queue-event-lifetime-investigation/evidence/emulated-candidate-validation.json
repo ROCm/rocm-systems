@@ -1,0 +1,123 @@
+{
+  "date": "2026-10-15T21:54:13.668523+00:00",
+  "branch": "users/jnewling/AIHPBLAS-3605-queue-event-lifetime",
+  "head": "d68cd7890a2403d3527bb575309d09a5982c97f6",
+  "base": "5ae2d3fcc39d8b8e750d9fc031277362313d71dc",
+  "latest_develop": "082bbaef98f3a55fb29f58a01c2519f977adef4a",
+  "campaigns": {
+    "tensile-100-fixed-runtime": {
+      "seconds": 141.03769459668547,
+      "suite_seconds": 154.11567228194326,
+      "planned_cases": 400,
+      "counts": {
+        "PASSED": 400
+      },
+      "passed": true,
+      "fully_validated": true,
+      "missing": [],
+      "unstarted_cases": []
+    },
+    "installed-bench-fixed-runtime": {
+      "seconds": 31.547307405620813,
+      "suite_seconds": 52.24564884370193,
+      "planned_cases": 20,
+      "counts": {
+        "PASSED": 20
+      },
+      "passed": true,
+      "fully_validated": true,
+      "missing": [],
+      "unstarted_cases": []
+    }
+  },
+  "controlled_test_results": [
+    {
+      "fixed": false,
+      "attempt": 0,
+      "returncode": 1,
+      "log": "regression-corrected-False-0.log",
+      "tail": [
+        "[rj warn] SET_EVENT_MISS: event_id=5 events_.size()=4",
+        "Queue event lifetime: delayed writes=130, overlapping destroys=1",
+        "Queue event destroyed during an outstanding callback write"
+      ]
+    },
+    {
+      "fixed": false,
+      "attempt": 1,
+      "returncode": 1,
+      "log": "regression-corrected-False-1.log",
+      "tail": [
+        "[rj warn] SET_EVENT_MISS: event_id=5 events_.size()=4",
+        "Queue event lifetime: delayed writes=130, overlapping destroys=1",
+        "Queue event destroyed during an outstanding callback write"
+      ]
+    },
+    {
+      "fixed": false,
+      "attempt": 2,
+      "returncode": 1,
+      "log": "regression-corrected-False-2.log",
+      "tail": [
+        "[rj warn] SET_EVENT_MISS: event_id=5 events_.size()=4",
+        "Queue event lifetime: delayed writes=130, overlapping destroys=1",
+        "Queue event destroyed during an outstanding callback write"
+      ]
+    },
+    {
+      "fixed": true,
+      "attempt": 0,
+      "returncode": 0,
+      "log": "regression-corrected-True-0.log",
+      "tail": [
+        "Queue event lifetime: delayed writes=130, overlapping destroys=0"
+      ]
+    },
+    {
+      "fixed": true,
+      "attempt": 1,
+      "returncode": 0,
+      "log": "regression-corrected-True-1.log",
+      "tail": [
+        "Queue event lifetime: delayed writes=130, overlapping destroys=0"
+      ]
+    },
+    {
+      "fixed": true,
+      "attempt": 2,
+      "returncode": 0,
+      "log": "regression-corrected-True-2.log",
+      "tail": [
+        "Queue event lifetime: delayed writes=130, overlapping destroys=0"
+      ]
+    }
+  ],
+  "final_smokes": {
+    "regression": [
+      {
+        "attempt": 0,
+        "returncode": 0,
+        "output": "Queue event lifetime: delayed writes=130, overlapping destroys=0\n"
+      },
+      {
+        "attempt": 1,
+        "returncode": 0,
+        "output": "Queue event lifetime: delayed writes=130, overlapping destroys=0\n"
+      },
+      {
+        "attempt": 2,
+        "returncode": 0,
+        "output": "Queue event lifetime: delayed writes=130, overlapping destroys=0\n"
+      }
+    ],
+    "gemm_returncode": 0,
+    "gemm_numerical_passes": 4
+  },
+  "limitations": [
+    "No physical GPU validation; CPU emulation only",
+    "rocrtst suite integration has not been built as a whole; standalone test target built and exercised",
+    "Existing files fail whole-file formatting hooks; base evidence preserved",
+    "One millisecond delay is a stress mechanism, not a deterministic scheduler",
+    "Candidate not published; nightly still uses original runtime"
+  ]
+}

@@ -1,0 +1,127 @@
+{
+  "revision": "6191d1527b29369b6558ff7cc246281704e22224",
+  "hardware": "Shark52 physical gfx1201",
+  "environment": {
+    "LD_LIBRARY_PATH": "<TOGA_ROOT>/builds/rocm-systems/queue-event-develop/rocr/lib",
+    "ROCR_VISIBLE_DEVICES": "0",
+    "HSA_ENABLE_INTERRUPT": "1"
+  },
+  "results": [
+    {
+      "mode": "plain",
+      "attempt": 0,
+      "exit": 0,
+      "output": "All HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "plain",
+      "attempt": 1,
+      "exit": 0,
+      "output": "All HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "plain",
+      "attempt": 2,
+      "exit": 0,
+      "output": "All HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "zero-delay",
+      "attempt": 0,
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "zero-delay",
+      "attempt": 1,
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "zero-delay",
+      "attempt": 2,
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "100ms-delay",
+      "attempt": 0,
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD SET_EVENT(event_id=3) returned -1, errno=22\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "100ms-delay",
+      "attempt": 1,
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD SET_EVENT(event_id=3) returned -1, errno=22\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "100ms-delay",
+      "attempt": 2,
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD SET_EVENT(event_id=3) returned -1, errno=22\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n"
+    }
+  ],
+  "strace_command": [
+    "strace",
+    "-f",
+    "-tt",
+    "-yy",
+    "-e",
+    "trace=ioctl",
+    "-o",
+    "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/native-strace.log",
+    "-E",
+    "LD_PRELOAD=<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/delay-set-event.so",
+    "-E",
+    "KFD_SET_EVENT_DELAY_US=100000",
+    "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/queue-lifecycle"
+  ],
+  "strace_exit": 0,
+  "strace_output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD SET_EVENT(event_id=3) returned -1, errno=22\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n",
+  "sha256": {
+    "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/queue-lifecycle.cpp": "9312f32833b1523452fff2fc9f9e0cd36ff2db73aff697d0911fd694c5f27ad6",
+    "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/delay-set-event.cpp": "87ee4e48aed9fea1c229d1ddda4b79e06f14afcc0922b9aecd99ee9283ab1338",
+    "<TOGA_ROOT>/builds/rocm-systems/queue-event-develop/rocr/lib/libhsa-runtime64.so.1.21.0": "ac53cf8603637cde6a233fda85ab9518f0ee9398ac42e25b6d56594c3ed80c39"
+  },
+  "traced_controls": [
+    {
+      "mode": "plain",
+      "command": [
+        "strace",
+        "-f",
+        "-tt",
+        "-yy",
+        "-e",
+        "trace=ioctl",
+        "-o",
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/plain-strace.log",
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/queue-lifecycle"
+      ],
+      "exit": 0,
+      "output": "All HSA calls returned SUCCESS\n",
+      "failed_set_event_syscalls": []
+    },
+    {
+      "mode": "zero-delay",
+      "command": [
+        "strace",
+        "-f",
+        "-tt",
+        "-yy",
+        "-e",
+        "trace=ioctl",
+        "-o",
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/zero-delay-strace.log",
+        "-E",
+        "LD_PRELOAD=<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/delay-set-event.so",
+        "-E",
+        "KFD_SET_EVENT_DELAY_US=0",
+        "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/simple/queue-lifecycle"
+      ],
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n",
+      "failed_set_event_syscalls": []
+    }
+  ]
+}

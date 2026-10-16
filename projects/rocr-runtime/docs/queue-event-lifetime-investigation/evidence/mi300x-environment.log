@@ -1,0 +1,17 @@
+sharkmi300x-4
+7.2.1
+9c98aa3d7f4641eb2f21cf7d036c4d24d547ef0068cee70e5956ad13c3ab39b6  queue-event-repro.cpp
+9a286aba74374fb21c4d56083cefb11b35e9d224967f14f60a8a909fc4e243e2  /opt/rocm/lib/libhsa-runtime64.so.1
+	linux-vdso.so.1 (0x00007ffe54ada000)
+	libhsa-runtime64.so.1 => /opt/rocm/lib/libhsa-runtime64.so.1 (0x00007f03db47a000)
+	libstdc++.so.6 => /lib/x86_64-linux-gnu/libstdc++.so.6 (0x00007f03db1c1000)
+	libm.so.6 => /lib/x86_64-linux-gnu/libm.so.6 (0x00007f03db0da000)
+	libgcc_s.so.1 => /lib/x86_64-linux-gnu/libgcc_s.so.1 (0x00007f03db0ac000)
+	libc.so.6 => /lib/x86_64-linux-gnu/libc.so.6 (0x00007f03dae83000)
+	libelf.so.1 => /lib/x86_64-linux-gnu/libelf.so.1 (0x00007f03dae63000)
+	librocprofiler-register.so.0 => /opt/rocm/lib/librocprofiler-register.so.0 (0x00007f03dadd4000)
+	libdrm.so.2 => /opt/amdgpu/lib/x86_64-linux-gnu/libdrm.so.2 (0x00007f03dadba000)
+	libdrm_amdgpu.so.1 => /opt/amdgpu/lib/x86_64-linux-gnu/libdrm_amdgpu.so.1 (0x00007f03dadaa000)
+	libnuma.so.1 => /lib/x86_64-linux-gnu/libnuma.so.1 (0x00007f03dad9d000)
+	/lib64/ld-linux-x86-64.so.2 (0x00007f03db880000)
+	libz.so.1 => /lib/x86_64-linux-gnu/libz.so.1 (0x00007f03dad7f000)

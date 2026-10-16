@@ -1,0 +1,134 @@
+{
+  "date": "2026-10-16T16:21:45.821407+00:00",
+  "revision": "6191d1527b29369b6558ff7cc246281704e22224",
+  "source_clean": true,
+  "branch": "users/jnewling/AIHPBLAS-3605-develop-reproducer",
+  "hardware": "Shark52 physical gfx1201 (PCI 1002:7551)",
+  "os": "Ubuntu 24.04.5 LTS",
+  "kernel": "7.0.0-31-generic",
+  "runtime_host_compiler": "Clang 23.1.0",
+  "runtime_support_kernel_compiler": "ROCm Clang 24",
+  "reproducer_compiler": "amdclang++ / AMD Clang20 ROCm7.1",
+  "runtime_sha256": "ac53cf8603637cde6a233fda85ab9518f0ee9398ac42e25b6d56594c3ed80c39",
+  "reproducer_source_sha256": "38d1b624ea7107c8af0bde037105dd54be25b60d062f167adfa441b5625fb834",
+  "original_one_queue_results": {
+    "revision": "6191d1527b29369b6558ff7cc246281704e22224",
+    "source_sha256": "38d1b624ea7107c8af0bde037105dd54be25b60d062f167adfa441b5625fb834",
+    "environment": {
+      "LD_LIBRARY_PATH": "<TOGA_ROOT>/builds/rocm-systems/queue-event-develop/rocr/lib:<TOGA_ROOT>/builds/rocm-systems/queue-event-develop/libhsakmt/lib:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/library:<TOGA_ROOT>/builds/rocm-libraries/nightly-gfx942-native/tensilelite:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/llvm/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/host-math/lib:<DEPENDENCY_TOGA_ROOT>/builds/rocm-libraries/pr12734/ci-37396020736/lib/rocm_sysdeps/lib",
+      "ROCR_VISIBLE_DEVICES": "0",
+      "HSA_ENABLE_INTERRUPT": "1"
+    },
+    "results": [
+      {
+        "delay_us": "0",
+        "attempt": 0,
+        "exit": 0,
+        "output": "GPU=gfx1201; callback delay=0 us\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=0\n"
+      },
+      {
+        "delay_us": "0",
+        "attempt": 1,
+        "exit": 0,
+        "output": "GPU=gfx1201; callback delay=0 us\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=0\n"
+      },
+      {
+        "delay_us": "0",
+        "attempt": 2,
+        "exit": 0,
+        "output": "GPU=gfx1201; callback delay=0 us\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=0\n"
+      },
+      {
+        "delay_us": "0",
+        "attempt": 3,
+        "exit": 0,
+        "output": "GPU=gfx1201; callback delay=0 us\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=0\n"
+      },
+      {
+        "delay_us": "0",
+        "attempt": 4,
+        "exit": 0,
+        "output": "GPU=gfx1201; callback delay=0 us\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=0\n"
+      },
+      {
+        "delay_us": "100000",
+        "attempt": 0,
+        "exit": 1,
+        "output": "GPU=gfx1201; callback delay=100000 us\nDelayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n"
+      },
+      {
+        "delay_us": "100000",
+        "attempt": 1,
+        "exit": 1,
+        "output": "GPU=gfx1201; callback delay=100000 us\nDelayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n"
+      },
+      {
+        "delay_us": "100000",
+        "attempt": 2,
+        "exit": 1,
+        "output": "GPU=gfx1201; callback delay=100000 us\nDelayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n"
+      },
+      {
+        "delay_us": "100000",
+        "attempt": 3,
+        "exit": 1,
+        "output": "GPU=gfx1201; callback delay=100000 us\nDelayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n"
+      },
+      {
+        "delay_us": "100000",
+        "attempt": 4,
+        "exit": 1,
+        "output": "GPU=gfx1201; callback delay=100000 us\nDelayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n"
+      }
+    ]
+  },
+  "current_header_results": [
+    {
+      "delay_us": 0,
+      "attempt": 0,
+      "exit": 0,
+      "output": "GPU=gfx1201; callback delay=0 us\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=0\n"
+    },
+    {
+      "delay_us": 0,
+      "attempt": 1,
+      "exit": 0,
+      "output": "GPU=gfx1201; callback delay=0 us\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=0\n"
+    },
+    {
+      "delay_us": 0,
+      "attempt": 2,
+      "exit": 0,
+      "output": "GPU=gfx1201; callback delay=0 us\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=0\n"
+    },
+    {
+      "delay_us": 100000,
+      "attempt": 0,
+      "exit": 1,
+      "output": "GPU=gfx1201; callback delay=100000 us\nDelayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n"
+    },
+    {
+      "delay_us": 100000,
+      "attempt": 1,
+      "exit": 1,
+      "output": "GPU=gfx1201; callback delay=100000 us\nDelayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n"
+    },
+    {
+      "delay_us": 100000,
+      "attempt": 2,
+      "exit": 1,
+      "output": "GPU=gfx1201; callback delay=100000 us\nDelayed KFD SET_EVENT id=3 failed: result=-1 errno=22\nhsa_queue_create, hsa_queue_destroy, hsa_shut_down all returned SUCCESS\nQueue event lifetime: delayed writes=4, overlapping destroys=1\nQueue event destroyed during an outstanding callback write\n"
+    }
+  ],
+  "trace_callback": "DynamicQueueEventsHandler<false>",
+  "destruction": "hsa_shut_down -> Runtime::Unload -> GpuAgent::ReleaseResources -> AqlQueue::~AqlQueue",
+  "interpretation": "Callback signal retained but queue event borrowed; event can be destroyed before callback notification finishes",
+  "limitations": [
+    "Injected100ms timing delay; natural native failure not reproduced",
+    "All public HSA calls return success; failed process exit is instrumentation assertion",
+    "Current develop verified on gfx1201; prior gfx942 result uses installed ROCm7.2.1",
+    "No same-current-head candidate fix comparison; earlier fixed-runtime comparison retained separately"
+  ],
+  "issue_created": false,
+  "user_instruction": "Do not create an issue until explicitly told"
+}

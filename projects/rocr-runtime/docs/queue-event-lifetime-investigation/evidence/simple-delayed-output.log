@@ -1,0 +1,7 @@
+Real KFD DESTROY_EVENT(event_id=3) returned 0
+Real KFD SET_EVENT(event_id=3) returned -1, errno=22
+Real KFD DESTROY_EVENT(event_id=1073741824) returned 0
+Real KFD DESTROY_EVENT(event_id=1073741825) returned 0
+Real KFD DESTROY_EVENT(event_id=1) returned 0
+Real KFD DESTROY_EVENT(event_id=2) returned 0
+All HSA calls returned SUCCESS

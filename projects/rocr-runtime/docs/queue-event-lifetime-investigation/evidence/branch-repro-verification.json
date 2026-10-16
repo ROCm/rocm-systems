@@ -1,0 +1,57 @@
+{
+  "revision": "6191d1527b29369b6558ff7cc246281704e22224",
+  "candidate_unchanged": "d68cd7890a2403d3527bb575309d09a5982c97f6",
+  "hardware": "physical gfx1201",
+  "commands": [
+    [
+      "/opt/rocm/bin/amdclang++",
+      "-std=c++17",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-I<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/develop/include",
+      "<TOGA_ROOT>/rocm-systems/projects/rocr-runtime/docs/queue-event-lifetime-investigation/repro/queue-lifecycle.cpp",
+      "-L<TOGA_ROOT>/builds/rocm-systems/queue-event-develop/rocr/lib",
+      "-Wl,-rpath,<TOGA_ROOT>/builds/rocm-systems/queue-event-develop/rocr/lib",
+      "-lhsa-runtime64",
+      "-o",
+      "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/closeout/queue-lifecycle"
+    ],
+    [
+      "/opt/rocm/bin/amdclang++",
+      "-std=c++17",
+      "-O2",
+      "-Wall",
+      "-Wextra",
+      "-Werror",
+      "-shared",
+      "-fPIC",
+      "<TOGA_ROOT>/rocm-systems/projects/rocr-runtime/docs/queue-event-lifetime-investigation/repro/delay-set-event.cpp",
+      "-ldl",
+      "-o",
+      "<TOGA_ROOT>/scratch/gfx942-nightly-implementation/event-diagnosis/closeout/delay-set-event.so"
+    ]
+  ],
+  "results": [
+    {
+      "mode": "plain",
+      "exit": 0,
+      "output": "All HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "zero-delay",
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n"
+    },
+    {
+      "mode": "100ms-delay",
+      "exit": 0,
+      "output": "Real KFD DESTROY_EVENT(event_id=3) returned 0\nReal KFD SET_EVENT(event_id=3) returned -1, errno=22\nReal KFD DESTROY_EVENT(event_id=1073741824) returned 0\nReal KFD DESTROY_EVENT(event_id=1073741825) returned 0\nReal KFD DESTROY_EVENT(event_id=1) returned 0\nReal KFD DESTROY_EVENT(event_id=2) returned 0\nAll HSA calls returned SUCCESS\n"
+    }
+  ],
+  "source_sha256": {
+    "repro/delay-set-event.cpp": "ba67d8d42b9e6f2a87594fbf845ee977e15e1784025f198b949dda7d75d06832",
+    "repro/queue-lifecycle.cpp": "fb5ac64b3d4d17fd23ed34f6d6ff2d8cef7b1ace2502da54c7d3d06170cb6483"
+  }
+}
