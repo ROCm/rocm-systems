@@ -165,14 +165,17 @@ do_host_tests() {
     "rccl-UnitTestsMicroEnqueue-devlinker:$SCRIPT_DIR/host_tests_micro_enqueue_devlinker.xml"
     "rccl-UnitTestsMicroSymKernels:$SCRIPT_DIR/host_tests_micro_symkernels.xml"
     "rccl-UnitTestsMicroTaskPrep:$SCRIPT_DIR/host_tests_micro_taskprep.xml"
+    "rccl-UnitTestsMicroConnect:$SCRIPT_DIR/host_tests_micro_connect.xml"
     "rccl-UnitTestsMicroCe:$SCRIPT_DIR/host_tests_micro_ce.xml"
     "rccl-UnitTestsMicroClientSupport:$SCRIPT_DIR/host_tests_micro_client_support.xml"
     "rccl-UnitTestsMicroGinHost:$SCRIPT_DIR/host_tests_micro_gin_host.xml"
+    "rccl-UnitTestsMicroRomeModels:$SCRIPT_DIR/host_tests_micro_rome_models.xml"
     "rccl-UnitTestsMicroCollTrace:$SCRIPT_DIR/host_tests_micro_coll_trace.xml"
     "rccl-UnitTestsMicroRecorder:$SCRIPT_DIR/host_tests_micro_recorder.xml"
     "rccl-UnitTestsMicroApiTrace:$SCRIPT_DIR/host_tests_micro_api_trace.xml"
     "rccl-UnitTestsMicroDebug:$SCRIPT_DIR/host_tests_micro_debug.xml"
     "rccl-UnitTestsMicroDiagnostics:$SCRIPT_DIR/host_tests_micro_diagnostics.xml"
+    "rccl-UnitTestsMicroRmaProxy:$SCRIPT_DIR/host_tests_micro_rma_proxy.xml"
   )
   # Binaries that only exist for some CMake option settings (rccl-UnitTestsMicroSymKernels needs
   # GENERATE_SYM_KERNELS, off via install.sh --disable-sym-kernels); missing is a skip, not an error.
