@@ -55,10 +55,10 @@ float slicePattern(int rank, size_t i)
     return static_cast<float>(static_cast<size_t>(rank) * kRankStride + i);
 }
 
-// Unique per rank and exact in fp32 at any count (max 4095 * 8 + 7 < 2^24).
+// Unique per rank and exact in fp32 (max 4095 * 8 + 7 < 2^24); i / 4096 catches a slice shifted by 4096 floats.
 float rankPattern(int rank, size_t i)
 {
-    return static_cast<float>((i % 4096) * 8 + static_cast<size_t>(rank));
+    return static_cast<float>(((i % 4096 + i / 4096) % 4096) * 8 + static_cast<size_t>(rank));
 }
 
 bool isDdaIpcArch()
@@ -79,6 +79,28 @@ int countFailingRanks(bool localOk)
     int failing = localOk ? 0 : 1;
     MPI_Allreduce(MPI_IN_PLACE, &failing, 1, MPI_INT, MPI_SUM, MPI_COMM_WORLD);
     return failing;
+}
+
+// Mismatches in recvBuf against expected(j); all count as wrong if the copy fails.
+template<typename Expected>
+size_t countMismatches(const void* recvBuf, size_t totalCount, Expected expected, size_t* firstBad)
+{
+    auto [copyErr, host] = downloadBuffer<float>(recvBuf, totalCount);
+    *firstBad            = totalCount;
+    if(copyErr != hipSuccess)
+    {
+        return totalCount;
+    }
+    size_t mismatches = 0;
+    for(size_t j = 0; j < totalCount; ++j)
+    {
+        if(host[j] != expected(j))
+        {
+            *firstBad = mismatches == 0 ? j : *firstBad;
+            ++mismatches;
+        }
+    }
+    return mismatches;
 }
 } // namespace
 
@@ -156,11 +178,11 @@ protected:
     {
         const size_t totalCount = count * static_cast<size_t>(nRanks_);
 
-        void* recvBuf = nullptr;
-        ASSERT_EQ(0, countFailingRanks(
-                         hipMalloc(&recvBuf, totalCount * sizeof(float))
-                         == hipSuccess));
+        void*            recvBuf = nullptr;
+        const hipError_t recvAllocErr
+            = hipMalloc(&recvBuf, totalCount * sizeof(float));
         DeviceBufferAutoGuard recvGuard(recvBuf);
+        ASSERT_EQ(0, countFailingRanks(recvAllocErr == hipSuccess));
         ASSERT_EQ(0, countFailingRanks(
                          initializeBufferWithPattern<float>(
                              recvBuf, totalCount,
@@ -205,17 +227,14 @@ protected:
             << "Rank " << rank_ << ": " << ncclGetErrorString(agRes) << " / "
             << hipGetErrorString(syncErr);
 
-        auto [copyErr, host] = downloadBuffer<float>(recvBuf, totalCount);
-        size_t mismatches = copyErr == hipSuccess ? 0 : totalCount;
-        size_t firstBad   = totalCount;
-        for(size_t j = 0; copyErr == hipSuccess && j < totalCount; ++j)
-        {
-            if(host[j] != slicePattern(static_cast<int>(j / count), j % count))
+        size_t       firstBad   = totalCount;
+        const size_t mismatches = countMismatches(
+            recvBuf, totalCount,
+            [count](size_t j)
             {
-                firstBad = mismatches == 0 ? j : firstBad;
-                ++mismatches;
-            }
-        }
+                return slicePattern(static_cast<int>(j / count), j % count);
+            },
+            &firstBad);
         ASSERT_EQ(0, countFailingRanks(mismatches == 0))
             << "Rank " << rank_ << ": " << mismatches << " of " << totalCount
             << " wrong, first at " << firstBad << " (count " << count << ")";
@@ -327,13 +346,14 @@ TEST_F(DdaMPI_AllGatherThreshold, AboveScratchFallsBack)
         << "Rank " << rank << ": " << ncclGetErrorString(agRes) << " / "
         << hipGetErrorString(syncErr);
 
-    size_t     firstBad = totalCount;
-    const bool dataOk   = verifyBufferData<float>(
+    size_t       firstBad   = totalCount;
+    const size_t mismatches = countMismatches(
         recvBuf, totalCount,
         [count](size_t j) { return rankPattern(static_cast<int>(j / count), j % count); },
-        /*num_samples=*/0, /*tolerance=*/0.0, &firstBad);
-    ASSERT_EQ(0, countFailingRanks(dataOk))
-        << "Rank " << rank << ": first mismatch at " << firstBad << " of " << totalCount;
+        &firstBad);
+    ASSERT_EQ(0, countFailingRanks(mismatches == 0))
+        << "Rank " << rank << ": " << mismatches << " of " << totalCount
+        << " wrong, first at " << firstBad;
 }
 
 #endif // MPI_TESTS_ENABLED
