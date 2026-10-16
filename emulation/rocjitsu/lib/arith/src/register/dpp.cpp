@@ -14,9 +14,17 @@
 namespace rocjitsu::arith {
 
 // Fill a routed 32-lane source snapshot using DPP8 selectors and inactive-source rules.
-void dpp8_source(uint32_t exec_mask, uint64_t mode, uint32_t *out, const uint32_t *a) {
+void dpp8_source(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *out,
+                 const uint32_t *a) {
   uint32_t selectors = uint32_t(mode >> RJ_ARITH_DPP8_SELECT_SHIFT);
   bool fi = (mode & RJ_ARITH_DPP_FI) != 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
+    dpp8_x86_64_v3(exec_mask, selectors, fi, out, a);
+    return;
+  }
+#endif
+  (void)flags;
   for (int lane = 0; lane < 32; ++lane) {
     int src = (lane & ~7u) | ((selectors >> (3 * (lane & 7))) & 7);
     out[lane] = (fi || ((exec_mask >> src) & 1)) ? a[src] : 0;
@@ -44,7 +52,8 @@ bool valid_dpp(uint64_t mode) {
 }
 
 // Fill a DPP16 source snapshot and return the effective destination EXEC mask.
-uint32_t dpp16_source(uint32_t exec_mask, uint64_t mode, uint32_t *out, const uint32_t *a) {
+uint32_t dpp16_source(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *out,
+                      const uint32_t *a) {
   unsigned ctrl = unsigned((mode & RJ_ARITH_DPP_CTRL_MASK) >> RJ_ARITH_DPP_CTRL_SHIFT);
   unsigned valid_row = 0xffff;
   if (ctrl >= 0x101 && ctrl <= 0x10f) {
@@ -55,6 +64,11 @@ uint32_t dpp16_source(uint32_t exec_mask, uint64_t mode, uint32_t *out, const ui
   }
   bool fi = (mode & RJ_ARITH_DPP_FI) != 0;
   uint32_t readable = 0;
+#if defined(RJ_ARITH_HAVE_X86_64_V3)
+  if ((flags & RJ_ARITH_CPU_MASK) >= RJ_ARITH_CPU_X86_64_V3) {
+    readable = dpp16_x86_64_v3(exec_mask, ctrl, valid_row, fi, out, a);
+  } else
+#endif
   {
     for (int lane = 0; lane < 32; ++lane) {
       int sub = lane & 15, index = sub;
@@ -79,6 +93,7 @@ uint32_t dpp16_source(uint32_t exec_mask, uint64_t mode, uint32_t *out, const ui
       readable |= uint32_t(read) << lane;
     }
   }
+  (void)flags;
   unsigned rows = unsigned((mode & RJ_ARITH_DPP_ROW_MASK) >> RJ_ARITH_DPP_ROW_SHIFT);
   unsigned banks = unsigned((mode & RJ_ARITH_DPP_BANK_MASK) >> RJ_ARITH_DPP_BANK_SHIFT);
   uint32_t bank_lanes = (banks & 1) * 15 | ((banks >> 1) & 1) * 0xf0 | ((banks >> 2) & 1) * 0xf00 |
