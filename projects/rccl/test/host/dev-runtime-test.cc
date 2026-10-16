@@ -1558,9 +1558,15 @@ TEST_F(SymMemoryMapLsaTeamTest, HostOwner_DoesNotFetchFd) {
   EXPECT_EQ(mem.hostOwnerFds, nullptr);
 }
 
-// Default SYM_REUSE_SYSMEM_HANDLES is off, so a one-host-owner team does not
-// take the fd path. Device windows and the reuse-off elastic path stay put.
+// Reuse is off, so the peer segment is imported with a POSIX fd and that fd is closed.
+// The owner-fd table stays empty.
 TEST_F(SymMemoryMapLsaTeamTest, ReuseOff_DoesNotFetchOwnerFd) {
+  int pipefd[2] = {-1, -1};
+  ASSERT_EQ(pipe(pipefd), 0);
+  struct CloseFd {
+    int fd;
+    ~CloseFd() { if (fd >= 0) close(fd); }
+  } readEnd{pipefd[0]}, writeEnd{pipefd[1]};
   ScopedHook props(g_hipMemGetAllocationPropertiesFromHandle,
                    [](hipMemAllocationProp* prop, hipMemGenericAllocationHandle_t) {
                      if (prop) {
@@ -1576,11 +1582,13 @@ TEST_F(SymMemoryMapLsaTeamTest, ReuseOff_DoesNotFetchOwnerFd) {
                       msgs[1].segmentSize = 4096;
                       return ncclSuccess;
                     });
-  ScopedHook proxy(g_ncclProxyClientGetFdBlocking,
-                   [](ncclComm*, int, void*, int*) { return ncclSystemError; });
+  ScopedHook proxy(g_ncclProxyClientGetFdBlocking, [&](ncclComm*, int, void*, int* fd) {
+    if (fd) *fd = dup(pipefd[1]);
+    return ncclSuccess;
+  });
 
   EXPECT_EQ(symMemoryMapLsaTeam(comm, &mem), ncclSuccess);
-  EXPECT_EQ(proxy.calls, 0);
+  EXPECT_EQ(proxy.calls, 1);
   EXPECT_EQ(mem.hostOwnerFds, nullptr);
 }
 
