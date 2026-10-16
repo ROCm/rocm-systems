@@ -789,6 +789,7 @@ if(BUILD_TESTS)
       graph/TuningTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
+      graph/TopoGpuDevTests.cpp
       graph/TopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp

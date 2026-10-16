@@ -697,6 +697,11 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "TopoGpuDev",
+          "description": "Topology GPU dev index tests",
+          "test_filter": "TopoGpuDev.*"
+        },
+        {
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
@@ -1523,6 +1528,11 @@
           "name": "AsymmetricVisibility.CommInitRankAllReduce",
           "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
           "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"
+        },
+        {
+          "name": "AsymmetricVisibility.OneGpuPerRankAllReduce",
+          "description": "Topology GPU dev index when each rank sees only its own GPU",
+          "test_filter": "AsymmetricVisibility.OneGpuPerRankAllReduce"
         }
       ]
     },

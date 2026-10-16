@@ -53,6 +53,7 @@ test_categories:
       - "NetDevsPolicyP2pNetTests.*"
       - "SymmetricMemP2pLevelTests.*"
       - "TopoTest.*"
+      - "TopoGpuDev.*"
       - "TopoNicFusionTests.*"
       - "P2pMaxNchannels.*"
       - "ChannelDefaults.*"
