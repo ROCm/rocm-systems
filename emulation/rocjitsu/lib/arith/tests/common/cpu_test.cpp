@@ -25,13 +25,13 @@ TEST(Cpu, LevelAndReservedFeatures) {
   EXPECT_EQ(RJ_ARITH_CPU_FEATURES_MASK, 0xfff0ULL);
   for (uint64_t level : {RJ_ARITH_CPU_BASELINE, RJ_ARITH_CPU_X86_64_V3, RJ_ARITH_CPU_X86_64_V4,
                          RJ_ARITH_CPU_X86_64_ZEN4}) {
-    EXPECT_EQ(rocjitsu::arith::validate(level), RJ_ARITH_SUCCESS);
+    EXPECT_EQ(rocjitsu::arith::validate(level, 0), RJ_ARITH_SUCCESS);
     for (int bit = 4; bit < 16; ++bit) {
-      EXPECT_EQ(rocjitsu::arith::validate(level | (1ULL << bit)), RJ_ARITH_ERROR_INVALID_FLAGS);
+      EXPECT_EQ(rocjitsu::arith::validate(level | (1ULL << bit), 0), RJ_ARITH_ERROR_INVALID_FLAGS);
     }
   }
   for (uint64_t level = RJ_ARITH_CPU_X86_64_ZEN4 + 1; level <= RJ_ARITH_CPU_MASK; ++level) {
-    EXPECT_EQ(rocjitsu::arith::validate(level), RJ_ARITH_ERROR_INVALID_FLAGS);
+    EXPECT_EQ(rocjitsu::arith::validate(level, 0), RJ_ARITH_ERROR_INVALID_FLAGS);
   }
 }
 
@@ -80,6 +80,10 @@ TEST(Cpu, SharedEnumerationHelpers) {
     EXPECT_TRUE(
         rocjitsu::arith::test::cpu_level_supported(level, detected | RJ_ARITH_CPU_FEATURES_MASK));
   }
+  const auto semantics = rocjitsu::arith::test::semantics_modes();
+  ASSERT_EQ(semantics.size(), 5U);
+  EXPECT_EQ(semantics.front(), RJ_ARITH_SEMANTICS_LOOSE);
+  EXPECT_EQ(semantics.back(), RJ_ARITH_SEMANTICS_COMPATIBILITY);
 }
 
 // Check readable names for supported and invalid CPU levels.

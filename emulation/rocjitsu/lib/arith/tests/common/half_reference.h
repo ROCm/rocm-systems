@@ -14,6 +14,16 @@
 
 namespace rocjitsu::arith::test {
 
+// Replace a NaN in the selected FP16 destination half with positive quiet NaN.
+// Preserve the other half and all non-NaN encodings, including signed zeros.
+inline uint32_t canonical_half_nan(uint32_t word, uint32_t mode) {
+  unsigned shift = mode & RJ_ARITH_ALU_HIGH_D ? 16 : 0;
+  if (((word >> shift) & 0x7fff) > 0x7c00) {
+    return (word & ~(65535U << shift)) | (0x7e00U << shift);
+  }
+  return word;
+}
+
 // Numeric half reference independent of the implementation's bit conversions.
 inline double half_value(uint16_t bits) {
   int exponent = (bits >> 10) & 31, fraction = bits & 1023;

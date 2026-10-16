@@ -1,6 +1,7 @@
 # Instruction coverage
 
-RDNA3 and RDNA4 support FP16/BF16 WMMA with FP32 output and FP16/FP32 FMA,
-in both wave sizes. All support loose and empirical exact numeric results.
-Only RDNA4 FP16 FMA supports FP-status reporting. WMMA has no status output.
-Instruction modifiers and guest controls other than FP16_OVFL are rejected.
+RDNA3 and RDNA4 FP16/BF16 WMMA with FP32 output and FP16/FP32 FMA support both
+wave sizes, loose and empirical exact arithmetic, instruction modifiers, and
+their documented guest FP controls. FP16 FMA reports status for the supported
+gfx12 policy; FP32 and gfx11 FMA status requests are unsupported. Compatibility
+resolves to each instruction’s inherited policy. SIMD implementations are not yet built.
