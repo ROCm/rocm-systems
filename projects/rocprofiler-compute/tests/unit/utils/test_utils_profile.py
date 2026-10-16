@@ -1057,4 +1057,3 @@ def test_keep_native_artifacts_keeps_the_agents_file(tmp_path):
 
     assert (tmp_path / "agents_pmc_perf_0_1234.csv.gz").is_file()
     assert not (source_dir / "1234_agents.csv.gz").exists()
-
