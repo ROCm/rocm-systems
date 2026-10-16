@@ -40,6 +40,8 @@
 #include <string>
 #include <vector>
 
+#include "ProcessIsolatedTestRunner.hpp"
+
 namespace RcclUnitTesting {
 namespace {
 
@@ -337,7 +339,7 @@ TEST(AsymmetricVisibilityWorker, Run) {
   // Exit with the WorkerStatus code so the orchestrator's WEXITSTATUS reflects
   // this worker's own result rather than gtest's generic exit code.
   const int rc = runWorker(rank, atoi(numRanksEnv), atoi(devEnv), id);
-  if (rc != kOk) { _exit(rc); }
+  ProcessIsolatedTestRunner::exitChild(rc);
 }
 
 // Runs the workers of a layout. All HIP/NCCL work happens in a forked
