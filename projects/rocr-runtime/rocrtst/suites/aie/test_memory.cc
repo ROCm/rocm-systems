@@ -66,19 +66,19 @@ hsa_status_t discover_first_global_coarse_grain_mem_pool(hsa_amd_memory_pool_t p
 }
 
 /**
- * @brief Like discover_first_global_coarse_grain_mem_pool, but further restricted to the
- * device-local (NPU) pool specifically.
+ * @brief Like discover_first_global_coarse_grain_mem_pool, but skips the dev-heap pool.
  *
  * AMD::MemoryRegion only reports HSA_AMD_MEMORY_POOL_INFO_RUNTIME_ALLOC_REC_GRANULE as 0 for
- * non-system heap types, so this is how a caller tells the NPU pool apart from a device's plain
- * system-backed pools. AIE4 (UMQ) agents have no such pool at all.
+ * non-system heap types, so this is how a caller tells the dev-heap pool apart from a device's
+ * plain system-backed pools. Every AIE agent has a system-backed pool; only aie2/aie2p (KMQ) also
+ * have a dev heap, whose BOs amdxdna cannot export as a dma-buf (so it cannot back VMem handles).
  *
  * @param pool memory pool being visited
  * @param data hsa_amd_memory_pool_t* to receive a match
  * @return HSA_STATUS_INFO_BREAK on a match, HSA_STATUS_SUCCESS to keep iterating, or the error
  * from a failed pool query
  */
-hsa_status_t discover_first_npu_local_mem_pool(hsa_amd_memory_pool_t pool, void* data) {
+hsa_status_t discover_first_system_mem_pool(hsa_amd_memory_pool_t pool, void* data) {
   hsa_status_t status = discover_first_global_coarse_grain_mem_pool(pool, data);
   if (status != HSA_STATUS_INFO_BREAK) {
     return status;
@@ -90,8 +90,8 @@ hsa_status_t discover_first_npu_local_mem_pool(hsa_amd_memory_pool_t pool, void*
   if (status != HSA_STATUS_SUCCESS) {
     return status;
   }
-  if (rec_granule != 0) {
-    // Not the NPU pool; keep looking.
+  if (rec_granule == 0) {
+    // Dev-heap pool; keep looking.
     *static_cast<hsa_amd_memory_pool_t*>(data) = hsa_amd_memory_pool_t{};
     return HSA_STATUS_SUCCESS;
   }
@@ -522,10 +522,9 @@ TEST_F(MemoryTest, VMemCreateNPU) {
 
 TEST_F(MemoryTest, VMemMapNPU) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_npu_local_mem_pool,
-                                         &global_memory_pool) != HSA_STATUS_INFO_BREAK) {
-    GTEST_SKIP() << "No NPU-local memory pool found; skipping test";
-  }
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_system_mem_pool,
+                                               &global_memory_pool),
+            HSA_STATUS_INFO_BREAK);
 
   // allocate on NPU 0
   constexpr std::size_t buffer_size = 1024;
@@ -1044,10 +1043,9 @@ TEST_F(MemoryTest, VMemMapSameHandleTwice) {
 
 TEST_F(MemoryTest, VMemDoubleMap) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_npu_local_mem_pool,
-                                         &global_memory_pool) != HSA_STATUS_INFO_BREAK) {
-    GTEST_SKIP() << "No NPU-local memory pool found; skipping test";
-  }
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_system_mem_pool,
+                                               &global_memory_pool),
+            HSA_STATUS_INFO_BREAK);
 
   constexpr std::size_t buffer_size = 1024;
   constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
@@ -1072,10 +1070,9 @@ TEST_F(MemoryTest, VMemDoubleMap) {
 
 TEST_F(MemoryTest, VMemReleaseBeforeUnmap) {
   hsa_amd_memory_pool_t global_memory_pool = {};
-  if (hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_npu_local_mem_pool,
-                                         &global_memory_pool) != HSA_STATUS_INFO_BREAK) {
-    GTEST_SKIP() << "No NPU-local memory pool found; skipping test";
-  }
+  ASSERT_EQ(hsa_amd_agent_iterate_memory_pools(aie_agents.front(), discover_first_system_mem_pool,
+                                               &global_memory_pool),
+            HSA_STATUS_INFO_BREAK);
 
   constexpr std::size_t buffer_size = 1024;
   constexpr std::size_t allocation_size = buffer_size * sizeof(std::uint32_t);
