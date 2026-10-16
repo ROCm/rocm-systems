@@ -82,7 +82,6 @@ apply_worker_profile() {
   ENV_FAMILY=""
   NATIVE_MODE=""
   THEROCK_STYLE=""
-  LOG_STYLE=home
   MEGA_BATCH_DEFAULT=65536
   SMOKE_FOLLOWS_MEGA_BATCH=0
   SKIP_MEGA_ON_BUILD_FAIL=0
@@ -108,7 +107,6 @@ apply_worker_profile() {
       ENV_FAMILY=therock
       NATIVE_MODE=probe
       THEROCK_STYLE=fixed
-      LOG_STYLE=therock
       WL_SEARCH=candidates
       WL_TREE_FALLBACK=1
       SOC_LEAVES=(MI300X_A1 MI300A_A0)
@@ -131,7 +129,7 @@ apply_worker_profile() {
       THEROCK_STYLE=rocm72
       SKIP_MEGA_ON_BUILD_FAIL=1
       SOC_LEAVES=(MI250 MI250X)
-      VENV_KIND=site-865-first
+      VENV_KIND=site-home-venv-first
       META_SITE=1
       ;;
     gfx950)
@@ -179,7 +177,10 @@ case "$THEROCK_STYLE" in
     fi
     ;;
   fixed)
-    THEROCK=${THEROCK:-/home/AMD/${USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
+    if [[ -z "${THEROCK:-}" ]]; then
+      echo "THEROCK is required for ARCH=${ARCH}" >&2
+      exit 1
+    fi
     ;;
   rocm72)
     THEROCK=${THEROCK:-${ROCM_ROOT:-/opt/rocm-7.2.0}}
@@ -193,11 +194,7 @@ case "$THEROCK_STYLE" in
     ;;
 esac
 
-if [[ "$LOG_STYLE" == "therock" ]]; then
-  LOG=${LOG:-/home/AMD/${USER}/workdir/metric_health_${TAG}.log}
-else
-  LOG=${LOG:-${HOME}/metric_health_${TAG}.log}
-fi
+LOG=${LOG:-${HOME}/metric_health_${TAG}.log}
 
 : >"$LOG"
 exec >>"$LOG" 2>&1
@@ -237,17 +234,17 @@ export_rocm_common() {
 source_site_venvs() {
   local venv
   local -a venvs
-  if [[ "$VENV_KIND" == "site-865-first" ]]; then
+  if [[ "$VENV_KIND" == "site-home-venv-first" ]]; then
     venvs=(
-      "${HOME}/workdir-venv/bin/activate"
-      "${HOME}/workdir/venv-single-pass/bin/activate"
+      "${HOME}/rocprofiler-compute-venv/bin/activate"
+      "${HOME}/rocprofiler-compute/venv-single-pass/bin/activate"
       "${HOME}/rocm-systems/projects/rocprofiler-compute/venv/bin/activate"
       /tmp/rpc_venv/bin/activate
     )
   else
     venvs=(
-      "${HOME}/workdir/venv-single-pass/bin/activate"
-      "${HOME}/workdir-venv/bin/activate"
+      "${HOME}/rocprofiler-compute/venv-single-pass/bin/activate"
+      "${HOME}/rocprofiler-compute-venv/bin/activate"
       "${HOME}/rocm-systems/projects/rocprofiler-compute/venv/bin/activate"
       /tmp/rpc_venv/bin/activate
     )
