@@ -37,6 +37,10 @@ struct ncclTopoGraph;
 // NCCL_PARAM does not cover it.
 int64_t ncclParamNvlsEnable() { return g_loadParam("NVLS_ENABLE", 2); }
 
+// src/transport/net.cc; coll_net.cc reads them too. test/host/CMakeLists.txt pins the defaults.
+int64_t ncclParamGdrCopySyncEnable() { return g_loadParam("GDRCOPY_SYNC_ENABLE", 1); }
+int64_t ncclParamGdrCopyFlushEnable() { return g_loadParam("GDRCOPY_FLUSH_ENABLE", 0); }
+
 // src/plugin/net.cc: initTransportsRank's GDR probe.
 int g_gdrSupportValue = 0;
 int g_gdrSupportCalls = 0;
@@ -87,7 +91,9 @@ void ResetTransportStubs() {
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
 #endif
+#ifndef RCCL_STUBS_OMIT_COLL_NET  // the binary compiles the real coll_net.cc
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]) { ::abort(); }
+#endif
 // ncclGetUserP2pLevel (src/graph/paths.cc): topo_stubs.cc, with the rest of that TU's seams.
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR
 ncclResult_t ncclNvlsBufferSetup(struct ncclComm* comm) { ::abort(); }
