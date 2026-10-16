@@ -20,12 +20,14 @@ import roofline.roofline_html as roofline_html
 from roofline.roofline_frame import FRAME_X_MIN, canonical_frame
 from roofline.roofline_hover import wrap_hover_name
 from roofline.roofline_html import RooflineViewModel, build_interactive_document
+from utils.html_report import report_shell
 from utils.html_report.report_shell import DARK_THEME_CLASS, read_asset
 
 if TYPE_CHECKING:
     from roofline.roofline_main import Roofline
 
 _ASSETS = Path(roofline_html.__file__).parent / "assets"
+_SHARED_ASSETS = Path(report_shell.__file__).parent / "assets"
 
 
 class MockMspec:
@@ -659,11 +661,26 @@ def test_precision_controller_remains_single_and_does_not_reset_view() -> None:
     assert "resetView" not in apply_precision
 
 
-def test_roofline_stylesheet_uses_shared_dark_theme_class() -> None:
-    """The stylesheet colors the dark theme selected by the shared shell."""
-    css = (_ASSETS / "roofline_plot.css").read_text(encoding="utf-8")
+def test_the_dark_theme_is_named_the_same_in_every_asset() -> None:
+    """The page sets this class before its first paint, the stylesheet colors it,
+    and the toggle flips it. All assets must use the same dark theme class name."""
+    dark_class = DARK_THEME_CLASS
+    page = report_shell.build_document(
+        title="Roofline",
+        body_html="",
+        page_css="",
+        page_js="",
+        model_id="roofline-model",
+        model={},
+    )
+    base_css = read_asset(_SHARED_ASSETS, "report_base.css")
+    page_css = read_asset(_ASSETS, "roofline_plot.css")
+    controller = read_asset(_SHARED_ASSETS, "report_base.js")
 
-    assert f":root.{DARK_THEME_CLASS}" in css
+    assert f'classList.add("{dark_class}")' in page
+    assert f":root.{dark_class}" in base_css
+    assert f":root.{dark_class}" in page_css
+    assert f'"{dark_class}"' in controller
 
 
 def test_roofline_document_contains_one_inline_plotly_bundle() -> None:
@@ -671,3 +688,10 @@ def test_roofline_document_contains_one_inline_plotly_bundle() -> None:
     document = build_interactive_document(go.Figure(), RooflineViewModel())
 
     assert document.count("plotly.js v") == 1
+    assert document.count("<style>") == 1
+    assert document.count("</style>") == 1
+    assert document.index("--report-border") < document.index("--roofline-warning")
+    assert document.index("plotly.js v") < document.index('id="roofline-model"')
+    assert document.index("window.HtmlReport") < document.index(
+        'readModel("roofline-model")'
+    )
