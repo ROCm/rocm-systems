@@ -389,7 +389,8 @@ race_detector/
     └── profiler_interface.h  optional hook profiling
 ```
 
-Wait decoding is in `lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h`.
+Explicit wait decoding is shared with the core checker in
+`lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h`.
 
 ## Tests
 
@@ -435,6 +436,15 @@ the corpus's `--case` option.
   asynchronous memory writes that overlap a pending load. Scalar-register WAW
   covers instruction writes and scalar loads that overlap pending scalar-memory
   destinations. LDS WAW is not currently reported.
+
+- **Embedded waits**: the plugin handles explicit wait instructions, including
+  `s_wait_idle` and RDNA4's compatibility `s_waitcnt`, but does not apply waits
+  embedded in other instructions. For example, RDNA4 `v_interp_p10_f32` with
+  `wait_exp:0` retires pending EXPCNT results in the core checker, while the
+  plugin leaves them pending and can report false register hazards. With
+  `wait_exp:7` (no wait), both keep those results pending. The shared
+  `wait_hazard_test.cpp` suite records this boundary. Supporting embedded waits
+  requires retirement before the instruction's register accesses.
 
 - **Conservative DPP/SDWA write masks**: WAW precision depends on the execution
   plugin's instruction-write lane and byte masks. DPP destinations can currently

@@ -543,6 +543,9 @@ void RaceDetectorPlugin::onAmdgpuBeforeExecuteInstruction(uint64_t pc, const Ins
 
 void RaceDetectorPlugin::onAmdgpuAfterExecuteInstruction(uint64_t /*pc*/, const Instruction &inst,
                                                          amdgpu::Wavefront &wf) {
+  // Only explicit waits are handled here. Embedded waits (e.g. VINTERP wait_exp)
+  // remain unsupported by the plugin; they must retire events before the
+  // instruction's register accesses, as in MemoryWaitScoreboard::before.
   if (!inst.is_waitcnt())
     return;
   const auto fields = amdgpu::WaitCounterPolicy::explicit_wait_fields(inst, wf.cu().arch());
