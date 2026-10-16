@@ -34,7 +34,7 @@ env:
 
 jobs:
   benchmark:
-    if: ${{ github.ref == 'refs/heads/develop' && github.ref_type == 'branch' }}
+    if: ${{ github.ref_type == 'branch' }}
     name: Run performance benchmark
     runs-on: rocjitsu-benchmark
     timeout-minutes: 210
@@ -264,7 +264,7 @@ jobs:
   publish:
     name: Publish benchmark results
     needs: benchmark
-    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && github.ref_type == 'branch' && needs.benchmark.outputs.raw_ready == 'true' }}
+    if: ${{ !cancelled() && github.ref_type == 'branch' && needs.benchmark.outputs.raw_ready == 'true' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 10
     concurrency:
