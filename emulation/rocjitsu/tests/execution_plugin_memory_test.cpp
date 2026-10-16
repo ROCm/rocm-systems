@@ -1702,6 +1702,17 @@ TEST(InstructionMetadataTest, StoresAndGdsExposeEveryCounterObligation) {
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);
   ASSERT_NE(decoder, nullptr);
+  const auto image_store_words =
+      cdna2::build_mimg(cdna2::kImageStoreMimg, {.dmask = 1, .unorm = 1, .vdata = 8});
+  std::unique_ptr<Instruction> image_store(decode_valid(*decoder, image_store_words.data()));
+  ASSERT_NE(image_store, nullptr);
+  const auto *image_issue = image_store->amdgpu_memory_issue_info();
+  ASSERT_NE(image_issue, nullptr);
+  const auto image_obligations = image_issue->counter_obligations();
+  ASSERT_EQ(image_obligations.size(), 1u);
+  EXPECT_EQ(image_obligations[0].wait_counter_type(), WaitCounterType::VMCNT);
+  EXPECT_EQ(image_obligations[0].completion_class(), MemoryCompletionClass::VMEM);
+
   const auto lds_words = cdna2::build_ds(cdna2::kDsReadB32Ds, {.gds = 0});
   const auto gds_words = cdna2::build_ds(cdna2::kDsReadB32Ds, {.gds = 1});
   std::unique_ptr<Instruction> lds(decode_valid(*decoder, lds_words.data()));
