@@ -185,6 +185,7 @@
       "num_gpus": 2,
       "timeout": 180,
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
@@ -255,6 +256,7 @@
       "num_gpus": 4,
       "timeout": 300,
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_NET": "IB",
@@ -337,6 +339,7 @@
       "num_gpus": 1,
       "timeout": 300,
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
@@ -385,6 +388,7 @@
       "num_gpus": 2,
       "timeout": 300,
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
@@ -5689,8 +5693,26 @@
       "enabled": true
     },
     {
+      "name": "Multi-Segment - Host Boundary Math",
+      "description": "Host-only segment selection and split arithmetic",
+      "config": "multisegment_host_boundary_math",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - Classic NET/IB and GIN (Multi-Node)",
+      "description": "Classic NET/IB and GIN multi-segment tests, including Generic and the register-off path",
+      "config": "multisegment_transport_multinode",
+      "enabled": true
+    },
+    {
+      "name": "Multi-Segment - NET Proxy Intra-Node Peer (Multi-Node)",
+      "description": "NetProxyPartialFinalSegment at 4 ranks across 2 nodes, so every rank also has an intra-node peer",
+      "config": "multisegment_netproxy_intranode_multinode",
+      "enabled": true
+    },
+    {
       "name": "Multi-Segment - LSA plus GIN (Multi-Node)",
-      "description": "Two-node UBR multi-segment tests including Generic rcclNet.nSegments",
+      "description": "Two-node LSA plus GIN coverage. Generic and NetProxyPartialFinalSegment run in the transport suites",
       "config": "ubr_multisegment_lsagin_multinode",
       "enabled": true
     },
