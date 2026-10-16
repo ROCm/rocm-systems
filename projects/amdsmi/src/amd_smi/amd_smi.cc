@@ -783,7 +783,7 @@ amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handl
   return AMDSMI_STATUS_SUCCESS;
 }
 
-// The internal kind is copied into the public type byte, so the values must match.
+// The device's type byte is cast to amdsmi_nic_type_t, so the values must match.
 static_assert(static_cast<int>(SMI_NIC_KIND_UNKNOWN) == static_cast<int>(AMDSMI_NIC_TYPE_UNKNOWN));
 static_assert(static_cast<int>(SMI_NIC_KIND_AINIC) == static_cast<int>(AMDSMI_NIC_TYPE_AINIC));
 static_assert(static_cast<int>(SMI_NIC_KIND_UALOE) == static_cast<int>(AMDSMI_NIC_TYPE_UALOE));
@@ -796,12 +796,28 @@ amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
   if (type == nullptr) {
     return AMDSMI_STATUS_INVAL;
   }
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
-  *type = static_cast<amdsmi_nic_type_t>(ainic_info.asic.type);
+  *type = static_cast<amdsmi_nic_type_t>(nic_device->nic_type());
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_nic_capability(amdsmi_processor_handle processor_handle,
+                                          uint32_t* capability) {
+  AMDSMI_CHECK_INIT();
+
+  if (capability == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  *capability = nic_device->capability();
   return AMDSMI_STATUS_SUCCESS;
 }
 
@@ -866,6 +882,24 @@ amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handl
   }
   *info = ainic_info.port;
   return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_nic_port_ifindex(amdsmi_processor_handle processor_handle,
+                                            uint32_t port_index, uint32_t* ifindex) {
+  AMDSMI_CHECK_INIT();
+  if (ifindex == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+
+  smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
+  return amd::smi::ainic_to_amdsmi_status(
+      smi_get_nic_port_ifindex(ctx, nic_device->bdf(), port_index, ifindex));
 }
 
 amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_handle,
@@ -990,26 +1024,43 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
       num_stats, stats);
 }
 
-amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
-                                                 uint32_t port_index, amdsmi_nic_stat_scope_t scope,
-                                                 uint32_t* num_stats, amdsmi_nic_stat_t* stats) {
+amdsmi_status_t amdsmi_set_nic_stat_scope(amdsmi_processor_handle processor_handle,
+                                          amdsmi_nic_stat_scope_t scope) {
   AMDSMI_CHECK_INIT();
-  if (num_stats == nullptr) {
-    return AMDSMI_STATUS_INVAL;
-  }
   smi_nic_stat_scope_t nic_scope = SMI_NIC_STAT_SCOPE_DEFAULT;
   if (!amd::smi::was_nic_stat_scope_resolved(scope, &nic_scope)) {
     return AMDSMI_STATUS_INVAL;
   }
 
-  amd::smi::AMDSmiAINICDevice::AINICInfo ainic_info = {};
-  amdsmi_status_t status = amdsmi_get_ainic_info(processor_handle, &ainic_info);
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
   if (status != AMDSMI_STATUS_SUCCESS) {
     return status;
   }
+  nic_device->set_stat_scope(scope);
+  return AMDSMI_STATUS_SUCCESS;
+}
+
+amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
+                                                 uint32_t port_index, uint32_t* num_stats,
+                                                 amdsmi_nic_stat_t* stats) {
+  AMDSMI_CHECK_INIT();
+  if (num_stats == nullptr) {
+    return AMDSMI_STATUS_INVAL;
+  }
+
+  amd::smi::AMDSmiAINICDevice* nic_device = nullptr;
+  amdsmi_status_t status = get_ainic_device_from_handle(processor_handle, &nic_device);
+  if (status != AMDSMI_STATUS_SUCCESS) {
+    return status;
+  }
+  // The setter only stores a validated tier.
+  const smi_nic_stat_scope_t nic_scope =
+      (nic_device->stat_scope() == AMDSMI_NIC_STAT_SCOPE_EXTENDED) ? SMI_NIC_STAT_SCOPE_EXTENDED
+                                                                   : SMI_NIC_STAT_SCOPE_DEFAULT;
 
   smi_nic_ctx_t ctx = amd::smi::AMDSmiSystem::getInstance().get_ainic_ctx();
-  const uint64_t device = ainic_info.bus.bdf.as_uint;
+  const uint64_t device = nic_device->bdf();
 
   return amd::smi::get_nic_stats(
       [&](uint32_t* available) {

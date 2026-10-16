@@ -371,7 +371,12 @@ class AMDSMILogger:
                     if isinstance(item, dict):
                         yaml_string += self.custom_dump(item, indent + 1)
                     else:  # If the list is not a dictionary, print it as a string
-                        yaml_string += "  " * (indent + 1) + f"- {item}\n"
+                        item_indent = "  " * (indent + 1)
+                        # The key pass in _convert_json_to_human_readable skips a line with no
+                        # colon, so scale the indent here to keep the item under its key.
+                        if ":" not in str(item):
+                            item_indent = item_indent.replace("  ", "    ")
+                        yaml_string += item_indent + f"- {item}\n"
             else:
                 key_prefix = "  " * indent
                 if isinstance(value, str) and "\n" in value:
@@ -631,7 +636,7 @@ class AMDSMILogger:
             self.output = {}
 
     def print_no_ainics_found(self):
-        """Report an explicit --nic that matched no NICs, in the selected format."""
+        """Report a --nic selection that resolved to no NICs, in the selected format."""
         self.output = {}
         self.clear_multiple_devices_output()
         if self.is_human_readable_format():

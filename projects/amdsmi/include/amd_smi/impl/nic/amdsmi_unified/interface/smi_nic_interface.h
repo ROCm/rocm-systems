@@ -160,7 +160,7 @@ typedef struct {
   char type[SMI_NIC_MAX_STRING_LENGTH];
   char flavour[SMI_NIC_MAX_STRING_LENGTH];
   char netdev[SMI_NIC_MAX_STRING_LENGTH];
-  uint32_t ifindex;
+  uint8_t ifindex;
   char mac_address[SMI_NIC_MAX_STRING_LENGTH];
   uint8_t carrier;
   uint16_t mtu;
@@ -332,6 +332,21 @@ smi_nic_status_t smi_get_nic_numa_info(smi_nic_ctx_t ctx, uint64_t device,
  */
 smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
                                        smi_nic_port_info_t* info);
+
+/**
+ * @brief Retrieve the full interface index of one NIC port.
+ *
+ * smi_nic_port_t holds the index in one byte; this returns the whole value.
+ *
+ * @param ctx Context handle
+ * @param device BDF of the network device.
+ * @param port_index Index of the NIC port (0-based), as in the statistics calls.
+ * @param ifindex Pointer to uint32_t to store the interface index; 0 when unavailable.
+ * @return ::smi_nic_status_t | ::SMI_NIC_STATUS_SUCCESS on success, ::SMI_NIC_STATUS_NOT_FOUND
+ * when @p port_index is past the last port, non-zero on other failure.
+ */
+smi_nic_status_t smi_get_nic_port_ifindex(smi_nic_ctx_t ctx, uint64_t device, uint32_t port_index,
+                                          uint32_t* ifindex);
 
 /**
  * @brief Retrieve RDMA device information for a NIC.

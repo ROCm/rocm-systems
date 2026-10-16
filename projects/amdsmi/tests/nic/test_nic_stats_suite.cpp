@@ -733,6 +733,127 @@ static void test_interface_port_info_reports_driver_not_loaded_when_every_port_i
   smi_nic_destroy_context(ctx);
 }
 
+// A sysfs class dir holding only an ifindex file.
+class IfindexDir_t {
+ public:
+  explicit IfindexDir_t(uint32_t ifindex)
+      : m_path(std::filesystem::temp_directory_path() /
+               ("amdsmi-ifindex-" + std::to_string(::getpid()) + "-" + std::to_string(ifindex))) {
+    std::filesystem::remove_all(m_path);
+    std::filesystem::create_directories(m_path);
+    std::ofstream(m_path / "ifindex") << ifindex << "\n";
+  }
+  ~IfindexDir_t() { std::filesystem::remove_all(m_path); }
+  IfindexDir_t(const IfindexDir_t&) = delete;
+  IfindexDir_t& operator=(const IfindexDir_t&) = delete;
+
+  std::string path() const { return m_path.string(); }
+
+ private:
+  std::filesystem::path m_path;
+};
+
+// The public port struct keeps ifindex in one byte, as in the previous release.
+constexpr auto kMaxByteIfindex = uint32_t{255};
+
+static uint32_t read_ifindex_from_port_info(uint32_t ifindex) {
+  IfindexDir_t dir(ifindex);
+  InterfaceFixture_t fixture(dir.path(), std::make_shared<FakeTransport>(), &kTestTable);
+  auto info = std::make_unique<smi_nic_port_info_t>();
+  check("port info succeeds for ifindex " + std::to_string(ifindex),
+        smi_get_nic_port_info(fixture.ctx, kFakeNicBdf, info.get()) == SMI_NIC_STATUS_SUCCESS);
+  return info->ports[0].ifindex;
+}
+
+static void test_interface_port_info_keeps_an_ifindex_that_fits_a_byte() {
+  check("an ifindex of 255 reads 255 in the port struct",
+        read_ifindex_from_port_info(kMaxByteIfindex) == kMaxByteIfindex);
+}
+
+// 300 and 511 truncate to 44 and 255, so a plain cast to one byte cannot pass for the clamp.
+static void test_interface_port_info_reads_zero_for_an_ifindex_above_a_byte() {
+  for (const auto ifindex : {kMaxByteIfindex + 1, uint32_t{300}, uint32_t{511}}) {
+    check("an ifindex of " + std::to_string(ifindex) + " reads 0 in the port struct",
+          read_ifindex_from_port_info(ifindex) == 0);
+  }
+}
+
+static void test_interface_port_ifindex_returns_the_full_value() {
+  const auto ifindex = kMaxByteIfindex + 45;
+  IfindexDir_t dir(ifindex);
+  InterfaceFixture_t fixture(dir.path(), std::make_shared<FakeTransport>(), &kTestTable);
+
+  auto value = uint32_t{0};
+  check("port ifindex succeeds",
+        smi_get_nic_port_ifindex(fixture.ctx, kFakeNicBdf, 0, &value) == SMI_NIC_STATUS_SUCCESS);
+  check("port ifindex returns a value above a byte whole", value == ifindex, std::to_string(value));
+}
+
+// Two ports on one NIC, each with its own sysfs class dir.
+class TwoPortIfindexFixture_t {
+ public:
+  TwoPortIfindexFixture_t(const std::string& first_class_path,
+                          const std::string& second_class_path) {
+    auto nic = std::make_unique<SmiNic>("faketh0", "0000:03:00.0");
+    nic->add_nic_port(SmiNicPort("faketh0", "0000:03:00.1", first_class_path, "/tmp",
+                                 std::make_shared<FakeTransport>(), &kTestTable));
+    nic->add_nic_port(SmiNicPort("faketh1", "0000:03:00.2", second_class_path, "/tmp",
+                                 std::make_shared<FakeTransport>(), &kTestTable));
+    auto subsystem = std::make_unique<FakeSubsystem>();
+    subsystem->add(std::move(nic));
+    auto system = std::make_unique<SmiNicSystem>("/tmp", "/tmp");
+    system->register_subsystem(std::move(subsystem));
+    system->discover_nics();
+    smi_nic_create_context_for_testing(&m_ctx, std::move(system));
+  }
+  ~TwoPortIfindexFixture_t() {
+    if (m_ctx != nullptr) {
+      smi_nic_destroy_context(m_ctx);
+    }
+  }
+  TwoPortIfindexFixture_t(const TwoPortIfindexFixture_t&) = delete;
+  TwoPortIfindexFixture_t& operator=(const TwoPortIfindexFixture_t&) = delete;
+
+  smi_nic_ctx_t ctx() const { return m_ctx; }
+
+ private:
+  smi_nic_ctx_t m_ctx = nullptr;
+};
+
+static void test_interface_port_ifindex_follows_the_port_index() {
+  const auto first_ifindex = kMaxByteIfindex + 45;
+  const auto second_ifindex = first_ifindex + 1;
+  IfindexDir_t first_dir(first_ifindex);
+  IfindexDir_t second_dir(second_ifindex);
+  TwoPortIfindexFixture_t fixture(first_dir.path(), second_dir.path());
+
+  auto first = uint32_t{0};
+  auto second = uint32_t{0};
+  check("port 0 ifindex succeeds",
+        smi_get_nic_port_ifindex(fixture.ctx(), kFakeNicBdf, 0, &first) == SMI_NIC_STATUS_SUCCESS);
+  check("port 1 ifindex succeeds",
+        smi_get_nic_port_ifindex(fixture.ctx(), kFakeNicBdf, 1, &second) == SMI_NIC_STATUS_SUCCESS);
+  check("port 0 reads its own ifindex", first == first_ifindex, std::to_string(first));
+  check("port 1 reads its own ifindex", second == second_ifindex, std::to_string(second));
+}
+
+static void test_interface_port_ifindex_rejects_a_bad_request() {
+  IfindexDir_t dir(1);
+  InterfaceFixture_t fixture(dir.path(), std::make_shared<FakeTransport>(), &kTestTable);
+
+  auto value = uint32_t{0};
+  check("port ifindex past the last port is not found",
+        smi_get_nic_port_ifindex(fixture.ctx, kFakeNicBdf, 1, &value) == SMI_NIC_STATUS_NOT_FOUND);
+  check(
+      "port ifindex needs an output pointer",
+      smi_get_nic_port_ifindex(fixture.ctx, kFakeNicBdf, 0, nullptr) == SMI_NIC_STATUS_WRONG_PARAM);
+  check("port ifindex needs a context",
+        smi_get_nic_port_ifindex(nullptr, kFakeNicBdf, 0, &value) == SMI_NIC_STATUS_WRONG_PARAM);
+  check("port ifindex on an unknown NIC is not found",
+        smi_get_nic_port_ifindex(fixture.ctx, kFakeNicBdf + 1, 0, &value) ==
+            SMI_NIC_STATUS_NOT_FOUND);
+}
+
 int main() {
   test_default_scope_excludes_extended();
   test_extended_scope_is_superset();
@@ -760,6 +881,11 @@ int main() {
   test_standard_statistics_drop_a_counter_that_disappears();
   test_interface_port_info_index_names_the_port_that_statistics_read();
   test_interface_port_info_reports_driver_not_loaded_when_every_port_is_unbound();
+  test_interface_port_info_keeps_an_ifindex_that_fits_a_byte();
+  test_interface_port_info_reads_zero_for_an_ifindex_above_a_byte();
+  test_interface_port_ifindex_returns_the_full_value();
+  test_interface_port_ifindex_follows_the_port_index();
+  test_interface_port_ifindex_rejects_a_bad_request();
 
   return nic_test::report();
 }

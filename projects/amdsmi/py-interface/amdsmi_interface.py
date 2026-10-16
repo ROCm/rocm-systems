@@ -2531,7 +2531,7 @@ def amdsmi_get_ainic_info_summary(nic_info):
     return {
         "bdf": _format_bdf(nic_info.bus.bdf),
         "Type": _nic_type_label(
-            _nic_type_from_value(nic_info.asic.type),
+            amdsmi_get_nic_type(nic_info.handle),
             nic_info.asic.vendor_name.decode("utf-8", errors="replace"),
         ),
         "UUID": nic_info.asic.permanent_address.decode("utf-8", errors="replace"),
@@ -2541,9 +2541,15 @@ def amdsmi_get_ainic_info_summary(nic_info):
         "Part Number": nic_info.asic.part_number.decode("utf-8", errors="replace"),
         "Serial Number": nic_info.asic.serial_number.decode("utf-8", errors="replace"),
         "Vendor Name": nic_info.asic.vendor_name.decode("utf-8", errors="replace"),
-        "Capability": _decode_nic_capabilities(nic_info.asic.capability),
+        "Capability": _decode_nic_capabilities(amdsmi_get_nic_capability(nic_info.handle)),
         # "Firmware_Version": nic_info.versions.running.fw.decode('utf-8'),
     }
+
+
+def _nic_value_with_unit(value: int, unavailable: MaxUIntegerTypes, unit: str) -> str:
+    """Format a port value with its unit, or "N/A" when it equals the type's unavailable marker."""
+    checked = _validate_if_max_uint(value, unavailable)
+    return checked if checked == "N/A" else f"{checked}{unit}"
 
 
 def amdsmi_get_ainic_info_detail(ainic_info_struct):
@@ -2561,7 +2567,9 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "PART_NUMBER": ainic_info_struct.asic.part_number.decode("utf-8", errors="replace"),
             "SERIAL_NUMBER": ainic_info_struct.asic.serial_number.decode("utf-8", errors="replace"),
             "VENDOR_NAME": ainic_info_struct.asic.vendor_name.decode("utf-8", errors="replace"),
-            "CAPABILITY": _decode_nic_capabilities(ainic_info_struct.asic.capability),
+            "CAPABILITY": _decode_nic_capabilities(
+                amdsmi_get_nic_capability(ainic_info_struct.handle)
+            ),
         },
         "BUS": {
             "bdf": _format_bdf(ainic_info_struct.bus.bdf),
@@ -2580,10 +2588,6 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
             "NODE": ainic_info_struct.numa.node,
             "AFFINITY": ainic_info_struct.numa.affinity.decode("utf-8", errors="replace"),
         },
-        "FW": {
-            "FW_0": ainic_info_struct.driver.name.decode("utf-8", errors="replace"),
-            "FW_HEARTBEAT": ainic_info_struct.driver.version.decode("utf-8", errors="replace"),
-        },
         "PORTS": {},
         "RDMA_DEVICES": {},
     }
@@ -2591,17 +2595,27 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
     for port_info in ainic_info_struct.port.ports:
         if port_num == ainic_info_struct.port.num_ports:
             break
+        # The library reports the largest value of the type for an attribute it could not read,
+        # for example the speed of a link that is down.
+        # The port list can change between the info read and this call; one port's index must not
+        # blank the rest of the NIC.
+        try:
+            ifindex = amdsmi_get_nic_port_ifindex(ainic_info_struct.handle, port_num)
+        except AmdSmiLibraryException:
+            ifindex = "N/A"
         ainic_info["PORTS"][f"PORT_{port_num}"] = {
             "TYPE": port_info.type.decode("utf-8", errors="replace"),
             "FLAVOUR": port_info.flavour.decode("utf-8", errors="replace"),
             "NETDEV": port_info.netdev.decode("utf-8", errors="replace"),
-            "IFINDEX": port_info.ifindex,
+            "IFINDEX": ifindex,
             "MAC_ADDRESS": port_info.mac_address.decode("utf-8", errors="replace"),
-            "CARRIER": port_info.carrier,
-            "MTU": f"{port_info.mtu}B",
+            "CARRIER": _validate_if_max_uint(port_info.carrier, MaxUIntegerTypes.UINT8_T),
+            "MTU": _nic_value_with_unit(port_info.mtu, MaxUIntegerTypes.UINT16_T, "B"),
             "LINK_STATE": port_info.link_state.decode("utf-8", errors="replace"),
-            "LINK_SPEED": f"{port_info.link_speed} Mb/s",
-            "ACTIVE_FEC": f"{port_info.active_fec}",
+            "LINK_SPEED": _nic_value_with_unit(
+                port_info.link_speed, MaxUIntegerTypes.UINT32_T, " Mb/s"
+            ),
+            "ACTIVE_FEC": _nic_value_with_unit(port_info.active_fec, MaxUIntegerTypes.UINT32_T, ""),
             "AUTONEG": port_info.autoneg.decode("utf-8", errors="replace"),
             "PAUSE_AUTONEG": port_info.pause_autoneg.decode("utf-8", errors="replace"),
             "PAUSE_RX": port_info.pause_rx.decode("utf-8", errors="replace"),
@@ -2647,6 +2661,7 @@ def amdsmi_get_ainic_info_detail(ainic_info_struct):
 
 class ainic_info_t:
     def __init__(self, processor_handle):
+        self.handle = processor_handle
         self.asic = amdsmi_wrapper.amdsmi_nic_asic_info_t()
         self.bus = amdsmi_wrapper.amdsmi_nic_bus_info_t()
         self.driver = amdsmi_wrapper.amdsmi_nic_driver_info_t()
@@ -2732,6 +2747,30 @@ def amdsmi_get_nic_type(processor_handle: amdsmi_wrapper.amdsmi_processor_handle
     _check_res(amdsmi_wrapper.amdsmi_get_nic_type(processor_handle, ctypes.byref(nic_type)))
 
     return _nic_type_from_value(nic_type.value)
+
+
+def amdsmi_get_nic_capability(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    capability = ctypes.c_uint32()
+    _check_res(amdsmi_wrapper.amdsmi_get_nic_capability(processor_handle, ctypes.byref(capability)))
+    return capability.value
+
+
+def amdsmi_get_nic_port_ifindex(
+    processor_handle: amdsmi_wrapper.amdsmi_processor_handle, port_index: int
+) -> int:
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    ifindex = ctypes.c_uint32()
+    _check_res(
+        amdsmi_wrapper.amdsmi_get_nic_port_ifindex(
+            processor_handle, port_index, ctypes.byref(ifindex)
+        )
+    )
+    return ifindex.value
 
 
 def amdsmi_get_nic_type_label(processor_handle: amdsmi_wrapper.amdsmi_processor_handle) -> str:
@@ -2842,27 +2881,38 @@ def amdsmi_get_nic_vendor_statistics(
     if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
         raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
 
-    num_stats = ctypes.c_uint32(0)
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_vendor_statistics(
-            processor_handle, port_index, scope, ctypes.byref(num_stats), None
+    # The C getter reads the tier set on the handle, which is shared by every caller in the
+    # process, so callers on other threads must agree on the tier while this runs. The handle is
+    # put back on the default tier afterwards so a later C caller does not inherit this scope.
+    _check_res(amdsmi_wrapper.amdsmi_set_nic_stat_scope(processor_handle, scope))
+    statistics = {}
+    try:
+        num_stats = ctypes.c_uint32(0)
+        _check_res(
+            amdsmi_wrapper.amdsmi_get_nic_vendor_statistics(
+                processor_handle, port_index, ctypes.byref(num_stats), None
+            )
         )
-    )
 
-    if num_stats.value == 0:
-        return {}
-
-    stats = (amdsmi_wrapper.amdsmi_nic_stat_t * num_stats.value)()
-    _check_res(
-        amdsmi_wrapper.amdsmi_get_nic_vendor_statistics(
-            processor_handle, port_index, scope, ctypes.byref(num_stats), stats
+        if num_stats.value > 0:
+            stats = (amdsmi_wrapper.amdsmi_nic_stat_t * num_stats.value)()
+            _check_res(
+                amdsmi_wrapper.amdsmi_get_nic_vendor_statistics(
+                    processor_handle, port_index, ctypes.byref(num_stats), stats
+                )
+            )
+            statistics = {
+                stats[i].name.decode("utf-8", errors="replace"): stats[i].value
+                for i in range(num_stats.value)
+            }
+    finally:
+        reset_status = amdsmi_wrapper.amdsmi_set_nic_stat_scope(
+            processor_handle, amdsmi_wrapper.AMDSMI_NIC_STAT_SCOPE_DEFAULT
         )
-    )
+    # Reached only when the query succeeded, so a failed reset never hides the query's error.
+    _check_res(reset_status)
 
-    return {
-        stats[i].name.decode("utf-8", errors="replace"): stats[i].value
-        for i in range(num_stats.value)
-    }
+    return statistics
 
 
 def amdsmi_get_nic_rdma_port_statistics(
