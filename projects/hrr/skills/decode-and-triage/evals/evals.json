@@ -57,6 +57,12 @@
       "prompt": "Our model runs slower than we expect on MI300X. Where is the time going?"
     },
     {
+      "id": "core-dump-under-rocgdb",
+      "skill_should_trigger": false,
+      "note": "A core dump with no HRR archive belongs to the crash-analysis tools.",
+      "prompt": "My HIP application dumped core. Open core.4242 with rocgdb and show me the backtrace."
+    },
+    {
       "id": "cuda-crash",
       "skill_should_trigger": false,
       "note": "No HRR archive and no AMD GPU involved.",
