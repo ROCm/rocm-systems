@@ -25,6 +25,10 @@ std::function<ncclResult_t(void* commState, void* allData, int size)> g_bootstra
 ncclResult_t bootstrapAllGather(void* commState, void* allData, int size) {
   return g_bootstrapAllGather(commState, allData, size);
 }
+// Only init.cc:2958 reaches this, to hand the rocSHMEM unique id to the other
+// ranks. Succeeds without touching bcastData; no test reaches it yet.
+ncclResult_t bootstrapBroadcast(void*, int, int, int, void*, int) { return ncclSuccess; }
+
 ncclResult_t bootstrapClose(void* commState) { ::abort(); }
 static ncclResult_t DefaultBootstrapCreateRoot(struct ncclBootstrapHandle*, bool) { ::abort(); }
 std::function<ncclResult_t(struct ncclBootstrapHandle*, bool)> g_bootstrapCreateRoot = DefaultBootstrapCreateRoot;
@@ -68,7 +72,7 @@ ncclResult_t bootstrapInit(int nHandles, void* handle, struct ncclComm* comm, st
   return g_bootstrapInit(nHandles, handle, comm, parent);
 }
 
-ncclResult_t bootstrapIntraNodeBarrier(void* commState, int* ranks, int rank, int nranks, int tag) { ::abort(); }
+ncclResult_t bootstrapIntraNodeBarrier(void*, int*, int, int, int) { return ncclSuccess; }
 
 static ncclResult_t DefaultBootstrapSplit(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*) { ::abort(); }
 std::function<ncclResult_t(uint64_t, struct ncclComm*, struct ncclComm*, int, int, int*)> g_bootstrapSplit =

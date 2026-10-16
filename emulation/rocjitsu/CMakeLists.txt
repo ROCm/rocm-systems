@@ -3,23 +3,7 @@
 
 cmake_minimum_required(VERSION 3.22)
 
-set(_RJ_ROCM_PATH_EXPLICIT OFF)
-if(DEFINED ROCM_PATH AND NOT "${ROCM_PATH}" STREQUAL "")
-    set(_RJ_ROCM_PATH_EXPLICIT ON)
-elseif(DEFINED ENV{ROCM_PATH} AND NOT "$ENV{ROCM_PATH}" STREQUAL "")
-    set(_RJ_ROCM_PATH_EXPLICIT ON)
-    set(ROCM_PATH "$ENV{ROCM_PATH}" CACHE PATH "Path to the ROCm installation")
-elseif(IS_DIRECTORY "/opt/rocm")
-    set(ROCM_PATH "/opt/rocm" CACHE PATH "Path to the ROCm installation")
-endif()
-
-if(_RJ_ROCM_PATH_EXPLICIT AND NOT IS_DIRECTORY "${ROCM_PATH}")
-    message(FATAL_ERROR "ROCM_PATH must be set to a valid directory")
-endif()
-unset(_RJ_ROCM_PATH_EXPLICIT)
-
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/cmake)
-include(rj_default_compiler)
 
 project(rocm_jit_suite VERSION 0.3.0)
 
@@ -28,11 +12,6 @@ include(rj_version)
 # Generate compile_commands.json for clangd, clang-tidy, and other tooling that
 # needs the exact compiler invocations from the configured build tree.
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
-
-# Default install prefix to /opt/rocm, matching other ROCm projects.
-if(CMAKE_INSTALL_PREFIX_INITIALIZED_TO_DEFAULT AND ROCM_PATH)
-    set(CMAKE_INSTALL_PREFIX "${ROCM_PATH}" CACHE PATH "" FORCE)
-endif()
 
 include(CTest)
 
@@ -101,6 +80,19 @@ option(
     OFF
 )
 option(RJ_INSTALL_TESTS "Install rocjitsu test binaries" OFF)
+option(
+    ROCJITSU_ENABLE_PERFSIM_PLUGIN
+    "Build the optional RocJITsu adapter for an external Perfsim observer plugin"
+    OFF
+)
+if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
+    if(NOT CMAKE_SYSTEM_NAME STREQUAL "Linux")
+        message(
+            FATAL_ERROR
+            "ROCJITSU_ENABLE_PERFSIM_PLUGIN is supported only on Linux"
+        )
+    endif()
+endif()
 option(
     ROCJITSU_ENABLE_VFIO
     "Build the vfio-user front end that serves rocjitsu as a PCIe device to a VMM"
@@ -355,6 +347,9 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
+# Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
+include(rj_host_cpu)
+
 # Libraries
 add_subdirectory(lib/util)
 add_subdirectory(lib/simdojo)
@@ -387,6 +382,7 @@ target_link_libraries(
         rocjitsu_vm_risc_v
         rocjitsu_config
         rocjitsu_dbt_config
+        rocjitsu_ip_discovery
         rocjitsu_drm_headers
         util
         flatbuffers

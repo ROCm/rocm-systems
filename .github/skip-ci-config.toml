@@ -1,0 +1,54 @@
+# Copyright Advanced Micro Devices, Inc.
+# SPDX-License-Identifier: MIT
+
+# Skip CI Configuration for rocm-systems
+#
+# This file defines which file patterns can skip TheRock CI.
+# When all changed files match these patterns, CI can be skipped.
+#
+# These patterns extend TheRock's base patterns in
+# build_tools/github_actions/skip-ci-base.toml.
+#
+# Pattern syntax: fnmatch glob patterns (*, ?, [abc])
+# See https://docs.python.org/3/library/fnmatch.html
+#
+# To add platform-specific skips (e.g., skip Windows CI for Linux-only
+# projects), use the [skip_ci.linux] or [skip_ci.windows] lists.
+
+version = 1
+
+[skip_ci]
+# Common patterns that skip CI on all platforms
+common = [
+    # Miscellaneous git/github files
+    "*.gitignore",
+    "*.pre-commit-config.*",
+    ".github/label*.yml",
+    "*CODEOWNERS",
+    "*LICENSE",
+    "*/.markdownlint-ci2.yaml",
+    "tools/systems_pr_bot/*",
+
+    # Documentation files
+    "docs/*",
+    "*.md",
+    "*.rtf",
+    "*.rst",
+    "*/.readthedocs.yaml",
+    "*/.spellcheck.local.yaml",
+    "*/.wordlist.txt",
+    "projects/*/docs/*",
+    "shared/*/docs/*",
+
+    # Vendored API headers are not yet integrated into TheRock builds.
+    "runtimes/api-headers/*",
+
+    # Changes to experimental code do not run standard build/test workflows.
+    "experimental/*",
+]
+
+# Patterns that skip CI only on Linux (e.g., Windows-only projects)
+linux = []
+
+# Patterns that skip CI only on Windows (e.g., Linux-only projects)
+windows = []

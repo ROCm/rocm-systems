@@ -43,7 +43,7 @@ public:
     for (const auto *wf : wavefronts)
       workgroups.push_back(wf->wg_id());
     std::ranges::sort(workgroups);
-    workgroups.erase(std::unique(workgroups.begin(), workgroups.end()), workgroups.end());
+    workgroups.erase(std::ranges::unique(workgroups).begin(), workgroups.end());
     resolution.workgroup_ids = std::move(workgroups);
     std::lock_guard<std::mutex> lock(mutex_);
     resolutions_.push_back(std::move(resolution));
@@ -371,6 +371,7 @@ TEST(Gfx1250SimulationTest, SMovrelsReadsM0IndexedScalarSources) {
       0xBE8400FFu,    0x33333333u, // s_mov_b32 s4, 0x33333333
       0xBE8500FFu,    0x44444444u, // s_mov_b32 s5, 0x44444444
       0xBE884002u,                 // s_movrels_b32 s8, s2
+      0xBEFD0082u,                 // s_mov_b32 m0, 2 (DWORD offset, even for B64)
       0xBE8A4102u,                 // s_movrels_b64 s[10:11], s[2:3]
       S_ENDPGM_GFX12,
   };
@@ -388,6 +389,7 @@ TEST(Gfx1250SimulationTest, SMovreldWritesM0IndexedScalarDestinations) {
       0xBE8200FFu,    0x55555555u, // s_mov_b32 s2, 0x55555555
       0xBE8300FFu,    0x66666666u, // s_mov_b32 s3, 0x66666666
       0xBE884202u,                 // s_movreld_b32 s8, s2
+      0xBEFD0082u,                 // s_mov_b32 m0, 2 (DWORD offset, even for B64)
       0xBE8A4302u,                 // s_movreld_b64 s[10:11], s[2:3]
       S_ENDPGM_GFX12,
   };
@@ -401,17 +403,16 @@ TEST(Gfx1250SimulationTest, SMovreldWritesM0IndexedScalarDestinations) {
 
 TEST(Gfx1250SimulationTest, SMovrelsd2B32UsesSeparatePackedM0Offsets) {
   const uint32_t code[] = {
-      0xBEFD00FFu,    0x00000201u, // s_mov_b32 m0, 0x201
-      0xBE8200FFu,    0x77777777u, // s_mov_b32 s2, 0x77777777
-      0xBE8300FFu,    0x88888888u, // s_mov_b32 s3, 0x88888888
-      0xBE884402u,                 // s_movrelsd_2_b32 s8, s2
+      0xBEFD00FFu,    0x0014000au, // s_mov_b32 m0, (20 << 16) | 10
+      0xBE9100FFu,    0x88888888u, // s_mov_b32 s17, 0x88888888
+      0xBE854407u,                 // s_movrelsd_2_b32 s5, s7
       S_ENDPGM_GFX12,
   };
 
   Gfx1250Sim sim;
   const auto *wf = dispatch_one_wave(sim, code, std::size(code));
   ASSERT_NE(wf, nullptr);
-  EXPECT_EQ(wf->sgpr(10), 0x88888888u);
+  EXPECT_EQ(wf->sgpr(25), 0x88888888u);
 }
 
 TEST(Gfx1250SimulationTest, SplitNamedBarrierOpsReportIdleState) {
@@ -787,6 +788,13 @@ TEST(Gfx1250SimulationTest, VgprMsbModeTracksModeRegisterLayout) {
   static_assert(amdgpu::set_vgpr_msb_to_mode_layout(kSetLayout) == kModeLayout);
   static_assert(amdgpu::mode_layout_to_set_vgpr_msb(kModeLayout) == kSetLayout);
   for (uint32_t layout = 0; layout <= 0xFF; ++layout) {
+    wf->set_vgpr_msb_mode(static_cast<uint8_t>(layout));
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::None), 0u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::Src0), layout & 3u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::Src1), (layout >> 2) & 3u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::Src2), (layout >> 4) & 3u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(amdgpu::VgprMsbRole::Dst), (layout >> 6) & 3u);
+    EXPECT_EQ(wf->vgpr_msb_for_role(static_cast<amdgpu::VgprMsbRole>(255)), 0u);
     EXPECT_EQ(amdgpu::mode_layout_to_set_vgpr_msb(
                   amdgpu::set_vgpr_msb_to_mode_layout(static_cast<uint8_t>(layout))),
               layout);
@@ -829,6 +837,104 @@ TEST(Gfx1250SimulationTest, SSetVgprMsbUpdatesWavefrontMode) {
 
   EXPECT_EQ(wf.vgpr_msb_mode, kSetLayout);
   EXPECT_EQ((wf.mode_raw & amdgpu::VGPR_MSB_MODE_MASK) >> amdgpu::VGPR_MSB_MODE_SHIFT, kModeLayout);
+}
+
+TEST(Gfx1250SimulationTest, SetregModeClobbersVgprMsbFromUnshiftedSourceBits) {
+  constexpr uint8_t kInitialSetLayout = 0x41;
+  constexpr uint8_t kClobberedModeLayout = 0xA5;
+  constexpr uint8_t kExpectedSetLayout = amdgpu::mode_layout_to_set_vgpr_msb(kClobberedModeLayout);
+  constexpr uint16_t kModeBitZeroHwreg = amdgpu::MODE_HWREG;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr uint32_t kLiteral =
+      (static_cast<uint32_t>(kClobberedModeLayout) << amdgpu::VGPR_MSB_MODE_SHIFT) | 1u;
+  const uint32_t code[] = {
+      S_SET_VGPR_MSB | kInitialSetLayout,
+      setreg[0],
+      kLiteral,
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kExpectedSetLayout);
+  EXPECT_EQ((wf->mode_raw & amdgpu::VGPR_MSB_MODE_MASK) >> amdgpu::VGPR_MSB_MODE_SHIFT,
+            kClobberedModeLayout);
+}
+
+TEST(Gfx1250SimulationTest, SetVgprMsbImmediatelyAfterSetregModeIsDropped) {
+  constexpr uint8_t kClobberedModeLayout = 0xA5;
+  constexpr uint8_t kExpectedSetLayout = amdgpu::mode_layout_to_set_vgpr_msb(kClobberedModeLayout);
+  constexpr uint8_t kDroppedSetLayout = 0xC3;
+  constexpr uint16_t kModeBitZeroHwreg = amdgpu::MODE_HWREG;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr uint32_t kLiteral = static_cast<uint32_t>(kClobberedModeLayout)
+                                << amdgpu::VGPR_MSB_MODE_SHIFT;
+  const uint32_t code[] = {
+      setreg[0],
+      kLiteral,
+      S_SET_VGPR_MSB | kDroppedSetLayout,
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kExpectedSetLayout);
+}
+
+TEST(Gfx1250SimulationTest, InterveningNopEndsSetregVgprMsbHazard) {
+  constexpr uint8_t kFollowingSetLayout = 0xC3;
+  constexpr uint16_t kModeBitZeroHwreg = amdgpu::MODE_HWREG;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kModeBitZeroHwreg});
+  constexpr auto nop = cdna5::build_sopp(cdna5::kSNopSopp);
+  constexpr uint32_t kLiteral = 0xA5u << amdgpu::VGPR_MSB_MODE_SHIFT;
+  const uint32_t code[] = {
+      setreg[0], kLiteral, nop[0], S_SET_VGPR_MSB | kFollowingSetLayout, S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
+}
+
+TEST(Gfx1250SimulationTest, NonModeSetregImm32DoesNotArmVgprMsbHazard) {
+  constexpr uint8_t kFollowingSetLayout = 0xC3;
+  constexpr uint16_t kWaveSchedModeHwreg = 26u | (31u << 11);
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = kWaveSchedModeHwreg});
+  constexpr uint32_t kLiteral = 0xA5A55A5Au;
+  const uint32_t code[] = {
+      setreg[0],
+      kLiteral,
+      S_SET_VGPR_MSB | kFollowingSetLayout,
+      S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
+}
+
+TEST(Gfx1250SimulationTest, InterveningTrapEndsSetregVgprMsbHazard) {
+  constexpr uint8_t kFollowingSetLayout = 0xC3;
+  constexpr auto setreg =
+      cdna5::build_sopk(cdna5::kSSetregImm32B32Sopk, {.simm16 = amdgpu::MODE_HWREG});
+  constexpr auto trap = cdna5::build_sopp(cdna5::kSTrapSopp, {.simm16 = 1});
+  constexpr uint32_t kLiteral = 0xA5u << amdgpu::VGPR_MSB_MODE_SHIFT;
+  const uint32_t code[] = {
+      setreg[0], kLiteral, trap[0], S_SET_VGPR_MSB | kFollowingSetLayout, S_ENDPGM_GFX12,
+  };
+
+  Gfx1250Sim sim;
+  const auto *wf = dispatch_one_wave(sim, code, std::size(code));
+  ASSERT_NE(wf, nullptr);
+  EXPECT_EQ(wf->vgpr_msb_mode, kFollowingSetLayout);
 }
 
 TEST(Gfx1250SimulationTest, VgprMsbRolesSelectHighVgprBanks) {

@@ -43,7 +43,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if (NOT DEFINED CMAKE_CXX_COMPILER)
+if (NOT WIN32 AND NOT DEFINED CMAKE_CXX_COMPILER)
   set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
   set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
 endif()
@@ -257,6 +257,23 @@ add_test(
             --test-command "videodecodecaps"
 )
 set_test_env(video_decodeCaps)
+
+# Windows only - rocDecodeMissingVaLibTest: rocdecode.dll must fail cleanly when the
+# TheRock VA-API DLLs cannot be found. TheRock builds load them at runtime; a
+# directly linked rocdecode.dll could not even be loaded without them.
+if(WIN32 AND USING_THE_ROCK)
+  add_test(
+    NAME
+    rocDecode_Missing_VA_Lib_Test
+    COMMAND
+      "${CMAKE_CTEST_COMMAND}"
+              --build-and-test "${ROCM_PATH}/share/rocdecode/test/rocDecodeMissingVaLibTest"
+                                "${CMAKE_CURRENT_BINARY_DIR}/rocdecodemissingvalibtest"
+              --build-generator "${CMAKE_GENERATOR}"
+              --test-command "rocdecodemissingvalibtest"
+  )
+  set_test_env(rocDecode_Missing_VA_Lib_Test)
+endif()
 
 if(FFMPEG_FOUND AND ENABLE_EXTENDED_TESTS)
   # 8 - videoDecode HEVC

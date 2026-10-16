@@ -12,22 +12,47 @@
 // moving those is a larger change than this one. Everything else this TU owns is
 // here, so the subsystem now lives in two files rather than four.
 
-#include "nccl.h"
-#include "strongstream.h"
+#include "strongstream_stubs.h"
 
 #include "fail_loud.h"
-#include "strongstream_stubs.h"
+#include "nccl.h"
+#include "signature-drift.h"
+#include "strongstream.h"
+
+ASSERT_HOOK_MATCHES_PROD(g_cudaGetCapturingGraph, ncclCudaGetCapturingGraph);
+ASSERT_HOOK_MATCHES_PROD(g_ncclStreamAdvanceToEvent, ncclStreamAdvanceToEvent);
+ASSERT_HOOK_MATCHES_PROD(g_ncclCudaGraphRecordEvent, ncclCudaGraphRecordEvent);
+#undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclCudaContext;
 
-ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph*, hipStream_t, int) {
-  FailLoudUnfaked("strongstream_stubs", "ncclCudaGetCapturingGraph");
+static ncclResult_t DefaultCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t, int graphUsageMode) {
+  if (graph) *graph = ncclCudaGraphNone(graphUsageMode);
+  return ncclSuccess;
+}
+std::function<ncclResult_t(struct ncclCudaGraph*, hipStream_t, int)> g_cudaGetCapturingGraph =
+    DefaultCudaGetCapturingGraph;
+ncclResult_t ncclCudaGetCapturingGraph(struct ncclCudaGraph* graph, hipStream_t stream, int graphUsageMode) {
+  return g_cudaGetCapturingGraph(graph, stream, graphUsageMode);
 }
 ncclResult_t ncclCudaGraphAddDestructor(struct ncclCudaGraph, hipHostFn_t, void*) {
   FailLoudUnfaked("strongstream_stubs", "ncclCudaGraphAddDestructor");
 }
-ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph, hipStream_t, hipEvent_t) {
+static ncclResult_t DefaultStreamAdvanceToEvent(struct ncclCudaGraph, hipStream_t, hipEvent_t) {
   FailLoudUnfaked("strongstream_stubs", "ncclStreamAdvanceToEvent");
+}
+std::function<ncclResult_t(struct ncclCudaGraph, hipStream_t, hipEvent_t)> g_ncclStreamAdvanceToEvent =
+    DefaultStreamAdvanceToEvent;
+ncclResult_t ncclStreamAdvanceToEvent(struct ncclCudaGraph graph, hipStream_t stream, hipEvent_t event) {
+  return g_ncclStreamAdvanceToEvent(graph, stream, event);
+}
+static ncclResult_t DefaultCudaGraphRecordEvent(struct ncclCudaGraph, hipEvent_t, hipStream_t) {
+  FailLoudUnfaked("strongstream_stubs", "ncclCudaGraphRecordEvent");
+}
+std::function<ncclResult_t(struct ncclCudaGraph, hipEvent_t, hipStream_t)> g_ncclCudaGraphRecordEvent =
+    DefaultCudaGraphRecordEvent;
+ncclResult_t ncclCudaGraphRecordEvent(struct ncclCudaGraph graph, hipEvent_t event, hipStream_t stream) {
+  return g_ncclCudaGraphRecordEvent(graph, event, stream);
 }
 ncclResult_t ncclStrongStreamAcquiredWorkStream(struct ncclCudaGraph, struct ncclStrongStream*,
                                                 bool, hipStream_t*) {
@@ -43,13 +68,16 @@ ncclResult_t ncclStrongStreamSynchronize(struct ncclStrongStream*) { return g_nc
 // Controllable (was fail-loud in nccl_stubs.cc).
 ncclResult_t g_ncclCudaContextTrackResult = ncclSuccess;
 int g_ncclCudaContextTrackCalls = 0;
-ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out) {
+ncclResult_t ncclCudaContextTrack(struct ncclCudaContext** out, int, uint64_t) {
   g_ncclCudaContextTrackCalls++;
   if (out) *out = nullptr;
   return g_ncclCudaContextTrackResult;
 }
 
 void ResetStrongStreamStubs() {
+  g_cudaGetCapturingGraph = DefaultCudaGetCapturingGraph;
+  g_ncclStreamAdvanceToEvent = DefaultStreamAdvanceToEvent;
+  g_ncclCudaGraphRecordEvent = DefaultCudaGraphRecordEvent;
   g_ncclStrongStreamResult = ncclSuccess;
   g_ncclCudaContextTrackResult = ncclSuccess;
   g_ncclCudaContextTrackCalls = 0;

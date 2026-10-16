@@ -26,7 +26,7 @@ THE SOFTWARE.
 extern "C" {
     #include <libavcodec/avcodec.h>
     #include <libavformat/avformat.h>
-    #if USE_AVCODEC_GREATER_THAN_58_134
+    #if USE_AVCODEC_GREATER_THAN_58_134 || USE_AVCODEC_GREATER_THAN_60_31
         #include <libavcodec/bsf.h>
     #endif
 }
@@ -35,8 +35,13 @@ extern "C" {
 #include <cstring>
 #include <ctime>
 #include <time.h>
+#ifndef _WIN32
 #include <unistd.h>
 #include <sys/syscall.h>
+#else
+#include <process.h>
+#include <windows.h>
+#endif
 #include <thread>
 #include <sstream>
 #include <iomanip>
@@ -45,6 +50,7 @@ extern "C" {
 // Minimal critical logging for video_demuxer.h.
 // Matches the format produced by the full logger in src/commons.h:
 //   [0, Critical] filename:line: timestamp_us us: [pid:X tid:Y hashid:0xZZZZZ] func(): message
+#ifndef _WIN32
 #define DemuxCriticalLog(msg) \
     do { \
         struct timespec _ts_; \
@@ -60,6 +66,28 @@ extern "C" {
                   << getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
                   << __func__ << "(): " << (msg) << std::endl; \
     } while (0)
+#else
+#define DemuxCriticalLog(msg) \
+    do { \
+        /* function-local static: the runtime initializes it exactly once, even when \
+           several decode threads reach their first log at the same time */ \
+        static const LARGE_INTEGER _freq_ = [] { LARGE_INTEGER _f_ = {}; QueryPerformanceFrequency(&_f_); return _f_; }(); \
+        LARGE_INTEGER _cnt_; QueryPerformanceCounter(&_cnt_); \
+        /* split the division to keep the counter from overflowing when scaled to us */ \
+        uint64_t _us_ = static_cast<uint64_t>(_cnt_.QuadPart / _freq_.QuadPart) * 1000000ULL \
+                      + static_cast<uint64_t>(_cnt_.QuadPart % _freq_.QuadPart) * 1000000ULL / _freq_.QuadPart; \
+        const char *_f_ = strrchr(__FILE__, '\\'); \
+        if (!_f_) _f_ = strrchr(__FILE__, '/'); \
+        DWORD _tid_ = GetCurrentThreadId(); \
+        std::ostringstream _htid_oss_; \
+        _htid_oss_ << "0x" << std::hex << std::setw(5) << std::setfill('0') \
+                  << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); \
+        std::cerr << "[0, Critical] " << (_f_ ? _f_ + 1 : __FILE__) \
+                  << ":" << __LINE__ << ": " << _us_ << " us: [pid:" \
+                  << _getpid() << " tid:" << _tid_ << " hashid:" << _htid_oss_.str() << "] " \
+                  << __func__ << "(): " << (msg) << std::endl; \
+    } while (0)
+#endif
 
 /*!
  * \file
@@ -149,18 +177,49 @@ public:
 };
 
 
+/**
+ * \ingroup group_amd_rocdecode_videodemuxer
+ * \brief Demultiplexes a video stream into elementary packets that are passed to the rocDecode parser.
+ */
 // Video Demuxer Interface class
 class VideoDemuxer {
     public:
+        /**
+         * \brief Abstract interface that feeds a custom stream of bytes to the demuxer.
+         *
+         * Implement this to demux from a source other than a file path, such as an
+         * in-memory buffer or a network stream.
+         */
         class StreamProvider {
             public:
                 virtual ~StreamProvider() {}
+                /**
+                 * \brief Reads up to \p buf_size bytes of stream data into \p buf.
+                 * \return The number of bytes read, or a negative value at end of stream.
+                 */
                 virtual int GetData(uint8_t *buf, int buf_size) = 0;
+                /**
+                 * \brief Returns the preferred buffer size to use for \ref GetData reads.
+                 */
                 virtual size_t GetBufferSize() = 0;
         };
+        /**
+         * \brief Returns the FFmpeg codec ID of the demultiplexed video stream.
+         */
         AVCodecID GetCodecID() { return av_video_codec_id_; };
+        /**
+         * \brief Constructs a demuxer that reads the video stream from a file path.
+         * \param input_file_path Path to the input video file.
+         */
         VideoDemuxer(const char *input_file_path) : VideoDemuxer(CreateFmtContextUtil(input_file_path)) {}
+        /**
+         * \brief Constructs a demuxer that reads the video stream from a custom \ref StreamProvider.
+         * \param stream_provider The stream provider to demux from.
+         */
         VideoDemuxer(StreamProvider *stream_provider) : VideoDemuxer(CreateFmtContextUtil(stream_provider)) {av_io_ctx_ = av_fmt_input_ctx_->pb;}
+        /**
+         * \brief Destroys the demuxer and releases the underlying FFmpeg resources.
+         */
         ~VideoDemuxer() {
             if (!av_fmt_input_ctx_) {
                 return;
@@ -183,6 +242,14 @@ class VideoDemuxer {
                 av_free(data_with_header_);
             }
         }
+        /**
+         * \brief Extracts the next elementary video packet from the stream, starting at the beginning.
+         *
+         * \param video Set to a pointer to the extracted packet data.
+         * \param video_size Set to the size, in bytes, of the extracted packet.
+         * \param pts Optional; if non-null, set to the packet's presentation timestamp.
+         * \return \c true if a packet was extracted, \c false at end of stream or on error.
+         */
         bool Demux(uint8_t **video, int *video_size, int64_t *pts = nullptr) {
             if (!av_fmt_input_ctx_) {
                 return false;
@@ -240,7 +307,7 @@ class VideoDemuxer {
                         memcpy(data_with_header_, av_fmt_input_ctx_->streams[av_stream_]->codecpar->extradata, ext_data_size);
                         memcpy(data_with_header_ + ext_data_size, packet_->data + 3, payload);
                         *video = data_with_header_;
-                        *video_size = total;
+                        *video_size = static_cast<int>(total);
                     }
                 } else {
                     *video = packet_->data;
@@ -259,6 +326,15 @@ class VideoDemuxer {
             frame_count_++;
             return true;
         }
+        /**
+         * \brief Seeks to a frame identified by \p seek_ctx and demuxes it, instead of demuxing sequentially.
+         *
+         * \param seek_ctx Describes the frame to seek to (by frame number or timestamp) and the seek mode;
+         * also receives the presentation timestamp, duration, and decoded frame count for the found frame.
+         * \param pp_video Set to a pointer to the demuxed packet data at the sought frame.
+         * \param video_size Set to the size, in bytes, of the demuxed packet.
+         * \return \c true on success.
+         */
         bool Seek(VideoSeekContext& seek_ctx, uint8_t** pp_video, int* video_size) {
             /* !!! IMPORTANT !!!
                 * Across this function, packet decode timestamp (DTS) values are used to
@@ -288,7 +364,7 @@ class VideoDemuxer {
                         ret = av_seek_frame(av_fmt_input_ctx_, av_stream_, timestamp, seek_backward ? AVSEEK_FLAG_BACKWARD | flags : flags);
                         break;
                     case SEEK_CRITERIA_TIME_STAMP:
-                        timestamp = TsFromTime(seek_ctx.seek_frame_);
+                        timestamp = TsFromTime(static_cast<double>(seek_ctx.seek_frame_));
                         ret = av_seek_frame(av_fmt_input_ctx_, av_stream_, timestamp, seek_backward ? AVSEEK_FLAG_BACKWARD | flags : flags);
                         break;
                     default:
@@ -310,7 +386,7 @@ class VideoDemuxer {
                         target_ts = TsFromFrameNumber(seek_ctx.seek_frame_);
                         break;
                     case SEEK_CRITERIA_TIME_STAMP:
-                        target_ts = TsFromTime(seek_ctx.seek_frame_);
+                        target_ts = TsFromTime(static_cast<double>(seek_ctx.seek_frame_));
                         break;
                     default:
                         DemuxCriticalLog("Invalid seek criteria");
@@ -385,14 +461,27 @@ class VideoDemuxer {
 
             return true;
         }
+        /** \brief Returns the width, in pixels, of the demultiplexed video stream. */
         const uint32_t GetWidth() const { return width_;}
+        /** \brief Returns the height, in pixels, of the demultiplexed video stream. */
         const uint32_t GetHeight() const { return height_;}
+        /** \brief Returns the chroma plane height, in pixels, for the stream's chroma format. */
         const uint32_t GetChromaHeight() const { return chroma_height_;}
+        /** \brief Returns the bit depth of the demultiplexed video stream. */
         const uint32_t GetBitDepth() const { return bit_depth_;}
+        /** \brief Returns the number of bytes per pixel for the stream's chroma format. */
         const uint32_t GetBytePerPixel() const { return byte_per_pixel_;}
+        /** \brief Returns the bit rate, in bits per second, reported by the input stream. */
         const uint32_t GetBitRate() const { return bit_rate_;}
+        /** \brief Returns the real (base) frame rate of the demultiplexed video stream. */
         const double GetFrameRate() const {return frame_rate_;};
+        /** \brief Returns \c true if the stream is variable frame rate (its real and average frame rates differ). */
         bool IsVFR() const { return frame_rate_ != avg_frame_rate_; };
+        /**
+         * \brief Converts a timestamp in seconds to the stream's internal time base units.
+         * \param ts_sec Timestamp, in seconds.
+         * \return The equivalent timestamp in the stream's time base units.
+         */
         int64_t TsFromTime(double ts_sec) {
             // Convert integer timestamp representation to AV_TIME_BASE and switch to fixed_point
             auto const ts_tbu = llround(ts_sec * AV_TIME_BASE);
@@ -401,6 +490,11 @@ class VideoDemuxer {
             return av_rescale_q(ts_tbu, time_factor, av_fmt_input_ctx_->streams[av_stream_]->time_base);
         }
 
+        /**
+         * \brief Converts a frame number to the stream's internal time base units, using the stream's frame rate.
+         * \param frame_num Frame number.
+         * \return The equivalent timestamp in the stream's time base units.
+         */
         int64_t TsFromFrameNumber(int64_t frame_num) {
             auto const ts_sec = static_cast<double>(frame_num) / frame_rate_;
             return TsFromTime(ts_sec);
@@ -434,7 +528,7 @@ class VideoDemuxer {
             width_ = av_fmt_input_ctx_->streams[av_stream_]->codecpar->width;
             height_ = av_fmt_input_ctx_->streams[av_stream_]->codecpar->height;
             chroma_format_ = (AVPixelFormat)av_fmt_input_ctx_->streams[av_stream_]->codecpar->format;
-            bit_rate_ = av_fmt_input_ctx_->streams[av_stream_]->codecpar->bit_rate;
+            bit_rate_ = static_cast<uint32_t>(av_fmt_input_ctx_->streams[av_stream_]->codecpar->bit_rate);
             if (av_fmt_input_ctx_->streams[av_stream_]->r_frame_rate.den != 0)
                 frame_rate_ = static_cast<double>(av_fmt_input_ctx_->streams[av_stream_]->r_frame_rate.num) / static_cast<double>(av_fmt_input_ctx_->streams[av_stream_]->r_frame_rate.den);
             if (av_fmt_input_ctx_->streams[av_stream_]->avg_frame_rate.den != 0)
@@ -497,9 +591,9 @@ class VideoDemuxer {
                         || !strcmp(av_fmt_input_ctx_->iformat->long_name, "Matroska / WebM"));
 
             // Check if the input file allow seek functionality.
-#if USE_AVCODEC_GREATER_THAN_58_134
+#if USE_AVCODEC_GREATER_THAN_58_134 || USE_AVCODEC_GREATER_THAN_60_31
             is_seekable_ = true;    //for latest version of FFMPeg, read_seek and read_seek2 is not exposed in AVFormatContext
-#else            
+#else
             is_seekable_ = av_fmt_input_ctx_->iformat->read_seek || av_fmt_input_ctx_->iformat->read_seek2;
 #endif            
 
@@ -547,7 +641,7 @@ class VideoDemuxer {
                 return nullptr;
             }
             uint8_t *avioc_buffer = nullptr;
-            int avioc_buffer_size = stream_provider->GetBufferSize();
+            int avioc_buffer_size = static_cast<int>(stream_provider->GetBufferSize());
             avioc_buffer = (uint8_t *)av_malloc(avioc_buffer_size);
             if (!avioc_buffer) {
                 DemuxCriticalLog("av_malloc failed!");

@@ -1,6 +1,7 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier:  MIT
 
+import io
 import json
 import re
 from collections import OrderedDict
@@ -11,7 +12,7 @@ import pandas as pd
 import yaml
 
 import config
-from utils import csv_compression, schema, utils_analysis
+from utils import csv_compression, utils_analysis
 from utils.logger import (
     console_debug,
     console_error,
@@ -23,6 +24,8 @@ from utils.utils_common import (
     canonical_config_arch,
     normalize_filter_to_str_list,
 )
+
+KERNEL_SYMBOLS_CSV_GLOB = f"kernel_symbols_*.csv{csv_compression.GZIP_SUFFIX}"
 
 # TODO: use pandas chunksize or dask to read really large csv file
 # from dask import dataframe as dd
@@ -232,6 +235,49 @@ def load_pc_sampling_results(workload_path: str) -> list[dict[str, Any]]:
     return tool_records
 
 
+def load_kernel_short_names(
+    workload_path: str,
+    tool_data_records: list[dict[str, Any]],
+) -> dict[str, str]:
+    """Map a workload's kernel names to the short names profiling captured."""
+    symbol_frames = _read_kernel_symbol_csvs(workload_path)
+
+    # A PC-sampling-only run has no rocpd database to write the CSV from, so
+    # read the same pair out of its results JSON instead.
+    if not symbol_frames:
+        return {
+            symbol["formatted_kernel_name"]: symbol["truncated_kernel_name"]
+            for tool_data in tool_data_records
+            for symbol in tool_data.get("kernel_symbols", [])
+        }
+
+    # A symbol is written once per process and once per run. The repeats all
+    # say the same thing, so keeping the last one is enough.
+    symbols = pd.concat(symbol_frames, ignore_index=True).dropna(
+        subset=["Kernel_Name", "Kernel_Short_Name"]
+    )
+    return dict(zip(symbols["Kernel_Name"], symbols["Kernel_Short_Name"]))
+
+
+def _read_kernel_symbol_csvs(workload_path: str) -> list[pd.DataFrame]:
+    """Return the workload's symbol CSVs that hold symbols to read.
+
+    The conversion opens each file before it runs its query, so an extract that
+    failed leaves an empty file behind rather than no file.
+    """
+    symbol_frames = []
+    for symbol_csv_path in sorted(Path(workload_path).glob(KERNEL_SYMBOLS_CSV_GLOB)):
+        try:
+            symbols = pd.read_csv(symbol_csv_path)
+        except (pd.errors.EmptyDataError, pd.errors.ParserError):
+            continue
+        if not symbols.empty and {"Kernel_Name", "Kernel_Short_Name"}.issubset(
+            symbols.columns
+        ):
+            symbol_frames.append(symbols)
+    return symbol_frames
+
+
 def process_pc_sampling_kernel_traces(
     tool_data_records: list[dict[str, Any]],
 ) -> pd.DataFrame:
@@ -307,30 +353,65 @@ def create_df_pmc(
     verbose: int,
 ) -> pd.DataFrame:
     """
-    Load all raw pmc counters and join into one df.
+    Read all raw pmc counters into one analysis df.
+
+    Counter data is read straight from the rocpd result artifacts. Bad profiling
+    output stops the run instead of producing a partial frame.
     """
-    pmc_perf_path = csv_compression.compressed_name(
-        Path(raw_data_dir) / f"{schema.PMC_PERF_FILE_PREFIX}.csv"
+    result_files = sorted(
+        Path(raw_data_dir).glob(f"results_*.csv{csv_compression.GZIP_SUFFIX}")
     )
-    if not pmc_perf_path.is_file():
+    if not result_files:
         return pd.DataFrame()
 
-    df = pd.read_csv(pmc_perf_path)
-
-    # The rocpd counter CSV is long: one row per counter per dispatch. Anything
-    # else was written by a removed backend and is no longer supported.
-    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
-        console_error(
-            "analysis",
-            f"{pmc_perf_path} is not in the supported rocpd format. "
-            "Please re-profile this workload with a current release.",
-        )
-    df = utils_analysis.process_rocpd_csv(df)
+    frames = [_read_counter_results(result_file) for result_file in result_files]
+    df = utils_analysis.process_rocpd_csv(pd.concat(frames, ignore_index=True))
 
     utils_analysis.add_unit_counter(df)
 
     if verbose >= 2:
-        console_debug(f"pmc_raw_data final_single_df {df.info}")
+        frame_info = io.StringIO()
+        df.info(buf=frame_info)
+        console_debug(f"pmc_raw_data final_single_df\n{frame_info.getvalue()}")
+    return df
+
+
+def _read_counter_results(result_file: Path) -> pd.DataFrame:
+    """Read one rocpd result artifact and check it carries counter rows."""
+    try:
+        df = pd.read_csv(result_file)
+    except pd.errors.EmptyDataError:
+        console_error(
+            "profiling",
+            f"No counter data in {result_file}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+        return pd.DataFrame()
+    except csv_compression.CORRUPT_CSV_ERRORS as error:
+        console_error(
+            "profiling",
+            f"{result_file} is truncated or corrupt: {error}\n"
+            "A profile run killed mid-write leaves this behind; "
+            "re-run 'rocprof-compute profile' to regenerate the "
+            "workload.",
+        )
+        return pd.DataFrame()
+
+    if df.empty:
+        console_error(
+            "profiling",
+            f"No counter data in {result_file}.\n"
+            "Please re-run 'rocprof-compute profile'.",
+        )
+
+    # The rocpd counter CSV is long: one row per counter per dispatch.
+    if not {"Counter_Name", "Counter_Value"}.issubset(df.columns):
+        console_error(
+            "analysis",
+            f"{result_file} is not in the supported rocpd format. "
+            "Please re-profile this workload with a current release.",
+        )
+
     return df
 
 

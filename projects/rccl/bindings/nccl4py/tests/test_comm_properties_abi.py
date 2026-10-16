@@ -83,6 +83,12 @@ class _NcclCommPropertiesRef(ctypes.Structure):
         int nLsaTeams;
         bool hostRmaSupport;
         ncclGinType_t railedGinType;
+        uint64_t commHash;
+        int ginMinStride;
+        ncclGinConnectionType_t ginConnectionType;
+        bool ginSupport[64];
+        size_t devCommRuntimeVersionSize;
+        bool cftSupport, cftMulticastSupport, cftCountedSupport;  // NCCL 2.32
     """
 
     _fields_ = [
@@ -99,6 +105,14 @@ class _NcclCommPropertiesRef(ctypes.Structure):
         ("nLsaTeams", ctypes.c_int),
         ("hostRmaSupport", ctypes.c_uint8),
         ("railedGinType", ctypes.c_int),  # ncclGinType_t
+        ("commHash", ctypes.c_uint64),
+        ("ginMinStride", ctypes.c_int),
+        ("ginConnectionType", ctypes.c_int),  # ncclGinConnectionType_t
+        ("ginSupport", ctypes.c_uint8 * 64),
+        ("devCommRuntimeVersionSize", ctypes.c_size_t),
+        ("cftSupport", ctypes.c_uint8),
+        ("cftMulticastSupport", ctypes.c_uint8),
+        ("cftCountedSupport", ctypes.c_uint8),
     ]
 
 
@@ -145,6 +159,14 @@ _FIELD_MAP = [
     ("nLsaTeams", "n_lsa_teams"),
     ("hostRmaSupport", "host_rma_support"),
     ("railedGinType", "railed_gin_type"),
+    ("commHash", "comm_hash"),
+    ("ginMinStride", "gin_min_stride"),
+    ("ginConnectionType", "gin_connection_type"),
+    ("ginSupport", "gin_support"),
+    ("devCommRuntimeVersionSize", "dev_comm_runtime_version_size"),
+    ("cftSupport", "cft_support"),
+    ("cftMulticastSupport", "cft_multicast_support"),
+    ("cftCountedSupport", "cft_counted_support"),
 ]
 
 
@@ -195,6 +217,14 @@ def test_comm_properties_from_buffer_round_trip(gin_type, railed_gin_type):
         nLsaTeams=42,
         hostRmaSupport=1,
         railedGinType=int(railed_gin_type),
+        commHash=0x123456789ABCDEF0,
+        ginMinStride=4,
+        ginConnectionType=1,
+        ginSupport=(ctypes.c_uint8 * 64)(*([0] * 63 + [1])),
+        devCommRuntimeVersionSize=512,
+        cftSupport=1,
+        cftMulticastSupport=0,
+        cftCountedSupport=1,
     )
 
     props = CommProperties.from_buffer(bytes(ref))
@@ -211,6 +241,14 @@ def test_comm_properties_from_buffer_round_trip(gin_type, railed_gin_type):
     assert props.n_lsa_teams == 42
     assert bool(props.host_rma_support) is True
     assert GinType(props.railed_gin_type) == railed_gin_type
+    assert props.comm_hash == 0x123456789ABCDEF0
+    assert props.gin_min_stride == 4
+    assert props.gin_connection_type == 1
+    assert props.gin_support[-1] == 1
+    assert props.dev_comm_runtime_version_size == 512
+    assert bool(props.cft_support) is True
+    assert bool(props.cft_multicast_support) is False
+    assert bool(props.cft_counted_support) is True
 
 
 def test_comm_properties_from_buffer_rejects_undersized_buffer():

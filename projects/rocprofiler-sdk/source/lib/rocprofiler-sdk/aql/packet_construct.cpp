@@ -23,8 +23,8 @@
 #include "lib/rocprofiler-sdk/aql/packet_construct.hpp"
 #include "lib/common/logging.hpp"
 #include "lib/rocprofiler-sdk/hsa/details/fmt.hpp"
+#include "lib/rocprofiler-sdk/kfd/resource.hpp"
 #include "lib/rocprofiler-sdk/spm/decode.hpp"
-#include "lib/rocprofiler-sdk/thread_trace/kfd_resource.hpp"
 
 #include <fmt/format.h>
 #include <hsa/hsa_ext_amd.h>
@@ -126,10 +126,10 @@ CounterPacketConstruct::construct_packet(const CoreApiTable& coreapi, const AmdE
 }
 
 ThreadTraceAQLPacketFactory::ThreadTraceAQLPacketFactory(
-    rocprofiler_agent_id_t                           agent_id,
-    const thread_trace_parameter_pack&               params,
-    std::shared_ptr<thread_trace::kfd_memory_pool_t> kfd_memory,
-    std::shared_ptr<thread_trace::kfd_copy_queue_t>  copy_queue)
+    rocprofiler_agent_id_t                  agent_id,
+    const thread_trace_parameter_pack&      params,
+    std::shared_ptr<kfd::kfd_memory_pool_t> kfd_memory,
+    std::shared_ptr<kfd::kfd_copy_queue_t>  copy_queue)
 {
     this->tracepool           = hsa::TraceMemoryPool{};
     this->tracepool.agent_id  = agent_id;
@@ -324,6 +324,11 @@ spm_construct_packet(const rocprofiler_agent_id_t                     agent_id,
                 params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, param.value});
                 params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
                                   AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK});
+                break;
+            case ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES:
+                params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL, param.value});
+                params.push_back({AQLPROFILE_SPM_PARAMETER_TYPE_SAMPLE_MODE,
+                                  AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK});
                 break;
             case ROCPROFILER_SPM_PARAMETER_TYPE_NONE:
             case ROCPROFILER_SPM_PARAMETER_TYPE_LAST:

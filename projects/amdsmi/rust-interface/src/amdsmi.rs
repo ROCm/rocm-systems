@@ -1422,9 +1422,9 @@ pub fn amdsmi_get_gpu_memory_reserved_pages(
 /// Retrieves the fan speed for a given GPU handle and sensor index.
 ///
 /// This function returns the fan speed for the specified GPU handle and sensor index. The fan speed
-/// is a value relative to the per-device maximum. For legacy hwmon GPUs the maximum is
-/// AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs interface, use
-/// `amdsmi_get_gpu_fan_speed_max()` to query the actual maximum.
+/// is the hwmon pwm1 duty cycle, whose maximum is AMDSMI_MAX_FAN_SPEED (255). On GPUs with the
+/// gpu_od sysfs interface, the range accepted by `amdsmi_set_gpu_fan_speed()` is the gpu_od
+/// OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -1482,8 +1482,9 @@ pub fn amdsmi_get_gpu_fan_speed(
 ///
 /// Given a processor handle `processor_handle` and a sensor index `sensor_ind`, this function returns
 /// the maximum fan speed for the specified GPU.
-/// For legacy hwmon GPUs this is AMDSMI_MAX_FAN_SPEED (255). For GPUs with the gpu_od sysfs
-/// interface, the maximum is read from the OD_RANGE (e.g. 100).
+/// This is the hwmon pwm1_max ceiling, AMDSMI_MAX_FAN_SPEED (255), and pairs with
+/// `amdsmi_get_gpu_fan_speed()`. On GPUs with the gpu_od sysfs interface, the range accepted by
+/// `amdsmi_set_gpu_fan_speed()` is the gpu_od OD_RANGE and is not derivable from this value.
 ///
 /// # Arguments
 ///
@@ -6221,6 +6222,43 @@ pub fn amdsmi_get_link_topology_nearest(
     ));
     let topology_nearest_info = unsafe { topology_nearest_info.assume_init() };
     Ok(topology_nearest_info)
+}
+
+/// Retrieve the unified link topology information between two processors.
+///
+/// # Baremetal notes
+///
+/// - Self pair: `INTERNAL`/`ENABLED`, zero weight and hops, `fb_sharing=1`.
+/// - Current successful calls report `ENABLED`; `UNKNOWN` to `DISABLED` is defensive.
+/// - Status provides host API parity, not link health or P2P access.
+/// - `num_hops` counts abstracted steps, capped at 255, not physical links.
+/// - For peers, `fb_sharing=0` means no P2P access or a failed P2P query.
+/// - Fields are queried sequentially, not atomically.
+///
+/// # Arguments
+///
+/// * `processor_handle_src` - A handle to the source processor.
+/// * `processor_handle_dst` - A handle to the destination processor.
+///
+/// # Returns
+///
+/// [`AmdsmiLinkTopologyT`] with weight, status, type, hops, and framebuffer sharing.
+///
+/// # Errors
+///
+/// Returns [`AmdsmiStatusT`] if the native query fails.
+pub fn amdsmi_get_link_topology(
+    processor_handle_src: AmdsmiProcessorHandle,
+    processor_handle_dst: AmdsmiProcessorHandle,
+) -> AmdsmiResult<AmdsmiLinkTopologyT> {
+    let mut topology_info = MaybeUninit::<AmdsmiLinkTopologyT>::uninit();
+    call_unsafe!(amdsmi_wrapper::amdsmi_get_link_topology(
+        processor_handle_src,
+        processor_handle_dst,
+        topology_info.as_mut_ptr()
+    ));
+    let topology_info = unsafe { topology_info.assume_init() };
+    Ok(topology_info)
 }
 
 /// A macro to get all the GPU processor handles directly.

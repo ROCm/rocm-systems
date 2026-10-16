@@ -16,6 +16,8 @@
 // fallback, and a repeated-flush burst.
 
 #include "NetIbMPITestBase.hpp"
+#include "NetIbFaultInject.hpp"
+#include "rocmwrap.h"
 
 #include <hsa/hsa_ext_amd.h>
 
@@ -28,6 +30,9 @@ protected:
     // NCCL_CUMEM_ENABLE=1 makes the flush scratchpad dma-buf-backed (the path
     // that used to fault). Absent/0 selects the legacy peermem reg_mr path.
     static bool cuMemEnabledEnv() {
+        // Honor the effective library gate, not just the env var. Forcing
+        // NCCL_CUMEM_ENABLE=1 on a kernel without dma-buf still disables cuMem.
+        if (!ncclCuMemEnable()) return false;
         const char* v = getenv("NCCL_CUMEM_ENABLE");
         return v && atoi(v) != 0;
     }
@@ -88,7 +93,7 @@ protected:
 
         ConnectionPair pair;
         NetConnectionGuard connGuard(net_);
-        SetupConnectionWithGuard(0, pair, connGuard);
+        ASSERT_NO_FATAL_FAILURE(SetupConnectionWithGuard(0, pair, connGuard));
 
         const size_t bufferSize = kSmallBufferSize;
         void* buffer = nullptr;
@@ -154,14 +159,15 @@ protected:
 // dma-buf (cuMem/UBR) scratchpad: the write+read flush must complete cleanly with
 // correct data.
 TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     if (!cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=1 (dma-buf scratchpad path)";
     AssertInitAndGetDevices(nullptr);
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "write+read flush over dma-buf scratchpad must not fault";
 }
@@ -169,15 +175,16 @@ TEST_F(GdrFlushTest, CuMemDmaBuf_GpuRecvFlush_NoAsyncFatal) {
 // Legacy peermem (ibv_reg_mr) scratchpad. Confirms Option 2a keeps the peermem
 // RO=0 read path working (never regressed).
 TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     if (cuMemEnabledEnv()) GTEST_SKIP() << "Requires NCCL_CUMEM_ENABLE=0 (peermem scratchpad path)";
     AssertInitAndGetDevices(nullptr);
     if (!(gdrPtrSupport() & NCCL_PTR_CUDA))
         GTEST_SKIP() << "peermem (NCCL_PTR_CUDA) not available for the reg_mr scratchpad";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "peermem RO=0 scratchpad flush must succeed";
 }
@@ -185,15 +192,16 @@ TEST_F(GdrFlushTest, Peermem_GpuRecvFlush_NoAsyncFatal) {
 // Feature disabled: ncclIbIflush falls back to reading the received buffer
 // directly (upstream-NCCL behaviour). Exercises the else branch.
 TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     if (scratchpadFlushEnabled())
         GTEST_SKIP() << "Requires RCCL_GDR_FLUSH_GPU_MEM_NO_RELAXED_ORDERING=0 (fallback path)";
     AssertInitAndGetDevices(nullptr);
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/4, /*verifyData=*/true,
+                                              &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "fallback flush (read recv buffer) must succeed";
 }
@@ -201,16 +209,24 @@ TEST_F(GdrFlushTest, FeatureDisabled_FallbackReadRecvBuffer) {
 // Repeated-flush burst. An intermittent async-fatal would surface as a
 // non-success flush on some iteration; the whole burst must stay clean.
 TEST_F(GdrFlushTest, RepeatedFlush_NoFaultBurst) {
-    ASSERT_TRUE(validateTestPrerequisites(kExactTwoProcesses, kExactTwoProcesses,
-                                          false, kMinGpusPerNode, kNoNodeLimit));
+    SKIP_UNLESS_MPI_PREREQS(kExactTwoProcesses, kExactTwoProcesses,
+                                          false, kMinGpusPerNode, kNoNodeLimit);
     AssertInitAndGetDevices(nullptr);
     if (!gdrPtrSupport()) GTEST_SKIP() << "no GDR backend (neither peermem nor dma-buf) on this device";
 
     ncclResult_t flush = ncclSuccess;
-    RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false, &flush);
+    ASSERT_NO_FATAL_FAILURE(RunRecvFlushBurst(/*iterations=*/50, /*verifyData=*/false,
+                                              &flush));
     if (MPIEnvironment::world_rank == 0)
         EXPECT_EQ(flush, ncclSuccess) << "no flush in the burst may raise a QP async-fatal";
 }
+
+// The NCCL v2.31.2-1 sync added ForcedScratchpadWrite_ReproducesFault: force the
+// removed scratchpad RDMA_WRITE on a dma-buf flush QP and expect the flush to
+// fault. That case never compiled: gdrSupported() does not exist, and
+// RunRecvFlushBurst has no forceWrite parameter. If a production forceWrite
+// hook is added, restore the case (skip with gdrPtrSupport(), three-arg burst
+// ForcedScratchpadWrite_ReproducesFault removed: forcing the flush fault needs a production hook that does not exist.
 
 }  // namespace
 

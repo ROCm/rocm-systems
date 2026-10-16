@@ -10,6 +10,7 @@
 #include <cstdlib>
 #include <fstream>
 #include <iterator>
+#include <stdexcept>
 #include <string>
 
 #ifndef PLUGIN_LOADER_FIXTURE_DIR
@@ -65,6 +66,64 @@ TEST_F(PluginLoaderTest, RejectsMissingRequiredExport) {
   EXPECT_EQ(load("missing", group), 0);
   EXPECT_TRUE(group.empty());
   EXPECT_EQ(trace().find("missing:create\n"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, PluginFailuresRemainBestEffortByDefault) {
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(R"({"plugins":{"missing":{}}})",
+                                                              PLUGIN_LOADER_FIXTURE_DIR);
+
+  EXPECT_TRUE(group->empty());
+}
+
+TEST_F(PluginLoaderTest, RequiredMissingPluginThrows) {
+  EXPECT_THROW(
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"require_all_plugins":true,"plugins":{"missing":{}}})", PLUGIN_LOADER_FIXTURE_DIR),
+      std::runtime_error);
+}
+
+TEST_F(PluginLoaderTest, RequiredPluginLoads) {
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(
+      R"({"require_all_plugins":true,"plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR);
+
+  ASSERT_EQ(group->num_plugins(), 1u);
+  EXPECT_NE(trace().find("good:create\n"), std::string::npos);
+}
+
+TEST_F(PluginLoaderTest, RequiringAllPluginsAllowsNoPlugins) {
+  auto group = rocjitsu::PluginLoader::configure_plugin_group(R"({"require_all_plugins":true})",
+                                                              PLUGIN_LOADER_FIXTURE_DIR);
+
+  EXPECT_TRUE(group->empty());
+}
+
+TEST_F(PluginLoaderTest, RequiringAllPluginsRejectsNonObjectPlugins) {
+  for (const char *plugins : {"[]", "null", R"("good")"}) {
+    SCOPED_TRACE(plugins);
+    const std::string config =
+        std::string{"{\"require_all_plugins\":true,\"plugins\":"} + plugins + "}";
+
+    EXPECT_THROW(rocjitsu::PluginLoader::configure_plugin_group(config, PLUGIN_LOADER_FIXTURE_DIR),
+                 std::invalid_argument);
+  }
+}
+
+TEST_F(PluginLoaderTest, BestEffortLoadingIgnoresNonObjectPlugins) {
+  for (const char *plugins : {"[]", "null", R"("good")"}) {
+    SCOPED_TRACE(plugins);
+    const std::string config = std::string{"{\"plugins\":"} + plugins + "}";
+
+    auto group = rocjitsu::PluginLoader::configure_plugin_group(config, PLUGIN_LOADER_FIXTURE_DIR);
+    EXPECT_TRUE(group->empty());
+  }
+}
+
+TEST_F(PluginLoaderTest, RejectsNonBooleanRequireAllPlugins) {
+  EXPECT_THROW(
+      rocjitsu::PluginLoader::configure_plugin_group(
+          R"({"require_all_plugins":"true","plugins":{"good":{}}})", PLUGIN_LOADER_FIXTURE_DIR),
+      std::invalid_argument);
+  EXPECT_EQ(trace().find("good:create\n"), std::string::npos);
 }
 
 TEST_F(PluginLoaderTest, DestroysRejectedDuplicateBeforeUnload) {

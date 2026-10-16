@@ -33,10 +33,16 @@ struct info_type : info_type_base
     bool operator!=(const info_type& rhs) const { return !(*this == rhs); }
     bool operator==(const info_type& rhs) const
     {
-        if(info().size() != rhs.info().size()) return false;
+        if(info().size() != rhs.info().size())
+        {
+            return false;
+        }
         for(size_t i = 0; i < info().size(); ++i)
         {
-            if(info().at(i) != rhs.info().at(i)) return false;
+            if(info().at(i) != rhs.info().at(i))
+            {
+                return false;
+            }
         }
         return name() == rhs.name() && is_available() == rhs.is_available();
     }

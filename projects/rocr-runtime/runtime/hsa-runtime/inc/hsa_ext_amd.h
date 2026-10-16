@@ -84,9 +84,12 @@
  * - 1.30 - hsa_amd_queue_get_info: engine type and SDMA engine ID
  * - 1.31 - hsa_amd_queue_get_info: queue read/write pointer addresses
  * - 1.32 - hsa_amd_svm_discard_and_prefetch_batch_async
+ * - 1.33 - hsa_amd_agent_set_attribute: GL2 persisting cache size control
+ * - 1.34 - hsa_amd_vmem_get_vmem_info
+ * - 1.35 - tools-only: hsa_amd_enable_high_precision_timestamps
  */
 #define HSA_AMD_INTERFACE_VERSION_MAJOR 1
-#define HSA_AMD_INTERFACE_VERSION_MINOR 32
+#define HSA_AMD_INTERFACE_VERSION_MINOR 35
 
 #ifdef __cplusplus
 extern "C" {
@@ -135,6 +138,12 @@ typedef enum {
    * dependency signal, and additional performance-oriented features.
    */
   HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH = 3,
+
+  /**
+   * Extended kernel dispatch packet with launch descriptor support.
+   * Supports clusters, launch descriptor for advanced scheduling, and L2 prefetch.
+   */
+  HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD = 4,
 
   /* Reserved for a packet that is not yet released */
   HSA_AMD_PACKET_TYPE_RESERVED200 = 200,
@@ -423,10 +432,13 @@ typedef struct hsa_amd_ext_kernel_dispatch_packet_s {
    *     and is interpreted as a satisfied dependency.
    *
    * Format 4 (HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD):
-   *   - launch_descriptor: Opaque handle to amd_launch_descriptor_t
+   *   - launch_descriptor: Opaque handle to launch descriptor configuration
    *     providing advanced scheduling control (CU enable, wave limiter,
    *     L2 prefetch, etc.). A handle value of 0 indicates no launch descriptor
    *     is used. Dependencies must be handled via barrier packets.
+   *
+   *     The handle's internal value (handle.handle) is a pointer to the
+   *     52-byte amd_launch_descriptor_data_t structure that FW reads directly.
    */
   union {
     hsa_signal_t dep_signal;                      // Format 3: signal-based dependency
@@ -560,10 +572,11 @@ typedef struct hsa_amd_metadata_kernel_dispatch_packet_s {
      */
     uint8_t reserved1[52];
     /**
-     * Launch descriptor. Overlays the former reserved1[52] area.
+     * Launch descriptor data. Overlays the former reserved1[52] area.
      * Zero-initialised means version=0 (NONE) — CP treats as "no descriptor".
+     * This is the 52-byte hardware structure, not an opaque handle.
      */
-    amd_launch_descriptor_t launch_descriptor;
+    amd_launch_descriptor_data_t launch_descriptor;
   };
 } hsa_amd_metadata_kernel_dispatch_packet_t;
 
@@ -1000,6 +1013,18 @@ typedef enum hsa_amd_agent_info_s {
    * Use HSA_AMD_SYSTEM_INFO_HOST_ALLOC_DMA_BUF_SUPPORTED instead.
    */
   HSA_AMD_AGENT_INFO_HOST_ALLOC_DMABUF_SUPPORTED = 0xA124,
+  /**
+   * Returns the last value set by
+   * HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE, default 0.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_INFO_REQUEST_PERSISTING_L2_CACHE_SIZE = 0xA125,
+  /**
+   * Returns the maximum supported persisting L2 cache size on this HW in bytes.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_INFO_MAX_PERSISTING_L2_CACHE_SIZE = 0xA126
+
 } hsa_amd_agent_info_t;
 
 /**
@@ -1968,18 +1993,22 @@ typedef enum hsa_amd_memory_pool_flag_s {
    * Allocates fine grain memory type where memory ordering is per point to point
    * connection. Atomic memory operations on these memory buffers are not
    * guaranteed to be visible at system scope.
+   * Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_PCIE_FLAG = (1 << 0),
   /**
-   *  Allocates physically contiguous memory
+   *  Allocates physically contiguous memory.
+   *  Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG = (1 << 1),
   /**
-   *  Allocates executable memory
+   *  Allocates executable memory.
+   *  Honored by ::hsa_amd_memory_pool_allocate and ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG = (1 << 2),
   /**
-   *  Allocates uncached memory
+   *  Allocates uncached memory. Honored by ::hsa_amd_memory_pool_allocate and
+   *  ::hsa_amd_vmem_handle_create.
    */
   HSA_AMD_MEMORY_POOL_UNCACHED_FLAG = (1 << 3),
 } hsa_amd_memory_pool_flag_t;
@@ -4388,6 +4417,25 @@ hsa_status_t hsa_amd_spm_set_dest_buffer(hsa_agent_t preferred_agent, size_t siz
                                          uint32_t* timeout, uint32_t* size_copied, void* dest,
                                          bool* is_data_loss);
 
+
+/** @} */
+
+/** \addtogroup hsa agent attribute
+ *  @{
+ */
+typedef enum hsa_amd_agent_attribute_s {
+  /**
+   * Requested persisting L2 cache size in bytes.
+   * The type of this attribute is size_t.
+   */
+  HSA_AMD_AGENT_ATTRIBUTE_REQUEST_PERSISTING_L2_CACHE_SIZE,
+
+} hsa_amd_agent_attribute_t;
+
+hsa_status_t HSA_API hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                                 hsa_amd_agent_attribute_t attribute,
+                                                 void* value);
+
 /** @} */
 
 /** \addtogroup memory Memory
@@ -4607,7 +4655,10 @@ typedef enum {
  * @param[in] pool memory to use.
  * @param[in] size of the memory allocation
  * @param[in] type of memory
- * @param[in] flags - currently unsupported
+ * @param[in] flags A bit-field of ::hsa_amd_memory_pool_flag_t allocation
+ * directives. ::HSA_AMD_MEMORY_POOL_PCIE_FLAG,
+ * ::HSA_AMD_MEMORY_POOL_CONTIGUOUS_FLAG, ::HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG,
+ * and ::HSA_AMD_MEMORY_POOL_UNCACHED_FLAG are honored.
  * @param[out] memory_handle - handle for the allocation
  *
  * @retval ::HSA_STATUS_SUCCESS memory allocated successfully
@@ -4800,6 +4851,14 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memor
  *
  * Returns the allocation properties of an existing handle
  *
+ * For a handle obtained from ::hsa_amd_vmem_import_shareable_handle, the
+ * returned pool identifies placement class only -- host versus device -- and is
+ * not the pool the exporting process allocated from. A shareable handle carries
+ * neither a NUMA node nor an allocation grain, so a host-resident import names
+ * the canonical fine-grained system region regardless of the node or grain of
+ * the original allocation. Consumers must not treat the returned pool as the
+ * source pool, and must not infer NUMA placement from it.
+ *
  * @param[in] memory_handle memory handle to be queried
  * @param[out] pool memory pool that owns this handle
  * @param[out] memory type
@@ -4811,6 +4870,64 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* memor
 hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(
     hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_memory_pool_t* pool,
     hsa_amd_memory_type_t* type);
+
+/**
+ * @brief Information about a virtual memory allocation handle.
+ *
+ * Within a ROCr major version this structure can only grow: members are
+ * appended, never reordered or resized. @p size lets ROCr fill only the members
+ * present in the layout the caller was compiled against, so a newer ROCr stays
+ * compatible with an older caller and vice versa.
+ */
+typedef struct hsa_amd_vmem_handle_info_s {
+  /**
+   * Size of this structure in bytes, as compiled by the caller. Must be set to
+   * sizeof(hsa_amd_vmem_handle_info_t) prior to the call. ROCr writes only the
+   * members that fit within this many bytes and leaves the rest untouched. If
+   * ROCr supports an older version of this structure then size will be smaller
+   * on return; members starting after the returned size are not updated.
+   */
+  size_t size;
+  /**
+   * Size of the allocation in bytes.
+   */
+  size_t alloc_size;
+  /**
+   * Agent on which the allocation resides: a CPU agent for host-resident
+   * memory, the owning GPU agent for device-resident memory. For an imported
+   * handle this identifies placement class only -- see the NUMA and grain
+   * caveats on ::hsa_amd_vmem_get_alloc_properties_from_handle.
+   */
+  hsa_agent_t agent;
+} hsa_amd_vmem_handle_info_t;
+
+/**
+ * @brief Returns information about an allocation handle
+ *
+ * Supports handles created locally by ::hsa_amd_vmem_handle_create, and handles
+ * from ::hsa_amd_vmem_import_shareable_handle whose placement and size the
+ * kernel driver was able to describe.
+ *
+ * An imported handle whose properties could not be recovered -- a fabric handle
+ * from ::hsa_amd_vmem_import_fabric_handle, a POSIX dma-buf on a kernel without
+ * GET_DMABUF_INFO support, or a thunk lacking the query -- reports
+ * ::HSA_STATUS_ERROR_INVALID_ALLOCATION rather than succeeding with a zero
+ * size, so callers can distinguish an unrecoverable handle from a genuinely
+ * empty allocation.
+ *
+ * @param[in] memory_handle memory handle to be queried
+ * @param[in,out] info handle information, with @p info->size set by the caller
+ *
+ * @retval ::HSA_STATUS_SUCCESS
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ARGUMENT @p info is NULL, or @p info->size
+ * is too small to hold any member
+ *
+ * @retval ::HSA_STATUS_ERROR_INVALID_ALLOCATION Invalid memory_handle, or an
+ * imported handle whose properties could not be recovered
+ */
+hsa_status_t hsa_amd_vmem_get_vmem_info(
+    hsa_amd_vmem_alloc_handle_t memory_handle, hsa_amd_vmem_handle_info_t* info);
 
 /**
  * @brief 128-bit globally unique identifier for a ROCr shared memory

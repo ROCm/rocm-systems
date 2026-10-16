@@ -33,8 +33,8 @@ prepare_on_this_thread(rocprofsys::track_registry* tracks, int pid)
 {
     rocprofsys::set_active_track_registry(tracks);
     rocprofsys::core::set_emitting_pid(pid);
-    return { rocprofsys::get_active_track_registry(),
-             rocprofsys::core::get_emitting_pid() };
+    return { .registry     = rocprofsys::get_active_track_registry(),
+             .emitting_pid = rocprofsys::core::get_emitting_pid() };
 }
 }  // namespace
 

@@ -290,6 +290,11 @@ hsa_status_t hsa_amd_queue_create(hsa_agent_t agent,
                                   uint32_t num_descs);
 
 // Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_agent_set_attribute(hsa_agent_t agent,
+                                         hsa_amd_agent_attribute_t attribute,
+                                         void* value);
+
+// Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_register_deallocation_callback(
     void* ptr, hsa_amd_deallocation_callback_t callback, void* user_data);
 
@@ -388,6 +393,10 @@ hsa_status_t hsa_amd_vmem_retain_alloc_handle(hsa_amd_vmem_alloc_handle_t* alloc
 hsa_status_t hsa_amd_vmem_get_alloc_properties_from_handle(hsa_amd_vmem_alloc_handle_t allocHandle,
                                                            hsa_amd_memory_pool_t* pool,
                                                            hsa_amd_memory_type_t* type);
+
+// Mirrors Amd Extension Apis
+hsa_status_t hsa_amd_vmem_get_vmem_info(hsa_amd_vmem_alloc_handle_t allocHandle,
+                                        hsa_amd_vmem_handle_info_t* info);
 
 // Mirrors Amd Extension Apis
 hsa_status_t hsa_amd_vmem_export_fabric_handle(hsa_fabric_handle_t *fabric_handle,

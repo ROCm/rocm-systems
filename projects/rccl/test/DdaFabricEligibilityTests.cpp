@@ -7,12 +7,16 @@
 #include "common/DdaFabricTestHelpers.hpp"
 
 #include "algorithms/dda/device/CollCommon_ll128.h"
+#include "param.h"
 #include "algorithms/dda/all_gather/dda_all_gather.h"
 #include "algorithms/dda/all_reduce/dda_all_reduce.h"
 #include "algorithms/dda/alltoall/dda_alltoall.h"
 #include "algorithms/dda/reduce_scatter/dda_reduce_scatter.h"
+#include "algorithms/dda/reduce_scatter/reduce_scatter_dda_fabric_ll.h"
 #include "algorithms/dda/fabric/fabric_gpu_barrier.h"
+#include "graph.h"
 #include "gtest/gtest.h"
+#include "rccl_common.h"
 
 namespace RcclUnitTesting
 {
@@ -24,6 +28,129 @@ protected:
     void*             sendbuff_{reinterpret_cast<void*>(0x1000)};
     void*             recvbuff_{reinterpret_cast<void*>(0x2000)};
 };
+
+// LL128 eligibility tests: skip when RCCL_DDA_LL is disabled.
+// LL128 paths are gated by rcclParamDdaLL() (not rcclParamDdaLL128()).
+class DdaFabricLL128EligibilityTest : public DdaFabricEligibilityTest
+{
+protected:
+    void SetUp() override
+    {
+        DdaFabricEligibilityTest::SetUp();
+        if (!rcclParamDdaLL())
+            GTEST_SKIP() << "LL disabled (RCCL_DDA_LL=0); set RCCL_DDA_LL=1 to run";
+    }
+};
+
+// ---------------------------------------------------------------------------
+// Fabric block cap
+// ---------------------------------------------------------------------------
+
+TEST(DdaFabricMaxBlocksTest, Uses96CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, nullptr), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, Uses128CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(128, nullptr), 128);
+}
+
+TEST(DdaFabricMaxBlocksTest, Uses192CuDefault)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(192, nullptr), 192);
+}
+
+TEST(DdaFabricMaxBlocksTest, ClampsCuCountToHardLimit)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(512, nullptr), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, InvalidCuCountUsesOneBlock)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(0, nullptr), 1);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(-1, nullptr), 1);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideCanLowerCuCap)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(192, "96"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideCannotExceedCuCap)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "192"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, ZeroOverrideUsesOneBlock)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "0", &parsed), 1);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, 0);
+}
+
+TEST(DdaFabricMaxBlocksTest, MinimumValidCuCount)
+{
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(1, nullptr), 1);
+}
+
+TEST(DdaFabricMaxBlocksTest, ExactHardLimitCuCount)
+{
+    // cuCount exactly at DDA_FABRIC_MAXBLOCKS (256) should not be clamped
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(256, nullptr), 256);
+    // cuCount at 257 should clamp to 256
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(257, nullptr), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, OverrideAboveHardLimitIgnored)
+{
+    // Override "512" with cuCount=256 should still cap at 256 (cuCount)
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(256, "512"), 256);
+}
+
+TEST(DdaFabricMaxBlocksTest, InvalidOverrideIgnored)
+{
+    // Non-numeric override should be ignored, using cuCount-derived cap
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "garbage"), 96);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, ""), 96);
+    // "12abc" has trailing non-numeric chars, so it's rejected as invalid
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "12abc"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, NegativeOverrideUsesOneBlock)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "-5", &parsed), 1);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, -5);
+}
+
+TEST(DdaFabricMaxBlocksTest, LargeOverrideDoesNotOverflow)
+{
+    // Values beyond INT_MAX should not overflow and incorrectly lower maxBlocks
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "3000000000"), 96);
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "9999999999"), 96);
+}
+
+TEST(DdaFabricMaxBlocksTest, ReportsParsedOverride)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "48", &parsed), 48);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_TRUE(parsed.valid);
+    EXPECT_EQ(parsed.requested, 48);
+}
+
+TEST(DdaFabricMaxBlocksTest, ReportsInvalidOverride)
+{
+    nccl_dda_detail::DdaFabricMaxBlocksOverride parsed;
+    EXPECT_EQ(nccl_dda_detail::ddaFabricMaxNBlocksForScratch(96, "96 ", &parsed), 96);
+    EXPECT_TRUE(parsed.specified);
+    EXPECT_FALSE(parsed.valid);
+}
 
 // ---------------------------------------------------------------------------
 // Scratch sizing
@@ -85,9 +212,9 @@ TEST(DdaFabricScratchSizingTest, LL128FloorDominatesWhenLargerThanSimpleCap)
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
 }
 
-// AllGather LL128 gates on RCCL_DDA_LL, not RCCL_DDA_LL128, so the LL128 floor
-// has to apply with only the LL flag set. Two ranks keeps the LL floor at 64 MiB
-// so the threshold-derived floor is what shows through.
+// Scratch sizing arms the LL128 floor when either LL or LL128 is enabled (for
+// backwards compatibility), so the floor applies with only the LL flag set.
+// Two ranks keeps the LL floor at 64 MiB so the threshold-derived floor shows.
 TEST(DdaFabricScratchSizingTest, LL128FloorArmedByLLFlagAlone)
 {
     constexpr int nRanks = 2;
@@ -137,6 +264,41 @@ TEST(DdaFabricScratchSizingTest, LL128FloorDominatesAtHighRankCount)
         nccl_dda_detail::kDdaLL128WireBytesPerSlice;
     EXPECT_EQ(sizing, ll128Floor);
     EXPECT_GT(sizing, (size_t)smallSimpleCap);
+}
+
+TEST(DdaFabricScratchSizingTest, PayloadCapTakesMaxAcrossDdaAndCeScratchTables)
+{
+    rcclArchThresholds table{};
+    table.ddaVmmMax[ncclFuncAllReduce] = 16ULL * 1024 * 1024;
+    table.ddaLL128Max[ncclFuncAllReduce] = 32ULL * 1024 * 1024;
+    table.ceNonRegMax[ncclFuncAllGather] = 32ULL * 1024 * 1024;
+    table.ddaVmmMaxGraph[ncclFuncAllReduce] = 256ULL * 1024 * 1024;
+    table.ddaLLMax[ncclFuncReduceScatter] = 1ULL * 1024 * 1024;
+
+    DdaFabricMockComm mock;
+    mock.comm.nRanks = 4;
+    mock.comm.archThresholds = &table;
+
+    // Graph VMM (256 MiB) dominates LL128/CE-Scratch (32 MiB) and RS LL
+    // (1 MiB/rank * 4 = 4 MiB). AR-only VMM (16 MiB) must not win.
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 256ULL * 1024 * 1024);
+
+    table.ddaVmmMaxGraph[ncclFuncAllReduce] = 0;
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), 32ULL * 1024 * 1024);
+}
+
+TEST(DdaFabricScratchSizingTest, PayloadCapUsesPreTableDefaultsWhenNoArchTable)
+{
+    DdaFabricMockComm mock;
+    mock.comm.nRanks = 8;
+    mock.comm.archThresholds = nullptr;
+    mock.comm.archName = nullptr;
+    // Matches rcclDdaVmmThreshold() with a null table (128 MiB dominates
+    // the 32 KiB / 32 MiB LL defaults).
+    EXPECT_EQ(rcclDdaScratchPayloadCap(mock.get()), kDdaVmmBaseDefault);
+    EXPECT_EQ(rcclDdaVmmThreshold(mock.get(), ncclFuncAllReduce), kDdaVmmBaseDefault);
+    EXPECT_EQ(rcclDdaLLThreshold(mock.get(), ncclFuncAllReduce), kDdaLLBaseDefault);
+    EXPECT_EQ(rcclDdaLL128Threshold(mock.get(), ncclFuncAllReduce), kDdaLL128BaseDefault);
 }
 
 // ---------------------------------------------------------------------------
@@ -242,7 +404,7 @@ TEST_F(DdaFabricEligibilityTest, AllToAll_DerivedScratchRejectsOversizedMessage)
 
 // LL128 AllReduce uses compact layout (scratch scales with message size).
 // Small message needs less scratch than the fixed floor.
-TEST_F(DdaFabricEligibilityTest, AllReduce_LL128CompactLayoutSmallMessageFits)
+TEST_F(DdaFabricLL128EligibilityTest, AllReduce_LL128CompactLayoutSmallMessageFits)
 {
     // Give scratch smaller than LL128 fixed floor but enough for a small message.
     // LL128 floor at 8 ranks = 2 * 8 * 4370 * 128 = ~8.5 MiB.
@@ -701,9 +863,9 @@ TEST_F(DdaFabricEligibilityTest, AllReduce_InvalidDatatypeDispatch)
 // size, with one-shot tested first.
 //
 // These run under the default parameter values -- DDA_LL=1, a 1 MiB
-// DDA_LL_ONESHOT_THRESHOLD and a 16 MiB DDA_LL_TWOSHOT_THRESHOLD -- so sizes
-// above 1 MiB and up to 16 MiB are claimed by the two-shot tier, which is what
-// makes the tier split observable from here. They deliberately do not setenv:
+// DDA_LL_ONESHOT_THRESHOLD and a 2 MiB DDA_LL_TWOSHOT_THRESHOLD, which gfx1250
+// raises to nRanks x 1 MiB from 8 ranks -- so sizes above 1 MiB are claimed by
+// the two-shot tier, which is what makes the tier split observable from here. They deliberately do not setenv:
 // RCCL_PARAM caches on first read, and the NCCL_NO_CACHE opt-out is resolved once
 // per process, so a test that changed a threshold would depend on being the first
 // in the binary to touch it. Two guards stay out of reach as a result:
@@ -849,9 +1011,10 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_TwoShotClaimsPastOneShotThreshold)
 }
 
 // 524288 floats is exactly the default 2 MiB DDA_LL_TWOSHOT_THRESHOLD, the top
-// of the LL range, which the tier takes with <=.
+// of the LL range on a comm below gfx1250's rank-scaled range, which the tier takes with <=.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtTwoShotThresholdEligible)
 {
+    mockComm_.comm.nRanks = 4;
     EXPECT_TRUE(ncclAllReduceDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 524288, ncclFloat32, ncclSum));
 }
@@ -859,10 +1022,29 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL_AtTwoShotThresholdEligible)
 // 128 bytes past the two-shot threshold: neither LL tier claims it and the message
 // falls through to LL128 / Simple. The count stays a multiple of 16 * nRanks so
 // the rejection is attributable to the threshold and not to the shard shape rules.
+// Four ranks: below gfx1250's rank-scaled range, so the 2 MiB env default applies.
 TEST_F(DdaFabricEligibilityTest, AllReduceLL_PastBothThresholds)
 {
+    mockComm_.comm.nRanks = 4;
+    // DDA_LL_TWOSHOT_THRESHOLD default 2 MiB; use 524320 float32 (~2.1 MiB)
+    // so both one-shot (1 MiB) and two-shot (2 MiB) limits are exceeded.
     EXPECT_FALSE(ncclAllReduceDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, 524320, ncclFloat32, ncclSum));
+}
+
+// From 8 ranks, gfx1250 scales the AllReduce LL tier with the comm (ddaLLMaxPerRank,
+// 1 MiB per rank), and two-shot runs to that cap: 8 MiB at 8 ranks, 16 MiB at 16.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL_TwoShotScalesWithRanks)
+{
+    for (int nRanks : {8, 16})
+    {
+        mockComm_.comm.nRanks = nRanks;
+        const size_t capFloats = static_cast<size_t>(nRanks) * 262144; // nRanks x 1 MiB
+        EXPECT_TRUE(ddaLLArTwoShotEligible(
+            mockComm_.get(), sendbuff_, recvbuff_, capFloats, ncclFloat32, ncclSum)) << nRanks;
+        EXPECT_FALSE(ddaLLArTwoShotEligible(
+            mockComm_.get(), sendbuff_, recvbuff_, capFloats + 4 * nRanks, ncclFloat32, ncclSum)) << nRanks;
+    }
 }
 
 // The gate above only reports the disjunction of the two tiers. These call each
@@ -1057,6 +1239,56 @@ TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_HalvedSlotStillReachesFur
         mockComm_.get(), sendbuff_, recvbuff_, count, ncclFloat32, ncclSum));
 }
 
+// ncclAllReduceDdaFabricLL128Eligible threshold tests: at-cap and past-cap.
+// These call the shape-eligibility function directly, which applies the one-shot and
+// two-shot ceilings but not the tier's ddaLL128Max. 32 MiB was gfx1250's
+// ddaLL128Max[AllReduce] when these were written; the probe size is kept as an
+// in-range point.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128_AtCapEligible)
+{
+    // 32 MiB / 4 bytes = 8388608 float32
+    EXPECT_TRUE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8388608, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128_PastCapRejected)
+{
+    // 8388610 * 4 = 33554440 bytes = 32 MiB + 8 bytes; %8 == 0
+    EXPECT_FALSE(ncclAllReduceDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8388610, ncclFloat32, ncclSum));
+}
+
+// gfx1250's two-shot runs to its AllReduce LL128 tier cap, 256 MiB; gfx950 has no
+// LL128 tier and keeps RCCL_DDA_LL128_TWOSHOT_THRESHOLD's 64 MiB default. The fixture's
+// scratch never limits the shard, so only the ceiling can reject. The cap + 128 bytes
+// still leaves a 16-byte-aligned shard at 8 ranks, so the shard rule does not reject it.
+TEST_F(DdaFabricEligibilityTest, AllReduceLL128TwoShot_CeilingFromArchTable)
+{
+    mockComm_.comm.nRanks = 8;
+    EXPECT_TRUE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 67108864, ncclFloat32, ncclSum));
+    EXPECT_FALSE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 67108896, ncclFloat32, ncclSum));
+
+    mockComm_.comm.archName = const_cast<char*>("gfx950");
+    EXPECT_TRUE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 16777216, ncclFloat32, ncclSum));
+    EXPECT_FALSE(ddaLL128ArTwoShotEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 16777248, ncclFloat32, ncclSum));
+}
+
+// The VMM AllReduce launch uses the rank-scaled block count: 128 blocks at 8 ranks and
+// 64 at 32 for a message large enough to fill every block, from a 256-block init cap.
+TEST_F(DdaFabricEligibilityTest, AllReduceVmm_BlocksFollowRankBudget)
+{
+    const size_t count = 64u * 1024u * 1024u;  // 256 MiB of float32
+    ASSERT_GE(mockComm_.comm.ddaFabricMaxBlocks, 128);
+    mockComm_.comm.nRanks = 8;
+    EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mockComm_.get(), count, ncclFloat32), 128u);
+    mockComm_.comm.nRanks = 32;
+    EXPECT_EQ(ncclAllReduceDdaFabricBlocks(mockComm_.get(), count, ncclFloat32), 64u);
+}
+
 // ---------------------------------------------------------------------------
 // AllToAll
 // ---------------------------------------------------------------------------
@@ -1160,6 +1392,198 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)
                                          mockComm_.get(),
                                          nullptr),
               ncclInvalidArgument);
+}
+
+// ---------------------------------------------------------------------------
+// AllGather LL128
+// ---------------------------------------------------------------------------
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_EligibleFloat32)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_EligibleFloat16)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclFloat16));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_EligibleBfloat16)
+{
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 8, ncclBfloat16));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnsupportedDatatype)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclInt32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_NullComm)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        nullptr, sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_MissingBootstrap)
+{
+    mockComm_.comm.bootstrap = nullptr;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_MissingFabricResources)
+{
+    mockComm_.setFabricResourcesPresent(false);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+// The kernel derives its flag from a per-block epoch cell, so the path is only
+// reachable once fabric init has allocated the array.
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_MissingEpochCells)
+{
+    mockComm_.comm.ddaLLEpochDev = nullptr;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_EmptyEpochArray)
+{
+    mockComm_.comm.ddaLLEpochLen = 0;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_ZeroCount)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 0, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_TooFewRanks)
+{
+    mockComm_.comm.nRanks = 1;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_TooManyRanks)
+{
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks + 1;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_MaxRanksEligible)
+{
+    mockComm_.comm.nRanks = dda::common::kDdaMaxNranks;
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+// 3 floats is 12B, so the per-rank payload is not a whole number of 16B chunks.
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedCount)
+{
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 3, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedSendbuff)
+{
+    void* unaligned = reinterpret_cast<void*>(0x1008);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), unaligned, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_UnalignedRecvbuff)
+{
+    void* unaligned = reinterpret_cast<void*>(0x2008);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, unaligned, 4, ncclFloat32));
+}
+
+// The cap is derived from the scratch rather than fixed, so shrinking the
+// allocation to 1 MiB still leaves a 32-slice slot that a small message fits in.
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotWithSmallScratch)
+{
+    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;  // 32 slices at 8 ranks
+    ASSERT_GT(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes),
+              4u * sizeof(float));
+    EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+// One 16B chunk past the cap: still alignment-legal, but a partial trailing
+// slice would run into the next rank's slot.
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PerRankSlotOverflow)
+{
+    mockComm_.comm.ddaScratchBytes = 1 * 1024 * 1024;
+    const size_t capBytes =
+        ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, (capBytes + 16) / sizeof(float), ncclFloat32));
+}
+
+// Below 2 banks * nRanks * 2 KiB the slot holds zero whole slices, so the cap is
+// zero and nothing fits.
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_ScratchTooSmallForOneSlice)
+{
+    mockComm_.comm.ddaScratchBytes = 16 * 1024;
+    ASSERT_EQ(ddaLL128AGPerRankCapBytes(mockComm_.comm.nRanks, mockComm_.comm.ddaScratchBytes), 0u);
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_AtThresholdEligible)
+{
+    // fixture sets archName="gfx1250": 128 MiB at 8 ranks, 256 MiB (clipped) at 16
+    for (int nRanks : {8, 16})
+    {
+        mockComm_.comm.nRanks = nRanks;
+        const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncAllGather);
+        EXPECT_EQ(totalCap, (nRanks == 8 ? 128u : 256u) * 1024u * 1024u) << nRanks;
+        const size_t perRankBytes = totalCap / (size_t)nRanks;
+        EXPECT_TRUE(ncclAllGatherDdaFabricLL128Eligible(
+            mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32)) << nRanks;
+    }
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
+{
+    const size_t totalCap = rcclDdaLL128Threshold(mockComm_.get(), ncclFuncAllGather);
+    const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
+    EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
+        mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+
+// ReduceScatter LL
+//
+// kDdaLLRsMaxBytes (1 MiB per-rank) replaced the old `bytes * 2 > kDdaLLMaxBytes`
+// rule.  ncclReduceScatterDdaFabricLLEligible had no test callers at all, so
+// neither side of the boundary was pinned.
+
+TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_AtCapEligible)
+{
+    // Per-rank shard exactly at kDdaLLRsMaxBytes must be accepted.
+    // kDdaLLRsMaxBytes is a multiple of 16, so the alignment gate passes.
+    const size_t perRankBytes = dda::common::kDdaLLRsMaxBytes;
+    const size_t recvcount    = perRankBytes / sizeof(float);
+    EXPECT_TRUE(ncclReduceScatterDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum));
+}
+
+TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_PastCapRejected)
+{
+    // One 16-byte step above kDdaLLRsMaxBytes must be rejected.
+    const size_t perRankBytes = dda::common::kDdaLLRsMaxBytes + 16;
+    const size_t recvcount    = perRankBytes / sizeof(float);
+    EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum));
 }
 
 } // namespace RcclUnitTesting

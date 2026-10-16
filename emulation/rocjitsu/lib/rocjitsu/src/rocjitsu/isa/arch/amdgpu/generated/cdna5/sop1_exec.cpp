@@ -229,70 +229,80 @@ void SAndNot1WrexecB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void SMovrelsB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
-  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
-  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
+  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
+  auto src_reg = amdgpu::relative_scalar_selector(wf, ssrc0.encoding_value(), wf.m0(), width_words,
+                                                  false, false);
+  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC,
+                      static_cast<int>(src_reg.value_or(0)));
+  amdgpu::RegisterAccess regs(wf);
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(
-        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
+    regs.write_scalar64(sdst, regs.read_scalar64(indexed_src));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+    regs.write_scalar(sdst, regs.read_scalar(indexed_src));
   }
 }
 
 void SMovrelsB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
-  uint32_t width_words = static_cast<uint32_t>(ssrc0.size_bits() / 32);
-  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + index * width_words;
-  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC, static_cast<int>(src_reg));
+  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
+  auto src_reg = amdgpu::relative_scalar_selector(wf, ssrc0.encoding_value(), wf.m0(), width_words,
+                                                  false, false);
+  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC,
+                      static_cast<int>(src_reg.value_or(0)));
+  amdgpu::RegisterAccess regs(wf);
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(
-        sdst, amdgpu::RegisterAccess(wf).read_scalar64(indexed_src));
+    regs.write_scalar64(sdst, regs.read_scalar64(indexed_src));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(sdst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+    regs.write_scalar(sdst, regs.read_scalar(indexed_src));
   }
 }
 
 void SMovreldB32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
   uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
-  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
+  auto dst_reg = amdgpu::relative_scalar_selector(wf, sdst.encoding_value(), wf.m0(), width_words,
+                                                  true, false);
+  if (!dst_reg)
+    return;
+  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(*dst_reg));
+  amdgpu::RegisterAccess regs(wf);
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
-                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    regs.write_scalar64(indexed_dst, regs.read_scalar64(ssrc0));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    regs.write_scalar(indexed_dst, regs.read_scalar(ssrc0));
   }
 }
 
 void SMovreldB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t index = wf.m0() & 0xFFu;
   uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
-  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + index * width_words;
-  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(dst_reg));
+  auto dst_reg = amdgpu::relative_scalar_selector(wf, sdst.encoding_value(), wf.m0(), width_words,
+                                                  true, false);
+  if (!dst_reg)
+    return;
+  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(*dst_reg));
+  amdgpu::RegisterAccess regs(wf);
   if (width_words == 2) {
-    amdgpu::RegisterAccess(wf).write_scalar64(indexed_dst,
-                                              amdgpu::RegisterAccess(wf).read_scalar64(ssrc0));
+    regs.write_scalar64(indexed_dst, regs.read_scalar64(ssrc0));
   } else {
-    amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                            amdgpu::RegisterAccess(wf).read_scalar(ssrc0));
+    regs.write_scalar(indexed_dst, regs.read_scalar(ssrc0));
   }
 }
 
 void SMovrelsd2B32Sop1::execute_impl(amdgpu::Wavefront &wf) {
-  uint32_t src_index = wf.m0() & 0xFFu;
-  uint32_t dst_index = (wf.m0() >> 8) & 0xFFu;
-  uint32_t src_reg = static_cast<uint32_t>(ssrc0.encoding_value()) + src_index;
-  uint32_t dst_reg = static_cast<uint32_t>(sdst.encoding_value()) + dst_index;
-  Operand indexed_src(32, OperandType::OPR_SSRC, static_cast<int>(src_reg));
-  Operand indexed_dst(32, OperandType::OPR_SDST, static_cast<int>(dst_reg));
-  amdgpu::RegisterAccess(wf).write_scalar(indexed_dst,
-                                          amdgpu::RegisterAccess(wf).read_scalar(indexed_src));
+  uint32_t width_words = static_cast<uint32_t>(sdst.size_bits() / 32);
+  auto dst_reg =
+      amdgpu::relative_scalar_selector(wf, sdst.encoding_value(), wf.m0(), width_words, true, true);
+  if (!dst_reg)
+    return;
+  Operand indexed_dst(sdst.size_bits(), OperandType::OPR_SDST, static_cast<int>(*dst_reg));
+  auto src_reg = amdgpu::relative_scalar_selector(wf, ssrc0.encoding_value(), wf.m0(), width_words,
+                                                  false, true);
+  Operand indexed_src(ssrc0.size_bits(), OperandType::OPR_SSRC,
+                      static_cast<int>(src_reg.value_or(0)));
+  amdgpu::RegisterAccess regs(wf);
+  if (width_words == 2) {
+    regs.write_scalar64(indexed_dst, regs.read_scalar64(indexed_src));
+  } else {
+    regs.write_scalar(indexed_dst, regs.read_scalar(indexed_src));
+  }
 }
 
 void SGetPcI64Sop1::execute_impl(amdgpu::Wavefront &wf) {
@@ -381,8 +391,7 @@ void SSendmsgRtnB64Sop1::execute_impl(amdgpu::Wavefront &wf) {
 void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
   bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
-  int32_t barrier_id =
-      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
   uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
   wf.barrier_signal(barrier_id, member_count);
 }
@@ -390,8 +399,7 @@ void SBarrierSignalSop1::execute_impl(amdgpu::Wavefront &wf) {
 void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
   bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
-  int32_t barrier_id =
-      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
   uint32_t member_count = source_is_m0 ? ((source >> 16) & 0x7fu) : 0;
   bool barrier_valid = (wf.barrier_state(barrier_id) & 1u) != 0;
   bool is_first = wf.barrier_signal(barrier_id, member_count);
@@ -402,16 +410,14 @@ void SBarrierSignalIsfirstSop1::execute_impl(amdgpu::Wavefront &wf) {
 void SGetBarrierStateSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
   bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
-  int32_t barrier_id =
-      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
   amdgpu::RegisterAccess(wf).write_scalar(sdst, wf.barrier_state(barrier_id));
 }
 
 void SBarrierInitSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
   bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
-  int32_t barrier_id =
-      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
   uint32_t member_source = wf.m0();
   uint32_t member_count = (member_source >> 16) & 0x7fu;
   wf.barrier_init(barrier_id, member_count);
@@ -420,8 +426,7 @@ void SBarrierInitSop1::execute_impl(amdgpu::Wavefront &wf) {
 void SBarrierJoinSop1::execute_impl(amdgpu::Wavefront &wf) {
   uint32_t source = amdgpu::RegisterAccess(wf).read_scalar(ssrc0);
   bool source_is_m0 = ssrc0.encoding_value() == OpSelSsrcBarrierId::OPR_SSRC_BARRIER_ID_M0;
-  int32_t barrier_id =
-      source_is_m0 ? static_cast<int32_t>(source & 0x1fu) : static_cast<int32_t>(source);
+  int32_t barrier_id = amdgpu::barrier_operand_id(source, source_is_m0);
   wf.barrier_join(barrier_id);
 }
 
