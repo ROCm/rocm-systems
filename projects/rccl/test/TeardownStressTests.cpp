@@ -122,10 +122,11 @@ namespace RcclUnitTesting
   // abortFlag skips the barrier, so a peer that entered it waits forever in
   // bootstrapRecv -- the PyTorch ProcessGroupNCCL watchdog hits exactly this.
   //
-  // These run on a single-node communicator at nRanks == 2, where the barrier
-  // cannot be protecting anything: RCCL defaults NCCL_PXN_DISABLE=1 and
-  // rcclSetPxn() only auto-enables PXN at nRanks >= 64 (gfx942) / >= 32
-  // (gfx950), so there is no PXN relay to keep alive.
+  // These run on a single-node communicator at nRanks == 2. At RCCL's defaults the
+  // barrier cannot be protecting anything there -- NCCL_PXN_DISABLE=1, and rcclSetPxn()
+  // only auto-enables PXN at nRanks >= 64 (gfx942) / >= 32 (gfx950), so there is no PXN
+  // relay to keep alive -- which is why the cases that need the barrier to actually run
+  // force NCCL_PXN_DISABLE=0 rather than relying on scale.
   namespace
   {
     // EnvVars reports 0 GPUs in a process re-exec'd by ProcessIsolatedTestRunner, and a
@@ -157,10 +158,19 @@ namespace RcclUnitTesting
     // the destroy barrier runs at all is derived from it -- an ambient
     // NCCL_PXN_DISABLE would silently change which path is under test.
     //
+    // barrierTimeoutMsec, when non-null, pins RCCL_DESTROY_BARRIER_TIMEOUT_MSEC. Only the
+    // cases that expect the deadline to fire need it, and they need it well below the 120s
+    // default or the runner's own timeout wins the race and reports a hang instead.
+    //
+    // minDestroyMsec, when non-zero, requires ncclCommDestroy to have taken at least that
+    // long. That is what makes a deadline case non-vacuous: returning promptly means the
+    // barrier was skipped (so the deadline is untested), not that it expired.
+    //
     // Nothing here may touch HIP or RCCL before fork(): initializing the runtime
     // in the parent leaves the children with unusable state and they die in
     // hipSetDevice.
-    bool DestroyReturnsWhenPeer(PeerTeardown peer, char const* pxnDisable, int deadlineSeconds)
+    bool DestroyReturnsWhenPeer(PeerTeardown peer, char const* pxnDisable, int deadlineSeconds,
+                                char const* barrierTimeoutMsec = nullptr, int minDestroyMsec = 0)
     {
       constexpr int    nRanks      = 2;
       constexpr size_t numElements = 32 * 1024;
@@ -181,6 +191,9 @@ namespace RcclUnitTesting
         if (pid == 0)
         {
           if (setenv("NCCL_PXN_DISABLE", pxnDisable, 1) != 0) _exit(69);
+          if (barrierTimeoutMsec != nullptr &&
+              setenv("RCCL_DESTROY_BARRIER_TIMEOUT_MSEC", barrierTimeoutMsec, 1) != 0)
+            _exit(68);
 
           ncclUniqueId id;
           if (rank == 0)
@@ -222,10 +235,23 @@ namespace RcclUnitTesting
           }
           else
           {
+            auto const         started = std::chrono::steady_clock::now();
+            ncclResult_t const res     = ncclCommDestroy(comm);
+            auto const         elapsed = std::chrono::duration_cast<std::chrono::milliseconds>(
+                                   std::chrono::steady_clock::now() - started)
+                                   .count();
+
+            if (minDestroyMsec > 0)
+            {
+              // Deadline case: the peer never arrives, so expiry is the expected outcome and
+              // reporting it as an error is correct. Only the duration is asserted.
+              if (elapsed < minDestroyMsec) _exit(82);
+            }
             // rank 0 always takes the barrier path. A non-success rc here is a real
             // failure, not a hang -- without this check the parent reads exit 0 and
             // scores a broken destroy as a pass.
-            if (ncclCommDestroy(comm) != ncclSuccess) _exit(81);
+            else if (res != ncclSuccess)
+              _exit(81);
           }
 
           _exit(0);
@@ -308,9 +334,10 @@ namespace RcclUnitTesting
   // Regression: the peer aborts, so it skips the barrier. Rank 0 must still
   // return instead of blocking forever in bootstrapRecv.
   //
-  // Pinned to NCCL_PXN_DISABLE=1, RCCL's default. With PXN genuinely enabled an
-  // ncclCommAbort peer still strands the barrier -- that needs a cancellation
-  // protocol and is tracked separately; do not widen this case without one.
+  // Pinned to NCCL_PXN_DISABLE=1, RCCL's default, so this case covers the gate: the
+  // barrier is never entered at all. DivergentTeardown_PeerAborts_PxnEnabled_TimesOut
+  // below is the same divergence with PXN on, where the barrier does run and the
+  // deadline is what releases it.
   TEST(Teardown, DivergentTeardown_PeerAborts_DoesNotHang)
   {
     if (!isIsolatedChild() && getDetectedGpuCount() < 2)
@@ -324,6 +351,32 @@ namespace RcclUnitTesting
           EXPECT_TRUE(DestroyReturnsWhenPeer(PeerTeardown::Abort, "1", /*deadlineSeconds*/ 60))
             << "rank 0 hung in ncclCommDestroy after its host-local peer aborted "
                "and skipped the destroy barrier (AICOMRCCL-2467 / AICOMRCCL-2468)";
+        })
+        .withTimeout(std::chrono::seconds(120)));
+  }
+
+  // The case the PXN gate does not cover: PXN is on, so rank 0 genuinely enters the
+  // barrier, and its peer aborts and never arrives. Only the deadline can release it.
+  // Before this PR this hung forever.
+  //
+  // The 5s barrier timeout is far below the 120000ms default so the runner does not
+  // time out first, and the >= 4s floor is what keeps the case honest: a prompt return
+  // would mean the barrier was skipped and the deadline never exercised.
+  TEST(Teardown, DivergentTeardown_PeerAborts_PxnEnabled_TimesOut)
+  {
+    if (!isIsolatedChild() && getDetectedGpuCount() < 2)
+      GTEST_SKIP() << "Divergent teardown requires at least 2 GPUs (detected "
+                   << getDetectedGpuCount() << ")";
+
+    RUN_ISOLATED_TESTS(
+      ProcessIsolatedTestRunner::TestConfig(
+        "DivergentTeardown_PeerAbortsPxn",
+        []() {
+          EXPECT_TRUE(DestroyReturnsWhenPeer(PeerTeardown::Abort, "0", /*deadlineSeconds*/ 60,
+                                             /*barrierTimeoutMsec*/ "5000", /*minDestroyMsec*/ 4000))
+            << "rank 0 did not return from ncclCommDestroy on the barrier deadline after its "
+               "host-local peer aborted with NCCL_PXN_DISABLE=0 -- either it hung, or it "
+               "returned early, which would mean the barrier was never entered";
         })
         .withTimeout(std::chrono::seconds(120)));
   }
