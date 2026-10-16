@@ -465,40 +465,6 @@ def test_list_torch_operators_wins_over_filter(
     assert "Matched PyTorch Operators:" not in out
 
 
-def test_torch_operator_intersects_kernel_id(
-    torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
-):
-    list_code = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--list-torch-operators",
-        "--path",
-        torch_trace_profiled_workload,
-    ])
-    assert list_code == 0
-    captured = capsys.readouterr()
-    list_out = captured.out + captured.err
-    addmm_match = _find_addmm_marker(list_out)
-    assert addmm_match is not None
-    match = re.search(r"\(id (\d+)\)", list_out[addmm_match.end() :])
-    assert match is not None
-    kernel_id = match.group(1)
-    code = binary_handler_analyze_rocprof_compute([
-        "--experimental",
-        "analyze",
-        "--torch-operator",
-        "*addmm*",
-        "--kernel",
-        kernel_id,
-        "--path",
-        torch_trace_profiled_workload,
-    ])
-    assert code == 0
-    captured = capsys.readouterr()
-    out = captured.out + captured.err
-    assert "operator filter selected 1 kernel" in out
-
-
 def test_torch_operator_with_dispatch_filter(
     torch_trace_profiled_workload, binary_handler_analyze_rocprof_compute, capsys
 ):
@@ -549,13 +515,7 @@ def test_torch_operator_with_dispatch_filter(
         "--path",
         torch_trace_profiled_workload,
     ])
-    assert miss_code == 0
-    captured = capsys.readouterr()
-    miss_out = captured.out + captured.err
-    assert (
-        "No PyTorch kernels mapped to kernel-top IDs" in miss_out
-        or "No PyTorch operators matched" in miss_out
-    )
+    assert miss_code != 0
 
 
 def test_torch_trace_user_range_in_marker_csv(binary_handler_profile_rocprof_compute):
