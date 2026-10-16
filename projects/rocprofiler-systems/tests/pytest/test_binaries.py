@@ -24,6 +24,14 @@ def get_sleep_cmd() -> str:
     return sleep_cmd
 
 
+def get_true_cmd() -> str:
+    """Return the path to true, or skip the test if it isn't on PATH."""
+    true_cmd = shutil.which("true")
+    if not true_cmd:
+        pytest.skip("true command not found")
+    return true_cmd
+
+
 # ============================================================================
 # Avail format consistency data
 # ============================================================================
@@ -383,6 +391,97 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
             fail_on_not_found=True,
         )
         self.assert_regex(result, pass_regex=pass_regex)
+
+    def _assert_usage_error(self, result, pass_regex):
+        self.assert_regex(
+            result,
+            pass_regex=pass_regex,
+            fail_regex=[
+                r"terminate called after throwing",
+                r"Signal 6 caught",
+                r"Killing process",
+            ],
+            use_abort_fail_regex=False,
+        )
+        if result.returncode != 1:
+            pytest.fail(f"invalid input should exit 1, got {result.returncode}")
+
+    @pytest.mark.timeout(60)
+    def test_invalid_input_non_elf(self, test_output_dir):
+        """A non-ELF text file is a usage error and must exit 1, not SIGABRT."""
+        bad_file = test_output_dir / "not-an-elf.txt"
+        bad_file.write_text("This is not an ELF binary.\n")
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--", str(bad_file)],
+            fail_on_not_found=True,
+            fail_on_pass=True,
+        )
+        self._assert_usage_error(
+            result,
+            [r"is a text file", r"only supports instrumenting binary files"],
+        )
+
+    @pytest.mark.timeout(60)
+    def test_invalid_input_missing_target(self, test_output_dir):
+        """A missing target is a usage error and must exit 1, not SIGABRT."""
+        missing = test_output_dir / "does-not-exist"
+
+        result = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["--", str(missing)],
+            fail_on_not_found=True,
+            fail_on_pass=True,
+        )
+        self._assert_usage_error(
+            result, [r"does not exist or is not a regular file\. Nothing to instrument"]
+        )
+
+    @pytest.mark.timeout(180)
+    def test_invalid_input_reinstrument(self, test_output_dir):
+        """Reject a second rewrite, and leave the first instrumented binary runnable."""
+        true_cmd = get_true_cmd()
+        first_inst = test_output_dir / "first.inst"
+        second_inst = test_output_dir / "second.inst"
+
+        baseline = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["-o", str(first_inst), "--", true_cmd],
+            working_directory=test_output_dir,
+            fail_on_not_found=True,
+        )
+        self.assert_regex(baseline)
+        self.assert_file_exists(first_inst)
+
+        rejected = self.run_test(
+            "baseline",
+            target=self.target,
+            run_args=["-o", str(second_inst), "--", str(first_inst)],
+            working_directory=test_output_dir,
+            fail_on_pass=True,
+            fail_on_not_found=True,
+        )
+        self._assert_usage_error(
+            rejected,
+            [
+                r"unable to open/reinstrument previously instrumented binary",
+                r"Failed to open binary",
+            ],
+        )
+        if second_inst.exists():
+            pytest.fail(f"rejected rewrite wrote {second_inst}")
+
+        kept = self.run_test(
+            "baseline",
+            target="rocprof-sys-run",
+            run_args=["--", str(first_inst)],
+            fail_on_not_found=True,
+        )
+        self.assert_regex(kept)
 
 
 # ============================================================================

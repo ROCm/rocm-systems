@@ -37,8 +37,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <regex>
@@ -287,12 +289,14 @@ auto _activate =
 
 //======================================================================================//
 //
-// entry point
+// instrument implementation
 //
 //======================================================================================//
 //
+namespace
+{
 int
-main(int argc, char** argv)
+run(int argc, char** argv)
 {
     argv0 = argv[0];
 
@@ -1185,8 +1189,9 @@ main(int argc, char** argv)
     // mutname was resolved against the search paths in the argument pre-scan
     if(!path::is_regular_file(mutname))
     {
-        fprintf(stderr, "Error! Application '%s' does not exist or is not a regular "
-                        "file. Nothing to instrument.\n",
+        fprintf(stderr,
+                "Error! Application '%s' does not exist or is not a regular "
+                "file. Nothing to instrument.\n",
                 _cmdv[0]);
         return EXIT_FAILURE;
     }
@@ -2885,6 +2890,26 @@ main(int argc, char** argv)
         log_ofs->close();
     }
     return code;
+}
+}  // namespace
+
+//======================================================================================//
+//
+// entry point
+//
+//======================================================================================//
+//
+int
+main(int argc, char** argv)
+{
+    try
+    {
+        return run(argc, argv);
+    } catch(const std::exception& ex)
+    {
+        std::cerr << "[rocprof-sys] error: " << ex.what() << '\n';
+        return EXIT_FAILURE;
+    }
 }
 
 //======================================================================================//
