@@ -244,26 +244,13 @@ TEST_F(GinAnvilSdmaFactoryTest, Create_MultiChannel) {
   destroyOut(&out);
 }
 
-// The CPX fold is not visible on a queue handle: a generic retry reports engine 0,
-// and getSdmaEngineIdFromOamMap is private. These assert the predicate and the
-// formula that function calls, including the in-range diagonal a partition must
-// still fold.
+// The CPX fold is not visible on a queue handle, and getSdmaEngineIdFromOamMap is
+// private. These assert when the fold runs, including the in-range diagonal a
+// partition must still fold. The engine the fold picks is rocSHMEM's contract and
+// is pinned by its anvil_engine_map_gtest.
 TEST(AnvilOamMapEngine, CpxPartitionFoldsTheInRangeDiagonal) {
   EXPECT_TRUE(sdma_anvil::oamMapEngineNeedsFold(/*numSdmaXgmiEngines=*/0, /*numSdmaEnginesTotal=*/2,
                                                /*doubledEngineId=*/0));
-  // Same-device peers share oamEngine 0. Distinct PCI functions must not all
-  // select engine 0.
-  EXPECT_EQ(sdma_anvil::foldOamMapEngine(/*oamEngine=*/0, /*srcFn=*/0, /*dstFn=*/0, /*numEngines=*/2), 0);
-  EXPECT_EQ(sdma_anvil::foldOamMapEngine(0, 0, 1, 2), 1);
-  EXPECT_EQ(sdma_anvil::foldOamMapEngine(0, 1, 1, 2), 0);
-  // An unreadable tail counts as function 0.
-  EXPECT_EQ(sdma_anvil::foldOamMapEngine(0, -1, 1, 2), 1);
-  EXPECT_EQ(sdma_anvil::foldOamMapEngine(0, 1, -1, 2), 1);
-}
-
-TEST(AnvilOamMapEngine, MoreThanTwoEnginesSeparatesSharedDestinationFunctions) {
-  EXPECT_EQ(sdma_anvil::foldOamMapEngine(0, 1, 3, 8), 4);
-  EXPECT_EQ(sdma_anvil::foldOamMapEngine(0, 2, 3, 8), 5);
 }
 
 TEST(AnvilOamMapEngine, SpxInRangeDoesNotFold) {
@@ -275,7 +262,6 @@ TEST(AnvilOamMapEngine, SpxInRangeDoesNotFold) {
 TEST(AnvilOamMapEngine, OutOfRangeFoldsEvenWithXgmiEngines) {
   EXPECT_TRUE(sdma_anvil::oamMapEngineNeedsFold(/*numSdmaXgmiEngines=*/8, /*numSdmaEnginesTotal=*/2,
                                                /*doubledEngineId=*/14));
-  EXPECT_EQ(sdma_anvil::foldOamMapEngine(/*oamEngine=*/7, /*srcFn=*/1, /*dstFn=*/2, /*numEngines=*/2), 0);
 }
 
 TEST(AnvilOamMapEngine, ZeroEnginesDoesNotFold) {
