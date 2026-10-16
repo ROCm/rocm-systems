@@ -2202,15 +2202,7 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
         return False
 
     if op_name.startswith("torch.ops.aten."):
-        op_short = aten_op_short_name(op_name)
-        if op_short:
-            packet = aten_packet_call_path(op_name)
-            if marker_leaf == packet:
-                return True
-            marker_norm = marker_leaf.rsplit("::", 1)[-1].rsplit(".", 1)[-1]
-            if marker_norm == op_short:
-                return True
-            return False
+        return marker_leaf == f"aten::{op_name[len('torch.ops.aten.') :]}"
 
     if op_name.startswith("torch.Tensor."):
         method = op_name[len("torch.Tensor.") :]
