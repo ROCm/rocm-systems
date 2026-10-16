@@ -69,8 +69,16 @@ static std::function<bool()> g_threadCreateShouldFail = [] { return false; };
 
 #include "fakes/nvtx_redirect.h"  // neuter / block nvtx.h before group.cc includes it
 
+// Seam for the UUT's free(), so a test can observe which entries a dequeue loop releases.
+// Textual and TU-wide while group.cc is included; #undef'd immediately after.
+static std::function<void(void*)> g_groupMicroFree = [](void* p) { ::free(p); };
+static void GroupMicroFree(void* p) { g_groupMicroFree(p); }
+#define free(p) GroupMicroFree(p)
+
 // Pulls in group.cc's file-static helpers (groupLaunch, asyncJobLaunch, ...); must come last.
 #include GROUP_CC_PATH
+
+#undef free
 
 namespace {
 
@@ -1045,16 +1053,20 @@ TEST_F(ArgsGlobalCheckTest, HookFailsOnSecondEntry_StopsDequeuingAndPropagatesTh
   ScopedHook hook(g_ncclArgsGlobalCheck, [&](struct ncclArgsInfo* info) {
     return info == failing ? ncclInternalError : ncclSuccess;
   });
+  std::vector<void*> freed;
+  ScopedHook freeHook(g_groupMicroFree, [&](void* p) {
+    freed.push_back(p);
+    ::free(p);
+  });
 
   EXPECT_EQ(ncclInternalError, ncclCommGroupArgsGlobalCheck(&job_.base));
 
   EXPECT_EQ(2, hook.calls);
   ASSERT_FALSE(ncclIntruQueueEmpty(&comm_->argsInfoQueue));
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->argsInfoQueue));
-  // `failing` is deliberately left unfreed here: production's fail: path dequeues without
-  // freeing it (mirrored here), and no test-side check can tell that apart from "already freed
-  // by a future production change" -- guessing wrong there double-frees. Leaks one entry under
-  // ASan, same as ~18 other pre-existing allocations in this binary; not a new gate.
+  // Both dequeued entries, including the failing one, are released; later entries remain queued for cleanup.
+  ASSERT_EQ(2u, freed.size());
+  EXPECT_EQ(static_cast<void*>(failing), freed[1]);
 }
 
 // groupJobUnlinkComms: undoes the comm->groupJob links the non-blocking path published, so a
@@ -1353,12 +1365,18 @@ TEST_F(GroupRegisterSymmetricCeInitTest, CeInitFailurePropagatesAndStopsDequeuin
   ncclIntruQueueEnqueue(&comm_->ceInitTaskQueue, failing);
   ncclIntruQueueEnqueue(&comm_->ceInitTaskQueue, neverReached);
   ScopedHook hook(g_ncclCeInit, [&](struct ncclComm*) { return ncclSystemError; });
+  std::vector<void*> freed;
+  ScopedHook freeHook(g_groupMicroFree, [&](void* p) {
+    freed.push_back(p);
+    ::free(p);
+  });
 
   EXPECT_EQ(ncclSystemError, ncclCommGroupRegisterSymmetric(&job_.base));
 
   EXPECT_EQ(1, hook.calls);
   EXPECT_EQ(neverReached, ncclIntruQueueHead(&comm_->ceInitTaskQueue));
-  // `failing` leaks (LSan-visible), a production bug: the fail: path dequeues it unfreed, like ArgsGlobalCheckTest's.
+  // The failing task is released; later tasks remain queued for cleanup.
+  EXPECT_EQ(std::vector<void*>({failing}), freed);
 }
 
 // groupCleanup: the fail-path unwind for a group that never launched. Walks groupCommHeadPtr per

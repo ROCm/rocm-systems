@@ -190,7 +190,20 @@ namespace RcclUnitTesting
       }
     }
   stop:
-    // Ensure communicators are destroyed before child process exits
+    // A command failure can stop the worker before the parent sends the normal
+    // deallocation commands. Release registrations and buffers while the
+    // communicators are still valid, then tear down graphs/comms/streams.
+    for (int groupId = 0; groupId < static_cast<int>(this->collArgs.size()); ++groupId)
+    {
+      for (int localRank = 0; localRank < static_cast<int>(this->collArgs[groupId].size()); ++localRank)
+      {
+        if (localRank < static_cast<int>(this->comms.size()))
+          (void)this->DeregisterMemInternal(groupId, /*collId=*/-1, localRank);
+        (void)this->DeallocateMemInternal(groupId, /*collId=*/-1, localRank);
+      }
+    }
+    this->collArgs.clear();
+
     if (!this->comms.empty()) DestroyComms();
 
     if (verbose) TEST_INFO("Child %d exiting execution loop", this->childId);
@@ -201,7 +214,9 @@ namespace RcclUnitTesting
     close(this->childReadFd);
     close(this->childWriteFd);
 
-    exit(0);
+    // Return through main so this stack object's vectors release their host
+    // allocations. exit() bypasses automatic object destruction.
+    return;
   }
 
   ErrCode TestBedChild::GetUniqueId(std::vector<char>& retValBuf)
@@ -1316,7 +1331,8 @@ namespace RcclUnitTesting
 
       if (collArg.options.scalarMode >= 0)
       {
-        ncclResult_t const result = ncclRedOpDestroy(collArg.options.redOp, this->comms[localRank]);
+        ncclComm_t const comm = localRank < static_cast<int>(this->comms.size()) ? this->comms[localRank] : nullptr;
+        ncclResult_t const result = comm == nullptr ? ncclSuccess : ncclRedOpDestroy(collArg.options.redOp, comm);
         if (result != ncclSuccess)
         {
           TEST_ERROR("Child process %d fails NCCL call ncclRedOpDestroy with code %d", this->childId, result);
@@ -1327,6 +1343,7 @@ namespace RcclUnitTesting
           TEST_INFO("Child %d destroys custom redop %d for collective %zu in group %d",
                   this->childId, collArg.options.redOp, collIdx, groupId);
         }
+        collArg.options.scalarMode = -1;
       }
     }
     if (this->verbose) TEST_INFO("Child %d finishes DeallocateMemInternal", this->childId);

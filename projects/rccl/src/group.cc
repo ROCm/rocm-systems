@@ -397,8 +397,9 @@ ncclResult_t ncclCommGroupArgsGlobalCheck(struct ncclAsyncJob* job_) {
   ncclResult_t ret = ncclSuccess;
   while (!ncclIntruQueueEmpty(&comm->argsInfoQueue)) {
     struct ncclArgsInfo* argsInfo = ncclIntruQueueDequeue(&comm->argsInfoQueue);
-    NCCLCHECKGOTO(ncclArgsGlobalCheck(argsInfo), ret, fail);
+    ncclResult_t checkRet = ncclArgsGlobalCheck(argsInfo);
     free(argsInfo);
+    NCCLCHECKGOTO(checkRet, ret, fail);
   }
 
 exit:
@@ -416,24 +417,26 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 
   while (!ncclIntruQueueEmpty(&comm->devrState.regTaskQueue)) {
     struct ncclDevrRegTask* task = ncclIntruQueueDequeue(&comm->devrState.regTaskQueue);
-    NCCLCHECKGOTO(ncclDevrWindowRegisterInGroup(comm, task->userPtr, task->userSize, task->winFlags, task->outWinDev),
-                  ret, fail);
+    ncclResult_t taskRet =
+      ncclDevrWindowRegisterInGroup(comm, task->userPtr, task->userSize, task->winFlags, task->outWinDev);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->devrState.commCreateTaskQueue)) {
     struct ncclDevrCommCreateTask* task = ncclIntruQueueDequeue(&comm->devrState.commCreateTaskQueue);
-    NCCLCHECKGOTO(ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false,
-                                             task->deviceCodeVersion),
-                  ret, fail);
+    ncclResult_t taskRet =
+      ncclDevrCommCreateInternal(comm, task->reqs, task->outDevComm, /*isInternal=*/false, task->deviceCodeVersion);
     freeDevCommRequirements(task->reqs); // free additional task memory for reqs
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->ceInitTaskQueue)) {
     struct ncclCeInitTask* task = ncclIntruQueueDequeue(&comm->ceInitTaskQueue);
-    NCCLCHECKGOTO(ncclCeInit(task->comm), ret, fail);
+    ncclResult_t taskRet = ncclCeInit(task->comm);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   if (comm->ceColl.stagingPending) {
@@ -443,8 +446,9 @@ ncclResult_t ncclCommGroupRegisterSymmetric(struct ncclAsyncJob* job_) {
 
   while (!ncclIntruQueueEmpty(&comm->rmaCeInitTaskQueue)) {
     struct ncclRmaCeInitTask* task = ncclIntruQueueDequeue(&comm->rmaCeInitTaskQueue);
-    NCCLCHECKGOTO(ncclRmaCeInit(task->comm), ret, fail);
+    ncclResult_t taskRet = ncclRmaCeInit(task->comm);
     free(task);
+    NCCLCHECKGOTO(taskRet, ret, fail);
   }
 
   while (!ncclIntruQueueEmpty(&comm->suspendTaskQueue)) {

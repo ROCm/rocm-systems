@@ -3233,14 +3233,14 @@ TEST(RcclDdaTierThresholds, Gfx1250_EnvZeroDisablesLlTier)
 // that the DDA eligibility predicates require.
 namespace
 {
-void InitA2ADecisionComm(ncclComm& comm, const char* arch, int nRanks)
+void InitA2ADecisionComm(ncclComm& comm, ncclTopoSystem& topo, const char* arch, int nRanks)
 {
     InitDdaDecisionComm(comm, arch, nRanks, /*nNodes=*/1, /*symmetricSupport=*/false);
     comm.archThresholds        = rcclGetArchThresholds(arch);
     // rcclSelectAlltoAll dereferences comm->topo->pivotA2AEnabled as its first
     // predicate (before any arch or DDA logic). Zero-initialised: pivotA2AEnabled=false,
     // so the pivot branch is skipped and falls through to the DDA logic under test.
-    comm.topo                  = new ncclTopoSystem();
+    comm.topo                  = &topo;
     // Sentinel pointers satisfy the non-null checks in the fabric eligibility
     // predicates (the values are never dereferenced by query=true calls).
     comm.bootstrap             = reinterpret_cast<void*>(0x1);
@@ -3270,7 +3270,8 @@ ncclResult_t SelectA2A(ncclComm& comm, size_t totalBytes, rcclCollDecision& out)
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 4);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     const size_t llMax = tbl->ddaLLMax[ncclFuncAlltoAll];
@@ -3288,7 +3289,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL_Band)
 TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 4);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     const size_t llMax    = tbl->ddaLLMax[ncclFuncAlltoAll];
@@ -3312,7 +3314,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_DdaLL128_Band)
 TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx1250", 4);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx1250", 4);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx1250");
     ASSERT_NE(tbl, nullptr);
     ASSERT_EQ(tbl->ddaVmmMax[ncclFuncAlltoAll], 0ul)
@@ -3332,7 +3335,8 @@ TEST(RcclAlltoAllDecision, Gfx1250_AboveDdaCap_DirectFallback)
 TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx950", 8);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx950", 8);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx950");
     ASSERT_NE(tbl, nullptr);
     const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
@@ -3347,7 +3351,8 @@ TEST(RcclAlltoAllDecision, Gfx950_DdaIpc_Band)
 TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
-    InitA2ADecisionComm(*comm, "gfx950", 8);
+    auto topo = std::make_unique<ncclTopoSystem>();
+    InitA2ADecisionComm(*comm, *topo, "gfx950", 8);
     const rcclArchThresholds* tbl = rcclGetArchThresholds("gfx950");
     ASSERT_NE(tbl, nullptr);
     const size_t ddaMax = tbl->ddaVmmMax[ncclFuncAlltoAll];
@@ -3365,11 +3370,12 @@ TEST(RcclAlltoAllDecision, Gfx950_AboveDdaCap_DirectFallback)
 TEST(RcclAlltoAllDecision, UnsupportedArch_DirectFallback)
 {
     auto comm = std::make_unique<ncclComm>();
+    auto topo = std::make_unique<ncclTopoSystem>();
     // rcclSelectAlltoAll dereferences comm->topo->pivotA2AEnabled as its first
     // predicate, so a topo is required. InitA2ADecisionComm attaches a zero-
     // initialised ncclTopoSystem (pivotA2AEnabled=false) and the DDA sentinels;
     // gfx90a exits rcclDdaEnabled early, so the sentinels are never dereferenced.
-    InitA2ADecisionComm(*comm, "gfx90a", 8);
+    InitA2ADecisionComm(*comm, *topo, "gfx90a", 8);
 
     rcclCollDecision dec{};
     ASSERT_EQ(rcclSelectAlltoAll(comm.get(), nullptr, nullptr, /*count=*/1024,

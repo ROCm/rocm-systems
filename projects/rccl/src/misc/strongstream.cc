@@ -130,8 +130,10 @@ ncclResult_t ncclStrongStreamConstruct(struct ncclStrongStream* ss) {
   return ncclSuccess;
 }
 
+// Tolerates a zeroed or partially constructed ss so init error paths can tear it down.
 ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) {
-  CUDACHECK(cudaStreamDestroy(ss->liveStream));
+  if (ss->liveStream != nullptr) CUDACHECK(cudaStreamDestroy(ss->liveStream));
+  ss->liveStream = nullptr;
 #if ROCM_VERSION >= 60100
   struct ncclStrongStreamCapture* cap = ss->captureHead;
   while (cap) {
@@ -140,7 +142,9 @@ ncclResult_t ncclStrongStreamDestruct(struct ncclStrongStream* ss) {
     free(cap);
     cap = next;
   }
-  CUDACHECK(cudaEventDestroy(ss->serialEvent));
+  ss->captureHead = nullptr;
+  if (ss->serialEvent != nullptr) CUDACHECK(cudaEventDestroy(ss->serialEvent));
+  ss->serialEvent = nullptr;
 #endif
   return ncclSuccess;
 }
