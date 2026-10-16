@@ -153,23 +153,22 @@ def test_deep_tensor_method_wraps_disabled_by_env(monkeypatch):
     assert _selected_tensor_method_wraps() == TENSOR_METHOD_WRAPS
 
 
-def test_function_apply_wrappers_idempotent(monkeypatch):
-    from tests.integration.common import require_torch
-    from utils.inject_roctx._backends import torch as torch_backend
-
-    require_torch()
+def _check_function_apply_wrappers():
+    """Install Function.apply wrappers and require a single push."""
     import torch
 
+    from utils.inject_roctx._backends import torch as torch_backend
+
     if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
+        raise AssertionError("torch could not be resolved for inject_roctx backend")
 
     push_counter = {"count": 0}
 
     def _count_push(*_args, **_kwargs):
         push_counter["count"] += 1
 
-    monkeypatch.setattr(torch_backend, "_push_scope", _count_push)
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
+    torch_backend._push_scope = _count_push
+    torch_backend._pop_scope = lambda: None
 
     class Foo(torch.autograd.Function):
         @staticmethod
@@ -195,6 +194,48 @@ def test_function_apply_wrappers_idempotent(monkeypatch):
     y = Bar.apply(x)
     y.backward()
     assert push_counter["count"] == 1
+
+
+def test_function_apply_wrappers_idempotent():
+    import os
+    import subprocess
+    import sys
+    from pathlib import Path
+
+    from tests.integration.common import require_torch
+
+    require_torch()
+    import torch
+
+    function = torch.autograd.Function
+    hook_before = function.__dict__.get("__init_subclass__")
+    project_root = Path(__file__).resolve().parents[4]
+    env = os.environ.copy()
+    pythonpath = [
+        str(project_root),
+        str(project_root / "src"),
+        str(project_root / "tests"),
+    ]
+    if env.get("PYTHONPATH"):
+        pythonpath.append(env["PYTHONPATH"])
+    env["PYTHONPATH"] = os.pathsep.join(pythonpath)
+    completed = subprocess.run(
+        [
+            sys.executable,
+            "-c",
+            "from tests.unit.utils.inject_roctx.test_torch import "
+            "_check_function_apply_wrappers\n"
+            "_check_function_apply_wrappers()\n",
+        ],
+        cwd=project_root,
+        env=env,
+        capture_output=True,
+        text=True,
+        check=False,
+    )
+    detail = f"{completed.stdout}\n{completed.stderr}".strip()
+    assert completed.returncode == 0, detail
+    assert function.__dict__.get("__init_subclass__") is hook_before
 
 
 def test_lazy_linear_to_under_tensor_wraps(monkeypatch):
