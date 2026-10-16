@@ -33,6 +33,19 @@ void expect_matrix_invalid_flags(Call call, const Registers<RegistersCount, Lane
       supported_modifiers);
 }
 
+// Write an A/B element in the gfx11 dense WMMA layout. Coordinate is the
+// A row or B column; each 16-lane group repeats the complete K vector.
+template <int Bits, int Lanes>
+void set_wmma_gfx11(uint32_t *const *v, int coordinate, int k, uint32_t bits) {
+  static_assert(Bits == 4 || Bits == 8 || Bits == 16);
+  static_assert(Lanes == 32 || Lanes == 64);
+  for (int group = 0; group < Lanes / 16; ++group) {
+    auto &word = v[k * Bits / 32][coordinate + 16 * group];
+    int shift = k * Bits % 32;
+    word = (word & ~(((1U << Bits) - 1) << shift)) | (bits << shift);
+  }
+}
+
 // Write a gfx12 dense WMMA FP16/BF16 A/B element. K is partitioned
 // between 16-lane groups, with adjacent halves packed in each word.
 template <int Lanes>

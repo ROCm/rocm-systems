@@ -7,6 +7,7 @@ add_library(rj_arith STATIC
   fp/arithmetic.cpp
   fp/half_fma.cpp
   wmma/wmma.cpp
+  wmma/wmma_replicated.cpp
 )
 
 target_include_directories(rj_arith

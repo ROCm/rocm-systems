@@ -9,7 +9,7 @@
 #include <cmath>
 
 // Evaluate fused A*B+C for selected lanes; errors leave D and FP status unchanged.
-template <int Lanes>
+template <int Lanes, bool Rdna3 = false>
 static int fma(uint64_t flags, rocjitsu::arith::ExecMask<Lanes> exec_mask,
                uint64_t instruction_flags, uint32_t *const *d, const uint32_t *const *a,
                const uint32_t *const *b, const uint32_t *const *c, uint32_t *excp_flag_user) {
@@ -30,7 +30,7 @@ static int fma(uint64_t flags, rocjitsu::arith::ExecMask<Lanes> exec_mask,
   for (int lane = 0; lane < Lanes; ++lane) {
     if (rocjitsu::arith::is_exact(flags)) {
       result[lane] =
-          rocjitsu::arith::fma_value_f32(a[0][lane], b[0][lane], c[0][lane], false, flags, false);
+          rocjitsu::arith::fma_value_f32(a[0][lane], b[0][lane], c[0][lane], false, flags, Rdna3);
     } else {
       result[lane] = rocjitsu::arith::as_bits(std::fma(rocjitsu::arith::as_float(a[0][lane]),
                                                        rocjitsu::arith::as_float(b[0][lane]),
@@ -59,4 +59,18 @@ int rj_arith_v_fma_f32_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t in
                                  const uint32_t *const *b, const uint32_t *const *c,
                                  uint32_t *excp_flag_user) {
   return fma<64>(flags, exec_mask, instruction_flags, d, a, b, c, excp_flag_user);
+}
+
+// Evaluate gfx11 FP32 FMA for Wave32; required TRAPSTS reporting is unsupported.
+int rj_arith_v_fma_f32_w32(uint64_t flags, uint32_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c, uint32_t *trapsts) {
+  return fma<32, true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
+}
+
+// Evaluate gfx11 FP32 FMA for Wave64; required TRAPSTS reporting is unsupported.
+int rj_arith_v_fma_f32_w64(uint64_t flags, uint64_t exec_mask, uint64_t instruction_flags,
+                           uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c, uint32_t *trapsts) {
+  return fma<64, true>(flags, exec_mask, instruction_flags, d, a, b, c, trapsts);
 }
