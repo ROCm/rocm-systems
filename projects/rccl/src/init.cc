@@ -145,6 +145,14 @@ NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
 // Opt-in: enables GPU-resident NCCL progress counters when RAS is enabled. When disabled,
 // counter buffers remain null and profiler() skips progress-counter updates.
 NCCL_PARAM(ProgressCountersEnable, "PROGRESS_COUNTERS", 0);
+// A partition reaches the NIC and xGMI over the physical device's paths, so GIN is as available
+// to it as to the whole GPU — same reasoning as NCCL_NET_GDR_MLOPART for GDR. Tri-state because
+// only the single-node case has been validated:
+//   -1 (default) admit a partitioned communicator on one node; refuse across nodes.
+//    0 refuse every partitioned communicator (pre-parameter behaviour).
+//    1 admit on any node count (multi-node is opt-in: unvalidated, and it also reaches the
+//      hierarchical CE path gated by ncclHierCeAllowed).
+NCCL_PARAM(GinMloPart, "GIN_MLOPART", -1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
@@ -152,6 +160,19 @@ extern int64_t ncclParamRasDiagnostics();
 extern int64_t ncclParamDiagnostics();
 extern int64_t ncclParamRasEnable();
 extern int64_t ncclParamP2pLL128Enable();
+
+// Whether this communicator may use GIN. MI300X CPX stamps mloPart on every partition, so without
+// NCCL_GIN_MLOPART every CPX rank would turn GIN off and fall back to a path that can't export its
+// buffers (AICOMRCCL-2387). Takes the whole comm, not the loose bools, so the call site can't
+// transpose cuMemGdrSupport and hasMloPart.
+static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) {
+  if (ginTypeBitMask == 0 || !comm->cuMemGdrSupport) return false;
+  if (!comm->hasMloPart) return true;
+  int64_t mloPart = ncclParamGinMloPart();
+  if (mloPart == 0) return false;
+  if (mloPart > 0) return true;
+  return comm->nNodes <= 1;
+}
 
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
@@ -2767,7 +2788,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
-  if (globalGinTypeBitMask && comm->cuMemGdrSupport && !comm->hasMloPart) {
+  if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
     if (globalCrossNicSupport) {
       comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
@@ -2787,9 +2808,15 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   if (!comm->symmetricSupport || comm->globalGinSupport == NCCL_GIN_CONNECTION_NONE) {
     INFO(NCCL_INIT,
          "symmetricSupport %d, cuMemEnable %d, globalGinSupport %d, globalNicFused %d, cuMemGdrSupport %d, "
-         "contiguousRanksPerHost %d, crossNicSupport %d",
+         "contiguousRanksPerHost %d, crossNicSupport %d, hasMloPart %d, nNodes %d",
          comm->symmetricSupport, ncclCuMemEnable(), comm->globalGinSupport, globalNicFused, comm->cuMemGdrSupport,
-         comm->contiguousRanksPerHost, globalCrossNicSupport);
+         comm->contiguousRanksPerHost, globalCrossNicSupport, comm->hasMloPart, comm->nNodes);
+    if (comm->hasMloPart && comm->nNodes > 1 && ncclParamGinMloPart() < 0) {
+      INFO(NCCL_INIT,
+           "NCCL_GIN_MLOPART admits a partitioned communicator on a single node only; set it to 1 to admit this "
+           "%d-node one, which no partitioned run has covered yet",
+           comm->nNodes);
+    }
   }
 
   comm->ceColl.baseUCSymReadyPtr = NULL;
