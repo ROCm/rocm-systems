@@ -38,8 +38,6 @@ from utils import utils_profile
 # =============================================================================
 
 DEFAULT_WORKGROUP_SIZE = 256
-DEFAULT_WORKGROUPS = 8192
-DEFAULT_THREADS = DEFAULT_WORKGROUP_SIZE * DEFAULT_WORKGROUPS
 DEFAULT_NUM_EXPERIMENTS = 10
 DEFAULT_NUM_ITERS = 10
 
