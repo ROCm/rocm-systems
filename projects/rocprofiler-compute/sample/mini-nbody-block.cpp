@@ -7,7 +7,7 @@
 // This file is not a copy of that sample.
 //
 // Usage: mini-nbody-block <bodies> <iterations>
-//   health: mini-nbody-block 131072 500
+//   health: mini-nbody-block 81920 500
 
 #include "hip/hip_runtime.h"
 
@@ -15,7 +15,7 @@
 #include <stdlib.h>
 #include <sys/time.h>
 
-constexpr int kBlockSize = 256;
+constexpr int kBlockSize = 128;
 constexpr float kSoftening = 1e-9f;
 
 namespace {
@@ -53,36 +53,54 @@ void fill_random(float* values, int count) {
 __global__ void update_bodies(const float* pos_x, const float* pos_y,
                               const float* pos_z, float* vel_x, float* vel_y,
                               float* vel_z, float step, int body_count) {
-  int body = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
-  if (body >= body_count) {
-    return;
-  }
+  __shared__ float3 tile_positions[kBlockSize];
 
+  int body = hipBlockDim_x * hipBlockIdx_x + hipThreadIdx_x;
+  bool valid_body = body < body_count;
   float force_x = 0.0f;
   float force_y = 0.0f;
   float force_z = 0.0f;
-  float origin_x = pos_x[body];
-  float origin_y = pos_y[body];
-  float origin_z = pos_z[body];
-  for (int other = 0; other < body_count; ++other) {
-    float delta_x = pos_x[other] - origin_x;
-    float delta_y = pos_y[other] - origin_y;
-    float delta_z = pos_z[other] - origin_z;
-    float distance_squared =
-        delta_x * delta_x + delta_y * delta_y + delta_z * delta_z + kSoftening;
-    float inverse_distance = rsqrtf(distance_squared);
-    float scale = inverse_distance * inverse_distance * inverse_distance;
-    force_x += delta_x * scale;
-    force_y += delta_y * scale;
-    force_z += delta_z * scale;
+  float origin_x = valid_body ? pos_x[body] : 0.0f;
+  float origin_y = valid_body ? pos_y[body] : 0.0f;
+  float origin_z = valid_body ? pos_z[body] : 0.0f;
+
+  for (int tile_start = 0; tile_start < body_count;
+       tile_start += kBlockSize) {
+    int other = tile_start + hipThreadIdx_x;
+    int tile_size = body_count - tile_start;
+    tile_size = tile_size < kBlockSize ? tile_size : kBlockSize;
+    if (hipThreadIdx_x < tile_size) {
+      tile_positions[hipThreadIdx_x] =
+          make_float3(pos_x[other], pos_y[other], pos_z[other]);
+    }
+    __syncthreads();
+
+    if (valid_body) {
+      for (int tile_index = 0; tile_index < tile_size; ++tile_index) {
+        float delta_x = tile_positions[tile_index].x - origin_x;
+        float delta_y = tile_positions[tile_index].y - origin_y;
+        float delta_z = tile_positions[tile_index].z - origin_z;
+        float distance_squared = delta_x * delta_x + delta_y * delta_y +
+                                 delta_z * delta_z + kSoftening;
+        float inverse_distance = rsqrtf(distance_squared);
+        float scale = inverse_distance * inverse_distance * inverse_distance;
+        force_x += delta_x * scale;
+        force_y += delta_y * scale;
+        force_z += delta_z * scale;
+      }
+    }
+    __syncthreads();
   }
-  vel_x[body] += step * force_x;
-  vel_y[body] += step * force_y;
-  vel_z[body] += step * force_z;
+
+  if (valid_body) {
+    vel_x[body] += step * force_x;
+    vel_y[body] += step * force_y;
+    vel_z[body] += step * force_z;
+  }
 }
 
 int main(int argc, char** argv) {
-  int body_count = 30000;
+  int body_count = 81920;
   int iteration_count = 10;
   if (argc > 1) {
     body_count = atoi(argv[1]);
@@ -124,6 +142,7 @@ int main(int argc, char** argv) {
                        pos_x, pos_y, pos_z, vel_x, vel_y, vel_z, step,
                        body_count);
     HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipDeviceSynchronize());
     HIP_CHECK(hipMemcpy(host_state, device_state,
                         coordinate_count * sizeof(float),
                         hipMemcpyDeviceToHost));
