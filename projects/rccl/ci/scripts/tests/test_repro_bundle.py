@@ -197,6 +197,16 @@ class WriteReproBundleTest(unittest.TestCase):
         self.assertNotIn("PRIMUS_REF", env_text)
         self.assertIn("38523607643", (bundle / "REPRO.md").read_text())
 
+    def test_the_workflow_uploads_the_bundles_hidden_paths(self):
+        bundle, _ = self.check_bundle("llama-3.1-70b-training")
+        hidden = [p for p in bundle.rglob(".*")]
+        self.assertTrue(hidden, "the kpack directory is a dot-path")
+        workflow = (Path(__file__).resolve().parents[5]
+                    / ".github" / "workflows" / "therock-rccl-test-madengine.yml")
+        step = workflow.read_text().split("- name: Upload repro bundle", 1)[1]
+        step = step.split("\n      - name:", 1)[0]
+        self.assertRegex(step, r"\n\s+include-hidden-files:\s*true\b")
+
     def test_rewriting_an_existing_bundle_replaces_it(self):
         bundle, work = self.check_bundle("llama-3.1-70b-training")
         (bundle / "stale").write_text("x")
