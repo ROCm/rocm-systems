@@ -110,6 +110,58 @@ def _assign_kernel_ids_from_top(
     return kernel_ids
 
 
+def _pmc_group_keys_from_node(node: CallTreeNode) -> list[tuple]:
+    pmc_group_keys: list[tuple] = []
+    for stats in node.kernels.values():
+        pmc_group_keys.extend(stats.pmc_group_keys)
+    for child in node.children:
+        pmc_group_keys.extend(_pmc_group_keys_from_node(child))
+    return pmc_group_keys
+
+
+def _analyze_ids_from_pmc_group_keys(
+    pmc_group_keys: list[tuple],
+    slot_to_id: dict[tuple, int],
+    labels: str,
+) -> list[int]:
+    analyze_ids: list[int] = []
+    for group_key in pmc_group_keys:
+        if group_key not in slot_to_id:
+            console_error(
+                "ml api trace",
+                f"No {labels} analyze dispatch id for pmc group key {group_key}",
+            )
+        analyze_ids.append(slot_to_id[group_key])
+    return analyze_ids
+
+
+def _intersect_with_user_dispatch_filter(
+    operator_dispatch_ids: list[int],
+    user_dispatch_filter: list,
+    labels: str,
+) -> list[int]:
+    operator_ids = set(operator_dispatch_ids)
+    if not user_dispatch_filter:
+        selected_ids = operator_ids
+    else:
+        first_filter = str(user_dispatch_filter[0]).strip()
+        if first_filter.startswith(">"):
+            threshold = int(first_filter[1:].strip())
+            selected_ids = {
+                dispatch_id for dispatch_id in operator_ids if dispatch_id > threshold
+            }
+        else:
+            selected_ids = operator_ids & {
+                int(dispatch_id) for dispatch_id in user_dispatch_filter
+            }
+    if not selected_ids:
+        console_error(
+            "ml api trace",
+            f"No {labels} dispatches matched the -d filter: {user_dispatch_filter}",
+        )
+    return sorted(selected_ids)
+
+
 class cli_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -152,11 +204,63 @@ class cli_analysis(OmniAnalyze_Base):
                 )
                 continue
 
-            # create 'mega dataframe'
-            workload.raw_pmc = file_io.create_df_pmc(
-                path_info[0],
-                args.verbose,
-            )
+            if active_operator_lists or active_operator_filters:
+                process_ml_api_trace_output(workload, path_info[0])
+
+            if active_operator_lists:
+                workload.raw_pmc = file_io.create_df_pmc(
+                    path_info[0],
+                    args.verbose,
+                )
+                if self._profiling_config.get("iteration_multiplexing") is not None:
+                    workload.raw_pmc = self.iteration_multiplex_impute_counters(
+                        workload.raw_pmc,
+                        policy=self._profiling_config["iteration_multiplexing"],
+                        workload_dir=Path(path_info[0]),
+                    )
+                kernel_top_df, dispatch_info_df = file_io.create_df_kernel_top_stats(
+                    df_in=workload.raw_pmc,
+                    raw_data_dir=path_info[0],
+                    filter_gpu_ids=workload.filter_gpu_ids,
+                    filter_dispatch_ids=workload.filter_dispatch_ids,
+                    time_unit=args.time_unit,
+                )
+                workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
+                workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
+                self.list_operators(path_info[0], kernel_top_df, active_operator_lists)
+                continue
+
+            if active_operator_filters:
+                pmc_group_keys = self.apply_operator_filter(
+                    args, workload, path_info[0], active_operator_filters
+                )
+                labels = ", ".join(
+                    _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"]
+                    for backend in active_operator_filters
+                )
+                workload.raw_pmc, slot_to_id = file_io.create_df_pmc_with_slot_ids(
+                    path_info[0],
+                    args.verbose,
+                )
+                operator_dispatch_ids = _analyze_ids_from_pmc_group_keys(
+                    pmc_group_keys, slot_to_id, labels
+                )
+                workload.filter_dispatch_ids = _intersect_with_user_dispatch_filter(
+                    operator_dispatch_ids,
+                    workload.filter_dispatch_ids,
+                    labels,
+                )
+                console_log(
+                    "ml api trace",
+                    f"{labels} operator filter selected "
+                    f"{len(workload.filter_dispatch_ids)} dispatch(es) "
+                    "for metric analysis.",
+                )
+            else:
+                workload.raw_pmc = file_io.create_df_pmc(
+                    path_info[0],
+                    args.verbose,
+                )
 
             if self._profiling_config.get("iteration_multiplexing") is not None:
                 workload.raw_pmc = self.iteration_multiplex_impute_counters(
@@ -174,18 +278,6 @@ class cli_analysis(OmniAnalyze_Base):
             )
             workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = kernel_top_df
             workload.dfs[parser.PMC_DISPATCH_INFO_TABLE_ID] = dispatch_info_df
-
-            if active_operator_lists or active_operator_filters:
-                process_ml_api_trace_output(workload, path_info[0])
-                if active_operator_lists:
-                    self.list_operators(
-                        path_info[0], kernel_top_df, active_operator_lists
-                    )
-                    continue
-                if active_operator_filters:
-                    self.apply_operator_filter(
-                        args, workload, path_info[0], active_operator_filters
-                    )
 
             # create the loaded table
             gpu_arch = workload.sys_info.iloc[0]["gpu_arch"]
@@ -339,14 +431,11 @@ class cli_analysis(OmniAnalyze_Base):
         workload: schema.Workload,
         workload_path: str,
         backends: list[str],
-    ) -> None:
-        """Set workload.filter_kernel_ids from the given backends' operator filter.
-
-        Operator matches are intersected with the -k/--kernel filter when set.
-        """
+    ) -> list[tuple]:
+        """Glob-filter the operator forest and return pmc group keys on the subtree."""
         framewise_patterns = parse_operator_patterns(args, backends)
         if framewise_patterns is None:
-            return
+            return []
         labels = ", ".join(
             _ML_API_ANALYSIS_CLI_OPTIONS[backend]["label"] for backend in backends
         )
@@ -368,38 +457,16 @@ class cli_analysis(OmniAnalyze_Base):
             confined_forest, matched_nodes
         )
 
-        kernel_top_df = workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID]
-        name_to_id: dict[str, int] = {
-            str(kernel_name).strip(): idx
-            for idx, kernel_name in enumerate(kernel_top_df["Kernel_Name"].tolist())
-        }
-        kernel_ids: set[int] = set()
+        pmc_group_keys: list[tuple] = []
         for roots in workload.ml_api_call_trees.values():
             for root in roots:
-                kernel_ids.update(_assign_kernel_ids_from_top(root, name_to_id))
-        if not kernel_ids:
+                pmc_group_keys.extend(_pmc_group_keys_from_node(root))
+        if not pmc_group_keys:
             console_error(
                 "ml api trace",
-                f"No {labels} kernels mapped to kernel-top IDs",
+                f"No {labels} kernel dispatches on the matched operators",
             )
-        selected_ids = sorted(kernel_ids)
-        if workload.filter_kernel_ids:
-            existing_ids = set(workload.filter_kernel_ids)
-            selected_ids = [
-                kernel_id for kernel_id in selected_ids if kernel_id in existing_ids
-            ]
-            if not selected_ids:
-                console_error(
-                    "ml api trace",
-                    f"No {labels} operators matched the -k filter: {args.gpu_kernel}",
-                )
-        workload.filter_kernel_ids = selected_ids
-
-        console_log(
-            "ml api trace",
-            f"{labels} operator filter selected {len(selected_ids)} kernel(s)"
-            " for metric analysis.",
-        )
+        return pmc_group_keys
 
     def handle_operator(
         self, args: argparse.Namespace, workload: schema.Workload, backends: list[str]
