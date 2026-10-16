@@ -337,11 +337,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
 
-- **`rccl-UnitTestsMicroBootstrap`** — `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
-  `bootstrap-test.cc`); suite `Bootstrap*`. Ranks run as threads over an in-memory socket
-  layer and net plugin defined in the test. Its own binary because those seams replace
-  `misc/socket.cc` wholesale, and other binaries link `bootstrap_stubs.cc` for this unit's
-  symbols. See `test_categories_micro_bootstrap.yaml`.
+- **`rccl-UnitTestsMicroBootstrap`**: `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
+  `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over an
+  in-memory socket layer and net plugin defined in the test. Its own binary because those
+  seams replace `misc/socket.cc` wholesale, and other binaries link `bootstrap_stubs.cc`
+  for this unit's symbols. See `test_categories_micro_bootstrap.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
