@@ -3012,7 +3012,16 @@ class ProxyUdsServiceMicrotest : public ProxyServiceFixture {
   int udsW_ = -1;
 };
 
-TEST_F(ProxyUdsServiceMicrotest, GetFd_ExportsTheHandleAndSendsTheFdBack) {
+// proxy.cc rejects GetFd/QueryFd requests before ROCm 7.
+class ProxyUdsFdServiceMicrotest : public ProxyUdsServiceMicrotest {
+ protected:
+  void SetUp() override {
+    ProxyUdsServiceMicrotest::SetUp();  // first: TearDown runs even after a skip
+    if (ROCM_VERSION < 70000) GTEST_SKIP() << "proxyGetFd/proxyQueryFd need ROCm 7";
+  }
+};
+
+TEST_F(ProxyUdsFdServiceMicrotest, GetFd_ExportsTheHandleAndSendsTheFdBack) {
   Hdr(ncclProxyMsgGetFd, 0xbeef, (void*)0x40);
   g_ipc.recvFd = 12;
   ASSERT_EQ(proxyUDSRecvReq(&ps_, 0), ncclSuccess);
@@ -3026,7 +3035,7 @@ TEST_F(ProxyUdsServiceMicrotest, GetFd_ExportsTheHandleAndSendsTheFdBack) {
   EXPECT_EQ(g_ipc.closes, 1);
 }
 
-TEST_F(ProxyUdsServiceMicrotest, GetFd_ExportInitSendCloseAndFdCloseFailures) {
+TEST_F(ProxyUdsFdServiceMicrotest, GetFd_ExportInitSendCloseAndFdCloseFailures) {
   Hdr(ncclProxyMsgGetFd, 1, (void*)0x40);
   g_hipExportResult = hipErrorInvalidValue;
   EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclUnhandledCudaError);
@@ -3046,7 +3055,7 @@ TEST_F(ProxyUdsServiceMicrotest, GetFd_ExportInitSendCloseAndFdCloseFailures) {
   EXPECT_TRUE(Logged(NCCL_LOG_WARN, "Call to close failed"));
 }
 
-TEST_F(ProxyUdsServiceMicrotest, QueryFd_EchoesTheRemoteFd) {
+TEST_F(ProxyUdsFdServiceMicrotest, QueryFd_EchoesTheRemoteFd) {
   Hdr(ncclProxyMsgQueryFd, 0, (void*)0x80, 3);
   g_ipc.recvFd = 44;
   ASSERT_EQ(proxyUDSRecvReq(&ps_, 0), ncclSuccess);
@@ -3060,7 +3069,7 @@ TEST_F(ProxyUdsServiceMicrotest, QueryFd_EchoesTheRemoteFd) {
 }
 
 // proxyQueryFd returns success when the reply socket's init or send fails; a fix flips this pin.
-TEST_F(ProxyUdsServiceMicrotest, QueryFd_KnownBug_SwallowsInitAndSendErrors) {
+TEST_F(ProxyUdsFdServiceMicrotest, QueryFd_KnownBug_SwallowsInitAndSendErrors) {
   Hdr(ncclProxyMsgQueryFd, 0, (void*)0x80, 3);
   g_ipc.recvFd = 44;
   g_ipc.sendResult = ncclRemoteError;
@@ -3070,7 +3079,7 @@ TEST_F(ProxyUdsServiceMicrotest, QueryFd_KnownBug_SwallowsInitAndSendErrors) {
   EXPECT_EQ(proxyUDSRecvReq(&ps_, 0), ncclSuccess);
 }
 
-TEST_F(ProxyUdsServiceMicrotest, ServiceUDS_HandlesRequestsUntilStopOrAbort) {
+TEST_F(ProxyUdsFdServiceMicrotest, ServiceUDS_HandlesRequestsUntilStopOrAbort) {
   ps_.cudaDev = 4;
   g_hipSetDeviceResult = hipErrorInvalidDevice;
   CPU_SET(0, &proxyCpuset);
