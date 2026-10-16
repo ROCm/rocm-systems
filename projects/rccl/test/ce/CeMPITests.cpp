@@ -1128,8 +1128,11 @@ protected:
         {
             EXPECT_TRUE(ceLogShowsReduceScatterPath(log))
                 << context << ": CE ReduceScatter log marker absent";
-            EXPECT_TRUE(ceLogShowsReduceScatterReducer(log, ceExpectedReduceScatterReducer()))
-                << context << ": expected reducer=" << ceExpectedReduceScatterReducer();
+            const size_t chunksPerShard = ceLogChunksPerShard(log);
+            const char* expectedReducer = ceExpectedReduceScatterReducer(chunksPerShard);
+            EXPECT_TRUE(ceLogShowsReduceScatterReducer(log, expectedReducer))
+                << context << ": expected reducer=" << expectedReducer
+                << " (chunksPerShard=" << chunksPerShard << ")";
             int algo = 0, proto = 0, nChannels = 0;
             ASSERT_EQ(ncclSuccess,
                       rcclGetCollImplInfo(getActiveCommunicator(), ncclFuncReduceScatter, recvcount,

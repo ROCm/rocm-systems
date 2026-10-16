@@ -479,10 +479,9 @@ bool ncclCeImplemented(ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType
     case ncclFuncAlltoAllv:
     case ncclFuncScatter:
     case ncclFuncGather:
-    case ncclFuncAllReduce:
-    case ncclFuncReduceScatter:
       return true;
     case ncclFuncAllReduce:
+    case ncclFuncReduceScatter:
       // The CE local reduce kernels have no fp8 instantiation (ce_reduce.cc returns ncclInvalidArgument).
       return ty != ncclFloat8e4m3 && ty != ncclFloat8e5m2;
     default:
@@ -3242,7 +3241,10 @@ ncclResult_t ncclCeEnsureAllReduceStaging(struct ncclComm* comm) {
   uint8_t* ceARTmpBuf = nullptr;
   ncclWindow_vidmem* arWinDev = nullptr;
   ncclWindow_vidmem* arWinDevHost = nullptr;
-  const size_t NUM_SLOTS = comm->ceColl.numStagingSlots;
+  // numStagingSlots is latched in ncclCeInit; unit tests that call EnsureStaging
+  // on a zeroed comm never run init, so fall back to the compile-time default.
+  const size_t NUM_SLOTS =
+      comm->ceColl.numStagingSlots ? comm->ceColl.numStagingSlots : (size_t)NCCL_CE_NUM_SLOTS;
   size_t maxChunkBytes = 0;
   size_t ceARTmpBufSize = 0;
 
@@ -3774,6 +3776,13 @@ ncclResult_t ncclCeReduceScatter(struct ncclComm* comm, const void* sendbuff, vo
     }
   }
   if (totalSteps > 1) {
+    // Drain covers totalSteps > NUM_SLOTS. When slots are not reused, join the
+    // reducer onto ceStream before the peer-done sync so a second CE collective
+    // on an independent user stream cannot race ceARTmpBuf reads.
+    if (totalSteps <= (size_t)NUM_SLOTS) {
+      CUDACHECKGOTO(cudaEventRecord(ceColl->synceEvent, reduceStream), ret, fail);
+      CUDACHECKGOTO(cudaStreamWaitEvent(ceStream, ceColl->synceEvent, 0), ret, fail);
+    }
     NCCLCHECKGOTO(ncclMemOpSync(comm, ceStream, &collArgs), ret, fail);
   }
 
@@ -3794,6 +3803,20 @@ exit:
   ncclCeFreeBatchOpsParams(&batchOpsParams);
   return ret;
 fail:
+  // Per-chunk mode raises slot doorbells on ceStream and clears them only after
+  // the finite reducer on reduceStream. A goto fail between those leaves the
+  // window latched at 1; the host reset above is !perChunkReduce and the
+  // totalSteps==1 launch never runs the kernel clear. Queue the zero on
+  // ceStream so it lands after any already-enqueued write: scatterStream is
+  // NonBlocking, so a default-stream memset would not wait for that write and
+  // could be overwritten by a store of 1 that completes later. Drain ceStream
+  // before returning so the next collective's readyWaits on the user stream
+  // cannot observe the stale 1.
+  if (perChunkReduce && signalBuffer != nullptr) {
+    CUDACHECKIGNORE(cudaMemsetAsync(signalBuffer, 0,
+                                    NUM_SLOTS * (size_t)comm->nRanks * sizeof(uint32_t), ceStream));
+    CUDACHECKIGNORE(cudaStreamSynchronize(ceStream));
+  }
   goto exit;
 }
 

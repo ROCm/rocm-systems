@@ -149,12 +149,14 @@ inline bool ceLogShowsReduceScatterReducer(const std::string& log, const char* r
     return log.find(std::string("reducer=") + reducer) != std::string::npos;
 }
 
-// RCCL_CE_REDUCE_PER_CHUNK is the host decision that selects the finite reducer;
-// unset / "0" is persistent.
-inline const char* ceExpectedReduceScatterReducer()
+// Mirrors ncclCeReduceScatterPerChunkReduce: RCCL_CE_REDUCE_PER_CHUNK alone is
+// not enough — production stays on the persistent reducer when totalSteps == 1
+// (single-chunk shards). Pass the logged chunksPerShard (or 0 if absent).
+inline const char* ceExpectedReduceScatterReducer(size_t chunksPerShard)
 {
     const char* env = std::getenv("RCCL_CE_REDUCE_PER_CHUNK");
-    if(env != nullptr && env[0] != '\0' && std::strcmp(env, "0") != 0)
+    const bool perChunkEnv = env != nullptr && env[0] != '\0' && std::strcmp(env, "0") != 0;
+    if(perChunkEnv && chunksPerShard > 1)
         return "per-chunk";
     return "persistent";
 }

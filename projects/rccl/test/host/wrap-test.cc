@@ -6884,7 +6884,7 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredPreemptsSymmetri
       });
 }
 
-// Late arm must reuse ceReduceScatterAllowed (incl. nNodes==1). On a multi-node
+// Late arm must reuse ceReduceScatterEligible (incl. nNodes==1). On a multi-node
 // CTA-ZERO comm where DDA/hier/Direct decline, CE must not be selected.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredDeclinedOnMultiNode) {
   RUN_ISOLATED_TEST(
@@ -6931,10 +6931,11 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_LateCeRegisteredRejectsFloat8) {
       });
 }
 
-// Both CE arms require ncclGroupDepth == 0.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCe) {
+// Eager CE_2SHOT requires ncclGroupDepth == 0; inside a group the call must
+// stay queued as CE_REGISTERED rather than falling through to the ring.
+TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupSelectsRegisteredNotEager) {
   RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_InsideGroupExcludesCe",
+      "Wrap_SelectReduceScatter_InsideGroupSelectsRegisteredNotEager",
       []() {
         g_loadParam = EnabledCeReduceScatterParams;
         ncclComm* comm = MakeSelectComm();
@@ -6947,8 +6948,8 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_InsideGroupExcludesCe) {
         EXPECT_EQ(ncclSuccess, rcclSelectReduceScatter(comm, nullptr, nullptr, /*recvcount=*/8, ncclFloat32,
                                                        ncclSum, /*query=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        EXPECT_EQ(NCCL_ALGO_RING, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
+        ncclGroupDepth = 0;
         DeleteCommWithArch(comm);
       });
 }
@@ -7062,7 +7063,8 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcedCeRegisteredPreemptsSymmet
 // Primus coalesces the GPT-OSS gradient bucket into 139,370,448 BF16 values
 // per rank. CE ReduceScatter has no message-size cap and pipelines through
 // staging; force mode must still preempt an otherwise-eligible symk path and
-// accept BF16 Avg.
+// accept BF16 Avg. Inside ncclGroupStart/End the call stays queued as
+// CE_REGISTERED rather than eager CE_2SHOT or symk.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgAboveCap) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgAboveCap",
@@ -7090,15 +7092,14 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgA
                                           /*query=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
 
-        // Both CE arms require ncclGroupDepth == 0; inside a group, force still
-        // cannot select CE and an eligible symk path wins.
+        // Primus issues the same collective between ncclGroupStart/End. Eager
+        // 2-shot is closed; queued CE_REGISTERED must win over symk.
         ncclGroupDepth = 1;
         EXPECT_EQ(ncclSuccess,
                   rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
                                           /*query=*/false, &decision));
         EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
-        EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_SYMMETRIC, decision.algo);
+        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
         ncclGroupDepth = 0;
         DeleteCommWithArch(comm);
       });
@@ -7326,7 +7327,7 @@ TEST(WrapMicrotestIsolated, HierarchicalAlgoInfo_ReduceScatterIntraNeverUsesDire
 // RCCL_CE_REDUCESCATTER at 0 keeps every CE arm out even with every CE seam forced true, the exact
 // combination that WOULD give CE_REGISTERED in rcclSelectAllReduce/AllGather. The param does it,
 // not an absent call: rcclUseCeReduceScatter returns on its first guard, so
-// ceReduceScatterAllowed is false for both the early and late CE arms.
+// ceReduceScatterEligible is false for both the early and late CE arms.
 TEST(WrapMicrotestIsolated, SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectReduceScatter_DoesNotChooseCeWhenParamsDefaultOff",
@@ -7378,56 +7379,6 @@ TEST(WrapMicrotestIsolated, SelectReduceScatter_CeOptInSelectsRegisteredThenEage
                                                         ncclSum, /*query=*/false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
 
-        DeleteCommWithArch(comm);
-      });
-}
-
-// Primus coalesces the GPT-OSS gradient bucket into 139,370,448 BF16 values
-// per rank (2,229,927,168 bytes across eight ranks). That is intentionally
-// larger than the tuned 256 MiB 2-shot window, but CE ReduceScatter supports
-// it by chunking over the reusable staging slots. Explicit force mode must
-// therefore bypass both the tuning cap and an otherwise-eligible symk path.
-TEST(WrapMicrotestIsolated, SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgAboveCap) {
-  RUN_ISOLATED_TEST(
-      "Wrap_SelectReduceScatter_ForcePipelinesPrimusBfloat16AvgAboveCap",
-      []() {
-        g_loadParam = [](const char* env, int64_t defaultValue) {
-          if (std::strcmp(env, "RCCL_CE_REDUCESCATTER") == 0) return (int64_t)1;
-          if (std::strcmp(env, "RCCL_FORCE_CE_REDUCESCATTER") == 0) return (int64_t)1;
-          if (std::strcmp(env, "RCCL_CE_AR_MAX_MSG_BYTES") == 0) return (int64_t)(256ULL * 1024 * 1024);
-          return defaultValue;
-        };
-        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
-                                                                  size_t, const void*, void*, bool) { return true; });
-        alignas(16) static uint8_t staging;
-        ncclComm* comm = MakeSelectComm();
-        comm->nRanks = 8;
-        comm->nNodes = 1;
-        comm->symmetricSupport = true;
-        comm->ceColl.graphModeSeen = false;
-        comm->ceColl.ceARTmpBuf = nullptr;
-        rcclCollDecision decision{};
-        constexpr size_t kPrimusRecvCount = 139370448;
-        EXPECT_EQ(ncclSuccess,
-                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
-                                          /*query=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-
-        comm->ceColl.ceARTmpBuf = &staging;
-        EXPECT_EQ(ncclSuccess,
-                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
-                                          /*query=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_2SHOT, decision.algo);
-
-        // Primus issues the same collective between ncclGroupStart/End. The
-        // grouped call must stay queued and use CE at group end rather than
-        // executing the eager 2-shot path or falling back to symk.
-        ncclGroupDepth = 1;
-        EXPECT_EQ(ncclSuccess,
-                  rcclSelectReduceScatter(comm, nullptr, nullptr, kPrimusRecvCount, ncclBfloat16, ncclAvg,
-                                          /*query=*/false, &decision));
-        EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_REGISTERED, decision.algo);
-        ncclGroupDepth = 0;
         DeleteCommWithArch(comm);
       });
 }

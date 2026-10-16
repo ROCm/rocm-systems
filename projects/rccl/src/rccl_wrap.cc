@@ -2045,23 +2045,26 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     const bool force = rcclParamForceCeReduceScatter() != 0;
     // CE ReduceScatter always stages through ceARTmpBuf, so user-buffer symmetric
     // registration is not required (unlike CE AllReduce's registered-window path).
-    // Both early arms require ncclGroupDepth == 0 (grouped calls stay queued).
-    const bool ceReduceScatterAllowed =
-      ncclGroupDepth == 0 && ceArGraphAllowed && rcclUseCeReduceScatter(comm, recvcount, datatype, op);
+    // Eager 2-shot requires ncclGroupDepth == 0; CE_REGISTERED stays available
+    // inside a group so Primus-style ncclGroupStart/End batches can still queue CE.
+    const bool ceReduceScatterEligible =
+      ceArGraphAllowed && rcclUseCeReduceScatter(comm, recvcount, datatype, op);
+    const bool ceReduceScatterEagerAllowed = ncclGroupDepth == 0 && ceReduceScatterEligible;
     // Explicit force mode must preempt symk and use the pipelined staging path.
     // Without this, Primus' registered gradient buffers silently select symk
     // even though the user requested CE. Non-force mode preserves the tuned
     // symk precedence on the early arms; the late CE arm below can still win.
-    if ((force || !symEligible) && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf != NULL) {
+    if ((force || !symEligible) && ceReduceScatterEagerAllowed && comm->ceColl.ceARTmpBuf != NULL) {
       decision->algo = RCCL_CE_2SHOT;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
     }
-    // ceReduceScatterAllowed does not look at ceARTmpBuf. The buffer is allocated
+    // ceReduceScatterEligible does not look at ceARTmpBuf. The buffer is allocated
     // by the CE launch, which the eager CE early-return never reaches. Hand this
     // call to enqueue so CE init runs and ncclLaunchCeColl allocates staging.
     // Otherwise DDA is suppressed below and the call stays on the ring kernel.
-    if ((force || !symEligible) && ceReduceScatterAllowed && comm->ceColl.ceARTmpBuf == NULL) {
+    // Also covers grouped calls (eagerAllowed is false) that must stay queued.
+    if ((force || !symEligible) && ceReduceScatterEligible && comm->ceColl.ceARTmpBuf == NULL) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
@@ -2073,7 +2076,7 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     const size_t rsDdaVmmMax =
       rcclDdaVmmThresholdCtxTab(archTable, ncclFuncReduceScatter, rsWinRegType, /*graphMode=*/false, comm->nRanks);
     const size_t rsDdaEntryMax = rcclDdaEntryThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
-    if (!symEligible && (ddaFabricArch || !ceReduceScatterAllowed) &&
+    if (!symEligible && (ddaFabricArch || !ceReduceScatterEligible) &&
         rcclDdaEnabled(comm, totalBytes, rsDdaEntryMax, query, "RS")) {
       if (ddaFabricArch) {
         const size_t rsDdaLLMax    = rcclDdaLLThresholdTab(archTable, ncclFuncReduceScatter, comm->nRanks);
@@ -2131,12 +2134,14 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
     }
 
     // (5) CE ReduceScatter via enqueue when an earlier CE arm did not return
-    // (e.g. symEligible skipped the eager arms). Reuse ceReduceScatterAllowed so
-    // this arm keeps the same gates as rcclUseCeReduceScatter (nNodes==1,
-    // symmetricSupport, recvcount, op, datatype, CTA ZERO) instead of rebuilding
-    // a weaker subset. CE intentionally has priority over symk when both are
-    // eligible; symk remains the fallback when CE is not.
-    if (ceReduceScatterAllowed && !hasSysmemSegment) {
+    // (e.g. symEligible skipped the eager arms, or the call is inside a group
+    // with staging already allocated). Reuse ceReduceScatterEligible so this
+    // arm keeps the same gates as rcclUseCeReduceScatter (nNodes==1,
+    // symmetricSupport, recvcount, op incl. Avg+bf16, datatype, CTA ZERO /
+    // force) instead of rebuilding a weaker subset. CE intentionally has
+    // priority over symk when both are eligible; symk remains the fallback
+    // when CE is not.
+    if (ceReduceScatterEligible && !hasSysmemSegment) {
       decision->algo = RCCL_CE_REGISTERED;
       decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, recvcount);
       return ncclSuccess;
