@@ -51,8 +51,6 @@ common = [
     ".github/workflows/hrr-ci.yml",
     ".github/workflows/hrr-gpu.yml",
     "projects/hrr/tests/config/ci.yaml",
-    "projects/hrr/tests/docker/*",
-    "projects/hrr/tests/scripts/hrr_dev.py",
 ]
 
 # Patterns that skip CI only on Linux (e.g., Windows-only projects)
