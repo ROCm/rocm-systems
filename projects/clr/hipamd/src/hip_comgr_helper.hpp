@@ -129,13 +129,11 @@ bool CheckIfPackaged(std::string_view image);
 // entries by, e.g. "amdgcn-amd-amdhsa--gfx942:xnack+" -> {"amdgcn-amd-amdhsa", "gfx942:xnack+"}.
 bool SplitIsaName(const std::string& isa_name, std::string& triple, std::string& arch);
 
-#if COMGR_SUPPORTS_UNPACKAGE
 bool UnpackageUsingComgr(std::string_view source, const std::string& isa,
                          const std::vector<std::string>& linkOptions, std::string& buildLog,
                          std::vector<char>& unpackaged_code, amd_comgr_data_kind_t output_kind,
                          const amd_comgr_target_id_t packageEntryIDs[],
                          size_t packageEntryIDsCount);
-#endif
 
 // Mapping from targets to generic targets
 const std::map<std::string, std::string>& GenericTargetMapping();

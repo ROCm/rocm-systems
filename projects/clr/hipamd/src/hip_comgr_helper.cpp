@@ -363,21 +363,12 @@ bool SplitIsaName(const std::string& isa_name, std::string& triple, std::string&
   return !triple.empty() && !arch.empty();
 }
 
-#if COMGR_SUPPORTS_UNPACKAGE
 // Unpackage bitcode out of an llvm-offload-binary package using a COMGR action
 bool UnpackageUsingComgr(std::string_view source, const std::string& isa,
                          const std::vector<std::string>& linkOptions, std::string& buildLog,
                          std::vector<char>& unpackaged_code, amd_comgr_data_kind_t output_kind,
                          const amd_comgr_target_id_t packageEntryIDs[],
                          size_t packageEntryIDsCount) {
-  if (!amd::Comgr::supports_unpackage()) {
-    LogError(
-        "Error in hip Linker : the input uses the llvm-offload-binary package format, which "
-        "requires a COMGR that provides amd_comgr_action_info_set_package_entry_ids (COMGR 3.5 or "
-        "newer)");
-    return false;
-  }
-
   comgr_helper::ComgrDataSetUniqueHandle linkinput;
   comgr_helper::ComgrActionInfoUniqueHandle action;
   if (linkinput.Create() != AMD_COMGR_STATUS_SUCCESS) {
@@ -424,7 +415,6 @@ bool UnpackageUsingComgr(std::string_view source, const std::string& isa,
 
   return true;
 }
-#endif  // COMGR_SUPPORTS_UNPACKAGE
 
 bool linkLLVMBitcode(const comgr_helper::ComgrDataSetUniqueHandle& linkInputs,
                      const std::string& isa, const std::vector<std::string>& linkOptions,
@@ -1018,12 +1008,6 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
       (input_type == hipJitInputLLVMBundledBitcode || input_type == hipJitInputSpirv)) {
     // Packages always go through COMGR: the branches below only understand the
     // clang-offload-bundle byte layout, not the llvm-offload-binary package format.
-#if !COMGR_SUPPORTS_UNPACKAGE
-    LogError(
-        "Error in hip Linker: the input uses the llvm-offload-binary package format, but this HIP "
-        "runtime was built against a COMGR older than 3.5, which cannot unpackage it");
-    return false;
-#else
     // Mirror the bundle path's target selection: SPIR-V inputs are keyed on the fixed SPIR-V
     // target (the bundle path's SPIRV_BUNDLE_ENTRY_ID), everything else on the device ISA.
     std::string triple, arch;
@@ -1055,7 +1039,6 @@ bool LinkProgram::AddLinkerDataImpl(std::string_view link_data, hipJitInputType 
     if (input_type == hipJitInputLLVMBundledBitcode) {
       input_type = hipJitInputLLVMBitcode;
     }
-#endif
   } else if (is_bundled_ && input_type == hipJitInputSpirv) {
     const char* bundleEntryIDs[] = {helpers::SPIRV_BUNDLE_ENTRY_ID};
     size_t bundleEntryIDsCount = sizeof(bundleEntryIDs) / sizeof(bundleEntryIDs[0]);

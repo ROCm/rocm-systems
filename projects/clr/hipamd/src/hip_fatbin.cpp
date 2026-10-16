@@ -409,7 +409,6 @@ static bool UncompressAndPopulateCodeObject(
   return passed;
 }
 
-#if COMGR_SUPPORTS_UNPACKAGE
 // Copy out the code object comgr produced for one requested target, if it produced one at all.
 //
 // comgr can return more than one entry for a single request, so this takes the first, the way
@@ -479,13 +478,6 @@ static bool TakeUnpackagedCodeObject(
 static bool PopulateCodeObjectMapFromPackage(
     const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
-  if (!amd::Comgr::supports_unpackage()) {
-    LogError(
-        "This code object uses the llvm-offload-binary package format, which requires a COMGR "
-        "that provides amd_comgr_action_info_set_package_entry_ids (COMGR 3.5 or newer)");
-    return false;
-  }
-
   if (image_bound != amd::Elf::kUnknownSize && image_bound < sizeof(symbols::OffloadPackageHeader)) {
     LogError("Offload package header is truncated");
     return false;
@@ -602,7 +594,6 @@ static bool PopulateCodeObjectMapFromPackage(
 
   return passed;
 }
-#endif  // COMGR_SUPPORTS_UNPACKAGE
 
 static bool PopulateCodeObjectMap(
     const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
@@ -717,15 +708,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
   // device loads reuse this copy instead of the caller-owned buffer.
   const bool save_image_data = image_storage != nullptr;
 
-#if !COMGR_SUPPORTS_UNPACKAGE
-  if (is_package) {
-    LogError(
-        "This code object uses the llvm-offload-binary package format, but this HIP runtime was "
-        "built against a COMGR older than 3.5, which cannot unpackage it");
-    return hipErrorInvalidImage;
-  }
-#endif
-
   if (!is_compressed && !is_uncompressed && !is_package && !is_elf) {
     LogError("The code object has invalid header: compressed, uncompressed, package or elf");
     return hipErrorInvalidImage;
@@ -828,7 +810,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     // Track these to release later
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
-#if COMGR_SUPPORTS_UNPACKAGE
   } else if (is_package) {
     if (!PopulateCodeObjectMapFromPackage(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;
@@ -836,7 +817,6 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     // Unpackaging always copies out of the package, just like the compressed path above.
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
-#endif
   } else {  // uncompressed code object
     if (!PopulateCodeObjectMap(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;

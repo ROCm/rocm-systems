@@ -83,12 +83,9 @@ bool Comgr::LoadLib() {
   GET_COMGR_SYMBOL(amd_comgr_action_info_set_device_lib_linking)
   GET_COMGR_SYMBOL(amd_comgr_lookup_code_object)
   GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_set_bundle_entry_ids)
-#if COMGR_SUPPORTS_UNPACKAGE
-  // Optional: a comgr older than 3.5 has no unpackaging support, but is otherwise usable.
-  GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_set_package_entry_ids)
-  GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_get_package_entry_id_count)
-  GET_COMGR_OPTIONAL_SYMBOL(amd_comgr_action_info_get_package_entry_id)
-#endif
+  GET_COMGR_SYMBOL(amd_comgr_action_info_set_package_entry_ids)
+  GET_COMGR_SYMBOL(amd_comgr_action_info_get_package_entry_id_count)
+  GET_COMGR_SYMBOL(amd_comgr_action_info_get_package_entry_id)
   size_t major = 0, minor = 0;
   get_version(&major, &minor);
   ClPrint(amd::LOG_INFO, amd::LOG_CODE, "Loaded COMGR library version %zu.%zu.", major, minor);
