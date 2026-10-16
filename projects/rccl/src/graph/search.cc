@@ -1046,8 +1046,10 @@ ncclResult_t ncclTopoGetChannelFromXml(struct ncclXmlNode* xmlChannel, int c, st
       NCCLCHECK(xmlGetAttrIndex(sub, "rank", &rankIndex));
       if (rankIndex != -1) {
         long rankValue = strtol(sub->attrs[rankIndex].value, NULL, 0);
-        if (rankValue < 0 || rankValue > INT_MAX) {
-          WARN("XML Import Channel : rank %ld out of range.", rankValue);
+        int rankGpuIndex = -1;
+        if (rankValue < 0 || rankValue > INT_MAX ||
+            ncclTopoRankToIndex(system, (int)rankValue, &rankGpuIndex, /*showWarn=*/false) != ncclSuccess) {
+          WARN("XML Import Channel : rank %ld not found in topology.", rankValue);
           return ncclInvalidUsage;
         }
         rank = (int)rankValue;
