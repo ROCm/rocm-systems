@@ -9,6 +9,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- RDC stops listening for a GPU's process start and end events once no job or watch on that GPU uses them. Before, they stayed enabled after a job stopped.
+
 ### Removed
 
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
@@ -61,6 +63,16 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdc_start_embedded()` returns `RDC_ST_FAIL_LOAD_MODULE`, and `rdcd` exits with an error, when AMD SMI fails to initialize. Both aborted the process.
 
 - GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values.
+
+- `rdci dmon` no longer hangs when it watches a GPU event and a GPU sends two events of that kind at once. RDC now gives every GPU event its own timestamp.
+
+- `rdcd` no longer drops every GPU event read in one poll when one of them comes from a GPU that RDC does not list. It skips that event.
+
+- RDC skips GPU events of a kind it does not know, instead of recording them as field 0. With assertions enabled, `rdcd` aborted.
+
+- Watching a GPU event field, or starting a job, on several GPUs no longer stops at the first GPU whose AMD SMI handle lookup, capability or event mask write fails. RDC enables the events on the other GPUs.
+
+- Watching a GPU event field, for example with `rdci dmon -e 2000`, no longer replaces the GPU events that other watches and running jobs on that GPU use, such as the process start and end events that job statistics record, and ending the watch no longer stops them. After AMD SMI fails to stop a GPU's event notification, the next watch of the same events gets them.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

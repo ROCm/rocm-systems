@@ -42,13 +42,21 @@ class RdcNotification {
  public:
   virtual bool is_notification_event(rdc_field_t field) const = 0;
 
-  virtual rdc_status_t set_listen_events(const std::vector<RdcFieldKey> fk_arr) = 0;
+  // Adds a listener for each (GPU, event field) pair in fields, a pair given twice counting
+  // twice; other fields are ignored. Each GPU then gets the events that its listeners want.
+  // Returns the first error for a GPU with an event field in fields; the listeners stay, and a
+  // later call that names the GPU tries again.
+  virtual rdc_status_t add_event_listeners(const std::vector<RdcFieldKey>& fields) = 0;
+
+  // Removes a listener for each (GPU, event field) pair in fields that has one. A GPU left
+  // without listeners gets no events. Returns the first error for a GPU that lost a listener;
+  // the listeners are removed whatever the result.
+  virtual rdc_status_t remove_event_listeners(const std::vector<RdcFieldKey>& fields) = 0;
 
   // Blocking
   virtual rdc_status_t listen(rdc_evnt_notification_t* events, uint32_t* num_events,
                               uint32_t timeout_ms) = 0;
 
-  virtual rdc_status_t stop_listening(uint32_t gpu_id) = 0;
   virtual ~RdcNotification() {}
 };
 

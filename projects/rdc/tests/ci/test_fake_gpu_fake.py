@@ -17,6 +17,7 @@ from test_fake_gpu import FACTOR, FAKE_NAME, PREFIX, _first_file, _missing  # no
 AMDSMI_STATUS_SUCCESS = 0
 AMDSMI_STATUS_INVAL = 1
 AMDSMI_STATUS_NOT_FOUND = 31
+AMDSMI_STATUS_NOT_INIT = 32
 AMDSMI_STATUS_NO_DATA = 40
 AMDSMI_STATUS_INSUFFICIENT_SIZE = 41
 AMDSMI_STATUS_UNKNOWN_ERROR = 0xFFFFFFFF
@@ -268,6 +269,63 @@ print(json.dumps(calls))
     ]
 
 
+def test_event_masks_hold_an_event_until_its_gpu_enables_it(fake):
+    out = _child(
+        fake,
+        r"""
+class Event(ctypes.Structure):
+    _fields_ = [("processor_handle", ctypes.c_void_p), ("event", ctypes.c_uint32),
+                ("message", ctypes.c_char * 256)]
+for name in ("amdsmi_init_gpu_event_notification", "amdsmi_set_gpu_event_notification_mask",
+             "amdsmi_stop_gpu_event_notification"):
+    getattr(lib, name).restype = ctypes.c_uint32
+lib.amdsmi_set_gpu_event_notification_mask.argtypes = [ctypes.c_void_p, ctypes.c_uint64]
+h = handles()
+data = (Event * 8)()
+def get():
+    n = ctypes.c_uint32(8)
+    st = lib.amdsmi_get_gpu_event_notification(0, ctypes.byref(n), data)
+    got = [[h.index(data[i].processor_handle) if data[i].processor_handle in h else "x",
+            data[i].event, data[i].message.decode()] for i in range(n.value)] if st == 0 else []
+    return [st, got]
+def init(g): return lib.amdsmi_init_gpu_event_notification(ctypes.c_void_p(h[g]))
+def mask(g, events): return lib.amdsmi_set_gpu_event_notification_mask(
+    ctypes.c_void_p(h[g]), sum(1 << (e - 1) for e in events))
+def stop(g): return lib.amdsmi_stop_gpu_event_notification(ctypes.c_void_p(h[g]))
+steps = {"mask closed": mask(0, [1]), "none open": get()}
+steps["open 1"] = [init(1), mask(1, [2]), get()]
+steps["open 1 again"] = [init(1), get()]  # the mask stays: 12 is not in it yet
+steps["mask 1"] = [mask(1, [2, 12]), get()]
+steps["stop 1"] = [stop(1), mask(1, [1])]
+steps["open 0"] = [init(0), mask(0, [1]), get()]
+print(json.dumps(steps))
+""",
+        RDC_FAKE_EVENTS="1@0,2@1,1@x,12@1",
+        RDC_FAKE_EVENT_MASKS="1",
+    )
+    assert out == {
+        "mask closed": AMDSMI_STATUS_NOT_INIT,
+        # x has no event file to wait for; GPU 0's and GPU 1's events wait for theirs.
+        "none open": [AMDSMI_STATUS_SUCCESS, [["x", 1, "fake event 1"]]],
+        "open 1": [
+            AMDSMI_STATUS_SUCCESS,
+            AMDSMI_STATUS_SUCCESS,
+            [AMDSMI_STATUS_SUCCESS, [[1, 2, "fake event 2"]]],
+        ],
+        "open 1 again": [AMDSMI_STATUS_SUCCESS, [AMDSMI_STATUS_NO_DATA, []]],
+        "mask 1": [
+            AMDSMI_STATUS_SUCCESS,
+            [AMDSMI_STATUS_SUCCESS, [[1, 12, "PID: 1001  task: fake"]]],
+        ],
+        "stop 1": [AMDSMI_STATUS_SUCCESS, AMDSMI_STATUS_NOT_INIT],
+        "open 0": [
+            AMDSMI_STATUS_SUCCESS,
+            AMDSMI_STATUS_SUCCESS,
+            [AMDSMI_STATUS_SUCCESS, [[0, 1, "fake event 1"]]],
+        ],
+    }
+
+
 @pytest.mark.parametrize("n", [0, 2])
 def test_num_freq_sets_the_levels_and_no_current_level(fake, n):
     out = _child(
@@ -412,6 +470,7 @@ print(json.dumps([st, v.build]))
         ("RDC_FAKE_EVENTS", "16@0"),
         ("RDC_FAKE_EVENTS", "1@2"),
         ("RDC_FAKE_EVENTS", "count=5"),
+        ("RDC_FAKE_EVENT_MASKS", "2"),
         ("RDC_FAKE_CPER_COUNT", "many"),
         ("RDC_FAKE_FAIL", "amdsmi_get_power_info@2"),  # GPUs 0 and 1 only
         ("RDC_FAKE_FAIL", "amdsmi_init=AMDSMI_STATUS_TYPO"),
