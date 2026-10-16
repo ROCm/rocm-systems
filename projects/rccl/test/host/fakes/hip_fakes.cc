@@ -59,6 +59,7 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 #ifdef CE_BATCH_ASYNC_SUPPORTED
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
+ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 
@@ -347,13 +348,20 @@ static hipError_t DefaultHipMemcpyAsync(void*, const void*, size_t, hipMemcpyKin
 {
     return g_hipAsyncOpsResult;
 }
-static hipError_t DefaultHipMemset(void*, int, size_t)
-{
-    return hipErrorInvalidValue;
-}
 static hipError_t DefaultHipMemsetAsync(void*, int, size_t, hipStream_t)
 {
     return g_hipAsyncOpsResult;
+}
+
+// Synchronous memset. Unlike the async form (which answers to the shared
+// g_hipAsyncOpsResult gate), this really writes: the allocation seams above
+// hand out std::malloc'd host memory, so production code that memsets a buffer
+// and later reads it back -- ncclRmaProxyCtxAllocGraph zeroing flushBufDev, for
+// one -- sees the zeros it wrote rather than uninitialised bytes.
+static hipError_t DefaultHipMemset(void* dst, int value, size_t bytes)
+{
+    if (dst != nullptr && bytes > 0) std::memset(dst, value, bytes);
+    return hipSuccess;
 }
 
 static hipError_t DefaultHipStreamCreateWithFlags(hipStream_t* stream, unsigned)
@@ -394,8 +402,8 @@ std::function<hipError_t(void*)> g_hipIpcCloseMemHandle = DefaultHipIpcCloseMemH
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind)> g_hipMemcpy = DefaultHipMemcpy;
 std::function<hipError_t(void*, const void*, size_t, hipMemcpyKind, hipStream_t)>
     g_hipMemcpyAsync = DefaultHipMemcpyAsync;
-std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(void*, int, size_t, hipStream_t)> g_hipMemsetAsync = DefaultHipMemsetAsync;
+std::function<hipError_t(void*, int, size_t)> g_hipMemset = DefaultHipMemset;
 std::function<hipError_t(hipStream_t*, unsigned)> g_hipStreamCreateWithFlags = DefaultHipStreamCreateWithFlags;
 std::function<hipError_t(hipStream_t)> g_hipStreamSynchronize = DefaultHipStreamSynchronize;
 std::function<hipError_t(hipStream_t)> g_hipStreamDestroy = DefaultHipStreamDestroy;
@@ -646,8 +654,8 @@ void ResetHipFakes()
     g_hipIpcCloseMemHandle          = DefaultHipIpcCloseMemHandle;
     g_hipMemcpy                     = DefaultHipMemcpy;
     g_hipMemcpyAsync                = DefaultHipMemcpyAsync;
-    g_hipMemset                     = DefaultHipMemset;
     g_hipMemsetAsync                = DefaultHipMemsetAsync;
+    g_hipMemset                     = DefaultHipMemset;
     g_hipStreamCreateWithFlags      = DefaultHipStreamCreateWithFlags;
     g_hipStreamSynchronize          = DefaultHipStreamSynchronize;
     g_hipStreamDestroy              = DefaultHipStreamDestroy;

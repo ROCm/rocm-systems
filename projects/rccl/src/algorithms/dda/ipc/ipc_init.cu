@@ -8,7 +8,6 @@
 
 #include "alloc.h"
 #include "archinfo.h"
-#include "bootstrap.h"
 #include "checks.h"
 #include "comm.h"
 #include "debug.h"
@@ -33,7 +32,7 @@ using nccl_dda_detail::kDdaNranks;
 namespace {
 
 bool ddaIpcCommEligible(const ncclComm* comm) {
-  if (comm == nullptr || !rcclParamDdaEnable()) {
+  if (comm == nullptr) {
     return false;
   }
   const bool ddaArchSupported =

@@ -129,6 +129,14 @@ struct rcclArchThresholds {
   bool forceCeScratch;
 };
 
-const rcclArchThresholds* rcclGetArchThresholds(const char* gcn);
+// Compute-partition mode a gfx1250 comm is tuned for (RCCL_TUNING_PARTITION_MODE). It picks
+// the table only; other archs have one table for every mode.
+enum rcclTuningPartition {
+  RCCL_TUNING_PARTITION_SPX = 0,
+  RCCL_TUNING_PARTITION_DPX = 1,
+};
+
+const rcclArchThresholds* rcclGetArchThresholds(const char* gcn,
+                                                rcclTuningPartition partition = RCCL_TUNING_PARTITION_SPX);
 
 #endif  // RCCL_ARCH_THRESHOLDS_H_

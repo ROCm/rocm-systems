@@ -7,6 +7,7 @@
 
 #include <cstdint>
 #include <iostream>
+#include <limits>
 #include <map>
 #include <string>
 
@@ -123,6 +124,16 @@ void TestTempRead::Run(void) {
         err = amdsmi_get_temp_metric(processor_handles_[i],
                                      static_cast<amdsmi_temperature_type_t>(type), met, &val_i64);
         DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
+        // PLX is read out of gpu_metrics temperature_vrsoc, which a device
+        // without that sensor leaves at the not-applicable sentinel. Judge the
+        // reading this call returned, not a second one: the sensor can change
+        // between calls, so re-reading it here would race.
+        if ((static_cast<amdsmi_temperature_type_t>(type) == AMDSMI_TEMPERATURE_TYPE_PLX) &&
+            (err == AMDSMI_STATUS_SUCCESS)) {
+          EXPECT_NE(val_i64, static_cast<int64_t>(std::numeric_limits<uint16_t>::max()))
+              << "device " << i << " handed back the not-applicable sentinel as a PLX "
+              << "temperature; a sensor that is not there must report NOT_SUPPORTED";
+        }
         if (err == AMDSMI_STATUS_NOT_SUPPORTED) {
           IF_VERB(STANDARD) {
             std::cout << "\t**" << label << ": "

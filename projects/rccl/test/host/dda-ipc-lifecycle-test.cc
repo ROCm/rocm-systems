@@ -327,13 +327,18 @@ TEST_F(DdaIpcLifecycleMicrotest, NormalDestroyClosesPeerMappingsBeforeSerialComm
   }
 }
 
-TEST_F(DdaIpcLifecycleMicrotest, DisabledDdaSkipsIpcInitializationAndCollectiveTeardown) {
+TEST_F(DdaIpcLifecycleMicrotest, DisabledDdaKeepsScratchForCeScratchCollectives) {
+  // CE-scratch AllGather/AlltoAll select on comm->ddaScratch independently of
+  // RCCL_DDA_ENABLE, so disabling DDA dispatch must not skip IPC scratch setup.
   g_ddaEnable = 0;
 
   initializeDdaIpcForAllRanks();
   for (int rank = 0; rank < kRanks; ++rank) {
-    EXPECT_EQ(nullptr, comms_[rank]->ddaIpcMemHandler) << "rank " << rank;
-    EXPECT_EQ(nullptr, comms_[rank]->ddaIpcBarrierState) << "rank " << rank;
+    ASSERT_EQ(ncclSuccess, initResults_[rank]) << "rank " << rank;
+    EXPECT_NE(nullptr, comms_[rank]->ddaScratch) << "rank " << rank;
+    EXPECT_GT(comms_[rank]->ddaScratchBytes, 0u) << "rank " << rank;
+    EXPECT_NE(nullptr, comms_[rank]->ddaPeerPtrsHost) << "rank " << rank;
+    EXPECT_NE(nullptr, comms_[rank]->ddaIpcMemHandler) << "rank " << rank;
   }
   closeDdaIpcPeerMappingsForAllRanks();
   finalizeDdaIpcSerially();
@@ -341,6 +346,7 @@ TEST_F(DdaIpcLifecycleMicrotest, DisabledDdaSkipsIpcInitializationAndCollectiveT
   EXPECT_EQ(0, bootstrap_.timeouts);
   EXPECT_EQ(0, bootstrap_.desyncs);
   EXPECT_EQ(0, bootstrap_.barrierCalls);
+  EXPECT_EQ(0, earlyFrees_);
   EXPECT_EQ(0, openMappingCount());
   EXPECT_TRUE(liveAllocations_.empty());
   for (int rank = 0; rank < kRanks; ++rank) {

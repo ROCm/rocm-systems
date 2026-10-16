@@ -168,9 +168,12 @@ extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*byt
 extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*bytes*/,
                                 hipMemcpyKind /*kind*/, hipStream_t /*stream*/)>
     g_hipMemcpyAsync;
-extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, hipStream_t /*stream*/)>
     g_hipMemsetAsync;
+// Synchronous memset. The default really writes (std::memset) and returns
+// hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
+// buffer production zeroes is genuinely zero when a test reads it back.
+extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
