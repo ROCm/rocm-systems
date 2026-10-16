@@ -337,12 +337,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
 
-- **`rccl-UnitTestsMicroLinux`** — `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
+- **`rccl-UnitTestsMicroLinux`**: `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
   plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc`, `misc/socket.cc`,
   `misc/shmutils.cc` and `misc/signals.cc`, one test TU each; suites `Linux*`,
-  `Socket*`, `Shmutils*`, `Signals*`. Its own binary because it runs the real
-  `os/linux.cc` the shared fakes stub, on real sockets, files and shared memory. See
-  `test_categories_micro_linux.yaml`.
+  `Socket*`, `Shmutils*`, `Signals*`. Its own binary: `fakes/os_fakes.cc`, which most
+  targets link, defines `ncclOsInitialize`, `ncclOsTopoGetStrFromSys` and other `ncclOs*`
+  symbols `os/linux.cc` defines. See `test_categories_micro_linux.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the

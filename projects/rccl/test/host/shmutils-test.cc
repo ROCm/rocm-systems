@@ -116,7 +116,7 @@ TEST_F(ShmutilsMicrotest, Allgather_EveryRankGetsEveryRanksValueInRankOrder) {
       ncclShmemCollBuff mine = coll_;
       for (int round = 0; round < kRounds; round++) {
         int send = 10 * round + r, recv[kRanks];
-        ASSERT_EQ(ncclShmemAllgather(comm.get(), &mine, &send, recv, sizeof(int)), ncclSuccess);
+        EXPECT_EQ(ncclShmemAllgather(comm.get(), &mine, &send, recv, sizeof(int)), ncclSuccess);
         got[r].insert(got[r].end(), recv, recv + kRanks);
       }
       EXPECT_EQ(mine.round, kRounds);

@@ -89,8 +89,9 @@ void LinuxResetParams() {
   g_paramCaches.clear();
 }
 
-// Defined by init.cc in production.
-int g_setCpuStackSize = 0;
+// Defined by init.cc in production, with this default.
+constexpr int kSetCpuStackSizeDefault = 1;
+int g_setCpuStackSize = kSetCpuStackSizeDefault;
 int ncclParamSetCpuStackSize() { return g_setCpuStackSize; }
 
 // --- HIP: only the SHM device-mapping path calls into it.
@@ -185,7 +186,7 @@ class LinuxMicrotest : public ::testing::Test {
   void SetUp() override {
     lx::Reset();
     g_linuxLog.clear();
-    g_setCpuStackSize = 0;
+    g_setCpuStackSize = kSetCpuStackSizeDefault;
   }
   void TearDown() override { lx::Reset(); }
   LinuxScopedEnv retrySleep_{"NCCL_SOCKET_RETRY_SLEEP_MSEC", "0"};
@@ -358,7 +359,8 @@ class LinuxInitMicrotest : public LinuxMicrotest {
   pthread_attr_t saved_;
 };
 
-TEST_F(LinuxInitMicrotest, Initialize_WithoutTheParamLeavesTheStackAlone) {
+TEST_F(LinuxInitMicrotest, Initialize_ParamOffLeavesTheStackAlone) {
+  g_setCpuStackSize = 0;
   SetDefaultStack(1 << 20);
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
   EXPECT_EQ(DefaultStack(), 1u << 20);
@@ -366,7 +368,6 @@ TEST_F(LinuxInitMicrotest, Initialize_WithoutTheParamLeavesTheStackAlone) {
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_RaisesASmallDefaultStackTo8MB) {
-  g_setCpuStackSize = 1;
   SetDefaultStack(1 << 20);
   lx::getrlimit = [](int resource, rlimit* lim) {
     int rc = ::getrlimit((__rlimit_resource_t)resource, lim);
@@ -379,7 +380,6 @@ TEST_F(LinuxInitMicrotest, Initialize_RaisesASmallDefaultStackTo8MB) {
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_ReportsAnUnlimitedStackLimit) {
-  g_setCpuStackSize = 1;
   SetDefaultStack(2 << 20);  // glibc's fallback when RLIMIT_STACK is unlimited
   lx::getrlimit = [](int resource, rlimit* lim) {
     int rc = ::getrlimit((__rlimit_resource_t)resource, lim);
@@ -391,7 +391,6 @@ TEST_F(LinuxInitMicrotest, Initialize_ReportsAnUnlimitedStackLimit) {
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_KeepsAStackThatIsAlready8MB) {
-  g_setCpuStackSize = 1;
   SetDefaultStack(8192 * 1024);
   ASSERT_EQ(ncclOsInitialize(), ncclSuccess);
   EXPECT_FALSE(LinuxLogged("unsafe"));
@@ -401,7 +400,6 @@ TEST_F(LinuxInitMicrotest, Initialize_KeepsAStackThatIsAlready8MB) {
 }
 
 TEST_F(LinuxInitMicrotest, Initialize_GetrlimitFailureIsASystemError) {
-  g_setCpuStackSize = 1;
   SetDefaultStack(1 << 20);
   lx::getrlimit = [](int, rlimit*) {
     errno = EPERM;
@@ -697,12 +695,14 @@ TEST_F(LinuxSocketMicrotest, ResetFd_CreatesAConfiguredSocket) {
 TEST_F(LinuxSocketMicrotest, ResetFd_ReusesTheExistingDescriptorNumber) {
   sockaddr_in addr;
   int fd = Listen(&addr);
+  int lowestFree = ::socket(AF_INET, SOCK_STREAM, 0);
+  ::close(lowestFree);
   ncclSocket sock = Sock(fd);
   ASSERT_EQ(ncclOsSocketResetFd(&sock), ncclSuccess);
   EXPECT_EQ(sock.socketDescriptor, fd);
   EXPECT_EQ(IntOpt(fd, SOL_SOCKET, SO_ACCEPTCONN), 0);
   int probe = ::socket(AF_INET, SOCK_STREAM, 0);  // the temporary descriptor was closed
-  EXPECT_LE(probe, fd + 1);
+  EXPECT_EQ(probe, lowestFree);
   ::close(probe);
 }
 
@@ -1200,7 +1200,7 @@ TEST_F(LinuxSocketCloseMicrotest, ShutsDownADuplicatedSocket) {
   EXPECT_TRUE(FdOpen(dupFd));
 }
 
-TEST_F(LinuxSocketCloseMicrotest, LeavesTheDescriptorOfANoneOrClosedSocket) {
+TEST_F(LinuxSocketCloseMicrotest, LeavesTheDescriptorOfANoneOrOutOfRangeState) {
   for (ncclSocketState state : {ncclSocketStateNone, ncclSocketStateNum}) {
     int sv[2];
     Pair(sv);
@@ -1416,18 +1416,14 @@ TEST_F(LinuxSysfsMicrotest, GetPciPath_MissingDeviceIsASystemError) {
   EXPECT_TRUE(LinuxLogged("WARN Could not find real path of /sys/class/pci_bus/0000:1b/../../0000:1b:00.0"));
 }
 
-TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_DropsTheLastCharacter) {
+TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_StripsTheNewlineAndTruncates) {
   Mkdirs("/d");
   Write("/d/nl", "0x030000\n");
-  Write("/d/raw", "abc");
   Write("/d/empty", "");
   char buf[16];
   std::string dir = root_ + "/d";
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "nl", buf, sizeof(buf)), ncclSuccess);
   EXPECT_STREQ(buf, "0x030000");
-  // Observed: a value without a trailing newline loses its last character.
-  ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "raw", buf, sizeof(buf)), ncclSuccess);
-  EXPECT_STREQ(buf, "ab");
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "nl", buf, 4), ncclSuccess);  // truncated to maxLen
   EXPECT_STREQ(buf, "0x0");
   EXPECT_FALSE(LinuxLogged("could not read"));
@@ -1437,6 +1433,16 @@ TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_DropsTheLastCharacter) {
   ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "missing", buf, sizeof(buf)), ncclSuccess);
   EXPECT_STREQ(buf, "");
   EXPECT_TRUE(LinuxLogged(("INFO Topology detection : could not read " + dir + "/missing, ignoring").c_str()));
+}
+
+// A value without a trailing newline loses its last character; a fix flips this pin.
+TEST_F(LinuxSysfsMicrotest, TopoGetStrFromSys_KnownBug_DropsTheLastCharacter) {
+  Mkdirs("/d");
+  Write("/d/raw", "abc");
+  char buf[16];
+  std::string dir = root_ + "/d";
+  ASSERT_EQ(ncclOsTopoGetStrFromSys(dir.c_str(), "raw", buf, sizeof(buf)), ncclSuccess);
+  EXPECT_STREQ(buf, "ab");
 }
 
 TEST_F(LinuxSysfsMicrotest, DeviceClass_ReadsTheClassAttribute) {
@@ -1727,9 +1733,8 @@ TEST_F(LinuxShmMicrotest, MkstempFailure) {
   EXPECT_TRUE(LinuxLogged("WARN Error: failed to create shared memory file /dev/shm/nccl-XXXXXX"));
 }
 
-// Observed: a segment that fails after the file was created leaves the file behind, because close
-// only unlinks once a refcount has been mapped.
-TEST_F(LinuxShmMicrotest, FallocateFailureLeavesTheCreatedFile) {
+// Close only unlinks once a refcount is mapped, so a failure after creation leaves the file; a fix flips this pin.
+TEST_F(LinuxShmMicrotest, ShmOpen_KnownBug_FallocateFailureLeavesTheCreatedFile) {
   lx::fallocate = [](int, int, off_t, off_t) {
     errno = ENOSPC;
     return -1;
@@ -1852,6 +1857,7 @@ TEST_F(LinuxShmMicrotest, CloseReportsAHipUnregisterFailure) {
   size_t size = h->realShmSize;
   EXPECT_EQ(ncclOsShmClose(h), ncclUnhandledCudaError);  // returns before munmap and free
   ::munmap(mapping, size);
+  free(h);
 }
 
 TEST_F(LinuxShmMicrotest, HandleInitWithoutAMapping) {

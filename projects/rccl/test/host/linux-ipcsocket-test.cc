@@ -156,9 +156,12 @@ TEST_F(LinuxIpcsocketMicrotest, GetFd) {
   EXPECT_EQ(fd, a_.fd);
 }
 
-// Observed: descriptor 0 counts as "not open", like -1, so Close leaves it.
-TEST_F(LinuxIpcsocketMicrotest, Close_SkipsNullAndUnopenedHandles) {
+TEST_F(LinuxIpcsocketMicrotest, Close_RejectsANullSocket) {
   EXPECT_EQ(ncclIpcSocketClose(nullptr), ncclInternalError);
+}
+
+// Descriptor 0 counts as "not open", like -1, so Close leaves it; a fix flips this pin.
+TEST_F(LinuxIpcsocketMicrotest, Close_KnownBug_TreatsDescriptorZeroAsUnopened) {
   ncclIpcSocket zero = {0, "", nullptr};
   EXPECT_EQ(ncclIpcSocketClose(&zero), ncclSuccess);
   EXPECT_TRUE(FdOpen(0));

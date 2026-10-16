@@ -370,7 +370,11 @@ TEST_F(SocketMicrotest, GetAddrFromString_IPv4WithPort) {
   ncclSocketAddress a;
   ASSERT_EQ(ncclSocketGetAddrFromString(&a, "10.1.2.3:5000"), ncclSuccess);
   EXPECT_EQ(Str(a), "10.1.2.3<5000>");
-  // Observed: without a port, the missing -1 becomes port 65535.
+}
+
+// Without a port, the missing -1 becomes port 65535; a fix flips this pin.
+TEST_F(SocketMicrotest, GetAddrFromString_KnownBug_MissingPortBecomes65535) {
+  ncclSocketAddress a;
   ASSERT_EQ(ncclSocketGetAddrFromString(&a, "10.1.2.3"), ncclSuccess);
   EXPECT_EQ(ncclSocketToPort(&a), 65535);
 }
