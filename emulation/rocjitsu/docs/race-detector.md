@@ -11,7 +11,8 @@ instructions.
 ## Target scope
 
 The race detector focuses on pre-GFX12 architectures. Its current end-to-end
-coverage exercises gfx950 (GFX9/CDNA4) and gfx1151 (GFX11.5/RDNA3.5). GFX12
+coverage exercises gfx942 (GFX9/CDNA3), gfx950 (GFX9/CDNA4), and gfx1151
+(GFX11.5/RDNA3.5). GFX12
 and later architectures are not supported. Some GFX12 split-counter behavior
 is already modeled and covered by plugin tests, including partial load waits
 and address-dependent FLAT counter participation. This partial
