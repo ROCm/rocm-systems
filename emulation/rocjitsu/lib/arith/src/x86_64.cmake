@@ -71,6 +71,10 @@ set(rj_arith_x86_64_v3_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/minmax_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_fma_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/packed_fma_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/cube_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp16_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp32_x86_64_v3.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/mullit_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bit_count_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bitfield_x86_64_v3.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/boolean_x86_64_v3.cpp
@@ -133,6 +137,9 @@ set(rj_arith_x86_64_v4_sources
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_scale_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/ldexp_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/cube_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/interp32_x86_64_v4.cpp
+    ${CMAKE_CURRENT_SOURCE_DIR}/graphics/x86_64/mullit_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bit_count_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/bitfield_x86_64_v4.cpp
     ${CMAKE_CURRENT_SOURCE_DIR}/integer/x86_64/boolean_x86_64_v4.cpp
