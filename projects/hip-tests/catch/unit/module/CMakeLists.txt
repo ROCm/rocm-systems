@@ -59,6 +59,59 @@ if (HIP_PLATFORM MATCHES "amd")
                ${CMAKE_CURRENT_BINARY_DIR}/fatbin_mismatch_module.code)
 endif()
 
+# llvm-offload-binary package fixtures for Unit_hipModuleLoad_*_Package*, the container
+# hipModuleLoad accepts alongside the clang-offload-bundle format every other fixture here uses.
+# clang has no HIP compilation mode that emits one, so they are assembled in two steps: compile a
+# bare code object ELF (--no-gpu-bundle-output), then wrap it with the offload packager the
+# toolchain ships -- llvm-offload-binary upstream, clang-offload-packager before the rename. When
+# neither is found the fixtures are not built and the tests skip themselves.
+#
+# package_module.code deliberately declares the plain arch with no sramecc/xnack qualifiers, the
+# way a --offload-arch=gfx90a build does, so on a feature-qualified agent the entry has to be
+# selected as compatible rather than as an exact name match.
+if (HIP_PLATFORM MATCHES "amd" AND NOT ENABLE_SPIRV AND HIP_GPU_ARCH_LIST)
+  get_filename_component(HIP_COMPILER_BIN_DIR "${CMAKE_HIP_COMPILER}" DIRECTORY)
+  find_program(HIP_OFFLOAD_PACKAGER
+               NAMES llvm-offload-binary clang-offload-packager
+               HINTS ${HIP_COMPILER_BIN_DIR} ${ROCM_PATH}/llvm/bin)
+  list(GET HIP_GPU_ARCH_LIST 0 PACKAGE_MODULE_ARCH)
+endif()
+
+if (HIP_OFFLOAD_PACKAGER AND PACKAGE_MODULE_ARCH)
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/package_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                   --offload-arch=${PACKAGE_MODULE_ARCH} --cuda-device-only --no-gpu-bundle-output
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/package_module.co
+                   COMMAND ${HIP_OFFLOAD_PACKAGER}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/package_module.code
+                   --image=file=${CMAKE_CURRENT_BINARY_DIR}/package_module.co,triple=amdgcn-amd-amdhsa,arch=${PACKAGE_MODULE_ARCH},kind=hip
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   COMMENT "Packaging package_module.code")
+  add_custom_target(package_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/package_module.code)
+
+  # Counterpart to fatbin_mismatch_module.code: a well-formed package whose only entry is for a
+  # fixed, old arch, so it is incompatible with any non-Vega runner.
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH}
+                   --offload-arch=gfx900 --cuda-device-only --no-gpu-bundle-output
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.co
+                   COMMAND ${HIP_OFFLOAD_PACKAGER}
+                   -o ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.code
+                   --image=file=${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.co,triple=amdgcn-amd-amdhsa,arch=gfx900,kind=hip
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   COMMENT "Packaging package_mismatch_module.code")
+  add_custom_target(package_mismatch_module
+                    DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.code)
+
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+               ${CMAKE_CURRENT_BINARY_DIR}/package_module.code
+               ${CMAKE_CURRENT_BINARY_DIR}/package_mismatch_module.code)
+endif()
+
 if (NOT WIN32)
   if (HIP_PLATFORM MATCHES "amd")
     add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
@@ -193,7 +246,9 @@ if(HIP_PLATFORM MATCHES "amd")
     hipExtModuleLaunchKernel.cc
     hipHccModuleLaunchKernel.cc
     hipLinkCreate.cc
-    hipModuleLoadMalformedFatBinary.cc)
+    hipModuleLoadMalformedFatBinary.cc
+    hipModuleLoadMalformedPackage.cc
+    hipModuleLoadPackage.cc)
 
   if(BUILD_SHARED_LIBS)
     set(TEST_SRC
@@ -456,6 +511,9 @@ if(HIP_PLATFORM MATCHES "amd")
   add_dependencies(ModuleTest copyKernel_code copyKernel_s)
   add_dependencies(ModuleTest addKernel_code)
   add_dependencies(ModuleTest fatbin_mismatch_module)
+  if(TARGET package_module)
+    add_dependencies(ModuleTest package_module package_mismatch_module)
+  endif()
   # TODO - Rock build failure from clang
   if(NOT WIN32)
     add_dependencies(ModuleTest addKernel_spv)

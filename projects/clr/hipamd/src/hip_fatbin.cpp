@@ -208,6 +208,13 @@ static bool IsCodeObjectCompressed(const void* image, size_t image_size) {
                      magic_size) == 0;
 }
 
+static bool IsCodeObjectPackage(const void* image, size_t image_size) {
+  if (image_size < symbols::kOffloadPackageMagicSize) {
+    return false;
+  }
+  return std::memcmp(image, symbols::kOffloadPackageMagic, symbols::kOffloadPackageMagicSize) == 0;
+}
+
 static bool IsCodeObjectElf(const void* image, size_t image_size) {
   if (image_size < sizeof(amd::Elf64_Ehdr)) {
     return false;
@@ -402,6 +409,201 @@ static bool UncompressAndPopulateCodeObject(
   return passed;
 }
 
+#if COMGR_SUPPORTS_UNPACKAGE
+// Copy out the code object comgr produced for one requested target, if it produced one at all.
+//
+// comgr can return more than one entry for a single request, so this takes the first, the way
+// amd_comgr_lookup_code_object picks the first compatible entry of a bundle. Returns false
+// only on a comgr failure.
+static bool TakeUnpackagedCodeObject(
+    amd_comgr_data_set_t unpackaged_co, const std::string& isa_name,
+    std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
+  // comgr classifies each unpackaged entry by sniffing its contents, so the kind depends on what
+  // the package holds. AMDGPU HIP entries arrive as executables; the rest are queried too so that
+  // a package nesting bitcode, SPIR-V or a fat binary is not silently dropped.
+  constexpr amd_comgr_data_kind_t kUnpackagedKinds[] = {
+      AMD_COMGR_DATA_KIND_EXECUTABLE, AMD_COMGR_DATA_KIND_BC, AMD_COMGR_DATA_KIND_SPIRV,
+      AMD_COMGR_DATA_KIND_FATBIN};
+
+  for (auto kind : kUnpackagedKinds) {
+    size_t count = 0;
+    if (auto comgr_status = amd::Comgr::action_data_count(unpackaged_co, kind, &count);
+        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+      LogPrintfError("Failed to get data count of unpackaged code object for kind %d", kind);
+      return false;
+    }
+
+    for (size_t i = 0; i < count; i++) {
+      amd_comgr_data_t item;
+      if (auto comgr_status = amd::Comgr::action_data_get_data(unpackaged_co, kind, i, &item);
+          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+        LogError("Failed to get data of unpackaged code object");
+        return false;
+      }
+      comgr_helper::ComgrDataUniqueHandle item_handle(item);
+
+      size_t item_size = 0;
+      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, nullptr);
+          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+        LogError("Failed to get data size");
+        return false;
+      }
+
+      if (item_size == 0) {
+        continue;
+      }
+
+      char* item_data = new char[item_size];
+      if (auto comgr_status = amd::Comgr::get_data(item_handle.get(), &item_size, item_data);
+          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+        LogError("Failed to get data");
+        delete[] item_data;
+        return false;
+      }
+
+      code_obj_map[isa_name] = std::make_pair(item_data, item_size);
+      return true;
+    }
+  }
+
+  return true;
+}
+
+// Extract the code objects matching unique_isa_names from an llvm-offload-binary package.
+//
+// Unlike the uncompressed-bundle path there is no offset-lookup equivalent of
+// amd_comgr_lookup_code_object for packages, so this always goes through
+// AMD_COMGR_ACTION_UNPACKAGE and every extracted code object is a copy owned by the caller (see
+// the code_obj_allocations_ bookkeeping at the call site), the same as the compressed-bundle
+// path.
+static bool PopulateCodeObjectMapFromPackage(
+    const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
+    std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
+  if (!amd::Comgr::supports_unpackage()) {
+    LogError(
+        "This code object uses the llvm-offload-binary package format, which requires a COMGR "
+        "that provides amd_comgr_action_info_set_package_entry_ids (COMGR 3.5 or newer)");
+    return false;
+  }
+
+  if (image_bound != amd::Elf::kUnknownSize && image_bound < sizeof(symbols::OffloadPackageHeader)) {
+    LogError("Offload package header is truncated");
+    return false;
+  }
+
+  // hipModuleLoadData supplies no length, so the package's own size is the only bound available.
+  // Validate it against the mapping when we do know one, mirroring the compressed-bundle path.
+  const auto pkg_header = reinterpret_cast<const symbols::OffloadPackageHeader*>(image);
+  const uint64_t size = pkg_header->totalSize;
+  if (size < sizeof(symbols::OffloadPackageHeader) ||
+      (image_bound != amd::Elf::kUnknownSize && size > image_bound)) {
+    LogPrintfError("Rejecting offload package: size=%llu is outside [%llu, %llu]",
+                   static_cast<unsigned long long>(size),
+                   static_cast<unsigned long long>(sizeof(symbols::OffloadPackageHeader)),
+                   static_cast<unsigned long long>(image_bound));
+    return false;
+  }
+
+  bool passed = false;
+  do {
+    comgr_helper::ComgrDataSetUniqueHandle packaged_co;
+    comgr_helper::ComgrDataUniqueHandle input_package;
+    if (auto comgr_status = packaged_co.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+      LogError("Error in creating packaged_co");
+      break;
+    }
+
+    if (auto comgr_status = input_package.Create(AMD_COMGR_DATA_KIND_PACKAGE);
+        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+      LogError("Error in creating input package");
+      break;
+    }
+
+    if (auto comgr_status =
+            amd::Comgr::set_data(input_package.get(), size, static_cast<const char*>(image));
+        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+      LogError("Error in setting image data to package");
+      break;
+    }
+
+    if (auto comgr_status = amd::Comgr::set_data_name(input_package.get(), symbols::kHipFatBinName);
+        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+      LogError("Error in setting package data name");
+      break;
+    }
+
+    if (auto comgr_status = amd::Comgr::data_set_add(packaged_co.get(), input_package.get());
+        comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+      LogError("Error in adding data set");
+      break;
+    }
+
+    // Targets are offered to comgr one at a time. The extra actions only re-read the
+    // package header, which is cheap beside the copy every matched entry already costs.
+    bool failed = false;
+    for (const auto& isa_name : unique_isa_names) {
+      std::string triple, arch;
+      if (!helpers::SplitIsaName(isa_name, triple, arch)) {
+        LogPrintfError("Cannot split ISA name into a (triple, arch) pair: %s", isa_name.c_str());
+        continue;
+      }
+      const amd_comgr_target_id_t target_id{triple.c_str(), arch.c_str()};
+
+      comgr_helper::ComgrActionInfoUniqueHandle unpackage_action;
+      comgr_helper::ComgrDataSetUniqueHandle unpackaged_co;
+      if (auto comgr_status = unpackage_action.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+        LogError("Error in creating unpackage action");
+        failed = true;
+        break;
+      }
+
+      if (auto comgr_status = unpackaged_co.Create(); comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+        LogError("Error in creating unpackaged_co");
+        failed = true;
+        break;
+      }
+
+      if (auto comgr_status =
+              amd::Comgr::action_info_set_package_entry_ids(unpackage_action.get(), &target_id, 1);
+          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+        LogError("Error in setting package entry ids");
+        failed = true;
+        break;
+      }
+
+      if (auto comgr_status =
+              amd::Comgr::do_action(AMD_COMGR_ACTION_UNPACKAGE, unpackage_action.get(),
+                                    packaged_co.get(), unpackaged_co.get());
+          comgr_status != AMD_COMGR_STATUS_SUCCESS) {
+        LogPrintfError("Failed to unpackage code object for %s", isa_name.c_str());
+        failed = true;
+        break;
+      }
+
+      if (!TakeUnpackagedCodeObject(unpackaged_co.get(), isa_name, code_obj_map)) {
+        failed = true;
+        break;
+      }
+    }
+    if (failed) {
+      break;
+    }
+    passed = true;
+  } while (0);
+
+  if (!passed) {
+    // The caller only takes ownership of these (into code_obj_allocations_) once this returns
+    // true, so a partial failure has to release whatever was already copied out.
+    for (const auto& entry : code_obj_map) {
+      delete[] static_cast<const char*>(entry.second.first);
+    }
+    code_obj_map.clear();
+  }
+
+  return passed;
+}
+#endif  // COMGR_SUPPORTS_UNPACKAGE
+
 static bool PopulateCodeObjectMap(
     const void* image, size_t image_bound, const std::set<std::string>& unique_isa_names,
     std::map<std::string, std::pair<const void*, size_t>>& code_obj_map) {
@@ -508,14 +710,24 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
 
   const bool is_compressed = IsCodeObjectCompressed(image_, image_bound);
   const bool is_uncompressed = IsCodeObjectUncompressed(image_, image_bound);
-  const bool is_elf =
-      !is_compressed && !is_uncompressed && IsCodeObjectElf(image_, image_bound);
+  const bool is_package = IsCodeObjectPackage(image_, image_bound);
+  const bool is_elf = !is_compressed && !is_uncompressed && !is_package &&
+                      IsCodeObjectElf(image_, image_bound);
   // Save the input during the initial/current-device load. Later non-current
   // device loads reuse this copy instead of the caller-owned buffer.
   const bool save_image_data = image_storage != nullptr;
 
-  if (!is_compressed && !is_uncompressed && !is_elf) {
-    LogError("The code object has invalid header: compressed, uncompressed or elf");
+#if !COMGR_SUPPORTS_UNPACKAGE
+  if (is_package) {
+    LogError(
+        "This code object uses the llvm-offload-binary package format, but this HIP runtime was "
+        "built against a COMGR older than 3.5, which cannot unpackage it");
+    return hipErrorInvalidImage;
+  }
+#endif
+
+  if (!is_compressed && !is_uncompressed && !is_package && !is_elf) {
+    LogError("The code object has invalid header: compressed, uncompressed, package or elf");
     return hipErrorInvalidImage;
   }
 
@@ -545,6 +757,22 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
       LogPrintfError("Rejecting compressed fat binary: totalSize=%llu is outside [%llu, %llu]",
                      static_cast<unsigned long long>(image_size),
                      static_cast<unsigned long long>(kCompressedHeaderSize),
+                     static_cast<unsigned long long>(image_bound));
+      return hipErrorInvalidImage;
+    }
+  } else if (is_package) {
+    if (image_bound != amd::Elf::kUnknownSize &&
+        image_bound < sizeof(symbols::OffloadPackageHeader)) {
+      LogError("Offload package header is truncated");
+      return hipErrorInvalidImage;
+    }
+    const auto* pkg_header = static_cast<const symbols::OffloadPackageHeader*>(image_);
+    image_size = pkg_header->totalSize;
+    if (image_size < sizeof(symbols::OffloadPackageHeader) ||
+        (image_bound != amd::Elf::kUnknownSize && image_size > image_bound)) {
+      LogPrintfError("Rejecting offload package: size=%llu is outside [%llu, %llu]",
+                     static_cast<unsigned long long>(image_size),
+                     static_cast<unsigned long long>(sizeof(symbols::OffloadPackageHeader)),
                      static_cast<unsigned long long>(image_bound));
       return hipErrorInvalidImage;
     }
@@ -600,6 +828,15 @@ hipError_t FatBinaryInfo::ExtractFatBinaryUsingCOMGR(const std::vector<hip::Devi
     // Track these to release later
     std::for_each(code_obj_map.begin(), code_obj_map.end(),
                   [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
+#if COMGR_SUPPORTS_UNPACKAGE
+  } else if (is_package) {
+    if (!PopulateCodeObjectMapFromPackage(image_, image_bound, unique_isa_names, code_obj_map)) {
+      return hipErrorInvalidImage;
+    }
+    // Unpackaging always copies out of the package, just like the compressed path above.
+    std::for_each(code_obj_map.begin(), code_obj_map.end(),
+                  [&](const auto& info) { code_obj_allocations_.insert(info.second.first); });
+#endif
   } else {  // uncompressed code object
     if (!PopulateCodeObjectMap(image_, image_bound, unique_isa_names, code_obj_map)) {
       return hipErrorInvalidImage;

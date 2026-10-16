@@ -10,6 +10,16 @@
 #include "top.hpp"
 #include "amd_comgr/amd_comgr.h"
 
+//! Whether the comgr headers we compile against declare the llvm-offload-binary
+//! unpackaging API (AMD_COMGR_DATA_KIND_PACKAGE, AMD_COMGR_ACTION_UNPACKAGE and
+//! the package-entry-id action info calls), introduced in comgr 3.5.
+#if (AMD_COMGR_INTERFACE_VERSION_MAJOR > 3) ||                                                     \
+    (AMD_COMGR_INTERFACE_VERSION_MAJOR == 3 && AMD_COMGR_INTERFACE_VERSION_MINOR >= 5)
+#define COMGR_SUPPORTS_UNPACKAGE 1
+#else
+#define COMGR_SUPPORTS_UNPACKAGE 0
+#endif
+
 namespace amd {
 typedef void (*t_amd_comgr_get_version)(size_t* major, size_t* minor);
 typedef amd_comgr_status_t (*t_amd_comgr_status_string)(amd_comgr_status_t status,
@@ -119,6 +129,16 @@ typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_device_lib_linking)(
     amd_comgr_action_info_t action_info, bool link_device_lib);
 typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_bundle_entry_ids)(
     amd_comgr_action_info_t action_info, const char* bundle_entry_ids[], size_t count);
+#if COMGR_SUPPORTS_UNPACKAGE
+typedef amd_comgr_status_t (*t_amd_comgr_action_info_set_package_entry_ids)(
+    amd_comgr_action_info_t action_info, const amd_comgr_target_id_t package_entry_ids[],
+    size_t count);
+typedef amd_comgr_status_t (*t_amd_comgr_action_info_get_package_entry_id_count)(
+    amd_comgr_action_info_t action_info, size_t* count);
+typedef amd_comgr_status_t (*t_amd_comgr_action_info_get_package_entry_id)(
+    amd_comgr_action_info_t action_info, size_t index, size_t* triple_size, char* triple,
+    size_t* arch_size, char* arch);
+#endif
 typedef amd_comgr_status_t (*t_amd_comgr_set_data_from_file_slice)(amd_comgr_data_t data, int fd,
                                                                    uint64_t offset, uint64_t size);
 typedef amd_comgr_status_t (*t_amd_comgr_lookup_code_object)(amd_comgr_data_t data,
@@ -181,6 +201,12 @@ struct ComgrEntryPoints {
   t_amd_comgr_map_name_expression_to_symbol_name amd_comgr_map_name_expression_to_symbol_name;
   t_amd_comgr_action_info_set_device_lib_linking amd_comgr_action_info_set_device_lib_linking;
   t_amd_comgr_action_info_set_bundle_entry_ids amd_comgr_action_info_set_bundle_entry_ids;
+#if COMGR_SUPPORTS_UNPACKAGE
+  t_amd_comgr_action_info_set_package_entry_ids amd_comgr_action_info_set_package_entry_ids;
+  t_amd_comgr_action_info_get_package_entry_id_count
+      amd_comgr_action_info_get_package_entry_id_count;
+  t_amd_comgr_action_info_get_package_entry_id amd_comgr_action_info_get_package_entry_id;
+#endif
   t_amd_comgr_set_data_from_file_slice amd_comgr_set_data_from_file_slice;
   t_amd_comgr_lookup_code_object amd_comgr_lookup_code_object;
 };
@@ -424,6 +450,61 @@ class Comgr : public amd::AllStatic {
     return COMGR_DYN(amd_comgr_action_info_set_bundle_entry_ids)(action_info, bundle_entry_ids,
                                                                  count);
   }
+
+#if COMGR_SUPPORTS_UNPACKAGE
+  //! True if the loaded comgr actually exports the unpackaging entry points. The headers we
+  //! compiled against may be newer than the shared library we ended up loading, so every caller
+  //! must be prepared for this to be false even when COMGR_SUPPORTS_UNPACKAGE is 1.
+  static bool supports_unpackage() {
+#if defined(COMGR_DYN_DLL)
+    return cep_.amd_comgr_action_info_set_package_entry_ids != nullptr;
+#else
+    return true;
+#endif
+  }
+
+  static amd_comgr_status_t action_info_set_package_entry_ids(
+      amd_comgr_action_info_t action_info, const amd_comgr_target_id_t package_entry_ids[],
+      size_t count) {
+#if defined(COMGR_DYN_DLL)
+    if (cep_.amd_comgr_action_info_set_package_entry_ids == nullptr) {
+      // comgr version 3.4 or less is loaded
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "Failed to load COMGR function amd_comgr_action_info_set_package_entry_ids");
+      return AMD_COMGR_STATUS_ERROR;
+    }
+#endif
+    return COMGR_DYN(amd_comgr_action_info_set_package_entry_ids)(action_info, package_entry_ids,
+                                                                  count);
+  }
+
+  static amd_comgr_status_t action_info_get_package_entry_id_count(
+      amd_comgr_action_info_t action_info, size_t* count) {
+#if defined(COMGR_DYN_DLL)
+    if (cep_.amd_comgr_action_info_get_package_entry_id_count == nullptr) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "Failed to load COMGR function amd_comgr_action_info_get_package_entry_id_count");
+      return AMD_COMGR_STATUS_ERROR;
+    }
+#endif
+    return COMGR_DYN(amd_comgr_action_info_get_package_entry_id_count)(action_info, count);
+  }
+
+  static amd_comgr_status_t action_info_get_package_entry_id(amd_comgr_action_info_t action_info,
+                                                             size_t index, size_t* triple_size,
+                                                             char* triple, size_t* arch_size,
+                                                             char* arch) {
+#if defined(COMGR_DYN_DLL)
+    if (cep_.amd_comgr_action_info_get_package_entry_id == nullptr) {
+      ClPrint(amd::LOG_ERROR, amd::LOG_CODE,
+              "Failed to load COMGR function amd_comgr_action_info_get_package_entry_id");
+      return AMD_COMGR_STATUS_ERROR;
+    }
+#endif
+    return COMGR_DYN(amd_comgr_action_info_get_package_entry_id)(action_info, index, triple_size,
+                                                                 triple, arch_size, arch);
+  }
+#endif  // COMGR_SUPPORTS_UNPACKAGE
 
  private:
   static ComgrEntryPoints cep_;

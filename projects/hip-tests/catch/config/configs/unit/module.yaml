@@ -174,6 +174,19 @@ module:
   Unit_hipModuleLoad_Negative_MalformedFatBinaryBounds:
     <<: *level_default
     tags: [load]
+  Unit_hipModuleLoad_Negative_MalformedPackageBounds:
+    <<: *level_2
+    tags: [load]
+  Unit_hipModuleLoad_Positive_Package:
+    <<: *level_2
+    # Fixture package_module.code is built only on the amd platform.
+    disabled: [nvidia_linux, nvidia_windows]
+    tags: [load]
+  Unit_hipModuleLoad_Negative_PackageNoCompatibleCodeObject:
+    <<: *level_2
+    # Fixture package_mismatch_module.code is built only on the amd platform.
+    disabled: [nvidia_linux, nvidia_windows]
+    tags: [load]
   Unit_hipModuleLoad_Negative_Load_From_A_File_That_Is_Not_A_Module:
     <<: *level_default
     disabled:
