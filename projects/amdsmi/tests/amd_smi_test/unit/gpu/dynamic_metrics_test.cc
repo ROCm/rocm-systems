@@ -3,7 +3,6 @@
 
 #include <amd_smi_test/test_base.h>
 #include <gtest/gtest.h>
-#include <unistd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -11,12 +10,14 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <limits>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -388,7 +389,7 @@ constexpr std::size_t kApuV24Size = offsetof(ApuMetrics, m_average_gfx_current) 
 // Filler that differs per byte offset, so every field reads back a value only
 // its own bytes could have produced: a copy that lands in the wrong member is
 // then visible, which a uniform fill would hide. The range stays inside
-// [0x10, 0xEF], clear of both 0x00 and the 0xFF not-applicable sentinel, so a
+// [0x10, 0xEF], clear of both 0x00 and the 0xFF N/A value, so a
 // populated field can never be mistaken for one the revision omits.
 constexpr uint8_t FillByte(std::size_t offset) {
   return static_cast<uint8_t>(0x10 + (offset % 0xE0));
@@ -404,17 +405,12 @@ constexpr T FilledValue(std::size_t offset) {
   return value;
 }
 
-// Fake sysfs tree at <tmp>/<name>/device/gpu_metrics. Binary reads are cached
-// per (device path, read size), so each case needs its own directory. The
-// process id and a counter keep that true for concurrent runs and for repeats
-// of the same case, which would otherwise share a path and its cache entry.
+// Fake sysfs tree under a mkdtemp() directory. Binary reads are cached per
+// (device path, read size), so the counter keeps repeats of a case off a path
+// an earlier instance used.
 class FakeMetricsDevice {
  public:
-  explicit FakeMetricsDevice(const std::string& name)
-      : root_(std::filesystem::temp_directory_path() /
-              ("amdsmi_apu_metrics_" + name + "_" + std::to_string(::getpid()) + "_" +
-               std::to_string(NextInstanceId()))) {
-    std::filesystem::remove_all(root_);
+  explicit FakeMetricsDevice(const std::string& name) : root_(MakeRoot(name)) {
     std::filesystem::create_directories(root_ / "device");
   }
   ~FakeMetricsDevice() { std::filesystem::remove_all(root_); }
@@ -446,9 +442,16 @@ class FakeMetricsDevice {
   std::string path() const { return root_.string(); }
 
  private:
-  static unsigned NextInstanceId() {
+  static std::filesystem::path MakeRoot(const std::string& name) {
     static std::atomic<unsigned> counter{0};
-    return counter.fetch_add(1);
+    std::string root =
+        (std::filesystem::temp_directory_path() /
+         ("amdsmi_apu_metrics_" + name + "_" + std::to_string(counter++) + "_XXXXXX"))
+            .string();
+    if (::mkdtemp(root.data()) == nullptr) {
+      throw std::system_error(errno, std::generic_category(), "mkdtemp " + root);
+    }
+    return root;
   }
 
   static void Write(const std::filesystem::path& file, const std::vector<uint8_t>& blob) {
@@ -494,8 +497,8 @@ void WriteLe16(std::vector<uint8_t>& blob, std::size_t offset, uint16_t value) {
 }  // namespace
 
 // A device may report an older, shorter APU revision than the newest layout we
-// model, or declare a table longer than it. Reading must pre-fill with the
-// not-applicable sentinel, take only the bytes the header declares, and stay
+// model, or declare a table longer than it. Reading must pre-fill with
+// N/A (max value), take only the bytes the header declares, and stay
 // inside our own buffer. Exercise that end to end against a fake sysfs node.
 TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
   PRINT_VERBOSITY();
@@ -569,11 +572,6 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
   }
 }
 
-// Reading a metrics table pre-fills and clamps using sizeof_metric_table(), so
-// that size must describe the very buffer get_metrics_table() hands back. v1.8
-// backs both the GPU table and the smaller partition table, so pin the pairing
-// for both modes: sizing the partition table as the GPU table would write past
-// the end of it.
 // v2.1 and v2.2 tables report GFX and MM activity in hundredths of a percent, so the
 // public fields have to be scaled to whole percent, in the APU sub-struct as well as
 // at the top level. The expected values are worked out by hand instead of
@@ -583,7 +581,7 @@ TEST(GpuUnit, ApuActivityReachesThePublicFieldsAsWholePercent) {
   PRINT_VERBOSITY();
 
   // Both fields must fall inside the revision the blob declares. If one did not,
-  // the read would leave it at the sentinel and the checks below would pass
+  // the read would leave it at N/A and the checks below would pass
   // without the conversion ever running.
   static_assert(offsetof(ApuMetrics, m_average_gfx_activity) + sizeof(uint16_t) <= kApuV21Size,
                 "v2.1 must carry average_gfx_activity for this test to mean anything");
@@ -665,11 +663,11 @@ TEST(GpuUnit, ApuV23AndV24ActivityPassesThroughAsWholePercent) {
   }
 }
 
-// The not-applicable sentinel is not a reading, so scaling it would turn a field
+// N/A (max value) is not a reading, so scaling it would turn a field
 // the device never answered for into a plausible-looking 655 %. The other field
 // carries a real reading in the same table: without it this test would also pass
 // if the read had populated nothing at all, since the destination is pre-filled
-// with the very sentinel being checked for.
+// with the very N/A value being checked for.
 TEST(GpuUnit, NotApplicableApuActivityIsStillReportedAsNotApplicable) {
   PRINT_VERBOSITY();
 
@@ -678,7 +676,7 @@ TEST(GpuUnit, NotApplicableApuActivityIsStillReportedAsNotApplicable) {
   WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), UINT16_MAX);
   WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), kMmHundredths);
 
-  FakeMetricsDevice fake_device("apu_activity_sentinel");
+  FakeMetricsDevice fake_device("apu_activity_not_applicable");
   fake_device.WriteMetrics(blob);
 
   amd::smi::Device device(fake_device.path(), nullptr);
@@ -689,11 +687,16 @@ TEST(GpuUnit, NotApplicableApuActivityIsStillReportedAsNotApplicable) {
 
   EXPECT_EQ(metrics.average_gfx_activity, uint16_t{UINT16_MAX});
   EXPECT_EQ(metrics.average_mm_activity, uint16_t{46})
-      << "a live reading beside the sentinel proves the read populated these fields";
+      << "a live reading beside the N/A value proves the read populated these fields";
   EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, uint16_t{UINT16_MAX});
   EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{46});
 }
 
+// Reading a metrics table pre-fills and clamps using sizeof_metric_table(), so
+// that size must describe the very buffer get_metrics_table() hands back. v1.8
+// backs both the GPU table and the smaller partition table, so pin the pairing
+// for both modes: sizing the partition table as the GPU table would write past
+// the end of it.
 TEST(GpuUnit, GPUMetricsV18TableSizeMatchesSelectedTable) {
   PRINT_VERBOSITY();
 
@@ -737,7 +740,7 @@ TEST(GpuUnit, UnsupportedMetricRevisionReportsNotSupported) {
 // v3.0 is a different layout, not a v2.x prefix, and it reaches the caller
 // through the same unified object. Read a real v3.0 blob end to end so the
 // classification is backed by an actual read: v3.0 fields must carry the
-// device data and the v2.4-only fields must stay not-applicable.
+// device data and the v2.x-only fields must stay not-applicable.
 TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   PRINT_VERBOSITY();
 
@@ -775,7 +778,7 @@ TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   EXPECT_EQ(apu.time_filter_alphavalue,
             FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_time_filter_alphavalue)));
 
-  // v2.4-only fields have no v3.0 source, so they stay not-applicable.
+  // v2.x-only fields have no v3.0 source, so they stay not-applicable.
   EXPECT_EQ(apu.average_mm_activity, UINT16_MAX);
   EXPECT_EQ(apu.temperature_l3[0], UINT16_MAX);
   EXPECT_EQ(apu.fan_pwm, UINT16_MAX);
@@ -783,15 +786,15 @@ TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   EXPECT_EQ(apu.indep_throttle_status, UINT64_MAX);
 
   // PLX temperature is read out of gpu_metrics, and an APU has no such sensor,
-  // so the reading stays at the sentinel that makes the query unsupported.
+  // so the reading stays N/A, which makes the query unsupported.
   EXPECT_EQ(metrics.temperature_vrsoc, UINT16_MAX);
 }
 
 // PLX temperature is sourced from gpu_metrics, so a device without that sensor
-// reports the not-applicable sentinel rather than an error. Reading it back as
+// reports N/A (max value) rather than an error. Reading it back as
 // a temperature would hand the caller a bogus 65535 C, so the query has to come
 // back unsupported instead.
-TEST(GpuUnit, PlxTemperatureSentinelReportsNotSupported) {
+TEST(GpuUnit, PlxTemperatureNotApplicableReportsNotSupported) {
   PRINT_VERBOSITY();
 
   amdsmi_gpu_metrics_t metric_info{};
@@ -852,9 +855,6 @@ TEST(GpuUnit, EmptyMetricsNodeReportsNotSupported) {
   EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
 }
 
-// The early return that keeps an unsupported revision from reaching the copy
-// stage lives in the public entry point, so exercise that entry point: the
-// Device stage alone stays green with the guard deleted.
 // A node the driver refuses to read is not a node that is absent. Reporting the
 // refusal as NOT_SUPPORTED would hide a transient device state -- a reset, a
 // suspend -- behind an answer that sounds permanent, and the refusal returns zero
@@ -892,6 +892,9 @@ TEST(GpuUnit, DriverRefusedMetricsReadIsNotReportedAsUnsupported) {
       << "a read the driver refused must not read back as a device without metrics";
 }
 
+// The early return that keeps an unsupported revision from reaching the copy
+// stage lives in the public entry point, so exercise that entry point: the
+// Device stage alone stays green with the guard deleted.
 TEST(GpuUnit, PublicMetricsEntryReportsUnsupportedRevision) {
   PRINT_VERBOSITY();
 
@@ -953,7 +956,7 @@ TEST(GpuUnit, PublicPartitionMetricsEntryReportsUnsupportedRevision) {
 
 // The PLX reading comes out of gpu_metrics, so drive it from a device whose
 // table really was read rather than from a hand-built struct: an APU leaves the
-// sensor at the sentinel, which is what makes the query unsupported.
+// sensor at N/A, which is what makes the query unsupported.
 TEST(GpuUnit, PlxTemperatureFromAFakeApuDeviceIsNotSupported) {
   PRINT_VERBOSITY();
 
