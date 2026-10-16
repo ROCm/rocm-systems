@@ -47,327 +47,6 @@ if(ROCJITSU_ENABLE_PERFSIM_PLUGIN)
     list(APPEND RJ_OBJECT_LIBS rocjitsu_plugin_perfsim)
 endif()
 
-if(RJ_INSTALL_TESTS)
-    set(RJ_INSTALL_TEST_DIR "${CMAKE_INSTALL_DATADIR}/rocjitsu/tests")
-    set(RJ_INSTALL_TEST_BIN_DIR "${RJ_INSTALL_TEST_DIR}/bin")
-    set(RJ_INSTALL_CTEST_FILE
-        "${CMAKE_CURRENT_BINARY_DIR}/install/CTestTestfile.cmake"
-    )
-    set(RJ_INSTALL_GTEST_GENERATOR
-        "${PROJECT_SOURCE_DIR}/cmake/rj_generate_installed_gtest_ctest.cmake"
-    )
-    if(IS_ABSOLUTE "${CMAKE_INSTALL_BINDIR}")
-        set(_rj_installed_bindir "${CMAKE_INSTALL_BINDIR}")
-    else()
-        set(_rj_installed_bindir "../../../${CMAKE_INSTALL_BINDIR}")
-    endif()
-    if(IS_ABSOLUTE "${CMAKE_INSTALL_DATADIR}")
-        set(_rj_installed_datadir "${CMAKE_INSTALL_DATADIR}")
-    else()
-        set(_rj_installed_datadir "../..")
-    endif()
-    if(IS_ABSOLUTE "${CMAKE_INSTALL_LIBDIR}")
-        set(_rj_installed_libdir "${CMAKE_INSTALL_LIBDIR}")
-    else()
-        set(_rj_installed_libdir "../../../${CMAKE_INSTALL_LIBDIR}")
-    endif()
-    file(MAKE_DIRECTORY "${CMAKE_CURRENT_BINARY_DIR}/install")
-    file(WRITE "${RJ_INSTALL_CTEST_FILE}" "# Installed rocjitsu CTest tests\n")
-    file(
-        APPEND "${RJ_INSTALL_CTEST_FILE}"
-        "set(RJ_INSTALLED_BINDIR \"${_rj_installed_bindir}\")\n"
-        "set(RJ_INSTALLED_CONFIG_DIR \"${_rj_installed_datadir}/rocjitsu/configs\")\n\n"
-        "set(RJ_INSTALLED_KERNEL_DIR \"kernels\")\n\n"
-        "set(RJ_INSTALLED_LIBDIR \"${_rj_installed_libdir}\")\n\n"
-        "include(\"rocjitsu_tests.cmake\")\n\n"
-    )
-
-    # Install a compiled test/tool target into the installed CTest bin directory.
-    # The installed CTest file references these binaries with paths relative to
-    # ${RJ_INSTALL_TEST_DIR}, e.g. bin/rocjitsu_tests.
-    function(rj_install_test_target target)
-        install(
-            TARGETS ${target}
-            RUNTIME DESTINATION ${RJ_INSTALL_TEST_BIN_DIR}
-        )
-    endfunction()
-
-    # Install a non-CMake executable produced by a custom command, such as a HIP
-    # test binary compiled directly with hipcc.
-    function(rj_install_test_program path)
-        install(PROGRAMS ${path} DESTINATION ${RJ_INSTALL_TEST_BIN_DIR})
-    endfunction()
-
-    # Append one installed CTest entry to ${RJ_INSTALL_CTEST_FILE}. This mirrors
-    # the subset of add_test()/set_tests_properties() used by rj_add_test, but
-    # writes plain CMake code because the file is consumed later by
-    # `ctest --test-dir <installed tests dir>`.
-    function(rj_install_ctest name)
-        set(oneValueArgs TIMEOUT SKIP_REGULAR_EXPRESSION)
-        set(multiValueArgs COMMAND ENVIRONMENT LABELS)
-        cmake_parse_arguments(
-            ARG
-            "RUN_SERIAL"
-            "${oneValueArgs}"
-            "${multiValueArgs}"
-            ${ARGN}
-        )
-        if(NOT ARG_COMMAND)
-            message(FATAL_ERROR "rj_install_ctest(${name}) requires COMMAND")
-        endif()
-
-        set(_content "add_test(\"${name}\"")
-        foreach(_arg IN LISTS ARG_COMMAND)
-            string(APPEND _content " \"${_arg}\"")
-        endforeach()
-        string(APPEND _content ")\n")
-
-        set(_props)
-        if(ARG_TIMEOUT)
-            string(APPEND _props " \"TIMEOUT\" \"${ARG_TIMEOUT}\"")
-        endif()
-        if(ARG_SKIP_REGULAR_EXPRESSION)
-            string(
-                APPEND _props
-                " \"SKIP_REGULAR_EXPRESSION\" [=[${ARG_SKIP_REGULAR_EXPRESSION}]=]"
-            )
-        endif()
-        if(ARG_LABELS)
-            list(JOIN ARG_LABELS ";" _labels)
-            string(APPEND _props " \"LABELS\" \"${_labels}\"")
-        endif()
-        if(ARG_RUN_SERIAL)
-            string(APPEND _props " \"RUN_SERIAL\" \"TRUE\"")
-        endif()
-        if(ARG_ENVIRONMENT)
-            list(JOIN ARG_ENVIRONMENT ";" _env)
-            string(APPEND _props " \"ENVIRONMENT\" \"${_env}\"")
-        endif()
-        if(_props)
-            string(
-                APPEND _content
-                "set_tests_properties(\"${name}\" PROPERTIES"
-            )
-            string(APPEND _content "${_props})\n")
-        endif()
-
-        file(APPEND "${RJ_INSTALL_CTEST_FILE}" "${_content}\n")
-    endfunction()
-
-    # Generate and install fine-grained CTest entries for every concrete
-    # GoogleTest case in a target. The target executable must already exist, so
-    # this is a build-time custom command that runs --gtest_list_tests and writes
-    # an installed CTest fragment like rocjitsu_tests.cmake.
-    function(rj_install_gtest_cases target)
-        set(_fragment "${CMAKE_CURRENT_BINARY_DIR}/install/${target}.cmake")
-        cmake_parse_arguments(ARG "" "TEST_FILTER" "" ${ARGN})
-        add_custom_command(
-            OUTPUT "${_fragment}"
-            COMMAND
-                ${CMAKE_COMMAND} "-DTEST_EXECUTABLE=$<TARGET_FILE:${target}>"
-                "-DINSTALLED_EXECUTABLE=bin/${target}"
-                "-DTEST_FILTER=${ARG_TEST_FILTER}" "-DOUTPUT_FILE=${_fragment}"
-                -P "${RJ_INSTALL_GTEST_GENERATOR}"
-            DEPENDS ${target} "${RJ_INSTALL_GTEST_GENERATOR}"
-            COMMENT "Generating installed CTest entries for ${target}"
-            VERBATIM
-        )
-        add_custom_target(${target}_installed_ctest ALL DEPENDS "${_fragment}")
-        install(FILES "${_fragment}" DESTINATION ${RJ_INSTALL_TEST_DIR})
-    endfunction()
-
-    install(FILES "${RJ_INSTALL_CTEST_FILE}" DESTINATION ${RJ_INSTALL_TEST_DIR})
-    install(
-        FILES
-            "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
-            "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
-        DESTINATION ${RJ_INSTALL_TEST_DIR}
-    )
-    install(
-        FILES "${CMAKE_CURRENT_SOURCE_DIR}/tsan_hip_runtime.supp"
-        DESTINATION ${RJ_INSTALL_TEST_DIR}
-    )
-endif()
-
-include(GoogleTest)
-
-set(_rj_installed_test_bin_dir "${CMAKE_INSTALL_DATADIR}/rocjitsu/tests/bin")
-function(_rj_path_from_installed_test_bin out install_dir file_name)
-    if(IS_ABSOLUTE "${install_dir}")
-        set(_path "${install_dir}/${file_name}")
-    elseif(IS_ABSOLUTE "${_rj_installed_test_bin_dir}")
-        set(_path "${CMAKE_INSTALL_PREFIX}/${install_dir}/${file_name}")
-    else()
-        file(
-            RELATIVE_PATH
-            _rel_dir
-            "/${_rj_installed_test_bin_dir}"
-            "/${install_dir}"
-        )
-        set(_path "${_rel_dir}/${file_name}")
-    endif()
-    set(${out} "${_path}" PARENT_SCOPE)
-endfunction()
-
-function(rj_test_runtime_dir_env out name)
-    string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_" _runtime_name "${name}")
-    set(${out}
-        "ROCJITSU_RUNTIME_DIR=${CMAKE_CURRENT_BINARY_DIR}/runtime/${_runtime_name}"
-        PARENT_SCOPE
-    )
-endfunction()
-
-function(rj_installed_test_runtime_dir_env out name)
-    string(REGEX REPLACE "[^A-Za-z0-9_.-]" "_" _runtime_name "${name}")
-    set(${out} "ROCJITSU_RUNTIME_DIR=runtime/${_runtime_name}" PARENT_SCOPE)
-endfunction()
-
-function(rj_environment_has_runtime_dir out)
-    set(_has_runtime_dir FALSE)
-    foreach(_entry IN LISTS ARGN)
-        if(_entry MATCHES "^ROCJITSU_RUNTIME_DIR=")
-            set(_has_runtime_dir TRUE)
-        endif()
-    endforeach()
-    set(${out} "${_has_runtime_dir}" PARENT_SCOPE)
-endfunction()
-
-function(rj_set_default_runtime_dir name)
-    get_property(_env TEST "${name}" PROPERTY ENVIRONMENT)
-    rj_environment_has_runtime_dir(_has_runtime_dir ${_env})
-    if(NOT _has_runtime_dir)
-        rj_test_runtime_dir_env(_runtime_dir_env "${name}")
-        list(APPEND _env "${_runtime_dir_env}")
-        set_tests_properties("${name}" PROPERTIES ENVIRONMENT "${_env}")
-    endif()
-endfunction()
-
-# Register a test for both the build tree and, when RJ_INSTALL_TESTS is ON, the
-# installed CTest tree. COMMAND is the normal build-tree command passed to
-# add_test(). INSTALL_COMMAND is optional and should use paths relative to the
-# installed test directory, e.g. bin/my_test or ${RJ_INSTALLED_BINDIR}/rocjitsu.
-# Shared properties TIMEOUT, SKIP_REGULAR_EXPRESSION, RUN_SERIAL, and LABELS are
-# applied to both registrations. ENVIRONMENT applies only to the build-tree test;
-# INSTALL_ENVIRONMENT adds to the default installed test environment, which
-# points installed tests at packaged configs, kernels, binaries, and runtimes.
-function(rj_add_test)
-    set(oneValueArgs NAME WORKING_DIRECTORY TIMEOUT SKIP_REGULAR_EXPRESSION)
-    set(multiValueArgs
-        COMMAND
-        ENVIRONMENT
-        INSTALL_COMMAND
-        INSTALL_ENVIRONMENT
-        LABELS
-    )
-    cmake_parse_arguments(
-        ARG
-        "RUN_SERIAL"
-        "${oneValueArgs}"
-        "${multiValueArgs}"
-        ${ARGN}
-    )
-    if(NOT ARG_NAME)
-        message(FATAL_ERROR "rj_add_test requires NAME")
-    endif()
-    if(NOT ARG_COMMAND)
-        message(FATAL_ERROR "rj_add_test(${ARG_NAME}) requires COMMAND")
-    endif()
-
-    rj_environment_has_runtime_dir(_has_runtime_dir ${ARG_ENVIRONMENT})
-    if(NOT _has_runtime_dir)
-        # Each launcher test writes the active config into its runtime dir for
-        # the preloaded interposer. Use a per-test default so ctest -j runs
-        # cannot overwrite another test's config or daemon socket.
-        rj_test_runtime_dir_env(_runtime_dir_env "${ARG_NAME}")
-        list(APPEND ARG_ENVIRONMENT "${_runtime_dir_env}")
-    endif()
-
-    add_test(NAME "${ARG_NAME}" COMMAND ${ARG_COMMAND})
-
-    if(ARG_WORKING_DIRECTORY)
-        set_tests_properties(
-            "${ARG_NAME}"
-            PROPERTIES WORKING_DIRECTORY "${ARG_WORKING_DIRECTORY}"
-        )
-    endif()
-    if(ARG_TIMEOUT)
-        set_tests_properties("${ARG_NAME}" PROPERTIES TIMEOUT "${ARG_TIMEOUT}")
-    endif()
-    if(ARG_SKIP_REGULAR_EXPRESSION)
-        set_tests_properties(
-            "${ARG_NAME}"
-            PROPERTIES SKIP_REGULAR_EXPRESSION "${ARG_SKIP_REGULAR_EXPRESSION}"
-        )
-    endif()
-    if(ARG_LABELS)
-        list(JOIN ARG_LABELS ";" _labels)
-        set_tests_properties("${ARG_NAME}" PROPERTIES LABELS "${_labels}")
-    endif()
-    if(ARG_RUN_SERIAL)
-        set_tests_properties("${ARG_NAME}" PROPERTIES RUN_SERIAL TRUE)
-    endif()
-    if(ARG_ENVIRONMENT)
-        list(JOIN ARG_ENVIRONMENT ";" _env)
-        set_tests_properties("${ARG_NAME}" PROPERTIES ENVIRONMENT "${_env}")
-    endif()
-
-    if(RJ_INSTALL_TESTS AND ARG_INSTALL_COMMAND)
-        set(_install_args COMMAND ${ARG_INSTALL_COMMAND})
-        if(ARG_TIMEOUT)
-            list(APPEND _install_args TIMEOUT "${ARG_TIMEOUT}")
-        endif()
-        if(ARG_SKIP_REGULAR_EXPRESSION)
-            list(
-                APPEND _install_args
-                SKIP_REGULAR_EXPRESSION
-                "${ARG_SKIP_REGULAR_EXPRESSION}"
-            )
-        endif()
-        if(ARG_LABELS)
-            list(APPEND _install_args LABELS ${ARG_LABELS})
-        endif()
-        if(ARG_RUN_SERIAL)
-            list(APPEND _install_args RUN_SERIAL)
-        endif()
-        set(_install_env
-            "ROCJITSU_CONFIG_DIR=\${RJ_INSTALLED_CONFIG_DIR}"
-            "ROCJITSU_KERNEL_DIR=\${RJ_INSTALLED_KERNEL_DIR}"
-        )
-        rj_environment_has_runtime_dir(
-            _install_has_runtime_dir
-            ${ARG_INSTALL_ENVIRONMENT}
-        )
-        if(NOT _install_has_runtime_dir)
-            rj_installed_test_runtime_dir_env(
-                _install_runtime_dir_env
-                "${ARG_NAME}"
-            )
-            list(APPEND _install_env "${_install_runtime_dir_env}")
-        endif()
-        list(APPEND _install_env ${ARG_INSTALL_ENVIRONMENT})
-        list(APPEND _install_args ENVIRONMENT ${_install_env})
-        rj_install_ctest("${ARG_NAME}" ${_install_args})
-    endif()
-endfunction()
-
-# Register a GoogleTest target with fine-grained tests in both the build tree
-# and installed CTest tree. Build-tree discovery delegates to
-# gtest_discover_tests(); installed discovery delegates to rj_install_gtest_cases
-# so parameterized TEST_P cases are expanded from the built executable.
-#
-# TEST_FILTER reaches BOTH paths. It used to reach only the build tree, while the
-# installed generator carried its own hard-coded copy, so a case excluded here to be
-# registered manually was still discovered on the installed side and ended up
-# registered twice under one name.
-function(rj_add_gtest_tests target)
-    cmake_parse_arguments(ARG "" "TEST_FILTER" "" ${ARGN})
-    gtest_discover_tests(${target} ${ARGN})
-    if(RJ_INSTALL_TESTS)
-        rj_install_test_target(${target})
-        rj_install_gtest_cases(${target} TEST_FILTER "${ARG_TEST_FILTER}")
-    endif()
-endfunction()
-
 # --- Unit / integration test suite ---
 
 add_test(NAME RocjitsuVersion COMMAND $<TARGET_FILE:rocjitsu_bin> --version)
@@ -962,6 +641,12 @@ endforeach()
 # SharedPool handoff, concurrent-close, and L2 mutex tests are registered separately so
 # CTest can bound a deadlocked child process, including helper destruction.
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+if(RJ_INSTALL_TESTS)
+    file(
+        APPEND "${RJ_INSTALL_CTEST_FILE}"
+        "include(\"rocjitsu_tests.cmake\")\n"
+    )
+endif()
 
 # Bound worker joins in the idle notification and CPU-use regressions.
 # Register explicitly so build-tree and installed tests have the same timeout.
@@ -1040,13 +725,15 @@ foreach(_shard RANGE 0 ${_rj_fp_mode_last_shard})
         COMMAND
             "${CMAKE_COMMAND}"
             "-DTEST_EXECUTABLE=$<TARGET_FILE:rocjitsu_fp_mode_tests>"
-            "-DTEST_OUTPUT_FILE=${_shard_output}" -P
+            "-DTEST_OUTPUT_FILE=${_shard_output}"
+            -P
             "${PROJECT_SOURCE_DIR}/cmake/rj_run_gtest_shard.cmake"
         ENVIRONMENT ${_shard_env}
         INSTALL_COMMAND
             "${CMAKE_COMMAND}"
             "-DTEST_EXECUTABLE=bin/rocjitsu_fp_mode_tests"
-            "-DTEST_OUTPUT_FILE=${_shard_output}" -P
+            "-DTEST_OUTPUT_FILE=${_shard_output}"
+            -P
             "rj_run_gtest_shard.cmake"
         INSTALL_ENVIRONMENT ${_shard_env}
         LABELS fp-mode
@@ -1396,14 +1083,13 @@ if(HAS_DEVICE_KERNELS AND HAS_PROBE_FIXTURES)
     # additional filtered registrations of the same cases.
     rj_add_gtest_tests(
         probe_fixture_test
-        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+        WORKING_DIRECTORY
+        ${CMAKE_CURRENT_BINARY_DIR}
     )
-    # The helper installs the fragment without including it. Keep the installed
-    # probe cases reachable whenever this fixture target is available.
     if(RJ_INSTALL_TESTS)
         file(
             APPEND "${RJ_INSTALL_CTEST_FILE}"
-            "include(\"probe_fixture_test.cmake\")\n\n"
+            "include(\"probe_fixture_test.cmake\")\n"
         )
     endif()
 endif()
@@ -1460,8 +1146,10 @@ if(RJ_INSTALL_TESTS)
 endif()
 rj_add_test(
     NAME "RjDbtTranslate.Smoke"
-    COMMAND rj_dbt_translate_smoke_test $<TARGET_FILE:rj_dbt_translate>
-            $<TARGET_FILE:rj_decode_benchmark>
+    COMMAND
+        rj_dbt_translate_smoke_test
+        $<TARGET_FILE:rj_dbt_translate>
+        $<TARGET_FILE:rj_decode_benchmark>
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
     INSTALL_COMMAND
         "bin/rj_dbt_translate_smoke_test"
@@ -1650,7 +1338,10 @@ add_dependencies(guest_kfd_test rocjitsu_bin rocjitsu_shared rocjitsu_hooks)
 rj_add_test(
     NAME "GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI}
+        --config
+        ${RJ_CDNA3_KMD_CONFIG}
+        --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdFailureTest.NonexistentSimulatorConfigFailsCleanly
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -1666,7 +1357,10 @@ rj_add_test(
 rj_add_test(
     NAME "GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI}
+        --config
+        ${RJ_CDNA3_KMD_CONFIG}
+        --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdFailureTest.SimulatorHostIsaMismatchFailsCleanly
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -1682,7 +1376,10 @@ rj_add_test(
 rj_add_test(
     NAME "GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI}
+        --config
+        ${RJ_CDNA3_KMD_CONFIG}
+        --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdFailureTest.SimulatorOversizedLdsFailsCleanly
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -1698,7 +1395,10 @@ rj_add_test(
 rj_add_test(
     NAME "GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI}
+        --config
+        ${RJ_CDNA3_KMD_CONFIG}
+        --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdFailureTest.PathOnlyAutomaticDbtHandoffFailsClosed
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -1714,7 +1414,10 @@ rj_add_test(
 rj_add_test(
     NAME "GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes"
     COMMAND
-        ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+        ${RJ_CLI}
+        --config
+        ${RJ_CDNA3_KMD_CONFIG}
+        --
         $<TARGET_FILE:guest_kfd_test>
         --gtest_filter=GuestKfdConfigTest.ReadsRuntimeHandoffLargerThan4095Bytes
     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -2091,19 +1794,24 @@ if(RJ_INSTALL_TESTS)
 endif()
 foreach(_config IN ITEMS gfx1100_w7900 gfx1201_r9700 gfx950_mi355x_kmd_2gpu)
     rj_add_test(
-        NAME "InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity.${_config}"
+        NAME
+            "InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity.${_config}"
         COMMAND
             ${RJ_CLI}
-            --config "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
-            -- $<TARGET_FILE:interposer_dup_test>
+            --config
+            "${CMAKE_SOURCE_DIR}/configs/${_config}.json"
+            --
+            $<TARGET_FILE:interposer_dup_test>
             "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
         ENVIRONMENT
             "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}$<TARGET_FILE:host_drm_preload>"
         WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
         INSTALL_COMMAND
             "\${RJ_INSTALLED_BINDIR}/rocjitsu"
-            --config "\${RJ_INSTALLED_CONFIG_DIR}/${_config}.json"
-            -- bin/interposer_dup_test
+            --config
+            "\${RJ_INSTALLED_CONFIG_DIR}/${_config}.json"
+            --
+            bin/interposer_dup_test
             "--gtest_filter=InterposerDrmTest.BorrowedDisplayDescriptorUsesSimulatedIdentity"
         INSTALL_ENVIRONMENT
             "LD_PRELOAD=${RJ_SANITIZER_PRELOAD_PREFIX}bin/${CMAKE_SHARED_LIBRARY_PREFIX}host_drm_preload${CMAKE_SHARED_LIBRARY_SUFFIX}"
@@ -2428,7 +2136,7 @@ if(ROCMINFO_EXECUTABLE AND RJ_HAS_KFD_DEVICE)
             INSTALL_COMMAND
                 "bin/rocminfo_test"
                 "--gtest_filter=RocminfoTest.${_rocminfo_test}"
-            ${_rocminfo_install_environment_arg}
+                ${_rocminfo_install_environment_arg}
         )
     endforeach()
 
@@ -2728,8 +2436,10 @@ if(HSA_RUNTIME64)
             rj_add_test(
                 NAME "HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib"
                 COMMAND
-                    $<TARGET_FILE:rocjitsu_bin> --config
-                    ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json --
+                    $<TARGET_FILE:rocjitsu_bin>
+                    --config
+                    ${CMAKE_SOURCE_DIR}/configs/guest_gfx950_on_gfx1201.json
+                    --
                     $<TARGET_FILE:hsa_hooks_test>
                     --gtest_filter=HsaHooksTest.TranslateGfx950Mfma16x16ThroughToolsLib
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -2842,7 +2552,10 @@ if(HSA_RUNTIME64)
             rj_add_test(
                 NAME "Cdna4ToCdna3SimulatedDispatchTest.${_test_name}"
                 COMMAND
-                    ${RJ_CLI} --config ${RJ_CDNA3_KMD_CONFIG} --
+                    ${RJ_CLI}
+                    --config
+                    ${RJ_CDNA3_KMD_CONFIG}
+                    --
                     $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
                     --gtest_filter=Cdna4ToCdna3DispatchTest.${_test_name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -2872,7 +2585,10 @@ if(HSA_RUNTIME64)
             rj_add_test(
                 NAME "Cdna4ToCdna3DbtGuestTest.${_test_name}"
                 COMMAND
-                    ${RJ_CLI} --config ${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG} --
+                    ${RJ_CLI}
+                    --config
+                    ${RJ_CDNA4_TO_CDNA3_SIM_DBT_CONFIG}
+                    --
                     $<TARGET_FILE:${RJ_CDNA4_TO_CDNA3_DISPATCH_TEST_EXE}>
                     --gtest_filter=Cdna4ToCdna3DbtGuestTest.${_test_name}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
@@ -3040,9 +2756,7 @@ if(HSA_RUNTIME64)
                 NAME "${_ctest_name}"
                 COMMAND ${_command}
                 WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                INSTALL_COMMAND ${_install_command}
-                ${_timeout}
-                ${_run_serial}
+                INSTALL_COMMAND ${_install_command} ${_timeout} ${_run_serial}
             )
         endfunction()
 
@@ -3377,9 +3091,10 @@ if(HSA_RUNTIME64)
                     NAME "${_ctest_name}"
                     COMMAND ${_command}
                     WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
-                    INSTALL_COMMAND ${_install_command}
-                    ${_timeout}
-                    ${_run_serial}
+                    INSTALL_COMMAND
+                        ${_install_command}
+                        ${_timeout}
+                        ${_run_serial}
                 )
             endfunction()
 
@@ -4005,16 +3720,16 @@ if(RJ_ENABLE_HIP_TESTS)
                 TIMEOUT 120
                 LABELS daemon
                 ENVIRONMENT ${_daemon_test_env}
-                INSTALL_COMMAND
-                    "bin/daemon_test"
-                    "--gtest_filter=${TC}"
+                INSTALL_COMMAND "bin/daemon_test" "--gtest_filter=${TC}"
                 INSTALL_ENVIRONMENT ${_daemon_test_env}
             )
         endforeach()
 
         rj_add_test(
             NAME DaemonTest.LoggingPlugin
-            COMMAND daemon_test --gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged
+            COMMAND
+                daemon_test
+                --gtest_filter=DaemonPluginTest.LoggingPluginDispatchLogged
             TIMEOUT 120
             LABELS daemon
             ENVIRONMENT ${RJ_HIP_ASAN_ENV}
@@ -4043,9 +3758,7 @@ if(RJ_ENABLE_HIP_TESTS)
                     TIMEOUT 180
                     LABELS daemon rccl
                     ENVIRONMENT ${RJ_RCCL_ASAN_ENV} ${RJ_HIP_TSAN_ENV}
-                    INSTALL_COMMAND
-                        "bin/daemon_test"
-                        "--gtest_filter=${TC}"
+                    INSTALL_COMMAND "bin/daemon_test" "--gtest_filter=${TC}"
                     INSTALL_ENVIRONMENT
                         ${RJ_RCCL_ASAN_ENV}
                         ${RJ_HIP_TSAN_INSTALL_ENV}
