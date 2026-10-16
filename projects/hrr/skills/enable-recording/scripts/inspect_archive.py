@@ -299,9 +299,12 @@ def _resolve(archive: Path) -> tuple[Path, list[Path]]:
     manifest lists processes that were not passed.
     """
     # A pid-* directory with no events.bin is a leftover the reader skips
-    # (playback/hrr_playback.cpp), not a process that recorded nothing.
+    # (playback/hrr_playback.cpp), not a process that recorded nothing, and so is
+    # pid-<pid>.prev-<n>, an earlier process's archive moved aside by the writer.
     pid_dirs = sorted(
-        d for d in archive.glob("pid-*") if d.is_dir() and (d / "events.bin").is_file()
+        d
+        for d in archive.glob("pid-*")
+        if d.name[len("pid-") :].isdigit() and d.is_dir() and (d / "events.bin").is_file()
     )
     if pid_dirs:
         return archive, pid_dirs

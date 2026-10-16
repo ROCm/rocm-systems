@@ -848,7 +848,7 @@ ncclResult_t rcclGetProtocolName(int protocol, const char** protocolName) {
 namespace {
 // This comm's arch table, or NULL when the arch has no DDA tuning at all.
 // comm->archThresholds is populated at init; the lookup covers comms assembled
-// by hand (unit tests) so they resolve exactly like production ones.
+// by hand (unit tests) and resolves them like an SPX comm.
 inline const rcclArchThresholds* extAlgoArchTable(const ncclComm* comm) {
   if (comm == nullptr) return nullptr;
   if (rcclParamIgnoreArchTable() && !IsArchMatch(comm->archName, "gfx942")
@@ -1649,27 +1649,31 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 
   // (5) Enqueue-bound backends: CE registered (Branch B) vs symmetric vs kernel.
   // Reproduce taskAppend()'s AllReduce CE decision exactly so both agree.
-  // develop's taskAppend appends CE for AllReduce iff !hasSysmemSegment && ceAvailable
-  // && ((CTAPolicy & ZERO) || force): ceAvailable is the conjunction of the four
-  // sub-conditions below; split out so the disqualification log can name the blocker.
+  // Under ZERO (ceRegZero) CE wins over an eligible symk at any size; ceRegForce (force without ZERO) yields to symk and ceRegMax.
+  // ceAvailable is the conjunction of the sub-conditions below; split out so the disqualification log can name the blocker.
   const bool ceBufferOk          = !ceCapturing && ncclCeAvailable(comm, ncclFuncAllReduce, (int)op, datatype, winRegType, sendWin, recvWin);
   const bool ceAllReduceOpSupported = (op == ncclSum || op == ncclProd || op == ncclMin || op == ncclMax);
   const bool ceCountDivisible    = (count % (size_t)comm->nRanks == 0);
   const bool ceEnabledByArch     = rcclCeAllReduceEnabledDef(ceArArchDefault);
   const bool ceAvailable         = ceArGraphAllowed && ceBufferOk && ceAllReduceOpSupported && ceCountDivisible && ceEnabledByArch;
   // Tuning cap only: registered CE has no staging allocation, so this does not
-  // size a buffer. kThreshUnlimited (or null table) = no upper bound;
-  // env var 0 returns 0, making ceRegInWindow false (disables registered CE).
+  // size a buffer. kThreshUnlimited = no upper bound; 0 (null table, untuned
+  // collective, or env var 0) disables registered CE, under ZERO too.
   // Independent of the 2-shot selector (ceNonRegMax/env, 0 = off) and ceARTmpBuf sizing.
   const size_t ceArRegMax = rcclCeRegMaxTab(archTable, ncclFuncAllReduce);
   const bool ceRegInWindow = ceArRegMax == kThreshUnlimited || msgBytes <= ceArRegMax;
-  if (!symEligible && ceRegInWindow && ceAvailable && !hasSysmemSegment &&
-      ((comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) || force)) {
+  // CTAPolicy=ZERO takes CE whenever it is available, like upstream taskAppend and rcclSelectAllGather Branch #3.
+  // Under ZERO symk does not veto CE and a positive table cap is ignored; a cap of 0 and an explicit env cap still apply.
+  const bool ceZeroPolicy = (comm->config.CTAPolicy & NCCL_CTA_POLICY_ZERO) != 0;
+  const bool ceRegEnvCapOk = rcclParamCeArRegMaxMsgBytes() < 0 || ceRegInWindow;
+  const bool ceRegZero = ceZeroPolicy && ceArRegMax != 0 && ceRegEnvCapOk;
+  const bool ceRegForce = force && !symEligible && ceRegInWindow;
+  if (ceAvailable && !hasSysmemSegment && (ceRegZero || ceRegForce)) {
     decision->algo = RCCL_CE_REGISTERED;
     decision->nMaxChannels = ncclCeLocalReduceBlocks(datatype, count / comm->nRanks);
     return ncclSuccess;
   }
-  if (!query && !symEligible) INFO(NCCL_TUNING,
+  if (!query && (ceZeroPolicy || !symEligible)) INFO(NCCL_TUNING,
        "AR CE-registered disqualified: ceAvailable=%d(graphAllowed=%d bufOk=%d opOk=%d countDiv=%d archEnabled=%d)"
        " ceRegInWindow=%d hasSysmem=%d CTAPolicy=%d force=%d",
        (int)ceAvailable, (int)ceArGraphAllowed, (int)ceBufferOk, (int)ceAllReduceOpSupported,
@@ -1807,11 +1811,11 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // (rcclSelectAllGatherAlgo); the reporting query always runs outside a group, so
     // the same gate reproduces rcclGetAlgoInfo's group-agnostic reporting. Only live
     // dispatch builds sub-communicators that RCCL_HIERARCHICAL_LAZY_INIT deferred.
-    if (!query && ncclGroupDepth == 0 && comm->hierarchicalEligible && !comm->hierarchicalCommsInitialized &&
+    if (!query && !symEligible && ncclGroupDepth == 0 && comm->hierarchicalEligible && !comm->hierarchicalCommsInitialized &&
         rcclHierarchicalAllGatherEligible(comm, msgSize)) {
       NCCLCHECK(rcclLazyInitHierarchicalComms(comm, ceCapturing));
     }
-    if (ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
+    if (!symEligible && ncclGroupDepth == 0 && rcclUseHierarchicalAllGather(comm, msgSize)) {
       decision->algo = RCCL_HIERARCHICAL_ALLGATHER;
       if (query) {
         // -A reports the inter-comm proto/channels; intra values are logged only.
@@ -2003,7 +2007,8 @@ ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff
           return ncclSuccess;
         }
         // The entry gate now admits the widest tier, so VMM re-checks its own cap.
-        // On gfx1250 this tier runs only on rank-scaled comms (ddaVmmMaxPerRank[RS]).
+        // On gfx1250 SPX this tier runs only on rank-scaled comms (ddaVmmMaxPerRank[RS]); the
+        // DPX table's ddaVmmMax total sits under the LL tier except at 8 ranks.
         if (rsDdaVmmMax != 0 && totalBytes <= rsDdaVmmMax &&
             ncclReduceScatterDdaFabricEligible(comm, sendbuff, recvbuff, recvcount, datatype, op)) {
           decision->algo = RCCL_DDA_FABRIC_VMM;
@@ -2654,8 +2659,7 @@ ncclResult_t commSetUnrollFactor(struct ncclComm* comm) {
     case ncclUnrollWrongArch:
       WARN("RCCL_UNROLL_FACTOR %d (unroll %d) is compiled for %s only, so its device function table is empty on "
            "arch %s and dispatching to it would crash. "
-           "Rebuild with install.sh --all_unrolls (-DBUILD_ALL_UNROLLS=ON) to compile it for every target, or select a "
-           "different one.",
+           "Select a different unroll factor.",
            comm->unroll, (1 << comm->unroll), ncclDevFuncUnrollArch[comm->unroll], comm->archName);
       return ncclInvalidArgument;
     case ncclUnrollUsable:

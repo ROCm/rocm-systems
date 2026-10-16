@@ -15,5 +15,8 @@
   ],
   "kernels": [
     "rocblas_sgemm::large_2048x2048"
+  ],
+  "race": [
+    "race.gfx950.global_to_lds_buffer_race"
   ]
 }
