@@ -45,17 +45,13 @@ on:
         type: string
         description: "Insert comma-separated list of Linux GPU families to build and test. ex: gfx94X, gfx120X (empty = skip linux)"
         default: ""
-      linux_test_labels:
-        type: string
-        description: "If enabled, reduce test set on Linux to the list of labels prefixed with 'test:'. ex: test:rocprim, test:hipcub"
-        default: ""
       windows_amdgpu_families:
         type: string
         description: "Insert comma-separated list of Windows GPU families to build and test. ex: gfx94X, gfx120X (empty = skip windows)"
         default: ""
-      windows_test_labels:
+      pr_labels:
         type: string
-        description: "If enabled, reduce test set on Windows to the list of labels prefixed with 'test:' ex: test:rocprim, test:hipcub"
+        description: "Comma-separated PR labels (e.g. ci:skip-pytorch,test:rocprim,test_filter:quick)."
         default: ""
       prebuilt_stages:
         type: string
@@ -179,8 +175,7 @@ jobs:
       # Note: gfx125X is added for MI455 bringup with limited tests (hip-tests, rocrtst, sanity)
       linux_amdgpu_families: ${{ inputs.linux_amdgpu_families || 'gfx94X,gfx950,gfx125X' }}
       windows_amdgpu_families: ${{ inputs.windows_amdgpu_families || needs.configure.outputs.windows_amdgpu_families || 'gfx110X' }}
-      linux_test_labels: ${{ inputs.linux_test_labels || '' }}
-      windows_test_labels: ${{ inputs.windows_test_labels || '' }}
+      pr_labels: ${{ inputs.pr_labels || '' }}
       # Per-PR selective build: the configure job maps the changed projects to
       # the minimal allowlist of build stages via TheRock's build topology.
       # TheRock (ROCm/TheRock#7600) builds only these stages and skips every
