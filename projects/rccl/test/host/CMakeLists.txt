@@ -400,6 +400,21 @@ function(rccl_define_micro_source_lists)
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroGinHostFinalize -- host finalize / connect generation.
+  # Not rccl-UnitTestsMicroGinHost: gin-host-test.cc defines the same ConnectOnce
+  # seams (ncclParamGinType, ncclOsCpuCount, bootstrapAllGather). Not
+  # rccl-UnitTestsMicro: that target defines the GIN host entry points in
+  # fakes/dev_runtime_micro_fakes.cc for dev-runtime-test.cc.
+  # os_fakes.cc for ncclOsCpuCount / ncclOsSetAffinity: no test starts a progress
+  # thread, but -fprofile-instr-generate / -fcoverage-mapping keep ncclGinProgress
+  # live against --gc-sections. The test TU defines the ConnectOnce / DevCommSetup
+  # link seams (topology, bootstrap, team and thread-name helpers, ncclParamGinType).
+  set(TEST_MICRO_GIN_HOST_FINALIZE_SOURCE_FILES
+    gin-host-finalize-test.cc
+    fakes/os_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
 endfunction()
 
 # Create one host-only micro-test binary and apply all the boilerplate that
@@ -1148,6 +1163,19 @@ rccl_add_micro_binary(rccl-UnitTestsMicroDiagnostics
     DIAG_P2P_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/p2p.cc"
     DIAG_IB_WRITE_BW_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/diagnostics/ib_write_bw.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_diagnostics.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroGinHostFinalize -- host finalize for src/gin/gin_host.cc.
+# Separate from rccl-UnitTestsMicroGinHost: both compile gin_host.cc, and their
+# test TUs define the same link seams.
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroGinHostFinalize
+  SOURCES ${TEST_MICRO_GIN_HOST_FINALIZE_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    # Hipify keeps gin/gin_host.cc (no basename collision with another gin_host.cc).
+    GIN_HOST_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/gin/gin_host.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_gin_host_finalize.yaml")
 
 # =====================================================================
 # Standalone-only tail: coverage + no CTest registration.

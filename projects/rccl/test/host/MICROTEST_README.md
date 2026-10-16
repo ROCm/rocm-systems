@@ -328,6 +328,16 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `transport/p2p.cc` shareable-buffer entry points that `rccl-UnitTestsMicro`
   compiles for real. See `test_categories_micro_diagnostics.yaml`.
 
+- **`rccl-UnitTestsMicroGinHostFinalize`**: `src/gin/gin_host.cc` (via
+  `GIN_HOST_CC_PATH`, suite `GinHostFinalizeTest.*`): host finalize, connect
+  failure / retry, and the register, deregister and DevCommSetup walks over
+  closed backends, against a fake `ncclGin_t` vtable. Separate from
+  `rccl-UnitTestsMicroGinHost`: both compile `gin_host.cc`, and
+  `gin-host-test.cc` defines the same ConnectOnce seams. Also separate from
+  `rccl-UnitTestsMicro`, which fakes those entry points in
+  `fakes/dev_runtime_micro_fakes.cc`. See
+  `test_categories_micro_gin_host_finalize.yaml`.
+
 Everything below (seams, fakes, coverage) applies to both; the concrete examples
 use `p2p.cc`.
 
@@ -841,7 +851,8 @@ above (`./install.sh -t`, wired via `add_subdirectory(host)`), the same file
 can be configured **directly** to build every host binary — `rccl-HostUnitTests`,
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
-`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroGinHostFinalize`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroCe`,
 `rccl-UnitTestsMicroSymKernels` and `rccl-UnitTestsMicroTaskPrep` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -883,6 +894,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroGinHostFinalize    # src/gin/gin_host.cc host finalize
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-HostUnitTests
