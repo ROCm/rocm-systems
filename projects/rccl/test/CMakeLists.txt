@@ -891,7 +891,8 @@ if(BUILD_TESTS)
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
-  # amdsmi_wrap.h. Those are header-inline, so they need no librccl.so symbols and
+  # amdsmi_wrap.h, and AmdSmiFabricTelemetryTests.cpp the telemetry sample reduction
+  # beside them. Those are header-inline, so they need no librccl.so symbols and
   # run in both Release and Debug.
   #
   # AmdSmiWrapTests.cpp drives the amd_smi_* API itself, so it needs symbols that
@@ -903,6 +904,7 @@ if(BUILD_TESTS)
     # main_altrsmi.cpp is a plain InitGoogleTest/RUN_ALL_TESTS entry point, reused here.
     set(TEST_AMDSMI_SOURCE_FILES
       AmdSmiFabricTests.cpp
+      AmdSmiFabricTelemetryTests.cpp
       common/main_altrsmi.cpp
     )
 
@@ -1009,6 +1011,8 @@ if(BUILD_TESTS)
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
+      transport/NetIbMPI/NetIbWqeLatMonUnitTests.cpp
+      transport/NetIbMPI/NetIbWqeLatMonTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp

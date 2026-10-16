@@ -1510,9 +1510,7 @@ typedef struct {
 #define AMDSMI_MAX_NUM_FREQUENCIES \
   33  //!< Guaranteed maximum possible number of supported frequencies
 
-//! Maximum possible value for fan speed for legacy hwmon GPUs.
-//! For GPUs with the gpu_od sysfs interface, use
-//! amdsmi_get_gpu_fan_speed_max() to query the actual maximum.
+//! Maximum fan speed (hwmon pwm1_max), as reported by amdsmi_get_gpu_fan_speed_max().
 //! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_MAX_FAN_SPEED 255
 
@@ -4657,9 +4655,12 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
  *  @p speed, this function will write the current fan speed (a value
  *  between 0 and the maximum fan speed) to the uint32_t pointed to by @p speed.
- *  For legacy hwmon GPUs the maximum is ::AMDSMI_MAX_FAN_SPEED (255).
- *  For GPUs with the gpu_od sysfs interface, use amdsmi_get_gpu_fan_speed_max()
- *  to query the actual maximum
+ *  The value is the hwmon pwm1 duty cycle, whose maximum is
+ *  ::AMDSMI_MAX_FAN_SPEED (255).
+ *
+ *  @note On GPUs exposing the gpu_od sysfs interface, the range accepted by
+ *  amdsmi_set_gpu_fan_speed() is the gpu_od OD_RANGE and is NOT derivable from
+ *  this value or from amdsmi_get_gpu_fan_speed_max()
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -4689,9 +4690,12 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handl
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
  *  @p max_speed, this function will write the maximum fan speed possible to
  *  the uint32_t pointed to by @p max_speed.
- *  For legacy hwmon GPUs this is ::AMDSMI_MAX_FAN_SPEED (255).
- *  For GPUs with the gpu_od sysfs interface, the maximum is read from the
- *  OD_RANGE section of the fan_minimum_pwm sysfs file (e.g. 100)
+ *  This is the hwmon pwm1_max ceiling, ::AMDSMI_MAX_FAN_SPEED (255), and pairs
+ *  with amdsmi_get_gpu_fan_speed().
+ *
+ *  @note On GPUs exposing the gpu_od sysfs interface, the range accepted by
+ *  amdsmi_set_gpu_fan_speed() is the gpu_od OD_RANGE and is NOT derivable from
+ *  this value
  *
  *  @param[in] processor_handle a processor handle
  *
