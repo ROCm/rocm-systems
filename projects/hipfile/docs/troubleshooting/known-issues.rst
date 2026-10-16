@@ -55,8 +55,7 @@ The Ubuntu 22.04 default kernel does not support the fastpath
 =============================================================
 
 On Ubuntu 22.04 LTS, hipFile I/O runs entirely on the fallback path and never
-reaches the bandwidth the storage device is capable of, even when ``ais-check``
-reports fastpath-capable volumes.
+uses the fastpath even when ``ais-check`` reports fastpath-capable volumes.
 
 Ubuntu 22.04 LTS is a supported ROCm distribution, but its default 5.15 kernel is
 built without ``CONFIG_PCI_P2PDMA``. hipFile's fastpath requires that option in
@@ -79,7 +78,8 @@ kernel, which is based on 6.8 and enables the option:
   $ sudo apt install linux-generic-hwe-22.04
   $ sudo systemctl reboot
 
-See :ref:`hipfile-kernel-p2pdma` for other distributions.
+See :ref:`hipfile-kernel-p2pdma` for other distributions, and
+:doc:`/reference/hipFile-kernel-support-matrix` for the kernels AMD has tested.
 
 High memory utilization with hipFile
 ====================================

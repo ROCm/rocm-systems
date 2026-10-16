@@ -65,7 +65,7 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
            amdgpu                  : True
            hipFile-capable volume  : True
 
-| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. On recent ``amdgpu`` DKMS builds, ``ais-check`` reads the AIS capability bit the KFD topology exposes. On older builds, or when the driver version can't be determined, it instead looks for ``CONFIG_PCI_P2PDMA=y`` in the running kernel's configuration.
+| ``Kernel P2PDMA support``: Peer-to-peer DMA between the GPU and storage is available. On recent ``amdgpu`` DKMS builds, ``ais-check`` reads the AIS capability bit exposed by the KFD topology. On older builds, or when the driver version can't be determined, ``ais-check`` looks for ``CONFIG_PCI_P2PDMA=y`` in the running kernel's configuration.
 | ``HIP runtime``: A discovered HIP runtime library exports  ``hipAmdFileRead()`` and ``hipAmdFileWrite()``.
 | ``amdgpu``: The loaded amdgpu kernel driver exposes ``kfd_ais_rw_file`` in ``/proc/kallsyms``.
 | ``hipFile-capable volume``: At least one row in the mounted volumes table has ``HIPFILE`` set to ``yes``.
@@ -73,10 +73,11 @@ present: kernel P2PDMA, a HIP runtime with AIS symbols, the amdgpu driver hook, 
 .. note::
 
    ``Kernel P2PDMA support : False`` most often means the distribution's kernel
-   was built without ``CONFIG_PCI_P2PDMA``, which no hipFile or ROCm setting can
-   work around. The Ubuntu 22.04 LTS default 5.15 kernel is one such kernel. For
-   the list of verified distributions and how to boot a kernel that enables the
-   option, see :ref:`hipfile-kernel-p2pdma`.
+   was built without ``CONFIG_PCI_P2PDMA``. For example, the Ubuntu 22.04 LTS
+   default 5.15 kernel is not built with ``CONFIG_PCI_P2PDMA``. For
+   how to boot a kernel that enables the option, see
+   :ref:`hipfile-kernel-p2pdma`. For the list of verified distributions, see
+   :doc:`/reference/hipFile-kernel-support-matrix`.
 
 .. note::
 
