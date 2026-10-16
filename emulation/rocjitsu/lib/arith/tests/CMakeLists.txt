@@ -136,7 +136,33 @@ foreach(family IN ITEMS
 endforeach()
 
 # Integer families share references and contract checks, with explicit API tests.
-
+foreach(family IN ITEMS
+    half_binary
+    half_ternary
+    add
+    multiply
+    select
+    combined
+    bitfield
+    bit_count
+    boolean
+    mad
+    packed_binary
+    packed_mad
+    shift
+    sad
+    carry
+    mad64
+)
+  set(target "rj_arith_integer_${family}_test")
+  add_executable(${target} integer/${family}_test.cpp)
+  target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -pedantic)
+  endif()
+  gtest_discover_tests(${target} TEST_PREFIX "rj_arith.")
+endforeach()
 
 # Conversion layouts share contract checks; family references remain independent.
 
