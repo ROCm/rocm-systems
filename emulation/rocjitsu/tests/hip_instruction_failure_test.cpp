@@ -7,6 +7,7 @@
 /// Requires the simulator interposer via LD_PRELOAD=librocjitsu.so.
 
 #include <chrono>
+#include <csignal>
 #include <cstdlib>
 #include <hip/hip_runtime.h>
 #include <thread>
@@ -18,6 +19,14 @@ constexpr int kInitializationFailure = 10;
 constexpr int kLaunchFailure = 11;
 constexpr int kSynchronizationReturned = 12;
 enum class FailureKind { Unsupported, Decode };
+
+bool native_instruction_failure(int status) {
+  // HIP may abort from its queue-error callback before the engine's fatal exit.
+  // Reject successful exits, setup/launch/synchronization failures, and every
+  // other signal; the instruction-specific diagnostic is checked separately.
+  return ::testing::ExitedWithCode(EXIT_FAILURE)(status) ||
+         ::testing::KilledBySignal(SIGABRT)(status);
+}
 } // namespace
 
 __global__ void unsupported_instruction() {
@@ -47,17 +56,15 @@ __global__ void undecodable_instruction() { asm volatile(".long 0xbfff0000"); }
 TEST(HipInstructionFailureTest, UnsupportedInstructionExitsWithFailure) {
   // Re-exec so the child owns its HIP runtime and interposer engine threads.
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Unsupported),
-              ::testing::ExitedWithCode(EXIT_FAILURE),
-              "rocjitsu: local VM failed: .*s_cbranch_i_fork.*pid=.*qid=.*dispatch=.*unimplemented "
+  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Unsupported), native_instruction_failure,
+              "CU .*could not execute s_cbranch_i_fork.*pc=.*pid=.*qid=.*dispatch=.*unimplemented "
               "instruction");
 }
 
 TEST(HipInstructionFailureTest, DecodeFailureExitsWithFailure) {
   GTEST_FLAG_SET(death_test_style, "threadsafe");
-  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Decode),
-              ::testing::ExitedWithCode(EXIT_FAILURE),
-              "rocjitsu: local VM failed: .*could not decode.*pid=.*qid=.*dispatch=.*0xbfff0000");
+  EXPECT_EXIT(wait_for_instruction_failure(FailureKind::Decode), native_instruction_failure,
+              "CU .*could not decode.*pc=.*pid=.*qid=.*dispatch=.*0xbfff0000");
 }
 
 // The outer DaemonTest fixture owns the daemon. Its diagnostics stay in that
