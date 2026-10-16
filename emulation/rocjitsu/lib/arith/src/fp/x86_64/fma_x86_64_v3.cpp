@@ -85,4 +85,25 @@ void fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint3
   run<false>(exec_mask, modifiers, d, a, b, c, 0, flags);
 }
 
+// Evaluate FP32 fused multiply-add. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+void fma_dx9_zero_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                            const uint32_t *a, const uint32_t *b, const uint32_t *c) {
+  run<true>(exec_mask, modifiers, d, a, b, c, 0, flags);
+}
+
+// Evaluate FP32 fused multiply-add. Preserve destination lanes outside exec_mask.
+// Requires the named CPU features and validated instruction controls.
+template <bool Multiply>
+void literal_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t literal, uint32_t *d,
+                           const uint32_t *a, const uint32_t *b) {
+  run<false, Multiply ? FmaOperands::MultiplyLiteral : FmaOperands::AddLiteral>(
+      exec_mask, 0, d, a, b, nullptr, literal, flags);
+}
+
+template void literal_fma_x86_64_v3<false>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                           const uint32_t *, const uint32_t *);
+template void literal_fma_x86_64_v3<true>(uint64_t, uint32_t, uint32_t, uint32_t *,
+                                          const uint32_t *, const uint32_t *);
+
 } // namespace rocjitsu::arith

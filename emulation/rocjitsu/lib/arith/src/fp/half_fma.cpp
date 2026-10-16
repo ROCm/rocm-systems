@@ -212,6 +212,87 @@ int rj_arith_v_fma_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mo
   return run(flags, exec_mask, mode, d, a, b, c, excp_flag_user);
 }
 
+// Accumulate fused A*B into D for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmac_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, false)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return rocjitsu::arith::execute_dpp(
+        flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
+          return rj_arith_v_fmac_f16_w32_gfx12(flags, exec_mask, uint32_t(mode), d, source, b,
+                                               excp_flag_user);
+        });
+  }
+  const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_ABS_A |
+                         RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_CLAMP |
+                         RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D;
+  if (int error = rocjitsu::arith::validate(flags, mode & ~known, true, fp_flags)) {
+    return error;
+  }
+
+  // FMAC reads the same destination half that it overwrites.
+  if (mode & RJ_ARITH_ALU_HIGH_D) {
+    mode |= RJ_ARITH_ALU_HIGH_C;
+  }
+  return run(flags, exec_mask, mode, d, a, b, d, excp_flag_user);
+}
+
+// Compute fused A*literal+B for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmamk_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a, uint16_t literal,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, false)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<rocjitsu::arith::FmaOperands::MultiplyLiteral>(flags, exec_mask, mode, d, a, b,
+                                                            nullptr, excp_flag_user, literal);
+}
+
+// Compute fused A*B+literal for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmaak_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint16_t literal,
+                                   uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, false)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<rocjitsu::arith::FmaOperands::AddLiteral>(flags, exec_mask, mode, d, a, b, nullptr,
+                                                       excp_flag_user, literal);
+}
+
 // Compute fused A*B+C for selected lanes.
 // Return errors before changing outputs. FP status is accumulated only when resolved semantics
 // require it.
@@ -229,6 +310,83 @@ int rj_arith_v_fma_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mo
     return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   return run_wave64(flags, exec_mask, mode, d, a, b, c, excp_flag_user);
+}
+
+// Accumulate fused A*B into D for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmac_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                  uint32_t *const *d, const uint32_t *const *a,
+                                  const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, false)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if ((mode >> 32) && !rocjitsu::arith::valid_dpp(mode)) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_ABS_A |
+                         RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_CLAMP |
+                         RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D;
+  if (int error = rocjitsu::arith::validate(flags, uint32_t(mode) & ~known, true, fp_flags)) {
+    return error;
+  }
+
+  // FMAC reads the same destination half that it overwrites.
+  if (mode & RJ_ARITH_ALU_HIGH_D) {
+    mode |= RJ_ARITH_ALU_HIGH_C;
+  }
+  return run_wave64(flags, exec_mask, mode, d, a, b, d, excp_flag_user);
+}
+
+// Compute fused A*literal+B for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmamk_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a, uint16_t literal,
+                                   const uint32_t *const *b, uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, false)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run_wave64<rocjitsu::arith::FmaOperands::MultiplyLiteral>(
+      flags, exec_mask, mode, d, a, b, nullptr, excp_flag_user, literal);
+}
+
+// Compute fused A*B+literal for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmaak_f16_w64_gfx12(uint64_t flags, uint64_t exec_mask, uint64_t mode,
+                                   uint32_t *const *d, const uint32_t *const *a,
+                                   const uint32_t *const *b, uint16_t literal,
+                                   uint32_t *excp_flag_user) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, false)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run_wave64<rocjitsu::arith::FmaOperands::AddLiteral>(flags, exec_mask, mode, d, a, b,
+                                                              nullptr, excp_flag_user, literal);
 }
 
 // Compute fused A*B+C for selected lanes.
@@ -267,4 +425,161 @@ int rj_arith_v_fma_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, ui
   }
   return run_wave64<rocjitsu::arith::FmaOperands::Registers, true>(flags, exec_mask, mode, d, a, b,
                                                                    c, trapsts);
+}
+
+// Accumulate fused A*B into D for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmac_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                            const uint32_t *const *a, const uint32_t *const *b, uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, true)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return rocjitsu::arith::execute_dpp(
+        flags, exec_mask, mode, a, [&](uint32_t exec_mask, const uint32_t *const *source) {
+          return rj_arith_v_fmac_f16_w32(flags, exec_mask, uint32_t(mode), d, source, b, trapsts);
+        });
+  }
+  const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_ABS_A |
+                         RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_CLAMP |
+                         RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D;
+  if (int error = rocjitsu::arith::validate(flags, mode & ~known, true,
+                                            fp_flags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
+    return error;
+  }
+
+  // FMAC reads the same destination half that it overwrites.
+  if (mode & RJ_ARITH_ALU_HIGH_D) {
+    mode |= RJ_ARITH_ALU_HIGH_C;
+  }
+  return run<rocjitsu::arith::FmaOperands::Registers, true>(flags, exec_mask, mode, d, a, b, d,
+                                                            trapsts);
+}
+
+// Accumulate fused A*B into D for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmac_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                            const uint32_t *const *a, const uint32_t *const *b, uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, true)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if ((mode >> 32) && !rocjitsu::arith::valid_dpp(mode)) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  const uint32_t known = RJ_ARITH_ALU_NEG_A | RJ_ARITH_ALU_NEG_B | RJ_ARITH_ALU_ABS_A |
+                         RJ_ARITH_ALU_ABS_B | RJ_ARITH_ALU_OMOD_HALF | RJ_ARITH_ALU_CLAMP |
+                         RJ_ARITH_ALU_HIGH_A | RJ_ARITH_ALU_HIGH_B | RJ_ARITH_ALU_HIGH_D;
+  if (int error = rocjitsu::arith::validate(flags, uint32_t(mode) & ~known, true,
+                                            fp_flags | RJ_ARITH_FP_DX10_CLAMP_OFF)) {
+    return error;
+  }
+
+  // FMAC reads the same destination half that it overwrites.
+  if (mode & RJ_ARITH_ALU_HIGH_D) {
+    mode |= RJ_ARITH_ALU_HIGH_C;
+  }
+  return run_wave64<rocjitsu::arith::FmaOperands::Registers, true>(flags, exec_mask, mode, d, a, b,
+                                                                   d, trapsts);
+}
+
+// Compute fused A*literal+B for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmamk_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                             const uint32_t *const *a, uint16_t literal, const uint32_t *const *b,
+                             uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, true)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<rocjitsu::arith::FmaOperands::MultiplyLiteral, true>(flags, exec_mask, mode, d, a, b,
+                                                                  nullptr, trapsts, literal);
+}
+
+// Compute fused A*literal+B for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmamk_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                             const uint32_t *const *a, uint16_t literal, const uint32_t *const *b,
+                             uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, true)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run_wave64<rocjitsu::arith::FmaOperands::MultiplyLiteral, true>(
+      flags, exec_mask, mode, d, a, b, nullptr, trapsts, literal);
+}
+
+// Compute fused A*B+literal for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmaak_f16_w32(uint64_t flags, uint32_t exec_mask, uint64_t mode, uint32_t *const *d,
+                             const uint32_t *const *a, const uint32_t *const *b, uint16_t literal,
+                             uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, true)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run<rocjitsu::arith::FmaOperands::AddLiteral, true>(flags, exec_mask, mode, d, a, b,
+                                                             nullptr, trapsts, literal);
+}
+
+// Compute fused A*B+literal for selected lanes.
+// Return errors before changing outputs. FP status is accumulated only when resolved semantics
+// require it.
+int rj_arith_v_fmaak_f16_w64(uint64_t flags, uint64_t exec_mask, uint64_t mode, uint32_t *const *d,
+                             const uint32_t *const *a, const uint32_t *const *b, uint16_t literal,
+                             uint32_t *trapsts) {
+  flags = rocjitsu::arith::resolve_compatibility(
+      flags, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS);
+  if (int error = rocjitsu::arith::validate_semantics(flags)) {
+    return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags) &&
+      rocjitsu::arith::half_fma_reporting_unsupported(flags, true)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
+  }
+  if (mode >> 32) {
+    return RJ_ARITH_ERROR_INVALID_FLAGS;
+  }
+  return run_wave64<rocjitsu::arith::FmaOperands::AddLiteral, true>(flags, exec_mask, mode, d, a, b,
+                                                                    nullptr, trapsts, literal);
 }

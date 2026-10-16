@@ -74,3 +74,23 @@ TEST(FpFmaF32W64Gfx12, Arithmetic) {
 TEST(FpFmaF32W64, Arithmetic) {
   rocjitsu::arith::test::check_fma<32, 64>(rj_arith_v_fma_f32_w64, /*gfx12=*/false);
 }
+
+// Check fused arithmetic, modifiers, aliases, and supported FP-status behavior.
+TEST(FpFmaF64W32Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_fma<64, 32>(rj_arith_v_fma_f64_w32_gfx12, /*gfx12=*/true);
+}
+
+// Check fused arithmetic, modifiers, aliases, and supported FP-status behavior.
+TEST(FpFmaF64W32, Arithmetic) {
+  rocjitsu::arith::test::check_fma<64, 32>(rj_arith_v_fma_f64_w32, /*gfx12=*/false);
+}
+
+// Check fused arithmetic, modifiers, aliases, and supported FP-status behavior.
+TEST(FpFmaF64W64Gfx12, Arithmetic) {
+  rocjitsu::arith::test::check_fma<64, 64>(rj_arith_v_fma_f64_w64_gfx12, /*gfx12=*/true);
+}
+
+// Check fused arithmetic, modifiers, aliases, and supported FP-status behavior.
+TEST(FpFmaF64W64, Arithmetic) {
+  rocjitsu::arith::test::check_fma<64, 64>(rj_arith_v_fma_f64_w64, /*gfx12=*/false);
+}

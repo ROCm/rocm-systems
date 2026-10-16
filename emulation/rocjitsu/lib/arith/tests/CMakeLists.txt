@@ -75,7 +75,16 @@ endforeach()
 
 # Group related operations, element types, wave widths and architectures; retain one test per entry point.
 foreach(mnemonic IN ITEMS
+    v_round_f64
+    v_fma_dx9_zero
     v_fma
+    v_fma_mix
+    v_fmaak
+    v_fmac
+    v_fmamk
+    v_pk_fma_f16
+    v_pk_fmac_f16
+    v_rcp_rsq_sqrt_f64
 )
   string(REGEX REPLACE "^v_" "" test_name "${mnemonic}")
   set(target "rj_arith_${test_name}_test")

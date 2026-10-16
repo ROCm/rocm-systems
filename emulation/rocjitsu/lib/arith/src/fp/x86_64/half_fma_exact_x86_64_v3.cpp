@@ -98,4 +98,29 @@ bool half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode,
   return true;
 }
 
+// Evaluate packed fma exact for the caller-selected operation. Preserve destination lanes
+// outside exec_mask.
+// Requires the named CPU features and validated instruction controls. Return false to request
+// fallback.
+bool packed_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, const uint32_t modes[2],
+                                uint32_t *d, const uint32_t *a, const uint32_t *b,
+                                const uint32_t *c, uint32_t *state, bool rdna3) {
+  uint32_t staged[32];
+  for (int lane = 0; lane < 32; ++lane) {
+    staged[lane] = d[lane];
+  }
+  if (!half_fma_exact_x86_64_v3(flags, exec_mask, modes[0], staged, a, b, c, state, rdna3) ||
+      !half_fma_exact_x86_64_v3(flags, exec_mask, modes[1] | RJ_ARITH_ALU_HIGH_D, staged, a, b, c,
+                                state, rdna3)) {
+    return false;
+  }
+  for (int lane = 0; lane < 32; lane += 8) {
+    auto mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
+                                  _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), mask,
+                           _mm256_loadu_si256(reinterpret_cast<const __m256i *>(staged + lane)));
+  }
+  return true;
+}
+
 } // namespace rocjitsu::arith
