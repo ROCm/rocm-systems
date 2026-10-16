@@ -90,6 +90,8 @@ constexpr uint16_t kGfx1250InlineZero = 128;
 constexpr uint32_t kGfx1250ScratchMaxDwordOffset = 0x7ffffcu;
 constexpr uint16_t kGfx1250ModeFp16OvflHwreg = 1u | (23u << 6);
 constexpr uint16_t kGfx1250WmmaCompletionWaitImmediate = 0x0f9f;
+constexpr uint16_t kWaitAluNoWaitImmediate = 0xff9fu;
+constexpr uint16_t kSaSdstDepctrMask = 0x0001u;
 
 /// @brief Diagnose control fields that are invalid for floating-point WMMA.
 ///
@@ -805,6 +807,15 @@ struct TensorMaskWrapper {
       {.ssrc0 = kGfx1250InlineZero, .ssrc1 = descriptor_base, .sdst = descriptor_base})[0];
 }
 
+// S_WAIT_ALU depctr_sa_sdst(0): drain descriptor writes before their consumers.
+// Start from the gfx1250 no-wait encoding and clear only the SA_SDST field;
+// other depctr fields remain disabled. This does not wait for TENSORCNT.
+constexpr uint16_t kTensorMaskSdstWaitImmediate = kWaitAluNoWaitImmediate & ~kSaSdstDepctrMask;
+
+[[nodiscard]] uint32_t build_tensor_mask_sdst_wait() {
+  return cdna5::build_sopp(cdna5::kSWaitAluSopp, {.simm16 = kTensorMaskSdstWaitImmediate})[0];
+}
+
 /// @brief Build the canonical save/clear/restore words around one tensor load.
 [[nodiscard]] TensorMaskWrapper build_tensor_mask_wrapper(uint8_t descriptor_base,
                                                           uint8_t scratch) {
@@ -825,9 +836,33 @@ struct TensorMaskWrapper {
          previous->raw_encoding() != nullptr && previous->raw_encoding()[0] == expected_word;
 }
 
-/// @brief Check whether every path to a tensor load executes the canonical mask clear.
-[[nodiscard]] bool has_tensor_mask_clear(const Instruction &inst, uint8_t descriptor_base) {
-  return has_canonical_predecessor(inst, build_tensor_mask_clear(descriptor_base));
+struct TensorMaskClearPrefix {
+  bool found_clear = false;
+  bool waited_for_sdst = false;
+};
+
+/// @brief Find a same-block clear followed only by SA_SDST drains or S_WAIT_ALU instructions.
+[[nodiscard]] TensorMaskClearPrefix tensor_mask_clear_prefix(const Instruction &inst,
+                                                             uint8_t descriptor_base) {
+  const Instruction *previous = inst.previous_instruction();
+  uint64_t next_offset = inst.src_loc();
+  bool waited_for_sdst = false;
+  while (previous != nullptr &&
+         (previous->mnemonic() == "s_wait_alu" || previous->mnemonic() == "s_wait_idle") &&
+         previous->size() == static_cast<int>(sizeof(uint32_t)) &&
+         previous->raw_encoding() != nullptr &&
+         previous->src_loc() + sizeof(uint32_t) == next_offset) {
+    waited_for_sdst |= previous->mnemonic() == "s_wait_idle" ||
+                       (previous->raw_encoding()[0] & kSaSdstDepctrMask) == 0;
+    next_offset = previous->src_loc();
+    previous = previous->previous_instruction();
+  }
+  if (previous == nullptr || previous->size() != static_cast<int>(sizeof(uint32_t)) ||
+      previous->raw_encoding() == nullptr ||
+      previous->src_loc() + sizeof(uint32_t) != next_offset ||
+      previous->raw_encoding()[0] != build_tensor_mask_clear(descriptor_base))
+    return {};
+  return {.found_clear = true, .waited_for_sdst = waited_for_sdst};
 }
 
 /// @brief Whether the tensor-load expansion still needs to add its canonical prefix.
@@ -844,7 +879,7 @@ struct TensorMaskWrapper {
   const uint8_t descriptor_base = static_cast<uint8_t>(source.vaddr1);
   if (descriptor_base == kGfx1250Null || descriptor_base > kLastOrdinarySgpr - 7u)
     return true;
-  return !has_tensor_mask_clear(inst, descriptor_base);
+  return !tensor_mask_clear_prefix(inst, descriptor_base).waited_for_sdst;
 }
 
 /// @brief Disable Tensor-DMA multicast for one A0 tensor load.
@@ -855,12 +890,13 @@ struct TensorMaskWrapper {
 /// therefore be cleared for every tensor load; inspecting only the instruction
 /// cannot prove that the runtime descriptor mask is zero. Preserve the guest
 /// descriptor value around the load because later tensor instructions commonly
-/// reuse and update the same descriptor.
+/// reuse and update the same descriptor. Wait for both the clear before the
+/// tensor read and the restore before a subsequent guest SGPR read.
 ///
-/// A second translation preserves the load when its immediately preceding
-/// decoded instruction in the same basic block is the canonical mask clear.
-/// This proves that no control-flow edge can bypass the clear. The clear
-/// instruction currently has no B0-to-A0 semantic rule and is copied unchanged;
+/// A second translation preserves the load when its same-block prefix has the
+/// canonical clear followed by an SA_SDST wait. A guest-authored clear without
+/// that wait receives only the missing wait, preserving its descriptor state.
+/// The clear currently has no B0-to-A0 semantic rule and is copied unchanged;
 /// this reuse condition must be revisited if such a rule is added.
 ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t, uint64_t,
                                                std::span<const uint8_t>,
@@ -883,10 +919,20 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
         {"Provide TENSOR_LOAD_TO_LDS VADDR1 as an ordinary eight-SGPR descriptor."});
   }
 
-  if (!tensor_load_residual(inst)) {
+  const TensorMaskClearPrefix prefix = tensor_mask_clear_prefix(inst, descriptor_base);
+  if (prefix.waited_for_sdst) {
     return ExpandResult::success(std::vector<uint32_t>(
         inst.raw_encoding(),
         inst.raw_encoding() + sizeof(cdna5::VimageMachineInst) / sizeof(uint32_t)));
+  }
+
+  if (prefix.found_clear) {
+    std::vector<uint32_t> words;
+    words.reserve(4);
+    words.push_back(build_tensor_mask_sdst_wait());
+    words.insert(words.end(), inst.raw_encoding(),
+                 inst.raw_encoding() + sizeof(cdna5::VimageMachineInst) / sizeof(uint32_t));
+    return ExpandResult::success(std::move(words));
   }
 
   Gfx1250SgprScratchRequest scratch_request;
@@ -899,7 +945,7 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
   }
 
   std::vector<uint32_t> words;
-  words.reserve(6);
+  words.reserve(9);
   append_gfx1250_scratch_dependency_barrier(words);
 
   const TensorMaskWrapper wrapper =
@@ -908,9 +954,11 @@ ExpandResult expand_gfx1250_tensor_load_to_lds(const Instruction &inst, uint32_t
   // PACK_HH forms {SRC1[31:16], SRC0[31:16]}. Inline zero as SRC0 clears
   // D1[15:0] while preserving all descriptor fields in D1[31:16].
   words.push_back(wrapper.clear);
+  words.push_back(build_tensor_mask_sdst_wait());
   words.insert(words.end(), inst.raw_encoding(),
                inst.raw_encoding() + sizeof(cdna5::VimageMachineInst) / sizeof(uint32_t));
   words.push_back(wrapper.restore);
+  words.push_back(build_tensor_mask_sdst_wait());
 
   return ExpandResult::success(std::move(words));
 }
