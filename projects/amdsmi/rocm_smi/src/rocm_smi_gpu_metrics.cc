@@ -2947,6 +2947,27 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     metrics_public_init.average_vclk0_frequency = metrics.m_average_vclk_frequency;
   }
 
+  // Firmware zero-fills the slots of cores and L3s the part does not have, and a present one
+  // never reports a 0 MHz clock.
+  constexpr auto kSlotNotAvailable = std::numeric_limits<uint16_t>::max();
+  auto& apu = m_apu_metrics_tbl;
+  for (size_t core = 0; core < RSMI_APU_MAX_CORES; ++core) {
+    if (apu.current_coreclk[core] == 0) {
+      apu.temperature_core[core] = kSlotNotAvailable;
+      apu.average_temperature_core[core] = kSlotNotAvailable;
+      apu.average_core_c0_activity[core] = kSlotNotAvailable;
+      apu.average_core_power[core] = kSlotNotAvailable;
+      apu.current_coreclk[core] = kSlotNotAvailable;
+    }
+  }
+  for (size_t l3 = 0; l3 < RSMI_APU_MAX_L3; ++l3) {
+    if (apu.current_l3clk[l3] == 0) {
+      apu.temperature_l3[l3] = kSlotNotAvailable;
+      apu.average_temperature_l3[l3] = kSlotNotAvailable;
+      apu.current_l3clk[l3] = kSlotNotAvailable;
+    }
+  }
+
   ss << __PRETTY_FUNCTION__ << " | ======= end ======= "
      << " | Success "
      << " | Returning = " << getRSMIStatusString(status_code) << " |";

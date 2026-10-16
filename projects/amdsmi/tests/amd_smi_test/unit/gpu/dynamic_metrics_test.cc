@@ -14,6 +14,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <string>
@@ -690,6 +691,87 @@ TEST(GpuUnit, NotApplicableApuActivityIsStillReportedAsNotApplicable) {
       << "a live reading beside the N/A value proves the read populated these fields";
   EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, uint16_t{UINT16_MAX});
   EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{46});
+}
+
+// A 6-core Phoenix at idle, from a real v2.1 table: firmware slots 0 and 4 have no core and
+// read 0, while present cores 1, 3, 5, 6 and 7 really draw 0 mW. v2.4 adds average core
+// temperatures, which must follow the slot too.
+TEST(GpuUnit, ApuV2CoreSlotWithZeroClockIsNotApplicable) {
+  PRINT_VERBOSITY();
+
+  const uint16_t temperature[] = {0, 2012, 2012, 2025, 0, 2037, 2125, 2100};
+  const uint16_t power[] = {0, 0, 736, 0, 0, 0, 0, 0};
+  const uint16_t clock[] = {0, 1400, 1400, 1400, 0, 1400, 1400, 1400};
+  const std::pair<uint8_t, std::size_t> revisions[] = {{1, kApuV21Size}, {4, kApuV24Size}};
+
+  for (const auto& [content_revision, declared_size] : revisions) {
+    SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision));
+    auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+    for (std::size_t i = 0; i < std::size(clock); ++i) {
+      const auto slot = i * sizeof(uint16_t);
+      WriteLe16(blob, offsetof(ApuMetrics, m_temperature_core) + slot, temperature[i]);
+      WriteLe16(blob, offsetof(ApuMetrics, m_average_core_power) + slot, power[i]);
+      WriteLe16(blob, offsetof(ApuMetrics, m_current_coreclk) + slot, clock[i]);
+    }
+
+    FakeMetricsDevice fake_device("apu_core_slot");
+    fake_device.WriteMetrics(blob);
+
+    amd::smi::Device device(fake_device.path(), nullptr);
+    ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+    const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+    ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+    ASSERT_NE(metrics.apu_metrics, nullptr);
+    const auto& apu = *metrics.apu_metrics;
+
+    for (std::size_t i = 0; i < std::size(clock); ++i) {
+      const bool present = clock[i] != 0;
+      const uint16_t average_temperature =
+          content_revision >= 3
+              ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_temperature_core) +
+                                      i * sizeof(uint16_t))
+              : UINT16_MAX;
+      EXPECT_EQ(apu.temperature_core[i], present ? temperature[i] : UINT16_MAX) << "core " << i;
+      EXPECT_EQ(apu.average_core_power[i], present ? power[i] : UINT16_MAX) << "core " << i;
+      EXPECT_EQ(apu.current_coreclk[i], present ? clock[i] : UINT16_MAX) << "core " << i;
+      EXPECT_EQ(apu.average_temperature_core[i], present ? average_temperature : UINT16_MAX)
+          << "core " << i;
+    }
+  }
+}
+
+// The renoir driver copies both L3 slots as-is, so a part with a single L3 can send a zeroed
+// second slot.
+TEST(GpuUnit, ApuV2L3SlotWithZeroClockIsNotApplicable) {
+  PRINT_VERBOSITY();
+
+  const std::pair<uint8_t, std::size_t> revisions[] = {{2, kApuV22Size}, {4, kApuV24Size}};
+  for (const auto& [content_revision, declared_size] : revisions) {
+    SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision));
+    auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+    WriteLe16(blob, offsetof(ApuMetrics, m_temperature_l3) + sizeof(uint16_t), 0);
+    WriteLe16(blob, offsetof(ApuMetrics, m_current_l3clk) + sizeof(uint16_t), 0);
+
+    FakeMetricsDevice fake_device("apu_l3_slot");
+    fake_device.WriteMetrics(blob);
+
+    amd::smi::Device device(fake_device.path(), nullptr);
+    ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+    const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+    ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+    ASSERT_NE(metrics.apu_metrics, nullptr);
+    const auto& apu = *metrics.apu_metrics;
+
+    EXPECT_EQ(apu.temperature_l3[0], FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_l3)));
+    EXPECT_EQ(apu.current_l3clk[0], FilledValue<uint16_t>(offsetof(ApuMetrics, m_current_l3clk)));
+    EXPECT_EQ(apu.average_temperature_l3[0],
+              content_revision >= 3
+                  ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_temperature_l3))
+                  : UINT16_MAX);
+    EXPECT_EQ(apu.temperature_l3[1], UINT16_MAX);
+    EXPECT_EQ(apu.current_l3clk[1], UINT16_MAX);
+    EXPECT_EQ(apu.average_temperature_l3[1], UINT16_MAX);
+  }
 }
 
 // Reading a metrics table pre-fills and clamps using sizeof_metric_table(), so

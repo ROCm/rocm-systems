@@ -226,6 +226,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed APU video engine (VCN) utilization reading 100 times too high**.  
   - On APUs such as Ryzen AI Max (Strix Halo), `amdsmi_get_gpu_metrics_info()` returned `apu_metrics.average_vcn_activity` in hundredths of a percent (6067 for 61 %), so Python reported it as N/A and `amd-smi metric --usage` left it out. It is now whole percent.
 
+- **Fixed APU per-core readings for CPU cores the processor does not have**.  
+  - On APUs with fewer CPU cores than the metrics table has slots, such as 6-core Ryzen 7040 and 12-core Ryzen AI Max parts, `amd-smi metric` and the library reported the missing cores as 0 °C, 0 MHz and 0 W. They now report N/A.
+
 - **Fixed xGMI read and write data counters reading as unavailable on MI450**.  
   - On MI450 the GPU connects to the CPU over xGMI, and the driver reports that link's traffic as a single counter. It was dropped instead of being stored as the first link, so `xgmi_read_data_acc` and `xgmi_write_data_acc` from `amdsmi_get_gpu_metrics_info()`, and the link `read`/`write` from `amdsmi_get_link_metrics()`, read `UINT64_MAX` (`N/A`).
 

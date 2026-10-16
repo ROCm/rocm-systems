@@ -2244,7 +2244,8 @@ typedef struct {
  * 'throttle_status' will contain 0xFFFFFFFF and UINT64_MAX for uint64_t elements such
  * as 'indep_throttle_status'. Callers should check the version and treat maximum values
  * as invalid/not applicable. On v3.0, a `temperature_core` or `temperature_skin`
- * reading of 0 (not measured) is also returned as 0xFFFF.
+ * reading of 0 (not measured) is also returned as 0xFFFF. A core or L3 slot whose
+ * clock reads 0 (the part has no such core or L3) has all of its fields returned as 0xFFFF.
  *
  * @cond @tag{gpu_bm_linux} @endcond
  */
