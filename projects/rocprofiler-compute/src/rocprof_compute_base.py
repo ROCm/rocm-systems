@@ -295,6 +295,8 @@ class RocProfCompute:
     def handle_analyze_args(self) -> None:
         """Handle analyze-specific argument processing"""
         args = self.__args
+        args.debug = "single-metric" in args.debug_options
+        args.verify_deps = args.verify_deps or "verify-deps" in args.debug_options
         args.ignore_amd_smi = "ignore-amd-smi" in args.debug_options
         if "table-view" in args.debug_options:
             args.view = "table"

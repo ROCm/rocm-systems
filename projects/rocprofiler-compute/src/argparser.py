@@ -667,6 +667,7 @@ Examples:
     )
     analyze_group = analyze_parser.add_argument_group("Analyze Options")
     analyze_advanced_group = analyze_parser.add_argument_group("Advanced Options")
+    analyze_debug_group = analyze_parser.add_argument_group("Debug Options")
 
     analyze_group.add_argument(
         "-p",
@@ -678,7 +679,7 @@ Examples:
         action="append",
         help="\t\tSpecify the raw data root dirs or desired results directory.",
     )
-    analyze_group.add_argument(
+    analyze_debug_group.add_argument(
         "--verify-deps",
         dest="verify_deps",
         action="store_true",
@@ -1000,23 +1001,19 @@ Examples:
             "\t\tuse the option --include-cols Description."
         ),
     )
-    analyze_advanced_group.add_argument(
-        "-g",
-        dest="debug",
-        action="store_true",
-        help="\t\tDebug single metric.",
-    )
-    analyze_advanced_group.add_argument(
+    analyze_debug_group.add_argument(
         "--debug",
         dest="debug_options",
         metavar="OPTION",
         nargs="+",
-        choices=["table-view", "ignore-amd-smi"],
+        choices=["table-view", "ignore-amd-smi", "single-metric", "verify-deps"],
         default=[],
         help=(
             "\t\tEnable debug options. Can provide multiple space separated options.\n"
             "\t\t   table-view: force plain tables and ignore cli_style from YAML.\n"
-            "\t\t   ignore-amd-smi: skip AMD-SMI queries when probing local hardware."
+            "\t\t   ignore-amd-smi: skip AMD-SMI queries when probing local hardware.\n"
+            "\t\t   single-metric: show metric and memory chart diagnostics.\n"
+            "\t\t   verify-deps: check analyze dependencies, then exit."
         ),
     )
     analyze_advanced_group.add_argument(
@@ -1032,10 +1029,18 @@ Examples:
         action="store_true",
         help="\t\tList the installation dependency.",
     )
-    analyze_advanced_group.add_argument(
-        "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS
+    analyze_debug_group.add_argument(
+        "--report-diff",
+        default=0,
+        nargs="?",
+        type=int,
+        metavar="percent",
+        help=(
+            "\t\tWarn when metric differences exceed <percent>.\n"
+            "\t\tZero disables threshold warnings (Default: 0)."
+        ),
     )
-    analyze_advanced_group.add_argument(
+    analyze_debug_group.add_argument(
         "--specs-correction",
         type=str,
         metavar="",

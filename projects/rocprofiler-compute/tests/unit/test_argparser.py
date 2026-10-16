@@ -164,28 +164,57 @@ def test_profile_kernel_iteration_range():
     ])
     assert args.kernel_iteration_range == ["1", "3:5"]
 
-    # =============================================================================
-    def test_analyze_debug_options_accept_multiple_selectors():
-        args = build_args([
-            "analyze",
-            "--debug",
-            "table-view",
-            "ignore-amd-smi",
-        ])
-        assert args.debug_options == ["table-view", "ignore-amd-smi"]
 
-    def test_analyze_debug_options_reject_unknown_selector(capsys):
-        with pytest.raises(SystemExit) as exc:
-            build_args(["analyze", "--debug", "unknown"])
-        assert exc.value.code == 2
-        assert "invalid choice" in capsys.readouterr().err
+@pytest.mark.parametrize(
+    "selectors",
+    [
+        [],
+        ["single-metric"],
+        ["verify-deps"],
+        ["table-view", "ignore-amd-smi", "single-metric", "verify-deps"],
+    ],
+)
+def test_analyze_debug_options(selectors):
+    argv = ["analyze", "--debug", *selectors] if selectors else ["analyze"]
+    assert build_args(argv).debug_options == selectors
 
-    def test_analyze_view_is_hidden_compatibility_option(capsys):
-        args = build_args(["analyze", "--view", "table"])
-        assert args.view == "table"
 
-        output = help_text(HOME, ["analyze"], capsys)
-        assert "--view" not in output
+@pytest.mark.parametrize("selector", ["unknown", "normal-unit", "output-format"])
+def test_analyze_debug_options_reject_invalid_selector(selector, capsys):
+    with pytest.raises(SystemExit) as exc:
+        build_args(["analyze", "--debug", selector])
+    assert exc.value.code == 2
+    assert "invalid choice" in capsys.readouterr().err
+
+
+def test_analyze_debug_requires_selector(capsys):
+    with pytest.raises(SystemExit) as exc:
+        build_args(["analyze", "--debug"])
+    assert exc.value.code == 2
+    assert "expected at least one argument" in capsys.readouterr().err
+
+
+def test_analyze_debug_help(capsys):
+    output = help_text(HOME, ["analyze"], capsys)
+    debug_help = output.split("Debug Options:", 1)[1].split("Roofline Options:", 1)[0]
+    for option in [
+        "--debug",
+        "single-metric",
+        "verify-deps",
+        "--specs-correction",
+        "--report-diff",
+    ]:
+        assert option in debug_help
+    assert "--normal-unit" not in debug_help
+    assert "--output-format" not in debug_help
+
+
+def test_analyze_view_is_hidden_compatibility_option(capsys):
+    args = build_args(["analyze", "--view", "table"])
+    assert args.view == "table"
+
+    output = help_text(HOME, ["analyze"], capsys)
+    assert "--view" not in output
 
 
 # analyze --verify-deps
