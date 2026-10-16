@@ -116,7 +116,24 @@ foreach(mnemonic IN ITEMS
 endforeach()
 
 # Related comparison predicates share a binary; every entry point has its own test.
-
+foreach(family IN ITEMS
+    constant
+    integer_equality
+    integer_ordering
+    class
+    float_equality
+    float_ordered
+    float_unordered
+)
+  set(target "rj_arith_compare_${family}_test")
+  add_executable(${target} compare/${family}_test.cpp)
+  target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -pedantic)
+  endif()
+  gtest_discover_tests(${target} TEST_PREFIX "rj_arith.")
+endforeach()
 
 # Integer families share references and contract checks, with explicit API tests.
 
