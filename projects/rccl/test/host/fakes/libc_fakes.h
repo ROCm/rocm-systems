@@ -106,6 +106,7 @@ extern std::function<void(const char*)> g_perror;
 extern std::function<void(int)> g_exit;
 extern std::function<int(char*, size_t)> g_gethostname;
 extern std::function<int(const char*, int)> g_access;
+extern std::function<int(const char*, int, mode_t)> g_open;
 
 // Fail an allocation for one case with a hook returning nullptr; g_freedPointers
 // then shows whether the unit released what it had already taken on the way out.

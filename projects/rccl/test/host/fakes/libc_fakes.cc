@@ -6,7 +6,7 @@
 
 #include "fakes/libc_fakes.h"
 
-// Puts the seam's 26 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
+// Puts the seam's 27 micro_* prototypes in scope so the compiler checks them against the definitions at the bottom of
 // this file. Without it the two lists are hand-maintained and both extern "C", so a drifted parameter type would link
 // cleanly and corrupt arguments at run time. Include the undef half immediately: this file's defaults call real libc.
 #include "fakes/libc_seam.h"
@@ -284,6 +284,13 @@ static void DefaultFree(void* ptr) {
   std::free(ptr);
 }
 
+// Fails rather than forwarding: the default read and close are fakes, and real files would make results
+// host-dependent.
+static int DefaultOpen(const char*, int, mode_t) {
+  errno = ENOENT;
+  return -1;
+}
+
 // ---------------------------------------------------------------------------
 
 std::function<ssize_t(int, const void*, size_t)> g_write = DefaultWrite;
@@ -313,6 +320,7 @@ std::function<int(const char*, int)> g_access = DefaultAccess;
 std::function<void*(size_t)> g_malloc = DefaultMalloc;
 std::function<void*(size_t, size_t)> g_calloc = DefaultCalloc;
 std::function<void(void*)> g_free = DefaultFree;
+std::function<int(const char*, int, mode_t)> g_open = DefaultOpen;
 
 ASSERT_HOOK_MATCHES_PROD(g_accept, ::accept);
 ASSERT_HOOK_MATCHES_PROD(g_recv, ::recv);
@@ -364,6 +372,7 @@ void ResetLibcFakes() {
   g_malloc = DefaultMalloc;
   g_calloc = DefaultCalloc;
   g_free = DefaultFree;
+  g_open = DefaultOpen;
 
   g_writtenData.clear();
   g_stdoutData.clear();
@@ -459,6 +468,16 @@ int micro_access(const char* path, int mode) { return g_access(path, mode); }
 void* micro_malloc(size_t size) { return g_malloc(size); }
 void* micro_calloc(size_t nmemb, size_t size) { return g_calloc(nmemb, size); }
 void micro_free(void* ptr) { g_free(ptr); }
+int micro_open(const char* path, int flags, ...) {
+  mode_t mode = 0;
+  if ((flags & O_CREAT) || (flags & O_TMPFILE) == O_TMPFILE) {
+    va_list args;
+    va_start(args, flags);
+    mode = va_arg(args, mode_t);
+    va_end(args);
+  }
+  return g_open(path, flags, mode);
+}
 
 // Always forwards to the real vfprintf so stderr output still happens; records only the FILE* and never the
 // formatted text, since no test needs the diagnostic's wording, only whether and where one was printed.
