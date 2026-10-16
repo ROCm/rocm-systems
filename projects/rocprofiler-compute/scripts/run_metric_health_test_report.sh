@@ -6,7 +6,7 @@
 #
 # Default workload iterations: 500 (median-stable). Override with --iterations.
 #   vcopy:       -n 81920 -b 256 -i <iterations>
-#   nbody:       mini-nbody-block 131072 <iterations>
+#   nbody:       mini-nbody-block 81920 <iterations>
 #   mega_kernel: -b <mega-batch> -n <iterations>
 #
 # --arch selects the host profile. Differences that used to be copied scripts:
@@ -551,7 +551,7 @@ write_run_meta() {
       echo "THEROCK=${THEROCK}"
     fi
     echo "VCOPY_ARGS=-n 81920 -b 256 -i ${ITERS}"
-    echo "NBODY_ARGS=131072 ${ITERS}"
+    echo "NBODY_ARGS=81920 ${ITERS}"
     echo "MEGA_KERNEL_ARGS=-b ${MEGA_BATCH} -n ${ITERS}"
     echo "STAT=Median"
   } >"${LOGDIR}/run_meta.env"
@@ -674,7 +674,10 @@ write_run_meta
 PROFILE=(python3 "${PROFILER_ROOT}/src/rocprof-compute" profile --overwrite "${PROFILE_EXTRA[@]}")
 
 run_one "$RUN" vcopy ./sample/vc -n 81920 -b 256 -i "$ITERS"
-run_one "$RUN" nbody ./sample/mini-nbody-block 131072 "$ITERS"
+# 81920 bodies at 128 threads/block launch 640 blocks. On the largest current
+# health target (304 CUs), that supplies at least two blocks and four wave64s
+# per CU, one wave for each SIMD. The kernel tiles body positions through LDS.
+run_one "$RUN" nbody ./sample/mini-nbody-block 81920 "$ITERS"
 if [[ "$SKIP_MEGA" != "1" ]]; then
   run_one "$RUN" mega_kernel \
     "./sample/mega_kernel/mega_kernel_test_${ARCH}" -b "$MEGA_BATCH" -n "$ITERS"
