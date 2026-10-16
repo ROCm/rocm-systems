@@ -1,0 +1,122 @@
+# C/C++ CodeQL on the HRR capture code, and only on it.
+#
+# The ROCm security baseline skips C/C++ CodeQL in repositories this size, so
+# nothing else scans capture. Capture is compiled into libamdhip64, so this job
+# must not turn into a scan of the HIP runtime: it traces a build of the
+# files in projects/clr/hipamd/src/hrr alone (hrr_capture_codeql_build.sh) and
+# keeps only the results located there (hrr_capture_codeql_filter.py). The
+# rocclr headers those files include raise nine alerts of their own, which are
+# not this job's. Replay is scanned separately.
+#
+# Capture has no alerts on develop, so any alert left after filtering is new:
+# it is uploaded, so code scanning shows it on the PR, and then fails the job.
+#
+# The cpp/path-injection false positive a one-off run reported on 1 October
+# (hip_capture_writer.cpp, the code_objects/<hex hash>.hsaco path in
+# write_code_object) does not reproduce with CodeQL 2.27.2, so nothing is
+# excluded for it. If it comes back, dismiss it once in code scanning as a false
+# positive: the file name is a hex hash of the code object, not caller input.
+
+name: "HRR capture CodeQL"
+
+on:
+  # develop is analysed too, so code scanning has a base to call a PR alert new.
+  push:
+    branches: [develop]
+    paths:
+      - 'projects/clr/hipamd/src/hrr/**'
+      - '.github/workflows/hrr-capture-codeql.yml'
+      - '.github/scripts/hrr_capture_codeql_*'
+      - '.github/scripts/tests/hrr_capture_codeql_*'
+  pull_request:
+    paths:
+      - 'projects/clr/hipamd/src/hrr/**'
+      - '.github/workflows/hrr-capture-codeql.yml'
+      - '.github/scripts/hrr_capture_codeql_*'
+      - '.github/scripts/tests/hrr_capture_codeql_*'
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  analyze:
+    name: "HRR capture CodeQL (c-cpp)"
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    permissions:
+      contents: read
+      security-events: write  # uploads the SARIF to code scanning
+    # ROCm headers for the includes capture shares with the runtime. The tracer
+    # only sees compilers started in its own environment, so init, build and
+    # analyze all run in this container.
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2@sha256:05af5f04a06b04676d4c7438997d0deadaeb7478961ad621376e199bf3aeb644
+    steps:
+      # The image has no git, and without it checkout downloads the whole
+      # repository instead of the sparse tree.
+      - name: Install git
+        run: |
+          apt-get update -qq
+          apt-get install -y -qq --no-install-recommends git ca-certificates
+
+      # Only what the capture files include.
+      - uses: actions/checkout@9c091bb21b7c1c1d1991bb908d89e4e9dddfe3e0 # v7.0.0
+        with:
+          sparse-checkout: |
+            projects/clr/hipamd
+            projects/clr/rocclr
+            projects/clr/opencl
+            projects/hip/include
+            projects/hrr/include
+            .github/scripts
+          persist-credentials: false
+
+      - name: Test the result filter
+        run: python3 -m unittest discover -s .github/scripts/tests -p 'hrr_capture_codeql_*_test.py' -v
+
+      - name: Initialize CodeQL
+        uses: github/codeql-action/init@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          languages: c-cpp
+          build-mode: manual
+          # cpp-security-extended.
+          queries: security-extended
+
+      - name: Build the capture sources
+        run: bash .github/scripts/hrr_capture_codeql_build.sh
+
+      - name: Analyze
+        uses: github/codeql-action/analyze@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          category: /hrr-capture
+          # Uploaded below, once the results outside capture are gone.
+          upload: never
+          output: codeql-results
+
+      - name: Keep the capture results
+        id: filter
+        run: |
+          set -euo pipefail
+          shopt -s nullglob
+          raw=(codeql-results/*.sarif)
+          [[ ${#raw[@]} -eq 1 ]] || { echo "Expected one SARIF file, found ${#raw[@]}."; exit 1; }
+          n=$(python3 .github/scripts/hrr_capture_codeql_filter.py "${raw[0]}" hrr-capture.sarif)
+          echo "alerts=$n" >> "$GITHUB_OUTPUT"
+
+      - name: Upload to code scanning
+        uses: github/codeql-action/upload-sarif@e46ed2cbd01164d986452f91f178727624ae40d7 # v4.35.3
+        with:
+          sarif_file: hrr-capture.sarif
+          category: /hrr-capture
+
+      - name: Fail on capture alerts
+        if: steps.filter.outputs.alerts != '0'
+        env:
+          ALERTS: ${{ steps.filter.outputs.alerts }}
+        run: |
+          echo "::error::CodeQL found ${ALERTS} alert(s) in HRR capture; they are listed by the filter step and on the PR."
+          exit 1
