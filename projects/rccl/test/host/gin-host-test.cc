@@ -641,6 +641,17 @@ TEST_F(GinHostProxyNthreadsMicrotest, ConnectOnce_FewerLocalDevsThanThreads_Rais
   EXPECT_EQ(4, gin()->backends[0].ginCommCount);
 }
 
+// GIN_NCONNECTIONS=3 with one progress thread → ginCommCount follows the param,
+// not the local GIN device count.
+TEST_F(GinHostProxyNthreadsMicrotest, ConnectOnce_NconnectionsAboveNthreads_GinCommCountFollowsNconnections) {
+  nthreadsParam_ = 1;
+  nconnParam_ = 3;
+  g_nLocalGinDevs = 1;
+  ASSERT_EQ(ncclSuccess, connectOnce());
+  EXPECT_EQ(1, gin()->proxyNthreads);
+  EXPECT_EQ(3, gin()->backends[0].ginCommCount);
+}
+
 // GIN_NCONNECTIONS=2 then GIN_PROXY_NTHREADS=4 → ginCommCount is 4, not 2.
 TEST_F(GinHostProxyNthreadsMicrotest, ConnectOnce_NconnectionsBelowNthreads_GinCommCountFollowsNthreads) {
   nthreadsParam_ = 4;
