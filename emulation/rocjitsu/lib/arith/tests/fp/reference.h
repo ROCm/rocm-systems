@@ -87,6 +87,32 @@ inline void expect_fp(uint64_t actual, uint64_t expected, int width, uint64_t se
   }
 }
 
+// IEEE selection with signed-zero ordering. These test references cover quiet
+// NaNs. Directed guest-control cases live in v_min_max_test.cpp; loose results
+// do not promise a particular NaN payload or signed-zero choice.
+inline double select_fp(double x, double y, bool maximum, bool propagate = false) {
+  if (std::isnan(x) || std::isnan(y)) {
+    return propagate ? std::numeric_limits<double>::quiet_NaN() : std::isnan(x) ? y : x;
+  }
+  if (x == 0 && y == 0) {
+    return (maximum ? std::signbit(x) && std::signbit(y) : std::signbit(x) || std::signbit(y))
+               ? -0.0
+               : 0.0;
+  }
+  return maximum ? std::max(x, y) : std::min(x, y);
+}
+
+// Return the test reference's three-value median.
+inline double median_fp(double x, double y, double z) {
+  if (std::isnan(x) || std::isnan(y) || std::isnan(z)) {
+    return select_fp(select_fp(x, y, false), z, false);
+  }
+  double maximum = std::max({x, y, z});
+  return maximum == x   ? select_fp(y, z, true)
+         : maximum == y ? select_fp(x, z, true)
+                        : select_fp(x, y, true);
+}
+
 // Apply source sign modifiers; selection of packed halves stays in each test.
 inline double modified_fp(double value, uint64_t mode, int operand) {
   if (mode & (RJ_ARITH_ALU_ABS_A << operand)) {

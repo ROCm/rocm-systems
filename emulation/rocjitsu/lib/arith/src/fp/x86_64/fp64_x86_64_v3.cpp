@@ -6,6 +6,7 @@
 
 #include "common/x86_64/alu_x86_64_v3.h"
 #include "fp/fp64.h"
+#include "fp/x86_64/minmax_x86_64_v3.h"
 #include "rj_arith/rj_arith.h"
 
 #include <immintrin.h>
@@ -59,7 +60,21 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
       }
       value = _mm256_fmadd_pd(x, y, z);
     }
-
+    if constexpr (Op == Fp64::MinLegacy || Op == Fp64::MaxLegacy) {
+      value = minmax_rdna3<Op == Fp64::MaxLegacy>(x, y, flags & RJ_ARITH_FP_IEEE_MODE);
+    }
+    if constexpr (Op == Fp64::MinNum) {
+      value = minmax<false, false>(x, y);
+    }
+    if constexpr (Op == Fp64::MaxNum) {
+      value = minmax<true, false>(x, y);
+    }
+    if constexpr (Op == Fp64::Minimum) {
+      value = minmax<false, true>(x, y);
+    }
+    if constexpr (Op == Fp64::Maximum) {
+      value = minmax<true, true>(x, y);
+    }
     if constexpr (Op == Fp64::FrexpMant) {
       auto original = _mm256_castpd_si256(x);
       auto magnitude = _mm256_and_si256(original, _mm256_set1_epi64x(INT64_MAX));
@@ -113,7 +128,11 @@ void run(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint32_t *const *d,
       }
       value = clamped;
     }
-    if (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS) {
+    // Selection preserves a selected subnormal; arithmetic/unary outputs flush.
+    constexpr bool selection = Op == Fp64::MinLegacy || Op == Fp64::MaxLegacy ||
+                               Op == Fp64::MinNum || Op == Fp64::MaxNum || Op == Fp64::Minimum ||
+                               Op == Fp64::Maximum;
+    if (!selection && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
       value = flush_denorm_f64(value);
     }
 
@@ -161,7 +180,18 @@ void fp64_x86_64_v3(Fp64 op, uint64_t flags, uint32_t exec_mask, uint32_t mode, 
     return run<Fp64::Rcp>(flags, exec_mask, mode, d, a, b, c);
   case Fp64::Rsq:
     return run<Fp64::Rsq>(flags, exec_mask, mode, d, a, b, c);
-
+  case Fp64::MinLegacy:
+    return run<Fp64::MinLegacy>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::MaxLegacy:
+    return run<Fp64::MaxLegacy>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::MinNum:
+    return run<Fp64::MinNum>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::MaxNum:
+    return run<Fp64::MaxNum>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::Minimum:
+    return run<Fp64::Minimum>(flags, exec_mask, mode, d, a, b, c);
+  case Fp64::Maximum:
+    return run<Fp64::Maximum>(flags, exec_mask, mode, d, a, b, c);
   case Fp64::Add:
     return run<Fp64::Add>(flags, exec_mask, mode, d, a, b, c);
   case Fp64::Mul:
