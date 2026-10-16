@@ -4,6 +4,7 @@
 add_library(rj_arith STATIC
   common/cpu.cpp
   common/cpu_decode.cpp
+  register/dpp.cpp
   fp/arithmetic.cpp
   fp/half_fma.cpp
   wmma/wmma.cpp

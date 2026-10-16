@@ -123,6 +123,53 @@ static const int RJ_ARITH_ERROR_UNSUPPORTED_REGISTER_STATE = 4;
 // Ordinary results, including comparison masks and SCC, are required in every
 // mode. Explicit register writes and non-FP side effects have separate contracts.
 
+// DPP8 permutes source A within each group of eight lanes before arithmetic
+// modifiers. Pack eight 3-bit lane indices into bits 40..63, index 0 first, and
+// set RJ_ARITH_DPP8. Without FI, an inactive source supplies positive zero; FI reads
+// its stored value. Inactive destinations remain unchanged. Supported by FP32
+// FMA/FMAC, ADD/SUB/SUBREV/MUL/MUL_DX9_ZERO, binary min/max, and three-input
+// min/max/median, and FP32 unary math (rounding, SQRT/RCP/RSQ/EXP/LOG, FRACT,
+// FREXP mantissa), and wave32 CLZ/CTZ/CLS/BCNT/MBCNT, 32-bit shifts, and 32-bit Boolean
+// AND/OR/XOR/XNOR/NOT, and 32-bit integer min/max/median (two or three inputs),
+// plus LSHL_ADD/ADD_LSHL/LSHL_OR/AND_OR/OR3/XOR3/XAD/LERP. Each supports its
+// applicable modifiers and whole-VGPR aliases. BFE/BFI/BFM/BFREV, ALIGNBIT,
+// ALIGNBYTE, and PERM also support DPP, as do 32-bit ADD_NC/SUB_NC/SUBREV_NC
+// (including CLAMP) and ADD3. SUBREV_NC_U32 permutes B instead of A.
+// Signed/unsigned 24-bit MUL and MUL_HI support DPP, with CLAMP for low results.
+// The four integer MAD forms support DPP with CLAMP and their 16-bit selectors.
+// The 16-bit AND/OR/XOR/NOT and non-packed integer arithmetic forms support
+// DPP with their source/destination selectors and applicable CLAMP modifiers.
+// This includes non-packed 16-bit MAD, MIN3, MAX3, and MED3.
+// FP16 ADD/SUB/SUBREV/MUL and binary/ternary min/max/median support DPP
+// with all modifiers. FP16 FMA/FMAC support DPP in loose and exact semantics.
+// FP16 unary math also supports DPP with all applicable modifiers, as do FP16
+// and FP32 LDEXP/FREXP exponent, all six FP32/integer conversions, and all six
+// FP16 conversions, byte/nibble-to-FP32 conversions, and FP32-to-byte packing.
+static const uint64_t RJ_ARITH_DPP8 = 1ULL << 32;
+static const uint64_t RJ_ARITH_DPP_FI = 1ULL << 33;
+static const uint32_t RJ_ARITH_DPP8_SELECT_SHIFT = 40;
+static const uint64_t RJ_ARITH_DPP8_SELECT_MASK = 0xffffffULL << 40;
+
+// DPP16 permutes the same source as DPP8 within 16-lane rows before arithmetic
+// modifiers (B for SUBREV_NC_U32, A otherwise). Select
+// exactly one of RJ_ARITH_DPP8/RJ_ARITH_DPP16. DPP16 control is the architectural 9-bit
+// encoding: quad_perm 0x000..0x0ff; row_shl 0x101..0x10f; row_shr 0x111..0x11f;
+// row_ror 0x121..0x12f; row_mirror 0x140; row_half_mirror 0x141;
+// row_share 0x150..0x15f; row_xmask 0x160..0x16f. Other controls are invalid.
+// Row/bank fields enable destination rows of 16 lanes and banks of four lanes.
+// Use both full MASK constants to enable all destinations; zero fields disable
+// writes. FI permits inactive in-range sources. Without a readable source,
+// BOUND_CTRL supplies positive zero; otherwise the destination is preserved.
+// FI does not permit out-of-range sources. Supports the same instructions as DPP8.
+static const uint64_t RJ_ARITH_DPP16 = 1ULL << 34;
+static const uint64_t RJ_ARITH_DPP_BOUND_CTRL = 1ULL << 35;
+static const uint32_t RJ_ARITH_DPP_CTRL_SHIFT = 40;
+static const uint64_t RJ_ARITH_DPP_CTRL_MASK = 0x1ffULL << 40;
+static const uint32_t RJ_ARITH_DPP_ROW_SHIFT = 49;
+static const uint64_t RJ_ARITH_DPP_ROW_MASK = 0xfULL << 49;
+static const uint32_t RJ_ARITH_DPP_BANK_SHIFT = 53;
+static const uint64_t RJ_ARITH_DPP_BANK_MASK = 0xfULL << 53;
+
 // Arithmetic exception bits shared by RDNA3 TRAPSTS.EXCP[6:0] and RDNA4
 // WAVE_EXCP_FLAG_USER[6:0]. Other fields of these registers are not interchangeable.
 static const uint32_t RJ_ARITH_EXCEPTION_INVALID = 1U << 0;
@@ -132,6 +179,28 @@ static const uint32_t RJ_ARITH_EXCEPTION_OVERFLOW = 1U << 3;
 static const uint32_t RJ_ARITH_EXCEPTION_UNDERFLOW = 1U << 4;
 static const uint32_t RJ_ARITH_EXCEPTION_INEXACT = 1U << 5;
 static const uint32_t RJ_ARITH_EXCEPTION_INT_DIV0 = 1U << 6;
+
+// Packed source negation: independent for the low and high result calculations.
+static const uint32_t RJ_ARITH_PK_NEG_LO_A = 1U << 0;
+static const uint32_t RJ_ARITH_PK_NEG_LO_B = 1U << 1;
+static const uint32_t RJ_ARITH_PK_NEG_LO_C = 1U << 2;
+static const uint32_t RJ_ARITH_PK_NEG_HI_A = 1U << 3;
+static const uint32_t RJ_ARITH_PK_NEG_HI_B = 1U << 4;
+static const uint32_t RJ_ARITH_PK_NEG_HI_C = 1U << 5;
+
+// Packed output clamp: floats to [0, 1], with NaNs and -0 to +0;
+// integer ADD/SUB/MAD saturate to their result range.
+static const uint32_t RJ_ARITH_PK_CLAMP = 1U << 6;
+
+// Packed half selectors flip the default choice for each result calculation.
+// Zero flags use low inputs for the low result and high inputs for the high one.
+// These flags can swap or replicate halves independently for each source.
+static const uint32_t RJ_ARITH_PK_LO_A_HIGH = 1U << 7;
+static const uint32_t RJ_ARITH_PK_LO_B_HIGH = 1U << 8;
+static const uint32_t RJ_ARITH_PK_LO_C_HIGH = 1U << 9;
+static const uint32_t RJ_ARITH_PK_HI_A_LOW = 1U << 10;
+static const uint32_t RJ_ARITH_PK_HI_B_LOW = 1U << 11;
+static const uint32_t RJ_ARITH_PK_HI_C_LOW = 1U << 12;
 
 // Floating ALU source modifiers: ABS precedes NEG.
 static const uint32_t RJ_ARITH_ALU_NEG_A = 1U << 0;

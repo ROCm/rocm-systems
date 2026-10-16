@@ -10,6 +10,7 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "rj_arith/rj_arith.h"
+#include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
 
 #include <gtest/gtest.h>
@@ -88,7 +89,7 @@ TEST(WmmaF32F16W32, Arithmetic) {
   // Invalid requests must be rejected before operand access or output writes.
   // This instruction supports the six NEG/ABS modifier bits, with no DPP.
   rocjitsu::arith::test::expect_matrix_invalid_flags(rj_arith_v_wmma_f32_16x16x16_f16_w32, input,
-                                                     24, 0, 8, 16, 0);
+                                                     24, 0, 8, 16, 63);
 
   // A=VGPRs 0..7, B=8..15, C=16..23; D spans eight registers. Offsets
   // cover A alias, partial A/B overlap, B alias, partial B/C overlap, C alias,
@@ -114,4 +115,6 @@ TEST(WmmaF32F16W32, Arithmetic) {
       }
     }
   }
+  rocjitsu::arith::test::expect_wmma_exact_simd<false, 32, true, false>(
+      rj_arith_v_wmma_f32_16x16x16_f16_w32);
 }

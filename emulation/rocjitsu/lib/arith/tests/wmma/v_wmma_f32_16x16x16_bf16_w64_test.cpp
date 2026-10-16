@@ -10,6 +10,7 @@
 #include "common/registers.h"
 #include "common/semantics.h"
 #include "rj_arith/rj_arith.h"
+#include "wmma/exact_simd.h"
 #include "wmma/helpers.h"
 #include <limits>
 
@@ -96,7 +97,7 @@ TEST(WmmaF32BF16W64, Arithmetic) {
   // clang-format on
 
   rocjitsu::arith::test::expect_matrix_invalid_flags(rj_arith_v_wmma_f32_16x16x16_bf16_w64, input,
-                                                     21, 0, 8, 16, 0);
+                                                     21, 0, 8, 16, 63);
 
   // A occupies 8 registers, B 8, C/D 4. Reuse the same arithmetic
   // data for overlapping and disjoint destination ranges.
@@ -124,4 +125,6 @@ TEST(WmmaF32BF16W64, Arithmetic) {
       }
     }
   }
+  rocjitsu::arith::test::expect_wmma_exact_simd<true, 64, true, false>(
+      rj_arith_v_wmma_f32_16x16x16_bf16_w64);
 }

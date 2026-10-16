@@ -78,6 +78,10 @@ TEST(Cpu, SharedEnumerationHelpers) {
     EXPECT_TRUE(
         rocjitsu::arith::test::cpu_level_supported(level, detected | RJ_ARITH_CPU_FEATURES_MASK));
   }
+  const auto semantics = rocjitsu::arith::test::semantics_modes();
+  ASSERT_EQ(semantics.size(), 5U);
+  EXPECT_EQ(semantics.front(), RJ_ARITH_SEMANTICS_LOOSE);
+  EXPECT_EQ(semantics.back(), RJ_ARITH_SEMANTICS_COMPATIBILITY);
 }
 
 // Check readable names for supported and invalid CPU levels.
