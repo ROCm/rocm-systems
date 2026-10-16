@@ -233,6 +233,14 @@ do_poison_hip_atomics() {
   python3 "$RCCL_ROOT/src/include/test_poison_hip_atomics.py"
 }
 
+# Keep each faked production symbol owned by exactly one fakes/ file. Unlike the other
+# guards this one needs the objects, so it runs after `build`; it is a no-op-safe read of
+# <build>/CMakeFiles and touches nothing.
+do_fake_ownership() {
+  echo "==> Fake ownership (test/host/test_fake_ownership.py)"
+  python3 "$SCRIPT_DIR/test_fake_ownership.py" --build-dir "$BUILD_DIR" -v
+}
+
 # Keep Makefile header tracking on -MM (NCCL PR #1806).
 do_makefile_depflags() {
   echo "==> Makefile -MM depflags (unittest: test/test_makefile_depflags.py)"
@@ -275,6 +283,7 @@ do_replayer_guards() {
 # first one. Same idiom as do_host_tests above.
 do_guards() {
   local rc=0
+  do_fake_ownership || rc=1
   do_makefile_depflags || rc=1
   do_device_table_guards || rc=1
   do_kernel_count_guards || rc=1

@@ -52,7 +52,9 @@ ncclGin_t* getNcclGin_v13(void*) { return nullptr; }
 ncclGin_t* getNcclGin_v14(void*) { return nullptr; }
 
 int64_t ncclParamGinEnable() { return 1; }
-int64_t ncclParamGinType() { return -1; }
+// ncclParamGinType is NOT here: src/transport/net_ib/gin.cc owns it and so does
+// fakes/transport_net_ib_gin_fakes.cc, which this binary links. It reads g_loadParam,
+// whose default in this TU returns the caller's default -- the -1 this used to hard-code.
 
 ncclGin_t ncclGinProxy{};
 int ncclGinProxyVersion = 14;

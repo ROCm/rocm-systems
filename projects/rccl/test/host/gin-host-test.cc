@@ -124,15 +124,6 @@ void ResetGinHostGlobals() {
 
 }  // namespace
 
-// The one external with no owning fakes file: NCCL_PARAM(GinType) in
-// src/transport/net_ib/gin.cc, whose only fakes file today (transport_net_ib_fakes.cc)
-// is named for a different TU in that directory. The production declaration IS visible
-// -- gin/gin_host.h:63, included above -- so a signature change upstream makes this
-// definition an unrelated overload and the real symbol goes undefined at link. That is
-// the same guarantee ASSERT_HOOK_MATCHES_PROD gives the std::function seams in fakes/,
-// which is why it does not need one.
-int64_t ncclParamGinType() { return g_paramGinType; }
-
 // The os_fakes.cc affinity seams (src/os/linux.cc) do double duty here.
 // ncclOsCpuCount is the first thing every progress thread calls and the progress
 // loop has no counter of its own while writePending is set, so
@@ -470,6 +461,11 @@ class GinHostFixture : public ::testing::Test {
       if (std::strcmp(env, "GIN_PROXY_NTHREADS") == 0) return nthreadsParam_;
       if (std::strcmp(env, "GIN_NCONNECTIONS") == 0) return nconnParam_;
       if (std::strcmp(env, "GIN_ENABLE") == 0) return 1;
+      // NCCL_PARAM(GinType) is defined by fakes/transport_net_ib_gin_fakes.cc, which reads it
+      // through this seam. The suites that install their own g_loadParam below do not forward
+      // it, so they see production's own -1 default -- which is what they want, and is the
+      // value ResetGinHostGlobals puts here anyway.
+      if (std::strcmp(env, "GIN_TYPE") == 0) return g_paramGinType;
       return deft;
     };
 
@@ -707,12 +703,12 @@ TEST_F(GinHostProgressMicrotest, Progress_WritePendingSet_StopsProgressingUntilI
   {
     auto worker = progressWorkers(gs);
     worker.spawn([gs] { ncclGinProgress(gs, 0); });
-    // Entry is the positive control: the 50 ms window starts only after the
-    // worker has reached ncclGinProgress, so an ignored writePending cannot pass as 0 == 0.
+    // Entry is the positive control: the window starts only after the worker has
+    // reached ncclGinProgress, so an ignored writePending cannot pass as 0 == 0.
     ASSERT_TRUE(waitUntil([&] { return g_ncclOsCpuCountCalls.load() > 0; }))
         << "progress thread never entered ncclGinProgress";
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    EXPECT_EQ(0, fake_.totalProgressCalls.load());
+    EXPECT_TRUE(staysFalse([&] { return fake_.totalProgressCalls.load() > 0; }))
+        << "writePending was set, but the worker progressed anyway";
     gs->writePending.store(false);
     ASSERT_TRUE(waitUntil([&] { return fake_.totalProgressCalls.load() > 0; }));
   }
@@ -802,8 +798,8 @@ TEST_F(GinHostProgressThreadsMicrotest, DevCommFree_OneOfTwoDevComms_StopsProgre
   const int keepBefore = fake_.slots.front()->progressCalls.load();
   ASSERT_TRUE(waitUntil([&] { return fake_.slots.front()->progressCalls.load() > keepBefore; }))
       << "kept ctx stopped progressing after the sibling was freed";
-  std::this_thread::sleep_for(std::chrono::milliseconds(30));
-  EXPECT_EQ(afterFree, dropSlot->progressCalls.load()) << "freed ctx kept receiving ginProgress";
+  EXPECT_TRUE(staysFalse([&] { return dropSlot->progressCalls.load() != afterFree; }))
+      << "freed ctx kept receiving ginProgress";
 
   ASSERT_EQ(ncclSuccess, ncclGinDevCommFree(comm(), &keep));
 }
@@ -826,8 +822,8 @@ TEST_F(GinHostProgressMicrotest, Progress_ThreadIndexBeyondTheConnectionCount_Pr
     idle.spawn([gs] { ncclGinProgress(gs, 3); });
     ASSERT_TRUE(waitUntil([&] { return g_ncclOsCpuCountCalls.load() >= 2; }))
         << "idle progress threads never entered ncclGinProgress";
-    std::this_thread::sleep_for(std::chrono::milliseconds(50));
-    EXPECT_EQ(0, fake_.totalProgressCalls.load());
+    EXPECT_TRUE(staysFalse([&] { return fake_.totalProgressCalls.load() > 0; }))
+        << "a thread beyond the connection count progressed something";
   }
   freeProgressList();
 }

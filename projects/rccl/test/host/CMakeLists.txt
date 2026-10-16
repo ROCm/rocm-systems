@@ -44,6 +44,11 @@ rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"
   "int64_t ncclParamIbQpsPerConn() { return g_loadParam(\"IB_QPS_PER_CONNECTION\", 1); }"
   "the IbQpsPerConn fake default")
+rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/gin.cc"
+  "NCCL_PARAM(GinType, \"GIN_TYPE\", -1)" "fakes/transport_net_ib_gin_fakes.cc: ncclParamGinType()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_gin_fakes.cc"
+  "int64_t ncclParamGinType() { return g_loadParam(\"GIN_TYPE\", -1); }"
+  "the GinType fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMinNchannels = -2;" "the MinNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
@@ -117,6 +122,7 @@ function(rccl_define_micro_source_lists)
     ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     fakes/dev_runtime_micro_fakes.cc
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
+    fakes/transport_net_ib_gin_fakes.cc  # src/transport/net_ib/gin.cc params
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
     fakes/libc_fakes.cc
@@ -400,6 +406,7 @@ function(rccl_define_micro_source_lists)
     fakes/nccl_device_core_fakes.cc      # src/nccl_device/core.cc ncclTeam* accessors
     fakes/os_fakes.cc                    # src/os/linux.cc proxy-thread affinity seams
     fakes/topo_stubs.cc                  # src/graph/topo.cc ncclTopoGetLocalGinDevs seam
+    fakes/transport_net_ib_gin_fakes.cc  # src/transport/net_ib/gin.cc params
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
     

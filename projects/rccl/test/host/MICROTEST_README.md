@@ -530,6 +530,7 @@ symbol.
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`) | `fakes/transport_net_ib_fakes.cc` |
+| `src/transport/net_ib/gin.cc` params (`ncclParamGinType`) | `fakes/transport_net_ib_gin_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
@@ -589,6 +590,20 @@ These do NOT follow the TU-per-file rule, deliberately:
 - `rcclParamIntraGraphGen` stays in `fakes/init_fakes.cc` because its owner
   (`graph/rccl_graph_gen.cc:34`) has no fakes file at all. `rcclEffectiveP2pBatchEnable`
   did have one and moved to `fakes/enqueue_fakes.cc`.
+
+**This table is enforced.** `test/host/test_fake_ownership.py`, run from the `guards` phase
+of `run_host_tests.sh`, fails the build if a test TU hand-writes a symbol that a `fakes/`
+file already owns. It tells the two cases apart with `nm -l`: a symbol a test TU defines
+because it `#include`s the production `.cc` under test resolves into `build/hipify/src/`
+and is ignored, while a hand-written stub resolves to the test `.cc` itself. The
+deliberate exceptions (`connect-test.cc`'s four, `scheduler-test.cc`'s one) are listed with
+their reasons in that script's `ALLOWED` set — add to it only when the owner genuinely
+cannot be linked, and say why.
+
+The guard exists because the failure it catches is silent: a per-TU stub links fine as
+long as its binary does not also link the owner, so the two copies drift until some later
+change puts them in the same binary and the build breaks with a duplicate-symbol error
+that names neither the rule nor the owner.
 - `ncclTeamLsa` stays in `fakes/devcomm_fakes.cc` rather than moving to
   `fakes/nccl_device_core_fakes.cc` with the other `src/nccl_device/core.cc`
   accessors: its default silently satisfies the `nRanks ==
@@ -763,7 +778,7 @@ declares:
 |---|---|
 | `ScopedHook.h` | Install behaviour on a `std::function` seam, count the calls, restore the previous behaviour on scope exit. See [Installing per-test behaviour with `ScopedHook`](#installing-per-test-behaviour-with-scopedhook). |
 | `ScriptedFailure.h` | "Fail call N of this entry point." A fake holds one per entry point and asks `at(++calls)` what to return; the test writes `fake_.failConnect = {ncclSystemError, 2}`. Replaces the `g_fooCalls` + `g_failFooCall` pair that otherwise grows per seam. |
-| `WaitUntil.h` | `waitUntil(pred)` — bounded poll for something another thread will do, returning false when the budget elapses so the test fails with its own message instead of hanging. Never `sleep_for` and hope. |
+| `WaitUntil.h` | `waitUntil(pred)` — bounded poll for something another thread will do, returning false when the budget elapses so the test fails with its own message instead of hanging. Its mirror `staysFalse(pred)` asserts the thread does *not* do something, for the negative cases no predicate can end. Never `sleep_for` and hope. |
 | `JoinThreadsOnExit.h` | Spawn worker threads and stop/join them on every exit from the scope. The stop action is a callback, because what ends the worker's loop belongs to the unit under test. |
 | `ScopeExit.h` | The one-off cleanup that has no purpose-built RAII type. A fatal `ASSERT_*` returns immediately, so cleanup written after it does not run. |
 
