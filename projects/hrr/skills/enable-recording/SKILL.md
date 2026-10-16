@@ -124,19 +124,19 @@ An archive with several `pid-*` directories is one archive. Send the whole direc
 
 ## 4. Share it, knowing what is in it
 
-**There is no scrubbing, anonymisation or randomisation option today.** Say that plainly before anyone asks whether the archive can be sanitised, because the answer shapes what they do next and there is no flag that changes it.
+**There is no scrubbing, anonymisation or randomisation option for the data today.** Say that plainly before anyone asks whether the archive can be sanitised, because the answer shapes what they do next and there is no flag that changes it. Capture does drop two things on its own, with no flag: the build paths and compiler build inside the code objects, and the GPU's hardware identifiers.
 
 What the archive holds, per process, and it is worth reading out to whoever has to approve the transfer:
 
 - **`events.bin`**: every successful HIP call the process made, with its arguments: sizes, device addresses, stream handles, kernel names.
 - **`blobs/`**: the host buffers those calls carried, byte for byte and in the clear. For a serving stack that means prompts and generated text; for training, the data and the weights that were copied to the device.
-- **`code_objects/`**: the compiled GPU kernels the process loaded, which is the application's own binary code and a separate disclosure question from customer data.
-- **`manifest.json`**: process and parent process ids, event and blob counts, the clean-shutdown flag, the HIP and comgr versions that captured, and the device's name, architecture, PCI location and UUID.
+- **`code_objects/`**: the compiled GPU kernels the process loaded, which is the application's own binary code and a separate disclosure question from customer data. Their `.comment` and `.debug*` sections are zeroed, here and in the fat binaries under `blobs/`, so the compiler build, source file names and build paths are gone, except in compressed (`CCOB`) fat binaries, which are stored as the application had them. Kernel names stay.
+- **`manifest.json`**: process and parent process ids, event and blob counts, the clean-shutdown flag, the HIP and comgr versions that captured, and the device's name, architecture, memory size and clocks. Its PCI location, UUID and LUID are written blank.
 - **`regions/*.hrrr`**: the framework allocator's own layout, when a producer ran alongside capture.
 
 Apart from the few exceptions in step 2, failed HIP calls are not recorded, and nothing that never crossed a HIP call is. The archive is exactly as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded.
 
-`verify --json` gives each process's counts and sizes in a form you can attach to the request; the device details are in each `manifest.json`. For a multi-process archive, `hrr-playback --info` against the archive root prints a table covering every process at once. The cross-check in `verify` reports on one process, which is enough to judge the capture and not enough for a disclosure inventory.
+`verify --json` gives each process's counts and sizes in a form you can attach to the request, and says whether any hardware identifier or code object build information is left (`hardware_ids`, `build_info_files`, and `unchecked_fat_binaries` for the compressed ones it cannot read); the device details are in each `manifest.json`. For a multi-process archive, `hrr-playback --info` against the archive root prints a table covering every process at once. The cross-check in `verify` reports on one process, which is enough to judge the capture and not enough for a disclosure inventory.
 
 If the content is the obstacle, three things exist and none of them is scrubbing. Re-capture the same failure driven by synthetic input, if it still reproduces. Replay the archive yourself and send only the finding, which is a few lines and carries no buffers. Or agree the handling of a production-data transfer before uploading, because that is what this is.
 

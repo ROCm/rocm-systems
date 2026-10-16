@@ -73,6 +73,14 @@ EVENT_HEADER_BYTES = 32
 # in playback/hrr_reader.cpp), however large the file is.
 MAX_RECORD_BYTES = 64 * 1024 * 1024
 
+# Capture zeroes these ELF sections in every code object it stores, since they
+# hold the compiler build, source file names and build paths; and it writes the
+# manifest's hardware identifiers blank. `verify` reports what is left of both.
+# See projects/clr/hipamd/src/hrr/hip_capture_scrub.h.
+BUNDLE_MAGIC = b"__CLANG_OFFLOAD_BUNDLE__"
+COMPRESSED_BUNDLE_MAGIC = b"CCOB"
+HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
+
 
 @dataclass
 class ProcessArchive:
@@ -92,6 +100,12 @@ class ProcessArchive:
     hip_runtime_version: str | None = None
     format_version: int | None = None
     holds_an_event: bool = False
+    # Manifest fields that name the individual GPU and are not blank.
+    hardware_ids: list[str] = field(default_factory=list)
+    # Code objects and fat binaries still holding a .comment or .debug* section.
+    build_info_files: int = 0
+    # Compressed fat binaries, which cannot be checked without decompressing.
+    unchecked_fat_binaries: int = 0
 
     @property
     def recorded(self) -> bool:
@@ -164,6 +178,75 @@ def _dir_stats(path: Path) -> tuple[int, int]:
         except OSError:
             continue
     return files, total
+
+
+def _elf_has_build_info(data: bytes) -> bool:
+    """Does this ELF64 image hold a .comment or .debug* section that is not all zero?"""
+    if len(data) < 64 or data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
+        return False
+    shoff = struct.unpack_from("<Q", data, 0x28)[0]
+    shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
+    if shentsize != 64 or shstrndx >= shnum or shoff + shnum * 64 > len(data):
+        return False
+    names = struct.unpack_from("<Q", data, shoff + shstrndx * 64 + 24)[0]
+    for i in range(shnum):
+        name, kind, flags, _, offset, size = struct.unpack_from("<IIQQQQ", data, shoff + i * 64)
+        end = data.find(b"\0", names + name)
+        label = data[names + name : end if end >= 0 else len(data)]
+        if label != b".comment" and not label.startswith(b".debug"):
+            continue
+        if kind == 8 or flags & 0x2:  # SHT_NOBITS, SHF_ALLOC
+            continue
+        if data[offset : offset + size].strip(b"\0"):
+            return True
+    return False
+
+
+def _code_object_has_build_info(data: bytes) -> bool:
+    """The same, for an ELF or for any entry of an uncompressed offload bundle."""
+    if not data.startswith(BUNDLE_MAGIC):
+        return _elf_has_build_info(data)
+    pos = len(BUNDLE_MAGIC)
+    if len(data) < pos + 8:
+        return False
+    (count,) = struct.unpack_from("<Q", data, pos)
+    pos += 8
+    for _ in range(count):
+        if len(data) < pos + 24:
+            break
+        offset, size, id_size = struct.unpack_from("<QQQ", data, pos)
+        pos += 24 + id_size
+        if _elf_has_build_info(data[offset : offset + size]):
+            return True
+    return False
+
+
+def _scan_code_objects(pid_dir: Path, proc: ProcessArchive) -> None:
+    """Count the stored code objects that still carry build information.
+
+    Every file under `code_objects/` is one; under `blobs/` only the fat
+    binaries are, and the first bytes tell them from buffer contents without
+    reading the buffers.
+    """
+    candidates = sorted((pid_dir / "code_objects").glob("*")) + sorted(
+        (pid_dir / "blobs").rglob("*")
+    )
+    for path in candidates:
+        try:
+            if not path.is_file():
+                continue
+            with path.open("rb") as handle:
+                head = handle.read(len(BUNDLE_MAGIC))
+                if head.startswith(COMPRESSED_BUNDLE_MAGIC):
+                    proc.unchecked_fat_binaries += 1
+                    continue
+                if path.parent.name != "code_objects" and head != BUNDLE_MAGIC:
+                    continue
+                data = head + handle.read()
+        except OSError:
+            continue
+        if _code_object_has_build_info(data):
+            proc.build_info_files += 1
 
 
 def _archive_format_version(events: Path) -> int | None:
@@ -246,6 +329,7 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
     proc.holds_an_event = _holds_an_event(events)
     proc.blob_files, _ = _dir_stats(pid_dir / "blobs")
     proc.code_object_files, _ = _dir_stats(pid_dir / "code_objects")
+    _scan_code_objects(pid_dir, proc)
 
     manifest, error = _read_manifest(pid_dir / "manifest.json")
     proc.manifest_error = error
@@ -280,6 +364,12 @@ def _load_process(pid_dir: Path) -> ProcessArchive:
         runtime = metadata.get("runtime") if isinstance(metadata, dict) else None
         if isinstance(runtime, dict):
             proc.hip_runtime_version = typed(runtime, "hip_runtime_version", str)
+        devices = metadata.get("devices") if isinstance(metadata, dict) else None
+        for device in devices if isinstance(devices, list) else []:
+            props = device.get("properties") if isinstance(device, dict) else None
+            for key in HARDWARE_ID_FIELDS:
+                if isinstance(props, dict) and props.get(key) and key not in proc.hardware_ids:
+                    proc.hardware_ids.append(key)
 
     if proc.pid is None and pid_dir.name.startswith("pid-"):
         suffix = pid_dir.name[len("pid-") :]
@@ -703,6 +793,11 @@ def render(report: ArchiveReport) -> str:
         )
         if proc.parent_pid:
             lines.append(f"    parent pid: {proc.parent_pid}")
+        hardware = ", ".join(proc.hardware_ids) if proc.hardware_ids else "blank"
+        build_info = f"build info in {proc.build_info_files} code objects"
+        if proc.unchecked_fat_binaries:
+            build_info += f", {proc.unchecked_fat_binaries} compressed fat binaries not checked"
+        lines.append(f"    hardware identifiers: {hardware}   {build_info}")
 
     incomplete = [p for p in report.processes if p.complete is False]
     if incomplete:
@@ -767,6 +862,9 @@ def to_dict(report: ArchiveReport) -> dict:
                 "blob_files": p.blob_files,
                 "code_object_files": p.code_object_files,
                 "finalized": p.finalized,
+                "hardware_ids": p.hardware_ids,
+                "build_info_files": p.build_info_files,
+                "unchecked_fat_binaries": p.unchecked_fat_binaries,
             }
             for p in report.processes
         ],

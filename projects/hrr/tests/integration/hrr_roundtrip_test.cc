@@ -1060,6 +1060,7 @@ HRR_TEST_CASE(Unit_HRR_MetadataManifest) {
   const std::string compute_capability = json_string_value(metadata, "compute_capability");
   const std::string pci = json_string_value(metadata, "pci");
   const std::string uuid = json_string_value(metadata, "uuid");
+  const std::string luid = json_string_value(metadata, "luid");
 
   CHECK(ordinal >= 0);
   CHECK_FALSE(json_object_value(metadata, "properties").empty());
@@ -1070,9 +1071,15 @@ HRR_TEST_CASE(Unit_HRR_MetadataManifest) {
   CHECK(compute_mode >= 0);
   CHECK_FALSE(compute_capability.empty());
   CHECK(std::count(compute_capability.begin(), compute_capability.end(), '.') == 1);
-  CHECK_FALSE(pci.empty());
-  CHECK(std::count(pci.begin(), pci.end(), ':') == 2);
-  CHECK_FALSE(uuid.empty());
+  // The keys stay, blank: they would identify the individual GPU and replay
+  // needs none of them.
+  for (const char* key : {"\"pci\": \"\"", "\"uuid\": \"\"", "\"luid\": \"\""}) {
+    INFO("Blank field: " << key);
+    CHECK(metadata.find(key) != std::string::npos);
+  }
+  CHECK(pci.empty());
+  CHECK(uuid.empty());
+  CHECK(luid.empty());
 }
 
 HRR_TEST_CASE(Unit_HRR_StreamAdvancedRoundtrip) {

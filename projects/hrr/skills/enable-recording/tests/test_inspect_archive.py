@@ -562,6 +562,84 @@ def test_json_output_is_machine_readable(tmp_path, capsys):
     assert payload["processes"][0]["pid"] == 99
 
 
+def make_elf(sections: dict[str, bytes]) -> bytes:
+    """A minimal ELF64 little-endian image holding `sections`, then .shstrtab."""
+    names = b"\0"
+    offsets = {}
+    for name in [*sections, ".shstrtab"]:
+        offsets[name] = len(names)
+        names += name.encode() + b"\0"
+    body = b"\0" * 64
+    headers = [struct.pack("<IIQQQQIIQQ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)]
+    for name, data in [*sections.items(), (".shstrtab", names)]:
+        headers.append(
+            struct.pack("<IIQQQQIIQQ", offsets[name], 1, 0, 0, len(body), len(data), 0, 0, 1, 0)
+        )
+        body += data
+    ident = b"\x7fELF" + bytes([2, 1, 1]) + b"\0" * 9
+    header = ident + struct.pack(
+        "<HHIQQQIHHHHHH", 3, 224, 1, 0, 0, len(body), 0, 64, 0, 0, 64, len(headers), len(headers) - 1
+    )
+    return header + body[64:] + b"".join(headers)
+
+
+def make_bundle(elf: bytes) -> bytes:
+    """An uncompressed offload bundle: an empty host entry, then `elf`."""
+    host, target = b"host-x86_64-unknown-linux-gnu-", b"hipv4-amdgcn-amd-amdhsa--gfx950"
+    table = inspect_archive.BUNDLE_MAGIC + struct.pack("<Q", 2)
+    start = len(table) + 2 * 24 + len(host) + len(target)
+    table += struct.pack("<QQQ", start, 0, len(host)) + host
+    table += struct.pack("<QQQ", start, len(elf), len(target)) + target
+    return table + elf
+
+
+def test_verify_reports_hardware_identifiers_and_build_info(tmp_path, capsys):
+    """A capture that will be shared should name neither the GPU nor the build
+    tree, and `verify` is where whoever approves the transfer looks.
+    """
+    leaky = make_process(tmp_path, 31)
+    manifest = json.loads((leaky / "manifest.json").read_text())
+    manifest["metadata"] = {
+        "devices": [{"properties": {"name": "gfx950", "pci": "0:134:0", "uuid": "ab12", "luid": ""}}]
+    }
+    (leaky / "manifest.json").write_text(json.dumps(manifest))
+    (leaky / "code_objects").mkdir()
+    (leaky / "code_objects" / "a.hsaco").write_bytes(make_elf({".comment": b"AMD clang version 23\0"}))
+    (leaky / "blobs" / "ff").mkdir()
+    (leaky / "blobs" / "ff" / "b.blob").write_bytes(
+        make_bundle(make_elf({".text": b"\1" * 8, ".debug_line_str": b"/app/build\0"}))
+    )
+    (leaky / "blobs" / "ff" / "c.blob").write_bytes(b"CCOB" + b"\1" * 20)
+
+    clean = make_process(tmp_path, 32)
+    manifest = json.loads((clean / "manifest.json").read_text())
+    manifest["metadata"] = {"devices": [{"properties": {"pci": "", "uuid": "", "luid": ""}}]}
+    (clean / "manifest.json").write_text(json.dumps(manifest))
+    (clean / "code_objects").mkdir()
+    (clean / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".text": b"\1" * 8, ".comment": b"\0" * 21, ".debug_str": b"\0" * 11})
+    )
+    # Buffer contents are not code objects, whatever bytes they hold.
+    (clean / "blobs" / "blob-0").write_bytes(make_elf({".comment": b"user data\0"})[4:])
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
+    assert procs[31]["hardware_ids"] == ["pci", "uuid"]
+    assert procs[31]["build_info_files"] == 2
+    assert procs[31]["unchecked_fat_binaries"] == 1
+    assert procs[32]["hardware_ids"] == []
+    assert procs[32]["build_info_files"] == 0
+    assert procs[32]["unchecked_fat_binaries"] == 0
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback"])
+    text = capsys.readouterr().out
+    assert (
+        "hardware identifiers: pci, uuid   build info in 2 code objects, "
+        "1 compressed fat binaries not checked" in text
+    )
+    assert "hardware identifiers: blank   build info in 0 code objects" in text
+
+
 def test_the_json_verdict_is_one_of_the_four_documented_ones(tmp_path, capsys):
     """`--json` used to know only `recorded` and `empty`, so a consumer could
     not tell an archive with no events from a directory no process ever opened.
