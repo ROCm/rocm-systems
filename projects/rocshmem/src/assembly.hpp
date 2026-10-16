@@ -362,28 +362,28 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 1: [[unlikely]] {
 #if defined(__gfx90a__)
       int16_t val16{static_cast<int16_t>(*src)};
-      asm volatile("flat_store_byte %0, %1, glc slc"
+      asm volatile("global_store_byte %0 %1 off glc slc"
                    :
                    : "v"(dst), "v"(val16)
                    : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16{static_cast<int16_t>(*src)};
-      asm volatile("flat_store_byte %0, %1, sc0 sc1"
+      asm volatile("global_store_byte %0 %1 off sc0 sc1"
                    :
                    : "v"(dst), "v"(val16)
                    : "memory");
 #endif
 #if defined(__GFX11__)
       int32_t val32{static_cast<int32_t>(*src)};
-      asm volatile("flat_store_byte %0, %1, glc slc"
+      asm volatile("global_store_byte %0 %1 off glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
 #endif
 #if defined(__GFX12__)
       int32_t val32{static_cast<int32_t>(*src)};
-      asm volatile("flat_store_b8 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+      asm volatile("global_store_b8 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -393,27 +393,27 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 2: [[unlikely]] {
       [[maybe_unused]] int16_t val16{*(reinterpret_cast<int16_t*>(src))};
 #if defined(__gfx90a__)
-      asm volatile("flat_store_short %0, %1, glc slc"
+      asm volatile("global_store_short %0 %1 off glc slc"
                    :
                    : "v"(dst), "v"(val16)
                    : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("flat_store_short %0, %1, sc0 sc1"
+      asm volatile("global_store_short %0 %1 off sc0 sc1"
                    :
                    : "v"(dst), "v"(val16)
                    : "memory");
 #endif
 #if defined(__GFX11__)
       int32_t val32{static_cast<int32_t>(val16)};
-      asm volatile("flat_store_short %0, %1, glc slc"
+      asm volatile("global_store_short %0 %1 off glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
 #endif
 #if defined(__GFX12__)
       int32_t val32{static_cast<int32_t>(val16)};
-      asm volatile("flat_store_b16 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+      asm volatile("global_store_b16 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -423,19 +423,19 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 4: [[unlikely]] {
       [[maybe_unused]] int32_t val32{*(reinterpret_cast<int32_t*>(src))};
 #if defined(__gfx90a__) || defined(__GFX11__)
-      asm volatile("flat_store_dword %0, %1, glc slc"
+      asm volatile("global_store_dword %0 %1 off glc slc"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("flat_store_dword %0, %1, sc0 sc1"
+      asm volatile("global_store_dword %0 %1 off sc0 sc1"
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
 #endif
 #if defined(__GFX12__)
-      asm volatile("flat_store_b32 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+      asm volatile("global_store_b32 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
                    :
                    : "v"(dst), "v"(val32)
                    : "memory");
@@ -445,19 +445,19 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 8: [[unlikely]] {
       [[maybe_unused]] int64_t val64{*(reinterpret_cast<int64_t*>(src))};
 #if defined(__gfx90a__) || defined(__GFX11__)
-      asm volatile("flat_store_dwordx2 %0, %1, glc slc"
+      asm volatile("global_store_dwordx2 %0 %1 off glc slc"
                    :
                    : "v"(dst), "v"(val64)
                    : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("flat_store_dwordx2 %0, %1, sc0 sc1"
+      asm volatile("global_store_dwordx2 %0 %1 off sc0 sc1"
                    :
                    : "v"(dst), "v"(val64)
                    : "memory");
 #endif
 #if defined(__GFX12__)
-      asm volatile("flat_store_b64 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+      asm volatile("global_store_b64 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
                    :
                    : "v"(dst), "v"(val64)
                    : "memory");
@@ -467,19 +467,19 @@ __device__ __forceinline__ void put_asm([[maybe_unused]] uint8_t* src,
     case 16: [[likely]] {
       [[maybe_unused]] __int128_t val128{*(reinterpret_cast<__int128_t*>(src))};
 #if defined(__gfx90a__) || defined(__GFX11__)
-      asm volatile("flat_store_dwordx4 %0, %1, glc slc"
+      asm volatile("global_store_dwordx4 %0 %1 off glc slc"
                    :
                    : "v"(dst), "v"(val128)
                    : "memory");
 #endif
 #if defined(__gfx942__) || defined(__gfx950__)
-      asm volatile("flat_store_dwordx4 %0, %1, sc0 sc1"
+      asm volatile("global_store_dwordx4 %0 %1 off sc0 sc1"
                    :
                    : "v"(dst), "v"(val128)
                    : "memory");
 #endif
 #if defined(__GFX12__)
-      asm volatile("flat_store_b128 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
+      asm volatile("global_store_b128 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT
                    :
                    : "v"(dst), "v"(val128)
                    : "memory");
@@ -499,7 +499,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__)
       int16_t val16;
       asm volatile(
-          "flat_load_ubyte %0, %1, glc slc\n"
+          "global_load_ubyte %0 %1 off glc slc\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val16)
           : "v"(src)
@@ -509,7 +509,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16;
       asm volatile(
-          "flat_load_ubyte %0, %1, sc0 sc1\n"
+          "global_load_ubyte %0 %1 off sc0 sc1\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val16)
           : "v"(src)
@@ -519,7 +519,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__GFX11__)
       int32_t val32;
       asm volatile(
-          "flat_load_ubyte %0, %1, glc slc\n"
+          "global_load_ubyte %0 %1 off glc slc\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val32)
           : "v"(src)
@@ -529,7 +529,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__GFX12__)
       int32_t val32;
       asm volatile(
-          "flat_load_u8 %0, %1, scope:SCOPE_SYS\n"
+          "global_load_u8 %0 %1 off scope:SCOPE_SYS\n"
           "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
           : "=&v"(val32)
           : "v"(src)
@@ -542,7 +542,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__)
       int16_t val16;
       asm volatile(
-          "flat_load_ushort %0, %1, glc slc\n"
+          "global_load_ushort %0 %1 off glc slc\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val16)
           : "v"(src)
@@ -552,7 +552,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       int16_t val16;
       asm volatile(
-          "flat_load_ushort %0, %1, sc0 sc1\n"
+          "global_load_ushort %0 %1 off sc0 sc1\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val16)
           : "v"(src)
@@ -562,7 +562,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__GFX11__)
       int32_t val32;
       asm volatile(
-          "flat_load_ushort %0, %1, glc slc\n"
+          "global_load_ushort %0 %1 off glc slc\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val32)
           : "v"(src)
@@ -572,7 +572,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__GFX12__)
       int32_t val32;
       asm volatile(
-          "flat_load_u16 %0, %1, scope:SCOPE_SYS\n"
+          "global_load_u16 %0 %1 off scope:SCOPE_SYS\n"
           "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
           : "=&v"(val32)
           : "v"(src)
@@ -585,7 +585,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__GFX11__)
       int32_t val32;
       asm volatile(
-          "flat_load_dword %0, %1, glc slc\n"
+          "global_load_dword %0 %1 off glc slc\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val32)
           : "v"(src)
@@ -595,7 +595,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       int32_t val32;
       asm volatile(
-          "flat_load_dword %0, %1, sc0 sc1\n"
+          "global_load_dword %0 %1 off sc0 sc1\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val32)
           : "v"(src)
@@ -605,7 +605,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__GFX12__)
       int32_t val32;
       asm volatile(
-          "flat_load_b32 %0, %1, scope:SCOPE_SYS\n"
+          "global_load_b32 %0 %1 off scope:SCOPE_SYS\n"
           "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
           : "=&v"(val32)
           : "v"(src)
@@ -618,7 +618,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__GFX11__)
       int64_t val64;
       asm volatile(
-          "flat_load_dwordx2 %0, %1, glc slc\n"
+          "global_load_dwordx2 %0 %1 off glc slc\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val64)
           : "v"(src)
@@ -628,7 +628,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       int64_t val64;
       asm volatile(
-          "flat_load_dwordx2 %0, %1, sc0 sc1\n"
+          "global_load_dwordx2 %0 %1 off sc0 sc1\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val64)
           : "v"(src)
@@ -638,7 +638,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__GFX12__)
       int64_t val64;
       asm volatile(
-          "flat_load_b64 %0, %1, scope:SCOPE_SYS\n"
+          "global_load_b64 %0 %1 off scope:SCOPE_SYS\n"
           "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
           : "=&v"(val64)
           : "v"(src)
@@ -651,7 +651,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx90a__) || defined(__GFX11__)
       __int128_t val128;
       asm volatile(
-          "flat_load_dwordx4 %0, %1, glc slc\n"
+          "global_load_dwordx4 %0 %1 off glc slc\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val128)
           : "v"(src)
@@ -661,7 +661,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__gfx942__) || defined(__gfx950__)
       __int128_t val128;
       asm volatile(
-          "flat_load_dwordx4 %0, %1, sc0 sc1\n"
+          "global_load_dwordx4 %0 %1 off sc0 sc1\n"
           "s_waitcnt vmcnt(0)"
           : "=&v"(val128)
           : "v"(src)
@@ -671,7 +671,7 @@ __device__ __forceinline__ void get_asm([[maybe_unused]] uint8_t* src,
 #if defined(__GFX12__)
       __int128_t val128;
       asm volatile(
-          "flat_load_b128 %0, %1, scope:SCOPE_SYS\n"
+          "global_load_b128 %0 %1 off scope:SCOPE_SYS\n"
           "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT
           : "=&v"(val128)
           : "v"(src)
@@ -832,14 +832,14 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
       }
 #elif defined(__GFX12__)
-      if constexpr (LoadPolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_load_b128 %0, %1, scope:SCOPE_SE\n"
+      if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_load_b128 %0 %1 off scope:SCOPE_SE\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_load_b128 %0, %1, scope:SCOPE_DEV\n"
+        asm volatile("global_load_b128 %0 %1 off scope:SCOPE_DEV\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       } else {
-        asm volatile("flat_load_b128 %0, %1, scope:SCOPE_SYS\n"
+        asm volatile("global_load_b128 %0 %1 off scope:SCOPE_SYS\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       }
 #else
@@ -874,12 +874,12 @@ struct AsmAccess<16, LoadPolicy, StorePolicy> {
         asm volatile("global_store_dwordx4 %0 %1 off glc slc" : : "v"(dst), "v"(val) : "memory");
       }
 #elif defined(__GFX12__)
-      if constexpr (StorePolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_store_b128 %0, %1, scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+      if constexpr (StorePolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_store_b128 %0, %1, scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       } else {
-        asm volatile("flat_store_b128 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b128 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       }
 #else
       *reinterpret_cast<type*>(dst) = val;
@@ -948,14 +948,14 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
       }
 #elif defined(__GFX12__)
-      if constexpr (LoadPolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_load_b64 %0, %1, scope:SCOPE_SE\n"
+      if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_load_b64 %0 %1 off scope:SCOPE_SE\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_load_b64 %0, %1, scope:SCOPE_DEV\n"
+        asm volatile("global_load_b64 %0 %1 off scope:SCOPE_DEV\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       } else {
-        asm volatile("flat_load_b64 %0, %1, scope:SCOPE_SYS\n"
+        asm volatile("global_load_b64 %0 %1 off scope:SCOPE_SYS\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       }
 #else
@@ -990,12 +990,12 @@ struct AsmAccess<8, LoadPolicy, StorePolicy> {
         asm volatile("global_store_dwordx2 %0 %1 off glc slc" : : "v"(dst), "v"(val) : "memory");
       }
 #elif defined(__GFX12__)
-      if constexpr (StorePolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_store_b64 %0, %1, scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+      if constexpr (StorePolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_store_b64 %0, %1, scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       } else {
-        asm volatile("flat_store_b64 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b64 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       }
 #else
       *reinterpret_cast<type*>(dst) = val;
@@ -1064,14 +1064,14 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
                      "s_waitcnt vmcnt(0)" : "=&v"(val) : "v"(src) : "memory");
       }
 #elif defined(__GFX12__)
-      if constexpr (LoadPolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_load_b32 %0, %1, scope:SCOPE_SE\n"
+      if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_load_b32 %0 %1 off scope:SCOPE_SE\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_load_b32 %0, %1, scope:SCOPE_DEV\n"
+        asm volatile("global_load_b32 %0 %1 off scope:SCOPE_DEV\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       } else {
-        asm volatile("flat_load_b32 %0, %1, scope:SCOPE_SYS\n"
+        asm volatile("global_load_b32 %0 %1 off scope:SCOPE_SYS\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val) : "v"(src) : "memory");
       }
 #else
@@ -1106,12 +1106,12 @@ struct AsmAccess<4, LoadPolicy, StorePolicy> {
         asm volatile("global_store_dword %0 %1 off glc slc" : : "v"(dst), "v"(val) : "memory");
       }
 #elif defined(__GFX12__)
-      if constexpr (StorePolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_store_b32 %0, %1, scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+      if constexpr (StorePolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_store_b32 %0, %1, scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       } else {
-        asm volatile("flat_store_b32 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
+        asm volatile("global_store_b32 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val) : "memory");
       }
 #else
       *reinterpret_cast<type*>(dst) = val;
@@ -1196,14 +1196,14 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
                      "s_waitcnt vmcnt(0)" : "=&v"(val32) : "v"(src) : "memory");
       }
   #else
-      if constexpr (LoadPolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_load_u16 %0, %1, scope:SCOPE_SE\n"
+      if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_load_u16 %0 %1 off scope:SCOPE_SE\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_load_u16 %0, %1, scope:SCOPE_DEV\n"
+        asm volatile("global_load_u16 %0 %1 off scope:SCOPE_DEV\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
       } else {
-        asm volatile("flat_load_u16 %0, %1, scope:SCOPE_SYS\n"
+        asm volatile("global_load_u16 %0 %1 off scope:SCOPE_SYS\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
       }
   #endif
@@ -1252,12 +1252,12 @@ struct AsmAccess<2, LoadPolicy, StorePolicy> {
         asm volatile("global_store_short %0 %1 off glc slc" : : "v"(dst), "v"(val32) : "memory");
       }
   #else
-      if constexpr (StorePolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_store_b16 %0, %1, scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+      if constexpr (StorePolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_store_b16 %0, %1, scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
       } else {
-        asm volatile("flat_store_b16 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b16 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
       }
   #endif
 #else
@@ -1343,14 +1343,14 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
                      "s_waitcnt vmcnt(0)" : "=&v"(val32) : "v"(src) : "memory");
       }
   #else
-      if constexpr (LoadPolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_load_u8 %0, %1, scope:SCOPE_SE\n"
+      if constexpr (LoadPolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_load_u8 %0 %1 off scope:SCOPE_SE\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
       } else if constexpr (LoadPolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_load_u8 %0, %1, scope:SCOPE_DEV\n"
+        asm volatile("global_load_u8 %0 %1 off scope:SCOPE_DEV\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
       } else {
-        asm volatile("flat_load_u8 %0, %1, scope:SCOPE_SYS\n"
+        asm volatile("global_load_u8 %0 %1 off scope:SCOPE_SYS\n"
                      "s_wait_loadcnt 0x0" ROCSHMEM_XNACK_XCNT_WAIT : "=&v"(val32) : "v"(src) : "memory");
       }
   #endif
@@ -1399,12 +1399,12 @@ struct AsmAccess<1, LoadPolicy, StorePolicy> {
         asm volatile("global_store_byte %0 %1 off glc slc" : : "v"(dst), "v"(val32) : "memory");
       }
   #else
-      if constexpr (StorePolicy == CachePolicy::FlatCache) {
-        asm volatile("flat_store_b8 %0, %1, scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+      if constexpr (StorePolicy == CachePolicy::GlobalCache) {
+        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_SE" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
       } else if constexpr (StorePolicy == CachePolicy::DeviceScope) {
-        asm volatile("flat_store_b8 %0, %1, scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_DEV" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
       } else {
-        asm volatile("flat_store_b8 %0, %1, scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
+        asm volatile("global_store_b8 %0 %1 off scope:SCOPE_SYS" ROCSHMEM_XNACK_XCNT_WAIT : : "v"(dst), "v"(val32) : "memory");
       }
   #endif
 #else
@@ -1580,4 +1580,5 @@ __device__ __forceinline__ void wait_on_vmem_and_lds([[maybe_unused]] int waits)
 }  // namespace rocshmem
 
 #endif  // LIBRARY_SRC_ASSEMBLY_HPP_
+
 
