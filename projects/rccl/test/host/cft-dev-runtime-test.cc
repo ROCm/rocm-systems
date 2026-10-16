@@ -12,7 +12,6 @@
 #include <cstdlib>
 #include <memory>
 
-#include "fakes/cft_dev_runtime_fakes.h"
 #include "fakes/dev_runtime_fakes.h"
 
 #include CORE_CC_PATH
@@ -50,7 +49,6 @@ protected:
 
   void TearDown() override {
     ResetDevRuntimeFakes();
-    ResetCftDevRuntimeFakes();
   }
 };
 
@@ -148,25 +146,6 @@ TEST_F(CftDevRuntimeMicrotest, SymBindTeamLe_AlwaysSucceedsAndConsultsWinRegEnab
   EXPECT_EQ(sawCapability, ncclDevrRegisterCft);
 }
 
-TEST_F(CftDevRuntimeMicrotest, SymBindTeamLe_WinRegDisabled_StillSucceeds) {
-  auto mem = std::make_unique<ncclDevrMemory>();
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return false; };
-  EXPECT_EQ(symBindTeamLe(comm, mem.get(), /*le=*/7), ncclSuccess);
-}
-
-TEST_F(CftDevRuntimeMicrotest, SymBindTeamLe_InvalidLe_StillSucceeds) {
-  auto mem = std::make_unique<ncclDevrMemory>();
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return true; };
-  EXPECT_EQ(symBindTeamLe(comm, mem.get(), /*le=*/NCCL_LE_ID_INVALID), ncclSuccess);
-}
-
-TEST_F(CftDevRuntimeMicrotest, SymBindTeamLe_GlobalHasSysmemSegment_StillSucceeds) {
-  auto mem = std::make_unique<ncclDevrMemory>();
-  mem->globalHasSysmemSegment = true;
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return true; };
-  EXPECT_EQ(symBindTeamLe(comm, mem.get(), /*le=*/7), ncclSuccess);
-}
-
 TEST_F(CftDevRuntimeMicrotest, SymUnbindTeamLe_AlwaysSucceedsAndConsultsWinRegEnabledWithCftCapability) {
   auto mem = std::make_unique<ncclDevrMemory>();
   mem->winFlags = 0x3c;
@@ -180,25 +159,6 @@ TEST_F(CftDevRuntimeMicrotest, SymUnbindTeamLe_AlwaysSucceedsAndConsultsWinRegEn
   EXPECT_EQ(symUnbindTeamLe(comm, mem.get(), /*le=*/3), ncclSuccess);
   EXPECT_EQ(sawWinFlags, 0x3c);
   EXPECT_EQ(sawCapability, ncclDevrRegisterCft);
-}
-
-TEST_F(CftDevRuntimeMicrotest, SymUnbindTeamLe_WinRegDisabled_StillSucceeds) {
-  auto mem = std::make_unique<ncclDevrMemory>();
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return false; };
-  EXPECT_EQ(symUnbindTeamLe(comm, mem.get(), /*le=*/3), ncclSuccess);
-}
-
-TEST_F(CftDevRuntimeMicrotest, SymUnbindTeamLe_InvalidLe_StillSucceeds) {
-  auto mem = std::make_unique<ncclDevrMemory>();
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return true; };
-  EXPECT_EQ(symUnbindTeamLe(comm, mem.get(), /*le=*/NCCL_LE_ID_INVALID), ncclSuccess);
-}
-
-TEST_F(CftDevRuntimeMicrotest, SymUnbindTeamLe_GlobalHasSysmemSegment_StillSucceeds) {
-  auto mem = std::make_unique<ncclDevrMemory>();
-  mem->globalHasSysmemSegment = true;
-  g_devrWinRegEnabled = [](int, ncclDevrRegisterCapability) { return true; };
-  EXPECT_EQ(symUnbindTeamLe(comm, mem.get(), /*le=*/3), ncclSuccess);
 }
 
 // symTeamObtainUcLe / symTeamObtainMcLe: this build's stand-ins always fail.

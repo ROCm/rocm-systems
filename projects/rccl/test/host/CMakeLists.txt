@@ -354,7 +354,6 @@ function(rccl_define_micro_source_lists)
   # binary: rccl-UnitTestsMicro fakes most of core.cc, which the LE-info queries call.
   set(TEST_MICRO_CFT_DEV_RUNTIME_SOURCE_FILES
     cft-dev-runtime-test.cc
-    fakes/cft_dev_runtime_fakes.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
     fakes/transport_stubs.cc

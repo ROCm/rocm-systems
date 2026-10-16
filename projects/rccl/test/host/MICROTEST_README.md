@@ -487,7 +487,6 @@ symbol.
 | `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
-| `src/dev_runtime.cc` callees of `src/cft_dev_runtime.cc` (`rccl-UnitTestsMicroCftDevRuntime`) | `fakes/cft_dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
