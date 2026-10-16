@@ -170,7 +170,7 @@ def main() -> int:
         if args.suite == "rccl":
             env.update(NCCL_DEBUG="INFO", NCCL_DEBUG_SUBSYS="ALL")
             asan_opts = env.get("ASAN_OPTIONS", "")
-            env["ASAN_OPTIONS"] = (asan_opts + ":halt_on_error=0") if asan_opts else "halt_on_error=0"
+            env["ASAN_OPTIONS"] = (asan_opts + ":halt_on_error=0:malloc_context_size=30") if asan_opts else "halt_on_error=0:malloc_context_size=30"
             lsan_opts = env.get("LSAN_OPTIONS", "")
             env["LSAN_OPTIONS"] = (lsan_opts + ":verbosity=1") if lsan_opts else "verbosity=1"
         libraries = [root / "lib", root / "lib/rocm_sysdeps/lib",
