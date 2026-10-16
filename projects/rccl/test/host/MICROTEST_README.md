@@ -322,6 +322,21 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+- **`rccl-UnitTestsMicroMemManager`** — `mem_manager.cc` (via `MEM_MANAGER_CC_PATH`, from
+  `mem-manager-test.cc`); suite `MemManager*`. Its own binary: `nccl_fakes.cc` defines
+  `ncclMemTrack` and `ncclMemTrackImportFromPeer`, and `collective_stubs.cc` defines
+  `ncclCommMemSuspend`; `mem_manager.cc` defines all three. See
+  `test_categories_micro_mem_manager.yaml`.
+- **`rccl-UnitTestsMicroAllocator`** — `allocator.cc` (via `ALLOCATOR_CC_PATH`, from
+  `allocator-test.cc`); suite `Allocator*`. Its own binary because every other binary that
+  needs `ncclShadowPoolToHost` links `fakes/allocator_fakes.cc` instead. See
+  `test_categories_micro_allocator.yaml`.
+- **`rccl-UnitTestsMicroMnnvl`** — `mnnvl.cc` (via `MNNVL_CC_PATH`, from `mnnvl-test.cc`);
+  suite `Mnnvl*`. Its own binary: `nccl_stubs.cc`, which most targets link, defines
+  `ncclMnnvlCheck`, and `mnnvl.cc` defines it too. See `test_categories_micro_mnnvl.yaml`.
+- **`rccl-UnitTestsMicroAlloc`** — header-only `include/alloc.h` (from `alloc-test.cc`); suite
+  `Alloc*`. Its own binary because the test seams `getBusId`, `ncclCuMemEnable` and the
+  memory-manager calls, which the shared fakes define. See `test_categories_micro_alloc.yaml`.
 
 - **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
   `RMA_PROXY_CC_PATH`, from `rma-proxy-test.cc`); suite
@@ -857,7 +872,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
-`rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
+`rccl-UnitTestsMicroMemManager`, `rccl-UnitTestsMicroAllocator`, `rccl-UnitTestsMicroMnnvl`,
+`rccl-UnitTestsMicroAlloc`, `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
 `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
 sources.
@@ -899,6 +915,10 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroMemManager         # src/mem_manager.cc tests
+./build/rccl-UnitTestsMicroAllocator          # src/allocator.cc tests
+./build/rccl-UnitTestsMicroMnnvl              # src/mnnvl.cc tests
+./build/rccl-UnitTestsMicroAlloc              # src/include/alloc.h tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests

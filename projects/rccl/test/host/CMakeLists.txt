@@ -13,6 +13,13 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
+# allocator-test.cc copies misc/utils.cc's pointer hash rather than linking utils.cc.
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "h ^= h >> 32;" "allocator-test.cc: ncclHashPointer()")
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "h *= 0x9e3779b97f4a7c13;" "allocator-test.cc: ncclHashPointer()")
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "return (uint64_t)h >> (64 - hbits);" "allocator-test.cc: ncclHashPointer()")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -425,6 +432,38 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroMemManager -- src/mem_manager.cc. Own binary: mem_manager.cc defines ncclMemTrack and
+  # ncclMemTrackImportFromPeer (also in nccl_fakes.cc) and ncclCommMemSuspend (also in collective_stubs.cc).
+  set(TEST_MICRO_MEM_MANAGER_SOURCE_FILES
+    mem-manager-test.cc
+    fakes/hip_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroAllocator -- src/allocator.cc. Own binary: every other binary that needs
+  # ncclShadowPoolToHost links allocator_fakes.cc instead.
+  set(TEST_MICRO_ALLOCATOR_SOURCE_FILES
+    allocator-test.cc
+    fakes/hip_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroMnnvl -- src/mnnvl.cc. Own binary: nccl_stubs.cc, which most targets link, defines
+  # ncclMnnvlCheck, and mnnvl.cc defines it too.
+  set(TEST_MICRO_MNNVL_SOURCE_FILES
+    mnnvl-test.cc
+    fakes/hip_fakes.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroAlloc -- src/include/alloc.h. Own binary: the test seams getBusId, ncclCuMemEnable
+  # and the memory-manager calls, which the shared fakes define.
+  set(TEST_MICRO_ALLOC_SOURCE_FILES
+    alloc-test.cc
+    fakes/hip_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -1119,6 +1158,45 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMemManager
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMemManager
+  SOURCES ${TEST_MICRO_MEM_MANAGER_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    MEM_MANAGER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mem_manager.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mem_manager.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroAllocator
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroAllocator
+  SOURCES ${TEST_MICRO_ALLOCATOR_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ALLOCATOR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/allocator.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_allocator.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroMnnvl
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroMnnvl
+  SOURCES ${TEST_MICRO_MNNVL_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    MNNVL_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/mnnvl.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_mnnvl.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroAlloc
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroAlloc
+  SOURCES ${TEST_MICRO_ALLOC_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_alloc.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels

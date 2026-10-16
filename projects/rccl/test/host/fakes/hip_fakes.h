@@ -88,6 +88,8 @@ extern int g_deviceCount;
 extern int g_currentDevice;
 extern std::function<hipError_t(int* /*dev*/)> g_hipGetDevice;
 extern std::function<hipError_t(int /*dev*/)> g_hipSetDevice;
+// Defaults to device 0 and hipSuccess, as the plain stub did.
+extern std::function<hipError_t(hipDevice_t* /*device*/, int /*ordinal*/)> g_hipDeviceGet;
 extern std::function<hipError_t(int* /*count*/)> g_hipGetDeviceCount;
 // Defaults to hipErrorInvalidValue with *canAccessPeer = 0, the fail-loud floor's behaviour.
 extern std::function<hipError_t(int* /*canAccessPeer*/, int /*dev1*/, int /*dev2*/)> g_hipDeviceCanAccessPeer;
@@ -174,6 +176,20 @@ extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, 
 // hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
 // buffer production zeroes is genuinely zero when a test reads it back.
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
+
+// Stream-ordered pool calls (allocator.cc's shadow pool). Alloc/free default to hipErrorInvalidValue;
+// create follows g_hipMemPoolResult and destroy succeeds, as the plain stubs did.
+extern std::function<hipError_t(hipMemPool_t* /*pool*/, const hipMemPoolProps* /*props*/)> g_hipMemPoolCreate;
+extern std::function<hipError_t(hipMemPool_t /*pool*/)> g_hipMemPoolDestroy;
+extern std::function<hipError_t(void** /*ptr*/, size_t /*size*/, hipMemPool_t /*pool*/, hipStream_t /*stream*/)>
+    g_hipMallocFromPoolAsync;
+extern std::function<hipError_t(void* /*ptr*/, hipStream_t /*stream*/)> g_hipFreeAsync;
+extern std::function<hipError_t(void)> g_hipDeviceSynchronize;
+
+// Default range is [0, 0]; priority-stream creation follows g_hipStreamCreateResult.
+extern std::function<hipError_t(int* /*least*/, int* /*greatest*/)> g_hipDeviceGetStreamPriorityRange;
+extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/, int /*priority*/)>
+    g_hipStreamCreateWithPriority;
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
