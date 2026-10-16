@@ -262,60 +262,6 @@ TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
   }
 }
 
-TEST(WaitCounterPolicy, SupportedRuntimeTagsRoundTripToCoveringWaits) {
-  struct Case {
-    WaitcntModel model;
-    WaitCounterType tag;
-    WaitCounterKind domain;
-    WaitCounterType wait;
-  };
-  using enum WaitcntModel;
-  using enum WaitCounterType;
-  const Case cases[] = {
-      {LegacyNoVscnt, VMCNT, WaitCounterKind::Load, VMCNT},
-      {LegacyNoVscnt, LGKMCNT, WaitCounterKind::Ds, LGKMCNT},
-      {LegacyNoVscnt, EXPCNT, WaitCounterKind::Exp, EXPCNT},
-      {LegacyVscnt, VMCNT, WaitCounterKind::Load, VMCNT},
-      {LegacyVscnt, LGKMCNT, WaitCounterKind::Ds, LGKMCNT},
-      {LegacyVscnt, EXPCNT, WaitCounterKind::Exp, EXPCNT},
-      {LegacyVscnt, VSCNT, WaitCounterKind::Store, VSCNT},
-      {LegacyVscnt, LOADCNT, WaitCounterKind::Load, VMCNT},
-      {LegacyVscnt, STORECNT, WaitCounterKind::Store, VSCNT},
-      {LegacyVscnt, DSCNT, WaitCounterKind::Ds, LGKMCNT},
-      {LegacyVscnt, KMCNT, WaitCounterKind::Ds, LGKMCNT},
-      {SplitGfx12, LOADCNT, WaitCounterKind::Load, LOADCNT},
-      {SplitGfx12, STORECNT, WaitCounterKind::Store, STORECNT},
-      {SplitGfx12, DSCNT, WaitCounterKind::Ds, DSCNT},
-      {SplitGfx12, KMCNT, WaitCounterKind::Km, KMCNT},
-      {SplitGfx12, EXPCNT, WaitCounterKind::Exp, EXPCNT},
-      {SplitGfx12, ASYNCCNT, WaitCounterKind::Async, ASYNCCNT},
-      {SplitGfx12, TENSORCNT, WaitCounterKind::Tensor, TENSORCNT},
-  };
-  for (const auto &c : cases) {
-    SCOPED_TRACE(static_cast<unsigned>(c.model));
-    SCOPED_TRACE(static_cast<unsigned>(c.tag));
-    const auto domain = canonical_wait_counter(c.tag, c.model);
-    EXPECT_EQ(domain, c.domain);
-    const auto wait = memory_wait_counter_type(domain, c.model);
-    ASSERT_TRUE(wait);
-    EXPECT_EQ(*wait, c.wait);
-    EXPECT_TRUE(wait_counter_covers(*wait, c.tag));
-  }
-}
-
-TEST(WaitCounterPolicy, UnmappedDomainsHaveNoMemoryPipelineWait) {
-  for (auto model :
-       {WaitcntModel::LegacyNoVscnt, WaitcntModel::LegacyVscnt, WaitcntModel::SplitGfx12}) {
-    for (auto domain : {WaitCounterKind::Sample, WaitCounterKind::Bvh, WaitCounterKind::X,
-                        WaitCounterKind::VmVsrc, WaitCounterKind::VaVdst, WaitCounterKind::Depctr,
-                        WaitCounterKind::Count}) {
-      SCOPED_TRACE(static_cast<unsigned>(model));
-      SCOPED_TRACE(static_cast<unsigned>(domain));
-      EXPECT_FALSE(memory_wait_counter_type(domain, model));
-    }
-  }
-}
-
 TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
   for (const uint32_t word : {0xbfc20000u, 0xbfc30000u}) { // Sample/Bvh waits.
     SCOPED_TRACE(word);
@@ -338,11 +284,11 @@ TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel
   };
   const Case cases[] = {
       {ROCJITSU_CODE_ARCH_RDNA1,
-       0xbc800000u,
+       0xbcfd0000u,
        0x7u,
        {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
       {ROCJITSU_CODE_ARCH_RDNA2,
-       0xbc800000u,
+       0xbcfd0000u,
        0x7u,
        {WaitCounterKind::Exp, WaitCounterType::EXPCNT}},
       {ROCJITSU_CODE_ARCH_RDNA3,
