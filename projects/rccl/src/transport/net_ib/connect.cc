@@ -9,6 +9,8 @@
 #include "common.h"
 #include "p2p_resiliency.h"
 
+#include <mutex>
+
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
 NCCL_PARAM(IbRoceVersionNum, "IB_ROCE_VERSION_NUM", 2);
@@ -1294,7 +1296,8 @@ static ncclResult_t ncclIbReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       qpCreateAttrs.cq = rCommDev->base.cq;
       qpCreateAttrs.pd = rCommDev->base.pd;
       qpCreateAttrs.maxRecvWorkRequest = 0;
-      qpCreateAttrs.maxSendWorkRequest = NET_IB_MAX_REQUESTS;
+      // Each flush may post a scratchpad write in addition to the read.
+      qpCreateAttrs.maxSendWorkRequest = 2 * NET_IB_MAX_REQUESTS;
       qpCreateAttrs.qpContext = &rComm->base.stats;
       NCCLCHECK(ncclIbQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       INFO(NCCL_NET,
@@ -1719,6 +1722,18 @@ ib_recv:
             if (rCommDev->gpuFlush.dmabuf_fd >= 0) {
               close(rCommDev->gpuFlush.dmabuf_fd);
               rCommDev->gpuFlush.dmabuf_fd = -1;
+            }
+          } else if (peermemAvailable) {
+            // Registered without IBV_ACCESS_RELAXED_ORDERING so the flush write to it is strictly ordered.
+            if (wrap_ibv_reg_mr(&rCommDev->gpuFlush.gpuMr, rCommDev->base.pd, rCommDev->gpuFlush.gpuFlushGpuMem,
+                                sizeof(int), IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_REMOTE_READ) ==
+                ncclSuccess) {
+              gpuFlushRegistered = true;
+              static std::once_flag logOnce;
+              std::call_once(logOnce,
+                             [] { INFO(NCCL_INIT | NCCL_NET, "NET/IB: GDR flush scratchpad registered via peermem"); });
+            } else {
+              rCommDev->gpuFlush.gpuMr = nullptr;
             }
           }
         }
