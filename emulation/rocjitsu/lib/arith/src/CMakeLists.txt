@@ -5,8 +5,13 @@ add_library(rj_arith STATIC
   common/cpu.cpp
   common/cpu_decode.cpp
   fp/arithmetic.cpp
+  fp/binary.cpp
   fp/fp64.cpp
+  fp/frexp_exp.cpp
+  fp/half_binary.cpp
+  fp/half_exponent.cpp
   fp/half_fma.cpp
+  fp/ldexp.cpp
   fp/mixed_fma.cpp
   fp/packed_fma.cpp
   register/dpp.cpp
