@@ -7,14 +7,17 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Added
 
 - HSA API tracing support for `hsa_amd_enable_high_precision_timestamps`.
+- Experimental `rocprofiler_spm_dispatch_counting_service_set_agents()` to scope dispatch SPM to selected GPU agents. Two SPM contexts may be active together when their agent sets are disjoint.
 
 ### Changed
 
+- Dispatch counter collection, Advanced Thread Trace (ATT), SPM, and PC sampling are agent-scoped on the dispatch path: when a service is configured on selected GPUs only, other GPUs stay on the fast path instead of taking profiling overhead for that service.
 - rocPD schema 3.0.5 stores SPM counter location on `rocpd_info_pmc`. Each agent and combination of counter, XCC, shader engine, shader array, WGP, and instance has its own pmc id. Location dimensions not provided for a counter are stored as `NULL` and left blank in CSV output. The instance index is always stored. `rocpd_pmc_event` keeps the sample value and points at that id.
 - Request ROCr high-precision timestamp correlation during HSA registration when GPU timestamp collection is configured and the runtime provides the tools API. Older runtimes and tools that only trace CPU APIs or markers retain the existing behavior.
 
 ### Resolved issues
 
+- Fixed kernel replay dropping later `--pmc` groups when used with `--kernel-iteration-range`: the range is evaluated once per logical dispatch (pass 0), and later replay passes reuse that decision instead of consuming another iteration each pass.
   - Fixed rocpd reporting a counter at N times its value under `rocprofv3 --replay-mode kernel` when N `--pmc` groups list it, for example a sanity counter such as `SQ_WAVES` in every group. Every pass of a replayed dispatch shares the dispatch's record, so the `counters_collection` view, and the counter CSV and Perfetto output that `rocpd convert` builds from it, summed the passes. Passes after the first are now tagged with `replay_pass` in `rocpd_pmc_event.extdata`, the view averages a counter over the passes that collected it, and the `pmc_events` view reports each row's pass in a new `replay_pass` column. This behavior is identified by rocpd schema version 3.0.6.
 
 ### Known issues
