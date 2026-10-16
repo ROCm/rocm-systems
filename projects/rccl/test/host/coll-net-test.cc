@@ -409,6 +409,33 @@ TEST(CollNetHelpersMicrotest, DumpMap_PrintsEveryBankAndOffset) {
   EXPECT_EQ(testing::internal::GetCapturedStdout(), want);
 }
 
+TEST(CollNetHelpersMicrotest, Transport_WiresEachSidesEntryPoints) {
+  EXPECT_STREQ(collNetTransport.name, "COL");
+  EXPECT_EQ(collNetTransport.canConnect, canConnect);
+  const ncclTransportComm& send = collNetTransport.send;
+  EXPECT_EQ(send.setup, sendSetup);
+  EXPECT_EQ(send.connect, sendConnect);
+  EXPECT_EQ(send.free, sendFree);
+  EXPECT_EQ(send.proxySharedInit, nullptr);
+  EXPECT_EQ(send.proxySetup, sendProxySetup);
+  EXPECT_EQ(send.proxyConnect, sendProxyConnect);
+  EXPECT_EQ(send.proxyFree, sendProxyFree);
+  EXPECT_EQ(send.proxyProgress, sendProxyProgress);
+  EXPECT_EQ(send.proxyRegister, sendProxyRegBuffer);
+  EXPECT_EQ(send.proxyDeregister, sendProxyDeregBuffer);
+  const ncclTransportComm& recv = collNetTransport.recv;
+  EXPECT_EQ(recv.setup, recvSetup);
+  EXPECT_EQ(recv.connect, recvConnect);
+  EXPECT_EQ(recv.free, recvFree);
+  EXPECT_EQ(recv.proxySharedInit, nullptr);
+  EXPECT_EQ(recv.proxySetup, recvProxySetup);
+  EXPECT_EQ(recv.proxyConnect, recvProxyConnect);
+  EXPECT_EQ(recv.proxyFree, recvProxyFree);
+  EXPECT_EQ(recv.proxyProgress, recvProxyProgress);
+  EXPECT_EQ(recv.proxyRegister, recvProxyRegBuffer);
+  EXPECT_EQ(recv.proxyDeregister, recvProxyDeregBuffer);
+}
+
 // ---------------------------------------------------------------------------
 // Proxy-side setup (sendProxySetup, recvProxySetup)
 // ---------------------------------------------------------------------------
@@ -1555,9 +1582,15 @@ TYPED_TEST(CollNetProxyConnectBothMicrotest, CuMemDmaBufAndRegMrFail_LeavesOther
   this->shared_->size = this->kPoolSize;
   this->shared_->cudaBuff = static_cast<char*>(this->Alloc(this->kPoolSize));
   this->net_.regMrDmaBufResult = ncclSystemError;
-  // The plugin opens a descriptor after the export fd is closed, so it can reuse that number.
-  static int pluginFd;
-  pluginFd = -1;
+  // Both take the lowest free fd, so the plugin's descriptor reuses the closed export fd's number.
+  static int pluginFd, exportFd;
+  pluginFd = exportFd = -1;
+  g_hipMemGetHandleForAddressRange = [](void* handle, hipDeviceptr_t, size_t, hipMemRangeHandleType,
+                                        unsigned long long) {
+    exportFd = open("/dev/null", O_RDONLY);
+    *static_cast<int*>(handle) = exportFd;
+    return hipSuccess;
+  };
   this->vtable_.regMr = [](void*, void*, size_t, int, void**) {
     pluginFd = open("/dev/null", O_RDONLY);
     return ncclSystemError;
@@ -1565,7 +1598,8 @@ TYPED_TEST(CollNetProxyConnectBothMicrotest, CuMemDmaBufAndRegMrFail_LeavesOther
 
   EXPECT_EQ(this->Connect(), ncclSystemError);
 
-  ASSERT_GE(pluginFd, 0);
+  ASSERT_GE(exportFd, 0);
+  ASSERT_EQ(pluginFd, exportFd);
   EXPECT_TRUE(FdOpen(pluginFd));
   close(pluginFd);
 }
@@ -2623,6 +2657,10 @@ class CollNetProgressMicrotestBase : public CollNetMicrotestBase {
     }
   }
 
+  void Subs(int n, int nsteps) {
+    args_.nsubs = n;
+    for (int s = 0; s < n; s++) args_.subs[s].nsteps = nsteps;
+  }
   ncclRecvMem* RecvMem(int s) { return &recvMems_[s]; }
   int Slot(int s, uint64_t step) { return (args_.subs[s].base + step) % NCCL_STEPS; }
   // The GPU hands the proxy its next step: the bytes in the FIFO slot, then the tail.
@@ -2658,10 +2696,6 @@ class CollNetSendProgressMicrotest : public CollNetProgressMicrotestBase {
     }
   }
 
-  void Subs(int n, int nsteps) {
-    args_.nsubs = n;
-    for (int s = 0; s < n; s++) args_.subs[s].nsteps = nsteps;
-  }
   ncclResult_t Progress() { return sendProxyProgress(&proxyState_, &args_); }
   // The recv proxy hands a step's shared slot to the send side.
   void RecvTurn(int s, int group, uint64_t step) { fifo_[s][group][Slot(s, step)].turnIsSendNotRecv = true; }
@@ -3299,10 +3333,6 @@ class CollNetRecvProgressMicrotest : public CollNetProgressMicrotestBase {
     }
   }
 
-  void Subs(int n, int nsteps) {
-    args_.nsubs = n;
-    for (int s = 0; s < n; s++) args_.subs[s].nsteps = nsteps;
-  }
   ncclResult_t Progress() { return recvProxyProgress(&proxyState_, &args_); }
   // Progresses until a call makes no progress.
   void Run() {
@@ -3897,6 +3927,16 @@ class CollNetSetupCommMicrotest : public CollNetCommMicrotest {
   // What the other ranks report for each (op, type); rank 2 is the other node's head.
   uint8_t remote_[kRanks][4][ncclNumTypes] = {};
 
+  // Drops what the last ncclCollNetSetup allocated, except a shared state it does not own.
+  void ResetComm(ncclCollNetSharedRes* notOwned = nullptr) {
+    free(comm_.collNetHeads);
+    if (comm_.collNetSharedRes != notOwned) free(comm_.collNetSharedRes);
+    comm_.collNetHeads = nullptr;
+    comm_.collNetSharedRes = nullptr;
+    comm_.collNetHeadsNum = 0;
+    comm_.config.collnetEnable = 1;
+  }
+
   void SetUp() override {
     CollNetCommMicrotest::SetUp();
     g_ncclTransportCollNetSetup = [this](ncclComm* comm, ncclTopoGraph* graph, ncclChannel* channel, int master,
@@ -4085,12 +4125,7 @@ TEST_F(CollNetSetupCommMicrotest, Setup_HeadOnAnotherNode_DisablesCollNetWithErr
 TEST_F(CollNetSetupCommMicrotest, Setup_DependencyFails_DisablesCollNetWithError) {
   for (int failing = 0; failing < 5; failing++) {
     SCOPED_TRACE(failing);
-    free(comm_.collNetHeads);
-    free(comm_.collNetSharedRes);
-    comm_.collNetHeads = nullptr;
-    comm_.collNetSharedRes = nullptr;
-    comm_.collNetHeadsNum = 0;
-    comm_.config.collnetEnable = 1;
+    ResetComm();
     frees_ = 0;
     ScopedHook initChannel(g_initCollnetChannel, [&](ncclComm*, int, ncclComm*, bool) {
       return failing == 0 ? ncclSystemError : ncclSuccess;
@@ -4194,10 +4229,7 @@ TEST_F(CollNetShareCommMicrotest, HeadNotAParentHead_DisablesCollNet) {
   for (int other : {0, -1}) {  // whether or not the other node's head is a parent head
     SCOPED_TRACE(other);
     otherHeadPosition_ = other;
-    comm_.config.collnetEnable = 1;
-    free(comm_.collNetHeads);
-    comm_.collNetHeads = nullptr;
-    comm_.collNetHeadsNum = 0;
+    ResetComm(&parentShared_);
 
     ASSERT_EQ(Setup(&parent_), ncclSuccess);
 
@@ -4222,17 +4254,14 @@ TEST_F(CollNetShareCommMicrotest, ParentCannotShare_SetsUpOwnResources) {
     parent_.nNodes = variant == 1 ? 3 : 2;
     parent_.shareResources = variant != 2;
     collNetSetups_.clear();
-    free(comm_.collNetHeads);
-    if (comm_.collNetSharedRes != &parentShared_) free(comm_.collNetSharedRes);
-    comm_.collNetHeads = nullptr;
-    comm_.collNetHeadsNum = 0;
+    ResetComm(&parentShared_);
 
     ASSERT_EQ(Setup(&parent_), ncclSuccess);
 
     EXPECT_NE(comm_.collNetSharedRes, &parentShared_);
     EXPECT_EQ(collNetSetups_.size(), 4u);
   }
-  if (comm_.collNetSharedRes != &parentShared_) free(comm_.collNetSharedRes);
+  ResetComm(&parentShared_);
 }
 
 TEST_F(CollNetShareCommMicrotest, Share_DependencyFails_DisablesCollNetWithError) {
@@ -4240,41 +4269,11 @@ TEST_F(CollNetShareCommMicrotest, Share_DependencyFails_DisablesCollNetWithError
   EXPECT_EQ(Setup(&parent_), ncclSystemError);
   EXPECT_EQ(comm_.config.collnetEnable, 0);
 
-  free(comm_.collNetHeads);
-  comm_.collNetHeads = nullptr;
-  comm_.collNetHeadsNum = 0;
-  comm_.config.collnetEnable = 1;
+  ResetComm(&parentShared_);
   g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
   g_initCollnetChannel = [](ncclComm*, int, ncclComm*, bool) { return ncclSystemError; };
   EXPECT_EQ(Setup(&parent_), ncclSystemError);
   EXPECT_EQ(comm_.config.collnetEnable, 0);
-}
-
-TEST(CollNetHelpersMicrotest, Transport_WiresEachSidesEntryPoints) {
-  EXPECT_STREQ(collNetTransport.name, "COL");
-  EXPECT_EQ(collNetTransport.canConnect, canConnect);
-  const ncclTransportComm& send = collNetTransport.send;
-  EXPECT_EQ(send.setup, sendSetup);
-  EXPECT_EQ(send.connect, sendConnect);
-  EXPECT_EQ(send.free, sendFree);
-  EXPECT_EQ(send.proxySharedInit, nullptr);
-  EXPECT_EQ(send.proxySetup, sendProxySetup);
-  EXPECT_EQ(send.proxyConnect, sendProxyConnect);
-  EXPECT_EQ(send.proxyFree, sendProxyFree);
-  EXPECT_EQ(send.proxyProgress, sendProxyProgress);
-  EXPECT_EQ(send.proxyRegister, sendProxyRegBuffer);
-  EXPECT_EQ(send.proxyDeregister, sendProxyDeregBuffer);
-  const ncclTransportComm& recv = collNetTransport.recv;
-  EXPECT_EQ(recv.setup, recvSetup);
-  EXPECT_EQ(recv.connect, recvConnect);
-  EXPECT_EQ(recv.free, recvFree);
-  EXPECT_EQ(recv.proxySharedInit, nullptr);
-  EXPECT_EQ(recv.proxySetup, recvProxySetup);
-  EXPECT_EQ(recv.proxyConnect, recvProxyConnect);
-  EXPECT_EQ(recv.proxyFree, recvProxyFree);
-  EXPECT_EQ(recv.proxyProgress, recvProxyProgress);
-  EXPECT_EQ(recv.proxyRegister, recvProxyRegBuffer);
-  EXPECT_EQ(recv.proxyDeregister, recvProxyDeregBuffer);
 }
 
 }  // namespace

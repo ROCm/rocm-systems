@@ -136,7 +136,7 @@ void ResetTransportStubs() {
 ncclResult_t ncclCollNetChainBufferSetup(ncclComm_t comm) { ::abort(); }
 ncclResult_t ncclCollNetDirectBufferSetup(ncclComm_t comm) { ::abort(); }
 #endif
-#ifndef RCCL_STUBS_OMIT_COLL_NET  // the binary compiles the real coll_net.cc
+#ifndef RCCL_TRANSPORT_STUBS_OMIT_COLL_NET  // the binary compiles the real coll_net.cc
 ncclResult_t ncclCollNetSetup(ncclComm_t comm, ncclComm_t parent, struct ncclTopoGraph* graphs[]) { ::abort(); }
 #endif
 // ncclGetUserP2pLevel (src/graph/paths.cc): topo_stubs.cc, with the rest of that TU's seams.
