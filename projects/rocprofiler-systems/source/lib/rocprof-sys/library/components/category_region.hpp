@@ -84,7 +84,7 @@ inline constexpr std::size_t delims_to_last_record = fields_per_record + 1;
 // Each renumbered idx field can grow by a few digits
 inline constexpr std::size_t renumber_growth_slack = 16;
 
-struct wall_clock_source
+struct timeline_clock_source
 {
     [[nodiscard]] timestamp_t now() const { return clocks::timeline::now_ns(); }
 };
@@ -131,7 +131,7 @@ struct thread_metadata_source
 
 struct real_region_policy
 {
-    using clock_type           = wall_clock_source;
+    using clock_type           = timeline_clock_source;
     using region_sink_type     = trace_cache_region_sink;
     using thread_metadata_type = thread_metadata_source;
 };
