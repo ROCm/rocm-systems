@@ -379,6 +379,16 @@ collected in the following table.
         | Default: ``16``
         | ``0``: No lower bound.
 
+    * - | ``NCCL_TREE_COMPACT``
+        | Builds the inter-node trees with a half-interleave node remapping.
+          Intended for jobs whose nodes are ordered by network domain. Both
+          trees keep cross-domain hops at the leaves only when the nodes split
+          evenly into two domains; with an uneven split, the first tree does
+          so when the first domain holds at least half of the nodes, and the
+          second tree still crosses domains. All ranks in a communicator must
+          use the same value; initialization fails otherwise.
+      - | ``0``: Standard double binary tree (default)
+        | ``1``: Compact tree
     * - | ``RCCL_TUNER_EMBEDDED_CONFIG``
         | Controls whether the built-in CSV tuner uses the tuning configurations
           compiled into ``librccl.so`` from the source tree's ``tuner/*.csv``.

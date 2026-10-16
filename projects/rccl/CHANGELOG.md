@@ -20,6 +20,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_CE_CHUNK_SIZE` (default 8 MiB): chunk size for the round-robin chunking that host RMA Copy Engine batches use when per-peer transfer sizes differ.
 * `NCCL_CE_INTRA_GPU_MEMCPY_ENABLE` (default `1`): controls whether batched Copy Engine collective copies pass `hipMemcpyFlagPreferOverlapWithCompute`. RCCL previously always set this flag, so the default keeps the previous behavior; set `0` to omit it.
 * `NCCL_HIER_CE_COLL_AG_RAIL_RING_ENABLE` (default `-1`): a positive value selects a ring for the inter-node rail phase of hierarchical Copy Engine `ncclAllGather`. The default keeps the direct path.
+* `NCCL_TREE_COMPACT` (default `0`): builds the inter-node trees with a half-interleave node remapping, for jobs whose nodes are ordered by network domain. Both trees keep cross-domain hops at the leaves only when the nodes split evenly into two domains; with an uneven split, the first tree does so when the first domain holds at least half of the nodes, and the second tree still crosses domains. All ranks in a communicator must use the same value; initialization fails with `ncclInvalidUsage` otherwise.
 * `NCCL_IB_SORT_MERGE_NICS`: sorts the sub-devices of a merged IB device by plane ID. RCCL defaults it to `0` (NCCL defaults to `1`), so merged-device order and names are unchanged.
 * `RCCL_FABRIC_TELEMETRY_ENABLE` (default `0`): samples every amd-smi fabric telemetry category for the GPUs this process opens communicators on and logs the counters that moved, plus a closing report over the whole sampled span when a device's last communicator is destroyed. Diagnostic only, and off by default. Also needs `RCCL_USE_AMD_SMI_LIB=1` and `render`-group access to the IFoE config character device; without either, RCCL logs why telemetry was skipped and initialization continues.
 * `RCCL_FABRIC_TELEMETRY_INTERVAL_MS` (default `1000`): sampling period for `RCCL_FABRIC_TELEMETRY_ENABLE`, clamped to a 100 ms floor and a one-hour ceiling. A non-positive value disables telemetry entirely.
@@ -52,6 +53,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
 
 ### Resolved issues
+* Fixed topology GPU indices that followed the HIP device order instead of the PCI order. This reordered rings and NIC selection, causing an `ncclGather` performance regression on multi-node MI355X systems, and made communicator initialization fail when each rank sees only its own GPU.
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
 * Fixed P2P IPC registration reuse producing out-of-bounds remote addresses when a registered allocation spans multiple cuMem segments.

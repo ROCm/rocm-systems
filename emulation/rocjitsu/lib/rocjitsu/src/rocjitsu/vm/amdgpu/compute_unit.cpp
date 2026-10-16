@@ -408,9 +408,7 @@ void ComputeUnitCore::flush_cp_notifications() {
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
-      if (pending_dispatch_failures_.empty() && pending_queue_exceptions_.empty() &&
-          pending_wg_completions_.empty() && !pending_capacity_change_ &&
-          pending_execution_failures_.empty())
+      if (!has_pending_cp_notifications())
         return;
       failures.swap(pending_dispatch_failures_);
       execution_failures.swap(pending_execution_failures_);
@@ -921,10 +919,16 @@ bool ComputeUnitCore::can_accept_workgroup(uint32_t num_wfs, uint32_t lds_bytes,
 }
 
 void ComputeUnitCore::tick_pipelines() {
-  scalar_mem_pipeline_.tick();
-  global_mem_pipeline_.tick();
-  local_mem_pipeline_.tick();
-  tensor_dma_pipeline_.tick();
+  // Functional accesses normally complete at issue. Retry only pipelines
+  // with retained work, avoiding four out-of-line calls on scalar-only steps.
+  if (!scalar_mem_pipeline_.empty())
+    scalar_mem_pipeline_.tick();
+  if (!global_mem_pipeline_.empty())
+    global_mem_pipeline_.tick();
+  if (!local_mem_pipeline_.empty())
+    local_mem_pipeline_.tick();
+  if (!tensor_dma_pipeline_.empty())
+    tensor_dma_pipeline_.tick();
 }
 
 VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront &wf) {
@@ -1546,40 +1550,54 @@ void ComputeUnitCore::report_routed_access(const Instruction &inst, Wavefront &w
 void ComputeUnitCore::update_wf_states() {
   ++cycle_counter_;
 
-  for (auto &w : wfs_) {
-    if (!w)
+#ifndef NDEBUG
+  // A missed activity transition would otherwise leave a wave outside every
+  // hot-path scan and silently prevent its dispatch from completing.
+  for (size_t slot = active_slot_limit_; slot < wfs_.size(); ++slot)
+    assert((!wfs_[slot] || wfs_[slot]->is_halted()) &&
+           "excluded wavefront slot must be halted or empty");
+#endif
+
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
+    if (!wf)
       continue;
-    if (w->state() == WfState::WAITCNT && w->wait_satisfied()) {
-      w->set_state(WfState::RUNNING);
-      w->set_ready_cycle(cycle_counter_);
-    } else if (w->state() == WfState::ENDING && w->wait_counters().empty()) {
-      w->halt();
+    if (wf->state() == WfState::WAITCNT && wf->wait_satisfied()) {
+      wf->set_state(WfState::RUNNING);
+      wf->set_ready_cycle(cycle_counter_);
+    } else if (wf->state() == WfState::ENDING && wf->wait_counters().empty()) {
+      wf->halt();
     }
   }
 
-  for (auto &w : wfs_) {
-    if (!w)
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
+    if (!wf)
       continue;
-    if (w->state() != WfState::BARRIER || w->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)
+    if (wf->state() != WfState::BARRIER || wf->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)
       continue;
-    uint32_t did = w->dispatch_id();
-    uint32_t wg = w->wg_id();
+    uint32_t did = wf->dispatch_id();
+    uint32_t wg = wf->wg_id();
     bool all_at_barrier = true;
-    for (auto &w2 : wfs_) {
-      if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg && w2->state() != WfState::HALTED &&
-          (w2->state() != WfState::BARRIER ||
-           w2->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)) {
+    for (uint32_t other = 0; other < active_slot_limit_; ++other) {
+      auto &other_wf = wfs_[other];
+      if (other_wf && other_wf->dispatch_id() == did && other_wf->wg_id() == wg &&
+          other_wf->state() != WfState::HALTED &&
+          (other_wf->state() != WfState::BARRIER ||
+           other_wf->waiting_barrier_bit_ != Wavefront::kNoBarrierWait)) {
         all_at_barrier = false;
         break;
       }
     }
     if (all_at_barrier) {
       std::vector<Wavefront *> barrier_wfs;
-      for (auto &w2 : wfs_)
-        if (w2 && w2->dispatch_id() == did && w2->wg_id() == wg &&
-            w2->state() == WfState::BARRIER &&
-            w2->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
-          barrier_wfs.push_back(w2.get());
+      for (uint32_t other = 0; other < active_slot_limit_; ++other) {
+        auto &other_wf = wfs_[other];
+        if (other_wf && other_wf->dispatch_id() == did && other_wf->wg_id() == wg &&
+            other_wf->state() == WfState::BARRIER &&
+            other_wf->waiting_barrier_bit_ == Wavefront::kNoBarrierWait)
+          barrier_wfs.push_back(other_wf.get());
+      }
       notify_barrier_complete(barrier_wfs);
       for (auto *bwf : barrier_wfs) {
         bwf->set_state(WfState::RUNNING);
@@ -2049,7 +2067,7 @@ template <bool EnableAsync>
     return;
   }
 
-  {
+  if (inst->flags() & (INDIRECT_BRANCH | INDIRECT_CALL)) {
     auto mn = std::string_view(inst->mnemonic());
     if (mn.find("s_setpc") != std::string_view::npos ||
         mn.find("s_swappc") != std::string_view::npos) {
@@ -2288,10 +2306,12 @@ template <bool EnableAsync>
   // the generated call sites use. A local copy here would keep checking the
   // old bits if the EXCP set ever widened.
   const uint32_t new_alu_causes = active->pending_alu_causes() & kAluExceptionTrapstsMask;
-  const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
-  if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
-      alu_exception_handler_(*active))
-    return;
+  if (new_alu_causes != 0) {
+    const uint32_t enabled_alu_causes = alu_exception_trap_enables(*active);
+    if ((new_alu_causes & enabled_alu_causes) != 0 && alu_exception_handler_ &&
+        alu_exception_handler_(*active))
+      return;
+  }
 
   // s_rfe follows the same target-minus-size convention as other control-flow
   // instructions. Publish the handler-driven stop only after the common PC
@@ -2327,7 +2347,8 @@ template <bool EnableAsync>
   tick_pipelines();
   update_wf_states();
 
-  for (auto &wf : wfs_) {
+  for (uint32_t slot = 0; slot < active_slot_limit_; ++slot) {
+    auto &wf = wfs_[slot];
     if (!wf)
       continue;
     if (wf->state() == WfState::RUNNING && !wf->debug_paused()) {
