@@ -113,6 +113,8 @@ class TestMIGPUSpecs:
             "gfx1151",
             "gfx1152",
             "gfx1153",
+            "gfx1170",
+            "gfx1171",
             "gfx908",
             None,
             "",
@@ -201,9 +203,13 @@ class TestMIGPUSpecs:
 
     def test_get_num_dies_rdna_single_die(self):
         design = {"rdna_model": {}}
-        for arch in ("gfx1151", "gfx1153"):
+        for arch, series in (
+            ("gfx1151", "rdna3.5"),
+            ("gfx1153", "rdna3.5"),
+            ("gfx1171", "rdna4m"),
+        ):
             with patch.object(MIGPUSpecs, "_gpu_design", design), patch.object(
-                MIGPUSpecs, "_gpu_series_dict", {arch: "rdna3.5"}
+                MIGPUSpecs, "_gpu_series_dict", {arch: series}
             ):
                 assert MIGPUSpecs.get_num_dies(arch, "rdna_model") == 1
 

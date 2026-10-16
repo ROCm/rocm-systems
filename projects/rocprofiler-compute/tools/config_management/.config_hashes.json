@@ -17,6 +17,23 @@
         "1700_graphics_register_bus_manager.yaml": "5e61a4f7c346f2d4373b4f8ff995501c"
       }
     },
+    "gfx117x": {
+      "files": {
+        "0000_top_stats.yaml": "128442c70edae4c4afc5906d3bbbaddc",
+        "0100_system_info.yaml": "6479ff2a0aa0dbd13ef67aee57465faa",
+        "0200_system_speed_of_light.yaml": "a6e2b1047025740ee3390eedb8b03e47",
+        "0300_memory_chart.yaml": "c2df2f0a6fadc3ac3bd8b34d6f7e7b27",
+        "0400_roofline.yaml": "437cba606eea800bd2aac7750de49444",
+        "0500_command_processor_cpc.yaml": "777432b4e3a2d353bd83d6dbf23c6f3e",
+        "0600_workgroup_manager_spi.yaml": "fafe886ba4ef582a14945e13f62006d1",
+        "0700_workgroup_processor.yaml": "f350eedcd475b6ebb198a9741ab7d207",
+        "0900_l0_cache.yaml": "3fa461495d5d0c7765a36cf2e8976fd2",
+        "1100_l1_cache.yaml": "d572899e80ef5006603859bad24386d3",
+        "1300_l2_cache.yaml": "d3802f18360b96d32d3ddc6bd172ba1e",
+        "1400_graphics_core_efficiency_arbiter.yaml": "f7ceb1ba95e04fabcaa666006f5a3ece",
+        "1700_graphics_register_bus_manager.yaml": "15fe118a10169c1c1d5c5a2fa5ae18a2"
+      }
+    },
     "gfx1250": {
       "files": {
         "0000_top_stats.yaml": "389a0a8101238b6dda7f4f4ae5a3c718",
