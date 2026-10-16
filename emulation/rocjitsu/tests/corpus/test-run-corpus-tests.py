@@ -100,14 +100,7 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
             if self.option(call, '--suite') == 'race':
                 self.assertEqual(wrapper[wrapper.index('--config') + 1], '{config}')
                 self.assertTrue(Path(call['config']).is_file())
-                if self.option(call, '--target') == 'gfx950':
-                    skip_config = Path(self.option(call, '--skip-tests-config'))
-                    self.assertEqual(
-                        json.loads(skip_config.read_text())['race'],
-                        ['race.gfx950.global_to_lds_buffer_race'],
-                    )
-                else:
-                    self.assertNotIn('--skip-tests-config', call['args'])
+                self.assertNotIn('--skip-tests-config', call['args'])
             else:
                 self.assertIn('--skip-tests-config', call['args'])
         self.assertEqual(
@@ -131,10 +124,13 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
             self.assertIn('--last-failed-no-failures=none', call['args'])
             self.assertNotIn('--junitxml', call['args'])
             self.assertIn('43s', shlex.split(self.option(call, '--run-wrapper')))
-            self.assertEqual(
-                Path(self.option(call, '--skip-tests-config')),
-                SOURCE_DIR / 'tests/corpus/gfx950_skip_tests.json',
-            )
+            if self.option(call, '--suite') == 'race':
+                self.assertNotIn('--skip-tests-config', call['args'])
+            else:
+                self.assertEqual(
+                    Path(self.option(call, '--skip-tests-config')),
+                    SOURCE_DIR / 'tests/corpus/gfx950_skip_tests.json',
+                )
         self.assertEqual(self.option(calls[-1], '--target'), 'gfx1151')
 
     def test_race_preserves_clang_asan_child_preload(self):
