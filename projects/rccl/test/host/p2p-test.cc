@@ -174,7 +174,10 @@ enum class FreeKind { CuMemFreeAddr, CudaFree };
 struct FreeCall {
     FreeKind    kind;
     const void* ptr;
-    bool operator==(const FreeCall& o) const { return kind == o.kind && ptr == o.ptr; }
+    bool        forceLegacy = false;
+    bool operator==(const FreeCall& o) const {
+        return kind == o.kind && ptr == o.ptr && forceLegacy == o.forceLegacy;
+    }
 };
 std::vector<FreeCall> g_freeCalls;
 
@@ -186,7 +189,7 @@ inline ncclResult_t RecordCuMemFreeAddr(void* ptr, struct ncclMemManager* mgr,
 template <typename T>
 inline ncclResult_t RecordCudaFree(T* ptr, struct ncclMemManager* mgr,
                                    int numSegments = 1, bool forceLegacy = false) {
-    g_freeCalls.push_back({FreeKind::CudaFree, static_cast<const void*>(ptr)});
+    g_freeCalls.push_back({FreeKind::CudaFree, static_cast<const void*>(ptr), forceLegacy});
     return ncclCudaFree(ptr, mgr, numSegments, forceLegacy);
 }
 }  // namespace
@@ -4554,6 +4557,26 @@ TEST_F(P2pShareableBufferMicrotest,
                                             &ipcDesc, &ptr);
 
     EXPECT_NE(r, ncclSuccess);       // the HIP error propagated
+}
+
+TEST_F(P2pShareableBufferMicrotest,
+       Allocate_ForcedLegacyIpcExportFailure_UsesLegacyFree)
+{
+    ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+    ScopedHook ipcGet(g_hipIpcGetMemHandle,
+        [](hipIpcMemHandle_t*, void*) -> hipError_t {
+            return hipErrorInvalidValue;
+        });
+
+    auto r = p2pAllocateShareableBuffer(/*size=*/256, /*refcount=*/0,
+                                        &ipcDesc, &ptr, /*peerRank=*/-1,
+                                        /*manager=*/nullptr, ncclMemPersist,
+                                        /*forceLegacyIpc=*/true);
+
+    EXPECT_NE(r, ncclSuccess);
+    ASSERT_FALSE(g_freeCalls.empty());
+    EXPECT_EQ(g_freeCalls.back().kind, FreeKind::CudaFree);
+    EXPECT_TRUE(g_freeCalls.back().forceLegacy);
 }
 
 #if ROCM_VERSION >= 70000
