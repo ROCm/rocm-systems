@@ -117,6 +117,9 @@ make -j $(nproc)
 
 To use a specific GCC version, edit `cmake/toolchains/amdsmi-gcc-toolchain.cmake` or create your own toolchain file.
 
+Setting `CC` and `CXX` when configuring a new build directory also skips the
+Clang auto-detection, for example `CC=gcc CXX=g++ cmake ..`.
+
 ### Building with clang++
 
 To use clang++ instead of amdclang++, explicitly specify the compiler with full path.
