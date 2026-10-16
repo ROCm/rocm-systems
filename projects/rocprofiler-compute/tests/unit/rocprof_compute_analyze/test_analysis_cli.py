@@ -10,16 +10,27 @@ import pandas as pd
 import pytest
 
 from rocprof_compute_analyze.analysis_cli import cli_analysis
-from utils import parser, schema
+from utils import schema
 from utils.utils_analysis import CallTreeNode, KernelStats
+
+ADDMM_PMC_GROUP_KEY = (1, "addmm_kernel", 0, 0, 0)
+RELU_PMC_GROUP_KEY = (2, "relu_kernel", 0, 0, 0)
 
 
 def simple_model_forest_with_relu_and_addmm():
     """SimpleModel.forward with Linear/addmm and a relu sibling."""
     addmm = CallTreeNode(name="aten::addmm", backend="torch")
-    addmm.kernels["addmm_kernel"] = KernelStats(launches=1, total_duration_ns=50.0)
+    addmm.kernels["addmm_kernel"] = KernelStats(
+        launches=1,
+        total_duration_ns=50.0,
+        pmc_group_keys=[ADDMM_PMC_GROUP_KEY],
+    )
     relu = CallTreeNode(name="aten::relu", backend="torch")
-    relu.kernels["relu_kernel"] = KernelStats(launches=1, total_duration_ns=10.0)
+    relu.kernels["relu_kernel"] = KernelStats(
+        launches=1,
+        total_duration_ns=10.0,
+        pmc_group_keys=[RELU_PMC_GROUP_KEY],
+    )
     linear = CallTreeNode(name="nn.Module.Linear.forward", backend="torch")
     linear.children = [addmm]
     simple = CallTreeNode(name="nn.Module.SimpleModel.forward", backend="torch")
@@ -34,7 +45,9 @@ def torch_parent_triton_child_forest():
     )
     parent = CallTreeNode(name="nn.Module.Linear.forward", backend="torch")
     parent.kernels["torch_gemm_kernel"] = KernelStats(
-        launches=1, total_duration_ns=10.0
+        launches=1,
+        total_duration_ns=10.0,
+        pmc_group_keys=[(3, "torch_gemm_kernel", 0, 0, 0)],
     )
     parent.children = [child]
     return {"1": [parent]}
@@ -43,9 +56,6 @@ def torch_parent_triton_child_forest():
 def workload_with_operator_forest():
     workload = schema.Workload()
     workload.ml_api_call_trees = simple_model_forest_with_relu_and_addmm()
-    workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = pd.DataFrame({
-        "Kernel_Name": ["addmm_kernel", "relu_kernel"]
-    })
     return workload
 
 
@@ -53,8 +63,22 @@ def apply_torch_operator_glob(pattern):
     args = argparse.Namespace(torch_operator=[pattern])
     cli = cli_analysis(args, {})
     workload = workload_with_operator_forest()
-    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
-    return workload
+    pmc_group_keys = cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    return pmc_group_keys, workload
+
+
+def forest_node_names(forest):
+    names = []
+
+    def collect(node):
+        names.append(node.name)
+        for child in node.children:
+            collect(child)
+
+    for roots in forest.values():
+        for root in roots:
+            collect(root)
+    return names
 
 
 def cli_with_two_operator_workloads(args):
@@ -210,19 +234,33 @@ def test_parse_patterns_star():
     assert parse_operator_patterns(args, ["torch"]) == {"torch": ["*", "torch.relu"]}
 
 
-def test_operator_glob_relu_selects_relu_kernel_ids():
-    workload = apply_torch_operator_glob("*relu*")
-    assert workload.filter_kernel_ids == [1]
+def test_operator_glob_relu_returns_relu_keys():
+    pmc_group_keys, workload = apply_torch_operator_glob("*relu*")
+    assert pmc_group_keys == [RELU_PMC_GROUP_KEY]
+    assert forest_node_names(workload.ml_api_call_trees) == [
+        "nn.Module.SimpleModel.forward",
+        "aten::relu",
+    ]
 
 
-def test_operator_glob_addmm_path_selects_addmm_kernel_ids():
-    workload = apply_torch_operator_glob("*/aten::addmm")
-    assert workload.filter_kernel_ids == [0]
+def test_operator_glob_addmm_path_returns_addmm_keys():
+    pmc_group_keys, workload = apply_torch_operator_glob("*/aten::addmm")
+    assert pmc_group_keys == [ADDMM_PMC_GROUP_KEY]
+    assert forest_node_names(workload.ml_api_call_trees) == [
+        "nn.Module.SimpleModel.forward",
+        "nn.Module.Linear.forward",
+        "aten::addmm",
+    ]
 
 
-def test_operator_glob_linear_includes_descendant_addmm_ids():
-    workload = apply_torch_operator_glob("*Linear.forward")
-    assert workload.filter_kernel_ids == [0]
+def test_operator_glob_linear_includes_descendant_addmm_keys():
+    pmc_group_keys, workload = apply_torch_operator_glob("*Linear.forward")
+    assert pmc_group_keys == [ADDMM_PMC_GROUP_KEY]
+    assert forest_node_names(workload.ml_api_call_trees) == [
+        "nn.Module.SimpleModel.forward",
+        "nn.Module.Linear.forward",
+        "aten::addmm",
+    ]
 
 
 def test_list_operators_joint_backend_heading(capsys):
@@ -247,94 +285,41 @@ def test_handle_operator_prints_matched_subtree(capsys):
     captured = capsys.readouterr()
     assert "Matched PyTorch Operators: *addmm*" in captured.out
     assert "aten::addmm" in captured.out
-    assert workload.filter_kernel_ids == [0]
 
 
-def test_apply_operator_filter_intersects_existing_kernel_ids(monkeypatch):
-    warnings = []
+def test_apply_operator_filter_missed_glob_errors(monkeypatch):
+    errors = []
+
+    def record_error(*argv, **_kwargs):
+        errors.append(argv)
+        raise SystemExit(1)
+
     monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.console_warning",
-        lambda *argv: warnings.append(argv),
-    )
-    args = argparse.Namespace(torch_operator=["*relu*"], gpu_kernel=[0])
-    cli = cli_analysis(args, {})
-    workload = workload_with_operator_forest()
-    workload.filter_kernel_ids = [0]
-    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
-    assert any(
-        "No PyTorch operators matched the -k filter: [0]" in str(item)
-        for item in warnings
-    )
-    assert workload.ml_api_call_trees == {}
-    assert workload.filter_kernel_ids == [0]
-
-
-def test_apply_operator_filter_missed_glob_clears_forest(monkeypatch):
-    warnings = []
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.console_warning",
-        lambda *argv: warnings.append(argv),
+        "rocprof_compute_analyze.analysis_cli.console_error",
+        record_error,
     )
     args = argparse.Namespace(torch_operator=["nomatch"])
     cli = cli_analysis(args, {})
     workload = workload_with_operator_forest()
-    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    with pytest.raises(SystemExit) as excinfo:
+        cli.apply_operator_filter(args, workload, "/workload", ["torch"])
+    assert excinfo.value.code == 1
     assert any(
         "No PyTorch operators matched the pattern(s): nomatch" in str(item)
-        for item in warnings
+        for item in errors
     )
-    assert workload.ml_api_call_trees == {}
+    assert "aten::addmm" in forest_node_names(workload.ml_api_call_trees)
 
 
-def test_apply_operator_filter_unmapped_kernels_clears_forest(monkeypatch):
-    warnings = []
-    monkeypatch.setattr(
-        "rocprof_compute_analyze.analysis_cli.console_warning",
-        lambda *argv: warnings.append(argv),
-    )
-    args = argparse.Namespace(torch_operator=["*relu*"])
-    cli = cli_analysis(args, {})
-    workload = workload_with_operator_forest()
-    workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = pd.DataFrame({
-        "Kernel_Name": ["unrelated_kernel"]
-    })
-    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
-    assert any(
-        "No PyTorch kernels mapped to kernel-top IDs" in str(item) for item in warnings
-    )
-    assert workload.ml_api_call_trees == {}
-
-
-def test_apply_operator_filter_keeps_intersection():
-    args = argparse.Namespace(torch_operator=["*addmm*"])
-    cli = cli_analysis(args, {})
-    workload = workload_with_operator_forest()
-    workload.filter_kernel_ids = [0]
-    cli.apply_operator_filter(args, workload, "/workload", ["torch"])
-    assert workload.filter_kernel_ids == [0]
-
-
-def test_apply_operator_filter_kernel_ids_only_from_requested_backend():
+def test_apply_operator_filter_keeps_nodes_from_requested_backend():
     args = argparse.Namespace(torch_operator=["*"])
     cli = cli_analysis(args, {})
     workload = schema.Workload()
     workload.ml_api_call_trees = torch_parent_triton_child_forest()
-    workload.dfs[parser.PMC_KERNEL_TOP_TABLE_ID] = pd.DataFrame({
-        "Kernel_Name": ["torch_gemm_kernel", "triton_matmul_kernel"]
-    })
     cli.apply_operator_filter(args, workload, "/workload", ["torch"])
-    assert workload.filter_kernel_ids == [0]
-    stored_names = []
-
-    def collect_names(node):
-        stored_names.append(node.name)
-        for child in node.children:
-            collect_names(child)
-
-    for roots in workload.ml_api_call_trees.values():
-        for root in roots:
-            collect_names(root)
-    assert "triton.JITFunction.matmul_kernel" not in stored_names
+    names = forest_node_names(workload.ml_api_call_trees)
+    assert "nn.Module.Linear.forward" in names
+    assert "triton.JITFunction.matmul_kernel" not in names
 
 
 def test_list_operators_omits_other_backend_kernel_lines(capsys):
