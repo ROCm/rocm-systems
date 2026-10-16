@@ -71,8 +71,9 @@ Add a `membw_analysis` check in `build_dfs` (`src/utils/parser.py`) to skip pane
 - `src/rocprof_compute_tui/utils/tui_utils.py` line 151 -- unnecessary, same reason
 - `src/rocprof_compute_analyze/analysis_webui.py` -- missing check fixed for free
 
-> **Update:** The TUI and WebUI analyze modes were later removed in #12220, so the
-> TUI and WebUI entries above no longer apply.
+> **Update:** The TUI and WebUI analyze modes were later removed in
+> https://github.com/ROCm/rocm-systems/pull/12220, so the TUI and WebUI entries
+> above no longer apply.
 
 ---
 

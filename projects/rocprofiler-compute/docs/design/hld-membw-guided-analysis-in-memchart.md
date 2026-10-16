@@ -67,7 +67,7 @@ Downstream tools (Optiq) hardcode the memory chart structure rather than consumi
 
 | Item | Notes |
 |------|-------|
-| TUI / GUI rendering | Not planned -- the TUI and GUI analyze modes were removed in #12220 |
+| TUI / GUI rendering | Not planned -- the TUI and GUI analyze modes were removed in https://github.com/ROCm/rocm-systems/pull/12220 |
 | Non-CLI output and Optiq integration (PS4) | HTML, structured JSON, Optiq database persistence, and the Optiq JSON schema contract are downstream concerns. `MemBwAnalysisResult` is JSON-serializable to support future integration, but defining export schemas is out of scope. See Open Items for the HTML rendering and Optiq discussions. |
 
 ---

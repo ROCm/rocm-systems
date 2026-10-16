@@ -247,7 +247,8 @@ ac.panel_configs = views_to_panel_configs(views, library)
 ```
 
 The call to `load_panel_configs()` for analysis configs is removed. (The TUI mode,
-which also used `load_panel_configs()`, was removed in #12220.)
+which also used `load_panel_configs()`, was removed in
+https://github.com/ROCm/rocm-systems/pull/12220.)
 
 **`detect_counters()` in `soc_base.py`** -- remove the old YAML-text-scanning path.
 Counter detection goes through `MetricLibrary.get_counters_for_metrics()`
