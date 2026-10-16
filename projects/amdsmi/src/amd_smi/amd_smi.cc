@@ -100,7 +100,7 @@ static const std::map<amdsmi_memory_partition_type_t, rsmi_memory_partition_type
 #define AMDSMI_BLOCK_CASE(name) \
   case AMDSMI_GPU_BLOCK_##name: \
     return #name
-static std::string get_gpu_block_name(amdsmi_gpu_block_t block) {
+static const char* get_gpu_block_name(amdsmi_gpu_block_t block) {
   switch (block) {
     AMDSMI_BLOCK_CASE(INVALID);
     AMDSMI_BLOCK_CASE(UMC);
@@ -6271,7 +6271,11 @@ amdsmi_status_t amdsmi_get_gpu_total_ecc_count(amdsmi_processor_handle processor
          << " enabled per mask but amdsmi_get_gpu_ecc_count() returned "
          << smi_amdgpu_get_status_string(status, false)
          << "; total ecc count below may be incomplete";
-      LOG_ERROR(ss);
+      if (status == AMDSMI_STATUS_NOT_SUPPORTED) {
+        LOG_DEBUG(ss);
+      } else {
+        LOG_ERROR(ss);
+      }
     }
   }
 

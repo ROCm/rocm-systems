@@ -509,7 +509,7 @@ amdsmi_status_t smi_amdgpu_get_enabled_blocks(amd::smi::AMDSmiGPUDevice* device,
   // read, not a plausible value.
   char* endptr = nullptr;
   unsigned long parsed = strtoul(tmp_str.c_str(), &endptr, 16);
-  bool parse_failed = tmp_str.empty() || endptr == tmp_str.c_str() || *endptr != '\0';
+  bool parse_failed = endptr == tmp_str.c_str() || *endptr != '\0';
   if (parse_failed || parsed == ULONG_MAX) {
     std::ostringstream ss;
     ss << __PRETTY_FUNCTION__ << " | " << fullpath << " line: \"" << line << "\""

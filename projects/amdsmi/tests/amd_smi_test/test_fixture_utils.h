@@ -12,6 +12,7 @@
 #include <functional>
 #include <limits>
 #include <string>
+#include <utility>
 
 #include "amd_smi/amdsmi.h"
 
