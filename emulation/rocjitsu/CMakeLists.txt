@@ -347,6 +347,9 @@ if(ROCJITSU_ENABLE_VFIO)
     include(rj_libvfio_user)
 endif()
 
+# Configure arithmetic before applying the parent host CPU flags.
+add_subdirectory(lib/arith)
+
 # Apply the host CPU policy to rocjitsu targets, after configuring dependencies.
 include(rj_host_cpu)
 
