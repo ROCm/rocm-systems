@@ -225,7 +225,7 @@ RJ_API_EXPORT void rj_vm_destroy(rj_vm_t *vm);
 /// on success.
 /// @retval ROCJITSU_STATUS_SUCCESS Step completed successfully.
 /// @retval ROCJITSU_STATUS_INVALID_ARGUMENT @p vm is NULL.
-/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC.
+/// @retval ROCJITSU_STATUS_ERROR The VM has no SoC or execution failed.
 /// @retval ROCJITSU_STATUS_UNSUPPORTED The VM has multiple engine partitions.
 RJ_API_EXPORT rj_status_t rj_vm_step(rj_vm_t *vm, int *active);
 
