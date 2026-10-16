@@ -342,4 +342,250 @@ TEST(SearchPcieOrderedRing, ExplicitZero_RingNotForced)
                                {{"RCCL_PCIE_ORDERED_RING", "0"}});
 }
 
+// ---------------------------------------------------------------------------
+// Review fixes: NET entry-candidate selection, strict-mode failure, and the
+// explicit-override conflict policy.
+// ---------------------------------------------------------------------------
+namespace
+{
+
+// One DPX partition. rank is independent of position so a test can express a
+// permuted rank->device mapping.
+struct DpxPart
+{
+    int     systemId;
+    int64_t busId;
+    int     mloPart;
+    int     rank;
+    int     dev;
+};
+
+// Minimum ncclTopoCompute() reads: GPU nodes carrying rank/mloPart/gcn, each
+// pointing at a per-partition DEV node whose id encodes (systemId, busId,
+// mloPart). Every path table is PATH_DIS, so the DFS search traverses nothing
+// and finds no ring -- which is exactly the strict-mode failure case.
+ncclTopoSystem* makeDpxSystem(const std::vector<DpxPart>& parts, const char* gcn = "gfx1250")
+{
+    auto* sys                   = new ncclTopoSystem{};
+    sys->nRanks                 = static_cast<int>(parts.size());
+    sys->skipPresetTopoMatching = true;
+    sys->totalBw                = 100.0f;
+    sys->nodes[GPU].count       = static_cast<int>(parts.size());
+
+    for(size_t i = 0; i < parts.size(); ++i)
+    {
+        const auto&   p     = parts[i];
+        const int64_t local = NCCL_TOPO_MLOPART_BUSID(p.busId, p.mloPart);
+        const int64_t devId = NCCL_TOPO_ID(p.systemId, local);
+
+        ncclTopoNode* dev = nullptr;
+        for(int d = 0; d < sys->nodes[DEV].count; ++d)
+            if(sys->nodes[DEV].nodes[d].id == devId) { dev = &sys->nodes[DEV].nodes[d]; break; }
+        if(dev == nullptr)
+        {
+            dev                  = &sys->nodes[DEV].nodes[sys->nodes[DEV].count++];
+            dev->type            = DEV;
+            dev->id              = devId;
+            dev->dev.cudaCompCap = 60;
+            dev->dev.dev         = p.dev;
+        }
+
+        auto& g           = sys->nodes[GPU].nodes[i];
+        g.type            = GPU;
+        g.id              = NCCL_TOPO_ID(p.systemId, NCCL_TOPO_GPU_LOCAL_ID(local, 0));
+        g.gpu.rank        = p.rank;
+        g.gpu.dev         = p.dev;
+        g.gpu.mloPart     = p.mloPart;
+        g.gpu.cudaCompCap = 60;
+        strncpy(g.gpu.gcn, gcn, GCN_ARCH_NAME_LEN - 1);
+        g.gpu.parent = dev;
+    }
+
+    for(int t = 0; t < NCCL_TOPO_NODE_TYPES; ++t)
+        for(int n = 0; n < sys->nodes[t].count; ++n)
+            for(int pt = 0; pt < NCCL_TOPO_NODE_TYPES; ++pt)
+            {
+                const int cnt = sys->nodes[pt].count;
+                if(cnt == 0) continue;
+                auto* paths = static_cast<ncclTopoLinkList*>(calloc(cnt, sizeof(ncclTopoLinkList)));
+                for(int i = 0; i < cnt; ++i) paths[i].type = PATH_DIS;
+                sys->nodes[t].nodes[n].paths[pt] = paths;
+            }
+    return sys;
+}
+
+void freeDpxSystem(ncclTopoSystem* sys)
+{
+    for(int t = 0; t < NCCL_TOPO_NODE_TYPES; ++t)
+        for(int n = 0; n < sys->nodes[t].count; ++n)
+            for(int pt = 0; pt < NCCL_TOPO_NODE_TYPES; ++pt) free(sys->nodes[t].nodes[n].paths[pt]);
+    delete sys;
+}
+
+ncclTopoGraph* makeRingGraph()
+{
+    auto* g        = new ncclTopoGraph{};
+    g->id          = 0;
+    g->pattern     = NCCL_TOPO_PATTERN_RING;
+    g->collNet     = 0;
+    g->minChannels = 1;
+    g->maxChannels = MAXCHANNELS;
+    return g;
+}
+
+std::vector<DpxPart> fourDies(int systemId = 0)
+{
+    std::vector<DpxPart> parts;
+    for(int i = 0; i < 8; ++i) parts.push_back({systemId, 0x1000 * (i / 2 + 1), i % 2, i, i});
+    return parts;
+}
+
+// One NIC and nGpus GPUs, every NET->GPU path disconnected by default. Tests
+// then connect individual GPUs to express a candidate set.
+ncclTopoSystem* makeNetSystem(int nGpus)
+{
+    auto* sys             = new ncclTopoSystem{};
+    sys->nRanks           = nGpus;
+    sys->nodes[GPU].count = nGpus;
+    sys->nodes[NET].count = 1;
+
+    for(int i = 0; i < nGpus; ++i)
+    {
+        auto& g           = sys->nodes[GPU].nodes[i];
+        g.type            = GPU;
+        g.id              = NCCL_TOPO_ID(0, i);
+        g.gpu.rank        = i;
+        g.gpu.dev         = i;
+        g.gpu.gdrSupport  = 1;
+        g.gpu.cudaCompCap = 60;
+    }
+    auto& net          = sys->nodes[NET].nodes[0];
+    net.type           = NET;
+    net.id             = NCCL_TOPO_ID(0, 0);
+    net.net.dev        = 0;
+    net.net.gdrSupport = 0; // keeps ncclTopoCheckGdr()'s answer uniformly false
+    net.net.localGpu   = -1;
+
+    // calloc leaves count at 0, which is the trap finding 2 is about.
+    auto* paths = static_cast<ncclTopoLinkList*>(calloc(nGpus, sizeof(ncclTopoLinkList)));
+    for(int i = 0; i < nGpus; ++i) paths[i].type = PATH_DIS;
+    net.paths[GPU] = paths;
+    return sys;
+}
+
+void connectNetToGpu(ncclTopoSystem* sys, int gpu, int hops, int type = PATH_PXB)
+{
+    auto* paths      = sys->nodes[NET].nodes[0].paths[GPU];
+    paths[gpu].type  = type;
+    paths[gpu].count = hops;
+}
+
+void freeNetSystem(ncclTopoSystem* sys)
+{
+    free(sys->nodes[NET].nodes[0].paths[GPU]);
+    delete sys;
+}
+
+} // namespace
+
+// Finding 2: an unreachable GPU is calloc'd to count 0, so a selection that
+// scores before rejecting PATH_DIS picks it over every reachable candidate.
+// Stock hid this by discarding the result; honouring NIC affinity makes it live.
+TEST(SearchPcieOrderedRing, NetClosestGpu_RejectsDisconnectedCandidates)
+{
+    RUN_ISOLATED_TEST("NetClosestGpu_RejectsDisconnectedCandidates",
+                      []()
+                      {
+                          auto* sys = makeNetSystem(4);
+                          // GPU 0 stays PATH_DIS with count 0; GPU 2 is reachable in 3 hops.
+                          connectNetToGpu(sys, 2, /*hops=*/3);
+                          int f = -99;
+                          EXPECT_EQ(ncclTopoNetClosestGpu(sys, &sys->nodes[NET].nodes[0], &f), ncclSuccess);
+                          EXPECT_EQ(f, 2);
+                          freeNetSystem(sys);
+                      });
+}
+
+// Nearest reachable wins among several reachable candidates.
+TEST(SearchPcieOrderedRing, NetClosestGpu_PicksFewestHops)
+{
+    RUN_ISOLATED_TEST("NetClosestGpu_PicksFewestHops",
+                      []()
+                      {
+                          auto* sys = makeNetSystem(4);
+                          connectNetToGpu(sys, 1, /*hops=*/5);
+                          connectNetToGpu(sys, 3, /*hops=*/2);
+                          int f = -99;
+                          EXPECT_EQ(ncclTopoNetClosestGpu(sys, &sys->nodes[NET].nodes[0], &f), ncclSuccess);
+                          EXPECT_EQ(f, 3);
+                          freeNetSystem(sys);
+                      });
+}
+
+// No GPU reaches this NIC: report -1 so the caller skips the forced attempt
+// rather than entering the ring at a GPU the NIC cannot talk to.
+TEST(SearchPcieOrderedRing, NetClosestGpu_AllDisconnectedYieldsNoCandidate)
+{
+    RUN_ISOLATED_TEST("NetClosestGpu_AllDisconnectedYieldsNoCandidate",
+                      []()
+                      {
+                          auto* sys = makeNetSystem(4);
+                          int   f   = -99;
+                          EXPECT_EQ(ncclTopoNetClosestGpu(sys, &sys->nodes[NET].nodes[0], &f), ncclSuccess);
+                          EXPECT_EQ(f, -1);
+                          freeNetSystem(sys);
+                      });
+}
+
+// Finding 3: with the knob on and no validated ring, report the failure instead
+// of returning success on the unvalidated one-channel fallback.
+TEST(SearchPcieOrderedRing, Enabled_NoValidatedRingReturnsError)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("Enabled_NoValidatedRingReturnsError",
+                               []()
+                               {
+                                   auto* sys = makeDpxSystem(fourDies());
+                                   auto* g   = makeRingGraph();
+                                   EXPECT_EQ(ncclTopoCompute(sys, g), ncclInvalidUsage);
+                                   delete g;
+                                   freeDpxSystem(sys);
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}});
+}
+
+// ...and with the knob off the legacy fallback is untouched: success, one
+// channel, ranks in topology order.
+TEST(SearchPcieOrderedRing, Disabled_NoValidatedRingKeepsLegacyFallback)
+{
+    RUN_ISOLATED_TEST("Disabled_NoValidatedRingKeepsLegacyFallback",
+                      []()
+                      {
+                          auto* sys = makeDpxSystem(fourDies());
+                          auto* g   = makeRingGraph();
+                          EXPECT_EQ(ncclTopoCompute(sys, g), ncclSuccess);
+                          EXPECT_EQ(g->nChannels, 1);
+                          EXPECT_EQ(std::vector<int>(g->intra, g->intra + 8),
+                                    (std::vector<int>{0, 1, 2, 3, 4, 5, 6, 7}));
+                          delete g;
+                          freeDpxSystem(sys);
+                      });
+}
+
+// Finding 4: an explicit NCCL_RINGS order outranks the knob -- the search must
+// honour the user's ring and must not fail the way the strict path does.
+TEST(SearchPcieOrderedRing, Enabled_ExplicitNcclRingsWins)
+{
+    RUN_ISOLATED_TEST_WITH_ENV("Enabled_ExplicitNcclRingsWins",
+                               []()
+                               {
+                                   auto* sys = makeDpxSystem(fourDies());
+                                   auto* g   = makeRingGraph();
+                                   EXPECT_EQ(ncclTopoCompute(sys, g), ncclSuccess);
+                                   EXPECT_GT(g->nChannels, 0);
+                                   delete g;
+                                   freeDpxSystem(sys);
+                               },
+                               {{"RCCL_PCIE_ORDERED_RING", "1"}, {"NCCL_RINGS", "0 1 2 3 4 5 6 7"}});
+}
+
 } // namespace RcclUnitTesting
