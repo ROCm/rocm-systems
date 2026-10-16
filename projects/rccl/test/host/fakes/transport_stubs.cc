@@ -12,9 +12,11 @@
 
 #include "transport_stubs.h"
 
+#include <algorithm>
 #include <cstdint>
 #include <cstdlib>
 #include <functional>
+#include <iterator>
 
 #include "channel.h"
 #include "fail_loud.h"
@@ -24,6 +26,7 @@
 #include "nvls_ub.h"
 #include "signature-drift.h"
 #include "transport.h"
+#include "transport_reg_stubs.h"
 
 ASSERT_HOOK_MATCHES_PROD(g_useAinic, rcclUseAinic);
 ASSERT_HOOK_MATCHES_PROD(g_pxnDisable, ncclPxnDisable);
@@ -32,6 +35,13 @@ ASSERT_HOOK_MATCHES_PROD(g_ncclTransportP2pSetup, ncclTransportP2pSetup);
 ASSERT_HOOK_MATCHES_PROD(g_ncclNetDeregBuffer, ncclNetDeregBuffer);
 ASSERT_HOOK_MATCHES_PROD(g_ncclCollnetDeregBuffer, ncclCollnetDeregBuffer);
 ASSERT_HOOK_MATCHES_PROD(g_ncclNvlsUbDeregister, ncclNvlsUbDeregister);
+ASSERT_HOOK_MATCHES_PROD(g_ncclNetLocalRegisterBuffer, ncclNetLocalRegisterBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_ncclNetGraphRegisterBuffer, ncclNetGraphRegisterBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_ncclCollnetLocalRegisterBuffer, ncclCollnetLocalRegisterBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_ncclCollnetGraphRegisterBuffer, ncclCollnetGraphRegisterBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_ncclNvlsLocalRegisterBuffer, ncclNvlsLocalRegisterBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_ncclNvlsGraphRegisterBuffer, ncclNvlsGraphRegisterBuffer);
+ASSERT_HOOK_MATCHES_PROD(g_ncclNvlsRegResourcesQuery, ncclNvlsRegResourcesQuery);
 #undef ASSERT_HOOK_MATCHES_PROD
 
 struct ncclComm;
@@ -73,6 +83,9 @@ static ncclResult_t DefaultTransportP2pSetup(struct ncclComm*, struct ncclTopoGr
 std::function<ncclResult_t(struct ncclComm*, struct ncclTopoGraph*, int, bool*)>
     g_ncclTransportP2pSetup = DefaultTransportP2pSetup;
 
+// src/transport.cc. Null slots: a test installs its own ncclTransport vtable.
+struct ncclTransport* ncclTransports[NTRANSPORTS] = {};
+
 static ncclResult_t DefaultNetDeregBuffer(struct ncclComm*, struct ncclProxyConnector*, void*) {
   FailLoudUnfaked("transport_stubs", "ncclNetDeregBuffer");
 }
@@ -99,6 +112,93 @@ ncclResult_t ncclNvlsUbDeregister(struct ncclComm* comm, struct ncclReg* reg) {
   return g_ncclNvlsUbDeregister(comm, reg);
 }
 
+static ncclResult_t DefaultNetLocalRegisterBuffer(ncclComm*, const void*, size_t, struct ncclConnector**, int, int*,
+                                                  void**) {
+  FailLoudUnfaked("transport_stubs", "ncclNetLocalRegisterBuffer");
+}
+std::function<ncclResult_t(ncclComm*, const void*, size_t, struct ncclConnector**, int, int*, void**)>
+  g_ncclNetLocalRegisterBuffer = DefaultNetLocalRegisterBuffer;
+ncclResult_t ncclNetLocalRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize,
+                                        struct ncclConnector** peerConns, int nPeers, int* outRegBufFlag,
+                                        void** outHandle) {
+  return g_ncclNetLocalRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, outRegBufFlag, outHandle);
+}
+
+static ncclResult_t DefaultNetGraphRegisterBuffer(ncclComm*, const void*, size_t, struct ncclConnector**, int, int*,
+                                                  void**, ncclRegCleanupQueue*, int*) {
+  FailLoudUnfaked("transport_stubs", "ncclNetGraphRegisterBuffer");
+}
+std::function<ncclResult_t(ncclComm*, const void*, size_t, struct ncclConnector**, int, int*, void**,
+                           ncclRegCleanupQueue*, int*)>
+  g_ncclNetGraphRegisterBuffer = DefaultNetGraphRegisterBuffer;
+ncclResult_t ncclNetGraphRegisterBuffer(ncclComm* comm, const void* userbuff, size_t buffSize,
+                                        struct ncclConnector** peerConns, int nPeers, int* outRegBufFlag,
+                                        void** outHandle, ncclRegCleanupQueue* cleanupQueue,
+                                        int* nCleanupQueueElts) {
+  return g_ncclNetGraphRegisterBuffer(comm, userbuff, buffSize, peerConns, nPeers, outRegBufFlag, outHandle,
+                                      cleanupQueue, nCleanupQueueElts);
+}
+
+static ncclResult_t DefaultCollnetLocalRegisterBuffer(struct ncclComm*, const void*, size_t, int, int*, void**) {
+  FailLoudUnfaked("transport_stubs", "ncclCollnetLocalRegisterBuffer");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, size_t, int, int*, void**)>
+  g_ncclCollnetLocalRegisterBuffer = DefaultCollnetLocalRegisterBuffer;
+ncclResult_t ncclCollnetLocalRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type,
+                                            int* outRegBufUsed, void** outHandle) {
+  return g_ncclCollnetLocalRegisterBuffer(comm, userbuff, buffSize, type, outRegBufUsed, outHandle);
+}
+
+static ncclResult_t DefaultCollnetGraphRegisterBuffer(struct ncclComm*, const void*, size_t, int, int*, void**,
+                                                      ncclRegCleanupQueue*, int*) {
+  FailLoudUnfaked("transport_stubs", "ncclCollnetGraphRegisterBuffer");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, size_t, int, int*, void**, ncclRegCleanupQueue*, int*)>
+  g_ncclCollnetGraphRegisterBuffer = DefaultCollnetGraphRegisterBuffer;
+ncclResult_t ncclCollnetGraphRegisterBuffer(struct ncclComm* comm, const void* userbuff, size_t buffSize, int type,
+                                            int* outRegBufFlag, void** outHandle, ncclRegCleanupQueue* cleanupQueue,
+                                            int* nCleanupQueueElts) {
+  return g_ncclCollnetGraphRegisterBuffer(comm, userbuff, buffSize, type, outRegBufFlag, outHandle, cleanupQueue,
+                                          nCleanupQueueElts);
+}
+
+static ncclResult_t DefaultNvlsLocalRegisterBuffer(struct ncclComm*, const void*, void*, size_t, size_t, int*, void**,
+                                                   void**) {
+  FailLoudUnfaked("transport_stubs", "ncclNvlsLocalRegisterBuffer");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, size_t, int*, void**, void**)>
+  g_ncclNvlsLocalRegisterBuffer = DefaultNvlsLocalRegisterBuffer;
+ncclResult_t ncclNvlsLocalRegisterBuffer(struct ncclComm* comm, const void* sendbuff, void* recvbuff,
+                                         size_t sendbuffSize, size_t recvbuffSize, int* outRegBufUsed,
+                                         void** outRegBufSend, void** outRegBufRecv) {
+  return g_ncclNvlsLocalRegisterBuffer(comm, sendbuff, recvbuff, sendbuffSize, recvbuffSize, outRegBufUsed,
+                                       outRegBufSend, outRegBufRecv);
+}
+
+static ncclResult_t DefaultNvlsGraphRegisterBuffer(struct ncclComm*, const void*, void*, size_t, size_t, int*, void**,
+                                                   void**, ncclRegCleanupQueue*, int*) {
+  FailLoudUnfaked("transport_stubs", "ncclNvlsGraphRegisterBuffer");
+}
+std::function<ncclResult_t(struct ncclComm*, const void*, void*, size_t, size_t, int*, void**, void**,
+                           ncclRegCleanupQueue*, int*)>
+  g_ncclNvlsGraphRegisterBuffer = DefaultNvlsGraphRegisterBuffer;
+ncclResult_t ncclNvlsGraphRegisterBuffer(struct ncclComm* comm, const void* sendbuff, void* recvbuff,
+                                         size_t sendbuffSize, size_t recvbuffSize, int* outRegBufUsed,
+                                         void** outRegBufSend, void** outRegBufRecv,
+                                         ncclRegCleanupQueue* cleanupQueue, int* nCleanupQueueElts) {
+  return g_ncclNvlsGraphRegisterBuffer(comm, sendbuff, recvbuff, sendbuffSize, recvbuffSize, outRegBufUsed,
+                                       outRegBufSend, outRegBufRecv, cleanupQueue, nCleanupQueueElts);
+}
+
+static ncclResult_t DefaultNvlsRegResourcesQuery(struct ncclComm*, ncclFunc_t, int*) {
+  FailLoudUnfaked("transport_stubs", "ncclNvlsRegResourcesQuery");
+}
+std::function<ncclResult_t(struct ncclComm*, ncclFunc_t, int*)> g_ncclNvlsRegResourcesQuery =
+  DefaultNvlsRegResourcesQuery;
+ncclResult_t ncclNvlsRegResourcesQuery(struct ncclComm* comm, ncclFunc_t func, int* recChannels) {
+  return g_ncclNvlsRegResourcesQuery(comm, func, recChannels);
+}
+
 void ResetTransportStubs() {
   g_rcclUseAinicValue = false;
   g_useAinic = DefaultUseAinic;
@@ -114,6 +214,14 @@ void ResetTransportStubs() {
   g_ncclNetDeregBuffer = DefaultNetDeregBuffer;
   g_ncclCollnetDeregBuffer = DefaultCollnetDeregBuffer;
   g_ncclNvlsUbDeregister = DefaultNvlsUbDeregister;
+  g_ncclNetLocalRegisterBuffer = DefaultNetLocalRegisterBuffer;
+  g_ncclNetGraphRegisterBuffer = DefaultNetGraphRegisterBuffer;
+  g_ncclCollnetLocalRegisterBuffer = DefaultCollnetLocalRegisterBuffer;
+  g_ncclCollnetGraphRegisterBuffer = DefaultCollnetGraphRegisterBuffer;
+  g_ncclNvlsLocalRegisterBuffer = DefaultNvlsLocalRegisterBuffer;
+  g_ncclNvlsGraphRegisterBuffer = DefaultNvlsGraphRegisterBuffer;
+  g_ncclNvlsRegResourcesQuery = DefaultNvlsRegResourcesQuery;
+  std::fill(std::begin(ncclTransports), std::end(ncclTransports), nullptr);
 }
 
 #ifndef RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR

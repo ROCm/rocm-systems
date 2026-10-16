@@ -16,10 +16,10 @@
 #include <functional>
 #include <initializer_list>
 #include <memory>
-#include <string>
 #include <utility>
 #include <vector>
 
+#include "RegisterScene.h"
 #include "ScopedHook.h"
 #include "fakes/argcheck_fakes.h"
 #include "fakes/hip_fakes.h"
@@ -48,19 +48,6 @@ namespace {
 
 constexpr uintptr_t kPage = 0x1000;
 constexpr int kCommDev = 3;
-
-void* Ptr(uintptr_t addr) { return reinterpret_cast<void*>(addr); }
-
-// Param values for the redirected NCCL_PARAM bodies; unset names keep their defaults.
-std::function<int64_t(const char*, int64_t)> ParamOverride(std::initializer_list<std::pair<const char*, int64_t>> kv) {
-  std::vector<std::pair<std::string, int64_t>> table(kv.begin(), kv.end());
-  return [table](const char* env, int64_t deft) {
-    for (const auto& [name, value] : table) {
-      if (name == env) return value;
-    }
-    return deft;
-  };
-}
 
 // hipPointerGetAttribute answering the two attributes register.cc queries.
 std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)> PointerAttrs(hipMemoryType memType,
