@@ -223,7 +223,20 @@ foreach(family IN ITEMS
 endforeach()
 
 # Graphics families retain their independent interpolation and selection references.
-
+foreach(family IN ITEMS
+    cube
+    interp
+    mullit
+)
+  set(target "rj_arith_graphics_${family}_test")
+  add_executable(${target} graphics/${family}_test.cpp)
+  target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -pedantic)
+  endif()
+  gtest_discover_tests(${target} TEST_PREFIX "rj_arith.")
+endforeach()
 
 # VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
 
