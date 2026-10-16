@@ -1960,6 +1960,25 @@ TEST_F(GinHostRegisterMicrotest, Deregister_PopulatedSlots_DeregistersEachOne) {
   EXPECT_EQ(std::make_pair(collCommFor(0, 1), win1), fake_.deregMrCalls[1]);
 }
 
+// Each backend's windows live in its own block of slots, so a second backend is
+// deregistered with the windows it was registered with.
+TEST_F(GinHostRegisterMicrotest, Deregister_MultipleActiveBackends_DeregistersEachBackendsOwnSlots) {
+  gin()->numActiveBackends = 2;
+  configureBackend(1, 1);
+  ASSERT_EQ(ncclSuccess, registerWindow());
+  void* const win0 = hostWins_[0];
+  void* const win1 = hostWins_[1];
+  void* const backend1Win = hostWins_[NCCL_GIN_MAX_CONNECTIONS];
+  ASSERT_NE(nullptr, backend1Win);
+
+  ASSERT_EQ(ncclSuccess, ncclGinDeregister(comm(), hostWins_));
+
+  ASSERT_EQ(3u, fake_.deregMrCalls.size());
+  EXPECT_EQ(std::make_pair(collCommFor(0, 0), win0), fake_.deregMrCalls[0]);
+  EXPECT_EQ(std::make_pair(collCommFor(0, 1), win1), fake_.deregMrCalls[1]);
+  EXPECT_EQ(std::make_pair(collCommFor(1, 0), backend1Win), fake_.deregMrCalls[2]);
+}
+
 // A connection that was never registered has an empty slot, which is skipped
 // rather than deregistered as a NULL window.
 TEST_F(GinHostRegisterMicrotest, Deregister_EmptySlot_IsNotDeregistered) {
