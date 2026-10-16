@@ -231,9 +231,10 @@ struct MemoryAccessObservation {
   /// original aperture addresses while @ref addresses reports the effective
   /// LDS allocation addresses.
   std::span<const uint64_t> pre_routing_addresses;
-  /// @brief Per-element lane validity, when an access has narrower bounds for
-  ///        later elements than for earlier ones. Empty means every element
-  ///        uses @ref valid_lane_mask.
+  /// @brief Per-element lanes requesting memory traffic. Buffer bounds can
+  ///        narrow later elements; block transfers can have arbitrary M0 holes.
+  ///        These masks need not be monotonic. Empty means every element uses
+  ///        @ref valid_lane_mask; otherwise there are @ref elements_per_lane masks.
   std::span<const uint64_t> element_lane_masks;
   /// @brief Addresses of the second access of a DS dual-access instruction.
   ///        Empty unless the instruction has one.
