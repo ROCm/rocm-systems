@@ -402,13 +402,15 @@ function(rccl_define_micro_source_lists)
     fakes/env_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
-    
+
   # rccl-UnitTestsMicroRomeModels
   set(TEST_MICRO_ROME_MODELS_SOURCE_FILES
     rome-models-test.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
+    fakes/topo_stubs.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -417,6 +419,7 @@ function(rccl_define_micro_source_lists)
     diag-p2p-test.cc
     diag-ib-write-bw-test.cc
     fakes/dev_runtime_micro_fakes.cc     # bootstrap collectives
+    fakes/env_fakes.cc
     fakes/diagnostics_fakes.cc           # src/diagnostics.cc external-tool runners
     fakes/diagnostics_p2p_device_fakes.cc  # src/diagnostics/device/p2p.cu
     fakes/hip_fakes.cc
