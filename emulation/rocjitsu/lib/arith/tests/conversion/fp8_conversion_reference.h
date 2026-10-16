@@ -12,9 +12,6 @@
 
 namespace rocjitsu::arith::test {
 
-// Independent reference inherited from tests/conversion/fp8_conversion_reference.h.
-// Retain its rounding and special-value model; do not call production helpers.
-
 // Decode an FP8/BF8 byte to its FP32 representation.
 inline uint32_t fp8_conversion_reference(bool bf8, uint8_t code) {
   bool negative = code >> 7;
