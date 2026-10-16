@@ -260,6 +260,12 @@ public:
   /// @returns Const reference to the stored exit event.
   const ExitStatus &last_exit() const { return exit_status_; }
 
+  /// @brief Read the exit code safely while a host thread may request exit.
+  int exit_code() const {
+    std::lock_guard<std::mutex> lock(exit_mutex_);
+    return exit_status_.code;
+  }
+
   /// @brief Enqueue an event from any thread (thread-safe).
   ///
   /// @details The event is buffered and drained into the target partition's queue
@@ -540,7 +546,7 @@ private:
   };
   std::vector<std::unique_ptr<AsyncQueue>> async_queues_; ///< One per partition.
 
-  std::mutex exit_mutex_; ///< Protects exit_status_ and exit_set_ (first-writer-wins).
+  mutable std::mutex exit_mutex_; ///< Protects exit_status_ and exit_set_ (first-writer-wins).
   bool exit_set_ = false; ///< True once exit_status_ has been written (sentinel for set_exit).
 };
 
