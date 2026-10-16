@@ -77,7 +77,8 @@ run by hand before a release:
 Routing mode denies the agent its tools and only checks which skill it chose,
 so it is quick and needs no GPU. Behavioral mode lets the agent work and grades
 `logs_contain`, `files_exist`, and the plain-language `expected_behavior` and
-`unexpected_behavior` claims, so it needs a supported GPU and real time.
+`unexpected_behavior` claims, so it needs a supported GPU and real time. The
+agent runs commands without asking for approval, so use a test machine.
 
 Both modes install the skills with `install-skills.sh`, so they also test the
 install script and its docs links. Both drive the `claude` CLI. The script
@@ -87,6 +88,10 @@ than failed.
 Each dataset needs at least three cases that should trigger the skill, two that
 should not, and one triggering case with judged behavior. Negative cases carry
 only an id, a prompt, and an optional note.
+
+Every workspace gets a copy of `sample/`. A triggering case that needs an
+application names one with `sample`, and behavioral mode tells the agent to use
+it. Routing mode sends the prompt unchanged.
 
 ## Keeping skills correct
 
