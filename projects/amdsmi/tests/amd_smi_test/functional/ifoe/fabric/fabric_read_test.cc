@@ -118,7 +118,6 @@ void TestFabricRead::Run(void) {
                      " on this system"
                   << std::endl;
       }
-      continue;
     } else if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_NO_DATA) {
       CHK_ERR_ASRT(err)
     } else {
@@ -146,6 +145,19 @@ void TestFabricRead::Run(void) {
     DISPLAY_AMDSMI_API("amdsmi_get_gpu_fabric_info(nullptr check)", "gpu=" + std::to_string(dv_ind),
                        VERB(STANDARD));
     err = amdsmi_get_gpu_fabric_info(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+    // Null-pointer validation for alloc/free; runs before the NOT_SUPPORTED early-continue below
+    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    err = amdsmi_free_fabric_telemetry(device, nullptr);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
@@ -217,6 +229,8 @@ void TestFabricRead::Run(void) {
             DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=" + std::to_string(it.id),
                                VERB(STANDARD));
             err = amdsmi_fabric_telem_id_to_string(it.id, &name);
+            DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                                  AMDSMI_STATUS_NOT_FOUND);
             // Unmapped telemetry ids return NOT_FOUND with a "UNKNOWN" name;
             // tolerate them so a single unknown id does not fail the test.
             if (err != AMDSMI_STATUS_NOT_FOUND) {
@@ -239,19 +253,6 @@ void TestFabricRead::Run(void) {
     err = amdsmi_free_fabric_telemetry(device, tel);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
-
-    // Null-pointer validation for alloc/free
-    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    err = amdsmi_free_fabric_telemetry(device, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
 }
 
