@@ -73,6 +73,10 @@ ncclResult_t ncclGinHostFinalize(struct ncclComm* comm);
 ncclResult_t ncclGinDevCommSetup(struct ncclComm* comm, struct ncclDevCommRequirements const* reqs,
                                  struct ncclDevComm* devComm, uint32_t deviceCodeVersion);
 ncclResult_t ncclGinDevCommFree(struct ncclComm* comm, struct ncclDevComm const* devComm);
+// Zero the GIN fields ncclGinDevCommSetup filled in. ncclGinDevCommFree matches a
+// devComm by ginHandles[0], so a devComm whose contexts were freed must be cleared
+// before anything can pass it to ncclGinDevCommFree again.
+void ncclGinDevCommClearFields(struct ncclDevComm* devComm);
 ncclResult_t ncclGinRegister(struct ncclComm* comm, void* address, size_t size,
                              void* ginHostWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],
                              ncclGinWindow_t ginDevWins[NCCL_GIN_MAX_CONNECTIONS * NCCL_GIN_MAX_ACTIVE_BACKENDS],

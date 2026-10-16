@@ -64,6 +64,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed Copy Engine `ncclAlltoAllv` hanging on intra-node communicators of more than 8 ranks with uneven send sizes. Each rank decided from its own send sizes whether to add intra-batch barriers, so ranks could issue different barrier counts. The decision now uses the full send-size matrix, which every rank shares.
 * Fixed `NCCL_P2P_DISABLE` and `NCCL_P2P_LEVEL` being ignored on Intel, ARM and Zhaoxin hosts, where the CPU-based default P2P level overwrote the user setting. On such hosts `NCCL_P2P_DISABLE=1` now falls back to SHM as documented, and `NCCL_P2P_LEVEL` is honored.
 * Fixed LL-protocol latency on gfx950 when RCCL is built against a ROCm older than 7.0.2 without the 128-bit global load/store builtins (for example ROCm 7.0.1, or `-DDWORDX4_INTRINSICS=OFF`). Every store to the user output buffer was followed by a release fence and an L2 writeback, which made 4 KB to 64 KB `ncclBroadcast` about 30% slower on MI355X. Builds against ROCm 7.0.2 or later were not affected and are unchanged.
+* Fixed Anvil SDMA (`NCCL_GIN_TYPE=7`) GIN contexts sharing signal cells across logical contexts on a connection, which let a consecutive `ncclGinAllContexts` barrier return early on a stale count. Each logical context now has its own signals.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.
