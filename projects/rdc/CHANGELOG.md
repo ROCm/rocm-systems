@@ -18,6 +18,8 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **The RDC job and group calls reject IDs and names that do not fit their buffers.** `rdc_job_start_stats()`, `rdc_job_get_stats()`, `rdc_job_stop_stats()` and `rdc_job_remove()` return `RDC_ST_BAD_PARAMETER` for a job ID of 64 bytes or more or with a control character, and `rdc_group_gpu_create()` and `rdc_group_field_create()` for a name of 256 bytes or more; `rdcd` rejects the same, and IDs or names with a NUL inside, from any gRPC client.
   - The job ID parameter is a `char[64]`, but RDC accepted longer job IDs and stored them whole, and cut longer names. `rdci stats` with such a job ID, and `rdci group -c` and `rdci fieldgroup -c` with such a name, now fail.
 
+- **RDC client calls to `rdcd` fail with `RDC_ST_CLIENT_ERROR` after 120 seconds**, or 30 minutes for `rdc_diagnostic_run()`, instead of waiting forever for an `rdcd` that does not answer. `rdc_test_case_run()`, which runs a test for as long as its configuration sets, and the stream of a policy registration have no deadline.
+
 ### Removed
 
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
@@ -92,6 +94,11 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdcd` no longer sends uninitialized memory, or memory past a buffer, in its replies when the RDC library returns less than a reply holds: device names, component versions, group and field group information, field values, job statistics, policies, health checks, topology, link status and diagnostic results. It sends counts no larger than the entries it sends, and strings no longer than their buffers.
 
 - `rdc_field_get_latest_value()` and `rdc_field_get_value_since()` set the `status` of the value they return, and `rdc_field_get_value_since()` returns all of a `BLOB` value instead of its first 8 bytes. Through `rdcd`, a string or `BLOB` value since a time is sent without its trailing spaces and without a NUL in place of the first of them.
+
+- With `rdcd`, `rdc_device_topology_get()`, `rdc_link_status_get()`, `rdc_health_check()`, `rdc_diagnostic_run()` and `rdc_test_case_run()` no longer report more GPUs, links, incidents, or results than the `rdcd` reply carries, or read past the entries it carries, and a reply that carries more than the C API holds changes nothing. `rdc_field_get_latest_value()` and `rdc_field_get_value_since()` return `RDC_ST_CLIENT_ERROR` for a value of a type RDC does not have, and `rdc_get_num_partition()` for a partition count that does not fit, instead of an unset or cut value.
+  - `rdc_diagnostic_run()` and `rdc_test_case_run()` return `RDC_ST_CLIENT_ERROR` when `rdcd` ends the run without its results, as an `rdcd` older than this release does for a diagnostic that it cannot run, instead of `RDC_ST_OK` with nothing written.
+
+- `rdc_device_get_all()`, `rdc_group_get_all_ids()` and `rdc_group_field_get_all_ids()` with a NULL list, and `rdc_policy_get()` with NULL `policies`, return `RDC_ST_BAD_PARAMETER` instead of crashing when there is anything to write. With `rdcd`, `rdc_device_topology_get()` and `rdc_link_status_get()` return it for NULL `results`, as they did without `rdcd`, instead of crashing on every reply that they accept.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

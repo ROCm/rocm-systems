@@ -120,6 +120,9 @@ rdc_status_t rdc_job_get_stats(rdc_handle_t p_rdc_handle, const char job_id[64],
   if (!job_id || !rdc_valid_job_id(job_id, strnlen(job_id, kRdcJobIdSize))) {
     return RDC_ST_BAD_PARAMETER;
   }
+  if (!p_job_info) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_job_get_stats(job_id, p_job_info);
 }
@@ -175,6 +178,9 @@ rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle, rdc_group_type_t ty
   if (!group_name || !rdc_valid_name(group_name, strnlen(group_name, RDC_MAX_STR_LENGTH))) {
     return RDC_ST_BAD_PARAMETER;
   }
+  if (!p_rdc_group_id) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_group_gpu_create(type, group_name, p_rdc_group_id);
@@ -194,6 +200,9 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
                                 uint32_t gpu_index_list[RDC_MAX_NUM_DEVICES], uint32_t* count) {
   if (!p_rdc_handle || !count) {
     return RDC_ST_INVALID_HANDLER;
+  }
+  if (!gpu_index_list) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
@@ -253,6 +262,9 @@ rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!field_group_info) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_group_field_get_info(rdc_field_group_id, field_group_info);
@@ -273,6 +285,9 @@ rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle, rdc_gpu_group_t gr
   if (!p_rdc_handle || !count) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!group_id_list) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_group_get_all_ids(group_id_list, count);
@@ -282,6 +297,9 @@ rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
                                          rdc_field_grp_t field_group_id_list[], uint32_t* count) {
   if (!p_rdc_handle || !count) {
     return RDC_ST_INVALID_HANDLER;
+  }
+  if (!field_group_id_list) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
@@ -354,6 +372,9 @@ rdc_status_t rdc_diagnostic_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!response) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_diagnostic_run(group_id, level, config, config_size, response, callback);
@@ -365,6 +386,9 @@ rdc_status_t rdc_test_case_run(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
                                rdc_diag_callback_t* callback) {
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
+  }
+  if (!result) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
@@ -496,6 +520,9 @@ rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!components) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_health_get(group_id, components);
 }
@@ -504,6 +531,9 @@ rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
                               rdc_health_response_t* response) {
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
+  }
+  if (!response) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
   }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_health_check(group_id, response);
@@ -540,6 +570,9 @@ rdc_status_t rdc_policy_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!count || !policies) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
+  }
 
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_policy_get(group_id, count, policies);
@@ -573,12 +606,18 @@ rdc_status_t rdc_device_topology_get(rdc_handle_t p_rdc_handle, uint32_t gpu_ind
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
   }
+  if (!results) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
+  }
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)
       ->rdc_device_topology_get(gpu_index, results);
 }
 rdc_status_t rdc_link_status_get(rdc_handle_t p_rdc_handle, rdc_link_status_t* results) {
   if (!p_rdc_handle) {
     return RDC_ST_INVALID_HANDLER;
+  }
+  if (!results) {
+    return RDC_ST_BAD_PARAMETER;  // an output the call cannot write
   }
   return static_cast<amd::rdc::RdcHandler*>(p_rdc_handle)->rdc_link_status_get(results);
 }

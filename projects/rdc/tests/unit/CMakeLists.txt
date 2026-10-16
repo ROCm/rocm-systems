@@ -145,8 +145,9 @@ if(TARGET rdc_client)
     )
 
     # rdc_client_replies_tests: the client against a server whose replies state more
-    # entries than they carry. It links librdc_client for the generated gRPC service and
-    # messages, so that the process has one copy of them.
+    # entries than they carry, or carry more than the C API holds, and the deadlines of
+    # its calls. It links librdc_client for the generated gRPC service and messages, so
+    # that the process has one copy of them.
     add_executable(rdc_client_replies_tests ${SRC_DIR}/test_client_replies.cc)
     target_include_directories(
         rdc_client_replies_tests
