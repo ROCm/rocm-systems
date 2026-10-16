@@ -24,6 +24,14 @@ inline __m512 clamp_f32(__m512 value, bool preserve_nan) {
   return _mm512_min_ps(_mm512_max_ps(value, _mm512_setzero_ps()), _mm512_set1_ps(1));
 }
 
+// Clamp the wrapped sum of signed 32-bit lanes to the signed range.
+inline __m512i saturate_signed_sum(__m512i x, __m512i y, __m512i sum) {
+  auto overflow = _mm512_and_si512(_mm512_xor_si512(x, sum), _mm512_xor_si512(y, sum));
+  auto limit = _mm512_xor_si512(_mm512_srai_epi32(x, 31), _mm512_set1_epi32(0x7fffffff));
+  return _mm512_mask_mov_epi32(
+      sum, _mm512_cmp_epi32_mask(overflow, _mm512_setzero_si512(), _MM_CMPINT_LT), limit);
+}
+
 // Replace FP32 subnormals with zero of the same sign.
 inline __m512 flush_denorm_f32(__m512 value) {
   auto bits = _mm512_castps_si512(value);
