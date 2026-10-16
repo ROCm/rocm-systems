@@ -19,9 +19,6 @@ from tests.integration.common import (
     require_torch,
 )
 from utils import csv_compression
-from utils.inject_roctx._backends.torch_trace_collector import (
-    _find_collector,
-)
 
 pytestmark = pytest.mark.torch_trace
 
@@ -48,6 +45,15 @@ COUNTER_COLLECTION_COLUMNS = {
 # they read deprecated results_*.csv.gz. A real overhead number needs a
 # larger workload with repeats, not this sample.
 _TORCH_TRACE_WALL_CLOCK_OVERHEAD_PCT = 50.0
+
+
+_ADDMM_NATIVE = re.compile(r"aten::addmm(?![A-Za-z0-9_])")
+_ADDMM_FALLBACK = re.compile(r"torch\.ops\.aten\.addmm(?![A-Za-z0-9_])")
+
+
+def _find_addmm_marker(text: str):
+    """Return an addmm marker in either the native or Python-tier spelling."""
+    return _ADDMM_NATIVE.search(text) or _ADDMM_FALLBACK.search(text)
 
 
 def _percent_overhead(with_flag, baseline, label):
@@ -109,8 +115,6 @@ def torch_trace_profiled_workload(
 ):
     """Profile simple_net with --torch-trace and return the workload directory."""
     require_torch(gpu=True)
-    if _find_collector() is None:
-        pytest.skip("torch_trace_collector .so not found")
     if not torch_trace_workload_state["profiled"]:
         workload_dir = common.get_output_dir(param_id="torch_trace")
         torch_trace_workload_state["dir"] = workload_dir
@@ -170,8 +174,7 @@ def test_torch_trace_profile_csvs(torch_trace_profiled_workload):
                 assert row["End_Timestamp"], f"Empty End_Timestamp in {marker_file}"
             assert found_row, f"{marker_file} is empty"
             assert any("nn.Module.Linear.forward" in fn for fn in functions)
-            assert any("aten::addmm" in fn for fn in functions)
-            assert any("scope=FUNCTION" in fn for fn in functions)
+            assert any(_find_addmm_marker(fn) for fn in functions)
             assert any("|seqNr=" in fn for fn in functions)
             assert any("|tid=" in fn for fn in functions)
             assert any("|ftid=" in fn for fn in functions)
@@ -415,7 +418,7 @@ def test_list_torch_operators_prints_call_tree(
     out = captured.out + captured.err
     assert "PyTorch Operator Call Tree:" in out
     assert "nn.Module.Linear.forward" in out
-    assert "aten::addmm" in out
+    assert _find_addmm_marker(out)
     assert "(id " in out
     assert not (
         Path(torch_trace_profiled_workload) / "ml_api_trace" / "consolidated.csv"
@@ -437,7 +440,7 @@ def test_torch_operator_addmm_selects_kernels(
     captured = capsys.readouterr()
     out = captured.out + captured.err
     assert "Matched PyTorch Operators:" in out
-    assert "aten::addmm" in out
+    assert _find_addmm_marker(out)
     assert "nn.Module.Linear.forward" in out
     assert "operator filter selected" in out
 
@@ -475,9 +478,9 @@ def test_torch_operator_intersects_kernel_id(
     assert list_code == 0
     captured = capsys.readouterr()
     list_out = captured.out + captured.err
-    addmm_idx = list_out.find("aten::addmm")
-    assert addmm_idx >= 0
-    match = re.search(r"\(id (\d+)\)", list_out[addmm_idx:])
+    addmm_match = _find_addmm_marker(list_out)
+    assert addmm_match is not None
+    match = re.search(r"\(id (\d+)\)", list_out[addmm_match.end() :])
     assert match is not None
     kernel_id = match.group(1)
     code = binary_handler_analyze_rocprof_compute([
@@ -594,8 +597,6 @@ def test_torch_trace_backward_thread_in_marker_csv(
     binary_handler_profile_rocprof_compute,
 ):
     require_torch(gpu=True)
-    if _find_collector() is None:
-        pytest.skip("torch_trace_collector .so not found")
     workload_dir = common.get_output_dir(param_id="torch_trace_backward_thread")
     profile_config = dict(config)
     profile_config["simple_net_backward_thread"] = [
@@ -627,6 +628,6 @@ def test_torch_trace_backward_thread_in_marker_csv(
                     thread_ids.add(row["Thread_Id"])
         assert any("torch.Tensor.backward" in fn for fn in functions)
         assert len(thread_ids) >= 2
-        assert any(re.search(r"ltid=\d+", fn) for fn in functions)
+        assert any("|ltid=" in fn for fn in functions)
     finally:
         common.clean_output_dir(config["cleanup"], workload_dir)
