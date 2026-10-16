@@ -28,6 +28,8 @@ struct CastIbGinCollComm {
   ncclResult_t (*allToAll)(struct CastIbGinCollComm* cComm, void* srcBuf, void* recvBuf, size_t len);
   ncclResult_t (*getGidIndex)(struct ibv_context* context, uint8_t portNum, struct ibv_port_attr* portAttr,
                               int* gidIndex);
+  // RMA only: per-rank symmetric-registration consensus records (see rcclIbCastRmaIbProxyConnectFinish).
+  void* regConsensus;
 };
 
 #endif

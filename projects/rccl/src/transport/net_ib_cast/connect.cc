@@ -554,11 +554,18 @@ void IbCastBuildDataQpCreateAttr(struct ncclIbNetCommBase* base, int devIndex, s
   if (base->isSend) {
     out->maxRecvWorkRequest = 0;
     out->maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
+    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_RMA_MAX_SEND_QP_WRS;
   } else {
-    IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
-    // Multi-segment matches IbCastReceiverQpsCreateToRts (side-table WR per CTS WR) for AINIC recovery rebuilds.
+    if (base->resiliency) {
+      IbCastResiliencyDataRqSizeGet(base->resiliency, devIndex, &out->maxRecvWorkRequest);
+    } else {
+      out->maxRecvWorkRequest = NET_IB_MAX_REQUESTS;
+    }
+    // Multi-segment CTS posts a side-table WR before each CTS WR; multi-segment RMA recv QPs are flush QPs.
+    // IbCastResiliencyDataRqSizeGet dereferences resiliency, so skip it when NULL (AINIC recovery also rebuilds here).
     out->maxSendWorkRequest =
       IbCastAdvertiseMultiSeg() ? NET_IB_MAX_REQUESTS * (base->resiliency ? 1 : 2) * 2 : NET_IB_MAX_REQUESTS;
+    if (base->isRma && rcclRmaMultiSegEnabled()) out->maxSendWorkRequest = NCCL_RMA_MAX_FLUSH_QP_WRS;
   }
 }
 
@@ -920,16 +927,6 @@ fail:
 static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbConnectionMetadata* meta, int channelId,
                                           int depthMult) {
   uint nqps = comm->base.nqps;
-  struct ncclIbQpCreateAttr qpCreateAttrs;
-  memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
-  qpCreateAttrs.type = IBV_QPT_RC;
-  qpCreateAttrs.maxRecvWorkRequest = 0;
-  // Send requests are sent using at most 2 messages (RDMA Write and RDMA Write with Immediate)
-  // Multi-segment adds one segmented multi-recv chain to the 2*MAX budget.
-  qpCreateAttrs.maxSendWorkRequest = IbCastAdvertiseMultiSeg() ? NCCL_IB_MAX_SEND_WRS : 2 * NET_IB_MAX_REQUESTS;
-  qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
-  qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
-  qpCreateAttrs.cqDepthMultiplier = depthMult;
   for (int qpIndex = 0; qpIndex < nqps; qpIndex++) {
     // The QPs are created in a "striped" manner across the available devices.
     // For example, if there are 2 devices and 4 QPs, the QPs will be created
@@ -942,17 +939,15 @@ static ncclResult_t IbCastSenderQpsCreate(ncclIbSendComm* comm, struct ncclIbCon
     ncclIbQp* localQp = &comm->base.qps[qpIndex];
     ncclIbQpInfo* localQpInfo = &meta->qpInfo[qpIndex];
 
-    qpCreateAttrs.cq = commDev->base.cq;
-    qpCreateAttrs.pd = commDev->base.pd;
-    qpCreateAttrs.qpContext = &comm->base.stats;
-
+    struct ncclIbQpCreateAttr qpCreateAttrs;
+    IbCastBuildDataQpCreateAttr(&comm->base, devIndex, &qpCreateAttrs);
     qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
     qpCreateAttrs.isCtsEnabled = comm->useCtsOffload;
     qpCreateAttrs.isDataQp = true;
     qpCreateAttrs.channelId = channelId;
-    qpCreateAttrs.ibDevN = commDev->base.ibDevN;
-    qpCreateAttrs.useIonic = IbCastAinicRoce;
-    qpCreateAttrs.isP2p = comm->base.isP2p;
+    qpCreateAttrs.isQpSharingEnabled = IbCastQpSharingEnabled();
+    qpCreateAttrs.qpSharingGroupIdx = meta->sharedGroupIdx;
+    qpCreateAttrs.cqDepthMultiplier = depthMult;
     qpCreateAttrs.qpIdx = qpIndex / comm->base.vProps.ndevs;
 
     if (ibDev->ibProvider == IB_PROVIDER_MLX5 && ncclParamIbCastOooRq()) {
@@ -1383,6 +1378,7 @@ ib_recv_dev_list:
   // Read isP2p from handle
   isP2p = handle->isP2p;
   comm->base.isP2p = isP2p;
+  comm->base.isRma = handle->isRMA;
   comm->useCtsOffload = IbCastIsCtsOffloadEnabled(isP2p) && !handle->isRMA;
   comm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(comm->useCtsOffload);
   IbCastInitOptRecvCompletion(&comm->base, comm->useCtsOffload);
@@ -1877,19 +1873,14 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       ncclIbDev* ibDev = &IbCastDevs[rCommDev->base.ibDevN];
 
       struct ncclIbQpCreateAttr qpCreateAttrs;
-      memset(&qpCreateAttrs, 0, sizeof(struct ncclIbQpCreateAttr));
-      qpCreateAttrs.type = IBV_QPT_RC;
-      qpCreateAttrs.cq = rCommDev->base.cq;
-      qpCreateAttrs.pd = rCommDev->base.pd;
+      IbCastBuildDataQpCreateAttr(&rComm->base, i, &qpCreateAttrs);
       qpCreateAttrs.maxRecvWorkRequest = 0;
-      qpCreateAttrs.maxSendWorkRequest = IbCastFlushQpSendDepth();
-      qpCreateAttrs.qpContext = &rComm->base.stats;
+      qpCreateAttrs.maxSendWorkRequest = IbCastFlushQpSendDepth(&rComm->base);
       qpCreateAttrs.ctsQpSlot = NCCL_CTS_QP_SLOT_INVALID;
       qpCreateAttrs.isCtsEnabled = rComm->useCtsOffload;
       qpCreateAttrs.isDataQp = true;
       qpCreateAttrs.channelId = channelId;
-      qpCreateAttrs.ibDevN = rCommDev->base.ibDevN;
-      qpCreateAttrs.useIonic = IbCastAinicRoce;
+      qpCreateAttrs.isP2p = 0;
       if (IbCastCommIsPrimary(&rComm->base)) {
         // Flush QP is shared across comms in the group — enable WR depth
         // scaling and group-based UDMA pinning so it matches the data QPs.
@@ -1904,6 +1895,9 @@ static ncclResult_t IbCastReceiverQpsCreateToRts(ncclIbRecvComm* rComm, struct n
       NCCLCHECK(IbCastQpCreate(&rCommDev->gpuFlush.qp, &qpCreateAttrs));
       rCommDev->gpuFlush.qp.channelId = channelId;
       rCommDev->gpuFlush.qp.isDataQp = qpCreateAttrs.isDataQp;
+      // Loopback flush QP: local and remote device indices are this recv device.
+      rCommDev->gpuFlush.qp.devIndex = i;
+      rCommDev->gpuFlush.qp.remDevIdx = i;
 
       INFO(NCCL_NET,
            "NET/IB: %s: Flush QP created: port=%d dev=%d devName=%s ndevs=%d nmdevs=%d qp_num=%u pkey=%u pd=%p",
@@ -2310,6 +2304,7 @@ ib_recv:
   rComm->peerCaps = IbCastAdvertiseMultiSeg() ? ncclIbGetConnectCaps(remMeta.devName, sizeof(remMeta.devName)) : 0;
 
   rComm->base.isP2p = remMeta.isP2p;
+  rComm->base.isRma = remMeta.isRMA;
   rComm->useCtsOffload = IbCastIsCtsOffloadEnabled(remMeta.isP2p) && !remMeta.isRMA;
   rComm->base.recvMatchingScheme = IbCastResolveRecvMatchingScheme(rComm->useCtsOffload);
   IbCastInitOptRecvCompletion(&rComm->base, rComm->useCtsOffload);

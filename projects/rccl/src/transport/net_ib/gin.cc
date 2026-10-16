@@ -813,9 +813,7 @@ static inline uint64_t ncclRmaMrBytes(const struct rcclRmaIbProxySegMrHandle* h,
 }
 
 static inline bool ncclRmaRangeOk(const struct rcclRmaIbProxySegMrHandle* h, int rank, uint64_t off, size_t size) {
-  const size_t* offs = ncclRmaRankOff(h, rank);
-  uint64_t bytes = offs[h->nSegments];
-  return off <= bytes && (uint64_t)size <= bytes - off;
+  return ncclRmaOffsetRangeOk(h->nSegments, ncclRmaRankOff(h, rank), off, size);
 }
 
 // Build a chained RDMA WR list, splitting at segment boundaries so every WR
