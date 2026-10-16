@@ -10,6 +10,7 @@
 /projects/amdsmi/                                                     @ROCm/smi-reviewers
 /projects/clr/                                                        @ROCm/clr-reviewers
 /projects/clr/hipamd/src/hrr/                                         @ROCm/clr-reviewers @ROCm/hrr-reviewers
+/projects/fortran/                                                    @ROCm/rocm-fortran-maintainers @ROCm/hip-reviewers
 /projects/hip/                                                        @ROCm/hip-reviewers
 /projects/hipfile/                                                    @ROCm/hipfile-reviewers
 /projects/hipother/                                                   @ROCm/hipother-reviewers
