@@ -243,6 +243,7 @@ public:
   const Wkmi::DeviceInfo& DeviceInfo() const { return device_info_; }
 
   ErrorCode CreateGpuMemory(const GpuMemoryCreateInfo &create_info, GpuMemory **gpu_mem, gpusize *gpu_va = nullptr);
+  ErrorCode MapFromPeerDev(GpuMemory *peer_mem, GpuMemory **gpu_mem);
   uint32_t RegisterEvent(uint32_t type, HANDLE event_handle, uint64_t* mailbox);
   bool UnregisterEvent(uint32_t event_id, HANDLE event_handle);
   static HSAKMT_STATUS WaitOnMultipleEvents(HsaEvent* events[], uint32_t num_elems, bool wait_all, uint32_t msec);

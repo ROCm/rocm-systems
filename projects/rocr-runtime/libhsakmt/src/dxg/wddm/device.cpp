@@ -470,6 +470,20 @@ ErrorCode WDDMDevice::CreateGpuMemory(const GpuMemoryCreateInfo &create_info,
   return ret;
 }
 
+ErrorCode WDDMDevice::MapFromPeerDev(GpuMemory *peer_mem, GpuMemory **gpu_mem) {
+  ErrorCode ret;
+
+  *gpu_mem = nullptr;
+  auto mem = new GpuMemory(this);
+  ret = mem->MapFromPeerDev(peer_mem);
+  if (ret == ErrorCode::Success)
+    *gpu_mem = mem;
+  else
+    delete mem;
+
+  return ret;
+}
+
 void *WDDMDevice::Lock(D3DKMT_HANDLE handle) {
   D3DKMT_LOCK2 args = {0};
   args.hDevice = device_;
