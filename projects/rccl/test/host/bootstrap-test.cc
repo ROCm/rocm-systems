@@ -1706,6 +1706,8 @@ TEST_F(BootstrapMicrotest, BcastGrowHandle_CoordinatorReachesOnlyTheBoundaryRank
   EXPECT_EQ(0xABu, got[0].magic);
   EXPECT_EQ(0xABu, got[3].magic);
   EXPECT_EQ(4, got[3].nRanks);
+  for (int r : {1, 2})  // neither the coordinator nor an inner rank was sent anything
+    EXPECT_EQ(0u, PendingOn(static_cast<struct bootstrapState*>(State(r))->listen.peerSocket)) << r;
   EXPECT_TRUE(AllOk(CloseRanks()));
 }
 
