@@ -17,6 +17,7 @@
 #include <hsa/hsa_ext_amd.h>
 #include <unistd.h>
 
+#include <algorithm>
 #include <chrono>
 #include <cstdint>
 #include <cstdio>
@@ -511,18 +512,136 @@ protected:
         (void)hipDeviceSynchronize();
     }
 
-    /** Return true iff device `buf` matches (seed + i) % 256 for all i. */
-    bool VerifyBuf(const void* buf, size_t size, int seed)
+    static uint8_t PatternByte(int seed, size_t i) { return static_cast<uint8_t>((seed + i) % 256); }
+
+    static size_t CountPatternMismatches(const std::vector<uint8_t>& data, int seed)
     {
+        size_t n = 0;
+        for(size_t i = 0; i < data.size(); ++i)
+            if(data[i] != PatternByte(seed, i)) ++n;
+        return n;
+    }
+
+    static std::string HexWindow(const uint8_t* p, size_t n)
+    {
+        std::string s;
+        char        b[4];
+        for(size_t i = 0; i < n; ++i)
+        {
+            std::snprintf(b, sizeof(b), i ? " %02x" : "%02x", p[i]);
+            s += b;
+        }
+        return s;
+    }
+
+    /** Check device `buf` against (seed + i) % 256. On mismatch the failure message
+     *  locates the bad bytes and classifies them, so a visibility race (zeros, or
+     *  clean on re-read) can be told apart from an addressing bug (another block's
+     *  ramp) or stale memory (no pattern). */
+    ::testing::AssertionResult VerifyBuf(const void* buf, size_t size, int seed)
+    {
+        constexpr size_t kHexWindow      = 16;
+        constexpr int    kRecheckDelayMs = 10;
+
         std::vector<uint8_t> staging(size);
-        if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) != hipSuccess)
-            return false;
+        hipError_t err = hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost);
+        if(err != hipSuccess)
+        {
+            return ::testing::AssertionFailure()
+                   << "hipMemcpy D2H of " << size << " bytes failed: " << hipGetErrorString(err);
+        }
         (void)hipDeviceSynchronize();
+
+        size_t  nBad = 0, first = 0, last = 0;
+        bool    allZero = true, sameByte = true, sameDelta = true;
+        uint8_t byte0 = 0, delta0 = 0;
         for(size_t i = 0; i < size; ++i)
         {
-            if(staging[i] != static_cast<uint8_t>((seed + i) % 256)) return false;
+            const uint8_t want = PatternByte(seed, i);
+            const uint8_t got  = staging[i];
+            if(got == want) continue;
+
+            const uint8_t delta = static_cast<uint8_t>(got - want);
+            if(nBad == 0)
+            {
+                first  = i;
+                byte0  = got;
+                delta0 = delta;
+            }
+            last = i;
+            ++nBad;
+            allZero   = allZero && got == 0;
+            sameByte  = sameByte && got == byte0;
+            sameDelta = sameDelta && delta == delta0;
         }
-        return true;
+        if(nBad == 0) return ::testing::AssertionSuccess();
+
+        const size_t window = std::min(kHexWindow, size - first);
+        std::vector<uint8_t> expected(window);
+        for(size_t k = 0; k < window; ++k) expected[k] = PatternByte(seed, first + k);
+        const std::string actualHex = HexWindow(staging.data() + first, window);
+
+        // The ramp has period 256, so a different seed and a shifted copy of the
+        // right pattern look the same; the hint names both.
+        std::string hint;
+        if(allZero)
+        {
+            hint = "all mismatching bytes are 0x00 (buffers start zeroed): payload not "
+                   "landed or not yet visible";
+        }
+        else if(nBad == 1)
+        {
+            hint = "single corrupted byte";
+        }
+        else if(sameByte)
+        {
+            char b[64];
+            std::snprintf(b, sizeof(b), "all mismatching bytes are 0x%02x (constant fill)", byte0);
+            hint = b;
+        }
+        else if(sameDelta)
+        {
+            char b[192];
+            std::snprintf(b, sizeof(b),
+                          "ramp offset by %+d: matches seed %d (another block's seed if blocks "
+                          "are seeded by index), or the expected pattern read from %+d bytes "
+                          "away",
+                          static_cast<int8_t>(delta0), (seed + delta0) % 256,
+                          static_cast<int8_t>(delta0));
+            hint = b;
+        }
+        else
+        {
+            hint = "no simple pattern (stale or foreign data)";
+        }
+
+        // A clean re-read means the bytes arrived after the check, i.e. a visibility
+        // gap rather than wrong data. Diagnostic only: the check has already failed.
+        std::this_thread::sleep_for(std::chrono::milliseconds(kRecheckDelayMs));
+        std::string recheck;
+        if(hipMemcpy(staging.data(), buf, size, hipMemcpyDeviceToHost) == hipSuccess)
+        {
+            (void)hipDeviceSynchronize();
+            const size_t nBadLater = CountPatternMismatches(staging, seed);
+            recheck = std::to_string(nBadLater) + " mismatching bytes"
+                      + (nBadLater == 0 ? " (late visibility)" : "");
+        }
+        else
+        {
+            recheck = "hipMemcpy failed";
+        }
+
+        return ::testing::AssertionFailure()
+               << nBad << " of " << size << " bytes mismatched (seed " << seed
+               << "); first at offset " << first << ", last at " << last << " (span "
+               << (last - first + 1) << " bytes)"
+               << "\n  expected @" << first << ": " << HexWindow(expected.data(), window)
+               << "\n  actual   @" << first << ": " << actualHex
+               << "\n  hint: " << hint
+               << "\n  re-read after " << kRecheckDelayMs << " ms: " << recheck
+               << "\n  rank " << worldRank_ << ", nContexts " << GetNumContexts() << ", "
+               << (UseDmaBuf() ? "DmaBuf" : "RegMr")
+               << (SkipIGetFlush() ? ", RCCL_TEST_RMA_SKIP_IGET_FLUSH set (iget flush skipped)" : "");
     }
 
     /** Fill device `buf` with a constant byte (sentinel). */
