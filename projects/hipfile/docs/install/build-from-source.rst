@@ -24,9 +24,11 @@ see :ref:`ROCm Core SDK components <rocm:release-components>`.
 - HIP and HSA packages from ROCm so CMake can locate ``hip`` and ``hsa-runtime64``
 - ``libmount`` from ``util-linux`` for mount metadata parsing
 - A Linux kernel built with ``CONFIG_PCI_P2PDMA=y`` for the peer-to-peer DMA
-  transfers the fastpath performs on AMD builds. hipFile builds and runs without
+  fastpath. hipFile builds and runs without
   it, but all I/O uses the fallback path. See :ref:`hipfile-kernel-p2pdma` for how
-  to check the running kernel and which distribution kernels enable the option.
+  to check the running kernel, and
+  :doc:`/reference/hipFile-kernel-support-matrix` for which distribution kernels
+  enable the option.
 
 
 Build and install

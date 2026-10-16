@@ -46,16 +46,15 @@ Kernel P2PDMA support
 =====================
 
 hipFile's fastpath requires a Linux kernel built with ``CONFIG_PCI_P2PDMA=y``.
-A kernel without it cannot perform peer-to-peer DMA between the GPU and the
+A kernel without it can't perform peer-to-peer DMA between the GPU and the
 storage device, so every I/O request falls back to the slower compatibility
-path. No error is reported; the only symptom is lower than expected throughput.
+path without reporting any errors or warnings.
 
 This is a common cause of unexpected fallback-path use, because a distribution
 supported by ROCm doesn't necessarily ship a kernel with the option enabled. The
 Ubuntu 22.04 LTS default 5.15 kernel is one such case.
 
-``ais-check`` reports the problem as ``Kernel P2PDMA support : False``, even
-when the volumes table shows capable mounts:
+`ais-check`` will report the problem as ``Kernel P2PDMA support : False``
 
 .. code-block:: none
 
@@ -76,8 +75,9 @@ Confirm the kernel configuration directly:
   $ grep CONFIG_PCI_P2PDMA /boot/config-$(uname -r)
   # CONFIG_PCI_P2PDMA is not set
 
-For the list of verified distributions and instructions on booting a kernel that
-enables the option, see :ref:`hipfile-kernel-p2pdma`.
+For instructions on booting a kernel that enables the option, see
+:ref:`hipfile-kernel-p2pdma`. For the list of verified distributions, see
+:doc:`/reference/hipFile-kernel-support-matrix`.
 
 .. note::
 
