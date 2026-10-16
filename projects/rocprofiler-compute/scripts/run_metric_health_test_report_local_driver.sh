@@ -6,16 +6,17 @@
 # Syncs rocprofiler-compute to the GPU host, starts scripts/run_metric_health_test_report.sh,
 # and can wait, fetch, and regenerate the HTML report.
 #
-#   ARCH=gfx942 ./scripts/run_metric_health_test_report_local_driver.sh
-#   ARCH=gfx942 TAG=261001-gfx942-500med \
-#     ./scripts/run_metric_health_test_report_local_driver.sh --fetch --report
-#   ARCH=gfx1151 ./scripts/run_metric_health_test_report_local_driver.sh --wait --fetch --report
-#   ARCH=gfx908 TAG=261002-gfx908-500med \
-#     ./scripts/run_metric_health_test_report_local_driver.sh --wait --fetch --report
-#   ARCH=gfx90a TAG=261002-gfx90a-500med \
-#     ./scripts/run_metric_health_test_report_local_driver.sh --fetch --report
-#   ARCH=gfx950 TAG=261002-gfx950-500med \
-#     ./scripts/run_metric_health_test_report_local_driver.sh --fetch --report
+#   ./scripts/run_metric_health_test_report_local_driver.sh --arch gfx942
+#   ./scripts/run_metric_health_test_report_local_driver.sh \
+#     --arch gfx942 --tag 261001-gfx942-500med --fetch --report
+#   ./scripts/run_metric_health_test_report_local_driver.sh \
+#     --arch gfx1151 --wait --fetch --report
+#   ./scripts/run_metric_health_test_report_local_driver.sh \
+#     --arch gfx908 --tag 261002-gfx908-500med --wait --fetch --report
+#   ./scripts/run_metric_health_test_report_local_driver.sh \
+#     --arch gfx90a --tag 261002-gfx90a-500med --fetch --report
+#   ./scripts/run_metric_health_test_report_local_driver.sh \
+#     --arch gfx950 --tag 261002-gfx950-500med --fetch --report
 #
 # 500-iter medians are the default ITERS=500, including gfx942. There is no
 # separate 500med script.
@@ -24,15 +25,17 @@
 # To compare two runs, make the baseline with a rocprofiler-compute-develop
 # checkout as PROFILER_ROOT (path on the GPU host) and RUN=develop, then fetch it:
 #
-#   ARCH=gfx942 TAG=261011-gfx942-500-develop RUN=develop \
-#     PROFILER_ROOT=/path/on/host/develop/projects/rocprofiler-compute \
-#     ./scripts/run_metric_health_test_report_local_driver.sh --wait --fetch
+#   ./scripts/run_metric_health_test_report_local_driver.sh \
+#     --arch gfx942 --tag 261011-gfx942-500-develop --run develop \
+#     --profiler-root /path/on/host/develop/projects/rocprofiler-compute \
+#     --wait --fetch
 #
 # Then report this branch's run against it:
 #
-#   ARCH=gfx942 TAG=261011-gfx942-500 \
-#     BASELINE=validation-artifacts/metric-health-261011-gfx942-500-develop \
-#     ./scripts/run_metric_health_test_report_local_driver.sh --report
+#   ./scripts/run_metric_health_test_report_local_driver.sh \
+#     --arch gfx942 --tag 261011-gfx942-500 \
+#     --baseline validation-artifacts/metric-health-261011-gfx942-500-develop \
+#     --report
 #
 # --report calls tools/generate_metric_health_report.py with -p "$ARTIFACTS"
 # for one run, or -p "$BASELINE" -p "$ARTIFACTS" for a comparison.
@@ -41,33 +44,93 @@ set -euo pipefail
 
 usage() {
   cat <<EOF
-Usage: ARCH=<gfx942|gfx950|gfx90a|gfx908|gfx1151> $(basename "$0") [--wait] [--fetch] [--report]
-       $(basename "$0") <arch> [--wait] [--fetch] [--report]
+Usage: $(basename "$0") --arch <gfx942|gfx950|gfx90a|gfx908|gfx1151> [options] [--wait] [--fetch] [--report]
 
-Env: TAG ITERS NO_ROOF THEROCK ARTIFACTS HOST NODE PARTITION GRES
-     RUN PROFILER_ROOT BASELINE BASELINE_RUN
+Options:
+  --tag <name>              Output name (default: YYMMDD-<arch>-500, or 500med on gfx908, gfx90a, gfx950)
+  --run <name>              Run name forwarded to the worker (default: single-pass)
+  --iterations <n>          Workload iterations (default: 500)
+  --therock <dir>           ROCm prefix forwarded to the worker
+  --profiler-root <dir>     rocprof-compute tree the worker uses to profile
+  --baseline <dir>          Second artifact directory for --report
+  --baseline-run <name>     Run name inside the baseline directory (default: develop)
+  --roof                    Enable roofline collection
+
+Env: ARTIFACTS HOST NODE PARTITION GRES PROXY REMOTE_USER REMOTE_PASS REMOTE_ROOT
+     HOST_LOGIN WALLTIME ROCR_VISIBLE_DEVICES
 EOF
 }
 
 DO_WAIT=false
 DO_FETCH=false
 DO_REPORT=false
-ARCH_ARG=""
+ARCH=""
+TAG_ARG=""
+RUN_ARG=""
+ITERS_ARG=""
+THEROCK_ARG=""
+PROFILER_ROOT_ARG=""
+BASELINE_ARG=""
+BASELINE_RUN_ARG=""
+ROOF=0
+
+require_option_value() {
+  local option_name=$1
+  local option_value=${2:-}
+  if [[ -z "$option_value" || "$option_value" == --* ]]; then
+    echo "${option_name} needs a value" >&2
+    usage >&2
+    exit 1
+  fi
+}
 
 while [[ $# -gt 0 ]]; do
   case "$1" in
+    --arch)
+      require_option_value "$1" "${2:-}"
+      ARCH=$2
+      shift
+      ;;
+    --tag)
+      require_option_value "$1" "${2:-}"
+      TAG_ARG=$2
+      shift
+      ;;
+    --run)
+      require_option_value "$1" "${2:-}"
+      RUN_ARG=$2
+      shift
+      ;;
+    --iterations)
+      require_option_value "$1" "${2:-}"
+      ITERS_ARG=$2
+      shift
+      ;;
+    --therock)
+      require_option_value "$1" "${2:-}"
+      THEROCK_ARG=$2
+      shift
+      ;;
+    --profiler-root)
+      require_option_value "$1" "${2:-}"
+      PROFILER_ROOT_ARG=$2
+      shift
+      ;;
+    --baseline)
+      require_option_value "$1" "${2:-}"
+      BASELINE_ARG=$2
+      shift
+      ;;
+    --baseline-run)
+      require_option_value "$1" "${2:-}"
+      BASELINE_RUN_ARG=$2
+      shift
+      ;;
+    --roof) ROOF=1 ;;
     --wait) DO_WAIT=true ;;
     --fetch) DO_FETCH=true ;;
     --report) DO_REPORT=true ;;
     -h|--help) usage; exit 0 ;;
-    gfx*)
-      if [[ -n "$ARCH_ARG" ]]; then
-        echo "Unknown: $1" >&2
-        usage >&2
-        exit 1
-      fi
-      ARCH_ARG=$1
-      ;;
     *)
       echo "Unknown: $1" >&2
       usage >&2
@@ -77,16 +140,15 @@ while [[ $# -gt 0 ]]; do
   shift
 done
 
-ARCH=${ARCH_ARG:-${ARCH:-}}
 if [[ -z "$ARCH" ]]; then
   usage >&2
   exit 1
 fi
 
-ITERS=${ITERS:-500}
-NO_ROOF=${NO_ROOF:-1}
-RUN=${RUN:-single-pass}
-BASELINE_RUN=${BASELINE_RUN:-develop}
+ITERS=${ITERS_ARG:-500}
+RUN=${RUN_ARG:-single-pass}
+BASELINE_RUN=${BASELINE_RUN_ARG:-develop}
+BASELINE=${BASELINE_ARG:-}
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
 
 apply_driver_profile() {
@@ -108,10 +170,10 @@ apply_driver_profile() {
       REMOTE_USER=${REMOTE_USER:-${USER}}
       REMOTE_PASS=${REMOTE_PASS:-}
       REMOTE_ROOT=${REMOTE_ROOT:-/home/${REMOTE_USER}/workdir/rocm-systems/projects/rocprofiler-compute}
-      THEROCK=${THEROCK:-/home/${REMOTE_USER}/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel}
+      THEROCK=${THEROCK_ARG:-/home/${REMOTE_USER}/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel}
       TAG_SUFFIX=500
       PASS_MEGA_BATCH=1
-      MEGA_BATCH=${MEGA_BATCH:-4096}
+      MEGA_BATCH=4096
       ROCR_DEFAULT=0
       POLL_SLEEP=120
       ;;
@@ -121,7 +183,7 @@ apply_driver_profile() {
       HOST=${HOST:-gfx942-host.example}
       REMOTE_USER=${REMOTE_USER:-${USER}}
       REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${USER}/workdir/rocm-systems/projects/rocprofiler-compute}
-      THEROCK=${THEROCK:-/home/AMD/${USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
+      THEROCK=${THEROCK_ARG:-/home/AMD/${USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
       TAG_SUFFIX=500
       PASS_LOCAL_PREFIX=1
       ROCR_DEFAULT=17
@@ -134,7 +196,7 @@ apply_driver_profile() {
       NODE=${NODE:-gfx908-node}
       PARTITION=${PARTITION:-}
       GRES=${GRES:-gpu:gfx908-mi100:1}
-      THEROCK=${THEROCK:-/opt/rocm-7.2.0}
+      THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
       TAG_SUFFIX=500med
       REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${USER}/workdir/rocprofiler-compute}
       WALLTIME=${WALLTIME:-24:00:00}
@@ -150,7 +212,7 @@ apply_driver_profile() {
       NODE=${NODE:-gfx950-node}
       PARTITION=${PARTITION:-}
       GRES=${GRES:-gpu:gfx950-mi350x:1}
-      THEROCK=${THEROCK:-/opt/rocm-7.1.0}
+      THEROCK=${THEROCK_ARG:-/opt/rocm-7.1.0}
       TAG_SUFFIX=500med
       REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${USER}/workdir/rocprofiler-compute}
       WALLTIME=${WALLTIME:-24:00:00}
@@ -165,7 +227,7 @@ apply_driver_profile() {
       NODE=${NODE:-gfx90a-node}
       PARTITION=${PARTITION:-}
       GRES=${GRES:-gpu:gfx90a-mi250:1}
-      THEROCK=${THEROCK:-/opt/rocm-7.2.0}
+      THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
       TAG_SUFFIX=500med
       REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${USER}/workdir/rocprofiler-compute}
       NODE_ROOT=${NODE_ROOT:-/home/AMD/${USER}/workdir/rocprofiler-compute}
@@ -181,7 +243,7 @@ apply_driver_profile() {
       ;;
   esac
 
-  TAG=${TAG:-$(date +%y%m%d)-${ARCH}-${TAG_SUFFIX}}
+  TAG=${TAG_ARG:-$(date +%y%m%d)-${ARCH}-${TAG_SUFFIX}}
   ARTIFACTS=${ARTIFACTS:-${REPO_ROOT}/validation-artifacts/metric-health-${TAG}}
   if [[ "$TRANSPORT" == "ssh-key" ]]; then
     REMOTE_LOG=${REMOTE_LOG:-/home/AMD/${USER}/workdir/metric_health_${TAG}.log}
@@ -284,46 +346,62 @@ remote_scp() {
   scp -o BatchMode=yes -o ProxyCommand="$PROXY" "$@"
 }
 
-launch_ssh() {
-  local gpu="${ROCR_VISIBLE_DEVICES:-$ROCR_DEFAULT}"
-  local -a env_parts=(
-    "TAG='${TAG}'"
-    "ROOT='${REMOTE_ROOT}'"
-    "THEROCK='${THEROCK}'"
-    "ARCH='${ARCH}'"
+shell_join() {
+  local part joined=""
+  for part in "$@"; do
+    joined+=" $(printf '%q' "$part")"
+  done
+  printf '%s' "${joined# }"
+}
+
+build_remote_args() {
+  local root_path=$1
+  REMOTE_ARGS=(
+    bash "${root_path}/scripts/run_metric_health_test_report.sh"
+    --arch "$ARCH"
+    --tag "$TAG"
+    --root "$root_path"
+    --therock "$THEROCK"
+    --log "$REMOTE_LOG"
+    --iterations "$ITERS"
+    --run "$RUN"
   )
-  if [[ "$PASS_LOCAL_PREFIX" == "1" ]]; then
-    env_parts+=("LOCAL_PREFIX='${LOCAL_PREFIX:-/tmp/rpc_local}'")
+  if [[ -n "$PROFILER_ROOT_ARG" ]]; then
+    REMOTE_ARGS+=(--profiler-root "$PROFILER_ROOT_ARG")
   fi
-  env_parts+=(
-    "LOG='${REMOTE_LOG}'"
-    "ROCR_VISIBLE_DEVICES='${gpu}'"
-    "HIP_VISIBLE_DEVICES='0'"
-    "ITERS='${ITERS}'"
-    "NO_ROOF='${NO_ROOF}'"
-    "RUN='${RUN}'"
-  )
-  if [[ -n "${PROFILER_ROOT:-}" ]]; then
-    env_parts+=("PROFILER_ROOT='${PROFILER_ROOT}'")
+  if [[ "$ROOF" == "1" ]]; then
+    REMOTE_ARGS+=(--roof)
   fi
   if [[ "$PASS_MEGA_BATCH" == "1" ]]; then
-    env_parts+=("MEGA_BATCH='${MEGA_BATCH}'")
+    REMOTE_ARGS+=(--mega-batch "$MEGA_BATCH")
   fi
-  local env_s="${env_parts[*]}"
+  if [[ "$PASS_LOCAL_PREFIX" == "1" ]]; then
+    REMOTE_ARGS+=(--local-prefix /tmp/rpc_local)
+  fi
+  if [[ "$SITE_ROCM_IN_LAUNCH" == "1" ]]; then
+    REMOTE_ARGS+=(--site-rocm /opt/rocm)
+  fi
+}
+
+launch_ssh() {
+  local gpu="${ROCR_VISIBLE_DEVICES:-$ROCR_DEFAULT}"
+  build_remote_args "$REMOTE_ROOT"
+  local remote_command
+  remote_command=$(shell_join "${REMOTE_ARGS[@]}")
   if [[ "$TRANSPORT" == "ssh-key" ]]; then
     echo "=== start remote health run (TAG=${TAG} ROCR=${gpu} ITERS=${ITERS}) ==="
   else
     echo "=== start remote health run (TAG=${TAG} ITERS=${ITERS}) ==="
   fi
   ssh_cmd "chmod +x '${REMOTE_ROOT}/scripts/run_metric_health_test_report.sh' && \
-    nohup env ${env_s} \
-      bash '${REMOTE_ROOT}/scripts/run_metric_health_test_report.sh' \
+    nohup env ROCR_VISIBLE_DEVICES='${gpu}' HIP_VISIBLE_DEVICES='0' \
+      ${remote_command} \
       >'${REMOTE_NOHUP}' 2>&1 & echo PID=\$!"
   echo "Remote log: ${REMOTE_LOG}"
   if [[ "$TRANSPORT" == "ssh-pass" ]]; then
-    echo "Re-run: ARCH=${ARCH} TAG=${TAG} REMOTE_PASS=… $(basename "$0") --wait --fetch --report"
+    echo "Re-run: REMOTE_PASS=… $(basename "$0") --arch ${ARCH} --tag ${TAG} --wait --fetch --report"
   else
-    echo "Re-run: ARCH=${ARCH} TAG=${TAG} $(basename "$0") --wait --fetch --report"
+    echo "Re-run: $(basename "$0") --arch ${ARCH} --tag ${TAG} --wait --fetch --report"
   fi
 }
 
@@ -339,7 +417,9 @@ sync_ssh() {
 }
 
 write_sbatch() {
-  local root_path=$1 dest=$2
+  local root_path=$1 dest=$2 remote_command
+  build_remote_args "$root_path"
+  remote_command=$(shell_join "${REMOTE_ARGS[@]}")
   cat >"$dest" <<SBATCH
 #!/bin/bash
 #SBATCH -J metric-health-${ARCH}
@@ -350,28 +430,10 @@ write_sbatch() {
 #SBATCH -o ${SBATCH_OUT}
 #SBATCH -e ${SBATCH_OUT}
 set -euo pipefail
-export ARCH='${ARCH}'
-export TAG='${TAG}'
-export ROOT='${root_path}'
-export THEROCK='${THEROCK}'
-export ROCM_ROOT='${THEROCK}'
-export LOG='${REMOTE_LOG}'
-export ITERS='${ITERS}'
-export NO_ROOF='${NO_ROOF}'
-export RUN='${RUN}'
-export FORCE_NO_NATIVE_TOOL=1
 export ROCR_VISIBLE_DEVICES=0
 export HIP_VISIBLE_DEVICES=0
-SBATCH
-  if [[ "$SITE_ROCM_IN_LAUNCH" == "1" ]]; then
-    echo "export SITE_ROCM_CORE=/opt/rocm" >>"$dest"
-  fi
-  if [[ -n "${PROFILER_ROOT:-}" ]]; then
-    echo "export PROFILER_ROOT='${PROFILER_ROOT}'" >>"$dest"
-  fi
-  cat >>"$dest" <<'SBATCH'
-chmod +x "${ROOT}/scripts/run_metric_health_test_report.sh"
-bash "${ROOT}/scripts/run_metric_health_test_report.sh"
+chmod +x '${root_path}/scripts/run_metric_health_test_report.sh'
+${remote_command}
 SBATCH
 }
 
@@ -384,7 +446,7 @@ submit_sbatch() {
   ssh_login "chmod +x /tmp/metric_health_${TAG}.sbatch && \
     JOB=\$(sbatch /tmp/metric_health_${TAG}.sbatch | awk '{print \$NF}') && \
     echo JOBID=\$JOB && echo Remote log: ${REMOTE_LOG} && echo Sbatch out: ${SBATCH_OUT}"
-  echo "Re-run: ARCH=${ARCH} TAG=${TAG} $(basename "$0") --wait --fetch --report"
+  echo "Re-run: $(basename "$0") --arch ${ARCH} --tag ${TAG} --wait --fetch --report"
 }
 
 sync_slurm_home() {
