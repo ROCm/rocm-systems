@@ -1032,4 +1032,627 @@ TEST_F(RegisterCollNetDirectMicrotest, CaptureWithoutLocalRegister_RegistersColl
   EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
 }
 
+// ---------------------------------------------------------------------------
+// ncclRegisterCollBuffers: Ring
+// ---------------------------------------------------------------------------
+
+// Channel 0: recv from P2P peer 1, send to NIC peer 2. Channel 1: recv from NIC peer 3, send to P2P peer 1.
+class RegisterCollRingMicrotest : public RegisterCollMicrotestBase {
+ protected:
+  void SetUp() override {
+    RegisterCollMicrotestBase::SetUp();
+    SetChannels(2);
+    comm_->channels[0].ring.prev = 1;
+    comm_->channels[0].ring.next = 2;
+    comm_->channels[1].ring.prev = 3;
+    comm_->channels[1].ring.next = 1;
+    RecvConn(0, 1)->conn.flags = NCCL_P2P_READ;
+    SendConn(0, 2)->conn.flags = NCCL_DIRECT_NIC;
+    RecvConn(1, 3)->conn.flags = NCCL_DIRECT_NIC;
+    SendConn(1, 1)->conn.flags = NCCL_P2P_WRITE;
+    comm_->isAllDirectP2p = true;
+    comm_->useGdr = true;
+    AddRegRecord(kSend, kBytes);
+    AddRegRecord(kRecv, kRanks * kBytes);
+  }
+  // Leaves only P2P links, so the NET path has no peer.
+  void P2pOnly() {
+    SendConn(0, 2)->conn.flags = NCCL_P2P_WRITE;
+    RecvConn(1, 3)->conn.flags = NCCL_P2P_READ;
+  }
+  std::vector<ncclConnector*> SendNetConns() { return {SendConn(0, 2), nullptr}; }
+  std::vector<ncclConnector*> RecvNetConns() { return {nullptr, RecvConn(1, 3)}; }
+};
+
+TEST_F(RegisterCollRingMicrotest, NoRecvRecordOutsideCapture_LeavesBufferUnregistered) {
+  regSlots_.erase(regSlots_.begin() + 1);
+  comm_->regCache.population = 1;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingMicrotest, MultiNodeWithoutSendRecord_LeavesBufferUnregistered) {
+  regSlots_.erase(regSlots_.begin());
+  comm_->regCache.population = 1;
+  comm_->nNodes = 2;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollRingMicrotest, SingleNodeWithoutSendRecord_RegistersRecvBuffer) {
+  P2pOnly();
+  regSlots_.erase(regSlots_.begin());
+  comm_->regCache.population = 1;
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, P2pNeighbours_RegistersRecvBufferForEachOnce) {
+  P2pOnly();
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kRecv, kBytes, NCCL_IPC_COLLECTIVE, {1, 2, 3}, {}}};
+  EXPECT_EQ(ipcLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+  EXPECT_EQ(task_.recvbuffRmtAddrs, ipcAddrs_);
+  EXPECT_EQ(task_.recvbuffOffset, 0x40u);
+}
+
+TEST_F(RegisterCollRingMicrotest, IpcNotRegistered_LeavesBufferUnregistered) {
+  P2pOnly();
+  IpcLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, NotAllDirectP2p_SkipsIpc) {
+  P2pOnly();
+  comm_->isAllDirectP2p = false;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, NoRecordsInCapture_RegistersPerGraph) {
+  P2pOnly();
+  regSlots_.clear();
+  comm_->regCache.population = 0;
+  comm_->nNodes = 2;
+  UseGraphCapture();
+  IpcGraphRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(ipcGraph_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, GraphIpcNotRegistered_FallsBackToLocal) {
+  P2pOnly();
+  UseGraphCapture();
+  IpcGraphRegisters({});
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(ipcLocal_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, GraphIpcMissWithoutLocalRegister_LeavesBufferUnregistered) {
+  P2pOnly();
+  UseGraphCapture(/*localRegister=*/0);
+  IpcGraphRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(ipcGraph_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, NicNeighbours_RegistersSendThenRecvOverEachDirection) {
+  comm_->isAllDirectP2p = false;
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kSend, kBytes, 0, {}, SendNetConns()},
+                                {kRecv, kBytes, 0, {}, SendNetConns()},
+                                {kRecv, kBytes, 0, {}, RecvNetConns()}};
+  EXPECT_EQ(netLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+  ASSERT_NE(task_.sendNetHandles, nullptr);
+  ASSERT_NE(task_.recvNetHandles, nullptr);
+  ASSERT_NE(task_.srecvNetHandles, nullptr);
+  EXPECT_EQ(task_.sendNetHandles[0], Ptr(0xe0));
+  EXPECT_EQ(task_.srecvNetHandles[0], Ptr(0xe1));
+  EXPECT_EQ(task_.recvNetHandles[0], Ptr(0xe2));
+}
+
+TEST_F(RegisterCollRingMicrotest, SendBufferNotRegistered_StopsNetRegistration) {
+  comm_->isAllDirectP2p = false;
+  NetLocalRegisters({0});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(netLocal_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+  EXPECT_EQ(task_.sendNetHandles, nullptr);
+}
+
+TEST_F(RegisterCollRingMicrotest, RecvSideNotRegistered_LeavesNetUnmarked) {
+  comm_->isAllDirectP2p = false;
+  NetLocalRegisters({1, 1, 0});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+  EXPECT_EQ(task_.recvNetHandles, nullptr);
+}
+
+TEST_F(RegisterCollRingMicrotest, OnlyRecvNicNeighbour_RegistersRecvBuffer) {
+  comm_->isAllDirectP2p = false;
+  SendConn(0, 2)->conn.flags = 0;
+  NetLocalRegisters({1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kRecv, kBytes, 0, {}, RecvNetConns()}};
+  EXPECT_EQ(netLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, OnlySendNicNeighbour_RegistersSendSide) {
+  comm_->isAllDirectP2p = false;
+  RecvConn(1, 3)->conn.flags = 0;
+  NetLocalRegisters({1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(netLocal_.size(), 2u);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, IpcAndNet_MarksBoth) {
+  IpcLocalRegisters({kRecv});
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(netLocal_.size(), 3u);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER | NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, IpcRegisteredNetNot_MarksOnlyIpc) {
+  IpcLocalRegisters({kRecv});
+  NetLocalRegisters({0});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(netLocal_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, IpcAndNetSingleNode_KeepsChannels) {
+  IpcLocalRegisters({kRecv});
+  NetLocalRegisters({1, 1, 1});
+  task_.nMaxChannels = 20;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 20);
+}
+
+TEST_F(RegisterCollRingMicrotest, IpcRegisteredWithoutNicNeighbours_MarksOnlyIpc) {
+  P2pOnly();
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+  EXPECT_EQ(task_.sendNetHandles, nullptr);
+}
+
+TEST_F(RegisterCollRingMicrotest, NetPxn_SkipsNetRegistration) {
+  comm_->isAllDirectP2p = false;
+  comm_->useNetPXN = true;
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(netLocal_.empty());
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, NoGdr_SkipsNetRegistration) {
+  comm_->isAllDirectP2p = false;
+  comm_->useGdr = false;
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(netLocal_.empty());
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, UnpackNetDevice_SkipsNetRegistration) {
+  comm_->isAllDirectP2p = false;
+  comm_->netDeviceType = NCCL_NET_DEVICE_UNPACK;
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(netLocal_.empty());
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, ScalingAllReduce_SkipsNetRegistration) {
+  comm_->isAllDirectP2p = false;
+  for (ncclDevRedOp_t op : {ncclDevPreMulSum, ncclDevSumPostDiv}) {
+    task_.opDev.op = op;
+    EXPECT_EQ(Run(), ncclSuccess);
+    EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+  }
+}
+
+TEST_F(RegisterCollRingMicrotest, ScalingBroadcast_RegistersNet) {
+  comm_->isAllDirectP2p = false;
+  task_.func = ncclFuncBroadcast;
+  task_.opDev.op = ncclDevPreMulSum;
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, MloPartBufferNotRdmaCapable_SkipsNetRegistration) {
+  comm_->isAllDirectP2p = false;
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 0}});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, MloPartWithoutSendBuffer_SkipsNetRegistration) {
+  comm_->isAllDirectP2p = false;
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 1}});
+  task_.sendbuff = nullptr;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, GraphCapture_RegistersNetPerGraph) {
+  comm_->isAllDirectP2p = false;
+  UseGraphCapture();
+  NetGraphRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kSend, kBytes, 0, {}, SendNetConns()},
+                                {kRecv, kBytes, 0, {}, SendNetConns()},
+                                {kRecv, kBytes, 0, {}, RecvNetConns()}};
+  EXPECT_EQ(netGraph_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+  EXPECT_EQ(task_.sendNetHandles[0], Ptr(0xf0));
+}
+
+TEST_F(RegisterCollRingMicrotest, GraphSendNotRegistered_FallsBackToLocal) {
+  comm_->isAllDirectP2p = false;
+  UseGraphCapture();
+  NetGraphRegisters({0});
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(netGraph_.size(), 1u);
+  EXPECT_EQ(netLocal_.size(), 3u);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, GraphNetMissWithoutLocalRegister_LeavesBufferUnregistered) {
+  comm_->isAllDirectP2p = false;
+  UseGraphCapture(/*localRegister=*/0);
+  NetGraphRegisters({0});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollRingMicrotest, OneRpnGatherRegistered_CapsChannelsAtNetCount) {
+  comm_->isAllDirectP2p = false;
+  comm_->isOneRPN = true;
+  comm_->minNetCount = 3;
+  NetLocalRegisters({1, 1, 1});
+  for (ncclFunc_t func : {ncclFuncAllGather, ncclFuncBroadcast}) {
+    task_.func = func;
+    task_.nMaxChannels = 32;
+    EXPECT_EQ(Run(), ncclSuccess);
+    EXPECT_EQ(task_.nMaxChannels, 3) << func;
+    free(task_.sendNetHandles);
+    free(task_.recvNetHandles);
+    free(task_.srecvNetHandles);
+    task_.sendNetHandles = task_.recvNetHandles = task_.srecvNetHandles = nullptr;
+    netLocal_.clear();
+  }
+}
+
+TEST_F(RegisterCollRingMicrotest, OneRpnGatherRegistered_KeepsChannelsWithinCtaLimits) {
+  comm_->isAllDirectP2p = false;
+  comm_->isOneRPN = true;
+  comm_->minNetCount = 3;
+  comm_->config.minCTAs = 5;
+  task_.func = ncclFuncBroadcast;
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 5);
+}
+
+TEST_F(RegisterCollRingMicrotest, OneRpnAllReduceRegistered_KeepsChannels) {
+  comm_->isAllDirectP2p = false;
+  comm_->isOneRPN = true;
+  comm_->minNetCount = 3;
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 32);
+}
+
+TEST_F(RegisterCollRingMicrotest, MultiRpnGatherRegistered_KeepsChannels) {
+  comm_->isAllDirectP2p = false;
+  comm_->minNetCount = 3;
+  task_.func = ncclFuncBroadcast;
+  NetLocalRegisters({1, 1, 1});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 32);
+}
+
+// ---------------------------------------------------------------------------
+// ncclRegisterCollBuffers: Tree and CollNet chain
+// ---------------------------------------------------------------------------
+
+// Channel 0's tree and chain: P2P parent 1, P2P child 2, network child 3, and an nRanks "no peer" slot.
+class RegisterCollTreeMicrotest : public RegisterCollMicrotestBase {
+ protected:
+  void SetUp() override {
+    RegisterCollMicrotestBase::SetUp();
+    SetChannels(1);
+    task_.algorithm = NCCL_ALGO_TREE;
+    comm_->isAllDirectP2p = true;
+    for (ncclTree* tree : {&comm_->channels[0].tree, &comm_->channels[0].collnetChain}) *tree = {0, 1, {2, kRanks, 3}};
+    ConnectP2p(RecvConn(0, 1));
+    ConnectP2p(RecvConn(0, 2));
+    RecvConn(0, 3)->connected = 1;
+    AddRegRecord(kRecv, kBytes);
+  }
+};
+
+TEST_F(RegisterCollTreeMicrotest, P2pTreePeers_RegistersRecvBufferForEach) {
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kRecv, kBytes, NCCL_IPC_COLLECTIVE, {2, 1}, {}}};
+  EXPECT_EQ(ipcLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+  EXPECT_EQ(task_.recvbuffRmtAddrs, ipcAddrs_);
+}
+
+TEST_F(RegisterCollTreeMicrotest, PeersAcrossChannels_RegisteredOnce) {
+  SetChannels(2);
+  for (int c = 0; c < 2; ++c) {
+    comm_->channels[c].tree = {0, 1, {-1, -1, -1}};
+    ConnectP2p(RecvConn(c, 1));
+  }
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ASSERT_EQ(ipcLocal_.size(), 1u);
+  EXPECT_EQ(ipcLocal_[0].peers, (std::vector<int>{1}));
+}
+
+TEST_F(RegisterCollTreeMicrotest, UnconnectedPeer_AsksTransportWithAlgorithmGraph) {
+  RecvConn(0, 2)->connected = 0;
+  p2p_.connectable = {};
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(p2p_.asked, (std::vector<int>{2}));
+  EXPECT_EQ(p2p_.lastGraph, &comm_->graphs[NCCL_ALGO_TREE]);
+  ASSERT_EQ(ipcLocal_.size(), 1u);
+  EXPECT_EQ(ipcLocal_[0].peers, (std::vector<int>{1}));
+}
+
+TEST_F(RegisterCollTreeMicrotest, CanConnectFails_ReturnsError) {
+  RecvConn(0, 2)->connected = 0;
+  p2p_.result = ncclInternalError;
+  EXPECT_EQ(Run(), ncclInternalError);
+}
+
+TEST_F(RegisterCollTreeMicrotest, NoRecvRecordOutsideCapture_LeavesBufferUnregistered) {
+  regSlots_.clear();
+  comm_->regCache.population = 0;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollTreeMicrotest, NotAllDirectP2p_SkipsIpc) {
+  comm_->isAllDirectP2p = false;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollTreeMicrotest, NoP2pPeer_SkipsIpc) {
+  comm_->channels[0].tree = {0, 3, {-1, -1, -1}};
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollTreeMicrotest, IpcNotRegistered_LeavesBufferUnregistered) {
+  IpcLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollTreeMicrotest, NoRecordsInCapture_RegistersPerGraph) {
+  regSlots_.clear();
+  comm_->regCache.population = 0;
+  UseGraphCapture();
+  IpcGraphRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(ipcGraph_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollTreeMicrotest, GraphIpcNotRegistered_FallsBackToLocal) {
+  UseGraphCapture();
+  IpcGraphRegisters({});
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(ipcLocal_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollTreeMicrotest, GraphIpcMissWithoutLocalRegister_LeavesBufferUnregistered) {
+  UseGraphCapture(/*localRegister=*/0);
+  IpcGraphRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(ipcGraph_.size(), 1u);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollTreeMicrotest, TreeOneRpn_SkipsCollnet) {
+  comm_->isOneRPN = true;
+  IpcLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+class RegisterCollChainMicrotest : public RegisterCollTreeMicrotest {
+ protected:
+  void SetUp() override {
+    RegisterCollTreeMicrotest::SetUp();
+    task_.algorithm = NCCL_ALGO_COLLNET_CHAIN;
+    comm_->isAllDirectP2p = false;
+    comm_->isOneRPN = true;
+  }
+};
+
+TEST_F(RegisterCollChainMicrotest, OneRpnBothRegistered_MarksNetOnOneChannel) {
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kSend, kBytes, collNetSend, {}, {}}, {kRecv, kBytes, collNetRecv, {}, {}}};
+  EXPECT_EQ(collnetLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+  EXPECT_EQ(task_.sendMhandle, Ptr(0xc0 + collNetSend));
+  EXPECT_EQ(task_.recvMhandle, Ptr(0xc0 + collNetRecv));
+  EXPECT_EQ(task_.nMaxChannels, 1);
+}
+
+TEST_F(RegisterCollChainMicrotest, IpcAndCollnet_MarksBoth) {
+  comm_->isAllDirectP2p = true;
+  IpcLocalRegisters({kRecv});
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ASSERT_EQ(ipcLocal_.size(), 1u);
+  EXPECT_EQ(ipcLocal_[0].peers, (std::vector<int>{2, 1}));
+  EXPECT_TRUE(p2p_.asked.empty());
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER | NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollChainMicrotest, UnconnectedPeer_AsksTransportWithChainGraph) {
+  comm_->isAllDirectP2p = true;
+  RecvConn(0, 2)->connected = 0;
+  IpcLocalRegisters({});
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(p2p_.lastGraph, &comm_->graphs[NCCL_ALGO_COLLNET_CHAIN]);
+}
+
+TEST_F(RegisterCollChainMicrotest, SendSideNotRegistered_SkipsRecvSide) {
+  CollnetLocalRegisters({collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetLocal_.size(), 1u);
+  ExpectUnregistered();
+  EXPECT_EQ(task_.nMaxChannels, 32);
+}
+
+TEST_F(RegisterCollChainMicrotest, RecvSideNotRegistered_LeavesNetUnmarked) {
+  CollnetLocalRegisters({collNetSend});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetLocal_.size(), 2u);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollChainMicrotest, MultiRpn_SkipsCollnet) {
+  comm_->isOneRPN = false;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollChainMicrotest, ScalingReduction_SkipsCollnet) {
+  for (ncclDevRedOp_t op : {ncclDevPreMulSum, ncclDevSumPostDiv}) {
+    task_.opDev.op = op;
+    EXPECT_EQ(Run(), ncclSuccess);
+    ExpectUnregistered();
+  }
+}
+
+TEST_F(RegisterCollChainMicrotest, MloPartWithoutSendBuffer_SkipsCollnet) {
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 1}});
+  task_.sendbuff = nullptr;
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(collnetLocal_.empty());
+}
+
+TEST_F(RegisterCollChainMicrotest, MloPartRdmaDisabled_SkipsCollnet) {
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 0}});
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(collnetLocal_.empty());
+}
+
+TEST_F(RegisterCollChainMicrotest, MloPartWithoutRecvBufferInCapture_SkipsCollnet) {
+  UseGraphCapture();
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"GRAPH_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 1}});
+  task_.recvbuff = nullptr;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollChainMicrotest, GraphCapture_RegistersBothPerGraph) {
+  UseGraphCapture();
+  CollnetGraphRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetGraph_.size(), 2u);
+  EXPECT_EQ(task_.sendMhandle, Ptr(0xd0 + collNetSend));
+  EXPECT_EQ(task_.recvMhandle, Ptr(0xd0 + collNetRecv));
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollChainMicrotest, GraphSendNotRegistered_RegistersBothLocally) {
+  UseGraphCapture();
+  CollnetGraphRegisters({});
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetGraph_.size(), 1u);
+  EXPECT_EQ(collnetLocal_.size(), 2u);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollChainMicrotest, GraphRecvNotRegistered_RegistersOnlyRecvLocally) {
+  UseGraphCapture();
+  CollnetGraphRegisters({collNetSend});
+  CollnetLocalRegisters({collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kRecv, kBytes, collNetRecv, {}, {}}};
+  EXPECT_EQ(collnetLocal_, expected);
+  EXPECT_EQ(task_.sendMhandle, Ptr(0xd0 + collNetSend));
+  EXPECT_EQ(task_.recvMhandle, Ptr(0xc0 + collNetRecv));
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollChainMicrotest, GraphRecvMissWithoutLocalRegister_LeavesBufferUnregistered) {
+  UseGraphCapture(/*localRegister=*/0);
+  CollnetGraphRegisters({collNetSend});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetGraph_.size(), 2u);
+  ExpectUnregistered();
+}
+
+// ---------------------------------------------------------------------------
+// ncclRegisterCollBuffers: channel cap for single-node IPC buffers
+// ---------------------------------------------------------------------------
+
+class RegisterCollIpcChannelsMicrotest : public RegisterCollTreeMicrotest {
+ protected:
+  int ChannelsFor(int requested) {
+    task_.nMaxChannels = requested;
+    EXPECT_EQ(Run(), ncclSuccess);
+    return task_.nMaxChannels;
+  }
+};
+
+TEST_F(RegisterCollIpcChannelsMicrotest, SingleNodeIpc_CapsSeventeenToTwentyFourAtSixteen) {
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(ChannelsFor(16), 16);
+  EXPECT_EQ(ChannelsFor(17), 16);
+  EXPECT_EQ(ChannelsFor(24), 16);
+  EXPECT_EQ(ChannelsFor(25), 25);
+}
+
+TEST_F(RegisterCollIpcChannelsMicrotest, MultiNodeIpc_KeepsChannels) {
+  comm_->nNodes = 2;
+  IpcLocalRegisters({kRecv});
+  EXPECT_EQ(ChannelsFor(20), 20);
+}
+
+TEST_F(RegisterCollIpcChannelsMicrotest, Unregistered_KeepsChannels) {
+  IpcLocalRegisters({});
+  EXPECT_EQ(ChannelsFor(20), 20);
+}
+
 }  // namespace
