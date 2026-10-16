@@ -328,15 +328,6 @@ Examples:
         ),
     )
     profile_group.add_argument(
-        "--kokkos-trace",
-        dest="kokkos_trace",
-        required=False,
-        default=False,
-        action="store_true",
-        help=argparse.SUPPRESS,
-        # help="\t\t\tKokkos trace, traces Kokkos API calls.",
-    )
-    profile_group.add_argument(
         "--torch-trace",
         dest="torch_trace",
         required=False,
@@ -1012,9 +1003,6 @@ Examples:
             "(e.g. mem_chart, Roofline charts as tables). "
             "Additional views may be added in future releases."
         ),
-    )
-    analyze_advanced_group.add_argument(
-        "--report-diff", default=0, nargs="?", type=int, help=argparse.SUPPRESS
     )
     analyze_advanced_group.add_argument(
         "--specs-correction",

@@ -694,26 +694,6 @@ def process_table_data(
                         )
 
                         result_df = pd.concat([result_df, formatted_diff], axis=1)
-
-                        # DEBUG: When in a CI setting and flag is set,
-                        #       then verify metrics meet threshold
-                        #       requirement
-                        if (
-                            header in ["Value", "Count", "Avg"]
-                            and percent_diff.abs().gt(args.report_diff).any()
-                        ):
-                            result_df["Abs Diff"] = absolute_diff
-
-                            if args.report_diff:
-                                violation_idx = percent_diff.index[
-                                    percent_diff.abs() > args.report_diff
-                                ]
-                                console_warning(
-                                    f"Dataframe diff exceeds {args.report_diff}% "
-                                    "threshold requirement\n"
-                                    f"See metric {violation_idx.to_numpy()}"
-                                )
-                                console_warning(result_df)
                     else:
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
