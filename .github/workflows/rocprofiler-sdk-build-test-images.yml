@@ -76,6 +76,6 @@ jobs:
             GPU_TYPE=${{ matrix.gpu }}
             GPU_TARBALL=${{ steps.therock.outputs.tarball }}
           tags: |
-            docker.io/rocm/rocprofiler-private:${{ matrix.os }}-${{ matrix.gpu }}-test-pr-13323
+            docker.io/rocm/rocprofiler-private:${{ matrix.os }}-${{ matrix.gpu }}-test-pr-13323-v2
           cache-from: type=gha,scope=rocprofiler-ci-test-${{ matrix.os }}-${{ matrix.gpu }}
           cache-to: type=gha,mode=max,scope=rocprofiler-ci-test-${{ matrix.os }}-${{ matrix.gpu }}
