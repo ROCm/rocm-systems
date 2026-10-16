@@ -5,22 +5,12 @@
 
 from __future__ import annotations
 
-import datetime as _dt
-import json
-import os
-import platform
 import re
-import shlex
 import shutil
-import socket
 import subprocess
-import sys
 import tarfile
-import time
 import urllib.request
 from pathlib import Path
-from typing import NoReturn
-
 
 from .command import die, log, run
 from .constants import NIGHTLY_TARBALL_INDEX, tarball_urls
@@ -34,7 +24,7 @@ def _require_https(url: str) -> None:
 
 def _http_get_text(url: str, timeout: int = 60) -> str:
     _require_https(url)
-    with urllib.request.urlopen(url, timeout=timeout) as resp:  # noqa: S310
+    with urllib.request.urlopen(url, timeout=timeout) as resp:
         return resp.read().decode("utf-8", errors="replace")
 
 
@@ -452,7 +442,7 @@ def download_file(
     # Run the downloader with inherited stdio so its in-place progress bar renders
     # live on the console, instead of teeing every progress line into the logs.
     log(f"$ {' '.join(cmd)}")
-    rc = subprocess.run(cmd).returncode  # noqa: S603
+    rc = subprocess.run(cmd).returncode
     if rc != 0:
         die(f"download failed (exit {rc}): {url}", rc)
     tmp.rename(dest)
@@ -472,7 +462,7 @@ def extract_tarball(tarball: Path, rocm_dir: Path) -> None:
         with tarfile.open(tarball) as tf:
             # PEP 706 'data' filter (Python 3.8.17+/3.9.17+/3.10.12+/3.12+) blocks
             # path traversal, absolute paths and unsafe links.
-            tf.extractall(rocm_dir, filter="data")  # noqa: S202
+            tf.extractall(rocm_dir, filter="data")
 
 
 def _rocm_marker(workdir: Path) -> Path:

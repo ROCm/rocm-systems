@@ -5,22 +5,13 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 import json
 import os
-import platform
 import re
-import shlex
 import shutil
-import socket
 import subprocess
 import sys
-import tarfile
-import time
-import urllib.request
 from pathlib import Path
-from typing import NoReturn
-
 
 from .command import die, emit, log, step
 from .constants import MULTIARCH_VARIANT, tarball_selection, tarball_urls
@@ -110,7 +101,7 @@ def _kfd_gpu_archs() -> list[str]:
             text = prop.read_text(errors="replace")
         except OSError:
             continue
-        match = re.search(r"^gfx_target_version\s+(\d+)", text, re.M)
+        match = re.search(r"^gfx_target_version\s+(\d+)", text, re.MULTILINE)
         if not match:
             continue
         arch = _gfx_from_kfd_version(int(match.group(1)))

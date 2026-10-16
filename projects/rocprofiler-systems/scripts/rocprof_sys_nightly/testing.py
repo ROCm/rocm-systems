@@ -5,22 +5,10 @@
 
 from __future__ import annotations
 
-import datetime as _dt
 import json
-import os
-import platform
-import re
 import shlex
-import shutil
-import socket
 import subprocess
-import sys
-import tarfile
-import time
-import urllib.request
 from pathlib import Path
-from typing import NoReturn
-
 
 from .command import die, log, run, step
 from .constants import TEST_CATEGORIES_REL, TIER_ORDER
@@ -34,7 +22,7 @@ def _yaml_to_obj(yaml_path: Path, venv_py: Path):
     shell out to the venv interpreter and exchange the result as JSON.
     """
     try:
-        import yaml  # noqa: PLC0415
+        import yaml
 
         return yaml.safe_load(yaml_path.read_text())
     except ImportError:

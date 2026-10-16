@@ -21,25 +21,25 @@ _SCRIPTS = Path(__file__).resolve().parent.parent
 if str(_SCRIPTS) not in sys.path:
     sys.path.insert(0, str(_SCRIPTS))
 
-from rocprof_sys_nightly.cli import main  # noqa: E402
+from rocprof_sys_nightly.cli import main
 from rocprof_sys_nightly.constants import (
     MULTIARCH_VARIANT,
     tarball_selection,
-)  # noqa: E402
-from rocprof_sys_nightly.environment import make_rocm_env  # noqa: E402
-from rocprof_sys_nightly.gpu import (  # noqa: E402
+)
+from rocprof_sys_nightly.environment import make_rocm_env
+from rocprof_sys_nightly.gpu import (
     _gfx_from_kfd_version,
     _kfd_gpu_archs,
     report_under_test,
     resolve_variant,
 )
-from rocprof_sys_nightly.tarball import (  # noqa: E402
+from rocprof_sys_nightly.tarball import (
     _rocm_version_matches,
     _version_sort_key,
     index_dist_variants,
+    paired_tests_tarball,
     parse_dist_tarball,
     redirect_variant,
-    paired_tests_tarball,
 )
 
 
