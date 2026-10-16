@@ -5,6 +5,7 @@
 
 #include "common/float_formats.h"
 #include "common/internal.h"
+#include "dot/dot.h"
 #include "rj_arith/rj_arith.h"
 
 #include <cmath>
@@ -17,7 +18,7 @@ int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruct
   if (instruction_flags) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  if (int error = rocjitsu::arith::validate(flags, 0)) {
+  if (int error = rocjitsu::arith::validate(flags, 0, true)) {
     return error;
   }
   uint32_t result[8][32];
@@ -28,12 +29,28 @@ int rj_arith_v_wmma_f32_16x16x16_f16_w32_gfx12(uint64_t flags, uint64_t instruct
   for (int row = 0; row < 16; ++row) {
     for (int col = 0; col < 16; ++col) {
       int lane = col + 16 * (row / 8);
-      float acc = rocjitsu::arith::as_float(c[row % 8][lane]);
-      for (int k = 0; k < 16; ++k) {
-        acc = std::fma(rocjitsu::arith::f16_to_float(read(a, row, k)),
-                       rocjitsu::arith::f16_to_float(read(b, col, k)), acc);
+      uint32_t acc_bits = c[row % 8][lane];
+      if (rocjitsu::arith::is_exact(flags)) {
+        // gfx12 Wave32 consumes physical K groups in order 0,8,4,12.
+        for (int k = 0; k < 16; k += 4) {
+          std::array<uint16_t, 4> left, right;
+          for (int j = 0; j < 4; ++j) {
+            int logical = k + j;
+            int physical = (logical & 3) | ((logical & 4) << 1) | ((logical & 8) >> 1);
+            left[j] = read(a, row, physical);
+            right[j] = read(b, col, physical);
+          }
+          acc_bits = rocjitsu::arith::gfx12_dot_bits<false, 4, false>(left, right, acc_bits);
+        }
+      } else {
+        float acc = rocjitsu::arith::as_float(c[row % 8][lane]);
+        for (int k = 0; k < 16; ++k) {
+          acc = std::fma(rocjitsu::arith::f16_to_float(read(a, row, k)),
+                         rocjitsu::arith::f16_to_float(read(b, col, k)), acc);
+        }
+        acc_bits = rocjitsu::arith::as_bits(acc);
       }
-      result[row % 8][lane] = rocjitsu::arith::as_bits(acc);
+      result[row % 8][lane] = acc_bits;
     }
   }
   for (int reg = 0; reg < 8; ++reg) {

@@ -8,6 +8,7 @@
 #include "common/half_reference.h"
 #include "common/registers.h"
 #include "common/semantics.h"
+#include "fp/half_fma_reference.h"
 #include "rj_arith/rj_arith.h"
 
 #include <cmath>
@@ -59,14 +60,20 @@ TEST(FpFmaF16W32Gfx12, Arithmetic) {
           double value = std::fma(half_value(uint16_t(input.v[0][lane])),
                                   half_value(uint16_t(input.v[1][lane])),
                                   half_value(uint16_t(input.v[2][lane])));
-          float expected = float(half_value(half_bits(value)));
+          // Existing independent integer oracle, validated against rocjitsu's model.
+          uint16_t expected_bits =
+              semantics == RJ_ARITH_SEMANTICS_LOOSE
+                  ? half_bits(value)
+                  : half_fma_reference::evaluate(input.v[0][lane], input.v[1][lane],
+                                                 input.v[2][lane], 0, false, 0, false);
+          float expected = float(half_value(expected_bits));
           expect_f32(bit_cast<uint32_t>(float(half_value(uint16_t(actual)))), expected, semantics,
                      /*atol=*/1e-5, /*rtol=*/5e-4);
         }
       }
     }
   }
-  EXPECT_EQ(rj_arith_v_fma_f16_w32_gfx12(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS, 0, 0,
-                                         nullptr, nullptr, nullptr, nullptr, nullptr),
-            RJ_ARITH_ERROR_UNSUPPORTED_SEMANTICS);
+  EXPECT_EQ(rj_arith_v_fma_f16_w32_gfx12(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 0, 0, nullptr,
+                                         nullptr, nullptr, nullptr, nullptr),
+            RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
 }

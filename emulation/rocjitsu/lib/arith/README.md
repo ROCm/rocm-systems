@@ -9,7 +9,7 @@ multiply-accumulate and elementwise fused multiply-add using portable code.
 numerical semantics, implementation principles, and testing policy.
 
 The semantics field selects numerical requirements; this first implementation
-supports loose arithmetic. rj-arith is not a GPU runtime or instruction decoder.
+supports loose and empirical bit-exact arithmetic. rj-arith is not a GPU runtime or instruction decoder.
 
 See [coverage per architecture](COVERAGE.md) for instruction-family support.
 
@@ -54,7 +54,7 @@ or FP status output.
 `flags` combines CPU capabilities from `rj_arith_init_cpu_flags()` with the
 semantics selection. Cache the CPU flags when making repeated calls.
 `instruction_flags = 0` selects unmodified operands. This initial implementation
-supports `RJ_ARITH_SEMANTICS_LOOSE` and rejects requests requiring exact arithmetic.
+supports `RJ_ARITH_SEMANTICS_LOOSE` and `RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS`.
 The host FP environment must be in its default state; the library never explicitly
 changes it. The function returns `RJ_ARITH_SUCCESS` (zero) on success and leaves
 outputs unchanged on error.
