@@ -322,24 +322,25 @@ TEST(RmaSegmentMathTest, WrCreditsAvailableRespectsCapacity)
     EXPECT_FALSE(ncclRmaWrCreditsAvailable(-1, 1, NCCL_RMA_SEND_QP_WRS));
 }
 
-// Eight full 65-WR chains fit a 577-deep SQ; the ninth must wait for completions.
-TEST(RmaSegmentMathTest, WrCreditsBlockNinthMaxChain)
+// Every full signal chain that fits the sender QP is posted; the next one waits.
+TEST(RmaSegmentMathTest, WrCreditsBlockChainPastQpDepth)
 {
     ncclRmaWrCredits c = {};
     uint64_t posted = 0;
-    for (int i = 0; i < 8; ++i) {
-        ASSERT_TRUE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), NCCL_RMA_MAX_SIGNAL_WRS,
-                                              NCCL_RMA_SEND_QP_WRS))
+    const int chain = NCCL_RMA_MAX_SIGNAL_WRS;
+    const int depth = NCCL_RMA_SEND_QP_WRS;
+    const int nFit = depth / chain;
+    ASSERT_GT(nFit, 0);
+    for (int i = 0; i < nFit; ++i) {
+        ASSERT_TRUE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), chain, depth))
             << "chain " << i;
-        ncclRmaWrCreditsRecord(&c, ++posted, NCCL_RMA_MAX_SIGNAL_WRS);
+        ncclRmaWrCreditsRecord(&c, ++posted, chain);
     }
-    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 8 * NCCL_RMA_MAX_SIGNAL_WRS);
-    EXPECT_FALSE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), NCCL_RMA_MAX_SIGNAL_WRS,
-                                           NCCL_RMA_SEND_QP_WRS));
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), nFit * chain);
+    EXPECT_FALSE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), chain, depth));
     ncclRmaWrCreditsRelease(&c, 1);
-    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), 7 * NCCL_RMA_MAX_SIGNAL_WRS);
-    EXPECT_TRUE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), NCCL_RMA_MAX_SIGNAL_WRS,
-                                          NCCL_RMA_SEND_QP_WRS));
+    EXPECT_EQ(ncclRmaWrCreditsInUse(&c, posted, 2), (nFit - 1) * chain);
+    EXPECT_TRUE(ncclRmaWrCreditsAvailable(ncclRmaWrCreditsInUse(&c, posted, 2), chain, depth));
 }
 
 // Ids without an entry are single-MR ops; they cost untrackedCost until released.
