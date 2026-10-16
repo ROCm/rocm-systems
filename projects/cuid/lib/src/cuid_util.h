@@ -4,6 +4,10 @@
 #ifndef CUID_UTIL_H
 #define CUID_UTIL_H
 
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+
 #include <iostream>
 #include <memory>
 #include <sstream>
@@ -98,6 +102,19 @@ inline const std::string& cuid_file() {
 inline const std::string& priv_cuid_file() {
   static const std::string path = "/tmp/priv_cuid";
   return path;
+}
+
+// Create a fresh regular file at `path` with `mode`, setting permissions on a
+// descriptor we own instead of a TOCTOU-prone chmod() after rename (CWE-367).
+// O_EXCL/O_NOFOLLOW reject an existing file or symlink at `path`. Returns an
+// open write descriptor (caller closes it), or -1 on error.
+inline int CuidCreateExclusiveFile(const char* path, mode_t mode) {
+  int fd = ::open(path, O_WRONLY | O_CREAT | O_EXCL | O_NOFOLLOW | O_CLOEXEC, mode);
+  if (fd < 0) {
+    return -1;
+  }
+  ::fchmod(fd, mode);  // exact mode regardless of umask
+  return fd;
 }
 }  // namespace CuidUtilities
 
