@@ -89,6 +89,14 @@ void operator delete(void* p) noexcept {
 void operator delete(void* p, size_t) noexcept {
   operator delete(p);
 }
+// mem_manager.cc allocates its jobs with new (std::nothrow), so the nothrow and array forms are replaced too.
+void* operator new[](size_t n) { return ::operator new(n); }
+void* operator new(size_t n, const std::nothrow_t&) noexcept { return std::malloc(n ? n : 1); }
+void* operator new[](size_t n, const std::nothrow_t&) noexcept { return std::malloc(n ? n : 1); }
+void operator delete[](void* p) noexcept { operator delete(p); }
+void operator delete[](void* p, size_t) noexcept { operator delete(p); }
+void operator delete(void* p, const std::nothrow_t&) noexcept { operator delete(p); }
+void operator delete[](void* p, const std::nothrow_t&) noexcept { operator delete(p); }
 
 ncclResult_t bootstrapBarrier(void*, int, int, int tag) { return g_barrier(tag, 0); }
 ncclResult_t bootstrapAllGather(void*, void* data, int size) { return g_allGather(data, size); }
