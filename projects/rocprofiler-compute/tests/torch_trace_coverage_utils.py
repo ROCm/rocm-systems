@@ -4330,9 +4330,19 @@ def run_ground_truth_torch_profiler_subprocess(
             runner_script_path,
         )
         due = op_workload_failure_due_to(timed_out=True, returncode=None)
-        out_tail = stderr_tail_collapsed(exc.stdout or "", max_lines=8)
-        err_tail = stderr_tail_collapsed(exc.stderr or "")
-        fault_hint = extract_device_fault_banner(exc.stderr or "")
+        stdout_text = (
+            exc.stdout.decode(errors="replace")
+            if isinstance(exc.stdout, bytes)
+            else (exc.stdout or "")
+        )
+        stderr_text = (
+            exc.stderr.decode(errors="replace")
+            if isinstance(exc.stderr, bytes)
+            else (exc.stderr or "")
+        )
+        out_tail = stderr_tail_collapsed(stdout_text, max_lines=8)
+        err_tail = stderr_tail_collapsed(stderr_text)
+        fault_hint = extract_device_fault_banner(stderr_text)
         hint_block = f"--- device fault ---\n{fault_hint}\n\n" if fault_hint else ""
         pytest.fail(
             f"Op workload failed: {due}.{repro}{copy_note}\n\n"
