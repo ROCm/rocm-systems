@@ -10,6 +10,7 @@ are also available. FP64 LDEXP supports exact results; selection and other basic
 currently support loose results only. Division helpers cover SCALE, FMAS and FIXUP;
 Dot products cover integer, FP16/BF16 and FP8/BF8 formats.
 Math includes reciprocal/root, rounding, log/exp and trigonometric operations.
+Comparisons produce scalar predicate masks, with gfx12 FP-status reporting.
 Family headers describe exact-result and FP-status support.
 FP status is available for gfx12 FP16 FMA under default guest rounding and denormals,
 and for gfx12 FP32 MUL under nearest-even rounding, preserved denormals, and no OMOD/CLAMP.
