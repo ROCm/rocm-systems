@@ -1869,18 +1869,22 @@ def _warn_kernels_with_incomplete_coverage(incomplete_kernel_names: set[str]) ->
     )
 
 
-def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
-    """
-    Merge counters across unique dispatches from the
-    input dataframe and return processed dataframe.
+def process_rocpd_csv(
+    df: pd.DataFrame,
+) -> tuple[pd.DataFrame, dict[tuple, int]]:
+    """Merge counters across unique dispatches into one row each.
+
+    The dict maps each groupby key to the new 1..N Dispatch_ID, in the
+    same order as those ids are assigned.
     """
     if df.empty:
-        return df
+        return df, {}
 
     data: list[dict[str, Any]] = []
+    slot_to_id: dict[tuple, int] = {}
 
     # Group by unique kernel and merge into a single row
-    for _, group_df in df.groupby([
+    for group_key, group_df in df.groupby([
         "Dispatch_ID",
         "Kernel_Name",
         "Grid_Size",
@@ -1904,10 +1908,11 @@ def process_rocpd_csv(df: pd.DataFrame) -> pd.DataFrame:
         # Each counter will become its own column
         row.update(dict(zip(group_df["Counter_Name"], group_df["Counter_Value"])))
         data.append(row)
+        slot_to_id[group_key] = len(data)
     df = pd.DataFrame(data)
     # Reset dispatch IDs
     df["Dispatch_ID"] = range(1, len(df) + 1)
-    return df
+    return df, slot_to_id
 
 
 def find_native_artifacts(workload_dir: Path) -> List[NativeArtifacts]:
