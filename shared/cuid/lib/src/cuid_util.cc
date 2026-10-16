@@ -66,6 +66,102 @@ std::string CuidUtilities::errno_string(int err) {
 #endif
 }
 
+amdcuid_status_t CuidUtilities::read_driver_cuid_from_path(const std::string& path,
+                                                           amdcuid_id_t* id) {
+  if (!id) {
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+
+  int fd = open(path.c_str(), O_RDONLY | O_CLOEXEC);
+  if (fd < 0) {
+    const int err = errno;
+    // ENOENT/ENOTDIR: the driver does not publish this attribute, the ordinary
+    // case. Anything else is an attribute that exists but would not open, which
+    // the caller must distinguish so it does not produce a competing value.
+    if (err == ENOENT || err == ENOTDIR) {
+      LOG(DEBUG, "no driver CUID attribute at " << path);
+      return AMDCUID_STATUS_FILE_NOT_FOUND;
+    }
+    if (err == EACCES || err == EPERM) {
+      LOG(DEBUG, "driver CUID attribute " << path
+                                          << " not readable: " << CuidUtilities::errno_string(err));
+      return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+    LOG(WARN, "failed to open " << path << ": " << CuidUtilities::errno_string(err));
+    return AMDCUID_STATUS_FILE_ERROR;
+  }
+
+  // A UUID string plus its newline is 37 octets; the buffer is larger so a
+  // longer file reads back long and is rejected, not truncated to a well-formed
+  // prefix.
+  char buf[64];
+  ssize_t n = 0;
+  do {
+    n = read(fd, buf, sizeof(buf));
+  } while (n < 0 && errno == EINTR);
+  const int read_err = errno;
+  close(fd);
+
+  if (n < 0) {
+    // amdgpu checks CAP_SYS_ADMIN in show(), not at open(), so root without the
+    // capability (a default container) opens cuid_primary and is refused here.
+    if (read_err == EPERM || read_err == EACCES) {
+      LOG(DEBUG, "driver CUID attribute "
+                     << path << " not readable: " << CuidUtilities::errno_string(read_err));
+      return AMDCUID_STATUS_PERMISSION_DENIED;
+    }
+    LOG(WARN, "failed to read " << path << ": " << CuidUtilities::errno_string(read_err));
+    return AMDCUID_STATUS_FILE_ERROR;
+  }
+
+  std::string value(buf, static_cast<size_t>(n));
+  // The kernel emits the UUID with a trailing newline, and
+  // uuid_string_to_uint8() treats every non-hyphen character as a hex digit.
+  while (!value.empty() && isspace(static_cast<unsigned char>(value.back()))) {
+    value.pop_back();
+  }
+
+  // Shape-check first so the common "garbage in the file" case does not go
+  // through uuid_string_to_uint8(), which reports parse failures on stderr.
+  // Length alone is not enough: that function strips hyphens wherever they
+  // fall, so the separators must sit at 8, 13, 18 and 23 and every other
+  // position must be a hex digit.
+  constexpr size_t kUuidStringLength = 36;
+  bool well_formed = value.size() == kUuidStringLength;
+  for (size_t i = 0; well_formed && i < value.size(); ++i) {
+    const bool is_separator_position = (i == 8 || i == 13 || i == 18 || i == 23);
+    if (is_separator_position) {
+      well_formed = value[i] == '-';
+    } else {
+      well_formed = isxdigit(static_cast<unsigned char>(value[i])) != 0;
+    }
+  }
+  if (!well_formed) {
+    LOG(WARN, "driver CUID attribute " << path << " is not a UUID string");
+    return AMDCUID_STATUS_INVALID_FORMAT;
+  }
+
+  amdcuid_id_t parsed = {};
+  if (CuidUtilities::uuid_string_to_uint8(value, parsed.bytes) != AMDCUID_STATUS_SUCCESS) {
+    LOG(WARN, "driver CUID attribute " << path << " is not a UUID string");
+    return AMDCUID_STATUS_INVALID_FORMAT;
+  }
+
+  if ((parsed.bytes[6] >> 4) != 8 || (parsed.bytes[8] >> 6) != 2 || (parsed.bytes[15] & 0x80))
+    return AMDCUID_STATUS_INVALID_FORMAT;
+
+  *id = parsed;
+  return AMDCUID_STATUS_SUCCESS;
+}
+
+amdcuid_status_t CuidUtilities::read_driver_cuid(const std::string& bdf,
+                                                 const std::string& attribute, amdcuid_id_t* id) {
+  if (bdf.empty()) {
+    return AMDCUID_STATUS_INVALID_ARGUMENT;
+  }
+  return read_driver_cuid_from_path("/sys/bus/pci/devices/" + bdf + "/" + attribute, id);
+}
+
 std::string CuidUtilities::read_sysfs_file(const std::string& path) {
   std::ifstream file(path);
   if (!file.is_open()) return "";

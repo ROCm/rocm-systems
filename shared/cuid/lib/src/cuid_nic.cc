@@ -184,6 +184,15 @@ amdcuid_status_t CuidNic::fingerprint_from_mac(const std::string& mac_address,
 }
 
 amdcuid_status_t CuidNic::get_primary_cuid(amdcuid_primary_id& id) const {
+  // The driver first, where it publishes a CUID for this device. The
+  // library reports what the kernel says rather than computing a rival value.
+  {
+    const amdcuid_status_t drv = driver_primary_cuid(id);
+    if (drv != AMDCUID_STATUS_UNSUPPORTED) {
+      return drv;
+    }
+  }
+
   // A device with no serial has no primary (HW_FINGERPRINT_NOT_FOUND) and
   // takes its temporary CUID; a serial this caller may not read is returned as
   // that error, since the identity a device presents must not depend on the

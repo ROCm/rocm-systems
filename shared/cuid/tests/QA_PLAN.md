@@ -15,12 +15,13 @@ tests use fixtures; they do not establish CPX/DPX or guest behavior on hardware.
 
 ## Lookup configurations
 
-* **Tier 1:** the driver publishes `cuid_unit_id`. A partition takes its
-  UnitID from it.
+* **Tier 1:** the driver publishes `cuid_unit_id` and `cuid_primary`. A
+  partition takes its UnitID from `cuid_unit_id`; root reads its metadata and
+  serial from `cuid_primary`.
 * **Tier 2:** the driver publishes nothing. A partition takes its UnitID from
   the KFD topology.
 
-The library holds no node key and reads no CUID from a driver, so every CPU,
+The library holds no node key, so every CPU,
 NIC, NPU, Platform, GPU and partition CUID is temporary, with source
 `LIBRARY`, for root and ordinary users alike.
 

@@ -15,9 +15,13 @@ library's API directly.
 Where CUIDs come from
 =====================
 
-This library holds no node key and reads no CUID from a driver, so every CUID
-it returns is a temporary CUID (see :ref:`temporary-cuid`), the same for root
-and every other caller. Every whole GPU, GPU partition, NPU, NIC function, CPU
+A GPU or compute partition is published by the driver when amdgpu exposes
+``cuid_unit_id`` (0444) for it. Its primary CUID is then the driver's
+``cuid_primary`` (0400, ``CAP_SYS_ADMIN``), which only root can read.
+
+This library holds no node key, so every CUID it returns is a temporary CUID
+(see :ref:`temporary-cuid`), the same for root and every other caller, and a
+temporary CUID has no primary. Every whole GPU, GPU partition, NPU, NIC function, CPU
 package and the platform has one. A partition's UnitID comes from amdgpu's
 ``cuid_unit_id`` or, on a kernel without it, from the KFD topology (see
 :ref:`cuid-gpu-partitions`). amd-smi reports the whole GPU's CUID for a GPU in

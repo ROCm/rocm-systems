@@ -69,8 +69,32 @@ inline amdcuid_status_t validate_fingerprint(uint64_t fingerprint) {
 
 // amdgpu publishes a component's UnitID, decimal, in cuid_unit_id under
 // /sys/bus/pci/devices/<bdf>/ and under each partition's xcp directory. It is
-// 0444, so any caller can read it.
+// 0444, so any caller can read it, and its presence is what says the driver
+// publishes a CUID there. cuid_primary beside it is 0400 and gated on
+// CAP_SYS_ADMIN because its payload embeds the raw serial.
+constexpr const char kDriverPrimaryAttribute[] = "cuid_primary";
 constexpr const char kDriverUnitIdAttribute[] = "cuid_unit_id";
+
+// Read a driver-published CUID attribute and parse its RFC 9562 UUID string
+// into `id`. `path` is the full attribute file, so a test can point it at a
+// fake sysfs root; read_driver_cuid() below is the BDF-based wrapper.
+//
+// The three failure modes are distinct because the caller acts on each
+// differently:
+//   FILE_NOT_FOUND    no attribute (pre-CUID driver, or no serial found), so
+//                     there is no kernel CUID to have. Logged at DEBUG.
+//   PERMISSION_DENIED present but not readable by us. The kernel still holds
+//                     the authoritative value, so do not compute a rival one.
+//   INVALID_FORMAT    readable, but not a UUID.
+//
+// Never throws: sysfs is read with open()/read() rather than an ifstream, so
+// errno is meaningful and nothing escapes into hosts built without exceptions.
+amdcuid_status_t read_driver_cuid_from_path(const std::string& path, amdcuid_id_t* id);
+
+// Read `attribute` (kDriverPrimaryAttribute) for the device at `bdf`, in the standard
+// "dddd:bb:dd.f" form.
+amdcuid_status_t read_driver_cuid(const std::string& bdf, const std::string& attribute,
+                                  amdcuid_id_t* id);
 
 // Write a 4-bit field into payload bits 118:121 of a 16-octet payload, leaving
 // every other bit alone. The field straddles an octet boundary: payload 118:119

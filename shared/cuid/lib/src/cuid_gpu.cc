@@ -271,7 +271,26 @@ amdcuid_status_t read_partition_metadata(amdcuid_gpu_info& info) {
     info.partition_metadata_valid = false;
     return AMDCUID_STATUS_UNSUPPORTED;
   }
-  return read_public_partition_metadata(info);
+  amdcuid_id_t primary{};
+  const auto status = CuidUtilities::read_driver_cuid_from_path(
+      info.partition_attr_dir + "/" + CuidUtilities::kDriverPrimaryAttribute, &primary);
+  // cuid_primary is 0400; without it the partition is described by what any
+  // caller can read.
+  if (status == AMDCUID_STATUS_FILE_NOT_FOUND || status == AMDCUID_STATUS_PERMISSION_DENIED)
+    return read_public_partition_metadata(info);
+  if (status != AMDCUID_STATUS_SUCCESS) return status;
+  uint8_t raw[16]{};
+  CuidUtilities::remove_UUIDv8_bits(&primary, raw);
+  if (((raw[14] >> 6) | ((raw[15] & 3) << 2)) != AMDCUID_DEVICE_TYPE_GPU)
+    return AMDCUID_STATUS_INVALID_FORMAT;
+  info.header.fields.gpu.unit_id = static_cast<uint16_t>(raw[8] | ((raw[14] & 0x1f) << 8));
+  if (info.header.fields.gpu.unit_id < 2 || info.header.fields.gpu.unit_id > 8128)
+    return AMDCUID_STATUS_INVALID_FORMAT;
+  info.header.fields.gpu.revision_id = raw[9];
+  info.header.fields.gpu.device_id = static_cast<uint16_t>(raw[10] | (raw[11] << 8));
+  info.header.fields.gpu.vendor_id = static_cast<uint16_t>(raw[12] | (raw[13] << 8));
+  info.partition_metadata_valid = true;
+  return AMDCUID_STATUS_SUCCESS;
 }
 
 // Helper to check if a /sys/class/drm entry name is a card device (e.g.,
@@ -732,6 +751,17 @@ amdcuid_status_t CuidGpu::discover_partition(amdcuid_gpu_info* gpu_info,
   return AMDCUID_STATUS_SUCCESS;
 }
 
+amdcuid_status_t CuidGpu::driver_attribute_path(const std::string& attribute,
+                                                std::string& path) const {
+  // A reachable attribute does not identify a VF whose index is unknown.
+  if (m_info.unnamed_vf) return AMDCUID_STATUS_UNSUPPORTED;
+  if (!m_info.partition_attr_dir.empty()) {
+    path = m_info.partition_attr_dir + "/" + attribute;
+    return AMDCUID_STATUS_SUCCESS;
+  }
+  return CuidDevice::driver_attribute_path(attribute, path);
+}
+
 amdcuid_status_t CuidGpu::partition_parent(const std::string& attr_dir, const std::string& pci_root,
                                            const std::string& kfd_nodes,
                                            CuidPartitionParent& parent) {
@@ -795,10 +825,13 @@ amdcuid_status_t CuidGpu::get_hardware_fingerprint(uint64_t& fingerprint) const 
     fingerprint = 0;
     return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
   }
-  // A partition's serial is its parent's, which names the whole GPU.
+  // A partition's serial is the one in the primary amdgpu publishes for it.
   if (!m_info.partition_attr_dir.empty()) {
-    fingerprint = 0;
-    return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
+    amdcuid_primary_id primary{};
+    const auto status = driver_primary_cuid(primary);
+    if (status != AMDCUID_STATUS_SUCCESS) return status;
+    fingerprint = PciUtil::load_le64(primary.raw_bits);
+    return AMDCUID_STATUS_SUCCESS;
   }
 
   // For DRM render nodes the PCI attributes live at "<render_node>/device";
@@ -900,10 +933,17 @@ amdcuid_status_t CuidGpu::read_config_space_serial(const std::string& bdf, uint1
   return status;
 }
 
-amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id& /*id*/) const {
-  // A GPU's permanent identity comes from amdgpu, not from a serial read
-  // here, so a GPU has no primary in this library and takes its temporary
-  // CUID.
+amdcuid_status_t CuidGpu::get_primary_cuid(amdcuid_primary_id& id) const {
+  // Where amdgpu publishes cuid_primary it has read the device serial out of
+  // privileged storage userspace cannot reach, so that value is the identity.
+  const amdcuid_status_t drv = driver_primary_cuid(id);
+  if (drv != AMDCUID_STATUS_UNSUPPORTED) {
+    return drv;
+  }
+
+  // A GPU the driver does not name has no primary and is temporary, whether
+  // or not its serial is readable here: the driver is the only source of a
+  // GPU's permanent identity.
   return AMDCUID_STATUS_HW_FINGERPRINT_NOT_FOUND;
 }
 
