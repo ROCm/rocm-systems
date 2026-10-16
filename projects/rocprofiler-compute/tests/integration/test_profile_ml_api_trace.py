@@ -61,7 +61,11 @@ def ml_api_trace_profiled_workload(
 ):
     require_triton(gpu=True)
     if not ml_api_trace_workload_state["profiled"]:
-        workload_dir = common.get_output_dir(param_id="ml_api_trace")
+        from torch_trace_coverage_utils import unique_output_param_id
+
+        workload_dir = common.get_output_dir(
+            param_id=unique_output_param_id("ml_api_trace"),
+        )
         ml_api_trace_workload_state["dir"] = workload_dir
         profile_config = dict(config)
         profile_config["ml_api_test_app"] = [
