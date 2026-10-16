@@ -566,33 +566,123 @@ void DsAddF32Ds::execute_impl(amdgpu::Wavefront &wf) {
 }
 
 void DsGwsSemaReleaseAllDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    wf.gws_sema_release_all(rid);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsInitDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));
+    auto &cu = wf.cu();
+    uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+    wf.gws_init(rid, gws_count);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsSemaVDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    wf.gws_sema_v(rid);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsSemaBrDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));
+    auto &cu = wf.cu();
+    uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+    wf.gws_sema_br(rid, gws_count);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsSemaPDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    wf.gws_sema_p(rid);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
 }
 
 void DsGwsBarrierDs::execute_impl(amdgpu::Wavefront &wf) {
-  wf.report_instruction_execution_error(
-      amdgpu::InstructionExecutionError::UnimplementedInstruction);
+  if (!inst_.gds)
+    throw util::UnimplementedInst(mnemonic());
+  uint64_t exec = wf.exec();
+  if (exec) {
+    uint32_t rid =
+        (((wf.m0() >> 16) & 0x3fu) + (static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;
+    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));
+    auto &cu = wf.cu();
+    uint32_t gws_base = wf.vgpr_alloc().base + 0u + inst_.addr;
+    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);
+    wf.gws_barrier_arrive(rid, gws_count);
+  }
+  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);
+  d->elem_size = 4;
+  d->num_elems = 0;
+  d->is_load = false;
+  d->lane_mask = 0;
+  d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
+  set_data(std::move(d));
 }
 
 void DsWriteB8Ds::execute_impl(amdgpu::Wavefront &wf) {
@@ -2804,7 +2894,21 @@ void DsWriteAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   d->num_elems = 1;
   d->is_load = false;
   d->wait_counter_type = amdgpu::WaitCounterType::LGKMCNT;
-  ds_calculate_addresses(inst_, wf, *d);
+  {
+    uint64_t exec = wf.exec();
+    d->lane_mask = exec;
+    d->exec_mask = exec;
+    d->wg_id = wf.wg_id();
+    d->wf_id = wf.wf_id();
+    uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
+    uint32_t m0 = wf.m0();
+    uint32_t byte_base = (m0 + offset) & 0xffffu;
+    for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
+      if (!(exec & (1ULL << lane)))
+        continue;
+      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();
+    }
+  }
   auto &cu = wf.cu();
   uint64_t exec = wf.exec();
   uint32_t data_base = wf.vgpr_alloc().base + 0u + inst_.data0;
@@ -2820,8 +2924,8 @@ void DsWriteAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base + 0, lane);
-    std::memcpy(&d->store_data[lane * 4 + 0], &val0, 4);
+    uint32_t val0 = amdgpu::RegisterAccess(cu).read_vgpr(data_base, lane);
+    std::memcpy(&d->store_data[lane * 4], &val0, 4);
   }
   set_data(std::move(d));
 }
@@ -2843,11 +2947,11 @@ void DsReadAddtidB32Ds::execute_impl(amdgpu::Wavefront &wf) {
     d->wf_id = wf.wf_id();
     uint32_t offset = (static_cast<uint32_t>(inst_.offset1) << 8) | inst_.offset0;
     uint32_t m0 = wf.m0();
-    uint32_t ds_stride_bytes = ((m0 >> 16) & 0x1FF) * 4;
+    uint32_t byte_base = (m0 + offset) & 0xffffu;
     for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
       if (!(exec & (1ULL << lane)))
         continue;
-      d->per_lane_addr[lane] = lane * ds_stride_bytes + offset + wf.lds_base();
+      d->per_lane_addr[lane] = byte_base + lane * 4u + wf.lds_base();
     }
   }
   set_data(std::move(d));

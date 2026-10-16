@@ -1425,6 +1425,16 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "TopoGpuDev",
+          "description": "Topology GPU dev index tests",
+          "test_filter": "TopoGpuDev.*"
+        },
+        {
+          "name": "P2pPxnLevel1NetId",
+          "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
+          "test_filter": "P2pPxnLevel1NetId.*"
+        },
+        {
           "name": "DdaAlltoAllThresholdTest",
           "description": "DDA AlltoAll 4 MiB threshold and host staging-byte unit tests for gfx942/gfx950",
           "test_filter": "DdaAlltoAllThresholdTest.*:DdaAlltoAllThreshold.*"
@@ -4030,6 +4040,11 @@
           "name": "AsymmetricVisibility.CommInitRankAllReduce",
           "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
           "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"
+        },
+        {
+          "name": "AsymmetricVisibility.OneGpuPerRankAllReduce",
+          "description": "Topology GPU dev index when each rank sees only its own GPU",
+          "test_filter": "AsymmetricVisibility.OneGpuPerRankAllReduce"
         }
       ]
     },
