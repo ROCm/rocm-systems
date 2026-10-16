@@ -113,7 +113,7 @@ Selecting a single kernel with ``host_trap`` PC sampling:
    ╘═════════╧═════════╧═══════════════╧════════════════════════════════╧════════════════════╧══════════════════╧══════════╧═════════╧═════════════════════════╧══════════════════════════════════════╛
 
 Selecting a single kernel with ``stochastic`` PC sampling, which adds the
-``count_issued``, ``count_stalled``, ``wave_occupancy_percent``, and
+``issue_count``, ``stall_count``, ``wave_occupancy_percent``, and
 ``stall_reason`` columns:
 
 .. code-block:: shell-session
@@ -121,7 +121,7 @@ Selecting a single kernel with ``stochastic`` PC sampling, which adds the
    $ rocprof-compute analyze -p <workload_dir> -k 0
 
    ╒═════════╤═════════╤═══════════════╤════════════════════════════════════╤════════════════════╤══════════════════╤══════════╤═════════╤═════════════════════════╤════════════════╤═════════════════╤══════════════════════════╤═══════════════════════════════════════════════════════╤══════════════════════════════════════╕
-   │   index │     pid │ source_line   │ instruction                        │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   count_issued │   count_stalled │   wave_occupancy_percent │ stall_reason                                          │ Kernel_Name                          │
+   │   index │     pid │ source_line   │ instruction                        │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   issue_count  │   stall_count   │   wave_occupancy_percent │ stall_reason                                          │ Kernel_Name                          │
    ╞═════════╪═════════╪═══════════════╪════════════════════════════════════╪════════════════════╪══════════════════╪══════════╪═════════╪═════════════════════════╪════════════════╪═════════════════╪══════════════════════════╪═══════════════════════════════════════════════════════╪══════════════════════════════════════╡
    │      90 │ 1429079 │ N/A           │ s_load_dword s8, s[0:1], 0x24      │ SCALAR             │                2 │ 0x3f00   │       3 │                  100.00 │              0 │               3 │                    78.12 │ [('ARBITER_NOT_WIN', 3)]                              │ matmul_fp32_throughput(float*, float │
    │         │         │               │                                    │                    │                  │          │         │                         │                │                 │                          │                                                       │ __vector(4)*, int)                   │
@@ -141,7 +141,7 @@ kernels, with a ``Kernel_Name`` column identifying each row's kernel:
    $ rocprof-compute analyze -p <workload_dir>
 
    ╒═════════╤═════════╤═══════════════╤══════════════════════════════════════════════════════════════╤════════════════════╤══════════════════╤══════════╤═════════╤═════════════════════════╤════════════════╤═════════════════╤══════════════════════════╤═══════════════════════════════════════════════╤══════════════════════════════════════════╕
-   │   index │     pid │ source_line   │ instruction                                                  │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   count_issued │   count_stalled │   wave_occupancy_percent │ stall_reason                                  │ Kernel_Name                              │
+   │   index │     pid │ source_line   │ instruction                                                  │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   issue_count  │   stall_count   │   wave_occupancy_percent │ stall_reason                                  │ Kernel_Name                              │
    ╞═════════╪═════════╪═══════════════╪══════════════════════════════════════════════════════════════╪════════════════════╪══════════════════╪══════════╪═════════╪═════════════════════════╪════════════════╪═════════════════╪══════════════════════════╪═══════════════════════════════════════════════╪══════════════════════════════════════════╡
    │      12 │ 1429079 │ N/A           │ s_cmp_eq_u32 s1, 0                                           │ SCALAR             │                2 │ 0x3bb8   │     199 │                  100.00 │            197 │               2 │                    84.38 │ [('OTHER_WAIT', 197), ('ARBITER_NOT_WIN', 2)] │ _Z22matmul_fp16_throughputPDv4_DF16_PDv4 │
    │         │         │               │                                                              │                    │                  │          │         │                         │                │                 │                          │                                               │ _fi                                      │
@@ -160,7 +160,7 @@ Sorting a single kernel by sample ``count`` instead of ``offset``:
    $ rocprof-compute analyze -p <workload_dir> -k 0 --pc-sampling-sorting-type count
 
    ╒═════════╤═════════╤═══════════════╤═══════════════════════════════════════════════════╤════════════════════╤══════════════════╤══════════╤═════════╤═════════════════════════╤════════════════╤═════════════════╤══════════════════════════╤══════════════════════════════════════════════════════════════╤══════════════════════════════════════╕
-   │   index │     pid │ source_line   │ instruction                                       │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   count_issued │   count_stalled │   wave_occupancy_percent │ stall_reason                                                 │ Kernel_Name                          │
+   │   index │     pid │ source_line   │ instruction                                       │ instruction_type   │   code_object_id │ offset   │   count │   active_thread_percent │   issue_count  │   stall_count   │   wave_occupancy_percent │ stall_reason                                                 │ Kernel_Name                          │
    ╞═════════╪═════════╪═══════════════╪═══════════════════════════════════════════════════╪════════════════════╪══════════════════╪══════════╪═════════╪═════════════════════════╪════════════════╪═════════════════╪══════════════════════════╪══════════════════════════════════════════════════════════════╪══════════════════════════════════════╡
    │     106 │ 1429079 │ N/A           │ global_load_dword v18, v[0:1], off                │ FLAT               │                2 │ 0x3f78   │   29715 │                  100.00 │              0 │           29715 │                    90.62 │ [('ARBITER_NOT_WIN', 26037), ('ARBITER_WIN_EX_STALL', 3678)] │ matmul_fp32_throughput(float*, float │
    │         │         │               │                                                   │                    │                  │          │         │                         │                │                 │                          │                                                              │ __vector(4)*, int)                   │
