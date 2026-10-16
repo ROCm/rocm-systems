@@ -7882,6 +7882,7 @@ def test_supported_vmem_writes_do_not_use_expcnt(arch_name, profile):
     for name, semantic_class, fields in (
         ('BUFFER_STORE_DWORD', 'buffer_store', set()),
         ('TBUFFER_STORE_FORMAT_X', 'tbuffer_store', set()),
+        ('IMAGE_STORE', 'image_store', set()),
         ('BUFFER_ATOMIC_ADD', 'buffer_atomic', set()),
         ('FLAT_STORE_DWORD', 'flat_store', {'seg'}),
         ('FLAT_ATOMIC_ADD', 'flat_atomic', {'seg'}),
