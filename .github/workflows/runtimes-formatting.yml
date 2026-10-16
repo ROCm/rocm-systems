@@ -1,0 +1,29 @@
+name: runtimes Formatting
+
+on:
+  pull_request:
+    branches: [develop]
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  pre-commit:
+    name: pre-commit / runtimes
+    runs-on: ubuntu-24.04
+    timeout-minutes: 10
+    steps:
+      # Fetch commit/tree history without checking out the source or submodules.
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+          sparse-checkout: .github/actions/scoped-formatting
+
+      - uses: ./.github/actions/scoped-formatting
+        with:
+          include: '^(runtimes/|\.github/workflows/runtimes-formatting\.yml\Z|\.pre-commit-config\.yaml\Z)'

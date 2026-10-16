@@ -1,0 +1,162 @@
+name: runtimes CI
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - develop
+    paths:
+      - 'runtimes/**'
+      - '.github/workflows/runtimes-ci.yml'
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'runtimes/**'
+      - '.github/workflows/runtimes-ci.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  # PR revisions supersede each other; distinct postsubmit commits do not.
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  rust-quality:
+    name: rust-quality
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    steps:
+      - name: Checkout runtimes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: runtimes
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Read the Rust toolchain pin
+        run: |
+          version=$(python -c 'import tomllib; print(tomllib.load(open("runtimes/rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          echo "RUST_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Install the pinned Rust tools and LLD
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y lld
+          rustup toolchain install "$RUST_VERSION" \
+            --profile minimal --component clippy --component rustfmt
+
+      - name: Check Rust formatting
+        working-directory: runtimes
+        run: cargo +"$RUST_VERSION" fmt --all --check
+
+      - name: Run Clippy
+        working-directory: runtimes
+        run: >-
+          cargo +"$RUST_VERSION" clippy
+          --workspace --all-targets --all-features --frozen
+          -- -D warnings
+
+  build-test:
+    name: build-test / ${{ matrix.name }}
+    runs-on: ubuntu-24.04
+    timeout-minutes: 20
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - name: gcc-debug
+            cc: gcc
+            cxx: g++
+            packages: gcc g++
+            build_type: Debug
+          - name: clang-release
+            cc: clang
+            cxx: clang++
+            packages: clang
+            build_type: Release
+    env:
+      RUNTIME_BUILD_DIR: ${{ github.workspace }}/build/runtimes-${{ matrix.name }}
+    steps:
+      - name: Checkout runtimes
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: runtimes
+
+      - name: Set up Python 3.11
+        uses: actions/setup-python@5fda3b95a4ea91299a34e894583c3862153e4b97 # v7.0.0
+        with:
+          python-version: '3.11'
+
+      - name: Install the CMake minimum
+        run: |
+          python -m pip install --disable-pip-version-check 'cmake==3.25'
+          python -c 'import cmake; print(cmake.CMAKE_BIN_DIR)' >> "$GITHUB_PATH"
+
+      - name: Read the Rust toolchain pin
+        run: |
+          version=$(python -c 'import tomllib; print(tomllib.load(open("runtimes/rust-toolchain.toml", "rb"))["toolchain"]["channel"])')
+          echo "RUST_VERSION=$version" >> "$GITHUB_ENV"
+
+      - name: Install native and Rust tools
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y ninja-build lld ${{ matrix.packages }}
+          rustup toolchain install "$RUST_VERSION" \
+            --profile minimal --component clippy --component rustfmt
+
+      - name: Configure
+        env:
+          CC: ${{ matrix.cc }}
+          CXX: ${{ matrix.cxx }}
+        run: |
+          cargo=$(rustup which --toolchain "$RUST_VERSION" cargo)
+          rustc=$(rustup which --toolchain "$RUST_VERSION" rustc)
+          lld=$(command -v ld.lld)
+          cmake --version
+          "$CC" --version
+          "$rustc" --version --verbose
+          "$lld" --version
+          cmake -S runtimes -B "$RUNTIME_BUILD_DIR" -G Ninja \
+            -DCMAKE_BUILD_TYPE=${{ matrix.build_type }} \
+            -DBUILD_TESTING=ON \
+            -DPython3_EXECUTABLE="$(command -v python)" \
+            -DROCM_RUNTIMES_CARGO="$cargo" \
+            -DROCM_RUNTIMES_RUSTC="$rustc" \
+            -DROCM_RUNTIMES_LLD="$lld" \
+            -DROCM_RUNTIMES_CARGO_JOBS="$(nproc)"
+
+      - name: Build
+        run: cmake --build "$RUNTIME_BUILD_DIR" --parallel "$(nproc)"
+
+      - name: Test
+        run: >-
+          ctest --test-dir "$RUNTIME_BUILD_DIR"
+          --output-on-failure
+          --output-junit "$RUNTIME_BUILD_DIR/ctest-results.xml"
+
+      - name: Upload test results
+        if: always()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtimes-${{ matrix.name }}-test-results
+          path: ${{ env.RUNTIME_BUILD_DIR }}/ctest-results.xml
+          if-no-files-found: warn
+
+      - name: Upload failure diagnostics
+        if: failure()
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: runtimes-${{ matrix.name }}-failure-diagnostics
+          path: |
+            ${{ env.RUNTIME_BUILD_DIR }}/Testing/Temporary/
+            ${{ env.RUNTIME_BUILD_DIR }}/runtime-rust-config.cmake
+            ${{ env.RUNTIME_BUILD_DIR }}/cargo-metadata.json
+          if-no-files-found: ignore
