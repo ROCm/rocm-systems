@@ -13,7 +13,7 @@ supports loose and empirical bit-exact arithmetic. rj-arith is not a GPU runtime
 
 See [coverage per architecture](COVERAGE.md) for instruction-family support.
 
-The current scope is gfx12 Wave32 FP16/BF16 WMMA with FP32 output and FP16/FP32 FMA.
+The current scope is gfx12 Wave32/Wave64 FP16/BF16 WMMA with FP32 output and FP16/FP32 FMA.
 Rocjitsu continues to use its existing instruction handlers.
 
 ## Build and run
