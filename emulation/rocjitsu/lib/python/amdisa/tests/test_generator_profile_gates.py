@@ -4614,7 +4614,7 @@ def test_generated_rdna3_5_fuzz_disassembly_rules(amdgpu_generated_root: Path):
     assert '(reinterpret_cast<const OpEncoding *>(inst)->ssamp * 4)' in mimg
     assert 'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst)' in mimg
     assert 'mimg_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst)' in mimg
-    assert 'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true)' in mimg
+    assert 'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), true,' in mimg
     assert 'vdata(128, OperandType::OPR_VGPR' in _generated_constructor_body(
         mimg, 'ImageBvhIntersectRayMimg'
     )
