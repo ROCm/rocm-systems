@@ -6,6 +6,9 @@
  *************************************************************************/
 
 #include "common.h"
+#include "rocmwrap.h"
+#include "net_ib/multiseg.h"
+#include "rccl_ib_multiseg.h"
 
 ncclResult_t ncclIbRegMrDmaBufInternal2(ncclIbNetCommDevBase* base, void* data, size_t size, int type, uint64_t offset,
                                         int fd, uint64_t mrFlags, ibv_mr** mhandle) {
@@ -79,6 +82,7 @@ ncclResult_t ncclIbRegMrDmaBufInternal(void* comm, void* data, size_t size, int 
   int registered = 0;
   *mhandle = NULL;
   NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
+  mhandleWrapper->nSegments = 1;
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
@@ -98,7 +102,90 @@ fail:
   goto exit;
 }
 
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+// RCCL: plugin regMrDmaBuf with fd < 0. offset is (cuMem export flags << 32) | segment count.
+static ncclResult_t rcclIbRegMrDmaBufFromRange(void* comm, void* data, size_t size, int type, uint64_t packed,
+                                               void** mhandle) {
+  const int nExpect = (int)(packed & 0xffffffffu);
+  const int handleFlags = (int)(packed >> 32);
+  ncclResult_t ret = ncclSuccess;
+  void** segAddrs = NULL;
+  size_t* segLens = NULL;
+  uint64_t* segOffsets = NULL;
+  int* segFds = NULL;
+  int nSeg = 0;
+  size_t remaining = size;
+  *mhandle = NULL;
+
+  if (nExpect < 1 || nExpect > NCCL_IB_MAX_SEGMENTS) {
+    WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nExpect,
+         NCCL_IB_MAX_SEGMENTS);
+    return ncclInvalidUsage;
+  }
+  NCCLCHECKGOTO(ncclCalloc(&segAddrs, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segLens, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segOffsets, nExpect), ret, fail);
+  NCCLCHECKGOTO(ncclCalloc(&segFds, nExpect), ret, fail);
+  for (int s = 0; s < nExpect; s++) segFds[s] = -1;
+
+  {
+    uintptr_t segPtr = (uintptr_t)data;
+    for (int s = 0; s < nExpect && remaining > 0; s++) {
+      CUdeviceptr segBase = 0;
+      size_t segSize = 0;
+      CUCHECKGOTO(cuMemGetAddressRange(&segBase, &segSize, (CUdeviceptr)segPtr), ret, fail);
+      size_t inSeg = ncclIbBytesRemainingInSegment(segPtr, (uintptr_t)segBase, segSize);
+      size_t thisLen = remaining < inSeg ? remaining : inSeg;
+      int fd = -1;
+      CUCHECKGOTO(cuMemGetHandleForAddressRange((void*)&fd, (CUdeviceptr)segPtr, thisLen,
+                                                CU_MEM_RANGE_HANDLE_TYPE_DMA_BUF_FD, handleFlags),
+                  ret, fail);
+      segAddrs[s] = (void*)segPtr;
+      segLens[s] = thisLen;
+      segOffsets[s] = 0ULL;
+      segFds[s] = fd;
+      segPtr += thisLen;
+      remaining -= thisLen;
+      nSeg++;
+    }
+  }
+
+  if (remaining != 0 || nSeg != nExpect) {
+    WARN("NET/IB: enumerated %d/%d segments for buffer %p but %zu/%zu bytes remain unregistered", nSeg, nExpect, data,
+         remaining, size);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  if (!ncclIbSegmentsUniform(nSeg, segLens)) {
+    INFO(NCCL_NET | NCCL_REG,
+         "Buffer %p (size %zu) has non-uniform segments; declining NET user-buffer registration (staging fallback)",
+         data, size);
+    ret = ncclInvalidUsage;
+    goto fail;
+  }
+  NCCLCHECKGOTO(ncclIbRegMrDmaBufMultiSeg(comm, nSeg, segAddrs, segLens, segOffsets, segFds, type, mhandle), ret, fail);
+
+exit:
+  if (segFds) {
+    for (int s = 0; s < nExpect; s++) {
+      if (segFds[s] != -1) (void)close(segFds[s]);
+    }
+  }
+  free(segAddrs);
+  free(segLens);
+  free(segOffsets);
+  free(segFds);
+  return ret;
+fail:
+  goto exit;
+}
+#endif
+
 ncclResult_t ncclIbRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  // RCCL: fd < 0 registers one MR per physical segment. A real fd stays one MR.
+  if (fd == -1) return rcclIbRegMrDmaBufFromRange(comm, data, size, type, offset, mhandle);
+#endif
   return ncclIbRegMrDmaBufInternal(comm, data, size, type, offset, fd, 0ULL, mhandle);
 }
 
@@ -127,11 +214,85 @@ ncclResult_t ncclIbDeregMrInternal(ncclIbNetCommDevBase* base, ibv_mr* mhandle) 
   return ncclInternalError;
 }
 
+// RCCL: one MR per segment. A whole-range dma-buf MR fails with EINVAL because
+// the export only describes the first physical segment.
+ncclResult_t ncclIbRegMrDmaBufMultiSeg(void* comm, int nSeg, void** segAddrs, size_t* segLens, uint64_t* segOffsets,
+                                       int* segFds, int type, void** mhandle) {
+  ncclResult_t ret = ncclSuccess;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  *mhandle = NULL;
+  if (nSeg < 1 || nSeg > NCCL_IB_MAX_SEGMENTS) {
+    WARN("NET/IB: multi-segment registration with %d segments exceeds NCCL_IB_MAX_SEGMENTS=%d", nSeg,
+         NCCL_IB_MAX_SEGMENTS);
+    return ncclInvalidUsage;
+  }
+  uint32_t peerCaps =
+    base->isSend ? ((struct ncclIbSendComm*)comm)->peerCaps : ((struct ncclIbRecvComm*)comm)->peerCaps;
+  // RCCL: the side table describes the receiver. A sender splits locally onto
+  // one remote rkey, so only recv registration requires the peer cap.
+  if (!base->isSend && ncclIbDeclineMultiSegRegistration(peerCaps, nSeg)) {
+    INFO(NCCL_NET | NCCL_REG,
+         "NET/IB: peer does not advertise multi-segment CTS side table; declining %d-segment registration", nSeg);
+    return ncclInvalidUsage;
+  }
+  struct ncclIbMrHandle* mhandleWrapper = NULL;
+  NCCLCHECK(ncclCalloc(&mhandleWrapper, 1));
+  mhandleWrapper->nSegments = nSeg;
+  for (int s = 0; s < nSeg; s++) {
+    mhandleWrapper->segStart[s] = (uintptr_t)segAddrs[s];
+    mhandleWrapper->segLen[s] = segLens[s];
+    for (int i = 0; i < base->vProps.ndevs; i++) {
+      struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
+      NCCLCHECKGOTO(ncclIbRegMrDmaBufInternal2(devComm, segAddrs[s], segLens[s], type, segOffsets[s], segFds[s], 0ULL,
+                                               &mhandleWrapper->segMrs[s][i]),
+                    ret, fail);
+    }
+  }
+  // Alias segment 0 into mrs[] so single-segment consumers keep working.
+  for (int i = 0; i < base->vProps.ndevs; i++) mhandleWrapper->mrs[i] = mhandleWrapper->segMrs[0][i];
+  INFO(NCCL_NET | NCCL_REG, "NET/IB: registered multi-segment buffer %p size %zu as %d DMA-BUF MRs", segAddrs[0],
+       (size_t)(mhandleWrapper->segStart[nSeg - 1] + mhandleWrapper->segLen[nSeg - 1] - mhandleWrapper->segStart[0]),
+       nSeg);
+  *mhandle = (void*)mhandleWrapper;
+  return ncclSuccess;
+fail:
+  for (int s = 0; s < nSeg; s++) {
+    for (int i = 0; i < base->vProps.ndevs; i++) {
+      if (mhandleWrapper->segMrs[s][i]) {
+        struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
+        (void)ncclIbDeregMrInternal(devComm, mhandleWrapper->segMrs[s][i]);
+      }
+    }
+  }
+  free(mhandleWrapper);
+  return ret;
+}
+
+// mrs[] aliases segment 0, so it is freed via segMrs[0] here (do not double-free).
+// RCCL: deregister every MR, then free the handle, and return the first error.
+static ncclResult_t rcclIbDeregMrMultiSeg(void* comm, void* mhandle) {
+  struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
+  struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  ncclResult_t ret = ncclSuccess;
+  for (int s = 0; s < mhandleWrapper->nSegments; s++) {
+    for (int i = 0; i < base->vProps.ndevs; i++) {
+      if (!mhandleWrapper->segMrs[s][i]) continue;
+      struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
+      ncclResult_t dr = ncclIbDeregMrInternal(devComm, mhandleWrapper->segMrs[s][i]);
+      if (dr != ncclSuccess && ret == ncclSuccess) ret = dr;
+    }
+  }
+  free(mhandleWrapper);
+  return ret;
+}
+
 ncclResult_t ncclIbDeregMr(void* comm, void* mhandle) {
   if (mhandle == NULL) return ncclSuccess;
 
   struct ncclIbMrHandle* mhandleWrapper = (struct ncclIbMrHandle*)mhandle;
   struct ncclIbNetCommBase* base = (struct ncclIbNetCommBase*)comm;
+  // RCCL: multi-segment handles own one MR per segment, not mrs[] alone.
+  if (mhandleWrapper->nSegments > 1) return rcclIbDeregMrMultiSeg(comm, mhandle);
   for (int i = 0; i < base->vProps.ndevs; i++) {
     // Each ncclIbNetCommDevBase is at different offset in send and recv netComms
     struct ncclIbNetCommDevBase* devComm = ncclIbGetNetCommDevBase(base, i);
