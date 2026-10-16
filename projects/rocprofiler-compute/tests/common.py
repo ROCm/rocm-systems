@@ -6,12 +6,17 @@ import inspect
 import os
 import re
 import shutil
+import sqlite3
 import subprocess
 import sys
+from contextlib import closing
 from pathlib import Path
 from threading import Thread
 from typing import Set
 from unittest.mock import Mock
+
+import numpy as np
+import pandas as pd
 
 from utils import csv_compression
 
@@ -34,6 +39,96 @@ SUPPORTED_ARCHS = {
     "gfx1153": {"rdna35_gorgon_point": ["RDNA35_GORGON_POINT"]},
     "gfx1250": {"gfx1250_series": ["gfx1250"]},
 }
+
+
+ANALYSIS_CSV_HEADERS = {
+    "kernel": [
+        "kernel_uuid",
+        "workload_id",
+        "workload_name",
+        "kernel_name",
+        "short_name",
+        "dispatch_count",
+        "duration_ns_sum",
+        "duration_ns_min",
+        "duration_ns_max",
+        "duration_ns_median",
+        "duration_ns_mean",
+    ],
+    "kernel_metric": [
+        "workload_id",
+        "workload_name",
+        "kernel_uuid",
+        "kernel_name",
+        "metric_uuid",
+        "metric_name",
+        "metric_id",
+        "description",
+        "table_name",
+        "sub_table_name",
+        "unit",
+        "value_uuid",
+        "value_name",
+        "value",
+    ],
+    "workload_metric": [
+        "workload_id",
+        "workload_name",
+        "metric_uuid",
+        "metric_name",
+        "metric_id",
+        "description",
+        "table_name",
+        "sub_table_name",
+        "unit",
+        "value_uuid",
+        "value_name",
+        "value",
+    ],
+    "pc_sampling_summary": [
+        "workload_id",
+        "pid",
+        "code_object_id",
+        "kernel_uuid",
+        "kernel_name",
+        "offset",
+        "instruction",
+        "instruction_type",
+        "source",
+        "count",
+        "issue_count",
+        "stall_count",
+        "wave_occupancy_percent",
+        "active_thread_percent",
+        "stall_reason",
+    ],
+    "source_lines": [
+        "workload_id",
+        "file_path",
+        "md5_checksum",
+        "line_number",
+        "content",
+    ],
+}
+
+
+COUNTER_RESULT_COLUMNS = (
+    "GPU_ID",
+    "Dispatch_ID",
+    "Kernel_ID",
+    "Kernel_Name",
+    "Grid_Size",
+    "Workgroup_Size",
+    "LDS_Per_Workgroup",
+    "Scratch_Per_Workitem",
+    "Arch_VGPR",
+    "Accum_VGPR",
+    "SGPR",
+    "Start_Timestamp",
+    "End_Timestamp",
+    "Counter_Name",
+    "Counter_Value",
+)
 
 
 def check_resource_allocation():
@@ -222,3 +317,176 @@ def normalize_kernel_name(name: str) -> str:
 def normalize_kernel_names(names: Set[str]) -> Set[str]:
     """Return the normalized form of each name in ``names``."""
     return {normalize_kernel_name(name) for name in names}
+
+
+def read_counter_results(workload_dir):
+    """Read all long-form counter artifacts in deterministic filename order."""
+    result_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
+    assert result_files, f"No counter result files in {workload_dir}"
+    return pd.concat([pd.read_csv(path) for path in result_files], ignore_index=True)
+
+
+def check_counter_results(df, *, required_counters=()):
+    """Validate the identities, launch fields, values and timing of counters."""
+    assert not df.empty, "Counter results are empty"
+    assert set(COUNTER_RESULT_COLUMNS) <= set(df.columns), "Missing counter columns"
+
+    for column in ("Counter_Value", "Start_Timestamp", "End_Timestamp"):
+        values = pd.to_numeric(df[column], errors="coerce")
+        assert np.isfinite(values).all(), f"Nonfinite or nonnumeric {column}"
+
+    assert (
+        pd.to_numeric(df.Start_Timestamp) < pd.to_numeric(df.End_Timestamp)
+    ).all(), "Unordered timestamps"
+
+    assert df.Kernel_Name.notna().all(), "Null kernel name"
+    assert df.Kernel_Name.astype(str).str.strip().ne("").all(), "Blank kernel name"
+
+    assert df.Counter_Name.notna().all(), "Null counter name"
+    assert df.Counter_Name.astype(str).str.strip().ne("").all(), "Blank counter name"
+    assert set(required_counters) <= set(df.Counter_Name), "Missing required counters"
+
+    return df
+
+
+def check_sysinfo(path):
+    """Read and validate the hardware metadata of every profiled device."""
+    df = pd.read_csv(path)
+    required = {"gpu_model", "gpu_arch", "cu_per_gpu", "se_per_gpu", "simd_per_cu"}
+
+    assert not df.empty, "Sysinfo is empty"
+    assert required <= set(df.columns), "Missing sysinfo columns"
+
+    assert df.gpu_model.notna().all(), "Null GPU model"
+    assert df.gpu_model.astype(str).str.strip().ne("").all(), "Blank GPU model"
+    assert df.gpu_arch.isin(SUPPORTED_ARCHS).all(), "Unsupported GPU architecture"
+
+    for column in ("cu_per_gpu", "se_per_gpu", "simd_per_cu"):
+        values = pd.to_numeric(df[column], errors="coerce")
+        assert (np.isfinite(values) & (values > 0)).all(), f"Invalid {column}"
+
+    return df
+
+
+def check_analysis_db(db_path, *, expected_workloads):
+    """Validate a saved analysis database and summarize workload ownership."""
+    assert Path(db_path).is_file(), f"Missing analysis database: {db_path}"
+
+    with closing(sqlite3.connect(db_path)) as connection:
+        assert connection.execute("PRAGMA integrity_check").fetchall() == [("ok",)]
+        assert not connection.execute("PRAGMA foreign_key_check").fetchall()
+
+        workloads = connection.execute(
+            "SELECT workload_id, name, sub_name FROM compute_workload"
+        ).fetchall()
+
+        kernels = connection.execute(
+            "SELECT kernel_uuid, workload_id, kernel_name FROM compute_kernel"
+        ).fetchall()
+
+        dispatches = connection.execute(
+            "SELECT kernel_uuid, start_timestamp, end_timestamp FROM compute_dispatch"
+        ).fetchall()
+
+    assert len(workloads) == expected_workloads, "Incorrect workload count"
+    assert workloads and kernels and dispatches, "Empty analysis tables"
+
+    summary = {
+        identifier: {
+            "name": name,
+            "sub_name": sub_name,
+            "kernels": set(),
+            "kernel_uuids": set(),
+            "dispatch_count": 0,
+        }
+        for identifier, name, sub_name in workloads
+    }
+    owners = {}
+
+    for identifier, workload_id, name in kernels:
+        assert workload_id in summary, "Orphan kernel owner"
+        owners[identifier] = workload_id
+        summary[workload_id]["kernels"].add(name)
+        summary[workload_id]["kernel_uuids"].add(identifier)
+
+    for kernel_id, start, end in dispatches:
+        assert kernel_id in owners, "Orphan dispatch owner"
+        assert start is not None and end is not None, "Null timestamps"
+        assert start <= end, "Reversed timestamps"
+        summary[owners[kernel_id]]["dispatch_count"] += 1
+
+    assert all(row["kernels"] and row["dispatch_count"] for row in summary.values()), (
+        "Empty workload data"
+    )
+
+    return summary
+
+
+def check_analysis_csv_dir(directory):
+    """Read every analysis CSV and validate ordered headers and composite owners."""
+    frames = {}
+    for name, columns in ANALYSIS_CSV_HEADERS.items():
+        path = Path(directory) / f"{name}.csv"
+        assert path.is_file(), f"Missing analysis CSV: {path}"
+
+        frames[name] = pd.read_csv(path)
+        assert list(frames[name].columns) == columns, f"Incorrect {name} header"
+
+    kernel = frames["kernel"]
+    assert not kernel.empty, "Empty kernel CSV"
+    assert kernel[["workload_id", "kernel_uuid"]].notna().all().all()
+
+    owners = set(zip(kernel.workload_id, kernel.kernel_uuid))
+    workloads = set(kernel.workload_id)
+
+    for name, frame in frames.items():
+        if "workload_id" in frame:
+            assert frame.workload_id.notna().all(), f"Null workload in {name}"
+            assert set(frame.workload_id) <= workloads, f"Unknown workload in {name}"
+
+        if {"workload_id", "kernel_uuid"} <= set(frame.columns):
+            assert frame.kernel_uuid.notna().all(), f"Null kernel in {name}"
+            assert set(zip(frame.workload_id, frame.kernel_uuid)) <= owners, (
+                f"Mismatched workload/kernel owner in {name}"
+            )
+
+    return frames
+
+
+def check_roofline_csv(path, *, allowed_zero=()):
+    """Read and validate ordered benchmark mean/Low/High triplets."""
+    assert Path(path).is_file(), f"Missing roofline CSV: {path}"
+
+    df = pd.read_csv(path)
+    assert not df.empty, "Empty roofline CSV"
+
+    # Historical MI200 exports spell this one column with an extra F.
+    aliases = {"mfmafi8opslow": "mfmai8opslow"}
+    columns = [aliases.get(str(name).lower(), str(name).lower()) for name in df.columns]
+    assert columns[0] == "device", "Device must be first"
+    assert len(columns) > 1 and (len(columns) - 1) % 3 == 0, "Incomplete triplets"
+    assert len(set(columns)) == len(columns), "Duplicate measurement columns"
+
+    devices = pd.to_numeric(df.iloc[:, 0], errors="coerce")
+    assert (np.isfinite(devices) & (devices >= 0) & (devices % 1 == 0)).all()
+
+    allowed = {str(name).lower() for name in allowed_zero}
+
+    for offset in range(1, len(columns), 3):
+        mean_name, low_name, high_name = columns[offset : offset + 3]
+        assert (low_name, high_name) == (mean_name + "low", mean_name + "high"), (
+            f"Malformed triplet: {mean_name}"
+        )
+
+        values = df.iloc[:, offset : offset + 3].apply(pd.to_numeric, errors="coerce")
+        assert (np.isfinite(values) & (values >= 0)).all().all(), "Invalid measurements"
+
+        mean, low, high = (values.iloc[:, index] for index in range(3))
+        if mean_name not in allowed:
+            assert (values > 0).all().all(), f"Unexpected zero: {mean_name}"
+        positive = mean > 0
+        assert (
+            (low[positive] <= mean[positive]) & (mean[positive] <= high[positive])
+        ).all(), f"Inverted bounds: {mean_name}"
+
+    return df

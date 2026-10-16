@@ -4,6 +4,7 @@
 import csv
 import os
 import shutil
+import sqlite3
 import tempfile
 from pathlib import Path
 
@@ -429,18 +430,49 @@ def test_dispatch_5(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_gpu_ids(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
+def test_gpu_ids(binary_handler_analyze_rocprof_compute, tmp_path, monkeypatch):
+    for directory in indirs:
         gpu_id = "0"
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--gpu-id",
-            gpu_id,
-        ])
+        workload_dir = integration_common.setup_workload_dir(directory)
+        output_dir = tmp_path / "analysis" / Path(directory).name / f"gpu_{gpu_id}"
+        output_dir.mkdir(parents=True)
+        # --output-name rejects path separators, so run from inside output_dir
+        # to keep the db there.
+        workload_path = str(Path(workload_dir).resolve())
+        with monkeypatch.context() as m:
+            m.chdir(output_dir)
+            code = binary_handler_analyze_rocprof_compute([
+                "analyze",
+                "--path",
+                workload_path,
+                "--gpu-id",
+                gpu_id,
+                "--output-format",
+                "db",
+                "--output-name",
+                "gpu_filter",
+            ])
         assert code == 0
+        db_path = output_dir / "gpu_filter.db"
+        assert db_path.is_file()
+
+        with sqlite3.connect(db_path) as connection:
+            dispatches = connection.execute(
+                "SELECT gpu_id, dispatch_id FROM compute_dispatch"
+            ).fetchall()
+            kernels = connection.execute(
+                "SELECT kernel_name FROM compute_kernel"
+            ).fetchall()
+
+        assert len(dispatches) == 3
+        assert {gpu for gpu, _ in dispatches} == {int(gpu_id)}
+        assert {dispatch for _, dispatch in dispatches} == {1, 2, 3}
+
+        expected_kernel = "vecCopy(double*, double*, double*, int, int)"
+        if Path(directory).name in {"MI300A_A1", "MI300X_A1"}:
+            expected_kernel += " (.kd)"
+
+        assert kernels == [(expected_kernel,)]
 
         common.clean_output_dir(config["cleanup"], workload_dir)
 

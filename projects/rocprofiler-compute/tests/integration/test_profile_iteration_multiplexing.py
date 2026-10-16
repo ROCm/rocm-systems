@@ -105,7 +105,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
             app_name="app_laplace_eqn",
         )
         integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        counters_no_multiplexing = integration_common.read_counter_results(workload_dir)
+        counters_no_multiplexing = common.read_counter_results(workload_dir)
 
         options = [
             "--block",
@@ -128,7 +128,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
             app_name="app_laplace_eqn_iter",
         )
         integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        counters_kernel = integration_common.read_counter_results(workload_dir)
+        counters_kernel = common.read_counter_results(workload_dir)
 
         options = [
             "--block",
@@ -151,9 +151,7 @@ def test_iteration_multiplexing_deterministic_counter_accuracy(
             app_name="app_laplace_eqn_iter",
         )
         integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
-        counters_kernel_launch_params = integration_common.read_counter_results(
-            workload_dir_klp
-        )
+        counters_kernel_launch_params = common.read_counter_results(workload_dir_klp)
 
         assert are_deterministic_counters_equal(
             [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
@@ -192,7 +190,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
             app_name="app_laplace_eqn",
         )
         integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        counters_no_multiplexing = integration_common.read_counter_results(workload_dir)
+        counters_no_multiplexing = common.read_counter_results(workload_dir)
 
         options = [
             "--block",
@@ -213,7 +211,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
             app_name="app_laplace_eqn_iter",
         )
         integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-        counters_kernel = integration_common.read_counter_results(workload_dir)
+        counters_kernel = common.read_counter_results(workload_dir)
 
         options = [
             "--block",
@@ -234,9 +232,7 @@ def test_iteration_multiplexing_stochastic_counter_accuracy(
             app_name="app_laplace_eqn_iter",
         )
         integration_common.check_csv_files(workload_dir_klp, num_devices, num_kernels)
-        counters_kernel_launch_params = integration_common.read_counter_results(
-            workload_dir_klp
-        )
+        counters_kernel_launch_params = common.read_counter_results(workload_dir_klp)
 
         assert are_stochastic_counters_similar(
             [counters_kernel, counters_kernel_launch_params], counters_no_multiplexing
@@ -265,7 +261,7 @@ def test_iteration_multiplexing_all_counter_accuracy(
         app_name="app_laplace_eqn",
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-    counters_no_multiplexing = integration_common.read_counter_results(workload_dir)
+    counters_no_multiplexing = common.read_counter_results(workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--iteration-multiplexing", "kernel"]
@@ -279,7 +275,7 @@ def test_iteration_multiplexing_all_counter_accuracy(
         app_name="app_laplace_eqn_iter",
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-    counters_kernel = integration_common.read_counter_results(workload_dir)
+    counters_kernel = common.read_counter_results(workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     options = ["--iteration-multiplexing", "kernel_launch_params"]
@@ -293,9 +289,7 @@ def test_iteration_multiplexing_all_counter_accuracy(
         app_name="app_laplace_eqn_iter",
     )
     integration_common.check_csv_files(workload_dir, num_devices, num_kernels)
-    counters_kernel_launch_params = integration_common.read_counter_results(
-        workload_dir
-    )
+    counters_kernel_launch_params = common.read_counter_results(workload_dir)
     common.clean_output_dir(config["cleanup"], workload_dir)
 
     assert are_deterministic_counters_equal(

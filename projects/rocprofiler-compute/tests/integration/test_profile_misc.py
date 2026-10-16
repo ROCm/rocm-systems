@@ -3,7 +3,6 @@
 
 """Integration tests for assorted profile CLI options."""
 
-import os
 import sqlite3
 from pathlib import Path
 
@@ -13,7 +12,7 @@ import pytest
 
 from tests.integration import common as integration_common
 from tests.integration.common import (
-    CSVS,
+    ROOF_ONLY_FILES,
     config,
     num_kernels,
     skip_unsupported_roofline_soc,
@@ -22,7 +21,10 @@ from tests.integration.common import (
 
 @pytest.mark.misc
 def test_analyze_rocpd(
-    binary_handler_profile_rocprof_compute, binary_handler_analyze_rocprof_compute
+    binary_handler_profile_rocprof_compute,
+    binary_handler_analyze_rocprof_compute,
+    tmp_path,
+    monkeypatch,
 ):
     skip_unsupported_roofline_soc()
 
@@ -31,17 +33,25 @@ def test_analyze_rocpd(
     binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     db_name = "test"
-    code = binary_handler_analyze_rocprof_compute([
-        "analyze",
-        "--output-format",
-        "db",
-        "--output-name",
-        f"{db_name}",
-        "--path",
-        workload_dir,
-    ])
+    analysis_dir = tmp_path / "analysis"
+    analysis_dir.mkdir(parents=True)
+    # --output-name rejects path separators, so run from inside analysis_dir
+    # to keep the db there.
+    workload_path = str(Path(workload_dir).resolve())
+    with monkeypatch.context() as m:
+        m.chdir(analysis_dir)
+        code = binary_handler_analyze_rocprof_compute([
+            "analyze",
+            "--output-format",
+            "db",
+            "--output-name",
+            f"{db_name}",
+            "--path",
+            workload_path,
+        ])
     assert code == 0
-    assert os.path.isfile(f"{db_name}.db")
+    database_path = analysis_dir / f"{db_name}.db"
+    common.check_analysis_db(database_path, expected_workloads=1)
 
     # Open the sqlite database and assert the schema
     # Import Kernel from analysis_orm.py
@@ -69,7 +79,7 @@ def test_analyze_rocpd(
     }
 
     def check_cols(table_name, orm_obj):
-        conn = sqlite3.connect(f"{db_name}.db")
+        conn = sqlite3.connect(database_path)
         cursor = conn.cursor()
         cursor.execute(f"PRAGMA table_info('{table_name}');")
         columns = cursor.fetchall()
@@ -81,7 +91,7 @@ def test_analyze_rocpd(
     for table_name, orm_obj in table_name_map.items():
         check_cols(table_name, orm_obj)
 
-    os.remove(f"{db_name}.db")
+    database_path.unlink()
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
@@ -106,6 +116,7 @@ def test_save_csv(
 
     csv_dir = Path(analysis_workload_dir)
     assert csv_dir.is_dir()
+    common.check_analysis_csv_dir(csv_dir)
 
     expected_view_csvs = ["kernel.csv", "kernel_metric.csv", "workload_metric.csv"]
     for csv_name in expected_view_csvs:
@@ -144,13 +155,16 @@ def test_pc_sampling_requires_experimental(binary_handler_profile_rocprof_comput
 
 @pytest.mark.misc
 def test_device_filter(binary_handler_profile_rocprof_compute):
+    skip_unsupported_roofline_soc()
+
     options = ["--device", "0"]
     workload_dir = common.get_output_dir()
-    binary_handler_profile_rocprof_compute(config, workload_dir, options)
+    binary_handler_profile_rocprof_compute(config, workload_dir, options, roof=True)
 
     file_dict = integration_common.check_csv_files(workload_dir, 1, num_kernels)
-    assert sorted(list(file_dict.keys())) == CSVS
+    assert sorted(list(file_dict.keys())) == ROOF_ONLY_FILES
 
-    # TODO - verify expected device id in results
+    roofline_df = pd.read_csv(Path(workload_dir) / "roofline.csv")
+    assert roofline_df["device"].tolist() == [0]
 
     common.clean_output_dir(config["cleanup"], workload_dir)

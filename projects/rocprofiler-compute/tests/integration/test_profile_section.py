@@ -113,12 +113,10 @@ def test_instmix_section_global_write_kernel(binary_handler_profile_rocprof_comp
     kernel_counter = "SQ_INSTS_FLAT_STORE" if rdna_or_gfx1250 else "TA_FLAT_WAVEFRONTS"
     results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
     assert any(common.check_file_pattern(kernel_counter, str(f)) for f in results_files)
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert any(common.check_file_pattern("global_write", str(f)) for f in results_files)
-    results_files = sorted(Path(workload_dir).glob("results_*.csv.gz"))
-    assert not any(
-        common.check_file_pattern("global_read", str(f)) for f in results_files
-    )
+    results = common.check_counter_results(common.read_counter_results(workload_dir))
+    assert common.normalize_kernel_names(set(results["Kernel_Name"])) == {
+        "global_write(int*, int)"
+    }
     common.clean_output_dir(config["cleanup"], workload_dir)
 
 
