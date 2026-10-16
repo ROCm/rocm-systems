@@ -95,6 +95,10 @@ static_assert(ncclIbCastUDMAPolicy::First == ncclIbCastUDMAPolicy::ChannelAffini
 static_assert(ncclIbCastUDMAPolicy::Last == ncclIbCastUDMAPolicy::SplitConnection,
               "ncclIbCastUDMAPolicy::Last must be the last policy; update this assert when adding one");
 
+static inline bool ncclIbCastUDMAPolicyIsValid(int64_t policy) {
+  return policy >= (int64_t)ncclIbCastUDMAPolicy::First && policy <= (int64_t)ncclIbCastUDMAPolicy::Last;
+}
+
 struct ncclIbMr {
   uintptr_t addr;
   size_t pages;

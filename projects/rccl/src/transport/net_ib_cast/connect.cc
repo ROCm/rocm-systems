@@ -83,7 +83,7 @@ constexpr int8_t ncclIbCastUDMANone = (int8_t)-1;
 
 static ncclIbCastUDMAPolicy ncclIbCastGetUDMAPolicy() {
   int64_t policy = rcclParamIbCastUDMAPolicy();
-  if (policy < (int64_t)ncclIbCastUDMAPolicy::First || policy > (int64_t)ncclIbCastUDMAPolicy::Last) {
+  if (!ncclIbCastUDMAPolicyIsValid(policy)) {
     return ncclIbCastUDMAPolicy::ChannelAffinity;
   }
   return (ncclIbCastUDMAPolicy)policy;
