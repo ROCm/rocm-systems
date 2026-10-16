@@ -55,6 +55,10 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+rccl_assert_source_line("${_rccl_src_root}/init.cc"
+  "NCCL_PARAM(SetCpuStackSize, \"SET_CPU_STACK_SIZE\", 1)" "linux-test.cc: kSetCpuStackSizeDefault")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/linux-test.cc"
+  "constexpr int kSetCpuStackSizeDefault = 1;" "the SetCpuStackSize fake default")
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags
@@ -425,6 +429,20 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroLinux -- src/os/linux*.cc, misc/{socket,shmutils,signals}.cc. Own binary:
+  # fakes/os_fakes.cc, which most targets link, defines ncclOs* symbols that os/linux.cc defines.
+  set(TEST_MICRO_LINUX_SOURCE_FILES
+    linux-test.cc
+    linux-ipcsocket-test.cc
+    linux-socket-pair-test.cc
+    socket-test.cc
+    shmutils-test.cc
+    signals-test.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/crypt.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -899,7 +917,7 @@ endif()
 # Mark every hipified misc/ oracle TU any target below compiles as GENERATED.
 # The property is directory-scoped and idempotent, so one call up front covers
 # all targets -- no need to repeat it per binary.
-rccl_mark_oracle_tus_generated(${RCCL_HOST_HIPIFY_DIR} argcheck archinfo utils)
+rccl_mark_oracle_tus_generated(${RCCL_HOST_HIPIFY_DIR} argcheck archinfo crypt utils)
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicro
@@ -1119,6 +1137,21 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroLinux
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroLinux
+  SOURCES ${TEST_MICRO_LINUX_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    LINUX_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux.cc"
+    LINUX_IPCSOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux_ipcsocket.cc"
+    LINUX_SOCKET_PAIR_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/os/linux_socket_pair.cc"
+    SOCKET_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/socket.cc"
+    SHMUTILS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/shmutils.cc"
+    SIGNALS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/misc/signals.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_linux.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels

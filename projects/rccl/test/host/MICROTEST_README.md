@@ -337,6 +337,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
 
+- **`rccl-UnitTestsMicroLinux`**: `os/linux.cc` (`LINUX_CC_PATH`, from `linux-test.cc`),
+  plus `os/linux_ipcsocket.cc`, `os/linux_socket_pair.cc`, `misc/socket.cc`,
+  `misc/shmutils.cc` and `misc/signals.cc`, one test TU each; suites `Linux*`,
+  `Socket*`, `Shmutils*`, `Signals*`. Its own binary: `fakes/os_fakes.cc`, which most
+  targets link, defines `ncclOsInitialize`, `ncclOsTopoGetStrFromSys` and other `ncclOs*`
+  symbols `os/linux.cc` defines. See `test_categories_micro_linux.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -857,6 +863,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroLinux`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
 `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
@@ -899,6 +906,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroLinux              # src/os/linux*.cc, misc/{socket,shmutils,signals}.cc
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
