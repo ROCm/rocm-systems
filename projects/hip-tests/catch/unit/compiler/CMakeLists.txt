@@ -133,4 +133,17 @@ if(HIP_PLATFORM MATCHES "amd")
                   VERBATIM)
   add_dependencies(hipSpirvTest Catch2::Catch2)
   add_dependencies(CompilerTest hipSpirvTest)
+
+  # Install hipSpirvTest and register it with ctest.
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+               ${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest${CMAKE_EXECUTABLE_SUFFIX})
+  set(SPIRV_TEST_CTEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest-spirv_include.cmake)
+  file(WRITE ${SPIRV_TEST_CTEST_FILE}
+       "add_test(Unit_test_spirv_mode \"\${EXE_PATH}/hipSpirvTest${CMAKE_EXECUTABLE_SUFFIX}\")\n"
+       "set_tests_properties(Unit_test_spirv_mode PROPERTIES WORKING_DIRECTORY \"\${EXE_PATH}\" SKIP_RETURN_CODE 4)\n"
+       "if(DEFINED LIB_PATH)\n"
+       "  list(TRANSFORM LIB_PATH PREPEND \"LD_LIBRARY_PATH=path_list_prepend:\" OUTPUT_VARIABLE _spirv_env)\n"
+       "  set_tests_properties(Unit_test_spirv_mode PROPERTIES ENVIRONMENT_MODIFICATION \"\${_spirv_env}\")\n"
+       "endif()\n")
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${SPIRV_TEST_CTEST_FILE})
 endif()
