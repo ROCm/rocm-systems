@@ -90,8 +90,11 @@ def my_vector_scalar_mul():
         # AIE_PARTITION PDI before the sequence runs. A full ELF has no xclbin,
         # so the sequence must load the PDI itself -- without this the cores
         # never start and the closing DMA token wait never retires, which the
-        # driver reports as ERT_CMD_STATE_TIMEOUT.
-        if FULL_ELF:
+        # driver reports as ERT_CMD_STATE_TIMEOUT. Skipped on aie4 (npu3), whose
+        # control code already configures the array in its own first job: loading
+        # the PDI on top applies that configuration twice, and every run then writes
+        # back stretches of the output shifted by 128 elements.
+        if FULL_ELF and positional[0] != "npu3":
             npu_load_pdi(device_ref="main")
         in_handle.fill(inoutTensor)
         out_handle.drain(inoutTensor, wait=True)
