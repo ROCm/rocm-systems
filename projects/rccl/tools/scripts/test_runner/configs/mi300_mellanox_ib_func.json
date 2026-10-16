@@ -2575,7 +2575,44 @@
           "name": "CE_Gather_8Ranks",
           "description": "Gather CE correctness, root=0 \u2014 default production topology (8 ranks)",
           "test_filter": "CeMPI_Gather.EightRanksRoot0"
+        },
+        {
+          "name": "CE_ReduceScatter_OutOfPlace",
+          "description": "ReduceScatter CE correctness, out-of-place (8 ranks)",
+          "test_filter": "CeMPI_ReduceScatter.OutOfPlace"
+        },
+        {
+          "name": "CE_ReduceScatter_InPlaceRankVaryingAlignment",
+          "description": "ReduceScatter CE in-place with rank-varying 16B alignment (8 ranks)",
+          "test_filter": "CeMPI_ReduceScatter.InPlaceRankVaryingAlignment"
+        },
+        {
+          "name": "CE_ReduceScatter_Bfloat16Average",
+          "description": "ReduceScatter CE BF16 Avg (8 ranks)",
+          "test_filter": "CeMPI_ReduceScatter.Bfloat16Average"
+        },
+        {
+          "name": "CE_ReduceScatter_GroupedBfloat16Average",
+          "description": "ReduceScatter CE BF16 Avg inside ncclGroupStart/End (8 ranks)",
+          "test_filter": "CeMPI_ReduceScatter.GroupedBfloat16Average"
+        },
+        {
+          "name": "CE_ReduceScatter_GroupedPipelinedBfloat16Average",
+          "description": "ReduceScatter CE multi-chunk BF16 Avg inside a group (8 ranks)",
+          "test_filter": "CeMPI_ReduceScatter.GroupedPipelinedBfloat16Average",
+          "timeout": 300
+        },
+        {
+          "name": "CE_ReduceScatter_PerChunk_GroupedPipelinedBfloat16Average",
+          "description": "ReduceScatter CE finite per-chunk reducer on multi-chunk BF16 Avg (8 ranks)",
+          "test_filter": "CeMPI_ReduceScatter.GroupedPipelinedBfloat16Average",
+          "timeout": 300,
+          "env_variables": {
+            "RCCL_CE_REDUCE_PER_CHUNK": "1",
+            "RCCL_CE_REDUCE_MAX_BLOCKS": "64"
+          }
         }
+
       ]
     },
     "ce_hier_alltoallv": {

@@ -537,7 +537,8 @@ TEST(RcclCeReduceScatterEligibility, RcclUseCeReduceScatter_Isolated)
         // and the kernel scalar-reduces the tail, so the selector must still accept it.
         {"ShardBytesNotMultipleOf16StillEligible_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 1001, ncclSum, ncclFloat32, true, baseEnv},
         {"ZeroCountRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 0, ncclSum, ncclFloat32, false, baseEnv},
-        {"UnsupportedOpRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 1024, ncclAvg, ncclFloat32, false, baseEnv},
+        {"Bfloat16AvgEligible_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 1024, ncclAvg, ncclBfloat16, true, baseEnv},
+        {"AvgOtherDatatypeRejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 1024, ncclAvg, ncclFloat32, false, baseEnv},
         {"Float8Rejected_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO, 1024, ncclSum, ncclFloat8e4m3, false, baseEnv},
         // No message-size cap: a former AllReduce 2-shot window size must still be accepted.
         {"LargeMessageAccepted_Isolated", 4, 1, true, NCCL_CTA_POLICY_ZERO,
