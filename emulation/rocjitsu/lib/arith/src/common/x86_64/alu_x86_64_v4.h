@@ -56,4 +56,19 @@ inline __m512 prepare_omod_f32(__m512 value, uint32_t mode) {
   return value;
 }
 
+// Prepare FP64 results for a nonzero OMOD.
+inline __m512d prepare_omod_f64(__m512d value, uint32_t mode) {
+  auto magnitude = _mm512_and_si512(_mm512_castpd_si512(value), _mm512_set1_epi64(INT64_MAX));
+  auto tiny = _mm512_cmplt_epi64_mask(magnitude, _mm512_set1_epi64(INT64_C(0x0010000000000000)));
+  value = _mm512_mask_mov_pd(value, tiny, _mm512_setzero_pd());
+  if ((mode & RJ_ARITH_ALU_OMOD_HALF) == RJ_ARITH_ALU_OMOD_HALF) {
+    auto underflow =
+        _mm512_cmplt_epi64_mask(magnitude, _mm512_set1_epi64(INT64_C(0x0020000000000000)));
+    auto sign = _mm512_castsi512_pd(
+        _mm512_and_si512(_mm512_castpd_si512(value), _mm512_set1_epi64(INT64_MIN)));
+    value = _mm512_mask_mov_pd(value, underflow, sign);
+  }
+  return value;
+}
+
 } // namespace rocjitsu::arith

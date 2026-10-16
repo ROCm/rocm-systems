@@ -1,7 +1,7 @@
 // Copyright (c) 2026 Advanced Micro Devices, Inc.
 // SPDX-License-Identifier: MIT
 
-// AVX2 exact FP16 FMA using wider arithmetic with scalar repair.
+// AVX2 exact FP16 FMA and packed FMA using wider arithmetic with scalar repair.
 // CPU-specific arithmetic stays here; public entry points select this backend.
 
 #include "common/internal.h"
@@ -38,8 +38,8 @@ void half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode,
                                   _mm256_cmpgt_epi32(_mm256_set1_epi32(0x38800000), magnitude));
       }
 
-      // The compensated helper requires finite inputs. Ordinary-FMA repair
-      // below owns exceptional lanes.
+      // The mixed helper's special repair implements a different model. Feed
+      // it harmless finite values; ordinary-FMA repair below owns these lanes.
       values[src] = _mm256_castsi256_ps(bits);
     }
     for (auto &value : values) {
@@ -51,8 +51,8 @@ void half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode,
       auto x = part ? _mm256_extractf128_ps(values[0], 1) : _mm256_castps256_ps128(values[0]);
       auto y = part ? _mm256_extractf128_ps(values[1], 1) : _mm256_castps256_ps128(values[1]);
       auto z = part ? _mm256_extractf128_ps(values[2], 1) : _mm256_castps256_ps128(values[2]);
-      halves[part] = mixed_half_value4(x, y, z, flags & RJ_ARITH_FP16_OVFL,
-                                       omod || (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS));
+      halves[part] = mixed_half_value4<false>(x, y, z, flags & RJ_ARITH_FP16_OVFL, false,
+                                              omod || (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS));
     }
     auto result = _mm256_inserti128_si256(_mm256_castsi128_si256(halves[0]), halves[1], 1);
     if (omod) {
@@ -90,6 +90,35 @@ void half_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode,
                                   _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
     _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), mask, result);
   }
+}
+
+// Evaluate packed fma exact for the caller-selected operation. Preserve destination lanes
+// outside exec_mask.
+// Requires the named CPU features and validated instruction controls. Return false to request
+// fallback.
+bool packed_fma_exact_x86_64_v3(uint64_t flags, uint32_t exec_mask, const uint32_t modes[2],
+                                uint32_t *d, const uint32_t *a, const uint32_t *b,
+                                const uint32_t *c, uint32_t *, bool rdna3) {
+  uint32_t staged[32];
+  for (int lane = 0; lane < 32; ++lane) {
+    staged[lane] = d[lane];
+  }
+  if ((flags & RJ_ARITH_FP_ROUND_MASK) ||
+      (reports_fp_status(flags) &&
+       (!(modes[0] & RJ_ARITH_ALU_CLAMP) || !(modes[1] & RJ_ARITH_ALU_CLAMP)))) {
+    return false;
+  }
+  half_fma_exact_x86_64_v3(flags, exec_mask, modes[0], staged, a, b, c, rdna3);
+  half_fma_exact_x86_64_v3(flags, exec_mask, modes[1] | RJ_ARITH_ALU_HIGH_D, staged, a, b, c,
+                           rdna3);
+
+  for (int lane = 0; lane < 32; lane += 8) {
+    auto mask = _mm256_sllv_epi32(_mm256_set1_epi32(int(exec_mask >> lane)),
+                                  _mm256_setr_epi32(31, 30, 29, 28, 27, 26, 25, 24));
+    _mm256_maskstore_epi32(reinterpret_cast<int *>(d + lane), mask,
+                           _mm256_loadu_si256(reinterpret_cast<const __m256i *>(staged + lane)));
+  }
+  return true;
 }
 
 } // namespace rocjitsu::arith
