@@ -74,6 +74,41 @@
                     "query": "SELECT COUNT(*) as count FROM regions WHERE start = 0"
                 }
             ]
+        },
+        {
+            "min_rows": 0,
+            "name": "rocpd_info_agent",
+            "required_columns": [
+                "id",
+                "type",
+                "extdata"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Agent extdata must be valid JSON",
+                    "error_message": "Found rocpd_info_agent rows with invalid extdata JSON",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_agent WHERE COALESCE(json_valid(extdata), 0) = 0"
+                }
+            ]
+        },
+        {
+            "name": "rocpd_info_process",
+            "required_columns": [
+                "pid",
+                "extdata",
+                "environment"
+            ],
+            "validation_queries": [
+                {
+                    "comparison": "equals",
+                    "description": "Process extdata/environment must be valid JSON",
+                    "error_message": "Found rocpd_info_process rows with invalid extdata or environment JSON",
+                    "expected_result": 0,
+                    "query": "SELECT COUNT(*) as count FROM rocpd_info_process WHERE COALESCE(json_valid(extdata), 0) = 0 OR COALESCE(json_valid(environment), 0) = 0"
+                }
+            ]
         }
     ]
 }

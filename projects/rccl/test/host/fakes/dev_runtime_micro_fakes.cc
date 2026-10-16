@@ -33,6 +33,7 @@
 #include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"   // shared HIP seams + InstallHipVmmEmulator()
 #include "fakes/nccl_fakes.h"  // g_ncclProxyClientGetFdBlocking, ResetNcclFakes()
+#include "fakes/signature-drift.h"
 
 #include <fcntl.h>
 #include <sys/mman.h>
@@ -95,6 +96,22 @@ std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_devrBootstrapIn
 
 ncclResult_t bootstrapIntraNodeAllGather(void* bs, int* ranks, int self, int size, void* buf, int bytes) {
   return g_devrBootstrapIntraNodeAllGather(bs, ranks, self, size, buf, bytes);
+}
+
+static ncclResult_t DefaultBootstrapSend(void*, int, int, void*, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapSend = DefaultBootstrapSend;
+ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapSend, bootstrapSend);
+
+ncclResult_t bootstrapSend(void* bs, int peer, int tag, void* data, int size) {
+  return g_devrBootstrapSend(bs, peer, tag, data, size);
+}
+
+static ncclResult_t DefaultBootstrapRecv(void*, int, int, void*, int) { return ncclSuccess; }
+std::function<ncclResult_t(void*, int, int, void*, int)> g_devrBootstrapRecv = DefaultBootstrapRecv;
+ASSERT_HOOK_MATCHES_PROD(g_devrBootstrapRecv, bootstrapRecv);
+
+ncclResult_t bootstrapRecv(void* bs, int peer, int tag, void* data, int size) {
+  return g_devrBootstrapRecv(bs, peer, tag, data, size);
 }
 
 // ---------------------------------------------------------------------------
@@ -464,10 +481,10 @@ int computeCftMcSize(struct ncclComm* comm) { return g_devrComputeCftMcSize(comm
 // instead of taking the whole binary down.
 ncclResult_t symBindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
 ncclResult_t symUnbindTeamLe(struct ncclComm*, struct ncclDevrMemory*, ncclCftLeId) { return ncclSuccess; }
-ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool*) {
+ncclResult_t symTeamObtainUcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool*, bool) {
   return ncclSuccess;
 }
-ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool*) {
+ncclResult_t symTeamObtainMcLe(struct ncclComm*, struct ncclDevrTeam*, struct ncclDevrState*, bool*, bool) {
   return ncclSuccess;
 }
 
@@ -527,6 +544,8 @@ void ResetDevRuntimeMicroFakes() {
   g_devrBootstrapIntraNodeBarrier               = DefaultIntraNodeBarrier;
   g_devrBootstrapIntraNodeAllGather             = DefaultIntraNodeAllGather;
   g_devrBootstrapAllGather                      = DefaultAllGather;
+  g_devrBootstrapSend                           = DefaultBootstrapSend;
+  g_devrBootstrapRecv                           = DefaultBootstrapRecv;
   g_devrGinRegister                             = DefaultGinRegister;
   g_devrGinDeregister                           = DefaultGinDeregister;
   g_devrRmaProxyConnectOnce                     = DefaultRmaProxyConnectOnce;

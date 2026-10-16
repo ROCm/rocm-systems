@@ -324,6 +324,10 @@ struct WaitcheckStateOps : WaitcheckTarget {
 
   static void apply_xcnt_wait(PendingState &state, uint32_t count);
 
+  // Includes counter-only requests as well as materialized register hazards.
+  [[nodiscard]] static bool has_xcnt_smem(const PendingState &state);
+  [[nodiscard]] static bool has_xcnt_vmem(const PendingState &state);
+
   static void apply_xcnt_wait_implied_by_kmcnt(PendingState &state, uint32_t count);
 
   static void apply_xcnt_wait_implied_by_loadcnt(PendingState &state, uint32_t count);

@@ -14,6 +14,7 @@ test_categories:
     # A trailing '.*' anchors the end of the suite name. Dropping the dot widens instead
     # ("Devcomm*" matches all five Devcomm suites).
     test_patterns:
+      # transport/p2p.cc
       - "P2pMicrotest.*"
       - "P2pMicrotestIsolated.*"
       - "P2pCanConnectMicrotest.*"
@@ -31,9 +32,40 @@ test_categories:
       - "MappingStages/P2pImportMapStageFails.*"
       - "FreshRegistrationMicrotest.*"
       - "FreshRegistrationLegacyIpcSucceedsFixture.*"
+      - "ConnStepAcquireMicrotest.*"
+      # ras/ras.cc
       - "RasMicrotest.*"
+      # ras/diagnostics_checks_common.cc
+      - "RasDiagnosticsCommonMicrotest.*"
+      # ras/collectives.cc
+      - "RasCollectivesMicrotest.*"
+      # ras/diagnostics.cc
+      - "RasDiagnosticsMicrotest.*"
+      # ras/rasnet.cc
+      - "RasNetMicrotest.*"
+      # ras/diagnostics_gpu.cc
+      - "RasDiagnosticsGpuMicrotest.*"
+      # ras/peers.cc
+      - "RasPeersMicrotest.*"
+      # ras/diagnostics_env.cc
+      - "RasDiagnosticsEnvMicrotest.*"
+      # ras/client.cc
       - "RasClientMicrotest.*"
+      # ras/client_support.cc
+      - "RasClientSupportMicrotest.*"
+      - "Commands/RasClientSupportEnqueueFailureMicrotest.*"
+      # ras/ras_param.cc
+      - "RasParamMicrotest.*"
+      # rma/rma_proxy_launch.cc
+      - "RmaProxyBatchMemOpTest.*"
+      - "RmaProxyDescriptorTest.*"
+      - "RmaProxyLaunchTest.*"
+      - "RmaProxyQueueTest.*"
+      - "RmaProxyParamsTest.*"
+      - "RmaProxyReclaimTest.*"
+      # rma/rma_proxy_progress.cc
       - "RmaProxyProgressTest.*"
+      # rma/rma_ce.cc
       - "RmaCeLaunchTest.*"
       - "RmaCeInitTest.*"
       - "RmaCeFinalizeTest.*"
@@ -41,6 +73,7 @@ test_categories:
       - "RmaCeNonPersistTest.*"
       - "RmaCePersistTest.*"
       - "RmaCeWaitLaunchTest.*"
+      # rma/rma.cc
       - "RmaWaitSignalTest.*"
       - "RmaPutTest.*"
       - "RmaLaunchTest.*"
@@ -48,10 +81,40 @@ test_categories:
       - "RmaDebugLoggingTest.*"
       - "RmaProxyGatingTest.*"
       - "RmaProxyReadyTest.*"
+      # tuning/tuning_general.cc
       - "TuningGeneralMicrotest.*"
+      # tuning/tuning.cc
+      - "TuningMicrotest.*"
+      # plugin/tuner/csv_tuner.cc
+      - "CsvTunerMicrotest.*"
+      # include/param/utils.h, include/param/parser_common.h
+      - "ParamUtilsMicrotest.*"
+      # group.cc
       - "GroupEndInternalTest.*"
+      - "GroupCommHeadChainTest.*"
+      - "ReclaimPlannerStateTest.*"
+      - "AsyncLaunchTest.*"
+      - "GroupJobAbortTest.*"
+      - "GroupApiWrapperTest.*"
+      - "ArgsGlobalCheckTest.*"
+      - "GroupJobUnlinkCommsTest.*"
+      - "JobFreeCallbacksTest.*"
+      - "MgmtTaskJobFuncTest.*"
+      - "GroupRegisterSymmetricCeInitTest.*"
+      - "GroupRegisterSymmetricTest.*"
+      - "GroupCleanupTest.*"
+      - "AsyncJobLaunchDirectTest.*"
+      # rccl_wrap.cc
       - "WrapMicrotest.*"
       - "WrapMicrotestIsolated.*"
+      # misc/gdr_probe.cc
+      - "GdrProbeTest.*"
+      # misc/ionicdvsymbols.cc, misc/mlx5dvsymbols.cc
+      - "DvSymbolsTestIsolated.*"
+      # ce_coll.cc (rccl-UnitTestsMicroCe)
+      - "CeCollMicrotest.*"
+      - "LaunchPaths/CeAlltoAllvSyncMicrotest.*"
+      # dev_runtime.cc
       - "Alloc*"
       - "Comm*"
       - "Compute*"
@@ -61,6 +124,8 @@ test_categories:
       - "Nccl*"
       - "Sym*"
       - "Win*"
+      # test/common/ProcessIsolatedTestRunner.cpp
+      - "ProcessIsolatedRunnerMicrotest.*"
     exclude_windows:
       - "*"
     labels:

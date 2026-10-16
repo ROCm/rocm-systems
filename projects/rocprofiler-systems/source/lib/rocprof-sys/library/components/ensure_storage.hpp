@@ -17,7 +17,7 @@ namespace
 template <typename... Tp>
 struct ensure_storage
 {
-    void operator()() const { (((*this)(tim::type_list<Tp>{})), ...); }
+    void operator()() const { ((*this)(tim::type_list<Tp>{}), ...); }
 
 private:
     template <typename Up>
@@ -25,13 +25,16 @@ private:
     void operator()(tim::type_list<Up>) const
     {
         using namespace tim;
-        static thread_local auto _storage = operation::get_storage<Up>{}();
-        static thread_local auto _tid     = threading::get_id();
-        static thread_local auto _dtor =
+        static thread_local auto       _storage = operation::get_storage<Up>{}();
+        static thread_local auto const _tid     = threading::get_id();
+        static thread_local auto const _dtor =
             scope::destructor{ []() { operation::set_storage<Up>{}(nullptr, _tid); } };
 
         tim::operation::set_storage<Up>{}(_storage, _tid);
-        if(_tid == 0 && !_storage) tim::trait::runtime_enabled<Up>::set(false);
+        if(_tid == 0 && !_storage)
+        {
+            tim::trait::runtime_enabled<Up>::set(false);
+        }
     }
 
     template <typename Up>

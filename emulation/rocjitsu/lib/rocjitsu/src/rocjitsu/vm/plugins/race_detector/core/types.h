@@ -47,7 +47,7 @@ struct EventId {
 };
 
 inline void removeFromUnorderedList(std::vector<EventId> &list, EventId eventId) {
-  auto it = std::find(list.begin(), list.end(), eventId);
+  auto it = std::ranges::find(list, eventId);
   if (it != list.end()) {
     std::swap(*it, list.back());
     list.pop_back();

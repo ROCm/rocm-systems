@@ -27,6 +27,8 @@
 #include <hip/hip_runtime_api.h>
 #include <hip/hip_runtime.h>
 
+struct ncclReg;
+
 // ncclStrongStreamAcquire: by default returns ncclSuccess with *stream=nullptr
 // (matching the stub's prior behaviour). Tests that need to exercise the
 // strong-stream block's failure paths can install a hook that returns an
@@ -36,6 +38,12 @@ extern std::function<ncclResult_t(struct ncclCudaGraph,
                                   bool,
                                   hipStream_t*)>
     g_strongStreamAcquire;
+
+// ncclStrongStreamRelease / ncclStreamWaitStream: succeed by default. The
+// addon capture cases in enqueue-test.cc install hooks to observe the calls.
+extern std::function<ncclResult_t(struct ncclCudaGraph, struct ncclStrongStream*, bool)>
+    g_strongStreamRelease;
+extern std::function<ncclResult_t(hipStream_t, hipStream_t, hipEvent_t)> g_ncclStreamWaitStream;
 
 // ncclProxyConnect / ncclProxyCallBlocking: fresh-registration arm of
 // ipcRegisterBuffer routes the per-peer IPC handshake through these. The

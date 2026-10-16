@@ -353,12 +353,10 @@ BasicBlock::build_impl(const CodeObject &co, Decoder &decoder, rj_code_arch_t ar
     // contains its s_getpc_b64. Blocks are in ascending source order and cover
     // the decoded stream without overlap, so the owning block is the last one
     // starting at or before the producer.
-    const auto starts_after = [](uint64_t offset, const std::unique_ptr<BasicBlock> &block) {
-      return offset < block->start_offset();
-    };
     for (const PcAddressBuilder &builder : pc_address_builders) {
-      const auto it = std::upper_bound(section_blocks.begin(), section_blocks.end(),
-                                       builder.source_getpc_offset, starts_after);
+      const auto it = std::ranges::upper_bound(
+          section_blocks, builder.source_getpc_offset, {},
+          [](const std::unique_ptr<BasicBlock> &block) { return block->start_offset(); });
       if (it == section_blocks.begin())
         continue;
       BasicBlock &owner = **(it - 1);
@@ -735,14 +733,17 @@ BasicBlock::build_cfg(const CodeObject &co, Decoder &decoder, rj_code_arch_t arc
       section_end > static_cast<uint64_t>(std::numeric_limits<int64_t>::max()))
     return emit_error.emit() << "invalid text section for reachable CFG";
 
-  std::vector<CodeRange> ranges(permitted_ranges.begin(), permitted_ranges.end());
-  for (const CodeRange &range : ranges) {
+  for (const CodeRange &range : permitted_ranges) {
     if (range.start_offset % sizeof(uint32_t) || range.size % sizeof(uint32_t) || range.size == 0 ||
         range.start_offset >= section_end || range.size > section_end - range.start_offset)
       return emit_error.emit() << "invalid reachable CFG code range at byte " << range.start_offset;
   }
-  if (ranges.empty())
-    ranges.push_back({0, section_end});
+  // Built in one step: a push_back onto a range-constructed vector trips a GCC 15
+  // -Wfree-nonheap-object false positive.
+  std::vector<CodeRange> ranges =
+      permitted_ranges.empty()
+          ? std::vector<CodeRange>{{0, section_end}}
+          : std::vector<CodeRange>(permitted_ranges.begin(), permitted_ranges.end());
   std::ranges::sort(ranges, {}, &CodeRange::start_offset);
   std::vector<CodeRange> merged_ranges;
   for (const CodeRange &range : ranges) {

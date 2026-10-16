@@ -92,6 +92,7 @@ ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* system, int cudaDev1, in
 // Find CPU affinity
 ncclResult_t ncclTopoGetCpuAffinity(struct ncclTopoSystem* system, int rank, ncclAffinity* affinity);
 
+#define NCCL_TOPO_CPU_ARCH_UNDEF 0
 #define NCCL_TOPO_CPU_ARCH_X86 1
 #define NCCL_TOPO_CPU_ARCH_POWER 2
 #define NCCL_TOPO_CPU_ARCH_ARM 3
@@ -220,6 +221,7 @@ ncclResult_t ncclTopoDumpGraphs(struct ncclTopoSystem* system, int ngraphs, stru
 
 struct ncclTopoRanks {
   int crossNicRing;
+  int nChannels;  // valid channels in the per-channel arrays below; set by Preset, raised by Postset's expansion
   int ringRecv[MAXCHANNELS];
   int ringSend[MAXCHANNELS];
   int ringPrev[MAXCHANNELS];

@@ -246,6 +246,66 @@ TEST_F(AqlProfileV2Test, PmcProfile)
     EXPECT_EQ(profile.events[2].event_id, 300);
 }
 
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineGlobal)
+{
+    int se_index  = 0;
+    int sa_index  = 0;
+    int wgp_index = 0;
+
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(-1, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, -1);
+    EXPECT_EQ(sa_index, -1);
+    EXPECT_EQ(wgp_index, -1);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineBaseSe)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(3, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, 3);
+    EXPECT_EQ(sa_index, 0);
+    EXPECT_EQ(wgp_index, 0);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineExpanded)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    const int          packed = (7 << 24) | (5 << 16) | 11;
+    const hsa_status_t status =
+        aqlprofile_spm_decode_shader_engine(packed, &se_index, &sa_index, &wgp_index);
+
+    EXPECT_EQ(status, HSA_STATUS_SUCCESS);
+    EXPECT_EQ(se_index, 11);
+    EXPECT_EQ(sa_index, 5);
+    EXPECT_EQ(wgp_index, 7);
+}
+
+TEST_F(AqlProfileV2Test, SpmDecodeShaderEngineNullArgs)
+{
+    int se_index  = -1;
+    int sa_index  = -1;
+    int wgp_index = -1;
+
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, nullptr, &sa_index, &wgp_index),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, &se_index, nullptr, &wgp_index),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+    EXPECT_EQ(aqlprofile_spm_decode_shader_engine(0, &se_index, &sa_index, nullptr),
+              HSA_STATUS_ERROR_INVALID_ARGUMENT);
+}
+
 // Test ATT parameter structure
 TEST_F(AqlProfileV2Test, AttParameter)
 {
@@ -563,9 +623,10 @@ protected:
         last_callback_name_  = "";
     }
 
-    static int         callback_call_count_;
-    static int         last_callback_id_;
-    static std::string last_callback_name_;
+    static int                                                   callback_call_count_;
+    static int                                                   last_callback_id_;
+    static std::string                                           last_callback_name_;
+    static std::vector<aqlprofile_spm_available_configuration_t> captured_spm_configs_;
 
     // Mock callback functions for testing
     static hsa_status_t eventname_callback_mock(int id, const char* name, void* data)
@@ -632,17 +693,27 @@ protected:
         }
         return HSA_STATUS_ERROR_INVALID_ARGUMENT;
     }
+
+    static hsa_status_t capture_spm_configurations(
+        const aqlprofile_spm_available_configuration_t* cfg,
+        size_t                                          count,
+        void*)
+    {
+        captured_spm_configs_.assign(cfg, cfg + count);
+        return HSA_STATUS_SUCCESS;
+    }
 };
 
 // Initialize static members
-int         AqlProfileV2ApiTest::callback_call_count_ = 0;
-int         AqlProfileV2ApiTest::last_callback_id_    = -1;
-std::string AqlProfileV2ApiTest::last_callback_name_  = "";
+int                                                   AqlProfileV2ApiTest::callback_call_count_ = 0;
+int                                                   AqlProfileV2ApiTest::last_callback_id_   = -1;
+std::string                                           AqlProfileV2ApiTest::last_callback_name_ = "";
+std::vector<aqlprofile_spm_available_configuration_t> AqlProfileV2ApiTest::captured_spm_configs_{};
 
 TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_NullCallback)
 {
     aqlprofile_agent_info_v1_t info{};
-    info.agent_gfxip          = "gfx900";
+    info.agent_gfxip          = "gfx942";
     info.xcc_num              = 1;
     info.se_num               = 4;
     info.cu_num               = 64;
@@ -667,5 +738,177 @@ TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurations_InvalidAgent)
 
     EXPECT_EQ(aqlprofile_spm_query_agent_configurations(agent, cb, nullptr),
               HSA_STATUS_ERROR_INVALID_AGENT);
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurationsGfx9Interval)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    captured_spm_configs_.clear();
+
+    ASSERT_EQ(aqlprofile_spm_query_agent_configurations(
+                  agent, &AqlProfileV2ApiTest::capture_spm_configurations, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(captured_spm_configs_.size(), 1u);
+    EXPECT_EQ(captured_spm_configs_[0].interval.mode, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK);
+    EXPECT_EQ(captured_spm_configs_[0].interval.min_interval, 32u);
+    EXPECT_EQ(captured_spm_configs_[0].interval.max_interval, static_cast<uint64_t>(0x10000 - 32));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmQueryAgentConfigurationsGfx11Interval)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx1100";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    captured_spm_configs_.clear();
+
+    ASSERT_EQ(aqlprofile_spm_query_agent_configurations(
+                  agent, &AqlProfileV2ApiTest::capture_spm_configurations, nullptr),
+              HSA_STATUS_SUCCESS);
+    ASSERT_EQ(captured_spm_configs_.size(), 2u);
+    EXPECT_EQ(captured_spm_configs_[0].interval.mode, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_SCLK);
+    EXPECT_EQ(captured_spm_configs_[0].interval.min_interval, 1u);
+    EXPECT_EQ(captured_spm_configs_[0].interval.max_interval, 0x10000u);
+    EXPECT_EQ(captured_spm_configs_[1].interval.mode, AQLPROFILE_SPM_PARAMETER_SAMPLE_MODE_REFCLK);
+    EXPECT_EQ(captured_spm_configs_[1].interval.min_interval, 1u);
+    EXPECT_EQ(captured_spm_configs_[1].interval.max_interval, 0x10000u);
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGpuGateStillClosed)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx1100";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.event_id   = 1;
+
+    EXPECT_FALSE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGfx9SqDefaultDepth)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.event_id   = 1;
+
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGfx9SqRejectsWrongExplicitDepth)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name            = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.event_id              = 1;
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_16_BITS;
+
+    EXPECT_FALSE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedGfx9SqAcceptsExplicit32Bit)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name            = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SQ;
+    event.event_id              = 1;
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_32_BITS;
+
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedRejectsBlockWithoutSpmSupport)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx900";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_GRBM;
+    event.event_id   = 1;
+
+    EXPECT_FALSE(aqlprofile_spm_is_event_supported(agent, event));
+}
+
+TEST_F(AqlProfileV2ApiTest, SpmIsEventSupportedNonSqDepthOptions)
+{
+    aqlprofile_agent_info_v1_t info{};
+    info.agent_gfxip          = "gfx942";
+    info.xcc_num              = 1;
+    info.se_num               = 4;
+    info.cu_num               = 64;
+    info.shader_arrays_per_se = 2;
+    info.domain               = 0;
+    info.location_id          = 0x1234;
+    auto agent                = aql_profile::RegisterAgent(&info);
+
+    aqlprofile_pmc_event_t event{};
+    event.block_name = HSA_VEN_AMD_AQLPROFILE_BLOCK_NAME_SPI;
+    event.event_id   = 1;
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_NONE;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_16_BITS;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
+
+    event.flags.spm_flags.depth = AQLPROFILE_SPM_DEPTH_32_BITS;
+    EXPECT_TRUE(aqlprofile_spm_is_event_supported(agent, event));
 }
 }  // namespace aql_profile_v2_tests

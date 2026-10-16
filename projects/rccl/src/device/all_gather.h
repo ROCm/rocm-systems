@@ -11,7 +11,7 @@
 
 namespace {
 template <typename T, typename RedOp, typename Proto, bool isNetOffload = false>
-#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && !defined(__gfx1250__)
+#if defined(USE_INDIRECT_FUNCTION_CALL) && !defined(__gfx942__) && !defined(__gfx950__) && (!defined(__gfx1250__) && !defined(__gfx1250_strict__))
 __device__ void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
 #else
 __device__ __attribute__((noinline)) void runRing(int tid, int nthreads, struct ncclDevWorkColl* work) {
@@ -178,8 +178,8 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
     ncclCollCbdPart(work, ncclShmem.channelId, Proto::Id, sizeof(T), &count, &channelOffset, &channelCount,
                     &chunkCount);
 
-    static constexpr int nworkers = NCCL_PAT_NWORKERS;
-    static constexpr int nGatherWorkers = NCCL_MAX_NTHREADS - NCCL_PAT_NWORKERS - WARP_SIZE;
+    const int nworkers = work->isOneRPN ? NCCL_PAT_NWORKERS : NCCL_PAT_MULTI_RPN_NWORKERS;
+    const int nGatherWorkers = NCCL_MAX_NTHREADS - nworkers - WARP_SIZE;
     struct ncclPatShmem* shmem = (struct ncclPatShmem*)ncclScratchForWarp(0);
     uint64_t pollCount = 0;
     (void)pollCount; // unused variable - compiler warning
@@ -203,7 +203,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* poll = &ps->flags;
-          while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != 0) {
+          while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != 0) {
             pollCount++; // Wait for workers to be done with step 'step-NCCL_SHMEM_PAT_STEPS'
           }
           patAlgo.getNextOp(ps);
@@ -231,14 +231,14 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* poll = &ps->flags;
-          while (__hip_atomic_load(poll, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) == 0) {
+          while (__scoped_atomic_load_n(poll, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) == 0) {
             pollCount++; // Wait for compute thread
           }
           int last = ps->last;
           prims.patCopy(ps, shmem);
           if (tidInGroup == 0)
-            __hip_atomic_store(poll, 0, __ATOMIC_RELEASE,
-                               __HIP_MEMORY_SCOPE_WORKGROUP); // Return element to compute thread
+            __scoped_atomic_store_n(poll, 0, __ATOMIC_RELEASE,
+                               __MEMORY_SCOPE_WRKGRP); // Return element to compute thread
           if (last) break;
           step += nGroups;
         }
@@ -249,7 +249,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
       if (tid == NCCL_MAX_NTHREADS - 1) {
         // Algo computation thread
         size_t patCount = count * localRanks;
-        PatAGAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, NCCL_PAT_NWORKERS / WARP_SIZE, channelOffset,
+        PatAGAlgorithm<T> patAlgo(chunkCount * sizeof(T), NCCL_STEPS, nworkers / WARP_SIZE, channelOffset,
                                   channelOffset + channelCount, patCount, chunkCount, node, nNodes,
                                   ncclShmem.comm.patSharedQps);
         shmem->parallelFactor = patAlgo.getParallelFactor();
@@ -257,9 +257,9 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != -1) pollCount++;
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != -1) pollCount++;
           patAlgo.getNextOp(ps);
-          __hip_atomic_store(schedulerStep, step, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP);
+          __scoped_atomic_store_n(schedulerStep, step, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP);
           int last = ps->last;
           step++;
           if (last == 2) break;
@@ -285,7 +285,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != step) pollCount++;
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != step) pollCount++;
           int last = ps->last;
           prims.template patCopy<true>(ps, shmem);
           if (last) break;
@@ -298,7 +298,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         int gatherTid = tid - nworkers;
         Primitives<T, RedOp, FanAsymmetric<NCCL_MAX_NVLS_ARITY, 0>, /*Direct=*/0, Proto, 0> prims(
           gatherTid, nGatherWorkers, nvls->up, nullptr, inputBuf, outputBuf, work->redOpArg,
-          /*group=*/1, /*connIndexRecv=*/1, /*connIndexSend=*/0);
+          /*group=*/NCCL_PAT_MULTI_RPN_NWORKERS / WARP_SIZE, /*connIndexRecv=*/1, /*connIndexSend=*/0);
 
         int parallelFactor = 0;
         volatile int* pfPtr = &shmem->parallelFactor;
@@ -307,7 +307,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
         while (1) {
           struct ncclPatStep* ps = shmem->patSteps + (step % NCCL_SHMEM_PAT_STEPS);
           int* schedulerStep = &ps->step;
-          while (__hip_atomic_load(schedulerStep, __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_WORKGROUP) != step) pollCount++;
+          while (__scoped_atomic_load_n(schedulerStep, __ATOMIC_ACQUIRE, __MEMORY_SCOPE_WRKGRP) != step) pollCount++;
           int last = ps->last;
           prims.patGather(ps, shmem, step, parallelFactor, count);
           int localIdx = step % parallelFactor;
@@ -317,7 +317,7 @@ struct RunWorkColl<ncclFuncAllGather, T, RedOp, NCCL_ALGO_PAT, NCCL_PROTO_SIMPLE
             int waveStart = step - localIdx;
             for (int i = 0; i < parallelFactor; i++) {
               struct ncclPatStep* donePs = shmem->patSteps + ((waveStart + i) % NCCL_SHMEM_PAT_STEPS);
-              __hip_atomic_store(&donePs->step, -1, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_WORKGROUP);
+              __scoped_atomic_store_n(&donePs->step, -1, __ATOMIC_RELEASE, __MEMORY_SCOPE_WRKGRP);
             }
           }
           if (last == 2) break;

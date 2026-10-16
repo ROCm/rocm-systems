@@ -29,7 +29,10 @@ get_uncovered(const std::set<Tp, Args...>& _covered,
     std::set<Tp, Args...> _v{};
     for(auto&& itr : _possible)
     {
-        if(_covered.count(itr) == 0) _v.emplace(itr);
+        if(_covered.count(itr) == 0)
+        {
+            _v.emplace(itr);
+        }
     }
     return _v;
 }
@@ -44,7 +47,9 @@ get_uncovered(const std::vector<Tp, Args...>& _covered,
     {
         if(!std::any_of(_covered.begin(), _covered.end(),
                         [itr](auto&& _entry) { return _entry == itr; }))
+        {
             _v.emplace_back(itr);
+        }
     }
     return _v;
 }
@@ -54,11 +59,17 @@ code_coverage::data&
 code_coverage::data::operator+=(const data& rhs)
 {
     for(auto&& itr : rhs.addresses)
+    {
         addresses.emplace(itr);
+    }
     for(auto&& itr : rhs.modules)
+    {
         modules.emplace(itr);
+    }
     for(auto&& itr : rhs.modules)
+    {
         modules.emplace(itr);
+    }
     return *this;
 }
 
@@ -143,11 +154,26 @@ coverage_data::operator!=(const coverage_data& rhs) const
 bool
 coverage_data::operator<(const coverage_data& rhs) const
 {
-    if(count != rhs.count) return count < rhs.count;
-    if(module != rhs.module) return module < rhs.module;
-    if(function != rhs.function) return function < rhs.function;
-    if(address != rhs.address) return address < rhs.address;
-    if(line != rhs.line) return line < rhs.line;
+    if(count != rhs.count)
+    {
+        return count < rhs.count;
+    }
+    if(module != rhs.module)
+    {
+        return module < rhs.module;
+    }
+    if(function != rhs.function)
+    {
+        return function < rhs.function;
+    }
+    if(address != rhs.address)
+    {
+        return address < rhs.address;
+    }
+    if(line != rhs.line)
+    {
+        return line < rhs.line;
+    }
     return source < rhs.source;
 }
 

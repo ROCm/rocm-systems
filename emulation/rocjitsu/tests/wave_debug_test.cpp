@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
@@ -928,13 +929,31 @@ TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
   EXPECT_FALSE(wave->fatal_exception_pending());
 }
 
-TEST(WaveDebugTest, IllegalInstructionWithoutDebuggerHalts) {
+TEST(WaveDebugTest, IllegalInstructionWithoutHandlerHalts) {
   WaveDebugFixture fx;
   fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
   auto *wave = fx.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
   fx.cu->step();
   EXPECT_TRUE(wave->is_halted());
+}
+
+TEST(WaveDebugTest, Pm4DecodeFailureDoesNotNotifyAqlOwner) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
+  uint32_t notifications = 0;
+  fx.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &) {
+    ++notifications;
+    return true;
+  });
+  auto failure = std::make_shared<amdgpu::Pm4FailureState>();
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_pm4_failure(failure);
+  fx.cu->step();
+  EXPECT_TRUE(failure->failed.load());
+  EXPECT_TRUE(wave->is_halted());
+  EXPECT_EQ(notifications, 0u);
 }
 
 TEST(WaveDebugTest, STrapWithoutConfiguredHandlerAdvancesPcWithoutChangingWaveState) {
@@ -1324,7 +1343,7 @@ TEST(WaveDebugTest, Gfx1250CwsrMatchesDbgapiWave32LayoutAndRoundTrips) {
   EXPECT_EQ(restored.queue_packet_id, wave.queue_packet_id);
   EXPECT_EQ(restored.trap_id, wave.trap_id);
   ASSERT_EQ(restored.lds.size(), 1024u);
-  EXPECT_TRUE(std::equal(wave.lds.begin(), wave.lds.end(), restored.lds.begin()));
+  EXPECT_TRUE(std::ranges::equal(wave.lds, std::span(restored.lds).first(wave.lds.size())));
   for (uint32_t r = 0; r < wave.num_vgprs; ++r)
     for (uint32_t lane = 0; lane < 32; ++lane)
       EXPECT_EQ(restored.vgprs[r * 64 + lane], wave.vgprs[r * 64 + lane]);
@@ -1421,7 +1440,7 @@ TEST(WaveDebugTest, CwsrSerializationRoundTripsThroughDbgapiLayout) {
         EXPECT_EQ(out.vgprs[r * 64 + l], in.vgprs[r * 64 + l]) << "vgpr " << r << " lane " << l;
     if (in.is_first_in_group) {
       ASSERT_GE(out.lds.size(), in.lds.size());
-      EXPECT_TRUE(std::equal(in.lds.begin(), in.lds.end(), out.lds.begin()));
+      EXPECT_TRUE(std::ranges::equal(in.lds, std::span(out.lds).first(in.lds.size())));
     } else {
       EXPECT_TRUE(out.lds.empty());
     }

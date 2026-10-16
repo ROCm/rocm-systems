@@ -37,7 +37,11 @@ template <> struct QueuePairTraits<QueuePairIONIC> {
   static_assert(InlineMax == 32, "ionic can send up to 32 bytes inline in a WQE");
 
   /*
-   * @brief ionic preferred inlining threshold is the same as the maximum
+   * @brief ionic preferred inlining threshold matches the hardware maximum.
+   * Inlining up to InlineMax (32B) avoids a second NIC DMA for the payload.
+   * The earlier byte-by-byte inline copy made larger inlines costly; with the
+   * constant-width copy_inline_payload (one or two wide VMEM ops, no byte loop)
+   * latency is flat across 1..32B, so there is no reason to cap below InlineMax.
    */
   static constexpr size_t InlineThreshold = InlineMax;
 };
@@ -200,7 +204,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
+        copy_inline_payload(wqe->common.pld.data, laddr, size);
       }
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
@@ -209,8 +213,8 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma(
     }
   }
 
-  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
-    __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_store_n(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
+    __MEMORY_SCOPE_DEVICE);
 
   commit_sq(wf_info, my_sq_prod, num_wqes);
 }
@@ -258,7 +262,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
         // TODO why is this needed?
         wqe->common.pld.data[0] = 1;
       } else {
-        memcpy(wqe->common.pld.data, reinterpret_cast<const void*>(laddr), size);
+        copy_inline_payload(wqe->common.pld.data, laddr, size);
       }
     } else {
       wqe->common.pld.sgl[0].va   = endian::to_be<uint64_t>(laddr);
@@ -267,7 +271,7 @@ __device__ __noinline__ void QueuePairIONIC::post_wqe_rma_single(
     }
   }
 
-  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_store_n(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
   commit_sq_single(my_sq_prod, num_wqes);
 }
@@ -327,8 +331,8 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
   wqe->atomic_v2.local_va = endian::to_be(reinterpret_cast<uintptr_t>(atomic_laddr));
   wqe->atomic_v2.lkey     = get_atomic_lkey<Fetch>();
 
-  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
-    __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_store_n(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE,
+    __MEMORY_SCOPE_DEVICE);
 
   cons = commit_sq(wf_info, my_sq_prod, num_wqes);
 
@@ -391,7 +395,7 @@ __device__ __noinline__ QueuePairIONIC::amo_ret_t<Fetch> QueuePairIONIC::post_wq
   wqe->atomic_v2.local_va = endian::to_be(reinterpret_cast<uintptr_t>(atomic_laddr));
   wqe->atomic_v2.lkey     = get_atomic_lkey<Fetch>();
 
-  __hip_atomic_store(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+  __scoped_atomic_store_n(&wqe->base.flags, wqe_flags, __ATOMIC_RELEASE, __MEMORY_SCOPE_DEVICE);
 
   cons = commit_sq_single(my_sq_prod, num_wqes);
 
@@ -415,8 +419,8 @@ __device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq(
 
   // reserve space for wqes in sq
   if (wf_info.is_pe_group_first) {
-    my_sq_prod = __hip_atomic_fetch_add(&sq.pos, num_wqes, __ATOMIC_RELAXED,
-                 __HIP_MEMORY_SCOPE_AGENT);
+    my_sq_prod = __scoped_atomic_fetch_add(&sq.pos, num_wqes, __ATOMIC_RELAXED,
+                 __MEMORY_SCOPE_DEVICE);
   }
   my_sq_prod = __shfl(my_sq_prod, wf_info.pe_group_first_phys_lane_id);
 
@@ -431,7 +435,7 @@ __device__ __forceinline__ uint32_t QueuePairIONIC::reserve_sq_single(
   uint32_t my_sq_prod = 0;
 
   // reserve space for wqes in sq
-  my_sq_prod = __hip_atomic_fetch_add(&sq.pos, num_wqes, __ATOMIC_RELAXED, __HIP_MEMORY_SCOPE_AGENT);
+  my_sq_prod = __scoped_atomic_fetch_add(&sq.pos, num_wqes, __ATOMIC_RELAXED, __MEMORY_SCOPE_DEVICE);
 
   // wait for that space to be available
   quiet_internal_ccqe_single(my_sq_prod + num_wqes - sq.mask);

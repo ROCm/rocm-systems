@@ -602,6 +602,142 @@ TEST(TrampolineBuilderPlan, AnchorExecArgumentsCostOneWordEach) {
   EXPECT_EQ(mask.before_word_count, immediates.before_word_count - 2);
 }
 
+// A log-buffer argument reads the entry-storage pair, so like an EXEC-sourced
+// one its v_mov_b32 carries no literal and costs a single word.
+TEST(TrampolineBuilderPlan, LogBufferArgumentsCostOneWordEach) {
+  TrampolinePlan immediates;
+  immediates.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  immediates.probe_args = {probe_arg_imm(1), probe_arg_imm(2)};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(immediates, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  TrampolinePlan pointer;
+  pointer.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  pointer.entry_storage_base = 10;
+  pointer.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}, {ProbeArgSource::LogBufferPtrHi, 0}};
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(pointer, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  EXPECT_EQ(pointer.before_word_count, immediates.before_word_count - 2);
+}
+
+// The pair carries a value produced once at kernel entry and read at arbitrary
+// later sites, so nothing in the envelope may land on it. Liveness cannot say
+// so: the prologue's write lives in the cave, which leaves the pair reading dead
+// at every anchor. With only s4 live the target pair would otherwise be s[0:1],
+// which is what makes this observable rather than accidental.
+TEST(TrampolineBuilderPlan, EnvelopeTempsAvoidTheEntryStoragePair) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.entry_storage_base = 0;
+  plan.preserve_exec = true;
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(0), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  const RegisterRef storage{RegClass::SGPR, 0, 2};
+  EXPECT_NE(plan.target_pair_base, 0u);
+  EXPECT_FALSE(plan.builder_clobbers.contains(storage));
+  EXPECT_NE(plan.scc_temp, 0u);
+  EXPECT_NE(plan.scc_temp, 1u);
+  for (const SpecialStateSlot &s : plan.special_state_saves) {
+    EXPECT_NE(s.temp_base, 0u);
+    EXPECT_NE(s.temp_base, 1u);
+  }
+}
+
+// Keeping the envelope off the pair is not enough: the probe body runs with the
+// pointer still in it. A body that writes the pair destroys the value for every
+// site after this one, and nothing brackets it, so the site is rejected.
+TEST(TrampolineBuilderPlan, ProbeBodyClobberingEntryStorageFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.entry_storage_base = 10;
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(0), make_sgpr_set({4}),
+                                                  make_sgpr_set({11}), &err));
+  EXPECT_NE(err.find("entry-storage pair"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+// Both lanes must sit inside the range the temps are drawn from; a pair at
+// or past the bound is one the exclusion cannot keep the envelope away from.
+TEST(TrampolineBuilderPlan, EntryStoragePairPastTheKernelAllocationFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.kernel_sgpr_count = 16;
+  plan.entry_storage_base = 15;
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(0), make_sgpr_set({4}),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("entry-storage pair"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+// A 32-SGPR kernel with s0..s17 live and the entry-storage pair at s[18:19],
+// passing the pointer with SCC, EXEC and VCC preserved. The target pair, SCC
+// temp and EXEC save take s[20:21], s22 and s[24:25], so the VCC save is next in
+// line at s[26:27].
+TrampolinePlan entry_storage_crowded_plan(rj_code_arch_t arch) {
+  TrampolinePlan plan;
+  plan.arch = arch;
+  plan.kernel_sgpr_count = 32;
+  plan.entry_storage_base = 18;
+  plan.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
+  plan.preserve_scc = true;
+  plan.preserve_exec = true;
+  plan.preserve_vcc = true;
+  return plan;
+}
+
+RegisterSet sgprs_below(uint16_t count) {
+  RegisterSet live;
+  for (uint16_t i = 0; i < count; ++i)
+    live.expand(RegisterRef{RegClass::SGPR, i, 1});
+  return live;
+}
+
+// On CDNA s[26:27] holds FLAT_SCRATCH, so the VCC save has no room left.
+TEST(TrampolineBuilderPlan, EnvelopeTempsStayBelowTheCdnaSpecialRegisterTail) {
+  TrampolinePlan plan = entry_storage_crowded_plan(ROCJITSU_CODE_ARCH_CDNA4);
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), sgprs_below(18),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("VCC preservation temp"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
+// RDNA keeps VCC outside the SGPR file, so the same site saves VCC in s[26:27].
+TEST(TrampolineBuilderPlan, RdnaEnvelopeTempsUseTheWholeAllocation) {
+  TrampolinePlan plan = entry_storage_crowded_plan(ROCJITSU_CODE_ARCH_RDNA4);
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), sgprs_below(18),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  const uint16_t vcc_lo = scalar_operand_vcc_lo(plan.arch);
+  const auto saved =
+      std::ranges::find_if(plan.special_state_saves,
+                           [&](const SpecialStateSlot &slot) { return slot.operand == vcc_lo; });
+  ASSERT_NE(saved, plan.special_state_saves.end());
+  EXPECT_EQ(saved->temp_base, 26u);
+}
+
+// A kernel with no entry prologue has no pair to read, so the argument names a
+// value the framework cannot produce at this site.
+TEST(TrampolineBuilderPlan, LogBufferArgumentWithoutEntryStorageFails) {
+  TrampolinePlan plan;
+  plan.arch = ROCJITSU_CODE_ARCH_CDNA2;
+  plan.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
+  std::string err;
+  EXPECT_FALSE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
+                                                  /*probe_body_clobbers=*/{}, &err));
+  EXPECT_NE(err.find("no entry-storage pair"), std::string::npos) << err;
+  EXPECT_FALSE(plan.is_probe_call);
+}
+
 // A full-exec site opens the full-mask window even with nothing to spill and no
 // arguments, since the probe itself runs inside it. Two toggles rather than
 // three: the widen, and the re-widen guarding the (here empty) epilogue against
@@ -625,8 +761,8 @@ TEST(TrampolineBuilderPlan, FullExecOpensTheWindowAndCostsTwoToggles) {
       << err;
 
   const uint16_t exec_lo = scalar_operand_exec_lo(full.arch);
-  EXPECT_TRUE(std::any_of(full.special_state_saves.begin(), full.special_state_saves.end(),
-                          [&](const SpecialStateSlot &s) { return s.operand == exec_lo; }));
+  EXPECT_TRUE(std::ranges::any_of(full.special_state_saves,
+                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; }));
   constexpr uint32_t kExecToggles = 2;
   constexpr uint32_t kExecSaveRestore = 2; // the EXEC temp's s_mov pair
   EXPECT_EQ(full.before_word_count, masked.before_word_count + kExecToggles + kExecSaveRestore);
@@ -848,11 +984,11 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
   const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
-  const auto widen_at = std::find(w.begin(), w.end(), widen);
+  const auto widen_at = std::ranges::find(w, widen);
   ASSERT_NE(widen_at, w.end()) << "no full-mask widen; an argument site must open the window";
 
   // The anchor-mask restore closing the window is the next EXEC write after it.
-  const auto restore_at = std::find_if(widen_at + 1, w.end(), [&](uint32_t word) {
+  const auto restore_at = std::ranges::find_if(widen_at + 1, w.end(), [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_mov_b64(plan.arch) && decode_sop1_sdst(word) == exec_lo;
   });
   ASSERT_NE(restore_at, w.end());
@@ -868,7 +1004,7 @@ TEST(TrampolineBuilderEmit, MaterializesArgumentsInsideTheFullMaskWindow) {
   EXPECT_EQ(args_begin[3], arg1[1]);
 
   // And still before the call.
-  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+  const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
@@ -891,8 +1027,8 @@ TEST(TrampolineBuilderEmit, AnchorExecArgumentsReadTheSavedPair) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const auto saved = std::find_if(plan.special_state_saves.begin(), plan.special_state_saves.end(),
-                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
+  const auto saved = std::ranges::find_if(
+      plan.special_state_saves, [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
   ASSERT_NE(saved, plan.special_state_saves.end());
 
   // Both halves come from the temp pair, in declaration order into v0 and v1.
@@ -900,13 +1036,51 @@ TEST(TrampolineBuilderEmit, AnchorExecArgumentsReadTheSavedPair) {
   const uint32_t lo = build_v_mov_b32_src(0, saved->temp_base, plan.arch);
   const uint32_t hi =
       build_v_mov_b32_src(1, static_cast<uint16_t>(saved->temp_base + 1), plan.arch);
-  const auto lo_at = std::find(w.begin(), w.end(), lo);
+  const auto lo_at = std::ranges::find(w, lo);
   ASSERT_NE(lo_at, w.end());
   ASSERT_NE(lo_at + 1, w.end());
   EXPECT_EQ(lo_at[1], hi);
 
   // Nothing reads the live EXEC register into a VGPR.
-  EXPECT_EQ(std::count(w.begin(), w.end(), build_v_mov_b32_src(0, exec_lo, plan.arch)), 0);
+  EXPECT_EQ(std::ranges::count(w, build_v_mov_b32_src(0, exec_lo, plan.arch)), 0);
+}
+
+// Both halves of the pointer come straight out of the entry-storage pair the
+// prologue loaded, in declaration order into the ABI's argument VGPRs.
+TEST(TrampolineBuilderEmit, LogBufferArgumentsReadTheEntryStoragePair) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.entry_storage_base = 20;
+  plan.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}, {ProbeArgSource::LogBufferPtrHi, 0}};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(2), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+  const auto bytes = TrampolineBuilder::emit_probe_call(plan, &err);
+  ASSERT_TRUE(bytes.has_value()) << err;
+
+  const std::vector<uint32_t> &w = bytes->trampoline_words;
+  const uint32_t lo = build_v_mov_b32_src(0, 20, plan.arch);
+  const uint32_t hi = build_v_mov_b32_src(1, 21, plan.arch);
+  const auto lo_at = std::find(w.begin(), w.end(), lo);
+  ASSERT_NE(lo_at, w.end());
+  ASSERT_NE(lo_at + 1, w.end());
+  EXPECT_EQ(lo_at[1], hi);
+}
+
+// Emission screens the combination too rather than inheriting planning's
+// rejection: the two entry points are separately callable.
+TEST(TrampolineBuilderEmit, LogBufferArgumentWithoutEntryStorageFails) {
+  TrampolinePlan plan = make_probe_plan();
+  plan.entry_storage_base = 20;
+  plan.probe_args = {{ProbeArgSource::LogBufferPtrLo, 0}};
+  std::string err;
+  ASSERT_TRUE(TrampolineBuilder::plan_probe_call(plan, arg_abi(1), make_sgpr_set({4}),
+                                                 /*probe_body_clobbers=*/{}, &err))
+      << err;
+
+  plan.entry_storage_base.reset();
+  EXPECT_FALSE(TrampolineBuilder::emit_probe_call(plan, &err).has_value());
+  EXPECT_NE(err.find("no entry-storage pair"), std::string::npos) << err;
 }
 
 // Under force_full_exec the call is reached with EXEC still -1: no anchor-mask
@@ -925,9 +1099,9 @@ TEST(TrampolineBuilderEmit, FullExecReachesTheCallWithTheWindowOpen) {
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
   const uint32_t widen = build_s_mov_b64(exec_lo, scalar_inline_neg_one(plan.arch), plan.arch);
-  const auto widen_at = std::find(w.begin(), w.end(), widen);
+  const auto widen_at = std::ranges::find(w, widen);
   ASSERT_NE(widen_at, w.end());
-  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+  const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
@@ -935,7 +1109,7 @@ TEST(TrampolineBuilderEmit, FullExecReachesTheCallWithTheWindowOpen) {
   ASSERT_LT(widen_at - w.begin(), swappc - w.begin());
 
   // No EXEC write of any kind between the widen and the call.
-  const auto between = std::find_if(widen_at + 1, swappc, [&](uint32_t word) {
+  const auto between = std::ranges::find_if(widen_at + 1, swappc, [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_mov_b64(plan.arch) && decode_sop1_sdst(word) == exec_lo;
   });
   EXPECT_EQ(between, swappc) << "the anchor mask must not be restored before a full-exec call";
@@ -956,16 +1130,16 @@ TEST(TrampolineBuilderEmit, WithoutFullExecTheAnchorMaskIsRestoredBeforeTheCall)
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint16_t exec_lo = scalar_operand_exec_lo(plan.arch);
-  const auto saved = std::find_if(plan.special_state_saves.begin(), plan.special_state_saves.end(),
-                                  [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
+  const auto saved = std::ranges::find_if(
+      plan.special_state_saves, [&](const SpecialStateSlot &s) { return s.operand == exec_lo; });
   ASSERT_NE(saved, plan.special_state_saves.end());
   const uint32_t restore = build_s_mov_b64(exec_lo, saved->temp_base, plan.arch);
-  const auto swappc = std::find_if(w.begin(), w.end(), [&](uint32_t word) {
+  const auto swappc = std::ranges::find_if(w, [&](uint32_t word) {
     return decode_sop1_op(word) == sop1_op_swappc_b64(plan.arch) &&
            decode_sop1_sdst(word) == plan.link_pair_base;
   });
   ASSERT_NE(swappc, w.end());
-  EXPECT_NE(std::find(w.begin(), swappc, restore), swappc);
+  EXPECT_NE(std::ranges::find(w.begin(), swappc, restore), swappc);
 }
 
 // A call passing nothing emits no argument words at all -- the v0 write that a
@@ -978,7 +1152,7 @@ TEST(TrampolineBuilderEmit, NoArgumentsEmitsNoArgumentWords) {
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
   const uint32_t v_mov_v0 = build_v_mov_b32_imm(0, 0, plan.arch)[0];
-  EXPECT_EQ(std::count(w.begin(), w.end(), v_mov_v0), 0);
+  EXPECT_EQ(std::ranges::count(w, v_mov_v0), 0);
 }
 
 // The relocated original appears exactly once, after the call.
@@ -989,10 +1163,10 @@ TEST(TrampolineBuilderEmit, OriginalAppearsOnceAfterCall) {
   ASSERT_TRUE(bytes.has_value()) << err;
 
   const std::vector<uint32_t> &w = bytes->trampoline_words;
-  const auto first = std::find(w.begin(), w.end(), plan.original_words[0]);
+  const auto first = std::ranges::find(w, plan.original_words[0]);
   ASSERT_NE(first, w.end());
   // Exactly one occurrence.
-  EXPECT_EQ(std::count(w.begin(), w.end(), plan.original_words[0]), 1);
+  EXPECT_EQ(std::ranges::count(w, plan.original_words[0]), 1);
   // It sits after the whole envelope: the arch-agnostic before_word_count plus the
   // two boundary drains (top of envelope and immediately after the call return).
   const size_t d = build_wait_all_loads_complete(plan.arch).size();

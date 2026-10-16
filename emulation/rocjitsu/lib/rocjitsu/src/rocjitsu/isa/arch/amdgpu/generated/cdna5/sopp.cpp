@@ -115,6 +115,7 @@ SSetVgprMsbSopp::SSetVgprMsbSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {
@@ -192,6 +193,7 @@ STrapSopp::STrapSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {
@@ -250,6 +252,7 @@ SBarrierWaitSopp::SBarrierWaitSopp(const MachineInst *inst)
   src_operands_[0] = &simm16;
   num_src_ = 1;
   num_dst_ = 0;
+  flags_ |= XCNT_DRAIN;
   flags_ |= BARRIER;
 }
 
@@ -591,6 +594,8 @@ SSendmsgSopp::SSendmsgSopp(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {
@@ -613,6 +618,8 @@ SSendmsghaltSopp::SSendmsghaltSopp(const MachineInst *inst)
   num_src_ = 2;
   num_dst_ = 0;
   m0.apply_fieldless_caps(false, false, false);
+  flags_ |= MEMORY_WAIT_PRODUCER;
+  flags_ |= XCNT_DRAIN;
 }
 
 namespace detail {

@@ -77,9 +77,11 @@ struct MaskSimArch {
   rj_code_arch_t arch;
   uint32_t e_flags;
   uint32_t wave_size;
-  // Descriptor wave size must match what DbiSim dispatches, or the patch-time
-  // gates reason about a different kernel than the one that executes. Only RDNA
-  // has a choice to make; CDNA is wave64 by construction.
+  // The descriptor's wave32 bit drives the patch-time gates, which is all this
+  // selects. It does not reach execution: DbiSim synthesizes its own descriptor
+  // without the bit, so every target dispatches Wave64 and wave_size only says
+  // how many lanes to read back (see dbi_sim.h). Only RDNA has a bit to set;
+  // CDNA is Wave64 by construction.
   bool wave32;
 };
 
@@ -302,8 +304,7 @@ protected:
   // Wave32 only, and the counterpart of the case above: with no high EXEC dword
   // to deliver, the request is rejected at patch time. Asserting it here is what
   // makes this fixture's Wave32 descriptor observable -- without it the flag
-  // would be decorative, and the suite would plan against a Wave64 kernel while
-  // dispatching 32 lanes.
+  // would be decorative, since nothing else in the suite reads it.
   void expect_anchor_exec_high_dword_is_rejected() {
     ASSERT_EQ(a_.wave_size, 32u) << "exec_hi is rejected only on a wave32 kernel";
     auto target = bare_target();
@@ -369,9 +370,9 @@ protected:
     // reopening it for the spill loads. The anchor-mask restore that would sit
     // between them is what the policy omits, so the second match is the one under
     // test with no ambiguity about which is which.
-    ASSERT_EQ(std::count(sabotaged.begin(), sabotaged.end(), widen), 2);
-    auto it = std::find(sabotaged.begin(), sabotaged.end(), widen);
-    it = std::find(it + 1, sabotaged.end(), widen);
+    ASSERT_EQ(std::ranges::count(sabotaged, widen), 2);
+    auto it = std::ranges::find(sabotaged, widen);
+    it = std::ranges::find(it + 1, sabotaged.end(), widen);
     ASSERT_NE(it, sabotaged.end());
     *it = build_s_nop(0, a_.arch);
 
@@ -396,7 +397,7 @@ protected:
     const uint32_t widen =
         build_s_mov_b64(scalar_operand_exec_lo(a_.arch), scalar_inline_neg_one(a_.arch), a_.arch);
     std::vector<uint32_t> sabotaged = patched_text_;
-    auto it = std::find(sabotaged.begin(), sabotaged.end(), widen);
+    auto it = std::ranges::find(sabotaged, widen);
     ASSERT_NE(it, sabotaged.end()) << "full-mask widen not found in the patched text";
     *it = build_s_nop(0, a_.arch);
 
