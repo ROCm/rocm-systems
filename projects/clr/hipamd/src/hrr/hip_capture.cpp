@@ -1363,111 +1363,48 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 }
 
 // ---------------------------------------------------------------------------
-// Fat binary registration — record the binary blob
+// Fat binary registration — record the code object HIP took from it
 //
-// We capture the clang offload bundle blob so the replay can load it via
-// hipModuleLoadData, making all kernel names resolvable.
+// The bundle itself is not stored. HIP is handed a bare pointer and reads only
+// the header and the code object it picks for each GPU, with a size COMGR
+// gives it; a whole-bundle size could only come from the header, and nothing
+// bounds that. Replay resolves kernels and globals in the code objects the
+// archive holds, so the register event is kept without a blob.
 // ---------------------------------------------------------------------------
 
-// Byte size of a clang offload bundle, or 0 when the header is not one or fails
-// the checks HIP applies to it. HIP receives a registered fat binary as a bare
-// pointer, so it knows no image bound (image_bound in hip_fatbin.cpp) and these
-// checks are all that stands between the header and the read.
-static size_t compute_bundle_size(const void* blob) {
-  if (!blob) return 0;
-  const char* p = static_cast<const char*>(blob);
-
-  // Compressed format: magic "CCOB", header contains totalSize at byte 8.
-  if (std::memcmp(p, hip::symbols::kOffloadBundleCompressedMagicStr,
-                  hip::symbols::kOffloadBundleCompressedMagicStrSize - 1) == 0) {
-    constexpr size_t kHeaderSize =
-        offsetof(hip::symbols::ClangOffloadBundleCompressedHeader, compressedBinarydesc);
-    const auto* hdr = static_cast<const hip::symbols::ClangOffloadBundleCompressedHeader*>(blob);
-    if (hdr->totalSize < kHeaderSize) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: compressed bundle "
-          "totalSize %u is smaller than its %zu-byte header",
-          blob, static_cast<unsigned>(hdr->totalSize), kHeaderSize);
-      return 0;
-    }
-    return static_cast<size_t>(hdr->totalSize);
+// Record the code object HIP extracted from a digested fat binary for the
+// current device, or device 0 before one is current, the device the global
+// variable sweep resolves on. A fat binary HIP has not digested yet has
+// nothing loaded; a launch from it records its code object then.
+static void record_fat_binary_code_object(hip::FatBinaryInfo* fbi) {
+  if (!fbi) return;
+  int dev = hip::ihipGetDevice();
+  if (dev < 0) dev = 0;
+  if (static_cast<size_t>(dev) >= hip::g_devices.size()) return;
+  amd::Program* prog = fbi->GetProgram(dev);
+  if (!prog) return;
+  const uint8_t* image = nullptr;
+  size_t size = 0;
+  {
+    std::lock_guard<std::mutex> lk(g_prog_hash_mu);
+    const amd::Device* device = hip::g_devices[dev]->devices()[0];
+    const auto& bin = prog->binary(*device);
+    image = std::get<0>(bin);
+    size = std::get<1>(bin).first;
   }
-
-  // Uncompressed format: magic "__CLANG_OFFLOAD_BUNDLE__" + numOfCodeObjects + entries.
-  if (std::memcmp(p, hip::symbols::kOffloadBundleUncompressedMagicStr,
-                  hip::symbols::kOffloadBundleUncompressedMagicStrSize - 1) != 0) {
-    return 0;  // Unknown format
-  }
-  const auto* hdr = static_cast<const hip::symbols::ClangOffloadBundleUncompressedHeader*>(blob);
-  uint64_t n = hdr->numOfCodeObjects;
-  if (n == 0) return 0;
-
-  // HIP hands COMGR only the first 4096 bytes, and COMGR reads the entry table from
-  // that slice and fails if a read runs off its end. __hipRegisterFatBinary passes
-  // no length, so this bound is also what keeps the walk below in range.
-  constexpr size_t kEntryTableLimit = 4096;
-  constexpr size_t kEntryHeaderSize = offsetof(hip::symbols::ClangOffloadBundleInfo, bundleEntryId);
-  size_t pos = offsetof(hip::symbols::ClangOffloadBundleUncompressedHeader, desc);
-  uint64_t end = 0;
-  for (uint64_t i = 0; i < n; i++) {
-    const auto* entry = reinterpret_cast<const hip::symbols::ClangOffloadBundleInfo*>(p + pos);
-    if (kEntryTableLimit - pos < kEntryHeaderSize ||
-        entry->bundleEntryIdSize > kEntryTableLimit - pos - kEntryHeaderSize) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu ends "
-          "past the first %zu bytes, where HIP looks for it",
-          blob, static_cast<unsigned long long>(i), kEntryTableLimit);
-      return 0;
-    }
-    pos += kEntryHeaderSize + static_cast<size_t>(entry->bundleEntryIdSize);
-    // HIP makes this check only for the code objects it picks for this host's GPUs.
-    // Every entry counts towards the end here, so capture checks them all.
-    const uint64_t entry_end = entry->offset + entry->size;
-    if (entry_end < entry->offset) {
-      LogPrintfWarning(
-          "[HRR capture] Fat binary at %p not recorded: bundle entry %llu has "
-          "an offset and size that overflow",
-          blob, static_cast<unsigned long long>(i));
-      return 0;
-    }
-    if (entry_end > end) end = entry_end;
-  }
-  static_assert(sizeof(size_t) >= sizeof(uint64_t), "a 64-bit bundle size must fit in size_t");
-  return static_cast<size_t>(end);
+  remember_program_hash(prog, image, size, hash_program_image(prog, image, size));
 }
 
 void** capture___hipRegisterFatBinary(const void* data) {
   void** r = g_real_compiler_table.__hipRegisterFatBinary_fn(data);
   // Shim is only installed when capture is active — no hip_capture_enabled() check needed.
 
-  // data is a __CudaFatBinaryWrapper* { magic, version, binary, dummy }.
-  // Capture the fat binary blob (binary field) so replay can load it via hipModuleLoadData.
-  struct __HRRFatBinaryWrapper { uint32_t magic; uint32_t version; const void* binary; const void* dummy; };
-  const auto* wrapper = static_cast<const __HRRFatBinaryWrapper*>(data);
-  const void* blob = (wrapper && (wrapper->magic == 0x48495046u /*HIPF*/ ||
-                                   wrapper->magic == 0x4B504948u /*HIPK*/))
-                     ? wrapper->binary : nullptr;
   // PlatformState is initialized before this shim is installed, so HIP has already
-  // digested the bundle, and no handle means it could not load it on this host: a bad
-  // header or, more often, no code object for any GPU here. Then no launch from it can
-  // succeed and be recorded, so replay never needs the blob.
-  if (blob && !r) {
-    LogPrintfWarning(
-        "[HRR capture] Fat binary at %p not recorded: HIP did not register it "
-        "(no code object for any GPU here, or a bad header)",
-        blob);
-    blob = nullptr;
-  }
-  size_t blob_size = blob ? compute_bundle_size(blob) : 0;
+  // digested the bundle and r, when set, is its FatBinaryInfo**.
+  if (r) record_fat_binary_code_object(*reinterpret_cast<hip::FatBinaryInfo**>(r));
 
   hrr_args___hipRegisterFatBinary a{};
-  a.ret      = reinterpret_cast<uint64_t>(r);
-  a.blob_size = static_cast<uint64_t>(blob_size);
-  if (blob && blob_size > 0) {
-    auto h = hrr_cap::writer::write_blob(blob, blob_size);
-    a.blob_hash_lo = h.lo;
-    a.blob_hash_hi = h.hi;
-  }
+  a.ret = reinterpret_cast<uint64_t>(r);
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
   return r;
 }
@@ -2609,22 +2546,14 @@ void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
 // Init / Shutdown
 // ---------------------------------------------------------------------------
 
-// Record a single fat binary blob as a HRR_API_HIPREGISTERFATBINARY event.
-// blob_ptr is the fbwrapper->binary pointer (the actual clang offload bundle).
-// These were registered before HIP initialized and are not digested yet, so
-// unlike the live shim there is no HIP verdict to check, only the header, and a
-// bundle with no code object for this host is still recorded.
-static void record_fat_binary_blob(const void* blob_ptr) {
-  if (!blob_ptr) return;
-  size_t blob_size = compute_bundle_size(blob_ptr);
-  if (blob_size == 0) return;
-
+// Record a fat binary registered before capture started as a
+// HRR_API_HIPREGISTERFATBINARY event, with the code object HIP has loaded from
+// it so far (fbi is null until HIP digests it).
+static void record_fat_binary(const void* data, hip::FatBinaryInfo* fbi) {
+  if (!data) return;
+  record_fat_binary_code_object(fbi);
   hrr_args___hipRegisterFatBinary a{};
-  a.ret      = 0;  // handle not meaningful at init time
-  a.blob_size = static_cast<uint64_t>(blob_size);
-  auto h = hrr_cap::writer::write_blob(blob_ptr, blob_size);
-  a.blob_hash_lo = h.lo;
-  a.blob_hash_hi = h.hi;
+  a.ret = 0;  // handle not meaningful at init time
   hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
 }
 
@@ -2744,14 +2673,13 @@ void hip_capture_init() {
     // the compiler dispatch table is fully populated.
     hip_capture_build_compiler_table();
 
-    // Retroactively record fat binaries that fired before our shims were live.
-    // __hipRegisterFatBinary fires at app static-init, before hip_capture_init().
-    hip::PlatformState::Instance().StatCO().ForEachFatBinaryBlob(record_fat_binary_blob);
-
-    // And the __device__ globals registered against them, for the same reason
-    // and in this order: the fat binaries have to be in the archive before the
-    // symbols that live inside them.
+    // Retroactively record the __device__ globals and fat binaries registered
+    // before our shims were live: both fire at app static-init, before
+    // hip_capture_init(). Globals first, because resolving one makes HIP load
+    // the code object holding it, which the fat binary sweep then records.
+    // Replay loads every code object before it replays any event.
     hip::PlatformState::Instance().StatCO().ForEachGlobalVar(record_registered_var);
+    hip::PlatformState::Instance().StatCO().ForEachFatBinary(record_fat_binary);
 
     std::call_once(g_hrr_atexit_once, [] { std::atexit(hip_capture_shutdown); });
 
@@ -2767,7 +2695,7 @@ void hip_capture_init() {
   #else
     // HRR capture is disabled
     // below to avoid -Wunused-function / -Wunused-variable
-    (void)&record_fat_binary_blob;
+    (void)&record_fat_binary;
     (void)&record_registered_var;
     (void)&hrr_install_clr_exception_handler;
     (void)&g_hrr_atexit_once;
