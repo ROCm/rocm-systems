@@ -296,7 +296,7 @@ TEST_F(PluginNetV10Microtest, GettersNeedTheV10Symbols) {
   EXPECT_STREQ(coll->name, "FakeColl10");
 }
 
-TEST_F(PluginNetV10Microtest, InitRunsOncePerProcessLifetime) {
+TEST_F(PluginNetV10Microtest, InitRunsOnceWhileAnyCommHoldsIt) {
   ncclNet_t* net = getNcclNet_v10(kLib);
   ncclNetCommConfig_t config{};
   void* ctx = &config;

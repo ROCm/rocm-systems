@@ -242,8 +242,8 @@ TEST_F(PluginNetV6Microtest, GettersNeedTheV6Symbols) {
   EXPECT_STREQ(coll->name, "FakeColl6");
 }
 
-// v6 plugins expect one init per process: later comms share it until every comm has finalized.
-TEST_F(PluginNetV6Microtest, NetInitRunsOncePerProcessLifetime) {
+// v6 plugins expect a single init: later comms share it until every comm has finalized.
+TEST_F(PluginNetV6Microtest, NetInitRunsOnceWhileAnyCommHoldsIt) {
   ncclNet_t* net = InitNet();
   InitNet();
   EXPECT_EQ(g_net.initCalls, 1);
@@ -364,7 +364,7 @@ TEST_F(PluginNetV6Microtest, IrecvClearsTheOptionalCompletionMarkerAndNarrowsSiz
   EXPECT_EQ(g_net.n, 0);
 }
 
-TEST_F(PluginNetV6Microtest, CollNetInitRunsOncePerProcessLifetime) {
+TEST_F(PluginNetV6Microtest, CollNetInitRunsOnceWhileAnyCommHoldsIt) {
   ncclCollNet_t* coll = InitCollNet();
   InitCollNet();
   EXPECT_EQ(g_coll.initCalls, 1);

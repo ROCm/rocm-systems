@@ -423,8 +423,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroPlugin -- src/plugin/net.cc, net/net_v*.cc and plugin_open.cc. Own binary: the
-  # tests supply their own logging, env and dlopen/dlsym seams, which would collide with the shared fakes.
+  # rccl-UnitTestsMicroPlugin -- src/plugin/net.cc, net/net_v*.cc, plugin_open.cc. Own binary: transport_stubs.cc
+  # defines ncclGpuGdrSupport; gin-plugin-init-test.cc, ncclPluginLibPaths, ncclClosePluginLib, ncclGetNetPluginLib.
   set(TEST_MICRO_PLUGIN_SOURCE_FILES
     plugin-net-test.cc
     plugin-open-test.cc

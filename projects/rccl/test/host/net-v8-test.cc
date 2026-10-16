@@ -260,8 +260,8 @@ TEST_F(PluginNetV8Microtest, GettersNeedTheV8Symbols) {
   EXPECT_STREQ(coll->name, "FakeColl8");
 }
 
-// v8 plugins expect one init per process: later comms share it until every comm has finalized.
-TEST_F(PluginNetV8Microtest, NetInitRunsOncePerProcessLifetime) {
+// v8 plugins expect a single init: later comms share it until every comm has finalized.
+TEST_F(PluginNetV8Microtest, NetInitRunsOnceWhileAnyCommHoldsIt) {
   ncclNet_t* net = InitNet();
   InitNet();
   EXPECT_EQ(g_net.initCalls, 1);
@@ -371,7 +371,7 @@ TEST_F(PluginNetV8Microtest, IrecvClearsTheOptionalCompletionMarkerAndNarrowsSiz
   EXPECT_EQ(g_net.n, 0);
 }
 
-TEST_F(PluginNetV8Microtest, CollNetInitRunsOncePerProcessLifetime) {
+TEST_F(PluginNetV8Microtest, CollNetInitRunsOnceWhileAnyCommHoldsIt) {
   ncclCollNet_t* coll = InitCollNet();
   InitCollNet();
   EXPECT_EQ(g_coll.initCalls, 1);

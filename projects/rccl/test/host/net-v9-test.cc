@@ -270,7 +270,7 @@ TEST_F(PluginNetV9Microtest, GettersNeedTheV9Symbols) {
   EXPECT_STREQ(coll->name, "FakeColl9");
 }
 
-TEST_F(PluginNetV9Microtest, InitRunsOncePerProcessLifetime) {
+TEST_F(PluginNetV9Microtest, InitRunsOnceWhileAnyCommHoldsIt) {
   ncclNet_t* net = getNcclNet_v9(kLib);
   ncclNetCommConfig_t config{};
   void* ctx = nullptr;

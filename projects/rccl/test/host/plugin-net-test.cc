@@ -369,8 +369,8 @@ TEST_F(PluginNetMicrotest, ListNoneOrEmptyLeavesOnlyInternals) {
   }
 }
 
-// NCCL_NET_MAX_PLUGINS (16) less the two internals leaves room for 14, but the log claims 13.
-TEST_F(PluginNetMicrotest, ListCapsExternalPluginsAndMisreportsTheCap) {
+// NCCL_NET_MAX_PLUGINS (16) less the two internals leaves room for 14, but the log claims 13; a fix flips this pin.
+TEST_F(PluginNetMicrotest, List_KnownBug_KeepsFourteenExternalsButLogsThirteen) {
   std::string list;
   for (int i = 0; i < 16; i++) list += (i ? ",p" : "p") + std::to_string(i);
   std::string log = CaptureLog([&] { BuildList(list.c_str()); });
@@ -741,9 +741,8 @@ TEST_F(PluginNetMicrotest, NetInitSecondCommReusesTheEnabledPlugin) {
   EXPECT_EQ(Lib(0).ncclNetPluginRefCount, 2);
 }
 
-// A plugin rejected by the device-version check is finalized, and ncclNetPluginFinalize decrements a refcount
-// that ncclNetPluginAssignToComm never incremented: it goes negative, so the library is never unloaded.
-TEST_F(PluginNetMicrotest, NetInitRejectedPluginLeavesANegativeRefCountAndStaysLoaded) {
+// A rejected plugin's finalize drops a refcount it never took, so the library is never unloaded; a fix flips this pin.
+TEST_F(PluginNetMicrotest, NetInit_KnownBug_RejectedPluginLeavesANegativeRefCount) {
   g_libs["ext"] = {12, 0};
   g_net[kExtA].deviceType = static_cast<ncclNetDeviceType>(0x42);
   BuildList("ext");
@@ -886,8 +885,8 @@ TEST_F(PluginNetMicrotest, InitFromParentRejectsADifferentNetNameButOnlyLogsTraf
   EXPECT_FALSE(LogHas(log, "trafficClass")) << log;
 }
 
-// A child with a netName under a parent without one (the default config) passes NULL to strcasecmp.
-TEST_F(PluginNetMicrotest, InitFromParentCrashesWhenOnlyTheChildHasANetName) {
+// A child with a netName under a parent without one passes NULL to strcasecmp; a fix flips this pin.
+TEST_F(PluginNetMicrotest, InitFromParent_KnownBug_CrashesWhenOnlyTheChildHasANetName) {
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   auto parent = std::make_unique<ncclComm>();
   comm_->config.netName = "IB";
@@ -951,7 +950,7 @@ TEST_F(PluginNetMicrotest, SetVirtDevCountRequiresEnabledAndNonNegative) {
 
 // GDR support. The answer is cached per cudaDev in a function-local static, so each case runs in a fresh process.
 
-class PluginNetGdrMicrotest : public PluginNetMicrotest {
+class PluginNetGdrMicrotestIsolated : public PluginNetMicrotest {
  protected:
   void SetUp() override {
     PluginNetMicrotest::SetUp();
@@ -962,7 +961,7 @@ class PluginNetGdrMicrotest : public PluginNetMicrotest {
   ncclNet_t net_;
 };
 
-TEST_F(PluginNetGdrMicrotest, StopsAtTheFirstCudaCapableDeviceAndCaches) {
+TEST_F(PluginNetGdrMicrotestIsolated, StopsAtTheFirstCudaCapableDeviceAndCaches) {
   RUN_ISOLATED_TEST("PluginNetGdr_StopsAtTheFirstCudaCapableDeviceAndCaches", [this]() {
     g_net[kIb].ndev = 4;
     g_net[kIb].cudaDevMask = 0b0110;
@@ -979,7 +978,7 @@ TEST_F(PluginNetGdrMicrotest, StopsAtTheFirstCudaCapableDeviceAndCaches) {
   });
 }
 
-TEST_F(PluginNetGdrMicrotest, NoCudaCapableDeviceMeansNoGdr) {
+TEST_F(PluginNetGdrMicrotestIsolated, NoCudaCapableDeviceMeansNoGdr) {
   RUN_ISOLATED_TEST("PluginNetGdr_NoCudaCapableDeviceMeansNoGdr", [this]() {
     g_net[kIb].ndev = 3;
     int gdr = -1;
@@ -995,7 +994,7 @@ TEST_F(PluginNetGdrMicrotest, NoCudaCapableDeviceMeansNoGdr) {
   });
 }
 
-TEST_F(PluginNetGdrMicrotest, ADevicesFailureIsRetried) {
+TEST_F(PluginNetGdrMicrotestIsolated, ADevicesFailureIsRetried) {
   RUN_ISOLATED_TEST("PluginNetGdr_ADevicesFailureIsRetried", [this]() {
     int gdr = -1;
     g_net[kIb].cudaDevMask = 0b1;
@@ -1010,9 +1009,9 @@ TEST_F(PluginNetGdrMicrotest, ADevicesFailureIsRetried) {
   });
 }
 
-// The slot is set to 0 before the device scan, so a getProperties failure caches "no GDR" for good.
-TEST_F(PluginNetGdrMicrotest, AGetPropertiesFailureCachesNoGdr) {
-  RUN_ISOLATED_TEST("PluginNetGdr_AGetPropertiesFailureCachesNoGdr", [this]() {
+// The slot is zeroed before the scan, so one getProperties failure caches "no GDR"; a fix (#11701) flips this pin.
+TEST_F(PluginNetGdrMicrotestIsolated, KnownBug_GetPropertiesFailureCachesNoGdr) {
+  RUN_ISOLATED_TEST("PluginNetGdr_KnownBug_GetPropertiesFailureCachesNoGdr", [this]() {
     int gdr = -1;
     g_net[kIb].cudaDevMask = 0b1;
     g_net[kIb].propsResult = ncclRemoteError;

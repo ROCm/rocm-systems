@@ -340,8 +340,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicroPlugin`** — `plugin/net.cc`, `plugin/plugin_open.cc` and the
   `plugin/net/net_v6.cc` to `net_v12.cc` shims (via `PLUGIN_NET_CC_PATH`,
   `PLUGIN_OPEN_CC_PATH` and `NET_V<N>_CC_PATH`, one test TU each); suite `Plugin*`. Its
-  own binary because the tests supply their own logging, env and dlopen/dlsym seams,
-  which would collide with the shared fakes. See `test_categories_micro_plugin.yaml`.
+  own binary: `fakes/transport_stubs.cc`, which most targets link, defines
+  `ncclGpuGdrSupport`, and `gin-plugin-init-test.cc` in `rccl-UnitTestsMicro` defines
+  `ncclPluginLibPaths`, `ncclClosePluginLib` and `ncclGetNetPluginLib`, all of which
+  `net.cc` or `plugin_open.cc` define. See `test_categories_micro_plugin.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the

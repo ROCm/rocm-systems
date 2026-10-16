@@ -178,8 +178,8 @@ TEST_F(PluginOpenMicrotest, PathsAndFullLibraryNamesAreTriedOnlyAsGiven) {
   }
 }
 
-// The comment says a name starting with "lib" or ending in ".so" is not retried; the code only skips both.
-TEST_F(PluginOpenMicrotest, AHalfLibraryNameIsStillRetriedWithThePrefix) {
+// Despite the comment, only a name with both "lib" and ".so" skips the prefixed retry; a fix flips this pin.
+TEST_F(PluginOpenMicrotest, OpenPluginLib_KnownBug_AHalfLibraryNameIsStillRetriedWithThePrefix) {
   EXPECT_EQ(ncclOpenNetPluginLib("x.so"), nullptr);
   EXPECT_EQ(ncclOpenNetPluginLib("libx"), nullptr);
   EXPECT_EQ(g_dl.opened, (std::vector<std::string>{"x.so", "librccl-net-x.so.so", "libx", "librccl-net-libx.so"}));
@@ -191,8 +191,8 @@ TEST_F(PluginOpenMicrotest, StaticPluginOpensTheProcessItself) {
   EXPECT_STREQ(ncclGetPluginLibName(ncclPluginTypeTuner), "static_plugin");
 }
 
-// The STATIC_PLUGIN check compares only strlen(name) chars, so any prefix of it ("s", "Stat") opens the process.
-TEST_F(PluginOpenMicrotest, AnyPrefixOfStaticPluginAlsoOpensTheProcess) {
+// The STATIC_PLUGIN check compares only strlen(name) chars, so any prefix opens the process; a fix flips this pin.
+TEST_F(PluginOpenMicrotest, TryOpenLib_KnownBug_AnyPrefixOfStaticPluginOpensTheProcess) {
   for (const char* name : {"s", "Stat", "STATIC_"}) {
     g_dl.opened.clear();
     ResetSlots();
@@ -260,9 +260,8 @@ TEST_F(PluginOpenMicrotest, SharingTheNetOrGinLibraryTakesItsOwnReference) {
   EXPECT_EQ(libHandles[ncclPluginTypeNet], kNet);
 }
 
-// rma.cc asks for the GIN library and then the NET library, both into the RMA slot. The second overwrites the
-// first without releasing it, so closing the GIN handle as RMA is a no-op and its reference leaks.
-TEST_F(PluginOpenMicrotest, GinThenNetIntoOneSlotLeaksTheGinReference) {
+// rma.cc shares GIN then NET into the RMA slot, and NET overwrites GIN's unreleased reference; a fix flips this pin.
+TEST_F(PluginOpenMicrotest, GetNetPluginLib_KnownBug_GinThenNetIntoOneSlotLeaksTheGinReference) {
   g_dl.installed["librccl-net.so"] = kNet;
   g_dl.installed["librccl-gin.so"] = kGin;
   ASSERT_EQ(ncclOpenNetPluginLib(nullptr), kNet);
@@ -282,8 +281,8 @@ TEST_F(PluginOpenMicrotest, GinThenNetIntoOneSlotLeaksTheGinReference) {
   EXPECT_EQ(g_dl.closeCount[kGin], 1);
 }
 
-// Sharing copies the NET library's path with strdup, which crashes when dlinfo could not resolve one.
-TEST_F(PluginOpenMicrotest, SharingCrashesWhenTheNetLibraryHasNoPath) {
+// Sharing strdup's the NET library's path, which is NULL when dlinfo failed; a fix flips this pin.
+TEST_F(PluginOpenMicrotest, GetNetPluginLib_KnownBug_CrashesWhenTheNetLibraryHasNoPath) {
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   g_dl.installed["librccl-net.so"] = kNet;
   g_dl.dlinfoFails = true;
