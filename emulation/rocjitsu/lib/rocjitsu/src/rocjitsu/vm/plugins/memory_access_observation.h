@@ -115,13 +115,12 @@ struct MemoryAccessObservation {
   /// an explicit SCRATCH access remains distinguishable from FLAT lanes that
   /// resolved to scratch.
   DecodedMemorySpace decoded_space = DecodedMemorySpace::UNKNOWN;
-  /// @brief Whether a FLAT access was rewritten from global into LDS.
+  /// @brief Whether FLAT selected the uniform shared-aperture local route.
   ///
-  /// @details True only when all requesting FLAT lanes use the shared aperture
-  /// and both the execution route and addresses were changed. Mixed-aperture
-  /// requests leave this false, while their observation still reports effective
-  /// shared addresses. Use @ref flat_local_lane_mask and @ref flat_dds_lane_mask
-  /// to account for shared-aperture traffic on either route.
+  /// @details True only when all requesting FLAT lanes use the shared aperture.
+  /// Mixed requests leave this false even though their LDS addresses are also
+  /// normalized. Use @ref flat_local_lane_mask and @ref flat_dds_lane_mask to
+  /// account for shared-aperture traffic on either route.
   bool normalized_to_local = false;
 
   /// @brief Whether the access returns a value to registers.
@@ -199,7 +198,8 @@ struct MemoryAccessObservation {
   /// @details GFX1250 splits its 4-GiB shared aperture at offset bit 31: the
   /// lower half is LDS and the upper half is direct data share (DDS). FFM
   /// reports both as LDS resources, but rejects DDS stores and atomics. This
-  /// mask preserves that distinction on either functional route.
+  /// mask preserves that distinction on either functional route. It is always
+  /// zero on other architectures, where shared-aperture lanes remain LDS.
   /// It is a subset of @ref request_lane_mask, disjoint from
   /// @ref scratch_lane_mask and @ref flat_local_lane_mask, and always zero for
   /// non-FLAT instructions.
@@ -226,8 +226,11 @@ struct MemoryAccessObservation {
   /// @brief Address each lane accesses, @ref wavefront_size entries.
   ///
   /// @details Only entries selected by @ref valid_lane_mask are meaningful.
-  /// Shared FLAT lanes report effective LDS allocation addresses on either
-  /// route; @ref flat_dds_lane_mask still distinguishes DDS from ordinary LDS.
+  /// Ordinary FLAT LDS lanes report effective allocation addresses on either
+  /// route, which can still be outside the LDS backing. CDNA5 DDS lanes also
+  /// undergo LDS-base arithmetic, but their values identify neither a DDS
+  /// backing location nor a valid LDS allocation address. DDS execution is
+  /// unsupported; use @ref flat_dds_lane_mask to distinguish those lanes.
   /// Their original aperture addresses are in @ref pre_routing_addresses.
   std::span<const uint64_t> addresses;
   /// @brief Addresses before shared-aperture normalization, when it occurred.
@@ -239,8 +242,9 @@ struct MemoryAccessObservation {
   /// access rewritten through the shared aperture uses this to retain the
   /// original aperture addresses while @ref addresses reports the effective
   /// LDS allocation addresses. Both uniform and mixed FLAT execution use the
-  /// same normalized addresses as the observation. DDS addresses remain
-  /// distinguishable by their mask and fault because DDS execution is unsupported.
+  /// same normalized addresses as the observation. CDNA5 DDS values are only
+  /// arithmetic results, not backing addresses; requesting DDS lanes cause an
+  /// unsupported-execution diagnostic and fault before any memory effects.
   std::span<const uint64_t> pre_routing_addresses;
   /// @brief Per-element lanes requesting memory traffic. Buffer bounds can
   ///        narrow later elements; block transfers can have arbitrary M0 holes.

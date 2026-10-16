@@ -184,6 +184,12 @@ public:
   /// FLAT counter participation selected from the resolved requesting lanes.
   /// Unset before routing; decoded metadata continues to describe all domains.
   std::optional<MemoryIssueInfo> routed_issue_info;
+  // Routing normalizes ordinary LDS lanes in per_lane_addr once, including
+  // mixed FLAT requests. CDNA5 DDS has no backing implementation and faults before
+  // either pipeline accesses memory. Original aperture addresses live only in
+  // the routed observation's callback snapshot.
+  uint64_t flat_local_lane_mask = 0;
+  uint64_t flat_dds_lane_mask = 0;
   bool non_temporal = false;
   // Keep this outside Mtype: cluster loads force only the request-side vector
   // L1 lookup to miss, while mtype must still preserve the instruction/PTE
@@ -219,12 +225,6 @@ public:
   // provenance: buffer SRD swizzling still addresses the SRD's global base.
   bool requires_scratch_backing = false;
   uint64_t scratch_lane_mask = 0;
-  // Routing normalizes ordinary LDS lanes in per_lane_addr once, including
-  // mixed FLAT requests. DDS has no backing implementation and faults before
-  // either pipeline accesses memory. Original aperture addresses live only in
-  // the routed observation's callback snapshot.
-  uint64_t flat_local_lane_mask = 0;
-  uint64_t flat_dds_lane_mask = 0;
   uint32_t scratch_addr_stride = 0;
   uint32_t scratch_swizzle_unit = 4; ///< Bytes per swizzle unit; RDNA buffers can use 16.
   // Low bits of the uniform address contribution applied after swizzling. The

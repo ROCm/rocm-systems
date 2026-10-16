@@ -574,6 +574,52 @@ TEST(GpuVmPipeline, TranslatedScalarLoadAndStoreUseExternalBacking) {
   EXPECT_EQ(context.external->write_calls, 1u);
 }
 
+TEST(GpuVmPipeline, DdsStepReportsUnsupportedInstructionAndPcBeforeFaulting) {
+  for (bool mixed : {false, true}) {
+    for (bool load : {false, true}) {
+      for (uint32_t dds_lane : {0u, 1u}) {
+        SCOPED_TRACE(testing::Message()
+                     << "mixed=" << mixed << " load=" << load << " DDS lane=" << dds_lane);
+        TranslatedPipelineContext context;
+        ASSERT_NE(context.wf, nullptr);
+        constexpr uint64_t shared_base = uint64_t{1} << 48;
+        constexpr uint64_t pc = 0x1000;
+        context.cu->set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+        context.wf->pc = pc;
+        context.wf->set_exec(mixed ? 3 : uint64_t{1} << dds_lane);
+        const auto words = cdna5::build_vflat(
+            load ? cdna5::kFlatLoadB32Vflat : cdna5::kFlatStoreB32Vflat,
+            {.saddr = 124, .vdst = uint8_t(load ? 16 : 0), .vsrc = 8, .vaddr = 0});
+        context.external->store(pc, std::array{words[0], words[1], words[2], S_ENDPGM_GFX12});
+        const uint32_t vb = context.wf->vgpr_alloc().base;
+        for (uint32_t lane = 0; lane < 2; ++lane) {
+          const uint64_t address = lane == dds_lane ? shared_base + 0xffffffc0 : 0x2000;
+          context.cu->write_vgpr(vb, lane, static_cast<uint32_t>(address));
+          context.cu->write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+          context.cu->write_vgpr(vb + 8, lane, 42);
+        }
+        testing::internal::CaptureStderr();
+        static_cast<void>(context.cu->step());
+        const std::string diagnostic = testing::internal::GetCapturedStderr();
+        const std::string prefix = "unsupported FLAT DDS execution: ";
+        const auto warning = diagnostic.find(prefix);
+        EXPECT_NE(warning, std::string::npos) << diagnostic;
+        EXPECT_EQ(diagnostic.find(prefix, warning == std::string::npos ? 0 : warning + 1),
+                  std::string::npos)
+            << diagnostic;
+        EXPECT_NE(diagnostic.find(load ? "flat_load_b32" : "flat_store_b32"), std::string::npos);
+        EXPECT_NE(diagnostic.find("pc=0x1000"), std::string::npos);
+        EXPECT_NE(diagnostic.find("DDS backing is not implemented"), std::string::npos);
+        EXPECT_TRUE(context.wf->is_halted());
+        EXPECT_TRUE(context.wf->wait_counters().empty());
+        EXPECT_EQ(context.external->write_calls, 0u);
+        for (const auto &read : context.external->read_history)
+          EXPECT_NE(read.address, 0x2000u);
+      }
+    }
+  }
+}
+
 TEST(GpuVmPipeline, ScratchWithoutBackingIsATerminalFault) {
   TranslatedPipelineContext context;
   ASSERT_TRUE(context.address_space);

@@ -237,20 +237,22 @@ public:
 
 // Routing tests supply a synthetic execution result, but wait tracking needs
 // decoded operands and the pre-execution address registers, as in the issuer.
-std::unique_ptr<Instruction>
-prepare_cdna4_flat_load_for_routing(ComputeUnitCore &cu, Wavefront &wave,
-                                    std::unique_ptr<VectorMemState> state) {
+std::unique_ptr<Instruction> prepare_flat_load_for_routing(ComputeUnitCore &cu, Wavefront &wave,
+                                                           std::unique_ptr<VectorMemState> state) {
   for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
     cu.write_vgpr(wave.vgpr_alloc().base, lane, state->per_lane_addr[lane]);
     cu.write_vgpr(wave.vgpr_alloc().base + 1, lane, state->per_lane_addr[lane] >> 32);
   }
-  const auto words = cdna4::build_flat(
-      cdna4::kFlatLoadDwordFlat,
-      {.seg = 0,
-       .addr = 0,
-       .saddr = 0x7F,
-       .vdst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base)});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto dst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base);
+  std::array<uint32_t, 3> words{};
+  if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    words = cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = dst, .vaddr = 0});
+  } else {
+    const auto encoded = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
+                                           {.seg = 0, .addr = 0, .saddr = 0x7F, .vdst = dst});
+    std::ranges::copy(encoded, words.begin());
+  }
+  auto decoder = Decoder::create(cu.arch());
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
   if (!load)
     return nullptr;
@@ -9260,7 +9262,8 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
 }
 
 TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
-  PluginFixture fixture;
+  PluginFixture fixture(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                        /*sgprs_per_wf=*/128);
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1234'0000'0000'0000;
@@ -9268,7 +9271,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   constexpr uint64_t kLdsAddress = kSharedBase | 0x0000'0020;
   cu->set_apertures(kSharedBase, kSharedBase | 0xffff'ffff, 0, 0);
   auto *wave = cu->dispatch_wf_at(/*wf_id=*/1, /*wg_id=*/7, /*pc=*/0x320,
-                                  /*num_sgprs=*/104, /*num_vgprs=*/256);
+                                  /*num_sgprs=*/128, /*num_vgprs=*/256);
   ASSERT_NE(wave, nullptr);
   wave->set_exec(0b111);
   wave->set_lds_base(0x400);
@@ -9284,7 +9287,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   state->per_lane_addr[0] = kDdsAddress;
   state->per_lane_addr[1] = kLdsAddress;
   state->per_lane_addr[2] = 0x2000;
-  auto load = prepare_cdna4_flat_load_for_routing(*cu, *wave, std::move(state));
+  auto load = prepare_flat_load_for_routing(*cu, *wave, std::move(state));
   ASSERT_NE(load, nullptr);
   test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
 
@@ -9341,7 +9344,7 @@ TEST(RoutedMemoryObservationTest, MixedFlatReportsEffectiveAddressesWithoutChang
     state->lane_mask = 0b0111;
     for (uint32_t lane = 0; lane < 4; ++lane)
       state->per_lane_addr[lane] = lane == global_lane ? 0x2000 : kSharedBase + 0x20 + lane * 4;
-    auto load = prepare_cdna4_flat_load_for_routing(*cu, *wave, std::move(state));
+    auto load = prepare_flat_load_for_routing(*cu, *wave, std::move(state));
     ASSERT_NE(load, nullptr);
     test::ComputeUnitTestAccess::route_memory_inst(*cu, load.release(), *wave);
 

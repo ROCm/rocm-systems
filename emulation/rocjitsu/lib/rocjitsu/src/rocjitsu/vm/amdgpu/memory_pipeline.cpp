@@ -1078,15 +1078,40 @@ void execute_lds_atomic_rmw(VectorMemState &d, Lds *lds,
   }
 }
 
+// Dispatch ordinary LDS loads, stores and atomics for uniform and mixed routes.
+// Callers prepare buffers and complete retryable global work before entering.
+// FLAT addresses include the workgroup base: reject out-of-backing lanes before
+// the LDS helpers narrow to 32 bits, preserving zero reads and discarded writes.
 void execute_lds_access(VectorMemState &d, Lds &lds, const std::array<uint64_t, 64> &addresses,
                         uint64_t lane_mask, const std::vector<uint8_t> &store_data,
                         std::vector<uint8_t> &response_data) {
+  uint64_t out_of_bounds = 0;
+  for (uint64_t lanes = lane_mask & d.flat_local_lane_mask; lanes; lanes &= lanes - 1) {
+    const auto lane = std::countr_zero(lanes);
+    if (addresses[lane] >= lds.size_bytes())
+      out_of_bounds |= uint64_t{1} << lane;
+  }
+  lane_mask &= ~out_of_bounds;
   if (d.atomic_op != AtomicOp::NONE)
     execute_lds_atomic_rmw(d, &lds, addresses, store_data, response_data, lane_mask);
   else if (d.is_load)
     lds.vector_load(addresses.data(), lane_mask, d.elem_size, d.num_elems, response_data.data());
   else
     lds.vector_store(addresses.data(), lane_mask, d.elem_size, d.num_elems, store_data.data());
+  if (d.is_load || d.atomic_op != AtomicOp::NONE) {
+    const uint32_t bytes_per_lane = d.elem_size * d.num_elems;
+    for (uint64_t lanes = out_of_bounds; lanes; lanes &= lanes - 1)
+      std::memset(response_data.data() + std::countr_zero(lanes) * bytes_per_lane, 0,
+                  bytes_per_lane);
+  }
+}
+
+bool rejects_flat_dds(const Instruction &inst, const Wavefront &wf, uint64_t request_lanes) {
+  if (!(inst.data_as<VectorMemState>()->flat_dds_lane_mask & request_lanes))
+    return false;
+  util::Logger::warn("unsupported FLAT DDS execution: ", inst.mnemonic(),
+                     " pc=", std::format("{:#x}", wf.pc), ": CDNA5 DDS backing is not implemented");
+  return true;
 }
 
 } // namespace
@@ -1098,12 +1123,11 @@ VmAccessOutcome GlobalMemPipeline::initiate_access(Instruction &inst, Wavefront 
   // DDS requires a separate backing implementation. Reject the complete
   // instruction before global or LDS side effects rather than narrowing a
   // DDS address into another workgroup's LDS allocation.
-  if (d.flat_dds_lane_mask & transpose_request_lane_mask(d, wf.wf_size()))
+  const uint64_t request_lanes = transpose_request_lane_mask(d, wf.wf_size());
+  if (rejects_flat_dds(inst, wf, request_lanes))
     return VmAccessOutcome::Faulted;
-  const uint64_t shared_lanes =
-      d.flat_local_lane_mask & transpose_request_lane_mask(d, wf.wf_size());
-  const auto outcome =
-      initiate_global_access(d, wf, transpose_request_lane_mask(d, wf.wf_size()) & ~shared_lanes);
+  const uint64_t shared_lanes = d.flat_local_lane_mask & request_lanes;
+  const auto outcome = initiate_global_access(d, wf, request_lanes & ~shared_lanes);
   if (outcome != VmAccessOutcome::Complete || shared_lanes == 0)
     return outcome;
 
@@ -1215,7 +1239,7 @@ VmAccessOutcome LocalMemPipeline::initiate_access(Instruction &inst, Wavefront &
   auto &lds = wf.lds();
   d.wf_size = wf.wf_size();
   // Uniform shared-aperture FLAT must reject unsupported DDS too.
-  if (d.flat_dds_lane_mask & transpose_request_lane_mask(d, wf.wf_size()))
+  if (rejects_flat_dds(inst, wf, transpose_request_lane_mask(d, wf.wf_size())))
     return VmAccessOutcome::Faulted;
   d.wg_id = wf.wg_id();
   d.wf_id = wf.wf_id();
