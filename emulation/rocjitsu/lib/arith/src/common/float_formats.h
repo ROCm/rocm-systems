@@ -12,6 +12,9 @@
 
 namespace rocjitsu::arith {
 
+// Widen a BF16 encoding to FP32, retaining its sign, payload, and subnormal bits.
+inline float bf16_to_float(uint16_t bits) { return as_float(uint32_t(bits) << 16); }
+
 // Widen an FP16 encoding to FP32, including zeros, subnormals, infinities, and NaNs.
 inline float f16_to_float(uint16_t bits) {
   uint32_t sign = uint32_t(bits & 0x8000) << 16;

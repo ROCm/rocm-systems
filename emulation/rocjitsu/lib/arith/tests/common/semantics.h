@@ -13,6 +13,9 @@
 namespace rocjitsu::arith::test {
 
 // Return all defined semantics modes, including temporary compatibility mode.
-inline std::vector<uint64_t> semantics_modes() { return {RJ_ARITH_SEMANTICS_LOOSE}; }
+inline std::vector<uint64_t> semantics_modes() {
+  return {RJ_ARITH_SEMANTICS_LOOSE, RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_ALLOW_LOOSE,
+          RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL_NO_FP_STATUS};
+}
 
 } // namespace rocjitsu::arith::test

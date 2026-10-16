@@ -4,6 +4,7 @@
 
 #include "common/float_formats.h"
 #include "common/internal.h"
+#include "fp/half_fma_scalar.h"
 #include "rj_arith/rj_arith.h"
 
 #include <cmath>
@@ -19,18 +20,26 @@ int rj_arith_v_fma_f16_w32_gfx12(uint64_t flags, uint32_t exec_mask, uint64_t in
   if (instruction_flags) {
     return RJ_ARITH_ERROR_INVALID_FLAGS;
   }
-  if (int error = rocjitsu::arith::validate(flags, 0)) {
+  if (int error = rocjitsu::arith::validate(flags, 0, true)) {
     return error;
+  }
+  if (rocjitsu::arith::reports_fp_status(flags)) {
+    return RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS;
   }
   if (!exec_mask) {
     return RJ_ARITH_SUCCESS;
   }
   uint16_t result[32];
   for (int lane = 0; lane < 32; ++lane) {
-    float x = rocjitsu::arith::f16_to_float(uint16_t(a[0][lane]));
-    float y = rocjitsu::arith::f16_to_float(uint16_t(b[0][lane]));
-    float z = rocjitsu::arith::f16_to_float(uint16_t(c[0][lane]));
-    result[lane] = rocjitsu::arith::float_to_f16(std::fma(x, y, z), flags & RJ_ARITH_FP16_OVFL);
+    if (rocjitsu::arith::is_exact(flags)) {
+      result[lane] = rocjitsu::arith::half_fma_value(uint16_t(a[0][lane]), uint16_t(b[0][lane]),
+                                                     uint16_t(c[0][lane]), 0, flags);
+    } else {
+      float x = rocjitsu::arith::f16_to_float(uint16_t(a[0][lane]));
+      float y = rocjitsu::arith::f16_to_float(uint16_t(b[0][lane]));
+      float z = rocjitsu::arith::f16_to_float(uint16_t(c[0][lane]));
+      result[lane] = rocjitsu::arith::float_to_f16(std::fma(x, y, z), flags & RJ_ARITH_FP16_OVFL);
+    }
   }
   for (int lane = 0; lane < 32; ++lane) {
     if ((exec_mask >> lane) & 1) {

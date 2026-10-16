@@ -133,6 +133,31 @@ static const uint32_t RJ_ARITH_EXCEPTION_UNDERFLOW = 1U << 4;
 static const uint32_t RJ_ARITH_EXCEPTION_INEXACT = 1U << 5;
 static const uint32_t RJ_ARITH_EXCEPTION_INT_DIV0 = 1U << 6;
 
+// Floating ALU source modifiers: ABS precedes NEG.
+static const uint32_t RJ_ARITH_ALU_NEG_A = 1U << 0;
+static const uint32_t RJ_ARITH_ALU_NEG_B = 1U << 1;
+static const uint32_t RJ_ARITH_ALU_NEG_C = 1U << 2;
+static const uint32_t RJ_ARITH_ALU_ABS_A = 1U << 3;
+static const uint32_t RJ_ARITH_ALU_ABS_B = 1U << 4;
+static const uint32_t RJ_ARITH_ALU_ABS_C = 1U << 5;
+
+// Floating ALU output scaling precedes CLAMP. OMOD is a two-bit enumeration:
+// none, multiply by 2, multiply by 4, divide by 2.
+static const uint32_t RJ_ARITH_ALU_OMOD_2 = 1U << 6;
+static const uint32_t RJ_ARITH_ALU_OMOD_4 = 2U << 6;
+static const uint32_t RJ_ARITH_ALU_OMOD_HALF = 3U << 6;
+
+// Result clamping where supported: floating results to [0,1] (NaNs become zero),
+// integer results to the representable signed/unsigned destination range.
+static const uint32_t RJ_ARITH_ALU_CLAMP = 1U << 8;
+
+// True16 source/destination half selectors. Zero selects the low half.
+// DOT2 consumes both A/B halves and accepts only the C and D selectors.
+static const uint32_t RJ_ARITH_ALU_HIGH_A = 1U << 9;
+static const uint32_t RJ_ARITH_ALU_HIGH_B = 1U << 10;
+static const uint32_t RJ_ARITH_ALU_HIGH_C = 1U << 11;
+static const uint32_t RJ_ARITH_ALU_HIGH_D = 1U << 12;
+
 // Returns CPU capability flags for features usable on this machine, accounting
 // for CPU and operating-system support. All non-CPU flag bits are zero.
 uint64_t rj_arith_init_cpu_flags(void);

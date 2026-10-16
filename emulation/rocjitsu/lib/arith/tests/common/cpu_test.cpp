@@ -78,7 +78,6 @@ TEST(Cpu, SharedEnumerationHelpers) {
     EXPECT_TRUE(
         rocjitsu::arith::test::cpu_level_supported(level, detected | RJ_ARITH_CPU_FEATURES_MASK));
   }
-
 }
 
 // Check readable names for supported and invalid CPU levels.
