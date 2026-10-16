@@ -233,12 +233,9 @@ run_pytest() {
   shift 8
   local pytest_environment=(env)
   if [[ "${suites}" == race ]]; then
-    # Keep the original 30-second adapter deadline on the first pass. A race
-    # rerun has an overall budget and must use its longer wrapper deadline.
-    pytest_environment+=(-u ROCJITSU_RACE_CASE_TIMEOUT)
-    if (( overall_timeout_seconds > 0 )); then
-      pytest_environment+=("ROCJITSU_RACE_CASE_TIMEOUT=${timeout_seconds}")
-    fi
+    # Use the same per-test deadline in the adapter and wrapper on both passes.
+    # The overall rerun budget separately bounds the complete pytest invocation.
+    pytest_environment+=("ROCJITSU_RACE_CASE_TIMEOUT=${timeout_seconds}")
     pytest_environment+=("ROCJITSU_RACE_CONFIG=${config_path}")
     # The race adapter materializes a private config for each GoogleTest case.
     config_path="{config}"
