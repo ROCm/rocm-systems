@@ -118,6 +118,7 @@ function(rccl_define_micro_source_lists)
     fakes/dev_runtime_micro_fakes.cc
     fakes/ibvwrap_fakes.cc               # src/misc/ibvwrap.cc PD / MR registration seams
     fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
     fakes/libc_fakes.cc
     fakes/ras_fakes.cc
     fakes/ras_net_fakes.cc
@@ -151,6 +152,7 @@ function(rccl_define_micro_source_lists)
     fakes/enqueue_fakes.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/nccl_fakes.cc
@@ -182,6 +184,7 @@ function(rccl_define_micro_source_lists)
     fakes/init_fakes.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/nccl_fakes.cc
@@ -232,6 +235,7 @@ function(rccl_define_micro_source_lists)
     fakes/enqueue_test_deps.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/nccl_fakes.cc
@@ -266,6 +270,7 @@ function(rccl_define_micro_source_lists)
     fakes/allocator_fakes.cc             # src/allocator.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/nccl_fakes.cc
@@ -300,8 +305,9 @@ function(rccl_define_micro_source_lists)
     fakes/libc_fakes.cc
     fakes/ras_fakes.cc
     fakes/ras_param_fakes.cc
-    fakes/nccl_fakes.cc                  # ncclDebugLog/ncclDebugMask (checks.h logging macros)
-    fakes/collectives_fakes.cc           # ncclFuncToString
+    fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
+    fakes/collectives_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
@@ -311,6 +317,7 @@ function(rccl_define_micro_source_lists)
     # Shared per-production-TU fakes (see MICROTEST_README.md for the map).
     fakes/hip_fakes.cc
     fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
     fakes/os_fakes.cc
     fakes/rma_fakes.cc
     fakes/rocmwrap_fakes.cc
@@ -323,6 +330,7 @@ function(rccl_define_micro_source_lists)
     sym-kernels-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/nccl_fakes.cc
@@ -355,6 +363,7 @@ function(rccl_define_micro_source_lists)
     task-sched-test.cc
     fakes/bootstrap_stubs.cc
     fakes/topo_stubs.cc
+    fakes/search_fakes.cc
     fakes/transport_stubs.cc
     fakes/nccl_stubs.cc
     fakes/nccl_fakes.cc
@@ -393,6 +402,7 @@ function(rccl_define_micro_source_lists)
   set(TEST_MICRO_GIN_HOST_SOURCE_FILES
     gin-host-test.cc
     fakes/nccl_fakes.cc
+    fakes/search_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
     ../common/main_altrsmi.cpp
@@ -401,6 +411,18 @@ function(rccl_define_micro_source_lists)
   # rccl-UnitTestsMicroRomeModels
   set(TEST_MICRO_ROME_MODELS_SOURCE_FILES
     rome-models-test.cc
+    fakes/nccl_fakes.cc
+    fakes/hip_fakes.cc
+    fakes/env_fakes.cc
+    fakes/topo_stubs.cc
+    fakes/search_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # src/graph/search.cc
+  set(TEST_MICRO_SEARCH_SOURCE_FILES
+    search-test.cc
     fakes/nccl_fakes.cc
     fakes/hip_fakes.cc
     fakes/env_fakes.cc
@@ -421,8 +443,9 @@ function(rccl_define_micro_source_lists)
     fakes/libc_fakes.cc
     fakes/nccl_fakes.cc
     fakes/topo_stubs.cc
-    fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
-    fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    fakes/search_fakes.cc
+    fakes/transport_net_ib_fakes.cc
+    fakes/transport_p2p_fakes.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -1182,6 +1205,16 @@ rccl_add_micro_binary(rccl-UnitTestsMicroRomeModels
     ${_MICRO_MODE_DEFS}
     ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_rome_models.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroSearch
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroSearch
+  SOURCES ${TEST_MICRO_SEARCH_SOURCE_FILES}
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    SEARCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_search.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroDiagnostics

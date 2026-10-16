@@ -456,6 +456,10 @@ target instead produces the same symbol faked three times in three files, each
 slightly weaker than the others, which is what `rccl::Recorder` and `ncclGetEnv`
 had become before this map existed.
 
+`src/graph/search.cc` has two rows for the same reason as `src/rccl_wrap.cc` below:
+`rccl-UnitTestsMicroSearch` compiles it and fakes its dependencies (`topo_stubs.cc`),
+while every other target fakes its own entry points (`search_fakes.cc`).
+
 `src/rccl_wrap.cc` has two rows because it is both a unit under test
 (`rccl-UnitTestsMicro` compiles it and fakes its dependencies) and a
 dependency of another unit (`rccl-UnitTestsMicroEnqueue` doesn't compile it,
@@ -471,7 +475,8 @@ symbol.
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
-| `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
+| `src/graph/*.cc` (topo, paths, connect, rome consensus) and `search.cc`'s *dependencies* | `fakes/topo_stubs.cc` |
+| `src/graph/search.cc`'s own entry points (targets that don't compile the real file, i.e. all but `rccl-UnitTestsMicroSearch`) | `fakes/search_fakes.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |

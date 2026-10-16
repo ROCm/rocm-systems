@@ -48,6 +48,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
   * `ncclReduceScatter`: DDA LL up to nRanks x 256 KiB, DDA LL128 up to nRanks x 512 KiB, then DDA VMM up to nRanks x 2 MiB; Ring LL up to 512 KiB per rank and LL128 up to 8 MiB per rank (32 MiB for 1-byte types); Ring Simple on at most 128 channels between 8 and 32 MiB per rank unless `NCCL_MIN_NCHANNELS` or `NCCL_MAX_NCHANNELS` is set.
   * DDA VMM `ncclAllReduce` and `ncclReduceScatter` launch 2048 / nRanks blocks, clamped to 32 to 128 and never more than before.
 
+* A graph XML file supplied through `NCCL_GRAPH_FILE` is now rejected with `ncclInvalidUsage` if its `nchannels` attribute does not match the number of `<channel>` elements present, instead of reading uninitialized channel data.
+
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
 
@@ -55,6 +57,8 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed profiler overhead when no profiler plugin is loaded or only kernel-channel events are enabled.
 * Fixed profiler API events reporting rank 0 instead of the originating communicator rank.
 * Fixed P2P IPC registration reuse producing out-of-bounds remote addresses when a registered allocation spans multiple cuMem segments.
+* Fixed out-of-bounds writes when importing a graph from the file named by `NCCL_GRAPH_FILE`. Channel indices beyond `MAXCHANNELS`, more than two `<net>` sub-nodes in a channel, and more `<gpu>` sub-nodes than the system has GPUs now return `ncclInvalidUsage` instead of writing past the end of the graph's channel data.
+* Fixed the `rank` attribute in an `NCCL_GRAPH_FILE` graph being accepted without checking it against the topology. A rank the topology does not contain was written into the graph and later used as an array index during ring connection; such files now return `ncclInvalidUsage`.
 * Fixed non-thread-safe token parsing that could corrupt configuration parsed concurrently from multiple threads.
 * Fixed tuner plugins receiving uninitialized cost-model constants.
 * Fixed GIN proxy descriptor shared-memory sizing and alignment.

@@ -106,6 +106,7 @@ void ResetInitFakes() {
   ResetRocshmemFakes();
 #endif
   ResetStrongStreamStubs();
+  ResetSearchFakes();
   ResetTopoStubs();
   ResetTransportStubs();
   ResetTuningFakes();
