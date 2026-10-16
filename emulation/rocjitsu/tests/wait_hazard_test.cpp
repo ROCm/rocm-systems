@@ -33,18 +33,21 @@ struct CounterDomain {
 constexpr CounterDomain kLoad{WaitCounterKind::Load, WaitCounterType::LOADCNT};
 constexpr CounterDomain kDs{WaitCounterKind::Ds, WaitCounterType::DSCNT};
 
-template <typename Consume> void with_wait(rj_code_arch_t arch, uint32_t word, Consume consume) {
+template <typename Consume>
+void with_wait(rj_code_arch_t arch, std::span<const uint32_t> words, Consume consume) {
   auto decoder = Decoder::create(arch);
   ASSERT_NE(decoder, nullptr);
   util::StringDiagnostic error;
-  auto decoded = decoder->decode_window(std::span<const uint32_t>(&word, 1), 0, error.emitter());
+  auto decoded = decoder->decode_window(words, 0, error.emitter());
   ASSERT_TRUE(decoded.succeeded()) << error.message();
-  ASSERT_TRUE(decoded.value()->is_waitcnt());
+  ASSERT_TRUE(decoded.value()->is_waitcnt() || decoded.value()->has_embedded_memory_wait());
   consume(*decoded.value());
 }
 
 class CoreWaitBackend {
 public:
+  static constexpr bool supports_embedded_waits = true;
+
   explicit CoreWaitBackend(rj_code_arch_t arch) : arch_(arch) {
     state_.bind(0x1000, &reports_,
                 [](void *context, const auto &) { ++*static_cast<unsigned *>(context); });
@@ -61,8 +64,9 @@ public:
                 bytes});
   }
   void counter_only(CounterDomain domain) { state_.issue(domain.core); }
-  void wait(uint32_t word) {
-    with_wait(arch_, word, [&](const Instruction &inst) { state_.before(inst, arch_); });
+  void wait(uint32_t word) { wait(std::span<const uint32_t>(&word, 1)); }
+  void wait(std::span<const uint32_t> words) {
+    with_wait(arch_, words, [&](const Instruction &inst) { state_.before(inst, arch_); });
   }
   void expect_drained() const {
     EXPECT_TRUE(state_.empty());
@@ -86,6 +90,8 @@ private:
 
 class RaceWaitBackend {
 public:
+  static constexpr bool supports_embedded_waits = false;
+
   explicit RaceWaitBackend(rj_code_arch_t arch) {
     ComputeUnitCore::Config config{};
     config.arch = arch;
@@ -126,9 +132,11 @@ public:
     state_->registerEvent(0x800, MemoryEventType::VGPR_TO_GLOBAL, {}, 1, 0xf, *domain.race,
                           MemoryOrderClass::VMEM);
   }
-  void wait(uint32_t word) {
-    with_wait(cu_->arch(), word, [&](Instruction &inst) {
-      EXPECT_TRUE(cu_->execute_instruction(&inst, *wave_).succeeded());
+  void wait(uint32_t word) { wait(std::span<const uint32_t>(&word, 1)); }
+  void wait(std::span<const uint32_t> words) {
+    with_wait(cu_->arch(), words, [&](Instruction &inst) {
+      plugins_->onAmdgpuBeforeExecuteInstruction(wave_->pc, inst, *wave_);
+      ASSERT_TRUE(cu_->execute_instruction(&inst, *wave_).succeeded());
       plugins_->onAmdgpuAfterExecuteInstruction(wave_->pc, inst, *wave_);
     });
   }
@@ -262,6 +270,24 @@ TYPED_TEST(WaitHazardTest, FullDrainWaitsRetireEverySupportedCounter) {
   }
 }
 
+TYPED_TEST(WaitHazardTest, Rdna1WaitIdleRetiresAggregateCounters) {
+  TypeParam backend(ROCJITSU_CODE_ARCH_RDNA1);
+  ASSERT_TRUE(backend.ready());
+  const CounterDomain counters[] = {
+      {WaitCounterKind::Load, WaitCounterType::VMCNT},
+      {WaitCounterKind::Store, WaitCounterType::VSCNT},
+      {WaitCounterKind::Ds, WaitCounterType::LGKMCNT},
+      {WaitCounterKind::Exp, WaitCounterType::EXPCNT},
+  };
+  unsigned reg = 0;
+  for (const auto counter : counters)
+    backend.load(counter, reg++, true);
+  backend.wait(0xbfa20000u); // RDNA1 s_wait_idle has a different opcode from GFX11/12.
+  backend.expect_drained();
+  for (unsigned i = 0; i < reg; ++i)
+    EXPECT_FALSE(backend.reports(i)) << "register " << i;
+}
+
 TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
   for (const uint32_t word : {0xbfc20000u, 0xbfc30000u}) { // Sample/Bvh waits.
     SCOPED_TRACE(word);
@@ -275,6 +301,40 @@ TYPED_TEST(WaitHazardTest, UnmappedWaitPreservesPendingOrdinaryLoads) {
   }
 }
 
+TYPED_TEST(WaitHazardTest, EmbeddedExpcntWaitIsCurrentlyCoreOnly) {
+  for (const auto arch :
+       {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA3_5, ROCJITSU_CODE_ARCH_RDNA4}) {
+    for (const uint32_t threshold : {0u, 1u, 7u}) {
+      for (const bool explicit_wait : {false, true}) {
+        SCOPED_TRACE(static_cast<unsigned>(arch));
+        SCOPED_TRACE(threshold);
+        SCOPED_TRACE(explicit_wait);
+        TypeParam backend(arch);
+        ASSERT_TRUE(backend.ready());
+        const CounterDomain exp{WaitCounterKind::Exp, WaitCounterType::EXPCNT};
+        backend.load(exp, 5);
+        backend.load(exp, 6);
+        backend.load(kLoad, 7);
+        backend.load(kDs, 8);
+        // v_interp_p10_f32 v9, v1, v2, v3 wait_exp:<threshold>.
+        // Use registers independent of the pending results to isolate retirement.
+        backend.wait(std::array{0xcd000009u | (threshold << 8u), 0x040e0501u});
+        // The control uses a fresh backend: probing a hazard before this wait
+        // could suppress a repeated report and hide a failure to retire it.
+        if (explicit_wait)
+          backend.wait(arch == ROCJITSU_CODE_ARCH_RDNA4 ? 0xbfc40000u   // s_wait_expcnt 0.
+                                                        : 0xbd7c0000u); // s_waitcnt_expcnt null, 0.
+        EXPECT_EQ(backend.reports(5),
+                  !explicit_wait && (!TypeParam::supports_embedded_waits || threshold == 7));
+        EXPECT_EQ(backend.reports(6),
+                  !explicit_wait && (!TypeParam::supports_embedded_waits || threshold != 0));
+        EXPECT_TRUE(backend.reports(7));
+        EXPECT_TRUE(backend.reports(8));
+      }
+    }
+  }
+}
+
 TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel) {
   struct Case {
     rj_code_arch_t arch;
@@ -283,6 +343,7 @@ TYPED_TEST(WaitHazardTest, UpperImmediateBitsAreIgnoredBeforeCheckingTheSentinel
     CounterDomain counter;
   };
   const Case cases[] = {
+      // SOPK waits select null so the thresholds depend only on SIMM16.
       {ROCJITSU_CODE_ARCH_RDNA1,
        0xbcfd0000u,
        0x7u,

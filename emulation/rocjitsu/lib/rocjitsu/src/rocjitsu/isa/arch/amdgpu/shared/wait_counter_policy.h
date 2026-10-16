@@ -244,6 +244,7 @@ struct WaitCounterPolicy {
 
   // Absent fields leave their counters unchanged. An engaged result with no
   // active fields represents an explicit no-wait sentinel.
+  // SOPK forms currently use only SIMM16; SGPR addends are not modeled.
   [[nodiscard]] static util::FailureOr<std::optional<WaitFields>>
   explicit_wait_fields(const Instruction &inst, rj_code_arch_t arch);
 
