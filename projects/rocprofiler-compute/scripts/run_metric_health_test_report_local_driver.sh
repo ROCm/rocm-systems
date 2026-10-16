@@ -38,6 +38,12 @@
 #
 # --report calls tools/generate_metric_health_report.py with -p "$ARTIFACTS"
 # for one run, or -p "$BASELINE" -p "$ARTIFACTS" for a comparison.
+#
+# Hosts, nodes, proxies, accounts, and remote paths are site values and are
+# not stored in this script. Copy scripts/.metric_health_sites.env.example to
+# scripts/.metric_health_sites.env (gitignored) and fill it in, or export the
+# variables. METRIC_HEALTH_SITES_ENV overrides the config path. Variables
+# already set in the environment win over the file.
 
 set -euo pipefail
 
@@ -56,7 +62,10 @@ Options:
   --roof                    Enable roofline collection
 
 Env: ARTIFACTS HOST NODE PARTITION GRES PROXY REMOTE_USER REMOTE_PASS REMOTE_ROOT
-     HOST_LOGIN WALLTIME ROCR_VISIBLE_DEVICES
+     HOST_LOGIN WALLTIME ROCR_VISIBLE_DEVICES METRIC_HEALTH_SITES_ENV
+
+Site values (per-arch HOST, PROXY, NODE, roots, ...) come from the environment
+or from scripts/.metric_health_sites.env; see scripts/.metric_health_sites.env.example.
 EOF
 }
 
@@ -148,21 +157,71 @@ ITERS=${ITERS_ARG:-500}
 RUN=${RUN_ARG:-single-pass}
 BASELINE_RUN=${BASELINE_RUN_ARG:-develop}
 BASELINE=${BASELINE_ARG:-}
-REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+REPO_ROOT="$(cd "${SCRIPT_DIR}/.." && pwd)"
+SITE_CONFIG=${METRIC_HEALTH_SITES_ENV:-${SCRIPT_DIR}/.metric_health_sites.env}
+SITE_CONFIG_VARS=(
+  GFX1151_HOST GFX1151_PROXY GFX1151_REMOTE_USER GFX1151_REMOTE_ROOT
+  GFX1151_THEROCK GFX1151_REMOTE_LOG_DIR
+  GFX942_HOST GFX942_PROXY GFX942_REMOTE_USER GFX942_REMOTE_ROOT
+  GFX942_THEROCK GFX942_REMOTE_LOG_DIR
+  SLURM_HOST_LOGIN SLURM_PARTITION SLURM_REMOTE_HOME SLURM_REMOTE_ROOT
+  GFX908_NODE GFX908_GRES GFX950_NODE GFX950_GRES GFX90A_NODE GFX90A_GRES
+)
+
+load_site_config() {
+  if [[ ! -f "$SITE_CONFIG" ]]; then
+    return 0
+  fi
+  local name
+  local -A preset=()
+  for name in "${SITE_CONFIG_VARS[@]}"; do
+    if [[ -n "${!name+set}" ]]; then
+      preset[$name]=${!name}
+    fi
+  done
+  # shellcheck disable=SC1090
+  . "$SITE_CONFIG"
+  for name in "${!preset[@]}"; do
+    printf -v "$name" '%s' "${preset[$name]}"
+  done
+}
+
+# Stops before any remote step when a site value has no setting.
+require_site_value() {
+  local name=$1 source_name=$2
+  if [[ -z "${!name:-}" ]]; then
+    local exports=$name
+    if [[ "$source_name" != "$name" ]]; then
+      exports="${name} or ${source_name}"
+    fi
+    echo "ERROR: ${name} is not set for --arch ${ARCH}." >&2
+    echo "Export ${exports}, or set ${source_name} in ${SITE_CONFIG}" >&2
+    echo "(template: ${SCRIPT_DIR}/.metric_health_sites.env.example)." >&2
+    exit 1
+  fi
+}
+
+load_site_config
+
 # Assumed remote username when a site doesn't have its own REMOTE_USER
 # (slurm transports log in via HOST_LOGIN, which is expected to carry its
 # own user). Override by exporting USER, or by setting REMOTE_ROOT /
 # NODE_ROOT / REMOTE_LOG / SBATCH_OUT directly.
 LOCAL_USER=${USER:-$(id -un)}
 
-# Shared defaults for the slurm-login slurm sites (gfx908, gfx950, gfx90a):
-# same login host, partition, walltime, poll interval, host-kind, and
-# TAG_SUFFIX. Each arch's case branch below still sets its own TRANSPORT,
-# NODE, GRES, THEROCK, and root path(s).
+# Shared settings for the slurm sites (gfx908, gfx950, gfx90a): same login
+# host, partition, walltime, poll interval, host-kind, and TAG_SUFFIX. Each
+# arch's case branch below still sets its own TRANSPORT, NODE, GRES, THEROCK,
+# and root path(s).
 apply_slurm_site_defaults() {
   RSYNC_STYLE=site
-  HOST_LOGIN=${HOST_LOGIN:-slurm-login}
-  PARTITION=${PARTITION:-}
+  HOST_LOGIN=${HOST_LOGIN:-${SLURM_HOST_LOGIN:-}}
+  PARTITION=${PARTITION:-${SLURM_PARTITION:-}}
+  require_site_value HOST_LOGIN SLURM_HOST_LOGIN
+  require_site_value PARTITION SLURM_PARTITION
+  require_site_value SLURM_REMOTE_HOME SLURM_REMOTE_HOME
+  SLURM_DEFAULT_ROOT=${SLURM_REMOTE_ROOT:-${SLURM_REMOTE_HOME}/rocprofiler-compute}
   WALLTIME=${WALLTIME:-24:00:00}
   POLL_SLEEP=180
   REPORT_HOST_KIND=node
@@ -184,52 +243,67 @@ apply_driver_profile() {
   case "$ARCH" in
     gfx1151)
       TRANSPORT=ssh-pass
-      PROXY=${PROXY:-'socat - SOCKS4A:127.0.0.1:%h:%p,socksport=PORT'}
-      HOST=${HOST:-192.0.2.10}
-      REMOTE_USER=${REMOTE_USER:-${USER}}
+      PROXY=${PROXY:-${GFX1151_PROXY:-none}}
+      HOST=${HOST:-${GFX1151_HOST:-}}
+      REMOTE_USER=${REMOTE_USER:-${GFX1151_REMOTE_USER:-}}
       REMOTE_PASS=${REMOTE_PASS:-}
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/${REMOTE_USER}/rocprofiler-compute}
-      THEROCK=${THEROCK_ARG:-/home/${REMOTE_USER}/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel}
+      REMOTE_ROOT=${REMOTE_ROOT:-${GFX1151_REMOTE_ROOT:-}}
+      THEROCK=${THEROCK_ARG:-${GFX1151_THEROCK:-}}
+      REMOTE_LOG_DIR=${REMOTE_LOG_DIR:-${GFX1151_REMOTE_LOG_DIR:-}}
+      require_site_value HOST GFX1151_HOST
+      require_site_value REMOTE_USER GFX1151_REMOTE_USER
+      require_site_value REMOTE_ROOT GFX1151_REMOTE_ROOT
+      require_site_value THEROCK GFX1151_THEROCK
       PASS_MEGA_BATCH=1
       MEGA_BATCH=4096
       ;;
     gfx942)
       TRANSPORT=ssh-key
-      PROXY=${PROXY:-'nc -X 5 -x 127.0.0.1:PORT %h %p'}
-      HOST=${HOST:-gfx942-host.example}
-      REMOTE_USER=${REMOTE_USER:-${LOCAL_USER}}
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${REMOTE_USER}/workdir/rocm-systems/projects/rocprofiler-compute}
-      THEROCK=${THEROCK_ARG:-/home/AMD/${REMOTE_USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
+      PROXY=${PROXY:-${GFX942_PROXY:-none}}
+      HOST=${HOST:-${GFX942_HOST:-}}
+      REMOTE_USER=${REMOTE_USER:-${GFX942_REMOTE_USER:-${LOCAL_USER}}}
+      REMOTE_ROOT=${REMOTE_ROOT:-${GFX942_REMOTE_ROOT:-}}
+      THEROCK=${THEROCK_ARG:-${GFX942_THEROCK:-}}
+      REMOTE_LOG_DIR=${REMOTE_LOG_DIR:-${GFX942_REMOTE_LOG_DIR:-}}
+      require_site_value HOST GFX942_HOST
+      require_site_value REMOTE_ROOT GFX942_REMOTE_ROOT
+      require_site_value THEROCK GFX942_THEROCK
       PASS_LOCAL_PREFIX=1
       ROCR_DEFAULT=17
       ;;
     gfx908)
       TRANSPORT=slurm-home
       apply_slurm_site_defaults
-      NODE=${NODE:-gfx908-node}
-      GRES=${GRES:-gpu:gfx908-mi100:1}
+      NODE=${NODE:-${GFX908_NODE:-}}
+      GRES=${GRES:-${GFX908_GRES:-}}
+      require_site_value NODE GFX908_NODE
+      require_site_value GRES GFX908_GRES
       THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${LOCAL_USER}/rocprofiler-compute}
+      REMOTE_ROOT=${REMOTE_ROOT:-${SLURM_DEFAULT_ROOT}}
       REPORT_MISSING=warn
       SITE_ROCM_IN_LAUNCH=1
       ;;
     gfx950)
       TRANSPORT=slurm-home
       apply_slurm_site_defaults
-      NODE=${NODE:-gfx950-node}
-      GRES=${GRES:-gpu:gfx950-mi350x:1}
+      NODE=${NODE:-${GFX950_NODE:-}}
+      GRES=${GRES:-${GFX950_GRES:-}}
+      require_site_value NODE GFX950_NODE
+      require_site_value GRES GFX950_GRES
       THEROCK=${THEROCK_ARG:-/opt/rocm-7.1.0}
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${LOCAL_USER}/rocprofiler-compute}
+      REMOTE_ROOT=${REMOTE_ROOT:-${SLURM_DEFAULT_ROOT}}
       SITE_ROCM_IN_LAUNCH=1
       ;;
     gfx90a)
       TRANSPORT=slurm-remote
       apply_slurm_site_defaults
-      NODE=${NODE:-gfx90a-node}
-      GRES=${GRES:-gpu:gfx90a-mi250:1}
+      NODE=${NODE:-${GFX90A_NODE:-}}
+      GRES=${GRES:-${GFX90A_GRES:-}}
+      require_site_value NODE GFX90A_NODE
+      require_site_value GRES GFX90A_GRES
       THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${LOCAL_USER}/rocprofiler-compute}
-      NODE_ROOT=${NODE_ROOT:-/home/AMD/${LOCAL_USER}/rocprofiler-compute}
+      REMOTE_ROOT=${REMOTE_ROOT:-${SLURM_DEFAULT_ROOT}}
+      NODE_ROOT=${NODE_ROOT:-${SLURM_DEFAULT_ROOT}}
       ;;
     *)
       echo "Unknown ARCH: ${ARCH}" >&2
@@ -240,15 +314,15 @@ apply_driver_profile() {
 
   TAG=${TAG_ARG:-$(date +%y%m%d)-${ARCH}-${TAG_SUFFIX}}
   ARTIFACTS=${ARTIFACTS:-${REPO_ROOT}/validation-artifacts/metric-health-${TAG}}
-  if [[ "$TRANSPORT" == "ssh-key" ]]; then
-    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/${REMOTE_USER}/workdir/metric_health_${TAG}.log}
-    REMOTE_NOHUP=${REMOTE_NOHUP:-/home/AMD/${REMOTE_USER}/workdir/metric_health_${TAG}.nohup}
-  elif [[ "$TRANSPORT" == "ssh-pass" ]]; then
-    REMOTE_LOG=${REMOTE_LOG:-/home/${REMOTE_USER}/metric_health_${TAG}.log}
-    REMOTE_NOHUP=${REMOTE_NOHUP:-/home/${REMOTE_USER}/metric_health_${TAG}.nohup}
+  if [[ "$TRANSPORT" == "ssh-key" || "$TRANSPORT" == "ssh-pass" ]]; then
+    if [[ -z "${REMOTE_LOG:-}" || -z "${REMOTE_NOHUP:-}" ]]; then
+      require_site_value REMOTE_LOG_DIR "${ARCH^^}_REMOTE_LOG_DIR"
+    fi
+    REMOTE_LOG=${REMOTE_LOG:-${REMOTE_LOG_DIR}/metric_health_${TAG}.log}
+    REMOTE_NOHUP=${REMOTE_NOHUP:-${REMOTE_LOG_DIR}/metric_health_${TAG}.nohup}
   else
-    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/${LOCAL_USER}/metric_health_${TAG}.log}
-    SBATCH_OUT=${SBATCH_OUT:-/home/AMD/${LOCAL_USER}/metric_health_${TAG}.sbatch.out}
+    REMOTE_LOG=${REMOTE_LOG:-${SLURM_REMOTE_HOME}/metric_health_${TAG}.log}
+    SBATCH_OUT=${SBATCH_OUT:-${SLURM_REMOTE_HOME}/metric_health_${TAG}.sbatch.out}
   fi
   if [[ "$REPORT_HOST_KIND" == "node" ]]; then
     REPORT_HOST=$NODE
