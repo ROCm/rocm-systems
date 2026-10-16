@@ -28,9 +28,9 @@ from utils.utils_analysis import (
     assign_native_ids,
     attach_unlocated_trees_by_launcher_thread,
     build_operator_summary,
-    find_native_artifacts,
     copy_matched_operator_subtree,
     filter_forest_by_backends,
+    find_native_artifacts,
     fold_identical_sibling_subtrees,
     format_operator_args,
     join_native_counters,
@@ -2975,6 +2975,7 @@ def test_assign_native_ids_numbers_dispatches_in_launch_order():
 
     assert numbered["Dispatch_ID"].tolist() == [1, 2, 3, 4]
     assert numbered["Counter_Value"].tolist() == [101, 102, 201, 202]
+
 
 def test_parse_marker_function_aten_addmm_n_a():
     parsed = parse_marker_function(
