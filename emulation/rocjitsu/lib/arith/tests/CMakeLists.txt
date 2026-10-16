@@ -125,7 +125,21 @@ endforeach()
 
 
 # Dot-product formats retain family-specific arithmetic and status expectations.
-
+foreach(family IN ITEMS
+    integer
+    fp8
+    half
+    dot2
+)
+  set(target "rj_arith_dot_${family}_test")
+  add_executable(${target} dot/${family}_test.cpp)
+  target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -pedantic)
+  endif()
+  gtest_discover_tests(${target} TEST_PREFIX "rj_arith.")
+endforeach()
 
 # Register-only operations share routing and preservation checks.
 

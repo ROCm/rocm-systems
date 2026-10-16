@@ -4,6 +4,10 @@
 add_library(rj_arith STATIC
   common/cpu.cpp
   common/cpu_decode.cpp
+  dot/dot.cpp
+  dot/fp8_dot.cpp
+  dot/half_dot.cpp
+  dot/integer_dot.cpp
   fp/arithmetic.cpp
   fp/binary.cpp
   fp/div_fixup.cpp

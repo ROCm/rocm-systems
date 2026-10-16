@@ -19,6 +19,11 @@ check_cxx_compiler_flag("${rj_arith_avx512vnni_check_flags}" RJ_ARITH_COMPILER_A
 
 set(rj_arith_x86_64_v3_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_exact_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/integer_dot_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/binary_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fixup_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fmas_x86_64_v3.cpp
@@ -45,6 +50,10 @@ set(rj_arith_x86_64_v3_sources
 )
 
 set(rj_arith_x86_64_v4_sources
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_bf16_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_exact_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/exact_arithmetic_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_fixup_x86_64_v4.cpp
