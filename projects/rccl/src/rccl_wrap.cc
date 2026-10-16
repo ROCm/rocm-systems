@@ -330,6 +330,7 @@ ncclResult_t rcclGetAlgoProtoIndex(const char* envStr, const char* algoProtoStri
 
 extern int64_t ncclParamMinNchannels();
 extern int64_t ncclParamMaxNchannels();
+extern int64_t ncclParamMultiSegmentRegister();
 extern int64_t rcclParamForceCe();
 RCCL_PARAM(ChannelTuningEnable, "CHANNEL_TUNING_ENABLE", 1);
 
@@ -2406,6 +2407,37 @@ static ncclUnrollAvailability unrollAvailability(int unroll, char const* archNam
   return ncclUnrollUsable;
 }
 
+ncclResult_t rcclNetRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  if (regRecord->rcclNet.nSegments != 0) {
+    *numSegments = regRecord->rcclNet.nSegments;
+    return ncclSuccess;
+  }
+  // endAddr is page-rounded but hipMalloc reports its unrounded size; stop inside the last page.
+  const size_t walkSize = regRecord->endAddr - regRecord->begAddr - comm->regCache.pageSize + 1;
+  CUdeviceptr base = 0;
+  size_t baseSize = 0;
+  NCCLCHECK(ncclCuMemGetAddressRange((CUdeviceptr)regRecord->begAddr, walkSize, &base, &baseSize, numSegments));
+  regRecord->rcclNet.nSegments = *numSegments;
+  return ncclSuccess;
+}
+
+ncclResult_t rcclNetGraphRegSegmentCount(struct ncclComm* comm, struct ncclReg* regRecord, int* numSegments) {
+  if (regRecord == NULL) return ncclSuccess;
+  ncclResult_t ret = rcclNetRegSegmentCount(comm, regRecord, numSegments);
+  if (ret != ncclSuccess || (*numSegments > 1 && !ncclParamMultiSegmentRegister())) {
+    (void)ncclCommGraphDeregister(comm, regRecord);
+  }
+  return ret;
+}
+
+void rcclNetRegCommit(struct ncclComm* comm, struct ncclReg* regRecord, int numSegments) {
+  // Reached only when every peer registered; a later-peer failure leaves allPeers unset.
+  if (!regRecord->rcclNet.allPeers) {
+    INFO(NCCL_REG, "rank %d - NET register regSize %ld numSegments %d", comm->rank,
+         (long)(regRecord->endAddr - regRecord->begAddr), numSegments);
+  }
+  regRecord->rcclNet.allPeers = true;
+}
 #ifdef ENABLE_WARP_SPEED
 void rcclSetWarpSpeedCUs(struct ncclComm* comm, int algo, int threadsPerBlock, int& rcclWarpSpeedChannels) {
   static int userChannelControlInput = RCCL_VALUE_UNSET;
