@@ -594,20 +594,164 @@ static void hrr_require_recorded_apis(const fs::path& cap_path,
  *   - Capture Unit_HRR_FirstMalloc_Direct, whose very first HIP call is a
  *     hipMalloc (no hipSetDevice / warm-up allocation first).  Replay and
  *     REQUIRE the D2H validates — i.e. the very first allocation was captured
- *     and translated.
- *
- *   Hidden ([.]) because it reproduces the known dropped-first-hipMalloc
- *   limitation: capture shims are installed from hip_capture_init() (run inside
- *   hip::init()), which is the in-flight first HIP API call, so that first call
- *   itself is not recorded.  When the first call is a hipMalloc the allocation
- *   is missing and replay aborts with "H2D dst ... not mapped".  The accepted
- *   workaround is a warm-up allocation before the real work.  Run explicitly by
- *   name; this case PASSES once first-call capture is fixed (the warm-up is no
- *   longer required), so it doubles as the regression guard for that fix.
+ *     and translated.  Before hip_capture_bootstrap() the shims went in from
+ *     hip::init(), inside that first call, so it was not recorded and replay
+ *     aborted with "H2D dst ... not mapped".
  */
-TEST_CASE("Unit_HRR_FirstMallocRoundtrip", "[.][hrr-repro]") {
+HRR_TEST_CASE(Unit_HRR_FirstMallocRoundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_firstmalloc"};
   hrr_run_roundtrip("Unit_HRR_FirstMalloc_Direct", cap.path);
+}
+
+// ---------------------------------------------------------------------------
+// First-call capture.  Each _Direct workload makes the call under test the
+// first HIP call of its process, the one that runs hip::init().
+// ---------------------------------------------------------------------------
+
+// Index of the one `api` event in the archive.
+static size_t hrr_only_event(const hrr::Archive& arc, hrr_api_id_t api) {
+  INFO("API: " << hrr::event_type_name(static_cast<uint16_t>(api)));
+  size_t found = arc.events.size();
+  for (size_t i = 0; i < arc.events.size(); ++i) {
+    if (arc.events[i].header().event_type != static_cast<uint16_t>(api)) continue;
+    REQUIRE(found == arc.events.size());
+    found = i;
+  }
+  REQUIRE(found < arc.events.size());
+  return found;
+}
+
+template <typename Args>
+static const Args& hrr_event_args(const hrr::Event& e) {
+  REQUIRE(e.raw_payload.size() >= sizeof(Args));
+  return *reinterpret_cast<const Args*>(e.raw_payload.data());
+}
+
+// The first event that is not a registration the init sweep recorded.
+static size_t hrr_first_call_event(const hrr::Archive& arc) {
+  for (size_t i = 0; i < arc.events.size(); ++i) {
+    const char* name = hrr::event_type_name(arc.events[i].header().event_type);
+    if (std::strncmp(name, "__hipRegister", 13) != 0) return i;
+  }
+  FAIL("archive holds only registrations");
+  return 0;
+}
+
+// Replay with the runtime's API trace on, REQUIRE the D2H checks pass, and count
+// the traced calls of `api` whose arguments end with `args_tail`: the trace is
+// written by the replayed runtime itself, so it shows what playback executed.
+static int hrr_replayed_calls(const fs::path& cap_path, const std::string& api,
+                              const std::string& args_tail) {
+  auto [ret, out] = hrr_playback_merged(cap_path, "",
+                                        {{"AMD_LOG_LEVEL", "3"}, {"AMD_LOG_MASK", "1"}});
+  INFO("Playback output:\n" << out);
+  REQUIRE(ret == 0);
+  int d2h_pass = 0, d2h_fail = 0;
+  REQUIRE(hrr_parse_d2h_summary(out, d2h_pass, d2h_fail));
+  CHECK(d2h_pass >= 1);
+  CHECK(d2h_fail == 0);
+  int calls = 0;
+  std::istringstream lines(out);
+  for (std::string line; std::getline(lines, line);) {
+    if (line.find(" " + api + " ( ") != std::string::npos &&
+        line.find(args_tail + " )") != std::string::npos)
+      ++calls;
+  }
+  return calls;
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FirstMalloc_Direct and REQUIRE both allocations in the
+ *     archive, the first one as the first call after the registrations, and the
+ *     H2D copy into it after it.  The roundtrip above covers the replay.
+ */
+HRR_TEST_CASE(Unit_HRR_FirstMallocRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_first_malloc_recorded"};
+  hrr_capture_direct("Unit_HRR_FirstMalloc_Direct", cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+
+  std::vector<size_t> mallocs;
+  for (size_t i = 0; i < arc.events.size(); ++i)
+    if (arc.events[i].header().event_type == static_cast<uint16_t>(HRR_API_HIPMALLOC)) mallocs.push_back(i);
+  REQUIRE(mallocs.size() == 2);
+  REQUIRE(mallocs[0] == hrr_first_call_event(arc));
+  const auto& first = hrr_event_args<hrr_args_hipMalloc>(arc.events[mallocs[0]]);
+  CHECK(first.ret == 0);
+  CHECK(first.size == 1024 * sizeof(float));
+  REQUIRE(first.ptr != 0);
+
+  bool h2d_after = false;
+  for (size_t i = 0; i < arc.events.size(); ++i) {
+    if (arc.events[i].header().event_type != static_cast<uint16_t>(HRR_API_HIPMEMCPY)) continue;
+    const auto& m = hrr_event_args<hrr_args_hipMemcpy>(arc.events[i]);
+    if (m.dst != first.ptr) continue;
+    CHECK(i > mallocs[0]);
+    h2d_after = true;
+  }
+  REQUIRE(h2d_after);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FirstStreamCreate_Direct, whose first HIP call creates a
+ *     non-blocking stream that every later command runs on.  REQUIRE exactly
+ *     one hipStreamCreateWithFlags event, first after the registrations, with
+ *     the flag and the stream handle, and every async copy on that handle after
+ *     it.  Replay must create the stream once with the recorded flag and pass
+ *     its D2H checks; a dropped creation would have fallen back to the default
+ *     stream, which the archive and the trace both rule out.
+ */
+HRR_TEST_CASE(Unit_HRR_FirstStreamCreateRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_first_stream_create_recorded"};
+  hrr_capture_direct("Unit_HRR_FirstStreamCreate_Direct", cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+
+  const size_t create = hrr_only_event(arc, HRR_API_HIPSTREAMCREATEWITHFLAGS);
+  REQUIRE(create == hrr_first_call_event(arc));
+  const auto& a = hrr_event_args<hrr_args_hipStreamCreateWithFlags>(arc.events[create]);
+  CHECK(a.ret == 0);
+  CHECK(a.flags == hipStreamNonBlocking);
+  REQUIRE(a.stream != 0);
+
+  int copies = 0;
+  for (size_t i = 0; i < arc.events.size(); ++i) {
+    if (arc.events[i].header().event_type != static_cast<uint16_t>(HRR_API_HIPMEMCPYASYNC)) continue;
+    CHECK(hrr_event_args<hrr_args_hipMemcpyAsync>(arc.events[i]).stream == a.stream);
+    CHECK(i > create);
+    ++copies;
+  }
+  REQUIRE(copies == 2);
+
+  CHECK(hrr_replayed_calls(cap.path, "hipStreamCreateWithFlags", ", 1") == 1);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_FirstSetDeviceFlags_Direct, whose first HIP call sets
+ *     hipDeviceScheduleBlockingSync.  REQUIRE exactly one hipSetDeviceFlags
+ *     event, first after the registrations, with that flag, and that replay
+ *     calls hipSetDeviceFlags exactly once, with it.
+ */
+HRR_TEST_CASE(Unit_HRR_FirstSetDeviceFlagsRecorded) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_first_set_device_flags_recorded"};
+  hrr_capture_direct("Unit_HRR_FirstSetDeviceFlags_Direct", cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+
+  const size_t set = hrr_only_event(arc, HRR_API_HIPSETDEVICEFLAGS);
+  REQUIRE(set == hrr_first_call_event(arc));
+  const auto& a = hrr_event_args<hrr_args_hipSetDeviceFlags>(arc.events[set]);
+  CHECK(a.ret == 0);
+  CHECK(a.flags == hipDeviceScheduleBlockingSync);
+
+  CHECK(hrr_replayed_calls(cap.path, "hipSetDeviceFlags",
+                           std::to_string(hipDeviceScheduleBlockingSync)) == 1);
 }
 
 /**

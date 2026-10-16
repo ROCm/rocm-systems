@@ -16,6 +16,7 @@
  * hrr_api_args.h — included by hip_capture.cpp and hip_capture_writer.cpp.
  */
 
+#include <atomic>
 #include <cstddef>
 #include <cstdint>
 
@@ -57,6 +58,12 @@ struct HipCompilerDispatchTable;
 // Swap the compiler shims into the live table. Call only from
 // hip_capture_build_compiler_table(), after it snapshots g_real_compiler_table.
 void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims);
+
+// Called from hip::GetHipDispatchTable() until g_capture_bootstrapped is set —
+// installs the shims before the first HIP API reads its slot when
+// HIP_HRR_CAPTURE_OUTPUT is set, so the call that runs hip::init() is recorded
+extern std::atomic<bool> g_capture_bootstrapped;
+void hip_capture_bootstrap();
 
 // Called from hip_context.cpp init() — performs build + conditional install
 void hip_capture_init();
