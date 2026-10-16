@@ -14,9 +14,9 @@ defines a three-layer architecture to separate them. This LLD specifies how each
 connects to the existing pipeline, how the compatibility adapter translates between old
 and new formats, and what each self-contained PR delivers.
 
-**Scope:** Layers 1.5, 2, and 3 -- collectables, metric library, display/view, and the
-compatibility adapter. Layer 1 (`sdk_config.yaml`) is out of scope. The metric formula
-evaluation engine (`eval_metric`, `build_eval_string`, `MetricEvaluator`) is unchanged --
+**Scope:** Layers 2 and 3 -- metric library, display/view, and the compatibility adapter.
+Layer 1.5 (collectables) moved to a separate epic. Layer 1 (`sdk_config.yaml`) is out of
+scope. The metric formula evaluation engine (`eval_metric`, `build_eval_string`, `MetricEvaluator`) is unchanged --
 only where formulas are defined and how they reach the engine changes.
 
 Built-in variables (`$GRBM_GUI_ACTIVE_PER_XCD`, `$numActiveCUs`, etc.), currently
@@ -143,13 +143,15 @@ around numeric positional IDs (e.g., `11.2.3` = panel 1100, table 1102, metric i
 3). The new design replaces these with stable string IDs (`compute.salu_util`). During
 the transition, both systems must coexist.
 
-`legacy_id` is an optional field on Layer 2 metrics that carries the numeric positional
-ID from the current system:
+`legacy_id` carries the numeric positional ID from the current system. It lives in a
+transition-only legacy mapping next to the Layer 2 metric files, not on the metrics,
+because one metric appears in several tables at a different position in each. Each row
+of the mapping links a `legacy_id` to a metric id:
 
 ```yaml
-SALU Utilization:
-  id: compute.salu_util          # new stable string ID
-  legacy_id: "11.2.2"            # old positional ID, transition only
+# legacy mapping, table 1102
+- legacy_id: "11.2.2"            # old positional ID, transition only
+  metric: compute.salu_util      # new stable string ID
 ```
 
 Similarly, `legacy_panel_id` on Layer 3 views carries the old numeric panel ID:
@@ -163,7 +165,7 @@ The compatibility adapter (Stage 3) uses these fields to reconstruct the numeric
 `OrderedDict[int, dict]` that `build_dfs()` expects. The `-b` filter resolves numeric
 IDs via `legacy_id` during the transition period.
 
-Both fields are removed in Stage 8 when the old path is retired and string IDs are
+The legacy mapping and `legacy_panel_id` are removed in Stage 8 when the old path is retired and string IDs are
 the primary format. They are transition artifacts, not part of the target design.
 
 

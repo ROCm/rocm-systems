@@ -24,7 +24,6 @@ New module `src/utils/layer3_schema.py`.
 | `title` | str | yes | Table title, e.g. `"Compute Speed-of-Light"` |
 | `header` | dict[str, str] | yes | Column name mapping |
 | `cli_style` | str | no | Render hint: `simple_bar`, `mem_chart`, `simple_box` |
-| `comparable` | bool | no | Whether table is comparable across runs |
 | `metrics` | list[ViewMetricRef] | yes | Ordered list of metric references |
 
 `ViewMetricRef` fields:
@@ -34,6 +33,7 @@ New module `src/utils/layer3_schema.py`.
 | `id` | str | yes | Layer 2 metric id |
 | `archs` | list[str] | no | Metric-level arch filter |
 | `label` | str | no | Display name override for this view |
+| `unit` | str | no | Display unit for this view, e.g. `Bytes/s` for a metric defined in `GB/s` |
 
 **Render type mapping to current table types:**
 
@@ -75,6 +75,14 @@ New module `src/utils/layer3_reader.py`.
 5. Resolve each metric `id` against `library.metrics` -- error if not found.
 6. For each `ViewMetricRef`: if `label` is present, use it as display name; otherwise
    use `name` from the Layer 2 `MetricDefinition`.
+7. For each `ViewMetricRef` with a `unit` different from the metric's Layer 2 `unit`,
+   convert the value in code with one table of known unit conversions (e.g. `GB/s` ->
+   `Bytes/s`, factor 1e9). An unknown pair is a validation error. The metric definition
+   itself stays uniform; only the view's display changes.
+
+Display adjustments such as unit scaling, rounding and aggregation wrappers belong in code,
+not in static YAML. Moving the remaining ones into code is a follow-up outside this
+redesign.
 
 `views_to_panel_configs(views: list[ViewDefinition], library: MetricLibrary) -> OrderedDict[int, dict]`:
 
@@ -213,7 +221,7 @@ One-time script `tools/generate_views_from_panels.py`:
 
 1. Read each current panel config YAML.
 2. Extract grouping and display information (table titles, headers, metric ordering,
-   `cli_style`, `comparable`).
+   `cli_style`).
 3. Generate the corresponding view file, replacing metric definitions with `id`
    references (using the mapping established in Stage 4).
 4. Preserve `label` overrides where the current display name differs from the
@@ -237,18 +245,16 @@ Stage 4 (metrics must be migrated before views can reference them) and Stage 5
 
 ### Modifications
 
-**`generate_configs()` in `analysis_base.py`** -- remove the feature flag. The
-new path is the only path:
+**`generate_configs()` in `analysis_base.py`** -- the new path replaces the
+`load_panel_configs()` call and becomes the only path (Phase 1 adds no runtime switch):
 
 ```python
-library = load_metric_library(Path(config_dir), arch)
+library = load_metric_library(METRIC_LIBRARY_DIR, arch)
 views = load_views(view_dirs, arch, library)
 ac.panel_configs = views_to_panel_configs(views, library)
 ```
 
-The call to `load_panel_configs()` for analysis configs is removed. (TUI mode's
-config files under `rocprof_compute_tui/utils/` may still use `load_panel_configs()`
-until separately migrated.)
+The call to `load_panel_configs()` for analysis configs is removed.
 
 **`detect_counters()` in `soc_base.py`** -- remove the old YAML-text-scanning path.
 Counter detection goes through `MetricLibrary.get_counters_for_metrics()`
@@ -268,7 +274,8 @@ WARNING: Numeric metric ID '11.2.3' is deprecated.
 `convert_metric_id_to_panel_info()` remains during the deprecation window for
 backward compatibility.
 
-**`legacy_id`** -- removed from all Layer 2 metric definitions.
+**Legacy mapping** -- the transition-only mapping that carries `legacy_id` per table row
+is removed.
 
 **`legacy_panel_id`** -- removed from all Layer 3 view files.
 
@@ -302,3 +309,16 @@ and `views/` directories are the canonical source.
 ### Dependencies
 
 Stages 3, 6, 7.
+
+
+## Set display
+
+Sets are defined in Layer 2 (see Phase 1, "Sets migration"). What Layer 3 decides is how a
+set's results are shown:
+
+- **Which panels analyze shows after `profile --set`.** Today the set's numeric IDs are
+  saved as `filter_blocks` and select panels. A string ID such as `compute.salu_util`
+  appears in several panels (e.g. 2 and 11), so the views must decide. This is HLD OQ2.
+- **What `--list-sets` prints.** Today it prints numeric IDs.
+
+At the cutover, `--set` switches to the Layer 2 sets, with these display rules in place.
