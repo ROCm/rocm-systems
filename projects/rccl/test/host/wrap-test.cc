@@ -5176,6 +5176,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchChosen) {
         ncclComm* comm = MakeCommWithArch("gfx942");
         comm->nRanks = 1;
         comm->nNodes = 1;
+        // gfx942 has ceNonRegMax[AG]=0; CE-scratch fires via CTAPolicy_ZERO.
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t scratch[64];
         comm->ddaScratch = scratch;
         comm->ddaScratchBytes = sizeof(scratch);
@@ -5321,11 +5323,13 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CeForceScratchAcceptsExactCapacity) 
         ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                        ncclSymRegType_t) { return true; });
         ncclComm* comm = MakeSelectComm();
+        // null table -> ceNonRegMax[AG]=0; CE-scratch fires via CTAPolicy_ZERO.
+        comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         uint8_t scratch[64];
         comm->ddaScratch = scratch;
         comm->ddaScratchBytes = sizeof(scratch);
         rcclCollDecision decision{};
-        // nRanks(1) * sendcount(16) * sizeof(float32)(4) == 64 bytes.
+        // nRanks(1) * sendcount(16) * sizeof(float32)(4) == 64 bytes == ddaScratchBytes exactly.
         EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr, 16, ncclFloat32, /*stream=*/nullptr, true,
                                                    false, &decision));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, decision.algo);
@@ -5400,9 +5404,10 @@ int SelectAlltoAllAlgo(ncclComm* comm) {
 }
 }  // namespace
 
-// AICOMRCCL-2876: an arch table with forceCeScratch = false (gfx1250) leaves CE-Scratch
-// unforced under the default RCCL_FORCE_CE=1. Flipping only the table entry is the
-// control: it proves every other gate is armed, so the entry alone keeps CE-Scratch off.
+// AICOMRCCL-2876: forceCeScratch in the arch table is a prerequisite gate, not a
+// sufficient trigger. The size window (ceNonRegMax[AG]) must also be open. Here
+// ceNonRegMax[AG]=64 keeps the window armed; flipping only forceCeScratch is the
+// control variable proving the gate alone controls CE-Scratch selection.
 TEST(WrapMicrotestIsolated, SelectAllGather_TableWithoutForceCeScratchDoesNotForce) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_TableWithoutForceCeScratchDoesNotForce",
@@ -5410,9 +5415,13 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TableWithoutForceCeScratchDoesNotFor
         ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                        ncclSymRegType_t) { return true; });
         rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        // Arm ceNonRegMax[AG] so the size window is open; only forceCeScratch varies.
+        table.ceNonRegMax[ncclFuncAllGather] = 64;
         uint8_t scratch[64];
         ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
+        // Gate fails (forceCeScratch=false) even though window is open.
         EXPECT_EQ(NCCL_ALGO_RING, SelectAllGatherAlgo(comm));
+        // Gate passes (forceCeScratch=true) and window is open -> CE-Scratch.
         table.forceCeScratch = true;
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
         DeleteCommWithArch(comm);
@@ -5441,29 +5450,39 @@ TEST(WrapMicrotestIsolated, SelectAllGather_CtaZeroKeepsCeScratch) {
       });
 }
 
-// A table with forceCeScratch = true (gfx942, gfx950) forces CE-Scratch, as does a
-// comm with no table (unknown arch or RCCL_IGNORE_ARCH_TABLE): MI300/MI355 keep the
-// old behaviour. An explicit FORCE_CE=0 turns it off in both cases.
+// With a table having forceCeScratch=true and ceNonRegMax[AG]>0, CE-Scratch fires on
+// gfx942/gfx950. With no table the prereq gate is open but ceNonRegMax[AG]=0, so
+// CTAPolicy_ZERO is needed to bypass the window. FORCE_CE=0 disables both.
 TEST(WrapMicrotestIsolated, SelectAllGather_ForceCeScratchTableOrNoTableForces) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_ForceCeScratchTableOrNoTableForces",
       []() {
         ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                        ncclSymRegType_t) { return true; });
-        const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/true);
-        for (const rcclArchThresholds* t : {&table, static_cast<const rcclArchThresholds*>(nullptr)}) {
-          for (const char* arch : {"gfx942", "gfx950"}) {
-            uint8_t scratch[64];
-            ncclComm* comm = MakeCeScratchComm(arch, t, scratch, sizeof(scratch));
-            EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm))
-                << arch << (t ? " table" : " no table");
-            {
-              ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
-              EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm))
-                  << arch << (t ? " table" : " no table");
-            }
-            DeleteCommWithArch(comm);
+        // Table case: forceCeScratch=true + ceNonRegMax[AG]=64 (>= totalBytes=32).
+        rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/true);
+        table.ceNonRegMax[ncclFuncAllGather] = 64;
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          uint8_t scratch[64];
+          ncclComm* comm = MakeCeScratchComm(arch, &table, scratch, sizeof(scratch));
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch;
+          {
+            ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+            EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch;
           }
+          DeleteCommWithArch(comm);
+        }
+        // Null-table case: prereq gate open; ceNonRegMax[AG]=0 so CTAPolicy_ZERO bypasses window.
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          uint8_t scratch[64];
+          ncclComm* comm = MakeCeScratchComm(arch, nullptr, scratch, sizeof(scratch));
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch << " no table";
+          {
+            ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+            EXPECT_NE((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm)) << arch << " no table";
+          }
+          DeleteCommWithArch(comm);
         }
       });
 }
@@ -5482,7 +5501,9 @@ TEST(WrapMicrotestIsolated, SelectAlltoAll_CeScratchFollowsForceCeScratchResolve
         comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
         comm->config.CTAPolicy = 0;
+        // forceCeScratch=true is the prereq; ceNonRegMax[A2A]=64 arms the window.
         table.forceCeScratch = true;
+        table.ceNonRegMax[ncclFuncAlltoAll] = 64;
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAlltoAllAlgo(comm));
         {
           ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
@@ -5836,7 +5857,9 @@ TEST(WrapMicrotestIsolated, SelectAllGather_ExplicitForceCeForcesCeScratch) {
         SetMicroEnv("RCCL_FORCE_CE", "1");
         ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
                                                        ncclSymRegType_t) { return true; });
-        const rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        // RCCL_FORCE_CE=1 satisfies the prereq gate; also need ceNonRegMax[AG]>0 for the window.
+        rcclArchThresholds table = MakeCeScratchTable(/*forceCeScratch=*/false);
+        table.ceNonRegMax[ncclFuncAllGather] = 64;
         uint8_t scratch[64];
         ncclComm* comm = MakeCeScratchComm("gfx1250", &table, scratch, sizeof(scratch));
         EXPECT_EQ((int)rcclAddonAlgos_t::RCCL_CE_SCRATCH, SelectAllGatherAlgo(comm));
