@@ -268,6 +268,17 @@
       "tests": [
         {"name": "RomeModelsMicrotests", "description": "Host-only graph/rome_models.cc microtests (no GPU, no HIP/RCCL runtime); covers parseGraphLight RCCL_TREES input validation", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_dda_coll": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroDdaColl",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "DdaCollMicrotests", "description": "Host-only algorithms/dda collective launchers microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -335,6 +346,12 @@
       "name": "RCCL Microtests - rome_models.cc",
       "description": "rccl-UnitTestsMicroRomeModels (host-only rome_models.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_rome_models",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - algorithms/dda collective launchers",
+      "description": "rccl-UnitTestsMicroDdaColl (host-only algorithms/dda collective launchers microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_dda_coll",
       "enabled": true
     }
   ]
