@@ -1111,6 +1111,46 @@ static inline void rcclTelemetrySetQpRole(int devIdx, int chIdx, int qpIdx, int 
     __atomic_fetch_add(&ch->num_cts_qp, 1, __ATOMIC_RELAXED);
 }
 
+/* ------------------------------------------------------------------ */
+/* Internal to net_telemetry.cc, declared here for the unit test.      */
+/* Transports must not use anything below.                             */
+/* ------------------------------------------------------------------ */
+
+/* Longest `ethtool -S` statistic name we ever ask for. The kernel bounds a
+ * statistic name by ETH_GSTRING_LEN (32), and the per-priority names we format
+ * stay well inside that, so this has room to spare. */
+#define RCCL_TEL_ETHTOOL_KEY_MAX 64
+
+typedef struct {
+  char     key[RCCL_TEL_ETHTOOL_KEY_MAX];
+  int64_t* target;
+} RcclEthtoolWantedEx;
+
+/* First match in `wanted` order wins, so a primary key queued before its
+ * fallback is preferred. */
+void rcclTelemetryEthtoolResolve(const char* names, size_t nameStride, const uint64_t* values, unsigned n,
+                                 RcclEthtoolWantedEx* wanted, int nwanted);
+
+/* Root of the sysfs/debugfs tree telemetry reads, "/sys" outside tests. */
+extern const char* rcclTelemetrySysRoot;
+
+/* Samples that retry a sampled column's primary row before it locks to the
+ * alternate. */
+#define RCCL_TEL_SAMPLE_PRIMARY_TRIES 10
+
+/* Which table row an hw_samples column reads on one device. With both a
+ * primary and an alternate row, the primary is tried on each sample and the
+ * choice locks on its first successful read, else to the alternate after
+ * RCCL_TEL_SAMPLE_PRIMARY_TRIES samples. */
+typedef struct {
+  int nameIdx, altIdx;
+  int locked; /* row in use once settled, -2 while still trying the primary */
+  int tries;
+} RcclTelSampledCol;
+
+void rcclTelemetrySampledColInit(int devIdx, int sampled, RcclTelSampledCol* col);
+int64_t rcclTelemetrySampledColRead(int devIdx, RcclTelSampledCol* col);
+
 #ifdef __cplusplus
 }
 #endif
