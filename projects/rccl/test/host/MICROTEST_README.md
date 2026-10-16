@@ -196,6 +196,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
     registry, the remaining parsers, the C API, and env loading) are covered
     by its follow-ups.
+  - `commDump.cc` (`COMM_DUMP_CC_PATH`, from `comm-dump-test.cc`); suite
+    `CommDumpMicrotest.*`. Defines `ncclProfilerProxyTraceDumpIfAny`.
+  - `include/timer.h` built with `ENABLE_TIMER`, from `timer-test.cc`; suite
+    `TimerMicrotest.*`. Header-only, no `_CC_PATH` macro needed.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
@@ -337,6 +341,23 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
 
+- **`rccl-UnitTestsMicroDebug`** — `debug.cc` (via `DEBUG_CC_PATH`, from
+  `debug-test.cc`); suite `Debug*`. Its own binary because it is the real
+  `ncclDebugLog`, which every shared fake set also defines. See
+  `test_categories_micro_debug.yaml`.
+- **`rccl-UnitTestsMicroApiTrace`** — `misc/api_trace.cc` (via `API_TRACE_CC_PATH`,
+  from `api-trace-test.cc`); suite `ApiTrace*`. Its own binary because it defines
+  the public `NCCL_API` entry points that `fakes/api_trace_fakes.cc` supplies
+  elsewhere. See `test_categories_micro_api_trace.yaml`.
+- **`rccl-UnitTestsMicroRecorder`** — `misc/recorder.cc` (via `RECORDER_CC_PATH`,
+  from `recorder-test.cc`); suite `Recorder*`. Its own binary because it is the
+  real `rccl::Recorder`, which `fakes/recorder_fakes.cc` supplies elsewhere. See
+  `test_categories_micro_recorder.yaml`.
+- **`rccl-UnitTestsMicroCollTrace`** — `misc/latency_profiler/CollTrace{,Event,Func,Utils}.cc`
+  (via `COLL_TRACE{,_EVENT,_FUNC,_UTILS}_CC_PATH`, all from `coll-trace-test.cc`);
+  suites `CollTrace*`. Its own binary because its `ncclDebugLog`, HIP event and
+  bootstrap seams would collide with the shared fakes. See
+  `test_categories_micro_coll_trace.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
@@ -468,6 +489,7 @@ symbol.
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
 | `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
+| `src/debug.cc` (`ncclDebugLog` recorder, for binaries that link no shared nccl fakes) | `fakes/debug_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |
 | `src/diagnostics.cc` (`ncclDiagChildRun*` external-tool runners) | `fakes/diagnostics_fakes.cc` |
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
@@ -857,6 +879,8 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroCollTrace`, `rccl-UnitTestsMicroRecorder`,
+`rccl-UnitTestsMicroApiTrace`, `rccl-UnitTestsMicroDebug`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
 `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
@@ -899,6 +923,10 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroCollTrace          # misc/latency_profiler tests
+./build/rccl-UnitTestsMicroRecorder           # misc/recorder.cc tests
+./build/rccl-UnitTestsMicroApiTrace           # misc/api_trace.cc tests
+./build/rccl-UnitTestsMicroDebug              # debug.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests

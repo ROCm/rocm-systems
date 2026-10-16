@@ -268,6 +268,50 @@
       "tests": [
         {"name": "RomeModelsMicrotests", "description": "Host-only graph/rome_models.cc microtests (no GPU, no HIP/RCCL runtime); covers parseGraphLight RCCL_TREES input validation", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_debug": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroDebug",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "DebugMicrotests", "description": "Host-only debug.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_api_trace": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroApiTrace",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "ApiTraceMicrotests", "description": "Host-only misc/api_trace.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_recorder": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroRecorder",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "RecorderMicrotests", "description": "Host-only misc/recorder.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_coll_trace": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroCollTrace",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "CollTraceMicrotests", "description": "Host-only misc/latency_profiler microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -335,6 +379,30 @@
       "name": "RCCL Microtests - rome_models.cc",
       "description": "rccl-UnitTestsMicroRomeModels (host-only rome_models.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_rome_models",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - debug.cc",
+      "description": "rccl-UnitTestsMicroDebug (host-only debug.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_debug",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - misc/api_trace.cc",
+      "description": "rccl-UnitTestsMicroApiTrace (host-only misc/api_trace.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_api_trace",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - misc/recorder.cc",
+      "description": "rccl-UnitTestsMicroRecorder (host-only misc/recorder.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_recorder",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - misc/latency_profiler",
+      "description": "rccl-UnitTestsMicroCollTrace (host-only misc/latency_profiler microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_coll_trace",
       "enabled": true
     }
   ]
