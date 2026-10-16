@@ -336,6 +336,57 @@ def _split_rccl_version(version: str) -> tuple[str, str, bool]:
     return m.group(1), (m.group(2) or "").lower(), m.group(3) == "+"
 
 
+# RCCL prints this on EVERY call of a deprecated API name (src/misc/api_trace.cc),
+# at WARN, so NCCL_DEBUG=WARN keeps it. GPT-OSS-120B's MoE all-to-all made it
+# 777600 lines per node per phase -- 97% of a 180 MB node log, which madengine
+# keeps three copies of -- and run 38238634668 alone left 2.1 GB on /apps, under
+# the runner account's quota.
+_LOG_SPAM_RE = re.compile(rb"NCCL WARN Please note that (\w+) is deprecated")
+
+
+def squash_log_spam(run_dir: Path) -> int:
+    """Drop the repeats of _LOG_SPAM_RE lines from one phase's logs, in place.
+
+    The first occurrence of each stays where it was, and one line at the end
+    of the file says how many repeats went. Files with no repeats are left
+    untouched. Returns the number of bytes saved.
+    """
+    log_dir = run_dir / "slurm_output"
+    if not log_dir.is_dir():
+        return 0
+    saved = 0
+    for path in sorted(p for p in log_dir.rglob("*") if p.is_file()):
+        dropped: dict[bytes, int] = {}
+        tmp = path.with_name(path.name + ".squash")
+        try:
+            before = path.stat().st_size
+            with path.open("rb") as src, tmp.open("wb") as dst:
+                for line in src:
+                    m = _LOG_SPAM_RE.search(line)
+                    if m:
+                        api = m.group(1)
+                        if api in dropped:
+                            dropped[api] += 1
+                            continue
+                        dropped[api] = 0
+                    dst.write(line)
+                for api, count in dropped.items():
+                    if count:
+                        dst.write(
+                            b"[rccl-ci] dropped %d repeats of 'NCCL WARN Please note "
+                            b"that %s is deprecated'\n" % (count, api)
+                        )
+            if not any(dropped.values()):
+                tmp.unlink()
+                continue
+            os.replace(tmp, path)
+            saved += before - path.stat().st_size
+        except OSError as exc:
+            log.warning("Could not squash %s: %s", path, exc)
+            tmp.unlink(missing_ok=True)
+    return saved
+
+
 def runtime_rccl_versions(work_dir: Path) -> list[str]:
     """Distinct ``RCCL version :`` banners across one phase's node logs."""
     log_dir = work_dir / "slurm_output"
@@ -1616,6 +1667,13 @@ def main() -> None:
         built_images=[] if args.skip_overlay_build else [overlay_image],
     )
     exit_code = max(allocation["exit_codes"].values(), default=1)
+
+    # Step 5a: Shrink the node logs before anything reads or uploads them.
+    for phase, run_dir in phases:
+        saved = squash_log_spam(run_dir)
+        if saved:
+            log.info("%s: dropped %.1f MB of repeated RCCL warnings from the node logs",
+                     phase, saved / 1e6)
 
     # Step 5b: Verify RCCL replacement. Only the candidate is meant to carry the
     # CI library — the baseline runs the image's bundled copy by design.
