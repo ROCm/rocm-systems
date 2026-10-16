@@ -208,6 +208,31 @@ jobs:
             echo "TENSILE_CANDIDATE_RUNNER=${BENCHMARK_DIR}/tensile-native/tensile_candidate"
           } >> "${GITHUB_ENV}"
 
+      - name: Print failed Tensile generation logs
+        if: ${{ failure() && steps.prepare.outcome == 'failure' }}
+        run: |
+          shopt -s nullglob
+          for LOG in "${BENCHMARK_DIR}"/tensile-artifacts/*/generate.log; do
+            printf '\n--- %s ---\n' "${LOG}"
+            cat -- "${LOG}"
+          done
+
+      - name: Upload preparation failure logs
+        if: ${{ failure() && env.BENCHMARK_DIR != '' }}
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a # v7.0.1
+        with:
+          name: ${{ env.RESULTS_ARTIFACT }}-preparation-logs
+          path: |
+            ${{ env.BENCHMARK_DIR }}/tensile-artifacts/*/generate.log
+            ${{ env.BENCHMARK_DIR }}/build/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ env.BENCHMARK_DIR }}/build/CMakeFiles/*.log
+            ${{ env.BENCHMARK_DIR }}/rocisa-build/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ env.BENCHMARK_DIR }}/rocisa-build/CMakeFiles/*.log
+            ${{ env.BENCHMARK_DIR }}/tensile-native/CMakeFiles/CMakeConfigureLog.yaml
+            ${{ env.BENCHMARK_DIR }}/tensile-native/CMakeFiles/*.log
+          if-no-files-found: warn
+          retention-days: 14
+
       - name: Run performance suite
         if: ${{ success() && steps.prepare.outcome == 'success' }}
         timeout-minutes: 60

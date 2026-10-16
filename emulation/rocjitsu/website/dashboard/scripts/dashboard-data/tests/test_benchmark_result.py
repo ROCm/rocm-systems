@@ -429,3 +429,59 @@ def test_develop_history_gate(tmp_path):
         assert result.returncode == expected, result.stderr
         if expected:
             assert "must be in develop's history" in result.stderr
+
+
+def test_failed_generation_log_is_visible(tmp_path):
+    steps = yaml.safe_load(WORKFLOW.read_text())['jobs']['benchmark']['steps']
+    diagnostics = next(
+        (step for step in steps if step['name'] == 'Print failed Tensile generation logs'),
+        None,
+    )
+    assert diagnostics is not None, 'Failed generator output must reach the Actions console'
+    assert diagnostics['if'] == "${{ failure() && steps.prepare.outcome == 'failure' }}"
+    benchmark_dir = tmp_path / 'benchmark with spaces'
+    log = benchmark_dir / 'tensile-artifacts/bf16_streamk/generate.log'
+    log.parent.mkdir(parents=True)
+    log.write_text('Fixture: underlying Tensile error\n')
+    result = subprocess.run(
+        ['bash', '-euo', 'pipefail', '-c', diagnostics['run']],
+        env={**os.environ, 'BENCHMARK_DIR': str(benchmark_dir)},
+        capture_output=True,
+        text=True,
+    )
+    assert result.returncode == 0, result.stderr
+    assert log.read_text() in result.stdout
+    log.unlink()
+    missing = subprocess.run(
+        ['bash', '-euo', 'pipefail', '-c', diagnostics['run']],
+        env={**os.environ, 'BENCHMARK_DIR': str(benchmark_dir)},
+        capture_output=True,
+        text=True,
+    )
+    assert missing.returncode == 0, missing.stderr
+    prepare = next(step for step in steps if step.get('id') == 'prepare')
+    assert not prepare.get('continue-on-error', False)
+
+
+def test_failed_preparation_logs_are_uploaded():
+    steps = yaml.safe_load(WORKFLOW.read_text())['jobs']['benchmark']['steps']
+    upload = next(
+        (step for step in steps if step['name'] == 'Upload preparation failure logs'),
+        None,
+    )
+    assert upload is not None, 'Preparation logs must survive a failed job'
+    assert upload['if'] == "${{ failure() && env.BENCHMARK_DIR != '' }}"
+    raw_upload = next(step for step in steps if step.get('id') == 'upload_raw')
+    assert upload['uses'] == raw_upload['uses']
+    assert upload['with']['name'] == '${{ env.RESULTS_ARTIFACT }}-preparation-logs'
+    assert upload['with']['if-no-files-found'] == 'warn'
+    assert upload['with']['retention-days'] == 14
+    assert upload['with']['path'].splitlines() == [
+        '${{ env.BENCHMARK_DIR }}/tensile-artifacts/*/generate.log',
+        '${{ env.BENCHMARK_DIR }}/build/CMakeFiles/CMakeConfigureLog.yaml',
+        '${{ env.BENCHMARK_DIR }}/build/CMakeFiles/*.log',
+        '${{ env.BENCHMARK_DIR }}/rocisa-build/CMakeFiles/CMakeConfigureLog.yaml',
+        '${{ env.BENCHMARK_DIR }}/rocisa-build/CMakeFiles/*.log',
+        '${{ env.BENCHMARK_DIR }}/tensile-native/CMakeFiles/CMakeConfigureLog.yaml',
+        '${{ env.BENCHMARK_DIR }}/tensile-native/CMakeFiles/*.log',
+    ]
