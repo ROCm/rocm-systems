@@ -384,7 +384,7 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       // Primaries still active so wait for an async event. With wall-clock
       // sync, use a timed sleep+check loop so we can advance sim time
       // proportionally to elapsed wall time during idle periods. Without
-      // pacing, use atomic::wait() for an efficient unbounded wait.
+      // pacing, sleep briefly between wake-flag and exit checks.
       pacer_.pause();
       {
         auto timeout = pacer_.idle_wait_duration();
@@ -407,7 +407,13 @@ void SimulationEngine::worker_loop(PartitionID partition_id) {
       }
       if (done_.load(std::memory_order_acquire))
         break;
-      ctx.idle_wakeup_.store(false, std::memory_order_release);
+      // Consume the notification atomically with respect to producers. A plain
+      // store can overwrite a concurrent wake without acquiring the producer's
+      // preceding writes (async work or a primary-count decrement), leaving the
+      // event or termination checks stale and the worker asleep. An exchange
+      // either acquires those writes or leaves a later producer's notification
+      // set for the next idle wait.
+      ctx.idle_wakeup_.exchange(false, std::memory_order_acq_rel);
 
       // After waking from idle, resume the pacing clock.
       pacer_.resume();
@@ -606,6 +612,11 @@ bool SimulationEngine::all_primaries_done() const {
 }
 
 bool SimulationEngine::check_termination(Tick lbts) {
+  // Async events posted during this epoch are absent from the published LBTS.
+  // Drain them in the next epoch before deciding that work is finished or that
+  // the next event exceeds the tick limit (notably terminal CP cancellation).
+  if (any_async_pending())
+    return false;
   if (all_primaries_done()) {
     // All primaries have signaled done. Enter draining phase: continue
     // processing until the system is fully quiescent (all incoming queues
@@ -619,7 +630,7 @@ bool SimulationEngine::check_termination(Tick lbts) {
   }
   // Multi-threaded max_ticks: terminate when global LBTS reaches max_ticks.
   if (config_.max_ticks > 0 && config_.num_threads > 1) {
-    if (lbts >= config_.max_ticks) {
+    if (lbts != TICK_MAX && lbts >= config_.max_ticks) {
       set_exit(ExitReason::COMPLETED, config_.max_ticks, "max ticks reached");
       done_.store(true, std::memory_order_release);
       return true;
@@ -647,7 +658,9 @@ void SimulationEngine::wake_partition_locked(PartitionID pid) {
   if (config_.num_threads != 1 || pid >= contexts_.size())
     return;
   PartitionContext &ctx = *contexts_[pid];
-  ctx.idle_wakeup_.store(true, std::memory_order_release);
+  // Keep concurrent producers in one release sequence so consuming the wake
+  // acquires every publication, including one followed by a delayed older wake.
+  ctx.idle_wakeup_.exchange(true, std::memory_order_release);
   ctx.idle_wakeup_.notify_one();
 }
 
