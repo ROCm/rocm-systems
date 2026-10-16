@@ -50,6 +50,7 @@
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/driver.h"
 #include "core/inc/memory_region.h"
+#include "inc/hsa_ext_amd_aie.h"
 
 namespace rocr {
 
@@ -153,6 +154,37 @@ public:
   ///
   /// @param[in] queue_metadata UMQ metadata to be destroyed
   hsa_status_t DestroyUserModeQueue(void* queue_metadata) const;
+
+  /// @brief Prepares a range of UMQ packets for CERT to execute.
+  ///
+  /// hsa_amd_aie_kernel_dispatch_packet_t was written to be binary-compatible with CERT's own
+  /// struct host_queue_packet / exec_buf: same bytes, reinterpreted. Every field the application
+  /// filled in already carries what CERT wants, except kernel_object -- the application treats it
+  /// as a host AieKernelDescriptor* (the same handle KMQ dispatch resolves it as), but CERT reads
+  /// the same bytes as a raw device address (struct exec_buf's dpu_control_code_host_addr_low/
+  /// high). CERT does not patch argument addresses into that control code itself either (confirmed
+  /// on real hardware: it faults on the IOMMU at the ELF's small placeholder offsets if nothing
+  /// else patches them first), so this allocates a fresh per-dispatch copy of each packet's
+  /// kernel's pristine control code, folds that dispatch's kernarg addresses into it (exactly like
+  /// @ref SubmitCmdChain's full-ELF path does for aie2p), and overwrites kernel_object with the
+  /// copy's address -- never the shared pristine one.
+  ///
+  /// Unlike @ref SubmitCmdChain, this never touches the device: there is no per-batch driver call
+  /// for UMQ, so the caller still owns publishing the new write index and ringing the doorbell.
+  ///
+  /// @param[in,out] ring the queue's packet ring; only kernel_object_low/high are modified
+  /// @param[in] ring_capacity number of packet slots in @p ring, for wrapping the index
+  /// @param[in] first_pkt_idx index of the first packet to translate
+  /// @param[in] num_pkts number of packets to translate, starting at @p first_pkt_idx. Must be
+  /// greater than 0.
+  /// @param[in] agent agent that owns the queue
+  /// @retval HSA_STATUS_ERROR_INVALID_CODE_OBJECT a packet's kernel_object does not name a loaded
+  /// descriptor
+  /// @retval HSA_STATUS_ERROR_OUT_OF_RESOURCES a per-dispatch control-code copy could not be
+  /// allocated
+  hsa_status_t TranslateUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring,
+                                   uint32_t ring_capacity, uint64_t first_pkt_idx,
+                                   uint64_t num_pkts, const core::Agent& agent) const;
 
   hsa_status_t SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
                               uint32_t* queue_cu_mask) const override;

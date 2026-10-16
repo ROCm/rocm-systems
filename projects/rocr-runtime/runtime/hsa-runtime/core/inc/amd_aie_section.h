@@ -117,14 +117,14 @@ struct AieKernelDescriptor {
   /// checked it is at least 1 and no more than the agent has; dispatch sizes the hardware context
   /// to the most any kernel in it declares.
   uint32_t num_cols;
-  /// @brief Control code with the PDI addresses already in place, in host memory. FullElf only;
-  /// empty for PdiInsts.
+  /// @brief Control-code pages with the PDI addresses already in place, in host memory. FullElf
+  /// only; empty for PdiInsts.
   ///
   /// The loader writes each PDI's device address into its sites at load; the argument sites keep
   /// what the ELF shipped, since their patches are additive. The NPU never fetches this. It is
   /// only a memcpy source for the per-dispatch buffer the driver allocates, so it needs neither
   /// device memory nor alignment.
-  std::vector<uint8_t> ctrl_code;
+  std::vector<aie_elf::Page> pages;
   /// @brief XDNA BO handles of the PDIs the control code loads, each placed once. FullElf only;
   /// empty otherwise.
   ///
@@ -137,6 +137,23 @@ struct AieKernelDescriptor {
   /// because a flat layout needs a separate index that could disagree with the sites and would
   /// have to be re-validated on every dispatch.
   std::vector<std::vector<aie_elf::PatchSite>> arg_sites;
+  /// @brief Device address of this kernel's pristine (argument-unpatched), single flat control
+  /// code, placed once at load. aie4 UMQ dispatch only; 0 otherwise.
+  ///
+  /// Every page aie_elf::Parse() found is concatenated into this one buffer at load (see the
+  /// loader), so arg_sites above are absolute offsets into it (page always 0, in_ctrldata always
+  /// false) -- the page/ctrldata split that distinguished a page's two buffers only matters while
+  /// parsing the ELF. aie4's CERT firmware does not patch argument addresses into the control code
+  /// itself (confirmed on real hardware: it faults rather than computing them), so exactly like
+  /// aie2p, this is a template copied fresh and patched (PatchShimDma57Aie4) before every dispatch
+  /// -- never this buffer itself. Allocated through the agent's system allocator rather than a
+  /// device segment (aie4 has no device heap to carve a CODE_AGENT segment region out of), so this
+  /// is already an address the agent can dereference directly -- no separate device-address
+  /// resolution, unlike a blob placed into that segment.
+  uint64_t static_ctrl_code_dev_addr = 0;
+  /// @brief Size in bytes of the buffer at @ref static_ctrl_code_dev_addr. aie4 UMQ dispatch only;
+  /// 0 otherwise.
+  uint64_t static_ctrl_code_size = 0;
 };
 
 /// @brief Current AieKernelDescriptor::version value.
