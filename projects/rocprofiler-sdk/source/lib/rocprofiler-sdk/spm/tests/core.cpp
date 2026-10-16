@@ -951,19 +951,31 @@ TEST(spm_core, query_agent_configurations)
             ASSERT_GT(result.num_configs, 0) << "Expected at least one configuration";
 
             bool found_interval = false;
+            bool found_refclk   = false;
             for(const auto& cfg : result.configs)
             {
                 EXPECT_EQ(cfg.size, sizeof(rocprofiler_spm_available_configuration_t));
                 if(cfg.type == ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_SCLK_CYCLES)
                 {
                     found_interval = true;
-                    EXPECT_EQ(cfg.interval.min_interval, 32);
+                    // aqlprofile uses a minimum of 1 after gfx10, and 32 on gfx10 and older.
+                    EXPECT_EQ(
+                        cfg.interval.min_interval,
+                        ROCPROFILER_GFXIP_MAJOR(rocp_agent->gfx_target_version) >= 11 ? 1 : 32);
+                    EXPECT_GT(cfg.interval.max_interval, cfg.interval.min_interval);
+                }
+                if(cfg.type == ROCPROFILER_SPM_PARAMETER_TYPE_SAMPLE_INTERVAL_REFCLK_CYCLES)
+                {
+                    found_refclk = true;
+                    EXPECT_EQ(cfg.interval.min_interval, 1);
                     EXPECT_GT(cfg.interval.max_interval, cfg.interval.min_interval);
                 }
                 EXPECT_NE(cfg.type, ROCPROFILER_SPM_PARAMETER_TYPE_NONE);
                 EXPECT_NE(cfg.type, ROCPROFILER_SPM_PARAMETER_TYPE_LAST);
             }
             EXPECT_TRUE(found_interval) << "Expected a sample interval configuration";
+            const auto version = rocp_agent->gfx_target_version;
+            EXPECT_EQ(found_refclk, version == 120000 || version == 120001 || version == 120500);
         }
     }
 

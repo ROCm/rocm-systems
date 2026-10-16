@@ -579,6 +579,42 @@ class AMDSMIHelpers:
         return (switch_choices, switch_choices_str)
 
     @staticmethod
+    def is_valid_ampp_field_name(name) -> bool:
+        """Check a candidate AMPP field name against the same constraints
+        amdsmi_configure_ampp_profile()/the driver enforce: a non-empty str
+        whose UTF-8 encoding fits in AMDSMI_MAX_STRING_LENGTH bytes.
+
+        Shared between the CLI's --ampp-configure argv parsing
+        (amdsmi_parser.py) and its @<file> JSON restore path
+        (set_value.py) so the two entry points can't drift apart.
+        """
+        if not isinstance(name, str) or not name:
+            return False
+        try:
+            # A str may contain a lone UTF-16 surrogate (e.g. via
+            # surrogateescape on argv, or from JSON), which is a valid
+            # Unicode code point but not valid UTF-8.
+            return len(name.encode("utf-8")) < amdsmi_interface.AMDSMI_MAX_STRING_LENGTH
+        except UnicodeEncodeError:
+            return False
+
+    @staticmethod
+    def parse_ampp_field_value(value) -> Optional[int]:
+        """Parse and range-check a candidate AMPP field value the same way
+        amdsmi_configure_ampp_profile() will (it assigns straight into an
+        int64 ctypes struct field). Returns the parsed int, or None if
+        `value` isn't representable as an int64 -- int(value) itself raises
+        TypeError/ValueError/OverflowError for a non-numeric or
+        out-of-range value (e.g. bare JSON Infinity/NaN)."""
+        try:
+            parsed = int(value)
+        except (TypeError, ValueError, OverflowError):
+            return None
+        if not -(2**63) <= parsed < 2**63:
+            return None
+        return parsed
+
+    @staticmethod
     def is_UUID(uuid_question: str) -> bool:
         """Determine if given string is of valid UUID format
         Args:
@@ -1638,14 +1674,14 @@ class AMDSMIHelpers:
                 power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
                 for sensor in power_cap_types["sensor_inds"]:
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
-                    if (
+                    if power_cap_info["max_power_cap"] != "N/A" and (
                         power_cap_info["max_power_cap"]
                         > power_limit_types[f"ppt{sensor}"]["power_cap_max"]
                     ):
                         power_limit_types[f"ppt{sensor}"]["power_cap_max"] = power_cap_info[
                             "max_power_cap"
                         ]
-                    if (
+                    if power_cap_info["min_power_cap"] != "N/A" and (
                         power_cap_info["min_power_cap"]
                         < power_limit_types[f"ppt{sensor}"]["power_cap_min"]
                     ):
@@ -2180,8 +2216,10 @@ class AMDSMIHelpers:
             unit_out - Requires using SI_Unit to set current value's SI unit
              default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
         return:
-            int or float : converted SI unit of value requested
+            int or float : converted SI unit of value requested, or "N/A" if val is "N/A"
         """
+        if val == "N/A":
+            return val
         if isinstance(val, float):
             return val * unit_in / unit_out
         elif isinstance(val, int):
@@ -3469,6 +3507,10 @@ class AMDSMIHelpers:
             current_power_cap = self.convert_SI_unit(
                 power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
             )
+            if "N/A" in (min_power_cap, max_power_cap, current_power_cap):
+                raise amdsmi_exception.AmdSmiLibraryException(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
             # Setting power cap to 0 reads back the current cap, so the technical minimum is 1
             min_power_cap = max(min_power_cap, 1)
 
