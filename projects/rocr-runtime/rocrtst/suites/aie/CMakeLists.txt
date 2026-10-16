@@ -70,10 +70,34 @@ target_link_libraries(test_memory
 )
 gtest_discover_tests(test_memory)
 
+# test_pointer_info: hsa_amd_pointer_info behavior on AIE and CPU allocations. Self-contained;
+# it does not require any AIE kernel artifacts (no aiecc / NPU toolchain needed).
+add_executable(test_pointer_info test_pointer_info.cc)
+set_target_properties(test_pointer_info
+  PROPERTIES
+    CXX_STANDARD                17
+    CXX_EXTENSIONS              OFF
+    CXX_VISIBILITY_PRESET       hidden
+    VISIBILITY_INLINES_HIDDEN   ON
+    POSITION_INDEPENDENT_CODE   ON
+)
+target_compile_options(test_pointer_info
+  PRIVATE
+    -Wall
+    -Wextra
+    -Wpedantic
+)
+target_link_libraries(test_pointer_info
+  PRIVATE
+    hsa-runtime64::hsa-runtime64
+    GTest::gtest_main
+)
+gtest_discover_tests(test_pointer_info)
+
 # ---------------------------------------------------------------------------
 # Everything below builds AIE kernel artifacts and the dispatch tests that need
 # them. It is all conditional on the kernel toolchain being present, because
-# test_error_callback and test_memory above need none of it and are expected to
+# test_error_callback, test_memory and test_pointer_info above need none of it and are expected to
 # configure and run on any machine -- a missing NPU or IRON environment must not
 # fail the configure and take those targets down with it.
 #
@@ -134,14 +158,22 @@ endif()
 if(AIE_KERNEL_TOOLCHAIN)
   execute_process(
     COMMAND "${Python3_EXECUTABLE}" -c
-            "import os, sysconfig; print(os.path.join(sysconfig.get_paths()['purelib'], 'llvm-aie'))"
-    OUTPUT_VARIABLE PEANO_INSTALL_DIR
+            "import os, sysconfig; print(sysconfig.get_paths()['purelib'])"
+    OUTPUT_VARIABLE PYTHON_PURELIB
     OUTPUT_STRIP_TRAILING_WHITESPACE
   )
+  # The standard llvm-aie wheel installs Peano at a top-level 'llvm-aie' dir. npu3 (AIE4) instead
+  # uses mlir-aie-xrlabs (medusa-dev), an experimental toolchain whose llvm-aie wheel places it at
+  # 'lnx64.o/tools/peano' -- try that layout only for npu3, so aie2/aie2p keep using the standard
+  # one unconditionally.
+  set(PEANO_INSTALL_DIR "${PYTHON_PURELIB}/llvm-aie")
+  if(NPU_TARGET STREQUAL "npu3" AND NOT EXISTS "${PEANO_INSTALL_DIR}")
+    set(PEANO_INSTALL_DIR "${PYTHON_PURELIB}/lnx64.o/tools/peano")
+  endif()
   if(NOT EXISTS "${PEANO_INSTALL_DIR}")
-    message(STATUS "Could not find Peano (llvm-aie) at '${PEANO_INSTALL_DIR}'; AIE kernel artifacts "
-                  "and the dispatch tests will not be built. Set up the IRON environment with "
-                  "iron_env_setup.sh to build them.")
+    message(STATUS "Could not find Peano (llvm-aie) under '${PYTHON_PURELIB}'; AIE kernel "
+                  "artifacts and the dispatch tests will not be built. Set up the IRON "
+                  "environment with iron_env_setup.sh to build them.")
     set(AIE_KERNEL_TOOLCHAIN FALSE)
   else()
     message(STATUS "Peano install dir: ${PEANO_INSTALL_DIR}")
@@ -172,7 +204,8 @@ if(AIE_KERNEL_TOOLCHAIN)
 endif()
 
 if(NOT AIE_KERNEL_TOOLCHAIN)
-  message(STATUS "AIE kernel toolchain incomplete: building test_error_callback and test_memory only.")
+  message(STATUS "AIE kernel toolchain incomplete: building test_error_callback, test_memory and "
+                 "test_pointer_info only.")
   return()
 endif()
 
@@ -200,8 +233,8 @@ find_program(AIEBU_ASM aiebu-asm
 # equivalent -- so there is nothing to build for an npu1 target even with a complete toolchain.
 set(AIE_FULL_ELF_SUPPORTED FALSE)
 if(NPU_TARGET STREQUAL "npu3")
-  # npu3 (AIE4) has no xclbin flow yet: aiecc assembles the full ELF's control code itself,
-  # without xclbinutil/aiebu-asm (unlike npu2's aiebu-asm-driven step).
+  # npu3 (AIE4): aiecc assembles the full ELF's control code itself, without
+  # xclbinutil/aiebu-asm (unlike npu2's aiebu-asm-driven step).
   set(AIE_FULL_ELF_SUPPORTED TRUE)
 elseif(NPU_TARGET STREQUAL "npu2" AND XCLBINUTIL AND AIEBU_ASM)
   execute_process(
@@ -364,10 +397,11 @@ else()
   set(AIE_HSACO_ARCH "aie2")
 endif()
 
-# npu3 (AIE4) has no PDI+insts/xclbin flow yet (see add_aie_kernel above), so there's nothing to
-# pack these hsacos from. test_dispatch.cc, elf_parse_test and aie_code_test all depend on them
-# unconditionally and so don't build for npu3 either -- only the full-ELF artifacts and hsacos
-# below do, enough to verify the kernels compile and package for AIE4.
+# npu3 (AIE4) builds only the full-ELF toolchain flow (see add_aie_kernel above), so there's
+# nothing to pack these PDI+insts/xclbin hsacos from. test_dispatch.cc, elf_parse_test and
+# aie_code_test all depend on them unconditionally and so don't build for npu3 either -- only the
+# full-ELF artifacts and hsacos below do, enough to verify the kernels compile and package for
+# AIE4.
 if(NOT NPU_TARGET STREQUAL "npu3")
   set(VSADD_HSACO_KERNEL_NAME "vsadd")
   set(vsadd_HSACO "${CMAKE_CURRENT_BINARY_DIR}/vsadd.hsaco")
@@ -474,14 +508,18 @@ endif()
 
 if(NPU_TARGET STREQUAL "npu3")
   message(STATUS "npu3 (AIE4): built vsadd/vsmul full-ELF kernel artifacts and their hsacos "
-                 "(vsadd_elf_hsaco_artifact, vsmul_elf_hsaco_artifact). test_dispatch, "
-                 "elf_parse_test and aie_code_test are not built for npu3: they depend on the "
-                 "PDI+insts/multi-arch hsacos above, which AIE4 has no toolchain flow for yet.")
-  return()
+                 "(vsadd_elf_hsaco_artifact, vsmul_elf_hsaco_artifact). test_dispatch's "
+                 "PDI+insts/multi-arch tests self-skip there (npu3's toolchain flow builds only "
+                 "full-ELF artifacts); its full-ELF tests run against these instead.")
 endif()
 
 # ---------------------------------------------------------------------------
 # test_dispatch executable
+#
+# Built for every target, including npu3 (AIE4): its full-ELF tests run there (see
+# FullElfDispatchTest in test_dispatch.cc), while its PDI+insts/multi-arch tests self-skip when
+# the matching hsaco file does not exist, the same way every other kernel-toolchain-dependent test
+# already does.
 # ---------------------------------------------------------------------------
 add_executable(test_dispatch test_dispatch.cc)
 set_target_properties(test_dispatch
@@ -522,8 +560,13 @@ target_link_libraries(test_dispatch
     hsa-runtime64::hsa-runtime64
     GTest::gtest_main
 )
-add_dependencies(test_dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact
-                               vsmul_hsaco_artifact multiarch_hsaco_artifact)
+# None of these targets exist for npu3 (AIE4): it only builds the full-ELF toolchain flow (see
+# AIE_HSACO_ARCH's npu3 branch above), so add_aie_kernel and the packaging block never define
+# PDI+insts/multi-arch targets.
+if(NOT NPU_TARGET STREQUAL "npu3")
+  add_dependencies(test_dispatch vsadd_kernel_artifacts vsmul_kernel_artifacts vsadd_hsaco_artifact
+                                 vsmul_hsaco_artifact multiarch_hsaco_artifact)
+endif()
 # Both are empty when the toolchain cannot build full ELFs. The guard is needed because
 # add_dependencies() rejects a call with no dependencies, but it tests the variables themselves
 # rather than AIE_FULL_ELF_SUPPORTED, so adding a kernel here cannot name a target that the
@@ -561,6 +604,7 @@ target_compile_options(elf_parse_test
 )
 target_include_directories(elf_parse_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime)
+target_compile_definitions(elf_parse_test PRIVATE AIE_HSACO_ARCH="${AIE_HSACO_ARCH}")
 target_link_libraries(elf_parse_test PRIVATE GTest::gtest_main hsa-runtime64::hsa-runtime64)
 if(vsadd_FULL_ELF_TARGET)
   add_dependencies(elf_parse_test ${vsadd_FULL_ELF_TARGET})
@@ -594,5 +638,11 @@ target_include_directories(aie_code_test PRIVATE
   ${CMAKE_CURRENT_SOURCE_DIR}/../../../runtime/hsa-runtime/libamdhsacode)
 target_compile_definitions(aie_code_test PRIVATE AIE_HSACO_ARCH="${AIE_HSACO_ARCH}")
 target_link_libraries(aie_code_test PRIVATE GTest::gtest_main elf)
-add_dependencies(aie_code_test vsadd_hsaco_artifact multiarch_hsaco_artifact)
+# npu3 (AIE4) builds only the full-ELF hsaco flow (see AIE_HSACO_ARCH above); it reads that hsaco
+# instead (see aie_code_test.cc's kHsaco), built by vsadd_elf_hsaco_artifact.
+if(NPU_TARGET STREQUAL "npu3")
+  add_dependencies(aie_code_test vsadd_elf_hsaco_artifact)
+else()
+  add_dependencies(aie_code_test vsadd_hsaco_artifact multiarch_hsaco_artifact)
+endif()
 add_test(NAME aie_code_test COMMAND aie_code_test WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR})
