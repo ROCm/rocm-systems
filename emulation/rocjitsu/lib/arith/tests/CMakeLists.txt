@@ -194,6 +194,16 @@ foreach(family IN ITEMS integer fp8 half dot2)
     rj_arith_add_test(${target} dot/${family}_test.cpp)
 endforeach()
 
+# Register-only operations share routing and preservation checks.
+foreach(
+    family
+    IN
+    ITEMS move swap ds permlane relative lane
+)
+    set(target "rj_arith_register_${family}_test")
+    rj_arith_add_test(${target} register/${family}_test.cpp)
+endforeach()
+
 # Math families share unary layouts, with independent loose and exact references.
 foreach(
     family
