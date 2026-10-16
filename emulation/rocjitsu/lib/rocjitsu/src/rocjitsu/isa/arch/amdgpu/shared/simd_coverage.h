@@ -393,10 +393,13 @@ template <bool Extended, typename Slot>
         result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(af, bf, wf));
         break;
       case 5:
-        result = std::bit_cast<U>(af - bf);
+        // SUB/SUBREV add the negated subtrahend in operand order, as VOP2 does.
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(
+            af, std::bit_cast<F>(bv ^ U(0x80000000u)), wf));
         break;
       case 6:
-        result = std::bit_cast<U>(bf - af);
+        result = std::bit_cast<U>(binary_f32_simd<fp_mode::Arithmetic::ADD>(
+            std::bit_cast<F>(av ^ U(0x80000000u)), bf, wf));
         break;
       case 7:
         result = std::bit_cast<U>(af * bf);

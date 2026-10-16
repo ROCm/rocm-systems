@@ -318,6 +318,44 @@ def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true1
     )
 
 
+@pytest.mark.parametrize(
+    'template',
+    [
+        'v_add_f32_vop2',
+        'v_sub_f32_vop2',
+        'v_subrev_f32_vop2',
+        'v_mul_f32_vop2',
+        'v_fmac_f32_vop2',
+        'v_fmaak_f32_vop2',
+        'v_fmamk_f32_vop2',
+        'v_mac_f32_vop2',
+        'v_add_f32_vop3',
+        'v_sub_f32_vop3',
+        'v_subrev_f32_vop3',
+        'v_mul_f32_vop3',
+        'v_fma_f32_vop3',
+        'v_fmac_f32_vop3',
+    ],
+)
+def test_f32_mode_aware_probes_share_one_guest_environment_policy(template):
+    probe = simd_probe_line(template)
+    source1 = 'inst.vsrc1' if template.endswith('_vop2') else 'inst.src1'
+
+    # One probe, entered when the guest environment may be installed or when the
+    # host already matches MODE; the environment is installed only in the first case.
+    assert probe.count('ROCJITSU_TRY_SIMD_') == 1
+    assert probe.count('ScopedEnvironment') == 1
+    assert (
+        'const bool guest_environment = amdgpu::may_install_guest_f32_environment('
+        f'wf, inst.src0, {source1}, inst.vdst);'
+    ) in probe
+    assert (
+        'if (guest_environment || amdgpu::fp_mode::native_arithmetic_matches('
+        'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {'
+    ) in probe
+    assert '      if (guest_environment)\n        environment.emplace(' in probe
+
+
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():
     assert simd_probe_line('v_not_b16_vop3', true16_vop3=True) is None
     assert simd_probe_line('v_cndmask_b16_vop3', true16_vop3=True) is None

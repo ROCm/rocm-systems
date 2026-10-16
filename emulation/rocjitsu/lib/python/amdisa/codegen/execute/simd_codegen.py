@@ -2625,6 +2625,30 @@ def simd_probe_line(
     return _guard_mode_arithmetic_probe(template_name, probe)
 
 
+def _guest_f32_environment_probe(probe: str, source1: str) -> str:
+    """Run an F32 MODE-aware SIMD probe once, under the guest FP environment.
+
+    The helpers apply MODE denormal controls themselves and take guest rounding
+    from the environment. amdgpu::may_install_guest_f32_environment owns the
+    policy: with register observers, the debugger or operand delegates, which can
+    run caller code during register access, the probe runs only when the host
+    environment already matches MODE.
+    """
+    return (
+        '  if (wf.exec() != 0 && !amdgpu::simd_force_scalar()) {\n'
+        '    const bool guest_environment = amdgpu::may_install_guest_f32_environment('
+        f'wf, inst.src0, {source1}, inst.vdst);\n'
+        '    if (guest_environment || amdgpu::fp_mode::native_arithmetic_matches('
+        'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {\n'
+        '      std::optional<amdgpu::fp_mode::ScopedEnvironment> environment;\n'
+        '      if (guest_environment)\n'
+        '        environment.emplace(wf.fp_round_mode_f32());\n'
+        f'{_indent_probe(_indent_probe(probe))}\n'
+        '    }\n'
+        '  }'
+    )
+
+
 def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str | None:
     """Retain native arithmetic only when it implements the guest FP policy."""
     if template_name in SIMD_VOP3_BINARY_MODE_FP16:
@@ -2659,37 +2683,13 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
     dtype = next((field for field in fields if field in ('f16', 'f32', 'f64')), None)
     if dtype is None or (fields[1] == 'ldexp' and dtype != 'f16'):
         return probe
-    if dtype == 'f32' and fields[1] in ('sub', 'subrev'):
-        # Reuse the checked SIMD views and share MODE setup for ordinary
-        # operands. Observers and delegates retain their existing path and host
-        # environment; they can execute user code during register access.
-        # The functor applies MODE denormals itself, so it also serves a host
-        # environment that already matches MODE.
-        source1 = 'inst.vsrc1' if fields[-1] == 'vop2' else 'inst.src1'
-        return (
-            '  if (wf.exec() != 0 && !amdgpu::simd_force_scalar() && '
-            '!wf.cu().observes_register_access() && '
-            '!wf.cu().debug_active() && !inst.src0.delegate() && '
-            f'!{source1}.delegate() && !inst.vdst.delegate()) {{\n'
-            '    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());\n'
-            f'{_indent_probe(probe)}\n'
-            '  }\n'
-            '  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), '
-            f'wf.fp_denorm_mode_f32())) {{\n{probe}\n  }}'
-        )
     if (
         dtype == 'f32'
         and 'dx9' not in fields
         and ('amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe)
     ):
-        # This helper applies guest denormal controls explicitly. Establish MODE
-        # once for the wave, including its output scaling and clamp operations.
-        return (
-            '  {\n'
-            '    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());\n'
-            f'{_indent_probe(probe)}\n'
-            '  }'
-        )
+        source1 = 'inst.vsrc1' if fields[-1] == 'vop2' else 'inst.src1'
+        return _guest_f32_environment_probe(probe, source1)
     if dtype in ('f16', 'f64') and fields[1] in ('fma', 'fmac', 'fmaak', 'fmamk'):
         return probe
     mode = 'f32' if dtype == 'f32' else 'f16_f64'

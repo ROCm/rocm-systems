@@ -2197,7 +2197,9 @@ class CodeGenerator:
                     ('VopdSubF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      // The ISA defines VOPD by the VOP2 instructions (16.11): add the
+                      // negated subtrahend, keeping the sources in operand order.
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2206,7 +2208,7 @@ class CodeGenerator:
                     ('VopdSubrevF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src1), std::bit_cast<float>(src0), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',

@@ -888,6 +888,18 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
   return util::native<uint32_t>(out, util::stdx::vector_aligned);
 }
 
+/// @brief Whether an F32 MODE-aware SIMD probe may install the guest FP environment.
+/// @details Register observers, the debugger and DPP/SDWA operand delegates can run
+/// caller code during register access, which must see the caller's host
+/// environment. When this returns false, generated F32 probes run only if the host
+/// environment already matches MODE; otherwise execution falls back to scalar.
+template <typename Source0, typename Source1, typename Destination>
+inline bool may_install_guest_f32_environment(const Wavefront &wf, const Source0 &src0,
+                                              const Source1 &src1, const Destination &vdst) {
+  return !wf.cu().observes_register_access() && !wf.cu().debug_active() && !src0.delegate() &&
+         !src1.delegate() && !vdst.delegate();
+}
+
 /// F32 FMA runs in the caller's guest-rounding environment and applies MODE
 /// denormal controls explicitly. Exceptional lanes use scalar NaN selection
 /// and minimum-normal boundary handling.

@@ -3005,6 +3005,73 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
   return cases;
 }
 
+// VOPD SUB/SUBREV follow the VOP2 rule in both slots: add the negated
+// subtrahend in operand order. Lanes are gfx1201 and gfx1100 captures of
+// v_dual_sub_f32 v6, v0, v1 :: v_dual_subrev_f32 v7, v2, v3 and the swapped
+// pair (llvm-mc encodes both targets identically), which matched VOP2 bit for
+// bit across 15 MODE settings. gfx1100 with IEEE=0 leaves signaling NaNs unquieted.
+std::vector<ArithmeticCase> vopd_subtraction_cases() {
+  struct Lane {
+    const char *name;
+    uint32_t a;
+    uint32_t b;
+    uint32_t sub;
+    uint32_t subrev;
+  };
+  struct Target {
+    const char *name;
+    rj_code_arch_t arch;
+    uint32_t mode;
+    std::vector<Lane> lanes;
+  };
+  const std::vector<Lane> quieting = {
+      {"TwoNans", 0x7fc00002u, 0x7fc00003u, 0x7fc00002u, 0xffc00002u},
+      {"SignalingSubtrahend", 0u, 0x7f800001u, 0xffc00001u, 0x7fc00001u},
+      {"SignalingMinuend", 0x7f800001u, 0u, 0x7fc00001u, 0xffc00001u},
+      {"Rounding", 0x3f800000u, 1u, 0x3f800000u, 0xbf800000u},
+  };
+  const std::array<Target, 5> targets = {{
+      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0x00u, quieting},
+      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0xf0u, quieting},
+      {"Gfx1201",
+       ROCJITSU_CODE_ARCH_RDNA4,
+       0xf3u,
+       {{"TwoNans", 0x7fc00002u, 0x7fc00003u, 0x7fc00002u, 0xffc00002u},
+        {"Rounding", 0x3f800000u, 1u, 0x3f7fffffu, 0xbf7fffffu}}},
+      {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x200u, quieting},
+      {"Gfx1100Ieee0",
+       ROCJITSU_CODE_ARCH_RDNA3,
+       0x00u,
+       {{"TwoNans", 0x7fc00002u, 0x7fc00003u, 0x7fc00002u, 0xffc00002u},
+        {"SignalingSubtrahend", 0u, 0x7f800001u, 0xff800001u, 0x7f800001u},
+        {"SignalingMinuend", 0x7f800001u, 0u, 0x7f800001u, 0xff800001u},
+        {"Rounding", 0x3f800000u, 1u, 0x3f800000u, 0xbf800000u}}},
+  }};
+  struct Pair {
+    const char *name;
+    uint32_t first_word;
+    bool sub_in_x;
+  };
+  constexpr std::array<Pair, 2> pairs = {{
+      {"SubXSubrevY", 0xc94c0300u, true},
+      {"SubrevXSubY", 0xc98a0300u, false},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Target &target : targets)
+    for (const Lane &lane : target.lanes)
+      for (const Pair &pair : pairs)
+        cases.push_back(
+            {std::format("{}{}{}Mode{:03X}", target.name, pair.name, lane.name, target.mode),
+             target.arch,
+             {pair.first_word, 0x06060702u, 0u},
+             {{0, lane.a}, {1, lane.b}, {2, lane.a}, {3, lane.b}},
+             {{6, pair.sub_in_x ? lane.sub : lane.subrev},
+              {7, pair.sub_in_x ? lane.subrev : lane.sub}},
+             target.mode,
+             FE_TONEAREST});
+  return cases;
+}
+
 // High source/destination halves and ABS then NEG stay on the F16 SIMD route.
 // The arithmetic result is +/-32768; mul:2 overflows and FP16_OVFL saturates
 // it to +/-MAX_F16. The low destination half must retain its prior value.
@@ -3609,6 +3676,24 @@ TEST_P(ValuSubtractionSimdBoundaryTest, MatchesBoundaryWithSimdEnabledAndForcedS
 
 INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuSubtractionSimdBoundaryTest,
                          testing::ValuesIn(subtraction_simd_boundary_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+class ValuVopdSubtractionTest : public testing::TestWithParam<ArithmeticCase> {};
+
+// VOPD SIMD runs when the host already matches MODE; other settings use scalar.
+TEST_P(ValuVopdSubtractionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam());
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Captures, ValuVopdSubtractionTest,
+                         testing::ValuesIn(vopd_subtraction_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
