@@ -1400,6 +1400,23 @@ static int rcclP2pChannelStride(struct ncclComm* comm, const struct ncclTaskP2p*
                                     ncclP2pUsesMemcpy());
 }
 
+// Match addP2pToPlan's transport check before reserving the round. A direct task can be local by
+// peer identity yet use a NET connector, in which case addP2pToPlan keeps it on the per-peer tile.
+static bool rcclP2pTaskUsesNetwork(struct ncclComm* comm, const struct ncclTaskP2p* task, int p2pRound,
+                                   bool isSendNotRecv) {
+  if (task == nullptr || task->root == comm->rank) return false;
+  int connIndex = comm->p2pNet && task->bytes > rcclParamP2pNetThreshold() ? NCCL_CONN_IDX_P2P_NET : 1;
+  uint8_t base = ncclP2pChannelBaseForRound(comm, p2pRound, rcclEffectiveP2pBatchEnable(comm));
+  for (int part = 0; part < comm->p2pnChannelsPerPeer; part++) {
+    int channelId = ncclP2pChannelForPart(comm->p2pnChannels, base, part, comm->p2pnChannelsPerPeer, comm->nNodes,
+                                          comm->p2pChannelShiftSize);
+    struct ncclConnector* conn = isSendNotRecv ? &comm->channels[channelId].peers[task->root]->send[connIndex] :
+                                                &comm->channels[channelId].peers[task->root]->recv[connIndex];
+    if (conn->transportComm == (isSendNotRecv ? &netTransport.send : &netTransport.recv)) return true;
+  }
+  return false;
+}
+
 // Put p2p op in plan assuming there is sizeof(ncclDevWorkBatch) in batch budget
 // and sizeof(ncclDevWorkP2p) in work budget. "sendRank" and "recvRank" must
 // match the corresponding values for this round of the p2p schedule (no -1's).
@@ -1941,7 +1958,11 @@ static ncclResult_t scheduleP2pTasksToPlan(struct ncclComm* comm, int* p2pEpoch,
         int strides[2] = {rcclP2pChannelStride(comm, recv), rcclP2pChannelStride(comm, send)};
         int maxStride = std::max(strides[0], strides[1]);
         // Equal-size direct directions with the same cap make the same tuning decisions and stay
-        // one work. Different caps or sizes can put one direction on each tile and must reserve two.
+        // one work only when their effective transports also keep the same caps. Different caps,
+        // sizes, or a NET direction can put one direction on each tile and must reserve two.
+        if (rcclP2pTaskUsesNetwork(comm, recv, *p2pRound, /*isSendNotRecv=*/false)) strides[0] = nChannelsMax;
+        if (rcclP2pTaskUsesNetwork(comm, send, *p2pRound, /*isSendNotRecv=*/true)) strides[1] = nChannelsMax;
+        maxStride = std::max(strides[0], strides[1]);
         bool maySplit = recv && send && sendRank != comm->rank && maxStride > nChannelsMax &&
                         (strides[0] != strides[1] || recvBytes != sendBytes);
         int roundBatches = maySplit ? maxStride + nChannelsMax : maxStride;

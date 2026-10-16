@@ -4383,3 +4383,25 @@ TEST_F(EnqueueMicrotest, ScheduleP2p_SplitRound_ReservesBothTiles) {
     EXPECT_EQ(needed, sc.bp.p()->nWorkBatches);
   }
 }
+
+TEST_F(EnqueueMicrotest, ScheduleP2p_EqualSizeMixedNetP2p_ReservesBothTiles) {
+  // Both direct tasks have a 128-channel policy cap and equal sizes, but the send connector is
+  // NET and is reduced to the 64-channel per-peer tile inside addP2pToPlan. The receive remains
+  // widened, so the round emits two works and needs 64 + 128 batches.
+  const int needed = WidenedP2pScene::kWideChannels + WidenedP2pScene::kChannelsPerPeer;
+  {
+    WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+    sc.channelPeers[WidenedP2pScene::kSendRank].send[1].transportComm = &netTransport.send;
+    ASSERT_EQ(ncclSuccess, sc.schedule((needed - 1) * kBatch));
+    EXPECT_EQ(2, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(0, sc.bp.p()->nWorkBatches);
+  }
+  {
+    WidenedP2pScene sc(ncclFuncSend, ssize_t(1) << 30, ncclFuncRecv, ssize_t(1) << 30);
+    sc.channelPeers[WidenedP2pScene::kSendRank].send[1].transportComm = &netTransport.send;
+    ASSERT_EQ(ncclSuccess, sc.schedule(needed * kBatch));
+    EXPECT_EQ(0, sc.bp.c()->planner.nTasksP2p);
+    EXPECT_EQ(needed, sc.bp.p()->nWorkBatches);
+    ASSERT_EQ(2u, sc.works().size());
+  }
+}
