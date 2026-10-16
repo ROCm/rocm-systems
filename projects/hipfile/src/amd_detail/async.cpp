@@ -5,14 +5,22 @@
 
 #include "async.h"
 #include "backend.h"
+#include "buffer.h"
 #include "context.h"
+#include "device-guard.h"
+#include "hip.h"
 #include "hipfile.h"
+#include "io.h"
 #include "stream.h"
-#include "sys.h"
+#include "thread-pool.h"
+#include "util.h"
 
+#include <algorithm>
+#include <atomic>
+#include <future>
+#include <hip/hip_runtime_api.h>
 #include <memory>
 #include <stdexcept>
-#include <syslog.h>
 #include <utility>
 
 namespace hipFile {
@@ -27,68 +35,47 @@ enum class IoType;
 
 namespace hipFile {
 
-AsyncMonitor::AsyncMonitor() : is_finished{false}
+AsyncMonitor::AsyncMonitor() : task_group{Context<IStreamThreadPool>::get()->makeTaskGroup()}
 {
-    thread = std::thread(&AsyncMonitor::completion_thread, this);
 }
 
 AsyncMonitor::~AsyncMonitor()
 {
-    {
-        std::lock_guard<std::mutex> lock{mutex};
-        is_finished = true;
-    }
-    cv.notify_one();
-    thread.join();
-    if (submitted_ops.size() > 0) {
-        Context<Sys>::get()->syslog(LOG_CRIT,
-                                    "Async state is being destructed while operations are outstanding.");
+    task_group->wait();
+}
+
+static void
+signalOffloadComplete(AsyncOp *op)
+{
+    op->file.reset();
+    op->buffer.reset();
+    if (uint64_t *slot = op->stream->signalSlot()) {
+        std::atomic_ref<uint64_t>{*slot}.fetch_add(1, std::memory_order_release);
     }
 }
 
 void
-AsyncMonitor::addOp(std::shared_ptr<AsyncOp> op)
+AsyncMonitor::submitIo(AsyncOp *op)
 {
-    std::lock_guard<std::mutex> lock{mutex};
-    submitted_ops.insert({op.get(), std::move(op)});
+    task_group->run([op]() {
+        std::unique_ptr<AsyncOp> owned{op};
+        owned->io_fn(owned.get());
+        signalOffloadComplete(owned.get());
+    });
 }
 
 void
-AsyncMonitor::completeOp(AsyncOp *op)
+AsyncMonitor::submitIoAndWait(AsyncOp *op)
 {
-    {
-        std::lock_guard<std::mutex> lock{mutex};
-        if (auto found = submitted_ops.find(op); found == submitted_ops.end()) {
-            throw std::invalid_argument("Op does not appear in submitted_ops");
-        }
-        op->file.reset();
-        op->buffer.reset();
-        completed_ops.push_back(op);
-    }
-    cv.notify_one();
-}
-
-void
-AsyncMonitor::completion_thread()
-{
-    while (true) {
-        std::unique_lock<std::mutex> lock{mutex};
-        if (!completed_ops.empty()) {
-            AsyncOp *op{completed_ops.back()};
-            completed_ops.pop_back();
-            auto nh = submitted_ops.extract(op);
-            // Lock needs to be released before destructor runs, as hipHostFree calls hipDeviceSynchronize.
-            // If another host function is running completeOp and waiting for the lock, this would cause
-            // deadlock.
-            lock.unlock();
-        }
-        else if (!is_finished) {
-            cv.wait(lock, [this] { return is_finished || !completed_ops.empty(); });
-        }
-        else {
-            break;
-        }
-    }
+    std::promise<void> done;
+    std::future<void>  fut = done.get_future();
+    task_group->run([op, &done]() {
+        std::unique_ptr<AsyncOp> owned{op};
+        owned->io_fn(owned.get());
+        signalOffloadComplete(owned.get());
+        done.set_value();
+    });
+    fut.wait();
 }
 
 AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<IBuffer> _buffer,
@@ -102,7 +89,7 @@ AsyncOp::AsyncOp(IoType _io_type, std::shared_ptr<IFile> _file, std::shared_ptr<
                                             : std::variant<const hoff_t, hoff_t *>{_file_offset}},
       buffer_offset{stream->fixedBufferOffset() ? std::variant<const hoff_t, hoff_t *>{*_buffer_offset}
                                                 : std::variant<const hoff_t, hoff_t *>{_buffer_offset}},
-      bytes_transferred{_bytes_transferred}, bytes_transferred_internal{0}
+      bytes_transferred{_bytes_transferred}
 {
 }
 
@@ -110,28 +97,116 @@ AsyncOp::~AsyncOp()
 {
 }
 
+void
+async_run_io(void *userargs)
+{
+    auto         op       = static_cast<AsyncOp *>(userargs);
+    const size_t size     = std::min(*get_variant_ptr(op->size), getMaxRwCount());
+    const hoff_t file_off = *get_variant_ptr(op->file_offset);
+    const hoff_t buf_off  = *get_variant_ptr(op->buffer_offset);
+    if (!paramsValid(op->buffer, size, file_off, buf_off)) {
+        *op->bytes_transferred = -hipFileInvalidValue;
+    }
+    else {
+        try {
+            DeviceGuard device_guard{op->stream->getHipDevice()};
+            *op->bytes_transferred = op->backend->io(op->io_type, op->file, op->buffer, size, file_off,
+                                                     buf_off, op->stream->copyStream());
+        }
+        catch (...) {
+            *op->bytes_transferred = -hipFileInternalError;
+        }
+    }
+}
+
+void
+enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFile> file,
+             std::shared_ptr<IBuffer> buffer, size_t *size_p, hoff_t *file_offset_p, hoff_t *buffer_offset_p,
+             ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream)
+{
+    if (!paramsValid(buffer, std::min(*size_p, getMaxRwCount()), *file_offset_p, *buffer_offset_p)) {
+        throw std::invalid_argument("The selected file or buffer region is invalid");
+    }
+
+    if (buffer->getGpuId() != stream->getHipDevice()) {
+        throw std::invalid_argument("Buffer GPU ID does not match Stream GPU ID");
+    }
+
+    *bytes_transferred_p = 0;
+
+    auto op     = std::make_unique<AsyncOp>(type, std::move(file), std::move(buffer), stream, size_p,
+                                            file_offset_p, buffer_offset_p, bytes_transferred_p);
+    op->backend = std::move(backend);
+    op->io_fn   = async_run_io;
+
+    if (stream->getHipStream() == nullptr) {
+        Context<Hip>::get()->hipStreamSynchronize(nullptr);
+        op->io_fn(op.get());
+        return;
+    }
+
+    auto        stream_lock = stream->getLock();
+    hipStream_t hip_stream  = stream->getHipStream();
+    bool        wait_value  = stream->canUseStreamWaitValue();
+    bool        targeted    = false;
+    bool        launched    = false;
+
+    AsyncOp *raw = op.release();
+    try {
+        if (wait_value) {
+            uint64_t target = stream->nextSignalTarget();
+            targeted        = true;
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_dispatch, raw);
+            launched = true;
+            Context<Hip>::get()->hipStreamWaitValue64(hip_stream, stream->signalSlot(), target,
+                                                      hipStreamWaitValueGte, ~uint64_t{0});
+        }
+        else {
+            Context<Hip>::get()->hipLaunchHostFunc(hip_stream, async_run_inline, raw);
+            launched = true;
+        }
+    }
+    catch (...) {
+        if (!launched) {
+            std::unique_ptr<AsyncOp> owned{raw};
+            if (targeted) {
+                stream->releaseSignalTarget();
+            }
+        }
+        throw;
+    }
+}
+
 }
 
 extern "C" {
 void
-async_io_cleanup(void *userargs)
+async_dispatch(void *userargs)
 {
     using namespace hipFile;
-    auto     op                         = static_cast<AsyncOp *>(userargs);
-    ssize_t *bytes_transferred          = op->bytes_transferred;
-    ssize_t  bytes_transferred_internal = op->bytes_transferred_internal;
-    bool     publish                    = op->write_result && op->committed;
+    auto op = static_cast<AsyncOp *>(userargs);
     try {
-        Context<AsyncMonitor>::get()->completeOp(op);
+        Context<AsyncMonitor>::get()->submitIo(op);
     }
-    catch (const std::invalid_argument &) {
-        if (publish) {
-            *bytes_transferred = -hipFileInternalError;
-        }
-        return;
+    catch (...) {
+        std::unique_ptr<AsyncOp> owned{op};
+        *owned->bytes_transferred = -hipFileInternalError;
+        signalOffloadComplete(owned.get());
     }
-    if (publish) {
-        *bytes_transferred = bytes_transferred_internal;
+}
+
+void
+async_run_inline(void *userargs)
+{
+    using namespace hipFile;
+    auto op = static_cast<AsyncOp *>(userargs);
+    try {
+        Context<AsyncMonitor>::get()->submitIoAndWait(op);
+    }
+    catch (...) {
+        std::unique_ptr<AsyncOp> owned{op};
+        *owned->bytes_transferred = -hipFileInternalError;
+        signalOffloadComplete(owned.get());
     }
 }
 }

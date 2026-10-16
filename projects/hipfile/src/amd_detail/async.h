@@ -5,15 +5,12 @@
 #pragma once
 
 #include "hipfile.h"
+#include "thread-pool.h"
 
-#include <condition_variable>
+#include <cstdint>
 #include <memory>
-#include <mutex>
 #include <sys/types.h>
-#include <thread>
-#include <unordered_map>
 #include <variant>
-#include <vector>
 
 namespace hipFile {
 class IBuffer;
@@ -25,14 +22,13 @@ namespace hipFile {
 class IStream;
 }
 namespace hipFile {
+struct Backend;
+}
+namespace hipFile {
 enum class IoType;
 }
 
 namespace hipFile {
-
-struct AsyncFailoverState {
-    bool fallback_needed{false};
-};
 
 class AsyncOp {
 public:
@@ -44,10 +40,8 @@ public:
     std::variant<const hoff_t, hoff_t *> file_offset;
     std::variant<const hoff_t, hoff_t *> buffer_offset;
     ssize_t *const                       bytes_transferred;
-    ssize_t                              bytes_transferred_internal;
-    std::shared_ptr<AsyncFailoverState>  failover{};
-    bool                                 write_result{true};
-    bool                                 committed{true};
+    void (*io_fn)(void *){nullptr};
+    std::shared_ptr<Backend> backend{};
 
     AsyncOp(const AsyncOp &)            = delete;
     AsyncOp &operator=(const AsyncOp &) = delete;
@@ -65,20 +59,21 @@ public:
     virtual ~AsyncMonitor();
     AsyncMonitor();
 
-    virtual void addOp(std::shared_ptr<AsyncOp> op);
-    virtual void completeOp(AsyncOp *op);
+    virtual void submitIo(AsyncOp *op);
+    virtual void submitIoAndWait(AsyncOp *op);
 
 private:
-    void                                                 completion_thread();
-    std::unordered_map<void *, std::shared_ptr<AsyncOp>> submitted_ops;
-    std::vector<AsyncOp *>                               completed_ops;
-    std::thread                                          thread;
-    std::mutex                                           mutex;
-    std::condition_variable                              cv;
-    bool                                                 is_finished;
+    std::unique_ptr<ITaskGroup> task_group;
 };
+
+void async_run_io(void *userargs);
+
+void enqueueAsync(std::shared_ptr<Backend> backend, IoType type, std::shared_ptr<IFile> file,
+                  std::shared_ptr<IBuffer> buffer, size_t *size_p, hoff_t *file_offset_p,
+                  hoff_t *buffer_offset_p, ssize_t *bytes_transferred_p, std::shared_ptr<IStream> stream);
 }
 
 extern "C" {
-void async_io_cleanup(void *userargs);
+void async_run_inline(void *userargs);
+void async_dispatch(void *userargs);
 }

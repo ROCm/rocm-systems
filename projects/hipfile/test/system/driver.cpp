@@ -601,10 +601,11 @@ TEST_F(DriverNoInit, hipFileStreamRegister)
     ASSERT_EQ(hipStreamDestroy(stream), hipSuccess);
 }
 
-TEST_F(DriverNoInit, hipFileStreamRegister_register_and_deregister_default_stream_works)
+TEST_F(DriverNoInit, hipFileStreamRegister_default_stream_returns_error)
 {
-    ASSERT_EQ(hipFileStreamRegister(nullptr, 0), HIPFILE_SUCCESS);
-    ASSERT_EQ(hipFileStreamDeregister(nullptr), HIPFILE_SUCCESS);
+    ASSERT_EQ(hipFileStreamRegister(nullptr, 0), HipFileOpError(hipFileInvalidValue));
+    ASSERT_EQ(hipFileStreamRegister(hipStreamPerThread, 0), HipFileOpError(hipFileInvalidValue));
+    ASSERT_EQ(hipFileStreamDeregister(nullptr), HipFileOpError(hipFileInvalidValue));
 }
 
 TEST_F(DriverNoInit, hipFileStreamDeregisterStream)

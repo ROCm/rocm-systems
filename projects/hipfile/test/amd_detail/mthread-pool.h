@@ -33,4 +33,15 @@ public:
     MOCK_METHOD(std::unique_ptr<ITaskGroup>, makeTaskGroup, (), (override));
 };
 
+class MStreamThreadPool : public IStreamThreadPool {
+public:
+    ContextOverride<IStreamThreadPool> o_co;
+
+    MStreamThreadPool() : o_co{this}
+    {
+    }
+
+    MOCK_METHOD(std::unique_ptr<ITaskGroup>, makeTaskGroup, (), (override));
+};
+
 }

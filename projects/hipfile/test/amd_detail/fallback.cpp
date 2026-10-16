@@ -331,6 +331,33 @@ TEST_P(FallbackParam, FallbackIoAllocatesChunkSizedHostBounceBuffer)
     ASSERT_EQ(0, Fallback().io(io_type, file, buffer, 4096, 0, 0, chunk_size));
 }
 
+TEST_P(FallbackParam, FallbackIoUsesCopyStreamWhenProvided)
+{
+    auto copy_stream = reinterpret_cast<hipStream_t>(0xCAFE);
+    auto ptr{reinterpret_cast<void *>(0xFEFEFEFE)};
+
+    EXPECT_CALL(mcfg, fallback()).WillOnce(Return(true));
+    EXPECT_CALL(msys, mmap).WillOnce(testing::Return(ptr));
+    EXPECT_CALL(mstats, addIo).Times(1);
+    switch (io_type) {
+        case IoType::Read:
+            EXPECT_CALL(msys, pread).WillOnce(testing::Return(4096));
+            EXPECT_CALL(
+                mhip, hipMemcpyWithStream(testing::_, testing::_, 4096u, hipMemcpyHostToDevice, copy_stream));
+            break;
+        case IoType::Write:
+            EXPECT_CALL(mhip, hipMemcpyWithStream(testing::_, testing::_, testing::_, hipMemcpyDeviceToHost,
+                                                  copy_stream));
+            EXPECT_CALL(msys, pwrite).WillOnce(testing::Return(4096));
+            EXPECT_CALL(msys, fdatasync);
+            break;
+        default:
+            FAIL();
+    }
+    EXPECT_CALL(msys, munmap(ptr, testing::_));
+    ASSERT_EQ(4096, Fallback().io(io_type, file, buffer, 4096, 0, 0, copy_stream));
+}
+
 INSTANTIATE_TEST_SUITE_P(Fallback, FallbackParam, ::testing::Values(IoType::Read, IoType::Write));
 
 struct FallbackWrite : public FallbackIo {

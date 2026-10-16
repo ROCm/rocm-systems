@@ -142,4 +142,16 @@ ThreadPool::makeTaskGroup()
     return std::make_unique<TaskflowTaskGroup>(impl->executor);
 }
 
+StreamThreadPool::StreamThreadPool(size_t workers) : pool{workers}
+{
+}
+
+StreamThreadPool::~StreamThreadPool() = default;
+
+std::unique_ptr<ITaskGroup>
+StreamThreadPool::makeTaskGroup()
+{
+    return pool.makeTaskGroup();
+}
+
 }
