@@ -111,8 +111,8 @@ TEST_F(DdaAllGatherIpcMicrotest, Eligible_PerRankBytesMustBeMultipleOf16) {
   EXPECT_TRUE(Eligible(16, ncclBfloat16));
 }
 
-// Observed: eligibility compares one rank's bytes with scratch, while the launcher needs room for all eight.
-TEST_F(DdaAllGatherIpcMicrotest, Eligible_ScratchCheckUsesPerRankBytesNotGatheredTotal) {
+// Eligibility compares one rank's bytes with scratch, but the launcher needs room for all eight; a fix flips this pin.
+TEST_F(DdaAllGatherIpcMicrotest, Eligible_KnownBug_ScratchCheckUsesPerRankBytesNotGatheredTotal) {
   comm().ddaScratchBytes = 64;
   EXPECT_TRUE(Eligible(16));
   EXPECT_FALSE(Eligible(20));
