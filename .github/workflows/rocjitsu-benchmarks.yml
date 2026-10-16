@@ -180,7 +180,6 @@ jobs:
           "${TENSILE_VENV}/bin/python" -m pip install --no-deps \
             --config-settings="build-dir=${BENCHMARK_DIR}/rocisa-build" \
             --config-settings="cmake.define.ROCM_PATH=${ROCM_PATH}" \
-            --config-settings="cmake.define.CMAKE_PREFIX_PATH=${ROCM_PATH}" \
             --config-settings="cmake.define.CMAKE_CXX_COMPILER=${ROCM_PATH}/bin/amdclang++" \
             "${TENSILE_SOURCE}/projects/hipblaslt/tensilelite/rocisa"
           cmake -S "${CORPUS_SOURCE_DIR}/corpus/benchmarks/tensile_candidates" -B "${BENCHMARK_DIR}/tensile-native" -G Ninja \
