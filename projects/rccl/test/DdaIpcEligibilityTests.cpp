@@ -196,6 +196,33 @@ TEST_F(DdaIpcEligibilityTest, ReduceScatter_PerRankUnaligned)
         mockComm_.get(), sendbuff_, recvbuff_, 2, ncclFloat32, ncclSum));
 }
 
+TEST_F(DdaIpcEligibilityTest, ReduceScatter_MisalignedSendbuff)
+{
+    void* misaligned = reinterpret_cast<void*>(0x14);
+    EXPECT_FALSE(ncclReduceScatterDdaIpcEligible(
+        mockComm_.get(), misaligned, recvbuff_, 4, ncclFloat32, ncclSum));
+}
+
+// Boundaries of ddaReduceScatterIpcStaging. A 1 MiB shard stays in-kernel even
+// when 8 ranks make the total 8 MiB, which is the case that used to memcpy on
+// the host and copy again in the kernel.
+TEST_F(DdaIpcEligibilityTest, ReduceScatter_StagingBoundaries)
+{
+    using dda::common::DdaRsIpcStaging;
+    using dda::common::ddaReduceScatterIpcStaging;
+    using dda::common::kDdaRsIpcKernelCopyMaxBytes;
+
+    EXPECT_EQ(ddaReduceScatterIpcStaging(4, sizeof(float)), DdaRsIpcStaging::FusedInKernel);
+
+    const size_t atKernelCap = kDdaRsIpcKernelCopyMaxBytes / sizeof(float);
+    EXPECT_EQ(ddaReduceScatterIpcStaging(atKernelCap, sizeof(float)), DdaRsIpcStaging::PerShardInKernel);
+
+    const size_t pastKernelCap = atKernelCap + 4;
+    EXPECT_EQ(ddaReduceScatterIpcStaging(pastKernelCap, sizeof(float)), DdaRsIpcStaging::HostPreCopy);
+    EXPECT_GT(pastKernelCap * sizeof(float), kDdaRsIpcKernelCopyMaxBytes);
+    EXPECT_GT(atKernelCap * sizeof(float) * 8, 4u * 1024u * 1024u);
+}
+
 TEST_F(DdaIpcEligibilityTest, ReduceScatter_InvalidDatatypeDispatch)
 {
     EXPECT_EQ(ncclReduceScatterDdaIpc(sendbuff_,
