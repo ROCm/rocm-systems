@@ -48,8 +48,9 @@ constexpr size_t kCeOnlyTotalBytes = 128ull * 1024 * 1024;
 constexpr size_t kCeOnlyRankStride = 517;   // per-rank offset so every rank wins some elements of Max/Min
 constexpr size_t kCeOnlyValueRange = 4096;  // keeps fill values exact in float32
 constexpr int    kCeOnlyIters      = 3;     // first call is CE registered, later ones CE 2-shot once ceARTmpBuf exists
-// A shard spans 8 default staging slots (128 MiB / nRanks vs 16 MiB / nRanks), so the CE pipeline must run.
-constexpr size_t kCeOnlyMinChunksPerShard = 2;
+// Staging pinned to 16 MiB in runCeOnlyAllReduce so 128 MiB / nRanks shard always spills its slot
+// (16 MiB / nRanks). At any rank count chunksPerShard >= 4; require >= 4 to catch single-shot regressions.
+constexpr size_t kCeOnlyMinChunksPerShard = 4;
 constexpr int    kMinRanks2       = 2;
 constexpr int    kMinRanks4       = 4;
 constexpr int    kMinRanks8       = 8;
@@ -985,6 +986,10 @@ protected:
             GTEST_SKIP() << skipReason;
         }
 
+        // Pin the staging buffer to 16 MiB so shardBytes (128 MiB / nRanks) always exceeds
+        // slotChunkBytes (16 MiB / nRanks), forcing the multi-chunk pipeline path.
+        // The default 256 MiB would make shard <= slot at every rank count, yielding chunksPerShard=1.
+        MPIHelpers::MpiEnvGuard stagingGuard("RCCL_CE_AR_STAGING_BYTES", "16777216");
         ASSERT_EQ(ncclSuccess, createTestCommunicator());
         ncclComm_t comm = getActiveCommunicator();
         if(!isCeAllReduceDispatchConfigured(comm))
