@@ -23,6 +23,12 @@ add_library(rj_arith STATIC
   fp/minmax.cpp
   fp/mixed_fma.cpp
   fp/packed_fma.cpp
+  math/half_trig.cpp
+  math/half_unary.cpp
+  math/rcp_iflag.cpp
+  math/trig.cpp
+  math/trig_preop.cpp
+  math/unary.cpp
   register/dpp.cpp
   wmma/swmmac16.cpp
   wmma/swmmac8.cpp

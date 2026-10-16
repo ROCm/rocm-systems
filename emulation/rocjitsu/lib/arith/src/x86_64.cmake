@@ -19,6 +19,9 @@ check_cxx_compiler_flag("${rj_arith_avx512vnni_check_flags}" RJ_ARITH_COMPILER_A
 
 set(rj_arith_x86_64_v3_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/half_fma_exact_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_sfu_exact_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_exact_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v3.cpp
@@ -40,6 +43,12 @@ set(rj_arith_x86_64_v3_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/minmax_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/mixed_fma_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/packed_fma_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_trig_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_unary_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_x86_64_v3.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/unary_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/fp8_wmma_x86_64_v3.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/integer_wmma_x86_64_v3.cpp
@@ -53,6 +62,10 @@ set(rj_arith_x86_64_v4_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_bf16_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/half_dot_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/fp8_dot_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/half_round_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_exact_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/root_exact_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/round_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/dot/x86_64/dot2_exact_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/wmma_exact_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/common/x86_64/exact_arithmetic_x86_64_v4.cpp
@@ -61,6 +74,8 @@ set(rj_arith_x86_64_v4_sources
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/div_scale_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/fma_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/fp/x86_64/ldexp_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/rcp_iflag_x86_64_v4.cpp
+  ${CMAKE_CURRENT_SOURCE_DIR}/math/x86_64/trig_preop_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/register/x86_64/dpp_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_float_x86_64_v4.cpp
   ${CMAKE_CURRENT_SOURCE_DIR}/wmma/x86_64/swmmac_integer_x86_64_v4.cpp

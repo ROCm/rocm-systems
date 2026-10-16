@@ -154,7 +154,24 @@ endforeach()
 
 
 # Math families share unary layouts, with independent loose and exact references.
-
+foreach(family IN ITEMS
+    round
+    root_reciprocal
+    log_exp
+    decompose
+    trig
+    rcp_iflag
+    preop
+)
+  set(target "rj_arith_math_${family}_test")
+  add_executable(${target} math/${family}_test.cpp)
+  target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -pedantic)
+  endif()
+  gtest_discover_tests(${target} TEST_PREFIX "rj_arith.")
+endforeach()
 
 # Infrastructure has no all-entry-point registry; contracts live in family helpers.
 add_executable(rj_arith_cpu_test common/cpu_test.cpp)
