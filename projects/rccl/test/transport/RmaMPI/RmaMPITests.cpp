@@ -99,6 +99,7 @@ TEST_P(RmaMPITest, IGetBasic)
                              /*localOff=*/0,  mh,
                              /*peerRank=*/1, &req));
         ASSERT_TRUE(PollUntilDone(req));
+        ASSERT_TRUE(FlushAfterGet(/*context=*/0, mh));
         EXPECT_TRUE(VerifyBuf(buf, kSize, /*seed=*/0xC3));
     }
     Barrier();
@@ -433,6 +434,11 @@ TEST_P(RmaMPITest, MultipleInflightIGets)
             EXPECT_TRUE(PollUntilDone(reqs[i]))
                 << "request " << i << " (ctx " << (i % nCtx) << ") did not complete";
         }
+        // Each context owns its own QPs, so every context that issued a get is flushed.
+        for(int ctx = 0; ctx < nCtx; ++ctx)
+        {
+            EXPECT_TRUE(FlushAfterGet(ctx, mh));
+        }
         for(int i = 0; i < kInflightN; ++i)
         {
             EXPECT_TRUE(VerifyBuf(static_cast<uint8_t*>(buf) + i * kBlock,
@@ -510,7 +516,9 @@ TEST_P(RmaMPITest, MixedIPutIGetIPutSignal)
         EXPECT_TRUE(PollUntilDone(getReq));
         EXPECT_TRUE(PollUntilDone(psReq));
 
-        // iget result is visible locally on rank 0 once the request completes.
+        // Completion alone does not make the iget payload visible on rank 0; the
+        // flush does.
+        EXPECT_TRUE(FlushAfterGet(/*context=*/1 % nCtx, getMh));
         EXPECT_TRUE(VerifyBuf(getBuf, kSize, /*seed=*/0x20));
     }
     Barrier();
@@ -889,7 +897,7 @@ TEST_F(RmaMPIFusedNicTest, IGetOverFusedVNic)
         {
             ADD_FAILURE() << "iget over a fused vNIC never completed";
         }
-        else
+        else if(FlushAfterGet(/*context=*/0, mh))
         {
             EXPECT_TRUE(VerifyBuf(buf, kSize, /*seed=*/0xD4));
         }

@@ -419,6 +419,58 @@ protected:
         }
     }
 
+    // RCCL_TEST_RMA_SKIP_IGET_FLUSH=1 makes FlushAfterGet a no-op, so hardware runs
+    // can A/B iget payload visibility with and without the flush from one binary.
+    static bool SkipIGetFlush()
+    {
+        static const bool skip = [] {
+            const char* v = std::getenv("RCCL_TEST_RMA_SKIP_IGET_FLUSH");
+            const bool  s = v != nullptr && std::atoi(v) != 0;
+            if(s)
+            {
+                std::fprintf(stderr,
+                             "[RmaMPITest] WARN: RCCL_TEST_RMA_SKIP_IGET_FLUSH=%s: iget "
+                             "payloads are verified without the iflush that makes them "
+                             "visible. Mismatches in this mode are expected on some "
+                             "platforms.\n",
+                             v);
+            }
+            return s;
+        }();
+        return skip;
+    }
+
+    // iget completion only says the RDMA_READ finished, not that its payload is
+    // visible in device memory. Production (gin_proxy.h) posts a flush to the local
+    // queue before it counts a get as visible, so this flushes with the local rank
+    // too. A null request means the plugin has flushing disabled and the payload is
+    // already visible.
+    bool FlushAfterGet(int context, void* mhandle)
+    {
+        if(SkipIGetFlush()) return true;
+        if(rma_->iflush == nullptr)
+        {
+            ADD_FAILURE() << "rma->iflush is NULL; cannot make iget payloads visible";
+            return false;
+        }
+
+        void* req = nullptr;
+        ncclResult_t r = rma_->iflush(rmaCtx_, context, mhandle,
+                                      static_cast<uint32_t>(worldRank_), &req);
+        if(r != ncclSuccess)
+        {
+            ADD_FAILURE() << "rma->iflush after iget failed on ctx " << context << ": " << r;
+            return false;
+        }
+        if(req == nullptr) return true;
+        if(!PollUntilDone(req))
+        {
+            ADD_FAILURE() << "iflush after iget did not complete on ctx " << context;
+            return false;
+        }
+        return true;
+    }
+
     /** MPI barrier across the world communicator. */
     void Barrier() { MPI_Barrier(MPI_COMM_WORLD); }
 
