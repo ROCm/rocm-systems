@@ -192,6 +192,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Resolved Issues
 
+- **Fixed individual GPU metric queries reporting misleading data errors**.  
+  - Queries now preserve unsupported-feature, permission and device-read failures instead of reporting all of them as unexpected data.
+
 - **Fixed GPU metrics returning no data on integrated GPUs**.  
   - `amdsmi_get_gpu_metrics_info()` answered `AMDSMI_STATUS_UNEXPECTED_DATA` on APUs such as gfx1103, which also left PLX temperature and the `amd-smi metric` output empty. These devices now return the values they provide with everything else marked N/A, and a metrics version amd-smi cannot read reports `AMDSMI_STATUS_NOT_SUPPORTED`.
 
