@@ -426,15 +426,15 @@ int g_ncclTopoGetLinkTypeCalls = 0;
 
 #ifndef RCCL_NCCL_FAKES_OMIT_GRAPH
 ncclResult_t ncclTopoGetLinkType(struct ncclTopoSystem* /*system*/,
-                                 int                    rank1,
-                                 int                    rank2,
+                                 int                    dev1,
+                                 int                    dev2,
                                  bool*                  isXGMI,
                                  int                    maxInter,
                                  int                    /*nInter*/,
                                  int*                   /*inter*/)
 {
     g_ncclTopoGetLinkTypeCalls++;
-    return g_ncclTopoGetLinkType(rank1, rank2, isXGMI, maxInter);
+    return g_ncclTopoGetLinkType(dev1, dev2, isXGMI, maxInter);
 }
 #endif
 

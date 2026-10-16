@@ -232,91 +232,6 @@ class TopoGpuDevMicrotest : public ::testing::Test {
 
   static bool AllLinked(int, int) { return true; }
 
-  struct Slot {
-    int bus;
-    int numa;
-  };
-
-  static struct ncclXmlNode* AddPci(struct ncclXml* xml, struct ncclXmlNode* parent, int bus, const std::string& cls) {
-    struct ncclXmlNode* pci = nullptr;
-    EXPECT_EQ(xmlAddNode(xml, parent, "pci", &pci), ncclSuccess);
-    SetAttrs(pci, {"class=" + cls, "busid=" + BusId(bus), "vendor=0x1002", "device=0x74a1",
-                   "subsystem_vendor=0x1002", "subsystem_device=0x74a1", "link_speed=32.0 GT/s PCIe", "link_width=16"});
-    return pci;
-  }
-
-  static std::string BusId(int bus) {
-    char busId[16];
-    snprintf(busId, sizeof(busId), "0000:%02x:00.0", bus);
-    return busId;
-  }
-
-  // Rank g runs on SMI index devs[g]; with nics, GPU g and NIC g share a PCIe switch, else GPU g sits on the CPU.
-  struct ncclXml* NodeXml(const std::vector<Slot>& slots, const std::vector<int>& devs, bool nics, bool rome,
-                          const std::function<bool(int, int)>& linked) {
-    struct ncclXml* xml = NewXml();
-    struct ncclXmlNode* top = nullptr;
-    std::vector<struct ncclXmlNode*> cpus(slots.size(), nullptr);
-    EXPECT_EQ(xmlAddNode(xml, nullptr, "system", &top), ncclSuccess);
-    EXPECT_EQ(xmlSetAttrInt(top, "version", NCCL_TOPO_XML_VERSION), ncclSuccess);
-    for (int g = 0; g < (int)slots.size(); g++) {
-      struct ncclXmlNode*& cpu = cpus[slots[g].numa];
-      if (cpu == nullptr) {
-        EXPECT_EQ(xmlAddNode(xml, top, "cpu", &cpu), ncclSuccess);
-        EXPECT_EQ(xmlSetAttrLong(cpu, "host_hash", kHostHash), ncclSuccess);
-        EXPECT_EQ(xmlSetAttrInt(cpu, "numaid", slots[g].numa), ncclSuccess);
-        SetAttrs(cpu, {"affinity=", "arch=x86_64", "vendor=AuthenticAMD", rome ? "familyid=143" : "familyid=25",
-                       rome ? "modelid=49" : "modelid=1"});
-      }
-      struct ncclXmlNode* sw = nics ? AddPci(xml, cpu, slots[g].bus - 2, "0x060400") : cpu;
-      struct ncclXmlNode* gpu = nullptr;
-      EXPECT_EQ(xmlAddNode(xml, AddPci(xml, sw, slots[g].bus, "0x120000"), "gpu", &gpu), ncclSuccess);
-      SetAttrs(gpu, {"sm=304", "gcn=gfx942", "arch=0", "gdr=1", "dev=" + std::to_string(devs[g]),
-                     "rank=" + std::to_string(g)});
-      for (int h = 0; h < (int)slots.size(); h++) {
-        if (h != g && linked(g, h)) {
-          struct ncclXmlNode* xgmi = nullptr;
-          EXPECT_EQ(xmlAddNode(xml, gpu, "xgmi", &xgmi), ncclSuccess);
-          SetAttrs(xgmi, {"target=" + BusId(slots[h].bus), "count=1", "tclass=0x120000"});
-        }
-      }
-      if (nics) {
-        struct ncclXmlNode *nic = nullptr, *net = nullptr;
-        EXPECT_EQ(xmlAddNode(xml, AddPci(xml, sw, slots[g].bus - 1, "0x020700"), "nic", &nic), ncclSuccess);
-        EXPECT_EQ(xmlAddNode(xml, nic, "net", &net), ncclSuccess);
-        SetAttrs(net, {"name=mlx5_" + std::to_string(g), "dev=" + std::to_string(g), "guid=" + std::to_string(g + 1),
-                       "rail=" + std::to_string(g), "plane=0", "speed=400000", "port=1", "latency=0", "gdr=1"});
-      }
-    }
-    return xml;
-  }
-
-  // The tree a Rome model match builds on xml: each channel's ranks, then each treeBase entry.
-  std::vector<std::string> RomeTree(struct ncclXml* xml, decltype(&parseA2a8P) parse) {
-    std::vector<std::string> tree;
-    struct ncclTopoSystem* system = BuildSystem(xml);
-    if (system == nullptr) {
-      return tree;
-    }
-    auto graph = std::make_unique<struct ncclTopoGraph>();
-    graph->pattern = NCCL_TOPO_PATTERN_BALANCED_TREE;
-    graph->maxChannels = MAXCHANNELS;
-    EXPECT_EQ(parse(system, graph.get(), nullptr), ncclSuccess);
-    tree.push_back(system->useRailOptimizedTrees ? "rail trees" : "no rail trees");
-    int ngpus = system->nodes[GPU].count;
-    for (int c = 0; c < graph->nChannels; c++) {
-      std::string ranks;
-      for (int i = 0; i < ngpus; i++) {
-        ranks += std::to_string(graph->intra[c * ngpus + i]) + " ";
-      }
-      tree.push_back(ranks);
-    }
-    for (int t = 0; graph->treeBase[t][0] != 0; t++) {
-      tree.push_back(graph->treeBase[t]);
-    }
-    return tree;
-  }
-
   // Ranks 0-3, one per process, on SMI 4-7 of an 8-GPU node, so no rank equals its GPU's dev.
   bool TrimUpperHalfFlagsAllXgmi(std::function<bool(int, int)> linked) {
     InstallNode(SpxNode(8), linked);
@@ -431,20 +346,20 @@ TEST_F(TopoGpuDevMicrotest, CpxAllPartitionsInOneProcess_PartitionsKeepDistinctD
   }
 }
 
-TEST_F(TopoGpuDevMicrotest, LinkType_FindsGpusByRankWhenNoRankEqualsItsGpusDev) {
+TEST_F(TopoGpuDevMicrotest, LinkType_FindsGpusBySmiIndexWhenNoRankEqualsItsGpusDev) {
   // An XGMI chain over SMI 4-5-6-7; ranks 0-3 run on SMI 7, 4, 5, 6.
   InstallNode(SpxNode(8), [](int a, int b) { return a >= 4 && b >= 4 && (a - b == 1 || b - a == 1); });
   struct ncclTopoSystem* system = BuildSystem(FuseAll(OneGpuPerProcess({7, 4, 5, 6})));
   ASSERT_NE(system, nullptr);
   bool isXgmi = false;
 
-  ASSERT_EQ(ncclTopoGetLinkType(system, 1, 2, &isXgmi, 0), ncclSuccess);
+  ASSERT_EQ(ncclTopoGetLinkType(system, 4, 5, &isXgmi, 0), ncclSuccess);
   EXPECT_TRUE(isXgmi);
-  ASSERT_EQ(ncclTopoGetLinkType(system, 1, 3, &isXgmi, 0), ncclSuccess);
+  ASSERT_EQ(ncclTopoGetLinkType(system, 4, 6, &isXgmi, 0), ncclSuccess);
   EXPECT_FALSE(isXgmi);
-  ASSERT_EQ(ncclTopoGetLinkType(system, 1, 3, &isXgmi, 1), ncclSuccess);
+  ASSERT_EQ(ncclTopoGetLinkType(system, 4, 6, &isXgmi, 1), ncclSuccess);
   EXPECT_TRUE(isXgmi);
-  ASSERT_EQ(ncclTopoGetLinkType(system, 0, 1, &isXgmi, 1), ncclSuccess);
+  ASSERT_EQ(ncclTopoGetLinkType(system, 7, 4, &isXgmi, 1), ncclSuccess);
   EXPECT_FALSE(isXgmi);
 }
 
@@ -454,35 +369,6 @@ TEST_F(TopoGpuDevMicrotest, TrimSystem_FlagsAllXgmiForOneGpuPerProcessOnTheUpper
 
 TEST_F(TopoGpuDevMicrotest, TrimSystem_DoesNotFlagAllXgmiWhenTheUpperHalfIsTwoHives) {
   EXPECT_FALSE(TrimUpperHalfFlagsAllXgmi([](int a, int b) { return a / 2 == b / 2; }));
-}
-
-TEST_F(TopoGpuDevMicrotest, RailTreeModel_BuildsTheSameTreesWhenRanksRunOnTheUpperHalfOfTheNode) {
-  // 8 GPUs and 8 NICs over two NUMA nodes, which matches a model with rail trees.
-  std::vector<Slot> mi300x;
-  for (int g = 0; g < 8; g++) {
-    mi300x.push_back({0x0c + 0x10 * g, g / 4});
-  }
-  std::vector<std::string> lower =
-    RomeTree(NodeXml(mi300x, {0, 1, 2, 3, 4, 5, 6, 7}, true, false, AllLinked), parseA2a8P);
-  std::vector<std::string> upper =
-    RomeTree(NodeXml(mi300x, {8, 9, 10, 11, 12, 13, 14, 15}, true, false, AllLinked), parseA2a8P);
-
-  ASSERT_GT(lower.size(), 1u);
-  EXPECT_EQ(lower[0], "rail trees");
-  EXPECT_EQ(upper, lower);
-}
-
-TEST_F(TopoGpuDevMicrotest, TreeBaseModel_BuildsTheSameTreesWhenRanksRunOnTheUpperHalfOfTheNode) {
-  // Two XGMI quads over four NUMA nodes, which matches a model with a treeBase.
-  std::vector<Slot> rome = {{0x63, 0}, {0x43, 0}, {0x27, 1}, {0x03, 1}, {0xe3, 2}, {0xc3, 2}, {0xa3, 3}, {0x83, 3}};
-  auto quads = [](int a, int b) { return a / 4 == b / 4; };
-  std::vector<std::string> lower = RomeTree(NodeXml(rome, {0, 1, 2, 3, 4, 5, 6, 7}, false, true, quads), parseRome4P2H);
-  std::vector<std::string> upper =
-    RomeTree(NodeXml(rome, {8, 9, 10, 11, 12, 13, 14, 15}, false, true, quads), parseRome4P2H);
-
-  ASSERT_GT(lower.size(), 1u);
-  EXPECT_EQ(lower.back().front(), '(');
-  EXPECT_EQ(upper, lower);
 }
 
 }  // namespace

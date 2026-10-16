@@ -3764,10 +3764,13 @@ TEST_F(P2pSetupMicrotest, SendSetup_LinkTypeQueryFails_ReturnsInternalError)
     p2pTransport.send.free(&comm_, &send_);
 }
 
-TEST_F(P2pSetupMicrotest, SendSetup_QueriesLinkTypeByRankNotByProcessLocalOrdinal)
+TEST_F(P2pSetupMicrotest, SendSetup_QueriesLinkTypeBySmiIndexNotByProcessLocalOrdinal)
 {
-    // One GPU per process: both peers are HIP ordinal 0, so only the ranks tell them apart.
+    // One GPU per process: both peers are HIP ordinal 0, so only the SMI indices tell them apart.
+    myInfo_.nvmlDev = 5;
+    peers_[0].nvmlDev = myInfo_.nvmlDev;
     peer_.cudaDev = myInfo_.cudaDev;
+    peer_.nvmlDev = 6;
     int first = -1, second = -1;
     InstallTopo(/*read=*/0);
     InstallHappyProxy();
@@ -3781,8 +3784,8 @@ TEST_F(P2pSetupMicrotest, SendSetup_QueriesLinkTypeByRankNotByProcessLocalOrdina
     EXPECT_EQ(p2pTransport.send.setup(&comm_, nullptr, &myInfo_, &peer_,
                                       &connect_info_, &send_, 0, 0),
               ncclInternalError);
-    EXPECT_EQ(first, myInfo_.rank);
-    EXPECT_EQ(second, peer_.rank);
+    EXPECT_EQ(first, myInfo_.nvmlDev);
+    EXPECT_EQ(second, peer_.nvmlDev);
 
     p2pTransport.send.free(&comm_, &send_);
 }

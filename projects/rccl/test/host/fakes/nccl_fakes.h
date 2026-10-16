@@ -117,9 +117,9 @@ extern std::function<ncclResult_t(struct ncclMemManager*, void* /*ptr*/,
 extern std::function<int64_t(const char* /*env*/, int64_t /*deftVal*/)>
     g_loadParam;
 
-// The two ranks and the isXGMI out-parameter; the topo system and the inter-GPU knobs are dropped.
+// The two device ids and the isXGMI out-parameter; the topo system and the inter-GPU knobs are dropped.
 // maxInter is carried because init.cc:1834 passes an explicit 1 where graph.h:90 defaults to MAX_XGMI_INTER_GPUS.
-extern std::function<ncclResult_t(int /*rank1*/, int /*rank2*/, bool* /*isXGMI*/, int /*maxInter*/)>
+extern std::function<ncclResult_t(int /*dev1*/, int /*dev2*/, bool* /*isXGMI*/, int /*maxInter*/)>
     g_ncclTopoGetLinkType;
 extern int g_ncclTopoGetLinkTypeCalls;
 
