@@ -2782,7 +2782,7 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
     return static_cast<PublicPowerT>(std::min<uint32_t>(rounded_watts, max_power));
   };
   // v2.1/v2.2 firmware reports GFX/MM activity in hundredths of a percent. v2.3/v2.4 come only
-  // from Van Gogh, whose current firmware interface reports whole percent, as v3.0 does.
+  // from Van Gogh, whose current firmware interface reports whole percent, as v3.0 GFX does.
   auto convert_apu_activity_centi_to_public_percent = [](auto activity_centi) {
     using InputT = decltype(activity_centi);
     // The not-applicable sentinel is not a reading; scaling it would turn it into 655.
@@ -2904,7 +2904,9 @@ AMGpuMetricsPublicLatestTupl_t ApuMetricsBase_v30_t::copy_internal_to_external_m
       apu.temperature_skin = kTempNotAvailable;
     }
     apu.average_gfx_activity = metrics.m_average_gfx_activity;
-    apu.average_vcn_activity = metrics.m_average_vcn_activity;
+    // v3.0 VCN activity is in hundredths; the kernel divides it by 100 for vcn_busy_percent.
+    apu.average_vcn_activity =
+        convert_apu_activity_centi_to_public_percent(metrics.m_average_vcn_activity);
     std::copy_n(std::begin(metrics.m_average_ipu_activity),
                 std::min(static_cast<uint32_t>(RSMI_APU_MAX_IPU),
                          static_cast<uint32_t>(std::size(apu.average_ipu_activity))),

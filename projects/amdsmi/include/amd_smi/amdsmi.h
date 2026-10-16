@@ -2262,7 +2262,7 @@ typedef struct {
    */
   uint16_t average_gfx_activity;                            //!< v2_4, v3_0 [%]
   uint16_t average_mm_activity;                             //!< v2_4 [%]
-  uint16_t average_vcn_activity;                            //!< v3_0
+  uint16_t average_vcn_activity;                            //!< v3_0 [%]
   uint16_t average_ipu_activity[AMDSMI_APU_MAX_IPU];        //!< v3_0
   uint16_t average_core_c0_activity[AMDSMI_APU_MAX_CORES];  //!< v3_0
   uint16_t average_dram_reads;                              //!< v3_0 [MB/s]
@@ -5136,7 +5136,7 @@ amdsmi_status_t amdsmi_get_gpu_metrics_header_info(amdsmi_processor_handle proce
  *  including a GPU metrics table (v1.x) reported by an APU: the pointer
  *  tracks the table the device publishes, not whether the device is an APU.
  *
- *  GFX and MM activity are whole percent for every revision, in @p pgpu_metrics
+ *  GFX, MM and VCN activity are whole percent for every revision, in @p pgpu_metrics
  *  and in its APU sub-struct alike. The APU sub-struct keeps its power fields in
  *  milliwatts.
  *

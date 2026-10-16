@@ -763,7 +763,7 @@ TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   EXPECT_EQ(apu.temperature_skin,
             FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_temperature_skin)));
   EXPECT_EQ(apu.average_vcn_activity,
-            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_vcn_activity)));
+            (FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_vcn_activity)) + 50) / 100);
   EXPECT_EQ(apu.average_ipu_power,
             FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_ipu_power)));
   EXPECT_EQ(apu.average_apu_power,
