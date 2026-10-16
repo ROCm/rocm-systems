@@ -308,9 +308,7 @@ class TestMultipassConfig(unittest.TestCase):
 
             connection, cursor = create_database()
             try:
-                perf_file = os.path.join(
-                    data_dir, f"perf-{os.getpid()}-test-app-1.json"
-                )
+                perf_file = os.path.join(data_dir, f"perf-{os.getpid()}-test-app-1.json")
                 with open(perf_file, "w") as ofs:
                     json.dump({}, ofs)
 
