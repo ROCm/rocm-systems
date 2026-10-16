@@ -55,6 +55,14 @@ combined with a PC-sampling-only profile.
 When counters are being spread thin across many short operator kernels,
 `--iteration-multiplexing kernel` collects more per pass.
 
+Before the first analyze, run `rocprof-compute analyze --verify-deps`. This
+is separate from the PyTorch version check above. If it reports a missing or
+wrong package, install the analyze dependencies into a virtual environment
+separate from the profiled application, then run analyze from that
+environment. Do not install them into the application's environment. The
+steps are in
+[Install the analyze mode dependencies](../../docs/install/core-install.rst).
+
 ## 3. List the captured operators
 
 Always list before filtering. Operator names come from the model that ran, so

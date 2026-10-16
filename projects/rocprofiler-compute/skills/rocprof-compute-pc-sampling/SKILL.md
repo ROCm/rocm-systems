@@ -60,6 +60,13 @@ PC sampling does not collect counters. A PC-sampling-only profile cannot be
 combined with the framework tracing options, and it will not populate the
 counter panels. When the user needs both, collect two workloads.
 
+Before the first analyze, run `rocprof-compute analyze --verify-deps`. If it
+reports a missing or wrong package, install the analyze dependencies into a
+virtual environment separate from the profiled application, then run analyze
+from that environment. Do not install them into the application's environment.
+The steps are in
+[Install the analyze mode dependencies](../../docs/install/core-install.rst).
+
 ## 4. Analyze
 
 ```bash

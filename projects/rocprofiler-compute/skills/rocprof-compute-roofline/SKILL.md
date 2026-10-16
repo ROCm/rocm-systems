@@ -40,6 +40,13 @@ See [standalone roofline](../../docs/how-to/profile/mode.rst) for `--roof-only`
 and `--bench-only`, which run the microbenchmarks without profiling an
 application.
 
+Before the first analyze, run `rocprof-compute analyze --verify-deps`. If it
+reports a missing or wrong package, install the analyze dependencies into a
+virtual environment separate from the profiled application, then run analyze
+from that environment. Do not install them into the application's environment.
+The steps are in
+[Install the analyze mode dependencies](../../docs/install/core-install.rst).
+
 ## 2. Read the table
 
 ```bash

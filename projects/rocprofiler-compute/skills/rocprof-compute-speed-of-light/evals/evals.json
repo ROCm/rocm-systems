@@ -52,6 +52,17 @@
       ]
     },
     {
+      "id": "sol-analyze-deps-missing",
+      "skill_should_trigger": true,
+      "prompt": "check percent of peak for kernel 0, but rocprof-compute analyze --verify-deps says the analyze Python packages are missing",
+      "expected_behavior": [
+        "runs rocprof-compute analyze --verify-deps before reading Speed-of-Light",
+        "installs the missing analyze packages into a virtual environment separate from the profiled application",
+        "does not install those packages into the application's environment"
+      ],
+      "logs_contain": ["--verify-deps"]
+    },
+    {
       "id": "sol-instruction-level",
       "skill_should_trigger": false,
       "note": "Peak comparison is not the question; this is per-instruction work.",

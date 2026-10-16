@@ -39,6 +39,19 @@ The script replaces any `rocprof-compute-*` skills already in that folder, so
 run it again after upgrading ROCm. Cursor also reads the Claude and Codex
 folders, so install for one agent only if you use Cursor alongside them.
 
+## Analyze dependencies
+
+Profile mode needs no extra Python packages. Before the first
+`rocprof-compute analyze`, each skill runs:
+
+```bash
+rocprof-compute analyze --verify-deps
+```
+
+If that reports a missing or wrong package, install the analyze dependencies
+into a virtual environment separate from the profiled application. See
+[Install the analyze mode dependencies](../docs/install/core-install.rst).
+
 ## Uninstall
 
 ```bash
