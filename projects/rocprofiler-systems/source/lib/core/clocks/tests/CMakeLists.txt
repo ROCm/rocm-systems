@@ -1,6 +1,18 @@
 # Copyright (c) Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
+add_library(clocks-read-tests OBJECT test_read.cpp)
+
+target_link_libraries(
+    clocks-read-tests
+    PRIVATE rocprofiler-systems-googletest-library
+)
+
+target_include_directories(
+    clocks-read-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib
+)
+
 add_library(clocks-thread-cpu-tests OBJECT test_thread_cpu.cpp)
 
 target_link_libraries(

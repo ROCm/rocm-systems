@@ -3,9 +3,10 @@
 
 #pragma once
 
+#include "core/clocks/read.hpp"
+
 #include <chrono>
 #include <cstdint>
-#include <ctime>
 #include <time.h>
 
 namespace rocprofsys::clocks::timeline
@@ -17,13 +18,7 @@ inline constexpr clockid_t k_clock_id = CLOCK_BOOTTIME;
 [[nodiscard]] inline std::chrono::nanoseconds
 now() noexcept
 {
-    struct timespec specs = {};
-    if(clock_gettime(k_clock_id, &specs) != 0)
-    {
-        return std::chrono::nanoseconds::zero();
-    }
-    return std::chrono::seconds{ specs.tv_sec } +
-           std::chrono::nanoseconds{ specs.tv_nsec };
+    return detail::read(k_clock_id);
 }
 
 template <typename Tp = std::uint64_t>

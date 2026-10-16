@@ -3,8 +3,9 @@
 
 #pragma once
 
+#include "core/clocks/read.hpp"
+
 #include <chrono>
-#include <ctime>
 #include <time.h>
 
 namespace rocprofsys::clocks::thread_cpu
@@ -15,12 +16,6 @@ namespace rocprofsys::clocks::thread_cpu
 [[nodiscard]] inline std::chrono::nanoseconds
 now() noexcept
 {
-    struct timespec cpu_time = {};
-    if(clock_gettime(CLOCK_THREAD_CPUTIME_ID, &cpu_time) != 0)
-    {
-        return std::chrono::nanoseconds::zero();
-    }
-    return std::chrono::seconds{ cpu_time.tv_sec } +
-           std::chrono::nanoseconds{ cpu_time.tv_nsec };
+    return detail::read(CLOCK_THREAD_CPUTIME_ID);
 }
 }  // namespace rocprofsys::clocks::thread_cpu
