@@ -239,7 +239,20 @@ foreach(family IN ITEMS
 endforeach()
 
 # VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
-
+foreach(family IN ITEMS
+    alu
+    fused
+    dot
+)
+  set(target "rj_arith_dual_${family}_test")
+  add_executable(${target} dual/${family}_test.cpp)
+  target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
+  target_include_directories(${target} PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})
+  if(CMAKE_CXX_COMPILER_ID MATCHES "GNU|Clang")
+    target_compile_options(${target} PRIVATE -Wall -Wextra -Werror -pedantic)
+  endif()
+  gtest_discover_tests(${target} TEST_PREFIX "rj_arith.")
+endforeach()
 
 # Scalar families keep required SCC/EXEC results distinct from FP status.
 foreach(family IN ITEMS
