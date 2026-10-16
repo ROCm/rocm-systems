@@ -31,7 +31,7 @@ using Registers = rocjitsu::arith::test::Registers<64, 64>;
 TEST(WmmaF32BF16W64Gfx12, Arithmetic) {
   rocjitsu::arith::test::expect_bf16_tiny_accumulator<64>(
       rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12);
-  rocjitsu::arith::test::expect_wmma_exact_simd<true, 64, false>(
+  rocjitsu::arith::test::expect_wmma_exact_simd<true, 64, false, false>(
       rj_arith_v_wmma_f32_16x16x16_bf16_w64_gfx12);
 
   rocjitsu::arith::test::expect_matrix_modifiers<true, 64, false>(

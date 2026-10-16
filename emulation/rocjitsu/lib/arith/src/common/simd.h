@@ -12,15 +12,43 @@ namespace rocjitsu::arith {
 
 #if defined(RJ_ARITH_HAVE_X86_64_V3)
 
-// Loose FP16/BF16 WMMA with FP32 output. All source reads precede destination
-// writes so D may overlap any input.
+// Loose FP8/BF8 WMMA in gfx12 Wave32 layout. D may alias any input.
+// Requires the named CPU features and validated instruction controls.
+template <bool Bf8A, bool Bf8B>
+void fp8_wmma_x86_64_v3(uint32_t *const *d, const uint32_t *const *a, const uint32_t *const *b,
+                        const uint32_t *const *c);
+
+// Exact integer WMMA in gfx12 Wave32 layout, with staged CLAMP. D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+template <int Bits, int K>
+void integer_wmma_x86_64_v3(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
+                            const uint32_t *const *b, const uint32_t *const *c);
+
+// Exact integer WMMA in gfx11 replicated layout for either wave size.
+// D may alias inputs; each sixteen-lane group supplies its own factors.
+// Requires the named CPU features and validated instruction controls.
+template <int Bits, int Lanes>
+void integer_wmma_replicated_x86_64_v3(uint32_t modifiers, uint32_t *const *d,
+                                       const uint32_t *const *a, const uint32_t *const *b,
+                                       const uint32_t *const *c);
+
+// Loose FP16/BF16 WMMA with FP32 output in gfx11 replicated or gfx12 layout.
+// Supports both wave sizes and D/input aliasing.
 // Requires the named CPU features and validated instruction controls.
 template <bool Bf16, int Lanes, bool Rdna3>
 void wmma_f32_x86_64_v3(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
                         const uint32_t *const *b, const uint32_t *const *c);
 
-// Loose FP32 FMA, supporting D/input aliases. Preserve destination lanes outside
-// exec_mask.
+// Loose WMMA with packed FP16/BF16 output in gfx11 replicated or gfx12 layout.
+// Supports both wave sizes, saturation, and D/input aliasing.
+// Requires the named CPU features and validated instruction controls.
+template <bool Bf16, int Lanes, bool Rdna3>
+void wmma_packed_x86_64_v3(uint32_t modifiers, bool saturate, uint32_t *const *d,
+                           const uint32_t *const *a, const uint32_t *const *b,
+                           const uint32_t *const *c);
+
+// Loose FP32 FMA with source/output modifiers and guest denormal controls.
+// Preserves inactive lanes and supports D/input aliasing.
 // Requires the named CPU features and validated instruction controls.
 void fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
                    const uint32_t *a, const uint32_t *b, const uint32_t *c);
@@ -43,13 +71,20 @@ void half_fma_x86_64_v3(uint64_t flags, uint32_t exec_mask, uint32_t mode, uint3
 
 // Compute empirical bit-exact FP16/BF16 A*B+C for the selected gfx layout
 // and wave size. Requires validated mode; D may alias inputs.
-template <bool Bf16, int Lanes, bool Rdna3>
-void wmma_exact_x86_64_v3(uint32_t mode, uint32_t *const *d, const uint32_t *const *a,
-                          const uint32_t *const *b, const uint32_t *const *c);
+template <bool Bf16, int Lanes, bool Rdna3, bool Packed>
+void wmma_exact_x86_64_v3(uint32_t mode, bool saturate, uint32_t *const *d,
+                          const uint32_t *const *a, const uint32_t *const *b,
+                          const uint32_t *const *c);
 
 #endif
 
 #if defined(RJ_ARITH_HAVE_X86_64_V4)
+
+// Loose FP32 FMA with source/output modifiers and guest denormal controls.
+// Preserves inactive lanes and supports D/input aliasing.
+// Requires the named CPU features and validated instruction controls.
+void fma_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t modifiers, uint32_t *d,
+                   const uint32_t *a, const uint32_t *b, const uint32_t *c);
 
 // Loose FP32 FMA with modifiers and guest denormal controls. Supports D/input
 // aliases and preserves destination lanes outside exec_mask.
@@ -70,13 +105,23 @@ bool half_fma_exact_x86_64_v4(uint64_t flags, uint32_t exec_mask, uint32_t mode,
 
 // Compute empirical bit-exact FP16/BF16 A*B+C for the selected gfx layout
 // and wave size. Requires validated mode; D may alias inputs.
-template <bool Bf16, int Lanes, bool Rdna3>
-void wmma_exact_x86_64_v4(uint32_t mode, uint32_t *const *d, const uint32_t *const *a,
-                          const uint32_t *const *b, const uint32_t *const *c);
+template <bool Bf16, int Lanes, bool Rdna3, bool Packed>
+void wmma_exact_x86_64_v4(uint32_t mode, bool saturate, uint32_t *const *d,
+                          const uint32_t *const *a, const uint32_t *const *b,
+                          const uint32_t *const *c);
 
 #endif
 
 #if defined(RJ_ARITH_HAVE_AVX512BF16)
+
+// Accumulate loose BF16 WMMA using native DPBF16 when inputs are eligible.
+// May decline without writes for screened input ranges. Native DPBF16 can
+// flush subnormal partial sums, even before a normal result; loose semantics
+// permit this difference.
+template <int Lanes, bool Rdna3, bool Packed>
+bool wmma_avx512bf16(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
+                     const uint32_t *const *b, const uint32_t *const *c);
+
 // Accumulate loose BF16 WMMA using native DPBF16 when inputs are eligible.
 // May decline without writes for screened input ranges. Native DPBF16 can
 // flush subnormal partial sums, including cancellation before a normal result;
@@ -84,6 +129,16 @@ void wmma_exact_x86_64_v4(uint32_t mode, uint32_t *const *d, const uint32_t *con
 template <int Lanes, bool Rdna3>
 bool wmma_avx512bf16(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
                      const uint32_t *const *b, const uint32_t *const *c);
+
+#endif
+
+#if defined(RJ_ARITH_HAVE_AVX512VNNI)
+
+// Exact integer WMMA in gfx12 Wave32 layout, with staged CLAMP. D may alias inputs.
+// Requires the named CPU features and validated instruction controls.
+template <int Bits, int K>
+void integer_wmma_avx512vnni(uint32_t modifiers, uint32_t *const *d, const uint32_t *const *a,
+                             const uint32_t *const *b, const uint32_t *const *c);
 
 #endif
 
