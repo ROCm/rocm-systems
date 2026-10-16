@@ -87,6 +87,10 @@ void ncclDebugLog(ncclDebugLogLevel /*level*/,
     std::fputc('\n', stderr);
 }
 
+// src/debug.cc, same owner as the logging symbols above. A no-op rather than a
+// recorder: the name is cosmetic, so nothing a microtest asserts can depend on it.
+void ncclSetThreadName(std::thread& /*thread*/, const char* /*fmt*/, ...) {}
+
 void ncclLoadParam(char const* /*env*/,
                    int64_t     /*deftVal*/,
                    int64_t     /*uninitialized*/,
