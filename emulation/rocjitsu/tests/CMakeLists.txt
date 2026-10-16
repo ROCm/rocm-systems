@@ -614,6 +614,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp

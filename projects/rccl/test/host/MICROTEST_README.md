@@ -305,6 +305,18 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   scene, vocabulary and fake-reset fixture live in `TaskPrepScene.h`.
   `ENABLE_WARP_SPEED` is deliberately absent: all eleven files are free of it.
   See `test_categories_micro_taskprep.yaml`.
+- **`rccl-UnitTestsMicroConnect`** — `src/graph/connect.cc` (via `CONNECT_CC_PATH`,
+  suites `EveryRank/ConnectMicrotest.*` and `ConnectMicrotestReject.*`):
+  `ncclTopoPreset` and `ncclTopoPostset` run unstubbed on a hand-built
+  single-node comm, with the real `rings.cc`, `trees.cc`, `rccl_graph_gen.cc` and
+  `archinfo.cc` linked in. Its own binary because every other micro target links
+  `topo_stubs.cc`, whose Preset/Postset stubs would be duplicate symbols; the few
+  remaining dependencies (logging, params, `bootstrapAllGather`, and the
+  WarpSpeed channel helpers `rcclGetMaxWarpsPerBlock` /
+  `rcclWarpSpeedComputeNChannels`) are faked in `connect-test.cc` itself.
+  The WarpSpeed helpers are referenced only when gfx950 CI copies
+  `ENABLE_WARP_SPEED` onto this binary; the scenes leave `warpSpeedEnabled`
+  false, so the stubs exist to link. See `test_categories_micro_connect.yaml`.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
   `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
@@ -312,9 +324,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 - **`rccl-UnitTestsMicroTopo`** — the real `src/graph` files, each `#include`d from its own
   test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`), `paths.cc` (`Paths*`),
-  `search.cc` (`Search*`), `rome_models.cc` (`RomeModels*`), `connect.cc` (`Connect*`),
-  `rings.cc` (`Rings*`), `trees.cc` (`Trees*`). Its own binary because every other micro binary
-  fakes the graph symbols. Topologies come from XML built in `TopoScene.h`; externals are faked
+  `search.cc` (`Search*`), `rome_models.cc` (`RomeModels*`), `connect.cc` (`graph-connect-test.cc`,
+  `GraphConnect*`), `rings.cc` (`Rings*`), `trees.cc` (`Trees*`). Its own binary because every
+  other micro binary fakes the graph symbols. Topologies come from XML built in `TopoScene.h`; externals are faked
   in `fakes/graph_fakes.cc`. See `test_categories_micro_topo.yaml`.
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
@@ -875,6 +887,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroEnqueue-devlinker  # same, RCCL_DEVICE_LINKER arm
 ./build/rccl-UnitTestsMicroSymKernels         # sym_kernels.cc tests
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
+./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
 ./build/rccl-UnitTestsMicroTopo               # src/graph/*.cc tests
