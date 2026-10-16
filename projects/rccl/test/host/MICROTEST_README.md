@@ -182,6 +182,20 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     overrides, NVLS efficiency policy, and symmetric-kernel fallback. Its
     `ncclParamSingleProcMemRegEnable` resolves from `group.cc` via
     `group-test.cc`; do not add `fakes/group_fakes.cc` to this binary.
+  - `include/param/utils.h` and `include/param/parser_common.h`, from
+    `param-utils-test.cc`; suite `ParamUtilsMicrotest.*`. Header-only, no
+    `_CC_PATH` macro needed. Covers `ncclParamTypeIdOf<T>`'s per-type mapping
+    and RAW fallback, `flagsStr`'s private-prefix/flag-ordering/comma-joining,
+    the `srcDefault`/`srcEnvPlugin` labels, `stringFormat` (including a long
+    argument), `iequals`/`trim`/`split`, the `ncclParamParser<T>`
+    function-pointer-trio wrapper (including that `resolve()` forwards its
+    `ctx` to the callee) and its explicit-`bool` truthiness, and
+    `makeOption(s)` /
+    `ncclOptionSetAssertUnique`'s duplicate-name `WARN` (captured via
+    `../common/LogCapture.hpp`). First PR in the AICOMRCCL-2820 stacked
+    chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
+    registry, the remaining parsers, the C API, and env loading) are covered
+    by its follow-ups.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
@@ -218,6 +232,22 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `rccl-UnitTestsMicroInit` cleanup-order oracle needs the fake `ncclCeFinalize`
   in `fakes/nccl_stubs.cc`, which this target drops via
   `RCCL_STUBS_OMIT_ncclCeFinalize`.
+- **`rccl-UnitTestsMicroClientSupport`**: `ras/client_support.cc` (via
+  `CLIENT_SUPPORT_CC_PATH`, from `client-support-test.cc`); suites
+  `RasClientSupportMicrotest.*` and
+  `Commands/RasClientSupportEnqueueFailureMicrotest.*`. Raw socket I/O is
+  redirected through `fakes/libc_fakes.{h,cc}`, the HIP driver query through
+  `fakes/hip_fakes.{h,cc}`, and reusable RAS collaborators through
+  `fakes/ras_fakes.{h,cc}` plus `fakes/ras_param_fakes.{h,cc}` for timeout
+  scaling. Its own binary: this file's inline stand-ins for
+  `ncclSocketsSameNode`/`rasPeerInfoToString`/`rasPeerToString` (its callees
+  into `ras/peers.cc`) collide with the REAL `peers.cc` that
+  `rccl-UnitTestsMicro` links for `ras-peers-test.cc`, which conversely needs
+  those three real and this file's own `ncclSocketToHost`/`rasGpuDevsToString`
+  faked -- the opposite split, so the two cannot share a binary. The
+  guard-less positional pair `libc_seam.h` / `libc_seam_undef.h` must bracket
+  the production source include, after system headers and before test
+  helpers. CMake pins the copied `ncclFuncStr` table to `src/init.cc`.
 - **`rccl-UnitTestsMicroSymKernels`** — the REAL `src/sym_kernels.cc` (via
   `SYM_KERNELS_CC_PATH`, from `sym-kernels-test.cc`), compiled together with the
   GENERATED `sym_kernels_host.cc` it calls into; suites `SymKernelMicrotest.*`,
@@ -436,7 +466,8 @@ symbol.
 | `src/plugin/env.cc` | `fakes/env_plugin_fakes.cc` |
 | `src/plugin/gin.cc`, `src/gin/gin_host.cc` (targets that do not compile the real file) | `fakes/gin_fakes.cc` |
 | `src/proxy.cc` | `fakes/proxy_fakes.cc` |
-| `src/ras/ras_param.cc` | `fakes/ras_param_fakes.cc` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
+| `src/ras/ras_param.cc` (seconds and nanoseconds timeout scaling) | `fakes/ras_param_fakes.{h,cc}` (the direct `ras-param-test.cc` inclusion uses renamed symbols) |
+| `src/rccl_arch_thresholds.cc` | `fakes/rccl_arch_thresholds_fakes.cc` |
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
@@ -448,7 +479,8 @@ symbol.
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
-| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`) | `fakes/libc_fakes.cc` |
+| libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`) | `fakes/libc_fakes.cc` |
+| reusable RAS poll-entry, message, and diagnostics-context seams | `fakes/ras_fakes.cc` |
 | core/lifecycle floor + data symbols | `fakes/nccl_stubs.cc` |
 | reusable `nccl*` seams | `fakes/nccl_fakes.cc` |
 | HIP runtime | `fakes/hip_fakes.cc` |

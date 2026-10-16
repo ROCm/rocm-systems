@@ -274,6 +274,15 @@ appropriate relative or absolute path. It discovers the active environment
 through `VIRTUAL_ENV` or the active Python interpreter, then formats changed
 generated files through the repository's pre-commit configuration.
 
+The CDNA1 through CDNA4 additions provide LLVM-supported legacy EXP/LOG encodings
+missing from the published base XML, while preserving those upstream inputs.
+The legacy EXP/LOG executors use the shared transcendental approximation and
+explicit flush/nearest output policy. The CDNA1/CDNA2 manuals specify base-2
+operations with unspecified legacy semantics. The CDNA3/CDNA4 manuals list the
+legacy names among transcendental operations but omit their opcode and operation
+definitions; their encodings come from LLVM. Bit-for-bit agreement for arbitrary
+inputs has not been qualified on CDNA hardware.
+
 The manual commands below are useful for focused generator development and are
 run from the rocjitsu project root. Set `MRISA` to the shared MR ISA directory:
 
@@ -291,6 +300,10 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --isa-output lib/rocjitsu/src/rocjitsu/isa/arch/amdgpu/generated \
@@ -315,6 +328,10 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-isas \
@@ -339,6 +356,10 @@ python -m amdisa \
     rdna3_5:$MRISA/amdgpu_isa_rdna3_5.xml \
     rdna4:$MRISA/amdgpu_isa_rdna4.xml \
     cdna5:$MRISA/amdgpu_isa_cdna5.xml \
+  --isa-additions cdna1:$MRISA/amdgpu_isa_cdna1_legacy_math.xml \
+  --isa-additions cdna2:$MRISA/amdgpu_isa_cdna2_legacy_math.xml \
+  --isa-additions cdna3:$MRISA/amdgpu_isa_cdna3_legacy_math.xml \
+  --isa-additions cdna4:$MRISA/amdgpu_isa_cdna4_legacy_math.xml \
   --isa-additions cdna5:$MRISA/amdgpu_isa_cdna5_gfx1251_delta.xml \
   --isa-variants cdna5:$MRISA/amdgpu_isa_cdna5_variants.json \
   --gen-dbt \

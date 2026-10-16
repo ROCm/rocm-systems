@@ -2324,7 +2324,8 @@ TEST(Cdna2DecodeTest, MemoryAccBitSelectsAccumulatorDestination) {
   constexpr TestCase cases[] = {
       {"global_load_dword", {0xDC508000u, 0x057F0002u}, {0xDC508000u, 0x05FF0002u}, 1},
       {"scratch_load_dword", {0xDC504000u, 0x05020000u}, {0xDC504000u, 0x05820000u}, 1},
-      {"image_load", {0xF0000100u, 0x00020502u}, {0xF0010100u, 0x00020502u}, 4},
+      {"image_load", {0xF0000100u, 0x00020502u}, {0xF0010100u, 0x00020502u}, 1},
+      {"image_load", {0xF0000F00u, 0x00020502u}, {0xF0010F00u, 0x00020502u}, 4},
   };
 
   auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA2);

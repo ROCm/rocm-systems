@@ -1674,14 +1674,14 @@ class AMDSMIHelpers:
                 power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
                 for sensor in power_cap_types["sensor_inds"]:
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
-                    if (
+                    if power_cap_info["max_power_cap"] != "N/A" and (
                         power_cap_info["max_power_cap"]
                         > power_limit_types[f"ppt{sensor}"]["power_cap_max"]
                     ):
                         power_limit_types[f"ppt{sensor}"]["power_cap_max"] = power_cap_info[
                             "max_power_cap"
                         ]
-                    if (
+                    if power_cap_info["min_power_cap"] != "N/A" and (
                         power_cap_info["min_power_cap"]
                         < power_limit_types[f"ppt{sensor}"]["power_cap_min"]
                     ):
@@ -2216,8 +2216,10 @@ class AMDSMIHelpers:
             unit_out - Requires using SI_Unit to set current value's SI unit
              default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
         return:
-            int or float : converted SI unit of value requested
+            int or float : converted SI unit of value requested, or "N/A" if val is "N/A"
         """
+        if val == "N/A":
+            return val
         if isinstance(val, float):
             return val * unit_in / unit_out
         elif isinstance(val, int):
@@ -3505,6 +3507,10 @@ class AMDSMIHelpers:
             current_power_cap = self.convert_SI_unit(
                 power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
             )
+            if "N/A" in (min_power_cap, max_power_cap, current_power_cap):
+                raise amdsmi_exception.AmdSmiLibraryException(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
             # Setting power cap to 0 reads back the current cap, so the technical minimum is 1
             min_power_cap = max(min_power_cap, 1)
 
