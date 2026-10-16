@@ -26,6 +26,7 @@
 #include "lib/common/logging.hpp"
 #include "lib/common/scope_destructor.hpp"
 #include "lib/common/static_object.hpp"
+#include "lib/common/synchronized.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/agent.hpp"
 #include "lib/rocprofiler-sdk/context/context.hpp"
@@ -49,7 +50,9 @@
 
 #include <chrono>
 #include <cstdlib>
+#include <optional>
 #include <type_traits>
+#include <unordered_map>
 
 #define ROCPROFILER_LIB_ROCPROFILER_HSA_ASYNC_COPY_CPP_IMPL 1
 
@@ -345,6 +348,36 @@ get_active_signals()
 {
     static auto*& _v = common::static_object<active_signals>::construct();
     return _v;
+}
+
+using copy_time_entry_t = std::pair<hsa_status_t, hsa_amd_profiling_async_copy_time_t>;
+using copy_time_map_t   = std::unordered_map<uint64_t, copy_time_entry_t>;
+
+/**
+ * @brief Copy times of completed copies whose completion signal was replaced, keyed by the handle
+ * of the caller's completion signal.
+ */
+common::Synchronized<copy_time_map_t>*
+get_copy_time_map()
+{
+    static auto*& _v = common::static_object<common::Synchronized<copy_time_map_t>>::construct();
+    return _v;
+}
+
+/**
+ * @brief Drops the stored copy time of a signal. Called for every submission, traced or not,
+ * because a copy that is not traced reports its time through the runtime.
+ */
+void
+forget_copy_time(hsa_signal_t _signal)
+{
+    if(auto* _map = get_copy_time_map())
+        _map->ulock(
+            [_signal](const copy_time_map_t& _data) { return _data.count(_signal.handle) == 0; },
+            [_signal](copy_time_map_t& _data) {
+                _data.erase(_signal.handle);
+                return true;
+            });
 }
 
 template <typename Tp, typename Up>
@@ -722,6 +755,18 @@ async_copy_handler(hsa_signal_value_t, void* arg)
         std::tie(orig_amd_signal->start_ts, orig_amd_signal->end_ts) =
             std::tie(rocp_amd_signal->start_ts, rocp_amd_signal->end_ts);
 
+        // operations of a batch share the caller's signal; like the runtime, report the operation
+        // that finished last
+        if(auto* _map = get_copy_time_map())
+            _map->wlock([&](copy_time_map_t& _times) {
+                auto [itr, inserted] =
+                    _times.try_emplace(_data->orig_signal.handle, copy_time_status, copy_time);
+                if(!inserted && (itr->second.first != HSA_STATUS_SUCCESS ||
+                                 (copy_time_status == HSA_STATUS_SUCCESS &&
+                                  copy_time.end >= itr->second.second.end)))
+                    itr->second = {copy_time_status, copy_time};
+            });
+
         ROCP_TRACE << "Decrementing Signal: " << std::hex << _data->orig_signal.handle << std::dec;
         get_core_table()->hsa_signal_subtract_screlease_fn(_data->orig_signal, 1);
     }
@@ -746,6 +791,66 @@ get_next_dispatch()
     using function_t     = typename hsa_api_meta<TableIdx, OpIdx>::function_type;
     static function_t _v = nullptr;
     return _v;
+}
+
+/**
+ * @brief The copy ran on a rocprofiler-owned signal, so the caller's signal carries no copy
+ * profiling state in the runtime: answer from the time recorded before the caller was signaled.
+ */
+hsa_status_t
+get_async_copy_time_impl(hsa_signal_t _signal, hsa_amd_profiling_async_copy_time_t* _time)
+{
+    auto& _next =
+        get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                          ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_async_copy_time>();
+
+    if(auto* _map = get_copy_time_map(); _map && _time)
+    {
+        auto _entry = _map->rlock(
+            [_signal](const copy_time_map_t& _data) -> std::optional<copy_time_entry_t> {
+                if(auto itr = _data.find(_signal.handle); itr != _data.end()) return itr->second;
+                return std::nullopt;
+            });
+
+        if(_entry)
+        {
+            *_time = _entry->second;
+            return _entry->first;
+        }
+    }
+
+    return _next(_signal, _time);
+}
+
+hsa_status_t
+signal_destroy_impl(hsa_signal_t _signal)
+{
+    forget_copy_time(_signal);
+    return get_next_dispatch<ROCPROFILER_HSA_TABLE_ID_Core,
+                             ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>()(_signal);
+}
+
+template <size_t TableIdx, size_t OpIdx, typename TableT>
+void
+save_table_func(TableT* _orig, uint64_t _tbl_instance)
+{
+    auto  _meta      = hsa_api_meta<TableIdx, OpIdx>{};
+    auto& _orig_func = _meta.get_table_func(_meta.get_table(_orig));
+    auto& _next_func = get_next_dispatch<TableIdx, OpIdx>();
+
+    if(_tbl_instance == 0 && _orig_func != _next_func) _next_func = _orig_func;
+}
+
+template <size_t TableIdx, size_t OpIdx, typename TableT, typename FuncT>
+void
+wrap_table_func(TableT* _orig, FuncT _impl)
+{
+    auto  _meta = hsa_api_meta<TableIdx, OpIdx>{};
+    auto& _func = _meta.get_table_func(_meta.get_table(_orig));
+
+    auto& _dispatch = get_next_dispatch<TableIdx, OpIdx>();
+    CHECK_NOTNULL(_dispatch);
+    _func = _impl;
 }
 
 template <size_t Idx>
@@ -964,6 +1069,9 @@ async_batch_copy_impl(const hsa_amd_memory_copy_op_t* copy_ops,
     if(copy_ops == nullptr || num_copy_ops == 0)
         return _dispatch(copy_ops, num_copy_ops, num_dep_signals, dep_signals);
 
+    for(uint32_t i = 0; i < num_copy_ops; ++i)
+        forget_copy_time(copy_ops[i].completion_signal);
+
     auto _intercept_data  = std::vector<intercept_data_t>{};
     auto _intercept_locks = std::vector<intercept_lock_t>{};
 
@@ -1088,6 +1196,8 @@ async_copy_impl(Args... args)
     constexpr auto src_agent_idx = arg_indices<OpIdx>::src_agent_idx;
 
     auto&& _tied_args = std::tie(args...);
+
+    forget_copy_time(std::get<arg_indices<OpIdx>::completion_signal_idx>(_tied_args));
 
     async_copy_data* _data = nullptr;
 
@@ -1315,6 +1425,14 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
     {
         async_copy::async_copy_save<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
             _orig->amd_ext_, _tbl_instance, async_copy::async_copy_index_seq_t{});
+        async_copy::save_table_func<
+            ROCPROFILER_HSA_TABLE_ID_AmdExt,
+            ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_async_copy_time>(_orig->amd_ext_,
+                                                                                  _tbl_instance);
+        if(_orig->core_)
+            async_copy::save_table_func<ROCPROFILER_HSA_TABLE_ID_Core,
+                                        ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>(
+                _orig->core_, _tbl_instance);
 
         auto ctxs = context::get_registered_contexts(async_copy::context_filter);
         if(!ctxs.empty())
@@ -1322,6 +1440,14 @@ async_copy_init(hsa_api_table_t* _orig, uint64_t _tbl_instance)
             _orig->amd_ext_->hsa_amd_profiling_async_copy_enable_fn(true);
             async_copy::async_copy_wrap<ROCPROFILER_HSA_TABLE_ID_AmdExt>(
                 _orig->amd_ext_, async_copy::async_copy_index_seq_t{});
+            async_copy::wrap_table_func<
+                ROCPROFILER_HSA_TABLE_ID_AmdExt,
+                ROCPROFILER_HSA_AMD_EXT_API_ID_hsa_amd_profiling_get_async_copy_time>(
+                _orig->amd_ext_, async_copy::get_async_copy_time_impl);
+            if(_orig->core_)
+                async_copy::wrap_table_func<ROCPROFILER_HSA_TABLE_ID_Core,
+                                            ROCPROFILER_HSA_CORE_API_ID_hsa_signal_destroy>(
+                    _orig->core_, async_copy::signal_destroy_impl);
         }
     }
 }
