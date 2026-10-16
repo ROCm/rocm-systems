@@ -91,6 +91,13 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
         # link librocjitsu.so (the interposer/simulator image), so loading it
         # never pulls the interposer into the host process and it resolves
         # nothing from the simulator at load time.
+        # GCC's vptr sanitizer adds references to the key-function-owned RTTI of
+        # simulator classes used by inline accessors. Standalone plugin modules
+        # deliberately do not link that simulator image. Keep all other UBSan
+        # checks; vptr checks cannot cross this private plugin ABI boundary.
+        if(CMAKE_CXX_COMPILER_ID STREQUAL "GNU" AND RJ_ENABLE_UBSAN)
+            target_compile_options(${object_lib} PRIVATE -fno-sanitize=vptr)
+        endif()
         target_link_libraries(
             ${target}
             PRIVATE ${object_lib} rocm_runtime::runtime_headers
