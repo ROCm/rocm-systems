@@ -4,6 +4,10 @@
         "hint": "use the ROCPROFSYS_* macros in \"common/defines.h\""
     },
     {
+        "header": "timemory/components/timing/backends.hpp",
+        "hint": "use \"core/control/clocks/timeline.hpp\" for trace timestamps, or call clock_gettime directly"
+    },
+    {
         "header": "timemory/defines.h",
         "hint": "don't use defines from Timemory"
     },
