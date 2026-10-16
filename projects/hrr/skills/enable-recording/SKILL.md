@@ -134,7 +134,7 @@ What the archive holds, per process, and it is worth reading out to whoever has 
 - **`manifest.json`**: process and parent process ids, event and blob counts, the clean-shutdown flag, the HIP and comgr versions that captured, and the device's name, architecture, PCI location and UUID.
 - **`regions/*.hrrr`**: the framework allocator's own layout, when a producer ran alongside capture.
 
-Apart from the few exceptions in step 2, failed HIP calls are not recorded, and nothing that never crossed a HIP call is. The archive is exactly as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded.
+Apart from the few exceptions in step 2, failed HIP calls are not recorded, and nothing that never crossed a HIP call is. The archive is exactly as sensitive as the data the workload handled, so where it may go has to be agreed before it is uploaded. [PRIVACY.md](../../PRIVACY.md) is the page to hand to whoever approves it.
 
 `verify --json` gives each process's counts and sizes in a form you can attach to the request; the device details are in each `manifest.json`. For a multi-process archive, `hrr-playback --info` against the archive root prints a table covering every process at once. The cross-check in `verify` reports on one process, which is enough to judge the capture and not enough for a disclosure inventory.
 
