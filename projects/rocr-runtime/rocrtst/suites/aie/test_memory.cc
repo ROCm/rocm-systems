@@ -539,7 +539,8 @@ TEST_F(MemoryTest, VMemMapNPU) {
   const std::uint64_t alignment = 0;
   std::uint32_t* buffer = nullptr;
   ASSERT_EQ(hsa_amd_vmem_address_reserve_align(reinterpret_cast<void**>(&buffer), allocation_size,
-                                               address, alignment, 0 /* flags */),
+                                               address, alignment,
+                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
             HSA_STATUS_SUCCESS);
   ASSERT_NE(buffer, nullptr);
 
@@ -1055,7 +1056,8 @@ TEST_F(MemoryTest, VMemDoubleMap) {
             HSA_STATUS_SUCCESS);
 
   void* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, allocation_size, 0, 0, 0),
+  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, allocation_size, 0, 0,
+                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
             HSA_STATUS_SUCCESS);
 
   ASSERT_EQ(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
@@ -1082,7 +1084,8 @@ TEST_F(MemoryTest, VMemReleaseBeforeUnmap) {
             HSA_STATUS_SUCCESS);
 
   void* buffer = nullptr;
-  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, allocation_size, 0, 0, 0),
+  ASSERT_EQ(hsa_amd_vmem_address_reserve_align(&buffer, allocation_size, 0, 0,
+                                               HSA_AMD_VMEM_ADDRESS_NO_REGISTER),
             HSA_STATUS_SUCCESS);
 
   ASSERT_EQ(hsa_amd_vmem_map(buffer, allocation_size, 0, memory_handle, 0), HSA_STATUS_SUCCESS);
