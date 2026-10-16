@@ -66,9 +66,10 @@ def my_vector_bias_add():
         # AIE_PARTITION PDI before the sequence runs. A full ELF has no xclbin,
         # so the sequence must load the PDI itself -- without this the cores
         # never start and the closing DMA token wait never retires, which the
-        # driver reports as ERT_CMD_STATE_TIMEOUT. aie4 (npu3) has no PDI concept at
-        # all yet (its full ELF carries no PDI section), so this step is skipped there --
-        # experimentally, including it anyway stalls the dispatch on real aie4 hardware.
+        # driver reports as ERT_CMD_STATE_TIMEOUT. On aie4 (npu3) aiecc's control code
+        # already configures the array in its own first job, so a load_pdi here would
+        # apply the same configuration a second time; on real aie4 hardware that stalls
+        # this design's dispatch and corrupts vector_scalar_mul.py's output.
         if FULL_ELF and positional[0] != "npu3":
             npu_load_pdi(device_ref="main")
         in_handle.fill(inTensor)

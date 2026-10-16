@@ -3149,19 +3149,6 @@ class FullElfInterleaveTest : public FullElfDispatchTest {
 // PDI it loads. What is checked is the other half of interleaving: that alternating designs in
 // one chain each run against their own control code and PDI rather than the previous packet's.
 TEST_F(FullElfInterleaveTest, ElfInterleavedKernels) {
-  if (is_aie4) {
-    GTEST_SKIP()
-        << "multi-packet batch dispatch corruption, under investigation: alternating two "
-           "differently-compiled full-ELF kernels on one UMQ hardware context leaves "
-           "every mul-kernel output off by the same additive constant, even though the "
-           "host-side submission sequence (kernel_object, num_kernargs, CERT's own "
-           "read_index) was confirmed correct one packet at a time. A KMQ-mirroring fix "
-           "(destroy/recreate the hardware context whenever the dispatched kernel's "
-           "identity changes) was tried and made things worse: it turned the silent data "
-           "corruption into a deterministic hang specifically when rebuilding right before "
-           "a mul dispatch, with no available evidence to explain why. Reverted; root "
-           "cause remains open.";
-  }
   constexpr std::uint32_t num_pairs = 4;
   constexpr std::size_t n = aie_full_elf_kernel::element_count;
   static_assert(aie_full_elf_kernel::element_count == aie_full_elf_mul_kernel::element_count);
