@@ -246,4 +246,10 @@ static inline size_t ncclIbBytesRemainingInSegment(uintptr_t segPtr, uintptr_t s
   return (segBase == 0) ? segSize : segSize - (segPtr - segBase);
 }
 
+// RCCL: direct-GDR iflush posts one read per recv per segment. The proxy can
+// post one flush per step before polling, so multi-seg depth is steps times that chain.
+static inline constexpr int ncclIbFlushQpSendDepth(int steps, int maxRecvs, int maxSegments, int legacyDepth, int multiSeg) {
+  return multiSeg ? steps * maxRecvs * maxSegments : legacyDepth;
+}
+
 #endif // NCCL_NET_IB_MULTISEG_H_

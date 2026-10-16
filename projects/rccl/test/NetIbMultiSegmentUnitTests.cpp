@@ -547,3 +547,16 @@ TEST(NetIbSideTable, NoTableOrNoCapDoesNotWait) {
 TEST(NetIbSideTable, NullIdxWithTableIsNotReady) {
     EXPECT_FALSE(ncclIbSideTableReady(true, true, true, nullptr, 1, 1));
 }
+
+// NCCL_STEPS and NCCL_NET_IB_MAX_RECVS are both 8. NET_IB_MAX_REQUESTS is 256.
+// The old depth added one chain (128) on top of 256 and held three full flushes.
+TEST(NetIbMultiSeg, FlushQpDepthCoversEveryOutstandingStep) {
+    constexpr int kSteps = 8;
+    constexpr int kRecvs = 8;
+    constexpr int kLegacy = 256;
+    EXPECT_EQ(ncclIbFlushQpSendDepth(kSteps, kRecvs, NCCL_IB_MAX_SEGMENTS, kLegacy, 0), kLegacy);
+    EXPECT_EQ(ncclIbFlushQpSendDepth(kSteps, kRecvs, NCCL_IB_MAX_SEGMENTS, kLegacy, 1),
+              kSteps * kRecvs * NCCL_IB_MAX_SEGMENTS);
+    EXPECT_LT(kLegacy + kRecvs * NCCL_IB_MAX_SEGMENTS,
+              ncclIbFlushQpSendDepth(kSteps, kRecvs, NCCL_IB_MAX_SEGMENTS, kLegacy, 1));
+}

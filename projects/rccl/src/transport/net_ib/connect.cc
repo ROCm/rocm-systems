@@ -11,6 +11,7 @@
 #include "rma_multiseg.h"
 #include "p2p_resiliency.h"
 #include "transport.h"
+#include "device.h"
 #include <mutex>
 
 // NCCL_MULTI_SEGMENT_REGISTER=0 keeps the legacy connect metadata, CTS MR and QP depths.
@@ -36,6 +37,10 @@ static_assert(NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS >= NCCL_RMA_MAX_FLUSH
 // RCCL: credits wait until a chain fits, so one RMA flush chain must fit the flush QP.
 static_assert(NCCL_RMA_MAX_FLUSH_WRS <= NET_IB_MAX_REQUESTS,
               "one RMA flush chain must fit the flush QP");
+// RCCL: recvProxy can leave one direct-GDR flush posted on each of NCCL_STEPS slots.
+static_assert(ncclIbFlushQpSendDepth(NCCL_STEPS, NCCL_NET_IB_MAX_RECVS, NCCL_IB_MAX_SEGMENTS, 2 * NET_IB_MAX_REQUESTS, 1) >=
+                  NCCL_STEPS * NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS,
+              "multi-segment flush QP must hold one chain per proxy step");
 
 NCCL_PARAM(IbGidIndex, "IB_GID_INDEX", -1);
 NCCL_PARAM(IbRoutableFlidIbGidIndex, "IB_ROUTABLE_FLID_GID_INDEX", 1);
@@ -1425,9 +1430,11 @@ ncclResult_t ncclIbCreateFlushQp(struct ncclIbRecvComm* comm) {
     qpCreateAttrs.cq = rCommDev->base.cq;
     qpCreateAttrs.pd = rCommDev->base.pd;
     qpCreateAttrs.maxRecvWorkRequest = 0;
-    // RCCL: one RDMA_READ per recv per segment when the peer advertised the cap.
-    qpCreateAttrs.maxSendWorkRequest =
-      2 * NET_IB_MAX_REQUESTS + ((comm->peerCaps & NCCL_IB_CAP_MULTISEG) ? NCCL_NET_IB_MAX_RECVS * NCCL_IB_MAX_SEGMENTS : 0);
+    // RCCL: one RDMA_READ per recv per segment, for every step the proxy may leave posted.
+    // RCCL: switch off keeps the scratchpad depth, one write plus one read.
+    qpCreateAttrs.maxSendWorkRequest = ncclIbFlushQpSendDepth(
+        NCCL_STEPS, NCCL_NET_IB_MAX_RECVS, NCCL_IB_MAX_SEGMENTS, 2 * NET_IB_MAX_REQUESTS,
+        (comm->peerCaps & NCCL_IB_CAP_MULTISEG) != 0);
     qpCreateAttrs.qpContext = &comm->base.stats;
     NCCLCHECK(ncclIbQpCreate(flushQp, &qpCreateAttrs));
     // Loopback flush QP: local and remote device indices are this recv device.
