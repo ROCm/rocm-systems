@@ -26,6 +26,7 @@ THE SOFTWARE.
 #include <sys/time.h>
 
 #include <cstdint>
+#include <limits>
 #include <memory>
 #include <set>
 #include <string>
@@ -590,15 +591,17 @@ rdc_status_t RdcMetricFetcherImpl::bulk_fetch_smi_fields(
         case RDC_FI_POWER_USAGE:  // average_socket_power
           value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.average_socket_power);
           // Use current_socket_power if average_socket_power is not available
-          if (value.field_value.value.l_int == 65535) {
+          if (value.field_value.value.l_int == std::numeric_limits<uint16_t>::max()) {
             RDC_LOG(RDC_DEBUG, "Bulk fetch "
                                    << value.gpu_index << ":"
                                    << "RDC_FI_POWER_USAGE fallback to current_socket_power.");
             value.field_value.value.l_int = static_cast<int64_t>(gpu_metrics.current_socket_power);
           }
 
-          // Ignore if the power is 0, which will fallback to non-bulk fetch.
-          if (value.field_value.value.l_int == 0) {
+          // Leave a power of 0 or one gpu_metrics cannot report (UINT16_MAX) to the
+          // per-field fetch, which reads amdsmi_get_power_info() instead.
+          if (value.field_value.value.l_int == 0 ||
+              value.field_value.value.l_int == std::numeric_limits<uint16_t>::max()) {
             RDC_LOG(RDC_DEBUG, "Bulk fetch " << value.gpu_index << ":"
                                              << "RDC_FI_POWER_USAGE fallback to regular way.");
             continue;
@@ -948,14 +951,21 @@ rdc_status_t RdcMetricFetcherImpl::fetch_gpu_field_(uint32_t gpu_index, rdc_fiel
         break;
       }
 
+      // amd-smi reports a power it cannot read as UINT32_MAX; older releases
+      // reported UINT16_MAX.
+      auto power_available = [](uint32_t watts) {
+        return watts != std::numeric_limits<uint32_t>::max() &&
+               watts != std::numeric_limits<uint16_t>::max();
+      };
+
       // Use current_socket_power if average_socket_power is not available
-      if (power_info.average_socket_power != 65535) {
+      if (power_available(power_info.average_socket_power)) {
         RDC_LOG(RDC_DEBUG, "AMDSMI: using average_socket_power");
         value->value.l_int = static_cast<int64_t>(power_info.average_socket_power) * 1000 * 1000;
         break;
       }
 
-      if (power_info.current_socket_power != 65535) {
+      if (power_available(power_info.current_socket_power)) {
         RDC_LOG(RDC_DEBUG, "AMDSMI: using current_socket_power");
         value->value.l_int = static_cast<int64_t>(power_info.current_socket_power) * 1000 * 1000;
         break;
