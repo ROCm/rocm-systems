@@ -3,6 +3,7 @@
 
 #pragma once
 
+#include "rocjitsu/base/rj_compiler.h"
 #include "rocjitsu/vm/amdgpu/device_cache_coherence.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
@@ -94,41 +95,22 @@ public:
   /// This path is used by translated PCI/VFIO address spaces.  Lines from a
   /// replaced root or a reused address-space slot cannot alias because both
   /// the handle generation and translation epoch participate in the tag.
-  [[nodiscard]] VmAccessOutcome fetch(const GpuVmAccess &access, uint64_t pc, uint8_t *dst) {
+  [[nodiscard, gnu::always_inline]] VmAccessOutcome fetch(const GpuVmAccess &access, uint64_t pc,
+                                                          uint8_t *dst) {
     synchronize_coherence_epoch();
-    uint32_t copied = 0;
-    while (copied < kFetchBytes) {
+    const uint32_t offset = static_cast<uint32_t>(pc) & (kLineSize - 1);
+    const uint64_t line_address = pc & ~uint64_t{kLineSize - 1};
+    const Line &line = lines_[(line_address / kLineSize) & (kNumLines - 1)];
+    if (offset + kFetchBytes <= kLineSize &&
+        is_translated_hit(line, line_address, access.cache_namespace())) {
       // A translated hit otherwise bypasses GpuVmAccess entirely and could
       // continue executing cached code after its snapshot was revoked.
       if (access.revoked())
         return VmAccessOutcome::Revoked;
-      const uint64_t address = pc + copied;
-      const uint64_t line_address = address & ~uint64_t{kLineSize - 1};
-      const uint32_t line_offset = static_cast<uint32_t>(address) & (kLineSize - 1);
-      const uint32_t chunk = std::min(kFetchBytes - copied, kLineSize - line_offset);
-      const VmCacheNamespace cache_namespace = access.cache_namespace();
-      Line &line = lines_[(line_address / kLineSize) & (kNumLines - 1)];
-
-      if (line.valid && line.translated && line.addr == line_address &&
-          line.cache_namespace == cache_namespace) {
-        std::memcpy(dst + copied, line.data + line_offset, chunk);
-      } else if (access.query_access(line_address, kLineSize, VmAccessKind::Execute) !=
-                 VmAccessOutcome::Complete) {
-        const VmAccessOutcome outcome = access.read(
-            address, std::span<std::byte>(reinterpret_cast<std::byte *>(dst + copied), chunk),
-            VmAccessKind::Execute);
-        if (outcome != VmAccessOutcome::Complete)
-          return outcome;
-      } else {
-        const uint8_t *line_data = nullptr;
-        const VmAccessOutcome outcome = line_for(access, address, line_data);
-        if (outcome != VmAccessOutcome::Complete)
-          return outcome;
-        std::memcpy(dst + copied, line_data + line_offset, chunk);
-      }
-      copied += chunk;
+      std::memcpy(dst, line.data + offset, kFetchBytes);
+      return VmAccessOutcome::Complete;
     }
-    return VmAccessOutcome::Complete;
+    return fetch_chunks(access, pc, dst);
   }
 
   /// @brief Bind instruction invalidation to the same domain as the CU's L2.
@@ -180,6 +162,48 @@ private:
     uint8_t data[kLineSize] = {};
   };
 
+  static bool is_translated_hit(const Line &line, uint64_t line_addr,
+                                VmCacheNamespace cache_namespace) {
+    return line.valid && line.translated && line.addr == line_addr &&
+           line.cache_namespace == cache_namespace;
+  }
+
+  // Keep permission queries, backing reads and straddling copies off the resident-line hit.
+  RJ_NOINLINE VmAccessOutcome fetch_chunks(const GpuVmAccess &access, uint64_t pc, uint8_t *dst) {
+    uint32_t copied = 0;
+    while (copied < kFetchBytes) {
+      // A translated hit otherwise bypasses GpuVmAccess entirely and could
+      // continue executing cached code after its snapshot was revoked.
+      if (access.revoked())
+        return VmAccessOutcome::Revoked;
+      const uint64_t address = pc + copied;
+      const uint64_t line_address = address & ~uint64_t{kLineSize - 1};
+      const uint32_t line_offset = static_cast<uint32_t>(address) & (kLineSize - 1);
+      const uint32_t chunk = std::min(kFetchBytes - copied, kLineSize - line_offset);
+      const VmCacheNamespace cache_namespace = access.cache_namespace();
+      Line &line = lines_[(line_address / kLineSize) & (kNumLines - 1)];
+
+      if (is_translated_hit(line, line_address, cache_namespace)) {
+        std::memcpy(dst + copied, line.data + line_offset, chunk);
+      } else if (access.query_access(line_address, kLineSize, VmAccessKind::Execute) !=
+                 VmAccessOutcome::Complete) {
+        const VmAccessOutcome outcome = access.read(
+            address, std::span<std::byte>(reinterpret_cast<std::byte *>(dst + copied), chunk),
+            VmAccessKind::Execute);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+      } else {
+        const uint8_t *line_data = nullptr;
+        const VmAccessOutcome outcome = line_for(access, address, line_data);
+        if (outcome != VmAccessOutcome::Complete)
+          return outcome;
+        std::memcpy(dst + copied, line_data + line_offset, chunk);
+      }
+      copied += chunk;
+    }
+    return VmAccessOutcome::Complete;
+  }
+
   const uint8_t *line_for(const GpuMemory &memory, uint64_t addr) {
     const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
     Line &line = lines_[(line_addr / kLineSize) & (kNumLines - 1)];
@@ -200,8 +224,7 @@ private:
     const uint64_t line_addr = addr & ~uint64_t{kLineSize - 1};
     const VmCacheNamespace cache_namespace = access.cache_namespace();
     Line &line = lines_[(line_addr / kLineSize) & (kNumLines - 1)];
-    if (line.valid && line.translated && line.addr == line_addr &&
-        line.cache_namespace == cache_namespace) {
+    if (is_translated_hit(line, line_addr, cache_namespace)) {
       data = line.data;
       return VmAccessOutcome::Complete;
     }

@@ -985,10 +985,11 @@ static ncclResult_t ncclTopoXmlAddHipPartitionXgmi(struct ncclXml* xml, struct n
 }
 #endif
 
-// dev is the machine-wide SMI index, unique per partition; HIP ordinals restart at 0 per process and would collide.
 ncclResult_t ncclTopoGetXmlFromGpu(struct ncclXmlNode* pciNode, uint32_t hipDev, uint32_t smiDev, struct ncclXml* xml,
                                    struct ncclXmlNode** gpuNodeRet) {
   struct ncclXmlNode* gpuNode = NULL;
+  // Processes learn about each other's GPUs only through XML fusion, so "dev" must mean the same in all
+  // of them. hipDev depends on each process's device visibility; the SMI index does not.
   NCCLCHECK(xmlGetSubKvInt(pciNode, "gpu", &gpuNode, "dev", (int)smiDev));
   if (gpuNode == NULL) NCCLCHECK(xmlAddNode(xml, pciNode, "gpu", &gpuNode));
 
@@ -1374,7 +1375,7 @@ ncclResult_t ncclTopoFillGpu(struct ncclXml* xml, const char* busId, struct nccl
   NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, &smiIndex));
 #endif
   int hipDev = -1;
-  if (hipDeviceGetByPCIBusId(&hipDev, busId) != hipSuccess || hipDev < 0) hipDev = (int)smiIndex;
+  CUDACHECK(hipDeviceGetByPCIBusId(&hipDev, busId));
   NCCLCHECK(ncclTopoGetXmlFromGpu(node, (uint32_t)hipDev, smiIndex, xml, gpuNode));
 #else
   nvmlDevice_t nvmlDev;
