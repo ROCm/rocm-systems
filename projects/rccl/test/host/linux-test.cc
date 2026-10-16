@@ -717,9 +717,18 @@ TEST_F(LinuxSocketMicrotest, ResetFd_SocketFailureLeavesTheDescriptorAlone) {
 TEST_F(LinuxSocketMicrotest, ResetFd_Dup2FailureClosesTheNewSocket) {
   int probe = ::socket(AF_INET, SOCK_STREAM, 0);  // the number the new socket will get
   ::close(probe);
-  ncclSocket sock = Sock(1 << 29);  // above any RLIMIT_NOFILE: dup2 fails
-  EXPECT_EQ(ncclOsSocketResetFd(&sock), ncclSystemError);
-  EXPECT_EQ(sock.socketDescriptor, 1 << 29);
+  // Lower the soft RLIMIT_NOFILE so the dup2 target is past it on any host.
+  rlimit saved;
+  ASSERT_EQ(getrlimit(RLIMIT_NOFILE, &saved), 0);
+  rlimit tight = saved;
+  tight.rlim_cur = probe + 8;
+  ASSERT_EQ(setrlimit(RLIMIT_NOFILE, &tight), 0);
+  const int target = probe + 8;
+  ncclSocket sock = Sock(target);
+  ncclResult_t ret = ncclOsSocketResetFd(&sock);
+  setrlimit(RLIMIT_NOFILE, &saved);
+  EXPECT_EQ(ret, ncclSystemError);
+  EXPECT_EQ(sock.socketDescriptor, target);
   EXPECT_TRUE(LinuxLogged("WARN Call to dup2 failed"));
   EXPECT_FALSE(FdOpen(probe));
 }
