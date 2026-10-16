@@ -22,11 +22,13 @@ foreach(line IN LISTS lines)
         )
     endif()
     set(domain baseline)
-    if(line MATCHES "_x86_64_v3[.]cpp[.]o:")
-        set(domain x86_64_v3)
+    if(line MATCHES "_(x86_64_v[34](_bf16)?)[.]cpp[.]o:")
+        set(domain ${CMAKE_MATCH_1})
+    endif()
+    if(NOT domain STREQUAL "baseline")
         if(
-            NOT symbol MATCHES "rocjitsu::arith::x86_64_v3::"
-            AND NOT symbol MATCHES "rocjitsu::arith::[A-Za-z0-9_]+_x86_64_v3[(<]"
+            NOT symbol MATCHES "rocjitsu::arith::${domain}::"
+            AND NOT symbol MATCHES "rocjitsu::arith::[A-Za-z0-9_]+_${domain}[(<]"
         )
             message(
                 FATAL_ERROR
