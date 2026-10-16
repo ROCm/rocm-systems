@@ -417,7 +417,7 @@ TEST_F(RegisterCollNvlsMicrotest, NotRegistered_LeavesBufferUnregisteredAndChann
 
 TEST_F(RegisterCollNvlsMicrotest, AllReduce_RegistersBothBuffersAtCountSize) {
   g_ncclNvlsLocalRegisterBuffer = [this](ncclComm*, const void* send, void* recv, size_t sendSize, size_t recvSize,
-                                     int* reged, void**, void**) {
+                                         int* reged, void**, void**) {
     EXPECT_EQ(send, kSend);
     EXPECT_EQ(recv, kRecv);
     EXPECT_EQ(sendSize, kBytes);
@@ -433,7 +433,7 @@ TEST_F(RegisterCollNvlsMicrotest, AllReduce_RegistersBothBuffersAtCountSize) {
 TEST_F(RegisterCollNvlsMicrotest, AllGather_RegistersOnlyTheGatheredRecvBuffer) {
   task_.func = ncclFuncAllGather;
   g_ncclNvlsLocalRegisterBuffer = [this](ncclComm*, const void* send, void* recv, size_t sendSize, size_t recvSize,
-                                     int* reged, void**, void**) {
+                                         int* reged, void**, void**) {
     EXPECT_EQ(send, nullptr);
     EXPECT_EQ(recv, kRecv);
     EXPECT_EQ(sendSize, kBytes);
@@ -449,7 +449,7 @@ TEST_F(RegisterCollNvlsMicrotest, AllGather_RegistersOnlyTheGatheredRecvBuffer) 
 TEST_F(RegisterCollNvlsMicrotest, ReduceScatter_RegistersOnlyTheScatteredSendBuffer) {
   task_.func = ncclFuncReduceScatter;
   g_ncclNvlsLocalRegisterBuffer = [this](ncclComm*, const void* send, void* recv, size_t sendSize, size_t recvSize,
-                                     int* reged, void**, void**) {
+                                         int* reged, void**, void**) {
     EXPECT_EQ(send, kSend);
     EXPECT_EQ(recv, nullptr);
     EXPECT_EQ(sendSize, kRanks * kBytes);

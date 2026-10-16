@@ -51,7 +51,7 @@ constexpr int kCommDev = 3;
 
 // hipPointerGetAttribute answering the two attributes register.cc queries.
 std::function<hipError_t(void*, hipPointer_attribute, hipDeviceptr_t)> PointerAttrs(hipMemoryType memType,
-                                                                                     int legacyIpcCapable) {
+                                                                                    int legacyIpcCapable) {
   return [=](void* data, hipPointer_attribute attr, hipDeviceptr_t) {
     if (attr == HIP_POINTER_ATTRIBUTE_MEMORY_TYPE) *static_cast<hipMemoryType*>(data) = memType;
     if (attr == HIP_POINTER_ATTRIBUTE_IS_LEGACY_HIP_IPC_CAPABLE) *static_cast<int*>(data) = legacyIpcCapable;
