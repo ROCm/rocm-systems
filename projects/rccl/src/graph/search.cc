@@ -341,6 +341,14 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
 #define FORCED_ORDER_PCI 1
 #define FORCED_ORDER_REPLAY 2
 
+// Opt-in: pin ring search to the topology array's PCI order. Visitation order only -- the ring
+// still travels whatever paths the search validates, and other patterns are untouched.
+RCCL_PARAM_NCCL_ALIAS(PcieOrderedRing, "PCIE_ORDERED_RING", 0);
+
+static int ringPcieOrdered(struct ncclTopoGraph* graph) {
+  return rcclParamPcieOrderedRing() && graph->pattern == NCCL_TOPO_PATTERN_RING && graph->collNet == 0;
+}
+
 ncclResult_t ncclTopoReplayGetGpu(struct ncclTopoSystem* system, struct ncclTopoGraph* graph, int step, int* g) {
   *g = -1;
   if (graph->nChannels == 0) return ncclInternalError;
@@ -753,8 +761,9 @@ ncclResult_t ncclTopoSearchRecGpu(struct ncclTopoSystem* system, struct ncclTopo
     int nextGpu = -1;
     int count;
     if (forcedOrder == FORCED_ORDER_PCI) {
-      // Try the PCI order
-      nextGpu = step + 1;
+      // Try the PCI order, cyclically from the entry GPU. g is start+step (mod ngpus), so this
+      // equals step+1 when entry is 0 and also lets NET enter at a NIC-local GPU.
+      nextGpu = (g + 1) % ngpus;
       count = 1;
     } else if (forcedOrder == FORCED_ORDER_REPLAY) {
       // Try last channel order
@@ -861,7 +870,10 @@ ncclResult_t ncclTopoSearchRecNet(struct ncclTopoSystem* system, struct ncclTopo
                                            time, NET, n, g),
                       ret, exit);
       } else {
-        if (graph->nChannels == 0 && system->nodes[NVS].count == 0) {
+        int pcieOrdered = ringPcieOrdered(graph);
+        // Stock seeds the PCI attempt only on channel 0 and leaves the rest to the local-GPU
+        // attempts below; those are suppressed when pinned, so cover every channel here.
+        if ((graph->nChannels == 0 || pcieOrdered) && system->nodes[NVS].count == 0) {
           // Always try the PCI order first to set a reference, but don't count in the timeout nor let it run for long
           struct ncclTopoLinkList* paths = net->paths[GPU];
           int f = 0, f_gdr = 0;
@@ -878,15 +890,18 @@ ncclResult_t ncclTopoSearchRecNet(struct ncclTopoSystem* system, struct ncclTopo
             }
           }
           int t = 1 << 10;
+          // Stock discards f and enters at GPU 0, the only entry a non-cyclic walk allowed.
+          // Pinned, this is the sole attempt, so it honours NIC affinity and gets the real budget.
           NCCLCHECKGOTO(ncclTopoSearchTryGpu(system, graph, saveGraph, 0, backToNet, backToFirstRank, FORCED_ORDER_PCI,
-                                             &t, NET, n, 0),
+                                             pcieOrdered ? time : &t, NET, n, pcieOrdered ? f : 0),
                         ret, exit);
-          if (t == -1) *time = -1;
+          if (!pcieOrdered && t == -1) *time = -1;
         }
 
-        // Then try the most local GPUs
+        // Then try the most local GPUs. Skipped when pinned -- that is the permutation we are
+        // suppressing. ncclTopoGetLocal() below still runs for its PATH_DIS guard.
         int localGpu = net->net.localGpu;
-        if (localGpu != -1) {
+        if (localGpu != -1 && !pcieOrdered) {
           NCCLCHECKGOTO(ncclTopoSearchTryGpu(system, graph, saveGraph, 0, backToNet, backToFirstRank, 0, time, NET, n,
                                              localGpu),
                         ret, exit);
@@ -895,7 +910,7 @@ ncclResult_t ncclTopoSearchRecNet(struct ncclTopoSystem* system, struct ncclTopo
         NCCLCHECKGOTO(ncclTopoGetLocal(system, NET, n, GPU, localGpus, &localGpuCount, &pathType), ret, exit);
         // if no GPUs are connected, skip this net
         if (pathType == PATH_DIS) continue;
-        for (int g = 0; g < localGpuCount; ++g) {
+        for (int g = 0; g < localGpuCount && !pcieOrdered; ++g) {
           if (localGpus[g] == localGpu) continue; // We already tried this one
           NCCLCHECKGOTO(ncclTopoSearchTryGpu(system, graph, saveGraph, 0, backToNet, backToFirstRank, 0, time, NET, n,
                                              localGpus[g]),
@@ -973,8 +988,9 @@ ncclResult_t ncclTopoSearchRec(struct ncclTopoSystem* system, struct ncclTopoGra
       NCCLCHECK(ncclTopoSearchTryGpu(system, graph, saveGraph, 0, backToNet, backToFirstRank, FORCED_ORDER_REPLAY, time,
                                      -1, -1, g));
     }
-    if (graph->sameChannels == 0 || graph->nChannels == 0) {
-      // Finally, try all other possibilities unless we are forced to use the same channels
+    // Finally, try all other possibilities unless forced to the same channels, or pinned to PCI
+    // order -- these are exactly the arbitrary permutations.
+    if ((graph->sameChannels == 0 || graph->nChannels == 0) && !ringPcieOrdered(graph)) {
       for (int g = 0; g < system->nodes[GPU].count; g++) {
         NCCLCHECK(ncclTopoSearchTryGpu(system, graph, saveGraph, 0, backToNet, backToFirstRank, 0, time, -1, -1, g));
       }
@@ -1522,6 +1538,12 @@ done:
     int nets[NCCL_TOPO_MAX_NODES];
     int netCount;
 
+    // Reached only if no PCIe-ordered ring passed validation at any relaxation step. The fallback
+    // is still topology order, but unvalidated -- warn rather than report success.
+    if (ringPcieOrdered(graph))
+      WARN("RCCL_PCIE_ORDERED_RING=1: no PCIe-ordered ring passed validation (bwIntra %f typeIntra %s); using "
+           "topology order without path validation",
+           graph->bwIntra, topoPathTypeStr[graph->typeIntra]);
     INFO(NCCL_GRAPH, "Could not find a path for pattern %d, falling back to simple order", graph->pattern);
     for (int i = 0; i < ngpus; i++) graph->intra[i] = system->nodes[GPU].nodes[i].gpu.rank;
     graph->bwIntra = 0.1;
