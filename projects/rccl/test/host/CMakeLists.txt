@@ -235,6 +235,8 @@ function(rccl_define_micro_source_lists)
     gdr-probe-test.cc                    # src/misc/gdr_probe.cc runtime GDR registration probe
     dv_symbols_test.cc                   # src/misc/ionicdvsymbols.cc, src/misc/mlx5dvsymbols.cc
     register-test.cc                     # src/register/register.cc
+    coll-reg-test.cc                     # src/register/coll_reg.cc
+    sendrecv-reg-test.cc                 # src/register/sendrecv_reg.cc
     process-isolated-runner-test.cc
     rccl-graph-gen-test.cc               # src/graph/rccl_graph_gen.cc ring construction + cut balancing
     # real IsArchMatch, for wrap-test.cc (path is build-directory-relative).
@@ -266,6 +268,7 @@ function(rccl_define_micro_source_lists)
     fakes/strongstream_stubs.cc
     fakes/sym_kernels_fakes.cc
     fakes/transport_stubs.cc
+    fakes/enqueue_fakes.cc               # ncclParamGraphRegister
     fakes/transport_p2p_reg_fakes.cc     # p2p.cc registration, renamed in by transport_p2p_reg_seam.h
     fakes/tuning_fakes.cc
     fakes/wrap_fakes.cc
@@ -1543,6 +1546,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicro
     DEVCOMM_V22907_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/devcomm/devcomm_v22907.cc"
     WRAP_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/rccl_wrap.cc"
     REGISTER_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/register.cc"
+    COLL_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/coll_reg.cc"
+    SENDRECV_REG_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/register/sendrecv_reg.cc"
     RCCL_RMA_FAKES_OMIT_ncclRmaInitialized
     RCCL_RMA_FAKES_OMIT_PROXY_LAUNCH_FLOOR
     RCCL_TRANSPORT_STUBS_OMIT_COLLECTIVE_FLOOR

@@ -62,10 +62,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
   - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2p*`,
     `FreshRegistration*`, `ConnStepAcquireMicrotest.*`.
-  - `register/register.cc` (`REGISTER_CC_PATH`, from `register-test.cc`); suites `Register*`. Its
-    calls into `p2p.cc`, compiled here for real, go through `fakes/transport_p2p_reg_seam.h`, and the
-    test TU renames the unit's definitions of the three names `nccl_fakes.cc` keeps as seams for
-    `p2p-test.cc`.
+  - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
+    (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
+    `coll-reg-test.cc` and `sendrecv-reg-test.cc`, helpers in `RegisterScene.h`); suites
+    `Register*`. Their calls into `p2p.cc`, compiled here for real, go through
+    `fakes/transport_p2p_reg_seam.h`, and `register-test.cc` renames the unit's definitions of the
+    three names `nccl_fakes.cc` keeps as seams for `p2p-test.cc`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
