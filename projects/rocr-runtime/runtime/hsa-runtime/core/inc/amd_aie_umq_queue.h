@@ -7,6 +7,8 @@
 #ifndef HSA_RUNTIME_CORE_INC_AMD_AIE_UMQ_QUEUE_H_
 #define HSA_RUNTIME_CORE_INC_AMD_AIE_UMQ_QUEUE_H_
 
+#include <atomic>
+
 #include "core/inc/amd_aie_agent.h"
 #include "core/inc/exceptions.h"
 #include "core/inc/queue.h"
@@ -79,11 +81,10 @@ class AieUmqQueue : public core::Queue,
     return rtti_id_;
   }
 
-  /// @brief Translates every packet readied since the last call through
-  /// XdnaDriver::TranslateUmqPackets, then publishes the new write index to the header and rings
-  /// the doorbell. Mirrors @ref AieKmqQueue::SubmitPackets's shape (StoreRelaxed delegates
-  /// entirely to this), though unlike KMQ's per-batch ioctl, the actual device-facing step here is
-  /// still just the doorbell write; everything before it is host-side packet preparation.
+  /// @brief Hands the ready range of packets to XdnaDriver::SubmitUmqCmdChain and settles the read
+  /// index against however many it completed, mirroring AieKmqQueue::SubmitPackets: submission is
+  /// synchronous to the caller either way, the driver call owns everything device-specific, and a
+  /// failure suspends the queue and reports it through the per-queue error callback.
   void SubmitPackets();
 
   /// @brief Queue size in bytes.
