@@ -388,3 +388,27 @@ to the correct device based on `gpu_id`.
 `configs/gfx950_mi355x_kmd_2gpu.json` is the default multi-GPU
 configuration for RCCL tests. `configs/gfx1250_mi455x_kmd_4gpu.json`
 provides a four-GPU daemon topology for explicit multi-GPU runs.
+
+## GWS wait budget
+
+The compute-unit option `gws_wait_limit` defaults to 1,000,000 unpaused CU
+steps without instruction progress from the waiting process. Executing an
+instruction on any CU for that process resets its waits' inactivity budgets
+(progress is published once per functional quantum);
+other processes do not. Set it to `0` to allow unbounded waits,
+or increase it for workloads that intentionally wait for later host submissions.
+It measures execution work, not GPU cycles or elapsed wall time. Debugger and
+runtime queue suspension do not consume this budget. CUs containing only GWS
+waiters poll once per normal quantum, including when the execution quantum is
+unlimited; parked waits do not shorten a co-resident producer's quantum.
+
+A wait exceeding the budget emits the process, queue, dispatch, CU, wave,
+resource and PC, faults the dispatch without publishing successful completion,
+reports a wave-abort exception to the queue, cancels its replicas on every XCD,
+and delivers failed native PM4 callbacks before stopping the VM with an error.
+This is an inactivity timeout policy, not a deadlock diagnosis: a process that
+keeps executing instructions can keep its waits alive indefinitely. Quiescence or insufficient
+residency never releases a GWS wait. Barriers require an explicit GWS INIT;
+unsupported residency can exhaust the budget but cannot produce a successful
+rendezvous. Checkpoints containing GWS resource state are rejected because the
+format does not serialize the shared table.
