@@ -34,6 +34,7 @@
 #include "core/locking.hpp"
 #include "core/node_info.hpp"
 #include "core/output/output_summary.hpp"
+#include "core/process_environment_info.hpp"
 #include "core/progress/bar.hpp"
 #include "core/progress/callback.hpp"
 #include "core/timemory.hpp"
@@ -407,13 +408,14 @@ rocprofsys_preinit_cache()
     std::stringstream _extdata_stream;
     config::print_settings_json(_extdata_stream);
 
-    trace_cache::get_metadata_registry().set_process({ .pid         = getpid(),
-                                                       .ppid        = getppid(),
-                                                       .command     = _command,
-                                                       .environment = "",
-                                                       .extdata = _extdata_stream.str(),
-                                                       .start   = 0,
-                                                       .end     = 0 });
+    trace_cache::get_metadata_registry().set_process(
+        { .pid         = getpid(),
+          .ppid        = getppid(),
+          .command     = _command,
+          .environment = dump_environment(capture_process_environment()),
+          .extdata     = _extdata_stream.str(),
+          .start       = 0,
+          .end         = 0 });
 }
 
 void
@@ -743,11 +745,13 @@ rocprofsys_init_tooling_hidden(void)
     (defined(ROCPROFSYS_USE_MPI) && ROCPROFSYS_USE_MPI > 0)
 
         component::mpi_gotcha::subscribe_to_init_event([](int rank, int size) {
-            nlohmann::json _environment_json;
-            _environment_json["MPI_COMM_WORLD_SIZE"] = size;
-            _environment_json["MPI_COMM_WORLD_RANK"] = rank;
+            // Captured again rather than reusing the preinit snapshot: it is a cheap walk
+            // of environ, and MPI_Init replaces the stored environment as a whole.
+            auto environment                   = capture_process_environment();
+            environment["MPI_COMM_WORLD_RANK"] = rank;
+            environment["MPI_COMM_WORLD_SIZE"] = size;
 
-            set_metadata_environment_json(_environment_json.dump());
+            set_metadata_environment_json(dump_environment(environment));
         });
 #endif
 
