@@ -60,6 +60,12 @@ if (HIP_PLATFORM MATCHES "amd")
 endif()
 
 if (HIP_PLATFORM MATCHES "amd")
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
+                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
+                   -o launch_kernel_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
                   -x hip ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
@@ -69,6 +75,12 @@ if (HIP_PLATFORM MATCHES "amd")
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
                   COMMENT "Compiling coopKernel.code")
 else()
+  add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
+                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
+                   -x cu ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
+                   -I${HIP_INCLUDE_DIR}
+                   -o launch_kernel_module.code
+                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
   add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code
                   COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
                   -x cu ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
@@ -78,30 +90,11 @@ else()
                   DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/coopKernel.cpp
                   COMMENT "Compiling coopKernel.code")
 endif()
+add_custom_target(launch_kernel_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
 add_custom_target(coopKernel_code DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+             ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
              ${CMAKE_CURRENT_BINARY_DIR}/coopKernel.code)
-
-if (NOT WIN32)
-  if (HIP_PLATFORM MATCHES "amd")
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-                     COMMAND ${CMAKE_HIP_COMPILER} ${HIP_DEVICE_BUILD_FLAGS_NO_ARCH} ${OFFLOAD_ARCH_LIST} --cuda-device-only
-                     -x hip ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
-                     -I${HIP_INCLUDE_DIR} ${HIP_PATH_OPT}
-                     -o launch_kernel_module.code
-                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
-  else()
-    add_custom_command(OUTPUT ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code
-                     COMMAND ${CMAKE_HIP_COMPILER} --fatbin ${OFFLOAD_ARCH_LIST}
-                     -x cu ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc
-                     -I${HIP_INCLUDE_DIR}
-                     -o launch_kernel_module.code
-                     DEPENDS ${CMAKE_CURRENT_SOURCE_DIR}/launch_kernel_module.cc)
-  endif()
-  add_custom_target(launch_kernel_module DEPENDS ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
-  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
-  ${CMAKE_CURRENT_BINARY_DIR}/launch_kernel_module.code)
-endif()
 
 
 if (HIP_PLATFORM MATCHES "amd")
@@ -435,9 +428,7 @@ hip_add_exe_to_target(NAME ModuleTest
   COMMON_SHARED_SRC ${COMMON_SHARED_SRC})
 
 add_dependencies(ModuleTest coopKernel_code)
-if(NOT WIN32)
-  add_dependencies(ModuleTest launch_kernel_module)
-endif()
+add_dependencies(ModuleTest launch_kernel_module)
 
 add_dependencies(ModuleTest get_function_module)
 add_dependencies(ModuleTest get_global_test_module)
