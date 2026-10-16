@@ -406,6 +406,7 @@ class PathsCommMicrotest : public PathsMicrotest {
     comm_->pxnDisable = RCCL_VALUE_UNSET;
     comm_->config.nChannelsPerNetPeer = NCCL_CONFIG_UNDEF_INT;
     comm_->config.maxP2pPeers = NCCL_CONFIG_UNDEF_INT;
+    AllowP2pBetweenEveryGpu();
   }
 
   void Use(SystemPtr system, int rank = 0) {

@@ -5,7 +5,7 @@
 
 test_categories:
   quick: &micro_topo_quick
-    description: "Smoke — host-only src/graph micro-tests, sub-second."
+    description: "Smoke — host-only src/graph micro-tests, a few seconds."
     test_patterns:
       - "Xml*"
       - "Topo*"

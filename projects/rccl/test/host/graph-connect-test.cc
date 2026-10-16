@@ -936,21 +936,16 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_MultiNodeJoinsTheNodesAndCapsAt64) 
   EXPECT_EQ(2, comm_->channels[2].tree.up);  // and hangs off node 1 in the second
 }
 
-TEST_F(GraphConnectPostsetMicrotest, Postset_MoreChannelsThanPresetRepeatThePresetOnes) {
+// develop's ConnectMicrotest.PresetPostset_* check the rings and trees of the repeated channels.
+TEST_F(GraphConnectPostsetMicrotest, Postset_MoreChannelsThanPresetAlsoRepeatTheChainLinks) {
   Use(4, 1, 1);
   comm_->nChannels = 4;
   std::vector<ncclTopoRanks> all = AllRanks(4, 1, 2);
 
   ASSERT_EQ(ncclSuccess, Postset(all, 1, rings_));
 
-  EXPECT_EQ(Ring(rings_, 0), Ring(rings_, 2));
-  EXPECT_EQ(Ring(rings_, 1), Ring(rings_, 3));
   EXPECT_EQ(4, all[0].nChannels);
   ncclChannel* ch = comm_->channels;
-  EXPECT_EQ(0, ch[2].tree.up);  // channel 2 reuses preset row 0: 0 1 2 3
-  EXPECT_EQ(2, ch[2].tree.down[0]);
-  EXPECT_EQ(2, ch[3].tree.up);  // channel 3 reuses row 1: 3 2 1 0
-  EXPECT_EQ(0, ch[3].tree.down[0]);
   EXPECT_EQ(0, ch[6].collnetChain.up);  // the doubled half copies the chain links
   EXPECT_EQ(2, ch[6].collnetChain.down[0]);
   comm_->rank = 0;
@@ -976,17 +971,16 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_ChainHeadsGoUpToTheNetwork) {
   EXPECT_EQ(-1, comm_->channels[0].collnetChain.down[0]);
 }
 
-TEST_F(GraphConnectPostsetMicrotest, Postset_PeerWithBadPresetChannelCountIsAnError) {
-  for (int bad : {0, MAXCHANNELS + 1}) {
-    Use(2, 1, 0);
-    comm_->nChannels = 1;
-    std::vector<ncclTopoRanks> all = AllRanks(2, 1, 1);
-    all[1].nChannels = bad;
+// develop's ConnectMicrotestReject covers a peer with no preset channels.
+TEST_F(GraphConnectPostsetMicrotest, Postset_PeerWithTooManyPresetChannelsIsAnError) {
+  Use(2, 1, 0);
+  comm_->nChannels = 1;
+  std::vector<ncclTopoRanks> all = AllRanks(2, 1, 1);
+  all[1].nChannels = MAXCHANNELS + 1;
 
-    EXPECT_EQ(ncclInternalError, Postset(all, 1, rings_)) << bad;
+  EXPECT_EQ(ncclInternalError, Postset(all, 1, rings_));
 
-    EXPECT_TRUE(Logged(("rank 1 reported " + std::to_string(bad) + " preset channels").c_str()));
-  }
+  EXPECT_TRUE(Logged(("rank 1 reported " + std::to_string(MAXCHANNELS + 1) + " preset channels").c_str()));
 }
 
 TEST_F(GraphConnectPostsetMicrotest, Postset_CrossNicRingsSwapChannelPairsOnOddNodes) {
@@ -1021,12 +1015,18 @@ TEST_F(GraphConnectPostsetMicrotest, Postset_Gfx1151AndInterGraphGenUseLoadBalan
   }
 }
 
-TEST_F(GraphConnectPostsetMicrotest, Postset_RailOptimizedTreesReplaceTheBinaryTrees) {
+// ConnectRailOptimizedTrees_* check the trees themselves; this checks Postset picks them only when asked.
+TEST_F(GraphConnectPostsetMicrotest, Postset_RailOptimizedTreesOnlyWhenTheTopologyAsks) {
+  Use(2, 2, 2);
+  comm_->nChannels = 4;
+  std::vector<ncclTopoRanks> all = AllRanks(2, 2, 4);
+  ASSERT_EQ(ncclSuccess, Postset(all, 4, rings_));
+  EXPECT_FALSE(Logged("Building rail-optimized trees"));
+
   Use(2, 2, 2);
   comm_->nChannels = 4;
   system_->useRailOptimizedTrees = true;
-  std::vector<ncclTopoRanks> all = AllRanks(2, 2, 4);
-
+  all = AllRanks(2, 2, 4);
   ASSERT_EQ(ncclSuccess, Postset(all, 4, rings_));
 
   EXPECT_TRUE(Logged("Building rail-optimized trees for 2 nodes"));

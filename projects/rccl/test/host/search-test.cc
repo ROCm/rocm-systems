@@ -229,13 +229,17 @@ TEST_F(SearchMicrotest, Compute_InterNodeTreeStaysOnOneNicPerChannel) {
 
   ASSERT_GE(tree->nChannels, 1);
   ExpectPermutations(tree.get());
+  for (int c = 0; c < tree->nChannels; c++) {
+    EXPECT_EQ(system_->nodes[NET].nodes[0].id, tree->inter[2 * c]) << c;
+    EXPECT_EQ(tree->inter[2 * c], tree->inter[2 * c + 1]) << c;
+  }
 }
 
 TEST_F(SearchMicrotest, Compute_CollNetDirectUsesCollCapableNics) {
   std::string body;
   for (int g = 0; g < 2; g++) {
     body += Pci(SwitchBus(g), GpuPci(GpuBus(g), g, g, Xgmi(GpuBus(1 - g))) +
-                                NicPci(NicBus(g), Net("c" + std::to_string(g), g, "coll=\"1\"")));
+                                NicPci(NicBus(g), Net("n" + std::to_string(g), g, g == 0 ? "coll=\"1\"" : "")));
   }
   Use(System(Cpu(0, body)), 4);
   GraphPtr graph = NewGraph(4, NCCL_TOPO_PATTERN_COLLNET_DIRECT, 1, MAXCHANNELS);
@@ -245,6 +249,10 @@ TEST_F(SearchMicrotest, Compute_CollNetDirectUsesCollCapableNics) {
 
   ASSERT_GE(graph->nChannels, 1);
   EXPECT_LE(graph->nChannels, 2);
+  for (int c = 0; c < graph->nChannels; c++) {
+    EXPECT_EQ(0, graph->inter[2 * c]) << c;  // n0, the only coll-capable NIC
+    EXPECT_EQ(0, graph->inter[2 * c + 1]) << c;
+  }
 }
 
 // --- Bandwidth accounting along a path
@@ -379,11 +387,12 @@ TEST_F(SearchMicrotest, FollowPath_PowerNvlinkToTheCpuChargesBothWays) {
   ASSERT_EQ(ncclSuccess, ncclTopoFollowPath(system_.get(), graph.get(), GPU, 0, GPU, 1, 1, &node));
 
   ASSERT_NE(nullptr, node);
+  ncclTopoLink* toGpu0 = nullptr;
   for (int l = 0; l < cpu->nlinks; l++) {
-    if (cpu->links[l].type == LINK_NVL && cpu->links[l].remNode == system_->nodes[DEV].nodes) {
-      EXPECT_FLOAT_EQ(GFX94X_XGMI_WIDTH - 10, cpu->links[l].bw);
-    }
+    if (cpu->links[l].type == LINK_NVL && cpu->links[l].remNode == system_->nodes[DEV].nodes) toGpu0 = cpu->links + l;
   }
+  ASSERT_NE(nullptr, toGpu0);
+  EXPECT_FLOAT_EQ(GFX94X_XGMI_WIDTH - 10, toGpu0->bw);
 }
 
 // --- Search helpers
@@ -752,16 +761,18 @@ TEST_F(SearchNvlsMicrotest, Compute_NvlsHeadsEveryGpu) {
 
   EXPECT_EQ(4, nvls->maxChannels);
   EXPECT_EQ(4, nvls->nChannels);
+  EXPECT_FLOAT_EQ(30, nvls->bwIntra);
   std::set<int> heads;
   for (int c = 0; c < nvls->nChannels; c++) heads.insert(nvls->intra[c * 4]);
   EXPECT_EQ(4u, heads.size());
 }
 
-TEST_F(SearchNvlsMicrotest, Compute_HopperBalancedTreeAlsoTriesAPlainTree) {
+TEST_F(SearchNvlsMicrotest, Compute_HopperBalancedTreeDuplicatesFourChannelsToEight) {
   GraphPtr tree = Compute(1, NCCL_TOPO_PATTERN_BALANCED_TREE);
 
-  EXPECT_GE(tree->nChannels, 1);
+  ASSERT_EQ(8, tree->nChannels);
   ExpectPermutations(tree.get());
+  for (int i = 0; i < 4 * 4; i++) EXPECT_EQ(tree->intra[i], tree->intra[4 * 4 + i]) << i;
 }
 
 TEST_F(SearchMicrotest, Compute_InterNodeNvlsPicksOneNicPerHead) {
@@ -1063,6 +1074,7 @@ class SearchNetDevMicrotest : public SearchMicrotest {
   std::vector<ncclPeerInfo> peers_;
 
   void Setup(const std::string& text, int nRanks) {
+    AllowP2pBetweenEveryGpu();
     Use(text, nRanks);
     comm_->topo = system_.get();
     comm_->rank = 0;
@@ -1223,6 +1235,7 @@ TEST_F(SearchMicrotest, FollowPath_TreeNeedsTheReversePathWithinTheTypeToo) {
   std::vector<ncclPeerInfo> peers(4);
   comm->peerInfo = peers.data();
   comm->pxnDisable = 0;
+  AllowP2pBetweenEveryGpu();
   ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), comm.get()));
   ASSERT_EQ(PATH_PXN, system_->nodes[GPU].nodes[1].paths[NET][0].type);
   GraphPtr graph = NewGraph(1, NCCL_TOPO_PATTERN_TREE);
@@ -1250,13 +1263,15 @@ TEST_F(SearchNvlsMicrotest, Compute_NvlsBacksOffWhenTheUplinkIsShort) {
   for (int d = 0; d < system_->nodes[DEV].count; d++) {
     ncclTopoNode* dev = system_->nodes[DEV].nodes + d;
     for (int l = 0; l < dev->nlinks; l++) {
-      if (dev->links[l].remNode->type == NVS) dev->links[l].bw = 1;
+      if (dev->links[l].remNode->type == NVS) dev->links[l].bw = 60;  // from 192
     }
   }
 
   GraphPtr nvls = Compute(3, NCCL_TOPO_PATTERN_NVLS, 1, MAXCHANNELS);
 
-  EXPECT_LE(nvls->nChannels, 4);
+  EXPECT_EQ(4, nvls->nChannels);
+  EXPECT_FLOAT_EQ(12, nvls->bwIntra);
+  EXPECT_FLOAT_EQ(24, nvls->bwInter);
 }
 
 TEST_F(SearchMicrotest, Compute_CollNetHeadsAreNotDuplicated) {
@@ -1276,15 +1291,19 @@ TEST_F(SearchMicrotest, Compute_CollNetHeadsAreNotDuplicated) {
   EXPECT_EQ((size_t)graph->nChannels, heads.size());
 }
 
-TEST_F(SearchMicrotest, Compute_SharedNicTriesEveryEquallyCloseGpu) {
+TEST_F(SearchMicrotest, Compute_SharedNicCarriesEveryRingChannel) {
   std::string body = Pci(SwitchBus(0), GpuPci(GpuBus(0), 0, 0, Xgmi(GpuBus(1))) +
                                          GpuPci(GpuBus(1), 1, 1, Xgmi(GpuBus(0))) + NicPci(NicBus(0), Net("n0", 0)));
   Use(System(Cpu(0, body)), 4);
 
   GraphPtr ring = Compute(0, NCCL_TOPO_PATTERN_RING);
 
-  ASSERT_GE(ring->nChannels, 1);
+  ASSERT_GE(ring->nChannels, 2);
   ExpectPermutations(ring.get());
+  for (int c = 0; c < ring->nChannels; c++) {
+    EXPECT_EQ(0, ring->inter[2 * c]) << c;
+    EXPECT_EQ(0, ring->inter[2 * c + 1]) << c;
+  }
 }
 
 TEST_F(SearchMicrotest, Compute_HopperInterNodeBalancedTree) {

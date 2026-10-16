@@ -6,8 +6,10 @@
 
 // Fakes for everything src/graph/*.cc calls outside src/graph, for rccl-UnitTestsMicroTopo. That binary
 // compiles the real graph files, so topo_stubs.cc, nccl_fakes.cc, init_fakes.cc and tuning_fakes.cc, which
-// define graph symbols, cannot link. The HIP, amd-smi, OS and bootstrap seams sit here with the rest so one
-// ResetGraphFakes() restores every hook the graph tests set.
+// define graph symbols, cannot link. The HIP, amd-smi, OS and logging seams are here rather than in
+// hip_fakes.cc, amdsmi_fakes.cc and os_fakes.cc because those lack what the graph tests drive (per-call
+// bus-id lookups, hipDeviceGetByPCIBusId, amd-smi device/link queries, sysfs/realpath/BCM/NUMA maps), so
+// using them means rewriting every scene; one ResetGraphFakes() restores every hook here.
 
 #ifndef RCCL_TEST_HOST_GRAPH_FAKES_H_
 #define RCCL_TEST_HOST_GRAPH_FAKES_H_

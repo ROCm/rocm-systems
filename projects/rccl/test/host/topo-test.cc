@@ -563,9 +563,8 @@ TEST_F(TopoMicrotest, AddCpu_DecodesArchVendorAndModel) {
   }
 }
 
-// Observed: the RCCL Rome/Zen classification runs after the upstream Zen 1/2, 3/4 and 5 one and overwrites it, so
-// two AMD sockets always get the Zen 1/2 inter-socket bandwidth, even on Zen 5 (CPUID family 26).
-TEST_F(TopoMicrotest, AddCpu_AmdZenGenerationIsOverwrittenSoSocketsGetZen12Bandwidth) {
+// The Rome/Zen classification overwrites the Zen generation, so sockets get Zen 1/2 bandwidth; a fix flips this pin.
+TEST_F(TopoMicrotest, AddCpu_KnownBug_AmdZenGenerationIsOverwrittenSoSocketsGetZen12Bandwidth) {
   const char* zen5 = "arch=\"x86_64\" vendor=\"AuthenticAMD\" familyid=\"26\" modelid=\"2\"";
   SystemPtr system =
     BuildSystem(System(std::string("<cpu numaid=\"0\" ") + zen5 + "/><cpu numaid=\"1\" " + zen5 + "/>"));
@@ -1488,9 +1487,8 @@ TEST_F(TopoAutoMergeMicrotest, AutoMerge_RailPolicyOnlyFusesTheSameRail) {
   EXPECT_EQ(std::vector<int>({0, 2}), DevsOf(g_vDeviceCalls[0]));  // a1 and c0 have no rail, so no match
 }
 
-// Observed: the restart after a failed merge sets i = 0 and the loop then increments it, so device 0 is never
-// re-placed.
-TEST_F(TopoAutoMergeMicrotest, AutoMerge_FailedMergeRestartsPastDeviceZero) {
+// A failed merge restarts at i = 0 before the loop's ++i, so device 0 is never re-placed; a fix flips this pin.
+TEST_F(TopoAutoMergeMicrotest, AutoMerge_KnownBug_FailedMergeRestartsPastDeviceZero) {
   Devs({"a0", "a1", "b0"});
   info_.mergeLevel = PATH_PIX;
   info_.maxDevsPerNic = 2;
@@ -1506,9 +1504,8 @@ TEST_F(TopoAutoMergeMicrotest, AutoMerge_FailedMergeRestartsPastDeviceZero) {
   EXPECT_TRUE(Logged("Marking physical devices as unplaced"));
 }
 
-// Observed: this error return skips free(paths), so the path matrix leaks.
 TEST_F(TopoAutoMergeMicrotest, AutoMerge_OverfullVnicIsAnError) {
-  if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
+  if (kAsan) GTEST_SKIP() << "this return skips free(paths), which LeakSanitizer reports";
   Devs({"a0", "a1"});
   info_.maxDevsPerNic = 0;
 
@@ -1834,9 +1831,8 @@ TEST_F(TopoMicrotest, Lookups_StayOnTheirSystemAndWarnOnlyWhenAsked) {
   EXPECT_TRUE(Logged("ncclTopoRankToIndex could not find rank 9"));
 }
 
-// Observed: the "str == NULL will return NCCL_TOPO_CPU_ARCH_UNDEF" comment does not hold, kvConvertToInt
-// dereferences the NULL string.
-TEST_F(TopoMicrotest, GetXmlCpuArch_NoCpuArchCrashes) {
+// With no arch attribute kvConvertToInt dereferences NULL instead of returning UNDEF; a fix flips this pin.
+TEST_F(TopoMicrotest, GetXmlCpuArch_KnownBug_NoCpuArchCrashes) {
   XmlPtr xml = MustParseXml(System("<cpu numaid=\"0\"/>"));
   int arch = -1;
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
@@ -1844,8 +1840,8 @@ TEST_F(TopoMicrotest, GetXmlCpuArch_NoCpuArchCrashes) {
   EXPECT_EXIT(ncclTopoGetXmlCpuArch(xml.get(), &arch), DEATH_BY_SEGV, "");
 }
 
-// Observed: a <gpu> without a gcn attribute (any NVIDIA-style topology file) crashes the system build.
-TEST_F(TopoMicrotest, GetSystemFromXml_GpuWithoutGcnCrashes) {
+// A <gpu> without gcn (any NVIDIA-style topology file) crashes the system build; a fix flips this pin.
+TEST_F(TopoMicrotest, GetSystemFromXml_KnownBug_GpuWithoutGcnCrashes) {
   XmlPtr xml = MustParseXml(System(Cpu(0, "<pci busid=\"0000:10:00.0\" class=\"0x120000\" link_speed=\"\" "
                                           "link_width=\"16\"><gpu dev=\"0\" sm=\"90\" arch=\"0\" rank=\"0\" "
                                           "gdr=\"1\"/></pci>")));

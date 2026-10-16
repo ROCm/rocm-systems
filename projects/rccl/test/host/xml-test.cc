@@ -1167,13 +1167,26 @@ TEST_F(XmlGpuMicrotest, FillGpu_BuildsThePciChainAndUsesTheHipOrdinal) {
   });
 
   ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &top));
-  ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &top));
 
   ASSERT_NE(nullptr, top);
   EXPECT_EQ("5", Attr(top, "dev"));
   EXPECT_EQ("0x03", Attr(top->parent, "class"));
   EXPECT_EQ("0000:50:00.0", Attr(top->parent, "busid"));
-  EXPECT_EQ(2, g_amdSmiInitCalls);  // observed: the amdsmiInit guard is never set, so every call re-inits
+  EXPECT_EQ(1, g_amdSmiInitCalls);
+}
+
+// The static amdsmiInit guard is never set, so every call runs amd_smi_init again; a fix flips this pin.
+TEST_F(XmlGpuMicrotest, FillGpu_KnownBug_AmdSmiInitRunsOnEveryCall) {
+  ncclXmlNode* top = nullptr;
+  ScopedHook ordinal(g_hipDeviceGetByPCIBusId, [](int* dev, const char*) {
+    *dev = 5;
+    return hipSuccess;
+  });
+
+  ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &top));
+  ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &top));
+
+  EXPECT_EQ(2, g_amdSmiInitCalls);
 }
 
 TEST_F(XmlGpuMicrotest, FillGpu_UnknownHipOrdinalFallsBackToTheSmiIndex) {

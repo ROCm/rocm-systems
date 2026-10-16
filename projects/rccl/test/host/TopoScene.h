@@ -29,10 +29,15 @@
 // Defined in topo-test.cc, which owns topo.cc's NCCL_NETDEVS_POLICY statics.
 void TopoSetNetDevsPolicy(enum netDevsPolicy policy, int num);
 
-#if defined(__SANITIZE_ADDRESS__) || (defined(__has_feature) && __has_feature(address_sanitizer))
-#define TOPO_SCENE_ASAN 1
-#else
 #define TOPO_SCENE_ASAN 0
+#if defined(__SANITIZE_ADDRESS__)
+#undef TOPO_SCENE_ASAN
+#define TOPO_SCENE_ASAN 1
+#elif defined(__has_feature)
+#if __has_feature(address_sanitizer)
+#undef TOPO_SCENE_ASAN
+#define TOPO_SCENE_ASAN 1
+#endif
 #endif
 
 namespace topo_scene {
@@ -57,6 +62,14 @@ inline GraphPtr NewGraph(int id, int pattern, int minChannels = 1, int maxChanne
   graph->minChannels = minChannels;
   graph->maxChannels = maxChannels;
   return graph;
+}
+
+// Every GPU pair passes the P2P transport check, for scenes that give ncclTopoComputePaths a comm.
+inline void AllowP2pBetweenEveryGpu() {
+  g_p2pCanConnect = [](int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo*, ncclPeerInfo*) {
+    *ret = 1;
+    return ncclSuccess;
+  };
 }
 
 inline XmlPtr NewXml(int maxNodes = kXmlNodes) {

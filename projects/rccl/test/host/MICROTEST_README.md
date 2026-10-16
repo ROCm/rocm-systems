@@ -326,8 +326,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   test TU via `<STEM>_CC_PATH`: `xml.cc` (`Xml*`), `topo.cc` (`Topo*`), `paths.cc` (`Paths*`),
   `search.cc` (`Search*`), `rome_models.cc` (`graph-rome-models-test.cc`, `GraphRomeModels*`),
   `connect.cc` (`graph-connect-test.cc`, `GraphConnect*`), `rings.cc` (`Rings*`), `trees.cc`
-  (`Trees*`). Its own binary because every other micro binary fakes the graph symbols.
-  Topologies come from XML built in `TopoScene.h`; externals are faked in `fakes/graph_fakes.cc`.
+  (`Trees*`). Its own binary: `topo_stubs.cc`, `nccl_fakes.cc`, `init_fakes.cc` and
+  `tuning_fakes.cc`, which most targets link, define graph symbols, and the real graph files
+  define them too. Topologies come from XML built in `TopoScene.h`; externals are faked in
+  `fakes/graph_fakes.cc`.
   See `test_categories_micro_topo.yaml`.
 
 - **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
@@ -480,6 +482,7 @@ symbol.
 | `src/diagnostics/device/p2p.cu` (`ncclDiagP2p*` kernel launchers) | `fakes/diagnostics_p2p_device_fakes.cc` |
 | `src/graph/*.cc` (topo, paths, search, connect, rome consensus) | `fakes/topo_stubs.cc` |
 | `src/graph/tuning.cc`, `src/graph/connect.cc` params | `fakes/tuning_fakes.cc` |
+| everything `src/graph/*.cc` calls outside `src/graph` (`rccl-UnitTestsMicroTopo` only, which compiles the real graph files) | `fakes/graph_fakes.cc` |
 | `src/group.cc` | `fakes/group_fakes.cc` |
 | `src/config/algorithm_*.cc` | compiled real (no fakes file) |
 | `src/config/collconfig.cc` (targets that do not compile the real file) | `fakes/collconfig_fakes.cc` |

@@ -13,6 +13,8 @@
 #include <cstdlib>
 #include <cstring>
 
+#include "fail_loud.h"
+
 #include "bootstrap.h"
 #include "comm.h"
 #include "graph.h"
@@ -162,10 +164,8 @@ hipError_t hipDeviceGetByPCIBusId(int* dev, const char* busId) { return g_hipDev
 hipError_t hipGetDevicePropertiesR0600(hipDeviceProp_t* prop, int dev) { return g_hipGetDeviceProperties(prop, dev); }
 const char* hipGetErrorString(hipError_t) { return "fake hip error"; }
 hipError_t hipGetLastError() { return hipSuccess; }
-hipError_t hipGetDevice(int* dev) {
-  *dev = 0;
-  return hipSuccess;
-}
+// UNDRIVEN: only utils.cc's ncclCudaCompCap reaches it, and src/graph never calls that.
+hipError_t hipGetDevice(int*) { FailLoudUnfaked("graph_fakes.cc", "hipGetDevice"); }
 hipError_t hipDeviceGetAttribute(int* value, hipDeviceAttribute_t, int) {
   *value = 0;
   return hipErrorInvalidValue;
@@ -236,8 +236,10 @@ ncclResult_t ncclNvmlDeviceGetCurrPcieLinkWidth(nvmlDevice_t device, unsigned in
 }
 
 // --- Bootstrap.
-static ncclResult_t DefaultAllGather(void*, void*, int) { return ncclSuccess; }
-static ncclResult_t DefaultIntraNodeAllGather(void*, int*, int, int, void*, int) { return ncclSuccess; }
+static ncclResult_t DefaultAllGather(void*, void*, int) { FailLoudUnfaked("graph_fakes.cc", "bootstrapAllGather"); }
+static ncclResult_t DefaultIntraNodeAllGather(void*, int*, int, int, void*, int) {
+  FailLoudUnfaked("graph_fakes.cc", "bootstrapIntraNodeAllGather");
+}
 std::function<ncclResult_t(void*, void*, int)> g_bootstrapAllGather = DefaultAllGather;
 std::function<ncclResult_t(void*, int*, int, int, void*, int)> g_bootstrapIntraNodeAllGather =
   DefaultIntraNodeAllGather;
@@ -268,9 +270,8 @@ ncclResult_t ncclCollNetSetVirtDevCount(int, int n) {
 }
 
 // --- Transports.
-static ncclResult_t DefaultCanConnect(int* ret, ncclComm*, ncclTopoGraph*, ncclPeerInfo*, ncclPeerInfo*) {
-  *ret = 1;
-  return ncclSuccess;
+static ncclResult_t DefaultCanConnect(int*, ncclComm*, ncclTopoGraph*, ncclPeerInfo*, ncclPeerInfo*) {
+  FailLoudUnfaked("graph_fakes.cc", "canConnect");
 }
 std::function<ncclResult_t(int*, ncclComm*, ncclTopoGraph*, ncclPeerInfo*, ncclPeerInfo*)> g_p2pCanConnect =
   DefaultCanConnect;

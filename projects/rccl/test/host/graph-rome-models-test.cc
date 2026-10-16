@@ -315,7 +315,7 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_MatchesEightFullyConnectedGpusOnTwoSocket
   for (int i = 0; i < kModels; i++) {
     const rcclRomeModel& m = romeTopoModels[i];
     if (m.nGpus != 8 || m.nCpus != 2 || !checkAlltoallWidth(const_cast<rcclRomeModel*>(&m))) continue;
-    if (i == kSixteenNicModel) continue;  // see A2a8P_SixteenNicsSearchEveryNicOrdering
+    if (i == kSixteenNicModel) continue;  // see A2a8P_KnownBug_SixteenNicsSearchEveryNicOrdering
     for (int pattern : {NCCL_TOPO_PATTERN_RING, NCCL_TOPO_PATTERN_BALANCED_TREE}) {
       UseModel(m, -1, kAmdCpu);
       GraphPtr graph = NewGraph(pattern == NCCL_TOPO_PATTERN_RING ? 0 : 1, pattern);
@@ -330,9 +330,8 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_MatchesEightFullyConnectedGpusOnTwoSocket
   EXPECT_GE(matched, 5);
 }
 
-// Observed: permuteNetIds only checks complete orderings and starts at NIC 2, so with 16 NICs it must walk
-// ~15! orderings before trying NIC 0 or 1 for the first GPU. search.cc calls parseA2a8P first, so init stalls.
-TEST_F(GraphRomeModelsMicrotest, A2a8P_SixteenNicsSearchEveryNicOrdering) {
+// permuteNetIds starts at NIC 2 and checks only complete orderings, so 16 NICs walk ~15! of them; a fix flips this pin.
+TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_SixteenNicsSearchEveryNicOrdering) {
   UseModel(romeTopoModels[kSixteenNicModel]);
   GraphPtr ring = NewGraph(0, NCCL_TOPO_PATTERN_RING);
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
@@ -390,8 +389,8 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_SkipsOtherShapes) {
   EXPECT_EQ(0, ring->nChannels);
 }
 
-// Observed: the GPU permutation table is not freed when no model matches.
-TEST_F(GraphRomeModelsMicrotest, A2a8P_NoMatchLeaksThePermutationTable) {
+// The GPU permutation table is not freed when no model matches; a fix flips this pin.
+TEST_F(GraphRomeModelsMicrotest, A2a8P_KnownBug_NoMatchLeaksThePermutationTable) {
   if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
   UseModel(romeTopoModels[44], -1, kAmdCpu);
   system_->nodes[DEV].nodes[0].links[0].bw /= 2;  // no model has a narrower link
@@ -400,10 +399,10 @@ TEST_F(GraphRomeModelsMicrotest, A2a8P_NoMatchLeaksThePermutationTable) {
 
   size_t before = InUseBytes();
   ASSERT_EQ(ncclSuccess, parseA2a8P(system_.get(), ring.get(), nullptr));
-  size_t leaked = InUseBytes() - before;
+  int64_t leaked = (int64_t)InUseBytes() - (int64_t)before;
 
   EXPECT_EQ(0, ring->nChannels);
-  EXPECT_GE(leaked, 24 * 24 * 8 * sizeof(int));
+  EXPECT_GE(leaked, (int64_t)(24 * 24 * 8 * sizeof(int)));
 }
 
 TEST_F(GraphRomeModelsMicrotest, A2a8P_EvenHostCountsAlternateTheRingDirection) {
@@ -468,8 +467,8 @@ TEST_F(GraphRomeModelsMicrotest, P1H16P_MatchesSixteenGpuModels) {
   EXPECT_TRUE(system_->ll128Enabled);  // rome_model_59's options
 }
 
-// Observed: as in parseA2a8P, the 21 MB permutation table is not freed when no model matches.
-TEST_F(GraphRomeModelsMicrotest, P1H16P_NoMatchLeaksThePermutationTable) {
+// As in parseA2a8P, the 21 MB permutation table is not freed when no model matches; a fix flips this pin.
+TEST_F(GraphRomeModelsMicrotest, P1H16P_KnownBug_NoMatchLeaksThePermutationTable) {
   if (kAsan) GTEST_SKIP() << "the leak would fail LeakSanitizer";
   rcclRomeModel rewired = romeTopoModels[24];
   auto link = [&](int a, int b, int v) { rewired.connMatrix[a * 16 + b] = rewired.connMatrix[b * 16 + a] = v; };
@@ -479,11 +478,11 @@ TEST_F(GraphRomeModelsMicrotest, P1H16P_NoMatchLeaksThePermutationTable) {
 
   size_t before = InUseBytes();
   ASSERT_EQ(ncclSuccess, parse1H16P(system_.get(), ring.get()));
-  size_t leaked = InUseBytes() - before;
+  int64_t leaked = (int64_t)InUseBytes() - (int64_t)before;
 
   EXPECT_EQ(0, ring->nChannels);
   EXPECT_EQ(RCCL_ROME_TOPO_PRESET_MODEL_IDX_NONE, system_->romeTopoModelIdx);
-  EXPECT_GE(leaked, 24u * 24 * 24 * 24 * 16 * sizeof(int));
+  EXPECT_GE(leaked, (int64_t)(24u * 24 * 24 * 24 * 16 * sizeof(int)));
 }
 
 TEST_F(GraphRomeModelsMicrotest, P1H16P_NeedsRomeAndSixteenGpus) {
@@ -736,9 +735,8 @@ TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_StopsAtTooManyNics) {
   EXPECT_EQ(0, ring_->nChannels);
 }
 
-// Observed: the GPU count is checked after the write, so GPU number NCCL_TOPO_MAX_NODES + 1 lands one past gpus[].
-// The write runs in a death-test child so the test process never executes it.
-TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_OneGpuPastTheLimitIsWrittenBeforeTheStop) {
+// The count is checked after gpus[gpu] is written, so one GPU too many lands past the array; a fix flips this pin.
+TEST_F(GraphRomeModelsParseMicrotest, ParseGraph_KnownBug_OneGpuPastTheLimitIsWrittenBeforeTheStop) {
   if (kAsan) GTEST_SKIP() << "the out-of-bounds stack write would fail AddressSanitizer";
   std::string many;
   for (int g = 0; g <= NCCL_TOPO_MAX_NODES; g++) many += std::to_string(g % 4) + " ";
@@ -781,8 +779,8 @@ TEST_F(GraphRomeModelsMicrotest, ParseOptions_BadGdrLevelAndEmptyString) {
   EXPECT_EQ(4, system_->tuning);
 }
 
-// Observed: options are split into at most 10 tokens, so pairs past the fifth are silently dropped.
-TEST_F(GraphRomeModelsMicrotest, ParseOptions_IgnoresPairsPastTheFifth) {
+// Options are split into at most 10 tokens, so pairs past the fifth are dropped; a fix flips this pin.
+TEST_F(GraphRomeModelsMicrotest, ParseOptions_KnownBug_IgnoresPairsPastTheFifth) {
   Use(XgmiSystem(1));
 
   parseOptions(system_.get(), "a=1,b=1,c=1,d=1,tuning=4,treeDefined=1");
