@@ -141,9 +141,8 @@ TEST_F(MgmtTaskEnqMicrotest, Enqueue_JoinsCommsInCommHashOrder) {
   EXPECT_EQ(high.get(), low->groupNext[ncclGroupTaskTypeMgmtTask]);
 }
 
-// ncclGroupCommJoin already set ncclGroupBlocking to this comm's mode, so the mixed-mode
-// rejection after it can never fire: a nonblocking comm joins a blocking group unchallenged.
-TEST_F(MgmtTaskEnqMicrotest, Enqueue_MixedBlockingModesAreNotRejected) {
+// ncclGroupCommJoin already stored this comm's mode, so the mixed-mode check never fires; a fix flips this pin.
+TEST_F(MgmtTaskEnqMicrotest, Enqueue_KnownBug_MixedBlockingModesAreNotRejected) {
   auto blocking = MakeComm(3, 1);
   auto nonblocking = MakeComm(9, 0);
   ncclAsyncJob a{};

@@ -423,8 +423,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroCollectives -- src/collectives.cc. Own binary: every other target links
-  # fakes/collectives_fakes.cc, which defines this file's string helpers.
+  # rccl-UnitTestsMicroCollectives -- src/collectives.cc. Own binary: fakes/collectives_fakes.cc, which
+  # most targets link, defines this file's string helpers.
   set(TEST_MICRO_COLLECTIVES_SOURCE_FILES
     collectives-test.cc
     ../common/main_altrsmi.cpp
@@ -1147,7 +1147,9 @@ rccl_add_micro_binary(rccl-UnitTestsMicroCollectives
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_collectives.yaml")
 # collectives.cc defines a kernel. An empty embedded device binary stands in for the device pass, so the
 # host-only object registers it without referencing a fatbin symbol nothing provides.
-target_compile_options(rccl-UnitTestsMicroCollectives PRIVATE "SHELL:-Xclang -fcuda-include-gpubinary -Xclang /dev/null")
+file(WRITE "${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary" "")
+target_compile_options(rccl-UnitTestsMicroCollectives PRIVATE
+  "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroOnerank
@@ -1162,7 +1164,8 @@ rccl_add_micro_binary(rccl-UnitTestsMicroOnerank
     ONERANK_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/device/onerank.cu.cpp"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_onerank.yaml")
 # onerank.cu defines kernels too; see rccl-UnitTestsMicroCollectives.
-target_compile_options(rccl-UnitTestsMicroOnerank PRIVATE "SHELL:-Xclang -fcuda-include-gpubinary -Xclang /dev/null")
+target_compile_options(rccl-UnitTestsMicroOnerank PRIVATE
+  "SHELL:-Xclang -fcuda-include-gpubinary -Xclang ${CMAKE_CURRENT_BINARY_DIR}/empty_gpubinary")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroMgmtTaskEnq

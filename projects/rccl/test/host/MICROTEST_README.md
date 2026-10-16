@@ -339,9 +339,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 
 - **`rccl-UnitTestsMicroCollectives`** — `collectives.cc` (via `COLLECTIVES_CC_PATH`, from
   `collectives-test.cc`), with the `include/collectives.h` ring/PAT generators and
-  `include/alltoallv_meta.h`; suite `Collectives*`. Its own binary because every other target
-  links `fakes/collectives_fakes.cc`, which defines this file's string helpers. See
-  `test_categories_micro_collectives.yaml`.
+  `include/alltoallv_meta.h`; suite `Collectives*`. Its own binary because
+  `fakes/collectives_fakes.cc`, which most targets link, defines this file's string helpers.
+  See `test_categories_micro_collectives.yaml`.
 - **`rccl-UnitTestsMicroOnerank`** — `device/onerank.cu` (via `ONERANK_CC_PATH`, from
   `onerank-test.cc`); suite `Onerank*`. Its own binary because `fakes/sched_stubs.cc` fakes
   `ncclLaunchOneRank`, and this test seams the HIP launch calls itself. See

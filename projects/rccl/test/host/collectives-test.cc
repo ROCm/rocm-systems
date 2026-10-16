@@ -607,6 +607,7 @@ class CollectivesMicrotest : public ::testing::Test {
   void TearDown() override {
     for (void* p : fake.memAllocs) std::free(p);
     fake.memAllocs.clear();
+    g_loadParam = nullptr;
   }
 
   std::unique_ptr<ncclComm> MakeComm(int rank, int nRanks) {
@@ -850,7 +851,7 @@ TEST_F(CollectivesMicrotest, EnqueueSetupNeedsSwitch_OnlyForAlgosThatRewriteTheI
 #else
   constexpr bool kGdaRewrites = false;
 #endif
-  for (int algo = 0; algo < RCCL_DIRECT_ALLTOALL + 1; algo++) {
+  for (int algo = 0; algo < RCCL_ALGO_COUNT; algo++) {
     const bool rewrites =
         algo == RCCL_DIRECT_ALLGATHER || algo == RCCL_A2A_PIVOT || (kGdaRewrites && algo == RCCL_A2A_GDA);
     EXPECT_EQ(rewrites, rcclEnqueueSetupNeedsSwitch(algo)) << algo;
@@ -2138,9 +2139,8 @@ TEST_F(CollectivesAlltoAllvMicrotest, SetupFailuresStopBeforeAnyTraffic) {
   EXPECT_TRUE(fake.p2ps.empty());
 }
 
-// Pins a known defect, not the intended contract: a failed post returns without ncclGroupEnd or skip(false), so
-// the caller's group stays open and later calls go unrecorded. Update these expectations when it is fixed.
-TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_FailuresReturnTheFirstError) {
+// A failed post returns without ncclGroupEnd or skip(false), so the caller's group stays open; a fix flips this pin.
+TEST_F(CollectivesAlltoAllvMicrotest, PeerToPeer_KnownBug_FailureLeavesTheGroupOpen) {
   fake.groupStartResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
   EXPECT_TRUE(fake.p2ps.empty());
@@ -2270,6 +2270,20 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_DeviceSwitchFailuresStopTheCall) {
   EXPECT_TRUE(fake.p2ps.empty());
 }
 
+// A failed size-exchange post returns without ncclGroupEnd, so the caller's group stays open; a fix flips this pin.
+TEST_F(CollectivesAlltoAllvMicrotest, Ce_KnownBug_FailedExchangePostLeavesTheGroupOpen) {
+  fake.ceElig = true;
+  for (int failAt : {1, 2}) {
+    SCOPED_TRACE(failAt);
+    fake.p2ps.clear();
+    fake.trace.clear();
+    fake.p2pFailAt = failAt;
+    EXPECT_EQ(ncclInternalError, AlltoAllv());
+    EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
+    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
+  }
+}
+
 TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangeFailuresReturnTheFirstError) {
   fake.ceElig = true;
   fake.memcpyResults = {hipErrorInvalidValue};
@@ -2279,16 +2293,6 @@ TEST_F(CollectivesAlltoAllvMicrotest, Ce_ExchangeFailuresReturnTheFirstError) {
   fake.groupStartResult = ncclInvalidUsage;
   EXPECT_EQ(ncclInvalidUsage, AlltoAllv());
   fake.groupStartResult = ncclSuccess;
-  for (int failAt : {1, 2}) {
-    fake.p2ps.clear();
-    fake.trace.clear();
-    fake.p2pFailAt = failAt;
-    EXPECT_EQ(ncclInternalError, AlltoAllv());
-    EXPECT_EQ(static_cast<size_t>(failAt), fake.p2ps.size());
-    // Known defect, pinned as observed: the group is left open.
-    EXPECT_EQ(0, std::count(fake.trace.begin(), fake.trace.end(), "groupEnd"));
-  }
-  fake.p2pFailAt = 0;
   fake.groupEndResult = ncclRemoteError;
   EXPECT_EQ(ncclRemoteError, AlltoAllv());
   fake.groupEndResult = ncclSuccess;
