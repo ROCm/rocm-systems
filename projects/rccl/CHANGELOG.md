@@ -61,6 +61,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 * Fixed virtual address space exhaustion when symmetric windows backed by the same physical allocation are registered repeatedly.
 * Fixed Copy Engine `ncclAlltoAllv` hanging on intra-node communicators of more than 8 ranks with uneven send sizes. Each rank decided from its own send sizes whether to add intra-batch barriers, so ranks could issue different barrier counts. The decision now uses the full send-size matrix, which every rank shares.
 * Fixed `NCCL_P2P_DISABLE` and `NCCL_P2P_LEVEL` being ignored on Intel, ARM and Zhaoxin hosts, where the CPU-based default P2P level overwrote the user setting. On such hosts `NCCL_P2P_DISABLE=1` now falls back to SHM as documented, and `NCCL_P2P_LEVEL` is honored.
+* Fixed hangs in small single-node collectives on gfx1200 and gfx1201 by selecting the Simple protocol instead of LL by default. `NCCL_PROTO` still overrides this choice.
 
 ### Known issues
 * The FP8 ReduceSum and ReduceCopy device APIs are not exported in the LLVM bitcode library.

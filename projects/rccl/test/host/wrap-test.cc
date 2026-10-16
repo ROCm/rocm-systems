@@ -1040,7 +1040,7 @@ TEST(WrapMicrotest, SymkHostRedOpToDev_UnknownOpReturnsNegativeOne) {
 // Covers the top-level user-override gate, one arch/size LL-threshold arm
 // (gfx950 AllGather, plus its own boundary; the gfx950/gfx942 ReduceScatter
 // arms right below it are the same shape with different constants and are
-// covered by their own tests here), the gfx120x delegation +
+// covered by their own tests here), the gfx120x single-node Simple default +
 // NCCL_P2P_DISABLE override, and the
 // nNodes>=2 minMaxLLRange-driven arm including its warn-once
 // undefined-tuning fallback.
@@ -1167,39 +1167,79 @@ TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_UserOverrideLeavesProtocolU
       });
 }
 
-TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisableForcesSimple) {
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xMultiNodeP2pDisableForcesSimple) {
   RUN_ISOLATED_TEST(
-      "Wrap_UpdateCollectiveProtocol_Gfx120xDelegatesThenP2pDisableForcesSimple",
+      "Wrap_UpdateCollectiveProtocol_Gfx120xMultiNodeP2pDisableForcesSimple",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
         ScopedHook p2pDisable(g_paramP2pDisable, []() { return 1; });
         ncclComm* comm = MakeCommWithArch("gfx1200");
-        comm->nNodes = 1;
-        comm->nRanks = 1;
+        comm->nNodes = 2;
+        comm->nRanks = 2;
         ncclTaskColl info{};
         info.func = ncclFuncAllGather;
-        info.protocol = NCCL_PROTO_LL; // whatever rcclGetProtoForGfx120x would pick, P2P_DISABLE overrides it
+        info.protocol = NCCL_PROTO_LL; // multi-node gfx120x gets no other tuning; only P2P_DISABLE changes it
         rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1024, &info);
         EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
         DeleteCommWithArch(comm);
       });
 }
 
-TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xSingleNodeDelegatesToProtocolSelector) {
+// LL can deadlock single-node gfx120x collectives, so automatic selection must
+// return Simple even at sizes rcclGetProtoForGfx120x maps to LL. 60,600 B per
+// rank is the largest AllGather/ReduceScatter in PyTorch's FSDP state-dict test.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xSingleNodeDefaultsSimple) {
   RUN_ISOLATED_TEST(
-      "Wrap_UpdateCollectiveProtocol_Gfx120xSingleNodeDelegatesToProtocolSelector",
+      "Wrap_UpdateCollectiveProtocol_Gfx120xSingleNodeDefaultsSimple",
       []() {
         SetMicroEnvAbsent("NCCL_PROTO");
-        SetMicroEnvAbsent("NCCL_P2P_DISABLE");
-        ncclComm* comm = MakeCommWithArch("gfx1200");
-        comm->nNodes = 1;
-        comm->nRanks = 1;
-        ncclTaskColl info{};
-        info.func = ncclFuncAllGather;
-        info.protocol = NCCL_PROTO_SIMPLE;
-        rcclUpdateCollectiveProtocol(comm, /*nBytes=*/1024, &info);
-        EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
-        DeleteCommWithArch(comm);
+        // Totals, not per rank: rcclGetSizePerRank divides by nRanks for every func here except AllReduce.
+        constexpr struct {
+          ncclFunc_t func;
+          size_t nBytes;
+        } kCases[] = {
+            {ncclFuncAllGather, 60600 * 4},      // sizePerRank 60600 <= 98304
+            {ncclFuncReduceScatter, 60600 * 4},  // sizePerRank 60600 <= 98304
+            {ncclFuncAllReduce, 16000},          // sizePerRank 16000 <= 16384
+            {ncclFuncBroadcast, 4 * 4},          // sizePerRank 4 <= 1536
+            {ncclFuncReduce, 4 * 4},             // sizePerRank 4 <= 8192
+        };
+        for (const char* arch : {"gfx1200", "gfx1201"}) {
+          ncclComm* comm = MakeCommWithArch(arch);
+          comm->nNodes = 1;
+          comm->nRanks = 4;
+          for (const auto& c : kCases) {
+            SCOPED_TRACE(::testing::Message() << "arch=" << arch << " func=" << c.func);
+            ncclTaskColl info{};
+            info.func = c.func;
+            info.protocol = NCCL_PROTO_LL;
+            rcclUpdateCollectiveProtocol(comm, c.nBytes, &info);
+            EXPECT_EQ(NCCL_PROTO_SIMPLE, info.protocol);
+          }
+          DeleteCommWithArch(comm);
+        }
+      });
+}
+
+// The gfx950 override test above can't catch the gfx120x arm ignoring
+// NCCL_PROTO, so pin that the user's LL survives on single-node gfx120x too.
+TEST(WrapMicrotestIsolated, UpdateCollectiveProtocol_Gfx120xUserOverrideKeepsLL) {
+  RUN_ISOLATED_TEST(
+      "Wrap_UpdateCollectiveProtocol_Gfx120xUserOverrideKeepsLL",
+      []() {
+        SetMicroEnv("NCCL_PROTO", "LL");
+        for (const char* arch : {"gfx1200", "gfx1201"}) {
+          SCOPED_TRACE(arch);
+          ncclComm* comm = MakeCommWithArch(arch);
+          comm->nNodes = 1;
+          comm->nRanks = 4;
+          ncclTaskColl info{};
+          info.func = ncclFuncAllGather;
+          info.protocol = NCCL_PROTO_LL;
+          rcclUpdateCollectiveProtocol(comm, /*nBytes=*/60600 * 4, &info);
+          EXPECT_EQ(NCCL_PROTO_LL, info.protocol);
+          DeleteCommWithArch(comm);
+        }
       });
 }
 

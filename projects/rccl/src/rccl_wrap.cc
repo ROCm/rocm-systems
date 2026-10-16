@@ -121,6 +121,8 @@ static inline bool rcclCollSupportsRing(ncclFunc_t func) {
           func == ncclFuncBroadcast || func == ncclFuncReduce);
 }
 
+// No production caller while single-node gfx120x defaults to Simple (see rcclUpdateCollectiveProtocol). Kept, with
+// its tests, to re-enable LL once the prims_ll.h loads are fixed for gfx120x.
 int32_t rcclGetProtoForGfx120x(ncclFunc_t collectiveFunc, size_t sizePerRank) {
   int returnVal = NCCL_PROTO_SIMPLE;
   int SingleNodeLLCutoffs[] = {/*ncclFuncBroadcast*/ 1536,
@@ -239,14 +241,12 @@ void rcclUpdateCollectiveProtocol(struct ncclComm* comm, size_t const& nBytes, s
     info->protocol = NCCL_PROTO_LL;
   } else if (!userProtocolInput && IsArchMatch(comm->topo->nodes[GPU].nodes[0].gpu.gcn, "gfx120" /*match gfx120x*/)) {
     if (comm->nNodes == 1) {
-      info->protocol = rcclGetProtoForGfx120x(info->func, sizePerRank);
+      // LL can deadlock single-node gfx120x collectives: its FIFO polls in prims_ll.h lack the
+      // gfx120x acquire ordering that Simple uses. Keep Simple until LL is fixed for gfx120x.
+      info->protocol = NCCL_PROTO_SIMPLE;
     }
-    /**
-     * We prefer simple protocol when p2p_disabled = 1,
-     * This is due to a fix in LL protocol implementation
-     * for gfx120x with __MEMORY_SCOPE_SYSTEM in prims_ll.h
-     * causing poor performance but keeps the LL protocol functional
-     */
+    // With P2P disabled, multi-node collectives also use Simple: the system-scope LL stores for gfx120x
+    // in prims_ll.h are slow.
     bool p2p_disabled = ncclParamP2pDisable();
     if (p2p_disabled) {
       info->protocol = NCCL_PROTO_SIMPLE;
