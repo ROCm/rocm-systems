@@ -2,7 +2,8 @@
 // SPDX-License-Identifier: MIT
 
 /// @file waitcnt_counter_test.cpp
-/// @brief Phase D unit tests for WaitCounters and WaitTarget.
+/// @brief Tests for WaitCounters, WaitTarget, architectural counter mappings,
+/// and counter-family coverage.
 
 #include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
