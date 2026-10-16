@@ -23,11 +23,13 @@
 #include <vector>
 
 #include "ScopedHook.h"
+#include "fakes/dev_runtime_micro_fakes.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
 #include "fakes/rocmwrap_fakes.h"
 #include "fakes/topo_net_stubs.h"
 #include "fakes/topo_stubs.h"
+#include "fakes/transport_stubs.h"
 
 // Routes every NCCL_PARAM / RCCL_PARAM in coll_net.cc through g_loadParam on each call.
 #include "fakes/param_redirect.h"
@@ -110,6 +112,10 @@ struct FakeCollNet {
   };
   std::vector<FlushCall> iflushes;
   ncclResult_t iflushResult = ncclSuccess;
+
+  std::set<std::pair<int, int>> supported;  // (dtype, op) this plugin reduces
+  std::set<std::pair<int, int>> asked;
+  ncclResult_t reduceSupportResult = ncclSuccess;
 
   static ncclNetProperties_t DefaultProps() {
     ncclNetProperties_t p{};
@@ -194,6 +200,11 @@ struct FakeCollNet {
     return issueResult;
   }
 
+  ncclResult_t reduceSupport(ncclDataType_t dtype, ncclRedOp_t op, int* out) {
+    asked.insert({dtype, op});
+    *out = supported.count({dtype, op});
+    return reduceSupportResult;
+  }
   ncclResult_t iflush(void* comm, void* data, int size, void* mhandle, void** request) {
     iflushes.push_back({comm, data, size, mhandle});
     Issue(request);
@@ -222,6 +233,7 @@ struct FakeCollNet {
     v.iallgather = &FakeCollNet::TrampIallgather;
     v.ireducescatter = &FakeCollNet::TrampIreducescatter;
     v.iflush = &FakeCollNet::TrampIflush;
+    v.reduceSupport = &FakeCollNet::TrampReduceSupport;
     v.test = &FakeCollNet::TrampTest;
     return v;
   }
@@ -254,6 +266,9 @@ struct FakeCollNet {
                                       size_t windowOffset, size_t windowBytes, void* sendMh, void** request) {
     return g_activeCollNet->iallgather(comm, send, nParts, parts, bytesPerRank, windowOffset, windowBytes, sendMh,
                                        request);
+  }
+  static ncclResult_t TrampReduceSupport(ncclDataType_t dtype, ncclRedOp_t op, int* supported) {
+    return g_activeCollNet->reduceSupport(dtype, op, supported);
   }
   static ncclResult_t TrampIflush(void* comm, void* data, int size, void* mhandle, void** request) {
     return g_activeCollNet->iflush(comm, data, size, mhandle, request);
@@ -334,6 +349,8 @@ class CollNetMicrotestBase : public ::testing::Test {
     ResetNcclFakes();
     ResetHipFakes();
     ResetTopoStubs();
+    ResetTransportStubs();
+    ResetDevRuntimeMicroFakes();
   }
 };
 
@@ -3685,6 +3702,579 @@ TEST_F(CollNetRecvProgressMicrotest, NotStarted_DoesNothing) {
 
   EXPECT_EQ(args_.subs[0].posted, 0u);
   EXPECT_EQ(args_.idle, 1);
+}
+
+// ---------------------------------------------------------------------------
+// Comm-level setup (ncclCollNetChainBufferSetup, ncclCollNetDirectBufferSetup,
+// isCollNetChainHeadsSubset, ncclCollNetSetup)
+// ---------------------------------------------------------------------------
+
+// Rank 0 of 4: two nodes of two local ranks, two channels.
+class CollNetCommMicrotest : public CollNetMicrotestBase {
+ protected:
+  static constexpr int kRanks = 4;
+  static constexpr int kChannels = 2;
+  ncclComm comm_{};
+  int rankToNode_[kRanks] = {0, 0, 1, 1};
+  int rankToLocalRank_[kRanks] = {0, 1, 0, 1};
+  int topParentRanks_[kRanks] = {10, 11, 12, 13};
+  ncclTopoGraph direct_{}, chain_{}, nvls_{};
+  ncclTopoGraph* graphs_[NCCL_NUM_ALGORITHMS] = {};
+  char bootstrap_ = 0;
+
+  struct Connect {
+    int channelId, nrecv, nsend, connIndex;
+    std::vector<int> recv, send;
+  };
+  std::vector<Connect> connects_;
+  std::vector<std::pair<ncclTopoGraph*, int>> setups_;  // (graph, connIndex)
+
+  void SetUp() override {
+    CollNetMicrotestBase::SetUp();
+    comm_.rank = 0;
+    comm_.nRanks = kRanks;
+    comm_.node = 0;
+    comm_.nNodes = 2;
+    comm_.localRanks = 2;
+    comm_.rankToNode = rankToNode_;
+    comm_.rankToLocalRank = rankToLocalRank_;
+    comm_.topParentRanks = topParentRanks_;
+    comm_.nChannels = kChannels;
+    comm_.config.collnetEnable = 1;
+    comm_.collNetChainSupport = 1;
+    comm_.buffSizes[NCCL_PROTO_SIMPLE] = 1 << 16;
+    comm_.bootstrap = &bootstrap_;
+    comm_.ncclCollNet = &vtable_;
+    // Channel 0's head is rank 0, channel 1's is rank 1.
+    direct_.nChannels = kChannels;
+    direct_.intra[0] = 0;
+    direct_.intra[1] = 1;
+    direct_.intra[2] = 1;
+    direct_.intra[3] = 0;
+    chain_.nChannels = 1;
+    chain_.intra[0] = 1;
+    graphs_[NCCL_ALGO_COLLNET_DIRECT] = &direct_;
+    graphs_[NCCL_ALGO_COLLNET_CHAIN] = &chain_;
+    graphs_[NCCL_ALGO_NVLS] = &nvls_;
+    g_ncclTransportP2pConnect = [this](ncclComm*, int c, int nrecv, int* recv, int nsend, int* send, int connIndex) {
+      connects_.push_back({c, nrecv, nsend, connIndex, std::vector<int>(recv, recv + nrecv),
+                           std::vector<int>(send, send + nsend)});
+      return ncclSuccess;
+    };
+    g_ncclTransportP2pSetup = [this](ncclComm* comm, ncclTopoGraph* graph, int connIndex, bool*) {
+      EXPECT_EQ(comm, &comm_);
+      setups_.push_back({graph, connIndex});
+      return ncclSuccess;
+    };
+  }
+
+  void TearDown() override {
+    free(comm_.collNetHeads);
+    free(comm_.collNetSharedRes);
+    CollNetMicrotestBase::TearDown();
+  }
+};
+
+TEST_F(CollNetCommMicrotest, ChainBufferSetup_ConnectsEachChannelsChainBothWays) {
+  for (int c = 0; c < kChannels; c++) {
+    comm_.channels[c].collnetChain.up = 10 + c;
+    comm_.channels[c].collnetChain.down[0] = 20 + c;
+  }
+
+  ASSERT_EQ(ncclCollNetChainBufferSetup(&comm_), ncclSuccess);
+
+  ASSERT_EQ(connects_.size(), 2u * kChannels);
+  for (int c = 0; c < kChannels; c++) {
+    SCOPED_TRACE(c);
+    const Connect& up = connects_[c];  // recv from up, send down
+    EXPECT_EQ(up.channelId, c);
+    EXPECT_EQ(up.recv, std::vector<int>{10 + c});
+    EXPECT_EQ(up.send, std::vector<int>{20 + c});
+    EXPECT_EQ(up.connIndex, 0);
+    const Connect& down = connects_[kChannels + c];
+    EXPECT_EQ(down.recv, std::vector<int>{20 + c});
+    EXPECT_EQ(down.send, std::vector<int>{10 + c});
+    EXPECT_EQ(down.connIndex, 1);
+  }
+  ncclTopoGraph* graph = &comm_.graphs[NCCL_ALGO_COLLNET_CHAIN];
+  std::vector<std::pair<ncclTopoGraph*, int>> want = {{graph, 0}, {graph, 1}};
+  EXPECT_EQ(setups_, want);
+}
+
+TEST_F(CollNetCommMicrotest, DirectBufferSetup_ConnectsEachChannelsHeadsBothWays) {
+  for (int c = 0; c < kChannels; c++) {
+    for (int i = 0; i < NCCL_MAX_DIRECT_ARITY; i++) {
+      comm_.channels[c].collnetDirect.up[i] = 100 * c + i;
+      comm_.channels[c].collnetDirect.down[i] = 100 * c + 50 + i;
+    }
+  }
+
+  ASSERT_EQ(ncclCollNetDirectBufferSetup(&comm_), ncclSuccess);
+
+  ASSERT_EQ(connects_.size(), 2u * kChannels);
+  for (int c = 0; c < kChannels; c++) {
+    SCOPED_TRACE(c);
+    const Connect& in = connects_[c];
+    EXPECT_EQ(in.channelId, c);
+    ASSERT_EQ(in.nrecv, NCCL_MAX_DIRECT_ARITY);
+    ASSERT_EQ(in.nsend, NCCL_MAX_DIRECT_ARITY);
+    EXPECT_EQ(in.recv.back(), 100 * c + NCCL_MAX_DIRECT_ARITY - 1);
+    EXPECT_EQ(in.send.front(), 100 * c + 50);
+    EXPECT_EQ(in.connIndex, 0);
+    const Connect& out = connects_[kChannels + c];
+    EXPECT_EQ(out.recv.front(), 100 * c + 50);
+    EXPECT_EQ(out.send.back(), 100 * c + NCCL_MAX_DIRECT_ARITY - 1);
+    EXPECT_EQ(out.connIndex, 1);
+  }
+  ncclTopoGraph* graph = &comm_.graphs[NCCL_ALGO_COLLNET_DIRECT];
+  std::vector<std::pair<ncclTopoGraph*, int>> want = {{graph, 0}, {graph, 1}};
+  EXPECT_EQ(setups_, want);
+}
+
+TEST_F(CollNetCommMicrotest, BufferSetups_CollNetOff_ConnectNothing) {
+  comm_.config.collnetEnable = 0;
+  EXPECT_EQ(ncclCollNetChainBufferSetup(&comm_), ncclSuccess);
+  EXPECT_EQ(ncclCollNetDirectBufferSetup(&comm_), ncclSuccess);
+
+  comm_.config.collnetEnable = 1;
+  comm_.collNetChainSupport = 0;
+  EXPECT_EQ(ncclCollNetChainBufferSetup(&comm_), ncclSuccess);
+
+  EXPECT_TRUE(connects_.empty());
+  EXPECT_TRUE(setups_.empty());
+}
+
+TEST_F(CollNetCommMicrotest, BufferSetups_TransportFails_ReturnsError) {
+  for (int failing = 0; failing < 4; failing++) {
+    SCOPED_TRACE(failing);
+    int connects = 0, setups = 0;
+    g_ncclTransportP2pConnect = [&](ncclComm*, int, int, int*, int, int*, int) {
+      return ++connects == (failing == 0 ? 1 : failing == 1 ? kChannels + 1 : 0) ? ncclSystemError : ncclSuccess;
+    };
+    g_ncclTransportP2pSetup = [&](ncclComm*, ncclTopoGraph*, int, bool*) {
+      return ++setups == (failing == 2 ? 1 : failing == 3 ? 2 : 0) ? ncclSystemError : ncclSuccess;
+    };
+    EXPECT_EQ(ncclCollNetChainBufferSetup(&comm_), ncclSystemError);
+    connects = setups = 0;
+    EXPECT_EQ(ncclCollNetDirectBufferSetup(&comm_), ncclSystemError);
+  }
+}
+
+TEST_F(CollNetCommMicrotest, ChainHeadsSubset_OnlyWhenEveryChainHeadIsACollNetHead) {
+  int heads[] = {0, 1};
+  comm_.collNetHeads = heads;
+  comm_.collNetHeadsNum = 1;
+  chain_.intra[0] = 0;
+  EXPECT_TRUE(isCollNetChainHeadsSubset(&comm_, &chain_));
+  chain_.intra[0] = 1;
+  EXPECT_FALSE(isCollNetChainHeadsSubset(&comm_, &chain_));
+  comm_.collNetHeadsNum = 2;
+  chain_.nChannels = 2;
+  chain_.intra[2] = 0;  // channel 1 starts localRanks entries later
+  EXPECT_TRUE(isCollNetChainHeadsSubset(&comm_, &chain_));
+  comm_.collNetHeadsNum = 1;
+  EXPECT_FALSE(isCollNetChainHeadsSubset(&comm_, &chain_));
+
+  heads[0] = 1;  // channel 1's chain head, rank 0, is not a CollNet head
+  EXPECT_FALSE(isCollNetChainHeadsSubset(&comm_, &chain_));
+  chain_.nChannels = 1;  // and past the last channel nothing counts
+  EXPECT_TRUE(isCollNetChainHeadsSubset(&comm_, &chain_));
+  comm_.collNetHeads = nullptr;
+}
+
+class CollNetSetupCommMicrotest : public CollNetCommMicrotest {
+ protected:
+  struct SetupCall {
+    int channel, head, h, type;
+    ncclConnect* connect;
+  };
+  std::vector<SetupCall> collNetSetups_;
+  std::set<ncclTopoGraph*> setupGraphs_;
+  std::vector<int> checks_, initChannels_;
+  int frees_ = 0;
+  std::vector<int> rankMap_;
+  bool failRecvOnChannel1_ = false;
+  // What the other ranks report for each (op, type); rank 2 is the other node's head.
+  uint8_t remote_[kRanks][4][ncclNumTypes] = {};
+
+  void SetUp() override {
+    CollNetCommMicrotest::SetUp();
+    g_ncclTransportCollNetSetup = [this](ncclComm* comm, ncclTopoGraph* graph, ncclChannel* channel, int master,
+                                         int peer, int id, int type, ncclConnect* connect) {
+      setupGraphs_.insert(graph);
+      EXPECT_EQ(master, peer);
+      int c = channel - comm->channels;
+      collNetSetups_.push_back({c, master, id, type, connect});
+      return failRecvOnChannel1_ && c == 1 && type == collNetRecv;
+    };
+    g_ncclTransportCollNetCheck = [this](ncclComm*, int fail) {
+      checks_.push_back(fail);
+      return ncclSuccess;
+    };
+    g_ncclTransportCollNetFree = [this](ncclComm*) {
+      ++frees_;
+      return ncclSuccess;
+    };
+    g_ncclTransportInitRankMap = [this](ncclComm*, int nHeads, const int* heads) {
+      rankMap_.assign(heads, heads + nHeads);
+      return ncclSuccess;
+    };
+    g_initCollnetChannel = [this](ncclComm* comm, int c, ncclComm* parent, bool share) {
+      EXPECT_EQ(comm, &comm_);
+      EXPECT_EQ(parent, nullptr);
+      EXPECT_FALSE(share);
+      initChannels_.push_back(c);
+      return ncclSuccess;
+    };
+    remote_[2][ncclSum][ncclFloat32] = 1 << 1;
+    remote_[2][ncclMax][ncclInt32] = 1 << 0;
+    remote_[3][ncclMin][ncclInt8] = 1 << 1;
+    g_devrBootstrapAllGather = [this](void* state, void* all, int size) {
+      EXPECT_EQ(state, &bootstrap_);
+      EXPECT_EQ(size, (int)sizeof(remote_[0]));
+      for (int r = 1; r < kRanks; r++) memcpy(static_cast<char*>(all) + r * size, remote_[r], size);
+      return ncclSuccess;
+    };
+    net_.supported = {{ncclFloat32, ncclSum}, {ncclInt32, ncclMax}};
+  }
+
+  ncclResult_t Setup(ncclComm* parent = nullptr) { return ncclCollNetSetup(&comm_, parent, graphs_); }
+};
+
+TEST_F(CollNetSetupCommMicrotest, Setup_ConnectsEveryHeadRecvThenSendOnEveryChannel) {
+  ASSERT_EQ(Setup(), ncclSuccess);
+
+  EXPECT_EQ(comm_.collNetHeadsNum, 2);
+  ASSERT_NE(comm_.collNetHeads, nullptr);
+  EXPECT_EQ(comm_.collNetHeads[0], 0);
+  EXPECT_EQ(comm_.collNetHeads[1], 1);
+  EXPECT_EQ(rankMap_, (std::vector<int>{0, 1}));
+  ASSERT_NE(comm_.collNetSharedRes, nullptr);
+  EXPECT_EQ(comm_.collNetSharedRes->nChannels, kChannels);
+  EXPECT_EQ(comm_.collNetSharedRes->buffSize, (size_t)1 << 16);
+  EXPECT_EQ(initChannels_, (std::vector<int>{0, 1}));
+  ASSERT_EQ(collNetSetups_.size(), 8u);
+  int i = 0;
+  for (int c = 0; c < kChannels; c++) {
+    for (int h = 0; h < 2; h++) {
+      for (int type : {collNetRecv, collNetSend}) {
+        SCOPED_TRACE(i);
+        const SetupCall& s = collNetSetups_[i++];
+        EXPECT_EQ(s.channel, c);
+        EXPECT_EQ(s.head, h);
+        EXPECT_EQ(s.h, h);
+        EXPECT_EQ(s.type, type);
+      }
+    }
+  }
+  EXPECT_EQ(setupGraphs_, std::set<ncclTopoGraph*>{&direct_});
+  EXPECT_EQ(collNetSetups_[0].connect, collNetSetups_[1].connect);  // send reuses recv's connect info
+  EXPECT_EQ(checks_, (std::vector<int>{0, 0}));  // after channel 0, then after all
+  EXPECT_EQ(frees_, 0);
+  EXPECT_EQ(comm_.config.collnetEnable, 1);
+  EXPECT_EQ(comm_.collNetChainSupport, 1);
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_HeadFails_SkipsLaterSendsAndReportsFailure) {
+  failRecvOnChannel1_ = true;
+
+  ASSERT_EQ(Setup(), ncclSuccess);
+
+  ASSERT_EQ(collNetSetups_.size(), 6u);  // channel 1: both recvs, no send
+  EXPECT_EQ(collNetSetups_[4].type, collNetRecv);
+  EXPECT_EQ(collNetSetups_[5].type, collNetRecv);
+  EXPECT_EQ(checks_, (std::vector<int>{0, 1}));
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_HeadsShareLocalRank_ConnectsEachOnce) {
+  direct_.intra[2] = 0;  // channel 1's head is rank 0 again
+
+  ASSERT_EQ(Setup(), ncclSuccess);
+
+  EXPECT_EQ(comm_.collNetHeadsNum, 1);
+  EXPECT_EQ(collNetSetups_.size(), 4u);
+  EXPECT_EQ(comm_.collNetChainSupport, 0);  // the chain's head, rank 1, gets no CollNet resources
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_NvlsTransport_TakesHeadsFromNvls) {
+  comm_.nvlsSupport = 1;
+  comm_.channels[0].nvls.nHeads = 1;
+  comm_.nvlsHeads[0] = 1;
+  nvls_.nChannels = 1;
+
+  ASSERT_EQ(Setup(), ncclSuccess);
+
+  EXPECT_EQ(comm_.collNetHeadsNum, 1);
+  EXPECT_EQ(comm_.collNetHeads[0], 1);
+  EXPECT_NE(comm_.collNetHeads, comm_.nvlsHeads);
+  ASSERT_EQ(collNetSetups_.size(), 4u);
+  EXPECT_EQ(collNetSetups_[0].head, 1);
+  EXPECT_EQ(setupGraphs_, std::set<ncclTopoGraph*>{&nvls_});
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_NvlsTransportDisabled_UsesCollNetGraph) {
+  comm_.nvlsSupport = 1;
+  comm_.config.nvlsHostMode = ncclNvlsHostModeDisableTransport;
+
+  ASSERT_EQ(Setup(), ncclSuccess);
+
+  EXPECT_EQ(comm_.collNetHeadsNum, 2);
+  EXPECT_EQ(setupGraphs_, std::set<ncclTopoGraph*>{&direct_});
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_SupportMatrix_SupportedOnlyWhereSomeHeadSaysYesAndNoneSaysNo) {
+  ASSERT_EQ(Setup(), ncclSuccess);
+
+  EXPECT_EQ(net_.asked.size(), 4u * ncclNumTypes);  // every type with sum, prod, max and min
+  EXPECT_LT(net_.asked.rbegin()->first, (int)ncclNumTypes);
+  for (const auto& [ty, op] : net_.asked) EXPECT_LT(op, 4);
+
+  EXPECT_EQ(comm_.collNetSupportMatrix[ncclSum][ncclFloat32], 1);  // both heads support it
+  EXPECT_EQ(comm_.collNetSupportMatrix[ncclMax][ncclInt32], 0);    // rank 2 does not
+  EXPECT_EQ(comm_.collNetSupportMatrix[ncclMin][ncclInt8], 0);     // we do not
+  EXPECT_EQ(comm_.collNetSupportMatrix[ncclProd][ncclFloat64], 0);
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_AnotherRankHeadsEveryChannel_OnlyItIsSetUp) {
+  direct_.intra[0] = 1;
+  direct_.intra[2] = 1;
+  net_.reduceSupportResult = ncclSystemError;  // not a head: never asked
+
+  ASSERT_EQ(Setup(), ncclSuccess);
+
+  EXPECT_EQ(comm_.collNetHeadsNum, 1);
+  EXPECT_EQ(comm_.collNetHeads[0], 1);
+  EXPECT_EQ(collNetSetups_.size(), 4u);
+  EXPECT_TRUE(net_.asked.empty());
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_NotAHead_TakesMatrixFromOtherRanksClaims) {
+  comm_.rank = 1;
+  direct_.intra[2] = 0;  // the only head is rank 0
+  remote_[0][ncclSum][ncclFloat32] = 1 << 1;
+  g_devrBootstrapAllGather = [this](void*, void* all, int size) {
+    for (int r = 0; r < kRanks; r++) {
+      if (r == 1) {
+        static const uint8_t none[4][ncclNumTypes] = {};
+        EXPECT_EQ(memcmp(static_cast<char*>(all) + r * size, none, size), 0);  // no claims either way
+      } else {
+        memcpy(static_cast<char*>(all) + r * size, remote_[r], size);
+      }
+    }
+    return ncclSuccess;
+  };
+  net_.reduceSupportResult = ncclSystemError;  // never asked
+
+  ASSERT_EQ(Setup(), ncclSuccess);
+
+  EXPECT_EQ(comm_.collNetSupportMatrix[ncclSum][ncclFloat32], 1);
+  EXPECT_EQ(comm_.collNetSupportMatrix[ncclMin][ncclInt8], 1);
+  EXPECT_EQ(comm_.collNetSupportMatrix[ncclMax][ncclInt32], 0);
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_HeadOnAnotherNode_DisablesCollNetWithError) {
+  direct_.intra[2] = 2;
+
+  EXPECT_EQ(Setup(), ncclInternalError);
+
+  EXPECT_EQ(frees_, 1);
+  EXPECT_EQ(comm_.config.collnetEnable, 0);
+  EXPECT_TRUE(collNetSetups_.empty());
+}
+
+TEST_F(CollNetSetupCommMicrotest, Setup_DependencyFails_DisablesCollNetWithError) {
+  for (int failing = 0; failing < 5; failing++) {
+    SCOPED_TRACE(failing);
+    free(comm_.collNetHeads);
+    free(comm_.collNetSharedRes);
+    comm_.collNetHeads = nullptr;
+    comm_.collNetSharedRes = nullptr;
+    comm_.collNetHeadsNum = 0;
+    comm_.config.collnetEnable = 1;
+    frees_ = 0;
+    ScopedHook initChannel(g_initCollnetChannel, [&](ncclComm*, int, ncclComm*, bool) {
+      return failing == 0 ? ncclSystemError : ncclSuccess;
+    });
+    ScopedHook check(g_ncclTransportCollNetCheck,
+                     [&](ncclComm*, int) { return failing == 1 ? ncclSystemError : ncclSuccess; });
+    ScopedHook rankMap(g_ncclTransportInitRankMap,
+                       [&](ncclComm*, int, const int*) { return failing == 2 ? ncclSystemError : ncclSuccess; });
+    ScopedHook gather(g_devrBootstrapAllGather, [&](void*, void*, int) {
+      return failing == 3 ? ncclSystemError : ncclSuccess;
+    });
+    net_.reduceSupportResult = failing == 4 ? ncclSystemError : ncclSuccess;
+
+    EXPECT_EQ(Setup(), ncclSystemError);
+    EXPECT_EQ(frees_, 1);
+    EXPECT_EQ(comm_.config.collnetEnable, 0);
+  }
+}
+
+class CollNetShareCommMicrotest : public CollNetSetupCommMicrotest {
+ protected:
+  ncclComm parent_{};
+  ncclCollNetSharedRes parentShared_{};
+  int parentHeads_[2] = {0, 1};
+  int parentTopRanks_[kRanks] = {10, 11, 12, 13};
+  std::vector<std::pair<int, bool>> sharedChannels_;
+  int otherHeadPosition_ = 0;  // what rank 2, the other node's first head, reports
+
+  void SetUp() override {
+    CollNetSetupCommMicrotest::SetUp();
+    parent_.config.collnetEnable = 1;
+    parent_.nNodes = 2;
+    parent_.nRanks = 8;
+    parent_.shareResources = true;
+    parent_.collNetHeads = parentHeads_;
+    parent_.collNetHeadsNum = 2;
+    parent_.topParentRanks = parentTopRanks_;
+    parent_.collNetSharedRes = &parentShared_;
+    parent_.collNetSupportMatrix[ncclProd][ncclBfloat16] = 1;
+    direct_.intra[2] = 0;  // one head: rank 0
+    g_initCollnetChannel = [this](ncclComm*, int c, ncclComm* parent, bool share) {
+      EXPECT_EQ(parent, &parent_);
+      sharedChannels_.push_back({c, share});
+      return ncclSuccess;
+    };
+    // Each head reports where it sits among the parent's heads.
+    g_devrBootstrapAllGather = [this](void*, void* all, int size) {
+      struct Info {
+        int headPosition, isMaster;
+      };
+      EXPECT_EQ(size, (int)sizeof(Info));
+      Info* infos = static_cast<Info*>(all);
+      const Info others[kRanks] = {{0, 1}, {7, 0}, {otherHeadPosition_, 1}, {7, 0}};  // non-heads are ignored
+      for (int r = 0; r < kRanks; r++) {
+        if (r != comm_.rank) infos[r] = others[r];
+      }
+      return ncclSuccess;
+    };
+  }
+
+  void TearDown() override {
+    comm_.collNetSharedRes = nullptr;  // the parent's
+    CollNetSetupCommMicrotest::TearDown();
+  }
+};
+
+TEST_F(CollNetShareCommMicrotest, HeadsMatchParents_SharesParentResourcesAndMatrix) {
+  ASSERT_EQ(Setup(&parent_), ncclSuccess);
+
+  EXPECT_EQ(comm_.collNetSharedRes, &parentShared_);
+  EXPECT_EQ(sharedChannels_, (std::vector<std::pair<int, bool>>{{0, true}, {1, true}}));
+  EXPECT_TRUE(collNetSetups_.empty());
+  EXPECT_EQ(rankMap_, std::vector<int>{0});
+  EXPECT_EQ(comm_.collNetSupportMatrix[ncclProd][ncclBfloat16], 1);
+  EXPECT_EQ(checks_, std::vector<int>{0});
+  EXPECT_EQ(comm_.config.collnetEnable, 1);
+}
+
+TEST_F(CollNetShareCommMicrotest, NonMasterRank_JoinsWithoutSharingResources) {
+  comm_.rank = 1;
+
+  ASSERT_EQ(Setup(&parent_), ncclSuccess);
+
+  EXPECT_EQ(comm_.collNetSharedRes, nullptr);
+  EXPECT_TRUE(sharedChannels_.empty());
+  EXPECT_EQ(comm_.config.collnetEnable, 1);
+}
+
+TEST_F(CollNetShareCommMicrotest, HeadsSitElsewhereInParent_DisablesCollNet) {
+  otherHeadPosition_ = 1;
+
+  ASSERT_EQ(Setup(&parent_), ncclSuccess);
+
+  EXPECT_EQ(frees_, 1);
+  EXPECT_EQ(comm_.config.collnetEnable, 0);
+  EXPECT_TRUE(sharedChannels_.empty());
+}
+
+TEST_F(CollNetShareCommMicrotest, HeadNotAParentHead_DisablesCollNet) {
+  topParentRanks_[0] = 99;
+  for (int other : {0, -1}) {  // whether or not the other node's head is a parent head
+    SCOPED_TRACE(other);
+    otherHeadPosition_ = other;
+    comm_.config.collnetEnable = 1;
+    free(comm_.collNetHeads);
+    comm_.collNetHeads = nullptr;
+    comm_.collNetHeadsNum = 0;
+
+    ASSERT_EQ(Setup(&parent_), ncclSuccess);
+
+    EXPECT_EQ(comm_.config.collnetEnable, 0);
+    EXPECT_TRUE(sharedChannels_.empty());
+  }
+}
+
+TEST_F(CollNetShareCommMicrotest, ParentCannotShare_SetsUpOwnResources) {
+  auto own = [this](ncclComm* parent, bool share) {
+    EXPECT_EQ(parent, &parent_);
+    EXPECT_FALSE(share);
+  };
+  g_initCollnetChannel = [&](ncclComm*, int, ncclComm* parent, bool share) {
+    own(parent, share);
+    return ncclSuccess;
+  };
+  g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
+  for (int variant = 0; variant < 3; variant++) {
+    SCOPED_TRACE(variant);
+    parent_.config.collnetEnable = variant != 0;
+    parent_.nNodes = variant == 1 ? 3 : 2;
+    parent_.shareResources = variant != 2;
+    collNetSetups_.clear();
+    free(comm_.collNetHeads);
+    if (comm_.collNetSharedRes != &parentShared_) free(comm_.collNetSharedRes);
+    comm_.collNetHeads = nullptr;
+    comm_.collNetHeadsNum = 0;
+
+    ASSERT_EQ(Setup(&parent_), ncclSuccess);
+
+    EXPECT_NE(comm_.collNetSharedRes, &parentShared_);
+    EXPECT_EQ(collNetSetups_.size(), 4u);
+  }
+  if (comm_.collNetSharedRes != &parentShared_) free(comm_.collNetSharedRes);
+}
+
+TEST_F(CollNetShareCommMicrotest, Share_DependencyFails_DisablesCollNetWithError) {
+  g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSystemError; };
+  EXPECT_EQ(Setup(&parent_), ncclSystemError);
+  EXPECT_EQ(comm_.config.collnetEnable, 0);
+
+  free(comm_.collNetHeads);
+  comm_.collNetHeads = nullptr;
+  comm_.collNetHeadsNum = 0;
+  comm_.config.collnetEnable = 1;
+  g_devrBootstrapAllGather = [](void*, void*, int) { return ncclSuccess; };
+  g_initCollnetChannel = [](ncclComm*, int, ncclComm*, bool) { return ncclSystemError; };
+  EXPECT_EQ(Setup(&parent_), ncclSystemError);
+  EXPECT_EQ(comm_.config.collnetEnable, 0);
+}
+
+TEST(CollNetHelpersMicrotest, Transport_WiresEachSidesEntryPoints) {
+  EXPECT_STREQ(collNetTransport.name, "COL");
+  EXPECT_EQ(collNetTransport.canConnect, canConnect);
+  const ncclTransportComm& send = collNetTransport.send;
+  EXPECT_EQ(send.setup, sendSetup);
+  EXPECT_EQ(send.connect, sendConnect);
+  EXPECT_EQ(send.free, sendFree);
+  EXPECT_EQ(send.proxySharedInit, nullptr);
+  EXPECT_EQ(send.proxySetup, sendProxySetup);
+  EXPECT_EQ(send.proxyConnect, sendProxyConnect);
+  EXPECT_EQ(send.proxyFree, sendProxyFree);
+  EXPECT_EQ(send.proxyProgress, sendProxyProgress);
+  EXPECT_EQ(send.proxyRegister, sendProxyRegBuffer);
+  EXPECT_EQ(send.proxyDeregister, sendProxyDeregBuffer);
+  const ncclTransportComm& recv = collNetTransport.recv;
+  EXPECT_EQ(recv.setup, recvSetup);
+  EXPECT_EQ(recv.connect, recvConnect);
+  EXPECT_EQ(recv.free, recvFree);
+  EXPECT_EQ(recv.proxySharedInit, nullptr);
+  EXPECT_EQ(recv.proxySetup, recvProxySetup);
+  EXPECT_EQ(recv.proxyConnect, recvProxyConnect);
+  EXPECT_EQ(recv.proxyFree, recvProxyFree);
+  EXPECT_EQ(recv.proxyProgress, recvProxyProgress);
+  EXPECT_EQ(recv.proxyRegister, recvProxyRegBuffer);
+  EXPECT_EQ(recv.proxyDeregister, recvProxyDeregBuffer);
 }
 
 }  // namespace
