@@ -334,18 +334,29 @@ def test_csv_counter_collection_averages_replay_passes(output_root, latest_schem
     }, f"unexpected counter_collection values for schema {latest_schema}: {values}"
 
 
+def _open_ro_db(db_path: Path):
+    """Open an existing fixture DB read-only so a missing path cannot create an empty file."""
+    assert db_path.is_file(), f"database not found: {db_path}"
+    return sqlite3.connect(f"file:{db_path.resolve().as_posix()}?mode=ro", uri=True)
+
+
 def test_counters_collection_schema_unchanged_from_3_0_5(output_root, latest_schema):
     """Replay averaging must not change the counters_collection columns."""
 
     def columns(version):
         db_path = output_root / version / "db" / f"schema_{version.replace('.', '_')}.db"
-        with sqlite3.connect(db_path) as connection:
+        with _open_ro_db(db_path) as connection:
             return [
                 row[1]
                 for row in connection.execute("PRAGMA table_info(counters_collection)")
             ]
 
-    assert columns(latest_schema) == columns("3.0.5")
+    latest_columns = columns(latest_schema)
+    baseline_columns = columns("3.0.5")
+    assert latest_columns == baseline_columns, (
+        f"counters_collection columns changed between 3.0.5 and {latest_schema}: "
+        f"3.0.5={baseline_columns} {latest_schema}={latest_columns}"
+    )
 
 
 def test_pmc_events_replay_pass_absent_before_3_0_6(output_root, old_schema):
@@ -353,9 +364,20 @@ def test_pmc_events_replay_pass_absent_before_3_0_6(output_root, old_schema):
     db_path = (
         output_root / old_schema / "db" / f"schema_{old_schema.replace('.', '_')}.db"
     )
-    with sqlite3.connect(db_path) as connection:
+    with _open_ro_db(db_path) as connection:
         columns = [row[1] for row in connection.execute("PRAGMA table_info(pmc_events)")]
-    assert "replay_pass" not in columns
+        view_sql = connection.execute(
+            "SELECT sql FROM sqlite_master WHERE name='pmc_events'"
+        ).fetchone()
+    assert view_sql and view_sql[0], f"pmc_events view missing for schema {old_schema}"
+    assert "replay_pass" not in columns, (
+        f"schema {old_schema} pmc_events unexpectedly has replay_pass; "
+        f"columns={columns}; sql={view_sql[0]}"
+    )
+    assert "replay_pass" not in view_sql[0], (
+        f"schema {old_schema} pmc_events SQL unexpectedly mentions replay_pass: "
+        f"{view_sql[0]}"
+    )
 
 
 def test_pmc_events_report_replay_pass(output_root, latest_schema):
@@ -370,8 +392,11 @@ def test_pmc_events_report_replay_pass(output_root, latest_schema):
         / "db"
         / f"schema_{latest_schema.replace('.', '_')}.db"
     )
-    assert db_path.exists(), f"database not found for schema {latest_schema}: {db_path}"
-    with sqlite3.connect(db_path) as conn:
+    with _open_ro_db(db_path) as conn:
+        columns = [row[1] for row in conn.execute("PRAGMA table_info(pmc_events)")]
+        assert (
+            "replay_pass" in columns
+        ), f"schema {latest_schema} pmc_events missing replay_pass; columns={columns}"
         rows = conn.execute(
             "SELECT dispatch_id, counter_name, replay_pass, SUM(counter_value) "
             "FROM pmc_events "

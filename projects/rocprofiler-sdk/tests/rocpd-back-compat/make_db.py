@@ -726,7 +726,31 @@ def main() -> int:
     schema.write_schema(conn)
     conn.close()
 
+    # Fail fast if the wrong schema SQL was loaded (e.g. system rocpd + stale
+    # ROCPD_SCHEMA_PATH). Archival schemas must not expose replay_pass; 3.0.6+
+    # must.
     conn = sqlite3.connect(output_path)
+    pmc_columns = [row[1] for row in conn.execute("PRAGMA table_info(pmc_events)")]
+    expect_replay_pass = tuple(int(part) for part in args.version.split(".")) >= (
+        3,
+        0,
+        6,
+    )
+    has_replay_pass = "replay_pass" in pmc_columns
+    if has_replay_pass != expect_replay_pass:
+        conn.close()
+        raise RuntimeError(
+            "schema {version} pmc_events columns unexpected after write_schema: "
+            "replay_pass present={present}, expected={expected}. columns={columns}. "
+            "ROCPD_SCHEMA_PATH={schema_path}".format(
+                version=args.version,
+                present=has_replay_pass,
+                expected=expect_replay_pass,
+                columns=pmc_columns,
+                schema_path=os.environ.get("ROCPD_SCHEMA_PATH", "<unset>"),
+            )
+        )
+
     insert_minimal_data(conn, uuid, guid, args.version)
     conn.commit()
     conn.close()
