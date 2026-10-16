@@ -1288,8 +1288,13 @@ TEST_P(KfdAqlPm4Test, ExecutesEveryXcdAndRetainsBlockedIndirectBuffer) {
   EXPECT_EQ(data[18], 0u);
   EXPECT_EQ(data[25], 1u);
   std::atomic_ref<uint64_t>(data[17]).store(1, std::memory_order_release);
-  for (unsigned i = 0; i < 2000 && (data[18] != 99 || data[25] != 0); ++i)
+  // The owner retries WAIT_REG_MEM from its wall-clock doorbell poll thread.
+  // Empty step() calls can exhaust an iteration budget before that thread runs.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while ((data[18] != 99 || data[25] != 0) && std::chrono::steady_clock::now() < deadline) {
     (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
   EXPECT_EQ(data[18], 99u);
   EXPECT_EQ(data[25], 0u);
   EXPECT_EQ(data[16], 8u);
