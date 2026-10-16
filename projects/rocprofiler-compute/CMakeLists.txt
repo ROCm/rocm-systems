@@ -1014,6 +1014,29 @@ add_test(
         ${WORKING_DIR_OPTION}
 )
 
+# Collectables / WEIGHTED_AVG unit tests (Phase 2)
+add_test(
+    NAME test_collectable
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_collectable.xml
+        ${COV_OPTION} tests/unit/utils/metrics/test_collectable.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_weighted_avg
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_weighted_avg.xml
+        ${COV_OPTION} tests/unit/utils/metrics/test_weighted_avg.py
+        tests/unit/utils/metrics/test_weighted_avg_pipeline.py ${WORKING_DIR_OPTION}
+)
+
+add_test(
+    NAME test_collect_ratio
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_collect_ratio.xml
+        ${COV_OPTION} tests/unit/utils/metrics/test_collect_ratio.py ${WORKING_DIR_OPTION}
+)
+
 add_test(
     NAME test_counter_grouping_buckets
     COMMAND
@@ -1164,6 +1187,9 @@ if(${ENABLE_COVERAGE})
         test_counter_grouping_single_pass
         test_counter_grouping_tcc
         test_pass_provenance
+        test_collect_ratio
+        test_weighted_avg
+        test_collectable
         test_counter_grouping_buckets
         test_tty
         test_file_io

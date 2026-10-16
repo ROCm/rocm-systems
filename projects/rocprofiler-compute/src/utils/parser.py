@@ -19,8 +19,21 @@ from pc_sampling.pc_sampling_analysis import (
 from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
+from utils.metrics.collectable import (
+    COLLECT_RATIO_SPECS_ATTR,
+    COLLECT_SUM_SPECS_ATTR,
+    COLLECTABLE_IDS_ATTR,
+    WEIGHTED_AVG_ATTR,
+    WEIGHTED_AVG_SUBS_ATTR,
+)
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.metrics.expression import gen_counter_list
+from utils.metrics.expression import (
+    gen_counter_list,
+    parse_collect_ratio_parts,
+    parse_collect_sum_submetrics,
+    parse_weighted_avg_submetrics,
+    reject_counter_bearing_composite_extents,
+)
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -189,6 +202,71 @@ def _metric_passes_filter(
     return False
 
 
+def _unsigned_collectable_ref(ref: str) -> str:
+    name = ref.strip()
+    if name.startswith("-"):
+        return name[1:].strip()
+    return name
+
+
+def _composite_ref_names(entries: dict[str, Any]) -> list[str]:
+    """Collectable display names a composite parent row references."""
+    formula = entries.get("avg")
+    if not isinstance(formula, str):
+        formula = entries.get("value")
+    if not isinstance(formula, str):
+        return []
+    refs: list[str] = []
+    weighted = parse_weighted_avg_submetrics(formula)
+    if weighted:
+        refs.extend(weighted)
+    summed = parse_collect_sum_submetrics(formula)
+    if summed:
+        refs.extend(summed)
+    ratio_parts = parse_collect_ratio_parts(formula)
+    if ratio_parts is not None:
+        nums, dens = ratio_parts
+        refs.extend(_unsigned_collectable_ref(ref) for ref in nums + dens)
+    return refs
+
+
+def _rows_kept_by_filter(
+    metric_entries: dict[str, Any],
+    table_data_source_idx: str,
+    panel_id: int,
+    user_metric_filter: Optional[list[str]],
+    profile_panel_filter: set[int],
+) -> set[int]:
+    """Indexes that pass the filter, plus collectables a kept parent needs."""
+    items = list(metric_entries.items())
+    name_to_index = {key: index for index, (key, _entries) in enumerate(items)}
+    kept: set[int] = set()
+    for index, (_key, _entries) in enumerate(items):
+        metric_idx = f"{table_data_source_idx}.{index}"
+        if _metric_passes_filter(
+            metric_id=metric_idx,
+            panel_id=panel_id,
+            data_source_idx=table_data_source_idx,
+            user_metric_filter=user_metric_filter,
+            profile_panel_filter=profile_panel_filter,
+        ):
+            kept.add(index)
+
+    changed = True
+    while changed:
+        changed = False
+        for index in list(kept):
+            _key, entries = items[index]
+            if not isinstance(entries, dict):
+                continue
+            for ref in _composite_ref_names(entries):
+                ref_index = name_to_index.get(ref)
+                if ref_index is not None and ref_index not in kept:
+                    kept.add(ref_index)
+                    changed = True
+    return kept
+
+
 def _build_metric_table_df(
     panel: dict[str, Any],
     data_config: dict[str, Any],
@@ -222,18 +300,53 @@ def _build_metric_table_df(
 
     rows: list[list[Any]] = []
     expressions: list[str] = []
+    weighted_avg_specs: dict[str, dict[str, Any]] = {}
+    weighted_avg_subs: dict[str, list[str]] = {}
+    collectable_ids: dict[str, str] = {}
+    collect_sum_specs: dict[str, list[str]] = {}
+    collect_ratio_specs: dict[str, dict[str, list[str]]] = {}
     metric_entries = data_config["metric"]
+    kept_rows = _rows_kept_by_filter(
+        metric_entries,
+        table_data_source_idx,
+        panel_id,
+        user_metric_filter,
+        profile_panel_filter,
+    )
     for i, (key, entries) in enumerate(metric_entries.items()):
         metric_idx = f"{table_data_source_idx}.{i}"
 
-        if not _metric_passes_filter(
-            metric_id=metric_idx,
-            panel_id=panel_id,
-            data_source_idx=table_data_source_idx,
-            user_metric_filter=user_metric_filter,
-            profile_panel_filter=profile_panel_filter,
-        ):
+        if i not in kept_rows:
             continue
+
+        if isinstance(entries, dict):
+            reject_counter_bearing_composite_extents(key, entries)
+
+        collectable_id = entries.get("_collectable_id")
+        if isinstance(collectable_id, str) and collectable_id:
+            collectable_ids[metric_idx] = collectable_id
+
+        # Composites may appear in avg or value (SOL/roofline use value→Avg/Value).
+        composite_entry = entries.get("avg")
+        if not isinstance(composite_entry, str):
+            composite_entry = entries.get("value")
+        if isinstance(composite_entry, str):
+            weighted_subs = parse_weighted_avg_submetrics(composite_entry)
+            if weighted_subs:
+                weighted_avg_subs[metric_idx] = weighted_subs
+            sum_refs = parse_collect_sum_submetrics(composite_entry)
+            if sum_refs:
+                collect_sum_specs[metric_idx] = sum_refs
+            ratio_parts = parse_collect_ratio_parts(composite_entry)
+            if ratio_parts is not None:
+                nums, dens = ratio_parts
+                collect_ratio_specs[metric_idx] = {
+                    "numerator": nums,
+                    "denominator": dens,
+                }
+        weighted_meta = entries.get("_weighted_avg")
+        if isinstance(weighted_meta, dict):
+            weighted_avg_specs[metric_idx] = weighted_meta
 
         values: list[Any] = [metric_idx, key]
         eqn_content: list[Any] = []
@@ -277,6 +390,11 @@ def _build_metric_table_df(
 
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
+    df.attrs[WEIGHTED_AVG_ATTR] = weighted_avg_specs
+    df.attrs[WEIGHTED_AVG_SUBS_ATTR] = weighted_avg_subs
+    df.attrs[COLLECTABLE_IDS_ATTR] = collectable_ids
+    df.attrs[COLLECT_SUM_SPECS_ATTR] = collect_sum_specs
+    df.attrs[COLLECT_RATIO_SPECS_ATTR] = collect_ratio_specs
     return df, expressions
 
 
