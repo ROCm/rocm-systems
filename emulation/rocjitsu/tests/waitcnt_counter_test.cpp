@@ -4,6 +4,7 @@
 /// @file waitcnt_counter_test.cpp
 /// @brief Phase D unit tests for WaitCounters and WaitTarget.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/wait_counter_policy.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
 #include <gtest/gtest.h>
@@ -147,6 +148,60 @@ TEST(WaitCounterCoverageTest, SplitCountersCoverOnlyThemselves) {
   EXPECT_TRUE(wait_counter_covers(WaitCounterType::EXPCNT, WaitCounterType::EXPCNT));
   EXPECT_TRUE(wait_counter_covers(WaitCounterType::TENSORCNT, WaitCounterType::TENSORCNT));
   EXPECT_TRUE(wait_counter_covers(WaitCounterType::ASYNCCNT, WaitCounterType::ASYNCCNT));
+}
+
+TEST(WaitCounterPolicy, SupportedRuntimeTagsRoundTripToCoveringWaits) {
+  struct Case {
+    WaitcntModel model;
+    WaitCounterType tag;
+    WaitCounterKind domain;
+    WaitCounterType wait;
+  };
+  using enum WaitcntModel;
+  using enum WaitCounterType;
+  const Case cases[] = {
+      {LegacyNoVscnt, VMCNT, WaitCounterKind::Load, VMCNT},
+      {LegacyNoVscnt, LGKMCNT, WaitCounterKind::Ds, LGKMCNT},
+      {LegacyNoVscnt, EXPCNT, WaitCounterKind::Exp, EXPCNT},
+      {LegacyVscnt, VMCNT, WaitCounterKind::Load, VMCNT},
+      {LegacyVscnt, LGKMCNT, WaitCounterKind::Ds, LGKMCNT},
+      {LegacyVscnt, EXPCNT, WaitCounterKind::Exp, EXPCNT},
+      {LegacyVscnt, VSCNT, WaitCounterKind::Store, VSCNT},
+      {LegacyVscnt, LOADCNT, WaitCounterKind::Load, VMCNT},
+      {LegacyVscnt, STORECNT, WaitCounterKind::Store, VSCNT},
+      {LegacyVscnt, DSCNT, WaitCounterKind::Ds, LGKMCNT},
+      {LegacyVscnt, KMCNT, WaitCounterKind::Ds, LGKMCNT},
+      {SplitGfx12, LOADCNT, WaitCounterKind::Load, LOADCNT},
+      {SplitGfx12, STORECNT, WaitCounterKind::Store, STORECNT},
+      {SplitGfx12, DSCNT, WaitCounterKind::Ds, DSCNT},
+      {SplitGfx12, KMCNT, WaitCounterKind::Km, KMCNT},
+      {SplitGfx12, EXPCNT, WaitCounterKind::Exp, EXPCNT},
+      {SplitGfx12, ASYNCCNT, WaitCounterKind::Async, ASYNCCNT},
+      {SplitGfx12, TENSORCNT, WaitCounterKind::Tensor, TENSORCNT},
+  };
+  for (const auto &c : cases) {
+    SCOPED_TRACE(static_cast<unsigned>(c.model));
+    SCOPED_TRACE(static_cast<unsigned>(c.tag));
+    const auto domain = canonical_wait_counter(c.tag, c.model);
+    EXPECT_EQ(domain, c.domain);
+    const auto wait = memory_wait_counter_type(domain, c.model);
+    ASSERT_TRUE(wait);
+    EXPECT_EQ(*wait, c.wait);
+    EXPECT_TRUE(wait_counter_covers(*wait, c.tag));
+  }
+}
+
+TEST(WaitCounterPolicy, UnmappedDomainsHaveNoMemoryPipelineWait) {
+  for (auto model :
+       {WaitcntModel::LegacyNoVscnt, WaitcntModel::LegacyVscnt, WaitcntModel::SplitGfx12}) {
+    for (auto domain : {WaitCounterKind::Sample, WaitCounterKind::Bvh, WaitCounterKind::X,
+                        WaitCounterKind::VmVsrc, WaitCounterKind::VaVdst, WaitCounterKind::Depctr,
+                        WaitCounterKind::Count}) {
+      SCOPED_TRACE(static_cast<unsigned>(model));
+      SCOPED_TRACE(static_cast<unsigned>(domain));
+      EXPECT_FALSE(memory_wait_counter_type(domain, model));
+    }
+  }
 }
 
 // ---------------------------------------------------------------------------
