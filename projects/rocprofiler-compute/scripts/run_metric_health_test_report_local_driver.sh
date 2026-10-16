@@ -21,15 +21,26 @@
 # 500-iter medians are the default ITERS=500, including gfx942.
 #
 # `--report` without BASELINE generates a health report for the fetched run.
+#
+# Passing any of --wait/--fetch/--report skips the rsync-and-launch step, so a
+# run always takes two invocations that share one --tag: launch with neither,
+# then come back with --wait --fetch once the job is on the host.
+#
 # To compare two runs, make the baseline with a rocprofiler-compute-develop
-# checkout as PROFILER_ROOT (path on the GPU host) and RUN=develop, then fetch it:
+# checkout as PROFILER_ROOT (path on the GPU host) and RUN=develop. Launch it:
 #
 #   ./scripts/run_metric_health_test_report_local_driver.sh \
 #     --arch gfx942 --tag 261011-gfx942-500-develop --run develop \
-#     --profiler-root /path/on/host/develop/projects/rocprofiler-compute \
-#     --wait --fetch
+#     --profiler-root /path/on/host/develop/projects/rocprofiler-compute
 #
-# Then report this branch's run against it:
+# then wait for it and fetch it:
+#
+#   ./scripts/run_metric_health_test_report_local_driver.sh \
+#     --arch gfx942 --tag 261011-gfx942-500-develop --run develop --wait --fetch
+#
+# Launch this branch's run the same way, passing --profiler-root for the remote
+# checkout the driver rsynced so that run is pinned to its own tree too, and
+# report it against the fetched baseline:
 #
 #   ./scripts/run_metric_health_test_report_local_driver.sh \
 #     --arch gfx942 --tag 261011-gfx942-500 \

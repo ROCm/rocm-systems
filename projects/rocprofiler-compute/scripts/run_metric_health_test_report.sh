@@ -49,6 +49,11 @@
 #   5. python3 ${PROFILER_ROOT}/src/rocprof-compute    (fallback only; logs a
 #      WARN because this runs uninstalled source, not a built artifact)
 #
+# Steps 3 and 4 resolve to the same binary for every run on a host, so passing
+# --profiler-root explicitly drops them and resolves only within that tree
+# (install/bin, bin, then its src/). Pass it on the candidate run too when
+# building a baseline comparison, so each run profiles its own checkout.
+#
 #   bash scripts/run_metric_health_test_report.sh \
 #     --arch gfx942 --tag 261011-gfx942-500-develop --run develop \
 #     --profiler-root /path/to/develop/projects/rocprofiler-compute
@@ -479,29 +484,51 @@ resolve_rocprof_compute() {
   # install prefix), then the --therock prefix (ROCm/TheRock may already ship
   # a built rocprof-compute), then PATH. Only fall back to the uninstalled
   # source tree if none of those resolve, and say so loudly.
+  #
+  # An explicit --profiler-root pins resolution to that tree. ${THEROCK}/bin and
+  # PATH are the same for every run on a host, so a baseline run pointed at a
+  # rocprofiler-compute-develop checkout would otherwise profile with the very
+  # binary the candidate run uses and report a comparison of a build against
+  # itself. Those two entries stay in the chain only when --profiler-root is
+  # left at its default, where there is no second tree to confuse it with.
   local candidate
+  local -a candidates=(
+    "${PROFILER_ROOT}/install/bin/rocprof-compute"
+    "${PROFILER_ROOT}/bin/rocprof-compute"
+  )
+  local pinned=0
+  if [[ -n "$PROFILER_ROOT_ARG" ]]; then
+    pinned=1
+  else
+    candidates+=("${THEROCK}/bin/rocprof-compute")
+  fi
   ROCPROF_COMPUTE_CMD=()
   ROCPROF_COMPUTE_SOURCE=""
-  for candidate in \
-    "${PROFILER_ROOT}/install/bin/rocprof-compute" \
-    "${PROFILER_ROOT}/bin/rocprof-compute" \
-    "${THEROCK}/bin/rocprof-compute"; do
+  for candidate in "${candidates[@]}"; do
     if [[ -x "$candidate" ]]; then
       ROCPROF_COMPUTE_CMD=("$candidate")
       ROCPROF_COMPUTE_SOURCE="$candidate"
       break
     fi
   done
-  if ((${#ROCPROF_COMPUTE_CMD[@]} == 0)) && command -v rocprof-compute >/dev/null 2>&1; then
+  if ((${#ROCPROF_COMPUTE_CMD[@]} == 0)) && [[ "$pinned" == "0" ]] \
+    && command -v rocprof-compute >/dev/null 2>&1; then
     ROCPROF_COMPUTE_CMD=("$(command -v rocprof-compute)")
     ROCPROF_COMPUTE_SOURCE="${ROCPROF_COMPUTE_CMD[0]} (PATH)"
   fi
   if ((${#ROCPROF_COMPUTE_CMD[@]} == 0)); then
     ROCPROF_COMPUTE_CMD=(python3 "${PROFILER_ROOT}/src/rocprof-compute")
     ROCPROF_COMPUTE_SOURCE="source fallback: ${PROFILER_ROOT}/src/rocprof-compute"
-    echo "WARN: no built rocprof-compute found under \${PROFILER_ROOT}/install/bin," \
-      "\${PROFILER_ROOT}/bin, \${THEROCK}/bin, or PATH — falling back to source tree" \
-      "(build + install rocprof-compute into one of those locations to use the built binary)"
+    if [[ "$pinned" == "1" ]]; then
+      echo "WARN: no built rocprof-compute under \${PROFILER_ROOT}/install/bin or" \
+        "\${PROFILER_ROOT}/bin — falling back to the source tree of the pinned" \
+        "--profiler-root (\${THEROCK}/bin and PATH are skipped because they are" \
+        "shared by every run on this host)"
+    else
+      echo "WARN: no built rocprof-compute found under \${PROFILER_ROOT}/install/bin," \
+        "\${PROFILER_ROOT}/bin, \${THEROCK}/bin, or PATH — falling back to source tree" \
+        "(build + install rocprof-compute into one of those locations to use the built binary)"
+    fi
   fi
   echo "rocprof-compute: ${ROCPROF_COMPUTE_SOURCE}"
 }
