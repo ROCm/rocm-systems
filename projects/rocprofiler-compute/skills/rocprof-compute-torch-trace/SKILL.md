@@ -63,9 +63,9 @@ When counters are being spread thin across many short operator kernels,
 `--iteration-multiplexing kernel` collects more per pass.
 
 Profile preserves each pass's raw marker and counter CSVs with the
-`ml_api_trace` prefix. A Function whose first token is the legacy stacked
-shape (`:#` or `#n@file:line`) makes analyze exit during parse, before the
-tree. Re-profile with current `--torch-trace` or `--triton-trace`.
+`ml_api_trace` prefix. Workloads from an older profile can contain stacked Function markers.
+Analyze exits during parse, before the tree.
+Re-profile with current `--torch-trace` or `--triton-trace`.
 
 ## 3. List the captured operators
 
@@ -100,9 +100,8 @@ on the reconstructed path, and `all` or `'*'` matches everything. Several
 patterns can be given, space or comma separated.
 Quote patterns so the shell does not expand them.
 
-Combine with `-k` to intersect an operator with specific kernel ids, and with
-`-b` to look at one metric block for that operator's kernels. `--triton-operator`
-works the same way.
+`--triton-operator` works the same way. `*rmsnorm_kernel*` matches the
+rmsnorm nodes on a Triton tree.
 
 Worked examples are in the PyTorch operator analysis section of
 [the analyze CLI guide](../../docs/how-to/analyze/cli.rst).

@@ -799,8 +799,13 @@ PyTorch operator analysis
 
 These flags require ``--output-format stdout`` (the default). Combining
 ``--list-*-operators`` with ``--*-operator`` warns and lists all operators.
-``--list-stats`` ignores ``--*-operator`` and prints the full kernel stats
-table.
+``-k`` is a row in the kernel table. ``-d`` runs first, so the table
+keeps only kernels from those dispatches. Run with the same ``-d``, then
+pass one of those rows to ``-k``. ``--torch-operator`` uses the same order.
+The ``(id N)`` on its filtered tree is that row.
+
+``--list-stats`` with ``--*-operator`` prints the kernel table for that
+operator's launches.
 
 ``--list-*-operators`` and ``--*-operator`` load each profiling pass's marker
 and counter CSV pair and print an operator call tree. Plain ``analyze -p``
@@ -822,8 +827,8 @@ Operator analyze warns before the tree is printed and continues when:
 * a worker interval is not contained in any launcher interval
 * a torch or triton call-tree root has no file/line and no launcher thread
 
-A Function whose first token is the legacy stacked shape (``:#`` or
-``#n@file:line``) makes analyze exit during parse, before the tree.
+Workloads from an older profile can contain stacked Function markers.
+Analyze exits during parse, before the tree.
 Re-profile with current ``--torch-trace`` or ``--triton-trace``.
 
 ``/`` in the Operator column and in globs is the reconstructed call path.
@@ -909,8 +914,14 @@ matching is case-sensitive:
 * **Exact** — ``aten::addmm``
 * **Match all** — no arguments, ``all``, ``*``, or ``**``
 
-``--torch-operator`` / ``--triton-operator`` intersect analyze ``-k/--kernel``.
-``-d/--dispatch`` composes with ``--*-operator``.
+``--torch-operator`` and ``--triton-operator`` show the kernel launches
+from the chosen operators. ``-d`` does not change that tree. It filters
+kernel-top, the dispatch list, and ``--list-stats``. ``-k`` does not
+filter that tree, kernel-top, the dispatch list, or ``--list-stats``.
+It filters the metric rows to that kernel's launches.
+
+``-k`` is the ``(id N)`` on the filtered tree. It keeps that kernel's
+launches in the metric rows. A ``-d`` or ``-k`` off the subtree fails.
 
 .. code-block:: shell-session
 
@@ -967,14 +978,17 @@ Display all Triton kernels captured during profiling:
 Filter the Triton kernels
 -------------------------
 
-``--triton-operator`` uses the same shell-style glob matching as
-``--torch-operator``; see :ref:`operator-filtering` for the full pattern syntax.
+``--triton-operator`` uses the same shell-style glob matching and the same
+``-d`` and ``-k`` rules as ``--torch-operator``; see
+:ref:`operator-filtering`. ``*rmsnorm_kernel*`` matches
+``triton.JITFunction.rmsnorm_kernel``, ``triton.CompiledKernel.rmsnorm_kernel``,
+and the leaf ``rmsnorm_kernel``.
 
 .. code-block:: shell-session
 
    # Wildcard match
-   $ rocprof-compute analyze --experimental --triton-operator "*matmul*" --path ./workload
+   $ rocprof-compute analyze --experimental --triton-operator "*rmsnorm_kernel*" --path ./workload
 
    # Filter multiple kernels (space or comma separated)
    $ rocprof-compute analyze --experimental \
-       --triton-operator "*matmul*,*softmax*" --path ./workload
+       --triton-operator "*matmul*,*rmsnorm_kernel*" --path ./workload
