@@ -32,10 +32,22 @@
 # compares two separate runs: this branch and rocprofiler-compute-develop.
 #   --run            name in output paths (default single-pass). Use --run develop
 #                    for the baseline run.
-#   --profiler-root  rocprofiler-compute checkout whose src/rocprof-compute runs
-#                    profile and analyze (default --root). For the baseline, point
-#                    it at a rocprofiler-compute-develop checkout. Samples still
-#                    build from --root so both runs profile the same binaries.
+#   --profiler-root  rocprofiler-compute checkout whose built/installed
+#                    rocprof-compute runs profile and analyze (default --root).
+#                    For the baseline, point it at a rocprofiler-compute-develop
+#                    checkout. Samples still build from --root so both runs
+#                    profile the same binaries.
+#
+# profile/analyze run the first rocprof-compute found, in order:
+#   1. ${PROFILER_ROOT}/install/bin/rocprof-compute   (cmake --target install,
+#      CMAKE_INSTALL_PREFIX=install; see README.md "manual testing")
+#   2. ${PROFILER_ROOT}/bin/rocprof-compute            (--profiler-root given
+#      directly as an install prefix)
+#   3. ${THEROCK}/bin/rocprof-compute                  (ROCm/TheRock prefix
+#      that already ships a built rocprof-compute)
+#   4. rocprof-compute on PATH
+#   5. python3 ${PROFILER_ROOT}/src/rocprof-compute    (fallback only; logs a
+#      WARN because this runs uninstalled source, not a built artifact)
 #
 #   bash scripts/run_metric_health_test_report.sh \
 #     --arch gfx942 --tag 261011-gfx942-500-develop --run develop \
@@ -56,7 +68,9 @@ Usage: bash $(basename "$0") --arch <gfx942|gfx950|gfx90a|gfx908|gfx1151> [optio
 Options:
   --tag <name>              Output name (default: YYMMDD-<arch>-500)
   --root <dir>              Sample tree (default: this repo)
-  --profiler-root <dir>     rocprof-compute tree used to profile (default: --root)
+  --profiler-root <dir>     rocprof-compute tree/install-prefix used to profile
+                            (default: --root; see the file header for how a
+                            built rocprof-compute is resolved)
   --run <name>              Run name in output paths (default: single-pass)
   --iterations <n>          Workload iterations (default: 500)
   --mega-batch <n>          mega_kernel batch (default: 4096 on gfx1151, else 65536)
@@ -458,6 +472,40 @@ toolchain_site() {
   echo "python3: $(command -v python3)"
 }
 
+resolve_rocprof_compute() {
+  # Prefer a built/installed rocprof-compute over running from source. Checked
+  # in order: an install under --profiler-root (either the checkout root with
+  # an install/ subdir per README.md, or --profiler-root given directly as the
+  # install prefix), then the --therock prefix (ROCm/TheRock may already ship
+  # a built rocprof-compute), then PATH. Only fall back to the uninstalled
+  # source tree if none of those resolve, and say so loudly.
+  local candidate
+  ROCPROF_COMPUTE_CMD=()
+  ROCPROF_COMPUTE_SOURCE=""
+  for candidate in \
+    "${PROFILER_ROOT}/install/bin/rocprof-compute" \
+    "${PROFILER_ROOT}/bin/rocprof-compute" \
+    "${THEROCK}/bin/rocprof-compute"; do
+    if [[ -x "$candidate" ]]; then
+      ROCPROF_COMPUTE_CMD=("$candidate")
+      ROCPROF_COMPUTE_SOURCE="$candidate"
+      break
+    fi
+  done
+  if ((${#ROCPROF_COMPUTE_CMD[@]} == 0)) && command -v rocprof-compute >/dev/null 2>&1; then
+    ROCPROF_COMPUTE_CMD=("$(command -v rocprof-compute)")
+    ROCPROF_COMPUTE_SOURCE="${ROCPROF_COMPUTE_CMD[0]} (PATH)"
+  fi
+  if ((${#ROCPROF_COMPUTE_CMD[@]} == 0)); then
+    ROCPROF_COMPUTE_CMD=(python3 "${PROFILER_ROOT}/src/rocprof-compute")
+    ROCPROF_COMPUTE_SOURCE="source fallback: ${PROFILER_ROOT}/src/rocprof-compute"
+    echo "WARN: no built rocprof-compute found under \${PROFILER_ROOT}/install/bin," \
+      "\${PROFILER_ROOT}/bin, \${THEROCK}/bin, or PATH — falling back to source tree" \
+      "(build + install rocprof-compute into one of those locations to use the built binary)"
+  fi
+  echo "rocprof-compute: ${ROCPROF_COMPUTE_SOURCE}"
+}
+
 decide_native() {
   PROFILE_EXTRA=()
   USE_NATIVE_TOOL=false
@@ -544,6 +592,7 @@ write_run_meta() {
     echo "ARCH=${ARCH}"
     echo "RUN=${RUN}"
     echo "PROFILER_ROOT=${PROFILER_ROOT}"
+    echo "ROCPROF_COMPUTE_SOURCE=${ROCPROF_COMPUTE_SOURCE}"
     echo "ITERS=${ITERS}"
     echo "NO_ROOF=${NO_ROOF}"
     if [[ "$META_SITE" == "1" ]]; then
@@ -618,7 +667,7 @@ run_one() {
   local prc=$?
   if [[ $prc -ne 0 && "$USE_NATIVE_TOOL" == true ]]; then
     echo "WARN: native-tool profile $wl_name failed rc=$prc — retrying with --no-native-tool"
-    local retry=(python3 "${PROFILER_ROOT}/src/rocprof-compute" profile --overwrite --no-native-tool)
+    local retry=("${ROCPROF_COMPUTE_CMD[@]}" profile --overwrite --no-native-tool)
     if [[ "$NO_ROOF" == "1" ]]; then
       retry+=(--no-roof)
     fi
@@ -638,7 +687,7 @@ run_one() {
   if [[ -n "$wl_dir" ]]; then
     echo "--- ANALYZE $wl_dir ---"
     set +e
-    python3 "${PROFILER_ROOT}/src/rocprof-compute" analyze -p "$wl_dir" -k 0 --view table \
+    "${ROCPROF_COMPUTE_CMD[@]}" analyze -p "$wl_dir" -k 0 --view table \
       >"${LOGDIR}/${name}_${mode}.log" 2>&1
     local arc=$?
     set -e
@@ -667,11 +716,12 @@ else
   toolchain_site
 fi
 decide_native
+resolve_rocprof_compute
 prepare_mega
 build_apps
-write_run_meta
+write_run_meta # after resolve_rocprof_compute so ROCPROF_COMPUTE_SOURCE is logged
 
-PROFILE=(python3 "${PROFILER_ROOT}/src/rocprof-compute" profile --overwrite "${PROFILE_EXTRA[@]}")
+PROFILE=("${ROCPROF_COMPUTE_CMD[@]}" profile --overwrite "${PROFILE_EXTRA[@]}")
 
 run_one "$RUN" vcopy ./sample/vc -n 81920 -b 256 -i "$ITERS"
 # 81920 bodies at 128 threads/block launch 640 blocks. On the largest current
