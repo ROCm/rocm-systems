@@ -188,6 +188,10 @@ struct RegMrCall {
 struct FakeGin {
   int ndev = 1;
   bool needsProxyProgress = true;
+  // What createContext reports as the context's device type. A knob rather than a
+  // constant so a test can tell the published value apart from both the zero
+  // default and whatever the other connections report.
+  ncclNetDeviceType contextNetDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
   std::atomic<int> totalProgressCalls{0};
   std::atomic<int> destroyCalls{0};
 
@@ -324,7 +328,7 @@ struct FakeGin {
     ncclResult_t ret = failCreateContext.at(createContextCalls);
     if (ret != ncclSuccess) return ret;
     FakeSlot* slot = addSlot();
-    slot->handle.netDeviceType = NCCL_NET_DEVICE_GIN_PROXY;
+    slot->handle.netDeviceType = contextNetDeviceType;
     slot->handle.handle = badContext == BadContext::NullHandle ? nullptr : slot;
     slot->handle.needsProxyProgress = needsProxyProgress ? 1 : 0;
     *devHandle = badContext == BadContext::NullDevHandle ? nullptr : &slot->handle;
@@ -1498,6 +1502,28 @@ TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_CustomStrideOnARailConnectedCo
   EXPECT_EQ(2, devComm_.ginConnectionStride);
   EXPECT_EQ(4, devComm_.ginContextStride);
   EXPECT_EQ(2, lastConfig().rankStride);  // 4 world ranks / 2 ranks per connection
+}
+
+// A successful setup publishes what the device side reads: the connection
+// stride's reciprocal (device code divides by it with idivRcp32) and each
+// connection's device type as the plugin reported it.
+TEST_F(GinHostDevCommSetupMicrotest, DevCommSetup_Succeeds_PublishesTheStrideReciprocalAndTheDeviceTypes) {
+  gin()->ginConnectionType = NCCL_GIN_CONNECTION_RAIL;  // connectedStride = ranks per host
+  comm_->contiguousRanksPerHost = 2;
+  g_railStride = 2;
+  gin()->backends[0].ginCommCount = 2;
+  gin()->backends[0].ginComms[1] = fake_.collCommHandle(1);
+  fake_.contextNetDeviceType = NCCL_NET_DEVICE_GIN_GDAKI;  // neither the zero default nor the fixture's
+
+  auto reqs = proxyReqs();
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_RAIL;
+  reqs.ginContextCount = 2;
+  ASSERT_EQ(ncclSuccess, setup(reqs, &devComm_));
+
+  EXPECT_EQ(2, devComm_.ginConnectionStride);
+  EXPECT_EQ(idivRcp32(2), devComm_.ginConnectionStride_rcp32);
+  EXPECT_EQ(NCCL_NET_DEVICE_GIN_GDAKI, devComm_.ginNetDeviceTypes[0]);
+  EXPECT_EQ(NCCL_NET_DEVICE_GIN_GDAKI, devComm_.ginNetDeviceTypes[1]);
 }
 
 // A zero stride would make every rank its own peer; it is rejected with the
