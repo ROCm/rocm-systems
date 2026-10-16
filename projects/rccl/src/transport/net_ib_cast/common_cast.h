@@ -83,9 +83,17 @@ enum struct ncclIbCastUDMAPolicy : int {
   // Split each connection across both pipelines: channel-id popcount parity picks the
   // starting pipeline and consecutive per-device QP indexes alternate
   SplitConnection = 3,
+  // New values go before Count; First/Last bound the RCCL_IB_UDMA_POLICY range
+  // check, so update the static_asserts below when adding one.
+  Count,
   First = ChannelAffinity,
-  Last = SplitConnection,
+  Last = Count - 1,
 };
+static_assert(ncclIbCastUDMAPolicy::First == ncclIbCastUDMAPolicy::ChannelAffinity &&
+                (int)ncclIbCastUDMAPolicy::First == 0,
+              "ncclIbCastUDMAPolicy must start at ChannelAffinity = 0");
+static_assert(ncclIbCastUDMAPolicy::Last == ncclIbCastUDMAPolicy::SplitConnection,
+              "ncclIbCastUDMAPolicy::Last must be the last policy; update this assert when adding one");
 
 struct ncclIbMr {
   uintptr_t addr;
