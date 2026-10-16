@@ -331,16 +331,9 @@ TEST_F(RomeModelsParseGraphMicrotest, GpuNumbersAreTranslatedThroughGpuMap) {
 }
 
 TEST_F(RomeModelsParseGraphMicrotest, ChannelWithWrongGpuCount_IsIgnored) {
-  // Documented behaviour: rings are supplied for several GPU counts at once and
-  // the ones that do not fit this communicator are skipped, not rejected.
-  //
-  // The short segment comes second, and is a prefix of the first, on purpose. The
-  // gpus[] slot it does not write still holds 3 from the full segment parsed just
-  // before it, so dropping the count check leaves four valid non-duplicate numbers
-  // and the segment is accepted as a second channel. A short segment that stood
-  // alone, or that collided with the carried-over value, would instead be refused
-  // by the bounds or duplicate check next door and the count check would look
-  // tested while being free to delete.
+  // Rings for other GPU counts are skipped, not rejected. The short segment follows a
+  // full one, so its stale gpus[3] keeps it otherwise valid and only the count check
+  // can drop it.
   ASSERT_EQ(parseGraph("0 1 2 3|0 1 2", system(), graph(), nullptr, nullptr, 0), ncclSuccess);
 
   EXPECT_EQ(graph()->nChannels, 1);
