@@ -18,8 +18,7 @@
 #   ./scripts/run_metric_health_test_report_local_driver.sh \
 #     --arch gfx950 --tag 261002-gfx950-500med --fetch --report
 #
-# 500-iter medians are the default ITERS=500, including gfx942. There is no
-# separate 500med script.
+# 500-iter medians are the default ITERS=500, including gfx942.
 #
 # `--report` without BASELINE generates a health report for the fetched run.
 # To compare two runs, make the baseline with a rocprofiler-compute-develop
@@ -150,6 +149,25 @@ RUN=${RUN_ARG:-single-pass}
 BASELINE_RUN=${BASELINE_RUN_ARG:-develop}
 BASELINE=${BASELINE_ARG:-}
 REPO_ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")/.." && pwd)"
+# Assumed remote username when a site doesn't have its own REMOTE_USER
+# (slurm transports log in via HOST_LOGIN, which is expected to carry its
+# own user). Override by exporting USER, or by setting REMOTE_ROOT /
+# NODE_ROOT / REMOTE_LOG / SBATCH_OUT directly.
+LOCAL_USER=${USER:-$(id -un)}
+
+# Shared defaults for the slurm-login slurm sites (gfx908, gfx950, gfx90a):
+# same login host, partition, walltime, poll interval, host-kind, and
+# TAG_SUFFIX. Each arch's case branch below still sets its own TRANSPORT,
+# NODE, GRES, THEROCK, and root path(s).
+apply_slurm_site_defaults() {
+  RSYNC_STYLE=site
+  HOST_LOGIN=${HOST_LOGIN:-slurm-login}
+  PARTITION=${PARTITION:-}
+  WALLTIME=${WALLTIME:-24:00:00}
+  POLL_SLEEP=180
+  REPORT_HOST_KIND=node
+  TAG_SUFFIX=500med
+}
 
 apply_driver_profile() {
   TRANSPORT=""
@@ -162,6 +180,7 @@ apply_driver_profile() {
   REPORT_HOST_KIND=host
   SITE_ROCM_IN_LAUNCH=0
   TAG_SUFFIX=500
+  # Each branch below only sets what differs from the defaults above.
   case "$ARCH" in
     gfx1151)
       TRANSPORT=ssh-pass
@@ -169,72 +188,48 @@ apply_driver_profile() {
       HOST=${HOST:-192.0.2.10}
       REMOTE_USER=${REMOTE_USER:-${USER}}
       REMOTE_PASS=${REMOTE_PASS:-}
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/${REMOTE_USER}/workdir/rocm-systems/projects/rocprofiler-compute}
+      REMOTE_ROOT=${REMOTE_ROOT:-/home/${REMOTE_USER}/rocprofiler-compute}
       THEROCK=${THEROCK_ARG:-/home/${REMOTE_USER}/rocm-venv/lib/python3.12/site-packages/_rocm_sdk_devel}
-      TAG_SUFFIX=500
       PASS_MEGA_BATCH=1
       MEGA_BATCH=4096
-      ROCR_DEFAULT=0
-      POLL_SLEEP=120
       ;;
     gfx942)
       TRANSPORT=ssh-key
       PROXY=${PROXY:-'nc -X 5 -x 127.0.0.1:PORT %h %p'}
       HOST=${HOST:-gfx942-host.example}
-      REMOTE_USER=${REMOTE_USER:-${USER}}
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${USER}/workdir/rocm-systems/projects/rocprofiler-compute}
-      THEROCK=${THEROCK_ARG:-/home/AMD/${USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
-      TAG_SUFFIX=500
+      REMOTE_USER=${REMOTE_USER:-${LOCAL_USER}}
+      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${REMOTE_USER}/workdir/rocm-systems/projects/rocprofiler-compute}
+      THEROCK=${THEROCK_ARG:-/home/AMD/${REMOTE_USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
       PASS_LOCAL_PREFIX=1
       ROCR_DEFAULT=17
-      POLL_SLEEP=120
       ;;
     gfx908)
       TRANSPORT=slurm-home
-      RSYNC_STYLE=site
-      HOST_LOGIN=${HOST_LOGIN:-slurm-login}
+      apply_slurm_site_defaults
       NODE=${NODE:-gfx908-node}
-      PARTITION=${PARTITION:-}
       GRES=${GRES:-gpu:gfx908-mi100:1}
       THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
-      TAG_SUFFIX=500med
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${USER}/workdir/rocprofiler-compute}
-      WALLTIME=${WALLTIME:-24:00:00}
-      POLL_SLEEP=180
+      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${LOCAL_USER}/rocprofiler-compute}
       REPORT_MISSING=warn
-      REPORT_HOST_KIND=node
       SITE_ROCM_IN_LAUNCH=1
       ;;
     gfx950)
       TRANSPORT=slurm-home
-      RSYNC_STYLE=site
-      HOST_LOGIN=${HOST_LOGIN:-slurm-login}
+      apply_slurm_site_defaults
       NODE=${NODE:-gfx950-node}
-      PARTITION=${PARTITION:-}
       GRES=${GRES:-gpu:gfx950-mi350x:1}
       THEROCK=${THEROCK_ARG:-/opt/rocm-7.1.0}
-      TAG_SUFFIX=500med
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${USER}/workdir/rocprofiler-compute}
-      WALLTIME=${WALLTIME:-24:00:00}
-      POLL_SLEEP=180
-      REPORT_HOST_KIND=node
+      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${LOCAL_USER}/rocprofiler-compute}
       SITE_ROCM_IN_LAUNCH=1
       ;;
     gfx90a)
       TRANSPORT=slurm-remote
-      RSYNC_STYLE=site
-      HOST_LOGIN=${HOST_LOGIN:-slurm-login}
+      apply_slurm_site_defaults
       NODE=${NODE:-gfx90a-node}
-      PARTITION=${PARTITION:-}
       GRES=${GRES:-gpu:gfx90a-mi250:1}
       THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
-      TAG_SUFFIX=500med
-      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${USER}/workdir/rocprofiler-compute}
-      NODE_ROOT=${NODE_ROOT:-/home/AMD/${USER}/workdir/rocprofiler-compute}
-      WALLTIME=${WALLTIME:-24:00:00}
-      POLL_SLEEP=180
-      REPORT_HOST_KIND=node
-      SITE_ROCM_IN_LAUNCH=0
+      REMOTE_ROOT=${REMOTE_ROOT:-/home/AMD/${LOCAL_USER}/rocprofiler-compute}
+      NODE_ROOT=${NODE_ROOT:-/home/AMD/${LOCAL_USER}/rocprofiler-compute}
       ;;
     *)
       echo "Unknown ARCH: ${ARCH}" >&2
@@ -246,14 +241,14 @@ apply_driver_profile() {
   TAG=${TAG_ARG:-$(date +%y%m%d)-${ARCH}-${TAG_SUFFIX}}
   ARTIFACTS=${ARTIFACTS:-${REPO_ROOT}/validation-artifacts/metric-health-${TAG}}
   if [[ "$TRANSPORT" == "ssh-key" ]]; then
-    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/${USER}/workdir/metric_health_${TAG}.log}
-    REMOTE_NOHUP=${REMOTE_NOHUP:-/home/AMD/${USER}/workdir/metric_health_${TAG}.nohup}
+    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/${REMOTE_USER}/workdir/metric_health_${TAG}.log}
+    REMOTE_NOHUP=${REMOTE_NOHUP:-/home/AMD/${REMOTE_USER}/workdir/metric_health_${TAG}.nohup}
   elif [[ "$TRANSPORT" == "ssh-pass" ]]; then
     REMOTE_LOG=${REMOTE_LOG:-/home/${REMOTE_USER}/metric_health_${TAG}.log}
     REMOTE_NOHUP=${REMOTE_NOHUP:-/home/${REMOTE_USER}/metric_health_${TAG}.nohup}
   else
-    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/${USER}/metric_health_${TAG}.log}
-    SBATCH_OUT=${SBATCH_OUT:-/home/AMD/${USER}/metric_health_${TAG}.sbatch.out}
+    REMOTE_LOG=${REMOTE_LOG:-/home/AMD/${LOCAL_USER}/metric_health_${TAG}.log}
+    SBATCH_OUT=${SBATCH_OUT:-/home/AMD/${LOCAL_USER}/metric_health_${TAG}.sbatch.out}
   fi
   if [[ "$REPORT_HOST_KIND" == "node" ]]; then
     REPORT_HOST=$NODE
@@ -513,7 +508,7 @@ wait_slurm_home() {
       ssh_login "grep -E 'WORKLOAD_DONE|ALL_DONE|MEGA_SMOKE|WARN:|DISPATCH_COUNT|iters=' '${REMOTE_LOG}' | tail -40" || true
       return 0
     fi
-    ssh_login "squeue -u ${USER} -o '%.18i %.9P %.8j %.2t %.10M %N' | head -10; \
+    ssh_login "squeue -u ${LOCAL_USER} -o '%.18i %.9P %.8j %.2t %.10M %N' | head -10; \
       grep -E 'WORKLOAD_DONE|PROFILE |MEGA_SMOKE|WARN:' '${REMOTE_LOG}' 2>/dev/null | tail -5" || true
     sleep "$POLL_SLEEP"
   done
@@ -529,7 +524,7 @@ wait_slurm_remote() {
         bash -lc 'grep -E \"WORKLOAD_DONE|ALL_DONE|MEGA_SMOKE|WARN:|DISPATCH_COUNT|iters=\" \"${REMOTE_LOG}\" | tail -40'" || true
       return 0
     fi
-    ssh_login "squeue -u ${USER} -o '%.18i %.9P %.8j %.2t %.10M %N' | head -10" || true
+    ssh_login "squeue -u ${LOCAL_USER} -o '%.18i %.9P %.8j %.2t %.10M %N' | head -10" || true
     sleep "$POLL_SLEEP"
   done
 }
