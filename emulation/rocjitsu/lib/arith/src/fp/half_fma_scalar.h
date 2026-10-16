@@ -16,6 +16,14 @@
 
 namespace rocjitsu::arith {
 
+// Whether required FP status reporting is unsupported for this FP16 FMA policy.
+inline bool half_fma_reporting_unsupported(uint64_t flags, bool rdna3) {
+  uint64_t semantics = flags & RJ_ARITH_SEMANTICS_MASK;
+  return semantics == RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL &&
+         (rdna3 || (flags & (RJ_ARITH_FP_FLUSH_INPUT_DENORMALS |
+                             RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS | RJ_ARITH_FP_ROUND_MASK)));
+}
+
 // Round finite FP64 to FP16 with guest rounding and optional finite saturation.
 // Directed rounding follows rocjitsu pseudo_scalar.h::round_f64_to_f16;
 // integer discarded-bit tests avoid depending on host conversions.
@@ -54,7 +62,8 @@ inline uint16_t half_fma_clamp(uint16_t value) {
 // Adapted from rocjitsu shared/fp_mode.h: fma_f16 and finish_fma_f16.
 // Guest rounding, input/output denormals and architecture-specific NaN quieting.
 template <bool Rdna3 = false>
-inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, uint32_t mode, uint64_t flags) {
+inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, uint32_t mode, uint64_t flags,
+                               uint32_t *exceptions = nullptr) {
   bool saturate = flags & RJ_ARITH_FP16_OVFL;
   uint16_t inputs[] = {a, b, c};
   for (int i = 0; i < 3; ++i) {
@@ -73,6 +82,22 @@ inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, uint32_t mode
   c = inputs[2];
   uint16_t ma = a & 0x7fff, mb = b & 0x7fff, mc = c & 0x7fff;
 
+  // CLAMP suppresses every exception. NaNs and invalid operations suppress
+  // denormal-input reporting; infinities alone do not. Classification uses bits
+  // and the integer FMA intermediate, never the host's exception flags.
+  bool report = exceptions && !(mode & RJ_ARITH_ALU_CLAMP);
+  if (report) {
+    bool nan = ma > 0x7c00 || mb > 0x7c00 || mc > 0x7c00;
+    bool invalid =
+        (ma == 0 && mb == 0x7c00) || (mb == 0 && ma == 0x7c00) || (ma > 0x7c00 && !(ma & 0x200)) ||
+        (mb > 0x7c00 && !(mb & 0x200)) || (mc > 0x7c00 && !(mc & 0x200)) ||
+        (!nan && (ma == 0x7c00 || mb == 0x7c00) && mc == 0x7c00 && ((a ^ b ^ c) & 0x8000));
+    if (invalid) {
+      *exceptions |= RJ_ARITH_EXCEPTION_INVALID;
+    } else if (!nan && ((ma && ma < 0x400) || (mb && mb < 0x400) || (mc && mc < 0x400))) {
+      *exceptions |= RJ_ARITH_EXCEPTION_INPUT_DENORM;
+    }
+  }
   uint16_t exceptional = 0;
   if ((ma == 0 && mb == 0x7c00) || (mb == 0 && ma == 0x7c00)) {
     exceptional = 0xfe00;
@@ -108,7 +133,26 @@ inline uint16_t half_fma_value(uint16_t a, uint16_t b, uint16_t c, uint32_t mode
   }
   uint16_t result = half_fma_narrow(value, saturate, rounding);
   uint32_t omod = (mode >> 6) & 3;
+  if (report) {
+    // FP16_OVFL changes the result, not overflow reporting. The round-to-odd
+    // intermediate retains discarded information even across large exponent gaps.
+    uint16_t rounded = half_fma_narrow(value, false);
+    uint16_t magnitude = rounded & 0x7fff;
+    if (magnitude == 0x7c00) {
+      *exceptions |= RJ_ARITH_EXCEPTION_OVERFLOW | (omod ? 0 : RJ_ARITH_EXCEPTION_INEXACT);
+    } else if (!omod && value != double(f16_to_float(rounded))) {
+      *exceptions |= RJ_ARITH_EXCEPTION_INEXACT;
 
+      // Tininess is detected after significand rounding, before limiting the
+      // exponent: the midpoint immediately below the smallest normal is not tiny.
+      if (std::abs(value) < 0x1p-14 - 0x1p-26) {
+        *exceptions |= RJ_ARITH_EXCEPTION_UNDERFLOW;
+      }
+    }
+    if ((omod == 1 || omod == 2) && magnitude < 0x7c00 && (magnitude >> 10) + omod >= 31) {
+      *exceptions |= RJ_ARITH_EXCEPTION_OVERFLOW;
+    }
+  }
   if (!omod && (flags & RJ_ARITH_FP_FLUSH_OUTPUT_DENORMALS)) {
     uint16_t magnitude = result & 0x7fff;
     const bool away = rounding == ((result & 0x8000) ? 2u : 1u);

@@ -47,7 +47,11 @@ TEST(FpFmaF16W32Gfx12, Arithmetic) {
         ASSERT_EQ(rj_arith_v_fma_f16_w32_gfx12(semantics, exec_mask, 0, r.v + aliasing_offset, r.v,
                                                r.v + 1, r.v + 2, &status),
                   RJ_ARITH_SUCCESS);
-        EXPECT_EQ(status, 0x80000000U);
+        if (semantics != RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL || !exec_mask) {
+          EXPECT_EQ(status, 0x80000000U);
+        } else {
+          EXPECT_EQ(status & 0x80000000U, 0x80000000U);
+        }
         r.expect_preserved(input, aliasing_offset, 1);
         for (int lane = 0; lane < 32; ++lane) {
           uint32_t actual = r.v[aliasing_offset][lane];
@@ -73,7 +77,31 @@ TEST(FpFmaF16W32Gfx12, Arithmetic) {
       }
     }
   }
-  EXPECT_EQ(rj_arith_v_fma_f16_w32_gfx12(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, 0, 0, nullptr,
-                                         nullptr, nullptr, nullptr, nullptr),
-            RJ_ARITH_ERROR_UNSUPPORTED_FP_STATUS);
+
+  // Literal causes from the inherited model and previously validated gfx1201 cases.
+  const struct {
+    uint16_t a, b, c;
+    uint32_t causes;
+  } cases[] = {
+      {0x3c00, 0x3c00, 0, 0},
+      {0, 0x7c00, 0, RJ_ARITH_EXCEPTION_INVALID},
+      {0x7bff, 0x4000, 0, RJ_ARITH_EXCEPTION_OVERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+      {0x3c01, 0x3c01, 0, RJ_ARITH_EXCEPTION_INEXACT},
+      {1, 0x3800, 0,
+       RJ_ARITH_EXCEPTION_INPUT_DENORM | RJ_ARITH_EXCEPTION_UNDERFLOW | RJ_ARITH_EXCEPTION_INEXACT},
+  };
+  for (const auto &test : cases) {
+    for (uint32_t exec_mask : {0U, 1U}) {
+      RegBank r = input;
+      r.v[0][0] = test.a;
+      r.v[1][0] = test.b;
+      r.v[2][0] = test.c;
+      uint32_t status = 0x80000000U | RJ_ARITH_EXCEPTION_FLOAT_DIV0;
+      ASSERT_EQ(rj_arith_v_fma_f16_w32_gfx12(RJ_ARITH_SEMANTICS_BIT_EXACT_EMPIRICAL, exec_mask, 0,
+                                             r.v + 3, r.v, r.v + 1, r.v + 2, &status),
+                RJ_ARITH_SUCCESS);
+      EXPECT_EQ(status,
+                0x80000000U | RJ_ARITH_EXCEPTION_FLOAT_DIV0 | (exec_mask ? test.causes : 0));
+    }
+  }
 }
