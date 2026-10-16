@@ -5,6 +5,7 @@
 
 import sys
 from pathlib import Path
+from typing import List
 
 import pytest
 
@@ -28,6 +29,14 @@ def write_artifact_dir(root: Path, run: str, value: float) -> Path:
     workload_dir.mkdir(parents=True)
     (workload_dir / "sysinfo.csv").write_text("gpu_arch\ngfx942\n", encoding="utf-8")
     return root
+
+
+def append_metric_lines(root: Path, run: str, values: List[float]) -> None:
+    """Append metric rows that produce distinct delta instances."""
+    log_path = root / "logs" / ARCH / f"vcopy_{run}.log"
+    with log_path.open("a", encoding="utf-8") as log_file:
+        for index, value in enumerate(values, start=1):
+            log_file.write(f"| 2.1.{index} | Metric {index} | {value} | Gflop |\n")
 
 
 def test_discover_finds_log_and_workload_dir(tmp_path: Path) -> None:
@@ -61,11 +70,13 @@ def test_discover_dir_without_run_logs_is_clear_error(tmp_path: Path) -> None:
         )
 
 
-def test_report_compares_candidate_dir_against_develop_dir(
+def test_report_compares_candidate_dir_against_baseline_dir(
     tmp_path: Path, monkeypatch: pytest.MonkeyPatch
 ) -> None:
     candidate = write_artifact_dir(tmp_path / "candidate", "single-pass", 10.0)
     baseline = write_artifact_dir(tmp_path / "develop", "develop", 5.0)
+    append_metric_lines(candidate, "single-pass", [10.0, 10.0])
+    append_metric_lines(baseline, "develop", [5.0, 5.0])
     out = tmp_path / "health.html"
     monkeypatch.setattr(report, "compute_medians_for_workload", lambda *_: {})
     monkeypatch.setattr(
@@ -75,10 +86,10 @@ def test_report_compares_candidate_dir_against_develop_dir(
             "generate_metric_health_report.py",
             "--arch",
             ARCH,
-            "--candidate",
-            str(candidate),
-            "--baseline",
+            "-p",
             str(baseline),
+            "-p",
+            str(candidate),
             "--workloads",
             "vcopy",
             "--out",
@@ -92,3 +103,61 @@ def test_report_compares_candidate_dir_against_develop_dir(
     assert "Value deltas vs rocprofiler-compute-develop" in page
     assert "<b>Candidate:</b> this branch" in page
     assert "100.0%" in page
+
+
+def test_report_for_one_path_omits_comparison_sections(
+    tmp_path: Path, monkeypatch: pytest.MonkeyPatch
+) -> None:
+    baseline = write_artifact_dir(tmp_path / "develop", "develop", 5.0)
+    out = tmp_path / "health.html"
+    monkeypatch.setattr(report, "compute_medians_for_workload", lambda *_: {})
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_metric_health_report.py",
+            "--arch",
+            ARCH,
+            "-p",
+            str(baseline),
+            "--workloads",
+            "vcopy",
+            "--out",
+            str(out),
+        ],
+    )
+
+    report.main()
+
+    page = out.read_text(encoding="utf-8")
+    assert "Value deltas vs" not in page
+    assert "<b>Run:</b> rocprofiler-compute-develop" in page
+
+
+def test_report_rejects_more_than_two_paths(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+    capsys: pytest.CaptureFixture[str],
+) -> None:
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [
+            "generate_metric_health_report.py",
+            "--arch",
+            ARCH,
+            "-p",
+            str(tmp_path / "baseline"),
+            "-p",
+            str(tmp_path / "candidate"),
+            "-p",
+            str(tmp_path / "third"),
+            "--out",
+            str(tmp_path / "health.html"),
+        ],
+    )
+
+    with pytest.raises(SystemExit, match="2"):
+        report.main()
+
+    assert "accepts at most two paths" in capsys.readouterr().err
