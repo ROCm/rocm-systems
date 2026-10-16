@@ -5535,16 +5535,59 @@ TEST_F(DevCommCreateTest, RequirementsFilterFails_ReturnsErrorWithoutQueueing) {
 
 
 // ---------------------------------------------------------------------------
+// devrGinContextsTotal sizes the per-context resource regions for the largest
+// ginContextCount any active backend could round nGinContexts up to.
+
+TEST(DevrGinContextsTotal, NoActiveBackends_ReturnsRequested) {
+  struct ncclGinState ginState{};
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 4), 4);
+}
+
+TEST(DevrGinContextsTotal, SingleBackend_RoundsUpToConnectionCount) {
+  struct ncclGinState ginState{};
+  ginState.numActiveBackends = 1;
+  ginState.backends[0].ginCommCount = 3;
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 8), 9);
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 6), 6);
+}
+
+// Branch: the widest backend is not the one that rounds furthest.
+TEST(DevrGinContextsTotal, MixedBackends_TakesLargestRoundedCount) {
+  struct ncclGinState ginState{};
+  ginState.numActiveBackends = 2;
+  ginState.backends[0].ginCommCount = 4;
+  ginState.backends[1].ginCommCount = 3;
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 4), 6);
+
+  // Mirrored order: the further-rounding backend must still win when it is
+  // visited first. Without the max-over-backends accumulator this would return 4.
+  ginState.backends[0].ginCommCount = 3;
+  ginState.backends[1].ginCommCount = 4;
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 4), 6);
+}
+
+// Branch: a backend reporting no connections must not divide by zero.
+TEST(DevrGinContextsTotal, ZeroConnectionBackend_TreatedAsOne) {
+  struct ncclGinState ginState{};
+  ginState.numActiveBackends = 1;
+  ginState.backends[0].ginCommCount = 0;
+  EXPECT_EQ(devrGinContextsTotal(&ginState, 5), 5);
+}
+
+
+// ---------------------------------------------------------------------------
 // ncclDevrCommCreateInternal is where a queued create is actually carried out.
 // This suite covers its GIN request validation, which runs before any resource
-// is touched and rejects combinations the communicator cannot serve.
+// is touched and rejects combinations the communicator cannot serve, and the
+// resource-window sizing that follows it, up to the cuMemCreate call.
 //
-// The body past that gate builds the whole devcomm -- GIN activation, resource
-// windows, barriers -- and is not covered here.
+// The rest of the devcomm build -- symmetric-memory window creation, GIN
+// window registration, barriers -- is not covered here.
 
 class DevrCommCreateInternalTest : public NcclVersionCompatTest {
 protected:
   std::unique_ptr<ncclComm> commStorage;
+  std::unique_ptr<ncclSharedResources> sharedResStorage;
   ncclComm* comm = nullptr;
   ncclDevCommRequirements reqs = NCCL_DEV_COMM_REQUIREMENTS_INITIALIZER;
   ncclDevComm outDevComm{};
@@ -5561,9 +5604,23 @@ protected:
     ncclDevCommCompat_v22902.maxVersion = NCCL_VERSION_CODE;
 
     commStorage = std::make_unique<ncclComm>();  // value-initialised: POD members zeroed
+    sharedResStorage = std::make_unique<ncclSharedResources>();
     comm = commStorage.get();
+    comm->sharedRes = sharedResStorage.get();
     comm->nRanks = 1;
     comm->devrState.lsaSize = 1;
+    comm->devrState.cftSize = 1;
+    comm->devrState.cftMcSize = 1;
+    comm->devrState.granularity = 1;
+  }
+
+  void TearDown() override {
+    while (comm->devrState.teamHead != nullptr) {
+      ncclDevrTeam* next = comm->devrState.teamHead->next;
+      free(comm->devrState.teamHead);
+      comm->devrState.teamHead = next;
+    }
+    NcclVersionCompatTest::TearDown();
   }
 
   ncclResult_t Create() {
@@ -5603,14 +5660,43 @@ TEST_F(DevrCommCreateInternalTest, FullGinRequestedOnRailOnlyComm_ReturnsInvalid
 // connection, so it fails the same support check rather than being ignored.
 //
 // The counterpart -- the same requirements with the flag clear, which requests
-// nothing and passes the gate -- is not tested: it continues into the devcomm
-// build, which this fixture does not set up for.
+// nothing and passes the gate -- is not tested: passing the gate is only
+// observable once the devcomm build completes, and this fixture stops that
+// build at the resource-window cuMemCreate.
 TEST_F(DevrCommCreateInternalTest, GinForceEnable_BehavesAsFullConnection) {
   reqs.ginForceEnable = true;
   reqs.ginConnectionType = NCCL_GIN_CONNECTION_NONE;  // overridden by the flag
   comm->globalGinSupport = NCCL_GIN_CONNECTION_RAIL;
 
   EXPECT_EQ(Create(), ncclInvalidArgument);
+}
+
+// Integration point: the resource-window allocation must use the rounded
+// context count, not merely the helper's result in isolation. Stop at
+// cuMemCreate after recording its requested size to avoid constructing the
+// unrelated symmetric-memory window.
+TEST_F(DevrCommCreateInternalTest, GinSignalRegions_UseLargestRoundedContextCount) {
+  reqs.ginConnectionType = NCCL_GIN_CONNECTION_FULL;
+  // 4 discriminates: ROUNDUP(4, 4) = 4 but ROUNDUP(4, 3) = 6.
+  reqs.ginContextCount = 4;
+  reqs.ginSignalCount = 1;
+  comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
+  comm->sharedRes->ginState.numActiveBackends = 2;
+  comm->sharedRes->ginState.backends[0].ginCommCount = 3;
+  comm->sharedRes->ginState.backends[1].ginCommCount = 4;
+
+  size_t allocationSize = 0;
+  ScopedHook create(g_hipMemCreate,
+                    [&](hipMemGenericAllocationHandle_t*, size_t size, const hipMemAllocationProp*,
+                        unsigned long long) {
+                      allocationSize = size;
+                      return hipErrorInvalidValue;
+                    });
+
+  EXPECT_NE(Create(), ncclSuccess);
+  EXPECT_EQ(create.calls, 1);
+  // ROUNDUP(4, 3) = 6 contexts; shadow and Anvil regions each use 6 * 1 * 8 bytes.
+  EXPECT_EQ(allocationSize, 96u);
 }
 
 
