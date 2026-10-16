@@ -43,6 +43,8 @@ debugpy==1.8.12
     # via ipykernel
 decorator==5.1.1
     # via ipython
+defusedxml==0.7.1
+    # via sphinxcontrib-datatemplates
 deprecated==1.2.14
     # via pygithub
 docutils==0.21.2
@@ -163,7 +165,7 @@ pygments==2.20.0
     #   ipython
     #   pydata-sphinx-theme
     #   sphinx
-pyjwt[crypto]==2.8.0
+pyjwt[crypto]==2.15.0
     # via pygithub
 pynacl==1.6.2
     # via pygithub
@@ -176,6 +178,7 @@ pyyaml==6.0.1
     #   myst-parser
     #   rocm-docs-core
     #   sphinx-external-toc
+    #   sphinxcontrib-datatemplates
 pyzmq==26.2.0
     # via
     #   ipykernel
@@ -214,6 +217,8 @@ sphinx==7.3.7
     #   sphinx-design
     #   sphinx-external-toc
     #   sphinx-notfound-page
+    #   sphinxcontrib-datatemplates
+    #   sphinxcontrib-runcmd
 sphinx-book-theme==1.1.4
     # via rocm-docs-core
 sphinx-copybutton==0.5.2
@@ -268,6 +273,7 @@ typing-extensions==4.12.0
     #   myst-nb
     #   pydata-sphinx-theme
     #   pygithub
+    #   pyjwt
     #   referencing
     #   sqlalchemy
 urllib3==2.6.3
