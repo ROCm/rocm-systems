@@ -237,7 +237,7 @@ apply_worker_profile() {
       THEROCK_STYLE=rocm72
       SKIP_MEGA_ON_BUILD_FAIL=1
       SOC_LEAVES=(MI250 MI250X)
-      VENV_KIND=site-865-first
+      VENV_KIND=site-home-venv-first
       META_SITE=1
       ;;
     gfx950)
@@ -293,7 +293,7 @@ case "$THEROCK_STYLE" in
     fi
     ;;
   fixed)
-    THEROCK=${THEROCK_ARG:-/home/AMD/${USER}/workdir/therock-work/therock-rocm-7.15.0a20260728}
+    THEROCK=${THEROCK_ARG:-${HOME}/workdir/therock-work/therock-rocm-7.15.0a20260728}
     ;;
   rocm72)
     THEROCK=${THEROCK_ARG:-/opt/rocm-7.2.0}
@@ -308,7 +308,7 @@ case "$THEROCK_STYLE" in
 esac
 
 if [[ "$LOG_STYLE" == "therock" ]]; then
-  LOG=${LOG_ARG:-/home/AMD/${USER}/workdir/metric_health_${TAG}.log}
+  LOG=${LOG_ARG:-${HOME}/workdir/metric_health_${TAG}.log}
 else
   LOG=${LOG_ARG:-${HOME}/metric_health_${TAG}.log}
 fi
@@ -350,17 +350,17 @@ export_rocm_common() {
 source_site_venvs() {
   local venv
   local -a venvs
-  if [[ "$VENV_KIND" == "site-865-first" ]]; then
+  if [[ "$VENV_KIND" == "site-home-venv-first" ]]; then
     venvs=(
-      "${HOME}/workdir-venv/bin/activate"
-      "${HOME}/workdir/venv-single-pass/bin/activate"
+      "${HOME}/rocprofiler-compute-venv/bin/activate"
+      "${HOME}/rocprofiler-compute/venv-single-pass/bin/activate"
       "${HOME}/rocm-systems/projects/rocprofiler-compute/venv/bin/activate"
       /tmp/rpc_venv/bin/activate
     )
   else
     venvs=(
-      "${HOME}/workdir/venv-single-pass/bin/activate"
-      "${HOME}/workdir-venv/bin/activate"
+      "${HOME}/rocprofiler-compute/venv-single-pass/bin/activate"
+      "${HOME}/rocprofiler-compute-venv/bin/activate"
       "${HOME}/rocm-systems/projects/rocprofiler-compute/venv/bin/activate"
       /tmp/rpc_venv/bin/activate
     )
