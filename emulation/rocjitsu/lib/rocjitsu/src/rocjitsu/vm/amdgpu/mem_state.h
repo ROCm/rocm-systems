@@ -10,11 +10,14 @@
 /// pipeline subclasses own the initiate/complete logic that operates
 /// on this state.
 
+#include "rocjitsu/isa/arch/amdgpu/shared/block_memory.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/scalar_operand_selectors.h"
 #include "rocjitsu/isa/instruction.h"
+#include "rocjitsu/isa/isa_traits.h"
 #include "rocjitsu/vm/amdgpu/atomic_op.h"
 #include "rocjitsu/vm/amdgpu/buffer_format.h"
 #include "rocjitsu/vm/amdgpu/gpu_vm.h"
+#include "rocjitsu/vm/amdgpu/lds.h"
 #include "rocjitsu/vm/amdgpu/mtype.h"
 #include "rocjitsu/vm/amdgpu/wait_counters.h"
 
@@ -83,7 +86,9 @@ public:
   uint32_t num_dwords = 0;
   uint32_t elem_size = 4;
   bool sign_extend = false;
+  /// Loads and returning atomics write response_data to dst_register.
   bool is_load = true;
+  AtomicOp atomic_op = AtomicOp::NONE;
   Mtype mtype = Mtype::RW;
   WaitCounterType wait_counter_type = WaitCounterType::LGKMCNT;
   uint16_t load_dword_mask = 0xffff;
@@ -154,10 +159,16 @@ public:
   }
   std::array<uint64_t, 64> per_lane_addr = {};
   uint64_t lane_mask = 0;
-  /// Optional per-element lane validity for untyped DWORD-component bounds.
+  /// Optional per-element lanes requesting memory traffic. Buffer bounds can
+  /// narrow later elements; M0-masked blocks can have arbitrary holes.
   /// Empty means every element uses lane_mask; otherwise the container has
   /// exactly num_elems masks and lane_mask is their union.
   ElementLaneMasks element_lane_masks;
+  /// Captured M0 distinguishes preserved block destinations from buffer-OOB
+  /// elements, which are zero-filled on load despite requesting no traffic.
+  uint32_t block_dword_mask = kUnmaskedBlockDwordMask;
+  /// Block operands validate ownership per DWORD, including with all bits enabled.
+  bool is_block_transfer = false;
   uint64_t exec_mask = 0; ///< Effective issue mask set by address calculation. This normally
                           ///< snapshots EXEC, but ISA exceptions may replace it (for example,
                           ///< CDNA5 DS transpose loads use an all-lanes mask), while
@@ -232,7 +243,8 @@ public:
   /// L2 ADD on qualified RDNA4 targets selects the incoming NaN first.
   /// Indexed LDS has an independent source-first policy.
   bool atomic_source_nan_first = false;
-  bool lds_dst = false; ///< Buffer load with LDS bit: write to LDS, not VGPRs.
+  bool lds_dword_extend = false; ///< Narrow LDS transfers extend to a full DWORD per lane.
+  bool lds_dst = false;          ///< Write the loaded payload to LDS instead of VGPRs.
   /// Reference LDS address for LDS-destination loads. For ordinary LDS-dst
   /// paths this may include the lane-0 destination offset. For cluster
   /// multicast this must be exactly Wavefront::lds_base(), the source WG
@@ -269,6 +281,28 @@ public:
   std::vector<uint8_t> ds2_response_data;
   TranslatedMemoryProgress translated;
 
+  /// Capture the issue-time M0 mask and populate element_lane_masks from the
+  /// current lane_mask. An empty mask clears lane_mask; exec_mask is retained
+  /// so the instruction still participates in wait-counter accounting.
+  void set_block_dword_mask(uint32_t mask) {
+    assert(elem_size == sizeof(uint32_t) && num_elems == kBlockDwordCount);
+    is_block_transfer = true;
+    block_dword_mask = mask;
+    element_lane_masks.assign(kBlockDwordCount, 0);
+    for (uint32_t i = 0; i < kBlockDwordCount; ++i) {
+      if (block_dword_enabled(i))
+        element_lane_masks[i] = lane_mask;
+    }
+    if (mask == 0)
+      lane_mask = 0;
+  }
+
+  /// Whether the captured block mask enables this DWORD. Other instructions
+  /// retain the all-ones default; results wider than a block are not masked.
+  [[nodiscard]] bool block_dword_enabled(uint32_t word) const {
+    return amdgpu::block_dword_enabled(block_dword_mask, word);
+  }
+
   /// Number of consecutive VGPRs written starting at dst_reg_base.
   [[nodiscard]] uint32_t destination_vgpr_count() const {
     if (buffer_components)
@@ -285,6 +319,38 @@ public:
     return lds_stack_inputs ? 1u : destination_vgpr_count();
   }
 };
+
+/// CDNA1-4 buffer-OOB reads still write zeros to legal LDS destinations.
+/// Later architectures suppress the LDS write for lanes that did not request data.
+inline uint64_t lds_destination_write_mask(const VectorMemState &state, rj_code_arch_t arch) {
+  uint64_t mask = arch_is_cdna_4_or_lower(arch) ? state.exec_mask : state.lane_mask;
+  if (state.lds_per_lane_addr)
+    for (uint32_t lane = 0; lane < state.wf_size; ++lane)
+      if (state.per_lane_lds_addr[lane] == kInvalidLdsAddress)
+        mask &= ~(uint64_t{1} << lane);
+  return mask;
+}
+
+/// Capture ordinary LDS-destination addresses and suppress out-of-allocation reads.
+/// Payload size and lane stride differ for DWORDX3: the fourth DWORD is untouched.
+inline void prepare_lds_destination(VectorMemState &state, uint32_t allocation_base,
+                                    uint32_t allocation_size, int64_t offset,
+                                    uint32_t payload_bytes, uint32_t lane_stride) {
+  state.lds_base = allocation_base;
+  state.lds_per_lane_addr = true;
+  state.per_lane_lds_addr.fill(kInvalidLdsAddress);
+  for (uint32_t lane = 0; lane < state.wf_size; ++lane) {
+    if (!(state.exec_mask & (uint64_t{1} << lane)))
+      continue;
+    const int64_t relative = offset + static_cast<int64_t>(lane) * lane_stride;
+    if (relative < 0 || static_cast<uint64_t>(relative) + payload_bytes > allocation_size ||
+        static_cast<uint64_t>(allocation_base) + relative + payload_bytes > UINT32_MAX) {
+      state.lane_mask &= ~(uint64_t{1} << lane);
+      continue;
+    }
+    state.per_lane_lds_addr[lane] = allocation_base + static_cast<uint32_t>(relative);
+  }
+}
 
 /// @brief Reject a vector-memory instruction before it reaches a memory pipeline.
 /// @details Preserve exec_mask so normal load completion semantics treat every

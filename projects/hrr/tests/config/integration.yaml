@@ -50,6 +50,9 @@ cases:
   Unit_HRR_CaptureActiveMarker: {}
   Unit_HRR_CaptureActiveMarker_Direct: {}
   Unit_HRR_CaptureArchiveIsPrivate: {}
+  Unit_HRR_CaptureCapabilities: {}
+  Unit_HRR_CaptureCapabilitiesImport_Direct: {}
+  Unit_HRR_CaptureCapabilities_Direct: {}
   Unit_HRR_CaptureCrashDuringFork: {}
   Unit_HRR_CaptureCrashDuringFork_Direct: {}
   Unit_HRR_CaptureCrashOnSmallStack: {}
@@ -148,6 +151,8 @@ cases:
   Unit_HRR_Fork_Direct: {}
   Unit_HRR_ForkedChildRecordsAfterShutdown: {}
   Unit_HRR_ForkedChildRecordsAfterShutdown_Direct: {}
+  Unit_HRR_ForkedChildStaysIncomplete: {}
+  Unit_HRR_ForkedChildStaysIncomplete_Direct: {}
   Unit_HRR_GpuWorkload_Direct: {}
   Unit_HRR_GraphExplicitRoundtrip: {}
   Unit_HRR_GraphExplicit_Direct: {}
@@ -163,6 +168,7 @@ cases:
   Unit_HRR_HostMemWorkload_Direct: {}
   Unit_HRR_HostRegLaunchRoundtrip: {}
   Unit_HRR_HostRegLaunch_Direct: {}
+  Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime: {}
   Unit_HRR_KernelArgs_Direct: {}
   Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled: {}
   Unit_HRR_LoggingRoundtrip: {}

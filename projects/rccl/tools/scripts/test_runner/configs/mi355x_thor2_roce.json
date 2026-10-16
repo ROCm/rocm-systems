@@ -697,6 +697,16 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "TopoGpuDev",
+          "description": "Topology GPU dev index tests",
+          "test_filter": "TopoGpuDev.*"
+        },
+        {
+          "name": "P2pPxnLevel1NetId",
+          "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
+          "test_filter": "P2pPxnLevel1NetId.*"
+        },
+        {
           "name": "DdaIpcEligibilityTest",
           "description": "Dda IPC eligibility tests",
           "test_filter": "DdaIpcEligibilityTest.*"
@@ -1523,6 +1533,11 @@
           "name": "AsymmetricVisibility.CommInitRankAllReduce",
           "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES",
           "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"
+        },
+        {
+          "name": "AsymmetricVisibility.OneGpuPerRankAllReduce",
+          "description": "Topology GPU dev index when each rank sees only its own GPU",
+          "test_filter": "AsymmetricVisibility.OneGpuPerRankAllReduce"
         }
       ]
     },
@@ -3112,6 +3127,16 @@
           "description": "Interleaved CE AllGather and SM AllReduce on same comm; validates no state corruption",
           "test_filter": "CeMPI_Stress.InterleavedCEAllGatherAndSMAllReduce",
           "timeout": 300
+        },
+        {
+          "name": "CE_AllReduce_MaxOp_2Ranks",
+          "description": "128 MiB Max AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MaxOp128MiB"
+        },
+        {
+          "name": "CE_AllReduce_MinOp_2Ranks",
+          "description": "128 MiB Min AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MinOp128MiB"
         }
       ]
     },
@@ -4643,6 +4668,28 @@
         }
       ]
     },
+    "gin_allgather_sym": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_AllGather_Symmetric",
+          "description": "Symmetric-memory multi-node AllGather (RailRing_LsaST): GIN ring over the rail team + LSA store broadcast; requires >=2 ranks/node across >=2 nodes",
+          "test_filter": "GinMPIDeviceTests.AllGather_Symmetric*"
+        }
+      ]
+    },
     "gin_negative": {
       "extends": "default",
       "is_gtest": true,
@@ -5422,6 +5469,12 @@
       "name": "GIN ReduceScatter - Symmetric",
       "description": "Symmetric-memory ReduceScatter (RailA2A_LsaLD) sum + avg with 2 ranks/node across 2 nodes",
       "config": "gin_reducescatter_sym",
+      "enabled": true
+    },
+    {
+      "name": "GIN AllGather - Symmetric",
+      "description": "Symmetric-memory AllGather (RailRing_LsaST) with 2 ranks/node across 2 nodes",
+      "config": "gin_allgather_sym",
       "enabled": true
     },
     {
