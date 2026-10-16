@@ -8094,6 +8094,19 @@ def test_generated_memory_paths_use_decoded_issue_metadata(
         issue_descriptors += source.count('set_memory_issue_info(')
         assert 'flags_ |= MEMORY_OP;' not in source, path
         assert 'MemoryCompletionClass::UNCLASSIFIED' not in source, path
+        # Check every VMEM model, including instructions without an execution
+        # body, so partial regeneration cannot leave stale EXP obligations.
+        # DS and LDS-direct models have separate EXP policies.
+        if path.stem in {
+            'mubuf',
+            'mtbuf',
+            'flat',
+            'mimg',
+            'vflat',
+            'vglobal',
+            'vscratch',
+        }:
+            assert 'WaitCounterType::EXPCNT' not in source, path
     assert issue_descriptors > 0
 
 
