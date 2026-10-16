@@ -10,16 +10,21 @@
 
 #include <gtest/gtest.h>
 
+#include <fcntl.h>
+#include <unistd.h>
+
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <set>
 #include <string>
+#include <utility>
 #include <vector>
 
 #include "ScopedHook.h"
 #include "fakes/hip_fakes.h"
 #include "fakes/nccl_fakes.h"
+#include "fakes/rocmwrap_fakes.h"
 #include "fakes/topo_net_stubs.h"
 #include "fakes/topo_stubs.h"
 
@@ -59,6 +64,19 @@ struct FakeCollNet {
 
   ncclResult_t closeListenResult = ncclSuccess, closeCollResult = ncclSuccess;
   std::vector<void*> closedListens, closedColls;
+
+  struct MrCall {
+    void* comm;
+    void* data;
+    size_t size;
+    int type;
+    uint64_t offset;
+    int fd;
+  };
+  std::vector<MrCall> regMrs, regMrDmaBufs;
+  ncclResult_t regMrResult = ncclSuccess, regMrDmaBufResult = ncclSuccess;
+  std::vector<std::pair<void*, void*>> deregMrs;  // (comm, mhandle)
+  ncclResult_t deregMrResult = ncclSuccess;
 
   static ncclNetProperties_t DefaultProps() {
     ncclNetProperties_t p{};
@@ -100,6 +118,22 @@ struct FakeCollNet {
     return closeCollResult;
   }
 
+  // An mhandle is the registered address, so tests can tell which buffer it came from.
+  ncclResult_t regMr(void* comm, void* data, size_t size, int type, void** mhandle) {
+    regMrs.push_back({comm, data, size, type, 0, -1});
+    *mhandle = data;
+    return regMrResult;
+  }
+  ncclResult_t regMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd, void** mhandle) {
+    regMrDmaBufs.push_back({comm, data, size, type, offset, fd});
+    *mhandle = data;
+    return regMrDmaBufResult;
+  }
+  ncclResult_t deregMr(void* comm, void* mhandle) {
+    deregMrs.push_back({comm, mhandle});
+    return deregMrResult;
+  }
+
   ncclCollNet_t vtable() {
     ncclCollNet_t v{};
     v.name = "FakeCollNet";
@@ -108,6 +142,9 @@ struct FakeCollNet {
     v.connect = &FakeCollNet::TrampConnect;
     v.closeListen = &FakeCollNet::TrampCloseListen;
     v.closeColl = &FakeCollNet::TrampCloseColl;
+    v.regMr = &FakeCollNet::TrampRegMr;
+    v.regMrDmaBuf = &FakeCollNet::TrampRegMrDmaBuf;
+    v.deregMr = &FakeCollNet::TrampDeregMr;
     return v;
   }
 
@@ -123,6 +160,14 @@ struct FakeCollNet {
   }
   static ncclResult_t TrampCloseListen(void* comm) { return g_activeCollNet->closeListen(comm); }
   static ncclResult_t TrampCloseColl(void* comm) { return g_activeCollNet->closeColl(comm); }
+  static ncclResult_t TrampRegMr(void* comm, void* data, size_t size, int type, void** mhandle) {
+    return g_activeCollNet->regMr(comm, data, size, type, mhandle);
+  }
+  static ncclResult_t TrampRegMrDmaBuf(void* comm, void* data, size_t size, int type, uint64_t offset, int fd,
+                                       void** mhandle) {
+    return g_activeCollNet->regMrDmaBuf(comm, data, size, type, offset, fd, mhandle);
+  }
+  static ncclResult_t TrampDeregMr(void* comm, void* mhandle) { return g_activeCollNet->deregMr(comm, mhandle); }
 };
 
 // Every device and host buffer goes through this ledger, so TearDown releases exactly
@@ -1017,6 +1062,517 @@ TEST_F(CollNetConnectMicrotest, Free_EitherSide_ReleasesNothing) {
   EXPECT_EQ(sendFree(&comm_, &conn_), ncclSuccess);
   EXPECT_EQ(recvFree(&comm_, &conn_), ncclSuccess);
   EXPECT_EQ(hostFrees_ + devFrees_, 0);
+}
+
+// ---------------------------------------------------------------------------
+// Proxy-side connect and free (sendProxyConnect, recvProxyConnect, sendProxyFree, recvProxyFree)
+// ---------------------------------------------------------------------------
+
+// Each export gets a higher fd number than any before it, so a stale fd can't match by reuse.
+std::vector<int> g_exportedFds;
+int g_nextExportFd = 200;
+hsa_status_t FakeExportDmaBuf(const void*, size_t, int* fd, uint64_t* offset) {
+  int devNull = open("/dev/null", O_RDONLY);
+  *fd = fcntl(devNull, F_DUPFD, g_nextExportFd++);
+  close(devNull);
+  *offset = 0x40;
+  g_exportedFds.push_back(*fd);
+  return HSA_STATUS_SUCCESS;
+}
+hsa_status_t FailExportDmaBuf(const void*, size_t, int*, uint64_t*) { return HSA_STATUS_ERROR; }
+bool FdOpen(int fd) { return fcntl(fd, F_GETFD) != -1; }
+
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+// Builds with the cuMem DMA-BUF export: each export hands back a fresh fd, recorded here.
+struct CuMemExport {
+  void* ptr;
+  size_t size;
+  unsigned long long flags;
+  int fd;
+};
+struct CuMemExportRecorder : std::vector<CuMemExport> {
+  hipError_t result = hipSuccess;
+  void Install() {
+    g_hipMemGetHandleForAddressRange = [this](void* handle, hipDeviceptr_t ptr, size_t size, hipMemRangeHandleType,
+                                              unsigned long long flags) {
+      if (result != hipSuccess) return result;
+      int devNull = open("/dev/null", O_RDONLY);
+      int fd = fcntl(devNull, F_DUPFD, g_nextExportFd++);  // never a number something else reuses
+      close(devNull);
+      *static_cast<int*>(handle) = fd;
+      push_back({ptr, size, flags, fd});
+      return hipSuccess;
+    };
+  }
+  void CloseOpen() {
+    for (const auto& e : *this) {
+      if (FdOpen(e.fd)) close(e.fd);
+    }
+  }
+};
+#endif
+
+// Per-side entry points, so one typed suite covers both proxy connects and frees.
+struct SendSide {
+  using Res = sendResources;
+  static constexpr int kAppendSlot = 0;
+  static ncclResult_t Connect(ncclProxyConnection* c, ncclProxyState* ps, void* req, int reqSize, void* resp,
+                              int respSize, int* done) {
+    return sendProxyConnect(c, ps, req, reqSize, resp, respSize, done);
+  }
+  static ncclResult_t Free(ncclProxyConnection* c, ncclProxyState* ps) { return sendProxyFree(c, ps); }
+  static void** Mhandles(Res* r) { return r->sendMhandles; }
+};
+struct RecvSide {
+  using Res = recvResources;
+  static constexpr int kAppendSlot = 1;
+  static ncclResult_t Connect(ncclProxyConnection* c, ncclProxyState* ps, void* req, int reqSize, void* resp,
+                              int respSize, int* done) {
+    return recvProxyConnect(c, ps, req, reqSize, resp, respSize, done);
+  }
+  static ncclResult_t Free(ncclProxyConnection* c, ncclProxyState* ps) { return recvProxyFree(c, ps); }
+  static void** Mhandles(Res* r) { return r->mhandles; }
+};
+
+// The connection's proxy setup already ran: its resources name the NIC, and the shared
+// table holds the listen comm the recv setup created.
+template <typename Side>
+class CollNetProxyConnectMicrotest : public CollNetMicrotestBase {
+ protected:
+  using Res = typename Side::Res;
+  static constexpr int kDev = 2;
+  static constexpr int kRanks = 4;
+  static constexpr int kRank = 1;
+  static constexpr int kChannels = 2;
+  static constexpr int kBuffSize = 1 << 12;
+  static constexpr int kPoolSize = 2 * kChannels * kBuffSize;
+
+  ncclProxyConnection conn_{};
+  ncclCollNetSharedRes* shared_ = static_cast<ncclCollNetSharedRes*>(calloc(1, sizeof(ncclCollNetSharedRes)));
+  ncclConnect connectInfos_[kRanks]{};
+  collNetConnectArgs args_{kRank, kRanks, connectInfos_};
+  connectMap* resp_ = reinterpret_cast<connectMap*>(0x1);
+  int done_ = -1;
+  void* reqFifo_ = reinterpret_cast<void*>(0x4000);
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+  CuMemExportRecorder exports_;
+#endif
+
+  void SetUp() override {
+    CollNetMicrotestBase::SetUp();
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+    exports_.Install();
+#endif
+    shared_->refCount = 2;  // this connection's and the test's, so a free never releases it unasked
+    shared_->nChannels = kChannels;
+    shared_->buffSize = kBuffSize;
+    auto* table = static_cast<sharedResources*>(calloc(1, sizeof(sharedResources)));
+    table->collNetListenComms[kDev] = &net_.listenComm;
+    shared_->resources = table;
+    conn_.collNet = shared_;
+    NewConn();
+    // What the recv side published for the send side.
+    auto* info = reinterpret_cast<collNetSendConnectInfo*>(connectInfos_ + kRank);
+    info->reqFifo = reqFifo_;
+    for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) info->mhandles[p] = reinterpret_cast<void*>(0x100 + p);
+    g_exportedFds.clear();
+    g_nextExportFd = 200;
+  }
+
+  void TearDown() override {
+    DropConn();
+    if (shared_) {
+      free(shared_->resources);
+      free(shared_);
+    }
+    for (int fd : g_exportedFds) {
+      if (FdOpen(fd)) close(fd);
+    }
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+    exports_.CloseOpen();
+#endif
+    ResetRocmWrapFakes();
+    CollNetMicrotestBase::TearDown();
+  }
+
+  // Fresh resources for a connection on the same shared state; keeps the GDR choice.
+  void NewConn() {
+    auto* r = static_cast<Res*>(calloc(1, sizeof(Res)));
+    r->netDev = kDev;
+    if (Res* old = R()) {
+      r->useGdr = old->useGdr;
+      r->useDmaBuf = old->useDmaBuf;
+    }
+    DropConn();
+    conn_.transportResources = r;
+  }
+  void DropConn() {
+    if (Res* r = R()) free(r->gdrDesc);
+    free(conn_.transportResources);
+    conn_.transportResources = nullptr;
+  }
+
+  Res* R() { return static_cast<Res*>(conn_.transportResources); }
+  void UseGdr(bool dmaBuf = false) {
+    R()->useGdr = ncclTopoGdrModePci;
+    R()->useDmaBuf = dmaBuf;
+  }
+  char* Pool() { return NCCL_NET_MAP_GET_POINTER(&R()->map, cpu, buffs[NCCL_PROTO_SIMPLE]); }
+  void* PoolMhandle() { return Side::Mhandles(R())[NCCL_PROTO_SIMPLE]; }
+
+  ncclResult_t Connect(int reqSize = sizeof(collNetConnectArgs), int respSize = sizeof(connectMap*)) {
+    return Side::Connect(&conn_, &proxyState_, &args_, reqSize, &resp_, respSize, &done_);
+  }
+  // On success the connection's resources are gone.
+  ncclResult_t Free() {
+    ncclResult_t ret = Side::Free(&conn_, &proxyState_);
+    if (ret == ncclSuccess) conn_.transportResources = nullptr;
+    return ret;
+  }
+};
+
+using CollNetSides = ::testing::Types<SendSide, RecvSide>;
+template <typename Side>
+using CollNetProxyConnectBothMicrotest = CollNetProxyConnectMicrotest<Side>;
+TYPED_TEST_SUITE(CollNetProxyConnectBothMicrotest, CollNetSides);
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, WrongRequestSize_RejectedBeforeConnecting) {
+  EXPECT_EQ(this->Connect(sizeof(collNetConnectArgs) - 1), ncclInternalError);
+  EXPECT_EQ(this->net_.connectCalls, 0);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, HostBuffers_MapsControlWordsAndRegistersSharedPool) {
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  auto* r = this->R();
+  EXPECT_EQ(this->net_.connectCalls, 1);
+  EXPECT_EQ(this->net_.lastConnectRank, this->kRank);
+  EXPECT_EQ(this->net_.lastConnectRanks, this->kRanks);
+  EXPECT_EQ(r->collNetComm, &this->net_.collComm);
+  EXPECT_EQ(r->collNetRank, this->kRank);
+  EXPECT_EQ(this->conn_.proxyAppendPtr, this->shared_->proxyAppend + 2 * this->kDev + TypeParam::kAppendSlot);
+  EXPECT_EQ(this->resp_, &r->map);
+  // ncclSendMem then ncclRecvMem in one host allocation the GPU sees at the same address.
+  char* host = r->map.mems[NCCL_NET_MAP_HOSTMEM].cpuPtr;
+  EXPECT_EQ((char*)r->sendMem, host);
+  EXPECT_EQ((char*)r->recvMem, host + sizeof(ncclSendMem));
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_HOSTMEM].gpuPtr, host);
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_HOSTMEM].size, (int)(sizeof(ncclSendMem) + sizeof(ncclRecvMem)));
+  EXPECT_EQ(r->gdcSync, nullptr);
+  EXPECT_EQ(this->Pool(), this->shared_->hostBuff);
+  EXPECT_FALSE(NCCL_NET_MAP_DEV_MEM(&r->map, buffs[NCCL_PROTO_SIMPLE]));
+  ASSERT_EQ(this->net_.regMrs.size(), 1u);
+  EXPECT_EQ(this->net_.regMrs[0].comm, &this->net_.collComm);
+  EXPECT_EQ(this->net_.regMrs[0].data, this->shared_->hostBuff);
+  EXPECT_EQ(this->net_.regMrs[0].size, (size_t)this->kPoolSize);
+  EXPECT_EQ(this->net_.regMrs[0].type, NCCL_PTR_HOST);
+  EXPECT_EQ(this->PoolMhandle(), this->shared_->hostBuff);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, Gdr_RegistersDevicePoolAsCuda) {
+  this->UseGdr();
+
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  EXPECT_EQ(this->Pool(), this->shared_->cudaBuff);
+  EXPECT_TRUE(NCCL_NET_MAP_DEV_MEM(&this->R()->map, buffs[NCCL_PROTO_SIMPLE]));
+  ASSERT_EQ(this->net_.regMrs.size(), 1u);
+  EXPECT_EQ(this->net_.regMrs[0].data, this->shared_->cudaBuff);
+  EXPECT_EQ(this->net_.regMrs[0].type, NCCL_PTR_CUDA);
+  EXPECT_EQ(this->PoolMhandle(), this->shared_->cudaBuff);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, CollNetConnectFails_AnswersNoMapWithoutBuffers) {
+  this->net_.connectResult = ncclSystemError;
+
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  EXPECT_EQ(this->resp_, nullptr);
+  EXPECT_EQ(this->hostAllocs_, 0);
+  EXPECT_EQ(this->conn_.proxyAppendPtr, nullptr);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, WrongResponseSize_RejectedWithoutBuffers) {
+  EXPECT_EQ(this->Connect(sizeof(collNetConnectArgs), sizeof(connectMap)), ncclInternalError);
+  EXPECT_EQ(this->hostAllocs_, 0);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, DependencyFails_ReturnsError) {
+  this->net_.regMrResult = ncclSystemError;
+  EXPECT_EQ(this->Connect(), ncclSystemError);
+  EXPECT_EQ(this->resp_, reinterpret_cast<connectMap*>(0x1));
+
+  this->net_.regMrResult = ncclSuccess;
+  this->NewConn();
+  g_hipHostMalloc = [](void**, size_t, unsigned) { return hipErrorOutOfMemory; };
+  EXPECT_NE(this->Connect(), ncclSuccess);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, CloseListenFails_ReturnsError) {
+  this->net_.closeListenResult = ncclSystemError;
+
+  EXPECT_EQ(this->Connect(), ncclSystemError);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, HsaDmaBuf_RegistersPoolByExportedFd) {
+  this->UseGdr(/*dmaBuf=*/true);
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  EXPECT_TRUE(this->net_.regMrs.empty());
+  ASSERT_EQ(this->net_.regMrDmaBufs.size(), 1u);
+  const auto& mr = this->net_.regMrDmaBufs[0];
+  EXPECT_EQ(mr.comm, &this->net_.collComm);
+  EXPECT_EQ(mr.data, this->shared_->cudaBuff);
+  EXPECT_EQ(mr.size, (size_t)this->kPoolSize);
+  EXPECT_EQ(mr.type, NCCL_PTR_CUDA);
+  ASSERT_EQ(g_exportedFds.size(), 1u);
+  EXPECT_EQ(mr.fd, g_exportedFds[0]);
+  EXPECT_EQ(this->PoolMhandle(), this->shared_->cudaBuff);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, HsaDmaBufFails_FallsBackToRegMr) {
+  this->UseGdr(/*dmaBuf=*/true);
+  pfn_hsa_amd_portable_export_dmabuf = FailExportDmaBuf;
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+  EXPECT_EQ(this->net_.regMrs.size(), 1u);
+
+  this->NewConn();
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  this->net_.regMrDmaBufResult = ncclSystemError;
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  ASSERT_EQ(this->net_.regMrs.size(), 2u);
+  EXPECT_EQ(this->net_.regMrs[1].type, NCCL_PTR_CUDA);
+  EXPECT_EQ(this->PoolMhandle(), this->shared_->cudaBuff);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, DmaBufNotUsable_RegistersWithRegMrWithoutExporting) {
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  this->UseGdr(/*dmaBuf=*/false);
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  this->NewConn();
+  this->R()->useGdr = ncclTopoGdrModeDisable;
+  this->R()->useDmaBuf = 1;
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  this->NewConn();
+  this->UseGdr(/*dmaBuf=*/true);
+  this->vtable_.regMrDmaBuf = nullptr;
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  this->NewConn();
+  pfn_hsa_amd_portable_export_dmabuf = nullptr;
+  this->vtable_ = this->net_.vtable();
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  EXPECT_EQ(this->net_.regMrs.size(), 4u);
+  EXPECT_TRUE(this->net_.regMrDmaBufs.empty());
+  EXPECT_TRUE(g_exportedFds.empty());
+}
+
+#if CUDA_VERSION >= 11070 || NCCL_CUMEM_DMABUF_EXPORT_GATE
+TYPED_TEST(CollNetProxyConnectBothMicrotest, CuMemDmaBuf_RegistersPoolByCuMemFdAndClosesIt) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  this->UseGdr(/*dmaBuf=*/true);
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;  // must not be needed
+  this->shared_->size = this->kPoolSize;                   // pool already allocated
+  this->shared_->cudaBuff = static_cast<char*>(this->Alloc(this->kPoolSize));
+
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+
+  ASSERT_EQ(this->exports_.size(), 1u);
+  EXPECT_EQ(this->exports_[0].ptr, this->shared_->cudaBuff);
+  EXPECT_EQ(this->exports_[0].size, (size_t)this->kPoolSize);
+  EXPECT_EQ(this->exports_[0].flags, (unsigned long long)getHandleForAddressRangeFlags(ncclTopoGdrModePci));
+  ASSERT_EQ(this->net_.regMrDmaBufs.size(), 1u);
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].fd, this->exports_[0].fd);
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].offset, 0u);
+  EXPECT_EQ(this->net_.regMrDmaBufs[0].type, NCCL_PTR_CUDA);
+  EXPECT_FALSE(FdOpen(this->exports_[0].fd));
+  EXPECT_TRUE(this->net_.regMrs.empty());
+  EXPECT_TRUE(g_exportedFds.empty());
+  EXPECT_EQ(this->PoolMhandle(), this->shared_->cudaBuff);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, CuMemDmaBufFails_ClosesFdAndFallsBack) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  this->UseGdr(/*dmaBuf=*/true);
+  this->shared_->size = this->kPoolSize;
+  this->shared_->cudaBuff = static_cast<char*>(this->Alloc(this->kPoolSize));
+  this->exports_.result = hipErrorNotSupported;
+  pfn_hsa_amd_portable_export_dmabuf = FakeExportDmaBuf;
+  ASSERT_EQ(this->Connect(), ncclSuccess);  // export refused: the HSA exporter takes over
+  EXPECT_EQ(g_exportedFds.size(), 1u);
+
+  this->NewConn();
+  this->exports_.result = hipSuccess;
+  pfn_hsa_amd_portable_export_dmabuf = nullptr;
+  this->net_.regMrDmaBufResult = ncclSystemError;
+  ASSERT_EQ(this->Connect(), ncclSuccess);  // registration refused: plain regMr takes over
+
+  ASSERT_EQ(this->exports_.size(), 1u);
+  EXPECT_FALSE(FdOpen(this->exports_[0].fd));
+  ASSERT_EQ(this->net_.regMrs.size(), 1u);
+  EXPECT_EQ(this->net_.regMrs[0].type, NCCL_PTR_CUDA);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, CuMemDmaBufAndRegMrFail_LeavesOtherDescriptorsOpen) {
+  ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
+  this->UseGdr(/*dmaBuf=*/true);
+  this->shared_->size = this->kPoolSize;
+  this->shared_->cudaBuff = static_cast<char*>(this->Alloc(this->kPoolSize));
+  this->net_.regMrDmaBufResult = ncclSystemError;
+  // The plugin opens a descriptor after the export fd is closed, so it can reuse that number.
+  static int pluginFd;
+  pluginFd = -1;
+  this->vtable_.regMr = [](void*, void*, size_t, int, void**) {
+    pluginFd = open("/dev/null", O_RDONLY);
+    return ncclSystemError;
+  };
+
+  EXPECT_EQ(this->Connect(), ncclSystemError);
+
+  ASSERT_GE(pluginFd, 0);
+  EXPECT_TRUE(FdOpen(pluginFd));
+  close(pluginFd);
+}
+#endif
+
+// Side-specific connect behaviour.
+using CollNetSendProxyConnectMicrotest = CollNetProxyConnectMicrotest<SendSide>;
+using CollNetRecvProxyConnectMicrotest = CollNetProxyConnectMicrotest<RecvSide>;
+
+TEST_F(CollNetSendProxyConnectMicrotest, Connect_TakesRecvSidesFifoAndHandles_WithheldCredits) {
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ((void*)R()->reqFifo, reqFifo_);
+  for (int p = 0; p < NCCL_NUM_PROTOCOLS; p++) EXPECT_EQ(R()->recvMhandles[p], reinterpret_cast<void*>(0x100 + p));
+  EXPECT_EQ(R()->sendMem->head, (uint64_t)-NCCL_STEPS);  // no credits until the recv side posts
+  EXPECT_EQ(R()->step, 0u);
+}
+
+TEST_F(CollNetSendProxyConnectMicrotest, GdrCopy_HeadCreditsLiveInGdcWord) {
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  sendResources* r = R();
+  ASSERT_NE(r->gdcSync, nullptr);
+  EXPECT_EQ(*r->gdcSync, (uint64_t)-NCCL_STEPS);
+  EXPECT_EQ(r->sendMem->head, 0u);
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].cpuPtr, (char*)r->gdcSync);
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].gpuPtr, (char*)r->gdcSync);  // AMD maps device memory 1:1
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].size, (int)sizeof(uint64_t));
+  EXPECT_NE(r->gdrDesc, nullptr);
+}
+
+TEST_F(CollNetSendProxyConnectMicrotest, GdrCopySyncDisabled_KeepsHeadInHostMemory) {
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  ScopedHook param(g_loadParam, [](const char* env, int64_t deft) {
+    return strcmp(env, "GDRCOPY_SYNC_ENABLE") == 0 ? 0 : deft;
+  });
+
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  EXPECT_EQ(R()->gdcSync, nullptr);
+  EXPECT_EQ(R()->gdrDesc, nullptr);
+  EXPECT_EQ(R()->sendMem->head, (uint64_t)-NCCL_STEPS);
+  EXPECT_EQ(R()->map.mems[NCCL_NET_MAP_GDCMEM].gpuPtr, nullptr);
+}
+
+TEST_F(CollNetRecvProxyConnectMicrotest, Connect_PublishesFifoAndPoolHandleForSendSide) {
+  ASSERT_EQ(Connect(), ncclSuccess);
+
+  auto* info = reinterpret_cast<collNetSendConnectInfo*>(connectInfos_ + kRank);
+  EXPECT_EQ(info->reqFifo, (void*)R()->reqFifo);
+  EXPECT_EQ(info->mhandles[NCCL_PROTO_SIMPLE], shared_->hostBuff);
+  EXPECT_EQ(info->mhandles[NCCL_PROTO_LL], nullptr);
+  EXPECT_EQ(info->mhandles[NCCL_PROTO_LL128], nullptr);
+  EXPECT_EQ(R()->recvMem->tail, 0u);
+}
+
+TEST_F(CollNetRecvProxyConnectMicrotest, GdrCopy_TailInGdcWordAndFlushWordWhenEnabled) {
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  R()->needFlush = ncclTopoFlushAlways;
+  ASSERT_EQ(Connect(), ncclSuccess);
+  recvResources* r = R();
+  ASSERT_NE(r->gdcSync, nullptr);
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].cpuPtr, (char*)r->gdcSync);
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].gpuPtr, (char*)r->gdcSync);
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].size, (int)sizeof(uint64_t));
+  EXPECT_EQ(r->gdcFlush, nullptr);  // GDRCOPY_FLUSH_ENABLE defaults off
+  EXPECT_EQ(r->needFlush, ncclTopoFlushAlways);
+
+  NewConn();
+  ScopedHook param(g_loadParam, [](const char* env, int64_t deft) {
+    if (strcmp(env, "GDRCOPY_FLUSH_ENABLE") == 0) return (int64_t)1;
+    return strcmp(env, "GDRCOPY_SYNC_ENABLE") == 0 ? 0 : deft;
+  });
+  ASSERT_EQ(Connect(), ncclSuccess);
+  r = R();
+  EXPECT_EQ(r->gdcSync, nullptr);
+  EXPECT_EQ(r->map.mems[NCCL_NET_MAP_GDCMEM].gpuPtr, nullptr);
+  ASSERT_NE(r->gdrDesc, nullptr);
+  auto* desc = static_cast<gdr_mem_desc_t*>(r->gdrDesc);
+  EXPECT_EQ(r->gdcFlush, reinterpret_cast<uint64_t*>(desc->gdrDevMem) + 1);
+}
+
+// ---------------------------------------------------------------------------
+// Proxy-side free (sendProxyFree, recvProxyFree)
+// ---------------------------------------------------------------------------
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, Free_NoResources_Succeeds) {
+  this->DropConn();
+
+  EXPECT_EQ(this->Free(), ncclSuccess);
+  EXPECT_EQ(this->shared_->refCount, 2);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, Free_ConnectedConnection_ReleasesEverythingItHolds) {
+  ncclGdrCopy = reinterpret_cast<gdr_t>(0x1);
+  this->UseGdr();
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+  void* pool = this->PoolMhandle();
+  void* userBuf = reinterpret_cast<void*>(0x7000);
+  auto* registered = static_cast<proxyMemHandle*>(calloc(1, sizeof(proxyMemHandle)));
+  registered->handle = userBuf;
+  ncclIntruQueueEnqueue(&this->conn_.proxyMemHandleQueue, registered);
+  this->R()->step = 42;  // it has run ops
+
+  ASSERT_EQ(this->Free(), ncclSuccess);
+
+  std::vector<std::pair<void*, void*>> want = {{&this->net_.collComm, userBuf}, {&this->net_.collComm, pool}};
+  EXPECT_EQ(this->net_.deregMrs, want);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&this->conn_.proxyMemHandleQueue));
+  EXPECT_TRUE(this->live_.empty());  // control words, GDC word and pool
+  EXPECT_EQ(this->net_.closedColls, std::vector<void*>{&this->net_.collComm});  // its comm reference dropped
+  EXPECT_EQ(this->shared_->refCount, 1);
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, Free_LastReference_ReleasesSharedState) {
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+  this->shared_->refCount = 1;
+
+  ASSERT_EQ(this->Free(), ncclSuccess);
+  this->shared_ = nullptr;  // released by the free
+
+  EXPECT_TRUE(this->live_.empty());
+}
+
+TYPED_TEST(CollNetProxyConnectBothMicrotest, Free_DeregistrationFails_ReturnsError) {
+  ASSERT_EQ(this->Connect(), ncclSuccess);
+  this->net_.deregMrResult = ncclSystemError;
+  EXPECT_EQ(this->Free(), ncclSystemError);
+
+  auto* registered = static_cast<proxyMemHandle*>(calloc(1, sizeof(proxyMemHandle)));
+  ncclIntruQueueEnqueue(&this->conn_.proxyMemHandleQueue, registered);
+  EXPECT_EQ(this->Free(), ncclSystemError);
+  free(registered);  // dequeued before the failing deregistration
+  this->net_.deregMrResult = ncclSuccess;
+  ASSERT_EQ(this->Free(), ncclSuccess);
 }
 
 }  // namespace
