@@ -43,6 +43,9 @@ thread_local int ncclDebugNoWarn = 0;
 struct allocationTracker allocTracker[MAX_ALLOC_TRACK_NGPU] = {};
 hipMemAllocationHandleType ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
 
+// ASan aborts on an oversized malloc instead of returning NULL, which the malloc-failure test needs.
+extern "C" const char* __asan_default_options() { return "allocator_may_return_null=1"; }
+
 namespace {
 
 std::vector<std::string> g_warns;
@@ -900,6 +903,7 @@ TEST_F(AllocMicrotest, CuMemFree_SuspendedDynamicEntryOnlyFreesTheRange) {
   EXPECT_TRUE(g_untrackedPersist.empty());
 }
 
+// BUG: same shared exit as ncclCuMemFreeAddr, so a failed step frees the range with size 0.
 TEST_F(AllocMicrotest, CuMemFree_FailuresStillFreeTheRange) {
   for (const char* step : {"retain", "release", "range", "unmap"}) {
     SCOPED_TRACE(step);
@@ -960,7 +964,7 @@ TEST_F(AllocMicrotest, GetAddressRange_ProbesForSysmemUntilFound) {
   EXPECT_EQ(Count("release"), 2);
 
   calls_.clear();
-  handleLocation_ = hipMemLocationTypeHost;
+  handleLocation_ = static_cast<hipMemLocationType>(2);  // hipMemLocationTypeHost, missing from older HIP headers
   ASSERT_EQ(ncclCuMemGetAddressRange(Va(), 2 * kGran, &base, &total, nullptr, &sysmem), ncclSuccess);
 #if ROCM_VERSION >= 71200
   EXPECT_TRUE(sysmem);
