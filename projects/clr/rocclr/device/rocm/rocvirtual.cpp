@@ -1815,6 +1815,23 @@ void VirtualGPU::dispatchNativeEventWait(hsa_signal_t signal, size_t wait_index)
   if (address & 3) {
     return;
   }
+  // The CP poll must see the producer's completion store. On gfx950, WAIT_REG_MEM does not
+  // observe updates to cached (MTYPE_NC) host memory with any cache policy, so the prewait
+  // would never finish. ROCr allocates BusyWaitSignal values from the uncached kernarg system
+  // pool today. Check that per signal, so a change in ROCr placement keeps only the AQL wait.
+  // hsa_amd_pointer_info reports the KFD Uncached allocation flag as KERNARG_INIT.
+  hsa_amd_pointer_info_t info{};
+  info.size = sizeof(info);
+  if (Hsa::pointer_info(const_cast<hsa_signal_value_t*>(pointer), &info, nullptr, nullptr,
+                        nullptr) != HSA_STATUS_SUCCESS ||
+      info.type == HSA_EXT_POINTER_TYPE_UNKNOWN ||
+      info.size < offsetof(hsa_amd_pointer_info_t, global_flags) + sizeof(info.global_flags) ||
+      (info.global_flags & HSA_AMD_MEMORY_POOL_GLOBAL_FLAG_KERNARG_INIT) == 0) {
+    ClPrint(amd::LOG_INFO, amd::LOG_WAIT,
+            "NATIVE_POLICY_SKIP reason=signal_memory_not_uncached type=%d flags=0x%x",
+            static_cast<int>(info.type), info.global_flags);
+    return;
+  }
   auto* ib = reinterpret_cast<uint32_t*>(native_wait_buffer_.TryAcquire(28, 64));
   if (ib == nullptr) {
     // The original AQL packet still carries this dependency.
@@ -1825,8 +1842,9 @@ void VirtualGPU::dispatchNativeEventWait(hsa_signal_t signal, size_t wait_index)
   if ((base & 3) || (base >> 48)) {
     return;
   }
-  ib[0] = 0xc0053c00;    // Type 3 WAIT_REG_MEM, seven DWORDs.
-  ib[1] = 3 | (1 << 4);  // Equal, memory space; ACE offload disabled.
+  ib[0] = 0xc0053c00;  // Type 3 WAIT_REG_MEM, seven DWORDs.
+  // Function equal, memory space, operation 3 (wait_mem_preemptable).
+  ib[1] = 3 | (1 << 4) | (3 << 6);
   ib[2] = static_cast<uint32_t>(address);
   ib[3] = static_cast<uint32_t>(address >> 32);
   ib[4] = 0;
