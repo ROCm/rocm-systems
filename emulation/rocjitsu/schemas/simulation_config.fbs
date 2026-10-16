@@ -17,6 +17,8 @@ table ComputeUnitConfig {
   // Scratch-addressable wave slots per CU. Omitted in legacy checkpoints,
   // which retain the execution-slot count as their scratch capacity.
   scratch_slots_per_cu: uint32;
+  // Unpaused CU steps without process instruction progress; zero disables this inactivity budget.
+  gws_wait_limit: uint32 = 1000000;
 }
 
 /// Configuration for a command processor.

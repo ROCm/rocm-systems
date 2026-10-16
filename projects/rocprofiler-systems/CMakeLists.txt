@@ -591,6 +591,9 @@ install(
     COMPONENT setup
     USE_SOURCE_PERMISSIONS
     PATTERN "evals" EXCLUDE
+    PATTERN "run_evals.py" EXCLUDE
+    PATTERN "test_run_evals.py" EXCLUDE
+    PATTERN "__pycache__" EXCLUDE
 )
 
 # ------------------------------------------------------------------------------#

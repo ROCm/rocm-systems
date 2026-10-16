@@ -247,7 +247,9 @@ run_native_replay() {
   # returns, so the analyzer never runs and the archive yields no finding at
   # all. The bound belongs here, around the playback process: wrapping the
   # container instead leaves the replay running inside it. Set
-  # HRR_REPLAY_TIMEOUT=0 to disable.
+  # HRR_REPLAY_TIMEOUT=0 to disable. hrr-playback has a wall-clock limit of its
+  # own (--max-wall-seconds, default 3600), so the same value goes to it:
+  # otherwise 0 or anything above 3600 would still end the replay at one hour.
   local timeout_s="${HRR_REPLAY_TIMEOUT:-1800}" runner=()
   if [[ "$timeout_s" != "0" ]] && command -v timeout >/dev/null 2>&1; then
     runner=(timeout "$timeout_s")
@@ -258,7 +260,7 @@ run_native_replay() {
   # applies to it. Setting ROCR_VISIBLE_DEVICES re-indexes devices underneath a
   # HIP mask, which can land the replay on a device other than the one picked.
   HIP_VISIBLE_DEVICES="$gpu" HIP_HRR_REPLAY_PROGRESS_SECONDS="${HIP_HRR_REPLAY_PROGRESS_SECONDS:-30}" \
-    ${runner[@]+"${runner[@]}"} "$play" "$ARCHIVE" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log"
+    ${runner[@]+"${runner[@]}"} "$play" "$ARCHIVE" --max-wall-seconds "$timeout_s" ${sync_args[@]+"${sync_args[@]}"} 2>&1 | tee "$log"
   local rc=${PIPESTATUS[0]}
   # Deliberately not re-enabling `set -e` here. The caller wraps this call in
   # `set +e` precisely so a failing replay is survivable, and restores `set -e`

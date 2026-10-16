@@ -2961,10 +2961,8 @@ static hipError_t capture_hipIpcGetMemHandle(hipIpcMemHandle_t* handle, void* de
     a.ret         = static_cast<int32_t>(r);
     a.handle = reinterpret_cast<uint64_t>(handle);
     a.devPtr = reinterpret_cast<uint64_t>(devPtr);
-    if (handle) {
-      std::memcpy(a.handle_bytes, handle, sizeof(hipIpcMemHandle_t));
-      a.handle_present = 1;
-    }
+    // *handle is a capability and is not recorded.
+    if (handle) a.handle_present = 1;
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCGETMEMHANDLE, &a.hdr, sizeof(a));
   }
   return r;
@@ -2976,7 +2974,7 @@ static hipError_t capture_hipIpcOpenEventHandle(hipEvent_t* event, hipIpcEventHa
   if (r == hipSuccess) {
     hrr_args_hipIpcOpenEventHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    std::memcpy(a.handle_bytes, &handle, sizeof(handle));
+    // handle is a capability and is not recorded.
     if (event) a.event = reinterpret_cast<uint64_t>(*event);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCOPENEVENTHANDLE, &a.hdr, sizeof(a));
   }
@@ -2989,7 +2987,7 @@ static hipError_t capture_hipIpcOpenMemHandle(void** devPtr, hipIpcMemHandle_t h
   if (r == hipSuccess) {
     hrr_args_hipIpcOpenMemHandle a{};
     a.ret         = static_cast<int32_t>(r);
-    std::memcpy(a.handle_bytes, &handle, sizeof(handle));
+    // handle is a capability and is not recorded.
     a.flags = static_cast<decltype(a.flags)>(flags);
     if (devPtr) a.devPtr = reinterpret_cast<uint64_t>(*devPtr);
     hrr_cap::writer::write_event_raw(HRR_API_HIPIPCOPENMEMHANDLE, &a.hdr, sizeof(a));
@@ -6008,7 +6006,7 @@ static hipError_t capture_hipGetProcAddress(const char* symbol, void** pfn, int 
     a.hipVersion = static_cast<decltype(a.hipVersion)>(hipVersion);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.symbolStatus = reinterpret_cast<uint64_t>(symbolStatus);
-    if (pfn) a.pfn = reinterpret_cast<uint64_t>(*pfn);
+    // pfn is not recorded, see UNRECORDED_OUTPUTS in the generator.
     if (symbol) {
       size_t _n = std::strlen(symbol);
       if (_n > 255u) {
@@ -6987,7 +6985,7 @@ static hipError_t capture_hipGetDriverEntryPoint(const char* symbol, void** func
     a.symbol = reinterpret_cast<uint64_t>(symbol);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.status = reinterpret_cast<uint64_t>(status);
-    if (funcPtr) a.funcPtr = reinterpret_cast<uint64_t>(*funcPtr);
+    // funcPtr is not recorded, see UNRECORDED_OUTPUTS in the generator.
     hrr_cap::writer::write_event_raw(HRR_API_HIPGETDRIVERENTRYPOINT, &a.hdr, sizeof(a));
   }
   return r;
@@ -7002,7 +7000,7 @@ static hipError_t capture_hipGetDriverEntryPoint_spt(const char* symbol, void** 
     a.symbol = reinterpret_cast<uint64_t>(symbol);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.status = reinterpret_cast<uint64_t>(status);
-    if (funcPtr) a.funcPtr = reinterpret_cast<uint64_t>(*funcPtr);
+    // funcPtr is not recorded, see UNRECORDED_OUTPUTS in the generator.
     hrr_cap::writer::write_event_raw(HRR_API_HIPGETDRIVERENTRYPOINT_SPT, &a.hdr, sizeof(a));
   }
   return r;
@@ -7207,7 +7205,7 @@ static hipError_t capture_hipGetProcAddress_spt(const char* symbol, void** pfn, 
     a.hipVersion = static_cast<decltype(a.hipVersion)>(hipVersion);
     a.flags = static_cast<decltype(a.flags)>(flags);
     a.symbolStatus = reinterpret_cast<uint64_t>(symbolStatus);
-    if (pfn) a.pfn = reinterpret_cast<uint64_t>(*pfn);
+    // pfn is not recorded, see UNRECORDED_OUTPUTS in the generator.
     if (symbol) {
       size_t _n = std::strlen(symbol);
       if (_n > 255u) {
@@ -7810,6 +7808,21 @@ static hipError_t capture_hipLibraryGetModule(hipModule_t* pMod, hipLibrary_t li
     a.library = reinterpret_cast<uint64_t>(library);
     if (pMod) a.pMod = reinterpret_cast<uint64_t>(*pMod);
     hrr_cap::writer::write_event_raw(HRR_API_HIPLIBRARYGETMODULE, &a.hdr, sizeof(a));
+  }
+  return r;
+}
+
+// Generated shim
+static hipError_t capture_hipKernelSetAttributeForDevice(hipKernel_t kernel, hipFuncAttribute attr, int value, int device) {
+  hipError_t r = g_real_table.hipKernelSetAttributeForDevice_fn(kernel, attr, value, device);
+  if (r == hipSuccess) {
+    hrr_args_hipKernelSetAttributeForDevice a{};
+    a.ret         = static_cast<int32_t>(r);
+    a.kernel = reinterpret_cast<uint64_t>(kernel);
+    a.attr = static_cast<decltype(a.attr)>(attr);
+    a.value = static_cast<decltype(a.value)>(value);
+    a.device = static_cast<decltype(a.device)>(device);
+    hrr_cap::writer::write_event_raw(HRR_API_HIPKERNELSETATTRIBUTEFORDEVICE, &a.hdr, sizeof(a));
   }
   return r;
 }
@@ -8551,6 +8564,7 @@ void hip_capture_build_table() {
   g_cap_table.hipModuleEnumerateFunctions_fn = capture_hipModuleEnumerateFunctions;
   g_cap_table.hipDeviceFlushGPUDirectRDMAWrites_fn = capture_hipDeviceFlushGPUDirectRDMAWrites;
   g_cap_table.hipLibraryGetModule_fn = capture_hipLibraryGetModule;
+  g_cap_table.hipKernelSetAttributeForDevice_fn = capture_hipKernelSetAttributeForDevice;
 }
 
 void hip_capture_build_compiler_table() {
