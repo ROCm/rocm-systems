@@ -69,6 +69,7 @@ static constexpr const char* ncclCryptKdfParamInfo = "info";
   SYMBOL(SSL_CTX_free) \
   SYMBOL(SSL_CTX_new) \
   SYMBOL(SSL_CTX_set_ciphersuites) \
+  SYMBOL(SSL_CTX_set_num_tickets) \
   SYMBOL(SSL_CTX_set_psk_find_session_callback) \
   SYMBOL(SSL_CTX_set_psk_use_session_callback) \
   SYMBOL(SSL_CTX_set_verify) \
@@ -364,6 +365,14 @@ static ncclResult_t cryptInitLib() {
   }
   ncclCryptOpenSsl.pfn_SSL_CTX_set_verify(ncclCryptClientCtx, SSL_VERIFY_PEER, nullptr);
   ncclCryptOpenSsl.pfn_SSL_CTX_set_verify(ncclCryptServerCtx, SSL_VERIFY_NONE, nullptr);
+  // Every connection derives its session from the PSK, so tickets are never used. A
+  // client that only writes (bootstrapSend, the unidirectional ring) never reads them,
+  // and closing a TCP socket with unread data sends RST and drops its unsent bytes.
+  if (ncclCryptOpenSsl.pfn_SSL_CTX_set_num_tickets(ncclCryptServerCtx, 0) != 1) {
+    WARN("ncclCrypt: disabling OpenSSL TLS session tickets failed");
+    ret = ncclSystemError;
+    goto fail;
+  }
   ncclCryptOpenSsl.pfn_SSL_CTX_set_psk_use_session_callback(ncclCryptClientCtx, cryptPskUseSession);
   ncclCryptOpenSsl.pfn_SSL_CTX_set_psk_find_session_callback(ncclCryptServerCtx, cryptPskFindSession);
   ncclCryptLibReady = true;

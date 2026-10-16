@@ -45,6 +45,7 @@ test_categories:
       # Short tier only: quick carries the smoke/precheck labels, and the three large rows each
       # validate a 2 MiB shard per rank over 64 steps. They stay covered by standard below.
       - "DtypeSizeCases/PersistentCommunicatorMPITest.*_short"
+      - "BootstrapStrayPeerMPITest.*"
     exclude_windows: &mpi_exclude_windows
       - "*"
     labels:
@@ -218,6 +219,25 @@ test_categories:
       - "NCCL_DEBUG=INFO"
       - "NCCL_LAUNCH_MODE=GROUP"
       - "RCCL_PAT_SHARED_QPS=0"
+  quick_env_bootstrap_tls_unidir:
+    description: "Communicator lifecycle over TLS-encrypted bootstrap/proxy sockets with the unidirectional bootstrap ring AllGather. Skips on builds without TLS_BACKEND=OPENSSL3, except the no-TLS-support check."
+    test_patterns: &bootstrap_tls_patterns
+      - "BootstrapTlsMPITest.*"
+      - "BootstrapStrayPeerMPITest.*"
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=WARN"
+      - "NCCL_BOOTSTRAP_BIDIR_ALLGATHER=0"
+  quick_env_bootstrap_tls_bidir:
+    description: "Same as quick_env_bootstrap_tls_unidir with the bidirectional bootstrap ring AllGather forced on for every payload size."
+    test_patterns: *bootstrap_tls_patterns
+    exclude_windows: *mpi_exclude_windows
+    labels: *mpi_quick_labels
+    env_variables:
+      - "NCCL_DEBUG=WARN"
+      - "NCCL_BOOTSTRAP_BIDIR_ALLGATHER=1"
+      - "NCCL_BOOTSTRAP_BIDIR_THRESHOLD=0"
   standard:
     description: "MPI regression — all transport / IB / implicit-launch / UBR / graph-capture suites (same patterns as comprehensive; lighter env)."
     test_patterns: &mpi_all_patterns
@@ -239,6 +259,7 @@ test_categories:
       - "PatLazyInitMPITest.*"
       - "PatSharedConnectionMPITest.*"
       - "DtypeSizeCases/PersistentCommunicatorMPITest.*"
+      - "BootstrapStrayPeerMPITest.*"
       - "DdaFabricSimple.*"
       - "DdaFabricBlockCap.*"
       - "DdaFabricBarrierStress.*"
@@ -429,6 +450,8 @@ execution_settings:
     quick_env_netib_xfer_trace: 1200
     quick_env_netib_xfer_log_ranks: 1200
     quick_env_pat_shared_qps_off: 1200
+    quick_env_bootstrap_tls_unidir: 1200
+    quick_env_bootstrap_tls_bidir: 1200
     standard: 1200
     comprehensive: 1200
     comprehensive_disable_env: 1200
