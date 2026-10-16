@@ -952,7 +952,7 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 }
 
 // ================================================================================================
-bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal, bool wait_only) {
+bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
   // Wait for the current signal to complete
   if (Hsa::signal_load_relaxed(signal->signal_) > 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Host wait on completion_signal=0x%zx",
@@ -962,10 +962,13 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal, bool 
       return false;
     }
   }
-  if (wait_only) {
-    return true;
-  }
 
+  ProcessSignalTiming(signal);
+  return true;
+}
+
+// ================================================================================================
+void VirtualGPU::HwQueueTracker::ProcessSignalTiming(ProfilingSignal* signal) {
   // Process this signal's timing before signal reuse
   // This copies timing to the Timestamp
   if (signal->ts_ != nullptr) {
@@ -977,8 +980,6 @@ bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal, bool 
     std::scoped_lock lock(signal->LockSignalOps());
     signal->flags_.done_ = true;
   }
-
-  return true;
 }
 
 // ================================================================================================
@@ -5412,18 +5413,15 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
 
   // Wait without the execution() lock. The marker holds a reference to the signal,
   // so the tracker can't reuse it in the meantime
-  constexpr bool kWaitOnly = true;
-  if (!Barriers().CpuWaitForSignal(signal, kWaitOnly)) {
-    // The GPU didn't complete the signal. Don't wait again under the lock and don't release the
-    // queue states, since the work may still be running. Complete the batch as before
-    updateCommandsState(cmd.GetBatchHead());
-    return;
-  }
+  WaitForSignal(signal->signal_, ActiveWait());
 
-  {
+  // The wait returns early, with the signal not completed normally, if the device is in an error
+  // state (HIP_SKIP_ABORT_ON_GPU_ERROR). The signal timing and the queue states can't be used then,
+  // since the GPU may still run. The batch is completed anyway, as before, because otherwise the
+  // threads waiting for its commands would hang
+  if (Hsa::signal_load_relaxed(signal->signal_) == 0) {
     std::scoped_lock lock(execution());
-    // The signal is complete, hence this call only processes its timing
-    Barriers().CpuWaitForSignal(signal);
+    Barriers().ProcessSignalTiming(signal);
     // Kernel arguments and memory dependencies can be released only if the wait covered all
     // submitted work, otherwise newer submissions may still use them
     if ((Barriers().GetLastSignal() == signal) && !IsPendingDispatch()) {
@@ -5433,7 +5431,7 @@ void VirtualGPU::CompleteCpuWait(amd::Command& cmd) {
   // Complete the batch without the lock: it belongs to the marker only, and the user callbacks
   // it runs must not block the other threads submitting to this queue. It uses no VirtualGPU or
   // tracker state, and the commands' Timestamps serialize with the tracker the same way as in
-  // HsaAmdSignalHandler. The signal timing is already processed above
+  // HsaAmdSignalHandler
   updateCommandsState(cmd.GetBatchHead());
 }
 
