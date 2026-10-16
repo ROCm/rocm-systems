@@ -330,9 +330,7 @@ TEST_F(ProfilerV5Microtest, RecordEventState_ForwardsEachStateWithItsArgs) {
   EXPECT_EQ(fake_.records.size(), n);
 }
 
-// Bug: the core records the group-API states with null args (ncclProfilerRecordGroupApiEventState), and this
-// adapter drops every state that has none, so a v5 plugin never sees GroupStartApiStop / GroupEndApiStart even
-// though the adapter lists both as forwarded.
+// The core records group-API states with null args, which this adapter drops; a fix flips this pin.
 TEST_F(ProfilerV5Microtest, RecordEventState_KnownBug_GroupApiStatesWithNullArgs_NeverReachThePlugin) {
   ASSERT_EQ(ncclSuccess, prof_->recordEventState(H(0x1), ncclProfilerGroupStartApiStop, nullptr));
   ASSERT_EQ(ncclSuccess, prof_->recordEventState(H(0x1), ncclProfilerGroupEndApiStart, nullptr));

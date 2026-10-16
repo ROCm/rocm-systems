@@ -313,6 +313,9 @@ class ProfilerMicrotest : public ::testing::Test {
 
   void TearDown() override {
     g_openProfilerLib = nullptr;
+    ncclPluginLibPaths[ncclPluginTypeProfiler] = nullptr;  // may point at a test's stack buffer
+    g_env.clear();
+    g_netPluginLib = nullptr;
     ResetProfilerStatics();
     FakePlugin::cur() = nullptr;
   }
@@ -565,8 +568,7 @@ TEST_F(ProfilerMicrotest, PluginInit_PluginInitFails_UnloadsAndContinuesWithoutP
   EXPECT_EQ(g_closedLibs, std::vector<void*>{&lib_});
 }
 
-// Bug: PluginInit already unloads on a failed plugin init(), and commFree calls PluginFinalize for every comm,
-// so the failed comm unloads twice and closes the lib under a comm that is still profiling.
+// A failed plugin init() unloads twice, closing the lib under a live comm; a fix flips this pin.
 TEST_F(ProfilerMicrotest, PluginInit_KnownBug_FailedInitThenFinalize_ClosesTheLibUnderAnotherLiveComm) {
   auto failing = NewComm(nullptr);
   ASSERT_EQ(ncclSuccess, ncclProfilerPluginInit(comm_.get()));
@@ -1083,8 +1085,7 @@ TEST_F(ProfilerPlanMicrotest, StartTaskEvents_SymPlan_AdvertisesTheKernelVariant
   EXPECT_STREQ(starts[1].d.coll.algo, "NoUnderscore");
 }
 
-// Bug: ncclTaskColl::nChannels was widened to 16 bits for MAXCHANNELS=256, but the v7 descriptor's
-// coll.nChannels is uint8_t, so a 256-channel collective is advertised to the plugin as 0 channels.
+// The v7 descriptor's coll.nChannels is uint8_t, so a 256-channel collective is advertised as 0; a fix flips this pin.
 TEST_F(ProfilerPlanMicrotest, StartTaskEvents_KnownBug_CollOn256Channels_AdvertisesZeroChannels) {
   Load(ncclProfileColl);
   AddColl(ncclProfileColl)->nChannels = 256;

@@ -229,9 +229,7 @@ TEST_F(ProfilerV1Microtest, StringToEnum_MapsEveryNameTheV1HeaderKnows) {
   for (const auto& t : kTypes) EXPECT_EQ(ncclStringToDatatype(t.first), t.second) << t.first;
 }
 
-// Bug: core names RCCL's AlltoAll/AlltoAllv/Gather/Scatter collectives (ncclFuncToString), which the v1 table
-// lacks, so a v1 plugin sees them as Send; likewise bf16 and fp8 collectives arrive as Float64 because the
-// bf16 entry is CUDA-only.
+// The v1 tables lack RCCL's extra collectives and bf16/fp8, so they arrive as Send and Float64; a fix flips this pin.
 TEST_F(ProfilerV1Microtest, StringToEnum_KnownBug_RcclOnlyFunctionsAndTypes_ArriveAsSendAndFloat64) {
   for (const char* f : {"AlltoAll", "AlltoAllv", "Gather", "Scatter"})
     EXPECT_EQ(ncclStringToFunc(f), ncclFuncSend) << f;
