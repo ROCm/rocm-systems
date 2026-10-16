@@ -57,7 +57,14 @@ function(generic_package)
         string(APPEND CMAKE_SHARED_LINKER_FLAGS " ${ASAN_LINKER_FLAGS}")
     else()
         ## Security breach mitigation flags
-        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS} -D_FORTIFY_SOURCE=2 -fstack-protector-all -Wcast-align" PARENT_SCOPE)
+        # _FORTIFY_SOURCE needs optimization: glibc warns without it, which the
+        # -Werror NIC library fails on (no -O when CMAKE_BUILD_TYPE is empty).
+        string(TOUPPER "${CMAKE_BUILD_TYPE}" BUILD_TYPE_UPPER)
+        set(FORTIFY_FLAG "")
+        if("${CMAKE_CXX_FLAGS} ${CMAKE_CXX_FLAGS_${BUILD_TYPE_UPPER}}" MATCHES "(^| )-O([1-3sgz]|fast)?( |$)")
+            set(FORTIFY_FLAG " -D_FORTIFY_SOURCE=2")
+        endif()
+        set(CMAKE_CXX_FLAGS "${CMAKE_CXX_FLAGS}${FORTIFY_FLAG} -fstack-protector-all -Wcast-align" PARENT_SCOPE)
         ## More security breach mitigation flags
         set(HARDENING_LDFLAGS "${HARDENING_LDFLAGS} -Wl,-z,noexecstack -Wl,-z,relro -Wl,-z,now")
         string(APPEND CMAKE_EXE_LINKER_FLAGS " ${HARDENING_LDFLAGS}")
