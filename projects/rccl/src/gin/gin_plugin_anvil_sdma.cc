@@ -720,17 +720,36 @@ cleanup:
   return ret;
 }
 
+// The signal peer table is indexed by GIN peer, but each entry is a slot in this
+// rank's LSA window. Returns the first GIN peer that is not the LSA team member in
+// the slot its entry points at, or -1 if every entry is a mapped peer.
+static int ginAnvilFirstSignalPeerOutsideLsa(const ginAnvilGinCtx* ctx) {
+  struct ncclComm* comm = ctx->comm;
+  struct ncclDevrState* devr = &comm->devrState;
+  const long long ginStride =
+    comm->globalGinSupport == NCCL_GIN_CONNECTION_RAIL ? comm->contiguousRanksPerHost : 1;
+  for (int pe = 0; pe < ctx->nRanks; pe++) {
+    const int slot = devr->lsaSelf + (pe - ctx->rank);
+    const long long worldPeer = comm->rank + (long long)(pe - ctx->rank) * ginStride;
+    if (devr->lsaRankList == nullptr || slot < 0 || slot >= devr->lsaSize || devr->lsaRankList[slot] != worldPeer) {
+      return pe;
+    }
+  }
+  return -1;
+}
+
 static ncclResult_t ginAnvilRegisterLsaSignals(ginAnvilGinCtx* ctx, void* lsaSelf, size_t bytes) {
   struct ncclDevrState* devr = &ctx->comm->devrState;
   struct ncclComm* comm = ctx->comm;
   const ptrdiff_t stride = (ptrdiff_t)devr->bigSize;
 
-  if (ctx->nRanks != devr->lsaSize) {
-    WARN("GIN anvil-sdma: signal nRanks=%d != devr->lsaSize=%d (rank %d)", ctx->nRanks, devr->lsaSize, ctx->rank);
-  }
-  if (ctx->rank != devr->lsaSelf) {
-    WARN("GIN anvil-sdma: ctx->rank=%d != devr->lsaSelf=%d (signal peer indexing may be wrong)", ctx->rank,
-         devr->lsaSelf);
+  const int outsidePeer = ginAnvilFirstSignalPeerOutsideLsa(ctx);
+  if (outsidePeer >= 0) {
+    WARN("GIN anvil-sdma: GIN peer %d is outside the LSA team of rank %d (ginRank=%d, ginRanks=%d, lsaSelf=%d, "
+         "lsaSize=%d). Anvil SDMA can only signal LSA team peers; set NCCL_LSA_TEAM_SIZE to cover the GIN team "
+         "or select another NCCL_GIN_TYPE.",
+         outsidePeer, comm->rank, ctx->rank, ctx->nRanks, devr->lsaSelf, devr->lsaSize);
+    return ncclInvalidUsage;
   }
 
   ctx->gpuCtxHost.signals = (uint64_t*)lsaSelf;
