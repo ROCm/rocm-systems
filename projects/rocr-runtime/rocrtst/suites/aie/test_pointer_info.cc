@@ -392,6 +392,17 @@ TEST_F(PointerInfoTest, ReportsPerAllocationFlags) {
 }
 
 TEST_F(PointerInfoTest, LeavesNonAieAllocationsAlone) {
+  // libhsakmt only registers a CPU-pool allocation as a real KFD buffer object
+  // (hsakmt_fmm_allocate_host picking hsakmt_is_dgpu's branch) when at least one discrete-GPU KFD
+  // node exists; with none, hsa_amd_pointer_info reports it as HSA_EXT_POINTER_TYPE_RESERVED_ADDR
+  // instead of HSA_EXT_POINTER_TYPE_HSA. That is a libhsakmt classification gap on GPU-less
+  // systems, unrelated to AIE, so this test needs a GPU present rather than trying to work around
+  // it here.
+  std::vector<hsa_agent_t> gpu_agents;
+  ASSERT_EQ(hsa_iterate_agents(aie_test::discover_agents<HSA_DEVICE_TYPE_GPU>, &gpu_agents),
+            HSA_STATUS_SUCCESS);
+  if (gpu_agents.empty()) GTEST_SKIP() << "no GPU agent; see libhsakmt's hsakmt_is_dgpu gap";
+
   // A CPU pool allocation is owned by the CPU agent.
   std::vector<hsa_agent_t> cpu_agents;
   ASSERT_EQ(hsa_iterate_agents(aie_test::discover_agents<HSA_DEVICE_TYPE_CPU>, &cpu_agents),
