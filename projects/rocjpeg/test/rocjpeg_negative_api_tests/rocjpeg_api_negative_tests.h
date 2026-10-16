@@ -115,6 +115,14 @@ class RocJpegApiNegativeTests {
          * falls back to checking only the reported status.
          */
         bool check_image_info_ = false;
+        /**
+         * @brief Whether TestInvalidCreate obtained a working hardware decoder handle.
+         *
+         * Cleared only on Windows, where the VA-API driver (vaon12) does not expose
+         * JPEG decoding on every GPU. The tests that need a decoder handle are then
+         * skipped; the parser, create/destroy and error-name tests still run.
+         */
+        bool hw_decoder_available_ = true;
 };
 
 #endif // ROCJPEG_API_NEGATIVE_TESTS_H

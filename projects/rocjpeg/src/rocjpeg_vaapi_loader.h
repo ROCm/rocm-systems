@@ -24,21 +24,41 @@ THE SOFTWARE.
 
 #ifdef ROCJPEG_USE_DLOPEN_VA
 
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <windows.h>
+#else
 #include <dlfcn.h>
+#endif
 #include <filesystem>
 #include <memory>
 #include <mutex>
 #include <stdexcept>
 #include <string>
 #include <va/va.h>
+#ifdef _WIN32
+#include <va/va_win32.h>
+#else
 #include <va/va_drm.h>
+#endif
 #include <va/va_drmcommon.h>
 
 // Function pointer table for all VA-API entry points used by rocjpeg.
-// Populated by RocJpegVaapiLoader via dlsym after dlopen.
+// Populated by RocJpegVaapiLoader via dlsym after dlopen (Linux) or
+// GetProcAddress after LoadLibraryExW (Windows).
 struct RocJpegVaapiVtable {
+#ifdef _WIN32
+    // va_win32
+    VADisplay    (*vaGetDisplayWin32)(const LUID *adapter_luid);
+#else
     // va-drm
     VADisplay    (*vaGetDisplayDRM)(int fd);
+#endif
     // va core
     VAStatus     (*vaInitialize)(VADisplay dpy, int *major_version, int *minor_version);
     VAStatus     (*vaTerminate)(VADisplay dpy);
@@ -86,6 +106,12 @@ struct RocJpegVaapiVtable {
 // other libraries (e.g. libavcodec) in the same process.
 // RTLD_DEEPBIND makes libva and its backend driver prefer their own symbol
 // closure when resolving symbols, before consulting the global scope.
+//
+// On Windows, loads rocm_sysdeps_va_win32.dll (and its dependency
+// rocm_sysdeps_va.dll) via LoadLibraryExW instead. vaGetDisplayWin32 replaces
+// vaGetDisplayDRM; there is no DRM on Windows. Unlike dlsym, GetProcAddress
+// does not search a module's dependencies, so the va core symbols are resolved
+// from a separate handle to rocm_sysdeps_va.dll.
 class RocJpegVaapiLoader {
 public:
     RocJpegVaapiVtable fn{};
@@ -103,12 +129,30 @@ public:
 private:
     RocJpegVaapiLoader();
 
+#ifdef _WIN32
+    HMODULE va_win32_handle_ = nullptr;  // rocm_sysdeps_va_win32.dll
+    HMODULE va_handle_ = nullptr;        // rocm_sysdeps_va.dll (va core)
+
+    // Finds rocm_sysdeps_va_win32.dll: next to the installed rocjpeg.dll
+    // (<prefix>/bin -> <prefix>/lib/rocm_sysdeps/bin), then under %ROCM_PATH%,
+    // then in the absolute directories listed in PATH (never the current directory).
+    static std::filesystem::path FindVaDisplayLibPath();
+
+    // Loads the libraries and resolves all symbols; throws on failure.
+    void Load();
+    // Releases every library handle and clears the function table.
+    void Unload() noexcept;
+
+    template <typename T>
+    void LoadSym(HMODULE handle, const char *name, T *&fn_ptr);
+#else
     void *va_drm_handle_ = nullptr;
 
     static std::string FindVaDrmLibPath();
 
     template <typename T>
     void LoadSym(const char *name, T *&fn_ptr);
+#endif
 };
 
 #endif // ROCJPEG_USE_DLOPEN_VA

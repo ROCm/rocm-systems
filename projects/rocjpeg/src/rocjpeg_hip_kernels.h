@@ -181,7 +181,7 @@ void ColorConvertYUVToRGBPlanarBatched(hipStream_t stream, uint32_t max_gx, uint
  * The `data` member is an array of size 6 that holds the integer values.
  */
 typedef struct UINT6TYPE {
-  uint data[6];
+  uint32_t data[6];
 } DUINT6;
 
 /**
@@ -191,7 +191,7 @@ typedef struct UINT6TYPE {
  * It is typically used in the context of the `rocjpeg_hip_kernels` module.
  */
 typedef struct UINT8TYPE {
-  uint data[8];
+  uint32_t data[8];
 } DUINT8;
 
 #endif //ROC_JPEG_HIP_KERNELS_H_

@@ -33,12 +33,23 @@ THE SOFTWARE.
 #include <cstdlib>
 #include <ctime>
 #include <time.h>
+#ifdef _WIN32
+#ifndef WIN32_LEAN_AND_MEAN
+#define WIN32_LEAN_AND_MEAN
+#endif
+#ifndef NOMINMAX
+#define NOMINMAX
+#endif
+#include <process.h>
+#include <windows.h>
+#else
 #include <unistd.h>
+#include <sys/syscall.h>
+#endif
 #include <stdint.h>
 #include <thread>
 #include <sstream>
 #include <iomanip>
-#include <sys/syscall.h>
 #include <vector>
 
 #define MSG(X) std::clog << X << std::endl;
@@ -57,11 +68,19 @@ enum RocJpegLogLevel {
     kRocJpegLogLevelMax       = 4
 };
 
+#ifndef _WIN32
 #define GET_TIME_NS() ([]() -> uint64_t { struct timespec ts_; clock_gettime(CLOCK_MONOTONIC, &ts_); return static_cast<uint64_t>(ts_.tv_sec) * 1000000000LL + ts_.tv_nsec; }())
 #define FILENAME_ONLY (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__)
-#define GET_HASHED_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
 #define GET_THREAD_ID() (static_cast<pid_t>(syscall(SYS_gettid)))
-#define MakeMsg(msg) ROCJPEG_STR(FILENAME_ONLY) + ":" + ROCJPEG_TOSTR(__LINE__) + ": " + ROCJPEG_TOSTR(GET_TIME_NS() / 1000ULL) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid:") + ROCJPEG_TOSTR(GET_THREAD_ID()) + ROCJPEG_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(__func__) + "(): " + msg
+#define GET_PID() (getpid())
+#else
+#define GET_TIME_NS() ([]() -> uint64_t {     static const LARGE_INTEGER freq = []() { LARGE_INTEGER f{}; QueryPerformanceFrequency(&f); return f; }();     LARGE_INTEGER cnt{}; QueryPerformanceCounter(&cnt);     if (freq.QuadPart <= 0) return 0ULL;     const uint64_t sec = static_cast<uint64_t>(cnt.QuadPart / freq.QuadPart);     const uint64_t rem = static_cast<uint64_t>(cnt.QuadPart % freq.QuadPart);     return sec * 1000000000ULL + (rem * 1000000000ULL) / static_cast<uint64_t>(freq.QuadPart); }())
+#define FILENAME_ONLY (strrchr(__FILE__, '\\') ? strrchr(__FILE__, '\\') + 1 : (strrchr(__FILE__, '/') ? strrchr(__FILE__, '/') + 1 : __FILE__))
+#define GET_THREAD_ID() (static_cast<uint32_t>(GetCurrentThreadId()))
+#define GET_PID() (_getpid())
+#endif
+#define GET_HASHED_THREAD_ID() ([]() -> std::string { std::ostringstream oss; oss << "0x" << std::hex << std::setw(5) << std::setfill('0') << (std::hash<std::thread::id>{}(std::this_thread::get_id()) & 0xFFFFF); return oss.str(); }())
+#define MakeMsg(msg) ROCJPEG_STR(FILENAME_ONLY) + ":" + ROCJPEG_TOSTR(__LINE__) + ": " + ROCJPEG_TOSTR(GET_TIME_NS() / 1000ULL) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(GET_PID()) + ROCJPEG_STR(" tid:") + ROCJPEG_TOSTR(GET_THREAD_ID()) + ROCJPEG_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(__func__) + "(): " + msg
 
 #define OutputMsg(msg) std::cout << msg << std::endl
 #define OutputErrMsg(msg) std::cerr << msg << std::endl
@@ -104,7 +123,7 @@ public:
         if (logger_.GetLogLevel() >= kRocJpegLogInfo) {
             start_time_ = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCJPEG_TOSTR(kRocJpegLogInfo) + ", Info] " + ROCJPEG_STR(filename_) + ":" + ROCJPEG_TOSTR(line_) + ": " +
-                      ROCJPEG_TOSTR(start_time_) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid:") +
+                      ROCJPEG_TOSTR(start_time_) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(GET_PID()) + ROCJPEG_STR(" tid:") +
                       ROCJPEG_TOSTR(GET_THREAD_ID()) + ROCJPEG_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) +
                       "( " + args_ + " ): entry ...");
         }
@@ -113,7 +132,7 @@ public:
         if (logger_.GetLogLevel() >= kRocJpegLogInfo) {
             uint64_t end_time = GET_TIME_NS() / 1000ULL;
             OutputMsg("[" + ROCJPEG_TOSTR(kRocJpegLogInfo) + ", Info] " + ROCJPEG_STR(filename_) + ":" + ROCJPEG_TOSTR(line_) + ": " +
-                      ROCJPEG_TOSTR(end_time) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(getpid()) + ROCJPEG_STR(" tid:") +
+                      ROCJPEG_TOSTR(end_time) + ROCJPEG_STR(" us: ") + ROCJPEG_STR("[pid:") + ROCJPEG_TOSTR(GET_PID()) + ROCJPEG_STR(" tid:") +
                       ROCJPEG_TOSTR(GET_THREAD_ID()) + ROCJPEG_STR(" hashid:") + GET_HASHED_THREAD_ID() + ROCJPEG_STR("] ") + ROCJPEG_STR(func_) +
                       "( " + args_ + " ): exit (" + ROCJPEG_TOSTR(end_time - start_time_) + " us) ...");
         }

@@ -42,7 +42,11 @@ THE SOFTWARE.
 static std::atomic<RocJpegVaapiLoader *> g_va_loader{nullptr};
 
 // clang-format off
+#ifdef _WIN32
+#define vaGetDisplayWin32(...)        (g_va_loader.load(std::memory_order_acquire)->fn.vaGetDisplayWin32(__VA_ARGS__))
+#else
 #define vaGetDisplayDRM(...)          (g_va_loader.load(std::memory_order_acquire)->fn.vaGetDisplayDRM(__VA_ARGS__))
+#endif
 #define vaInitialize(...)             (g_va_loader.load(std::memory_order_acquire)->fn.vaInitialize(__VA_ARGS__))
 #define vaTerminate(...)              (g_va_loader.load(std::memory_order_acquire)->fn.vaTerminate(__VA_ARGS__))
 #define vaSetInfoCallback(...)        (g_va_loader.load(std::memory_order_acquire)->fn.vaSetInfoCallback(__VA_ARGS__))
@@ -272,6 +276,13 @@ RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, H
         auto it = std::find_if(entries.begin(), entries.end(),
                               [surface_id](const RocJpegVaapiMemPoolEntry& entry){return std::find(entry.va_surface_ids.begin(), entry.va_surface_ids.end(), surface_id) != entry.va_surface_ids.end();});
         if (it != entries.end()) {
+#ifdef _WIN32
+            // vaon12 surfaces are D3D12 resources, not DRM PRIME buffers, so the export/import below does not apply.
+            // Sharing them with HIP needs a D3D12 interop path (as in rocDecode), which is not implemented yet.
+            (void)hip_interop;
+            ErrorLog(g_rocjpeg_logger, "VA-API/HIP surface interop is not implemented on Windows!");
+            return ROCJPEG_STATUS_NOT_IMPLEMENTED;
+#else
             auto idx = std::distance(it->va_surface_ids.begin(), std::find(it->va_surface_ids.begin(), it->va_surface_ids.end(), surface_id));
             #if defined(ENABLE_INTEROP_BUFFER_REUSE) && ENABLE_INTEROP_BUFFER_REUSE > 0
                 // Perform the VA-API/HIP interop once for each surface in the memory pool and store it for reuse.
@@ -357,6 +368,7 @@ RocJpegStatus RocJpegVaapiMemoryPool::GetHipInteropMem(VASurfaceID surface_id, H
             #endif
             hip_interop = it->hip_interops[idx];
             return ROCJPEG_STATUS_SUCCESS;
+#endif // _WIN32
         }
     }
     // it shouldn't reach here unless the requested surface_id is not in the memory pool.
@@ -404,9 +416,11 @@ RocJpegVappiDecoder::RocJpegVappiDecoder(int device_id) : device_id_{device_id},
  * @note If any of the cleanup operations fail, an error message will be printed.
  */
 RocJpegVappiDecoder::~RocJpegVappiDecoder() {
+#ifndef _WIN32
     if (drm_fd_ != -1) {
         close(drm_fd_);
     }
+#endif
     if (va_display_) {
         vaapi_mem_pool_->ReleaseResources();
         RocJpegStatus rocjpeg_status = DestroyDataBuffers();
@@ -461,6 +475,25 @@ RocJpegVappiDecoder::~RocJpegVappiDecoder() {
  * @param gpu_pci_bdf The GPU PCI BDF (primary match).
  * @return The status of the initialization process.
  */
+#ifdef _WIN32
+RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(int device_id, const LUID& adapter_luid) {
+    device_id_ = device_id;
+    // HIP already resolves device_id against its own enumeration (including HIP_VISIBLE_DEVICES), so the
+    // adapter LUID it reports identifies the display adapter directly; there is no DRM node to map to.
+    InfoLog(g_rocjpeg_logger, "Selected adapter LUID: " + ROCJPEG_TOSTR(adapter_luid.HighPart) + ":" + ROCJPEG_TOSTR(adapter_luid.LowPart));
+
+    CHECK_ROCJPEG(InitVAAPI(adapter_luid));
+    CHECK_ROCJPEG(CreateDecoderConfig());
+    CHECK_ROCJPEG(CreateDecoderContext());
+
+    vaapi_mem_pool_->SetVaapiDisplay(va_display_);
+
+    GetNumJpegCores();
+    vaapi_mem_pool_->SetPoolSize(5 * current_vcn_jpeg_spec_.num_jpeg_cores + 1);
+
+    return ROCJPEG_STATUS_SUCCESS;
+}
+#else
 RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_name, int device_id, const std::string& gpu_uuid, const std::string& gpu_pci_bdf) {
     device_id_ = device_id;
     std::vector<int> visible_devices;
@@ -548,6 +581,7 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_n
 
     return ROCJPEG_STATUS_SUCCESS;
 }
+#endif // _WIN32
 /**
  * @brief Retrieves the number of JPEG cores available on the AMD GPU and updates the decoder's capabilities.
  *
@@ -562,6 +596,12 @@ RocJpegStatus RocJpegVappiDecoder::InitializeDecoder(const std::string& device_n
  *       advance. For the same reason a successful query reporting zero cores is also clamped to 1.
  */
 void RocJpegVappiDecoder::GetNumJpegCores() {
+#ifdef _WIN32
+    // libdrm_amdgpu is not available on Windows, so the core count cannot be queried. Keep the constructor's
+    // safe fallback (a single core, no VCN ROI decode or RGB conversion); cropping and RGB conversion are then
+    // done by the HIP kernels.
+    return;
+#else
     amdgpu_device_handle dev_handle;
     uint32_t major_version = 0, minor_version = 0;
     uint32_t num_jpeg_cores = 0;
@@ -586,6 +626,7 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
         ErrorLog(g_rocjpeg_logger, "Failed to get the number of jpeg cores! Falling back to a single JPEG core.");
     }
     amdgpu_device_deinitialize(dev_handle);
+#endif // _WIN32
 }
 /**
  * @brief Initializes the VAAPI decoder.
@@ -598,6 +639,10 @@ void RocJpegVappiDecoder::GetNumJpegCores() {
  *         - ROCJPEG_STATUS_SUCCESS if the initialization is successful.
  *         - ROCJPEG_STATUS_NOT_INITIALIZED if the initialization fails.
  */
+#ifdef _WIN32
+RocJpegStatus RocJpegVappiDecoder::InitVAAPI(const LUID& adapter_luid) {
+    va_display_ = vaGetDisplayWin32(&adapter_luid);
+#else
 RocJpegStatus RocJpegVappiDecoder::InitVAAPI(std::string drm_node) {
     InfoLog(g_rocjpeg_logger, "Opening DRM node: " + drm_node);
     drm_fd_ = open(drm_node.c_str(), O_RDWR);
@@ -606,6 +651,7 @@ RocJpegStatus RocJpegVappiDecoder::InitVAAPI(std::string drm_node) {
         return ROCJPEG_STATUS_NOT_INITIALIZED;
     }
     va_display_ = vaGetDisplayDRM(drm_fd_);
+#endif
     if (!va_display_) {
         ErrorLog(g_rocjpeg_logger, "failed to create va_display!");
         return ROCJPEG_STATUS_NOT_INITIALIZED;
@@ -649,7 +695,13 @@ RocJpegStatus RocJpegVappiDecoder::CreateDecoderConfig() {
     std::vector<VAEntrypoint> jpeg_entrypoint_list;
     jpeg_entrypoint_list.resize(max_num_entrypoints);
     int num_entrypoints = 0;
-    CHECK_VAAPI(vaQueryConfigEntrypoints(va_display_, va_profile_, jpeg_entrypoint_list.data(), &num_entrypoints));
+    VAStatus query_status = vaQueryConfigEntrypoints(va_display_, va_profile_, jpeg_entrypoint_list.data(), &num_entrypoints);
+    if (query_status == VA_STATUS_ERROR_UNSUPPORTED_PROFILE) {
+        // The driver has no JPEG decode at all (e.g. vaon12 on Windows), which is not a runtime failure.
+        ErrorLog(g_rocjpeg_logger, "The VA-API driver does not support JPEG decoding!");
+        return ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED;
+    }
+    CHECK_VAAPI(query_status);
     bool hw_jpeg_decoder_supported = false;
     if (num_entrypoints > 0) {
         for (auto entry_point : jpeg_entrypoint_list) {
@@ -861,10 +913,9 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecode(const JpegStreamParameters *jpeg
     surface_attribs.push_back(surface_attrib);
 
     uint64_t mod_linear = 0;
-    VADRMFormatModifierList modifier_list = {
-        .num_modifiers = 1,
-        .modifiers = &mod_linear,
-    };
+    VADRMFormatModifierList modifier_list = {};
+    modifier_list.num_modifiers = 1;
+    modifier_list.modifiers = &mod_linear;
     if (supports_modifiers_) {
         surface_attrib.type = VASurfaceAttribDRMFormatModifiers;
         surface_attrib.value.type = VAGenericValueTypePointer;
@@ -1004,10 +1055,9 @@ RocJpegStatus RocJpegVappiDecoder::SubmitDecodeBatched(JpegStreamParameters *jpe
     surface_attribs[0].value.type = VAGenericValueTypeInteger;
 
     uint64_t mod_linear = 0;
-    VADRMFormatModifierList modifier_list = {
-        .num_modifiers = 1,
-        .modifiers = &mod_linear,
-    };
+    VADRMFormatModifierList modifier_list = {};
+    modifier_list.num_modifiers = 1;
+    modifier_list.modifiers = &mod_linear;
     if (supports_modifiers_) {
         surface_attribs[1].type = VASurfaceAttribDRMFormatModifiers;
         surface_attribs[1].flags = VA_SURFACE_ATTRIB_SETTABLE;
@@ -1120,6 +1170,7 @@ RocJpegStatus RocJpegVappiDecoder::GetHipInteropMem(VASurfaceID surface_id, HipI
     return vaapi_mem_pool_->GetHipInteropMem(surface_id, hip_interop);
 }
 
+#ifndef _WIN32
 /**
  * @brief Retrieves the visible devices for the RocJpegVappiDecoder.
  *
@@ -1210,6 +1261,8 @@ void RocJpegVappiDecoder::GetDrmNodeOffset(std::string device_name, uint8_t devi
     }
 }
 
+#endif // !_WIN32
+
 /**
  * @brief Sets a VASurfaceID as idle.
  *
@@ -1227,6 +1280,7 @@ RocJpegStatus RocJpegVappiDecoder::SetSurfaceAsIdle(VASurfaceID surface_id) {
     return ROCJPEG_STATUS_SUCCESS;
 }
 
+#ifndef _WIN32
 /**
  * @brief Retrieves GPU UUIDs and maps them to render node IDs and compute partitions.
  *
@@ -1349,3 +1403,4 @@ std::string RocJpegVappiDecoder::GetFirstAvailableDrmNode() {
     }
     return "/dev/dri/renderD" + std::to_string(min_render_id);
 }
+#endif // !_WIN32

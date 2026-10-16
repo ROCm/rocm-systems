@@ -38,7 +38,9 @@ if(EXISTS "${ROCM_PATH}/lib/rocm_sysdeps/lib")
   set(USING_THE_ROCK ON)
 endif()
 
-if(USING_THE_ROCK)
+# RULE_LAUNCH_COMPILE is a Unix-shell 'VAR=value' prefix. On Windows the HIP
+# kernels are compiled out of line and get --rocm-device-lib-path explicitly.
+if(USING_THE_ROCK AND NOT WIN32)
   if(NOT DEFINED ENV{HIP_DEVICE_LIB_PATH})
     set(ENV{HIP_DEVICE_LIB_PATH} ${ROCM_PATH}/lib/llvm/amdgcn/bitcode)
     set_property(GLOBAL PROPERTY RULE_LAUNCH_COMPILE "HIP_DEVICE_LIB_PATH=${ROCM_PATH}/lib/llvm/amdgcn/bitcode")
@@ -49,9 +51,13 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if(NOT DEFINED CMAKE_CXX_COMPILER)
-  set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
-  set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+# On Windows the host compiler is MSVC; only the HIP kernels are compiled with
+# amdclang++ (see the rocjpeg_hip_kernels custom command below).
+if(NOT WIN32)
+  if(NOT DEFINED CMAKE_CXX_COMPILER)
+    set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
+    set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
+  endif()
 endif()
 
 # rocjpeg Version
@@ -113,12 +119,19 @@ if(NOT GPU_TARGETS AND NOT AMDGPU_TARGETS)
     include(ROCMCheckTargetIds OPTIONAL RESULT_VARIABLE HAS_ROCM_CHECK_TARGET_IDS)
 
     set(OPTIONAL_GPU_TARGETS "gfx950;gfx1150;gfx1151;gfx1152;gfx1153;gfx1170;gfx1171;gfx1200;gfx1201;gfx1250;gfx1250-strict")
-    if(HAS_ROCM_CHECK_TARGET_IDS)
+    # rocm_check_target_ids probes with a HIP-language try_compile, which the
+    # Visual Studio generator cannot run.
+    if(HAS_ROCM_CHECK_TARGET_IDS AND NOT WIN32)
         rocm_check_target_ids(OPTIONAL_GPU_TARGETS_AVAILABLE TARGETS ${OPTIONAL_GPU_TARGETS})
     else() # if we don't have rocm_check_target_ids, just assume the targets are available
         set(OPTIONAL_GPU_TARGETS_AVAILABLE "${OPTIONAL_GPU_TARGETS}")
     endif()
-    set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
+    if(NOT WIN32)
+        set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1100;gfx1101;gfx1102;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
+    else()
+        # Windows also covers the integrated GPUs (gfx1035, gfx1103) that rocDecode's Windows samples target.
+        set(DEFAULT_GPU_TARGETS "gfx908;gfx90a;gfx942;gfx1030;gfx1031;gfx1032;gfx1035;gfx1100;gfx1101;gfx1102;gfx1103;${OPTIONAL_GPU_TARGETS_AVAILABLE}")
+    endif()
 endif()
 
 # Set AMD GPU_TARGETS
@@ -146,49 +159,149 @@ option(ROCJPEG_ENABLE_ROCPROFILER_REGISTER "Enable rocprofiler-register support"
 set (HIP_PLATFORM amd CACHE STRING "HIP platform")
 find_package(HIP QUIET)
 find_package(Libva QUIET)
-find_package(Libdrm_amdgpu QUIET)
+if(NOT WIN32)
+  find_package(Libdrm_amdgpu QUIET)
+endif()
 find_package(Threads QUIET)
 
-if(ROCJPEG_ENABLE_ROCPROFILER_REGISTER)
-  find_package(rocprofiler-register QUIET
-    HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
-    PATHS ${ROCM_PATH})
+if(NOT WIN32)
+  if(ROCJPEG_ENABLE_ROCPROFILER_REGISTER)
+    find_package(rocprofiler-register QUIET
+      HINTS $ENV{rocprofiler_register_ROOT} $ENV{ROCPROFILER_REGISTER_ROOT} ${CMAKE_INSTALL_PREFIX}
+      PATHS ${ROCM_PATH})
+  endif()
+else()
+  # Not available on Windows. Clear any value inherited from an enclosing scope
+  # -- a superbuild parent that found the package would otherwise leave
+  # rocprofiler-register_FOUND true here.
+  set(rocprofiler-register_FOUND FALSE)
+  if(ROCJPEG_ENABLE_ROCPROFILER_REGISTER)
+    message("-- ${Yellow}NOTE: rocprofiler-register is not available on Windows -- ROCJPEG_ENABLE_ROCPROFILER_REGISTER ignored${ColourReset}")
+  endif()
 endif()
 
-if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
+# On Windows libdrm_amdgpu is not needed (vaon12 replaces DRM) and the CRT provides threads.
+set(_deps_met FALSE)
+if(NOT WIN32)
+  if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
+    set(_deps_met TRUE)
+  endif()
+else()
+  if(HIP_FOUND AND Libva_FOUND)
+    set(_deps_met TRUE)
+  endif()
+endif()
+
+if(_deps_met)
   # HIP
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
+  if(NOT WIN32)
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::device)
+  else()
+    # MSVC cannot take hip::device's clang-only flags; the kernels are compiled separately.
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} hip::host)
+  endif()
   # LibVA - headers always needed for VA-API type definitions.
   # On Linux TheRock builds, libva is loaded at runtime via dlopen with
   # RTLD_LOCAL | RTLD_DEEPBIND (see rocjpeg_vaapi_loader.cpp) to prevent symbol
   # collision with any system libva.so.2 in the same process; no direct
   # link-time dependency is needed in that case.
+  # On Windows TheRock builds, rocm_sysdeps_va_win32.dll and rocm_sysdeps_va.dll
+  # are likewise loaded at runtime via LoadLibraryExW (see rocjpeg_vaapi_loader.cpp).
   # On non-TheRock builds, link directly as before.
   include_directories(${LIBVA_INCLUDE_DIR})
-  if(NOT (USING_THE_ROCK AND UNIX))
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
-    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+  if(NOT WIN32)
+    if(NOT (USING_THE_ROCK AND UNIX))
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY})
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_DRM_LIBRARY})
+    endif()
+    # DRM_AMDGPU
+    include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
+  else()
+    # vaon12: va_win32 instead of va-drm. FindLibva only looks for va-drm on
+    # Linux, so LIBVA_DRM_LIBRARY is never referenced here (a stale cache entry
+    # would otherwise reach the linker).
+    include_directories(${LIBVA_WIN32_INCLUDE_DIR})
+    if(NOT USING_THE_ROCK)
+      set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBVA_LIBRARY} ${LIBVA_WIN32_LIBRARY})
+    endif()
   endif()
-  # DRM_AMDGPU
-  include_directories(${LIBDRM_AMDGPU_INCLUDE_DIR})
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} ${LIBDRM_AMDGPU_LIBRARY})
 
   # rocprofiler
   if(rocprofiler-register_FOUND)
     set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} rocprofiler-register::rocprofiler-register)
   endif()
 
-  # Threads library (required for std::thread support)
-  set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+  if(NOT WIN32)
+    # Threads library (required for std::thread support)
+    set(LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST} Threads::Threads)
+  endif()
 
   # local include files
   include_directories(${CMAKE_CURRENT_SOURCE_DIR}/api ${CMAKE_CURRENT_SOURCE_DIR}/src)
   # source files
   file(GLOB_RECURSE SOURCES "${CMAKE_CURRENT_SOURCE_DIR}/src/*.cpp")
-  # rocjpeg.so
+  if(WIN32)
+    # The Windows host compiler is MSVC, so the HIP device code cannot ride along on
+    # hip::device the way it does on Linux. CMake's HIP language is not an option
+    # either: it requires Ninja and forbids mixing MSVC-style and clang-style command
+    # lines in one project. Compile the kernels out of line with amdclang++ -- the
+    # same compiler the Linux path uses for this file -- and link the object into
+    # the DLL. The per-config output path needs a generator expression in
+    # add_custom_command(OUTPUT), which CMake only evaluates from 3.20 on.
+    if(CMAKE_VERSION VERSION_LESS 3.20)
+      message(FATAL_ERROR "Building rocjpeg on Windows requires CMake 3.20 or newer (found ${CMAKE_VERSION}).")
+    endif()
+    set(HIP_KERNEL_SOURCE ${CMAKE_CURRENT_SOURCE_DIR}/src/rocjpeg_hip_kernels.cpp)
+    list(REMOVE_ITEM SOURCES ${HIP_KERNEL_SOURCE})
+    set(HIP_KERNEL_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++.exe)
+    # amdclang++ needs one --offload-arch= per target; GPU_TARGETS is a list and
+    # would otherwise expand into bare arguments that clang reads as inputs
+    set(OFFLOAD_ARCH_FLAGS)
+    foreach(GPU_TARGET ${GPU_TARGETS})
+      list(APPEND OFFLOAD_ARCH_FLAGS --offload-arch=${GPU_TARGET})
+    endforeach()
+    # Visual Studio is a multi-config generator, and the CRT and optimization flags
+    # below vary by configuration, so the object lives in a per-config directory:
+    # with a shared path, an object left by a Debug build looks up to date to a later
+    # Release build, which would then link a kernel built against the debug CRT.
+    set(HIP_KERNEL_OBJ_DIR ${CMAKE_CURRENT_BINARY_DIR}/hip_kernels/$<CONFIG>)
+    set(HIP_KERNEL_OBJ ${HIP_KERNEL_OBJ_DIR}/rocjpeg_hip_kernels.obj)
+    add_custom_command(
+      OUTPUT ${HIP_KERNEL_OBJ}
+      COMMAND ${CMAKE_COMMAND} -E make_directory ${HIP_KERNEL_OBJ_DIR}
+      COMMAND ${HIP_KERNEL_COMPILER} -x hip -c ${HIP_KERNEL_SOURCE} -o ${HIP_KERNEL_OBJ} -D__HIP_PLATFORM_AMD__=1 -std=c++17
+        ${OFFLOAD_ARCH_FLAGS}
+        --rocm-path=${ROCM_PATH}
+        --rocm-device-lib-path=${ROCM_PATH}/lib/llvm/amdgcn/bitcode
+        -I${CMAKE_CURRENT_SOURCE_DIR}/src
+        -I${ROCM_PATH}/include
+        -DNOMINMAX -D_CRT_SECURE_NO_WARNINGS
+        # must track the MSVC config, or the kernel object links
+        # against a different CRT than the rest of the library
+        -fms-runtime-lib=$<IF:$<CONFIG:Debug>,dll_dbg,dll>
+        $<IF:$<CONFIG:Debug>,-O0,-O3>
+      # depend on this file too, so changing the flags above rebuilds
+      DEPENDS ${HIP_KERNEL_SOURCE} ${CMAKE_CURRENT_SOURCE_DIR}/src/rocjpeg_hip_kernels.h ${CMAKE_CURRENT_LIST_FILE}
+      COMMENT "Compiling rocjpeg HIP kernels"
+    )
+    add_custom_target(rocjpeg_hip_kernels DEPENDS ${HIP_KERNEL_OBJ})
+  endif()
+  # rocjpeg.so / rocjpeg.dll
   add_library(${PROJECT_NAME} SHARED ${SOURCES})
 
-  if(CMAKE_BUILD_TYPE MATCHES Debug)
+  if(WIN32)
+    target_compile_definitions(${PROJECT_NAME} PRIVATE NOMINMAX _CRT_SECURE_NO_WARNINGS)
+    # /-prefixed flags are MSVC syntax: a GNU-driver compiler on Windows reads
+    # them as input filenames, so gate on the compiler rather than on WIN32.
+    if(MSVC)
+      # Suppress warnings from pre-existing code and external headers:
+      # C4200: zero-sized array in va.h
+      # C4018/C4267/C4244/C4146: signed/unsigned and narrowing conversions in
+      #   pre-existing code (also present, unreported, on Linux)
+      target_compile_options(${PROJECT_NAME} PRIVATE /W3 /wd4200 /wd4018 /wd4267 /wd4244 /wd4146)
+    endif()
+  elseif(CMAKE_BUILD_TYPE MATCHES Debug)
     # -O0 -- Don't Optimize output file
     # -g  -- generate debugging information, generate debugging information, dwarf-4 for making valgrind work
     # -Og -- Optimize for debugging experience rather than speed or size
@@ -203,13 +316,36 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   endif()
   message("-- ${BoldBlue}rocjpeg Build Type -- ${CMAKE_BUILD_TYPE}${ColourReset}")
 
-  target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+  if(NOT WIN32)
+    target_link_libraries(${PROJECT_NAME} ${LINK_LIBRARY_LIST})
+  else()
+    # On Windows the implementation libraries are linked PRIVATE so they stay out
+    # of the exported INTERFACE_LINK_LIBRARIES: raw .lib/.obj paths resolve to
+    # absolute build-tree locations, and a consumer relinking against the installed
+    # target (the ctest build-and-test samples) would fail on them.
+    #
+    # hip::host stays PUBLIC: the installed public header rocjpeg.h includes
+    # hip/hip_runtime.h, so it is a genuine usage requirement for consumers.
+    #
+    # The kernel object is a link input rather than a target source, so
+    # WINDOWS_EXPORT_ALL_SYMBOLS does not export the kernel launchers.
+    set(_PRIVATE_LINK_LIBRARY_LIST ${LINK_LIBRARY_LIST})
+    list(REMOVE_ITEM _PRIVATE_LINK_LIBRARY_LIST hip::host)
+    add_dependencies(${PROJECT_NAME} rocjpeg_hip_kernels)
+    target_link_libraries(${PROJECT_NAME}
+      PUBLIC hip::host
+      PRIVATE ${_PRIVATE_LINK_LIBRARY_LIST} ${HIP_KERNEL_OBJ})
+  endif()
 
   set_target_properties(${PROJECT_NAME} PROPERTIES POSITION_INDEPENDENT_CODE ON)
   set_target_properties(${PROJECT_NAME} PROPERTIES LINKER_LANGUAGE CXX)
-  set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
+  if(NOT WIN32)
+    set_target_properties(${PROJECT_NAME} PROPERTIES VERSION ${PROJECT_VERSION} SOVERSION ${PROJECT_VERSION_MAJOR})
+  else()
+    set_target_properties(${PROJECT_NAME} PROPERTIES WINDOWS_EXPORT_ALL_SYMBOLS ON)
+  endif()
 
-  if(USING_THE_ROCK)
+  if(USING_THE_ROCK AND NOT WIN32)
     set_target_properties(${PROJECT_NAME} PROPERTIES INSTALL_RPATH "$ORIGIN;$ORIGIN/rocm_sysdeps/lib" BUILD_WITH_INSTALL_RPATH TRUE)
     if(UNIX)
       # Enable dlopen-based VA isolation and link against libdl for dlopen/dlsym/dlclose.
@@ -217,6 +353,11 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
       target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
       target_link_libraries(${PROJECT_NAME} dl)
     endif()
+  endif()
+  if(USING_THE_ROCK AND WIN32)
+    # Load rocm_sysdeps_va_win32.dll / rocm_sysdeps_va.dll at runtime via
+    # LoadLibraryExW/GetProcAddress (kernel32, linked by default).
+    target_compile_definitions(${PROJECT_NAME} PRIVATE ROCJPEG_USE_DLOPEN_VA)
   endif()
 
   # rocprofiler
@@ -264,8 +405,15 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   configure_file( ${CMAKE_CURRENT_SOURCE_DIR}/api/rocjpeg_version.h.in ${CMAKE_CURRENT_BINARY_DIR}/rocjpeg_version.h @ONLY )
 
   # install rocjpeg libs -- {ROCM_PATH}/lib
-  install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
-  install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  if(NOT WIN32)
+    install(TARGETS ${PROJECT_NAME} LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_SKIP)
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR} NAMELINK_ONLY)
+  else()
+    install(TARGETS ${PROJECT_NAME} EXPORT ${PROJECT_NAME}-targets
+            RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+            LIBRARY DESTINATION ${CMAKE_INSTALL_LIBDIR}
+            ARCHIVE DESTINATION ${CMAKE_INSTALL_LIBDIR})
+  endif()
   # install rocjpeg include files -- {ROCM_PATH}/include/rocjpeg
   install(FILES api/rocjpeg/rocjpeg.h
           DESTINATION ${CMAKE_INSTALL_INCLUDEDIR}/${PROJECT_NAME})
@@ -341,7 +489,11 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
   # Option to build test binaries during the main build (without running them)
   option(BUILD_TESTS "Build test binaries and install to share/${PROJECT_NAME}/bin" OFF)
 
-  if(BUILD_TESTS)
+  # Not supported on Windows: the nested ExternalProject builds assume a
+  # single-config generator (CMAKE_BUILD_TYPE, an unsuffixed executable directly
+  # in BINARY_DIR) and $ORIGIN install RPATHs, none of which hold for the
+  # Visual Studio generator. Build the samples from share/rocjpeg/samples instead.
+  if(BUILD_TESTS AND NOT WIN32)
     include(ExternalProject)
     set(ROCJPEG_TEST_BIN_DIR ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin)
     set(ROCJPEG_STAGE_DIR ${CMAKE_BINARY_DIR}/stage)
@@ -442,6 +594,12 @@ if(HIP_FOUND AND Libva_FOUND AND Libdrm_amdgpu_FOUND AND Threads_FOUND)
     rocjpeg_add_test_ext(jpegdecodeasync         ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeAsync)
     rocjpeg_add_test_ext(jpegdecodebatchedasync  ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeBatchedAsync)
     rocjpeg_add_test_ext(jpegdecodecaps          ${CMAKE_CURRENT_SOURCE_DIR}/samples/jpegDecodeCaps)
+  elseif(BUILD_TESTS)
+    # Reached only when BUILD_TESTS=ON and WIN32, which the branch above excludes.
+    message(WARNING "BUILD_TESTS=ON is ignored on Windows: no test binaries will be built "
+                    "or installed to ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/bin. "
+                    "Build the samples from ${CMAKE_INSTALL_DATADIR}/${PROJECT_NAME}/samples "
+                    "after installing instead.")
   endif()
 
   # make test with CTest
@@ -458,10 +616,10 @@ else()
   if(NOT Libva_FOUND)
     message(FATAL_ERROR "-- ERROR!: libva Not Found!")
   endif()
-  if(NOT Libdrm_amdgpu_FOUND)
+  if(NOT WIN32 AND NOT Libdrm_amdgpu_FOUND)
     message(FATAL_ERROR "-- ERROR!: libdrm_amdgpu Not Found!")
   endif()
-  if(NOT Threads_FOUND)
+  if(NOT WIN32 AND NOT Threads_FOUND)
     message(FATAL_ERROR "-- ERROR!: Threads Not Found!")
   endif()
 endif()

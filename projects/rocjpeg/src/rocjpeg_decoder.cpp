@@ -96,11 +96,18 @@ RocJpegStatus RocJpegDecoder::InitializeDecoder() {
         return rocjpeg_status;
     }
     if (backend_ == ROCJPEG_BACKEND_HARDWARE) {
+#ifdef _WIN32
+        LUID adapter_luid = {};
+        static_assert(sizeof(adapter_luid) == sizeof(hip_dev_prop_.luid), "hipDeviceProp_t::luid must hold a LUID");
+        memcpy(&adapter_luid, hip_dev_prop_.luid, sizeof(adapter_luid));
+        rocjpeg_status = jpeg_vaapi_decoder_.InitializeDecoder(device_id_, adapter_luid);
+#else
         std::string gpu_uuid(hip_dev_prop_.uuid.bytes, sizeof(hip_dev_prop_.uuid.bytes));
         char pci_bus_id[64] = {0};
         CHECK_HIP(hipDeviceGetPCIBusId(pci_bus_id, sizeof(pci_bus_id), device_id_));
         std::string gpu_pci_bdf(pci_bus_id);
         rocjpeg_status = jpeg_vaapi_decoder_.InitializeDecoder(hip_dev_prop_.name, device_id_, gpu_uuid, gpu_pci_bdf);
+#endif
         if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
             CriticalLog(g_rocjpeg_logger, "Failed to initialize the VA-API JPEG decoder!");
             FunctionExitLog(g_rocjpeg_logger);

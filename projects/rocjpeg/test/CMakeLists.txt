@@ -43,7 +43,7 @@ endif()
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED On)
 set(CMAKE_CXX_EXTENSIONS ON)
-if(NOT DEFINED CMAKE_CXX_COMPILER)
+if(NOT WIN32 AND NOT DEFINED CMAKE_CXX_COMPILER)
   set(CMAKE_C_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang)
   set(CMAKE_CXX_COMPILER ${ROCM_PATH}/lib/llvm/bin/amdclang++)
 endif()
@@ -399,3 +399,15 @@ add_test(
             --build-generator "${CMAKE_GENERATOR}"
             --test-command "rocjpegnegativetest"
 )
+
+if(WIN32)
+  # The Windows VA-API driver (vaon12) does not expose JPEG decoding on every
+  # GPU. The decode samples then fail rocJpegCreate with
+  # ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED, which is reported as a skip
+  # rather than a failure. Any other error still fails the test.
+  # jpeg-decode-caps and jpeg-negative-api-tests handle that status themselves.
+  get_property(ROCJPEG_TESTS DIRECTORY PROPERTY TESTS)
+  list(REMOVE_ITEM ROCJPEG_TESTS jpeg-decode-caps jpeg-negative-api-tests)
+  set_tests_properties(${ROCJPEG_TESTS} PROPERTIES
+    SKIP_REGULAR_EXPRESSION "rocJpegCreate\\(.*\\) returned ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED")
+endif()

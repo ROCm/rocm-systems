@@ -23,7 +23,9 @@ THE SOFTWARE.
 #ifndef ROC_JPEG_DECODER_H_
 #define ROC_JPEG_DECODER_H_
 
+#ifndef _WIN32
 #include <unistd.h>
+#endif
 #include <vector>
 #include <mutex>
 #include <atomic>

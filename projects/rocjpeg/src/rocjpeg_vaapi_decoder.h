@@ -30,18 +30,26 @@ THE SOFTWARE.
 #include <sstream>
 #include <vector>
 #include <string>
+#ifndef _WIN32
 #include <fcntl.h>
 #include <unistd.h>
 #include <dirent.h>
 #include <sys/stat.h>
+#endif
 #include <unordered_map>
 #include <memory>
 #include <mutex>
 #include <functional>
+#ifndef _WIN32
 #include <libdrm/amdgpu.h>
 #include <libdrm/amdgpu_drm.h>
+#endif
 #include <va/va.h>
+#ifdef _WIN32
+#include <va/va_win32.h>
+#else
 #include <va/va_drm.h>
+#endif
 #include <va/va_drmcommon.h>
 #ifdef ROCJPEG_USE_DLOPEN_VA
 #include "rocjpeg_vaapi_loader.h"
@@ -288,7 +296,17 @@ public:
      * @param gpu_pci_bdf The GPU PCI BDF (primary match).
      * @return The status of the initialization.
      */
+#ifdef _WIN32
+    /**
+     * @brief Initializes the decoder on the display adapter that backs the given HIP device.
+     * @param device_id The ID of the device.
+     * @param adapter_luid The LUID of the display adapter of the HIP device (hipDeviceProp_t::luid).
+     * @return The status of the initialization.
+     */
+    RocJpegStatus InitializeDecoder(int device_id, const LUID& adapter_luid);
+#else
     RocJpegStatus InitializeDecoder(const std::string& device_name, int device_id, const std::string& gpu_uuid, const std::string& gpu_pci_bdf);
+#endif
 
     /**
      * @brief Submits a JPEG stream for decoding.
@@ -386,6 +404,14 @@ private:
     VABufferID va_huffmantable_buf_id_; // The VAAPI Huffman table buffer ID
     VABufferID va_slice_param_buf_id_; // The VAAPI slice parameter buffer ID
     VABufferID va_slice_data_buf_id_; // The VAAPI slice data buffer ID
+#ifdef _WIN32
+    /**
+     * @brief Initializes the VAAPI on the display adapter with the given LUID.
+     * @param adapter_luid The LUID of the display adapter to open.
+     * @return The status of the VAAPI initialization.
+     */
+    RocJpegStatus InitVAAPI(const LUID& adapter_luid);
+#else
     /**
      * @brief A map that associates GPU UUIDs with their corresponding render node indices.
      * 
@@ -413,6 +439,7 @@ private:
      * @return The status of the VAAPI initialization.
      */
     RocJpegStatus InitVAAPI(std::string drm_node);
+#endif
 
     /**
      * @brief Creates the decoder configuration.
@@ -436,6 +463,7 @@ private:
      */
     RocJpegStatus DestroyDataBuffers();
 
+#ifndef _WIN32
     /**
      * @brief Retrieves the visible devices.
      * @param visible_devices The vector to store the visible devices.
@@ -463,6 +491,7 @@ private:
 
     // Returns the lowest-numbered /dev/dri/renderD* node, or "" if none.
     std::string GetFirstAvailableDrmNode();
+#endif
 
     /**
      * @brief Retrieves the number of JPEG cores available.

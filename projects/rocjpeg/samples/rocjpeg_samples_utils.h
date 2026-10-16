@@ -34,7 +34,7 @@ THE SOFTWARE.
 #include <functional>
 #include <condition_variable>
 #include <queue>
-#if __cplusplus >= 201703L && __has_include(<filesystem>)
+#if (defined(_MSVC_LANG) && _MSVC_LANG >= 201703L) || (__cplusplus >= 201703L && __has_include(<filesystem>))
     #include <filesystem>
     namespace fs = std::filesystem;
 #else

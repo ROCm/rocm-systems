@@ -627,6 +627,14 @@ int RocJpegApiNegativeTests::TestInvalidCreate() {
 
     // Create a valid rocJPEG handle - This step ensures a valid rocjpeg_handle_ is available for subsequent negative testing of other rocJPEG APIs.
     rocjpeg_status = rocJpegCreate(ROCJPEG_BACKEND_HARDWARE, device_id, &rocjpeg_handle_);
+#ifdef _WIN32
+    if (rocjpeg_status == ROCJPEG_STATUS_HW_JPEG_DECODER_NOT_SUPPORTED) {
+        std::cout << "info: The hardware JPEG decoder is not supported on GPU device " << device_id
+                  << "; skipping the negative tests that need a decoder handle" << std::endl;
+        hw_decoder_available_ = false;
+        return DestroyHandle();
+    }
+#endif
     if (rocjpeg_status != ROCJPEG_STATUS_SUCCESS) {
         std::cerr << "Expected ROCJPEG_STATUS_SUCCESS but got " << rocJpegGetErrorName(rocjpeg_status) << std::endl;
         return EXIT_FAILURE;
@@ -1686,8 +1694,8 @@ int RocJpegApiNegativeTests::TestStreamParseFuzz() {
 
 int RocJpegApiNegativeTests::RunTests() {
     if (TestInvalidStreamCreate() || TestInvalidStreamParse () || TestInvalidStreamDestroy() || TestInvalidCreate() || TestInvalidDestroy() ||
-        TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched() || TestInvalidGetErrorName() ||
-        TestInvalidGetDecoderCaps() || TestStreamParseFuzz()) {
+        (hw_decoder_available_ && (TestInvalidGetImageInfo() || TestInvalidDecode() || TestInvalidDecodeBatched())) || TestInvalidGetErrorName() ||
+        (hw_decoder_available_ && TestInvalidGetDecoderCaps()) || TestStreamParseFuzz()) {
         std::cerr << "One or more negative tests failed." << std::endl;
         return EXIT_FAILURE;
     } else {
