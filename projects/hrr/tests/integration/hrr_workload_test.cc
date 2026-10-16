@@ -4128,14 +4128,21 @@ TEST_CASE("Unit_HRR_ForkAfterCaptureShutdown_Direct", "[.][hrr-direct]") {
 
 // ---------------------------------------------------------------------------
 // mkdir() for this test binary, for the same reason as fsync() above: CLR
-// resolves it here first. The capture writer creates an archive's directories
-// with it while it opens the archive. With no hook set it is a plain mkdir.
+// resolves it here first. The capture writer creates the path to an archive
+// with it, and the directories inside it with mkdirat, while it opens the
+// archive. The hook gets the path or the name as given. With no hook set they
+// are a plain mkdir and mkdirat.
 // ---------------------------------------------------------------------------
 static std::atomic<void (*)(const char*)> g_hrr_mkdir_hook{nullptr};
 
 extern "C" int mkdir(const char* path, mode_t mode) noexcept {
   if (auto hook = g_hrr_mkdir_hook.load(std::memory_order_acquire)) hook(path);
   return static_cast<int>(syscall(SYS_mkdirat, AT_FDCWD, path, mode));
+}
+
+extern "C" int mkdirat(int dirfd, const char* path, mode_t mode) noexcept {
+  if (auto hook = g_hrr_mkdir_hook.load(std::memory_order_acquire)) hook(path);
+  return static_cast<int>(syscall(SYS_mkdirat, dirfd, path, mode));
 }
 
 // ---------------------------------------------------------------------------
@@ -4155,7 +4162,7 @@ namespace {
 std::atomic<bool> g_child_open_held{false};
 
 void child_open_mkdir_hook(const char* path) {
-  static constexpr char kSuffix[] = "/code_objects";
+  static constexpr char kSuffix[] = "code_objects";
   constexpr size_t kSuffixLen = sizeof(kSuffix) - 1;
   const size_t len = strlen(path);
   if (len < kSuffixLen || memcmp(path + len - kSuffixLen, kSuffix, kSuffixLen) != 0) return;
@@ -4188,16 +4195,23 @@ TEST_CASE("Unit_HRR_ShutdownWhileChildOpensArchive_Direct", "[.][hrr-direct]") {
 }
 
 // ---------------------------------------------------------------------------
-// rename() for this test binary, for the same reason as fsync() above: CLR
-// resolves it here first. The capture shutdown calls it to publish the root
-// manifest, after it has written the trailer and before it closes events.bin.
-// With no hook set it is a plain rename.
+// rename() and renameat() for this test binary, for the same reason as fsync()
+// above: CLR resolves them here first. The capture shutdown calls renameat to
+// publish the root manifest, by its path, after it has written the trailer and
+// before it closes events.bin. With no hook set they are a plain rename and
+// renameat.
 // ---------------------------------------------------------------------------
 static std::atomic<void (*)(const char*)> g_hrr_rename_hook{nullptr};
 
 extern "C" int rename(const char* oldpath, const char* newpath) noexcept {
   if (auto hook = g_hrr_rename_hook.load(std::memory_order_acquire)) hook(newpath);
   return static_cast<int>(syscall(SYS_renameat2, AT_FDCWD, oldpath, AT_FDCWD, newpath, 0));
+}
+
+extern "C" int renameat(int olddirfd, const char* oldpath, int newdirfd,
+                        const char* newpath) noexcept {
+  if (auto hook = g_hrr_rename_hook.load(std::memory_order_acquire)) hook(newpath);
+  return static_cast<int>(syscall(SYS_renameat2, olddirfd, oldpath, newdirfd, newpath, 0));
 }
 
 // ---------------------------------------------------------------------------

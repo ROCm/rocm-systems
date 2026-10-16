@@ -32,8 +32,12 @@
  * arguments and code objects, so every archive directory this writer creates is
  * 0700, every file is 0600, no file is opened through a symbolic link in its last
  * path component, and when the archive is opened the per-process directory must
- * be a real directory owned by the effective user. The directories above each
- * file are resolved again on every open.
+ * be a real directory owned by the effective user. The writer keeps a descriptor
+ * for each archive directory it checked, pid-<pid>, blobs/, code_objects/ and
+ * each blobs/<xx>, and creates, opens, renames and removes every file inside
+ * the archive relative to it, so a directory renamed on the path after the
+ * check cannot redirect a write. Only finding pid-<pid> and the root manifest
+ * in the base directory go by path.
  */
 
 #include "hip_capture_writer.h"
@@ -58,6 +62,7 @@
 #include <string>
 #include <thread>
 #include <unordered_set>
+#include <utility>
 #include <algorithm>
 #include <vector>
 
@@ -91,7 +96,6 @@ static inline uint64_t current_parent_process_id() {
 #  include <sys/statvfs.h>
 #  include <sys/syscall.h>
 #  include <pthread.h>
-#  define HRR_OPEN(p)        open_private_fd((p))
 #  define HRR_WRITE(fd,b,n)  ::write((fd), (b), (n))
 #  define HRR_CLOSE(fd)      ::close((fd))
 #  define HRR_FSYNC(fd)      ::fsync((fd))
@@ -241,10 +245,19 @@ static std::mutex        g_reopen_mu;
 // "co:" prefix for code objects matches the playback-side load_code_object key convention.
 static std::mutex                      g_blob_mu;
 static std::unordered_set<std::string> g_written_blobs;
+// Descriptors of the archive directories open() checked, pid-<pid>, blobs/ and
+// code_objects/, and of each blobs/<xx> once write_blob claims it (xx is two hex
+// chars). Every file inside the archive is created, opened, renamed and removed
+// relative to them, never by path. All are O_CLOEXEC. open() replaces them and
+// atfork_child closes the parent's; the child's open() opens its own. -1 when
+// there is none, always on Windows, where files are opened by path. Atomic
+// because blob writers and the crash path read them without a lock.
+static std::atomic<int> g_dir_fd{-1};
+static std::atomic<int> g_blobs_fd{-1};
+static std::atomic<int> g_code_objects_fd{-1};
 #ifndef _WIN32
-// blobs/<xx> prefixes already checked with claim_private_dir (xx is two hex chars).
-// Atomic because write_blob runs on many threads without a lock held.
-static std::atomic<bool> g_blob_prefix_claimed[256];
+// Valid only while g_dir_fd is: open() sets them all to -1 when it publishes.
+static std::atomic<int> g_blob_prefix_fd[256];
 #endif
 // Keys a thread is reserving space for or writing, also under g_blob_mu. Another
 // caller with the same bytes waits for the claim to end, so the reserve is
@@ -371,16 +384,16 @@ static bool ensure_dir(const std::string& path) {
 static bool owned_by_euid(const struct stat& st) { return st.st_uid == geteuid(); }
 #endif
 
+#ifndef _WIN32
 // pid-<pid>, blobs/, code_objects/ and each blobs/<xx> must be a real directory
 // owned by the effective user; anything else planted there (a symbolic link,
 // another user's directory) is refused. An existing one is tightened to 0700.
-static bool claim_private_dir(const std::string& path) {
-#ifdef _WIN32
-  (void)path;
-  return true;
-#else
-  const int fd = ::open(path.c_str(), O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
-  if (fd < 0) return false;
+// Creates `name` in the directory `at` when it is missing and returns the
+// descriptor the checks ran on, or -1 with errno set.
+static int open_private_dir(int at, const char* name) {
+  if (::mkdirat(at, name, 0700) != 0 && errno != EEXIST) return -1;
+  const int fd = ::openat(at, name, O_RDONLY | O_DIRECTORY | O_NOFOLLOW | O_CLOEXEC);
+  if (fd < 0) return -1;
   struct stat st{};
   int err = 0;
   if (::fstat(fd, &st) != 0) {
@@ -390,25 +403,81 @@ static bool claim_private_dir(const std::string& path) {
   } else if ((st.st_mode & 07777) != 0700 && ::fchmod(fd, 0700) != 0) {
     err = errno;
   }
+  if (err == 0) return fd;
   ::close(fd);
   errno = err;
-  return err == 0;
+  return -1;
+}
+
+// Closes the archive directory descriptors. Async-signal-safe: atfork_child
+// calls it.
+static void close_dir_fds() {
+  const int dir = g_dir_fd.exchange(-1);
+  if (dir < 0) return;
+  ::close(dir);
+  for (std::atomic<int>* fd : {&g_blobs_fd, &g_code_objects_fd})
+    if (const int d = fd->exchange(-1); d >= 0) ::close(d);
+  for (auto& fd : g_blob_prefix_fd)
+    if (const int d = fd.exchange(-1); d >= 0) ::close(d);
+}
+#endif
+
+// pid-<pid>, created with any missing parents. On POSIX *fd gets its descriptor.
+static bool claim_pid_dir(const std::string& out_dir, int* fd) {
+  if (!ensure_dir(out_dir)) return false;
+#ifdef _WIN32
+  (void)fd;
+  return true;
+#else
+  *fd = open_private_dir(AT_FDCWD, out_dir.c_str());
+  return *fd >= 0;
 #endif
 }
+
+// blobs/, code_objects/ or a blobs/<xx>: `name` in the directory `parent_fd` on
+// POSIX, where *fd gets its descriptor, and `path` on Windows.
+static bool claim_sub_dir(int parent_fd, const std::string& path, const char* name, int* fd) {
+#ifdef _WIN32
+  (void)parent_fd;
+  (void)name;
+  (void)fd;
+  return ensure_dir(path);
+#else
+  (void)path;
+  *fd = open_private_dir(parent_fd, name);
+  return *fd >= 0;
+#endif
+}
+
+// Directory descriptors open() holds until it publishes them; any still held
+// when it returns early are closed.
+struct PendingDirs {
+  int dir = -1;
+  int blobs = -1;
+  int code_objects = -1;
+  PendingDirs() = default;
+  PendingDirs(const PendingDirs&) = delete;
+  PendingDirs& operator=(const PendingDirs&) = delete;
+  ~PendingDirs() {
+    for (int fd : {dir, blobs, code_objects})
+      if (fd >= 0) HRR_CLOSE(fd);
+  }
+};
 
 // True when the claimed pid-<pid> holds an earlier process's archive: an
 // events.bin of the kind this writer leaves, a regular file with a single link
 // owned by the effective user. Anything else at that name is not moved, and the
 // open of events.bin refuses it.
-static bool holds_earlier_archive(const std::string& out_dir) {
-  const std::string events = out_dir + "/events.bin";
+static bool holds_earlier_archive(int dir_fd, const std::string& out_dir) {
 #ifdef _WIN32
+  (void)dir_fd;
   std::error_code ec;
-  return fs::is_regular_file(fs::symlink_status(events, ec));
+  return fs::is_regular_file(fs::symlink_status(out_dir + "/events.bin", ec));
 #else
+  (void)out_dir;
   struct stat st{};
-  return ::lstat(events.c_str(), &st) == 0 && S_ISREG(st.st_mode) && st.st_nlink == 1 &&
-         owned_by_euid(st);
+  return ::fstatat(dir_fd, "events.bin", &st, AT_SYMLINK_NOFOLLOW) == 0 && S_ISREG(st.st_mode) &&
+         st.st_nlink == 1 && owned_by_euid(st);
 #endif
 }
 
@@ -439,9 +508,10 @@ static bool move_earlier_archive_aside(const std::string& out_dir, std::string* 
 // opened inode has been checked, so a planted hard link cannot empty a file
 // outside the archive, and O_NONBLOCK keeps a planted FIFO from blocking the
 // open. A refused inode fails with EPERM, so the caller's message names the
-// reason. Async-signal-safe: emergency_finalize reaches it through HRR_OPEN.
-static int open_private_fd(const char* path) {
-  const int fd = ::open(path, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
+// reason. `name` is relative to the directory `dir_fd`. Async-signal-safe:
+// emergency_finalize calls it.
+static int open_private_fd(int dir_fd, const char* name) {
+  const int fd = ::openat(dir_fd, name, O_WRONLY | O_CREAT | O_NOFOLLOW | O_NONBLOCK | O_CLOEXEC, 0600);
   if (fd < 0) return -1;
   struct stat st{};
   int err = 0;
@@ -461,12 +531,36 @@ static int open_private_fd(const char* path) {
 }
 #endif
 
-// fopen(path, "w") for a file inside the archive, opened by open_private_fd on POSIX.
-static FILE* fopen_private(const std::string& path) {
+// Opens `name` inside the archive for writing and truncates it: in the directory
+// `dir_fd` through open_private_fd on POSIX, in `dir` by path on Windows.
+static int open_in_archive(int dir_fd, const std::string& dir, const char* name) {
 #ifdef _WIN32
-  return fopen(path.c_str(), "w");
+  (void)dir_fd;
+  return HRR_OPEN((dir + "/" + name).c_str());
 #else
-  const int fd = open_private_fd(path.c_str());
+  (void)dir;
+  return open_private_fd(dir_fd, name);
+#endif
+}
+
+// Removes `name` from the archive directory, as open_in_archive() finds it.
+static void remove_in_archive(int dir_fd, const std::string& dir, const char* name) {
+#ifdef _WIN32
+  (void)dir_fd;
+  (void)remove((dir + "/" + name).c_str());
+#else
+  (void)dir;
+  (void)::unlinkat(dir_fd, name, 0);
+#endif
+}
+
+// fopen(path, "w") for a file inside the archive, opened by open_in_archive().
+static FILE* fopen_private(int dir_fd, const std::string& dir, const char* name) {
+#ifdef _WIN32
+  (void)dir_fd;
+  return fopen((dir + "/" + name).c_str(), "w");
+#else
+  const int fd = open_in_archive(dir_fd, dir, name);
   if (fd < 0) return nullptr;
   FILE* f = ::fdopen(fd, "w");
   if (!f) ::close(fd);
@@ -497,7 +591,8 @@ static FILE* fopen_read_regular(const std::string& path) {
 #endif
 }
 
-static bool atomic_write_file(const std::string& path, const void* data, size_t len);
+static bool atomic_write_file(int dir_fd, const std::string& dir, const std::string& name,
+                              const void* data, size_t len);
 
 static bool is_json_object_fragment(const std::string& json) {
   const auto begin = json.find_first_not_of(" \t\r\n");
@@ -566,6 +661,7 @@ static void atfork_child() {
     HRR_CLOSE(g_events_fd);
     g_events_fd = -1;
   }
+  close_dir_fds();
   g_buf_len = 0;
   g_events_since_ckpt = 0;
   g_events_finalized = false;
@@ -590,8 +686,8 @@ static void install_atfork_handlers_once() {
 }
 #endif
 
-static void write_manifest_stdio(const char* output_dir, bool complete) {
-  FILE* mf = fopen_private(std::string(output_dir) + "/manifest.json");
+static void write_manifest_stdio(int dir_fd, const std::string& output_dir, bool complete) {
+  FILE* mf = fopen_private(dir_fd, output_dir, "manifest.json");
   if (!mf) return;
   fprintf(mf,
           "{\n"
@@ -737,7 +833,12 @@ static void update_root_manifest() {
   json += "  ]\n";
   json += "}\n";
 
-  (void)atomic_write_file(g_base_dir + "/manifest.json", json.data(), json.size());
+#ifdef _WIN32
+  constexpr int kBaseDir = -1;
+#else
+  constexpr int kBaseDir = AT_FDCWD;
+#endif
+  (void)atomic_write_file(kBaseDir, g_base_dir, "manifest.json", json.data(), json.size());
 }
 
 // ---------------------------------------------------------------------------
@@ -808,7 +909,7 @@ static bool fs_space(const std::string& dir, uint64_t* avail, uint64_t* total,
 // killed process cannot remove its marker, and a producer in a later process
 // with the same pid checks before HIP starts, so it must find its own instance
 // in the marker.
-static constexpr const char* kActiveMarker = "/active";
+static constexpr const char* kActiveMarker = "active";
 
 // Flush what is buffered, close events.bin and mark the archive incomplete.
 // Every write path already treats a closed events fd as "capture off". Both flags
@@ -831,7 +932,7 @@ static void stop_for_space(uint64_t keep_free) {
   }
   // The application runs on, and producers would keep writing sidecars to an
   // archive that records nothing, on a file system already short of space.
-  (void)remove((g_output_dir + kActiveMarker).c_str());
+  remove_in_archive(g_dir_fd.load(), g_output_dir, kActiveMarker);
   mark_incomplete(reason);
   // Not gated on AMD_LOG_LEVEL, like the refusal in open().
   fprintf(stderr,
@@ -991,20 +1092,19 @@ static std::string process_instance() {
 #endif
 }
 
-static bool publish_active_marker(const std::string& out_dir) {
-  const std::string marker = out_dir + kActiveMarker;
+static bool publish_active_marker(int dir_fd, const std::string& out_dir) {
   const std::string instance = process_instance();
   if (instance.empty())
-    LogPrintfWarning("[HRR capture] Cannot name this process in %s, so producers will not "
-                     "take the capture for active", marker.c_str());
-  const int fd = HRR_OPEN(marker.c_str());
+    LogPrintfWarning("[HRR capture] Cannot name this process in %s/%s, so producers will not "
+                     "take the capture for active", out_dir.c_str(), kActiveMarker);
+  const int fd = open_in_archive(dir_fd, out_dir, kActiveMarker);
   if (fd < 0) return false;
   const std::string line = instance + "\n";
   const bool written = write_all_fd(fd, line.data(), line.size());
   const int err = errno;
   HRR_CLOSE(fd);
   if (written) return true;
-  (void)remove(marker.c_str());
+  remove_in_archive(dir_fd, out_dir, kActiveMarker);
   errno = err;
   return false;
 }
@@ -1033,8 +1133,9 @@ bool open(const char* output_dir) {
 
   std::error_code exists_ec;
   bool created_pid_dir = !fs::exists(fs::symlink_status(out_dir, exists_ec));
-  bool dirs_ok = ensure_dir(out_dir) && claim_private_dir(out_dir);
-  if (dirs_ok && !created_pid_dir && holds_earlier_archive(out_dir)) {
+  PendingDirs dirs;
+  bool dirs_ok = claim_pid_dir(out_dir, &dirs.dir);
+  if (dirs_ok && !created_pid_dir && holds_earlier_archive(dirs.dir, out_dir)) {
     std::string moved_to;
     if (!move_earlier_archive_aside(out_dir, &moved_to)) {
       const int err = errno;
@@ -1047,15 +1148,16 @@ bool open(const char* output_dir) {
     fprintf(stderr, "[HRR capture] %s held an archive from an earlier process with this pid; "
             "moved it to %s.\n", out_dir.c_str(), moved_to.c_str());
     created_pid_dir = true;
-    dirs_ok = ensure_dir(out_dir) && claim_private_dir(out_dir);
+    HRR_CLOSE(dirs.dir);
+    dirs.dir = -1;
+    dirs_ok = claim_pid_dir(out_dir, &dirs.dir);
   }
   // A marker left by an earlier process with this pid goes first, once the
   // directory it sits in is known to be ours.
-  if (dirs_ok) (void)remove((out_dir + kActiveMarker).c_str());
-  dirs_ok = dirs_ok && ensure_dir(out_dir + "/blobs") &&
-            claim_private_dir(out_dir + "/blobs") &&
-            ensure_dir(out_dir + "/code_objects") &&
-            claim_private_dir(out_dir + "/code_objects");
+  if (dirs_ok) remove_in_archive(dirs.dir, out_dir, kActiveMarker);
+  dirs_ok = dirs_ok &&
+            claim_sub_dir(dirs.dir, out_dir + "/blobs", "blobs", &dirs.blobs) &&
+            claim_sub_dir(dirs.dir, out_dir + "/code_objects", "code_objects", &dirs.code_objects);
   if (!dirs_ok) {
     const int err = errno;
     LogPrintfError("[HRR capture] Cannot use %s as a private archive directory: %s",
@@ -1064,9 +1166,6 @@ bool open(const char* output_dir) {
             "directory (%s).\n", out_dir.c_str(), strerror(err));
     return open_failed(out_dir, created_pid_dir);
   }
-#ifndef _WIN32
-  for (auto& claimed : g_blob_prefix_claimed) claimed.store(false, std::memory_order_relaxed);
-#endif
 
   if (!init_space_reserve(out_dir)) {
     LogPrintfError("[HRR capture] Less than %llu MiB free on the file system holding %s",
@@ -1080,7 +1179,7 @@ bool open(const char* output_dir) {
   std::string events_path = out_dir + "/events.bin";
   std::string manifest_path = out_dir + "/manifest.json";
 
-  const int fd = HRR_OPEN(events_path.c_str());
+  const int fd = open_in_archive(dirs.dir, out_dir, "events.bin");
   if (fd < 0) {
     const int err = errno;
     LogPrintfError("[HRR capture] Failed to open %s: %s", events_path.c_str(), strerror(err));
@@ -1106,11 +1205,11 @@ bool open(const char* output_dir) {
   }
 
   // The last step before the archive is published.
-  if (!publish_active_marker(out_dir)) {
+  if (!publish_active_marker(dirs.dir, out_dir)) {
     const int err = errno;
-    LogPrintfError("[HRR capture] Cannot create %s%s: %s", out_dir.c_str(), kActiveMarker,
+    LogPrintfError("[HRR capture] Cannot create %s/%s: %s", out_dir.c_str(), kActiveMarker,
                    strerror(err));
-    fprintf(stderr, "[HRR capture] Capture disabled: cannot create %s%s (%s).\n",
+    fprintf(stderr, "[HRR capture] Capture disabled: cannot create %s/%s (%s).\n",
             out_dir.c_str(), kActiveMarker, strerror(err));
     HRR_CLOSE(fd);
     return open_failed(out_dir, created_pid_dir);
@@ -1119,6 +1218,15 @@ bool open(const char* output_dir) {
   {
     BufWriteGuard lk;
     g_output_dir = out_dir;
+#ifndef _WIN32
+    // The previous archive's, if any. No blob writer is left on them: open() runs
+    // only while no archive is open.
+    close_dir_fds();
+    for (auto& prefix : g_blob_prefix_fd) prefix.store(-1, std::memory_order_relaxed);
+#endif
+    g_blobs_fd.store(std::exchange(dirs.blobs, -1));
+    g_code_objects_fd.store(std::exchange(dirs.code_objects, -1));
+    g_dir_fd.store(std::exchange(dirs.dir, -1));
     g_pid        = pid;
     g_parent_pid = parent_pid;
     snprintf(g_manifest_path, sizeof(g_manifest_path), "%s", manifest_path.c_str());
@@ -1224,11 +1332,13 @@ void flush(const char* /*output_dir*/) {
   g_reopen_after_fork.store(false, std::memory_order_release);
   bool incomplete;
   std::string out_dir;
+  int dir_fd;
   {
     BufWriteGuard lk;
     // Must be read under the lock, see stop_for_space().
     incomplete = g_capture_incomplete.load(std::memory_order_relaxed);
     out_dir = g_output_dir;
+    dir_fd = g_dir_fd.load();
     if (g_events_fd >= 0 && !g_events_finalized) {
       {
         // Stop new blob and code object claims, then wait for the claimed writes
@@ -1260,9 +1370,9 @@ void flush(const char* /*output_dir*/) {
   }
 
   if (out_dir.empty()) return;
-  write_manifest_stdio(out_dir.c_str(), /*complete=*/!incomplete);
+  write_manifest_stdio(dir_fd, out_dir, /*complete=*/!incomplete);
   update_root_manifest();
-  remove((out_dir + kActiveMarker).c_str());
+  remove_in_archive(dir_fd, out_dir, kActiveMarker);
 }
 
 void close() {
@@ -1338,7 +1448,11 @@ void emergency_finalize(bool clean_shutdown) {
   // entrant skips the manifest.
   if (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire)) return;
   bool complete = clean_shutdown && locked;
+#ifdef _WIN32
   int mfd = HRR_OPEN(g_manifest_path);
+#else
+  int mfd = open_private_fd(g_dir_fd.load(), "manifest.json");
+#endif
   if (mfd < 0) {
     g_emergency_manifest_busy.clear(std::memory_order_release);
     return;
@@ -1466,14 +1580,18 @@ void write_event_raw(uint16_t api_id, hrr_event_header* hdr, uint32_t payload_le
 // On Windows, rename() fails when the destination already exists (unlike POSIX
 // where it is atomic). Use MoveFileExA(MOVEFILE_REPLACE_EXISTING) instead.
 //
-// On POSIX the temp file comes from mkostemps: an unpredictable name, created
-// exclusively with mode 0600. This matters for the root manifest, whose
-// directory is whatever HIP_HRR_CAPTURE_OUTPUT names and may be shared.
+// On POSIX a file inside the archive is written in the directory `dir_fd` as
+// <name>.tmp through open_private_fd, and renamed relative to it. The root
+// manifest, with dir_fd AT_FDCWD, takes its temp file from mkostemps: an
+// unpredictable name, created exclusively with mode 0600. This matters because
+// its directory is whatever HIP_HRR_CAPTURE_OUTPUT names and may be shared.
 // ---------------------------------------------------------------------------
 
-static bool atomic_write_file(const std::string& path,
+static bool atomic_write_file(int dir_fd, const std::string& dir, const std::string& name,
                               const void* data, size_t len) {
 #ifdef _WIN32
+  (void)dir_fd;
+  const std::string path = dir + "/" + name;
   std::string tmp = path + "." + std::to_string(current_process_id()) + ".tmp";
   FILE* f = fopen(tmp.c_str(), "wb");
   if (!f) return false;
@@ -1483,17 +1601,20 @@ static bool atomic_write_file(const std::string& path,
   if (fclose(f) != 0) ok = false;
   if (!ok) { remove(tmp.c_str()); return false; }
   ok = MoveFileExA(tmp.c_str(), path.c_str(), MOVEFILE_REPLACE_EXISTING) != 0;
+  if (!ok) remove(tmp.c_str());
 #else
-  std::string tmp = path + ".XXXXXX.tmp";
-  const int fd = ::mkostemps(&tmp[0], 4, O_CLOEXEC);
+  // The claim on the key keeps every other thread off <name>.tmp.
+  const std::string path = dir_fd == AT_FDCWD ? dir + "/" + name : name;
+  std::string tmp = path + (dir_fd == AT_FDCWD ? ".XXXXXX.tmp" : ".tmp");
+  const int fd = dir_fd == AT_FDCWD ? ::mkostemps(&tmp[0], 4, O_CLOEXEC)
+                                    : open_private_fd(dir_fd, tmp.c_str());
   if (fd < 0) return false;
   // mkostemps creates the file 0600 minus the umask.
   bool ok = ::fchmod(fd, 0600) == 0 && write_all_fd(fd, data, len);
   if (::close(fd) != 0) ok = false;
-  if (!ok) { remove(tmp.c_str()); return false; }
-  ok = (rename(tmp.c_str(), path.c_str()) == 0);
+  if (ok) ok = ::renameat(dir_fd, tmp.c_str(), dir_fd, path.c_str()) == 0;
+  if (!ok) (void)::unlinkat(dir_fd, tmp.c_str(), 0);
 #endif
-  if (!ok) remove(tmp.c_str());
   return ok;
 }
 
@@ -1597,7 +1718,9 @@ Hash128 write_blob(const void* data, size_t len) {
   ClaimedWrite claim(key);
 
   // blobs/<2-char-prefix>/<fullhash>.blob
-  std::string subdir = g_output_dir + "/blobs/" + std::string(hex, 2);
+  const std::string prefix(hex, 2);
+  std::string subdir = g_output_dir + "/blobs/" + prefix;
+  int subdir_fd = -1;
 #ifndef _WIN32
   {
     // hash_hex writes lowercase hex digits; two chars index 0..255.
@@ -1605,23 +1728,28 @@ Hash128 write_blob(const void* data, size_t len) {
       return (c >= '0' && c <= '9') ? static_cast<unsigned>(c - '0')
                                     : static_cast<unsigned>(c - 'a' + 10);
     };
-    const unsigned pref = (nibble(hex[0]) << 4) | nibble(hex[1]);
-    if (!g_blob_prefix_claimed[pref].load(std::memory_order_acquire)) {
-      if (!ensure_dir(subdir) || !claim_private_dir(subdir)) {
+    std::atomic<int>& claimed = g_blob_prefix_fd[(nibble(hex[0]) << 4) | nibble(hex[1])];
+    subdir_fd = claimed.load(std::memory_order_acquire);
+    if (subdir_fd < 0) {
+      int fd = -1;
+      if (!claim_sub_dir(g_blobs_fd.load(), subdir, prefix.c_str(), &fd)) {
         // `claim` unpublishes the key and marks the capture incomplete.
-        LogPrintfWarning("[HRR capture] Failed to claim blob prefix %s",
-                         std::string(hex, 2).c_str());
+        LogPrintfWarning("[HRR capture] Failed to claim blob prefix %s", prefix.c_str());
         return h;
       }
-      g_blob_prefix_claimed[pref].store(true, std::memory_order_release);
+      // Another thread may have claimed it meanwhile; keep the first descriptor.
+      if (claimed.compare_exchange_strong(subdir_fd, fd, std::memory_order_acq_rel)) {
+        subdir_fd = fd;
+      } else {
+        ::close(fd);
+      }
     }
   }
 #else
   ensure_dir(subdir);
 #endif
-  std::string path = subdir + "/" + key + ".blob";
 
-  const bool ok = atomic_write_file(path, data, len);
+  const bool ok = atomic_write_file(subdir_fd, subdir, key + ".blob", data, len);
   if (!ok) LogPrintfWarning("[HRR capture] Failed to write blob %s", hex);
   claim.done(ok);
   return h;
@@ -1657,8 +1785,8 @@ Hash128 write_code_object(const void* image, size_t image_size) {
   }
   ClaimedWrite claim(key);
 
-  std::string path = g_output_dir + "/code_objects/" + hex + ".hsaco";
-  const bool ok = atomic_write_file(path, image, image_size);
+  const bool ok = atomic_write_file(g_code_objects_fd.load(), g_output_dir + "/code_objects",
+                                    std::string(hex) + ".hsaco", image, image_size);
   if (!ok) LogPrintfWarning("[HRR capture] Failed to write code object %s", hex);
   claim.done(ok);
   return h;

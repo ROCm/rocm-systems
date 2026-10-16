@@ -59,6 +59,11 @@
  *     process with the same pid moves it to pid-<pid>.prev-1, untouched, and
  *     records a fresh archive, which readers find on their own; when it cannot
  *     move it, capture is disabled and the earlier archive stays (POSIX).
+ *
+ *   Unit_HRR_CaptureWritesThroughCheckedDirs:
+ *     pid-<pid> renamed while the capture runs, with a symbolic link planted in
+ *     its place, is still where the blobs, the manifest and the active marker's
+ *     removal go, and nothing is written through the link (POSIX).
  */
 
 #include "hrr_test_common.hh"
@@ -372,6 +377,32 @@ TEST_CASE("Unit_HRR_CaptureMarkerRefused_Direct", "[.][hrr-direct]") {
   g_hrr_statvfs_hook = plant_marker_link;
   HRR_HIP_CHECK(hipSetDevice(0));
   g_hrr_statvfs_hook = nullptr;
+}
+
+// ---------------------------------------------------------------------------
+// Hidden ([.]) workload for Unit_HRR_CaptureWritesThroughCheckedDirs: once HIP
+// is up, and with it the capture, renames its own pid-<pid> to "moved" and
+// plants a symbolic link to HRR_TEST_VICTIM at pid-<pid>, as someone who can
+// write to the base directory could. It then copies 32 distinct host buffers
+// to the device, blobs that between them need blobs/<xx> prefixes not claimed
+// yet, and exits cleanly, which writes manifest.json and removes the marker.
+// Run without either variable, it does nothing.
+// ---------------------------------------------------------------------------
+TEST_CASE("Unit_HRR_CaptureRenamedArchive_Direct", "[.][hrr-direct]") {
+  const char* base = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
+  const char* victim = std::getenv("HRR_TEST_VICTIM");
+  if (base == nullptr || victim == nullptr) return;
+  HRR_HIP_CHECK(hipSetDevice(0));
+  const std::string pid_dir = std::string(base) + "/pid-" + std::to_string(::getpid());
+  REQUIRE(::rename(pid_dir.c_str(), (std::string(base) + "/moved").c_str()) == 0);
+  REQUIRE(::symlink(victim, pid_dir.c_str()) == 0);
+  void* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, 256));
+  for (uint32_t i = 0; i < 32; ++i) {
+    const std::vector<uint32_t> host(64, i);
+    HRR_HIP_CHECK(hipMemcpy(d, host.data(), 256, hipMemcpyHostToDevice));
+  }
+  HRR_HIP_CHECK(hipFree(d));
 }
 
 #endif
@@ -923,6 +954,46 @@ HRR_TEST_CASE(Unit_HRR_CaptureMovesEarlierArchiveAside) {
     CHECK(disabled_because(run.output, "cannot move the earlier archive at ", " aside ("));
     CHECK(same_tree(pid_dir, earlier));
   }
+#endif
+}
+
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Runs Unit_HRR_CaptureRenamedArchive_Direct, which renames its pid-<pid>
+ *     to "moved" after the capture has opened it and plants a symbolic link to
+ *     an empty directory at pid-<pid>, then records blobs and exits cleanly.
+ *   - The directory behind the link stays empty: the writer creates, opens and
+ *     renames everything relative to the directories it checked, so neither
+ *     the blobs nor the manifest follow the path to the link.
+ *   - "moved" holds the whole archive: its blobs, a manifest that says
+ *     complete: true, no active marker, and events.bin loads complete.
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureWritesThroughCheckedDirs) {
+#ifdef _WIN32
+  HRR_SKIP("POSIX symbolic links");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_renamed"};
+  const fs::path base = work.path / "capture";
+  const fs::path victim_dir = work.path / "victim-dir";
+  fs::create_directories(base);
+  fs::create_directories(victim_dir);
+
+  const PlantedRun run = capture_after_planting(
+      base, work.path / "plant.sh", "export HRR_TEST_VICTIM='" + victim_dir.string() + "'\n",
+      "Unit_HRR_CaptureRenamedArchive_Direct");
+  INFO("Workload exit code: " << run.ret << "\n" << run.output);
+  REQUIRE(run.ret == 0);
+  CHECK(fs::is_empty(victim_dir));
+  const fs::path moved = base / "moved";
+  REQUIRE(fs::is_directory(fs::symlink_status(moved)));
+  CHECK(archive_files(moved, "blobs", ".blob").size() >= 32);
+  CHECK(manifest_says_complete(moved, true));
+  CHECK_FALSE(fs::exists(fs::symlink_status(moved / "active")));
+  hrr::Archive archive;
+  REQUIRE(hrr::load_archive(moved.string(), archive));
+  CHECK(archive.complete);
 #endif
 }
 

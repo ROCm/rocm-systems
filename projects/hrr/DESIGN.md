@@ -123,9 +123,15 @@ creates from the base directory down are 0700 and its files 0600, and an existin
 above the base directory get 0777 minus the umask. The writer refuses a `pid-<pid>/`,
 `blobs/` or `code_objects/` that is a symbolic link or belongs to another user, and an
 existing `events.bin` that is not a regular file with a single link owned by that user.
-These directory checks run when the archive is opened and each later open resolves the
-path again, so every directory on the path to the archive should belong to the capturing
-user or to root, and any that other users can write to should have the sticky bit. When
+These directory checks run when the archive is opened, and the writer keeps a descriptor
+(`O_CLOEXEC`) for each directory it checked: `pid-<pid>/`, `blobs/`, `code_objects/` and
+each `blobs/<xx>/` once claimed. Every file inside the archive is created, opened, renamed
+and removed relative to those descriptors with `openat`, `renameat` and `unlinkat`, the
+crash-path manifest included, so a directory renamed on the path after the check cannot
+redirect a write. Only finding `pid-<pid>/` when the archive opens, and the root
+`manifest.json` in the base directory, go by path, so every directory on the path to
+the base should still belong to the capturing user or to root, and any that other users
+can write to should have the sticky bit. When
 the archive cannot be set up, capture is disabled with a
 `[HRR capture] Capture disabled` line on stderr and the application runs on without the
 runtime capture shims. Reading an archive needs the capturing user or root, so a capture
@@ -134,7 +140,8 @@ taken as root in a container needs `chown` before another user can replay it.
 `writer::open()` (`hip_capture_writer.cpp`) always selects the current process's
 PID directory. A `fork()` child re-opens from the base dir on its first record,
 blob or code object after the fork, so it switches to its own `pid-<childpid>/`
-sub-archive. `atfork_child` only drops the parent's events fd and paths: the
+sub-archive. `atfork_child` only drops the parent's events fd, directory descriptors
+and paths, and the child's `writer::open()` opens its own: the
 child of a multithreaded process may make only async-signal-safe calls until it
 execs, and a child that execs or exits without recording leaves no archive. The root
 `manifest.json` is a common aggregate index with the schema fields
