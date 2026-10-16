@@ -107,6 +107,9 @@ public:
                         std::span<const amdgpu::MemoryCounterObligation> counterObligations,
                         MemoryOrderClass memoryOrder, uint64_t ldsLaneMask = ~uint64_t{0},
                         int elementBytes = 0);
+  /// Register two LDS address sets per lane. elementBytes selects the granularity
+  /// of complete elements retained at the backing boundary; zero treats the
+  /// whole per-lane access in each address set as one element.
   void registerLdsEvent(uint64_t pc, MemoryEventType type, std::vector<uint32_t> registers,
                         uint64_t execMask, int waveSize,
                         std::span<const uint32_t> firstLaneBaseAddresses,

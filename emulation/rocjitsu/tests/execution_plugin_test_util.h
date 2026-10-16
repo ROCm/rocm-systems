@@ -163,20 +163,22 @@ public:
 
 // Routing tests supply a synthetic execution result, but wait tracking needs
 // decoded operands and the pre-execution address registers, as in the issuer.
-inline std::unique_ptr<Instruction>
-prepare_cdna4_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wave,
-                                    std::unique_ptr<amdgpu::VectorMemState> state) {
+inline std::unique_ptr<Instruction> prepare_flat_load_for_routing(amdgpu::ComputeUnitCore &cu, amdgpu::Wavefront &wave,
+                                                           std::unique_ptr<amdgpu::VectorMemState> state) {
   for (unsigned lane = 0; lane < wave.wf_size(); ++lane) {
     cu.write_vgpr(wave.vgpr_alloc().base, lane, state->per_lane_addr[lane]);
     cu.write_vgpr(wave.vgpr_alloc().base + 1, lane, state->per_lane_addr[lane] >> 32);
   }
-  const auto words = cdna4::build_flat(
-      cdna4::kFlatLoadDwordFlat,
-      {.seg = 0,
-       .addr = 0,
-       .saddr = 0x7F,
-       .vdst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base)});
-  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  const auto dst = static_cast<uint8_t>(state->dst_reg_base - wave.vgpr_alloc().base);
+  std::array<uint32_t, 3> words{};
+  if (cu.arch() == ROCJITSU_CODE_ARCH_CDNA5) {
+    words = cdna5::build_vflat(cdna5::kFlatLoadB32Vflat, {.saddr = 124, .vdst = dst, .vaddr = 0});
+  } else {
+    const auto encoded = cdna4::build_flat(cdna4::kFlatLoadDwordFlat,
+                                           {.seg = 0, .addr = 0, .saddr = 0x7F, .vdst = dst});
+    std::ranges::copy(encoded, words.begin());
+  }
+  auto decoder = Decoder::create(cu.arch());
   std::unique_ptr<Instruction> load(decode_valid(*decoder, words.data()));
   if (!load)
     return nullptr;

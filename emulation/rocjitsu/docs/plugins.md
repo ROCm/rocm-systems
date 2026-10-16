@@ -481,18 +481,22 @@ while `VectorMemState::routed_issue_info` carries both VMEM and LDS obligations.
 Consult that routed issue's `counter_obligations()` for the full set.
 
 When all requesting FLAT lanes use the shared aperture, routing selects the
-LDS pipeline, rewrites
-the addresses into the workgroup's LDS allocation, and sets
-`normalized_to_local` to `true`.
+LDS pipeline and sets `normalized_to_local` to `true`. This flag describes the
+uniform local route, not whether addresses were normalized.
 
 Mixed FLAT requests retain `MemoryRoute::GLOBAL`. The global pipeline separates the lanes by backing store, completing
 retryable global/scratch work before accessing LDS. These
 observations have `normalized_to_local == false`. On both routes, `addresses`
-reports effective shared addresses in the workgroup's LDS allocation, and
+reports effective ordinary LDS addresses, which can still be outside the backing, and
 `pre_routing_addresses` preserves the original aperture addresses. Normalizing
 shared lanes during routing gives execution and observers the same addresses.
-DDS lanes are identified separately and fault before memory execution because
-the emulator does not implement DDS backing.
+CDNA5 DDS lanes are identified separately. Their reported values also include
+LDS-base arithmetic, but identify neither a DDS backing location nor a valid
+LDS allocation address. Requesting DDS lanes emit a warning naming the instruction
+and PC, then fault before any memory effects because DDS backing is unimplemented.
+On other architectures the shared aperture remains LDS; out-of-backing accesses
+read zero and discard writes. RDNA4 FLAT low-17-bit address truncation remains
+a separate follow-up.
 Observers must inspect `flat_local_lane_mask` and `flat_dds_lane_mask` to account
 for LDS and DDS lanes; choosing a backing store
 from `route` alone misses the shared-aperture portion of a mixed request.

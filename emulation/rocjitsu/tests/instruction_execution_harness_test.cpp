@@ -867,6 +867,91 @@ TEST(InstructionExecutionHarness, Gfx1250) {
 
 #undef RUN_HARNESS
 
+template <typename Isa> void check_high_shared_flat_addresses(rj_code_arch_t arch) {
+  for (uint32_t shared_lane : {0u, 1u}) {
+    for (bool mixed : {false, true}) {
+      for (uint32_t offset : {0x40u, 0x80000040u, 0xffffffc0u}) {
+        for (bool load : {false, true}) {
+          SCOPED_TRACE(testing::Message() << "shared lane=" << shared_lane << " mixed=" << mixed
+                                          << " offset=" << offset << " load=" << load);
+          amdgpu::GpuMemory memory("shared_memory");
+          amdgpu::L2Cache l2("shared_l2");
+          amdgpu::ComputeUnitCore::Config cfg{};
+          cfg.arch = arch;
+          cfg.num_wf_slots = 1;
+          cfg.sgprs_per_wf = 128;
+          cfg.vgprs_per_wf = 256;
+          cfg.lds_size_kb = 64;
+          MemoryTestCu<Isa> cu("shared", cfg, &memory, &l2);
+          constexpr uint64_t shared_base = uint64_t{1} << 48;
+          cu.set_apertures(shared_base, shared_base + UINT32_MAX, 0, 0);
+          auto *wf = cu.dispatch_wf(0, 0, 128, 256, arch == ROCJITSU_CODE_ARCH_CDNA4 ? 64 : 32);
+          ASSERT_NE(wf, nullptr);
+          wf->set_exec(mixed ? 3 : uint64_t{1} << shared_lane);
+          ASSERT_EQ(cu.allocate_lds(256), 0u);
+          const uint32_t own_base = cu.allocate_lds(256);
+          ASSERT_EQ(own_base, 0x100u);
+          wf->set_lds_base(own_base);
+          constexpr uint32_t canary = 0xdeadbeef, value = 0x12345678;
+          constexpr uint32_t destination = 0xbaadf00d, global_value = 0x87654321;
+          for (uint32_t address = 0; address < 512; address += 4)
+            wf->lds().write32(address, canary);
+          memory.write32(0x2000, global_value);
+          const uint32_t vb = wf->vgpr_alloc().base;
+          for (uint32_t lane = 0; lane < 3; ++lane) {
+            const uint64_t address = lane == shared_lane ? shared_base + offset : 0x2000;
+            cu.write_vgpr(vb, lane, static_cast<uint32_t>(address));
+            cu.write_vgpr(vb + 1, lane, static_cast<uint32_t>(address >> 32));
+            cu.write_vgpr(vb + 8, lane, value);
+            cu.write_vgpr(vb + 16, lane, destination);
+          }
+          std::array<uint32_t, 3> words{};
+          if (arch == ROCJITSU_CODE_ARCH_CDNA4) {
+            const auto encoded = cdna4::build_flat(
+                load ? cdna4::kFlatLoadDwordFlat : cdna4::kFlatStoreDwordFlat,
+                {.seg = 0, .addr = 0, .data = 8, .saddr = 0x7f, .vdst = uint8_t(load ? 16 : 0)});
+            std::ranges::copy(encoded, words.begin());
+          } else {
+            words = rdna4::build_vflat(
+                load ? rdna4::kFlatLoadB32Vflat : rdna4::kFlatStoreB32Vflat,
+                {.saddr = 124, .vdst = uint8_t(load ? 16 : 0), .vsrc = 8, .vaddr = 0});
+          }
+          auto decoder = Decoder::create(arch);
+          std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+          ASSERT_NE(inst, nullptr);
+          ASSERT_TRUE(cu.execute_instruction(inst.get(), *wf).succeeded());
+          ASSERT_EQ(cu.route_memory_inst(inst.release(), *wf), amdgpu::VmAccessOutcome::Complete);
+          cu.flush_all();
+          EXPECT_EQ(wf->state(), amdgpu::WfState::RUNNING);
+          EXPECT_TRUE(wf->wait_counters().empty());
+          for (uint32_t address = 0; address < 512; address += 4)
+            EXPECT_EQ(wf->lds().read32(address),
+                      !load && offset == 0x40 && address == own_base + offset ? value : canary);
+          EXPECT_EQ(memory.read32(0x2000), !load && mixed ? value : global_value);
+          for (uint32_t lane = 0; lane < 3; ++lane) {
+            // RDNA4 low-17-bit address truncation is a separate follow-up. Until
+            // then, high LDS offsets retain zero-read/discarded-write behavior.
+            const uint32_t expected = !load || lane == 2 || (!mixed && lane != shared_lane)
+                                          ? destination
+                                      : lane != shared_lane ? global_value
+                                      : offset == 0x40      ? canary
+                                                            : 0;
+            EXPECT_EQ(cu.read_vgpr(vb + 16, lane), expected);
+          }
+        }
+      }
+    }
+  }
+}
+
+TEST(Cdna4MemoryExecutionHarness, HighSharedFlatAddressesDoNotFaultOrWrap) {
+  check_high_shared_flat_addresses<cdna4::Isa>(ROCJITSU_CODE_ARCH_CDNA4);
+}
+
+TEST(Rdna4MemoryExecutionHarness, HighSharedFlatAddressesDoNotFaultOrWrap) {
+  check_high_shared_flat_addresses<rdna4::Isa>(ROCJITSU_CODE_ARCH_RDNA4);
+}
+
 TEST(Gfx1250MemoryExecutionHarness, DdsFaultsWithoutWrappingIntoAnotherLdsAllocation) {
   for (uint32_t dds_lane : {0u, 1u}) {
     for (bool mixed : {false, true}) {
