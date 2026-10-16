@@ -56,6 +56,44 @@ Xcd::Xcd(std::string name, const Config &config, rj_code_arch_t arch, GpuMemory 
 
   cp_->add_l2_cache(l2_cache_);
   add_child(std::move(cp));
+
+  // Share one device-global GWS store across every CU of this XCD now that all
+  // shader engines and their CUs exist.
+  wire_gws_to_cus();
+}
+
+void Xcd::wire_gws_to_cus() {
+  // Include CUs attached directly to the CP by custom topologies.
+  if (cp_) {
+    cp_->set_gws_device(gws_device_);
+    return;
+  }
+  // Standalone-XCD fallback: no command processor, so wire the CUs directly.
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      if (!compute_unit->can_set_gws_device(gws_device_))
+        throw std::logic_error("Cannot wire GWS store with active waves or workgroups");
+  for (ShaderEngine *shader_engine : shader_engines_)
+    for (ComputeUnitCore *compute_unit : shader_engine->compute_units())
+      compute_unit->set_gws_device(gws_device_);
+}
+
+void Xcd::adopt_gws_store(std::shared_ptr<GwsDevice> store) {
+  if (!store || store == gws_device_)
+    return;
+  // Preflight the entire XCD before changing any owner. Topology changes require
+  // external serialization and drained CUs, as for the CP wiring API.
+  for (ShaderEngine *se : shader_engines_)
+    for (ComputeUnitCore *cu : se->compute_units())
+      if (!cu->can_set_gws_device(store))
+        throw std::logic_error("Cannot replace XCD GWS store with active waves or workgroups");
+  if (cp_)
+    cp_->set_gws_device(store);
+  else
+    for (ShaderEngine *se : shader_engines_)
+      for (ComputeUnitCore *cu : se->compute_units())
+        (void)cu->set_gws_device(store);
+  gws_device_ = std::move(store);
 }
 
 void Xcd::set_l2_cache(L2Cache *l2) {

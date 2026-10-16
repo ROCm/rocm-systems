@@ -98,6 +98,7 @@ void ResetInitFakes() {
   ResetNcclFakes();
   ResetNcclStubs();
   ResetOsFakes();
+  ResetRcclArchThresholdsFakes();
   ResetRcclWrapFakes();
   ResetRecorderFakes();
   ResetRocmWrapFakes();
