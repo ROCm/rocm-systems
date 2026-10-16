@@ -6,10 +6,10 @@ on:
       os:
         description: 'OS version to export.'
         required: true
-        default: 'rhel-8.8'
+        default: 'ubuntu-22.04'
         type: choice
         options:
-          - rhel-8.8
+          - ubuntu-22.04
           - rhel-8.8
           - rhel-9.5
           - sles-15.6
@@ -32,6 +32,13 @@ on:
 jobs:
   export-image:
     runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        include:
+          - tag: latest
+            suffix: latest
+          - tag: test-pr-13323-v2
+            suffix: v2
     steps:
       - name: Docker Hub login
         uses: docker/login-action@v3
@@ -41,43 +48,45 @@ jobs:
 
       - name: Pull the private image
         run: |
-          OS="${{ inputs.os || 'rhel-8.8' }}"
+          OS="${{ inputs.os || 'ubuntu-22.04' }}"
           GPU="${{ inputs.gpu || 'gfx94X' }}"
-          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest"
-          echo "Pulling image: $IMAGE (OS: $OS, GPU: $GPU)"
+          TAG="${{ matrix.tag }}"
+          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-${TAG}"
+          echo "Pulling image: $IMAGE (OS: $OS, GPU: $GPU, Tag: $TAG)"
           docker pull "$IMAGE"
 
-      - name: Inspect image (quick check)
+      - name: Inspect image for libva
         run: |
-          OS="${{ inputs.os || 'rhel-8.8' }}"
+          OS="${{ inputs.os || 'ubuntu-22.04' }}"
           GPU="${{ inputs.gpu || 'gfx94X' }}"
-          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest"
-          echo "=== Running quick inspection ==="
+          TAG="${{ matrix.tag }}"
+          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-${TAG}"
+          echo "=== Running libva inspection on ${{ matrix.suffix }} image ==="
           docker run --rm "$IMAGE" /bin/bash -c '
-            echo "=== /usr/local/bin contents ===";
-            ls -la /usr/local/bin 2>/dev/null || echo "Directory not found";
+            echo "=== libva in /opt/rocm/lib/rocm_sysdeps ===";
+            ls -la /opt/rocm/lib/rocm_sysdeps/lib/libva* 2>/dev/null || echo "No libva found in rocm_sysdeps";
             echo "";
-            echo "=== Git locations ===";
-            which -a git 2>/dev/null || echo "git not found in PATH";
+            echo "=== libva version in /opt/rocm ===";
+            cat /opt/rocm/lib/rocm_sysdeps/include/va/va_version.h 2>/dev/null | grep "VA_.*_VERSION" || echo "No va_version.h in rocm_sysdeps";
             echo "";
-            echo "=== Git versions ===";
-            echo -n "/usr/local/bin/git: ";
-            /usr/local/bin/git --version 2>/dev/null || echo "not found";
-            echo -n "/usr/bin/git: ";
-            /usr/bin/git --version 2>/dev/null || echo "not found";
-            echo -n "Default git: ";
-            git --version 2>/dev/null || echo "not in PATH";
+            echo "=== libva in /usr (system) ===";
+            ls -la /usr/lib/x86_64-linux-gnu/libva.so* 2>/dev/null || echo "No system libva found";
             echo "";
-            echo "=== PATH ===";
-            echo $PATH;
+            echo "=== libva version in /usr ===";
+            cat /usr/include/va/va_version.h 2>/dev/null | grep "VA_.*_VERSION" || echo "No system va_version.h";
+            echo "";
+            echo "=== libva in /opt/amdgpu ===";
+            ls -la /opt/amdgpu/lib*/libva* 2>/dev/null || echo "No amdgpu libva found";
           '
 
       - name: Save image to tar file
         run: |
-          OS="${{ inputs.os || 'rhel-8.8' }}"
+          OS="${{ inputs.os || 'ubuntu-22.04' }}"
           GPU="${{ inputs.gpu || 'gfx94X' }}"
-          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest"
-          OUTPUT="rocprofiler-${OS}-${GPU}.tar"
+          TAG="${{ matrix.tag }}"
+          SUFFIX="${{ matrix.suffix }}"
+          IMAGE="docker.io/rocm/rocprofiler-private:${OS}-${GPU}-${TAG}"
+          OUTPUT="rocprofiler-${OS}-${GPU}-${SUFFIX}.tar"
 
           echo "Saving image to tar file..."
           docker save "$IMAGE" -o "$OUTPUT"
@@ -91,36 +100,38 @@ jobs:
       - name: Upload image as artifact
         uses: actions/upload-artifact@v4
         with:
-          name: rocprofiler-image-${{ inputs.os || 'rhel-8.8' }}-${{ inputs.gpu || 'gfx94X' }}-run-${{ github.run_id }}
-          path: rocprofiler-${{ inputs.os || 'rhel-8.8' }}-${{ inputs.gpu || 'gfx94X' }}.tar.gz
+          name: rocprofiler-image-${{ inputs.os || 'ubuntu-22.04' }}-${{ inputs.gpu || 'gfx94X' }}-${{ matrix.suffix }}
+          path: rocprofiler-${{ inputs.os || 'ubuntu-22.04' }}-${{ inputs.gpu || 'gfx94X' }}-${{ matrix.suffix }}.tar.gz
           retention-days: 7
           compression-level: 0
 
       - name: Output download instructions
         run: |
-          OS="${{ inputs.os || 'rhel-8.8' }}"
+          OS="${{ inputs.os || 'ubuntu-22.04' }}"
           GPU="${{ inputs.gpu || 'gfx94X' }}"
+          TAG="${{ matrix.tag }}"
+          SUFFIX="${{ matrix.suffix }}"
           echo "================================================"
-          echo "Image exported successfully!"
+          echo "Image exported successfully! (${{ matrix.suffix }})"
           echo "================================================"
           echo ""
-          echo "Image: docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest"
+          echo "Image: docker.io/rocm/rocprofiler-private:${OS}-${GPU}-${TAG}"
           echo ""
           echo "To download this artifact:"
           echo ""
           echo "Option 1 - Via GitHub Web UI:"
           echo "  1. Go to: https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }}"
           echo "  2. Scroll to 'Artifacts' section"
-          echo "  3. Click to download"
+          echo "  3. Download: rocprofiler-image-${OS}-${GPU}-${SUFFIX}"
           echo ""
           echo "Option 2 - Via GitHub CLI:"
           echo "  gh run download ${{ github.run_id }} --repo ${{ github.repository }}"
           echo ""
           echo "To load the image locally:"
-          echo "  gunzip rocprofiler-${OS}-${GPU}.tar.gz"
-          echo "  docker load -i rocprofiler-${OS}-${GPU}.tar"
+          echo "  gunzip rocprofiler-${OS}-${GPU}-${SUFFIX}.tar.gz"
+          echo "  docker load -i rocprofiler-${OS}-${GPU}-${SUFFIX}.tar"
           echo ""
           echo "To run the image:"
-          echo "  docker run -it --rm docker.io/rocm/rocprofiler-private:${OS}-${GPU}-latest /bin/bash"
+          echo "  docker run -it --rm docker.io/rocm/rocprofiler-private:${OS}-${GPU}-${TAG} /bin/bash"
           echo ""
           echo "================================================"
