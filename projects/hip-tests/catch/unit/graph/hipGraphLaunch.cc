@@ -144,6 +144,94 @@ TEST_CASE("Unit_hipGraphLaunch_Negative_Parameters") {
   }
 }
 
+// Each independent root writes its own location. Atomic accesses make an early
+// consumer observable without introducing a concurrent non-atomic data race.
+static __global__ void GraphCompletionWrite(int* values, int slot, int token, int slow_slot) {
+  volatile unsigned int delay = static_cast<unsigned int>(slot + 1);
+  // Keep only one root slow, rotating it across every possible stream mapping.
+  const int delay_iterations = slot == slow_slot ? 262144 : 32768;
+  for (int i = 0; i < delay_iterations; ++i) {
+    delay = delay * 1664525u + 1013904223u;
+  }
+  atomicExch(values + slot, token);
+}
+
+static __global__ void GraphCompletionSnapshot(int* values, int* snapshot, int count) {
+  const int slot = static_cast<int>(threadIdx.x);
+  if (slot < count) snapshot[slot] = atomicAdd(values + slot, 0);
+}
+
+/**
+ * Test Description
+ * ------------------------
+ *    - Work submitted after hipGraphLaunch on the launch stream sees every root.
+ *    - Independent roots exercise final completion without a graph sink node.
+ * Test source
+ * ------------------------
+ *    - unit/graph/hipGraphLaunch.cc
+ * Test requirements
+ * ------------------------
+ *    - HIP_VERSION >= 5.2
+ */
+TEST_CASE("Unit_hipGraphLaunch_IndependentRootsCompletion") {
+  // One root is the single-stream control. On release/rocm-rel-7.2 defaults,
+  // 14/15 one-node segments use segmented scheduling; 16+ uses classic fallback.
+  // The CTest forced-segmented invocation sets the flag before process startup.
+  const int roots = GENERATE(1, 14, 15, 16, 17);
+  const int slow_slot = GENERATE_COPY(Catch::Generators::range(0, roots));
+  int* values = nullptr;
+  int* snapshot = nullptr;
+  HIP_CHECK(hipMalloc(&values, roots * sizeof(int)));
+  HIP_CHECK(hipMalloc(&snapshot, roots * sizeof(int)));
+  hipStream_t stream;
+  HIP_CHECK(hipStreamCreateWithFlags(&stream, hipStreamNonBlocking));
+  hipGraph_t graph;
+  hipGraphExec_t executable;
+  HIP_CHECK(hipGraphCreate(&graph, 0));
+  const int token = 123;
+  for (int slot = 0; slot < roots; ++slot) {
+    int argument_slot = slot;
+    int argument_token = token;
+    int argument_slow_slot = slow_slot;
+    void* args[] = {&values, &argument_slot, &argument_token, &argument_slow_slot};
+    hipKernelNodeParams params{};
+    params.func = reinterpret_cast<void*>(GraphCompletionWrite);
+    params.gridDim = dim3(1);
+    params.blockDim = dim3(1);
+    params.kernelParams = args;
+    hipGraphNode_t node;
+    HIP_CHECK(hipGraphAddKernelNode(&node, graph, nullptr, 0, &params));
+  }
+  HIP_CHECK(hipGraphInstantiate(&executable, graph, nullptr, nullptr, 0));
+  bool complete = true;
+  for (int iteration = 0; iteration < 8; ++iteration) {
+    HIP_CHECK(hipMemsetAsync(values, 0, roots * sizeof(int), stream));
+    HIP_CHECK(hipMemsetAsync(snapshot, 0, roots * sizeof(int), stream));
+    // Finish initialization before launch: this test does not rely on the
+    // separate initial-fork ordering contract of internally created streams.
+    HIP_CHECK(hipDeviceSynchronize());
+    HIP_CHECK(hipGraphLaunch(executable, stream));
+    // No device sync, graph sink, or cross-stream event before this consumer.
+    hipLaunchKernelGGL(GraphCompletionSnapshot, dim3(1), dim3(32), 0, stream,
+                       values, snapshot, roots);
+    HIP_CHECK(hipGetLastError());
+    HIP_CHECK(hipStreamSynchronize(stream));
+    int observed[32] = {};
+    HIP_CHECK(hipMemcpy(observed, snapshot, roots * sizeof(int), hipMemcpyDeviceToHost));
+    // Retire even work missed by a broken join before reinitialization/free.
+    // This cannot repair the snapshot already stored by the consumer.
+    HIP_CHECK(hipDeviceSynchronize());
+    for (int slot = 0; slot < roots; ++slot) complete &= observed[slot] == token;
+  }
+  HIP_CHECK(hipGraphExecDestroy(executable));
+  HIP_CHECK(hipGraphDestroy(graph));
+  HIP_CHECK(hipStreamDestroy(stream));
+  HIP_CHECK(hipFree(snapshot));
+  HIP_CHECK(hipFree(values));
+  INFO("independent roots: " << roots << ", slow root: " << slow_slot);
+  REQUIRE(complete);
+}
+
 /**
  * End doxygen group GraphTest.
  * @}
