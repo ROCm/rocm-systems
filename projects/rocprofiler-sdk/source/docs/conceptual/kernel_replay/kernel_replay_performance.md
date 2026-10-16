@@ -143,9 +143,10 @@ a defect, and the benchmark harness described below is what would measure them.
 
 ### Host staging is pageable
 
-`mem_block_t::host_copy` is a `std::vector<char>`. `hsa_memory_copy` into pageable host memory
-cannot DMA directly; the driver stages through its own pinned buffers, which costs an extra copy and
-serializes against that staging capacity.
+`mem_block_t::host_copy` is ordinary pageable host memory. ROCr's `hsa_memory_copy` cannot DMA
+into memory it does not know, so for every copy it locks the range (pins the pages and maps them
+for the GPU), runs the DMA, and unlocks it again (`Runtime::CopyMemory` in `rocr-runtime`). Each
+snapshot therefore pays one lock/unlock per region, and each restore pays it again for every pass.
 
 The suggestive evidence is in the tests themselves: `snap_bandwidth.cpp` sets its floor at
 **4 GB/s** and describes it as conservative. PCIe Gen5 x16 is roughly 64 GB/s theoretical and
@@ -154,15 +155,31 @@ what one would expect from pageable staging. Whether the achieved rate is actual
 comfortably above it is not currently reported anywhere, because the tests assert a bound rather
 than record the value.
 
-Allocating the staging buffer from a host memory pool would be the obvious experiment.
+Now that staging storage is retained across dispatches (next section), locking it once with
+`hsa_amd_memory_lock`, or allocating it from a host memory pool, is the obvious experiment: ROCr
+then recognizes the range and skips the per-copy lock. What it costs is keeping that much host
+memory pinned between dispatches, which is a policy decision rather than a code change.
 
-### The staging buffer is allocated and freed per dispatch
+### The staging buffer was allocated and freed per dispatch
 
-Because the snapshot is a local that dies with the dispatch, every replayed dispatch performs a
-`resize()` per tracked region and frees it again. At a gigabyte-scale footprint this is a large
-allocation churn on every dispatch: first-touch page faults on the way in, and return-to-OS on the
-way out. A per-agent staging buffer retained across dispatches, sized to the high-water footprint,
-would remove all of it.
+Because the snapshot is a local that dies with the dispatch, every replayed dispatch used to
+`resize()` a fresh `std::vector<char>` per tracked region and free it again. `resize()` zero-fills,
+and glibc serves blocks above its mmap threshold with a fresh mapping, so each dispatch also
+first-touch faulted the whole footprint and returned it to the OS on the way out. Measured on the
+host alone, that cycle cost about 0.35 ms per MiB of footprint per dispatch: roughly 20 ms at
+64 MiB, 94 ms at 256 MiB and 375 ms at 1 GiB, before any copy.
+
+Staging storage now comes from a per-agent pool. A snapshot takes the best-fitting retained buffer
+and only allocates, without zero-filling, when nothing fits. `snap()` frees whatever retained
+storage it did not take, so host memory held between dispatches is bounded by the most recent
+snapshot's footprint.
+
+### Measuring the phases
+
+With `ROCPROFILER_LOG_LEVEL=info`, every replayed dispatch logs the wall time it spent acquiring the
+agent lock and draining, snapshotting (with the bytes and regions captured), running its passes,
+and restoring between them. That separates the fixed per-dispatch cost from the per-pass cost, which
+end-to-end wall time cannot, so each optimization above can be measured on its own.
 
 ### The whole footprint is copied regardless of what the kernel writes
 

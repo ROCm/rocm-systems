@@ -12,6 +12,11 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - rocPD schema 3.0.5 stores SPM counter location on `rocpd_info_pmc`. Each agent and combination of counter, XCC, shader engine, shader array, WGP, and instance has its own pmc id. Location dimensions not provided for a counter are stored as `NULL` and left blank in CSV output. The instance index is always stored. `rocpd_pmc_event` keeps the sample value and points at that id.
 - Request ROCr high-precision timestamp correlation during HSA registration when GPU timestamp collection is configured and the runtime provides the tools API. Older runtimes and tools that only trace CPU APIs or markers retain the existing behavior.
+**API:**
+
+  - Kernel replay keeps its snapshot staging memory between replayed dispatches instead of allocating, zero-filling, and freeing the whole tracked footprint on every dispatch. What is kept between dispatches is bounded by the most recent snapshot's footprint.
+  - Kernel replay takes its drain signal from the SDK's signal pool and no longer snapshots HIP's one-byte `__hip_cuid_*` compilation-unit markers.
+  - Each replayed dispatch logs its lock and drain, snapshot, pass, and restore times at `ROCPROFILER_LOG_LEVEL=info`.
 
 ### Resolved issues
 
