@@ -9,12 +9,15 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
 
 ### Changed
 * On gfx1250, cuMem auto-detection (`NCCL_CUMEM_ENABLE=-2`, the default) no longer requires Linux kernel 6.8 or later; it enables cuMem whenever the ROCm version, VMM support and runtime probe checks pass. The runtime probe now also exports a DMA-BUF, so hosts that cannot export one keep cuMem off. Kernel 6.8 or later is still recommended for performance, and RCCL logs a warning when cuMem runs on an older kernel. Set `NCCL_CUMEM_ENABLE=0` to keep cuMem off.
+* A graph XML file supplied through `NCCL_GRAPH_FILE` is now rejected with `ncclInvalidUsage` if its `nchannels` attribute does not match the number of `<channel>` elements present, instead of reading uninitialized channel data.
 
 ### Removed
 
 ### Resolved issues
 * Fixed the device linker dropping feature suffixes such as `xnack+` from `GPU_TARGETS`, which left address sanitizer builds without instrumented device code.
 * Fixed `NCCL_CUMEM_ENABLE=1` being ignored on Linux kernels older than 6.8 (for example 6.6 on MI308X). cuMem stayed off, so RCCL buffers bypassed the memory manager and `ncclCommSuspend` released no GPU memory.
+* Fixed out-of-bounds writes when importing a graph from the file named by `NCCL_GRAPH_FILE`. Channel indices beyond `MAXCHANNELS`, more than two `<net>` sub-nodes in a channel, and more `<gpu>` sub-nodes than the system has GPUs now return `ncclInvalidUsage` instead of writing past the end of the graph's channel data.
+* Fixed the `rank` attribute in an `NCCL_GRAPH_FILE` graph being accepted without checking it against the topology. A rank the topology does not contain was written into the graph and later used as an array index during ring connection; such files now return `ncclInvalidUsage`.
 
 ### Known issues
 
