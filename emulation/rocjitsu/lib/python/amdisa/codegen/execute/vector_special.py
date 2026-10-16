@@ -405,8 +405,7 @@ def gen_vector_mullit(
         L.append(f'    const uint32_t s{i} = {read};')
     result = (
         'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        'wf.fp_denorm_mode_f32(), '
-        'amdgpu::fp_mode::quiets_nan(wf.cu().arch(), wf.ieee_mode()))'
+        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode())'
     )
     if is_vop3:
         result = apply_output('f32', result)

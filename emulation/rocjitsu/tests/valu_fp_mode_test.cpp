@@ -3215,7 +3215,7 @@ std::vector<ArithmeticCase> mullit_cases() {
     std::array<uint32_t, 3> sources;
     std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
   };
-  constexpr std::array<Lane, 11> lanes = {{
+  constexpr std::array<Lane, 12> lanes = {{
       // min_normal * min_normal underflows to +0 unless S2 = 2^-149 is flushed.
       {"S2Subnormal",
        0,
@@ -3255,6 +3255,16 @@ std::vector<ArithmeticCase> mullit_cases() {
        0,
        {0x2d1d4000u, 0x49032148u, 0x44630000u},
        {{{0xf0u, 0x36a11863u}, {0xffu, 0x36a11862u}}}},
+      // min_normal * (1 - 2^-24) stays below min_normal at F32 precision, so it
+      // is tiny although its subnormal encoding rounds up; flushing gives +0.
+      // The MULLIT capture lacks this product; gfx1201 V_MUL_DX9_ZERO_F32
+      // captures of the same factors give these results.
+      {"TinyProductRoundsToMinNormal",
+       0,
+       0,
+       0,
+       {0x00800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x00u, 0u}, {0xf0u, 0x00800000u}}}},
       {"RoundTowardZeroF32Field",
        0,
        0,

@@ -898,13 +898,14 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
 /// @brief V_MULLIT_F32 on sources with ABS/NEG applied, before OMOD and CLAMP.
 /// @details MODE flushes the sources first, so a subnormal S2 counts as zero.
 /// S1 equal to -MAX_FLOAT, -INF or NaN, or S2 that is zero, negative or NaN,
-/// gives -MAX_FLOAT. Otherwise the result is the legacy product: +0 if either
-/// factor is zero, else S0 * S1 rounded and output-flushed under MODE. A NaN S0
-/// reaching the product is returned, quieted only when `quiet_nan` is set
-/// (see quiets_nan). Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets
-/// with V_MULLIT_F32 inherit these rules without measurement.
+/// gives -MAX_FLOAT. Otherwise a zero factor gives +0, as in the legacy multiply,
+/// even with an infinite or NaN S0. Other products use the architectural F32
+/// multiply: MODE rounding, tininess before F32 exponent packing, and quiets_nan
+/// for a NaN S0.
+/// Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets with
+/// V_MULLIT_F32 inherit these rules without measurement.
 inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
-                           uint32_t denorm_mode, bool quiet_nan) {
+                           uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode) {
   using F32 = fp_format::F32;
   constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);
   const auto input = input_denormal::Policy::make(denorm_mode);
@@ -916,10 +917,11 @@ inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round
   if (s1 == kNegativeMax || s1 == (F32::kSign | F32::kInfinity) || is_nan(s1) || !s2_positive ||
       is_nan(s2))
     return kNegativeMax;
-  if (is_nan(s0) && (s1 & F32::kMagnitude) != 0)
-    return s0 | (quiet_nan ? F32::kQuiet : 0u);
-  return std::bit_cast<uint32_t>(arithmetic<Arithmetic::MUL_LEGACY>(
-      std::bit_cast<float>(s0), std::bit_cast<float>(s1), 0.0f, round_mode, denorm_mode));
+  if ((s0 & F32::kMagnitude) == 0 || (s1 & F32::kMagnitude) == 0)
+    return 0;
+  return std::bit_cast<uint32_t>(
+      arithmetic<Arithmetic::MUL>(std::bit_cast<float>(s0), std::bit_cast<float>(s1), 0.0f,
+                                  round_mode, denorm_mode, arch, ieee_mode));
 }
 
 /// @brief Evaluate prepared F16 arithmetic operands in F64.
