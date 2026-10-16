@@ -263,5 +263,6 @@ class TestMatrixExpandRules:
         )
         header = emit_matrix_conversions_header(rules)
         assert '#pragma once' in header
+        assert '#include <cstddef>' in header
         assert 'kMatrixConversions' in header
         assert '192u' in header

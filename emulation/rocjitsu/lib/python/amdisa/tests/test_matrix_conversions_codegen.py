@@ -1,7 +1,7 @@
 # Copyright (c) 2026 Advanced Micro Devices, Inc.
 # SPDX-License-Identifier: MIT
 
-"""Exercise matrix-header regeneration through the public CLI."""
+"""Test matrix-header CLI regeneration, output helpers, and standalone compilation."""
 
 import os
 from pathlib import Path
