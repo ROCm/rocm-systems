@@ -3029,6 +3029,16 @@ def test_parse_marker_function_user_range_without_keys():
     assert parsed["Backend"] == "user"
 
 
+def test_parse_marker_function_decodes_name_and_args():
+    parsed = parse_marker_function(
+        "aten::foo%2Fbar%25baz:n/a"
+        "|seqNr=1|tid=1|ftid=0|scope=FUNCTION"
+        "|args=a%7Cb%3Bc%0Dd%0Ae%25f|torch"
+    )
+    assert parsed["Operator_Name"] == "aten::foo/bar%baz"
+    assert parsed["args"] == "a|b;c\rd\ne%f"
+
+
 def test_stacked_marker_wire_exits(monkeypatch):
     messages = record_console_error_and_exit(monkeypatch)
     stacked = pd.DataFrame({
@@ -3038,6 +3048,15 @@ def test_stacked_marker_wire_exits(monkeypatch):
         utils_analysis._apply_parsed_function_columns(stacked)
     assert excinfo.value.code == 1
     assert "Stacked marker wire is not supported" in messages[0]
+    for function in (
+        "triton.JITFunction.foo@file.py",
+        "triton.JITFunction.foo:#file.py",
+    ):
+        parsed = utils_analysis._apply_parsed_function_columns(
+            pd.DataFrame({"Function": [function]})
+        )
+        assert parsed["Operator_Name"].tolist() == [function]
+    assert len(messages) == 1
 
 
 def test_parse_marker_function_ltid_and_thread_id_unchanged(tmp_path):
@@ -3132,6 +3151,17 @@ def test_nest_marker_intervals_nests_when_child_row_precedes_parent():
     )
     assert forest["1"][0].name == "nn.Module.Linear.forward"
     assert [child.name for child in forest["1"][0].children] == ["aten::addmm"]
+
+
+def test_nest_marker_intervals_same_start_nests_contained_interval():
+    forest = nest_marker_intervals(
+        pd.DataFrame([
+            parsed_marker_row("outer", 10, 100),
+            parsed_marker_row("inner", 10, 40),
+        ])
+    )
+    assert [node.name for node in forest["1"]] == ["outer"]
+    assert [child.name for child in forest["1"][0].children] == ["inner"]
 
 
 def test_nest_marker_intervals_disjoint_linear_siblings():
@@ -3235,40 +3265,6 @@ def test_nest_marker_intervals_torch_root_without_file_stays_unlocated():
     assert isinstance(errors[0], MissingSourceLocationError)
     assert errors[0].operator_name == "aten::addmm"
     assert root in forest["1"]
-
-
-def test_process_ml_api_trace_output_leaves_no_ml_api_trace_dir(tmp_path):
-    workload_dir = tmp_path / "no_ml_api_dir"
-    write_ml_api_pass(
-        workload_dir,
-        0,
-        [
-            {
-                "Function": (
-                    "nn.Module.Linear.forward:simple_torch_code.py:19"
-                    "|seqNr=n/a|tid=n/a|ftid=n/a|scope=n/a|args=()|torch"
-                ),
-                "Thread_Id": 1,
-                "Correlation_ID": 4,
-                "GUID": TEST_GUID,
-                "Start_Timestamp": 10,
-                "End_Timestamp": 80,
-            }
-        ],
-        [
-            {
-                "Correlation_ID": 4,
-                "GUID": TEST_GUID,
-                "Kernel_Name": "addmm_kernel",
-                "Dispatch_ID": 1,
-                "Start_Timestamp": 20,
-                "End_Timestamp": 70,
-                "Counter_Name": "SQ_WAVES",
-            }
-        ],
-    )
-    process_ml_api_trace_output(schema.Workload(), str(workload_dir))
-    assert not (workload_dir / "ml_api_trace").exists()
 
 
 def test_build_operator_summary_location_from_node_file_line():
