@@ -32,6 +32,7 @@ class RunCorpusTests(unittest.TestCase):
             'CORPUS_TEST_CALLS': str(self.calls),
             'ROCJITSU_CPU_THREAD_BUDGET': '4',
         }
+        self.env.pop('ROCJITSU_RACE_CASE_TIMEOUT', None)
         self.write_tool('rocjitsu', '#!/bin/sh\nexit 0\n')
         self.write_tool(
             'pytest',
@@ -43,7 +44,8 @@ if "--suite" not in args:
 suite = args[args.index("--suite") + 1]
 target = args[args.index("--target") + 1]
 with open(os.environ["CORPUS_TEST_CALLS"], "a") as log:
-    log.write(json.dumps({"args": args, "config": os.getenv("ROCJITSU_RACE_CONFIG")}) + "\\n")
+    log.write(json.dumps({"args": args, "config": os.getenv("ROCJITSU_RACE_CONFIG"),
+                         "case_timeout": os.getenv("ROCJITSU_RACE_CASE_TIMEOUT")}) + "\\n")
 if "--junitxml" in args:
     report = Path(args[args.index("--junitxml") + 1])
     report.parent.mkdir(parents=True, exist_ok=True)
@@ -103,6 +105,7 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
                 self.assertNotIn('--skip-tests-config', call['args'])
             else:
                 self.assertIn('--skip-tests-config', call['args'])
+            self.assertIsNone(call['case_timeout'])
         self.assertEqual(
             [self.option(c, '--target') for c in calls[-2:]], ['gfx950', 'gfx1151']
         )
@@ -126,12 +129,31 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
             self.assertIn('43s', shlex.split(self.option(call, '--run-wrapper')))
             if self.option(call, '--suite') == 'race':
                 self.assertNotIn('--skip-tests-config', call['args'])
+                self.assertEqual(call['case_timeout'], '43')
             else:
+                self.assertIsNone(call['case_timeout'])
                 self.assertEqual(
                     Path(self.option(call, '--skip-tests-config')),
                     SOURCE_DIR / 'tests/corpus/gfx950_skip_tests.json',
                 )
         self.assertEqual(self.option(calls[-1], '--target'), 'gfx1151')
+        self.assertTrue(
+            all(
+                c['case_timeout'] is None
+                for c in calls
+                if '--last-failed' not in c['args']
+            )
+        )
+
+    def test_race_retry_deadline_does_not_leak_into_first_pass(self):
+        self.env['CORPUS_TEST_FAIL'] = '1'
+        self.env['ROCJITSU_RACE_CASE_TIMEOUT'] = '7'
+        result, calls = self.run_script(
+            '--race-tests', '--rerun-failed', '--hard-timeout', '43'
+        )
+        self.assertEqual(result.returncode, 1, result.stderr)
+        race_calls = [c for c in calls if self.option(c, '--suite') == 'race']
+        self.assertEqual([c['case_timeout'] for c in race_calls], [None, '43', None])
 
     def test_race_preserves_clang_asan_child_preload(self):
         rocm = Path(self.env['ROCM_PATH'])
