@@ -310,7 +310,7 @@ static ncclResult_t p2pAllocateShareableBuffer(size_t size, int refcount, ncclIp
     cudaError_t res = cudaIpcGetMemHandle(&ipcDesc->devIpc, *ptr);
     if (res != cudaSuccess) {
       WARN("cudaIpcGetMemHandle failed : %s", cudaGetErrorString(res));
-      ncclCudaFree(*ptr, manager);
+      ncclCudaFree(*ptr, manager, /*numSegments=*/1, /*forceLegacy=*/forceLegacyIpc);
       CUDACHECK(res);
     }
   }
