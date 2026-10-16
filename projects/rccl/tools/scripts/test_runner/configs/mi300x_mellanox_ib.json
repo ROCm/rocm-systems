@@ -185,6 +185,7 @@
       "num_gpus": 2,
       "timeout": 180,
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_LOCAL_REGISTER": "1",
         "NCCL_CUMEM_ENABLE": "1",
@@ -255,6 +256,7 @@
       "num_gpus": 4,
       "timeout": 300,
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_DEBUG": "INFO",
         "NCCL_DEBUG_SUBSYS": "REG",
         "NCCL_NET": "IB",
@@ -337,6 +339,7 @@
       "num_gpus": 1,
       "timeout": 300,
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
@@ -385,6 +388,7 @@
       "num_gpus": 2,
       "timeout": 300,
       "env_variables": {
+        "NCCL_MULTI_SEGMENT_REGISTER": "1",
         "NCCL_NET": "IB",
         "NCCL_CUMEM_ENABLE": "1",
         "RCCL_FORCE_ENABLE_DMABUF": "1",
