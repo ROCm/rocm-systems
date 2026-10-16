@@ -1560,7 +1560,8 @@ hsa_status_t XdnaDriver::CreateUserModeQueue(void* ring_buf, const core::Agent& 
   create_hwctx_args.num_tiles = num_cols * num_core_rows;
   err = xdna_ioctl(fd_, DRM_IOCTL_AMDXDNA_CREATE_HWCTX, &create_hwctx_args);
   if (err != HSA_STATUS_SUCCESS) {
-    assert(false && "Failed to create hardware context for UMQ");
+    log_warning_n(10, "AIE: failed to create a hardware context for a UMQ queue (errno=%d: %s).\n",
+                  errno, strerror(errno));
     return err;
   }
   MAKE_NAMED_SCOPE_GUARD(hwctx_guard, [&] {
@@ -1610,6 +1611,73 @@ hsa_status_t XdnaDriver::DestroyUserModeQueue(void* queue_metadata) const {
   umq_metadata->hw_ctx_handle = AMDXDNA_INVALID_CTX_HANDLE;
   umq_metadata->syncobj_handle = 0;
   return err;
+}
+
+hsa_status_t XdnaDriver::TranslateUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* ring,
+                                             uint32_t ring_capacity, uint64_t first_pkt_idx,
+                                             uint64_t num_pkts, const core::Agent& agent) const {
+  // Alignment for a per-dispatch control-code copy; no hardware requirement is known to need more
+  // than this (also used for the kernel's one static pristine copy; see executable.cpp).
+  constexpr size_t kCtrlCodeCopyAlign = 64;
+
+  const auto& aie_agent = static_cast<const AieAgent&>(agent);
+  for (uint64_t idx = first_pkt_idx; idx < first_pkt_idx + num_pkts; ++idx) {
+    hsa_amd_aie_kernel_dispatch_packet_t& pkt = ring[idx % ring_capacity];
+
+    // Mirrors KMQ's ValidateBatchPacket: a packet this queue cannot possibly run is a malformed
+    // packet, caught here rather than left for CERT to reject less legibly.
+    if (static_cast<hsa_amd_aie_packet_opcode_t>(pkt.opcode) != HSA_AMD_AIE_PACKET_OPCODE_UMQ) {
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
+
+    const uint64_t kernel_object =
+        (static_cast<uint64_t>(pkt.kernel_object_high) << 32) | pkt.kernel_object_low;
+    const auto* desc = reinterpret_cast<const AieKernelDescriptor*>(kernel_object);
+
+    // Unlike the rest of this packet, kernel_object is not trusted blindly: a packet built by
+    // hand (or a confused caller) can carry one that names nothing the loader ever published, and
+    // dereferencing it would be undefined behavior rather than a clean, reportable failure. Mirrors
+    // the KMQ dispatch path's own ValidDescriptor check, including its error code: KMQ's
+    // ValidateBatchPacket reports an unresolvable kernel object as a malformed packet, not a bad
+    // code object, since from the queue's point of view that's what it is.
+    if (!ValidDescriptor(desc)) {
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
+
+    // The arguments are patched into the control code rather than passed to the hardware, so
+    // nothing downstream would notice a short list: the dispatch would run with the ELF's
+    // placeholder addresses, or read past kernarg_address's declared buffer. Checked before
+    // anything is allocated, same as BuildFullElfCommand's KMQ counterpart.
+    if (pkt.num_kernargs != desc->arg_sites.size()) {
+      log_warning_n(10, "AIE: the packet's kernarg count does not match the kernel's.\n");
+      return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
+    }
+
+    // Leaked, not freed: nothing here tracks CERT's own completion (see the dispatch-completion
+    // signal this queue still does not implement), so there is no safe point yet to know the
+    // device is done reading this copy.
+    void* ctrl_copy = aie_agent.system_allocator()(desc->static_ctrl_code_size, kCtrlCodeCopyAlign,
+                                                   core::MemoryRegion::AllocateNoFlags);
+    if (ctrl_copy == nullptr) {
+      return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+    }
+    std::memcpy(ctrl_copy, reinterpret_cast<const void*>(desc->static_ctrl_code_dev_addr),
+                desc->static_ctrl_code_size);
+
+    const auto* kernarg_address = static_cast<const uint64_t*>(pkt.kernarg_address);
+    for (uint32_t arg = 0; arg < desc->arg_sites.size(); ++arg) {
+      for (const aie_elf::PatchSite& site : desc->arg_sites[arg]) {
+        aie_elf::PatchShimDma57Aie4(
+            reinterpret_cast<uint32_t*>(static_cast<uint8_t*>(ctrl_copy) + site.offset),
+            kernarg_address[arg] + site.addend);
+      }
+    }
+
+    const uint64_t ctrl_code_addr = reinterpret_cast<uint64_t>(ctrl_copy);
+    pkt.kernel_object_low = static_cast<uint32_t>(ctrl_code_addr & 0xFFFFFFFF);
+    pkt.kernel_object_high = static_cast<uint32_t>(ctrl_code_addr >> 32);
+  }
+  return HSA_STATUS_SUCCESS;
 }
 
 hsa_status_t XdnaDriver::SetQueueCUMask(HSA_QUEUEID queue_id, uint32_t cu_mask_count,
@@ -2010,6 +2078,12 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
     return HSA_STATUS_ERROR_INVALID_PACKET_FORMAT;
   }
 
+  // This path only ever runs through a KMQ hardware context, which aie4 (UMQ-only) never creates;
+  // the loader has already refused to load a kernel here whose control code is not the single
+  // ctrltext buffer this function's PatchShimDma48 patches (aie4's multi-page, ctrldata-bearing
+  // shape is patched a different way entirely, by TranslateUmqPackets's PatchShimDma57Aie4).
+  const std::vector<uint8_t>& ctrl_code = desc.pages[0].ctrltext;
+
   // Resolves the argument BOs and bounds-checks the kernarg buffer, which the patch loop below
   // relies on. The argument BOs are not part of the command but must stay resident for the
   // dispatch.
@@ -2021,7 +2095,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // Measured on aie2p: the dispatch only completes when the control code's device address is
   // 16 KiB aligned, which is what CTRL_CODE_DEV_ADDR_ALIGNMENT asks of the allocation.
   DeviceBuffer ctrl;
-  err = AllocAlignedDeviceBuffer(fd, heap_base, desc.ctrl_code.size(), CTRL_CODE_DEV_ADDR_ALIGNMENT,
+  err = AllocAlignedDeviceBuffer(fd, heap_base, ctrl_code.size(), CTRL_CODE_DEV_ADDR_ALIGNMENT,
                                  &ctrl);
   if (err != HSA_STATUS_SUCCESS) {
     return err;
@@ -2031,7 +2105,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
 
   // Always start from the descriptor's control code, since the argument patches are additive. The
   // loader has already written the PDI addresses into it.
-  std::memcpy(ctrl.ptr(), desc.ctrl_code.data(), desc.ctrl_code.size());
+  std::memcpy(ctrl.ptr(), ctrl_code.data(), ctrl_code.size());
 
   const auto* kernarg_address = static_cast<const uint64_t*>(pkt->kernarg_address);
   for (size_t arg = 0; arg < desc.arg_sites.size(); ++arg) {
@@ -2041,7 +2115,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
           kernarg_address[arg] + site.addend);
     }
   }
-  FlushCpuCache(ctrl.ptr(), 0, desc.ctrl_code.size());
+  FlushCpuCache(ctrl.ptr(), 0, ctrl_code.size());
 
   bo_handles->push_back(ctrl.bo.handle);
   // The PDIs are reached only through the addresses written into the control code above, so the
@@ -2063,7 +2137,7 @@ static hsa_status_t BuildFullElfCommand(int fd, const void* heap_base,
   // page-aligned command BO, so the 64-bit fields below are aligned.
   auto* npu = reinterpret_cast<ert_npu_preempt_data*>(&cmd->data[1]);
   npu->instruction_buffer = ctrl.dev_addr();
-  npu->instruction_buffer_size = static_cast<uint32_t>(desc.ctrl_code.size());
+  npu->instruction_buffer_size = static_cast<uint32_t>(ctrl_code.size());
   // The save and restore buffers and the property count are left zero. This design has no
   // preemption sections, and aie2p firmware accepts null preemption buffers.
   //

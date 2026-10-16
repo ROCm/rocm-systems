@@ -79,10 +79,19 @@ class AieUmqQueue : public core::Queue,
     return rtti_id_;
   }
 
+  /// @brief Translates every packet readied since the last call through
+  /// XdnaDriver::TranslateUmqPackets, then publishes the new write index to the header and rings
+  /// the doorbell. Mirrors @ref AieKmqQueue::SubmitPackets's shape (StoreRelaxed delegates
+  /// entirely to this), though unlike KMQ's per-batch ioctl, the actual device-facing step here is
+  /// still just the doorbell write; everything before it is host-side packet preparation.
+  void SubmitPackets();
+
   /// @brief Queue size in bytes.
   uint32_t queue_size_bytes_ = 0;
   /// @brief Base of the queue's ring buffer storage. Handed to the device directly as the
-  /// hardware context's umq_bo; CERT reads packets out of it in place.
+  /// hardware context's umq_bo. Opens with a HostQueueHeader (CERT's own read/write indices),
+  /// followed immediately by the packet ring the application writes into and CERT reads out of in
+  /// place (see amd_aie_umq_queue.cpp).
   void* ring_buf_ = nullptr;
   /// @brief User Mode Queue (UMQ) metadata associated with this queue.
   void* umq_metadata_ = nullptr;

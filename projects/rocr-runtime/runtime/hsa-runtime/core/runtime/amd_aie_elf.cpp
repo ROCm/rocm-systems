@@ -43,10 +43,7 @@ enum class PatchScheme : uint32_t {
   kShimDma48 = 5,
   /// @brief Same as kShimDma48 but for aie4's wider shim DMA buffer descriptor: a 57-bit field
   /// (site[1] low 32 bits, site[0] bits 0-24 for bits 32-56; aiebu's write57_aie4 in
-  /// src/cpp/analyzer/transform_manager.cpp). Recognized here so a kernel argument site using it
-  /// is not rejected as an unsupported scheme; the dispatch-time address patch for it is not
-  /// implemented yet (see PatchShimDma48's kDdrAieAddrOffset -- its aie4 equivalent is not
-  /// confirmed), so nothing calls into one.
+  /// src/cpp/analyzer/transform_manager.cpp). See PatchShimDma57Aie4.
   kShimDma57Aie4 = 6,
   /// @brief Store a plain 64-bit address. Used for the PDI address.
   kAddress64 = 8,
@@ -56,10 +53,20 @@ enum class PatchScheme : uint32_t {
 /// keeps a malformed symbol name from being used to size a vector.
 constexpr uint32_t kMaxArgIndex = 4095;
 
+/// @brief Size of the transaction header a full-ELF control code opens with. Used both to rebase a
+/// relocation offset from the combined ctrltext+ctrldata address space into ctrldata's own byte
+/// offset, and to recognize a PDI site at offset 0 as malformed rather than legal.
+constexpr uint32_t kControlCodeHeaderSize = 16;
+
 /// @brief One relocation found while scanning `.rela.dyn`, before it is known to be a PDI site or
 /// an argument site.
 struct RelocSite {
-  uint32_t offset = 0;  // byte offset into the control code
+  // Which page's section the relocation's symbol is bound to, and which buffer within it:
+  // the "<col>.<page>.<id>" suffix shared by that page's ctrltext/ctrldata section names (see
+  // Group::pages below).
+  std::string page_key;
+  bool in_ctrldata = false;
+  uint32_t offset = 0;  // byte offset into the named buffer, already rebased if in_ctrldata
   uint32_t addend = 0;  // added to the address before it is written
   PatchScheme scheme = PatchScheme::kShimDma48;
 };
@@ -109,6 +116,22 @@ std::string KernelNameFromSymbol(const std::string& symbol) {
   }
   if (len == 0 || i + len > symbol.size()) return symbol;
   return symbol.substr(i, len);
+}
+
+/// @brief True if `name` is `prefix` followed by '.' and more characters, or exactly `prefix`
+/// with nothing after (in which case `*suffix` is set empty). Used to find a ctrltext/ctrldata
+/// section's "<col>.<page>.<id>" suffix, which is how its ctrldata/ctrltext counterpart (if any)
+/// is identified: same suffix, different prefix.
+bool StripPrefix(const char* name, const char* prefix, std::string* suffix) {
+  const size_t plen = std::strlen(prefix);
+  if (std::strncmp(name, prefix, plen) != 0) return false;
+  if (name[plen] == '\0') {
+    suffix->clear();
+    return true;
+  }
+  if (name[plen] != '.') return false;
+  *suffix = name + plen + 1;
+  return true;
 }
 
 bool ParseArgIndex(const char* name, uint32_t* index) {
@@ -210,12 +233,29 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
   // A group's sh_info is the .symtab index of its instance symbol, whose st_shndx in turn is the
   // .symtab index of the kernel's function symbol. That is an overload of st_shndx specific to
   // this ELF flavour, not a section index.
+  //
+  // A kernel's control code may be split into several pages -- aie2p has exactly one, aie4 bundles
+  // several per kernel -- each a (ctrltext, ctrldata) section pair sharing a name suffix (see
+  // StripPrefix). ctrldata is optional (aie2p never has one).
+  struct PageSections {
+    uint32_t ctrltext_section = 0;
+    uint32_t ctrldata_section = 0;
+  };
   struct Group {
     std::string name;
-    uint32_t ctrltext_section = 0;
+    // Keyed by the page's name suffix; an ordered map just so iteration order is stable from one
+    // parse to the next; nothing here depends on it being numeric or otherwise meaningful.
+    std::map<std::string, PageSections> pages;
   };
-  std::map<uint32_t, Group> groups;      // group section index -> group
-  std::map<uint32_t, uint32_t> sec2grp;  // member section index -> group section index
+  // Role of a ctrltext/ctrldata section that is a group member, for resolving a relocation's
+  // st_shndx straight to the (group, page, buffer) it patches.
+  struct SectionRole {
+    uint32_t group = 0;
+    std::string page_key;
+    bool in_ctrldata = false;
+  };
+  std::map<uint32_t, Group> groups;              // group section index -> group
+  std::map<uint32_t, SectionRole> section_role;  // member section index -> role
 
   for (uint32_t i = 0; i < ehdr->e_shnum; ++i) {
     if (shdrs[i].sh_type != SHT_GROUP) continue;
@@ -242,13 +282,21 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
     for (uint32_t w = 1; w < word_count; ++w) {
       const uint32_t member = words[w];
       if (member >= ehdr->e_shnum) return fail("group member out of range");
-      sec2grp[member] = i;
       const char* member_name = section_name(member);
-      if (member_name != nullptr && std::strncmp(member_name, ".ctrltext", 9) == 0) {
+      if (member_name == nullptr) continue;
+      std::string suffix;
+      if (StripPrefix(member_name, ".ctrltext", &suffix)) {
         if (shdrs[member].sh_type != SHT_PROGBITS) {
           return fail("control code section holds no data");
         }
-        group.ctrltext_section = member;
+        group.pages[suffix].ctrltext_section = member;
+        section_role[member] = SectionRole{i, suffix, false};
+      } else if (StripPrefix(member_name, ".ctrldata", &suffix)) {
+        if (shdrs[member].sh_type != SHT_PROGBITS) {
+          return fail("control-data section holds no data");
+        }
+        group.pages[suffix].ctrldata_section = member;
+        section_role[member] = SectionRole{i, suffix, true};
       }
     }
     groups.emplace(i, std::move(group));
@@ -258,8 +306,14 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
   // Collect relocations. Each names a symbol whose st_shndx is the section being patched and
   // whose name says what address to write: ".pdi.N" for a PDI, a decimal string for an argument.
   std::map<uint32_t, std::map<uint32_t, std::vector<RelocSite>>> group_arg_sites;
-  // group section index -> (PDI section index, patch offset) for each PDI site
-  std::map<uint32_t, std::vector<std::pair<uint32_t, uint32_t>>> group_pdi_sites;
+  // One PDI relocation, before it is known which Kernel::pages index its page_key will become.
+  struct PdiSite {
+    uint32_t pdi_section = 0;
+    std::string page_key;
+    uint32_t offset = 0;  // already rebased; always into ctrltext (PDI sites in ctrldata are
+                          // refused: see below)
+  };
+  std::map<uint32_t, std::vector<PdiSite>> group_pdi_sites;  // group section index -> PDI sites
 
   // PDI sections are not group members, so a relocation names its PDI by section name only, and a
   // multi-kernel ELF can repeat a name (MLIR-AIR repeats .pdi.1.. for each kernel). A name is
@@ -303,13 +357,44 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
       const char* sym_name = StringAt(image, *dynstr, sym.st_name);
       if (sym_name == nullptr) return fail("bad relocation symbol name");
 
-      auto grp_it = sec2grp.find(sym.st_shndx);
-      if (grp_it == sec2grp.end()) continue;
-      Group& group = groups.at(grp_it->second);
-      if (sym.st_shndx != group.ctrltext_section) continue;  // only control code is patched
+      auto role_it = section_role.find(sym.st_shndx);
+      if (role_it == section_role.end()) continue;  // not a control-code section
+      const SectionRole& role = role_it->second;
+      const Group& group = groups.at(role.group);
+      const PageSections& page_secs = group.pages.at(role.page_key);
+
+      // A relocation names its page by its ctrltext section's symbol (confirmed against a real
+      // aie4 full ELF: both argument relocations' symbols are bound to a ctrltext section, never
+      // a ctrldata one), but the offset itself is given in a combined ctrltext+ctrldata address
+      // space (aiebu's own convention: transform_manager.cpp's get_controlcode_bd_offset/
+      // set_controlcode_bd_offset) -- that same ELF lays each page's ctrldata address out
+      // immediately after its ctrltext one, with no gap, so an offset past ctrltext's own size is
+      // one into ctrldata. Rebase it into ctrldata's own byte offset; +16 because a full-ELF
+      // control code opens with a 16-byte transaction header.
+      uint32_t offset = relocs[r].r_offset;
+      bool in_ctrldata = role.in_ctrldata;
+      if (!in_ctrldata && page_secs.ctrltext_section != 0) {
+        const uint32_t ctrltext_size = shdrs[page_secs.ctrltext_section].sh_size;
+        if (offset >= ctrltext_size) {
+          if (page_secs.ctrldata_section == 0) {
+            return fail("relocation offset past the end of ctrltext, but the page has no ctrldata");
+          }
+          // 64-bit so a huge r_offset (untrusted ELF input) is caught by the overflow check below
+          // rather than wrapping back into range.
+          const uint64_t rebased =
+              static_cast<uint64_t>(offset) - ctrltext_size + kControlCodeHeaderSize;
+          if (rebased > std::numeric_limits<uint32_t>::max()) {
+            return fail("control-data relocation offset overflows");
+          }
+          offset = static_cast<uint32_t>(rebased);
+          in_ctrldata = true;
+        }
+      }
 
       RelocSite site;
-      site.offset = relocs[r].r_offset;
+      site.page_key = role.page_key;
+      site.in_ctrldata = in_ctrldata;
+      site.offset = offset;
       if (abi_version == 1) {
         // In ABI version 1 the scheme lives in the low bits of the addend rather than in r_info.
         site.addend = static_cast<uint32_t>(relocs[r].r_addend) >> 4;
@@ -323,12 +408,13 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
         if (site.scheme != PatchScheme::kAddress64) {
           return fail("unexpected patch scheme for PDI symbol");
         }
+        if (site.in_ctrldata) return fail("PDI patch site in control-data is not supported");
         uint32_t pdi_section = 0;
         if (!find_pdi_section(sym_name, &pdi_section)) {
           return fail(std::string("ambiguous PDI: sections named ") + sym_name + " differ");
         }
         if (pdi_section == 0) return fail("PDI section not found");
-        group_pdi_sites[grp_it->second].emplace_back(pdi_section, site.offset);
+        group_pdi_sites[role.group].push_back(PdiSite{pdi_section, role.page_key, site.offset});
         continue;
       }
 
@@ -344,40 +430,59 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
       if (arg_index > kMaxArgIndex) {
         return fail("kernel argument index out of range");
       }
-      group_arg_sites[grp_it->second][arg_index].push_back(site);
+      group_arg_sites[role.group][arg_index].push_back(site);
     }
   }
 
   std::map<std::string, Kernel> kernels;
   for (auto& [grp_index, group] : groups) {
-    if (group.ctrltext_section == 0) continue;  // nothing to dispatch
-
     Kernel k;
     k.name = group.name;
-    if (!section_bytes(group.ctrltext_section, &k.ctrl_code)) {
-      return fail("section extends past end of file");
+
+    // page_key -> index into k.pages, for resolving the sites collected above. A page with
+    // ctrldata but no ctrltext has nothing to execute, so it is dropped rather than failing the
+    // whole group: other pages, or other groups, may still be valid.
+    std::map<std::string, uint32_t> page_index;
+    for (auto& [page_key, secs] : group.pages) {
+      if (secs.ctrltext_section == 0) continue;
+      Page page;
+      if (!section_bytes(secs.ctrltext_section, &page.ctrltext)) {
+        return fail("section extends past end of file");
+      }
+      if (page.ctrltext.empty()) return fail("empty control code");
+      if (secs.ctrldata_section != 0 && !section_bytes(secs.ctrldata_section, &page.ctrldata)) {
+        return fail("section extends past end of file");
+      }
+      page_index.emplace(page_key, static_cast<uint32_t>(k.pages.size()));
+      k.pages.push_back(std::move(page));
     }
-    if (k.ctrl_code.empty()) return fail("empty control code");
+    if (k.pages.empty()) continue;  // nothing to dispatch
 
     auto pdi_sites_it = group_pdi_sites.find(grp_index);
     if (pdi_sites_it != group_pdi_sites.end()) {
-      for (const auto& [pdi_section, offset] : pdi_sites_it->second) {
+      for (const PdiSite& s : pdi_sites_it->second) {
+        auto page_it = page_index.find(s.page_key);
+        // A PDI site is only ever recorded against a page found via its ctrltext section (sites
+        // bound to ctrldata are refused above), so that page is never one dropped for lacking
+        // ctrltext; fail rather than silently drop if that invariant is ever violated.
+        if (page_it == page_index.end()) return fail("PDI patch site's page has no control code");
+        std::vector<uint8_t>& ctrltext = k.pages[page_it->second].ctrltext;
         // A 64-bit address is written here, so it must lie wholly inside the control code.
-        if (offset + sizeof(uint64_t) > k.ctrl_code.size() || offset % sizeof(uint32_t) != 0) {
+        if (s.offset + sizeof(uint64_t) > ctrltext.size() || s.offset % sizeof(uint32_t) != 0) {
           return fail("PDI patch site does not fit the control code");
         }
-        // A full-ELF control code opens with a 16-byte transaction header, so a PDI patch site at
-        // offset 0 means a malformed ELF, not a legal kernel.
-        if (offset == 0) {
+        // A full-ELF control code opens with a kControlCodeHeaderSize-byte transaction header, so
+        // a PDI patch site at offset 0 means a malformed ELF, not a legal kernel.
+        if (s.offset == 0) {
           return fail("PDI patch site at offset 0 is indistinguishable from no patch");
         }
         std::vector<uint8_t> bytes;
-        if (!section_bytes(pdi_section, &bytes)) return fail("section extends past end of file");
+        if (!section_bytes(s.pdi_section, &bytes)) return fail("section extends past end of file");
         // Each distinct PDI is placed in device memory once, however many sites load it.
         auto pdi = std::find_if(k.pdis.begin(), k.pdis.end(),
                                 [&](const Pdi& p) { return p.bytes == bytes; });
         if (pdi == k.pdis.end()) pdi = k.pdis.insert(k.pdis.end(), Pdi{std::move(bytes), {}});
-        pdi->patch_offsets.push_back(offset);
+        pdi->patch_sites.push_back(PdiPatchSite{page_it->second, s.offset});
       }
     }
 
@@ -389,15 +494,28 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
         auto& dst = k.arg_sites[arg_index];
         dst.reserve(sites.size());
         for (const RelocSite& site : sites) {
-          // PatchShimDma48 updates the two dwords after the site, so three dwords from the offset
-          // must lie inside the control code and the offset must be dword aligned; otherwise the
-          // driver patches past the end of its per-dispatch buffer. Checked here because this is
-          // the first point at which the control code's size is known.
+          auto page_it = page_index.find(site.page_key);
+          // Unlike a PDI site, an argument site's symbol may bind directly to a ctrldata section,
+          // which can reference a page whose ctrldata has no matching ctrltext (dropped above as
+          // having nothing to execute); fail rather than silently drop the patch, since a dropped
+          // site would leave the ELF's placeholder address in place at dispatch instead of the
+          // caller's real one.
+          if (page_it == page_index.end()) {
+            return fail("argument patch site's page has no control code");
+          }
+          const std::vector<uint8_t>& target = site.in_ctrldata ? k.pages[page_it->second].ctrldata
+                                                                : k.pages[page_it->second].ctrltext;
+          // PatchShimDma48 updates the two dwords after the site (site[1], site[2]); kShimDma57Aie4
+          // updates the site itself and the dword after (site[0], site[1]), per the scheme's own
+          // layout comment above. Either way three dwords from the offset must lie inside the named
+          // buffer and the offset must be dword aligned; otherwise the driver patches past the end
+          // of its per-dispatch buffer. Checked here because this is the first point at which the
+          // buffer's size is known.
           if ((site.offset % sizeof(uint32_t)) != 0 ||
-              site.offset + 3 * sizeof(uint32_t) > k.ctrl_code.size()) {
+              site.offset + 3 * sizeof(uint32_t) > target.size()) {
             return fail("argument patch site does not fit the control code");
           }
-          dst.push_back(PatchSite{site.offset, site.addend});
+          dst.push_back(PatchSite{page_it->second, site.in_ctrldata, site.offset, site.addend});
         }
       }
     }
@@ -418,6 +536,18 @@ void PatchShimDma48(uint32_t* site, uint64_t addr) {
   base += addr + kDdrAieAddrOffset;
   site[1] = static_cast<uint32_t>(base & 0xFFFFFFFC);
   site[2] = (site[2] & 0xFFFF0000) | static_cast<uint32_t>(base >> 32);
+}
+
+void PatchShimDma57Aie4(uint32_t* site, uint64_t addr) {
+  // No aie4 equivalent of kDdrAieAddrOffset is added here: measured directly via
+  // hsa_amd_pointer_info on this agent's data pool, agentBaseAddress equals the host pointer
+  // exactly (no aperture shift), unlike aie2p. If a future aie4 memory model needs one, this is
+  // where it would go.
+  const uint64_t base =
+      ((static_cast<uint64_t>(site[0]) & 0x1FFFFFF) << 32) | static_cast<uint64_t>(site[1]);
+  const uint64_t sum = base + addr;
+  site[1] = static_cast<uint32_t>(sum & 0xFFFFFFFF);
+  site[0] = (site[0] & 0xFE000000) | static_cast<uint32_t>((sum >> 32) & 0x1FFFFFF);
 }
 
 }  // namespace aie_elf
