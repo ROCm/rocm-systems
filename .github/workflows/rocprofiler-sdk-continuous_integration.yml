@@ -148,6 +148,13 @@ jobs:
       CORE_EXT_RUNNER: mi325
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
+      - name: Prepare writable Git configuration
+        shell: bash
+        run: |
+          # Keep Git's global config writable even when /github/home is absent.
+          git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
+          echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
+
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v6
         with:
@@ -395,6 +402,13 @@ jobs:
       OS_TYPE: ${{ matrix.system.os }}
       GPU_RUNNER: ${{ matrix.system.gpu }}
     steps:
+      - name: Prepare writable Git configuration
+        shell: bash
+        run: |
+          # Keep Git's global config writable even when /github/home is absent.
+          git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
+          echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
+
       - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
         uses: actions/checkout@v6
         with:
@@ -591,6 +605,13 @@ jobs:
       GPU_RUNNER: ${{ matrix.system.gpu }}
 
     steps:
+    - name: Prepare writable Git configuration
+      shell: bash
+      run: |
+        # Keep Git's global config writable even when /github/home is absent.
+        git_config_dir=$(mktemp -d "${RUNNER_TEMP}/rocprofiler-sdk-git.XXXXXX")
+        echo "GIT_CONFIG_GLOBAL=${git_config_dir}/config" >> "$GITHUB_ENV"
+
     - name: Clone ROCProfiler SDK & AQLProfile & ROCProfiler Register & ROCR-Runtime & Trace Decoder
       uses: actions/checkout@v6
       with:
