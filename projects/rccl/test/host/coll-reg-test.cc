@@ -343,4 +343,693 @@ TEST_F(RegisterCollGateMicrotest, GraphRegisterInCapture_ProbesPeers) {
   EXPECT_EQ(p2p_.asked, (std::vector<int>{1}));
 }
 
+// ---------------------------------------------------------------------------
+// ncclRegisterCollBuffers: NVLS
+// ---------------------------------------------------------------------------
+
+class RegisterCollNvlsMicrotest : public RegisterCollMicrotestBase {
+ protected:
+  int nvlsLocalCalls_ = 0;
+
+  void SetUp() override {
+    RegisterCollMicrotestBase::SetUp();
+    task_.algorithm = NCCL_ALGO_NVLS;
+    comm_->nvlsSupport = 1;
+    comm_->nvlsRegSupport = 1;
+  }
+
+  void NvlsLocalRegisters(int registered) {
+    g_ncclNvlsLocalRegisterBuffer = [this, registered](ncclComm*, const void*, void*, size_t, size_t, int* reged,
+                                                       void** outSend, void** outRecv) {
+      ++nvlsLocalCalls_;
+      EXPECT_EQ(outSend, outSend_);
+      EXPECT_EQ(outRecv, outRecv_);
+      *reged = registered;
+      return ncclSuccess;
+    };
+  }
+};
+
+TEST_F(RegisterCollNvlsMicrotest, TransportDisabled_LeavesBufferUnregistered) {
+  comm_->nvlsSupport = 0;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNvlsMicrotest, HostModeDisablesTransport_LeavesBufferUnregistered) {
+  comm_->config.nvlsHostMode = ncclNvlsHostModeDisableTransport;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNvlsMicrotest, NoNvlsRegSupport_LeavesBufferUnregistered) {
+  comm_->nvlsRegSupport = 0;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNvlsMicrotest, PreMulSum_LeavesBufferUnregistered) {
+  task_.opDev.op = ncclDevPreMulSum;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNvlsMicrotest, LocalRegistered_MarksNvlsAndSkipsConnect) {
+  NvlsLocalRegisters(1);
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+  EXPECT_FALSE(needConnect_);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, NvlsTreeLocalRegistered_MarksNvls) {
+  task_.algorithm = NCCL_ALGO_NVLS_TREE;
+  NvlsLocalRegisters(1);
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, NotRegistered_LeavesBufferUnregisteredAndChannelsAlone) {
+  NvlsLocalRegisters(0);
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+  EXPECT_EQ(task_.nMaxChannels, 32);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, AllReduce_RegistersBothBuffersAtCountSize) {
+  g_ncclNvlsLocalRegisterBuffer = [this](ncclComm*, const void* send, void* recv, size_t sendSize, size_t recvSize,
+                                     int* reged, void**, void**) {
+    EXPECT_EQ(send, kSend);
+    EXPECT_EQ(recv, kRecv);
+    EXPECT_EQ(sendSize, kBytes);
+    EXPECT_EQ(recvSize, kBytes);
+    ++nvlsLocalCalls_;
+    *reged = 0;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(nvlsLocalCalls_, 1);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, AllGather_RegistersOnlyTheGatheredRecvBuffer) {
+  task_.func = ncclFuncAllGather;
+  g_ncclNvlsLocalRegisterBuffer = [this](ncclComm*, const void* send, void* recv, size_t sendSize, size_t recvSize,
+                                     int* reged, void**, void**) {
+    EXPECT_EQ(send, nullptr);
+    EXPECT_EQ(recv, kRecv);
+    EXPECT_EQ(sendSize, kBytes);
+    EXPECT_EQ(recvSize, kRanks * kBytes);
+    ++nvlsLocalCalls_;
+    *reged = 0;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(nvlsLocalCalls_, 1);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, ReduceScatter_RegistersOnlyTheScatteredSendBuffer) {
+  task_.func = ncclFuncReduceScatter;
+  g_ncclNvlsLocalRegisterBuffer = [this](ncclComm*, const void* send, void* recv, size_t sendSize, size_t recvSize,
+                                     int* reged, void**, void**) {
+    EXPECT_EQ(send, kSend);
+    EXPECT_EQ(recv, nullptr);
+    EXPECT_EQ(sendSize, kRanks * kBytes);
+    EXPECT_EQ(recvSize, kBytes);
+    ++nvlsLocalCalls_;
+    *reged = 0;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(nvlsLocalCalls_, 1);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, RegisteredSingleNode_CapsChannelsAtFour) {
+  NvlsLocalRegisters(1);
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 4);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, RegisteredSingleNodeReduceScatter_CapsChannelsAtFive) {
+  task_.func = ncclFuncReduceScatter;
+  NvlsLocalRegisters(1);
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 5);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, RegisteredMultiNode_CapsChannelsAtSix) {
+  task_.algorithm = NCCL_ALGO_NVLS_TREE;
+  comm_->nNodes = 2;
+  NvlsLocalRegisters(1);
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 6);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, Registered_KeepsChannelsWithinCtaLimits) {
+  NvlsLocalRegisters(1);
+  comm_->config.maxCTAs = 2;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 2);
+  comm_->config.maxCTAs = 64;
+  comm_->config.minCTAs = 8;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.nMaxChannels, 8);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, LocalRegistered_SkipsGraphRegistration) {
+  UseGraphCapture();
+  NvlsLocalRegisters(1);
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, LocalNotRegisteredInCapture_FallsBackToGraphRegistration) {
+  UseGraphCapture();
+  NvlsLocalRegisters(0);
+  g_ncclNvlsGraphRegisterBuffer = [this](ncclComm*, const void*, void*, size_t, size_t, int* reged, void**, void**,
+                                         ncclRegCleanupQueue* queue, int* nElts) {
+    EXPECT_EQ(queue, &cleanupQueue_);
+    EXPECT_EQ(nElts, &task_.nCleanupQueueElts);
+    *reged = 1;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(nvlsLocalCalls_, 1);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsMicrotest, CaptureWithoutLocalRegister_RegistersPerGraphOnly) {
+  UseGraphCapture(/*localRegister=*/0);
+  g_ncclNvlsGraphRegisterBuffer = [](ncclComm*, const void*, void*, size_t, size_t, int* reged, void**, void**,
+                                     ncclRegCleanupQueue*, int*) {
+    *reged = 1;
+    return ncclSuccess;
+  };
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+class RegisterCollNvlsCollnetMicrotest : public RegisterCollNvlsMicrotest {
+ protected:
+  void SetUp() override {
+    RegisterCollNvlsMicrotest::SetUp();
+    comm_->nNodes = 2;
+    NvlsLocalRegisters(1);
+  }
+};
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, BothDirectionsRegistered_MarksNetWithHandles) {
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kRecv, kBytes, collNetSend, {}, {}}, {kRecv, kBytes, collNetRecv, {}, {}}};
+  EXPECT_EQ(collnetLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER | NCCL_NET_REG_BUFFER);
+  EXPECT_EQ(task_.sendMhandle, Ptr(0xc0 + collNetSend));
+  EXPECT_EQ(task_.recvMhandle, Ptr(0xc0 + collNetRecv));
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, SendSideNotRegistered_SkipsRecvSide) {
+  CollnetLocalRegisters({collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetLocal_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, RecvSideNotRegistered_LeavesNetUnmarked) {
+  CollnetLocalRegisters({collNetSend});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetLocal_.size(), 2u);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, NvlsNotRegistered_StillMarksCollnet) {
+  NvlsLocalRegisters(0);
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+  EXPECT_TRUE(needConnect_);
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, SingleNode_SkipsCollnet) {
+  comm_->nNodes = 1;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, NvlsTree_SkipsCollnet) {
+  task_.algorithm = NCCL_ALGO_NVLS_TREE;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, MloPartRecvBufferNotRdmaCapable_SkipsCollnet) {
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 0}});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, LocalNotRegisteredInCapture_FallsBackToGraphRegistration) {
+  UseGraphCapture();
+  CollnetLocalRegisters({});
+  CollnetGraphRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kRecv, kBytes, collNetSend, {}, {}}, {kRecv, kBytes, collNetRecv, {}, {}}};
+  EXPECT_EQ(collnetGraph_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER | NCCL_NET_REG_BUFFER);
+  EXPECT_EQ(task_.sendMhandle, Ptr(0xd0 + collNetSend));
+  EXPECT_EQ(task_.recvMhandle, Ptr(0xd0 + collNetRecv));
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, LocalRegisteredInCapture_SkipsGraphRegistration) {
+  UseGraphCapture();
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER | NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNvlsCollnetMicrotest, GraphSendSideNotRegistered_SkipsGraphRecvSide) {
+  UseGraphCapture(/*localRegister=*/0);
+  g_ncclNvlsGraphRegisterBuffer = [](ncclComm*, const void*, void*, size_t, size_t, int* reged, void**, void**,
+                                     ncclRegCleanupQueue*, int*) {
+    *reged = 1;
+    return ncclSuccess;
+  };
+  CollnetGraphRegisters({collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetGraph_.size(), 1u);
+  EXPECT_EQ(task_.regBufType, NCCL_NVLS_REG_BUFFER);
+}
+
+// ---------------------------------------------------------------------------
+// ncclRegisterCollBuffers: IPC eligibility
+// ---------------------------------------------------------------------------
+
+// Ring, tree and chain scenes that register over IPC with P2P peers 1 and 2 unless a rule skips them.
+class RegisterCollIpcGateMicrotest : public RegisterCollMicrotestBase {
+ protected:
+  void SetUp() override {
+    RegisterCollMicrotestBase::SetUp();
+    SetChannels(1);
+    comm_->isAllDirectP2p = true;
+    ncclChannel& ch = comm_->channels[0];
+    ch.ring.prev = 1;
+    ch.ring.next = 2;
+    ch.tree.up = 1;
+    ch.collnetChain.up = 1;
+    ConnectP2p(RecvConn(0, 1));
+    ConnectP2p(SendConn(0, 2));
+    AddRegRecord(kSend, kRanks * kBytes);
+    AddRegRecord(kRecv, kRanks * kBytes);
+    IpcLocalRegisters({kSend, kRecv});
+  }
+};
+
+TEST_F(RegisterCollIpcGateMicrotest, RingOutOfPlaceAllReduce_RegistersOverIpc) {
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, NonSimpleProtocol_LeavesBufferUnregistered) {
+  task_.protocol = NCCL_PROTO_LL;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, RingReduceScatter_LeavesBufferUnregistered) {
+  task_.func = ncclFuncReduceScatter;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, AllReduceWithBias_LeavesBufferUnregistered) {
+  task_.acc = Ptr(0x300000);
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, BroadcastWithAccumulator_RegistersOverIpc) {
+  task_.func = ncclFuncBroadcast;
+  task_.acc = Ptr(0x300000);
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, RingInPlaceAllReduce_LeavesBufferUnregistered) {
+  task_.sendbuff = kRecv;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, RingInPlaceBroadcast_RegistersOverIpc) {
+  task_.func = ncclFuncBroadcast;
+  task_.sendbuff = kRecv;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, RingReduce_LeavesBufferUnregistered) {
+  task_.func = ncclFuncReduce;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, TreeOutOfPlace_RegistersOverIpc) {
+  task_.algorithm = NCCL_ALGO_TREE;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, TreeInPlace_LeavesBufferUnregistered) {
+  task_.algorithm = NCCL_ALGO_TREE;
+  task_.sendbuff = kRecv;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, TreeCrossClique_LeavesBufferUnregistered) {
+  task_.algorithm = NCCL_ALGO_TREE;
+  comm_->p2pCrossClique = true;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, CollnetChainInPlaceWithLocalPeers_LeavesBufferUnregistered) {
+  task_.algorithm = NCCL_ALGO_COLLNET_CHAIN;
+  task_.sendbuff = kRecv;
+  comm_->maxLocalRanks = 2;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, CollnetChainInPlaceSingleLocalRank_RegistersOverIpc) {
+  task_.algorithm = NCCL_ALGO_COLLNET_CHAIN;
+  task_.sendbuff = kRecv;
+  comm_->maxLocalRanks = 1;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollIpcGateMicrotest, CollnetChainOutOfPlaceWithLocalPeers_RegistersOverIpc) {
+  task_.algorithm = NCCL_ALGO_COLLNET_CHAIN;
+  comm_->maxLocalRanks = 2;
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+// ---------------------------------------------------------------------------
+// ncclRegisterCollBuffers: CollNet Direct
+// ---------------------------------------------------------------------------
+
+class RegisterCollNetDirectMicrotest : public RegisterCollMicrotestBase {
+ protected:
+  void SetUp() override {
+    RegisterCollMicrotestBase::SetUp();
+    SetChannels(1);
+    task_.algorithm = NCCL_ALGO_COLLNET_DIRECT;
+    task_.func = ncclFuncAllGather;
+    comm_->isAllDirectP2p = true;
+  }
+  ncclDirect& Direct() { return comm_->channels[0].collnetDirect; }
+  // Peers 1 (up) and 2 (down), both reached over P2P.
+  void TwoP2pPeers() {
+    Direct().up[0] = 1;
+    Direct().down[0] = 2;
+    ConnectP2p(RecvConn(0, 1));
+    ConnectP2p(RecvConn(0, 2));
+  }
+};
+
+TEST_F(RegisterCollNetDirectMicrotest, P2pPeers_RegistersBothBuffersForEachPeerOnce) {
+  TwoP2pPeers();
+  Direct().down[3] = 1;
+  Direct().up[NCCL_MAX_DIRECT_ARITY - 1] = 3;
+  ConnectP2p(RecvConn(0, 3));
+  IpcLocalRegisters({kSend, kRecv});
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kSend, kBytes, NCCL_IPC_COLLECTIVE, {1, 2, 3}, {}},
+                                {kRecv, kRanks * kBytes, NCCL_IPC_COLLECTIVE, {1, 2, 3}, {}}};
+  EXPECT_EQ(ipcLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+  EXPECT_EQ(task_.recvbuffRmtAddrs, ipcAddrs_);
+  EXPECT_EQ(task_.recvbuffOffset, 0x40u);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, NetConnectedPeer_IsNotIpcRegistered) {
+  Direct().up[0] = 1;
+  RecvConn(0, 1)->connected = 1;
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, UnconnectedPeer_RegisteredWhenTransportCanConnect) {
+  Direct().up[0] = 1;
+  Direct().down[0] = 2;
+  p2p_.connectable = {2};
+  IpcLocalRegisters({kSend, kRecv});
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(p2p_.asked, (std::vector<int>{1, 2}));
+  EXPECT_EQ(p2p_.lastGraph, &comm_->graphs[NCCL_ALGO_COLLNET_DIRECT]);
+  EXPECT_EQ(p2p_.lastMine, &comm_->peerInfo[comm_->rank]);
+  ASSERT_EQ(ipcLocal_.size(), 2u);
+  EXPECT_EQ(ipcLocal_[0].peers, (std::vector<int>{2}));
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, CanConnectFails_ReturnsError) {
+  Direct().up[0] = 1;
+  p2p_.result = ncclInternalError;
+  EXPECT_EQ(Run(), ncclInternalError);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, NoP2pPeer_SkipsIpc) {
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, NotAllDirectP2p_SkipsIpc) {
+  TwoP2pPeers();
+  comm_->isAllDirectP2p = false;
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, ReduceScatter_SkipsIpc) {
+  TwoP2pPeers();
+  task_.func = ncclFuncReduceScatter;
+  IpcLocalRegisters({kSend, kRecv});
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(ipcLocal_.empty());
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, AllReduce_SkipsIpc) {
+  TwoP2pPeers();
+  task_.func = ncclFuncAllReduce;
+  IpcLocalRegisters({kSend, kRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(ipcLocal_.empty());
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, BroadcastRegistered_LeavesIpcUnmarked) {
+  TwoP2pPeers();
+  task_.func = ncclFuncBroadcast;
+  IpcLocalRegisters({kSend, kRecv});
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(ipcLocal_.size(), 2u);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, AllGatherSendOnlyRegistered_LeavesIpcUnmarked) {
+  TwoP2pPeers();
+  IpcLocalRegisters({kSend});
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, GraphCapture_RegistersLocallyOnlyWhatGraphMissed) {
+  TwoP2pPeers();
+  UseGraphCapture();
+  IpcGraphRegisters({kSend});
+  IpcLocalRegisters({kRecv});
+  CollnetGraphRegisters({});
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ASSERT_EQ(ipcGraph_.size(), 2u);
+  ASSERT_EQ(ipcLocal_.size(), 1u);
+  EXPECT_EQ(ipcLocal_[0].buff, kRecv);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, GraphRegisteredRecv_RegistersOnlySendLocally) {
+  TwoP2pPeers();
+  UseGraphCapture();
+  IpcGraphRegisters({kRecv});
+  IpcLocalRegisters({kSend});
+  CollnetGraphRegisters({});
+  CollnetLocalRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ASSERT_EQ(ipcLocal_.size(), 1u);
+  EXPECT_EQ(ipcLocal_[0].buff, kSend);
+  EXPECT_EQ(task_.regBufType, NCCL_IPC_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, CaptureWithoutLocalRegister_RegistersPerGraphOnly) {
+  TwoP2pPeers();
+  UseGraphCapture(/*localRegister=*/0);
+  IpcGraphRegisters({});
+  CollnetGraphRegisters({});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(ipcGraph_.size(), 2u);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, AllGatherOneRpnBothRegistered_MarksNetOnOneChannel) {
+  comm_->isOneRPN = true;
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  std::vector<RegCall> expected{{kSend, kBytes, collNetSend, {}, {}},
+                                {kRecv, kRanks * kBytes, collNetRecv, {}, {}}};
+  EXPECT_EQ(collnetLocal_, expected);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+  EXPECT_EQ(task_.sendMhandle, Ptr(0xc0 + collNetSend));
+  EXPECT_EQ(task_.recvMhandle, Ptr(0xc0 + collNetRecv));
+  EXPECT_EQ(task_.nMaxChannels, 1);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, AllGatherOneRpnRecvMissing_LeavesNetUnmarked) {
+  comm_->isOneRPN = true;
+  CollnetLocalRegisters({collNetSend});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+  EXPECT_EQ(task_.nMaxChannels, 32);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, AllGatherMultiRpnSendRegistered_MarksNetKeepingChannels) {
+  CollnetLocalRegisters({collNetSend});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+  EXPECT_EQ(task_.nMaxChannels, 32);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, AllGatherMultiRpnSendMissing_LeavesNetUnmarked) {
+  CollnetLocalRegisters({collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, ReduceOneRpnBothRegistered_MarksNet) {
+  comm_->isOneRPN = true;
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  for (ncclFunc_t func : {ncclFuncAllReduce, ncclFuncReduceScatter}) {
+    task_.func = func;
+    task_.regBufType = -1;
+    EXPECT_EQ(Run(), ncclSuccess);
+    EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER) << func;
+  }
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, ReduceOneRpnOneSideMissing_LeavesNetUnmarked) {
+  comm_->isOneRPN = true;
+  task_.func = ncclFuncReduceScatter;
+  for (int missing : {collNetSend, collNetRecv}) {
+    CollnetLocalRegisters({missing == collNetSend ? collNetRecv : collNetSend});
+    EXPECT_EQ(Run(), ncclSuccess);
+    EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER) << missing;
+  }
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, ReduceScatterMultiRpn_LeavesNetUnmarked) {
+  task_.func = ncclFuncReduceScatter;
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, AllReduceMultiRpn_SkipsCollnet) {
+  task_.func = ncclFuncAllReduce;
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, OtherCollectiveRegistered_LeavesNetUnmarked) {
+  task_.func = ncclFuncBroadcast;
+  comm_->isOneRPN = true;
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetLocal_.size(), 2u);
+  EXPECT_EQ(task_.regBufType, NCCL_REGULAR_BUFFER);
+  EXPECT_EQ(task_.nMaxChannels, 32);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, ScalingReduction_SkipsCollnet) {
+  for (ncclDevRedOp_t op : {ncclDevPreMulSum, ncclDevSumPostDiv}) {
+    task_.opDev.op = op;
+    EXPECT_EQ(Run(), ncclSuccess);
+    ExpectUnregistered();
+  }
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, MloPartBufferNotRdmaCapable_SkipsCollnet) {
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 0}});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ExpectUnregistered();
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, MloPartWithoutSendBuffer_SkipsCollnet) {
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 1}});
+  task_.sendbuff = nullptr;
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(collnetLocal_.empty());
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, MloPartWithoutRecvBuffer_SkipsCollnet) {
+  comm_->hasMloPart = true;
+  g_loadParam = ParamOverride({{"LOCAL_REGISTER", 1}, {"MLOPART_RDMA_ENABLE", 1}});
+  task_.recvbuff = nullptr;
+  CollnetLocalRegisters({collNetSend, collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_TRUE(collnetLocal_.empty());
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, GraphCapture_RegistersCollnetLocallyOnlyWhatGraphMissed) {
+  UseGraphCapture();
+  comm_->isOneRPN = true;
+  CollnetGraphRegisters({collNetSend});
+  CollnetLocalRegisters({collNetRecv});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ASSERT_EQ(collnetGraph_.size(), 2u);
+  ASSERT_EQ(collnetLocal_.size(), 1u);
+  EXPECT_EQ(collnetLocal_[0].type, collNetRecv);
+  EXPECT_EQ(task_.sendMhandle, Ptr(0xd0 + collNetSend));
+  EXPECT_EQ(task_.recvMhandle, Ptr(0xc0 + collNetRecv));
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, GraphRegisteredCollnetRecv_RegistersOnlySendLocally) {
+  UseGraphCapture();
+  comm_->isOneRPN = true;
+  CollnetGraphRegisters({collNetRecv});
+  CollnetLocalRegisters({collNetSend});
+  EXPECT_EQ(Run(), ncclSuccess);
+  ASSERT_EQ(collnetLocal_.size(), 1u);
+  EXPECT_EQ(collnetLocal_[0].type, collNetSend);
+  EXPECT_EQ(task_.recvMhandle, Ptr(0xd0 + collNetRecv));
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
+TEST_F(RegisterCollNetDirectMicrotest, CaptureWithoutLocalRegister_RegistersCollnetPerGraphOnly) {
+  UseGraphCapture(/*localRegister=*/0);
+  CollnetGraphRegisters({collNetSend});
+  EXPECT_EQ(Run(), ncclSuccess);
+  EXPECT_EQ(collnetGraph_.size(), 2u);
+  EXPECT_EQ(task_.regBufType, NCCL_NET_REG_BUFFER);
+}
+
 }  // namespace
