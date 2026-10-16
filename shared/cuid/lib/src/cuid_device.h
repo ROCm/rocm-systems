@@ -65,13 +65,15 @@ class CuidDevice {
   // machine-id. There is no temporary primary.
   amdcuid_status_t get_temporary_cuid(amdcuid_derived_id& id) const;
 
-  // This library's computation: keyed with `hmac` where it holds a key,
-  // otherwise temporary for a key-gated component.
+  // The driver's cuid_derived, else this library's computation. Where the
+  // kernel answers, it wins. Virtual: a spatial GPU partition answers from the
+  // driver alone.
   virtual amdcuid_status_t get_derived_cuid(amdcuid_derived_id& id,
                                             cuid_hmac* hmac = nullptr) const;
 
-  // Whether this component's identity is temporary: whether the derivation
-  // takes the temporary path. `hmac` decides that for a key-gated component,
+  // Whether this component's identity is temporary: the driver's cuid_derived
+  // when it publishes one, else whether the derivation takes the temporary
+  // path. `hmac` decides that for a key-gated component,
   // as in get_derived_cuid(), so the two agree on the same component.
   amdcuid_status_t is_temporary_cuid(bool* is_temporary, cuid_hmac* hmac = nullptr) const;
 
@@ -79,9 +81,9 @@ class CuidDevice {
   // AMDCUID_SOURCE_UNKNOWN before one and after a failed one.
   amdcuid_source_t derived_source() const { return last_source_; }
 
-  // The driver step of the lookup: read `attribute`
-  // (CuidUtilities::kDriverPrimaryAttribute) for this device's BDF, where it
-  // has one.
+  // The driver step of the lookup: read `attribute` (one of
+  // CuidUtilities::kDriverPrimaryAttribute / kDriverDerivedAttribute) for
+  // this device's BDF, where it has one.
   //
   // On the base class rather than on CuidGpu because the interface is a
   // property of the PCI device, not of amdgpu: a NIC or NPU whose driver grows
@@ -156,6 +158,10 @@ class CuidDevice {
   }
 
  protected:
+  // The driver step: its cuid_derived. UNSUPPORTED when it holds no value
+  // for this component.
+  amdcuid_status_t driver_derived_cuid(amdcuid_derived_id& id) const;
+
   // Record the derivation's source: a later sysfs lookup could observe
   // provisioning changes and attribute the returned value to the wrong stage.
   mutable amdcuid_source_t last_source_ = AMDCUID_SOURCE_UNKNOWN;

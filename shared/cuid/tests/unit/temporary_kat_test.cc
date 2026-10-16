@@ -125,8 +125,26 @@ TEST(cuidtstUnprivileged, TemporaryKatNicCpuAndPlatform) {
 
 // Over many inputs, the framing gives an RFC 9562 v8 with octet 15 bit 7 set,
 // which this library de-frames to payload bit 117, the Auxiliary Value
-// Identifier.
+// Identifier. Drivers never publish temporary values.
 TEST(cuidtstUnprivileged, TemporaryCuidIsAValidTemporaryDerivedPayload) {
+  const ScopedTempDir dir("cuid_temporary_mask_");
+  ASSERT_FALSE(dir.path().empty());
+  struct Published : CuidDevice {
+    std::string dir;
+    amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_OTHER; }
+    amdcuid_status_t get_primary_cuid(amdcuid_primary_id&) const override {
+      return AMDCUID_STATUS_UNSUPPORTED;
+    }
+    amdcuid_status_t get_hardware_fingerprint(uint64_t&) const override {
+      return AMDCUID_STATUS_UNSUPPORTED;
+    }
+    amdcuid_status_t driver_attribute_path(const std::string& a, std::string& p) const override {
+      p = dir + "/" + a;
+      return AMDCUID_STATUS_SUCCESS;
+    }
+  } reader;
+  reader.dir = dir.path();
+
   std::mt19937_64 rng(20261001);
   uint8_t machine_id[16];
   for (int n = 0; n < 20000; ++n) {
@@ -151,6 +169,43 @@ TEST(cuidtstUnprivileged, TemporaryCuidIsAValidTemporaryDerivedPayload) {
     ASSERT_EQ(std::memcmp(raw, id.raw_bits, 16), 0) << n;
     ASSERT_NE(b[15] & 0x80, 0) << n;
     ASSERT_NE(raw[14] & 0x20, 0) << n << ": payload bit 117";
+    if (n % 1000 == 0) {
+      std::ofstream(reader.dir + "/" + CuidUtilities::kDriverDerivedAttribute)
+          << CuidUtilities::get_cuid_as_string(&id.UUIDv8_representation) << "\n";
+      bool temporary = false;
+      ASSERT_EQ(reader.is_temporary_cuid(&temporary), AMDCUID_STATUS_INVALID_FORMAT) << n;
+    }
+  }
+}
+
+// No permanent CUID reads as temporary: the derived vectors, which hold hash
+// bits wherever the derived fold puts them, and a value amdgpu published.
+TEST(cuidtstUnprivileged, PermanentCuidsAreNotTemporary) {
+  const ScopedTempDir dir("cuid_permanent_");
+  ASSERT_FALSE(dir.path().empty());
+  struct Published : CuidDevice {
+    std::string dir;
+    amdcuid_device_type_t type() const override { return AMDCUID_DEVICE_TYPE_OTHER; }
+    amdcuid_status_t get_primary_cuid(amdcuid_primary_id&) const override {
+      return AMDCUID_STATUS_UNSUPPORTED;
+    }
+    amdcuid_status_t get_hardware_fingerprint(uint64_t&) const override {
+      return AMDCUID_STATUS_UNSUPPORTED;
+    }
+    amdcuid_status_t driver_attribute_path(const std::string& a, std::string& p) const override {
+      p = dir + "/" + a;
+      return AMDCUID_STATUS_SUCCESS;
+    }
+  } reader;
+  reader.dir = dir.path();
+  for (const char* value :
+       {"58d972f0-6109-8e13-b801-ceabe45f8444", "bacd5eff-e6fc-8a52-9c03-8eddc1c55c2c",
+        "af5adadb-ba91-8ccc-ac02-a5cc158f3848", "990c3ee8-d8f5-8846-b403-0d63e848381c"}) {
+    std::ofstream(reader.dir + "/" + CuidUtilities::kDriverDerivedAttribute, std::ios::trunc)
+        << value << "\n";
+    bool temporary = true;
+    ASSERT_EQ(reader.is_temporary_cuid(&temporary), AMDCUID_STATUS_SUCCESS) << value;
+    EXPECT_FALSE(temporary) << value;
   }
 }
 

@@ -21,6 +21,7 @@
 namespace {
 
 constexpr char kPrimary[] = "10325476-98ba-8dcf-b808-028dcc084200";
+constexpr char kDerived[] = "58d972f0-6109-8e13-b801-ceabe45f8444";
 
 class FakeSysfs {
  public:
@@ -28,10 +29,11 @@ class FakeSysfs {
 
   const std::string& device_path() const { return root_; }
 
-  void PublishPartition(const char* primary) {
+  void PublishPartition(const char* primary, const char* derived) {
     mkdir((root_ + "/xcp").c_str(), 0755);
     Write(root_ + "/xcp/cuid_unit_id", "2");
     if (primary) Write(root_ + "/xcp/cuid_primary", primary);
+    if (derived) Write(root_ + "/xcp/cuid_derived", derived);
   }
 
  private:
@@ -60,7 +62,7 @@ TEST(cuidtst, PartitionIsSkippedWhenTheDriverPublishesNothing) {
 TEST(cuidtst, PartitionIsNamedByItsOwnNode) {
   FakeSysfs fake;
   ASSERT_FALSE(fake.device_path().empty());
-  fake.PublishPartition(kPrimary);
+  fake.PublishPartition(kPrimary, kDerived);
 
   const std::string attr_dir = CuidGpu::partition_attr_dir_for_device(fake.device_path());
   ASSERT_EQ(attr_dir, fake.device_path() + "/xcp");
@@ -82,7 +84,7 @@ TEST(cuidtst, PartitionIsNamedByItsOwnNode) {
 TEST(cuidtst, PartitionAnswersWithTheKernelsValues) {
   FakeSysfs fake;
   ASSERT_FALSE(fake.device_path().empty());
-  fake.PublishPartition(kPrimary);
+  fake.PublishPartition(kPrimary, kDerived);
 
   amdcuid_gpu_info info = {};
   ASSERT_EQ(CuidGpu::discover_partition(&info, fake.device_path()), AMDCUID_STATUS_SUCCESS);
@@ -94,7 +96,10 @@ TEST(cuidtst, PartitionAnswersWithTheKernelsValues) {
   EXPECT_EQ(path, info.partition_attr_dir + "/cuid_primary");
 
   amdcuid_id_t want_primary = {};
+  amdcuid_id_t want_derived = {};
   ASSERT_EQ(CuidUtilities::uuid_string_to_uint8(kPrimary, want_primary.bytes),
+            AMDCUID_STATUS_SUCCESS);
+  ASSERT_EQ(CuidUtilities::uuid_string_to_uint8(kDerived, want_derived.bytes),
             AMDCUID_STATUS_SUCCESS);
 
   amdcuid_primary_id primary = {};
@@ -109,16 +114,15 @@ TEST(cuidtst, PartitionAnswersWithTheKernelsValues) {
     EXPECT_EQ(partition.get_hardware_fingerprint(fingerprint), AMDCUID_STATUS_PERMISSION_DENIED);
   }
 
-  // Without a node key the derived CUID is the temporary one, built from the
-  // parent's PCI IDs, which this tree does not have.
   amdcuid_derived_id derived = {};
-  EXPECT_EQ(partition.get_derived_cuid(derived, nullptr), AMDCUID_STATUS_UNSUPPORTED);
+  ASSERT_EQ(partition.get_derived_cuid(derived, nullptr), AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(std::memcmp(derived.UUIDv8_representation.bytes, want_derived.bytes, 16), 0);
 }
 
 TEST(cuidtst, UnnamedVfCannotAdoptPartitionAttributes) {
   FakeSysfs fake;
   ASSERT_FALSE(fake.device_path().empty());
-  fake.PublishPartition(kPrimary);
+  fake.PublishPartition(kPrimary, kDerived);
 
   amdcuid_gpu_info info = {};
   info.header.device_type = AMDCUID_DEVICE_TYPE_GPU;
@@ -146,7 +150,7 @@ TEST(cuidtst, PartitionWithoutAPublishedPrimaryDoesNotInventOne) {
   ASSERT_FALSE(fake.device_path().empty());
   // Without cuid_primary a partition has no primary: one built from the
   // parent's routing id would be shared by every partition.
-  fake.PublishPartition(nullptr);
+  fake.PublishPartition(nullptr, kDerived);
 
   amdcuid_gpu_info info = {};
   ASSERT_EQ(CuidGpu::discover_partition(&info, fake.device_path()), AMDCUID_STATUS_SUCCESS);
@@ -284,6 +288,19 @@ TEST(cuidtst, UnpublishedPartitionsGetDistinctTemporaryCuids) {
   EXPECT_NE(Uuid(first), Uuid(second));
   EXPECT_NE(Uuid(first), Uuid(whole));
   EXPECT_NE(Uuid(second), Uuid(whole));
+}
+
+// A published cuid_derived still wins: no temporary value beside it.
+TEST(cuidtst, PublishedPartitionTakesNoTemporaryCuid) {
+  UnpublishedPartitions fake;
+  WriteFile(fake.root() + "/platform/amdgpu_xcp_1/xcp/cuid_derived", kDerived);
+  amdcuid_derived_id derived = {};
+  const CuidGpu gpu = fake.Second();
+  ASSERT_EQ(gpu.get_derived_cuid(derived, nullptr), AMDCUID_STATUS_SUCCESS);
+  EXPECT_EQ(Uuid(derived), kDerived);
+  EXPECT_EQ(gpu.derived_source(), AMDCUID_SOURCE_DRIVER);
+  CuidUtilities::AuxiliaryInput input;
+  EXPECT_EQ(gpu.get_temporary_input(input), AMDCUID_STATUS_UNSUPPORTED);
 }
 
 // A stock amdgpu publishes no cuid_unit_id. KFD's location_id carries the

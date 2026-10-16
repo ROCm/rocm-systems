@@ -24,7 +24,7 @@ Component Type uses these values: `0x0` Platform, `0x1` CPU, `0x2` GPU, `0x3` NI
 if (!amdcuid_device_type_is_valid(type)) { /* reserved, or not a Component Type at all */ }
 ```
 
-`amdcuid_device_type_is_valid()` is true for `0x0`–`0xA` and `0xF`, and false for the reserved `0xB`–`0xE`, for `AMDCUID_DEVICE_TYPE_NONE` (`0xFF`, deliberately outside what a 4-bit field can hold), and for anything else. The library version is 2.2 (`AMDCUID_LIB_VERSION_MAJOR`, `AMDCUID_LIB_VERSION_MINOR`); code that loops over Component Types uses the helper.
+`amdcuid_device_type_is_valid()` is true for `0x0`–`0xA` and `0xF`, and false for the reserved `0xB`–`0xE`, for `AMDCUID_DEVICE_TYPE_NONE` (`0xFF`, deliberately outside what a 4-bit field can hold), and for anything else. The library version is 2.3 (`AMDCUID_LIB_VERSION_MAJOR`, `AMDCUID_LIB_VERSION_MINOR`); code that loops over Component Types uses the helper.
 
 This value is then used to fill out a UUIDv8 style format as follows:
 
@@ -44,7 +44,7 @@ A **temporary CUID** names a component without a node key, a driver or a serial 
 
 When an input cannot be read, for example because the host has no machine-id, the library **returns an error** rather than a placeholder. Callers must handle the error rather than assume an identifier always comes back. Derivation of a permanent CUID requires a 256-bit HMAC key (FIPS 198-1). Anyone holding the key can confirm a guessed serial number, so the key carries the same handling requirements as the serial it protects: random, unique per deployment, and readable only by root.
 
-### Temporary CUIDs
+### The node key
 
 This library holds no node key, so every CUID it returns is a temporary CUID,
 for root and every other caller alike: one per CPU package, NIC function, NPU,
@@ -52,17 +52,39 @@ whole GPU and GPU partition, and one for the platform. Where amdgpu publishes
 `cuid_unit_id` and `cuid_primary`, root reads the GPU's primary from the
 driver, but a temporary CUID reports no primary until there is a node key.
 
+A derived CUID that is not temporary is HMAC'd with one node-wide 256-bit key.
+amdgpu holds it in memory for all its devices: an administrator sets it after
+amdgpu loads, amdgpu never generates or stores one, and it is gone when the
+module is unloaded or the host reboots. Root reads it from `cuid_seed` (0600,
+`CAP_SYS_ADMIN`) on any amdgpu device on every enumeration, device lookup and
+property query, and the library zeroes it before that call returns, so it
+keeps no copy between calls. During a call the key, and the working state of
+each HMAC under it, are in memory that a `fork()` from another thread hands
+the child zero-filled and that core dumps leave out. While amdgpu holds no key
+the read fails with `ENODATA`; there is no other key source.
+
+A GPU or partition takes its derived CUID from the driver's `cuid_derived`,
+which fails with `ENODATA` until a key is set; without it, root with a key
+derives it from the driver's `cuid_primary`. CPU, NIC, NPU and platform CUIDs
+are derived by root with the key. Everything else is a **temporary CUID**,
+built from world-readable inputs: every component without root or without a
+key, so the same CPU has a permanent CUID for root and a temporary one for
+everyone else.
+
 A GPU split into `n >= 2` compute partitions has one component per partition.
 Partition `k` has UnitID `n*(n-1)/2 + 1 + k` (DPX 2–3, QPX 7–10, CPX on 8 XCCs
 29–36); the whole GPU keeps UnitID 0, and a GPU in SPX has no separate
-partition. The UnitID comes from the partition's `cuid_unit_id` where amdgpu
-publishes one, and otherwise from the world-readable KFD topology, so a stock
-kernel gives the same values. A partition whose UnitID cannot be determined
+partition. A temporary partition CUID takes its UnitID from the partition's
+`cuid_unit_id` where amdgpu publishes one, and otherwise from the
+world-readable KFD topology. A partition whose UnitID cannot be determined
 has no CUID.
 
-Temporary CUIDs depend on the host's machine-id, so they are node-local.
-See [Temporary CUIDs](docs/conceptual/what_is_cuid.rst) for the construction
-and its effect on containers.
+Temporary CUIDs depend on the host's machine-id, not the node key, so they are
+node-local and do not change when the node key does. See
+[Temporary CUIDs](docs/conceptual/what_is_cuid.rst) for the construction and
+its effect on containers.
+
+The node key is not persisted; set it again after a reboot or after amdgpu reloads.
 
 ### Using the library
 
@@ -79,7 +101,26 @@ A program that links it carries no runtime dependency on CUID. It discovers
 hardware, reads what the driver publishes, constructs each component's CUID,
 and answers queries by handle; [`example/main.cc`](example/main.cc) walks
 through the API. amd-smi links the same library and is the administrator's
-interface to CUID: `amd-smi node --cuid` lists every component's CUID.
+interface to CUID: `amd-smi node --cuid` lists every component's CUID, and
+`amd-smi set --cuid-seed` sets the node key.
+
+#### Re-keying
+
+Changing the node key changes every derived CUID for a key-gated component.
+An administrator runs `amd-smi set --cuid-seed <file|->`; a program calls
+`amdcuid_set_hash_key()`. Both, as root:
+
+1. Reject a key that repeats one byte, that equals `AMD-CUID-DEFAULT-SEED-v1`
+   or `AMD-CUID-TEMP-KEY-v1` zero-padded to 32 octets, or that equals one of
+   the conformance vectors' test keys (`00..1f` or `0xa5 ^ n`). amd-smi also
+   rejects a key file that is not exactly 32 octets; a C caller must pass 32
+   readable octets, which the library cannot check.
+2. Write the key to one amdgpu device's `cuid_seed`, which re-keys every GPU
+   and partition. Without amdgpu the call returns
+   `AMDCUID_STATUS_UNSUPPORTED` and nothing changes.
+
+The key must be set again after every boot or amdgpu reload. Where it is kept
+in between is the administrator's choice; keep it readable only by root.
 
 ### Build and Install Instructions
 
@@ -149,7 +190,7 @@ sphinx-build docs docs/_build/html
 #### Notes
 
 - No third-party crypto dependency: SHA-256 and HMAC-SHA-256 are built from source out of the shared `shared/sha256` component, whose objects are absorbed into `libamdcuid_static.a`, so the archive defines the digest symbols rather than importing them, and the library links no TLS stack
-- Root/administrator privileges are required for full functionality (ACPI tables, SMBIOS UUID and PCI config space access); temporary CUIDs need none
+- Root/administrator privileges are required for full functionality (ACPI tables, SMBIOS UUID, PCI config space access, and reading the node key); temporary CUIDs need none
 
 ## License
 

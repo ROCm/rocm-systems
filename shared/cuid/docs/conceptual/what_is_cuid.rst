@@ -166,7 +166,7 @@ Derived CUID
 
 For typical day-to-day operations, the derived CUID is used. It is derived by hashing the primary CUID using HMAC-SHA2-256 (keyed hash) using a 256-bit key. The derived CUID obscures hardware details from lower-privilege software and prevents precomputed table attacks.
 
-The key is the node key, a 256-bit HMAC key as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). Anyone holding the key can confirm a guessed serial number, so it must be random, unique per deployment, and readable only by root. This version of the library holds no node key, so every CUID it returns is a temporary CUID; see :ref:`temporary-cuid`.
+The key is the node key, a 256-bit HMAC key as described in FIPS 198-1, The Keyed-Hash Message Authentication Code (HMAC). An administrator sets it in amdgpu, which holds it in memory until the module is unloaded or the host reboots; see :ref:`manage-node-key`. Anyone holding the key can confirm a guessed serial number, so it must be random, unique per deployment, and readable only by root.
 
 If the node key changes, every derived CUID computed with it changes. Primary CUIDs do not change, so they still trace each derived CUID back to its device.
 
@@ -262,7 +262,7 @@ A temporary CUID is node-local: it names a component only on the installation wh
 Machine identity and containers
 -------------------------------
 
-The library reads the machine-id from ``/etc/machine-id``, and from ``/var/lib/dbus/machine-id`` only when ``/etc/machine-id`` does not exist. An ``/etc/machine-id`` that is empty, ``uninitialized`` or all zero counts as no machine-id. Every temporary CUID needs the machine-id. Without one ``S`` reduces to properties of the hardware model and its slot, so two identically configured hosts would report the same temporary CUID for different physical parts; the library therefore reports an **error** rather than a placeholder for every component. Every container started from an image that bakes in a machine-id reports the same temporary CUIDs for the same device in the same slot, on every host. Give the container the host's ``/etc/machine-id``, for example with a read-only bind mount.
+The library reads the machine-id from ``/etc/machine-id``, and from ``/var/lib/dbus/machine-id`` only when ``/etc/machine-id`` does not exist. An ``/etc/machine-id`` that is empty, ``uninitialized`` or all zero counts as no machine-id. Every temporary CUID needs the machine-id. Without one ``S`` reduces to properties of the hardware model and its slot, so two identically configured hosts would report the same temporary CUID for different physical parts; the library therefore reports an **error** rather than a placeholder for each component that would get a temporary CUID. Every container started from an image that bakes in a machine-id reports the same temporary CUIDs for the same device in the same slot, on every host. With a node key set, a GPU's or partition's CUID is the driver's ``cuid_derived``, which a container sees through sysfs; every other component still needs the machine-id. Give the container the host's ``/etc/machine-id``, for example with a read-only bind mount.
 
 .. _cuid-gpu-partitions:
 
@@ -271,7 +271,7 @@ GPU partitions
 
 A GPU split into ``n >= 2`` compute partitions has one component per partition beside the whole GPU. Partition ``k`` (``0 <= k < n``, the partition's xcp id) has UnitID ``n*(n-1)/2 + 1 + k``: DPX 2 and 3, TPX 4 to 6, QPX 7 to 10, CPX on 6 XCCs 16 to 21, CPX on 8 XCCs 29 to 36. The whole GPU has UnitID 0, and a GPU in SPX is the whole GPU alone, with no separate partition. A partition uses its parent's PCIe address and IDs.
 
-The library reads a partition's UnitID from its ``cuid_unit_id`` where amdgpu publishes one. Otherwise it reads the KFD topology under ``/sys/class/kfd/kfd/topology/nodes``, which any user can read: the node whose ``drm_render_minor`` is the partition's render node gives the parent as ``domain`` and ``location_id & ~7``, and ``k = location_id & 7``; ``n`` is the number of GPU nodes with that parent, and their indices must be exactly ``0`` to ``n-1``. A partition whose UnitID cannot be determined, for example because KFD is not loaded, has no CUID.
+For a temporary CUID the library reads a partition's UnitID from its ``cuid_unit_id`` where amdgpu publishes one. Otherwise it reads the KFD topology under ``/sys/class/kfd/kfd/topology/nodes``, which any user can read: the node whose ``drm_render_minor`` is the partition's render node gives the parent as ``domain`` and ``location_id & ~7``, and ``k = location_id & 7``; ``n`` is the number of GPU nodes with that parent, and their indices must be exactly ``0`` to ``n-1``. A partition whose UnitID cannot be determined, for example because KFD is not loaded, has no CUID.
 
 NIC functions
 =============
