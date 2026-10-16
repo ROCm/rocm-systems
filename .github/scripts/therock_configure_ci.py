@@ -395,11 +395,13 @@ def retrieve_projects(args):
             logging.info("Modified paths do not require Windows CI, skipping")
             return [], test_type
     # Determine logical projects impacted
-    projects = {
-        subtree_to_project_map[subtree]
-        for subtree in subtrees
-        if subtree in subtree_to_project_map
-    }
+    projects = set()
+    for subtree in subtrees:
+        mapped = subtree_to_project_map.get(subtree)
+        if isinstance(mapped, list):
+            projects.update(mapped)
+        elif mapped:
+            projects.add(mapped)
 
     if not projects:
         return [], test_type

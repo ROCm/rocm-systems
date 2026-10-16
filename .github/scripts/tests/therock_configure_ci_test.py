@@ -509,6 +509,41 @@ class ConfigureCITest(unittest.TestCase):
         self.assertNotIn("DTHEROCK_ENABLE_ALL=ON", cmake_options)
 
     @patch("therock_configure_ci.get_modified_paths")
+    def test_fortran_pr_builds_runtimes_and_profiler(self, mock_get_modified):
+        """PR with projects/fortran changes should run both the runtimes and profiler tests."""
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "linux",
+        }
+
+        mock_get_modified.return_value = [
+            "projects/fortran/hip.F90",
+            "projects/fortran/roctx.F90",
+        ]
+
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 1)
+        tests = project_to_run[0]["projects_to_test"]
+        self.assertIn("hip-tests", tests)
+        self.assertIn("aqlprofile", tests)
+        self.assertIn("DTHEROCK_ENABLE_ALL=ON", project_to_run[0]["cmake_options"])
+
+    @patch("therock_configure_ci.get_modified_paths")
+    def test_fortran_pr_skips_windows_ci(self, mock_get_modified):
+        """PR with only projects/fortran changes should not trigger Windows CI (Linux-only)."""
+        args = {
+            "is_pull_request": True,
+            "base_ref": "HEAD^",
+            "platform": "windows",
+        }
+
+        mock_get_modified.return_value = ["projects/fortran/hip.F90"]
+
+        project_to_run, _ = therock_configure_ci.retrieve_projects(args)
+        self.assertEqual(len(project_to_run), 0)
+
+    @patch("therock_configure_ci.get_modified_paths")
     def test_hipfile_pr_skips_windows_ci(self, mock_get_modified):
         """PR with only hipfile changes should not trigger Windows CI (Linux-only component)."""
         args = {
@@ -632,12 +667,13 @@ class ConfigureCITest(unittest.TestCase):
 
     def test_every_subtree_maps_to_a_known_project(self):
         """configure_ci silently drops a subtree mapped to an unknown project."""
-        for subtree, project in therock_matrix.subtree_to_project_map.items():
-            self.assertIn(
-                project,
-                therock_matrix.project_map,
-                f"{subtree} maps to {project!r}, which is not a key of project_map",
-            )
+        for subtree, mapped in therock_matrix.subtree_to_project_map.items():
+            for project in mapped if isinstance(mapped, list) else [mapped]:
+                self.assertIn(
+                    project,
+                    therock_matrix.project_map,
+                    f"{subtree} maps to {project!r}, which is not a key of project_map",
+                )
 
 
 if __name__ == "__main__":
