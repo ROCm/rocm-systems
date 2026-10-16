@@ -37,6 +37,7 @@
 #include <future>
 #include <memory>
 #include <thread>
+#include <vector>
 
 namespace rocprofiler
 {
@@ -590,6 +591,163 @@ TEST_F(QueueInterpositionConsumerTransition, rapid_start_stop_does_not_hang)
         ASSERT_LT(std::chrono::steady_clock::now(), deadline)
             << "hung in consumer 0→1 / 1→0 after " << i << " cycles";
     }
+}
+
+// Fake hardware write index. Installed as the next-table write-index ops so a
+// bypassing wrapper advances "HW" without a real HSA queue.
+uint64_t g_stub_hw_wdid = 0;
+
+uint64_t
+stub_add_write_index(const hsa_queue_t*, uint64_t value)
+{
+    return __atomic_fetch_add(&g_stub_hw_wdid, value, __ATOMIC_ACQ_REL);
+}
+
+void
+stub_store_write_index(const hsa_queue_t*, uint64_t value)
+{
+    __atomic_store_n(&g_stub_hw_wdid, value, __ATOMIC_RELEASE);
+}
+
+uint64_t
+stub_cas_write_index(const hsa_queue_t*, uint64_t expected, uint64_t value)
+{
+    auto cur = expected;
+    __atomic_compare_exchange_n(
+        &g_stub_hw_wdid, &cur, value, false, __ATOMIC_ACQ_REL, __ATOMIC_ACQUIRE);
+    return cur;
+}
+
+uint64_t
+stub_load_write_index(const hsa_queue_t*)
+{
+    return __atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE);
+}
+
+class QueueInterpositionConsumerTransitionConcurrent : public ::testing::Test
+{
+protected:
+    void SetUp() override
+    {
+        if(hsa_init() != HSA_STATUS_SUCCESS)
+        {
+            GTEST_SKIP() << "hsa_init failed; consumer-transition tests need HSA";
+        }
+        fill_hsa_fn_tables();
+        g_stub_hw_wdid = 0;
+        core_table_    = make_core_table();
+        // Wire stubs in before init: interposition_init copies this table as the
+        // next-in-chain that bypass wrappers call.
+        core_table_.hsa_queue_add_write_index_relaxed_fn     = stub_add_write_index;
+        core_table_.hsa_queue_add_write_index_scacq_screl_fn = stub_add_write_index;
+        core_table_.hsa_queue_add_write_index_scacquire_fn   = stub_add_write_index;
+        core_table_.hsa_queue_add_write_index_screlease_fn   = stub_add_write_index;
+        core_table_.hsa_queue_store_write_index_relaxed_fn   = stub_store_write_index;
+        core_table_.hsa_queue_store_write_index_screlease_fn = stub_store_write_index;
+        core_table_.hsa_queue_cas_write_index_relaxed_fn     = stub_cas_write_index;
+        core_table_.hsa_queue_cas_write_index_scacq_screl_fn = stub_cas_write_index;
+        core_table_.hsa_queue_cas_write_index_scacquire_fn   = stub_cas_write_index;
+        core_table_.hsa_queue_cas_write_index_screlease_fn   = stub_cas_write_index;
+        core_table_.hsa_queue_load_write_index_relaxed_fn    = stub_load_write_index;
+        core_table_.hsa_queue_load_write_index_scacquire_fn  = stub_load_write_index;
+        interposition_init(&core_table_, true);
+        ASSERT_TRUE(supports_queue_interposition());
+    }
+
+    void TearDown() override
+    {
+        if(!supports_queue_interposition()) return;
+        stop_completion_monitor();
+        interposition_fini();
+    }
+
+    CoreApiTable core_table_{};
+};
+
+// 0→1 with live bypass traffic: several threads call the installed write-index
+// wrappers (so inflight counting and should_bypass run) while consumer start
+// resyncs shadow. Start must complete within a deadline, and afterward shadow
+// must not sit behind the hardware write index (that inversion is the hang).
+TEST_F(QueueInterpositionConsumerTransitionConcurrent,
+       start_with_concurrent_bypass_producers_keeps_shadow_ahead_of_hw)
+{
+    auto               dummy_queue = hsa_queue_t{};
+    const hsa_queue_t* queue_ptr   = &dummy_queue;
+
+    auto state       = std::make_shared<QueueState>();
+    state->real_wdid = &g_stub_hw_wdid;
+    state->virtual_wptr.store(0);
+    state->next_scan_pos   = 0;
+    state->next_submit_pos = 0;
+    state->hsa_queue       = queue_ptr;
+
+    get_queue_registry().wlock([&](auto& registry) { registry[queue_ptr] = state; });
+
+    std::atomic<bool> run{true};
+    std::atomic<bool> pause{false};
+    std::atomic<int>  paused{0};
+    auto              producer = [&]() {
+        while(run.load(std::memory_order_relaxed))
+        {
+            if(pause.load(std::memory_order_acquire))
+            {
+                paused.fetch_add(1, std::memory_order_acq_rel);
+                while(pause.load(std::memory_order_acquire) && run.load(std::memory_order_relaxed))
+                    std::this_thread::sleep_for(std::chrono::microseconds{50});
+                paused.fetch_sub(1, std::memory_order_acq_rel);
+                continue;
+            }
+            // Wrapper entry point (not the stub): exercises bypass inflight + gate.
+            core_table_.hsa_queue_add_write_index_relaxed_fn(queue_ptr, 1);
+        }
+    };
+
+    constexpr int            k_producers = 4;
+    std::vector<std::thread> threads;
+    threads.reserve(k_producers);
+    for(int i = 0; i < k_producers; ++i)
+        threads.emplace_back(producer);
+
+    const auto warm_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while(__atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE) < 256u &&
+          std::chrono::steady_clock::now() < warm_deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    ASSERT_GE(__atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE), 256u)
+        << "producers failed to advance stub HW write index under bypass";
+
+    auto ctx = rocprofiler::context::context{};
+    make_dispatch_tracing_context(ctx);
+
+    auto start_fut = std::async(
+        std::launch::async, [&]() { notify_queue_interposition_consumer_context_started(&ctx); });
+    ASSERT_EQ(start_fut.wait_for(std::chrono::seconds{10}), std::future_status::ready)
+        << "0→1 hung with concurrent bypass producers";
+    start_fut.get();
+
+    // Stop further advances so the shadow-vs-HW check is stable.
+    pause.store(true, std::memory_order_release);
+    const auto pause_deadline = std::chrono::steady_clock::now() + std::chrono::seconds{2};
+    while(paused.load(std::memory_order_acquire) < k_producers &&
+          std::chrono::steady_clock::now() < pause_deadline)
+        std::this_thread::sleep_for(std::chrono::milliseconds{1});
+    ASSERT_EQ(paused.load(std::memory_order_acquire), k_producers);
+
+    const uint64_t hw   = __atomic_load_n(&g_stub_hw_wdid, __ATOMIC_ACQUIRE);
+    const uint64_t vwp  = state->virtual_wptr.load();
+    const uint64_t scan = state->next_scan_pos;
+    // next_scan_pos is only advanced by resync/doorbell publish — not by post-cutover
+    // intercept write-index adds — so it exposes HW races that virtual_wptr can mask.
+    EXPECT_GE(scan, hw) << "scan/shadow behind HW after 0→1 with concurrent bypass producers"
+                        << " (scan=" << scan << " hw=" << hw << " vwp=" << vwp << ")";
+    EXPECT_GE(vwp, hw) << "virtual_wptr behind HW after 0→1 with concurrent bypass producers";
+
+    run.store(false, std::memory_order_relaxed);
+    pause.store(false, std::memory_order_release);
+    for(auto& t : threads)
+        t.join();
+
+    notify_queue_interposition_consumer_context_stopped(&ctx);
+    get_queue_registry().wlock([&](auto& registry) { registry.erase(queue_ptr); });
 }
 }  // namespace
 }  // namespace queue_interposition

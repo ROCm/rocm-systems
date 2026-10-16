@@ -98,13 +98,15 @@ auto s_active_queue_interposition_consumers = std::atomic<uint32_t>{0};
 auto s_intercept_installed = std::atomic<bool>{false};  // installed (may not be active)
 auto s_intercept_active    = std::atomic<bool>{false};  // actively intercepting
 auto s_intercept_dynamic   = std::atomic<bool>{false};  // dynamically add queue states
-// Forces bypass during 0→1 / 1→0 consumer transitions so doorbells cannot race
-// shadow resync while hardware write indices may still advance.
+// Forces bypass for the duration of a 0→1 / 1→0 consumer cutover. While set,
+// producers keep updating real hardware indices so the app is not stalled;
+// shadow state is brought up to date before intercept is trusted again.
 auto s_consumer_transition_in_progress = std::atomic<bool>{false};
-// Threads that observed should_bypass_inline_intercept()==true and are still
-// inside the next-table write-index / doorbell call. Transition code waits for
-// this to hit zero so a TOCTOU bypass cannot leave hw_wdid ahead of
-// virtual_wptr after unlock (seen as GPU-busy hangs with stalled tracers).
+// How many mutating wrappers are inside the bypass-counted region: after
+// inflight++ and before inflight--, including the should_bypass check and any
+// next-table write-index / doorbell call that follows a true result. Transition
+// code waits for zero so a resync cannot finish while a producer still has a
+// pending hardware advance that would leave real_wdid ahead of virtual_wptr.
 auto s_bypass_inflight = std::atomic<uint32_t>{0};
 
 bool
@@ -394,8 +396,9 @@ resolve_ring_properties(const void* ring_buf)
     return ring_props;
 }
 
-// Wait until no bypass write-index/doorbell call is in flight. New bypass
-// calls may still start after this returns.
+// Spin until s_bypass_inflight is zero. That means every wrapper that already
+// entered the counted region has finished its next-table call (or decided not
+// to take bypass). It does not stop new wrappers from entering afterward.
 void
 wait_for_bypass_idle()
 {
@@ -1976,17 +1979,23 @@ namespace
 namespace impl
 {
 // The 16 wrappers differ only by HSA suffix + memory order; generated via macros below.
+//
+// Mutating bypass wrappers hold s_bypass_inflight across should_bypass and the
+// next-table call. Counting starts before the check so a thread that will take
+// bypass is visible to wait_for_bypass_idle for the whole critical window — not
+// only after it has already committed to the next-table path. Loads are not
+// counted: they do not advance hardware write indices.
 
 // add_write_index: uint64_t(const hsa_queue_t*, uint64_t)
 #define ROCP_QUEUE_ADD_WRITE_INDEX(SUFFIX, ORDER)                                                  \
     uint64_t queue_add_write_index_##SUFFIX(const hsa_queue_t* q, uint64_t v)                      \
     {                                                                                              \
-        if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
             auto _bypass_guard = common::scope_destructor{                                         \
                 []() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); },               \
                 []() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }};              \
-            return get_next_table()->hsa_queue_add_write_index_##SUFFIX##_fn(q, v);                \
+            if(should_bypass_inline_intercept())                                                   \
+                return get_next_table()->hsa_queue_add_write_index_##SUFFIX##_fn(q, v);            \
         }                                                                                          \
         if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s) \
             return add_write_index_impl(s.get(), v, ORDER);                                        \
@@ -2004,13 +2013,15 @@ ROCP_QUEUE_ADD_WRITE_INDEX(screlease, std::memory_order_release)
 #define ROCP_QUEUE_STORE_WRITE_INDEX(SUFFIX, ORDER)                                                \
     void queue_store_write_index_##SUFFIX(const hsa_queue_t* q, uint64_t v)                        \
     {                                                                                              \
-        if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
             auto _bypass_guard = common::scope_destructor{                                         \
                 []() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); },               \
                 []() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }};              \
-            get_next_table()->hsa_queue_store_write_index_##SUFFIX##_fn(q, v);                     \
-            return;                                                                                \
+            if(should_bypass_inline_intercept())                                                   \
+            {                                                                                      \
+                get_next_table()->hsa_queue_store_write_index_##SUFFIX##_fn(q, v);                 \
+                return;                                                                            \
+            }                                                                                      \
         }                                                                                          \
         if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s) \
         {                                                                                          \
@@ -2030,12 +2041,13 @@ ROCP_QUEUE_STORE_WRITE_INDEX(screlease, std::memory_order_release)
     uint64_t queue_cas_write_index_##SUFFIX(                                                       \
         const hsa_queue_t* q, uint64_t expected, uint64_t value)                                   \
     {                                                                                              \
-        if(should_bypass_inline_intercept())                                                       \
         {                                                                                          \
             auto _bypass_guard = common::scope_destructor{                                         \
                 []() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); },               \
                 []() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }};              \
-            return get_next_table()->hsa_queue_cas_write_index_##SUFFIX##_fn(q, expected, value);  \
+            if(should_bypass_inline_intercept())                                                   \
+                return get_next_table()->hsa_queue_cas_write_index_##SUFFIX##_fn(                  \
+                    q, expected, value);                                                           \
         }                                                                                          \
         if(auto s = lookup_queue_state(q, s_intercept_dynamic.load(std::memory_order_acquire)); s) \
             return cas_write_index_impl(s.get(), expected, value, ORDER);                          \
@@ -2069,17 +2081,18 @@ ROCP_QUEUE_LOAD_WRITE_INDEX(scacquire, std::memory_order_acquire)
 #define ROCP_SIGNAL_STORE(NAME)                                                                    \
     void signal_##NAME(hsa_signal_t sig, hsa_signal_value_t val)                                   \
     {                                                                                              \
-        /* This gate decides whether to take the interposition path, nothing more. A caller */     \
-        /* admitted here can still be inside process_doorbell_impl when the monitor stops, */      \
-        /* and needs no counting: register_pending_completion re-tests the state under the */      \
-        /* inbox lock and disposes of its own batch if it lost the race. */                        \
-        if(should_bypass_inline_intercept())                                                       \
+        /* Same inflight discipline as write-index mutators. If we leave bypass and */             \
+        /* enter process_doorbell_impl, register_pending_completion may still race a */            \
+        /* stopping monitor; it re-checks under the inbox lock and retires locally. */             \
         {                                                                                          \
             auto _bypass_guard = common::scope_destructor{                                         \
                 []() { s_bypass_inflight.fetch_sub(1, std::memory_order_release); },               \
                 []() { s_bypass_inflight.fetch_add(1, std::memory_order_relaxed); }};              \
-            get_next_table()->hsa_signal_##NAME##_fn(sig, val);                                    \
-            return;                                                                                \
+            if(should_bypass_inline_intercept())                                                   \
+            {                                                                                      \
+                get_next_table()->hsa_signal_##NAME##_fn(sig, val);                                \
+                return;                                                                            \
+            }                                                                                      \
         }                                                                                          \
         /* it is too late to create queue state at this point so do not create if missing. */      \
         constexpr auto create_if_missing = false;                                                  \
@@ -2117,11 +2130,10 @@ std::mutex s_consumer_transition_mutex;
 void
 drain_intercept_work(bool sync_async_handlers)
 {
-    // Match signal-less teardown order: wait for in-flight doorbell workers
-    // first, then drain the completion monitor they may have queued work into.
+    // Quiet both producer paths before a following resync: gate_lock holders
+    // (intercept doorbell workers), then bypass-counted wrappers (which never
+    // take gate_lock). Optional completion-monitor drain matches teardown order.
     fence_all_queue_gates();
-    // Bypass write-index / doorbell paths do not take gate_lock; wait for any
-    // that already sampled should_bypass==true to finish before resync.
     wait_for_bypass_idle();
 
     if(sync_async_handlers) interposition_sync();
@@ -2149,6 +2161,18 @@ resync_all_queue_shadow_states()
             resync_queue_shadow_state(entry.second.get());
     });
 }
+
+// Quiesce bypass-counted wrappers, then copy each queue's real write index into
+// shadow (virtual_wptr / scan / submit). A new wrapper may still arrive after
+// the wait and advance hardware during or after the copy, so a single absorb is
+// not a closed world — the 0→1 sequence pairs one absorb under force-bypass with
+// one after the force flag clears.
+void
+absorb_bypass_into_shadow()
+{
+    wait_for_bypass_idle();
+    resync_all_queue_shadow_states();
+}
 }  // namespace
 
 void
@@ -2158,42 +2182,33 @@ notify_queue_interposition_consumer_context_started(const context::context* ctx)
 
     const auto prev = s_active_queue_interposition_consumers.load(std::memory_order_acquire);
 
-    // First consumer only. Resync shadow from hardware before trusting intercept.
-    // Increment-before-resync turns intercept on with a stale shadow; a plain
-    // resync-then-increment without holding bypass open races live doorbells.
+    // First consumer: bring shadow up to hardware before intercept is trusted.
+    // Turning intercept on with a stale shadow, or resyncing without holding
+    // bypass open, races live doorbells that still advance real_wdid.
     if(prev == 0 && s_intercept_installed.load(std::memory_order_acquire))
     {
         auto lk = std::lock_guard<std::mutex>{s_consumer_transition_mutex};
         if(s_active_queue_interposition_consumers.load(std::memory_order_acquire) == 0)
         {
-            // Keep bypass forced while shadow catches up so producers are not
-            // stalled. wait_for_bypass_idle() only means "no bypass call in
-            // flight right now"; a doorbell can still finish between that wait
-            // and the following resync, so one wait+resync can miss an update.
-            // The repeated wait+resync pairs reduce that gap (chosen from hang
-            // repro; not a formal bound). fence_all_queue_gates() waits out
-            // intercept workers that hold gate_lock; bypass does not take that
-            // lock, so another wait+resync follows the fence. After clearing
-            // the force-bypass flag, one more wait+resync covers threads that
-            // already entered bypass and are still in the next-table call.
+            // Cutover design:
+            // 1) Force bypass so producers keep making progress (no app stall).
+            // 2) Drain intercept workers and any in-flight bypass wrappers, then
+            //    baseline-resync and publish the consumer count.
+            // 3) Absorb once under force-bypass so shadow tracks HW before we
+            //    drop the force flag.
+            // 4) Clear force-bypass, then absorb once more so any wrapper that
+            //    entered under transition=true finishes and is reflected in
+            //    shadow before intercept runs with consumers > 0.
             //
-            // Tradeoff: a few dispatches during this window may not be traced.
-            // Prefer a stable application and later sessions over capturing
-            // every record on the cutover.
+            // Dispatches in this window may not be traced; the goal is a stable
+            // queue and later sessions rather than capturing every cutover packet.
             s_consumer_transition_in_progress.store(true, std::memory_order_release);
             drain_intercept_work(true);
             resync_all_queue_shadow_states();
             s_active_queue_interposition_consumers.fetch_add(1, std::memory_order_acq_rel);
-            wait_for_bypass_idle();
-            resync_all_queue_shadow_states();
-            wait_for_bypass_idle();
-            resync_all_queue_shadow_states();
-            fence_all_queue_gates();
-            wait_for_bypass_idle();
-            resync_all_queue_shadow_states();
+            absorb_bypass_into_shadow();
             s_consumer_transition_in_progress.store(false, std::memory_order_release);
-            wait_for_bypass_idle();
-            resync_all_queue_shadow_states();
+            absorb_bypass_into_shadow();
             return;
         }
     }
@@ -2223,10 +2238,10 @@ notify_queue_interposition_consumer_context_stopped(const context::context* ctx)
                 if(s_active_queue_interposition_consumers.compare_exchange_weak(
                        cur, cur - 1, std::memory_order_acq_rel, std::memory_order_acquire))
                 {
-                    // Drop the transition flag before the unbounded completion-monitor
-                    // drain. Consumers is already 0 so new doorbells stay in bypass;
-                    // holding transition across the drain previously coincided with
-                    // self-deadlock when Stop raced the record emitter.
+                    // Consumers is already 0, so new doorbells bypass without the
+                    // transition flag. Clear it before the completion-monitor drain:
+                    // that drain can run on the record-emitter path, and holding
+                    // force-bypass across it can deadlock Stop against the emitter.
                     s_consumer_transition_in_progress.store(false, std::memory_order_release);
                     interposition_sync();
                     return;
