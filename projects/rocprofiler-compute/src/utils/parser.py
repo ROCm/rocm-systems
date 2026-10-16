@@ -502,8 +502,8 @@ def _format_pc_sampling_display_frame(
     # wave_occupancy_percent is stochastic-only: a host_trap record has no
     # wave count to derive it from.
     stochastic_only_columns = [
-        "count_issued",
-        "count_stalled",
+        "issue_count",
+        "stall_count",
         "wave_occupancy_percent",
         "stall_reason",
     ]

@@ -13,6 +13,7 @@ import pandas as pd
 import pytest
 
 from tests.integration import common as integration_common
+from utils.analysis_orm import PCSampleState
 
 PC_SAMPLING_WORKLOAD = "tests/workloads/vcopy_pc_sampling_only/MI350"
 
@@ -70,6 +71,17 @@ def test_pc_sampling_analyze_kernel_filter(
     assert "0.1 Top Kernels" in captured.out
     assert "0.2 Dispatch List" in captured.out
     assert "21. PC Sampling" in captured.out
+    pc_sampling_output = captured.out.split("21. PC Sampling", maxsplit=1)[1]
+    pc_sampling_header = next(
+        line
+        for line in pc_sampling_output.splitlines()
+        if "issue_count" in line and "stall_count" in line
+    )
+    for field_name in ("issue_count", "stall_count"):
+        assert field_name in PCSampleState.__table__.columns.keys()
+        assert field_name in pc_sampling_header
+    assert "count_issued" not in pc_sampling_header
+    assert "count_stalled" not in pc_sampling_header
 
     common.clean_output_dir(True, workload_dir)
 

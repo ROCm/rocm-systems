@@ -160,8 +160,8 @@ def aggregate_pc_sample_records(
             columns=[
                 *group_by,
                 "count",
-                "count_issued",
-                "count_stalled",
+                "issue_count",
+                "stall_count",
                 "stall_reason",
                 "inst_type",
                 "active_thread_percent",
@@ -175,8 +175,8 @@ def aggregate_pc_sample_records(
     )
     aggregations = {
         "count": ("inst_index", "size"),
-        "count_issued": ("wave_issued", _aggregate_count_issued),
-        "count_stalled": ("wave_issued", _aggregate_count_stalled),
+        "issue_count": ("wave_issued", _aggregate_count_issued),
+        "stall_count": ("wave_issued", _aggregate_count_stalled),
         "stall_reason": ("stall_reason", _aggregate_stall_reason),
         "inst_type": ("inst_type", _aggregate_inst_type),
         # mean skips missing values, so a sample without the field does not
@@ -318,8 +318,8 @@ def _to_instruction_line_record(row: Any) -> InstructionLineRecord:  # noqa: ANN
         instruction=row.instruction,
         source=row.source_line,
         total_count=int(row.count),
-        issue_count=None if pd.isna(row.count_issued) else int(row.count_issued),
-        stall_count=None if pd.isna(row.count_stalled) else int(row.count_stalled),
+        issue_count=None if pd.isna(row.issue_count) else int(row.issue_count),
+        stall_count=None if pd.isna(row.stall_count) else int(row.stall_count),
         stall_reasons={} if pd.isna(row.stall_reason) else row.stall_reason,
         inst_types={} if pd.isna(row.inst_type) else row.inst_type,
         active_thread_percent=(
