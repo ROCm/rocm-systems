@@ -1198,16 +1198,45 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
   auto access = vm.snapshot(handle);
   ASSERT_TRUE(access);
   VmMtypeCache cache;
+  cache.clear();
+  cache.clear(); // Clearing an already-empty table is idempotent.
   for (uint32_t repeat = 0; repeat < 3; ++repeat)
     for (uint64_t page = 0; page < 8; ++page)
       EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::RW);
   EXPECT_EQ(policy->queries, 8u);
 
+  {
+    VmMtypeCache copied(cache);
+    VmMtypeCache assigned;
+    assigned = copied;
+    VmMtypeCache moved(std::move(assigned));
+    EXPECT_FALSE(access->cached_private_uc_hint(0, assigned));
+    EXPECT_EQ(access->query_mtype(0, moved), Mtype::RW);
+    EXPECT_EQ(policy->queries, 8u);
+    // Clearing/refilling the copy cannot overwrite another cache's entries.
+    policy->mtype = Mtype::CC;
+    moved.clear();
+    EXPECT_EQ(access->query_mtype(0, moved), Mtype::CC);
+    EXPECT_EQ(access->query_mtype(0, cache), Mtype::RW);
+    EXPECT_EQ(access->query_mtype(0, copied), Mtype::RW);
+    EXPECT_EQ(policy->queries, 9u);
+  }
+
   policy->epoch->fetch_add(1);
   policy->mtype = Mtype::UC;
   for (uint64_t page = 0; page < 8; ++page)
     EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::UC);
-  EXPECT_EQ(policy->queries, 16u);
+  EXPECT_EQ(policy->queries, 17u);
+
+  // Explicit clearing must release every retained token and force fresh policy
+  // queries even when the binding and mutation epoch themselves do not change.
+  cache.clear();
+  cache.clear(); // Clearing an already-empty table is idempotent.
+  EXPECT_EQ(policy->epoch.use_count(), 1);
+  policy->mtype = Mtype::CC;
+  for (uint64_t page = 0; page < 8; ++page)
+    EXPECT_EQ(access->query_mtype(page * 4096, cache), Mtype::CC);
+  EXPECT_EQ(policy->queries, 25u);
 
   // A different VM generation may reuse the same epoch token. Entries from
   // every page must be invalidated even when the token itself is unchanged.
@@ -1221,6 +1250,13 @@ TEST(GpuVmService, PolicyCacheReusesInterleavedPagesAndRevalidatesEveryEntry) {
     EXPECT_EQ(new_access->query_mtype(page * 4096, cache), Mtype::RW);
   }
   EXPECT_EQ(replacement->queries, 8u);
+
+  // An expired generation still owns cache entries until they are cleared.
+  ASSERT_TRUE(vm.unregister_address_space(handle));
+  access.reset();
+  new_access.reset();
+  cache.clear();
+  EXPECT_EQ(policy->epoch.use_count(), 2);
 }
 
 TEST(GpuVmService, GenerationsShareFaultReporterWithoutCopyingItsTarget) {
