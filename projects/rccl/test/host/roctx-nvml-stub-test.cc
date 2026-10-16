@@ -6,7 +6,7 @@
 
 // Host-only microtests for src/misc/roctx.cc and src/misc/nvmlwrap_stub.cc. The -roctx variant
 // builds roctx.cc's ROCTX_ENABLE arm; the range tests hold in either. stringify() inputs stay
-// under MAX_MESSAGE_LENGTH: past it, it overflows its buffer (AICOMRCCL-2914).
+// under MAX_MESSAGE_LENGTH: past it, it overflows its buffer.
 
 #include <gtest/gtest.h>
 
@@ -378,8 +378,8 @@ TEST_F(RoctxNvmlRoctxMicrotest, Extract_MappingToUnknownRoctxTypeTakesTheDefault
   roctxFree(&info);
 }
 
-// Pinned as observed: an unmapped nvtx type is inserted by operator[] as INT and decoded as one.
-TEST_F(RoctxNvmlRoctxMicrotest, Extract_UnmappedNvtxTypeIsTreatedAsIntAndInsertedIntoTheMap) {
+// operator[] inserts an unmapped nvtx type as INT, so it is decoded as one; a fix flips this pin.
+TEST_F(RoctxNvmlRoctxMicrotest, Extract_KnownBug_UnmappedNvtxTypeIsDecodedAsInt) {
   const uint64_t unmapped = NVTX_PAYLOAD_ENTRY_TYPE_INT + 1;
   ASSERT_EQ(nvtxToRoctx.count(unmapped), 0u);
   int value = 42;

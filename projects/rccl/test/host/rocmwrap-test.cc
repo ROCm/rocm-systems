@@ -689,8 +689,8 @@ TEST_F(RocmwrapMicrotest, Init_KernelConfigWithBothOptionsArmsTheGateAndInitsHsa
   EXPECT_TRUE(fopenPaths_.empty());
 }
 
-// Pinned as observed: the pfn gate is armed before the kernel check, so it stays armed on this failure.
-TEST_F(RocmwrapMicrotest, Init_KernelConfigMissingEitherOptionIsASystemError) {
+// The pfn gate is armed before the kernel check, so it stays armed on this failure; a fix flips this pin.
+TEST_F(RocmwrapMicrotest, Init_KnownBug_KernelConfigFailureLeavesTheExportGateArmed) {
   for (int missing = 0; missing < 2; ++missing) {
     SCOPED_TRACE(missing == 0 ? "no MOVE_NOTIFY" : "no P2PDMA");
     Reset();
@@ -735,8 +735,8 @@ TEST_F(RocmwrapMicrotest, Init_KallsymsFallbackMissingEitherSymbolIsASystemError
   }
 }
 
-// Pinned as observed: an unreadable /proc/kallsyms is only logged, and init still succeeds.
-TEST_F(RocmwrapMicrotest, Init_UnreadableKallsymsStillSucceeds) {
+// An unreadable /proc/kallsyms is only logged, and init still succeeds; a fix flips this pin.
+TEST_F(RocmwrapMicrotest, Init_KnownBug_UnreadableKallsymsStillSucceeds) {
   initOnceFunc();
   EXPECT_TRUE(Logged(NCCL_LOG_INFO, "Could not open /proc/kallsyms"));
   EXPECT_EQ(initResult, ncclSuccess);

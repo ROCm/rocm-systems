@@ -428,6 +428,7 @@ protected:
     g_dlopen = [](const char*, int) -> void* { return nullptr; };
     g_dlsymTable.clear();
     g_hipDeviceGetByPCIBusId = [](int*, const char*) { return hipErrorInvalidValue; };
+    g_legacyTelemName = "LEGACY_NAME";
     InstallFakeSmiTable();
 
     is_wsl2 = -1;
@@ -689,8 +690,8 @@ TEST_F(AmdsmiWrapMicrotest, NumDevice_Wsl2AsksHip) {
   EXPECT_EQ(n, 3u);
 }
 
-// Counts every processor handle in every socket, CPUs included (pinned as observed).
-TEST_F(AmdsmiWrapMicrotest, NumDevice_LibCountsProcessorsAcrossSockets) {
+// Counts every processor handle in every socket, CPUs included; a fix flips this pin.
+TEST_F(AmdsmiWrapMicrotest, NumDevice_KnownBug_LibCountsCpuProcessors) {
   InitFor(/*lib=*/true);
   g_smi.sockets = {{FakeProc{}, FakeProc{}}, {FakeProc{}}};
   g_smi.sockets[1][0].gpu = false;
@@ -731,8 +732,8 @@ TEST_F(AmdsmiWrapMicrotest, PciBusIdString_Wsl2AsksHip) {
   EXPECT_STREQ(busId, "wsl-2");
 }
 
-// Domain from bits [63:32], bus [15:8], device [7:3], function [2:0] (pinned as observed: the
-// comment in the source describes the domain as [63:16]).
+// Domain from bits [63:32], bus [15:8], device [7:3], function [2:0]; the source comment says
+// the domain is [63:16].
 TEST_F(AmdsmiWrapMicrotest, PciBusIdString_ArsmiFormatsTheBdf) {
   InitFor(/*lib=*/false);
   g_arsmi.bdfIds = {0, 0x0000002A0000C3DBull};
@@ -837,9 +838,8 @@ TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_LibPassesTheBdfFieldsAndReturnsTheHi
   EXPECT_EQ(g_smi.lastBdf.domain_number, 0x2au);
 }
 
-// Pinned as observed, not endorsed: the device number is taken as `(busid & 0xff) >> 4`, which keeps
-// only its low hex digit, so device 0x1b reaches amd_smi as 0x0b. Devices below 0x10 are unaffected.
-TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_LibDropsTheDeviceNumbersHighDigit) {
+// `(busid & 0xff) >> 4` keeps only the device number's low hex digit (0x1b becomes 0x0b); a fix flips this pin.
+TEST_F(AmdsmiWrapMicrotest, IndexByPciBusId_KnownBug_LibDropsDeviceHighDigit) {
   InitFor(/*lib=*/true);
   g_smi.fromBdfStatus = AMDSMI_STATUS_NOT_FOUND;
   uint32_t idx = 0;
@@ -987,8 +987,8 @@ TEST_F(AmdsmiWrapMicrotest, LinkInfo_LibXgmiCountIsTheBandwidthRatio) {
   EXPECT_EQ(count, 1);
 }
 
-// An unknown index is logged, and the query still runs against the null handle (pinned as observed).
-TEST_F(AmdsmiWrapMicrotest, LinkInfo_LibUnknownIndexIsLogged) {
+// An unknown index is logged, then queried as a null handle and reported as success; a fix flips this pin.
+TEST_F(AmdsmiWrapMicrotest, LinkInfo_KnownBug_LibUnknownIndexStillSucceeds) {
   InitFor(/*lib=*/true);
   TwoGpusBehindACpu();
   amdsmi_link_type_t type;
