@@ -11,7 +11,9 @@ add_library(rj_arith STATIC
   fp/half_binary.cpp
   fp/half_exponent.cpp
   fp/half_fma.cpp
+  fp/half_minmax.cpp
   fp/ldexp.cpp
+  fp/minmax.cpp
   fp/mixed_fma.cpp
   fp/packed_fma.cpp
   register/dpp.cpp

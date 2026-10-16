@@ -84,11 +84,21 @@ foreach(mnemonic IN ITEMS
     v_fmac
     v_fmamk
     v_exponent
+    v_min_max_med3
+    v_min_max_med3_num
+    v_min_max
+    v_min_max_num
+    v_minimum_maximum3
+    v_minimum_maximum
+    v_minimummaximum_maximumminimum
+    v_minmax_maxmin
+    v_minmax_maxmin_num
     v_mul_dx9_zero_f32
     v_mul
     v_pk_add_mul_f16
     v_pk_fma_f16
     v_pk_fmac_f16
+    v_pk_selection_f16
     v_rcp_rsq_sqrt_f64
 )
   string(REGEX REPLACE "^v_" "" test_name "${mnemonic}")
