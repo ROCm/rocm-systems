@@ -337,11 +337,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `ncclRmaProxyCreateContext` / `ncclRmaProxyDestroyContext` -- so production
   owns the context and its cleanup. See `test_categories_micro_rma_proxy.yaml`.
 
-- **`rccl-UnitTestsMicroProxy`** — `proxy.cc` (via `PROXY_CC_PATH`, from
+- **`rccl-UnitTestsMicroProxy`**: `proxy.cc` (via `PROXY_CC_PATH`, from
   `proxy-test.cc`); suites `Proxy*`. Sockets are socketpair-backed fakes in the
   test TU. Its own binary: it compiles the real `proxy.cc`, which
   `fakes/proxy_fakes.cc` fakes for the other binaries. See
   `test_categories_micro_proxy.yaml`.
+
 - **`rccl-UnitTestsMicroDiagnostics`**: `src/diagnostics/p2p.cc` (via
   `DIAG_P2P_CC_PATH`, suite `DiagP2pMicrotest.*`) and `src/diagnostics/ib_write_bw.cc`
   (via `DIAG_IB_WRITE_BW_CC_PATH`, suite `DiagIbWriteBwMicrotest.*`). Its own binary: it fakes the
