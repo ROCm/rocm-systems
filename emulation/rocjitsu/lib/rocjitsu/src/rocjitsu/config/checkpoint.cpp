@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "rocjitsu/config/checkpoint.h"
+#include "rocjitsu/config/config_common.h"
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/shared/isa_properties.h"
 #include "rocjitsu/vm/amdgpu/matrix_coexecution.h"
@@ -122,7 +123,8 @@ serialize_config(flatbuffers::FlatBufferBuilder &builder, const SoC &soc,
         fb_cu = fb::CreateComputeUnitConfig(
             builder, cu_cfg.num_wf_slots, cu_cfg.sgprs_per_wf, cu_cfg.vgprs_per_wf,
             cu_cfg.lds_size_kb, cu_cfg.functional_quantum,
-            se->compute_unit(0)->scratch_slots_per_cu(), cu_cfg.gws_wait_limit);
+            se->compute_unit(0)->scratch_slots_per_cu(), cu_cfg.gws_wait_limit,
+            arithmetic_to_fb(builder, cu_cfg.arithmetic));
         builder.ForceDefaults(false);
       }
     }
@@ -178,6 +180,7 @@ VirtualMachine::Config config_from_checkpoint(const fb::SimulationConfig *fb_con
         vm_config.soc.xcd.shader_engine.cus_per_shader_array = se->cus_per_shader_array();
         if (auto *cu = se->compute_unit()) {
           auto &cu_cfg = vm_config.soc.xcd.shader_engine.compute_unit;
+          cu_cfg.arithmetic = arithmetic_from_fb(cu->arithmetic());
           cu_cfg.num_wf_slots = cu->num_wf_slots();
           cu_cfg.sgprs_per_wf = cu->sgprs_per_wf();
           cu_cfg.vgprs_per_wf = cu->vgprs_per_wf();
@@ -286,7 +289,8 @@ void save_checkpoint(const std::string &path, const SoC &soc, uint64_t tick,
             builder, name, wfs_vec, 0, cu->config().functional_quantum, true,
             cu->config().memory_wait_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
             cu->config().xcnt_diagnostics != amdgpu::MemoryWaitDiagnostics::Off,
-            cu->config().gws_wait_limit);
+            cu->config().gws_wait_limit, arithmetic_to_fb(builder, cu->config().arithmetic));
+
         cu_offsets.push_back(cus);
       }
     }
@@ -440,6 +444,8 @@ LoadedConfig restore_checkpoint(const std::string &path) {
       auto *cu = all_cus[i];
       if (cu_state->gws_wait_limit())
         cu->set_gws_wait_limit(*cu_state->gws_wait_limit());
+      if (cu_state->arithmetic())
+        cu->restore_arithmetic_policy(arithmetic_from_fb(cu_state->arithmetic()));
       if (cu_state->functional_quantum_present())
         cu->set_functional_quantum(cu_state->functional_quantum());
       using amdgpu::MemoryWaitDiagnostics;

@@ -63,6 +63,8 @@ public:
   bool observes_register_access() const;
   bool debug_active() const;
   rj_code_arch_t arch() const;
+  uint64_t arithmetic_flags() const;
+  bool arithmetic_reports_fp_status() const;
   uint32_t cus_per_shader_array() const;
   uint32_t shader_array_cu_id() const;
   uint32_t wf_size() const;

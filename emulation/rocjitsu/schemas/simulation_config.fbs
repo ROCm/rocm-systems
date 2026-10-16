@@ -6,6 +6,11 @@
 
 namespace rocjitsu.fb;
 
+// CPU arithmetic semantics. Omission selects temporary compatibility mode (7).
+table ArithmeticPolicyConfig {
+  semantics: string;
+}
+
 /// Configuration for a single compute unit.
 table ComputeUnitConfig {
   num_wf_slots: uint32;   // Number of hardware wavefront slots (contexts).
@@ -19,6 +24,7 @@ table ComputeUnitConfig {
   scratch_slots_per_cu: uint32;
   // Unpaused CU steps without process instruction progress; zero disables this inactivity budget.
   gws_wait_limit: uint32 = 1000000;
+  arithmetic: ArithmeticPolicyConfig;
 }
 
 /// Configuration for a command processor.
@@ -320,6 +326,7 @@ table SimulationConfig {
   // Optional override for all CUs: "off", "on" (ordinary only), or "all" (with XCNT).
   // Omission preserves the per-CU diagnostic settings and defaults.
   wait_checking: string;
+  arithmetic: ArithmeticPolicyConfig;
 }
 
 root_type SimulationConfig;

@@ -479,6 +479,17 @@ std::vector<simdojo::LinkSpec> expand_link(const fb::LinkDef *ld) {
 
 using AsyncResources = std::shared_ptr<amdgpu::matrix_coexecution::ExecutionResources>;
 using CfgMap = std::unordered_map<std::string, std::string>;
+amdgpu::ArithmeticPolicy arithmetic_from_config(const CfgMap &cfg) {
+  auto value = [&](const char *key, const char *fallback) -> std::string_view {
+    auto it = cfg.find(key);
+    return it == cfg.end() ? std::string_view(fallback) : std::string_view(it->second);
+  };
+  if (cfg.count("arithmetic_fallback") || cfg.count("arithmetic_state_reporting"))
+    throw std::invalid_argument(
+        "Use arithmetic_semantics instead of separate fallback/reporting controls");
+  return amdgpu::parse_arithmetic_policy(value("arithmetic_semantics", "compatibility"));
+}
+
 using FactoryFn = std::function<std::unique_ptr<simdojo::Component>(
     const std::string &name, const CfgMap &cfg, simdojo::ExecMode mode, rj_code_arch_t arch,
     rj_code_target_id_t target, amdgpu::GpuMemory *mem, const AsyncResources &resources)>;
@@ -560,6 +571,7 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.arch = arch;
       cc.async_resources = resources;
       cc.target = target;
+      cc.arithmetic = arithmetic_from_config(cfg);
       cc.num_wf_slots = config_u32(cfg, "num_wf_slots", 10);
       cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
       cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch));
@@ -591,8 +603,10 @@ std::unordered_map<std::string, FactoryFn> &factories() {
 
 // Validate explicit policies even when the launch override will replace them.
 void apply_cu_overrides(CfgMap &cfg, const CfgMap &overrides) {
+  (void)arithmetic_from_config(cfg);
   for (const auto &[key, value] : overrides) {
-    if (auto it = cfg.find(key); it != cfg.end() && it->second != "off" && it->second != "warn")
+    if (auto it = cfg.find(key); key.rfind("arithmetic_", 0) != 0 && it != cfg.end() &&
+                                 it->second != "off" && it->second != "warn")
       throw std::invalid_argument(key + " must be warn or off");
     cfg[key] = value;
   }
@@ -956,6 +970,11 @@ ExecutionThreadSettings execution_thread_settings(const fb::SimulationConfig *co
 
 LoadedConfig build_from_fb(const rocjitsu::fb::SimulationConfig *fb_config, uint32_t host_threads) {
   CfgMap cu_overrides;
+  if (const auto *policy = fb_config->arithmetic()) {
+    (void)arithmetic_from_fb(policy); // Validate even when the topology contains no CUs.
+    cu_overrides["arithmetic_semantics"] =
+        policy->semantics() ? policy->semantics()->str() : "compatibility";
+  }
   if (const auto *setting = fb_config->wait_checking()) {
     const auto mode = parse_wait_checking(setting->string_view());
     if (!mode)
