@@ -1894,19 +1894,9 @@ def main() -> None:
                         return float(value)
                 return 0.0
 
-            op_edges = []
-            for event in events:
-                parent = getattr(event, "cpu_parent", None)
-                if parent is not None:
-                    op_edges.append([parent.name, event.name])
             results[op_name] = {
-                "torch_ops": [e.name for e in events],
-                "aten_ops": [
-                    e.name for e in events if e.name.startswith("aten::")
-                ],
                 "cuda_kernels": [e.name for e in cuda_events],
                 "cuda_time_us": sum(_cuda_us(e) for e in cuda_events),
-                "op_edges": op_edges,
             }
         except Exception as exc:
             results[op_name] = {
