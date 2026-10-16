@@ -76,6 +76,9 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_ConcurrentSubmitFromOtherThread) {
   INFO("Waiting stream: " << (useNullStream ? "null stream" : "created stream")
                           << ", extra synchronizing threads: " << extraSyncers);
 
+  // Earlier tests may leave another device selected, while the threads below start on device 0
+  HIP_CHECK(hipSetDevice(0));
+
   int ticksPerMs = 0;
 #if HT_NVIDIA
   HIP_CHECK(hipDeviceGetAttribute(&ticksPerMs, hipDeviceAttributeClockRate, 0));
@@ -153,7 +156,9 @@ HIP_TEST_CASE(Unit_hipStreamSynchronize_ConcurrentSubmitFromOtherThread) {
       std::this_thread::yield();
     }
     // The main thread sets the flag right before it calls hipStreamSynchronize, so this leaves it
-    // ample time to be blocked inside the call.
+    // ample time to be blocked inside the call. This is a best-effort ordering: on a heavily
+    // loaded host the calls below may be enqueued first. The test then passes without covering the
+    // contention, but it can't fail spuriously.
     std::this_thread::sleep_for(std::chrono::milliseconds(300));
 
     HIP_CHECK_THREAD(hipMemcpyAsync(devBuf, pinned, kBytes, hipMemcpyHostToDevice, side));
