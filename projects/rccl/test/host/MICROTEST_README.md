@@ -323,17 +323,17 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 - **`rccl-UnitTestsMicroMemManager`** — `mem_manager.cc` (via `MEM_MANAGER_CC_PATH`, from
-  `mem-manager-test.cc`); suite `MemManager*`. Its own binary because the test defines
-  `mem_manager.cc`'s bootstrap, proxy and group callees, which the shared fakes also define.
-  See `test_categories_micro_mem_manager.yaml`.
+  `mem-manager-test.cc`); suite `MemManager*`. Its own binary: `nccl_fakes.cc` defines
+  `ncclMemTrack` and `ncclMemTrackImportFromPeer`, and `collective_stubs.cc` defines
+  `ncclCommMemSuspend`; `mem_manager.cc` defines all three. See
+  `test_categories_micro_mem_manager.yaml`.
 - **`rccl-UnitTestsMicroAllocator`** — `allocator.cc` (via `ALLOCATOR_CC_PATH`, from
   `allocator-test.cc`); suite `Allocator*`. Its own binary because every other binary that
   needs `ncclShadowPoolToHost` links `fakes/allocator_fakes.cc` instead. See
   `test_categories_micro_allocator.yaml`.
 - **`rccl-UnitTestsMicroMnnvl`** — `mnnvl.cc` (via `MNNVL_CC_PATH`, from `mnnvl-test.cc`);
-  suite `Mnnvl*`. Its own binary because the test defines the `ncclCuMemEnable`, `getBusId`
-  and memory-manager symbols that `rccl-UnitTestsMicro` gets from its shared fakes. See
-  `test_categories_micro_mnnvl.yaml`.
+  suite `Mnnvl*`. Its own binary: `nccl_stubs.cc`, which most targets link, defines
+  `ncclMnnvlCheck`, and `mnnvl.cc` defines it too. See `test_categories_micro_mnnvl.yaml`.
 - **`rccl-UnitTestsMicroAlloc`** — header-only `include/alloc.h` (from `alloc-test.cc`); suite
   `Alloc*`. Its own binary because the test seams `getBusId`, `ncclCuMemEnable` and the
   memory-manager calls, which the shared fakes define. See `test_categories_micro_alloc.yaml`.

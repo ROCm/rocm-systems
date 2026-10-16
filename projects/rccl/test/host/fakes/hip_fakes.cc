@@ -60,6 +60,18 @@ ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitValue64,          hipStreamWaitValue64);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemcpyBatchAsync,           hipMemcpyBatchAsync);
 #endif
 ASSERT_HOOK_MATCHES_PROD(g_hipMemset,                     hipMemset);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGet,                  hipDeviceGet);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemPoolCreate,              hipMemPoolCreate);
+ASSERT_HOOK_MATCHES_PROD(g_hipMemPoolDestroy,             hipMemPoolDestroy);
+// hipMallocFromPoolAsync also has a template overload, so pick the C one; the cast fails if it drifts.
+using HipMallocFromPoolAsyncFn = hipError_t(void**, size_t, hipMemPool_t, hipStream_t);
+static_assert(std::is_same_v<decltype(g_hipMallocFromPoolAsync), std::function<HipMallocFromPoolAsyncFn>> &&
+                  sizeof(static_cast<HipMallocFromPoolAsyncFn*>(&hipMallocFromPoolAsync)) != 0,
+              "signature drift: g_hipMallocFromPoolAsync no longer matches hipMallocFromPoolAsync");
+ASSERT_HOOK_MATCHES_PROD(g_hipFreeAsync,                  hipFreeAsync);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceSynchronize,          hipDeviceSynchronize);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceGetStreamPriorityRange, hipDeviceGetStreamPriorityRange);
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamCreateWithPriority,   hipStreamCreateWithPriority);
 
 #undef ASSERT_HOOK_MATCHES_PROD
 

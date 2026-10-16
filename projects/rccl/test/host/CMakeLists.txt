@@ -13,6 +13,13 @@ rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
   "NCCL_PARAM(MaxNchannels, \"MAX_NCHANNELS\", -2)" "fakes/tuning_fakes.cc: ncclParamMaxNchannels()")
 rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
   "RCCL_PARAM(ForceCe, \"FORCE_CE\", 1)" "fakes/wrap_fakes.cc: rcclParamForceCe()")
+# allocator-test.cc copies misc/utils.cc's pointer hash rather than linking utils.cc.
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "h ^= h >> 32;" "allocator-test.cc: ncclHashPointer()")
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "h *= 0x9e3779b97f4a7c13;" "allocator-test.cc: ncclHashPointer()")
+rccl_assert_source_line("${_rccl_src_root}/misc/utils.cc"
+  "return (uint64_t)h >> (64 - hbits);" "allocator-test.cc: ncclHashPointer()")
 # src/enqueue/task_prep/*.cc declare these five but define none, and param_redirect.h only rewrites
 # NCCL_PARAM where it expands, so the hand-written bodies below are the only definitions on that link line.
 rccl_assert_source_line("${_rccl_src_root}/init.cc"
@@ -423,8 +430,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroMemManager -- src/mem_manager.cc. Own binary: the test defines mem_manager.cc's
-  # bootstrap, proxy and group callees, which the shared fakes also define.
+  # rccl-UnitTestsMicroMemManager -- src/mem_manager.cc. Own binary: mem_manager.cc defines ncclMemTrack and
+  # ncclMemTrackImportFromPeer (also in nccl_fakes.cc) and ncclCommMemSuspend (also in collective_stubs.cc).
   set(TEST_MICRO_MEM_MANAGER_SOURCE_FILES
     mem-manager-test.cc
     fakes/hip_fakes.cc
@@ -439,8 +446,8 @@ function(rccl_define_micro_source_lists)
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroMnnvl -- src/mnnvl.cc. Own binary: the test defines the ncclCuMemEnable, getBusId
-  # and memory-manager symbols that rccl-UnitTestsMicro gets from its shared fakes.
+  # rccl-UnitTestsMicroMnnvl -- src/mnnvl.cc. Own binary: nccl_stubs.cc, which most targets link, defines
+  # ncclMnnvlCheck, and mnnvl.cc defines it too.
   set(TEST_MICRO_MNNVL_SOURCE_FILES
     mnnvl-test.cc
     fakes/hip_fakes.cc

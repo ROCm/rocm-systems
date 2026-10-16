@@ -376,19 +376,19 @@
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - mem_manager",
+      "name": "RCCL Microtests - mem_manager.cc",
       "description": "rccl-UnitTestsMicroMemManager (host-only mem_manager microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_mem_manager",
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - allocator",
+      "name": "RCCL Microtests - allocator.cc",
       "description": "rccl-UnitTestsMicroAllocator (host-only allocator microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_allocator",
       "enabled": true
     },
     {
-      "name": "RCCL Microtests - mnnvl",
+      "name": "RCCL Microtests - mnnvl.cc",
       "description": "rccl-UnitTestsMicroMnnvl (host-only mnnvl microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_mnnvl",
       "enabled": true

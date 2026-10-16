@@ -466,7 +466,7 @@ TEST_F(AllocMicrotest, Realloc_GrowsKeepingContentsAndZeroingTheTail) {
 }
 
 TEST_F(AllocMicrotest, CallocAndRealloc_ReportMallocFailure) {
-  const size_t huge = SIZE_MAX / 16;  // past PTRDIFF_MAX bytes: malloc refuses it
+  const size_t huge = SIZE_MAX / 16;  // 2^63 - 8 bytes, more than any address space: malloc refuses it
   uint64_t* p = reinterpret_cast<uint64_t*>(this);
   EXPECT_EQ(ncclCalloc(&p, huge), ncclSystemError);
   EXPECT_EQ(p, reinterpret_cast<uint64_t*>(this));
@@ -771,9 +771,8 @@ TEST_F(AllocMicrotest, FreeAddr_SkipsWhatSuspendReleased) {
   for (const char* call : {"free", "retain", "range", "unmap", "release", "addrfree"}) EXPECT_EQ(Count(call), 0);
 }
 
-// BUG: when a step fails, the shared exit still calls cuMemAddressFree with only the size of the
-// segments already unmapped -- zero if the first one failed -- on a range that may still be mapped.
-TEST_F(AllocMicrotest, FreeAddr_FailureFreesTheRangeWithThePartialSize) {
+// A failed step frees the range with only the size already unmapped (0 if the first failed); a fix flips this pin.
+TEST_F(AllocMicrotest, FreeAddr_KnownBug_FailureFreesTheRangeWithThePartialSize) {
   ranges_[Va()] = {Va(), kGran};
   failing_ = {"range"};
   EXPECT_EQ(ncclCuMemFreeAddr(Va(), nullptr), ncclUnhandledCudaError);
@@ -903,8 +902,8 @@ TEST_F(AllocMicrotest, CuMemFree_SuspendedDynamicEntryOnlyFreesTheRange) {
   EXPECT_TRUE(g_untrackedPersist.empty());
 }
 
-// BUG: same shared exit as ncclCuMemFreeAddr, so a failed step frees the range with size 0.
-TEST_F(AllocMicrotest, CuMemFree_FailuresStillFreeTheRange) {
+// Same shared exit as ncclCuMemFreeAddr, so a failed step frees the range with size 0; a fix flips this pin.
+TEST_F(AllocMicrotest, CuMemFree_KnownBug_FailuresStillFreeTheRange) {
   for (const char* step : {"retain", "release", "range", "unmap"}) {
     SCOPED_TRACE(step);
     failing_ = {step};
@@ -978,9 +977,8 @@ TEST_F(AllocMicrotest, GetAddressRange_ProbesForSysmemUntilFound) {
   }
 }
 
-// BUG: if reading the retained handle's properties fails, the handle reference taken to probe for
-// sysmem is never released.
-TEST_F(AllocMicrotest, GetAddressRange_PropertiesFailureLeaksTheRetainedHandle) {
+// A failed properties read never releases the handle retained to probe for sysmem; a fix flips this pin.
+TEST_F(AllocMicrotest, GetAddressRange_KnownBug_PropertiesFailureLeaksTheRetainedHandle) {
   hipDeviceptr_t base = nullptr;
   size_t total = 0;
   bool sysmem = false;
@@ -1098,9 +1096,8 @@ TEST_F(AllocMicrotest, CudaCalloc_ZeroingFailuresWithoutCuMem) {
   Unheap(p);
 }
 
-// BUG: a zero-element allocation allocates nothing but still counts one allocation, and freeing the
-// null pointer it returns takes nothing back off.
-TEST_F(AllocMicrotest, CudaAllocs_ZeroElementsStillCountAnAllocation) {
+// Zero elements allocate nothing but count an allocation that freeing never takes back; a fix flips this pin.
+TEST_F(AllocMicrotest, CudaAllocs_KnownBug_ZeroElementsStillCountAnAllocation) {
   char* p = reinterpret_cast<char*>(this);
   ASSERT_EQ(ncclCudaMalloc(&p, 0, nullptr), ncclSuccess);
   EXPECT_EQ(p, nullptr);
@@ -1112,10 +1109,8 @@ TEST_F(AllocMicrotest, CudaAllocs_ZeroElementsStillCountAnAllocation) {
   EXPECT_EQ(allocTracker[kDev].totalAlloc, 3u);
 }
 
-// BUG: with cuMem both ncclCudaMalloc and ncclCuMemAlloc count the allocation, by requested and by
-// granularity-aligned size, and ncclCudaFree and ncclCuMemFree both take the mapped size back off:
-// the count balances but the byte total drifts by the alignment padding on every allocation.
-TEST_F(AllocMicrotest, CudaAllocs_CuMemCountsEveryAllocationTwice) {
+// With cuMem each allocation is counted twice and the byte total drifts by the padding; a fix flips this pin.
+TEST_F(AllocMicrotest, CudaAllocs_KnownBug_CuMemCountsEveryAllocationTwice) {
   g_cuMemEnable = 1;
   char* p = nullptr;
   ASSERT_EQ(ncclCudaMalloc(&p, 100, nullptr), ncclSuccess);
@@ -1127,9 +1122,8 @@ TEST_F(AllocMicrotest, CudaAllocs_CuMemCountsEveryAllocationTwice) {
   EXPECT_EQ((int64_t)allocTracker[kDev].totalAllocSize, (int64_t)(100 - kGran));
 }
 
-// BUG: on a zeroing failure the buffer is neither freed nor returned null, so the caller cannot
-// free it, and the allocation is counted as if it had succeeded; a private zeroing stream leaks too.
-TEST_F(AllocMicrotest, CudaCalloc_ZeroingFailureLeaksTheBuffer) {
+// A zeroing failure keeps and counts a buffer the caller can't free, and leaks the stream; a fix flips this pin.
+TEST_F(AllocMicrotest, CudaCalloc_KnownBug_ZeroingFailureLeaksTheBuffer) {
   failing_ = {"memset"};
   char* p = nullptr;
   EXPECT_EQ(ncclCudaCalloc(&p, 8, nullptr), ncclUnhandledCudaError);
@@ -1140,8 +1134,8 @@ TEST_F(AllocMicrotest, CudaCalloc_ZeroingFailureLeaksTheBuffer) {
   Unheap(p);
 }
 
-// BUG: a failed side-stream lookup returns with the thread still switched to relaxed capture mode.
-TEST_F(AllocMicrotest, CudaCalloc_SideStreamFailureLeavesTheCaptureModeSwitched) {
+// A failed side-stream lookup returns with relaxed capture mode still set; a fix flips this pin.
+TEST_F(AllocMicrotest, CudaCalloc_KnownBug_SideStreamFailureLeavesTheCaptureModeSwitched) {
   g_busIdResult = ncclSystemError;
   char* p = nullptr;
   EXPECT_EQ(ncclCudaCalloc(&p, 8, nullptr), ncclSystemError);
@@ -1186,8 +1180,8 @@ TEST_F(AllocMicrotest, CudaMemcpy_Failures) {
   EXPECT_TRUE(CaptureModeRestored());
 }
 
-// BUG: when the copy itself fails, the private stream ncclCudaMemcpy created is never destroyed.
-TEST_F(AllocMicrotest, CudaMemcpy_CopyFailureLeaksThePrivateStream) {
+// A failed copy never destroys the private stream ncclCudaMemcpy created; a fix flips this pin.
+TEST_F(AllocMicrotest, CudaMemcpy_KnownBug_CopyFailureLeaksThePrivateStream) {
   uint32_t a[4], b[4];
   failing_ = {"memcpy"};
   EXPECT_EQ(ncclCudaMemcpy(a, b, 4), ncclUnhandledCudaError);

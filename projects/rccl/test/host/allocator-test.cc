@@ -10,6 +10,7 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <csignal>
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
@@ -592,9 +593,8 @@ TEST_F(AllocatorSpaceMicrotest, ManySegmentsGrowTheCutArray) {
   EXPECT_EQ(Cuts(), std::vector<int64_t>{40});
 }
 
-// BUG: an aligned allocation appended to a full segment marks its alignment padding allocated, and
-// freeing both neighbours never releases it: the space never empties again.
-TEST_F(AllocatorSpaceMicrotest, Alloc_AlignmentPaddingIsNeverFreed) {
+// Padding appended to a full segment is never freed, so the space never empties; a fix flips this pin.
+TEST_F(AllocatorSpaceMicrotest, Alloc_KnownBug_AlignmentPaddingIsNeverFreed) {
   EXPECT_EQ(Alloc(1), 0);
   EXPECT_EQ(Alloc(1, 16), 16);
   ASSERT_EQ(ncclSpaceFree(&space_, 0, 1), ncclSuccess);
@@ -721,9 +721,8 @@ TEST_F(AllocatorShadowPoolMicrotest, Alloc_DeviceAllocationFailuresAreReported) 
   EXPECT_TRUE(allocated_.empty());
 }
 
-// BUG: when zeroing a directly allocated object fails, its device memory is neither returned nor
-// tracked, so not even Destruct frees it.
-TEST_F(AllocatorShadowPoolMicrotest, Alloc_LargeObjectLeaksWhenZeroingFails) {
+// A large object whose zeroing fails is neither returned nor tracked, so it leaks; a fix flips this pin.
+TEST_F(AllocatorShadowPoolMicrotest, Alloc_KnownBug_LargeObjectLeaksWhenZeroingFails) {
   memsetResult_ = hipErrorInvalidValue;
   void* dev = nullptr;
   EXPECT_EQ(ncclShadowPoolAlloc(&pool_, 1 << 20, &dev, nullptr, kStream), ncclUnhandledCudaError);
@@ -735,9 +734,8 @@ TEST_F(AllocatorShadowPoolMicrotest, Alloc_LargeObjectLeaksWhenZeroingFails) {
   ncclShadowPoolConstruct(&pool_);
 }
 
-// BUG: a page whose device allocation failed stays on the page list with no device memory, and the
-// next allocation of that size class hands out a slot of it as if it were backed.
-TEST_F(AllocatorShadowPoolMicrotest, Alloc_FailedPageIsReusedWithoutDeviceMemory) {
+// A page whose device allocation failed stays listed and backs the next allocation; a fix flips this pin.
+TEST_F(AllocatorShadowPoolMicrotest, Alloc_KnownBug_FailedPageIsReusedWithoutDeviceMemory) {
   void* dev = this;
   mallocResult_ = hipErrorOutOfMemory;
   EXPECT_EQ(ncclShadowPoolAlloc(&pool_, 64, &dev, nullptr, kStream), ncclUnhandledCudaError);
@@ -834,14 +832,13 @@ TEST_F(AllocatorShadowPoolMicrotest, UnknownObjectsAreRejected) {
   EXPECT_EQ(pool_.count, 1);
 }
 
-// BUG: on a pool that never allocated there is no table yet, so an unknown object crashes the lookup
-// instead of being rejected.
-TEST_F(AllocatorShadowPoolMicrotest, UnknownObjectOnAnEmptyPoolCrashes) {
+// With no table yet, an unknown object crashes the lookup instead of being rejected; a fix flips this pin.
+TEST_F(AllocatorShadowPoolMicrotest, FreeAndToHost_KnownBug_UnknownObjectOnAnEmptyPoolCrashes) {
   ::testing::GTEST_FLAG(death_test_style) = "threadsafe";
   int other = 0;
   void* h = nullptr;
-  EXPECT_DEATH(ncclShadowPoolToHost(&pool_, &other, &h), "");
-  EXPECT_DEATH(ncclShadowPoolFree(&pool_, &other, kStream), "");
+  EXPECT_EXIT(ncclShadowPoolToHost(&pool_, &other, &h), ::testing::KilledBySignal(SIGSEGV), "");
+  EXPECT_EXIT(ncclShadowPoolFree(&pool_, &other, kStream), ::testing::KilledBySignal(SIGSEGV), "");
 }
 
 TEST_F(AllocatorShadowPoolMicrotest, Destruct_FreesObjectsPagesAndPool) {

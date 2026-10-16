@@ -30,6 +30,7 @@
 #include "comm.h"
 #include "debug.h"
 #include "group.h"
+#include "fakes/fail_loud.h"
 #include "fakes/hip_fakes.h"
 
 uint32_t ncclDebugLevelMask = NCCL_DEBUG_LEVEL_MASK_UNINITIALIZED;
@@ -118,7 +119,9 @@ ncclResult_t ncclCommGetAsyncError(ncclComm_t, ncclResult_t* asyncError) {
 }
 int64_t ncclParamEnqueueRearchEnable() { return g_rearch; }
 // Only ncclGroupCommJoin's collective arm reaches this; Suspend/Resume join as SymRegister.
-void* ncclMemoryStack::allocateSpilled(ncclMemoryStack*, size_t, size_t) { std::abort(); }
+void* ncclMemoryStack::allocateSpilled(ncclMemoryStack*, size_t, size_t) {
+  FailLoudUnfaked("mem-manager-test", "ncclMemoryStack::allocateSpilled");
+}
 ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* job, ncclResult_t (*func)(struct ncclAsyncJob*),
                                  void (*destructor)(void*), ncclComm_t) {
   return g_mgmtEnqueue(job, func, destructor);
@@ -299,6 +302,7 @@ class MemManagerMicrotest : public ::testing::Test {
     ncclIntruQueueConstruct(&comm_->resumeTaskQueue);
     for (auto* t : tasks_) free(t);
     ncclGroupCommHead[ncclGroupTaskTypeSymRegister] = nullptr;
+    g_watchedDelete = nullptr;
     ResetHipFakes();
   }
 
@@ -690,9 +694,8 @@ TEST_F(MemManagerMicrotest, Suspend_OffloadCopyFailureFreesTheBackup) {
   EXPECT_TRUE(unmaps_.empty());
 }
 
-// BUG: an offload entry whose unmap failed keeps the backup it just made, and the retry makes a
-// second one over it: the first is leaked and cpuBackupUsage counts the entry twice.
-TEST_F(MemManagerMicrotest, Suspend_RetryAfterOffloadUnmapFailureLeaksTheFirstBackup) {
+// The retry backs the entry up again, leaking the first backup and counting it twice; a fix flips this pin.
+TEST_F(MemManagerMicrotest, Suspend_KnownBug_RetryAfterOffloadUnmapFailureLeaksTheFirstBackup) {
   std::vector<char> device(kSize);
   ncclDynMemEntry* offload = Track(device.data(), ncclMemOffload, 0x12);
   unmapFail_[device.data()] = true;
@@ -808,10 +811,8 @@ TEST_F(MemManagerMicrotest, Resume_RestoresAccessOnlyForSameProcessExportedPeers
   EXPECT_EQ(accessDevs_, (std::vector<int>{kDev, 11}));
 }
 
-// BUG: when restoring an offload backup fails the new handle is already mapped at entry->ptr, but the
-// entry stays Released: a retry re-creates and maps on top of the live mapping, and Destroy frees the
-// VA range without unmapping or releasing that handle.
-TEST_F(MemManagerMicrotest, Resume_BackupRestoreFailureKeepsTheMappingButStaysReleased) {
+// A failed restore leaves the new handle mapped on a Released entry, so it is never released; a fix flips this pin.
+TEST_F(MemManagerMicrotest, Resume_KnownBug_BackupRestoreFailureKeepsTheMappingButStaysReleased) {
   std::vector<char> device(kSize);
   ncclDynMemEntry* offload = Track(device.data(), ncclMemOffload, 0x12);
   MarkSuspended({offload});
@@ -1189,9 +1190,8 @@ TEST_F(MemManagerMicrotest, SuspendImpl_JobReportsSetDeviceFailure) {
   jobs_[0].destructor(jobs_[0].job);
 }
 
-// ncclMgmtTaskEnqueue runs the job's destructor itself when it rejects the job (a blocking and a
-// nonblocking comm in one group). Resume leaves it at that; BUG: Suspend deletes the job a second time.
-TEST_F(MemManagerMicrotest, Impl_RejectedJobIsDeletedTwiceBySuspend) {
+// Suspend deletes a job ncclMgmtTaskEnqueue already destroyed on rejecting it (Resume doesn't); a fix flips this pin.
+TEST_F(MemManagerMicrotest, Impl_KnownBug_RejectedJobIsDeletedTwiceBySuspend) {
   g_rearch = 1;
   g_mgmtEnqueue = [](ncclAsyncJob* job, ncclResult_t (*)(ncclAsyncJob*), void (*destructor)(void*)) {
     g_watchedDelete = job;
