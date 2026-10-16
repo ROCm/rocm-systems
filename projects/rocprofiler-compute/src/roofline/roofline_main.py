@@ -341,7 +341,7 @@ class Roofline:
     def _collect_compute_peaks(self, ops_flops: str) -> list[tuple[str, float]]:
         """Read every stacked datatype's ceilings and label each peak with it."""
         peaks: list[tuple[str, float]] = []
-        for dt in self.__run_parameters.get("roofline_data_type", []):
+        for dt in SUPPORTED_DATATYPES.get(self.__mspec.gpu_arch, {}):
             dt = str(dt)
             if _figure_class(dt) != ops_flops or not self._datatype_supported(dt):
                 continue
