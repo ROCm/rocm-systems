@@ -393,7 +393,7 @@ bool ncclCeAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_
     return false;
   }
 
-  if (coll == ncclFuncAllReduce && (datatype == ncclFloat8e4m3 || datatype == ncclFloat8e5m2)) {
+  if (coll == ncclFuncAllReduce && (ty == ncclFloat8e4m3 || ty == ncclFloat8e5m2)) {
     WARN("Skipping CE AllReduce: unsupported datatype: Float8");
     return false;
   }
