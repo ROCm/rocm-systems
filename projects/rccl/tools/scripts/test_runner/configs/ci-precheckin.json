@@ -268,6 +268,39 @@
       "tests": [
         {"name": "RomeModelsMicrotests", "description": "Host-only graph/rome_models.cc microtests (no GPU, no HIP/RCCL runtime); covers parseGraphLight RCCL_TREES input validation", "test_filter": "*"}
       ]
+    },
+    "unit_tests_micro_collectives": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroCollectives",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "CollectivesMicrotests", "description": "Host-only collectives.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_onerank": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroOnerank",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "OnerankMicrotests", "description": "Host-only onerank.cu microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
+    },
+    "unit_tests_micro_mgmt_task_enq": {
+      "is_gtest": true,
+      "binary": "host/rccl-UnitTestsMicroMgmtTaskEnq",
+      "num_ranks": 1,
+      "num_nodes": 1,
+      "num_gpus": 1,
+      "timeout": 60,
+      "tests": [
+        {"name": "MgmtTaskEnqMicrotests", "description": "Host-only mgmt_task_enq.cc microtests (no GPU, no HIP/RCCL runtime)", "test_filter": "*"}
+      ]
     }
   },
   "test_suites": [
@@ -335,6 +368,24 @@
       "name": "RCCL Microtests - rome_models.cc",
       "description": "rccl-UnitTestsMicroRomeModels (host-only rome_models.cc microtests, no GPU/HIP/RCCL runtime)",
       "config": "unit_tests_micro_rome_models",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - collectives.cc",
+      "description": "rccl-UnitTestsMicroCollectives (host-only collectives.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_collectives",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - onerank.cu",
+      "description": "rccl-UnitTestsMicroOnerank (host-only onerank.cu microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_onerank",
+      "enabled": true
+    },
+    {
+      "name": "RCCL Microtests - mgmt_task_enq.cc",
+      "description": "rccl-UnitTestsMicroMgmtTaskEnq (host-only mgmt_task_enq.cc microtests, no GPU/HIP/RCCL runtime)",
+      "config": "unit_tests_micro_mgmt_task_enq",
       "enabled": true
     }
   ]
