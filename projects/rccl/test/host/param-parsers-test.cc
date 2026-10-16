@@ -133,15 +133,15 @@ TEST(ParamParsersMicrotest, Integer_RejectsOverflowOfTheIntermediateLongLong) {
             ncclParamParserDefault<uint32_t>::resolve("999999999999999999999999999", unsignedOut));
 }
 
-TEST(ParamParsersMicrotest, Integer_NegativeUnsignedWrapsRatherThanErrors) {
-  // strtoull() negates a leading '-' rather than rejecting it (pinned as observed).
+TEST(ParamParsersMicrotest, Integer_KnownBug_NegativeUnsignedWraps) {
+  // strtoull() negates a leading '-' rather than rejecting it; a fix flips this pin.
   uint32_t out = 0;
   EXPECT_EQ(ncclSuccess, ncclParamParserDefault<uint32_t>::resolve("-1", out));
   EXPECT_EQ(0xFFFFFFFFu, out);
 }
 
-TEST(ParamParsersMicrotest, Integer_NarrowerTypeTruncatesRatherThanErrors) {
-  // Only long long's range is checked, so this truncates silently (pinned as observed).
+TEST(ParamParsersMicrotest, Integer_KnownBug_NarrowerTypeTruncates) {
+  // Only long long's range is checked, so this truncates silently; a fix flips this pin.
   int8_t out = 0;
   EXPECT_EQ(ncclSuccess, ncclParamParserDefault<int8_t>::resolve("200", out));
   EXPECT_EQ(static_cast<int8_t>(200), out);
@@ -402,7 +402,6 @@ TEST(ParamParsersMicrotest, Bitset_ToStringSilentlyDropsAnUnlistedBit) {
 
 TEST(ParamParsersMicrotest, Bitset_DescribesEachOptionWithOrWithoutADescription) {
   auto parser = MakeFlagParser();
-  // The desc says "Comma-separated" whatever the delimiter (pinned as observed).
   EXPECT_EQ("Comma-separated list of:\n        NONE\n        A\n        B\n        C - the C bit\n        AB",
             parser.desc);
 }

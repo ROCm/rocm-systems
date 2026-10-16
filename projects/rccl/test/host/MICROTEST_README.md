@@ -192,10 +192,9 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `ctx` to the callee) and its explicit-`bool` truthiness, and
     `makeOption(s)` /
     `ncclOptionSetAssertUnique`'s duplicate-name `WARN` (captured via
-    `../common/LogCapture.hpp`). First PR in the AICOMRCCL-2820 stacked
-    chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
-    registry, the remaining parsers, the C API, and env loading) are covered
-    by its follow-ups.
+    `../common/LogCapture.hpp`). The rest of `src/param/*` and
+    `src/include/param/*.h` is covered by the two entries below and
+    `rccl-UnitTestsMicroParam`.
   - `include/param/parser_{default,enum,bitset,list}.h` (header-only, from
     `param-parsers-test.cc`); suite `ParamParsersMicrotest.*`.
   - `param/param_registry.cc` (`PARAM_REGISTRY_CC_PATH`, from

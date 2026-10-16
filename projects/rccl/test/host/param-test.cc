@@ -741,11 +741,18 @@ TEST_F(ParamEnvFileMicrotest, SetEnvFile_MissingFileIsIgnored) {
 }
 
 TEST_F(ParamEnvFileMicrotest, SetEnvFile_SetsEachAssignmentLine) {
-  setEnvFile(WriteFile("# COMMENT=1\nA=1\nB=x=y\r\n\nNO_EQUALS\n=empty\nC=\nD=last\r").c_str());
-  EXPECT_EQ((Pairs{{"A", "1"}, {"B", "x=y"}, {"", "empty"}, {"C", ""}, {"D", "last"}}), g_setEnv);
+  setEnvFile(WriteFile("# COMMENT=1\nA=1\nB=x=y\r\n\nNO_EQUALS\nC=\nD=last\r").c_str());
+  EXPECT_EQ((Pairs{{"A", "1"}, {"B", "x=y"}, {"C", ""}, {"D", "last"}}), g_setEnv);
 }
 
-TEST_F(ParamEnvFileMicrotest, SetEnvFile_TruncatesNamesAndValuesTo1023) {
+// A line with no name still reaches setenv, as an empty name; a fix flips this pin.
+TEST_F(ParamEnvFileMicrotest, SetEnvFile_KnownBug_EmptyNameIsPassedToSetenv) {
+  setEnvFile(WriteFile("A=1\n=empty\n").c_str());
+  EXPECT_EQ((Pairs{{"A", "1"}, {"", "empty"}}), g_setEnv);
+}
+
+// Names and values are cut to 1023 chars, so a long name sets a different variable; a fix flips this pin.
+TEST_F(ParamEnvFileMicrotest, SetEnvFile_KnownBug_TruncatesNamesAndValuesTo1023) {
   setEnvFile(WriteFile(std::string(1100, 'K') + "=" + std::string(1100, 'v') + "\n").c_str());
   EXPECT_EQ((Pairs{{std::string(1023, 'K'), std::string(1023, 'v')}}), g_setEnv);
 }
