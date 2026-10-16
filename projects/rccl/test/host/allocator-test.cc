@@ -291,6 +291,7 @@ class AllocatorMicrotest : public ::testing::Test {
 
 // ncclMemAlloc / ncclMemFree
 
+#if ROCM_VERSION >= 70000
 TEST_F(AllocatorMicrotest, MemAlloc_FallsBackToHipMallocWithoutCuMem) {
   void* p = nullptr;
   ASSERT_EQ(ncclMemAlloc_impl(&p, 100), ncclSuccess);
@@ -462,6 +463,18 @@ TEST_F(AllocatorMicrotest, MemFree_LookupFailuresStillRestoreTheDevice) {
   g_hipGetDevice = [](int*) { return hipErrorInvalidValue; };
   EXPECT_EQ(ncclMemFree_impl(p), ncclUnhandledCudaError);
 }
+#else
+// Below ROCm 7.0 both are plain hipMalloc/hipFree, even with cuMem enabled.
+TEST_F(AllocatorMicrotest, MemAllocAndFree_PlainHipBelowRocm7) {
+  g_cuMemEnable = 1;
+  void* p = nullptr;
+  ASSERT_EQ(ncclMemAlloc_impl(&p, 100), ncclSuccess);
+  EXPECT_EQ(mallocs_, std::vector<size_t>{100});
+  ASSERT_EQ(ncclMemFree_impl(p), ncclSuccess);
+  EXPECT_EQ(frees_, std::vector<void*>{p});
+  EXPECT_EQ(g_rocmInitCalls, 0);
+}
+#endif  // ROCM_VERSION >= 70000
 
 // ncclSpace
 

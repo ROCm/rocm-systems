@@ -16,11 +16,13 @@
 #include <cstdarg>
 #include <cstdint>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <initializer_list>
 #include <map>
 #include <memory>
+#include <new>
 #include <string>
 #include <utility>
 #include <vector>
@@ -68,8 +70,14 @@ ncclResult_t g_asyncError = ncclSuccess;
 ncclResult_t g_asyncErrorResult = ncclSuccess;
 
 // Counts deletes of one watched pointer and keeps its memory, so a double delete is observable.
+// new is replaced too so the pair stays malloc/free, which ASan expects.
 void* g_watchedDelete = nullptr;
 int g_watchedDeletes = 0;
+void* operator new(size_t n) {
+  void* p = std::malloc(n ? n : 1);
+  if (p == nullptr) throw std::bad_alloc();
+  return p;
+}
 void operator delete(void* p) noexcept {
   if (p != nullptr && p == g_watchedDelete) {
     g_watchedDeletes++;
@@ -118,8 +126,13 @@ ncclResult_t ncclMgmtTaskEnqueue(struct ncclAsyncJob* job, ncclResult_t (*func)(
 
 int g_mallocFailAt = 0;
 int g_mallocCalls = 0;
+constexpr unsigned char kMallocPoison = 0xee;
+// Fills fresh blocks with kMallocPoison so fields the UUT leaves unset read the same every run.
 void* MemManagerMalloc(size_t n) {
-  return ++g_mallocCalls == g_mallocFailAt ? nullptr : std::malloc(n);
+  if (++g_mallocCalls == g_mallocFailAt) return nullptr;
+  void* p = std::malloc(n);
+  if (p != nullptr) std::memset(p, kMallocPoison, n);
+  return p;
 }
 
 #include "fakes/param_redirect.h"
@@ -911,7 +924,8 @@ TEST_F(MemManagerMicrotest, Exchange_FabricEntryWithoutAnExportedHandleIsSentAny
   inbox_[1] = {};
   ASSERT_EQ(ncclCommMemResume(comm_.get()), ncclSuccess);
   ASSERT_EQ(sent_[1].size(), 1u);
-  EXPECT_NE(sent_[1][0].fabricHandle.data[63], 0x5c);
+  EXPECT_EQ(sent_[1][0].handleType, kFabricHandle);
+  EXPECT_EQ(sent_[1][0].fabricHandle.data[63], kMallocPoison);
 }
 
 TEST_F(MemManagerMicrotest, Exchange_ReceivesOnlyFromPeersWithHandles) {
