@@ -6,6 +6,7 @@
 
 #include <gtest/gtest.h>
 
+#include <algorithm>
 #include <cstring>
 #include <elf.h>
 #include <fstream>
@@ -34,8 +35,19 @@ std::vector<std::uint8_t> ReadFile(const char* path) {
 }
 
 constexpr const char* kElf = "kernel_full_elf_vsadd/aie.elf";
-// The only arch with a full-ELF format the reader implements.
-constexpr const char* kArch = "aie2p";
+// The arch the configured NPU target builds full-ELF kernels for (aie2p or aie4; aie2 has no
+// full-ELF format at all, see RejectsArchWithoutFullElf).
+constexpr const char* kArch = AIE_HSACO_ARCH;
+/**
+ * @brief Whether kArch is aie4.
+ *
+ * aie4's full ELF carries no .pdi section; its kernel's control code is split across several
+ * pages instead (see amd_aie_elf.h's Page/aie4 doc comments), unlike aie2p's one page plus PDI.
+ * Several tests below only make sense for one shape or the other.
+ *
+ * @return true if kArch is "aie4"
+ */
+bool IsAie4() { return std::strcmp(kArch, "aie4") == 0; }
 
 // ---------------------------------------------------------------------------
 // In-memory ELF surgery
@@ -178,6 +190,19 @@ hsa_status_t ParseImage(const std::vector<std::uint8_t>& image,
 // The relocation type the reader reads as "write a 64-bit address here", used for PDI symbols.
 constexpr std::uint32_t kAddress64 = 8;
 
+/**
+ * @brief The offsets of a PDI's patch sites, for comparing against a plain expected list.
+ *
+ * @param sites patch sites, e.g. from a Pdi's patch_sites
+ * @return the offset of each site, in order
+ */
+std::vector<std::uint32_t> Offsets(const std::vector<rocr::AMD::aie_elf::PdiPatchSite>& sites) {
+  std::vector<std::uint32_t> offsets;
+  offsets.reserve(sites.size());
+  for (const auto& s : sites) offsets.push_back(s.offset);
+  return offsets;
+}
+
 TEST(AieElfParse, ParsesVectorScalarAdd) {
   const auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
@@ -189,6 +214,19 @@ TEST(AieElfParse, ParsesVectorScalarAdd) {
       << error;
   ASSERT_FALSE(kernels.empty());
 
+  const auto& k = kernels.begin()->second;
+  if (IsAie4()) {
+    // A real aie4 kernel's control code is split across several pages (confirmed via readelf on a
+    // real aie4 full ELF -- see amd_aie_elf.h's Page doc comment), not the one aie2p always has.
+    EXPECT_TRUE(k.pdis.empty());
+    ASSERT_GT(k.pages.size(), 1u);
+    EXPECT_TRUE(std::any_of(k.pages.begin(), k.pages.end(), [](const auto& page) {
+      return !page.ctrldata.empty();
+    })) << "no page carries the ctrldata an argument site patches into";
+    EXPECT_GT(k.num_args(), 0u);
+    return;
+  }
+
   // Compared against the artifact's own sections rather than fixed sizes: their sizes change with
   // the mlir-aie version that built the ELF, but the reader must copy them out verbatim either way.
   const auto ctrltext = SectionContents(image, ".ctrltext.0");
@@ -196,12 +234,14 @@ TEST(AieElfParse, ParsesVectorScalarAdd) {
   ASSERT_FALSE(ctrltext.empty()) << "artifact has no .ctrltext.0 section";
   ASSERT_FALSE(pdi.empty()) << "artifact has no .pdi.1 section";
 
-  const auto& k = kernels.begin()->second;
-  EXPECT_EQ(k.ctrl_code, ctrltext);
+  ASSERT_EQ(k.pages.size(), 1u);
+  EXPECT_EQ(k.pages[0].ctrltext, ctrltext);
+  EXPECT_TRUE(k.pages[0].ctrldata.empty());
   ASSERT_EQ(k.pdis.size(), 1u);
   EXPECT_EQ(k.pdis[0].bytes, pdi);
-  ASSERT_EQ(k.pdis[0].patch_offsets.size(), 1u);
-  EXPECT_NE(k.pdis[0].patch_offsets[0], 0u);
+  ASSERT_EQ(k.pdis[0].patch_sites.size(), 1u);
+  EXPECT_EQ(k.pdis[0].patch_sites[0].page, 0u);
+  EXPECT_NE(k.pdis[0].patch_sites[0].offset, 0u);
   EXPECT_GT(k.num_args(), 0u);
 }
 
@@ -268,6 +308,7 @@ TEST(AieElfParse, ParsesTwoPatchSitesForOnePdi) {
   // relocation into a second relocation of .pdi.1 (symbol 1, as the ELF's relocation 0 already is).
   auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+  if (IsAie4()) GTEST_SKIP() << "no PDI construct to test on aie4";
 
   std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
   std::string error;
@@ -280,7 +321,7 @@ TEST(AieElfParse, ParsesTwoPatchSitesForOnePdi) {
   const auto& k = kernels.begin()->second;
   ASSERT_EQ(k.pdis.size(), 1u);
   EXPECT_EQ(k.pdis[0].bytes, SectionContents(image, ".pdi.1"));
-  EXPECT_EQ(k.pdis[0].patch_offsets,
+  EXPECT_EQ(Offsets(k.pdis[0].patch_sites),
             (std::vector<std::uint32_t>{RelocationOffset(image, 0), RelocationOffset(image, 1)}));
 }
 
@@ -291,6 +332,7 @@ TEST(AieElfParse, ParsesTwoPdisInOneKernel) {
   // own section header refers to its file offset.
   auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+  if (IsAie4()) GTEST_SKIP() << "no PDI construct to test on aie4";
 
   std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
   std::string error;
@@ -328,9 +370,9 @@ TEST(AieElfParse, ParsesTwoPdisInOneKernel) {
   const auto& k = kernels.begin()->second;
   ASSERT_EQ(k.pdis.size(), 2u);
   EXPECT_EQ(k.pdis[0].bytes, SectionContents(image, ".pdi.1"));
-  EXPECT_EQ(k.pdis[0].patch_offsets, std::vector<std::uint32_t>{RelocationOffset(image, 0)});
+  EXPECT_EQ(Offsets(k.pdis[0].patch_sites), std::vector<std::uint32_t>{RelocationOffset(image, 0)});
   EXPECT_EQ(k.pdis[1].bytes, SectionContents(image, ".pdi.2"));
-  EXPECT_EQ(k.pdis[1].patch_offsets, std::vector<std::uint32_t>{RelocationOffset(image, 2)});
+  EXPECT_EQ(Offsets(k.pdis[1].patch_sites), std::vector<std::uint32_t>{RelocationOffset(image, 2)});
 }
 
 TEST(AieElfParse, RejectsAmbiguousPdiName) {
@@ -339,6 +381,7 @@ TEST(AieElfParse, RejectsAmbiguousPdiName) {
   // than resolved by section order. Give a spare section the name ".pdi.1".
   auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+  if (IsAie4()) GTEST_SKIP() << "no PDI construct to test on aie4";
 
   std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
   std::string error;
@@ -356,6 +399,7 @@ TEST(AieElfParse, AcceptsRepeatedPdiNameWithSameContents) {
   // unambiguous and has to parse. Give a spare section the name ".pdi.1" and the original's bytes.
   auto image = ReadFile(kElf);
   if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+  if (IsAie4()) GTEST_SKIP() << "no PDI construct to test on aie4";
 
   std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
   std::string error;
@@ -387,13 +431,41 @@ TEST(AieElfParse, RejectsArgumentPatchSiteOutOfRange) {
   std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
   std::string error;
   ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
-  const std::size_t ctrl_code_size = kernels.begin()->second.ctrl_code.size();
+
+  // Relocation 1 is always some argument's patch site (aie2p: reloc 0 is the PDI, reloc 1 the
+  // first/only argument; aie4: both relocations are arguments), so its target buffer's size is
+  // whichever page/buffer the first site found below names -- not necessarily page 0's ctrltext,
+  // unlike aie2p's single-page shape.
+  const rocr::AMD::aie_elf::Kernel& k = kernels.begin()->second;
+  const rocr::AMD::aie_elf::PatchSite* first_site = nullptr;
+  for (const auto& sites : k.arg_sites) {
+    if (!sites.empty()) {
+      first_site = &sites.front();
+      break;
+    }
+  }
+  ASSERT_NE(first_site, nullptr) << "artifact has no argument patch sites";
+  const std::vector<std::uint8_t>& target_buffer = first_site->in_ctrldata
+      ? k.pages[first_site->page].ctrldata
+      : k.pages[first_site->page].ctrltext;
+  const std::size_t ctrl_code_size = target_buffer.size();
+
+  // SetRelocationOffset writes the ELF's raw r_offset, not the post-rebase in-buffer offset
+  // aie_elf::Parse() computes: for a ctrldata site that is a combined ctrltext+ctrldata address
+  // space value (see Parse()'s own rebase), so an in-buffer offset has to be converted back into
+  // it. A no-op for a ctrltext site (aie2p's only kind), where the two spaces are the same thing.
+  const auto to_raw_offset = [&](std::uint32_t in_buffer_offset) -> std::uint32_t {
+    if (!first_site->in_ctrldata) return in_buffer_offset;
+    const std::uint32_t ctrltext_size =
+        static_cast<std::uint32_t>(k.pages[first_site->page].ctrltext.size());
+    return in_buffer_offset + ctrltext_size - 16;
+  };
 
   // The last dword of the control code: in range on its own, but the two the patch also writes
   // are not.
   auto past_the_end = image;
   ASSERT_TRUE(SetRelocationOffset(past_the_end, /*index=*/1,
-                                  static_cast<std::uint32_t>(ctrl_code_size - 4)));
+                                  to_raw_offset(static_cast<std::uint32_t>(ctrl_code_size - 4))));
   EXPECT_NE(ParseImage(past_the_end, &kernels, &error), HSA_STATUS_SUCCESS)
       << "an out-of-range argument patch site was accepted";
   EXPECT_NE(error.find("argument patch site"), std::string::npos)
@@ -429,9 +501,10 @@ TEST(AieElfParse, RejectsOsAbiOfAnotherArch) {
   std::string error;
   ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
 
-  image[EI_OSABI] = 64;  // aie2ps
+  // Some OS/ABI value belonging to neither kArch nor any arch the reader would mistake it for.
+  image[EI_OSABI] = IsAie4() ? 69 : 64;  // aie2p's OS/ABI, or aie2ps's if kArch is already aie4
   EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS);
-  EXPECT_NE(error.find("not an aie2p AIE ELF"), std::string::npos)
+  EXPECT_NE(error.find(std::string("not an ") + kArch + " AIE ELF"), std::string::npos)
       << "rejected for the wrong reason: " << error;
 }
 
@@ -479,11 +552,15 @@ TEST(AieElfParse, FindsStringTablesThroughSymbolTableLinks) {
   for (const auto& [name, k] : expected) {
     const auto it = kernels.find(name);
     ASSERT_NE(it, kernels.end()) << "kernel " << name << " not found";
-    EXPECT_EQ(it->second.ctrl_code, k.ctrl_code);
+    ASSERT_EQ(it->second.pages.size(), k.pages.size());
+    for (std::size_t pg = 0; pg < k.pages.size(); ++pg) {
+      EXPECT_EQ(it->second.pages[pg].ctrltext, k.pages[pg].ctrltext);
+      EXPECT_EQ(it->second.pages[pg].ctrldata, k.pages[pg].ctrldata);
+    }
     ASSERT_EQ(it->second.pdis.size(), k.pdis.size());
     for (std::size_t p = 0; p < k.pdis.size(); ++p) {
       EXPECT_EQ(it->second.pdis[p].bytes, k.pdis[p].bytes);
-      EXPECT_EQ(it->second.pdis[p].patch_offsets, k.pdis[p].patch_offsets);
+      EXPECT_EQ(Offsets(it->second.pdis[p].patch_sites), Offsets(k.pdis[p].patch_sites));
     }
     EXPECT_EQ(it->second.num_args(), k.num_args());
   }
@@ -496,6 +573,16 @@ TEST(AieElfPatch, ShimDma48IsAdditive) {
   rocr::AMD::aie_elf::PatchShimDma48(once, 0x2000);
   rocr::AMD::aie_elf::PatchShimDma48(twice, 0x2000);
   rocr::AMD::aie_elf::PatchShimDma48(twice, 0x2000);
+  EXPECT_NE(once[1], twice[1]);
+}
+
+TEST(AieElfPatch, ShimDma57Aie4IsAdditive) {
+  // Same contract as ShimDma48, for aie4's wider (57-bit, site[0]+site[1]) scheme.
+  std::uint32_t once[2] = {0, 0x1000};
+  std::uint32_t twice[2] = {0, 0x1000};
+  rocr::AMD::aie_elf::PatchShimDma57Aie4(once, 0x2000);
+  rocr::AMD::aie_elf::PatchShimDma57Aie4(twice, 0x2000);
+  rocr::AMD::aie_elf::PatchShimDma57Aie4(twice, 0x2000);
   EXPECT_NE(once[1], twice[1]);
 }
 
