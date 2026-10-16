@@ -37,6 +37,7 @@
 
 #include <algorithm>
 #include <cctype>
+#include <cstddef>
 #include <csignal>
 #include <cstdio>
 #include <cstdlib>
@@ -1285,6 +1286,77 @@ HRR_TEST_CASE(Unit_HRR_DeviceExtraRoundtrip) {
 HRR_TEST_CASE(Unit_HRR_StreamAdvanced2Roundtrip) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_streamadv2"};
   hrr_run_roundtrip("Unit_HRR_StreamAdvanced2_Direct", cap.path);
+}
+
+// Point the archive's hipStreamCreateWithFlags at another handle, and return
+// the one it recorded: the calls made on that stream then name a stream the
+// replay never created, as they do when the creating call is left out.
+static uint64_t hrr_redirect_stream_create(const fs::path& events_bin) {
+  std::fstream f(events_bin, std::ios::in | std::ios::out | std::ios::binary);
+  REQUIRE(f.good());
+  std::streamoff off = sizeof(hrr_file_header);
+  hrr_event_header hdr{};
+  while (f.seekg(off) && f.read(reinterpret_cast<char*>(&hdr), sizeof(hdr))) {
+    REQUIRE(hdr.payload_length >= sizeof(hdr));
+    if (hdr.event_type == HRR_API_HIPSTREAMCREATEWITHFLAGS) {
+      const std::streamoff at = off + offsetof(hrr_args_hipStreamCreateWithFlags, stream);
+      uint64_t recorded = 0;
+      f.seekg(at);
+      f.read(reinterpret_cast<char*>(&recorded), sizeof(recorded));
+      const uint64_t other = recorded ^ 0x100000;
+      f.seekp(at);
+      f.write(reinterpret_cast<const char*>(&other), sizeof(other));
+      REQUIRE(f.good());
+      return recorded;
+    }
+    off += hdr.payload_length;
+  }
+  return 0;
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Capture Unit_HRR_StreamElision_Direct, a memset on a created stream, and
+ *     replay it unchanged: exit 0.
+ *   - Rewrite the archive so the creating call maps another handle. The
+ *     replay must stop at the memset, naming the API and the recorded handle,
+ *     rather than run it on the null stream.
+ *   - With --lossy-streams the same archive replays with exit 0: its bytes
+ *     alone cannot tell a missing stream from a present one, which is why the
+ *     strict default refuses.
+ */
+HRR_TEST_CASE(Unit_HRR_ElidedStreamRoundtrip) {
+  ScopedDir cap{fs::temp_directory_path() / "hrr_roundtrip_elidedstream"};
+  hrr_capture_direct("Unit_HRR_StreamElision_Direct", cap.path);
+  const fs::path arc = hrr_single_process_archive(cap.path);
+
+  {
+    auto [rc, out] = hrr_playback_merged(arc);
+    INFO("Replay output:\n" << out);
+    REQUIRE(rc == 0);
+  }
+
+  const uint64_t recorded = hrr_redirect_stream_create(arc / "events.bin");
+  REQUIRE(recorded != 0);
+  char handle[32];
+  snprintf(handle, sizeof(handle), "0x%llx", (unsigned long long)recorded);
+
+  {
+    auto [rc, out] = hrr_playback_merged(arc);
+    INFO("Replay output:\n" << out);
+    CHECK(rc != 0);
+    CHECK(rc < 128);
+    CHECK(out.find("(hipMemsetAsync, seq") != std::string::npos);
+    CHECK(out.find(std::string("recorded stream ") + handle + " has no live stream") !=
+          std::string::npos);
+  }
+
+  {
+    auto [rc, out] = hrr_playback_merged(arc, "--lossy-streams");
+    INFO("Replay output:\n" << out);
+    CHECK(rc == 0);
+  }
 }
 
 HRR_TEST_CASE(Unit_HRR_ContextRoundtrip) {

@@ -1364,6 +1364,37 @@ TEST_CASE("Unit_HRR_DeviceInfo_Direct", "[.][hrr-direct]") {
 }
 
 // ===========================================================================
+// Workload: work on a created stream
+//
+// One stream, one memset on it, one readback. Unit_HRR_ElidedStreamRoundtrip
+// rewrites the archive so the stream's creating call maps another handle,
+// which is what a replay sees when that call is not replayed. The bytes come
+// out the same whichever stream the memset runs on, so only the replay's own
+// refusal tells the difference.
+// Final blob: 0x5A5A5A5A.
+// ===========================================================================
+TEST_CASE("Unit_HRR_StreamElision_Direct", "[.][hrr-direct]") {
+  HRR_HIP_CHECK(hipSetDevice(0));
+  constexpr int N = 256;
+  constexpr size_t SZ = N * sizeof(int);
+
+  hipStream_t s;
+  HRR_HIP_CHECK(hipStreamCreateWithFlags(&s, hipStreamNonBlocking));
+  int* d = nullptr;
+  HRR_HIP_CHECK(hipMalloc(&d, SZ));
+  HRR_HIP_CHECK(hipMemsetAsync(d, 0x5A, SZ, s));
+  HRR_HIP_CHECK(hipStreamSynchronize(s));
+
+  int* h = new int[N]();
+  HRR_HIP_CHECK(hipMemcpy(h, d, SZ, hipMemcpyDeviceToHost));
+  for (int i = 0; i < N; ++i) REQUIRE(h[i] == 0x5A5A5A5A);
+
+  HRR_HIP_CHECK(hipFree(d));
+  HRR_HIP_CHECK(hipStreamDestroy(s));
+  delete[] h;
+}
+
+// ===========================================================================
 // Workload D: Stream + event advanced APIs
 //
 // Exercises hipStreamGetId, hipStreamGetAttribute, hipStreamCopyAttributes,

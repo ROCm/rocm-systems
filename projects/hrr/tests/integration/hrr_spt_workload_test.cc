@@ -222,11 +222,9 @@ TEST_CASE("Unit_HRR_MemsetSpt_Direct", "[.][hrr-direct]") {
   // stream and passes an explicitly created one straight through.
   //
   // Omitting the stream instead, and so taking the _spt prototype's
-  // hipStreamPerThread default, reaches the same stream but is deliberately not
-  // exercised here: it records the sentinel handle, and replay only resolves
-  // that because translate_stream returns nullptr for handles it cannot map.
-  // AIRUNTIME-2556 turns that fallback into an explicit failure, which would
-  // break this test as though the memset handlers had regressed.
+  // hipStreamPerThread default, reaches the same stream but records the
+  // sentinel handle, which translate_stream passes through as itself; the
+  // matrix workloads cover that form.
   HRR_HIP_CHECK(hipMemsetAsync(d_set_async, 0x42, SZ, nullptr));
   HRR_HIP_CHECK(hipMemset2D(d_set2d, PITCH, 0x44, PITCH, ROWS));
   HRR_HIP_CHECK(hipMemset2DAsync(d_set2d_async, PITCH, 0x4C, PITCH, ROWS, nullptr));
