@@ -203,7 +203,9 @@ __device__ __forceinline__ void ddaLL128StoreWire(
     ddaLL128StoreAtomic16B(wire + u * kDdaLL128Warp, regs[u], flagLane ? flag : regs[u + 1]);
 }
 
-// Poll until every line this lane reads has landed, then read the payload once.
+// Poll until every line this lane reads has landed. The cooperative 8x16B load
+// returns a whole line, flag included, in one transaction, so the poll that sees
+// every flag already holds the payload. The plain 16B fallback reads it again.
 __device__ __forceinline__ void ddaLL128PollWire(
   const uint64_t* wire, uint64_t (&vr)[kDdaLL128WordsPerThread], uint64_t flag, int wid) {
   const bool flagLane = ddaLL128IsFlagLane(wid);
@@ -216,9 +218,11 @@ __device__ __forceinline__ void ddaLL128PollWire(
       needReload |= flagLane && (vr[u + 1] != flag);
     }
   } while (__any(needReload));
+#if !RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS
 #pragma unroll
   for (int u = 0; u < kDdaLL128WordsPerThread; u += 2)
     ddaLL128LoadAtomic16B(wire + u * kDdaLL128Warp, vr[u], vr[u + 1]);
+#endif
 }
 
 // Flag-lane un-shuffle then store of registers into `dst`
