@@ -3,18 +3,19 @@
 # SPDX-License-Identifier:  MIT
 # ruff: noqa: E501
 
-"""Generate a metric health HTML report that compares two health runs.
+"""Generate a metric health HTML report from one or two health runs.
 
-The report reads two completed artifact directories written by
+The report reads one or two completed artifact directories written by
 scripts/run_metric_health_test_report_local_driver.sh --fetch:
 
-* `--candidate`: a run of this branch.
-* `--baseline`: a separate run of rocprofiler-compute-develop.
+* `-p` / `--path`: the baseline run.
+* A second `-p` / `--path`: the candidate run to compare with the baseline.
 
 Each directory holds `logs/<arch>/<workload>_<run>.log` (analyze output) and
 `<arch>/<workload>_<tag>_<run>/.../sysinfo.csv` (the profiled workload). `<run>`
-is `--candidate-run` / `--baseline-run`. The two runs are never produced or
-re-profiled by this tool, and nothing here switches allocator modes.
+is `--candidate-run` / `--baseline-run`. One path produces the baseline health
+report without comparison sections. The runs are never produced or re-profiled
+by this tool, and nothing here switches allocator modes.
 
 Analyze logs must be produced with `--view table` so chart-only panels (roofline,
 memory charts, etc.) are emitted as plain metric tables. Default TTY output omits
@@ -927,10 +928,10 @@ def _iteration_banner(
 
 
 def build_report(
-    candidate: RunArtifacts,
+    primary_run: RunArtifacts,
     parsed_logs: Dict[str, ParsedLog],
-    baseline: RunArtifacts,
-    baseline_logs: Dict[str, ParsedLog],
+    baseline: Optional[RunArtifacts],
+    baseline_logs: Optional[Dict[str, ParsedLog]],
     formulas: Dict[str, Tuple[str, str, bool]],
     out_path: Path,
     report_date: str,
@@ -941,7 +942,6 @@ def build_report(
     stat_label: str,
 ) -> None:
     wl_names = list(parsed_logs.keys())
-    baseline_label = baseline.label
     parsed: Dict[str, Dict[str, MetricValue]] = {
         wl: log.metrics for wl, log in parsed_logs.items()
     }
@@ -1028,55 +1028,58 @@ def build_report(
 
     improve_rows: List[str] = []
     delta_rows: List[str] = []
-    base_parsed: Dict[str, Dict[str, MetricValue]] = {
-        wl: log.metrics for wl, log in baseline_logs.items()
-    }
-    classify_metrics(base_parsed, metric_units, metric_formulas)
-    for key in all_keys:
-        mid, name = key.split("|", 1)
-        unit = formulas.get(key, ("", "", False))[1]
-        for wl in wl_names:
-            old = base_parsed.get(wl, {}).get(key)
-            new = parsed.get(wl, {}).get(key)
-            if not old or not new:
-                continue
-            if old.cls in {"overflow", "formula_overflow"} and new.cls not in {
-                "overflow",
-                "formula_overflow",
-            }:
-                improve_rows.append(
-                    f"<tr><td>{html.escape(wl)}</td>"
+    baseline_label = ""
+    if baseline is not None and baseline_logs is not None:
+        baseline_label = baseline.label
+        base_parsed: Dict[str, Dict[str, MetricValue]] = {
+            wl: log.metrics for wl, log in baseline_logs.items()
+        }
+        classify_metrics(base_parsed, metric_units, metric_formulas)
+        for key in all_keys:
+            mid, name = key.split("|", 1)
+            unit = formulas.get(key, ("", "", False))[1]
+            for wl in wl_names:
+                old = base_parsed.get(wl, {}).get(key)
+                new = parsed.get(wl, {}).get(key)
+                if not old or not new:
+                    continue
+                if old.cls in {"overflow", "formula_overflow"} and new.cls not in {
+                    "overflow",
+                    "formula_overflow",
+                }:
+                    improve_rows.append(
+                        f"<tr><td>{html.escape(wl)}</td>"
+                        f"<td class='mid'>{html.escape(mid)}</td>"
+                        f"<td>{html.escape(name)}</td>"
+                        f"<td style='background:#ffcdd2;font-weight:bold'>"
+                        f"{html.escape(fmt_value(old, unit))}</td>"
+                        f"<td style='background:#c8e6c9;font-weight:bold'>"
+                        f"{html.escape(fmt_value(new, unit))}</td>"
+                        f"<td>{html.escape(unit)}</td></tr>"
+                    )
+                if old.value is None or new.value is None:
+                    continue
+                # |rel| with old≈0 is undefined — skip (no huge % highlights).
+                rel = relative_abs_delta(old.value, new.value)
+                if rel is None or rel < DELTA_REL_THRESHOLD:
+                    continue
+                rel_pct = rel * 100.0
+                hi = rel >= DELTA_HIGHLIGHT_THRESHOLD
+                row_cls = " class='delta-ge-100'" if hi else ""
+                rel_cell = (
+                    f"<td style='background:#ffe082;font-weight:bold'>{rel_pct:.1f}%</td>"
+                    if hi
+                    else f"<td>{rel_pct:.1f}%</td>"
+                )
+                delta_rows.append(
+                    f"<tr{row_cls}><td>{html.escape(wl)}</td>"
                     f"<td class='mid'>{html.escape(mid)}</td>"
                     f"<td>{html.escape(name)}</td>"
-                    f"<td style='background:#ffcdd2;font-weight:bold'>"
-                    f"{html.escape(fmt_value(old, unit))}</td>"
-                    f"<td style='background:#c8e6c9;font-weight:bold'>"
-                    f"{html.escape(fmt_value(new, unit))}</td>"
+                    f"<td>{html.escape(fmt_value(old, unit))}</td>"
+                    f"<td>{html.escape(fmt_value(new, unit))}</td>"
+                    f"{rel_cell}"
                     f"<td>{html.escape(unit)}</td></tr>"
                 )
-            if old.value is None or new.value is None:
-                continue
-            # |rel| with old≈0 is undefined — skip (no huge % highlights).
-            rel = relative_abs_delta(old.value, new.value)
-            if rel is None or rel < DELTA_REL_THRESHOLD:
-                continue
-            rel_pct = rel * 100.0
-            hi = rel >= DELTA_HIGHLIGHT_THRESHOLD
-            row_cls = " class='delta-ge-100'" if hi else ""
-            rel_cell = (
-                f"<td style='background:#ffe082;font-weight:bold'>{rel_pct:.1f}%</td>"
-                if hi
-                else f"<td>{rel_pct:.1f}%</td>"
-            )
-            delta_rows.append(
-                f"<tr{row_cls}><td>{html.escape(wl)}</td>"
-                f"<td class='mid'>{html.escape(mid)}</td>"
-                f"<td>{html.escape(name)}</td>"
-                f"<td>{html.escape(fmt_value(old, unit))}</td>"
-                f"<td>{html.escape(fmt_value(new, unit))}</td>"
-                f"{rel_cell}"
-                f"<td>{html.escape(unit)}</td></tr>"
-            )
 
     sup_rows = []
     for wl in wl_names:
@@ -1149,7 +1152,7 @@ def build_report(
             + "".join(improve_rows)
             + "</tbody></table>"
         )
-    if delta_rows:
+    if len(delta_rows) > 2:
         n_hi = sum(1 for r in delta_rows if "delta-ge-100" in r)
         n_delta = len(delta_rows)
         n_metrics = len(all_keys)
@@ -1190,12 +1193,16 @@ def build_report(
             "</tr></thead><tbody>" + "".join(delta_rows) + "</tbody></table>"
         )
 
+    primary_label = "Candidate" if baseline is not None else "Run"
     runs_html = (
-        f" | <b>Candidate:</b> {html.escape(candidate.label)} "
-        f"(<code>{html.escape(str(candidate.artifact_dir))}</code>)"
-        f" | <b>Baseline:</b> {html.escape(baseline.label)} "
-        f"(<code>{html.escape(str(baseline.artifact_dir))}</code>)"
+        f" | <b>{primary_label}:</b> {html.escape(primary_run.label)} "
+        f"(<code>{html.escape(str(primary_run.artifact_dir))}</code>)"
     )
+    if baseline is not None:
+        runs_html += (
+            f" | <b>Baseline:</b> {html.escape(baseline.label)} "
+            f"(<code>{html.escape(str(baseline.artifact_dir))}</code>)"
+        )
 
     doc = f"""<!DOCTYPE html><html lang="en"><head><meta charset="UTF-8">
 <title>{html.escape(arch_title)} — Metric Health {html.escape(report_date)}</title>
@@ -1386,16 +1393,18 @@ def _build_arg_parser() -> argparse.ArgumentParser:
         help="GPU arch (selects analysis_configs dir and logs/<arch>)",
     )
     parser.add_argument(
-        "--candidate",
+        "-p",
+        "--path",
+        dest="paths",
         type=Path,
         required=True,
-        help="Artifact directory of the run under test (this branch)",
-    )
-    parser.add_argument(
-        "--baseline",
-        type=Path,
-        required=True,
-        help="Artifact directory of a separate rocprofiler-compute-develop run",
+        metavar="PATH",
+        nargs="+",
+        action="append",
+        help=(
+            "Artifact directories: baseline first; optional candidate second. "
+            "Accepts at most two paths."
+        ),
     )
     parser.add_argument("--candidate-label", default=DEFAULT_CANDIDATE_LABEL)
     parser.add_argument("--baseline-label", default=DEFAULT_BASELINE_LABEL)
@@ -1433,29 +1442,40 @@ def _build_arg_parser() -> argparse.ArgumentParser:
 
 
 def main() -> None:
-    args = _build_arg_parser().parse_args()
+    parser = _build_arg_parser()
+    args = parser.parse_args()
+    paths = [path for path_group in args.paths for path in path_group]
+    if len(paths) > 2:
+        parser.error(
+            "-p/--path accepts at most two paths: baseline first, candidate second"
+        )
+
     config_arch = ARCH_CONFIG_DIR[args.arch]
-    candidate = discover_run_artifacts(
-        args.candidate,
-        args.arch,
-        args.candidate_run,
-        args.candidate_label,
-        args.workloads,
-    )
     baseline = discover_run_artifacts(
-        args.baseline,
+        paths[0],
         args.arch,
         args.baseline_run,
         args.baseline_label,
         args.workloads,
     )
+    candidate: Optional[RunArtifacts] = None
+    if len(paths) == 2:
+        candidate = discover_run_artifacts(
+            paths[1],
+            args.arch,
+            args.candidate_run,
+            args.candidate_label,
+            args.workloads,
+        )
 
-    formulas = merge_formulas_from_logs(candidate.logs, config_arch)
+    primary_run = candidate or baseline
+    baseline_logs = load_run_logs(baseline) if candidate is not None else None
+    formulas = merge_formulas_from_logs(primary_run.logs, config_arch)
     build_report(
-        candidate,
-        load_run_logs(candidate),
-        baseline,
-        load_run_logs(baseline),
+        primary_run,
+        load_run_logs(primary_run),
+        baseline if candidate is not None else None,
+        baseline_logs,
         formulas,
         args.out,
         args.date,

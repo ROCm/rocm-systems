@@ -20,9 +20,9 @@
 # 500-iter medians are the default ITERS=500, including gfx942. There is no
 # separate 500med script.
 #
-# The report compares two artifact directories from two separate runs. Make
-# the baseline with a rocprofiler-compute-develop checkout as PROFILER_ROOT
-# (path on the GPU host) and RUN=develop, then fetch it:
+# `--report` without BASELINE generates a health report for the fetched run.
+# To compare two runs, make the baseline with a rocprofiler-compute-develop
+# checkout as PROFILER_ROOT (path on the GPU host) and RUN=develop, then fetch it:
 #
 #   ARCH=gfx942 TAG=261011-gfx942-500-develop RUN=develop \
 #     PROFILER_ROOT=/path/on/host/develop/projects/rocprofiler-compute \
@@ -34,8 +34,8 @@
 #     BASELINE=validation-artifacts/metric-health-261011-gfx942-500-develop \
 #     ./scripts/run_metric_health_test_report_local_driver.sh --report
 #
-# --report calls tools/generate_metric_health_report.py with
-# --candidate "$ARTIFACTS" --baseline "$BASELINE".
+# --report calls tools/generate_metric_health_report.py with -p "$ARTIFACTS"
+# for one run, or -p "$BASELINE" -p "$ARTIFACTS" for a comparison.
 
 set -euo pipefail
 
@@ -544,11 +544,7 @@ fetch_results() {
 generate_report() {
   local logs="${ARTIFACTS}/logs/${ARCH}"
   local reports="${ARTIFACTS}/reports"
-  if [[ -z "${BASELINE:-}" ]]; then
-    echo "ERROR: --report needs BASELINE=<artifact dir of a rocprofiler-compute-develop run>" >&2
-    exit 1
-  fi
-  if [[ ! -d "$BASELINE" ]]; then
+  if [[ -n "${BASELINE:-}" && ! -d "$BASELINE" ]]; then
     echo "ERROR: baseline artifact directory not found: ${BASELINE}" >&2
     exit 1
   fi
@@ -568,17 +564,33 @@ generate_report() {
   if [[ -f "${logs}/run_meta.env" ]]; then
     iters=$(grep -E '^ITERS=' "${logs}/run_meta.env" | cut -d= -f2- || echo "$ITERS")
   fi
-  python3 "${REPO_ROOT}/tools/generate_metric_health_report.py" \
-    --arch "$ARCH" \
-    --candidate "$ARTIFACTS" \
-    --candidate-run "$RUN" \
-    --baseline "$BASELINE" \
-    --baseline-run "$BASELINE_RUN" \
-    --out "${reports}/${ARCH}_health_vs_develop.html" \
-    --host "${REPORT_HOST}" \
-    --iterations "${iters}" \
+  local report_path="${reports}/${ARCH}_health.html"
+  local report_args=(
+    --arch "$ARCH"
+    -p "$ARTIFACTS"
+    --baseline-run "$RUN"
+    --baseline-label "this branch"
+    --out "$report_path"
+    --host "${REPORT_HOST}"
+    --iterations "${iters}"
     --stat Median
-  echo "Report: ${reports}/${ARCH}_health_vs_develop.html"
+  )
+  if [[ -n "${BASELINE:-}" ]]; then
+    report_path="${reports}/${ARCH}_health_vs_develop.html"
+    report_args=(
+      --arch "$ARCH"
+      -p "$BASELINE"
+      -p "$ARTIFACTS"
+      --baseline-run "$BASELINE_RUN"
+      --candidate-run "$RUN"
+      --out "$report_path"
+      --host "${REPORT_HOST}"
+      --iterations "${iters}"
+      --stat Median
+    )
+  fi
+  python3 "${REPO_ROOT}/tools/generate_metric_health_report.py" "${report_args[@]}"
+  echo "Report: ${report_path}"
 }
 
 if ! "${DO_WAIT}" && ! "${DO_FETCH}" && ! "${DO_REPORT}"; then
