@@ -5257,7 +5257,7 @@ void VirtualGPU::submitKernel(amd::NDRangeKernelCommand& vcmd) {
     }
 
     // Get device queue for exclusive GPU access
-    VirtualGPU* queue = dev().xferQueue();
+    VirtualGPU* queue = dev().coopQueue();
     if (!queue) {
       LogError("Runtime failed to acquire a cooperative queue!");
       vcmd.setStatus(CL_INVALID_OPERATION);
