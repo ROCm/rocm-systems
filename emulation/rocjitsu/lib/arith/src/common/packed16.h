@@ -12,6 +12,31 @@
 // Adapted from rocjitsu shared/dot_packed16.h.
 namespace rocjitsu::arith::packed16 {
 
+/// @brief Widen a packed value to FP32 bits without host FP operations.
+/// @details Preserves signaling NaN payloads without quieting them.
+template <bool Bf16> inline uint32_t widen(uint16_t bits) {
+  if constexpr (Bf16) {
+    return uint32_t(bits) << 16;
+  }
+  const uint32_t sign = uint32_t(bits & 0x8000) << 16;
+  const uint32_t exponent = (bits >> 10) & 31;
+  const uint32_t fraction = bits & 1023;
+  if (exponent == 31) {
+    return sign | 0x7f800000u | (fraction << 13);
+  }
+  if (exponent) {
+    return sign | ((exponent + 112) << 23) | (fraction << 13);
+  }
+  if (!fraction) {
+    return sign;
+  }
+  int shift = 0;
+  while (!((fraction << shift) & 1024)) {
+    ++shift;
+  }
+  return sign | ((113 - shift) << 23) | (((fraction << shift) & 1023) << 13);
+}
+
 /// @brief Narrow infinity or NaN bits using the packed WMMA payload policy.
 template <bool Bf16> inline uint16_t special(uint32_t bits) {
   // Factor NaNs have a format-specific diagnostic payload on both cards.
