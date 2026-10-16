@@ -293,28 +293,6 @@ def test_uninitialized_tensor_item_still_raises(monkeypatch):
         wrapped.contiguous()
 
 
-def test_lazy_batch_norm_to_cuda_keeps_uninitialized_buffer(monkeypatch):
-    from tests.integration.common import require_torch
-    from utils.inject_roctx._backends import torch as torch_backend
-
-    require_torch(gpu=True)
-    import torch
-    from torch.nn.parameter import UninitializedBuffer
-
-    if not torch_backend._resolve_torch():
-        pytest.skip("torch could not be resolved for inject_roctx backend")
-
-    monkeypatch.setattr(torch_backend, "_push_scope", lambda *args, **kwargs: None)
-    monkeypatch.setattr(torch_backend, "_pop_scope", lambda: None)
-    install_tensor_method_wrappers_for_test(monkeypatch, torch_backend, torch)
-
-    model = torch.nn.LazyBatchNorm1d().to("cuda")
-    assert isinstance(model.running_mean, UninitializedBuffer)
-    assert isinstance(model.running_var, UninitializedBuffer)
-    assert model.running_mean.device.type == "cuda"
-    model(torch.randn(2, 4, device="cuda"))
-
-
 def test_lazy_batch_norm_to_dtype_keeps_uninitialized_buffer(monkeypatch):
     from tests.integration.common import require_torch
     from utils.inject_roctx._backends import torch as torch_backend

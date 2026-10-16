@@ -905,6 +905,15 @@ add_test(
         ${COV_OPTION} tests/unit/utils/inject_roctx/test_torch.py ${WORKING_DIR_OPTION}
 )
 
+add_test(
+    NAME test_inject_roctx_torch_gpu
+    COMMAND
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_inject_roctx_torch_gpu.xml
+        ${COV_OPTION} tests/integration/test_inject_roctx_torch_gpu.py
+        ${WORKING_DIR_OPTION}
+)
+set_tests_properties(test_inject_roctx_torch_gpu PROPERTIES RESOURCE_GROUPS gpus:1)
+
 # ---------------------------------------
 # Pure csv compatibility layer for pandas
 # ---------------------------------------
@@ -1110,6 +1119,7 @@ if(${ENABLE_COVERAGE})
         test_torch_trace_coverage
         test_inject_roctx_package
         test_inject_roctx_torch
+        test_inject_roctx_torch_gpu
         test_analysis_db
         test_analysis_base
         test_analysis_orm
