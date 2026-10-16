@@ -16,6 +16,6 @@ int main(void) {
   uint32_t words[32] = {0};
   uint32_t *vgpr = words;
   const uint32_t *input = words;
-  return rj_arith_v_fma_f16_w32_gfx12(rj_arith_init_cpu_flags(), 1, 0, &vgpr, &input, &input,
-                                      &input, NULL) != RJ_ARITH_SUCCESS;
+  return rj_arith_v_fma_f32_w32(rj_arith_init_cpu_flags(), 1, 0, &vgpr, &input, &input, &input,
+                                NULL) != RJ_ARITH_SUCCESS;
 }

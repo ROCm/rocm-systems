@@ -116,15 +116,8 @@ foreach(mnemonic IN ITEMS
 endforeach()
 
 # Related comparison predicates share a binary; every entry point has its own test.
-foreach(family IN ITEMS
-    constant
-    integer_equality
-    integer_ordering
-    class
-    float_equality
-    float_ordered
-    float_unordered
-)
+foreach(family IN ITEMS constant integer_equality integer_ordering
+    class float_equality float_ordered float_unordered)
   set(target "rj_arith_compare_${family}_test")
   add_executable(${target} compare/${family}_test.cpp)
   target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
@@ -165,17 +158,7 @@ foreach(family IN ITEMS
 endforeach()
 
 # Conversion layouts share contract checks; family references remain independent.
-foreach(family IN ITEMS
-    integer_pack
-    byte
-    float16
-    float32
-    float64
-    normalized
-    packed
-    fp8_widen
-    fp8_narrow
-)
+foreach(family IN ITEMS integer_pack byte float16 float32 float64 normalized packed fp8_widen fp8_narrow)
   set(target "rj_arith_conversion_${family}_test")
   add_executable(${target} conversion/${family}_test.cpp)
   target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
@@ -187,12 +170,7 @@ foreach(family IN ITEMS
 endforeach()
 
 # Dot-product formats retain family-specific arithmetic and status expectations.
-foreach(family IN ITEMS
-    integer
-    fp8
-    half
-    dot2
-)
+foreach(family IN ITEMS integer fp8 half dot2)
   set(target "rj_arith_dot_${family}_test")
   add_executable(${target} dot/${family}_test.cpp)
   target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
@@ -204,14 +182,7 @@ foreach(family IN ITEMS
 endforeach()
 
 # Register-only operations share routing and preservation checks.
-foreach(family IN ITEMS
-    move
-    swap
-    ds
-    permlane
-    relative
-    lane
-)
+foreach(family IN ITEMS move swap ds permlane relative lane)
   set(target "rj_arith_register_${family}_test")
   add_executable(${target} register/${family}_test.cpp)
   target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
@@ -223,11 +194,7 @@ foreach(family IN ITEMS
 endforeach()
 
 # Graphics families retain their independent interpolation and selection references.
-foreach(family IN ITEMS
-    cube
-    interp
-    mullit
-)
+foreach(family IN ITEMS cube interp mullit)
   set(target "rj_arith_graphics_${family}_test")
   add_executable(${target} graphics/${family}_test.cpp)
   target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
@@ -239,11 +206,7 @@ foreach(family IN ITEMS
 endforeach()
 
 # VOPD wrappers retain the ordinary instructions' arithmetic and status contracts.
-foreach(family IN ITEMS
-    alu
-    fused
-    dot
-)
+foreach(family IN ITEMS alu fused dot)
   set(target "rj_arith_dual_${family}_test")
   add_executable(${target} dual/${family}_test.cpp)
   target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
@@ -255,24 +218,7 @@ foreach(family IN ITEMS
 endforeach()
 
 # Scalar families keep required SCC/EXEC results distinct from FP status.
-foreach(family IN ITEMS
-    boolean
-    shift
-    move
-    field
-    count
-    pack
-    arithmetic
-    compare_integer
-    compare_float
-    exec
-    fp
-    round
-    conversion
-    state
-    relative
-    pseudo
-)
+foreach(family IN ITEMS boolean shift move field count pack arithmetic compare_integer compare_float exec fp round conversion state relative pseudo)
   set(target "rj_arith_scalar_${family}_test")
   add_executable(${target} scalar/${family}_test.cpp)
   target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
@@ -284,15 +230,7 @@ foreach(family IN ITEMS
 endforeach()
 
 # Math families share unary layouts, with independent loose and exact references.
-foreach(family IN ITEMS
-    round
-    root_reciprocal
-    log_exp
-    decompose
-    trig
-    rcp_iflag
-    preop
-)
+foreach(family IN ITEMS round root_reciprocal log_exp decompose trig rcp_iflag preop)
   set(target "rj_arith_math_${family}_test")
   add_executable(${target} math/${family}_test.cpp)
   target_link_libraries(${target} PRIVATE rj_arith GTest::gtest_main)
