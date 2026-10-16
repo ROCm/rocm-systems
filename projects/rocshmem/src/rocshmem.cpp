@@ -1362,18 +1362,14 @@ __host__ void rocshmem_putmem_signal_on_stream(void *dest, const void *source,
 
 __host__ void rocshmem_signal_add_on_stream(uint64_t *sig_addr, uint64_t signal,
                                             int pe, hipStream_t stream) {
-  LOG_API("host::signal_add_on_stream (sig_addr=%p, pe=%d)", sig_addr, pe);
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->signal_add_on_stream(sig_addr, signal, pe, stream);
+  RocshmemGetFunctionTable()->signal_add_on_stream_fn(sig_addr, signal, pe,
+                                                      stream);
 }
 
 __host__ void rocshmem_signal_set_on_stream(uint64_t *sig_addr, uint64_t signal,
                                             int pe, hipStream_t stream) {
-  LOG_API("host::signal_set_on_stream (sig_addr=%p, pe=%d)", sig_addr, pe);
-
-  get_internal_ctx(ROCSHMEM_HOST_CTX_DEFAULT)
-      ->signal_set_on_stream(sig_addr, signal, pe, stream);
+  RocshmemGetFunctionTable()->signal_set_on_stream_fn(sig_addr, signal, pe,
+                                                      stream);
 }
 
 __host__ void rocshmem_signal_wait_until_on_stream(uint64_t *sig_addr, int cmp,
