@@ -127,6 +127,20 @@ typedef union rocprofiler_rocshmem_api_args_t
         uint64_t    cmp_value;
         hipStream_t stream;
     } signal_wait_until_on_stream;
+    struct
+    {
+        uint64_t*   sig_addr;
+        uint64_t    signal;
+        int         pe;
+        hipStream_t stream;
+    } signal_add_on_stream;
+    struct
+    {
+        uint64_t*   sig_addr;
+        uint64_t    signal;
+        int         pe;
+        hipStream_t stream;
+    } signal_set_on_stream;
 } rocprofiler_rocshmem_api_args_t;
 
 ROCPROFILER_EXTERN_C_FINI
