@@ -39,6 +39,15 @@ if(BUILD_TESTS)
             "${PROJECT_SOURCE_DIR}/src/device/ce_reduce/test_generate_ce_reduce.py"
   )
 
+  # CPU-only Makefile scan: NCCL PR #1806 (-M -> -MM) must stay in force.
+  # Registered here for local `ctest` only; CI gates via the `guards` phase of
+  # test/host/run_host_tests.sh.
+  add_test(
+    NAME rccl-makefile-depflags
+    COMMAND "${Python3_EXECUTABLE}"
+            "${PROJECT_SOURCE_DIR}/test/test_makefile_depflags.py"
+  )
+
   # The kernel-count leak guards and the __hip_atomic_* poison probe
   # (src/include/test_poison_hip_atomics.py) are intentionally NOT registered as
   # ctest cases here: nothing in RCCL CI runs `ctest`, so an add_test() would
@@ -397,6 +406,7 @@ if(BUILD_TESTS)
       device/GinBackendMaskDispatch_test.cpp
       device/GinAnvilIpcDevice_test.cpp
       device/HierarchicalShuffleTests.cpp
+      device/ChannelMaskMapTests.cpp
       DeviceApiTests.cpp
       common/main_fixtures.cpp
       common/EnvVars.cpp
@@ -779,6 +789,8 @@ if(BUILD_TESTS)
       graph/TuningTests.cpp
       graph/XmlTests.cpp
       graph/NetDevsPolicyP2pNetTests.cpp
+      graph/P2pPxnLevel1NetIdTests.cpp
+      graph/TopoGpuDevTests.cpp
       graph/TopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
@@ -880,7 +892,8 @@ if(BUILD_TESTS)
   # rccl-UnitTestsAmdSmi: tests for the amdsmi_wrap layer.
   #
   # AmdSmiFabricTests.cpp covers the fabric predicates and struct layout pinned in
-  # amdsmi_wrap.h. Those are header-inline, so they need no librccl.so symbols and
+  # amdsmi_wrap.h, and AmdSmiFabricTelemetryTests.cpp the telemetry sample reduction
+  # beside them. Those are header-inline, so they need no librccl.so symbols and
   # run in both Release and Debug.
   #
   # AmdSmiWrapTests.cpp drives the amd_smi_* API itself, so it needs symbols that
@@ -892,6 +905,7 @@ if(BUILD_TESTS)
     # main_altrsmi.cpp is a plain InitGoogleTest/RUN_ALL_TESTS entry point, reused here.
     set(TEST_AMDSMI_SOURCE_FILES
       AmdSmiFabricTests.cpp
+      AmdSmiFabricTelemetryTests.cpp
       common/main_altrsmi.cpp
     )
 
@@ -998,9 +1012,12 @@ if(BUILD_TESTS)
       transport/NetIbMPI/FaultInjectTests.cpp
       transport/NetIbMPI/GidChangeTests.cpp
       transport/NetIbMPI/OpsFaultUnitTests.cpp
+      transport/NetIbMPI/NetIbWqeLatMonUnitTests.cpp
+      transport/NetIbMPI/NetIbWqeLatMonTests.cpp
       transport/RmaMPI/RmaMPITests.cpp
       transport/NetIbMPI/StressTests.cpp
       transport/GinDeviceMPITests.cpp
+      transport/GinNicFusionMPITests.cpp
       WarpSpeedMPITests.cpp
       ImplicitLaunchOrderMPITests.cpp
       CommMPITests.cpp
@@ -1009,6 +1026,7 @@ if(BUILD_TESTS)
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
+      GinConnectLeakMPITests.cpp
       RmaExternalPluginPutSignalMPITests.cpp
       plugin/net_reload_plugin.cpp
       mem_manager/SuspendResumeMPITests.cpp
@@ -1056,6 +1074,20 @@ if(BUILD_TESTS)
       "LINKER:--export-dynamic-symbol=ncclRmaPlugin_v13")
 
     list(APPEND RCCL_TEST_EXECUTABLES rccl-UnitTestsMPI)
+
+    # Loadable GIN plugin for GinConnectLeakMPITest, built and installed beside the test binary.
+    add_library(rccl-test-gin-fault-plugin SHARED plugin/gin_fault_plugin.cpp)
+    target_include_directories(rccl-test-gin-fault-plugin PRIVATE ${RCCL_COMMON_INCLUDE_DIRS})
+    target_link_libraries(rccl-test-gin-fault-plugin PRIVATE hip::host)
+    if(TARGET rccl)
+      add_dependencies(rccl-test-gin-fault-plugin rccl)
+    endif()
+    add_dependencies(rccl-UnitTestsMPI rccl-test-gin-fault-plugin)
+    target_compile_definitions(rccl-UnitTestsMPI PRIVATE
+      RCCL_TEST_GIN_FAULT_PLUGIN_NAME="$<TARGET_FILE_NAME:rccl-test-gin-fault-plugin>")
+    install(TARGETS rccl-test-gin-fault-plugin
+      LIBRARY DESTINATION ${CMAKE_INSTALL_BINDIR}
+      COMPONENT tests)
 
     # Hand the in-tree Inspector plugin to InspectorPromP2pMPITests so it can
     # load a profiler without the caller setting NCCL_INSPECTOR_PLUGIN_SO.

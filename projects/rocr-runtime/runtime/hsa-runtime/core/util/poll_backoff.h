@@ -25,20 +25,15 @@ namespace core {
 // Floor (microseconds) for the polling-fallback nap.
 inline constexpr int kPollNapFloorUs = 20;
 
-// Ceiling (microseconds) when the runtime has no interrupt-backed signal
-// events at all (g_use_interrupt_wait == false, e.g. the WSL/dxg thunk).
-// Every signal is polling-only, so the only cost of a long nap is observation
-// latency of the napping wait itself.
+// Ceiling (microseconds) for the polling-fallback nap. Only used when the
+// runtime has no interrupt-backed signal events at all
+// (g_use_interrupt_wait == false, e.g. the WSL/dxg thunk). Every signal is
+// polling-only there, so the only cost of a long nap is observation latency of
+// the napping wait itself. Where interrupts are available, callers must not
+// back off at all: a single EopEvent-less signal can force the shared
+// async-events thread into polling, and napping would delay the unrelated
+// interrupt-backed handlers batched onto that same thread.
 inline constexpr int kPollNapCeilingUs = 2000;
-
-// Ceiling (microseconds) when interrupts are available globally but the wait
-// batch was forced into polling by a signal with no EopEvent (an IPC signal
-// or an internal DefaultSignal, e.g. gang copies). One such signal drags every
-// interrupt-backed signal on the shared async-events thread into this polling
-// scan, so the nap here bounds the added callback latency of unrelated
-// interrupt-backed handlers. Kept at the interrupt path's 200us active-poll
-// window (see AsyncEventsLoop) so that bound stays at the noise floor.
-inline constexpr int kPollNapCeilingMixedUs = 200;
 
 // Given the current nap duration, return the next one: double it, capped at
 // ceiling_us. Saturating at the ceiling is a fixed point, so repeated calls

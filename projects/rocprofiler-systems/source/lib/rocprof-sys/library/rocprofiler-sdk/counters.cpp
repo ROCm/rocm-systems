@@ -71,12 +71,14 @@ constexpr const char* k_unknown_kernel_name = "unknown_kernel";
 std::string
 get_counter_description(const client_data* tool_data, std::string_view _v)
 {
-    const auto& _info = tool_data->events_info;
-    for(const auto& itr : _info)
+    for(const auto& [_agent_id, _counters] : tool_data->agent_counter_info)
     {
-        if(itr.symbol().starts_with(_v) || itr.short_description().starts_with(_v))
+        for(const auto& itr : _counters)
         {
-            return itr.long_description();
+            if(!itr.is_constant && std::string_view{ itr.name }.starts_with(_v))
+            {
+                return std::string{ itr.description };
+            }
         }
     }
     return std::string{};
@@ -84,8 +86,8 @@ get_counter_description(const client_data* tool_data, std::string_view _v)
 }  // namespace
 
 void
-counter_event::operator()(::perfetto::CounterTrack* _track, const std::string& track_name,
-                          timing_interval _timing, scope::config _scope) const
+counter_event::operator()(const std::string& track_name, timing_interval _timing,
+                          scope::config _scope) const
 {
     if(!record.dispatch_data)
     {
@@ -107,13 +109,8 @@ counter_event::operator()(::perfetto::CounterTrack* _track, const std::string& t
 
     _bundle.stop().pop(_dispatch_info.queue_id.handle);
 
-    if(_track && _timing.start > 0 && _timing.end > _timing.start)
+    if(_timing.start > 0 && _timing.end > _timing.start)
     {
-        TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *_track,
-                      _timing.start, record.record_counter.counter_value);
-        TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *_track,
-                      _timing.end, 0);
-
         const std::string event_metadata  = "{}";
         const size_t      stack_id        = 0;
         const size_t      parent_stack_id = 0;
@@ -180,19 +177,11 @@ counter_storage::counter_storage(const client_data* _tool_data, std::uint64_t _d
                     metric_name);
     }
 
-    {
-        constexpr auto _unit = ::perfetto::CounterTrack::Unit::UNIT_COUNT;
-        track_name           = fmt::format("GPU {} [{}]", _metric_name, device_id);
-        track                = std::make_unique<counter_track_type>(
-            ::perfetto::StaticString(track_name.c_str()));
+    track_name = fmt::format("GPU {} [{}]", _metric_name, device_id);
 
-        metadata_initialize_counter_category();
-        metadata_initialize_counters_pmc(device_id, track_name, metric_description);
-        metadata_initialize_counter_track(track_name.c_str());
-        track->set_is_incremental(false);
-        track->set_unit(_unit);
-        track->set_unit_multiplier(1);
-    }
+    metadata_initialize_counter_category();
+    metadata_initialize_counters_pmc(device_id, track_name, metric_description);
+    metadata_initialize_counter_track(track_name.c_str());
 }
 
 void
@@ -200,22 +189,17 @@ counter_storage::operator()(const counter_event& _event, timing_interval _timing
                             scope::config _scope) const
 {
     operation::set_storage<counter_data_tracker>{}(storage.get());
-    _event(track.get(), track_name, _timing, _scope);
+    _event(track_name, _timing, _scope);
 }
 
 void
 counter_storage::write_zero(rocprofiler_timestamp_t timestamp) const
 {
-    if(!track || timestamp == 0)
+    if(timestamp == 0)
     {
         return;
     }
 
-    // Write zero to Perfetto trace (for legacy Perfetto)
-    TRACE_COUNTER(trait::name<category::rocm_counter_collection>::value, *track,
-                  timestamp, 0);
-
-    // Write zero to cache (for rocpd database)
     trace_cache::get_buffer_storage().store(trace_cache::pmc_event_with_sample{
         static_cast<size_t>(category_enum_id<category::rocm_counter_collection>::value),
         track_name, timestamp, "{}", 0, 0, 0, "{}", "{}", device_type_index,

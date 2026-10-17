@@ -7,6 +7,7 @@
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/gpu_memory.h"
 #include "rocjitsu/vm/amdgpu/l2_cache.h"
+#include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/amdgpu/spi.h"
 #include "rocjitsu/vm/amdgpu/wavefront.h"
 
@@ -928,13 +929,31 @@ TEST(WaveDebugTest, IllegalInstructionStopsWaveUnderDebugger) {
   EXPECT_FALSE(wave->fatal_exception_pending());
 }
 
-TEST(WaveDebugTest, IllegalInstructionWithoutDebuggerHalts) {
+TEST(WaveDebugTest, IllegalInstructionWithoutHandlerHalts) {
   WaveDebugFixture fx;
   fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
   auto *wave = fx.dispatch(kKernelAddr);
   ASSERT_NE(wave, nullptr);
   fx.cu->step();
   EXPECT_TRUE(wave->is_halted());
+}
+
+TEST(WaveDebugTest, Pm4DecodeFailureDoesNotNotifyAqlOwner) {
+  WaveDebugFixture fx;
+  fx.gpu_mem.write32(kKernelAddr, 0xFFFFFFFFu);
+  uint32_t notifications = 0;
+  fx.cu->set_illegal_inst_handler([&](amdgpu::Wavefront &) {
+    ++notifications;
+    return true;
+  });
+  auto failure = std::make_shared<amdgpu::Pm4FailureState>();
+  auto *wave = fx.dispatch(kKernelAddr);
+  ASSERT_NE(wave, nullptr);
+  wave->set_pm4_failure(failure);
+  fx.cu->step();
+  EXPECT_TRUE(failure->failed.load());
+  EXPECT_TRUE(wave->is_halted());
+  EXPECT_EQ(notifications, 0u);
 }
 
 TEST(WaveDebugTest, STrapWithoutConfiguredHandlerAdvancesPcWithoutChangingWaveState) {

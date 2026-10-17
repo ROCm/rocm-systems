@@ -9,6 +9,7 @@
 #include "rocjitsu/kmd/linux/legacy_gpu_vm.h"
 #include "rocjitsu/kmd/linux/linux_kfd.h"
 #include "rocjitsu/kmd/linux/sysfs.h"
+#include "rocjitsu/vm/amdgpu/instruction_compute_unit_view.h"
 #include "rocjitsu/vm/amdgpu/interrupt_sink.h"
 #include "rocjitsu/vm/amdgpu/pm4/pm4.h"
 #include "rocjitsu/vm/soc.h"
@@ -27,6 +28,7 @@ RJ_DIAGNOSTIC_POP
 #include <memory>
 #include <mutex>
 #include <optional>
+#include <sys/stat.h>
 #include <thread>
 #include <unordered_map>
 #include <unordered_set>
@@ -132,6 +134,7 @@ struct IpcHandleKeyHash {
 struct IpcObject {
   uint32_t share_handle[4];
   int backing_memfd = -1;
+  std::shared_ptr<GemObject> bo_state;
   uint64_t allocation_size = 0;
   uint32_t allocation_flags = 0;
   uint32_t source_gpu_id = 0;
@@ -430,10 +433,11 @@ public:
   [[nodiscard]] int claim_fd(int real_fd);
   [[nodiscard]] bool owns_reserved_fd(int fd) const;
 
-  /// @brief Derive the PTE MTYPE from KFD allocation flags (mirrors amdgpu).
-  /// @details Public so the interposer's DRM GEM_VA path can install page-table
-  /// entries with the same coherency type the KFD alloc requested.
-  static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags);
+  /// @brief Derive PTE MTYPE from KFD allocation flags and simulator sharing policy.
+  /// @details @p shared retains coherence across remapping without modifying the
+  /// requested allocation flags. mapping_flags_for_handle encodes that policy as
+  /// COHERENT for the interposer's GEM_VA path.
+  static amdgpu::Mtype pte_mtype_for_flags(uint32_t alloc_flags, bool shared = false);
   /// @brief Submit compute IBs to the CP assigned to a DRM file/context/ring key.
   int submit_pm4(uint32_t render_minor, uint64_t queue_key, amdgpu::Pm4Submission submission);
   /// Cancel accepted work and release the queue owned by one DRM context/ring.
@@ -457,15 +461,29 @@ public:
   /// @retval false the local process is gone, so nothing was unmapped.
   [[nodiscard]] bool gem_va_unmap(uint64_t gpu_va, size_t size);
 
+  /// @brief Keep DRM BO state with the local allocations backed by the file @p st describes.
+  /// @details A KFD allocation's BO, with its UMD metadata, outlives every GEM handle
+  /// and dmabuf fd to it. The first state offered is shared by every allocation of
+  /// that file and freed with the last of them.
+  /// @returns The state those allocations keep, or @p state when no allocation uses the file.
+  /// @note Called by the interposer's prime_import with its fd_mutex_ held. This takes
+  /// process_mutex_ (find_process, released at once), then alloc_mutex_; the two are
+  /// never nested. fd_mutex_ < process_mutex_ and fd_mutex_ < alloc_mutex_ are
+  /// recorded here, not in the global ordering below. Retaining IPC state also
+  /// follows alloc_mutex_ < ipc_mutex_, as allocation teardown does.
+  [[nodiscard]] std::shared_ptr<GemObject> retain_bo_state(const struct stat &st,
+                                                           std::shared_ptr<GemObject> state);
+
   /// @brief Look up a KfdProcess by ID. Returns nullptr if not found.
   std::shared_ptr<KfdProcess> find_process(uint32_t process_id) const;
 
-  /// @brief KFD allocation flags for a local-process allocation @p handle, or 0.
+  /// @brief Effective mapping flags for a local-process allocation @p handle, or 0.
   /// @details Locks the process alloc mutex internally, keeping lock discipline for
   /// per-process allocation state inside the driver. Used by the interposer to
   /// capture the GPU PTE MTYPE flags at EXPORT_DMABUF time (before the allocation
-  /// may be freed).
-  uint32_t alloc_flags_for_handle(uint64_t handle) const;
+  /// may be freed). Includes sharing policy without changing the requested flags
+  /// returned by the KFD ABI.
+  uint32_t mapping_flags_for_handle(uint64_t handle) const;
 
   /// @brief Per-GPU device state (mirrors kfd_dev in the kernel).
   struct GpuDevice {
@@ -519,6 +537,12 @@ private:
                   KfdProcess::HostExtentOwner owner = KfdProcess::HostExtentOwner::Application);
   void unmap_from_gpu(KfdProcess &proc, uint64_t gpu_va, size_t size);
 
+  /// @brief Export existing backing with its public mode and coherent sharing policy.
+  /// @details Retains the policy for future mappings and imports as well as
+  /// current PTEs. Returns the new fd or a negative errno; failure leaves the
+  /// policy unchanged. Caller holds proc.alloc_mutex_.
+  int share_allocation_locked(KfdProcess &proc, KfdProcess::GpuAllocation &alloc);
+
   void update_cp_doorbell_base(uint32_t gpu_ordinal, uint32_t process_id, void *base);
 
   int dispatch_ioctl(KfdProcess &proc, unsigned long request, void *arg,
@@ -543,6 +567,9 @@ private:
   int unmap_memory_ioctl(KfdProcess &proc, void *arg);
   int create_queue_ioctl(KfdProcess &proc, void *arg);
   int update_queue_ioctl(KfdProcess &proc, void *arg);
+  /// @brief Whether KFD allows GWS with debugging, assuming capable firmware.
+  bool debugger_supports_gws(uint32_t gpu_id) const;
+  int alloc_queue_gws_ioctl(KfdProcess &proc, void *arg);
   int set_cu_mask_ioctl(KfdProcess &proc, void *arg);
   int destroy_queue_ioctl(KfdProcess &proc, void *arg);
   int create_event_ioctl(KfdProcess &proc, void *arg);
@@ -599,11 +626,13 @@ private:
                                         uint64_t exception_mask = KFD_EC_MASK(EC_QUEUE_WAVE_TRAP),
                                         bool retain_on_rejection = true,
                                         bool reserve_runtime_on_rejection = false);
-  bool defer_wave_exception_to_runtime(amdgpu::Wavefront &wf, uint64_t exception_mask,
-                                       bool suspend_while_pending,
-                                       bool clear_debug_stop_on_success = false,
-                                       bool runtime_already_reserved = false,
-                                       bool runtime_failure_debuggable = true);
+  bool defer_wave_exception_to_runtime(
+      amdgpu::Wavefront &wf, uint64_t exception_mask, bool suspend_while_pending,
+      bool clear_debug_stop_on_success = false, bool runtime_already_reserved = false,
+      bool runtime_failure_debuggable = true,
+      amdgpu::QueueExceptionDeliveryPolicy delivery_policy =
+          amdgpu::QueueExceptionDeliveryPolicy::WaitForAcknowledgment,
+      bool retain_wave = true);
   /// @brief Publish a wave stop: serialize the queue, then wake the debugger.
   /// @param retain_on_rejection Whether a serialized stop whose notification
   ///        loses its subscription or notifier should remain in the queue's
@@ -644,7 +673,10 @@ private:
   /// atomic read-modify-write.
   bool on_wave_watchpoint(amdgpu::Wavefront &wf, uint64_t addr, uint32_t bytes, bool is_write,
                           bool is_atomic);
+  /// @brief Decode failures go to a publishable debugger stop first, then the runtime.
   bool on_wave_illegal_instruction(amdgpu::Wavefront &wf);
+  /// @brief Report non-architectural execution failures as queue aborts without a trap.
+  bool on_wave_execution_failure(amdgpu::Wavefront &wf, bool retain_wave);
   bool on_wave_alu_exception(amdgpu::Wavefront &wf);
 
   /// @brief Memory-violation handler installed on every compute unit.
