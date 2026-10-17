@@ -2945,15 +2945,17 @@ ArithmeticCase unary_case(const UnaryForm &form, const UnaryLane &lane) {
 // MODE values of one format's fields; the other format's fields differ, so
 // reading the wrong field fails.
 struct FormatModes {
-  uint32_t kept;         // this format keeps subnormals, the other flushes them
-  uint32_t flushed;      // the reverse
-  uint32_t input_flush;  // from 0xf0, only this format's input denormals flush
-  uint32_t output_flush; // from 0xf0, only this format's output denormals flush
-  uint32_t nearest_even; // this format rounds to nearest even, the other toward zero
-  uint32_t toward_zero;  // the reverse
+  uint32_t kept;            // this format keeps subnormals, the other flushes them
+  uint32_t flushed;         // the reverse
+  uint32_t input_flush;     // from 0xf0, only this format's input denormals flush
+  uint32_t output_flush;    // from 0xf0, only this format's output denormals flush
+  uint32_t nearest_even;    // this format rounds to nearest even, the other toward zero
+  uint32_t toward_zero;     // the reverse
+  uint32_t toward_positive; // this format rounds toward +inf, the other toward -inf
+  uint32_t toward_negative; // the reverse
 };
-constexpr FormatModes kF32Modes{0x30u, 0xc0u, 0xe0u, 0xd0u, 0xfcu, 0xf3u};
-constexpr FormatModes kF16F64Modes{0xc0u, 0x30u, 0xb0u, 0x70u, 0xf3u, 0xfcu};
+constexpr FormatModes kF32Modes{0x30u, 0xc0u, 0xe0u, 0xd0u, 0xfcu, 0xf3u, 0xf9u, 0xf6u};
+constexpr FormatModes kF16F64Modes{0xc0u, 0x30u, 0xb0u, 0x70u, 0xf3u, 0xfcu, 0xf6u, 0xf9u};
 
 // V_FRACT lanes captured on gfx1201. A positive subnormal is its own
 // fractional part, so only output flushing zeroes it once the input is kept;
@@ -2979,6 +2981,10 @@ std::vector<ArithmeticCase> fract_cases() {
         {"PositiveSubnormalOutputFlushed", Vop1, {}, tiny, modes.output_flush, 0},
         {"RoundNearestEven", Vop1, {}, round_input, modes.nearest_even, nearest},
         {"RoundTowardZero", Vop1, {}, round_input, modes.toward_zero, toward_zero},
+        // This source's result rounds up under nearest even; toward -inf it
+        // truncates, as toward zero does for the positive result.
+        {"RoundTowardPositive", Vop1, {}, round_input, modes.toward_positive, nearest},
+        {"RoundTowardNegative", Vop1, {}, round_input, modes.toward_negative, toward_zero},
         {"InfinityIsNegativeNan", Vop1, {}, infinity, 0xf0u, infinity_result},
         {"QuietsSignalingNan", Vop1, {}, infinity | 1, 0xf0u, quiet_nan},
         // Integers, including -0, give +0 even when rounding toward -inf.
@@ -3108,13 +3114,6 @@ std::vector<ArithmeticCase> ldexp_f16_cases() {
   return cases;
 }
 
-// V_LDEXP_F32/F64 lanes from the same gfx1201 probe; the audit captures do not
-// reach them. The value just below 1.0 scaled to just below the smallest
-// normal stays tiny at full precision: with the format's output-denormal bit
-// cleared it flushes to a signed zero, kept it rounds to the smallest normal or,
-// toward zero, to the largest subnormal. With OMOD it flushes even when kept, and
-// OMOD then gives +0. Each lane varies one MODE field or OMOD from 0xf0, and the
-// other format's output flush leaves it unchanged.
 // SDWA V_LDEXP_F16/V_FRACT_F16 lanes from a gfx1030 probe, where SDWA and VOP3
 // agree bit for bit for every OMOD. OMOD applies only with IEEE=0 and F16
 // output denormals flushed (MODE 0); the operation rounds first, so LDEXP
@@ -3155,6 +3154,15 @@ std::vector<ArithmeticCase> sdwa_f16_cases() {
   return cases;
 }
 
+// V_LDEXP_F32/F64 lanes from the same gfx1201 probe; the audit captures do not
+// reach them. The value just below 1.0 scaled to just below the smallest
+// normal stays tiny at full precision: with the format's output-denormal bit
+// cleared it flushes to a signed zero, kept it rounds to the smallest normal or,
+// toward zero, to the largest subnormal. With OMOD it flushes even when kept, and
+// OMOD then gives +0. Each lane varies one MODE field or OMOD from 0xf0, and the
+// other format's output flush leaves it unchanged. A subnormal source scaled to
+// a normal result flushes only when its own format's input-denormal bit is
+// cleared (F32 0xe0, F64 0xb0).
 std::vector<ArithmeticCase> ldexp_tininess_cases() {
   struct Lane {
     const char *name;
@@ -3199,6 +3207,8 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
            Lane{"NegativeTinyTowardPositive", 0xbf7fffffu, -126, 0xf1u, 0x807fffffu},
            Lane{"TinyDoubledIsPositiveZero", 0x3f7fffffu, -126, 0xf0u, 0u, 1},
            Lane{"NegativeTinyHalvedIsPositiveZero", 0xbf7fffffu, -126, 0xf0u, 0u, 3},
+           Lane{"SubnormalInputFlushed", 0x80000001u, 134, 0xe0u, 0x80000000u},
+           Lane{"SubnormalInputKeptByF64Flush", 0x80000001u, 134, 0xb0u, 0xb8000000u},
        })
     add(cases, false, lane);
   for (const Lane &lane : {
@@ -3212,6 +3222,8 @@ std::vector<ArithmeticCase> ldexp_tininess_cases() {
                 0x800fffffffffffffu},
            Lane{"TinyDoubledIsPositiveZero", 0x3fefffffffffffffu, -1022, 0xf0u, 0u, 1},
            Lane{"NegativeTinyHalvedIsPositiveZero", 0xbfefffffffffffffu, -1022, 0xf0u, 0u, 3},
+           Lane{"SubnormalInputFlushed", 0x1u, 1753, 0xb0u, 0u},
+           Lane{"SubnormalInputKeptByF32Flush", 0x1u, 1753, 0xe0u, 0x6a60000000000000u},
        })
     add(cases, true, lane);
   return cases;
