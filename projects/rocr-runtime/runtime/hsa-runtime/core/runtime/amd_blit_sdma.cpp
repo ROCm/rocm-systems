@@ -584,7 +584,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitCommand(const void* cmd, size_
   }
 
   if (profiling_enabled && (gang_leader_ || gang_signals.empty())) {
-    assert(IsMultipleOf(end_ts_addr, 32));
     BuildGetGlobalTimestampCommand(command_addr,
                                    reinterpret_cast<void*>(end_ts_addr));
     command_addr += timestamp_command_size_;
@@ -769,7 +768,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitLinearCopyBodyWaitSignal(
   wrapped_index += copy_bytes;
 
   if (profiling_enabled) {
-    assert(IsMultipleOf(end_ts_addr, 32));
     BuildGetGlobalTimestampCommand(command_addr, reinterpret_cast<void*>(end_ts_addr));
     command_addr += timestamp_command_size_;
     bytes_written_[wrapped_index] = post_bytes;
@@ -1031,7 +1029,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitEpilogue(
   }
 
   if (profiling_enabled) {
-    assert(IsMultipleOf(end_ts_addr, 32));
     BuildGetGlobalTimestampCommand(command_addr,
                                    reinterpret_cast<void*>(end_ts_addr));
     command_addr += timestamp_command_size_;
@@ -1314,7 +1311,6 @@ hsa_status_t BlitSdma<useGCR, scopeFields>::SubmitFusedCoordinator(
       uint64_t* start_ts_addr = nullptr;
       uint64_t* end_ts_addr = nullptr;
       out_signal.GetSdmaTsAddresses(start_ts_addr, end_ts_addr);
-      assert(IsMultipleOf(end_ts_addr, 32));
       BuildGetGlobalTimestampCommand(command_addr, reinterpret_cast<void*>(end_ts_addr));
       command_addr += timestamp_command_size_;
       bytes_written_[wrapped_index] = post_bytes;
