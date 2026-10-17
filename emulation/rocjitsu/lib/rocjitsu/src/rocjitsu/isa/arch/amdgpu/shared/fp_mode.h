@@ -906,17 +906,6 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
                                                 static_cast<double>(addend));
 }
 
-/// @brief Evaluate F16 LDEXP in F64 before destination rounding.
-/// @details The caller flushes the raw source half before widening. Migrated
-/// VOP3 callers round to F16 before applying the shared OMOD/CLAMP stage.
-inline double ldexp_f16(float value, int32_t adjustment) {
-  detail::ScopedFenv environment(0);
-  // Every finite nonzero half lies in [2^-24, 2^16). Bounding the adjustment
-  // keeps the intermediate normal in F64 while retaining all F16 rounding
-  // outcomes, including directed underflow and output scaling by up to four.
-  return std::ldexp(static_cast<double>(value), std::clamp(adjustment, -64, 64));
-}
-
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
 /// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
 /// afterward. SDWA supplies omod here to retain legacy pre-round scaling, which
@@ -1145,28 +1134,6 @@ inline uint16_t narrow_div_fixup_f16(float value, bool fp16_ovfl) {
   if ((bits & 0x7fffffffu) > 0x7f800000u)
     return static_cast<uint16_t>(((bits >> 16) & 0x8000u) | 0x7c00u | ((bits >> 13) & 0x3ffu));
   return util::f32_to_f16_mode(value, fp16_ovfl);
-}
-
-/// @brief Scale by an integer power of two with explicit guest rounding and flushing.
-template <typename Float>
-inline Float ldexp(Float value, int32_t adjustment, uint32_t rounding, uint32_t denorm) {
-  using Format = DivisionFormat<Float>;
-  using Bits = typename Format::Bits;
-  const Bits bits = std::bit_cast<Bits>(value);
-  const Bits magnitude = bits & ~Format::sign;
-  if (magnitude >= Format::infinity)
-    return std::bit_cast<Float>(Bits(bits | (magnitude > Format::infinity ? Format::quiet : 0)));
-  const int exponent = Format::exponent(bits);
-  if (magnitude == 0 || (exponent == 0 && !(denorm & 1u)))
-    return std::bit_cast<Float>(Bits(bits & Format::sign));
-  const Bits significand =
-      (bits & Format::fraction_mask) | (exponent ? Bits{1} << Format::fraction : 0);
-  // Larger adjustments have the same overflow/underflow result. Bound them
-  // before adding the format's exponent so INT32_MIN/MAX cannot overflow.
-  const int bounded = std::clamp(adjustment, -4096, 4096);
-  return div_round<Float>(significand,
-                          (exponent ? exponent : 1) - Format::bias - Format::fraction + bounded,
-                          (bits & Format::sign) != 0, rounding, denorm);
 }
 
 struct FrexpF32Result {
