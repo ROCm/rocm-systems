@@ -46,7 +46,7 @@ from pc_sampling.source_snapshot_analysis import (
 from utils.logger import console_debug, console_error, console_warning
 
 PREFIX = "compute_"
-SCHEMA_VERSION = "2.3.1"
+SCHEMA_VERSION = "2.4.0"
 
 
 Base = declarative_base()
@@ -63,6 +63,8 @@ class Workload(Base):
     sys_info_extdata = Column(JSON)
     roofline_bench_extdata = Column(JSON)
     profiling_config_extdata = Column(JSON)
+    # Memory chart layout file, unchanged; see src/memory_chart/README.md
+    memory_chart_layout_extdata = Column(JSON)
 
     # Workload can have multiple kernels
     kernels = relationship("Kernel", back_populates="workload")
