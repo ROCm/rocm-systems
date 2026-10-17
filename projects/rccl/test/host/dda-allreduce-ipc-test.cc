@@ -163,6 +163,8 @@ TEST_F(DdaAllReduceIpcEligibleTest, TreePathAlignedPerRankSliceIsEligible) {
 
 struct Launch {
   const void* kernel;
+  unsigned gridX;
+  unsigned blockX;
   void* ipcbuffs;
   size_t count;
   const void* sendbuff;
@@ -182,9 +184,9 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
       return hipSuccess;
     };
     g_hipGetLastError = []() { return hipSuccess; };
-    g_hipExtLaunchKernel = [this](const void* kernel, dim3, dim3, void** args, size_t, hipStream_t stream,
+    g_hipExtLaunchKernel = [this](const void* kernel, dim3 grid, dim3 block, void** args, size_t, hipStream_t stream,
                                   hipEvent_t, hipEvent_t stopEvent, int) {
-      launches_.push_back({kernel, *static_cast<void**>(args[0]), *static_cast<size_t*>(args[2]),
+      launches_.push_back({kernel, grid.x, block.x, *static_cast<void**>(args[0]), *static_cast<size_t*>(args[2]),
                            *static_cast<const void**>(args[3]), *static_cast<void**>(args[1]),
                            *static_cast<int*>(args[4]), stream, stopEvent, g_hipMemcpyAsyncArgs.size()});
       return hipSuccess;
@@ -202,6 +204,11 @@ class DdaAllReduceIpcDispatchTest : public ::testing::Test {
   template <typename T>
   static const void* Flat() {
     return reinterpret_cast<const void*>(&dda::common::ddaAllReduceFlatIpc<T, kDdaNranks, false>);
+  }
+
+  template <typename T>
+  static const void* Tree() {
+    return reinterpret_cast<const void*>(&dda::common::ddaAllReduceTreeIpc<T, kDdaNranks, false>);
   }
 
   const hipEvent_t kStopEvent = reinterpret_cast<hipEvent_t>(0x77);
@@ -280,7 +287,7 @@ TEST_F(DdaAllReduceIpcDispatchTest, PayloadAboveThresholdRunsTree) {
   const size_t count = kFp32CountAtThreshold + 4 * kDdaNranks;
   ASSERT_EQ(ncclSuccess, Run(count, ncclFloat32));
   ASSERT_EQ(1u, launches_.size());
-  EXPECT_NE(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
   EXPECT_EQ(count, launches_[0].count);
 }
 
@@ -288,7 +295,7 @@ TEST_F(DdaAllReduceIpcDispatchTest, LargeTreePayloadIsCopiedToScratchBeforeLaunc
   const size_t count = kFp32CountCopiedBeforeTree;
   ASSERT_EQ(ncclSuccess, Run(count, ncclFloat32));
   ASSERT_EQ(1u, launches_.size());
-  EXPECT_NE(Flat<float>(), launches_[0].kernel);
+  EXPECT_EQ(Tree<float>(), launches_[0].kernel);
   ASSERT_EQ(1u, g_hipMemcpyAsyncArgs.size());
   EXPECT_EQ(1u, launches_[0].memcpysBefore);
   EXPECT_EQ(mock_.comm.ddaScratch, g_hipMemcpyAsyncArgs[0].dst);
@@ -318,7 +325,17 @@ TEST_F(DdaAllReduceIpcDispatchTest, ThresholdIsInBytesNotElements) {
   ASSERT_EQ(ncclSuccess, Run(kFp16CountAtThreshold + 8 * kDdaNranks, ncclBfloat16));
   ASSERT_EQ(2u, launches_.size());
   EXPECT_EQ(Flat<bf16>(), launches_[0].kernel);
-  EXPECT_NE(Flat<bf16>(), launches_[1].kernel);
+  EXPECT_EQ(Tree<bf16>(), launches_[1].kernel);
+}
+
+TEST_F(DdaAllReduceIpcDispatchTest, LaunchGeometryFollowsTheDispatchedElementSize) {
+  ASSERT_EQ(ncclSuccess, Run(4096, ncclBfloat16));
+  ASSERT_EQ(ncclSuccess, Run(4096, ncclFloat32));
+  ASSERT_EQ(2u, launches_.size());
+  EXPECT_EQ(1u, launches_[0].gridX);
+  EXPECT_EQ(512u, launches_[0].blockX);
+  EXPECT_EQ(2u, launches_[1].gridX);
+  EXPECT_EQ(512u, launches_[1].blockX);
 }
 
 TEST_F(DdaAllReduceIpcDispatchTest, LaunchErrorIsReported) {
