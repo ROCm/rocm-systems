@@ -1242,7 +1242,11 @@ def gen_dot2(
         L.append(
             f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
         )
-        L.append('    if (inst_.neg & 4) acc ^= 0x80000000u;')
+        # The F32 accumulator takes NEG_HI as ABS, like the MAD_MIX F32
+        # sources; gfx1201 and gfx1100 both return |C| for neg_hi:[0,0,1].
+        L.append(
+            '    acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);'
+        )
         bf16 = str(cls == 'dot2_f32_bf16').lower()
         L.append(
             f'    uint32_t result = amdgpu::{dot_arch}_dot2_f32<{bf16}>(a0, b0, a1, b1, acc);'
@@ -1277,7 +1281,9 @@ def gen_dot2(
         L.append(
             f'    float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2}, lane));'
         )
-        L.append('    if (inst_.neg & 4) acc = -acc;')
+        L.append(
+            '    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.neg_hi, inst_.neg);'
+        )
         L.append('    float result = a0 * b0 + a1 * b1 + acc;')
         L.append(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(result));'
@@ -1338,21 +1344,31 @@ def gen_dot2(
     return '\n'.join(L)
 
 
-def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
+def gen_dot2_true16(
+    dst: list[str],
+    src: list[str],
+    cls: str,
+    dot_accumulation: FloatDotAccumulation,
+) -> str:
     """Generate VOP3 true16 V_DOT2_{F16,BF16}_{F16,BF16}.
 
     These are VOP3 dot instructions, not VOP3P packed instructions. LLVM rejects
     op_sel[0:1] for this family, so src0/src1 are consumed as their packed v2
     half values. op_sel[2] selects the half accumulator and op_sel[3] selects
     the destination half.
+
+    The arithmetic is one packed-output step of the architecture's DOT/WMMA
+    datapath on raw bits. MODE rounding and denormal fields do not apply;
+    FP16_OVFL clamps F16 overflow. ABS/NEG flip sign bits before widening.
     """
-    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
-    if cls == 'dot2_f16_f16':
-        widen = 'util::f16_to_f32'
-    elif cls == 'dot2_bf16_bf16':
-        widen = 'util::bf16_to_f32'
-    else:
+    if cls not in ('dot2_f16_f16', 'dot2_bf16_bf16'):
         raise ValueError(f'unhandled true16 dot2 class: {cls}')
+    if dot_accumulation is FloatDotAccumulation.HOST_F32:
+        raise ValueError(f'{cls} needs a characterized DOT accumulation model')
+    d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
+    bf16 = cls == 'dot2_bf16_bf16'
+    fmt = 'amdgpu::fp_format::BF16' if bf16 else 'amdgpu::fp_format::F16'
+    dot_arch = 'gfx12' if dot_accumulation is FloatDotAccumulation.GFX12 else 'gfx11'
 
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -1362,34 +1378,29 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     L.append('    uint32_t opsel = ::rocjitsu::amdgpu::vop3_opsel(inst_);')
     # RDNA3/4 inline constants replicate the narrowed low half for src0/src1.
     # Registers and literal constants retain their independent packed halves.
-    _append_pk16_src_reads(
-        L, [s0, s1], {'dot2_f16_f16': 'f16', 'dot2_bf16_bf16': 'bf16'}[cls]
-    )
+    _append_pk16_src_reads(L, [s0, s1], 'bf16' if bf16 else 'f16')
     for i in range(2):
         L.append(f'    if (amdgpu::dot2_src_needs_half_replication(inst_.src{i}))')
         L.append(f'      raw{i} = (raw{i} & 0xffffu) * 0x10001u;')
     L.append(
         f'    uint32_t acc_bits = ::rocjitsu::amdgpu::read_vop3_true16_src({s2}, wf, lane, opsel, 2);'
     )
-    L.append(f'    float a0 = {widen}(static_cast<uint16_t>(raw0 & 0xffffu));')
-    L.append(f'    float a1 = {widen}(static_cast<uint16_t>((raw0 >> 16) & 0xffffu));')
-    L.append(f'    float b0 = {widen}(static_cast<uint16_t>(raw1 & 0xffffu));')
-    L.append(f'    float b1 = {widen}(static_cast<uint16_t>((raw1 >> 16) & 0xffffu));')
-    L.append(f'    float acc = {widen}(static_cast<uint16_t>(acc_bits));')
-    L.extend(vop3_src_mod('a0', 0, True))
-    L.extend(vop3_src_mod('a1', 0, True))
-    L.extend(vop3_src_mod('b0', 1, True))
-    L.extend(vop3_src_mod('b1', 1, True))
-    L.extend(vop3_src_mod('acc', 2, True))
-    if cls == 'dot2_f16_f16':
-        L.append(
-            '    uint32_t result_bits = amdgpu::fp_mode::dot2_f16(a0, b0, a1, b1, acc, wf.fp16_ovfl());'
-        )
-    else:
-        # RDNA3 7.2.4 / RDNA4 7.2.4: fixed RNE and no input/output denormals.
-        L.append(
-            '    uint32_t result_bits = amdgpu::fp_mode::dot2_bf16(a0, b0, a1, b1, acc);'
-        )
+    L.append('    const auto half = [&](uint32_t bits, unsigned source) {')
+    L.append(
+        f'      return uint16_t(amdgpu::source_modifier::apply<{fmt}>(bits & 0xffffu, source, inst_.abs, inst_.neg));'
+    )
+    L.append('    };')
+    L.append('    const uint16_t a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);')
+    L.append('    const uint16_t b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);')
+    L.append('    const uint16_t acc = half(acc_bits, 2);')
+    # ISA discrepancy: the ISA (RDNA3/RDNA4 section 7.2.4) expects BF16 DOT2
+    # to round to nearest even and flush denormals, but gfx1201 rounds the sum
+    # to FP32, truncates that to BF16 and keeps BF16 subnormals. gfx1100 also
+    # truncates; it flushes subnormal inputs and results.
+    L.append(
+        f'    const uint16_t result_bits = amdgpu::{dot_arch}_dot2_packed16<{str(bf16).lower()}>('
+        'a0, b0, a1, b1, acc, wf.fp16_ovfl());'
+    )
     L.append(
         f'    ::rocjitsu::amdgpu::write_vop3_true16_dst({d}, wf, lane, opsel, result_bits, true);'
     )
@@ -1397,14 +1408,33 @@ def gen_dot2_true16(dst: list[str], src: list[str], cls: str) -> str:
     return '\n'.join(L)
 
 
+def _append_dot_int_halves(L: list[str], opsel_exprs: tuple[str, str]) -> None:
+    """Apply VOP3P OP_SEL/OP_SEL_HI to the packed integer sources of DOT4/DOT8.
+
+    gfx1201 and gfx1100 treat each 32-bit source as two 16-bit halves: OP_SEL
+    picks the half used for bits 15:0 and OP_SEL_HI the half for bits 31:16,
+    as for packed 16-bit math. The assembler default (op_sel:[0,0],
+    op_sel_hi:[1,1]) keeps the register as is. src2 is unaffected.
+    """
+    opsel, opsel_hi = opsel_exprs
+    if not opsel:
+        return
+    for i in range(2):
+        L.append(
+            f'    raw{i} = amdgpu::select_packed_halves(raw{i}, {opsel}, {opsel_hi}, {i});'
+        )
+
+
 def gen_dot4(
     dst: list[str],
     src: list[str],
     cls: str,
-    *,
-    input_formats: tuple[str, str] = ('FP8', 'FP8'),
+    instruction: str = '',
+    dot_accumulation: FloatDotAccumulation = FloatDotAccumulation.HOST_F32,
+    opsel_exprs: tuple[str, str] = ('', ''),
 ) -> str:
-    """Generate integer and floating DOT4 bodies with each input's format."""
+    """Generate V_DOT4_I32_I8 / V_DOT4_I32_IU8 / V_DOT4_U32_U8 and the RDNA4
+    V_DOT4_F32_{FP8,BF8}_{FP8,BF8} forms (``instruction`` names the formats)."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
     L.append('  uint64_t exec = wf.exec();')
@@ -1412,6 +1442,8 @@ def gen_dot4(
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
     L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
+    if cls != 'dot4_f32_fp8':
+        _append_dot_int_halves(L, opsel_exprs)
 
     if cls in ('dot4_i32_i8', 'dot4_i32_iu8'):
         L.append(
@@ -1446,22 +1478,24 @@ def gen_dot4(
             f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, static_cast<uint32_t>(sum));'
         )
     elif cls == 'dot4_f32_fp8':
-        decode = {'FP8': 'util::fp8_e4m3_to_f32', 'BF8': 'util::bf8_e5m2_to_f32'}
+        # Only RDNA4 has these; gfx1201 runs them through its DOT datapath.
+        if dot_accumulation is not FloatDotAccumulation.GFX12:
+            raise ValueError(f'{instruction} needs the GFX12 DOT accumulation model')
+        formats = instruction.upper().removeprefix('V_DOT4_F32_').split('_')
+        if len(formats) != 2 or not set(formats) <= {'FP8', 'BF8'}:
+            raise ValueError(f'unhandled FP8 dot instruction: {instruction}')
+        bf8_a, bf8_b = (str(f == 'BF8').lower() for f in formats)
         L.append(
-            f'    float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane({s2}, lane));'
+            f'    uint32_t acc = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
         )
-        L.append('    for (int i = 0; i < 4; ++i) {')
+        # As for DOT2 F32, NEG_HI on the F32 accumulator is ABS.
         L.append(
-            f'      float a = {decode[input_formats[0]]}(static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF));'
+            '    acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst_.neg_hi, inst_.neg);'
         )
         L.append(
-            f'      float b = {decode[input_formats[1]]}(static_cast<uint8_t>((raw1 >> (i * 8)) & 0xFF));'
+            f'    const uint32_t result = amdgpu::gfx12_dot4_f32_fp8<{bf8_a}, {bf8_b}>(raw0, raw1, acc);'
         )
-        L.append('      acc += a * b;')
-        L.append('    }')
-        L.append(
-            f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, std::bit_cast<uint32_t>(acc));'
-        )
+        L.append(f'    amdgpu::RegisterAccess(wf).write_lane({d}, lane, result);')
     else:  # dot4_u32_u8
         L.append(
             f'    uint64_t sum = amdgpu::RegisterAccess(wf).read_lane({s2}, lane);'
@@ -1483,7 +1517,9 @@ def gen_dot4(
     return '\n'.join(L)
 
 
-def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
+def gen_dot8(
+    dst: list[str], src: list[str], cls: str, opsel_exprs: tuple[str, str] = ('', '')
+) -> str:
     """Generate V_DOT8_I32_I4 / V_DOT8_I32_IU4 / V_DOT8_U32_U4."""
     d, s0, s1, s2 = dst[0], src[0], src[1], src[2]
     L = []
@@ -1492,6 +1528,7 @@ def gen_dot8(dst: list[str], src: list[str], cls: str) -> str:
     L.append('    if (!(exec & (1ULL << lane))) continue;')
     L.append(f'    uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane({s0}, lane);')
     L.append(f'    uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane({s1}, lane);')
+    _append_dot_int_halves(L, opsel_exprs)
 
     if cls in ('dot8_i32_i4', 'dot8_i32_iu4'):
         L.append(

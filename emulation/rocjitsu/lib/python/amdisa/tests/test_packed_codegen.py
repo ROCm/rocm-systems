@@ -3,8 +3,6 @@
 
 """Tests for packed execute code generation."""
 
-import pytest
-
 from amdisa.isa_profile import FloatDotAccumulation
 
 from amdisa.codegen.execute.packed import (
@@ -26,20 +24,6 @@ from amdisa.codegen.execute.packed import (
     gen_pk_ternary,
 )
 from amdisa.codegen.execute.simd_codegen import vop3p_local_simd_probe_line
-
-
-@pytest.mark.parametrize('format0', ['FP8', 'BF8'])
-@pytest.mark.parametrize('format1', ['FP8', 'BF8'])
-def test_float_dot4_decodes_each_operand_format(format0, format1):
-    cpp = gen_dot4(
-        ['vdst'],
-        ['src0', 'src1', 'src2'],
-        'dot4_f32_fp8',
-        input_formats=(format0, format1),
-    )
-    helpers = {'FP8': 'fp8_e4m3_to_f32', 'BF8': 'bf8_e5m2_to_f32'}
-    assert f'float a = util::{helpers[format0]}' in cpp
-    assert f'float b = util::{helpers[format1]}' in cpp
 
 
 def test_dot4_iu8_uses_operand_signedness_modifiers():
@@ -293,6 +277,29 @@ def test_dot2_half_forms_narrow_inline_float_constants():
                 )
 
 
+def test_float_dot2_accumulator_takes_neg_hi_as_abs():
+    for accumulation in (FloatDotAccumulation.GFX11, FloatDotAccumulation.GFX12):
+        for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
+            cpp = gen_dot2(
+                ['vdst'],
+                ['src0', 'src1', 'src2'],
+                cls,
+                opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+                dot_accumulation=accumulation,
+            )
+            assert (
+                'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
+                'inst_.neg_hi, inst_.neg);' in cpp
+            )
+            assert 'acc ^= 0x80000000u' not in cpp
+            if accumulation is FloatDotAccumulation.GFX11:
+                # The host-float fallback for other targets follows the same rule.
+                assert (
+                    'acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst_.neg_hi, inst_.neg);'
+                    in cpp
+                )
+
+
 def test_rdna4_dot2_uses_exact_policy_and_encoding_specific_inline_halves():
     for cls in ('dot2_f32_f16', 'dot2_f32_bf16'):
         cpp = gen_dot2(
@@ -324,7 +331,9 @@ def test_dot2_true16_narrows_inline_float_constants():
         ('dot2_f16_f16', 'f32_to_f16'),
         ('dot2_bf16_bf16', 'f32_to_bf16'),
     ):
-        cpp = gen_dot2_true16(['vdst'], ['src0', 'src1', 'src2'], cls)
+        cpp = gen_dot2_true16(
+            ['vdst'], ['src0', 'src1', 'src2'], cls, FloatDotAccumulation.GFX12
+        )
 
         assert (
             'if (amdgpu::pk16_src_needs_narrowing(inst_.src0, src0.size_bits()))' in cpp
@@ -336,6 +345,106 @@ def test_dot2_true16_narrows_inline_float_constants():
         assert f'raw1 = util::{narrow}(std::bit_cast<float>(raw1));' in cpp
         # src2 is read at 16 bits by read_vop3_true16_src, so it is left alone.
         assert 'inst_.src2, src2.size_bits()' not in cpp
+
+
+def test_dot2_true16_uses_the_architecture_packed_dot_step():
+    """V_DOT2_{F16,BF16} run one packed DOT/WMMA step on raw bits, with
+    ABS/NEG applied to the 16-bit halves and no host FP or MODE policy."""
+    for accumulation, arch in (
+        (FloatDotAccumulation.GFX11, 'gfx11'),
+        (FloatDotAccumulation.GFX12, 'gfx12'),
+    ):
+        for cls, bf16, fmt in (
+            ('dot2_f16_f16', 'false', 'F16'),
+            ('dot2_bf16_bf16', 'true', 'BF16'),
+        ):
+            cpp = gen_dot2_true16(['vdst'], ['src0', 'src1', 'src2'], cls, accumulation)
+            assert (
+                f'amdgpu::{arch}_dot2_packed16<{bf16}>(a0, b0, a1, b1, acc, wf.fp16_ovfl())'
+                in cpp
+            )
+            assert (
+                f'source_modifier::apply<amdgpu::fp_format::{fmt}>(bits & 0xffffu, source, '
+                'inst_.abs, inst_.neg)' in cpp
+            )
+            assert 'a0 = half(raw0, 0), a1 = half(raw0 >> 16, 0);' in cpp
+            assert 'b0 = half(raw1, 1), b1 = half(raw1 >> 16, 1);' in cpp
+            assert 'acc = half(acc_bits, 2);' in cpp
+            # Only an inline constant is converted through a host float.
+            assert '_to_f32' not in cpp
+            assert 'float a' not in cpp
+            assert 'fp_mode::' not in cpp
+
+
+def test_dot2_true16_rejects_host_float_accumulation():
+    import pytest
+
+    with pytest.raises(ValueError, match='characterized DOT accumulation model'):
+        gen_dot2_true16(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            'dot2_f16_f16',
+            FloatDotAccumulation.HOST_F32,
+        )
+
+
+def test_rdna4_fp8_dot4_uses_the_gfx12_dot_model():
+    for instruction, bf8_a, bf8_b in (
+        ('V_DOT4_F32_FP8_FP8', 'false', 'false'),
+        ('V_DOT4_F32_FP8_BF8', 'false', 'true'),
+        ('V_DOT4_F32_BF8_FP8', 'true', 'false'),
+        ('V_DOT4_F32_BF8_BF8', 'true', 'true'),
+    ):
+        cpp = gen_dot4(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            'dot4_f32_fp8',
+            instruction=instruction,
+            dot_accumulation=FloatDotAccumulation.GFX12,
+        )
+        assert f'amdgpu::gfx12_dot4_f32_fp8<{bf8_a}, {bf8_b}>(raw0, raw1, acc)' in cpp
+        assert (
+            'acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, '
+            'inst_.neg_hi, inst_.neg);' in cpp
+        )
+        assert 'fp8_e4m3_to_f32' not in cpp
+
+
+def test_fp8_dot4_rejects_other_accumulation_models():
+    import pytest
+
+    with pytest.raises(ValueError, match='GFX12 DOT accumulation model'):
+        gen_dot4(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            'dot4_f32_fp8',
+            instruction='V_DOT4_F32_FP8_FP8',
+            dot_accumulation=FloatDotAccumulation.HOST_F32,
+        )
+
+
+def test_integer_dot4_dot8_select_source_halves():
+    for gen, cls in (
+        (gen_dot4, 'dot4_i32_iu8'),
+        (gen_dot4, 'dot4_u32_u8'),
+        (gen_dot4, 'dot4_i32_i8'),
+        (gen_dot8, 'dot8_i32_iu4'),
+        (gen_dot8, 'dot8_u32_u4'),
+        (gen_dot8, 'dot8_i32_i4'),
+    ):
+        cpp = gen(
+            ['vdst'],
+            ['src0', 'src1', 'src2'],
+            cls,
+            opsel_exprs=('inst_.opsel', 'inst_.opsel_hi'),
+        )
+        for i in range(2):
+            assert (
+                f'raw{i} = amdgpu::select_packed_halves(raw{i}, inst_.opsel, inst_.opsel_hi, {i});'
+                in cpp
+            )
+        # The accumulator is a full 32-bit operand.
+        assert 'select_packed_halves(raw2' not in cpp
 
 
 def test_dot2_integer_forms_leave_inline_constants_alone():

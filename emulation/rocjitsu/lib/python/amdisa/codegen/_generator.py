@@ -7762,13 +7762,19 @@ class CodeGenerator:
             )
 
         if cls.startswith('dot4_'):
-            if cls == 'dot4_f32_fp8':
-                formats = sem.name.rsplit('_', 2)[1:]
-                return gen_dot4(dst_ops, src_ops, cls, input_formats=tuple(formats))
-            return gen_dot4(dst_ops, src_ops, cls)
+            return gen_dot4(
+                dst_ops,
+                src_ops,
+                cls,
+                instruction=sem.name,
+                dot_accumulation=self.isa_spec.profile.float_dot_accumulation,
+                opsel_exprs=self._vop3p_opsel_exprs(),
+            )
 
         if cls.startswith('dot8_'):
-            return gen_dot8(dst_ops, src_ops, cls)
+            return gen_dot8(
+                dst_ops, src_ops, cls, opsel_exprs=self._vop3p_opsel_exprs()
+            )
 
         if cls == 'smem_load':
             return self._gen_smem_load(dst_ops, src_ops, sem)
@@ -14768,8 +14774,15 @@ class CodeGenerator:
                 'optional': 'std::optional',
                 'rocjitsu/base/rj_compiler.h': 'RJ_NOINLINE',
                 'rocjitsu/isa/arch/amdgpu/shared/fp_mode.h': 'fp_mode::',
-                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': 'gfx11_dot2_f32',
-                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': 'gfx12_dot2_f32',
+                'rocjitsu/isa/arch/amdgpu/shared/gfx11_dot2.h': (
+                    'gfx11_dot2_f32',
+                    'gfx11_dot2_packed16',
+                ),
+                'rocjitsu/isa/arch/amdgpu/shared/gfx12_dot.h': (
+                    'gfx12_dot2_f32',
+                    'gfx12_dot2_packed16',
+                    'gfx12_dot4_f32_fp8',
+                ),
                 'rocjitsu/isa/arch/amdgpu/shared/cube.h': 'cube::',
                 'rocjitsu/isa/arch/amdgpu/shared/division.h': (
                     'div_scale(',

@@ -10125,8 +10125,8 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
       if (inst.inst_.neg_hi & 2)
         b1 ^= 0x8000u;
       uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      if (inst.inst_.neg & 4)
-        acc ^= 0x80000000u;
+      acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst.inst_.neg_hi,
+                                                                   inst.inst_.neg);
       uint32_t result = amdgpu::gfx11_dot2_f32<true>(a0, b0, a1, b1, acc);
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
       continue;
@@ -10144,8 +10144,7 @@ inline void execute_v_dot2_f32_bf16_vop3p([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg_hi & 2)
       b1 = -b1;
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    if (inst.inst_.neg & 4)
-      acc = -acc;
+    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst.inst_.neg_hi, inst.inst_.neg);
     float result = a0 * b0 + a1 * b1 + acc;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        std::bit_cast<uint32_t>(result));
@@ -10184,8 +10183,8 @@ inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
       if (inst.inst_.neg_hi & 2)
         b1 ^= 0x8000u;
       uint32_t acc = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
-      if (inst.inst_.neg & 4)
-        acc ^= 0x80000000u;
+      acc = amdgpu::source_modifier::apply<amdgpu::fp_format::F32>(acc, 2, inst.inst_.neg_hi,
+                                                                   inst.inst_.neg);
       uint32_t result = amdgpu::gfx11_dot2_f32<false>(a0, b0, a1, b1, acc);
       sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane, result);
       continue;
@@ -10203,8 +10202,7 @@ inline void execute_v_dot2_f32_f16_vop3p([[maybe_unused]] Inst &inst,
     if (inst.inst_.neg_hi & 2)
       b1 = -b1;
     float acc = std::bit_cast<float>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane));
-    if (inst.inst_.neg & 4)
-      acc = -acc;
+    acc = amdgpu::source_modifier::apply_to_float(acc, 2, inst.inst_.neg_hi, inst.inst_.neg);
     float result = a0 * b0 + a1 * b1 + acc;
     sdwa::write_lane<amdgpu::sdwa::ResultFormat::NONE>(inst, wf, inst.vdst, lane,
                                                        std::bit_cast<uint32_t>(result));
@@ -10412,6 +10410,8 @@ inline void execute_v_dot4_i32_i8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     for (int i = 0; i < 4; ++i) {
@@ -10438,6 +10438,8 @@ inline void execute_v_dot4_i32_iu8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
@@ -10470,6 +10472,8 @@ inline void execute_v_dot4_u32_u8_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     for (int i = 0; i < 4; ++i) {
       uint8_t a = static_cast<uint8_t>((raw0 >> (i * 8)) & 0xFF);
@@ -10533,6 +10537,8 @@ inline void execute_v_dot8_i32_i4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     for (int i = 0; i < 8; ++i) {
@@ -10563,6 +10569,8 @@ inline void execute_v_dot8_i32_iu4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     int64_t sum = static_cast<int64_t>(
         static_cast<int32_t>(amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane)));
     const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
@@ -10595,6 +10603,8 @@ inline void execute_v_dot8_u32_u4_vop3p([[maybe_unused]] Inst &inst,
       continue;
     uint32_t raw0 = amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane);
     uint32_t raw1 = amdgpu::RegisterAccess(wf).read_lane(inst.src1, lane);
+    raw0 = amdgpu::select_packed_halves(raw0, inst.inst_.op_sel, inst.inst_.op_sel_hi, 0);
+    raw1 = amdgpu::select_packed_halves(raw1, inst.inst_.op_sel, inst.inst_.op_sel_hi, 1);
     uint64_t sum = amdgpu::RegisterAccess(wf).read_lane(inst.src2, lane);
     for (int i = 0; i < 8; ++i) {
       uint32_t a = (raw0 >> (i * 4)) & 0xF;

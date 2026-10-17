@@ -103,6 +103,7 @@ enum class SimdFastPath : uint8_t {
   VOP3_TERNARY_RAW_FP,
   VOP3_TERNARY_TRUE16_RAW_FP16,
   VOP3_FMA_FP16,
+  VOP3P_DOT_INT,
   VOP_WORDS,
   VOP1_UNARY,
   VOP2_BINARY,
@@ -4528,11 +4529,10 @@ template <typename Inst> [[nodiscard]] bool try_execute_vop3p_mov_b32_simd(Inst 
 /// signed forms when inst.clamp is set, saturation to [INT_MIN, INT_MAX]. Unsigned
 /// clamp saturates to UINT_MAX. Clamped accumulation is widened so overflow is
 /// detected before narrowing; unclamped accumulation remains in uint32_t bits
-/// and wraps. For the 16-bit forms op_sel /
-/// op_sel_hi pick the source halves,
-/// so the fast path gates on the default packing (op_sel == 0, op_sel_hi == 3)
-/// and bails otherwise; the 8/4-bit scalar bodies ignore op_sel so no gate is
-/// needed there.
+/// and wraps. op_sel / op_sel_hi pick the source halves. The 16-bit forms gate
+/// on the default packing (op_sel == 0, op_sel_hi == 3) and bail otherwise; the
+/// 8/4-bit forms apply the selection to the packed sources, as gfx1201 and
+/// gfx1100 do.
 template <int ElemBits, bool Signed, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_int_simd(Inst &inst, Wavefront &wf) {
@@ -4566,8 +4566,12 @@ template <int ElemBits, bool Signed, typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const U raw0 = src0.template load_native<uint32_t>(base);
-    const U raw1 = src1.template load_native<uint32_t>(base);
+    U raw0 = src0.template load_native<uint32_t>(base);
+    U raw1 = src1.template load_native<uint32_t>(base);
+    if constexpr (ElemBits != 16) {
+      raw0 = select_packed_halves(raw0, packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 0);
+      raw1 = select_packed_halves(raw1, packed_opsel(inst.inst_), packed_opsel_hi(inst.inst_), 1);
+    }
     const U acc = src2.template load_native<uint32_t>(base);
     if constexpr (Signed) {
 #if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
@@ -4623,6 +4627,7 @@ template <int ElemBits, bool Signed, typename Inst>
       dst.template store_native<uint32_t>(base, sum, chunk);
     }
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP3P_DOT_INT);
   return true;
 }
 
@@ -4641,7 +4646,8 @@ enum class Vop3pDotHalfFormat { F16, BF16 };
 /// acc (plain `*` / `+`, left-to-right — matching the scalar, NOT a contracted
 /// fma). op_sel / op_sel_hi pick the halves of src0/src1 (gated to the default
 /// packing op_sel == 0 && op_sel_hi == 3); neg / neg_hi flip the src0/src1
-/// product-operand signs and neg bit 2 flips the accumulator. The encoded CLAMP
+/// product-operand signs; on the accumulator neg_hi bit 2 is ABS, applied before
+/// neg bit 2, as in the scalar body. The encoded CLAMP
 /// field is ignored for floating DOT instructions. NaN-input payload divergence accepted (same
 /// carve-out as the pk_fma
 /// slices). @tparam Fmt selects the f16 vs bf16 widening.
@@ -4668,17 +4674,19 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
   const uint64_t exec = dpp::execution_lane_mask(inst, wf);
   using F = util::native<float>;
   using U = util::native<uint32_t>;
-  const U kSignBit(0x80000000u);
   const bool neg_a0 = inst.inst_.neg & 1u;
   const bool neg_b0 = inst.inst_.neg & 2u;
-  const bool neg_acc = inst.inst_.neg & 4u;
   const bool neg_a1 = inst.inst_.neg_hi & 1u;
   const bool neg_b1 = inst.inst_.neg_hi & 2u;
-  const auto widen = [](U raw) {
+  // Widen one half, then flip its sign (NEG only; the product sources have no ABS).
+  const auto half = [](U raw, bool negate) {
+    F value;
     if constexpr (Fmt == Vop3pDotHalfFormat::BF16)
-      return util::bf16_to_f32_simd(raw);
+      value = util::bf16_to_f32_simd(raw);
     else
-      return util::f16_to_f32_simd(raw);
+      value = util::f16_to_f32_simd(raw);
+    return std::bit_cast<F>(
+        source_modifier::apply<fp_format::F32>(std::bit_cast<U>(value), false, negate));
   };
   RegisterAccess regs(wf);
   auto src0 = regs.read_operand(inst.src0, exec);
@@ -4691,21 +4699,12 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
       continue;
     const U raw0 = src0.template load_native<uint32_t>(base);
     const U raw1 = src1.template load_native<uint32_t>(base);
-    F acc = src2.template load_native<float>(base);
-    F a0 = widen(raw0 & 0xFFFFu);
-    F a1 = widen(raw0 >> 16);
-    F b0 = widen(raw1 & 0xFFFFu);
-    F b1 = widen(raw1 >> 16);
-    if (neg_a0)
-      a0 = std::bit_cast<F>(std::bit_cast<U>(a0) ^ kSignBit);
-    if (neg_b0)
-      b0 = std::bit_cast<F>(std::bit_cast<U>(b0) ^ kSignBit);
-    if (neg_a1)
-      a1 = std::bit_cast<F>(std::bit_cast<U>(a1) ^ kSignBit);
-    if (neg_b1)
-      b1 = std::bit_cast<F>(std::bit_cast<U>(b1) ^ kSignBit);
-    if (neg_acc)
-      acc = std::bit_cast<F>(std::bit_cast<U>(acc) ^ kSignBit);
+    const F acc = std::bit_cast<F>(source_modifier::apply<fp_format::F32>(
+        src2.template load_native<uint32_t>(base), 2, inst.inst_.neg_hi, inst.inst_.neg));
+    const F a0 = half(raw0 & 0xFFFFu, neg_a0);
+    const F a1 = half(raw0 >> 16, neg_a1);
+    const F b0 = half(raw1 & 0xFFFFu, neg_b0);
+    const F b1 = half(raw1 >> 16, neg_b1);
     F r = a0 * b0 + a1 * b1 + acc;
     dst.template store_native<float>(base, r, chunk);
   }
@@ -4722,8 +4721,8 @@ template <Vop3pDotHalfFormat Fmt, typename Inst>
 /// signedness is chosen at RUNTIME from inst.neg (bit 0 -> src0 signed, bit 1
 /// -> src1 signed) — hoisted out of the chunk loop. src2 is the int32
 /// accumulator seed; clamp (when set) saturates to [INT_MIN, INT_MAX] before
-/// narrowing. Unclamped accumulation wraps in uint32_t bits. The 8/4-bit scalar
-/// bodies read no op_sel/neg_hi, so no gate.
+/// narrowing. Unclamped accumulation wraps in uint32_t bits. op_sel / op_sel_hi
+/// pick the source halves, as in the scalar bodies.
 template <int ElemBits, typename Inst>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_vop3p_dot_int_mixed_simd(Inst &inst, Wavefront &wf) {
@@ -4744,6 +4743,8 @@ template <int ElemBits, typename Inst>
 #endif
   const bool src0_signed = (inst.inst_.neg & 0x1u) != 0;
   const bool src1_signed = (inst.inst_.neg & 0x2u) != 0;
+  const uint32_t opsel = packed_opsel(inst.inst_);
+  const uint32_t opsel_hi = packed_opsel_hi(inst.inst_);
   using U = util::native<uint32_t>;
   using I = util::native<int32_t>;
   RegisterAccess regs(wf);
@@ -4755,8 +4756,10 @@ template <int ElemBits, typename Inst>
     const uint64_t chunk = (exec >> base) & chunk_full;
     if (chunk == 0)
       continue;
-    const U raw0 = src0.template load_native<uint32_t>(base);
-    const U raw1 = src1.template load_native<uint32_t>(base);
+    const U raw0 =
+        select_packed_halves(src0.template load_native<uint32_t>(base), opsel, opsel_hi, 0);
+    const U raw1 =
+        select_packed_halves(src1.template load_native<uint32_t>(base), opsel, opsel_hi, 1);
     const U acc = src2.template load_native<uint32_t>(base);
 #if !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS
     if (clamp) {
@@ -4791,6 +4794,7 @@ template <int ElemBits, typename Inst>
     }
     dst.template store_native<uint32_t>(base, sum, chunk);
   }
+  detail::record_simd_fast_path(SimdFastPath::VOP3P_DOT_INT);
   return true;
 }
 
