@@ -19,6 +19,7 @@ import pandas as pd
 import pytest
 from sqlalchemy import text
 
+from memory_chart.loader import Layouts
 from pc_sampling import per_kernel_isa_export, source_snapshot_analysis
 from pc_sampling.code_object_analysis import CodeObjectInstruction, CodeObjectSymbol
 from pc_sampling.pc_sampling_analysis import SOURCE_LINE_MISSING, InstructionLineRecord
@@ -223,6 +224,14 @@ def make_counter_backed_database_analyzer(
     analyzer._kernel_values_data_per_workload = {}
     analyzer._workload_values_data_per_workload = {}
     return analyzer
+
+
+def run_memory_chart_workload(tmp_path, gpu_arch):
+    """Run analysis of one counter-backed workload; return its workload row."""
+    analyzer = make_counter_backed_database_analyzer(str(tmp_path), ["3"], [])
+    analyzer._runs[str(tmp_path)].sys_info = pd.DataFrame([{"gpu_arch": gpu_arch}])
+    run_analysis_with_existing_database(analyzer)
+    return orm.Database.get_session().query(orm.Workload).one()
 
 
 def run_analysis_with_existing_database(analyzer):
@@ -3556,3 +3565,24 @@ def test_calc_roofline_data_includes_all_kernels(monkeypatch):
         assert (df[col] == 42.0).all()
 
     assert evaluated_row_counts == [2] * (NUM_KERNELS * len(roofline_metrics))
+
+
+# =============================================================================
+# Memory chart layout (Workload.memory_chart_layout_extdata)
+# =============================================================================
+
+
+def test_run_analysis_stores_the_memory_chart_layout_file_unchanged(
+    db_session, tmp_path
+):
+    workload = run_memory_chart_workload(tmp_path, "gfx942")
+    layout_file = Layouts.for_arch("gfx942").path
+    assert workload.memory_chart_layout_extdata == json.loads(
+        layout_file.read_text(encoding="utf-8")
+    )
+
+
+def test_run_analysis_stores_null_for_an_arch_without_a_layout(db_session, tmp_path):
+    # Also covers a layout file skipped as broken
+    workload = run_memory_chart_workload(tmp_path, "gfx1030")
+    assert workload.memory_chart_layout_extdata is None
