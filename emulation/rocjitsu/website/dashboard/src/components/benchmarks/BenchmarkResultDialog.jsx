@@ -17,17 +17,19 @@ import { DetailGrid, DetailSectionHeading } from '../shared/DetailLayout';
 import StatusChip from '../shared/StatusChip';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { problemDetails } from '../../data/problemDetails';
-import { provenanceDetails } from '../../data/provenance';
+import { runEnvironmentDetails } from '../../data/provenance';
 import { formatDuration, formatFullDate, shortSha } from '../../utils/formatters';
 import { hasDisplayValue } from '../../utils/values';
+import { commitUrl } from '../../utils/commitUrl';
 
 export default function BenchmarkResultDialog({ record, repository, onClose }) {
   const run = record?.run;
   const test = record?.test;
   const provenance = run?.provenance ?? {};
   const commitSha = provenance.rocjitsuCommitSha;
+  const sourceUrl = commitUrl(repository, commitSha);
   const testProblemDetails = problemDetails(test?.problem);
-  const environmentDetails = provenanceDetails(provenance);
+  const environmentDetails = [...runEnvironmentDetails({ provenance, environment: run?.environment }).values()];
 
   return (
     <Dialog open={Boolean(record)} onClose={onClose} fullWidth maxWidth="md">
@@ -35,7 +37,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
         <>
           <DialogTitle component="div" sx={{ pr: 7 }}>
             <Typography variant="h2" sx={{ lineHeight: '24px' }}>{test.name}</Typography>
-            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4, lineHeight: '21px' }}>{test.target} · {test.suite}</Typography>
+            <Typography variant="body2" sx={{ color: 'text.secondary', mt: 0.4, lineHeight: '21px' }}>{test.target} · {test.mode} · {test.suite}</Typography>
             <IconButton onClick={onClose} aria-label="Close details" sx={{ position: 'absolute', top: 11, right: 11 }}><CloseRoundedIcon /></IconButton>
           </DialogTitle>
           <DialogContent dividers>
@@ -43,6 +45,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
             <DetailGrid>
               <DetailItem label="Status"><StatusChip status={test.status} /></DetailItem>
               <DetailItem label="Duration">{formatDuration(test.durationSeconds)}</DetailItem>
+              <DetailItem label="Execution mode">{test.mode}</DetailItem>
               {test.error && <Box sx={{ gridColumn: '1 / -1' }}><DetailItem label="Error">{test.error}</DetailItem></Box>}
             </DetailGrid>
 
@@ -63,7 +66,7 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
             {environmentDetails.length > 0 ? (
               <DetailGrid>
                 {environmentDetails.map((detail) => (
-                  <DetailItem key={detail.key} label={detail.label}>{detail.value}</DetailItem>
+                  <DetailItem key={detail.key} label={detail.label}>{String(detail.value)}</DetailItem>
                 ))}
               </DetailGrid>
             ) : (
@@ -73,22 +76,21 @@ export default function BenchmarkResultDialog({ record, repository, onClose }) {
             <Divider sx={{ my: 2.5 }} />
             <DetailSectionHeading>Run Provenance</DetailSectionHeading>
             <DetailGrid>
+              <DetailItem label="Run identity">{run.runId}</DetailItem>
               <DetailItem label="Run time">{formatFullDate(run.timestamp)}</DetailItem>
               <DetailItem label="Run type">{run.trigger === 'manual' ? 'Manual' : 'Auto'}</DetailItem>
               {hasDisplayValue(run.machineId) && <DetailItem label="Machine">{run.machineId}</DetailItem>}
               <DetailItem label="Rocjitsu commit">{commitSha}</DetailItem>
               <DetailItem label="Commit time">{formatFullDate(commitTimestampFor(run))}</DetailItem>
               {hasDisplayValue(provenance.commitMessage) && <DetailItem label="Commit message">{provenance.commitMessage}</DetailItem>}
-              {hasDisplayValue(run.plugin?.name) && <DetailItem label="Plugin">{run.plugin.name}</DetailItem>}
-              {hasDisplayValue(run.plugin?.version) && <DetailItem label="Plugin version">{run.plugin.version}</DetailItem>}
             </DetailGrid>
 
           </DialogContent>
           <DialogActions sx={{ px: 3, py: 1.5 }}>
-            {repository && commitSha && (
+            {sourceUrl && (
               <Button
                 component={Link}
-                href={`${repository}/commit/${commitSha}`}
+                href={sourceUrl}
                 target="_blank"
                 rel="noreferrer"
                 endIcon={<OpenInNewRoundedIcon />}

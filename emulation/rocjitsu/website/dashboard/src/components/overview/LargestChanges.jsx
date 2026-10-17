@@ -1,91 +1,33 @@
-import {
-  Box,
-  Divider,
-  LinearProgress,
-  Stack,
-  Typography,
-} from '@mui/material';
-import ArrowDownwardRoundedIcon from '@mui/icons-material/ArrowDownwardRounded';
-import ArrowUpwardRoundedIcon from '@mui/icons-material/ArrowUpwardRounded';
-import RemoveRoundedIcon from '@mui/icons-material/RemoveRounded';
+import { Box, Stack, Typography } from '@mui/material';
 import SectionCard from '../shared/SectionCard';
-import { formatPercent } from '../../utils/formatters';
+import CategoryTag from '../shared/CategoryTag';
+import { monoFont } from '../../theme/tokens';
+import { formatPercent, shortSha } from '../../utils/formatters';
 import { changeTone, classifyDurationChange } from '../../utils/performance';
-import CommitComparison from '../shared/CommitComparison';
-
-const NOISE_TOLERANCE = 3;
-const legendItems = [
-  { state: 'slower', label: 'Slower', color: 'error.main' },
-  { state: 'neutral', label: `Within ±${NOISE_TOLERANCE}%`, color: 'text.disabled' },
-  { state: 'faster', label: 'Faster', color: 'success.main' },
-];
 
 export default function LargestChanges({ changes, candidate, baseline }) {
-  const maxDelta = Math.max(...changes.map((item) => Math.abs(item.delta)), 1);
-
+  const maximumMagnitude = Math.max(...changes.map((item) => Math.abs(item.delta)).filter(Number.isFinite), 0);
   return (
-    <SectionCard
-      title="Largest Changes"
-      subtitle="Largest benchmark changes across the selected history range"
-      sx={{ height: '100%' }}
-      data-testid="largest-changes"
-    >
-      <Stack direction="row" sx={{ flexWrap: 'wrap', columnGap: 2, rowGap: 0.75, mb: 1 }}>
-        {legendItems.map((item) => (
-          <Stack key={item.state} direction="row" data-legend-state={item.state} sx={{ alignItems: 'center', gap: 0.65 }}>
-            <Box aria-hidden="true" sx={{ width: 8, height: 8, borderRadius: '50%', bgcolor: item.color, flexShrink: 0 }} />
-            <Typography variant="caption" sx={{ color: 'text.secondary' }} fontWeight={650}>{item.label}</Typography>
-          </Stack>
-        ))}
-      </Stack>
-      {changes.length === 0 ? (
-        <Typography sx={{ color: 'text.secondary', py: 8, textAlign: 'center' }}>
-          {candidate ? 'No comparable results in this selection.' : '—'}
-        </Typography>
-      ) : changes.map((item, index) => {
-        const changeState = classifyDurationChange(item.delta, NOISE_TOLERANCE);
-        const tone = changeTone(changeState);
-        const toneColor = tone === 'neutral' ? 'text.secondary' : `${tone}.main`;
-        return (
-          <Box key={item.candidateTest.testId} data-change-state={changeState}>
-            {index > 0 && <Divider />}
-            <Box sx={{ py: 1.35 }}>
-              <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'space-between', gap: 1.5 }}>
-                <Box sx={{ minWidth: 0 }}>
-                  <Typography variant="body2" fontWeight={680} noWrap>{item.candidateTest.name}</Typography>
-                  <Typography variant="caption" sx={{ color: 'text.secondary' }}>
-                    {item.candidateTest.target} · {item.candidateTest.suite}
-                  </Typography>
-                </Box>
-                <Box sx={{ flexShrink: 0 }}>
-                  <Stack direction="row" sx={{ alignItems: 'center', justifyContent: 'flex-end', color: toneColor }}>
-                    {changeState === 'slower' && <ArrowUpwardRoundedIcon sx={{ fontSize: 16 }} />}
-                    {changeState === 'faster' && <ArrowDownwardRoundedIcon sx={{ fontSize: 16 }} />}
-                    {changeState === 'neutral' && <RemoveRoundedIcon sx={{ fontSize: 16 }} />}
-                    <Typography variant="body2" fontWeight={750}>{formatPercent(item.delta)}</Typography>
-                  </Stack>
-                  <CommitComparison candidate={candidate} baseline={baseline} align="right" sx={{ mt: 0.15, fontSize: 10 }} />
-                </Box>
+    <SectionCard title="Largest Changes" subtitle="Across selected targets and suites and execution modes" sx={{ height: '100%', minWidth: 0 }} contentSx={{ p: 2, '&:last-child': { pb: 2 } }} data-testid="largest-changes">
+      {changes.length === 0 ? <Typography color="text.secondary" sx={{ py: 4 }}>No comparable results in this selection.</Typography> : changes.map((item) => {
+        const state = classifyDurationChange(item.delta, 3);
+        const tone = changeTone(state);
+        return <Box key={item.candidateTest.testId} data-change-state={state} sx={{ py: 1.1 }}>
+          <Stack direction="row" sx={{ justifyContent: 'space-between', alignItems: 'center', gap: 1 }}>
+            <Box sx={{ minWidth: 0 }}>
+              <Typography variant="body2" title={item.candidateTest.name} sx={{ fontWeight: 600, overflowWrap: 'anywhere', fontSize: 12 }}>{item.candidateTest.name}</Typography>
+              <Stack direction="row" sx={{ mt: 0.4, gap: 0.5, flexWrap: 'wrap' }}>
+                <CategoryTag kind="target" label={item.candidateTest.target} />
+                <CategoryTag label={item.candidateTest.suite} />
+                <CategoryTag kind="mode" label={item.candidateTest.mode} />
               </Stack>
-              <LinearProgress
-                variant="determinate"
-                value={(Math.abs(item.delta) / maxDelta) * 100}
-                color={changeState === 'slower' ? 'error' : changeState === 'faster' ? 'success' : 'primary'}
-                sx={{
-                  mt: 1,
-                  height: 6,
-                  borderRadius: 999,
-                  bgcolor: 'action.hover',
-                  '& .MuiLinearProgress-bar': {
-                    borderRadius: 999,
-                    boxShadow: changeState === 'neutral' ? 'none' : 2,
-                    ...(changeState === 'neutral' && { bgcolor: 'text.disabled' }),
-                  },
-                }}
-              />
             </Box>
+            <Typography variant="body2" aria-label={`${formatPercent(item.delta)}, ${state === 'neutral' ? 'within 3% noise tolerance' : state}`} title={`Candidate ${shortSha(candidate)} vs baseline ${shortSha(baseline)}`} sx={{ flexShrink: 0, fontWeight: 650, fontFamily: monoFont, fontSize: 15, color: tone === 'neutral' ? 'text.secondary' : `${tone}.main` }}>{formatPercent(item.delta)}</Typography>
+          </Stack>
+          <Box aria-hidden="true" sx={{ mt: 1, height: 3, bgcolor: 'divider', borderRadius: 1 }}>
+            <Box data-testid="change-magnitude-bar" sx={{ height: '100%', width: `${maximumMagnitude && Number.isFinite(item.delta) ? Math.abs(item.delta) / maximumMagnitude * 100 : 0}%`, bgcolor: tone === 'neutral' ? 'text.disabled' : `${tone}.main`, borderRadius: 1 }} />
           </Box>
-        );
+        </Box>;
       })}
     </SectionCard>
   );

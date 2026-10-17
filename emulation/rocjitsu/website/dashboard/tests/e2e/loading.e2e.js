@@ -1,194 +1,130 @@
 import { expect, test } from '@playwright/test';
+import { createSchema2Publication } from '../fixtures/schema2Dataset.js';
+import { downloadSource, fetchPolicies, installPublication, openDashboard, ready, recordFetchPolicies } from './helpers/dashboard.js';
 
-test('loads the data-driven overview without browser errors', async ({ page }) => {
-  const errors = [];
-  page.on('pageerror', (error) => errors.push(error.message));
-  page.on('console', (message) => {
-    if (message.type() === 'error') errors.push(message.text());
-  });
-
-  await page.goto('/');
-  await expect(page.getByTestId('rocjitsu-logo')).toHaveCount(0);
-  await expect(page.getByText('Beta', { exact: true })).toBeVisible();
-  await expect(page.getByText('Demo', { exact: true })).toHaveCount(0);
-  await expect(page.getByRole('heading', { name: 'Rocjitsu Simulation Performance' })).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Performance Trend' })).toBeVisible();
-  await expect(page.getByText('Run coverage', { exact: true })).toBeVisible();
-  await expect(page.getByText('Recent Runs')).toBeVisible();
-  await expect(page.getByText('Rocjitsu Commit Activity')).toHaveCount(0);
-  await expect(page.locator('canvas')).toHaveCount(1);
-  await expect(page.getByText('GEMM BF16 4096³').first()).toBeVisible();
-  expect(await page.evaluate(() => Object.hasOwn(window, 'ROCjITSU_BENCHMARK_DATA'))).toBe(false);
-  expect(errors).toEqual([]);
-});
-
-test('renders the dashboard shell and run progress while data is still loading', async ({ page }) => {
-  let releaseRunRequest;
-  const runRequestGate = new Promise((resolve) => {
-    releaseRunRequest = resolve;
-  });
-  await page.route('**/data/runs/**', async (route) => {
-    await runRequestGate;
-    await route.continue();
-  }, { times: 1 });
-
+test('loading shell reports partial progress and disables data actions until all indexed runs settle', async ({ page }) => {
+  let release;
+  let held = false;
+  const gate = new Promise((resolve) => { release = resolve; });
+  await installPublication(page, { beforeResponse: async ({ relative }) => {
+    // A permanent handler and synchronous flag avoid interception-disable races.
+    if (relative.startsWith('runs/') && !held) {
+      held = true;
+      await gate;
+    }
+  } });
   await page.goto('/');
   try {
-    await expect(page.getByText('Rocjitsu / Simulation Performance Dashboard')).toBeVisible();
-    await expect(page.getByRole('heading', { name: 'Rocjitsu Simulation Performance' })).toBeVisible();
-    await expect(page.getByText('Beta', { exact: true })).toBeVisible();
-    const loadingState = page.getByTestId('dashboard-data-loading');
-    await expect(loadingState).toBeVisible();
-    await expect(loadingState).toHaveAttribute('aria-busy', 'true');
-    await expect(loadingState.getByRole('status')).toHaveText('Loading benchmark run data');
-    const progress = loadingState.getByRole('progressbar', { name: 'Loading benchmark run data' });
-    await expect(progress).toBeVisible();
-    await expect(loadingState.getByTestId('dashboard-load-progress')).toContainText(/\d+ of \d+ run files/);
-    await expect.poll(() => progress.getAttribute('aria-valuenow')).not.toBeNull();
-    await expect(progress).toHaveAttribute('aria-valuetext', /\d+ of \d+ run files loaded/);
+    await expect.poll(() => held).toBe(true);
+    const loading = page.getByTestId('dashboard-data-loading');
+    await expect(loading).toHaveAttribute('aria-busy', 'true');
+    await expect(loading.getByRole('status')).toHaveText('Loading benchmark run data');
+    const progress = loading.getByRole('progressbar', { name: 'Loading benchmark run data' });
+    await expect.poll(async () => Number(await progress.getAttribute('aria-valuenow'))).toBeGreaterThan(0);
+    expect(Number(await progress.getAttribute('aria-valuenow'))).toBeLessThan(100);
+    await expect(progress).toHaveAttribute('aria-valuetext', /\d+ of 44 run files loaded/);
     await expect(page.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
     await expect(page.getByRole('button', { name: 'Reload all data' })).toBeDisabled();
+    await expect(page.getByTestId('dashboard-navigation').getByRole('tab')).toHaveCount(4);
+    await page.getByRole('tab', { name: 'Benchmarks', exact: true }).click();
+    await expect(page.getByRole('heading', { name: 'Benchmarks', level: 1, exact: true })).toBeVisible();
   } finally {
-    releaseRunRequest();
+    release();
   }
-
-  await expect(page.getByTestId('dashboard-data-loading')).toHaveCount(0);
-  await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
+  await ready(page);
+  await expect(page.getByTestId('benchmark-grid-card')).toHaveCount(4);
 });
 
-test('offers an explicit full data reload', async ({ page }) => {
-  let indexRequests = 0;
-  let cacheBustedIndexRequests = 0;
-  const runGenerations = [];
-  await page.route('**/data/index.json*', async (route) => {
-    indexRequests += 1;
-    if (new URL(route.request().url()).searchParams.has('reload')) {
-      cacheBustedIndexRequests += 1;
+test('fatal load and failed refresh discard stale exports; Retry restores raw schema 2 and cache generations', async ({ page }) => {
+  let status = 404;
+  let indexFailures = 0;
+  const { publication } = await installPublication(page, { beforeResponse: ({ relative }) => {
+    if (relative === 'index.json' && status !== 200) {
+      indexFailures += 1;
+      return { status, contentType: 'text/plain', body: 'Fictional endpoint unavailable' };
     }
-    await route.continue();
-  });
-  await page.route('**/data/runs/*.json*', async (route) => {
-    runGenerations.push(new URL(route.request().url()).searchParams.get('reload'));
-    await route.continue();
-  });
-
+  } });
+  await recordFetchPolicies(page);
   await page.goto('/');
-  const reload = page.getByRole('button', { name: 'Reload all data' });
-  await expect(reload).toBeEnabled();
-  await expect(reload).toHaveClass(/MuiButton-colorInherit/);
-  const initialIndexRequests = indexRequests;
-  await reload.click();
+  const failure = page.getByTestId('dashboard-data-error');
+  await expect(failure).toContainText('No available test data');
+  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
+  for (const name of ['Branch Runs', 'Benchmarks', 'Run Comparison', 'Overview']) {
+    await page.getByRole('tab', { name, exact: true }).click();
+    await expect(failure).toBeVisible();
+  }
+  await expect(page.getByRole('img')).toHaveCount(0);
+  status = 200;
+  await failure.getByRole('button', { name: 'Retry', exact: true }).click();
+  await ready(page);
+  const source = await downloadSource(page);
+  expect(source).toEqual(publication);
+  expect(source.index).not.toHaveProperty('schemaVersion');
+  expect(source.runs.every((run) => run.schemaVersion === 2)).toBe(true);
+  expect(source).not.toHaveProperty('metadata');
+  expect(source).not.toHaveProperty('siteConfig');
+  expect(source.runs.every((run) => !('plugin' in run) && !('comparisonId' in run))).toBe(true);
+  expect(source.runs.some((run) => run.source.branch.startsWith('fictional/'))).toBe(true);
+  const policies = await fetchPolicies(page);
+  const initialImmutable = policies.filter(({ url }) => /\/(runs|test-catalogs)\//.test(url));
+  expect(initialImmutable).toHaveLength(publication.runs.length + Object.keys(publication.catalogs).length);
+  expect(policies.filter(({ url }) => /\/index\.json/.test(url)).every(({ cache }) => cache === 'no-store')).toBe(true);
+  expect(initialImmutable.every(({ cache }) => cache === 'force-cache')).toBe(true);
 
-  await expect.poll(() => indexRequests).toBeGreaterThan(initialIndexRequests);
-  expect(cacheBustedIndexRequests).toBeGreaterThan(0);
-  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
-
-  const savedGeneration = await page.evaluate(
-    () => window.localStorage.getItem('rocjitsu-data-cache-generation'),
-  );
-  expect(savedGeneration).toBeTruthy();
-
-  runGenerations.length = 0;
+  const before = indexFailures;
+  status = 503;
+  await page.getByRole('button', { name: 'Reload all data' }).click();
+  await expect(failure).toContainText('Unable to reach published dashboard data');
+  expect(indexFailures - before).toBe(3);
+  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
+  await expect(page.getByRole('button', { name: 'Reload all data' })).toBeEnabled();
+  await expect(page.getByTestId('recent-runs-table').locator('tbody tr')).toHaveCount(0);
+  status = 200;
+  await page.evaluate(() => { window.__dashboardFetches = []; });
+  await failure.getByRole('button', { name: 'Retry', exact: true }).click();
+  await ready(page);
+  const generation = await page.evaluate(() => localStorage.getItem('rocjitsu-data-cache-generation'));
+  expect(generation).toBeTruthy();
+  const refreshed = await fetchPolicies(page);
+  expect(refreshed.length).toBeGreaterThan(0);
+  expect(refreshed.every(({ url }) => new URL(url).searchParams.get('reload') === generation)).toBe(true);
+  expect(refreshed.filter(({ url }) => /\/(runs|test-catalogs)\//.test(url)).every(({ cache }) => cache === 'reload')).toBe(true);
+  expect(await downloadSource(page)).toEqual(source);
   await page.reload();
-  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
-  expect(runGenerations.length).toBeGreaterThan(0);
-  expect(runGenerations.every((generation) => generation === savedGeneration)).toBe(true);
+  await ready(page);
+  const normal = await fetchPolicies(page);
+  const immutable = normal.filter(({ url }) => /\/(runs|test-catalogs)\//.test(url));
+  expect(immutable.length).toBeGreaterThan(0);
+  expect(immutable.every(({ url, cache }) => cache === 'force-cache' && new URL(url).searchParams.get('reload') === generation)).toBe(true);
+  expect(normal.filter(({ url }) => /\/index\.json/.test(url)).every(({ url, cache }) => cache === 'no-store' && !new URL(url).searchParams.has('reload'))).toBe(true);
 });
 
-test('keeps loaded data when cache generation persistence fails', async ({ page }) => {
+test('one invalid indexed run fails the entire publication instead of exposing partial measurements', async ({ page }) => {
+  const publication = createSchema2Publication();
+  publication.runs.find((run) => run.id === 'fictional-develop-23').configurations[0].results[0].durationSeconds = -1;
+  await installPublication(page, { publication });
+  await page.goto('/');
+  await expect(page.getByTestId('dashboard-data-error')).toContainText('fictional-develop-23');
+  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeDisabled();
+  await expect(page.getByTestId('metric-card-run-health')).toContainText('No selected results available');
+  await expect(page.getByRole('img')).toHaveCount(0);
+  await page.getByRole('tab', { name: 'Branch Runs', exact: true }).click();
+  await expect(page.getByRole('heading', { name: 'No published branch runs' })).toBeVisible();
+  await expect(page.getByTestId('branch-config-gfx1250-ST')).toHaveCount(0);
+});
+
+test('optional storage failure cannot discard a successfully refreshed publication', async ({ page }) => {
   await page.addInitScript(() => {
-    const originalSetItem = Storage.prototype.setItem;
+    const original = Storage.prototype.setItem;
     Storage.prototype.setItem = function setItem(key, value) {
-      if (key === 'rocjitsu-data-cache-generation') {
-        throw new DOMException('Quota exceeded', 'QuotaExceededError');
-      }
-      return originalSetItem.call(this, key, value);
+      if (key === 'rocjitsu-data-cache-generation') throw new DOMException('Fictional quota failure', 'QuotaExceededError');
+      return original.call(this, key, value);
     };
   });
-
-  await page.goto('/');
-  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
-
+  await openDashboard(page);
   await page.getByRole('button', { name: 'Reload all data' }).click();
-
-  await expect(page.getByTestId('dashboard-data-error')).toHaveCount(0);
-  await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
-  await expect(page.getByRole('button', { name: 'Download JSON' })).toBeEnabled();
-});
-
-test('fails closed when an indexed run is invalid', async ({ page }) => {
-  const invalidRunFile = 'runs/invalid-run.json';
-  await page.route('**/data/index.json', async (route) => {
-    const response = await route.fetch();
-    const index = await response.json();
-    await route.fulfill({
-      status: 200,
-      contentType: 'application/json',
-      body: JSON.stringify({ ...index, runFiles: [index.runFiles[0], invalidRunFile] }),
-    });
-  });
-  await page.route('**/data/runs/invalid-run.json', async (route) => {
-    await route.fulfill({ status: 200, contentType: 'application/json', body: '{"id":"invalid-run"}' });
-  });
-
-  await page.goto('/');
-
-  const failure = page.getByTestId('dashboard-data-error');
-  await expect(failure).toContainText('No available test data');
-  await expect(failure).toContainText(invalidRunFile);
-  await expect(failure).toContainText('references an invalid test catalog');
-  await expect(page.getByRole('button', { name: 'Reload all data' }))
-    .toHaveClass(/MuiButton-colorPrimary/);
-  await expect(page.getByTestId('latest-results')).toBeVisible();
-  await expect(page.getByTestId('latest-results').locator('tbody tr')).toHaveCount(1);
-});
-
-test('offers a working Retry after a fatal data failure', async ({ page }) => {
-  let remainingFailures = 3;
-  await page.route('**/data/index.json', async (route) => {
-    if (remainingFailures === 0) {
-      await route.continue();
-      return;
-    }
-    remainingFailures -= 1;
-    await route.abort('failed');
-  });
-
-  await page.goto('/');
-  const failure = page.getByTestId('dashboard-data-error');
-  await expect(failure).toContainText('No available test data');
-  await expect(failure).toContainText('Unable to reach published dashboard data');
-  await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
-  await expect(page.getByLabel('Targets')).toBeDisabled();
-  await expect(page.getByLabel('Suites')).toBeDisabled();
-  await expect(page.getByText('Total duration', { exact: true })).toBeVisible();
-  await expect(page.getByText('Run health', { exact: true })).toBeVisible();
-  await expect(page.getByText('Performance Trend')).toBeVisible();
-  await expect(page.getByText('Largest Changes')).toBeVisible();
-  await expect(page.getByText('Latest Commit Results')).toBeVisible();
-  await expect(page.getByText('Recent Runs')).toBeVisible();
-  await expect(page.getByTestId('latest-commit-run').getByText('—', { exact: true })).toHaveCount(2);
-
-  await page.getByRole('tab', { name: 'Benchmarks' }).click();
-  await expect(page.getByText('Benchmark Explorer')).toBeVisible();
-  await expect(page.getByText('Benchmark Run History')).toBeVisible();
-  await expect(page.getByText('Seconds', { exact: true })).toHaveCount(0);
-  await page.getByRole('tab', { name: 'Run Comparison' }).click();
-  await expect(page.getByText('Performance Change by Benchmark')).toBeVisible();
-  await page.getByRole('tab', { name: 'Plugin Comparison' }).click();
-  await expect(page.getByTestId('plugin-comparison-empty')).toContainText('No vanilla baseline or sanitizer comparison runs are available');
-  await expect(page.getByText('Per-Test Runtime Overhead')).toBeVisible();
-  await expect(page.getByText('Plugin Errors')).toBeVisible();
-  await page.getByRole('tab', { name: 'Failures' }).click();
-  await expect(page.getByText('Run Reliability')).toBeVisible();
-  await expect(page.getByText('Failed and Timed-Out Cases')).toBeVisible();
-  await expect(page.getByText('101%', { exact: true })).toHaveCount(0);
-  await expect(page.getByTestId('failure-range')).toHaveCount(0);
-
-  await failure.getByRole('button', { name: 'Retry' }).click();
-
-  await expect(page.getByTestId('dashboard-data-error')).toHaveCount(0);
-  await expect(page.getByTestId('dashboard-navigation')).toBeVisible();
-  await expect(page.getByRole('heading', { name: 'Rocjitsu Simulation Performance' })).toBeVisible();
+  await ready(page);
+  const source = await downloadSource(page);
+  expect(source.index).not.toHaveProperty('schemaVersion');
+  expect(source.runs.every((run) => run.schemaVersion === 2)).toBe(true);
 });

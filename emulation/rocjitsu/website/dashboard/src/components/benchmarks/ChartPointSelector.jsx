@@ -1,8 +1,6 @@
-import { useState } from 'react';
 import {
   Autocomplete,
   Box,
-  Button,
   createFilterOptions,
   TextField,
   Typography,
@@ -16,17 +14,15 @@ const filterOptions = createFilterOptions({ limit: MAX_RENDERED_OPTIONS });
 
 export default function ChartPointSelector({
   label,
-  actionLabel,
   description,
   descriptionId,
   options,
-  onActivate,
+  selectedId,
+  onSelectionChange,
 }) {
-  const [requestedId, setRequestedId] = useState('');
-
   if (options.length === 0) return null;
 
-  const selected = options.find((option) => option.id === requestedId) ?? options[0];
+  const selected = options.find((option) => option.id === selectedId) ?? options[0];
 
   return (
     <Box sx={{ display: 'flex', flexWrap: 'wrap', alignItems: 'flex-start', gap: 1, mt: 1 }}>
@@ -41,8 +37,8 @@ export default function ChartPointSelector({
         getOptionLabel={(option) => option.label}
         isOptionEqualToValue={(option, value) => option.id === value.id}
         value={selected}
-        onChange={(_, option) => setRequestedId(option?.id ?? '')}
-        sx={{ minWidth: 260, maxWidth: '100%' }}
+        onChange={(_, option) => onSelectionChange(option?.id ?? '')}
+        sx={{ minWidth: 0, width: '100%', maxWidth: 540 }}
         renderInput={(params) => (
           <TextField
             {...params}
@@ -51,7 +47,6 @@ export default function ChartPointSelector({
           />
         )}
       />
-      <Button size="small" variant="outlined" sx={{ mt: 0.3 }} onClick={() => onActivate(selected)}>{actionLabel}</Button>
     </Box>
   );
 }

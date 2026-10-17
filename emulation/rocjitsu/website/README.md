@@ -7,6 +7,13 @@ This directory contains the public web applications for Rocjitsu.
 | [dashboard/](dashboard/README.md) | Simulation-performance dashboard (React + Vite) | `/rocjitsu-dashboard/` |
 | [handbook/](handbook/README.md) | Markdown documentation and blog (MkDocs) | `/rocjitsu/` |
 
+## Dashboard data input
+
+Workflow authors should start with the dashboard
+[publication guide](dashboard/docs/architecture-and-publication.md#preparing-and-publishing-measurements) and follow the
+[schema-2 contract](dashboard/docs/schema-2.md).
+The [dashboard README](dashboard/README.md#documentation) also links build and test guidance.
+
 Each application owns its dependencies, build configuration, and tests. See its
 README for local development instructions. The handbook reads its content
 directly from [../docs/](../docs/), with [../README.md](../README.md) supplying

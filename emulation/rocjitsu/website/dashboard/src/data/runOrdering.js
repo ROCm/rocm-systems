@@ -25,7 +25,7 @@ export function compareCommitPosition(left, right) {
   return timeDifference || leftSha.localeCompare(rightSha);
 }
 
-export function compareRunsByCommit(left, right) {
+function compareRunsByCommit(left, right) {
   return compareCommitPosition(left, right)
     || compareRunExecution(left, right);
 }

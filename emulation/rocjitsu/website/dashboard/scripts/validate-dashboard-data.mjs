@@ -1,30 +1,50 @@
 #!/usr/bin/env node
 
-import { readFile } from 'node:fs/promises';
+import { isExcludedPluginRun } from '../src/data/runSchema.js';
+import { lstat, readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { pathToFileURL } from 'node:url';
 import {
   CATALOG_FILE_PATTERN,
   RUN_FILE_PATTERN,
+  validatePublishedManifest,
   validatePublishedDashboardData,
 } from '../src/data/dashboardValidation.js';
 
-async function readJson(file, label) {
+async function rejectSymbolicLinks(file, root) {
+  let current = path.resolve(file);
+  while (true) {
+    if ((await lstat(current)).isSymbolicLink()) {
+      throw new Error(`Resource path contains a symbolic link: ${current}`);
+    }
+    if (current === root) return;
+    current = path.dirname(current);
+  }
+}
+
+async function readJson(file, label, root) {
   try {
-    return JSON.parse(await readFile(file, 'utf8'));
+    await rejectSymbolicLinks(file, root);
+    const resolved = await realpath(file);
+    const relative = path.relative(root, resolved);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) {
+      throw new Error('Resource resolves outside the data directory');
+    }
+    return JSON.parse(await readFile(resolved, 'utf8'));
   } catch (error) {
     throw new Error(`Unable to read ${label} ${file}: ${error.message}`, { cause: error });
   }
 }
 
 export async function validateDashboardDataDirectory(directory) {
-  const root = path.resolve(directory);
-  const metadata = await readJson(path.join(root, 'metadata.json'), 'dashboard metadata');
-  const index = await readJson(path.join(root, 'index.json'), 'dashboard data index');
-
-  if (!index || !Array.isArray(index.runFiles)) {
-    return validatePublishedDashboardData({ metadata, index, runs: [] });
+  const requestedRoot = path.resolve(directory);
+  if ((await lstat(requestedRoot)).isSymbolicLink()) {
+    throw new Error(`Dashboard data directory is a symbolic link: ${requestedRoot}`);
   }
+  const root = await realpath(requestedRoot);
+  const index = await readJson(path.join(root, 'index.json'), 'dashboard data index', root);
+
+  validatePublishedManifest(index);
 
   const runResults = await Promise.all(index.runFiles.map(async (runFile) => {
     if (typeof runFile !== 'string' || !RUN_FILE_PATTERN.test(runFile)) {
@@ -32,7 +52,7 @@ export async function validateDashboardDataDirectory(directory) {
     }
     try {
       return {
-        run: await readJson(path.join(root, runFile), 'run file'),
+        run: await readJson(path.join(root, runFile), 'run file', root),
         error: null,
       };
     } catch (error) {
@@ -41,6 +61,7 @@ export async function validateDashboardDataDirectory(directory) {
   }));
 
   const catalogPaths = [...new Set(runResults
+    .filter((result) => !isExcludedPluginRun(result.run))
     .map((result) => result.run?.testCatalog)
     .filter((catalogPath) => (
       typeof catalogPath === 'string' && CATALOG_FILE_PATTERN.test(catalogPath)
@@ -49,7 +70,7 @@ export async function validateDashboardDataDirectory(directory) {
     try {
       return {
         catalogPath,
-        catalog: await readJson(path.join(root, catalogPath), 'test catalog'),
+        catalog: await readJson(path.join(root, catalogPath), 'test catalog', root),
         error: null,
       };
     } catch (error) {
@@ -58,7 +79,6 @@ export async function validateDashboardDataDirectory(directory) {
   }));
 
   const result = validatePublishedDashboardData({
-    metadata,
     index,
     runs: runResults.map(({ run }) => run),
     runErrors: runResults.map(({ error }) => error),
@@ -80,7 +100,7 @@ async function main() {
   }
 
   const result = await validateDashboardDataDirectory(directory);
-  console.log(`Dashboard data is valid (${result.sourceData.runs.length} run files).`);
+  console.log(`Dashboard schema 2 is valid (${result.sourceData.runs.length} run files; ${result.data.runs.length} develop attempts).`);
 }
 
 const invokedAsScript = process.argv[1]

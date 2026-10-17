@@ -17,20 +17,9 @@ const fullDateFormatter = new Intl.DateTimeFormat(undefined, {
 export const formatShortDate = (timestamp) => shortDateFormatter.format(new Date(timestamp));
 export const formatFullDate = (timestamp) => fullDateFormatter.format(new Date(timestamp));
 
-export function formatRelativeTime(timestamp) {
-  const seconds = (Date.parse(timestamp) - Date.now()) / 1000;
-  if (!Number.isFinite(seconds)) return 'unavailable';
-  const units = [
-    ['year', 31_536_000],
-    ['month', 2_592_000],
-    ['week', 604_800],
-    ['day', 86_400],
-    ['hour', 3_600],
-    ['minute', 60],
-    ['second', 1],
-  ];
-  const [unit, size] = units.find(([, unitSize]) => Math.abs(seconds) >= unitSize) ?? units.at(-1);
-  return new Intl.RelativeTimeFormat(undefined, { numeric: 'auto' }).format(Math.round(seconds / size), unit);
+export function formatMetadataValue(value) {
+  if (value == null) return 'Not provided';
+  return typeof value === 'object' ? JSON.stringify(value) : String(value);
 }
 
 export function formatDuration(value) {

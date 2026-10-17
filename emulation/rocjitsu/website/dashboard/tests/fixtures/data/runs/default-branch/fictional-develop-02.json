@@ -1,0 +1,131 @@
+{
+  "schemaVersion": 2,
+  "id": "fictional-develop-02",
+  "testCatalog": "test-catalogs/fictional-old.json",
+  "source": {
+    "branch": "develop",
+    "commit": "0003f1c70003f1c70003f1c70003f1c70003f1c7",
+    "committedAt": "2026-09-13T04:00:00.000Z",
+    "message": "FICTIONAL develop measurement 2"
+  },
+  "execution": {
+    "completedAt": "2026-09-13T06:00:00.000Z",
+    "trigger": "auto",
+    "machine": "fictional-node-a"
+  },
+  "environment": [
+    {
+      "key": "sdk",
+      "label": "Fictional SDK",
+      "value": "test-a"
+    },
+    {
+      "key": "enabled",
+      "label": "Feature enabled",
+      "value": true
+    },
+    {
+      "key": "cores",
+      "label": "CPU cores",
+      "value": 32
+    }
+  ],
+  "configurations": [
+    {
+      "target": "gfx1250",
+      "threadingMode": "ST",
+      "results": [
+        {
+          "testId": "a",
+          "status": "completed",
+          "durationSeconds": 19.6,
+          "error": null
+        },
+        {
+          "testId": "b",
+          "status": "completed",
+          "durationSeconds": 29.6,
+          "error": null
+        },
+        {
+          "testId": "c",
+          "status": "completed",
+          "durationSeconds": 39.6,
+          "error": null
+        }
+      ]
+    },
+    {
+      "target": "gfx1250",
+      "threadingMode": "MT",
+      "results": [
+        {
+          "testId": "a",
+          "status": "completed",
+          "durationSeconds": 24.6,
+          "error": null
+        },
+        {
+          "testId": "b",
+          "status": "completed",
+          "durationSeconds": 34.6,
+          "error": null
+        },
+        {
+          "testId": "c",
+          "status": "completed",
+          "durationSeconds": 44.6,
+          "error": null
+        }
+      ]
+    },
+    {
+      "target": "gfx950",
+      "threadingMode": "ST",
+      "results": [
+        {
+          "testId": "a",
+          "status": "completed",
+          "durationSeconds": 29.6,
+          "error": null
+        },
+        {
+          "testId": "b",
+          "status": "completed",
+          "durationSeconds": 39.6,
+          "error": null
+        },
+        {
+          "testId": "c",
+          "status": "completed",
+          "durationSeconds": 49.6,
+          "error": null
+        }
+      ]
+    },
+    {
+      "target": "gfx950",
+      "threadingMode": "MT",
+      "results": [
+        {
+          "testId": "a",
+          "status": "completed",
+          "durationSeconds": 34.6,
+          "error": null
+        },
+        {
+          "testId": "b",
+          "status": "completed",
+          "durationSeconds": 44.6,
+          "error": null
+        },
+        {
+          "testId": "c",
+          "status": "completed",
+          "durationSeconds": 54.6,
+          "error": null
+        }
+      ]
+    }
+  ]
+}
