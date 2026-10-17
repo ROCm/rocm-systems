@@ -11,7 +11,7 @@ class MlApiTraceError(Exception):
 
 
 class UnaccountedKernelError(MlApiTraceError):
-    """A GPU dispatch whose Correlation_ID is not in that pass's marker CSV."""
+    """Dispatch unmatched on Correlation_ID and GUID."""
 
     def __init__(self, unmatched_rows: pd.DataFrame) -> None:
         self.unmatched_rows = unmatched_rows
@@ -117,7 +117,7 @@ class OverlappingMarkerRangeError(MlApiTraceError):
 
 
 class MissingSourceLocationError(MlApiTraceError):
-    """An unlocated torch or triton call-tree root with no launcher thread."""
+    """Unlocated root in KNOWN_ML_API_BACKENDS with no launcher thread."""
 
     def __init__(
         self,

@@ -25,7 +25,7 @@ VERSION.sha
 
 # sample workloads copied by tests/CMakeLists.txt
 /tests/simple_net.py
-/tests/torch_compile_triton.py
+/tests/torch_triton_net.py
 /tests/triton_ffn.py
 
 # documentation artifacts

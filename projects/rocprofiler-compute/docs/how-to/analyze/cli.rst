@@ -691,6 +691,8 @@ analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``.
 format is ``stdout``.
 
 ``--list-stats`` is available only with ``stdout`` and ``txt`` output.
+``--list-torch-operators``, ``--list-triton-operators``, ``--torch-operator``,
+and ``--triton-operator`` are available only with ``stdout``.
 
 * ``stdout`` format:
    * Print analysis report to the terminal.
@@ -795,6 +797,42 @@ PyTorch operator analysis
    use ``rocprof-compute analyze ... --experimental`` with
    ``--list-torch-operators`` or ``--torch-operator`` as needed.
 
+These flags require ``--output-format stdout`` (the default). Combining
+``--list-*-operators`` with ``--*-operator`` warns and lists all operators.
+``-k`` is a row in the kernel table. ``-d`` runs first, so the table
+keeps only kernels from those dispatches. Run with the same ``-d``, then
+pass one of those rows to ``-k``. ``--torch-operator`` uses the same order.
+The ``(id N)`` on its filtered tree is that row.
+
+``--list-stats`` with ``--*-operator`` prints the kernel table for that
+operator's launches.
+
+``--list-*-operators`` and ``--*-operator`` load each profiling pass's marker
+and counter CSV pair and print an operator call tree. Plain ``analyze -p``
+without those flags does not join markers. Analyze does not write
+``ml_api_trace/consolidated.csv``.
+
+Operator analyze exits when:
+
+* two markers on the same ``Thread_Id`` overlap in time (neither nested
+  nor adjacent)
+* a marker is not nested in the call forest
+* kernel-name and timestamp lists on a marker have unequal lengths
+* operator calls or kernel names disagree across passes
+
+Operator analyze warns before the tree is printed and continues when:
+
+* a kernel dispatch does not match any ROCTX range
+* attach cannot find the launcher thread
+* a worker interval is not contained in any launcher interval
+* a torch or triton call-tree root has no file/line and no launcher thread
+
+Workloads from an older profile can contain stacked Function markers.
+Analyze exits during parse, before the tree.
+Re-profile with current ``--torch-trace`` or ``--triton-trace``.
+
+``/`` in the Operator column and in globs is the reconstructed call path.
+
 
 List all operators
 ---------------------
@@ -810,14 +848,13 @@ Display all PyTorch operators captured during profiling:
    Sorted by total GPU kernel duration.
    ================================================================================
 
-   main.py:60 (dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
-   └─ nn.Module.Net.forward (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
-      ├─ torch.nn.functional.conv2d (calls: 20)
-      |  └─ conv2d_fwd (dispatches: 40, total: 27.08 ms)
-      ├─ torch.nn.functional.linear (calls: 20)
-      |  └─ gemm (dispatches: 20, total: 15.41 ms)
-      └─ torch.nn.functional.relu (calls: 40)
-         └─ relu_kernel (dispatches: 30, total: 0.31 ms)
+   nn.Module.Net.forward main.py:60 (calls: 10, dispatches: 90, total: 42.80 ms, dispatch_mean: 0.48 ms, dispatch_min: 0.01 ms, dispatch_max: 2.10 ms)
+      ├─ aten::convolution (calls: 20)
+      |  └─ conv2d_fwd (id 0) (dispatches: 40, total: 27.08 ms)
+      ├─ aten::addmm (calls: 20)
+      |  └─ gemm (id 1) (dispatches: 20, total: 15.41 ms)
+      └─ aten::relu (calls: 40)
+         └─ relu_kernel (id 2) (dispatches: 30, total: 0.31 ms)
 
    Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
    ╒══════════════════════════════════════════════════╤═════════╤══════════════╤══════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
@@ -825,14 +862,16 @@ Display all PyTorch operators captured during profiling:
    ╞══════════════════════════════════════════════════╪═════════╪══════════════╪══════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
    │ nn.Module.Net.forward                            │      10 │           90 │ 42.80 ms │    100.00 │     4.28 ms │ 0.48 ms │ 0.01 ms │ 2.10 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.conv2d │      20 │           40 │ 27.08 ms │     63.27 │     1.35 ms │ 0.68 ms │ 0.21 ms │ 2.10 ms │
+   │ nn.Module.Net.forward/aten::convolution          │      20 │           40 │ 27.08 ms │     63.27 │     1.35 ms │ 0.68 ms │ 0.21 ms │ 2.10 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.linear │      20 │           20 │ 15.41 ms │     36.00 │     0.77 ms │ 0.77 ms │ 0.13 ms │ 1.82 ms │
+   │ nn.Module.Net.forward/aten::addmm                │      20 │           20 │ 15.41 ms │     36.00 │     0.77 ms │ 0.77 ms │ 0.13 ms │ 1.82 ms │
    ├──────────────────────────────────────────────────┼─────────┼──────────────┼──────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ nn.Module.Net.forward/torch.nn.functional.relu   │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
+   │ nn.Module.Net.forward/aten::relu                 │      40 │           30 │  0.31 ms │      0.72 │     7.70 us │ 0.01 ms │ 0.01 ms │ 0.02 ms │
    ╘══════════════════════════════════════════════════╧═════════╧══════════════╧══════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
-The printed call tree is sorted by GPU duration. Source location is shown on
+The printed call tree is sorted by GPU duration. Identical sibling subtrees
+are folded for display only; the forest and operator summary are not folded.
+Source location is shown on
 each node that recorded a file and line. Kernel stats appear under the
 operators that launched them. See :ref:`torch-operator-profiling` for how
 markers are captured.
@@ -841,10 +880,9 @@ The flat **Operator summary** table below the call tree has one row per
 operator that ran at least one GPU kernel. Time cells auto-switch between
 milliseconds and microseconds per cell; missing values render as ``N/A``.
 
-* **Operator** — full operator path (for example
-  ``aten::matmul/aten::mm``).
-* **Calls** — how many times the operator was invoked. ``N/A`` when the
-  trace did not include marker invocation ids.
+* **Operator** — reconstructed path (for example
+  ``nn.Module.Net.forward/aten::addmm``).
+* **Calls** — how many nested marker intervals ran for that operator.
 * **Dispatches** — how many GPU kernels ran while the operator was on the
   call stack (kernels launched by operators it called also count).
 * **Total** — total GPU time spent while the operator was on the call
@@ -865,23 +903,33 @@ line ``Operator summary: (no operators with recorded dispatches)``.
 Filtering by Operator
 ---------------------
 
-``--torch-operator`` uses shell-style glob patterns (``fnmatch``) to select
-operators. Operator hierarchies are ``/``-separated (e.g.
-``nn.Module.Net.forward/torch.nn.functional.relu``); ``*``, ``?``, and
-``[seq]`` cross hierarchy levels, and matching is case-sensitive:
+``--torch-operator`` uses shell-style glob patterns to select
+nodes whose backend is torch. Metric kernel ids come only from nodes whose
+backend is in the requested list. Ancestors of any backend stay in the path
+string, so ``user/.../aten::addmm`` still matches. Hierarchies are
+``/``-separated; ``*``, ``?``, and ``[seq]`` cross path components, and
+matching is case-sensitive:
 
-* **Wildcard** — ``*relu`` (ends with relu), ``*conv*`` (contains conv)
-* **Exact** — ``torch.nn.functional.relu``
-* **Multi-level** — ``*/torch.nn.functional.relu``, ``*/*functional*/*``
+* **Wildcard** — ``*relu*`` (contains relu), ``*/aten::addmm`` (addmm leaf)
+* **Exact** — ``aten::addmm``
 * **Match all** — no arguments, ``all``, ``*``, or ``**``
+
+``--torch-operator`` and ``--triton-operator`` show the kernel launches
+from the chosen operators. ``-d`` does not change that tree. It filters
+kernel-top, the dispatch list, and ``--list-stats``. ``-k`` does not
+filter that tree, kernel-top, the dispatch list, or ``--list-stats``.
+It filters the metric rows to that kernel's launches.
+
+``-k`` is the ``(id N)`` on the filtered tree. It keeps that kernel's
+launches in the metric rows. A ``-d`` or ``-k`` off the subtree fails.
 
 .. code-block:: shell-session
 
    # Wildcard match
-   $ rocprof-compute analyze --experimental --torch-operator "*relu" --path ./workload
+   $ rocprof-compute analyze --experimental --torch-operator "*relu*" --path ./workload
 
-   # Exact match
-   $ rocprof-compute analyze --experimental --torch-operator torch.nn.functional.relu --path ./workload
+   # Path match
+   $ rocprof-compute analyze --experimental --torch-operator "*/aten::addmm" --path ./workload
 
    # Match all operators (no arguments)
    $ rocprof-compute analyze --experimental --torch-operator --path ./workload
@@ -891,7 +939,7 @@ operators. Operator hierarchies are ``/``-separated (e.g.
 .. code-block:: shell-session
 
    $ rocprof-compute analyze --experimental \
-       --torch-operator "*relu,*conv*,*linear" --path ./workload
+       --torch-operator "*relu*,*addmm*" --path ./workload
 
 
 Triton operator analysis
@@ -904,10 +952,10 @@ Triton operator analysis
    ``rocprof-compute analyze ... --experimental`` with
    ``--list-triton-operators`` or ``--triton-operator`` as needed.
 
-Triton kernels can be analyzed similar to PyTorch operators with
-``--list-triton-operators`` and ``--triton-operator``. Those options keep
-Triton nodes from the same call tree, so Triton kernels are reported
-independently even if PyTorch operators appear in the same run.
+Triton kernels use the same analyze path as PyTorch operators.
+``--list-triton-operators`` and ``--triton-operator`` keep nodes
+whose backend is ``triton`` (plus their ancestors), so Triton kernels are
+reported independently even if PyTorch operators appear in the same run.
 
 List all captured Triton kernels
 ---------------------------------
@@ -923,37 +971,38 @@ Display all Triton kernels captured during profiling:
    Sorted by total GPU kernel duration.
    ================================================================================
 
-   torch_compile_triton.py:26 (dispatches: 39, total: 4.22 ms, dispatch_mean: 0.11 ms, dispatch_min: 0.05 ms, dispatch_max: 0.81 ms)
-   └─ torch.compile.fused (calls: 1)
-      └─ triton.CompiledKernel.triton_poi_fused_add_mul_relu_0 (calls: 3)
-         └─ triton_poi_fused_add_mul_relu_0 (id 0) (dispatches: 39, total: 4.22 ms)
+   triton.JITFunction.matmul_kernel triton_ffn.py:120 (calls: 1, dispatches: 2, total: 0.03 ms, dispatch_mean: 0.01 ms, dispatch_min: 4.40 us, dispatch_max: 0.02 ms)
+   └─ triton.CompiledKernel.matmul_kernel triton_ffn.py:120 (calls: 1, dispatches: 2, total: 0.03 ms, dispatch_mean: 0.01 ms, dispatch_min: 4.40 us, dispatch_max: 0.02 ms)
+      ├─ matmul_kernel (id 0) (dispatches: 1, total: 0.02 ms)
+      └─ __amd_rocclr_initHeap (id 7) (dispatches: 1, total: 4.40 us)
+
+   ...
 
    Operator summary (Min/Max/Mean are per-dispatch over the subtree; sorted by Total):
-   ╒══════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
-   │ Operator                                                                 │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
-   ╞══════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
-   │ torch.compile.fused                                                      │       1 │           39 │ 4.22 ms │    100.00 │     4.22 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
-   ├──────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
-   │ torch.compile.fused/triton.CompiledKernel.triton_poi_fused_add_mul_relu_ │       3 │           39 │ 4.22 ms │    100.00 │     1.41 ms │ 0.11 ms │ 0.05 ms │ 0.81 ms │
-   │ 0                                                                        │         │              │         │           │             │         │         │         │
-   ╘══════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
+   ╒════════════════════════════════════════════════════════════════════════╤═════════╤══════════════╤═════════╤═══════════╤═════════════╤═════════╤═════════╤═════════╕
+   │ Operator                                                               │   Calls │   Dispatches │   Total │   % Total │   Mean/Call │    Mean │     Min │     Max │
+   ╞════════════════════════════════════════════════════════════════════════╪═════════╪══════════════╪═════════╪═══════════╪═════════════╪═════════╪═════════╪═════════╡
+   │ triton.JITFunction.matmul_kernel                                       │     9.0 │         10.0 │ 0.30 ms │     88.81 │     0.03 ms │ 0.03 ms │ 4.40 us │ 0.06 ms │
+   ├────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ triton.JITFunction.matmul_kernel/triton.CompiledKernel.matmul_kernel   │     9.0 │         10.0 │ 0.30 ms │     88.81 │     0.03 ms │ 0.03 ms │ 4.40 us │ 0.06 ms │
+   ├────────────────────────────────────────────────────────────────────────┼─────────┼──────────────┼─────────┼───────────┼─────────────┼─────────┼─────────┼─────────┤
+   │ ...                                                                    │         │              │         │           │             │         │         │         │
+   ╘════════════════════════════════════════════════════════════════════════╧═════════╧══════════════╧═════════╧═══════════╧═════════════╧═════════╧═════════╧═════════╛
 
 Filter the Triton kernels
 -------------------------
 
-``--triton-operator`` uses the same shell-style glob matching as
-``--torch-operator``; see :ref:`operator-filtering` for the full pattern syntax.
+``--triton-operator`` uses the same shell-style glob matching and the same
+``-d`` and ``-k`` rules as ``--torch-operator``; see
+:ref:`operator-filtering`. ``*rmsnorm_kernel*`` matches
+``triton.JITFunction.rmsnorm_kernel``, ``triton.CompiledKernel.rmsnorm_kernel``,
+and the leaf ``rmsnorm_kernel``.
 
 .. code-block:: shell-session
 
    # Wildcard match
-   $ rocprof-compute analyze --experimental --triton-operator "*matmul*" --path ./workload
+   $ rocprof-compute analyze --experimental --triton-operator "*rmsnorm_kernel*" --path ./workload
 
    # Filter multiple kernels (space or comma separated)
    $ rocprof-compute analyze --experimental \
-       --triton-operator "*matmul*,*softmax*" --path ./workload
-
-.. note::
-
-   ``--torch-operator`` and ``--triton-operator`` are mutually exclusive; use
-   one operator filter per analysis run.
+       --triton-operator "*matmul*,*rmsnorm_kernel*" --path ./workload

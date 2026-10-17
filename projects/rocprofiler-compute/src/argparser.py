@@ -352,7 +352,8 @@ Examples:
         feature_label="Torch trace",
         help=(
             "\t\t\tTorch Trace, maps PyTorch operators to performance counters.\n"
-            "\t\t\tRequires PyTorch 2.13 or 2.14."
+            "\t\t\tNative tracing on PyTorch 2.13/2.14 when the collector loads;\n"
+            "\t\t\totherwise a warning and TorchDispatchMode."
         ),
     )
     profile_group.add_argument(
@@ -550,8 +551,9 @@ Examples:
         feature_label="Triton trace",
         help=(
             "\t\t\tTriton Trace, maps Triton kernels to performance counters.\n"
-            "\t\t\tUse when profiling Triton kernels, including those generated\n"
-            "\t\t\tby torch.compile / Inductor.\n"
+            "\t\t\tUse when profiling Triton kernels launched through Triton's\n"
+            "\t\t\tPython runtime. torch.compile / Inductor static launches are\n"
+            "\t\t\tnot covered; use --torch-trace.\n"
             "\t\t\tCan be combined with --torch-trace."
         ),
     )
@@ -689,7 +691,8 @@ Examples:
         action="store_true",
         help=(
             "\t\tList all detected kernels and kernel dispatches.\n"
-            "\t\tCannot be used with --output-format csv or db."
+            "\t\tCannot be used with --output-format csv or db.\n"
+            "\t\tWith --*-operator, shows that operator's kernels and dispatches."
         ),
     )
     analyze_group.add_argument(
@@ -710,7 +713,9 @@ Examples:
         feature_label="List torch operators",
         help=(
             "\t\tList PyTorch operators as a unified call tree with kernel "
-            "launch stats."
+            "launch stats.\n"
+            "\t\tRequires --output-format stdout. Ignores --*-operator if both "
+            "are given."
         ),
     )
     analyze_group.add_argument(
@@ -725,19 +730,19 @@ Examples:
         feature_label="Torch operator filter",
         help=(
             "\t\tFilter operators using shell-style glob patterns (fnmatch),\n"
-            "\t\t\tselect their kernels, and display metrics.\n"
-            "\t\t\tWith no arguments, matches all operators (default: **).\n"
-            "\t\t\tExamples (operator hierarchy is /-separated):\n"
-            "\t\t\t  *relu               ends with relu\n"
-            "\t\t\t  *conv*              contains conv\n"
-            "\t\t\t  torch.nn.functional.relu   exact match\n"
-            "\t\t\t  */torch.nn.functional.relu two-level match\n"
-            "\t\t\t  */*functional*/*    intermediate component match\n"
+            "\t\t\tkeep launches on the matched subtree, and display metrics.\n"
+            "\t\t\tWith no arguments, matches all operators.\n"
+            "\t\t\t/ in patterns is the reconstructed call path.\n"
+            "\t\t\tExamples:\n"
+            "\t\t\t  *relu*              contains relu\n"
+            "\t\t\t  */aten::addmm       addmm leaf on the reconstructed path\n"
             "\t\t\t  all  or  '*'        match every operator\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
-            "\t\t\t  --torch-operator *relu,*conv*,*linear\n"
-            "\t\t\t  --torch-operator */*conv2d */*relu\n"
-            "\t\t\tCombine with -k to intersect with kernel IDs."
+            "\t\t\t  --torch-operator *relu*,*/aten::addmm\n"
+            "\t\t\tWith -k, ids index that operator's kernel table.\n"
+            "\t\t\tRequires --output-format stdout.\n"
+            "\t\t\tIgnored when --list-*-operators is set.\n"
+            "\t\t\t(Default: **)"
         ),
     )
     analyze_group.add_argument(
@@ -751,7 +756,10 @@ Examples:
         experimental_enabled=experimental_enabled,
         feature_label="List triton operators",
         help=(
-            "\t\tList Triton kernels as a unified call tree with kernel launch stats."
+            "\t\tList Triton kernels as a unified call tree with kernel launch "
+            "stats.\n"
+            "\t\tRequires --output-format stdout. Ignores --*-operator if both "
+            "are given."
         ),
     )
     analyze_group.add_argument(
@@ -766,14 +774,20 @@ Examples:
         feature_label="Triton operator filter",
         help=(
             "\t\tFilter Triton kernels using shell-style glob patterns\n"
-            "\t\t\t(fnmatch), select their GPU kernels, and display metrics.\n"
-            "\t\t\tWith no arguments, matches all kernels (default: **).\n"
+            "\t\t\t(fnmatch), keep launches on the matched subtree, and display\n"
+            "\t\t\tmetrics.\n"
+            "\t\t\tWith no arguments, matches all kernels.\n"
+            "\t\t\t/ in patterns is the reconstructed call path.\n"
             "\t\t\tExamples:\n"
+            "\t\t\t  *rmsnorm_kernel*    matches rmsnorm nodes on the tree\n"
             "\t\t\t  *matmul*            contains matmul\n"
             "\t\t\t  all  or  '*'        match every kernel\n"
             "\t\t\tMultiple patterns (space or comma-separated):\n"
-            "\t\t\t  --triton-operator *matmul*,*softmax*\n"
-            "\t\t\tCombine with -k to intersect with kernel IDs."
+            "\t\t\t  --triton-operator *matmul*,*rmsnorm_kernel*\n"
+            "\t\t\tWith -k, ids index that operator's kernel table.\n"
+            "\t\t\tRequires --output-format stdout.\n"
+            "\t\t\tIgnored when --list-*-operators is set.\n"
+            "\t\t\t(Default: **)"
         ),
     )
     analyze_group.add_argument(
@@ -784,7 +798,10 @@ Examples:
         dest="gpu_kernel",
         nargs="+",
         action="append",
-        help="\t\tSpecify kernel id(s) from --list-stats for filtering.",
+        help=(
+            "\t\tSpecify kernel id(s) from --list-stats for filtering.\n"
+            "\t\tWith an operator filter, ids index that operator's kernel table."
+        ),
     )
     analyze_group.add_argument(
         "-d",

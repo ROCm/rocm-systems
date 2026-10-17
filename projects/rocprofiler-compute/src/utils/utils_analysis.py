@@ -779,7 +779,7 @@ def _record_missing_source_location_errors(
     forest: dict[str, list[CallTreeNode]],
     errors: Optional[list[MlApiTraceError]] = None,
 ) -> None:
-    """Record unlocated torch/triton roots with no launcher thread."""
+    """Record unlocated roots in KNOWN_ML_API_BACKENDS with no launcher thread."""
     for thread_id, roots in forest.items():
         for root in roots:
             if root.file_name is not None:
@@ -1362,7 +1362,7 @@ def _join_keys_for_marker_and_dispatch(
     marker_df: pd.DataFrame,
     dispatch_df: pd.DataFrame,
 ) -> list[str]:
-    """Correlation_ID, plus GUID when both frames have that column."""
+    """Correlation_ID and GUID."""
     join_keys = ["Correlation_ID"]
     if "GUID" in marker_df.columns and "GUID" in dispatch_df.columns:
         join_keys.append("GUID")
@@ -1558,7 +1558,7 @@ def _collapse_matching_markers_across_passes(
 
 
 def _unmatched_kernel_rows(joined_df: pd.DataFrame) -> pd.DataFrame:
-    """Dispatches whose Correlation_ID is not in that pass's marker CSV."""
+    """Dispatches unmatched on Correlation_ID and GUID."""
     return joined_df[
         joined_df["Kernel_Name"].notna() & joined_df["Function"].isna()
     ].copy()

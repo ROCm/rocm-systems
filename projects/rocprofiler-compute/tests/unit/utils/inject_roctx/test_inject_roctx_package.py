@@ -326,3 +326,128 @@ def test_extract_kernel_name_prefers_attr_then_meta_then_fn():
         triton_backend._extract_kernel_name(types.SimpleNamespace())
         == "<triton_kernel>"
     )
+
+
+def test_encode_marker_name_wrap_chars():
+    from utils.inject_roctx.core import encode_marker_name
+
+    assert encode_marker_name("nn.Module.Linear.forward") == "nn.Module.Linear.forward"
+    assert encode_marker_name("pkg/mod%hook") == "pkg%2Fmod%25hook"
+    assert encode_marker_name("aten::addmm") == "aten::addmm"
+
+
+def test_compose_marker_python_wrap_wire():
+    from utils.inject_roctx.core import compose_marker
+
+    expected = (
+        "nn.Module.Linear.forward:simple_net.py:51"
+        "|seqNr=n/a|tid=n/a|ftid=n/a|ltid=n/a|scope=n/a|args=n/a|torch"
+    )
+    assert (
+        compose_marker("nn.Module.Linear.forward", "simple_net.py:51", backend="torch")
+        == expected
+    )
+    empty_backend = compose_marker(
+        "nn.Module.Linear.forward", "simple_net.py:51", backend=""
+    )
+    assert empty_backend.endswith("args=n/a")
+    assert not empty_backend.endswith("args=n/a|")
+
+
+def test_encode_args_wrap_delimiters():
+    from utils.inject_roctx.marker_format import encode_args
+
+    assert "%7C" in encode_args("(float32[2x4], bias=float32[2x4]|x)")
+    assert encode_args("%|;|\r\n") == "%25%7C%3B%7C%0D%0A"
+
+
+def test_cap_args_balanced_parens():
+    from utils.inject_roctx.marker_format import cap_args
+
+    assert cap_args("x" * 512) == "x" * 512
+    assert cap_args("x" * 513).endswith("...")
+    blob = "(" + "float32[2x4], " * 40 + ")"
+    assert cap_args(blob).endswith("...)")
+
+
+def test_push_scope_emits_composed_marker_and_pop_is_idempotent():
+    from utils.inject_roctx import core
+
+    previous = core.get_python_tier_io()
+    pushes = []
+    pops = []
+    core.set_python_tier_io(pushes.append, lambda: pops.append("pop"))
+    core._thread_local.depth = 0
+    try:
+        core._push_scope("aten::addmm", "n/a", backend="torch")
+        assert pushes == [core.compose_marker("aten::addmm", "n/a", backend="torch")]
+        core._pop_scope()
+        core._pop_scope()
+        assert pops == ["pop"]
+    finally:
+        core.set_python_tier_io(*previous)
+        core._thread_local.depth = 0
+
+
+def test_resolve_user_caller_location_skips_package_and_framework_roots():
+    import os
+    from pathlib import Path
+
+    from utils.inject_roctx import core
+
+    location = core.resolve_user_caller_location()
+    assert location.startswith(Path(__file__).name)
+    assert ":" in location
+    parent = str(Path(__file__).resolve().parent)
+    core.add_framework_root(parent)
+    stored = parent if parent.endswith(os.sep) else parent + os.sep
+    try:
+        skipped = core.resolve_user_caller_location()
+        assert ":" in skipped
+        assert not skipped.startswith(Path(__file__).name)
+    finally:
+        if stored in core._STATE.framework_roots:
+            core._STATE.framework_roots.remove(stored)
+
+
+def test_launch_parses_frameworks_and_runs_target(tmp_path, monkeypatch):
+    import runpy
+    import sys
+    from pathlib import Path
+
+    from utils.inject_roctx import core
+
+    target = tmp_path / "target.py"
+    ok_path = tmp_path / "ok.txt"
+    target.write_text(
+        f"from pathlib import Path\nPath({str(ok_path)!r}).write_text('ok')\n"
+    )
+    launch = Path(core.__file__).resolve().parent / "launch.py"
+    recorded = []
+    monkeypatch.setattr(
+        core, "install_global_wraps", lambda names: recorded.append(list(names))
+    )
+    monkeypatch.setattr(
+        sys,
+        "argv",
+        [str(launch), "--frameworks", "torch", "triton", "--", str(target)],
+    )
+    runpy.run_path(str(launch))
+    assert recorded == [["torch", "triton"]]
+    assert ok_path.read_text() == "ok"
+
+
+def test_launch_exits_2_without_target(monkeypatch, capsys):
+    import runpy
+    import sys
+    from pathlib import Path
+
+    from utils.inject_roctx import core
+
+    launch = Path(core.__file__).resolve().parent / "launch.py"
+    monkeypatch.setattr(sys, "argv", [str(launch), "--frameworks", "torch"])
+    with pytest.raises(SystemExit) as excinfo:
+        runpy.run_path(str(launch))
+    assert excinfo.value.code == 2
+    captured = capsys.readouterr()
+    assert "usage:" in captured.err
