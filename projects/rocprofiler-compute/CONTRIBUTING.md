@@ -236,6 +236,10 @@ If your PR modifies **metric configurations** — panel YAMLs under `src/rocprof
 
 For full details, see the [metric config management README](./tools/config_management/README.md).
 
+## Memory Chart Layouts
+
+The memory chart is drawn from one JSON layout per architecture family. To add or change a layout, see the [memory chart layouts README](./src/memory_chart/README.md).
+
 ## Analysis Database Schema Diagrams
 
 The two diagrams in the [analysis data dump docs](docs/how-to/analyze/cli.rst) are
