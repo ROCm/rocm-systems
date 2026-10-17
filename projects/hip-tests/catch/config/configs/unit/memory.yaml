@@ -1199,6 +1199,9 @@ memory:
   Unit_hipGetSymbolSizeAddress_Positive_Basic:
     <<: *level_default
     tags: [query, P0]
+  Unit_hipGetSymbolSizeAddress_Positive_Managed:
+    <<: *level_default
+    tags: [query, managed_memory, P0]
   Unit_hipGetSymbolAddress_Negative_Parameters: *level_default
   Unit_hipGetSymbolSize_Negative_Parameters: *level_default
   Unit_hipMemPrefetchAsync_v2_Device_Host:
