@@ -792,6 +792,7 @@ if(BUILD_TESTS)
       graph/P2pPxnLevel1NetIdTests.cpp
       graph/TopoGpuDevTests.cpp
       graph/TopoTests.cpp
+      graph/Mi350pPcieTopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       common/main_fixtures.cpp
@@ -1042,6 +1043,7 @@ if(BUILD_TESTS)
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
       DdaAllReduceMPITests.cpp
+      DdaReduceScatterMPITests.cpp
       DdaFabricSimpleMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
