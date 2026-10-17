@@ -178,6 +178,14 @@ in the following table.
         | Write logs to a file rather than ``stdout``.
       - | The filename can be formatted using ``%h`` for hostname, ``%p`` for pid, and ``%%`` to escape the ``%`` character. It is recommended to use ``%p`` to output to individual files per pid to avoid mixing or potentially overwriting the output. Example usage: ``NCCL_DEBUG_FILE=debugfile.%h.%p``
 
+    * - | ``NCCL_RUN_DIAGNOSTICS``
+        | Runs the active P2P diagnostics at every communicator initialization.
+          RCCL writes data between every eligible pair of GPUs on each node and
+          prints a report with the ``NCCL DIAG`` prefix to ``stdout``.
+          See :ref:`using-rccl-diagnostics` to learn how to read the report.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled.
+
     * - | ``NCCL_CHECK_MODE``
         | Selects how thoroughly RCCL validates the arguments of every
           collective call. Checking costs latency, so it is disabled by default
