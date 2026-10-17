@@ -14,6 +14,7 @@
 
 #include "simdojo/sim/simulation.h"
 #include "simdojo/sim/topology.h"
+#include "util/diagnostic.h"
 
 #include <cstddef>
 #include <cstdint>
@@ -99,23 +100,27 @@ struct ExecutionThreadSettings {
 /// @brief Read only a config's thread requests and topology dimensions.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @returns Settings for evaluating the allocation at a given host-thread count.
-/// @throws std::runtime_error when the file cannot be read or parsed.
+/// @param emit_error Destination for failure diagnostics.
+/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
+/// @details File-reading and parsing failures emit a diagnostic and return failure.
 /// @throws std::invalid_argument when required allocation metadata is invalid.
 /// @details Allocates no simulator components or worker threads.
-ExecutionThreadSettings load_execution_thread_settings(const std::string &json_path,
-                                                       const std::string &schema_text);
+util::FailureOr<ExecutionThreadSettings>
+load_execution_thread_settings(const std::string &json_path, const std::string &schema_text,
+                               util::DiagnosticEmitter emit_error);
 
 /// @brief Read thread requests and topology dimensions from config JSON text.
 /// @details Same as the path overload, for a config a launch has already rewritten
 /// in memory and does not need to place on disk.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @returns Settings for evaluating the allocation at a given host-thread count.
-/// @throws std::runtime_error when the text cannot be parsed.
+/// @param emit_error Destination for failure diagnostics.
+/// @returns Settings for evaluating allocation, or failure after emitting a diagnostic.
+/// @details Parsing failures emit a diagnostic and return failure.
 /// @throws std::invalid_argument when required allocation metadata is invalid.
-ExecutionThreadSettings load_execution_thread_settings_from_string(const std::string &json,
-                                                                   const std::string &schema_text);
+util::FailureOr<ExecutionThreadSettings>
+load_execution_thread_settings_from_string(const std::string &json, const std::string &schema_text,
+                                           util::DiagnosticEmitter emit_error);
 
 /// @brief Check whether the ISA supports asynchronous MMA execution.
 bool configured_async_mma_supported(rj_code_arch_t arch);
@@ -171,7 +176,14 @@ struct TopologyBuildResult {
 /// @code
 ///   #include "rocjitsu/vm/amdgpu/partitioning.h"
 ///
-///   config::LoadedConfig loaded = load_config("config.json", kEmbeddedSchema);
+///   util::StringDiagnostic diagnostic;
+///   util::FailureOr<config::LoadedConfig> result =
+///       load_config("config.json", kEmbeddedSchema, diagnostic.emitter());
+///   if (result.failed()) {
+///     // Report diagnostic.message() and stop before accessing the value.
+///     return;
+///   }
+///   config::LoadedConfig loaded = std::move(result.value());
 ///   SoC *soc = loaded.soc();
 ///   loaded.apply_cpu_dispatch_threads();
 ///
@@ -255,13 +267,16 @@ struct DeviceIdentityConfig {
 /// @brief Read only a config's device identity and bus shape.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @returns The identity and bus shape.
-/// @throws std::runtime_error when the file cannot be read or parsed.
+/// @param emit_error Destination for failure diagnostics.
+/// @returns The identity and bus shape, or failure after emitting a diagnostic.
+/// @details File-reading, parsing, and device conversion failures emit a diagnostic
+/// and return failure. Other validation and allocation exceptions propagate.
 /// @details Building the topology allocates the whole simulated machine, which
 /// for a large part is gigabytes of register files. A front end that only needs
 /// to know which GPU to present should not pay for a machine it never runs.
-DeviceIdentityConfig load_device_identity(const std::string &json_path,
-                                          const std::string &schema_text);
+util::FailureOr<DeviceIdentityConfig> load_device_identity(const std::string &json_path,
+                                                           const std::string &schema_text,
+                                                           util::DiagnosticEmitter emit_error);
 
 /// @brief Parse an architecture name string to an rj_code_arch_t enum value.
 rj_code_arch_t parse_arch(const std::string &arch_str);
@@ -275,39 +290,55 @@ simdojo::ExecMode parse_exec_mode(const std::string &mode_str);
 /// @brief Load simulation config from a JSON file.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @returns LoadedConfig with engine parameters and built topology.
-/// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_text);
+/// @param emit_error Destination for failure diagnostics.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+/// @details File-reading, parsing, and KFD/DBT device conversion failures emit a
+/// diagnostic and return failure. Other validation and allocation exceptions propagate.
+util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
+                                          const std::string &schema_text,
+                                          util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON file against a stated host width.
 ///
-/// @details Like the two-argument overload, but uses @p host_threads as the
+/// @details Like the three-argument overload, but uses @p host_threads as the
 /// affinity input to the shared execution budget. Zero means indeterminate and
 /// gives an automatic budget of one. An explicit cpu_thread_budget overrides it.
 /// @param json_path Path to the JSON config file.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param emit_error Destination for failure diagnostics.
 /// @param host_threads Affinity width used for automatic budget selection.
-/// @returns LoadedConfig with engine parameters and built topology.
-/// @throws std::runtime_error on file I/O, parse errors, or invalid config.
-LoadedConfig load_config(const std::string &json_path, const std::string &schema_text,
-                         uint32_t host_threads);
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+/// @details File-reading, parsing, and KFD/DBT device conversion failures emit a
+/// diagnostic and return failure. Other validation and allocation exceptions propagate.
+util::FailureOr<LoadedConfig> load_config(const std::string &json_path,
+                                          const std::string &schema_text,
+                                          util::DiagnosticEmitter emit_error,
+                                          uint32_t host_threads);
 
 /// @brief Load simulation config from a JSON string.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
-/// @returns LoadedConfig with engine parameters and built topology.
-/// @throws std::runtime_error on parse errors or invalid config.
-LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text);
+/// @param emit_error Destination for failure diagnostics.
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+/// @details Parsing and KFD/DBT device conversion failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
+util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
+                                                      const std::string &schema_text,
+                                                      util::DiagnosticEmitter emit_error);
 
 /// @brief Load simulation config from a JSON string against a stated host width.
-/// @details See the three-argument @ref load_config overload.
+/// @details See the four-argument @ref load_config overload.
 /// @param json JSON configuration string.
 /// @param schema_text FlatBuffers schema text (the .fbs content).
+/// @param emit_error Destination for failure diagnostics.
 /// @param host_threads Affinity width for automatic selection; zero gives a budget of one.
-/// @returns LoadedConfig with engine parameters and built topology.
-/// @throws std::runtime_error on parse errors or invalid config.
-LoadedConfig load_config_from_string(const std::string &json, const std::string &schema_text,
-                                     uint32_t host_threads);
+/// @returns LoadedConfig with engine parameters and built topology, or failure.
+/// @details Parsing and KFD/DBT device conversion failures emit a diagnostic and
+/// return failure. Other validation and allocation exceptions propagate.
+util::FailureOr<LoadedConfig> load_config_from_string(const std::string &json,
+                                                      const std::string &schema_text,
+                                                      util::DiagnosticEmitter emit_error,
+                                                      uint32_t host_threads);
 
 } // namespace config
 } // namespace rocjitsu

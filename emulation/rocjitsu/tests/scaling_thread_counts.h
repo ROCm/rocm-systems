@@ -4,11 +4,7 @@
 #pragma once
 
 /// @file scaling_thread_counts.h
-/// @brief Argument parsing for the scaling benchmark's thread-count list.
-///
-/// Split out of scaling_test.cpp so it can be unit-tested: the benchmark itself
-/// needs a GPU-sized simulation and a device-kernel build, and its main() is
-/// compiled away entirely without HAS_DEVICE_KERNELS.
+/// @brief Argument parsing for lists of thread counts.
 
 #include <charconv>
 #include <cstdint>
@@ -20,14 +16,13 @@
 
 namespace rocjitsu::test {
 
-/// @brief Parse the benchmark's thread-count arguments.
+/// @brief Parse decimal thread-count arguments.
 ///
 /// @details Each argument must be a whole decimal number in [1, @p max_threads]
 /// -- no sign, no trailing text, no value that would narrow into a nonsense
-/// thread count. An empty argument list means "sweep 1..max_threads", which is
-/// the benchmark's default; a malformed one is an error rather than a silent
-/// fallback to that sweep, because a typo would otherwise look like a
-/// deliberate full run.
+/// thread count. An empty argument list means "sweep 1..max_threads";
+/// a malformed one is an error rather than a silent fallback to that sweep,
+/// because a typo would otherwise look like a deliberate full run.
 ///
 /// @param args Arguments after argv[0].
 /// @param max_threads Largest accepted thread count; also the end of the sweep.

@@ -37,8 +37,8 @@
 #pragma once
 
 #include "../aql_queue.h"
+#include "../config_test_util.h"
 #include "../halt_snapshot_plugin.h"
-#include "embedded_schema.h"
 
 #include "rocjitsu/config/config_loader.h"
 #include "rocjitsu/vm/amdgpu/command_processor.h"
@@ -54,6 +54,8 @@ RJ_DIAGNOSTIC_IGNORE_PEDANTIC
 #include "hsa/AMDHSAKernelDescriptor.h"
 RJ_DIAGNOSTIC_POP
 
+#include <gtest/gtest.h>
+
 #include <cstdint>
 #include <memory>
 #include <optional>
@@ -66,13 +68,14 @@ RJ_DIAGNOSTIC_POP
 namespace rocjitsu {
 namespace test {
 
-/// @brief One-CU simulator (CDNA3, CDNA4, or RDNA4, selected by the constructor
+/// @brief One-CU simulator (CDNA3, CDNA4, or RDNA4, selected by initialize()
 ///        arch) for executing a patched DBI kernel.
 class DbiSim {
 public:
   /// @param arch Config/VM arch string: "cdna3", "cdna4", or "rdna4".
   /// @param wave_size 64 for CDNA, 32 for RDNA4.
-  DbiSim(std::string_view arch, uint32_t wave_size) : wave_size_(wave_size) {
+  void initialize(std::string_view arch, uint32_t wave_size) {
+    wave_size_ = wave_size;
     const std::string json =
         std::string(R"({"max_ticks":100000,"num_threads":1,"vm":{"arch":")") + std::string(arch) +
         R"("},)"
@@ -91,7 +94,7 @@ public:
         R"({"src":"xcd0.cp.req_0","dst":"xcd0.se0.cu0.cpl","latency":1,"weight":2},)"
         R"({"src":"xcd0.se0.cu0.req","dst":"xcd0.l2.cpl_0","latency":1,"weight":10})"
         R"(]}})";
-    loaded_ = config::load_config_from_string(json, kEmbeddedSchema);
+    ASSERT_TRUE(load_valid_config_from_string(json, loaded_));
     soc_ = loaded_.soc();
     mem_ = loaded_.memory();
     engine_ = std::make_unique<simdojo::SimulationEngine>(loaded_.engine_config);

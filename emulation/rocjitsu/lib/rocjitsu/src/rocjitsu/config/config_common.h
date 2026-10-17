@@ -12,6 +12,7 @@
 
 #include "flatbuffers/idl.h"
 #include "simulation_config_generated.h"
+#include "util/diagnostic.h"
 
 #include <algorithm>
 #include <charconv>
@@ -19,9 +20,9 @@
 #include <fstream>
 #include <optional>
 #include <sstream>
-#include <stdexcept>
 #include <string>
 #include <string_view>
+#include <type_traits>
 #include <utility>
 
 namespace rocjitsu {
@@ -51,10 +52,14 @@ inline std::optional<uint32_t> parse_uint32(std::string_view text) {
   return value;
 }
 
-inline std::string read_config_file(const std::string &path) {
+/// @brief Read a config file into a string.
+/// @returns File contents on success, or failure after emitting a diagnostic
+/// containing @p path when the file cannot be opened.
+inline util::FailureOr<std::string> read_config_file(const std::string &path,
+                                                     util::DiagnosticEmitter emit_error) {
   std::ifstream file(path);
   if (!file.is_open())
-    throw std::runtime_error("Cannot open file: " + path);
+    return emit_error.emit() << "Cannot open file: " << path;
 
   std::ostringstream contents;
   contents << file.rdbuf();
@@ -66,13 +71,16 @@ inline std::string read_config_file(const std::string &path) {
 /// @details FlatBuffers returns pointers into `Parser::builder_`. Keeping the
 /// parser local to this helper makes the lifetime explicit: callers must copy
 /// any values they need inside @p callback rather than retaining raw pointers.
+/// The callback must return util::FailureOr<T> or util::Result so parsing failures
+/// can be returned through the same result type.
 /// @param skip_unexpected_fields Preserve the general simulation config's
 /// forward-compatible unknown-field behavior when true; use false for strict
 /// sub-configs whose misspelled keys could change execution behavior.
 template <typename Callback>
-decltype(auto)
-with_parsed_simulation_config_json(const std::string &json, const std::string &schema_text,
-                                   Callback &&callback, bool skip_unexpected_fields = true) {
+auto with_parsed_simulation_config_json(const std::string &json, const std::string &schema_text,
+                                        util::DiagnosticEmitter emit_error, Callback &&callback,
+                                        bool skip_unexpected_fields = true)
+    -> std::invoke_result_t<Callback, const fb::SimulationConfig *> {
   flatbuffers::IDLOptions options;
   // Preserve an explicit scalar default (notably cpu_dispatch_threads=1),
   // whose meaning differs from an omitted automatic setting in JSON.
@@ -80,9 +88,9 @@ with_parsed_simulation_config_json(const std::string &json, const std::string &s
   flatbuffers::Parser parser(options);
   parser.opts.skip_unexpected_fields_in_json = skip_unexpected_fields;
   if (!parser.Parse(schema_text.c_str()))
-    throw std::runtime_error("Failed to parse schema: " + std::string(parser.error_));
+    return emit_error.emit() << "Failed to parse schema: " << parser.error_;
   if (!parser.Parse(json.c_str()))
-    throw std::runtime_error("Failed to parse JSON config: " + std::string(parser.error_));
+    return emit_error.emit() << "Failed to parse JSON config: " << parser.error_;
   const fb::SimulationConfig *config =
       flatbuffers::GetRoot<fb::SimulationConfig>(parser.builder_.GetBufferPointer());
   return std::forward<Callback>(callback)(config);
@@ -111,8 +119,9 @@ inline PciDeviceConfig pci_device_from_fb(const fb::PciDeviceInfo *pci) {
 /// @details The resulting config owns its strings and IP versions so it is safe
 /// after the FlatBuffers parser storage goes out of scope.
 /// @param json_path JSON path of @p device, used in validation diagnostics.
-inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
-                                          std::string_view json_path) {
+inline util::FailureOr<KfdDeviceConfig> kfd_device_from_fb(const fb::KfdDeviceInfo *device,
+                                                           std::string_view json_path,
+                                                           util::DiagnosticEmitter emit_error) {
   KfdDeviceConfig config;
   if (device == nullptr)
     return config;
@@ -173,9 +182,8 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
   config.num_sdma_xgmi_engines = device->num_sdma_xgmi_engines();
   config.num_sdma_queues_per_engine = device->num_sdma_queues_per_engine();
   if (config.num_sdma_engines != 0 && config.num_sdma_queues_per_engine == 0)
-    throw std::runtime_error(std::string(json_path) +
-                             ".num_sdma_queues_per_engine must be nonzero when " +
-                             std::string(json_path) + ".num_sdma_engines is nonzero");
+    return emit_error.emit() << json_path << ".num_sdma_queues_per_engine must be nonzero when "
+                             << json_path << ".num_sdma_engines is nonzero";
   config.num_cp_queues = device->num_cp_queues();
   config.max_engine_clk_fcompute = device->max_engine_clk_fcompute();
   config.location_id = device->location_id();
@@ -187,13 +195,12 @@ inline KfdDeviceConfig kfd_device_from_fb(const fb::KfdDeviceInfo *device,
   if (const auto *versions = device->ip_versions()) {
     for (const auto *version : *versions) {
       if (version->hardware_id() == 0 || version->major() == 0)
-        throw std::runtime_error(std::string(json_path) +
-                                 ".ip_versions requires nonzero hardware_id and major");
+        return emit_error.emit() << json_path
+                                 << ".ip_versions requires nonzero hardware_id and major";
       if (std::ranges::any_of(config.ip_versions, [&](const DeviceIpVersion &existing) {
             return existing.hardware_id == version->hardware_id();
           }))
-        throw std::runtime_error(std::string(json_path) +
-                                 ".ip_versions contains a duplicate hardware_id");
+        return emit_error.emit() << json_path << ".ip_versions contains a duplicate hardware_id";
       config.ip_versions.push_back(
           {version->hardware_id(), version->major(), version->minor(), version->revision()});
     }

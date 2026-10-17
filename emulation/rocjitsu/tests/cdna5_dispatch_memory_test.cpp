@@ -21,6 +21,7 @@ using namespace rocjitsu::test::cdna5;
 
 TEST(Gfx1250ExecutionTest, LdsAccessesRejectWrappedRanges) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *cu = sim.cu();
   auto &lds = cu->lds();
   constexpr uint32_t kWrappedAddress = UINT32_MAX - 3;
@@ -40,6 +41,7 @@ TEST(Gfx1250ExecutionTest, LdsAccessesRejectWrappedRanges) {
 
 TEST(Gfx1250SimulationTest, DispatchesEndpgmThroughConfig) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
 
@@ -64,6 +66,7 @@ TEST(Gfx1250SimulationTest, DispatchedPseudoScalarExpIgnoresRoundingMode) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const auto *snapshot = dispatch_one_wave(sim, code, std::size(code));
 
   ASSERT_NE(snapshot, nullptr);
@@ -76,6 +79,7 @@ TEST(Gfx1250SimulationTest, MultiWaveDispatchHonorsPackedTidComponentCount) {
   for (uint32_t component_count = 0; component_count <= 1; ++component_count) {
     SCOPED_TRACE("component_count=" + std::to_string(component_count));
     Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize());
     uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, false,
                                               false, false, 0, 0, 0, 0, component_count);
 
@@ -122,6 +126,7 @@ std::vector<uint64_t> collect_active_exec_masks(Gfx1250Sim &sim) {
 
 TEST(Gfx1250SimulationTest, PartialWorkgroupMasksTailWaveExec) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
 
@@ -149,6 +154,7 @@ uint32_t count_dispatched_workgroups(Gfx1250Sim &sim) {
 // (ceil(65/32)); the old floor division dropped the tail WG and dispatched 2.
 TEST(Gfx1250SimulationTest, PartialFinalWorkgroupRoundsUpDispatchCount) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
 
@@ -163,6 +169,7 @@ TEST(Gfx1250SimulationTest, PartialFinalWorkgroupRoundsUpDispatchCount) {
 // ceil(65/32) * ceil(33/16) = 3 * 3 = 9 workgroups, not floor's 2 * 2 = 4.
 TEST(Gfx1250SimulationTest, PartialFinalWorkgroupRoundsUpDispatchCount2D) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
 
@@ -185,6 +192,7 @@ TEST(Gfx1250SimulationTest, PartialFinalWorkgroupRoundsUpDispatchCount2D) {
 
 TEST(Gfx1250SimulationTest, PartialGridTailMasksFinalWorkgroupExec) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
 
@@ -200,6 +208,7 @@ TEST(Gfx1250SimulationTest, PartialGridTailMasksFinalWorkgroupExec) {
 
 TEST(Gfx1250SimulationTest, Partial2DGridTailMasksNonContiguousExecLanes) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
 
@@ -237,6 +246,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargDwordsIntoUserSgprs) {
   AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(&args), sizeof(args), kKernargAddr);
   uint64_t kernel_object =
       sim.write_kernel(kKernelAddr, code, std::size(code), 104, 32, 4, false, false, false,
@@ -265,6 +275,7 @@ TEST(Gfx1250SimulationTest, DispatchPreloadsKernargWhenDescriptorSizeIsUnknown) 
   AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(args.data()),
                          args.size() * sizeof(args[0]), kKernargAddr);
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code, std::size(code), 104, 32, 4, false,
@@ -295,6 +306,7 @@ TEST(Gfx1250SimulationTest, DispatchDecodesSixBitUserSgprCountForKernargPreload)
   AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(args.data()),
                          args.size() * sizeof(args[0]), kKernargAddr);
   uint64_t kernel_object =
@@ -329,6 +341,7 @@ TEST(Gfx1250SimulationTest, SLoadB32DoesNotScaleImmediateOffset) {
   AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   write_global_u32(*sim.memory, kKernargAddr + 4, kExpected);
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size(), 104, 32, 2,
                                             false, false, false, kernel_code_properties, 16);
@@ -369,6 +382,7 @@ TEST(Gfx1250SimulationTest, SLoadB32WritesVccHalves) {
   AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   write_global_u32(*sim.memory, kKernargAddr, kVccLo);
   write_global_u32(*sim.memory, kKernargAddr + 4, kVccHi);
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size(), 104, 32, 2,
@@ -402,6 +416,7 @@ TEST(Gfx1250SimulationTest, SLoadB64WritesVccPair) {
   AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   sim.memory->load_image(reinterpret_cast<const uint8_t *>(&kExpected), sizeof(kExpected),
                          kKernargAddr);
   uint64_t kernel_object = sim.write_kernel(kKernelAddr, code.data(), code.size(), 104, 32, 2,
@@ -451,6 +466,7 @@ TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
   AMDHSA_BITS_SET(kernel_code_properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   write_global_u32(*sim.memory, kKernargAddr, kSgprValue);
   write_global_u32(*sim.memory, kKernargAddr + 4, kTtmpValue);
   write_global_u32(*sim.memory, kKernargAddr + 8, kDiscardedValue);
@@ -470,6 +486,7 @@ TEST(Gfx1250SimulationTest, SLoadB32RoutesSgprTtmpAndNullDestinations) {
 
 TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object =
       sim.write_kernel(0x10000, code, std::size(code), 104, 32, 2, true, false, false);
@@ -498,6 +515,7 @@ TEST(Gfx1250SimulationTest, TtmpWorkgroupIdsUseGridCoordinatesFor2DDispatch) {
 
 TEST(Gfx1250SimulationTest, Ttmp8EncodesWaveIdWithinWorkgroup) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
 
@@ -515,6 +533,7 @@ TEST(Gfx1250SimulationTest, Ttmp8EncodesWaveIdWithinWorkgroup) {
 
 TEST(Gfx1250SimulationTest, Ttmp8EncodesQueuePacketId) {
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   const uint32_t code[] = {S_ENDPGM_GFX12};
   uint64_t kernel_object = sim.write_kernel(0x10000, code, std::size(code));
 
@@ -555,6 +574,7 @@ TEST(Gfx1250SimulationTest, GlobalStoreWritesVisibleMemory) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code));
   for (uint32_t lane = 0; lane < 32; ++lane)
     sim.memory->write32(output_addr + lane * sizeof(uint32_t), 0);
@@ -592,6 +612,7 @@ TEST(Gfx1250SimulationTest, GlobalStoreSignExtendsNegativeSaddrVgprOffset) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code));
   sim.memory->write32(base_addr - sizeof(uint32_t), 0);
   sim.memory->write32(base_addr, 0);
@@ -636,6 +657,7 @@ TEST(Gfx1250SimulationTest, GlobalStoreScalesANegativeSaddrVgprOffsetSigned) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code));
   sim.memory->write32(base_addr - sizeof(uint32_t), 0);
   sim.memory->write32(base_addr, 0);
@@ -668,6 +690,7 @@ TEST(Gfx1250SimulationTest, BufferStoreUsesM0Soffset) {
   };
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   uint64_t kernel_object = sim.write_kernel(kernel_addr, code, std::size(code), 128);
   for (uint32_t lane = 0; lane < 32; ++lane) {
     sim.memory->write32(output_addr + lane * 32, 0);
@@ -690,6 +713,7 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushSerializesConcurrentAccess) {
   constexpr uint32_t iterations = 32;
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *msc = sim.soc->iod(0)->msc();
   std::barrier start(3);
 
@@ -758,6 +782,7 @@ TEST(Gfx1250SimulationTest, MemorySideCacheFlushMakesProgressUnderContinuousRead
   constexpr uint32_t reader_count = 4;
 
   Gfx1250Sim sim;
+  ASSERT_NO_FATAL_FAILURE(sim.initialize());
   auto *msc = sim.soc->iod(0)->msc();
   std::barrier start(reader_count + 1);
   std::atomic<bool> stop_readers = false;

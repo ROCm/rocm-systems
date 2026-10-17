@@ -932,7 +932,8 @@ TEST(MemoryWaitExecutionTest, InlineDsResultAndCounterOnlyNopUseOrderedQueue) {
                                                {.simm16 = static_cast<uint16_t>(threshold)}));
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 258, .vdst = 3}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -952,7 +953,8 @@ TEST(MemoryWaitExecutionTest, CounterAdmissionPrecedesTheIncomingInstructionsReg
       append_instruction(code, cdna5::build_vds(cdna5::kDsNopVds));
     append_instruction(code, cdna5::build_vds(cdna5::kDsSwizzleB32Vds, {.addr = 2, .vdst = 3}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -975,7 +977,8 @@ TEST(MemoryWaitExecutionTest, ReturnMessageResultsRequireZeroWait) {
                                                {.simm16 = static_cast<uint16_t>(threshold)}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 6}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);
@@ -1023,7 +1026,8 @@ TEST(MemoryWaitExecutionTest, MessageResultsCheckM0AndOnlyConsumedExecWords) {
           append_instruction(code,
                              cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 2}));
         append_instruction(code, S_ENDPGM_GFX12);
-        Gfx1250Sim sim(memory_wait_test_config());
+        Gfx1250Sim sim;
+        ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
         test::AqlQueue queue(sim.memory, sim.cp());
         queue.dispatch(kernel, 32, 32);
@@ -1060,7 +1064,8 @@ TEST(MemoryWaitExecutionTest, CounterOnlyCacheOperationDoesNotProveOlderLoadComp
       append_instruction(code, S_ENDPGM_GFX12);
       uint32_t properties = 0;
       AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-      Gfx1250Sim sim(memory_wait_test_config());
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
       write_global_u32(*sim.memory, 0x400000, 0x12345678);
       auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                      false, properties, 16);
@@ -1149,7 +1154,8 @@ TEST(MemoryWaitExecutionTest, ScalarMissingWaitWarnsWithoutChangingTheResult) {
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
     AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -1559,7 +1565,8 @@ TEST(MemoryWaitExecutionTest, BarrierObserversPreservePendingResults) {
   };
   for (bool wait : {false, true}) {
     SCOPED_TRACE(wait);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto observer = std::make_unique<BarrierSnapshot>();
     auto *snapshot = observer.get();
     ASSERT_TRUE(sim.plugin_group->add(std::move(observer)));
@@ -1613,7 +1620,8 @@ TEST(MemoryWaitExecutionTest, BarrierSccReadAndOverwriteNeedTheKmWait) {
                                                           4 | ((consumer == 3 ? 9 : 10) << 6)),
                                                       .sdst = 4}));
         append_instruction(code, S_ENDPGM_GFX12);
-        Gfx1250Sim sim(memory_wait_test_config());
+        Gfx1250Sim sim;
+        ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
         test::AqlQueue queue(sim.memory, sim.cp());
         queue.dispatch(kernel, group_size, group_size);
@@ -1762,7 +1770,8 @@ TEST(MemoryWaitExecutionTest, ScalarVccLoadChecksOnlyTheConsumedOrWrittenWords) 
         append_instruction(code, S_ENDPGM_GFX12);
         uint32_t properties = 0;
         AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-        Gfx1250Sim sim(memory_wait_test_config());
+        Gfx1250Sim sim;
+        ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
         write_global_u32(*sim.memory, 0x400000, 1);
         auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                        false, properties, 16);
@@ -2084,7 +2093,8 @@ TEST(MemoryWaitExecutionTest, GlobalFlatResultNeedsOnlyItsLoadCounter) {
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
     AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -2117,7 +2127,8 @@ TEST(MemoryWaitExecutionTest, VectorWaitDiagnosticsCanBeSilenced) {
     append_instruction(code, S_ENDPGM_GFX12);
     uint32_t properties = 0;
     AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-    Gfx1250Sim sim(memory_wait_test_config(mode == 3 ? "off" : "warn"));
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config(mode == 3 ? "off" : "warn")));
     write_global_u32(*sim.memory, 0x400000, 0x12345678);
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32, 2, false, false,
                                    false, properties, 16);
@@ -2300,10 +2311,11 @@ void enable_multi_group_replay(std::vector<uint32_t> &code) {
   code.push_back(1);
 }
 
-std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
-                                        std::string_view xcnt_setting = "warn", unsigned vgprs = 32,
-                                        std::string_view memory_setting = "warn",
-                                        std::string_view wait_checking = "") {
+util::FailureOr<std::array<uint64_t, 2>> run_xcnt_kernel(std::vector<uint32_t> code,
+                                                         std::string_view xcnt_setting = "warn",
+                                                         unsigned vgprs = 32,
+                                                         std::string_view memory_setting = "warn",
+                                                         std::string_view wait_checking = "") {
   using namespace rocr::llvm::amdhsa;
   append_instruction(code, S_WAIT_KMCNT_0_GFX12);
   append_instruction(code, cdna5::build_sopp(cdna5::kSWaitLoadcntSopp, {.simm16 = 0}));
@@ -2312,7 +2324,10 @@ std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
   std::string config = memory_wait_test_config(memory_setting, xcnt_setting);
   if (!wait_checking.empty())
     config.insert(config.find('{') + 1, std::format("\"wait_checking\":\"{}\",", wait_checking));
-  Gfx1250Sim sim(config);
+  Gfx1250Sim sim;
+  sim.initialize(config);
+  if (testing::Test::HasFatalFailure())
+    return util::Result::failure();
   write_global_u32(*sim.memory, 0x400000, 0x12345678);
   uint32_t properties = 0;
   AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
@@ -2327,7 +2342,8 @@ std::array<uint64_t, 2> run_xcnt_kernel(std::vector<uint32_t> code,
     EXPECT_FALSE(sim.cu()->wf(0)->memory_wait_checks_enabled());
     EXPECT_EQ(sim.cu()->wf(0)->memory_wait_scoreboard(), nullptr);
   }
-  return {sim.cu()->xcnt_diagnostic_count(), sim.cu()->memory_wait_diagnostic_count()};
+  return std::array<uint64_t, 2>{sim.cu()->xcnt_diagnostic_count(),
+                                 sim.cu()->memory_wait_diagnostic_count()};
 }
 
 TEST(XcntExecutionTest, ScalarAddressOverwriteNeedsZeroXOrKmWait) {
@@ -2349,7 +2365,9 @@ TEST(XcntExecutionTest, ScalarAddressOverwriteNeedsZeroXOrKmWait) {
     if (wait == 6)
       append_instruction(code, cdna5::build_sopp(cdna5::kSBranchSopp, {.simm16 = 0}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
-    const auto counts = run_xcnt_kernel(code);
+    auto counts_result = run_xcnt_kernel(code);
+    ASSERT_TRUE(counts_result.succeeded());
+    const auto counts = std::move(counts_result).value();
     EXPECT_EQ(counts[0], wait == 1 || wait == 3 || wait == 6 ? 0u : 1u);
     EXPECT_EQ(counts[1], 0u);
   }
@@ -2373,7 +2391,9 @@ TEST(XcntExecutionTest, ScalarRegisterOffsetOverwriteNeedsTranslationOrCompletio
                                     {.simm16 = 0}));
       append_instruction(
           code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = overwritten}));
-      const auto counts = run_xcnt_kernel(code);
+      auto counts_result = run_xcnt_kernel(code);
+      ASSERT_TRUE(counts_result.succeeded());
+      const auto counts = std::move(counts_result).value();
       EXPECT_EQ(counts[0], selector != 124 && !wait ? 1u : 0u);
       EXPECT_EQ(counts[1], 0u);
     }
@@ -2405,7 +2425,9 @@ TEST(XcntExecutionTest, VectorAddressAndExecRespectPartialTranslationAndLoadWait
             code, cdna5::build_sop1(
                       cdna5::kSMovB32Sop1,
                       {.ssrc0 = 128, .sdst = static_cast<uint8_t>(consumer == 1 ? 0 : 126)}));
-      const auto counts = run_xcnt_kernel(code);
+      auto counts_result = run_xcnt_kernel(code);
+      ASSERT_TRUE(counts_result.succeeded());
+      const auto counts = std::move(counts_result).value();
       EXPECT_EQ(counts[0], wait && (consumer == 0 || wait % 2 == 0) ? 0u : 1u);
       EXPECT_EQ(counts[1], 0u);
     }
@@ -2730,7 +2752,9 @@ TEST(XcntExecutionTest, StoreDataIsProtectedAndSourceReadsAreAllowed) {
                                                              : cdna5::kSWaitStorecntSopp,
                                                  {.simm16 = 0}));
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 1}));
-    const auto counts = run_xcnt_kernel(code);
+    auto counts_result = run_xcnt_kernel(code);
+    ASSERT_TRUE(counts_result.succeeded());
+    const auto counts = std::move(counts_result).value();
     EXPECT_EQ(counts[0], wait == 1 || wait == 3 ? 0u : 1u);
     EXPECT_EQ(counts[1], 0u);
   }
@@ -2744,7 +2768,9 @@ TEST(XcntExecutionTest, CompletionAndReplaySettingsAreIndependent) {
       append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 0));
       append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
       append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
-      const auto counts = run_xcnt_kernel(code, xcnt, 32, memory);
+      auto counts_result = run_xcnt_kernel(code, xcnt, 32, memory);
+      ASSERT_TRUE(counts_result.succeeded());
+      const auto counts = std::move(counts_result).value();
       EXPECT_EQ(counts[0], xcnt == "warn" ? 1u : 0u);
       EXPECT_EQ(counts[1], memory != "off" ? 1u : 0u);
     }
@@ -2757,7 +2783,9 @@ TEST(XcntExecutionTest, LaunchModesOverridePerCuSettings) {
     append_instruction(code, make_s_load_b32_scaled_imm(4, 0, 0));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 4, .sdst = 5}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
-    const auto counts = run_xcnt_kernel(code, "warn", 32, "off", mode);
+    auto counts_result = run_xcnt_kernel(code, "warn", 32, "off", mode);
+    ASSERT_TRUE(counts_result.succeeded());
+    const auto counts = std::move(counts_result).value();
     EXPECT_EQ(counts[0], mode.empty() || mode == "all" ? 1u : 0u);
     EXPECT_EQ(counts[1], mode == "on" || mode == "all" ? 1u : 0u);
   }
@@ -2777,14 +2805,17 @@ TEST(XcntExecutionTest, ReplayOnlyCheckingRetainsCompletionOrdering) {
                                                              : cdna5::kSWaitStorecntSopp,
                                                  {.simm16 = 0}));
     append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 0}));
-    EXPECT_EQ(run_xcnt_kernel(code, "warn", 32, "off"),
+    auto counts_result = run_xcnt_kernel(code, "warn", 32, "off");
+    ASSERT_TRUE(counts_result.succeeded());
+    EXPECT_EQ(counts_result.value(),
               (std::array<uint64_t, 2>{wait == 1 || wait == 2 ? 0u : 1u, 0}));
   }
 }
 
 TEST(XcntExecutionTest, InvalidDiagnosticSettingsAreRejected) {
-  EXPECT_THROW(Gfx1250Sim(memory_wait_test_config("no")), std::invalid_argument);
-  EXPECT_THROW(Gfx1250Sim(memory_wait_test_config("", "no")), std::invalid_argument);
+  Gfx1250Sim sim;
+  EXPECT_THROW(sim.initialize(memory_wait_test_config("no")), std::invalid_argument);
+  EXPECT_THROW(sim.initialize(memory_wait_test_config("", "no")), std::invalid_argument);
 }
 
 TEST(XcntExecutionTest, SingleGroupVmemIsOutsideQualifiedCoverage) {
@@ -2793,7 +2824,9 @@ TEST(XcntExecutionTest, SingleGroupVmemIsOutsideQualifiedCoverage) {
   append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
                                                 {.saddr = 0, .vdst = 2, .vaddr = 0}));
   append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
-  EXPECT_EQ(run_xcnt_kernel(code), (std::array<uint64_t, 2>{0, 0}));
+  auto counts_result = run_xcnt_kernel(code);
+  ASSERT_TRUE(counts_result.succeeded());
+  EXPECT_EQ(counts_result.value(), (std::array<uint64_t, 2>{0, 0}));
 }
 
 TEST(XcntExecutionTest, GroupTransitionsAndVmemDestinationsProvideImplicitOrdering) {
@@ -2819,7 +2852,9 @@ TEST(XcntExecutionTest, GroupTransitionsAndVmemDestinationsProvideImplicitOrderi
       append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 0}));
     else
       append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 128, .vdst = 1}));
-    const auto counts = run_xcnt_kernel(code);
+    auto counts_result = run_xcnt_kernel(code);
+    ASSERT_TRUE(counts_result.succeeded());
+    const auto counts = std::move(counts_result).value();
     EXPECT_EQ(counts[0], mode == 2 ? 1u : 0u);
     EXPECT_EQ(counts[1], 0u);
   }
@@ -2834,7 +2869,9 @@ TEST(XcntExecutionTest, ReplaySourcesUseTheExecutedHighVgprBank) {
   append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
                                                 {.saddr = 0, .vdst = 2, .vaddr = 0}));
   append_instruction(code, cdna5::build_vop1(cdna5::kVMovB32Vop1, {.src0 = 129, .vdst = 0}));
-  EXPECT_EQ(run_xcnt_kernel(code, "warn", 320), (std::array<uint64_t, 2>{1, 0}));
+  auto counts_result = run_xcnt_kernel(code, "warn", 320);
+  ASSERT_TRUE(counts_result.succeeded());
+  EXPECT_EQ(counts_result.value(), (std::array<uint64_t, 2>{1, 0}));
 }
 
 TEST(XcntExecutionTest, ReplayAddressFootprintsHonorScratchAndBufferEnableBits) {
@@ -2887,7 +2924,9 @@ TEST(XcntExecutionTest, EmptyExecWithoutPendingTranslationsHasNoReplayDependency
   append_instruction(code, cdna5::build_vglobal(cdna5::kGlobalLoadB32Vglobal,
                                                 {.saddr = 0, .vdst = 2, .vaddr = 0}));
   append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 129, .sdst = 126}));
-  EXPECT_EQ(run_xcnt_kernel(code), (std::array<uint64_t, 2>{0, 0}));
+  auto counts_result = run_xcnt_kernel(code);
+  ASSERT_TRUE(counts_result.succeeded());
+  EXPECT_EQ(counts_result.value(), (std::array<uint64_t, 2>{0, 0}));
 }
 
 TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySources) {
@@ -2917,7 +2956,9 @@ TEST(XcntExecutionTest, EmptyExecStoreCannotUseAnOlderCompletionToDrainReplaySou
       // Scalar sources can be overwritten even with EXEC zero. Only a real load
       // completion or an X wait proves that this older address is safe to change.
       append_instruction(code, cdna5::build_sop1(cdna5::kSMovB32Sop1, {.ssrc0 = 128, .sdst = 0}));
-      EXPECT_EQ(run_xcnt_kernel(code), (std::array<uint64_t, 2>{wait ? 1u : 2u, 0}));
+      auto counts_result = run_xcnt_kernel(code);
+      ASSERT_TRUE(counts_result.succeeded());
+      EXPECT_EQ(counts_result.value(), (std::array<uint64_t, 2>{wait ? 1u : 2u, 0}));
     }
 }
 
@@ -3689,7 +3730,8 @@ TEST(MemoryWaitExecutionTest, WaterfallKeepsPendingResultsInTheirIssuingLanesAnd
           emit(S_ENDPGM_GFX12);
           uint32_t properties = 0;
           AMDHSA_BITS_SET(properties, KERNEL_CODE_PROPERTY_ENABLE_SGPR_KERNARG_SEGMENT_PTR, 1);
-          Gfx1250Sim sim(memory_wait_test_config());
+          Gfx1250Sim sim;
+          ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
           write_global_u32(*sim.memory, 0x400000, 0x12345678);
           const auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 1024, 2,
                                                false, false, false, properties, 16);
@@ -3806,7 +3848,8 @@ TEST(MemoryWaitExecutionTest, MemoryProducerOverwriteIsCheckedBeforeExecution) {
       else
         emit(cdna5::build_vds(cdna5::kDsLoadU16Vds, {.addr = 0, .vdst = 2}));
       emit(S_ENDPGM_GFX12);
-      Gfx1250Sim sim(memory_wait_test_config());
+      Gfx1250Sim sim;
+      ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
       auto observer = std::make_unique<BeforeObserver>(consumer, sim.cu());
       auto *observed = observer.get();
       sim.plugin_group->add(std::move(observer));
@@ -5161,7 +5204,8 @@ TEST(MemoryWaitExecutionTest, BarrierM0ReadChecksMessageReturnBeforeExecution) {
       append_instruction(code, cdna5::build_sopp(cdna5::kSWaitKmcntSopp, {.simm16 = 0}));
     append_instruction(code, cdna5::build_sop1(cdna5::kSBarrierSignalSop1, {.ssrc0 = 125}));
     append_instruction(code, S_ENDPGM_GFX12);
-    Gfx1250Sim sim(memory_wait_test_config());
+    Gfx1250Sim sim;
+    ASSERT_NO_FATAL_FAILURE(sim.initialize(memory_wait_test_config()));
     auto kernel = sim.write_kernel(0x10000, code.data(), code.size(), 104, 32);
     test::AqlQueue queue(sim.memory, sim.cp());
     queue.dispatch(kernel, 32, 32);

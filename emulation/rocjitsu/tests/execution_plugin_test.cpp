@@ -10,10 +10,11 @@
 /// Machine-level preservation below RegisterAccess must not add callbacks.
 
 #include "aql_queue.h"
+#include "config_test_util.h"
 #include "decode_test_util.h"
 #include "mma_test_util.h"
+#include "util/diagnostic.h"
 
-#include "embedded_schema.h"
 #include "rocjitsu/code/amdgpu_elf.h"
 #include "rocjitsu/code/rj_code.h"
 #include "rocjitsu/config/config_loader.h"
@@ -86,6 +87,7 @@ RJ_DIAGNOSTIC_POP
 #include "rocjitsu/vm/plugins/throughput/plugin.h"
 
 #include <flatbuffers/flexbuffers.h>
+#include <gtest/gtest-spi.h>
 #include <gtest/gtest.h>
 
 #include <algorithm>
@@ -1217,10 +1219,9 @@ struct PluginFixture {
   SoC *soc = nullptr;
   amdgpu::GpuMemory *mem = nullptr;
 
-  explicit PluginFixture(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
-                         uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104,
-                         uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1,
-                         uint32_t async_helpers = 0) {
+  void initialize(uint32_t num_wf_slots = 10, std::string_view arch = "cdna4",
+                  uint32_t wavefront_size = 64, uint32_t sgprs_per_wf = 104,
+                  uint32_t vgprs_per_wf = 256, uint32_t num_cus = 1, uint32_t async_helpers = 0) {
     std::string cu_range = "cu[0:" + std::to_string(num_cus) + "]";
     std::string links;
     for (uint32_t i = 0; i < num_cus; ++i) {
@@ -1255,7 +1256,8 @@ struct PluginFixture {
     )",
                                    async_helpers, arch, wavefront_size, cu_range, num_wf_slots,
                                    sgprs_per_wf, vgprs_per_wf, links);
-    auto loaded = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    config::LoadedConfig loaded;
+    ASSERT_TRUE(test::load_valid_config_from_string(json, loaded));
     soc = loaded.soc();
     mem = loaded.memory();
     engine = std::make_unique<simdojo::SimulationEngine>(loaded.engine_config);
@@ -1332,6 +1334,18 @@ struct PluginFixture {
   }
 };
 
+TEST(PluginFixtureSetupTest, ReportsMalformedConfigAndLeavesFixtureEmpty) {
+  EXPECT_FATAL_FAILURE(
+      {
+        PluginFixture fixture;
+        fixture.initialize(10, "\"");
+        EXPECT_EQ(fixture.engine, nullptr);
+        EXPECT_EQ(fixture.soc, nullptr);
+        EXPECT_EQ(fixture.mem, nullptr);
+      },
+      "Failed to parse JSON config");
+}
+
 TEST(ExecutionPluginTest, SgprBlockOwnersTrackPhysicalAllocationAndSlotReuseAcrossTargets) {
   struct TargetCase {
     std::string_view arch;
@@ -1341,7 +1355,9 @@ TEST(ExecutionPluginTest, SgprBlockOwnersTrackPhysicalAllocationAndSlotReuseAcro
 
   for (const TargetCase target : {TargetCase{"cdna4", 64, 104}, TargetCase{"cdna5", 32, 128}}) {
     SCOPED_TRACE(target.arch);
-    PluginFixture f(/*num_wf_slots=*/3, target.arch, target.wave_size, target.sgprs_per_wf);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(
+        f.initialize(/*num_wf_slots=*/3, target.arch, target.wave_size, target.sgprs_per_wf));
     auto *plugin = f.attach_ordering_plugin();
     const uint32_t first_sgpr_count = target.sgprs_per_wf / 2;
     auto *first = f.cu()->dispatch_wf(/*wg_id=*/10, /*pc=*/0, first_sgpr_count,
@@ -1430,7 +1446,8 @@ TEST(ExecutionPluginTest, VopdIntegerSimdRejectsUnsupportedWaveAndModifiers) {
     return try_execute_vopd_integer_pair_simd<8, 16, 17>(wf, x, y);
   };
 
-  PluginFixture wave64(/*num_wf_slots=*/1);
+  PluginFixture wave64;
+  ASSERT_NO_FATAL_FAILURE(wave64.initialize(/*num_wf_slots=*/1));
   auto *wide = wave64.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
   ASSERT_NE(wide, nullptr);
   ASSERT_EQ(wide->wf_size(), 64u);
@@ -1884,13 +1901,16 @@ std::vector<uint8_t> make_loaded_kernel_symbol_elf(uint64_t kernel_descriptor_of
 
 TEST(ExecutionPluginTest, NoPluginNoCrash) {
   PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize());
   const uint32_t code[] = {S_NOP, S_ENDPGM};
   f.run_kernel(code, 2);
 }
 
 TEST(ExecutionPluginTest, DispatchPacketCarriesExecutionShapeAndTargetMetadata) {
-  PluginFixture fixture(/*num_wf_slots=*/16, /*arch=*/"cdna5", /*wavefront_size=*/32,
-                        /*sgprs_per_wf=*/128);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/16, /*arch=*/"cdna5",
+                                             /*wavefront_size=*/32,
+                                             /*sgprs_per_wf=*/128));
   auto *plugin = fixture.attach_ordering_plugin();
 
   constexpr uint32_t kCdna5Endpgm = 0xBFB00000u;
@@ -2159,7 +2179,8 @@ TEST(ThroughputPluginTest, ClassifiesExclusiveInstructionFamilies) {
 TEST(ThroughputPluginTest, ReportsExactWaveInstructionCountsAsJsonl) {
   using plugins::throughput::InstructionFamily;
 
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2210,7 +2231,8 @@ TEST(ThroughputPluginTest, ReportsExactWaveInstructionCountsAsJsonl) {
 TEST(ThroughputPluginTest, TimesTerminatorWithoutAfterExecuteCallback) {
   using plugins::throughput::InstructionFamily;
 
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2374,7 +2396,8 @@ TEST(InstructionMixPluginTest, ClassifiesExclusiveInstructionFamilies) {
 }
 
 TEST(InstructionMixPluginTest, ReportsExecutedMnemonicsAsJsonl) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -2606,7 +2629,8 @@ TEST(InstructionMixPluginTest, ClassifiesMemoryByIssueMetadataWhenThePrefixIsUnk
 // not have its reported encoding decided by hash order -- the whole point of
 // the report is that two runs of the same workload diff cleanly.
 TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   // Wavefront slots are created on demand by the CU's dispatch path, so take
   // the wave from there; reaching into an unpopulated slot would dereference
   // null. The same slot is reused on purpose -- recycling is what makes the
@@ -2655,7 +2679,8 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingRegardlessOfMergeOrder) {
 // reported encoding_bytes is decided by whichever wave merged first and the
 // report stops being diffable.
 TEST(InstructionMixPluginTest, PicksTheSameEncodingSizeRegardlessOfMergeOrder) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   // Wavefront slots are created on demand by the CU's dispatch path, so take
   // the wave from there; reaching into an unpopulated slot would dereference
   // null. The same slot is reused on purpose -- recycling is what makes the
@@ -2703,7 +2728,8 @@ TEST(InstructionMixPluginTest, PicksTheSameEncodingSizeRegardlessOfMergeOrder) {
 // and the report's contract is that absence means non-execution -- so the
 // summary has to carry them, and has to say that it is a partial view.
 TEST(InstructionMixPluginTest, ShutdownKeepsCoverageFromUnfinishedDispatches) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   ExecutionPluginGroup group(std::move(sink_config));
@@ -2759,7 +2785,8 @@ TEST(InstructionMixPluginTest, ShutdownKeepsCoverageFromUnfinishedDispatches) {
 // stored std::string_view outlives its characters. The plugin must copy on
 // first sight; this test fails with a view-keyed map.
 TEST(InstructionMixPluginTest, OwnsMnemonicStorageWhenTheSourceIsNotStatic) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   ExecutionPluginGroup group(std::move(sink_config));
@@ -2848,7 +2875,8 @@ std::vector<uint32_t> independent_wmma_kernel() {
 }
 
 TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
-  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto observer = std::make_unique<AsyncEventPlugin>();
   auto *events = observer.get();
@@ -2875,7 +2903,8 @@ TEST(ExecutionPluginTest, AsyncMmaEndsSetregVgprMsbAdjacencyHazard) {
 }
 
 TEST(ExecutionPluginTest, SynchronousObserverDisablesActualMmaOffload) {
-  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto async_observer = std::make_unique<AsyncEventPlugin>();
   auto *async_events = async_observer.get();
@@ -2973,7 +3002,8 @@ class AsyncPluginFailureTest : public ::testing::TestWithParam<AsyncFailurePoint
 
 TEST_P(AsyncPluginFailureTest, DestroysEveryAcceptedInstructionOnIssuerAfterFailure) {
   AsyncFailureObservation observations;
-  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   for (unsigned index = 0; index != 3; ++index)
     ASSERT_TRUE(f.plugin_group_->add(
@@ -3006,7 +3036,8 @@ INSTANTIATE_TEST_SUITE_P(CallbackFailures, AsyncPluginFailureTest,
                          });
 
 TEST(ThroughputPluginTest, AsyncMmaCountsHaveExplicitlyUnavailableHandlerTiming) {
-  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -3087,7 +3118,8 @@ TEST(InstructionMixPluginTest, AloneItSubscribesToOnlyTheHooksItConsumes) {
 // without handling the issue hook would have dropped them from the counts
 // instead.
 TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
-  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -3116,7 +3148,8 @@ TEST(InstructionMixPluginTest, CountsActuallyOffloadedInstructions) {
 }
 
 TEST(ExecutionPluginTest, KernelLoggingSupportsActualAsyncMma) {
-  PluginFixture f(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(1, "cdna5", 32, 128, 256, 1, /*async_helpers=*/4));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -3159,7 +3192,8 @@ TEST(ExecutionPluginTest, SgprReadPolicyComesFromContainedPlugins) {
 }
 
 TEST(ExecutionPluginTest, SgprReadOptOutSkipsComputeUnitCallback) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<NoSgprReadPlugin>();
   auto *plugin_ptr = plugin.get();
@@ -3176,7 +3210,8 @@ TEST(ExecutionPluginTest, SgprReadOptOutSkipsComputeUnitCallback) {
 }
 
 TEST(ExecutionPluginTest, AsyncIssueFanoutHonorsPerPluginInterest) {
-  PluginFixture fixture(/*num_wf_slots=*/1);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
   auto *wave = fixture.cu()->dispatch_wf(/*wg_id=*/1, /*pc=*/0, /*sgprs=*/32, /*vgprs=*/32);
   ASSERT_NE(wave, nullptr);
   Instruction instruction("v_wmma_test", nullptr);
@@ -3317,7 +3352,8 @@ TEST(ExecutionPluginTest, UnsubscribedWaveBypassesHotHookAndCallbackLock) {
 }
 
 TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
-  PluginFixture fixture(/*num_wf_slots=*/1);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
   ExecutionPluginGroup group(PluginSinkConfig{});
   auto subscribed = std::make_unique<HotHookSubscriptionProbe>("subscribed_probe", true);
   auto *subscribed_ptr = subscribed.get();
@@ -3342,7 +3378,8 @@ TEST(ExecutionPluginTest, WaveDispatchCachesEachPluginsHotHookSubscription) {
 }
 
 TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {
-  PluginFixture fixture(/*num_wf_slots=*/1);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
   ExecutionPluginGroup group(PluginSinkConfig{});
   auto plugin =
       std::make_unique<HotHookSubscriptionProbe>("serial_unsubscribed_probe", false, true);
@@ -3362,7 +3399,8 @@ TEST(ExecutionPluginTest, CachedUnsubscribedWaveBypassesCallbackLock) {
 }
 
 TEST(ExecutionPluginTest, ReentrantDispatchHotHookFallsBackUntilCachePublication) {
-  PluginFixture fixture(/*num_wf_slots=*/1);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
   ExecutionPluginGroup group(PluginSinkConfig{});
   auto plugin = std::make_unique<HotHookSubscriptionProbe>("reentrant_dispatch_probe", true, true);
   auto *plugin_ptr = plugin.get();
@@ -3384,7 +3422,8 @@ TEST(ExecutionPluginTest, ReentrantDispatchHotHookFallsBackUntilCachePublication
 }
 
 TEST(ExecutionPluginTest, HaltAndRedispatchCannotReuseAStaleHotHookSubscription) {
-  PluginFixture fixture(/*num_wf_slots=*/1);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
   ExecutionPluginGroup group(PluginSinkConfig{});
   auto plugin = std::make_unique<HotHookSubscriptionProbe>("halt_reuse_probe", true, true);
   auto *plugin_ptr = plugin.get();
@@ -3481,8 +3520,7 @@ TEST(ExecutionPluginTest, EmptyGroupDispatchBypassesCallbackLock) {
             non_empty_before + 1);
 }
 
-int run_serial_hot_hook_halt_snapshot() {
-  PluginFixture f;
+int run_serial_hot_hook_halt_snapshot(PluginFixture &f) {
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   if (!f.plugin_group_->add(std::make_unique<SerialHotHookPlugin>()))
     return 1;
@@ -3510,13 +3548,17 @@ TEST(ExecutionPluginDeathTest, SerialHotHooksAllowRegisterReadsFromHaltHook) {
   ASSERT_EXIT(
       {
         alarm(5);
-        _exit(run_serial_hot_hook_halt_snapshot());
+        PluginFixture fixture;
+        ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+        _exit(run_serial_hot_hook_halt_snapshot(fixture));
       },
       ::testing::ExitedWithCode(0), "");
 }
 #else
 TEST(ExecutionPluginTest, SerialHotHooksAllowRegisterReadsFromHaltHook) {
-  EXPECT_EQ(run_serial_hot_hook_halt_snapshot(), 0);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
+  EXPECT_EQ(run_serial_hot_hook_halt_snapshot(fixture), 0);
 }
 #endif
 
@@ -3526,7 +3568,8 @@ TEST(ExecutionPluginTest, ValuSimdReadObservationUsesActiveExecMask) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -3617,7 +3660,8 @@ TEST(ExecutionPluginTest, ValuSimdWriteObservationUsesActiveExecMask) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -3653,7 +3697,8 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
     GTEST_SKIP() << "<experimental/simd> unavailable";
     return;
   } else {
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -3716,7 +3761,8 @@ TEST(ExecutionPluginTest, DppObservationReportsExactSourceAndDestinationLanes) {
 
 TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -3765,7 +3811,8 @@ TEST(ExecutionPluginTest, DppOutOfBoundsObservationHonorsBoundCtrl) {
 
 TEST(ExecutionPluginTest, DppSourceDestinationAliasStagesBeforeWriting) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4053,7 +4100,8 @@ TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
   }
   ForceScalarOverride force_simd(false);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4087,7 +4135,8 @@ TEST(ExecutionPluginTest, Dpp64BitSourceSimdStagesBothPhysicalDwords) {
 TEST(ExecutionPluginTest, DppInstructionReuseRestagesOriginalSource) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -4171,7 +4220,8 @@ TEST(ExecutionPluginTest, SdwaFp8ConversionsIgnoreNumericalOutputModifiers) {
 TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna3::execution_backend()};
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna3");
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna3"));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4215,7 +4265,8 @@ TEST(ExecutionPluginTest, Sdwa64BitDestinationWritesLegalConversionResult) {
 TEST(ExecutionPluginTest, SdwaInstructionReuseRestagesOriginalSource) {
   ForceScalarOverride force_scalar(true);
   ScopedIsaExecutionBackend execution_backend_scope{&cdna4::execution_backend()};
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -4247,7 +4298,8 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
   for (bool force_scalar : {true, false}) {
     SCOPED_TRACE(force_scalar ? "scalar" : "simd");
     ForceScalarOverride execution_mode(force_scalar);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wf, nullptr);
@@ -4329,7 +4381,8 @@ TEST(ExecutionPluginTest, SdwaFloatingModifiersUseSemanticSourceWidth) {
 
 TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
   ForceScalarOverride force_scalar(true);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4375,7 +4428,8 @@ TEST(ExecutionPluginTest, SdwaVop2Src1SelectorReportsExactBytes) {
 
 TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
   ForceScalarOverride force_scalar(true);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4431,7 +4485,8 @@ TEST(ExecutionPluginTest, SdwaVop2ScalarSelectorsUseSgprs) {
 }
 
 TEST(ExecutionPluginTest, SgprWriteObservationUsesExplicitWavePhysicalBlock) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   constexpr uint32_t kRequestedSgprs = 40;
@@ -4472,7 +4527,8 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4562,7 +4618,8 @@ TEST(ExecutionPluginTest, SdwaObservationReportsExactSourceAndDestinationBytes) 
 
 TEST(ExecutionPluginTest, SdwaClampIsAppliedInsideArchitecturalDestinationWrite) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4621,7 +4678,8 @@ TEST(ExecutionPluginTest, SdwaF16ClampPrecedesDestinationPlacement) {
   };
   for (bool force_scalar : {false, true}) {
     ForceScalarOverride scalar_override(force_scalar);
-    PluginFixture fixture(/*num_wf_slots=*/1);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
     OrderingPlugin *plugin = fixture.attach_ordering_plugin();
     amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
     amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4682,7 +4740,8 @@ TEST(ExecutionPluginTest, SdwaF16ClampPrecedesDestinationPlacement) {
 TEST(ExecutionPluginTest, SdwaPackedF16ClampTreatsEachHalfIndependently) {
   for (bool force_scalar : {false, true}) {
     ForceScalarOverride scalar_override(force_scalar);
-    PluginFixture fixture(/*num_wf_slots=*/1);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
     amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
     amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wavefront, nullptr);
@@ -4738,7 +4797,9 @@ TEST(ExecutionPluginTest, SdwaPackedConversionClampsBothHalvesBeforePlacement) {
     SCOPED_TRACE(arch_name);
     for (bool force_scalar : {false, true}) {
       ForceScalarOverride scalar_override(force_scalar);
-      PluginFixture fixture(/*num_wf_slots=*/1, arch_name, /*wavefront_size=*/32);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(
+          fixture.initialize(/*num_wf_slots=*/1, arch_name, /*wavefront_size=*/32));
       OrderingPlugin *plugin = fixture.attach_ordering_plugin();
       amdgpu::ComputeUnitCore *cu = fixture.cu();
       amdgpu::Wavefront *wave = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4801,7 +4862,8 @@ TEST(ExecutionPluginTest, SdwaPackedConversionClampsBothHalvesBeforePlacement) {
 TEST(ExecutionPluginTest, SdwaIntegerResultsDoNotUseFloatingClamp) {
   for (bool force_scalar : {false, true}) {
     ForceScalarOverride scalar_override(force_scalar);
-    PluginFixture fixture(/*num_wf_slots=*/1);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(/*num_wf_slots=*/1));
     amdgpu::ComputeUnitCore *compute_unit = fixture.cu();
     amdgpu::Wavefront *wavefront = compute_unit->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
     ASSERT_NE(wavefront, nullptr);
@@ -4839,7 +4901,8 @@ TEST(ExecutionPluginTest, SdwaIntegerResultsDoNotUseFloatingClamp) {
 
 TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
@@ -4879,7 +4942,8 @@ TEST(ExecutionPluginTest, SdwaClampHonorsDx10ClampMode) {
 
 TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsOnlySelectedBytes) {
   ForceScalarOverride force_simd(false);
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4918,7 +4982,8 @@ TEST(ExecutionPluginTest, SdwaPartialPreserveClampReportsOnlySelectedBytes) {
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4949,7 +5014,8 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotObserveInstructionWrite
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDirectly) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -4999,7 +5065,8 @@ TEST(ExecutionPluginTest, MemoryPipelineWideDwordCompletionWritesSparseLanesDire
 }
 
 TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLane) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -5041,7 +5108,8 @@ TEST(ExecutionPluginTest, FlatStoreDwordx4ReportsEverySourceRegisterAndActiveLan
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedCountersUntilCompletion) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
 
@@ -5058,7 +5126,8 @@ TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedCountersUntilCompletion) {
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedStoreCountersUntilCompletion) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
 
@@ -5081,7 +5150,8 @@ TEST(ExecutionPluginTest, MemoryPipelineHoldsDecodedStoreCountersUntilCompletion
 }
 
 TEST(ExecutionPluginTest, MemoryPipelineHonorsWideScalarCounterIncrement) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *wf = f.cu()->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   ASSERT_NE(wf, nullptr);
 
@@ -5099,8 +5169,9 @@ TEST(ExecutionPluginTest, MemoryPipelineHonorsWideScalarCounterIncrement) {
 
 TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
   constexpr uint32_t kVgprsPerWave = 16;
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128, kVgprsPerWave);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128, kVgprsPerWave));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/128, kVgprsPerWave, 32);
   auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/128, kVgprsPerWave, 32);
@@ -5135,8 +5206,9 @@ TEST(ExecutionPluginTest, MemoryPipelineCompletionDoesNotCrossWaveVgprBlock) {
 
 TEST(ExecutionPluginTest, DualOffsetCompletionRejectsBothDestinationsBeforeWriteback) {
   constexpr uint32_t kVgprsPerWave = 16;
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128, kVgprsPerWave);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128, kVgprsPerWave));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/128, kVgprsPerWave, 32);
   auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/128, kVgprsPerWave, 32);
@@ -5184,8 +5256,9 @@ TEST(ExecutionPluginTest, DualOffsetLoadsPreserveSparsePhysicalDestinations) {
   for (const auto arch : {std::string_view{"cdna4"}, std::string_view{"cdna5"}}) {
     const uint32_t wave = arch == "cdna4" ? 64 : 32;
     const uint64_t wave_mask = wave == 64 ? ~uint64_t{0} : 0xffffffffull;
-    PluginFixture f(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
-                    /*vgprs_per_wf=*/256);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
+                                         /*vgprs_per_wf=*/256));
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
     ASSERT_NE(wf, nullptr);
@@ -5249,8 +5322,9 @@ TEST(ExecutionPluginTest, DualOffsetLoadsRejectThePhysicalBlockBoundary) {
   constexpr uint32_t kSentinel = 0xa55a'3cc3u;
   for (const auto arch : {std::string_view{"cdna4"}, std::string_view{"cdna5"}}) {
     const uint32_t wave = arch == "cdna4" ? 64 : 32;
-    PluginFixture f(/*num_wf_slots=*/2, arch, wave, /*sgprs_per_wf=*/104,
-                    /*vgprs_per_wf=*/256);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, arch, wave, /*sgprs_per_wf=*/104,
+                                         /*vgprs_per_wf=*/256));
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
     auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
@@ -5291,8 +5365,9 @@ TEST(ExecutionPluginTest, EmptyDualLoadDoesNotMaterializeSecondDestination) {
     for (uint32_t bank : {0u, 256u}) {
       if (arch != "cdna4" && bank != 0)
         continue;
-      PluginFixture f(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
-                      /*vgprs_per_wf=*/256);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, arch, wave, /*sgprs_per_wf=*/104,
+                                           /*vgprs_per_wf=*/256));
       using Cu = IsaExecComputeUnit<simdojo::ExecMode::FUNCTIONAL, Isa>;
       auto *cu = static_cast<Cu *>(f.cu());
       auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256, wave);
@@ -5330,7 +5405,8 @@ TEST(ExecutionPluginTest, EmptyDualLoadDoesNotMaterializeSecondDestination) {
 }
 
 TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -5387,7 +5463,9 @@ TEST(ExecutionPluginTest, ScalarMemoryCompletionDoesNotObserveInstructionWrite) 
 
 TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgprBase) {
   constexpr uint32_t kSgprsPerWave = 128;
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32, kSgprsPerWave);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32, kSgprsPerWave));
   auto *cu = f.cu();
   auto *first = cu->dispatch_wf(/*wg_id=*/0, /*pc=*/0, kSgprsPerWave, /*vgprs=*/32);
   auto *wf = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0, kSgprsPerWave, /*vgprs=*/32);
@@ -5470,7 +5548,8 @@ TEST(ExecutionPluginTest, Gfx1250ScalarMemoryRoutesSpecialSelectorsAtNonzeroSgpr
 }
 
 TEST(ExecutionPluginTest, ScalarMemoryRejectsDestinationThatCrossesTtmpFile) {
-  PluginFixture f(/*num_wf_slots=*/2);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
   auto *adjacent = cu->dispatch_wf(1, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -5497,7 +5576,8 @@ TEST(ExecutionPluginTest, ScalarMemoryRejectsDestinationThatCrossesTtmpFile) {
 }
 
 TEST(ExecutionPluginTest, MemoryPipelinesSnapshotDispatchIdentityAtIssue) {
-  PluginFixture f(/*num_wf_slots=*/4);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/4));
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf_at(/*wf_id=*/3, /*wg_id=*/17, /*pc=*/0, /*num_sgprs=*/104,
                                 /*num_vgprs=*/256);
@@ -5523,7 +5603,9 @@ TEST(ExecutionPluginTest, MemoryPipelinesSnapshotDispatchIdentityAtIssue) {
 }
 
 TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -5567,13 +5649,14 @@ TEST(ExecutionPluginTest, D16MemoryCompletionPreservesHalfWithoutObservation) {
 
 class FormattedLoadRaceTest : public ::testing::Test {
 protected:
-  PluginFixture fixture{1, "rdna4", 32, 128};
+  PluginFixture fixture;
   StringSink *sink = nullptr;
   Wavefront *wave = nullptr;
   RaceWavefrontState *plugin_state = nullptr;
   std::unique_ptr<Decoder> decoder;
 
   void SetUp() override {
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, "rdna4", 32, 128));
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -5709,8 +5792,9 @@ protected:
   std::unique_ptr<Decoder> decoder;
 
   void SetUp() override {
-    fixture = std::make_unique<PluginFixture>(/*num_wf_slots=*/1, GetParam().arch,
-                                              /*wavefront_size=*/32, /*sgprs_per_wf=*/128);
+    fixture = std::make_unique<PluginFixture>();
+    ASSERT_NO_FATAL_FAILURE(fixture->initialize(/*num_wf_slots=*/1, GetParam().arch,
+                                                /*wavefront_size=*/32, /*sgprs_per_wf=*/128));
     PluginSinkConfig sink_config;
     sink = &sink_config.emplace<StringSink>();
     fixture->plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -5860,7 +5944,10 @@ INSTANTIATE_TEST_SUITE_P(BlockLoads, BlockLoadRaceTest,
 TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
   auto opposite_half_read_reports_race = [](std::string_view arch, uint32_t wavefront_size,
                                             bool formatted) {
-    PluginFixture f(/*num_wf_slots=*/1, arch, wavefront_size);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/1, arch, wavefront_size);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -5912,8 +5999,12 @@ TEST(RaceDetectorPluginTest, D16LoadTracksFullDwordWhenSramEccEnabled) {
 TEST(RaceDetectorPluginTest, InvalidVectorLoadDestinationIsRejectedBeforeWawChecks) {
   auto rejects_without_access = [](MemPipelineTag tag) {
     constexpr uint32_t kVgprsPerWave = 16;
-    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                    /*sgprs_per_wf=*/128, kVgprsPerWave);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4",
+                 /*wavefront_size=*/32,
+                 /*sgprs_per_wf=*/128, kVgprsPerWave);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -5952,7 +6043,8 @@ TEST(RaceDetectorPluginTest, InvalidVectorLoadDestinationIsRejectedBeforeWawChec
 }
 
 TEST(RaceDetectorPluginTest, WideVectorLoadTracksEveryDestinationVgpr) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -5986,7 +6078,8 @@ TEST(RaceDetectorPluginTest, WideVectorLoadTracksEveryDestinationVgpr) {
 }
 
 TEST(RaceDetectorPluginTest, DualOffsetLoadTracksBothDestinationRanges) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6023,7 +6116,8 @@ TEST(RaceDetectorPluginTest, DualOffsetLoadTracksBothDestinationRanges) {
 }
 
 TEST(RaceDetectorPluginTest, DualOffsetStoreTracksSecondLdsRange) {
-  PluginFixture f(/*num_wf_slots=*/2);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6072,7 +6166,10 @@ TEST(RaceDetectorPluginTest, DualOffsetStoreTracksSecondLdsRange) {
 
 TEST(RaceDetectorPluginTest, DualOffsetAccessValidatesSecondLdsRange) {
   const auto second_range_reports_race = [](bool dual_is_load) {
-    PluginFixture f(/*num_wf_slots=*/2);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/2);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6128,8 +6225,9 @@ TEST(RaceDetectorPluginTest, DualOffsetAccessValidatesSecondLdsRange) {
 }
 
 TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   sink_config.emplace<StringSink>();
   auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -6174,7 +6272,8 @@ TEST(RaceDetectorPluginTest, LocalMemoryUsesEffectiveIssueMask) {
 }
 
 TEST(RaceDetectorPluginTest, MixedCounterClassesUseUnorderedEventOrdering) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   sink_config.emplace<StringSink>();
   auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -6218,7 +6317,10 @@ TEST(RaceDetectorPluginTest, MixedCounterClassesUseUnorderedEventOrdering) {
 
 TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
   auto trailing_access_reports_race = [](bool flat_store_first) {
-    PluginFixture f(/*num_wf_slots=*/2);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/2);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6301,8 +6403,9 @@ TEST(RaceDetectorPluginTest, LdsRoutedFlatStoreDwordx2TracksTrailingDword) {
 }
 
 TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6346,8 +6449,9 @@ TEST(RaceDetectorPluginTest, Rdna4PartialLoadWaitRetiresOnlyOldestOrderedEvent) 
 }
 
 TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -6415,8 +6519,10 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatPartialWaitRetiresOldestEvent) {
 
 TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
   auto verify_wait_order = [](bool storecnt_first) {
-    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                    /*sgprs_per_wf=*/128);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4",
+                                         /*wavefront_size=*/32,
+                                         /*sgprs_per_wf=*/128));
     PluginSinkConfig sink_config;
     sink_config.emplace<StringSink>();
     auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -6500,7 +6606,8 @@ TEST(RaceDetectorPluginTest, Rdna4GenericFlatStoreRequiresBothCounterWaits) {
 }
 
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6538,7 +6645,8 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsReadBeforeWait) {
 }
 
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsWriteBeforeWait) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6567,8 +6675,9 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpReportsWriteBeforeWait) {
 }
 
 TEST(RaceDetectorPluginTest, ScalarLoadToTtmpHonorsSplitKmcntWait) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6601,8 +6710,12 @@ TEST(RaceDetectorPluginTest, ScalarLoadToTtmpHonorsSplitKmcntWait) {
 
 TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) {
   auto run = [](WaitCounterType event_counter) {
-    PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna3", /*wavefront_size=*/32,
-                    /*sgprs_per_wf=*/128);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna3",
+                 /*wavefront_size=*/32,
+                 /*sgprs_per_wf=*/128);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6643,7 +6756,10 @@ TEST(RaceDetectorPluginTest, NamedVmcntWaitRetiresMonolithicAndSplitLoadEvents) 
 
 TEST(RaceDetectorPluginTest, UnresolvedOrMixedFlatWholeResultRequiresBothWaitCounterDomains) {
   auto reports_race_after_wait = [](MemoryRoute route, uint8_t vmcnt, uint8_t lgkmcnt) {
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    f.initialize(/*num_wf_slots=*/1);
+    if (testing::Test::HasFatalFailure())
+      return false;
     PluginSinkConfig sink_config;
     StringSink &sink = sink_config.emplace<StringSink>();
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6713,7 +6829,8 @@ TEST(RaceDetectorPluginTest, FlatLoadReadyLanesKnownFalsePositives) {
           SCOPED_TRACE(static_cast<unsigned>(waited));
           const uint32_t wave_size = is_rdna4 ? 32 : 64;
           const uint32_t sgprs = is_rdna4 ? 128 : 104;
-          PluginFixture f(1, is_rdna4 ? "rdna4" : "cdna4", wave_size, sgprs);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize(1, is_rdna4 ? "rdna4" : "cdna4", wave_size, sgprs));
           PluginSinkConfig sink_config;
           auto &sink = sink_config.emplace<StringSink>();
           f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -6832,7 +6949,8 @@ TEST(RaceDetectorPluginTest, FlatResultsFollowTheirResolvedCounter) {
             SCOPED_TRACE(width);
             SCOPED_TRACE(exec);
             SCOPED_TRACE(waits);
-            PluginFixture f(1, std::string(arch), wave_size, sgprs);
+            PluginFixture f;
+            ASSERT_NO_FATAL_FAILURE(f.initialize(1, std::string(arch), wave_size, sgprs));
             PluginSinkConfig sink_config;
             auto &sink = sink_config.emplace<StringSink>();
             auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -6975,7 +7093,8 @@ TEST(RaceDetectorPluginTest, Gfx950FlatEmptyPortionDoesNotOrderAnOlderResult) {
     for (const int flat_count : {1, lds ? 64 : 16}) {
       SCOPED_TRACE(lds);
       SCOPED_TRACE(flat_count);
-      PluginFixture f(/*num_wf_slots=*/1);
+      PluginFixture f;
+      ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
       PluginSinkConfig sink_config;
       auto &sink = sink_config.emplace<StringSink>();
       auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -7053,7 +7172,8 @@ TEST(RaceDetectorPluginTest, FlatCounterCapacityRequiresResolvedDomain) {
           SCOPED_TRACE(requests);
           SCOPED_TRACE(flat_lds);
           SCOPED_TRACE(static_cast<int>(phase));
-          PluginFixture f(1);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(f.initialize(1));
           PluginSinkConfig sink_config;
           auto &sink = sink_config.emplace<StringSink>();
           auto plugin = std::make_unique<RaceDetectorPlugin>();
@@ -7173,7 +7293,9 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
           const bool cdna_legacy = arch == "cdna2" || arch == "cdna4";
           const bool split = arch == "rdna4" || arch == "cdna5";
           const uint32_t wave_size = cdna_legacy ? 64 : 32;
-          PluginFixture f(1, std::string(arch), wave_size, cdna_legacy ? 104 : 128);
+          PluginFixture f;
+          ASSERT_NO_FATAL_FAILURE(
+              f.initialize(1, std::string(arch), wave_size, cdna_legacy ? 104 : 128));
           auto *observer = f.attach_memory_observation_plugin();
           auto *cu = f.cu();
           constexpr uint64_t shared = 0x0001'0000'0000'0000ULL;
@@ -7274,8 +7396,9 @@ TEST(ExecutionPluginTest, MemoryPipelineFlatCountersFollowRoutedRequests) {
 }
 
 TEST(RaceDetectorPluginTest, NamedLgkmcntWaitRetiresSplitScalarEvent) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"rdna3", /*wavefront_size=*/32,
-                  /*sgprs_per_wf=*/128);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna3", /*wavefront_size=*/32,
+                                       /*sgprs_per_wf=*/128));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -7313,7 +7436,8 @@ TEST(ExecutionPluginTest, F64SourceReadObservationReportsBothHalves) {
     return;
   } else {
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -7366,7 +7490,8 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
   } else {
     ForceScalarOverride force_simd(false);
     amdgpu::fp_mode::detail::ScopedFenv floating_environment(0);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -7394,7 +7519,8 @@ TEST(ExecutionPluginTest, Vop3FmacSimdReadObservationReportsAccumulator) {
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -7415,7 +7541,8 @@ TEST(ExecutionPluginTest, MfmaReadObservationUsesLaneMasks) {
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -7435,7 +7562,8 @@ TEST(ExecutionPluginTest, MfmaReadObservationSkipsConstantAccumulator) {
 }
 
 TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaAbidZeroPrefixRejectsBeforeExecuteCallbacks) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   const auto scale = make_cdna4_mfma_scale_words(45, /*abid=*/0, vgpr_src(96), vgpr_src(97));
   const std::array<uint32_t, 5> code = {scale[0], scale[1], scale[2], scale[3], S_ENDPGM};
@@ -7450,7 +7578,8 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaAbidZeroPrefixRejectsBeforeExecuteC
 }
 
 TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaCompoundAdvancesCallbacksByFullPrefixSize) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   const auto scale = make_cdna4_mfma_scale_words(45, /*abid=*/1, vgpr_src(96), vgpr_src(97));
   const std::array<uint32_t, 5> code = {scale[0], scale[1], scale[2], scale[3], S_ENDPGM};
@@ -7476,7 +7605,8 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaScaleReadsUseSelectedByteMask) {
   constexpr uint32_t kScaleB = 97;
 
   for (uint32_t byte = 0; byte < 4; ++byte) {
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -7538,7 +7668,8 @@ TEST(ExecutionPluginTest, Cdna4BlockScaleMfmaInlineScalesDoNotReadVgprs) {
   constexpr uint32_t kSrc1 = 16;
   constexpr uint32_t kAccumulator = 32;
 
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_ordering_plugin();
   auto *cu = f.cu();
   auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -7739,7 +7870,8 @@ TEST(ExecutionPluginTest, WmmaBf16F32FastPathReadsBeforePackedWrites) {
 }
 
 TEST(ExecutionPluginTest, MfmaReadObservationReportsRace) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<MfmaRacePlugin>();
   auto *race_plugin = plugin.get();
@@ -7780,7 +7912,8 @@ TEST(ExecutionPluginTest, MfmaF32NativeWidthFastPathUsesRegionReads) {
       GTEST_SKIP() << "f32 MFMA shape is not divisible by the native SIMD width";
 
     ForceScalarOverride force_simd(false);
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     auto *plugin = f.attach_ordering_plugin();
     auto *cu = f.cu();
     auto *wf = cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/256);
@@ -7816,7 +7949,8 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
     } force_scalar_guard;
     util::set_force_scalar_for_testing(false);
 
-    PluginFixture f(/*num_wf_slots=*/1);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
     f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     auto plugin = std::make_unique<MfmaRacePlugin>();
     auto *race_plugin = plugin.get();
@@ -7854,6 +7988,7 @@ TEST(ExecutionPluginTest, MfmaFastPathReadHookReportsRace) {
 
 TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
   PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize());
   auto *plugin = f.attach_ordering_plugin();
 
   constexpr uint32_t process_id = 123;
@@ -7931,8 +8066,10 @@ TEST(ExecutionPluginTest, DispatchPacketNameResolvesForVmidMappedCodeObject) {
 
 TEST(ExecutionPluginTest, HotHookSerializationDoesNotSetCpuDispatchPolicy) {
   {
-    PluginFixture f(/*num_wf_slots=*/10, /*arch=*/"cdna4", /*wavefront_size=*/64,
-                    /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_cus=*/8);
+    PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(
+        f.initialize(/*num_wf_slots=*/10, /*arch=*/"cdna4", /*wavefront_size=*/64,
+                     /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_cus=*/8));
     f.soc->set_dispatch_threads(8);
     auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     pg->add(std::make_unique<SerialHotHookPlugin>());
@@ -7943,6 +8080,7 @@ TEST(ExecutionPluginTest, HotHookSerializationDoesNotSetCpuDispatchPolicy) {
   }
   {
     PluginFixture f;
+    ASSERT_NO_FATAL_FAILURE(f.initialize());
     auto pg = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
     pg->add(std::make_unique<ParallelSafePlugin>());
     f.soc->set_plugin_group(pg);
@@ -7960,6 +8098,7 @@ TEST(ExecutionPluginTest, HotHookSerializationDoesNotSetCpuDispatchPolicy) {
 
 TEST(HookOrderingTest, BarrierTwoWaves) {
   PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize());
   auto *p = f.attach_ordering_plugin();
   const uint32_t code[] = {S_BARRIER, S_ENDPGM};
   f.run_kernel(code, 2, /*grid=*/128, /*workgroup=*/128);
@@ -7978,6 +8117,7 @@ TEST(HookOrderingTest, BarrierTwoWaves) {
 
 TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalRegisterBlockSizes) {
   PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize());
   auto *p = f.attach_ordering_plugin();
   const uint32_t code[] = {S_ENDPGM};
   constexpr uint32_t kGranulatedSgprCount = 3; // Requests 32 SGPRs on CDNA4.
@@ -7994,7 +8134,8 @@ TEST(HookOrderingTest, WorkgroupDispatchedReportsPhysicalRegisterBlockSizes) {
 }
 
 TEST(HookOrderingTest, BeforeInstructionExposesMemoryIssueBeforeOperandReadsAndRouting) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *p = f.attach_ordering_plugin();
   const auto load =
       cdna4::build_smem(cdna4::kSLoadDwordSmem, {.sbase = 0, .sdata = 4, .imm = 1, .offset = 0});
@@ -8145,7 +8286,8 @@ TEST(InstructionMetadataTest, CounterObligationPackingRoundTrips) {
 }
 
 TEST(HookOrderingTest, UniformLdsFlatPreservesPreAndPostRoutingViews) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *plugin = f.attach_memory_observation_plugin();
   auto *cu = f.cu();
 
@@ -8182,7 +8324,8 @@ TEST(HookOrderingTest, UniformLdsFlatPreservesPreAndPostRoutingViews) {
 // every non-terminator retains a matched BEFORE/AFTER pair. This pins the guard
 // that prevents hooks/logging from touching a freed register slot.
 TEST(HookOrderingTest, TerminatorEmitsBeforeButNotAfterInstruction) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *p = f.attach_ordering_plugin();
   // Two non-terminators then the terminator, so the sequence exercises matched
   // BEFORE/AFTER pairs and the terminator's asymmetry in one run.
@@ -8222,7 +8365,8 @@ TEST(HookOrderingTest, TerminatorEmitsBeforeButNotAfterInstruction) {
 }
 
 TEST(HookOrderingTest, FiveDispatchLifecycle) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *p = f.attach_ordering_plugin();
 
   // 3 distinct kernels.
@@ -8335,7 +8479,8 @@ TEST(HookOrderingTest, FiveDispatchLifecycle) {
 }
 
 TEST(HookOrderingTest, NonKernelQueueEntriesDoNotEmitDispatchLifecycleHooks) {
-  PluginFixture f(/*num_wf_slots=*/1);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/1));
   auto *p = f.attach_ordering_plugin();
 
   const uint32_t code[] = {S_ENDPGM};
@@ -8363,8 +8508,9 @@ TEST(HookOrderingTest, NonKernelQueueEntriesDoNotEmitDispatchLifecycleHooks) {
 }
 
 TEST(HookOrderingTest, ParallelWorkgroupLifecycleRunsOnCommandProcessorAfterWorkersRejoin) {
-  PluginFixture f(/*num_wf_slots=*/2, "cdna4", /*wavefront_size=*/64,
-                  /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_cus=*/2);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(f.initialize(/*num_wf_slots=*/2, "cdna4", /*wavefront_size=*/64,
+                                       /*sgprs_per_wf=*/104, /*vgprs_per_wf=*/256, /*num_cus=*/2));
   auto group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
   auto plugin = std::make_unique<ParallelColdHookRecorder>();
   auto *recorder = plugin.get();
@@ -8642,7 +8788,9 @@ TEST(RaceDetectorPluginOutputTest, DispatchLineUsesReadableNameAndExactSymbol) {
 }
 
 TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -8691,7 +8839,9 @@ TEST(RaceDetectorPluginTest, DroppedAsyncLdsLaneDoesNotCreateLowAddressRace) {
 }
 
 TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
-  PluginFixture f(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/2, /*arch=*/"cdna5", /*wavefront_size=*/32));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -8742,7 +8892,9 @@ TEST(RaceDetectorPluginTest, RejectedAsyncGlobalLaneDoesNotCreateLdsRace) {
 class IgnoredGlobalMemoryRaceTest : public ::testing::TestWithParam<AtomicOp> {};
 
 TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -8777,7 +8929,9 @@ TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotCreateDestinationRace) {
 }
 
 TEST_P(IgnoredGlobalMemoryRaceTest, DoesNotConsumeVmcntOrderingSlot) {
-  PluginFixture f(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32);
+  PluginFixture f;
+  ASSERT_NO_FATAL_FAILURE(
+      f.initialize(/*num_wf_slots=*/1, /*arch=*/"cdna5", /*wavefront_size=*/32));
   PluginSinkConfig sink_config;
   StringSink &sink = sink_config.emplace<StringSink>();
   f.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -8882,6 +9036,7 @@ TEST(ExecutionPluginGroupTest, OwnsFileSinkThroughPluginDestruction) {
 
 TEST(RoutedMemoryObservationTest, AScalarAccessCarriesItsFullIdentity) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf_at(/*wf_id=*/3, /*wg_id=*/17, /*pc=*/0x240,
@@ -8937,6 +9092,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
   // counter changed. An observer that looked before routing would charge it
   // against the vector cache, at an address the memory system never uses.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1000'0000;
@@ -8989,6 +9145,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessToTheSharedApertureIsSeenAsTheLdsAc
 
 TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1234'0000'0000'0000;
@@ -9043,6 +9200,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessSeparatesDdsFromLdsLanes) {
 
 TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLaneIsGlobal) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1000'0000;
@@ -9091,6 +9249,7 @@ TEST(RoutedMemoryObservationTest, AFlatAccessRetainsPerLaneLdsRoutingWhenFirstLa
 
 TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   constexpr uint64_t kSharedBase = 0x1000'0000;
@@ -9123,7 +9282,8 @@ TEST(RoutedMemoryObservationTest, AnExplicitGlobalAccessIgnoresTheSharedAperture
 
 TEST(RoutedMemoryObservationTest, DecodedDirectLdsLoadsReportBroadcastMaskAndWidth) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
-    PluginFixture fixture(1, arch, 32);
+    PluginFixture fixture;
+    ASSERT_NO_FATAL_FAILURE(fixture.initialize(1, arch, 32));
     auto *plugin = fixture.attach_memory_observation_plugin();
     auto *cu = fixture.cu();
     // Seed the whole stream before the CU fills its instruction cache.
@@ -9168,7 +9328,8 @@ TEST(RaceDetectorPluginTest, DecodedDirectLdsLoadsDetectConflictingWaveStores) {
   for (auto arch : {"rdna3", "rdna3_5", "rdna4"}) {
     for (uint32_t store_address : {16u, 20u}) {
       SCOPED_TRACE(testing::Message() << arch << ',' << store_address);
-      PluginFixture fixture(2, arch, 32);
+      PluginFixture fixture;
+      ASSERT_NO_FATAL_FAILURE(fixture.initialize(2, arch, 32));
       PluginSinkConfig sink_config;
       auto &sink = sink_config.emplace<StringSink>();
       fixture.plugin_group_ = std::make_shared<ExecutionPluginGroup>(std::move(sink_config));
@@ -9211,6 +9372,7 @@ TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormaliz
   // The counterpart to the case above: a consumer separating "traffic that is
   // really LDS" from "traffic rewritten into LDS" needs the two to differ.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/5, /*pc=*/0x400, /*sgprs=*/104, /*vgprs=*/256);
@@ -9252,6 +9414,7 @@ TEST(RoutedMemoryObservationTest, AnLdsAccessThatWasAlwaysLdsIsNotMarkedNormaliz
 
 TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPolicy) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf_at(/*wf_id=*/2, /*wg_id=*/11, /*pc=*/0x380,
@@ -9305,6 +9468,7 @@ TEST(RoutedMemoryObservationTest, AGlobalAtomicReportsItsOperationScratchAndPoli
 
 TEST(RoutedMemoryObservationTest, DedicatedScratchIsDistinctFromFlatScratch) {
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x3C0, /*sgprs=*/104, /*vgprs=*/256);
@@ -9339,6 +9503,7 @@ TEST(RoutedMemoryObservationTest, ANonScratchAccessReportsNoSwizzleStride) {
   // scratch_addr_stride is left set by whatever last used the state, so the
   // observation has to gate it on the swizzle flag rather than copy it.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x500, /*sgprs=*/104, /*vgprs=*/256);
@@ -9368,7 +9533,9 @@ TEST(RoutedMemoryObservationTest, TheLaneCountIsTheWavefrontsOwn) {
   // VectorMemState's wf_size defaults to 64 whatever the target, so a
   // wave32 access would otherwise be reported with thirty-two lanes of
   // whatever the array happened to hold.
-  PluginFixture fixture(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32);
+  PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(
+      fixture.initialize(/*num_wf_slots=*/1, /*arch=*/"rdna4", /*wavefront_size=*/32));
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/5, /*pc=*/0x440, /*sgprs=*/104, /*vgprs=*/256);
@@ -9400,6 +9567,7 @@ TEST(RoutedMemoryObservationTest, ATransposeLoadRequestsFromFewerLanesThanItFill
   // through the low half, so a model that charged traffic per valid lane would
   // double it. Its effective all-lane execution must not erase incoming EXEC.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x700, /*sgprs=*/104, /*vgprs=*/256);
@@ -9430,6 +9598,7 @@ TEST(RoutedMemoryObservationTest, TheTransposeRequestMaskUsesTheWavefrontsWidth)
   // routing, so it can still hold whatever the last user left. The wavefront
   // is the authority; the state is not.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x740, /*sgprs=*/104, /*vgprs=*/256);
@@ -9457,6 +9626,7 @@ TEST(RoutedMemoryObservationTest, PerElementBoundsAndCachePolicyAreCarried) {
   // not moves fewer bytes than its element count suggests, and the cache
   // policy decides which levels it even touches. Both travel with the access.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x780, /*sgprs=*/104, /*vgprs=*/256);
@@ -9494,6 +9664,7 @@ TEST(RoutedMemoryObservationTest, ASingleAccessCarriesNoSecondAddressSet) {
   // an empty second set rather than a stale array of zeroes, which a consumer
   // would otherwise take for sixty-four accesses to address zero.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/1, /*pc=*/0x7C0, /*sgprs=*/104, /*vgprs=*/256);
@@ -9521,6 +9692,7 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   // plugin that never implements the hook -- which is every plugin in the tree
   // but one -- should not be charged for it.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *ordering = fixture.attach_ordering_plugin();
   ASSERT_NE(ordering, nullptr);
   EXPECT_FALSE(fixture.plugin_group().observes_memory_routing());
@@ -9537,6 +9709,7 @@ TEST(RoutedMemoryObservationTest, APluginThatDoesNotWantTheHookDoesNotPayForIt) 
   // this, deleting the guard and building an observation for every memory
   // instruction would pass the whole suite.
   PluginFixture declining;
+  ASSERT_NO_FATAL_FAILURE(declining.initialize());
   auto *quiet = declining.attach_memory_observation_plugin(/*wants_hook=*/false);
   EXPECT_FALSE(declining.plugin_group().observes_memory_routing());
   auto *cu = declining.cu();
@@ -9580,6 +9753,7 @@ TEST(RoutedMemoryObservationTest, AnUnroutableAccessIsReportedRatherThanDropped)
   // model counting a kernel's memory traffic has to be able to see that there
   // was an access it cannot account for.
   PluginFixture fixture;
+  ASSERT_NO_FATAL_FAILURE(fixture.initialize());
   auto *plugin = fixture.attach_memory_observation_plugin();
   auto *cu = fixture.cu();
   auto *wave = cu->dispatch_wf(/*wg_id=*/2, /*pc=*/0x600, /*sgprs=*/104, /*vgprs=*/256);
