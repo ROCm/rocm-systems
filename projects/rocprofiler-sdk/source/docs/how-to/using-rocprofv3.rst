@@ -954,6 +954,10 @@ Kernel counter collection
 
 The application tracing functionality allows you to evaluate the duration of kernel execution but is of little help in providing insight into kernel execution details. The kernel counter collection functionality allows you to select kernels for profiling and choose the basic counters or derived metrics to be collected for each kernel execution, thus providing a greater insight into kernel execution.
 
+.. note::
+
+   Counter collection with the ``--pmc`` option runs one kernel at a time on the hardware, which can change kernel timings and overlap. For details, see :ref:`rocprofv3-profiling-overhead`.
+
 AMDGPUs are equipped with hardware performance counters that can be used to measure specific values during kernel execution, which are then exported from the GPU and written into the output files at the end of the kernel execution. These performance counters vary according to the GPU. Therefore, it is recommended to examine the hardware counters that can be collected before running the profile.
 
 There are two types of data available for profiling: hardware basic counters and derived metrics.
@@ -1315,6 +1319,21 @@ Here is the same sample in JSON format:
          }
       ]
    }
+
+.. _rocprofv3-profiling-overhead:
+
+Profiling overhead
+------------------
+
+Profiling changes the timing of the application that it measures:
+
+* Counter collection with the ``--pmc`` option uses the dispatch counting service, which allows only a single kernel to execute on the hardware at a time (:ref:`rocprofiler_sdk_counter_collection_services`). Kernels that run concurrently without the profiler, for example on different HIP streams, run sequentially during counter collection. Kernel timings and overlap observed under ``--pmc`` can differ from an unprofiled run.
+* Profiling can add wall-clock time to each kernel dispatch. When an application launches many short kernels back to back, kernel tracing can add several microseconds per dispatch, and counter collection can add tens of microseconds per dispatch. For kernels that run for only a few microseconds, the added time can exceed the kernel duration.
+* Host-trap PC sampling also slows kernels down while they run. The slowdown depends on the kernel and on the sampling interval, and it can be larger than the kernel's unprofiled duration.
+
+The added time can also depend on the GPU and the ROCm version.
+
+To decide between application configurations, such as kernel variants, launch parameters, or streams, measure the elapsed time without the profiler; use ``rocprofv3`` to explain the difference. When you compare profiled runs, compare the elapsed time of the profiled region rather than the sum of kernel durations: when kernels overlap, the sum of their durations can exceed the elapsed time.
 
 Perfetto visualization
 -----------------------
