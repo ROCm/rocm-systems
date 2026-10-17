@@ -1,6 +1,6 @@
 // MIT License
 //
-// Copyright (c) 2023-2025 Advanced Micro Devices, Inc. All rights reserved.
+// Copyright (c) 2023-2026 Advanced Micro Devices, Inc. All rights reserved.
 //
 // Permission is hereby granted, free of charge, to any person obtaining a copy
 // of this software and associated documentation files (the "Software"), to deal
@@ -65,6 +65,7 @@ constexpr unsigned HIP_FAT_MAGIC_HIPK = 0x4B504948;  // HIPK
 struct hip_register_data
 {
     const void*                    fat_binary               = nullptr;
+    void**                         fat_binary_modules       = nullptr;
     hip_host_function_map_t        host_function_map        = {};
     kernel_symbol_hip_device_map_t kernel_symbol_device_map = {};
 };

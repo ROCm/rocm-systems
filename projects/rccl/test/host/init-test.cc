@@ -9344,6 +9344,7 @@ struct Tr_AllGatherInfo {
   int localRanks;
   int nc;
   int romeTopoModelIdx;
+  int treeCompact;
   bool pivotA2AEnabled;
   bool ll128Enabled;
   char hostname[128];
