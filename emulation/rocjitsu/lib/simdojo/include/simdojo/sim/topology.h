@@ -166,7 +166,9 @@ public:
   /// @param name Human-readable domain name.
   /// @param frequency_hz Clock frequency in Hz.
   /// @param phase_offset Phase offset in simulation ticks.
-  /// @returns Pointer to the created ClockDomain.
+  /// @returns Pointer to the created ClockDomain, owned by this topology.
+  /// @throws std::invalid_argument if the frequency is zero or above the tick
+  ///         resolution, or if the phase leaves no representable first edge.
   ClockDomain *add_clock_domain(std::string name, uint64_t frequency_hz, Tick phase_offset = 0);
 
   /// @brief Return the list of registered clock domains.
