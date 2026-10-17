@@ -30,12 +30,14 @@
 ///     negative normal with the smallest exponent gives -0 on gfx1201, gfx1100,
 ///     gfx1030 and gfx1010, where finish_f64 gives +0. Migrating them must also
 ///     apply FMA tininess before rounding.
-///   - Other SDWA F16 producers (dpp_sdwa_ops.h): separate arithmetic and
-///     rounded-TRANS helpers that keep the emulator's scaling before narrowing.
-///     gfx1030 SDWA captures contradict that order: MUL_F16 with inputs 0x3e00
-///     and 0x7bff, div:2, MODE=0 and IEEE=0 gives 0x7c00 through SDWA and VOP3,
-///     where the emulator's SDWA path returns 0x79ff. Migrating these producers
-///     needs SDWA captures of each.
+///   - Other SDWA F16 producers (dpp_sdwa_ops.h):
+///     - Arithmetic keeps the emulator's scaling before rounding. gfx1030 SDWA
+///       captures contradict it: with div:2, MODE=0 and IEEE=0, MUL_F16
+///       0x3e00 * 0x7bff and ADD_F16 0x7bff + 0x7bff give 0x7c00 through SDWA
+///       and VOP3, where the emulator's SDWA path returns 0x79ff and 0x7bff.
+///     - TRANS scales its rounded half through a separate helper, and other
+///       producers scale before narrowing; no SDWA captures cover either.
+///     Migrating these producers needs SDWA captures of each.
 /// - Intentional exception:
 ///   - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
 ///     rounding; match gfx1201 captures.

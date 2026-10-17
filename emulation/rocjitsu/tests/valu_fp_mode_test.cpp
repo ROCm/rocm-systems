@@ -2933,13 +2933,25 @@ ArithmeticCase unary_case(const UnaryForm &form, const UnaryLane &lane) {
     }
   }
   static constexpr const char *kEncodingNames[] = {"Vop1", "Vop1High", "Vop3", "Vop3High"};
+  // F16 VOP1 runs on the tracked word path and VOP3 forms run scalar. F32/F64
+  // VOP1 SIMD paths are not instrumented, so those cases assert nothing.
+  const bool vop3 =
+      lane.encoding == UnaryEncoding::Vop3 || lane.encoding == UnaryEncoding::Vop3High;
+  SimdPathExpectation simd{};
+  if (vop3)
+    simd = expect_simd_fallback();
+  else if (form.width == 16)
+    simd = expect_simd_path(amdgpu::SimdFastPath::VOP_WORDS);
   return {std::string(form.name) + kEncodingNames[static_cast<int>(lane.encoding)] + lane.name,
           ROCJITSU_CODE_ARCH_RDNA4,
           words,
           std::move(sources),
           std::move(expected),
           lane.mode,
-          FE_TONEAREST};
+          FE_TONEAREST,
+          0,
+          0,
+          simd};
 }
 
 // MODE values of one format's fields; the other format's fields differ, so
@@ -3118,8 +3130,10 @@ std::vector<ArithmeticCase> ldexp_f16_cases() {
 // agree bit for bit for every OMOD. OMOD applies only with IEEE=0 and F16
 // output denormals flushed (MODE 0); the operation rounds first, so LDEXP
 // overflows before div:2 and flushes 2^-15 before mul:2. A halved negative
-// minimum normal stays -0. Sources select WORD_0 of registers whose upper
-// halves hold 0x5a5a; the destination preserves its upper half.
+// minimum normal stays -0. Setting IEEE (0x200) or keeping F16 output denormals
+// (0x80) disables OMOD, and with it LDEXP's flush of a tiny result. Sources
+// select WORD_0 of registers whose upper halves hold 0x5a5a; the destination
+// preserves its upper half.
 std::vector<ArithmeticCase> sdwa_f16_cases() {
   struct Lane {
     const char *name;
@@ -3141,6 +3155,12 @@ std::vector<ArithmeticCase> sdwa_f16_cases() {
            Lane{"LdexpF16HalvesToNegativeZero", kLdexpDiv2, 4, 0x8400u, 0u, 0x000u, 0x8000u},
            Lane{"FractF16CappedThenDoubled", kFractMul2, 10, 0x8400u, 0u, 0x000u, 0x3fffu},
            Lane{"FractF16IgnoresOmodWithIeee", kFractMul2, 10, 0x8400u, 0u, 0x200u, 0x3bffu},
+           Lane{"FractF16IgnoresOmodWithOutputKept", kFractMul2, 10, 0x8400u, 0u, 0x080u, 0x3bffu},
+           Lane{"LdexpF16IgnoresHalvingWithIeee", kLdexpDiv2, 4, 0x8400u, 0u, 0x200u, 0x8400u},
+           Lane{"LdexpF16IgnoresHalvingWithOutputKept", kLdexpDiv2, 4, 0x8400u, 0u, 0x080u,
+                0x8400u},
+           Lane{"LdexpF16KeepsTinyWithOutputKept", kLdexpMul2, 2, 0x3c00u, 0xfff1u, 0x080u,
+                0x0200u},
        })
     cases.push_back({std::string("Sdwa") + lane.name,
                      ROCJITSU_CODE_ARCH_RDNA2,
