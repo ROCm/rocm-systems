@@ -908,8 +908,8 @@ inline double arithmetic_f16(float lhs, float rhs, float addend, uint32_t round_
 
 /// @brief Round an F16 arithmetic destination and apply output-denormal policy.
 /// @details Migrated VOP3 callers leave omod=0 and modify the rounded bits
-/// afterward. SDWA supplies omod here to retain legacy pre-round scaling, which
-/// has no SDWA hardware validation. Its migration requires separate captures.
+/// afterward. SDWA supplies omod here to keep the emulator's pre-round scaling,
+/// which gfx1030 SDWA captures contradict; see output_modifier.h.
 inline uint16_t finish_arithmetic_f16(double value, uint32_t round_mode, uint32_t denorm_mode,
                                       bool fp16_ovfl, uint32_t omod = 0) {
   detail::ScopedFenv environment(0);

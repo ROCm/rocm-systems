@@ -1064,12 +1064,12 @@ class CodeGenerator:
     def _apply_sdwa_f16_omod(
         body: str, instruction: str, *, transcendental: bool = False
     ) -> str:
-        """Retain the producer's legacy SDWA F16 OMOD ordering.
+        """Keep the producer's current SDWA F16 OMOD ordering.
 
         TRANS producers already return rounded halves; ordinary producers scale
         before narrowing. Arithmetic producers retain their MODE-aware helper.
-        This ordering lacks SDWA hardware validation; VOP3 captures do not
-        establish it. Migrating SDWA requires separate capture evidence.
+        gfx1030 SDWA captures round before OMOD; SDWA_ROUNDED_F16_OPS follow
+        that order and the rest await their own captures.
         """
         helper = 'finish_rounded_f16' if transcendental else 'round_f16_result'
         body = body.replace(
