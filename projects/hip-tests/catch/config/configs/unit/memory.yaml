@@ -359,6 +359,11 @@ memory:
   Unit_hipMemcpy_DynamicQueueChurn_StagedCopies:
     <<: *level_default
     tags: [multigpu, transfer]
+  Unit_hipMemcpy_OrderedAfterEventRecord:
+    <<: *level_2
+    # Calibrates against a device busy-loop; ASAN instrumentation skews the timing
+    disabled: [asan]
+    tags: [transfer]
   Unit_hipHostRegister_ReferenceFromKernelandhipMemset:
     <<: *level_default
     # disabling due to flaky segfault in CI nightly https://github.com/ROCm/TheRock/issues/4111

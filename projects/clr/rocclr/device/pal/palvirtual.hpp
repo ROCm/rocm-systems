@@ -564,9 +564,17 @@ class VirtualGPU : public device::VirtualDevice {
 
   //! Waits for idle on compute engine
   void WaitForIdleCompute() {
-    if (events_[MainEngine].isValid()) {
-      queues_[events_[MainEngine].engineId_]->waitForEvent(events_[MainEngine].id_);
+    // Prefer the live MainEngine event; fall back to the last compute submission
+    // that flush() may have already cleared (e.g. after a hipEventRecord marker is
+    // submitted between a kernel and a copy), so an SDMA copy still orders behind
+    // the compute work rather than racing it (rocm-systems #12571).
+    GpuEvent* evt = events_[MainEngine].isValid()
+                        ? &events_[MainEngine]
+                        : (lastComputeEvent_.isValid() ? &lastComputeEvent_ : nullptr);
+    if (evt != nullptr) {
+      queues_[evt->engineId_]->waitForEvent(evt->id_);
       events_[MainEngine].invalidate();
+      lastComputeEvent_.invalidate();
     }
   }
 
@@ -702,6 +710,8 @@ class VirtualGPU : public device::VirtualDevice {
 
   State state_;                  //!< virtual GPU current state
   GpuEvent events_[AllEngines];  //!< Last known GPU events
+  GpuEvent lastComputeEvent_;    //!< Last compute submission; survives flush() so an
+                                 //!< SDMA copy still orders behind it (rocm-systems #12571)
 
   uint64_t readjustTimeGPU_;  //!< Readjust time between GPU and CPU timestamps
   TimeStamp* lastTS_;         //!< Last timestamp executed on Virtual GPU
