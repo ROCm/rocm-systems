@@ -1094,8 +1094,13 @@ void DmaBlitManager::releaseBuffer(BufferState& buffer) const {
 bool DmaBlitManager::hsaCopyStagedOrPinned(const_address hostSrc, address hostDst, size_t size,
                                            bool hostToDev, amd::CopyMetadata& copyMetadata,
                                            bool enablePin) const {
-  // Do not skip wait here for D2H. Resolving dependent signals for SDMA engine is slow
-  gpu().releaseGpuMemoryFence(hostToDev || !dev().settings().blocking_blit_);
+  // H2D with staging on unified-memory APUs does a CPU memcpy from hostSrc into a staging
+  // buffer.  Skipping the CPU wait there races with any pending host-function callback that
+  // writes to the source buffer (e.g. hipLaunchHostFunc captured before an H2D in a graph).
+  // Do not skip wait here for D2H either — resolving dependent signals for SDMA engine is slow.
+  bool skip_wait = hostToDev ? !dev().info().hostUnifiedMemory_
+                             : !dev().settings().blocking_blit_;
+  gpu().releaseGpuMemoryFence(skip_wait);
   // If Pinning is enabled, Pin host Memory for copy size > MinSizeForPinnedTransfer
   // For 16KB < size <= MinSizeForPinnedTransfer Use staging buffer without pinning
   bool status = true;
