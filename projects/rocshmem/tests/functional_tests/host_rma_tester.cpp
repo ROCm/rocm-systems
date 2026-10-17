@@ -24,10 +24,54 @@
 
 #include "host_rma_tester.hpp"
 
+#include <chrono>
+#include <cstdlib>
+#include <cstdio>
 #include <iostream>
 #include <rocshmem/rocshmem.hpp>
 
 using namespace rocshmem;
+
+namespace {
+/*
+ * Optional host-side benchmark for the host-initiated RMA path (put/get),
+ * gated by ROCSHMEM_HOST_BENCH=1 so the default correctness behavior is
+ * unchanged. Times `loop` blocking ops on the initiator with a host clock and
+ * prints one latency/bandwidth row per message size (comparable across
+ * transports: unset vs ROCSHMEM_HOST_TRANSPORT=verbs, and across backends).
+ */
+void host_bench_rma(void* dst, void* src, size_t size, int loop, int peer,
+                    bool is_put) {
+  constexpr int kWarmup = 8;
+  for (int i = 0; i < kWarmup; i++) {
+    if (is_put) rocshmem_putmem(dst, src, size, peer);
+    else        rocshmem_getmem(dst, src, size, peer);
+  }
+  rocshmem_quiet();
+
+  auto t0 = std::chrono::high_resolution_clock::now();
+  for (int i = 0; i < loop; i++) {
+    if (is_put) rocshmem_putmem(dst, src, size, peer);
+    else        rocshmem_getmem(dst, src, size, peer);
+  }
+  rocshmem_quiet();
+  auto t1 = std::chrono::high_resolution_clock::now();
+
+  double us = std::chrono::duration<double, std::micro>(t1 - t0).count();
+  double lat = us / loop;
+  double bw_gbs = (static_cast<double>(size) * loop) / (us / 1e6) / (1024.0 * 1024.0 * 1024.0);
+
+  static bool header = false;
+  if (!header) {
+    printf("%-15s%-15s%*s%*s%*s\n", "# Msg Size (B)", "# Msgs", 18,
+           "Latency (us)", 20, "Bandwidth (GB/s)", 20, "Msg Rate (Msg/s)");
+    header = true;
+  }
+  printf("%-15zu%-15d%*.2f%*.2f%*.0f\n", size, loop, 18, lat, 20, bw_gbs, 20,
+         loop / (us / 1e6));
+  fflush(stdout);
+}
+}  // namespace
 
 HostRmaTester::HostRmaTester(TesterArguments args) : Tester(args) {
   my_pe = rocshmem_my_pe();
@@ -39,6 +83,11 @@ HostRmaTester::HostRmaTester(TesterArguments args) : Tester(args) {
   amo_buf     = reinterpret_cast<long *>(alloc_test_buffer(sizeof(long)));
   amo_int_buf = reinterpret_cast<int  *>(alloc_test_buffer(sizeof(int)));
   wait_buf    = reinterpret_cast<long *>(alloc_test_buffer(WAIT_NELEMS * sizeof(long)));
+
+  // Host RMA is CPU-driven, so the base GPU-cycle-timer table is meaningless
+  // (prints inf/0). Suppress it; the ROCSHMEM_HOST_BENCH path prints its own
+  // host-timed table instead.
+  _print_results = false;
 }
 
 HostRmaTester::~HostRmaTester() {
@@ -77,15 +126,23 @@ void HostRmaTester::launchKernel([[maybe_unused]] dim3 gridSize,
     // -----------------------------------------------------------------------
     case HostPutmemTestType:
       if (my_pe == 0) {
-        rocshmem_putmem(dest_buf, source_buf, size, peer);
-        rocshmem_fence();
+        if (getenv("ROCSHMEM_HOST_BENCH")) {
+          host_bench_rma(dest_buf, source_buf, size, loop, peer, /*is_put=*/true);
+        } else {
+          rocshmem_putmem(dest_buf, source_buf, size, peer);
+          rocshmem_fence();
+        }
       }
       break;
 
     case HostGetmemTestType:
       if (my_pe == 0) {
-        rocshmem_getmem(dest_buf, source_buf, size, peer);
-        rocshmem_quiet();
+        if (getenv("ROCSHMEM_HOST_BENCH")) {
+          host_bench_rma(dest_buf, source_buf, size, loop, peer, /*is_put=*/false);
+        } else {
+          rocshmem_getmem(dest_buf, source_buf, size, peer);
+          rocshmem_quiet();
+        }
       }
       break;
 
