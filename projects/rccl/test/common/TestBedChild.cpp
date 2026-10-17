@@ -160,6 +160,7 @@ namespace RcclUnitTesting
       case CHILD_SET_COLL_ARGS   : status = SetCollectiveArgs();    break;
       case CHILD_ALLOCATE_MEM    : status = AllocateMem();          break;
       case CHILD_REGISTER_MEM    : status = RegisterMem();          break;
+      case CHILD_DEREGISTER_MEM  : status = DeregisterMem();        break;
       case CHILD_PREPARE_DATA    : status = PrepareData();          break;
       case CHILD_EXECUTE_COLL    : status = ExecuteCollectives();   break;
       case CHILD_VALIDATE_RESULTS: status = ValidateResults();      break;
@@ -1204,6 +1205,78 @@ namespace RcclUnitTesting
     return TEST_SUCCESS;
   }
 
+  ErrCode TestBedChild::DeregisterMem()
+  {
+    if (this->verbose) TEST_INFO("Child %d begins DeregisterMem()", this->childId);
+
+    int groupId;
+    int collId;
+    int numRanks;
+
+    PIPE_READ(groupId);
+    PIPE_READ(collId);
+    PIPE_READ(numRanks);
+
+    if (numRanks < 0)
+    {
+      TEST_ERROR("Child %d received invalid deregistration rank count %d", this->childId, numRanks);
+      return TEST_FAIL;
+    }
+
+    // Consume the complete payload before validating it so a rejected request
+    // cannot leave rank ids to be decoded as the next command.
+    std::vector<int> globalRanks(numRanks);
+    for (int& globalRank : globalRanks) PIPE_READ(globalRank);
+    if (!this->IsValidGroupId(groupId, "DeregisterMem")) return TEST_FAIL;
+
+    if (numRanks > this->totalRanks)
+    {
+      TEST_ERROR("Child %d received invalid deregistration rank count %d", this->childId, numRanks);
+      return TEST_FAIL;
+    }
+
+    std::vector<int> localRanks;
+    localRanks.reserve(numRanks);
+    for (int globalRank : globalRanks)
+    {
+      if (globalRank < this->rankOffset ||
+          this->rankOffset + static_cast<int>(this->comms.size()) <= globalRank)
+      {
+        TEST_ERROR("Child %d does not contain deregistration rank %d", this->childId, globalRank);
+        return TEST_FAIL;
+      }
+      localRanks.push_back(globalRank - this->rankOffset);
+    }
+
+    // A single child can own multiple communicator ranks. Deregister all of
+    // them in one group, mirroring RegisterMem(), before the parent allows any
+    // backing allocation to be freed.
+    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart DeregisterMem");
+    ErrCode const deregisterStatus = [&]() -> ErrCode
+    {
+      for (int localRank : localRanks)
+      {
+        CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+        CHECK_CALL(this->DeregisterMemInternal(groupId, collId, localRank));
+      }
+      return TEST_SUCCESS;
+    }();
+
+    ErrCode const groupStatus = this->EndGroup(deregisterStatus, "ncclGroupEnd DeregisterMem");
+    if (groupStatus != TEST_SUCCESS) return groupStatus;
+
+    // Complete mapping/TLB teardown before acknowledging the deregistration
+    // phase to the parent.
+    for (int localRank : localRanks)
+    {
+      CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
+      CHECK_HIP(hipDeviceSynchronize());
+    }
+
+    if (this->verbose) TEST_INFO("Child %d finishes DeregisterMem()", this->childId);
+    return TEST_SUCCESS;
+  }
+
   ErrCode TestBedChild::DeregisterMemInternal(int groupId, int collId, int localRank)
   {
     if (this->verbose) TEST_INFO("Child %d begins DeregisterMemInternal", this->childId);
@@ -1223,80 +1296,72 @@ namespace RcclUnitTesting
     }
     CHECK_HIP(hipSetDevice(this->deviceIds[localRank]));
 
-    // Enclose RCCL deregistration calls in a group for safety
-    CHILD_NCCL_CALL(ncclGroupStart(), "ncclGroupStart DeregisterMem");
-
-    ErrCode const deregisterStatus = [&]() -> ErrCode
+    for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
     {
-      for (size_t collIdx = 0; collIdx < collArgs[groupId][localRank].size(); ++collIdx)
-      {
-        CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
-        if (collId != -1 && collId != static_cast<int>(collIdx)) continue;
+      CollectiveArgs& collArg = this->collArgs[groupId][localRank][collIdx];
+      if (collId != -1 && collId != static_cast<int>(collIdx)) continue;
 
-        if (this->verbose)
+      if (this->verbose)
+      {
+         TEST_INFO("Child %d deregistering memory for collective %zu in group %d",
+                this->childId, collIdx, groupId);
+      }
+      // =====================================================================
+      // 1. Deregister Symmetric Windows (ncclCommWindowDeregister)
+      // =====================================================================
+      if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN)
+      {
+        if (collArg.inPlace)
         {
-           TEST_INFO("Child %d deregistering memory for collective %zu in group %d",
-                  this->childId, collIdx, groupId);
-        }
-        // =====================================================================
-        // 1. Deregister Symmetric Windows (ncclCommWindowDeregister)
-        // =====================================================================
-        if (this->memAllocType == MEM_ALLOC_SYMMETRIC_WIN)
-        {
-          if (collArg.inPlace)
+          // In-place mode: RegisterMem registers a single window into outputWin
+          if (collArg.outputWin != nullptr)
           {
-            // In-place mode: RegisterMem registers a single window into outputWin
-            if (collArg.outputWin != nullptr)
-            {
-              CHILD_NCCL_CALL(
-                ncclCommWindowDeregister(this->comms[localRank], collArg.outputWin),
-                "ncclCommWindowDeregister (in-place)");
-            }
+            CHILD_NCCL_CALL(
+              ncclCommWindowDeregister(this->comms[localRank], collArg.outputWin),
+              "ncclCommWindowDeregister (in-place)");
+          }
+          collArg.inputWin = nullptr;
+          collArg.outputWin = nullptr;
+        }
+        else
+        {
+          // Out-of-place mode: Distinct window handles
+          if (collArg.inputWin != nullptr)
+          {
+            CHILD_NCCL_CALL(
+              ncclCommWindowDeregister(this->comms[localRank], collArg.inputWin),
+              "ncclCommWindowDeregister (input)");
             collArg.inputWin = nullptr;
+          }
+
+          if (collArg.outputWin != nullptr)
+          {
+            CHILD_NCCL_CALL(
+             ncclCommWindowDeregister(this->comms[localRank], collArg.outputWin),
+             "ncclCommWindowDeregister (output)");
             collArg.outputWin = nullptr;
           }
-          else
-          {
-            // Out-of-place mode: Distinct window handles
-            if (collArg.inputWin != nullptr)
-            {
-              CHILD_NCCL_CALL(
-                ncclCommWindowDeregister(this->comms[localRank], collArg.inputWin),
-                "ncclCommWindowDeregister (input)");
-              collArg.inputWin = nullptr;
-            }
-
-            if (collArg.outputWin != nullptr)
-            {
-              CHILD_NCCL_CALL(
-               ncclCommWindowDeregister(this->comms[localRank], collArg.outputWin),
-               "ncclCommWindowDeregister (output)");
-              collArg.outputWin = nullptr;
-            }
-          }
-        }
-
-        // =====================================================================
-        // 2. Deregister Standard Buffers (ncclCommDeregister)
-        // =====================================================================
-        if (collArg.inputRegHandle != nullptr)
-        {
-          CHILD_NCCL_CALL(
-            ncclCommDeregister(this->comms[localRank], collArg.inputRegHandle),
-            "ncclCommDeregister");
-          collArg.inputRegHandle = nullptr;
-        }
-        if (collArg.outputRegHandle != nullptr)
-        {
-          CHILD_NCCL_CALL(
-            ncclCommDeregister(this->comms[localRank], collArg.outputRegHandle),
-            "ncclCommDeregister");
-          collArg.outputRegHandle = nullptr;
         }
       }
-      return TEST_SUCCESS;
-    }();
-    CHECK_CALL(this->EndGroup(deregisterStatus, "ncclGroupEnd DeregisterMem"));
+
+      // =====================================================================
+      // 2. Deregister Standard Buffers (ncclCommDeregister)
+      // =====================================================================
+      if (collArg.inputRegHandle != nullptr)
+      {
+        CHILD_NCCL_CALL(
+          ncclCommDeregister(this->comms[localRank], collArg.inputRegHandle),
+          "ncclCommDeregister");
+        collArg.inputRegHandle = nullptr;
+      }
+      if (collArg.outputRegHandle != nullptr)
+      {
+        CHILD_NCCL_CALL(
+          ncclCommDeregister(this->comms[localRank], collArg.outputRegHandle),
+          "ncclCommDeregister");
+        collArg.outputRegHandle = nullptr;
+      }
+    }
     if (this->verbose) TEST_INFO("Child %d finishes DeregisterMemInternal", this->childId);
     return TEST_SUCCESS;
   }
@@ -1350,11 +1415,7 @@ namespace RcclUnitTesting
     }
 
     int const localRank = globalRank - rankOffset;
-    // Free the buffers even if deregistration fails, so a pooled worker does not
-    // carry them into the next config.
-    ErrCode const deregisterStatus = this->DeregisterMemInternal(groupId, collId, localRank);
-    ErrCode const deallocateStatus = this->DeallocateMemInternal(groupId, collId, localRank);
-    return deregisterStatus != TEST_SUCCESS ? deregisterStatus : deallocateStatus;
+    return this->DeallocateMemInternal(groupId, collId, localRank);
   }
 
   ErrCode TestBedChild::DestroyComms()
