@@ -2204,7 +2204,13 @@ def marker_matches_op(op_name: str, marker_leaf: str) -> bool:
         return False
 
     if op_name.startswith("torch.ops.aten."):
-        return marker_leaf == f"aten::{op_name[len('torch.ops.aten.') :]}"
+        suffix = op_name[len("torch.ops.aten.") :]
+        packet = aten_op_short_name(op_name)
+        return marker_leaf in (
+            f"aten::{suffix}",
+            f"aten::{packet}",
+            aten_packet_call_path(op_name),
+        )
 
     if op_name.startswith("torch.Tensor."):
         method = op_name[len("torch.Tensor.") :]
