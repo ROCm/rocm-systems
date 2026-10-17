@@ -32,7 +32,11 @@ communicator and window setup. The validated AMD path is ``GIN_IB_PROXY``:
    export NCCL_GIN_TYPE=2
    export NCCL_CUMEM_ENABLE=1
    export NCCL_DMABUF_ENABLE=1
-   export NCCL_IB_MERGE_NICS=0
+
+NIC fusion does not have to be disabled, and enabling it has no effect on GIN
+either way: GIN and the host RMA proxy build no vNICs of their own and keep
+using the physical devices, so fusion aggregates bandwidth for the regular
+transport only.
 
 The ROCm runtime and NIC driver must support exporting and registering VMM
 allocations. ``NCCL_DMABUF_ENABLE=1`` is the validated registration path;

@@ -444,8 +444,12 @@ private:
 const StaticInstructionInfo &classify_instruction(uint64_t pc, const Instruction &inst,
                                                   const std::array<uint32_t, 4> &encoding,
                                                   uint32_t encoding_dwords) {
-  static thread_local StaticInstructionCache cache;
-  return cache.classify(pc, inst, encoding, encoding_dwords);
+  // The cache is 448 KiB; glibc carves static TLS out of every thread's stack,
+  // so it lives on the heap rather than in a binary that links this plugin.
+  static thread_local std::unique_ptr<StaticInstructionCache> cache;
+  if (!cache)
+    cache = std::make_unique<StaticInstructionCache>();
+  return cache->classify(pc, inst, encoding, encoding_dwords);
 }
 
 struct DispatchState {

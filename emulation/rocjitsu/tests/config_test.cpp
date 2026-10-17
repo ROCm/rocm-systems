@@ -116,7 +116,7 @@ TEST(SoCTest, SelectsSdmaPacketDialect) {
       std::pair{ROCJITSU_CODE_ARCH_RDNA2, amdgpu::SdmaPacketDialect::LegacyExtendedCount},
       std::pair{ROCJITSU_CODE_ARCH_RDNA3, amdgpu::SdmaPacketDialect::Gfx11Plus},
       std::pair{ROCJITSU_CODE_ARCH_RDNA3_5, amdgpu::SdmaPacketDialect::Gfx11Plus},
-      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Gfx11Plus},
+      std::pair{ROCJITSU_CODE_ARCH_RDNA4, amdgpu::SdmaPacketDialect::Rdna4},
   };
   for (const auto &[arch, expected] : cases) {
     SCOPED_TRACE(static_cast<int>(arch));
@@ -620,8 +620,7 @@ TEST(ConfigLoaderTest, LoadRdnaKmdConfigs) {
   EXPECT_EQ(rdna4.soc()->xcd(0)->num_shader_engines(), 4u);
   EXPECT_EQ(rdna4.soc()->xcd(0)->shader_engine(0)->num_compute_units(), 16u);
   EXPECT_TRUE(rdna4.soc()->xcd(0)->command_processor()->packed_tid());
-  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx11Plus);
+  EXPECT_EQ(rdna4.soc()->sdma_queue_scheduler().packet_dialect(), amdgpu::SdmaPacketDialect::Rdna4);
 
   auto rdna3 =
       config::load_config(CONFIG_DIR_PATH + "/gfx1100_w7900.json", rocjitsu::kEmbeddedSchema);
@@ -2344,6 +2343,42 @@ TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {
   EXPECT_EQ(restored.soc()->dispatch_threads(), 1u);
 }
 
+TEST(CApiTest, GwsWaitFailureIsReportedByStep) {
+  const auto json = functional_quantum_checkpoint_config(1, 1);
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+  auto *cu = handle->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  cu->begin_workgroup(0, 0, 1);
+  cu->set_gws_wait_limit(2);
+  cu->gws_sema_p(*wave, 0);
+  rj_status_t status = ROCJITSU_STATUS_SUCCESS;
+  int active = 123;
+  for (int i = 0; i < 100 && status == ROCJITSU_STATUS_SUCCESS; ++i)
+    status = rj_vm_step(handle.get(), &active);
+  EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
+  EXPECT_NE(handle->engine->last_exit().code, 0);
+  EXPECT_FALSE(cu->has_active_wfs());
+}
+
+TEST(CheckpointTest, RoundTripsGwsWaitLimits) {
+  auto source = config::load_config_from_string(functional_quantum_checkpoint_config(1, 1),
+                                                rocjitsu::kEmbeddedSchema);
+  auto *se = source.soc()->xcd(0)->shader_engine(0);
+  se->compute_unit(0)->set_gws_wait_limit(0);
+  se->compute_unit(1)->set_gws_wait_limit(17);
+  test::ScopedTempFile checkpoint("rocjitsu-gws-limit-");
+  config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+  EXPECT_EQ(restored_se->compute_unit(0)->config().gws_wait_limit, 0u);
+  EXPECT_EQ(restored_se->compute_unit(1)->config().gws_wait_limit, 17u);
+}
+
 TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
   const std::string json = functional_quantum_checkpoint_config(0, 0);
   auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
@@ -2445,6 +2480,53 @@ TEST(CheckpointTest, RoundTripsIndependentPerCuWaitSettings) {
   EXPECT_EQ(se->compute_unit(1)->config().memory_wait_diagnostics,
             amdgpu::MemoryWaitDiagnostics::Warn);
   EXPECT_EQ(se->compute_unit(1)->config().xcnt_diagnostics, amdgpu::MemoryWaitDiagnostics::Off);
+}
+
+TEST(CheckpointTest, PreservesCdnaSimdIdsWithSparseWaveSlots) {
+  for (const char *arch : {"cdna2", "cdna3", "cdna4"}) {
+    SCOPED_TRACE(arch);
+    std::string json = functional_quantum_checkpoint_config(7, 37);
+    json.replace(json.find("cdna3"), 5, arch);
+    auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
+    auto *source_se = source.soc()->xcd(0)->shader_engine(0);
+    struct Resident {
+      uint32_t cu, slot, simd;
+    };
+    constexpr std::array<Resident, 5> residents{
+        {{0, 1, 1}, {0, 4, 0}, {0, 7, 3}, {1, 2, 2}, {1, 5, 1}}};
+    constexpr uint16_t hw_id_simd = 4u | (4u << 6) | (1u << 11); // HW_ID[5:4].
+    for (const auto &[cu_id, slot, simd] : residents) {
+      auto *cu = source_se->compute_unit(cu_id);
+      auto *wf = cu->dispatch_wf_at(slot, cu_id * 10 + slot, 0x1000, cu->config().sgprs_per_wf,
+                                    cu->config().vgprs_per_wf);
+      ASSERT_NE(wf, nullptr);
+      uint32_t value = UINT32_MAX;
+      ASSERT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value),
+                amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, simd);
+    }
+
+    test::ScopedTempFile checkpoint_file("rocjitsu-simd-identity-");
+    config::save_checkpoint(checkpoint_file.path(), *source.soc(), 0, source.engine_config,
+                            source.cpu_dispatch_threads);
+    auto restored = config::restore_checkpoint(checkpoint_file.path());
+    auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+    for (const auto &[cu_id, slot, simd] : residents) {
+      SCOPED_TRACE(cu_id);
+      SCOPED_TRACE(slot);
+      auto *wf = restored_se->compute_unit(cu_id)->wf(slot);
+      ASSERT_NE(wf, nullptr);
+      ASSERT_FALSE(wf->is_halted());
+      EXPECT_EQ(wf->wf_id(), slot);
+      uint32_t value = UINT32_MAX;
+      EXPECT_EQ(amdgpu::read_hwreg_field(*wf, hw_id_simd, value),
+                amdgpu::HwregAccessResult::Success);
+      EXPECT_EQ(value, simd);
+    }
+    // Restoration must not compact the resident waves into different slots.
+    EXPECT_EQ(restored_se->compute_unit(0)->wf(0), nullptr);
+    EXPECT_EQ(restored_se->compute_unit(1)->wf(0), nullptr);
+  }
 }
 
 TEST(CheckpointTest, SaveAndRestoreMemory) {
@@ -2713,7 +2795,7 @@ TEST(CheckpointTest, SaveAndRestoreRdnaWave64State) {
   auto *restored_cp = restored_soc->xcd(0)->command_processor();
   ASSERT_NE(restored_cp, nullptr);
   EXPECT_EQ(restored_soc->sdma_queue_scheduler().packet_dialect(),
-            amdgpu::SdmaPacketDialect::Gfx11Plus);
+            amdgpu::SdmaPacketDialect::Rdna4);
   auto *restored_cu = restored_soc->xcd(0)->shader_engine(0)->compute_unit(0);
   ASSERT_NE(restored_cu, nullptr);
   auto *restored_wf = restored_cu->wf(0);
@@ -2880,6 +2962,35 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   EXPECT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config,
                                           loaded.cpu_dispatch_threads));
   wf->set_runtime_suspended(false);
+}
+
+TEST(CheckpointTest, RefusesToSaveParkedGwsWave) {
+  auto loaded = config::load_config_from_string(functional_quantum_checkpoint_config(1, 1),
+                                                rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  cu->begin_workgroup(0, 0, 1);
+  wf->set_exec(1);
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-gws-");
+  EXPECT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                          loaded.cpu_dispatch_threads));
+  cu->gws_init(*wf, 0, 1);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                       loaded.cpu_dispatch_threads),
+               std::runtime_error);
+  wf->gws_sema_p(0);
+  wf->gws_sema_p(0);
+  ASSERT_EQ(wf->state(), amdgpu::WfState::GWS_WAIT);
+  try {
+    config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
+                            loaded.cpu_dispatch_threads);
+    FAIL() << "a parked GWS wave must not restore as running";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("GWS resource state"), std::string::npos);
+  }
+  wf->halt();
 }
 
 // wg_coord is dispatch identity, and the flat wg_id cannot stand in for it: the

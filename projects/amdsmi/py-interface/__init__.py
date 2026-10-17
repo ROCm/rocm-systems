@@ -106,6 +106,8 @@ from .amdsmi_interface import amdsmi_get_processor_handle_from_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_bdf
 from .amdsmi_interface import amdsmi_get_gpu_device_uuid
 from .amdsmi_interface import amdsmi_get_gpu_device_cuid
+from .amdsmi_interface import amdsmi_get_gpu_cuid_info
+from .amdsmi_interface import amdsmi_get_cuid_components
 from .amdsmi_interface import amdsmi_get_gpu_enumeration_info
 
 # # Functions not dependent on ESMI library
@@ -163,6 +165,7 @@ from .amdsmi_interface import amdsmi_get_gpu_board_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_feature_info
 from .amdsmi_interface import amdsmi_get_gpu_ras_block_features_enabled
 from .amdsmi_interface import amdsmi_get_gpu_cper_entries
+from .amdsmi_interface import amdsmi_get_fabric_cper_entries
 from .amdsmi_interface import amdsmi_get_afids_from_cper
 from .amdsmi_interface import amdsmi_gpu_validate_ras_eeprom
 
@@ -262,6 +265,7 @@ from .amdsmi_interface import amdsmi_topo_get_link_weight
 from .amdsmi_interface import amdsmi_get_minmax_bandwidth_between_processors
 from .amdsmi_interface import amdsmi_get_link_metrics
 from .amdsmi_interface import amdsmi_topo_get_link_type
+from .amdsmi_interface import amdsmi_get_link_topology
 from .amdsmi_interface import amdsmi_topo_get_p2p_status
 from .amdsmi_interface import amdsmi_is_P2P_accessible
 from .amdsmi_interface import amdsmi_get_xgmi_info
@@ -333,6 +337,7 @@ from .amdsmi_interface import AmdSmiFreqInd
 from .amdsmi_interface import AmdSmiXgmiStatus
 from .amdsmi_interface import AmdSmiMemoryPageStatus
 from .amdsmi_interface import AmdSmiLinkType
+from .amdsmi_interface import AmdSmiLinkStatus
 from .amdsmi_interface import AmdSmiUtilizationCounterType
 from .amdsmi_interface import AmdSmiProcessorType
 from .amdsmi_interface import AmdSmiVirtualizationMode
@@ -347,9 +352,18 @@ from .amdsmi_interface import amdsmi_get_ttm_info
 from .amdsmi_interface import amdsmi_set_ttm_pages_limit
 from .amdsmi_interface import amdsmi_reset_ttm_pages_limit
 
+# AMPP (amdsmi power profile)
+from .amdsmi_interface import amdsmi_get_ampp_profiles
+from .amdsmi_interface import amdsmi_get_ampp_fields
+from .amdsmi_interface import amdsmi_activate_ampp_profile
+from .amdsmi_interface import amdsmi_configure_ampp_profile
+
 # # Fabric (IFoE/UALoE) Information
 from .amdsmi_interface import amdsmi_get_fabric_telemetry_data
 from .amdsmi_interface import amdsmi_get_gpu_fabric_info
+from .amdsmi_interface import amdsmi_set_gpu_fabric_ppod_config
+from .amdsmi_interface import amdsmi_set_gpu_fabric_vpod_config
+from .amdsmi_interface import amdsmi_set_gpu_fabric_station_config
 
 # Exceptions
 from .amdsmi_exception import AmdSmiLibraryException
