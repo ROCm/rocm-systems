@@ -76,10 +76,10 @@ constexpr uint64_t MIN_BUFFER_SIZE = 1 << 20;  // 1MB minimum to give the GPU ro
 
 struct cbdata_t
 {
-    rocprofiler_agent_id_t                          agent      = {.handle = 0};
-    rocprofiler_thread_trace_shader_data_callback_t cb_fn      = nullptr;
-    const rocprofiler_user_data_t*                  userdata   = nullptr;
-    uint64_t                                        next_chunk = 0;
+    rocprofiler_agent_id_t                          agent    = {.handle = 0};
+    rocprofiler_thread_trace_shader_data_callback_t cb_fn    = nullptr;
+    const rocprofiler_user_data_t*                  userdata = nullptr;
+    std::vector<uint64_t>                           next_chunks{};
 
     aqlprofile_handle_t handle{};
 };
@@ -106,7 +106,7 @@ thread_trace_callback(uint32_t shader, void* buffer, uint64_t size, void* callba
     shader_data.data             = buffer;
     shader_data.data_size        = size;
     shader_data.shader_engine_id = shader;
-    shader_data.chunk_index      = cb_data.next_chunk++;
+    shader_data.chunk_index      = cb_data.next_chunks[shader]++;
     shader_data.read_offset      = 0;
     shader_data.agent            = cb_data.agent;
     shader_data.flags            = ROCPROFILER_THREAD_TRACE_SHADER_DATA_FLAGS_END;
@@ -166,6 +166,10 @@ ThreadTracerAgent::initialize_resources()
 {
     // Subsequent starts reuse the queue and packet factory.
     ROCP_TRACE << "Constructing ATT instance for agent " << agent_id.handle;
+    const auto* agent  = CHECK_NOTNULL(rocprofiler::agent::get_agent(agent_id));
+    num_shader_engines = agent->num_shader_banks;
+    params.shader_engine_mask &= (uint64_t{1} << num_shader_engines) - 1;
+
     const bool   multi_buffer = params.num_buffers > 1;
     const size_t staging_n    = multi_buffer ? params.num_buffers : 0;
 
@@ -258,6 +262,7 @@ ThreadTracerAgent::iterate_data(aqlprofile_handle_t handle, rocprofiler_user_dat
 
     cb_dt.agent  = agent_id;
     cb_dt.handle = handle;
+    cb_dt.next_chunks.resize(num_shader_engines);
     // Walk each buffer produced by the ATT runtime and forward it to the
     // registered shader callback.
     cb_dt.cb_fn    = params.shader_cb_fn;
@@ -358,17 +363,18 @@ ThreadTracerAgent::start_thread_trace_locked()
                      << agent_id.handle;
         return nullptr;
     }
-    signal_ptr_t                               producer_signal;
-    std::unique_ptr<hsa::SQTTBufferingPackets> buffer_packet;
+    signal_ptr_t                                            producer_signal;
+    std::vector<std::unique_ptr<hsa::SQTTBufferingPackets>> buffer_packets;
     if(params.num_buffers > 1)
     {
         producer_signal = make_signal(*queue);
         if(!producer_signal) return nullptr;
-        int shader_engine_id = 0;
-        for(uint64_t mask = params.shader_engine_mask; mask > 1; mask >>= 1)
-            ++shader_engine_id;
-        buffer_packet = std::make_unique<hsa::SQTTBufferingPackets>(control_packet->GetHandle(),
-                                                                    shader_engine_id);
+        for(uint64_t i = 0; (params.shader_engine_mask >> i) != 0; i++)
+        {
+            if((params.shader_engine_mask >> i) % 2 == 1)
+                buffer_packets.emplace_back(
+                    std::make_unique<hsa::SQTTBufferingPackets>(control_packet->GetHandle(), i));
+        }
     }
     auto control_packet_copy = get_control(true);
     control_packet_copy->populate_before();
@@ -406,14 +412,15 @@ ThreadTracerAgent::start_thread_trace_locked()
         for(size_t i = 0; i < worker_data->num_buffers; i++)
             worker_data->buffers[i].memory = worker_data->queue->cpu_buffers.at(i);
 
-        auto producer_data             = triple_buffer_producer_data_t{};
-        producer_data.producer_running = worker_flag;
-        producer_data.submit_signal    = std::move(producer_signal);
-        producer_data.control_packet   = std::move(control_packet_copy);
-        producer_data.copy_data_fn     = att_queue_copy;
-        producer_data.shared           = worker_data;
-        producer_data.buffer_packet    = std::move(buffer_packet);
-        producer_data.restart_trace    = [this](auto& snapshot) {
+        auto producer_data               = triple_buffer_producer_data_t{};
+        producer_data.producer_running   = worker_flag;
+        producer_data.submit_signal      = std::move(producer_signal);
+        producer_data.control_packet     = std::move(control_packet_copy);
+        producer_data.copy_data_fn       = att_queue_copy;
+        producer_data.shared             = worker_data;
+        producer_data.num_shader_engines = num_shader_engines;
+        producer_data.buffer_packets     = std::move(buffer_packets);
+        producer_data.restart_trace      = [this](auto& snapshot) {
             auto snapshot_lock = std::unique_lock{trace_resources_mut};
             // Keep marker allocations alive in the producer until the next completed stop.
             snapshot = get_control();

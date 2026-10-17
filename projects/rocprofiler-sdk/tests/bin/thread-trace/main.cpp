@@ -84,6 +84,7 @@ main(int /*argc*/, char** /*argv*/)
         loopcount = 5000;  // prevent multiple-cmds test taking too long / timeout
     else if(is_triple_buffer)
         loopcount = 30000;
+    if(const auto* env = std::getenv("ATT_LOOP_COUNT")) loopcount = atoi(env);
 
     for(int i = 0; i < loopcount; i++)
     {

@@ -150,6 +150,17 @@ set_target_properties(
     PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
                INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
 
+# multi-SE triple buffer correctness tool
+add_library(thread-trace-triple-buffer-multise-tool SHARED)
+target_sources(thread-trace-triple-buffer-multise-tool
+               PRIVATE thread-trace-triple-buffer-multise-tool.cpp)
+target_link_libraries(thread-trace-triple-buffer-multise-tool
+                      PRIVATE ${THREAD_TRACE_TOOL_LINK_LIBRARIES})
+set_target_properties(
+    thread-trace-triple-buffer-multise-tool
+    PROPERTIES LIBRARY_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/lib/rocprofiler-sdk"
+               INSTALL_RPATH "\$ORIGIN:\$ORIGIN/..")
+
 # tool library supporting late initialization in the application
 add_library(rocprofiler-sdk-late-start-tool SHARED)
 target_sources(rocprofiler-sdk-late-start-tool PRIVATE late-start-tool.cpp)
