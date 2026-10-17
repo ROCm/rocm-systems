@@ -1082,19 +1082,33 @@ void GpuAgent::InitDma() {
 
 void GpuAgent::InitGWS() {
   gws_queue_.queue_.reset([this]() {
-    if (properties_.NumGws == 0) return (core::Queue*)nullptr;
+    if (!CooperativeQueuesSupported()) return (core::Queue*)nullptr;
     const uint32_t defaultGWSQueueSize = 0x4000; // 16KB
     std::unique_ptr<core::Queue> queue(CreateInterceptibleQueue(true, defaultGWSQueueSize));
     if (queue == nullptr)
       throw AMD::hsa_exception(HSA_STATUS_ERROR_OUT_OF_RESOURCES,
                                "Internal queue creation failed.");
 
-    auto err = static_cast<AqlQueue*>(queue.get())->EnableGWS(1);
+    auto err = static_cast<AqlQueue*>(queue.get())->EnableGWS(properties_.NumGws != 0 ? 1 : 0);
     if (err != HSA_STATUS_SUCCESS) throw AMD::hsa_exception(err, "GWS allocation failed.");
 
     gws_queue_.ref_ct_ = 0;
     return queue.release();
   });
+}
+
+bool GpuAgent::CooperativeQueuesSupported() const {
+  if (properties_.NumGws != 0) return true;
+  if (!core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) return false;
+
+  // DXG cannot allocate GWS. Grid sync on these targets uses memory atomics instead; keep in sync
+  // with AVOID_GWS() in device-libs ockl/src/cg.cl.
+  const auto* isa = supported_isas()[0];
+  const int major = isa->GetMajorVersion();
+  const int minor = isa->GetMinorVersion();
+  const int stepping = isa->GetStepping();
+  return major >= 11 || (major == 9 && minor == 4 && stepping == 2) ||
+         (major == 9 && minor == 5 && stepping == 0);
 }
 
 void GpuAgent::GWSRelease() {
@@ -2572,7 +2586,7 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
       *((uint32_t*)value) = static_cast<uint32_t>(properties_.Domain);
       break;
     case HSA_AMD_AGENT_INFO_COOPERATIVE_QUEUES:
-      *((bool*)value) = properties_.NumGws != 0;
+      *((bool*)value) = CooperativeQueuesSupported();
       break;
     case HSA_AMD_AGENT_INFO_UUID: {
       uint64_t uuid_value = static_cast<uint64_t>(properties_.UniqueID);

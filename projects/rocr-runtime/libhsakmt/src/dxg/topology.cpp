@@ -949,6 +949,7 @@ HSAKMT_STATUS topology_sysfs_get_node_props(uint32_t node_id, HsaNodeProperties&
   props.NumSdmaXgmiEngines = 0;
   props.NumSdmaQueuesPerEngine = 6;  // TODO
   props.NumCpQueues = device->GetNumCpQueues();
+  // Not device->NumGws(): GWS cannot be allocated to a queue through WKMI.
   props.NumGws = 0;
   /*
    * In Native Linux, if the asic is APU, this value will be set to 1,
