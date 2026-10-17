@@ -48,6 +48,7 @@ Full documentation for RCCL is available at [https://rccl.readthedocs.io](https:
   * `ncclAllGather`: DDA LL up to nRanks x 16 KiB, DDA LL128 up to 256 MiB from 16 ranks, and Ring LL128 up to 64 MiB per rank.
   * `ncclReduceScatter`: DDA LL up to nRanks x 256 KiB, DDA LL128 up to nRanks x 512 KiB, then DDA VMM up to nRanks x 2 MiB; Ring LL up to 512 KiB per rank and LL128 up to 8 MiB per rank (32 MiB for 1-byte types); Ring Simple on at most 128 channels between 8 and 32 MiB per rank unless `NCCL_MIN_NCHANNELS` or `NCCL_MAX_NCHANNELS` is set.
   * DDA VMM `ncclAllReduce` and `ncclReduceScatter` launch 2048 / nRanks blocks, clamped to 32 to 128 and never more than before.
+* `fp8_e4m3` and `fp8_e5m2` sum reductions on gfx1250 convert eight elements per instruction using the packed conversion instructions, instead of two. Results are unchanged. Other architectures and reduction operators are unaffected.
 
 ### Removed
 * `NCCL_TOPO_SCATTER_START_NET`, which selected how the first network device was scattered across GPUs. Rail and plane assignment replaces it.
