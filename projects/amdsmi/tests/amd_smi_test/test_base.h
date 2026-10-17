@@ -105,7 +105,7 @@ class TestBase {
 
  protected:
   void MakeHeaderStr(const char* inStr, std::string* outStr) const;
-  void PrintDeviceHeader(amdsmi_processor_handle dv_ind);
+  virtual void PrintDeviceHeader(amdsmi_processor_handle dv_ind);
   bool setup_failed_;          ///< Record that setup failed to return ierr in Run
   uint32_t num_monitor_devs_;  ///< Number of monitor devices found
   ///< device handles
