@@ -32,10 +32,14 @@ constexpr size_t ddaLL128AgSlotWords(size_t bankSize, int nRanks) {
   return ddaLL128SlotWords(bankSize, nRanks, 1);
 }
 
+// How many of its own pushes a warp keeps ahead of its unpacks.
+constexpr size_t kDdaLL128AGUnpackLag = 2;
+
 // LL128 all-gather. 2D grid: grid.x == nRanks - 1 places one column per remote
 // peer; grid.y splits that peer's slices across blocks, one
-// warp per slice. Each column packs this rank's payload into its peer's slot,
-// then polls its own slot for that peer's payload and unpacks it.
+// warp per slice. Each column packs this rank's payload into its peer's slot
+// and, a few slices behind, polls its own slot for that peer's payload and
+// unpacks it.
 template <typename T, int NRANKS_CT>
 #if defined(USE_ROCM)
 __launch_bounds__(1024)
@@ -82,16 +86,34 @@ __launch_bounds__(1024)
     (uint64_t)peer * (uint64_t)slotWords;
   int8_t* dstBytes = reinterpret_cast<int8_t*>(recvbuff) + (size_t)peer * perRankBytes;
 
-  // Phase 1: pack and push this column's slices to the one peer it owns.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
-    const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice =
-      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+  auto sliceElts = [&](size_t s) {
+    const size_t rem = perRankBytes - s * (size_t)kDdaLL128DataBytesPerSlice;
+    return rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
+  };
+  // Pack slice s and push it to the one peer this column owns.
+  auto push = [&](size_t s) {
     uint64_t regs[kDdaLL128WordsPerThread];
-    ddaLL128LoadRegs<int8_t>(regs, srcBytes + dataByte, eltInSlice, lane, flagLane);
+    ddaLL128LoadRegs<int8_t>(
+      regs, srcBytes + s * (size_t)kDdaLL128DataBytesPerSlice, sliceElts(s), lane, flagLane);
     ddaLL128StoreWire(
       scatterSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, regs, flag, flagLane);
+  };
+  // Poll slice s of that peer's payload in this rank's slot and unpack it.
+  auto unpack = [&](size_t s) {
+    uint64_t vr[kDdaLL128WordsPerThread];
+    ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
+    ddaLL128StoreRegs<int8_t>(
+      dstBytes + s * (size_t)kDdaLL128DataBytesPerSlice, vr, sliceElts(s), lane, flagLane);
+  };
+
+  // Push this warp's i-th slice and unpack its (i - kDdaLL128AGUnpackLag)-th in the
+  // same pass, so the unpack overlaps the pushes still in flight instead of trailing
+  // all of them. Every warp pushes its slices in order and only waits on one it is
+  // already past, so the waits always resolve.
+  const size_t mine = gwarp < slicesTotal ? (slicesTotal - gwarp + wstride - 1) / wstride : 0;
+  for (size_t i = 0; i < mine + kDdaLL128AGUnpackLag; ++i) {
+    if (i < mine) push(gwarp + i * wstride);
+    if (i >= kDdaLL128AGUnpackLag) unpack(gwarp + (i - kDdaLL128AGUnpackLag) * wstride);
   }
 
   // Local copy sendbuff -> recvbuff[selfRank].
@@ -104,17 +126,6 @@ __launch_bounds__(1024)
     for (size_t i = gtid; i < nVec; i += stride) {
       d4[i] = s4[i];
     }
-  }
-
-  // Phase 2: poll the same slices in that peer's slot and unpack.
-  for (size_t s = gwarp; s < slicesTotal; s += wstride) {
-    const size_t dataByte = s * (size_t)kDdaLL128DataBytesPerSlice;
-    const size_t rem = perRankBytes - dataByte;
-    const int eltInSlice =
-      rem < (size_t)kDdaLL128DataBytesPerSlice ? (int)rem : kDdaLL128DataBytesPerSlice;
-    uint64_t vr[kDdaLL128WordsPerThread];
-    ddaLL128PollWire(gatherSlot + s * (size_t)kDdaLL128WireWordsPerSlice + 2 * lane, vr, flag, lane);
-    ddaLL128StoreRegs<int8_t>(dstBytes + dataByte, vr, eltInSlice, lane, flagLane);
   }
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__))
   asm volatile("s_wait_storecnt 0x0" ::: "memory");

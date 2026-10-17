@@ -23,9 +23,9 @@
 
 // Tuned block sizes, used when the env override is unset or out of range, picked
 // from the bytes each rank pushes ((nRanks - 1) x the per-rank payload). Every warp
-// pushes its slices, then spins on its peer's. With little to push, small blocks
-// spread the slices over more CUs and keep fewer warps spinning on each; with more,
-// bigger blocks keep enough slices in flight per CU.
+// pushes its slices and spins on its peer's a couple of slices behind. With little to
+// push, small blocks spread the slices over more CUs and keep fewer warps spinning on
+// each; with more, bigger blocks keep enough slices in flight per CU.
 constexpr unsigned kDdaLL128AGLargeThreads = 512;
 constexpr unsigned kDdaLL128AGMidThreads = 256;
 constexpr unsigned kDdaLL128AGSmallThreads = 128;
