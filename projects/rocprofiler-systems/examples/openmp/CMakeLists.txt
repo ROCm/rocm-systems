@@ -31,5 +31,14 @@ rocprofiler_systems_custom_compilation(
 
 add_subdirectory(cg)
 add_subdirectory(lu)
-add_subdirectory(fortran)
+# flang cannot lower Fortran OpenMP target-offload to the portable SPIR-V target
+# (amdgcnspirv): "Target.cpp: not yet implemented: target not implemented". Skip
+# the Fortran examples when the only requested GPU target is amdgcnspirv; native
+# targets are unaffected. (The fortran subdir also self-disables offload when no
+# GPU target is set.)
+set(_rocprofsys_non_spirv_gfx_targets ${ROCPROFSYS_GFX_TARGETS})
+list(REMOVE_ITEM _rocprofsys_non_spirv_gfx_targets amdgcnspirv)
+if(_rocprofsys_non_spirv_gfx_targets OR NOT ROCPROFSYS_GFX_TARGETS)
+    add_subdirectory(fortran)
+endif()
 add_subdirectory(target)
