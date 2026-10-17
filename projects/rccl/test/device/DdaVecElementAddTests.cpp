@@ -95,12 +95,13 @@ std::vector<E> PseudoRandomBits(size_t n, uint32_t seed) {
 
 class DdaVecElementAdd : public DeviceTestBase {
 protected:
-  // Runs vecElementAdd<T> over element arrays a and b viewed as uint4, padding the tail with zeros.
+  // Runs vecElementAdd<T> over element arrays a and b viewed as uint4, zero-padding the shorter one and the tail.
   template <typename T, typename E>
   std::vector<E> Run(const std::vector<E>& a, const std::vector<E>& b) {
     static_assert(sizeof(T) == sizeof(E), "element storage must match T");
     constexpr size_t kPerVec = sizeof(uint4) / sizeof(E);
-    const size_t nVec = (std::max(a.size(), b.size()) + kPerVec - 1) / kPerVec;
+    const size_t nElems = std::max(a.size(), b.size());
+    const size_t nVec = (nElems + kPerVec - 1) / kPerVec;
     std::vector<uint4> ha(nVec, uint4{0, 0, 0, 0});
     std::vector<uint4> hb(nVec, uint4{0, 0, 0, 0});
     std::memcpy(ha.data(), a.data(), a.size() * sizeof(E));
@@ -117,8 +118,8 @@ protected:
     syncAndCheck();
 
     const std::vector<uint4> hOut = dOut.copyTo();
-    std::vector<E> out(a.size());
-    std::memcpy(out.data(), hOut.data(), a.size() * sizeof(E));
+    std::vector<E> out(nElems);
+    std::memcpy(out.data(), hOut.data(), nElems * sizeof(E));
     return out;
   }
 
