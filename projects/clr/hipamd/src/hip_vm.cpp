@@ -167,7 +167,7 @@ hipError_t hipMemCreate(hipMemGenericAllocationHandle_t* handle, size_t size,
   }
 
   void* ptr = amd::SvmBuffer::malloc(*amdContext, ihipFlags, size, dev_info.memBaseAddrAlign_,
-                                     useHostDevice ? curDevContext->svmDevices()[0] : nullptr);
+                                     isHostMemBacked ? curDevContext->svmDevices()[0] : nullptr);
 
   // Handle out of memory cases,
   if (ptr == nullptr) {
