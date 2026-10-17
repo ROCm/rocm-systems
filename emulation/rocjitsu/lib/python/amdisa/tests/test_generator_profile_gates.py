@@ -7326,6 +7326,40 @@ def test_vopd_integer_simd_probe_requires_available_opcodes(tmp_path, missing_op
     assert execute_slot.index('return src0;') < execute_slot.index('uint32_t src1 =')
 
 
+@pytest.mark.parametrize('arch', ['rdna3', 'rdna4'])
+def test_vopd_subtraction_adds_negated_subtrahend(tmp_path, arch):
+    profile = Rdna3Profile() if arch == 'rdna3' else Rdna4Profile()
+    codegen = object.__new__(CodeGenerator)
+    codegen.isa_spec = SimpleNamespace(
+        arch_name=arch,
+        generated_dir_name=arch,
+        cpp_namespace=arch,
+        profile=profile,
+        operand_types={'OPR_SRC'},
+    )
+    codegen.out_path = str(tmp_path)
+    codegen.config = CodegenConfig()
+    codegen.gen_vopd()
+    exec_cpp = (tmp_path / arch / 'vopd_exec.cpp').read_text()
+
+    def body(case):
+        # The last label is the execute_slot body; earlier ones list modifier support.
+        start = exec_cpp.rindex(f'case {case}:')
+        return exec_cpp[start : exec_cpp.index('case ', start + 1)]
+
+    # As VOP2: ADD of the negated subtrahend, in operand order, with the
+    # architectural NaN policy. Host subtraction would keep a NaN subtrahend's sign.
+    sub, subrev = body('kVopdSubF32'), body('kVopdSubrevF32')
+    for text in (sub, subrev):
+        assert 'Arithmetic::ADD>' in text
+        assert 'Arithmetic::SUB>' not in text
+        assert 'wf.cu().arch(), wf.ieee_mode()' in text
+    assert 'std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u)' in sub
+    assert (
+        'std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1)' in subrev
+    )
+
+
 def test_rdna4_profile_enables_generated_vopd():
     codegen = object.__new__(CodeGenerator)
     codegen.isa_spec = SimpleNamespace(

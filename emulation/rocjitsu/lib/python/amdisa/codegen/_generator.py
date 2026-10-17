@@ -2197,7 +2197,9 @@ class CodeGenerator:
                     ('VopdSubF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src0), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      // The ISA defines VOPD by the VOP2 instructions (16.11): add the
+                      // negated subtrahend, keeping the sources in operand order.
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0), std::bit_cast<float>(src1 ^ 0x80000000u), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -2206,7 +2208,7 @@ class CodeGenerator:
                     ('VopdSubrevF32',),
                     '''
                     {
-                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::SUB>(std::bit_cast<float>(src1), std::bit_cast<float>(src0), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32());
+                      float result = amdgpu::fp_mode::arithmetic<amdgpu::fp_mode::Arithmetic::ADD>(std::bit_cast<float>(src0 ^ 0x80000000u), std::bit_cast<float>(src1), 0.0f, wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode());
                       return std::bit_cast<uint32_t>(result);
                     }
                     ''',
@@ -6685,6 +6687,12 @@ class CodeGenerator:
                     if 'omod' in inst_fields and not integer_result:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
+                elif is_vop3 and cls == 'vector_cndmask':
+                    from amdisa.sema_enrich import enrich_block
+
+                    # The select has source modifiers but no output modifiers.
+                    ef = {'neg', 'abs'} if has_abs else {'neg'}
+                    sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
                 # bit widths (op_widths) subsume the old src_width/dst_width name
                 # heuristics: mixed-width instructions (e.g. the f64<->32-bit
@@ -6800,6 +6808,9 @@ class CodeGenerator:
                             f'    amdgpu::RegisterAccess(wf).write_lane({dst_ops[0]}, lane, (({selector_read} >> lane) & 1) ? src1_value : src0_value);\n'
                             '  }\n'
                         )
+                    # ABS/NEG modify the selected half's sign bit, as for F16.
+                    # Measured on gfx1201 and gfx1100; RDNA3.5 and CDNA5 inherit it.
+                    lctx.source_modifier_format = 'F16'
                 true16_special_vop3_ops = {
                     'V_ASHRREV_I16': (
                         2,

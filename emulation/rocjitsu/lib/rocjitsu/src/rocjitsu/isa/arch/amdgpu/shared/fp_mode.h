@@ -808,7 +808,9 @@ inline double finalize_omod_f64(double value, uint32_t omod) {
 }
 
 /// @brief Ordinary VALU arithmetic operations governed by MODE.
-enum class Arithmetic : uint8_t { ADD, SUB, MUL, FMA, MUL_LEGACY, FMA_DX9_ZERO };
+/// @details Subtraction is ADD of the negated subtrahend: host subtraction would keep a NaN
+/// subtrahend's sign, unlike the hardware.
+enum class Arithmetic : uint8_t { ADD, MUL, FMA, MUL_LEGACY, FMA_DX9_ZERO };
 
 namespace detail {
 
@@ -827,8 +829,6 @@ inline Float evaluate_arithmetic(Float lhs, Float rhs, Float addend) {
   volatile Float accumulator = addend;
   if constexpr (operation == Arithmetic::ADD)
     return left + right;
-  else if constexpr (operation == Arithmetic::SUB)
-    return left - right;
   else if constexpr (operation == Arithmetic::MUL)
     return left * right;
   else if constexpr (operation == Arithmetic::MUL_LEGACY)
@@ -893,6 +893,37 @@ inline float arithmetic(float lhs, float rhs, float addend, uint32_t round_mode,
           }
         return fma_f32(a, b, c, arch, ieee_mode, denorm_mode, force_output_flush);
       });
+}
+
+/// @brief V_MULLIT_F32 on sources with ABS/NEG applied, before OMOD and CLAMP.
+/// @details MODE flushes the sources first, so a subnormal S2 counts as zero.
+/// S1 equal to -MAX_FLOAT, -INF or NaN, or S2 that is zero, negative or NaN,
+/// gives -MAX_FLOAT. Otherwise a zero factor gives +0, as in the legacy multiply,
+/// even with an infinite or NaN S0. Other products use the architectural F32
+/// multiply: MODE rounding, tininess before F32 exponent packing, and quiets_nan
+/// for a NaN S0. `force_output_flush` is set by an effective OMOD, which flushes a
+/// tiny product before scaling, as for V_MUL_F32.
+/// Measured on gfx1201 and gfx1100 (IEEE=0 and 1); other targets with
+/// V_MULLIT_F32 inherit these rules without measurement.
+inline uint32_t mullit_f32(uint32_t s0, uint32_t s1, uint32_t s2, uint32_t round_mode,
+                           uint32_t denorm_mode, rj_code_arch_t arch, bool ieee_mode,
+                           bool force_output_flush) {
+  using F32 = fp_format::F32;
+  constexpr uint32_t kNegativeMax = F32::kSign | (F32::kInfinity - 1);
+  const auto input = input_denormal::Policy::make(denorm_mode);
+  s0 = input_denormal::flush_input<F32>(s0, input);
+  s1 = input_denormal::flush_input<F32>(s1, input);
+  s2 = input_denormal::flush_input<F32>(s2, input);
+  const auto is_nan = [](uint32_t bits) { return (bits & F32::kMagnitude) > F32::kInfinity; };
+  const bool s2_positive = (s2 & F32::kSign) == 0 && s2 != 0;
+  if (s1 == kNegativeMax || s1 == (F32::kSign | F32::kInfinity) || is_nan(s1) || !s2_positive ||
+      is_nan(s2))
+    return kNegativeMax;
+  if ((s0 & F32::kMagnitude) == 0 || (s1 & F32::kMagnitude) == 0)
+    return 0;
+  return std::bit_cast<uint32_t>(
+      arithmetic<Arithmetic::MUL>(std::bit_cast<float>(s0), std::bit_cast<float>(s1), 0.0f,
+                                  round_mode, denorm_mode, arch, ieee_mode, force_output_flush));
 }
 
 /// @brief Evaluate prepared F16 arithmetic operands in F64.

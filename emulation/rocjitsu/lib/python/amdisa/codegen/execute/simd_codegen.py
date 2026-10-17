@@ -25,23 +25,34 @@ from amdisa.codegen.execute.floating_policy import (
 
 from amdisa.codegen.execute.cube import CUBE_OPERATIONS, cube_expression, cube_omod
 
+# Operation and operands of each F32 binary functor. SUB and SUBREV add the
+# negated subtrahend, keeping the sources in operand order (see _vec_binop_expr).
+_BINARY_F32_FORMS = {
+    'add': ('ADD', 'a, b'),
+    'sub': ('ADD', 'a, -b'),
+    'subrev': ('ADD', '-a, b'),
+    'mul': ('MUL', 'a, b'),
+}
 
-def _binary_f32_op(
-    operation: str, *, modifiers: bool = False, reverse: bool = False
-) -> str:
+
+def _binary_f32_op(name: str, *, modifiers: bool = False) -> str:
+    operation, operands = _BINARY_F32_FORMS[name]
     capture = '&inst, &wf' if modifiers else '&wf'
     omod = ', amdgpu::effective_vop3_omod_f32(wf, inst.inst_.omod)' if modifiers else ''
-    operands = 'b, a' if reverse else 'a, b'
     return (
         f'[{capture}](auto a, auto b) {{ return '
         f'amdgpu::binary_f32_simd<amdgpu::fp_mode::Arithmetic::{operation}>({operands}, wf{omod}); }}'
     )
 
 
-# F16 VOP3 arithmetic with explicit MODE flushing and post-rounding modifiers.
+# F16 VOP3 arithmetic with explicit MODE flushing and post-rounding modifiers:
+# template_name -> (operation, negated source or -1). SUB and SUBREV add the
+# negated subtrahend in operand order, as in scalar lowering.
 SIMD_VOP3_BINARY_MODE_FP16 = {
-    'v_add_f16_vop3': 'ADD',
-    'v_mul_f16_vop3': 'MUL',
+    'v_add_f16_vop3': ('ADD', -1),
+    'v_sub_f16_vop3': ('ADD', 1),
+    'v_subrev_f16_vop3': ('ADD', 0),
+    'v_mul_f16_vop3': ('MUL', -1),
 }
 
 # template_name -> (cpp_element_type, cpp_binary_op_functor)
@@ -53,10 +64,10 @@ SIMD_VOP3_BINARY_MODE_FP16 = {
 # try_execute_binary_vop2_simd. Use std::*<> for stateless ops.
 SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
     # --- float32 (IEEE-754 single-rounded, bit-identical to scalar body) ---
-    "v_add_f32_vop2": ("float32_t", _binary_f32_op('ADD')),
-    'v_sub_f32_vop2': ('float32_t', _binary_f32_op('SUB')),
-    'v_subrev_f32_vop2': ('float32_t', _binary_f32_op('SUB', reverse=True)),
-    'v_mul_f32_vop2': ('float32_t', _binary_f32_op('MUL')),
+    "v_add_f32_vop2": ("float32_t", _binary_f32_op('add')),
+    'v_sub_f32_vop2': ('float32_t', _binary_f32_op('sub')),
+    'v_subrev_f32_vop2': ('float32_t', _binary_f32_op('subrev')),
+    'v_mul_f32_vop2': ('float32_t', _binary_f32_op('mul')),
     # Legacy / DX9 zero-multiply: (a==0 || b==0) ? 0 : a*b. The ==0 matches both
     # ±0 (as the scalar `a == 0.0f` does). Routed via the VOP3 binary fp glue for
     # the _vop3 twin (which applies abs/neg/omod/clamp around this functor).
@@ -261,15 +272,18 @@ SIMD_VOP2_BINARY: dict[str, tuple[str, str]] = {
         '[](auto a, auto b) {'
         ' return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b)); }',
     ),
+    # SUB and SUBREV add the negated subtrahend in source order, as F32 does.
+    # Negate the half's bits: the compiler may fold a float negation into a
+    # host subtraction, which keeps a NaN subtrahend's sign.
     'v_sub_f16_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
-        ' return util::f32_to_f16_simd(util::f16_to_f32_simd(a) - util::f16_to_f32_simd(b)); }',
+        ' return util::f32_to_f16_simd(util::f16_to_f32_simd(a) + util::f16_to_f32_simd(b ^ 0x8000u)); }',
     ),
     'v_subrev_f16_vop2': (
         'uint32_t',
         '[](auto a, auto b) {'
-        ' return util::f32_to_f16_simd(util::f16_to_f32_simd(b) - util::f16_to_f32_simd(a)); }',
+        ' return util::f32_to_f16_simd(util::f16_to_f32_simd(a ^ 0x8000u) + util::f16_to_f32_simd(b)); }',
     ),
     'v_mul_f16_vop2': (
         'uint32_t',
@@ -1113,12 +1127,6 @@ SIMD_VOP2_CNDMASK: set[str] = {
 # read from the SGPR-pair `src2` instead of VCC. Also fixed-op / functorless.
 SIMD_VOP3_CNDMASK: set[str] = {
     'v_cndmask_b32_vop3',
-}
-
-# 16-bit variant — RDNA3+. Low-16 of each source selected per lane, high-16
-# zero (matches scalar `uint32_t(uint16_t(...))` write pattern).
-SIMD_VOP3_CNDMASK_B16: set[str] = {
-    'v_cndmask_b16_vop3',
 }
 
 # VOP3 div_fmas: fused FMA and VCC-controlled scaling, rounded once using
@@ -2651,39 +2659,19 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
     dtype = next((field for field in fields if field in ('f16', 'f32', 'f64')), None)
     if dtype is None or (fields[1] == 'ldexp' and dtype != 'f16'):
         return probe
-    if dtype == 'f32' and fields[1] in ('sub', 'subrev'):
-        # Reuse the checked SIMD views and share MODE setup for ordinary
-        # operands. Observers and delegates retain their existing path and host
-        # environment; they can execute user code during register access.
-        source1 = 'inst.vsrc1' if fields[-1] == 'vop2' else 'inst.src1'
-        macro = 'VOP2_BINARY' if fields[-1] == 'vop2' else 'VOP3_BINARY_FP'
-        native_op = (
-            'std::minus<>{}'
-            if fields[1] == 'sub'
-            else '[](auto a, auto b) { return b - a; }'
-        )
-        native_probe = f'  ROCJITSU_TRY_SIMD_{macro}(float32_t, {native_op});'
-        return (
-            '  if (wf.exec() != 0 && !amdgpu::simd_force_scalar() && '
-            '!wf.cu().observes_register_access() && '
-            '!wf.cu().debug_active() && !inst.src0.delegate() && '
-            f'!{source1}.delegate() && !inst.vdst.delegate()) {{\n'
-            '    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());\n'
-            f'{_indent_probe(probe)}\n'
-            '  }\n'
-            '  if (amdgpu::fp_mode::native_arithmetic_matches(wf.fp_round_mode_f32(), '
-            f'wf.fp_denorm_mode_f32())) {{\n{native_probe}\n  }}'
-        )
     if (
         dtype == 'f32'
         and 'dx9' not in fields
         and ('amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe)
     ):
-        # This helper applies guest denormal controls explicitly. Establish MODE
-        # once for the wave, including its output scaling and clamp operations.
+        # The helpers scope the guest environment to arithmetic and output
+        # scaling, so callbacks keep the caller's FP environment. With callbacks
+        # (amdgpu::register_access_runs_no_caller_code), SIMD runs only in the
+        # host's default MODE.
         return (
-            '  {\n'
-            '    amdgpu::fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());\n'
+            '  if (amdgpu::register_access_runs_no_caller_code(wf) ||\n'
+            '      amdgpu::fp_mode::native_arithmetic_matches('
+            'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {\n'
             f'{_indent_probe(probe)}\n'
             '  }'
         )
@@ -2705,9 +2693,11 @@ def _simd_probe_line(
     """Return the SIMD fast-path probe block for a kernel, or None."""
     f16_arithmetic = SIMD_VOP3_BINARY_MODE_FP16.get(template_name)
     if f16_arithmetic is not None:
+        operation, negated_source = f16_arithmetic
         return (
             '  ROCJITSU_TRY_SIMD_VOP3_BINARY_MODE_FP16('
-            f'{str(true16_vop3).lower()}, amdgpu::fp_mode::Arithmetic::{f16_arithmetic});'
+            f'{str(true16_vop3).lower()}, amdgpu::fp_mode::Arithmetic::{operation}, '
+            f'{negated_source});'
         )
     minmax_probe = float_minmax.simd_probe(template_name, true16_vop3)
     if minmax_probe is not None:
@@ -2721,10 +2711,6 @@ def _simd_probe_line(
         return '  ROCJITSU_TRY_SIMD_VOP2_CNDMASK();'
     if template_name in SIMD_VOP3_CNDMASK:
         return '  ROCJITSU_TRY_SIMD_VOP3_CNDMASK();'
-    if template_name in SIMD_VOP3_CNDMASK_B16:
-        if true16_vop3:
-            return None
-        return '  ROCJITSU_TRY_SIMD_VOP3_CNDMASK_B16();'
     spec2 = SIMD_VOP2_BINARY.get(template_name)
     if spec2 is not None:
         cpp_t, cpp_op = spec2
@@ -3078,16 +3064,11 @@ def _simd_probe_line(
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_INT({cpp_t}, {cpp_op});'
             if cpp_t == 'float32_t':
                 if base in ('v_add_f32', 'v_mul_f32', 'v_sub_f32', 'v_subrev_f32'):
-                    operation = (
-                        'SUB' if base == 'v_subrev_f32' else base.split('_')[1].upper()
-                    )
-                    cpp_op = _binary_f32_op(
-                        operation, modifiers=True, reverse=base == 'v_subrev_f32'
-                    )
+                    cpp_op = _binary_f32_op(base.split('_')[1], modifiers=True)
                 return f'  ROCJITSU_TRY_SIMD_VOP3_BINARY_FP({cpp_t}, {cpp_op});'
             # Remaining F16 binaries reuse unmodified VOP2 functors and reject
-            # modifiers. ADD/MUL use the MODE-aware route above; min/max has its
-            # own route. Keep a probe for the shared cross-ISA plan.
+            # modifiers. ADD/SUB/SUBREV/MUL use the MODE-aware route above;
+            # min/max has its own route. Keep a probe for the shared cross-ISA plan.
             if base.endswith('_f16'):
                 macro = (
                     'ROCJITSU_TRY_SIMD_VOP3_BINARY_TRUE16_F16'
@@ -3450,6 +3431,8 @@ def _local_coverage_probe(
                 True,
                 3,
                 '[&](auto a, auto b, uint32_t base) { '
+                'a = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(a, 0, inst.inst_.abs, inst.inst_.neg); '
+                'b = amdgpu::source_modifier::apply<amdgpu::fp_format::F16>(b, 1, inst.inst_.abs, inst.inst_.neg); '
                 'const uint64_t mask = amdgpu::read_wave_mask_scalar(inst.src2, wf); '
                 'util::native<uint32_t> choose([&](auto i) { return uint32_t((mask >> (base + i)) & 1u); }); '
                 'util::stdx::where(choose != 0u, a) = b; return a; }',
