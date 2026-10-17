@@ -216,6 +216,7 @@
   X(SignalAdd,                      171)  \
   X(SignalSet,                      172)  \
   X(SignalWaitUntil,                173)  \
+  X(SignalOpsOnStream,              174)  \
   X(TilePutRowMajorStartCoord,      177)  \
   X(TileGetRowMajorStartCoord,      178)  \
   X(TilePutWaveRowMajorStartCoord,  179)  \

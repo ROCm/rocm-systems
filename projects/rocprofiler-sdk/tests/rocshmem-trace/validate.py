@@ -26,7 +26,7 @@ import sys
 import os
 import pytest
 
-# The 9 host-stream APIs registered by rocshmem/src/api_trace.cc.
+# The 11 host-stream APIs registered by rocshmem/src/api_trace.cc.
 EXPECTED_OPERATIONS = {
     "barrier_all_on_stream",
     "quiet_on_stream",
@@ -37,14 +37,16 @@ EXPECTED_OPERATIONS = {
     "putmem_on_stream",
     "putmem_signal_on_stream",
     "signal_wait_until_on_stream",
+    "signal_add_on_stream",
+    "signal_set_on_stream",
 }
 
 # rocshmem-demo wraps its API block in `for(iter = 0; iter < 3; ++iter)` to
 # exercise the tracer under repetition. Update both numbers in lockstep if
 # the demo's iteration count changes.
 DEMO_ITERATIONS = 3
-EXPECTED_BUFFER_RECORDS = len(EXPECTED_OPERATIONS) * DEMO_ITERATIONS  # 45
-EXPECTED_CALLBACK_RECORDS = EXPECTED_BUFFER_RECORDS * 2  # phase 1 + phase 2 = 90
+EXPECTED_BUFFER_RECORDS = len(EXPECTED_OPERATIONS) * DEMO_ITERATIONS  # 33
+EXPECTED_CALLBACK_RECORDS = EXPECTED_BUFFER_RECORDS * 2  # phase 1 + phase 2 = 66
 
 
 def node_exists(name, data, min_len=1):
@@ -113,14 +115,17 @@ def test_size_entries(input_data):
 
 
 def test_rocshmem_domain_registered(input_data):
-    """The ROCSHMEM_API buffer-tracing kind exposes exactly 9 operation names."""
+    """The ROCSHMEM_API buffer-tracing kind exposes every operation name."""
     sdk_data = _get_sdk_data(input_data)
     op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API")
     assert (
         op_lookup is not None
     ), "ROCSHMEM_API kind not registered in buffer_records.names"
     _, op_names = op_lookup
-    assert len(op_names) == 9, f"expected 9 operations, got {len(op_names)}: {op_names}"
+    assert len(op_names) == len(EXPECTED_OPERATIONS), (
+        f"expected {len(EXPECTED_OPERATIONS)} operations, "
+        f"got {len(op_names)}: {op_names}"
+    )
     assert set(op_names) == EXPECTED_OPERATIONS, (
         f"operation set mismatch.\n  got:      {sorted(op_names)}"
         f"\n  expected: {sorted(EXPECTED_OPERATIONS)}"
@@ -128,14 +133,17 @@ def test_rocshmem_domain_registered(input_data):
 
 
 def test_rocshmem_ext_domain_registered(input_data):
-    """The ROCSHMEM_API_EXT buffer-tracing kind exposes the same 9 operation names."""
+    """The ROCSHMEM_API_EXT buffer-tracing kind exposes every operation name."""
     sdk_data = _get_sdk_data(input_data)
     op_lookup = get_operation(sdk_data["buffer_records"], "ROCSHMEM_API_EXT")
     assert (
         op_lookup is not None
     ), "ROCSHMEM_API_EXT kind not registered in buffer_records.names"
     _, op_names = op_lookup
-    assert len(op_names) == 9, f"expected 9 operations, got {len(op_names)}: {op_names}"
+    assert len(op_names) == len(EXPECTED_OPERATIONS), (
+        f"expected {len(EXPECTED_OPERATIONS)} operations, "
+        f"got {len(op_names)}: {op_names}"
+    )
     assert set(op_names) == EXPECTED_OPERATIONS, (
         f"operation set mismatch.\n  got:      {sorted(op_names)}"
         f"\n  expected: {sorted(EXPECTED_OPERATIONS)}"
@@ -364,7 +372,7 @@ def test_callback_record_payloads(input_data):
         payload = rec["payload"]
         assert "size" in payload, f"missing payload.size: {rec}"
         assert payload["size"] > 0, f"non-positive payload.size: {rec}"
-        # All 9 traced rocSHMEM host-stream APIs return void; the callback's
+        # All traced rocSHMEM host-stream APIs return void; the callback's
         # `retval` is therefore an empty struct, but the key must still be
         # present so tools can serialize it uniformly.
         assert "retval" in payload, f"missing payload.retval: {rec}"
@@ -597,7 +605,7 @@ def test_perfetto_data(request, input_data):
             "rocSHMEM tracing may not be enabled in this build."
         )
 
-    # If perfetto did record rocSHMEM, every one of the 9 traced API calls
+    # If perfetto did record rocSHMEM, every traced API call
     # should appear at least once in its entry names.
     if not name_hits.empty:
         observed = set()
@@ -607,11 +615,11 @@ def test_perfetto_data(request, input_data):
                     observed.add(op)
                     break
 
-        # `observed` is the set of rocSHMEM API calls (of the 9 we trace)
+        # `observed` is the set of rocSHMEM API calls
         # whose names appeared in the perfetto trace. Three outcomes:
-        # * all 9 names found: pass.
+        # * all names found: pass.
         # * some names found, others missing: bug - if any call is named
-        #   in the trace, all 9 should be. Fail.
+        #   in the trace, all should be. Fail.
         # * no names found, but perfetto did record rocSHMEM activity:
         #   the trace shows rocSHMEM ran but doesn't yet name each
         #   individual call. This is a known intermediate state in some

@@ -28,7 +28,8 @@ THE SOFTWARE.
 //   quiet_on_stream            alltoallmem_on_stream
 //   broadcastmem_on_stream     getmem_on_stream
 //   putmem_on_stream           putmem_signal_on_stream
-//   signal_wait_until_on_stream
+//   signal_wait_until_on_stream signal_add_on_stream
+//   signal_set_on_stream
 //
 // The demo must be launched by an MPI/PMI launcher (mpirun / mpiexec / srun) that exposes
 // the node-local rank via an environment variable; it uses that to pin each process to a
@@ -152,6 +153,8 @@ main(int /*argc*/, char** /*argv*/)
                                          peer,
                                          stream);
         rocshmem_signal_wait_until_on_stream(signal, ROCSHMEM_CMP_GE, 1, stream);
+        rocshmem_signal_add_on_stream(signal, 1, peer, stream);
+        rocshmem_signal_set_on_stream(signal, 1, peer, stream);
 
         rocshmem_broadcastmem_on_stream(
             ROCSHMEM_TEAM_WORLD, dst, src, kPerPeBytes, /*pe_root=*/0, stream);

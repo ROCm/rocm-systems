@@ -57,8 +57,8 @@ def test_rocshmem(json_data):
 
     _, bf_op_names = get_operation(data, "ROCSHMEM_API")
 
-    # rocSHMEM dispatch table currently has 9 host-stream operations
-    assert len(bf_op_names) == 9
+    # rocSHMEM dispatch table currently has 11 host-stream operations
+    assert len(bf_op_names) == 11
 
     # check buffering data
     for node in rocshmem_data:
@@ -159,6 +159,8 @@ def test_rocpd_data(rocpd_conn, json_data):
         "putmem_on_stream",
         "putmem_signal_on_stream",
         "signal_wait_until_on_stream",
+        "signal_add_on_stream",
+        "signal_set_on_stream",
     ]:
         assert call in op_names, f"rocpd missing rocSHMEM operation '{call}'"
 
