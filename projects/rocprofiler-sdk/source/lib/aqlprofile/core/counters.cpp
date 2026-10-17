@@ -38,6 +38,7 @@
 #include <array>
 #include <cstddef>
 #include <cstdint>
+#include <cstring>
 #include <future>
 #include <map>
 #include <string>
@@ -618,6 +619,35 @@ aqlprofile_get_pmc_info(const aqlprofile_pmc_profile_t* profile,
             {
                 *reinterpret_cast<uint32_t*>(value) =
                     pm4_factory->GetBlockInfo(&profile->events[0])->counter_count;
+            }
+            break;
+            case AQLPROFILE_INFO_ENABLE_CMD:
+            case AQLPROFILE_INFO_DISABLE_CMD:
+            {
+                auto* control = static_cast<aqlprofile_pmc_control_packet_t*>(value);
+                if(!control) return HSA_STATUS_ERROR_INVALID_ARGUMENT;
+
+                pm4_builder::CmdBuffer   commands;
+                pm4_builder::PmcBuilder* pmc_builder = pm4_factory->GetPmcBuilder();
+                if(attribute == AQLPROFILE_INFO_ENABLE_CMD)
+                    pmc_builder->Enable(&commands);
+                else
+                    pmc_builder->Disable(&commands);
+
+                const auto cmd_size = static_cast<uint32_t>(commands.Size());
+                if(!control->command_buffer)
+                {
+                    control->command_buffer_size = cmd_size;
+                    break;
+                }
+                if(control->command_buffer_size < cmd_size)
+                    return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
+
+                memcpy(control->command_buffer, commands.Data(), cmd_size);
+                aql_profile::PopulateAql(control->command_buffer,
+                                         cmd_size,
+                                         pm4_factory->GetCmdBuilder(),
+                                         &control->packet);
             }
             break;
             default: return HSA_STATUS_ERROR_INVALID_ARGUMENT;

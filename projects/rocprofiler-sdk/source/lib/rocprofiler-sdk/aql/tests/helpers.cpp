@@ -65,27 +65,6 @@ findDeviceMetrics(const rocprofiler_agent_t& agent, const std::unordered_set<std
     return ret;
 }
 
-hsa_ven_amd_aqlprofile_id_query_t
-v1_get_query_info(hsa_agent_t agent, const counters::Metric& metric)
-{
-    hsa_ven_amd_aqlprofile_profile_t  profile = {.agent  = agent,
-                                                .type   = HSA_VEN_AMD_AQLPROFILE_EVENT_TYPE_PMC,
-                                                .events = nullptr,
-                                                .event_count     = 0,
-                                                .parameters      = nullptr,
-                                                .parameter_count = 0,
-                                                .output_buffer   = {nullptr, 0},
-                                                .command_buffer  = {nullptr, 0}};
-    hsa_ven_amd_aqlprofile_id_query_t query   = {metric.block().c_str(), 0, 0};
-    if(hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_BLOCK_ID, &query) !=
-       HSA_STATUS_SUCCESS)
-    {
-        DLOG(FATAL) << fmt::format("AQL failed to query info for counter {}", metric);
-        throw std::runtime_error(fmt::format("AQL failed to query info for counter {}", metric));
-    }
-    return query;
-}
-
 void
 test_init()
 {
@@ -123,7 +102,7 @@ TEST(aql_helpers, get_query_info)
     }
 }
 
-TEST(aql_helpers, get_query_info_compare_v1)
+TEST(aql_helpers, get_query_info_hsa_agents)
 {
     ASSERT_EQ(hsa_init(), HSA_STATUS_SUCCESS);
     test_init();
@@ -142,12 +121,10 @@ TEST(aql_helpers, get_query_info_compare_v1)
         for(auto& metric : metrics)
         {
             auto query = aql::get_query_info(agent->id, metric);
-            auto query_v1 =
-                v1_get_query_info(agent::get_agent_cache(agent)->get_hsa_agent(), metric);
-            // v1 query with hsa_agent
-
-            EXPECT_EQ(query.id, query_v1.id);
-            EXPECT_EQ(std::string(query.name), std::string(query_v1.name));
+            ASSERT_TRUE(query.name != nullptr);
+            EXPECT_EQ(std::string(query.name), metric.block());
+            EXPECT_TRUE(query.instance_count != 0);
+            EXPECT_TRUE(query.id < std::numeric_limits<uint32_t>().max());
         }
     }
     hsa_shut_down();

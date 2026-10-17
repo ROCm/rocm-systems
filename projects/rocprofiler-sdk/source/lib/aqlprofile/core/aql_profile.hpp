@@ -44,24 +44,15 @@ class CmdBuilder;
 
 namespace aql_profile
 {
-typedef hsa_ven_amd_aqlprofile_descriptor_t    descriptor_t;
-typedef hsa_ven_amd_aqlprofile_profile_t       profile_t;
-typedef hsa_ven_amd_aqlprofile_info_type_t     info_type_t;
-typedef hsa_ven_amd_aqlprofile_data_callback_t data_callback_t;
-typedef hsa_ext_amd_aql_pm4_packet_t           packet_t;
-typedef hsa_ven_amd_aqlprofile_event_t         event_t;
+typedef hsa_ven_amd_aqlprofile_descriptor_t descriptor_t;
+typedef hsa_ext_amd_aql_pm4_packet_t        packet_t;
+typedef hsa_ven_amd_aqlprofile_event_t      event_t;
 
 void
 PopulateAql(const void*              cmd_buffer,
             uint32_t                 cmd_size,
             pm4_builder::CmdBuilder* cmd_writer,
             packet_t*                aql_packet);
-void*
-LegacyAqlAcquire(const packet_t* aql_packet, void* data);
-void*
-LegacyAqlRelease(const packet_t* aql_packet, void* data);
-void*
-LegacyPm4(const packet_t* aql_packet, void* data);
 
 class event_exception : public aql_profile_exc_val<event_t>
 {

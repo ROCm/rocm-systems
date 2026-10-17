@@ -45,7 +45,7 @@ set(_v2_common_libs
     rocprofiler-sdk::rocprofiler-sdk-drm)
 
 # HSA-tool shared library: loaded via HSA_TOOLS_LIB, hooks hsa_queue_create to enable
-# aqlprofile profiling on the queue (uses the in-tree v1 get_info).
+# aqlprofile profiling on the queue (uses AQLPROFILE_INFO_ENABLE_CMD).
 add_library(aqlprofile-v2-intercept SHARED)
 target_sources(aqlprofile-v2-intercept PRIVATE intercept.cpp)
 target_include_directories(aqlprofile-v2-intercept PRIVATE ${CMAKE_CURRENT_SOURCE_DIR})

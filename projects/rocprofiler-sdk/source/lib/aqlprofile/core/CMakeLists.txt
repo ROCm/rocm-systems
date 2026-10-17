@@ -23,7 +23,6 @@ target_sources(
             parse_ip_discovery.cpp
             pm4_factory.cpp
             populate_aql.cpp
-            spm_data.cpp
             spm_decode.cpp
             spm_v2.cpp
             threadtrace.cpp

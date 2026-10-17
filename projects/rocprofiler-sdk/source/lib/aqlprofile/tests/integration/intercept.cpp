@@ -32,7 +32,6 @@
 #include <hsa/hsa.h>
 #include <hsa/hsa_ext_amd.h>
 #include <hsa/hsa_api_trace.h>
-#include <hsa/hsa_ven_amd_aqlprofile.h>
 
 #include "lib/aqlprofile/aqlprofile.hpp"
 
@@ -123,30 +122,55 @@ queue_submit(hsa_queue_t* queue, hsa_ext_amd_aql_pm4_packet_t* packet)
     return true;
 }
 
+aqlprofile_agent_handle_t
+register_agent(hsa_agent_t hsa_agent)
+{
+    char                    gfxip[64] = {};
+    aqlprofile_agent_info_t info{};
+    CHECK_HSA(hsa_agent_get_info_fn(hsa_agent, HSA_AGENT_INFO_NAME, gfxip));
+    CHECK_HSA(hsa_agent_get_info_fn(
+        hsa_agent, static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_XCC), &info.xcc_num));
+    CHECK_HSA(
+        hsa_agent_get_info_fn(hsa_agent,
+                              static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ENGINES),
+                              &info.se_num));
+    CHECK_HSA(
+        hsa_agent_get_info_fn(hsa_agent,
+                              static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_COMPUTE_UNIT_COUNT),
+                              &info.cu_num));
+    CHECK_HSA(hsa_agent_get_info_fn(
+        hsa_agent,
+        static_cast<hsa_agent_info_t>(HSA_AMD_AGENT_INFO_NUM_SHADER_ARRAYS_PER_SE),
+        &info.shader_arrays_per_se));
+    info.agent_gfxip = gfxip;
+
+    aqlprofile_agent_handle_t handle{};
+    CHECK_HSA(aqlprofile_register_agent(&handle, &info));
+    return handle;
+}
+
 void
 set_profiler_active_on_queue(hsa_agent_t hsa_agent, hsa_queue_t* queue)
 {
-    hsa_ext_amd_aql_pm4_packet_t     packet{};
-    hsa_ven_amd_aqlprofile_profile_t profile{};
-    profile.agent = hsa_agent;
+    auto profile = aqlprofile_pmc_profile_t{
+        .agent = register_agent(hsa_agent), .events = nullptr, .event_count = 0};
+    auto control = aqlprofile_pmc_control_packet_t{};
 
     // Query for cmd buffer size
-    CHECK_HSA(
-        hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, nullptr));
+    CHECK_HSA(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_ENABLE_CMD, &control));
 
     // Allocate cmd buffer
     const size_t mask = 0x1000 - 1;
-    auto         size = (profile.command_buffer.size + mask) & ~mask;
+    auto         size = (control.command_buffer_size + mask) & ~mask;
 
     CHECK_HSA(hsa_amd_memory_pool_allocate_fn(
-        cpu_pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &profile.command_buffer.ptr));
-    CHECK_HSA(hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, profile.command_buffer.ptr));
+        cpu_pool, size, HSA_AMD_MEMORY_POOL_EXECUTABLE_FLAG, &control.command_buffer));
+    CHECK_HSA(hsa_amd_agents_allow_access_fn(1, &hsa_agent, nullptr, control.command_buffer));
 
-    CHECK_HSA(
-        hsa_ven_amd_aqlprofile_get_info(&profile, HSA_VEN_AMD_AQLPROFILE_INFO_ENABLE_CMD, &packet));
+    CHECK_HSA(aqlprofile_get_pmc_info(&profile, AQLPROFILE_INFO_ENABLE_CMD, &control));
 
-    queue_submit(queue, &packet);
-    hsa_amd_memory_pool_free_fn(profile.command_buffer.ptr);
+    queue_submit(queue, &control.packet);
+    hsa_amd_memory_pool_free_fn(control.command_buffer);
 }
 
 hsa_status_t
