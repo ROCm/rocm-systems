@@ -23,7 +23,6 @@
 #include "lib/rocprofiler-sdk/spm/dispatch_handlers.hpp"
 #include "lib/common/utility.hpp"
 #include "lib/rocprofiler-sdk/hsa/queue_controller.hpp"
-#include "lib/rocprofiler-sdk/kernel_replay/local_context.hpp"
 
 #include <rocprofiler-sdk/rocprofiler.h>
 
@@ -125,7 +124,8 @@ pre_kernel_call(const context::context*                                  ctx,
                 rocprofiler_dispatch_id_t                                dispatch_id,
                 rocprofiler_user_data_t*                                 user_data,
                 const hsa::queue_info_session_t::external_corr_id_map_t& extern_corr_ids,
-                const context::correlation_id*                           correlation_id)
+                const context::correlation_id*                           correlation_id,
+                bool                                                     locally_enabled)
 {
     CHECK(info && ctx);
     auto no_instrumentation = [&]() {
@@ -139,17 +139,14 @@ pre_kernel_call(const context::context*                                  ctx,
 
     if(!ctx || !ctx->dispatch_spm) return {nullptr, false};
 
-    // Effective collection state for this dispatch: the context's enabled flag, then the kernel-
-    // replay per-pass override (a replay pass may force this context on/off; no-op outside a replay
-    // loop). Mirrors counters/dispatch_handlers.cpp. See kernel_replay/local_context.hpp.
-    // Local start must only undo a prior local stop: it cannot promote a globally stopped context.
-    // Mirrors counters/dispatch_handlers.cpp.
+    // Effective collection state for this dispatch: the context's enabled flag AND the
+    // kernel-replay pass decision the enter hook resolved. Mirrors counters/dispatch_handlers.cpp:
+    // a local start cannot promote a globally stopped context, and a locally stopped one still
+    // takes the no_instrumentation path, so serialization is unchanged.
     const bool is_enabled = [&] {
         bool enabled = false;
         ctx->dispatch_spm->enabled.rlock([&](const auto& collect_ctx) { enabled = collect_ctx; });
-        if(auto ov = kernel_replay::local_context_override({.handle = ctx->context_idx}))
-            enabled = enabled && *ov;
-        return enabled;
+        return enabled && locally_enabled;
     }();
 
     if(!is_enabled || !info->user_cb) return {no_instrumentation(), true};
