@@ -82,6 +82,9 @@ class EventMarker : public amd::Marker {
     profilingInfo_.marker_ts_ = markerTs;
     profilingInfo_.batch_flush_ = batch_flush;
     profilingInfo_.clear();
+    // Non-batch-flush markers skip EnableProfiling() in Command::enqueue(), so this is the
+    // only place that ties the barrier's activity record back to the recording API call.
+    profilingInfo_.correlation_id_ = amd::activity_prof::correlation_id;
     setCommandEntryScope(scope);
   }
 };
