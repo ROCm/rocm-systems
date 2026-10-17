@@ -83,8 +83,9 @@ struct rcclArchThresholds {
   // kernels for the call. 0 in either bound = no window.
   size_t symTdmMinR2[RCCL_DDA_FUNC_COUNT];
   size_t symTdmMaxR2[RCCL_DDA_FUNC_COUNT];
-  // Upper edge of that window on a comm that spans UALink trays (MNNVL without all-direct
-  // links), where Ring Simple overtakes the TDM kernel sooner. 0 = symTdmMaxR2.
+  // Lower upper edge for that window on a comm that spans UALink trays (MNNVL without
+  // all-direct links), where Ring Simple overtakes the TDM kernel sooner. It can only lower
+  // symTdmMaxR2; 0 = no cap.
   size_t symTdmFabricMaxR2[RCCL_DDA_FUNC_COUNT];
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least

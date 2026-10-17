@@ -899,8 +899,8 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
 inline bool rcclSymTdmWindowTab(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes,
                                 bool crossTray) {
   if (table == nullptr) return false;
-  const size_t lo       = funcThresholdFromTable(table->symTdmMinR2, func);
-  size_t hi             = funcThresholdFromTable(table->symTdmMaxR2, func);
+  const size_t lo = funcThresholdFromTable(table->symTdmMinR2, func);
+  size_t hi = funcThresholdFromTable(table->symTdmMaxR2, func);
   const size_t fabricHi = funcThresholdFromTable(table->symTdmFabricMaxR2, func);
   if (crossTray && fabricHi != 0) hi = std::min(hi, fabricHi);
   return lo != 0 && hi != 0 && totalBytes >= lo && totalBytes <= hi;
