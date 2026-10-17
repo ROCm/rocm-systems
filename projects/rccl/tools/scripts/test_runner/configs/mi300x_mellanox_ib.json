@@ -3163,6 +3163,19 @@
           }
         },
         {
+          "name": "DDA_AllGatherSlicePlacement_8Ranks",
+          "description": "DDA IPC AllGather writes each rank's slice at the sender's offset on every rank, out of place and in place, at one-block and grid-stride sizes",
+          "test_filter": "DdaMPI_AllGather.SlicePlacement*"
+        },
+        {
+          "name": "DDA_AllGatherThresholdAboveScratch_8Ranks",
+          "description": "RCCL_DDA_THRESHOLD above the IPC scratch: an AllGather whose total exceeds scratch falls back and succeeds instead of returning ncclInvalidArgument",
+          "test_filter": "DdaMPI_AllGatherThreshold.AboveScratchFallsBack",
+          "env_variables": {
+            "RCCL_DDA_THRESHOLD": "1073741824"
+          }
+        },
+        {
           "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
           "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
           "test_filter": "HostApiTest.DenseAllToAllPutSignal",

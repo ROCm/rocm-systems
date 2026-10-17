@@ -1042,6 +1042,7 @@ if(BUILD_TESTS)
       DeviceApiMPITests.cpp
       CommNetMismatchMPITests.cpp
       test_sparse_send_recv.cpp
+      DdaAllGatherMPITests.cpp
       DdaAllReduceMPITests.cpp
       DdaFabricSimpleMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
