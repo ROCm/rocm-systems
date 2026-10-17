@@ -805,6 +805,7 @@ if(BUILD_TESTS)
       graph/P2pPxnLevel1NetIdTests.cpp
       graph/TopoGpuDevTests.cpp
       graph/TopoTests.cpp
+      graph/Mi350pPcieTopoTests.cpp
       transport/NetIbCast/NetIbCastPlaneSubnetTests.cpp
       transport/NetIbCast/NetIbCastMultiplaneTests.cpp
       common/main_fixtures.cpp
