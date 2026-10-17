@@ -2235,6 +2235,15 @@ template <bool EnableAsync>
         d->issue_pc = active->pc;
       }
       const VmAccessOutcome memory_outcome = route_memory_inst(decoded.value().release(), *active);
+      // A scalar access that completed inside its own issue keeps its decode. The
+      // pipeline state is destroyed first, so only the stateless instruction is
+      // cached, exactly like a completed ALU instruction.
+      if (std::unique_ptr<Instruction> done{scalar_mem_pipeline_.take_recyclable()}) {
+        if (reuse_decoded) {
+          done->set_data({});
+          decoded_inst_cache_.put_completed(issue_pc, vmid, words, done);
+        }
+      }
       if (memory_outcome != VmAccessOutcome::Complete) {
         if (memory_outcome == VmAccessOutcome::Unavailable) {
           request_functional_yield();

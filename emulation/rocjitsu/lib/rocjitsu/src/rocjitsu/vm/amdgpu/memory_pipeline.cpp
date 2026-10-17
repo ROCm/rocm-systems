@@ -116,8 +116,11 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
                                            bool retain_unavailable) {
   const WaitCounterTokens counters = issue_counters(*inst);
   acquire_wait_counters(wf, counters);
+  recyclable_ = nullptr;
+  issuing_ = recycle_sync_completions_ ? inst : nullptr;
   const VmAccessOutcome access = initiate_access(*inst, wf);
   if (access == VmAccessOutcome::Unavailable && retain_unavailable) {
+    issuing_ = nullptr;
     issued_.push({.inst = inst,
                   .wf = &wf,
                   .counters = counters,
@@ -127,12 +130,14 @@ VmAccessOutcome MemoryPipeline::issue_impl(Instruction *inst, Wavefront &wf,
     return VmAccessOutcome::Complete;
   }
   if (access != VmAccessOutcome::Complete) {
+    issuing_ = nullptr;
     release_wait_counters(wf, counters);
     delete inst;
     return access;
   }
   complete_entry(
       {.inst = inst, .wf = &wf, .counters = counters, .wave_generation = wf.dispatch_generation()});
+  issuing_ = nullptr;
   return VmAccessOutcome::Complete;
 }
 

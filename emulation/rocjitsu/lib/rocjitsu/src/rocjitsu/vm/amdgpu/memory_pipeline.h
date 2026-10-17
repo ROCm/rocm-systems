@@ -81,6 +81,11 @@ public:
   /// failures are returned synchronously and leave no retained instruction.
   VmAccessOutcome issue_deferred(Instruction *inst, Wavefront &wf);
 
+  /// @brief Take the instruction that completed synchronously in the last issue.
+  /// @details Ownership passes to the caller, who must destroy or reuse it. Returns
+  /// nullptr when the access was retained, deferred, failed, or recycling is off.
+  [[nodiscard]] Instruction *take_recyclable() { return std::exchange(recyclable_, nullptr); }
+
   /// @brief Retry every request that was unavailable on its preceding attempt.
   void tick();
 
@@ -121,8 +126,23 @@ protected:
     release_wait_counters(wf, counters);
     if (wf.state() == WfState::VM_RETRY)
       wf.set_state(WfState::RUNNING);
+    // An access that finished inside its own issue_impl() is handed back to the
+    // issuer instead of destroyed, so it can reuse the decode. Later (retried or
+    // deferred) completions never match, and are destroyed here.
+    if (inst == issuing_ && recycle_sync_completions_) {
+      issuing_ = nullptr;
+      recyclable_ = inst;
+      return;
+    }
     delete inst;
   }
+
+  /// Set by pipelines whose issuer can recycle a synchronously completed instruction.
+  bool recycle_sync_completions_ = false;
+  /// Instruction currently inside issue_impl() and, after a synchronous
+  /// completion, the one handed back to the issuer by finish_completed_access().
+  Instruction *issuing_ = nullptr;
+  Instruction *recyclable_ = nullptr;
 
   WaitCounterType counter_type_;
   std::queue<PipelineEntry> issued_;
@@ -138,7 +158,9 @@ class ScalarMemPipeline : public MemoryPipeline {
 public:
   /// @param l1 L1 Scalar Cache (K$), not owned.
   explicit ScalarMemPipeline(L1ScalarCache *l1)
-      : MemoryPipeline(WaitCounterType::LGKMCNT), l1_(l1) {}
+      : MemoryPipeline(WaitCounterType::LGKMCNT), l1_(l1) {
+    recycle_sync_completions_ = true;
+  }
 
 protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;

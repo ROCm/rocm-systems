@@ -88,6 +88,18 @@ public:
     int exceptions_;
   };
 
+  /// @brief Return a memory instruction whose pipeline state was already cleared.
+  ///
+  /// @details Only an instruction that completed synchronously inside the caller's
+  /// own issue may come back, with the key and policy it was decoded under. It
+  /// must hold no dynamic state and no borrow of the fetch buffer; otherwise it
+  /// is left in @p instruction for the caller to destroy.
+  void put_completed(uint64_t pc, uint32_t vmid, Words words,
+                     std::unique_ptr<Instruction> &instruction) {
+    if (instruction && !instruction->data() && !borrows_fetch_buffer(*instruction, words))
+      put(pc, vmid, words, instruction);
+  }
+
   /// @brief Drop entries before replacing the decoder/target, or destroying this CU.
   void clear() {
     Instruction::ScopedHeapAllocation heap_allocation;
