@@ -87,10 +87,11 @@ process_completed_cb(completed_cb_params_t&& params)
             // callback branch below and CHECK on a record_callback this context never configured,
             // and aborting here would turn a late completion into a crash in the tool's own
             // shutdown path.
-            ROCP_WARNING << "counter collection: buffer " << info->buffer->handle
-                         << " was destroyed before dispatch "
-                         << packet.callback_record.dispatch_info.dispatch_id
-                         << " completed; dropping its counter record";
+            ROCP_CI_LOG(WARNING)
+                << "counter collection: buffer " << info->buffer->handle
+                << " was destroyed before dispatch "
+                << packet.callback_record.dispatch_info.dispatch_id
+                << " completed; dropping its counter record";
             return;
         }
     }
