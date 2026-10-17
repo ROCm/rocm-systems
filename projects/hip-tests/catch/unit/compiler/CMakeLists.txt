@@ -109,17 +109,41 @@ if(HIP_PLATFORM MATCHES "amd")
     add_dependencies(hipSquareGenericTargetDefault hipSquareGenericTargetOnlyCompressed)
   endif()
 
-  # SWDEV-548807 skip building hipSpirvTest
-  if(false)
-    add_custom_target(hipSpirvTest ALL
-                    COMMAND ${CMAKE_HIP_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
-                    -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
-                    -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
-                    -I${Catch2_SOURCE_DIR}/src
-                    -I${Catch2_BINARY_DIR}/generated-includes
-                    --offload-arch=amdgcnspirv
-                    -o ${CMAKE_CURRENT_BINARY_DIR}/../../unit/compiler/hipSpirvTest)
-    add_dependencies(CompilerTest hipSpirvTest)
+  # Custom command so hipSpirvTest is compiled for amdgcnspirv only.
+  # On Windows, match the MSVC runtime used by Catch2 (CMAKE_MSVC_RUNTIME_LIBRARY).
+  set(SPIRV_TEST_RUNTIME_FLAG)
+  if(WIN32)
+    if(NOT CMAKE_MSVC_RUNTIME_LIBRARY OR CMAKE_MSVC_RUNTIME_LIBRARY MATCHES "DLL")
+      set(SPIRV_TEST_RUNTIME_FLAG "-fms-runtime-lib=dll$<$<CONFIG:Debug>:_dbg>")
+    else()
+      set(SPIRV_TEST_RUNTIME_FLAG "-fms-runtime-lib=static$<$<CONFIG:Debug>:_dbg>")
+    endif()
   endif()
+  add_custom_target(hipSpirvTest ALL
+                  COMMAND ${CMAKE_HIP_COMPILER} -x hip ${CMAKE_CURRENT_SOURCE_DIR}/hipSpirvTest.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/hip_test_context.cc
+                  -x hip ${CMAKE_CURRENT_SOURCE_DIR}/../../hipTestMain/main.cc
+                  -I${CMAKE_CURRENT_SOURCE_DIR}/../../include
+                  "-I$<JOIN:$<TARGET_PROPERTY:Catch2::Catch2,INTERFACE_INCLUDE_DIRECTORIES>,;-I>"
+                  --offload-arch=amdgcnspirv
+                  ${SPIRV_TEST_RUNTIME_FLAG}
+                  -x none $<TARGET_LINKER_FILE:Catch2::Catch2>
+                  -o ${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest${CMAKE_EXECUTABLE_SUFFIX}
+                  COMMAND_EXPAND_LISTS
+                  VERBATIM)
+  add_dependencies(hipSpirvTest Catch2::Catch2)
+  add_dependencies(CompilerTest hipSpirvTest)
+
+  # Install hipSpirvTest and register it with ctest.
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CUSTOM_TARGETS
+               ${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest${CMAKE_EXECUTABLE_SUFFIX})
+  set(SPIRV_TEST_CTEST_FILE ${CMAKE_CURRENT_BINARY_DIR}/hipSpirvTest-spirv_include.cmake)
+  file(WRITE ${SPIRV_TEST_CTEST_FILE}
+       "add_test(Unit_test_spirv_mode \"\${EXE_PATH}/hipSpirvTest${CMAKE_EXECUTABLE_SUFFIX}\")\n"
+       "set_tests_properties(Unit_test_spirv_mode PROPERTIES WORKING_DIRECTORY \"\${EXE_PATH}\" SKIP_RETURN_CODE 4)\n"
+       "if(DEFINED LIB_PATH)\n"
+       "  list(TRANSFORM LIB_PATH PREPEND \"LD_LIBRARY_PATH=path_list_prepend:\" OUTPUT_VARIABLE _spirv_env)\n"
+       "  set_tests_properties(Unit_test_spirv_mode PROPERTIES ENVIRONMENT_MODIFICATION \"\${_spirv_env}\")\n"
+       "endif()\n")
+  set_property(GLOBAL APPEND PROPERTY G_INSTALL_CTEST_INCLUDE_FILES ${SPIRV_TEST_CTEST_FILE})
 endif()
