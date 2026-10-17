@@ -102,6 +102,10 @@ protected:
   virtual MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                                  MemoryAccessDeferredCompletion complete) = 0;
 
+  /// Whether complete_access() may return Deferred. Pipelines that always return
+  /// Complete override this to skip building the deferred-completion closure.
+  virtual bool may_defer_completion() const { return true; }
+
   VmAccessOutcome issue_impl(Instruction *inst, Wavefront &wf, bool retain_unavailable);
   [[nodiscard]] WaitCounterTokens issue_counters(const Instruction &inst) const;
   void acquire_wait_counters(Wavefront &wf, const WaitCounterTokens &counters);
@@ -140,6 +144,7 @@ protected:
   VmAccessOutcome initiate_access(Instruction &inst, Wavefront &wf) override;
   MemoryAccessCompletion complete_access(Instruction &inst, Wavefront &wf,
                                          MemoryAccessDeferredCompletion complete) override;
+  bool may_defer_completion() const override { return false; }
 
 private:
   L1ScalarCache *l1_;

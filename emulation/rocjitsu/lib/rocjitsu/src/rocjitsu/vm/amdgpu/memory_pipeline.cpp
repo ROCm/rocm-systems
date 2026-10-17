@@ -91,6 +91,16 @@ void MemoryPipeline::release_wait_counters(Wavefront &wf, const WaitCounterToken
 }
 
 void MemoryPipeline::complete_entry(PipelineEntry entry) {
+  if (!may_defer_completion()) {
+    // complete_access() never defers here, so no std::function closure (a heap
+    // allocation per access) is needed.
+    const MemoryAccessCompletion completion =
+        complete_access(*entry.inst, *entry.wf, MemoryAccessDeferredCompletion{});
+    assert(completion == MemoryAccessCompletion::Complete);
+    (void)completion;
+    finish_completed_access(entry.inst, *entry.wf, entry.counters, entry.wave_generation);
+    return;
+  }
   MemoryAccessDeferredCompletion deferred_completion = [this, inst = entry.inst, wf = entry.wf,
                                                         counters = entry.counters,
                                                         wave_generation = entry.wave_generation]() {
