@@ -500,19 +500,21 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
     return ncclSuccess;
   }
 #endif
-  static int gdrSupportMatrix[32] = {-1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1,
-                                     -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1, -1};
-  if (gdrSupportMatrix[comm->cudaDev] == -1) {
-    int netDevs;
+  // Keyed by plugin as well as GPU: the verdict comes from the communicator's own net, and Socket
+  // offers no NCCL_PTR_CUDA on any device, so one slot per GPU let a Socket communicator answer
+  // for every later IB one in the process. 0 unprobed, 1 no, 2 yes. (ROCM-27737)
+  static int gdrSupportMatrix[NCCL_NET_MAX_PLUGINS][32] = {};
+  int* cached = &gdrSupportMatrix[comm->netPluginIndex][comm->cudaDev];
+  if (*cached == 0) {
+    int netDevs, verdict = 1;
     NCCLCHECK(comm->ncclNet->devices(&netDevs));
-    gdrSupportMatrix[comm->cudaDev] = 0;
     for (int dev = 0; dev < netDevs; dev++) {
       // Find a net device which is GDR-capable
       ncclNetProperties_t props;
       NCCLCHECK(comm->ncclNet->getProperties(dev, &props));
       if ((props.ptrSupport & NCCL_PTR_CUDA) == 0) continue;
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
-      gdrSupportMatrix[comm->cudaDev] = 1;
+      verdict = 2;
       break;
 #endif
 
@@ -547,7 +549,7 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
         NCCLCHECKNOWARN(comm->ncclNet->deregMr(sComm, mHandle), NCCL_NET);
         NCCLCHECKNOWARN(comm->ncclNet->regMr(rComm, gpuPtr, GPU_BUF_SIZE, NCCL_PTR_CUDA, &mHandle), NCCL_NET);
         NCCLCHECKNOWARN(comm->ncclNet->deregMr(rComm, mHandle), NCCL_NET);
-        gdrSupportMatrix[comm->cudaDev] = 1;
+        verdict = 2;
       }
       NCCLCHECK(ncclCudaFree(gpuPtr, comm->memManager));
     cleanup2:
@@ -557,7 +559,8 @@ ncclResult_t ncclGpuGdrSupport(struct ncclComm* comm, int* gdrSupport) {
     cleanup1:
       break;
     }
+    *cached = verdict;
   }
-  *gdrSupport = gdrSupportMatrix[comm->cudaDev];
+  *gdrSupport = (*cached == 2) ? 1 : 0;
   return ncclSuccess;
 }
