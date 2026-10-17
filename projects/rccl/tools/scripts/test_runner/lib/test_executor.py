@@ -480,7 +480,7 @@ def extract_skip_reasons_from_log(log_path):
 
     for i, line in enumerate(lines):
         # Match the terminal "[  SKIPPED ] Suite.Case (N ms)" line.
-        m = re.match(r'\[  SKIPPED  \] ([\w./]+)\s+\(\d+', line)
+        m = re.match(r'\[  SKIPPED \] ([\w./]+)\s+\(\d+', line)
         if not m:
             continue
         full_name = m.group(1)
