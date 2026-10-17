@@ -2896,6 +2896,8 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
     std::array<uint32_t, 2> words;
     std::array<uint32_t, 2> modes;
     std::vector<Lane> lanes;
+    // VOP3 F16 SUB/SUBREV share ADD's MODE-aware SIMD route, including NEG.
+    SimdPathExpectation simd = {};
   };
   const auto vop2 = [](uint16_t op) {
     return std::array<uint32_t, 2>{rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = 1, .vdst = 6})[0],
@@ -2904,6 +2906,8 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
   const auto vop3 = [](uint16_t op, uint8_t neg) {
     return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257, .neg = neg});
   };
+  const SimdPathExpectation f16_mode_route =
+      expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16);
   // The E32 captures cover MODE 0x30 and 0xc0; the E64 ones cover 0x00 and 0xf0.
   // llvm-mc gives gfx1100 the same VOP2 F32 SUB/SUBREV encodings as gfx1201.
   constexpr rj_code_arch_t kGfx1201 = ROCJITSU_CODE_ARCH_RDNA4;
@@ -2952,12 +2956,14 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
        "SubF16E64Neg1",
        vop3(rdna4::kVSubF16Vop3, 2),
        {0x00u, 0xf0u},
-       {{"NanSubtrahend", 0x913b8000u, 0x72617e00u, 0xa5a57e00u}}},
+       {{"NanSubtrahend", 0x913b8000u, 0x72617e00u, 0xa5a57e00u}},
+       f16_mode_route},
       {kGfx1201,
        "SubrevF16E64Neg0",
        vop3(rdna4::kVSubrevF16Vop3, 1),
        {0x00u, 0xf0u},
-       {{"NanSubtrahend", 0x6c027e00u, 0x840c8000u, 0xa5a57e00u}}},
+       {{"NanSubtrahend", 0x6c027e00u, 0x840c8000u, 0xa5a57e00u}},
+       f16_mode_route},
       {kGfx1100,
        "SubF32E32",
        vop2(rdna4::kVSubF32Vop2),
@@ -2976,17 +2982,11 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
   constexpr uint32_t kHigh = 0xa5a50000u;
   std::vector<ArithmeticCase> cases;
   for (const Form &form : forms) {
-    const bool half = std::string_view(form.name).find("F16") != std::string_view::npos;
-    // VOP3 F16 SUB/SUBREV share ADD's MODE-aware SIMD route, including NEG.
-    const SimdPathExpectation simd =
-        std::string_view(form.name).find("F16E64") != std::string_view::npos
-            ? expect_simd_path(amdgpu::SimdFastPath::VOP3_BINARY_MODE_FP16)
-            : SimdPathExpectation{};
     for (const Lane &lane : form.lanes) {
       for (const uint32_t mode : form.modes) {
-        std::vector<std::pair<uint32_t, uint32_t>> sources{{0, lane.src0}, {1, lane.src1}};
-        if (half)
-          sources.emplace_back(6, kHigh);
+        // Every form seeds the destination; F16 forms must keep its high half.
+        std::vector<std::pair<uint32_t, uint32_t>> sources{
+            {0, lane.src0}, {1, lane.src1}, {6, kHigh}};
         cases.push_back(
             {std::format("{}{}{}Mode{:02X}", form.arch == kGfx1100 ? "Gfx1100" : "Gfx1201",
                          form.name, lane.name, mode),
@@ -2998,7 +2998,7 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
              FE_TONEAREST,
              0u,
              0u,
-             simd});
+             form.simd});
       }
     }
   }
@@ -3125,19 +3125,22 @@ std::vector<ArithmeticCase> subtraction_simd_boundary_cases() {
 // exact cancellation down to -0. VOP3 nearest-even cases take the MODE-aware
 // F16 SIMD route; directed rounding falls back to scalar execution.
 std::vector<ArithmeticCase> subtraction_mode_cases() {
+  struct Encoding {
+    std::array<uint32_t, 2> words;
+    bool vop3;
+  };
   struct Lane {
     const char *name;
-    std::array<uint32_t, 2> words;
+    Encoding encoding;
     uint32_t src0;
     uint32_t src1;
     std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
   };
   const auto vop2 = [](uint16_t op) {
-    return std::array<uint32_t, 2>{rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = 1, .vdst = 6})[0],
-                                   0u};
+    return Encoding{{rdna4::build_vop2(op, {.src0 = 256, .vsrc1 = 1, .vdst = 6})[0], 0u}, false};
   };
   const auto vop3 = [](uint16_t op) {
-    return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257});
+    return Encoding{rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257}), true};
   };
   // The *FieldSplit lanes set the F32 and F16/F64 MODE fields differently:
   // 0xf3/0xfc round only F32 or only F16 toward zero, and 0x30/0xc0 flush only
@@ -3197,7 +3200,7 @@ std::vector<ArithmeticCase> subtraction_mode_cases() {
   }};
   std::vector<ArithmeticCase> cases;
   for (const Lane &lane : lanes) {
-    const bool vop3_form = std::string_view(lane.name).find("E64") != std::string_view::npos;
+    const bool vop3_form = lane.encoding.vop3;
     for (const auto &[mode, result] : lane.mode_results) {
       const bool nearest = ((mode >> 2) & 3u) == 0;
       const SimdPathExpectation simd =
@@ -3206,7 +3209,7 @@ std::vector<ArithmeticCase> subtraction_mode_cases() {
                      : expect_simd_fallback();
       cases.push_back({std::format("{}Mode{:02X}", lane.name, mode),
                        ROCJITSU_CODE_ARCH_RDNA4,
-                       {lane.words[0], lane.words[1], 0u},
+                       {lane.encoding.words[0], lane.encoding.words[1], 0u},
                        {{0, lane.src0}, {1, lane.src1}, {6, 0xa5a50000u}},
                        {{6, result}},
                        mode,
@@ -3324,7 +3327,7 @@ std::vector<ArithmeticCase> mullit_cases() {
     std::array<uint32_t, 3> sources;
     std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
   };
-  constexpr std::array<Lane, 14> lanes = {{
+  constexpr std::array<Lane, 16> lanes = {{
       // min_normal * min_normal underflows to +0 unless S2 = 2^-149 is flushed.
       {"S2Subnormal",
        0,
@@ -3365,20 +3368,23 @@ std::vector<ArithmeticCase> mullit_cases() {
        {0x2d1d4000u, 0x49032148u, 0x44630000u},
        {{{0xf0u, 0x36a11863u}, {0xffu, 0x36a11862u}}}},
       // min_normal * (1 - 2^-24) stays below min_normal at F32 precision, so it
-      // is tiny although its subnormal encoding rounds up; flushing gives +0.
-      // The MULLIT capture lacks this product; gfx1201 V_MUL_DX9_ZERO_F32
-      // captures of the same factors give these results.
+      // is tiny although its subnormal encoding rounds up; flushing gives +0 of
+      // the product's sign, and an effective OMOD flushes it even when MODE keeps
+      // denormals. These boundary lanes are direct gfx1201 MULLIT captures; gfx1100
+      // with IEEE=1 gives the same plain and NEG results.
       {"TinyProductRoundsToMinNormal",
        0,
        0,
        0,
        {0x00800000u, 0x3f7fffffu, 0x3f800000u},
        {{{0x00u, 0u}, {0xf0u, 0x00800000u}}}},
-      // The same boundary with a negative product keeps its sign; an effective
-      // OMOD flushes the tiny product before scaling even when MODE keeps
-      // denormals. gfx1201 V_MUL_DX9_ZERO_F32 captures (lanes 251/2240, NEG and
-      // mul:2 forms) give these results.
-      {"NegativeTinyProductRoundsToMinNormal",
+      {"NegativeS0TinyProductRoundsToMinNormal",
+       0,
+       0,
+       0,
+       {0x80800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x00u, 0x80000000u}, {0xf0u, 0x80800000u}}}},
+      {"NegTinyProductRoundsToMinNormal",
        0,
        0,
        1,
@@ -3389,6 +3395,12 @@ std::vector<ArithmeticCase> mullit_cases() {
        1,
        0,
        {0x00800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x00u, 0u}, {0xf0u, 0u}}}},
+      {"Mul2NegativeS0TinyProductFlushes",
+       0,
+       1,
+       0,
+       {0x80800000u, 0x3f7fffffu, 0x3f800000u},
        {{{0x00u, 0u}, {0xf0u, 0u}}}},
       {"RoundTowardZeroF32Field",
        0,
@@ -3447,8 +3459,7 @@ std::vector<ArithmeticCase> mullit_cases() {
 // On gfx1100, encoded OMOD is disabled with IEEE=1 or with output denormals kept
 // (IEEE=0, MODE 0xf0): mul:2 neither scales nor forces a flush, so the tiny
 // product rounds to min_normal. With IEEE=0 and MODE 0x00, OMOD applies and the
-// flushed product is +0. gfx1100 V_MUL_DX9_ZERO_F32 and V_MUL_F32 mul:2 captures
-// of the same factors (lane 251, both IEEE settings) give these results.
+// flushed product is +0. These are direct gfx1100 MULLIT captures.
 std::vector<ArithmeticCase> mullit_rdna3_omod_cases() {
   constexpr auto kWords = rdna4::build_vop3(
       rdna4::kVMullitF32Vop3, {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258, .omod = 1});
