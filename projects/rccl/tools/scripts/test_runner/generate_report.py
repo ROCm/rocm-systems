@@ -32,8 +32,10 @@ from datetime import datetime, timezone
 def load_run(run_dir):
     with open(os.path.join(run_dir, "run.json")) as f:
         run = json.load(f)
+    counts = {"passed": 0, "failed": 0, "timeout": 0, "skipped": 0, "disabled": 0, "total": 0}
     cases = {"failed": [], "timeout": [], "skipped": [], "disabled": [],
-              "skipped_by_reason": collections.defaultdict(list)}
+              "skipped_by_reason": collections.defaultdict(list),
+              "counts": counts}
     with open(os.path.join(run_dir, "tests.jsonl")) as f:
         for line in f:
             line = line.strip()
@@ -51,27 +53,40 @@ def load_run(run_dir):
                     full_name = c.get("full_name", f"{c.get('suite','')}.{c.get('case','')}")
                     msg = c.get("message", c.get("failure_message", ""))
                     reason = c.get("reason", "")
-                    if st == "FAILED":
+                    counts["total"] += 1
+                    if st == "PASSED":
+                        counts["passed"] += 1
+                    elif st == "FAILED":
+                        counts["failed"] += 1
                         cases["failed"].append({"test": full_name, "suite": suite_label, "message": msg})
                     elif st in ("TIMEOUT", "TIMED_OUT"):
+                        counts["timeout"] += 1
                         cases["timeout"].append({"test": full_name, "suite": suite_label})
                     elif st == "SKIPPED":
+                        counts["skipped"] += 1
                         cases["skipped"].append({"test": full_name, "suite": suite_label,
                                                  "reason": reason or skip_reason})
                     elif st == "DISABLED":
+                        counts["disabled"] += 1
                         cases["disabled"].append({"test": full_name, "suite": suite_label})
             else:
-                # Suite-level records (no case_details): use top-level result
+                # Config-level records (no case_details): binary timed out or was skipped/disabled
                 exit_code = t.get("exit_code", "")
                 msg = skip_reason if result == "SKIPPED" else (
                     f"exit_code={exit_code}" if exit_code not in (0, None, "") else "")
                 if result == "FAILED":
+                    counts["total"] += 1
+                    counts["failed"] += 1
                     cases["failed"].append({"test": test_name, "suite": suite_label, "message": msg})
                 elif result in ("TIMEOUT", "TIMED_OUT"):
+                    counts["total"] += 1
+                    counts["timeout"] += 1
                     cases["timeout"].append({"test": test_name, "suite": suite_label})
                 elif result == "SKIPPED":
                     cases["skipped_by_reason"][skip_reason].append(test_name)
                 elif result == "DISABLED":
+                    counts["total"] += 1
+                    counts["disabled"] += 1
                     cases["disabled"].append({"test": test_name, "suite": suite_label})
     return run, cases
 
@@ -123,6 +138,7 @@ header p  { font-size: .85rem; color: #aaa; margin-top: 4px; }
 .stat.timeout { background: #fff3cd; color: #856404; }
 .stat.skipped { background: #e2e3e5; color: #383d41; }
 .stat.disabled{ background: #cfe2ff; color: #084298; }
+.stat.notrun  { background: #f5e6ff; color: #4a0072; }
 section { background: #fff; border-radius: 8px; box-shadow: 0 1px 4px rgba(0,0,0,.08);
           margin-bottom: 24px; overflow: hidden; }
 section h2 { padding: 16px 24px; font-size: 1rem; border-bottom: 1px solid #eee;
@@ -165,67 +181,69 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
     versions = meta.get("versions", {})
     summary = run.get("summary", {})
 
+    # --- gtest case counts: always from case_details in tests.jsonl, never from run.json summary ---
+    cnt = cases["counts"]
+    passed   = cnt["passed"]
+    failed   = cnt["failed"]
+    timeout  = cnt["timeout"]
+    skipped  = cnt["skipped"]
+    disabled = cnt["disabled"]
+    suite_total = cnt["total"]
+    executed = passed + failed + timeout + skipped
+    pass_rate      = (passed / suite_total * 100) if suite_total else 0
+    pass_rate_exec = (passed / executed   * 100) if executed   else 0
+    duration = summary.get("duration_s", 0)
+
+    not_executed_raw = (real_total - suite_total) if real_total and real_total > suite_total else None
+    not_executed = not_executed_raw if (not_executed_raw is not None and not_executed_raw != disabled) else None
+
+    # --- metadata from run.json; augment_report.py overlays node-level data from nodes.tsv ---
     node_names = run.get("node_names", [])
-    hostname = ", ".join(node_names) if node_names else run.get("host", "unknown")
-    rocm_ver = rocm_label or versions.get("rocm", run.get("rocm_version", "unknown"))
-    kernel = versions.get("kernel", meta.get("kernel", "unknown"))
-    bkc = bkc_override or "unknown"
-    gpu_arch = run.get("gpu_arch", "unknown")
-    num_gpus = run.get("gpus_per_node", "?")
+    hostname   = ", ".join(node_names) if node_names else run.get("host", "")
+    rocm_ver   = rocm_label or versions.get("rocm", run.get("rocm_version", ""))
+    hip_ver    = versions.get("hip", "")
+    amdgpu_ver = versions.get("amdgpu", "")
+    sbios      = versions.get("sbios", "")
+    num_gpus   = str(run.get("gpus_per_node", ""))
+    kernel     = versions.get("kernel", meta.get("kernel", ""))
+    os_name    = meta.get("os", "")
+    rccl_branch = run.get("rccl_branch", "")
+    rccl_sha    = run.get("rccl_sha", "")
+
+    bkc = bkc_override or ""
+    gpu_arch = run.get("gpu_arch", "")
     config_file = run.get("config_file", "")
-    if config_file:
-        config_name = os.path.basename(config_file)
-    else:
-        config_name = run.get("config_name", "") or ""
-    os_name = meta.get("os", "unknown")
+    config_name = os.path.basename(config_file) if config_file else (run.get("config_name", "") or "")
 
     ts = run.get("started_at", run.get("created_at", ""))
     try:
         dt = datetime.fromisoformat(ts).astimezone(timezone.utc)
-        date_str = dt.strftime("%Y-%m-%d %H:%M UTC")
+        date_str   = dt.strftime("%Y-%m-%d %H:%M UTC")
         date_short = dt.strftime("%Y-%m-%d")
     except Exception:
-        date_str = ts
-        date_short = ts[:10]
+        date_str   = ts
+        date_short = ts[:10] if ts else ""
 
-    passed   = summary.get("cases_passed", summary.get("passed", 0))
-    failed   = summary.get("cases_failed", summary.get("failed", 0))
-    timeout  = summary.get("cases_timeout", summary.get("timeout", 0))
-    skipped  = summary.get("cases_skipped", summary.get("skipped", 0))
-    disabled = summary.get("cases_disabled", summary.get("disabled", 0))
-    duration = summary.get("duration_s", 0)
-    executed = passed + failed + timeout + skipped
-
-    suite_total  = real_total or summary.get("cases_total", summary.get("total", executed))
-    not_executed_raw = suite_total - executed if suite_total > executed else None
-    # Suppress "Not Executed" stat when it equals the disabled count — that means
-    # every unexecuted case is simply a DISABLED_ test (they never run by design).
-    not_executed = not_executed_raw if (not_executed_raw is not None and not_executed_raw != disabled) else None
-    pass_rate         = (passed / suite_total * 100) if suite_total else 0
-    pass_rate_exec    = (passed / executed * 100) if executed else 0
-
-    # ---- META TABLE ----
-    sbios = versions.get("sbios", "")
-    amdgpu_ver = versions.get("amdgpu", "")
-    hip_ver = versions.get("hip", "")
-
+    # Canonical field order — fixed. Node-level fields use placeholders here;
+    # augment_report.py overwrites them from nodes.tsv.
+    _P = "\u2014"
     meta_rows = [
-        ("Date", date_str),
-        ("Host", hostname),
-        ("BKC", bkc),
-        ("ROCm version", rocm_ver),
-        ("amdgpu driver", amdgpu_ver),
-        ("HIP version", hip_ver),
-        ("SBIOS version", sbios),
-        ("GPU Arch", gpu_arch),
-        ("GPUs / Node", num_gpus),
-        ("OS", os_name),
-        ("Kernel", kernel),
-        ("Config", config_name),
-        ("Duration", f"{duration:.0f}s ({duration/60:.1f}m)"),
-        ("Pass Rate", f"{pass_rate:.1f}% of total  |  {pass_rate_exec:.1f}% of executed"),
+        ("Date",          date_str),
+        ("Host",          hostname or _P),
+        ("ROCm version",  rocm_ver or _P),
+        ("amdgpu driver", amdgpu_ver or _P),
+        ("HIP version",   hip_ver or _P),
+        ("SBIOS version", sbios or _P),
+        ("PLDM version",  _P),
+        ("GPU Arch",      gpu_arch),
+        ("GPUs / Node",   num_gpus or _P),
+        ("OS",            os_name or _P),
+        ("Kernel",        kernel or _P),
+        ("Config",        config_name),
+        ("Duration",      f"{duration:.0f}s ({duration/60:.1f}m)"),
+        ("Pass Rate",     f"{pass_rate:.1f}% of total  |  {pass_rate_exec:.1f}% of executed"),
+        ("Partition mode", _P),
     ]
-    # Strip rows with no value so the table stays clean
     meta_rows = [(k, v) for k, v in meta_rows if v not in (None, "", "unknown")]
 
     meta_rows_html = "".join(
@@ -238,25 +256,28 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
     </table>"""
 
     # ---- SUMMARY STATS ----
+    configs_not_run = sum(len(v) for v in cases["skipped_by_reason"].values())
     not_exec_stat = ""
     if not_executed is not None:
         not_exec_stat = f'<div class="stat" style="background:#fff3cd;color:#856404"><div class="num">{not_executed}</div><div class="lbl">Not Executed</div></div>'
+    notrun_stat = f'<div class="stat notrun"><div class="num">{configs_not_run}</div><div class="lbl">Configs Not Run</div></div>' if configs_not_run else ""
     stats_html = f"""
-    <div class="stat total">  <div class="num">{suite_total}</div>  <div class="lbl">Total in Suite</div></div>
+    <div class="stat total">  <div class="num">{suite_total}</div>  <div class="lbl">Total Cases (Launched)</div></div>
     <div class="stat passed"> <div class="num">{passed}</div> <div class="lbl">Passed</div></div>
     <div class="stat failed"> <div class="num">{failed}</div> <div class="lbl">Failed</div></div>
     <div class="stat timeout"><div class="num">{timeout}</div><div class="lbl">Timeout</div></div>
     <div class="stat skipped"><div class="num">{skipped}</div><div class="lbl">Skipped</div></div>
     <div class="stat disabled"><div class="num">{disabled}</div><div class="lbl">Disabled</div></div>
-    {not_exec_stat}
+    {notrun_stat}{not_exec_stat}
     """
     legend_items = [
-        ("Total in Suite", "All gtest cases registered across all test binaries (via --gtest_list_tests)."),
+        ("Total Cases (Launched)", "All gtest cases from test configs that were actually launched. Does not include cases from configs skipped before execution (see Configs Not Run)."),
         ("Passed", "Binary ran, gtest case executed, and reported success."),
         ("Failed", "Binary ran, gtest case executed, and reported failure or exited non-zero."),
         ("Timeout", "Test config was killed after exceeding the time limit; no case results were captured."),
         ("Skipped", "Binary ran, gtest case was selected, but called GTEST_SKIP() at runtime (e.g. missing feature or hardware)."),
         ("Disabled", "Gtest case name prefixed with DISABLED_; excluded from execution by the framework."),
+        ("Configs Not Run", "Entire test configs the runner skipped before invoking the binary (e.g. requires more nodes than available). Reason shown in the Skipped section."),
         ("Not Executed", "Cases whose test config was never launched (e.g. requires a second node, or a prior config timed out)."),
     ]
     legend_rows = "".join(
@@ -281,20 +302,23 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
     # ---- SKIPPED TABLE ----
     skipped_html = ""
     if cases["skipped"]:
-        skipped_html += "<h3 style='margin:12px 0 8px;font-size:.85rem;color:#555'>Individual gtest cases skipped within executed suites</h3>"
         skipped_rows = [(c["test"], c["suite"], c.get("reason", "")) for c in cases["skipped"]]
         skipped_html += _table(["Test Case", "Suite", "Reason"], skipped_rows)
-    if cases["skipped_by_reason"]:
-        skipped_html += "<h3 style='margin:20px 0 8px;font-size:.85rem;color:#555'>Test configs skipped before execution (grouped by reason)</h3>"
-        for reason, tests in sorted(cases["skipped_by_reason"].items(), key=lambda x: -len(x[1])):
-            items = "".join(f"<li>{_h(t)}</li>" for t in sorted(tests))
-            skipped_html += f"""
-            <div class="reason-group">
-              <h3>{_h(reason)} <span style="color:#aaa;font-weight:normal">({len(tests)} tests)</span></h3>
-              <ul>{items}</ul>
-            </div>"""
     if not skipped_html:
         skipped_html = '<p class="empty">No skipped tests.</p>'
+
+    # ---- CONFIGS NOT RUN TABLE ----
+    notrun_html = ""
+    if cases["skipped_by_reason"]:
+        for reason, tests in sorted(cases["skipped_by_reason"].items(), key=lambda x: -len(x[1])):
+            items = "".join(f"<li>{_h(t)}</li>" for t in sorted(tests))
+            notrun_html += f"""
+            <div class="reason-group">
+              <h3>{_h(reason)} <span style="color:#aaa;font-weight:normal">({len(tests)} configs)</span></h3>
+              <ul>{items}</ul>
+            </div>"""
+    if not notrun_html:
+        notrun_html = '<p class="empty">All test configs were launched.</p>'
 
     # ---- DISABLED TABLE ----
     disabled_rows = [(c["test"], c["suite"]) for c in cases["disabled"]]
@@ -331,6 +355,7 @@ def generate(run, cases, mode, bkc_override, out_path, rocm_label=None, real_tot
   {section("Timed-Out Tests", f"{timeout} cases", "#fd7e14", timeout_html)}
   {section("Skipped Tests", f"{skipped} gtest cases", "#6c757d", skipped_html)}
   {section("Disabled Tests", f"{disabled} cases", "#0d6efd", disabled_html)}
+  {section("Configs Not Run", f"{configs_not_run} configs", "#6f42c1", notrun_html) if configs_not_run else ""}
 <!-- augment:coverage -->
 </div>
 {f'<div class="content"><div style="background:#fff3cd;border-left:4px solid #ffc107;padding:12px 18px;border-radius:6px;font-size:.88rem;color:#856404;margin-bottom:24px"><strong>Note:</strong> {_h(summary["note"])}</div></div>' if summary.get("note") else ""}
