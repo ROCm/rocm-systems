@@ -14,9 +14,9 @@ namespace RcclUnitTesting
 {
 
 // Minimal ncclComm for GIN AllReduce eligibility early-outs that run *before*
-// isSymmetricKernelRequested(). Do not set symmetricSupport=true with gfx950,
-// ncclSum, and a supported datatype together: that path calls ncclSymkInitOnce
-// on this stand-in and is not safe.
+// isSymmetricKernelRequested(). Do not set symmetricSupport=true with gfx950
+// or gfx1250, ncclSum, and a supported datatype together: that path calls
+// ncclSymkInitOnce on this stand-in and is not safe.
 struct GinAllReduceMockComm
 {
     ncclComm comm{};
