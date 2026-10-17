@@ -114,9 +114,9 @@ There are three high-level GPU analysis views:
 
 .. _cli-memory-chart-viewing:
 
-The memory chart is a wide diagram drawn at a fixed width. It does not shrink to
-fit the terminal, so in a narrow window every chart line wraps and the boxes,
-arrows, and bandwidth labels no longer line up. Widening the window until one
+The memory chart is a wide diagram whose width follows its content. It does not
+shrink to fit the terminal, so in a narrow window every chart line wraps and the
+boxes, arrows, and bandwidth labels no longer line up. Widening the window until one
 chart line fits on a single row fixes this. If you cannot resize, use one of the
 following instead.
 
@@ -416,6 +416,11 @@ More analysis options
 
    $ rocprof-compute analyze -p workloads/vcopy/MI200/  --list-stats
 
+.. note::
+
+   ``--list-stats`` supports the default ``stdout`` output and ``--output-format txt``.
+   Combining it with ``--output-format csv`` or ``--output-format db`` exits with an error.
+
 
 **List metrics**
 
@@ -624,7 +629,8 @@ Example with multiple ``--mem-level`` and ``--roofline-data-type`` options:
 
 Interactive Roofline HTML:
 
-* Use the *AI axis* selector to choose one memory level per kernel, or *All peaks* to plot every level at once. Isolating one kernel shows it across all available memory levels.
+* Use the *AI axis* selector to choose one memory level per kernel, *All peaks* to plot every level at once, or *Limited by* to show each kernel's limiting memory-level point (falling back to its leftmost point when no memory-level limiter is available).
+  Isolating one kernel shows it across all available memory levels.
 * Use the *Precision* selector to choose one or more arithmetic precision's peak roofline to display on the plot.
 * Use the *Kernels* and *Bandwidth rooflines* panels to isolate, multi-select, or reset plotted items. The *Runtime shown* slider filters to the heaviest kernels that reach the selected GPU resident-time cutoff.
 * Hover over kernel dots and rooflines to see arithmetic intensity, throughput, roofline percentage, limiter, runtime, bandwidth, and compute-peak details.
@@ -683,6 +689,8 @@ Analysis output format
 Use the ``--output-format <format>`` analyze mode option to specify the output format of the
 analysis report. Supported formats are ``stdout``, ``txt``, ``csv``, and ``db``. The default output
 format is ``stdout``.
+
+``--list-stats`` is available only with ``stdout`` and ``txt`` output.
 
 * ``stdout`` format:
    * Print analysis report to the terminal.

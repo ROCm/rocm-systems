@@ -612,31 +612,24 @@ add_test(
 
 # Memory chart tests — no GPU required
 add_test(
-    NAME test_mem_chart_gfx11
+    NAME test_memory_chart_loader
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx11.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx11.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_loader.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_loader.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_mem_chart_common
+    NAME test_memory_chart_units
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_common.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_common.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_units.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_units.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
-    NAME test_mem_chart_gfx9
+    NAME test_memory_chart_render
     COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx9.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx9.py ${WORKING_DIR_OPTION}
-)
-
-add_test(
-    NAME test_mem_chart_gfx1250
-    COMMAND
-        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_mem_chart_gfx1250.xml
-        ${COV_OPTION} tests/unit/utils/test_mem_chart_gfx1250.py ${WORKING_DIR_OPTION}
+        ${PYTHON_TEST_COMMAND} -m pytest --junitxml=tests/test_memory_chart_render.xml
+        ${COV_OPTION} tests/unit/memory_chart/test_render.py ${WORKING_DIR_OPTION}
 )
 
 add_test(
@@ -1045,6 +1038,23 @@ if(TARGET test-compression)
 endif()
 
 # -----------------------------------
+# CSV formatter Tests
+# -----------------------------------
+
+if(TARGET test-csv)
+    if(TEST_FROM_INSTALL)
+        set(_csv_test_cmd tests/test-csv)
+    else()
+        set(_csv_test_cmd $<TARGET_FILE:test-csv>)
+    endif()
+    add_test(NAME test-csv COMMAND ${_csv_test_cmd})
+    sanitizer_runtime_env(_san_env)
+    if(_san_env)
+        set_tests_properties(test-csv PROPERTIES ENVIRONMENT "${_san_env}")
+    endif()
+endif()
+
+# -----------------------------------
 # Generate coverage tests
 # -----------------------------------
 
@@ -1088,10 +1098,9 @@ if(${ENABLE_COVERAGE})
         test_analysis_cli
         test_pattern_matching
         test_list_metrics_cli
-        test_mem_chart_common
-        test_mem_chart_gfx9
-        test_mem_chart_gfx11
-        test_mem_chart_gfx1250
+        test_memory_chart_loader
+        test_memory_chart_units
+        test_memory_chart_render
         test_membw_engine
         test_membw_summary
         test_membw_guidance
@@ -1225,6 +1234,13 @@ install(
 # src/rocprof_compute_profile
 install(
     DIRECTORY src/rocprof_compute_profile
+    DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
+    COMPONENT main
+    PATTERN "__pycache__" EXCLUDE
+)
+# src/memory_chart (renderer and its JSON layouts)
+install(
+    DIRECTORY src/memory_chart
     DESTINATION ${CMAKE_INSTALL_LIBEXECDIR}/${PROJECT_NAME}
     COMPONENT main
     PATTERN "__pycache__" EXCLUDE

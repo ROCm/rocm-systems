@@ -2,6 +2,7 @@
 # SPDX-License-Identifier:  MIT
 
 import ast
+import json
 import re
 import warnings
 from pathlib import Path
@@ -12,6 +13,7 @@ import pandas as pd
 
 import utils.analysis_orm as orm
 from config import rocprof_compute_home
+from memory_chart.loader import Layouts
 from pc_sampling.code_object_analysis import (
     CodeObjectSymbol,
     InstructionPipelines,
@@ -297,6 +299,17 @@ class SourceFrameCollector:
         })
 
 
+def memory_chart_layout_extdata(gpu_arch: str) -> Optional[dict[str, Any]]:
+    """The memory chart layout file of *gpu_arch*, unchanged; None if it has none.
+
+    src/memory_chart/README.md documents the format.
+    """
+    layout = Layouts.for_arch(gpu_arch)
+    if layout is None:
+        return None
+    return json.loads(layout.path.read_text(encoding="utf-8"))
+
+
 class db_analysis(OmniAnalyze_Base):
     # -----------------------
     # Required child methods
@@ -357,6 +370,9 @@ class db_analysis(OmniAnalyze_Base):
                     workload_path
                 ),
                 profiling_config_extdata=self._profiling_config,
+                memory_chart_layout_extdata=memory_chart_layout_extdata(
+                    sys_info["gpu_arch"]
+                ),
             )
             Database.get_session().add(workload_obj)
             workload_objs.append(workload_obj)
