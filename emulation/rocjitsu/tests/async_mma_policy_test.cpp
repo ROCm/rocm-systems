@@ -106,6 +106,36 @@ TEST(AsyncMmaPolicyTest, QualifiedMfmaFamiliesExcludeUnmeasuredShapes) {
   EXPECT_FALSE(policy::candidate("v_mfma_i32_16x16x64_i8"));
 }
 
+TEST(AsyncMmaPolicyTest, InlinePreferenceOnlySelectsOptimizedScaledFp4Shape) {
+  auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_CDNA4);
+  bool available = false;
+#if defined(__AVX512F__) && defined(__AVX512VL__) && defined(__AVX512BW__) && defined(__FMA__)
+  available = !util::force_scalar() && amdgpu::mfma_fp4_vnni_available();
+#endif
+  for (unsigned opcode : {45, 46}) {
+    for (unsigned a = 0; a < 5; ++a) {
+      for (unsigned b = 0; b < 5; ++b) {
+        const auto words = mma_test::make_cdna4_mfma_scale_words(opcode, 1, 448, 449, 0, 0, a, b);
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, words.data()));
+        const uint32_t m = opcode == 45 ? 16 : 32;
+        const uint32_t k = opcode == 45 ? 128 : 64;
+        const uint32_t a_bits = a == 4 ? 4 : a >= 2 ? 6 : 8;
+        const uint32_t b_bits = b == 4 ? 4 : b >= 2 ? 6 : 8;
+        for (uint32_t wave : {32u, 64u}) {
+          const bool selected = amdgpu::mfma_fp4_vnni_selected(m, m, k, 1, a_bits, b_bits, wave,
+                                                               util::force_scalar());
+          EXPECT_EQ(policy::prefer_inline_mma(*inst, wave), selected);
+          EXPECT_EQ(selected, available && opcode == 45 && a == 4 && b == 4 && wave == 64);
+          EXPECT_FALSE(amdgpu::mfma_fp4_vnni_selected(m, m, k, 1, a_bits, b_bits, wave, true));
+        }
+        // Register hazard tracking remains valid even when dispatch runs inline.
+        EXPECT_TRUE(policy::candidate(inst->mnemonic()));
+        EXPECT_TRUE(policy::safe_inline(*inst));
+      }
+    }
+  }
+}
+
 TEST(AsyncMmaPolicyTest, Cdna5DefaultFamiliesIncludeK32AndScaledWmma) {
   for (auto name :
        {"v_wmma_f32_16x16x32_f16", "v_wmma_f32_16x16x32_bf16", "v_wmma_f32_16x16x64_fp8_fp8",
