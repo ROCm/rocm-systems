@@ -312,6 +312,25 @@ option(ENABLE_ASSERTIONS "Enable assertions" ${ENABLE_ASSERTIONS_DEFAULT})
 # <https://cmake.org/cmake/help/latest/variable/BUILD_SHARED_LIBS.html>.
 option(BUILD_SHARED_LIBS "Build amd-dbgapi as a shared library" ON)
 
+# Test suite options.  Default ON so the suite is built unless a
+# developer or CI job explicitly opts out.
+#
+# ENABLE_TESTS is the master switch: turning it OFF flips the default
+# for every per-tier option below to OFF as well.  Each tier can still
+# be toggled independently of the master switch, e.g.
+# -DENABLE_TESTS=OFF -DENABLE_UNIT_TESTS=ON builds only the unit tier.
+option(ENABLE_TESTS "Build all rocdbgapi test suites" ON)
+option(ENABLE_UNIT_TESTS "Build rocdbgapi unit tests" ${ENABLE_TESTS})
+
+# Only one tier exists today, so this condition is just the unit tier's
+# option.  When a second tier is added, extend it to
+# ENABLE_UNIT_TESTS OR ENABLE_<TIER>_TESTS so that test/ is entered
+# whenever any tier is requested.
+if(ENABLE_UNIT_TESTS)
+    enable_testing()
+    add_subdirectory(test)
+endif()
+
 if(ENABLE_ASSERTIONS)
     if(NOT CMAKE_BUILD_TYPE STREQUAL "Debug")
         # Add -UNDEBUG to the CXXFLAGS (project is C++ only, no CFLAGS needed)
