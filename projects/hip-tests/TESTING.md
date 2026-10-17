@@ -135,6 +135,7 @@ Use `isQuickLevel()` inside the test function to trim workload size at `level_0`
 | Device-side code coverage is not fully captured by host coverage tools | Medium | A high host coverage number can still miss device-only behavior | Contract, functional, integration, and stress tests execute behavior on real devices |
 | Flaky and quarantined tracking should keep converging toward owner plus issue plus expiry | Medium | Suppressed failures can age into permanent blind spots | Treat flaky/quarantined cases as unstable signal until each has a tracking issue and removal plan |
 | Sanitizer coverage of device-side paths is inherently partial and is not part of the default per-PR gate | Low | Memory or race issues can escape sanitizer lanes | Use sanitizers as an additional signal, not a replacement for device-executed tests |
+| Legacy unit tests contain broad mixed-responsibility files, duplicated setup, and overlapping behavioral coverage | Medium | Test intent, ownership, and retirement decisions are harder to audit and maintain | Incrementally reorganize coverage into focused behavioral domains while preserving contract, integration, stress, and performance responsibilities; see [HIP test restructuring](TEST_RESTRUCTURING.md) |
 
 ## Why we test this way
 
