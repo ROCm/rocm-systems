@@ -905,6 +905,53 @@ TEST_F(GinMPIDeviceTests, QpCount_GinStaysBelowConnectionEnv) {
   }
 }
 
+// Each DevComm logs the backend it bound to exactly once. The line is INIT-only, so
+// NCCL_DEBUG_SUBSYS must include INIT. NCCL_GIN_TYPE leaves a single active backend,
+// so backends[0] is the one the line must name. On multi-node comms, comm init already
+// logs it for the internal symmetric-kernel DevComm, so counts are taken after init.
+TEST_F(GinMPIDeviceTests, Log_ReportsUsedBackend) {
+  if (auto reason = ginProxyTestSkipReason(); !reason.empty())
+    GTEST_SKIP() << reason;
+  if (!validateTestPrerequisites(/*min_processes=*/2, /*max_processes=*/2))
+    GTEST_SKIP() << "Requires exactly 2 ranks";
+
+  MPIHelpers::MpiEnvGuard debugGuard("NCCL_DEBUG", "INFO");
+  MPIHelpers::MpiEnvGuard subsysGuard("NCCL_DEBUG_SUBSYS", "INIT");
+  MPIHelpers::TestLogAssertionContext logCtx(
+      MPIHelpers::makeNcclDebugFileAssertionOptions(getTestMpiRank()));
+
+  ASSERT_EQ(ncclSuccess, createTestCommunicator());
+  SKIP_IF_GIN_UNSUPPORTED();
+  ncclComm_t comm = getActiveCommunicator();
+
+  const ncclGinBackendState& backend = comm->sharedRes->ginState.backends[0];
+  const std::string expected = "GIN: using backend " + std::string(backend.ncclGin->name) + " type " +
+                               std::to_string(static_cast<int>(backend.ginType));
+  auto countExpected = [&]() {
+    const std::string log = logCtx.readNcclDebugLog();
+    int n = 0;
+    for (size_t pos = log.find(expected); pos != std::string::npos; pos = log.find(expected, pos + 1)) ++n;
+    return n;
+  };
+  const int afterInit = countExpected();
+
+  ncclDevCommRequirements reqs = defaultGinReqs();
+  reqs.ginContextCount = 1;
+  reqs.ginSignalCount = 1;
+
+  ncclDevComm first{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &first));
+  auto firstCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &first); });
+  EXPECT_EQ(afterInit + 1, countExpected()) << "after first DevComm, expected: " << expected << "\nactual log:\n"
+                                            << logCtx.readNcclDebugLog();
+
+  ncclDevComm second{};
+  ASSERT_MPI_EQ(ncclSuccess, ncclDevCommCreate(comm, &reqs, &second));
+  auto secondCleanup = makeScopeGuard([&]() { (void)ncclDevCommDestroy(comm, &second); });
+  EXPECT_EQ(afterInit + 2, countExpected()) << "after second DevComm, expected: " << expected << "\nactual log:\n"
+                                            << logCtx.readNcclDebugLog();
+}
+
 TEST_F(GinMPIDeviceTests, Put_BasicAndOffsets_MultiContext) {
   int n = ginEnvContextCount();
   if (n == 0) GTEST_SKIP() << "Set NCCL_GIN_NCONTEXTS>1 to run the multi-context variant";
