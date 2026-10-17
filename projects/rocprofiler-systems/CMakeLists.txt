@@ -189,6 +189,9 @@ else()
     rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_TESTING
         "Install the test suite" OFF
     )
+    rocprofiler_systems_add_option(ROCPROFSYS_INSTALL_HOST_ASAN_TESTS
+        "Install rocprof-sys-unit-tests as a host-ASAN payload" OFF
+    )
     rocprofiler_systems_add_option(
         ROCPROFSYS_BUILD_DEBUG "Enable building with extensive debug symbols" OFF
         ADVANCED
