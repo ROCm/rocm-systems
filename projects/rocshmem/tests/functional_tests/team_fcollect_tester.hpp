@@ -41,6 +41,8 @@ class TeamFcollectTester : public Tester {
   explicit TeamFcollectTester(TesterArguments args);
   virtual ~TeamFcollectTester();
 
+  std::string typeName() const override { return type_name<T1>(); }
+
  protected:
   virtual void resetBuffers(size_t size) override;
 
