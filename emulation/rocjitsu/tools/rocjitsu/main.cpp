@@ -32,10 +32,12 @@
 #include "rocm_visibility.h"
 
 #include <algorithm>
+#include <arpa/inet.h>
 #include <array>
 #include <cctype>
 #include <cerrno>
 #include <charconv>
+#include <chrono>
 #include <csignal>
 #include <cstdint>
 #include <cstdlib>
@@ -46,11 +48,13 @@
 #include <fstream>
 #include <iostream>
 #include <iterator>
+#include <netinet/in.h>
 #include <optional>
 #include <poll.h>
 #include <string>
 #include <string_view>
 #include <sys/prctl.h>
+#include <sys/socket.h>
 #include <sys/wait.h>
 #include <unistd.h>
 #include <utility>
@@ -73,6 +77,17 @@ using namespace rocjitsu;
 namespace {
 
 constexpr int kDaemonReadyTimeoutMs = 30'000;
+constexpr uint32_t kMaxProcessGridWorldSize = 4096;
+constexpr int kProcessGridPollTimeoutMs = 100;
+constexpr auto kProcessGridTerminateGrace = std::chrono::seconds(5);
+
+struct ProcessGrid {
+  uint32_t num_nodes = 1;
+  uint32_t nproc_per_node = 1;
+  bool requested = false;
+
+  uint64_t world_size() const { return uint64_t{num_nodes} * nproc_per_node; }
+};
 
 int run_daemon_server(const char *config_path, const std::string &socket_path = {},
                       int ready_fd = -1) {
@@ -672,6 +687,23 @@ bool apply_unsigned_config_option(std::string_view key, std::string_view value,
   return true;
 }
 
+std::optional<uint32_t> parse_positive_uint32(std::string_view value) {
+  std::optional<uint32_t> parsed = config::parse_uint32(value);
+  if (!parsed || *parsed == 0)
+    return std::nullopt;
+  return parsed;
+}
+
+bool apply_grid_count_option(std::string_view flag, std::string_view value, uint32_t &target) {
+  std::optional<uint32_t> parsed = parse_positive_uint32(value);
+  if (!parsed) {
+    std::cerr << std::format("rocjitsu: {} requires a positive integer\n", flag);
+    return false;
+  }
+  target = *parsed;
+  return true;
+}
+
 bool apply_config_option(std::string_view assignment, config::LaunchOverrides &overrides) {
   const size_t equals = assignment.find('=');
   if (equals == std::string_view::npos) {
@@ -716,6 +748,198 @@ bool apply_config_option(std::string_view assignment, config::LaunchOverrides &o
       "cpu_dispatch_threads, cpu_thread_budget, num_threads, wait_checking\n",
       key);
   return false;
+}
+
+std::optional<uint16_t> pick_head_port() {
+  const int fd = socket(AF_INET, SOCK_STREAM | SOCK_CLOEXEC, 0);
+  if (fd < 0)
+    return std::nullopt;
+
+  sockaddr_in addr{};
+  addr.sin_family = AF_INET;
+  addr.sin_addr.s_addr = htonl(INADDR_LOOPBACK);
+  addr.sin_port = 0;
+  if (bind(fd, reinterpret_cast<const sockaddr *>(&addr), sizeof(addr)) != 0) {
+    close(fd);
+    return std::nullopt;
+  }
+
+  socklen_t len = sizeof(addr);
+  if (getsockname(fd, reinterpret_cast<sockaddr *>(&addr), &len) != 0) {
+    close(fd);
+    return std::nullopt;
+  }
+  close(fd);
+  return ntohs(addr.sin_port);
+}
+
+void apply_process_grid_environment(rocjitsu::cli::LaunchEnvironment &environment,
+                                    const ProcessGrid &grid, uint32_t node, uint32_t local,
+                                    uint16_t head_port) {
+  const uint32_t global = node * grid.nproc_per_node + local;
+  const std::string head_addr = "127.0.0.1";
+  const std::string port = std::to_string(head_port);
+  environment.set("ROCJITSU_NODE_RANK", std::to_string(node));
+  environment.set("RANK", std::to_string(global));
+  environment.set("ROCJITSU_HEAD_ADDR", head_addr);
+  environment.set("ROCJITSU_HEAD_PORT", port);
+  environment.set("MASTER_ADDR", head_addr);
+  environment.set("MASTER_PORT", port);
+  environment.set("WORLD_SIZE", std::to_string(grid.world_size()));
+  environment.set("LOCAL_RANK", std::to_string(local));
+  environment.set("NCCL_HOSTID", std::format("rocjitsu-node-{}", node));
+}
+
+int child_status_to_exit_code(int status) {
+  if (WIFEXITED(status))
+    return WEXITSTATUS(status);
+  if (WIFSIGNALED(status))
+    return 128 + WTERMSIG(status);
+  return 1;
+}
+
+void signal_process_grid(const std::vector<pid_t> &children, int signal) {
+  for (pid_t pid : children)
+    if (pid > 0)
+      kill(pid, signal);
+}
+
+int wait_for_process_grid(std::vector<pid_t> children, const sigset_t &shutdown_signals,
+                          int initial_exit_code = 0, bool terminate_now = false) {
+  int exit_code = initial_exit_code;
+  bool terminating = false;
+  bool escalated = false;
+  std::chrono::steady_clock::time_point termination_started;
+  auto begin_termination = [&](int signal) {
+    if (terminating)
+      return;
+    signal_process_grid(children, signal);
+    termination_started = std::chrono::steady_clock::now();
+    terminating = true;
+  };
+  if (terminate_now)
+    begin_termination(SIGTERM);
+
+  while (!children.empty()) {
+    for (;;) {
+      int status = 0;
+      pid_t done = waitpid(-1, &status, WNOHANG);
+      if (done > 0) {
+        auto found = std::ranges::find(children, done);
+        if (found == children.end())
+          continue;
+        children.erase(found);
+        const int child_exit = child_status_to_exit_code(status);
+        if (child_exit != 0) {
+          if (exit_code == 0)
+            exit_code = child_exit;
+          begin_termination(SIGTERM);
+        }
+        continue;
+      }
+      if (done == 0)
+        break;
+      if (errno == EINTR)
+        continue;
+      if (errno == ECHILD) {
+        children.clear();
+        break;
+      }
+      std::cerr << std::format("rocjitsu: waitpid failed: {}\n", strerror(errno));
+      if (exit_code == 0)
+        exit_code = 1;
+      begin_termination(SIGTERM);
+      break;
+    }
+
+    if (children.empty())
+      break;
+
+    if (terminating && !escalated &&
+        std::chrono::steady_clock::now() - termination_started >= kProcessGridTerminateGrace) {
+      signal_process_grid(children, SIGKILL);
+      escalated = true;
+    }
+
+    const timespec timeout{.tv_sec = 0, .tv_nsec = kProcessGridPollTimeoutMs * 1'000'000L};
+    const int signal = sigtimedwait(&shutdown_signals, nullptr, &timeout);
+    if (signal == SIGINT || signal == SIGTERM) {
+      if (exit_code == 0)
+        exit_code = 128 + signal;
+      begin_termination(signal);
+    } else if (signal < 0 && errno != EAGAIN && errno != EINTR) {
+      std::cerr << std::format("rocjitsu: sigtimedwait failed: {}\n", strerror(errno));
+      if (exit_code == 0)
+        exit_code = 1;
+      begin_termination(SIGTERM);
+    }
+  }
+
+  return exit_code;
+}
+
+int launch_process_grid(char *const app_argv[], rocjitsu::cli::LaunchEnvironment &environment,
+                        const ProcessGrid &grid, uint16_t head_port) {
+  sigset_t shutdown_signals;
+  sigemptyset(&shutdown_signals);
+  sigaddset(&shutdown_signals, SIGINT);
+  sigaddset(&shutdown_signals, SIGTERM);
+
+  sigset_t previous_signals;
+  if (sigprocmask(SIG_BLOCK, &shutdown_signals, &previous_signals) != 0) {
+    std::cerr << std::format("rocjitsu: failed to block process-grid signals: {}\n",
+                             strerror(errno));
+    return 1;
+  }
+
+  auto restore_signal_mask = [&]() { sigprocmask(SIG_SETMASK, &previous_signals, nullptr); };
+
+  std::vector<pid_t> children;
+  children.reserve(grid.world_size());
+  for (uint32_t node = 0; node < grid.num_nodes; ++node) {
+    for (uint32_t local = 0; local < grid.nproc_per_node; ++local) {
+      apply_process_grid_environment(environment, grid, node, local, head_port);
+      pid_t child = fork();
+      if (child < 0) {
+        std::cerr << std::format("rocjitsu: fork failed: {}\n", strerror(errno));
+        const int exit_code = wait_for_process_grid(std::move(children), shutdown_signals, 1, true);
+        restore_signal_mask();
+        return exit_code;
+      }
+      if (child == 0) {
+        if (prctl(PR_SET_PDEATHSIG, SIGTERM) != 0) {
+          std::cerr << std::format("rocjitsu: prctl(PR_SET_PDEATHSIG) failed: {}\n",
+                                   strerror(errno));
+          _exit(127);
+        }
+        if (getppid() == 1)
+          _exit(128 + SIGTERM);
+        sigprocmask(SIG_SETMASK, &previous_signals, nullptr);
+        rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, environment);
+        std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
+        _exit(127);
+      }
+      children.push_back(child);
+
+      const timespec no_wait{.tv_sec = 0, .tv_nsec = 0};
+      const int pending_signal = sigtimedwait(&shutdown_signals, nullptr, &no_wait);
+      if (pending_signal == SIGINT || pending_signal == SIGTERM) {
+        const int exit_code = wait_for_process_grid(std::move(children), shutdown_signals,
+                                                    128 + pending_signal, true);
+        restore_signal_mask();
+        return exit_code;
+      }
+      if (pending_signal < 0 && errno != EAGAIN && errno != EINTR) {
+        std::cerr << std::format("rocjitsu: sigtimedwait failed: {}\n", strerror(errno));
+        const int exit_code = wait_for_process_grid(std::move(children), shutdown_signals, 1, true);
+        restore_signal_mask();
+        return exit_code;
+      }
+    }
+  }
+  const int exit_code = wait_for_process_grid(std::move(children), shutdown_signals);
+  restore_signal_mask();
+  return exit_code;
 }
 
 bool looks_like_option(std::string_view arg) {
@@ -931,6 +1155,7 @@ void print_usage() {
       << "Usage: rocjitsu [--json] [--config <config.json>|--profile <name>] "
          "[--env KEY=VALUE] [--workdir <dir>] "
          "[--exec-mode functional|clocked] [--plugin <name>]... [--gpus-per-node <n>] "
+         "[--num-nodes <n>] [--nproc-per-node <n>] "
          "[--daemon|--attach] [--] <app> [args...]\n"
          "\n"
          "Modes:\n"
@@ -939,6 +1164,8 @@ void print_usage() {
          "  rocjitsu --profile mi350x -- ./app          Run with a bundled profile config\n"
          "  rocjitsu --exec-mode clocked -- ./app        Override the config execution mode\n"
          "  rocjitsu --gpus-per-node 2 -- ./app         Override the emulated GPU count\n"
+         "  rocjitsu --num-nodes 2 --nproc-per-node 4 -- ./app\n"
+         "                                               Run a local process grid\n"
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
@@ -957,6 +1184,11 @@ void print_usage() {
          "  --plugin <name>   Enable an execution plugin with its default config. Repeatable.\n"
          "  --gpus-per-node <n>\n"
          "                    Override the emulated GPU count for this launch.\n"
+         "  --num-nodes <n>  Number of local emulated nodes to launch. Defaults to 1.\n"
+         "  --nproc-per-node <n>, --nproc_per_node <n>\n"
+         "                    Number of workload processes per node. Defaults to 1.\n"
+         "                    Each process gets RANK, LOCAL_RANK, WORLD_SIZE,\n"
+         "                    MASTER_ADDR/PORT, ROCJITSU_* node vars, and NCCL_HOSTID.\n"
          "  --env KEY=VALUE  Add or replace an environment variable for the launched app.\n"
          "  --clear-env-vars Start the launched app with a clean environment, preserving\n"
          "                    only basic shell/session variables before applying --env.\n"
@@ -1056,6 +1288,7 @@ int main(int argc, char *argv[]) {
   std::vector<std::string> gdb_commands;
   std::optional<std::filesystem::path> workdir;
   bool thread_budget_table = false;
+  ProcessGrid process_grid;
   config::LaunchOverrides overrides;
   config::LaunchOverrides flag_overrides;
   int vfio_ready_fd = -1;
@@ -1108,6 +1341,37 @@ int main(int argc, char *argv[]) {
         return 1;
       }
       overrides.gpus_per_node = *count;
+    } else if (arg == "--num-nodes" || arg.starts_with("--num-nodes=")) {
+      std::string_view count_text;
+      if (arg == "--num-nodes") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --num-nodes requires a positive integer\n";
+          return 1;
+        }
+        count_text = argv[++i];
+      } else {
+        count_text = arg.substr(std::string_view("--num-nodes=").size());
+      }
+      if (!apply_grid_count_option("--num-nodes", count_text, process_grid.num_nodes))
+        return 1;
+      process_grid.requested = true;
+    } else if (arg == "--nproc-per-node" || arg == "--nproc_per_node" ||
+               arg.starts_with("--nproc-per-node=") || arg.starts_with("--nproc_per_node=")) {
+      std::string_view count_text;
+      if (arg == "--nproc-per-node" || arg == "--nproc_per_node") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --nproc-per-node requires a positive integer\n";
+          return 1;
+        }
+        count_text = argv[++i];
+      } else if (arg.starts_with("--nproc-per-node=")) {
+        count_text = arg.substr(std::string_view("--nproc-per-node=").size());
+      } else {
+        count_text = arg.substr(std::string_view("--nproc_per_node=").size());
+      }
+      if (!apply_grid_count_option("--nproc-per-node", count_text, process_grid.nproc_per_node))
+        return 1;
+      process_grid.requested = true;
     } else if (arg == "--env" || arg.starts_with("--env=")) {
       std::string_view assignment;
       if (arg == "--env") {
@@ -1266,12 +1530,32 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: --in-process cannot be combined with --daemon or --attach\n";
     return 1;
   }
+  if (process_grid.world_size() > kMaxProcessGridWorldSize) {
+    std::cerr << std::format(
+        "rocjitsu: --num-nodes {} --nproc-per-node {} would launch {} processes; maximum is {}\n",
+        process_grid.num_nodes, process_grid.nproc_per_node, process_grid.world_size(),
+        kMaxProcessGridWorldSize);
+    return 1;
+  }
+  if (process_grid.requested && (daemon_mode || attach_mode)) {
+    std::cerr << "rocjitsu: process grid options require local in-process mode\n";
+    return 1;
+  }
+  if (process_grid.requested && vfio_socket != nullptr) {
+    std::cerr << "rocjitsu: process grid options cannot be combined with --vfio-socket\n";
+    return 1;
+  }
 
   const bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
   const bool launch_environment_options =
       clear_env_vars || !env_overrides.empty() || workdir.has_value();
   const bool gdb_requested = gdb || !gdb_commands.empty();
-  if (thread_budget_table && (launch_environment_options || gdb_requested)) {
+  if (process_grid.world_size() > 1 && gdb_requested) {
+    std::cerr << "rocjitsu: rocgdb options require a single-process launch\n";
+    return 1;
+  }
+  if (thread_budget_table &&
+      (launch_environment_options || gdb_requested || process_grid.requested)) {
     std::cerr << "rocjitsu: --thread-budget-table cannot be combined with launch-only options\n";
     return 1;
   }
@@ -1283,8 +1567,16 @@ int main(int argc, char *argv[]) {
     std::cerr << "rocjitsu: rocgdb options require an application after --\n";
     return 1;
   }
+  if (!has_app && process_grid.requested) {
+    std::cerr << "rocjitsu: process grid options require an application after --\n";
+    return 1;
+  }
   if (gdb_requested && !attach_mode)
     daemon_mode = true;
+  if (process_grid.requested && daemon_mode) {
+    std::cerr << "rocjitsu: process grid options require local in-process mode\n";
+    return 1;
+  }
   if (workdir && !validate_workdir(*workdir))
     return 1;
 
@@ -1664,11 +1956,26 @@ int main(int argc, char *argv[]) {
     launch_environment.set(rocjitsu::kRpcInvocationDirEnv, invocation_runtime_dir.string());
   if (launched_daemon_pid)
     launch_environment.set(rocjitsu::kRpcDaemonPidEnv, std::to_string(*launched_daemon_pid));
+  std::optional<uint16_t> process_grid_head_port;
+  if (process_grid.requested) {
+    process_grid_head_port = pick_head_port();
+    if (!process_grid_head_port) {
+      std::cerr << "rocjitsu: failed to choose a process-grid rendezvous port\n";
+      cleanup_runtime_files(invocation_runtime_dir);
+      return 1;
+    }
+  }
   if (workdir && chdir(workdir->c_str()) != 0) {
     std::cerr << std::format("rocjitsu: failed to enter --workdir {}: {}\n", workdir->string(),
                              strerror(errno));
     cleanup_runtime_files(invocation_runtime_dir);
     return 1;
+  }
+  if (process_grid.requested) {
+    const int exit_code =
+        launch_process_grid(app_argv, launch_environment, process_grid, *process_grid_head_port);
+    cleanup_runtime_files(invocation_runtime_dir);
+    return exit_code;
   }
   rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, launch_environment);
 
