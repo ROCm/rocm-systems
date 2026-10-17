@@ -1043,6 +1043,15 @@ threshold table introduced for gfx1250.
         | ``0``: Disabled.
         | ``1``: Force-enabled (CTA_POLICY check bypassed).
 
+    * - | ``RCCL_CE_REDUCESCATTER``
+        | Opt-in Copy Engine ReduceScatter. Off by default. When enabled, it shares
+          the CE AllReduce staging buffer (``ceARTmpBuf``); user buffers do not need
+          symmetric registration. Requires ``NCCL_CTA_POLICY=2`` (``CTA_POLICY_ZERO``).
+          Single-node symmetric communicators only. There is no message-size cap;
+          large messages are pipelined through the staging slots.
+      - | ``0``: Disabled (default).
+        | ``1``: Enabled, subject to the other eligibility checks.
+
     * - | ``RCCL_CE_AR_MAX_MSG_BYTES``
         | Overrides the CE 2-shot AllReduce message size cap. When ``-1`` (default),
           the cap is read from ``ceNonRegMax[AllReduce]`` in the per-arch table. A
@@ -1061,12 +1070,14 @@ threshold table introduced for gfx1250.
         | ``N`` (bytes): Use ``N`` as the registered AllReduce size cap.
 
     * - | ``RCCL_CE_AR_STAGING_BYTES``
-        | Overrides the total allocation size of the CE AllReduce staging buffer
-          (``ceARTmpBuf``). When ``-1`` (default), the buffer is allocated at the
-          compile-time constant ``NCCL_CE_AR_STAGING_BYTES`` (16 MiB). Increasing
-          this reduces pipelining overhead for large messages but raises per-rank
-          GPU memory usage. This variable sizes the buffer only; the selector cap
-          is controlled separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
-      - | ``-1``: Use the compile-time default of 16 MiB (default).
+        | Overrides the total allocation size of the CE AllReduce and CE ReduceScatter
+          staging buffer (``ceARTmpBuf``). Both collectives share this allocation.
+          When ``-1`` (default), the buffer is allocated at the compile-time
+          constant ``NCCL_CE_AR_STAGING_BYTES`` (256 MiB). Increasing this reduces
+          pipelining overhead for large messages but raises per-rank GPU memory
+          usage: two slots reserve twice this value (512 MiB at the default).
+          This variable sizes the buffer only; the selector cap is controlled
+          separately by ``RCCL_CE_AR_MAX_MSG_BYTES``.
+      - | ``-1``: Use the compile-time default of 256 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 

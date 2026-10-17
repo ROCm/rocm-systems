@@ -200,13 +200,16 @@ ncclResult_t rcclSelectAllReduce(struct ncclComm* comm, const void* sendbuff, vo
 ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t sendcount,
                                  ncclDataType_t datatype, cudaStream_t stream, bool query, bool graphCapturingHint,
                                  struct rcclCollDecision* decision);
-// Single source of truth for ReduceScatter selection: symmetric -> DDA fabric
-// (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct -> native ring/pat kernel.
-// RS has no CE. Live enqueue carries the decision so taskAppend honors
-// RCCL_SYMMETRIC vs ring (symkExtract) instead of re-deriving it.
+// Single source of truth for ReduceScatter selection: symmetric -> CE (eager /
+// enqueue-init) -> DDA fabric (LL/LL128/VMM) / DDA IPC -> hierarchical -> Direct
+// -> CE registered -> symmetric -> native ring/pat kernel.
+// Live enqueue carries the decision so taskAppend honors RCCL_SYMMETRIC / CE
+// vs ring (symkExtract) instead of re-deriving it.
+// graphCapturingHint is used only when query=true (rcclGetCollImplInfo). The live
+// path ticks the shared CE graph latch in ncclReduceScatter_impl before calling.
 ncclResult_t rcclSelectReduceScatter(struct ncclComm* comm, const void* sendbuff, void* recvbuff, size_t recvcount,
                                      ncclDataType_t datatype, ncclRedOp_t op, bool query,
-                                     struct rcclCollDecision* decision);
+                                     struct rcclCollDecision* decision, bool graphCapturingHint = false);
 // Single source of truth for AlltoAll selection: Pivot -> GDA -> DDA (LL/LL128/VMM/IPC) ->
 // CE registered -> HierCE -> CE scratch -> Direct (per-peer Send/Recv).
 // Live enqueue carries the decision so taskAppend honors CE vs Direct instead of
@@ -245,6 +248,12 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
+// Opt-in CE ReduceScatter gate (RCCL_CE_REDUCESCATTER=1). Staging path (scatter
+// into ceARTmpBuf, then local reduce). No message-size cap: large messages are
+// pipelined through staging slots. Pipeline chunks are rounded to 16 bytes in
+// ncclCeAllReduceChooseChunkBytes, and the reduce kernel scalar-reduces the
+// tail, so a shard that is not a multiple of 16 still runs.
+bool rcclUseCeReduceScatter(struct ncclComm* comm, size_t recvcount, ncclDataType_t datatype, ncclRedOp_t op);
 // Updates the CE AllReduce graph latch from this call's capture state.
 // Invoke once per collective (any type) at each CE AR decision point.
 void rcclCeAllReduceGraphLatchTick(struct ncclComm* comm, bool ceCapturing);
@@ -255,6 +264,7 @@ bool rcclCeArGraphSafe(struct ncclComm* comm);
 // params so an unset env var does not read as "disabled".
 RCCL_PARAM_DECLARE(CeAllReduce);
 RCCL_PARAM_DECLARE(ForceCeAllReduce);
+RCCL_PARAM_DECLARE(CeReduceScatter);
 // Is CE AllReduce enabled for this comm? RCCL_CE_ALLREDUCE wins when set;
 // otherwise CE AllReduce is on only for the arch it is tuned for (gfx1250) and
 // off elsewhere, independent of that arch table's ceNonRegMax/ceRegMax entries.
