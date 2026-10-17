@@ -192,10 +192,13 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     `ctx` to the callee) and its explicit-`bool` truthiness, and
     `makeOption(s)` /
     `ncclOptionSetAssertUnique`'s duplicate-name `WARN` (captured via
-    `../common/LogCapture.hpp`). First PR in the AICOMRCCL-2820 stacked
-    chain; the rest of `src/param/*` and `src/include/param/*.h` (the typed
-    registry, the remaining parsers, the C API, and env loading) are covered
-    by its follow-ups.
+    `../common/LogCapture.hpp`). The rest of `src/param/*` and
+    `src/include/param/*.h` is covered by the two entries below and
+    `rccl-UnitTestsMicroParam`.
+  - `include/param/parser_{default,enum,bitset,list}.h` (header-only, from
+    `param-parsers-test.cc`); suite `ParamParsersMicrotest.*`.
+  - `param/param_registry.cc` (`PARAM_REGISTRY_CC_PATH`, from
+    `param-registry-test.cc`); suite `ParamRegistryMicrotest.*`.
   - `misc/gdr_probe.cc` (`GDR_PROBE_CC_PATH`, from `gdr-probe-test.cc`); suite
     `GdrProbeTest.*`. Covers `ncclIbProbeGdrSupport`, the runtime GPU
     memory-registration fallback behind the sysfs peer-memory scan: the result
@@ -328,6 +331,11 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
+- **`rccl-UnitTestsMicroParam`** — `param/param.cc`, `param/c_api.cc`,
+  `misc/param.cc` and `include/param/param.h` (via `PARAM_CC_PATH` / `C_API_CC_PATH`
+  / `MISC_PARAM_CC_PATH`, from `param-test.cc`); suites `Param*`. Its own binary
+  because `misc/param.cc` defines `ncclGetEnv`, `initEnv` and `ncclLoadParam`, which
+  the shared fakes in `rccl-UnitTestsMicro` also define.
 
 - **`rccl-UnitTestsMicroRmaProxy`** — `src/rma/rma_proxy.cc` (via
   `RMA_PROXY_CC_PATH`, from `rma-proxy-test.cc`); suite
@@ -863,6 +871,7 @@ can be configured **directly** to build every host binary — `rccl-HostUnitTest
 `rccl-UnitTestsMicro`, `rccl-UnitTestsMicroWarpSpeed`,
 `rccl-UnitTestsMicroInit[-uncached|-faultinj]`, `rccl-UnitTestsMicroEnqueue[-devlinker]`,
 `rccl-UnitTestsMicroGinHost`, `rccl-UnitTestsMicroCe`, `rccl-UnitTestsMicroDiagnostics`,
+`rccl-UnitTestsMicroParam`,
 `rccl-UnitTestsMicroSymKernels`, `rccl-UnitTestsMicroTaskPrep` and
 `rccl-UnitTestsMicroRmaProxy` — **without configuring/building all of
 librccl**. It compiles just the tests + fakes + the hipified unit-under-test
@@ -905,6 +914,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
 ./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroParam              # src/param/*.cc, src/misc/param.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
