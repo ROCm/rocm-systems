@@ -476,8 +476,11 @@ class Device : public NullDevice {
   void deviceVmemRelease(uint64_t mem_handle) const;
   uint64_t deviceVmemAlloc(size_t size, uint64_t flags) const;
 
-  //! Allocate a host-resident VMM handle on a CPU NUMA pool. numaNode < 0 resolves
-  //! to the calling thread's current node (HostNumaCurrent). Returns 0 on failure.
+  //! Allocate a host-resident VMM handle on a CPU NUMA pool. The node selector is resolved to a
+  //! CPU agent. numaNode = -1 resolves to calling thread's current node (HostNumaCurrent).
+  //! numaNode = -2 resolves to default ROCr CPU agent (Host). numaNode >= 0 resolves to that
+  //! particular NUMA node. Fallback to the default agent when node selector does not resolve to a
+  //! reachable ROCr CPU agent. Returns 0 on failure.
   uint64_t hostVmemAlloc(size_t size, uint64_t flags, int numaNode) const;
 
   //! Recovers the location, owning device and size of a VMM allocation from its
