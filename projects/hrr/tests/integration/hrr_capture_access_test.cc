@@ -48,22 +48,17 @@
  *     a blob or code object that cannot be written leaves the archive marked
  *     incomplete (POSIX).
  *
- *   Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles:
- *     resuming an archive whose directories and events.bin are readable by
- *     others makes them private again, and a hard-linked blob found there is
- *     written again rather than trusted (POSIX).
- *
- *   Unit_HRR_CaptureResumeCountsOnlyWholeRecords:
- *     resuming an archive that ends in a torn record cuts it off and leaves
- *     it out of the event count, so the new trailer counts the records (POSIX).
- *
  *   Unit_HRR_CaptureActiveMarker:
  *     pid-<pid>/active, the file producers read as "capture is on", exists
  *     while the capture runs, names the process instance on Linux, and is
  *     gone after a clean exit; a stale one is removed when the archive is
- *     refused; and a resume that cannot create it, or cannot cut the trailer
- *     off the earlier events.bin, disables the capture and leaves that
- *     events.bin as it was (POSIX; the trailer case on Linux).
+ *     refused (POSIX).
+ *
+ *   Unit_HRR_CaptureMovesEarlierArchiveAside:
+ *     a process whose pid-<pid> already holds an archive from an earlier
+ *     process with the same pid moves it to pid-<pid>.prev-1, untouched, and
+ *     records a fresh archive, which readers find on their own; when it cannot
+ *     move it, capture is disabled and the earlier archive stays (POSIX).
  */
 
 #include "hrr_test_common.hh"
@@ -79,6 +74,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <map>
 #include <string>
 #include <vector>
 
@@ -89,15 +85,6 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <unistd.h>
-#endif
-#if defined(__linux__) && (defined(__x86_64__) || defined(__aarch64__))
-#include <cstddef>
-#include <linux/audit.h>
-#include <linux/filter.h>
-#include <linux/seccomp.h>
-#include <sys/prctl.h>
-#include <sys/syscall.h>
-#define HRR_TEST_HAVE_SECCOMP 1
 #endif
 
 namespace {
@@ -225,12 +212,18 @@ bool refused_active_marker(const std::string& output) {
   return disabled_because(output, "cannot create ", "/active (");
 }
 
-bool refused_trim(const std::string& output) {
-  return disabled_because(output, "cannot trim ", "/events.bin to resume it (");
+// True if both directories hold the same entries and every file the same bytes.
+// A bool, for the reason given at file_holds.
+bool same_tree(const fs::path& a, const fs::path& b) {
+  const auto tree = [](const fs::path& dir) {
+    std::map<std::string, std::string> out;
+    for (const auto& ent : fs::recursive_directory_iterator(dir))
+      out[fs::relative(ent.path(), dir).string()] =
+          ent.is_regular_file() ? read_text_file(ent.path()) : "(not a file)";
+    return out;
+  };
+  return tree(a) == tree(b);
 }
-
-// Printed by Unit_HRR_CaptureTrimFails_Direct when it cannot install its filter.
-constexpr const char* kNoSeccomp = "[HRR test] no seccomp filter: ";
 
 bool manifest_says_complete(const fs::path& archive, bool complete) {
   return read_text_file(archive / "manifest.json")
@@ -381,56 +374,6 @@ TEST_CASE("Unit_HRR_CaptureMarkerRefused_Direct", "[.][hrr-direct]") {
   g_hrr_statvfs_hook = nullptr;
 }
 
-// ---------------------------------------------------------------------------
-// Hidden ([.]) workload for Unit_HRR_CaptureActiveMarker: before its first HIP
-// call, and so before the capture opens its archive, it installs a seccomp
-// filter that fails ftruncate with EIO for the length in
-// HRR_TEST_FAIL_FTRUNCATE_AT, the one a resume cuts its events.bin to. Then it
-// records a few events. Without a filter it says so and makes no HIP call.
-// ---------------------------------------------------------------------------
-TEST_CASE("Unit_HRR_CaptureTrimFails_Direct", "[.][hrr-direct]") {
-#ifdef HRR_TEST_HAVE_SECCOMP
-  const char* at = std::getenv("HRR_TEST_FAIL_FTRUNCATE_AT");
-  REQUIRE(at != nullptr);
-  const std::uint64_t length = std::strtoull(at, nullptr, 10);
-  REQUIRE(length > 0);
-#if defined(__x86_64__)
-  constexpr std::uint32_t kArch = AUDIT_ARCH_X86_64;
-#else
-  constexpr std::uint32_t kArch = AUDIT_ARCH_AARCH64;
-#endif
-  // args[1] is the length; both architectures are little-endian, so its low
-  // half comes first.
-  constexpr std::uint32_t kLengthLo = offsetof(struct seccomp_data, args[1]);
-  struct sock_filter code[] = {
-      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, arch)),
-      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, kArch, 0, 7),
-      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, offsetof(struct seccomp_data, nr)),
-      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, __NR_ftruncate, 0, 5),
-      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, kLengthLo),
-      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<std::uint32_t>(length), 0, 3),
-      BPF_STMT(BPF_LD | BPF_W | BPF_ABS, kLengthLo + 4),
-      BPF_JUMP(BPF_JMP | BPF_JEQ | BPF_K, static_cast<std::uint32_t>(length >> 32), 0, 1),
-      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ERRNO | (EIO & SECCOMP_RET_DATA)),
-      BPF_STMT(BPF_RET | BPF_K, SECCOMP_RET_ALLOW),
-  };
-  struct sock_fprog prog{static_cast<unsigned short>(sizeof(code) / sizeof(code[0])), code};
-  if (::prctl(PR_SET_NO_NEW_PRIVS, 1, 0, 0, 0) != 0 ||
-      ::prctl(PR_SET_SECCOMP, SECCOMP_MODE_FILTER, &prog) != 0) {
-    std::printf("%s%s\n", kNoSeccomp, std::strerror(errno));
-    return;
-  }
-
-  HRR_HIP_CHECK(hipSetDevice(0));
-  void* d = nullptr;
-  HRR_HIP_CHECK(hipMalloc(&d, 256));
-  HRR_HIP_CHECK(hipMemset(d, 0, 256));
-  HRR_HIP_CHECK(hipDeviceSynchronize());
-  HRR_HIP_CHECK(hipFree(d));
-#else
-  std::printf("%sLinux on x86-64 or AArch64 only\n", kNoSeccomp);
-#endif
-}
 #endif
 
 // ---------------------------------------------------------------------------
@@ -507,9 +450,8 @@ HRR_TEST_CASE(Unit_HRR_CaptureArchiveIsPrivate) {
  *     pid-<pid>/manifest.json pointing at a file with known contents, followed
  *     by a workload that exits cleanly or one that aborts and leaves the
  *     manifest to the crash callback.
- *   - Each target stays untouched: a resume would otherwise truncate and
- *     append to the file, and a fresh capture would fill the directory or
- *     overwrite the hard-linked manifest.
+ *   - Each target stays untouched: a capture would otherwise truncate and
+ *     write the file, fill the directory or overwrite the hard-linked manifest.
  *   - Each symbolic link and the hard link at events.bin disable the capture,
  *     which says so on stderr, and the workload still succeeds; with the links
  *     at the blob prefixes the capture runs without its blobs and its manifest
@@ -843,154 +785,16 @@ HRR_TEST_CASE(Unit_HRR_CaptureMarksUnwrittenFilesIncomplete) {
 /**
  * Test Description
  * ----------------
- *   - Captures Unit_HRR_GpuWorkload_Direct, copies the archive into the next
- *     run's pid-<pid> with its directories made 0755 and events.bin 0644, and
- *     replaces the largest blob with a hard link to a copy of it outside the
- *     archive; the run then resumes that archive.
- *   - The archive is resumed (events.bin grows), its directories end up 0700
- *     and events.bin and manifest.json 0600, and the hard-linked blob is not
- *     trusted: it is written again, so neither name shares its inode any more.
- */
-HRR_TEST_CASE(Unit_HRR_CaptureResumeTrustsOnlyItsOwnFiles) {
-#ifdef _WIN32
-  HRR_SKIP("POSIX permission bits and hard links");
-#else
-  ScopedDir work{fs::temp_directory_path() / "hrr_access_resume"};
-  const fs::path first = work.path / "first";
-  const fs::path base = work.path / "capture";
-  const fs::path victim = work.path / "victim.blob";
-  fs::create_directories(base);
-  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
-  const fs::path first_archive = hrr_single_process_archive(first);
-  const std::uintmax_t first_bytes = fs::file_size(first_archive / "events.bin");
-
-  // The largest blob is a host buffer the workload copies on every run.
-  const std::vector<fs::path> blobs = archive_files(first_archive, "blobs", ".blob");
-  REQUIRE_FALSE(blobs.empty());
-  const fs::path linked = *std::max_element(
-      blobs.begin(), blobs.end(), [&](const fs::path& a, const fs::path& b) {
-        return fs::file_size(first_archive / a) < fs::file_size(first_archive / b);
-      });
-  fs::copy_file(first_archive / linked, victim);
-  const std::string victim_contents = read_text_file(victim);
-
-  const PlantedRun run = capture_after_planting(
-      base, work.path / "plant.sh",
-      "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
-      "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n"
-      "find \"$HRR_TEST_BASE/pid-$$\" -type d -exec chmod 0755 {} +\n"
-      "chmod 0644 \"$HRR_TEST_BASE/pid-$$/events.bin\"\n"
-      "ln -f '" + victim.string() + "' \"$HRR_TEST_BASE/pid-$$/" + linked.string() + "\"\n");
-  INFO("Workload exit code: " << run.ret << "\n" << run.output);
-  REQUIRE(run.ret == 0);
-  const std::vector<fs::path> archives = hrr_process_archives(base);
-  REQUIRE(archives.size() == 1);
-  const fs::path archive = archives.front();
-  CHECK(fs::file_size(archive / "events.bin") > first_bytes);
-
-  CHECK(perms_of(archive) == fs::perms::owner_all);
-  for (const auto& ent : fs::recursive_directory_iterator(archive)) {
-    INFO("Path: " << ent.path().string());
-    if (fs::is_directory(fs::symlink_status(ent.path())))
-      CHECK(perms_of(ent.path()) == fs::perms::owner_all);
-  }
-  for (const char* name : {"events.bin", "manifest.json"}) {
-    INFO("File: " << name);
-    CHECK(perms_of(archive / name) == (fs::perms::owner_read | fs::perms::owner_write));
-  }
-
-  INFO("Hard-linked blob: " << linked.string());
-  CHECK(fs::hard_link_count(archive / linked) == 1);
-  CHECK(fs::hard_link_count(victim) == 1);
-  CHECK(file_holds(victim, victim_contents));
-#endif
-}
-
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
- *   - Captures Unit_HRR_GpuWorkload_Direct, then copies its events.bin into
- *     the next run's pid-<pid> without the trailer and with a record header
- *     whose body was never written, as a crash mid-record leaves it. There is
- *     no writer_state.json, so the resume scans events.bin.
- *   - The resume cuts the torn record off and does not count it: the archive
- *     loads complete, with a trailer that counts its records.
- */
-HRR_TEST_CASE(Unit_HRR_CaptureResumeCountsOnlyWholeRecords) {
-#ifdef _WIN32
-  HRR_SKIP("planting relies on /bin/sh and exec keeping the pid");
-#else
-  ScopedDir work{fs::temp_directory_path() / "hrr_access_resume_torn"};
-  const fs::path first = work.path / "first";
-  const fs::path base = work.path / "capture";
-  const fs::path torn = work.path / "torn.bin";
-  fs::create_directories(base);
-  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
-  const fs::path first_archive = hrr_single_process_archive(first);
-  hrr::Archive earlier;
-  REQUIRE(hrr::load_archive(first_archive.string(), earlier));
-  REQUIRE(earlier.complete);
-  REQUIRE(earlier.skipped_after_trailer == 0);
-
-  fs::copy_file(first_archive / "events.bin", torn);
-  fs::resize_file(torn, fs::file_size(torn) - sizeof(hrr_eof_record));
-  {
-    hrr_event_header h{};
-    h.event_type = static_cast<uint16_t>(HRR_API_HIPDEVICESYNCHRONIZE);
-    h.sequence_id = earlier.events.back().header().sequence_id + 1;
-    h.payload_length = 1024;
-    std::ofstream out(torn, std::ios::binary | std::ios::app);
-    out.write(reinterpret_cast<const char*>(&h), sizeof(h));
-  }
-
-  const PlantedRun run = capture_after_planting(
-      base, work.path / "plant.sh",
-      "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
-      "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n"
-      "cp '" + torn.string() + "' \"$HRR_TEST_BASE/pid-$$/events.bin\"\n"
-      "rm -f \"$HRR_TEST_BASE/pid-$$/writer_state.json\"\n");
-  INFO("Workload exit code: " << run.ret << "\n" << run.output);
-  REQUIRE(run.ret == 0);
-  CHECK(run.output.find(kCaptureDisabled) == std::string::npos);
-  const std::vector<fs::path> archives = hrr_process_archives(base);
-  REQUIRE(archives.size() == 1);
-
-  hrr::Archive resumed;
-  REQUIRE(hrr::load_archive(archives.front().string(), resumed));
-  CHECK(resumed.events.size() > earlier.events.size());
-  CHECK(resumed.trailer);
-  CHECK(resumed.trailer_events == resumed.events.size());
-  CHECK(resumed.complete);
-#endif
-}
-
-// ---------------------------------------------------------------------------
-/**
- * Test Description
- * ----------------
  *   - Runs Unit_HRR_CaptureActiveMarker_Direct, which finds its
  *     pid-<pid>/active while the capture runs, holding its boot id and start
  *     time on Linux; after a clean exit it is gone.
  *   - Plants a stale pid-<pid>/active next to a symbolic link at
  *     pid-<pid>/events.bin: the capture is refused and the stale marker is
  *     removed, so producers do not take the refused archive for a live one.
- *   - Copies a finished archive into the next run's pid-<pid>, with a
- *     non-empty directory at pid-<pid>/active: the writer opens and resumes
- *     events.bin, then cannot create the marker. Capture is disabled with a
- *     message and nothing is appended to events.bin, which stays without a
- *     marker next to it: the state a resume that fails after opening
- *     events.bin leaves behind.
  *   - Runs Unit_HRR_CaptureMarkerRefused_Direct, which plants a hard link to
  *     a file outside the archive at pid-<pid>/active while the archive opens:
  *     capture is disabled, the message gives EPERM as the reason, and the
  *     linked file keeps its contents.
- *   - Copies a finished archive into the next run's pid-<pid> and runs
- *     Unit_HRR_CaptureTrimFails_Direct, whose seccomp filter fails the
- *     ftruncate that would cut the trailer off. Capture is disabled with a
- *     message, events.bin is left byte for byte as it was, and no marker is
- *     created: records appended after the trailer would never be read.
- *     Skipped where the workload cannot install the filter.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
 #ifdef _WIN32
@@ -1026,29 +830,6 @@ HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
     CHECK_FALSE(fs::exists(fs::symlink_status(pid_dir / "active")));
   }
 
-  SECTION("resume that cannot create the marker") {
-    const fs::path first = work.path / "first";
-    hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
-    const fs::path first_archive = hrr_single_process_archive(first);
-    const std::uintmax_t first_bytes = fs::file_size(first_archive / "events.bin");
-    REQUIRE(first_bytes > sizeof(hrr_file_header));
-
-    const PlantedRun run = capture_after_planting(
-        base, work.path / "plant.sh",
-        "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
-        "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n"
-        "mkdir -p \"$HRR_TEST_BASE/pid-$$/active/keep\"\n");
-    INFO("Workload exit code: " << run.ret << "\n" << run.output);
-    REQUIRE(run.ret == 0);
-    CHECK(refused_active_marker(run.output));
-    const std::vector<fs::path> archives = hrr_process_archives(base);
-    REQUIRE(archives.size() == 1);
-    // No larger: the resume may have stripped the trailer, but nothing was
-    // appended.
-    CHECK(fs::file_size(archives.front() / "events.bin") <= first_bytes);
-    CHECK_FALSE(fs::is_regular_file(fs::symlink_status(archives.front() / "active")));
-  }
-
   SECTION("marker refused, with the reason") {
     const PlantedRun run = capture_after_planting(
         base, work.path / "plant.sh",
@@ -1062,37 +843,85 @@ HRR_TEST_CASE(Unit_HRR_CaptureActiveMarker) {
                            "/active (" + std::string(std::strerror(EPERM)) + ")"));
     CHECK(file_holds(victim_file, "must survive a capture\n"));
   }
+#endif
+}
 
-  SECTION("resume that cannot trim the trailer") {
-    const fs::path first = work.path / "first";
-    hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
-    const fs::path first_archive = hrr_single_process_archive(first);
-    const std::string first_events = read_text_file(first_archive / "events.bin");
-    // A clean exit ends events.bin with the trailer, which a resume cuts off.
-    REQUIRE(first_events.size() > sizeof(hrr_file_header) + sizeof(hrr_eof_record));
-    const size_t trailer_at = first_events.size() - sizeof(hrr_eof_record);
-    hrr_eof_record trailer{};
-    std::memcpy(&trailer, first_events.data() + trailer_at, sizeof(trailer));
-    REQUIRE(trailer.hdr.event_type == HRR_EOF_MARKER);
-    REQUIRE(trailer.eof_magic == HRR_EOF_MAGIC);
+// ---------------------------------------------------------------------------
+/**
+ * Test Description
+ * ----------------
+ *   - Captures Unit_HRR_GpuWorkload_Direct, then copies that archive into the
+ *     next run's pid-<pid> before it starts, as a process that reuses an
+ *     earlier process's pid finds it.
+ *   - The run moves the earlier archive to pid-<pid>.prev-1, byte for byte as
+ *     it was, says so on stderr, and records a fresh archive in pid-<pid>: its
+ *     first event has sequence number 0 and it loads complete. The root
+ *     manifest lists one process, and the reader resolves the base directory
+ *     to the fresh archive alone.
+ *   - With the base directory read-only, so the earlier archive cannot be
+ *     moved, capture is disabled with a message and pid-<pid> keeps the earlier
+ *     archive as it was. Skipped where the mode does not stop the rename
+ *     (CAP_DAC_OVERRIDE).
+ */
+HRR_TEST_CASE(Unit_HRR_CaptureMovesEarlierArchiveAside) {
+#ifdef _WIN32
+  HRR_SKIP("planting relies on /bin/sh and exec keeping the pid");
+#else
+  ScopedDir work{fs::temp_directory_path() / "hrr_access_earlier"};
+  const fs::path first = work.path / "first";
+  const fs::path base = work.path / "capture";
+  fs::create_directories(base);
+  hrr_capture_direct("Unit_HRR_GpuWorkload_Direct", first);
+  const fs::path earlier = hrr_single_process_archive(first);
+  REQUIRE(manifest_says_complete(earlier, true));
+  const std::string plant = "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
+                            "cp -R '" + earlier.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n";
 
-    const PlantedRun run = capture_after_planting(
-        base, work.path / "plant.sh",
-        "mkdir \"$HRR_TEST_BASE/pid-$$\"\n"
-        "cp -R '" + first_archive.string() + "/.' \"$HRR_TEST_BASE/pid-$$/\"\n"
-        "export HRR_TEST_FAIL_FTRUNCATE_AT=" + std::to_string(trailer_at) + "\n",
-        "Unit_HRR_CaptureTrimFails_Direct");
+  SECTION("moved aside") {
+    const PlantedRun run = capture_after_planting(base, work.path / "plant.sh", plant);
     INFO("Workload exit code: " << run.ret << "\n" << run.output);
     REQUIRE(run.ret == 0);
-    if (run.output.find(kNoSeccomp) != std::string::npos)
-      HRR_SKIP("The workload cannot make ftruncate fail without a seccomp filter");
-    CHECK(refused_trim(run.output));
     const std::vector<fs::path> archives = hrr_process_archives(base);
     REQUIRE(archives.size() == 1);
-    // Still the earlier run's file, trailer included: nothing was appended
-    // after the trailer, where the reader would never reach it.
-    CHECK(file_holds(archives.front() / "events.bin", first_events));
-    CHECK_FALSE(fs::is_regular_file(fs::symlink_status(archives.front() / "active")));
+    const fs::path archive = archives.front();
+    const fs::path prev = archive.string() + ".prev-1";
+    REQUIRE(fs::is_directory(fs::symlink_status(prev)));
+    CHECK(same_tree(prev, earlier));
+    CHECK(run.output.find("moved it to " + prev.string() + ".") != std::string::npos);
+
+    hrr::Archive fresh;
+    REQUIRE(hrr::load_archive(archive.string(), fresh));
+    REQUIRE_FALSE(fresh.events.empty());
+    CHECK(fresh.events.front().header().sequence_id == 0);
+    CHECK(fresh.trailer);
+    CHECK(fresh.trailer_events == fresh.events.size());
+    CHECK(fresh.complete);
+
+    const std::string root = read_text_file(base / "manifest.json");
+    size_t listed = 0;
+    for (size_t at = root.find("\"pid\":"); at != std::string::npos; at = root.find("\"pid\":", at + 1))
+      ++listed;
+    CHECK(listed == 1);
+    hrr::Archive resolved;
+    REQUIRE(hrr::load_archive(base.string(), resolved));
+    CHECK(resolved.path == archive.string());
+  }
+
+  SECTION("cannot be moved") {
+    struct RestoreMode {
+      const fs::path& dir;
+      ~RestoreMode() { ::chmod(dir.c_str(), 0700); }
+    } restore{base};
+    const PlantedRun run = capture_after_planting(base, work.path / "plant.sh",
+                                                  plant + "chmod 0500 \"$HRR_TEST_BASE\"\n");
+    REQUIRE(::chmod(base.c_str(), 0700) == 0);
+    INFO("Workload exit code: " << run.ret << "\n" << run.output);
+    REQUIRE(run.ret == 0);
+    const fs::path pid_dir = only_pid_dir(base);
+    if (pid_dir.empty())
+      HRR_SKIP("The earlier archive was moved from a base directory at mode 0500 (CAP_DAC_OVERRIDE)");
+    CHECK(disabled_because(run.output, "cannot move the earlier archive at ", " aside ("));
+    CHECK(same_tree(pid_dir, earlier));
   }
 #endif
 }

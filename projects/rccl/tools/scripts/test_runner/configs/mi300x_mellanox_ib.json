@@ -930,6 +930,16 @@
           "test_filter": "TopoTest.*"
         },
         {
+          "name": "TopoGpuDev",
+          "description": "Topology GPU dev index tests",
+          "test_filter": "TopoGpuDev.*"
+        },
+        {
+          "name": "P2pPxnLevel1NetId",
+          "description": "PXN level-1 packed netId lookup (NCCL PR #2258 / AICOMRCCL-2038)",
+          "test_filter": "P2pPxnLevel1NetId.*"
+        },
+        {
           "name": "TopoNicFusionTests",
           "description": "NIC fusion input validation in the topology layer",
           "test_filter": "TopoNicFusionTests.*"
@@ -982,7 +992,9 @@
         {
           "name": "P2pMaxNchannels",
           "description": "NCCL_MAX_P2P_NCHANNELS resolution, p2pnChannels upper bound, and the multi-node maxP2pPeers per-peer reduction",
-          "test_filter": "P2pMaxNchannels*",
+          "test_filter": "P2pMaxNchannels*"
+        },
+        {
           "name": "RcclAlltoAllDecision",
           "description": "AlltoAll dispatch decision unit tests (DDA, CE, pivot selection)",
           "test_filter": "RcclAlltoAllDecision.*"
@@ -1028,6 +1040,7 @@
         {"name": "HostApi_WaitSignalMultipleDescriptors", "description": "Host API: wait signal multiple descriptors", "test_filter": "HostApiTest.WaitSignalMultipleDescriptors"},
         {"name": "HostApi_LargePut", "description": "Host API: large put", "test_filter": "HostApiTest.LargePut"},
         {"name": "HostApi_AllToAllPut", "description": "Host API: all-to-all put", "test_filter": "HostApiTest.AllToAllPut"},
+        {"name": "HostApi_DenseAllToAllPutSignal", "description": "Host API: dense all-to-all put/signal, uniform and uneven sizes", "test_filter": "HostApiTest.DenseAllToAllPutSignal"},
         {"name": "HostApi_SignalImpliesPriorPutsDelivered", "description": "Host API: signal implies prior puts delivered", "test_filter": "HostApiTest.SignalImpliesPriorPutsDelivered"},
         {"name": "HostApi_PutSignalInvalidCtx", "description": "Host API: put signal invalid ctx", "test_filter": "HostApiTest.PutSignalInvalidCtx"},
         {"name": "HostApi_WaitSignalNullDescs", "description": "Host API: wait signal null descs", "test_filter": "HostApiTest.WaitSignalNullDescs"},
@@ -1090,6 +1103,20 @@
       "tests": [
         {"name": "HostApi_RmaDisableCrossNodePutFails_Sym", "description": "Host API: NCCL_RMA_DISABLE=1, symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of hanging", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails"},
         {"name": "HostApi_RmaDisableCrossNodePutFails_NonSym", "description": "Host API: NCCL_RMA_DISABLE=1, non-symmetric window, cross-node put/wait fail with ncclInvalidUsage instead of using the proxy", "test_filter": "HostApiTest.RmaDisableCrossNodePutFails", "env_variables": {"NCCL_CUMEM_ENABLE": "0"}}
+      ]
+    },
+
+    "gin_connect_leak": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "description": "ncclGinConnectOnce must release the comms it opened when a later connect fails",
+      "tests": [
+        {"name": "GinConnectLeak_FailedConnectReleasesOpenedComms", "description": "second connect is made to fail; the first GIN comm and the listen comm must be closed", "test_filter": "GinConnectLeakMPITest.FailedConnectReleasesOpenedComms"}
       ]
     },
 
@@ -1321,7 +1348,8 @@
         "NCCL_DEBUG": "INFO"
       },
       "tests": [
-        {"name": "AsymmetricVisibility.CommInitRankAllReduce", "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES", "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"}
+        {"name": "AsymmetricVisibility.CommInitRankAllReduce", "description": "ROCM-27034: RCCL comm init + AllReduce under asymmetric HIP_VISIBLE_DEVICES", "test_filter": "AsymmetricVisibility.CommInitRankAllReduce"},
+        {"name": "AsymmetricVisibility.OneGpuPerRankAllReduce", "description": "Topology GPU dev index when each rank sees only its own GPU", "test_filter": "AsymmetricVisibility.OneGpuPerRankAllReduce"}
       ]
     },
     "plugin_compat_v10": {
@@ -1856,6 +1884,11 @@
           "name": "Cast_SendRecvZeroSize",
           "description": "Zero-byte send: WRR oneQp path taken (dataPerQp=0 < splitDataMin), 1 token consumed, received size==0",
           "test_filter": "NetIbMPITest.CastSendRecvZeroSize"
+        },
+        {
+          "name": "Cast_RegistrationRejectsBadArguments",
+          "description": "regMr, regMrDmaBuf and deregMr reject a null communicator, and regMr rejects a zero size, instead of dereferencing it",
+          "test_filter": "NetIbMPITest.CastRegistrationRejectsBadArguments"
         }
       ]
     },
@@ -2924,6 +2957,16 @@
           "description": "Interleaved CE AllGather and SM AllReduce on same comm; validates no state corruption",
           "test_filter": "CeMPI_Stress.InterleavedCEAllGatherAndSMAllReduce",
           "timeout": 300
+        },
+        {
+          "name": "CE_AllReduce_MaxOp_2Ranks",
+          "description": "128 MiB Max AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MaxOp128MiB"
+        },
+        {
+          "name": "CE_AllReduce_MinOp_2Ranks",
+          "description": "128 MiB Min AllReduce: CE registered on the first call, CE 2-shot after, exact data and pipelined chunking",
+          "test_filter": "CeMPI_AllReduce.MinOp128MiB"
         }
       ]
     },
@@ -3117,6 +3160,15 @@
           "test_filter": "DdaMPI_AllReduce.CapturedOnGraphOriginJoinsSerialEvent",
           "env_variables": {
             "NCCL_GRAPH_STREAM_ORDERING": "0"
+          }
+        },
+        {
+          "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
+          "description": "Dense all-to-all put/signal over the copy engine on 8 ranks; the uneven profile can split batches into chunks, which the 2-rank Host API suites never reach",
+          "test_filter": "HostApiTest.DenseAllToAllPutSignal",
+          "env_variables": {
+            "NCCL_CUMEM_ENABLE": "1",
+            "RCCL_CE_BATCH_ASYNC_ENABLE": "1"
           }
         }
       ]
@@ -4364,6 +4416,28 @@
         }
       ]
     },
+    "gin_allgather_sym": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 4,
+      "num_nodes": 2,
+      "num_gpus": 2,
+      "timeout": 300,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_AllGather_Symmetric",
+          "description": "Symmetric-memory multi-node AllGather (RailRing_LsaST): GIN ring over the rail team + LSA store broadcast; requires >=2 ranks/node across >=2 nodes",
+          "test_filter": "GinMPIDeviceTests.AllGather_Symmetric*"
+        }
+      ]
+    },
     "gin_negative": {
       "extends": "default",
       "is_gtest": true,
@@ -4402,6 +4476,29 @@
           "env_variables": {
             "NCCL_GIN_COUNTER_POOL_SIZE": "0x40000000"
           }
+        }
+      ]
+    },
+    "gin_devcomm_requirements": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_ranks": 2,
+      "num_nodes": 2,
+      "num_gpus": 1,
+      "timeout": 180,
+      "env_variables": {
+        "NCCL_GIN_TYPE": "2",
+        "NCCL_GIN_ENABLE": "1",
+        "NCCL_CUMEM_ENABLE": "1",
+        "NCCL_DMABUF_ENABLE": "1",
+        "NCCL_ENV_PLUGIN": "none"
+      },
+      "tests": [
+        {
+          "name": "GIN_DevComm_GroupedCreateKeepsGinRequirements",
+          "description": "Grouped ncclDevCommCreate keeps GIN signal/counter requests from caller-built requirement nodes on the GIN proxy",
+          "test_filter": "GinMPIDeviceTests.DevComm_GroupedCreateKeepsGinRequirements"
         }
       ]
     },
@@ -4502,8 +4599,13 @@
         },
         {
           "name": "Symk_AllGatherStoreCrossover",
-          "description": "AllGather switches from LL to the store kernel at 4 MB on gfx950, skipped on other architectures",
-          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom4MB"
+          "description": "AllGather switches from LL to the store kernel at 1 MB on gfx950, skipped on other architectures",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGather_StoreKernelFrom1MB"
+        },
+        {
+          "name": "Symk_AllGatherStoreData",
+          "description": "Forced AllGather_ST with position-dependent data across its byte, 4-byte and 16-byte tiers and in-place",
+          "test_filter": "SymmetricKernelCorruptionTest.AllGatherST_PositionDependentData"
         }
       ]
     }
@@ -5297,9 +5399,21 @@
       "enabled": true
     },
     {
+      "name": "GIN AllGather - Symmetric",
+      "description": "Symmetric-memory AllGather (RailRing_LsaST) with 2 ranks/node across 2 nodes",
+      "config": "gin_allgather_sym",
+      "enabled": true
+    },
+    {
       "name": "GIN Negative / Pool Limits",
       "description": "GIN disabled-path rejection and oversized signal/counter pool clamp opt-in tests",
       "config": "gin_negative",
+      "enabled": true
+    },
+    {
+      "name": "GIN DevComm Requirements - Proxy",
+      "description": "Grouped ncclDevCommCreate with caller-built GIN signal/counter requirement nodes on the GIN proxy over IB across two nodes",
+      "config": "gin_devcomm_requirements",
       "enabled": true
     },
     {
@@ -5377,6 +5491,12 @@
       "name": "RMA External Plugin - Put Signal",
       "description": "Validate the EXTERNAL one-sided RMA plugin loader/assign path",
       "config": "rma_external_plugin_put_signal",
+      "enabled": true
+    },
+    {
+      "name": "GIN Connect Leak",
+      "description": "Resource release when GIN connection setup fails",
+      "config": "gin_connect_leak",
       "enabled": true
     }
   ]

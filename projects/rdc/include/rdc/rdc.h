@@ -82,6 +82,7 @@ typedef enum {
 
   RDC_ST_GROUP_NOT_FOUND,     //!< Specified group not found
   RDC_ST_FLDGROUP_NOT_FOUND,  //!< Specified field group not found
+  // Add new statuses here, and give each a string in rdc_status_string().
 
   RDC_ST_UNKNOWN_ERROR = 0xFFFFFFFF  //!< Unknown error
 } rdc_status_t;
@@ -1183,7 +1184,9 @@ rdc_status_t rdc_device_get_all(rdc_handle_t p_rdc_handle,
  *  @param[in] gpu_index GPU index corresponding to which the attributes
  *  should be fetched
  *
- *  @param[out] p_rdc_attr GPU attribute corresponding to the gpu_index.
+ *  @param[out] p_rdc_attr GPU attribute corresponding to the gpu_index. Unless
+ *  it is NULL, the struct is zeroed first, so fields the call does not fill
+ *  read as 0.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
  */
@@ -1242,6 +1245,8 @@ rdc_status_t rdc_group_gpu_create(rdc_handle_t p_rdc_handle, rdc_group_type_t ty
  *  @param[in] gpu_index The GPU index to be added to the group.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned if the GPU index does not exist.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
  */
 rdc_status_t rdc_group_gpu_add(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                                uint32_t gpu_index);
@@ -1261,6 +1266,7 @@ rdc_status_t rdc_group_gpu_add(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_
  *  group p_rdc_group_id.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
  */
 rdc_status_t rdc_group_gpu_get_info(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p_rdc_group_id,
                                     rdc_group_info_t* p_rdc_group_info);
@@ -1292,6 +1298,7 @@ rdc_status_t rdc_group_get_all_ids(rdc_handle_t p_rdc_handle, rdc_gpu_group_t gr
  *  @param[in] p_rdc_group_id The group id
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
  */
 rdc_status_t rdc_group_gpu_destroy(rdc_handle_t p_rdc_handle, rdc_gpu_group_t p_rdc_group_id);
 
@@ -1332,6 +1339,7 @@ rdc_status_t rdc_group_field_create(rdc_handle_t p_rdc_handle, uint32_t num_fiel
  *  @param[in] field_id The field ID to be added to the field group
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_FLDGROUP_NOT_FOUND is returned if the field group does not exist.
  */
 rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle,
                                        rdc_field_grp_t rdc_field_group_id, rdc_field_t field_id);
@@ -1351,6 +1359,7 @@ rdc_status_t rdc_group_field_add_field(rdc_handle_t p_rdc_handle,
  *  rdc_field_group_id.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_FLDGROUP_NOT_FOUND is returned if the field group does not exist.
  */
 rdc_status_t rdc_group_field_get_info(rdc_handle_t p_rdc_handle, rdc_field_grp_t rdc_field_group_id,
                                       rdc_field_group_info_t* field_group_info);
@@ -1382,6 +1391,7 @@ rdc_status_t rdc_group_field_get_all_ids(rdc_handle_t p_rdc_handle,
  *  @param[in] rdc_field_group_id The field group id
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_FLDGROUP_NOT_FOUND is returned if the field group does not exist.
  */
 rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle, rdc_field_grp_t rdc_field_group_id);
 
@@ -1406,6 +1416,9 @@ rdc_status_t rdc_group_field_destroy(rdc_handle_t p_rdc_handle, rdc_field_grp_t 
  *  @param[in] max_keep_samples Maximum number of samples to keep. 0=no limit.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_CONFLICT is returned if the field group is already watched for the GPU group.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
+ *  @retval ::RDC_ST_FLDGROUP_NOT_FOUND is returned if the field group does not exist.
  */
 rdc_status_t rdc_field_watch(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                              rdc_field_grp_t field_group_id, uint64_t update_freq,
@@ -1684,6 +1697,7 @@ rdc_status_t rdc_policy_unregister(rdc_handle_t p_rdc_handle, rdc_gpu_group_t gr
  *  for example, RDC_HEALTH_WATCH_THERMAL | RDC_HEALTH_WATCH_POWER
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
  */
 rdc_status_t rdc_health_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             unsigned int components);
@@ -1702,6 +1716,7 @@ rdc_status_t rdc_health_set(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *  if it is 0x0, then the health check not set for the group yet.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_GROUP_NOT_FOUND is returned if the GPU group does not exist.
  */
 rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                             unsigned int* components);
@@ -1719,6 +1734,7 @@ rdc_status_t rdc_health_get(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
  *  @param[inout] response  The detail results of the health.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned if no health watches are set for the group.
  */
 rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id,
                               rdc_health_response_t* response);
@@ -1733,6 +1749,7 @@ rdc_status_t rdc_health_check(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_i
  *  @param[in] group_id The GPU group id.
  *
  *  @retval ::RDC_ST_OK is returned upon successful call.
+ *  @retval ::RDC_ST_NOT_FOUND is returned if no health watches are set for the group.
  */
 rdc_status_t rdc_health_clear(rdc_handle_t p_rdc_handle, rdc_gpu_group_t group_id);
 
