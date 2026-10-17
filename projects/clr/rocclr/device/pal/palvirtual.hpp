@@ -220,22 +220,18 @@ class VirtualGPU : public device::VirtualDevice {
   struct CommandBatch {
     amd::Command* head_;           //!< Command batch head
     GpuEvent events_[AllEngines];  //!< Last known GPU events
-    TimeStamp* lastTS_;            //!< TS associated with command batch
 
     //! Constructor
-    CommandBatch(amd::Command* head,      //!< Command batch head
-                 const GpuEvent* events,  //!< HW events on all engines
-                 TimeStamp* lastTS        //!< Last TS in command batch
+    CommandBatch(amd::Command* head,     //!< Command batch head
+                 const GpuEvent* events  //!< HW events on all engines
     ) {
-      init(head, events, lastTS);
+      init(head, events);
     }
 
-    void init(amd::Command* head,      //!< Command batch head
-              const GpuEvent* events,  //!< HW events on all engines
-              TimeStamp* lastTS        //!< Last TS in command batch
+    void init(amd::Command* head,     //!< Command batch head
+              const GpuEvent* events  //!< HW events on all engines
     ) {
       head_ = head;
-      lastTS_ = lastTS;
       memcpy(&events_, events, AllEngines * sizeof(GpuEvent));
     }
   };
@@ -703,9 +699,7 @@ class VirtualGPU : public device::VirtualDevice {
   State state_;                  //!< virtual GPU current state
   GpuEvent events_[AllEngines];  //!< Last known GPU events
 
-  uint64_t readjustTimeGPU_;  //!< Readjust time between GPU and CPU timestamps
-  TimeStamp* lastTS_;         //!< Last timestamp executed on Virtual GPU
-  TimeStamp* profileTs_;      //!< current profiling timestamp for command
+  TimeStamp* profileTs_;  //!< Profiling timestamp of the command being submitted
 
   AmdVQueueHeader* vqHeader_;  //!< Sysmem copy for virtual queue header
   Memory* virtualQueue_;       //!< Virtual device queue
