@@ -32,6 +32,18 @@ def _cpu_set_range_label(value_range):
     return f"{value_range.start}-{value_range[-1]}"
 
 
+def _add_selected_devices(args, dest, device_handles):
+    """Add device_handles to args.<dest> once each, so repeated device options combine."""
+    selected = list(getattr(args, dest) or [])
+    # ctypes handles compare by identity, and every handle query returns new objects.
+    selected_values = {handle.value for handle in selected}
+    for handle in device_handles:
+        if handle.value not in selected_values:
+            selected_values.add(handle.value)
+            selected.append(handle)
+    setattr(args, dest, selected)
+
+
 # Custom Help Formatter for increasing the action max length
 class AMDSMIParserHelpFormatter(argparse.HelpFormatter):
     def __init__(self, prog):
@@ -828,7 +840,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
@@ -868,7 +880,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
@@ -904,7 +916,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
@@ -939,7 +951,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
@@ -978,7 +990,7 @@ class AMDSMIParser(argparse.ArgumentParser):
                     )
                 )
                 if status:
-                    setattr(args, self.dest, selected_device_handles)
+                    _add_selected_devices(args, self.dest, selected_device_handles)
                 else:
                     if selected_device_handles == "":
                         raise amdsmi_cli_exceptions.AmdSmiMissingParameterValueException(
