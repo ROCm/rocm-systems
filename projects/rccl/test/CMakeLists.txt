@@ -1045,6 +1045,7 @@ if(BUILD_TESTS)
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
       DdaFabricSimpleMPITests.cpp
+      DdaIpcIndexDataMPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
