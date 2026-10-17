@@ -246,7 +246,8 @@ public:
   /// @param vmid Owning process address space recorded in the new line's tag.
   /// @param evicted_tag If non-null, filled with the evicted tag (caller checks dirty,
   ///        and uses @c evicted_tag->vmid for the writeback address space).
-  /// @param evicted_data If non-null, the evicted line data is copied here.
+  /// @param evicted_data If non-null, the evicted line data is copied here when the victim is
+  ///        valid and dirty; it is left untouched otherwise.
   /// @returns Pointer to the allocated tag entry.
   CacheTag *allocate(uint64_t addr, uint32_t vmid = 0, CacheTag *evicted_tag = nullptr,
                      uint8_t *evicted_data = nullptr) {
@@ -292,7 +293,9 @@ public:
     auto &vt = tag_at(set, victim_way);
     if (evicted_tag)
       *evicted_tag = vt;
-    if (evicted_data)
+    // Only a dirty victim has data anyone must preserve. Skipping the copy for
+    // clean victims avoids touching a cold data line that is about to be overwritten.
+    if (evicted_data && vt.dirty)
       std::memcpy(evicted_data, line_data(set, victim_way), LINE_SIZE);
 
     vt.tag = tag;
