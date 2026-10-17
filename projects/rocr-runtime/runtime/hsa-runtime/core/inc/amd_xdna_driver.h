@@ -186,6 +186,9 @@ public:
   hsa_status_t SetPersistingCacheSize(uint32_t node_id, uint64_t cache_size) override {
     return HSA_STATUS_ERROR_INVALID_AGENT;
   }
+  hsa_status_t GetPersistingCacheSize(uint32_t node_id, uint64_t* cache_size) const override {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
 
  private:
   /// @brief Queries the driver version and updates internal state.
