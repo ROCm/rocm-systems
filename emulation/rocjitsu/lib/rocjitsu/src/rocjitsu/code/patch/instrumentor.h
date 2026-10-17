@@ -396,8 +396,8 @@ validate_anchor(const Instruction &anchor, uint64_t anchor_offset,
 /// is a much more difficult task.
 ///
 /// Block decoding is lazy so the CFG is built on the first call that needs
-/// it (validate_points / find_instruction_at_offset). An Instrumentor that
-/// never gets patched also never decodes.
+/// it (validate_points, blocks or patch). An Instrumentor
+/// that is never asked for either also never decodes.
 class Instrumentor {
 public:
   /// @param obj  The code object to instrument. Borrowed; must outlive the
@@ -433,6 +433,24 @@ public:
   /// lists every fatal diagnostic encountered. On success, `sites` contains
   /// one record per queued point in insertion order and `errors` is empty.
   [[nodiscard]] ValidationResult validate_points();
+
+  /// @brief The decoded blocks of the object's .text, in .text order.
+  ///
+  /// The same blocks validation and patching use; every kernel entry starts
+  /// one. Returns nullptr and sets *error_out when decoding fails or the object
+  /// does not have exactly one .text section. Queues nothing and does not spend
+  /// the single patch attempt.
+  [[nodiscard]] const std::vector<std::unique_ptr<BasicBlock>> *
+  blocks(std::string *error_out = nullptr);
+
+  /// @brief The first instruction in @p block a point can anchor at, if any.
+  ///
+  /// Applies the anchor rules that do not depend on the point:
+  /// is_relocatable_anchor(), and not being among the instructions an s_clause
+  /// covers, which is counted across block boundaries. A point queued there can
+  /// still be refused for reasons that depend on its probe or on the other
+  /// points. @p block must come from blocks().
+  [[nodiscard]] std::optional<uint64_t> first_anchor(const BasicBlock &block) const;
 
   /// @brief Validate, plan, build, and apply the queued points; emit a
   ///        patched ELF.
@@ -485,6 +503,10 @@ private:
   // in that case *error_out is set and blocks_built_ stays false so the failure
   // is reported instead of crashing in BasicBlock::build.
   [[nodiscard]] bool ensure_blocks_built(std::string *error_out = nullptr);
+  // Builds the blocks and returns the single .text section that anchor offsets
+  // are relative to. Sets *error_out and returns nullopt when decoding fails or
+  // the object does not have exactly one .text section.
+  [[nodiscard]] std::optional<std::span<const uint8_t>> anchor_text(std::string *error_out);
   [[nodiscard]] const Instruction *find_instruction_at_offset(uint64_t anchor_offset) const;
 
   // The DBI entry prologue as a dispatch-only stub in the cave: the descriptor

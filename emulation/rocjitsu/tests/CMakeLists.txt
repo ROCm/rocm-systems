@@ -1982,6 +1982,36 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
     )
 endif()
 
+# DBI runtime hook. Like sidecar_registry.cpp in hsa_hooks_unit_test, the hook's
+# HSA-free site selection is compiled in directly and tested as a plain unit.
+if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(
+        dbi_runtime_unit_test
+        dbi/dbi_runtime_sites_test.cpp
+        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/hooks/dbi_runtime_sites.cpp
+    )
+    target_include_directories(
+        dbi_runtime_unit_test
+        PRIVATE
+            ${CMAKE_CURRENT_SOURCE_DIR}
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+            ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+            ${CMAKE_BINARY_DIR}/include
+            ${GENERATED_DIR}
+    )
+    target_link_libraries(
+        dbi_runtime_unit_test
+        PRIVATE
+            ${RJ_OBJECT_LIBS}
+            util
+            flatbuffers
+            Threads::Threads
+            GTest::gtest_main
+    )
+    rj_configure_target(dbi_runtime_unit_test TEST)
+    gtest_discover_tests(dbi_runtime_unit_test)
+endif()
+
 # A separate loadable module is the only way to observe the force-scalar gate's
 # per-module scope: the gate is an inline variable with hidden visibility, so
 # nothing linked into the test executable can see the boundary. The test dlopens

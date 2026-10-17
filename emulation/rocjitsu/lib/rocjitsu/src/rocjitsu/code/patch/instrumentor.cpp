@@ -820,8 +820,22 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
     return false;
   }
   decoder_ = std::move(decoder);
+  // A kernel entry need not follow a terminator (alignment padding can fall
+  // into it), so split there explicitly. Split points add no external entry
+  // state, so liveness is unchanged.
+  std::vector<uint64_t> kernel_entries;
+  if (obj_.text_sections().size() == 1) {
+    const Section *text = obj_.text_sections().front();
+    const std::span<const uint8_t> image(reinterpret_cast<const uint8_t *>(obj_.image_data()),
+                                         obj_.image_size());
+    for (const KernelDescriptorInfo &kernel :
+         scan_kernel_descriptors(image, text->sectionOffset(), text->size()))
+      kernel_entries.push_back(kernel.entry_text_offset);
+  }
   util::StringDiagnostic decode_error;
-  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter());
+  auto blocks = BasicBlock::build(obj_, *decoder_, arch_, decode_error.emitter(),
+                                  /*extra_leaders=*/{}, ExternalEntryPolicy::InferPredecessorless,
+                                  kernel_entries);
   if (blocks.failed()) {
     report(error_out, decode_error.message().c_str());
     return false;
@@ -848,32 +862,60 @@ bool Instrumentor::ensure_blocks_built(std::string *error_out) {
   return true;
 }
 
+std::optional<std::span<const uint8_t>> Instrumentor::anchor_text(std::string *error_out) {
+  if (!ensure_blocks_built(error_out))
+    return std::nullopt;
+  if (obj_.text_sections().empty()) {
+    report(error_out, "code object has no .text section");
+    return std::nullopt;
+  }
+  // TODO: support multi-text code objects. Anchor offsets would need to identify
+  // which .text section they belong to.
+  if (obj_.text_sections().size() > 1) {
+    report(error_out, "code object has multiple .text sections; currently supports only one");
+    return std::nullopt;
+  }
+  const Section *text = obj_.text_sections().front();
+  return std::span<const uint8_t>(reinterpret_cast<const uint8_t *>(text->data()), text->size());
+}
+
 const Instruction *Instrumentor::find_instruction_at_offset(uint64_t anchor_offset) const {
   auto it = offset_to_inst_.find(anchor_offset);
   return it == offset_to_inst_.end() ? nullptr : it->second;
+}
+
+const std::vector<std::unique_ptr<BasicBlock>> *Instrumentor::blocks(std::string *error_out) {
+  return anchor_text(error_out) ? &blocks_ : nullptr;
+}
+
+std::optional<uint64_t> Instrumentor::first_anchor(const BasicBlock &block) const {
+  const Section *text = obj_.text_sections().front();
+  const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
+                                            text->size());
+  // Walked through offset_to_inst_ because a const block's instruction list
+  // cannot be iterated.
+  for (uint64_t cur = block.start_offset(); cur < block.end_offset();) {
+    const Instruction *inst = find_instruction_at_offset(cur);
+    if (inst == nullptr || inst->size() <= 0)
+      break;
+    if (!clause_blocked_offsets_.contains(cur) &&
+        is_relocatable_anchor(*inst, cur, text_bytes, arch_))
+      return cur;
+    cur += static_cast<uint64_t>(inst->size());
+  }
+  return std::nullopt;
 }
 
 Instrumentor::ResolvedPoints Instrumentor::resolve_points() {
   ResolvedPoints out;
 
   std::string err;
-  if (!ensure_blocks_built(&err)) {
+  const std::optional<std::span<const uint8_t>> text = anchor_text(&err);
+  if (!text) {
     out.errors.push_back(std::move(err));
     return out;
   }
-  if (obj_.text_sections().empty()) {
-    out.errors.emplace_back("code object has no .text section");
-    return out;
-  }
-  // TODO: support multi-text code objects. Anchor offsets would need to identify
-  // which .text section they belong to.
-  if (obj_.text_sections().size() > 1) {
-    out.errors.emplace_back("code object has multiple .text sections; currently supports only one");
-    return out;
-  }
-  const Section *text = obj_.text_sections().front();
-  const std::span<const uint8_t> text_bytes(reinterpret_cast<const uint8_t *>(text->data()),
-                                            text->size());
+  const std::span<const uint8_t> text_bytes = *text;
 
   const auto &registry = default_isa_target_registry();
   const IsaTargetDescriptor *arch_descriptor = registry.find(arch_);
