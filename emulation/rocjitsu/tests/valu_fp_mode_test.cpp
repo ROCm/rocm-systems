@@ -4369,6 +4369,9 @@ std::vector<DotLane> dot_family_lanes() {
   const auto add = [&](const char *name, uint16_t opcode, DotModifiers modifiers, uint32_t a,
                        uint32_t b, uint32_t c, uint32_t gfx1201, std::optional<uint32_t> gfx1100,
                        std::vector<uint32_t> modes, SimdPathExpectation simd = {}) {
+    if (UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS && modifiers.clamp &&
+        simd.path == amdgpu::SimdFastPath::VOP3P_DOT_INT)
+      simd = expect_simd_fallback();
     lanes.push_back({name, opcode, modifiers, {a, b, c}, gfx1201, gfx1100, std::move(modes), simd});
   };
   const std::vector<uint32_t> split_modes{0xf0u, 0x70u, 0xb0u, 0xd0u, 0xe0u, 0xf3u, 0xfcu};
