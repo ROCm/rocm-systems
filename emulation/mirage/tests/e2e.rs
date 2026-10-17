@@ -1605,17 +1605,15 @@ fn state_builtins_writes_every_shipped_document_and_names_where() {
 /// Only the JSON form was ever exercised (the harness and the matrix
 /// suite both probe with it), so the human-readable form — the one
 /// anybody actually types — could have rendered nothing at all. The
-/// expectations are derived from the JSON rather than hardcoded, so this
-/// says the same thing on a host with a GPU and on one without.
+/// registry must contain only rocjitsu, regardless of host hardware;
+/// both human-readable forms must agree with the JSON listing.
 #[test]
 fn emulators_lists_every_backend_and_marks_the_default() {
     let env = Env::new();
     let json: serde_json::Value = serde_json::from_str(&env.ok(&["--json", "emulators"])).unwrap();
     let rows = json.as_array().expect("emulators --json is an array");
-    assert!(
-        !rows.is_empty(),
-        "a build with no backends at all cannot run anything: {json}"
-    );
+    assert_eq!(rows.len(), 1, "only rocjitsu should be registered: {json}");
+    assert_eq!(rows[0]["name"], "rocjitsu");
 
     let short = env.ok(&["emulators"]);
     assert!(short.contains("NAME"), "no table header: {short}");

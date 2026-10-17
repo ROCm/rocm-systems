@@ -24,9 +24,8 @@
   - [container](emulation/mirage/container/) — Drives the `docker`/`podman` CLI to realise the containerised parts of a session: image build/pull, networks, node launch. See [lib.rs](emulation/mirage/container/src/lib.rs).
   - [builtin](emulation/mirage/builtin/) — Built-in agents and topologies (e.g. MI300X/MI350X) preloaded into the user config. See [agents.rs](emulation/mirage/builtin/src/agents.rs) and [profiles.rs](emulation/mirage/builtin/src/profiles.rs).
   - Emulator backends — pluggable engines registered via `inventory`, selected per profile by `kind`:
-    - [rocjitsu](emulation/mirage/rocjitsu/) — rocjitsu integration: synthesizes the sim config, hosts the in-process emulator daemon, and the `rocjitsu-dbt` translation backend. See [lib.rs](emulation/mirage/rocjitsu/src/lib.rs), [daemon.rs](emulation/mirage/rocjitsu/src/daemon.rs), [dbt.rs](emulation/mirage/rocjitsu/src/dbt.rs).
+    - [rocjitsu](emulation/mirage/rocjitsu/) — rocjitsu integration: synthesizes the sim config, hosts the in-process emulator daemon. See [lib.rs](emulation/mirage/rocjitsu/src/lib.rs), [daemon.rs](emulation/mirage/rocjitsu/src/daemon.rs).
     - [rocjitsu_sys](emulation/mirage/rocjitsu_sys/) — Runtime (dlopen) FFI bindings to the rocjitsu VM C API (`rj_vm_*`). See [lib.rs](emulation/mirage/rocjitsu_sys/src/lib.rs).
-    - [hotswap](emulation/mirage/hotswap/) — HotSwap backend: load-time ISA rewriter that runs a guest-built workload on the host GPU. See [lib.rs](emulation/mirage/hotswap/src/lib.rs).
     - [noop](emulation/mirage/noop/) — Pass-through backend that runs the workload directly with no GPU emulation. See [lib.rs](emulation/mirage/noop/src/lib.rs).
   - [daemon](emulation/mirage/daemon/) — Optional HTTP/WebSocket server exposing the control plane as a REST API (off by default). See [api.rs](emulation/mirage/daemon/src/api.rs) and [server.rs](emulation/mirage/daemon/src/server.rs).
   - [dashboard](emulation/mirage/dashboard/) — React + Vite single-page app (topology editor, session dashboard, interactive terminals) bundled into the daemon. Source under [web/src/](emulation/mirage/dashboard/web/src/).
