@@ -174,6 +174,19 @@ rj_add_device_kernel(vector_add_probe gfx950 OUTPUT_NAME vector_add_probe_gfx950
 # padding. Build the padded kernel anyway to keep one fixture shape per target.
 rj_add_device_kernel(vector_add_probe gfx1201 OUTPUT_NAME vector_add_probe_gfx1201)
 
+# Block reduction for the DBI runtime hook tests (tests/dbi/). Its resource
+# padding and fixed scratch are explained in dbi_block_reduce.hip.
+rj_add_device_kernel(
+    dbi_block_reduce
+    gfx950
+    OUTPUT_NAME dbi_block_reduce_gfx950
+)
+rj_add_device_kernel(
+    dbi_block_reduce
+    gfx1201
+    OUTPUT_NAME dbi_block_reduce_gfx1201
+)
+
 if(RJ_INSTALL_TESTS)
     set(RJ_DEVICE_KERNEL_FIXTURES
         ${KERNEL_OUTPUT_DIR}/matmul_naive.o
@@ -186,6 +199,8 @@ if(RJ_INSTALL_TESTS)
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx950.o
         ${KERNEL_OUTPUT_DIR}/vector_add_gfx1201.o
         ${KERNEL_OUTPUT_DIR}/vector_add_probe_gfx1201.o
+        ${KERNEL_OUTPUT_DIR}/dbi_block_reduce_gfx950.o
+        ${KERNEL_OUTPUT_DIR}/dbi_block_reduce_gfx1201.o
         ${KERNEL_OUTPUT_DIR}/dynamic_copy_loop.o
         ${KERNEL_OUTPUT_DIR}/scratch_spill_probe.o
         ${KERNEL_OUTPUT_DIR}/virtual_lds_smoke.o
@@ -303,6 +318,8 @@ add_custom_target(
         kernel_vector_add_probe_gfx950
         kernel_vector_add_gfx1201
         kernel_vector_add_probe_gfx1201
+        kernel_dbi_block_reduce_gfx950
+        kernel_dbi_block_reduce_gfx1201
         kernel_dynamic_copy_loop
         kernel_scratch_spill_probe
         kernel_virtual_lds_smoke

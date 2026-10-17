@@ -3636,6 +3636,137 @@ if(HSA_RUNTIME64)
                     "CTest (no gfx1201); the Sim cases still run"
                 )
             endif()
+
+            # --- DBI runtime hook end to end: the test loads the uninstrumented
+            # block_reduce through HSA, and the hook, which ROCr installs from
+            # HSA_TOOLS_LIB, instruments it at load. The binary links the hook's
+            # testing library and HSA_TOOLS_LIB names the same file, so its test
+            # seams read the instance ROCr installed. That library is never
+            # installed, so this test has no installed registration.
+            if(TARGET rocjitsu_dbi_runtime_testing)
+                add_executable(
+                    hsa_dbi_runtime_test
+                    dbi/hsa_dbi_runtime_test.cpp
+                    ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src/rocjitsu/hooks/dbi_runtime_sites.cpp
+                )
+                target_include_directories(
+                    hsa_dbi_runtime_test
+                    PRIVATE
+                        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/include
+                        ${CMAKE_SOURCE_DIR}/lib/rocjitsu/src
+                        ${RJ_HSA_INCLUDE_DIR}
+                )
+                target_link_libraries(
+                    hsa_dbi_runtime_test
+                    PRIVATE
+                        rocjitsu_dbi_runtime_testing
+                        ${RJ_OBJECT_LIBS}
+                        util
+                        ${HSA_RUNTIME64}
+                        GTest::gtest
+                        GTest::gtest_main
+                )
+                target_link_options(
+                    hsa_dbi_runtime_test
+                    PRIVATE -Wl,-rpath,${RJ_HSA_LIBRARY_DIR}
+                )
+                target_compile_definitions(
+                    hsa_dbi_runtime_test
+                    PRIVATE KERNEL_DIR="${KERNEL_OUTPUT_DIR}"
+                )
+                add_dependencies(
+                    hsa_dbi_runtime_test
+                    device_kernels
+                    probe_rj_nop_probe_gfx950
+                    probe_rj_nop_probe_gfx1201
+                    rocjitsu_bin
+                    rocjitsu_shared
+                )
+                rj_configure_target(hsa_dbi_runtime_test TEST)
+
+                # Registers HsaDbiRuntime<target>.<case> as <suite>Sim.<case>
+                # through the CLI with CONFIG, or as <suite>Hardware.<case> on
+                # the bare GPU.
+                function(register_hsa_dbi_runtime_case target case)
+                    cmake_parse_arguments(
+                        RJ_DBIR
+                        "SIM"
+                        "CONFIG;TIMEOUT"
+                        ""
+                        ${ARGN}
+                    )
+                    set(_suite "HsaDbiRuntime${target}")
+                    set(_run_serial)
+                    if(RJ_DBIR_SIM)
+                        set(_name "${_suite}Sim.${case}")
+                        set(_command
+                            ${CMAKE_COMMAND}
+                            "-DTEST_EXECUTABLE=$<TARGET_FILE:hsa_dbi_runtime_test>"
+                            "-DTEST_FILTER=${_suite}.${case}"
+                            "-DTEST_LAUNCHER=${RJ_CLI}"
+                            "-DTEST_CONFIG=${RJ_DBIR_CONFIG}"
+                            "-DFAIL_ON_SKIP=ON"
+                            -P
+                            "${PROJECT_SOURCE_DIR}/cmake/rj_run_filtered_gtest.cmake"
+                        )
+                        if(
+                            RJ_ENABLE_ASAN
+                            OR RJ_ENABLE_UBSAN
+                            OR RJ_ENABLE_TSAN
+                            OR RJ_ENABLE_MSAN
+                        )
+                            set(_run_serial RUN_SERIAL)
+                        endif()
+                    else()
+                        set(_name "${_suite}Hardware.${case}")
+                        set(_command
+                            hsa_dbi_runtime_test
+                            --gtest_filter=${_suite}.${case}
+                        )
+                        set(_run_serial RUN_SERIAL)
+                    endif()
+                    rj_add_test(
+                        NAME "${_name}"
+                        COMMAND ${_command}
+                        WORKING_DIRECTORY ${CMAKE_CURRENT_BINARY_DIR}
+                        # Only this hook: HotSwap wraps the same HSA functions.
+                        ENVIRONMENT
+                            "HSA_TOOLS_LIB=$<TARGET_FILE:rocjitsu_dbi_runtime_testing>"
+                            HSA_HOTSWAP_ENABLE=0
+                            HSA_HOTSWAP_DISABLE=1
+                            HSA_TOOLS_DISABLE_REGISTER=1
+                        TIMEOUT ${RJ_DBIR_TIMEOUT}
+                        ${_run_serial}
+                    )
+                endfunction()
+
+                foreach(
+                    _case
+                    InstrumentedKernelMatchesGolden
+                    ProbeThatEndsTheWaveLeavesOutputUnwritten
+                )
+                    register_hsa_dbi_runtime_case(
+                        Cdna4
+                        ${_case}
+                        SIM
+                        CONFIG ${RJ_CDNA4_KMD_CONFIG}
+                        TIMEOUT 300
+                    )
+                    register_hsa_dbi_runtime_case(
+                        Rdna4
+                        ${_case}
+                        SIM
+                        CONFIG ${RJ_RDNA4_KMD_CONFIG}
+                        TIMEOUT 300
+                    )
+                    if(HAS_CDNA4_GPU)
+                        register_hsa_dbi_runtime_case(Cdna4 ${_case} TIMEOUT 30)
+                    endif()
+                    if(HAS_GFX1201_GPU)
+                        register_hsa_dbi_runtime_case(Rdna4 ${_case} TIMEOUT 30)
+                    endif()
+                endforeach()
+            endif()
         else()
             message(
                 STATUS
