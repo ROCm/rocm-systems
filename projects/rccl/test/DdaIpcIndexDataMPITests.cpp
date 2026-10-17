@@ -221,8 +221,10 @@ TEST_F(DdaIpcMPI_IndexData, AllReduceFlat) {
 
 // Two-shot tree kernel: each rank reduces one count/8 slice, then gathers the peers' slices. Largest case stays below
 // gfx942's 8 MiB DDA IPC AllReduce cap.
+// Each dtype sits just over the flat/tree threshold and at least 8x over it, so a threshold retune keeps tree coverage.
 TEST_F(DdaIpcMPI_IndexData, AllReduceTree) {
-  runAllReduce({{ncclFloat32, 65568}, {ncclFloat32, 1u << 20}, {ncclFloat32, 3u << 19}, {ncclBfloat16, 131136}},
+  runAllReduce({{ncclFloat32, 65568}, {ncclFloat32, 1u << 20}, {ncclFloat32, 3u << 19}, {ncclBfloat16, 131136},
+                {ncclBfloat16, 1u << 20}},
                /*tree=*/true);
 }
 
