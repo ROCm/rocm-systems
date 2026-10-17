@@ -109,6 +109,9 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Changed
 
+- **Source builds use amdclang++ or clang++ by default instead of GCC**.  
+  - Build with GCC through `cmake/toolchains/amdsmi-gcc-toolchain.cmake` or by setting `CC`/`CXX`.
+
 - **Use fwupd daemon to read and write UMA carveout information**.  
   - `amdsmi_get_gpu_uma_carveout_info()` / `amdsmi_set_gpu_uma_carveout()` (and therefore `amd-smi static/set --mem-carveout`) now read and write the carveout through the fwupd BIOS-settings interface on integrated GPUs and fallback to amdgpu `.../device/uma/carveout` sysfs node when the fwupd daemon is absent.
   - Implemented in the AMD SMI library over the fwupd daemon's D-Bus BIOS-settings interface; the fwupd path is used only for the integrated (APU) GPU, and PolicyKit brokers authorization instead of requiring explicit root. Reading needs fwupd >= 1.8.4; writing needs fwupd >= 2.1.1 (Ubuntu 26.04+).
