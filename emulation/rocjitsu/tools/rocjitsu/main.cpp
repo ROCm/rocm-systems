@@ -396,21 +396,18 @@ void print_paths_usage() {
                "Print the config search roots and runtime paths the rocjitsu CLI uses.\n";
 }
 
-void cleanup_runtime_files(pid_t pid) {
+void cleanup_runtime_files(const std::filesystem::path &invocation_runtime_dir) {
   std::error_code error;
-  std::filesystem::remove_all(rpc_invocation_runtime_dir(pid), error);
+  std::filesystem::remove_all(invocation_runtime_dir, error);
 }
 
 // Best-effort reap of per-PID runtime dirs left behind by prior invocations that
 // exited via execvp (which never returns, so cleanup_runtime_files does not run).
 // Each numeric <pid> subdir of the runtime root is removed if that PID is no
 // longer alive, so a recycled PID cannot inherit a stale config_path/daemon.sock.
-void reap_stale_runtime_dirs() {
+void reap_stale_runtime_dirs(const std::filesystem::path &root) {
   // Never iterate an empty root: directory_iterator("") scans the CWD, which would
-  // let this reaper remove_all unrelated numeric directories. rpc_default_runtime_dir()
-  // already treats a set-but-empty $ROCJITSU_RUNTIME_DIR as unset, but guard here too
-  // since the loop body deletes.
-  const std::string root = rpc_default_runtime_dir();
+  // let this reaper remove_all unrelated numeric directories.
   if (root.empty())
     return;
   // Advance the iterator with an error_code (not the throwing operator++): another
@@ -525,12 +522,176 @@ std::optional<std::string_view> environment_value(const char *name) {
   return value == nullptr ? std::nullopt : std::optional<std::string_view>(value);
 }
 
+bool append_env_override(std::string_view assignment,
+                         std::vector<std::pair<std::string, std::string>> &overrides) {
+  const size_t equals = assignment.find('=');
+  if (equals == std::string_view::npos) {
+    std::cerr << std::format("rocjitsu: --env expects KEY=VALUE, got: {}\n", assignment);
+    return false;
+  }
+  if (equals == 0) {
+    std::cerr << std::format("rocjitsu: --env key is empty in: {}\n", assignment);
+    return false;
+  }
+  overrides.emplace_back(std::string(assignment.substr(0, equals)),
+                         std::string(assignment.substr(equals + 1)));
+  return true;
+}
+
+bool apply_config_option(std::string_view assignment, config::LaunchOverrides &overrides) {
+  const size_t equals = assignment.find('=');
+  if (equals == std::string_view::npos) {
+    std::cerr << std::format("rocjitsu: --option expects KEY=VALUE, got: {}\n", assignment);
+    return false;
+  }
+  if (equals == 0) {
+    std::cerr << std::format("rocjitsu: --option key is empty in: {}\n", assignment);
+    return false;
+  }
+
+  const std::string_view key = assignment.substr(0, equals);
+  const std::string_view value = assignment.substr(equals + 1);
+  if (key == "cpu_thread_budget") {
+    overrides.cpu_thread_budget = config::parse_uint32(value);
+    if (!overrides.cpu_thread_budget) {
+      std::cerr << "rocjitsu: --option cpu_thread_budget requires an unsigned integer\n";
+      return false;
+    }
+    return true;
+  }
+  if (key == "wait_checking") {
+    overrides.wait_checking = config::parse_wait_checking(value);
+    if (!overrides.wait_checking) {
+      std::cerr << "rocjitsu: --option wait_checking requires on, off, or all\n";
+      return false;
+    }
+    return true;
+  }
+
+  std::cerr << std::format(
+      "rocjitsu: unknown --option key '{}'; known options: cpu_thread_budget, wait_checking\n",
+      key);
+  return false;
+}
+
+bool validate_workdir(const std::filesystem::path &workdir) {
+  std::error_code status_error;
+  const std::filesystem::file_status status = std::filesystem::status(workdir, status_error);
+  if (status_error) {
+    if (status_error == std::errc::no_such_file_or_directory ||
+        status_error == std::errc::not_a_directory) {
+      std::cerr << std::format("rocjitsu: --workdir {}: directory does not exist\n",
+                               workdir.string());
+      return false;
+    }
+    std::cerr << std::format("rocjitsu: --workdir {}: {}\n", workdir.string(),
+                             status_error.message());
+    return false;
+  }
+  if (!std::filesystem::exists(status)) {
+    std::cerr << std::format("rocjitsu: --workdir {}: directory does not exist\n",
+                             workdir.string());
+    return false;
+  }
+  if (!std::filesystem::is_directory(status)) {
+    std::cerr << std::format("rocjitsu: --workdir {}: not a directory\n", workdir.string());
+    return false;
+  }
+  return true;
+}
+
+void preserve_clear_environment_defaults(rocjitsu::cli::LaunchEnvironment &environment) {
+  constexpr std::array<std::string_view, 8> kPreservedNames = {
+      "PATH", "HOME", "TERM", "USER", "LOGNAME", "SHELL", "LANG", "LC_ALL",
+  };
+
+  for (std::string_view name : kPreservedNames) {
+    const std::string key(name);
+    if (std::optional<std::string_view> value = environment_value(key.c_str()))
+      environment.set(key, std::string(*value));
+  }
+}
+
+std::filesystem::path absolute_runtime_path(std::filesystem::path path) {
+  if (path.is_relative())
+    path = std::filesystem::absolute(path);
+  return path;
+}
+
+std::filesystem::path runtime_dir_from_values(std::optional<std::string_view> rocjitsu_runtime_dir,
+                                              std::optional<std::string_view> xdg_runtime_dir) {
+  if (rocjitsu_runtime_dir && !rocjitsu_runtime_dir->empty())
+    return absolute_runtime_path(std::filesystem::path(std::string(*rocjitsu_runtime_dir)));
+  if (xdg_runtime_dir && !xdg_runtime_dir->empty())
+    return absolute_runtime_path(std::filesystem::path(std::string(*xdg_runtime_dir)) / "rocjitsu");
+  return std::filesystem::path("/tmp") / ("rocjitsu-" + std::to_string(getuid()));
+}
+
+std::filesystem::path runtime_dir_from_process_environment() {
+  return runtime_dir_from_values(environment_value("ROCJITSU_RUNTIME_DIR"),
+                                 environment_value("XDG_RUNTIME_DIR"));
+}
+
+std::optional<std::string_view>
+launch_environment_value(const rocjitsu::cli::LaunchEnvironment &environment, const char *name) {
+  const char *value = environment.get(name);
+  return value == nullptr ? std::nullopt : std::optional<std::string_view>(value);
+}
+
+std::filesystem::path
+runtime_dir_from_launch_environment(const rocjitsu::cli::LaunchEnvironment &environment,
+                                    const std::filesystem::path &fallback_runtime_dir) {
+  const std::optional<std::string_view> rocjitsu_runtime_dir =
+      launch_environment_value(environment, "ROCJITSU_RUNTIME_DIR");
+  const std::optional<std::string_view> xdg_runtime_dir =
+      launch_environment_value(environment, "XDG_RUNTIME_DIR");
+  if ((rocjitsu_runtime_dir && !rocjitsu_runtime_dir->empty()) ||
+      (xdg_runtime_dir && !xdg_runtime_dir->empty()))
+    return runtime_dir_from_values(rocjitsu_runtime_dir, xdg_runtime_dir);
+  return fallback_runtime_dir;
+}
+
+bool set_process_runtime_dir(const std::filesystem::path &runtime_dir) {
+  const std::string value = runtime_dir.string();
+  if (setenv("ROCJITSU_RUNTIME_DIR", value.c_str(), 1) == 0)
+    return true;
+  std::cerr << std::format("rocjitsu: failed to set runtime directory: {}\n", strerror(errno));
+  return false;
+}
+
+std::vector<std::string> gdb_wrapped_arguments(char *const app_argv[],
+                                               const std::vector<std::string> &commands) {
+  std::vector<std::string> args;
+  args.emplace_back("rocgdb");
+  args.emplace_back("-ex");
+  args.emplace_back("set breakpoint pending on");
+  for (const std::string &command : commands) {
+    args.emplace_back("-ex");
+    args.push_back(command);
+  }
+  args.emplace_back("--args");
+  for (char *const *arg = app_argv; *arg != nullptr; ++arg)
+    args.emplace_back(*arg);
+  return args;
+}
+
+std::vector<char *> argv_pointers(std::vector<std::string> &args) {
+  std::vector<char *> pointers;
+  pointers.reserve(args.size() + 1);
+  for (std::string &arg : args)
+    pointers.push_back(arg.data());
+  pointers.push_back(nullptr);
+  return pointers;
+}
+
 /// @brief Resolve automatic host selection once for every DBT runtime layer.
 bool resolve_host_gpu(rocjitsu::config::DbtGuestConfig *dbt_guest,
-                      const std::vector<KfdGpuOrdinal> &topology) {
-  const std::vector<KfdGpuOrdinal> visible_gpus = rocjitsu::cli::effective_visible_gpus(
-      topology, environment_value("ROCR_VISIBLE_DEVICES"), environment_value("HIP_VISIBLE_DEVICES"),
-      environment_value("CUDA_VISIBLE_DEVICES"));
+                      const std::vector<KfdGpuOrdinal> &topology,
+                      std::optional<std::string_view> rocr_visible,
+                      std::optional<std::string_view> hip_visible,
+                      std::optional<std::string_view> cuda_visible) {
+  const std::vector<KfdGpuOrdinal> visible_gpus =
+      rocjitsu::cli::effective_visible_gpus(topology, rocr_visible, hip_visible, cuda_visible);
 
   std::optional<uint32_t> target_version =
       rocjitsu::kmd::gfx_target_version_from_name(dbt_guest->host.isa);
@@ -588,7 +749,7 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
 void print_usage() {
   std::cerr
       << "Usage: rocjitsu [--config <config.json>|--profile <name>] "
-         "[--daemon|--attach] -- <app> [args...]\n"
+         "[--env KEY=VALUE] [--workdir <dir>] [--daemon|--attach] -- <app> [args...]\n"
          "\n"
          "Modes:\n"
          "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)\n"
@@ -603,6 +764,15 @@ void print_usage() {
          "Options:\n"
          "  --config <path>   Simulation config JSON. Cannot be combined with --profile.\n"
          "  --profile <name>  Bundled profile config to run. Defaults to mi350x.\n"
+         "  --env KEY=VALUE  Add or replace an environment variable for the launched app.\n"
+         "  --clear-env-vars Start the launched app with a clean environment, preserving\n"
+         "                    only basic shell/session variables before applying --env.\n"
+         "  --workdir <dir>  Run the launched app from this existing directory.\n"
+         "  --gdb           Run the launched app under rocgdb.\n"
+         "  --gdb-ex <cmd>  Extra rocgdb command to run before the program. May be repeated\n"
+         "                    and implies --gdb.\n"
+         "  --option KEY=VALUE, -o KEY=VALUE\n"
+         "                    Override a supported top-level config value for this launch.\n"
          "  --cpu-thread-budget <n>, --cpu-thread-budget=<n>\n"
          "                    Replace cpu_thread_budget for this launch only; the\n"
          "                    config file is left unchanged. Zero selects automatic\n"
@@ -657,11 +827,17 @@ int main(int argc, char *argv[]) {
   const char *config_path = nullptr;
   const char *profile_name = nullptr;
   const char *vfio_socket = nullptr;
+  std::vector<std::pair<std::string, std::string>> env_overrides;
+  std::vector<std::string> gdb_commands;
+  std::optional<std::filesystem::path> workdir;
   bool thread_budget_table = false;
   config::LaunchOverrides overrides;
+  config::LaunchOverrides flag_overrides;
   int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
+  bool clear_env_vars = false;
+  bool gdb = false;
   int separator_idx = -1;
   for (int i = 1; i < argc; ++i) {
     std::string_view arg(argv[i]);
@@ -673,6 +849,60 @@ int main(int argc, char *argv[]) {
       config_path = argv[++i];
     } else if (arg == "--profile" && i + 1 < argc) {
       profile_name = argv[++i];
+    } else if (arg == "--env" || arg.starts_with("--env=")) {
+      std::string_view assignment;
+      if (arg == "--env") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --env requires KEY=VALUE\n";
+          return 1;
+        }
+        assignment = argv[++i];
+      } else {
+        assignment = arg.substr(std::string_view("--env=").size());
+      }
+      if (!append_env_override(assignment, env_overrides))
+        return 1;
+    } else if (arg == "--option" || arg == "-o" || arg.starts_with("--option=") ||
+               (arg.starts_with("-o") && arg.size() > 2)) {
+      std::string_view assignment;
+      if (arg == "--option" || arg == "-o") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --option requires KEY=VALUE\n";
+          return 1;
+        }
+        assignment = argv[++i];
+      } else if (arg.starts_with("--option=")) {
+        assignment = arg.substr(std::string_view("--option=").size());
+      } else {
+        assignment = arg.substr(2);
+      }
+      if (!apply_config_option(assignment, overrides))
+        return 1;
+    } else if (arg == "--clear-env-vars") {
+      clear_env_vars = true;
+    } else if (arg == "--gdb") {
+      gdb = true;
+    } else if (arg == "--gdb-ex" || arg.starts_with("--gdb-ex=")) {
+      if (arg == "--gdb-ex") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --gdb-ex requires a command\n";
+          return 1;
+        }
+        gdb_commands.emplace_back(argv[++i]);
+      } else {
+        gdb_commands.emplace_back(arg.substr(std::string_view("--gdb-ex=").size()));
+      }
+    } else if (arg == "--workdir" || arg.starts_with("--workdir=")) {
+      if (arg == "--workdir") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --workdir requires a directory\n";
+          return 1;
+        }
+        workdir = argv[++i];
+      } else {
+        workdir =
+            std::filesystem::path(std::string(arg.substr(std::string_view("--workdir=").size())));
+      }
     } else if (arg == "--cpu-thread-budget" || arg.starts_with("--cpu-thread-budget=")) {
       // Both spellings are accepted because wrappers that forward a single opaque
       // token cannot pass a flag and its value as two arguments.
@@ -686,8 +916,8 @@ int main(int argc, char *argv[]) {
         std::cerr << "rocjitsu: --cpu-thread-budget requires a value\n";
         return 1;
       }
-      overrides.cpu_thread_budget = config::parse_uint32(value);
-      if (!overrides.cpu_thread_budget) {
+      flag_overrides.cpu_thread_budget = config::parse_uint32(value);
+      if (!flag_overrides.cpu_thread_budget) {
         std::cerr << "rocjitsu: --cpu-thread-budget requires an unsigned integer\n";
         return 1;
       }
@@ -698,8 +928,8 @@ int main(int argc, char *argv[]) {
         value = arg.substr(equals + 1);
       else if (i + 1 < argc)
         value = argv[++i];
-      overrides.wait_checking = config::parse_wait_checking(value);
-      if (!overrides.wait_checking) {
+      flag_overrides.wait_checking = config::parse_wait_checking(value);
+      if (!flag_overrides.wait_checking) {
         std::cerr << "rocjitsu: --wait-checking requires on, off, or all\n";
         return 1;
       }
@@ -740,10 +970,36 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  if (flag_overrides.cpu_thread_budget)
+    overrides.cpu_thread_budget = flag_overrides.cpu_thread_budget;
+  if (flag_overrides.wait_checking)
+    overrides.wait_checking = flag_overrides.wait_checking;
+
   if (config_path && profile_name) {
     std::cerr << "rocjitsu: --config and --profile cannot be combined\n";
     return 1;
   }
+
+  const bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
+  const bool launch_environment_options =
+      clear_env_vars || !env_overrides.empty() || workdir.has_value();
+  const bool gdb_requested = gdb || !gdb_commands.empty();
+  if (thread_budget_table && (launch_environment_options || gdb_requested)) {
+    std::cerr << "rocjitsu: --thread-budget-table cannot be combined with launch-only options\n";
+    return 1;
+  }
+  if (!has_app && launch_environment_options) {
+    std::cerr << "rocjitsu: launch environment options require an application after --\n";
+    return 1;
+  }
+  if (!has_app && gdb_requested) {
+    std::cerr << "rocjitsu: rocgdb options require an application after --\n";
+    return 1;
+  }
+  if (gdb_requested && !attach_mode)
+    daemon_mode = true;
+  if (workdir && !validate_workdir(*workdir))
+    return 1;
 
   std::string abs_config;
   if (config_path) {
@@ -830,12 +1086,24 @@ int main(int argc, char *argv[]) {
     }
   }
 
+  rocjitsu::cli::LaunchEnvironment launch_environment(!clear_env_vars);
+  if (clear_env_vars)
+    preserve_clear_environment_defaults(launch_environment);
+  for (const auto &[name, value] : env_overrides)
+    launch_environment.set(name, value);
+
+  const std::filesystem::path launcher_runtime_dir = runtime_dir_from_process_environment();
+  if (!set_process_runtime_dir(launcher_runtime_dir))
+    return 1;
+
   const pid_t my_pid = getpid();
+  const std::filesystem::path invocation_runtime_dir =
+      launcher_runtime_dir / std::to_string(my_pid);
 
   // Reclaim per-PID runtime dirs orphaned by prior runs (execvp never returns, so
   // those invocations could not clean up after themselves). Done for every launch
   // mode, before this invocation creates its own directory.
-  reap_stale_runtime_dirs();
+  reap_stale_runtime_dirs(launcher_runtime_dir);
 
   // The copy lives in this invocation's runtime directory, beside the config-path
   // handoff an exec'd workload already reads, so the same cleanup reclaims it.
@@ -847,7 +1115,7 @@ int main(int argc, char *argv[]) {
         abs_config, overrides, my_pid, diagnostic.emitter());
     if (written.failed()) {
       std::cerr << std::format("rocjitsu: {}\n", diagnostic.message());
-      cleanup_runtime_files(my_pid);
+      cleanup_runtime_files(invocation_runtime_dir);
       return false;
     }
     abs_config = std::move(written.value());
@@ -914,8 +1182,6 @@ int main(int argc, char *argv[]) {
   if (!write_config_for_this_launch())
     return 1;
 
-  bool has_app = (separator_idx >= 0 && separator_idx + 1 < argc);
-
   if (daemon_mode && !has_app)
     return run_daemon_server(abs_config.c_str());
 
@@ -926,12 +1192,20 @@ int main(int argc, char *argv[]) {
   }
 
   char **app_argv = &argv[separator_idx + 1];
+  std::vector<std::string> gdb_argv_storage;
+  std::vector<char *> gdb_argv;
+  if (gdb_requested) {
+    gdb_argv_storage = gdb_wrapped_arguments(app_argv, gdb_commands);
+    gdb_argv = argv_pointers(gdb_argv_storage);
+    app_argv = gdb_argv.data();
+  }
 
   auto lib_path = find_interposer_lib();
   if (lib_path.empty()) {
     std::cerr << "rocjitsu: could not find librocjitsu.so\n";
     return 1;
   }
+  rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path);
 
   std::string hooks_path;
   std::vector<KfdGpuOrdinal> dbt_execution_gpus;
@@ -946,13 +1220,38 @@ int main(int argc, char *argv[]) {
       std::cerr << std::format("rocjitsu: failed to load DBT execution topology: {}\n", e.what());
       return 1;
     }
-    if (!resolve_host_gpu(&dbt_guest_config, dbt_execution_gpus))
+    std::optional<std::string_view> child_rocr_visible =
+        launch_environment_value(launch_environment, "ROCR_VISIBLE_DEVICES");
+    std::optional<std::string> expanded_rocr_visible =
+        rocjitsu::cli::expanded_rocr_visible_devices(dbt_execution_gpus, child_rocr_visible);
+    if (expanded_rocr_visible) {
+      launch_environment.set("ROCR_VISIBLE_DEVICES", *expanded_rocr_visible);
+      child_rocr_visible = *expanded_rocr_visible;
+    }
+    const std::optional<std::string_view> child_hip_visible =
+        launch_environment_value(launch_environment, "HIP_VISIBLE_DEVICES");
+    const std::optional<std::string_view> child_cuda_visible =
+        launch_environment_value(launch_environment, "CUDA_VISIBLE_DEVICES");
+
+    if (!resolve_host_gpu(&dbt_guest_config, dbt_execution_gpus, child_rocr_visible,
+                          child_hip_visible, child_cuda_visible))
       return 1;
+    if (std::optional<rocjitsu::cli::VisibilityOverride> client_visible =
+            rocjitsu::cli::normalized_client_visible_devices(dbt_execution_gpus, child_rocr_visible,
+                                                             child_hip_visible, child_cuda_visible,
+                                                             dbt_guest_config.host.gpu_id))
+      launch_environment.set(client_visible->name, client_visible->value);
+
     hooks_path = find_hooks_lib();
     if (hooks_path.empty()) {
       std::cerr << "rocjitsu: could not find librocjitsu_hooks.so\n";
       return 1;
     }
+    // The HSA hook still uses the legacy tools callback path. Disable the
+    // rocprofiler-register table-delivery path so it cannot validate an
+    // unshadowed table before rocjitsu installs guest-agent wrappers. Also
+    // exclude the overlapping automatic HotSwap hook across ROCr generations.
+    rocjitsu::cli::configure_dbt_guest_tool_environment(launch_environment, hooks_path);
   }
 
   // Set only where this process forked the daemon itself. A client authorizes
@@ -960,17 +1259,20 @@ int main(int argc, char *argv[]) {
   // come from whoever started it rather than from the socket, and this exec
   // is the last point that still knows.
   std::optional<pid_t> launched_daemon_pid;
+  std::optional<std::filesystem::path> attach_runtime_dir;
 
   if (attach_mode) {
-    auto sock_path = rpc_default_socket_path();
+    attach_runtime_dir =
+        runtime_dir_from_launch_environment(launch_environment, launcher_runtime_dir);
+    const std::filesystem::path sock_path = *attach_runtime_dir / "daemon.sock";
     if (!std::filesystem::exists(sock_path)) {
-      std::cerr << std::format("rocjitsu: no daemon socket at {}\n", sock_path);
+      std::cerr << std::format("rocjitsu: no daemon socket at {}\n", sock_path.string());
       return 1;
     }
   } else if (daemon_mode) {
-    auto socket_path = rpc_invocation_socket_path(my_pid);
+    const std::string socket_path = (invocation_runtime_dir / "daemon.sock").string();
     std::error_code directory_error;
-    std::filesystem::create_directories(rpc_invocation_runtime_dir(my_pid), directory_error);
+    std::filesystem::create_directories(invocation_runtime_dir, directory_error);
     if (directory_error) {
       std::cerr << std::format("rocjitsu: failed to create runtime directory: {}\n",
                                directory_error.message());
@@ -980,7 +1282,7 @@ int main(int argc, char *argv[]) {
     int ready_pipe[2];
     if (pipe(ready_pipe) != 0) {
       std::cerr << std::format("rocjitsu: pipe failed: {}\n", strerror(errno));
-      cleanup_runtime_files(my_pid);
+      cleanup_runtime_files(invocation_runtime_dir);
       return 1;
     }
 
@@ -989,7 +1291,7 @@ int main(int argc, char *argv[]) {
       std::cerr << std::format("rocjitsu: fork failed: {}\n", strerror(errno));
       close(ready_pipe[0]);
       close(ready_pipe[1]);
-      cleanup_runtime_files(my_pid);
+      cleanup_runtime_files(invocation_runtime_dir);
       return 1;
     }
 
@@ -1012,49 +1314,38 @@ int main(int argc, char *argv[]) {
       std::cerr << "rocjitsu: daemon did not become ready\n";
       kill(daemon_pid, SIGKILL);
       waitpid(daemon_pid, nullptr, 0);
-      cleanup_runtime_files(my_pid);
+      cleanup_runtime_files(invocation_runtime_dir);
       return 1;
     }
     launched_daemon_pid = daemon_pid;
   } else {
     if (!rocjitsu::config::write_dbt_runtime_config_handoff(abs_config, dbt_guest_config, my_pid)) {
       std::cerr << "rocjitsu: failed to write config file\n";
-      cleanup_runtime_files(my_pid);
+      cleanup_runtime_files(invocation_runtime_dir);
       return 1;
     }
   }
 
-  rocjitsu::cli::LaunchEnvironment launch_environment;
-  rocjitsu::cli::prepend_launch_preloads(launch_environment, lib_path);
-  if (dbt_guest_mode) {
-    std::optional<std::string_view> child_rocr_visible = environment_value("ROCR_VISIBLE_DEVICES");
-    std::optional<std::string> expanded_rocr_visible =
-        rocjitsu::cli::expanded_rocr_visible_devices(dbt_execution_gpus, child_rocr_visible);
-    if (expanded_rocr_visible) {
-      launch_environment.set("ROCR_VISIBLE_DEVICES", *expanded_rocr_visible);
-      child_rocr_visible = *expanded_rocr_visible;
-    }
-    if (std::optional<rocjitsu::cli::VisibilityOverride> client_visible =
-            rocjitsu::cli::normalized_client_visible_devices(
-                dbt_execution_gpus, child_rocr_visible, environment_value("HIP_VISIBLE_DEVICES"),
-                environment_value("CUDA_VISIBLE_DEVICES"), dbt_guest_config.host.gpu_id))
-      launch_environment.set(client_visible->name, client_visible->value);
-    // The HSA hook still uses the legacy tools callback path. Disable the
-    // rocprofiler-register table-delivery path so it cannot validate an
-    // unshadowed table before rocjitsu installs guest-agent wrappers. Also
-    // exclude the overlapping automatic HotSwap hook across ROCr generations.
-    rocjitsu::cli::configure_dbt_guest_tool_environment(launch_environment, hooks_path);
-  }
   // Export the invocation runtime dir so every descendant (including grandchild
   // processes spawned through wrappers like ctest) inherits the exact directory
-  // holding config_path/daemon.sock. Attach mode creates no such dir.
-  if (!attach_mode)
-    launch_environment.set(rocjitsu::kRpcInvocationDirEnv, rpc_invocation_runtime_dir(my_pid));
+  // holding config_path/daemon.sock. Attach mode exports the resolved daemon
+  // runtime directory so a cleared or changed child environment still reaches
+  // the socket the launcher validated.
+  if (attach_mode)
+    launch_environment.set(rocjitsu::kRpcInvocationDirEnv, attach_runtime_dir->string());
+  else
+    launch_environment.set(rocjitsu::kRpcInvocationDirEnv, invocation_runtime_dir.string());
   if (launched_daemon_pid)
     launch_environment.set(rocjitsu::kRpcDaemonPidEnv, std::to_string(*launched_daemon_pid));
+  if (workdir && chdir(workdir->c_str()) != 0) {
+    std::cerr << std::format("rocjitsu: failed to enter --workdir {}: {}\n", workdir->string(),
+                             strerror(errno));
+    cleanup_runtime_files(invocation_runtime_dir);
+    return 1;
+  }
   rocjitsu::cli::execvp_with_environment(app_argv[0], app_argv, launch_environment);
 
   std::cerr << std::format("rocjitsu: execvp failed: {}\n", strerror(errno));
-  cleanup_runtime_files(my_pid);
+  cleanup_runtime_files(invocation_runtime_dir);
   return 1;
 }
