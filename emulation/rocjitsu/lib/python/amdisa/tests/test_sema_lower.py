@@ -839,17 +839,18 @@ class TestLowerVectorAdd:
             (
                 SemaType.F16,
                 '<amdgpu::fp_format::F16>',
-                'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl()',
+                'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), '
+                'wf.fp16_ovfl(), output_policy.omod != 0',
             ),
             (
                 SemaType.F32,
                 '<amdgpu::fp_format::F32>',
-                'wf.fp_denorm_mode_f32(), wf.fp_round_mode_f32(), false',
+                'wf.fp_denorm_mode_f32(), wf.fp_round_mode_f32(), false, false',
             ),
             (
                 SemaType.F64,
                 '<amdgpu::fp_format::F64, 32>',
-                'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), false',
+                'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), false, false',
             ),
         ],
     )
@@ -867,8 +868,9 @@ class TestLowerVectorAdd:
             f'const auto ldexp_policy = amdgpu::ldexp::Policy::make({policy});'
             in result
         )
-        # F16 destination writes wrap the operation for SDWA OMOD; F32/F64
-        # call it directly. F64 reads a 32-bit exponent.
+        # F16 destination writes wrap the operation for SDWA OMOD, which also
+        # makes a tiny result flush; F32/F64 call it directly. F64 reads a
+        # 32-bit exponent.
         operation = 'Operation' if ty == SemaType.F16 else 'evaluate'
         assert f'amdgpu::ldexp::{operation}{template}' in result
         # The helper flushes the value itself, never the exponent, and rounds

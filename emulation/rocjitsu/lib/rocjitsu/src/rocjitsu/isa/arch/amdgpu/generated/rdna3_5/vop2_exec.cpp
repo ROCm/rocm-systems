@@ -1493,14 +1493,15 @@ void VLdexpF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
     return;
   }
   uint64_t exec = wf.exec();
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(),
-                                                        wf.fp_round_mode_f16_f64(), wf.fp16_ovfl());
   const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(
       wf, amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf), 0u);
+  const auto ldexp_policy =
+      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(),
+                                  wf.fp16_ovfl(), output_policy.omod != 0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::APPLIED>(
         *this, wf, vdst, lane,
         amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
             amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,
@@ -1528,14 +1529,15 @@ RJ_NOINLINE void VLdexpF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
     dpp_write_mask_scope_.bind(wf,
                                wf.exec() & dpp_plan_.row_bank_mask & dpp_plan_.source_write_mask);
   uint64_t exec = wf.exec();
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(),
-                                                        wf.fp_round_mode_f16_f64(), wf.fp16_ovfl());
   const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(
       wf, amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf), 0u);
+  const auto ldexp_policy =
+      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(),
+                                  wf.fp16_ovfl(), output_policy.omod != 0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::APPLIED>(
         *this, wf, vdst, lane,
         amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
             amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,

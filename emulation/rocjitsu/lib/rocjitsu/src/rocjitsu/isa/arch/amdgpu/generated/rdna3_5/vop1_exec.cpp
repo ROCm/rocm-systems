@@ -2335,7 +2335,7 @@ void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::APPLIED>(
         *this, wf, vdst, lane,
         amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
             amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,
@@ -2369,7 +2369,7 @@ RJ_NOINLINE void VFractF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::APPLIED>(
         *this, wf, vdst, lane,
         amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
             amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,

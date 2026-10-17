@@ -1644,19 +1644,20 @@ void VLdexpF16Vop2::execute_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
         return std::bit_cast<util::native<uint32_t>>((
             amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make(
-                wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl())})(
+                wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl(), false)})(
             std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
     return;
   uint64_t exec = wf.exec();
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(),
-                                                        wf.fp_round_mode_f16_f64(), wf.fp16_ovfl());
   const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(
       wf, amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf), 0u);
+  const auto ldexp_policy =
+      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(),
+                                  wf.fp16_ovfl(), output_policy.omod != 0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::APPLIED>(
         *this, wf, vdst, lane,
         amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
             amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,
@@ -1687,19 +1688,20 @@ RJ_NOINLINE void VLdexpF16Vop2::execute_modifier_impl(amdgpu::Wavefront &wf) {
   if (amdgpu::try_execute_words_simd<2, true, true, 3>(inst, wf, [&](auto a, auto b) {
         return std::bit_cast<util::native<uint32_t>>((
             amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make(
-                wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl())})(
+                wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl(), false)})(
             std::bit_cast<util::native<uint32_t>>(a), std::bit_cast<util::native<uint32_t>>(b)));
       }))
     return;
   uint64_t exec = wf.exec();
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(),
-                                                        wf.fp_round_mode_f16_f64(), wf.fp16_ovfl());
   const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(
       wf, amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf), 0u);
+  const auto ldexp_policy =
+      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(),
+                                  wf.fp16_ovfl(), output_policy.omod != 0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::APPLIED>(
         *this, wf, vdst, lane,
         amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
             amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,

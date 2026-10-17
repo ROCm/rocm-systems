@@ -2485,12 +2485,14 @@ def _ldexp_result(
     dtype = f'f{node.ty.size}'
     value, has_abs, has_neg = _register_read(node.children[0], ctx)
     exponent, _, _ = _register_read(node.children[1], ctx)
-    declaration = float_ldexp.policy_decl(dtype)
-    if declaration not in ctx.body_preamble:
-        ctx.body_preamble.append(declaration)
     modifiers, output_policy = _raw_operation_modifiers(
         ctx, dtype, has_abs, has_neg, output_fields, destination
     )
+    # A tiny result flushes under effective OMOD; see shared/ldexp.h.
+    omod = f'{output_policy}.omod != 0' if output_policy else 'false'
+    declaration = float_ldexp.policy_decl(dtype, omod)
+    if declaration not in ctx.body_preamble:
+        ctx.body_preamble.append(declaration)
     return float_ldexp.ldexp_expr(dtype, value, exponent, modifiers, output_policy)
 
 

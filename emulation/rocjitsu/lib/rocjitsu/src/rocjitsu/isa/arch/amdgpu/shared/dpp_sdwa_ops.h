@@ -552,8 +552,9 @@ namespace sdwa {
 /// @details Selects the denormal mode used for OMOD eligibility, shared with VOP3.
 /// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
 /// environment; MODE uses scale_f32 with guest rounding. F16 scaling order remains
-/// the producer helper's responsibility.
-enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST };
+/// the producer helper's responsibility. APPLIED marks an F16 result whose producer
+/// already applied OMOD and output flushing (floating_operation.h); only CLAMP remains.
+enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST, APPLIED };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
 inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
@@ -943,7 +944,9 @@ inline void write_lane(Inst &inst, amdgpu::Wavefront &wf, const Op &op, uint32_t
                 }) {
     if (inst.inst_.src0 == amdgpu::SRC_SDWA && op.is_vgpr() &&
         inst.dst_operand(0) == static_cast<const Operand *>(&op)) {
-      value = scale_result<Format, Policy>(inst, wf, value);
+      static_assert(Policy != OutputPolicy::APPLIED || Format == ResultFormat::F16);
+      if constexpr (Policy != OutputPolicy::APPLIED)
+        value = scale_result<Format, Policy>(inst, wf, value);
       if (inst.sdwa_clamp_)
         value = clamp_result<Format>(value, wf);
       const uint8_t byte_mask = sdwa_dst_byte_mask(inst.sdwa_dst_sel_, inst.sdwa_dst_unused_);

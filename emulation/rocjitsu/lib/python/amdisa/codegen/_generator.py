@@ -25,6 +25,7 @@ import cgen
 
 from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.floating_policy import (
+    APPLIED_OUTPUT_F16_OPS,
     F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
 )
@@ -1027,6 +1028,8 @@ class CodeGenerator:
     def _sdwa_output_policy(sem: InstructionSemantics | None) -> str:
         if sem and sem.name in FLUSH_NEAREST_F32_OPS:
             return ', amdgpu::sdwa::OutputPolicy::FLUSH_NEAREST'
+        if sem and sem.name in APPLIED_OUTPUT_F16_OPS:
+            return ', amdgpu::sdwa::OutputPolicy::APPLIED'
         return ''
 
     @staticmethod
