@@ -109,6 +109,26 @@ __global__ void kernelHasPk8(int* out) {
 #endif
 }
 
+// True when Apply_Reduce<Fn, N> is a specialization rather than the generic
+// recursion: specializations declare a plain `reduce`, while the primary template
+// (reduce_kernel.h:322) declares a member template whose `Size` cannot be deduced
+// from &A::reduce, so the decltype is ill-formed and SFINAE picks false_type.
+template <class A, class = void>
+struct HasPlainReduce : std::false_type {};
+template <class A>
+struct HasPlainReduce<A, std::void_t<decltype(&A::reduce)>> : std::true_type {};
+
+// kernelHasPk8 only reports that RCCL_FP8_HAS_PK8 is defined, which is derived from
+// the architecture alone (rccl_float8.h:96). It stays 1 even if the width-8 rows are
+// deleted, and the hadd2 fallback is numerically identical, so no runtime assertion
+// can see the difference. This pins the selection itself at compile time.
+#if defined(RCCL_FP8_HAS_PK8)
+static_assert(HasPlainReduce<Apply_Reduce<FuncSum<rccl_float8>, 8>>::value,
+              "fp8 width-8 reduce fell back to the hadd2 recursion; pk8 not selected");
+static_assert(HasPlainReduce<Apply_Reduce<FuncSum<rccl_bfloat8>, 8>>::value,
+              "bf8 width-8 reduce fell back to the hadd2 recursion; pk8 not selected");
+#endif
+
 // Ask the device which fp8 encoding it actually compiled in, rather than
 // re-deriving it from the architecture name. Byte 0x80 is -0.0 under OCP and NaN
 // under FNUZ, so decoding it on device distinguishes the two. Reading it off the
@@ -437,7 +457,9 @@ TEST_F(Fp8ReduceTest, OverflowConsistentE5m2) {
 //
 //    Width 8 falls back to the hadd2 recursion if RCCL_FP8_HAS_PK8 stops being
 //    defined. That fallback is numerically identical, so every test above stays
-//    green while the optimization is silently gone.
+//    green while the optimization is silently gone. This runtime test covers the
+//    macro; the static_asserts above cover the specialization actually being
+//    selected, which the macro does not imply.
 // ---------------------------------------------------------------------------
 
 TEST_F(Fp8ReduceTest, Pk8CompiledOnGfx1250) {
