@@ -9,7 +9,10 @@
 #include "hrr/hrr_regions.h"
 
 #include <algorithm>
+#include <atomic>
+#include <new>
 #include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <vector>
@@ -75,13 +78,20 @@ const char* event_type_name(uint16_t type) {
   return "UNKNOWN";
 }
 
+uint64_t pid_from_archive_dir_name(const std::string& name) {
+  if (name.size() <= 4 || name.compare(0, 4, "pid-") != 0 ||
+      name.find_first_not_of("0123456789", 4) != std::string::npos)
+    return 0;
+  return std::strtoull(name.c_str() + 4, nullptr, 10);
+}
+
 static std::vector<fs::path> find_pid_subarchives(const fs::path& root) {
   std::vector<fs::path> dirs;
   if (!fs::exists(root) || !fs::is_directory(root)) return dirs;
   for (const auto& ent : fs::directory_iterator(root)) {
     if (!ent.is_directory()) continue;
     const std::string name = ent.path().filename().string();
-    if (name.rfind("pid-", 0) == 0 && fs::exists(ent.path() / "events.bin"))
+    if (pid_from_archive_dir_name(name) != 0 && fs::exists(ent.path() / "events.bin"))
       dirs.push_back(ent.path());
   }
   std::sort(dirs.begin(), dirs.end());
@@ -593,6 +603,15 @@ bool load_archive(const std::string& path, Archive& archive) {
     #undef AS
     #undef SIZE_OK
 
+    if (archive.events.size() >= max_events()) {
+      fprintf(stderr,
+              "[HRR] Refusing %s: more than %llu events (--max-events); stopped "
+              "reading after %zu\n",
+              events_path.c_str(), (unsigned long long)max_events(),
+              archive.events.size());
+      fclose(f);
+      return false;
+    }
     archive.events.push_back(std::move(ev));
   }
 
@@ -724,17 +743,57 @@ bool has_clean_trailer(const std::string& archive_dir) {
 // Blob / code object readers
 // ---------------------------------------------------------------------------
 
-static bool read_file(const std::string& file_path, std::vector<uint8_t>& data) {
+static std::atomic<uint64_t> g_max_file_bytes{kDefaultMaxFileBytes};
+static std::atomic<uint64_t> g_max_events{kDefaultMaxEvents};
+
+uint64_t max_events() { return g_max_events.load(std::memory_order_relaxed); }
+void set_max_events(uint64_t events) { g_max_events.store(events, std::memory_order_relaxed); }
+
+uint64_t max_file_bytes() { return g_max_file_bytes.load(std::memory_order_relaxed); }
+void set_max_file_bytes(uint64_t bytes) {
+  g_max_file_bytes.store(bytes, std::memory_order_relaxed);
+}
+
+bool read_file_capped(const std::string& file_path, std::vector<uint8_t>& data,
+                      std::string* error, bool* refused) {
+  if (refused) *refused = false;
+  auto fail = [&](const std::string& why) {
+    if (error) *error = why;
+    return false;
+  };
+  auto refuse = [&](const std::string& why) {
+    if (refused) *refused = true;
+    return fail(why);
+  };
+  std::error_code ec;
+  const uintmax_t size = std::filesystem::file_size(file_path, ec);
+  if (ec)
+    return fail("cannot stat " + file_path + ": " + ec.message());
+  const uint64_t cap = max_file_bytes();
+  if (size > cap)
+    return refuse("refusing to read " + file_path + ": " + std::to_string(size) +
+                " bytes exceeds the " + std::to_string(cap) +
+                "-byte file cap (--max-file-bytes)");
   FILE* f = fopen(file_path.c_str(), "rb");
-  if (!f) return false;
-  if (fseek(f, 0, SEEK_END) != 0) { fclose(f); return false; }
-  long size = ftell(f);
-  if (size < 0) { fclose(f); return false; }
-  if (fseek(f, 0, SEEK_SET) != 0) { fclose(f); return false; }
-  data.resize(static_cast<size_t>(size));
+  if (!f) return fail("cannot open " + file_path);
+  try {
+    data.resize(static_cast<size_t>(size));
+  } catch (const std::bad_alloc&) {
+    fclose(f);
+    return refuse("out of memory reading " + file_path + " (" + std::to_string(size) + " bytes)");
+  }
+  // Read at most `size` bytes: a file that grew since the stat is not followed.
   bool ok = fread(data.data(), 1, data.size(), f) == data.size();
   fclose(f);
-  return ok;
+  if (!ok) return fail("short read of " + file_path);
+  return true;
+}
+
+static bool read_file(const std::string& file_path, std::vector<uint8_t>& data) {
+  std::string err;
+  if (read_file_capped(file_path, data, &err)) return true;
+  fprintf(stderr, "[HRR] %s\n", err.c_str());
+  return false;
 }
 
 bool read_blob(const Archive& archive, uint64_t hash_lo, uint64_t hash_hi,
