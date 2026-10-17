@@ -381,8 +381,9 @@ def gen_vector_mullit(
 ) -> str:
     """Generate V_MULLIT_F32 (the legacy lighting multiply).
 
-    Stages: ABS/NEG, fp_mode::mullit_f32 (input flush, special cases, legacy
-    product with MODE rounding and output flush), then OMOD and CLAMP.
+    Stages: ABS/NEG, fp_mode::mullit_f32 (input flush and special cases; a zero
+    factor gives +0 by the legacy rule, other factors use the architectural F32
+    multiply with MODE rounding, tininess and output flush), then OMOD and CLAMP.
     """
     L = []
     if is_vop3:
