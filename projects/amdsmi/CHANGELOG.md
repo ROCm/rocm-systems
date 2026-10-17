@@ -273,6 +273,15 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Fixed `amd-smi event -g` listening on the wrong GPU**.  
   - Events now come from the GPUs you select.
 
+- **Fixed power readings of exactly 255 W showing as N/A in the Python library**.  
+  - A reading of exactly 255 in any power or voltage field was treated as unavailable.
+
+- **Fixed wrong overdrive clock values in the Python library**.  
+  - The memory clock range showed the fabric clock range, and the clock limits read 0 even when the GPU reported them.
+
+- **Fixed wrong CPU DIMM readings in the Python library on Python 3.14 and later**.  
+  - The update rate, DIMM address and temperature were wrong.
+
 - **Fixed `amdsmi_get_gpu_driver_info()` reporting `0` as the driver date**.  
   - Kernels that no longer use the DRM driver date report it as `0`. `driver_date` is now empty in the C API and `N/A` in Python.
 

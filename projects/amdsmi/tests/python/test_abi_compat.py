@@ -24,6 +24,7 @@ import ctypes
 import importlib
 import importlib.util
 import os
+import re
 import shutil
 import subprocess
 import sys
@@ -443,6 +444,95 @@ class DisableSystemFallbackToolTest(unittest.TestCase):
             self.assertNotEqual(rc, 0)
         finally:
             shutil.rmtree(tmp, ignore_errors=True)
+
+
+GENERATOR_TOOL = REPO_ROOT / "tools" / "generator.py"
+
+
+def _load_generator() -> ModuleType:
+    """Import tools/generator.py with a stub ctypeslib; only its text passes run here."""
+    clang2py = ModuleType("ctypeslib.clang2py")
+    clang2py.main = None
+    stubs = {"ctypeslib": ModuleType("ctypeslib"), "ctypeslib.clang2py": clang2py}
+    saved = {name: sys.modules.get(name) for name in stubs}
+    sys.modules.update(stubs)
+    try:
+        spec = importlib.util.spec_from_file_location("amdsmi_generator", GENERATOR_TOOL)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        return module
+    finally:
+        for name, module in saved.items():
+            if module is None:
+                sys.modules.pop(name, None)
+            else:
+                sys.modules[name] = module
+
+
+@unittest.skipUnless(GENERATOR_TOOL.is_file(), "generator.py not found (installed layout)")
+class GeneratorBitfieldPaddingTest(unittest.TestCase):
+    """tools/generator.py types each PADDING bit-field like the unit it completes."""
+
+    def _unify(self, fields):
+        tmp = Path(tempfile.mkdtemp(prefix="amdsmi-padding-"))
+        try:
+            path = tmp / "fields.py"
+            path.write_text("".join("    %s,\n" % field for field in fields))
+            _load_generator().unify_bitfield_padding(str(path))
+            return [line.strip().rstrip(",") for line in path.read_text().splitlines()]
+        finally:
+            shutil.rmtree(tmp, ignore_errors=True)
+
+    def test_units_are_matched_by_size_not_type_name(self):
+        fields = [
+            "('a', ctypes.c_ubyte, 3)",
+            "('PADDING_0', ctypes.c_uint32, 29)",
+            "('b', ctypes.c_ushort, 15)",
+            "('PADDING_1', ctypes.c_uint8, 1)",
+            "('c', ctypes.c_bool, 1)",
+            "('PADDING_2', ctypes.c_uint8, 7)",
+            "('t', ctypes.c_float)",
+            "('u', ctypes.c_unknown, 3)",
+            "('PADDING_3', ctypes.c_uint8, 5)",
+        ]
+        self.assertEqual(
+            self._unify(fields),
+            [
+                "('a', ctypes.c_ubyte, 3)",
+                "('PADDING_0', ctypes.c_ubyte, 5)",
+                "('PADDING_0_1', ctypes.c_ubyte, 8)",
+                "('PADDING_0_2', ctypes.c_ubyte, 8)",
+                "('PADDING_0_3', ctypes.c_ubyte, 8)",
+                "('b', ctypes.c_ushort, 15)",
+                "('PADDING_1', ctypes.c_ushort, 1)",
+                "('c', ctypes.c_bool, 1)",
+                "('PADDING_2', ctypes.c_uint8, 7)",
+                "('t', ctypes.c_float)",
+                "('u', ctypes.c_unknown, 3)",
+                "('PADDING_3', ctypes.c_uint8, 5)",
+            ],
+        )
+
+    def test_output_keeps_the_c_layout(self):
+        # struct { unsigned char a : 3; unsigned int b; }: b at offset 4, 8 bytes.
+        lines = self._unify(
+            [
+                "('a', ctypes.c_ubyte, 3)",
+                "('PADDING_0', ctypes.c_uint32, 29)",
+                "('b', ctypes.c_uint32)",
+            ]
+        )
+        fields = []
+        for line in lines:
+            name, ctype, bits = re.match(r"\('(\w+)', ctypes\.(\w+)(?:, (\d+))?\)$", line).groups()
+            fields.append((name, getattr(ctypes, ctype)) + ((int(bits),) if bits else ()))
+
+        class Record(ctypes.Structure):
+            _pack_ = 1
+            _layout_ = "ms"
+            _fields_ = fields
+
+        self.assertEqual((Record.b.offset, ctypes.sizeof(Record)), (4, 8))
 
 
 def _stdlib_top_level_names() -> frozenset:
