@@ -189,6 +189,42 @@ public:
     return false;
   }
 
+  /// @brief Look up an address like lookup(), returning its tag and line data.
+  /// @details Promotes the way exactly as lookup() does. Callers that go on to read
+  /// or write the line use the returned pointers instead of rescanning the set.
+  /// The pointers stay valid until the next allocation or invalidation of this set.
+  /// @returns {nullptr, nullptr} on a miss.
+  Allocation find(uint64_t addr, uint32_t vmid = 0) {
+    uint32_t set = set_index(addr);
+    if constexpr (LazyStorage)
+      if (!touched_sets_[set])
+        return {};
+    uint64_t tag = tag_bits(addr);
+    for (uint32_t w = 0; w < Associativity; ++w) {
+      auto &t = tag_at(set, w);
+      if (t.valid && t.tag == tag && t.vmid == vmid) {
+        policy_.access(set, w);
+        return {&t, line_data(set, w)};
+      }
+    }
+    return {};
+  }
+
+  /// @brief Read from a resident line located by find() or allocate_with_data().
+  static void read_resident(const Allocation &line, uint8_t *dst, uint32_t offset, uint32_t size) {
+    assert(line.tag && offset + size <= LINE_SIZE);
+    assert(bytes_valid(*line.tag, offset, size) && "read_resident called for absent bytes");
+    std::memcpy(dst, line.data + offset, size);
+  }
+
+  /// @brief Write to a resident line located by find() or allocate_with_data().
+  static void write_resident(const Allocation &line, const uint8_t *src, uint32_t offset,
+                             uint32_t size) {
+    assert(line.tag && offset + size <= LINE_SIZE);
+    std::memcpy(line.data + offset, src, size);
+    mark_valid_bytes(*line.tag, offset, size);
+  }
+
   /// Inspect residency without changing replacement order or cache contents.
   const CacheTag *peek(uint64_t addr, uint32_t vmid = 0) const {
     const uint32_t set = set_index(addr);

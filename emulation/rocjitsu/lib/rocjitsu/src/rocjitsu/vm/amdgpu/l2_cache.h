@@ -385,7 +385,10 @@ private:
   VmAccessOutcome cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size,
                                       uint32_t vmid);
   // Store allocation leaves untouched bytes absent instead of reading backing.
-  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid = 0, bool fetch_on_miss = true);
+  // On success, *line (when non-null) addresses the resident line; it stays valid while the
+  // caller holds the set lock and does not allocate or invalidate in that set.
+  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid = 0, bool fetch_on_miss = true,
+                              CacheStore::Allocation *line = nullptr);
   VmAccessOutcome flush_line_locked(uint64_t addr, uint32_t vmid = 0);
   VmAccessOutcome flush_dirty_locked();
   [[nodiscard]] VmAccessOutcome flush_dirty_to_legacy_backing_locked();

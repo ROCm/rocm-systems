@@ -99,7 +99,10 @@ private:
                                  RequestMtypeResolver &mtypes);
   void cache_partial_bytes(uint64_t addr, const uint8_t *src, uint32_t size, uint32_t vmid);
   // Store allocation leaves untouched bytes absent instead of reading backing.
-  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss = true);
+  // On success, *line (when non-null) addresses the resident line; it stays valid until the
+  // next allocation or invalidation in this cache.
+  VmAccessOutcome ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss = true,
+                              CacheStore::Allocation *line = nullptr);
 
   CacheStore cache_;
   L2Cache *l2_;

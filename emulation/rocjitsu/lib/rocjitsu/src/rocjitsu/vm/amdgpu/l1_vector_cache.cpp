@@ -81,33 +81,37 @@ void L1VectorCache::set_gpu_vm(GpuVm *gpu_vm) {
   mtype_cache_.clear();
 }
 
-VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
-  simdojo::CacheTag *resident = nullptr;
-  if (cache_.lookup(addr, &resident, vmid)) {
-    if (!fetch_on_miss || CacheStore::bytes_valid(*resident, 0, LINE_SIZE))
+VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss,
+                                           CacheStore::Allocation *line_out) {
+  if (CacheStore::Allocation resident = cache_.find(addr, vmid); resident.tag) {
+    if (!fetch_on_miss || CacheStore::bytes_valid(*resident.tag, 0, LINE_SIZE)) {
+      if (line_out)
+        *line_out = resident;
       return VmAccessOutcome::Complete;
+    }
 
     uint8_t line_buf[LINE_SIZE];
     const VmAccessOutcome outcome = l2_->fetch_line(CacheStore::line_address(addr), line_buf, vmid);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
     cache_.fill_missing_bytes(addr, line_buf, vmid);
+    if (line_out)
+      *line_out = resident;
     return VmAccessOutcome::Complete;
   }
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
-  cache_.allocate(addr, vmid, &evicted, nullptr);
+  CacheStore::Allocation allocated = cache_.allocate_with_data(addr, vmid, &evicted, nullptr);
 
   assert(!evicted.dirty && "L1 V$ is write-through; lines should never be dirty");
 
   // A store supplies only its architectural byte range. Keep all other bytes
   // absent so the store never speculatively reads backing memory.
   if (!fetch_on_miss) {
-    simdojo::CacheTag *allocated = nullptr;
-    cache_.lookup(addr, &allocated, vmid);
-    assert(allocated != nullptr);
-    CacheStore::clear_valid_bytes(*allocated);
+    CacheStore::clear_valid_bytes(*allocated.tag);
+    if (line_out)
+      *line_out = allocated;
     return VmAccessOutcome::Complete;
   }
 
@@ -117,7 +121,10 @@ VmAccessOutcome L1VectorCache::ensure_line(uint64_t addr, uint32_t vmid, bool fe
     cache_.invalidate(addr, vmid);
     return outcome;
   }
-  cache_.fill_line(addr, line_buf, vmid);
+  std::memcpy(allocated.data, line_buf, LINE_SIZE);
+  allocated.tag->valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
+  if (line_out)
+    *line_out = allocated;
   return VmAccessOutcome::Complete;
 }
 
@@ -179,10 +186,9 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
       continue;
     }
 
-    simdojo::CacheTag *resident = nullptr;
-    if (cache_.lookup(ea, &resident, vmid) &&
-        CacheStore::bytes_valid(*resident, line_offset, chunk)) {
-      cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    const CacheStore::Allocation resident = cache_.find(ea, vmid);
+    if (resident.tag && CacheStore::bytes_valid(*resident.tag, line_offset, chunk)) {
+      CacheStore::read_resident(resident, dst + copied, line_offset, chunk);
       copied += chunk;
       continue;
     }
@@ -196,10 +202,11 @@ VmAccessOutcome L1VectorCache::read_bytes(uint64_t addr, uint8_t *dst, uint32_t 
       continue;
     }
 
-    const VmAccessOutcome outcome = ensure_line(ea, vmid);
+    CacheStore::Allocation line;
+    const VmAccessOutcome outcome = ensure_line(ea, vmid, /*fetch_on_miss=*/true, &line);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
-    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    CacheStore::read_resident(line, dst + copied, line_offset, chunk);
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
@@ -241,7 +248,8 @@ VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, ui
       continue;
     }
 
-    const VmAccessOutcome fill_outcome = ensure_line(ea, vmid, /*fetch_on_miss=*/false);
+    CacheStore::Allocation line;
+    const VmAccessOutcome fill_outcome = ensure_line(ea, vmid, /*fetch_on_miss=*/false, &line);
     if (fill_outcome != VmAccessOutcome::Complete)
       return fill_outcome;
 
@@ -253,11 +261,10 @@ VmAccessOutcome L1VectorCache::write_bytes(uint64_t addr, const uint8_t *src, ui
     if (write_outcome != VmAccessOutcome::Complete)
       return write_outcome;
 
-    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+    // The write-through to L2 does not touch this L1, so `line` is still resident.
+    CacheStore::write_resident(line, src + copied, line_offset, chunk);
 
-    simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag, vmid);
-    assert(tag != nullptr && "ensure_line must guarantee hit");
+    simdojo::CacheTag *tag = line.tag;
 
     // L1 line stays clean since L2 has the authoritative copy.
     tag->coherence = (chunk_mtype == Mtype::CC) ? simdojo::CoherenceState::SHARED

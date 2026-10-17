@@ -303,11 +303,14 @@ VmAccessOutcome L2Cache::send_atomic_backing(uint64_t addr, uint32_t size,
   return access_outcome(completion_status);
 }
 
-VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss) {
-  simdojo::CacheTag *resident = nullptr;
-  if (cache_.lookup(addr, &resident, vmid)) {
-    if (!fetch_on_miss || CacheStore::bytes_valid(*resident, 0, LINE_SIZE))
+VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on_miss,
+                                     CacheStore::Allocation *line_out) {
+  if (CacheStore::Allocation resident = cache_.find(addr, vmid); resident.tag) {
+    if (!fetch_on_miss || CacheStore::bytes_valid(*resident.tag, 0, LINE_SIZE)) {
+      if (line_out)
+        *line_out = resident;
       return VmAccessOutcome::Complete;
+    }
 
     uint8_t line_buf[LINE_SIZE];
     const VmAccessOutcome outcome = send_backing(CacheStore::line_address(addr), line_buf,
@@ -315,13 +318,15 @@ VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
     cache_.fill_missing_bytes(addr, line_buf, vmid);
+    if (line_out)
+      *line_out = resident;
     return VmAccessOutcome::Complete;
   }
 
   uint64_t line_addr = CacheStore::line_address(addr);
   simdojo::CacheTag evicted;
   uint8_t evicted_data[LINE_SIZE];
-  cache_.allocate(addr, vmid, &evicted, evicted_data);
+  CacheStore::Allocation allocated = cache_.allocate_with_data(addr, vmid, &evicted, evicted_data);
 
   if (evicted.valid && evicted.dirty) {
     static constexpr uint32_t SET_INDEX_BITS = std::bit_width(NUM_SETS - 1);
@@ -349,10 +354,9 @@ VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on
   // absent so the store never speculatively reads backing memory. Dirty victims
   // are still published before the caller modifies the new line.
   if (!fetch_on_miss) {
-    simdojo::CacheTag *allocated = nullptr;
-    cache_.lookup(addr, &allocated, vmid);
-    assert(allocated != nullptr);
-    CacheStore::clear_valid_bytes(*allocated);
+    CacheStore::clear_valid_bytes(*allocated.tag);
+    if (line_out)
+      *line_out = allocated;
     return VmAccessOutcome::Complete;
   }
 
@@ -363,7 +367,10 @@ VmAccessOutcome L2Cache::ensure_line(uint64_t addr, uint32_t vmid, bool fetch_on
     cache_.invalidate(addr, vmid);
     return outcome;
   }
-  cache_.fill_line(addr, line_buf, vmid);
+  std::memcpy(allocated.data, line_buf, LINE_SIZE);
+  allocated.tag->valid_bytes = {~uint64_t{0}, ~uint64_t{0}};
+  if (line_out)
+    *line_out = allocated;
   return VmAccessOutcome::Complete;
 }
 
@@ -467,10 +474,9 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
         return outcome;
     }
 
-    simdojo::CacheTag *resident = nullptr;
-    if (cache_.lookup(ea, &resident, vmid) &&
-        CacheStore::bytes_valid(*resident, line_offset, chunk)) {
-      cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    const CacheStore::Allocation resident = cache_.find(ea, vmid);
+    if (resident.tag && CacheStore::bytes_valid(*resident.tag, line_offset, chunk)) {
+      CacheStore::read_resident(resident, dst + copied, line_offset, chunk);
       copied += chunk;
       continue;
     }
@@ -487,10 +493,11 @@ VmAccessOutcome L2Cache::read(uint64_t addr, uint8_t *dst, uint32_t size, Mtype 
       continue;
     }
 
-    const VmAccessOutcome outcome = ensure_line(ea, vmid);
+    CacheStore::Allocation line;
+    const VmAccessOutcome outcome = ensure_line(ea, vmid, /*fetch_on_miss=*/true, &line);
     if (outcome != VmAccessOutcome::Complete)
       return outcome;
-    cache_.read_line(ea, dst + copied, line_offset, chunk, vmid);
+    CacheStore::read_resident(line, dst + copied, line_offset, chunk);
     copied += chunk;
   }
   return VmAccessOutcome::Complete;
@@ -563,7 +570,10 @@ VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size,
     const uint32_t chunk = std::min(size - copied, LINE_SIZE - line_offset);
     std::lock_guard set_lock(set_mutex(ea));
 
-    const VmAccessOutcome fill_outcome = ensure_line(ea, vmid, /*fetch_on_miss=*/false);
+    // The set lock is held, so the resident line cannot move between the fill
+    // and the update below; send_backing never touches this cache's lines.
+    CacheStore::Allocation line;
+    const VmAccessOutcome fill_outcome = ensure_line(ea, vmid, /*fetch_on_miss=*/false, &line);
     if (fill_outcome != VmAccessOutcome::Complete)
       return fill_outcome;
 
@@ -571,11 +581,9 @@ VmAccessOutcome L2Cache::write(uint64_t addr, const uint8_t *src, uint32_t size,
                                                        chunk, simdojo::MessageOp::WRITE, vmid);
     if (write_outcome != VmAccessOutcome::Complete)
       return write_outcome;
-    cache_.write_line(ea, src + copied, line_offset, chunk, vmid);
+    CacheStore::write_resident(line, src + copied, line_offset, chunk);
 
-    simdojo::CacheTag *tag = nullptr;
-    cache_.lookup(ea, &tag, vmid);
-    assert(tag != nullptr && "ensure_line must guarantee hit");
+    simdojo::CacheTag *tag = line.tag;
 
     // Write through to backing store for all mtypes. In the simulator, GPU
     // virtual addresses are host-mapped (MAP_FIXED), so hipMemcpy reads from
@@ -597,10 +605,11 @@ VmAccessOutcome L2Cache::fetch_line(uint64_t addr, uint8_t *line_buf, uint32_t v
   auto maintenance_lock = acquire_cache_access();
   std::lock_guard set_lock(set_mutex(addr));
   uint64_t line_addr = CacheStore::line_address(addr);
-  const VmAccessOutcome outcome = ensure_line(line_addr, vmid);
+  CacheStore::Allocation line;
+  const VmAccessOutcome outcome = ensure_line(line_addr, vmid, /*fetch_on_miss=*/true, &line);
   if (outcome != VmAccessOutcome::Complete)
     return outcome;
-  cache_.read_line(line_addr, line_buf, 0, LINE_SIZE, vmid);
+  CacheStore::read_resident(line, line_buf, 0, LINE_SIZE);
   return VmAccessOutcome::Complete;
 }
 
