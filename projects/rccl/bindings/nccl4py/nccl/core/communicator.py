@@ -184,7 +184,13 @@ class NCCLConfig(LowppSpec, lowpp_cls=_nccl_bindings.Config):
 
     graph_usage_mode: int | None = None
     """Graph usage mode. Supported values are 0 (no graphs), 1 (one graph), and 2
-    (multiple graphs or a mix of graph and non-graph). If unset, NCCL uses 2.
+    (multiple graphs or a mix of graph and non-graph). If unset, RCCL uses 0, so a
+    communicator used from CUDA graphs needs 1 or 2 (upstream NCCL uses 2). Mode 1
+    handles captured and non-captured calls as long as they are serialized; 2 is
+    needed only when they overlap, such as a non-captured call while a graph launch
+    on the same or a split-shared communicator is still outstanding (see
+    ``NCCL_GRAPH_MIXING_SUPPORT``). ``NCCL_GRAPH_MIXING_SUPPORT`` overrides it:
+    1 sets 2 and 0 sets 0.
 
     Available since NCCL 2.29.0.
     """

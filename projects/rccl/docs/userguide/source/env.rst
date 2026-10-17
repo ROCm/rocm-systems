@@ -1759,9 +1759,11 @@ Enable/disable support for multiple outstanding NCCL calls from parallel CUDA gr
 
 The ability to disable support is motivated by observed hangs in the CUDA launches when support is enabled and multiple ranks have work launched via cudaGraphLaunch from the same thread.
 
+When set, this variable overrides the communicator's ``graphUsageMode`` (see :ref:`ncclconfig`): ``1`` sets it to ``2`` and ``0`` sets it to ``0``. Because ``2`` cannot be combined with :ref:`NCCL_GRAPH_STREAM_ORDERING` ``0``, ``1`` also forces ``graphStreamOrdering`` back to ``1`` when stream ordering is disabled.
+
 Value accepted
 ^^^^^^^^^^^^^^
-0 or 1. Default is 1 (enabled).
+0 or 1. Unset by default, in which case the communicator's ``graphUsageMode`` applies. In RCCL that defaults to ``0``, so graph mixing support is **disabled** by default (upstream NCCL enables it).
 
 .. _NCCL_GRAPH_STREAM_ORDERING:
 
@@ -1778,8 +1780,8 @@ CUDA graph capture.
 .. warning::
 
    ``NCCL_GRAPH_STREAM_ORDERING=0`` together with **graph mixing** (communicator
-   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL emits
-   a warning, forces ``graphStreamOrdering`` to ``1``, and continues communicator
+   ``graphUsageMode=2``; see :ref:`ncclconfig`) is **not supported**. NCCL logs
+   an INFO message (visible with ``NCCL_DEBUG=INFO``), forces ``graphStreamOrdering`` to ``1``, and continues communicator
    creation successfully. If stream ordering is disabled for a communicator,
    **graph mixing must be off**—use ``graphUsageMode`` ``0`` or ``1`` (and note
    that :ref:`NCCL_GRAPH_MIXING_SUPPORT` ``1`` forces ``graphUsageMode=2`` at init,
