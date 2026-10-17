@@ -9,6 +9,14 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - **`rdc_health_get()` returns `RDC_ST_GROUP_NOT_FOUND` for a GPU group that does not exist**.
   - It returned `RDC_ST_OK` with no health watches, so `rdci health -f` showed every watch as Off and exited successfully, and `rdci health -c` failed asking for watches to be enabled. Both commands now fail with a message that the group does not exist.
 
+- `rdci diag` reports a check as skipped, instead of passed, when it or one GPU in it compared nothing (a group without GPUs, a group of one GPU for the topology check, a GPU whose sensors cannot be read, processes whose GPUs cannot be read); `rdc_diagnostic_run()`, and `rdc_test_case_run()` in embedded mode, also report a check whose module returned without writing a result as skipped.
+
+- `rdci diag`'s GPU parameters line gives one sentence per GPU (limits in range, or how many crossed), and its per-GPU lines state each crossed limit, for example `Edge temperature 105 is at or above its maximum 100.`
+
+- `rdci diag`'s compute process lines cover only the GPUs of the group, and leave out the process that runs the check (`rdcd`, or the program that embeds RDC), which can stay listed on a GPU after the ROCr diagnostics have used it.
+
+- `rdci diag` cuts a compute process, node topology or GPU parameters detail too long to show after a whole sentence, GPU pair or process ID and ends it with "(N more not shown)".
+
 ### Removed
 
 - Removed the unused `GetBlockNameStr()` test helper and its GPU block name map. Nothing called it, and its `static_assert` on `AMDSMI_GPU_BLOCK_LAST` broke the RDC build whenever AMD SMI added an IP block (#10949).
@@ -61,6 +69,18 @@ Full documentation for RDC is available at [ROCm DataCenter Tool User Guide](htt
 - `rdc_start_embedded()` returns `RDC_ST_FAIL_LOAD_MODULE`, and `rdcd` exits with an error, when AMD SMI fails to initialize. Both aborted the process.
 
 - GPU indexes no longer shift when AMD SMI fails to identify a GPU, unless AMD SMI also lists CPUs and no identified GPU shares that GPU's socket. That GPU keeps its index and is reported as unavailable until AMD SMI identifies it: `rdci discovery` lists it as `unavailable`, `rdci link` shows no links for it, `rdci topo` shows no link to it, and its fields read N/A instead of another GPU's values.
+
+- The node topology diagnostic checks each pair of GPUs, instead of each GPU against itself, and names the GPUs by index.
+
+- The GPU parameters diagnostic reports each GPU's messages under that GPU and compares the critical voltage limits.
+
+- The compute process diagnostic finds the GPUs of each process: it asked AMD SMI for them with a NULL list, which current AMD SMI versions reject, so it passed while processes ran; it also retries when processes start while it reads the list.
+
+- `rdcd` and `rdci` no longer need about 7 MB of stack per diagnostic run.
+
+- `rdci diag` no longer shows the results of an earlier run for a check that did not run.
+
+- `rdcd` no longer logs an error for each diagnostic run with a custom configuration.
 
 ## RDC 1.3.1 for ROCm 7.14.0
 

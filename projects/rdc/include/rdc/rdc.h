@@ -694,7 +694,8 @@ typedef enum {
  */
 typedef enum {
   RDC_DIAG_RESULT_PASS,  //!< The diagnostic test pass
-  RDC_DIAG_RESULT_SKIP,  //!< The diagnostic test skipped
+  RDC_DIAG_RESULT_SKIP,  //!< The diagnostic test skipped; also the result of a test that
+                         //!< could not compare anything
   RDC_DIAG_RESULT_WARN,  //!< The diagnostic test has warnings
   RDC_DIAG_RESULT_FAIL   //!< The diagnostic test fail
 } rdc_diag_result_t;
@@ -704,7 +705,8 @@ typedef enum {
  */
 typedef enum {
   RDC_DIAG_TEST_FIRST = 0,
-  //!< The diagnostic test pass
+  //! No compute process runs on the group's GPUs. The process that runs the check (rdcd, or the
+  //! program that embeds RDC) is left out, so an embedding program's own GPU work is not reported.
   RDC_DIAG_COMPUTE_PROCESS = RDC_DIAG_TEST_FIRST,
   RDC_DIAG_COMPUTE_QUEUE,         //!< The Compute Queue is ready
   RDC_DIAG_SYS_MEM_CHECK,         //!< Check System memory

@@ -29,6 +29,7 @@ THE SOFTWARE.
 #include <future>
 #include <iostream>
 #include <memory>
+#include <new>
 #include <string>
 
 #include "rdc.grpc.pb.h"  // NOLINT
@@ -658,11 +659,18 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       writer,
   };
 
-  rdc_diag_response_t diag_response;
+  // About 7 MB: on the heap, not on this thread's stack.
+  std::unique_ptr<rdc_diag_response_t> diag_response(new (std::nothrow) rdc_diag_response_t());
+  if (diag_response == nullptr) {
+    RDC_LOG(RDC_DEBUG, "Not enough memory for the diagnostic results");
+    ::rdc::DiagnosticRunResponse reply;
+    reply.set_status(RDC_ST_INSUFF_RESOURCES);
+    return writer->Write(reply) ? ::grpc::Status::OK : ::grpc::Status::CANCELLED;
+  }
   rdc_status_t result = rdc_diagnostic_run(
       rdc_handle_, request->group_id(), static_cast<rdc_diag_level_t>(request->level()),
       const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
-      &diag_response, &callback);
+      diag_response.get(), &callback);
 
   ::rdc::DiagnosticRunResponse reply;
   reply.set_status(result);
@@ -671,15 +679,15 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
   }
 
   ::rdc::DiagnosticResponse* to_response = reply.mutable_response();
-  if (diag_response.results_count > MAX_TEST_CASES) {
+  if (diag_response->results_count > MAX_TEST_CASES) {
     reply.set_status(RDC_ST_BAD_PARAMETER);
     writer->Write(reply);
     return ::grpc::Status::OK;
   }
-  to_response->set_results_count(diag_response.results_count);
+  to_response->set_results_count(diag_response->results_count);
 
-  for (uint32_t i = 0; i < diag_response.results_count; i++) {
-    const rdc_diag_test_result_t& test_result = diag_response.diag_info[i];
+  for (uint32_t i = 0; i < diag_response->results_count; i++) {
+    const rdc_diag_test_result_t& test_result = diag_response->diag_info[i];
     ::rdc::DiagnosticTestResult* to_diag_info = to_response->add_diag_info();
 
     to_diag_info->set_status(test_result.status);
@@ -751,11 +759,18 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
       writer,
   };
 
-  rdc_diag_test_result_t test_result;
+  // About 521 KB: on the heap, not on this thread's stack.
+  std::unique_ptr<rdc_diag_test_result_t> test_result(new (std::nothrow) rdc_diag_test_result_t());
+  if (test_result == nullptr) {
+    RDC_LOG(RDC_DEBUG, "Not enough memory for the diagnostic result");
+    ::rdc::DiagnosticTestCaseRunResponse reply;
+    reply.set_status(RDC_ST_INSUFF_RESOURCES);
+    return writer->Write(reply) ? ::grpc::Status::OK : ::grpc::Status::CANCELLED;
+  }
   rdc_status_t result = rdc_test_case_run(
       rdc_handle_, request->group_id(), static_cast<rdc_diag_test_cases_t>(request->test_case()),
       const_cast<char*>(request->config().c_str()), static_cast<size_t>(request->config().length()),
-      &test_result, &callback);
+      test_result.get(), &callback);
 
   ::rdc::DiagnosticTestCaseRunResponse reply;
   reply.set_status(result);
@@ -763,30 +778,30 @@ bool RdcAPIServiceImpl::copy_gpu_usage_info(const rdc_gpu_usage_info_t& src,
     return ::grpc::Status::OK;
   }
   ::rdc::DiagnosticTestResult* to_diag_info = reply.mutable_result();
-  to_diag_info->set_status(test_result.status);
+  to_diag_info->set_status(test_result->status);
 
   // details
   auto to_details = to_diag_info->mutable_details();
-  to_details->set_code(test_result.details.code);
-  to_details->set_msg(test_result.details.msg);
+  to_details->set_code(test_result->details.code);
+  to_details->set_msg(test_result->details.msg);
 
   to_diag_info->set_test_case(
-      static_cast<::rdc::DiagnosticTestResult_DiagnosticTestCase>(test_result.test_case));
-  to_diag_info->set_per_gpu_result_count(test_result.per_gpu_result_count);
+      static_cast<::rdc::DiagnosticTestResult_DiagnosticTestCase>(test_result->test_case));
+  to_diag_info->set_per_gpu_result_count(test_result->per_gpu_result_count);
 
   // gpu_results
-  uint32_t gpu_result_count = (test_result.per_gpu_result_count > RDC_MAX_NUM_DEVICES)
+  uint32_t gpu_result_count = (test_result->per_gpu_result_count > RDC_MAX_NUM_DEVICES)
                                   ? RDC_MAX_NUM_DEVICES
-                                  : test_result.per_gpu_result_count;
+                                  : test_result->per_gpu_result_count;
   for (uint32_t j = 0; j < gpu_result_count; j++) {
     auto to_result = to_diag_info->add_gpu_results();
-    const rdc_diag_per_gpu_result_t& cur_result = test_result.gpu_results[j];
+    const rdc_diag_per_gpu_result_t& cur_result = test_result->gpu_results[j];
     to_result->set_gpu_index(cur_result.gpu_index);
     auto to_per_detail = to_result->mutable_gpu_result();
     to_per_detail->set_code(cur_result.gpu_result.code);
     to_per_detail->set_msg(cur_result.gpu_result.msg);
   }
-  to_diag_info->set_info(test_result.info);
+  to_diag_info->set_info(test_result->info);
 
   if (!writer->Write(reply)) {
     return ::grpc::Status::CANCELLED;
