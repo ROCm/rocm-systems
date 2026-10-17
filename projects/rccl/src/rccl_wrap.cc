@@ -894,11 +894,15 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
 }
 
 // R2 window per collective in which a symmetric TDM kernel runs whatever symMinR2 /
-// symMaxR2 say. 0 in either bound = no window.
-inline bool rcclSymTdmWindowTab(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes) {
+// symMaxR2 say. 0 in either bound = no window. Across trays symTdmFabricMaxR2, when set,
+// lowers the upper edge.
+inline bool rcclSymTdmWindowTab(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes,
+                                bool crossTray) {
   if (table == nullptr) return false;
-  const size_t lo = funcThresholdFromTable(table->symTdmMinR2, func);
-  const size_t hi = funcThresholdFromTable(table->symTdmMaxR2, func);
+  const size_t lo       = funcThresholdFromTable(table->symTdmMinR2, func);
+  size_t hi             = funcThresholdFromTable(table->symTdmMaxR2, func);
+  const size_t fabricHi = funcThresholdFromTable(table->symTdmFabricMaxR2, func);
+  if (crossTray && fabricHi != 0) hi = std::min(hi, fabricHi);
   return lo != 0 && hi != 0 && totalBytes >= lo && totalBytes <= hi;
 }
 } // namespace
@@ -1781,8 +1785,10 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // whatever symMinR2/symMaxR2 say, but only when the cost model picks that kernel for these
     // buffers: it does not at 2 ranks for the smaller sizes, for misaligned windows, or on a
     // multi-node comm (only the non-TDM rail kernel is offered there).
+    // A UALink domain without all-direct links spans trays.
+    const bool agCrossTray = comm->MNNVL && !comm->isAllDirectNvlink;
     bool agSymTdmWindow = false;
-    if (agSymkRequested && rcclSymTdmWindowTab(archTable, ncclFuncAllGather, totalBytes)) {
+    if (agSymkRequested && rcclSymTdmWindowTab(archTable, ncclFuncAllGather, totalBytes, agCrossTray)) {
       int a, p, ch;
       agSymTdmWindow = rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch,
                                      ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin,
@@ -1793,8 +1799,7 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     const bool agSymSuppressedBySize = agSymkRequested && !agSymTdmWindow && totalBytes > agSymMaxR2;
     // Across UALink trays (MNNVL without all-direct links) only the TDM window runs symk:
     // the symMinR2..symMaxR2 kernels lose to DDA there.
-    const bool agSymSuppressedByFabric =
-      agSymkRequested && !agSymTdmWindow && comm->MNNVL && !comm->isAllDirectNvlink;
+    const bool agSymSuppressedByFabric = agSymkRequested && !agSymTdmWindow && agCrossTray;
     const bool symEligible =
       agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize && !agSymSuppressedByFabric;
     if (!query && agSymTdmWindow) INFO(NCCL_TUNING, "AG symk admitted by the TDM window: totalBytes=%zu", totalBytes);

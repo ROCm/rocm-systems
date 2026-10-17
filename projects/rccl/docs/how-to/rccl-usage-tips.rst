@@ -109,9 +109,9 @@ can use a TDM kernel when all of the following are true:
 - The gfx1250 dispatch table admits the symmetric path for that collective and
   size. With the default (SPX) table, allreduce does not use symmetric kernels,
   reduce-scatter uses them from 2 MiB, and allgather uses them from 128 KiB to
-  2 MiB and, where the cost model picks the TDM kernel, from 64 MiB to 512 MiB.
-  On communicators that span several trays only that allgather TDM window is
-  used. ``RCCL_IGNORE_ARCH_TABLE=1`` removes these limits within one tray; on
+  2 MiB and, where the cost model picks the TDM kernel, from 64 MiB to 4 GiB
+  within one tray. On communicators that span several trays only that allgather
+  TDM window is used, and it ends at 512 MiB, above which Ring Simple is faster. ``RCCL_IGNORE_ARCH_TABLE=1`` removes these limits within one tray; on
   communicators that span several trays it turns the allgather symmetric kernels
   off. ``NCCL_SYM_TMA_ENABLE=2`` does not override the table.
 

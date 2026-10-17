@@ -4703,7 +4703,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaGatedOnNotSymEligible) {
 }
 
 // The TDM window re-admits symk for registered AllGather between symTdmMinR2 and
-// symTdmMaxR2, past symMaxR2, but only when the cost model picks a TDM kernel.
+// symTdmMaxR2 (symTdmFabricMaxR2 across trays), past symMaxR2, but only when the cost
+// model picks a TDM kernel.
 TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel) {
   RUN_ISOLATED_TEST(
       "Wrap_SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel",
@@ -4719,7 +4720,8 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel)
         table.symMaxR2[ncclFuncAllGather] = 2 * kMiB;
         table.symMaxR2Graph[ncclFuncAllGather] = 2 * kMiB;
         table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
-        table.symTdmMaxR2[ncclFuncAllGather] = 512 * kMiB;
+        table.symTdmMaxR2[ncclFuncAllGather] = 1024 * kMiB;
+        table.symTdmFabricMaxR2[ncclFuncAllGather] = 512 * kMiB;
         auto picksSymk = [&table](size_t totalBytes, ncclSymkKernelId modelPick, bool directLinks = true) {
           ScopedHook tuningCompute(g_tuningCompute, SelectSymkTuning(modelPick, /*maxChannels=*/64));
           ncclComm* comm = MakeCommWithArch("gfx1250");
@@ -4742,11 +4744,13 @@ TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel)
         EXPECT_FALSE(picksSymk(32 * kMiB, tdm)) << "between the two windows";
         EXPECT_FALSE(picksSymk(64 * kMiB - 64, tdm)) << "just below the TDM window";
         EXPECT_TRUE(picksSymk(64 * kMiB, tdm)) << "TDM window floor";
-        EXPECT_TRUE(picksSymk(512 * kMiB, tdm)) << "TDM window ceiling";
-        EXPECT_FALSE(picksSymk(512 * kMiB + 64, tdm)) << "just past the TDM window";
+        EXPECT_TRUE(picksSymk(1024 * kMiB, tdm)) << "TDM window ceiling";
+        EXPECT_FALSE(picksSymk(1024 * kMiB + 64, tdm)) << "just past the TDM window";
         EXPECT_FALSE(picksSymk(128 * kMiB, st)) << "model picks the non-TDM kernel";
         EXPECT_FALSE(picksSymk(1 * kMiB, st, /*directLinks=*/false)) << "cross-tray, symMinR2..symMaxR2 window";
         EXPECT_TRUE(picksSymk(128 * kMiB, tdm, /*directLinks=*/false)) << "cross-tray, TDM window";
+        EXPECT_TRUE(picksSymk(512 * kMiB, tdm, /*directLinks=*/false)) << "cross-tray TDM window ceiling";
+        EXPECT_FALSE(picksSymk(512 * kMiB + 64, tdm, /*directLinks=*/false)) << "cross-tray, just past it";
       });
 }
 
