@@ -4907,13 +4907,23 @@ static ncclResult_t taskAppend(struct ncclComm* comm, struct ncclInfo* info) {
   return ncclSuccess;
 }
 
-ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
-  // Early-out on invalid or revoked communicator
-  ncclResult_t ret = CommCheck(info->comm, info->opName, "comm");
-  if (ret != ncclSuccess) return ncclGroupErrCheck(ret);
-  if (info->comm->revokedFlag) {
-    WARN("%s: communicator was revoked", info->opName);
+// Early-out on an invalid or revoked comm. Call it before any comm read that precedes ncclEnqueueCheck.
+ncclResult_t ncclEnqueueCommCheck(struct ncclComm* comm, const char* opName) {
+  ncclResult_t ret = CommCheck(comm, opName, "comm");
+  if (ret != ncclSuccess) {
+    return ncclGroupErrCheck(ret);
+  }
+  if (comm->revokedFlag) {
+    WARN("%s: communicator was revoked", opName);
     return ncclGroupErrCheck(ncclInvalidUsage);
+  }
+  return ncclSuccess;
+}
+
+ncclResult_t ncclEnqueueCheck(struct ncclInfo* info) {
+  ncclResult_t ret = ncclEnqueueCommCheck(info->comm, info->opName);
+  if (ret != ncclSuccess) {
+    return ret;
   }
   // Profiler - If a group API event has already started, update the profilerGroupDepth so that the depth
   // updates correctly for implicit ncclGroupStartInternal and ncclGroupEndInternal calls
