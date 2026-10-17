@@ -18,6 +18,7 @@
 
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/instruction_encoding.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/output_modifier.h"
 #include "rocjitsu/isa/operand.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
 #include "rocjitsu/vm/amdgpu/register_access.h"
@@ -551,9 +552,10 @@ namespace sdwa {
 /// @brief Select the SDWA OMOD eligibility and F32 scaling policy.
 /// @details Selects the denormal mode used for OMOD eligibility, shared with VOP3.
 /// For F32, FLUSH_NEAREST uses apply_omod_f32 under the producer's nearest-rounding
-/// environment; MODE uses scale_f32 with guest rounding. F16 scaling order remains
-/// the producer helper's responsibility.
-enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST };
+/// environment; MODE uses scale_f32 with guest rounding. For F16, MODE expects the
+/// producer helper to have scaled already. ROUNDED marks an F16 result rounded
+/// without OMOD; the store scales it with output_modifier.h, as MODE does for F32.
+enum class OutputPolicy : uint8_t { MODE, FLUSH_NEAREST, ROUNDED };
 
 /// @brief Return the architectural source bytes selected by an SDWA selector.
 inline uint8_t sdwa_src_byte_mask(uint32_t sel) {
@@ -812,7 +814,8 @@ inline uint32_t output_modifier(const Inst &inst, const Wavefront &wf) {
 }
 
 /// @brief Apply SDWA scaling before narrowing a semantic F16 result.
-/// @details Retained legacy ordering, without SDWA hardware validation.
+/// @details Keeps the emulator's current order for unmigrated producers; no
+/// SDWA captures cover them (see output_modifier.h).
 template <typename Inst>
 inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float value,
                                  bool fp16_ovfl) {
@@ -826,7 +829,8 @@ inline uint16_t round_f16_result(const Inst &inst, const Wavefront &wf, float va
 }
 
 /// @brief Apply SDWA scaling to an already rounded half transcendental result.
-/// @details Retained legacy ordering, without SDWA hardware validation.
+/// @details Keeps the emulator's current order for unmigrated producers; no
+/// SDWA captures cover TRANS (see output_modifier.h).
 template <typename Inst>
 inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float value,
                                    bool fp16_ovfl) {
@@ -835,8 +839,9 @@ inline uint16_t finish_rounded_f16(const Inst &inst, const Wavefront &wf, float 
 }
 
 /// @brief Apply SDWA scaling before guest-mode rounding of a wide F16 arithmetic result.
-/// @details Retained legacy ordering, without SDWA hardware validation; migrated
-/// VOP3 arithmetic instead modifies the rounded half. See output_modifier.h.
+/// @details Keeps the emulator's current order, which gfx1030 SDWA MUL_F16 and
+/// ADD_F16 captures contradict; migrated VOP3 arithmetic modifies the rounded half.
+/// See output_modifier.h.
 template <typename Inst>
 inline uint16_t finish_arithmetic_f16(const Inst &inst, const Wavefront &wf, double value,
                                       uint32_t round_mode, uint32_t denorm_mode, bool fp16_ovfl) {
@@ -891,10 +896,20 @@ inline uint32_t scale_f32(uint32_t value, uint32_t omod, uint32_t round_mode) {
 /// @brief Scale a floating-point SDWA result before destination placement.
 template <ResultFormat Format, OutputPolicy Policy = OutputPolicy::MODE, typename Inst>
 inline uint32_t scale_result(const Inst &inst, const Wavefront &wf, uint32_t value) {
-  const uint32_t omod = output_modifier<Format, Policy>(inst, wf);
+  static_assert(Policy != OutputPolicy::ROUNDED || Format == ResultFormat::F16);
+  constexpr OutputPolicy kOmodPolicy =
+      Policy == OutputPolicy::ROUNDED ? OutputPolicy::MODE : Policy;
+  const uint32_t omod = output_modifier<Format, kOmodPolicy>(inst, wf);
   if (omod == 0)
     return value;
-  if constexpr (Format == ResultFormat::F16) {
+  if constexpr (Policy == OutputPolicy::ROUNDED) {
+    // The producer rounded without OMOD; scale the half as VOP3 does.
+    output_modifier::Policy policy;
+    policy.omod = omod;
+    policy.round_mode = wf.fp_round_mode_f16_f64();
+    policy.fp16_ovfl = wf.fp16_ovfl();
+    return output_modifier::scale<fp_format::F16>(value, policy);
+  } else if constexpr (Format == ResultFormat::F16) {
     // The producer has already applied F16 scaling; finalize its encoded result.
     return fp_mode::finalize_omod_f16(static_cast<uint16_t>(value), omod);
   } else if constexpr (Format == ResultFormat::PK_F16) {

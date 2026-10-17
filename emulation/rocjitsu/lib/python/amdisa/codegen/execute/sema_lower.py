@@ -20,6 +20,8 @@ from enum import Enum, auto
 
 from amdisa.codegen.execute import (
     float_compare,
+    float_fract,
+    float_ldexp,
     float_minmax,
     input_policy,
     vop3_modifiers,
@@ -650,20 +652,10 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'std::pow({lhs}, {rhs})'
 
     if kind == SemaNodeKind.LDEXP:
+        if _is_vector_ldexp(node, ctx):
+            return _float_value(node.ty, _ldexp_result(node, ctx))
         exp = _lower_expr(node.children[1], ctx)
-        if ctx.exec_model == ExecModel.VECTOR and node.ty == SemaType.F16:
-            val = _flushed_f16_source(node.children[0], ctx)
-            return f'amdgpu::fp_mode::ldexp_f16({val}, {exp})'
         val = _lower_expr(node.children[0], ctx)
-        if ctx.exec_model == ExecModel.VECTOR and node.ty in (
-            SemaType.F32,
-            SemaType.F64,
-        ):
-            mode = 'f32' if node.ty == SemaType.F32 else 'f16_f64'
-            return (
-                f'amdgpu::ldexp({val}, {exp}, wf.fp_round_mode_{mode}(), '
-                f'wf.fp_denorm_mode_{mode}())'
-            )
         return f'std::ldexp({val}, {exp})'
 
     if kind in _STD_MATH:
@@ -676,6 +668,8 @@ def _lower_expr(node: SemaNode, ctx: LoweringContext) -> str:
         return f'{_STD_MATH[kind]}({arg})'
 
     if kind == SemaNodeKind.FRACT:
+        if _is_vector_fract(node, ctx):
+            return _float_value(node.ty, _fract_result(node, ctx))
         arg = _lower_expr(node.children[0], ctx)
         return f'[&]() {{ auto v = {arg}; return v - std::floor(v); }}()'
 
@@ -1159,6 +1153,23 @@ def _lower_dst_write(
             selection_node,
             ctx,
             output_fields if selection_node is not rhs_node else None,
+        )
+        needs_bitcast = 0
+    elif _is_vector_fract(selection_node, ctx):
+        writes_bits = True
+        rhs = _fract_result(
+            selection_node,
+            ctx,
+            output_fields if selection_node is not rhs_node else None,
+        )
+        needs_bitcast = 0
+    elif _is_vector_ldexp(selection_node, ctx):
+        writes_bits = True
+        rhs = _ldexp_result(
+            selection_node,
+            ctx,
+            output_fields if selection_node is not rhs_node else None,
+            destination=True,
         )
         needs_bitcast = 0
     elif selection_node is not rhs_node and (
@@ -2231,7 +2242,7 @@ def _input_flushed_source(node: SemaNode, ctx: LoweringContext) -> str | None:
 def _flushed_f16_source(node: SemaNode, ctx: LoweringContext) -> str:
     """Return an F16 helper operand, flushed by MODE before it is widened.
 
-    The F16 arithmetic, LDEXP, conversion and transcendental helpers expect
+    The F16 arithmetic, conversion and transcendental helpers expect
     their sources already input-flushed; see _input_flushed_source.
     """
     if (source := _input_flushed_source(node, ctx)) is None:
@@ -2261,17 +2272,11 @@ def _is_integral_rounding(node: SemaNode) -> bool:
 
 
 def _uses_shared_f64_arithmetic_output(node: SemaNode, ctx: LoweringContext) -> bool:
-    """Whether F64 arithmetic uses the migrated destination modifier stage.
-
-    LDEXP retains expression-level div_apply_omod/CLAMP, although its result is
-    already MODE-rounded. Moving it to the shared stage requires validating its
-    modifier policy separately.
-    """
+    """Whether F64 arithmetic uses the migrated destination modifier stage."""
     return (
         node.ty == SemaType.F64
         and ctx.mode_arithmetic
         and _contains_mode_arithmetic(node)
-        and not any(n.kind == SemaNodeKind.LDEXP for n in node.walk())
     )
 
 
@@ -2370,6 +2375,126 @@ def _lower_float_minmax(node: SemaNode, ctx: LoweringContext) -> str:
     if dtype == 'f16':
         return f'util::f16_to_f32(static_cast<uint16_t>({selected}))'
     return f'std::bit_cast<{"double" if dtype == "f64" else "float"}>({selected})'
+
+
+# An SDWA destination's effective OMOD for an F16 result; zero for other
+# encodings. The SDWA store applies it (sdwa::OutputPolicy::ROUNDED).
+_SDWA_F16_OMOD = (
+    'amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf)'
+)
+
+
+def _float_value(ty: SemaType, bits: str) -> str:
+    """Convert raw result bits to a value inside a larger expression."""
+    if ty == SemaType.F16:
+        return f'util::f16_to_f32(static_cast<uint16_t>({bits}))'
+    return f'std::bit_cast<{ty.cpp_type}>({bits})'
+
+
+def _is_vector_fract(node: SemaNode, ctx: LoweringContext) -> bool:
+    return (
+        node.kind == SemaNodeKind.FRACT
+        and node.ty in (SemaType.F16, SemaType.F32, SemaType.F64)
+        and ctx.exec_model == ExecModel.VECTOR
+    )
+
+
+def _is_vector_ldexp(node: SemaNode, ctx: LoweringContext) -> bool:
+    return (
+        node.kind == SemaNodeKind.LDEXP
+        and node.ty in (SemaType.F16, SemaType.F32, SemaType.F64)
+        and ctx.exec_model == ExecModel.VECTOR
+    )
+
+
+def _register_read(node: SemaNode, ctx: LoweringContext) -> tuple[str, bool, bool]:
+    """Return (raw register read, has ABS, has NEG) through casts and apply_src_mod."""
+    has_abs = has_neg = False
+    while True:
+        if node.kind == SemaNodeKind.CALL and node.call_name == 'apply_src_mod':
+            has_neg |= node.children[3].lit_value == '1'
+            has_abs |= node.children[4].lit_value == '1'
+            node = node.children[1]
+        elif node.kind == SemaNodeKind.CAST:
+            node = node.children[0]
+        else:
+            break
+    if node.kind != SemaNodeKind.INSTOPERAND:
+        raise ValueError(f'unexpected raw floating source: {node}')
+    return _lower_expr(node, ctx), has_abs, has_neg
+
+
+def _raw_operation_modifiers(
+    ctx: LoweringContext,
+    dtype: str,
+    has_abs: bool,
+    has_neg: bool,
+    output_fields: tuple[str, str] | None,
+) -> tuple[tuple[str, str] | None, str | None]:
+    """Return the source (ABS, NEG) fields of src0 and the output policy name.
+
+    VOP3 forms pass their (OMOD, CLAMP) fields. Other destination writes leave
+    OMOD and CLAMP to the SDWA store, which scales the rounded result.
+    """
+    modifiers = None
+    if has_abs or has_neg:
+        modifiers = (
+            'inst_.abs & 1u' if has_abs else '0u',
+            'inst_.neg & 1u' if has_neg else '0u',
+        )
+    if output_fields is None:
+        return modifiers, None
+    declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
+    if declaration not in ctx.body_preamble:
+        ctx.body_preamble.append(declaration)
+    return modifiers, vop3_modifiers.OUTPUT_POLICY
+
+
+def _fract_result(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None = None,
+) -> str:
+    """Return the V_FRACT result bits from a raw source read."""
+    dtype = f'f{node.ty.size}'
+    source, has_abs, has_neg = _register_read(node.children[0], ctx)
+    declaration = float_fract.policy_decl(dtype)
+    if declaration not in ctx.body_preamble:
+        ctx.body_preamble.append(declaration)
+    modifiers, output_policy = _raw_operation_modifiers(
+        ctx, dtype, has_abs, has_neg, output_fields
+    )
+    return float_fract.fract_expr(dtype, source, modifiers, output_policy)
+
+
+def _ldexp_result(
+    node: SemaNode,
+    ctx: LoweringContext,
+    output_fields: tuple[str, str] | None = None,
+    destination: bool = False,
+) -> str:
+    """Return the V_LDEXP result bits from raw value and exponent reads.
+
+    ABS/NEG apply to the value only; the exponent takes no modifiers. An F16
+    destination write may be SDWA, whose store applies OMOD after this result.
+    """
+    dtype = f'f{node.ty.size}'
+    value, has_abs, has_neg = _register_read(node.children[0], ctx)
+    exponent, _, _ = _register_read(node.children[1], ctx)
+    modifiers, output_policy = _raw_operation_modifiers(
+        ctx, dtype, has_abs, has_neg, output_fields
+    )
+    # A tiny result flushes under effective OMOD; see shared/ldexp.h.
+    if output_policy:
+        omod = f'{output_policy}.omod != 0'
+    elif destination and dtype == 'f16':
+        omod = f'{_SDWA_F16_OMOD} != 0'
+    else:
+        omod = 'false'
+    declaration = float_ldexp.policy_decl(dtype, omod)
+    if declaration not in ctx.body_preamble:
+        ctx.body_preamble.append(declaration)
+    return float_ldexp.ldexp_expr(dtype, value, exponent, modifiers, output_policy)
 
 
 def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
@@ -2472,10 +2597,6 @@ def _lower_apply_omod(node: SemaNode, ctx: LoweringContext) -> str:
             else ctx
         ),
     )
-    if node.ty in (SemaType.F32, SemaType.F64) and any(
-        child.kind == SemaNodeKind.LDEXP for child in node.children[1].walk()
-    ):
-        return f'amdgpu::div_apply_omod({rhs}, wf.fp_round_mode_{mode}(), {omod_expr})'
     if arithmetic_f32:
         # The arithmetic helper establishes MODE and restores the host state.
         # Only active scaling needs a second environment, after the operation.
