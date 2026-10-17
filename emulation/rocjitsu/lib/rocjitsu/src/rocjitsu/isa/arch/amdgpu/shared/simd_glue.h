@@ -99,6 +99,7 @@ enum class SimdFastPath : uint8_t {
   VOP3_TERNARY_TRUE16_RAW_FP16,
   VOP3_FMA_FP16,
   VOP_WORDS,
+  VOPD,
 };
 
 namespace detail {
@@ -713,9 +714,43 @@ inline util::native<double> apply_vop3_dst_mod_f64(util::native<double> v, uint3
   return apply_vop3_dst_mod<double>(v, omod, clamp, clamp_nan_to_zero);
 }
 
+/// @brief Apply F32 OMOD, then CLAMP, independently of the host FP environment.
+/// @details Power-of-two scaling of a flushed F32 value is exact except on
+/// overflow, which rounds by `round_mode` (MODE.FP_ROUND): infinity, or the
+/// largest finite value when rounding toward zero or away from the sign. The
+/// host arithmetic runs under a scoped default environment, keeping its
+/// exception flags from the caller.
 inline util::native<float> apply_vop3_dst_mod_f32(util::native<float> v, uint32_t omod,
-                                                  uint32_t clamp, bool clamp_nan_to_zero) {
-  return apply_vop3_dst_mod<float>(v, omod, clamp, clamp_nan_to_zero);
+                                                  uint32_t clamp, bool clamp_nan_to_zero,
+                                                  uint32_t round_mode) {
+  if (omod == 0 && clamp == 0)
+    return v;
+  util::native<float> result;
+  {
+    fp_mode::ScopedEnvironment environment(0);
+    result = apply_vop3_dst_mod<float>(v, omod, clamp, clamp_nan_to_zero);
+  }
+  if ((omod != 1 && omod != 2) || clamp)
+    return result;
+  using U = util::native<uint32_t>;
+  const U bits = std::bit_cast<U>(v);
+  const U sign = bits & U(0x80000000u);
+  const U exponent = (bits >> 23) & U(0xffu);
+  const auto overflow = exponent != U(0xffu) && exponent + U(omod) > U(254u);
+  if (!util::stdx::any_of(overflow))
+    return result;
+  // Toward zero saturates both signs; toward +inf saturates negatives and toward
+  // -inf positives.
+  using Mask = std::remove_const_t<decltype(overflow)>;
+  Mask saturates(round_mode == 3u);
+  if (round_mode == 1u)
+    saturates = sign != U(0);
+  else if (round_mode == 2u)
+    saturates = sign == U(0);
+  U out = std::bit_cast<U>(result);
+  util::stdx::where(overflow, out) = sign | U(0x7f800000u);
+  util::stdx::where(overflow && saturates, out) = sign | U(0x7f7fffffu);
+  return std::bit_cast<util::native<float>>(out);
 }
 
 inline uint32_t effective_vop3_omod_f32(const Wavefront &wf, uint32_t omod,
@@ -888,26 +923,26 @@ fma_f16_mode_simd(util::native<uint32_t> src0, util::native<uint32_t> src1,
   return util::native<uint32_t>(out, util::stdx::vector_aligned);
 }
 
-/// @brief Whether an F32 MODE-aware SIMD probe may install the guest FP environment.
-/// @details Register observers, the debugger and DPP/SDWA operand delegates can run
-/// caller code during register access, which must see the caller's host
-/// environment. When this returns false, generated F32 probes run only if the host
-/// environment already matches MODE; otherwise execution falls back to scalar.
-template <typename Source0, typename Source1, typename Destination>
-inline bool may_install_guest_f32_environment(const Wavefront &wf, const Source0 &src0,
-                                              const Source1 &src1, const Destination &vdst) {
-  return !wf.cu().observes_register_access() && !wf.cu().debug_active() && !src0.delegate() &&
-         !src1.delegate() && !vdst.delegate();
+/// @brief Whether register access in this wave can run no caller code.
+/// @details Register observers and the debugger run caller code during register
+/// access. With them, F32 MODE-aware SIMD runs only when MODE matches the host
+/// default, so observation keeps the scalar path's per-lane granularity otherwise.
+/// The guest environment never spans register access: it is scoped to arithmetic
+/// (fma_f32_simd) and output scaling (apply_vop3_dst_mod_f32).
+inline bool register_access_runs_no_caller_code(const Wavefront &wf) {
+  return !wf.cu().observes_register_access() && !wf.cu().debug_active();
 }
 
-/// F32 FMA runs in the caller's guest-rounding environment and applies MODE
-/// denormal controls explicitly. Exceptional lanes use scalar NaN selection
-/// and minimum-normal boundary handling.
+/// F32 FMA under MODE rounding and denormal controls. The guest environment is
+/// scoped to this arithmetic, keeping it and its exception flags away from
+/// register-access callbacks. Exceptional lanes use scalar NaN selection and
+/// minimum-normal boundary handling.
 /// Nonzero effective OMOD forces output flushing here, before destination scaling.
 inline util::native<float> fma_f32_simd(util::native<float> a, util::native<float> b,
                                         util::native<float> c, const Wavefront &wf,
                                         uint32_t omod = 0, bool force_flush = false) {
   using U = util::native<uint32_t>;
+  fp_mode::ScopedEnvironment environment(wf.fp_round_mode_f32());
   const uint32_t denorm_mode = force_flush ? 0 : wf.fp_denorm_mode_f32();
   if (!(denorm_mode & 1u)) {
     a = denormal::flush_value(a);
@@ -931,7 +966,7 @@ inline util::native<float> fma_f32_simd(util::native<float> a, util::native<floa
 }
 
 /// ADD and MUL share FMA's NaN and pre-packing tininess policy. Callers pass
-/// SUB as ADD of the negated subtrahend. The caller establishes guest rounding.
+/// SUB as ADD of the negated subtrahend.
 template <fp_mode::Arithmetic operation>
 inline util::native<float> binary_f32_simd(util::native<float> a, util::native<float> b,
                                            const Wavefront &wf, uint32_t omod = 0) {
@@ -1760,7 +1795,8 @@ template <bool True16, typename Inst>
     else
       raw = raw & util::broadcast<T>(0xffffu);
     const auto src = apply_vop3_src_mod_f32<0>(cvt_f32_f16_mode_simd(raw, wf), abs, neg);
-    const auto result = apply_vop3_dst_mod_f32(src, omod, clamp, floating_clamp_nan_to_zero(wf));
+    // A widened F16 value cannot overflow F32 under OMOD.
+    const auto result = apply_vop3_dst_mod_f32(src, omod, clamp, floating_clamp_nan_to_zero(wf), 0);
     dst.template store_native<T>(base, std::bit_cast<util::native<T>>(result), chunk);
   }
   return true;
@@ -2314,8 +2350,8 @@ template <typename T, typename Inst, typename BinOp>
       continue;
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<T>(base), abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(src1.template load_native<T>(base), abs, neg);
-    const auto r =
-        apply_vop3_dst_mod_f32(bin_op(a, b), omod, clamp, floating_clamp_nan_to_zero(wf));
+    const auto r = apply_vop3_dst_mod_f32(bin_op(a, b), omod, clamp, floating_clamp_nan_to_zero(wf),
+                                          wf.fp_round_mode_f32());
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -2820,8 +2856,8 @@ template <typename Inst, typename FmaOp>
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<T>(base), abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(src1.template load_native<T>(base), abs, neg);
     const auto c = apply_vop3_src_mod_f32<2>(src2.template load_native<T>(base), abs, neg);
-    const auto r =
-        apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
+    const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp,
+                                          floating_clamp_nan_to_zero(wf), wf.fp_round_mode_f32());
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -2871,8 +2907,9 @@ template <bool True16, typename Inst, typename TernOp>
   };
   const auto finish = [&](util::native<float> value) {
     if (output_order == F16TernaryOutputOrder::MODIFY_THEN_ROUND) {
-      const auto modified = apply_vop3_dst_mod_f32(value, output_policy.omod, output_policy.clamp,
-                                                   output_policy.clamp_nan_to_zero);
+      const auto modified =
+          apply_vop3_dst_mod_f32(value, output_policy.omod, output_policy.clamp,
+                                 output_policy.clamp_nan_to_zero, output_policy.round_mode);
       return finalize_omod_f16_bits_simd(narrow(modified), output_policy.omod);
     }
     return output_modifier::apply<fp_format::F16>(narrow(value), output_policy);
@@ -3118,8 +3155,8 @@ template <typename Inst, typename FmaOp>
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<T>(base), abs, neg);
     const auto b = apply_vop3_src_mod_f32<1>(src1.template load_native<T>(base), abs, neg);
     const auto c = acc.template load_native<T>(base); // accumulator, NO modifier
-    const auto r =
-        apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp, floating_clamp_nan_to_zero(wf));
+    const auto r = apply_vop3_dst_mod_f32(tern_op(a, b, c), omod, clamp,
+                                          floating_clamp_nan_to_zero(wf), wf.fp_round_mode_f32());
     acc.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -3259,7 +3296,8 @@ template <typename Inst, typename Op>
     const util::native<float> scaled([&](auto index) {
       return div_apply_omod(static_cast<float>(values[index]), wf.fp_round_mode_f32(), omod);
     });
-    const auto r = apply_vop3_dst_mod_f32(scaled, 0, clamp, floating_clamp_nan_to_zero(wf));
+    const auto r = apply_vop3_dst_mod_f32(scaled, 0, clamp, floating_clamp_nan_to_zero(wf),
+                                          wf.fp_round_mode_f32());
     dst.template store_native<T>(base, r, chunk);
   }
   return true;
@@ -3323,6 +3361,7 @@ template <typename Inst, typename Op>
 /// and Tout are both float32_t (the plain int/cvt unary VOP3 forms apply no
 /// modifiers and reuse the VOP1 unary path directly). The modifier helpers are
 /// bit-exact, so the fast path stays correct with modifiers set; no bail.
+/// OMOD overflow gives infinity: TRANS results ignore MODE rounding.
 template <typename Tin, typename Tout, typename Inst, typename UnOp>
   requires(util::has_stdx_simd)
 [[nodiscard]] inline bool try_execute_unary_vop3_fp_simd(Inst &inst, Wavefront &wf, UnOp un_op,
@@ -3345,7 +3384,8 @@ template <typename Tin, typename Tout, typename Inst, typename UnOp>
     if (chunk == 0)
       continue;
     const auto a = apply_vop3_src_mod_f32<0>(src0.template load_native<Tin>(base), abs, neg);
-    const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf));
+    const auto r = apply_vop3_dst_mod_f32(un_op(a), omod, clamp, floating_clamp_nan_to_zero(wf),
+                                          /*round_mode=*/0);
     dst.template store_native<Tout>(base, r, chunk);
   }
   return true;
@@ -3828,7 +3868,7 @@ template <FmaMixDst DstMode, bool Fused = false, typename Inst>
     else
       r = fma_mix_mul_add(a, b, c);
     if (clamp)
-      r = apply_vop3_dst_mod_f32(r, 0, 1, floating_clamp_nan_to_zero(wf));
+      r = apply_vop3_dst_mod_f32(r, 0, 1, floating_clamp_nan_to_zero(wf), wf.fp_round_mode_f32());
     return r;
   };
   if constexpr (DstMode == FmaMixDst::F32) {
@@ -4191,7 +4231,8 @@ template <typename Inst, typename Op>
   };
   auto flush_output = [&wf, &inst](util::native<float> value) {
     if (inst.inst_.clamp)
-      value = apply_vop3_dst_mod_f32(value, 0, 1, floating_clamp_nan_to_zero(wf));
+      value = apply_vop3_dst_mod_f32(value, 0, 1, floating_clamp_nan_to_zero(wf),
+                                     wf.fp_round_mode_f32());
     return (wf.fp_denorm_mode_f32() & 2u) ? value : denormal::flush_value(value);
   };
   constexpr std::size_t W = util::native_width_v<float>;
@@ -4261,7 +4302,8 @@ template <typename Inst, typename Op>
   };
   auto flush_output = [&wf, &inst](util::native<float> value) {
     if (inst.inst_.clamp)
-      value = apply_vop3_dst_mod_f32(value, 0, 1, floating_clamp_nan_to_zero(wf));
+      value = apply_vop3_dst_mod_f32(value, 0, 1, floating_clamp_nan_to_zero(wf),
+                                     wf.fp_round_mode_f32());
     return (wf.fp_denorm_mode_f32() & 2u) ? value : denormal::flush_value(value);
   };
   constexpr std::size_t W = util::native_width_v<float>;

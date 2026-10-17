@@ -19,6 +19,7 @@
 #include <algorithm>
 #include <array>
 #include <bit>
+#include <cfenv>
 #include <cmath>
 #include <cstdint>
 
@@ -234,6 +235,44 @@ TEST(Vop3ModifierSimd, SrcModF64_AllAbsNegCombos_BitExact) {
   }
 }
 
+// OMOD overflow rounds by MODE.FP_ROUND, independently of the host: infinity, or
+// the largest finite value toward zero or away from the sign. gfx1201 captures of
+// v_add_f32/v_mul_f32/v_fma_f32 mul:2 and mul:4 give the largest finite value
+// under MODE 0xff (toward zero) and infinity under 0xf0.
+TEST(Vop3ModifierSimd, DstModF32OverflowFollowsGuestRounding) {
+  SKIP_IF_NO_SIMD();
+  struct Case {
+    uint32_t value;
+    uint32_t omod;
+    std::array<uint32_t, 4> by_mode;
+  };
+  constexpr std::array<Case, 4> cases = {{
+      {0x7f000000u, 1, {0x7f800000u, 0x7f800000u, 0x7f7fffffu, 0x7f7fffffu}},
+      {0xff7fffffu, 1, {0xff800000u, 0xff7fffffu, 0xff800000u, 0xff7fffffu}},
+      {0x7e800000u, 2, {0x7f800000u, 0x7f800000u, 0x7f7fffffu, 0x7f7fffffu}},
+      {0x7e800000u, 1, {0x7f800000u, 0x7f800000u, 0x7f800000u, 0x7f800000u}},
+  }};
+  for (const Case &test : cases) {
+    const util::native<float> v(std::bit_cast<float>(test.value));
+    for (uint32_t mode = 0; mode < 4; ++mode) {
+      // The last case does not overflow: 2^126 * 2 is exact.
+      const uint32_t expected =
+          test.value == 0x7e800000u && test.omod == 1 ? 0x7f000000u : test.by_mode[mode];
+      for (const int host : {FE_TONEAREST, FE_TOWARDZERO}) {
+        ASSERT_EQ(std::fesetround(host), 0);
+        const auto out = apply_vop3_dst_mod_f32(v, test.omod, 0, false, mode);
+        const auto clamped = apply_vop3_dst_mod_f32(v, test.omod, 1, false, mode);
+        ASSERT_EQ(std::fesetround(FE_TONEAREST), 0);
+        EXPECT_EQ(std::bit_cast<uint32_t>(float(out[0])), expected)
+            << std::hex << test.value << " omod=" << test.omod << " mode=" << mode
+            << " host=" << host;
+        EXPECT_EQ(std::bit_cast<uint32_t>(float(clamped[0])),
+                  (test.value >> 31) ? 0u : 0x3f800000u);
+      }
+    }
+  }
+}
+
 TEST(Vop3ModifierSimd, DstMod_AllOmodClampCombos_BitExact) {
   SKIP_IF_NO_SIMD();
   constexpr std::size_t W = util::native_width_v<float>;
@@ -246,7 +285,7 @@ TEST(Vop3ModifierSimd, DstMod_AllOmodClampCombos_BitExact) {
     for (uint32_t omod = 0; omod < 4; ++omod) {
       for (uint32_t clamp = 0; clamp < 2; ++clamp) {
         for (uint32_t clamp_nan = 0; clamp_nan < 2; ++clamp_nan) {
-          auto out = apply_vop3_dst_mod_f32(v, omod, clamp, clamp_nan != 0);
+          auto out = apply_vop3_dst_mod_f32(v, omod, clamp, clamp_nan != 0, 0);
           alignas(util::native<float>) float o[W];
           out.copy_to(o, util::stdx::element_aligned);
           const std::size_t count = std::min(W, kPatterns.size() - base);

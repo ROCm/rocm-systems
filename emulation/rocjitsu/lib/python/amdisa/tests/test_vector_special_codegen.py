@@ -166,7 +166,8 @@ def test_mullit_and_trig_preop_preserve_special_fp_rules():
     assert (
         'amdgpu::output_modifier::apply<amdgpu::fp_format::F32>('
         'amdgpu::fp_mode::mullit_f32(s0, s1, s2, wf.fp_round_mode_f32(), '
-        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode()), output_policy)'
+        'wf.fp_denorm_mode_f32(), wf.cu().arch(), wf.ieee_mode(), '
+        'output_policy.omod != 0), output_policy)'
     ) in mullit
     assert 'std::isnan' not in mullit
     assert '0xA2F983u' in trig
@@ -339,21 +340,17 @@ def test_vop3_f16_subtraction_uses_mode_aware_add_route(mnemonic, negated, true1
 )
 def test_f32_mode_aware_probes_share_one_guest_environment_policy(template):
     probe = simd_probe_line(template)
-    source1 = 'inst.vsrc1' if template.endswith('_vop2') else 'inst.src1'
 
-    # One probe, entered when the guest environment may be installed or when the
-    # host already matches MODE; the environment is installed only in the first case.
+    # One probe, without a probe-level environment: the helpers scope it to
+    # arithmetic. With callbacks, SIMD runs only in the host's default MODE.
     assert probe.count('ROCJITSU_TRY_SIMD_') == 1
-    assert probe.count('ScopedEnvironment') == 1
-    assert (
-        'const bool guest_environment = amdgpu::may_install_guest_f32_environment('
-        f'wf, inst.src0, {source1}, inst.vdst);'
-    ) in probe
-    assert (
-        'if (guest_environment || amdgpu::fp_mode::native_arithmetic_matches('
-        'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {'
-    ) in probe
-    assert '      if (guest_environment)\n        environment.emplace(' in probe
+    assert 'ScopedEnvironment' not in probe
+    assert probe.startswith(
+        '  if (amdgpu::register_access_runs_no_caller_code(wf) ||\n'
+        '      amdgpu::fp_mode::native_arithmetic_matches('
+        'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {\n'
+    )
+    assert 'amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe
 
 
 def test_true16_vop3_simd_probe_leaves_unsupported_b16_scalar():

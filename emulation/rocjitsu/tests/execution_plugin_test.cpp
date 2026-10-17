@@ -1747,67 +1747,99 @@ TEST(ExecutionPluginTest, SpecialDestinationTrackingIncludesTheHighDword) {
   EXPECT_EQ(hazards, 1u);
 }
 
-// Records the host rounding mode seen by each VGPR read callback.
+// Records the host FP environment seen by each VGPR read callback.
 class RoundingObserverPlugin : public ExecutionPlugin {
 public:
   RoundingObserverPlugin() : ExecutionPlugin("rounding_observer") {}
   std::vector<int> read_roundings;
+  std::vector<uint32_t> read_mxcsrs;
 
   void onAmdgpuReadVgprLanes(const amdgpu::Wavefront *, uint32_t, uint64_t, uint8_t) override {
     read_roundings.push_back(std::fegetround());
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+    read_mxcsrs.push_back(_mm_getcsr());
+#endif
   }
 };
 
-// F32 MODE-aware SIMD helpers must not run observer callbacks under the guest
-// rounding environment (amdgpu::may_install_guest_f32_environment). With
-// round-toward-+infinity in MODE, results still round up.
+// F32 MODE-aware arithmetic scopes the guest environment to arithmetic and
+// output scaling (amdgpu::fma_f32_simd), so register-access callbacks see the
+// caller's rounding, exception flags and trap masks, and inexact results leave
+// the caller's flags unchanged. MODE 0xF1 rounds toward +infinity and falls back
+// to scalar under an observer; 0xF0 matches the host and runs SIMD.
 TEST(ExecutionPluginTest, F32ModeArithmeticObserversSeeCallerRounding) {
   struct Case {
     const char *name;
     uint16_t op;
     uint32_t src0;
     uint32_t src1;
-    uint32_t expected;
+    uint32_t round_up;
+    uint32_t nearest;
+    bool preserves_flags;
   };
+  // V_MUL_F32's TRAPSTS classifier (classify_mul_f32) multiplies on the host
+  // outside any ScopedEnvironment before either path runs, so its inexact
+  // product reaches the caller's flags; callbacks still see the caller's state.
   constexpr std::array<Case, 3> cases = {{
-      {"Add", rdna4::kVAddF32Vop2, 0x3f800000u, 0x30800000u, 0x3f800001u},
-      {"Sub", rdna4::kVSubF32Vop2, 0x3f800000u, 0xb0800000u, 0x3f800001u},
-      {"Mul", rdna4::kVMulF32Vop2, 0x3f800001u, 0x3f800001u, 0x3f800003u},
+      {"Add", rdna4::kVAddF32Vop2, 0x3f800000u, 0x30800000u, 0x3f800001u, 0x3f800000u, true},
+      {"Sub", rdna4::kVSubF32Vop2, 0x3f800000u, 0xb0800000u, 0x3f800001u, 0x3f800000u, true},
+      {"Mul", rdna4::kVMulF32Vop2, 0x3f800001u, 0x3f800001u, 0x3f800003u, 0x3f800002u, false},
   }};
   for (const Case &test : cases) {
-    for (bool force_scalar : {false, true}) {
-      SCOPED_TRACE(std::format("{} force_scalar={}", test.name, force_scalar));
-      ForceScalarOverride execution_mode(force_scalar);
-      Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
-      auto plugin_owner = std::make_unique<RoundingObserverPlugin>();
-      auto *plugin = plugin_owner.get();
-      f.plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
-      f.plugin_group->add(std::move(plugin_owner));
-      f.cu->set_plugin_group(f.plugin_group);
-      f.plugin_group->onInit();
-      auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
-      ASSERT_NE(wf, nullptr);
-      wf->set_exec(0xFFFFFFFFu);
-      wf->set_mode_raw(0xF1u);
-      const uint32_t base = wf->vgpr_alloc().base;
-      for (uint32_t lane = 0; lane < 32; ++lane) {
-        f.cu->write_vgpr(base + 0, lane, test.src0);
-        f.cu->write_vgpr(base + 1, lane, test.src1);
+    for (const uint32_t mode : {0xF1u, 0xF0u}) {
+      for (bool force_scalar : {false, true}) {
+        SCOPED_TRACE(std::format("{} mode={:#x} force_scalar={}", test.name, mode, force_scalar));
+        ForceScalarOverride execution_mode(force_scalar);
+        Wave32PluginFixture f(ROCJITSU_CODE_ARCH_RDNA4);
+        auto plugin_owner = std::make_unique<RoundingObserverPlugin>();
+        auto *plugin = plugin_owner.get();
+        f.plugin_group = std::make_shared<ExecutionPluginGroup>(PluginSinkConfig{});
+        f.plugin_group->add(std::move(plugin_owner));
+        f.cu->set_plugin_group(f.plugin_group);
+        f.plugin_group->onInit();
+        auto *wf = f.cu->dispatch_wf(0, 0, /*sgprs=*/104, /*vgprs=*/32);
+        ASSERT_NE(wf, nullptr);
+        wf->set_exec(0xFFFFFFFFu);
+        wf->set_mode_raw(mode);
+        const uint32_t base = wf->vgpr_alloc().base;
+        for (uint32_t lane = 0; lane < 32; ++lane) {
+          f.cu->write_vgpr(base + 0, lane, test.src0);
+          f.cu->write_vgpr(base + 1, lane, test.src1);
+        }
+        auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
+        const auto words = rdna4::build_vop2(test.op, {.src0 = 256, .vsrc1 = 1, .vdst = 6});
+        const std::array<uint32_t, 3> encoded = {words[0], 0u, 0u};
+        std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoded.data()));
+        ASSERT_NE(inst, nullptr);
+        ASSERT_EQ(std::fegetround(), FE_TONEAREST);
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+        // A pre-existing underflow flag must stay visible to callbacks, and the
+        // inexact results here must not add the inexact flag.
+        const uint32_t saved_mxcsr = _mm_getcsr();
+        _mm_setcsr((saved_mxcsr & ~_MM_EXCEPT_MASK) | _MM_EXCEPT_UNDERFLOW);
+        const uint32_t host_mxcsr = _mm_getcsr();
+#endif
+        plugin->read_roundings.clear();
+        plugin->read_mxcsrs.clear();
+        const bool succeeded = f.cu->execute_instruction(inst.get(), *wf).succeeded();
+#if defined(__x86_64__) || defined(_M_X64) || defined(__i386__)
+        const uint32_t after_mxcsr = _mm_getcsr();
+        _mm_setcsr(saved_mxcsr);
+        if (test.preserves_flags)
+          EXPECT_EQ(after_mxcsr, host_mxcsr);
+        ASSERT_FALSE(plugin->read_mxcsrs.empty());
+        for (const uint32_t seen : plugin->read_mxcsrs)
+          EXPECT_EQ(test.preserves_flags ? seen : seen & ~_MM_EXCEPT_INEXACT, host_mxcsr);
+#endif
+        ASSERT_TRUE(succeeded);
+        EXPECT_EQ(std::fegetround(), FE_TONEAREST);
+        ASSERT_FALSE(plugin->read_roundings.empty());
+        for (const int rounding : plugin->read_roundings)
+          EXPECT_EQ(rounding, FE_TONEAREST);
+        for (uint32_t lane = 0; lane < 32; ++lane)
+          EXPECT_EQ(f.cu->read_vgpr(base + 6, lane), mode == 0xF1u ? test.round_up : test.nearest)
+              << "lane " << lane;
       }
-      auto decoder = Decoder::create(ROCJITSU_CODE_ARCH_RDNA4);
-      const auto words = rdna4::build_vop2(test.op, {.src0 = 256, .vsrc1 = 1, .vdst = 6});
-      const std::array<uint32_t, 3> encoded = {words[0], 0u, 0u};
-      std::unique_ptr<Instruction> inst(decode_valid(*decoder, encoded.data()));
-      ASSERT_NE(inst, nullptr);
-      ASSERT_EQ(std::fegetround(), FE_TONEAREST);
-      plugin->read_roundings.clear();
-      ASSERT_TRUE(f.cu->execute_instruction(inst.get(), *wf).succeeded());
-      EXPECT_EQ(std::fegetround(), FE_TONEAREST);
-      ASSERT_FALSE(plugin->read_roundings.empty());
-      for (const int rounding : plugin->read_roundings)
-        EXPECT_EQ(rounding, FE_TONEAREST);
-      for (uint32_t lane = 0; lane < 32; ++lane)
-        EXPECT_EQ(f.cu->read_vgpr(base + 6, lane), test.expected) << "lane " << lane;
     }
   }
 }

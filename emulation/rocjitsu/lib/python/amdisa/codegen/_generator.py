@@ -6810,7 +6810,7 @@ class CodeGenerator:
                         )
                     # ABS/NEG modify the selected half's sign bit, as for F16.
                     # Measured on gfx1201 and gfx1100; RDNA3.5 and CDNA5 inherit it.
-                    lctx.source_modifier_bits = 'F16'
+                    lctx.source_modifier_format = 'F16'
                 true16_special_vop3_ops = {
                     'V_ASHRREV_I16': (
                         2,

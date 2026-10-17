@@ -2625,30 +2625,6 @@ def simd_probe_line(
     return _guard_mode_arithmetic_probe(template_name, probe)
 
 
-def _guest_f32_environment_probe(probe: str, source1: str) -> str:
-    """Run an F32 MODE-aware SIMD probe once, under the guest FP environment.
-
-    The helpers apply MODE denormal controls themselves and take guest rounding
-    from the environment. amdgpu::may_install_guest_f32_environment owns the
-    policy: with register observers, the debugger or operand delegates, which can
-    run caller code during register access, the probe runs only when the host
-    environment already matches MODE.
-    """
-    return (
-        '  if (wf.exec() != 0 && !amdgpu::simd_force_scalar()) {\n'
-        '    const bool guest_environment = amdgpu::may_install_guest_f32_environment('
-        f'wf, inst.src0, {source1}, inst.vdst);\n'
-        '    if (guest_environment || amdgpu::fp_mode::native_arithmetic_matches('
-        'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {\n'
-        '      std::optional<amdgpu::fp_mode::ScopedEnvironment> environment;\n'
-        '      if (guest_environment)\n'
-        '        environment.emplace(wf.fp_round_mode_f32());\n'
-        f'{_indent_probe(_indent_probe(probe))}\n'
-        '    }\n'
-        '  }'
-    )
-
-
 def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str | None:
     """Retain native arithmetic only when it implements the guest FP policy."""
     if template_name in SIMD_VOP3_BINARY_MODE_FP16:
@@ -2688,8 +2664,17 @@ def _guard_mode_arithmetic_probe(template_name: str, probe: str | None) -> str |
         and 'dx9' not in fields
         and ('amdgpu::fma_f32_simd(' in probe or 'amdgpu::binary_f32_simd<' in probe)
     ):
-        source1 = 'inst.vsrc1' if fields[-1] == 'vop2' else 'inst.src1'
-        return _guest_f32_environment_probe(probe, source1)
+        # The helpers scope the guest environment to arithmetic and output
+        # scaling, so callbacks keep the caller's FP environment. With callbacks
+        # (amdgpu::register_access_runs_no_caller_code), SIMD runs only in the
+        # host's default MODE.
+        return (
+            '  if (amdgpu::register_access_runs_no_caller_code(wf) ||\n'
+            '      amdgpu::fp_mode::native_arithmetic_matches('
+            'wf.fp_round_mode_f32(), wf.fp_denorm_mode_f32())) {\n'
+            f'{_indent_probe(probe)}\n'
+            '  }'
+        )
     if dtype in ('f16', 'f64') and fields[1] in ('fma', 'fmac', 'fmaak', 'fmamk'):
         return probe
     mode = 'f32' if dtype == 'f32' else 'f16_f64'

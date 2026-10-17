@@ -138,9 +138,9 @@ class LoweringContext:
     true16_dst_select: str | None = None
     true16_src_selects: dict[int, str] = field(default_factory=dict)
     true16_vop3_opsel: str | None = None
-    # 32-bit-lane format (F16 or F32) whose sign bit ABS/NEG modify in
+    # amdgpu::fp_format tag (F16 or F32) whose sign bit ABS/NEG modify in
     # integer-typed source reads. None ignores them, as integer operations do.
-    source_modifier_bits: str | None = None
+    source_modifier_format: str | None = None
     fp8_byte_select: str | None = None
     fp8_decode_e5m3_select: str | None = None
     arch_name: str = ''
@@ -2403,10 +2403,10 @@ def _lower_apply_src_mod(node: SemaNode, ctx: LoweringContext) -> str:
     abs_field = 'inst_.abs' if has_abs else '0u'
     neg_field = 'inst_.neg' if has_neg else '0u'
     if src_ty and src_ty.base in ('I', 'U'):
-        if ctx.source_modifier_bits is None:
+        if ctx.source_modifier_format is None:
             return src_expr
         return (
-            f'amdgpu::source_modifier::apply<amdgpu::fp_format::{ctx.source_modifier_bits}>('
+            f'amdgpu::source_modifier::apply<amdgpu::fp_format::{ctx.source_modifier_format}>('
             f'static_cast<uint32_t>({src_expr}), {src_idx}, {abs_field}, {neg_field})'
         )
 

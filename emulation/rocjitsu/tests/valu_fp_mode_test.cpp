@@ -3007,9 +3007,11 @@ std::vector<ArithmeticCase> subtraction_nan_cases() {
 
 // VOPD SUB/SUBREV follow the VOP2 rule in both slots: add the negated
 // subtrahend in operand order. Lanes are gfx1201 and gfx1100 captures of
-// v_dual_sub_f32 v6, v0, v1 :: v_dual_subrev_f32 v7, v2, v3 and the swapped
-// pair (llvm-mc encodes both targets identically), which matched VOP2 bit for
-// bit across 15 MODE settings. gfx1100 with IEEE=0 leaves signaling NaNs unquieted.
+// v_dual_sub_f32 v6, v0, v1 :: v_dual_subrev_f32 v7, v2, v3 and the swapped pair
+// (llvm-mc encodes both targets identically); in those captures VOPD matched VOP2
+// bit for bit under 15 MODE settings. gfx1100 with IEEE=0 leaves signaling NaNs
+// unquieted. Round-down cancellation gives -0 for SUB and SUBREV alike, which a
+// negated result would not. MODE 0xf0 matches the host and takes the VOPD SIMD path.
 std::vector<ArithmeticCase> vopd_subtraction_cases() {
   struct Lane {
     const char *name;
@@ -3024,28 +3026,34 @@ std::vector<ArithmeticCase> vopd_subtraction_cases() {
     uint32_t mode;
     std::vector<Lane> lanes;
   };
+  const Lane two_nans{"TwoNans", 0x7fc00002u, 0x7fc00003u, 0x7fc00002u, 0xffc00002u};
+  const Lane rounding{"Rounding", 0x3f800000u, 1u, 0x3f800000u, 0xbf800000u};
   const std::vector<Lane> quieting = {
-      {"TwoNans", 0x7fc00002u, 0x7fc00003u, 0x7fc00002u, 0xffc00002u},
+      two_nans,
       {"SignalingSubtrahend", 0u, 0x7f800001u, 0xffc00001u, 0x7fc00001u},
       {"SignalingMinuend", 0x7f800001u, 0u, 0x7fc00001u, 0xffc00001u},
-      {"Rounding", 0x3f800000u, 1u, 0x3f800000u, 0xbf800000u},
+      rounding,
   };
-  const std::array<Target, 5> targets = {{
+  const std::vector<Lane> unquieted = {
+      two_nans,
+      {"SignalingSubtrahend", 0u, 0x7f800001u, 0xff800001u, 0x7f800001u},
+      {"SignalingMinuend", 0x7f800001u, 0u, 0x7f800001u, 0xff800001u},
+      rounding,
+  };
+  const Lane cancellation_down{"CancellationDown", 0x3f800000u, 0x3f800000u, 0x80000000u,
+                               0x80000000u};
+  const std::array<Target, 8> targets = {{
       {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0x00u, quieting},
       {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0xf0u, quieting},
       {"Gfx1201",
        ROCJITSU_CODE_ARCH_RDNA4,
        0xf3u,
-       {{"TwoNans", 0x7fc00002u, 0x7fc00003u, 0x7fc00002u, 0xffc00002u},
-        {"Rounding", 0x3f800000u, 1u, 0x3f7fffffu, 0xbf7fffffu}}},
+       {two_nans, {"Rounding", 0x3f800000u, 1u, 0x3f7fffffu, 0xbf7fffffu}}},
+      {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0x02u, {cancellation_down}},
       {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x200u, quieting},
-      {"Gfx1100Ieee0",
-       ROCJITSU_CODE_ARCH_RDNA3,
-       0x00u,
-       {{"TwoNans", 0x7fc00002u, 0x7fc00003u, 0x7fc00002u, 0xffc00002u},
-        {"SignalingSubtrahend", 0u, 0x7f800001u, 0xff800001u, 0x7f800001u},
-        {"SignalingMinuend", 0x7f800001u, 0u, 0x7f800001u, 0xff800001u},
-        {"Rounding", 0x3f800000u, 1u, 0x3f800000u, 0xbf800000u}}},
+      {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x202u, {cancellation_down}},
+      {"Gfx1100Ieee0", ROCJITSU_CODE_ARCH_RDNA3, 0x00u, unquieted},
+      {"Gfx1100Ieee0", ROCJITSU_CODE_ARCH_RDNA3, 0xf0u, unquieted},
   }};
   struct Pair {
     const char *name;
@@ -3057,7 +3065,10 @@ std::vector<ArithmeticCase> vopd_subtraction_cases() {
       {"SubrevXSubY", 0xc98a0300u, false},
   }};
   std::vector<ArithmeticCase> cases;
-  for (const Target &target : targets)
+  for (const Target &target : targets) {
+    const SimdPathExpectation simd = (target.mode & 0xffu) == 0xf0u
+                                         ? expect_simd_path(amdgpu::SimdFastPath::VOPD)
+                                         : expect_simd_fallback();
     for (const Lane &lane : target.lanes)
       for (const Pair &pair : pairs)
         cases.push_back(
@@ -3068,7 +3079,11 @@ std::vector<ArithmeticCase> vopd_subtraction_cases() {
              {{6, pair.sub_in_x ? lane.sub : lane.subrev},
               {7, pair.sub_in_x ? lane.subrev : lane.sub}},
              target.mode,
-             FE_TONEAREST});
+             FE_TONEAREST,
+             0u,
+             0u,
+             simd});
+  }
   return cases;
 }
 
@@ -3124,7 +3139,11 @@ std::vector<ArithmeticCase> subtraction_mode_cases() {
   const auto vop3 = [](uint16_t op) {
     return rdna4::build_vop3(op, {.vdst = 6, .src0 = 256, .src1 = 257});
   };
-  const std::array<Lane, 6> lanes = {{
+  // The *FieldSplit lanes set the F32 and F16/F64 MODE fields differently:
+  // 0xf3/0xfc round only F32 or only F16 toward zero, and 0x30/0xc0 flush only
+  // F16 or only F32. Their results are gfx1201 VOP2 captures of the same lanes;
+  // the VOP3 corpus did not capture these MODE values.
+  const std::array<Lane, 10> lanes = {{
       {"SubF16E64DenormSplit",
        vop3(rdna4::kVSubF16Vop3),
        0x376083ffu,
@@ -3150,6 +3169,26 @@ std::vector<ArithmeticCase> subtraction_mode_cases() {
        0x767283ffu,
        0xd5ab8000u,
        {{{0x40u, 0xa5a58000u}, {0x80u, 0xa5a50000u}}}},
+      {"SubF16E64RoundingFieldSplit",
+       vop3(rdna4::kVSubF16Vop3),
+       0x7c9b3c00u,
+       0x782e0001u,
+       {{{0xf3u, 0xa5a53c00u}, {0xfcu, 0xa5a53bffu}}}},
+      {"SubrevF16E64RoundingFieldSplit",
+       vop3(rdna4::kVSubrevF16Vop3),
+       0x5bc73c00u,
+       0x25b30001u,
+       {{{0xf3u, 0xa5a5bc00u}, {0xfcu, 0xa5a5bbffu}}}},
+      {"SubF16E64DenormFieldSplit",
+       vop3(rdna4::kVSubF16Vop3),
+       0xb16983ffu,
+       0x8a110000u,
+       {{{0x30u, 0xa5a58000u}, {0xc0u, 0xa5a583ffu}}}},
+      {"SubrevF16E64DenormFieldSplit",
+       vop3(rdna4::kVSubrevF16Vop3),
+       0x5a9d83ffu,
+       0x65d30000u,
+       {{{0x30u, 0xa5a50000u}, {0xc0u, 0xa5a503ffu}}}},
       {"SubF16E32CancellationDown",
        vop2(rdna4::kVSubF16Vop2),
        0x89f00000u,
@@ -3242,7 +3281,10 @@ std::vector<ArithmeticCase> cndmask_b16_modifier_cases() {
 // v_cndmask_b16 v6.h, -v0.h, |v1.h|, s[10:11] identically for gfx1100 and gfx1201.
 // The expectations apply the captured sign-bit rule; this form is not captured.
 std::vector<ArithmeticCase> cndmask_b16_half_selection_cases() {
-  constexpr std::array<uint32_t, 2> kWords = {0xd65d5a06u, 0x202a0300u};
+  constexpr auto kWords = rdna4::build_vop3(
+      rdna4::kVCndmaskB16Vop3,
+      {.vdst = 6, .abs = 2, .opsel = 0xb, .src0 = 256, .src1 = 257, .src2 = 10, .neg = 1});
+  static_assert(kWords[0] == 0xd65d5a06u && kWords[1] == 0x202a0300u, "llvm-mc encoding");
   std::vector<ArithmeticCase> cases;
   for (const rj_code_arch_t arch : {ROCJITSU_CODE_ARCH_RDNA3, ROCJITSU_CODE_ARCH_RDNA4}) {
     const bool gfx1201 = arch == ROCJITSU_CODE_ARCH_RDNA4;
@@ -3282,7 +3324,7 @@ std::vector<ArithmeticCase> mullit_cases() {
     std::array<uint32_t, 3> sources;
     std::array<std::pair<uint32_t, uint32_t>, 2> mode_results;
   };
-  constexpr std::array<Lane, 12> lanes = {{
+  constexpr std::array<Lane, 14> lanes = {{
       // min_normal * min_normal underflows to +0 unless S2 = 2^-149 is flushed.
       {"S2Subnormal",
        0,
@@ -3332,6 +3374,22 @@ std::vector<ArithmeticCase> mullit_cases() {
        0,
        {0x00800000u, 0x3f7fffffu, 0x3f800000u},
        {{{0x00u, 0u}, {0xf0u, 0x00800000u}}}},
+      // The same boundary with a negative product keeps its sign; an effective
+      // OMOD flushes the tiny product before scaling even when MODE keeps
+      // denormals. gfx1201 V_MUL_DX9_ZERO_F32 captures (lanes 251/2240, NEG and
+      // mul:2 forms) give these results.
+      {"NegativeTinyProductRoundsToMinNormal",
+       0,
+       0,
+       1,
+       {0x00800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x00u, 0x80000000u}, {0xf0u, 0x80800000u}}}},
+      {"Mul2TinyProductFlushes",
+       0,
+       1,
+       0,
+       {0x00800000u, 0x3f7fffffu, 0x3f800000u},
+       {{{0x00u, 0u}, {0xf0u, 0u}}}},
       {"RoundTowardZeroF32Field",
        0,
        0,
@@ -3383,6 +3441,37 @@ std::vector<ArithmeticCase> mullit_cases() {
                        mode,
                        FE_TONEAREST});
   }
+  return cases;
+}
+
+// On gfx1100, encoded OMOD is disabled with IEEE=1 or with output denormals kept
+// (IEEE=0, MODE 0xf0): mul:2 neither scales nor forces a flush, so the tiny
+// product rounds to min_normal. With IEEE=0 and MODE 0x00, OMOD applies and the
+// flushed product is +0. gfx1100 V_MUL_DX9_ZERO_F32 and V_MUL_F32 mul:2 captures
+// of the same factors (lane 251, both IEEE settings) give these results.
+std::vector<ArithmeticCase> mullit_rdna3_omod_cases() {
+  constexpr auto kWords = rdna4::build_vop3(
+      rdna4::kVMullitF32Vop3, {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258, .omod = 1});
+  static_assert(kWords[0] == 0xd6180006u && kWords[1] == 0x0c0a0300u, "llvm-mc encoding");
+  struct Mode {
+    const char *name;
+    uint32_t mode;
+    uint32_t result;
+  };
+  constexpr std::array<Mode, 3> modes = {{
+      {"Ieee1OmodDisabled", 0x2f0u, 0x00800000u},
+      {"Ieee0DenormalsKeptOmodDisabled", 0x0f0u, 0x00800000u},
+      {"Ieee0FlushedOmodActive", 0x000u, 0u},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const Mode &mode : modes)
+    cases.push_back({std::format("Gfx1100Mul2TinyProduct{}", mode.name),
+                     ROCJITSU_CODE_ARCH_RDNA3,
+                     {kWords[0], kWords[1], 0u},
+                     {{0, 0x00800000u}, {1, 0x3f7fffffu}, {2, 0x3f800000u}},
+                     {{6, mode.result}},
+                     mode.mode,
+                     FE_TONEAREST});
   return cases;
 }
 
@@ -3444,12 +3533,20 @@ std::vector<ArithmeticCase> mullit_signaling_nan_cases() {
       {"Gfx1100Ieee1", ROCJITSU_CODE_ARCH_RDNA3, 0x200u, true},
       {"Gfx1201", ROCJITSU_CODE_ARCH_RDNA4, 0u, true},
   }};
+  // Plain and NEG(S0) forms; llvm-mc gives the same words for gfx1100 and gfx1201.
+  constexpr std::array<std::array<uint32_t, 2>, 2> words = {
+      rdna4::build_vop3(rdna4::kVMullitF32Vop3, {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258}),
+      rdna4::build_vop3(rdna4::kVMullitF32Vop3,
+                        {.vdst = 6, .src0 = 256, .src1 = 257, .src2 = 258, .neg = 1})};
+  static_assert(words[0][0] == 0xd6180006u && words[0][1] == 0x040a0300u &&
+                    words[1][1] == 0x240a0300u,
+                "llvm-mc encoding");
   std::vector<ArithmeticCase> cases;
   for (const Target &target : targets)
     for (const Lane &lane : lanes)
       cases.push_back({std::format("{}{}Mode{:02X}", target.name, lane.name, lane.mode),
                        target.arch,
-                       {0xd6180006u, lane.neg0 ? 0x240a0300u : 0x040a0300u, 0u},
+                       {words[lane.neg0][0], words[lane.neg0][1], 0u},
                        {{0, lane.sources[0]}, {1, lane.sources[1]}, {2, lane.sources[2]}},
                        {{6, target.quiets ? lane.quieted : lane.unquieted}},
                        lane.mode | target.ieee,
@@ -3688,7 +3785,7 @@ TEST_P(ValuVopdSubtractionTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
   for (const bool scalar : {true, false}) {
     SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
     util::set_force_scalar_for_testing(scalar);
-    expect_arithmetic_case(GetParam());
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
   }
 }
 
@@ -3762,6 +3859,12 @@ TEST_P(ValuMullitModeTest, MatchesCapturesWithSimdEnabledAndForcedScalar) {
 }
 
 INSTANTIATE_TEST_SUITE_P(Gfx1201, ValuMullitModeTest, testing::ValuesIn(mullit_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(Rdna3Omod, ValuMullitModeTest,
+                         testing::ValuesIn(mullit_rdna3_omod_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
@@ -4050,7 +4153,7 @@ TEST(ValuFpModeHelpers, RoundingAndSignedZero) {
                   amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(1.0f, 0x1p-24f, 0.0f, mode, 3)),
               expected);
     EXPECT_EQ(std::bit_cast<uint32_t>(
-                  amdgpu::fp_mode::arithmetic<Arithmetic::SUB>(1.0f, 1.0f, 0.0f, mode, 3)),
+                  amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(1.0f, -1.0f, 0.0f, mode, 3)),
               mode == 2 ? 0x80000000u : 0u);
     EXPECT_EQ(std::bit_cast<uint32_t>(
                   amdgpu::fp_mode::arithmetic<Arithmetic::MUL>(-0.0f, 1.0f, 0.0f, mode, 3)),
