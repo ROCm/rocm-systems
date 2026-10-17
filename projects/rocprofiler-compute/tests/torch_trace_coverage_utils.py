@@ -3294,7 +3294,6 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
         # Set before ``import torch``; HIP reads it at runtime init.
         'os.environ.setdefault("AMD_SERIALIZE_KERNEL", "3")',
         "import torch",
-        "import roctx",
         "",
         'device = "cuda"',
         "",
@@ -3371,6 +3370,7 @@ def build_workload_module_lines(operators: List[OpEntry]) -> List[str]:
     lines.append("    torch.cuda.synchronize()")
     lines.append("")
     lines.append("def run_all():")
+    lines.append("    import roctx")
     lines.append("    for op_label, fn in zip(OP_NAMES, ALL_OPS):")
     lines.append(
         '        print(f"[torch-trace-cov] START {op_label}", '
