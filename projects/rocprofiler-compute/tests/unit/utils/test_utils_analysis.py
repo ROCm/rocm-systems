@@ -218,6 +218,9 @@ def counter_row(
         "GUID": guid,
         "Kernel_Name": kernel_name,
         "Dispatch_ID": dispatch_id,
+        "Grid_Size": 256,
+        "Workgroup_Size": 64,
+        "LDS_Per_Workgroup": 0,
         "Start_Timestamp": start,
         "End_Timestamp": end,
         "Counter_Name": counter_name,
@@ -3082,17 +3085,7 @@ def test_parse_marker_function_ltid_and_thread_id_unchanged(tmp_path):
                 "End_Timestamp": 70,
             }
         ],
-        [
-            {
-                "Correlation_ID": 8,
-                "GUID": TEST_GUID,
-                "Kernel_Name": "addmm_kernel",
-                "Dispatch_ID": 1,
-                "Start_Timestamp": 30,
-                "End_Timestamp": 60,
-                "Counter_Name": "SQ_WAVES",
-            }
-        ],
+        [counter_row(8, "addmm_kernel", 30, 60, dispatch_id=1)],
     )
     workload = schema.Workload()
     process_ml_api_trace_output(workload, str(workload_dir))
@@ -3303,6 +3296,9 @@ def test_process_outer_join_keeps_wrap_with_empty_kernel_names(tmp_path):
             "GUID",
             "Kernel_Name",
             "Dispatch_ID",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
             "Start_Timestamp",
             "End_Timestamp",
             "Counter_Name",
@@ -3573,6 +3569,9 @@ def test_process_pass_null_kernel_name_mismatch_exits(tmp_path, monkeypatch):
             "GUID",
             "Kernel_Name",
             "Dispatch_ID",
+            "Grid_Size",
+            "Workgroup_Size",
+            "LDS_Per_Workgroup",
             "Start_Timestamp",
             "End_Timestamp",
             "Counter_Name",
