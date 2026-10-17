@@ -357,6 +357,9 @@ struct Info : public amd::EmbeddedObject {
   //! Size of L2 Cache in bytes.
   uint32_t l2CacheSize_;
 
+  //! Maximum persisting L2 cache size in bytes.
+  size_t persistingL2CacheMaxSize_;
+
   //! Timestamp frequency in Hz.
   uint32_t timeStampFrequency_;
 
@@ -2232,6 +2235,15 @@ class Device : public RuntimeObject {
 
   //! Sets the current scratch limit of the device. Valid only on rocm device.
   virtual bool UpdateScratchLimitCurrent(size_t limit) const { return true; }
+
+  //! Returns current persisting L2 cache size of the device. Valid only on rocm device.
+  virtual size_t PersistingL2CacheSizeCurrent() const { return 0; }
+
+  //! Returns maximum persisting L2 cache size of the device. Valid only on rocm device.
+  virtual size_t PersistingL2CacheSizeMax() const { return 0; }
+
+  //! Sets the current persisting L2 cache size of the device. Valid only on rocm device.
+  virtual bool UpdatePersistingL2CacheSizeCurrent(size_t size) const { return true; }
 
   //! Validate kernel
   virtual bool validateKernel(const amd::Kernel& kernel, const device::VirtualDevice* vdev,

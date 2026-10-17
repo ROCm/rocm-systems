@@ -877,6 +877,9 @@ enum hipLimit_t {
                                    ///< device. Currently not supported
   hipLimitMallocHeapSize = 0x02,   ///< Limit of heap size in bytes on the current device, should
                                    ///< be less than the global memory size on the device
+  hipLimitPersistingL2CacheSize = 0x03, ///< Requested persisting L2 cache size in bytes for the
+                                        ///< current device. This size can be set to a value up to
+                                        ///< persistingL2CacheMaxSize reported in hipDeviceProp_t.
   hipExtLimitScratchMin = 0x1000,  ///< Minimum allowed value in bytes for scratch limit on this
                                    ///< device. Valid only on Rocm device. This is read only.
   hipExtLimitScratchMax = 0x1001,  ///< Maximum allowed value in bytes for scratch limit on this
