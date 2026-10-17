@@ -3,11 +3,15 @@
 
 from collections import OrderedDict
 from dataclasses import dataclass, field
-from typing import Any, Optional
+from pathlib import Path
+from typing import TYPE_CHECKING, Any, Optional
 
 import pandas as pd
 
 from membw_analysis.models import MemBwAnalysisResult
+
+if TYPE_CHECKING:
+    from utils.utils_analysis import CallTreeNode
 
 
 @dataclass
@@ -37,6 +41,15 @@ class ArchConfig:
 
 
 @dataclass
+class MlApiTracePair:
+    """Marker rows from one profiling pass and the sibling counter CSV."""
+
+    marker_df: pd.DataFrame
+    counter_path: Path
+    joined_df: Optional[pd.DataFrame] = None
+
+
+@dataclass
 class Workload:
     sys_info: pd.DataFrame = field(default_factory=pd.DataFrame)
     raw_pmc: pd.DataFrame = field(default_factory=pd.DataFrame)
@@ -49,6 +62,12 @@ class Workload:
     roofline_peaks: pd.DataFrame = field(default_factory=pd.DataFrame)
     roofline_metrics: dict[int, dict[str, Any]] = field(default_factory=dict)
     path: str = field(default_factory=str)
-    # Matched ML API trace rows keyed by backend, populated by operator filters.
-    matched_ml_api_trace_dfs: dict[str, pd.DataFrame] = field(default_factory=dict)
+    # Marker CSV / counter CSV pairs, one entry per profiling pass.
+    ml_api_trace_pairs: list[MlApiTracePair] = field(default_factory=list)
+    # Dispatches whose Correlation_ID is missing from that pass's marker CSV.
+    unmatched_kernel_frames: list[pd.DataFrame] = field(default_factory=list)
+    # Consolidated marker rows after matching operator calls across passes.
+    ml_api_trace_df: pd.DataFrame = field(default_factory=pd.DataFrame)
+    # Nested operator trees keyed by Thread_Id.
+    ml_api_call_trees: dict[str, list["CallTreeNode"]] = field(default_factory=dict)
     membw_result: Optional[MemBwAnalysisResult] = None
