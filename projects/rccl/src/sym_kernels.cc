@@ -404,7 +404,12 @@ uint32_t ncclSymkMask(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp
 bool ncclSymkAvailable(struct ncclComm* comm, ncclFunc_t coll, int /*ncclDevRedOp_t*/ red, ncclDataType_t ty,
                        size_t nElts) {
   if (!comm->symmetricSupport) return false;
-  if (!comm->isAllDirectNvlink) return false;
+  // [RCCL] A UALink (MNNVL) domain that spans the whole communicator reaches every peer
+  // through the fabric, even where the topology models cross-tray links as multi-hop
+  // XGMI. Only AllGather is offered there: rcclSelectAllGather admits it just where the
+  // TDM kernel wins, and the other collectives' symmetric kernels lose across trays.
+  const bool oneFabricDomain = comm->MNNVL && comm->nvlDomainSize == comm->nRanks;
+  if (!comm->isAllDirectNvlink && !(coll == ncclFuncAllGather && oneFabricDomain)) return false;
   if (!ncclSymkImplemented(coll, red, ty)) return false;
 
   return (ncclSymkMask(comm, coll, red, ty, nElts) != 0);

@@ -541,4 +541,29 @@ TEST_F(SymKernelMicrotest, SymkAvailable_AllReduceFloat64_NotAvailable) {
   EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllReduce, ncclDevSum, ncclFloat64, /*nElts=*/1024));
 }
 
+// A UALink (MNNVL) domain covering the whole comm stands in for all-direct NVLink for
+// AllGather: the topology may model cross-tray links as multi-hop, but the fabric
+// reaches every peer.
+TEST_F(SymKernelMicrotest, SymkAvailable_OneFabricDomainStandsInForDirectNvlink) {
+  comm_->symmetricSupport = true;
+  const size_t nElts = 1024 * 1024;
+  comm_->isAllDirectNvlink = true;
+  ASSERT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts))
+    << "precondition: AllGather float has a symmetric kernel at this size";
+  comm_->isAllDirectNvlink = false;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts)) << "no fabric";
+  comm_->MNNVL = 1;
+  comm_->nvlDomainSize = comm_->nRanks;
+  EXPECT_TRUE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts)) << "one domain";
+  ASSERT_TRUE(ncclSymkImplemented(ncclFuncReduceScatter, ncclDevSum, ncclFloat32));
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncReduceScatter, ncclDevSum, ncclFloat32, nElts))
+    << "only AllGather crosses trays";
+  comm_->nvlDomainSize = comm_->nRanks - 1;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts))
+    << "a rank outside the domain";
+  comm_->nvlDomainSize = comm_->nRanks;
+  comm_->MNNVL = 0;
+  EXPECT_FALSE(ncclSymkAvailable(comm_.get(), ncclFuncAllGather, ncclDevSum, ncclFloat32, nElts)) << "no MNNVL";
+}
+
 }  // namespace
