@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-#include "net_telemetry.h"
+#include "net_telemetry_internal.h"
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,6 +57,7 @@ int rcclTelemetryEnabled = 0;
 RcclTelemetryConfig rcclTelemetryCfg;
 RcclDeviceStats rcclTelemetryDevs[RCCL_TELEMETRY_MAX_DEVS];
 int rcclTelemetryNumDevs = 0;
+const char* rcclTelemetrySysRoot = "/sys";
 
 /* 1-in-N completion-latency sampling; see net_telemetry.h. The defaults are
  * "sample everything", so an un-configured run behaves and reports exactly as
@@ -205,6 +206,39 @@ int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots) 
   return startSlot;
 }
 
+int rcclTelemetrySetupQps(int devIdx, int chIdx, const void* const* keys, const int* isDataQp, int n,
+                          RcclQpStats** handles) {
+  int distinct = 0;
+  for (int q = 0; q < n; q++) {
+    handles[q] = NULL;
+    int first = q;
+    for (int j = 0; j < q && first == q; j++) {
+      if (keys[j] == keys[q]) first = j;
+    }
+    if (first == q) distinct++;
+  }
+  int numSlots = 0;
+  int startSlot = rcclTelemetrySetupChannel(devIdx, chIdx, distinct, &numSlots);
+  int k = 0;
+  for (int q = 0; q < n; q++) {
+    int first = q;
+    for (int j = 0; j < q && first == q; j++) {
+      if (keys[j] == keys[q]) first = j;
+    }
+    if (first != q) {
+      handles[q] = handles[first];
+      continue;
+    }
+    // Entries past the granted slots stay NULL (untracked).
+    if (k < numSlots) {
+      rcclTelemetrySetQpRole(devIdx, chIdx, startSlot + k, isDataQp[q]);
+      handles[q] = rcclTelemetryResolveQp(devIdx, chIdx, startSlot + k);
+    }
+    k++;
+  }
+  return numSlots;
+}
+
 /* ---- Periodic HW-counter sampler (time series for congestion) ------ */
 /* When RCCL_TELEMETRY_SAMPLE_MS > 0, a background thread samples a small
  * set of congestion-relevant IB-sysfs counters plus the atomic SW byte
@@ -234,11 +268,11 @@ static const RcclTelSampledDesc rcclTelSampled[] = {
   {"ecn_marked_pkts", NULL},                      /* ainic, mlx5, thor2 */
   {"cnp_sent", NULL},                             /* ainic, mlx5, thor2 */
   {"cnp_rcvd", "cnp_handled"},                    /* ainic | mlx5, thor2 */
-  {"out_of_buffer", NULL},                        /* ainic, mlx5 */
+  {"out_of_buffer", NULL},                        /* ainic, mlx5, thor2 */
   {"oos_drop_count", NULL},                       /* ainic, mlx5, thor2 */
   {"seq_err_naks_rcvd", NULL},                    /* ainic, mlx5, thor2 */
   {"rnr_retry_err", NULL},                        /* ainic, mlx5, thor2 */
-  {"local_ack_timeout_err", "to_retransmits"},    /* mlx5, thor2 | ainic */
+  {"local_ack_timeout_err", "to_retransmits"},    /* mlx5 | ainic, thor2 (no such counter) */
 };
 #define RCCL_TEL_NUM_SAMPLED ((int)(sizeof(rcclTelSampled) / sizeof(rcclTelSampled[0])))
 #define RCCL_TEL_MAX_SAMPLES 100000
@@ -296,7 +330,7 @@ typedef struct {
    * IB_SYSFS reads the per-port RoCE counters under
    *   /sys/class/infiniband/<dev>/ports/1/hw_counters/.
    * Some drivers only refresh ETHTOOL tx_bytes/rx_bytes every ~1 s,
-   * so short brackets see delta=0; IB sysfs values update per WQE. */
+   * so short brackets see delta=0. */
   enum RcclHwcSource source;
   const char* tx_bytes;
   const char* rx_bytes;
@@ -511,19 +545,18 @@ RCCL_TEL_HW_CONFIG(rcclHwConfigMlx5, rcclHwcMlx5, "mlx5",
 /* ------------------------------------------------------------------ */
 /* RoCE counters exposed under                                         */
 /*   /sys/class/infiniband/<dev>/ports/<p>/hw_counters/                */
-/* Counter names follow the upstream bnxt_re driver (hw_counters.c).   */
-/* Best-effort: names absent on a given firmware read back as N/A (-1) */
-/* rather than failing, so the table is safe across bnxt_re versions.  */
-/* Delta bytes/packets come from the IB sysfs rx/tx_bytes counters,    */
-/* which bnxt_re updates per WQE (ethtool L2 stats refresh too slowly).*/
+/* Names differ across bnxt_re versions: current key first, old one as */
+/* fallback. Absent names read N/A (-1). The sysfs byte counters can   */
+/* update late, so only whole-run deltas are reliable.                 */
 
 static const RcclHwCounterDesc rcclHwcThor2[] = {
   /* --- Canonical cross-driver counters (shared json_name, bnxt_re sysfs key) --- */
   /* ECN / congestion notification (primary congestion signals) */
   HWC_FB("ecn_marked_pkts",         HWC_IB_SYSFS, "rx_ecn_marked_pkts", "np_ecn_marked_roce_packets"),
-  HWC("cnp_sent",                   HWC_IB_SYSFS, "np_cnp_sent"),
-  HWC("cnp_handled",                HWC_IB_SYSFS, "rp_cnp_handled"),
+  HWC_FB("cnp_sent",                HWC_IB_SYSFS, "tx_cnp_pkts", "np_cnp_sent"),
+  HWC_FB("cnp_handled",             HWC_IB_SYSFS, "rx_cnp_pkts", "rp_cnp_handled"),
   HWC("cnp_ignored",                HWC_IB_SYSFS, "rp_cnp_ignored"),
+  HWC_FB("out_of_buffer",           HWC_IB_SYSFS, "rx_out_of_buffer", "out_of_buffer"),
 
   /* Retransmits / timeouts / out-of-sequence (congestion under load) */
   HWC("to_retransmits",             HWC_IB_SYSFS, "to_retransmits"),
@@ -539,17 +572,17 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC("bad_resp_err",               HWC_IB_SYSFS, "bad_resp_err"),
   HWC("unrecoverable_err",          HWC_IB_SYSFS, "unrecoverable_err"),
   HWC("recoverable_errors",         HWC_IB_SYSFS, "recoverable_errors"),
-  HWC("rx_errors",                  HWC_IB_SYSFS, "rx_errors"),
-  HWC("rx_discards",                HWC_IB_SYSFS, "rx_discards"),
-  HWC("tx_errors",                  HWC_IB_SYSFS, "tx_errors"),
-  HWC("tx_discards",                HWC_IB_SYSFS, "tx_discards"),
+  HWC_FB("rx_errors",               HWC_IB_SYSFS, "rx_roce_errors", "rx_errors"),
+  HWC_FB("rx_discards",             HWC_IB_SYSFS, "rx_roce_discards", "rx_discards"),
+  HWC_FB("tx_errors",               HWC_IB_SYSFS, "tx_roce_errors", "tx_errors"),
+  HWC_FB("tx_discards",             HWC_IB_SYSFS, "tx_roce_discards", "tx_discards"),
   HWC("rx_roce_error_pkts",         HWC_IB_SYSFS, "rx_roce_error_pkts"),
   HWC("rx_roce_discard_pkts",       HWC_IB_SYSFS, "rx_roce_discard_pkts"),
 
   /* Responder resource errors (context for the error rates) */
   HWC("res_rx_pci_err",             HWC_IB_SYSFS, "res_rx_pci_err"),
   HWC("res_tx_pci_err",             HWC_IB_SYSFS, "res_tx_pci_err"),
-  HWC("res_mem_error",              HWC_IB_SYSFS, "res_mem_error"),
+  HWC_FB("res_mem_error",           HWC_IB_SYSFS, "res_mem_err", "res_mem_error"),
   HWC("res_cq_load_err",            HWC_IB_SYSFS, "res_cq_load_err"),
   HWC("res_srq_load_err",           HWC_IB_SYSFS, "res_srq_load_err"),
 
@@ -558,9 +591,8 @@ static const RcclHwCounterDesc rcclHwcThor2[] = {
   HWC("rx_read_req",                HWC_IB_SYSFS, "rx_read_req"),
   HWC("rx_atomic_req",              HWC_IB_SYSFS, "rx_atomic_req"),
 
-  /* Global PFC pause frames (ethtool, best-effort bnxt_en names). */
-  HWC_FB("pfc_rx_pause_frames",     HWC_ETHTOOL, "rx_pause_frames", "rx_pause_ctrl_phy"),
-  HWC_FB("pfc_tx_pause_frames",     HWC_ETHTOOL, "tx_pause_frames", "tx_pause_ctrl_phy"),
+  HWC("pfc_rx_pause_frames",        HWC_ETHTOOL, "rx_pfc_frames"),
+  HWC("pfc_tx_pause_frames",        HWC_ETHTOOL, "tx_pfc_frames"),
 };
 
 RCCL_TEL_HW_CONFIG(rcclHwConfigThor2, rcclHwcThor2, "thor2",
@@ -628,11 +660,6 @@ static void rcclTelemetryReadCounters(RcclDeviceStats* dev, int64_t* hwc,
 /* Unified batched ethtool reader                                     */
 /* ------------------------------------------------------------------ */
 
-/* Longest `ethtool -S` statistic name we ever ask for. The kernel bounds a
- * statistic name by ETH_GSTRING_LEN (32), and the per-priority names we format
- * stay well inside that, so this has room to spare. */
-#define RCCL_TEL_ETHTOOL_KEY_MAX 64
-
 /* The four PFC per-priority patterns (rx/tx frames, rx/tx pause duration) and
  * the four delta keys (tx/rx bytes, tx/rx packets) of an RcclHwConfig. */
 #define RCCL_TEL_NUM_PFC_PATTERNS 4
@@ -650,10 +677,19 @@ static void rcclTelemetryReadCounters(RcclDeviceStats* dev, int64_t* hwc,
    RCCL_TEL_NUM_PFC_PATTERNS * RCCL_TELEMETRY_NUM_PFC_PRIO +        \
    RCCL_TEL_NUM_DELTA_KEYS)
 
-typedef struct {
-  char     key[RCCL_TEL_ETHTOOL_KEY_MAX];
-  int64_t* target;
-} RcclEthtoolWantedEx;
+void rcclTelemetryEthtoolResolve(const char* names, size_t nameStride, const uint64_t* values, unsigned n,
+                                 RcclEthtoolWantedEx* wanted, int nwanted) {
+  for (int i = 0; i < nwanted; i++) {
+    if (*(wanted[i].target) >= 0) continue;
+    size_t keyLen = strlen(wanted[i].key);
+    for (unsigned s = 0; s < n; s++) {
+      const char* name = names + (size_t)s * nameStride;
+      if (strnlen(name, nameStride) != keyLen || strncmp(name, wanted[i].key, nameStride) != 0) continue;
+      *(wanted[i].target) = (int64_t)values[s];
+      break;
+    }
+  }
+}
 
 static void rcclTelemetryCollectEthtoolBatch(const char* eth_device,
                                               RcclEthtoolWantedEx* wanted,
@@ -728,22 +764,8 @@ static void rcclTelemetryCollectEthtoolBatch(const char* eth_device,
     return;
   }
 
-  int found = 0;
-  for (unsigned int s = 0; s < n_stats && found < num_wanted; s++) {
-    /* Kernel names need not be NUL-terminated when they fill the field, so copy
-     * into a bounded buffer and terminate before comparing. */
-    char name[ETH_GSTRING_LEN + 1];
-    memcpy(name, strings->data + (size_t)s * ETH_GSTRING_LEN, ETH_GSTRING_LEN);
-    name[ETH_GSTRING_LEN] = '\0';
-
-    for (int i = 0; i < num_wanted; i++) {
-      if (*(wanted[i].target) >= 0) continue;
-      if (strcmp(name, wanted[i].key) != 0) continue;
-      *(wanted[i].target) = (int64_t)stats->data[s];
-      found++;
-      break;
-    }
-  }
+  rcclTelemetryEthtoolResolve((const char*)strings->data, ETH_GSTRING_LEN, (const uint64_t*)stats->data, n_stats,
+                              wanted, num_wanted);
 
   free(strings);
   free(stats);
@@ -1150,7 +1172,7 @@ static void rcclTelemetryGetEthDevice(const char* roce_device, char* eth_device,
   }
 
   char path[RCCL_TEL_PATH_MAX];
-  snprintf(path, sizeof(path), "/sys/class/infiniband/%s/device/net", roce_device);
+  snprintf(path, sizeof(path), "%s/class/infiniband/%s/device/net", rcclTelemetrySysRoot, roce_device);
 
   DIR* dir = opendir(path);
   if (dir == NULL) {
@@ -1366,7 +1388,7 @@ static void rcclTelemetryGetDriverName(const char* roce_device, char* driver_nam
   driver_name[0] = '\0';
 
   char link_path[RCCL_TEL_PATH_MAX];
-  snprintf(link_path, sizeof(link_path), "/sys/class/infiniband/%s/device/driver", roce_device);
+  snprintf(link_path, sizeof(link_path), "%s/class/infiniband/%s/device/driver", rcclTelemetrySysRoot, roce_device);
 
   char resolved[RCCL_TEL_PATH_MAX];
   ssize_t len = readlink(link_path, resolved, sizeof(resolved) - 1);
@@ -1384,14 +1406,14 @@ static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* c
   char path[RCCL_TEL_PATH_MAX];
   int64_t val;
 
-  snprintf(path, sizeof(path), "/sys/class/infiniband/%s/hw_counters/%s",
-           roce_device, counter_name);
+  snprintf(path, sizeof(path), "%s/class/infiniband/%s/hw_counters/%s",
+           rcclTelemetrySysRoot, roce_device, counter_name);
   val = rcclTelemetryReadSysfsCounter(path);
   if (val >= 0) return val;
 
   for (int port = 1; port <= 2; port++) {
-    snprintf(path, sizeof(path), "/sys/class/infiniband/%s/ports/%d/hw_counters/%s",
-             roce_device, port, counter_name);
+    snprintf(path, sizeof(path), "%s/class/infiniband/%s/ports/%d/hw_counters/%s",
+             rcclTelemetrySysRoot, roce_device, port, counter_name);
     val = rcclTelemetryReadSysfsCounter(path);
     if (val >= 0) return val;
   }
@@ -1403,24 +1425,24 @@ static int64_t rcclTelemetryReadHwCounter(const char* roce_device, const char* c
 /* Periodic HW-counter sampler                                        */
 /* ------------------------------------------------------------------ */
 
-/* Resolve a sampled json_name, or its alternate, to a row of the HW table. */
-static int rcclTelemetrySampledTableIdx(const RcclHwConfig* hw, int sampled) {
-  const RcclTelSampledDesc* s = &rcclTelSampled[sampled];
-  for (int c = 0; c < hw->num_counters; c++) {
-    if (strcmp(hw->counters[c].json_name, s->name) == 0) return c;
-  }
-  if (s->alt == NULL) return -1;
-  for (int c = 0; c < hw->num_counters; c++) {
-    if (strcmp(hw->counters[c].json_name, s->alt) == 0) return c;
-  }
-  return -1;
-}
-
 /* Read one resolved row, honouring the table's fallback sysfs key. */
 static int64_t rcclTelemetrySampleRow(const RcclDeviceStats* dev, const RcclHwCounterDesc* d) {
   int64_t v = rcclTelemetryReadHwCounter(dev->roce_device, d->key);
   if (v < 0 && d->key_fallback != NULL) v = rcclTelemetryReadHwCounter(dev->roce_device, d->key_fallback);
   return v;
+}
+
+/* Resolve a sampled json_name to a row of the HW table. The alternate is used
+ * when the table has no such row or the device cannot read it. */
+static int rcclTelemetrySampledTableIdx(const RcclDeviceStats* dev, const RcclHwConfig* hw, int sampled) {
+  const RcclTelSampledDesc* s = &rcclTelSampled[sampled];
+  int nameIdx = -1, altIdx = -1;
+  for (int c = 0; c < hw->num_counters; c++) {
+    if (strcmp(hw->counters[c].json_name, s->name) == 0) nameIdx = c;
+    else if (s->alt != NULL && strcmp(hw->counters[c].json_name, s->alt) == 0) altIdx = c;
+  }
+  if (nameIdx >= 0 && (altIdx < 0 || rcclTelemetrySampleRow(dev, &hw->counters[nameIdx]) >= 0)) return nameIdx;
+  return altIdx;
 }
 
 /* Warn once about any sampled name that no configured device's table defines,
@@ -1471,7 +1493,7 @@ static void* rcclTelemetrySamplerMain(void* arg) {
       smp->tx_bytes = __atomic_load_n(&dev->tx_bytes, __ATOMIC_RELAXED);
       smp->rx_bytes = __atomic_load_n(&dev->rx_bytes, __ATOMIC_RELAXED);
       for (int c = 0; c < RCCL_TEL_NUM_SAMPLED; c++) {
-        if (idx_cache[i][c] == -2) idx_cache[i][c] = rcclTelemetrySampledTableIdx(hw, c);
+        if (idx_cache[i][c] == -2) idx_cache[i][c] = rcclTelemetrySampledTableIdx(dev, hw, c);
         int ti = idx_cache[i][c];
         smp->cong[c] = (ti >= 0) ? rcclTelemetrySampleRow(dev, &hw->counters[ti]) : -1;
       }
@@ -1518,8 +1540,8 @@ static void rcclTelemetryCollectDebugfs(int64_t* hwc,
   if (driver_name[0] == '\0' || num_wanted == 0) return;
 
   char path[RCCL_TEL_PATH_MAX];
-  snprintf(path, sizeof(path), "/sys/kernel/debug/%s/%s/info",
-           driver_name, roce_device);
+  snprintf(path, sizeof(path), "%s/kernel/debug/%s/%s/info",
+           rcclTelemetrySysRoot, driver_name, roce_device);
 
   FILE* fp = fopen(path, "r");
   if (fp == NULL) return;
@@ -1627,9 +1649,13 @@ static void rcclTelemetryWriteJson(FILE* fp) {
   fprintf(fp, "  \"start_time\": \"%s\",\n", rcclTelemetryStartTime);
   fprintf(fp, "  \"end_time\": \"%s\",\n", end_time);
 
-  const char* transport = "IB-CAST";
-  if (rcclTelemetryNumDevs > 0 && rcclTelemetryDevs[0].transport[0] != '\0')
-    transport = rcclTelemetryDevs[0].transport;
+  const char* transport = "none";
+  for (int d = 0; d < rcclTelemetryNumDevs; d++) {
+    if (rcclTelemetryDevs[d].transport[0] != '\0') {
+      transport = rcclTelemetryDevs[d].transport;
+      break;
+    }
+  }
   fprintf(fp, "  \"transport\": \"%s\",\n", transport);
 
   /* Only when sampling is actually on. At the default N == 1 the histogram

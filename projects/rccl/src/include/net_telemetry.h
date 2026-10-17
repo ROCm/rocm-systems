@@ -1066,6 +1066,15 @@ static inline void rcclTelemetryWqeSize(int devIdx, uint64_t bytes) {
 int rcclTelemetrySetupChannel(int devIdx, int chIdx, int numQps, int* numSlots);
 
 /**
+ * Set up the n QPs of one device on a channel and resolve their handles.
+ * Entries with the same key (e.g. the ibv_qp a QP-sharing secondary borrows)
+ * share one slot, so posts and completions on that QP meet in the same place.
+ * handles[q] is NULL for an untracked entry. Returns the slots granted.
+ */
+int rcclTelemetrySetupQps(int devIdx, int chIdx, const void* const* keys, const int* isDataQp, int n,
+                          RcclQpStats** handles);
+
+/**
  * Mark a device's channel ids as not real NCCL channel ids.
  *
  * Call from a transport that cannot supply a channel id (e.g. mlx5/thor2, where
