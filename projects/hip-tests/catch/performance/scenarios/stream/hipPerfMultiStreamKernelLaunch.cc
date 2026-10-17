@@ -16,6 +16,8 @@
 #include <vector>
 #include <iomanip>
 
+#include "stream_create_helper.hh"
+
 #if HT_AMD
 #define device_clock64() wall_clock64()
 #else
@@ -38,16 +40,17 @@ class Experiment {
     double walltime_us;
   };
 
-  Experiment(uint32_t num_streams):
+  Experiment(size_t num_streams):
     num_streams_{num_streams}, streams_{num_streams, nullptr} { }
 
   Experiment(const Experiment& other):
     num_streams_{other.num_streams_}, streams_{other.num_streams_, nullptr} { }
 
-  void init() {
-    for (hipStream_t& s: streams_){
-      HIP_CHECK(hipStreamCreate(&s));
-    }
+  /** False when the device cannot provide num_streams_ streams. The helper reports the memory
+   *  state and leaves nothing allocated, so the caller can skip the experiment. */
+  bool init() {
+    streams_.clear();
+    return stream_test::CreateStreamsOrReport(num_streams_, /*nonBlocking=*/false, streams_);
   }
 
   void cleanup() {
@@ -122,7 +125,11 @@ HIP_TEST_CASE(Performance_hipPerfMultiStreamKernelLaunch) {
   for (const auto& num_streams : STREAMS_PER_EXPERIMENT) {
     Experiment exp(num_streams);
     Experiment::Metrics metrics;
-    exp.init();
+    // How many streams a device can hold is a device property, not a scenario defect: report
+    // and skip rather than fail the run.
+    if (!exp.init()) {
+      SKIP("Device cannot provide " << num_streams << " streams");
+    }
     exp.do_warmup(WARMUP_ITERATIONS, WARMUP_KERNEL_DISPATCHES_PER_STREAM, TimingKernel, timing_count);
     HIP_CHECK(hipDeviceSynchronize());
     if (KERNEL_SLEEP_US == 0) {
