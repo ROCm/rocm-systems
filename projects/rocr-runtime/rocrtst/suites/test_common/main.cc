@@ -94,6 +94,7 @@
 #include "suites/functional/gpu_coredump.h"
 #include "suites/functional/gpu_discovery_deprecated.h"
 #include "suites/functional/gl2_cache_test.h"
+#include "suites/functional/signal_batch_test.h"
 #include "amd_smi/amdsmi.h"
 #include "common/common.h"
 #include "suites/functional/counted_queues.h"
@@ -495,6 +496,48 @@ TEST(rocrtstFunc, GL2_PersistingCache_NegativeCPUAgent) {
     if (!RunCustomTestProlog(&gl2)) return;
     gl2.NegativeCPUAgent();
     RunCustomTestEpilog(&gl2);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Host_Pool) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.HostPoolBatch();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Device_Pools) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.DevicePoolsFollowQuery();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Async_Copy_Completion) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.AsyncCopyCompletesMember();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Negative) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.NegativeArguments();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Batch_Agent_Queries) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.AgentQueries();
+    RunCustomTestEpilog(&batch_test);
+}
+
+TEST(rocrtstFunc, Signal_Handle_Hints) {
+    SignalBatchTest batch_test;
+    if (!RunCustomTestProlog(&batch_test)) return;
+    batch_test.HandleHints();
+    RunCustomTestEpilog(&batch_test);
 }
 
 TEST(rocrtstFunc, Memory_Atomic_Add_Test) {

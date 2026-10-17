@@ -306,6 +306,27 @@ hsa_status_t MemoryRegion::GetInfo(hsa_region_info_t attribute,
   return HSA_STATUS_SUCCESS;
 }
 
+bool MemoryRegion::SignalCapable() const {
+  switch (owner()->device_type()) {
+    case core::Agent::DeviceType::kAmdCpuDevice:
+      return fine_grain();
+    case core::Agent::DeviceType::kAmdGpuDevice: {
+      if (!IsPublic()) return false;
+      // The uncached (extended-scope fine-grained) pool on gfx94x/gfx95x, where the other pools
+      // are MTYPE RW and a binary completion store is not seen by another queue's CP; the
+      // coarse-grained pool on gfx125x.
+      const core::Isa* isa = owner()->supported_isas()[0];
+      const int32_t major = isa->GetMajorVersion();
+      const int32_t minor = isa->GetMinorVersion();
+      if ((major == 9) && ((minor == 4) || (minor == 5))) return extended_scope_fine_grain();
+      if ((major == 12) && (minor >= 5)) return !fine_grain() && !extended_scope_fine_grain();
+      return false;
+    }
+    default:
+      return false;
+  }
+}
+
 hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
                                        void* value) const {
   switch (attribute) {
@@ -344,6 +365,9 @@ hsa_status_t MemoryRegion::GetPoolInfo(hsa_amd_memory_pool_info_t attribute,
           *((size_t*)value) = 0;
           break;
       }
+      break;
+    case HSA_AMD_MEMORY_POOL_INFO_SIGNAL_CAPABLE:
+      *((bool*)value) = SignalCapable();
       break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;

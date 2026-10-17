@@ -45,9 +45,11 @@
 #ifndef HSA_RUNTME_CORE_INC_SIGNAL_H_
 #define HSA_RUNTME_CORE_INC_SIGNAL_H_
 
+#include <atomic>
 #include <map>
 #include <functional>
 #include <memory>
+#include <optional>
 #include <vector>
 #include <utility>
 #include <mutex>
@@ -64,6 +66,7 @@
 #include "core/util/timer.h"
 
 #include "inc/amd_hsa_signal.h"
+#include "inc/hsa_ext_amd.h"
 
 #if defined(__i386__) || defined(__x86_64__)
 #include <mwaitxintrin.h>
@@ -146,18 +149,12 @@ class Signal;
 /// @brief ABI and object conversion struct for signals.  May be shared between processes.
 struct SharedSignal {
   amd_signal_t amd_signal;
-  uint64_t sdma_start_ts;
+  uint64_t reserved0;
   Signal* core_signal;
   Check<0x71FCCA6A3D5D5276, true> id;
-  uint8_t reserved[8];
-  uint64_t sdma_end_ts;
-  uint8_t reserved2[24];
+  uint8_t reserved[40];
 
-  SharedSignal() :
-    sdma_start_ts(0),
-    reserved{},
-    sdma_end_ts(0),
-    reserved2{} {
+  SharedSignal() : reserved0(0), reserved{} {
     memset(&amd_signal, 0, sizeof(amd_signal));
     amd_signal.kind = AMD_SIGNAL_KIND_INVALID;
     core_signal = nullptr;
@@ -168,34 +165,17 @@ struct SharedSignal {
   bool IsIPC() const { return core_signal == nullptr; }
 
   void GetSdmaTsAddresses(uint64_t*& start, uint64_t*& end) {
-    /*
-    SDMA timestamps on gfx7xx/8xxx require 32 byte alignment (gfx9xx relaxes
-    alignment to 8 bytes).  This conflicts with the frozen format for amd_signal_t
-    so we place the time stamps in sdma_start/end_ts instead (amd_signal.start_ts
-    is also properly aligned).  Reading of the timestamps occurs in GetRawTs().
-    */
-    start = &sdma_start_ts;
-    end = &sdma_end_ts;
+    start = &amd_signal.start_ts;
+    end = &amd_signal.end_ts;
   }
 
+  // Zero means "not captured" to TranslateTime, so clear before the copy engine writes.
   void CopyPrep() {
-    // Clear sdma_end_ts before a copy so we can detect if the copy was done via
-    // SDMA or blit kernel.
-    sdma_start_ts = 0;
-    sdma_end_ts = 0;
+    amd_signal.start_ts = 0;
+    amd_signal.end_ts = 0;
   }
 
-  void GetRawTs(bool FetchCopyTs, uint64_t& start, uint64_t& end) {
-    /*
-    If the read is for a copy we need to check if it was done by blit kernel or SDMA.
-    Since we clear sdma_start/end_ts during CopyPrep we know it was a SDMA copy if one
-    of those is non-zero.  Otherwise return compute kernel stamps from amd_signal.
-    */
-    if (FetchCopyTs && sdma_end_ts != 0) {
-      start = sdma_start_ts;
-      end = sdma_end_ts;
-      return;
-    }
+  void GetRawTs(uint64_t& start, uint64_t& end) const {
     start = amd_signal.start_ts;
     end = amd_signal.end_ts;
   }
@@ -217,12 +197,10 @@ static_assert(std::is_standard_layout<SharedSignal>::value,
               "SharedSignal must remain standard layout for IPC use.");
 static_assert(std::is_trivially_destructible<SharedSignal>::value,
               "SharedSignal must not be modified on delete for IPC use.");
-static_assert((offsetof(SharedSignal, sdma_start_ts) % 32) == 0,
-              "Bad SDMA time stamp alignment.");
-static_assert((offsetof(SharedSignal, sdma_end_ts) % 32) == 0,
-              "Bad SDMA time stamp alignment.");
 static_assert(sizeof(SharedSignal) == 128,
               "Bad SharedSignal size.");
+static_assert(offsetof(SharedSignal, core_signal) == 0x48 && offsetof(SharedSignal, id) == 0x50,
+              "core_signal and id must not move: IPC peers on other runtime versions read them.");
 
 
 #define SIGNAL_PREALLOC_BLOCKS 512 //16K Signals
@@ -245,18 +223,95 @@ class SharedSignalPool_t : private BaseShared {
   size_t block_size_;
 };
 
+class MemoryRegion;
+
+/// @brief Makes prior host stores to device memory visible to agents. Re-stores
+/// @p value, which the host already wrote to @p stored, and reads it back; the read
+/// completes only after every earlier store has passed through HDP. Passing the value
+/// in saves reading it across the bus first.
+void FlushDeviceStores(volatile int64_t* stored, int64_t value);
+
+/// @brief Signals created together in one contiguous arena from a memory pool.
+/// Slots are never recycled. The arena is freed once the batch handle and every
+/// member have been destroyed, in any order.
+class SignalBatch {
+ public:
+  /// @p access_agents are granted access to the arena; empty when @p region is
+  /// already mapped for every agent.
+  static hsa_status_t Create(uint32_t count, const hsa_signal_value_t* initial_values,
+                             bool use_interrupt, const MemoryRegion* region,
+                             const std::vector<hsa_agent_t>& access_agents,
+                             bool host_access_via_hdp,
+                             SignalBatch** batch,
+                             hsa_signal_t* signals);
+
+  static __forceinline hsa_amd_signal_batch_t Convert(SignalBatch* batch) {
+    const hsa_amd_signal_batch_t handle = {
+        static_cast<uint64_t>(reinterpret_cast<uintptr_t>(batch))};
+    return handle;
+  }
+
+  static __forceinline SignalBatch* Convert(hsa_amd_signal_batch_t handle) {
+    return reinterpret_cast<SignalBatch*>(static_cast<uintptr_t>(handle.handle));
+  }
+
+  bool IsValid() const { return id_.IsValid() && !destroyed_; }
+
+  bool host_access_via_hdp() const { return host_access_via_hdp_; }
+
+  /// @brief Releases the batch handle. Members stay valid until each is destroyed.
+  void ReleaseHandle();
+
+  /// @brief Called by a member's LocalSignal on construction and destruction.
+  void AcquireSlot() { references_++; }
+  void ReleaseSlot(SharedSignal* slot);
+
+ private:
+  SignalBatch(void* arena, bool host_access_via_hdp)
+      : arena_(arena),
+        host_access_via_hdp_(host_access_via_hdp),
+        references_(1),
+        destroyed_(false) {}
+  ~SignalBatch();
+
+  SharedSignal* Slot(uint32_t slot_index) const {
+    return static_cast<SharedSignal*>(arena_) + slot_index;
+  }
+
+  void DropReference();
+
+  Check<0x5B1A7C3E9D2F4861> id_;
+  void* const arena_;
+  const bool host_access_via_hdp_;
+
+  /// One for the batch handle plus one per live member object.
+  std::atomic<uint32_t> references_;
+  std::atomic<bool> destroyed_;
+
+  DISALLOW_COPY_AND_ASSIGN(SignalBatch);
+};
+
 class LocalSignal {
  public:
   // Temporary, for legacy tools lib support.
   explicit LocalSignal(hsa_signal_value_t initial_value) {
-    local_signal_.shared_object()->amd_signal.value = initial_value;
+    shared_signal_ = local_signal_.emplace().shared_object();
+    shared_signal_->amd_signal.value = initial_value;
   }
   LocalSignal(hsa_signal_value_t initial_value, bool exportable);
 
-  SharedSignal* signal() const { return local_signal_.shared_object(); }
+  /// @brief Wraps a constructed slot owned by @p batch, which reclaims it when
+  /// this object is destroyed.
+  LocalSignal(hsa_signal_value_t initial_value, SignalBatch* batch, SharedSignal* slot);
+
+  ~LocalSignal();
+
+  SharedSignal* signal() const { return shared_signal_; }
 
  private:
-  Shared<SharedSignal, SharedSignalPool_t> local_signal_;
+  std::optional<Shared<SharedSignal, SharedSignalPool_t>> local_signal_;
+  SignalBatch* batch_ = nullptr;
+  SharedSignal* shared_signal_;
 };
 
 /// @brief An abstract base class which helps implement the public hsa_signal_t
@@ -477,6 +532,8 @@ class Signal {
   __forceinline void async_copy_agent(core::Agent* agent) {
     async_copy_agent_ = agent;
     core::SharedSignal::Convert(Convert(this))->CopyPrep();
+    if (host_access_via_hdp_)
+      FlushDeviceStores(reinterpret_cast<volatile int64_t*>(&signal_.end_ts), 0);
   }
 
   __forceinline core::Agent* async_copy_agent() { return async_copy_agent_; }
@@ -485,9 +542,8 @@ class Signal {
     core::SharedSignal::Convert(Convert(this))->GetSdmaTsAddresses(start, end);
   }
 
-  // Set FetchCopyTs = true when reading time stamps from a copy operation.
-  void GetRawTs(bool FetchCopyTs, uint64_t& start, uint64_t& end) {
-    core::SharedSignal::Convert(Convert(this))->GetRawTs(FetchCopyTs, start, end);
+  void GetRawTs(uint64_t& start, uint64_t& end) {
+    core::SharedSignal::Convert(Convert(this))->GetRawTs(start, end);
   }
 
   /// @brief Structure which defines key signal elements like type and value.
@@ -514,12 +570,49 @@ class Signal {
   /// @variable Pointer to agent used to perform an async copy.
   core::Agent* async_copy_agent_;
 
+  enum class ValueOp { kStore, kAnd, kOr, kXor, kAdd, kSub, kExchange, kCas };
+
+  /// @brief Applies @p op to the value from the host and returns the prior value
+  /// (unspecified for kStore). A value reached through HDP is read, modified and
+  /// written back instead, which requires that no agent updates it concurrently.
+  __forceinline int64_t UpdateValue(ValueOp op, int64_t operand, std::memory_order order,
+                                    int64_t expected = 0) {
+    if (host_access_via_hdp_) return UpdateValueWithoutRmw(op, operand, expected);
+    switch (op) {
+      case ValueOp::kStore:
+        atomic::Store(&signal_.value, operand, order);
+        return 0;
+      case ValueOp::kAnd:
+        return atomic::And(&signal_.value, operand, order);
+      case ValueOp::kOr:
+        return atomic::Or(&signal_.value, operand, order);
+      case ValueOp::kXor:
+        return atomic::Xor(&signal_.value, operand, order);
+      case ValueOp::kAdd:
+        return atomic::Add(&signal_.value, operand, order);
+      case ValueOp::kSub:
+        return atomic::Sub(&signal_.value, operand, order);
+      case ValueOp::kExchange:
+        return atomic::Exchange(&signal_.value, operand, order);
+      case ValueOp::kCas:
+        return atomic::Cas(&signal_.value, operand, expected, order);
+    }
+    return 0;
+  }
+
+  /// @variable The value is in device memory the host reaches through HDP: host
+  /// atomics don't reach it and host stores need a flush. Cached so host operations
+  /// never read the signal's properties across the bus.
+  bool host_access_via_hdp_ = false;
+
  private:
   static std::mutex ipcLock_;
   static std::map<decltype(hsa_signal_t::handle), Signal*> ipcMap_;
 
   static Signal* lookupIpc(hsa_signal_t signal);
   static Signal* duplicateIpc(hsa_signal_t signal);
+
+  int64_t UpdateValueWithoutRmw(ValueOp op, int64_t operand, int64_t expected);
 
   /// @variable Ref count of this signal's handle (see IPC APIs)
   std::atomic<uint32_t> refcount_;
