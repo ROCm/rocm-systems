@@ -72,6 +72,7 @@ Settings::Settings() {
   fgs_kernel_arg_ = false;
   barrier_value_packet_ = false;
   ext_dispatch_packet_ = false;
+  ext_dispatch_packet_ld_ = false;
   kernel_arg_impl_ = KernelArgImpl::HostKernelArgs;
   aql_device_ring_buf_ = false;
   gwsInitSupported_ = true;

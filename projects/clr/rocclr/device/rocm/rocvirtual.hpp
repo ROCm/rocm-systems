@@ -362,12 +362,28 @@ class VirtualGPU : public device::VirtualDevice {
       template <class AqlPacket>
       inline void SetMetadata(AqlPacket* packet, uint16_t header,
                               uint64_t index, bool use_movdir64b,
-                              bool device_mem_ring_buf) {
+                              bool device_mem_ring_buf, uint32_t rest = 0,
+                              AqlPacket* aql_loc = nullptr) {
         if (!HasMetadataQueue()) {
           return;
         }
         auto* dst = static_cast<uint8_t*>(queue_base_) + index * kMetadataPacketSize;
         FillMetadata(packet, header, dst, use_movdir64b, device_mem_ring_buf);
+
+        // For Format 4 (DISPATCH_LD), set the launch_descriptor pointer in the AQL packet
+        // to point to the launch_descriptor structure in the metadata packet
+        if constexpr (std::is_same_v<AqlPacket, hsa_amd_ext_kernel_dispatch_packet_t>) {
+          hsa_amd_packet_type8_t amd_format = static_cast<hsa_amd_packet_type8_t>(rest & 0xFF);
+          if (amd_format == HSA_AMD_PACKET_TYPE_EXT_KERNEL_DISPATCH_LD) {
+            auto* metadata = GetMetadataPacket(index);
+            if (metadata != nullptr && aql_loc != nullptr) {
+              // Set the pointer in both the local packet copy and the queue location
+              auto* launch_desc = const_cast<amd_launch_descriptor_t*>(&metadata->launch_descriptor);
+              packet->launch_descriptor = launch_desc;
+              aql_loc->launch_descriptor = launch_desc;
+            }
+          }
+        }
       }
 
       //! Build the metadata-prefetch packet for a captured (graph) dispatch into a
@@ -723,7 +739,13 @@ class VirtualGPU : public device::VirtualDevice {
   void adjustHeader(uint16_t& header);
 
   //! Dispatches a barrier with blocking HSA signals
-  void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet);
+  void dispatchBlockingWait(hsa_kernel_dispatch_packet_t* packet,
+                            hsa_amd_packet_type8_t amd_format = 0);
+
+  //! Select ext-dispatch AQL packet format. Format 4 (DISPATCH_LD) is used only when
+  //! dynamic data prefetch is enabled and the device reports ucode support.
+  hsa_amd_packet_type8_t SelectExtDispatchAmdFormat(
+      bool ext_dispatch_packet, const amd::NDRangeKernelCommand* vcmd) const;
 
   //! Dispatch (or capture, when graph-capturing) a kernel dispatch packet.
   //! Handles both hsa_kernel_dispatch_packet_t and hsa_amd_ext_kernel_dispatch_packet_t.
