@@ -1266,4 +1266,48 @@ TEST(InstructionCacheCuTest, LaunchInvalidationIsOncePerDispatch) {
       << "a new dispatch reused code bytes cached by the previous one";
 }
 
+TEST(InstructionCacheCuTest, MemoryReplacementInvalidatesCachedInstruction) {
+  GpuMemory replacement("replacement_memory");
+  CuFixture fixture("icache_memory_replacement");
+  fixture.write_program(std::array<uint32_t, 2>{s_mov_b32_s0_imm(1), kSEndpgm});
+  auto *wf = fixture.launch(1, 0);
+  ASSERT_NE(wf, nullptr);
+  fixture.cu()->step();
+  ASSERT_EQ(fixture.read_s0(*wf), 1u);
+
+  replacement.write32(kCodeBase, s_mov_b32_s0_imm(2));
+  replacement.write32(kCodeBase + 4, kSEndpgm);
+  fixture.cu()->set_memory(&replacement);
+  wf->pc = kCodeBase;
+  fixture.cu()->step();
+  EXPECT_EQ(fixture.read_s0(*wf), 2u);
+}
+
+// Scalar launch coherency follows the same once-per-dispatch rule as the I$:
+// sibling workgroups retain shared cache contents, while a later dispatch sees
+// the authoritative L2 value.
+TEST(InstructionCacheCuTest, ScalarCacheInvalidatesOncePerDispatch) {
+  CuFixture fixture("scalar_dispatch_cu", 2);
+  fixture.write_program(std::array<uint32_t, 1>{kSEndpgm});
+  constexpr uint64_t kDataAddr = 0x300000;
+  constexpr uint32_t kFirst = 0x11112222;
+  constexpr uint32_t kSecond = 0x33334444;
+
+  fixture.memory().write32(kDataAddr, kFirst);
+  ASSERT_NE(fixture.launch(7, 0), nullptr);
+  uint32_t value = 0;
+  fixture.cu()->l1_scalar().load(kDataAddr, 1, &value, 0);
+  ASSERT_EQ(value, kFirst);
+
+  fixture.cu()->l2()->write(kDataAddr, reinterpret_cast<const uint8_t *>(&kSecond), sizeof(kSecond),
+                            amdgpu::Mtype::RW, 0);
+  ASSERT_NE(fixture.launch(7, 1), nullptr);
+  fixture.cu()->l1_scalar().load(kDataAddr, 1, &value, 0);
+  EXPECT_EQ(value, kFirst) << "a sibling workgroup invalidated the scalar cache";
+
+  fixture.cu()->begin_workgroup(8, 0, 1);
+  fixture.cu()->l1_scalar().load(kDataAddr, 1, &value, 0);
+  EXPECT_EQ(value, kSecond) << "a new dispatch reused stale scalar cache data";
+}
+
 } // namespace

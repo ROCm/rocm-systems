@@ -23,6 +23,11 @@ class RequestMtypeResolver;
 /// sharing the same L2 are properly merged at byte granularity.
 ///
 /// CDNA3 V$ geometry: 128B lines, 64 sets, 4-way = 32KB.
+/// @par Thread safety
+/// This cache is mutable per-CU state and is not internally synchronized.
+/// Functional dispatch must preserve one-host-thread-per-CU ownership while a
+/// CU quantum runs. Different CUs may execute concurrently because each owns a
+/// separate L1VectorCache; their shared L2 provides its own synchronization.
 class L1VectorCache {
 public:
   static constexpr uint32_t LINE_SIZE_BITS = 7; // 128 bytes
@@ -82,6 +87,7 @@ public:
   uint64_t store_count() const { return store_count_; }
   uint64_t store_active_count() const { return store_active_count_; }
   uint64_t store_l2_writes() const { return store_l2_writes_; }
+  uint64_t read_count() const { return read_count_; }
 
 private:
   void invalidate_all_lines();
@@ -109,6 +115,7 @@ private:
   uint64_t store_count_ = 0;
   uint64_t store_active_count_ = 0;
   uint64_t store_l2_writes_ = 0;
+  uint64_t read_count_ = 0;
 };
 
 } // namespace amdgpu
