@@ -15,6 +15,7 @@ from typing import Any, Callable, Generator, Optional
 import re
 import os
 import sys
+import json
 import shutil
 import signal
 import traceback
@@ -547,17 +548,19 @@ def pytest_collection_modifyitems(config, items) -> None:
         if "rocm_min_version" in item.keywords:
             req_version = item.get_closest_marker("rocm_min_version").args[0]
             system_version = rocprof_config.rocm_version
+            # None < (major, minor, patch) raises TypeError and aborts collection.
+            # Adding the skip marker does not stop the comparison below.
             if system_version is None:
                 item.add_marker(pytest.mark.skip(reason="ROCm version not found"))
-            # Parse min_version and compare
-            min_parts = req_version.split(".")
-            min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
-            if system_version < min_tuple:
-                item.add_marker(
-                    pytest.mark.skip(
-                        reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
+            else:
+                min_parts = req_version.split(".")
+                min_tuple = tuple(int(p) for p in (min_parts + ["0", "0"])[:3])
+                if system_version < min_tuple:
+                    item.add_marker(
+                        pytest.mark.skip(
+                            reason=f"ROCm {'.'.join(map(str, system_version))} < required {req_version}"
+                        )
                     )
-                )
         if "oshrun_min_version" in item.keywords:
             req_version = item.get_closest_marker("oshrun_min_version").args[0]
             system_version = rocprof_config.capabilities.oshrun_version
@@ -786,6 +789,37 @@ def pytest_sessionfinish(session, exitstatus):
 # Helper functions
 #
 # ============================================================================
+
+# ----------------------------------------------------------------------------
+# Resolved settings: what the profiled process actually stored, as opposed to
+# what the launcher echoed to stdout before exec. A test that only matches the
+# echo passes whether or not the runtime kept the value.
+# ----------------------------------------------------------------------------
+
+
+def parse_metadata_settings(metadata_file) -> dict:
+    """Parse a metadata-*.json settings block into {KEY: resolved value}.
+
+    metadata.json records what each setting actually resolved to, so it catches
+    storage/serialization bugs the stdout echo might miss.
+    """
+    settings = json.loads(metadata_file.read_text())["rocprofiler-systems"]["metadata"][
+        "settings"
+    ]
+    return {
+        key: entry["value"]
+        for key, entry in settings.items()
+        if isinstance(entry, dict) and "value" in entry
+    }
+
+
+def resolved_settings(result) -> dict:
+    """Find the run's metadata-*.json at the default output location and parse it."""
+    metadata_file = result.get_output_file("metadata*.json")
+    if metadata_file is None:
+        pytest.fail(f"No metadata*.json found under {result.output_dir}")
+    return parse_metadata_settings(metadata_file)
+
 
 # ----------------------------------------------------------------------------
 # Collection-time availability: return None if OK, else a skip reason string.

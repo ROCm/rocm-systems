@@ -20,9 +20,11 @@ It also validates outputs including:
 """
 
 from __future__ import annotations
+import shutil
+import signal
 import pytest
 from pathlib import Path
-from conftest import RocprofsysTest
+from conftest import RocprofsysTest, resolved_settings
 
 pytestmark = [
     pytest.mark.transpose,
@@ -440,3 +442,405 @@ class TestTransposeGPUPerfCounters(RocprofsysTest):
             subtest_name="ROCpd GPU perf counter validation",
             rules_files=[rules_dir / "gpu-perf-counter-rules.json"],
         )
+
+
+TRANSPOSE_ARGS = ["2", "100", "50"]
+
+# effect is what the flag changes in the run output:
+#   kernels     - an open trace window records the transpose kernel
+#   no_kernels  - a window that never opens records none
+#   diff        - --profile-diff writes a diff against a previous profile
+SAMPLE_TRANSPOSE_FLAG_CASES = [
+    pytest.param(
+        ["--trace-periods", "0:10"],
+        {"ROCPROFSYS_TRACE_PERIODS": "0:10"},
+        "kernels",
+        id="trace_periods",
+    ),
+    pytest.param(
+        ["--trace-periods", "10:15"],
+        {"ROCPROFSYS_TRACE_PERIODS": "10:15"},
+        "no_kernels",
+        id="trace_periods_closed",
+    ),
+    pytest.param(
+        ["--profile-diff"],
+        {
+            "ROCPROFSYS_DIFF_OUTPUT": True,
+            "ROCPROFSYS_INPUT_PATH": "{baseline}",
+        },
+        "diff",
+        id="profile_diff",
+    ),
+]
+
+
+def _check_resolved_settings(result, flag_args, expected: dict) -> None:
+    """Assert metadata.json (written by the profiled process) holds `expected`."""
+    settings = resolved_settings(result)
+    for key, value in expected.items():
+        if key not in settings:
+            pytest.fail(f"{flag_args}: {key} missing from metadata.json")
+        if settings[key] != value:
+            pytest.fail(
+                f"{flag_args}: metadata.json has {key}={settings[key]!r}, "
+                f"expected {value!r}"
+            )
+
+
+def _profile_inputs(output_dir: Path) -> list[Path]:
+    return [
+        path
+        for path in output_dir.iterdir()
+        if path.is_file() and "wall_clock" in path.name and ".diff." not in path.name
+    ]
+
+
+def _perfetto_traces(output_dir) -> list:
+    """Perfetto traces written as .pftrace and, when present, .proto."""
+    traces = []
+    for ext in ("pftrace", "proto"):
+        traces.extend(sorted(output_dir.glob(f"perfetto-trace*.{ext}")))
+    return traces
+
+
+@pytest.mark.sampling
+@pytest.mark.timeout(180)
+@pytest.mark.class_name("sample-transpose-cli")
+@pytest.mark.rocpd("transpose_env")
+class TestSampleTransposeCli(RocprofsysTest):
+    # transpose_env must be passed through: the rocpd marker enables ROCpd by
+    # mutating it.
+    def _run_transpose(self, sampling_args, env):
+        return self.run_test(
+            "sampling",
+            target="transpose",
+            env=env,
+            run_args=TRANSPOSE_ARGS,
+            sampling_args=sampling_args,
+            check_target_arch=True,
+        )
+
+    def _assert_transpose_trace(self, result, present: bool):
+        traces = _perfetto_traces(result.output_dir)
+        if not traces and result.perfetto_file is not None:
+            traces = [result.perfetto_file]
+        if not traces:
+            pytest.fail(f"No Perfetto trace under {result.output_dir}")
+        for trace in traces:
+            if present:
+                self.assert_perfetto(
+                    result,
+                    perfetto_file=trace,
+                    label_substrings=["transpose_a"],
+                    subtest_name=f"{trace.name} recorded transpose_a",
+                )
+            else:
+                self.assert_perfetto(
+                    result,
+                    perfetto_file=trace,
+                    label_substrings=["transpose_a"],
+                    counts=[0],
+                    subtest_name=f"{trace.name} has no transpose_a",
+                )
+
+    @pytest.mark.parametrize(
+        "flag_args, expected_settings, effect", SAMPLE_TRANSPOSE_FLAG_CASES
+    )
+    def test_flag_changes_output(
+        self,
+        flag_args,
+        expected_settings,
+        effect,
+        transpose_env,
+        test_output_dir,
+        trace_delay_rules,
+        validation_rules_dir,
+    ):
+        resolved_flags = list(flag_args)
+        expected = dict(expected_settings)
+        if effect == "diff":
+            baseline = test_output_dir / "baseline"
+            first = self._run_transpose([], transpose_env)
+            profiles = _profile_inputs(first.output_dir)
+            if not profiles:
+                pytest.fail(
+                    f"no wall_clock profile under {first.output_dir} to diff against"
+                )
+            baseline.mkdir()
+            for profile in profiles:
+                shutil.copy2(profile, baseline / profile.name)
+            resolved_flags = ["--profile-diff", str(baseline)]
+            expected["ROCPROFSYS_INPUT_PATH"] = str(baseline)
+
+        result = self._run_transpose(resolved_flags, transpose_env)
+        _check_resolved_settings(result, resolved_flags, expected)
+        self.assert_regex(result)
+
+        if effect == "kernels":
+            self._assert_transpose_trace(result, present=True)
+            # default-rules requires a kernel row. validation-rules.json
+            # also requires 1000 calls, which 2 100 50 does not produce.
+            self.assert_rocpd(
+                result,
+                subtest_name="open window recorded kernels in rocpd",
+                rules_files=[validation_rules_dir / "default-rules.json"],
+            )
+        elif effect == "no_kernels":
+            self._assert_transpose_trace(result, present=False)
+            self.assert_rocpd(
+                result,
+                subtest_name="closed window recorded no kernels in rocpd",
+                rules_files=trace_delay_rules,
+            )
+        elif effect == "diff":
+            if any(baseline.glob("*.diff.*")):
+                pytest.fail(
+                    f"--profile-diff wrote a diff file into the baseline {baseline}"
+                )
+            diff_txt = result.output_dir / "wall_clock.diff.txt"
+            diff_json = result.output_dir / "wall_clock.diff.json"
+            if not diff_txt.is_file() or not diff_json.is_file():
+                pytest.fail(
+                    f"--profile-diff did not write wall_clock.diff.txt and "
+                    f"wall_clock.diff.json under {result.output_dir}"
+                )
+            # Seconds are deltas, so the exact number is not fixed.
+            self.assert_file_regex(
+                diff_txt,
+                pass_regex=[
+                    r"vs\.",
+                    r"baseline/wall_clock\.json",
+                    r"sec\s+\|\s+-?\d+\.\d+",
+                ],
+                subtest_name="wall_clock.diff.txt compares the baseline in seconds",
+            )
+            self.assert_file_regex(
+                diff_json,
+                pass_regex=[r'"unit_repr"\s*:\s*"sec"', r'"repr_data"\s*:\s*-?\d+\.\d+'],
+                subtest_name="wall_clock.diff.json has second values",
+            )
+            self._assert_transpose_trace(result, present=True)
+
+
+# ============================================================================
+# rocprof-sys-sample flag coverage on the transpose HIP workload.
+# Each class asserts the flag's effect on the run, not just the echoed setting.
+# ============================================================================
+
+
+@pytest.mark.sampling
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("sample-transpose-mode")
+@pytest.mark.rocpd("transpose_env")
+class TestSampleTransposeMode(RocprofsysTest):
+    """--mode on a HIP workload.
+
+    Tests:  --mode coverage switches the run from tracing to code coverage.
+    Input:  --mode coverage on transpose 2 100 50.
+    Expect: ROCPROFSYS_MODE=coverage with TRACE and both samplers off, and
+            neither a Perfetto trace nor a ROCpd database on disk.
+
+    Only "coverage" has a visible effect here; "sampling"/"causal" just move
+    ROCPROFSYS_MODE in the settings dump.
+    """
+
+    MODE_FLAGS = ["--mode", "coverage"]
+
+    def test_coverage_disables_trace_and_sampling(self, transpose_env):
+        result = self.run_test(
+            "sampling",
+            target="transpose",
+            env=transpose_env,
+            run_args=TRANSPOSE_ARGS,
+            sampling_args=self.MODE_FLAGS,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+        _check_resolved_settings(
+            result,
+            self.MODE_FLAGS,
+            {
+                "ROCPROFSYS_MODE": "coverage",
+                "ROCPROFSYS_TRACE": False,
+                "ROCPROFSYS_USE_SAMPLING": False,
+                "ROCPROFSYS_USE_PROCESS_SAMPLING": False,
+                "ROCPROFSYS_USE_AMD_SMI": False,
+                "ROCPROFSYS_USE_CODE_COVERAGE": True,
+            },
+        )
+
+        # No trace/database to hand to assert_perfetto/assert_rocpd, so assert
+        # their absence directly.
+        traces = _perfetto_traces(result.output_dir)
+        if result.perfetto_file is not None:
+            traces.append(result.perfetto_file)
+        if traces:
+            pytest.fail(
+                "--mode coverage turns ROCPROFSYS_TRACE off, but a Perfetto "
+                f"trace was still written: {sorted(str(t) for t in traces)}"
+            )
+        if result.rocpd_files:
+            pytest.fail(
+                "--mode coverage turns ROCPROFSYS_TRACE off, but a ROCpd "
+                f"database was still written: {[str(f) for f in result.rocpd_files]}"
+            )
+
+
+@pytest.mark.sampling
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("sample-transpose-cputime-signal")
+@pytest.mark.rocpd("transpose_env")
+class TestSampleTransposeCputimeSignal(RocprofsysTest):
+    """--sampling-cputime-signal moves the cputime sampler off SIGPROF.
+
+    Tests:  the cputime sampler is armed on the requested signal, not the
+            SIGPROF default, and keeps sampling once moved.
+    Input:  --sampling-cputime-signal 26 (SIGVTALRM) on transpose 2 100 50.
+    Expect: a "[SIG26] Sampler for thread 0" line and no "[SIG27] Sampler"
+            line, with GPU kernels and timer samples still recorded.
+
+    SIGVTALRM specifically: an arbitrary free signal (SIGUSR2) causes
+    hipStreamCreate to fail with "out of memory" in ~60% of runs.
+    """
+
+    CPUTIME_SIGNAL = str(signal.SIGVTALRM.value)
+    SIGNAL_FLAGS = ["--sampling-cputime-signal", CPUTIME_SIGNAL]
+
+    def test_override_keeps_sampling(self, transpose_env, validation_rules_dir):
+        result = self.run_test(
+            "sampling",
+            target="transpose",
+            env=transpose_env,
+            run_args=TRANSPOSE_ARGS,
+            sampling_args=self.SIGNAL_FLAGS,
+            check_target_arch=True,
+        )
+        # The sampler logs the signal it actually armed, not just the echoed value.
+        self.assert_regex(
+            result,
+            pass_regex=[rf"\[SIG{self.CPUTIME_SIGNAL}\] Sampler for thread 0"],
+            fail_regex=[rf"\[SIG{signal.SIGPROF.value}\] Sampler for thread"],
+        )
+        _check_resolved_settings(
+            result,
+            self.SIGNAL_FLAGS,
+            {"ROCPROFSYS_SAMPLING_CPUTIME_SIGNAL": int(self.CPUTIME_SIGNAL)},
+        )
+        self.assert_perfetto(
+            result,
+            label_substrings=["transpose_a"],
+            subtest_name="GPU kernels still recorded on the overridden signal",
+        )
+        # No rocpd row names which signal carried the sampler; this is a
+        # no-regression guard, the flag-specific check is the [SIG<n>] pair above.
+        self.assert_rocpd(
+            result,
+            subtest_name="overriding the signal did not stop sampling",
+            rules_files=[
+                validation_rules_dir / "default-rules.json",
+                validation_rules_dir / "transpose" / "cputime-signal-rules.json",
+            ],
+        )
+
+
+@pytest.mark.skip(reason="issue is reported in AIPROFSYST-773")
+@pytest.mark.sampling
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("sample-transpose-trace-clock-id")
+@pytest.mark.rocpd("transpose_env")
+class TestSampleTransposeTraceClockId(RocprofsysTest):
+    """--trace-clock-id selects the clock a --trace-periods window runs on.
+
+    Tests:  the --trace-periods delay is measured against process CPU time
+            instead of the realtime default.
+    Input:  --trace-periods 2:10 --trace-clock-id cputime on transpose 2 100 50.
+    Expect: the window opens about 2s of CPU time in, so transpose_a kernels
+            land in both the trace and ROCpd; realtime would record none.
+
+    Skipped under AIPROFSYST-773: on the gfx950 CI runner the window never
+    opens and zero kernels are recorded.
+    """
+
+    CLOCK_FLAGS = ["--trace-periods", "2:10", "--trace-clock-id", "cputime"]
+
+    def test_cputime_window(self, transpose_env, validation_rules_dir):
+        result = self.run_test(
+            "sampling",
+            target="transpose",
+            env=transpose_env,
+            run_args=TRANSPOSE_ARGS,
+            sampling_args=self.CLOCK_FLAGS,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+        _check_resolved_settings(
+            result,
+            self.CLOCK_FLAGS,
+            {
+                "ROCPROFSYS_TRACE_PERIODS": "2:10",
+                "ROCPROFSYS_TRACE_PERIOD_CLOCK_ID": "cputime",
+            },
+        )
+        self.assert_perfetto(
+            result,
+            label_substrings=["transpose_a"],
+            subtest_name="cputime window recorded transpose_a",
+        )
+        # default-rules.json requires at least one kernel row.
+        self.assert_rocpd(
+            result,
+            subtest_name="cputime window opened before the run ended",
+            rules_files=[validation_rules_dir / "default-rules.json"],
+        )
+
+
+@pytest.mark.sampling
+@pytest.mark.timeout(120)
+@pytest.mark.class_name("sample-transpose-cpu-metrics")
+@pytest.mark.rocpd("transpose_env")
+class TestSampleTransposeCpuMetrics(RocprofsysTest):
+    """--cpu-metrics on a HIP workload.
+
+    Tests:  selecting host counters does not cost the GPU kernel rows that
+            would otherwise be recorded alongside them.
+    Input:  -H --cpus 0 --cpu-metrics frequency,load on transpose 2 100 50.
+    Expect: "Frequency (S)" and "Load (S)" counter tracks beside transpose_a.
+
+    -H and --cpus are required: without them ROCPROFSYS_CPU_FREQ_ENABLED and
+    ROCPROFSYS_SAMPLING_CPUS stay off, and --cpu-metrics selects a collector
+    that never runs.
+
+    ROCpd assertion skipped under AIPROFSYST-XXX: the selected PMCs register
+    in pmc_info but carry zero rows in rocpd_pmc_event.
+    """
+
+    CPU_METRICS_FLAGS = ["-H", "--cpus", "0", "--cpu-metrics", "frequency,load"]
+
+    def test_frequency_and_load_with_gpu_kernels(self, transpose_env):
+        result = self.run_test(
+            "sampling",
+            target="transpose",
+            env=transpose_env,
+            run_args=TRANSPOSE_ARGS,
+            sampling_args=self.CPU_METRICS_FLAGS,
+            check_target_arch=True,
+        )
+        self.assert_regex(result)
+        _check_resolved_settings(
+            result,
+            self.CPU_METRICS_FLAGS,
+            {
+                "ROCPROFSYS_CPU_METRICS": "frequency,load",
+                "ROCPROFSYS_CPU_FREQ_ENABLED": True,
+                "ROCPROFSYS_SAMPLING_CPUS": "0",
+            },
+        )
+        self.assert_perfetto(
+            result,
+            subtest_name="host frequency and load counters alongside GPU kernels",
+            counter_names_present=["Frequency (S)", "Load (S)"],
+            label_substrings=["transpose_a"],
+        )
+        # ROCpd assertion against cpu-metrics-selection-rules.json parked here
+        # pending AIPROFSYST-XXX (see class docstring); restore once fixed.
