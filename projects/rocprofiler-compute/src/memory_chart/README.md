@@ -5,10 +5,7 @@ The memory chart (panel 3 of `analyze`) is drawn from a layout file in
 chart except the metric values: which boxes it has, where each box goes, which metric
 each box and arrow shows, which way each arrow points, and how each part is drawn.
 
-This README is the contract for any tool that draws the chart, such as ROCm Optiq. To
-draw the same chart as `analyze`, a tool needs only the layout file, the metric values,
-and this page. It never has to work anything out from the order of entries in the file,
-from units, or from categories.
+This README is the contract for any tool that draws the chart, such as ROCm Optiq.
 
 ## Example
 
@@ -47,23 +44,6 @@ A small layout with three columns. JSON has no comments; they are here only to e
 }
 ```
 
-## How to draw a layout
-
-1. Draw the boxes that have `"position": "grid"` and no `parent` as columns, left to
-   right by `column`. In each column, stack them top to bottom by `order`.
-2. Draw each box that has a `parent` inside that parent box, top to bottom by `order`.
-3. Draw each box with `"position": "above"` or `"below"` outside the columns, above or
-   below its `host` box, in `order`.
-4. Draw a bar above the columns with the two `scope.labels`. The second label starts at
-   the column of the `scope.split` box.
-5. Draw the arrows between their boxes, in the order of the `arrows` list. Put
-   consecutive arrows with the same `group` under one heading with that name.
-6. Show each metric's value and unit, found as described in
-   [Metric values](#metric-values).
-
-Colors, sizes, number formats, and where an arrow sits along the side of a box are up to
-each tool.
-
 ## Fields
 
 ### Top level
@@ -87,11 +67,11 @@ All fields are required.
 | `column` | yes | The column, counting from 0 on the left. A box inside another box, or above or below one, has that box's column. |
 | `order` | yes | The place among the boxes it is stacked with, counting from 0. Boxes are stacked with the other top-level boxes of their column, with the other boxes inside the same parent, or with the other boxes on the same side of the same host. |
 | `position` | yes | `grid` for a box in a column or inside another box. `above` or `below` for a small labelled box outside the columns, such as xGMI or PCIe. |
-| `style` | yes | `panel` for a box with a border. `list` for a compact list: no blank lines, all values in one color, and no bars. The compute box on the left uses `list`. Boxes above or below the columns are `panel`. |
+| `style` | yes | `panel` for a box with a border. `list` for a compact list, used by the compute box on the left. Boxes above or below the columns are `panel`. |
 | `parent` | no | The id of the box this box is drawn inside. |
 | `host` | for `above` and `below` boxes | The id of the top-level box in a column that this box is drawn above or below. |
 | `content` | no | The metrics shown in the box, top to bottom. |
-| `stall_level` | no | `GL1`, `GL2`, or `EA`. `analyze` lists the memory bandwidth stalls of that level in the box. Other tools can ignore it; its data is not in the analysis database. |
+| `stall_level` | no | `GL1`, `GL2`, or `EA`. `analyze` lists the memory bandwidth stalls of that level in the box. |
 
 A box with boxes inside it shows only its title and those boxes; its metrics and arrows
 belong to the inner boxes. Boxes above or below the columns show only their title.
@@ -142,16 +122,15 @@ always follows them:
   box drawn above or below its start box. It never starts or ends at a box that has
   boxes inside it.
 
-The tests also check that a layout shows every metric of the GPU's memory chart panel,
-and no other metric.
-
 ## Metric values
 
 Each `metric` is the name of a metric in the memory chart panel (panel 3). Names are
 unique within panel 3. They can repeat in other panels, so look only in panel 3.
 
-In the analysis database (`analyze --output-format db`), each metric of a workload has a
-row in `compute_metric_definition`. For a layout metric, use the workload's row whose
+In the analysis database (`analyze --output-format db`), each workload's layout file is
+stored unchanged in the `memory_chart_layout_extdata` column of `compute_workload`. It
+is null when the workload's GPU has no layout. Each metric of a workload has a row in
+`compute_metric_definition`. For a layout metric, use the workload's row whose
 `name` is the metric name and whose `metric_id` starts with `3.`. That row has the unit.
 The value the terminal chart shows is in `compute_workload_metric_value`, in the row
 for that definition with `value_name` `Value`. `compute_kernel_metric_value` has the
