@@ -167,7 +167,9 @@
         {"name": "VersionInfoTests", "description": "HIP/ROCm version string formatting tests", "test_filter": "VersionInfoTests.*"},
         {"name": "GinDeviceTest", "description": "GIN proxy backend device-leaf tests", "test_filter": "GinDeviceTest.*:GinProxyFlushWaitTest.*:GinProxyPutTest.*"},
         {"name": "GinBackendMaskDispatchTest", "description": "GIN backend-mask put dispatch tests", "test_filter": "GinBackendMaskDispatchTest.*"},
-        {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"}
+        {"name": "DdaCollCommon", "description": "DDA collective common helper tests", "test_filter": "DdaCollCommon.*"},
+        {"name": "DdaVecElementAdd", "description": "DDA vecElementAdd float/half/bf16 lane arithmetic on device", "test_filter": "DdaVecElementAdd.*"},
+        {"name": "DdaIpcGpuBarrierOrdering", "description": "DDA IPC barrier release/acquire cross-GPU message passing (8 GPUs)", "test_filter": "DdaIpcGpuBarrierOrdering.*", "timeout": 600}
       ]
     },
     "unit_tests_gdr": {

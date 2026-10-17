@@ -398,6 +398,8 @@ if(BUILD_TESTS)
       device/TestOp128.cpp
       device/RcclEpTests.cpp
       device/LlFifoSysScopeTests.cpp
+      device/DdaIpcGpuBarrierOrderingTests.cpp
+      device/DdaVecElementAddTests.cpp
       device/TestTDM.cpp
       device/TestTdmCopy.cpp
       device/TestAsyncCopy.cpp
