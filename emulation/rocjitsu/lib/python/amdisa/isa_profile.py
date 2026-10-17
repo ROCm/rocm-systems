@@ -1586,11 +1586,6 @@ class _AmdgpuProfileBase(IsaProfile):
         return True
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        """Whether vector-memory writes also contribute to EXPCNT."""
-        return False
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         """Whether GDS operations also contribute to EXPCNT."""
         return False
@@ -1791,10 +1786,6 @@ class CdnaProfile(_AmdgpuProfileBase):
         return False
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         return True
 
@@ -1951,6 +1942,11 @@ class CdnaProfile(_AmdgpuProfileBase):
 
 class Cdna4Profile(CdnaProfile):
     """ISA profile for CDNA4-only encoding capabilities."""
+
+    @property
+    def gds_uses_expcnt(self) -> bool:
+        # CDNA4 ISA, sections 3.1 and 4.4: EXPCNT is unused.
+        return False
 
     @property
     def mfma_scale_vop3px2_specs(self) -> tuple[MfmaScaleVop3px2Spec, ...]:
@@ -2148,10 +2144,6 @@ class Rdna1Profile(_AmdgpuProfileBase):
     _SKIP_DPP_SDWA = True
 
     @property
-    def vmem_writes_use_expcnt(self) -> bool:
-        return True
-
-    @property
     def gds_uses_expcnt(self) -> bool:
         return True
 
@@ -2297,10 +2289,6 @@ class Rdna3Profile(_AmdgpuProfileBase):
 
     @property
     def has_gfx11_image_address_extension(self) -> bool:
-        return True
-
-    @property
-    def vmem_writes_use_expcnt(self) -> bool:
         return True
 
     @property

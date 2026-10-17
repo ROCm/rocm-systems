@@ -484,9 +484,7 @@ FlatStoreByteFlat::FlatStoreByteFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -541,9 +539,7 @@ FlatStoreByteD16HiFlat::FlatStoreByteD16HiFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -598,9 +594,7 @@ FlatStoreShortFlat::FlatStoreShortFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -655,9 +649,7 @@ FlatStoreShortD16HiFlat::FlatStoreShortD16HiFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -711,9 +703,7 @@ FlatStoreDwordFlat::FlatStoreDwordFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -767,9 +757,7 @@ FlatStoreDwordx2Flat::FlatStoreDwordx2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -823,9 +811,7 @@ FlatStoreDwordx3Flat::FlatStoreDwordx3Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -879,9 +865,7 @@ FlatStoreDwordx4Flat::FlatStoreDwordx4Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1269,9 +1253,7 @@ FlatAtomicSwapFlat::FlatAtomicSwapFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1335,9 +1317,7 @@ FlatAtomicCmpswapFlat::FlatAtomicCmpswapFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1401,9 +1381,7 @@ FlatAtomicAddFlat::FlatAtomicAddFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1467,9 +1445,7 @@ FlatAtomicSubFlat::FlatAtomicSubFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1533,9 +1509,7 @@ FlatAtomicSminFlat::FlatAtomicSminFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1599,9 +1573,7 @@ FlatAtomicUminFlat::FlatAtomicUminFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1665,9 +1637,7 @@ FlatAtomicSmaxFlat::FlatAtomicSmaxFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1731,9 +1701,7 @@ FlatAtomicUmaxFlat::FlatAtomicUmaxFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1797,9 +1765,7 @@ FlatAtomicAndFlat::FlatAtomicAndFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1863,9 +1829,7 @@ FlatAtomicOrFlat::FlatAtomicOrFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1929,9 +1893,7 @@ FlatAtomicXorFlat::FlatAtomicXorFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -1995,9 +1957,7 @@ FlatAtomicIncFlat::FlatAtomicIncFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2061,9 +2021,7 @@ FlatAtomicDecFlat::FlatAtomicDecFlat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2127,9 +2085,7 @@ FlatAtomicAddF64Flat::FlatAtomicAddF64Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2193,9 +2149,7 @@ FlatAtomicMinF64Flat::FlatAtomicMinF64Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2259,9 +2213,7 @@ FlatAtomicMaxF64Flat::FlatAtomicMaxF64Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2325,9 +2277,7 @@ FlatAtomicSwapX2Flat::FlatAtomicSwapX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2391,9 +2341,7 @@ FlatAtomicCmpswapX2Flat::FlatAtomicCmpswapX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2457,9 +2405,7 @@ FlatAtomicAddX2Flat::FlatAtomicAddX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2523,9 +2469,7 @@ FlatAtomicSubX2Flat::FlatAtomicSubX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2589,9 +2533,7 @@ FlatAtomicSminX2Flat::FlatAtomicSminX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2655,9 +2597,7 @@ FlatAtomicUminX2Flat::FlatAtomicUminX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2721,9 +2661,7 @@ FlatAtomicSmaxX2Flat::FlatAtomicSmaxX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2787,9 +2725,7 @@ FlatAtomicUmaxX2Flat::FlatAtomicUmaxX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2853,9 +2789,7 @@ FlatAtomicAndX2Flat::FlatAtomicAndX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2919,9 +2853,7 @@ FlatAtomicOrX2Flat::FlatAtomicOrX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -2985,9 +2917,7 @@ FlatAtomicXorX2Flat::FlatAtomicXorX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3051,9 +2981,7 @@ FlatAtomicIncX2Flat::FlatAtomicIncX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3117,9 +3045,7 @@ FlatAtomicDecX2Flat::FlatAtomicDecX2Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3179,9 +3105,7 @@ GlobalAtomicAddF32Flat::GlobalAtomicAddF32Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
@@ -3244,9 +3168,7 @@ GlobalAtomicPkAddF16Flat::GlobalAtomicPkAddF16Flat(const MachineInst *inst)
                                                        : amdgpu::MemoryCompletionClass::VMEM)},
        (inst_.seg == 0 ? amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::LGKMCNT,
                                                          amdgpu::MemoryCompletionClass::UNORDERED}
-                       : amdgpu::MemoryCounterObligation{}),
-       amdgpu::MemoryCounterObligation{amdgpu::WaitCounterType::EXPCNT,
-                                       amdgpu::MemoryCompletionClass::UNORDERED}});
+                       : amdgpu::MemoryCounterObligation{})});
   flags_ |= MEMORY_WAIT_PRODUCER;
 }
 
