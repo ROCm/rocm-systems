@@ -14,7 +14,7 @@
 
 namespace dda::common {
 
-template <typename T, int NRANKS, bool hasAcc, bool kStagingCopyInKernel = false>
+template <typename T, int NRANKS, bool hasAcc, bool kCopyInKernel = false>
 #if defined(USE_ROCM)
 __launch_bounds__(512)
 #endif
@@ -27,24 +27,19 @@ __launch_bounds__(512)
   const auto idxEnd = count;
   const auto idxStride = gridDim.x * blockDim.x * countPerThread;
 
-  if constexpr (kStagingCopyInKernel) {
-    // Small messages: fuse sendbuff -> scratch copy into the kernel to avoid
-    // cudaMemcpyAsync launch overhead on ROCm.
-    const size_t copyCount = count * NRANKS;
-    copyFromSrcToDest<T>(sendbuff, ipcbuffs[selfRank], idxStart, copyCount, idxStride);
+  // kCopyInKernel is the host's only staging decision (ddaReduceScatterIpcStaging).
+  // The per-shard loop is the same for a one-block message and a multi-block one,
+  // so there is no fused whole-buffer copy and no second size cutoff in here.
+  if constexpr (kCopyInKernel) {
+#pragma unroll NRANKS
+    for (int s = 0; s < NRANKS; ++s) {
+      const size_t off = static_cast<size_t>(s) * count;
+      copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
+    }
     barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   } else {
-    if (count * sizeof(T) <= kDdaRsIpcKernelCopyMaxBytes) {
-#pragma unroll NRANKS
-      for (int s = 0; s < NRANKS; ++s) {
-        const size_t off = static_cast<size_t>(s) * count;
-        copyFromSrcToDest<T>(sendbuff + off, ipcbuffs[selfRank] + off, idxStart, idxEnd, idxStride);
-      }
-      barrier.syncOnSameBlockIdx<true /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();	
-    } else {
-      // Large messages: host enqueues cudaMemcpyAsync into ddaScratch before launch.
-      barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
-    }
+    // Host enqueued cudaMemcpyAsync into ddaScratch before launch.
+    barrier.syncOnSameBlockIdx<false /* hasPreviousMemAccess */, true /* hasSubsequentMemAccess */>();
   }
 
   reduceScatter<T, NRANKS, hasAcc>(ipcbuffs, recvbuff, nullptr, selfRank, NRANKS, idxStart, idxEnd, idxStride, 0);

@@ -186,23 +186,20 @@ inline bool ddaUserBuffers16ByteAligned(const void* sendbuff, const void* recvbu
          (reinterpret_cast<uintptr_t>(recvbuff) % 16) == 0;
 }
 
-// Reduce-scatter IPC copies a shard inside the kernel at or below this size.
-// Above it the host pre-copies the whole input into scratch. The cutoff is
-// per shard, matching the kernel, so a multi-rank total cannot stage twice.
+// Reduce-scatter IPC copies each shard inside the kernel at or below this size.
+// Above it the host pre-copies the whole input into scratch. The cutoff is per
+// shard, so a multi-rank total cannot stage twice, and it lives only here: the
+// kernel takes a single copy-in-kernel flag and does not re-derive the size.
 constexpr size_t kDdaRsIpcKernelCopyMaxBytes = 1ULL * 1024 * 1024;
 
 enum class DdaRsIpcStaging {
-  FusedInKernel,    // one block: fuse the sendbuff copy into the kernel
-  PerShardInKernel, // multi-block, shard small enough for the in-kernel copy
-  HostPreCopy,      // multi-block, host cudaMemcpyAsync before launch
+  InKernel,    // kernel copies each shard from sendbuff
+  HostPreCopy, // host cudaMemcpyAsync before launch
 };
 
 inline DdaRsIpcStaging ddaReduceScatterIpcStaging(size_t recvcount, int typeSize) {
-  if (ddaAlltoAllSingleBlockGrid(recvcount, typeSize)) {
-    return DdaRsIpcStaging::FusedInKernel;
-  }
   if (recvcount * static_cast<size_t>(typeSize) <= kDdaRsIpcKernelCopyMaxBytes) {
-    return DdaRsIpcStaging::PerShardInKernel;
+    return DdaRsIpcStaging::InKernel;
   }
   return DdaRsIpcStaging::HostPreCopy;
 }
