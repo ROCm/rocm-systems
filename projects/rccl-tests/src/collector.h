@@ -7,7 +7,7 @@
 /*************************************************************************
  * Network Counter Collector
  *
- * Self-contained library for collecting Thor2 / AINIC NIC counters
+ * Self-contained library for collecting Thor2 / AINIC / MLX5 NIC counters
  * before/after an operation and printing a summary table.  No dependency
  * on NCCL, RCCL, or any GPU runtime -- can be integrated into any
  * application.
@@ -16,7 +16,8 @@
  *   RCCL_TESTS_NET_COUNTER_ENABLE=1   – enable collection
  *   RCCL_TESTS_NIC_COUNTER_LIST=a,b   – comma-separated counter subset
  *                                        (default: all counters for detected NIC)
- *   NCCL_IB_HCA=ib0,ib1,...           – IB device list (primary)
+ *   NCCL_IB_HCA=ib0,ib1,...           – IB device list (primary), RCCL-like:
+ *                                        ^ excludes, = exact, else prefix
  *   RCCL_TESTS_NET_COUNTER_NIC_PREFIX – NIC prefix filter for auto-discovery
  *
  * Counter sources (looked up automatically per NIC type):
@@ -24,7 +25,10 @@
  *   COUNTER_SRC_IB_HW    – /sys/class/infiniband/<dev>/ports/<port>/hw_counters/
  *                           (port parsed from NCCL_IB_HCA suffix, default 1;
  *                            falls back to device-level hw_counters/ if needed)
- *   COUNTER_SRC_DEBUGFS  – /sys/kernel/debug/bnxt_re/<dev>/info
+ *   COUNTER_SRC_DEBUGFS  – /sys/kernel/debug/bnxt_re/<dev>/info (needs root);
+ *                           also the fallback for counters flagged 'debugfs'
+ *
+ * A counter not read in both snapshots prints N/A, never 0.
  *************************************************************************/
 #ifndef __COLLECTOR_H__
 #define __COLLECTOR_H__
@@ -32,6 +36,7 @@
 #include <cstdint>
 #include <cstring>
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -44,13 +49,15 @@ enum CounterSource {
 };
 
 struct CounterDescriptor {
-  std::string name;           // canonical/display key (also primary sysfs lookup name)
+  std::string name;           // column name; also the lookup key unless 'key' is set
   CounterSource source;
-  bool is_prefix;             // true -> prefix match (expands to name0..name7)
-  std::string fallback_name;  // alternative sysfs key to try when 'name' is missing
+  bool is_prefix;             // true -> sum of keys matching the key ('*' = priority number)
+  std::string fallback_name;  // alternative key to try when the lookup key is missing
+  std::string key = {};       // lookup key or pattern if it differs from name
+  bool debugfs = false;       // fall back to bnxt_re debugfs if not read
 };
 
-typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC } NicType;
+typedef enum { NIC_UNKNOWN, NIC_BNXT_RE, NIC_IONIC, NIC_MLX5 } NicType;
 
 struct NetworkCounterSnapshot {
   std::map<std::string, uint64_t> counters;
@@ -58,6 +65,7 @@ struct NetworkCounterSnapshot {
   char    ib_device[256];
   int64_t timestamp_us;
   NicType nic_type;
+  std::set<std::string> debugfs_counters;  // counters read from debugfs
 };
 
 struct NetworkCounterContext {
@@ -76,6 +84,14 @@ struct NetworkCounterContext {
 // Detect NIC type from IB device driver symlink
 NicType NetCounterDetectNicType(const std::string& ib_device);
 
+// Most common known NIC type (ties: non-MLX5, then first seen); mixed=true if
+// known types differ
+NicType NetCounterDominantNicType(const std::vector<NicType>& types, bool& mixed);
+
+// Devices to collect: all for an explicit NCCL_IB_HCA list, else those of the
+// dominant or an unknown type
+std::vector<bool> NetCounterKeepDevices(const std::vector<NicType>& types, NicType dominant, bool explicit_list);
+
 // Scan snapshots and return the dominant NIC type; sets mixed=true if types differ
 NicType DetectNicTypeFromSnapshots(
     const std::vector<NetworkCounterSnapshot>& snaps, bool& mixed);
@@ -89,8 +105,18 @@ bool NetCounterIsEnabled();
 // Return counter list for the given NIC type
 std::vector<CounterDescriptor> NetCounterGetCounterList(NicType nic_type);
 
-// Parse NCCL_IB_HCA into IB device names (empty if unset)
+// IB devices selected by NCCL_IB_HCA (empty if unset or nothing matches)
 std::vector<std::string> NetCounterParseIbHcaList();
+
+// Select from devs by an NCCL_IB_HCA value
+std::vector<std::string> NetCounterFilterIbHca(const char* env, std::vector<std::string> devs);
+
+// Parse `ethtool -S` output / bnxt_re debugfs info text into counters
+void NetCounterParseEthtool(const std::string& text,
+                            const std::vector<CounterDescriptor>& selected,
+                            std::map<std::string, uint64_t>& out);
+void NetCounterParseDebugfs(const std::string& text, const std::set<std::string>& wanted,
+                            std::map<std::string, uint64_t>& out);
 
 // Device lookup helpers
 std::string NetCounterFindIbDeviceForNic(const std::string& nic);
@@ -110,11 +136,12 @@ NetworkCounterSnapshot NetCounterCollectSnapshot(
     const std::string& nic,
     const std::vector<CounterDescriptor>& selected);
 
-// Compute delta for a single counter between two snapshots
-uint64_t NetCounterComputeDelta(
+// Delta for one counter; false if it was not read in both snapshots.
+bool NetCounterComputeDelta(
     const NetworkCounterSnapshot& before,
     const NetworkCounterSnapshot& after,
-    const CounterDescriptor& desc);
+    const CounterDescriptor& desc,
+    uint64_t* delta);
 
 // Print one table per node to stdout
 void NetCounterPrintTable(

@@ -38,3 +38,14 @@ set_target_properties(rccl-tests-GinSdmaDevtimeHostUnit PROPERTIES
 add_test(NAME rccl-tests-GinSdmaDevtimeHostUnit
          COMMAND rccl-tests-GinSdmaDevtimeHostUnit)
 set_tests_properties(rccl-tests-GinSdmaDevtimeHostUnit PROPERTIES LABELS "unit")
+
+add_executable(rccl-tests-CollectorHostUnit collector_host_test.cpp)
+target_include_directories(rccl-tests-CollectorHostUnit PRIVATE
+  ${CMAKE_CURRENT_SOURCE_DIR}/../src)
+target_link_libraries(rccl-tests-CollectorHostUnit PRIVATE
+  ${_RCCL_TESTS_GTEST_LIB} ${_RCCL_TESTS_GTEST_MAIN})
+set_target_properties(rccl-tests-CollectorHostUnit PROPERTIES
+  RUNTIME_OUTPUT_DIRECTORY "${CMAKE_BINARY_DIR}/test")
+add_test(NAME rccl-tests-CollectorHostUnit
+         COMMAND rccl-tests-CollectorHostUnit)
+set_tests_properties(rccl-tests-CollectorHostUnit PROPERTIES LABELS "unit")
