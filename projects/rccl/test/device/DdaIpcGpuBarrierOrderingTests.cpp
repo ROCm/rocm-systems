@@ -34,7 +34,8 @@ constexpr int kBlocks = 64;
 constexpr int kMpWords = 16;
 constexpr int kMpIters = 100000;
 constexpr int kFlatIters = 20000;
-constexpr int kFlatSlice = 256;
+constexpr int kFlatThreads = 512;  // the DDA kernels' __launch_bounds__
+constexpr int kFlatSlice = kFlatThreads;  // one word per thread, so no lane idles
 constexpr int kSkewSleeps = 4;  // ~16 us of s_sleep 127, well above an XGMI flag round trip
 
 // No host constructor works without a bootstrap, so build the objects bitwise; the asserts catch size changes only.
@@ -129,9 +130,9 @@ __global__ void flatSync(IpcGpuBarrier bar, uint32_t* const* bufs, int self, int
       mine[i] = payloadValue(self, it, b, i);
     }
     if constexpr (kAcquireOnly) {
-      // Stands in for the kernel boundary that publishes the slice before the production entry barrier.
+      // Release-only stand-in for the prior kernel end; with no acquire here, only the barrier orders the reads.
       __syncthreads();
-      __threadfence_system();
+      __builtin_amdgcn_fence(__ATOMIC_RELEASE, "");
       bar.syncOnSameBlockIdx<false, true>();
     } else {
       bar.syncOnSameBlockIdx<true, true>();
@@ -252,11 +253,11 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
   for (int r = 0; r < kRanks; ++r) {
     HIP_CHECK(hipSetDevice(r));
     if (shape == Shape::kFlat) {
-      hipLaunchKernelGGL(flatSync<false>, dim3(kBlocks), dim3(512), 0, streams[r], makeBarrier(r, dataMb), dBufs[r], r,
-                         iters, slice, dBad[r]);
+      hipLaunchKernelGGL(flatSync<false>, dim3(kBlocks), dim3(kFlatThreads), 0, streams[r], makeBarrier(r, dataMb),
+                         dBufs[r], r, iters, slice, dBad[r]);
     } else if (shape == Shape::kFlatAcquireOnly) {
-      hipLaunchKernelGGL(flatSync<true>, dim3(kBlocks), dim3(512), 0, streams[r], makeBarrier(r, dataMb), dBufs[r], r,
-                         iters, slice, dBad[r]);
+      hipLaunchKernelGGL(flatSync<true>, dim3(kBlocks), dim3(kFlatThreads), 0, streams[r], makeBarrier(r, dataMb),
+                         dBufs[r], r, iters, slice, dBad[r]);
     } else if (shape == Shape::kPull) {
       hipLaunchKernelGGL(mailboxMessagePassing<false>, dim3(kBlocks), dim3(64), 0, streams[r], dData[r], dAck[r],
                          dBufs[r], r, iters, dBad[r]);
