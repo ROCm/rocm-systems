@@ -9,39 +9,37 @@ to apply ABS/NEG to the floating source and OMOD/CLAMP to the result; the
 exponent source takes no modifiers.
 """
 
-# Floating format and exponent operand width, by data type: V_LDEXP_F16 takes
-# an I16 exponent, the F32 and F64 forms an I32.
-FORMATS: dict[str, tuple[str, int]] = {
-    'f16': ('F16', 16),
-    'f32': ('F32', 32),
-    'f64': ('F64', 32),
-}
+from amdisa.codegen.execute import input_policy
+
+# Exponent operand width other than the format's: V_LDEXP_F64 takes an I32.
+_EXPONENT_WIDTHS: dict[str, int] = {'f64': 32}
 
 # Name of the policy the scalar body declares before the lane loop.
 POLICY = 'ldexp_policy'
 
 
-def _format(dtype: str) -> str:
-    return f'amdgpu::fp_format::{FORMATS[dtype][0]}'
+def policy_expr(dtype: str, omod: str = 'false') -> str:
+    """Return the MODE policy; F16 saturates under FP16_OVFL.
 
-
-def policy_expr(dtype: str) -> str:
-    """Return the MODE rounding and denormal policy; F16 saturates under FP16_OVFL."""
-    mode = 'f32' if dtype == 'f32' else 'f16_f64'
+    ``omod`` is a C++ condition that holds when effective OMOD is enabled.
+    """
+    mode = input_policy.mode_field(dtype)
     saturate = 'wf.fp16_ovfl()' if dtype == 'f16' else 'false'
     return (
         f'amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_{mode}(), '
-        f'wf.fp_round_mode_{mode}(), {saturate})'
+        f'wf.fp_round_mode_{mode}(), {saturate}, {omod})'
     )
 
 
-def policy_decl(dtype: str, indent: str = '  ') -> str:
-    return f'{indent}const auto {POLICY} = {policy_expr(dtype)};'
+def policy_decl(dtype: str, omod: str = 'false', indent: str = '  ') -> str:
+    return f'{indent}const auto {POLICY} = {policy_expr(dtype, omod)};'
 
 
 def _template_args(dtype: str) -> str:
     """Format and, for F64, the exponent width that differs from the format's."""
-    return f'{_format(dtype)}, 32' if dtype == 'f64' else _format(dtype)
+    fmt = input_policy.fp_format(dtype)
+    width = _EXPONENT_WIDTHS.get(dtype)
+    return f'{fmt}, {width}' if width else fmt
 
 
 def operation_expr(dtype: str, policy: str = POLICY) -> str:
@@ -74,11 +72,11 @@ def ldexp_expr(
         value,
         exponent,
     ]
-    return f'amdgpu::floating_operation::apply<{_format(dtype)}>({", ".join(args)})'
+    return f'amdgpu::floating_operation::apply<{input_policy.fp_format(dtype)}>({", ".join(args)})'
 
 
 def simd_functor(dtype: str) -> str:
-    """Return the SIMD functor on raw lanes."""
+    """Return the VOP2 SIMD functor on raw lanes; it runs only without OMOD."""
     return operation_expr(dtype, policy_expr(dtype))
 
 
@@ -99,4 +97,8 @@ def simd_probe(template_name: str, true16_vop3: bool = False) -> str | None:
         macro = 'VOP3_LDEXP_TRUE16_RAW_FP16' if true16_vop3 else 'VOP3_LDEXP_RAW_FP16'
     else:
         macro = 'VOP3_LDEXP_RAW_FP64' if dtype == 'f64' else 'VOP3_LDEXP_RAW_FP'
-    return f'  ROCJITSU_TRY_SIMD_{macro}({simd_functor(dtype)});'
+    omod = (
+        f'amdgpu::output_modifier_policy<{input_policy.fp_format(dtype)}>'
+        '(wf, inst.inst_.omod, inst.inst_.clamp).omod != 0'
+    )
+    return f'  ROCJITSU_TRY_SIMD_{macro}({operation_expr(dtype, policy_expr(dtype, omod))});'

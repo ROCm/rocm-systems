@@ -19,6 +19,9 @@
 /// | Positive, below 1.0 | The source                               |
 /// | Otherwise           | x - floor(x), rounded; at most 1.0 - ulp |
 ///
+/// The table gives this operation's result. OMOD and CLAMP follow it, so CLAMP
+/// treats the infinity result like any other NaN.
+///
 /// Only a negative source above -0.5 needs rounding: its fractional part
 /// 1 - |x| has fewer fraction bits than |x|. Every other result is exact.
 /// gfx1201 captures match these rules bit for bit in F16, F32 and F64, VOP1

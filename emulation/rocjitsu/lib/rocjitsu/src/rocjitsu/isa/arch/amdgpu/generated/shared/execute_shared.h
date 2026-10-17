@@ -11982,17 +11982,13 @@ inline void execute_v_fract_f16_vop1([[maybe_unused]] Inst &inst, [[maybe_unused
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
   const auto fract_policy =
       amdgpu::fract::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64());
-  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(
-      wf, amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(inst, wf), 0u);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         inst, wf, inst.vdst, lane,
-        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
-            amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,
-            amdgpu::fract::Operation<amdgpu::fp_format::F16>{fract_policy},
-            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane)));
+        amdgpu::fract::evaluate<amdgpu::fp_format::F16>(
+            amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane), fract_policy));
   }
 }
 
@@ -12006,7 +12002,7 @@ inline void execute_v_fract_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         inst, wf, inst.vdst, lane,
         amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
             amdgpu::floating_operation::SourceModifiers{inst.inst_.abs & 1u, inst.inst_.neg & 1u},
@@ -12442,23 +12438,21 @@ inline void execute_v_frexp_mant_f64_vop3([[maybe_unused]] Inst &inst,
 template <typename Inst>
 inline void execute_v_ldexp_f16_vop2([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP2_BINARY(
-      uint32_t, amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make(
-                    wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl())});
+      uint32_t,
+      amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make(
+          wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl(), false)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(),
-                                                        wf.fp_round_mode_f16_f64(), wf.fp16_ovfl());
-  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(
-      wf, amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(inst, wf), 0u);
+  const auto ldexp_policy = amdgpu::ldexp::Policy::make(
+      wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl(),
+      amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(inst, wf) != 0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         inst, wf, inst.vdst, lane,
-        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
-            amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,
-            amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{ldexp_policy},
+        amdgpu::ldexp::evaluate<amdgpu::fp_format::F16>(
             amdgpu::RegisterAccess(wf).read_lane(inst.src0, lane),
-            amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane)));
+            amdgpu::RegisterAccess(wf).read_lane(inst.vsrc1, lane), ldexp_policy));
   }
 }
 
@@ -12466,16 +12460,20 @@ template <typename Inst>
 inline void execute_v_ldexp_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP16(
       amdgpu::ldexp::Operation<amdgpu::fp_format::F16>{amdgpu::ldexp::Policy::make(
-          wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl())});
+          wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl(),
+          amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst.inst_.omod,
+                                                                 inst.inst_.clamp)
+                  .omod != 0)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const auto ldexp_policy = amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(),
-                                                        wf.fp_round_mode_f16_f64(), wf.fp16_ovfl());
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(wf, inst.inst_.omod, inst.inst_.clamp);
+  const auto ldexp_policy =
+      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(),
+                                  wf.fp16_ovfl(), output_policy.omod != 0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         inst, wf, inst.vdst, lane,
         amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
             amdgpu::floating_operation::SourceModifiers{inst.inst_.abs & 1u, inst.inst_.neg & 1u},
@@ -12488,12 +12486,15 @@ inline void execute_v_ldexp_f16_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_ldexp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP(amdgpu::ldexp::Operation<amdgpu::fp_format::F32>{
-      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f32(), wf.fp_round_mode_f32(), false)});
+      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f32(), wf.fp_round_mode_f32(), false,
+                                  amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(
+                                      wf, inst.inst_.omod, inst.inst_.clamp)
+                                          .omod != 0)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const auto ldexp_policy =
-      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f32(), wf.fp_round_mode_f32(), false);
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F32>(wf, inst.inst_.omod, inst.inst_.clamp);
+  const auto ldexp_policy = amdgpu::ldexp::Policy::make(
+      wf.fp_denorm_mode_f32(), wf.fp_round_mode_f32(), false, output_policy.omod != 0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
@@ -12510,12 +12511,15 @@ inline void execute_v_ldexp_f32_vop3([[maybe_unused]] Inst &inst, [[maybe_unused
 template <typename Inst>
 inline void execute_v_ldexp_f64_vop3([[maybe_unused]] Inst &inst, [[maybe_unused]] Wavefront &wf) {
   ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64(amdgpu::ldexp::Operation<amdgpu::fp_format::F64, 32>{
-      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), false)});
+      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), false,
+                                  amdgpu::output_modifier_policy<amdgpu::fp_format::F64>(
+                                      wf, inst.inst_.omod, inst.inst_.clamp)
+                                          .omod != 0)});
   uint64_t exec = dpp::execution_lane_mask(inst, wf);
-  const auto ldexp_policy =
-      amdgpu::ldexp::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), false);
   const auto output_policy =
       amdgpu::output_modifier_policy<amdgpu::fp_format::F64>(wf, inst.inst_.omod, inst.inst_.clamp);
+  const auto ldexp_policy = amdgpu::ldexp::Policy::make(
+      wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), false, output_policy.omod != 0);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;

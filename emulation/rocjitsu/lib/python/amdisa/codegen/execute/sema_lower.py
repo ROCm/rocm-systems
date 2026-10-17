@@ -1161,7 +1161,6 @@ def _lower_dst_write(
             selection_node,
             ctx,
             output_fields if selection_node is not rhs_node else None,
-            destination=True,
         )
         needs_bitcast = 0
     elif _is_vector_ldexp(selection_node, ctx):
@@ -2378,7 +2377,8 @@ def _lower_float_minmax(node: SemaNode, ctx: LoweringContext) -> str:
     return f'std::bit_cast<{"double" if dtype == "f64" else "float"}>({selected})'
 
 
-# An SDWA destination's OMOD for an F16 result; zero for other encodings.
+# An SDWA destination's effective OMOD for an F16 result; zero for other
+# encodings. The SDWA store applies it (sdwa::OutputPolicy::ROUNDED).
 _SDWA_F16_OMOD = (
     'amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf)'
 )
@@ -2430,13 +2430,11 @@ def _raw_operation_modifiers(
     has_abs: bool,
     has_neg: bool,
     output_fields: tuple[str, str] | None,
-    destination: bool,
 ) -> tuple[tuple[str, str] | None, str | None]:
     """Return the source (ABS, NEG) fields of src0 and the output policy name.
 
-    VOP3 forms pass their (OMOD, CLAMP) fields. Other F16 destination writes
-    take SDWA OMOD: SDWA writes clamp F16 bits but expect them scaled. F32 SDWA
-    destination writes scale the bits themselves.
+    VOP3 forms pass their (OMOD, CLAMP) fields. Other destination writes leave
+    OMOD and CLAMP to the SDWA store, which scales the rounded result.
     """
     modifiers = None
     if has_abs or has_neg:
@@ -2444,8 +2442,6 @@ def _raw_operation_modifiers(
             'inst_.abs & 1u' if has_abs else '0u',
             'inst_.neg & 1u' if has_neg else '0u',
         )
-    if output_fields is None and destination and dtype == 'f16':
-        output_fields = (_SDWA_F16_OMOD, '0u')
     if output_fields is None:
         return modifiers, None
     declaration = vop3_modifiers.output_policy_decl(dtype, output_fields)
@@ -2458,7 +2454,6 @@ def _fract_result(
     node: SemaNode,
     ctx: LoweringContext,
     output_fields: tuple[str, str] | None = None,
-    destination: bool = False,
 ) -> str:
     """Return the V_FRACT result bits from a raw source read."""
     dtype = f'f{node.ty.size}'
@@ -2467,7 +2462,7 @@ def _fract_result(
     if declaration not in ctx.body_preamble:
         ctx.body_preamble.append(declaration)
     modifiers, output_policy = _raw_operation_modifiers(
-        ctx, dtype, has_abs, has_neg, output_fields, destination
+        ctx, dtype, has_abs, has_neg, output_fields
     )
     return float_fract.fract_expr(dtype, source, modifiers, output_policy)
 
@@ -2480,17 +2475,25 @@ def _ldexp_result(
 ) -> str:
     """Return the V_LDEXP result bits from raw value and exponent reads.
 
-    ABS/NEG apply to the value only; the exponent takes no modifiers.
+    ABS/NEG apply to the value only; the exponent takes no modifiers. An F16
+    destination write may be SDWA, whose store applies OMOD after this result.
     """
     dtype = f'f{node.ty.size}'
     value, has_abs, has_neg = _register_read(node.children[0], ctx)
     exponent, _, _ = _register_read(node.children[1], ctx)
-    declaration = float_ldexp.policy_decl(dtype)
+    modifiers, output_policy = _raw_operation_modifiers(
+        ctx, dtype, has_abs, has_neg, output_fields
+    )
+    # A tiny result flushes under effective OMOD; see shared/ldexp.h.
+    if output_policy:
+        omod = f'{output_policy}.omod != 0'
+    elif destination and dtype == 'f16':
+        omod = f'{_SDWA_F16_OMOD} != 0'
+    else:
+        omod = 'false'
+    declaration = float_ldexp.policy_decl(dtype, omod)
     if declaration not in ctx.body_preamble:
         ctx.body_preamble.append(declaration)
-    modifiers, output_policy = _raw_operation_modifiers(
-        ctx, dtype, has_abs, has_neg, output_fields, destination
-    )
     return float_ldexp.ldexp_expr(dtype, value, exponent, modifiers, output_policy)
 
 
