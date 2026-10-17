@@ -37,8 +37,10 @@
 #include <cstdio>
 #include <cstdlib>
 #include <cstring>
+#include <exception>
 #include <filesystem>
 #include <iomanip>
+#include <iostream>
 #include <iterator>
 #include <map>
 #include <regex>
@@ -287,12 +289,14 @@ auto _activate =
 
 //======================================================================================//
 //
-// entry point
+// instrument implementation
 //
 //======================================================================================//
 //
+namespace
+{
 int
-main(int argc, char** argv)
+run(int argc, char** argv)
 {
     argv0 = argv[0];
 
@@ -2886,6 +2890,26 @@ main(int argc, char** argv)
         log_ofs->close();
     }
     return code;
+}
+}  // namespace
+
+//======================================================================================//
+//
+// entry point
+//
+//======================================================================================//
+//
+int
+main(int argc, char** argv)
+{
+    try
+    {
+        return run(argc, argv);
+    } catch(const std::exception& ex)
+    {
+        std::cerr << "[rocprof-sys] error: " << ex.what() << '\n';
+        return EXIT_FAILURE;
+    }
 }
 
 //======================================================================================//
