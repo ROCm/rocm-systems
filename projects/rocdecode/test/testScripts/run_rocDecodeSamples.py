@@ -19,13 +19,11 @@
 # THE SOFTWARE.
 
 from datetime import datetime
-from subprocess import Popen, PIPE, STDOUT
+from subprocess import Popen, PIPE, STDOUT, run
 import argparse
 import os
-import shutil
 import sys
 import platform
-import glob
 import pandas as pd
 from pathlib import Path
 
@@ -34,10 +32,12 @@ __version__ = "1.0"
 __status__ = "Shipping"
 
 
-def shell(cmd):
-    p = Popen(cmd, shell=True, stdout=PIPE, stderr=PIPE)
-    output = p.communicate()[0][0:-1]
-    return output
+def run_command(command):
+    try:
+        result = run(command, stdout=PIPE, stderr=PIPE, text=True, check=False)
+    except OSError as error:
+        return str(error)
+    return result.stdout.rstrip('\n')
 
 
 def run_and_log(cmd, logFilePath):
@@ -84,11 +84,9 @@ def print_bitrate(current_file):
     else:
         frame_rate = "n/a"
         bit_rate = "n/a"
-    orig_stdout = sys.stdout
-    sys.stdout = open(resultsPath+'/rocDecode_output.log', 'a')
-    print("Framerate: ", frame_rate)
-    print("Bitrate: ", bit_rate)
-    sys.stdout = orig_stdout
+    with open(outputLogPath, 'a') as outputLog:
+        print("Framerate: ", frame_rate, file=outputLog)
+        print("Bitrate: ", bit_rate, file=outputLog)
 
 # Import arguments
 parser = argparse.ArgumentParser()
@@ -180,13 +178,13 @@ else:
     print("\nERROR: The input directory path is either for a file or directory does not exist!")
     exit()
 
-# Get cwd
-cwd = os.getcwd()
-if os.path.exists(resultsPath+'/rocDecode_output.log'):
-    os.remove(resultsPath+'/rocDecode_output.log')
+outputLogPath = os.path.join(resultsPath, 'rocDecode_output.log')
+resultsCsvPath = os.path.join(resultsPath, 'rocDecode_test_results.csv')
+if os.path.exists(outputLogPath):
+    os.remove(outputLogPath)
 
-if os.path.exists(resultsPath+'/rocDecode_test_results.csv'):
-    os.remove(resultsPath+'/rocDecode_test_results.csv')
+if os.path.exists(resultsCsvPath):
+    os.remove(resultsCsvPath)
 
 if sampleMode == 0:
     for current_file in iter_files(filesDirPath):
@@ -196,15 +194,15 @@ if sampleMode == 0:
         if bsReaderOption:
             cmd.append(bsReaderOption)
         logFilePath = resultsPath+'/rocDecode_output.log'
-        run_and_log(cmd, logFilePath)
+        returnCode = run_and_log(cmd, logFilePath)
+        if returnCode != 0:
+            sys.exit(returnCode)
         print("\n\n")
 
     if checkDecStatus == 0:
-        orig_stdout = sys.stdout
-        sys.stdout = open(resultsPath+'/rocDecode_test_results.csv', 'a')
         echo_1 = 'File Name, Codec, Video Size, Bit Depth, Frame rate, Bit rate (Mb/s), Total Frames, Average decoding time per frame (ms), Avg FPS'
-        print(echo_1)
-        sys.stdout = orig_stdout
+        with open(resultsCsvPath, 'a') as resultsFile:
+            print(echo_1, file=resultsFile)
 
         with open(resultsPath+'/rocDecode_output.log', 'r') as lf:
             frameRate = bitRate = filename = codec = videoSize = bitDepth = totalFrames = timePerFrame = 'n/a'
@@ -236,15 +234,15 @@ elif sampleMode == 1:
 
         cmd = [run_rocDecode_app, '-i', str(current_file), '-t', str(numThreads), '-f', str(maxNumFrames)]
         logFilePath = resultsPath+'/rocDecode_output.log'
-        run_and_log(cmd, logFilePath)
+        returnCode = run_and_log(cmd, logFilePath)
+        if returnCode != 0:
+            sys.exit(returnCode)
         print("\n\n")
 
     if checkDecStatus == 0:
-        orig_stdout = sys.stdout
-        sys.stdout = open(resultsPath+'/rocDecode_test_results.csv', 'a')
         echo_1 = 'File Name, Num Threads, Codec, Video Size, Bit Depth, Frame rate, Bit rate (Mb/s), Total Frames, Average decoding time per frame (ms), Avg FPS'
-        print(echo_1)
-        sys.stdout = orig_stdout
+        with open(resultsCsvPath, 'a') as resultsFile:
+            print(echo_1, file=resultsFile)
 
         with open(resultsPath+'/rocDecode_output.log', 'r') as lf:
             frameRate = bitRate = filename = codec = videoSize = bitDepth = totalFrames = timePerFrame = numThr = 'n/a'
@@ -277,35 +275,35 @@ elif sampleMode == 1:
 if checkDecStatus == 0:
     platform_name = platform.platform()
     if platform.system() != 'Windows':
-        platform_name_fq = shell('hostname --all-fqdns')
-        platform_ip = shell('hostname -I')[0:-1]  # extra trailing space
+        platform_name_fq = run_command(['hostname', '--all-fqdns'])
+        platform_ip = run_command(['hostname', '-I']).rstrip()
     else:
-        platform_name_fq = shell('hostname')
-        platform_ip = b'N/A'
+        platform_name_fq = run_command(['hostname'])
+        platform_ip = 'N/A'
 
     file_dtstr = datetime.now().strftime("%Y%m%d")
     reportFilename = 'rocDecode_report_%s_%s.md' % (platform_name, file_dtstr)
     report_dtstr = datetime.now().strftime("%Y-%m-%d %H:%M:%S %Z")
     if platform.system() != 'Windows':
-        sys_info = shell('inxi -c0 -S')
-        cpu_info = shell('inxi -c0 -C')
-        gpu_info = shell('inxi -c0 -G')
-        memory_info = shell('inxi -c 0 -m')
-        board_info = shell('inxi -c0 -M')
-        lib_tree = shell('ldd '+run_rocDecode_app)
+        sys_info = run_command(['inxi', '-c0', '-S'])
+        cpu_info = run_command(['inxi', '-c0', '-C'])
+        gpu_info = run_command(['inxi', '-c0', '-G'])
+        memory_info = run_command(['inxi', '-c', '0', '-m'])
+        board_info = run_command(['inxi', '-c0', '-M'])
+        lib_tree = run_command(['ldd', run_rocDecode_app])
     else:
         # wmic is removed from Windows 11 24H2 onwards; use CIM cmdlets instead
-        ps = 'powershell -NoProfile -Command '
-        sys_info = shell('systeminfo')
-        cpu_info = shell(ps + '"Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name"')
-        gpu_info = shell(ps + '"Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name"')
-        memory_info = shell(ps + '"(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory"')
-        board_info = shell(ps + '"Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer,Product | Format-List"')
-        lib_tree = b'N/A (use dumpbin /dependents on Windows)'
+        powershell = ['powershell', '-NoProfile', '-Command']
+        sys_info = run_command(['systeminfo'])
+        cpu_info = run_command(powershell + ['Get-CimInstance Win32_Processor | Select-Object -ExpandProperty Name'])
+        gpu_info = run_command(powershell + ['Get-CimInstance Win32_VideoController | Select-Object -ExpandProperty Name'])
+        memory_info = run_command(powershell + ['(Get-CimInstance Win32_ComputerSystem).TotalPhysicalMemory'])
+        board_info = run_command(powershell + ['Get-CimInstance Win32_BaseBoard | Select-Object Manufacturer,Product | Format-List'])
+        lib_tree = 'N/A (use dumpbin /dependents on Windows)'
     lib_tree = strip_libtree_addresses(lib_tree)
 
     # Load the data
-    df = pd.read_csv(resultsPath+'/rocDecode_test_results.csv')
+    df = pd.read_csv(resultsCsvPath)
     # Generate the markdown table
     print(df.to_markdown(index=False))
 
@@ -354,7 +352,7 @@ else:
     decodeEndString = 'info: Total pictures decoded:'
     numFiles = 0
     numDecodedStreams = 0
-    with open(resultsPath + '/rocDecode_output.log', 'r') as logFile:
+    with open(outputLogPath, 'r') as logFile:
         line = logFile.readline()
         while line:
             if line.find(fileString) != -1:
