@@ -3170,7 +3170,7 @@
         {
           "name": "DDA_IpcReduceScatterIndexData_8Ranks",
           "description": "DDA IPC ReduceScatter with rank- and index-dependent fp32/bf16 data: every rank must receive its own reduced slice",
-          "test_filter": "DdaIpcMPI_IndexData.ReduceScatter"
+          "test_filter": "DdaIpcMPI_IndexData.ReduceScatter*"
         },
         {
           "name": "HostApi_DenseAllToAllPutSignal_8Ranks",
