@@ -125,7 +125,8 @@ protected:
   void runCase(ncclFunc_t func, const IndexCase& c) {
     for (bool inPlace : {false, true}) {
       runOnce(func, c, inPlace);
-      if (HasFatalFailure() || IsSkipped()) {
+      // Any failure, not just fatal: runOnce fails or skips every rank together, so all ranks stop on the same case.
+      if (HasFailure() || IsSkipped()) {
         return;
       }
     }
@@ -142,13 +143,14 @@ protected:
     DeviceBufferAutoGuard sendGuard(sendBuf);
     void* recvBuf = static_cast<char*>(sendBuf) + base * elem;
     void* separateRecvBuf = nullptr;
+    DeviceBufferAutoGuard recvGuard;
     if (!inPlace) {
       ASSERT_MPI_EQ(hipSuccess, hipMalloc(&separateRecvBuf, c.count * elem));
+      recvGuard.set(separateRecvBuf);
       // 0xFF is NaN in both types, so an element the kernel never writes cannot match.
       ASSERT_MPI_EQ(hipSuccess, hipMemset(separateRecvBuf, 0xFF, c.count * elem));
       recvBuf = separateRecvBuf;
     }
-    DeviceBufferAutoGuard recvGuard(separateRecvBuf);
 
     const bool fp32 = c.dtype == ncclFloat32;
     ASSERT_MPI_EQ(hipSuccess, fp32 ? fillInput<float>(sendBuf, sendCount, c.dtype, rank_) :
@@ -194,7 +196,7 @@ protected:
       const size_t bytes = c.count * elemBytes(c.dtype);
       ASSERT_EQ(tree, bytes > kFlatTreeThresholdBytes) << "count " << c.count << " misses the intended kernel";
       runCase(ncclFuncAllReduce, c);
-      if (HasFatalFailure() || IsSkipped()) {
+      if (HasFailure() || IsSkipped()) {
         return;
       }
     }
@@ -203,7 +205,7 @@ protected:
   void runReduceScatter(const std::vector<IndexCase>& cases) {
     for (const IndexCase& c : cases) {
       runCase(ncclFuncReduceScatter, c);
-      if (HasFatalFailure() || IsSkipped()) {
+      if (HasFailure() || IsSkipped()) {
         return;
       }
     }
