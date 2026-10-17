@@ -32,9 +32,13 @@ struct LaunchOverrides {
   std::vector<std::string> plugins = {};
   std::optional<uint32_t> cpu_thread_budget = std::nullopt;
   std::optional<WaitChecking> wait_checking = std::nullopt;
+  std::optional<uint32_t> num_threads = std::nullopt;
+  std::optional<uint32_t> cpu_dispatch_threads = std::nullopt;
+  std::optional<int32_t> async_helper_threads = std::nullopt;
 
   bool empty() const {
-    return !exec_mode && !gpus_per_node && plugins.empty() && !cpu_thread_budget && !wait_checking;
+    return !exec_mode && !gpus_per_node && plugins.empty() && !cpu_thread_budget &&
+           !wait_checking && !num_threads && !cpu_dispatch_threads && !async_helper_threads;
   }
 };
 
