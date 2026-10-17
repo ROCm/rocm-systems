@@ -5,6 +5,7 @@
  ************************************************************************/
 
 #include "common/DdaFabricTestHelpers.hpp"
+#include "common/DdaFp8TestHelpers.hpp"
 
 #include "algorithms/dda/device/CollCommon_ll128.h"
 #include "param.h"
@@ -1584,6 +1585,115 @@ TEST_F(DdaFabricEligibilityTest, ReduceScatterLL_PastCapRejected)
     const size_t recvcount    = perRankBytes / sizeof(float);
     EXPECT_FALSE(ncclReduceScatterDdaFabricLLEligible(
         mockComm_.get(), sendbuff_, recvbuff_, recvcount, ncclFloat32, ncclSum));
+}
+
+// ---------------------------------------------------------------------------
+// fp8
+//
+// Both fp8 formats are admitted wherever the float types are: summed by the
+// reducing collectives and moved as bytes by AllGather and AlltoAll. One line
+// meets every one-shot tier's shape rules; the two-shot tiers need a line per
+// rank.
+//
+// The SIMPLE dispatchers are driven with the fabric resources absent. The typed
+// launcher then returns ncclInvalidUsage before launching anything, which a
+// datatype the dispatcher does not route (ncclInvalidArgument) cannot reach.
+// The LL and LL128 launchers have no such guard, so fp8 dispatch on those tiers
+// is covered by DdaFp8MPITests.cpp.
+// ---------------------------------------------------------------------------
+
+TEST(DdaDatatypeSupportTest, AdmitsFloatTypesAndBothFp8Formats)
+{
+    for (int t = 0; t < ncclNumTypes; ++t)
+    {
+        const auto datatype = static_cast<ncclDataType_t>(t);
+        const bool expected = datatype == ncclFloat32 || datatype == ncclFloat16 ||
+                              datatype == ncclBfloat16 || datatype == ncclFloat8e4m3 ||
+                              datatype == ncclFloat8e5m2;
+        EXPECT_EQ(rcclDdaDatatypeSupported(datatype), expected) << "datatype " << t;
+    }
+}
+
+TEST_F(DdaFabricEligibilityTest, GatesAdmitFp8)
+{
+    const size_t line  = kDdaFp8LineCount;
+    const size_t shard = kDdaFp8LineCount * static_cast<size_t>(mockComm_.comm.nRanks);
+    expectDdaGates(
+        {
+            {"AllGather", ddaGateIgnoringOp<ncclAllGatherDdaFabricEligible>, line},
+            {"AllGather LL", ddaGateIgnoringOp<ncclAllGatherDdaFabricLLEligible>, line},
+            {"AllReduce", ncclAllReduceDdaFabricEligible, line},
+            {"AllReduce LL one-shot", ddaLLArOneShotEligible, line},
+            {"AllReduce LL two-shot", ddaLLArTwoShotEligible, shard},
+            {"AllReduce LL128 one-shot", ddaLL128ArOneShotEligible, line},
+            {"AllReduce LL128 two-shot", ddaLL128ArTwoShotEligible, shard},
+            {"AlltoAll", ddaGateIgnoringOp<ncclAllToAllDdaFabricEligible>, line},
+            {"AlltoAll LL", ddaGateIgnoringOp<ncclAllToAllDdaFabricLLEligible>, line},
+            {"ReduceScatter", ncclReduceScatterDdaFabricEligible, line},
+            {"ReduceScatter LL", ncclReduceScatterDdaFabricLLEligible, line},
+        },
+        kDdaFp8Types, /*expected=*/true, mockComm_.get(), sendbuff_, recvbuff_);
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, GatesAdmitFp8)
+{
+    expectDdaGates(
+        {
+            {"AllGather LL128", ddaGateIgnoringOp<ncclAllGatherDdaFabricLL128Eligible>,
+             kDdaFp8LineCount},
+            {"AlltoAll LL128", ddaGateIgnoringOp<ncclAllToAllDdaFabricLL128Eligible>,
+             kDdaFp8LineCount},
+            {"ReduceScatter LL128", ncclReduceScatterDdaFabricLL128Eligible, kDdaFp8LineCount},
+        },
+        kDdaFp8Types, /*expected=*/true, mockComm_.get(), sendbuff_, recvbuff_);
+}
+
+// The AllReduce LL128 gate evaluates the two-shot predicate once one-shot
+// declines, so this rejects the datatype in both.
+TEST_F(DdaFabricEligibilityTest, GatesRejectUnsupportedDatatype)
+{
+    expectDdaGates(
+        {
+            {"AllReduce LL128", ncclAllReduceDdaFabricLL128Eligible, 32},
+            {"AlltoAll LL", ddaGateIgnoringOp<ncclAllToAllDdaFabricLLEligible>, 4},
+            {"ReduceScatter LL", ncclReduceScatterDdaFabricLLEligible, 4},
+        },
+        {ncclInt32}, /*expected=*/false, mockComm_.get(), sendbuff_, recvbuff_);
+}
+
+TEST_F(DdaFabricLL128EligibilityTest, GatesRejectUnsupportedDatatype)
+{
+    expectDdaGates(
+        {
+            {"AlltoAll LL128", ddaGateIgnoringOp<ncclAllToAllDdaFabricLL128Eligible>, 4},
+            {"ReduceScatter LL128", ncclReduceScatterDdaFabricLL128Eligible, 4},
+        },
+        {ncclInt32}, /*expected=*/false, mockComm_.get(), sendbuff_, recvbuff_);
+}
+
+TEST_F(DdaFabricEligibilityTest, LLDispatchRejectsUnsupportedDatatype)
+{
+    expectDdaLaunches(
+        {
+            {"AllGather LL", ddaLaunchIgnoringOp<ncclAllGatherDdaFabricLL>},
+            {"AllGather LL128", ddaLaunchIgnoringOp<ncclAllGatherDdaFabricLL128>},
+            {"AlltoAll LL", ddaLaunchIgnoringOp<ncclAllToAllDdaFabricLL>},
+            {"AlltoAll LL128", ddaLaunchIgnoringOp<ncclAllToAllDdaFabricLL128>},
+        },
+        {ncclInt32}, 4, ncclInvalidArgument, mockComm_.get(), sendbuff_, recvbuff_);
+}
+
+TEST_F(DdaFabricEligibilityTest, Fp8DispatchReachesTypedLauncher)
+{
+    mockComm_.setFabricResourcesPresent(false);
+    expectDdaLaunches(
+        {
+            {"AllGather", ddaLaunchIgnoringOp<ncclAllGatherDdaFabric>},
+            {"AllReduce", ncclAllReduceDdaFabric},
+            {"AlltoAll", ddaLaunchIgnoringOp<ncclAllToAllDdaFabric>},
+            {"ReduceScatter", ncclReduceScatterDdaFabric},
+        },
+        kDdaFp8Types, kDdaFp8LineCount, ncclInvalidUsage, mockComm_.get(), sendbuff_, recvbuff_);
 }
 
 } // namespace RcclUnitTesting

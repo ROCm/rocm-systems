@@ -1001,6 +1001,7 @@ if(BUILD_TESTS)
       common/MPITestCore.cpp
       common/MPIEnvironment.cpp
       common/TestChecks.cpp
+      common/VerifiableFp8.cpp
       transport/TransportMPIBase.cpp
       transport/P2pMPITests.cpp
       transport/NetMPITests.cpp
@@ -1045,6 +1046,7 @@ if(BUILD_TESTS)
       DdaAllReduceMPITests.cpp
       DdaReduceScatterMPITests.cpp
       DdaFabricSimpleMPITests.cpp
+      DdaFp8MPITests.cpp
       SymmetricAbortCheckModeMPITests.cpp
     )
 
