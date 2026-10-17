@@ -1,0 +1,73 @@
+name: RCCL TLS build
+
+# Compiles RCCL's socket-encryption code with TLS_BACKEND=OPENSSL3. That code sits behind
+# `#if NCCL_TLS_BACKEND_OPENSSL3` in src/misc/crypt.cc and no other RCCL build enables the
+# backend, so without this job it can stop compiling unnoticed. Runs weekly on develop and
+# on PRs that touch the encryption or socket layer. CPU-only: configure, hipify, then build
+# just the objects that carry or drive the TLS code. JIRA ID: AICOMRCCL-2488
+
+on:
+  schedule:
+    - cron: '23 4 * * 0'  # weekly, Sunday 04:23 UTC
+  workflow_dispatch:
+  pull_request:
+    branches:
+      - develop
+    paths:
+      - 'projects/rccl/src/misc/crypt.cc'
+      - 'projects/rccl/src/include/crypt.h'
+      - 'projects/rccl/src/misc/socket.cc'
+      - 'projects/rccl/src/include/socket.h'
+      - 'projects/rccl/src/bootstrap.cc'
+      - 'projects/rccl/CMakeLists.txt'
+      - 'projects/rccl/src/CMakeLists.txt'
+      - 'projects/rccl/src/misc/CMakeLists.txt'
+      - 'projects/rccl/makefiles/common.mk'
+      - '.github/workflows/rccl-tls-build.yml'
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: true
+
+jobs:
+  rccl-tls-build:
+    name: TLS_BACKEND=OPENSSL3 compile
+    runs-on: ubuntu-24.04
+    container:
+      image: rocm/dev-ubuntu-22.04:7.2
+    env:
+      ROCM_PATH: /opt/rocm
+      # Pin an arch so configure never probes for a GPU; only host objects are built.
+      GPU_TARGETS: gfx942
+    steps:
+      - name: Checkout rccl
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          sparse-checkout: projects/rccl
+
+      - name: Install build deps
+        run: |
+          apt-get update
+          apt-get install -y cmake git build-essential rocm-cmake libssl-dev
+
+      - name: Put ROCm on PATH
+        run: echo "/opt/rocm/bin" >> "$GITHUB_PATH"
+
+      - name: RCCL configure (TLS_BACKEND=OPENSSL3)
+        run: |
+          cmake -S projects/rccl -B build -DGPU_TARGETS="$GPU_TARGETS" -DBUILD_TESTS=OFF -DTLS_BACKEND=OPENSSL3
+          grep -q NCCL_TLS_BACKEND_OPENSSL3 build/src/CMakeFiles/rccl.dir/flags.make
+
+      - name: Stage hipified sources
+        run: cmake --build build --target hipify_all -j"$(nproc)"
+
+      - name: Compile TLS objects
+        run: |
+          for src in misc/crypt.cc misc/socket.cc bootstrap.cc; do
+            echo "::group::$src"
+            make -C build/src "__/hipify/src/$src.o"
+            echo "::endgroup::"
+          done
