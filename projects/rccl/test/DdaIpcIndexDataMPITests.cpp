@@ -71,8 +71,10 @@ float expectedSum(ncclDataType_t dtype, int nRanks, size_t j) {
 // Settings under which RCCL legitimately routes away from DDA IPC.
 bool ddaRoutingOverridden(const ncclComm* comm) {
   const char* ddaEnable = std::getenv("RCCL_DDA_ENABLE");
-  return comm->config.launchOrderImplicit == 1 || (ddaEnable != nullptr && std::string(ddaEnable) == "0") ||
-         std::getenv("NCCL_ALGO") != nullptr || std::getenv("RCCL_DDA_THRESHOLD") != nullptr;
+  // NCCL_CHECK_MODE and NCCL_CHECK_POINTERS force the enqueue path: native kernel runs, DDA IPC is still reported.
+  return comm->config.launchOrderImplicit == 1 || comm->checkMode != ncclCheckModeDefault ||
+         (ddaEnable != nullptr && std::string(ddaEnable) == "0") || std::getenv("NCCL_ALGO") != nullptr ||
+         std::getenv("RCCL_DDA_THRESHOLD") != nullptr;
 }
 
 template <typename T>
