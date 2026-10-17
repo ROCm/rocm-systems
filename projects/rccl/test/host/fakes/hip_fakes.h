@@ -68,6 +68,7 @@ extern std::function<hipError_t(void* /*data*/,
 
 // Device model + inventory seams. Defaults succeed with plausible values.
 extern std::function<hipError_t(int* /*version*/)> g_hipRuntimeGetVersion;
+extern std::function<hipError_t(int* /*version*/)> g_hipDriverGetVersion;
 extern std::function<hipError_t(hipDeviceProp_t* /*prop*/, int /*device*/)>
     g_hipGetDeviceProperties;
 extern std::function<hipError_t(void** /*ptr*/, std::size_t /*size*/,
@@ -169,6 +170,10 @@ extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*byt
     g_hipMemcpyAsync;
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, hipStream_t /*stream*/)>
     g_hipMemsetAsync;
+// Synchronous memset. The default really writes (std::memset) and returns
+// hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
+// buffer production zeroes is genuinely zero when a test reads it back.
+extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;
@@ -217,6 +222,12 @@ extern std::function<hipError_t(hipStream_t /*stream*/, void* /*ptr*/,
                                 std::uint64_t /*value*/, unsigned int /*flags*/,
                                 std::uint64_t /*mask*/)>
     g_hipStreamWaitValue64;
+#ifdef CE_BATCH_ASYNC_SUPPORTED
+extern std::function<hipError_t(void** /*dsts*/, void** /*srcs*/, size_t* /*sizes*/, size_t /*count*/,
+                                hipMemcpyAttributes* /*attrs*/, size_t* /*attrsIdxs*/, size_t /*numAttrs*/,
+                                size_t* /*failIdx*/, hipStream_t /*stream*/)>
+    g_hipMemcpyBatchAsync;
+#endif
 
 // Restore the HIP controllable seams above to their defaults. Called by
 // ResetP2pFakes(); exposed for tests that only touch HIP hooks.

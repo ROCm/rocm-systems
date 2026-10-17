@@ -74,38 +74,6 @@ struct nic_traits
         Cache::initialize_pmc_metadata(device->get_index(), device->get_product_name());
     }
 
-    template <typename DeviceEntries>
-    static container_t extract_devices(const DeviceEntries& device_entries)
-    {
-        container_t devices;
-        devices.reserve(device_entries.size());
-        for(const auto& entry : device_entries)
-        {
-            devices.push_back(entry.device);
-        }
-        return devices;
-    }
-
-    template <typename Perfetto, typename DeviceEntries>
-    static void init_perfetto_storage(const DeviceEntries& device_entries)
-    {
-        Perfetto::init_storage(extract_devices(device_entries));
-    }
-
-    template <typename Perfetto>
-    static void setup_counter_tracks(const device_ptr_t&      device,
-                                     const enabled_metrics_t& enabled)
-    {
-        Perfetto::setup_counter_tracks(device->get_index(), device->get_name(), enabled);
-    }
-
-    template <typename Perfetto, typename DeviceEntries>
-    static void post_process_perfetto(const DeviceEntries&     device_entries,
-                                      const enabled_metrics_t& enabled)
-    {
-        Perfetto::post_process(extract_devices(device_entries), enabled);
-    }
-
     [[nodiscard]] static metrics_t get_metrics(
         const device_ptr_t& device, [[maybe_unused]] const enabled_metrics_t& enabled,
         [[maybe_unused]] std::uint64_t timestamp)

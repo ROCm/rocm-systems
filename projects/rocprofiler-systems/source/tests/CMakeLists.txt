@@ -12,6 +12,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:control-timeline-clock-tests>
     $<TARGET_OBJECTS:control-steady-clock-tests>
     $<TARGET_OBJECTS:control-session-scope-tests>
+    $<TARGET_OBJECTS:control-roctx-trigger-tests>
     $<TARGET_OBJECTS:trace-period-config-tests>
     $<TARGET_OBJECTS:track-registry-tests>
     $<TARGET_OBJECTS:packet-framing-tests>
@@ -19,7 +20,9 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:perfetto-sinks-tests>
     $<TARGET_OBJECTS:emission-handshake-tls-contract-tests>
     $<TARGET_OBJECTS:output-format-tests>
+    $<TARGET_OBJECTS:output-summary-tests>
     $<TARGET_OBJECTS:parse-numeric-range-tests>
+    $<TARGET_OBJECTS:process-environment-tests>
     $<TARGET_OBJECTS:rank-passes-filter-tests>
     $<TARGET_OBJECTS:state-tests>
     $<TARGET_OBJECTS:progress-tests>
@@ -30,6 +33,7 @@ set(UNIT_TEST_OBJECTS
     $<TARGET_OBJECTS:callback-domains-unit-tests>
     $<$<TARGET_EXISTS:rccl-unit-tests>:$<TARGET_OBJECTS:rccl-unit-tests>>
     $<$<TARGET_EXISTS:bin-common-tests>:$<TARGET_OBJECTS:bin-common-tests>>
+    $<$<TARGET_EXISTS:instrument-tests>:$<TARGET_OBJECTS:instrument-tests>>
 )
 
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:amd-smi-backend-tests>)
@@ -39,6 +43,7 @@ list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-gpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-nic-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-cpu-collector-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:procfs-backend-tests>)
+list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:posix-backend-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:hipfile-backend-tests>)
 list(APPEND UNIT_TEST_OBJECTS $<TARGET_OBJECTS:pmc-hipfile-collector-tests>)
 list(

@@ -10,7 +10,7 @@ use rocddi::device::gpu::queue::{
     self, QueueAccessWidth, QueueParameters, QueuePriority, QueueProducerMode, QueueRequest,
     QueueRingMemory, QueueScratch,
 };
-use rocddi::host_storage::{Allocator, Owned};
+use rocddi::memory::storage::Owned;
 
 use crate::generated::amdf::*;
 use crate::instance::{self, Device};
@@ -70,7 +70,6 @@ impl NativeQueue {
 /// partial native cleanup cannot restore a revoked public transport.
 struct Queue {
     native: NativeQueue,
-    allocator: Allocator,
     device: *mut Device,
     // These counters borrow the public device, which cannot be destroyed while
     // this queue is registered. No public device ownership is retained.
@@ -449,7 +448,7 @@ pub(crate) unsafe extern "C" fn create(
         let (scratch, scratch_memory) = scratch_descriptor(&create_info, &family, pointer.cast())?;
         let desc = descriptor(&create_info, &family, scratch)?;
         let instance = instance::device_instance(device);
-        let slot = Owned::<Queue>::try_new_uninit(instance.allocator).map_err(|_| EXHAUSTED)?;
+        let slot = Owned::<Queue>::try_new_uninit().map_err(|_| EXHAUSTED)?;
         let id = next_id(&instance.ids)?;
         register(&device.queues)?;
         let scratch_borrow = if scratch_memory.is_null() {
@@ -534,7 +533,6 @@ pub(crate) unsafe extern "C" fn create(
         };
         let owner = slot.write(Queue {
             native: NativeQueue::Provider(native_queue),
-            allocator: instance.allocator,
             device: pointer.cast(),
             device_queues: &raw const device.queues,
             #[cfg(test)]
@@ -590,7 +588,7 @@ pub(crate) unsafe extern "C" fn map(
             }
             Some(producer)
         };
-        let slot = Owned::<Mapping>::try_new_uninit(queue.allocator).map_err(|_| EXHAUSTED)?;
+        let slot = Owned::<Mapping>::try_new_uninit().map_err(|_| EXHAUSTED)?;
         let info = if host {
             queue.host_mapping
         } else if peer.is_none() {

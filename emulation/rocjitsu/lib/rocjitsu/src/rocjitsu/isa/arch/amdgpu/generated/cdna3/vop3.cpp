@@ -1366,6 +1366,7 @@ VScreenPartition4seB32Vop3::VScreenPartition4seB32Vop3(const MachineInst *inst)
   num_dst_ = 1;
   vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
   src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
 }
 
 namespace detail {
@@ -12578,6 +12579,56 @@ DecodeResult decodeVCmpxTU64Vop3(const MachineInst *opcode, const DecodeErrorEmi
       amdgpu::dpp::is_src_dpp8(reinterpret_cast<const Vop3::OpEncoding *>(inst)->src0)) [[unlikely]]
     return emit_error.emit() << "V_CMPX_T_U64 does not support DPP";
   return std::make_unique<VCmpxTU64Vop3>(opcode);
+}
+} // namespace detail
+
+VExpLegacyF32Vop3::VExpLegacyF32Vop3(const MachineInst *inst)
+    : Vop3("v_exp_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VExpLegacyF32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  num_src_ = 1;
+  num_dst_ = 1;
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+}
+
+namespace detail {
+DecodeResult decodeVExpLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_exp_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VExpLegacyF32Vop3>(opcode);
+}
+} // namespace detail
+
+VLogLegacyF32Vop3::VLogLegacyF32Vop3(const MachineInst *inst)
+    : Vop3("v_log_legacy_f32", reinterpret_cast<const OpEncoding *>(inst),
+           selected_exec_fn(InstructionExecutionId::VLogLegacyF32Vop3)),
+      vdst(32, OperandType::OPR_VGPR, reinterpret_cast<const OpEncoding *>(inst)->vdst),
+      src0(32, OperandType::OPR_SRC_NOLIT, reinterpret_cast<const OpEncoding *>(inst)->src0) {
+  dst_operands_[0] = &vdst;
+  src_operands_[0] = &src0;
+  num_src_ = 1;
+  num_dst_ = 1;
+  vdst.set_vgpr_msb_role(amdgpu::VgprMsbRole::Dst);
+  src0.set_vgpr_msb_role(amdgpu::VgprMsbRole::Src0);
+  flags_ |= DIRECT_REGISTER_ACCESSES;
+}
+
+namespace detail {
+DecodeResult decodeVLogLegacyF32Vop3(const MachineInst *opcode,
+                                     const DecodeErrorEmitter &emit_error) {
+  Result validation = Vop3::validate_encoding(
+      "v_log_legacy_f32", reinterpret_cast<const Vop3::OpEncoding *>(opcode), emit_error);
+  if (validation.failed()) [[unlikely]]
+    return Result::failure();
+  return std::make_unique<VLogLegacyF32Vop3>(opcode);
 }
 } // namespace detail
 
