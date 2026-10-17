@@ -1199,7 +1199,7 @@ if (ENABLE_ROCSHMEM_GIN)
     # SDMA anvil host code: copied into build tree (no sed — host code needs
     # unqualified log.hpp to find the host shim via include path ordering).
     set(_GIN_SDMA_DIR "${PROJECT_BINARY_DIR}/gin/sdma")
-    foreach(_f anvil.cpp anvil.hpp)
+    foreach(_f anvil.cpp anvil.hpp anvil_engine_map.hpp)
       add_custom_command(
         OUTPUT "${_GIN_SDMA_DIR}/${_f}"
         COMMAND ${CMAKE_COMMAND} -E make_directory "${_GIN_SDMA_DIR}"
