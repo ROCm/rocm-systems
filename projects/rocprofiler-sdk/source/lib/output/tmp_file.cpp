@@ -25,23 +25,79 @@
 #include "lib/common/filesystem.hpp"
 #include "lib/common/logging.hpp"
 
+#include <cerrno>
+#include <cstring>
+
 namespace fs = ::rocprofiler::common::filesystem;
+
+namespace
+{
+bool
+ensure_parent_directory(const std::string& filename)
+{
+    auto fpath = fs::path{filename}.parent_path();
+    if(fpath.empty()) return true;
+
+    auto ec = std::error_code{};
+    if(fs::exists(fpath, ec)) return true;
+
+    if(ec)
+    {
+        ROCP_ERROR << "failed to stat temporary file directory '" << fpath.string() << "' for '"
+                   << filename << "' :: " << ec.message();
+        return false;
+    }
+
+    fs::create_directories(fpath, ec);
+    if(ec)
+    {
+        ROCP_ERROR << "failed to create temporary file directory '" << fpath.string() << "' for '"
+                   << filename << "' :: " << ec.message();
+        return false;
+    }
+
+    return true;
+}
+
+bool
+ensure_file_exists(const std::string& filename, std::ios::openmode mode = std::ofstream::out)
+{
+    auto ec = std::error_code{};
+    if(fs::exists(filename, ec)) return true;
+
+    if(ec)
+    {
+        ROCP_ERROR << "failed to stat temporary file '" << filename << "' :: " << ec.message();
+        return false;
+    }
+
+    auto ofs = std::ofstream{};
+    ofs.open(filename, mode);
+    if(!ofs)
+    {
+        ROCP_ERROR << "failed to create temporary file: '" << filename << "'";
+        return false;
+    }
+
+    return true;
+}
+}  // namespace
 
 bool
 tmp_file::fopen(const char* _mode)
 {
-    auto fpath = fs::path{filename}.parent_path();
-    if(!fs::exists(fpath)) fs::create_directories(fpath);
+    if(!ensure_parent_directory(filename)) return false;
 
-    if(!fs::exists(filename))
-    {
-        // if the filepath does not exist, open in out mode to create it
-        std::ofstream _ofs{filename};
-    }
+    // if the filepath does not exist, open in out mode to create it
+    if(!ensure_file_exists(filename)) return false;
 
     ROCP_INFO << "opening (via fopen) temporary file: '" << filename << "'...";
     file = std::fopen(filename.c_str(), _mode);
-    if(file) fd = ::fileno(file);
+    if(file)
+        fd = ::fileno(file);
+    else
+        ROCP_ERROR << "failed to open temporary file via fopen: '" << filename
+                   << "' :: " << std::strerror(errno);
 
     return (file != nullptr && fd > 0);
 }
@@ -110,15 +166,10 @@ tmp_file::close()
 bool
 tmp_file::open(std::ios::openmode _mode)
 {
-    auto fpath = fs::path{filename}.parent_path();
-    if(!fs::exists(fpath)) fs::create_directories(fpath);
+    if(!ensure_parent_directory(filename)) return false;
 
-    if(!fs::exists(filename))
-    {
-        // if the filepath does not exist, open in out mode to create it
-        std::ofstream _ofs{};
-        _ofs.open(filename, std::ofstream::binary | std::ofstream::out);
-    }
+    // if the filepath does not exist, open in out mode to create it
+    if(!ensure_file_exists(filename, std::ofstream::binary | std::ofstream::out)) return false;
 
     if(stream.is_open() && stream.good())
     {
@@ -128,6 +179,8 @@ tmp_file::open(std::ios::openmode _mode)
 
     ROCP_INFO << "opening temporary file: '" << filename << "'...";
     stream.open(filename, _mode);
+    if(!stream.is_open() || !stream.good())
+        ROCP_ERROR << "failed to open temporary file: '" << filename << "'";
     return (stream.is_open() && stream.good());
 }
 
@@ -135,20 +188,26 @@ bool
 tmp_file::remove()
 {
     close();
-    if(fs::exists(filename))
+    auto ec = std::error_code{};
+    if(fs::exists(filename, ec))
     {
         ROCP_INFO << "removing temporary file: '" << filename << "'...";
-        auto _ec  = std::error_code{};
-        auto _ret = fs::remove(filename, _ec);
+        auto _ret = fs::remove(filename, ec);
 
-        if(_ec)
+        if(ec)
             ROCP_WARNING << fmt::format(
-                "Error removing temporary file '{}' :: {}", filename, _ec.message());
+                "Error removing temporary file '{}' :: {}", filename, ec.message());
         else if(!_ret)
             ROCP_WARNING << fmt::format("Error removing temporary file '{}' :: Unknown error",
                                         filename);
 
         return _ret;
+    }
+    else if(ec)
+    {
+        ROCP_WARNING << fmt::format(
+            "Error checking temporary file '{}' for removal :: {}", filename, ec.message());
+        return false;
     }
 
     return true;
@@ -157,7 +216,15 @@ tmp_file::remove()
 bool
 tmp_file::exists() const
 {
-    return fs::exists(filename);
+    auto ec  = std::error_code{};
+    auto ret = fs::exists(filename, ec);
+    if(ec)
+    {
+        ROCP_WARNING << fmt::format(
+            "Error checking temporary file '{}' :: {}", filename, ec.message());
+        return false;
+    }
+    return ret;
 }
 
 tmp_file::operator bool() const

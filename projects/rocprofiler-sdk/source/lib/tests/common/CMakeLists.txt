@@ -10,6 +10,7 @@ set(common_sources
     environment.cpp
     md5sum.cpp
     mpl.cpp
+    output_config.cpp
     parse.cpp
     regex.cpp
     sha256.cpp
