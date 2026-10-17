@@ -363,11 +363,38 @@ void ProfilingSignal::CacheTimingData(hsa_agent_t gpu_device) {
   }
 
   // Wait for this signal to complete if not already done
-  if (Hsa::signal_load_relaxed(signal_) > 0) {
-    WaitForSignal(signal_);
+  if (LoadRelaxed() > 0) {
+    WaitUntilDone();
   }
 
   // Extract timing and cache it
+  if (flags_.device_backed_) {
+    auto* sig = reinterpret_cast<volatile amd_signal_t*>(signal_.handle);
+    const uint64_t raw_start = sig->start_ts;
+    const uint64_t raw_end = sig->end_ts;
+
+    // hsa_amd_profiling_get_dispatch_time cannot consume a raw VRAM address:
+    // it first interprets hsa_signal_t as a ROCr Signal object. Convert the
+    // timestamps individually through ROCr's public clock-correlation API
+    // instead. Convert end first, matching ROCr's dispatch-time path, so any
+    // clock resynchronization latency cannot distort this dispatch's duration.
+    uint64_t system_start = 0;
+    uint64_t system_end = 0;
+    if (raw_start != 0 && raw_end >= raw_start &&
+        HSA_STATUS_SUCCESS ==
+            Hsa::profiling_convert_tick_to_system_domain(gpu_device, raw_end, &system_end) &&
+        HSA_STATUS_SUCCESS ==
+            Hsa::profiling_convert_tick_to_system_domain(gpu_device, raw_start, &system_start)) {
+      cached_timing_.start_ = system_start;
+      cached_timing_.end_ = system_end;
+    } else {
+      cached_timing_.start_ = 0;
+      cached_timing_.end_ = 0;
+    }
+    cached_timing_.valid_ = true;
+    return;
+  }
+
   if (IsSdmaEngine(engine_)) {
     hsa_amd_profiling_async_copy_time_t time = {};
     Hsa::profiling_get_async_copy_time(signal_, &time);
@@ -928,7 +955,7 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
   // Validate all signals for the wait and skip already completed
   for (uint32_t i = 0; i < external_signals_.size(); ++i) {
     // Early signal status check
-    if (Hsa::signal_load_relaxed(external_signals_[i]->signal_) > 0) {
+    if (external_signals_[i]->LoadRelaxed() > 0) {
       const Settings& settings = gpu_.dev().settings();
       if (settings.cpu_wait_for_signal_) {
         // Wait on CPU for completion if requested
@@ -954,10 +981,10 @@ std::vector<hsa_signal_t>& VirtualGPU::HwQueueTracker::WaitingSignal(HwQueueEngi
 // ================================================================================================
 bool VirtualGPU::HwQueueTracker::CpuWaitForSignal(ProfilingSignal* signal) {
   // Wait for the current signal to complete
-  if (Hsa::signal_load_relaxed(signal->signal_) > 0) {
+  if (signal->LoadRelaxed() > 0) {
     ClPrint(amd::LOG_DEBUG, amd::LOG_COPY, "Host wait on completion_signal=0x%zx",
             signal->signal_.handle);
-    if (!WaitForSignal(signal->signal_, gpu_.ActiveWait())) {
+    if (!signal->WaitUntilDone(gpu_.ActiveWait())) {
       LogPrintfError("Failed signal [0x%lx] wait", signal->signal_);
       return false;
     }
