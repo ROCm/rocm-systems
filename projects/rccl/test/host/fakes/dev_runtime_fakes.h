@@ -24,6 +24,8 @@ extern std::function<bool(struct ncclDevrWindow*)> g_devrWindowIsMultiSegment;
 extern std::function<bool(struct ncclDevrWindow*)> g_devrWindowHasSysmemSegment;
 extern bool g_devrWindowIsMultiSegmentValue;
 extern bool g_devrWindowHasSysmemSegmentValue;
+// ncclDevrIsOneLsaTeam (defined in nccl_stubs.cc): defaults to one LSA team spanning the comm.
+extern bool g_devrIsOneLsaTeamValue;
 
 // src/dev_runtime.cc's ncclDevrInitOnce: generous default (ncclSuccess), matching a comm that
 // never sets symmetricSupport with a null peerInfo (dev_runtime.cc's own real error condition).
