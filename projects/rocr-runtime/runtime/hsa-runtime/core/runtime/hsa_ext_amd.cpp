@@ -64,6 +64,7 @@
 #include "core/inc/intercept_queue.h"
 #include "core/inc/interrupt_signal.h"
 #include "core/inc/ipc_signal.h"
+#include "core/inc/launch_descriptor.h"
 #include "core/inc/runtime.h"
 #include "core/inc/signal.h"
 #include "core/inc/counted_queue_manager.h"
@@ -96,6 +97,11 @@ struct ValidityError<AMD::MemoryRegion*> {
 template <>
 struct ValidityError<core::Queue*> {
   enum { value = HSA_STATUS_ERROR_INVALID_QUEUE };
+};
+
+template <>
+struct ValidityError<core::LaunchDescriptor*> {
+  enum { value = HSA_STATUS_ERROR_INVALID_ARGUMENT };
 };
 
 template <class T>
@@ -2740,6 +2746,72 @@ hsa_status_t hsa_amd_queue_create(hsa_agent_t agent_handle,
   }
 
   return first_error;
+  CATCH;
+}
+
+// ====================================================================================
+// Launch Descriptor API Implementation
+// ====================================================================================
+
+hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_create(
+    hsa_agent_t agent_handle,
+    amd_launch_descriptor_t* launch_descriptor) {
+  TRY;
+  IS_OPEN();
+  IS_BAD_PTR(launch_descriptor);
+
+  const core::Agent* agent = core::Agent::Convert(agent_handle);
+  IS_VALID(agent);
+
+  if (agent->device_type() != core::Agent::kAmdGpuDevice) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  uint8_t version = core::GetDescriptorVersion(agent);
+  if (version == AMD_LAUNCH_DESCRIPTOR_VERSION_NONE) {
+    return HSA_STATUS_ERROR_INVALID_AGENT;
+  }
+
+  core::LaunchDescriptor* desc = new core::LaunchDescriptor(version);
+  *launch_descriptor = core::LaunchDescriptor::Convert(desc);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_destroy(
+    amd_launch_descriptor_t launch_descriptor) {
+  TRY;
+  IS_OPEN();
+
+  core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
+  delete desc;
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_set(
+    amd_launch_descriptor_t launch_descriptor,
+    uint32_t field,
+    uint64_t value) {
+  TRY;
+  IS_OPEN();
+
+  core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
+  core::SetDescriptorField(desc, field, value);
+  return HSA_STATUS_SUCCESS;
+  CATCH;
+}
+
+hsa_status_t HSA_API hsa_ven_amd_launch_descriptor_set_prefetch(
+    amd_launch_descriptor_t launch_descriptor,
+    uint32_t index,
+    const amd_data_prefetch_t* prefetch) {
+  TRY;
+  IS_OPEN();
+
+  core::LaunchDescriptor* desc = core::LaunchDescriptor::Convert(launch_descriptor);
+  core::SetDescriptorPrefetch(desc, index, prefetch);
+  return HSA_STATUS_SUCCESS;
   CATCH;
 }
 
