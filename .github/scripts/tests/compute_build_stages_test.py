@@ -34,6 +34,26 @@ class ParseProjectsTest(unittest.TestCase):
     def test_empty(self):
         self.assertEqual(cbs._parse_projects(""), [])
 
+    def test_cuid_uses_amdsmi_build_and_test_selection(self):
+        for projects in ("shared/cuid", "projects/amdsmi,shared/cuid"):
+            with self.subTest(projects=projects), patch.object(
+                cbs, "compute_windows_families", return_value="none"
+            ) as windows, patch.object(cbs, "set_github_output") as output:
+                self.assertEqual(cbs.main(["--changed-projects", projects]), 0)
+                windows.assert_called_once_with(
+                    changed_projects="projects/amdsmi",
+                    therock_path="_therock",
+                    run_all_tests=False,
+                )
+                output.assert_called_once_with([], "none", "projects/amdsmi")
+
+    def test_cuid_selection_preserves_other_projects(self):
+        with patch.object(
+            cbs, "compute_windows_families", return_value=""
+        ), patch.object(cbs, "set_github_output") as output:
+            cbs.main(["--changed-projects", "projects/rdc, shared/cuid"])
+            output.assert_called_once_with([], "", "projects/amdsmi,projects/rdc")
+
 
 class ComputeBuildStagesTest(unittest.TestCase):
     def test_run_all_tests_builds_everything(self):
