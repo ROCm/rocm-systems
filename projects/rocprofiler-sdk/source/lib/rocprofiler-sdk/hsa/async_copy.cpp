@@ -42,7 +42,6 @@
 #include <rocprofiler-sdk/hsa/api_id.h>
 #include <rocprofiler-sdk/hsa/table_id.h>
 #include <rocprofiler-sdk/cxx/constants.hpp>
-#include <rocprofiler-sdk/cxx/operators.hpp>
 
 #include <hsa/amd_hsa_signal.h>
 #include <hsa/hsa.h>
@@ -373,8 +372,9 @@ async_copy_handler(hsa_signal_value_t, void* arg);
  * When both HSA agents are GPU type, the agent handles alone are not sufficient to determine
  * the true transfer direction. OpenMP RTL (libomptarget) pins host memory and registers it
  * under a GPU agent, causing HSA to report src_agent == dst_agent (both GPU) even for
- * HOST<->DEVICE transfers. In that case, hsa_amd_pointer_info::agentOwner is consulted to
- * recover the true direction (fix for ROCM-9863).
+ * HOST<->DEVICE transfers, while a peer copy passes two different GPU agents. In that case,
+ * hsa_amd_pointer_info is used to classify each pointer as host or device memory
+ * (ROCM-9863, ROCM-30981).
  */
 copy_metadata
 get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
@@ -408,9 +408,16 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                 _copy_meta.direction = ROCPROFILER_MEMORY_COPY_DEVICE_TO_HOST;
             else if(_rocp_dst_agent->type == ROCPROFILER_AGENT_TYPE_GPU)
             {
-                // ROCM-9863: when both HSA agents are GPU type, inspect the actual ownership
-                // of each pointer with hsa_amd_pointer_info to disambiguate HOST<->DEVICE
-                // copies that OpenMP RTL routes through a GPU-registered host staging buffer.
+                // hsa_amd_pointer_info reports what each pointer actually is:
+                //   HSA_EXT_POINTER_TYPE_UNKNOWN - unregistered host memory
+                //   HSA_EXT_POINTER_TYPE_LOCKED  - pinned host memory; agentOwner is the
+                //                                  agent it was locked for, may be a GPU
+                //   everything else              - ROCr allocation owned by agentOwner
+                //
+                // ROCM-9863: OpenMP offload transfers reported as DEVICE_TO_DEVICE.
+                // ROCM-30981: peer copies reported as HOST_TO_DEVICE / DEVICE_TO_HOST
+                // because agentOwner was compared against an agent handle of the copy
+                // rather than classified on its own.
                 auto _src_info = hsa_amd_pointer_info_t{};
                 auto _dst_info = hsa_amd_pointer_info_t{};
                 _src_info.size = sizeof(hsa_amd_pointer_info_t);
@@ -430,12 +437,23 @@ get_copy_metadata(hsa_agent_t      _hsa_dst_agent,
                          HSA_STATUS_SUCCESS);
                 }
 
-                // A pointer is considered GPU device memory if its agentOwner matches
-                // the GPU agent handle passed to the copy operation.
-                const bool _src_is_device =
-                    _src_query_ok && (_src_info.agentOwner == _hsa_src_agent);
-                const bool _dst_is_device =
-                    _dst_query_ok && (_dst_info.agentOwner == _hsa_dst_agent);
+                auto _is_device_memory = [](bool _query_ok, const hsa_amd_pointer_info_t& _info) {
+                    // both HSA agents are GPUs, so assume device memory when the
+                    // allocation cannot be inspected
+                    if(!_query_ok) return true;
+
+                    // locked and unknown pointers are host memory regardless of
+                    // agentOwner, which is the agent the memory was locked for
+                    if(_info.type == HSA_EXT_POINTER_TYPE_UNKNOWN ||
+                       _info.type == HSA_EXT_POINTER_TYPE_LOCKED)
+                        return false;
+
+                    const auto* _owner = agent::get_rocprofiler_agent(_info.agentOwner);
+                    return (_owner == nullptr) || (_owner->type == ROCPROFILER_AGENT_TYPE_GPU);
+                };
+
+                const bool _src_is_device = _is_device_memory(_src_query_ok, _src_info);
+                const bool _dst_is_device = _is_device_memory(_dst_query_ok, _dst_info);
 
                 if(!_src_is_device && _dst_is_device)
                     _copy_meta.direction = ROCPROFILER_MEMORY_COPY_HOST_TO_DEVICE;
