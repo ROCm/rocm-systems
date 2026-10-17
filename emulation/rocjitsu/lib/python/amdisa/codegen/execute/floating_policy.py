@@ -70,6 +70,6 @@ F16_FLUSHED_SOURCE_CALLS = frozenset(
 )
 
 # Integral rounding whose source honors MODE input flushing, in every format.
-# TRUNC and RNDNE give a signed zero for a subnormal either way; FRACT's input
-# flush is not implemented.
+# TRUNC and RNDNE give a signed zero for a subnormal either way; FRACT flushes
+# in shared/fract.h.
 INPUT_FLUSHED_ROUNDING = frozenset({'ceil', 'floor'})

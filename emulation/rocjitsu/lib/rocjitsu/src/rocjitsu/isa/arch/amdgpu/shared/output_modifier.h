@@ -28,8 +28,6 @@
 ///     negative normal with the smallest exponent gives -0 on gfx1201, gfx1100,
 ///     gfx1030 and gfx1010, where finish_f64 gives +0. Migrating them must also
 ///     apply FMA tininess before rounding.
-///   - F64 LDEXP: retains expression-level div_apply_omod/CLAMP pending separate
-///     modifier-policy validation.
 ///   - SDWA F16 (dpp_sdwa_ops.h): separate arithmetic and rounded-TRANS
 ///     helpers; no SDWA captures. Arithmetic retains unvalidated legacy scaling
 ///     before narrowing. For RDNA1/2 MUL_F16 with inputs 0x3e00 and 0x7bff,

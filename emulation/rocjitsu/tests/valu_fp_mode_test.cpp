@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/ldexp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
 #include "rocjitsu/isa/decoder.h"
@@ -29,6 +30,7 @@
 #include <optional>
 #include <ostream>
 #include <string>
+#include <string_view>
 #include <thread>
 #include <utility>
 #include <vector>
@@ -2873,6 +2875,288 @@ std::vector<ArithmeticCase> integral_rounding_input_flush_cases() {
   return cases;
 }
 
+// Encodings of a captured unary F16/F32/F64 lane. The High forms read and
+// write the upper F16 halves: VOP1 through v0.h/v6.h, VOP3 through OPSEL.
+enum class UnaryEncoding { Vop1, Vop1High, Vop3, Vop3High };
+
+struct UnaryForm {
+  const char *name;
+  uint16_t vop1;
+  uint16_t vop3;
+  unsigned width;
+};
+
+struct UnaryLane {
+  const char *name;
+  UnaryEncoding encoding;
+  rdna4::Vop3BuilderFields fields;
+  uint64_t input;
+  uint32_t mode;
+  uint64_t expected;
+};
+
+// Build a case for v6 = op(v0), or v[6:7] = op(v[0:1]) for F64. The F16 source's
+// other half holds 0x5a5a, which the operation must ignore; the destination's
+// other half holds 0xa5a5, which it must keep.
+ArithmeticCase unary_case(const UnaryForm &form, const UnaryLane &lane) {
+  constexpr uint16_t V0 = 256;
+  constexpr uint16_t kHighHalf = 128;
+  std::array<uint32_t, 3> words{};
+  if (lane.encoding == UnaryEncoding::Vop1 || lane.encoding == UnaryEncoding::Vop1High) {
+    const bool high = lane.encoding == UnaryEncoding::Vop1High;
+    const auto word = rdna4::build_vop1(form.vop1, {.src0 = uint16_t(V0 + (high ? kHighHalf : 0)),
+                                                    .vdst = uint8_t(6 + (high ? kHighHalf : 0))});
+    words = {word[0], 0u, 0u};
+  } else {
+    rdna4::Vop3BuilderFields fields = lane.fields;
+    fields.vdst = 6;
+    fields.src0 = V0;
+    if (lane.encoding == UnaryEncoding::Vop3High)
+      fields.opsel = 0b1001; // source 0 and destination use the high half
+    const auto pair = rdna4::build_vop3(form.vop3, fields);
+    words = {pair[0], pair[1], 0u};
+  }
+  std::vector<std::pair<uint32_t, uint32_t>> sources;
+  std::vector<std::pair<uint32_t, uint32_t>> expected;
+  if (form.width == 16) {
+    const bool high =
+        lane.encoding == UnaryEncoding::Vop1High || lane.encoding == UnaryEncoding::Vop3High;
+    const uint32_t input = uint32_t(lane.input);
+    const uint32_t result = uint32_t(lane.expected);
+    sources = {{0, high ? (input << 16) | 0x5a5au : 0x5a5a0000u | input}, {6, 0xa5a5a5a5u}};
+    expected = {{6, high ? (result << 16) | 0xa5a5u : 0xa5a50000u | result}};
+  } else {
+    sources = {{0, uint32_t(lane.input)}};
+    expected = {{6, uint32_t(lane.expected)}};
+    if (form.width == 64) {
+      sources.emplace_back(1, uint32_t(lane.input >> 32));
+      expected.emplace_back(7, uint32_t(lane.expected >> 32));
+    }
+  }
+  static constexpr const char *kEncodingNames[] = {"Vop1", "Vop1High", "Vop3", "Vop3High"};
+  return {std::string(form.name) + kEncodingNames[static_cast<int>(lane.encoding)] + lane.name,
+          ROCJITSU_CODE_ARCH_RDNA4,
+          words,
+          std::move(sources),
+          std::move(expected),
+          lane.mode,
+          FE_TONEAREST};
+}
+
+// V_FRACT lanes captured on gfx1201. MODE 0x30 keeps F32 subnormals and
+// flushes F16/F64 ones; 0xc0 does the reverse, so reading the wrong field
+// fails. 0xf3 and 0xfc swap round-to-nearest-even and round-toward-zero
+// between the F32 and F16/F64 fields; 0xfa rounds toward -inf in both.
+std::vector<ArithmeticCase> fract_cases() {
+  using enum UnaryEncoding;
+  const auto rows = [](uint64_t sign, uint64_t infinity, uint64_t one, uint64_t round_input,
+                       std::array<uint64_t, 6> results) {
+    const uint64_t tiny = 1;
+    // results: capped 1 - ulp, its double, rounding under RNE and RTZ, the
+    // infinity result and the quieted signaling NaN.
+    const auto [capped, doubled, nearest, toward_zero, infinity_result, quiet_nan] = results;
+    return std::vector<UnaryLane>{
+        // A kept -tiny gives 1 - tiny, which rounds to 1.0 and is capped below it.
+        {"NegativeSubnormalKept", Vop1, {}, sign | tiny, 0, capped},
+        {"NegativeSubnormalFlushed", Vop1, {}, sign | tiny, 0, 0},
+        // A kept +tiny is its own fractional part, then flushed as an output.
+        {"PositiveSubnormalKept", Vop1, {}, tiny, 0, tiny},
+        {"PositiveSubnormalFlushed", Vop1, {}, tiny, 0, 0},
+        {"RoundNearestEven", Vop1, {}, round_input, 0, nearest},
+        {"RoundTowardZero", Vop1, {}, round_input, 0, toward_zero},
+        {"InfinityIsNegativeNan", Vop1, {}, infinity, 0xf0u, infinity_result},
+        {"QuietsSignalingNan", Vop1, {}, infinity | 1, 0xf0u, quiet_nan},
+        // Integers, including -0, give +0 even when rounding toward -inf.
+        {"NegativeZeroRoundDown", Vop1, {}, sign, 0xfau, 0},
+        {"NegativeOneRoundDown", Vop1, {}, sign | one, 0xfau, 0},
+        {"NegatedSubnormal", Vop3, {.neg = 1}, tiny, 0xf0u, capped},
+        {"CappedThenDoubled", Vop3, {.omod = 1}, sign | tiny, 0xf0u, doubled},
+        {"ClampNan", Vop3, {.clamp = 1}, infinity | 1, 0xf0u, 0},
+    };
+  };
+  struct FormLanes {
+    UnaryForm form;
+    std::vector<UnaryLane> lanes;
+  };
+  const std::array<FormLanes, 3> forms = {{
+      {{"FractF16", rdna4::kVFractF16Vop1, rdna4::kVFractF16Vop3, 16},
+       rows(0x8000u, 0x7c00u, 0x3c00u, 0xb58du,
+            {0x3bffu, 0x3fffu, 0x393au, 0x3939u, 0xfe00u, 0x7e01u})},
+      {{"FractF32", rdna4::kVFractF32Vop1, rdna4::kVFractF32Vop3, 32},
+       rows(0x80000000u, 0x7f800000u, 0x3f800000u, 0xb7cbb5fdu,
+            {0x3f7fffffu, 0x3fffffffu, 0x3f7ffe69u, 0x3f7ffe68u, 0xffc00000u, 0x7fc00001u})},
+      {{"FractF64", rdna4::kVFractF64Vop1, rdna4::kVFractF64Vop3, 64},
+       rows(0x8000000000000000u, 0x7ff0000000000000u, 0x3ff0000000000000u, 0xbce254ae32fc7a4fu,
+            {0x3fefffffffffffffu, 0x3fffffffffffffffu, 0x3fefffffffffffeeu, 0x3fefffffffffffedu,
+             0xfff8000000000000u, 0x7ff8000000000001u})},
+  }};
+  std::vector<ArithmeticCase> cases;
+  for (const auto &[form, lanes] : forms) {
+    const bool f32 = form.width == 32;
+    for (UnaryLane lane : lanes) {
+      const std::string_view name = lane.name;
+      if (name.ends_with("Kept"))
+        lane.mode = f32 ? 0x30u : 0xc0u;
+      else if (name.ends_with("Flushed"))
+        lane.mode = f32 ? 0xc0u : 0x30u;
+      else if (name == "RoundNearestEven")
+        lane.mode = f32 ? 0xfcu : 0xf3u;
+      else if (name == "RoundTowardZero")
+        lane.mode = f32 ? 0xf3u : 0xfcu;
+      cases.push_back(unary_case(form, lane));
+    }
+  }
+  // F16 upper halves: hi(v0) = 0x8ce6 and 0x9e3f, captured with the .h forms.
+  const UnaryForm f16 = forms[0].form;
+  cases.push_back(unary_case(f16, {"NegativeNormal", Vop1High, {}, 0x8ce6u, 0xf0u, 0x3bffu}));
+  cases.push_back(unary_case(f16, {"NegativeNormal", Vop3High, {}, 0x9e3fu, 0xf0u, 0x3bf4u}));
+  return cases;
+}
+
+// V_LDEXP_F16 lanes from gfx1201. An exponent of 0x7fff overflows every finite
+// value; with MODE.FP16_OVFL (0x800000) the result saturates to the largest
+// finite half instead of infinity. These come from the audit captures. The
+// tininess lanes come from a targeted gfx1201 probe of all 512 MODE values:
+// 0x3bff * 2^-14 stays below the smallest normal at full precision, so it
+// flushes to zero once the F16/F64 output-denormal bit (0x80) is cleared,
+// although its subnormal encoding rounds up to 0x0400. Each varies one MODE
+// field from 0xf0. The value and exponent occupy the selected halves of v0 and
+// v1; their other halves hold 0x5a5a, and the destination's other half keeps 0xa5a5.
+std::vector<ArithmeticCase> ldexp_f16_cases() {
+  enum class Encoding { Vop2, Vop2High, Vop3, Vop3High };
+  struct Lane {
+    const char *name;
+    Encoding encoding;
+    rdna4::Vop3BuilderFields fields;
+    uint16_t value;
+    uint16_t exponent;
+    uint32_t mode;
+    uint16_t expected;
+  };
+  using enum Encoding;
+  const std::array<Lane, 16> lanes = {{
+      {"SaturatesPositiveOverflow", Vop2, {}, 0x0001u, 0x7fffu, 0x8000f0u, 0x7bffu},
+      {"PositiveOverflowWithoutSaturation", Vop2, {}, 0x0001u, 0x7fffu, 0xf0u, 0x7c00u},
+      {"SaturatesNegativeOverflow", Vop2, {}, 0x83ffu, 0x7fffu, 0x8000f0u, 0xfbffu},
+      {"SaturatesTowardZero", Vop2, {}, 0x83ffu, 0x7fffu, 0x8000ffu, 0xfbffu},
+      {"SaturatesOverflow", Vop3, {}, 0x3c00u, 0x7fffu, 0x8000f0u, 0x7bffu},
+      {"NegatedThenSaturated", Vop3, {.neg = 1}, 0x3c00u, 0x7fffu, 0x8000f0u, 0xfbffu},
+      {"SaturatedThenDoubled", Vop3, {.omod = 1}, 0x3c00u, 0x7fffu, 0x8000f0u, 0x7bffu},
+      {"SaturatesOverflow", Vop2High, {}, 0xbfd0u, 0x1d13u, 0x8000f0u, 0xfbffu},
+      {"SaturatesOverflow", Vop3High, {}, 0x096eu, 0x274eu, 0x8000f0u, 0x7bffu},
+      {"TinyRoundsToMinNormal", Vop2, {}, 0x3bffu, 0xfff2u, 0xf0u, 0x0400u},
+      {"TinyFlushed", Vop2, {}, 0x3bffu, 0xfff2u, 0x70u, 0x0000u},
+      {"TinyIgnoresF32OutputFlush", Vop2, {}, 0x3bffu, 0xfff2u, 0xd0u, 0x0400u},
+      {"TinyTowardZero", Vop2, {}, 0x3bffu, 0xfff2u, 0xfcu, 0x03ffu},
+      {"NegativeTinyFlushed", Vop3, {}, 0xbbffu, 0xfff2u, 0x70u, 0x8000u},
+      {"NegativeTinyTowardPositive", Vop3, {}, 0xbbffu, 0xfff2u, 0xf4u, 0x83ffu},
+      {"NegatedTinyFlushed", Vop3, {.neg = 1}, 0x3bffu, 0xfff2u, 0x70u, 0x8000u},
+  }};
+  static constexpr const char *kEncodingNames[] = {"Vop2", "Vop2High", "Vop3", "Vop3High"};
+  constexpr uint16_t V0 = 256, V1 = 257;
+  constexpr uint8_t kHighHalf = 128;
+  std::vector<ArithmeticCase> cases;
+  for (const Lane &lane : lanes) {
+    const bool high = lane.encoding == Vop2High || lane.encoding == Vop3High;
+    const bool vop3 = lane.encoding == Vop3 || lane.encoding == Vop3High;
+    std::array<uint32_t, 3> words{};
+    if (!vop3) {
+      const uint8_t half = high ? kHighHalf : 0;
+      const auto word = rdna4::build_vop2(
+          rdna4::kVLdexpF16Vop2,
+          {.src0 = uint16_t(V0 + half), .vsrc1 = uint8_t(1 + half), .vdst = uint8_t(6 + half)});
+      words = {word[0], 0u, 0u};
+    } else {
+      rdna4::Vop3BuilderFields fields = lane.fields;
+      fields.vdst = 6;
+      fields.src0 = V0;
+      fields.src1 = V1;
+      if (high)
+        fields.opsel = 0b1011; // both sources and the destination use the high half
+      const auto pair = rdna4::build_vop3(rdna4::kVLdexpF16Vop3, fields);
+      words = {pair[0], pair[1], 0u};
+    }
+    const auto place = [high](uint16_t half, uint32_t other) {
+      return high ? (uint32_t(half) << 16) | other : (other << 16) | half;
+    };
+    cases.push_back(
+        {std::string("LdexpF16") + kEncodingNames[static_cast<int>(lane.encoding)] + lane.name,
+         ROCJITSU_CODE_ARCH_RDNA4,
+         words,
+         {{0, place(lane.value, 0x5a5au)}, {1, place(lane.exponent, 0x5a5au)}, {6, 0xa5a5a5a5u}},
+         {{6, place(lane.expected, 0xa5a5u)}},
+         lane.mode,
+         FE_TONEAREST,
+         0,
+         0,
+         expect_simd_path(vop3 ? amdgpu::SimdFastPath::VOP3_LDEXP_RAW
+                               : amdgpu::SimdFastPath::VOP_WORDS)});
+  }
+  return cases;
+}
+
+// V_LDEXP_F32/F64 lanes from the same gfx1201 probe; the audit captures do not
+// reach them. The value just below 1.0 scaled to just below the smallest
+// normal stays tiny at full precision: with the format's output-denormal bit
+// cleared it flushes to a signed zero, kept it rounds to the smallest normal or,
+// toward zero, to the largest subnormal. Each lane varies one MODE field from
+// 0xf0, and the other format's output flush leaves it unchanged.
+std::vector<ArithmeticCase> ldexp_tininess_cases() {
+  struct Lane {
+    const char *name;
+    uint64_t value;
+    int32_t exponent;
+    uint32_t mode;
+    uint64_t expected;
+  };
+  const auto add = [](std::vector<ArithmeticCase> &cases, bool f64, const Lane &lane) {
+    // v6 (v[6:7]) = ldexp(v0 (v[0:1]), v2)
+    const auto words = rdna4::build_vop3(f64 ? rdna4::kVLdexpF64Vop3 : rdna4::kVLdexpF32Vop3,
+                                         {.vdst = 6, .src0 = 256, .src1 = 258});
+    std::vector<std::pair<uint32_t, uint32_t>> sources{{0, uint32_t(lane.value)},
+                                                       {2, uint32_t(lane.exponent)}};
+    std::vector<std::pair<uint32_t, uint32_t>> expected{{6, uint32_t(lane.expected)}};
+    if (f64) {
+      sources.emplace_back(1, uint32_t(lane.value >> 32));
+      expected.emplace_back(7, uint32_t(lane.expected >> 32));
+    }
+    const bool simd = !f64 || !UTIL_SIMD_BROKEN_NATIVE_64BIT_MASKS;
+    cases.push_back(
+        {std::string(f64 ? "LdexpF64" : "LdexpF32") + lane.name,
+         ROCJITSU_CODE_ARCH_RDNA4,
+         {words[0], words[1], 0u},
+         std::move(sources),
+         std::move(expected),
+         lane.mode,
+         FE_TONEAREST,
+         0,
+         0,
+         simd ? expect_simd_path(amdgpu::SimdFastPath::VOP3_LDEXP_RAW) : SimdPathExpectation{}});
+  };
+  std::vector<ArithmeticCase> cases;
+  for (const Lane &lane : {
+           Lane{"TinyRoundsToMinNormal", 0x3f7fffffu, -126, 0xf0u, 0x00800000u},
+           Lane{"TinyFlushed", 0x3f7fffffu, -126, 0xd0u, 0u},
+           Lane{"TinyIgnoresF64OutputFlush", 0x3f7fffffu, -126, 0x70u, 0x00800000u},
+           Lane{"TinyTowardZero", 0x3f7fffffu, -126, 0xf3u, 0x007fffffu},
+           Lane{"NegativeTinyFlushed", 0xbf7fffffu, -126, 0xd0u, 0x80000000u},
+           Lane{"NegativeTinyTowardPositive", 0xbf7fffffu, -126, 0xf1u, 0x807fffffu},
+       })
+    add(cases, false, lane);
+  for (const Lane &lane : {
+           Lane{"TinyRoundsToMinNormal", 0x3fefffffffffffffu, -1022, 0xf0u, 0x0010000000000000u},
+           Lane{"TinyFlushed", 0x3fefffffffffffffu, -1022, 0x70u, 0u},
+           Lane{"TinyIgnoresF32OutputFlush", 0x3fefffffffffffffu, -1022, 0xd0u,
+                0x0010000000000000u},
+           Lane{"TinyTowardZero", 0x3fefffffffffffffu, -1022, 0xfcu, 0x000fffffffffffffu},
+           Lane{"NegativeTinyFlushed", 0xbfefffffffffffffu, -1022, 0x70u, 0x8000000000000000u},
+           Lane{"NegativeTinyTowardPositive", 0xbfefffffffffffffu, -1022, 0xf4u,
+                0x800fffffffffffffu},
+       })
+    add(cases, true, lane);
+  return cases;
+}
+
 SimdPathExpectation simd_expectation_for_run(const ArithmeticCase &test, bool force_scalar) {
   if (!util::has_stdx_simd || !test.simd.checked)
     return {};
@@ -3001,6 +3285,34 @@ INSTANTIATE_TEST_SUITE_P(OutputModifiers, ValuIntegralRoundingModeTest,
 
 INSTANTIATE_TEST_SUITE_P(InputFlush, ValuIntegralRoundingModeTest,
                          testing::ValuesIn(integral_rounding_input_flush_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+// Each case is a gfx1201 lane, checked on the forced-scalar and SIMD paths.
+class ValuCapturedLaneTest : public testing::TestWithParam<ArithmeticCase> {};
+
+TEST_P(ValuCapturedLaneTest, MatchesGfx1201OnScalarAndSimdPaths) {
+  ForceScalarGuard guard;
+  for (const bool scalar : {true, false}) {
+    SCOPED_TRACE(scalar ? "scalar" : "SIMD enabled");
+    util::set_force_scalar_for_testing(scalar);
+    expect_arithmetic_case(GetParam(), simd_expectation_for_run(GetParam(), scalar));
+  }
+}
+
+INSTANTIATE_TEST_SUITE_P(Fract, ValuCapturedLaneTest, testing::ValuesIn(fract_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(LdexpF16, ValuCapturedLaneTest, testing::ValuesIn(ldexp_f16_cases()),
+                         [](const testing::TestParamInfo<ArithmeticCase> &info) {
+                           return info.param.name;
+                         });
+
+INSTANTIATE_TEST_SUITE_P(LdexpTininess, ValuCapturedLaneTest,
+                         testing::ValuesIn(ldexp_tininess_cases()),
                          [](const testing::TestParamInfo<ArithmeticCase> &info) {
                            return info.param.name;
                          });
@@ -3460,10 +3772,10 @@ TEST(ValuFpModeHelpers, HostFlushControlsDoNotOverrideGpuMode) {
   const bool native_matches = amdgpu::fp_mode::native_arithmetic_matches(0, 3);
   const uint32_t result = std::bit_cast<uint32_t>(amdgpu::fp_mode::arithmetic<Arithmetic::ADD>(
       std::bit_cast<float>(1u), std::bit_cast<float>(1u), 0.0f, 0, 3));
-  const uint32_t scaled32 =
-      std::bit_cast<uint32_t>(amdgpu::ldexp(std::bit_cast<float>(1u), 1, 1, 3));
+  const auto ldexp_policy = amdgpu::ldexp::Policy::make(3, 1, false);
+  const uint32_t scaled32 = amdgpu::ldexp::evaluate<amdgpu::fp_format::F32>(1u, 1u, ldexp_policy);
   const uint64_t scaled64 =
-      std::bit_cast<uint64_t>(amdgpu::ldexp(std::bit_cast<double>(uint64_t{1}), 1, 1, 3));
+      amdgpu::ldexp::evaluate<amdgpu::fp_format::F64, 32>(uint64_t{1}, uint64_t{1}, ldexp_policy);
   const amdgpu::FrexpF32Result split = amdgpu::frexp_f32(std::bit_cast<float>(1u), 3);
   const uint32_t restored_mxcsr = _mm_getcsr();
   _mm_setcsr(saved_mxcsr);
