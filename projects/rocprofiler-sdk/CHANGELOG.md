@@ -23,6 +23,8 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 ### Changed
 
 - rocPD schema 3.0.5 stores SPM counter location on `rocpd_info_pmc`. Each agent and combination of counter, XCC, shader engine, shader array, WGP, and instance has its own pmc id. Location dimensions not provided for a counter are stored as `NULL` and left blank in CSV output. The instance index is always stored. `rocpd_pmc_event` keeps the sample value and points at that id.
+- Bump rocpd schema to version 3.0.6 for PC sampling support (`rocpd_gpu_pc_sample`, blob tables `rocpd_info_blob_schema`/`rocpd_info_blob_field`/`rocpd_blob_event`, `rocpd_disassembly_data`, and `rocpd_event.parent_id`). The pre-PC-sampling 3.0.5 schema is now frozen under `versions/3.0.5/` per the rocpd schema versioning scheme.
+- rocpd lazily disassembles PC samples only from code objects whose bytes match the content hash `rocprofv3` records for them, and writes back only those instructions. `rocpd2csv` and `python -m rocpd.query` accept `--no-cache-disassembly` and `--codeobj-path-prefix-map`, and the PC-sampling CSV files start with a `Guid` column.
 - Request ROCr high-precision timestamp correlation during HSA registration when GPU timestamp collection is configured and the runtime provides the tools API. Older runtimes and tools that only trace CPU APIs or markers retain the existing behavior.
 
 ### Resolved issues
