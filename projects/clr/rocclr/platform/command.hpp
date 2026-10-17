@@ -345,7 +345,6 @@ class Command : public Event {
 
   bool packetCapturing_ = false;       //!< Flag to enable/disable graph gpu packet capture
   GraphPacketCaptureContext* graphCapture_ = nullptr;  //!< Capture context, owned by the graph node
-  address kernArgOffset_ = nullptr;  //!< KernelArg buffer to used when graph capturing is enabled
  protected:
   bool cpu_wait_ = false;  //!< If true, then the command was issued for CPU/GPU sync
 
@@ -1095,8 +1094,8 @@ class BatchMemoryOperationCommand : public Command {
                               size_t paramSize)
       : Command(queue, cmdType, eventWaitList),
         count_(count),
-        paramArray_(paramArray),
         flags_(flags),
+        paramArray_(paramArray),
         paramSize_(paramSize) {
     // Sanity check
     assert(((cmdType == ROCCLR_COMMAND_BATCH_STREAM)) && "Invalid batch memory operation");
@@ -1113,7 +1112,7 @@ class BatchMemoryOperationCommand : public Command {
 
  private:
   uint32_t count_;          // !< The number of operations in the array.
-  uint32_t flags_;          // !< Reserved for future expansion. Must be 0.
+  [[maybe_unused]] uint32_t flags_;  // !< Reserved for future expansion. Must be 0.
   const void* paramArray_;  // !< Pointer to the array of individual operations
   size_t paramSize_;        // !< size in bytes of the param array passed
 };
@@ -1711,7 +1710,7 @@ class Marker : public Command {
   bool isMarkerCommand() const override { return true; }
 
   //! The actual command implementation.
-  virtual void submit(device::VirtualDevice& device) { device.submitMarker(*this); }
+  void submit(device::VirtualDevice& device) override { device.submitMarker(*this); }
 };
 
 class AccumulateCommand : public Command {
@@ -2264,8 +2263,8 @@ class SvmPrefetchAsyncCommand : public Command {
         dev_ptr_(dev_ptr),
         count_(count),
         cpu_access_(cpu_access),
-        dev_(dev),
-        numa_id_(numa_id) {}
+        numa_id_(numa_id),
+        dev_(dev) {}
 
   virtual void submit(device::VirtualDevice& device) { device.submitSvmPrefetchAsync(*this); }
 

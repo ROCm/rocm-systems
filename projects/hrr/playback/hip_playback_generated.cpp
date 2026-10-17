@@ -111,7 +111,7 @@ static hipError_t playback_hipBindTextureToMipmappedArray(PlaybackContext& ctx, 
 }
 
 static hipError_t playback_hipChooseDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipChooseDevice*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipChooseDevice*>(payload);
   int _out_device{};
   hipDeviceProp_t _d_prop{};
   if (a->prop_present)
@@ -125,7 +125,7 @@ static hipError_t playback_hipChooseDevice(PlaybackContext& ctx, const uint8_t* 
 }
 
 static hipError_t playback_hipChooseDeviceR0000(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipChooseDeviceR0000*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipChooseDeviceR0000*>(payload);
   int _out_device{};
   hipDeviceProp_tR0000 _d_properties{};
   if (a->properties_present)
@@ -139,7 +139,7 @@ static hipError_t playback_hipChooseDeviceR0000(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipConfigureCall(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipConfigureCall*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipConfigureCall*>(payload);
   dim3 _dim_gridDim(a->gridDim_x, a->gridDim_y, a->gridDim_z);
   dim3 _dim_blockDim(a->blockDim_x, a->blockDim_y, a->blockDim_z);
   hipError_t _r = (hipError_t)hipConfigureCall(_dim_gridDim, _dim_blockDim, (size_t)a->sharedMem, (hipStream_t)ctx.translate_stream(a->stream));
@@ -168,7 +168,7 @@ static hipError_t playback_hipCreateTextureObject(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipCtxCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxCreate*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipCtxCreate*>(payload);
   hipCtx_t _out_ctx = nullptr;
   hipError_t _r = (hipError_t)hipCtxCreate(&_out_ctx, (unsigned int)a->flags, (hipDevice_t)a->device);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -182,7 +182,7 @@ static hipError_t playback_hipCtxCreate(PlaybackContext& ctx, const uint8_t* pay
 }
 
 static hipError_t playback_hipCtxDestroy(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxDestroy*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipCtxDestroy*>(payload);
   uint64_t _rec_hdl = a->ctx;
   hipError_t _r = (hipError_t)hipCtxDestroy((hipCtx_t)ctx.translate_ctx(_rec_hdl));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -236,7 +236,7 @@ static hipError_t playback_hipCtxGetCacheConfig(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipCtxGetCurrent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxGetCurrent*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipCtxGetCurrent*>(payload);
   hipCtx_t _out_ctx = nullptr;
   hipError_t _r = (hipError_t)hipCtxGetCurrent(&_out_ctx);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -280,7 +280,7 @@ static hipError_t playback_hipCtxGetSharedMemConfig(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipCtxPopCurrent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxPopCurrent*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipCtxPopCurrent*>(payload);
   hipCtx_t _out_ctx = nullptr;
   hipError_t _r = (hipError_t)hipCtxPopCurrent(&_out_ctx);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -294,7 +294,7 @@ static hipError_t playback_hipCtxPopCurrent(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipCtxPushCurrent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxPushCurrent*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipCtxPushCurrent*>(payload);
   hipError_t _r = (hipError_t)hipCtxPushCurrent((hipCtx_t)ctx.translate_ctx(a->ctx));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipCtxPushCurrent", a->ret);
@@ -304,7 +304,7 @@ static hipError_t playback_hipCtxPushCurrent(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipCtxSetCacheConfig(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxSetCacheConfig*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipCtxSetCacheConfig*>(payload);
   hipError_t _r = (hipError_t)hipCtxSetCacheConfig((hipFuncCache_t)a->cacheConfig);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipCtxSetCacheConfig", a->ret);
@@ -324,7 +324,7 @@ static hipError_t playback_hipCtxSetCurrent(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipCtxSetSharedMemConfig(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxSetSharedMemConfig*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipCtxSetSharedMemConfig*>(payload);
   hipError_t _r = (hipError_t)hipCtxSetSharedMemConfig((hipSharedMemConfig)a->config);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipCtxSetSharedMemConfig", a->ret);
@@ -334,7 +334,7 @@ static hipError_t playback_hipCtxSetSharedMemConfig(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipCtxSynchronize(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipCtxSynchronize*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipCtxSynchronize*>(payload);
   hipError_t _r = (hipError_t)hipCtxSynchronize();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipCtxSynchronize", a->ret);
@@ -358,7 +358,7 @@ static hipError_t playback_hipDestroyExternalSemaphore(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipDestroySurfaceObject(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDestroySurfaceObject*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDestroySurfaceObject*>(payload);
   uint64_t _rec_hdl = a->surfaceObject;
   hipError_t _r = (hipError_t)hipDestroySurfaceObject((hipSurfaceObject_t)ctx.translate_surface(_rec_hdl));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -382,7 +382,7 @@ static hipError_t playback_hipDestroyTextureObject(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipDeviceCanAccessPeer(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceCanAccessPeer*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceCanAccessPeer*>(payload);
   int _out_canAccessPeer{};
   hipError_t _r = (hipError_t)hipDeviceCanAccessPeer(&_out_canAccessPeer, (int)a->deviceId, (int)a->peerDeviceId);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -393,7 +393,7 @@ static hipError_t playback_hipDeviceCanAccessPeer(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipDeviceComputeCapability(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceComputeCapability*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceComputeCapability*>(payload);
   int _out_major{};
   int _out_minor{};
   hipError_t _r = (hipError_t)hipDeviceComputeCapability(&_out_major, &_out_minor, (hipDevice_t)a->device);
@@ -405,7 +405,7 @@ static hipError_t playback_hipDeviceComputeCapability(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipDeviceDisablePeerAccess(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceDisablePeerAccess*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceDisablePeerAccess*>(payload);
   hipError_t _r = (hipError_t)hipDeviceDisablePeerAccess((int)a->peerDeviceId);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceDisablePeerAccess", a->ret);
@@ -415,7 +415,7 @@ static hipError_t playback_hipDeviceDisablePeerAccess(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipDeviceEnablePeerAccess(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceEnablePeerAccess*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceEnablePeerAccess*>(payload);
   hipError_t _r = (hipError_t)hipDeviceEnablePeerAccess((int)a->peerDeviceId, (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceEnablePeerAccess", a->ret);
@@ -435,7 +435,7 @@ static hipError_t playback_hipDeviceGet(PlaybackContext& ctx, const uint8_t* pay
 }
 
 static hipError_t playback_hipDeviceGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetAttribute*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetAttribute*>(payload);
   int _out_pi{};
   hipError_t _r = (hipError_t)hipDeviceGetAttribute(&_out_pi, (hipDeviceAttribute_t)a->attr, (int)a->deviceId);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -456,7 +456,7 @@ static hipError_t playback_hipDeviceGetByPCIBusId(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipDeviceGetCacheConfig(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetCacheConfig*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetCacheConfig*>(payload);
   hipFuncCache_t _out_cacheConfig{};
   hipError_t _r = (hipError_t)hipDeviceGetCacheConfig(&_out_cacheConfig);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -467,7 +467,7 @@ static hipError_t playback_hipDeviceGetCacheConfig(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipDeviceGetDefaultMemPool(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetDefaultMemPool*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetDefaultMemPool*>(payload);
   hipMemPool_t _out_mem_pool = nullptr;
   hipError_t _r = (hipError_t)hipDeviceGetDefaultMemPool(&_out_mem_pool, (int)a->device);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -491,7 +491,7 @@ static hipError_t playback_hipDeviceGetGraphMemAttribute(PlaybackContext& ctx, c
 }
 
 static hipError_t playback_hipDeviceGetLimit(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetLimit*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetLimit*>(payload);
   size_t _out_pValue{};
   hipError_t _r = (hipError_t)hipDeviceGetLimit(&_out_pValue, (enum hipLimit_t)a->limit);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -502,7 +502,7 @@ static hipError_t playback_hipDeviceGetLimit(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipDeviceGetMemPool(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetMemPool*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetMemPool*>(payload);
   hipMemPool_t _out_mem_pool = nullptr;
   hipError_t _r = (hipError_t)hipDeviceGetMemPool(&_out_mem_pool, (int)a->device);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -526,7 +526,7 @@ static hipError_t playback_hipDeviceGetName(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipDeviceGetP2PAttribute(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetP2PAttribute*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetP2PAttribute*>(payload);
   int _out_value{};
   hipError_t _r = (hipError_t)hipDeviceGetP2PAttribute(&_out_value, (hipDeviceP2PAttr)a->attr, (int)a->srcDevice, (int)a->dstDevice);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -547,7 +547,7 @@ static hipError_t playback_hipDeviceGetPCIBusId(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipDeviceGetSharedMemConfig(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetSharedMemConfig*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetSharedMemConfig*>(payload);
   hipSharedMemConfig _out_pConfig{};
   hipError_t _r = (hipError_t)hipDeviceGetSharedMemConfig(&_out_pConfig);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -558,7 +558,7 @@ static hipError_t playback_hipDeviceGetSharedMemConfig(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipDeviceGetStreamPriorityRange(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetStreamPriorityRange*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetStreamPriorityRange*>(payload);
   int _out_leastPriority{};
   int _out_greatestPriority{};
   hipError_t _r = (hipError_t)hipDeviceGetStreamPriorityRange(&_out_leastPriority, &_out_greatestPriority);
@@ -580,7 +580,7 @@ static hipError_t playback_hipDeviceGetUuid(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipDeviceGraphMemTrim(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGraphMemTrim*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGraphMemTrim*>(payload);
   hipError_t _r = (hipError_t)hipDeviceGraphMemTrim((int)a->device);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceGraphMemTrim", a->ret);
@@ -620,7 +620,7 @@ static hipError_t playback_hipDevicePrimaryCtxReset(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipDevicePrimaryCtxRetain(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDevicePrimaryCtxRetain*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDevicePrimaryCtxRetain*>(payload);
   hipCtx_t _out_pctx = nullptr;
   hipError_t _r = (hipError_t)hipDevicePrimaryCtxRetain(&_out_pctx, (hipDevice_t)a->dev);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -644,7 +644,7 @@ static hipError_t playback_hipDevicePrimaryCtxSetFlags(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipDeviceReset(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceReset*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceReset*>(payload);
   hipError_t _r = (hipError_t)hipDeviceReset();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceReset", a->ret);
@@ -654,7 +654,7 @@ static hipError_t playback_hipDeviceReset(PlaybackContext& ctx, const uint8_t* p
 }
 
 static hipError_t playback_hipDeviceSetCacheConfig(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceSetCacheConfig*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceSetCacheConfig*>(payload);
   hipError_t _r = (hipError_t)hipDeviceSetCacheConfig((hipFuncCache_t)a->cacheConfig);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceSetCacheConfig", a->ret);
@@ -674,7 +674,7 @@ static hipError_t playback_hipDeviceSetGraphMemAttribute(PlaybackContext& ctx, c
 }
 
 static hipError_t playback_hipDeviceSetLimit(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceSetLimit*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceSetLimit*>(payload);
   hipError_t _r = (hipError_t)hipDeviceSetLimit((enum hipLimit_t)a->limit, (size_t)a->value);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceSetLimit", a->ret);
@@ -684,7 +684,7 @@ static hipError_t playback_hipDeviceSetLimit(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipDeviceSetMemPool(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceSetMemPool*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceSetMemPool*>(payload);
   hipError_t _r = (hipError_t)hipDeviceSetMemPool((int)a->device, (hipMemPool_t)ctx.translate_mempool(a->mem_pool));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceSetMemPool", a->ret);
@@ -694,7 +694,7 @@ static hipError_t playback_hipDeviceSetMemPool(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipDeviceSetSharedMemConfig(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceSetSharedMemConfig*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceSetSharedMemConfig*>(payload);
   hipError_t _r = (hipError_t)hipDeviceSetSharedMemConfig((hipSharedMemConfig)a->config);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceSetSharedMemConfig", a->ret);
@@ -704,7 +704,7 @@ static hipError_t playback_hipDeviceSetSharedMemConfig(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipDeviceSynchronize(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceSynchronize*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceSynchronize*>(payload);
   hipError_t _r = (hipError_t)hipDeviceSynchronize();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipDeviceSynchronize", a->ret);
@@ -714,7 +714,7 @@ static hipError_t playback_hipDeviceSynchronize(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipDeviceTotalMem(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceTotalMem*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceTotalMem*>(payload);
   size_t _out_bytes{};
   hipError_t _r = (hipError_t)hipDeviceTotalMem(&_out_bytes, (hipDevice_t)a->device);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -725,7 +725,7 @@ static hipError_t playback_hipDeviceTotalMem(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipDriverGetVersion(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDriverGetVersion*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDriverGetVersion*>(payload);
   int _out_driverVersion{};
   hipError_t _r = (hipError_t)hipDriverGetVersion(&_out_driverVersion);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -780,7 +780,7 @@ extern hipError_t playback_hipEventCreateWithFlags(PlaybackContext& ctx, const u
 extern hipError_t playback_hipEventDestroy(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipEventElapsedTime*>(payload);
   float _out_ms{};
   hipError_t _r = (hipError_t)hipEventElapsedTime(&_out_ms, (hipEvent_t)ctx.translate_event(a->start), (hipEvent_t)ctx.translate_event(a->stop));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -793,7 +793,7 @@ static hipError_t playback_hipEventElapsedTime(PlaybackContext& ctx, const uint8
 extern hipError_t playback_hipEventQuery(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipEventRecord(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventRecord*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipEventRecord*>(payload);
   hipError_t _r = (hipError_t)hipEventRecord((hipEvent_t)ctx.translate_event(a->event), (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipEventRecord", a->ret);
@@ -803,7 +803,7 @@ static hipError_t playback_hipEventRecord(PlaybackContext& ctx, const uint8_t* p
 }
 
 static hipError_t playback_hipEventSynchronize(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventSynchronize*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipEventSynchronize*>(payload);
   hipError_t _r = (hipError_t)hipEventSynchronize((hipEvent_t)ctx.translate_event(a->event));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipEventSynchronize", a->ret);
@@ -957,7 +957,7 @@ static hipError_t playback_hipGetChannelDesc(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipGetDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetDevice*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetDevice*>(payload);
   int _out_deviceId{};
   hipError_t _r = (hipError_t)hipGetDevice(&_out_deviceId);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -968,7 +968,7 @@ static hipError_t playback_hipGetDevice(PlaybackContext& ctx, const uint8_t* pay
 }
 
 static hipError_t playback_hipGetDeviceCount(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetDeviceCount*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetDeviceCount*>(payload);
   int _out_count{};
   hipError_t _r = (hipError_t)hipGetDeviceCount(&_out_count);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -979,7 +979,7 @@ static hipError_t playback_hipGetDeviceCount(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipGetDeviceFlags(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetDeviceFlags*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetDeviceFlags*>(payload);
   unsigned int _out_flags{};
   hipError_t _r = (hipError_t)hipGetDeviceFlags(&_out_flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -990,7 +990,7 @@ static hipError_t playback_hipGetDeviceFlags(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipGetDevicePropertiesR0600(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetDevicePropertiesR0600*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetDevicePropertiesR0600*>(payload);
   hipDeviceProp_tR0600 _out_prop{};
   hipError_t _r = (hipError_t)hipGetDevicePropertiesR0600(&_out_prop, (int)a->device);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -1031,7 +1031,7 @@ static hipError_t playback_hipGetErrorString(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipGetLastError(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetLastError*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetLastError*>(payload);
   hipError_t _r = (hipError_t)hipGetLastError();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipGetLastError", a->ret);
@@ -1062,7 +1062,7 @@ static hipError_t playback_hipGetTextureAlignmentOffset(PlaybackContext& ctx, co
 }
 
 static hipError_t playback_hipGetTextureObjectResourceDesc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetTextureObjectResourceDesc*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetTextureObjectResourceDesc*>(payload);
   hipResourceDesc _out_pResDesc{};
   hipError_t _r = (hipError_t)hipGetTextureObjectResourceDesc(&_out_pResDesc, (hipTextureObject_t)ctx.translate_texture(a->textureObject));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -1073,7 +1073,7 @@ static hipError_t playback_hipGetTextureObjectResourceDesc(PlaybackContext& ctx,
 }
 
 static hipError_t playback_hipGetTextureObjectResourceViewDesc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetTextureObjectResourceViewDesc*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetTextureObjectResourceViewDesc*>(payload);
   struct hipResourceViewDesc _out_pResViewDesc{};
   hipError_t _r = (hipError_t)hipGetTextureObjectResourceViewDesc(&_out_pResViewDesc, (hipTextureObject_t)ctx.translate_texture(a->textureObject));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -1084,7 +1084,7 @@ static hipError_t playback_hipGetTextureObjectResourceViewDesc(PlaybackContext& 
 }
 
 static hipError_t playback_hipGetTextureObjectTextureDesc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetTextureObjectTextureDesc*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetTextureObjectTextureDesc*>(payload);
   hipTextureDesc _out_pTexDesc{};
   hipError_t _r = (hipError_t)hipGetTextureObjectTextureDesc(&_out_pTexDesc, (hipTextureObject_t)ctx.translate_texture(a->textureObject));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -1105,7 +1105,7 @@ static hipError_t playback_hipGetTextureReference(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipGraphAddChildGraphNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddChildGraphNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddChildGraphNode*>(payload);
   hipGraphNode_t _out_pGraphNode = nullptr;
   hipGraphNode_t _d_pDependencies[16]{};
   uint32_t _d_pDependencies_n = a->pDependencies_n > 16u ? 16u : a->pDependencies_n;
@@ -1141,7 +1141,7 @@ static hipError_t playback_hipGraphAddChildGraphNode(PlaybackContext& ctx, const
 }
 
 static hipError_t playback_hipGraphAddDependencies(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddDependencies*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddDependencies*>(payload);
   hipGraphNode_t _d_from[16]{};
   uint32_t _d_from_n = a->from_n > 16u ? 16u : a->from_n;
   (void)_d_from_n;
@@ -1191,7 +1191,7 @@ static hipError_t playback_hipGraphAddDependencies(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipGraphAddEmptyNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddEmptyNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddEmptyNode*>(payload);
   hipGraphNode_t _out_pGraphNode = nullptr;
   hipGraphNode_t _d_pDependencies[16]{};
   uint32_t _d_pDependencies_n = a->pDependencies_n > 16u ? 16u : a->pDependencies_n;
@@ -1225,7 +1225,7 @@ static hipError_t playback_hipGraphAddEmptyNode(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipGraphAddEventRecordNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddEventRecordNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddEventRecordNode*>(payload);
   hipGraphNode_t _out_pGraphNode = nullptr;
   hipGraphNode_t _d_pDependencies[16]{};
   uint32_t _d_pDependencies_n = a->pDependencies_n > 16u ? 16u : a->pDependencies_n;
@@ -1259,7 +1259,7 @@ static hipError_t playback_hipGraphAddEventRecordNode(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipGraphAddEventWaitNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddEventWaitNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddEventWaitNode*>(payload);
   hipGraphNode_t _out_pGraphNode = nullptr;
   hipGraphNode_t _d_pDependencies[16]{};
   uint32_t _d_pDependencies_n = a->pDependencies_n > 16u ? 16u : a->pDependencies_n;
@@ -1305,7 +1305,7 @@ extern hipError_t playback_hipGraphAddKernelNode(PlaybackContext& ctx, const uin
 extern hipError_t playback_hipGraphAddMemAllocNode(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipGraphAddMemFreeNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddMemFreeNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddMemFreeNode*>(payload);
   hipGraphNode_t _out_pGraphNode = nullptr;
   hipGraphNode_t _d_pDependencies[16]{};
   uint32_t _d_pDependencies_n = a->pDependencies_n > 16u ? 16u : a->pDependencies_n;
@@ -1339,7 +1339,7 @@ static hipError_t playback_hipGraphAddMemFreeNode(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipGraphAddMemcpyNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddMemcpyNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddMemcpyNode*>(payload);
   hipGraphNode_t _out_pGraphNode = nullptr;
   hipGraphNode_t _d_pDependencies[16]{};
   uint32_t _d_pDependencies_n = a->pDependencies_n > 16u ? 16u : a->pDependencies_n;
@@ -1380,7 +1380,7 @@ static hipError_t playback_hipGraphAddMemcpyNode(PlaybackContext& ctx, const uin
 }
 
 static hipError_t playback_hipGraphAddMemcpyNode1D(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddMemcpyNode1D*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddMemcpyNode1D*>(payload);
   hipGraphNode_t _out_pGraphNode = nullptr;
   hipGraphNode_t _d_pDependencies[16]{};
   uint32_t _d_pDependencies_n = a->pDependencies_n > 16u ? 16u : a->pDependencies_n;
@@ -1418,7 +1418,7 @@ extern hipError_t playback_hipGraphAddMemcpyNodeFromSymbol(PlaybackContext& ctx,
 extern hipError_t playback_hipGraphAddMemcpyNodeToSymbol(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipGraphAddMemsetNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphAddMemsetNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphAddMemsetNode*>(payload);
   hipGraphNode_t _out_pGraphNode = nullptr;
   hipGraphNode_t _d_pDependencies[16]{};
   uint32_t _d_pDependencies_n = a->pDependencies_n > 16u ? 16u : a->pDependencies_n;
@@ -1466,7 +1466,7 @@ static hipError_t playback_hipGraphChildGraphNodeGetGraph(PlaybackContext& ctx, 
 }
 
 static hipError_t playback_hipGraphClone(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphClone*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphClone*>(payload);
   hipGraph_t _out_pGraphClone = nullptr;
   hipError_t _r = (hipError_t)hipGraphClone(&_out_pGraphClone, (hipGraph_t)ctx.translate_graph(a->originalGraph));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -1482,7 +1482,7 @@ static hipError_t playback_hipGraphClone(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipGraphCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphCreate*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphCreate*>(payload);
   hipGraph_t _out_pGraph = nullptr;
   hipError_t _r = (hipError_t)hipGraphCreate(&_out_pGraph, (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -1516,7 +1516,7 @@ static hipError_t playback_hipGraphDestroy(PlaybackContext& ctx, const uint8_t* 
 }
 
 static hipError_t playback_hipGraphDestroyNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphDestroyNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphDestroyNode*>(payload);
   if (a->node != 0 && ctx.translate_graph_node(a->node) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1550,7 +1550,7 @@ static hipError_t playback_hipGraphEventRecordNodeGetEvent(PlaybackContext& ctx,
 }
 
 static hipError_t playback_hipGraphEventRecordNodeSetEvent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphEventRecordNodeSetEvent*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphEventRecordNodeSetEvent*>(payload);
   if (a->node != 0 && ctx.translate_graph_node(a->node) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1580,7 +1580,7 @@ static hipError_t playback_hipGraphEventWaitNodeGetEvent(PlaybackContext& ctx, c
 }
 
 static hipError_t playback_hipGraphEventWaitNodeSetEvent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphEventWaitNodeSetEvent*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphEventWaitNodeSetEvent*>(payload);
   if (a->node != 0 && ctx.translate_graph_node(a->node) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1600,7 +1600,7 @@ static hipError_t playback_hipGraphEventWaitNodeSetEvent(PlaybackContext& ctx, c
 }
 
 static hipError_t playback_hipGraphExecChildGraphNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExecChildGraphNodeSetParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphExecChildGraphNodeSetParams*>(payload);
   if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1640,7 +1640,7 @@ static hipError_t playback_hipGraphExecDestroy(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipGraphExecEventRecordNodeSetEvent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExecEventRecordNodeSetEvent*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphExecEventRecordNodeSetEvent*>(payload);
   if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1670,7 +1670,7 @@ static hipError_t playback_hipGraphExecEventRecordNodeSetEvent(PlaybackContext& 
 }
 
 static hipError_t playback_hipGraphExecEventWaitNodeSetEvent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExecEventWaitNodeSetEvent*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphExecEventWaitNodeSetEvent*>(payload);
   if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1709,7 +1709,7 @@ static hipError_t playback_hipGraphExecHostNodeSetParams(PlaybackContext& ctx, c
 extern hipError_t playback_hipGraphExecKernelNodeSetParams(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipGraphExecMemcpyNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParams*>(payload);
   if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1746,7 +1746,7 @@ static hipError_t playback_hipGraphExecMemcpyNodeSetParams(PlaybackContext& ctx,
 }
 
 static hipError_t playback_hipGraphExecMemcpyNodeSetParams1D(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParams1D*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphExecMemcpyNodeSetParams1D*>(payload);
   if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1780,7 +1780,7 @@ extern hipError_t playback_hipGraphExecMemcpyNodeSetParamsFromSymbol(PlaybackCon
 extern hipError_t playback_hipGraphExecMemcpyNodeSetParamsToSymbol(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipGraphExecMemsetNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExecMemsetNodeSetParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphExecMemsetNodeSetParams*>(payload);
   if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1875,7 +1875,7 @@ extern hipError_t playback_hipGraphInstantiate(PlaybackContext& ctx, const uint8
 extern hipError_t playback_hipGraphInstantiateWithFlags(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipGraphKernelNodeCopyAttributes(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphKernelNodeCopyAttributes*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphKernelNodeCopyAttributes*>(payload);
   if (a->hSrc != 0 && ctx.translate_graph_node(a->hSrc) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1925,7 +1925,7 @@ static hipError_t playback_hipGraphKernelNodeGetParams(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipGraphKernelNodeSetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphKernelNodeSetAttribute*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphKernelNodeSetAttribute*>(payload);
   if (a->hNode != 0 && ctx.translate_graph_node(a->hNode) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -1986,7 +1986,7 @@ static hipError_t playback_hipGraphMemcpyNodeGetParams(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipGraphMemcpyNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParams*>(payload);
   if (a->node != 0 && ctx.translate_graph_node(a->node) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -2013,7 +2013,7 @@ static hipError_t playback_hipGraphMemcpyNodeSetParams(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipGraphMemcpyNodeSetParams1D(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParams1D*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphMemcpyNodeSetParams1D*>(payload);
   if (a->node != 0 && ctx.translate_graph_node(a->node) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -2047,7 +2047,7 @@ static hipError_t playback_hipGraphMemsetNodeGetParams(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipGraphMemsetNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphMemsetNodeSetParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphMemsetNodeSetParams*>(payload);
   if (a->node != 0 && ctx.translate_graph_node(a->node) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -2071,7 +2071,7 @@ static hipError_t playback_hipGraphMemsetNodeSetParams(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipGraphNodeFindInClone(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphNodeFindInClone*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphNodeFindInClone*>(payload);
   if (a->originalNode != 0 && ctx.translate_graph_node(a->originalNode) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -2135,7 +2135,7 @@ static hipError_t playback_hipGraphNodeGetType(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipGraphNodeSetEnabled(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphNodeSetEnabled*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphNodeSetEnabled*>(payload);
   if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -2225,7 +2225,7 @@ static hipError_t playback_hipGraphicsGLRegisterImage(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipGraphicsMapResources(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphicsMapResources*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphicsMapResources*>(payload);
   hipGraphicsResource_t _out_resources{};
   hipError_t _r = (hipError_t)hipGraphicsMapResources((int)a->count, &_out_resources, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -2250,7 +2250,7 @@ static hipError_t playback_hipGraphicsSubResourceGetMappedArray(PlaybackContext&
 }
 
 static hipError_t playback_hipGraphicsUnmapResources(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphicsUnmapResources*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphicsUnmapResources*>(payload);
   hipGraphicsResource_t _out_resources{};
   hipError_t _r = (hipError_t)hipGraphicsUnmapResources((int)a->count, &_out_resources, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -2278,7 +2278,7 @@ static hipError_t playback_hipHostAlloc(PlaybackContext& ctx, const uint8_t* pay
 }
 
 static hipError_t playback_hipHostFree(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipHostFree*>(payload);
   uint64_t _rec_ptr = a->ptr;
   void*    _live_ptr = ctx.translate_ptr(_rec_ptr);
   hipError_t _r = (hipError_t)hipHostFree(_live_ptr);
@@ -2325,7 +2325,7 @@ static hipError_t playback_hipImportExternalSemaphore(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipInit(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipInit*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipInit*>(payload);
   hipError_t _r = (hipError_t)hipInit((unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipInit", a->ret);
@@ -2335,7 +2335,7 @@ static hipError_t playback_hipInit(PlaybackContext& ctx, const uint8_t* payload)
 }
 
 static hipError_t playback_hipIpcCloseMemHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipIpcCloseMemHandle*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipIpcCloseMemHandle*>(payload);
   hipError_t _r = (hipError_t)hipIpcCloseMemHandle(ctx.translate_ptr(a->devPtr));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipIpcCloseMemHandle", a->ret);
@@ -2345,7 +2345,7 @@ static hipError_t playback_hipIpcCloseMemHandle(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipIpcGetEventHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipIpcGetEventHandle*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipIpcGetEventHandle*>(payload);
   hipIpcEventHandle_t* _s_handle{};
   hipError_t _r = (hipError_t)hipIpcGetEventHandle(_s_handle, (hipEvent_t)ctx.translate_event(a->event));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -2358,7 +2358,7 @@ static hipError_t playback_hipIpcGetEventHandle(PlaybackContext& ctx, const uint
 extern hipError_t playback_hipIpcGetMemHandle(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipIpcOpenEventHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipIpcOpenEventHandle*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipIpcOpenEventHandle*>(payload);
   hipEvent_t _out_event = nullptr;
   hipIpcEventHandle_t _v_handle{};
   std::memcpy(&_v_handle, a->handle_bytes, sizeof(_v_handle));
@@ -2463,7 +2463,7 @@ static hipError_t playback_hipMallocMipmappedArray(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipMallocPitch(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMallocPitch*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMallocPitch*>(payload);
   void* _out_ptr = nullptr;
   size_t _out_pitch{};
   hipError_t _r = (hipError_t)hipMallocPitch((void**)&_out_ptr, &_out_pitch, (size_t)a->width, (size_t)a->height);
@@ -2482,7 +2482,7 @@ extern hipError_t playback_hipMemAddressFree(PlaybackContext& ctx, const uint8_t
 extern hipError_t playback_hipMemAddressReserve(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemAdvise(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemAdvise*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemAdvise*>(payload);
 #if HIP_FORCE_API_VERSION >= 800 && !defined(HIP_ABI_IMPL)
   hipMemLocation _loc_device{};
   _loc_device.type = hipMemLocationTypeDevice;
@@ -2521,7 +2521,7 @@ static hipError_t playback_hipMemAllocPitch(PlaybackContext& ctx, const uint8_t*
 extern hipError_t playback_hipMemCreate(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemExportToShareableHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemExportToShareableHandle*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemExportToShareableHandle*>(payload);
   alignas(8) unsigned char _outbuf_shareableHandle[8]{};
   hipError_t _r = (hipError_t)hipMemExportToShareableHandle((void*)_outbuf_shareableHandle, (hipMemGenericAllocationHandle_t)ctx.translate_vmm_handle(a->handle), (hipMemAllocationHandleType)a->handleType, (unsigned long long)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -2532,7 +2532,7 @@ static hipError_t playback_hipMemExportToShareableHandle(PlaybackContext& ctx, c
 }
 
 static hipError_t playback_hipMemGetAccess(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemGetAccess*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemGetAccess*>(payload);
   unsigned long long _d_flags{};
   hipMemLocation _d_location{};
   if (a->location_present)
@@ -2568,7 +2568,7 @@ static hipError_t playback_hipMemGetAllocationPropertiesFromHandle(PlaybackConte
 }
 
 static hipError_t playback_hipMemGetInfo(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemGetInfo*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemGetInfo*>(payload);
   size_t _out_free{};
   size_t _out_total{};
   hipError_t _r = (hipError_t)hipMemGetInfo(&_out_free, &_out_total);
@@ -2601,7 +2601,7 @@ static hipError_t playback_hipMemMapArrayAsync(PlaybackContext& ctx, const uint8
 extern hipError_t playback_hipMemPoolCreate(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemPoolDestroy(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemPoolDestroy*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemPoolDestroy*>(payload);
   uint64_t _rec_hdl = a->mem_pool;
   hipError_t _r = (hipError_t)hipMemPoolDestroy((hipMemPool_t)ctx.translate_mempool(_rec_hdl));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -2625,7 +2625,7 @@ static hipError_t playback_hipMemPoolExportPointer(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipMemPoolExportToShareableHandle(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemPoolExportToShareableHandle*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemPoolExportToShareableHandle*>(payload);
   alignas(8) unsigned char _outbuf_shared_handle[8]{};
   hipError_t _r = (hipError_t)hipMemPoolExportToShareableHandle((void*)_outbuf_shared_handle, (hipMemPool_t)ctx.translate_mempool(a->mem_pool), (hipMemAllocationHandleType)a->handle_type, (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -2669,7 +2669,7 @@ extern hipError_t playback_hipMemPoolSetAccess(PlaybackContext& ctx, const uint8
 extern hipError_t playback_hipMemPoolSetAttribute(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemPoolTrimTo(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemPoolTrimTo*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemPoolTrimTo*>(payload);
   hipError_t _r = (hipError_t)hipMemPoolTrimTo((hipMemPool_t)ctx.translate_mempool(a->mem_pool), (size_t)a->min_bytes_to_hold);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemPoolTrimTo", a->ret);
@@ -2679,7 +2679,7 @@ static hipError_t playback_hipMemPoolTrimTo(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipMemPrefetchAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchAsync*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchAsync*>(payload);
   hipError_t _r = (hipError_t)hipMemPrefetchAsync(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, (int)a->device, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemPrefetchAsync", a->ret);
@@ -2797,7 +2797,7 @@ static hipError_t playback_hipMemcpyAtoH(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipMemcpyDtoD(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoD*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoD*>(payload);
   hipError_t _r = (hipError_t)hipMemcpyDtoD((hipDeviceptr_t)ctx.translate_ptr(a->dst), (hipDeviceptr_t)ctx.translate_ptr(a->src), (size_t)a->sizeBytes);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemcpyDtoD", a->ret);
@@ -2807,7 +2807,7 @@ static hipError_t playback_hipMemcpyDtoD(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipMemcpyDtoDAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoDAsync*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemcpyDtoDAsync*>(payload);
   hipError_t _r = (hipError_t)hipMemcpyDtoDAsync((hipDeviceptr_t)ctx.translate_ptr(a->dst), (hipDeviceptr_t)ctx.translate_ptr(a->src), (size_t)a->sizeBytes, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemcpyDtoDAsync", a->ret);
@@ -2869,7 +2869,7 @@ extern hipError_t playback_hipMemcpyParam2D(PlaybackContext& ctx, const uint8_t*
 extern hipError_t playback_hipMemcpyParam2DAsync(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemcpyPeer(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemcpyPeer*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemcpyPeer*>(payload);
   hipError_t _r = (hipError_t)hipMemcpyPeer(ctx.translate_ptr(a->dst), (int)a->dstDeviceId, ctx.translate_ptr(a->src), (int)a->srcDeviceId, (size_t)a->sizeBytes);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemcpyPeer", a->ret);
@@ -2879,7 +2879,7 @@ static hipError_t playback_hipMemcpyPeer(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipMemcpyPeerAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemcpyPeerAsync*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemcpyPeerAsync*>(payload);
   hipError_t _r = (hipError_t)hipMemcpyPeerAsync(ctx.translate_ptr(a->dst), (int)a->dstDeviceId, ctx.translate_ptr(a->src), (int)a->srcDevice, (size_t)a->sizeBytes, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemcpyPeerAsync", a->ret);
@@ -2921,7 +2921,7 @@ static hipError_t playback_hipMemcpyToSymbolAsync(PlaybackContext& ctx, const ui
 extern hipError_t playback_hipMemcpyWithStream(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemset(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemset*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemset*>(payload);
   hipError_t _r = (hipError_t)hipMemset(ctx.translate_ptr(a->dst), (int)a->value, (size_t)a->sizeBytes);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemset", a->ret);
@@ -2931,7 +2931,7 @@ static hipError_t playback_hipMemset(PlaybackContext& ctx, const uint8_t* payloa
 }
 
 static hipError_t playback_hipMemset2D(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemset2D*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemset2D*>(payload);
   hipError_t _r = (hipError_t)hipMemset2D(ctx.translate_ptr(a->dst), (size_t)a->pitch, (int)a->value, (size_t)a->width, (size_t)a->height);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemset2D", a->ret);
@@ -2941,7 +2941,7 @@ static hipError_t playback_hipMemset2D(PlaybackContext& ctx, const uint8_t* payl
 }
 
 static hipError_t playback_hipMemset2DAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemset2DAsync*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemset2DAsync*>(payload);
   hipError_t _r = (hipError_t)hipMemset2DAsync(ctx.translate_ptr(a->dst), (size_t)a->pitch, (int)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemset2DAsync", a->ret);
@@ -2971,7 +2971,7 @@ static hipError_t playback_hipMemset3DAsync(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipMemsetAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetAsync*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetAsync*>(payload);
   hipError_t _r = (hipError_t)hipMemsetAsync(ctx.translate_ptr(a->dst), (int)a->value, (size_t)a->sizeBytes, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetAsync", a->ret);
@@ -2981,7 +2981,7 @@ static hipError_t playback_hipMemsetAsync(PlaybackContext& ctx, const uint8_t* p
 }
 
 static hipError_t playback_hipMemsetD16(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD16*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD16*>(payload);
   hipError_t _r = (hipError_t)hipMemsetD16((hipDeviceptr_t)ctx.translate_ptr(a->dest), (unsigned short)a->value, (size_t)a->count);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD16", a->ret);
@@ -2991,7 +2991,7 @@ static hipError_t playback_hipMemsetD16(PlaybackContext& ctx, const uint8_t* pay
 }
 
 static hipError_t playback_hipMemsetD16Async(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD16Async*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD16Async*>(payload);
   hipError_t _r = (hipError_t)hipMemsetD16Async((hipDeviceptr_t)ctx.translate_ptr(a->dest), (unsigned short)a->value, (size_t)a->count, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD16Async", a->ret);
@@ -3001,7 +3001,7 @@ static hipError_t playback_hipMemsetD16Async(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipMemsetD32(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD32*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD32*>(payload);
   hipError_t _r = (hipError_t)hipMemsetD32((hipDeviceptr_t)ctx.translate_ptr(a->dest), (int)a->value, (size_t)a->count);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD32", a->ret);
@@ -3011,7 +3011,7 @@ static hipError_t playback_hipMemsetD32(PlaybackContext& ctx, const uint8_t* pay
 }
 
 static hipError_t playback_hipMemsetD32Async(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD32Async*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD32Async*>(payload);
   hipError_t _r = (hipError_t)hipMemsetD32Async((hipDeviceptr_t)ctx.translate_ptr(a->dst), (int)a->value, (size_t)a->count, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD32Async", a->ret);
@@ -3021,7 +3021,7 @@ static hipError_t playback_hipMemsetD32Async(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipMemsetD8(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD8*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD8*>(payload);
   hipError_t _r = (hipError_t)hipMemsetD8((hipDeviceptr_t)ctx.translate_ptr(a->dest), (unsigned char)a->value, (size_t)a->count);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD8", a->ret);
@@ -3031,7 +3031,7 @@ static hipError_t playback_hipMemsetD8(PlaybackContext& ctx, const uint8_t* payl
 }
 
 static hipError_t playback_hipMemsetD8Async(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD8Async*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD8Async*>(payload);
   hipError_t _r = (hipError_t)hipMemsetD8Async((hipDeviceptr_t)ctx.translate_ptr(a->dest), (unsigned char)a->value, (size_t)a->count, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetD8Async", a->ret);
@@ -3095,7 +3095,7 @@ static hipError_t playback_hipModuleGetTexRef(PlaybackContext& ctx, const uint8_
 extern hipError_t playback_hipModuleLaunchCooperativeKernel(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipModuleLaunchCooperativeKernelMultiDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipModuleLaunchCooperativeKernelMultiDevice*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipModuleLaunchCooperativeKernelMultiDevice*>(payload);
   hipFunctionLaunchParams _out_launchParamsList{};
   hipError_t _r = (hipError_t)hipModuleLaunchCooperativeKernelMultiDevice(&_out_launchParamsList, (unsigned int)a->numDevices, (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3194,7 +3194,7 @@ static hipError_t playback_hipOccupancyMaxPotentialBlockSize(PlaybackContext& ct
 }
 
 static hipError_t playback_hipPeekAtLastError(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipPeekAtLastError*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipPeekAtLastError*>(payload);
   hipError_t _r = (hipError_t)hipPeekAtLastError();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipPeekAtLastError", a->ret);
@@ -3214,7 +3214,7 @@ static hipError_t playback_hipPointerGetAttribute(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipPointerGetAttributes(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipPointerGetAttributes*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipPointerGetAttributes*>(payload);
   hipPointerAttribute_t _out_attributes{};
   hipError_t _r = (hipError_t)hipPointerGetAttributes(&_out_attributes, ctx.translate_ptr(a->ptr));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3235,7 +3235,7 @@ static hipError_t playback_hipPointerSetAttribute(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipProfilerStart(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipProfilerStart*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipProfilerStart*>(payload);
   hipError_t _r = (hipError_t)hipProfilerStart();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipProfilerStart", a->ret);
@@ -3245,7 +3245,7 @@ static hipError_t playback_hipProfilerStart(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipProfilerStop(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipProfilerStop*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipProfilerStop*>(payload);
   hipError_t _r = (hipError_t)hipProfilerStop();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipProfilerStop", a->ret);
@@ -3255,7 +3255,7 @@ static hipError_t playback_hipProfilerStop(PlaybackContext& ctx, const uint8_t* 
 }
 
 static hipError_t playback_hipRuntimeGetVersion(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipRuntimeGetVersion*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipRuntimeGetVersion*>(payload);
   int _out_runtimeVersion{};
   hipError_t _r = (hipError_t)hipRuntimeGetVersion(&_out_runtimeVersion);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3266,7 +3266,7 @@ static hipError_t playback_hipRuntimeGetVersion(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipSetDevice(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipSetDevice*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipSetDevice*>(payload);
   hipError_t _r = (hipError_t)hipSetDevice((int)a->deviceId);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipSetDevice", a->ret);
@@ -3276,7 +3276,7 @@ static hipError_t playback_hipSetDevice(PlaybackContext& ctx, const uint8_t* pay
 }
 
 static hipError_t playback_hipSetDeviceFlags(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipSetDeviceFlags*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipSetDeviceFlags*>(payload);
   hipError_t _r = (hipError_t)hipSetDeviceFlags((unsigned)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipSetDeviceFlags", a->ret);
@@ -3286,7 +3286,7 @@ static hipError_t playback_hipSetDeviceFlags(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipSetupArgument(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipSetupArgument*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipSetupArgument*>(payload);
   unsigned char _d_arg[256]{};
   uint32_t _d_arg_n = a->arg_n > 256u ? 256u : a->arg_n;
   (void)_d_arg_n;
@@ -3337,7 +3337,7 @@ extern hipError_t playback_hipStreamDestroy(PlaybackContext& ctx, const uint8_t*
 extern hipError_t playback_hipStreamEndCapture(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamGetCaptureInfo(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetCaptureInfo*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetCaptureInfo*>(payload);
   hipStreamCaptureStatus _out_pCaptureStatus{};
   unsigned long long _out_pId{};
   hipError_t _r = (hipError_t)hipStreamGetCaptureInfo((hipStream_t)ctx.translate_stream(a->stream), &_out_pCaptureStatus, &_out_pId);
@@ -3369,7 +3369,7 @@ static hipError_t playback_hipStreamGetDevice(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipStreamGetFlags(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetFlags*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetFlags*>(payload);
   unsigned int _out_flags{};
   hipError_t _r = (hipError_t)hipStreamGetFlags((hipStream_t)ctx.translate_stream(a->stream), &_out_flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3380,7 +3380,7 @@ static hipError_t playback_hipStreamGetFlags(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipStreamGetPriority(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetPriority*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetPriority*>(payload);
   int _out_priority{};
   hipError_t _r = (hipError_t)hipStreamGetPriority((hipStream_t)ctx.translate_stream(a->stream), &_out_priority);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3391,7 +3391,7 @@ static hipError_t playback_hipStreamGetPriority(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipStreamIsCapturing(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamIsCapturing*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamIsCapturing*>(payload);
   hipStreamCaptureStatus _out_pCaptureStatus{};
   hipError_t _r = (hipError_t)hipStreamIsCapturing((hipStream_t)ctx.translate_stream(a->stream), &_out_pCaptureStatus);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3404,7 +3404,7 @@ static hipError_t playback_hipStreamIsCapturing(PlaybackContext& ctx, const uint
 extern hipError_t playback_hipStreamQuery(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamSynchronize(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamSynchronize*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamSynchronize*>(payload);
   hipError_t _r = (hipError_t)hipStreamSynchronize((hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipStreamSynchronize", a->ret);
@@ -3424,7 +3424,7 @@ static hipError_t playback_hipStreamUpdateCaptureDependencies(PlaybackContext& c
 }
 
 static hipError_t playback_hipStreamWaitEvent(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamWaitEvent*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamWaitEvent*>(payload);
   hipError_t _r = (hipError_t)hipStreamWaitEvent((hipStream_t)ctx.translate_stream(a->stream), (hipEvent_t)ctx.translate_event(a->event), (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipStreamWaitEvent", a->ret);
@@ -3454,7 +3454,7 @@ static hipError_t playback_hipStreamWaitValue64(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipStreamWriteValue32(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue32*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue32*>(payload);
   void* _live_dst = ctx.translate_ptr(a->ptr);
   if (_live_dst == nullptr) {
     static bool warned = false;
@@ -3476,7 +3476,7 @@ static hipError_t playback_hipStreamWriteValue32(PlaybackContext& ctx, const uin
 }
 
 static hipError_t playback_hipStreamWriteValue64(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue64*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamWriteValue64*>(payload);
   void* _live_dst = ctx.translate_ptr(a->ptr);
   if (_live_dst == nullptr) {
     static bool warned = false;
@@ -3518,7 +3518,7 @@ static hipError_t playback_hipTexObjectDestroy(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipTexObjectGetResourceDesc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexObjectGetResourceDesc*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexObjectGetResourceDesc*>(payload);
   HIP_RESOURCE_DESC _out_pResDesc{};
   hipError_t _r = (hipError_t)hipTexObjectGetResourceDesc(&_out_pResDesc, (hipTextureObject_t)ctx.translate_texture(a->texObject));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3529,7 +3529,7 @@ static hipError_t playback_hipTexObjectGetResourceDesc(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipTexObjectGetResourceViewDesc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexObjectGetResourceViewDesc*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexObjectGetResourceViewDesc*>(payload);
   HIP_RESOURCE_VIEW_DESC _out_pResViewDesc{};
   hipError_t _r = (hipError_t)hipTexObjectGetResourceViewDesc(&_out_pResViewDesc, (hipTextureObject_t)ctx.translate_texture(a->texObject));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3540,7 +3540,7 @@ static hipError_t playback_hipTexObjectGetResourceViewDesc(PlaybackContext& ctx,
 }
 
 static hipError_t playback_hipTexObjectGetTextureDesc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexObjectGetTextureDesc*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexObjectGetTextureDesc*>(payload);
   HIP_TEXTURE_DESC _out_pTexDesc{};
   hipError_t _r = (hipError_t)hipTexObjectGetTextureDesc(&_out_pTexDesc, (hipTextureObject_t)ctx.translate_texture(a->texObject));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3627,7 +3627,7 @@ static hipError_t playback_hipTexRefGetMipmapLevelClamp(PlaybackContext& ctx, co
 }
 
 static hipError_t playback_hipTexRefSetAddress(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetAddress*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetAddress*>(payload);
   size_t _out_ByteOffset{};
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetAddress(&_out_ByteOffset, &_out_texRef, (hipDeviceptr_t)ctx.translate_ptr(a->dptr), (size_t)a->bytes);
@@ -3646,7 +3646,7 @@ static hipError_t playback_hipTexRefSetAddress2D(PlaybackContext& ctx, const uin
 }
 
 static hipError_t playback_hipTexRefSetAddressMode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetAddressMode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetAddressMode*>(payload);
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetAddressMode(&_out_texRef, (int)a->dim, (enum hipTextureAddressMode)a->am);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3657,7 +3657,7 @@ static hipError_t playback_hipTexRefSetAddressMode(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipTexRefSetArray(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetArray*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetArray*>(payload);
   textureReference _out_tex{};
   hipError_t _r = (hipError_t)hipTexRefSetArray(&_out_tex, (hipArray_t)ctx.translate_array(a->array), (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3668,7 +3668,7 @@ static hipError_t playback_hipTexRefSetArray(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipTexRefSetBorderColor(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetBorderColor*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetBorderColor*>(payload);
   textureReference _out_texRef{};
   float _out_pBorderColor{};
   hipError_t _r = (hipError_t)hipTexRefSetBorderColor(&_out_texRef, &_out_pBorderColor);
@@ -3680,7 +3680,7 @@ static hipError_t playback_hipTexRefSetBorderColor(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipTexRefSetFilterMode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetFilterMode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetFilterMode*>(payload);
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetFilterMode(&_out_texRef, (enum hipTextureFilterMode)a->fm);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3691,7 +3691,7 @@ static hipError_t playback_hipTexRefSetFilterMode(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipTexRefSetFlags(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetFlags*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetFlags*>(payload);
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetFlags(&_out_texRef, (unsigned int)a->Flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3712,7 +3712,7 @@ static hipError_t playback_hipTexRefSetFormat(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipTexRefSetMaxAnisotropy(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMaxAnisotropy*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMaxAnisotropy*>(payload);
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetMaxAnisotropy(&_out_texRef, (unsigned int)a->maxAniso);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3723,7 +3723,7 @@ static hipError_t playback_hipTexRefSetMaxAnisotropy(PlaybackContext& ctx, const
 }
 
 static hipError_t playback_hipTexRefSetMipmapFilterMode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMipmapFilterMode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMipmapFilterMode*>(payload);
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetMipmapFilterMode(&_out_texRef, (enum hipTextureFilterMode)a->fm);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3734,7 +3734,7 @@ static hipError_t playback_hipTexRefSetMipmapFilterMode(PlaybackContext& ctx, co
 }
 
 static hipError_t playback_hipTexRefSetMipmapLevelBias(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMipmapLevelBias*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMipmapLevelBias*>(payload);
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetMipmapLevelBias(&_out_texRef, (float)a->bias);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3745,7 +3745,7 @@ static hipError_t playback_hipTexRefSetMipmapLevelBias(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipTexRefSetMipmapLevelClamp(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMipmapLevelClamp*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMipmapLevelClamp*>(payload);
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetMipmapLevelClamp(&_out_texRef, (float)a->minMipMapLevelClamp, (float)a->maxMipMapLevelClamp);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3756,7 +3756,7 @@ static hipError_t playback_hipTexRefSetMipmapLevelClamp(PlaybackContext& ctx, co
 }
 
 static hipError_t playback_hipTexRefSetMipmappedArray(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMipmappedArray*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipTexRefSetMipmappedArray*>(payload);
   textureReference _out_texRef{};
   hipError_t _r = (hipError_t)hipTexRefSetMipmappedArray(&_out_texRef, (hipMipmappedArray_t)ctx.translate_mipmapped(a->mipmappedArray), (unsigned int)a->Flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -3890,7 +3890,7 @@ static hipError_t playback_hipMemcpy2DFromArray_spt(PlaybackContext& ctx, const 
 extern hipError_t playback_hipMemcpy3D_spt(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipMemset_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemset_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemset_spt*>(payload);
   hipError_t _r = (hipError_t)hipMemset_spt(ctx.translate_ptr(a->dst), (int)a->value, (size_t)a->sizeBytes);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemset_spt", a->ret);
@@ -3900,7 +3900,7 @@ static hipError_t playback_hipMemset_spt(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipMemsetAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetAsync_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetAsync_spt*>(payload);
   hipError_t _r = (hipError_t)hipMemsetAsync_spt(ctx.translate_ptr(a->dst), (int)a->value, (size_t)a->sizeBytes, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemsetAsync_spt", a->ret);
@@ -3910,7 +3910,7 @@ static hipError_t playback_hipMemsetAsync_spt(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipMemset2D_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemset2D_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemset2D_spt*>(payload);
   hipError_t _r = (hipError_t)hipMemset2D_spt(ctx.translate_ptr(a->dst), (size_t)a->pitch, (int)a->value, (size_t)a->width, (size_t)a->height);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemset2D_spt", a->ret);
@@ -3920,7 +3920,7 @@ static hipError_t playback_hipMemset2D_spt(PlaybackContext& ctx, const uint8_t* 
 }
 
 static hipError_t playback_hipMemset2DAsync_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemset2DAsync_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemset2DAsync_spt*>(payload);
   hipError_t _r = (hipError_t)hipMemset2DAsync_spt(ctx.translate_ptr(a->dst), (size_t)a->pitch, (int)a->value, (size_t)a->width, (size_t)a->height, (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipMemset2DAsync_spt", a->ret);
@@ -4034,7 +4034,7 @@ static hipError_t playback_hipMemcpy2DToArrayAsync_spt(PlaybackContext& ctx, con
 extern hipError_t playback_hipStreamQuery_spt(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipStreamSynchronize_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamSynchronize_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamSynchronize_spt*>(payload);
   hipError_t _r = (hipError_t)hipStreamSynchronize_spt((hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipStreamSynchronize_spt", a->ret);
@@ -4044,7 +4044,7 @@ static hipError_t playback_hipStreamSynchronize_spt(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipStreamGetPriority_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetPriority_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetPriority_spt*>(payload);
   int _out_priority{};
   hipError_t _r = (hipError_t)hipStreamGetPriority_spt((hipStream_t)ctx.translate_stream(a->stream), &_out_priority);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -4055,7 +4055,7 @@ static hipError_t playback_hipStreamGetPriority_spt(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipStreamWaitEvent_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamWaitEvent_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamWaitEvent_spt*>(payload);
   hipError_t _r = (hipError_t)hipStreamWaitEvent_spt((hipStream_t)ctx.translate_stream(a->stream), (hipEvent_t)ctx.translate_event(a->event), (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipStreamWaitEvent_spt", a->ret);
@@ -4065,7 +4065,7 @@ static hipError_t playback_hipStreamWaitEvent_spt(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipStreamGetFlags_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetFlags_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetFlags_spt*>(payload);
   unsigned int _out_flags{};
   hipError_t _r = (hipError_t)hipStreamGetFlags_spt((hipStream_t)ctx.translate_stream(a->stream), &_out_flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -4083,7 +4083,7 @@ static hipError_t playback_hipStreamAddCallback_spt(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipEventRecord_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventRecord_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipEventRecord_spt*>(payload);
   hipError_t _r = (hipError_t)hipEventRecord_spt((hipEvent_t)ctx.translate_event(a->event), (hipStream_t)ctx.translate_stream(a->stream));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipEventRecord_spt", a->ret);
@@ -4097,7 +4097,7 @@ extern hipError_t playback_hipLaunchCooperativeKernel_spt(PlaybackContext& ctx, 
 extern hipError_t playback_hipLaunchKernel_spt(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphLaunch_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphLaunch_spt*>(payload);
   if (a->graphExec != 0 && ctx.translate_graph_exec(a->graphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -4117,7 +4117,7 @@ static hipError_t playback_hipGraphLaunch_spt(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipStreamBeginCapture_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginCapture_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginCapture_spt*>(payload);
   hipError_t _r = (hipError_t)hipStreamBeginCapture_spt((hipStream_t)ctx.translate_stream(a->stream), (hipStreamCaptureMode)a->mode);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipStreamBeginCapture_spt", a->ret);
@@ -4127,7 +4127,7 @@ static hipError_t playback_hipStreamBeginCapture_spt(PlaybackContext& ctx, const
 }
 
 static hipError_t playback_hipStreamEndCapture_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamEndCapture_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamEndCapture_spt*>(payload);
   hipGraph_t _out_pGraph = nullptr;
   hipError_t _r = (hipError_t)hipStreamEndCapture_spt((hipStream_t)ctx.translate_stream(a->stream), &_out_pGraph);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -4138,7 +4138,7 @@ static hipError_t playback_hipStreamEndCapture_spt(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipStreamIsCapturing_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamIsCapturing_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamIsCapturing_spt*>(payload);
   hipStreamCaptureStatus _out_pCaptureStatus{};
   hipError_t _r = (hipError_t)hipStreamIsCapturing_spt((hipStream_t)ctx.translate_stream(a->stream), &_out_pCaptureStatus);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -4149,7 +4149,7 @@ static hipError_t playback_hipStreamIsCapturing_spt(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipStreamGetCaptureInfo_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetCaptureInfo_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetCaptureInfo_spt*>(payload);
   hipStreamCaptureStatus _out_pCaptureStatus{};
   unsigned long long _out_pId{};
   hipError_t _r = (hipError_t)hipStreamGetCaptureInfo_spt((hipStream_t)ctx.translate_stream(a->stream), &_out_pCaptureStatus, &_out_pId);
@@ -4188,7 +4188,7 @@ static hipError_t playback_hipGetStreamDeviceId(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipDrvGraphAddMemsetNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDrvGraphAddMemsetNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDrvGraphAddMemsetNode*>(payload);
   hipGraphNode_t _out_phGraphNode = nullptr;
   hipGraphNode_t _d_dependencies[16]{};
   uint32_t _d_dependencies_n = a->dependencies_n > 16u ? 16u : a->dependencies_n;
@@ -4270,7 +4270,7 @@ static hipError_t playback_hipGraphExternalSemaphoresWaitNodeSetParams(PlaybackC
 }
 
 static hipError_t playback_hipGraphExternalSemaphoresSignalNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExternalSemaphoresSignalNodeGetParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphExternalSemaphoresSignalNodeGetParams*>(payload);
   if (a->hNode != 0 && ctx.translate_graph_node(a->hNode) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -4291,7 +4291,7 @@ static hipError_t playback_hipGraphExternalSemaphoresSignalNodeGetParams(Playbac
 }
 
 static hipError_t playback_hipGraphExternalSemaphoresWaitNodeGetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGraphExternalSemaphoresWaitNodeGetParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGraphExternalSemaphoresWaitNodeGetParams*>(payload);
   if (a->hNode != 0 && ctx.translate_graph_node(a->hNode) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -4356,7 +4356,7 @@ static hipError_t playback_hipGraphInstantiateWithParams(PlaybackContext& ctx, c
 }
 
 static hipError_t playback_hipExtGetLastError(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExtGetLastError*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipExtGetLastError*>(payload);
   hipError_t _r = (hipError_t)hipExtGetLastError();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipExtGetLastError", a->ret);
@@ -4380,7 +4380,7 @@ static hipError_t playback_hipTexRefGetArray(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipGetProcAddress(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetProcAddress*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetProcAddress*>(payload);
   static_assert(sizeof(a->symbol_bytes) == 256, "hipGetProcAddress: symbol_bytes is not 256 bytes");
   char _str_symbol[256]{};
   if (a->symbol_present) {
@@ -4398,7 +4398,7 @@ static hipError_t playback_hipGetProcAddress(PlaybackContext& ctx, const uint8_t
 }
 
 static hipError_t playback_hipStreamBeginCaptureToGraph(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginCaptureToGraph*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamBeginCaptureToGraph*>(payload);
   hipGraphNode_t _d_dependencies[16]{};
   uint32_t _d_dependencies_n = a->dependencies_n > 16u ? 16u : a->dependencies_n;
   (void)_d_dependencies_n;
@@ -4513,7 +4513,7 @@ static hipError_t playback_hipMemcpy2DArrayToArray(PlaybackContext& ctx, const u
 }
 
 static hipError_t playback_hipDrvGraphAddMemFreeNode(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDrvGraphAddMemFreeNode*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDrvGraphAddMemFreeNode*>(payload);
   hipGraphNode_t _out_phGraphNode = nullptr;
   hipGraphNode_t _d_dependencies[16]{};
   uint32_t _d_dependencies_n = a->dependencies_n > 16u ? 16u : a->dependencies_n;
@@ -4549,7 +4549,7 @@ static hipError_t playback_hipDrvGraphAddMemFreeNode(PlaybackContext& ctx, const
 extern hipError_t playback_hipDrvGraphExecMemcpyNodeSetParams(PlaybackContext& ctx, const uint8_t* payload);
 
 static hipError_t playback_hipDrvGraphExecMemsetNodeSetParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDrvGraphExecMemsetNodeSetParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDrvGraphExecMemsetNodeSetParams*>(payload);
   if (a->hGraphExec != 0 && ctx.translate_graph_exec(a->hGraphExec) == nullptr) {
     static bool warned = false;
     if (!warned) {
@@ -4642,7 +4642,7 @@ static hipError_t playback_hipExtHostAlloc(PlaybackContext& ctx, const uint8_t* 
 }
 
 static hipError_t playback_hipDeviceGetTexture1DLinearMaxWidth(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetTexture1DLinearMaxWidth*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetTexture1DLinearMaxWidth*>(payload);
   size_t _d_maxWidthInElements{};
   hipChannelFormatDesc _d_fmtDesc{};
   if (a->fmtDesc_present)
@@ -4683,7 +4683,7 @@ static hipError_t playback_hipLinkAddFile(PlaybackContext& ctx, const uint8_t* p
 }
 
 static hipError_t playback_hipLinkComplete(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkComplete*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipLinkComplete*>(payload);
   void* _out_hipBinOut = nullptr;
   size_t _out_sizeOut{};
   hipError_t _r = (hipError_t)hipLinkComplete((hipLinkState_t)ctx.translate_link_state(a->state), (void**)&_out_hipBinOut, &_out_sizeOut);
@@ -4695,7 +4695,7 @@ static hipError_t playback_hipLinkComplete(PlaybackContext& ctx, const uint8_t* 
 }
 
 static hipError_t playback_hipLinkCreate(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkCreate*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipLinkCreate*>(payload);
   hipJitOption _d_options[32]{};
   uint32_t _d_options_n = a->options_n > 32u ? 32u : a->options_n;
   (void)_d_options_n;
@@ -4727,7 +4727,7 @@ static hipError_t playback_hipLinkCreate(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipLinkDestroy(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipLinkDestroy*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipLinkDestroy*>(payload);
   uint64_t _rec_hdl = a->state;
   hipError_t _r = (hipError_t)hipLinkDestroy((hipLinkState_t)ctx.translate_link_state(_rec_hdl));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -4741,7 +4741,7 @@ static hipError_t playback_hipLinkDestroy(PlaybackContext& ctx, const uint8_t* p
 }
 
 static hipError_t playback_hipEventRecordWithFlags(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipEventRecordWithFlags*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipEventRecordWithFlags*>(payload);
   hipError_t _r = (hipError_t)hipEventRecordWithFlags((hipEvent_t)ctx.translate_event(a->event), (hipStream_t)ctx.translate_stream(a->stream), (unsigned int)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipEventRecordWithFlags", a->ret);
@@ -4766,7 +4766,7 @@ static hipError_t playback_hipMemGetHandleForAddressRange(PlaybackContext& ctx, 
   }
   return hipSuccess;
 #else
-  const auto* a = reinterpret_cast<const hrr_args_hipMemGetHandleForAddressRange*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemGetHandleForAddressRange*>(payload);
   alignas(8) unsigned char _outbuf_handle[8]{};
   hipError_t _r = (hipError_t)hipMemGetHandleForAddressRange((void*)_outbuf_handle, (hipDeviceptr_t)ctx.translate_ptr(a->dptr), (size_t)a->size, (hipMemRangeHandleType)a->handleType, (unsigned long long)a->flags);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -4788,7 +4788,7 @@ static hipError_t playback_hipModuleGetFunctionCount(PlaybackContext& ctx, const
 }
 
 static hipError_t playback_hipMemsetD2D8(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D8*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D8*>(payload);
   void* _live_dst = ctx.translate_ptr(a->dst);
   if (!_live_dst) {
     static bool warned = false;
@@ -4810,7 +4810,7 @@ static hipError_t playback_hipMemsetD2D8(PlaybackContext& ctx, const uint8_t* pa
 }
 
 static hipError_t playback_hipMemsetD2D8Async(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D8Async*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D8Async*>(payload);
   void* _live_dst = ctx.translate_ptr(a->dst);
   if (!_live_dst) {
     static bool warned = false;
@@ -4832,7 +4832,7 @@ static hipError_t playback_hipMemsetD2D8Async(PlaybackContext& ctx, const uint8_
 }
 
 static hipError_t playback_hipMemsetD2D16(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D16*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D16*>(payload);
   void* _live_dst = ctx.translate_ptr(a->dst);
   if (!_live_dst) {
     static bool warned = false;
@@ -4854,7 +4854,7 @@ static hipError_t playback_hipMemsetD2D16(PlaybackContext& ctx, const uint8_t* p
 }
 
 static hipError_t playback_hipMemsetD2D16Async(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D16Async*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D16Async*>(payload);
   void* _live_dst = ctx.translate_ptr(a->dst);
   if (!_live_dst) {
     static bool warned = false;
@@ -4876,7 +4876,7 @@ static hipError_t playback_hipMemsetD2D16Async(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipMemsetD2D32(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D32*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D32*>(payload);
   void* _live_dst = ctx.translate_ptr(a->dst);
   if (!_live_dst) {
     static bool warned = false;
@@ -4898,7 +4898,7 @@ static hipError_t playback_hipMemsetD2D32(PlaybackContext& ctx, const uint8_t* p
 }
 
 static hipError_t playback_hipMemsetD2D32Async(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D32Async*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemsetD2D32Async*>(payload);
   void* _live_dst = ctx.translate_ptr(a->dst);
   if (!_live_dst) {
     static bool warned = false;
@@ -4920,7 +4920,7 @@ static hipError_t playback_hipMemsetD2D32Async(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipStreamGetAttribute(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetAttribute*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetAttribute*>(payload);
   hipStreamAttrValue _out_value_out{};
   hipError_t _r = (hipError_t)hipStreamGetAttribute((hipStream_t)ctx.translate_stream(a->stream), (hipStreamAttrID)a->attr, &_out_value_out);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -4943,7 +4943,7 @@ static hipError_t playback_hipModuleLoadFatBinary(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipMemcpyBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemcpyBatchAsync*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemcpyBatchAsync*>(payload);
   void* _d_dsts[16]{};
   uint32_t _d_dsts_n = a->dsts_n > 16u ? 16u : a->dsts_n;
   (void)_d_dsts_n;
@@ -5025,7 +5025,7 @@ static hipError_t playback_hipGetDriverEntryPoint_spt(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipMemPrefetchAsync_v2(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchAsync_v2*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchAsync_v2*>(payload);
   hipMemLocation _v_location{};
   std::memcpy(&_v_location, a->location_bytes, sizeof(_v_location));
   hipError_t _r = (hipError_t)hipMemPrefetchAsync_v2(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, _v_location, (unsigned int)a->flags, (hipStream_t)ctx.translate_stream(a->stream));
@@ -5037,7 +5037,7 @@ static hipError_t playback_hipMemPrefetchAsync_v2(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipMemAdvise_v2(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemAdvise_v2*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemAdvise_v2*>(payload);
   hipMemLocation _v_device{};
   std::memcpy(&_v_device, a->device_bytes, sizeof(_v_device));
   hipError_t _r = (hipError_t)hipMemAdvise_v2(ctx.translate_ptr(a->dev_ptr), (size_t)a->count, (hipMemoryAdvise)a->advice, _v_device);
@@ -5049,7 +5049,7 @@ static hipError_t playback_hipMemAdvise_v2(PlaybackContext& ctx, const uint8_t* 
 }
 
 static hipError_t playback_hipStreamGetId(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetId*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetId*>(payload);
   unsigned long long _out_streamId{};
   hipError_t _r = (hipError_t)hipStreamGetId((hipStream_t)ctx.translate_stream(a->stream), &_out_streamId);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -5110,7 +5110,7 @@ static hipError_t playback_hipLibraryGetKernelCount(PlaybackContext& ctx, const 
 }
 
 static hipError_t playback_hipStreamCopyAttributes(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamCopyAttributes*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamCopyAttributes*>(payload);
   hipError_t _r = (hipError_t)hipStreamCopyAttributes((hipStream_t)ctx.translate_stream(a->dst), (hipStream_t)ctx.translate_stream(a->src));
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipStreamCopyAttributes", a->ret);
@@ -5160,7 +5160,7 @@ static hipError_t playback_hipOccupancyAvailableDynamicSMemPerBlock(PlaybackCont
 }
 
 static hipError_t playback_hipGetProcAddress_spt(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipGetProcAddress_spt*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipGetProcAddress_spt*>(payload);
   static_assert(sizeof(a->symbol_bytes) == 256, "hipGetProcAddress_spt: symbol_bytes is not 256 bytes");
   char _str_symbol[256]{};
   if (a->symbol_present) {
@@ -5188,7 +5188,7 @@ static hipError_t playback_hipKernelGetParamInfo(PlaybackContext& ctx, const uin
 }
 
 static hipError_t playback_hipExtDisableLogging(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExtDisableLogging*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipExtDisableLogging*>(payload);
   hipError_t _r = (hipError_t)hipExtDisableLogging();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipExtDisableLogging", a->ret);
@@ -5198,7 +5198,7 @@ static hipError_t playback_hipExtDisableLogging(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipExtEnableLogging(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExtEnableLogging*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipExtEnableLogging*>(payload);
   hipError_t _r = (hipError_t)hipExtEnableLogging();
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipExtEnableLogging", a->ret);
@@ -5208,7 +5208,7 @@ static hipError_t playback_hipExtEnableLogging(PlaybackContext& ctx, const uint8
 }
 
 static hipError_t playback_hipExtSetLoggingParams(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipExtSetLoggingParams*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipExtSetLoggingParams*>(payload);
   hipError_t _r = (hipError_t)hipExtSetLoggingParams((size_t)a->log_level, (size_t)a->log_size, (size_t)a->log_mask);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
     hrr_note_recorded_error(ctx, "hipExtSetLoggingParams", a->ret);
@@ -5218,7 +5218,7 @@ static hipError_t playback_hipExtSetLoggingParams(PlaybackContext& ctx, const ui
 }
 
 static hipError_t playback_hipMemSetMemPool(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemSetMemPool*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemSetMemPool*>(payload);
   hipMemLocation _d_location{};
   if (a->location_present)
     std::memcpy(&_d_location, a->location_bytes, sizeof(_d_location));
@@ -5231,7 +5231,7 @@ static hipError_t playback_hipMemSetMemPool(PlaybackContext& ctx, const uint8_t*
 }
 
 static hipError_t playback_hipMemGetMemPool(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemGetMemPool*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemGetMemPool*>(payload);
   hipMemPool_t _out_pool = nullptr;
   hipMemLocation _d_location{};
   if (a->location_present)
@@ -5288,7 +5288,7 @@ static hipError_t playback_hipKernelGetFunction(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipMemPrefetchBatchAsync(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchBatchAsync*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipMemPrefetchBatchAsync*>(payload);
   void* _out_dev_ptrs = nullptr;
   size_t _out_sizes{};
   hipMemLocation* _s_prefetch_locs{};
@@ -5343,7 +5343,7 @@ static hipError_t playback_hipExecutionCtxStreamCreate(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipDeviceGetDevResource(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetDevResource*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetDevResource*>(payload);
   hipDevResource _out_resource{};
   hipError_t _r = (hipError_t)hipDeviceGetDevResource((hipDevice_t)a->device, &_out_resource, (hipDevResourceType)a->type);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -5368,7 +5368,7 @@ static hipError_t playback_hipDevSmResourceSplit(PlaybackContext& ctx, const uin
 }
 
 static hipError_t playback_hipDevResourceGenerateDesc(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDevResourceGenerateDesc*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDevResourceGenerateDesc*>(payload);
   hipDevResourceDesc_t _out_phDesc{};
   hipDevResource _out_resources{};
   hipError_t _r = (hipError_t)hipDevResourceGenerateDesc(&_out_phDesc, &_out_resources, (unsigned int)a->nbResources);
@@ -5380,7 +5380,7 @@ static hipError_t playback_hipDevResourceGenerateDesc(PlaybackContext& ctx, cons
 }
 
 static hipError_t playback_hipDeviceGetExecutionCtx(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetExecutionCtx*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceGetExecutionCtx*>(payload);
   hipExecutionCtx_t _out_ctx{};
   hipError_t _r = (hipError_t)hipDeviceGetExecutionCtx(&_out_ctx, (int)a->device);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -5412,7 +5412,7 @@ static hipError_t playback_hipExecutionCtxGetId(PlaybackContext& ctx, const uint
 }
 
 static hipError_t playback_hipStreamGetDevResource(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipStreamGetDevResource*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipStreamGetDevResource*>(payload);
   hipDevResource _out_resource{};
   hipError_t _r = (hipError_t)hipStreamGetDevResource((hipStream_t)ctx.translate_stream(a->hStream), &_out_resource, (hipDevResourceType)a->type);
   if (_r != hipSuccess && a->ret != 0 && static_cast<int32_t>(_r) == a->ret) {
@@ -5538,7 +5538,7 @@ static hipError_t playback_hipModuleEnumerateFunctions(PlaybackContext& ctx, con
 }
 
 static hipError_t playback_hipDeviceFlushGPUDirectRDMAWrites(PlaybackContext& ctx, const uint8_t* payload) {
-  const auto* a = reinterpret_cast<const hrr_args_hipDeviceFlushGPUDirectRDMAWrites*>(payload);
+  [[maybe_unused]] const auto* a = reinterpret_cast<const hrr_args_hipDeviceFlushGPUDirectRDMAWrites*>(payload);
   static const auto _fn = reinterpret_cast<decltype(&hipDeviceFlushGPUDirectRDMAWrites)>(
       hrr_runtime_symbol("hipDeviceFlushGPUDirectRDMAWrites"));
   if (_fn == nullptr) {

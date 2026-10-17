@@ -243,7 +243,12 @@ namespace amd {
 
 // ================================================================================================
 #if IS_LINUX
-__attribute__((optimize("unroll-all-loops"), always_inline)) static inline void nontemporalMemcpy(
+#if defined(__has_attribute) && __has_attribute(optimize)
+__attribute__((optimize("unroll-all-loops"), always_inline))
+#else
+__attribute__((always_inline))
+#endif
+static inline void nontemporalMemcpy(
     void* __restrict dst, const void* __restrict src, size_t size) {
 #if defined(ATI_ARCH_X86)
   // Drain unaligned head with scalar NT stores to reach 4-byte then 16-byte
@@ -431,7 +436,8 @@ static inline void nontemporalWriteAQL(AqlPacket* __restrict dst,
   static_assert(sizeof(AqlPacket) == 64, "AQL packets must be 64 bytes");
   alignas(64) AqlPacket staging;
   std::memcpy(&staging, src, sizeof(AqlPacket));
-  *reinterpret_cast<uint32_t*>(&staging) = header | (static_cast<uint32_t>(rest) << 16);
+  const uint32_t merged = header | (static_cast<uint32_t>(rest) << 16);
+  std::memcpy(&staging, &merged, sizeof(merged));
   movdir64b_copy64(dst, &staging);
 }
 

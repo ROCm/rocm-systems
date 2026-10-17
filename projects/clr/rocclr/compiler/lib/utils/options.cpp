@@ -278,7 +278,6 @@ void ShowOptionsHelp(const char* helpValue, Options& Opts) {
 
     const char* sname = OPTION_sname(od);
     const char* lname = OPTION_lname(od);
-    size_t sz = 0;
     Opts.optionsLog() += "\t";
     if (OPTION_form(od) == OFA_NORMAL) {
       for (int j = 0; j < 2; ++j) {
@@ -1354,7 +1353,7 @@ static std::string getValidDumpPath(const std::string& path) {
   }
 
   const std::string curPath = path + ".";
-  long pathname_max = pathconf(curPath.c_str(), _PC_PATH_MAX);
+  [[maybe_unused]] long pathname_max = pathconf(curPath.c_str(), _PC_PATH_MAX);
   assert(pathname_max != -1 && path.size() < static_cast<unsigned long>(pathname_max));
   return path;
 }

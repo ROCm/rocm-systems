@@ -34,7 +34,7 @@ class StreamAddCallback : public StreamCallback {
 
  public:
   StreamAddCallback(hipStream_t stream, hipStreamCallback_t callback, void* userData)
-      : StreamCallback(userData), stream_(stream), callBack_(callback) {}
+      : StreamCallback(userData), callBack_(callback), stream_(stream) {}
 
   void CL_CALLBACK callback() override {
     hipError_t status = hipSuccess;
@@ -160,7 +160,7 @@ class Event {
     return hipErrorInvalidConfiguration;
   }
   virtual bool awaitEventCompletion();
-  virtual bool ready();
+  [[nodiscard]] virtual bool ready();
   virtual int64_t time(bool getStartTs) const;
 
  protected:
@@ -190,7 +190,7 @@ class EventDD : public Event {
   ~EventDD() override = default;
 
   bool awaitEventCompletion() override;
-  bool ready() override;
+  [[nodiscard]] bool ready() override;
   int64_t time(bool getStartTs) const override;
 };
 
@@ -214,8 +214,8 @@ class IPCEventEmulated : public Event {
     if (ipc_evt_.ipc_shmem_) {
       int owners = --ipc_evt_.ipc_shmem_->owners;
       // Make sure event is synchronized
-      hipError_t status = synchronize();
-      status = ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
+      (void)synchronize();
+      (void)ihipHostUnregister(&ipc_evt_.ipc_shmem_->signal);
       if (!amd::Os::MemoryUnmapFile(ipc_evt_.ipc_shmem_, sizeof(hip::ihipIpcEventShmem_t))) {
         // print hipErrorInvalidHandle;
       }
