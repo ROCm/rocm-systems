@@ -97,8 +97,8 @@ void RdciTopologyLinkSubSystem::process() {
     throw RdcException(result, "Error to find devices on the system.");
   }
   if (group_index_ >= count) {
-    throw RdcException(
-        result, "Fail to get " + std::to_string(group_index_) + " to the topology gpu index");
+    throw RdcException(RDC_ST_BAD_PARAMETER, "Fail to get " + std::to_string(group_index_) +
+                                                 " to the topology gpu index");
   }
   switch (topology_ops_) {
     case TOPOLOGY_INDEX: {
@@ -125,6 +125,9 @@ void RdciTopologyLinkSubSystem::process() {
         std::cout << "+-----------------------+"
                   << "-----------------------------"
                   << "------------------+\n";
+      } else {
+        throw RdcException(result,
+                           "Fail to get the topology of GPU " + std::to_string(group_index_));
       }
       break;
     }
