@@ -477,33 +477,17 @@ SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 2, fp8x2_storage_t, hadd2_b(x, y))
 SPECIALIZE_REDUCE(FuncProd, rccl_bfloat8, 1, rccl_bfloat8, rccl_bfloat8(float(x) * float(y)))
 SPECIALIZE_REDUCE(FuncMinMax, rccl_bfloat8, 1, rccl_bfloat8,
                   rccl_bfloat8(fn.isMinNotMax ? fminf(float(x), float(y)) : fmaxf(float(x), float(y))))
+
+#if defined(RCCL_FP8_HAS_PK8)
+// gfx1250 converts 8 fp8 lanes per instruction, so reduce a whole BytePack<8>
+// at once instead of letting Apply_Reduce recurse down to pairs.
+SPECIALIZE_REDUCE(FuncSum, rccl_float8, 8, fp8x8_storage_t, hadd8(x, y))
+SPECIALIZE_REDUCE(FuncSum, rccl_bfloat8, 8, fp8x8_storage_t, hadd8_b(x, y))
+#endif
 #endif
 #endif
 
 #undef SPECIALIZE_REDUCE
-
-#if defined(RCCL_FLOAT8) && defined(RCCL_FP8_HAS_PK8)
-// gfx1250 converts 8 fp8 lanes per instruction, so reduce a whole BytePack<8>
-// at once instead of letting Apply_Reduce recurse down to pairs.
-#define SPECIALIZE_REDUCE_PK8(T, hadd8_fn) \
-  template <> \
-  struct Apply_Reduce<FuncSum<T>, /*EltPerPack=*/8> { \
-    __device__ __forceinline__ static BytePack<8> reduce(FuncSum<T> fn, BytePack<8> a, BytePack<8> b) { \
-      fp8x8_storage_t x = {a.u32[0], a.u32[1]}; \
-      fp8x8_storage_t y = {b.u32[0], b.u32[1]}; \
-      fp8x8_storage_t r = hadd8_fn(x, y); \
-      BytePack<8> out; \
-      out.u32[0] = r.x; \
-      out.u32[1] = r.y; \
-      return out; \
-    } \
-  };
-
-SPECIALIZE_REDUCE_PK8(rccl_float8, hadd8)
-SPECIALIZE_REDUCE_PK8(rccl_bfloat8, hadd8_b)
-
-#undef SPECIALIZE_REDUCE_PK8
-#endif
 
 ////////////////////////////////////////////////////////////////////////////////
 // Apply_PreOp
