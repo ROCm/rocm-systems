@@ -3,6 +3,8 @@
 
 #include "amd_smi/impl/amd_smi_socket.h"
 
+#include <cstdint>
+
 namespace amd::smi {
 
 AMDSmiSocket::~AMDSmiSocket() {
@@ -18,15 +20,10 @@ AMDSmiSocket::~AMDSmiSocket() {
     delete cpu_core_processors_[i];
   }
   cpu_core_processors_.clear();
-  for (uint32_t i = 0; i < nic_processors_.size(); i++) {
-    delete nic_processors_[i];
+  for (uint32_t i = 0; i < ainic_processors_.size(); i++) {
+    delete ainic_processors_[i];
   }
-  nic_processors_.clear();
-
-  for (uint32_t i = 0; i < switch_processors_.size(); i++) {
-    delete switch_processors_[i];
-  }
-  switch_processors_.clear();
+  ainic_processors_.clear();
 }
 
 amdsmi_status_t AMDSmiSocket::get_processor_count(uint32_t* processor_count) const {
@@ -51,10 +48,8 @@ amdsmi_status_t AMDSmiSocket::get_processor_count(amdsmi_processor_type_t type,
       *processor_count = static_cast<uint32_t>(ainic_processors_.size());
       break;
     case AMDSMI_PROCESSOR_TYPE_BRCM_NIC:
-      *processor_count = static_cast<uint32_t>(nic_processors_.size());
-      break;
     case AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH:
-      *processor_count = static_cast<uint32_t>(switch_processors_.size());
+      *processor_count = 0;
       break;
     default:
       *processor_count = 0;

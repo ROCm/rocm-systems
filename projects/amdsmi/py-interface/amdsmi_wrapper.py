@@ -3043,6 +3043,28 @@ struct_amdsmi_nic_stat_t._fields_ = [
 ]
 
 amdsmi_nic_stat_t = struct_amdsmi_nic_stat_t
+
+# values for enumeration 'amdsmi_nic_capability_bits_t'
+amdsmi_nic_capability_bits_t__enumvalues = {
+    1: 'AMDSMI_NIC_CAP_FWCTL',
+    2: 'AMDSMI_NIC_CAP_NETDEV',
+}
+AMDSMI_NIC_CAP_FWCTL = 1
+AMDSMI_NIC_CAP_NETDEV = 2
+amdsmi_nic_capability_bits_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_nic_type_t'
+amdsmi_nic_type_t__enumvalues = {
+    0: 'AMDSMI_NIC_TYPE_UNKNOWN',
+    1: 'AMDSMI_NIC_TYPE_AINIC',
+    2: 'AMDSMI_NIC_TYPE_UALOE',
+    3: 'AMDSMI_NIC_TYPE_OTHER',
+}
+AMDSMI_NIC_TYPE_UNKNOWN = 0
+AMDSMI_NIC_TYPE_AINIC = 1
+AMDSMI_NIC_TYPE_UALOE = 2
+AMDSMI_NIC_TYPE_OTHER = 3
+amdsmi_nic_type_t = ctypes.c_uint32 # enum
 class struct_amdsmi_nic_asic_info_t(Structure):
     pass
 
@@ -3111,6 +3133,80 @@ struct_amdsmi_nic_fw_info_t._fields_ = [
 ]
 
 amdsmi_nic_fw_info_t = struct_amdsmi_nic_fw_info_t
+
+# values for enumeration 'amdsmi_nic_health_state_t'
+amdsmi_nic_health_state_t__enumvalues = {
+    0: 'AMDSMI_NIC_HEALTH_UNKNOWN',
+    1: 'AMDSMI_NIC_HEALTH_HEALTHY',
+    2: 'AMDSMI_NIC_HEALTH_WARNING',
+    3: 'AMDSMI_NIC_HEALTH_ERROR',
+    4: 'AMDSMI_NIC_HEALTH_UNSUPPORTED',
+}
+AMDSMI_NIC_HEALTH_UNKNOWN = 0
+AMDSMI_NIC_HEALTH_HEALTHY = 1
+AMDSMI_NIC_HEALTH_WARNING = 2
+AMDSMI_NIC_HEALTH_ERROR = 3
+AMDSMI_NIC_HEALTH_UNSUPPORTED = 4
+amdsmi_nic_health_state_t = ctypes.c_uint32 # enum
+
+# values for enumeration 'amdsmi_nic_filter_t'
+amdsmi_nic_filter_t__enumvalues = {
+    0: 'AMDSMI_NIC_FILTER_ALL',
+    1: 'AMDSMI_NIC_FILTER_AINIC_ONLY',
+}
+AMDSMI_NIC_FILTER_ALL = 0
+AMDSMI_NIC_FILTER_AINIC_ONLY = 1
+amdsmi_nic_filter_t = ctypes.c_uint32 # enum
+class struct_amdsmi_nic_temperature_t(Structure):
+    pass
+
+struct_amdsmi_nic_temperature_t._pack_ = 1 # source:False
+struct_amdsmi_nic_temperature_t._layout_ = 'ms'
+struct_amdsmi_nic_temperature_t._fields_ = [
+    ('asic_temp_c', ctypes.c_uint16),
+    ('transceiver_temp_c', ctypes.c_uint16),
+    ('board_temp_c', ctypes.c_uint16),
+]
+
+amdsmi_nic_temperature_t = struct_amdsmi_nic_temperature_t
+class struct_amdsmi_nic_health_t(Structure):
+    pass
+
+struct_amdsmi_nic_health_t._pack_ = 1 # source:False
+struct_amdsmi_nic_health_t._layout_ = 'ms'
+struct_amdsmi_nic_health_t._fields_ = [
+    ('state', ctypes.c_ubyte),
+    ('reserved', ctypes.c_ubyte * 3),
+    ('error_count', ctypes.c_uint32),
+    ('reporter', ctypes.c_char * 64),
+]
+
+amdsmi_nic_health_t = struct_amdsmi_nic_health_t
+class struct_amdsmi_nic_port_split_t(Structure):
+    pass
+
+struct_amdsmi_nic_port_split_t._pack_ = 1 # source:False
+struct_amdsmi_nic_port_split_t._layout_ = 'ms'
+struct_amdsmi_nic_port_split_t._fields_ = [
+    ('splittable', ctypes.c_ubyte),
+    ('split_count', ctypes.c_ubyte),
+]
+
+amdsmi_nic_port_split_t = struct_amdsmi_nic_port_split_t
+class struct_amdsmi_nic_telemetry_t(Structure):
+    pass
+
+struct_amdsmi_nic_telemetry_t._pack_ = 1 # source:False
+struct_amdsmi_nic_telemetry_t._layout_ = 'ms'
+struct_amdsmi_nic_telemetry_t._fields_ = [
+    ('temperature', amdsmi_nic_temperature_t),
+    ('PADDING_0', ctypes.c_ubyte * 2),
+    ('health', amdsmi_nic_health_t),
+    ('port_split', amdsmi_nic_port_split_t),
+    ('PADDING_1', ctypes.c_ubyte * 2),
+]
+
+amdsmi_nic_telemetry_t = struct_amdsmi_nic_telemetry_t
 class struct_amdsmi_nic_port_t(Structure):
     pass
 
@@ -5202,6 +5298,24 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_nic_type = _libraries['libamd_smi.so'].amdsmi_get_nic_type
+    amdsmi_get_nic_type.restype = amdsmi_status_t
+    amdsmi_get_nic_type.argtypes = [amdsmi_processor_handle, ctypes.POINTER(amdsmi_nic_type_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_capability = _libraries['libamd_smi.so'].amdsmi_get_nic_capability
+    amdsmi_get_nic_capability.restype = amdsmi_status_t
+    amdsmi_get_nic_capability.argtypes = [amdsmi_processor_handle, ctypes.POINTER(ctypes.c_uint32)]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_nic_filter = _libraries['libamd_smi.so'].amdsmi_set_nic_filter
+    amdsmi_set_nic_filter.restype = amdsmi_status_t
+    amdsmi_set_nic_filter.argtypes = [amdsmi_nic_filter_t]
+except AttributeError:
+    pass
+try:
     amdsmi_get_nic_bus_info = _libraries['libamd_smi.so'].amdsmi_get_nic_bus_info
     amdsmi_get_nic_bus_info.restype = amdsmi_status_t
     amdsmi_get_nic_bus_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_nic_bus_info_t)]
@@ -5217,6 +5331,12 @@ try:
     amdsmi_get_nic_port_info = _libraries['libamd_smi.so'].amdsmi_get_nic_port_info
     amdsmi_get_nic_port_info.restype = amdsmi_status_t
     amdsmi_get_nic_port_info.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_nic_port_info_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_get_nic_port_ifindex = _libraries['libamd_smi.so'].amdsmi_get_nic_port_ifindex
+    amdsmi_get_nic_port_ifindex.restype = amdsmi_status_t
+    amdsmi_get_nic_port_ifindex.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32)]
 except AttributeError:
     pass
 try:
@@ -5238,15 +5358,36 @@ try:
 except AttributeError:
     pass
 try:
+    amdsmi_get_nic_telemetry = _libraries['libamd_smi.so'].amdsmi_get_nic_telemetry
+    amdsmi_get_nic_telemetry.restype = amdsmi_status_t
+    amdsmi_get_nic_telemetry.argtypes = [amdsmi_processor_handle, ctypes.POINTER(struct_amdsmi_nic_telemetry_t)]
+except AttributeError:
+    pass
+try:
     amdsmi_get_nic_port_statistics = _libraries['libamd_smi.so'].amdsmi_get_nic_port_statistics
     amdsmi_get_nic_port_statistics.restype = amdsmi_status_t
     amdsmi_get_nic_port_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
 except AttributeError:
     pass
+
+# values for enumeration 'amdsmi_nic_stat_scope_t'
+amdsmi_nic_stat_scope_t__enumvalues = {
+    0: 'AMDSMI_NIC_STAT_SCOPE_DEFAULT',
+    1: 'AMDSMI_NIC_STAT_SCOPE_EXTENDED',
+}
+AMDSMI_NIC_STAT_SCOPE_DEFAULT = 0
+AMDSMI_NIC_STAT_SCOPE_EXTENDED = 1
+amdsmi_nic_stat_scope_t = ctypes.c_uint32 # enum
 try:
     amdsmi_get_nic_vendor_statistics = _libraries['libamd_smi.so'].amdsmi_get_nic_vendor_statistics
     amdsmi_get_nic_vendor_statistics.restype = amdsmi_status_t
     amdsmi_get_nic_vendor_statistics.argtypes = [amdsmi_processor_handle, uint32_t, ctypes.POINTER(ctypes.c_uint32), ctypes.POINTER(struct_amdsmi_nic_stat_t)]
+except AttributeError:
+    pass
+try:
+    amdsmi_set_nic_stat_scope = _libraries['libamd_smi.so'].amdsmi_set_nic_stat_scope
+    amdsmi_set_nic_stat_scope.restype = amdsmi_status_t
+    amdsmi_set_nic_stat_scope.argtypes = [amdsmi_processor_handle, amdsmi_nic_stat_scope_t]
 except AttributeError:
     pass
 class struct_amdsmi_ampp_field_t(Structure):
@@ -5593,7 +5734,15 @@ __all__ = \
     'AMDSMI_MEM_TYPE_GTT', 'AMDSMI_MEM_TYPE_LAST',
     'AMDSMI_MEM_TYPE_VIS_VRAM', 'AMDSMI_MEM_TYPE_VRAM',
     'AMDSMI_MM_UVD', 'AMDSMI_MM_VCE', 'AMDSMI_MM_VCN',
-    'AMDSMI_MM__MAX', 'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
+    'AMDSMI_MM__MAX', 'AMDSMI_NIC_CAP_FWCTL', 'AMDSMI_NIC_CAP_NETDEV',
+    'AMDSMI_NIC_FILTER_AINIC_ONLY', 'AMDSMI_NIC_FILTER_ALL',
+    'AMDSMI_NIC_HEALTH_ERROR', 'AMDSMI_NIC_HEALTH_HEALTHY',
+    'AMDSMI_NIC_HEALTH_UNKNOWN', 'AMDSMI_NIC_HEALTH_UNSUPPORTED',
+    'AMDSMI_NIC_HEALTH_WARNING', 'AMDSMI_NIC_STAT_SCOPE_DEFAULT',
+    'AMDSMI_NIC_STAT_SCOPE_EXTENDED', 'AMDSMI_NIC_TYPE_AINIC',
+    'AMDSMI_NIC_TYPE_OTHER', 'AMDSMI_NIC_TYPE_UALOE',
+    'AMDSMI_NIC_TYPE_UNKNOWN',
+    'AMDSMI_NPM_BALANCING_MODE_FREQUENCY_BALANCING',
     'AMDSMI_NPM_BALANCING_MODE_INVALID',
     'AMDSMI_NPM_BALANCING_MODE_MAX',
     'AMDSMI_NPM_BALANCING_MODE_POWER_BALANCING',
@@ -5825,15 +5974,16 @@ __all__ = \
     'amdsmi_get_link_topology_nearest',
     'amdsmi_get_minmax_bandwidth_between_processors',
     'amdsmi_get_nic_asic_info', 'amdsmi_get_nic_bus_info',
-    'amdsmi_get_nic_device_bdf', 'amdsmi_get_nic_driver_info',
-    'amdsmi_get_nic_fw_info', 'amdsmi_get_nic_numa_info',
+    'amdsmi_get_nic_capability', 'amdsmi_get_nic_device_bdf',
+    'amdsmi_get_nic_driver_info', 'amdsmi_get_nic_fw_info',
+    'amdsmi_get_nic_numa_info', 'amdsmi_get_nic_port_ifindex',
     'amdsmi_get_nic_port_info', 'amdsmi_get_nic_port_statistics',
     'amdsmi_get_nic_processor_handles',
     'amdsmi_get_nic_rdma_dev_info',
-    'amdsmi_get_nic_rdma_port_statistics',
-    'amdsmi_get_nic_vendor_statistics', 'amdsmi_get_node_handle',
-    'amdsmi_get_npm_balancing_mode', 'amdsmi_get_npm_info',
-    'amdsmi_get_npm_supported_balancing_modes',
+    'amdsmi_get_nic_rdma_port_statistics', 'amdsmi_get_nic_telemetry',
+    'amdsmi_get_nic_type', 'amdsmi_get_nic_vendor_statistics',
+    'amdsmi_get_node_handle', 'amdsmi_get_npm_balancing_mode',
+    'amdsmi_get_npm_info', 'amdsmi_get_npm_supported_balancing_modes',
     'amdsmi_get_pcie_info', 'amdsmi_get_power_cap_info',
     'amdsmi_get_power_info',
     'amdsmi_get_processor_count_from_handles',
@@ -5865,14 +6015,18 @@ __all__ = \
     'amdsmi_memory_partition_config_t',
     'amdsmi_memory_partition_type_t', 'amdsmi_memory_type_t',
     'amdsmi_mm_ip_t', 'amdsmi_name_value_t', 'amdsmi_nic_asic_info_t',
-    'amdsmi_nic_bus_info_t', 'amdsmi_nic_driver_info_t',
+    'amdsmi_nic_bus_info_t', 'amdsmi_nic_capability_bits_t',
+    'amdsmi_nic_driver_info_t', 'amdsmi_nic_filter_t',
     'amdsmi_nic_fw_entry_t', 'amdsmi_nic_fw_info_t',
+    'amdsmi_nic_health_state_t', 'amdsmi_nic_health_t',
     'amdsmi_nic_numa_info_t', 'amdsmi_nic_port_info_t',
-    'amdsmi_nic_port_t', 'amdsmi_nic_rdma_dev_info_t',
-    'amdsmi_nic_rdma_devices_info_t', 'amdsmi_nic_rdma_port_info_t',
-    'amdsmi_nic_stat_t', 'amdsmi_node_handle',
-    'amdsmi_npm_balancing_mode_t', 'amdsmi_npm_info_t',
-    'amdsmi_npm_status_t', 'amdsmi_nps_caps_t',
+    'amdsmi_nic_port_split_t', 'amdsmi_nic_port_t',
+    'amdsmi_nic_rdma_dev_info_t', 'amdsmi_nic_rdma_devices_info_t',
+    'amdsmi_nic_rdma_port_info_t', 'amdsmi_nic_stat_scope_t',
+    'amdsmi_nic_stat_t', 'amdsmi_nic_telemetry_t',
+    'amdsmi_nic_temperature_t', 'amdsmi_nic_type_t',
+    'amdsmi_node_handle', 'amdsmi_npm_balancing_mode_t',
+    'amdsmi_npm_info_t', 'amdsmi_npm_status_t', 'amdsmi_nps_caps_t',
     'amdsmi_od_vddc_point_t', 'amdsmi_od_volt_curve_t',
     'amdsmi_od_volt_freq_data_t', 'amdsmi_p2p_capability_t',
     'amdsmi_pcie_bandwidth_t', 'amdsmi_pcie_info_t',
@@ -5917,13 +6071,14 @@ __all__ = \
     'amdsmi_set_gpu_perf_level', 'amdsmi_set_gpu_power_profile',
     'amdsmi_set_gpu_process_isolation', 'amdsmi_set_gpu_ptl_formats',
     'amdsmi_set_gpu_ptl_state', 'amdsmi_set_gpu_uma_carveout',
+    'amdsmi_set_nic_filter', 'amdsmi_set_nic_stat_scope',
     'amdsmi_set_npm_balancing_mode', 'amdsmi_set_npm_limit',
-    'amdsmi_set_power_cap',
-    'amdsmi_set_soc_pstate', 'amdsmi_set_ttm_pages_limit',
-    'amdsmi_set_xgmi_plpd', 'amdsmi_shut_down',
-    'amdsmi_smu_fw_version_t', 'amdsmi_sock_info_t',
-    'amdsmi_socket_handle', 'amdsmi_status_code_to_string',
-    'amdsmi_status_t', 'amdsmi_stop_gpu_event_notification',
+    'amdsmi_set_power_cap', 'amdsmi_set_soc_pstate',
+    'amdsmi_set_ttm_pages_limit', 'amdsmi_set_xgmi_plpd',
+    'amdsmi_shut_down', 'amdsmi_smu_fw_version_t',
+    'amdsmi_sock_info_t', 'amdsmi_socket_handle',
+    'amdsmi_status_code_to_string', 'amdsmi_status_t',
+    'amdsmi_stop_gpu_event_notification',
     'amdsmi_temp_range_refresh_rate_t', 'amdsmi_temperature_metric_t',
     'amdsmi_temperature_type_t', 'amdsmi_topo_get_link_type',
     'amdsmi_topo_get_link_weight', 'amdsmi_topo_get_numa_node_number',
@@ -5983,12 +6138,14 @@ __all__ = \
     'struct_amdsmi_name_value_t', 'struct_amdsmi_nic_asic_info_t',
     'struct_amdsmi_nic_bus_info_t', 'struct_amdsmi_nic_driver_info_t',
     'struct_amdsmi_nic_fw_entry_t', 'struct_amdsmi_nic_fw_info_t',
-    'struct_amdsmi_nic_numa_info_t', 'struct_amdsmi_nic_port_info_t',
+    'struct_amdsmi_nic_health_t', 'struct_amdsmi_nic_numa_info_t',
+    'struct_amdsmi_nic_port_info_t', 'struct_amdsmi_nic_port_split_t',
     'struct_amdsmi_nic_port_t', 'struct_amdsmi_nic_rdma_dev_info_t',
     'struct_amdsmi_nic_rdma_devices_info_t',
     'struct_amdsmi_nic_rdma_port_info_t', 'struct_amdsmi_nic_stat_t',
-    'struct_amdsmi_npm_info_t', 'struct_amdsmi_od_vddc_point_t',
-    'struct_amdsmi_od_volt_curve_t',
+    'struct_amdsmi_nic_telemetry_t',
+    'struct_amdsmi_nic_temperature_t', 'struct_amdsmi_npm_info_t',
+    'struct_amdsmi_od_vddc_point_t', 'struct_amdsmi_od_volt_curve_t',
     'struct_amdsmi_od_volt_freq_data_t',
     'struct_amdsmi_p2p_capability_t',
     'struct_amdsmi_pcie_bandwidth_t', 'struct_amdsmi_pcie_info_t',

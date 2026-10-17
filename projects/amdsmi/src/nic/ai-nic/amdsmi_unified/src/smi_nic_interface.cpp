@@ -3,19 +3,27 @@
 
 #include "smi_nic_interface.h"
 
+#include <algorithm>
 #include <atomic>
-#include <cstdlib>
+#include <cstdint>
+#include <cstdio>
 #include <cstring>
 #include <iostream>
 #include <limits>
 #include <memory>
 #include <mutex>
+#include <new>
+#include <optional>
 #include <string>
+#include <utility>
 #include <variant>
 #include <vector>
 
+#include "smi_devlink_netlink.h"
 #include "smi_ethtool_ioctl.h"
 #include "smi_nic_system.h"
+#include "smi_nic_telemetry.h"
+#include "smi_nic_testing.h"
 #include "smi_sysfs.h"
 
 struct smi_nic_ctx {
@@ -26,6 +34,19 @@ struct smi_nic_ctx {
   smi_nic_ctx() : init(false) {}
 };
 
+static constexpr const char* kNotAvailable = "N/A";
+
+// Empty values render as "N/A", matching the optional::value_or("N/A") fields.
+template <size_t N>
+static void copy_or_na(char (&dst)[N], const std::string& value) {
+  std::snprintf(dst, N, "%s", value.empty() ? kNotAvailable : value.c_str());
+}
+
+// The list holds at most SMI_NIC_MAX_STATISTICS entries, so the count cannot promise more.
+static uint32_t capped_stat_count(size_t num_stats) {
+  return static_cast<uint32_t>(std::min(num_stats, static_cast<size_t>(SMI_NIC_MAX_STATISTICS)));
+}
+
 static SmiNicSystem* get_nic_system_from_context(smi_nic_ctx* ctx) {
   if (!ctx || !ctx->init || !ctx->nic_system) {
     return nullptr;
@@ -33,8 +54,11 @@ static SmiNicSystem* get_nic_system_from_context(smi_nic_ctx* ctx) {
   return ctx->nic_system.get();
 }
 
+// The null-ctx and null-out-parameter guards on the entry points below have no
+// test covering them: they sit behind the C ABI with no injection seam, so
+// deleting one leaves the suites green. Change them on inspection, not on CI.
 extern "C" {
-smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx) {
+smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx, bool is_ainic_only) {
   try {
     if (!ctx) {
       return SMI_NIC_STATUS_WRONG_PARAM;
@@ -43,9 +67,11 @@ smi_nic_status_t smi_nic_create_context(smi_nic_ctx_t* ctx) {
     auto context = std::make_unique<smi_nic_ctx>();
     context->nic_system = std::make_unique<SmiNicSystem>();
     context->init = true;
-    *ctx = context.release();
 
-    (*ctx)->nic_system->discover_nics();
+    // Publish only once discovery has succeeded: throwing after the release
+    // would both leak the context and leave the caller holding a handle to it.
+    context->nic_system->discover_nics(is_ainic_only);
+    *ctx = context.release();
 
     return SMI_NIC_STATUS_SUCCESS;
 
@@ -136,11 +162,13 @@ smi_nic_status_t smi_get_nic_driver_info(smi_nic_ctx_t ctx, uint64_t device,
   }
 
   const auto& ports = nic->nic_ports();
+  // A fwctl-only NIC has no netdev to query via ethtool for driver name/version;
+  // report NO_DATA (non-fatal upstream) rather than dropping the device.
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
-  if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+  if (!nic_system->is_driver_loaded(ports[0].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -181,11 +209,9 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
   }
 
   const auto& ports = nic->nic_ports();
-  if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
-  }
-
-  if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+  // A fwctl-only NIC (no host netdev) exposes no port; its PCI-sysfs identity is
+  // still valid. Require a loaded netdev driver only when a port exists.
+  if (!ports.empty() && !nic_system->is_driver_loaded(ports[0].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -204,8 +230,28 @@ smi_nic_status_t smi_get_nic_asic_info(smi_nic_ctx_t ctx, uint64_t device,
                 nic->vendor_name().value_or("N/A").c_str());
   std::snprintf(info->part_number, SMI_NIC_MAX_STRING_LENGTH, "%s",
                 nic->part_number().value_or("N/A").c_str());
+
+  // VPD is the primary serial source; when it was readable but carried no
+  // serial keyword, fall back to the board serial reported over devlink. Skip
+  // the fallback when VPD could not be opened at all, since the devlink round
+  // trip costs ~1s per NIC and has never yet produced a serial in that case.
+  std::string serial = nic->serial_number().value_or("");
+  if (serial.empty() && nic->is_vpd_readable()) {
+    // The devlink client allocates netlink messages that throw; the serial is optional here.
+    try {
+      auto devlink = amd::nic::netlink::create_devlink_client();
+      auto dev_info = devlink->get_device_info(nic->telemetry_bdf());
+      if (dev_info.success && (dev_info.value.board_serial_number[0] != '\0')) {
+        serial = dev_info.value.board_serial_number;
+      }
+    } catch (...) {
+    }
+  }
   std::snprintf(info->serial_number, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                nic->serial_number().value_or("N/A").c_str());
+                serial.empty() ? kNotAvailable : serial.c_str());
+
+  info->type = static_cast<uint8_t>(nic->kind());
+  info->capability = nic->capabilities();
 
   return SMI_NIC_STATUS_SUCCESS;
 }
@@ -232,11 +278,9 @@ smi_nic_status_t smi_get_nic_bus_info(smi_nic_ctx_t ctx, uint64_t device,
   }
 
   const auto& ports = nic->nic_ports();
-  if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
-  }
-
-  if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+  // A fwctl-only NIC (no host netdev) exposes no port; its PCI-sysfs identity is
+  // still valid. Require a loaded netdev driver only when a port exists.
+  if (!ports.empty() && !nic_system->is_driver_loaded(ports[0].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -272,11 +316,9 @@ smi_nic_status_t smi_get_nic_numa_info(smi_nic_ctx_t ctx, uint64_t device,
   }
 
   const auto& ports = nic->nic_ports();
-  if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
-  }
-
-  if (!nic_system->driver_loaded(ports[0].bdf(), DriverType::IONIC)) {
+  // A fwctl-only NIC (no host netdev) exposes no port; its PCI-sysfs identity is
+  // still valid. Require a loaded netdev driver only when a port exists.
+  if (!ports.empty() && !nic_system->is_driver_loaded(ports[0].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -310,91 +352,104 @@ smi_nic_status_t smi_get_nic_port_info(smi_nic_ctx_t ctx, uint64_t device,
   }
 
   const auto& ports = nic->nic_ports();
+  // A fwctl-only NIC has no host netdev/port to report link state for; report
+  // NO_DATA (non-fatal upstream) rather than dropping the device.
   if (ports.empty()) {
-    return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
+    return SMI_NIC_STATUS_NO_DATA;
   }
 
   *info = {};
 
-  uint32_t port_count = 0;
-  bool driver_not_loaded = false;
-  for (uint32_t i = 0; i < ports.size() && port_count < SMI_NIC_MAX_PORTS; i++) {
-    const auto& port = ports[i];
+  uint32_t bound_count = 0;
+  const auto slot_count =
+      static_cast<uint32_t>(std::min(ports.size(), static_cast<size_t>(SMI_NIC_MAX_PORTS)));
+  /**
+   * port.autoneg()/pause_params() route through the netlink transport, whose
+   * RAII message/callback allocations throw; keep that off the C ABI boundary.
+   */
+  try {
+    for (uint32_t i = 0; i < slot_count; i++) {
+      const auto& port = ports[i];
+      // Slot i is nic_ports()[i], the index the statistics entry points take.
+      smi_nic_port_t* port_info = &info->ports[i];
 
-    if (!nic_system->driver_loaded(port.bdf(), DriverType::IONIC)) {
-      driver_not_loaded = true;
-      continue;
-    }
+      port_info->bdf = parse_bdf(port.bdf());
+      port_info->port_num = port.port_num().value_or(std::numeric_limits<uint32_t>::max());
+      copy_or_na(port_info->netdev, port.interface());
 
-    smi_nic_port_t* port_info = &info->ports[port_count];
+      if (!nic_system->is_driver_loaded(port.bdf(), DriverType::Main)) {
+        // Keep the identity; everything the driver would answer reads N/A.
+        copy_or_na(port_info->type, "");
+        copy_or_na(port_info->flavour, "");
+        copy_or_na(port_info->mac_address, "");
+        copy_or_na(port_info->link_state, "");
+        copy_or_na(port_info->autoneg, "");
+        copy_or_na(port_info->pause_autoneg, "");
+        copy_or_na(port_info->pause_rx, "");
+        copy_or_na(port_info->pause_tx, "");
+        port_info->carrier = std::numeric_limits<uint8_t>::max();
+        port_info->mtu = std::numeric_limits<uint16_t>::max();
+        port_info->link_speed = std::numeric_limits<uint32_t>::max();
+        port_info->active_fec = std::numeric_limits<uint32_t>::max();
+        continue;
+      }
 
-    port_info->bdf = parse_bdf(port.bdf());
-    port_info->port_num = port.port_num().value_or(std::numeric_limits<uint32_t>::max());
+      copy_or_na(port_info->type, port.port_type());
+      copy_or_na(port_info->flavour, port.flavour());
 
-    auto port_type = port.port_type();
-    std::snprintf(port_info->type, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                  !port_type.empty() ? port_type.c_str() : "N/A");
+      // The public field is one byte; an index that does not fit reads 0, and
+      // smi_get_nic_port_ifindex() returns the whole value.
+      const auto ifindex = port.ifindex().value_or(0);
+      port_info->ifindex = (ifindex <= std::numeric_limits<uint8_t>::max())
+                               ? static_cast<uint8_t>(ifindex)
+                               : uint8_t{0};
 
-    std::string flavour = port.flavour();
-    std::snprintf(port_info->flavour, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                  !flavour.empty() ? flavour.c_str() : "N/A");
+      copy_or_na(port_info->mac_address, port.mac_address().value_or(""));
 
-    const std::string& netdev = port.interface();
-    std::snprintf(port_info->netdev, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                  !netdev.empty() ? netdev.c_str() : "N/A");
+      port_info->carrier = port.carrier().value_or(std::numeric_limits<uint8_t>::max());
+      port_info->mtu = port.mtu().value_or(std::numeric_limits<uint16_t>::max());
 
-    port_info->ifindex = port.ifindex().value_or(std::numeric_limits<uint8_t>::max());
+      copy_or_na(port_info->link_state, port.link_state().value_or(""));
 
-    auto mac = port.mac_address();
-    std::snprintf(port_info->mac_address, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                  (mac.has_value() && !mac.value().empty()) ? mac.value().c_str() : "N/A");
+      port_info->link_speed = port.link_speed().value_or(std::numeric_limits<uint32_t>::max());
 
-    port_info->carrier = port.carrier().value_or(std::numeric_limits<uint8_t>::max());
-    port_info->mtu = port.mtu().value_or(std::numeric_limits<uint16_t>::max());
+      /**
+       * FEC stays on the direct ioctl (not the transport): the netlink
+       * ETHTOOL_A_FEC_ACTIVE attribute is a link-mode bit index, a different
+       * domain than ioctl active_fec's ETHTOOL_FEC_* bitmask that this field's
+       * API contract promises. The dead netlink FEC path was removed rather
+       * than left to report the wrong domain.
+       */
+      struct ethtool_fecparam fecparam_info{};
+      fecparam_info.cmd = ETHTOOL_GFECPARAM;
+      port_info->active_fec = (smi_ethtool_ioctl(port.interface(), &fecparam_info) == 0)
+                                  ? fecparam_info.active_fec
+                                  : std::numeric_limits<uint32_t>::max();
 
-    auto link_state = port.link_state();
-    std::snprintf(port_info->link_state, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                  (link_state.has_value() && !link_state.value().empty())
-                      ? link_state.value().c_str()
-                      : "N/A");
+      /** Autoneg and pause route through the transport (netlink-first, ioctl fallback). */
+      auto on_off = [](std::optional<bool> v) -> const char* {
+        return v.has_value() ? (v.value() ? "ON" : "OFF") : kNotAvailable;
+      };
+      std::snprintf(port_info->autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s", on_off(port.autoneg()));
 
-    port_info->link_speed = port.link_speed().value_or(std::numeric_limits<uint32_t>::max());
-
-    struct ethtool_fecparam fecparam_info{};
-    fecparam_info.cmd = ETHTOOL_GFECPARAM;
-    port_info->active_fec = (smi_ethtool_ioctl(port.interface(), &fecparam_info) == 0)
-                                ? fecparam_info.active_fec
-                                : std::numeric_limits<uint32_t>::max();
-
-    struct ethtool_link_settings link_settings{};
-    link_settings.cmd = ETHTOOL_GLINKSETTINGS;
-    if (smi_ethtool_ioctl(port.interface(), &link_settings) == 0) {
-      std::snprintf(port_info->autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    link_settings.autoneg ? "ON" : "OFF");
-    } else {
-      std::snprintf(port_info->autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
-    }
-
-    struct ethtool_pauseparam pause_info{};
-    pause_info.cmd = ETHTOOL_GPAUSEPARAM;
-    if (smi_ethtool_ioctl(port.interface(), &pause_info) == 0) {
+      auto pause = port.pause_params();
       std::snprintf(port_info->pause_autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    pause_info.autoneg ? "ON" : "OFF");
+                    on_off(pause ? std::optional<bool>(pause->is_autoneg_enabled) : std::nullopt));
       std::snprintf(port_info->pause_rx, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    pause_info.rx_pause ? "ON" : "OFF");
+                    on_off(pause ? std::optional<bool>(pause->is_rx_pause_enabled) : std::nullopt));
       std::snprintf(port_info->pause_tx, SMI_NIC_MAX_STRING_LENGTH, "%s",
-                    pause_info.tx_pause ? "ON" : "OFF");
-    } else {
-      std::snprintf(port_info->pause_autoneg, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
-      std::snprintf(port_info->pause_rx, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
-      std::snprintf(port_info->pause_tx, SMI_NIC_MAX_STRING_LENGTH, "%s", "N/A");
-    }
+                    on_off(pause ? std::optional<bool>(pause->is_tx_pause_enabled) : std::nullopt));
 
-    port_count++;
+      bound_count++;
+    }
+  } catch (const std::bad_alloc&) {
+    return SMI_NIC_STATUS_NO_RESOURCE;
+  } catch (...) {
+    return SMI_NIC_STATUS_ERROR;
   }
 
-  info->num_ports = port_count;
-  if (driver_not_loaded && port_count == 0) {
+  info->num_ports = slot_count;
+  if (bound_count == 0) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
@@ -433,7 +488,7 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
   bool driver_not_loaded = false;
   for (uint32_t i = 0; i < ports.size() && rdma_count < SMI_NIC_MAX_RDMA_DEV; i++) {
     const auto& port = ports[i];
-    if (!nic_system->driver_loaded(port.bdf(), DriverType::IONIC_RDMA)) {
+    if (!nic_system->is_driver_loaded(port.bdf(), DriverType::Rdma)) {
       driver_not_loaded = true;
       continue;
     }
@@ -454,7 +509,14 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
                     ib.fw_ver().value_or("N/A").c_str());
 
       const auto& ib_ports = ib.ports();
-      rdma_dev->num_rdma_ports = ib.ports_num();
+      /**
+       * Report only the entries the loop below actually writes: the array holds
+       * at most SMI_NIC_MAX_PORTS, and the loop is bounded by ib_ports.size().
+       * Using ib.ports_num() (a sysfs-reported count that can exceed either)
+       * would let a consumer over-read rdma_port_info[].
+       */
+      rdma_dev->num_rdma_ports =
+          static_cast<uint8_t>(std::min(ib_ports.size(), static_cast<size_t>(SMI_NIC_MAX_PORTS)));
       for (uint8_t k = 0; k < ib_ports.size() && k < SMI_NIC_MAX_PORTS; k++) {
         const auto& ib_port = ib_ports[k];
         smi_nic_rdma_port_info_t* port_info = &rdma_dev->rdma_port_info[k];
@@ -482,6 +544,32 @@ smi_nic_status_t smi_get_nic_rdma_dev_info(smi_nic_ctx_t ctx, uint64_t device,
   return SMI_NIC_STATUS_SUCCESS;
 }
 
+smi_nic_status_t smi_get_nic_port_ifindex(smi_nic_ctx_t ctx, uint64_t device, uint32_t port_index,
+                                          uint32_t* ifindex) {
+  if (!ctx || !ifindex) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+
+  auto* nic_system = get_nic_system_from_context(ctx);
+  if (!nic_system) {
+    return SMI_NIC_STATUS_NOT_INIT;
+  }
+
+  std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+  const SmiNic* nic = nic_system->get_nic_by_bdf(device);
+  if (!nic) {
+    return SMI_NIC_STATUS_NOT_FOUND;
+  }
+
+  const auto& ports = nic->nic_ports();
+  if (port_index >= ports.size()) {
+    return SMI_NIC_STATUS_NOT_FOUND;
+  }
+
+  *ifindex = ports[port_index].ifindex().value_or(0);
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
 smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t device,
                                                    uint32_t port_index, uint32_t* count) {
   if (!ctx || !count) {
@@ -505,16 +593,17 @@ smi_nic_status_t smi_get_nic_port_statistics_count(smi_nic_ctx_t ctx, uint64_t d
   }
 
   if (port_index >= ports.size()) {
-    return SMI_NIC_STATUS_WRONG_PARAM;
+    return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
+  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
   const auto& port = ports[port_index];
+  port.collect_standard_statistics();
   const auto& stats_map = port.get_standard_stats_map();
-  *count = static_cast<uint32_t>(stats_map.size());
+  *count = capped_stat_count(stats_map.size());
 
   return SMI_NIC_STATUS_SUCCESS;
 }
@@ -545,18 +634,15 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
+  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
   const auto& port = ports[port_index];
+  port.collect_standard_statistics();
   const auto& stats_map = port.get_standard_stats_map();
 
-  if (stats_map.empty()) {
-    return SMI_NIC_STATUS_NO_DATA;
-  }
-
-  stats->count = static_cast<uint32_t>(std::min(stats_map.size(), (size_t)SMI_NIC_MAX_STATISTICS));
+  stats->count = capped_stat_count(stats_map.size());
   uint32_t i = 0;
   for (const auto& stat_pair : stats_map) {
     if (i >= stats->count) {
@@ -571,7 +657,8 @@ smi_nic_status_t smi_get_nic_port_statistics_list(smi_nic_ctx_t ctx, uint64_t de
 }
 
 smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t device,
-                                                     uint32_t port_index, uint32_t* count) {
+                                                     uint32_t port_index,
+                                                     smi_nic_stat_scope_t scope, uint32_t* count) {
   if (!ctx || !count) {
     return SMI_NIC_STATUS_WRONG_PARAM;
   }
@@ -596,19 +683,23 @@ smi_nic_status_t smi_get_nic_vendor_statistics_count(smi_nic_ctx_t ctx, uint64_t
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
+  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
   const auto& port = ports[port_index];
-  const auto& stats_map = port.get_vendor_stats_map();
-  *count = static_cast<uint32_t>(stats_map.size());
+  if (port.collect_vendor_statistics() != 0) {
+    return SMI_NIC_STATUS_ERROR;
+  }
+  const auto tier =
+      (scope == SMI_NIC_STAT_SCOPE_EXTENDED) ? StatTier_t::Extended : StatTier_t::Default;
+  *count = capped_stat_count(port.get_vendor_stats_map(tier).size());
 
   return SMI_NIC_STATUS_SUCCESS;
 }
 
 smi_nic_status_t smi_get_nic_vendor_statistics_list(smi_nic_ctx_t ctx, uint64_t device,
-                                                    uint32_t port_index,
+                                                    uint32_t port_index, smi_nic_stat_scope_t scope,
                                                     smi_nic_stat_info_t* stats) {
   if (!ctx || !stats) {
     return SMI_NIC_STATUS_WRONG_PARAM;
@@ -634,18 +725,19 @@ smi_nic_status_t smi_get_nic_vendor_statistics_list(smi_nic_ctx_t ctx, uint64_t 
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC)) {
+  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Main)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
   const auto& port = ports[port_index];
-  const auto& stats_map = port.get_vendor_stats_map();
-
-  if (stats_map.empty()) {
-    return SMI_NIC_STATUS_NO_DATA;
+  if (port.collect_vendor_statistics() != 0) {
+    return SMI_NIC_STATUS_ERROR;
   }
+  const auto tier =
+      (scope == SMI_NIC_STAT_SCOPE_EXTENDED) ? StatTier_t::Extended : StatTier_t::Default;
+  const auto stats_map = port.get_vendor_stats_map(tier);
 
-  stats->count = static_cast<uint32_t>(std::min(stats_map.size(), (size_t)SMI_NIC_MAX_STATISTICS));
+  stats->count = capped_stat_count(stats_map.size());
   uint32_t i = 0;
   for (const auto& stat_pair : stats_map) {
     if (i >= stats->count) {
@@ -686,23 +778,25 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_count(smi_nic_ctx_t ctx, uint6
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC_RDMA)) {
+  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Rdma)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
   const auto& ibs = ports[port_index].infiniband();
-  if (ib_index >= (uint32_t)ibs.size()) {
+  if (ib_index >= ibs.size()) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
   const auto& ib_ports = ibs[ib_index].ports();
-  if (rdma_port_index >= (uint32_t)ib_ports.size()) {
-    return SMI_NIC_STATUS_WRONG_PARAM;
+  if (rdma_port_index >= ib_ports.size()) {
+    return SMI_NIC_STATUS_NOT_FOUND;
   }
 
   const auto& ib_port = ib_ports[rdma_port_index];
+  // Counters change while running; the map from discovery time would be stale.
+  ib_port.collect_hw_counters();
   const auto& stats_map = ib_port.get_hw_counters_map();
-  *count = static_cast<uint32_t>(stats_map.size());
+  *count = capped_stat_count(stats_map.size());
 
   return SMI_NIC_STATUS_SUCCESS;
 }
@@ -735,28 +829,26 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
-  if (!nic_system->driver_loaded(ports[port_index].bdf(), DriverType::IONIC_RDMA)) {
+  if (!nic_system->is_driver_loaded(ports[port_index].bdf(), DriverType::Rdma)) {
     return SMI_NIC_STATUS_DRIVER_NOT_LOADED;
   }
 
   const auto& ibs = ports[port_index].infiniband();
-  if (ib_index >= (uint32_t)ibs.size()) {
+  if (ib_index >= ibs.size()) {
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
   const auto& ib_ports = ibs[ib_index].ports();
-  if (rdma_port_index >= (uint32_t)ib_ports.size()) {
+  if (rdma_port_index >= ib_ports.size()) {
     return SMI_NIC_STATUS_NOT_FOUND;
   }
 
   const auto& ib_port = ib_ports[rdma_port_index];
+  // Counters change while running; the map from discovery time would be stale.
+  ib_port.collect_hw_counters();
   const auto& stats_map = ib_port.get_hw_counters_map();
 
-  if (stats_map.empty()) {
-    return SMI_NIC_STATUS_NO_DATA;
-  }
-
-  stats->count = static_cast<uint32_t>(std::min(stats_map.size(), (size_t)SMI_NIC_MAX_STATISTICS));
+  stats->count = capped_stat_count(stats_map.size());
   uint32_t i = 0;
   for (const auto& stat_pair : stats_map) {
     if (i >= stats->count) {
@@ -771,3 +863,87 @@ smi_nic_status_t smi_get_nic_rdma_port_statistics_list(smi_nic_ctx_t ctx, uint64
 }
 
 }  // extern "C"
+
+smi_nic_status_t smi_nic_create_context_for_testing(smi_nic_ctx_t* ctx,
+                                                    std::unique_ptr<SmiNicSystem> system) {
+  if ((ctx == nullptr) || (system == nullptr)) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+  auto context = std::make_unique<smi_nic_ctx>();
+  context->nic_system = std::move(system);
+  context->init = true;
+  *ctx = context.release();
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
+smi_nic_status_t smi_get_nic_telemetry(smi_nic_ctx_t ctx, uint64_t device,
+                                       amd::smi::nic::telemetry::NicTelemetrySnapshot* snapshot) {
+  if (!ctx || !snapshot) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+
+  auto* nic_system = get_nic_system_from_context(ctx);
+  if (!nic_system) {
+    return SMI_NIC_STATUS_NOT_INIT;
+  }
+
+  std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+  const SmiNic* nic = nic_system->get_nic_by_bdf(device);
+  if (!nic) {
+    return SMI_NIC_STATUS_NOT_FOUND;
+  }
+
+  // get_snapshot is total: an unexposed metric comes back as its reserved value, never
+  // as a failure, so there is no unsuccessful result to branch on here.
+  // The devlink client allocates netlink messages that throw; keep that off the C ABI boundary.
+  try {
+    amd::smi::nic::telemetry::NicTelemetry telemetry(amd::nic::netlink::create_devlink_client());
+    *snapshot = telemetry.get_snapshot(*nic).value;
+  } catch (const std::bad_alloc&) {
+    return SMI_NIC_STATUS_NO_RESOURCE;
+  } catch (...) {
+    return SMI_NIC_STATUS_ERROR;
+  }
+  return SMI_NIC_STATUS_SUCCESS;
+}
+
+smi_nic_status_t smi_get_nic_fw_info(smi_nic_ctx_t ctx, uint64_t device,
+                                     amd::nic::netlink::DevlinkDeviceInfo* info) {
+  if (!ctx || !info) {
+    return SMI_NIC_STATUS_WRONG_PARAM;
+  }
+
+  auto* nic_system = get_nic_system_from_context(ctx);
+  if (!nic_system) {
+    return SMI_NIC_STATUS_NOT_INIT;
+  }
+
+  // DEVLINK_CMD_INFO_GET is a live FW/NVM mailbox round trip (~1s); the lock is
+  // released before it runs so concurrent per-NIC callers overlap that wait
+  // instead of serializing on it. create_devlink_client() below is a fresh,
+  // unshared socket per call, so nothing here needs ctx_mutex's protection.
+  std::string telemetry_bdf;
+  {
+    std::lock_guard<std::mutex> lock(ctx->ctx_mutex);
+    const SmiNic* nic = nic_system->get_nic_by_bdf(device);
+    if (!nic) {
+      return SMI_NIC_STATUS_NOT_FOUND;
+    }
+    telemetry_bdf = nic->telemetry_bdf();
+  }
+
+  try {
+    auto devlink = amd::nic::netlink::create_devlink_client();
+    auto dev = devlink->get_device_info(telemetry_bdf);
+    if (!dev.success) {
+      return SMI_NIC_STATUS_NOT_SUPPORTED;
+    }
+
+    *info = dev.value;
+  } catch (const std::bad_alloc&) {
+    return SMI_NIC_STATUS_NO_RESOURCE;
+  } catch (...) {
+    return SMI_NIC_STATUS_ERROR;
+  }
+  return SMI_NIC_STATUS_SUCCESS;
+}

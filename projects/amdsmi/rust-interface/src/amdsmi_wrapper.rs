@@ -3546,6 +3546,20 @@ const _: () = {
     ["Offset of field: AmdsmiNicStatT::value"]
         [::std::mem::offset_of!(AmdsmiNicStatT, value) - 256usize];
 };
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicCapabilityBitsT {
+    AmdsmiNicCapFwctl = 1,
+    AmdsmiNicCapNetdev = 2,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicTypeT {
+    AmdsmiNicTypeUnknown = 0,
+    AmdsmiNicTypeAinic = 1,
+    AmdsmiNicTypeUaloe = 2,
+    AmdsmiNicTypeOther = 3,
+}
 #[repr(C)]
 #[derive(Debug, Copy, Clone)]
 pub struct AmdsmiNicAsicInfoT {
@@ -3653,6 +3667,94 @@ const _: () = {
         [::std::mem::offset_of!(AmdsmiNicFwInfoT, num_fw) - 0usize];
     ["Offset of field: AmdsmiNicFwInfoT::fw"]
         [::std::mem::offset_of!(AmdsmiNicFwInfoT, fw) - 4usize];
+};
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicHealthStateT {
+    AmdsmiNicHealthUnknown = 0,
+    AmdsmiNicHealthHealthy = 1,
+    AmdsmiNicHealthWarning = 2,
+    AmdsmiNicHealthError = 3,
+    AmdsmiNicHealthUnsupported = 4,
+}
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicFilterT {
+    AmdsmiNicFilterAll = 0,
+    AmdsmiNicFilterAinicOnly = 1,
+}
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicTemperatureT {
+    pub asic_temp_c: u16,
+    pub transceiver_temp_c: u16,
+    pub board_temp_c: u16,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicTemperatureT"][::std::mem::size_of::<AmdsmiNicTemperatureT>() - 6usize];
+    ["Alignment of AmdsmiNicTemperatureT"]
+        [::std::mem::align_of::<AmdsmiNicTemperatureT>() - 2usize];
+    ["Offset of field: AmdsmiNicTemperatureT::asic_temp_c"]
+        [::std::mem::offset_of!(AmdsmiNicTemperatureT, asic_temp_c) - 0usize];
+    ["Offset of field: AmdsmiNicTemperatureT::transceiver_temp_c"]
+        [::std::mem::offset_of!(AmdsmiNicTemperatureT, transceiver_temp_c) - 2usize];
+    ["Offset of field: AmdsmiNicTemperatureT::board_temp_c"]
+        [::std::mem::offset_of!(AmdsmiNicTemperatureT, board_temp_c) - 4usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicHealthT {
+    pub state: u8,
+    pub reserved: [u8; 3usize],
+    pub error_count: u32,
+    pub reporter: [::std::os::raw::c_char; 64usize],
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicHealthT"][::std::mem::size_of::<AmdsmiNicHealthT>() - 72usize];
+    ["Alignment of AmdsmiNicHealthT"][::std::mem::align_of::<AmdsmiNicHealthT>() - 4usize];
+    ["Offset of field: AmdsmiNicHealthT::state"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, state) - 0usize];
+    ["Offset of field: AmdsmiNicHealthT::reserved"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, reserved) - 1usize];
+    ["Offset of field: AmdsmiNicHealthT::error_count"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, error_count) - 4usize];
+    ["Offset of field: AmdsmiNicHealthT::reporter"]
+        [::std::mem::offset_of!(AmdsmiNicHealthT, reporter) - 8usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicPortSplitT {
+    pub splittable: u8,
+    pub split_count: u8,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicPortSplitT"][::std::mem::size_of::<AmdsmiNicPortSplitT>() - 2usize];
+    ["Alignment of AmdsmiNicPortSplitT"][::std::mem::align_of::<AmdsmiNicPortSplitT>() - 1usize];
+    ["Offset of field: AmdsmiNicPortSplitT::splittable"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, splittable) - 0usize];
+    ["Offset of field: AmdsmiNicPortSplitT::split_count"]
+        [::std::mem::offset_of!(AmdsmiNicPortSplitT, split_count) - 1usize];
+};
+#[repr(C)]
+#[derive(Debug, Copy, Clone)]
+pub struct AmdsmiNicTelemetryT {
+    pub temperature: AmdsmiNicTemperatureT,
+    pub health: AmdsmiNicHealthT,
+    pub port_split: AmdsmiNicPortSplitT,
+}
+#[allow(clippy::unnecessary_operation, clippy::identity_op)]
+const _: () = {
+    ["Size of AmdsmiNicTelemetryT"][::std::mem::size_of::<AmdsmiNicTelemetryT>() - 84usize];
+    ["Alignment of AmdsmiNicTelemetryT"][::std::mem::align_of::<AmdsmiNicTelemetryT>() - 4usize];
+    ["Offset of field: AmdsmiNicTelemetryT::temperature"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, temperature) - 0usize];
+    ["Offset of field: AmdsmiNicTelemetryT::health"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, health) - 8usize];
+    ["Offset of field: AmdsmiNicTelemetryT::port_split"]
+        [::std::mem::offset_of!(AmdsmiNicTelemetryT, port_split) - 80usize];
 };
 #[repr(C)]
 #[derive(Copy, Clone)]
@@ -5690,6 +5792,21 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_nic_type(
+        processor_handle: AmdsmiProcessorHandle,
+        type_: *mut AmdsmiNicTypeT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_capability(
+        processor_handle: AmdsmiProcessorHandle,
+        capability: *mut u32,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_nic_filter(mode: AmdsmiNicFilterT) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_nic_bus_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiNicBusInfoT,
@@ -5705,6 +5822,13 @@ extern "C" {
     pub fn amdsmi_get_nic_port_info(
         processor_handle: AmdsmiProcessorHandle,
         info: *mut AmdsmiNicPortInfoT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_get_nic_port_ifindex(
+        processor_handle: AmdsmiProcessorHandle,
+        port_index: u32,
+        ifindex: *mut u32,
     ) -> AmdsmiStatusT;
 }
 extern "C" {
@@ -5728,6 +5852,12 @@ extern "C" {
     ) -> AmdsmiStatusT;
 }
 extern "C" {
+    pub fn amdsmi_get_nic_telemetry(
+        processor_handle: AmdsmiProcessorHandle,
+        info: *mut AmdsmiNicTelemetryT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
     pub fn amdsmi_get_nic_port_statistics(
         processor_handle: AmdsmiProcessorHandle,
         port_index: u32,
@@ -5735,12 +5865,24 @@ extern "C" {
         stats: *mut AmdsmiNicStatT,
     ) -> AmdsmiStatusT;
 }
+#[repr(u32)]
+#[derive(Debug, Copy, Clone, Hash, PartialEq, Eq)]
+pub enum AmdsmiNicStatScopeT {
+    AmdsmiNicStatScopeDefault = 0,
+    AmdsmiNicStatScopeExtended = 1,
+}
 extern "C" {
     pub fn amdsmi_get_nic_vendor_statistics(
         processor_handle: AmdsmiProcessorHandle,
         port_index: u32,
         num_stats: *mut u32,
         stats: *mut AmdsmiNicStatT,
+    ) -> AmdsmiStatusT;
+}
+extern "C" {
+    pub fn amdsmi_set_nic_stat_scope(
+        processor_handle: AmdsmiProcessorHandle,
+        scope: AmdsmiNicStatScopeT,
     ) -> AmdsmiStatusT;
 }
 #[repr(C)]

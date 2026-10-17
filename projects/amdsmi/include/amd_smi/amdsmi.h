@@ -323,8 +323,8 @@ typedef enum {
                                            within the CPU */
   AMDSMI_PROCESSOR_TYPE_AMD_APU,   //!< AMD Accelerated processor type, GPU and CPU on a single die
   AMDSMI_PROCESSOR_TYPE_AMD_NIC,   //!< AMD Network Interface Card processor type
-  AMDSMI_PROCESSOR_TYPE_BRCM_NIC,  //!< Broadcom Network Interface Card type
-  AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH  //!< Broadcom Switch type
+  AMDSMI_PROCESSOR_TYPE_BRCM_NIC,  //!< Deprecated: no processor reports this type
+  AMDSMI_PROCESSOR_TYPE_BRCM_SWITCH  //!< Deprecated: no processor reports this type
 } amdsmi_processor_type_t;
 
 /**
@@ -3075,7 +3075,39 @@ typedef struct {
 } amdsmi_nic_stat_t;
 
 /**
+ * @brief NIC capability bits
+ *
+ * Bitmask describing what a NIC exposes. A device may set more than one bit
+ * (e.g. an AMD POLLARA exposes both a firmware-control management function and
+ * host network ports).
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_CAP_FWCTL = (1u << 0),   //!< exposes a firmware-control management function
+  AMDSMI_NIC_CAP_NETDEV = (1u << 1),  //!< exposes host network port(s)
+} amdsmi_nic_capability_bits_t;
+
+/**
+ * @brief NIC type
+ *
+ * Which kind of NIC a handle refers to. Use the vendor name to tell apart devices reported as
+ * ::AMDSMI_NIC_TYPE_OTHER.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_TYPE_UNKNOWN = 0,  //!< the type could not be determined
+  AMDSMI_NIC_TYPE_AINIC = 1,    //!< AMD Pensando AINIC
+  AMDSMI_NIC_TYPE_UALOE = 2,    //!< UALoE accelerator-fabric endpoint
+  AMDSMI_NIC_TYPE_OTHER = 3,    //!< any other vendor
+} amdsmi_nic_type_t;
+
+/**
  * @brief NIC asic information
+ *
+ * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF)
+ * when the corresponding attribute is unavailable.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -3095,6 +3127,9 @@ typedef struct {
 /**
  * @brief NIC bus information
  *
+ * Integer fields are set to the maximum value of their type (0xFF / 0xFFFFFFFF)
+ * when the corresponding attribute is unavailable.
+ *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
 typedef struct {
@@ -3107,6 +3142,8 @@ typedef struct {
 
 /**
  * @brief NIC NUMA information
+ *
+ * @p node is set to 0xFF when the NUMA node is unavailable.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -3136,7 +3173,79 @@ typedef struct {
 } amdsmi_nic_fw_info_t;
 
 /**
+ * @brief NIC health state.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_HEALTH_UNKNOWN = 0,  //!< reserved: reporter present, state indeterminate
+  AMDSMI_NIC_HEALTH_HEALTHY = 1,
+  AMDSMI_NIC_HEALTH_WARNING = 2,  //!< reserved: no producing path yet
+  AMDSMI_NIC_HEALTH_ERROR = 3,
+  AMDSMI_NIC_HEALTH_UNSUPPORTED = 4,  //!< no health reporter exposed (distinct from UNKNOWN)
+} amdsmi_nic_health_state_t;
+
+/**
+ * @brief NIC discovery filter mode. Selects which NICs @ref amdsmi_init enumerates.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_FILTER_ALL = 0,     //!< Discover every supported NIC (default)
+  AMDSMI_NIC_FILTER_AINIC_ONLY,  //!< Discover only AMD NICs (AINIC cards and UALoE endpoints)
+} amdsmi_nic_filter_t;
+
+/**
+ * @brief NIC temperatures in whole degrees Celsius; UINT16_MAX when unavailable.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint16_t asic_temp_c;
+  uint16_t transceiver_temp_c;
+  uint16_t board_temp_c;
+} amdsmi_nic_temperature_t;
+
+/**
+ * @brief NIC health summary.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint8_t state;  //!< an amdsmi_nic_health_state_t value
+  uint8_t reserved[3];
+  uint32_t error_count;  //!< UINT32_MAX when unavailable; real counts saturate to UINT32_MAX-1
+  char reporter[64];     //!< devlink reporter name, NUL-terminated; "" if none
+} amdsmi_nic_health_t;
+
+/**
+ * @brief NIC port-split configuration; UINT8_MAX when unknown.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  uint8_t splittable;
+  uint8_t split_count;
+} amdsmi_nic_port_split_t;
+
+/**
+ * @brief Aggregate live NIC telemetry.
+ *
+ * @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef struct {
+  amdsmi_nic_temperature_t temperature;
+  amdsmi_nic_health_t health;
+  amdsmi_nic_port_split_t port_split;
+} amdsmi_nic_telemetry_t;
+
+/**
  * @brief NIC port information
+ *
+ * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF /
+ * 0xFFFFFFFF) when the corresponding attribute is unavailable, except @p ifindex
+ * which is 0 when unavailable or when the interface index does not fit in a byte (a valid Linux
+ * ifindex starts at 1); amdsmi_get_nic_port_ifindex() returns the full value.
  *
  * Active FEC Modes:
  * The active_fec field provides a bitmask representation of Active FEC (Active Forward Error
@@ -3198,6 +3307,9 @@ typedef struct {
 
 /**
  * @brief NIC RDMA port information
+ *
+ * Integer fields are set to the maximum value of their type (0xFF / 0xFFFF)
+ * when the corresponding attribute is unavailable.
  *
  * @cond @tag{gpu_bm_linux} @tag{host} @endcond
  */
@@ -10350,6 +10462,62 @@ amdsmi_status_t amdsmi_get_nic_asic_info(amdsmi_processor_handle processor_handl
                                          amdsmi_nic_asic_info_t* info);
 
 /**
+ *  @brief Retrieves the type of the NIC
+ *
+ *  Reports the kind of NIC; see ::amdsmi_nic_type_t.
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] type reference to the NIC type. Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_type(amdsmi_processor_handle processor_handle,
+                                    amdsmi_nic_type_t* type);
+
+/**
+ *  @brief Retrieves the capability bitmask of the NIC
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] capability reference to a bitmask of ::amdsmi_nic_capability_bits_t. Must be
+ *  allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_capability(amdsmi_processor_handle processor_handle,
+                                          uint32_t* capability);
+
+/**
+ *  @brief Restrict which NICs @ref amdsmi_init discovers.
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  The filter is process-global and is read during @ref amdsmi_init, so it must
+ *  be set BEFORE calling @ref amdsmi_init to affect that init.
+ *
+ *  The default is ::AMDSMI_NIC_FILTER_ALL (every supported NIC is discovered).
+ *  Skip third-party NICs with ::AMDSMI_NIC_FILTER_AINIC_ONLY, which keeps AINIC cards and
+ *  UALoE endpoints; restore the default with ::AMDSMI_NIC_FILTER_ALL.
+ *
+ *  @param[in] mode an ::amdsmi_nic_filter_t value
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *  ::AMDSMI_STATUS_INVAL if mode is not a valid ::amdsmi_nic_filter_t
+ */
+amdsmi_status_t amdsmi_set_nic_filter(amdsmi_nic_filter_t mode);
+
+/**
  *  @brief Retrieves BUS information for the NIC
  *
  *  @ingroup tagNicInfo
@@ -10393,12 +10561,36 @@ amdsmi_status_t amdsmi_get_nic_numa_info(amdsmi_processor_handle processor_handl
  *  @param[in] processor_handle NIC for which to query
  *
  *  @param[out] info reference to the nic port info struct.
- *  Must be allocated by user.
+ *  Must be allocated by user. `ports[i]` is the port the statistics calls take as
+ *  `port_index` i. A port with no driver bound keeps its `bdf`, `port_num` and `netdev`;
+ *  its other fields read N/A.
  *
  *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
  */
 amdsmi_status_t amdsmi_get_nic_port_info(amdsmi_processor_handle processor_handle,
                                          amdsmi_nic_port_info_t* info);
+
+/**
+ *  @brief Retrieves the full interface index of a NIC port
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  amdsmi_nic_port_t::ifindex holds one byte; this returns the whole value.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[in] port_index index of the NIC port, as for amdsmi_get_nic_port_statistics()
+ *
+ *  @param[out] ifindex reference to the Linux interface index, 0 when unavailable. Must be
+ *  allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, ::AMDSMI_STATUS_NOT_FOUND if
+ *  @p port_index is past the last port, non-zero on other failure
+ */
+amdsmi_status_t amdsmi_get_nic_port_ifindex(amdsmi_processor_handle processor_handle,
+                                            uint32_t port_index, uint32_t* ifindex);
 
 /**
  *  @brief Retrieves RDMA devices information for the NIC
@@ -10433,16 +10625,28 @@ amdsmi_status_t amdsmi_get_nic_rdma_dev_info(amdsmi_processor_handle processor_h
  *  1. First call with stats=NULL to get the count of available statistics
  *  2. Second call with allocated array to retrieve all statistics
  *
+ *  The counters are the driver's RDMA hardware counters, as listed by
+ *  `rdma statistic show link DEV/PORT`, and are read on every call.
+ *
+ *  @note Setting optional counters (`rdma statistic set link DEV/PORT optional-counters`)
+ *  is not supported.
+ *
  *  @param[in] processor_handle NIC for which to query
- *  @param[in] rdma_port_index index of the NIC RDMA port to query
+ *  @param[in] rdma_port_index index of the RDMA port to query, counted from 0 across the
+ *    NIC's RDMA devices in the order of ::amdsmi_nic_rdma_devices_info_t (each device's
+ *    ports in turn)
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a port with no
+ *    counters (num_stats is 0), non-zero on fail.
+ *    ::AMDSMI_STATUS_NOT_SUPPORTED if the NIC has no RDMA port at @p rdma_port_index
  */
 amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle processor_handle,
                                                     uint32_t rdma_port_index, uint32_t* num_stats,
@@ -10455,8 +10659,9 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
  *
  *  @platform{host} @platform{gpu_bm_linux}
  *
- *  @note This API depends on libmnl. If libmnl is not installed on the
- *  system, this function returns ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *  @note This API reads firmware versions over devlink (libnl3). If libnl3 is
+ *  not available on the system, this function returns
+ *  ::AMDSMI_STATUS_NOT_SUPPORTED.
  *
  *  @param[in] processor_handle NIC for which to query
  *
@@ -10467,6 +10672,28 @@ amdsmi_status_t amdsmi_get_nic_rdma_port_statistics(amdsmi_processor_handle proc
  */
 amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
                                        amdsmi_nic_fw_info_t* info);
+
+/**
+ *  @brief Retrieve live telemetry (temperature, health, port-split) for a NIC.
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  @note Health and port-split are read over devlink (libnl3); temperature via
+ *  sysfs/hwmon. A metric the NIC does not expose is reported through reserved values
+ *  in its sub-struct (per-width max value), not a failed call. The call fails
+ *  only when the handle is not a NIC.
+ *
+ *  @param[in] processor_handle NIC for which to query
+ *
+ *  @param[out] info reference to the nic telemetry struct.
+ *  Must be allocated by user.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ */
+amdsmi_status_t amdsmi_get_nic_telemetry(amdsmi_processor_handle processor_handle,
+                                         amdsmi_nic_telemetry_t* info);
 
 /**
  *  @brief Retrieve PORT statistics for the specified NIC port
@@ -10482,17 +10709,35 @@ amdsmi_status_t amdsmi_get_nic_fw_info(amdsmi_processor_handle processor_handle,
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a port with no
+ *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
+ *    port, non-zero on other failure
  */
 amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor_handle,
                                                uint32_t port_index, uint32_t* num_stats,
                                                amdsmi_nic_stat_t* stats);
+
+/**
+ *  @brief Which tier of vendor statistics to return
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  AMDSMI_NIC_STAT_SCOPE_EXTENDED is a superset of AMDSMI_NIC_STAT_SCOPE_DEFAULT.
+ *
+ *  @cond @tag{gpu_bm_linux} @tag{host} @endcond
+ */
+typedef enum {
+  AMDSMI_NIC_STAT_SCOPE_DEFAULT = 0,
+  AMDSMI_NIC_STAT_SCOPE_EXTENDED = 1
+} amdsmi_nic_stat_scope_t;
 
 /**
  *  @brief Retrieve vendor specific statistics for the NIC port
@@ -10509,20 +10754,48 @@ amdsmi_status_t amdsmi_get_nic_port_statistics(amdsmi_processor_handle processor
  *  between different NIC vendors and driver/fw versions. The statistic names are
  *  preserved as provided by the underlying driver implementation.
  *
+ *  The counter set is the tier chosen for @p processor_handle with
+ *  amdsmi_set_nic_stat_scope(), AMDSMI_NIC_STAT_SCOPE_DEFAULT until set.
+ *
  *  @param[in] processor_handle NIC for which to query
  *  @param[in] port_index index of the NIC port to query
  *  @param[in,out] num_stats pointer to the number of statistics
- *    - Input: maximum number of statistics that stats array can hold
- *    - Output: actual number of statistics available/returned
+ *    - Input: maximum number of statistics that stats array can hold; ignored if stats is NULL
+ *    - Output: number of statistics available
  *  @param[out] stats pointer to array of amdsmi_nic_stat_t structures to be filled
  *    - If NULL, only num_stats is filled with the count of available statistics
- *    - If not NULL, must be allocated by user with at least num_stats elements
+ *    - If not NULL, must be allocated by user with at least num_stats elements. When there are
+ *      more statistics, the first num_stats are filled and ::AMDSMI_STATUS_INSUFFICIENT_SIZE
+ *      is returned
  *
- *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on fail
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including a driver with no
+ *    statistics (num_stats is 0). ::AMDSMI_STATUS_NOT_FOUND if @p port_index is past the last
+ *    port, ::AMDSMI_STATUS_API_FAILED if the driver's statistics could not be read, non-zero on
+ *    other failure
  */
 amdsmi_status_t amdsmi_get_nic_vendor_statistics(amdsmi_processor_handle processor_handle,
                                                  uint32_t port_index, uint32_t* num_stats,
                                                  amdsmi_nic_stat_t* stats);
+
+/**
+ *  @brief Select the vendor statistics tier returned for a NIC handle
+ *
+ *  @ingroup tagNicInfo
+ *
+ *  @platform{host} @platform{gpu_bm_linux}
+ *
+ *  Applies to later amdsmi_get_nic_vendor_statistics() calls on @p processor_handle. The
+ *  setting is per handle; callers that share a handle across threads must agree on the tier.
+ *
+ *  @param[in] processor_handle NIC to configure
+ *  @param[in] scope AMDSMI_NIC_STAT_SCOPE_DEFAULT for the driver's default counter set,
+ *  AMDSMI_NIC_STAT_SCOPE_EXTENDED for the full set (a superset). Any other value returns
+ *  ::AMDSMI_STATUS_INVAL
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, non-zero on failure
+ */
+amdsmi_status_t amdsmi_set_nic_stat_scope(amdsmi_processor_handle processor_handle,
+                                          amdsmi_nic_stat_scope_t scope);
 
 /** @} End tagNicInfo */
 
