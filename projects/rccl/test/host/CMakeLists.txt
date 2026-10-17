@@ -55,6 +55,21 @@ rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/tuning_fakes.cc"
   "int64_t g_paramMaxNchannels = -2;" "the MaxNchannels fake default")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/wrap_fakes.cc"
   "static int64_t DefaultParamForceCe() { return 1; }" "the ForceCe fake default")
+# graph_fakes.cc hand-writes these params, whose NCCL_PARAMs are in files rccl-UnitTestsMicroTopo doesn't compile.
+# Each entry is <src file>|<production line>|<fake body, up to its ';'>.
+foreach(_pin
+    "init.cc|NCCL_PARAM(P2pDisable, \"P2P_DISABLE\", 0)|ncclParamP2pDisable() { return g_loadParam(\"P2P_DISABLE\", 0)"
+    "init.cc|NCCL_PARAM(MultiRankGpuEnable, \"MULTI_RANK_GPU_ENABLE\", 0)|ncclParamMultiRankGpuEnable() { return g_loadParam(\"MULTI_RANK_GPU_ENABLE\", 0)"
+    "init.cc|NCCL_PARAM(WorkArgsBytes, \"WORK_ARGS_BYTES\", INT64_MAX)|ncclParamWorkArgsBytes() { return g_loadParam(\"WORK_ARGS_BYTES\", INT64_MAX)"
+    "graph/rccl_graph_gen.cc|RCCL_PARAM(IntraGraphGen, \"INTRA_GRAPH_GEN\", 0)|rcclParamIntraGraphGen() { return g_loadParam(\"RCCL_INTRA_GRAPH_GEN\", 0)"
+    "graph/rccl_graph_gen.cc|RCCL_PARAM(InterGraphGen, \"INTER_GRAPH_GEN\", 0)|rcclParamInterGraphGen() { return g_loadParam(\"RCCL_INTER_GRAPH_GEN\", 0)")
+  string(REPLACE "|" ";" _pin "${_pin}")
+  list(GET _pin 0 _src)
+  list(GET _pin 1 _prod)
+  list(GET _pin 2 _fake)
+  rccl_assert_source_line("${_rccl_src_root}/${_src}" "${_prod}" "fakes/graph_fakes.cc")
+  rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/graph_fakes.cc" "${_fake}" "the graph_fakes.cc default")
+endforeach()
 # gdr-probe-test.cc pins the GDR probe's registration flags to production's; these
 # keep its kRegAccessFlags and both reg.cc copies spelling the same set.
 set(_rccl_reg_access_flags
@@ -425,6 +440,24 @@ function(rccl_define_micro_source_lists)
     fakes/topo_stubs.cc
     fakes/transport_net_ib_fakes.cc      # src/transport/net_ib/connect.cc params
     fakes/transport_p2p_fakes.cc         # src/transport/p2p.cc shareable buffers
+    ../common/main_altrsmi.cpp
+    PARENT_SCOPE)
+
+  # rccl-UnitTestsMicroTopo -- src/graph/{xml,topo,paths,search,rome_models,connect,rings,trees}.cc, one
+  # test TU each. Own binary: topo_stubs.cc, nccl_fakes.cc, init_fakes.cc and tuning_fakes.cc, which most
+  # targets link, define graph symbols, and the real graph files define them too.
+  set(TEST_MICRO_TOPO_SOURCE_FILES
+    xml-test.cc
+    topo-test.cc
+    paths-test.cc
+    search-test.cc
+    graph-rome-models-test.cc
+    graph-connect-test.cc
+    rings-test.cc
+    trees-test.cc
+    fakes/graph_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/archinfo.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 endfunction()
@@ -1119,6 +1152,26 @@ rccl_add_micro_binary(rccl-UnitTestsMicroClientSupport
     ${_MICRO_MODE_DEFS}
     CLIENT_SUPPORT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/ras/client_support.cc"
   CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro.yaml")
+
+# ---------------------------------------------------------------------------
+# rccl-UnitTestsMicroTopo
+# ---------------------------------------------------------------------------
+rccl_add_micro_binary(rccl-UnitTestsMicroTopo
+  SOURCES ${TEST_MICRO_TOPO_SOURCE_FILES}
+  # The warp-speed arms of connect.cc call rcclGetMaxWarpsPerBlock/rcclWarpSpeedComputeNChannels (rccl_wrap.cc).
+  REMOVE_DEFS ENABLE_WARP_SPEED
+  EXTRA_DEFS
+    ${_MICRO_MODE_DEFS}
+    ${_MICRO_AMDSMI_DEF}
+    XML_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/xml.cc"
+    TOPO_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/topo.cc"
+    PATHS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/paths.cc"
+    SEARCH_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/search.cc"
+    ROME_MODELS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rome_models.cc"
+    CONNECT_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/connect.cc"
+    RINGS_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/rings.cc"
+    TREES_CC_PATH="${RCCL_HOST_HIPIFY_DIR}/src/graph/trees.cc"
+  CATEGORIES_YAML "${CMAKE_CURRENT_SOURCE_DIR}/../test_categories_micro_topo.yaml")
 
 # ---------------------------------------------------------------------------
 # rccl-UnitTestsMicroSymKernels
