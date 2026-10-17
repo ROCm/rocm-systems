@@ -50,8 +50,8 @@ CONFIG="${CONFIG:-${script_dir}/lib/device-api-tests.json}"
 : "${ROCM_PATH:?run-device-api-ci.sh: ROCM_PATH unset (provisioned via rocm.env / sbatch)}"
 : "${MPI_HOME:?run-device-api-ci.sh: MPI_HOME unset (run build-ompi.sh / via sbatch)}"
 
-if [[ ! -x "${ROCM_PATH}/bin/hipcc" ]]; then
-  echo "ERROR: ROCM_PATH=${ROCM_PATH} does not look like a ROCm tree (no bin/hipcc)" >&2
+if [[ ! -x "${ROCM_PATH}/bin/amdclang++" ]]; then
+  echo "ERROR: ROCM_PATH=${ROCM_PATH} does not look like a ROCm tree (no bin/amdclang++)" >&2
   exit 1
 fi
 if [[ ! -f "${MPI_HOME}/lib/libmpi.so" ]]; then
