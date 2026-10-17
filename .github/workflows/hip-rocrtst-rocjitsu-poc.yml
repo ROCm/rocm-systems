@@ -1,0 +1,238 @@
+name: rocJITsu hip-tests and rocrtst PoC
+
+# Standalone CPU run of the normal hip-tests and rocrtst quick selections.
+# It does not call TheRock reusable workflows and it does not change
+# production test workflows.
+#
+# The pull-request label ci:rocjitsu decides whether the job runs.
+# runs-on comes from TheRock select_build_runner(), which reads build_runners.
+# That label is a CPU scale set, not a GPU test runner.
+#
+# rocJITsu is built from this checkout, in local non-kmd mode. The CPU
+# runner cannot grant CAP_SYS_PTRACE, so --daemon is not used.
+#
+# hip-tests quick is the installed Catch2 smoke label. rocrtst quick is the
+# QUICK_TESTS filter in test/therock/test_rocrtst.py.
+
+on:
+  pull_request:
+    types: [opened, synchronize, reopened, labeled, unlabeled]
+    paths:
+      - ".github/workflows/hip-rocrtst-rocjitsu-poc.yml"
+      - ".github/scripts/rocjitsu_suite_runner.py"
+      - ".github/scripts/select_cpu_build_runner.py"
+      - "emulation/rocjitsu/**"
+  workflow_dispatch:
+    inputs:
+      hip_ctest_label:
+        description: "CTest label for hip-tests. Empty skips hip-tests."
+        type: string
+        default: "^smoke$"
+      rocrtst_filter:
+        description: "rocrtst gtest filter. Empty or skip skips rocrtst."
+        type: string
+        default: "rocrtst.Test_Example:rocrtstFunc.MemoryAccessTests:rocrtstFunc.GroupMemoryAllocationTest:rocrtstFunc.MemoryAllocateAndFreeTest:rocrtstFunc.Memory_Alignment_Test:rocrtstFunc.Concurrent_Init_Test:rocrtstFunc.Concurrent_Init_Shutdown_Test:rocrtstFunc.Reference_Count:rocrtstFunc.Signal_Create_Concurrently:rocrtstFunc.Signal_Destroy_Concurrently:rocrtstFunc.IPC:rocrtstFunc.AgentProp_UUID:rocrtstFunc.Deallocation_Notifier_Test:rocrtstFunc.Memory_Atomic_Add_Test:rocrtstFunc.Memory_Atomic_Xchg_Test"
+      rocm_version:
+        description: "Pinned gfx94X-dcgpu nightly used for runtime and tests."
+        type: string
+        default: "10.2.0a20260928"
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.number || github.sha }}
+  cancel-in-progress: false
+
+jobs:
+  gate:
+    name: Check ci:rocjitsu label
+    runs-on: ubuntu-24.04
+    outputs:
+      enabled: ${{ steps.label.outputs.enabled }}
+      build_runs_on: ${{ steps.runner.outputs.build_runs_on || steps.skipped.outputs.build_runs_on }}
+    steps:
+      - name: Label gate
+        id: label
+        run: |
+          echo "enabled=${{ github.event_name != 'pull_request' || contains(github.event.pull_request.labels.*.name, 'ci:rocjitsu') }}" >> "$GITHUB_OUTPUT"
+
+      - name: Checkout scripts
+        if: steps.label.outputs.enabled == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: .github
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout TheRock
+        if: steps.label.outputs.enabled == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/TheRock
+          ref: 7440cb8578f4daae0d85a428fadd6645dc5464a0
+          path: TheRock
+          sparse-checkout: build_tools/github_actions
+          sparse-checkout-cone-mode: true
+
+      - name: Checkout CI config
+        if: steps.label.outputs.enabled == 'true'
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          repository: ROCm/therock-ci-config
+          ref: main
+          path: ci-config
+        continue-on-error: true
+
+      - name: Select CPU build runner
+        id: runner
+        if: steps.label.outputs.enabled == 'true'
+        env:
+          CI_CONFIG_PATH: ci-config
+        run: python3 .github/scripts/select_cpu_build_runner.py
+
+      - name: No runner when the label is absent
+        id: skipped
+        if: steps.label.outputs.enabled != 'true'
+        run: echo "build_runs_on=skipped" >> "$GITHUB_OUTPUT"
+
+  rocjitsu-tests:
+    name: hip-tests and rocrtst on CPU build runner
+    needs: gate
+    if: needs.gate.outputs.enabled == 'true'
+    runs-on: ${{ needs.gate.outputs.build_runs_on }}
+    timeout-minutes: 360
+    # The build-runner process has CapEff 0 and no docker socket, and a nested
+    # container ignores --cap-add=SYS_PTRACE. This Ubuntu container is where the
+    # build and the nightly unpack run. The tests use the non-kmd config in
+    # local mode, which is how the rocJITsu corpus job runs on a CPU scale set
+    # without ptrace.
+    defaults:
+      run:
+        shell: bash
+    container:
+      image: ubuntu:24.04
+    env:
+      ROCM_VERSION: ${{ github.event.inputs.rocm_version || '10.2.0a20260928' }}
+      # workflow_dispatch can clear a suite input to skip that suite.
+      HIP_CTEST_LABEL: ${{ github.event_name == 'workflow_dispatch' && inputs.hip_ctest_label || github.event_name != 'workflow_dispatch' && '^smoke$' || '' }}
+      ROCRTST_FILTER: ${{ github.event_name == 'workflow_dispatch' && inputs.rocrtst_filter || github.event_name != 'workflow_dispatch' && 'rocrtst.Test_Example:rocrtstFunc.MemoryAccessTests:rocrtstFunc.GroupMemoryAllocationTest:rocrtstFunc.MemoryAllocateAndFreeTest:rocrtstFunc.Memory_Alignment_Test:rocrtstFunc.Concurrent_Init_Test:rocrtstFunc.Concurrent_Init_Shutdown_Test:rocrtstFunc.Reference_Count:rocrtstFunc.Signal_Create_Concurrently:rocrtstFunc.Signal_Destroy_Concurrently:rocrtstFunc.IPC:rocrtstFunc.AgentProp_UUID:rocrtstFunc.Deallocation_Notifier_Test:rocrtstFunc.Memory_Atomic_Add_Test:rocrtstFunc.Memory_Atomic_Xchg_Test' || '' }}
+      THEROCK_REF: 7440cb8578f4daae0d85a428fadd6645dc5464a0
+    steps:
+      - name: Install build tools
+        run: |
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            build-essential ca-certificates cmake curl git ninja-build pkg-config python3
+
+      - name: Checkout rocm-systems
+        uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
+        with:
+          sparse-checkout: |
+            .github
+            emulation/rocjitsu
+          sparse-checkout-cone-mode: true
+
+      - name: Build rocJITsu
+        run: |
+          set -euo pipefail
+          cmake -S emulation/rocjitsu -B rj-build -G Ninja \
+            -DCMAKE_BUILD_TYPE=Release \
+            -DBUILD_TESTING=OFF \
+            -DRJ_LOG_GROUPS=OFF
+          cmake --build rj-build --target rocjitsu_bin rocjitsu_shared -j"$(nproc)"
+          test -x rj-build/tools/rocjitsu/rocjitsu
+
+      - name: Install pinned gfx94X runtime and tests
+        run: |
+          set -euo pipefail
+          root="${RUNNER_TEMP:-/tmp}/rocm/${ROCM_VERSION}"
+          mkdir -p "$root" cache
+          base="https://nightly.repo.amd.com/rocm/core/tarball"
+          curl -fL --retry 3 -o "cache/rocm-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-${ROCM_VERSION}.tar.gz"
+          curl -fL --retry 3 -o "cache/tests-${ROCM_VERSION}.tar.gz" \
+            "${base}/therock-dist-linux-gfx94X-dcgpu-tests-${ROCM_VERSION}.tar.gz"
+          tar -xzf "cache/rocm-${ROCM_VERSION}.tar.gz" -C "$root"
+          tar -xzf "cache/tests-${ROCM_VERSION}.tar.gz" -C "$root"
+          if [ -n "${HIP_CTEST_LABEL}" ]; then
+            test -f "$root/share/hip/catch_tests/CTestTestfile.cmake"
+          fi
+          if [ -n "${ROCRTST_FILTER}" ]; then
+            test -x "$root/bin/rocrtst64"
+          fi
+          echo "ROCM_ROOT=$root" >> "$GITHUB_ENV"
+
+      - name: Run hip-tests quick tests under rocJITsu
+        if: env.HIP_CTEST_LABEL != ''
+        env:
+          DEBUG_HIP_GRAPH_MIN_OVERLAP: "0"
+          THEROCK_REQUIRE_HIP_YAML_ENTRIES: "1"
+        run: |
+          set -uo pipefail
+          unset GTEST_FILTER || true
+          mkdir -p logs
+          echo "hip-tests wrapper timeout 18000s, ctest per-test timeout 14400s"
+          set +e
+          python3 .github/scripts/rocjitsu_suite_runner.py \
+            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
+            --config "$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json" \
+            --name hip-tests-quick \
+            --cwd "$ROCM_ROOT/share/hip/catch_tests" \
+            --timeout-seconds 18000 \
+            --log logs/hip-tests.log \
+            -- \
+            ctest \
+            --test-dir "$ROCM_ROOT/share/hip/catch_tests" \
+            -L "$HIP_CTEST_LABEL" \
+            --exclude-regex 'Unit_NonHost_Printf_(loop|multiple_Threads|BufferAvailability)' \
+            --output-on-failure \
+            --parallel 1 \
+            --timeout 14400 \
+            -V
+          hip_status=$?
+          set -e
+          echo "$hip_status" > logs/hip-tests.exit
+          exit "$hip_status"
+
+      - name: Run rocrtst under rocJITsu
+        if: always() && env.ROCRTST_FILTER != '' && env.ROCRTST_FILTER != 'skip'
+        run: |
+          set -uo pipefail
+          mkdir -p logs
+          python3 .github/scripts/rocjitsu_suite_runner.py \
+            --rocjitsu "$PWD/rj-build/tools/rocjitsu/rocjitsu" \
+            --config "$PWD/emulation/rocjitsu/configs/gfx942_cdna3.json" \
+            --name rocrtst64 \
+            --cwd "$ROCM_ROOT/bin" \
+            --gtest-filter "$ROCRTST_FILTER" \
+            --timeout-seconds 14400 \
+            --log logs/rocrtst.log \
+            -- \
+            "$ROCM_ROOT/bin/rocrtst64" \
+            "--gtest_filter=$ROCRTST_FILTER"
+          echo $? > logs/rocrtst.exit
+
+      - name: Fail the job when a suite failed
+        if: always()
+        run: |
+          set -euo pipefail
+          hip=0
+          rocrtst=0
+          if [ -f logs/hip-tests.exit ]; then hip=$(cat logs/hip-tests.exit); fi
+          if [ -f logs/rocrtst.exit ]; then rocrtst=$(cat logs/rocrtst.exit); fi
+          echo "hip-tests exit ${hip}"
+          echo "rocrtst exit ${rocrtst}"
+          {
+            echo "### rocJITsu hip-tests and rocrtst"
+            echo
+            grep -H "Test #" logs/*.log || true
+          } >> "$GITHUB_STEP_SUMMARY"
+          test "$hip" = 0
+          test "$rocrtst" = 0
+
+      - name: Upload rocJITsu test logs
+        if: always()
+        uses: actions/upload-artifact@de65e23aa2b7e23d713bb51fbfcb6d502f8667d8 # v4.6.2
+        with:
+          name: rocjitsu-hip-rocrtst-logs
+          path: logs/
