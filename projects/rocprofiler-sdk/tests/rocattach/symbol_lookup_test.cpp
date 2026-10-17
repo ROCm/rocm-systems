@@ -459,6 +459,131 @@ expect_pathname_lookup_validates_build_id(const loaded_library& source,
     }
     return true;
 }
+
+bool
+expect_load_bias_handles_mapping_layouts()
+{
+    namespace detail = rocprofiler::rocattach::detail;
+
+    constexpr auto page_size = uint64_t{0x1000};
+    constexpr auto load_bias = uint64_t{0x100000};
+    const auto     segments  = std::vector<detail::load_segment>{
+        {0x0000, 0x0000, 0x0800},
+        {0x1000, 0x1000, 0x0800},
+        {0x2000, 0x2000, 0x0800},
+        {0x3000, 0x3000, 0x0000},
+    };
+
+    auto expect_bias_for = [&](uint64_t                                 test_page_size,
+                               const std::vector<detail::load_segment>& test_segments,
+                               const std::vector<detail::file_mapping>& mappings,
+                               std::optional<uint64_t>                  expected,
+                               std::string_view                         description) {
+        auto actual = detail::calculate_load_bias(test_page_size, test_segments, mappings);
+        if(actual == expected) return true;
+
+        auto print_bias = [](std::optional<uint64_t> value) {
+            if(value)
+                std::cerr << "0x" << std::hex << *value << std::dec;
+            else
+                std::cerr << "none";
+        };
+
+        std::cerr << "Unexpected load bias for " << description << ": expected ";
+        print_bias(expected);
+        std::cerr << ", got ";
+        print_bias(actual);
+        std::cerr << '\n';
+        return false;
+    };
+    auto expect_bias = [&](const std::vector<detail::file_mapping>& mappings,
+                           std::optional<uint64_t>                  expected,
+                           std::string_view                         description) {
+        return expect_bias_for(page_size, segments, mappings, expected, description);
+    };
+
+    const auto exact_mappings = std::vector<detail::file_mapping>{
+        {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
+        {load_bias + 0x1000, load_bias + 0x2000, 0x1000},
+        {load_bias + 0x2000, load_bias + 0x3000, 0x2000},
+    };
+    if(!expect_bias(exact_mappings, load_bias, "one maps entry per PT_LOAD segment")) return false;
+
+    const auto merged_mappings = std::vector<detail::file_mapping>{
+        {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
+        {load_bias + 0x1000, load_bias + 0x3000, 0x1000},
+    };
+    if(!expect_bias(merged_mappings, load_bias, "adjacent PT_LOAD segments in one maps entry"))
+    {
+        return false;
+    }
+
+    const auto lower_shadow_mapping = std::vector<detail::file_mapping>{
+        {load_bias - 0x4000, load_bias - 0x3000, 0x2000},
+        {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
+        {load_bias + 0x1000, load_bias + 0x2000, 0x1000},
+        {load_bias + 0x2000, load_bias + 0x3000, 0x2000},
+    };
+    if(!expect_bias(lower_shadow_mapping,
+                    load_bias,
+                    "lower-address nonzero-offset mapping before the load image"))
+    {
+        return false;
+    }
+
+    const auto lower_shadow_with_merged_segments = std::vector<detail::file_mapping>{
+        {load_bias - 0x4000, load_bias - 0x3000, 0x2000},
+        {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
+        {load_bias + 0x1000, load_bias + 0x3000, 0x1000},
+    };
+    if(!expect_bias(lower_shadow_with_merged_segments,
+                    load_bias,
+                    "lower-address mapping with adjacent segments sharing one maps entry"))
+    {
+        return false;
+    }
+
+    const auto contained_segment = std::vector<detail::load_segment>{
+        {0x1000, 0x2000, 0x0800},
+    };
+    const auto mapping_starting_before_segment = std::vector<detail::file_mapping>{
+        {load_bias + 0x1000, load_bias + 0x3000, 0x0000},
+    };
+    if(!expect_bias_for(page_size,
+                        contained_segment,
+                        mapping_starting_before_segment,
+                        load_bias,
+                        "candidate segment contained inside a larger mapping"))
+    {
+        return false;
+    }
+
+    const auto wrong_offset = std::vector<detail::file_mapping>{
+        {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
+        {load_bias + 0x1000, load_bias + 0x3000, 0x2000},
+    };
+    if(!expect_bias(wrong_offset, std::nullopt, "merged mapping with a mismatched file offset"))
+    {
+        return false;
+    }
+
+    const auto ends_at_segment = std::vector<detail::file_mapping>{
+        {load_bias + 0x0000, load_bias + 0x2000, 0x0000},
+    };
+    if(!expect_bias(ends_at_segment, std::nullopt, "mapping ending at the next segment start"))
+    {
+        return false;
+    }
+
+    constexpr auto second_bias = uint64_t{0x200000};
+    const auto     ambiguous   = std::vector<detail::file_mapping>{
+        {load_bias + 0x0000, load_bias + 0x1000, 0x0000},
+        {load_bias + 0x1000, load_bias + 0x3000, 0x1000},
+        {second_bias + 0x0000, second_bias + 0x1000, 0x0000},
+        {second_bias + 0x1000, second_bias + 0x3000, 0x1000},
+    };
+    return expect_bias(ambiguous, std::nullopt, "the same object mapped at two load biases");
+}
 }  // namespace
 
 int
@@ -471,6 +596,8 @@ main(int argc, char** argv)
                      "<no-build-id-lib> <ambiguous-a> <ambiguous-b>\n";
         return 1;
     }
+
+    if(!expect_load_bias_handles_mapping_layouts()) return 1;
 
     auto libraries = std::vector<loaded_library>{};
     libraries.reserve(7);
