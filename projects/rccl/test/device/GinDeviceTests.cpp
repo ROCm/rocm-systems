@@ -2133,4 +2133,98 @@ TEST_F(GinDeviceTest, ProxyFlush_NoTimeoutOverloadWaitsForAbortPoll) {
   queues.ExpectUnchanged();
 }
 
+// ---------------------------------------------------------------------------
+// DescriptorSmem: a caller-provided ncclGinDescriptorSmem (ncclGin_DescriptorSmem)
+//   is where the proxy builds its 128-byte GFD before posting it. NCCL 2.32.3
+//   (052c879fed) grew the storage from alignas(16) char[64] to alignas(64)
+//   char[128]; before that the GFD overran the storage into the caller's
+//   neighbouring shared memory. Checked at runtime rather than with static_assert,
+//   so the file still builds against headers without the fix.
+// ---------------------------------------------------------------------------
+
+TEST_F(GinDeviceTest, DescriptorSmem_FitsProxyGfd) {
+  EXPECT_LE(sizeof(ncclGinProxyGfd_t), sizeof(ncclGinDescriptorSmem));
+  EXPECT_LE(alignof(ncclGinProxyGfd_t), alignof(ncclGinDescriptorSmem));
+}
+
+constexpr int kDescriptorGuardWords = 16;
+
+struct DescriptorSmemWithGuard {
+  ncclGinDescriptorSmem descriptor;
+  uint64_t guard[kDescriptorGuardWords];
+};
+
+// The leaf that ncclGin::putValue(..., ncclGin_DescriptorSmem{&smem}) dispatches to.
+__global__ void kernelPutValueSmemDescriptor(ncclGinCtx ctx, int peer, uint64_t value,
+                                             uint64_t guardInit, uint64_t* guardOut, uint64_t* descOut) {
+  __shared__ DescriptorSmemWithGuard smem;
+  // __shared__ is not zero-initialised: seed the descriptor's first qword with bit 0 clear, so that its flag bit
+  // afterwards shows whether the GFD was built here rather than in the leaf's own scratch.
+  *reinterpret_cast<uint64_t*>(&smem.descriptor) = guardInit;
+  for (int i = 0; i < kDescriptorGuardWords; i++) smem.guard[i] = guardInit;
+  __syncthreads();
+  ncclGinSignalDescriptor noSignal{};
+  noSignal.type = NCCL_GIN_SIGNAL_TYPE_NONE;
+  ncclGinApi_PutValue<NCCL_NET_DEVICE_GIN_PROXY>::call(
+      ctx, ncclCoopThread{}, peer, reinterpret_cast<ncclGinWindow_t>(0x1000), /*dstOff=*/0, value,
+      noSignal, ncclGinSignalInc, /*signalOpArg=*/0, /*hasDescriptor=*/true, &smem.descriptor,
+      cuda::thread_scope_device, cuda::thread_scope_thread);
+  __syncthreads();
+  *descOut = *reinterpret_cast<const volatile uint64_t*>(&smem.descriptor);
+  const volatile uint64_t* guard = smem.guard;
+  for (int i = 0; i < kDescriptorGuardWords; i++) guardOut[i] = guard[i];
+}
+
+TEST_F(GinDeviceTest, PutValue_SmemDescriptorNoOverflow) {
+  constexpr uint32_t kNranks    = 2;
+  constexpr uint32_t kQueueSize = 4;
+  constexpr uint32_t kPeer      = 1;
+  constexpr uint64_t kValue     = 0x0123456789ABCDEFULL;
+  // Bit 0 clear: buildGfd sets the flag bit (bit 0) of every one of the 16 GFD qwords.
+  constexpr uint64_t kGuard     = 0xC0FFEE00C0FFEE00ULL;
+
+  DeviceBuffer<ncclGinProxyGfd_t>    d_queues(kNranks * kQueueSize);
+  DeviceBuffer<uint32_t>             d_pis(kNranks);
+  DeviceBuffer<uint32_t>             d_cis(kNranks);
+  DeviceBuffer<ncclGinProxyGpuCtx_t> d_proxyCtx(1);
+  DeviceBuffer<uint64_t>             d_guard(kDescriptorGuardWords);
+  DeviceBuffer<uint64_t>             d_desc(1);
+  d_queues.zero();
+  d_pis.zero();
+  d_cis.zero();
+  d_guard.zero();
+  d_desc.zero();
+
+  ncclGinProxyGpuCtx_t hostProxyCtx{};
+  hostProxyCtx.nranks    = static_cast<int>(kNranks);
+  hostProxyCtx.queueSize = kQueueSize;
+  hostProxyCtx.queues    = d_queues.ptr;
+  hostProxyCtx.pis       = d_pis.ptr;
+  hostProxyCtx.cis       = d_cis.ptr;
+  d_proxyCtx.upload(hostProxyCtx);
+
+  ncclGinCtx ctx{};
+  ctx.backend = NCCL_NET_DEVICE_GIN_PROXY;
+  ctx.nRanks  = static_cast<int>(kNranks);
+  ctx.handle  = d_proxyCtx.ptr;
+
+  kernelPutValueSmemDescriptor<<<1, 1>>>(ctx, kPeer, kValue, kGuard, d_guard.ptr, d_desc.ptr);
+  syncAndCheck();
+
+  // The GFD was built in the descriptor and posted to the peer's queue.
+  EXPECT_EQ(d_desc.copyTo()[0] & 1u, 1u) << "the GFD was not built in the caller's ncclGinDescriptorSmem";
+  EXPECT_EQ(d_pis.copyTo()[kPeer], 1u);
+  const ncclGinProxyGfd_t posted = d_queues.copyTo()[kPeer * kQueueSize];
+  EXPECT_EQ(static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow) |
+                (static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineLow].inlineLow.inlineValLow2) << 32) |
+                (static_cast<uint64_t>(posted.qword[ncclGinProxyGfdInlineHigh].inlineHigh.inlineValHigh) << 48),
+            kValue);
+
+  // Shared memory right after the descriptor storage must be left alone.
+  const std::vector<uint64_t> guard = d_guard.copyTo();
+  for (int i = 0; i < kDescriptorGuardWords; i++) {
+    EXPECT_EQ(guard[i], kGuard) << "shared-memory word " << i << " after ncclGinDescriptorSmem was overwritten";
+  }
+}
+
 } // namespace RcclUnitTesting
