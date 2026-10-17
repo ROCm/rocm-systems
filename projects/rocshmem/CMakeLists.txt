@@ -424,6 +424,10 @@ if (NOT BUILD_TESTS_ONLY)
     if(NOT rocprofiler-register_FOUND)
       message(STATUS "rocprofiler-register not found - rocSHMEM tracing disabled.")
     endif()
+    # Set before configure_file so #cmakedefine picks it up in rocshmem_config.h
+    if(TARGET rocprofiler-register::rocprofiler-register)
+      set(ROCSHMEM_ROCPROFILER_REGISTER 1)
+    endif()
   endif()
 
   set(CMAKE_THREAD_PREFER_PTHREAD TRUE)
