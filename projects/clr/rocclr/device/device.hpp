@@ -1340,6 +1340,8 @@ class VirtualDevice : public amd::ReferenceCountedObject {
   virtual void submitKernel(amd::NDRangeKernelCommand& command) = 0;
   virtual void submitNativeFn(amd::NativeFnCommand& cmd) = 0;
   virtual void submitMarker(amd::Marker& cmd) = 0;
+  //! Waits for a marker with CPU wait, after Command::enqueue() released the lock (ROCm specific)
+  virtual void CompleteCpuWait(amd::Command& cmd) {}
   virtual void submitAccumulate(amd::AccumulateCommand& cmd) = 0;
   virtual void submitExternalSemaphoreCmd(amd::ExternalSemaphoreCmd& cmd) = 0;
   virtual void submitFillMemory(amd::FillMemoryCommand& cmd) = 0;
