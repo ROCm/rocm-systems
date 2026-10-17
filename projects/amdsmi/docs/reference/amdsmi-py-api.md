@@ -1732,6 +1732,8 @@ Field | Description
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
 `sdma_usage`   | SDMA usage in microseconds
 
+note: In a PID namespace other than the host's, such as that of a container that does not share the host's, the list holds the processes of that namespace that have /dev/kfd open, by their PIDs there, on the GPUs `amdsmi_get_gpu_compute_process_gpus` reports for them. It leaves out the processes whose open files the caller may not read, such as another user's when the caller lacks CAP_SYS_PTRACE. Their `cu_occupancy`, `evicted_time` and `sdma_usage` are "N/A", and `mem` is the sum of their `memory_usage` values.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_process_list` function:
 
 * `AmdSmiLibraryException`
@@ -5100,6 +5102,8 @@ note: Sum of the process memory is not expected to be the total memory usage.
 
 note: A value with all bits set (18446744073709551615 or 4294967295) is not available. A process that exits during the read is listed with zero usage and `cu_occupancy` not available, and a process whose statistics cannot be read with all of them not available.
 
+note: In a PID namespace other than the host's, such as that of a container that does not share the host's, the list holds the processes of that namespace that have /dev/kfd open, by their PIDs there, with `vram_usage`, `sdma_usage`, `cu_occupancy` and `evicted_time` not available. It leaves out the processes whose open files the caller may not read, such as another user's when the caller lacks CAP_SYS_PTRACE.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info` function:
 
 * `AmdSmiLibraryException`
@@ -5147,7 +5151,7 @@ Field | Description
 `cu_occupancy` | Number of Compute Units utilized
 `evicted_time` | Time that queues are evicted on a GPU in milliseconds
 
-note: A value with all bits set is not available. When the library detects that it runs in a container's PID namespace, it reports every value as not available.
+note: A value with all bits set is not available. In a PID namespace other than the host's, `pid` is a process of that namespace. It is not found unless it has /dev/kfd open, its `vram_usage`, `sdma_usage`, `cu_occupancy` and `evicted_time` are not available, and the call raises `AMDSMI_STATUS_NO_PERM` if the caller may not read its open files.
 
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info_by_pid` function:
 
@@ -5162,6 +5166,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_info_by_pid` fu
 - `AMDSMI_STATUS_NOT_FOUND` - Device Not found
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
 
 Example:
 
@@ -5188,6 +5193,8 @@ Input parameters:
 
 Output: List of indices of devices currently being used by the process
 
+note: In a PID namespace other than the host's, `pid` is a process of that namespace, and its GPUs are those it created queues on or, if none is found, those whose render node it holds open. The call raises `AMDSMI_STATUS_NO_PERM` if the caller may not read its open files.
+
 Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_gpus` function:
 
 * `AmdSmiLibraryException`
@@ -5201,6 +5208,7 @@ Exceptions that can be thrown by `amdsmi_get_gpu_compute_process_gpus` function:
 - `AMDSMI_STATUS_NOT_FOUND` - Device Not found
 - `AMDSMI_STATUS_INVAL` - Invalid parameters
 - `AMDSMI_STATUS_TIMEOUT` - Timeout in API call
+- `AMDSMI_STATUS_NO_PERM` - Permission Denied
 
 Example:
 

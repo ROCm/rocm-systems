@@ -36,9 +36,12 @@ namespace {
 using amdsmi_test::FindHelperKfdPids;
 using amdsmi_test::HelperReport;
 using amdsmi_test::HelperStopper;
+using amdsmi_test::InInitialPidNamespace;
 using amdsmi_test::IsEnvironmentFailure;
 using amdsmi_test::kIocAcquireVm;
 using amdsmi_test::kIocAllocMemoryOfGpu;
+using amdsmi_test::kNotAvailable32;
+using amdsmi_test::kNotAvailable64;
 using Clock = std::chrono::steady_clock;
 
 // Extra fds the helper opens on its one DRM client, as dup(), fork() or fd passing do.
@@ -121,8 +124,10 @@ TestProcessMemoryRead::TestProcessMemoryRead() : TestBase() {
   set_description(
       "This test verifies that amdsmi_get_gpu_process_list reports a process's "
       "VRAM, GTT and CPU memory in bytes, counting its DRM client once however "
-      "many fds refer to it. When the process's fdinfo is in another PID "
-      "namespace, it verifies the VRAM KFD reports for the process instead.");
+      "many fds refer to it. In a PID namespace other than the initial one, "
+      "where KFD's statistics for the process are not available, it verifies "
+      "that they are reported so and that mem is the sum of the memory fdinfo "
+      "reports.");
 }
 
 TestProcessMemoryRead::~TestProcessMemoryRead(void) {}
@@ -235,33 +240,30 @@ void TestProcessMemoryRead::Run(void) {
            Clock::now() + std::chrono::seconds(10) +
            std::chrono::milliseconds(cache_ms ? std::strtoul(cache_ms, nullptr, 10) : 0);
        !listed && Clock::now() < give_up;) {
-    listed = find(kfd_pid, &found);
+    listed = find(helper, &found);
     if (!listed) std::this_thread::sleep_for(std::chrono::milliseconds(10));
   }
-  // In a container rocm_smi may list this namespace's PIDs instead of KFD's.
-  amdsmi_proc_info_t by_own_pid{};
-  if (!listed && kfd_pid != helper && find(helper, &by_own_pid)) {
-    GTEST_SKIP() << "The library lists the helper by this PID namespace's PID";
-  }
-  ASSERT_TRUE(listed) << "GPU 0 does not list the helper";
+  ASSERT_TRUE(listed) << "GPU 0 does not list the helper by its PID";
   DrmMemoryKiB now;
   ASSERT_TRUE(ReadDrmMemory(helper, report.drm_fd, &now));
   ASSERT_TRUE(now == expected) << "The helper's DRM memory changed during the query";
 
-  // A KFD process reports, as mem, the VRAM KFD holds for it.
-  EXPECT_EQ(found.mem, vram);
-  if (kfd_pid == helper) {
-    // fdinfo sizes are KiB, and the helper's 1 + kDupFds fds all name one client.
-    EXPECT_EQ(found.memory_usage.vram_mem, expected.vram * 1024);
-    EXPECT_EQ(found.memory_usage.gtt_mem, expected.gtt * 1024);
-    EXPECT_EQ(found.memory_usage.cpu_mem, expected.cpu * 1024);
+  // fdinfo sizes are KiB, and the helper's 1 + kDupFds fds all name one client.
+  EXPECT_EQ(found.memory_usage.vram_mem, expected.vram * 1024);
+  EXPECT_EQ(found.memory_usage.gtt_mem, expected.gtt * 1024);
+  EXPECT_EQ(found.memory_usage.cpu_mem, expected.cpu * 1024);
+  if (InInitialPidNamespace()) {
+    // KFD names the helper by its PID and reports, as mem, the VRAM it holds
+    // for it.
+    EXPECT_EQ(kfd_pid, helper);
+    EXPECT_EQ(found.mem, vram);
   } else {
-    // Listed by its host PID, which this PID namespace's /proc does not have: the
-    // library cannot read the helper's fdinfo and reports the VRAM KFD holds for it.
-    EXPECT_EQ(found.memory_usage.vram_mem, vram);
-    std::cout << "\t**fdinfo sizes not compared: the helper's fdinfo is in another PID "
-                 "namespace"
-              << std::endl;
+    // KFD's statistics for a process of another PID namespace are not
+    // available, so mem is the sum of the memory its fdinfo reports.
+    EXPECT_EQ(found.mem, (expected.vram + expected.gtt + expected.cpu) * 1024);
+    EXPECT_EQ(found.cu_occupancy, kNotAvailable32);
+    EXPECT_EQ(found.evicted_time, kNotAvailable32);
+    EXPECT_EQ(found.sdma_usage, kNotAvailable64);
   }
   IF_VERB(STANDARD) {
     std::cout << "\t**fdinfo KiB vram " << expected.vram << ", gtt " << expected.gtt << ", cpu "
@@ -273,17 +275,17 @@ void TestProcessMemoryRead::Run(void) {
   // The helper holds VRAM on GPU 0, so it uses at least one GPU. Count its GPUs,
   // then read them. A smaller buffer is reported, and a NULL count rejected.
   uint32_t gpu_count = 0;
-  ASSERT_EQ(amdsmi_get_gpu_compute_process_gpus(kfd_pid, nullptr, &gpu_count),
+  ASSERT_EQ(amdsmi_get_gpu_compute_process_gpus(helper, nullptr, &gpu_count),
             AMDSMI_STATUS_SUCCESS);
   ASSERT_GE(gpu_count, 1u);
   std::vector<uint32_t> gpu_indices(gpu_count);
   uint32_t read_count = gpu_count;
-  ASSERT_EQ(amdsmi_get_gpu_compute_process_gpus(kfd_pid, gpu_indices.data(), &read_count),
+  ASSERT_EQ(amdsmi_get_gpu_compute_process_gpus(helper, gpu_indices.data(), &read_count),
             AMDSMI_STATUS_SUCCESS);
   EXPECT_EQ(read_count, gpu_count);
   uint32_t too_few = gpu_count - 1;
-  EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(kfd_pid, gpu_indices.data(), &too_few),
+  EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(helper, gpu_indices.data(), &too_few),
             AMDSMI_STATUS_INSUFFICIENT_SIZE);
-  EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(kfd_pid, gpu_indices.data(), nullptr),
+  EXPECT_EQ(amdsmi_get_gpu_compute_process_gpus(helper, gpu_indices.data(), nullptr),
             AMDSMI_STATUS_INVAL);
 }
