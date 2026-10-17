@@ -1,5 +1,11 @@
 #pragma once
 
+// pragma once does not collapse the hipify copy and the build/debug/include
+// copy of this header, which host TUs include through both paths. The macro
+// guard does, so the named 16-byte pun is not redefined.
+#ifndef RCCL_PTR_H_
+#define RCCL_PTR_H_
+
 /*
 Copyright (c) 2025 Advanced Micro Devices, Inc. All rights reserved.
 
@@ -49,16 +55,22 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 #define RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS 0
 #endif
 
+// -DDWORDX4_INTRINSICS=OFF defines DWORDX4_INTRINSICS_FORCE_OFF. Cooperative
+// 128-bit atomics are the same class of builtin, so that switch disables them
+// too. Checked here so every translation unit that forces the dwordx4 path off
+// (the library target and the unit-test fixtures) also drops the cooperative path.
+#if defined(DWORDX4_INTRINSICS_FORCE_OFF) && !defined(COOPERATIVE_ATOMIC_INTRINSICS_FORCE_OFF)
+#define COOPERATIVE_ATOMIC_INTRINSICS_FORCE_OFF
+#endif
+
 #ifdef __HIP_DEVICE_COMPILE__
 #if (defined(__gfx1250__) || defined(__gfx1250_strict__)) && \
   __has_builtin(__builtin_amdgcn_cooperative_atomic_load_8x16B) && \
   __has_builtin(__builtin_amdgcn_cooperative_atomic_store_8x16B) && \
   !defined(COOPERATIVE_ATOMIC_INTRINSICS_FORCE_OFF)
 #define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 1
-// #pragma message "RCCL Cooperative Atomic Builtins Enabled on GFX1250"
 #else
 #define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 0
-// #pragma message "RCCL Cooperative Atomic Builtins Disabled"
 #endif
 #else
 #define RCCL_HAVE_COOPERATIVE_ATOMIC_BUILTINS 0
@@ -67,8 +79,17 @@ using u8_gptr = __attribute__((address_space(1))) uint8_t*;
 typedef __attribute__((__vector_size__(4 * sizeof(unsigned int)))) unsigned int v4u;
 typedef __attribute__((address_space(1))) v4u* v4u_gptr;
 
+// v4i/v4i_gptr exist only for the cooperative_atomic_*_8x16B builtins, whose
+// signature takes a signed vector. The global b128 intrinsics take v4u.
 typedef __attribute__((__vector_size__(4 * sizeof(int)))) int v4i;
 typedef __attribute__((address_space(1))) v4i* v4i_gptr;
+
+// One 16-byte pun for those two vector types and a pair of uint64 words.
+union alignas(16) rcclB128 {
+  v4u v;
+  v4i vi;
+  uint64_t u64[2];
+};
 
 // "" means system scope, "agent" means device.  Adding this here because I don't think it's obvious otherwise that
 // "" means system scope.
@@ -87,3 +108,5 @@ typedef __attribute__((address_space(1))) v4i* v4i_gptr;
 // Deprecated alias for RCCL_LL_FIFO_SYS_SCOPE; kept for source-level backward
 // compatibility with out-of-tree users of this installed header.
 #define RCCL_LL_FIFO_SYS_SCOPE_LOAD RCCL_LL_FIFO_SYS_SCOPE
+
+#endif // RCCL_PTR_H_
