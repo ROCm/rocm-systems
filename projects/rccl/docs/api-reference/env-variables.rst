@@ -1084,3 +1084,21 @@ threshold table introduced for gfx1250.
       - | ``-1``: Use the compile-time default of 16 MiB (default).
         | ``N`` (bytes): Set the per-slot payload capacity to ``N``; ``ceARTmpBuf`` is ``NCCL_CE_NUM_SLOTS`` (2) times that.
 
+    * - | ``NCCL_SYM_TMA_ENABLE``
+        | Controls the Tensor Data Mover (TDM) symmetric kernels
+          (``AllGather_TmaST``, ``AllReduce_RSxTmaLD_AGxTmaST`` and
+          ``ReduceScatter_TmaLD``), which stage data through the gfx1250 Tensor
+          Data Mover instead of per-lane vector loads and stores. They run only on
+          gfx1250 builds whose ROCm SDK ships the TDM descriptor header, and only
+          for collectives on symmetric registered windows whose buffers are
+          16-byte aligned. On every
+          other architecture this variable has no effect. When enabled, the
+          symmetric cost model offers these kernels only at message sizes where
+          their TDM deep loop engages, and launches them with the widest allowed
+          block count. See :ref:`symmetric-tdm-kernels`.
+      - | ``0``: Disabled. The symmetric path uses only the vector-load kernels.
+        | ``1``: Offered to the symmetric cost model (default).
+        | ``2``: Forced. Wherever the collective has a TDM kernel, it is selected
+          regardless of predicted time or message size. Intended for A/B
+          measurement, not production.
+

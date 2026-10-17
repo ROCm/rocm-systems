@@ -134,7 +134,8 @@ namespace RcclUnitTesting
           addon = {true, "CE", false, "", false, 0};
         }
 
-        // Live SYM is scheduled in enqueue: "<Func> [Symmetric]: ... Kernel AllGather_LL nchannels N"
+        // Live SYM is scheduled in enqueue: "<Func> [Symmetric]: ... Kernel AllGather_LL nchannels N".
+        // Tensor Data Mover kernels (AllGather_TmaST, ...) are reported as SymTDM.
         if (line.find(func + " [Symmetric]:") != std::string::npos)
         {
           std::string kernel = TokenAfter(line, "Kernel ");
@@ -142,7 +143,8 @@ namespace RcclUnitTesting
           if (kernel.find("LL128") != std::string::npos) proto = "LL128";
           else if (kernel.find("LL") != std::string::npos) proto = "LL";
           else if (!kernel.empty()) proto = "SIMPLE";
-          addon = {true, "SYM", !proto.empty(), proto, false, 0};
+          const char* name = kernel.find("Tma") != std::string::npos ? "SymTDM" : "SYM";
+          addon = {true, name, !proto.empty(), proto, false, 0};
         }
 
         if (func == "AllGather")
@@ -377,7 +379,8 @@ namespace RcclUnitTesting
       if (mode.checkSymk) symk = QuerySymk(comms[0], coll, count, dt, ncclSum);
       NCCLCHECK(ncclGroupEnd());
 
-      if (sawSym && sel.algoName == "SYM") *sawSym = true;
+      const bool selIsSym = sel.algoName == "SYM" || sel.algoName == "SymTDM";
+      if (sawSym && selIsSym) *sawSym = true;
       if (nCe && sel.algoName == "CE")
       {
         (*nCe)++;
@@ -411,18 +414,18 @@ namespace RcclUnitTesting
           // equal the log -- and must never claim SYM.
           EXPECT_EQ(symk.algoName, sel.algoName)
             << "symk-reported algo != logged-selected algo\nLOG:\n" << log;
-          EXPECT_NE(symk.algoName, "SYM")
+          EXPECT_TRUE(symk.algoName != "SYM" && symk.algoName != "SymTDM")
             << "symk reported SYM with cuMem disabled\nLOG:\n" << log;
         }
-        else if (sel.algoName == "SYM")
+        else if (selIsSym)
         {
           // Registered sweep, symmetric actually dispatched: the symk reporter must
-          // agree it is SYM. (At non-SYM sizes the dispatch may run a
+          // agree, SYM vs SymTDM included. (At non-SYM sizes the dispatch may run a
           // registration-dependent backend like CE that rcclSymKGetInfo's null-buffer
           // fallback cannot observe, so only the SYM case is asserted here; rep above
           // -- queried with the real registered buffers -- covers the rest.)
-          EXPECT_EQ(symk.algoName, "SYM")
-            << "symk did not report SYM though dispatch ran SYM\nLOG:\n" << log;
+          EXPECT_EQ(symk.algoName, sel.algoName)
+            << "symk did not report " << sel.algoName << " though dispatch ran it\nLOG:\n" << log;
 
           // Symmetric block count: at least 1 because the model rejects a zero count, at most
           // ncclSymkMaxBlocks. Device independent, since the model clamps to that constant and to
