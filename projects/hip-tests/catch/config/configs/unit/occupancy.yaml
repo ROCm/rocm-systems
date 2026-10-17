@@ -78,3 +78,10 @@ occupancy:
   Unit_hipOccupancy_Positive_ZeroLdsMatchesThreadLimit:
     <<: *level_default
     disabled: [nvidia]
+  Unit_hipOccupancy_Positive_MonotoneInVgprCount:
+    <<: *level_default
+    # Uses an AMDGPU register clobber; not built for the NVIDIA platform
+    disabled: [nvidia]
+  Unit_hipOccupancy_Positive_EqualVgprCountEqualOccupancy:
+    <<: *level_default
+    disabled: [nvidia]
