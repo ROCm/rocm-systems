@@ -106,6 +106,13 @@ can use a TDM kernel when all of the following are true:
   their windows. For an in-place allgather or reduce-scatter, the per-rank slice
   must also be a multiple of 16 bytes.
 - The message is large enough for the TDM deep loop to engage.
+- The gfx1250 dispatch table admits the symmetric path for that collective and
+  size. With the default (SPX) table, allreduce does not use symmetric kernels,
+  reduce-scatter uses them from 2 MiB, and allgather uses them from 128 KiB to
+  2 MiB and, where the cost model picks the TDM kernel, from 64 MiB to 512 MiB.
+  On communicators that span several trays only that allgather TDM window is
+  used. ``RCCL_IGNORE_ARCH_TABLE=1`` removes these limits;
+  ``NCCL_SYM_TMA_ENABLE=2`` does not override them.
 
 The symmetric cost model then chooses between the TDM kernel and the vector-load
 kernels. The TDM kernels cost more setup latency but reach a higher bandwidth

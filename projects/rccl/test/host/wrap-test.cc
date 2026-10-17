@@ -4702,6 +4702,54 @@ TEST(WrapMicrotestIsolated, SelectAllGather_DdaGatedOnNotSymEligible) {
       });
 }
 
+// The TDM window re-admits symk for registered AllGather between symTdmMinR2 and
+// symTdmMaxR2, past symMaxR2, but only when the cost model picks a TDM kernel.
+TEST(WrapMicrotestIsolated, SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAllGather_TdmWindowAdmitsSymkOnlyForTdmKernel",
+      []() {
+        ScopedHook symRequested(g_isSymmetricKernelRequested, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                                  size_t, const void*, void*, bool) { return true; });
+        ScopedHook symkAvailable(g_symkAvailable,
+                                 [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t, size_t) { return true; });
+        ScopedHook kernelIsTma(g_symkKernelIdIsTma,
+                               [](int id) { return id == (int)ncclSymkKernelId_AllGather_TmaST; });
+        rcclArchThresholds table{};
+        table.symMinR2[ncclFuncAllGather] = 128 * kKiB;
+        table.symMaxR2[ncclFuncAllGather] = 2 * kMiB;
+        table.symMaxR2Graph[ncclFuncAllGather] = 2 * kMiB;
+        table.symTdmMinR2[ncclFuncAllGather] = 64 * kMiB;
+        table.symTdmMaxR2[ncclFuncAllGather] = 512 * kMiB;
+        auto picksSymk = [&table](size_t totalBytes, ncclSymkKernelId modelPick, bool directLinks = true) {
+          ScopedHook tuningCompute(g_tuningCompute, SelectSymkTuning(modelPick, /*maxChannels=*/64));
+          ncclComm* comm = MakeCommWithArch("gfx1250");
+          comm->archThresholds = &table;
+          comm->symmetricSupport = 1;
+          comm->isAllDirectNvlink = directLinks;
+          comm->MNNVL = directLinks ? 0 : 1;  // cross-tray: UALink domain without direct links
+          comm->nRanks = 4;
+          comm->nNodes = 1;
+          rcclCollDecision decision{};
+          EXPECT_EQ(ncclSuccess, rcclSelectAllGather(comm, nullptr, nullptr,
+                                                     totalBytes / comm->nRanks / sizeof(float), ncclFloat32,
+                                                     /*stream=*/nullptr, /*query=*/false,
+                                                     /*graphCapturingHint=*/false, &decision));
+          DeleteCommWithArch(comm);
+          return decision.algo == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC;
+        };
+        const ncclSymkKernelId tdm = ncclSymkKernelId_AllGather_TmaST, st = ncclSymkKernelId_AllGather_ST;
+        EXPECT_TRUE(picksSymk(1 * kMiB, st)) << "symMinR2..symMaxR2 window";
+        EXPECT_FALSE(picksSymk(32 * kMiB, tdm)) << "between the two windows";
+        EXPECT_FALSE(picksSymk(64 * kMiB - 64, tdm)) << "just below the TDM window";
+        EXPECT_TRUE(picksSymk(64 * kMiB, tdm)) << "TDM window floor";
+        EXPECT_TRUE(picksSymk(512 * kMiB, tdm)) << "TDM window ceiling";
+        EXPECT_FALSE(picksSymk(512 * kMiB + 64, tdm)) << "just past the TDM window";
+        EXPECT_FALSE(picksSymk(128 * kMiB, st)) << "model picks the non-TDM kernel";
+        EXPECT_FALSE(picksSymk(1 * kMiB, st, /*directLinks=*/false)) << "cross-tray, symMinR2..symMaxR2 window";
+        EXPECT_TRUE(picksSymk(128 * kMiB, tdm, /*directLinks=*/false)) << "cross-tray, TDM window";
+      });
+}
+
 // Hierarchical, live mode: the inner (query-only) inter/intra-comm
 // dereferencing never runs, so no sub-comms need to be set up here --
 // just the eligibility gates (outside a group, 8+ nodes, param enabled,

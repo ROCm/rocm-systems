@@ -892,6 +892,15 @@ inline size_t rcclSymMinR2CapTab(const rcclArchThresholds* table, ncclFunc_t fun
   if (table == nullptr) return 0;
   return funcThresholdFromTable(table->symMinR2, func);
 }
+
+// R2 window per collective in which a symmetric TDM kernel runs whatever symMinR2 /
+// symMaxR2 say. 0 in either bound = no window.
+inline bool rcclSymTdmWindowTab(const rcclArchThresholds* table, ncclFunc_t func, size_t totalBytes) {
+  if (table == nullptr) return false;
+  const size_t lo = funcThresholdFromTable(table->symTdmMinR2, func);
+  const size_t hi = funcThresholdFromTable(table->symTdmMaxR2, func);
+  return lo != 0 && hi != 0 && totalBytes >= lo && totalBytes <= hi;
+}
 } // namespace
 
 inline size_t rcclCeRegMaxTab(const rcclArchThresholds* table, ncclFunc_t func) {
@@ -1768,13 +1777,33 @@ ncclResult_t rcclSelectAllGather(struct ncclComm* comm, const void* sendbuff, vo
     // to carry NCCL_WIN_COLL_SYMMETRIC, so agSymkRequested=true implies recv registered.
     const size_t agSymMaxR2  = rcclSymMaxR2CapTab(archTable, ncclFuncAllGather, ceCapturing);
     const size_t agSymMinR2  = rcclSymMinR2CapTab(archTable, ncclFuncAllGather);
-    const bool agSymSuppressedByMin  = agSymkRequested && agSymMinR2 > 0 && totalBytes < agSymMinR2;
-    const bool agSymSuppressedBySize = agSymkRequested && totalBytes > agSymMaxR2;
-    const bool symEligible = agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize;
-    if (!query && agSymkRequested && agSymSuppressedByMin)
+    // symTdmMinR2..symTdmMaxR2 re-admits symk where its TDM kernel beats DDA and CE-registered,
+    // whatever symMinR2/symMaxR2 say, but only when the cost model picks that kernel for these
+    // buffers: it does not at 2 ranks for the smaller sizes, for misaligned windows, or on a
+    // multi-node comm (only the non-TDM rail kernel is offered there).
+    bool agSymTdmWindow = false;
+    if (agSymkRequested && rcclSymTdmWindowTab(archTable, ncclFuncAllGather, totalBytes)) {
+      int a, p, ch;
+      agSymTdmWindow = rcclSymkQuery(comm, ncclFuncAllGather, sendcount, datatype, ncclSum, &a, &p, &ch,
+                                     ncclSymAligned16B(ncclFuncAllGather, comm->rank, sendbuff, recvbuff, sendWin,
+                                                       recvWin, sendcount * typeSize)) &&
+                       a == (int)rcclAddonAlgos_t::RCCL_SYMMETRIC_TDM;
+    }
+    const bool agSymSuppressedByMin  = agSymkRequested && !agSymTdmWindow && agSymMinR2 > 0 && totalBytes < agSymMinR2;
+    const bool agSymSuppressedBySize = agSymkRequested && !agSymTdmWindow && totalBytes > agSymMaxR2;
+    // Across UALink trays (MNNVL without all-direct links) only the TDM window runs symk:
+    // the symMinR2..symMaxR2 kernels lose to DDA there.
+    const bool agSymSuppressedByFabric =
+      agSymkRequested && !agSymTdmWindow && comm->MNNVL && !comm->isAllDirectNvlink;
+    const bool symEligible =
+      agSymkRequested && !agSymSuppressedByMin && !agSymSuppressedBySize && !agSymSuppressedByFabric;
+    if (!query && agSymTdmWindow) INFO(NCCL_TUNING, "AG symk admitted by the TDM window: totalBytes=%zu", totalBytes);
+    if (!query && agSymSuppressedByMin)
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu < agSymMinR2=%zu", totalBytes, agSymMinR2);
-    if (!query && agSymkRequested && agSymSuppressedBySize)
+    if (!query && agSymSuppressedBySize)
       INFO(NCCL_TUNING, "AG symk disqualified: totalBytes=%zu > agSymMaxR2=%zu", totalBytes, agSymMaxR2);
+    if (!query && agSymSuppressedByFabric && !agSymSuppressedByMin && !agSymSuppressedBySize)
+      INFO(NCCL_TUNING, "AG symk disqualified: cross-tray comm outside the TDM window, totalBytes=%zu", totalBytes);
     // symEligible gates DDA below; the symk report itself is deferred until after
     // the CE-registered check so it loses to CE exactly as dispatch does
     // (taskAppend appends the CE task before ncclMakeSymmetricTaskList runs, so

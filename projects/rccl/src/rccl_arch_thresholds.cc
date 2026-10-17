@@ -175,6 +175,10 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  // symTdmMinR2..symTdmMaxR2: [2] AllGather -- the TDM symmetric kernel beats DDA LL128 and
+  // CE-registered from 64M; CE and Ring Simple win again from 1G on 8 and 16 ranks.
+  .symTdmMinR2 = {0, 0, 64ULL*1024*1024, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2 = {0, 0, 512ULL*1024*1024, 0, 0, 0, 0, 0, 0},
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).
@@ -397,6 +401,9 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250_dpx = {
     kThreshUnlimited,     // [7] Recv            -- not used on gfx1250
     kThreshUnlimited,     // [8] AlltoAll        -- not used on gfx1250
   },
+  // symTdmMinR2..symTdmMaxR2: not measured on DPX.
+  .symTdmMinR2 = {0, 0, 0, 0, 0, 0, 0, 0, 0},
+  .symTdmMaxR2 = {0, 0, 0, 0, 0, 0, 0, 0, 0},
   // Rank-scaled caps from the 8-64 rank H13 sweep, AICOMRCCL-1756. The
   // crossovers move with the per-rank share, so on 8+ rank comms these replace the
   // totals above (which stay in force for smaller comms).

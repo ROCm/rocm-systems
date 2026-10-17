@@ -78,6 +78,11 @@ struct rcclArchThresholds {
   // can win in that sub-range while symk still wins above it.
   // 0 means no suppression (symk may win at any size for that collective).
   size_t symMinR2[RCCL_DDA_FUNC_COUNT];
+  // R2 window per collective, total bytes, in which the symmetric kernel runs whatever
+  // symMinR2 / symMaxR2 say, provided the cost model picks one of its Tensor Data Mover
+  // kernels for the call. 0 in either bound = no window.
+  size_t symTdmMinR2[RCCL_DDA_FUNC_COUNT];
+  size_t symTdmMaxR2[RCCL_DDA_FUNC_COUNT];
 
   // Rank-scaled tier caps, bytes per rank. On a comm of at least
   // rankScaledMinRanks ranks, a non-zero entry replaces the matching
