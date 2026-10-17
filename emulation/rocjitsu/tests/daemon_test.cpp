@@ -59,6 +59,7 @@ struct TestPaths {
   std::string hip_rccl_bin = RJ_HIP_RCCL_BIN;
   std::string daemon_logging_config = RJ_DAEMON_LOGGING_CONFIG;
   std::string interposer_dup_bin = RJ_INTERPOSER_DUP_BIN;
+  std::string hip_instruction_failure_bin = RJ_HIP_INSTRUCTION_FAILURE_BIN;
 };
 
 std::filesystem::path resolve_relative_to_exe(const std::filesystem::path &exe_dir,
@@ -105,6 +106,7 @@ TestPaths installed_paths(const std::filesystem::path &exe_dir) {
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_RCCL_BIN).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_DAEMON_LOGGING_CONFIG).string(),
       resolve_relative_to_exe(exe_dir, RJ_INSTALLED_INTERPOSER_DUP_BIN).string(),
+      resolve_relative_to_exe(exe_dir, RJ_INSTALLED_HIP_INSTRUCTION_FAILURE_BIN).string(),
   };
 }
 
@@ -139,6 +141,11 @@ const char *hip_rccl_bin() { return test_paths().hip_rccl_bin.c_str(); }
 
 const char *daemon_logging_config() { return test_paths().daemon_logging_config.c_str(); }
 const char *interposer_dup_bin() { return test_paths().interposer_dup_bin.c_str(); }
+#ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
+const char *hip_instruction_failure_bin() {
+  return test_paths().hip_instruction_failure_bin.c_str();
+}
+#endif
 
 TEST(RocjitsuCliDaemon, LaunchesApplicationAfterDaemonIsReady) {
   const char *xdg = std::getenv("XDG_RUNTIME_DIR");
@@ -222,11 +229,29 @@ protected:
 
   void TearDown() override {
     if (daemon_pid_ > 0) {
-      EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
       int status = 0;
-      EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
-      EXPECT_TRUE(WIFEXITED(status));
-      EXPECT_EQ(WEXITSTATUS(status), 0);
+      pid_t exited = 0;
+      if (expected_daemon_exit_ != EXIT_SUCCESS) {
+        // Fatal VM failures must stop the daemon without a teardown signal.
+        // SIGTERM sent after its signal-wait loop has ended can remain pending
+        // until the CLI restores its signal mask, replacing the failure exit.
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(5);
+        do {
+          exited = waitpid(daemon_pid_, &status, WNOHANG);
+          if (exited == daemon_pid_ || (exited < 0 && errno != EINTR))
+            break;
+          std::this_thread::sleep_for(std::chrono::milliseconds(10));
+        } while (std::chrono::steady_clock::now() < deadline);
+        EXPECT_EQ(exited, daemon_pid_) << "daemon did not exit after a fatal VM failure";
+      }
+      if (exited != daemon_pid_) {
+        EXPECT_EQ(kill(daemon_pid_, SIGTERM), 0);
+        EXPECT_EQ(waitpid(daemon_pid_, &status, 0), daemon_pid_);
+      }
+      EXPECT_TRUE(WIFEXITED(status)) << "daemon exit status=" << status;
+      if (WIFEXITED(status)) {
+        EXPECT_EQ(WEXITSTATUS(status), expected_daemon_exit_);
+      }
       EXPECT_FALSE(std::filesystem::exists(sock_path_));
       daemon_pid_ = -1;
     }
@@ -325,6 +350,7 @@ protected:
   }
 
   pid_t daemon_pid_ = -1;
+  int expected_daemon_exit_ = 0;
   std::string tmp_dir_;
   std::string runtime_dir_;
   std::string sock_path_;
@@ -337,6 +363,22 @@ TEST_F(DaemonTest, HipVectorAdd) {
   auto r = run_hip_test(hip_vector_add_bin(), "HipVectorAddTest.CorrectResult");
   EXPECT_EQ(r.exit_code, 0) << r.output;
 }
+
+#ifdef RJ_HAS_INSTRUCTION_FAILURE_TEST
+TEST_F(DaemonTest, HipUnsupportedInstructionExitsWithFailure) {
+  expected_daemon_exit_ = EXIT_FAILURE;
+  auto r = run_hip_test(hip_instruction_failure_bin(),
+                        "HipDaemonInstructionFailureTest.UnsupportedInstructionExitsWithFailure");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+
+TEST_F(DaemonTest, HipDecodeFailureExitsWithFailure) {
+  expected_daemon_exit_ = EXIT_FAILURE;
+  auto r = run_hip_test(hip_instruction_failure_bin(),
+                        "HipDaemonInstructionFailureTest.DecodeFailureExitsWithFailure");
+  EXPECT_EQ(r.exit_code, 0) << r.output;
+}
+#endif
 
 TEST_F(DaemonTest, AttachExecFailurePreservesDaemonSocket) {
   const pid_t client = fork();

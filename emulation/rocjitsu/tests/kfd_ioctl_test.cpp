@@ -1288,8 +1288,13 @@ TEST_P(KfdAqlPm4Test, ExecutesEveryXcdAndRetainsBlockedIndirectBuffer) {
   EXPECT_EQ(data[18], 0u);
   EXPECT_EQ(data[25], 1u);
   std::atomic_ref<uint64_t>(data[17]).store(1, std::memory_order_release);
-  for (unsigned i = 0; i < 2000 && (data[18] != 99 || data[25] != 0); ++i)
+  // The owner retries WAIT_REG_MEM from its wall-clock doorbell poll thread.
+  // Empty step() calls can exhaust an iteration budget before that thread runs.
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+  while ((data[18] != 99 || data[25] != 0) && std::chrono::steady_clock::now() < deadline) {
     (void)engine_->step();
+    std::this_thread::sleep_for(std::chrono::microseconds(50));
+  }
   EXPECT_EQ(data[18], 99u);
   EXPECT_EQ(data[25], 0u);
   EXPECT_EQ(data[16], 8u);
@@ -2286,7 +2291,8 @@ TEST_P(KfdInstructionRejectionTest, RoutesFailureToQueueOwner) {
     extra_waves.push_back(extra);
   }
   cu->step();
-  const bool engine_failed = GetParam().kind != RejectionKind::Decode || !GetParam().status_mapped;
+  const bool engine_failed = GetParam().kind != RejectionKind::Decode || !GetParam().debugger ||
+                             !GetParam().runtime_signal || !GetParam().status_mapped;
   EXPECT_EQ(engine_->last_exit().code, engine_failed ? 1 : 0);
   if (!GetParam().runtime_signal || !GetParam().registered) {
     EXPECT_EQ(deliveries.load(), 0u);
@@ -5647,6 +5653,72 @@ void serve_one_handshake(int fd, int32_t result) {
 }
 
 } // namespace
+
+TEST(RemoteDriverDisconnectTest, ReportsPeerExitWithoutAnotherRpc) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  const util::UniqueHandle server_closer{sv[1]};
+  std::jthread server([fd = sv[1]] { serve_one_handshake(fd, 0); });
+  std::mutex mutex;
+  std::condition_variable cv;
+  unsigned notifications = 0;
+  rocjitsu::RemoteDriver driver(sv[0], [&] {
+    std::lock_guard lock(mutex);
+    ++notifications;
+    cv.notify_all();
+  });
+  const int kfd = driver.open();
+  ASSERT_GE(kfd, 0);
+  const util::UniqueHandle kfd_closer{kfd};
+  server.join();
+
+  ASSERT_EQ(shutdown(sv[1], SHUT_WR), 0);
+  {
+    std::unique_lock lock(mutex);
+    ASSERT_TRUE(cv.wait_for(lock, std::chrono::seconds(2), [&] { return notifications != 0; }));
+  }
+  kfd_ioctl_get_version_args version{};
+  EXPECT_EQ(driver.ioctl(AMDKFD_IOC_GET_VERSION, &version), -EPROTO);
+  EXPECT_EQ(driver.close(), 0);
+  EXPECT_EQ(notifications, 1u);
+}
+
+TEST(RemoteDriverDisconnectTest, GracefulCloseAndDestructionStopTheMonitor) {
+  for (bool explicit_close : {false, true}) {
+    SCOPED_TRACE(explicit_close);
+    int sv[2];
+    ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+    const util::UniqueHandle server_closer{sv[1]};
+    std::jthread server([fd = sv[1]] { serve_one_handshake(fd, 0); });
+    std::atomic<unsigned> notifications{0};
+    {
+      rocjitsu::RemoteDriver driver(sv[0], [&] { ++notifications; });
+      const int kfd = driver.open();
+      ASSERT_GE(kfd, 0);
+      const util::UniqueHandle kfd_closer{kfd};
+      server.join();
+      if (explicit_close) {
+        EXPECT_EQ(driver.close(), 0);
+      }
+    }
+    EXPECT_EQ(notifications.load(), 0u);
+  }
+}
+
+TEST(RemoteDriverDisconnectTest, FailedHandshakeDoesNotStartTheMonitor) {
+  int sv[2];
+  ASSERT_EQ(socketpair(AF_UNIX, SOCK_STREAM, 0, sv), 0) << strerror(errno);
+  std::jthread server([fd = sv[1]] {
+    serve_one_handshake(fd, -EPROTO);
+    close(fd);
+  });
+  std::atomic<unsigned> notifications{0};
+  {
+    rocjitsu::RemoteDriver driver(sv[0], [&] { ++notifications; });
+    EXPECT_LT(driver.open(), 0);
+  }
+  EXPECT_EQ(notifications.load(), 0u);
+}
 
 // Both ends of a socketpair belong to this process, so SO_PEERCRED reports this
 // PID -- which is what makes the launcher's PID the only variable here.

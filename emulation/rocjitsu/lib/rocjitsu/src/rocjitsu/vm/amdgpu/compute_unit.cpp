@@ -111,6 +111,8 @@ std::string_view instruction_execution_error_name(InstructionExecutionError erro
     return "unsupported operand value";
   case InstructionExecutionError::UnimplementedInstruction:
     return "unimplemented instruction";
+  case InstructionExecutionError::DecodeFailure:
+    return "instruction decode failure";
   }
   return "unknown instruction execution error";
 }
@@ -401,14 +403,14 @@ void ComputeUnitCore::flush_cp_notifications() {
   for (;;) {
     bool capacity_changed = false;
     std::vector<PendingExecutionFailure> execution_failures;
-    std::vector<PendingVmFault> faults;
+    std::vector<PendingDispatchFailure> failures;
     std::vector<PendingQueueException> exceptions;
     std::vector<std::pair<uint32_t, uint32_t>> ready;
     {
       std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
       if (!has_pending_cp_notifications())
         return;
-      faults.swap(pending_vm_faults_);
+      failures.swap(pending_dispatch_failures_);
       execution_failures.swap(pending_execution_failures_);
       exceptions.swap(pending_queue_exceptions_);
       ready.swap(pending_wg_completions_);
@@ -420,9 +422,13 @@ void ComputeUnitCore::flush_cp_notifications() {
       return;
     for (const auto &failure : execution_failures)
       cp_->notify_execution_failure(failure.queue_id, failure.process_id, failure.reason);
-    for (const PendingVmFault &fault : faults)
-      cp_->notify_dispatch_vm_fault(fault.queue_id, fault.process_id, fault.dispatch_id,
-                                    fault.outcome);
+    for (const PendingDispatchFailure &failure : failures) {
+      if (failure.vm_outcome)
+        cp_->notify_dispatch_vm_fault(failure.queue_id, failure.process_id, failure.dispatch_id,
+                                      *failure.vm_outcome);
+      else
+        cp_->notify_dispatch_failure(failure.queue_id, failure.process_id, failure.dispatch_id);
+    }
     for (const auto &exception : exceptions) {
       const bool delivered =
           queue_exception_handler_
@@ -472,10 +478,10 @@ void ComputeUnitCore::handle_terminal_vm_fault(Wavefront &wf, VmAccessOutcome ou
     abort_dispatch(wf.dispatch_id());
     return;
   }
-  pending_vm_faults_.push_back({.queue_id = wf.queue_id(),
-                                .process_id = wf.process_id(),
-                                .dispatch_id = wf.dispatch_id(),
-                                .outcome = outcome});
+  pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
+                                        .process_id = wf.process_id(),
+                                        .dispatch_id = wf.dispatch_id(),
+                                        .vm_outcome = outcome});
   if (outcome == VmAccessOutcome::Revoked) {
     // Fetch revocation is recovered before reaching this terminal path. An
     // in-flight data access cannot be replayed safely. Notify the live queue
@@ -802,24 +808,48 @@ void ComputeUnitCore::release_wf(uint32_t dispatch_id, uint32_t wg_id,
 void ComputeUnitCore::abort_workgroup(uint32_t dispatch_id, uint32_t wg_id) {
   // Roll back a workgroup that was committed via begin_workgroup() but whose peers
   // in the same clustered dispatch failed to fully dispatch. Unlike release_wf(),
-  // this fires no completion hook and no CP notify — the WG never executed. Free any
+  // this fires cancellation hooks but no CP completion notify. Free any
   // resident (not-yet-halted) waves belonging to this WG, drop the refcount entry,
   // and reclaim LDS if the CU is now idle and unpinned. The caller unpins the cluster
   // LDS separately (the pin is CP-side bookkeeping).
   for (const auto &w : wfs_) {
-    if (w && !w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id)
+    if (w && !w->is_halted() && w->dispatch_id() == dispatch_id && w->wg_id() == wg_id) {
+      plugin_group().onAmdgpuWavefrontCancelled(*w);
       free_wavefront_resources(*w);
+    }
   }
   active_wgs_.erase(wg_key(dispatch_id, wg_id));
   barrier_wgs_.erase(wg_key(dispatch_id, wg_id));
   maybe_reset_lds_alloc();
 }
 
+void ComputeUnitCore::handle_instruction_failure(Wavefront &wf, const std::string &failure) {
+  util::Logger::warn(failure);
+  if (!wf.fail_pm4_submission()) {
+    // Keep upstream queue-owner exception delivery before cancelling the dispatch.
+    const bool claimed =
+        execution_failure_handler_ && execution_failure_handler_(wf, /*retain_wave=*/true);
+    pending_dispatch_failures_.push_back({.queue_id = wf.queue_id(),
+                                          .process_id = wf.process_id(),
+                                          .dispatch_id = wf.dispatch_id(),
+                                          .vm_outcome = std::nullopt});
+    if (auto *sim_engine = engine())
+      sim_engine->request_exit(failure, /*code=*/1);
+    if (claimed)
+      return;
+  }
+  // halt() follows the successful workgroup-completion path. A rejected
+  // instruction instead cancels resident waves and their pending memory work.
+  abort_dispatch(wf.dispatch_id());
+}
+
 void ComputeUnitCore::abort_dispatch(uint32_t dispatch_id) {
   std::lock_guard<std::recursive_mutex> wave_state_lock(wave_state_mutex_);
   for (const auto &wavefront : wfs_) {
-    if (wavefront && !wavefront->is_halted() && wavefront->dispatch_id() == dispatch_id)
+    if (wavefront && !wavefront->is_halted() && wavefront->dispatch_id() == dispatch_id) {
+      plugin_group().onAmdgpuWavefrontCancelled(*wavefront);
       free_wavefront_resources(*wavefront);
+    }
   }
 
   std::erase_if(active_wgs_, [dispatch_id](const auto &entry) {
@@ -1811,14 +1841,37 @@ template <bool EnableAsync>
                                                     decode_error.emitter(), reuse_decoded);
   if (decoded.failed()) {
     drain_async_window();
-    util::Logger::vm("CU ", this->name(), ": wf", active->wf_id(), " HALT(decode rejection) pc=0x",
-                     std::hex, active->pc, " words=[0x", words[0], ",0x", words[1], ",0x", words[2],
-                     ",0x", words[3], "]", std::dec, " what=", decode_error.message());
-    // Let the queue owner observe the illegal instruction before retiring the
-    // wave. A debugger may claim the exception before the runtime sees it.
-    if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active))
+    // Preserve debugger-first handling of illegal instructions. PM4 failures
+    // remain exclusive to their submission and are handled below.
+    if (!active->fail_pm4_submission() && illegal_inst_handler_ && illegal_inst_handler_(*active)) {
+      // A debugger may stop and repair this wave. A runtime claim instead
+      // preserves its exception state but must still fail the simulator run.
+      if (!active->debug_halted()) {
+        const std::string failure =
+            std::format("CU {}: wf{} could not decode instruction at pc={:#x} (pid={} qid={} "
+                        "dispatch={} wg={}) "
+                        "words=[{:#x},{:#x},{:#x},{:#x}]: {}",
+                        this->name(), active->wf_id(), active->pc, active->process_id(),
+                        active->queue_id(), active->dispatch_id(), active->wg_id(), words[0],
+                        words[1], words[2], words[3], decode_error.message());
+        util::Logger::warn(failure);
+        pending_dispatch_failures_.push_back({.queue_id = active->queue_id(),
+                                              .process_id = active->process_id(),
+                                              .dispatch_id = active->dispatch_id(),
+                                              .vm_outcome = std::nullopt});
+        if (auto *sim_engine = engine())
+          sim_engine->request_exit(failure, /*code=*/1);
+      }
       return;
-    active->halt();
+    }
+    active->report_instruction_execution_error(InstructionExecutionError::DecodeFailure);
+    const std::string failure = std::format(
+        "CU {}: wf{} could not decode instruction at pc={:#x} (pid={} qid={} dispatch={} wg={}) "
+        "words=[{:#x},{:#x},{:#x},{:#x}]: {}",
+        this->name(), active->wf_id(), active->pc, active->process_id(), active->queue_id(),
+        active->dispatch_id(), active->wg_id(), words[0], words[1], words[2], words[3],
+        decode_error.message());
+    handle_instruction_failure(*active, failure);
     return;
   }
   Instruction *inst = decoded.value().get();
@@ -2042,22 +2095,12 @@ template <bool EnableAsync>
         window->drain();
     }
     const InstructionExecutionError error = active->instruction_execution_error();
-    const std::string failure = std::format("CU {}: wf{} could not execute {} at pc={:#x}: {}",
-                                            this->name(), active->wf_id(), inst->mnemonic(),
-                                            active->pc, instruction_execution_error_name(error));
-    util::Logger::warn(failure);
-    if (!active->fail_pm4_submission()) {
-      // Notify the queue owner without hiding the simulator's failure status.
-      // WaveStateGuard flushes deferred notifications before this step returns,
-      // even after request_exit records the terminal engine result.
-      const bool claimed =
-          execution_failure_handler_ && execution_failure_handler_(*active, /*retain_wave=*/true);
-      if (auto *sim_engine = this->engine())
-        sim_engine->request_exit(failure, /*code=*/1);
-      if (claimed)
-        return;
-    }
-    active->halt();
+    const std::string failure = std::format(
+        "CU {}: wf{} could not execute {} at pc={:#x} (pid={} qid={} dispatch={} wg={}): {}",
+        this->name(), active->wf_id(), inst->mnemonic(), active->pc, active->process_id(),
+        active->queue_id(), active->dispatch_id(), active->wg_id(),
+        instruction_execution_error_name(error));
+    handle_instruction_failure(*active, failure);
     return;
   }
 

@@ -866,6 +866,9 @@ void CommandProcessor::startup() {
 
 void CommandProcessor::shutdown() {
   stop_doorbell_monitor();
+  // An instruction failure stops the engine before peer doorbell events may
+  // run. Engine workers have joined, so finish cancelling those shards here.
+  drain_dispatch_fault_inbox();
   retry_event_pending_.store(false, std::memory_order_release);
   stall_recheck_pending_ = false;
   stall_recheck_tick_ = simdojo::TICK_MAX;
@@ -960,10 +963,8 @@ void CommandProcessor::notify_execution_failure(uint32_t queue_id, uint32_t proc
       sim->request_exit(reason, 1);
   };
   for (auto *peer : peers)
-    peer->accept_dispatch_fault({.queue_id = queue_id,
-                                 .process_id = process_id,
-                                 .outcome = VmAccessOutcome::Malformed,
-                                 .on_cancelled = completed});
+    peer->accept_dispatch_fault(
+        {.queue_id = queue_id, .process_id = process_id, .on_cancelled = completed});
 }
 
 void CommandProcessor::accept_dispatch_fault(DispatchFaultNotification fault) {
@@ -983,8 +984,7 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
   }
   for (const DispatchFaultNotification &fault : faults) {
     if (!fault.on_cancelled) {
-      (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id,
-                                 fault.outcome);
+      (void)fault_dispatch_local(fault.queue_id, fault.process_id, fault.dispatch_id);
       continue;
     }
     {
@@ -996,25 +996,15 @@ void CommandProcessor::drain_dispatch_fault_inbox() {
         queue->faulted = true;
         for (auto &entry : queue->entries) {
           entry.terminal_faulted = true;
-          dispatch_launch_metadata_.erase(entry.dispatch_id);
-          erase_cluster_workgroups(entry.dispatch_id);
           if (entry.grid_completion)
             entry.grid_completion->mark_faulted();
         }
-        // Abort, rather than halt, so no workgroup completion can publish success.
-        for (auto *cu : cus_) {
-          cu->with_wave_state_locked([&] {
-            for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-              auto *wave = cu->wf(slot);
-              if (wave && !wave->is_halted() && wave->queue_id() == fault.queue_id &&
-                  wave->process_id() == fault.process_id)
-                cu->abort_dispatch(wave->dispatch_id());
-            }
-          });
-        }
-        // Native PM4 submissions deliver their failed callback/fence here, before
-        // the last replica acknowledges cancellation and stops the engine.
+        // Share queue cancellation with PM4/forced close: cancel resident waves,
+        // release cluster pins and SPI reservations, then fail native submissions
+        // before the last replica acknowledges cancellation and stops the engine.
         fail_pm4_queue(*queue, queue->dispatches);
+        for (const auto &entry : queue->entries)
+          dispatch_launch_metadata_.erase(entry.dispatch_id);
         queue->entries.clear();
         queue->next_dispatch_idx = 0;
       }
@@ -1507,16 +1497,7 @@ QueuePrepareCloseStatus CommandProcessor::close_queue_registration(uint64_t regi
     if (!retry_close) {
       queue_id = queue->queue_id;
       process_id = queue->process_id;
-      for (auto *cu : cus_) {
-        cu->with_wave_state_locked([&] {
-          for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-            auto *wave = cu->wf(slot);
-            if (wave && !wave->is_halted() && wave->process_id() == process_id &&
-                wave->queue_id() == queue_id)
-              wave->halt();
-          }
-        });
-      }
+      cancel_queue_dispatches(*queue);
       drop_replicas = queue->xcd_fanout;
       for (const DispatchEntry &entry : queue->entries)
         dispatch_launch_metadata_.erase(entry.dispatch_id);
@@ -2670,7 +2651,7 @@ bool CommandProcessor::drain_completions() {
 }
 
 bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_id,
-                                            uint64_t dispatch_id, VmAccessOutcome outcome) {
+                                            uint64_t dispatch_id) {
   bool found = false;
   {
     // A shard may still be in transit from its owner. Remove it under the leaf
@@ -2726,32 +2707,42 @@ bool CommandProcessor::fault_dispatch_local(uint32_t queue_id, uint32_t process_
   if (state.packet_format == QueuePacketFormat::Aql && !state.commands.submissions.empty())
     fail_pm4_queue(state, state.dispatches);
   util::Logger::cp([&](auto &os) {
-    os << std::format("{}: terminal dispatch fault pid={} qid={} dispatch={} outcome={}", name(),
-                      process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
+    os << std::format("{}: terminal dispatch failure pid={} qid={} dispatch={}", name(), process_id,
+                      queue_id, dispatch_id);
   });
   erase_cluster_workgroups(static_cast<uint32_t>(dispatch_id));
   for (ComputeUnitCore *cu : cus_)
     cu->abort_dispatch(static_cast<uint32_t>(dispatch_id));
+  for (auto *spi : spis_)
+    spi->release_wgp_dispatch(static_cast<uint32_t>(dispatch_id));
   return true;
 }
 
 void CommandProcessor::notify_dispatch_vm_fault(uint32_t queue_id, uint32_t process_id,
                                                 uint64_t dispatch_id, VmAccessOutcome outcome) {
-  if (outcome == VmAccessOutcome::Complete || outcome == VmAccessOutcome::Unavailable ||
-      dispatch_id > std::numeric_limits<uint32_t>::max())
+  if (outcome == VmAccessOutcome::Complete || outcome == VmAccessOutcome::Unavailable)
+    return;
+  util::Logger::cp([&](auto &os) {
+    os << std::format("{}: terminal VM fault pid={} qid={} dispatch={} outcome={}", name(),
+                      process_id, queue_id, dispatch_id, static_cast<unsigned>(outcome));
+  });
+  notify_dispatch_failure(queue_id, process_id, dispatch_id);
+}
+
+void CommandProcessor::notify_dispatch_failure(uint32_t queue_id, uint32_t process_id,
+                                               uint64_t dispatch_id) {
+  if (dispatch_id > std::numeric_limits<uint32_t>::max())
     return;
 
-  if (!fault_dispatch_local(queue_id, process_id, dispatch_id, outcome))
+  if (!fault_dispatch_local(queue_id, process_id, dispatch_id))
     return;
   // A fault can originate on any shard. Cross-XCD delivery uses a leaf inbox
   // and the peer's event thread, exactly like dispatch fan-out, so this path
   // never acquires another CP's queue mutex.
   for (CommandProcessor *peer : xcd_peers_) {
     if (peer != nullptr && peer != this) {
-      peer->accept_dispatch_fault({.queue_id = queue_id,
-                                   .process_id = process_id,
-                                   .dispatch_id = dispatch_id,
-                                   .outcome = outcome});
+      peer->accept_dispatch_fault(
+          {.queue_id = queue_id, .process_id = process_id, .dispatch_id = dispatch_id});
     }
   }
 }
@@ -3322,6 +3313,35 @@ void CommandProcessor::dispatch_pm4(const ComputeQueueRecord &queue, Pm4Dispatch
   qs.push_entry(std::move(dp));
 }
 
+void CommandProcessor::cancel_queue_dispatches(const ComputeQueueRecord &queue) {
+  // Include queued and reserved workgroups as well as resident waves. A CU may
+  // already have aborted every wave before the CP observes the failure.
+  std::unordered_set<uint32_t> dispatch_ids;
+  for (const auto &entry : queue.entries)
+    dispatch_ids.insert(entry.dispatch_id);
+  for (const auto &entry : queue.dispatches.entries)
+    dispatch_ids.insert(entry.dispatch_id);
+  for (auto *cu : cus_) {
+    cu->with_wave_state_locked([&] {
+      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
+        auto *wave = cu->wf(slot);
+        if (wave && !wave->is_halted() && wave->process_id() == queue.process_id &&
+            wave->queue_id() == queue.queue_id)
+          dispatch_ids.insert(wave->dispatch_id());
+      }
+    });
+  }
+  // Abort all waves without successful completion notifications. The CP owns
+  // cluster pins and SPI reservations, which normal retirement would release.
+  for (uint32_t dispatch_id : dispatch_ids) {
+    erase_cluster_workgroups(dispatch_id);
+    for (auto *cu : cus_)
+      cu->abort_dispatch(dispatch_id);
+    for (auto *spi : spis_)
+      spi->release_wgp_dispatch(dispatch_id);
+  }
+}
+
 void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchState &qs) {
   queue.faulted = true;
   for (auto &entry : queue.entries)
@@ -3329,16 +3349,7 @@ void CommandProcessor::fail_pm4_queue(ComputeQueueRecord &queue, Pm4DispatchStat
       entry.grid_completion->mark_faulted();
   // The CP owns the queue lock and CU workers have rejoined. Stop all resident
   // waves before releasing the submission's BO references or publishing failure.
-  for (auto *cu : cus_) {
-    cu->with_wave_state_locked([&] {
-      for (uint32_t slot = 0; slot < cu->num_wf_slots(); ++slot) {
-        auto *wave = cu->wf(slot);
-        if (wave && !wave->is_halted() && wave->process_id() == queue.process_id &&
-            wave->queue_id() == queue.queue_id)
-          wave->halt();
-      }
-    });
-  }
+  cancel_queue_dispatches(queue);
   flush_gpu_caches();
   qs.entries.clear();
   for (auto &submission : queue.commands.submissions)

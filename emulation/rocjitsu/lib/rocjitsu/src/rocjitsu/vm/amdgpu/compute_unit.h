@@ -1399,7 +1399,7 @@ protected:
   /// @brief Whether command-processor notifications are pending.
   /// @details Inspected under @ref wave_state_mutex_.
   bool has_pending_cp_notifications() const {
-    return !pending_vm_faults_.empty() || !pending_queue_exceptions_.empty() ||
+    return !pending_dispatch_failures_.empty() || !pending_queue_exceptions_.empty() ||
            !pending_wg_completions_.empty() || pending_capacity_change_ ||
            !pending_execution_failures_.empty();
   }
@@ -1419,6 +1419,9 @@ protected:
   /// @brief Fault a dispatch for an exhausted GWS inactivity budget or a barrier before INIT.
   void fail_gws_wait(Wavefront &wf, std::string_view reason);
 
+  /// @brief Cancel an unhandled decode or execution failure without successful completion.
+  void handle_instruction_failure(Wavefront &wf, const std::string &failure);
+
   mutable std::recursive_mutex wave_state_mutex_;
   /// @brief Recursion depth of WaveStateGuard on the thread holding the mutex.
   /// @details Only ever touched under @ref wave_state_mutex_, so the value
@@ -1428,13 +1431,17 @@ protected:
   /// @details Drained by @ref flush_cp_notifications once the lock is dropped.
   std::vector<std::pair<uint32_t, uint32_t>> pending_wg_completions_;
   bool pending_capacity_change_ = false;
-  struct PendingVmFault {
+  struct PendingDispatchFailure {
     uint32_t queue_id = 0;
     uint32_t process_id = 0;
     uint32_t dispatch_id = 0;
-    VmAccessOutcome outcome = VmAccessOutcome::Faulted;
+    /// Empty for an instruction failure; a value preserves VM-fault reporting.
+    std::optional<VmAccessOutcome> vm_outcome;
   };
-  std::vector<PendingVmFault> pending_vm_faults_;
+  /// @brief Dispatch failures deferred until the wave-state lock is dropped.
+  /// @details Drained before workgroup completions so the CP marks failed
+  /// dispatches and queues before a completion can publish success.
+  std::vector<PendingDispatchFailure> pending_dispatch_failures_;
   struct PendingExecutionFailure {
     uint32_t queue_id;
     uint32_t process_id;

@@ -54,6 +54,7 @@ enum class InstructionExecutionError : uint8_t {
   None,
   UnsupportedOperandValue,
   UnimplementedInstruction,
+  DecodeFailure,
 };
 
 /// @brief Allocation slice within a register file.
