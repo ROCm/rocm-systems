@@ -3612,6 +3612,17 @@ ncclResult_t ncclLaunchCeColl(struct ncclComm* comm, struct ncclKernelPlan* plan
       CUDACHECKGOTO(cudaMemcpyAsync(args->ddaUserRecvBuff, args->recvBuff /*scratch*/, fullBytes,
                                     cudaMemcpyDeviceToDevice, stream),
                     ret, fail);
+      // gfx1250 fabric comms: the DDA LL / LL128 kernels of every collective poll flag words in this
+      // same scratch with no entry barrier. Without the two steps below a peer's next LL kernel can
+      // write our scratch while this copy-back still reads it, or accept our leftover payload as a
+      // flag. Zero the staged range (0 is never a live LL epoch, ddaGetLLEpochInc skips it), then
+      // sync once more so every rank has finished its copy-back and its zeroing before any peer
+      // launches past this collective. CE-Scratch is never selected under graph capture
+      // (rcclSelectAlltoAll and taskAppend refuse it), so this path is eager only.
+      if (args->func == ncclFuncAlltoAll && comm->ddaFabricMemHandler != nullptr) {
+        CUDACHECKGOTO(cudaMemsetAsync(args->recvBuff /*scratch*/, 0, fullBytes, stream), ret, fail);
+        NCCLCHECKGOTO(ncclMemOpSync(comm, stream, args), ret, fail);
+      }
       break;
     }
   }

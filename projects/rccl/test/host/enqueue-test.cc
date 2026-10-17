@@ -4053,3 +4053,193 @@ TEST_F(EnqueueMicrotest, AddP2pToPlan_Gfx1250Enable1AboveCap_UsesSimple) {
   ASSERT_NE(nullptr, batch);
   EXPECT_EQ(ncclDevFuncId_P2p(false), batch->funcId);
 }
+
+// ===========================================================================
+// taskAppend -- AllToAll without a selector decision (ncclAlltoAllConfig) and the
+// NCCL_ENQUEUE_REARCH_ENABLE lowering. In place on gfx1250 must reach CE-Scratch or
+// fail; it must never be decomposed into per-peer Send/Recv (wrong in place there).
+// ===========================================================================
+
+namespace {
+struct A2aTaskAppendScene : CeAppendScene {
+  uint8_t scratch[64]{};
+  void* peerScratch[4]{};
+  float buf[64]{};
+  A2aTaskAppendScene() {
+    ncclComm* c = cc.get();
+    c->nRanks = 4;
+    c->nNodes = 1;
+    c->ddaScratch = scratch;
+    c->ddaScratchBytes = 4 * 4 * sizeof(float);  // fits count = 4 floats per peer
+    c->ddaPeerPtrsHost = peerScratch;
+    g_ceScratchAvailable = [](ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return true; };
+    // Mirrors rcclAlltoAllInPlaceGuard on a gfx1250 comm (the real one is tested in wrap-test).
+    g_rcclAlltoAllInPlaceGuard = [](const ncclComm*, const void* s, const void* r, size_t) {
+      return s == r ? ncclInvalidUsage : ncclSuccess;
+    };
+  }
+  ~A2aTaskAppendScene() {
+    cc.get()->ddaScratch = nullptr;
+    cc.get()->ddaPeerPtrsHost = nullptr;
+  }
+  ncclInfo InPlace(size_t count) {
+    ncclInfo info = MakeCollInfo(cc.get(), /*decisionValid=*/false, 0);
+    info.coll = ncclFuncAlltoAll;
+    info.count = count;
+    info.sendbuff = buf;
+    info.recvbuff = buf;
+    return info;
+  }
+  bool CeQueued() { return !ncclIntruQueueEmpty(&cc.get()->planner.collCeTaskQueue); }
+};
+}  // namespace
+
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecisionInPlace_FitsTheScratch_TakesCeScratch) {
+  A2aTaskAppendScene scene;
+  g_rcclAlltoAllCeScratchInPlace = [](const ncclComm*, const void* s, const void* r) { return s == r; };
+  ncclInfo info = scene.InPlace(4);
+  ASSERT_EQ(ncclSuccess, taskAppend(scene.cc.get(), &info));
+  ASSERT_TRUE(scene.CeQueued());
+  const ncclTaskColl* t = ncclIntruQueueHead(&scene.cc.get()->planner.collCeTaskQueue);
+  EXPECT_TRUE(t->useDda);
+  EXPECT_EQ(0, g_rcclAlltoAllInPlaceGuardCalls);
+  EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p);
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecisionInPlace_AboveTheScratch_FailsBeforeSendRecv) {
+  A2aTaskAppendScene scene;
+  g_rcclAlltoAllCeScratchInPlace = [](const ncclComm*, const void* s, const void* r) { return s == r; };
+  ncclInfo info = scene.InPlace(8);  // 2x the scratch
+  EXPECT_EQ(ncclInvalidUsage, taskAppend(scene.cc.get(), &info));
+  EXPECT_FALSE(scene.CeQueued());
+  EXPECT_EQ(1, g_rcclAlltoAllInPlaceGuardCalls);
+  EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p);
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecisionInPlace_CeScratchOff_FailsBeforeSendRecv) {
+  A2aTaskAppendScene scene;  // g_rcclAlltoAllCeScratchInPlace false: RCCL_FORCE_CE=0, or not gfx1250
+  ncclInfo info = scene.InPlace(4);
+  EXPECT_EQ(ncclInvalidUsage, taskAppend(scene.cc.get(), &info));
+  EXPECT_FALSE(scene.CeQueued());
+  EXPECT_EQ(1, g_rcclAlltoAllInPlaceGuardCalls);
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllRearchInPlace_FailsBeforeLowering) {
+  A2aTaskAppendScene scene;
+  SetParam("ENQUEUE_REARCH_ENABLE", 1);
+  size_t guardedBytes = 0;
+  g_rcclAlltoAllInPlaceGuard = [&guardedBytes](const ncclComm*, const void* s, const void* r, size_t bytes) {
+    guardedBytes = bytes;
+    return s == r ? ncclInvalidUsage : ncclSuccess;
+  };
+  ncclInfo info = scene.InPlace(4);
+  EXPECT_EQ(ncclInvalidUsage, taskAppend(scene.cc.get(), &info));
+  EXPECT_EQ(1, g_rcclAlltoAllInPlaceGuardCalls);
+  EXPECT_EQ(4u * 4u * sizeof(float), guardedBytes);
+  EXPECT_TRUE(ncclIntruQueueEmpty(&scene.cc.get()->rawTaskQueue.genericQueue));
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecisionInPlace_TellsTheGuardItsSite) {
+  A2aTaskAppendScene scene;
+  ncclInfo info = scene.InPlace(4);
+  EXPECT_EQ(ncclInvalidUsage, taskAppend(scene.cc.get(), &info));
+  EXPECT_EQ(rcclA2aSiteAlltoAllConfig, g_rcclAlltoAllInPlaceGuardSite);
+  EXPECT_FALSE(g_rcclAlltoAllInPlaceGuardRegisteredCe);
+}
+
+// NCCL_ALGO does not block the in-place CE-Scratch arm (the selector does not consult it either), but it
+// still blocks the generic forced arm.
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecisionInPlace_NcclAlgoSet_StillTakesCeScratch) {
+  A2aTaskAppendScene scene;
+  g_rcclNcclAlgoEnvIsSet = true;
+  g_rcclAlltoAllCeScratchInPlace = [](const ncclComm*, const void* s, const void* r) { return s == r; };
+  ncclInfo info = scene.InPlace(4);
+  ASSERT_EQ(ncclSuccess, taskAppend(scene.cc.get(), &info));
+  ASSERT_TRUE(scene.CeQueued());
+  EXPECT_TRUE(ncclIntruQueueHead(&scene.cc.get()->planner.collCeTaskQueue)->useDda);
+  EXPECT_EQ(0, g_rcclAlltoAllInPlaceGuardCalls);
+}
+
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecision_NcclAlgoSet_BlocksTheForcedCeScratchArm) {
+  A2aTaskAppendScene scene;
+  g_rcclNcclAlgoEnvIsSet = true;
+  g_rcclForceCeScratchEnabled = true;  // in-place exception off: only the forced arm could take it
+  ncclInfo info = scene.InPlace(4);
+  EXPECT_EQ(ncclInvalidUsage, taskAppend(scene.cc.get(), &info));
+  EXPECT_FALSE(scene.CeQueued());
+  EXPECT_EQ(1, g_rcclAlltoAllInPlaceGuardCalls);
+}
+
+// The generic forced arm (RCCL_FORCE_CE / CTA_POLICY_ZERO / an arch table that forces CE-Scratch, i.e. the
+// path every non-gfx1250 arch takes) still serves an out-of-place AllToAll.
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecisionOutOfPlace_ForcedCeScratch_TakesCeScratch) {
+  A2aTaskAppendScene scene;
+  g_rcclForceCeScratchEnabled = true;
+  float other[64]{};
+  ncclInfo info = scene.InPlace(4);
+  info.sendbuff = other;
+  ASSERT_EQ(ncclSuccess, taskAppend(scene.cc.get(), &info));
+  ASSERT_TRUE(scene.CeQueued());
+  EXPECT_TRUE(ncclIntruQueueHead(&scene.cc.get()->planner.collCeTaskQueue)->useDda);
+  EXPECT_EQ(0, g_rcclAlltoAllInPlaceGuardCalls);
+  EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p);
+}
+
+// An ncclAlltoAll whose decision is a DDA fabric path but which reached taskAppend anyway (check mode or a
+// suspended comm divert to enqueue): in place it must fail before the Send/Recv decomposition.
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllFabricDecisionInPlace_FailsBeforeSendRecv) {
+  A2aTaskAppendScene scene;
+  ncclInfo info = scene.InPlace(4);
+  info.decisionValid = true;
+  info.decision.algo = RCCL_DDA_FABRIC_LL128;
+  EXPECT_EQ(ncclInvalidUsage, taskAppend(scene.cc.get(), &info));
+  EXPECT_FALSE(scene.CeQueued());
+  EXPECT_EQ(1, g_rcclAlltoAllInPlaceGuardCalls);
+  EXPECT_EQ(rcclA2aSiteAlltoAllEnqueue, g_rcclAlltoAllInPlaceGuardSite);
+  EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p);
+}
+
+// N1: ncclAlltoAllConfig with CTA_POLICY_ZERO and registered windows. In place on gfx1250 the registered-window
+// CE AllToAll (single-node, or hierarchical) races on the user buffer, and CE-Scratch does not take registered
+// recv windows: InvalidUsage, naming the registered-window reason. Out of place, and other arches in place,
+// keep the registered CE path.
+TEST_F(EnqueueMicrotest, TaskAppend_AlltoAllNoDecisionInPlace_RegisteredWindows_NotCeRegistered) {
+  for (bool hier : {false, true}) {
+    g_rcclAlltoAllInPlaceGuardCalls = 0;
+    A2aTaskAppendScene scene;
+    scene.cc.get()->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+    g_ceScratchAvailable = [](ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t) { return false; };
+    g_ceAvailable = [hier](ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t, ncclDevrWindow*,
+                           ncclDevrWindow*) { return !hier; };
+    g_hierCeAvailable = [hier](ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t, ncclDevrWindow*,
+                               ncclDevrWindow*) { return hier; };
+    g_rcclAlltoAllCeScratchInPlace = [](const ncclComm*, const void* s, const void* r) { return s == r; };
+    g_rcclAlltoAllRegisteredCeRefused = true;  // gfx1250
+    ncclInfo info = scene.InPlace(4);
+    EXPECT_EQ(ncclInvalidUsage, taskAppend(scene.cc.get(), &info)) << "hier=" << hier;
+    EXPECT_FALSE(scene.CeQueued()) << "hier=" << hier;
+    EXPECT_EQ(1, g_rcclAlltoAllInPlaceGuardCalls) << "hier=" << hier;
+    EXPECT_EQ(rcclA2aSiteAlltoAllConfig, g_rcclAlltoAllInPlaceGuardSite);
+    EXPECT_TRUE(g_rcclAlltoAllInPlaceGuardRegisteredCe) << "hier=" << hier;
+    EXPECT_EQ(0, scene.cc.get()->planner.nTasksP2p);
+
+    // out of place on gfx1250: the registered CE path, no guard
+    float other[64]{};
+    ncclInfo oop = scene.InPlace(4);
+    oop.sendbuff = other;
+    ASSERT_EQ(ncclSuccess, taskAppend(scene.cc.get(), &oop)) << "hier=" << hier;
+    ASSERT_TRUE(scene.CeQueued()) << "hier=" << hier;
+    EXPECT_FALSE(ncclIntruQueueHead(&scene.cc.get()->planner.collCeTaskQueue)->useDda);
+    EXPECT_EQ(1, g_rcclAlltoAllInPlaceGuardCalls);
+  }
+  // other arches in place: unchanged (the same race exists there upstream; not changed by this branch)
+  A2aTaskAppendScene scene;
+  scene.cc.get()->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+  g_ceAvailable = [](ncclComm*, ncclFunc_t, int, ncclDataType_t, ncclSymRegType_t, ncclDevrWindow*,
+                     ncclDevrWindow*) { return true; };
+  g_rcclAlltoAllRegisteredCeRefused = false;
+  ncclInfo info = scene.InPlace(4);
+  ASSERT_EQ(ncclSuccess, taskAppend(scene.cc.get(), &info));
+  ASSERT_TRUE(scene.CeQueued());
+  EXPECT_FALSE(ncclIntruQueueHead(&scene.cc.get()->planner.collCeTaskQueue)->useDda);
+}

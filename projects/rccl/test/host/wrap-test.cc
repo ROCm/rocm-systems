@@ -7835,3 +7835,350 @@ TEST(WrapMicrotestIsolated, InfoMacroSweep_CtaDirectCallSiteForcedOpenByNegative
         ExpectInfoCallSiteLogs(log, /*seedDirectDisabled=*/false);
       });
 }
+
+// ===========================================================================
+// rcclSelectAlltoAll on gfx1250 -- the in-place guards of the AllToAll
+// selection. The arch table
+// is a hand-built copy of the gfx1250 A2A windows (the micro build fakes
+// rcclGetArchThresholds to nullptr); the DDA eligibility fakes encode the real
+// predicates' contracts: every path needs P % 16 == 0, LL128
+// also 16-byte aligned buffers.
+// ===========================================================================
+namespace {
+
+rcclArchThresholds Gfx1250A2aTable() {
+  rcclArchThresholds t;
+  std::memset(&t, 0, sizeof(t));
+  t.ddaLLMax[ncclFuncAlltoAll] = 64u << 10;
+  t.ddaLL128Max[ncclFuncAlltoAll] = 1u << 20;
+  return t;
+}
+
+bool A2aPerPeer16(size_t count, ncclDataType_t t) { return (count * ncclTypeSize(t)) % 16 == 0; }
+bool A2aPtrs16(const void* s, const void* r) { return (((uintptr_t)s | (uintptr_t)r) % 16) == 0; }
+
+void InstallA2aFabricFakes() {
+  g_allToAllDdaFabricLLEligible = [](ncclComm*, const void*, void*, size_t c, ncclDataType_t t) {
+    return A2aPerPeer16(c, t);
+  };
+  g_allToAllDdaFabricLL128Eligible = [](ncclComm*, const void* s, void* r, size_t c, ncclDataType_t t) {
+    return A2aPerPeer16(c, t) && A2aPtrs16(s, r);
+  };
+}
+
+const void* const kA2aSend = reinterpret_cast<const void*>(0x10000000);
+void* const kA2aRecv = reinterpret_cast<void*>(0x20000000);
+
+// Decision for nRanks ranks, totalBytes = nRanks * perPeer (int8 count == per-peer bytes).
+ncclResult_t SelectA2aGfx1250(ncclComm* comm, size_t perPeer, const void* send, void* recv, bool query,
+                              rcclCollDecision* out) {
+  *out = rcclCollDecision{};
+  return rcclSelectAlltoAll(comm, send, recv, perPeer, ncclInt8, /*stream=*/nullptr, query,
+                            /*graphCapturingHint=*/false, out);
+}
+
+}  // namespace
+
+// Misaligned / P % 16 != 0: no fabric path. Out of place falls to p2p; in place has no correct
+// path (p2p is wrong in place on gfx1250) -> live call fails with ncclInvalidUsage, the query
+// still names the fallback.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceWithoutCorrectPathIsInvalidUsage) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250InPlaceWithoutCorrectPathIsInvalidUsage",
+      []() {
+        InstallA2aFabricFakes();
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        comm->nRanks = 8;
+        void* misaligned = reinterpret_cast<void*>(0x20000004);
+        for (size_t perPeer : {size_t(4u << 20) + 4, size_t(65537)}) {
+          rcclCollDecision d{};
+          // out of place: p2p, fine
+          EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d));
+          EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
+          // in place: error live, fallback named by the query
+          EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d));
+          EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, true, &d));
+          EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
+        }
+        // aligned size, misaligned in-place buffer above LL: LL128 needs 16 B buffers
+        rcclCollDecision d{};
+        EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, 4u << 20, misaligned, misaligned, false, &d));
+        // ... but LL (no pointer alignment requirement) still serves small in-place calls
+        EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 512, misaligned, misaligned, false, &d));
+        EXPECT_EQ((int)RCCL_DDA_FABRIC_LL, d.algo);
+        // an empty in-place call (count 0, e.g. empty tensors with nullptr buffers) stays a no-op success
+        EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 0, nullptr, nullptr, false, &d));
+        EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 0, kA2aRecv, kA2aRecv, false, &d));
+        // a single rank is trivially correct in place
+        comm->nRanks = 1;
+        EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, (4u << 20) + 4, kA2aRecv, kA2aRecv, false, &d));
+        // other arches keep the stock behaviour
+        DeleteCommWithArch(comm);
+        ncclComm* c942 = MakeCommWithArch("gfx942");
+        c942->nRanks = 8;
+        EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(c942, (4u << 20) + 4, kA2aRecv, kA2aRecv, false, &d));
+        EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
+        DeleteCommWithArch(c942);
+      });
+}
+
+// gfx1250 does not force CE-Scratch (arch table forceCeScratch = false), but in place it stays the
+// correct fallback when no fabric path takes the call (the p2p fallback is wrong in place there).
+// Out of place follows the resolver (p2p unless forced); RCCL_FORCE_CE=0 turns CE-Scratch off in
+// place too, which leaves ncclInvalidUsage; a buffer-less query is not treated as in place.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceKeepsCeScratch) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250InPlaceKeepsCeScratch",
+      []() {
+        InstallA2aFabricFakes();
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return true; });
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ASSERT_FALSE(tbl.forceCeScratch);
+        uint8_t scratch[64];  // only the pointer and ddaScratchBytes are read
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        comm->nRanks = 8;
+        comm->nNodes = 1;
+        comm->ddaScratch = scratch;
+        comm->ddaScratchBytes = 64u << 20;
+        const size_t perPeer = (4u << 20) + 4;  // P % 16 != 0: no fabric path; T ~ 32 MiB fits the scratch
+        rcclCollDecision d{};
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d));
+        EXPECT_EQ((int)RCCL_CE_SCRATCH, d.algo);
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, true, &d));
+        EXPECT_EQ((int)RCCL_CE_SCRATCH, d.algo);
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d));
+        EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, nullptr, nullptr, true, &d));
+        EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo);
+        // in place above the scratch: no correct path left
+        EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, (8u << 20) + 4, kA2aRecv, kA2aRecv, false, &d));
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+          EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d));
+        }
+        // control: a table that forces CE-Scratch takes it out of place too
+        tbl.forceCeScratch = true;
+        ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d));
+        EXPECT_EQ((int)RCCL_CE_SCRATCH, d.algo);
+        comm->ddaScratch = nullptr;
+        comm->ddaScratchBytes = 0;
+        DeleteCommWithArch(comm);
+      });
+}
+
+// The two in-place AllToAll helpers every AllToAll funnel shares (rcclSelectAlltoAll, taskAppend for
+// ncclAlltoAllConfig, the NCCL_ENQUEUE_REARCH_ENABLE lowering): CE-Scratch in place is gfx1250-only, needs real
+// buffers and RCCL_FORCE_CE != 0; the guard refuses in place on gfx1250 only, and never an empty or 1-rank call.
+TEST(WrapMicrotestIsolated, AlltoAllInPlaceHelpers_Gfx1250Only) {
+  RUN_ISOLATED_TEST(
+      "Wrap_AlltoAllInPlaceHelpers_Gfx1250Only",
+      []() {
+        int buf[2];
+        void* const a = &buf[0];
+        void* const b = &buf[1];
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 8;
+        EXPECT_TRUE(rcclAlltoAllCeScratchInPlace(comm, a, a));
+        EXPECT_FALSE(rcclAlltoAllCeScratchInPlace(comm, a, b));
+        EXPECT_FALSE(rcclAlltoAllCeScratchInPlace(comm, nullptr, nullptr));
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+          EXPECT_FALSE(rcclAlltoAllCeScratchInPlace(comm, a, a));
+        }
+        EXPECT_TRUE(rcclAlltoAllRegisteredCeRefused(comm, a, a));
+        EXPECT_FALSE(rcclAlltoAllRegisteredCeRefused(comm, a, b));
+        EXPECT_FALSE(rcclAlltoAllRegisteredCeRefused(comm, nullptr, nullptr));
+        const auto guard = [](ncclComm* c, const void* s, const void* r, size_t bytes) {
+          return rcclAlltoAllInPlaceGuard(c, s, r, bytes, rcclA2aSiteAlltoAll, false, false);
+        };
+        ncclResult_t r = ncclSuccess;
+        const std::string log = RcclUnitTesting::CaptureLog([&]() { r = guard(comm, a, a, 64); });
+        EXPECT_EQ(ncclInvalidUsage, r);
+        EXPECT_NE(std::string::npos, log.find("has no correct implementation on gfx1250")) << log;
+        EXPECT_EQ(ncclSuccess, guard(comm, a, b, 64));
+        EXPECT_EQ(ncclSuccess, guard(comm, a, a, 0));
+        comm->nRanks = 1;
+        EXPECT_EQ(ncclSuccess, guard(comm, a, a, 64));
+        EXPECT_FALSE(rcclAlltoAllRegisteredCeRefused(comm, a, a));
+        DeleteCommWithArch(comm);
+        for (const char* arch : {"gfx942", "gfx950"}) {
+          ncclComm* other = MakeCommWithArch(arch);
+          other->nRanks = 8;
+          EXPECT_FALSE(rcclAlltoAllCeScratchInPlace(other, a, a)) << arch;
+          EXPECT_FALSE(rcclAlltoAllRegisteredCeRefused(other, a, a)) << arch;
+          EXPECT_EQ(ncclSuccess, guard(other, a, a, 64)) << arch;
+          for (rcclA2aInPlaceSite site : {rcclA2aSiteAlltoAllConfig, rcclA2aSiteRearch}) {
+            EXPECT_EQ(ncclSuccess, rcclAlltoAllInPlaceGuard(other, a, a, 64, site, true, true)) << arch;
+          }
+          DeleteCommWithArch(other);
+        }
+      });
+}
+
+// The guard's WARN names the API that was called and the reason no correct path was left, instead of always
+// blaming NCCL_CHECK_MODE.
+TEST(WrapMicrotestIsolated, AlltoAllInPlaceGuard_WarnNamesEntryAndReason) {
+  RUN_ISOLATED_TEST(
+      "Wrap_AlltoAllInPlaceGuard_WarnNamesEntryAndReason",
+      []() {
+        int buf[1];
+        void* const a = &buf[0];
+        uint8_t scratch[64];
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->nRanks = 8;
+        comm->ddaScratch = scratch;
+        comm->ddaScratchBytes = 1024;
+        comm->ddaFabricMemHandler = reinterpret_cast<ncclFabricMemHandler*>(0x1);  // only compared to nullptr
+        const auto warn = [&](size_t bytes, rcclA2aInPlaceSite site, bool capturing, bool registeredCe) {
+          ncclResult_t r = ncclSuccess;
+          const std::string log = RcclUnitTesting::CaptureLog(
+              [&]() { r = rcclAlltoAllInPlaceGuard(comm, a, a, bytes, site, capturing, registeredCe); });
+          EXPECT_EQ(ncclInvalidUsage, r);
+          return log;
+        };
+        struct Case {
+          size_t bytes;
+          rcclA2aInPlaceSite site;
+          bool capturing;
+          bool registeredCe;
+          const char* entry;
+          const char* reason;
+        } cases[] = {
+            {64, rcclA2aSiteAlltoAll, false, false, "ncclAlltoAll: ", "no DDA fabric path takes these arguments"},
+            {64, rcclA2aSiteAlltoAll, false, false, "ncclAlltoAll: ", "CE-Scratch is unavailable"},
+            {4096, rcclA2aSiteAlltoAll, false, false, "ncclAlltoAll: ", "above the CE scratch (1024 bytes)"},
+            {64, rcclA2aSiteAlltoAll, true, false, "ncclAlltoAll: ", "cannot run under graph capture"},
+            {64, rcclA2aSiteAlltoAll, false, true, "ncclAlltoAll: ", "registered-window CE AllToAll is not correct"},
+            {4096, rcclA2aSiteAlltoAllConfig, false, false, "ncclAlltoAllConfig: ", "has no DDA fabric path"},
+            {4096, rcclA2aSiteAlltoAllConfig, false, false, "ncclAlltoAllConfig: ", "above the CE scratch"},
+            {64, rcclA2aSiteAlltoAllConfig, false, true, "ncclAlltoAllConfig: ", "registered-window CE AllToAll"},
+            {64, rcclA2aSiteAlltoAllEnqueue, false, false, "ncclAlltoAll: ", "diverted to the enqueue path"},
+            {64, rcclA2aSiteRearch, false, false, "ncclAlltoAll / ncclAlltoAllConfig: ", "NCCL_ENQUEUE_REARCH_ENABLE"},
+        };
+        for (const Case& c : cases) {
+          const std::string log = warn(c.bytes, c.site, c.capturing, c.registeredCe);
+          EXPECT_NE(std::string::npos, log.find(c.entry)) << c.reason << "\n" << log;
+          EXPECT_NE(std::string::npos, log.find(c.reason)) << log;
+          if (c.site != rcclA2aSiteAlltoAll) {
+            EXPECT_EQ(std::string::npos, log.find("NCCL_CHECK_MODE turns")) << log;
+          }
+          if (c.site == rcclA2aSiteAlltoAllConfig) {
+            EXPECT_EQ(std::string::npos, log.find("ncclAlltoAll: ")) << log;
+          }
+        }
+        // Not the scratch size and not CE-Scratch when CE-Scratch was never considered (REARCH).
+        EXPECT_EQ(std::string::npos, warn(4096, rcclA2aSiteRearch, false, false).find("CE scratch"));
+        {
+          ScopedHook forceCe(g_paramForceCe, []() { return int64_t(0); });
+          EXPECT_NE(std::string::npos, warn(4096, rcclA2aSiteAlltoAll, true, false).find("RCCL_FORCE_CE=0"));
+        }
+        comm->checkMode = ncclCheckModeDebugLocal;
+        EXPECT_NE(std::string::npos, warn(64, rcclA2aSiteAlltoAll, false, false).find("NCCL_CHECK_MODE turns the DDA "
+                                                                                      "fabric paths off"));
+        comm->checkMode = ncclCheckModeDefault;
+        // No fabric handler (split / shrink / grow child, MNNVL off, multi-clique, DDA off): no fabric paths and no
+        // ddaScratch. The WARN names the comm, not the arguments.
+        comm->ddaFabricMemHandler = nullptr;
+        comm->ddaScratch = nullptr;
+        comm->ddaScratchBytes = 0;
+        const char kNoFabric[] = "this communicator has no DDA fabric scratch (child comm from split/shrink/grow, "
+                                 "MNNVL off, multi-clique, or DDA disabled)";
+        std::string log = warn(64, rcclA2aSiteAlltoAll, false, false);
+        EXPECT_NE(std::string::npos, log.find(kNoFabric)) << log;
+        EXPECT_NE(std::string::npos, log.find("CE-Scratch has nothing to stage through")) << log;
+        EXPECT_EQ(std::string::npos, log.find("16-byte aligned")) << log;
+        log = warn(64, rcclA2aSiteAlltoAllConfig, false, false);
+        EXPECT_NE(std::string::npos, log.find("ncclAlltoAllConfig has no DDA fabric path")) << log;
+        EXPECT_NE(std::string::npos, log.find(std::string("CE-Scratch is unavailable: ") + kNoFabric)) << log;
+        // a more specific CE reason still wins
+        EXPECT_NE(std::string::npos, warn(64, rcclA2aSiteAlltoAll, true, false).find("cannot run under graph capture"));
+        DeleteCommWithArch(comm);
+      });
+}
+
+// F4: the selector-site refusal returns from ncclAlltoAll before ncclEnqueueCheck, so it must record the error for an
+// enclosing group itself (ncclGroupErrCheck); ncclGroupEnd then fails the group, as for the taskAppend-site refusal.
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceRefusalInGroupFailsTheGroup) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250InPlaceRefusalInGroupFailsTheGroup",
+      []() {
+        InstallA2aFabricFakes();
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        ncclComm* comm = MakeCommWithArch("gfx1250");
+        comm->archThresholds = &tbl;
+        comm->nRanks = 8;
+        const size_t perPeer = (4u << 20) + 4;  // P % 16 != 0: no fabric path, no scratch: no correct path in place
+        rcclCollDecision d{};
+        ncclGroupDepth = 1;
+        ncclGroupError = ncclSuccess;
+        // out of place and a query leave the group untouched
+        EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d));
+        EXPECT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, true, &d));
+        EXPECT_EQ(ncclSuccess, ncclGroupError);
+        EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d));
+        EXPECT_EQ(ncclInvalidUsage, ncclGroupError);
+        // outside a group nothing is recorded
+        ncclGroupDepth = 0;
+        ncclGroupError = ncclSuccess;
+        EXPECT_EQ(ncclInvalidUsage, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d));
+        EXPECT_EQ(ncclSuccess, ncclGroupError);
+        DeleteCommWithArch(comm);
+      });
+}
+
+// N1: CTA_POLICY_ZERO with window-registered buffers. In place on gfx1250 neither the registered-window CE
+// AllToAll (4) nor hierarchical CE (5) may be chosen (both race on the user buffer); CE-Scratch does not take
+// registered recv windows, so the live call is ncclInvalidUsage and the query names the fallback. Out of
+// place keeps CE-Registered; other arches keep it in place too (upstream behaviour, unchanged).
+TEST(WrapMicrotestIsolated, SelectAlltoAll_Gfx1250InPlaceRegisteredWindowsNotCeRegistered) {
+  RUN_ISOLATED_TEST(
+      "Wrap_SelectAlltoAll_Gfx1250InPlaceRegisteredWindowsNotCeRegistered",
+      []() {
+        InstallA2aFabricFakes();
+        // registered windows: CE-Scratch refuses them
+        ScopedHook ceScratch(g_ceScratchAvailable, [](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t) { return false; });
+        rcclArchThresholds tbl = Gfx1250A2aTable();
+        const size_t perPeer = (4u << 20) + 4;  // P % 16 != 0: no fabric path
+        for (bool hier : {false, true}) {
+          ScopedHook ceAvailable(g_ceAvailable, [hier](struct ncclComm*, ncclFunc_t, int, ncclDataType_t,
+                                                       ncclSymRegType_t, struct ncclDevrWindow*,
+                                                       struct ncclDevrWindow*) { return !hier; });
+          g_hierCeAvailableValue = hier;
+          ncclComm* comm = MakeCommWithArch("gfx1250");
+          comm->archThresholds = &tbl;
+          comm->nRanks = hier ? 16 : 8;
+          comm->nNodes = hier ? 2 : 1;
+          comm->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          rcclCollDecision d{};
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aSend, kA2aRecv, false, &d)) << hier;
+          EXPECT_EQ((int)RCCL_CE_REGISTERED, d.algo) << "out of place keeps CE-Registered, hier=" << hier;
+          ncclResult_t r = ncclSuccess;
+          const std::string log = RcclUnitTesting::CaptureLog(
+              [&]() { r = SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, false, &d); });
+          EXPECT_EQ(ncclInvalidUsage, r) << "hier=" << hier;
+          EXPECT_NE(std::string::npos, log.find("registered-window CE AllToAll is not correct in place")) << log;
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, perPeer, kA2aRecv, kA2aRecv, true, &d));
+          EXPECT_EQ((int)RCCL_DIRECT_ALLTOALL, d.algo) << "hier=" << hier;
+          // an aligned in-place call the fabric takes is unaffected
+          if (!hier) {
+            ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(comm, 64u << 10, kA2aRecv, kA2aRecv, false, &d));
+            EXPECT_EQ((int)RCCL_DDA_FABRIC_LL128, d.algo);
+          }
+          DeleteCommWithArch(comm);
+
+          ncclComm* c942 = MakeCommWithArch("gfx942");
+          c942->nRanks = hier ? 16 : 8;
+          c942->nNodes = hier ? 2 : 1;
+          c942->config.CTAPolicy = NCCL_CTA_POLICY_ZERO;
+          ASSERT_EQ(ncclSuccess, SelectA2aGfx1250(c942, perPeer, kA2aRecv, kA2aRecv, false, &d)) << hier;
+          EXPECT_EQ((int)RCCL_CE_REGISTERED, d.algo) << "gfx942 in place unchanged, hier=" << hier;
+          DeleteCommWithArch(c942);
+        }
+        g_hierCeAvailableValue = false;
+      });
+}
