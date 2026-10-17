@@ -6372,6 +6372,100 @@
           "test_filter": "RmaExternalPluginPutSignalTest.IssuesPutSignalToStub"
         }
       ]
+    },
+    "dda_fabric_reduce_scatter_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_ReduceScatter_LL",
+          "description": "DDA fabric ReduceScatter LL tier: 16 B to ~1 MiB shards, three back-to-back calls per shape, position-dependent data, guard tail, one COLL launch line per call",
+          "test_filter": "DdaMPI_ReduceScatter.LLTierBackToBackShapes"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_LL128",
+          "description": "DDA fabric ReduceScatter LL128 tier: odd-word shards with a partial last 128 B line, three back-to-back calls per shape, position-dependent data, guard tail",
+          "test_filter": "DdaMPI_ReduceScatter.LL128TierBackToBackShapes"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_Interleaved",
+          "description": "DDA fabric ReduceScatter LL and LL128 alternated on one communicator: same-tier calls back to back, a stream drain and a global MPI barrier at each tier switch (LL and LL128 scratch banks overlap)",
+          "test_filter": "DdaMPI_ReduceScatter.LLAndLL128Interleaved"
+        },
+        {
+          "name": "DDA_Fabric_ReduceScatter_GridStride",
+          "description": "DDA fabric ReduceScatter LL and LL128 with RCCL_DDA_FABRIC_MAXBLOCKS=2 so both kernels grid-stride; stream drain and global MPI barrier at each tier switch",
+          "test_filter": "DdaMPI_ReduceScatter.GridStrideWithTwoBlocks"
+        }
+      ]
+    },
+    "dda_fabric_reduce_scatter_2rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_reduce_scatter_4rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_reduce_scatter_8rank": {
+      "extends": "dda_fabric_reduce_scatter_base",
+      "num_ranks": 8,
+      "num_gpus": 8
+    },
+    "dda_fabric_allreduce_ll_base": {
+      "extends": "default",
+      "is_gtest": true,
+      "binary": "rccl-UnitTestsMPI",
+      "num_nodes": 1,
+      "timeout": 300,
+      "env_variables": {
+        "UT_DDA_FABRIC_REQUIRE_INIT": "1"
+      },
+      "tests": [
+        {
+          "name": "DDA_Fabric_AllReduce_LL_OneShot",
+          "description": "DDA fabric AllReduce LL one-shot tier: analytic sum and the one-shot COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLOneShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL_TwoShot",
+          "description": "DDA fabric AllReduce LL two-shot tier past the one-shot threshold: analytic sum and the two-shot COLL log line",
+          "test_filter": "DdaMPI_AllReduce.LLTwoShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_OneShot",
+          "description": "DDA fabric AllReduce LL128 one-shot tier with the LL thresholds zeroed; own process because RCCL_PARAM caches thresholds",
+          "test_filter": "DdaMPI_AllReduce.LL128OneShotMultiRank"
+        },
+        {
+          "name": "DDA_Fabric_AllReduce_LL128_TwoShot",
+          "description": "DDA fabric AllReduce LL128 two-shot tier with the LL and LL128 one-shot thresholds zeroed; own process",
+          "test_filter": "DdaMPI_AllReduce.LL128TwoShotMultiRank"
+        }
+      ]
+    },
+    "dda_fabric_allreduce_ll_2rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 2,
+      "num_gpus": 2
+    },
+    "dda_fabric_allreduce_ll_4rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 4,
+      "num_gpus": 4
+    },
+    "dda_fabric_allreduce_ll_8rank": {
+      "extends": "dda_fabric_allreduce_ll_base",
+      "num_ranks": 8,
+      "num_gpus": 8
     }
   },
   "test_suites": [
@@ -7301,6 +7395,42 @@
       "name": "Perf - SendRecv (datatype sweep)",
       "description": "rccl-tests SendRecv perf sweep across 12 datatypes (1B-4G)",
       "config": "sendrecv_perf",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 2-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 2 GPUs, runtime-nRanks kernel (NRANKS_CT 0). Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 4-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 4 GPUs, unrolled NRANKS_CT=4 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric ReduceScatter LL/LL128 - 8-Rank",
+      "description": "DDA fabric ReduceScatter LL and LL128 tiers on 8 GPUs, unrolled NRANKS_CT=8 kernel. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_reduce_scatter_8rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllReduce LL/LL128 - 2-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 2 GPUs, runtime-nRanks kernels. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_2rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllReduce LL/LL128 - 4-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 4 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_4rank",
+      "enabled": true
+    },
+    {
+      "name": "DDA Fabric AllReduce LL/LL128 - 8-Rank",
+      "description": "DDA fabric AllReduce LL and LL128 one-shot and two-shot tiers on 8 GPUs. Fails on every rank under UT_DDA_FABRIC_REQUIRE_INIT=1 unless gfx1250 with MNNVL fabric DDA initialised.",
+      "config": "dda_fabric_allreduce_ll_8rank",
       "enabled": true
     }
   ]
