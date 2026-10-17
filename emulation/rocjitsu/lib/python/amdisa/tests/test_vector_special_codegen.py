@@ -10,6 +10,7 @@ import re
 
 import pytest
 
+from amdisa.codegen.execute import float_fract, float_ldexp
 from amdisa.codegen.execute.sema_lower import _INLINE_UNARY_OPS
 from amdisa.codegen.execute.simd_codegen import (
     SIMD_VOP1_UNARY,
@@ -251,23 +252,42 @@ def test_ldexp_simd_probes_use_the_shared_raw_operation():
     )
     vop2 = simd_probe_line('v_ldexp_f16_vop2')
     # Every MODE takes the SIMD path; the helper rounds and saturates itself.
+    # Only SDWA sets OMOD on VOP2, and SDWA OMOD keeps the scalar body.
     assert vop2 == f'  ROCJITSU_TRY_SIMD_VOP2_BINARY(uint32_t, {operation}' + (
-        'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl())});'
+        'wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64(), wf.fp16_ovfl(), '
+        'false)});'
     )
-    assert simd_probe_line('v_ldexp_f16_vop3').startswith(
+    vop3 = {
+        'f16': simd_probe_line('v_ldexp_f16_vop3'),
+        'f32': simd_probe_line('v_ldexp_f32_vop3'),
+        'f64': simd_probe_line('v_ldexp_f64_vop3'),
+    }
+    assert vop3['f16'].startswith(
         f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP16({operation}'
     )
     assert simd_probe_line('v_ldexp_f16_vop3', true16_vop3=True).startswith(
         f'  ROCJITSU_TRY_SIMD_VOP3_LDEXP_TRUE16_RAW_FP16({operation}'
     )
-    assert simd_probe_line('v_ldexp_f32_vop3').startswith(
+    assert vop3['f32'].startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP('
         'amdgpu::ldexp::Operation<amdgpu::fp_format::F32>{'
     )
-    assert simd_probe_line('v_ldexp_f64_vop3').startswith(
+    assert vop3['f64'].startswith(
         '  ROCJITSU_TRY_SIMD_VOP3_LDEXP_RAW_FP64('
         'amdgpu::ldexp::Operation<amdgpu::fp_format::F64, 32>{'
     )
+    # Effective OMOD makes a tiny result flush before scaling.
+    for dtype, line in vop3.items():
+        assert line.endswith(
+            f'amdgpu::output_modifier_policy<amdgpu::fp_format::{dtype.upper()}>'
+            '(wf, inst.inst_.omod, inst.inst_.clamp).omod != 0)});'
+        )
+
+
+@pytest.mark.parametrize('module', [float_fract, float_ldexp])
+def test_raw_operation_policies_reject_unknown_formats(module):
+    with pytest.raises(ValueError, match='bf16'):
+        module.policy_expr('bf16')
 
 
 def test_vop3_f16_simd_probes_split_true16_from_generic():

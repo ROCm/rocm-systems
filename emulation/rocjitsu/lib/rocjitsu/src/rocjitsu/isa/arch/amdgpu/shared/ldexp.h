@@ -17,12 +17,16 @@
 /// pass through.
 ///
 /// The floating_operation.h wrapper applies ABS/NEG to the floating source
-/// only, then OMOD/CLAMP to the result. gfx1201 audit captures of all three
-/// formats match these rules bit for bit, including the true16 F16 halves and
-/// OMOD/CLAMP, under every MODE rounding, denormal and FP16_OVFL setting
-/// probed. The tininess rule comes from a gfx1201 boundary probe of all three
-/// formats under all 512 MODE values; the audit captures do not reach it.
-/// Other targets use these rules without hardware verification.
+/// only, then OMOD/CLAMP to the result. With effective OMOD a tiny result
+/// flushes even when output denormals are kept, and OMOD then gives +0.
+///
+/// Evidence: gfx1201 audit captures of all three formats, including true16
+/// halves and OMOD/CLAMP, and a gfx1201 boundary probe of every FP_ROUND and
+/// FP_DENORM byte with FP16_OVFL clear and set, without and with mul:2/div:2;
+/// IEEE and DX10 kept their launch values. A gfx1030 F16 probe matches for
+/// e32, VOP3 and SDWA with every OMOD under IEEE=0 and IEEE=1, except that
+/// IEEE=0 keeps signaling NaNs. Other targets use these rules without
+/// hardware verification.
 ///
 /// Scalar and SIMD callers use the same implementation on unsigned encodings.
 
@@ -47,9 +51,12 @@ struct Policy {
 
   /// @brief Read the format's MODE.FP_DENORM and MODE.FP_ROUND fields.
   /// @param saturate Overflow gives the largest finite value (FP16_OVFL for F16).
-  static constexpr Policy make(uint32_t denorm_mode, uint32_t round_mode, bool saturate) {
+  /// @param omod Effective OMOD is enabled: a tiny result flushes even with output
+  /// denormals kept, so OMOD then gives +0 (gfx1201 probe, all three formats).
+  static constexpr Policy make(uint32_t denorm_mode, uint32_t round_mode, bool saturate,
+                               bool omod = false) {
     return {input_denormal::Policy::make(denorm_mode), round_mode,
-            output_denormal::Policy::make(denorm_mode).flush_outputs, saturate};
+            omod || output_denormal::Policy::make(denorm_mode).flush_outputs, saturate};
   }
 };
 

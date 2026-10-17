@@ -9,19 +9,15 @@ shared/floating_operation.h to apply ABS/NEG before the operation and
 OMOD/CLAMP afterward.
 """
 
-FORMATS: dict[str, str] = {'f16': 'F16', 'f32': 'F32', 'f64': 'F64'}
+from amdisa.codegen.execute import input_policy
 
 # Name of the policy the scalar body declares before the lane loop.
 POLICY = 'fract_policy'
 
 
-def _format(dtype: str) -> str:
-    return f'amdgpu::fp_format::{FORMATS[dtype]}'
-
-
 def policy_expr(dtype: str) -> str:
     """Return the MODE rounding and denormal policy of ``dtype``'s fields."""
-    mode = 'f32' if dtype == 'f32' else 'f16_f64'
+    mode = input_policy.mode_field(dtype)
     return (
         f'amdgpu::fract::Policy::make(wf.fp_denorm_mode_{mode}(), '
         f'wf.fp_round_mode_{mode}())'
@@ -34,7 +30,7 @@ def policy_decl(dtype: str, indent: str = '  ') -> str:
 
 def operation_expr(dtype: str, policy: str = POLICY) -> str:
     """Capture the policy in an operation free of instruction modifiers."""
-    return f'amdgpu::fract::Operation<{_format(dtype)}>{{{policy}}}'
+    return f'amdgpu::fract::Operation<{input_policy.fp_format(dtype)}>{{{policy}}}'
 
 
 def fract_expr(
@@ -48,8 +44,9 @@ def fract_expr(
     ``modifiers`` holds the (ABS, NEG) fields; ``output_policy`` names a
     declared output_modifier::Policy.
     """
+    fmt = input_policy.fp_format(dtype)
     if modifiers is None and output_policy is None:
-        return f'amdgpu::fract::evaluate<{_format(dtype)}>({source}, {POLICY})'
+        return f'amdgpu::fract::evaluate<{fmt}>({source}, {POLICY})'
     source_fields = ', '.join(modifiers or ('0u', '0u'))
     args = [
         f'amdgpu::floating_operation::SourceModifiers{{{source_fields}}}',
@@ -57,7 +54,7 @@ def fract_expr(
         operation_expr(dtype),
         source,
     ]
-    return f'amdgpu::floating_operation::apply<{_format(dtype)}>({", ".join(args)})'
+    return f'amdgpu::floating_operation::apply<{fmt}>({", ".join(args)})'
 
 
 def simd_functor(dtype: str) -> str:

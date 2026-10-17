@@ -2872,17 +2872,13 @@ void VFractF16Vop1::execute_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   const auto fract_policy =
       amdgpu::fract::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64());
-  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(
-      wf, amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf), 0u);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         *this, wf, vdst, lane,
-        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
-            amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,
-            amdgpu::fract::Operation<amdgpu::fp_format::F16>{fract_policy},
-            amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+        amdgpu::fract::evaluate<amdgpu::fp_format::F16>(
+            amdgpu::RegisterAccess(wf).read_lane(src0, lane), fract_policy));
   }
 }
 
@@ -2914,17 +2910,13 @@ RJ_NOINLINE void VFractF16Vop1::execute_modifier_impl(amdgpu::Wavefront &wf) {
   uint64_t exec = wf.exec();
   const auto fract_policy =
       amdgpu::fract::Policy::make(wf.fp_denorm_mode_f16_f64(), wf.fp_round_mode_f16_f64());
-  const auto output_policy = amdgpu::output_modifier_policy<amdgpu::fp_format::F16>(
-      wf, amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf), 0u);
   for (uint32_t lane = 0; lane < wf.wf_size(); ++lane) {
     if (!(exec & (1ULL << lane)))
       continue;
-    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16>(
+    amdgpu::sdwa::write_lane<amdgpu::sdwa::ResultFormat::F16, amdgpu::sdwa::OutputPolicy::ROUNDED>(
         *this, wf, vdst, lane,
-        amdgpu::floating_operation::apply<amdgpu::fp_format::F16>(
-            amdgpu::floating_operation::SourceModifiers{0u, 0u}, output_policy,
-            amdgpu::fract::Operation<amdgpu::fp_format::F16>{fract_policy},
-            amdgpu::RegisterAccess(wf).read_lane(src0, lane)));
+        amdgpu::fract::evaluate<amdgpu::fp_format::F16>(
+            amdgpu::RegisterAccess(wf).read_lane(src0, lane), fract_policy));
   }
   dpp_write_mask_scope_.restore();
 }

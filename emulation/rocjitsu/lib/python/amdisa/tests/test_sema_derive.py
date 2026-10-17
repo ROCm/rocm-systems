@@ -846,18 +846,9 @@ class TestDeriveVectorUnary:
         )
         assert f'const auto fract_policy = {policy};' in cpp
         assert 'std::floor' not in cpp and 'f32_to_f16' not in cpp
-        if dtype == 'F16':
-            # Half bits are written directly, scaled by SDWA OMOD when present.
-            assert (
-                'amdgpu::sdwa::output_modifier<amdgpu::sdwa::ResultFormat::F16>(*this, wf)'
-                in cpp
-            )
-            assert (
-                f'amdgpu::fract::Operation<amdgpu::fp_format::F16>{{fract_policy}}'
-                in cpp
-            )
-        else:
-            assert f'amdgpu::fract::evaluate<amdgpu::fp_format::{dtype}>(' in cpp
+        # Result bits are written directly; an SDWA store applies OMOD to them.
+        assert f'amdgpu::fract::evaluate<amdgpu::fp_format::{dtype}>(' in cpp
+        assert 'sdwa::output_modifier' not in cpp
 
     @pytest.mark.parametrize('dtype', ['F16', 'F32', 'F64'])
     def test_fract_vop3_applies_shared_modifiers(self, dtype):

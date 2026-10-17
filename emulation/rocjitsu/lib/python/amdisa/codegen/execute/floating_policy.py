@@ -25,6 +25,10 @@ FLUSH_NEAREST_F32_OPS = frozenset(
     }
 )
 
+# F16 results rounded before SDWA OMOD, which the SDWA store applies, as VOP3
+# does. gfx1030 SDWA matches VOP3 for both bit for bit.
+SDWA_ROUNDED_F16_OPS = frozenset({'V_FRACT_F16', 'V_LDEXP_F16'})
+
 
 @dataclass(frozen=True)
 class F16TransOperation:
