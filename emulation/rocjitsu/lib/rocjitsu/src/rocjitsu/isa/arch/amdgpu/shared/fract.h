@@ -24,9 +24,13 @@
 ///
 /// Only a negative source above -0.5 needs rounding: its fractional part
 /// 1 - |x| has fewer fraction bits than |x|. Every other result is exact.
-/// gfx1201 captures match these rules bit for bit in F16, F32 and F64, VOP1
-/// and VOP3, under every MODE rounding and denormal setting probed. Other
-/// targets use them without hardware verification.
+/// Evidence: gfx1201 captures match these rules bit for bit in F16, F32 and
+/// F64. Unmodified VOP1/VOP3 forms run under 84 MODE values covering every
+/// per-format rounding and denormal combination and FP16_OVFL; ABS/NEG,
+/// OMOD/CLAMP and true16 halves run under 7, with nearest-even or toward-zero
+/// rounding and one denormal setting for every format. gfx1100 IEEE=0 captures
+/// match except that hardware keeps signaling NaNs, which the emulator quiets.
+/// Other targets use these rules without hardware verification.
 ///
 /// Scalar and SIMD callers use the same implementation on unsigned encodings.
 

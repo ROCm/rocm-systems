@@ -20,13 +20,20 @@
 /// only, then OMOD/CLAMP to the result. With effective OMOD a tiny result
 /// flushes even when output denormals are kept, and OMOD then gives +0.
 ///
-/// Evidence: gfx1201 audit captures of all three formats, including true16
-/// halves and OMOD/CLAMP, and a gfx1201 boundary probe of every FP_ROUND and
-/// FP_DENORM byte with FP16_OVFL clear and set, without and with mul:2/div:2;
-/// IEEE and DX10 kept their launch values. A gfx1030 F16 probe matches for
-/// e32, VOP3 and SDWA with every OMOD under IEEE=0 and IEEE=1, except that
-/// IEEE=0 keeps signaling NaNs. Other targets use these rules without
-/// hardware verification.
+/// Evidence, all three formats unless noted:
+/// - gfx1201 boundary probe: every FP_ROUND and FP_DENORM byte with FP16_OVFL
+///   clear and set, unmodified and with mul:2, mul:4, div:2, ABS, NEG and
+///   CLAMP each; IEEE and DX10 kept their launch values.
+/// - gfx1201 audit captures: unmodified forms under 84 MODE values; modifier
+///   and true16 forms under 7, with nearest-even or toward-zero rounding and
+///   one denormal setting for every format.
+/// - gfx1100 IEEE=0 audit captures: match except that hardware keeps
+///   signaling NaNs, which the emulator quiets.
+/// - gfx1030 F16 probe: e32, VOP3 and SDWA with every OMOD under IEEE=0 and
+///   IEEE=1 match in the result half. Hardware also keeps signaling NaNs at
+///   IEEE=0 and keeps the upper half of e32/VOP3 destinations, which the
+///   emulator zeroes for every F16 operation.
+/// Other targets use these rules without hardware verification.
 ///
 /// Scalar and SIMD callers use the same implementation on unsigned encodings.
 
