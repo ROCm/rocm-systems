@@ -38,6 +38,18 @@ types = [
     ("unsigned int", "uint"),
     ("unsigned long", "ulong"),
     ("unsigned long long", "ulonglong"),
+    ("__half", "half"),
+    ("__hip_bfloat16", "bfloat16"),
+    ("int8_t", "int8"),
+    ("int16_t", "int16"),
+    ("int32_t", "int32"),
+    ("int64_t", "int64"),
+    ("uint8_t", "uint8"),
+    ("uint16_t", "uint16"),
+    ("uint32_t", "uint32"),
+    ("uint64_t", "uint64"),
+    ("size_t", "size"),
+    ("ptrdiff_t", "ptrdiff"),
 ]
 
 
@@ -78,6 +90,38 @@ def generate_signal_api():
     return "".join([signaling_api_dec(suffix) for suffix in suffixes])
 
 
+def add_misc_apis():
+    return """/**
+ * @brief Kernel wrapper for putmem_signal operation on stream
+ *
+ * @param[in] dest      Destination address on remote PE
+ * @param[in] source    Source address on local PE
+ * @param[in] nelems    Size of the transfer in bytes
+ * @param[in] sig_addr  Address of signal variable on remote PE
+ * @param[in] signal    Signal value to write
+ * @param[in] sig_op    Signal operation (ROCSHMEM_SIGNAL_SET or
+ * ROCSHMEM_SIGNAL_ADD)
+ * @param[in] pe        PE of the remote process
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_putmem_signal_kernel(
+    void *dest, const void *source, size_t nelems, uint64_t *sig_addr,
+    uint64_t signal, int sig_op, int pe);
+
+/**
+ * @brief Kernel wrapper for signal_wait_until operation on stream
+ *
+ * @param[in] sig_addr  Address of signal variable on the symmetric heap
+ * @param[in] cmp       Comparison operator
+ * @param[in] cmp_value Value to compare against
+ *
+ * @return void
+ */
+__global__ ATTR_NO_INLINE void rocshmem_signal_wait_until_kernel(
+    uint64_t *sig_addr, int cmp, uint64_t cmp_value);
+"""
+
 def signal_op_dec(operation):
     return (
         f"__device__ ATTR_NO_INLINE void rocshmem_ctx_signal_{operation}(\n"
@@ -94,7 +138,7 @@ def signal_fetch_dec():
     ]
     for suffix, scope in [("_wg", "work-group"), ("_wave", "wave")]:
         declarations.append(
-            "/**\n"
+            "\n/**\n"
             f" * @brief Atomically fetch a signal value collectively at {scope} scope.\n"
             " *\n"
             " * @deprecated Use rocshmem_signal_fetch() instead.\n"
@@ -109,7 +153,7 @@ def signal_fetch_dec():
 def signal_wait_dec():
     return (
         "__device__ ATTR_NO_INLINE uint64_t rocshmem_signal_wait_until(\n"
-        "    uint64_t *sig_addr, int cmp, uint64_t cmp_value);"
+        "    uint64_t *sig_addr, int cmp, uint64_t cmp_value);\n"
     )
 
 
@@ -140,7 +184,7 @@ namespace rocshmem {
 
     expanded_code += generate_signal_api()
     expanded_code += standalone_signal_dec()
-
+    expanded_code += add_misc_apis()
     expanded_code += """
 }  // namespace rocshmem
 
