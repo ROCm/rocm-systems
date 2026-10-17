@@ -154,6 +154,16 @@ typedef struct rocprofiler_thread_trace_decoder_inst_t
 } rocprofiler_thread_trace_decoder_inst_t;
 
 /**
+ * @brief Tracks exec mask changes (exec_lo and exec_hi register writes).
+ */
+typedef struct rocprofiler_thread_trace_decoder_exec_popcnt_t
+{
+    uint64_t time;
+    uint64_t index;  ///< Instruction index within instructions_array
+    uint64_t count;  ///< Number of nonzero bits in the new exec mask
+} rocprofiler_thread_trace_decoder_exec_popcnt_t;
+
+/**
  * @brief Struct describing a wave during it's lifetime.
  * This record is only generated for waves executing in the target_cu and target_simd, selected by
  * ROCPROFILER_THREAD_TRACE_PARAMETER_TARGET_CU and ROCPROFILER_THREAD_TRACE_PARAMETER_SIMD_SELECT
@@ -176,10 +186,12 @@ typedef struct rocprofiler_thread_trace_decoder_wave_t
     int64_t begin_time;  ///< Wave begin time. Should match occupancy event wave start.
     int64_t end_time;    ///< Wave end time. Should match occupancy event wave end.
 
-    uint64_t                                       timeline_size;      ///< timeline_array size
-    uint64_t                                       instructions_size;  ///< instructions_array size
-    rocprofiler_thread_trace_decoder_wave_state_t* timeline_array;     ///< wave state change events
-    rocprofiler_thread_trace_decoder_inst_t*       instructions_array;  ///< Instructions executed
+    uint64_t                                        timeline_size;      ///< timeline_array size
+    uint64_t                                        instructions_size;  ///< instructions_array size
+    rocprofiler_thread_trace_decoder_wave_state_t*  timeline_array;  ///< wave state change events
+    rocprofiler_thread_trace_decoder_inst_t*        instructions_array;  ///< Instructions executed
+    rocprofiler_thread_trace_decoder_exec_popcnt_t* execmask;            ///< Exec mask changes
+    uint64_t                                        execmask_size;  ///< Number execmask entries
 } rocprofiler_thread_trace_decoder_wave_t;
 
 /**
