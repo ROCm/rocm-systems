@@ -53,6 +53,8 @@
 #include <Windows.h>
 #undef WIN32_NO_STATUS
 
+#include <atomic>
+
 // A load must not write. InterlockedOr(object, 0) reads the value back
 // unchanged, but it is still a locked read-modify-write: it needs the page
 // writable, and some memory the runtime only ever reads is mapped read-only to
@@ -157,16 +159,12 @@ typename std::remove_volatile<T>::type __atomic_fetch_sub(
 }
 
 template <class T>
-void __atomic_compare_exchange(
+bool __atomic_compare_exchange(
     T* object, typename std::remove_volatile<T>::type* expected,
     typename std::remove_volatile<T>::type* val, int arg0, int arg1, int arg2) {
-  if constexpr (sizeof(T) == 8) {
-    InterlockedCompareExchange64(reinterpret_cast<volatile LONG64*>(object),
-      *val, *expected);
-  } else {
-    InterlockedCompareExchange(reinterpret_cast<volatile LONG*>(object),
-      *val, *expected);
-  }
+  using value_type = typename std::remove_volatile<T>::type;
+  std::atomic_ref<value_type> ref(*const_cast<value_type*>(object));
+  return ref.compare_exchange_strong(*expected, *val, std::memory_order_seq_cst);
 }
 
 template <class T>
