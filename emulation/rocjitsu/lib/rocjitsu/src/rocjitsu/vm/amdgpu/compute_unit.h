@@ -638,17 +638,26 @@ public:
   /// @param shader_engine_id Zero-based shader-engine index within the XCC.
   /// @param cu_index Zero-based CU index within the shader engine.
   /// @param cus_per_shader_array Width of each shader array in CU order; zero means unknown.
+  /// @param shader_engine_cu_count Total CUs in the shader engine; zero means unknown.
   void set_shader_engine_location(uint32_t shader_engine_id, uint32_t cu_index,
-                                  uint32_t cus_per_shader_array = 0) {
+                                  uint32_t cus_per_shader_array = 0,
+                                  uint32_t shader_engine_cu_count = 0) {
     shader_engine_id_ = shader_engine_id;
     shader_engine_cu_index_ = cu_index;
     scratch_scoreboard_base_ = shader_engine_cu_index_ * scratch_slots_per_cu_;
     cus_per_shader_array_ = cus_per_shader_array;
+    shader_engine_cu_count_ = shader_engine_cu_count;
     shader_array_cu_id_ = cus_per_shader_array ? cu_index % cus_per_shader_array : 0;
   }
 
   /// @brief Return this CU's physical shader-engine index.
   uint32_t shader_engine_id() const { return shader_engine_id_; }
+
+  /// @brief Return the physical XCC rank, or nullopt without an assigned CP topology.
+  std::optional<uint32_t> xcc_id() const;
+
+  /// @brief Return the shader engine CU count, or zero when unknown.
+  uint32_t shader_engine_cu_count() const { return shader_engine_cu_count_; }
 
   /// @brief Return the shader-array width, or zero when the geometry is unknown.
   uint32_t cus_per_shader_array() const { return cus_per_shader_array_; }
@@ -1360,6 +1369,7 @@ protected:
   uint32_t shader_engine_cu_index_ = 0;
   uint32_t scratch_slots_per_cu_ = 1;
   uint32_t cus_per_shader_array_ = 0;
+  uint32_t shader_engine_cu_count_ = 0;
   uint32_t shader_array_cu_id_ = 0;
   uint32_t scratch_scoreboard_base_ = 0;
   bool sram_ecc_ = false;
@@ -1673,6 +1683,15 @@ inline uint32_t InstructionComputeUnitView::cus_per_shader_array() const {
 }
 inline uint32_t InstructionComputeUnitView::shader_array_cu_id() const {
   return raw_cu().shader_array_cu_id();
+}
+inline uint32_t InstructionComputeUnitView::shader_engine_id() const {
+  return raw_cu().shader_engine_id();
+}
+inline uint32_t InstructionComputeUnitView::shader_engine_cu_count() const {
+  return raw_cu().shader_engine_cu_count();
+}
+inline std::optional<uint32_t> InstructionComputeUnitView::xcc_id() const {
+  return raw_cu().xcc_id();
 }
 inline uint32_t InstructionComputeUnitView::wf_size() const { return raw_cu().wf_size(); }
 inline uint32_t InstructionComputeUnitView::sgprs_per_wf() const {
