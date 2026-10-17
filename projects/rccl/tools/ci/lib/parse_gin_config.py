@@ -9,6 +9,7 @@ Column layout:
 
   mca<SEP><flags>
   debug_env<SEP><-x flags>   (appended to every test only when RCCL_CI_DEBUG=1)
+  gating<SEP><space-separated test names>   (gating_tests; may be empty)
   test<SEP><name><SEP><kind><SEP><bin><SEP><-x env flags><SEP><args>
     kind: rocshmem | rccl-tests | fixtures | pytest
       rocshmem/rccl-tests: mpirun benchmark; bin is the executable name
@@ -43,6 +44,7 @@ class GinConfig(NamedTuple):
     mca: str
     debug_env: list[str]
     tests: list[GinTest]
+    gating_tests: list[str]
 
 
 def parse_config(path: Path) -> GinConfig:
@@ -67,10 +69,17 @@ def parse_config(path: Path) -> GinConfig:
             )
         )
 
+    gating_tests = list(data.get("gating_tests", []) or [])
+    known = {test.name for test in tests}
+    unknown = [name for name in gating_tests if name not in known]
+    if unknown:
+        raise ValueError(f"gating_tests not in tests of {path}: {', '.join(unknown)}")
+
     return GinConfig(
         mca=data.get("mca", "") or "",
         debug_env=list(data.get("debug_env", []) or []),
         tests=tests,
+        gating_tests=gating_tests,
     )
 
 
@@ -79,6 +88,7 @@ def format_rows(config: GinConfig) -> list[str]:
     sep = _FIELD_SEP
     rows = [f"mca{sep}{config.mca}"]
     rows.append(f"debug_env{sep}{' '.join('-x ' + e for e in config.debug_env)}")
+    rows.append(f"gating{sep}{' '.join(config.gating_tests)}")
     for test in config.tests:
         env_flags = " ".join("-x " + e for e in test.env)
         rows.append(sep.join(["test", test.name, test.kind, test.bin, env_flags, test.args]))
