@@ -5,6 +5,7 @@ from pathlib import Path
 
 # NB: Creating a new module to share global vars across modules
 rocprof_compute_home = Path(__file__).resolve().parent
+analysis_configs_dir = rocprof_compute_home / "rocprof_compute_soc" / "analysis_configs"
 PROJECT_NAME = "rocprofiler-compute"
 
 HIDDEN_COLUMNS_CLI = ["Description"]
