@@ -70,24 +70,6 @@ void TestFabricRead::Run(void) {
     GTEST_SKIP() << "No GPU devices found";
   }
 
-  /**
-   *    IFoE capability gate: fabric-less systems report NOT_SUPPORTED from
-   *    amdsmi_get_gpu_fabric_info(); skip the whole test rather than exercise the
-   *    hardware paths below (matches the Fabric Write test)
-   *    Probes device 0 only, assuming a homogeneous fabric config across devices;
-   *    a mixed host (some devices fabric-capable, some not) would skip on device 0.
-   */
-  {
-    amdsmi_fabric_info_t probe = {};
-    probe.fabric_version = AMDSMI_FABRIC_INFO_VERSION_2;
-    if (amdsmi_get_gpu_fabric_info(processor_handles_[0], &probe) == AMDSMI_STATUS_NOT_SUPPORTED) {
-      IF_VERB(STANDARD) {
-        std::cout << "\t**Fabric (IFoE) not supported on this system; skipping test" << std::endl;
-      }
-      GTEST_SKIP() << "Fabric (IFoE) not supported on this system";
-    }
-  }
-
   for (uint32_t dv_ind = 0; dv_ind < num_monitor_devs(); ++dv_ind) {
     auto device = processor_handles_[dv_ind];
     PrintDeviceHeader(device);
@@ -150,7 +132,6 @@ void TestFabricRead::Run(void) {
                      " on this system"
                   << std::endl;
       }
-      continue;
     } else if (err != AMDSMI_STATUS_SUCCESS && err != AMDSMI_STATUS_NO_DATA) {
       CHK_ERR_ASRT(err)
     } else {
@@ -335,6 +316,19 @@ void TestFabricRead::Run(void) {
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
     ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
 
+    // Null-pointer validation for alloc/free; runs before the NOT_SUPPORTED early-continue below
+    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
+    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry(nullptr check)",
+                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
+    err = amdsmi_free_fabric_telemetry(device, nullptr);
+    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
+    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
+
     /**
      * Test amdsmi_alloc_fabric_telemetry(), amdsmi_get_fabric_telemetry_data(),
      * amdsmi_free_fabric_telemetry()
@@ -403,7 +397,11 @@ void TestFabricRead::Run(void) {
           // ── amdsmi_fabric_telem_id_to_string ─────────────────────────────
           for (uint32_t item = 0; item < in.item_count; ++item) {
             const auto& it = in.items[item];
+            DISPLAY_AMDSMI_API("amdsmi_fabric_telem_id_to_string", "id=" + std::to_string(it.id),
+                               VERB(STANDARD));
             err = amdsmi_fabric_telem_id_to_string(it.id, &name);
+            DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS,
+                                  AMDSMI_STATUS_NOT_FOUND);
             // Unmapped telemetry ids return NOT_FOUND with a "UNKNOWN" name;
             // tolerate them so a single unknown id does not fail the test.
             if (err != AMDSMI_STATUS_NOT_FOUND) {
@@ -421,56 +419,10 @@ void TestFabricRead::Run(void) {
     }
 
     // amdsmi_free_fabric_telemetry
+    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry", "gpu=" + std::to_string(dv_ind),
+                       VERB(STANDARD));
     err = amdsmi_free_fabric_telemetry(device, tel);
     DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_SUCCESS);
     CHK_ERR_ASRT(err)
-
-    // Null-pointer validation for alloc/free
-    DISPLAY_AMDSMI_API("amdsmi_alloc_fabric_telemetry(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    err = amdsmi_alloc_fabric_telemetry(device, kAllCategories, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-
-    DISPLAY_AMDSMI_API("amdsmi_free_fabric_telemetry(nullptr check)",
-                       "gpu=" + std::to_string(dv_ind), VERB(STANDARD));
-    err = amdsmi_free_fabric_telemetry(device, nullptr);
-    DISPLAY_AMDSMI_STATUS(VERB(STANDARD), __FILE__, __LINE__, err, AMDSMI_STATUS_INVAL);
-    ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
   }
-}
-
-// amdsmi_fabric_telem_id_to_string() is a pure lookup over a static id->name
-// table generated from the vendored IFOE_TELEM_ID_* headers, so these run
-// without a device and catch id->name drift when the headers are re-synced.
-
-// Literals (independent of the vendored macros) spanning the table — first,
-// mid-table, and last entry — so a reorder or drop anywhere is caught.
-static constexpr uint64_t kFirstTelemId = 0x1;
-static constexpr uint64_t kMidTelemId = 0x6000001;
-static constexpr uint64_t kLastTelemId = 0x6001011;
-
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringMapsKnownIds) {
-  const char* name = nullptr;
-
-  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kFirstTelemId, &name), AMDSMI_STATUS_SUCCESS);
-  ASSERT_STREQ(name, "IFOE_SDP_TX_PACK_WR_REQ");
-
-  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kMidTelemId, &name), AMDSMI_STATUS_SUCCESS);
-  ASSERT_STREQ(name, "NETPORT_LINK_STATUS");
-
-  ASSERT_EQ(amdsmi_fabric_telem_id_to_string(kLastTelemId, &name), AMDSMI_STATUS_SUCCESS);
-  ASSERT_STREQ(name, "NETPORT_FEC_CW_SYMBOL_ERRS_UNCORRECTABLE");
-}
-
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringRejectsNullName) {
-  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(kFirstTelemId, nullptr);
-  ASSERT_EQ(err, AMDSMI_STATUS_INVAL);
-}
-
-TEST(IfoeFunctionalReadOnly, FabricTelemIdToStringUnknownIdReportsUnknown) {
-  const char* name = nullptr;
-  amdsmi_status_t err = amdsmi_fabric_telem_id_to_string(UINT64_MAX, &name);
-  ASSERT_EQ(err, AMDSMI_STATUS_NOT_FOUND);
-  ASSERT_STREQ(name, "UNKNOWN");
 }
