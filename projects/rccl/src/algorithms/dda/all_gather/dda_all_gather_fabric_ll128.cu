@@ -25,12 +25,14 @@
 // from the bytes each rank pushes ((nRanks - 1) x the per-rank payload). Every warp
 // pushes its slices and spins on its peer's a couple of slices behind. With little to
 // push, small blocks spread the slices over more CUs and keep fewer warps spinning on
-// each; with more, bigger blocks keep enough slices in flight per CU.
+// each; with more, bigger blocks keep enough slices in flight per CU. From 16 ranks
+// each peer column gets so few blocks that the small blocks win up to the mid edge.
 constexpr unsigned kDdaLL128AGLargeThreads = 512;
 constexpr unsigned kDdaLL128AGMidThreads = 256;
 constexpr unsigned kDdaLL128AGSmallThreads = 128;
 constexpr size_t kDdaLL128AGSmallMaxPushBytes = 8ULL * 1024 * 1024;
 constexpr size_t kDdaLL128AGMidMaxPushBytes = 16ULL * 1024 * 1024;
+constexpr int kDdaLL128AGNoMidMinRanks = 16;
 
 // 0 (unset): pick the block size from the pushed bytes as above.
 RCCL_PARAM(DdaLL128AGThreads, "DDA_LL128_AG_THREADS", 0);
@@ -60,7 +62,8 @@ unsigned ddaLL128AGThreads(int nRanks, size_t perRankBytes) {
     return (unsigned)UserInput;
   }
   const size_t pushBytes = (size_t)(nRanks - 1) * perRankBytes;
-  if (pushBytes <= kDdaLL128AGSmallMaxPushBytes) return kDdaLL128AGSmallThreads;
+  const size_t smallMax = nRanks >= kDdaLL128AGNoMidMinRanks ? kDdaLL128AGMidMaxPushBytes : kDdaLL128AGSmallMaxPushBytes;
+  if (pushBytes <= smallMax) return kDdaLL128AGSmallThreads;
   if (pushBytes <= kDdaLL128AGMidMaxPushBytes) return kDdaLL128AGMidThreads;
   return kDdaLL128AGLargeThreads;
 }
