@@ -3752,7 +3752,11 @@ def generated_f16_sdwa_consumers(request, tmp_path_factory):
 def test_generated_f16_sdwa_keeps_unmigrated_ordering(
     generated_f16_sdwa_consumers, instruction, helper
 ):
-    """Pin current helper selection; gfx1030 SDWA captures contradict its order."""
+    """Pin current helper selection, not hardware order.
+
+    gfx1030 SDWA captures contradict the arithmetic order (MUL_F16, ADD_F16);
+    no SDWA captures cover TRANS or integral rounding.
+    """
     route, output = generated_f16_sdwa_consumers
     encoding = 'vop2' if instruction == 'V_ADD_F16' else 'vop1'
     if route == 'shared':

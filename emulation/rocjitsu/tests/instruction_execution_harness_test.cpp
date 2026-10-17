@@ -9920,8 +9920,9 @@ TEST(SdwaOutputScalingTest, HonorsFormatModesAndDestinationPlacement) {
         ValueCase{architecture.add_f16, false, true, 0x3c00u, 0x3c00u, 1, 0, 0x4400beefu,
                   amdgpu::sdwa::WORD_1},
         // Pin the emulator's scaling before F16 narrowing for overflow and tiny
-        // results. gfx1030 SDWA MUL_F16 captures round first instead, so the
-        // overflow case is known to differ from hardware until SDWA migrates.
+        // results. On gfx1030, SDWA ADD_F16 0x7bff + 0x7bff with div:2 gives
+        // 0x7c00, so the overflow case differs from hardware until SDWA
+        // arithmetic migrates; the tiny cases are not captured.
         ValueCase{architecture.add_f16, false, true, 0x7bffu, 0x7bffu, 3, 0, 0x7bffu},
         ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3800u, 2, 0, 0x0800u},
         ValueCase{architecture.mul_f16, false, true, 0x0400u, 0x3c00u, 3, 0, 0},
