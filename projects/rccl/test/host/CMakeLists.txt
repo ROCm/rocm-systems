@@ -39,6 +39,11 @@ rccl_assert_source_line("${_rccl_src_root}/enqueue/enqueue.cc"
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
   "int64_t ncclParamP2pLL128Enable() { return g_loadParam(\"P2P_LL128_ENABLE\", -1); }"
   "the P2pLL128Enable fake default")
+rccl_assert_source_line("${_rccl_src_root}/graph/connect.cc"
+  "NCCL_PARAM(TreeCompact, \"TREE_COMPACT\", 0)" "fakes/init_fakes.cc: ncclParamTreeCompact()")
+rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/init_fakes.cc"
+  "int64_t ncclParamTreeCompact() { return g_loadParam(\"TREE_COMPACT\", 0); }"
+  "the TreeCompact fake default")
 rccl_assert_source_line("${_rccl_src_root}/transport/net_ib/connect.cc"
   "NCCL_PARAM(IbQpsPerConn, \"IB_QPS_PER_CONNECTION\", 1)" "fakes/transport_net_ib_fakes.cc: ncclParamIbQpsPerConn()")
 rccl_assert_source_line("${CMAKE_CURRENT_LIST_DIR}/fakes/transport_net_ib_fakes.cc"

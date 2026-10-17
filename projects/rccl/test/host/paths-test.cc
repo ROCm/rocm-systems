@@ -1173,6 +1173,29 @@ TEST_F(PathsP2pChannelsMicrotest, P2pChannels_GrowCommAgreesOnTheSmallestCount) 
   EXPECT_EQ(ncclSystemError, ncclTopoComputeP2pChannels(comm_.get()));
 }
 
+TEST_F(PathsP2pChannelsMicrotest, PerPeer_MloPartSiblingsUseTheStatedCount) {
+  Setup(BuildWithPaths(System(Cpu(0, PartitionedSwitch("mlopart=\"0\"", "mlopart=\"1\"")))), 2, 1, 64);
+
+  ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), comm_.get()));
+  ASSERT_EQ(ncclSuccess, ncclTopoComputeP2pChannelsPerPeer(comm_.get()));
+
+  EXPECT_EQ(MLOPART_P2P_NCHANNELS, comm_->p2pnChannelsPerPeer);
+}
+
+TEST_F(PathsP2pChannelsMicrotest, P2pChannels_MloPartSingleNodeFitsThePeersInOneRound) {
+  for (bool mloPart : {false, true}) {
+    Setup(BuildWithPaths(System(Cpu(0, PartitionedSwitch("mlopart=\"0\"", "mlopart=\"1\"")))), 2, 1, 64);
+    ASSERT_EQ(ncclSuccess, ncclTopoComputePaths(system_.get(), comm_.get()));
+    comm_->config.maxP2pPeers = 2 * NCCL_MAX_DEV_WORK_P2P_PER_BATCH;
+    comm_->hasMloPart = mloPart;
+
+    Compute();
+
+    EXPECT_EQ(64, comm_->p2pnChannels) << mloPart;
+    EXPECT_EQ(mloPart ? 32 : 64, comm_->p2pnChannelsPerPeer) << mloPart;  // 32 doubled; 2 rounds fit 32 each
+  }
+}
+
 // --- Trim
 
 class PathsTrimMicrotest : public PathsCommMicrotest {

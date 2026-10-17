@@ -2140,8 +2140,13 @@ class TopoGetSystemMicrotest : public TopoMicrotest {
       *nVirt = 0;
       return ncclSuccess;
     };
+    // The XML dev is the SMI index; the HIP ordinal runs the other way, as with reordered device visibility.
+    g_amdSmiGetDeviceIndexByPciBusId = [](const char* busId, uint32_t* index) {
+      *index = std::string(busId) == GpuBus(0) ? 0 : 1;
+      return ncclSuccess;
+    };
     g_hipDeviceGetByPCIBusId = [](int* dev, const char* busId) {
-      *dev = std::string(busId) == GpuBus(0) ? 0 : 1;
+      *dev = std::string(busId) == GpuBus(0) ? 1 : 0;
       return hipSuccess;
     };
     // Every local rank sees the same node, so the gather hands each the caller's own XML.

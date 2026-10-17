@@ -962,12 +962,12 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_FillsSmGcnAndArchFromHip) {
   rcclHipDeviceArch_t expected;
   expected.arch = arch;
 
-  ncclXmlNode* gpu = GpuNode(2);
+  ncclXmlNode* gpu = GpuNode(2, 7);
 
   ASSERT_NE(nullptr, gpu);
   EXPECT_EQ(pci_, gpu->parent);
-  EXPECT_EQ("2", Attr(gpu, "dev"));
-  EXPECT_EQ("82", Attr(gpu, "sm"));
+  EXPECT_EQ("7", Attr(gpu, "dev"));  // the SMI index, the same in every process
+  EXPECT_EQ("82", Attr(gpu, "sm"));  // properties come from the HIP ordinal
   EXPECT_EQ("gfx950", Attr(gpu, "gcn"));
   EXPECT_EQ(std::to_string(expected.value), Attr(gpu, "arch"));
   EXPECT_EQ(3, props.calls);
@@ -989,7 +989,7 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_TopologyFileValuesSkipHip) {
 }
 
 TEST_F(XmlGpuMicrotest, GetXmlFromGpu_DevMinusOneHasNoGpu) {
-  EXPECT_EQ(nullptr, GpuNode(UINT32_MAX));
+  EXPECT_EQ(nullptr, GpuNode(0, UINT32_MAX));
 }
 
 TEST_F(XmlGpuMicrotest, GetXmlFromGpu_HipPropertiesFailureIsReturned) {
@@ -1154,10 +1154,17 @@ TEST_F(XmlGpuMicrotest, GetXmlFromGpu_MissingTargetClassComesFromSysfs) {
   EXPECT_TRUE(Logged("No sysfs PCI class for XGMI target 0000:40:00.0"));
 }
 
-TEST_F(XmlGpuMicrotest, FillGpu_BuildsThePciChainAndUsesTheHipOrdinal) {
+TEST_F(XmlGpuMicrotest, FillGpu_BuildsThePciChainWithTheSmiIndexAsDev) {
   ncclXmlNode* top = nullptr;
   ScopedHook ordinal(g_hipDeviceGetByPCIBusId, [](int* dev, const char*) {
     *dev = 5;
+    return hipSuccess;
+  });
+  std::vector<int> propDevs;
+  ScopedHook props(g_hipGetDeviceProperties, [&propDevs](hipDeviceProp_t* prop, int dev) {
+    *prop = hipDeviceProp_t{};
+    snprintf(prop->gcnArchName, sizeof(prop->gcnArchName), "gfx942");
+    propDevs.push_back(dev);
     return hipSuccess;
   });
   ScopedHook index(g_amdSmiGetDeviceIndexByPciBusId, [](const char* busId, uint32_t* i) {
@@ -1169,7 +1176,9 @@ TEST_F(XmlGpuMicrotest, FillGpu_BuildsThePciChainAndUsesTheHipOrdinal) {
   ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &top));
 
   ASSERT_NE(nullptr, top);
-  EXPECT_EQ("5", Attr(top, "dev"));
+  EXPECT_EQ("1", Attr(top, "dev"));
+  ASSERT_FALSE(propDevs.empty());
+  for (int dev : propDevs) EXPECT_EQ(5, dev);
   EXPECT_EQ("0x03", Attr(top->parent, "class"));
   EXPECT_EQ("0000:50:00.0", Attr(top->parent, "busid"));
   EXPECT_EQ(1, g_amdSmiInitCalls);
@@ -1189,24 +1198,20 @@ TEST_F(XmlGpuMicrotest, FillGpu_KnownBug_AmdSmiInitRunsOnEveryCall) {
   EXPECT_EQ(2, g_amdSmiInitCalls);
 }
 
-TEST_F(XmlGpuMicrotest, FillGpu_UnknownHipOrdinalFallsBackToTheSmiIndex) {
+TEST_F(XmlGpuMicrotest, FillGpu_HipLookupFailureIsAnError) {
   ncclXmlNode* gpu = nullptr;
-  g_amdSmiGetDeviceIndexByPciBusId = [](const char*, uint32_t* i) {
-    *i = 2;
-    return ncclSuccess;
-  };
-  ScopedHook ordinal(g_hipDeviceGetByPCIBusId, [](int* dev, const char*) {
-    *dev = -1;
-    return hipSuccess;
-  });
 
-  ASSERT_EQ(ncclSuccess, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &gpu));
+  EXPECT_EQ(ncclUnhandledCudaError, ncclTopoFillGpu(xml_.get(), "0000:50:00.0", &gpu));
 
-  EXPECT_EQ("2", Attr(gpu, "dev"));
+  EXPECT_EQ(nullptr, gpu);
 }
 
 TEST_F(XmlGpuMicrotest, FillGpu_HipLogicalFunctionAttachesToFunctionZero) {
   ncclXmlNode* gpu = nullptr;
+  ScopedHook ordinal(g_hipDeviceGetByPCIBusId, [](int* dev, const char*) {
+    *dev = 0;
+    return hipSuccess;
+  });
   g_pciPaths["0000:50:00.2"] = "/sys/x/0000:50:00.2";
   g_sysfs["/sys/x/0000:50:00.2/class"] = "0x020000";
 
@@ -1222,6 +1227,10 @@ TEST_F(XmlGpuMicrotest, FillGpu_HipLogicalFunctionAttachesToFunctionZero) {
 
 TEST_F(XmlGpuMicrotest, FillGpu_GpuClassFunctionKeepsItsOwnBusId) {
   ncclXmlNode* gpu = nullptr;
+  ScopedHook ordinal(g_hipDeviceGetByPCIBusId, [](int* dev, const char*) {
+    *dev = 0;
+    return hipSuccess;
+  });
   g_pciPaths["0000:50:00.1"] = "/sys/x/0000:50:00.1";
   g_sysfs["/sys/x/0000:50:00.1/class"] = "0x120000";
   g_pciPaths["0000:50:00.8"] = "/sys/x/0000:50:00.8";

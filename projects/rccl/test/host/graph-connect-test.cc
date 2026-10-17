@@ -539,6 +539,22 @@ TEST_F(GraphConnectMicrotest, ConnectTrees_LinksNodesAlongBothBinaryTrees) {
   EXPECT_TRUE(Logged("Tree 0 : -1 -> 5 -> 2/-1/-1"));
 }
 
+TEST_F(GraphConnectMicrotest, ConnectTrees_TreeCompactUsesTheCompactDoubleTree) {
+  Use(2, 4, 4);  // node 2
+  comm_->nChannels = 1;
+  ResetChannels();
+  g_params["TREE_COMPACT"] = 1;
+  NodeTrees t(4, 2);
+
+  ASSERT_EQ(ncclSuccess, connectTrees(comm_.get(), t.parent.data(), t.child0.data(), t.child1.data(), nullptr));
+
+  EXPECT_EQ(3, comm_->channels[0].tree.up);  // first child of node 1, a leaf
+  EXPECT_EQ(-1, comm_->channels[0].tree.down[0]);
+  EXPECT_EQ(6, comm_->channels[1].tree.up);  // second tree: under node 3, above node 0
+  EXPECT_EQ(0, comm_->channels[1].tree.down[0]);
+  EXPECT_TRUE(Logged("Using compact tree: nNodes=4, node=2"));
+}
+
 TEST_F(GraphConnectMicrotest, ConnectTrees_OverTheChannelLimitTheSecondHalfHasItsOwnRanks) {
   Use(2, 4, 4, "gfx90a");
   comm_->nChannels = 2 * CHANNEL_LIMIT;
@@ -577,12 +593,22 @@ TEST_F(GraphConnectMicrotest, SetTreeDown_AFourthChildIsAnError) {
 }
 
 TEST_F(GraphConnectMicrotest, GetTreeNodeParity_FlipsOnFirstChildren) {
-  EXPECT_EQ(-1, getTreeNodeParity(0, 4, -1));
-  EXPECT_EQ(0, getTreeNodeParity(0, 4, 0));  // the first tree's root
-  EXPECT_EQ(1, getTreeNodeParity(1, 4, 3));  // the second tree's root
-  EXPECT_EQ(0, getTreeNodeParity(0, 4, 2));  // second child of the root
-  EXPECT_EQ(1, getTreeNodeParity(0, 4, 1));  // first child of node 2
-  EXPECT_EQ(0, getTreeNodeParity(0, 4, 3));
+  EXPECT_EQ(-1, getTreeNodeParity(0, 4, -1, false));
+  EXPECT_EQ(0, getTreeNodeParity(0, 4, 0, false));  // the first tree's root
+  EXPECT_EQ(1, getTreeNodeParity(1, 4, 3, false));  // the second tree's root
+  EXPECT_EQ(0, getTreeNodeParity(0, 4, 2, false));  // second child of the root
+  EXPECT_EQ(1, getTreeNodeParity(0, 4, 1, false));  // first child of node 2
+  EXPECT_EQ(0, getTreeNodeParity(0, 4, 3, false));
+}
+
+// Compact tree on 4 nodes: 0 -> 1 -> {2, 3}, so node 1 is the root's second child and node 2 a first child.
+TEST_F(GraphConnectMicrotest, GetTreeNodeParity_CompactTreeFollowsTheRemappedShape) {
+  EXPECT_EQ(-1, getTreeNodeParity(0, 4, -1, true));
+  EXPECT_EQ(0, getTreeNodeParity(0, 4, 0, true));
+  EXPECT_EQ(0, getTreeNodeParity(0, 4, 1, true));
+  EXPECT_EQ(1, getTreeNodeParity(0, 4, 2, true));
+  EXPECT_EQ(0, getTreeNodeParity(0, 4, 3, true));
+  EXPECT_EQ(1, getTreeNodeParity(1, 4, 3, true));  // the second tree's root
 }
 
 TEST_F(GraphConnectMicrotest, ConnectRailOptimizedTrees_SwapsChannelPairsOnOddParityNodes) {
@@ -636,6 +662,32 @@ TEST_F(GraphConnectMicrotest, ConnectRailOptimizedTrees_ChildRanksFollowTheChild
   EXPECT_EQ(7, comm_->channels[1].tree.down[0]);
   EXPECT_EQ(3, comm_->channels[3].tree.up);  // down-tree: node 2 under node 1
   EXPECT_EQ(3, comm_->channels[0].tree.depth);
+}
+
+// Compact tree on 4 nodes, node 2: first tree under node 1 with no children; second tree under node 3 with
+// children 1 (first) and 0 (second). Parities: first tree 0/0/1/0, second tree 1/0/1/1 for nodes 0-3.
+TEST_F(GraphConnectMicrotest, ConnectRailOptimizedTrees_TreeCompactUsesTheCompactParities) {
+  Use(2, 4, 5);  // node 2's second rank
+  comm_->nChannels = 4;
+  ResetChannels();
+  g_params["TREE_COMPACT"] = 1;
+  std::vector<int> parent, child0, child1;
+  for (int c = 0; c < 4; c++) {
+    for (int n = 0; n < 4; n++) {
+      parent.push_back(c % 2 ? 2 * n + 1 : 2 * n);
+      child0.push_back(c % 2 ? 2 * n : 2 * n + 1);
+      child1.push_back(c % 2 ? 2 * n + 1 : 2 * n);
+    }
+  }
+
+  ASSERT_EQ(ncclSuccess, connectRailOptimizedTrees(comm_.get(), parent.data(), child0.data(), child1.data()));
+
+  EXPECT_EQ(3, comm_->channels[0].tree.up);
+  EXPECT_EQ(-1, comm_->channels[1].tree.up);
+  EXPECT_EQ(7, comm_->channels[2].tree.up);
+  EXPECT_EQ(1, comm_->channels[2].tree.down[0]);
+  EXPECT_EQ(3, comm_->channels[3].tree.down[0]);
+  EXPECT_TRUE(Logged("Using compact tree (rail-optimized): nNodes=4, node=2"));
 }
 
 // --- CollNet and NVLS
@@ -722,6 +774,23 @@ TEST_F(GraphConnectMicrotest, ConnectNvls_MultiNodeTreesFollowTheHeadsOnEachNode
   comm_->node = 0;
   ASSERT_EQ(ncclSuccess, connectNvls(comm_.get(), heads, 2));
   EXPECT_TRUE(Logged("NVLS Head  0:  0  2  4  6"));
+}
+
+TEST_F(GraphConnectMicrotest, ConnectNvls_TreeCompactFollowsTheCompactDoubleTree) {
+  Use(2, 4, 4);  // node 2
+  comm_->nvlsChannels = 2;
+  g_params["TREE_COMPACT"] = 1;
+  int heads[2 * 4] = {0, 2, 4, 6, 1, 3, 5, 7};
+
+  ASSERT_EQ(ncclSuccess, connectNvls(comm_.get(), heads, 2));
+
+  ncclNvls& c0 = comm_->channels[0].nvls;
+  ncclNvls& c1 = comm_->channels[1].nvls;
+  EXPECT_EQ(2, c0.treeUp);  // first tree: node 2 is a leaf under node 1
+  EXPECT_EQ(-1, c0.treeDown[1]);
+  EXPECT_EQ(6, c1.treeUp);  // second tree: under node 3, above nodes 1 and 0
+  EXPECT_EQ(2, c1.treeDown[1]);
+  EXPECT_EQ(0, c1.treeDown[2]);
 }
 
 // --- Channel counts

@@ -111,4 +111,44 @@ TEST(TreesMicrotest, GetDtree_OddCountShiftsTheSecondTreeByOne) {
   EXPECT_EQ(Btree(13, 12).childType, zero.t1.childType);
 }
 
+DoubleTree DtreeCompact(int nranks, int rank) {
+  DoubleTree d;
+  EXPECT_EQ(ncclSuccess, ncclGetDtreeCompact(nranks, rank, &d.t0.up, &d.t0.down0, &d.t0.down1, &d.t0.childType,
+                                             &d.t1.up, &d.t1.down0, &d.t1.down1, &d.t1.childType));
+  return d;
+}
+
+TEST(TreesMicrotest, GetDtreeCompact_MatchesTheEightNodePicture) {
+  const int expected[8][3] = {{-1, -1, 2}, {2, 4, 5}, {0, 1, 3}, {2, 6, 7},
+                              {1, -1, -1}, {1, -1, -1}, {3, -1, -1}, {3, -1, -1}};
+
+  for (int r = 0; r < 8; r++) {
+    TreeNode n = DtreeCompact(8, r).t0;
+    EXPECT_EQ(expected[r][0], n.up) << r;
+    EXPECT_EQ(expected[r][1], n.down0) << r;
+    EXPECT_EQ(expected[r][2], n.down1) << r;
+  }
+}
+
+TEST(TreesMicrotest, GetDtreeCompact_FirstTreeSpineStaysInTheFirstHalf) {
+  for (int nranks = 1; nranks <= 33; nranks++) {
+    int half = (nranks + 1) / 2;
+    std::vector<int> ups(nranks, 0);
+    for (int r = 0; r < nranks; r++) {
+      DoubleTree d = DtreeCompact(nranks, r);
+      for (int child : {d.t0.down0, d.t0.down1}) {
+        if (child == -1) continue;
+        EXPECT_LT(r, half) << nranks << "/" << r;  // only the first half has children
+        ASSERT_LT(child, nranks);
+        EXPECT_EQ(r, DtreeCompact(nranks, child).t0.up) << nranks << "/" << child;
+      }
+      for (int up : {d.t0.up, d.t1.up}) {
+        if (up != -1) ups[r]++;
+      }
+    }
+    for (int r = 0; r < nranks; r++) EXPECT_GE(ups[r], nranks > 1 ? 1 : 0) << nranks << "/" << r;
+  }
+  EXPECT_EQ(-1, DtreeCompact(1, 0).t0.up);
+}
+
 }  // namespace
