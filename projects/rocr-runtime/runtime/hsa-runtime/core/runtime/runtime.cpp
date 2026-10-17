@@ -123,6 +123,7 @@ extern void _loader_debug_state();
 namespace core {
 bool g_use_interrupt_wait;
 bool g_use_mwaitx;
+bool g_use_yielding_poll;
 Runtime* Runtime::runtime_singleton_ = NULL;
 
 hsa_status_t Runtime::Acquire() {
@@ -2779,6 +2780,7 @@ Runtime::Runtime()
   xnack_enabled_ = false;
   g_use_interrupt_wait = true;
   g_use_mwaitx = true;
+  g_use_yielding_poll = false;
   ::_amdgpu_r_debug = {11, nullptr, reinterpret_cast<uintptr_t>(&_loader_debug_state),
                        r_debug::RT_CONSISTENT, 0};
   log_file = stderr;
@@ -2813,6 +2815,7 @@ hsa_status_t Runtime::Load() {
 
   g_use_interrupt_wait = flag_.enable_interrupt();
   g_use_mwaitx = flag_.check_mwaitx(cpuinfo.mwaitx);
+  g_use_yielding_poll = flag_.enable_yielding_poll();
 
   if (!AMD::Load()) {
     return HSA_STATUS_ERROR_OUT_OF_RESOURCES;
