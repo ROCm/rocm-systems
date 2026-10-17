@@ -71,6 +71,20 @@ HSAKMT_STATUS HSAKMTAPI hsaKmtAisReadWriteFile(void *MemoryAddress,
 
 	ret = hsakmt_ioctl(hsakmt_primary_kfd_ctx.fd, AMDKFD_IOC_AIS_OP, &args);
 
+	/* in and out share a union. If the KFD rejected the ioctl before the AIS
+	 * handler ran (e.g. ENOTTY when AIS is unsupported), out still holds the
+	 * input args, so out.size_copied still equals handle. Report errno and no
+	 * progress instead. A kernel-written size_copied can't equal a real
+	 * handle: it is at most transfer_size (< 2^32), while a handle's upper
+	 * half is a GPU ID, which is never 0. Handle 0 (an address-only
+	 * allocation) also matches; the KFD fails it before any transfer with
+	 * status = -errno and size_copied = 0, so rewriting it changes nothing.
+	 */
+	if (ret < 0 && args.out.size_copied == handle) {
+		args.out.status = -errno;
+		args.out.size_copied = 0;
+	}
+
 	if (SizeCopiedInBytes)
 		*SizeCopiedInBytes = args.out.size_copied;
 	if (status)
