@@ -435,9 +435,10 @@ public:
 protected:
   friend class Decoder;
 
+  /// @param memory_op Whether the instruction enters a memory pipeline (sets MEMORY_OP).
   void
   set_memory_issue_info(std::initializer_list<amdgpu::MemoryCounterObligation> counter_obligations,
-                        bool exec_masked = true) {
+                        bool exec_masked = true, bool memory_op = true) {
     memory_issue_info_ = {};
     memory_issue_info_.exec_masked = exec_masked;
     for (const auto obligation : counter_obligations) {
@@ -452,7 +453,8 @@ protected:
           obligation;
     }
     assert(!memory_issue_info_.empty());
-    flags_ |= MEMORY_OP;
+    if (memory_op)
+      flags_ |= MEMORY_OP;
   }
 
   /// @brief Size of the instruction's encoding in bytes.
