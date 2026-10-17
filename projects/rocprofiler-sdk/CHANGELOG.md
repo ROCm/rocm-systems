@@ -24,8 +24,26 @@ Full documentation for ROCprofiler-SDK is available at [rocm.docs.amd.com/projec
 
 - rocPD schema 3.0.5 stores SPM counter location on `rocpd_info_pmc`. Each agent and combination of counter, XCC, shader engine, shader array, WGP, and instance has its own pmc id. Location dimensions not provided for a counter are stored as `NULL` and left blank in CSV output. The instance index is always stored. `rocpd_pmc_event` keeps the sample value and points at that id.
 - Request ROCr high-precision timestamp correlation during HSA registration when GPU timestamp collection is configured and the runtime provides the tools API. Older runtimes and tools that only trace CPU APIs or markers retain the existing behavior.
+- `rocprof-attach` and `rocprofv3 --attach` now profile the target process with the tool library of the rocprofiler-sdk installation that the target is running, located through `/proc/<pid>/maps`. When that library cannot be found, they fall back to the tool library of the attaching installation and print a warning. With `--attach-children`, every process in the tree uses the selection made for the target PID.
+- A warning is printed when the target runs a different rocprofiler-sdk installation, because options that installation does not support are ignored or skipped. Aggregate options such as `--sys-trace` only enable what the target's installation supports.
+- `rocprof-attach -t/--attach-tool-library` is now optional. A tool library given with `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` is used exactly as given and is interpreted in the target's filesystem. `rocprofv3 --attach` now honors a user-set `ROCPROF_ATTACH_TOOL_LIBRARY`.
+- A user-set `ROCP_TOOL_LIBRARIES` is ignored in attach mode, with a warning. Use `-t` or `ROCPROF_ATTACH_TOOL_LIBRARY` to attach a custom tool library.
+- `rocprof-attach` reports a clear error before touching the target when the target's rocprofiler-sdk attach library predates attachment through the `rocp-bg-attach` thread.
 
 ### Resolved issues
+
+- Fixed `rocprofiler_configure_buffer_tracing_service` and `rocprofiler_configure_callback_tracing_service` throwing an exception for an out-of-range tracing kind. They now return `ROCPROFILER_STATUS_ERROR_KIND_NOT_FOUND`.
+- Fixed the rocprofv3 tool library aborting when it runs with an older rocprofiler-sdk, for example after attaching to a process from a different installation. Tracing kinds that the running rocprofiler-sdk does not support, including those enabled internally (external correlation requests and HIP graph tracing), are skipped with a warning.
+- Thread trace is disabled with a warning when the rocprofv3 tool library runs with a rocprofiler-sdk older than 1.5.0, instead of running with a mismatched thread trace ABI.
+- Fixed `rocprofv3 --attach` replacing the attach tool library with its own through the forwarded `ROCP_TOOL_LIBRARIES` environment variable.
+- Fixed attaching with a colon-delimited list of tool libraries in `-t`/`--attach-tool-library` or `ROCPROF_ATTACH_TOOL_LIBRARY`. Every library in the list is checked, and attachment fails if any of them is not found.
+- Fixed the last library of a colon-delimited `ROCP_TOOL_LIBRARIES` list not being loaded.
+- Fixed the application aborting when a library in `ROCP_TOOL_LIBRARIES` could not be loaded. An error is logged, none of the listed libraries are used, and an attach to the process reports failure.
+- `rocprofiler_attach` and `rocprofiler_detach` return the attach and detach status instead of always reporting success. A tool without `tool_attach` succeeds only on the attach that loaded it, and a warning is logged for each tool that does not support attach or detach.
+- An attach now fails when no tool accepted configuration (every tool's `rocprofiler_configure` returned `NULL`).
+- Fixed `rocattach_attach_tree` reporting failure, and `rocprof-attach --attach-children` exiting without detaching, when only some processes in the tree attached. It now returns success when any process attached, and `rocattach_detach_tree` detaches those processes even if the root did not attach.
+- Fixed `rocattach` not unmapping the environment and tool-path buffers in the target when the attach call in the target reported failure.
+- Fixed the rocprofv3 tool library aborting on reattach after it disabled thread trace or kernel replay because the running rocprofiler-sdk does not support them, and fixed counter collection using kernel replay passes when kernel replay is unsupported.
 
 ### Known issues
 
