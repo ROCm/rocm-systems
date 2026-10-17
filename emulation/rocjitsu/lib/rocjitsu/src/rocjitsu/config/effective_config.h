@@ -15,6 +15,7 @@
 #include <optional>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #include <sys/types.h>
 
@@ -26,10 +27,15 @@ inline constexpr char kEffectiveConfigName[] = "effective_config.json";
 
 /// @brief Per-launch config overrides; unset fields preserve the source settings.
 struct LaunchOverrides {
+  std::optional<std::string> exec_mode = std::nullopt;
+  std::optional<uint32_t> gpus_per_node = std::nullopt;
+  std::vector<std::string> plugins = {};
   std::optional<uint32_t> cpu_thread_budget = std::nullopt;
   std::optional<WaitChecking> wait_checking = std::nullopt;
 
-  bool empty() const { return !cpu_thread_budget && !wait_checking; }
+  bool empty() const {
+    return !exec_mode && !gpus_per_node && plugins.empty() && !cpu_thread_budget && !wait_checking;
+  }
 };
 
 /// @brief Return @p json with its top-level `cpu_thread_budget` set to @p budget.

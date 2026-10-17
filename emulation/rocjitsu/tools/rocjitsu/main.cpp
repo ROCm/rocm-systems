@@ -574,6 +574,31 @@ bool apply_config_option(std::string_view assignment, config::LaunchOverrides &o
   return false;
 }
 
+bool looks_like_option(std::string_view arg) {
+  if (arg.starts_with("--"))
+    return arg.size() > 2;
+  if (!arg.starts_with("-") || arg.size() <= 1)
+    return false;
+  return std::isalpha(static_cast<unsigned char>(arg[1]));
+}
+
+std::string_view trim_ascii_whitespace(std::string_view text) {
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.front())))
+    text.remove_prefix(1);
+  while (!text.empty() && std::isspace(static_cast<unsigned char>(text.back())))
+    text.remove_suffix(1);
+  return text;
+}
+
+bool is_valid_plugin_name(std::string_view name) {
+  if (name.empty())
+    return false;
+  for (unsigned char c : name)
+    if (!std::isalnum(c) && c != '_' && c != '-')
+      return false;
+  return true;
+}
+
 bool validate_workdir(const std::filesystem::path &workdir) {
   std::error_code status_error;
   const std::filesystem::file_status status = std::filesystem::status(workdir, status_error);
@@ -748,22 +773,34 @@ dbt_execution_gpu_ordinals(const std::string &dbt_config_path,
 
 void print_usage() {
   std::cerr
-      << "Usage: rocjitsu [--config <config.json>|--profile <name>] "
-         "[--env KEY=VALUE] [--workdir <dir>] [--daemon|--attach] -- <app> [args...]\n"
+      << "Usage: rocjitsu [--json] [--config <config.json>|--profile <name>] "
+         "[--env KEY=VALUE] [--workdir <dir>] "
+         "[--exec-mode functional|clocked] [--plugin <name>]... [--gpus-per-node <n>] "
+         "[--daemon|--attach] [--] <app> [args...]\n"
          "\n"
          "Modes:\n"
          "  rocjitsu --config foo.json -- ./app          Local mode (in-process simulation)\n"
+         "  rocjitsu --config foo.json ./app             Same launch without a separator\n"
          "  rocjitsu --profile mi350x -- ./app          Run with a bundled profile config\n"
+         "  rocjitsu --exec-mode clocked -- ./app        Override the config execution mode\n"
+         "  rocjitsu --gpus-per-node 2 -- ./app         Override the emulated GPU count\n"
          "  rocjitsu --daemon --config foo.json -- ./app Daemon mode (fork daemon + launch app)\n"
          "  rocjitsu --daemon --config foo.json          Daemon-only (run server)\n"
          "  rocjitsu --attach --config foo.json -- ./app Attach to running daemon\n"
+         "  rocjitsu --in-process --config foo.json -- ./app\n"
+         "                                               Explicit local mode\n"
          "  rocjitsu --config foo.json --vfio-socket <path>\n"
          "                                               Serve a PCI device to a VMM\n"
-         "  rocjitsu paths [--json]                      Print config/runtime paths\n"
+         "  rocjitsu [--json] paths                      Print config/runtime paths\n"
          "\n"
          "Options:\n"
          "  --config <path>   Simulation config JSON. Cannot be combined with --profile.\n"
          "  --profile <name>  Bundled profile config to run. Defaults to mi350x.\n"
+         "  --exec-mode <mode>\n"
+         "                    Override the top-level config exec_mode: functional or clocked.\n"
+         "  --plugin <name>   Enable an execution plugin with its default config. Repeatable.\n"
+         "  --gpus-per-node <n>\n"
+         "                    Override the emulated GPU count for this launch.\n"
          "  --env KEY=VALUE  Add or replace an environment variable for the launched app.\n"
          "  --clear-env-vars Start the launched app with a clean environment, preserving\n"
          "                    only basic shell/session variables before applying --env.\n"
@@ -777,6 +814,8 @@ void print_usage() {
          "                    Replace cpu_thread_budget for this launch only; the\n"
          "                    config file is left unchanged. Zero selects automatic\n"
          "                    sizing. Not available with --attach.\n"
+         "  --in-process     Run in local in-process mode. This is the default and\n"
+         "                    cannot be combined with --daemon or --attach.\n"
          "  --wait-checking <mode>, --wait-checking=<mode>\n"
          "                    Override every CU and GPU for this launch:\n"
          "                    on = ordinary checks, off = no wait checks,\n"
@@ -796,6 +835,7 @@ void print_usage() {
          "  --thread-budget-table\n"
          "                    Print engine / dispatch allocations without running a VM\n"
          "  --check-vfio-user Report whether this binary includes VFIO-user support\n"
+         "  --json            Emit machine-readable JSON where available\n"
          "  --version, -v     Print version and exit\n"
          "  --help, -h        Print this help and exit\n";
 }
@@ -805,9 +845,16 @@ void print_usage() {
 int main(int argc, char *argv[]) {
   std::signal(SIGPIPE, SIG_IGN);
 
-  if (argc > 1 && std::string_view(argv[1]) == "paths") {
-    bool json = false;
-    for (int i = 2; i < argc; ++i) {
+  bool json_output = false;
+  int command_arg = 1;
+  while (command_arg < argc && std::string_view(argv[command_arg]) == "--json") {
+    json_output = true;
+    ++command_arg;
+  }
+
+  if (command_arg < argc && std::string_view(argv[command_arg]) == "paths") {
+    bool json = json_output;
+    for (int i = command_arg + 1; i < argc; ++i) {
       std::string_view arg(argv[i]);
       if (arg == "--json") {
         json = true;
@@ -836,10 +883,11 @@ int main(int argc, char *argv[]) {
   int vfio_ready_fd = -1;
   bool daemon_mode = false;
   bool attach_mode = false;
+  bool in_process_mode = false;
   bool clear_env_vars = false;
   bool gdb = false;
   int separator_idx = -1;
-  for (int i = 1; i < argc; ++i) {
+  for (int i = command_arg; i < argc; ++i) {
     std::string_view arg(argv[i]);
     if (arg == "--") {
       separator_idx = i;
@@ -849,6 +897,39 @@ int main(int argc, char *argv[]) {
       config_path = argv[++i];
     } else if (arg == "--profile" && i + 1 < argc) {
       profile_name = argv[++i];
+    } else if (arg == "--exec-mode" || arg.starts_with("--exec-mode=")) {
+      std::string_view mode;
+      if (arg == "--exec-mode") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --exec-mode requires functional or clocked\n";
+          return 1;
+        }
+        mode = argv[++i];
+      } else {
+        mode = arg.substr(std::string_view("--exec-mode=").size());
+      }
+      if (mode != "functional" && mode != "clocked") {
+        std::cerr << "rocjitsu: --exec-mode requires functional or clocked\n";
+        return 1;
+      }
+      overrides.exec_mode = std::string(mode);
+    } else if (arg == "--gpus-per-node" || arg.starts_with("--gpus-per-node=")) {
+      std::string_view count_text;
+      if (arg == "--gpus-per-node") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --gpus-per-node requires a positive integer\n";
+          return 1;
+        }
+        count_text = argv[++i];
+      } else {
+        count_text = arg.substr(std::string_view("--gpus-per-node=").size());
+      }
+      std::optional<uint32_t> count = config::parse_uint32(count_text);
+      if (!count || *count == 0) {
+        std::cerr << "rocjitsu: --gpus-per-node requires a positive integer\n";
+        return 1;
+      }
+      overrides.gpus_per_node = *count;
     } else if (arg == "--env" || arg.starts_with("--env=")) {
       std::string_view assignment;
       if (arg == "--env") {
@@ -878,6 +959,25 @@ int main(int argc, char *argv[]) {
       }
       if (!apply_config_option(assignment, overrides))
         return 1;
+    } else if (arg == "--plugin" || arg.starts_with("--plugin=")) {
+      std::string_view plugin;
+      if (arg == "--plugin") {
+        if (i + 1 >= argc) {
+          std::cerr << "rocjitsu: --plugin requires a plugin name\n";
+          return 1;
+        }
+        plugin = argv[++i];
+      } else {
+        plugin = arg.substr(std::string_view("--plugin=").size());
+      }
+      plugin = trim_ascii_whitespace(plugin);
+      if (!is_valid_plugin_name(plugin)) {
+        std::cerr << std::format("rocjitsu: invalid plugin name '{}'; allowed: letters, digits, "
+                                 "'_', '-'\n",
+                                 plugin);
+        return 1;
+      }
+      overrides.plugins.emplace_back(plugin);
     } else if (arg == "--clear-env-vars") {
       clear_env_vars = true;
     } else if (arg == "--gdb") {
@@ -948,6 +1048,8 @@ int main(int argc, char *argv[]) {
       daemon_mode = true;
     } else if (arg == "--attach") {
       attach_mode = true;
+    } else if (arg == "--in-process") {
+      in_process_mode = true;
     } else if (arg == "--check-vfio-user") {
 #if defined(RJ_ENABLE_VFIO_USER)
       std::cout << "vfio-user support enabled\n";
@@ -963,6 +1065,9 @@ int main(int argc, char *argv[]) {
     } else if (arg == "--version" || arg == "-v") {
       std::cout << rj_get_version_string() << "\n";
       return 0;
+    } else if (!looks_like_option(arg)) {
+      separator_idx = i - 1;
+      break;
     } else {
       std::cerr << std::format("rocjitsu: unknown option: {}\n", arg);
       print_usage();
@@ -977,6 +1082,10 @@ int main(int argc, char *argv[]) {
 
   if (config_path && profile_name) {
     std::cerr << "rocjitsu: --config and --profile cannot be combined\n";
+    return 1;
+  }
+  if (in_process_mode && (daemon_mode || attach_mode)) {
+    std::cerr << "rocjitsu: --in-process cannot be combined with --daemon or --attach\n";
     return 1;
   }
 
@@ -1025,6 +1134,18 @@ int main(int argc, char *argv[]) {
   // so these overrides cannot change it.
   if (overrides.cpu_thread_budget && attach_mode) {
     std::cerr << "rocjitsu: --cpu-thread-budget cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.exec_mode && attach_mode) {
+    std::cerr << "rocjitsu: --exec-mode cannot be combined with --attach\n";
+    return 1;
+  }
+  if (overrides.gpus_per_node && attach_mode) {
+    std::cerr << "rocjitsu: --gpus-per-node cannot be combined with --attach\n";
+    return 1;
+  }
+  if (!overrides.plugins.empty() && attach_mode) {
+    std::cerr << "rocjitsu: --plugin cannot be combined with --attach\n";
     return 1;
   }
   if (overrides.wait_checking && attach_mode) {
@@ -1164,15 +1285,33 @@ int main(int argc, char *argv[]) {
   // A dbt_guest simulator_config is resolved relative to the config naming it, and
   // it, not this config, is what the host VM is built from. Moving overrides onto
   // a copy would therefore both break that path and miss the config they must reach.
-  if (dbt_guest_mode && overrides.cpu_thread_budget &&
-      !dbt_guest_config.host.simulator_config_path.empty()) {
+  const bool dbt_guest_delegates_to_simulator =
+      dbt_guest_mode && !dbt_guest_config.host.simulator_config_path.empty();
+  if (dbt_guest_delegates_to_simulator && overrides.exec_mode) {
+    std::cerr << std::format("rocjitsu: --exec-mode cannot be combined with a dbt_guest "
+                             "simulator_config; set exec_mode in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_delegates_to_simulator && overrides.gpus_per_node) {
+    std::cerr << std::format("rocjitsu: --gpus-per-node cannot be combined with a dbt_guest "
+                             "simulator_config; set vm.gpu.num_gpus in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_delegates_to_simulator && !overrides.plugins.empty()) {
+    std::cerr << std::format("rocjitsu: --plugin cannot be combined with a dbt_guest "
+                             "simulator_config; set plugins in {} instead\n",
+                             dbt_guest_config.host.simulator_config_path);
+    return 1;
+  }
+  if (dbt_guest_delegates_to_simulator && overrides.cpu_thread_budget) {
     std::cerr << std::format("rocjitsu: --cpu-thread-budget cannot be combined with a dbt_guest "
                              "simulator_config; set cpu_thread_budget in {} instead\n",
                              dbt_guest_config.host.simulator_config_path);
     return 1;
   }
-  if (dbt_guest_mode && overrides.wait_checking &&
-      !dbt_guest_config.host.simulator_config_path.empty()) {
+  if (dbt_guest_delegates_to_simulator && overrides.wait_checking) {
     std::cerr << std::format("rocjitsu: --wait-checking cannot be combined with a dbt_guest "
                              "simulator_config; set wait_checking in {} instead\n",
                              dbt_guest_config.host.simulator_config_path);
