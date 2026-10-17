@@ -293,7 +293,7 @@ void runOrderingTest(Shape shape, Alloc alloc, int iters, int slice) {
 
 ProcessIsolatedTestRunner::TestConfig makeConfig(const char* name, Shape shape, Alloc alloc, int iters, int slice = 0) {
   return ProcessIsolatedTestRunner::TestConfig(name, [=]() { runOrderingTest(shape, alloc, iters, slice); })
-    .withTimeout(std::chrono::seconds(300))
+    .withTimeout(std::chrono::seconds(60))
     .withNumGpus(kRanks);
 }
 
