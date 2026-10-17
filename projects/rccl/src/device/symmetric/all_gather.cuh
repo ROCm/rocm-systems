@@ -193,7 +193,9 @@ static __device__ void bcast(ncclSymkArgsHandler const& handler, int tn, int t, 
 #if NCCL_SYMK_ASYNC_TILE
   if NCCL_IF_CONSTEXPR (EnableTma) {
     if (alignment % 256 == 0) {
-      constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkAlign256BDeepUnrollPacks, UnrollPeers = 2;
+      // [RCCL] Drain the tile stores every 4 peers rather than 2: the tile is refilled only after
+      // all peers are written, so the wider batch keeps more stores in flight.
+      constexpr int BytePerPack = ncclSymkBytePerPack, UnrollPacks = ncclSymkAlign256BDeepUnrollPacks, UnrollPeers = 4;
       constexpr int BytePerChunk = ncclSymkAlign256BDeepBytePerChunk;
       uint32_t chunks = (nBytes - cursor) / BytePerChunk;
       chunks -= imodFast32(chunks, nBlocks, nBlocks_rcp32);
