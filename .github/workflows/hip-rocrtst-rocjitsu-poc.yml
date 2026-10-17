@@ -249,8 +249,6 @@ jobs:
     if: github.event_name == 'workflow_dispatch'
     runs-on: linux-gfx942-1gpu-ccs-csp-ossci-rocm
     timeout-minutes: 360
-    container:
-      image: ubuntu:24.04
     defaults:
       run:
         shell: bash
@@ -260,10 +258,16 @@ jobs:
       HIP_CTEST_LABEL: ${{ github.event.inputs.hip_ctest_label || '^smoke$' }}
       ROCRTST_FILTER: ${{ github.event.inputs.rocrtst_filter }}
     steps:
-      - name: Install tools
+      - name: Check host tools and gfx942 device access
         run: |
-          apt-get update
-          apt-get install -y --no-install-recommends ca-certificates cmake curl python3
+          set -euo pipefail
+          command -v curl
+          command -v ctest
+          command -v python3
+          test -e /dev/kfd
+          ls -l /dev/kfd /dev/dri/render*
+          rocminfo > "$RUNNER_TEMP/rocminfo.txt"
+          grep -m1 -E 'Name:.*gfx942|gfx942' "$RUNNER_TEMP/rocminfo.txt"
       - name: Install pinned gfx94X runtime and tests
         run: |
           set -euo pipefail
