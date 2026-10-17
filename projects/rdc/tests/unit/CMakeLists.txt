@@ -167,7 +167,12 @@ install(
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
-add_executable(${RDC_UNIT_TESTS} ${SRC_DIR}/test_smi_utils.cc)
+add_executable(
+    ${RDC_UNIT_TESTS}
+    ${SRC_DIR}/test_smi_utils.cc
+    ${SRC_DIR}/test_health_fields.cc
+    ${SRC_DIR}/test_health_watch.cc
+)
 target_include_directories(
     ${RDC_UNIT_TESTS}
     PRIVATE ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
@@ -191,21 +196,26 @@ install(
 )
 
 # rdc_status_tests: the statuses the health calls return for a GPU group that does
-# not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc and
-# RdcGroupSettingsImpl.cc instead of linking librdc, so it needs no GPU;
-# librdc_bootstrap provides the logger and rdc_status_string().
+# not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc,
+# RdcGroupSettingsImpl.cc and SmiUtils.cc instead of linking librdc, so it needs no
+# GPU; librdc_bootstrap provides the logger and rdc_status_string(). amd_smi is
+# linked for SmiUtils.cc but never initialized.
 add_executable(
     rdc_status_tests
     ${SRC_DIR}/test_status_codes.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcWatchTableImpl.cc
     ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
 )
 target_include_directories(
     rdc_status_tests
     PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
 )
-target_link_libraries(rdc_status_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
-set_target_properties(rdc_status_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+target_link_libraries(rdc_status_tests PRIVATE rdc_bootstrap amd_smi GTest::gtest_main pthread)
+set_target_properties(
+    rdc_status_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:${AMD_SMI_LIB_DIR}"
+)
 add_test(NAME rdc_status_tests COMMAND rdc_status_tests)
 install(
     TARGETS rdc_status_tests
