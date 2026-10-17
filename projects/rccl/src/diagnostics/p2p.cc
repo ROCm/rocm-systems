@@ -25,6 +25,13 @@
 #include <stdint.h>
 #include <string.h>
 
+// Runtime name in the free text of report lines; key=value tokens keep their NCCL names for log parsers.
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+#define NCCL_DIAG_P2P_RUNTIME "HIP"
+#else
+#define NCCL_DIAG_P2P_RUNTIME "CUDA"
+#endif
+
 enum ncclDiagP2pHandlePath {
   ncclDiagP2pHandleDirect = 1,
   ncclDiagP2pHandleLegacyIpc = 2,
@@ -137,7 +144,8 @@ static bool ncclDiagP2pSameProcess(struct ncclComm* comm, int srcRank, int dstRa
 static int ncclDiagP2pHandleType(struct ncclComm* comm, int srcRank, int dstRank) {
   if (ncclDiagP2pSameProcess(comm, srcRank, dstRank)) return ncclDiagP2pHandleDirect;
   if (!ncclCuMemEnable()) return ncclDiagP2pHandleLegacyIpc;
-#if CUDART_VERSION >= 11030
+  // HIP builds leave CUDART_VERSION undefined but provide both handle types.
+#if CUDART_VERSION >= 11030 || defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_POSIX_FILE_DESCRIPTOR) return ncclDiagP2pHandleCuMemPosixFd;
   if (ncclCuMemHandleType == CU_MEM_HANDLE_TYPE_FABRIC) return ncclDiagP2pHandleCuMemFabric;
 #endif
@@ -196,6 +204,23 @@ static bool ncclDiagP2pIsFabricEdge(const struct ncclDiagP2pEdgeInfo* edge) {
 }
 
 static const char* ncclDiagP2pEdgeAdvice(const struct ncclDiagP2pEdgeInfo* edge) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  // AMD GPUs have no IMEX fabric domain to check, so the advice follows the path alone, whatever the handle.
+  switch (edge->pathType) {
+  case PATH_NVL:
+  case PATH_NVB:
+    return "check the XGMI link status and link type with 'amd-smi xgmi -l' and 'amd-smi topology -t'";
+  case PATH_PIX:
+  case PATH_PXB:
+  case PATH_PHB:
+  case PATH_SYS:
+    return "check peer access and DMA support of the affected pair with 'amd-smi topology -a' and "
+           "'amd-smi topology -d', then check Linux bare-metal IOMMU mode and PCIe ACS settings";
+  default:
+    return "inspect the link type and peer access of the affected GPU pair with 'amd-smi topology -t' and "
+           "'amd-smi topology -a'";
+  }
+#else
   if (ncclDiagP2pIsFabricEdge(edge)) {
     return "check the IMEX domain with 'nvidia-imex-ctl -H -N' (nodes READY, connectivity C) and verify access to "
            "/dev/nvidia-caps-imex-channels/channel*";
@@ -215,12 +240,23 @@ static const char* ncclDiagP2pEdgeAdvice(const struct ncclDiagP2pEdgeInfo* edge)
   default:
     return "inspect the affected GPU pair with 'nvidia-smi topo -m' and the applicable 'nvidia-smi topo -p2p' check";
   }
+#endif
 }
 
 static const char* ncclDiagP2pImportAdvice(const struct ncclDiagP2pEdgeInfo* edge) {
   if (ncclDiagP2pIsFabricEdge(edge)) return ncclDiagP2pEdgeAdvice(edge);
 
   switch (edge->handleType) {
+#if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
+  case ncclDiagP2pHandleDirect:
+    return "inspect preceding HIP peer-access or virtual-memory mapping errors on the source rank";
+  case ncclDiagP2pHandleLegacyIpc:
+    return "check HIP IPC support, GPU visibility, and process or container isolation";
+  case ncclDiagP2pHandleCuMemPosixFd:
+    return "check HIP virtual-memory POSIX-FD sharing support and process or container permissions";
+  default:
+    return "check HIP virtual-memory handle support and permissions between the processes";
+#else
   case ncclDiagP2pHandleDirect:
     return "inspect preceding CUDA peer-access or virtual-memory mapping errors on the source rank";
   case ncclDiagP2pHandleLegacyIpc:
@@ -229,6 +265,7 @@ static const char* ncclDiagP2pImportAdvice(const struct ncclDiagP2pEdgeInfo* edg
     return "check cuMem POSIX-FD sharing support and process or container permissions";
   default:
     return "check CUDA virtual-memory handle support and permissions between the processes";
+#endif
   }
 }
 
@@ -303,7 +340,8 @@ static void ncclDiagP2pReport(struct ncclComm* comm, int srcRank, int dstRank, c
   }
 
   if (result->reason == ncclDiagP2pReasonLocalCuda) {
-    DIAG_PRINT("NCCL DIAG [INFO] p2p: local CUDA setup failed %s reason=%s; inspect preceding device, stream, "
+    DIAG_PRINT("NCCL DIAG [INFO] p2p: local " NCCL_DIAG_P2P_RUNTIME
+               " setup failed %s reason=%s; inspect preceding device, stream, "
                "allocation, or initialization errors on the source rank",
                edgeFields, ncclDiagP2pReasonName(result->reason));
     return;
@@ -336,7 +374,8 @@ static void ncclDiagP2pReport(struct ncclComm* comm, int srcRank, int dstRank, c
     return;
   }
 
-  DIAG_PRINT("NCCL DIAG [INFO] p2p: launch/check failed %s reason=%s; inspect preceding CUDA or NCCL warnings, then %s",
+  DIAG_PRINT("NCCL DIAG [INFO] p2p: launch/check failed %s reason=%s; inspect preceding " NCCL_DIAG_P2P_RUNTIME
+             " or NCCL warnings, then %s",
              edgeFields, ncclDiagP2pReasonName(result->reason), ncclDiagP2pEdgeAdvice(edge));
 }
 
@@ -748,8 +787,9 @@ setup_complete:
     break;
   }
   if (peerAccessChanged) {
-    DIAG_PRINT("NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=%d cudaDev=%d; "
-               "avoid concurrent CUDA use on this context until diagnostics completes",
+    DIAG_PRINT("NCCL DIAG [INFO] p2p: temporarily enabled context-wide " NCCL_DIAG_P2P_RUNTIME
+               " peer access rank=%d cudaDev=%d; avoid concurrent " NCCL_DIAG_P2P_RUNTIME
+               " use on this context until diagnostics completes",
                comm->rank, comm->cudaDev);
   }
 

@@ -123,10 +123,10 @@ This is expected and is not an error:
 
 .. code:: none
 
-   node01:4242 NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=3 cudaDev=3; avoid concurrent CUDA use on this context until diagnostics completes
+   node01:4242 NCCL DIAG [INFO] p2p: temporarily enabled context-wide HIP peer access rank=3 cudaDev=3; avoid concurrent HIP use on this context until diagnostics completes
 
-In this message, "CUDA" refers to the HIP runtime. Do not issue HIP work on
-these devices from other threads while the communicator is being initialized.
+Do not issue HIP work on these devices from other threads while the
+communicator is being initialized.
 
 The line is not printed when peer access between the devices was already
 enabled. A missing line does not mean that the check did not run.
@@ -187,7 +187,7 @@ suggested next step. The table lists the kinds of failure.
    * - ``destination buffer unavailable``
      - The destination rank could not allocate or export its test buffer.
        Look for earlier allocation or initialization errors on that rank.
-   * - ``local CUDA setup failed``
+   * - ``local HIP setup failed``
      - The source rank could not set up its device, stream, or buffers.
        Look for earlier HIP errors on that rank.
    * - ``peer-memory import failed``
@@ -247,19 +247,16 @@ This table explains the edge fields:
        PCIe path type such as ``PIX``, ``PXB``, ``PHB``, or ``SYS``.
    * - ``handle``
      - How the destination memory was shared: ``DIRECT`` (both GPUs in one
-       process), ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes), or
-       ``CUMEM_OTHER`` (HIP virtual-memory handle between processes, when cuMem
-       is enabled). The report format also defines ``CUMEM_POSIX_FD`` and
-       ``CUMEM_FABRIC``, but RCCL does not report them on AMD GPUs.
+       process), ``LEGACY_CUDA_IPC`` (HIP IPC handle between processes), or,
+       when cuMem is enabled, a HIP virtual-memory handle between processes:
+       ``CUMEM_POSIX_FD`` (file descriptor, the default), ``CUMEM_FABRIC``, or
+       ``CUMEM_OTHER``.
 
-.. note::
-
-   Known limitation: the suggested next step at the end of each line comes
-   from NCCL and still refers to NVIDIA tools and terms (``nvidia-smi``,
-   ``nvidia-imex-ctl``, NVLink, CUDA IPC). AMD-specific wording in the report
-   is tracked separately. Until then, use the commands in the following table.
-
-On AMD GPUs, use the following commands instead:
+The suggested next step at the end of each line depends on the line. A
+``peer-memory import failed`` line suggests a step for its ``handle``, except
+for ``handle=CUMEM_FABRIC``, which takes the step for the path. The other edge
+lines suggest a step for their ``path``. ``local HIP setup failed`` points to
+earlier HIP errors only. The following table summarizes the steps:
 
 .. list-table::
    :header-rows: 1
@@ -274,14 +271,23 @@ On AMD GPUs, use the following commands instead:
      - Check peer access and DMA support with ``amd-smi topology -a`` and
        ``amd-smi topology -d``, then check the IOMMU mode and the PCIe ACS
        settings of the host.
+   * - Any other ``path``, for example ``path=DIS``
+     - Check the link type and peer access between the two GPUs with
+       ``amd-smi topology -t`` and ``amd-smi topology -a``.
    * - ``handle=LEGACY_CUDA_IPC``
      - Check that all processes see the GPUs and can share IPC handles. See
        :ref:`diagnostics-containers` for more info.
-   * - ``handle=CUMEM_OTHER``
+   * - ``handle=CUMEM_POSIX_FD`` or ``handle=CUMEM_OTHER``
      - Check that HIP virtual memory is supported and that the processes can
        share memory handles. See :ref:`diagnostics-containers` for more info.
    * - ``handle=DIRECT``
      - Look for earlier peer-access errors on the source rank.
+
+For example, a failed edge between two GPUs connected by XGMI is reported as:
+
+.. code:: none
+
+   node01:4242 NCCL DIAG [INFO] p2p: destination buffer unavailable srcRank=0 srcCudaDev=0 srcNvmlDev=0 dstRank=1 dstCudaDev=1 dstNvmlDev=1 path=XGMI handle=LEGACY_CUDA_IPC reason=noDescriptor; inspect earlier allocation, export, or initialization errors on the destination rank, then check the XGMI link status and link type with 'amd-smi xgmi -l' and 'amd-smi topology -t'
 
 To see a record for every tested edge, including passing ones, add
 ``NCCL_DEBUG=INFO NCCL_DEBUG_SUBSYS=INIT``. Each passing edge produces

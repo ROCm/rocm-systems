@@ -11,12 +11,14 @@
 #include <gtest/gtest.h>
 
 #include <algorithm>
+#include <cctype>
 #include <cstdint>
 #include <cstdlib>
 #include <cstring>
 #include <functional>
 #include <iterator>
 #include <memory>
+#include <sstream>
 #include <string>
 #include <vector>
 
@@ -324,11 +326,12 @@ TEST_F(DiagP2pMicrotest, HandleType_CrossProcessWithoutCuMemIsLegacyIpc) {
   EXPECT_EQ(cuMem.calls, 1);
 }
 
-// ROCm gap: CUDART_VERSION unset hides POSIX_FD; a fix flips this pin.
-TEST_F(DiagP2pMicrotest, HandleType_CuMemPosixFdReportsOtherOnRocm) {
+TEST_F(DiagP2pMicrotest, HandleType_CuMemFollowsCuMemHandleType) {
   BuildComm(2, 0, {0, 1});
   ScopedHook cuMem(g_cuMemEnable, [] { return 1; });
   ncclCuMemHandleType = hipMemHandleTypePosixFileDescriptor;
+  EXPECT_EQ(ncclDiagP2pHandleType(comm_.get(), 0, 1), ncclDiagP2pHandleCuMemPosixFd);
+  ncclCuMemHandleType = hipMemHandleTypeNone;
   EXPECT_EQ(ncclDiagP2pHandleType(comm_.get(), 0, 1), ncclDiagP2pHandleCuMemOther);
 }
 
@@ -371,35 +374,82 @@ TEST_F(DiagP2pMicrotest, IsFabricEdge_FabricHandleOrNetPath) {
   EXPECT_FALSE(ncclDiagP2pIsFabricEdge(&legacyOverSys));
 }
 
-constexpr char kImexAdvice[] =
-    "check the IMEX domain with 'nvidia-imex-ctl -H -N' (nodes READY, connectivity C) and verify access to "
-    "/dev/nvidia-caps-imex-channels/channel*";
-constexpr char kNvlinkAdvice[] =
-    "check the single-node NVLink topology and peer-access state with 'nvidia-smi topo -m' and "
-    "'nvidia-smi topo -p2p n'";
+constexpr char kXgmiAdvice[] =
+    "check the XGMI link status and link type with 'amd-smi xgmi -l' and 'amd-smi topology -t'";
 constexpr char kPcieAdvice[] =
-    "check the affected pair with 'nvidia-smi topo -p2p p', then check Linux bare-metal IOMMU mode and PCIe "
-    "ACS settings";
+    "check peer access and DMA support of the affected pair with 'amd-smi topology -a' and 'amd-smi topology -d', "
+    "then check Linux bare-metal IOMMU mode and PCIe ACS settings";
 constexpr char kGenericAdvice[] =
-    "inspect the affected GPU pair with 'nvidia-smi topo -m' and the applicable 'nvidia-smi topo -p2p' check";
+    "inspect the link type and peer access of the affected GPU pair with 'amd-smi topology -t' and "
+    "'amd-smi topology -a'";
 
-TEST_F(DiagP2pMicrotest, EdgeAdvice_SelectsByFabricThenPathClass) {
+constexpr int kAllPaths[] = {PATH_LOC, PATH_NVL, PATH_NVB, PATH_C2C, PATH_PIX, PATH_PXB,
+                             PATH_P2C, PATH_PXN, PATH_PHB, PATH_SYS, PATH_NET, PATH_DIS};
+constexpr int kAllHandles[] = {0,
+                               ncclDiagP2pHandleDirect,
+                               ncclDiagP2pHandleLegacyIpc,
+                               ncclDiagP2pHandleCuMemPosixFd,
+                               ncclDiagP2pHandleCuMemFabric,
+                               ncclDiagP2pHandleCuMemOther};
+
+// Report free text without its key=value tokens, which keep their NCCL names (handle=LEGACY_CUDA_IPC) for log
+// parsers; starts at the report prefix, so the "<host>:<pid> " before it is not checked either.
+std::string DiagFreeText(const std::string& line) {
+  const size_t prefix = line.find("NCCL DIAG ");
+  std::istringstream words(prefix == std::string::npos ? line : line.substr(prefix));
+  std::string word, text;
+  while (words >> word) {
+    if (word.find('=') == std::string::npos) {
+      text += word + " ";
+    }
+  }
+  return text;
+}
+
+void ExpectNoNvidiaTerms(const std::string& text, const std::string& context) {
+  std::string lower = text;
+  std::transform(lower.begin(), lower.end(), lower.begin(), [](unsigned char c) { return std::tolower(c); });
+  for (const char* term : {"nvidia", "nvlink", "imex", "cuda", "cumem"}) {
+    EXPECT_EQ(lower.find(term), std::string::npos) << "'" << term << "' in " << context << ": " << text;
+  }
+}
+
+TEST_F(DiagP2pMicrotest, DiagFreeText_DropsKeyValueTokensAndHostPrefix) {
+  EXPECT_EQ(DiagFreeText("cuda-ci:42 NCCL DIAG [INFO] p2p: write mismatch srcRank=0 handle=LEGACY_CUDA_IPC; x"),
+            "NCCL DIAG [INFO] p2p: write mismatch x ");
+}
+
+// AMD GPUs have no IMEX fabric domain, so a fabric handle or a NET path does not change the advice.
+TEST_F(DiagP2pMicrotest, EdgeAdvice_SelectsByPathClassWhateverTheHandle) {
   const struct {
     int path;
     int handle;
     const char* advice;
   } kCases[] = {
-      {PATH_NVL, ncclDiagP2pHandleCuMemFabric, kImexAdvice}, {PATH_NET, ncclDiagP2pHandleDirect, kImexAdvice},
-      {PATH_NVL, ncclDiagP2pHandleDirect, kNvlinkAdvice},    {PATH_NVB, ncclDiagP2pHandleDirect, kNvlinkAdvice},
+      {PATH_NVL, ncclDiagP2pHandleCuMemFabric, kXgmiAdvice}, {PATH_NET, ncclDiagP2pHandleDirect, kGenericAdvice},
+      {PATH_NVL, ncclDiagP2pHandleDirect, kXgmiAdvice},      {PATH_NVB, ncclDiagP2pHandleDirect, kXgmiAdvice},
       {PATH_PIX, ncclDiagP2pHandleDirect, kPcieAdvice},      {PATH_PXB, ncclDiagP2pHandleDirect, kPcieAdvice},
       {PATH_PHB, ncclDiagP2pHandleDirect, kPcieAdvice},      {PATH_SYS, ncclDiagP2pHandleDirect, kPcieAdvice},
       {PATH_LOC, ncclDiagP2pHandleDirect, kGenericAdvice},   {PATH_C2C, ncclDiagP2pHandleDirect, kGenericAdvice},
       {PATH_P2C, ncclDiagP2pHandleDirect, kGenericAdvice},   {PATH_PXN, ncclDiagP2pHandleDirect, kGenericAdvice},
-      {PATH_DIS, ncclDiagP2pHandleDirect, kGenericAdvice},
+      {PATH_DIS, ncclDiagP2pHandleDirect, kGenericAdvice},   {PATH_PXB, ncclDiagP2pHandleCuMemFabric, kPcieAdvice},
+      {PATH_NET, ncclDiagP2pHandleCuMemFabric, kGenericAdvice},
   };
   for (const auto& c : kCases) {
     ncclDiagP2pEdgeInfo edge = Edge(c.path, c.handle);
     EXPECT_STREQ(ncclDiagP2pEdgeAdvice(&edge), c.advice) << "path " << c.path << " handle " << c.handle;
+  }
+}
+
+TEST_F(DiagP2pMicrotest, EdgeAdvice_NamesAmdSmiForEveryPathAndHandle) {
+  for (int path : kAllPaths) {
+    for (int handle : kAllHandles) {
+      ncclDiagP2pEdgeInfo edge = Edge(path, handle);
+      const std::string advice = ncclDiagP2pEdgeAdvice(&edge);
+      const std::string context = "path " + std::to_string(path) + " handle " + std::to_string(handle);
+      ExpectNoNvidiaTerms(advice, context);
+      EXPECT_NE(advice.find("amd-smi"), std::string::npos) << context << ": " << advice;
+    }
   }
 }
 
@@ -409,20 +459,30 @@ TEST_F(DiagP2pMicrotest, ImportAdvice_FabricDefersToEdgeAdviceElseByHandle) {
     int handle;
     const char* advice;
   } kCases[] = {
-      {PATH_NET, ncclDiagP2pHandleLegacyIpc, kImexAdvice},
-      {PATH_NVL, ncclDiagP2pHandleCuMemFabric, kImexAdvice},
+      {PATH_NET, ncclDiagP2pHandleLegacyIpc, kGenericAdvice},
+      {PATH_NVL, ncclDiagP2pHandleCuMemFabric, kXgmiAdvice},
       {PATH_NVL, ncclDiagP2pHandleDirect,
-       "inspect preceding CUDA peer-access or virtual-memory mapping errors on the source rank"},
+       "inspect preceding HIP peer-access or virtual-memory mapping errors on the source rank"},
       {PATH_NVL, ncclDiagP2pHandleLegacyIpc,
-       "check CUDA IPC support, GPU visibility, and process or container isolation"},
+       "check HIP IPC support, GPU visibility, and process or container isolation"},
       {PATH_NVL, ncclDiagP2pHandleCuMemPosixFd,
-       "check cuMem POSIX-FD sharing support and process or container permissions"},
+       "check HIP virtual-memory POSIX-FD sharing support and process or container permissions"},
       {PATH_NVL, ncclDiagP2pHandleCuMemOther,
-       "check CUDA virtual-memory handle support and permissions between the processes"},
+       "check HIP virtual-memory handle support and permissions between the processes"},
   };
   for (const auto& c : kCases) {
     ncclDiagP2pEdgeInfo edge = Edge(c.path, c.handle);
     EXPECT_STREQ(ncclDiagP2pImportAdvice(&edge), c.advice) << "path " << c.path << " handle " << c.handle;
+  }
+}
+
+TEST_F(DiagP2pMicrotest, ImportAdvice_NamesNoNvidiaTermsForAnyPathOrHandle) {
+  for (int path : kAllPaths) {
+    for (int handle : kAllHandles) {
+      ncclDiagP2pEdgeInfo edge = Edge(path, handle);
+      ExpectNoNvidiaTerms(ncclDiagP2pImportAdvice(&edge),
+                          "path " + std::to_string(path) + " handle " + std::to_string(handle));
+    }
   }
 }
 
@@ -568,12 +628,12 @@ TEST_F(DiagP2pMicrotest, Report_EachReasonHasItsOwnLine) {
            " reason=noDescriptor; inspect earlier allocation, export, or initialization errors on the destination "
            "rank, then " + kPcieAdvice},
       {ncclDiagP2pReasonLocalCuda,
-       "NCCL DIAG [INFO] p2p: local CUDA setup failed " + fields +
+       "NCCL DIAG [INFO] p2p: local HIP setup failed " + fields +
            " reason=localCuda; inspect preceding device, stream, allocation, or initialization errors on the source "
            "rank"},
       {ncclDiagP2pReasonImport,
        "NCCL DIAG [INFO] p2p: peer-memory import failed " + fields +
-           " reason=import; check CUDA IPC support, GPU visibility, and process or container isolation"},
+           " reason=import; check HIP IPC support, GPU visibility, and process or container isolation"},
       {ncclDiagP2pReasonWriteMismatch,
        "NCCL DIAG [INFO] p2p: write mismatch " + fields +
            " expected=0x4000000200000001 got=0x0000000000000abc verify=0x0000000000000def; " + kPcieAdvice},
@@ -583,15 +643,32 @@ TEST_F(DiagP2pMicrotest, Report_EachReasonHasItsOwnLine) {
       {ncclDiagP2pReasonTopo, "NCCL DIAG [INFO] p2p: topology check failed " + fields +
                                   " reason=topo; inspect preceding topology records, then " + kPcieAdvice},
       {ncclDiagP2pReasonWriteLaunch, "NCCL DIAG [INFO] p2p: launch/check failed " + fields +
-                                         " reason=writeLaunch; inspect preceding CUDA or NCCL warnings, then " +
+                                         " reason=writeLaunch; inspect preceding HIP or NCCL warnings, then " +
                                          kPcieAdvice},
       {ncclDiagP2pReasonReadLaunch, "NCCL DIAG [INFO] p2p: launch/check failed " + fields +
-                                        " reason=readLaunch; inspect preceding CUDA or NCCL warnings, then " +
+                                        " reason=readLaunch; inspect preceding HIP or NCCL warnings, then " +
                                         kPcieAdvice},
   };
   for (const auto& c : kCases) {
     const ncclDiagP2pEdgeResult result = {1, c.reason, 0xabc, 0xdef, 0x123};
     EXPECT_EQ(CaptureStdout([&] { ncclDiagP2pReport(comm_.get(), 4, 1, &edge, &result); }), DiagLine(c.line));
+  }
+}
+
+TEST_F(DiagP2pMicrotest, Report_FreeTextNamesNoNvidiaTermsForAnyReasonPathOrHandle) {
+  BuildComm(6, 4, {4, 1});
+  for (int reason = ncclDiagP2pReasonNoDescriptor; reason <= ncclDiagP2pReasonLocalCuda; reason++) {
+    for (int path : kAllPaths) {
+      for (int handle : kAllHandles) {
+        const ncclDiagP2pEdgeInfo edge = Edge(path, handle);
+        const ncclDiagP2pEdgeResult result = {1, reason, 0xabc, 0xdef, 0x123};
+        const std::string line = CaptureStdout([&] { ncclDiagP2pReport(comm_.get(), 4, 1, &edge, &result); });
+        const std::string context =
+            "reason " + std::to_string(reason) + " path " + std::to_string(path) + " handle " + std::to_string(handle);
+        ASSERT_NE(line.find("NCCL DIAG [INFO] p2p: "), std::string::npos) << context << ": " << line;
+        ExpectNoNvidiaTerms(DiagFreeText(line), context);
+      }
+    }
   }
 }
 
@@ -609,7 +686,7 @@ TEST_F(DiagP2pMicrotest, ReportGroupFailures_ReportsTestedFailuresBySlotRanksInO
   results[1 * kN + 0] = {0, ncclDiagP2pReasonIndirect, 0, 0, 0};
   results[2 * kN + 1] = {1, ncclDiagP2pReasonTopo, 0, 0, 0};
   const std::string importLine = std::string("NCCL DIAG [INFO] p2p: peer-memory import failed ") + kFields41 +
-                                 " reason=import; check CUDA IPC support, GPU visibility, and process or container "
+                                 " reason=import; check HIP IPC support, GPU visibility, and process or container "
                                  "isolation";
   const std::string topoLine = std::string(
                                    "NCCL DIAG [INFO] p2p: topology check failed srcRank=5 srcCudaDev=5 srcNvmlDev=15 "
@@ -2015,7 +2092,7 @@ TEST_F(DiagP2pMicrotest, Run_CuMemSameProcessPeer_FailsImportAndCleanupOnRocm) {
             DiagP2pPartialLine(11, 12) +
                 DiagLine("NCCL DIAG [INFO] p2p: peer-memory import failed srcRank=0 srcCudaDev=0 srcNvmlDev=10 "
                          "dstRank=3 dstCudaDev=3 dstNvmlDev=13 path=DIS handle=DIRECT reason=import; inspect "
-                         "preceding CUDA peer-access or virtual-memory mapping errors on the source rank") +
+                         "preceding HIP peer-access or virtual-memory mapping errors on the source rank") +
                 DiagP2pCleanupLine(0, ncclInternalError));
 }
 
@@ -2036,8 +2113,8 @@ TEST_F(DiagP2pMicrotest, Run_LegacySameProcessPeer_EnablesPeerAccessThenDisables
   EXPECT_EQ(disabled, std::vector<int>{6});
   EXPECT_EQ(run.ipcClose.calls, run.n - 2);
   EXPECT_EQ(run.out,
-            DiagLine("NCCL DIAG [INFO] p2p: temporarily enabled context-wide CUDA peer access rank=0 cudaDev=5; "
-                     "avoid concurrent CUDA use on this context until diagnostics completes") +
+            DiagLine("NCCL DIAG [INFO] p2p: temporarily enabled context-wide HIP peer access rank=0 cudaDev=5; "
+                     "avoid concurrent HIP use on this context until diagnostics completes") +
                 DiagP2pOkLine(12));
 }
 
