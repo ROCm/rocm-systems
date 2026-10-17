@@ -604,6 +604,9 @@ class Device : public NullDevice {
   //! Allow access for peer device
   bool deviceAllowAccess(void* dst) const;
 
+  //! Latches a GPU error if PAL reports the device as faulted or lost
+  void CheckExecutionState() const;
+
   //! Returns a handle to the capture manager (RGP or UberTrace)
   ICaptureMgr* captureMgr() const { return captureMgr_; }
 

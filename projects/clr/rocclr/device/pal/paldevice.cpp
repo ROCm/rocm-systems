@@ -2408,6 +2408,37 @@ bool Device::deviceAllowAccess(void* ptr) const {
   return true;
 }
 
+// ================================================================================================
+void Device::CheckExecutionState() const {
+  // The error is sticky, so once one is latched there is nothing left to ask.
+  if (amd::Device::IsGPUInError()) {
+    return;
+  }
+
+  Pal::PageFaultStatus pageFault = {};
+  const Pal::Result result = iDev()->CheckExecutionState(&pageFault);
+
+  // ErrorUnavailable means the query isn't supported for this client and
+  // ErrorInvalidValue that PAL couldn't read the reset state, neither of which
+  // says the device is bad.
+  if (!Util::IsErrorResult(result) || (result == Pal::Result::ErrorUnavailable) ||
+      (result == Pal::Result::ErrorInvalidValue)) {
+    return;
+  }
+
+  if (result == Pal::Result::ErrorGpuPageFaultDetected) {
+    LogPrintfError("GPU page fault detected! %s at address 0x%llx",
+                   pageFault.flags.readFault ? "read" : "write",
+                   static_cast<unsigned long long>(pageFault.faultAddress));
+  } else {
+    LogPrintfError("PAL reports the device unusable! result:%d", result);
+  }
+  // A trap faults instead of being caught when the KMD trap handler is missing, so
+  // it can't be told apart from a bad access here. Both keep reporting the error
+  // the failed submit in VirtualGPU::Queue::isDone() already reported.
+  gpu_error_.store(CL_INVALID_OPERATION, std::memory_order_relaxed);
+}
+
 void* Device::svmAlloc(amd::Context& context, size_t size, size_t alignment, cl_svm_mem_flags flags,
                        void* svmPtr) const {
   constexpr bool kForceAllocation = true;
