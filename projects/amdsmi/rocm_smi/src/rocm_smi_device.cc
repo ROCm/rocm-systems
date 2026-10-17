@@ -1197,9 +1197,21 @@ int Device::readDevInfoBinary(DevInfoTypes type, std::size_t b_size, void* p_bin
     auto result = EIO;
     const auto* cause = "the node came up short of the size it declared";
     if (read_failed) {
-      // Suspended or resetting answers EBUSY, runtime-inactive EPERM: pass
-      // it on, so each keeps reaching the caller as the state it is.
-      result = (read_errno != 0) ? read_errno : EIO;
+      // Pass through only errnos naming a device state (suspend, reset, runtime PM, access,
+      // signal); report the rest as EIO, since e.g. EINVAL would map to INVALID_ARGS.
+      switch (read_errno) {
+        // SMU_RESP_CMD_UNKNOWN: the firmware lacks the metrics command. ENOTSUP is the same value.
+        case EOPNOTSUPP:
+        case EBUSY:
+        case EPERM:
+        case EACCES:
+        case EINTR:
+          result = read_errno;
+          break;
+        default:
+          result = EIO;
+          break;
+      }
       cause = "the driver refused the read";
     } else if (bytes_read == 0) {
       // A driver with no metrics callback publishes an empty node: nothing

@@ -39,7 +39,7 @@ void PrintApuMetrics(const amdsmi_gpu_metrics_t& smu) {
 
   // The APU auxiliary block is a single unified structure across metric
   // versions: any field a given device/version does not populate reads back as
-  // the not-applicable sentinel (the maximum value of the field's type). Print
+  // the N/A value (the maximum value of the field's type). Print
   // every field unconditionally so callers never branch on the metric version.
   const auto& apu = *smu.apu_metrics;
 

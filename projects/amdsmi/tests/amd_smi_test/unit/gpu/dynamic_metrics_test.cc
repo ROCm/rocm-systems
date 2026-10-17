@@ -3,17 +3,22 @@
 
 #include <amd_smi_test/test_base.h>
 #include <gtest/gtest.h>
-#include <unistd.h>
 
+#include <algorithm>
 #include <atomic>
+#include <cerrno>
 #include <cstddef>
 #include <cstdint>
+#include <cstdio>
+#include <cstdlib>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <limits>
 #include <memory>
 #include <string>
+#include <system_error>
 #include <tuple>
 #include <utility>
 #include <vector>
@@ -385,7 +390,7 @@ constexpr std::size_t kApuV24Size = offsetof(ApuMetrics, m_average_gfx_current) 
 // Filler that differs per byte offset, so every field reads back a value only
 // its own bytes could have produced: a copy that lands in the wrong member is
 // then visible, which a uniform fill would hide. The range stays inside
-// [0x10, 0xEF], clear of both 0x00 and the 0xFF not-applicable sentinel, so a
+// [0x10, 0xEF], clear of both 0x00 and the 0xFF N/A value, so a
 // populated field can never be mistaken for one the revision omits.
 constexpr uint8_t FillByte(std::size_t offset) {
   return static_cast<uint8_t>(0x10 + (offset % 0xE0));
@@ -401,17 +406,12 @@ constexpr T FilledValue(std::size_t offset) {
   return value;
 }
 
-// Fake sysfs tree at <tmp>/<name>/device/gpu_metrics. Binary reads are cached
-// per (device path, read size), so each case needs its own directory. The
-// process id and a counter keep that true for concurrent runs and for repeats
-// of the same case, which would otherwise share a path and its cache entry.
+// Fake sysfs tree under a mkdtemp() directory. Binary reads are cached per
+// (device path, read size), so the counter keeps repeats of a case off a path
+// an earlier instance used.
 class FakeMetricsDevice {
  public:
-  explicit FakeMetricsDevice(const std::string& name)
-      : root_(std::filesystem::temp_directory_path() /
-              ("amdsmi_apu_metrics_" + name + "_" + std::to_string(::getpid()) + "_" +
-               std::to_string(NextInstanceId()))) {
-    std::filesystem::remove_all(root_);
+  explicit FakeMetricsDevice(const std::string& name) : root_(MakeRoot(name)) {
     std::filesystem::create_directories(root_ / "device");
   }
   ~FakeMetricsDevice() { std::filesystem::remove_all(root_); }
@@ -423,6 +423,18 @@ class FakeMetricsDevice {
     Write(root_ / "device" / "gpu_metrics", blob);
   }
 
+  // A directory is the only way to get fopen() to succeed and the following
+  // fread() to fail with the stream's error flag set while returning zero bytes:
+  // the same shape as an empty node apart from that flag, which is what tells the
+  // two apart. Permissions are not a substitute -- they fail the open instead and
+  // would move the test onto a different branch.
+  void ReplaceMetricsFileWithDirectory() const {
+    const auto node = root_ / "device" / "gpu_metrics";
+    std::error_code ignored;
+    std::filesystem::remove(node, ignored);
+    std::filesystem::create_directories(node);
+  }
+
   void WritePartitionMetrics(const std::vector<uint8_t>& blob) const {
     std::filesystem::create_directories(root_ / "device" / "xcp");
     Write(root_ / "device" / "xcp" / "xcp_metrics", blob);
@@ -431,9 +443,16 @@ class FakeMetricsDevice {
   std::string path() const { return root_.string(); }
 
  private:
-  static unsigned NextInstanceId() {
+  static std::filesystem::path MakeRoot(const std::string& name) {
     static std::atomic<unsigned> counter{0};
-    return counter.fetch_add(1);
+    std::string root =
+        (std::filesystem::temp_directory_path() /
+         ("amdsmi_apu_metrics_" + name + "_" + std::to_string(counter++) + "_XXXXXX"))
+            .string();
+    if (::mkdtemp(root.data()) == nullptr) {
+      throw std::system_error(errno, std::generic_category(), "mkdtemp " + root);
+    }
+    return root;
   }
 
   static void Write(const std::filesystem::path& file, const std::vector<uint8_t>& blob) {
@@ -462,15 +481,25 @@ auto BuildMetricsBlob(std::size_t table_size, uint8_t format_revision, uint8_t c
   return blob;
 }
 
+// Always give the file at least as many bytes as its header declares. A blob that
+// stopped at the struct size would turn a read that ignored the declared size into
+// a harmless short read instead of the overrun such a read really is.
 auto BuildApuMetricsBlob(uint8_t content_revision, uint16_t declared_size) -> std::vector<uint8_t> {
-  return BuildMetricsBlob(sizeof(ApuMetrics), 2, content_revision, declared_size);
+  return BuildMetricsBlob(std::max(sizeof(ApuMetrics), std::size_t{declared_size}), 2,
+                          content_revision, declared_size);
+}
+
+// Overwrite one little-endian uint16_t field that the filler already populated.
+void WriteLe16(std::vector<uint8_t>& blob, std::size_t offset, uint16_t value) {
+  blob[offset] = static_cast<uint8_t>(value & 0xFFU);
+  blob[offset + 1] = static_cast<uint8_t>(value >> 8);
 }
 
 }  // namespace
 
 // A device may report an older, shorter APU revision than the newest layout we
-// model, or declare a table longer than it. Reading must pre-fill with the
-// not-applicable sentinel, take only the bytes the header declares, and stay
+// model, or declare a table longer than it. Reading must pre-fill with
+// N/A (max value), take only the bytes the header declares, and stay
 // inside our own buffer. Exercise that end to end against a fake sysfs node.
 TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
   PRINT_VERBOSITY();
@@ -482,15 +511,19 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
     bool has_indep_throttle_status;  // added in v2.2
     bool has_average_temperature;    // added in v2.3
     bool has_average_voltage;        // added in v2.4
+    bool activity_in_hundredths;     // v2.1 and v2.2 only
   };
+  static_assert(sizeof(ApuMetrics) + 4096 <= UINT16_MAX,
+                "the oversized case must still fit the uint16_t the header declares");
   const ReadCase cases[] = {
-      {"v2_1", 1, kApuV21Size, false, false, false},
-      {"v2_2", 2, kApuV22Size, true, false, false},
-      {"v2_3", 3, kApuV23Size, true, true, false},
-      {"v2_4", 4, kApuV24Size, true, true, true},
-      // Header claims more than the layout we model: the read must clamp to our
-      // buffer rather than run past it.
-      {"v2_4_oversized", 4, sizeof(ApuMetrics) + 4096, true, true, true},
+      {"v2_1", 1, kApuV21Size, false, false, false, true},
+      {"v2_2", 2, kApuV22Size, true, false, false, true},
+      {"v2_3", 3, kApuV23Size, true, true, false, false},
+      {"v2_4", 4, kApuV24Size, true, true, true, false},
+      // Header claims more than the layout we model, and the file really is that
+      // long (see the blob size below), so a read that trusted the header would
+      // write past our buffer instead of simply coming up short.
+      {"v2_4_header_exceeds_struct", 4, sizeof(ApuMetrics) + 4096, true, true, true, false},
   };
 
   for (const auto& test_case : cases) {
@@ -512,8 +545,11 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
 
     // Present in every v2.x revision.
     EXPECT_EQ(apu.temperature_gfx, FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_gfx)));
+    // Scaled to whole percent only on v2.1/v2.2; the fill never holds the N/A value.
+    const auto filled_activity =
+        FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfx_activity));
     EXPECT_EQ(apu.average_gfx_activity,
-              FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_gfx_activity)));
+              test_case.activity_in_hundredths ? (filled_activity + 50) / 100 : filled_activity);
     EXPECT_EQ(apu.average_socket_power,
               FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_socket_power)));
     EXPECT_EQ(apu.average_gfxclk_frequency,
@@ -534,6 +570,207 @@ TEST(GpuUnit, APUMetricsShortRevisionReadsTrailingFieldsAsNotApplicable) {
               test_case.has_average_voltage
                   ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_cpu_voltage))
                   : UINT16_MAX);
+  }
+}
+
+// v2.1 and v2.2 tables report GFX and MM activity in hundredths of a percent, so the
+// public fields have to be scaled to whole percent, in the APU sub-struct as well as
+// at the top level. The expected values are worked out by hand instead of
+// being recomputed from the production expression, so changing that expression
+// cannot quietly carry the expectation along with it.
+TEST(GpuUnit, ApuActivityReachesThePublicFieldsAsWholePercent) {
+  PRINT_VERBOSITY();
+
+  // Both fields must fall inside the revision the blob declares. If one did not,
+  // the read would leave it at N/A and the checks below would pass
+  // without the conversion ever running.
+  static_assert(offsetof(ApuMetrics, m_average_gfx_activity) + sizeof(uint16_t) <= kApuV21Size,
+                "v2.1 must carry average_gfx_activity for this test to mean anything");
+  static_assert(offsetof(ApuMetrics, m_average_mm_activity) + sizeof(uint16_t) <= kApuV21Size,
+                "v2.1 must carry average_mm_activity for this test to mean anything");
+
+  struct ActivityCase {
+    const char* name;
+    uint16_t hundredths;
+    uint16_t whole_percent;
+  };
+  // 45.67 rules out plain truncation, which would answer 45; 12.34 rules out
+  // rounding away from zero, which would answer 13; 12.50 is the exact half that
+  // separates rounding half up from rounding half to even.
+  const ActivityCase cases[] = {
+      {"45.67 %", 4567, 46},
+      {"12.34 %", 1234, 12},
+      {"12.50 %", 1250, 13},
+  };
+  // Both revisions that report hundredths, so the last one scaled is pinned too.
+  const std::pair<uint8_t, std::size_t> revisions[] = {{1, kApuV21Size}, {2, kApuV22Size}};
+
+  for (const auto& [content_revision, declared_size] : revisions) {
+    for (const auto& test_case : cases) {
+      SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision)
+                                      << " GFX activity " << test_case.name);
+
+      // Give MM a different reading, so a conversion that crossed the two fields
+      // over would not go unnoticed.
+      constexpr uint16_t kMmHundredths = 999;  // 9.99 %
+      auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+      WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), test_case.hundredths);
+      WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), kMmHundredths);
+
+      FakeMetricsDevice fake_device("apu_activity_scaled");
+      fake_device.WriteMetrics(blob);
+
+      amd::smi::Device device(fake_device.path(), nullptr);
+      ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+      const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+      ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+      ASSERT_NE(metrics.apu_metrics, nullptr);
+
+      EXPECT_EQ(metrics.average_gfx_activity, test_case.whole_percent);
+      EXPECT_EQ(metrics.average_mm_activity, uint16_t{10});
+
+      // Python and the CLI print the APU sub-struct with a % sign too.
+      EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, test_case.whole_percent);
+      EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{10});
+    }
+  }
+}
+
+// Van Gogh's current firmware interface publishes v2.3/v2.4 with activity already in
+// whole percent, so scaling it would turn 48 % GFX busy into 0.
+TEST(GpuUnit, ApuV23AndV24ActivityPassesThroughAsWholePercent) {
+  PRINT_VERBOSITY();
+
+  const std::pair<uint8_t, std::size_t> revisions[] = {{3, kApuV23Size}, {4, kApuV24Size}};
+  for (const auto& [content_revision, declared_size] : revisions) {
+    SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision));
+    auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+    WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), 45);
+    WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), 100);
+
+    FakeMetricsDevice fake_device("apu_activity_whole");
+    fake_device.WriteMetrics(blob);
+
+    amd::smi::Device device(fake_device.path(), nullptr);
+    ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+    const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+    ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+    ASSERT_NE(metrics.apu_metrics, nullptr);
+
+    EXPECT_EQ(metrics.average_gfx_activity, uint16_t{45});
+    EXPECT_EQ(metrics.average_mm_activity, uint16_t{100});
+    EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, uint16_t{45});
+    EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{100});
+  }
+}
+
+// N/A (max value) is not a reading, so scaling it would turn a field
+// the device never answered for into a plausible-looking 655 %. The other field
+// carries a real reading in the same table: without it this test would also pass
+// if the read had populated nothing at all, since the destination is pre-filled
+// with the very N/A value being checked for.
+TEST(GpuUnit, NotApplicableApuActivityIsStillReportedAsNotApplicable) {
+  PRINT_VERBOSITY();
+
+  constexpr uint16_t kMmHundredths = 4567;  // 45.67 %
+  auto blob = BuildApuMetricsBlob(1, static_cast<uint16_t>(kApuV21Size));
+  WriteLe16(blob, offsetof(ApuMetrics, m_average_gfx_activity), UINT16_MAX);
+  WriteLe16(blob, offsetof(ApuMetrics, m_average_mm_activity), kMmHundredths);
+
+  FakeMetricsDevice fake_device("apu_activity_not_applicable");
+  fake_device.WriteMetrics(blob);
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+  const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+  ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+  ASSERT_NE(metrics.apu_metrics, nullptr);
+
+  EXPECT_EQ(metrics.average_gfx_activity, uint16_t{UINT16_MAX});
+  EXPECT_EQ(metrics.average_mm_activity, uint16_t{46})
+      << "a live reading beside the N/A value proves the read populated these fields";
+  EXPECT_EQ(metrics.apu_metrics->average_gfx_activity, uint16_t{UINT16_MAX});
+  EXPECT_EQ(metrics.apu_metrics->average_mm_activity, uint16_t{46});
+}
+
+// A 6-core Phoenix at idle, from a real v2.1 table: firmware slots 0 and 4 have no core and
+// read 0, while present cores 1, 3, 5, 6 and 7 really draw 0 mW. v2.4 adds average core
+// temperatures, which must follow the slot too.
+TEST(GpuUnit, ApuV2CoreSlotWithZeroClockIsNotApplicable) {
+  PRINT_VERBOSITY();
+
+  const uint16_t temperature[] = {0, 2012, 2012, 2025, 0, 2037, 2125, 2100};
+  const uint16_t power[] = {0, 0, 736, 0, 0, 0, 0, 0};
+  const uint16_t clock[] = {0, 1400, 1400, 1400, 0, 1400, 1400, 1400};
+  const std::pair<uint8_t, std::size_t> revisions[] = {{1, kApuV21Size}, {4, kApuV24Size}};
+
+  for (const auto& [content_revision, declared_size] : revisions) {
+    SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision));
+    auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+    for (std::size_t i = 0; i < std::size(clock); ++i) {
+      const auto slot = i * sizeof(uint16_t);
+      WriteLe16(blob, offsetof(ApuMetrics, m_temperature_core) + slot, temperature[i]);
+      WriteLe16(blob, offsetof(ApuMetrics, m_average_core_power) + slot, power[i]);
+      WriteLe16(blob, offsetof(ApuMetrics, m_current_coreclk) + slot, clock[i]);
+    }
+
+    FakeMetricsDevice fake_device("apu_core_slot");
+    fake_device.WriteMetrics(blob);
+
+    amd::smi::Device device(fake_device.path(), nullptr);
+    ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+    const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+    ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+    ASSERT_NE(metrics.apu_metrics, nullptr);
+    const auto& apu = *metrics.apu_metrics;
+
+    for (std::size_t i = 0; i < std::size(clock); ++i) {
+      const bool present = clock[i] != 0;
+      const uint16_t average_temperature =
+          content_revision >= 3
+              ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_temperature_core) +
+                                      i * sizeof(uint16_t))
+              : UINT16_MAX;
+      EXPECT_EQ(apu.temperature_core[i], present ? temperature[i] : UINT16_MAX) << "core " << i;
+      EXPECT_EQ(apu.average_core_power[i], present ? power[i] : UINT16_MAX) << "core " << i;
+      EXPECT_EQ(apu.current_coreclk[i], present ? clock[i] : UINT16_MAX) << "core " << i;
+      EXPECT_EQ(apu.average_temperature_core[i], present ? average_temperature : UINT16_MAX)
+          << "core " << i;
+    }
+  }
+}
+
+// The renoir driver copies both L3 slots as-is, so a part with a single L3 can send a zeroed
+// second slot.
+TEST(GpuUnit, ApuV2L3SlotWithZeroClockIsNotApplicable) {
+  PRINT_VERBOSITY();
+
+  const std::pair<uint8_t, std::size_t> revisions[] = {{2, kApuV22Size}, {4, kApuV24Size}};
+  for (const auto& [content_revision, declared_size] : revisions) {
+    SCOPED_TRACE(testing::Message() << "v2." << static_cast<int>(content_revision));
+    auto blob = BuildApuMetricsBlob(content_revision, static_cast<uint16_t>(declared_size));
+    WriteLe16(blob, offsetof(ApuMetrics, m_temperature_l3) + sizeof(uint16_t), 0);
+    WriteLe16(blob, offsetof(ApuMetrics, m_current_l3clk) + sizeof(uint16_t), 0);
+
+    FakeMetricsDevice fake_device("apu_l3_slot");
+    fake_device.WriteMetrics(blob);
+
+    amd::smi::Device device(fake_device.path(), nullptr);
+    ASSERT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_SUCCESS);
+    const auto [status_code, metrics] = device.dev_copy_internal_to_external_metrics();
+    ASSERT_EQ(status_code, rsmi_status_t::RSMI_STATUS_SUCCESS);
+    ASSERT_NE(metrics.apu_metrics, nullptr);
+    const auto& apu = *metrics.apu_metrics;
+
+    EXPECT_EQ(apu.temperature_l3[0], FilledValue<uint16_t>(offsetof(ApuMetrics, m_temperature_l3)));
+    EXPECT_EQ(apu.current_l3clk[0], FilledValue<uint16_t>(offsetof(ApuMetrics, m_current_l3clk)));
+    EXPECT_EQ(apu.average_temperature_l3[0],
+              content_revision >= 3
+                  ? FilledValue<uint16_t>(offsetof(ApuMetrics, m_average_temperature_l3))
+                  : UINT16_MAX);
+    EXPECT_EQ(apu.temperature_l3[1], UINT16_MAX);
+    EXPECT_EQ(apu.current_l3clk[1], UINT16_MAX);
+    EXPECT_EQ(apu.average_temperature_l3[1], UINT16_MAX);
   }
 }
 
@@ -585,7 +822,7 @@ TEST(GpuUnit, UnsupportedMetricRevisionReportsNotSupported) {
 // v3.0 is a different layout, not a v2.x prefix, and it reaches the caller
 // through the same unified object. Read a real v3.0 blob end to end so the
 // classification is backed by an actual read: v3.0 fields must carry the
-// device data and the v2.4-only fields must stay not-applicable.
+// device data and the v2.x-only fields must stay not-applicable.
 TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   PRINT_VERBOSITY();
 
@@ -611,7 +848,7 @@ TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   EXPECT_EQ(apu.temperature_skin,
             FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_temperature_skin)));
   EXPECT_EQ(apu.average_vcn_activity,
-            FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_vcn_activity)));
+            (FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_vcn_activity)) + 50) / 100);
   EXPECT_EQ(apu.average_ipu_power,
             FilledValue<uint16_t>(offsetof(ApuMetricsV30, m_average_ipu_power)));
   EXPECT_EQ(apu.average_apu_power,
@@ -623,7 +860,7 @@ TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   EXPECT_EQ(apu.time_filter_alphavalue,
             FilledValue<uint32_t>(offsetof(ApuMetricsV30, m_time_filter_alphavalue)));
 
-  // v2.4-only fields have no v3.0 source, so they stay not-applicable.
+  // v2.x-only fields have no v3.0 source, so they stay not-applicable.
   EXPECT_EQ(apu.average_mm_activity, UINT16_MAX);
   EXPECT_EQ(apu.temperature_l3[0], UINT16_MAX);
   EXPECT_EQ(apu.fan_pwm, UINT16_MAX);
@@ -631,15 +868,15 @@ TEST(GpuUnit, APUMetricsV30ReadsThroughTheSameUnifiedObject) {
   EXPECT_EQ(apu.indep_throttle_status, UINT64_MAX);
 
   // PLX temperature is read out of gpu_metrics, and an APU has no such sensor,
-  // so the reading stays at the sentinel that makes the query unsupported.
+  // so the reading stays N/A, which makes the query unsupported.
   EXPECT_EQ(metrics.temperature_vrsoc, UINT16_MAX);
 }
 
 // PLX temperature is sourced from gpu_metrics, so a device without that sensor
-// reports the not-applicable sentinel rather than an error. Reading it back as
+// reports N/A (max value) rather than an error. Reading it back as
 // a temperature would hand the caller a bogus 65535 C, so the query has to come
 // back unsupported instead.
-TEST(GpuUnit, PlxTemperatureSentinelReportsNotSupported) {
+TEST(GpuUnit, PlxTemperatureNotApplicableReportsNotSupported) {
   PRINT_VERBOSITY();
 
   amdsmi_gpu_metrics_t metric_info{};
@@ -698,6 +935,43 @@ TEST(GpuUnit, EmptyMetricsNodeReportsNotSupported) {
 
   amd::smi::Device device(fake_device.path(), nullptr);
   EXPECT_EQ(device.setup_gpu_metrics_reading(), rsmi_status_t::RSMI_STATUS_NOT_SUPPORTED);
+}
+
+// A node the driver refuses to read is not a node that is absent. Reporting the
+// refusal as NOT_SUPPORTED would hide a transient device state -- a reset, a
+// suspend -- behind an answer that sounds permanent, and the refusal returns zero
+// bytes just as an empty node does, so only the stream's error flag separates them.
+TEST(GpuUnit, DriverRefusedMetricsReadIsNotReportedAsUnsupported) {
+  PRINT_VERBOSITY();
+
+  FakeMetricsDevice fake_device("refused_metrics_read");
+  fake_device.ReplaceMetricsFileWithDirectory();
+
+  // The branch under test is only reached when the open succeeds and the read
+  // then fails. Check that the directory still behaves that way before drawing
+  // any conclusion from the status below, so a platform where it stopped doing
+  // so reports that rather than passing for the wrong reason.
+  {
+    const std::string node = fake_device.path() + "/device/gpu_metrics";
+    FILE* stream = std::fopen(node.c_str(), "rb");
+    ASSERT_NE(stream, nullptr) << "opening a directory must still succeed here";
+    char byte = 0;
+    errno = 0;
+    const std::size_t read_count = std::fread(&byte, 1, sizeof(byte), stream);
+    const bool failed = std::ferror(stream) != 0;
+    std::fclose(stream);
+    ASSERT_EQ(read_count, 0u);
+    ASSERT_TRUE(failed) << "reading a directory must still set the stream's error flag";
+  }
+
+  amd::smi::Device device(fake_device.path(), nullptr);
+  const auto status_code = device.setup_gpu_metrics_reading();
+
+  // Pinned rather than merely "not NOT_SUPPORTED": the errno this path reports is
+  // public behaviour that callers switch on, so changing it should have to be
+  // deliberate.
+  EXPECT_EQ(status_code, rsmi_status_t::RSMI_STATUS_UNEXPECTED_SIZE)
+      << "a read the driver refused must not read back as a device without metrics";
 }
 
 // The early return that keeps an unsupported revision from reaching the copy
@@ -764,7 +1038,7 @@ TEST(GpuUnit, PublicPartitionMetricsEntryReportsUnsupportedRevision) {
 
 // The PLX reading comes out of gpu_metrics, so drive it from a device whose
 // table really was read rather than from a hand-built struct: an APU leaves the
-// sensor at the sentinel, which is what makes the query unsupported.
+// sensor at N/A, which is what makes the query unsupported.
 TEST(GpuUnit, PlxTemperatureFromAFakeApuDeviceIsNotSupported) {
   PRINT_VERBOSITY();
 
