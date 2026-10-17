@@ -9,6 +9,18 @@ import unittest
 import common.common as common
 from common.common import amdsmi
 
+# Writing a 0 boostlimit / power cap is the invalid-input probe the original
+# tests used. Firmware may clamp-and-succeed or reject with INVAL, and a platform
+# without HSMP answers NOT_SUPPORTED/NO_HSMP_MSG_SUP; accept that spread (same
+# tolerance the old check_ret path had) so the write is meaningful without
+# widening to anything.
+INVALID_SET_ACCEPT = [
+    amdsmi.AmdSmiStatus.SUCCESS,
+    amdsmi.AmdSmiStatus.INVAL,
+    amdsmi.AmdSmiStatus.NOT_SUPPORTED,
+    amdsmi.AmdSmiStatus.NO_HSMP_MSG_SUP,
+]
+
 
 class TestCpuPower(unittest.TestCase):
     @classmethod
@@ -23,9 +35,7 @@ class TestCpuPower(unittest.TestCase):
             pass
 
     def setUp(self):
-        self.raise_exception = None
         self.common.amdsmi_smart_init()
-        self.common.processors = amdsmi.amdsmi_get_processor_handles()
 
     def tearDown(self):
         amdsmi.amdsmi_shut_down()
@@ -33,56 +43,33 @@ class TestCpuPower(unittest.TestCase):
     def test_cpu_core_boostlimit(self):
         self.common.print_func_name("")
 
-        try:
-            ret = amdsmi.amdsmi_get_cpu_handles()
-            cpu_processors = ret["processor_handles"]
-        except amdsmi.AmdSmiLibraryException:
-            cpu_processors = []
-        if not cpu_processors:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.common.print(msg)
-            self.skipTest(msg)
+        def positive(handles, failures):
+            with self.common.status_sweep():
+                for i, cpu in enumerate(handles):
+                    # Write an invalid boostlimit (0); firmware may reject or clamp.
+                    inval_msg = f"\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit=0):"
+                    with self.common.expect_status(inval_msg, INVALID_SET_ACCEPT):
+                        amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, 0)
+                    # Read the current boostlimit so it can be restored.
+                    orig = {}
+                    get_msg = f"\t### amdsmi_get_cpu_core_boostlimit(cpu={i}):"
+                    with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
+                        orig["val"] = amdsmi.amdsmi_get_cpu_core_boostlimit(cpu)
+                    if "val" not in orig:
+                        continue  # getter did not succeed; nothing to restore
+                    set_msg = (
+                        f"\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit={orig['val']}):"
+                    )
+                    with self.common.expect_status(set_msg, self.common.CPU_CORRECT_ACCEPT):
+                        amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, orig["val"])
 
-        for i, cpu in enumerate(cpu_processors):
-            found_error = False
-
-            # Set invalid boostlimit
-            boost_limit = 0
-            msg = f"\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit={boost_limit}):"
-            try:
-                ret = amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, boost_limit)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.FAIL):
-                    self.raise_exception = e
-
-            # Get current boostlimit
-            msg = f"\t### amdsmi_get_cpu_core_boostlimit(cpu={i}):"
-            try:
-                boost_limit_orig = amdsmi.amdsmi_get_cpu_core_boostlimit(cpu)
-                self.common.print(msg, boost_limit_orig)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-                found_error = True
-
-            if found_error:
-                continue
-
-            # Set boostlimit back
-            msg = f"\t### amdsmi_set_cpu_core_boostlimit(cpu={i}, boost_limit={boost_limit_orig}):"
-            try:
-                ret = amdsmi.amdsmi_set_cpu_core_boostlimit(cpu, boost_limit_orig)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-
-        if self.raise_exception:
-            raise self.raise_exception
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_set_cpu_core_boostlimit,
+            "amdsmi_set_cpu_core_boostlimit",
+            handle_kind="core",
+            arg_sets=[("boost_limit=0", (0,))],
+            positive=positive,
+        )
         return
 
     # integration
@@ -90,150 +77,91 @@ class TestCpuPower(unittest.TestCase):
     def test_cpu_socket_power_cap(self):
         self.common.print_func_name("")
 
-        try:
-            ret = amdsmi.amdsmi_get_cpu_handles()
-            cpu_processors = ret["processor_handles"]
-        except amdsmi.AmdSmiLibraryException:
-            cpu_processors = []
-        if not cpu_processors:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.common.print(msg)
-            self.skipTest(msg)
+        def positive(handles, failures):
+            with self.common.status_sweep():
+                for i, cpu in enumerate(handles):
+                    # Write an invalid power cap (0); firmware may reject or clamp.
+                    inval_msg = f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap=0):"
+                    with self.common.expect_status(inval_msg, INVALID_SET_ACCEPT):
+                        amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, 0)
+                    # Read the current cap and the max so the cap can be exercised
+                    # and then restored.
+                    vals = {}
+                    get_msg = f"\t### amdsmi_get_cpu_socket_power_cap(cpu={i}):"
+                    with self.common.expect_status(get_msg, self.common.CPU_CORRECT_ACCEPT):
+                        vals["orig"] = amdsmi.amdsmi_get_cpu_socket_power_cap(cpu)
+                    max_msg = f"\t### amdsmi_get_cpu_socket_power_cap_max(cpu={i}):"
+                    with self.common.expect_status(max_msg, self.common.CPU_CORRECT_ACCEPT):
+                        vals["max"] = amdsmi.amdsmi_get_cpu_socket_power_cap_max(cpu)
+                    if "orig" not in vals or "max" not in vals:
+                        continue  # a getter did not succeed; nothing to set/restore
+                    set_max_msg = (
+                        f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={vals['max']}):"
+                    )
+                    with self.common.expect_status(set_max_msg, self.common.CPU_CORRECT_ACCEPT):
+                        amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, vals["max"])
+                    restore_msg = (
+                        f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={vals['orig']}):"
+                    )
+                    with self.common.expect_status(restore_msg, self.common.CPU_CORRECT_ACCEPT):
+                        amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, vals["orig"])
 
-        for i, cpu in enumerate(cpu_processors):
-            found_error = False
-
-            # Set cpu socket power to invalid number
-            power_cap = 0
-            msg = f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={power_cap}):"
-            try:
-                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, power_cap)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.FAIL):
-                    self.raise_exception = e
-
-            # Get cpu socket power
-            msg = f"\t### amdsmi_get_cpu_socket_power_cap(cpu={i}):"
-            try:
-                power_cap_orig = amdsmi.amdsmi_get_cpu_socket_power_cap(cpu)
-                self.common.print(msg, power_cap_orig)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-                    found_error = True
-
-            # Get cpu socket power to max
-            msg = f"\t### amdsmi_get_cpu_socket_power_cap_max(cpu={i}):"
-            try:
-                power_cap_max = amdsmi.amdsmi_get_cpu_socket_power_cap_max(cpu)
-                self.common.print(msg, power_cap_max)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-                found_error = True
-
-            if found_error:
-                continue
-
-            # Set cpu socket power to max
-            msg = f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={power_cap_max}):"
-            try:
-                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, power_cap_max)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-
-            # Set cpu socket power back
-            msg = f"\t### amdsmi_set_cpu_socket_power_cap(cpu={i}, power_cap={power_cap_orig}):"
-            try:
-                ret = amdsmi.amdsmi_set_cpu_socket_power_cap(cpu, power_cap_orig)
-                self.common.print(msg, ret)
-                self.common.check_ret("", "", self.common.PASS)
-            except (amdsmi.AmdSmiLibraryException, amdsmi.AmdSmiParameterException) as e:
-                if self.common.check_ret(msg, e, self.common.PASS):
-                    self.raise_exception = e
-
-        if self.raise_exception:
-            raise self.raise_exception
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_set_cpu_socket_power_cap,
+            "amdsmi_set_cpu_socket_power_cap",
+            arg_sets=[("power_cap=0", (0,))],
+            positive=positive,
+        )
         return
 
     # integration
 
     def test_cpu_socket_boostlimit(self):
         self.common.print_func_name("")
-
-        try:
-            ret = amdsmi.amdsmi_get_cpu_handles()
-            cpu_processors = ret["processor_handles"]
-        except amdsmi.AmdSmiLibraryException:
-            cpu_processors = []
-        if not cpu_processors:
-            msg = "\tNo CPU processors found; skipping CPU-specific test"
-            self.common.print(msg)
-            self.skipTest(msg)
-
-        # TODO boost_limit = 0
-        boost_limit = 0
-        for i, cpu in enumerate(cpu_processors):
-            msg = f"cpu({i}):"
-            msg1 = f"{msg} boost_limit({boost_limit}):"
-            try:
-                amdsmi.amdsmi_set_cpu_socket_boostlimit(cpu, boost_limit)
-                self.common.print(msg1, "")
-            except amdsmi.AmdSmiLibraryException as e:
-                if self.common.check_ret(msg1, e, self.common.PASS):
-                    self.raise_exception = e
-        if self.raise_exception:
-            raise self.raise_exception
+        # TODO boost_limit = 0: the original test only writes a 0 boostlimit; it
+        # is preserved here as the positive portion (one set per socket).
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_set_cpu_socket_boostlimit,
+            "amdsmi_set_cpu_socket_boostlimit",
+            arg_sets=[("boost_limit=0", (0,))],
+            correct_accept=INVALID_SET_ACCEPT,
+        )
         return
 
     def test_get_cpu_pwr_svi_telemetry_all_rails(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_pwr_svi_telemetry_all_rails=amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_get_cpu_pwr_svi_telemetry_all_rails,
+            "amdsmi_get_cpu_pwr_svi_telemetry_all_rails",
         )
         return
 
     def test_get_cpu_socket_power(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(amdsmi_get_cpu_socket_power=amdsmi.amdsmi_get_cpu_socket_power)
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_get_cpu_socket_power, "amdsmi_get_cpu_socket_power"
+        )
         return
 
     def test_get_cpu_socket_power_cap(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_socket_power_cap=amdsmi.amdsmi_get_cpu_socket_power_cap
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_get_cpu_socket_power_cap, "amdsmi_get_cpu_socket_power_cap"
         )
         return
 
     def test_get_cpu_socket_power_cap_max(self):
         self.common.print_func_name("")
-        self.common.Test_API_Per_GPU(
-            amdsmi_get_cpu_socket_power_cap_max=amdsmi.amdsmi_get_cpu_socket_power_cap_max
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_get_cpu_socket_power_cap_max, "amdsmi_get_cpu_socket_power_cap_max"
         )
         return
 
     def test_set_cpu_pwr_efficiency_mode(self):
         self.common.print_func_name("")
-        modes = [0, 1, 2]
-        for i, gpu in enumerate(self.common.processors):
-            self.common.print_device_header(i)
-            for mode in modes:
-                msg = f"\t### amdsmi_set_cpu_pwr_efficiency_mode(gpu={i}, mode={mode}):"
-                try:
-                    amdsmi.amdsmi_set_cpu_pwr_efficiency_mode(gpu, mode)
-                    self.common.print(msg, "")
-                    self.common.check_ret("", "", self.common.PASS)
-                except amdsmi.AmdSmiLibraryException as e:
-                    if self.common.check_ret(msg, e, self.common.PASS):
-                        self.raise_exception = e
-                self.common.print("")
-        if self.raise_exception:
-            raise self.raise_exception
+        self.common.run_cpu_api_contract(
+            amdsmi.amdsmi_set_cpu_pwr_efficiency_mode,
+            "amdsmi_set_cpu_pwr_efficiency_mode",
+            arg_sets=[(f"mode={mode}", (mode,)) for mode in (0, 1, 2)],
+        )
         return
