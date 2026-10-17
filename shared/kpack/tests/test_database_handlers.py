@@ -670,6 +670,34 @@ class TestMIOpenHandler:
         result = handler.detect(file_path, prefix_root)
         assert result == "gfx900"
 
+    def test_detect_windows_install_layout(self, handler, prefix_root):
+        """Windows installs MIOpen.dll and CK DLLs in bin/ and DBs in share/miopen/db/."""
+        for relative, expected_arch in (
+            ("share/miopen/db/gfx110136.HIP.fdb.txt", "gfx1101"),
+            ("share/miopen/db/gfx110136.db.txt", "gfx1101"),
+            ("share/miopen/db/gfx115128.HIP.fdb.txt", "gfx1151"),
+            ("share/miopen/db/gfx1030.kdb", "gfx1030"),
+            ("share/miopen/db/gfx908.tn.model", "gfx908"),
+            ("bin/MIOpenCKGroupedConv_gfx1101.dll", "gfx1101"),
+            ("bin/MIOpen.dll", None),
+            ("share/miopen/db/lgbm_rank.bin", None),
+            ("share/miopen/db/lgbm_model_meta.json", None),
+        ):
+            file_path = prefix_root / relative
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            assert handler.detect(file_path, prefix_root) == expected_arch, relative
+
+    def test_reject_top_level_bin_databases(self, handler, prefix_root):
+        """DB-named files directly under bin/ are not MIOpen system DBs."""
+        for filename in ("gfx110136.HIP.fdb.txt", "gfx110136.db.txt", "gfx1030.kdb"):
+            file_path = prefix_root / "bin" / filename
+            file_path.parent.mkdir(parents=True, exist_ok=True)
+            file_path.touch()
+
+            assert handler.detect(file_path, prefix_root) is None, filename
+
     def test_detect_various_architectures(self, handler, prefix_root):
         test_cases = [
             ("gfx908.tn.model", "gfx908"),

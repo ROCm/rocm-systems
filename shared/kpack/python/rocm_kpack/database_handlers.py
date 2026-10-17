@@ -248,8 +248,8 @@ class AotritonHandler(DatabaseHandler):
 class MIOpenHandler(DatabaseHandler):
     """Handler for MIOpen performance database and model files.
 
-    MIOpen installs files to share/miopen/db/ with filenames prefixed by
-    the target architecture:
+    MIOpen installs files to share/miopen/db/ on Linux and Windows, with
+    filenames prefixed by the target architecture:
         gfx942130.db.txt          (gfx942 + 130 CUs)
         gfx90878.HIP.fdb.txt      (gfx908 + 78 CUs)
         gfx1030_36.db.txt         (gfx1030 + 36 CUs, underscore separator)
