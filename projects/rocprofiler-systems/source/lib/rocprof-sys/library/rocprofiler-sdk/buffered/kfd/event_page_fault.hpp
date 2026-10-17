@@ -92,8 +92,11 @@ on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record
     }
 
     auto& metadata_registry = Externals::get_metadata_registry();
-    metadata_registry.add_thread_info(typename Externals::thread_info_t{
-        Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}" });
+    metadata_registry.ensure_thread(tid, [&] {
+        return typename Externals::thread_info_t{
+            Externals::get_ppid(), Externals::get_pid(), tid, 0, 0, "{}"
+        };
+    });
 
     auto const agent_label = [](const auto* agent_ptr) {
         if(!agent_ptr)
@@ -106,7 +109,7 @@ on_kfd_event_page_fault(typename SdkBackend::kfd_event_page_fault_record* record
     };
 
     auto const track_name = fmt::format("KFD Event Page Fault [{}]", agent_label(agent));
-    metadata_registry.add_track(typename Externals::track_t{ track_name, tid, "{}" });
+    metadata_registry.ensure_track(track_name, tid);
 
     constexpr auto k_empty_args = "";
 

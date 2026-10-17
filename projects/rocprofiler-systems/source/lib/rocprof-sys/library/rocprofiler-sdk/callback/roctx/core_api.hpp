@@ -96,9 +96,12 @@ emit_region(std::string_view name, const region_span<SdkBackend>& timespan,
     constexpr const char* k_empty_json = "{}";
 
     constexpr std::uint32_t k_unknown_time = 0;
-    Externals::get_metadata_registry().add_thread_info(
-        { Externals::get_ppid(), Externals::get_pid(), record.thread_id, k_unknown_time,
-          k_unknown_time, k_empty_json });
+    Externals::get_metadata_registry().ensure_thread(record.thread_id, [&record] {
+        return typename Externals::thread_info_t{
+            Externals::get_ppid(), Externals::get_pid(), record.thread_id,
+            k_unknown_time,        k_unknown_time,       k_empty_json
+        };
+    });
 
     Externals::get_buffer_storage().store(typename Externals::region_sample{
         record.thread_id, name, record.correlation_id.internal,
