@@ -1514,7 +1514,31 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
       if (enable_in_place)
         TESTCHECK(BenchTime(args, type, op, root, 1));
       if(output_algo_proto_channels) {
-        if(args->collTest->getAlgoProtoChannels) {
+        if (deviceImpl != 0) {
+          // -D != 0 launches the test's own device kernel (e.g. GIN-SDMA) and
+          // never calls the host collective, so the getCollImplInfo/
+          // getAlgoProtoChannels reporters below describe a dispatch that did
+          // not run. When the collective wires getDeviceImplInfo it fills both
+          // columns for this message size: algo = T-<movement pattern> (T-DIRECT/
+          // T-SAG/T-RING; the "T-" prefix marks a rccl-Test device kernel and the
+          // -D value is in the command line), proto = transport (GIN/LSA/LL/...).
+          // The neutral default (T-DEV / DEV) stands for collectives without a
+          // tiered device kernel.
+          char devAlgo[16];
+          snprintf(devAlgo, sizeof(devAlgo), "%s", "T-DEV");
+          char devProto[16];
+          snprintf(devProto, sizeof(devProto), "DEV");
+          if (args->collTest->getDeviceImplInfo) {
+            const int nRanks = args->nProcs * args->nThreads * args->nGpus;
+            int lsaSize = nRanks;
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,0)
+            if (args->devComms) lsaSize = (int)args->devComms[0].lsaSize;
+#endif
+            TESTCHECK(args->collTest->getDeviceImplInfo(deviceImpl, args->nbytes / wordSize(type), type,
+                                                        nRanks, lsaSize, devAlgo, devProto));
+          }
+          PRINT("  %8s  %8s  %10s", devAlgo, devProto, "N/A");
+        } else if(args->collTest->getAlgoProtoChannels) {
           int algo, proto, nchannels;
           const char* algoName = NULL;
           const char* protoName = NULL;
@@ -1546,12 +1570,12 @@ testResult_t TimeTest(struct threadArgs* args, ncclDataType_t type, const char* 
           if (rcclTestsGetAlgoName && rcclTestsGetProtocolName) {
             NCCLCHECK(rcclTestsGetAlgoName(algo, &algoName));
             NCCLCHECK(rcclTestsGetProtocolName(proto, &protoName));
-            PRINT("%8s  %8s  %10d", algoName, protoName, nchannels);
+            PRINT("  %8s  %8s  %10d", algoName, protoName, nchannels);
           } else {
-            PRINT("%8s  %8s  %10s", "N/A", "N/A", "N/A");
+            PRINT("  %8s  %8s  %10s", "N/A", "N/A", "N/A");
           }
         } else {
-          PRINT("%8s  %8s  %10s","N/A", "N/A", "N/A");
+          PRINT("  %8s  %8s  %10s","N/A", "N/A", "N/A");
         }
       }
       writeBenchmarkLineTerminator(iters, "");

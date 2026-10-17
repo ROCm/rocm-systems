@@ -1354,6 +1354,53 @@ testResult_t BroadcastDeviceTime(struct threadArgs* args, ncclDataType_t type, n
 }
 #endif
 
+#if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
+// Tier report for -D 3. Re-resolves the SAME env thresholds BroadcastRunColl uses
+// (the shared statics there are function-local to RunColl, so they are re-derived
+// here; both read the same env/defaults, so the report tracks the dispatch) and
+// mirrors its precedence:
+//   large tier first -- RING (direct LSA stores) / SAG (gin.put scatter+allgather),
+//   else the hybrid kernel's own LL / LSA-direct / flat-GIN (DIRECT) choice.
+// algo names the movement pattern (T-RING / T-SAG / T-DIRECT; "T-" marks a
+// rccl-Test device kernel), proto the transport (LSA / GIN / LL).
+testResult_t BroadcastGetDeviceImplInfo(int /*deviceImpl*/, size_t count, ncclDataType_t type,
+    int nRanks, int lsaSize, char* algoOut, char* protoOut) {
+  static const size_t bcastThr = testResolveSdmaThreshold("NCCL_GIN_ANVIL_SDMA_THRESHOLD_BROADCAST", gin_sdma::kBroadcastSdmaThresholdDefault);
+  static const size_t bcastSagMin = []() {
+    size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_SCATTER_AG_MIN_BYTES");
+    return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastScatterAgMinDefault : v;
+  }();
+  static const size_t bcastRingMin = []() {
+    size_t v = testParseSdmaThresholdEnv("NCCL_GIN_ANVIL_BCAST_RING_MIN_BYTES");
+    return (v == TEST_SDMA_THRESHOLD_UNSET) ? gin_sdma::kBroadcastRingMinDefault : v;
+  }();
+  const size_t msgBytes = count * wordSize(type);
+  const gin_sdma::BcastLargeTier largeTier =
+      gin_sdma::bcastLargeTier(msgBytes, count, nRanks, lsaSize, bcastRingMin, bcastSagMin);
+  if (largeTier == gin_sdma::BcastLargeTier::Ring) {
+    snprintf(algoOut, 16, "%s", "T-RING");
+    snprintf(protoOut, 16, "%s", "LSA");
+  } else if (largeTier == gin_sdma::BcastLargeTier::ScatterAG) {
+    snprintf(algoOut, 16, "%s", "T-SAG");
+    snprintf(protoOut, 16, "%s", "GIN");
+  } else {
+    snprintf(algoOut, 16, "%s", "T-DIRECT");
+    switch (gin_sdma::bcastKernelTier(msgBytes, bcastThr, g_bcastLLHandle.nSlots, g_bcastLLMaxBytes)) {
+      case gin_sdma::BcastTier::LL:        snprintf(protoOut, 16, "%s", "LL");  break;
+      case gin_sdma::BcastTier::LSADirect: snprintf(protoOut, 16, "%s", "LSA"); break;
+      case gin_sdma::BcastTier::Flat:      snprintf(protoOut, 16, "%s", "GIN"); break;
+    }
+  }
+  return testSuccess;
+}
+#else
+testResult_t BroadcastGetDeviceImplInfo(int, size_t, ncclDataType_t, int, int, char* algoOut, char* protoOut) {
+  snprintf(algoOut, 16, "%s", "T-DIRECT");
+  snprintf(protoOut, 16, "%s", "GIN");
+  return testSuccess;
+}
+#endif
+
 struct testColl broadcastTest = {
   "Broadcast",
   BroadcastGetCollByteCount,
@@ -1363,7 +1410,8 @@ struct testColl broadcastTest = {
   BroadcastGetAlgoProtoChannels,
   NULL,
   NULL,
-  BroadcastDeviceTime
+  BroadcastDeviceTime,
+  BroadcastGetDeviceImplInfo
 };
 
 void BroadcastGetBuffSize(size_t *sendcount, size_t *recvcount, size_t count, int nranks) {
