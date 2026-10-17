@@ -52,6 +52,7 @@ void Recorder::record(rcclCall_t, int, int, ncclUniqueId*, ncclConfig_t*, ncclCo
 
 ncclResult_t Recorder::record(rcclCall_t, int) { return g_recorderResult; }            // group op
 ncclResult_t Recorder::record(rcclCall_t, ncclComm_t) { return g_recorderResult; }     // comm destroy
+ncclResult_t Recorder::record(rcclCall_t, ncclComm_t, void*, void*, size_t) { return g_recorderResult; }  // UBR
 ncclResult_t Recorder::record(rcclCall_t call, int rank, int nranks, ncclUniqueId* id, ncclComm_t,
                               int) {  // init
   ++g_recorderIdCalls;

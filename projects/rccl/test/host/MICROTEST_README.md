@@ -62,6 +62,12 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
 - **`rccl-UnitTestsMicro`** — one unit per test TU:
   - `p2p.cc` (`P2P_CC_PATH`, from `p2p-test.cc`); suites `P2pMicrotest.*`,
     `FreshRegistration*`.
+  - `register/register.cc`, `register/coll_reg.cc` and `register/sendrecv_reg.cc`
+    (`REGISTER_CC_PATH`, `COLL_REG_CC_PATH`, `SENDRECV_REG_CC_PATH`, from `register-test.cc`,
+    `coll-reg-test.cc` and `sendrecv-reg-test.cc`, helpers in `RegisterScene.h`); suites
+    `Register*`. Their calls into `p2p.cc`, compiled here for real, go through
+    `fakes/transport_p2p_reg_seam.h`, and `register-test.cc` renames the unit's definitions of the
+    three names `nccl_fakes.cc` keeps as seams for `p2p-test.cc`.
   - `rma/rma_proxy_progress.cc` (`RMA_PROXY_PROGRESS_CC_PATH`, from
     `rma-proxy-progress-test.cc`); suite `RmaProxyProgressTest.*`.
   - `plugin/gin.cc` (`GIN_CC_PATH`, from `gin-plugin-init-test.cc`); suite
@@ -492,6 +498,7 @@ symbol.
 | `src/mem_manager.cc` | `fakes/mem_manager_fakes.cc` |
 | `src/misc/amdsmi_wrap.cc` | `fakes/amdsmi_fakes.cc` |
 | `src/misc/api_trace.cc` (`NCCL_API` dispatch) | `fakes/api_trace_fakes.cc` |
+| `src/misc/argcheck.cc` | `fakes/argcheck_fakes.cc` |
 | `src/misc/ibvwrap.cc` (PD / MR registration wrappers) | `fakes/ibvwrap_fakes.cc` |
 | ibverbs provider dv libraries (`libionic.so`, `libmlx5.so`) | `fakes/dv_provider_fake.cc` |
 | `src/misc/kernel_config.cc` | `fakes/kernel_config_fakes.cc` |
@@ -508,12 +515,13 @@ symbol.
 | `src/rccl_wrap.cc`'s own public entry points (targets that don't compile the real file, e.g. `rccl-UnitTestsMicroEnqueue`) | `fakes/rccl_wrap_fakes.cc` |
 | `src/rccl_wrap.cc`'s dependencies (`rccl-UnitTestsMicro`, which compiles the real file and tests it directly) | `fakes/wrap_fakes.cc` |
 | `src/recorder.cc` | `fakes/recorder_fakes.cc` |
-| `src/register/*.cc` | `fakes/register_stubs.cc` |
+| `src/register/*.cc` (targets that do not compile the real files) | `fakes/register_stubs.cc` |
 | `src/rma/*.cc` | `fakes/rma_fakes.cc` |
 | `src/scheduler/*.cc`'s own public entry points (targets that don't compile the real files, e.g. `rccl-UnitTestsMicroEnqueue`) and the deep launch paths | `fakes/sched_stubs.cc` |
 | `src/sym_kernels.cc` | `fakes/sym_kernels_fakes.cc` |
 | `src/transport/net_ib/connect.cc` params (`ncclParamIbQpsPerConn`) | `fakes/transport_net_ib_fakes.cc` |
 | `src/transport/p2p.cc` shareable-buffer entry points (`rccl-UnitTestsMicroDiagnostics`) | `fakes/transport_p2p_fakes.cc` |
+| `src/transport/p2p.cc` registration entry points, macro-renamed in one unit via `fakes/transport_p2p_reg_seam.h` (`rccl-UnitTestsMicro`, which compiles the real file) | `fakes/transport_p2p_reg_fakes.cc` |
 | `src/transport/*`, `src/plugin/net.cc` | `fakes/transport_stubs.cc` |
 | libc (`gethostname`, `dladdr`), process-wide for units linking libc directly | `fakes/libc_interposers.cc` |
 | libc macro-renamed in one unit via `fakes/libc_seam.h` (sockets/stdio/exit for `ras/client.cc` and `ras/client_support.cc`; `gethostname`/`access` for `diagnostics/ib_write_bw.cc`; heap for `graph/rccl_graph_gen.cc`) | `fakes/libc_fakes.cc` |
