@@ -170,8 +170,9 @@ jobs:
       timeout-minutes: 115
       shell: bash
       working-directory: projects/rocprofiler-register
+      # gcc-12 TSan and LSan fail on hosts with vm.mmap_rnd_bits=32
       run:
-        python3 ./scripts/run-ci.py -B build
+        setarch $(uname -m) -R python3 ./scripts/run-ci.py -B build
           --name ${{ github.repository_owner }}-${{ github.ref_name }}-azure-mi300x-${{ matrix.compiler }}${{ matrix.ci-tag }}
           --build-jobs 2
           --site GitHub
