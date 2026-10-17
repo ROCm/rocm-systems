@@ -560,6 +560,12 @@ HIP_PUBLIC_API hipError_t hipEventSynchronize(hipEvent_t event) {
   return hip::GetHipDispatchTable()->hipEventSynchronize_fn(event);
   CATCH;
 }
+HIP_PUBLIC_API hipError_t hipExtCopyEngineGetDeviceHandle(int device,
+                                                          hipExtCopyEngineDeviceHandle* handle) {
+  TRY;
+  return hip::GetHipDispatchTable()->hipExtCopyEngineGetDeviceHandle_fn(device, handle);
+  CATCH;
+}
 HIP_PUBLIC_API hipError_t hipExtGetLinkTypeAndHopCount(int device1, int device2, uint32_t* linktype,
                                         uint32_t* hopcount) {
   TRY;

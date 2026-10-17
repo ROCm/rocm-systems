@@ -11,8 +11,10 @@
 #include <hip/hip_common.h>
 #if __cplusplus
 #include <cstdlib>
+#include <cstdint>
 #else
 #include <stdlib.h>  // size_t
+#include <stdint.h>  // uint64_t, int8_t
 #endif
 #endif
 
@@ -491,6 +493,35 @@ typedef struct hipMemcpyAttributes {
   hipMemLocation dstLocHint;  ///< Location hint for destination operand.
   unsigned int flags;         ///< Additional Flags for copies. See hipMemcpyFlags.
 } hipMemcpyAttributes;
+
+/**
+ * Agent ids naming the two ends of a copy-engine operation. Values >= 0 are
+ * device agents, obtained from hipExtCopyEngineAgentFor or
+ * hipExtCopyEngineLocalAgent. Agents only steer which engine serves an
+ * operation, so leaving both unknown is always valid.
+ */
+#define HIP_EXT_COPY_ENGINE_AGENT_HOST (-1)
+#define HIP_EXT_COPY_ENGINE_AGENT_UNKNOWN (-2)
+
+/**
+ * Device-wide copy-engine state, obtained with hipExtCopyEngineGetDeviceHandle
+ * and passed to a kernel by value. Valid until runtime teardown.
+ */
+typedef struct hipExtCopyEngineDeviceHandle {
+  uint64_t stateAddress;
+  uint32_t deviceAbiVersion;
+} hipExtCopyEngineDeviceHandle;
+
+/**
+ * A copy's completion: a 64-bit signal word the caller owns and the value the
+ * copy engine lands it on when the copy retires. Passed to a submit as its
+ * completion, then polled, or passed to a later submit as its dependency.
+ */
+typedef struct hipExtCopyEngineToken {
+  uint64_t signalAddress;
+  uint64_t reference;
+} hipExtCopyEngineToken;
+
 /**
  * Operand types for individual copies within a batch
  */

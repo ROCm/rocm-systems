@@ -51,6 +51,7 @@ global:
     hipEventQuery;
     hipEventRecord;
     hipEventSynchronize;
+    hipExtCopyEngineGetDeviceHandle;
     hipExtGetLinkTypeAndHopCount;
     hipExtLaunchMultiKernelMultiDevice;
     hipExtMallocWithFlags;

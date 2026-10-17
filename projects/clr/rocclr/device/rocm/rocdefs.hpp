@@ -24,12 +24,15 @@ enum HwQueueEngine : uint32_t {
   SdmaH2D = 2,
   SdmaD2D = 3,
   SdmaP2P = 4,
-  Unknown = 5
+  //! ABCE submission. Ordering is only implied when HwQueueTracker also sees
+  //! the same exact coordinator ring as the previous ABCE submission.
+  SdmaAbce = 5,
+  Unknown = 6
 };
 
 //! Returns true if the engine is an SDMA engine (any type)
 inline bool IsSdmaEngine(HwQueueEngine engine) {
-  return engine >= HwQueueEngine::SdmaD2H && engine <= HwQueueEngine::SdmaP2P;
+  return engine >= HwQueueEngine::SdmaD2H && engine <= HwQueueEngine::SdmaAbce;
 }
 
 inline const char* EngineOpName(HwQueueEngine engine) {
@@ -38,6 +41,7 @@ inline const char* EngineOpName(HwQueueEngine engine) {
     case HwQueueEngine::SdmaH2D: return "H2D";
     case HwQueueEngine::SdmaD2D:
     case HwQueueEngine::SdmaP2P: return "D2D/P2P";
+    case HwQueueEngine::SdmaAbce: return "ABCE";
     case HwQueueEngine::Compute: return "Compute";
     default:                     return "Unknown";
   }
