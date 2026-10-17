@@ -340,9 +340,9 @@ Panel Config:
           max: MAX(TCP_UTCL1_LFIFO_FULL_sum / $denom)
           unit: (Cycles + $normUnit)
         Resident Page Full Stall:
-          avg: SUM(TCP_UTCL1_STALL_LFIFO_NO_RES_sum) / SUM($denom)
-          min: MIN(TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom)
-          max: MAX(TCP_UTCL1_STALL_LFIFO_NO_RES_sum / $denom)
+          avg: SUM(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum) / SUM($denom)
+          min: MIN(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum / $denom)
+          max: MAX(TCP_PERF_SEL_UTCL1_STALL_LFIFO_NOT_RES_sum / $denom)
           unit: (Cycles + $normUnit)
         UTCL2 Stall:
           avg: SUM(TCP_UTCL1_STALL_UTCL2_REQ_OUT_OF_CREDITS_sum) / SUM($denom)
