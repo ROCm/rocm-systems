@@ -111,8 +111,9 @@ can use a TDM kernel when all of the following are true:
   reduce-scatter uses them from 2 MiB, and allgather uses them from 128 KiB to
   2 MiB and, where the cost model picks the TDM kernel, from 64 MiB to 512 MiB.
   On communicators that span several trays only that allgather TDM window is
-  used. ``RCCL_IGNORE_ARCH_TABLE=1`` removes these limits;
-  ``NCCL_SYM_TMA_ENABLE=2`` does not override them.
+  used. ``RCCL_IGNORE_ARCH_TABLE=1`` removes these limits within one tray; on
+  communicators that span several trays it turns the allgather symmetric kernels
+  off. ``NCCL_SYM_TMA_ENABLE=2`` does not override the table.
 
 The symmetric cost model then chooses between the TDM kernel and the vector-load
 kernels. The TDM kernels cost more setup latency but reach a higher bandwidth
