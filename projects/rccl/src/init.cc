@@ -152,6 +152,7 @@ extern int64_t ncclParamRasDiagnostics();
 extern int64_t ncclParamDiagnostics();
 extern int64_t ncclParamRasEnable();
 extern int64_t ncclParamP2pLL128Enable();
+extern int64_t ncclParamTreeCompact();
 
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
@@ -1763,6 +1764,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int localRanks;
     int nc;
     int romeTopoModelIdx;
+    int treeCompact;
     bool pivotA2AEnabled;
     bool ll128Enabled;
     char hostname[128];
@@ -2196,7 +2198,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
       bool isXGMI;
       // Limit to single intermediate GPU for enabling clique
-      NCCLCHECK(ncclTopoGetLinkType(comm->topo, i, j, &isXGMI, 1));
+      NCCLCHECK(ncclTopoGetLinkType(comm->topo, comm->peerInfo[i].nvmlDev, comm->peerInfo[j].nvmlDev, &isXGMI, 1));
       allXgmi &= isXGMI;
     }
   }
@@ -2340,6 +2342,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuArch = comm->cpuArch;
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
+  allGather3Data[rank].treeCompact = ncclParamTreeCompact() ? 1 : 0;
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
@@ -2370,6 +2373,17 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                     [&](int r) { return allGather3Data[r].hostname; },
                     [&](int r) { return comm->peerInfo[r].hostHash; }),
                   ret, fail);
+  }
+
+  // NCCL_TREE_COMPACT changes the inter-node tree shape; ranks that disagree would build mismatched trees and hang
+  for (int r = 0; r < nranks; r++) {
+    if (allGather3Data[r].treeCompact != allGather3Data[rank].treeCompact) {
+      WARN("NCCL_TREE_COMPACT mismatch: rank %d (%s) has %d, rank %d (%s) has %d; all ranks must set the same value",
+           rank, allGather3Data[rank].hostname, allGather3Data[rank].treeCompact, r, allGather3Data[r].hostname,
+           allGather3Data[r].treeCompact);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
   }
 
   // Determine nNodes, firstRanks, ...
