@@ -10,6 +10,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/fp_mode.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/fract.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/ldexp.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_glue.h"
 #include "rocjitsu/isa/arch/amdgpu/shared/simd_path_test_hooks.h"
@@ -2968,6 +2969,21 @@ struct FormatModes {
 };
 constexpr FormatModes kF32Modes{0x30u, 0xc0u, 0xe0u, 0xd0u, 0xfcu, 0xf3u, 0xf9u, 0xf6u};
 constexpr FormatModes kF16F64Modes{0xc0u, 0x30u, 0xb0u, 0x70u, 0xf3u, 0xfcu, 0xf6u, 0xf9u};
+
+// Constant evaluation rejects undefined behavior, such as an out-of-range
+// shift. A zero fraction (+-0, or a negative subnormal flushed to -0) gives +0
+// in every format.
+template <typename Fmt> constexpr bool fract_zero_fractions_are_defined() {
+  using Lane = typename Fmt::Lane;
+  constexpr auto kKept = amdgpu::fract::Policy::make(3, 0);
+  constexpr auto kFlushed = amdgpu::fract::Policy::make(0, 0);
+  return amdgpu::fract::evaluate<Fmt>(Lane{0}, kKept) == 0 &&
+         amdgpu::fract::evaluate<Fmt>(Fmt::kSign, kKept) == 0 &&
+         amdgpu::fract::evaluate<Fmt>(Lane(Fmt::kSign | 1), kFlushed) == 0;
+}
+static_assert(fract_zero_fractions_are_defined<amdgpu::fp_format::F16>());
+static_assert(fract_zero_fractions_are_defined<amdgpu::fp_format::F32>());
+static_assert(fract_zero_fractions_are_defined<amdgpu::fp_format::F64>());
 
 // V_FRACT lanes captured on gfx1201. A positive subnormal is its own
 // fractional part, so only output flushing zeroes it once the input is kept;

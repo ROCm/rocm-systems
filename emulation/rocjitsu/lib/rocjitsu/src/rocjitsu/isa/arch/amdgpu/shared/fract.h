@@ -130,8 +130,11 @@ template <typename Fmt, typename V> constexpr V fractional_part(V bits, uint32_t
   const V exact_shift = choose(exact, shift, V(kMantissaBits + 1));
   const V unit = one << exact_shift;
   const V fraction_bits = significand & (unit - Lane{1});
+  // A zero fraction (an integer or +-0) gives +0 below; complementing it would
+  // pass 2^(m+1) here, whose normalization shift wraps.
+  const auto complement = negative && fraction_bits != Lane{0};
   const V exact_result = detail::encode_fraction<Fmt>(
-      choose(negative, unit - fraction_bits, fraction_bits), exact_shift);
+      choose(complement, unit - fraction_bits, fraction_bits), exact_shift);
 
   // -0.5 < x < 0: the result 1 - |x| lies in (0.5, 1), in steps of 2^-(m+1).
   // Scaled by 2^(m+1), it is the integer 2^(m+1) plus x * 2^(m+1), so it rounds
