@@ -87,6 +87,7 @@ set(SRC_FILES
   device/symmetric/reduce_scatter_gin.cuh
   device/tdm/asyncCopy.h
   device/tdm/cachePolicy.h
+  device/tdm/ll128Tdm.h
   device/tdm/syncPolicy.h
   device/tdm/tdmCopy.h
   algorithms/dda/device/device_buffer.cc

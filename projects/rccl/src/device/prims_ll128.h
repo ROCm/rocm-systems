@@ -6,7 +6,17 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
+#include "tdm/tdmCopy.h"
+
 #define NCCL_LL128_FLAGTHREAD (NCCL_LL128_LINEELEMS - 1)
+
+// gfx1250 tensor-data-mover path for the LL128 user buffers; see tdm/ll128Tdm.h.
+// Built in with --enable-tdm-prim-ll128, then selected per comm with RCCL_TDM_LL128_ENABLE=1.
+#ifndef ENABLE_TDM_PRIM_LL128
+#define ENABLE_TDM_PRIM_LL128 0
+#endif
+
+#define TDM_LL128_ON (TDM_SUPPORTED && ENABLE_TDM_PRIM_LL128)
 
 #ifndef RCCL_USE_WBINVL1_VOL
 #if defined(__GFX8__) || defined(__gfx906__) || defined(__gfx908__) || defined(__gfx90a__)
@@ -127,6 +137,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
   uint64_t* barriers;
   uint64_t barrier_next = 0;
   bool skip_fence = false;
+#if TDM_LL128_ON
+  // Read from shmem once here, not per slice: the hot path tests a register.
+  bool tdmEnable = false;
+#endif
 
   inline __device__ void barrier() {
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
@@ -236,6 +250,10 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     }
   }
 
+#if TDM_LL128_ON
+#include "tdm/ll128Tdm.h"  // member functions; included inside the class body on purpose
+#endif
+
   template <int WordPerThread>
   __device__ __forceinline__ void loadRegsBegin(uint64_t (&regs)[WordPerThread], T const* src, int eltN) {
     constexpr int EltPer16B = 16 / sizeof(T);
@@ -312,6 +330,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
     for (int g = 1; g < WordPerThread / 2; g += 2) {
       if (flagThread) regs[2 * g - 1] = regs[2 * g];
     }
+#if TDM_LL128_ON
+    if (tdmStoreRegs<WordPerThread>(dst, regs, eltN)) return;
+#endif
 
     // Write to dst if 4-byte aligned, shmem otherwise.
     int misalignment = reinterpret_cast<uintptr_t>(dst) % 16;
@@ -497,6 +518,9 @@ class Primitives<T, RedOp, Fan, Direct, ProtoLL128, P2p, isNetOffload, Metadata,
       dstPtr += DataEltPerSlice * nwarps;
       nelem -= DataEltPerSlice * nwarps;
     }
+#if TDM_LL128_ON
+    tdmDrain();
+#endif
 
     barrier();
 
@@ -576,6 +600,9 @@ public:
     loadSendSync();
     userRegUsed = (e != nullptr) && (e->regUsed || e->netRegUsed);
     setDataPtrs(inputBuf, outputBuf, e != nullptr ? e->acc : nullptr);
+#if TDM_LL128_ON
+    tdmEnable = ncclShmem.comm.tdmLl128Enable;
+#endif
 #if RCCL_HAVE_GLOBAL_DWORDX4_BUILTINS
     skip_fence = !ncclShmem.comm.cheapPostSendFenceOff;
 #else
