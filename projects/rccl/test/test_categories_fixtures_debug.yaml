@@ -30,6 +30,7 @@ test_categories:
       - "DdaIpcEligibilityTest.*"
       - "DdaFabricEligibilityTest.*"
       - "DdaFabricLL128EligibilityTest.*"
+      - "DdaFabricLL128GeomTest.*"
       - "DdaFabricMaxBlocksTest.*"
       - "DdaFabricScratchSizingTest.*"
       - "RcclDdaTierThresholds.*"

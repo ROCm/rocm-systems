@@ -18,6 +18,9 @@
 #include "gtest/gtest.h"
 #include "rccl_common.h"
 
+// Defined in dda_all_gather_fabric_ll128.cu; 0 unless RCCL_DDA_LL128_AG_THREADS is set.
+RCCL_PARAM_DECLARE(DdaLL128AGThreads);
+
 namespace RcclUnitTesting
 {
 
@@ -1558,6 +1561,64 @@ TEST_F(DdaFabricLL128EligibilityTest, AllGatherLL128_PastThresholdRejected)
     const size_t perRankBytes = totalCap / (size_t)mockComm_.comm.nRanks + 16;
     EXPECT_FALSE(ncclAllGatherDdaFabricLL128Eligible(
         mockComm_.get(), sendbuff_, recvbuff_, perRankBytes / sizeof(float), ncclFloat32));
+}
+
+// LL128 AllGather launch geometry (one warp per slice, block size picked from the pushed
+// bytes in dda_all_gather_fabric_ll128.cu). Skipped when RCCL_DDA_LL128_AG_THREADS pins
+// the block size.
+class DdaFabricLL128GeomTest : public DdaFabricEligibilityTest
+{
+protected:
+    static constexpr size_t kMiB = 1024 * 1024;
+
+    void SetUp() override
+    {
+        DdaFabricEligibilityTest::SetUp();
+        if (rcclParamDdaLL128AGThreads() != 0)
+            GTEST_SKIP() << "RCCL_DDA_LL128_AG_THREADS is set";
+    }
+
+    uint32_t blocks(size_t perRankBytes)
+    {
+        return ncclAllGatherDdaFabricLL128Blocks(mockComm_.get(), perRankBytes / sizeof(float), ncclFloat32);
+    }
+};
+
+// The two block-size edges sit at 8 MiB and 16 MiB pushed, i.e. (nRanks - 1) x the
+// per-rank payload, so they move with the rank count: 2 / 4 MiB per rank at 5 ranks and
+// 1 / 2 MiB at 9. One 16 B step past an edge keeps the slice count and halves the
+// blocks. The block cap stays out of the way.
+TEST_F(DdaFabricLL128GeomTest, AllGatherLL128_BlockSizeFollowsPushedBytes)
+{
+    for (int nRanks : {5, 9})
+    {
+        const size_t nPeers = (size_t)nRanks - 1;
+        mockComm_.comm.nRanks             = nRanks;
+        mockComm_.comm.ddaFabricMaxBlocks = (int)nPeers * 1024;
+        const size_t smallEdge = 8 * kMiB / nPeers;
+        const size_t midEdge   = 16 * kMiB / nPeers;
+        const size_t sSmall    = dda::common::ddaLL128Slices(smallEdge);
+        const size_t sMid      = dda::common::ddaLL128Slices(midEdge);
+        ASSERT_EQ(dda::common::ddaLL128Slices(smallEdge + 16), sSmall) << nRanks;
+        ASSERT_EQ(dda::common::ddaLL128Slices(midEdge + 16), sMid) << nRanks;
+        EXPECT_EQ(blocks(smallEdge), nPeers * ((sSmall + 3) / 4)) << nRanks;
+        EXPECT_EQ(blocks(smallEdge + 16), nPeers * ((sSmall + 7) / 8)) << nRanks;
+        EXPECT_EQ(blocks(midEdge), nPeers * ((sMid + 7) / 8)) << nRanks;
+        EXPECT_EQ(blocks(midEdge + 16), nPeers * ((sMid + 15) / 16)) << nRanks;
+    }
+}
+
+// 8 ranks pushing 1.75 MiB (256 KiB per rank, 137 slices per peer) take 128-thread
+// blocks: 35 per peer, which the per-peer share of 189 blocks caps at 27. 512-thread
+// blocks would need only 9 per peer (63 in all).
+TEST_F(DdaFabricLL128GeomTest, AllGatherLL128_SmallBlocksFillTheCap)
+{
+    mockComm_.comm.nRanks = 8;
+    ASSERT_EQ(dda::common::ddaLL128Slices(256 * 1024), 137u);
+    mockComm_.comm.ddaFabricMaxBlocks = 7 * 1024;
+    EXPECT_EQ(blocks(256 * 1024), 7u * 35u);
+    mockComm_.comm.ddaFabricMaxBlocks = 189;
+    EXPECT_EQ(blocks(256 * 1024), 189u);
 }
 
 
