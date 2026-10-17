@@ -325,7 +325,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
   false, so the stubs exist to link. See `test_categories_micro_connect.yaml`.
 - **`rccl-UnitTestsMicroGinHost`** — `gin/gin_host.cc` (`GIN_HOST_CC_PATH`, from
   `gin-host-test.cc`); suite `GinHostTest.*`. NVIDIA/nccl#2279
-  `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Its own binary, not
+  `NCCL_GIN_PROXY_NTHREADS` progress-thread assignment. Also `gin/gin_host_proxy.cc`
+  (`GIN_HOST_PROXY_CC_PATH`, from `gin-host-proxy-test.cc`); suite
+  `GinHostProxyBatchTest.*`. `NCCL_GIN_PROXY_POLL_BATCH` draining and the
+  `ncclRmaOptFlagsAggregateRequests` hint. Its own binary, not
   sharing `rccl-UnitTestsMicro`: `gin-plugin-init-test.cc` already defines
   `ncclParamGinEnable` there. See `test_categories_micro_gin_host.yaml`.
 
@@ -904,7 +907,7 @@ cmake --build build -j"$(nproc)"
 ./build/rccl-UnitTestsMicroTaskPrep           # src/enqueue/task_prep/ + task_sched/ tests
 ./build/rccl-UnitTestsMicroConnect            # src/graph/connect.cc Preset/Postset tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/{p2p,ib_write_bw}.cc tests
-./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host.cc GIN_PROXY_NTHREADS
+./build/rccl-UnitTestsMicroGinHost            # src/gin/gin_host{,_proxy}.cc tests
 ./build/rccl-UnitTestsMicroDiagnostics        # src/diagnostics/p2p.cc tests
 ./build/rccl-UnitTestsMicroCe                 # src/ce_coll.cc tests
 ./build/rccl-UnitTestsMicroRmaProxy           # src/rma/rma_proxy.cc tests
