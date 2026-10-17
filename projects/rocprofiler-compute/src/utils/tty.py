@@ -32,8 +32,8 @@ from utils.utils_analysis import (
 from utils.utils_common import (
     convert_filter_blocks_to_panel_ids,
     is_gfx9,
-    is_gfx115x,
     is_gfx1250,
+    uses_gfx11_mem_chart,
 )
 
 _GUIDANCE_PANEL_MIN_WIDTH = 100
@@ -824,7 +824,9 @@ def format_table_output(
         and len(runs) == 1
         and "Metric" in df.columns
         and "Value" in df.columns
-        and (is_gfx9(gpu_arch) or is_gfx115x(gpu_arch) or is_gfx1250(gpu_arch))
+        and (
+            is_gfx9(gpu_arch) or uses_gfx11_mem_chart(gpu_arch) or is_gfx1250(gpu_arch)
+        )
     )
 
     if use_mem_chart:
@@ -833,7 +835,7 @@ def format_table_output(
         else:
             mem_data = raw_chart_values or {}
 
-        if is_gfx115x(gpu_arch):
+        if uses_gfx11_mem_chart(gpu_arch):
             content += (
                 mem_chart_gfx11.plot_mem_chart(
                     mem_data,
@@ -1135,7 +1137,7 @@ def show_all(
                     and not _tty_view_is_table(args)
                     and (
                         is_gfx9(gpu_arch)
-                        or is_gfx115x(gpu_arch)
+                        or uses_gfx11_mem_chart(gpu_arch)
                         or is_gfx1250(gpu_arch)
                     )
                 )
@@ -1168,7 +1170,7 @@ def show_all(
                 args.normal_unit,
                 panel_id=int((panel or {}).get("id", 300)),
             )
-            if is_gfx115x(gpu_arch):
+            if uses_gfx11_mem_chart(gpu_arch):
                 panel_content += (
                     mem_chart_gfx11.plot_mem_chart(
                         mem_chart_data,

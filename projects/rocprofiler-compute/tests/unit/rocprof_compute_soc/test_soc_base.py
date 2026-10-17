@@ -581,6 +581,14 @@ def test_same_bucket_priority_resolves_gfx115x_policy(gpu_arch):
     assert "17.1.0" in ids
 
 
+@pytest.mark.parametrize("gpu_arch", ["gfx1170", "gfx1171"])
+def test_same_bucket_priority_resolves_gfx117x_policy(gpu_arch):
+    """gfx117x parts share one profiling_counter_grouping_policy.yaml block."""
+    soc = _make_soc(PERFMON_CONFIG, arch=gpu_arch)
+    ids = soc._same_bucket_priority_metric_ids()
+    assert set(ids) == {"2.1.3", "9.1.0", "9.3.0", "11.3.0", "17.1.0"}
+
+
 @pytest.mark.parametrize("gpu_arch", ["gfx908", "gfx90a", "gfx940", "gfx941", "gfx942"])
 def test_same_bucket_priority_hbm_traffic_ids_match_yaml(gpu_arch):
     """Policy metric IDs must resolve to 'HBM Read Traffic' and
