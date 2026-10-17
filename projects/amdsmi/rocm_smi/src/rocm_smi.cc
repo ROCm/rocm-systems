@@ -5366,6 +5366,14 @@ rsmi_status_t rsmi_dev_counter_group_supported(uint32_t dv_ind, rsmi_event_group
   CATCH
 }
 
+// Whether a GetProcessInfoForPID() error means that the process exited during
+// the read: KFD removes its files (ENODEV), then its directory (ESRCH, or any
+// error once the directory is gone). That function fails only outside a PID
+// namespace, where pid names the KFD directory.
+static bool KfdProcessExitedDuringRead(uint32_t pid, int err) {
+  return err == ESRCH || err == ENODEV || (err != 0 && !amd::smi::KfdProcessExists(pid));
+}
+
 rsmi_status_t rsmi_compute_process_info_get(rsmi_process_info_t* procs, uint32_t* num_items) {
   TRY
 
@@ -5398,15 +5406,19 @@ rsmi_status_t rsmi_compute_process_info_get(rsmi_process_info_t* procs, uint32_t
     }
 
     for (uint32_t i = 0; i < procs_found; ++i) {
-      auto proc_err_code = amd::smi::GetProcessInfoForPID(procs[i].process_id, &procs[i], &gpu_set);
-      // Non-fatal: if a process disappeared between enumeration
-      // and info collection (ESRCH), zero-fill stats but keep process_id
+      const auto pid = procs[i].process_id;
+      auto proc_err_code = amd::smi::GetProcessInfoForPID(pid, &procs[i], &gpu_set);
+      // Non-fatal: if a process exited between enumeration and info
+      // collection, zero-fill stats but keep process_id.
       // cu_occupancy uses KFD_STATS_INVALID to signal N/A.
-      if (proc_err_code == ESRCH) {
-        const auto pid = procs[i].process_id;
+      if (KfdProcessExitedDuringRead(pid, proc_err_code)) {
         procs[i] = rsmi_process_info_t{pid, 0, 0, KFD_STATS_INVALID, 0};
       } else if (proc_err_code) {
-        return amd::smi::ErrnoToRsmiStatus(proc_err_code);
+        // Still running but unreadable: keep it with every stat not available,
+        // as the amdsmi process list does.
+        procs[i] = rsmi_process_info_t{pid, std::numeric_limits<uint64_t>::max(),
+                                       std::numeric_limits<uint64_t>::max(), KFD_STATS_INVALID,
+                                       KFD_STATS_INVALID};
       }
     }
   }
@@ -5563,7 +5575,8 @@ rsmi_status_t rsmi_compute_process_info_by_pid_get(uint32_t pid, rsmi_process_in
   int err = amd::smi::GetProcessInfoForPID(pid, proc, &gpu_set);
 
   if (err) {
-    return amd::smi::ErrnoToRsmiStatus(err);
+    return KfdProcessExitedDuringRead(pid, err) ? RSMI_STATUS_NOT_FOUND
+                                                : amd::smi::ErrnoToRsmiStatus(err);
   }
 
   return RSMI_STATUS_SUCCESS;
@@ -5582,7 +5595,8 @@ rsmi_status_t rsmi_compute_process_info_by_device_get(uint32_t pid, uint32_t dv_
   int err = amd::smi::GetProcessInfoForPID(pid, proc, &gpu_set);
 
   if (err) {
-    return amd::smi::ErrnoToRsmiStatus(err);
+    return KfdProcessExitedDuringRead(pid, err) ? RSMI_STATUS_NOT_FOUND
+                                                : amd::smi::ErrnoToRsmiStatus(err);
   }
 
   return RSMI_STATUS_SUCCESS;

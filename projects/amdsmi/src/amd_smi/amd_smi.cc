@@ -4996,7 +4996,7 @@ amdsmi_status_t amdsmi_get_gpu_compute_process_gpus(uint32_t pid, uint32_t* dv_i
                                                     uint32_t* num_devices) {
   AMDSMI_CHECK_INIT();
 
-  if (dv_indices == nullptr || num_devices == nullptr) return AMDSMI_STATUS_INVAL;
+  if (num_devices == nullptr) return AMDSMI_STATUS_INVAL;
 #ifdef ENABLE_WSL_BACKEND
   if (amd::smi::WSLGPUBackend::IsActive()) return AMDSMI_STATUS_NOT_SUPPORTED;
 #endif
@@ -6313,7 +6313,11 @@ amdsmi_status_t amdsmi_get_gpu_process_list(amdsmi_processor_handle processor_ha
 #endif
 
   // Get the list of compute processes running on the GPU
-  auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
+  amd::smi::GPUComputeProcessList_t compute_process_list;
+  status_code = gpu_device->amdgpu_get_compute_process_list(compute_process_list);
+  if (status_code != AMDSMI_STATUS_SUCCESS) {
+    return status_code;
+  }
 
   // If max_processes is 0, return the number of processes currently running
   // If compute_process_list is empty, return success with max_processes set to 0
@@ -6393,7 +6397,9 @@ amdsmi_status_t amdsmi_get_gpu_process_list_by_pid(amdsmi_processor_handle* proc
     if (r != AMDSMI_STATUS_SUCCESS) continue;
 
     uint32_t gpu_index = gpu_device->get_gpu_id();
-    auto compute_process_list = gpu_device->amdgpu_get_compute_process_list();
+    amd::smi::GPUComputeProcessList_t compute_process_list;
+    r = gpu_device->amdgpu_get_compute_process_list(compute_process_list);
+    if (r != AMDSMI_STATUS_SUCCESS) return r;
     for (auto& [pid, proc_info] : compute_process_list)
       merge_proc_into_pid_map(pid_map, gpu_index, proc_info);
   }
