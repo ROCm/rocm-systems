@@ -3050,10 +3050,19 @@ private:
     const size_t chunk = std::min(remaining, PAGE_SIZE - (addr & PAGE_MASK));
     // Allocate staging before any mapping admission. A failed physical read
     // leaves its destination unchanged, including a guarded host-access fault.
-    std::vector<uint8_t> staged;
-    if constexpr (!IntoMemory)
-      staged.resize(chunk);
-    void *copy_bytes = IntoMemory ? bytes : staged.data();
+    // Typical GPU requests are at most a cache line; keep their staging on the
+    // stack. Larger spans fall back to the heap, still before mapping admission.
+    constexpr size_t kInlineStaging = 256;
+    std::array<uint8_t, kInlineStaging> inline_staged;
+    std::vector<uint8_t> heap_staged;
+    uint8_t *staged = inline_staged.data();
+    if constexpr (!IntoMemory) {
+      if (chunk > kInlineStaging) {
+        heap_staged.resize(chunk);
+        staged = heap_staged.data();
+      }
+    }
+    void *copy_bytes = IntoMemory ? bytes : staged;
     bool policy_fault = false;
     const bool copied =
         with_page_mapping(addr, vmid, [&](const LegacyPageTableEntry *pte, IdentityPage page) {
@@ -3073,7 +3082,7 @@ private:
     if (outcome != CopyOutcome::Complete)
       return {.outcome = outcome};
     if constexpr (!IntoMemory)
-      std::memcpy(bytes, staged.data(), chunk);
+      std::memcpy(bytes, staged, chunk);
     return {.completed_bytes = chunk, .outcome = CopyOutcome::Complete};
   }
 
@@ -3106,15 +3115,32 @@ private:
         size_t size = 0;
         const LegacyHostExtent *extent = nullptr;
       };
-      std::vector<Span> spans;
+      // A page-bounded access almost always resolves to one or two spans; keep
+      // them on the stack and fall back to the heap only for pathological maps.
+      constexpr size_t kInlineSpans = 4;
+      std::array<Span, kInlineSpans> inline_spans;
+      size_t inline_count = 0;
+      std::vector<Span> heap_spans;
       const auto mapping_lease = rocjitsu::host_mapping_lock().lock_shared();
       const size_t mapped_bytes =
           for_each_mapped_span(*pte, page_offset, size,
                                [&](size_t value_offset, uint8_t *host_ptr, size_t span_size,
                                    const LegacyHostExtent &extent) {
-                                 spans.push_back({value_offset, host_ptr, span_size, &extent});
+                                 const Span span{value_offset, host_ptr, span_size, &extent};
+                                 if (heap_spans.empty() && inline_count < kInlineSpans) {
+                                   inline_spans[inline_count++] = span;
+                                   return;
+                                 }
+                                 if (heap_spans.empty())
+                                   heap_spans.assign(inline_spans.begin(),
+                                                     inline_spans.begin() + inline_count);
+                                 heap_spans.push_back(span);
                                });
-      std::ranges::sort(spans, {}, &Span::value_offset);
+      const std::span<Span> spans = heap_spans.empty()
+                                        ? std::span<Span>(inline_spans.data(), inline_count)
+                                        : std::span<Span>(heap_spans);
+      if (spans.size() > 1)
+        std::ranges::sort(spans, {}, &Span::value_offset);
       size_t covered = 0;
       for (const Span &span : spans) {
         if (span.value_offset != covered)
