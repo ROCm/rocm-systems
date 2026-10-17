@@ -9,7 +9,8 @@
 /// and MODE through output_modifier_policy in simd_glue.h.
 ///
 /// Scope:
-/// - Shared scalar/SIMD stage for migrated VOP3 results on every target.
+/// - Shared scalar/SIMD stage for migrated VOP3 results on every target, and
+///   for SDWA FRACT_F16/LDEXP_F16, stored with sdwa::OutputPolicy::APPLIED.
 /// - The emulator's older-target gate enables OMOD only with IEEE=0 and output
 ///   denormals flushed. RDNA1/2/3 IEEE=0 captures cover both flushed and
 ///   preserved output denormals.
@@ -28,12 +29,12 @@
 ///     negative normal with the smallest exponent gives -0 on gfx1201, gfx1100,
 ///     gfx1030 and gfx1010, where finish_f64 gives +0. Migrating them must also
 ///     apply FMA tininess before rounding.
-///   - SDWA F16 (dpp_sdwa_ops.h): separate arithmetic and rounded-TRANS
-///     helpers; no SDWA captures. Arithmetic retains unvalidated legacy scaling
-///     before narrowing. For RDNA1/2 MUL_F16 with inputs 0x3e00 and 0x7bff,
-///     div:2, MODE=0 and IEEE=0, the emulator returns 0x79ff through SDWA versus
-///     0x7c00 through VOP3. Only the VOP3 result is capture-backed; migrating
-///     SDWA requires separate hardware validation.
+///   - Other SDWA F16 producers (dpp_sdwa_ops.h): separate arithmetic and
+///     rounded-TRANS helpers that keep the emulator's scaling before narrowing.
+///     gfx1030 SDWA captures contradict that order: MUL_F16 with inputs 0x3e00
+///     and 0x7bff, div:2, MODE=0 and IEEE=0 gives 0x7c00 through SDWA and VOP3,
+///     where the emulator's SDWA path returns 0x79ff. Migrating these producers
+///     needs SDWA captures of each.
 /// - Intentional exception:
 ///   - Pseudo-scalar F32 transcendentals: scale the exact value before one F32
 ///     rounding; match gfx1201 captures.
@@ -55,6 +56,7 @@
 ///   gfx1030 bit for bit.
 /// - gfx1030 (RDNA2, RX 6800 XT): the same F16 MUL/ADD div:2 lanes, plus IEEE=0
 ///   lanes showing that preserved F16 output denormals (MODE 0xf0/0xa0) disable OMOD.
+///   SDWA FRACT_F16/LDEXP_F16 match VOP3 bit for bit under every OMOD.
 /// - gfx1010 (RDNA1, RX 5700 XT): an out-of-tree VALU probe matches gfx1030 bit
 ///   for bit with IEEE=1 and IEEE=0.
 /// - RDNA3.5 / CDNA1-5: extrapolated; no captures, hardware verification required.
