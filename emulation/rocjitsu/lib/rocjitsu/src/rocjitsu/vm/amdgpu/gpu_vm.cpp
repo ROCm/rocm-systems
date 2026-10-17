@@ -416,40 +416,49 @@ std::optional<Mtype> GpuVmAccess::query_mtype(uint64_t address, VmMtypeCache &ca
   // A hit uses copied policy only. Retirement invalidates the snapshot's state
   // before releasing any frontend storage; misses remain under its lease.
   // Compare generation ownership without acquiring another strong reference.
-  const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
+  const bool same_generation = cache.snapshots_ &&
+                               !cache.access_state_.owner_before(access_state_) &&
                                !access_state_.owner_before(cache.access_state_);
-  auto &snapshot = cache.snapshots_[(address >> 12) % cache.snapshots_.size()];
-  if (same_generation && access_state_->valid.load(std::memory_order_acquire) &&
-      snapshot.unchanged(address))
-    return snapshot.mtype;
+  const std::size_t index = (address >> 12) % VmMtypeCache::kSnapshotCount;
+  if (same_generation && access_state_->valid.load(std::memory_order_acquire)) {
+    const auto &snapshot = (*cache.snapshots_)[index];
+    if (snapshot.unchanged(address))
+      return snapshot.mtype;
+  }
   std::shared_lock state_lock(access_state_->mutex);
   if (!access_state_->valid || access_state_->translator == nullptr)
     return std::nullopt;
   if (!same_generation) {
-    cache.snapshots_ = {};
+    // Complete first-use allocation before publishing the generation. Reuse the
+    // existing table on generation changes, dropping every old mutation token.
+    if (!cache.snapshots_)
+      cache.snapshots_ = std::make_unique<VmMtypeCache::Snapshots>();
+    else
+      *cache.snapshots_ = {};
     cache.access_state_ = access_state_;
   }
+  auto &snapshot = (*cache.snapshots_)[index];
   snapshot = access_state_->translator->snapshot_mtype(address);
   return snapshot.mtype;
 }
 
 bool GpuVmAccess::cached_private_uc_hint(uint64_t address, const VmMtypeCache &cache) const {
-  if (!access_state_)
+  if (!access_state_ || !cache.snapshots_)
     return false;
   const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
                                !access_state_.owner_before(cache.access_state_);
-  const auto &snapshot = cache.snapshots_[(address >> 12) % cache.snapshots_.size()];
+  const auto &snapshot = (*cache.snapshots_)[(address >> 12) % VmMtypeCache::kSnapshotCount];
   return same_generation && access_state_->valid.load(std::memory_order_acquire) &&
          snapshot.may_batch_private_uc && snapshot.unchanged(address);
 }
 
 std::optional<Mtype> GpuVmAccess::cached_private_ram_mtype(uint64_t address,
                                                            const VmMtypeCache &cache) const {
-  if (!access_state_)
+  if (!access_state_ || !cache.snapshots_)
     return std::nullopt;
   const bool same_generation = !cache.access_state_.owner_before(access_state_) &&
                                !access_state_.owner_before(cache.access_state_);
-  const auto &snapshot = cache.snapshots_[(address >> 12) % cache.snapshots_.size()];
+  const auto &snapshot = (*cache.snapshots_)[(address >> 12) % VmMtypeCache::kSnapshotCount];
   if (same_generation && access_state_->valid.load(std::memory_order_acquire) &&
       snapshot.may_batch_private_ram && snapshot.unchanged(address))
     return snapshot.mtype;

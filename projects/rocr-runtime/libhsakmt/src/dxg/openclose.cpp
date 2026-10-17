@@ -706,6 +706,13 @@ static HSAKMT_STATUS init_vars_from_env(void) {
     dxg_runtime->check_avail_sysram = (envvar[0] == '1' && envvar[1] == '\0');
   }
 
+  // Leave the dependency POLL_REGMEM packets in the ring for the SDMA engine to execute if
+  // HSA_ENABLE_SDMA_GPU_POLL is "1", instead of waiting them out and stripping them on a host
+  // thread. Only meaningful on a native SDMA user queue. Defaults off: gpu poll is stuck in KMD.
+  if ((envvar = getenv("HSA_ENABLE_SDMA_GPU_POLL")) != nullptr) {
+    dxg_runtime->sdma_gpu_poll_ = (envvar[0] == '1' && envvar[1] == '\0');
+  }
+
   // Set default GPU node based on ROCR_VISIBLE_DEVICES. Extract the first numeric value
   // from the environment variable and add 1 to convert to 1-indexed node ID.
   if ((envvar = getenv("ROCR_VISIBLE_DEVICES")) != nullptr) {
