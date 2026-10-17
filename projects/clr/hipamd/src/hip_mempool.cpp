@@ -369,6 +369,9 @@ hipError_t hipMallocFromPoolAsync(void** dev_ptr, size_t size, hipMemPool_t mem_
   STREAM_CAPTURE(hipMallocAsync, stream, mem_pool, size, dev_ptr);
 
   auto mpool = reinterpret_cast<hip::MemoryPool*>(mem_pool);
+  if (!IsMemPoolValid(mpool)) {
+    HIP_RETURN(hipErrorInvalidValue);
+  }
   auto hip_stream = (stream == nullptr || stream == hipStreamLegacy)
                         ? hip::getCurrentDevice()->NullStream()
                         : reinterpret_cast<hip::Stream*>(stream);
