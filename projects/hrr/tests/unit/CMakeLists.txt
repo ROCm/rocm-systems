@@ -69,6 +69,40 @@ endif()
 
 add_test(NAME hrr-unit-tests COMMAND hrr-unit-tests)
 
+# HIP entry points load dispatch table slots with hip::LoadDispatchSlot from
+# projects/clr/hipamd/src/hip_dispatch_load.hpp, which HRR capture relies on when it
+# installs shims into the live table.
+set(HRR_HIPAMD_SRC "${CMAKE_CURRENT_SOURCE_DIR}/../../../clr/hipamd/src")
+if(EXISTS "${HRR_HIPAMD_SRC}/hip_dispatch_load.hpp")
+  # Every entry point in hip_table_interface.cpp goes through that load.
+  add_test(NAME hrr-unit-tests-dispatch-readers
+    COMMAND ${CMAKE_COMMAND} -DSOURCE=${HRR_HIPAMD_SRC}/hip_table_interface.cpp
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/check_dispatch_readers.cmake)
+
+  # The load and HRR's slot store race cleanly under ThreadSanitizer. The test only
+  # means something with TSan, so it is built when the compiler supports it.
+  include(CheckCXXSourceCompiles)
+  set(CMAKE_REQUIRED_FLAGS -fsanitize=thread)
+  set(CMAKE_REQUIRED_LINK_OPTIONS -fsanitize=thread)
+  check_cxx_source_compiles("int main() { return 0; }" HRR_HAVE_TSAN)
+  unset(CMAKE_REQUIRED_FLAGS)
+  unset(CMAKE_REQUIRED_LINK_OPTIONS)
+  if(HRR_HAVE_TSAN)
+    add_executable(hrr-unit-tests-tsan hrr_dispatch_load_tsan_test.cc)
+    set_target_properties(hrr-unit-tests-tsan PROPERTIES
+      CXX_STANDARD 17
+      CXX_STANDARD_REQUIRED ON)
+    target_include_directories(hrr-unit-tests-tsan PRIVATE "${HRR_HIPAMD_SRC}")
+    target_compile_definitions(hrr-unit-tests-tsan PRIVATE __HIP_PLATFORM_AMD__)
+    target_compile_options(hrr-unit-tests-tsan PRIVATE -fsanitize=thread)
+    target_link_options(hrr-unit-tests-tsan PRIVATE -fsanitize=thread)
+    target_link_libraries(hrr-unit-tests-tsan PRIVATE hip::host)
+    # Building the unit tests builds this one too, so a plain ctest run includes it.
+    add_dependencies(hrr-unit-tests hrr-unit-tests-tsan)
+    add_test(NAME hrr-unit-tests-tsan COMMAND hrr-unit-tests-tsan)
+  endif()
+endif()
+
 # Handler-level tests: playback handlers and helpers in hip_playback.cpp (and
 # the generated handlers), linked in and called with crafted records or stand-ins
 # for the HIP call. They link the HIP runtime like hrr-playback does but reach no

@@ -257,7 +257,7 @@ intercept a hand-maintained subset of HIP calls. This approach has several gaps:
 
 `hip_api_trace.hpp` already provides a **versioned dispatch table** (`HipDispatchTable`)
 with a function pointer slot for every HIP API. `hip_table_interface.cpp` routes every
-`extern "C" hipFoo(...)` call through `GetHipDispatchTable()->hipFoo_fn(...)`.
+`extern "C" hipFoo(...)` call through the `hipFoo_fn` slot of `GetHipDispatchTable()`.
 
 This is the correct hook point. An in-tree capture layer installs capture shims into
 the dispatch table at init time, replacing the out-of-tree proxy entirely.
@@ -327,13 +327,36 @@ projects/clr/hipamd/src/hrr/      — in-tree capture layer (compiled into amdhi
 At init time the capture layer snapshots `g_real_table` from `GetHipDispatchTable()`,
 builds `g_cap_table` as a copy with the manual shims (`MANUAL_CAPTURE_APIS`) overridden,
 then writes each shim into the live table with its own atomic store so the table is
-never copied as a whole. HIP entry points in `hip_table_interface.cpp` still load those
-slots with ordinary function-pointer reads, not atomic loads. All shims call through
-`g_real_table`, never back into the dispatch table, which prevents re-entrancy.
+never copied as a whole. All shims call through `g_real_table`, never back into the
+dispatch table, which prevents re-entrancy.
 Uninstall puts the snapshot back only into the slots that still hold a capture shim, so
 a slot that another component changed after install keeps its new value. The compiler
 dispatch table receives its shims the same way. It loses them, the same way, only when
 the archive cannot be opened, at init or in a forked child, never at shutdown.
+
+HRR's writes to the live tables and the HIP entry points follow one contract:
+
+- HRR changes one slot at a time with a single atomic store of the aligned pointer,
+  with release order or stronger. It never copies a table over as a whole.
+- Every HIP entry point in `hip_table_interface.cpp` loads its slot with an acquire load,
+  `hip::LoadDispatchSlot` from `projects/clr/hipamd/src/hip_dispatch_load.hpp`, through
+  the `HIP_LOAD_DISPATCH_TABLE_FN` and `HIP_LOAD_COMPILER_TABLE_FN` macros.
+- Both sides use the `__atomic` builtins outside Windows and `std::atomic_ref<void*>` on
+  Windows.
+
+The contract covers HRR's writer only. For a slot that HRR writes, a caller therefore
+gets either the old function or the new one. The acquire load pairs
+with the release store, so a shim also sees what was written before its install, such
+as `g_real_table`. An acquire load of a pointer is a plain load on x86-64 and `LDAR` on
+AArch64. `hrr-unit-tests-tsan` races the store against the load under ThreadSanitizer.
+`hrr-unit-tests-dispatch-readers` fails if an entry point reads its slot directly.
+
+Other writers do not follow the contract yet. The CLR profiler
+(`projects/clr/hipamd/src/profiler/hip_clr_dispatch_wrappers.cpp`) installs and removes
+its wrappers with a whole-table `memcpy`, and keeps doing so until AIRUNTIME-2845
+(PR #13260) lands. rocprofiler-register tools write slots with
+ordinary stores during `ToolsInit()` in `hip_api_trace.cpp`. Those writes can race
+with the entry points.
 
 ### `<<<>>>` Launch Path — Compiler Dispatch Table
 
