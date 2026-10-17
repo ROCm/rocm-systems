@@ -23,7 +23,7 @@
 
 #include <cstdint>
 #include <cstdlib>
-#include <experimental/filesystem>
+#include <filesystem>
 #include <iomanip>
 #include <iostream>
 #include <fstream>
@@ -124,7 +124,7 @@ void CollectStatistics(const char* begin, const char* end, void* /* user_arg */)
   }
 }
 
-namespace fs = std::experimental::filesystem;
+namespace fs = std::filesystem;
 
 void DumpStatistics() {
   CHECK_ROCTRACER(roctracer_close_pool());
