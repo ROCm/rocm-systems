@@ -26,6 +26,18 @@ published data.
 Upload a new catalog before any run that references it. Upload run files before
 publishing the updated index. Existing catalogs and runs are immutable.
 
+## Manual publication rollout and rollback
+
+Before publishing manual topic-branch results, deploy the compatible dashboard
+and let older publisher jobs finish. Publication requires the run's benchmark
+workflow to match the copy checked out from canonical `develop`, including the
+corpus pin and publication steps. Runs with changed or outdated workflows retain
+diagnostics artifacts but cannot publish. While manual topic-branch results remain
+indexed, retain compatible dashboard and publisher versions: older versions reject
+that history.
+See the [publisher instructions](https://github.com/ROCm/rocjitsu-test-corpus/blob/8443bc956e889c0bebd2ee8663ec419df1a68cad/benchmarks/README.md#results-and-plugins)
+for the publication workflow.
+
 ## Hosting requirements
 
 The dashboard loads one HTTP request per published run. Where the hosting service
@@ -156,7 +168,10 @@ the dashboard-wide test catalog.
 - Catalog versions may share any number of unchanged tests.
 - Runs referencing a five-test catalog remain 5/5 after a seven-test catalog is introduced.
 
-The browser derives the dashboard-wide picker from the union of referenced catalogs. No separate mutable current catalog exists.
+The browser derives the Benchmark Explorer picker from catalogs referenced by
+automatic develop Vanilla runs. Run Comparison uses the union of Vanilla run
+targets and suites, including manual runs. No separate mutable current catalog
+exists.
 
 Because that union is keyed by test ID, a shared test ID must carry an identical `suite`, `name`, and `problem` in every catalog that defines it. There is no authoritative winner when two catalogs disagree, so the dashboard rejects the whole dataset and names both catalogs rather than silently comparing different workloads. Renaming a published test therefore costs its history continuity; that price buys the guarantee that one test ID always means one workload.
 
@@ -255,7 +270,7 @@ Plugin identity and options do not belong in `environment`, because plugins are 
 
 ### `source`
 
-- `branch`: required and currently must be `develop`.
+- `branch`: required and nonempty. Automatic executions must use `develop`; manual executions can use any branch.
 - `commit`: required full SHA of the tested Rocjitsu commit.
 - `committedAt`: required ISO-8601 timestamp of that commit.
 - `message`: optional commit message.
@@ -345,7 +360,11 @@ Do not publish aggregate duration, runtime overhead, baselines, deltas, coverage
 ### Baseline selection
 
 There is no single published baseline. Each surface answers a different question and
-chooses its own, so the same run can show different changes in different places. Every
+chooses its own, so the same run can show different changes in different places.
+Overview, Benchmarks, Failures, and Plugin Comparison use only automatic develop
+executions. Manual executions, including manual develop runs, appear only in Run
+Comparison. Its selectors include the branch and Manual/Auto trigger labels. An
+explicit baseline selection is preserved when changing the candidate. Every
 choice below respects the active target and suite filters, and *complete* means that
 every selected test in that run completed with a finite duration.
 
@@ -355,10 +374,10 @@ every selected test in that run completed with a finite duration.
 | Duration history and Largest Changes | Latest run shown in the selected timeframe | First run shown in that timeframe; the `1D` range instead uses the previous commit day's latest run |
 | Latest Commit Results | Latest commit run | The same timeframe baseline the duration history uses, so the Overview range selector also changes this table |
 | Recent Runs | Each listed run | Nearest earlier complete commit run, evaluated per row |
-| Run Comparison | Selected run, defaulting to the latest execution | Nearest earlier complete commit run for a selected candidate; with no selection, the previous execution in publication order |
+| Run Comparison | Selected Vanilla run, defaulting to the latest execution, including manual runs | For manual candidates, the latest complete automatic develop execution; for selected automatic candidates, the nearest earlier complete commit run; for the default automatic candidate, the previous automatic execution |
 | Plugin Comparison | Each plugin run in the comparison | The `vanilla` run of the same `comparisonId` and target |
 
-Baselines are ordered by commit, not by publication time, so a historical rerun
+Automatic history baselines are ordered by commit, not by publication time, so a historical rerun
 published today does not become the baseline for older commits. Largest Changes and
 Run Comparison treat changes within ±3% as measurement noise.
 

@@ -109,7 +109,7 @@ function ResponsiveTags({ values, getItemProps }) {
 }
 
 function MultiSelect({ label, options, value, onChange, disabled = false }) {
-  const allSelected = options.length > 0 && value.length === options.length;
+  const allSelected = options.length > 0 && options.every((option) => value.includes(option));
   const someSelected = value.length > 0 && !allSelected;
   const groupName = label.toLowerCase();
 
@@ -175,8 +175,8 @@ export default function FiltersBar({ data, state, disabled = false }) {
         <Typography variant="overline" sx={{ color: 'text.secondary' }}>Global filters</Typography>
       </Stack>
       <Box sx={{ display: 'grid', gridTemplateColumns: { xs: '1fr', sm: 'repeat(2, minmax(0, 1fr))' }, gap: 1.25 }}>
-        <MultiSelect label="Targets" options={data.targets} value={state.targets} onChange={state.setTargets} disabled={disabled} />
-        <MultiSelect label="Suites" options={data.suites} value={state.suites} onChange={state.setSuites} disabled={disabled} />
+        <MultiSelect label="Targets" options={state.tab === 'compare' ? data.comparisonTargets : data.targets} value={state.targets} onChange={state.setTargets} disabled={disabled} />
+        <MultiSelect label="Suites" options={state.tab === 'compare' ? data.comparisonSuites : data.suites} value={state.suites} onChange={state.setSuites} disabled={disabled} />
       </Box>
     </Paper>
   );

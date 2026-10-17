@@ -26,7 +26,8 @@ test('loads merged target runs from immutable test catalogs', () => {
     'test-catalogs/rocjitsu-core-v1.json',
     'test-catalogs/rocjitsu-core-v2.json',
   ]);
-  expect(benchmarkData.runs).toHaveLength(79);
+  expect(benchmarkData.comparisonRuns).toHaveLength(79);
+  expect(benchmarkData.runs).toHaveLength(78);
   expect(benchmarkData.pluginRuns).toHaveLength(83);
   expect(benchmarkData.runs.every((run) => run.plugin.id === 'vanilla')).toBe(true);
   expect(benchmarkData.runs.every((run) => (
@@ -35,7 +36,7 @@ test('loads merged target runs from immutable test catalogs', () => {
   expect(benchmarkData.runs.every((run) => (
     !Object.hasOwn(run, 'canonical')
     && run.branch === 'develop'
-    && ['auto', 'manual'].includes(run.trigger)
+    && run.trigger === 'auto'
   ))).toBe(true);
 
   const pluginGroups = selectPluginComparisonGroups(benchmarkData);
@@ -177,7 +178,9 @@ describe('dataset-level validation', () => {
     const data = cloneBenchmarkData();
     data.runs[0].branch = 'feature/experiment';
 
-    expect(loadDashboardData(data).runs[0].branch).toBe('feature/experiment');
+    const rebuilt = loadDashboardData(data);
+    expect(rebuilt.runs.some((run) => run.branch === 'feature/experiment')).toBe(false);
+    expect(rebuilt.comparisonRuns.some((run) => run.branch === 'feature/experiment')).toBe(true);
   });
 
   test('allows environments to change between independent historical runs', () => {

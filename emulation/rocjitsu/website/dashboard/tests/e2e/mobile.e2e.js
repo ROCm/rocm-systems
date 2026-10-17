@@ -16,9 +16,10 @@ test('replaces the recent-runs table with run cards that keep their labels', asy
 
   await expect(page.getByTestId('recent-runs-table')).toHaveCount(0);
   const newestExecution = page.getByTestId('mobile-run').first();
-  await expect(newestExecution).toContainText('8418072e');
+  await expect(newestExecution).toContainText('31369c4d');
   await expect(newestExecution).toContainText('Most recent');
-  await expect(newestExecution).toContainText('Historical rerun');
+  await expect(newestExecution).toContainText('Latest commit');
+  await expect(page.getByTestId('mobile-run').filter({ hasText: 'Manual' })).toHaveCount(0);
   await expect(page.getByTestId('mobile-run').filter({ hasText: '31369c4d' })).toContainText('Latest commit');
 });
 

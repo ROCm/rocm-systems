@@ -60,6 +60,25 @@ export function previousCompletedRunForFilters(runs, candidate, filters) {
   }).sort(compareRunsByCommit).at(-1) ?? null;
 }
 
+export function selectComparisonRuns(data, selectedCandidateId, selectedBaselineId, filters) {
+  const comparisonRuns = data.comparisonRuns;
+  const selectedCandidate = comparisonRuns.find((run) => run.runId === selectedCandidateId);
+  const candidate = selectedCandidate ?? comparisonRuns.at(-1) ?? null;
+  let defaultBaseline;
+  if (candidate?.trigger === 'manual') {
+    // Manual candidates compare against the latest completed official run.
+    defaultBaseline = data.runs.filter((run) => isRunCompletedForFilters(run, filters)).at(-1) ?? null;
+  } else if (selectedCandidate) {
+    // An explicitly selected official candidate compares against its predecessor.
+    defaultBaseline = previousCompletedRunForFilters(data.runs, candidate, filters);
+  } else {
+    // The default official candidate compares against the preceding run.
+    defaultBaseline = data.runs.at(-2) ?? null;
+  }
+  const baseline = comparisonRuns.find((run) => run.runId === selectedBaselineId) ?? defaultBaseline;
+  return { candidate, baseline };
+}
+
 function previousCompletedTestResult(runs, candidate, testId) {
   if (!candidate || !testId) return null;
   const earlierRuns = runs.filter((run) => (

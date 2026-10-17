@@ -134,7 +134,7 @@ test('Overview uses the newest attempt of the newest commit even when it is inco
     ...source,
     runId: 'incomplete-latest-commit-attempt',
     timestamp: '2026-09-01T04:00:00.000Z',
-    trigger: 'manual',
+    trigger: 'auto',
     tests: source.tests.map((result, index) => (index === 0 ? {
       ...result,
       durationSeconds: null,
@@ -151,7 +151,7 @@ test('Overview uses the newest attempt of the newest commit even when it is inco
   expect(overview.results.some((result) => result.status === 'failed')).toBe(true);
 });
 
-test('a late old-commit run remains visible in Overview and Aggregate Explorer data', () => {
+test('a late automatic old-commit run remains visible in Overview and Aggregate Explorer data', () => {
   const rawData = cloneBenchmarkData();
   const source = rawData.runs.find((run) => run.provenance.rocjitsuCommitSha.startsWith('31369c4d'));
   rawData.runs.push({
@@ -159,7 +159,7 @@ test('a late old-commit run remains visible in Overview and Aggregate Explorer d
     runId: 'late-run-for-01d0c0de',
     timestamp: '2026-09-01T03:00:00.000Z',
     commitTimestamp: '2026-08-29T12:00:00.000Z',
-    trigger: 'manual',
+    trigger: 'auto',
     provenance: {
       ...source.provenance,
       rocjitsuCommitSha: '01d0c0de00000000000000000000000000000000',
@@ -283,7 +283,7 @@ test('1D history follows the latest commit date rather than the latest execution
     runId: 'late-execution-for-2026-08-31-commit',
     timestamp: '2026-09-01T02:00:00.000Z',
     commitTimestamp: '2026-08-31T21:00:00.000Z',
-    trigger: 'manual',
+    trigger: 'auto',
     provenance: {
       ...source.provenance,
       rocjitsuCommitSha: 'c0ffee2600000000000000000000000000000000',
@@ -375,17 +375,11 @@ test('benchmark history keeps same-day commits as separate ordered points', () =
   expect(latestLabels.join(' ')).toContain('31369c4d');
 });
 
-test('a manual rerun of an older commit keeps its commit position and both attempts adjacent', () => {
+test('manual historical reruns stay out of benchmark history and Recent Runs', () => {
   const series = selectBenchmarkSeries(benchmarkData, gfx1250Filters, 'triton-gemm-f16-1024');
-  const backfillIndexes = series.labels
-    .map((label, index) => (label.includes('8418072e') ? index : -1))
-    .filter((index) => index >= 0);
-
-  expect(backfillIndexes).toHaveLength(2);
-  expect(backfillIndexes[1] - backfillIndexes[0]).toBe(1);
-  expect(series.labels.slice(-3).join(' ')).not.toContain('8418072e');
+  expect(series.labels.filter((label) => label.includes('8418072e'))).toHaveLength(1);
   expect(selectRecentRuns(benchmarkData, gfx1250Filters)[0]).toMatchObject({
     latest: true,
-    olderCommit: true,
+    olderCommit: false,
   });
 });

@@ -17,7 +17,7 @@ defaults:
     shell: bash
 
 env:
-  CORPUS_SHA: e1bac822f3fd2e8c29e3a08ae6c326db1692a757 # rocjitsu-test-corpus#44
+  CORPUS_SHA: 8443bc956e889c0bebd2ee8663ec419df1a68cad # rocjitsu-test-corpus#56
   ROCJITSU_SOURCE_DIR: ${{ github.workspace }}/rocm-systems/emulation/rocjitsu
   CORPUS_SOURCE_DIR: ${{ github.workspace }}/rocjitsu-test-corpus
   RESULTS_BRANCH: gh-pages-rocjitsu
@@ -137,7 +137,7 @@ jobs:
   publish:
     name: Publish dashboard data
     needs: benchmark
-    if: ${{ !cancelled() && github.ref == 'refs/heads/develop' && needs.benchmark.outputs.ran == 'true' }}
+    if: ${{ !cancelled() && needs.benchmark.outputs.ran == 'true' && github.ref_type == 'branch' }}
     runs-on: ubuntu-24.04
     timeout-minutes: 30
     permissions:
@@ -163,15 +163,28 @@ jobs:
       - name: Checkout repository for publication
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
+          ref: ${{ github.sha }}
           path: publication
 
       - name: Checkout dashboard validator
         uses: actions/checkout@df4cb1c069e1874edd31b4311f1884172cec0e10 # v6.0.3
         with:
           repository: ROCm/rocm-systems
+          ref: develop
           path: dashboard
           persist-credentials: false
-          sparse-checkout: emulation/rocjitsu/website/dashboard
+          sparse-checkout: |
+            emulation/rocjitsu/website/dashboard
+            .github/workflows
+
+      - name: Check publication workflow
+        run: |
+          OFFICIAL_WORKFLOW="${GITHUB_WORKSPACE}/dashboard/.github/workflows/rocjitsu-benchmarks.yml"
+          RUN_WORKFLOW="${GITHUB_WORKSPACE}/publication/.github/workflows/rocjitsu-benchmarks.yml"
+          if ! cmp -s "${RUN_WORKFLOW}" "${OFFICIAL_WORKFLOW}"; then
+            echo "::error::Publication requires the benchmark workflow to match canonical develop. Benchmark diagnostics remain available as artifacts."
+            exit 1
+          fi
 
       - name: Set up publisher Python
         uses: actions/setup-python@a309ff8b426b58ec0e2a45f0f869d46889d02405 # v6.2.0
@@ -228,7 +241,7 @@ jobs:
                 --expected-corpus-sha "${CORPUS_SHA}" \
                 --machine-id "${BENCHMARK_MACHINE}" \
                 --trigger "${TRIGGER}" \
-                --branch develop \
+                --branch "${GITHUB_REF_NAME}" \
                 --commit-message "${COMMIT_MESSAGE}" \
                 --source-ref "${GITHUB_REF_NAME}" \
                 --is-beta

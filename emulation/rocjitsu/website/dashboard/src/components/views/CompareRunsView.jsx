@@ -25,7 +25,7 @@ import DetailItem from '../shared/DetailItem';
 import { DetailGrid, DetailSectionHeading } from '../shared/DetailLayout';
 import SectionCard from '../shared/SectionCard';
 import StatusChip from '../shared/StatusChip';
-import { previousCompletedRunForFilters, selectRunComparison } from '../../data/selectors';
+import { selectComparisonRuns, selectRunComparison } from '../../data/selectors';
 import { commitTimestampFor } from '../../data/runOrdering';
 import { provenanceDetails } from '../../data/provenance';
 import {
@@ -133,6 +133,8 @@ function RunInformation({ label, run, otherRun, filters, accentColor }) {
         />
       </Stack>
       <DetailGrid>
+        <DetailItem label="Branch">{run.branch}</DetailItem>
+        <DetailItem label="Run type">{run.trigger === 'manual' ? 'Manual' : 'Auto'}</DetailItem>
         <DetailItem label="Coverage">
           <HighlightedValue different={coverage !== otherCoverage}>{coverage}</HighlightedValue>
         </DetailItem>
@@ -220,15 +222,10 @@ export default function CompareRunsView({
 }) {
   const theme = useTheme();
   const compactChart = useMediaQuery(theme.breakpoints.down('sm'));
-  const selectedCandidate = data.runs.find((run) => run.runId === selectedCandidateId);
-  const candidate = selectedCandidate ?? data.latestRun;
-  const defaultBaseline = selectedCandidate
-    ? previousCompletedRunForFilters(data.runs, candidate, filters)
-    : data.runs.at(-2) ?? null;
-  const baseline = data.runs.find((run) => run.runId === selectedBaselineId) ?? defaultBaseline;
+  const { candidate, baseline } = selectComparisonRuns(data, selectedCandidateId, selectedBaselineId, filters);
   const viewModel = selectRunComparison(candidate, baseline, filters, NOISE_TOLERANCE);
   const hasRuns = Boolean(candidate);
-  const runOptions = data.runs.slice().reverse();
+  const runOptions = data.comparisonRuns.slice().reverse();
   const maximumDelta = Math.max(...viewModel.comparable.map((item) => Math.abs(item.delta)), 0);
   const axisLimit = Math.max(5, Math.ceil(maximumDelta * 1.25));
   const chartHeight = Math.min(720, Math.max(320, viewModel.comparable.length * 34 + 100));
