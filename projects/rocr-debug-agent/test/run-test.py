@@ -1,3 +1,4 @@
+import contextlib
 import os
 import re
 import select
@@ -11,8 +12,11 @@ import hashlib
 import logging
 import shutil
 import signal
+import threading
 
 DEFAULT_TIMEOUT = 60
+
+AGENT_LIBRARY = "librocm-debug-agent.so.2"
 
 LOGGER_NAME = "rocm-debug-agent-test"
 
@@ -635,6 +639,131 @@ def test_lazy_loading_and_eager_incompatible(*, name, args, patterns=(), **_):
     return True
 
 
+@contextlib.contextmanager
+def agent_loaded_by(mode):
+    """Run with the agent loaded by the runtime ('tools': HSA_TOOLS_LIB, OnLoad hooks
+    code object loads) or by the dynamic loader ('preload': LD_PRELOAD, the agent
+    starts by itself and reads code objects from r_debug when waves stop)."""
+    with unittest.mock.patch.dict(os.environ):
+        if mode == "preload":
+            os.environ.pop("HSA_TOOLS_LIB", None)
+            os.environ["LD_PRELOAD"] = AGENT_LIBRARY
+        yield
+
+
+def test_preload_dump(*, name, args, **_):
+    """The assert trap of test_assert_trap, with the agent preloaded instead."""
+    patterns = next(
+        t["patterns"] for t in TEST_DEFINITIONS if t["name"] == "test_assert_trap"
+    )
+    with agent_loaded_by("preload"):
+        out_str, err_str, success = run_and_communicate(test_name=name, args=args)
+    if not success:
+        return False
+    return check_errors([re.compile(s) for s in patterns], out_str, err_str)
+
+
+def test_preload_save_code_objects(*, name, args, **_):
+    """-c with the agent preloaded saves the code objects when the waves are printed."""
+    if not shutil.which("readelf"):
+        logger().info("Tool readelf not found, skipping %s", name)
+        unsupported_tests.add(test_preload_save_code_objects)
+        return True
+
+    with tempfile.TemporaryDirectory() as tmpdir:
+        with agent_loaded_by("preload"):
+            run_and_communicate(
+                test_name=name,
+                args=args,
+                debug_agent_options=f"--save-code-objects={tmpdir} -c",
+            )
+
+        saved = [os.path.join(tmpdir, f) for f in os.listdir(tmpdir)]
+        if not any(_has_symbol_with_readelf(p, "vector_add_assert_trap") for p in saved):
+            logger().info(
+                "No saved code object defines vector_add_assert_trap; saved:\n\t%s",
+                "\n\t".join(os.path.basename(p) for p in saved) or "(none)",
+            )
+            return False
+    return True
+
+
+def run_sigquit_resume(name, args, mode, patterns):
+    """SIGQUIT a running kernel, release it once the waves are printed, and
+    expect the program to finish: the agent resumes the waves it stopped."""
+    check_list = [re.compile(s) for s in patterns]
+    _log = logger()
+    with agent_loaded_by(mode):
+        p = Popen(
+            ["./rocm-debug-agent-test", args], stdin=PIPE, stdout=PIPE, stderr=PIPE
+        )
+
+    lock = threading.Lock()
+    collected = {"out": b"", "err": b""}
+
+    def drain(stream, key):
+        for chunk in iter(lambda: stream.read1(4096), b""):
+            with lock:
+                collected[key] += chunk
+
+    readers = [
+        threading.Thread(target=drain, args=(p.stdout, "out"), daemon=True),
+        threading.Thread(target=drain, args=(p.stderr, "err"), daemon=True),
+    ]
+    for t in readers:
+        t.start()
+
+    def wait_for(key, text):
+        end = time.monotonic() + DEFAULT_TIMEOUT
+        while time.monotonic() < end:
+            with lock:
+                if text in collected[key]:
+                    return True
+            if p.poll() is not None:
+                break
+            time.sleep(0.1)
+        return False
+
+    def fail(reason):
+        _log.info("Test %s (%s) FAIL: %s", name, mode, reason)
+        p.kill()
+        p.wait()
+        for t in readers:
+            t.join(timeout=5)
+        log_program_output(
+            collected["out"].decode("utf-8", "replace"),
+            collected["err"].decode("utf-8", "replace"),
+        )
+        return False
+
+    if not wait_for("out", b"Kernel started"):
+        return fail("the kernel did not start")
+    p.send_signal(signal.SIGQUIT)
+    if not wait_for("err", b"End of disassembly"):
+        return fail("no wave dump with disassembly after SIGQUIT")
+    p.stdin.write(b"go\n")
+    p.stdin.flush()
+    try:
+        rc = p.wait(timeout=DEFAULT_TIMEOUT)
+    except TimeoutExpired:
+        return fail("the program did not finish: waves left stopped after the dump")
+    for t in readers:
+        t.join(timeout=5)
+    out_str = collected["out"].decode("utf-8", "replace")
+    err_str = collected["err"].decode("utf-8", "replace")
+    log_program_output(out_str, err_str)
+    if rc != 0 or "Kernel finished" not in out_str:
+        _log.info("Test %s (%s): exit code %d", name, mode, rc)
+        return False
+    return check_errors(check_list, out_str, err_str)
+
+
+def test_sigquit_resumes(*, name, args, patterns=(), **_):
+    return all(
+        run_sigquit_resume(name, args, mode, patterns) for mode in ("tools", "preload")
+    )
+
+
 # ==============================================================================
 # Test Definitions
 #
@@ -657,6 +786,7 @@ def test_lazy_loading_and_eager_incompatible(*, name, args, patterns=(), **_):
 #                    for default pattern-matching behaviour.
 #   abort_on_fail  - if True, abort the entire suite when this test fails
 # ==============================================================================
+
 
 TEST_DEFINITIONS = [
     {
@@ -779,6 +909,28 @@ TEST_DEFINITIONS = [
             r"v0:",
             r"Disassembly for function sigquit_kern\(int\*\)",
         ],
+    },
+    {
+        'name': 'test_sigquit_resumes',
+        'description': 'SIGQUIT dump names the kernel and the program then finishes',
+        'args': '8',
+        'function': test_sigquit_resumes,
+        'patterns': [
+            r"<sigquit_resume_kern\(int\*, int const\*\)>",
+            r"Disassembly for function sigquit_resume_kern\(int\*, int const\*\)",
+        ],
+    },
+    {
+        'name': 'test_preload_dump',
+        'description': 'Agent preloaded without HSA_TOOLS_LIB dumps a faulting wave',
+        'args': '1',
+        'function': test_preload_dump,
+    },
+    {
+        'name': 'test_preload_save_code_objects',
+        'description': '-c with the agent preloaded saves code objects when waves are printed',
+        'args': '1',
+        'function': test_preload_save_code_objects,
     },
     {
         'name': 'test_debug_info',

@@ -41,7 +41,9 @@ namespace amd::debug_agent
 
 log_level_t log_level = log_level_t::warning;
 
-std::ofstream agent_out;
+/* Constructed before any other initializer of the library: the agent starts from one
+   (debug_agent.cpp) and configures this stream.  */
+std::ofstream agent_out __attribute__ ((init_priority (101)));
 
 namespace detail
 {
