@@ -30,7 +30,7 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLLMax = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    128ULL*1024,         // [2] AllGather
+    256ULL*1024,         // [2] AllGather       -- LL beats LL128 up to 256K on 4 ranks
     1ULL*1024*1024,      // [3] ReduceScatter -- LL ends here; LL128 starts on the next byte
     32ULL*1024*1024,     // [4] AllReduce
     0,                   // [5] SendRecv        -- not used
@@ -43,7 +43,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLL128Max = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    128ULL*1024*1024,    // [2] AllGather       -- beats Ring at 128M on 8-64 ranks (AICOMRCCL-2876)
+    64ULL*1024*1024,     // [2] AllGather       -- below 8 ranks Ring Simple wins from 128M; 8+ ranks use
+                         //                        the per-rank cap below
     64ULL*1024*1024,     // [3] ReduceScatter   -- LL128 through 64M total
     256ULL*1024*1024,    // [4] AllReduce       -- two-shot beats Ring to 256M (AICOMRCCL-2875); its scratch
                          //                        slot reaches 256M from 32 ranks, ~128M at 2-8, 240M at 16
@@ -180,7 +181,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .ddaLLMaxPerRank = {
     0,                   // [0] Broadcast      -- not used
     0,                   // [1] Reduce          -- not used
-    16ULL*1024,          // [2] AllGather       -- LL beats LL128 to 128K/256K/512K/1M at 8/16/32/64
+    32ULL*1024,          // [2] AllGather       -- LL beats LL128 up to 256K on 8 ranks (16-64
+                         //                        ranks follow the per-rank share, not re-measured)
     256ULL*1024,         // [3] ReduceScatter   -- LL past 2M/4M/8M/16M at 8/16/32/64 trails LL128 up to 2x
     1ULL*1024*1024,      // [4] AllReduce       -- LL two-shot beats LL128 1.4-1.9x to 8M/16M/32M/64M
     0,                   // [5] SendRecv        -- not used
@@ -225,7 +227,8 @@ static const rcclArchThresholds rcclArchThresholds_gfx1250 = {
   .arTreeLL128Unlimited = true,                   // Tree LL128 beats Tree Simple 1.3-2.9x at 32M-16G
   .arTreeMaxPerRank = 1ULL*1024*1024,             // Tree beats Ring 1.4-2.3x to 8M/16M/32M/64M
   .arTreeLLMaxPerRank = 32ULL*1024,               // Tree LL beats LL128 1.2-1.6x to 256K/512K/1M/2M
-  .agRingLL128MaxPerRank = 64ULL*1024*1024,       // Ring LL128 beats Simple to 512M/1G/2G/4G
+  .agRingLL128MaxPerRank = 0,                     // 0: keep the tuning model's Ring LL128 range (Ring
+                                                  // Simple beats LL128 from 256M on 8 ranks)
   .rsRingLL128MinPerRank = 512ULL*1024,           // Ring LL128 beats LL from 1M per rank
   .rsRingLL128MaxPerRank = 8ULL*1024*1024,        // 2/4-byte types: Simple wins past 8M per rank
   .rsRingLL128MaxPerRank1B = 32ULL*1024*1024,     // fp8: LL128 holds to 32M per rank
