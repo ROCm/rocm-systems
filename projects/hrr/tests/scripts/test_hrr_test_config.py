@@ -155,11 +155,6 @@ class LintTest(unittest.TestCase):
         self.assertTrue(any("workload" in error for error in errors))
         self.assertEqual(cfg.lint(suite({"Unit_HRR_Foo_Direct": {}}), cases=listed), [])
 
-    def test_workflow_archs_must_match(self):
-        errors = cfg.lint(suite({"Runs": {}}), workflow_archs=["gfx90a"])
-        self.assertTrue(any("HRR_ARCHS" in error for error in errors))
-        self.assertEqual(cfg.lint(suite({"Runs": {}}), workflow_archs=list(ARCHS)), [])
-
 
 class ListingTest(unittest.TestCase):
     def test_json_listing_keeps_tags_and_passes_the_selector(self):
@@ -203,6 +198,56 @@ class CheckTest(unittest.TestCase):
         self.assertIn("Gone", err.getvalue())
         self.assertIn("UNEXPECTED", err.getvalue())
         self.assertIn("New", err.getvalue())
+
+    def test_check_allows_a_case_compiled_out_where_it_is_unsupported(self):
+        self.write(suite({
+            "Kept": {},
+            "PosixOnly": {"skip": [rule({"os": "windows"})]},
+            "OneArch": {"skip": [rule({"os": "windows", "arch": "gfx90a"})]},
+        }))
+        payload = listing(("Kept", []))
+        for os_name, rc, text in (("windows", 1, "OneArch"), ("linux", 1, "PosixOnly")):
+            with self.subTest(os=os_name):
+                with mock.patch.object(cfg, "detect_os", return_value=os_name), \
+                        mock.patch.object(cfg.subprocess, "run", return_value=completed(payload)):
+                    err = io.StringIO()
+                    with contextlib.redirect_stderr(err):
+                        got = cfg.main(["check", "--binary", "./bin", "--config", str(self.path)])
+                self.assertEqual(got, rc)
+                self.assertIn("MISSING", err.getvalue())
+                self.assertIn(text, err.getvalue())
+                if os_name == "windows":
+                    self.assertNotIn("PosixOnly", err.getvalue())
+
+    def test_supported_case_compiled_in_is_not_unexpected(self):
+        # An OS-wide unsupported rule (even an empty one) only relaxes the
+        # MISSING side: the case stays in the config, so a binary that still
+        # compiles it is correct and must not be reported UNEXPECTED.
+        self.write(suite({
+            "Kept": {},
+            "NoWhen": {"skip": [rule({})]},
+            "LinuxOnly": {"skip": [rule({"os": "linux"})]},
+        }))
+        payload = listing(("Kept", []), ("NoWhen", []), ("LinuxOnly", []))
+        with mock.patch.object(cfg, "detect_os", return_value="linux"), \
+                mock.patch.object(cfg.subprocess, "run", return_value=completed(payload)):
+            out, err = io.StringIO(), io.StringIO()
+            with contextlib.redirect_stdout(out), contextlib.redirect_stderr(err):
+                rc = cfg.main(["check", "--binary", "./bin", "--config", str(self.path)])
+        self.assertEqual(rc, 0, err.getvalue())
+        self.assertNotIn("UNEXPECTED", err.getvalue())
+        self.assertIn("OK: 3 test cases present", out.getvalue())
+
+    def test_case_not_in_the_config_is_still_unexpected(self):
+        self.write(suite({"Kept": {}, "LinuxOnly": {"skip": [rule({"os": "linux"})]}}))
+        payload = listing(("Kept", []), ("LinuxOnly", []), ("Bogus", []))
+        with mock.patch.object(cfg, "detect_os", return_value="linux"), \
+                mock.patch.object(cfg.subprocess, "run", return_value=completed(payload)):
+            err = io.StringIO()
+            with contextlib.redirect_stderr(err):
+                rc = cfg.main(["check", "--binary", "./bin", "--config", str(self.path)])
+        self.assertEqual(rc, 1)
+        self.assertIn("UNEXPECTED (added without updating the config): Bogus", err.getvalue())
 
     def test_update_keeps_rules_and_adds_empty_entries(self):
         kept = rule({"os": "linux", "arch": "gfx1151"}, "disabled", "npu",
@@ -259,15 +304,6 @@ class DetectTest(unittest.TestCase):
         self.assertEqual(cfg.detect_archs(lambda argv: None), [])
 
 
-class WorkflowTest(unittest.TestCase):
-    def test_reads_hrr_archs(self):
-        tmp = tempfile.NamedTemporaryFile("w", delete=False, encoding="utf-8")
-        self.addCleanup(lambda: Path(tmp.name).unlink(missing_ok=True))
-        tmp.write('env:\n  HRR_ARCHS: "gfx90a;gfx942"\n')
-        tmp.close()
-        self.assertEqual(cfg.workflow_archs(tmp.name), ["gfx90a", "gfx942"])
-
-
 class LintCommandTest(unittest.TestCase):
     def test_lint_command_fails_on_a_bad_file(self):
         tmp = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8")
@@ -279,6 +315,29 @@ class LintCommandTest(unittest.TestCase):
             rc = cfg.main(["lint", tmp.name])
         self.assertEqual(rc, 1)
         self.assertIn("version", err.getvalue())
+
+    def test_lint_command_fails_when_targets_arch_differ(self):
+        other = suite({"Runs": {}})
+        other["targets"]["arch"] = ARCHS[:-1] + ["gfx1200"]
+        paths = []
+        for config in (suite({"Runs": {}}), other):
+            tmp = tempfile.NamedTemporaryFile("w", suffix=".yaml", delete=False, encoding="utf-8")
+            self.addCleanup(lambda name=tmp.name: Path(name).unlink(missing_ok=True))
+            tmp.write(cfg.render(config))
+            tmp.close()
+            paths.append(tmp.name)
+        err = io.StringIO()
+        with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
+            rc = cfg.main(["lint", *paths])
+        self.assertEqual(rc, 1)
+        self.assertIn("missing: gfx1151; extra: gfx1200", err.getvalue())
+        with contextlib.redirect_stdout(io.StringIO()):
+            self.assertEqual(cfg.main(["lint", paths[0], paths[0]]), 0)
+
+    def test_repo_suites_share_targets_arch(self):
+        config_dir = Path(__file__).resolve().parent.parent / "config"
+        configs = {name: cfg.load(config_dir / name) for name in ("unit.yaml", "integration.yaml")}
+        self.assertEqual(cfg.arch_mismatches(configs), [])
 
 
 if __name__ == "__main__":
