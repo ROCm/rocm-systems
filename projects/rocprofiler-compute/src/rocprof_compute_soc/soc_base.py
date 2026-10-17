@@ -82,12 +82,7 @@ def _same_bucket_priority_ids_from_policy_value(
 @functools.lru_cache(maxsize=1)
 def _load_same_bucket_priority_policy_map() -> dict[str, tuple[str, ...]]:
     """Load counter grouping policy YAML into arch -> metric id tuple."""
-    path = (
-        config.rocprof_compute_home
-        / "rocprof_compute_soc"
-        / "analysis_configs"
-        / "profiling_counter_grouping_policy.yaml"
-    )
+    path = config.analysis_configs_dir / "profiling_counter_grouping_policy.yaml"
     if not path.is_file():
         console_warning(
             "profiling",

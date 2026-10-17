@@ -586,9 +586,7 @@ def test_same_bucket_priority_hbm_traffic_ids_match_yaml(gpu_arch):
     """Policy metric IDs must resolve to 'HBM Read Traffic' and
     'HBM Write and Atomic Traffic' in the analysis YAMLs.  Guards against
     metric index drift after YAML re-org."""
-    config_dir = (
-        Path(config.rocprof_compute_home) / "rocprof_compute_soc" / "analysis_configs"
-    )
+    config_dir = config.analysis_configs_dir
     soc = _make_soc(PERFMON_CONFIG, arch=gpu_arch)
     ids = soc._same_bucket_priority_metric_ids()
     resolved = [_resolve_metric_name(config_dir, gpu_arch, mid) for mid in ids]
