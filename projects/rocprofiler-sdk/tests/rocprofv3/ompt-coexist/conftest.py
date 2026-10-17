@@ -2,7 +2,7 @@
 
 # MIT License
 #
-# Copyright (c) 2024-2025 Advanced Micro Devices, Inc. All rights reserved.
+# Copyright (c) 2026 Advanced Micro Devices, Inc. All rights reserved.
 #
 # Permission is hereby granted, free of charge, to any person obtaining a copy
 # of this software and associated documentation files (the "Software"), to deal
@@ -23,35 +23,46 @@
 # THE SOFTWARE.
 
 import json
-import pytest
+import os
+import sqlite3
 
-from rocprofiler_sdk.pytest_utils.dotdict import dotdict
+import pytest
 
 
 def pytest_addoption(parser):
     parser.addoption(
-        "--client-input",
+        "--rocpd-input",
         action="store",
-        default="coexist-client.json",
-        help="JSON summary produced by the coexist SDK client",
+        default="out_results.db",
+        help="Input rocpd SQLite database written by rocprofv3",
     )
     parser.addoption(
         "--mock-input",
         action="store",
         default="coexist-mock.json",
-        help="JSON summary produced by the mock OMPT tool",
+        help="JSON summary the mock OMPT tool writes at teardown",
     )
 
 
 @pytest.fixture
-def client_data(request):
-    filename = request.config.getoption("--client-input")
-    with open(filename, "r") as inp:
-        return dotdict(json.load(inp))
+def rocpd_conn(request):
+    """Open the rocpd SQLite database. OMPT is a rocpd-only trace, so all OMPT
+    validators read from here. Skipped when the database is unavailable (the
+    execute test that produces it was skipped or failed)."""
+    filename = request.config.getoption("--rocpd-input")
+    if not os.path.isfile(filename):
+        return pytest.skip("rocpd output unavailable")
+    return sqlite3.connect(filename)
 
 
 @pytest.fixture
-def mock_data(request):
+def mock_summary(request):
+    """Parsed JSON summary from the mock OMPT tool, or None when the file is
+    absent. Absence is itself an assertable outcome: the mock only writes the
+    summary once the OpenMP runtime has loaded it, so no file means the runtime
+    never went looking for a second tool."""
     filename = request.config.getoption("--mock-input")
+    if not os.path.isfile(filename):
+        return None
     with open(filename, "r") as inp:
-        return dotdict(json.load(inp))
+        return json.load(inp)["coexist-mock-tool"]
