@@ -1999,6 +1999,22 @@ target_compile_definitions(
 # --- Interposer loader initialization regression tests ---
 
 if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
+    add_executable(standalone_plugin_abi_test standalone_plugin_abi_test.cpp)
+    # Keep this loader independent of core objects and librocjitsu.so so they
+    # cannot hide unresolved simulator symbols in the standalone module.
+    target_link_libraries(
+        standalone_plugin_abi_test
+        PRIVATE util simdojo_headers ${CMAKE_DL_LIBS}
+    )
+    rj_configure_target(standalone_plugin_abi_test TEST)
+    add_dependencies(standalone_plugin_abi_test rocjitsu_plugin_race_so)
+    add_test(
+        NAME ExecutionPluginAbi.StandaloneRaceModuleLoads
+        COMMAND
+            standalone_plugin_abi_test $<TARGET_FILE:rocjitsu_plugin_race_so>
+            race
+    )
+
     # Keep inline register accessors in a separate DSO without linking core
     # objects into it, so missing exports cannot be hidden by static linkage.
     add_library(register_observer_probe MODULE register_observer_probe.cpp)

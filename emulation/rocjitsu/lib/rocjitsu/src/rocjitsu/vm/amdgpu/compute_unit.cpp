@@ -925,30 +925,31 @@ VmAccessOutcome ComputeUnitCore::route_memory_inst(Instruction *inst, Wavefront 
       if ((d.lane_mask & ~scratch_lanes & lane_bit) != 0) {
         const uint64_t address = d.per_lane_addr[lane];
         if (address >= shared_aperture_base_ && address <= shared_aperture_limit_) {
-          if (((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
+          if (arch() == ROCJITSU_CODE_ARCH_CDNA5 &&
+              ((address - shared_aperture_base_) & (uint64_t{1} << 31)) != 0)
             flat_dds_lane_mask |= lane_bit;
           else
             flat_local_lane_mask |= lane_bit;
         }
       }
     }
-    // Under the current uniform-address-space assumption, FLAT operations
-    // targeting the shared aperture use the LDS pipeline. Scratch-targeting
-    // FLATs stay on the global path. Counter participation is selected from all
-    // requesting lanes below, independently of the first-lane functional route.
+    // Normalize shared addresses once for both routes. The global operation
+    // excludes those lanes, and retries reuse this state without rerouting.
     const uint64_t request_lanes = transpose_request_lane_mask(d, wf_size);
-    const uint32_t first_lane =
-        request_lanes == 0 ? wf_size : static_cast<uint32_t>(std::countr_zero(request_lanes));
     const uint64_t flat_shared_lane_mask = flat_local_lane_mask | flat_dds_lane_mask;
-    if (first_lane < wf_size && (flat_shared_lane_mask & (uint64_t{1} << first_lane)) != 0) {
+    d.flat_local_lane_mask = flat_local_lane_mask & request_lanes;
+    d.flat_dds_lane_mask = flat_dds_lane_mask & request_lanes;
+    if (flat_shared_lane_mask != 0) {
       if (observe_routed_access) {
         std::ranges::copy_n(d.per_lane_addr.begin(), wf_size, pre_routing_address_storage.begin());
         pre_routing_addresses = {pre_routing_address_storage.data(), wf_size};
       }
       for (uint32_t lane = 0; lane < wf_size; ++lane) {
-        if (d.lane_mask & (1ULL << lane))
-          d.per_lane_addr[lane] = (d.per_lane_addr[lane] - shared_aperture_base_) + wf.lds_base();
+        if (flat_shared_lane_mask & (uint64_t{1} << lane))
+          d.per_lane_addr[lane] = d.per_lane_addr[lane] - shared_aperture_base_ + wf.lds_base();
       }
+    }
+    if (request_lanes != 0 && (request_lanes & ~flat_shared_lane_mask) == 0) {
       inst->data()->set_tag(LOCAL_MEM);
       d.wait_counter_type = WaitCounterType::LGKMCNT;
       const auto *issue = inst->amdgpu_memory_issue_info();
@@ -1308,8 +1309,7 @@ void ComputeUnitCore::track_memory_wait(Instruction &inst, Wavefront &wf) {
   // map X to a position issued below for this instruction: zero-EXEC operations
   // may be skipped by an empty completion queue while older X entries remain.
   const bool flat_local_route =
-      flat && flat_requests &&
-      (flat_shared_lanes & (uint64_t{1} << std::countr_zero(flat_requests)));
+      flat && flat_requests != 0 && (flat_requests & ~flat_shared_lanes) == 0;
   const auto xcnt_completion_counter =
       flat_local_route ? WaitCounterKind::Ds : classified.front().counter;
   std::optional<WaitCounterKind> xcnt_completion;
