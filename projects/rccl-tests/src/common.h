@@ -27,6 +27,13 @@
 #include <thread>
 #ifdef MPI_SUPPORT
 #include "mpi.h"
+// Open MPI reports its GPU-awareness (MPIX_ROCM_AWARE_SUPPORT and
+// MPIX_CUDA_AWARE_SUPPORT) in mpi-ext.h rather than mpi.h.
+#if defined(OPEN_MPI) && defined(__has_include)
+#if __has_include(<mpi-ext.h>)
+#include <mpi-ext.h>
+#endif
+#endif
 #endif
 #include "nccl1_compat.h"
 #include "rccl_compat.h"  // Weak symbols forward declarations
