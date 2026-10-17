@@ -12,7 +12,269 @@
 #include "device/rocm/rocsched.hpp"
 #include "utils/debug.hpp"
 #include <algorithm>
+#include <atomic>
+#include <chrono>
+#include <cstdio>
+#include <cstdlib>
+#include <cstring>
 #include <map>
+#include <string>
+
+namespace {
+
+#if defined(__linux__)
+// Detects host memory pressure by reading /proc/meminfo and /proc/pressure/memory.
+// Used to skip pinning when the system is under reclaim pressure, avoiding KFD
+// queue evictions caused by hsa_amd_memory_lock under reclaim (rocm-systems#12528).
+//
+// When running inside a cgroup v2 container with a memory limit, uses the
+// per-cgroup memory.current / memory.max / memory.pressure instead of the
+// system-wide /proc files.
+//
+// Env vars:
+//   GPU_SKIP_PIN_UNDER_PRESSURE     0 to disable (default: enabled)
+//   GPU_PIN_PRESSURE_THRESHOLD_MB   MemAvailable threshold in MiB
+//                                   (default: max(2048, 5% of MemTotal))
+//   GPU_PIN_PRESSURE_PSI_THRESHOLD  PSI some avg10 threshold, percent (default: 5.0)
+struct MemPressureDetector {
+  static constexpr int64_t kFloorBytes = 2LL * 1024 * 1024 * 1024;
+  static constexpr int kDefaultFractionPercent = 5;
+  static constexpr int kDefaultPsiThresholdX100 = 500;
+  static constexpr int64_t kCheckIntervalUs = 100'000;
+
+  std::atomic<int64_t> cached_avail_bytes_{INT64_MAX};
+  std::atomic<int> cached_psi_x100_{0};
+  std::atomic<int64_t> last_check_us_{0};
+  int64_t threshold_bytes_{0};
+  int psi_threshold_x100_{0};
+  bool use_psi_{false};
+  bool enabled_{false};
+
+  // cgroup v2 paths (empty if not in a constrained cgroup)
+  std::string cg_mem_current_path_;
+  std::string cg_mem_stat_path_;
+  std::string cg_pressure_path_;
+  bool use_cgroup_{false};
+  int64_t cg_mem_max_{0};
+
+  static int64_t readSingleInt(const char* path) {
+    FILE* f = fopen(path, "r");
+    if (!f) return -1;
+    char buf[64];
+    int64_t val = -1;
+    if (fgets(buf, sizeof(buf), f)) {
+      val = atoll(buf);
+    }
+    fclose(f);
+    return val;
+  }
+
+  // Read a named field from a cgroup stat file (key-value lines separated by spaces).
+  static int64_t readStatField(const char* path, const char* field) {
+    FILE* f = fopen(path, "r");
+    if (!f) return 0;
+    char line[256];
+    size_t field_len = strlen(field);
+    int64_t val = 0;
+    while (fgets(line, sizeof(line), f)) {
+      if (strncmp(line, field, field_len) == 0 && line[field_len] == ' ') {
+        val = atoll(line + field_len + 1);
+        break;
+      }
+    }
+    fclose(f);
+    return val;
+  }
+
+  static int64_t readMemTotal() {
+    FILE* f = fopen("/proc/meminfo", "r");
+    if (!f) return 0;
+    char line[256];
+    int64_t total_kb = 0;
+    while (fgets(line, sizeof(line), f)) {
+      if (strncmp(line, "MemTotal:", 9) == 0) {
+        total_kb = atoll(line + 9);
+        break;
+      }
+    }
+    fclose(f);
+    return total_kb * 1024LL;
+  }
+
+  // Try to read a finite memory.max from the given cgroup path.
+  // Returns the limit in bytes, or 0 if "max" (unlimited) or unreadable.
+  static int64_t readCgroupMemMax(const std::string& base) {
+    std::string max_path = base + "/memory.max";
+    FILE* f = fopen(max_path.c_str(), "r");
+    if (!f) return 0;
+    char buf[64];
+    if (!fgets(buf, sizeof(buf), f)) {
+      fclose(f);
+      return 0;
+    }
+    fclose(f);
+    if (strncmp(buf, "max", 3) == 0) return 0;
+    int64_t val = atoll(buf);
+    return val > 0 ? val : 0;
+  }
+
+  void detectCgroup() {
+    FILE* f = fopen("/proc/self/cgroup", "r");
+    if (!f) return;
+    char line[512];
+    std::string cg_path;
+    while (fgets(line, sizeof(line), f)) {
+      // cgroup v2 line: "0::<path>"
+      if (strncmp(line, "0::", 3) == 0) {
+        cg_path = line + 3;
+        while (!cg_path.empty() && (cg_path.back() == '\n' || cg_path.back() == ' '))
+          cg_path.pop_back();
+        break;
+      }
+    }
+    fclose(f);
+    if (cg_path.empty()) return;
+
+    // Walk up the cgroup hierarchy to find the effective memory limit.
+    // In Kubernetes, the limit is often on an ancestor (e.g., /kubepods/pod-xyz)
+    // rather than the leaf cgroup.
+    std::string effective_base;
+    int64_t effective_max = 0;
+    std::string path = cg_path;
+    while (!path.empty()) {
+      std::string base = "/sys/fs/cgroup" + path;
+      int64_t mem_max = readCgroupMemMax(base);
+      if (mem_max > 0 && (effective_max == 0 || mem_max < effective_max)) {
+        effective_max = mem_max;
+        effective_base = base;
+      }
+      // Move to parent
+      auto pos = path.rfind('/');
+      if (pos == std::string::npos || pos == 0) break;
+      path = path.substr(0, pos);
+    }
+
+    if (effective_max == 0) return;
+
+    std::string cur_path = effective_base + "/memory.current";
+    std::string stat_path = effective_base + "/memory.stat";
+    std::string psi_path = effective_base + "/memory.pressure";
+
+    // Verify memory.current is readable
+    if (readSingleInt(cur_path.c_str()) < 0) return;
+
+    cg_mem_max_ = effective_max;
+    cg_mem_current_path_ = cur_path;
+    cg_mem_stat_path_ = stat_path;
+    cg_pressure_path_ = psi_path;
+    use_cgroup_ = true;
+  }
+
+  MemPressureDetector() {
+    const char* env = getenv("GPU_SKIP_PIN_UNDER_PRESSURE");
+    if (env && atoi(env) == 0) return;
+
+    detectCgroup();
+
+    const char* thresh_env = getenv("GPU_PIN_PRESSURE_THRESHOLD_MB");
+    if (thresh_env) {
+      threshold_bytes_ = atoll(thresh_env) * 1024LL * 1024LL;
+    } else {
+      int64_t mem_total = use_cgroup_ ? cg_mem_max_ : readMemTotal();
+      int64_t fraction = mem_total * kDefaultFractionPercent / 100;
+      threshold_bytes_ = std::max(kFloorBytes, fraction);
+    }
+
+    const char* psi_env = getenv("GPU_PIN_PRESSURE_PSI_THRESHOLD");
+    psi_threshold_x100_ =
+        psi_env ? static_cast<int>(atof(psi_env) * 100) : kDefaultPsiThresholdX100;
+
+    // For PSI: prefer per-cgroup, fall back to system-wide
+    const char* psi_path = use_cgroup_ ? cg_pressure_path_.c_str() : "/proc/pressure/memory";
+    FILE* f = fopen(psi_path, "r");
+    use_psi_ = (f != nullptr) && (psi_threshold_x100_ > 0);
+    if (f) fclose(f);
+
+    enabled_ = true;
+  }
+
+  void refresh() {
+    if (use_cgroup_) {
+      int64_t current = readSingleInt(cg_mem_current_path_.c_str());
+      if (current >= 0) {
+        // memory.current includes reclaimable page cache. Subtract inactive_file
+        // to approximate true memory pressure, matching what MemAvailable does
+        // for system-wide /proc/meminfo.
+        int64_t inactive_file = readStatField(cg_mem_stat_path_.c_str(), "inactive_file");
+        int64_t used = std::max(current - inactive_file, int64_t{0});
+        int64_t avail = cg_mem_max_ - used;
+        cached_avail_bytes_.store(std::max(avail, int64_t{0}), std::memory_order_relaxed);
+      }
+    } else {
+      FILE* f = fopen("/proc/meminfo", "r");
+      if (f) {
+        char line[256];
+        while (fgets(line, sizeof(line), f)) {
+          if (strncmp(line, "MemAvailable:", 13) == 0) {
+            int64_t kb = atoll(line + 13);
+            if (kb > 0) cached_avail_bytes_.store(kb * 1024LL, std::memory_order_relaxed);
+            break;
+          }
+        }
+        fclose(f);
+      }
+    }
+
+    if (use_psi_) {
+      const char* psi_path = use_cgroup_ ? cg_pressure_path_.c_str() : "/proc/pressure/memory";
+      FILE* f = fopen(psi_path, "r");
+      if (f) {
+        char line[256];
+        if (fgets(line, sizeof(line), f)) {
+          const char* p = strstr(line, "avg10=");
+          if (p) {
+            cached_psi_x100_.store(static_cast<int>(atof(p + 6) * 100), std::memory_order_relaxed);
+          }
+        }
+        fclose(f);
+      }
+    }
+  }
+
+  bool underPressure() {
+    if (!enabled_) return false;
+
+    auto now = std::chrono::steady_clock::now().time_since_epoch();
+    int64_t now_us = std::chrono::duration_cast<std::chrono::microseconds>(now).count();
+    int64_t last = last_check_us_.load(std::memory_order_relaxed);
+    if (now_us - last > kCheckIntervalUs) {
+      last_check_us_.store(now_us, std::memory_order_relaxed);
+      refresh();
+    }
+
+    bool mem_low = cached_avail_bytes_.load(std::memory_order_relaxed) < threshold_bytes_;
+    if (!use_psi_) return mem_low;
+
+    bool psi_high = cached_psi_x100_.load(std::memory_order_relaxed) > psi_threshold_x100_;
+    return mem_low && psi_high;
+  }
+};
+
+static MemPressureDetector& pressureDetector() {
+  static MemPressureDetector detector;
+  return detector;
+}
+#endif  // __linux__
+
+static bool isUnderMemoryPressure() {
+#if defined(__linux__)
+  return pressureDetector().underPressure();
+#else
+  return false;
+#endif
+}
+
+}  // anonymous namespace
 
 namespace amd::roc {
 DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
@@ -21,8 +283,7 @@ DmaBlitManager::DmaBlitManager(VirtualGPU& gpu, Setup setup)
       PinXferSize(dev().settings().pinnedXferSize_),
       StagingXferSize(dev().settings().stagedXferSize_),
       completeOperation_(false),
-      context_(nullptr) {
-}
+      context_(nullptr) {}
 
 inline void DmaBlitManager::synchronize() const {
   if (syncOperation_) {
@@ -213,8 +474,8 @@ bool DmaBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& dstMe
   // (releaseGpuMemoryFence) and breaks CUDA-style host-async DtoD semantics.
   if (!HSA_ENABLE_DTIF_FAST_COPY &&
       (setup_.disableCopyBuffer_ ||
-      (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
-       (dev().agent_profile() != HSA_PROFILE_FULL) && dstMemory.isHostMemDirectAccess()))) {
+       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
+        (dev().agent_profile() != HSA_PROFILE_FULL) && dstMemory.isHostMemDirectAccess()))) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     return HostBlitManager::copyBuffer(srcMemory, dstMemory, srcOrigin, dstOrigin, size, false,
@@ -235,8 +496,8 @@ bool DmaBlitManager::copyBufferRect(device::Memory& srcMemory, device::Memory& d
   // is enabled so DtoD stays on the GPU blit path.
   if (!HSA_ENABLE_DTIF_FAST_COPY &&
       (setup_.disableCopyBufferRect_ ||
-      (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
-       dstMemory.isHostMemDirectAccess()))) {
+       (srcMemory.isHostMemDirectAccess() && !srcMemory.isCpuUncached() &&
+        dstMemory.isHostMemDirectAccess()))) {
     // Stall GPU before CPU access
     gpu().releaseGpuMemoryFence();
     return HostBlitManager::copyBufferRect(srcMemory, dstMemory, srcRect, dstRect, size, entire,
@@ -544,8 +805,8 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
       copyMask = assignedEngineMask;
 
       ClPrint(amd::LOG_DEBUG, amd::LOG_COPY,
-              "Using assigned SDMA engine for VirtualGPU %p: mask=0x%x, engine_type=%d",
-              &gpu(), copyMask, engine);
+              "Using assigned SDMA engine for VirtualGPU %p: mask=0x%x, engine_type=%d", &gpu(),
+              copyMask, engine);
     } else {
       // No assigned engine yet - allocate one using device-level allocator
       copyMask = dev().AllocateSdmaEngine(&gpu(), engine, peerAgent, copyAgent);
@@ -555,11 +816,11 @@ inline bool DmaBlitManager::rocrCopyBuffer(address dst, hsa_agent_t& dstAgent, c
         gpu().SetAssignedSdmaEngine(copyMask);
 
         ClPrint(amd::LOG_INFO, amd::LOG_COPY,
-                "Allocated new SDMA engine for VirtualGPU %p: mask=0x%x, engine_type=%d",
-                &gpu(), copyMask, engine);
+                "Allocated new SDMA engine for VirtualGPU %p: mask=0x%x, engine_type=%d", &gpu(),
+                copyMask, engine);
       } else {
-        ClPrint(amd::LOG_WARNING, amd::LOG_COPY,
-                "Failed to allocate SDMA engine for VirtualGPU %p", &gpu());
+        ClPrint(amd::LOG_WARNING, amd::LOG_COPY, "Failed to allocate SDMA engine for VirtualGPU %p",
+                &gpu());
         if (requireSDMA) {
           status = HSA_STATUS_ERROR_OUT_OF_RESOURCES;
         } else {
@@ -659,10 +920,10 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
   hsa_agent_t backendDevice = dev().getBackendDevice();
 
   for (const auto& op : copyOps) {
-    const Memory& srcMem = gpuMem(*op.srcMemory->getDeviceMemory(
-        *op.srcMemory->getContext().devices()[0]));
-    const Memory& dstMem = gpuMem(*op.dstMemory->getDeviceMemory(
-        *op.dstMemory->getContext().devices()[0]));
+    const Memory& srcMem =
+        gpuMem(*op.srcMemory->getDeviceMemory(*op.srcMemory->getContext().devices()[0]));
+    const Memory& dstMem =
+        gpuMem(*op.dstMemory->getDeviceMemory(*op.dstMemory->getContext().devices()[0]));
 
     address src = reinterpret_cast<address>(srcMem.getDeviceMemory()) + op.srcOffset;
     address dst = reinterpret_cast<address>(dstMem.getDeviceMemory()) + op.dstOffset;
@@ -673,8 +934,8 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
 
     // Normalize agents to ensure the calling device's SDMA engines are used,
     // matching the rocrCopyBuffer agent selection logic.
-    if (srcAgent.handle != dstAgent.handle &&
-        srcAgent.handle != cpuAgent.handle && dstAgent.handle != cpuAgent.handle) {
+    if (srcAgent.handle != dstAgent.handle && srcAgent.handle != cpuAgent.handle &&
+        dstAgent.handle != cpuAgent.handle) {
       // P2P: force calling device's backend as src_agent, peer as dst_agent.
       // ROCr selects copy_agent from src_agent, so this ensures the calling
       // device's SDMA engines are used.
@@ -691,23 +952,23 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
     hsaOp.size = op.size;
 
     switch (op.metadata.copyOpType_) {
-    case amd::CopyMetadata::kCopyOpSwap:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
-      hsaOp.src_size = op.size;
-      hsaOp.dst_size = op.size;
-      break;
-    case amd::CopyMetadata::kCopyOpIndirectSrc:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC;
-      break;
-    case amd::CopyMetadata::kCopyOpIndirectDst:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST;
-      break;
-    case amd::CopyMetadata::kCopyOpIndirectSrcDst:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST;
-      break;
-    default:
-      hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
-      break;
+      case amd::CopyMetadata::kCopyOpSwap:
+        hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP;
+        hsaOp.src_size = op.size;
+        hsaOp.dst_size = op.size;
+        break;
+      case amd::CopyMetadata::kCopyOpIndirectSrc:
+        hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC;
+        break;
+      case amd::CopyMetadata::kCopyOpIndirectDst:
+        hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST;
+        break;
+      case amd::CopyMetadata::kCopyOpIndirectSrcDst:
+        hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST;
+        break;
+      default:
+        hsaOp.type = HSA_AMD_MEMORY_COPY_OP_LINEAR;
+        break;
     }
 
     hsaCopyOps.push_back(hsaOp);
@@ -720,7 +981,6 @@ bool DmaBlitManager::hsaCopyBatch(const std::vector<amd::BatchCopyOp>& copyOps,
 bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_op_t>& copyOps,
                                          const std::vector<hsa_signal_t>* externalWaitEvents,
                                          std::vector<ProfilingSignal*>* outBatchSignals) const {
-
   if (copyOps.empty()) {
     return true;
   }
@@ -962,8 +1222,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                   "HSA BatchCopy Broadcast [%u/%u] engineOp=%s, src=%p, dst=%p, "
                   "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                  d + 1, op.num_entries, EngineOpName(engine), op.src, op.dst_list[d],
-                  op.size, (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                  d + 1, op.num_entries, EngineOpName(engine), op.src, op.dst_list[d], op.size,
+                  (wait_events.size() != 0) ? wait_events[0].handle : 0,
                   op.completion_signal.handle);
         }
       } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_SWAP) {
@@ -971,23 +1231,23 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                   "HSA BatchCopy Swap [%u/%u] engineOp=%s, addr_a=%p, addr_b=%p, "
                   "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                  d + 1, op.num_entries, EngineOpName(engine), op.src_list[d],
-                  op.dst_list[d], op.size_list[d],
-                  (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                  d + 1, op.num_entries, EngineOpName(engine), op.src_list[d], op.dst_list[d],
+                  op.size_list[d], (wait_events.size() != 0) ? wait_events[0].handle : 0,
                   op.completion_signal.handle);
         }
       } else if (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC ||
                  op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST ||
                  op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRCDST) {
-        const char* indirect_kind =
-            (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ? "Src" :
-            (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST) ? "Dst" : "SrcDst";
+        const char* indirect_kind = (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_SRC) ? "Src"
+                                    : (op.type == HSA_AMD_MEMORY_COPY_OP_LINEAR_INDIRECT_DST)
+                                        ? "Dst"
+                                        : "SrcDst";
         for (uint32_t d = 0; d < op.num_entries; ++d) {
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                   "HSA BatchCopy Indirect%s [%u/%u] engineOp=%s, dst=%p, src=%p, "
                   "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                  indirect_kind, d + 1, op.num_entries, EngineOpName(engine),
-                  op.dst_list[d], op.src_list[d], op.size_list[d],
+                  indirect_kind, d + 1, op.num_entries, EngineOpName(engine), op.dst_list[d],
+                  op.src_list[d], op.size_list[d],
                   (wait_events.size() != 0) ? wait_events[0].handle : 0,
                   op.completion_signal.handle);
         }
@@ -996,9 +1256,8 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
           ClPrint(amd::LOG_DEBUG, amd::LOG_COPY2,
                   "HSA BatchCopy Multi [%u/%u] engineOp=%s, src=%p, dst=%p, "
                   "size=%zu, wait_event=0x%zx, completion_signal=0x%zx",
-                  d + 1, op.num_entries, EngineOpName(engine), op.src_list[d],
-                  op.dst_list[d], op.size_list[d],
-                  (wait_events.size() != 0) ? wait_events[0].handle : 0,
+                  d + 1, op.num_entries, EngineOpName(engine), op.src_list[d], op.dst_list[d],
+                  op.size_list[d], (wait_events.size() != 0) ? wait_events[0].handle : 0,
                   op.completion_signal.handle);
         }
       } else {
@@ -1007,14 +1266,12 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
                 "src_agent=0x%zx, dst_agent=0x%zx, wait_event=0x%zx, completion_signal=0x%zx",
                 i, finalOps.size(), EngineOpName(engine), op.dst, op.src, op.size,
                 op.src_agent.handle, op.dst_agent.handle,
-                (wait_events.size() != 0) ? wait_events[0].handle : 0,
-                op.completion_signal.handle);
+                (wait_events.size() != 0) ? wait_events[0].handle : 0, op.completion_signal.handle);
       }
     }
 
-    status = Hsa::memory_async_batch_copy(
-        finalOps.data(), static_cast<uint32_t>(finalOps.size()),
-        wait_events.size(), wait_events.data());
+    status = Hsa::memory_async_batch_copy(finalOps.data(), static_cast<uint32_t>(finalOps.size()),
+                                          wait_events.size(), wait_events.data());
 
     if (status != HSA_STATUS_SUCCESS) {
       for (size_t s = 0; s < finalOps.size(); ++s) {
@@ -1023,7 +1280,6 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
       LogPrintfError("HSA batch copy failed with code %d for engine %d", status, engine);
       return false;
     }
-
   }
 
   // All-but-last group signals go to outBatchSignals for external tracking.
@@ -1044,8 +1300,9 @@ bool DmaBlitManager::rocrCopyBufferBatch(const std::vector<hsa_amd_memory_copy_o
 void DmaBlitManager::getBuffer(const_address hostMem, size_t size, bool enablePin, bool first_tx,
                                DmaBlitManager::BufferState& buffState) const {
   // Pinning is slower than staging on unified-memory devices; skip it there.
-  bool doHostPinning =
-      enablePin && (size > MinSizeForPinnedXfer) && !dev().info().hostUnifiedMemory_;
+  // Under host memory pressure, pinning causes KFD queue evictions (rocm-systems#12528).
+  bool doHostPinning = enablePin && (size > MinSizeForPinnedXfer) &&
+                       !dev().info().hostUnifiedMemory_ && !isUnderMemoryPressure();
   size_t copyChunkSize = doHostPinning ? PinXferSize : StagingXferSize;
   size_t xferSize = std::min(size, copyChunkSize);
 
@@ -2509,16 +2766,13 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
     tile_start = alignUp(body_aligned_start, tile_size);
     uintptr_t tile_end = alignDown(body_aligned_end, tile_size);
     head_count = body_aligned_start - fill_buf_addr;
-    body_tile_count =
-        (tile_end > tile_start) ? (tile_end - tile_start) / tile_size : 0;
-    body_count =
-        (tile_start > body_aligned_start)
-            ? static_cast<size_t>((tile_start - body_aligned_start) / bodyElemSize)
-            : static_cast<size_t>(0);
-    body_tail_count =
-        (body_aligned_end > tile_end)
-            ? static_cast<size_t>((body_aligned_end - tile_end) / bodyElemSize)
-            : static_cast<size_t>(0);
+    body_tile_count = (tile_end > tile_start) ? (tile_end - tile_start) / tile_size : 0;
+    body_count = (tile_start > body_aligned_start)
+                     ? static_cast<size_t>((tile_start - body_aligned_start) / bodyElemSize)
+                     : static_cast<size_t>(0);
+    body_tail_count = (body_aligned_end > tile_end)
+                          ? static_cast<size_t>((body_aligned_end - tile_end) / bodyElemSize)
+                          : static_cast<size_t>(0);
     tail_count = static_cast<size_t>(end_addr - body_aligned_end);
   }
 
@@ -2534,16 +2788,18 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
   if (cleanup_total > 16) {
     LogPrintfError(
         "fillBuffer1D: cleanup region size %zu exceeds 16-lane kernel gate "
-        "(head=%zu body=%zu body_tail=%zu tail=%zu, fill_buf_addr=0x%lx, size=%zu, patternSize=%zu)",
-        cleanup_total, head_count, body_count, body_tail_count, tail_count,
-        fill_buf_addr, size[0], patternSize);
+        "(head=%zu body=%zu body_tail=%zu tail=%zu, fill_buf_addr=0x%lx, size=%zu, "
+        "patternSize=%zu)",
+        cleanup_total, head_count, body_count, body_tail_count, tail_count, fill_buf_addr, size[0],
+        patternSize);
     return false;
   }
 
-  const size_t tail_offset =
-      head_count + body_count * bodyElemSize + body_tile_count * tile_size + body_tail_count * bodyElemSize;
+  const size_t tail_offset = head_count + body_count * bodyElemSize + body_tile_count * tile_size +
+                             body_tail_count * bodyElemSize;
   const size_t body_offset = head_count;
-  const size_t body_tail_offset = head_count + body_count * bodyElemSize + body_tile_count * tile_size;
+  const size_t body_tail_offset =
+      head_count + body_count * bodyElemSize + body_tile_count * tile_size;
   const size_t tile_offset = static_cast<size_t>(tile_start - fill_buf_addr);
 
   // Build rotated payloads: each region's payload is rotated by its byte-offset-from-fill-start
@@ -2567,8 +2823,7 @@ bool KernelBlitManager::fillBuffer1D(device::Memory& memory, const void* pattern
     uint16_t s0, s1, s2, s3;
   } counts = {static_cast<uint16_t>(head_count), static_cast<uint16_t>(body_count),
               static_cast<uint16_t>(body_tail_count), static_cast<uint16_t>(tail_count)};
-  static_assert(sizeof(size_t) == sizeof(uint64_t),
-                "Kernel arg passing assumes 64-bit size_t");
+  static_assert(sizeof(size_t) == sizeof(uint64_t), "Kernel arg passing assumes 64-bit size_t");
   setArgument(kernels_[kFillType], 0, sizeof(cl_mem), &mem, origin[0]);
   setArgument(kernels_[kFillType], 1, sizeof(cl_mem), kernArgBase, 0, nullptr, kDirectVa);
   setArgument(kernels_[kFillType], 2, sizeof(tiled_pattern), &tiled_pattern);
@@ -2769,9 +3024,9 @@ struct CopyBufferBatchDescriptor {
 bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const Memory& dstMemory,
                                                 size_t size, amd::CopyMetadata copyMetadata,
                                                 bool* useLimitedP2pBlitWg) const {
-  bool isP2pOrIpc = (&srcMemory.dev() != &dstMemory.dev()) ||
-                    srcMemory.owner()->ipcShared() || dstMemory.owner()->ipcShared() ||
-                    srcMemory.owner()->vmmImported() || dstMemory.owner()->vmmImported();
+  bool isP2pOrIpc = (&srcMemory.dev() != &dstMemory.dev()) || srcMemory.owner()->ipcShared() ||
+                    dstMemory.owner()->ipcShared() || srcMemory.owner()->vmmImported() ||
+                    dstMemory.owner()->vmmImported();
   const bool smallP2pOrIpc = isP2pOrIpc && size <= dev().settings().sdma_p2p_threshold_;
   if (useLimitedP2pBlitWg != nullptr) {
     *useLimitedP2pBlitWg = smallP2pOrIpc;
@@ -2798,7 +3053,7 @@ bool KernelBlitManager::useShaderCopyBufferPath(const Memory& srcMemory, const M
 
 // ================================================================================================
 bool KernelBlitManager::ShaderCopyBufferBatch(
-    const std::vector<amd::BatchCopyOp> &copy_operations) const {
+    const std::vector<amd::BatchCopyOp>& copy_operations) const {
   std::vector<BatchRawCopyOp> raw_copy_operations;
   raw_copy_operations.reserve(copy_operations.size());
 
@@ -3162,7 +3417,7 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
     return true;
   }
 
-  //If there is intra-device copies, SDMA copies can overlap
+  // If there is intra-device copies, SDMA copies can overlap
   const bool kSkipCpuWait = true;
   gpu().releaseGpuMemoryFence(kSkipCpuWait);
 
@@ -3176,10 +3431,10 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
   std::vector<amd::BatchCopyOp> p2pCopyOps;
 
   for (const auto& op : copyOps) {
-    device::Memory* srcDevMem = op.srcMemory->getDeviceMemory(
-        *op.srcMemory->getContext().devices()[0]);
-    device::Memory* dstDevMem = op.dstMemory->getDeviceMemory(
-        *op.dstMemory->getContext().devices()[0]);
+    device::Memory* srcDevMem =
+        op.srcMemory->getDeviceMemory(*op.srcMemory->getContext().devices()[0]);
+    device::Memory* dstDevMem =
+        op.dstMemory->getDeviceMemory(*op.dstMemory->getContext().devices()[0]);
 
     if (srcDevMem == nullptr || dstDevMem == nullptr) {
       LogError("KernelBlitManager::copyBufferBatch: Invalid memory objects!");
@@ -3238,17 +3493,17 @@ bool KernelBlitManager::copyBufferBatch(const std::vector<amd::BatchCopyOp>& cop
       gpu().Barriers().AddExternalSignal(priorSignal);
     }
 
-    std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>>
-        d2d_copy_ops_by_size;
-    for (const auto &op : d2dCopyOps) {
+    std::map<size_t, std::vector<amd::BatchCopyOp>, std::greater<size_t>> d2d_copy_ops_by_size;
+    for (const auto& op : d2dCopyOps) {
       d2d_copy_ops_by_size[op.size].push_back(op);
     }
 
-    for (const auto &copy_ops_by_size_entry : d2d_copy_ops_by_size) {
-      const auto &copy_ops_by_size = copy_ops_by_size_entry.second;
+    for (const auto& copy_ops_by_size_entry : d2d_copy_ops_by_size) {
+      const auto& copy_ops_by_size = copy_ops_by_size_entry.second;
       if (!ShaderCopyBufferBatch(copy_ops_by_size)) {
-        LogError("KernelBlitManager::ShaderCopyBufferBatch: Intra-device batch "
-                 "copy failed!");
+        LogError(
+            "KernelBlitManager::ShaderCopyBufferBatch: Intra-device batch "
+            "copy failed!");
         return false;
       }
     }
@@ -3291,9 +3546,8 @@ bool KernelBlitManager::copyBuffer(device::Memory& srcMemory, device::Memory& ds
   const bool requireSDMA =
       copyMetadata.copyEnginePreference_ == amd::CopyMetadata::CopyEnginePreference::SDMA;
   bool useLimitedP2pBlitWg = false;
-  const bool useShaderCopyBuffer =
-      useShaderCopyBufferPath(srcRocMemory, dstRocMemory, sizeIn[0], copyMetadata,
-                              &useLimitedP2pBlitWg);
+  const bool useShaderCopyBuffer = useShaderCopyBufferPath(srcRocMemory, dstRocMemory, sizeIn[0],
+                                                           copyMetadata, &useLimitedP2pBlitWg);
   const bool useShaderCopyPath =
       !requireSDMA && (setup_.disableHwlCopyBuffer_ || useShaderCopyBuffer);
   if (useLimitedP2pBlitWg) {
@@ -3626,11 +3880,10 @@ bool KernelBlitManager::batchMemOps(const void* paramArray, size_t paramSize,
   // During graph packet capture, allocate from the graph's stable kernarg pool so the
   // address baked into the captured AQL packet remains valid on re-launch.
   constexpr bool kDirectVa = true;
-  bool isGraphPktCapturing =
-      gpu().command() != nullptr && gpu().command()->getPktCapturingState();
-  auto constBuf = isGraphPktCapturing
-      ? gpu().command()->getGraphKernArg(count * paramSize, kCBAlignment, dev().index())
-      : gpu().allocKernArg(count * paramSize, kCBAlignment);
+  bool isGraphPktCapturing = gpu().command() != nullptr && gpu().command()->getPktCapturingState();
+  auto constBuf = isGraphPktCapturing ? gpu().command()->getGraphKernArg(
+                                            count * paramSize, kCBAlignment, dev().index())
+                                      : gpu().allocKernArg(count * paramSize, kCBAlignment);
   memcpy(constBuf, paramArray, (count * paramSize));
 
   setArgument(kernels_[blitType], 0, sizeof(cl_mem), constBuf, 0, nullptr, kDirectVa);
@@ -3698,8 +3951,8 @@ amd::Memory* DmaBlitManager::pinHostMemory(const void* hostMem, size_t pinSize,
   amdMemory = new (*context_) amd::Buffer(*context_, CL_MEM_USE_HOST_PTR, pinAllocSize);
   amdMemory->setVirtualDevice(&gpu());
   if ((amdMemory != nullptr) && !amdMemory->create(tmpHost, SysMem)) {
-    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM,
-             "Buffer create failed, Buffer: 0x%x \n", amdMemory);
+    ClPrint(amd::LOG_DETAIL_DEBUG, amd::LOG_MEM, "Buffer create failed, Buffer: 0x%x \n",
+            amdMemory);
     amdMemory->release();
     return nullptr;
   }
