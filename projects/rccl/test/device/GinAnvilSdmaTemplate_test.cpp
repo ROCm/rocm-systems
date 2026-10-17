@@ -4,7 +4,7 @@
  * See LICENSE.txt for license information
  ************************************************************************/
 
-// Suite H: device template coverage (Put/PutValue/Get/Flush/FlushAsync/Wait/Signal/Counter SDMA + edge paths).
+// Suite H: device template coverage (Put/PutValue/Get/Flush/FlushAsync/Wait/Signal/Counter SDMA, timeouts + edge paths).
 // Uses test/device/sdma/anvil_device.hpp stubs (no librocshmem device link).
 
 #include "DeviceTestBase.hpp"
@@ -644,122 +644,142 @@ TEST_F(GinAnvilSdmaTemplateTest, Get_MissingHandleFallsBackToIpc) {
   EXPECT_EQ(d_dirty.download(), 0ULL);
 }
 
-// H17: FlushAsync quiets dirty channels for the requested peer and marks complete.
-// Dirty bits are left set; only Flush (the synchronous API) clears them.
-__global__ void kernelFlushAsync(TemplateHarness* h, ncclGinRequest_t* req, int peer, uint32_t* completeOut) {
+// Each (peer, channel) gets its own stub queue at index peer * numChannels + channel.
+struct SdmaEnv {
+  static constexpr int kQueues = 4;
+  DeviceBuffer<uint8_t> src{1};
+  DeviceBuffer<uint8_t> dst{1};
+  DeviceBuffer<ncclGinAnvilIpcBufEntry> entry{1};
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> q{kQueues};
+  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> row{kQueues};
+  DeviceBuffer<TemplateHarness> h{1};
+  DeviceBuffer<uint64_t> dirty{1};
+  TemplateHarness host{};
+
+  explicit SdmaEnv(uint64_t dirtyBits, int numChannels = 1) {
+    dirty.copyFrom(&dirtyBits, 1);
+    uploadHarness(&h, &host, &src, &dst, &entry, &q, &row, 128);
+    q.zero();
+    std::vector<sdma_anvil::SdmaQueueDeviceHandle*> rowHost(kQueues);
+    for (int i = 0; i < kQueues; ++i) rowHost[i] = q.ptr + i;
+    row.copyFrom(rowHost);
+    host.ctx.numChannels = numChannels;
+    host.ctx.sdmaDirty = dirty.ptr;
+    h.upload(host);
+  }
+
+  void setQueue(int index, uint64_t writeIndex, uint64_t readLag, uint64_t busyPolls) {
+    sdma_anvil::SdmaQueueDeviceHandle handle{};
+    handle.writeIndex = writeIndex;
+    handle.readLag = readLag;
+    handle.busyPolls = busyPolls;
+    HIP_CHECK(hipMemcpy(q.ptr + index, &handle, sizeof(handle), hipMemcpyHostToDevice));
+  }
+
+  unsigned long long polls(int index) {
+    sdma_anvil::SdmaQueueDeviceHandle handle{};
+    HIP_EXPECT(hipMemcpy(&handle, q.ptr + index, sizeof(handle), hipMemcpyDeviceToHost));
+    return handle.polls;
+  }
+};
+
+// H17: FlushAsync records the dirty channels and queue target of the requested peer without quieting or clearing them.
+__global__ void kernelFlushAsync(TemplateHarness* h, ncclGinRequest_t* req, int peer) {
   ncclGinCtx ginCtx{};
   ginCtx.handle = &h->ctx;
   ginCtx.nRanks = 2;
   ncclGinApi_FlushAsync<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, peer, req, false, nullptr, 0);
-  completeOut[0] = reinterpret_cast<ncclGinAnvilSdmaRequest*>(req)->complete;
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CompletesWithoutClearingDirty) {
-  DeviceBuffer<uint8_t> d_src(1);
-  DeviceBuffer<uint8_t> d_dst(1);
-  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
-  DeviceBuffer<TemplateHarness> d_h(1);
-  DeviceBuffer<uint64_t> d_dirty(1);
-  DeviceBuffer<ncclGinRequest_t> d_req(1);
-  DeviceBuffer<uint32_t> d_complete(1);
+static ncclGinAnvilSdmaRequest readRequest(DeviceBuffer<ncclGinRequest_t>& d_req) {
+  ncclGinRequest_t raw = d_req.download();
+  ncclGinAnvilSdmaRequest req;
+  std::memcpy(&req, &raw, sizeof(req));
+  return req;
+}
+
+static ncclGinRequest_t makeRequest(int peer, uint32_t channelMask, uint64_t target = 0) {
+  ncclGinAnvilSdmaRequest req{peer, channelMask, target};
+  ncclGinRequest_t raw{};
+  std::memcpy(&raw, &req, sizeof(req));
+  return raw;
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_RecordsDirtyChannelsWithoutQuiet) {
   uint64_t peer1Bit = 1ULL << 1;  // peer 1, channel 0, numChannels=1
-  d_dirty.copyFrom(&peer1Bit, 1);
-  d_req.zero();
-  d_complete.zero();
-  TemplateHarness host{};
-  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
-  host.ctx.sdmaDirty = d_dirty.ptr;
-  d_h.upload(host);
-  resetQuietCount();
-  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
-  syncAndCheck();
-  EXPECT_EQ(d_complete.download(), 1u);
-  EXPECT_EQ(d_dirty.download(), peer1Bit);
-  EXPECT_EQ(readQuietCount(), 1ULL);
-}
-
-TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CleanPeerDoesNotQuiet) {
-  DeviceBuffer<uint8_t> d_src(1);
-  DeviceBuffer<uint8_t> d_dst(1);
-  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
-  DeviceBuffer<TemplateHarness> d_h(1);
-  DeviceBuffer<uint64_t> d_dirty(1);
+  SdmaEnv env(peer1Bit);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  DeviceBuffer<uint32_t> d_complete(1);
-  uint64_t peer0Bit = 1ULL << 0;  // peer 0 dirty; flush peer 1 so a bitIdx that drops peer still quiets
-  d_dirty.copyFrom(&peer0Bit, 1);
   d_req.zero();
-  d_complete.zero();
-  TemplateHarness host{};
-  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
-  host.ctx.sdmaDirty = d_dirty.ptr;
-  d_h.upload(host);
+  env.setQueue(/*index=*/1, /*writeIndex=*/5, /*readLag=*/0, /*busyPolls=*/0);
   resetQuietCount();
-  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
+  kernelFlushAsync<<<1, 1>>>(env.h.ptr, d_req.ptr, /*peer=*/1);
   syncAndCheck();
-  EXPECT_EQ(d_complete.download(), 1u);
-  EXPECT_EQ(d_dirty.download(), peer0Bit);
+  ncclGinAnvilSdmaRequest req = readRequest(d_req);
+  EXPECT_EQ(req.peer, 1);
+  EXPECT_EQ(req.channelMask, 1u);
+  EXPECT_EQ(req.target, 5ULL);
+  EXPECT_EQ(env.dirty.download(), peer1Bit);
   EXPECT_EQ(readQuietCount(), 0ULL);
 }
 
-// H18: invalid ctx still completes the request so Wait will not hang.
-TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_InvalidCtxCompletes) {
-  DeviceBuffer<uint8_t> d_src(1);
-  DeviceBuffer<uint8_t> d_dst(1);
-  DeviceBuffer<ncclGinAnvilIpcBufEntry> d_entry(1);
-  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle> d_q(1);
-  DeviceBuffer<sdma_anvil::SdmaQueueDeviceHandle*> d_row(2);
-  DeviceBuffer<TemplateHarness> d_h(1);
-  DeviceBuffer<uint64_t> d_dirty(1);
+TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_CleanPeerRecordsNoChannels) {
+  uint64_t peer0Bit = 1ULL << 0;  // peer 0 dirty, request peer 1. A bitIdx that ignored peer would record ch 0
+  SdmaEnv env(peer0Bit);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  DeviceBuffer<uint32_t> d_complete(1);
-  uint64_t peer1Bit = 1ULL << 1;
-  d_dirty.copyFrom(&peer1Bit, 1);
   d_req.zero();
-  d_complete.zero();
-  TemplateHarness host{};
-  uploadHarness(&d_h, &host, &d_src, &d_dst, &d_entry, &d_q, &d_row, 128);
-  host.ctx.sdmaDirty = d_dirty.ptr;
-  host.ctx.layoutMagic = 0;
-  d_h.upload(host);
   resetQuietCount();
-  kernelFlushAsync<<<1, 1>>>(d_h.ptr, d_req.ptr, /*peer=*/1, d_complete.ptr);
+  kernelFlushAsync<<<1, 1>>>(env.h.ptr, d_req.ptr, /*peer=*/1);
   syncAndCheck();
-  EXPECT_EQ(d_complete.download(), 1u);
+  EXPECT_EQ(readRequest(d_req).channelMask, 0u);
+  EXPECT_EQ(env.dirty.download(), peer0Bit);
   EXPECT_EQ(readQuietCount(), 0ULL);
 }
 
-// H19/H20: Wait fences only after FlushAsync has marked the request complete.
-__global__ void kernelWait(ncclGinRequest_t* req) {
+// H18: an invalid ctx records no channels.
+TEST_F(GinAnvilSdmaTemplateTest, FlushAsync_InvalidCtxRecordsNoChannels) {
+  SdmaEnv env(/*dirtyBits=*/1ULL << 1);
+  env.host.ctx.layoutMagic = 0;
+  env.h.upload(env.host);
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.zero();
+  resetQuietCount();
+  kernelFlushAsync<<<1, 1>>>(env.h.ptr, d_req.ptr, /*peer=*/1);
+  syncAndCheck();
+  EXPECT_EQ(readRequest(d_req).channelMask, 0u);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+}
+
+// H19/H20: Wait polls the channel recorded by FlushAsync up to its target, then fences.
+__global__ void kernelWait(TemplateHarness* h, ncclGinRequest_t* req, uint32_t* abortFlag) {
   ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
   ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
-      ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel, nullptr);
+      ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel, abortFlag);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Wait_FencesWhenComplete) {
+TEST_F(GinAnvilSdmaTemplateTest, Wait_PollsRecordedChannel) {
+  SdmaEnv env(/*dirtyBits=*/0);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  ncclGinRequest_t hostReq{};
-  reinterpret_cast<ncclGinAnvilSdmaRequest&>(hostReq).complete = 1;
-  d_req.upload(hostReq);
+  d_req.upload(makeRequest(/*peer=*/1, /*channelMask=*/1u));
   resetThreadfenceCount();
-  kernelWait<<<1, 1>>>(d_req.ptr);
+  kernelWait<<<1, 1>>>(env.h.ptr, d_req.ptr, nullptr);
   syncAndCheck();
+  EXPECT_EQ(env.polls(1), 1ULL);
+  EXPECT_EQ(env.polls(0), 0ULL);
   EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
-TEST_F(GinAnvilSdmaTemplateTest, Wait_NoFenceWhenIncomplete) {
+TEST_F(GinAnvilSdmaTemplateTest, Wait_EmptyRequestOnlyFences) {
+  SdmaEnv env(/*dirtyBits=*/0);
   DeviceBuffer<ncclGinRequest_t> d_req(1);
-  ncclGinRequest_t hostReq{};
-  reinterpret_cast<ncclGinAnvilSdmaRequest&>(hostReq).complete = 0;
-  d_req.upload(hostReq);
+  d_req.upload(makeRequest(/*peer=*/0, /*channelMask=*/0u));
+  resetQuietCount();
   resetThreadfenceCount();
-  kernelWait<<<1, 1>>>(d_req.ptr);
+  kernelWait<<<1, 1>>>(env.h.ptr, d_req.ptr, nullptr);
   syncAndCheck();
-  EXPECT_EQ(readThreadfenceCount(), 0ULL);
+  EXPECT_EQ(readQuietCount(), 0ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
 }
 
 // H21/H22: a strong signal still resolves the peer queue so fenceBeforeSignal
@@ -1148,6 +1168,181 @@ TEST_F(GinAnvilSdmaTemplateTest, PutValue_SdmaFusedSignalSkipsSignalPeer) {
   kernelPutValueIpcSignalQuiesce<<<1, 1>>>(env.h.ptr, kVal, /*signalId=*/1);  // Copying stub: the value must land.
   syncAndCheck();
   EXPECT_EQ(downloadU64(env.dst), kVal);
+}
+
+// H26-H31: Flush and Wait poll the queue until it reaches the target, the budget runs out, or abort is set.
+constexpr uint64_t kShortBudget = 1000;
+constexpr uint64_t kLongBudget = 1ULL << 34;
+constexpr unsigned long long kNeverDrains = ~0ULL;
+
+__global__ void kernelFlushTimeout(TemplateHarness* h, uint32_t* abortFlag, uint64_t timeoutCycles,
+                                   ncclResult_t* result) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  *result = ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, ncclCoopThread{}, false, nullptr, cuda::memory_order_seq_cst, abortFlag, timeoutCycles);
+}
+
+__global__ void kernelWaitTimeout(TemplateHarness* h, ncclGinRequest_t* req, uint32_t* abortFlag,
+                                  uint64_t timeoutCycles, ncclResult_t* result) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  *result = ncclGinApi_Wait<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(
+      ginCtx, *req, false, nullptr, cuda::memory_order_acq_rel, abortFlag, timeoutCycles);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_PollsUntilDrainedAndClearsDirty) {
+  SdmaEnv env(/*dirtyBits=*/1ULL << 1);
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  env.setQueue(/*index=*/1, /*writeIndex=*/0, /*readLag=*/0, /*busyPolls=*/3);
+  kernelFlushTimeout<<<1, 1>>>(env.h.ptr, nullptr, kLongBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+  EXPECT_EQ(env.dirty.download(), 0ULL);
+  EXPECT_EQ(env.polls(1), 4ULL);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_BusyQueueTimesOutAndStaysDirty) {
+  SdmaEnv env(/*dirtyBits=*/1ULL << 1);
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  env.setQueue(/*index=*/1, /*writeIndex=*/0, /*readLag=*/0, kNeverDrains);
+  kernelFlushTimeout<<<1, 1>>>(env.h.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+  EXPECT_EQ(env.dirty.download(), 1ULL << 1);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, WaitTimeout_CoversOnlyWorkBeforeFlushAsync) {
+  SdmaEnv env(/*dirtyBits=*/1ULL << 1);
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  DeviceBuffer<ncclResult_t> d_result(1);
+  env.setQueue(/*index=*/1, /*writeIndex=*/5, /*readLag=*/0, /*busyPolls=*/0);
+  kernelFlushAsync<<<1, 1>>>(env.h.ptr, d_req.ptr, /*peer=*/1);
+  syncAndCheck();
+
+  // Work posted after FlushAsync moves the write index past the recorded target.
+  d_result.upload(ncclInternalError);
+  env.setQueue(/*index=*/1, /*writeIndex=*/9, /*readLag=*/4, /*busyPolls=*/0);
+  kernelWaitTimeout<<<1, 1>>>(env.h.ptr, d_req.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+
+  d_result.upload(ncclInternalError);
+  env.setQueue(/*index=*/1, /*writeIndex=*/9, /*readLag=*/5, /*busyPolls=*/0);
+  kernelWaitTimeout<<<1, 1>>>(env.h.ptr, d_req.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, WaitTimeout_BusyQueueTimesOutAfterFence) {
+  SdmaEnv env(/*dirtyBits=*/0);
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(/*peer=*/1, /*channelMask=*/1u, /*target=*/5));
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  env.setQueue(/*index=*/1, /*writeIndex=*/5, /*readLag=*/0, kNeverDrains);
+  resetThreadfenceCount();
+  kernelWaitTimeout<<<1, 1>>>(env.h.ptr, d_req.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, WaitTimeout_AbortReturnsSuccess) {
+  SdmaEnv env(/*dirtyBits=*/0);
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(/*peer=*/1, /*channelMask=*/1u, /*target=*/5));
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  DeviceBuffer<uint32_t> d_abort(1);
+  uint32_t aborted = 1;
+  d_abort.copyFrom(&aborted, 1);
+  env.setQueue(/*index=*/1, /*writeIndex=*/5, /*readLag=*/0, kNeverDrains);
+  kernelWaitTimeout<<<1, 1>>>(env.h.ptr, d_req.ptr, d_abort.ptr, kLongBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclSuccess);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Wait_BlockingReturnsOnAbort) {
+  SdmaEnv env(/*dirtyBits=*/0);
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.upload(makeRequest(/*peer=*/1, /*channelMask=*/1u, /*target=*/5));
+  DeviceBuffer<uint32_t> d_abort(1);
+  uint32_t aborted = 1;
+  d_abort.copyFrom(&aborted, 1);
+  env.setQueue(/*index=*/1, /*writeIndex=*/5, /*readLag=*/0, kNeverDrains);
+  resetThreadfenceCount();
+  kernelWait<<<1, 1>>>(env.h.ptr, d_req.ptr, d_abort.ptr);
+  syncAndCheck();
+  EXPECT_GT(env.polls(1), 1ULL);
+  EXPECT_EQ(readThreadfenceCount(), 1ULL);
+}
+
+// H32: a request spanning several channels records the live-target marker, and Wait drains each channel.
+TEST_F(GinAnvilSdmaTemplateTest, Wait_MultiChannelRequestDrainsEachChannel) {
+  SdmaEnv env(/*dirtyBits=*/(1ULL << 2) | (1ULL << 3), /*numChannels=*/2);  // peer 1, channels 0 and 1
+  DeviceBuffer<ncclGinRequest_t> d_req(1);
+  d_req.zero();
+  kernelFlushAsync<<<1, 1>>>(env.h.ptr, d_req.ptr, /*peer=*/1);
+  syncAndCheck();
+  ncclGinAnvilSdmaRequest req = readRequest(d_req);
+  EXPECT_EQ(req.channelMask, 3u);
+  EXPECT_EQ(req.target, nccl::gin::anvil::detail::kSdmaLiveTarget);
+  kernelWait<<<1, 1>>>(env.h.ptr, d_req.ptr, nullptr);
+  syncAndCheck();
+  EXPECT_EQ(env.polls(2), 1ULL);
+  EXPECT_EQ(env.polls(3), 1ULL);
+}
+
+// H33: blocking Flush returns once abort is set, even if the queue never drains.
+__global__ void kernelFlushBlocking(TemplateHarness* h, uint32_t* abortFlag) {
+  ncclGinCtx ginCtx{};
+  ginCtx.handle = &h->ctx;
+  ginCtx.nRanks = 2;
+  ncclGinApi_Flush<NCCL_NET_DEVICE_GIN_ANVIL_SDMA>::call(ginCtx, ncclCoopThread{}, false, nullptr,
+                                                         cuda::memory_order_seq_cst, abortFlag);
+}
+
+TEST_F(GinAnvilSdmaTemplateTest, Flush_BlockingReturnsOnAbort) {
+  SdmaEnv env(/*dirtyBits=*/1ULL << 1);
+  DeviceBuffer<uint32_t> d_abort(1);
+  uint32_t aborted = 1;
+  d_abort.copyFrom(&aborted, 1);
+  env.setQueue(/*index=*/1, /*writeIndex=*/0, /*readLag=*/0, kNeverDrains);
+  kernelFlushBlocking<<<1, 1>>>(env.h.ptr, d_abort.ptr);
+  syncAndCheck();
+  EXPECT_GT(env.polls(1), 1ULL);
+}
+
+// H34: when one peer drains and the next times out, the timed Flush clears only the drained peer's bits.
+TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_ClearsOnlyDrainedPeers) {
+  SdmaEnv env(/*dirtyBits=*/(1ULL << 0) | (1ULL << 1));
+  env.setQueue(/*index=*/1, /*writeIndex=*/0, /*readLag=*/0, kNeverDrains);
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  kernelFlushTimeout<<<1, 1>>>(env.h.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+  EXPECT_EQ(env.dirty.download(), 1ULL << 1);
+  EXPECT_EQ(env.polls(0), 1ULL);
+}
+
+// H35: a peer whose first channel drains but whose second times out keeps both dirty bits.
+TEST_F(GinAnvilSdmaTemplateTest, FlushTimeout_PartlyDrainedPeerStaysDirty) {
+  uint64_t peer1Bits = (1ULL << 2) | (1ULL << 3);  // peer 1, channels 0 and 1
+  SdmaEnv env(peer1Bits, /*numChannels=*/2);
+  env.setQueue(/*index=*/3, /*writeIndex=*/0, /*readLag=*/0, kNeverDrains);
+  DeviceBuffer<ncclResult_t> d_result(1);
+  d_result.upload(ncclInternalError);
+  kernelFlushTimeout<<<1, 1>>>(env.h.ptr, nullptr, kShortBudget, d_result.ptr);
+  syncAndCheck();
+  EXPECT_EQ(d_result.download(), ncclTimeout);
+  EXPECT_EQ(env.dirty.download(), peer1Bits);
+  EXPECT_EQ(env.polls(2), 1ULL);
 }
 
 #endif  // NCCL_GIN_ANVIL_SDMA_ENABLE
