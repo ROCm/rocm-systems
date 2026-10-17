@@ -74,6 +74,16 @@ std::optional<GpuVmAccess> Wavefront::snapshot_vm_access() const {
   return address_space_ ? gpu_vm->snapshot(address_space_) : gpu_vm->snapshot_vmid(process_id_);
 }
 
+const GpuVmAccess *Wavefront::borrow_vm_access() const {
+  if (vm_access_)
+    return vm_access_.get();
+  GpuVm *gpu_vm = cu_.gpu_vm();
+  if (gpu_vm == nullptr || !GpuVmAccessBatchGuard::active())
+    return nullptr;
+  return address_space_ ? gpu_vm->borrow_snapshot(address_space_)
+                        : gpu_vm->borrow_snapshot_vmid(process_id_);
+}
+
 VmAccessOutcome Wavefront::read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const {
   assert(has_gpu_memory());
   if (address_space_ || process_id_ != 0) {

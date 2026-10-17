@@ -461,16 +461,22 @@ VmAccessOutcome ScalarMemPipeline::initiate_access(Instruction &inst, Wavefront 
   if (d.load_dword_mask == 0)
     return VmAccessOutcome::Complete;
   if (wf.address_space()) {
+    // Legacy-cache-compatible bindings take the K$ path below, which keeps no
+    // per-instruction snapshot. The flag is fixed for the binding's lifetime, so
+    // a borrowed batch snapshot decides without a binding lookup and shared_ptr
+    // copy per load. Anything else takes the owned snapshot as before.
+    const GpuVmAccess *borrowed = d.translated.initialized ? nullptr : wf.borrow_vm_access();
+    const bool legacy_path = borrowed && borrowed->info().legacy_cache_compatible;
     const bool may_refresh_unready =
         d.translated.initialized && d.translated.access && !d.translated.access->info().ready &&
         d.translated.completed_bytes == 0 && d.translated.request_index == 0;
-    if (!d.translated.initialized || may_refresh_unready) {
+    if (!legacy_path && (!d.translated.initialized || may_refresh_unready)) {
       d.translated.access = wf.snapshot_vm_access();
       if (!d.translated.access)
         return VmAccessOutcome::Faulted;
       d.translated.initialized = true;
     }
-    if (!d.translated.access->info().legacy_cache_compatible) {
+    if (!legacy_path && !d.translated.access->info().legacy_cache_compatible) {
       if (d.atomic_op != AtomicOp::NONE)
         return execute_translated_scalar_atomic_rmw(d);
       if (d.is_load) {

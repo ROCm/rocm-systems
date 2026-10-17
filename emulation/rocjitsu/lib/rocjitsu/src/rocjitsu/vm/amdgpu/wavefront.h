@@ -362,6 +362,12 @@ public:
   /// legacy memory path.
   [[nodiscard]] std::optional<GpuVmAccess> snapshot_vm_access() const;
 
+  /// @brief Borrow the current translated view without taking ownership.
+  /// @details Returns the retained access, or the thread's batch snapshot when a
+  /// GpuVmAccessBatchGuard is active, or nullptr when neither is available. The
+  /// pointer is valid only for the current operation and must not be stored.
+  [[nodiscard]] const GpuVmAccess *borrow_vm_access() const;
+
   /// @brief Read GPU memory in this wave's process address space.
   [[nodiscard]] VmAccessOutcome read_gpu_memory(uint64_t addr, std::span<uint8_t> dst) const;
 
