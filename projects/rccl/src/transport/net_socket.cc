@@ -522,7 +522,7 @@ ncclResult_t ncclNetSocketTest(void* request, int* done, int* size) {
              "network is in a healthy state, "
              "there may be a mismatch in collective sizes or environment settings (e.g. NCCL_PROTO, NCCL_ALGO) between "
              "ranks",
-             ncclSocketToString(&addr, line), senderSize, r->size);
+             ncclSocketToString(&addr, line, sizeof(line)), senderSize, r->size);
         return ncclInvalidUsage;
       }
       // copy to the data buffer if we have received some inline data already

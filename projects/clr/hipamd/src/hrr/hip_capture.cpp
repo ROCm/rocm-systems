@@ -88,6 +88,7 @@ std::atomic<bool>        g_installed{false};
 std::atomic<bool>        g_table_built{false};  // guard for hip_capture_build_table()
 
 HipCompilerDispatchTable g_real_compiler_table{};
+static HipCompilerDispatchTable g_cap_compiler_table{};  // the shims, kept for uninstall
 std::atomic<bool>        g_compiler_installed{false};  // guard for hip_capture_build_compiler_table()
 
 // TLS dims saved by __hipPushCallConfiguration — used only as a fallback by
@@ -129,10 +130,17 @@ const char* hip_capture_output_dir() {
 
 // HIP_HRR_DEBUG_ARGS also enables provenance tracing: every H2D memcpy
 // destination is logged so a kernel pointer arg can be matched to the copy that
-// filled it. Routed through the CLR flags registry (flags.hpp) like every other
-// HRR flag, so it is discoverable and honors AMD_LOG_LEVEL log routing.
+// filled it. The flag stays a release() flag in flags.hpp, but only a Debug
+// build (DEBUG from rocclr/utils/macros.hpp, the macro that picks debug() over
+// release() there) honours it; any other build ignores it, because the dumps put
+// a second copy of the workload's kernel arguments in the log, where log
+// collection picks them up.
 static bool hrr_dbg_args_enabled() {
+#if defined(DEBUG)
   return HIP_HRR_DEBUG_ARGS;
+#else
+  return false;
+#endif
 }
 
 static void hrr_trace_h2d(const char* api, const void* dst, size_t sz) {
@@ -2508,16 +2516,100 @@ hipError_t capture_hipGraphExecBatchMemOpNodeSetParams(
 // Install / uninstall (build_table functions live in hip_capture_generated.cpp)
 // ---------------------------------------------------------------------------
 
+namespace {
+
+// Other threads keep calling through the live dispatch tables while the shims go
+// in and out, so the tables are written one slot at a time with atomic operations
+// and never copied over as a whole. Outside Windows, function-pointer slots are
+// accessed through a may_alias view so the store is well-defined against the typed
+// table fields; MSVC does no type-based alias analysis and clang-cl disables it by
+// default.
+template <typename Table> constexpr size_t kDispatchSlots =
+    (sizeof(Table) - sizeof(size_t)) / sizeof(void*);
+
+#if IS_WINDOWS
+struct DispatchSlot {
+  void* value;
+};
+
+void store_slot(DispatchSlot* slot, void* value) {
+  std::atomic_ref<void*>(slot->value).store(value, std::memory_order_release);
+}
+
+void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
+  std::atomic_ref<void*>(slot->value).compare_exchange_strong(
+      expected, desired, std::memory_order_release, std::memory_order_relaxed);
+}
+#elif defined(__GNUC__) || defined(__clang__)
+struct DispatchSlot {
+  void* value;
+} __attribute__((__may_alias__));
+
+void store_slot(DispatchSlot* slot, void* value) {
+  __atomic_store_n(&slot->value, value, __ATOMIC_RELEASE);
+}
+
+void replace_slot(DispatchSlot* slot, void* expected, void* desired) {
+  __atomic_compare_exchange_n(&slot->value, &expected, desired, false, __ATOMIC_RELEASE,
+                              __ATOMIC_RELAXED);
+}
+#else
+#error "Outside Windows, HRR dispatch slots need GCC or Clang"
+#endif
+
+template <typename Table> DispatchSlot* dispatch_slots(Table& table) {
+  static_assert(sizeof(void (*)()) == sizeof(void*),
+                "dispatch slot atomics need function pointers the size of void*");
+  static_assert(offsetof(Table, size) == 0 && sizeof(table.size) == sizeof(size_t) &&
+                    (sizeof(Table) - sizeof(size_t)) % sizeof(void*) == 0,
+                "layout must match HIP dispatch tables: size_t size then void* slots");
+  static_assert(sizeof(DispatchSlot) == sizeof(void*), "DispatchSlot must be a single pointer");
+  return reinterpret_cast<DispatchSlot*>(reinterpret_cast<char*>(&table) + sizeof(size_t));
+}
+
+// Unlike uninstall this does not compare first: a slot that changed since the
+// snapshot still gets its shim, or the archive would silently miss that API.
+template <typename Table>
+void install_shims(const Table* live, const Table& shims, const Table& real) {
+  DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));
+  const DispatchSlot* shim = dispatch_slots(const_cast<Table&>(shims));
+  const DispatchSlot* orig = dispatch_slots(const_cast<Table&>(real));
+  for (size_t i = 0; i < kDispatchSlots<Table>; ++i) {
+    if (shim[i].value != orig[i].value) store_slot(&slot[i], shim[i].value);
+  }
+}
+
+// A slot that another component changed after install keeps its new value.
+template <typename Table>
+void uninstall_shims(const Table* live, const Table& shims, const Table& real) {
+  DispatchSlot* slot = dispatch_slots(*const_cast<Table*>(live));
+  const DispatchSlot* shim = dispatch_slots(const_cast<Table&>(shims));
+  const DispatchSlot* orig = dispatch_slots(const_cast<Table&>(real));
+  for (size_t i = 0; i < kDispatchSlots<Table>; ++i) {
+    if (shim[i].value != orig[i].value) replace_slot(&slot[i], shim[i].value, orig[i].value);
+  }
+}
+
+}  // namespace
+
 void hip_capture_install() {
   if (g_installed.exchange(true)) return;
-  std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
-              &g_cap_table, sizeof(HipDispatchTable));
+  install_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
 }
 
 void hip_capture_uninstall() {
   if (!g_installed.exchange(false)) return;
-  std::memcpy(const_cast<HipDispatchTable*>(hip::GetHipDispatchTable()),
-              &g_real_table, sizeof(HipDispatchTable));
+  uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
+  // The compiler shims go as well, or a capture refused at init or in a forked
+  // child keeps running them with capture off. Shutdown leaves them.
+  if (g_compiler_installed.exchange(false))
+    uninstall_shims(hip::GetHipCompilerDispatchTable(), g_cap_compiler_table,
+                    g_real_compiler_table);
+}
+
+void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
+  g_cap_compiler_table = shims;
+  install_shims(hip::GetHipCompilerDispatchTable(), shims, g_real_compiler_table);
 }
 
 // ---------------------------------------------------------------------------
@@ -2621,19 +2713,6 @@ void hip_capture_init() {
       return;
     }
 
-    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
-    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
-    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
-    // level to LOG_INFO (never lower an already-higher level) so enabling
-    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces, as it was when they
-    // went through raw fprintf(stderr).
-    if (hrr_dbg_args_enabled() && AMD_LOG_LEVEL < amd::LOG_INFO) {
-      AMD_LOG_LEVEL = amd::LOG_INFO;
-      LogPrintfInfo("[HRR capture] HIP_HRR_DEBUG_ARGS set — raised AMD_LOG_LEVEL "
-                    "to %d (LOG_INFO) so argument traces are visible",
-                    static_cast<int>(amd::LOG_INFO));
-    }
-
     // Snapshot the fully-initialized dispatch table and install runtime shims here
     // only (see comment above — no static-init capture hook).
     if (!g_installed) {
@@ -2642,12 +2721,36 @@ void hip_capture_init() {
     }
 
     // Open the events writer now — Flag::init() has run so output_dir is valid.
-    // A refused open leaves capture off, so take the shims out of the dispatch
-    // table too rather than leave every call going through them for nothing.
+    // A refused open leaves capture off. Without a writer the shims would only
+    // cost time, and the D2H ones still synchronize streams, so take them out
+    // of the dispatch table again.
     if (!hrr_cap::writer::open(hip_capture_output_dir())) {
       hip_capture_uninstall();
       return;
     }
+
+    // HIP_HRR_DEBUG_ARGS traces are emitted via LogPrintfInfo (amd::LOG_INFO).
+    // ClPrint filters anything above AMD_LOG_LEVEL, so a user who set the trace
+    // flag but left AMD_LOG_LEVEL below LOG_INFO would see nothing. Raise the
+    // level to LOG_INFO (never lower an already-higher level) so enabling
+    // HIP_HRR_DEBUG_ARGS alone is enough to get the traces. Say so on stderr
+    // whatever the log level, since the traces carry argument bytes. This runs
+    // only once the writer is open, so a refused open claims nothing.
+    if (hrr_dbg_args_enabled()) {
+      fprintf(stderr,
+              "[HRR capture] HIP_HRR_DEBUG_ARGS is set: kernel argument bytes and "
+              "host-to-device copy destinations are also written to the log\n");
+      if (AMD_LOG_LEVEL < amd::LOG_INFO) AMD_LOG_LEVEL = amd::LOG_INFO;
+    }
+#if !defined(DEBUG)
+    // A release runtime ignores the flag, so tell whoever set it why no
+    // traces appear rather than leave them looking.
+    else if (!amd::Os::getEnvironment("HIP_HRR_DEBUG_ARGS").empty()) {
+      fprintf(stderr,
+              "[HRR capture] HIP_HRR_DEBUG_ARGS ignored: only a Debug build of the "
+              "HIP runtime reads it\n");
+    }
+#endif
 
     hrr_cap::writer::set_capture_metadata_json(
         hrr_cap::metadata::collect_json());
@@ -2689,7 +2792,10 @@ void hip_capture_init() {
 }
 
 void hip_capture_shutdown() {
-  hip_capture_uninstall();
+  // Only the runtime shims: the compiler table keeps its shims, so a fat binary
+  // unregistered after this still goes through them, and the writer drops it.
+  if (g_installed.exchange(false))
+    uninstall_shims(hip::GetHipDispatchTable(), g_cap_table, g_real_table);
   hrr_cap::writer::flush(hip_capture_output_dir());
   hrr_cap::writer::close();
 

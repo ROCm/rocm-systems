@@ -307,7 +307,6 @@ HELP_CASES = [
             r"-c, --config",
             r"-o, --output",
             r"-T, --trace",
-            r"-L, --trace-legacy",
             r"-P, --profile",
             r"-F, --flat-profile",
             r"-H, --host",

@@ -325,6 +325,8 @@ rj_status_t rj_vm_step(rj_vm_t *vm, int *active) {
     return ROCJITSU_STATUS_UNSUPPORTED;
 
   bool any_active = vm->engine->step();
+  if (vm->engine->exit_code() != 0)
+    return ROCJITSU_STATUS_ERROR;
   if (active)
     *active = any_active ? 1 : 0;
   return ROCJITSU_STATUS_SUCCESS;
