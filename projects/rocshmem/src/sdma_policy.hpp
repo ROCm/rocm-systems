@@ -43,7 +43,9 @@ namespace rocshmem {
 class SdmaImpl {
  public:
   // Configuration (set from environment variables during init)
-  bool sdmaEnabled{true};
+  // True only after the node-local group agreed to use SDMA; init_constant_memory() derives
+  // constmem.ipc_sdma_threshold from it. Stays false if sdmaHostInit never runs.
+  bool sdmaEnabled{false};
   // Dirty bitmask: bit [local_pe * numChannels + ch] set = channel ch has a
   // pending SDMA op to local_pe.  With up to 8 PEs × 8 channels = 64 bits.
   uint64_t sdmaDirty{0};
@@ -58,6 +60,8 @@ class SdmaImpl {
   int shm_size{0};
   int my_pe{0};
   int local_rank{0};
+  // Local peers [0, wiredPeers) this rank connected; sdmaReleasePeers() disconnects exactly those.
+  int wiredPeers{0};
 
   // Gathers one int from every node-local rank into values[0, num_pes), indexed by local rank. The
   // caller has already written its own entry at values[local_rank].
@@ -69,6 +73,7 @@ class SdmaImpl {
   __host__ void sdmaHostStop();
   // Copy this rank's queue handles to deviceHandles_d, or nulls when SDMA was dropped.
   __host__ void sdmaPublishHandles(int deviceId, bool useQueues);
+  __host__ void sdmaReleasePeers();
 
   // Device-side copy with optional wavefront-affine channel spreading.
   //

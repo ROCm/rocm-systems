@@ -60,8 +60,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
   int deviceId;
   CHECK_HIP(hipGetDevice(&deviceId));
 
-  // Peers this init wired, so a fallback releases exactly those.
-  std::vector<int> wired;
+  wiredPeers = 0;
   uint32_t queuesBefore = 0;
   int status = kSdmaDisabledByEnv;
   if (sdmaEnabled) {
@@ -73,9 +72,8 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
     queuesBefore = sdma_anvil::anvil.queuesUsed();
     status = kSdmaReady;
 
-    // Create SDMA connections to all local PEs including self. A failure is not acted on here:
-    // sdmaEnabled also selects the alltoall algorithm, and ranks that disagree on it run
-    // incompatible synchronization and hang, so the result is agreed across the group below.
+    // Connect to every local PE. A failure is not acted on here; the group agrees on the result
+    // below, because disagreeing on sdmaEnabled hangs alltoall.
     for (int i = 0; i < shm_size; i++) {
       if (i != deviceId) {
         sdma_anvil::EnablePeerAccess(deviceId, i);
@@ -89,7 +87,7 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
         status = kSdmaConnectFailed;
         break;
       }
-      wired.push_back(i);
+      wiredPeers = i + 1;
     }
   }
 
@@ -104,6 +102,8 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
       return;
     case SdmaDecision::kAllDisabled:
       LOG_INFO("SDMA disabled at runtime (ROCSHMEM_SDMA_ENABLED=0)");
+      // USE_SDMA testers index deviceHandles_d without checking sdmaEnabled.
+      sdmaPublishHandles(deviceId, false);
       return;
     case SdmaDecision::kFallbackConnectFailed:
       LOG_ERROR("SDMA: connect failed on local rank(s) %s of %d; all of them fall back to IPC "
@@ -117,16 +117,15 @@ __host__ void SdmaImpl::sdmaHostInit(int pe, int num_pes, int rank,
       break;
   }
 
-  // Release only what this init wired: the channel map is process-global, so disconnect() would
-  // also destroy queues another user still holds.
-  for (int i : wired) sdma_anvil::anvil.disconnectDevice(i);
+  const int released = wiredPeers;
+  sdmaReleasePeers();
   if (status != kSdmaDisabledByEnv) {
     const uint32_t queuesAfter = sdma_anvil::anvil.queuesUsed();
     if (queuesAfter != queuesBefore) {
       LOG_WARN("SDMA: %u queue(s) held after the fallback, %u before init", queuesAfter,
                queuesBefore);
     } else {
-      LOG_INFO("SDMA: fallback released %zu peer(s), %u queue(s) held", wired.size(), queuesAfter);
+      LOG_INFO("SDMA: fallback released %d peer(s), %u queue(s) held", released, queuesAfter);
     }
   }
   sdmaEnabled = false;
@@ -159,17 +158,20 @@ __host__ void SdmaImpl::sdmaPublishHandles(int deviceId, bool useQueues) {
                       hipMemcpyHostToDevice));
 }
 
+__host__ void SdmaImpl::sdmaReleasePeers() {
+  // Release only the peers sdmaHostInit wired: the channel map is process-global, so disconnect()
+  // would also destroy queues another user still holds.
+  for (int i = 0; i < wiredPeers; i++) sdma_anvil::anvil.disconnectDevice(i);
+  wiredPeers = 0;
+}
+
 __host__ void SdmaImpl::sdmaHostStop() {
   LOG_TRACE("SDMA stop");
   if (deviceHandles_d != nullptr) {
     CHECK_HIP(hipFree(deviceHandles_d));
     deviceHandles_d = nullptr;
   }
-  // Release only the peers sdmaHostInit wired: the channel map is process-global, so disconnect()
-  // would also destroy queues another user still holds. A disabled init wired none.
-  if (sdmaEnabled) {
-    for (int i = 0; i < shm_size; i++) sdma_anvil::anvil.disconnectDevice(i);
-  }
+  sdmaReleasePeers();
 }
 
 #endif  // USE_SDMA
