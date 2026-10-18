@@ -2132,7 +2132,12 @@ Memory* Device::getRocMemory(amd::Memory* mem) const {
 }
 
 // ================================================================================================
-device::Memory* Device::createMemory(amd::Memory& owner) const {
+device::Memory* Device::createMemory(
+    amd::Memory& owner, amd::Memory::ErrorCode* errorCode) const {
+  if (errorCode != nullptr) {
+    *errorCode = amd::Memory::kErrorUnknown;
+  }
+
   roc::Memory* memory = nullptr;
   if (owner.asBuffer()) {
     memory = new roc::Buffer(*this, owner);
@@ -2146,7 +2151,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
     return nullptr;
   }
 
-  bool result = memory->create();
+  bool result = memory->create(false, errorCode);
 
   if (!result) {
     LogError("Failed creating memory");
@@ -2186,7 +2191,8 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
       return nullptr;
     }
 
-    if (devImageView != nullptr && !devImageView->createView(static_cast<roc::Image&>(*memory))) {
+    if (devImageView != nullptr &&
+        !devImageView->createView(static_cast<roc::Image&>(*memory), errorCode)) {
       LogError("[OCL] Fail to create device mem object for the view");
       delete devImageView;
       imageView->release();
@@ -2229,7 +2235,7 @@ device::Memory* Device::createMemory(amd::Memory& owner) const {
 device::Memory* Device::createMemory(size_t size, size_t alignment) const {
   auto buffer = new roc::Buffer(*this, size);
   static constexpr bool LocalAlloc = true;
-  if ((buffer == nullptr) || !buffer->create(LocalAlloc)) {
+  if ((buffer == nullptr) || !buffer->create(LocalAlloc, nullptr)) {
     LogError("Couldn't allocate memory on device!");
     return nullptr;
   }
