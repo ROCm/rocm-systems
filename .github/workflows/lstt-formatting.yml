@@ -53,7 +53,7 @@ jobs:
         with:
           sparse-checkout: |
             projects/${{ matrix.project }}
-            .github/workflows
+            ${{ matrix.project == 'amdsmi' && '.github/workflows' || '' }}
           fetch-depth: 0
 
       - name: Set up Python

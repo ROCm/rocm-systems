@@ -152,7 +152,7 @@ def validate_tools(
         universal_newlines=True,
     )
     match = GO_VERSION.search(result.stdout)
-    minimum = (1, 21) if args.cgocheck2 else (1, 20)
+    minimum = (1, 21) if args.cgocheck2 else (1, 18)
     if not match or tuple(map(int, match.groups())) < minimum:
         raise ValueError("local Go toolchain must be at least " + ".".join(map(str, minimum)))
     print(result.stdout.strip(), flush=True)

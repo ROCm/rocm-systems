@@ -18,7 +18,7 @@ typedef enum {
 } amdsmi_test_t;
 """
 MEMBERS = ["AMDSMI_TEST_FIRST", "AMDSMI_TEST_ALIAS", "AMDSMI_TEST_LAST"]
-MODULE = "module github.com/ROCm/rocm-systems/projects/amdsmi/go\n\ngo 1.20\n"
+MODULE = "module github.com/ROCm/rocm-systems/projects/amdsmi/go\n\ngo 1.18\n"
 ENUM_TYPES = {
     "amdsmi_status_t": "Status",
     "amdsmi_vram_type_t": "VramType",
@@ -128,17 +128,17 @@ class ModuleTests(unittest.TestCase):
                 with self.assertRaisesRegex(ValueError, "dependencies|toolchain"):
                     contract.check_module(MODULE + directive + "\n")
 
-    def test_requires_expected_module_and_go_1_20(self) -> None:
+    def test_requires_expected_module_and_go_1_18(self) -> None:
         contract.check_module("// SPDX-License-Identifier: MIT\n" + MODULE)
         for source in (
             "",
             MODULE.replace("/amdsmi/go", "/other/go"),
-            MODULE.replace("1.20", "1.19"),
-            MODULE.replace("1.20", "1.24"),
-            MODULE.replace("go 1.20", ""),
-            MODULE + "go 1.20\n",
+            MODULE.replace("1.18", "1.17"),
+            MODULE.replace("1.18", "1.24"),
+            MODULE.replace("go 1.18", ""),
+            MODULE + "go 1.18\n",
         ):
-            with self.subTest(source=source), self.assertRaisesRegex(ValueError, "go 1.20"):
+            with self.subTest(source=source), self.assertRaisesRegex(ValueError, "go 1.18"):
                 contract.check_module(source)
 
 

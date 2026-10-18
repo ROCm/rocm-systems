@@ -10,7 +10,7 @@ myst:
 ## Read-only Go module
 
 Import `github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi`. Requires Linux,
-CGO, Go 1.20+, a C compiler, an AMD SMI 27.x public header (27.1 or later), and a
+CGO, Go 1.18+, a C compiler, an AMD SMI 27.x public header (27.2 or later), and a
 27.x `libamd_smi` shared library at least as new. See the [setup guide](../how-to/amdsmi-go-lib.md)
 and the standalone guide installed at `share/amd_smi/go/README.md`. CPU, NIC,
 set/reset, all-profile configuration, and event APIs are not included.
@@ -68,6 +68,8 @@ Before the first package reference, `Init` rejects a native major different from
 the compiled header or an older minor with `AMDSMI_STATUS_NOT_SUPPORTED`. Newer
 minors in the same major are allowed; release differences are ignored. A native
 version-query error is propagated. Neither failure acquires a native reference.
+Compilation rejects older headers because 27.1 used incompatible driver-info
+layouts. Newer-minor runtime compatibility assumes stable native ABI layouts.
 
 Go indices refer only to the current filtered AMD-GPU list and need not match
 CLI `-g`. Correlate devices across tools with `GetGpuDeviceBdf`. To visit every
@@ -85,6 +87,9 @@ and the {download}`telemetry example <../../go/examples/telemetry/main.go>`, als
 installed at `share/amd_smi/go/examples/telemetry/main.go`, for a complete example.
 
 ### Identity and firmware
+
+See [Go API coverage](amdsmi-go-coverage.md) for the full C API inventory and
+deferred functionality, including partition configuration.
 
 | Signature | Native entry |
 | --- | --- |
@@ -111,6 +116,14 @@ installed at `share/amd_smi/go/examples/telemetry/main.go`, for a complete examp
 Fixed strings are bounded by their C capacity. Firmware counts are checked against
 the array capacity and `uint8` width before copying or narrowing. Reserved fields
 are omitted.
+
+`DriverInfo` exposes only the three fields listed above. The native
+`driver_kernel_version`, `amdgpu_driver_version`, `driver_build_version`, and
+`driver_full_version` fields are not exposed by this Go API.
+
+`FwBlock`, `VramType`, `MemoryPartitionType`, and `AcceleratorPartitionType`
+each provide `String() string`, returning the enum name or `UNKNOWN(n)` for an
+unrecognized value.
 
 ### Telemetry
 

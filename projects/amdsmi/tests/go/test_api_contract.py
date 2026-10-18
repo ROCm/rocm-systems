@@ -20,8 +20,8 @@ DIRECT_BINDINGS = re.compile(
     r"C\.(AMDSMI_[A-Z0-9_]+)[ \t]*(?=[;\n]|$)"
 )
 C_IMPORT = re.compile(r'\s*import\s+"C"')
-GO_CALLS = re.compile(r"\bC\s*\.\s*(amdsmi_[a-z0-9_]+)\s*\(")
-C_CALLS = re.compile(r"\b(amdsmi_[a-z0-9_]+)\s*\(")
+GO_CALLS = re.compile(r"\bC\s*\.\s*(amdsmi_[A-Za-z0-9_]+)\s*\(")
+C_CALLS = re.compile(r"\b(amdsmi_[A-Za-z0-9_]+)\s*\(")
 MODULE_DEPENDENCIES = re.compile(r"^\s*(require|replace|exclude|toolchain)\b", re.M)
 REQUIRED_ENUMS = {
     "amdsmi_status_t": "Status",
@@ -131,9 +131,9 @@ def check_module(source: str) -> None:
         "module",
         "github.com/ROCm/rocm-systems/projects/amdsmi/go",
         "go",
-        "1.20",
+        "1.18",
     ]:
-        raise ValueError("Go module must declare only the planned module and go 1.20")
+        raise ValueError("Go module must declare only the planned module and go 1.18")
 
 
 def check_project(*, project: Path, available_only: bool) -> None:

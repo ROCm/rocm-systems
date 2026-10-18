@@ -64,6 +64,19 @@ func TestTelemetryClock(t *testing.T) {
 		ClkLocked: false, ClkDeepSleep: false, ClkLockedRaw: 255, ClkDeepSleepRaw: 222})
 }
 
+func TestTelemetryClockBooleanBytesRemainUnavailable(t *testing.T) {
+	h := fixtureHandle(t)
+	for _, mode := range []uint32{1, 2} {
+		mockConfigure("amdsmi_get_clock_info", AMDSMI_STATUS_SUCCESS, mode)
+		got, err := GetClockInfo(h, AMDSMI_CLK_TYPE_GFX)
+		want := ClkInfo{Clk: ^uint32(0), MinClk: 500, MaxClk: 2100,
+			ClkLockedRaw: uint8(mode - 1), ClkDeepSleepRaw: uint8(2 - mode)}
+		if err != nil || got != want {
+			t.Fatalf("mode %d: want %#v, got %#v, err=%v", mode, want, got, err)
+		}
+	}
+}
+
 func TestTelemetryFrequencies(t *testing.T) {
 	checkQuery(t, "amdsmi_get_clk_freq", func(h ProcessorHandle) (Frequencies, error) {
 		return GetClockFrequencies(h, AMDSMI_CLK_TYPE_MEM)

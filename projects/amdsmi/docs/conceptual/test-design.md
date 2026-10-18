@@ -547,14 +547,14 @@ under `tests/go/`; wrapper tests and C fixtures live under `go/amdsmi/`.
 
 ### Go checks
 
-Run from the AMD SMI project root on Linux with Go 1.20+ and a C compiler.
+Run from the AMD SMI project root on Linux with Go 1.18+ and a C compiler.
 The fixture runner enables CGO and uses local tools with downloads disabled;
 mock tests require neither an installed AMD SMI library nor root.
 
 The [repository module test guide](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md#repository-tests) contains the shared
 fixture, tooling, sanitizer, native, and staged-consumer commands.
 
-Go 1.20 is the module's language/toolchain floor. Separately, `Init` checks the
+Go 1.18 is the module's language/toolchain floor. Separately, `Init` checks the
 loaded native library against the compiled AMD SMI header version. Tests retain
 both requirements; changing the Go floor does not change native compatibility.
 
@@ -570,10 +570,10 @@ prerequisites produce visible local skips. Contract guard tests retain negative
 cases for partial enums, explicit exclusions, and the module declaration.
 
 The dedicated repository-root `.github/workflows/amdsmi-go.yml` configures
-CPU-only `go-tests` jobs on `ubuntu-24.04` with Go 1.20.14 and 1.24.1. Both run
+CPU-only `go-tests` jobs on `ubuntu-24.04` with Go 1.18.10 and 1.24.1. Both run
 tooling tests, API contracts, default/race/checkptr fixtures, vet, and example
 builds. Go 1.24.1 adds explicit cgocheck2 and ASAN runs; that choice is not a
-claim that Go 1.20 cannot run ASAN. Each matrix entry builds the native shared
+claim that Go 1.18 cannot run ASAN. Each matrix entry builds the native shared
 library with ESMI, CLI, C++ tests, and ldconfig disabled, then checks native
 version lookup, vet, example linking, and a staged-source consumer. The job
 installs native build dependencies first; the checks themselves run without
@@ -581,8 +581,7 @@ root or GPU access. Examples are built, not run. The existing repository-root
 `.github/workflows/amdsmi-build.yml` retains the GPU build/test jobs.
 
 The pinned actionlint pre-commit hook checks both workflows, including Actions
-expression contexts, in place of the deleted Python substring test. Workflow
-configuration describes intended coverage, not proof of a hosted CI pass.
+expression contexts.
 
 ## Migration reference
 

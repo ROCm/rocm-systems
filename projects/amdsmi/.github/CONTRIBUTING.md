@@ -38,7 +38,7 @@ pre-commit run --files ./**/*
 ```
 
 The pinned actionlint hook validates Actions expressions as well as workflow YAML.
-Its managed Go 1.25.0 environment is separate from the bindings' Go 1.20 minimum;
+Its managed Go 1.25.0 environment is separate from the bindings' Go 1.18 minimum;
 the first hook setup needs network access to provision the tool and dependencies.
 
 ### C/C++ ###
@@ -93,6 +93,17 @@ out of scope. The `amdsmi-license-headers` pre-commit hook
 
 * Reviewers are listed in the CODEOWNERS file
 * All code must pass pre-commit checks before review
+
+### API Updates ###
+
+The read-only [Go binding](../go/amdsmi/amdsmi_interface.go) is handwritten.
+When changing supported C APIs, review its signatures, constants, struct fields,
+and conversions, then update fixtures, tests, and [API docs](../docs/reference/amdsmi-go-api.md).
+The [contract check](../tests/go/test_api_contract.py) covers 11 mirrored enums;
+new C struct fields can compile without being exposed in Go. Run the
+[Go checks](../go/README.md#repository-tests), including native and staged checks.
+The [coverage inventory](../docs/reference/amdsmi-go-coverage.md) must account
+for every public declaration and any changes to types used by the binding.
 
 ## References ##
 

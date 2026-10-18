@@ -183,7 +183,7 @@ tests/
 ### Go CGO tests (no GPU)
 
 From the project root on Linux, use the Python stdlib runner with a local Go
-1.20+ and C compiler. The runner compiles a controlled native fixture against the
+1.18+ and C compiler. The runner compiles a controlled native fixture against the
 public header; no installed AMD SMI library, GPU, root, or network is needed.
 
 Use the [module test guide](../go/README.md#repository-tests) for the fixture,
@@ -201,7 +201,7 @@ with that tag alone does not build or link it. Test assets are not installed.
 | actionlint hook | Actions syntax and expression contexts in the Go and GPU build workflows |
 | External-package contract | Common Host names, signatures, fields, and `Init(AMDSMI_INIT_AMD_GPUS)` compile without private-package access; BM extensions are checked separately |
 | Lifecycle, index, and flag cases | Native header/library compatibility, independently of the Go toolchain floor; filtered GPU discovery order, bounds and lifetime checks, rejection of unsupported flags |
-| `--native --include-dir ... --library-dir ... --run '^TestNativeVersion$'` | Fresh matching 27.1 header/library linkage and runtime version, without initialization |
+| `--native --include-dir ... --library-dir ... --run '^TestNativeVersion$'` | Fresh matching 27.2+ header/library linkage and runtime version, without initialization |
 | `--native --include-dir ... --library-dir ... --build-example` | Example links against the real library; it is not executed |
 | `python3 -B tests/go/test_install.py --build-dir "$AMDSMI_NATIVE_BUILD_DIR"` | Temporary `DESTDIR` install, exact source contents, build from staged sources, independent local-replacement consumer against staged headers/library |
 
@@ -217,7 +217,7 @@ provides those prerequisites.
             └─► clang-format, ruff-format, gersemi, codespell
 
  CI (.github/workflows/)
-   amdsmi-go.yml ──► CPU-only Go 1.20.14/1.24.1 fixture, contract, tooling, native/staged checks
+  amdsmi-go.yml ──► CPU-only Go 1.18.10/1.24.1 fixture, contract, tooling, native/staged checks
    amdsmi-build.yml ──► run_amdsmi_build.py → GPU build+install+test
                         └─► source amdsmitst.exclude; detect_asic_filter.sh
                             ./amdsmitst --gtest_filter="-$GTEST_EXCLUDE"
@@ -230,8 +230,7 @@ provides those prerequisites.
                                   run_amdsmi_component_removal_test.py
 ```
 
-Workflow paths above are relative to the repository root. This describes
-configured coverage, not a hosted CI pass.
+Workflow paths above are relative to the repository root.
 
 # API Summary Report
 ## Overview

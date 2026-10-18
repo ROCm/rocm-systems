@@ -18,11 +18,11 @@ installed at `share/amd_smi/go/README.md` alongside the matching module sources.
 
 | Build requirements | Runtime requirements |
 | --- | --- |
-| Linux, CGO, Go 1.20+, C compiler | AMD GPU driver and native device permissions for GPU queries |
-| AMD SMI 27.x public development header (27.1 or later) and a 27.x shared library at least as new | Matching `libamd_smi.so`, not `libamdsmi.so` |
+| Linux, CGO, Go 1.18+, C compiler | AMD GPU driver and native device permissions for GPU queries |
+| AMD SMI 27.x public development header (27.2 or later) and a 27.x shared library at least as new | Matching `libamd_smi.so`, not `libamdsmi.so` |
 | Compilation and mock tests need no GPU/root | Go adds no root requirement |
 
-Go 1.20 is the Go language/toolchain floor, not the native library version.
+Go 1.18 is the Go language/toolchain floor, not the native library version.
 The separate `Init` check compares the loaded AMD SMI library with the compiled
 C header; it does not inspect the Go version.
 
@@ -69,7 +69,7 @@ go build ./...
 The local `v0.0.0` requirement is only a replacement key. For remote consumption,
 select `github.com/ROCm/rocm-systems/projects/amdsmi/go@<immutable-revision>`
 at a published revision containing this module and pair it with a native 27.x
-release (27.1 or later) for compilation. Any v0 module tag must have the form
+release (27.2 or later) for compilation. Any v0 module tag must have the form
 `projects/amdsmi/go/v0.X.Y`; this convention does not assert that a tag exists.
 Native major 27 does not determine the Go module version. Use a local replacement
 for unpublished source changes. The [repository module guide](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/go/README.md#source-pairing-and-consumption)
@@ -171,7 +171,7 @@ See the [requirements](#install_reqs) section for more information.
    export LD_LIBRARY_PATH=$LD_LIBRARY_PATH:/opt/rocm/lib:/opt/rocm/lib64:
    ```
 
-3. Install Go 1.20+.
+3. Install Go 1.18+.
 
    Download Go from [https://go.dev/dl/](https://go.dev/dl/) and follow the
    official installation documentation at [Download and

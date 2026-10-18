@@ -13,6 +13,8 @@ on:
       - 'projects/amdsmi/CMakeLists.txt'
       - 'projects/amdsmi/amd_smi-config.cmake.in'
       - 'projects/amdsmi/py-interface/CMakeLists.txt'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-go.yml'
   push:
     branches: [develop]
@@ -26,6 +28,8 @@ on:
       - 'projects/amdsmi/CMakeLists.txt'
       - 'projects/amdsmi/amd_smi-config.cmake.in'
       - 'projects/amdsmi/py-interface/CMakeLists.txt'
+      - 'shared/cuid/**'
+      - 'shared/sha256/**'
       - '.github/workflows/amdsmi-go.yml'
   workflow_dispatch:
 
@@ -44,7 +48,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        go: ['1.20.14', '1.24.1']
+        go: ['1.18.10', '1.24.1']
     env:
       BUILD_DIR: /tmp/amdsmi-go-build
     defaults:
@@ -55,7 +59,10 @@ jobs:
       - uses: actions/checkout@de0fac2e4500dabe0009e67214ff5f5447ce83dd # v6.0.2
         with:
           persist-credentials: false
-          sparse-checkout: projects/amdsmi
+          sparse-checkout: |
+            projects/amdsmi
+            shared/cuid
+            shared/sha256
 
       - uses: actions/setup-go@40f1582b2485089dde7abd97c1529aa768e1baff # v5.6.0
         with:
@@ -73,6 +80,7 @@ jobs:
         run: |
           python3 -B -m unittest discover -s tests/go -p 'test_*.py' -v
           python3 -B tests/go/test_api_contract.py
+          python3 -B tests/go/test_api_coverage.py
 
       - name: Go mock tests and example
         run: |
@@ -93,6 +101,7 @@ jobs:
           cmake -S . -B "$BUILD_DIR" \
             -DCMAKE_BUILD_TYPE=Release \
             -DENABLE_ESMI_LIB=OFF -DBUILD_SHARED_LIBS=ON \
+            -DBUILD_CUID=ON \
             -DBUILD_CLI=OFF -DBUILD_TESTS=OFF -DENABLE_LDCONFIG=OFF
           cmake --build "$BUILD_DIR" --parallel 2
 

@@ -10,7 +10,7 @@ description: "Use when: reviewing API changes, adding/modifying amdsmi_* functio
 | Public C headers | `include/amd_smi/` | `amdsmi.h` (public API) |
 | Python bindings | `py-interface/` | `amdsmi_interface.py`, `amdsmi_wrapper.py` (auto-generated), `amdsmi_exception.py` |
 | Python CLI | `amdsmi_cli/` | `amdsmi_commands.py`, `amdsmi_parser.py`, `amdsmi_helpers.py` |
-| Read-only Go bindings | `go/amdsmi/` | `amdsmi_interface.go` (single production file, retained to match the requested Host source layout) |
+| Read-only Go bindings | `go/amdsmi/` | `amdsmi_interface.go` (single production file matching the Host source layout) |
 | Go shim | `goamdsmi_shim/` | |
 | Rust bindings | `rust-interface/` | |
 | Legacy compat | `rocm_smi/` | ROCm SMI compatibility layer |
@@ -31,7 +31,7 @@ Non-function public-API edits do **not** all cascade the same way:
 | Change | Cascade path |
 |--------|--------------|
 | New / changed `amdsmi_*` **function** | Full path below (name is grep-able in every name-bearing layer) |
-| New **enum value / struct field / macro** in `amdsmi.h` | Header + impl + regenerate wrapper; interface/CLI only if user-facing. Not name-grep-able per layer |
+| New **enum value / struct field / macro** in `amdsmi.h` | Header + impl + regenerate wrapper; review handwritten Go constants, fields, conversions, and tests within its supported GPU scope; interface/CLI only if user-facing. Not name-grep-able per layer |
 | Bug fix or behavior change inside an existing function | Impl + tests; docs/changelog if user-visible. No new wrapper/CLI entry |
 | Doxygen / comment-only edit | Header (or docs) only |
 
@@ -82,6 +82,13 @@ prove layers 3 and 7 are done.
 | `goamdsmi_shim/` | `amdsmi_*` call added if the function must reach the Go shim |
 | `go/amdsmi/` | Read-only GPU CGO binding, Go-owned results, native units/availability, and `StatusError`; keep common Host spellings and conventional Go initialisms for BM-only names |
 
+The Go binding is handwritten. Its enum contract check covers 11 mirrored enums;
+the separate coverage inventory detects declaration and bound C type changes.
+A new C field can compile without becoming
+a Go field; review supported results and conversions explicitly, then update
+fixtures, tests, and API documentation. Keep unsupported fields documented rather
+than inferring values, including the unavailable BM clock Booleans.
+
 # Tools (`tools/`)
 
 | Tool | Purpose |
@@ -131,15 +138,14 @@ Go's runner owns the `amdsmi_mock` tag and fixture linking. Commands live in
 [go/README.md](../../go/README.md#repository-tests). Python runner tests cover
 parsing, environment/cache safety, and real default/ASAN/vet/example subprocesses;
 contract guards retain partial-enum, explicit-exclusion, and module checks.
-Go 1.20 is the toolchain floor, separate from `Init`'s native header/library
+Go 1.18 is the toolchain floor, separate from `Init`'s native header/library
 version check; preserve both requirements.
 
 The repository-root `.github/workflows/amdsmi-go.yml` configures CPU-only Go
-1.20.14/1.24.1 fixture and native/staged checks. Go 1.24.1 adds explicit cgocheck2
-and `--asan` runs (GCC, incompatible with `--race`); this is not a Go 1.20 ASAN
+1.18.10/1.24.1 fixture and native/staged checks. Go 1.24.1 adds explicit cgocheck2
+and `--asan` runs (GCC, incompatible with `--race`); this is not a Go 1.18 ASAN
 exclusion. `.github/workflows/amdsmi-build.yml` retains the GPU build/test jobs.
-The pinned actionlint hook checks both workflows instead of Python substring
-assertions. Do not infer a hosted CI pass from the configuration alone.
+The pinned actionlint hook checks both workflows, including Actions expressions.
 
 # Build & Packaging
 

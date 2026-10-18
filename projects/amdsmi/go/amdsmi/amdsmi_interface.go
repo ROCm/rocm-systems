@@ -11,6 +11,10 @@ package amdsmi
 #cgo LDFLAGS: -lamd_smi
 #include <stddef.h>
 #include <amd_smi/amdsmi.h>
+// Older 27.1 headers have incompatible driver-info layouts under the same version.
+#if AMDSMI_LIB_VERSION_MAJOR != 27 || AMDSMI_LIB_VERSION_MINOR < 2
+#error "Go bindings require AMD SMI 27.2 or later 27.x headers"
+#endif
 // CGO reads high-bit enum constants as signed unless their expression has an unsigned type.
 #define AMDSMI_GPU_BLOCK_RESERVED ((unsigned long long)AMDSMI_GPU_BLOCK_RESERVED)
 

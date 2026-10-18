@@ -6,8 +6,8 @@
 package main
 
 import (
-	"errors"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi"
@@ -17,7 +17,7 @@ func run() (err error) {
 	if err = amdsmi.Init(amdsmi.AMDSMI_INIT_AMD_GPUS); err != nil {
 		return err
 	}
-	defer func() { err = errors.Join(err, amdsmi.ShutDown()) }()
+	defer func() { recordShutdownError(&err, amdsmi.ShutDown(), os.Stderr) }()
 	version, versionErr := amdsmi.GetLibVersion()
 	if versionErr != nil {
 		return versionErr
@@ -57,6 +57,17 @@ func run() (err error) {
 		}
 	}
 	return nil
+}
+
+func recordShutdownError(primary *error, cleanup error, output io.Writer) {
+	if cleanup == nil {
+		return
+	}
+	if *primary == nil {
+		*primary = cleanup
+	} else {
+		fmt.Fprintln(output, cleanup)
+	}
 }
 
 func main() {

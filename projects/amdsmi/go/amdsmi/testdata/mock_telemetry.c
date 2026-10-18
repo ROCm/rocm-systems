@@ -59,6 +59,11 @@ amdsmi_status_t amdsmi_get_clock_info(amdsmi_processor_handle processor, amdsmi_
   out->max_clk = 2100;
   out->clk_locked = UINT8_MAX;
   out->clk_deep_sleep = 222;
+  uint32_t mode = mock_mode(__func__);
+  if (mode == 1 || mode == 2) {
+    out->clk_locked = (uint8_t)(mode - 1);
+    out->clk_deep_sleep = (uint8_t)(2 - mode);
+  }
   return mock_finish(AMDSMI_STATUS_SUCCESS);
 }
 

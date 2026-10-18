@@ -82,7 +82,7 @@ The following prerequisites apply to the AMD SMI library interfaces:
   - Python 3.6.8 or later
   - 64-bit Python
 - Go interface:
-  - Go 1.20 or later
+  - Go 1.18 or later for the read-only module; see [Go requirements](../how-to/amdsmi-go-lib.md#read-only-module-requirements).
 
 ::::{note}
 When installing an `amd-smi-lib` package from ROCm 7.2.x or earlier, or one

@@ -13,6 +13,18 @@ from pathlib import Path
 from run_tests import make_env
 
 
+def header_version(header: str) -> tuple:
+    version = []
+    for part in ("MAJOR", "MINOR"):
+        matches = re.findall(r"^#define AMDSMI_LIB_VERSION_" + part + r"\s+(\d+)\s*$", header, re.M)
+        if len(matches) != 1:
+            raise ValueError("missing or ambiguous native version macro: " + part)
+        version.append(int(matches[0]))
+    if version[0] != 27 or version[1] < 2:
+        raise ValueError("this module targets AMD SMI 27.2 or later 27.x headers")
+    return tuple(version)
+
+
 def cache_value(*, cache: str, name: str) -> str:
     prefix = name + ":"
     for line in cache.splitlines():
@@ -32,12 +44,7 @@ def verify_install(*, project: Path, build_dir: Path) -> None:
     if Path(cache_value(cache=cache, name="CMAKE_HOME_DIRECTORY")).resolve() != project.resolve():
         raise ValueError("native build belongs to a different source tree")
     header = (project / "include" / "amd_smi" / "amdsmi.h").read_text()
-    version = tuple(
-        int(re.search(r"#define AMDSMI_LIB_VERSION_" + part + r"\s+(\d+)", header).group(1))
-        for part in ("MAJOR", "MINOR")
-    )
-    if version[0] != 27 or version[1] < 1:
-        raise ValueError("this module targets AMD SMI 27.x headers from 27.1 on")
+    version = header_version(header)
     prefix = Path("/amdsmi-go-stage")
     with tempfile.TemporaryDirectory(prefix="amdsmi-go-install-") as directory:
         root = Path(directory)
@@ -98,7 +105,7 @@ def verify_install(*, project: Path, build_dir: Path) -> None:
         consumer.mkdir()
         module_path = "github.com/ROCm/rocm-systems/projects/amdsmi/go"
         (consumer / "go.mod").write_text(
-            "module example.com/amdsmi-install-check\n\ngo 1.20\n\n"
+            "module example.com/amdsmi-install-check\n\ngo 1.18\n\n"
             + "require "
             + module_path
             + " v0.0.0\n"

@@ -160,8 +160,8 @@ separate development package.
 Native builds do not find or invoke Go, download modules, or add Go install
 scriptlets. `BUILD_SHARED_LIBS=OFF` still installs the Go sources, but does not
 supply their shared-library dependency. Consuming the module requires an AMD SMI
-27.x public header (27.1 or later), a 27.x shared `libamd_smi.so` at least as new
-from a shared build, a C compiler, CGO, and Go 1.20+ on Linux.
+27.x public header (27.2 or later), a 27.x shared `libamd_smi.so` at least as new
+from a shared build, a C compiler, CGO, and Go 1.18+ on Linux.
 
 Use a local module replacement for the installed sources, and explicitly set
 include, link, and runtime library directories for the matching native release.

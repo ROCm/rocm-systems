@@ -3,4 +3,4 @@
 
 module github.com/ROCm/rocm-systems/projects/amdsmi/go
 
-go 1.20
+go 1.18

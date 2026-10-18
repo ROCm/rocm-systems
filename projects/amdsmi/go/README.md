@@ -8,17 +8,22 @@ legacy shim dependency is used. Native dependencies are still required.
 
 | Requirement | Value |
 | --- | --- |
-| Build | Linux, CGO, Go 1.20+, a C compiler |
-| Native dependency | AMD SMI 27.x public development header (27.1 or later) and a 27.x shared library at least as new |
+| Build | Linux, CGO, Go 1.18+, a C compiler |
+| Native dependency | AMD SMI 27.x public development header (27.2 or later) and a 27.x shared library at least as new |
 | Runtime GPU queries | Loaded AMD GPU driver and native device permissions; Go adds no root requirement |
 | Compilation and mock tests | No GPU or root required |
 | Module | `github.com/ROCm/rocm-systems/projects/amdsmi/go` |
 | Package import | `github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi` |
 | Native library | `libamd_smi` (`-lamd_smi`), not `libamdsmi` |
 
-Go 1.20 is the language/toolchain floor declared by the Go module. The native
+Go 1.18 is the language/toolchain floor declared by the Go module. The native
 AMD SMI 27.x dependency is separate: `Init` checks the loaded library against
 the compiled C header, not against the Go version. Both requirements apply.
+
+Headers older than 27.2 are rejected at compilation because 27.1 used incompatible
+driver-info layouts under the same version. Accepting newer runtime minors relies
+on native ABI stability within major 27. Go 1.18 is a compatibility baseline;
+use a maintained Go toolchain for new deployments.
 
 Other operating systems and `CGO_ENABLED=0` are unsupported. The production
 file requires `linux && cgo`, so Go reports that build constraints exclude all
@@ -32,7 +37,7 @@ import "github.com/ROCm/rocm-systems/projects/amdsmi/go/amdsmi"
 ```
 
 Production bindings remain in the single [amdsmi/amdsmi_interface.go](amdsmi/amdsmi_interface.go)
-file to match the required Host source layout.
+file to match the Host source layout.
 The common read-only names, signatures, and fields follow the Host declarations.
 Spellings such as `Id`, `Gpu`, `Fw`, and `Clk` are retained deliberately for
 shared source compatibility. BM-only names use conventional Go initialisms,
@@ -62,7 +67,7 @@ queries; executing it does.
 ## Source pairing and consumption
 
 Pin an immutable published source revision containing this module and pair it
-with a native 27.x release (27.1 or later) for compilation. Any v0 module tag must use
+with a native 27.x release (27.2 or later) for compilation. Any v0 module tag must use
 the monorepo form `projects/amdsmi/go/v0.X.Y`; this is a naming convention, not a
 claim that a tag exists. Native major 27 is not the Go module version.
 Remote acquisition requires a published revision containing the module;
@@ -181,6 +186,12 @@ recommended for new read-only GPU integrations, not as a source-compatible
 replacement for existing consumers. CPU, NIC, set/reset, all-profile configuration,
 and event APIs are outside this module; existing consumers keep their current path.
 
+Full applicable C API coverage is a delivery target, not current functionality.
+The [coverage inventory](https://github.com/ROCm/rocm-systems/blob/develop/projects/amdsmi/docs/reference/amdsmi-go-coverage.md) records each
+declaration and deferral. Partition setters, profile enumeration, and process-idle
+queries are priority follow-up work requiring agreed consumer and handle/restart
+contracts. This foundation is not a DRA replacement or a unified BM/Host loader.
+
 ## Repository tests
 
 Run from the AMD SMI project root, not the installed module. The Python stdlib
@@ -192,6 +203,7 @@ Fixture files are not installed. Checks use the local toolchain with downloads d
 ```bash
 python3 -B -m unittest discover -s tests/go -p 'test_*.py' -v
 python3 -B tests/go/test_api_contract.py
+python3 -B tests/go/test_api_coverage.py
 python3 -B tests/go/run_tests.py
 python3 -B tests/go/run_tests.py --race
 python3 -B tests/go/run_tests.py --checkptr
@@ -213,16 +225,15 @@ exclusions, and the module declaration.
 `--cgocheck2` requires Go 1.21+. `--asan` instruments the Go binary and C fixture
 with AddressSanitizer, selects GCC, and cannot be combined with `--race`.
 The dedicated repository-root `.github/workflows/amdsmi-go.yml` configures
-CPU-only `ubuntu-24.04` jobs for Go 1.20.14 and 1.24.1, with tooling tests, API
+CPU-only `ubuntu-24.04` jobs for Go 1.18.10 and 1.24.1, with tooling tests, API
 contracts, default/race/checkptr fixtures, vet, and example builds. Go 1.24.1
 adds explicit cgocheck2 and ASAN runs; this selection does not declare ASAN
-unsupported on Go 1.20. Both versions build the native shared library and run
+unsupported on Go 1.18. Both versions build the native shared library and run
 the native and staged checks below without GPU access. The existing
 `.github/workflows/amdsmi-build.yml` retains the GPU build/test jobs.
 
 The pinned actionlint pre-commit hook checks both workflows, including Actions
-expression contexts, instead of Python substring assertions. These are
-configured checks, not evidence that a hosted CI run has passed.
+expression contexts.
 
 Native checks require a fresh matching build;
 only the version test executes native code, without initialization or GPU access.

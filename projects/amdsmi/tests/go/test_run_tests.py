@@ -4,6 +4,7 @@
 import contextlib
 import io
 import os
+import re
 import shlex
 import shutil
 import subprocess
@@ -97,16 +98,14 @@ class EnvironmentTests(unittest.TestCase):
             first, second = root / "first", root / "second"
             first.mkdir()
             second.mkdir()
-            with (
-                patch("run_tests.tempfile.gettempdir", return_value=directory),
-                patch.dict(os.environ, {"GOEXPERIMENT": "wrong"}),
-            ):
-                envs = [
-                    run_tests.make_env(
-                        root=path, include_dir=root, library_dir=path, cc="cc", cgocheck2=False
-                    )
-                    for path in (first, second)
-                ]
+            with patch("run_tests.tempfile.gettempdir", return_value=directory):
+                with patch.dict(os.environ, {"GOEXPERIMENT": "wrong"}):
+                    envs = [
+                        run_tests.make_env(
+                            root=path, include_dir=root, library_dir=path, cc="cc", cgocheck2=False
+                        )
+                        for path in (first, second)
+                    ]
             for env in envs:
                 self.assertNotIn("GOEXPERIMENT", env)
             self.assertEqual(envs[0]["GOCACHE"], envs[1]["GOCACHE"])
@@ -159,16 +158,14 @@ class ValidationTests(unittest.TestCase):
 
     def test_missing_native_inputs(self) -> None:
         self.args.native = True
-        with (
-            patch("run_tests.shutil.which", return_value="tool"),
-            patch("run_tests.subprocess.run") as run,
-        ):
-            with self.assertRaisesRegex(FileNotFoundError, "shared library"):
-                self.validate()
-            (self.root / "amd_smi" / "amdsmi.h").unlink()
-            with self.assertRaisesRegex(FileNotFoundError, "header"):
-                self.validate()
-            run.assert_not_called()
+        with patch("run_tests.shutil.which", return_value="tool"):
+            with patch("run_tests.subprocess.run") as run:
+                with self.assertRaisesRegex(FileNotFoundError, "shared library"):
+                    self.validate()
+                (self.root / "amd_smi" / "amdsmi.h").unlink()
+                with self.assertRaisesRegex(FileNotFoundError, "header"):
+                    self.validate()
+                run.assert_not_called()
 
     def test_requires_linux(self) -> None:
         with patch("run_tests.sys.platform", "darwin"):
@@ -177,7 +174,10 @@ class ValidationTests(unittest.TestCase):
 
     def test_local_version_gates(self) -> None:
         cases = [
-            ("go1.19.13", False, False),
+            ("go1.17.13", False, False),
+            ("go1.18.10", False, True),
+            ("go1.18.10", True, False),
+            ("go1.19.13", False, True),
             ("go1.20.14", False, True),
             ("go1.20.14", True, False),
             ("go1.21.0", True, True),
@@ -188,12 +188,12 @@ class ValidationTests(unittest.TestCase):
             result = subprocess.CompletedProcess(
                 ["go", "version"], 0, stdout="go version " + version + " linux/amd64"
             )
-            with (
-                self.subTest(version=version, experiment=experiment),
-                patch("run_tests.shutil.which", return_value="tool"),
-                patch("run_tests.subprocess.run", return_value=result),
-                contextlib.redirect_stdout(io.StringIO()),
-            ):
+            with self.subTest(
+                version=version, experiment=experiment
+            ), contextlib.ExitStack() as stack:
+                stack.enter_context(patch("run_tests.shutil.which", return_value="tool"))
+                stack.enter_context(patch("run_tests.subprocess.run", return_value=result))
+                stack.enter_context(contextlib.redirect_stdout(io.StringIO()))
                 if accepted:
                     self.validate()
                 else:
@@ -210,17 +210,14 @@ class ValidationTests(unittest.TestCase):
                 ["--native", "--include-dir", str(self.root), "--library-dir", str(self.root)]
                 + options
             )
-            with (
-                self.subTest(options=options),
-                patch("run_tests.validate_tools"),
-                patch("run_tests.subprocess.run") as run,
-            ):
-                run_tests.run_fixture(project=self.root, args=args)
-                run.assert_called_once()
-                command = run.call_args.args[0]
-                self.assertEqual(command[:2], ["go", action])
-                self.assertNotIn("-tags=amdsmi_mock", command)
-                self.assertEqual(run.call_args.kwargs["env"]["LD_LIBRARY_PATH"], str(self.root))
+            with self.subTest(options=options), patch("run_tests.validate_tools"):
+                with patch("run_tests.subprocess.run") as run:
+                    run_tests.run_fixture(project=self.root, args=args)
+                    run.assert_called_once()
+                    command = run.call_args[0][0]
+                    self.assertEqual(command[:2], ["go", action])
+                    self.assertNotIn("-tags=amdsmi_mock", command)
+                    self.assertEqual(run.call_args[1]["env"]["LD_LIBRARY_PATH"], str(self.root))
 
     def test_no_sources_fails_before_compilation(self) -> None:
         with patch("run_tests.validate_tools"), patch("run_tests.subprocess.run") as run:
@@ -282,6 +279,28 @@ class SmokeTests(unittest.TestCase):
             "TestECCCount",
             "TestNativeVersion",
         )
+
+    def test_rejects_unsupported_native_headers(self) -> None:
+        project = Path(run_tests.__file__).resolve().parents[2]
+        for major, minor in ((27, 1), (26, 2), (28, 2)):
+            with self.subTest(major=major, minor=minor):
+                with tempfile.TemporaryDirectory(prefix="amdsmi-header-test-") as directory:
+                    include = Path(directory) / "include"
+                    shutil.copytree(project / "include", include)
+                    header = include / "amd_smi" / "amdsmi.h"
+                    text = header.read_text()
+                    for part, value in (("MAJOR", major), ("MINOR", minor)):
+                        text, count = re.subn(
+                            r"(#define AMDSMI_LIB_VERSION_" + part + r"\s+)\d+",
+                            lambda match: match.group(1) + str(value),
+                            text,
+                        )
+                        self.assertEqual(count, 1)
+                    header.write_text(text)
+                    output = self.run_cli("--include-dir", str(include), success=False)
+                    self.assertIn("Go bindings require AMD SMI 27.2 or later 27.x headers", output)
+                    self.assertNotIn("--- PASS:", output)
+                    self.assertNotIn("Traceback", output)
 
     def test_asan_partition_and_lifecycle(self) -> None:
         self.assert_tests_passed(
