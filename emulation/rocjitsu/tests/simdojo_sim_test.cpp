@@ -66,6 +66,13 @@ private:
   Event timer_event_{this, EventType::TIMER_CALLBACK};
 };
 
+/// Leaf kept alive until an external producer finishes posting events.
+class AsyncPrimaryComponent : public Component {
+public:
+  explicit AsyncPrimaryComponent(std::string name) : Component(std::move(name)) {}
+  void startup() override { engine()->register_as_primary(); }
+};
+
 /// Component with IN/OUT ports that replies to each received message.
 /// Optionally registers as primary (default: true).
 class PingPongComponent : public Component {
@@ -1138,24 +1145,79 @@ TEST(TerminationTest, RequestExitWakesAllPartitions) {
 // down after the guest exited - which TSan caught as a data race and a use-after-free
 // on the partition's idle_wakeup_ flag.
 TEST(TerminationTest, RequestExitRacingShutdownIsSafe) {
-  // Single-threaded mode is what arms the wake path that dereferences contexts_[0].
-  // Iterate: the two threads must interleave inside the narrow shutdown window.
-  for (int iter = 0; iter < 200; ++iter) {
-    SimulationEngine engine({.num_threads = 1});
-    auto root = std::make_unique<CompositeComponent>("root");
-    root->add_child(std::make_unique<CounterComponent>("c0", 4));
-    engine.topology().set_root(std::move(root));
-    engine.create();
+  // Every worker mode dereferences context zero in its wake path. Iterate:
+  // the two threads must interleave inside the narrow shutdown window.
+  for (const uint32_t partitions : {1u, 2u, 4u}) {
+    SCOPED_TRACE(partitions);
+    for (int iter = 0; iter < 100; ++iter) {
+      SimulationEngine engine({.num_threads = partitions});
+      auto root = std::make_unique<CompositeComponent>("root");
+      root->add_child(std::make_unique<CounterComponent>("c0", 4));
+      engine.topology().set_root(std::move(root));
+      if (partitions > 1)
+        engine.topology().partition_balanced(partitions);
+      engine.create();
 
-    // Mirrors rj_vm_run(): run to self-termination, then tear the contexts down.
-    std::thread runner([&engine]() {
-      engine.run();
-      engine.shutdown();
-    });
+      // Mirrors rj_vm_run(): run to self-termination, then tear the contexts down.
+      std::thread runner([&engine]() {
+        engine.run();
+        engine.shutdown();
+      });
 
-    // Mirrors the daemon teardown path landing concurrently with that shutdown.
-    engine.request_exit("test stop");
-    runner.join();
+      // Mirrors the daemon teardown path landing concurrently with that shutdown.
+      engine.request_exit("test stop");
+      runner.join();
+    }
+  }
+}
+
+// All foreign-thread termination paths must wake an idle engine, including a
+// barrier completion sleeping on behalf of the other partitions. No async event
+// is posted after termination to rescue a missing publication.
+TEST(TerminationTest, IdleExitAndLastPrimaryReleaseWakeEveryWorkerMode) {
+  for (const uint32_t partitions : {1u, 2u, 4u}) {
+    for (const bool release_primary : {false, true}) {
+      for (int iteration = 0; iteration < 16; ++iteration) {
+        SCOPED_TRACE(::testing::Message() << "partitions=" << partitions << " primary="
+                                          << release_primary << " iteration=" << iteration);
+        SimulationEngine engine({.num_threads = partitions, .await_primaries = true});
+        auto root = std::make_unique<CompositeComponent>("root");
+        if (release_primary)
+          root->add_child(std::make_unique<AsyncPrimaryComponent>("primary"));
+        engine.topology().set_root(std::move(root));
+        if (partitions > 1)
+          engine.topology().partition_balanced(partitions);
+        engine.create();
+
+        ExitStatus exit_status;
+        std::atomic<bool> finished{false};
+        std::thread runner([&]() {
+          exit_status = engine.run();
+          finished.store(true, std::memory_order_release);
+        });
+        const bool started = engine.wait_until_started();
+        std::this_thread::sleep_for(std::chrono::milliseconds(1));
+        if (release_primary)
+          engine.primary_release();
+        else
+          engine.request_exit("idle exit", 7);
+
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(2);
+        while (!finished.load(std::memory_order_acquire) &&
+               std::chrono::steady_clock::now() < deadline)
+          std::this_thread::yield();
+        const bool finished_on_its_own = finished.load(std::memory_order_acquire);
+        if (!finished_on_its_own)
+          engine.request_exit("idle termination timeout", 1);
+        runner.join();
+
+        EXPECT_TRUE(started);
+        EXPECT_TRUE(finished_on_its_own);
+        EXPECT_EQ(exit_status.reason,
+                  release_primary ? ExitReason::COMPLETED : ExitReason::EXIT_REQUEST);
+        EXPECT_EQ(exit_status.code, release_primary ? 0 : 7);
+      }
+    }
   }
 }
 
@@ -1269,36 +1331,39 @@ TEST(TerminationTest, QuiescentEpochDoesNotStrandPeersAtTheBarrier) {
   EXPECT_EQ(responder->recv_count, 1u);
 }
 
-// Regression: a quiescent multi-partition engine must idle, not spin.
+// Regression: a quiescent engine must idle, not spin, in every worker mode.
 //
-// With no idle wait in the epoch loop, every partition of an idle engine burns a
-// host core going round the barrier. rocjitsu's own suite runs many emulators at
-// once under `ctest -j`, and those spinning partitions starved the guest process
-// that had to ring the next doorbell -- so an idle engine never became busy
-// again. Measured as CPU time, which is what starves a peer; wall time is not.
+// The single worker waits directly; in multi-worker mode, barrier completion
+// waits on behalf of all partitions. Removing either wait burns host CPU and
+// can starve the guest process that must ring the next doorbell. Measure process
+// CPU time so unrelated CTest jobs do not count against this engine's budget.
 TEST(TerminationTest, QuiescentEngineDoesNotSpinTheHost) {
-  SimulationEngine engine({.num_threads = 4});
-  auto root = std::make_unique<CompositeComponent>("root");
-  for (int i = 0; i < 4; ++i)
-    root->add_child(std::make_unique<PeerWaitComponent>("idle" + std::to_string(i)));
-  engine.topology().set_root(std::move(root));
-  engine.topology().partition_balanced(4);
-  engine.create();
+  for (const uint32_t partitions : {1u, 2u, 4u}) {
+    SCOPED_TRACE(partitions);
+    SimulationEngine engine({.num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    for (uint32_t i = 0; i < partitions; ++i)
+      root->add_child(std::make_unique<PeerWaitComponent>("idle" + std::to_string(i)));
+    engine.topology().set_root(std::move(root));
+    engine.topology().partition_balanced(partitions);
+    engine.create();
 
-  std::thread runner([&]() { engine.run(); });
-  ASSERT_TRUE(engine.wait_until_started());
+    std::thread runner([&]() { engine.run(); });
+    const bool started = engine.wait_until_started();
 
-  const auto cpu_before = std::clock();
-  std::this_thread::sleep_for(std::chrono::milliseconds(200));
-  const auto cpu_used =
-      static_cast<double>(std::clock() - cpu_before) / static_cast<double>(CLOCKS_PER_SEC);
+    const auto cpu_before = std::clock();
+    std::this_thread::sleep_for(std::chrono::milliseconds(200));
+    const auto cpu_used =
+        static_cast<double>(std::clock() - cpu_before) / static_cast<double>(CLOCKS_PER_SEC);
 
-  engine.request_exit("test stop");
-  runner.join();
+    engine.request_exit("test stop");
+    runner.join();
 
-  // Four spinning partitions burn ~0.8s of CPU over this window; four idle ones
-  // burn milliseconds. The threshold is one core's worth, well clear of both.
-  EXPECT_LT(cpu_used, 0.2) << "idle engine consumed " << cpu_used << "s of CPU in 0.2s";
+    EXPECT_TRUE(started);
+    // Even one spinning worker burns about 0.2s of CPU over this window; idle
+    // workers burn milliseconds. Leave room for startup and scheduling noise.
+    EXPECT_LT(cpu_used, 0.05) << "idle engine consumed " << cpu_used << "s of CPU in 0.2s";
+  }
 }
 
 TEST(TerminationTest, StepModeConsistency) {
@@ -1450,6 +1515,109 @@ TEST(AsyncCausalityTest, ScheduleEventNowProducesReasonableTimestamp) {
   }
 
   EXPECT_GE(injected_tick.load(), before);
+}
+
+// Regression: draining a handler's async self-post can leave its wake flag set.
+// Clearing that stale notification must acquire any concurrent producer's
+// publication, or the worker can sleep with an event stranded in the async queue.
+TEST(AsyncCausalityTest, StaleWakeDoesNotHideConcurrentPublication) {
+  constexpr uint32_t kEvents = 2000;
+  SimulationEngine engine({.num_threads = 1});
+  auto root = std::make_unique<CompositeComponent>("root");
+  auto *target = root->add_child(std::make_unique<AsyncPrimaryComponent>("target"));
+  engine.topology().set_root(std::move(root));
+  engine.create();
+
+  std::atomic<uint32_t> processed{0};
+  Event noop{target, EventType::TIMER_CALLBACK, [](Tick, Message *) {}};
+  Event test_event{target, EventType::TIMER_CALLBACK, [&](Tick, Message *) {
+                     // Self-posting leaves a stale wake flag after the no-op is
+                     // drained, so idle entry can race the next publication.
+                     engine.schedule_event_now(&noop);
+                     if (processed.fetch_add(1, std::memory_order_release) + 1 == kEvents)
+                       engine.primary_release();
+                   }};
+  ExitStatus exit_status;
+  std::thread runner([&]() { exit_status = engine.run(); });
+  const bool started = engine.wait_until_started();
+  const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+  uint32_t sent = 0;
+  if (started) {
+    // Only one producer event may be outstanding: a later publication must not
+    // rescue a lost wake.
+    while (sent < kEvents && std::chrono::steady_clock::now() < deadline) {
+      engine.schedule_event_now(&test_event);
+      ++sent;
+      while (processed.load(std::memory_order_acquire) < sent &&
+             std::chrono::steady_clock::now() < deadline)
+        std::this_thread::yield();
+    }
+  }
+  const bool completed = processed.load(std::memory_order_acquire) == kEvents;
+  if (!completed)
+    engine.request_exit("async notification timeout", /*code=*/1);
+  runner.join();
+  EXPECT_TRUE(started);
+  EXPECT_TRUE(completed) << "sent " << sent << ", processed " << processed.load();
+  EXPECT_EQ(exit_status.reason, ExitReason::COMPLETED);
+}
+
+// Successive quiescent barrier completions can run on different workers, but
+// they share one notification consumer. Exercise publications to every partition
+// while self-posts leave stale notifications; a later producer cannot rescue a
+// stranded event because at most one producer event is outstanding.
+TEST(AsyncCausalityTest, QuiescentPublicationsToEveryPartitionMakeProgress) {
+  constexpr uint32_t kEvents = 2000;
+  for (const uint32_t partitions : {2u, 4u}) {
+    SCOPED_TRACE(partitions);
+    SimulationEngine engine({.num_threads = partitions});
+    auto root = std::make_unique<CompositeComponent>("root");
+    std::vector<Component *> targets;
+    for (uint32_t i = 0; i < partitions; ++i)
+      targets.push_back(
+          root->add_child(std::make_unique<AsyncPrimaryComponent>("target" + std::to_string(i))));
+    engine.topology().set_root(std::move(root));
+    engine.topology().partition_manual(partitions, partition_by_name_suffix);
+    engine.create();
+
+    std::atomic<uint32_t> processed{0};
+    std::vector<std::unique_ptr<Event>> noops;
+    std::vector<std::unique_ptr<Event>> events;
+    for (uint32_t i = 0; i < partitions; ++i) {
+      noops.push_back(
+          std::make_unique<Event>(targets[i], EventType::TIMER_CALLBACK, [](Tick, Message *) {}));
+      events.push_back(
+          std::make_unique<Event>(targets[i], EventType::TIMER_CALLBACK, [&, i](Tick, Message *) {
+            engine.schedule_event_now(noops[i].get());
+            processed.fetch_add(1, std::memory_order_release);
+          }));
+    }
+    ExitStatus exit_status;
+    std::thread runner([&]() { exit_status = engine.run(); });
+    const bool started = engine.wait_until_started();
+    const auto deadline = std::chrono::steady_clock::now() + std::chrono::seconds(10);
+    uint32_t sent = 0;
+    if (started) {
+      while (sent < kEvents && std::chrono::steady_clock::now() < deadline) {
+        engine.schedule_event_now(events[sent % partitions].get());
+        ++sent;
+        while (processed.load(std::memory_order_acquire) < sent &&
+               std::chrono::steady_clock::now() < deadline)
+          std::this_thread::yield();
+      }
+    }
+    const bool completed = processed.load(std::memory_order_acquire) == kEvents;
+    if (completed) {
+      for (uint32_t i = 0; i < partitions; ++i)
+        engine.primary_release();
+    } else {
+      engine.request_exit("multi-partition notification timeout", 1);
+    }
+    runner.join();
+    EXPECT_TRUE(started);
+    EXPECT_TRUE(completed) << "sent " << sent << ", processed " << processed.load();
+    EXPECT_EQ(exit_status.reason, ExitReason::COMPLETED);
+  }
 }
 
 TEST(AsyncCausalityTest, SustainedSameTickAsyncAndExistingBatchMakeBoundedProgress) {
