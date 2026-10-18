@@ -112,8 +112,10 @@ void check_crash_chain(const fs::path& cap, bool async_log) {
 // Installs its SIGSEGV handler before HIP starts, so the capture's crash
 // handler finds it already there. Ends with _exit: no atexit flush.
 TEST_CASE("Unit_HRR_CaptureCrashChain_Direct", "[.][hrr-direct]") {
+  // Run on its own, outside the driver, the signals would only test the
+  // handler, and there would be no archive to look at.
   const char* root = std::getenv("HIP_HRR_CAPTURE_OUTPUT");
-  REQUIRE(root != nullptr);
+  if (root == nullptr) HRR_SKIP("not running under capture");
   snprintf(g_events_path, sizeof(g_events_path), "%s/pid-%d/events.bin", root,
            static_cast<int>(getpid()));
 
