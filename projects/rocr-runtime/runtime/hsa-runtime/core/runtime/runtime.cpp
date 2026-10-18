@@ -1111,8 +1111,10 @@ hsa_status_t Runtime::VMemoryPtrInfo(const void* ptr, hsa_amd_pointer_info_t* in
         ptr) {
       /* Allocation found */
       info->type = HSA_EXT_POINTER_TYPE_HSA_VMEM;
-      info->agentBaseAddress = const_cast<void*>(ptr);
-      info->hostBaseAddress = const_cast<void*>(ptr);
+      // Report the mapping the pointer lies in, as for other allocations: callers pair the base
+      // with sizeInBytes, so an interior pointer must not be reported as the base.
+      info->agentBaseAddress = const_cast<void*>(mappedHandleIt->first);
+      info->hostBaseAddress = const_cast<void*>(mappedHandleIt->first);
       info->sizeInBytes = mappedHandleIt->second.size;
       info->registered = true;
 
