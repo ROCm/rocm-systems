@@ -379,6 +379,18 @@ TEST_F(DdaFabricEligibilityTest, AllGather_ScratchTooSmall)
         mockComm_.get(), sendbuff_, recvbuff_, 4, ncclFloat32));
 }
 
+// The launcher checks nRanks * sendcount against scratch, so gate on the total.
+TEST_F(DdaFabricEligibilityTest, AllGather_PerRankFitsButTotalExceedsScratch)
+{
+    ASSERT_EQ(mockComm_.comm.nRanks, 8);
+    mockComm_.comm.ddaScratchBytes = 1024;
+    // 8 ranks: 128 B each totals 1024 B and fits; 256 B each does not.
+    EXPECT_TRUE(ncclAllGatherDdaFabricEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 32, ncclFloat32));
+    EXPECT_FALSE(ncclAllGatherDdaFabricEligible(
+        mockComm_.get(), sendbuff_, recvbuff_, 64, ncclFloat32));
+}
+
 TEST_F(DdaFabricEligibilityTest, ReduceScatter_DerivedScratchAcceptsSmallMessage)
 {
     // Use derived scratch sizing with default params (8 ranks, 128 MiB threshold, LL+LL128 enabled).
