@@ -382,19 +382,11 @@ class RocProfCompute_Base:
             args_dict["format_rocprof_output"] = PROFILE_OUTPUT_FORMAT
             yaml.dump(args_dict, f)
 
-        # verify soc compatibility
-        if self.__profiler not in self._soc.get_compatible_profilers():
-            console_error(
-                f"{self._soc.get_arch()} is not enabled in {self.__profiler}. "
-                f"Available profilers include: {self._soc.get_compatible_profilers()}"
-            )
-
         gen_sysinfo(
             workload_dir=args.output_directory,
             app_cmd=args.remaining,
             skip_roof=args.no_roof,
             mspec=self._soc._mspec,
-            soc=self._soc,
         )
 
         for message in _partition_warning_messages(self._soc._mspec):
@@ -423,42 +415,38 @@ class RocProfCompute_Base:
 
         start_time = time.time()
 
-        if self.__profiler == "rocprofv3" or self.__profiler == "rocprofiler-sdk":
-            # Only 1-run case is permitted for attach/detach
-            if (isinstance(options, list) and "--pid" in options) or (
-                isinstance(options, dict)
-                and (options.get("ROCPROF_ATTACH_PID") is not None)
-            ):
-                if total_runs > 1:
-                    console_error(
-                        f"Cannot attach process for profiling as the requested "
-                        f"performance counters exceed the collection capacity of "
-                        f"single pass counter collection. The current setup of "
-                        f"requested counter blocks needs {total_runs} number of "
-                        f'passes. Please use "--block" or "--set" '
-                        f"to adjust or reduce the requested performance metrics!"
-                    )
-            console_debug(f"Sending profiler options to run_prof: {options}")
+        # Only 1-run case is permitted for attach/detach
+        if (isinstance(options, list) and "--pid" in options) or (
+            isinstance(options, dict)
+            and (options.get("ROCPROF_ATTACH_PID") is not None)
+        ):
+            if total_runs > 1:
+                console_error(
+                    f"Cannot attach process for profiling as the requested "
+                    f"performance counters exceed the collection capacity of "
+                    f"single pass counter collection. The current setup of "
+                    f"requested counter blocks needs {total_runs} number of "
+                    f'passes. Please use "--block" or "--set" '
+                    f"to adjust or reduce the requested performance metrics!"
+                )
+        console_debug(f"Sending profiler options to run_prof: {options}")
 
-            run_prof(
-                fnames=str_fnames,
-                profiler_options=options,
-                workload_dir=args.output_directory,
-                ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
-                retain_rocpd_output=args.retain_rocpd_output,
-            )
+        run_prof(
+            fnames=str_fnames,
+            profiler_options=options,
+            workload_dir=args.output_directory,
+            ml_api_trace_enabled=bool(getattr(self, "_selected_frameworks", set())),
+            retain_rocpd_output=args.retain_rocpd_output,
+        )
 
-            end_time = time.time()
-            duration = end_time - start_time
+        end_time = time.time()
+        duration = end_time - start_time
 
-            console_debug(
-                f"The time of run_prof of {str_fnames} is {int(duration / 60)} min"
-                f" {duration % 60} sec"
-            )
-            return duration
-        else:
-            console_error("Profiler not supported")
-            return 0.0
+        console_debug(
+            f"The time of run_prof of {str_fnames} is {int(duration / 60)} min"
+            f" {duration % 60} sec"
+        )
+        return duration
 
     @abstractmethod
     def run_profiling(self, version: str, prog: str) -> None:

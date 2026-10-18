@@ -13,10 +13,6 @@ class gfx90a_soc(OmniSoC_Base):
     def __init__(self, args: argparse.Namespace, mspec: MachineSpecs) -> None:
         super().__init__(args, mspec)
         self.set_arch("gfx90a")
-        self.set_compatible_profilers([
-            "rocprofv3",
-            "rocprofiler-sdk",
-        ])
         # Per IP block max number of simultaneous counters. GFX IP Blocks
         self.set_perfmon_config(mi_gpu_specs.get_perfmon_config("gfx90a"))
 

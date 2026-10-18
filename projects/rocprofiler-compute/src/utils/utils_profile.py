@@ -186,7 +186,6 @@ def run_prof(
     workload_dir: str,
     ml_api_trace_enabled: bool = False,
     retain_rocpd_output: bool = False,
-    extra_env: Optional[dict[str, str]] = None,
 ) -> None:
     multiple_files = isinstance(fnames, list)
     if multiple_files and (
@@ -233,8 +232,6 @@ def run_prof(
         options = ["-A", "absolute"] + options
 
     new_env = os.environ.copy()
-    if extra_env:
-        new_env.update(extra_env)
 
     # Counter definitions
     with open(
@@ -450,7 +447,6 @@ def gen_sysinfo(
     app_cmd: str,
     skip_roof: bool,
     mspec: Any,  # noqa: ANN401
-    soc: Any,  # noqa: ANN401
 ) -> None:
     data = mspec.get_class_members()
 

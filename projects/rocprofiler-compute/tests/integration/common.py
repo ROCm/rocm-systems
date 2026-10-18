@@ -30,22 +30,11 @@ from utils.utils_common import canonical_config_arch
 config = {}
 config["kernel_name_1"] = "vecCopy"
 config["app_1"] = ["./tests/vcopy", "-n", "1048576", "-b", "256", "-i", "3"]
-config["app_occupancy"] = ["./tests/occupancy"]
 config["app_mat_mul_max"] = ["./tests/mat_mul_max"]
 config["app_hip_dynamic_shared"] = ["./tests/hip_dynamic_shared"]
 config["app_laplace_eqn"] = ["./tests/laplace_eqn", "-i", "5000"]
 config["app_laplace_eqn_iter"] = ["./tests/laplace_eqn", "-i", "15000"]
 config["app_laplace_eqn_insufficient"] = ["./tests/laplace_eqn", "-i", "3"]
-config["app_vcopy_multikernel_iter"] = [
-    "./tests/vcopy",
-    "-n",
-    "1048576",
-    "-b",
-    "256",
-    "-i",
-    "500",
-    "--multikernel",
-]
 config["app_mpi_aware_laplace_eqn"] = ["./tests/mpi_aware_laplace_eqn", "-i", "5"]
 config["rocflop"] = ["./tests/rocflop", "--device", "0", "--fp16"]
 config["torch_test_app"] = ["python3", "./tests/simple_net.py"]

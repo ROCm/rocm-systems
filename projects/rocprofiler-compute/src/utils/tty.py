@@ -363,8 +363,9 @@ def format_node_stats(node: CallTreeNode) -> str:
     )
 
 
-def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
+def get_tree_wrap_width() -> int:
     """Pick wrap width based on terminal size to avoid terminal hard-wrap artifacts."""
+    min_width, max_width = 72, 120
     terminal_cols = shutil.get_terminal_size((max_width, 20)).columns
     safe_width = max(terminal_cols - 2, min_width)
     return min(safe_width, max_width)
@@ -373,18 +374,15 @@ def get_tree_wrap_width(min_width: int = 72, max_width: int = 120) -> int:
 def print_wrapped_tree_line(
     prefix: str,
     body: str,
-    width: Optional[int] = None,
-    break_long_words: bool = False,
 ) -> None:
     """Print a tree line and wrap continuation lines to preserve indentation."""
-    effective_width = get_tree_wrap_width() if width is None else width
     print(
         textwrap.fill(
             body,
-            width=effective_width,
+            width=get_tree_wrap_width(),
             initial_indent=prefix,
             subsequent_indent=" " * len(prefix),
-            break_long_words=break_long_words,
+            break_long_words=False,
             break_on_hyphens=False,
         )
     )
@@ -394,12 +392,10 @@ def print_wrapped_kernel_line(
     prefix: str,
     kernel_name: str,
     suffix: str,
-    width: Optional[int] = None,
     continuation_prefix: str = "",
 ) -> None:
     """Wrap long kernel names while keeping suffix attached to final name chunk."""
-    effective_width = get_tree_wrap_width() if width is None else width
-    content_width = max(effective_width - len(prefix), 20)
+    content_width = max(get_tree_wrap_width() - len(prefix), 20)
 
     inline = f"{kernel_name} {suffix}"
     if len(inline) <= content_width:
@@ -695,26 +691,6 @@ def process_table_data(
                         )
 
                         result_df = pd.concat([result_df, formatted_diff], axis=1)
-
-                        # DEBUG: When in a CI setting and flag is set,
-                        #       then verify metrics meet threshold
-                        #       requirement
-                        if (
-                            header in ["Value", "Count", "Avg"]
-                            and percent_diff.abs().gt(args.report_diff).any()
-                        ):
-                            result_df["Abs Diff"] = absolute_diff
-
-                            if args.report_diff:
-                                violation_idx = percent_diff.index[
-                                    percent_diff.abs() > args.report_diff
-                                ]
-                                console_warning(
-                                    f"Dataframe diff exceeds {args.report_diff}% "
-                                    "threshold requirement\n"
-                                    f"See metric {violation_idx.to_numpy()}"
-                                )
-                                console_warning(result_df)
                     else:
                         # Base run - just add the rounded values
                         cur_df_copy = copy.deepcopy(cur_df)
@@ -922,10 +898,6 @@ def show_all(
     )
 
     for panel_id, panel in arch_configs.panel_configs.items():
-        # Skip panels that don't support baseline comparison
-        if len(args.path) > 1 and panel_id in config.HIDDEN_SECTIONS:
-            continue
-
         # Handle roofline panel (400) with custom display logic
         # Skip if --view table is set; tables 401/402 will be rendered as normal tables
         if panel_id == 400 and not _tty_view_is_table(args):
