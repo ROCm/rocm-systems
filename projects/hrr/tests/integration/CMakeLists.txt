@@ -38,10 +38,16 @@
 #   ./derive_manifest.py
 #   ./check_matrix.py --emit-cxx
 #
+# hrr_capture_capabilities_test.cc covers what capture leaves out of the archive
+# when a call hands back a capability or an address: IPC handles and resolved
+# entry points are not recorded. Contains its own hidden [.][hrr-direct]
+# workloads; the exporter starts the importer as a second process.
+#
 # hrr_kernel_args_test.cc covers what replay does with a pointer-typed kernel
 # argument no allocation explains: a sentinel keeps its value, an
-# address-shaped lost pointer becomes null. Contains its own hidden
-# [.][hrr-direct] workload.
+# address-shaped lost pointer becomes null. It also checks that capture logs
+# argument bytes for HIP_HRR_DEBUG_ARGS only in a Debug runtime. Contains its
+# own hidden [.][hrr-direct] workload.
 #
 # hrr_va_placement_test.cc covers capture-address placement: a device pointer
 # stored in device memory by an H2D copy (ROCM-31827). Contains its own hidden
@@ -104,6 +110,7 @@ add_executable(hrr-integration-tests
   hrr_dispatch_swap_test.cc
   hrr_capture_access_test.cc
   hrr_fatbin_header_test.cc
+  hrr_capture_capabilities_test.cc
   hrr_secure_exec_test.cc
   hrr_clock_hook.cc
 )
@@ -179,6 +186,13 @@ if(NOT DEFINED HRR_RAW_TRACE_EXE)
   else()
     set(HRR_RAW_TRACE_EXE "")
   endif()
+endif()
+
+# Capture honours HIP_HRR_DEBUG_ARGS only in a CLR built without NDEBUG
+# (CMAKE_BUILD_TYPE=Debug). Tell the tests which kind of runtime they run against.
+option(HRR_TEST_CLR_DEBUG_FLAGS "The HIP runtime under test is a Debug build" OFF)
+if(HRR_TEST_CLR_DEBUG_FLAGS)
+  target_compile_definitions(hrr-integration-tests PRIVATE HRR_TEST_CLR_DEBUG_FLAGS)
 endif()
 
 target_compile_definitions(hrr-integration-tests PRIVATE

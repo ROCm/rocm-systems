@@ -46,14 +46,20 @@ endif()
 
 include(GoogleTest)
 
-# rdc_codec_tests: pure-logic tests (entity codec + AFID field registration).
-# Links only librdc_bootstrap (which holds the codec and the field descriptor
-# table) and NOT librdc, so it pulls in no amdsmi. librdc runs amdsmi_init in a
+# rdc_codec_tests: pure-logic tests (entity codec, AFID field registration,
+# library loader; the loader tests dlopen only libm and libc). Links only
+# librdc_bootstrap (which holds the codec, the field descriptor table and the
+# loader) and NOT librdc, so it pulls in no amdsmi. librdc runs amdsmi_init in a
 # load-time static initializer that throws when no GPU/driver is present, which
 # would abort the process before main(); keeping these tests out of that library
 # lets them run on GPU-less CI and satisfy the unit-test gate anywhere. Uses
 # gtest_main since it needs no custom setup.
-add_executable(${RDC_CODEC_TESTS} ${SRC_DIR}/test_entity_codec.cc ${SRC_DIR}/test_afid_field.cc)
+add_executable(
+    ${RDC_CODEC_TESTS}
+    ${SRC_DIR}/test_entity_codec.cc
+    ${SRC_DIR}/test_afid_field.cc
+    ${SRC_DIR}/test_library_loader.cc
+)
 target_include_directories(
     ${RDC_CODEC_TESTS}
     PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include
@@ -128,6 +134,36 @@ install(
     COMPONENT ${TESTS_COMPONENT}
 )
 
+# rdc_power_usage_tests: RDC_FI_POWER_USAGE against fake amdsmi power and
+# gpu_metrics replies. Compiles the metric fetcher into the test, which defines
+# the amdsmi calls the tests reach, so it runs on GPU-less CI. amd_smi provides
+# the calls the tests never make, librdc_bootstrap the logger.
+add_executable(
+    rdc_power_usage_tests
+    ${SRC_DIR}/test_power_usage.cc
+    ${PROJECT_SOURCE_DIR}/common/rdc_capabilities.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcMetricFetcherImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+)
+target_include_directories(
+    rdc_power_usage_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(
+    rdc_power_usage_tests
+    PRIVATE rdc_bootstrap amd_smi cap GTest::gtest_main pthread
+)
+set_target_properties(
+    rdc_power_usage_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:${AMD_SMI_LIB_DIR}"
+)
+add_test(NAME rdc_power_usage_tests COMMAND rdc_power_usage_tests)
+install(
+    TARGETS rdc_power_usage_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
 # rdc_unit_tests: hardware-aware SmiUtils tests. Links librdc (flat table,
 # partition helpers) and amd_smi. Provides its own main() to init amdsmi once.
 # Hardware-dependent tests self-skip when no AMD GPU is present.
@@ -150,6 +186,59 @@ add_test(NAME ${RDC_UNIT_TESTS} COMMAND ${RDC_UNIT_TESTS})
 
 install(
     TARGETS ${RDC_CODEC_TESTS} ${RDC_UNIT_TESTS} rdc_diag_kernel_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
+# rdc_status_tests: the statuses the health calls return for a GPU group that does
+# not exist, and rdc_status_string(). It compiles RdcWatchTableImpl.cc and
+# RdcGroupSettingsImpl.cc instead of linking librdc, so it needs no GPU;
+# librdc_bootstrap provides the logger and rdc_status_string().
+add_executable(
+    rdc_status_tests
+    ${SRC_DIR}/test_status_codes.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcWatchTableImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcGroupSettingsImpl.cc
+)
+target_include_directories(
+    rdc_status_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(rdc_status_tests PRIVATE rdc_bootstrap GTest::gtest_main pthread)
+set_target_properties(rdc_status_tests PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib")
+add_test(NAME rdc_status_tests COMMAND rdc_status_tests)
+install(
+    TARGETS rdc_status_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)
+
+# rdc_partition_count_tests: RDC_FI_GPU_PARTITION_COUNT against fake amdsmi
+# partition profiles. Compiles the metric fetcher into the test, which defines
+# the amdsmi calls the tests reach, so it runs on GPU-less CI. amd_smi provides
+# the calls the tests never make, librdc_bootstrap the logger.
+add_executable(
+    rdc_partition_count_tests
+    ${SRC_DIR}/test_partition_count.cc
+    ${PROJECT_SOURCE_DIR}/common/rdc_capabilities.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcMetricFetcherImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+)
+target_include_directories(
+    rdc_partition_count_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(
+    rdc_partition_count_tests
+    PRIVATE rdc_bootstrap amd_smi cap GTest::gtest_main pthread
+)
+set_target_properties(
+    rdc_partition_count_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:${AMD_SMI_LIB_DIR}"
+)
+add_test(NAME rdc_partition_count_tests COMMAND rdc_partition_count_tests)
+install(
+    TARGETS rdc_partition_count_tests
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )

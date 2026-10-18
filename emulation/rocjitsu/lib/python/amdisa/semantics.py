@@ -26,6 +26,14 @@ F32_TO_INTEGER_DTYPES = frozenset({'i32_f32', 'u32_f32', 'rpi_i32_f32', 'flr_i32
 # Mixed-type conversions that accept VOP3 ABS/NEG on a floating half source.
 F16_INPUT_CONVERSION_DTYPES = frozenset({'i16_f16', 'u16_f16', 'f32_f16'})
 
+# Floating-source operations with integer results; OMOD and CLAMP do not apply.
+# This covers operation-keyed cases only. F32-to-integer conversions use
+# F32_TO_INTEGER_DTYPES, and V_CVT_I16_F16/V_CVT_U16_F16 use
+# sema_enrich._NO_DST_MODIFIER_INSTRUCTIONS.
+INTEGER_RESULT_OPERATIONS = frozenset(
+    {'frexp_exp_f32', 'frexp_exp_f16', 'cvt_norm_i16_f16', 'cvt_norm_u16_f16'}
+)
+
 # Floating VOPC relations that read their sources; F and T/TRU are constants.
 FLOAT_COMPARE_RELATIONS = frozenset(
     {
@@ -357,6 +365,8 @@ def _derive_sopp(name: str) -> InstructionSemantics | None:
         )
     if name == 'S_BRANCH':
         return InstructionSemantics(name, 'branch', branch_condition='always')
+    if name == 'S_SETKILL':
+        return InstructionSemantics(name, 'setkill')
     if name.startswith('S_ENDPGM'):
         return InstructionSemantics(name, 'endpgm')
     if name == 'S_TRAP':
@@ -772,7 +782,7 @@ _VOP1_OP_MAP = {
     'V_NOP': ('true_nop', None),
     'V_CLREXCP': ('true_nop', None),
     'V_SAT_PK_U8_I16': ('vector_sat_pack', 'u8_i16'),
-    'V_SCREEN_PARTITION_4SE': ('nop', None),
+    'V_SCREEN_PARTITION_4SE': ('vector_unary', 'screen_partition_4se'),
     'V_ACCVGPR_MOV': ('vector_mov', None),
     'V_CVT_F32_FP8': ('vector_unary', 'cvt_f32_fp8'),
     'V_CVT_F32_BF8': ('vector_unary', 'cvt_f32_bf8'),
@@ -805,7 +815,7 @@ _VOP1_OP_MAP = {
     'V_LOG_LEGACY': ('vector_unary', 'log2'),
     'V_EXP': ('vector_unary', 'exp2'),
     'V_EXP_LEGACY': ('vector_unary', 'exp2'),
-    'V_PRNG': ('true_nop', None),  # PRNG not simulated
+    'V_PRNG': ('vector_unary', 'prng_advance'),
     'V_PERMLANE16_SWAP': ('vector_permlane16_swap', None),
     'V_PERMLANE32_SWAP': ('vector_permlane32_swap', None),
     'V_SWAPREL': ('vector_swaprel', None),
@@ -1237,6 +1247,14 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(
             name, 'vector_cvt_pknorm', operation='u16', data_type='f32'
         )
+    if name == 'V_CVT_PKNORM_I16_F16':
+        return InstructionSemantics(
+            name, 'vector_cvt_pknorm', operation='i16', data_type='f16'
+        )
+    if name == 'V_CVT_PKNORM_U16_F16':
+        return InstructionSemantics(
+            name, 'vector_cvt_pknorm', operation='u16', data_type='f16'
+        )
     if name == 'V_CVT_PKRTZ_F16_F32':
         return InstructionSemantics(name, 'vector_cvt_pkrtz_f16_f32')
     if name == 'V_CVT_PK_U16_U32':
@@ -1490,9 +1508,6 @@ def _derive_vop3(name: str) -> InstructionSemantics | None:
     }
     if name in _CVT_FP8_MAP:
         return InstructionSemantics(name, 'cvt_fp8', operation=_CVT_FP8_MAP[name])
-
-    if name in ('V_CVT_PKNORM_I16_F16', 'V_CVT_PKNORM_U16_F16'):
-        return InstructionSemantics(name, 'nop')
 
     # Scaled FP8/BF8/FP6/FP4 conversions not covered by the exact gfx1250
     # mappings above still need per-encoding validation.
@@ -1811,7 +1826,11 @@ def _derive_smem(name: str) -> InstructionSemantics | None:
     if 'DCACHE' in upper or upper in ('S_ATC_PROBE', 'S_ATC_PROBE_BUFFER'):
         return InstructionSemantics(name, 'nop')
 
-    # S_ATOMIC_* are scalar atomics — not currently simulated.
+    if upper == 'S_ATOMIC_DEC':
+        return InstructionSemantics(
+            name, 'smem_atomic', operation='dec', elem_size=4, num_elems=1
+        )
+    # Other scalar atomics are not currently simulated.
     if '_ATOMIC_' in upper:
         return InstructionSemantics(name, 'nop')
 
@@ -2358,6 +2377,17 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
             num_elems=1,
             operation='st64' if is_st64 else None,
         )
+    # Classify ADDTID before the ordinary DS write/read suffix tables.
+    if 'ADDTID' in upper:
+        if is_write:
+            return InstructionSemantics(
+                name, 'ds_write_addtid', elem_size=4, num_elems=1
+            )
+        if is_read:
+            return InstructionSemantics(
+                name, 'ds_read_addtid', elem_size=4, num_elems=1
+            )
+        return InstructionSemantics(name, 'nop')
     if is_write:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
@@ -2380,17 +2410,6 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
                 num_elems=ne,
                 transpose_kind=transpose_kind,
             )
-    # ADDTID instructions: address = thread_id * M0_stride + offset.
-    if 'ADDTID' in upper:
-        if is_write:
-            return InstructionSemantics(
-                name, 'ds_write_addtid', elem_size=4, num_elems=1
-            )
-        if is_read:
-            return InstructionSemantics(
-                name, 'ds_read_addtid', elem_size=4, num_elems=1
-            )
-        return InstructionSemantics(name, 'nop')
     if is_read:
         for suffix, (esz, ne) in _DS_DATA_MAP.items():
             if upper.endswith(suffix):
@@ -2544,14 +2563,33 @@ def _derive_ds(name: str) -> InstructionSemantics | None:
         return InstructionSemantics(name, 'ds_permute')
     if upper == 'DS_SWIZZLE_B32':
         return InstructionSemantics(name, 'ds_swizzle')
-    # ── Explicitly classified as nop (not simulated) ────────────────────
+    # ── Explicit DS classifications ────────────────────────────────────
     # GS register operations — must precede the atomic fallback because
     # DS_ADD_GS_REG_RTN / DS_SUB_GS_REG_RTN contain _ADD / _SUB.
     if upper in ('DS_ADD_GS_REG_RTN', 'DS_SUB_GS_REG_RTN'):
         return InstructionSemantics(name, 'nop')
-    # GWS (Global Wave Sync) — hardware scheduling primitive, not needed
-    # for compute simulation.
+    # GWS (Global Wave Sync) classification. Map each of the six GWS DS opcodes
+    # to its per-mnemonic operation so the generator can decode the operands and
+    # the matching ComputeUnitCore hook can apply the right semantics.
+    _DS_GWS_MAP = {
+        'DS_GWS_INIT': 'init',
+        'DS_GWS_SEMA_V': 'sema_v',
+        'DS_GWS_SEMA_P': 'sema_p',
+        'DS_GWS_SEMA_BR': 'sema_br',
+        'DS_GWS_SEMA_RELEASE_ALL': 'sema_release_all',
+        'DS_GWS_BARRIER': 'barrier',
+    }
     if upper.startswith('DS_GWS_'):
+        for prefix, op in _DS_GWS_MAP.items():
+            if upper == prefix or upper.startswith(prefix + '_'):
+                return InstructionSemantics(
+                    name, 'ds_gws', operation=op, elem_size=4, num_elems=0
+                )
+        # An unrecognized DS_GWS_* mnemonic matches none of the six supported
+        # operations. Classify it as an explicit (unsimulated) nop here instead of
+        # letting control reach the generic DS-atomic fallback below: a name like
+        # DS_GWS_ADD_* contains '_ADD', so the fallback would otherwise mis-decode a
+        # GWS opcode as a read-modify-write atomic and give it memory semantics.
         return InstructionSemantics(name, 'nop')
     # GDS ordered count.
     if upper == 'DS_ORDERED_COUNT':
@@ -2709,6 +2747,18 @@ def derive_semantics(
             sem = fallback(name)
             if sem is not None:
                 break
+
+    if (
+        sem is not None
+        and profile is not None
+        and sem.semantic_class in ('ds_read_tr_b4', 'ds_read_tr_b6')
+    ):
+        kind = (
+            profile.ds_b4_transpose_kind
+            if sem.semantic_class == 'ds_read_tr_b4'
+            else profile.ds_b6_transpose_kind
+        )
+        sem = replace(sem, transpose_kind=kind)
 
     if (
         sem is not None
