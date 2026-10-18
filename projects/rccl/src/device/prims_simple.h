@@ -46,6 +46,8 @@ class Primitives<T, RedOp, Fan, Direct,
   T* directBuff = NULL;
   uint64_t* connStepPtr;
   uint64_t connStepCache; // Cache last seen value of (*connStepPtr)
+  uint64_t* gdrFlushFlag = nullptr;
+  uint64_t* gdrFlushSeq;
   int connStepSize; // Connection step size
   void* netDeviceHandle;
   uint64_t accSize;
@@ -127,6 +129,17 @@ class Primitives<T, RedOp, Fan, Direct,
 #endif
   }
 
+  // The net proxy skips the GDR flush and publishes, per step, the flag value
+  // the remote NIC writes (RO=0) after the payload; seeing it in local VRAM
+  // means the payload writes ahead of it have landed.
+  __device__ __forceinline__ void waitGdrFlushFlag(uint64_t* flag, uint64_t* seqs, uint64_t seqStep) {
+    uint64_t seq = ld_volatile_global(seqs + seqStep % NCCL_STEPS);
+    int spins = 0;
+    while (ld_volatile_global(flag) < seq) {
+      if (checkAbort(flags, Aborted, spins)) break;
+    }
+  }
+
   template <int DirectRecv, int DirectSend, int Recv, int Send, int Src, int Dst>
   __device__ __forceinline__ void waitPeer(intptr_t srcIx, intptr_t dstIx, int offset, int nelts) {
     sqtt_marker_enter("PRIM_SIMPLE_WAIT_PEER");
@@ -147,6 +160,7 @@ class Primitives<T, RedOp, Fan, Direct,
                     int(step + StepPerSlice));
         }
       }
+      if (!isSendNotRecv && gdrFlushFlag) waitGdrFlushFlag(gdrFlushFlag, gdrFlushSeq, step);
       __asm__ __volatile__("s_wakeup");
     }
 
@@ -394,6 +408,7 @@ public:
             connStepCache = loadStepValue(connStepPtr, (flags & SysAcquireStep) != 0);
             if (checkAbort(flags, Aborted, spins)) break;
           }
+          if (!isSendNotRecv && gdrFlushFlag) waitGdrFlushFlag(gdrFlushFlag, gdrFlushSeq, step);
           void** ptrs = isSendNotRecv ? ncclShmem.groups[group].dsts : ncclShmem.groups[group].srcs;
           if ((flags & ConnFifoEnabled) && connFifo[step % NCCL_STEPS].mode == NCCL_MODE_OFFSET) {
             ssize_t offset = loadSsize(&connFifo[step % NCCL_STEPS].offset);
@@ -561,6 +576,8 @@ private:
         flags |= ConnFifoEnabled;
         connFifo = conn->connFifo;
       }
+      gdrFlushFlag = conn->gdrFlushFlag;
+      gdrFlushSeq = conn->gdrFlushSeq;
       if (Direct) {
         if (ipcRegFlag) {
           // User buffers have been registered
@@ -1258,6 +1275,7 @@ __device__ __forceinline__ void patReduce(struct ncclPatStep* ps, struct ncclPat
       peer->stepCache = loadStepValue(peer->tailPtr);
       if (checkAbort(flags, Aborted, spins)) break;
     }
+    if (peer->conn->gdrFlushFlag) waitGdrFlushFlag(peer->conn->gdrFlushFlag, peer->conn->gdrFlushSeq, step);
   }
   if (send && (flags & RoleWaitSend)) {
     int spins = 0;
@@ -1409,6 +1427,9 @@ __device__ __forceinline__ void patCopy(struct ncclPatStep* ps, struct ncclPatSh
     while (peer->stepCache < step + ps->stepOffset + StepPerSlice) {
       peer->stepCache = loadStepValue(peer->tailPtr);
       if (checkAbort(flags, Aborted, spins)) break;
+    }
+    if (peer->conn->gdrFlushFlag) {
+      waitGdrFlushFlag(peer->conn->gdrFlushFlag, peer->conn->gdrFlushSeq, step + ps->stepOffset);
     }
     if (!needsBcast) {
       if (peer->accSize < ps->recvOffset + nelem + (step + ps->stepOffset) * peer->connStepSize) {

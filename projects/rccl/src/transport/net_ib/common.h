@@ -253,6 +253,7 @@ struct ncclIbRequest {
       // Aggregates the size of a send request when sender does not write to the
       // completion records array.
       int aggSize;
+      bool flagFlush; // The sender writes the GDR flush flag for this request
     } recv;
     struct {
       int rank;
@@ -287,6 +288,7 @@ struct alignas(64) ncclIbSendFifo {
   uint32_t nreqs;
   uint32_t tag;
   uint64_t idx;
+  uint32_t flagFlush; // Receiver asks for the GDR flush flag write after this payload
 };
 
 struct ncclIbQpInitAttr {
@@ -365,6 +367,7 @@ struct alignas(8) ncclIbSendCommDev {
   struct ibv_mr* ctsFifoMr;
   struct ibv_mr* putSignalScratchpadMr;
   struct ibv_mr* cmplsRecordsMr;
+  struct ibv_mr* flagFlushSrcMr;
   struct ibv_sge sge;
 };
 
@@ -533,7 +536,8 @@ struct ncclIbSendComm {
   // on the receiver side.
   struct ncclIbSendFifo ctsFifo[NET_IB_MAX_REQUESTS][NCCL_NET_IB_MAX_RECVS];
   struct ibv_sge sges[NCCL_NET_IB_MAX_RECVS];
-  struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 1];
+  // Data writes, plus the completion records write and the GDR flush flag write.
+  struct ibv_send_wr wrs[NCCL_NET_IB_MAX_RECVS + 2];
   // Each dev correlates to a mergedIbDev
   struct ncclIbSendCommDev devs[NCCL_IB_MAX_DEVS_PER_NIC];
   // Array of pointers to store the send requests for faster access. The
@@ -556,6 +560,14 @@ struct ncclIbSendComm {
   struct ncclIbRemoteSpeedBuf remoteSpeedBuf;
   struct ibv_mr* remoteSpeedMr;
   uint64_t remoteSpeedCounter;
+  // GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG): after the payload of a slot, the
+  // sender writes the slot sequence number from flagFlushSrc[slot] into the
+  // receiver's RO=0 GPU flag at flagFlushRemAddr, on the same single QP.
+  int flagFlush;
+  uint64_t flagFlushRemAddr;
+  uint32_t flagFlushRkey;
+  struct ibv_sge flagFlushSge;
+  uint64_t flagFlushSrc[NET_IB_MAX_REQUESTS];
 };
 // The SendFifo needs to be 32-byte aligned and each element needs
 // to be a 32-byte multiple, so that an entry does not get split and
@@ -637,6 +649,18 @@ struct ncclIbRecvComm {
   int flushQpSl;
   int flushQpTc;
   bool flushQpsCreated;
+  // GDR flush flag (RCCL_IB_GDR_FLUSH_FLAG): the sender writes an RO=0 flag in
+  // GPU memory after the payload and the GPU kernel waits on it, replacing
+  // the RDMA read flush.
+  int flagFlush;
+  // Whether the next receives need the flag (only SIMPLE GDR receives are
+  // flushed); set by net.cc before each irecv.
+  int flagFlushHint;
+  uint64_t* flagFlushGpuMem;
+  struct ibv_mr* flagFlushMr;
+  int flagFlushDmabufFd;
+  // Highest sequence among completed receives that requested the flag.
+  uint64_t flagFlushLastSeq;
   bool prepostReceiveWorkRequests;
   // To avoid allocation and memset on the data-path a single structure is used
   // and only the wr_id is updated before posting a receive work request.
