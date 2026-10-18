@@ -50,6 +50,7 @@ every capture is a contents capture.
 | Host memory registered with `hipHostRegister`: the whole range, byte for byte, as it was at registration, whether or not it is ever copied | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Kernel argument bytes | `events.bin` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Code objects the process loaded (the application's own GPU binary code) | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
+| Linker input buffers passed to `hipLinkAddData`, every byte, with their names, including inputs the call rejected and inputs never linked or loaded | `blobs/` | contents | [AIRUNTIME-2880](https://amd-hub.atlassian.net/browse/AIRUNTIME-2880) |
 | Whole fat binary bundles, including targets HIP never loads | `blobs/` | contents | [AIRUNTIME-2858](https://amd-hub.atlassian.net/browse/AIRUNTIME-2858): only the code objects HIP loads |
 | Debug and comment sections of code objects: absolute build paths, source file names, the exact compiler build | `code_objects/`, `blobs/` | contents | [AIRUNTIME-2881](https://amd-hub.atlassian.net/browse/AIRUNTIME-2881): stripped |
 | Framework allocator layout, when a region producer ran beside capture | `regions/` | both | — kept, written only by an opt-in producer |
@@ -73,7 +74,8 @@ name, and records a date and time of day only in the `active` marker on Windows.
 reaches the archive only as a kernel name; as a string argument of a HIP call (the path
 given to `hipLinkAddFile`, the name given to `hipLinkAddData`, the function name given to
 `hipGetProcAddress`); as the name of a device variable the program registers; inside a host
-buffer the workload copied or registered; or inside a code object. A path in such a buffer,
+buffer the workload copied or registered; inside a linker input buffer, even one the linker
+rejected; or inside a code object. A path in such a buffer,
 for example a compiler cache path under the user's home directory, is recorded with it.
 Memory that never crossed a HIP call is not recorded, and neither is a failed call, apart
 from the exceptions listed in [skills/enable-recording/SKILL.md](skills/enable-recording/SKILL.md).

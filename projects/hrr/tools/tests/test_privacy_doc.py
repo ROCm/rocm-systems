@@ -6,7 +6,8 @@
 The page is the customer text for AIRUNTIME-2733. Its device table has to name
 exactly the fields hip_capture_metadata.cpp writes into a manifest, so a task
 that adds, removes or blanks one cannot land without updating the page. Its
-inventory has to list the active marker and the hipHostRegister snapshot.
+inventory has to list the active marker, the hipHostRegister snapshot and the
+hipLinkAddData inputs.
 
 Run: python3 -m unittest discover -s projects/hrr/tools/tests
 """
@@ -68,14 +69,25 @@ class PrivacyDocTest(unittest.TestCase):
             any(row.split("|")[2].strip() == f"`{name}`" for row in inventory_rows())
         )
 
-    def test_inventory_lists_the_host_register_snapshot(self):
+    def assert_blob_row(self, api: str) -> tuple:
+        """api's capture wrapper writes a blob and the inventory has its row."""
         capture = (CAPTURE_SRC / "hip_capture.cpp").read_text(encoding="utf-8")
-        body = capture.split("hipError_t capture_hipHostRegister(", 1)[1]
+        body = capture.split(f"hipError_t capture_{api}(", 1)[1]
         body = body.split("\n}\n", 1)[0]
         self.assertIn("write_blob(", body)
-        self.assertTrue(
-            any("`hipHostRegister`" in row and "`blobs/`" in row for row in inventory_rows())
-        )
+        rows = [r for r in inventory_rows() if f"`{api}`" in r and "`blobs/`" in r]
+        self.assertTrue(rows, api)
+        return body, rows[0]
+
+    def test_inventory_lists_the_host_register_snapshot(self):
+        self.assert_blob_row("hipHostRegister")
+
+    def test_inventory_lists_linker_inputs_rejected_ones_included(self):
+        body, row = self.assert_blob_row("hipLinkAddData")
+        # The row says rejected inputs are recorded: true while the wrapper
+        # does not gate on the call's result.
+        self.assertNotIn("hipSuccess", body)
+        self.assertIn("rejected", row)
 
     def test_states_that_an_archive_is_untrusted_executable_input(self):
         text = PRIVACY.read_text(encoding="utf-8")
