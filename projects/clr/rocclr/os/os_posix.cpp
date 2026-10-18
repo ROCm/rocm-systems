@@ -24,6 +24,7 @@
 #include <pthread.h>
 #include <dlfcn.h>
 #include <signal.h>
+#include <ucontext.h>
 #include <cxxabi.h>
 
 #include <sys/prctl.h>
@@ -133,7 +134,10 @@ bool IsSameAffinity(const std::vector<uint64_t>& lhs, const std::vector<uint64_t
 static const int kCrashSignals[] = {SIGSEGV, SIGABRT, SIGBUS, SIGILL, SIGFPE};
 static constexpr size_t kNumCrashSignals = sizeof(kCrashSignals) / sizeof(kCrashSignals[0]);
 static constexpr size_t kMaxCrashCallbacks = 4;
-static struct sigaction oldCrashHandlers_[kNumCrashSignals];
+static struct sigaction oldCrashHandlers_[kNumCrashSignals];  // Not written by the handler
+// Set by the one delivery that runs an earlier SA_RESETHAND handler; later ones get SIG_DFL
+static std::atomic<bool> oldCrashHandlerSpent_[kNumCrashSignals];
+static_assert(std::atomic<bool>::is_always_lock_free, "used from a signal handler");
 static std::atomic<Os::CrashCallback> crashCallbacks_[kMaxCrashCallbacks];
 static std::mutex crashHandlersLock_;
 static bool crashHandlersInstalled_ = false;  // Guarded by crashHandlersLock_
@@ -156,25 +160,30 @@ static void crashSignalHandler(int sig, siginfo_t* info, void* context) {
 
   // Chain to the earlier handler. It may recover and return, and then a later
   // fault reaches this handler again, so ours is not installed with SA_RESETHAND.
-  struct sigaction& old = oldCrashHandlers_[i];
-  if (old.sa_handler != SIG_DFL && old.sa_handler != SIG_IGN) {
-    const bool siginfo = (old.sa_flags & SA_SIGINFO) != 0;
-    void (*handler)(int) = old.sa_handler;
-    void (*action)(int, siginfo_t*, void*) = old.sa_sigaction;
-    if (old.sa_flags & SA_RESETHAND) {
-      old.sa_handler = SIG_DFL;
-      old.sa_flags &= ~SA_SIGINFO;
+  const struct sigaction& old = oldCrashHandlers_[i];
+  if (old.sa_handler != SIG_DFL && old.sa_handler != SIG_IGN &&
+      !((old.sa_flags & SA_RESETHAND) && oldCrashHandlerSpent_[i].exchange(true))) {
+    // Run it with the mask the kernel would have given it: the interrupted
+    // thread's mask, its sa_mask, and the signal itself unless SA_NODEFER.
+    sigset_t mask = static_cast<ucontext_t*>(context)->uc_sigmask;
+    sigset_t entry;
+    sigorset(&mask, &mask, &old.sa_mask);
+    if ((old.sa_flags & SA_NODEFER) == 0) {
+      sigaddset(&mask, sig);
     }
-    if (siginfo) {
-      action(sig, info, context);
+    pthread_sigmask(SIG_SETMASK, &mask, &entry);
+    if (old.sa_flags & SA_SIGINFO) {
+      old.sa_sigaction(sig, info, context);
     } else {
-      handler(sig);
+      old.sa_handler(sig);
     }
+    pthread_sigmask(SIG_SETMASK, &entry, nullptr);
     return;
   }
 
-  // No earlier handler (an ignored crash signal is treated the same): die with
-  // the default action, so a core dump still records the original fault.
+  // No earlier handler (an ignored crash signal, or a one-shot handler that has
+  // run, is treated the same): die with the default action, so a core dump
+  // still records the original fault.
   struct sigaction dfl;
   memset(&dfl, 0, sizeof(dfl));
   sigemptyset(&dfl.sa_mask);
@@ -214,6 +223,7 @@ bool Os::installExceptionHandlers(CrashCallback callback) {
   sa.sa_flags = SA_SIGINFO | SA_ONSTACK;
 
   for (size_t i = 0; i < kNumCrashSignals; ++i) {
+    oldCrashHandlerSpent_[i].store(false);
     if (sigaction(kCrashSignals[i], &sa, &oldCrashHandlers_[i]) != 0) {
       while (i-- > 0) {
         sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
@@ -223,6 +233,12 @@ bool Os::installExceptionHandlers(CrashCallback callback) {
         slot.compare_exchange_strong(expected, nullptr);
       }
       return false;
+    }
+    // The earlier handler runs from ours, so keep the SA_RESTART it asked for
+    if (oldCrashHandlers_[i].sa_flags & SA_RESTART) {
+      struct sigaction restart = sa;
+      restart.sa_flags |= SA_RESTART;
+      sigaction(kCrashSignals[i], &restart, nullptr);
     }
   }
   crashHandlersInstalled_ = true;
@@ -245,7 +261,12 @@ void Os::uninstallExceptionHandlers(CrashCallback callback) {
   }
 
   for (size_t i = 0; i < kNumCrashSignals; ++i) {
-    sigaction(kCrashSignals[i], &oldCrashHandlers_[i], nullptr);
+    struct sigaction old = oldCrashHandlers_[i];
+    if ((old.sa_flags & SA_RESETHAND) && oldCrashHandlerSpent_[i].load()) {
+      old.sa_handler = SIG_DFL;  // It already ran once, as with the kernel's reset
+      old.sa_flags = 0;
+    }
+    sigaction(kCrashSignals[i], &old, nullptr);
   }
   crashHandlersInstalled_ = false;
 }

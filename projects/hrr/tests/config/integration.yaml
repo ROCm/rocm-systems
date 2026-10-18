@@ -53,8 +53,10 @@ cases:
   Unit_HRR_CaptureCapabilities: {}
   Unit_HRR_CaptureCapabilitiesImport_Direct: {}
   Unit_HRR_CaptureCapabilities_Direct: {}
+  Unit_HRR_CaptureCrashChainResetHand_Direct: {}
   Unit_HRR_CaptureCrashChain_Direct: {}
   Unit_HRR_CaptureCrashChainsEarlierHandler: {}
+  Unit_HRR_CaptureCrashChainsResetHandOnce: {}
   Unit_HRR_CaptureCrashChainsWithAsyncLog: {}
   Unit_HRR_CaptureCrashDuringFork: {}
   Unit_HRR_CaptureCrashDuringFork_Direct: {}
