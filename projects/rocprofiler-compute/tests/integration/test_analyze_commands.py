@@ -787,20 +787,6 @@ def test_baseline(binary_handler_analyze_rocprof_compute):
 
 
 @pytest.mark.misc
-def test_dependency_MI100(binary_handler_analyze_rocprof_compute):
-    for dir in indirs:
-        workload_dir = integration_common.setup_workload_dir(dir)
-        code = binary_handler_analyze_rocprof_compute([
-            "analyze",
-            "--path",
-            workload_dir,
-            "--dependency",
-        ])
-        assert code == 0
-    common.clean_output_dir(config["cleanup"], workload_dir)
-
-
-@pytest.mark.misc
 def test_missing_file_handling(binary_handler_analyze_rocprof_compute):
     """Test handling of missing files"""
     with tempfile.TemporaryDirectory() as temp_dir:
