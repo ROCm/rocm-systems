@@ -1148,7 +1148,8 @@ bool open(const char* output_dir) {
     fprintf(stderr, "[HRR capture] %s held an archive from an earlier process with this pid; "
             "moved it to %s.\n", out_dir.c_str(), moved_to.c_str());
     created_pid_dir = true;
-    HRR_CLOSE(dirs.dir);
+    // On Windows claim_pid_dir() leaves dirs.dir unset.
+    if (dirs.dir >= 0) HRR_CLOSE(dirs.dir);
     dirs.dir = -1;
     dirs_ok = claim_pid_dir(out_dir, &dirs.dir);
   }
