@@ -28,6 +28,13 @@
 * Deprecated `rocshmem_signal_fetch_wg` and `rocshmem_signal_fetch_wave`.
   Use `rocshmem_signal_fetch` instead.
 
+### Changed
+* SDMA transport, when built in (`USE_SDMA=ON`), is disabled at runtime by default;
+  set `ROCSHMEM_SDMA_ENABLED=1` to activate it.
+* `ROCSHMEM_SDMA_THRESHOLD` default changed from 256 to 1024 bytes.
+  Wave and workgroup operations automatically scale the threshold by the wavefront size,
+  avoiding SDMA for small-to-medium transfers where parallel IPC copy is faster.
+
 ## rocSHMEM 3.7.0 for ROCm 10.1
 
 ### Added

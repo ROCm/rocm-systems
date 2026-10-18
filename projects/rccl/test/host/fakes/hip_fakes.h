@@ -109,6 +109,8 @@ extern hipError_t g_hipDeviceGetPCIBusIdResult;
 // device index (drives busIdToCudaDev's per-device resolution).
 extern std::function<hipError_t(char* /*pciBusId*/, int /*len*/, int /*device*/)>
     g_hipDeviceGetPCIBusId;
+// Backs hipDeviceGetByPCIBusId. The default fails, as for a BDF this process cannot see.
+extern std::function<hipError_t(int* /*device*/, const char* /*pciBusId*/)> g_hipDeviceGetByPCIBusId;
 extern hipError_t g_hipEventCreateResult;
 extern hipError_t g_hipMemPoolResult;
 extern hipError_t g_hipStreamCreateResult;
@@ -170,6 +172,10 @@ extern std::function<hipError_t(void* /*dst*/, const void* /*src*/, size_t /*byt
     g_hipMemcpyAsync;
 extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/, hipStream_t /*stream*/)>
     g_hipMemsetAsync;
+// Synchronous memset. The default really writes (std::memset) and returns
+// hipSuccess -- the allocation seams hand out std::malloc'd host memory, so a
+// buffer production zeroes is genuinely zero when a test reads it back.
+extern std::function<hipError_t(void* /*dst*/, int /*value*/, size_t /*bytes*/)> g_hipMemset;
 
 extern std::function<hipError_t(hipStream_t* /*stream*/, unsigned /*flags*/)> g_hipStreamCreateWithFlags;
 extern std::function<hipError_t(hipStream_t /*stream*/)> g_hipStreamSynchronize;

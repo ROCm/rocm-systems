@@ -2070,8 +2070,11 @@ _HEADER_PREAMBLE = """\
  * v8: hipDeviceFlushGPUDirectRDMAWrites and hipLibraryGetModule were
  * appended to HipDispatchTable. Each took a compiler ID, so the compiler
  * API IDs moved up by two. develop still records both under v7. A v7
- * reader decodes those events as the wrong API. */
-#define HRR_VERSION ((uint16_t)8u)
+ * reader decodes those events as the wrong API.
+ * v9: hipKernelSetAttributeForDevice was appended to HipDispatchTable,
+ * taking the first compiler ID and shifting the compiler API IDs up by one.
+ * A v8 reader would decode those events as the wrong API. */
+#define HRR_VERSION ((uint16_t)9u)
 
 /* Written once at byte 0 of events.bin. */
 #pragma pack(push, 1)
