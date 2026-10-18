@@ -52,6 +52,9 @@ extern std::function<ncclResult_t(struct ncclComm*, struct ncclTaskColl*, int*)>
 // enqueue.cc's rcclEffectiveP2pBatchEnable: default 0 is batching off, the single-node answer.
 extern std::function<int(struct ncclComm*)> g_rcclEffectiveP2pBatchEnable;
 
+// enqueue.cc's rcclP2pTaskParts: default p2pnChannelsPerPeer; install the multi-node AINIC Scatter limit per test.
+extern std::function<int(struct ncclComm*, ncclFunc_t)> g_rcclP2pTaskParts;
+
 void ResetEnqueueFakes();
 
 #endif  // RCCL_TEST_HOST_FAKES_ENQUEUE_FAKES_H_

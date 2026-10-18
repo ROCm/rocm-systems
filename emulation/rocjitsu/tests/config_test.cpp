@@ -2343,6 +2343,42 @@ TEST(CheckpointTest, PresentEmptyAllocationTableKeepsSerialFallback) {
   EXPECT_EQ(restored.soc()->dispatch_threads(), 1u);
 }
 
+TEST(CApiTest, GwsWaitFailureIsReportedByStep) {
+  const auto json = functional_quantum_checkpoint_config(1, 1);
+  rj_vm_t *raw = nullptr;
+  ASSERT_EQ(rj_vm_create_from_string(json.c_str(), RJ_VM_MODE_DEFAULT, &raw),
+            ROCJITSU_STATUS_SUCCESS);
+  std::unique_ptr<rj_vm_t, decltype(&rj_vm_destroy)> handle(raw, &rj_vm_destroy);
+  auto *cu = handle->soc->xcd(0)->shader_engine(0)->compute_unit(0);
+  auto *wave = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wave, nullptr);
+  cu->begin_workgroup(0, 0, 1);
+  cu->set_gws_wait_limit(2);
+  cu->gws_sema_p(*wave, 0);
+  rj_status_t status = ROCJITSU_STATUS_SUCCESS;
+  int active = 123;
+  for (int i = 0; i < 100 && status == ROCJITSU_STATUS_SUCCESS; ++i)
+    status = rj_vm_step(handle.get(), &active);
+  EXPECT_EQ(status, ROCJITSU_STATUS_ERROR);
+  EXPECT_NE(handle->engine->last_exit().code, 0);
+  EXPECT_FALSE(cu->has_active_wfs());
+}
+
+TEST(CheckpointTest, RoundTripsGwsWaitLimits) {
+  auto source = config::load_config_from_string(functional_quantum_checkpoint_config(1, 1),
+                                                rocjitsu::kEmbeddedSchema);
+  auto *se = source.soc()->xcd(0)->shader_engine(0);
+  se->compute_unit(0)->set_gws_wait_limit(0);
+  se->compute_unit(1)->set_gws_wait_limit(17);
+  test::ScopedTempFile checkpoint("rocjitsu-gws-limit-");
+  config::save_checkpoint(checkpoint.path(), *source.soc(), 0, source.engine_config,
+                          source.cpu_dispatch_threads);
+  auto restored = config::restore_checkpoint(checkpoint.path());
+  auto *restored_se = restored.soc()->xcd(0)->shader_engine(0);
+  EXPECT_EQ(restored_se->compute_unit(0)->config().gws_wait_limit, 0u);
+  EXPECT_EQ(restored_se->compute_unit(1)->config().gws_wait_limit, 17u);
+}
+
 TEST(CheckpointTest, RoundTripsExplicitUnboundedFunctionalQuantum) {
   const std::string json = functional_quantum_checkpoint_config(0, 0);
   auto source = config::load_config_from_string(json, rocjitsu::kEmbeddedSchema);
@@ -2926,6 +2962,35 @@ TEST(CheckpointTest, RefusesToSaveTrappedOrDebuggerStoppedWaves) {
   EXPECT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 5, loaded.engine_config,
                                           loaded.cpu_dispatch_threads));
   wf->set_runtime_suspended(false);
+}
+
+TEST(CheckpointTest, RefusesToSaveParkedGwsWave) {
+  auto loaded = config::load_config_from_string(functional_quantum_checkpoint_config(1, 1),
+                                                rocjitsu::kEmbeddedSchema);
+  auto *cu = loaded.soc()->xcd(0)->shader_engine(0)->compute_unit(0);
+  ASSERT_NE(cu, nullptr);
+  auto *wf = cu->dispatch_wf(0, 0, cu->config().sgprs_per_wf, cu->config().vgprs_per_wf);
+  ASSERT_NE(wf, nullptr);
+  cu->begin_workgroup(0, 0, 1);
+  wf->set_exec(1);
+  test::ScopedTempFile checkpoint("rocjitsu-checkpoint-gws-");
+  EXPECT_NO_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                          loaded.cpu_dispatch_threads));
+  cu->gws_init(*wf, 0, 1);
+  EXPECT_THROW(config::save_checkpoint(checkpoint.path(), *loaded.soc(), 0, loaded.engine_config,
+                                       loaded.cpu_dispatch_threads),
+               std::runtime_error);
+  wf->gws_sema_p(0);
+  wf->gws_sema_p(0);
+  ASSERT_EQ(wf->state(), amdgpu::WfState::GWS_WAIT);
+  try {
+    config::save_checkpoint(checkpoint.path(), *loaded.soc(), 1, loaded.engine_config,
+                            loaded.cpu_dispatch_threads);
+    FAIL() << "a parked GWS wave must not restore as running";
+  } catch (const std::runtime_error &error) {
+    EXPECT_NE(std::string(error.what()).find("GWS resource state"), std::string::npos);
+  }
+  wf->halt();
 }
 
 // wg_coord is dispatch identity, and the flat wg_id cannot stand in for it: the
