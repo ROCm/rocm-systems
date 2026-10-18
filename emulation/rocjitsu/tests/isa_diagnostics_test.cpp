@@ -16,6 +16,7 @@
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna3_5/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/builders.h"
 #include "rocjitsu/isa/arch/amdgpu/generated/rdna4/opcodes.h"
+#include "rocjitsu/isa/arch/amdgpu/shared/mma_exec.h"
 #include "rocjitsu/isa/decoder.h"
 #include "rocjitsu/vm/amdgpu/async_scoreboard.h"
 #include "rocjitsu/vm/amdgpu/compute_unit.h"
@@ -214,6 +215,30 @@ TEST_P(IsaDiagnosticsTest, MfmaBroadcastBlockBoundary) {
       execute(words, cbsz > max_cbsz, "v_mfma_");
     }
   }
+  for (uint16_t opcode :
+       {cdna4::kVMfmaF3216x16x14bF32Vop3pMfma, cdna4::kVMfmaI3216x16x44bI8Vop3pMfma}) {
+    const auto words = cdna4::build_vop3p_mfma(
+        opcode, {.vdst = 32, .cbsz = 1, .abid = 2, .src0 = 256, .src1 = 257, .src2 = 128});
+    execute(words, true, "v_mfma_");
+  }
+}
+
+TEST_P(IsaDiagnosticsTest, ReservedMfmaBroadcastControlsStayInsideWave) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP();
+  EXPECT_EQ(permute_a_lane(63, 7, 7), 63u);
+  EXPECT_LT(permute_a_lane(63, 2, 7), 64u);
+}
+
+TEST_P(IsaDiagnosticsTest, CrossRegionScalarPairsReportUndefinedBehavior) {
+  if (GetParam() != ROCJITSU_CODE_ARCH_CDNA4)
+    GTEST_SKIP();
+  execute(cdna4::build_sop2(cdna4::kSCselectB64Sop2, {.ssrc0 = 128, .ssrc1 = 129, .sdst = 123}), 1,
+          "s_cselect_b64");
+  const std::array<uint32_t, 1> setpc{0xBE801D6Bu}; // vcc_hi cannot start a pair.
+  execute(setpc, 1, "s_setpc_b64");
+  EXPECT_FALSE(wf->is_halted());
+  EXPECT_EQ(wf->instruction_execution_error(), InstructionExecutionError::None);
 }
 
 TEST_P(IsaDiagnosticsTest, MfmaF64IgnoresBroadcastFields) {

@@ -506,26 +506,47 @@ inline util::native<uint32_t> simd_cvt_u32_f32(util::native<float32_t> s) {
   });
 }
 
+/// @brief Convert f32 to a zero-extended packed i16 lane.
+/// @details NaN converts to zero and out-of-range values saturate before the
+/// signed 16-bit result is returned in the low half of a uint32_t.
+inline uint32_t cvt_i16_f32(float32_t value) {
+  if (std::isnan(value))
+    return uint32_t{0};
+  if (value >= 32768.0f)
+    return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::max()));
+  if (value < -32768.0f)
+    return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::min()));
+  return static_cast<uint16_t>(static_cast<int16_t>(value));
+}
+
+/// @brief Convert f32 to a zero-extended packed u16 lane.
+/// @details NaN and negative inputs convert to zero; values above the u16 range
+/// saturate to UINT16_MAX.
+inline uint32_t cvt_u16_f32(float32_t value) {
+  if (std::isnan(value) || value < 0.0f)
+    return uint32_t{0};
+  if (value >= 65536.0f)
+    return static_cast<uint32_t>(std::numeric_limits<uint16_t>::max());
+  return static_cast<uint16_t>(value);
+}
+
+/// @brief Convert f32 to a zero-extended packed u8 lane.
+/// @details NaN and negative inputs convert to zero; values above the u8 range
+/// saturate to UINT8_MAX.
+inline uint32_t cvt_u8_f32(float32_t value) {
+  if (std::isnan(value) || value < 0.0f)
+    return uint32_t{0};
+  if (value >= 256.0f)
+    return static_cast<uint32_t>(std::numeric_limits<uint8_t>::max());
+  return static_cast<uint32_t>(static_cast<uint8_t>(value));
+}
+
 inline util::native<uint32_t> simd_cvt_i16_f32_to_u32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
-    if (std::isnan(value))
-      return uint32_t{0};
-    if (value >= 32768.0f)
-      return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::max()));
-    if (value < -32768.0f)
-      return static_cast<uint32_t>(static_cast<uint16_t>(std::numeric_limits<int16_t>::min()));
-    return static_cast<uint32_t>(static_cast<uint16_t>(static_cast<int16_t>(value)));
-  });
+  return util::map_native_convert_scalar<uint32_t>(s, cvt_i16_f32);
 }
 
 inline util::native<uint32_t> simd_cvt_u16_f32_to_u32(util::native<float32_t> s) {
-  return util::map_native_convert_scalar<uint32_t>(s, [](float32_t value) {
-    if (std::isnan(value) || value < 0.0f)
-      return uint32_t{0};
-    if (value >= 65536.0f)
-      return static_cast<uint32_t>(std::numeric_limits<uint16_t>::max());
-    return static_cast<uint32_t>(static_cast<uint16_t>(value));
-  });
+  return util::map_native_convert_scalar<uint32_t>(s, cvt_u16_f32);
 }
 
 template <typename Op>

@@ -19,6 +19,7 @@ from amdisa.codegen.execute.sema_lower import (
     _INLINE_TERNARY_OPS,
     _lower_apply_clamp,
     _lower_apply_omod,
+    _lower_call,
     InlineBinaryOp,
     LoweringContext,
     OperandBinding,
@@ -57,6 +58,32 @@ def test_scc_shift_add_inline_operations_do_not_read_scc(name):
 
 def test_non_scc_inline_operation_has_no_scc_effect():
     assert not isinstance(_INLINE_BINARY_OPS['add_co'], InlineBinaryOp)
+
+
+@pytest.mark.parametrize(
+    ('callee', 'ty', 'expected', 'unexpected'),
+    [
+        ('maxmin', SemaType.I32, 'std::min(std::max(', 'std::fmin'),
+        ('minmax', SemaType.U32, 'std::max(std::min(', 'std::fmax'),
+        ('maxmin', SemaType.F32, 'std::fmin(std::fmax(', 'std::min'),
+        ('minmax', SemaType.F32, 'std::fmax(std::fmin(', 'std::max'),
+    ],
+)
+def test_minmax_ternary_lowering_uses_result_type(callee, ty, expected, unexpected):
+    node = SemaNode(
+        SemaNodeKind.CALL,
+        call_name=callee,
+        ty=ty,
+        children=(
+            SemaNode(SemaNodeKind.ID, id_name=callee),
+            SemaNode(SemaNodeKind.LIT, lit_value='a', ty=ty),
+            SemaNode(SemaNodeKind.LIT, lit_value='b', ty=ty),
+            SemaNode(SemaNodeKind.LIT, lit_value='c', ty=ty),
+        ),
+    )
+    result = _lower_call(node, LoweringContext(exec_model=ExecModel.VECTOR))
+    assert expected in result
+    assert unexpected not in result
 
 
 def test_packed_byte_inline_operations_match_isa_special_cases():

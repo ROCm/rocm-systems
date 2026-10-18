@@ -2872,17 +2872,26 @@ class CodeGenerator:
                       kVopdMovB32, kVopdAddNcU32, kVopdLshlrevB32>(wf, x_, y_))
                 return;
             ''')
+        wave64_guard = (
+            'return;'
+            if logical_arch in ('rdna3', 'rdna3_5')
+            else 'wf.report_instruction_execution_error(\n'
+            '    amdgpu::InstructionExecutionError::InvalidInstructionEncoding);\n'
+            'return;'
+        )
         execution_method = (
             textwrap.dedent('''\
             void Vopd::execute_impl(amdgpu::Wavefront &wf) {
-              if (wf.wf_size() != 32)
-                throw util::UnimplementedInst("VOPD requires Wave32");
+              if (wf.wf_size() != 32) {
+            @WAVE64_GUARD@
+              }
             @VOPD_INTEGER_SIMD_PROBE@
             @EXECUTE_IMPL_BODY@
             }
             ''')
             .replace('@EXECUTE_IMPL_BODY@', execute_impl_body)
             .replace('@VOPD_INTEGER_SIMD_PROBE@', vopd_integer_simd_probe)
+            .replace('@WAVE64_GUARD@', textwrap.indent(wave64_guard, '    '))
         )
 
         vopd_isa_diagnostics = cpp_block('''
@@ -7974,8 +7983,11 @@ class CodeGenerator:
             gds_guard = ''
             if self._enc_has_field('gds'):
                 gds_guard = (
-                    '  if (!inst_.gds)\n'
-                    '    throw util::UnimplementedInst(mnemonic());\n'
+                    '  if (!inst_.gds) {\n'
+                    '    wf.report_instruction_execution_error(\n'
+                    '        amdgpu::InstructionExecutionError::InvalidInstructionEncoding);\n'
+                    '    return;\n'
+                    '  }\n'
                 )
             return gds_guard + self._gen_ds_gws(dst_ops, src_ops, sem)
 
@@ -12663,9 +12675,12 @@ class CodeGenerator:
                             )
                     if inst_sem and inst_sem.semantic_class == 'mfma':
                         ctor_body_parts.append('flags_ |= MATRIX_REGISTER_ACCESSES;')
-                        # CBSZ is a broadcast for F32/I32 MFMA, but a format
-                        # selector for F8/F6/F4; F64 ignores it. Qualify the
-                        # static restriction once and report on the CU issuer.
+                        # CBSZ selects broadcasting for F32/I32 MFMA, but is a
+                        # format selector for F8/F6/F4; F64 ignores it. For the
+                        # qualified broadcast forms, reject a group larger than
+                        # the instruction block count and an ABID outside the
+                        # selected group. CBSZ zero disables broadcasting, so
+                        # ABID is deliberately ignored in that case.
                         broadcast_shape = re.match(
                             r'V_MFMA_(?:F32|I32)_(\d+)X(\d+)X', inst.name
                         )
@@ -12677,7 +12692,8 @@ class CodeGenerator:
                             rows, cols = map(int, broadcast_shape.groups())
                             blocks = 64 * (inst.operands[0].size // 32) // (rows * cols)
                             ctor_body_parts.append(
-                                f'if ((1u << inst_.cbsz) > {blocks}u) '
+                                f'if ((1u << inst_.cbsz) > {blocks}u || '
+                                '(inst_.cbsz != 0 && inst_.abid >= (1u << inst_.cbsz))) '
                                 'flags_ |= INVALID_MFMA_BROADCAST;'
                             )
                     # These qualified execution emitters only access their

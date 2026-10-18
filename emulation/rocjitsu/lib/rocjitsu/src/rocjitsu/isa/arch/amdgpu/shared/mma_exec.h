@@ -688,14 +688,22 @@ inline SwmmacIndexLoc swmmac_index_loc(uint32_t wave_size, uint32_t M, uint32_t 
 
 /// @brief Permute the A-matrix lane based on cbsz and abid fields.
 ///
-/// @details When cbsz > 0, a block of S = 64/(1<<cbsz) lanes is broadcast to
-/// all other blocks. abid selects which block is the broadcast source.
-/// cbsz=0 means no broadcast (identity).
+/// @details When cbsz > 0, the wave is divided into 1<<cbsz blocks and abid
+/// selects the source block. The source lane keeps its offset within a block.
+/// cbsz=0 is the identity. Reserved cbsz values also return the original lane,
+/// and abid is reduced modulo the block count, so decoded undefined controls
+/// can be diagnosed without causing an out-of-wave host access.
 inline uint32_t permute_a_lane(uint32_t lane, uint32_t cbsz, uint32_t abid) {
   if (cbsz == 0)
     return lane;
-  uint32_t S = 64 >> cbsz;
-  return (lane % S) + S * abid;
+  // Reserved CBSZ encodings are diagnosed from the decoded instruction flags.
+  // Keep undefined guest controls inside the wave so diagnostics never turn
+  // into host division-by-zero or out-of-range register access.
+  if (cbsz > 4)
+    return lane;
+  const uint32_t block_count = 1u << cbsz;
+  const uint32_t block_size = 64 / block_count;
+  return (lane % block_size) + block_size * (abid % block_count);
 }
 
 /// @brief Permute the B-matrix lane based on the blgp field.
