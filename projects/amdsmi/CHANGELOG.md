@@ -87,6 +87,29 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 - **Added a read-only Linux Go module**.
   - Provides GPU discovery, identity, telemetry, current partition metadata, and ECC/RAS queries with native units and field availability preserved.
 
+- **Added Component Unified ID (CUID) reporting APIs**.  
+  - `amdsmi_get_gpu_cuid_info()` returns a device's primary and derived CUIDs together with the Component Type, the lookup stage that answered, and whether the value is auxiliary (a temporary CUID), in the new `amdsmi_cuid_info_t`. The new `amdsmi_cuid_source_t` and `amdsmi_cuid_component_type_t` enums name the on-wire values.
+  - `amdsmi_get_gpu_device_cuid()` now returns the device's derived CUID.
+  - `amdsmi_get_cuid_components()` lists every component on the node that has a CUID (platform, CPU packages, GPUs and their compute partitions, NPUs, one entry per NIC function; a NIC's UnitID is its PCI function number) in the new `amdsmi_cuid_component_t`, with its BDF and sysfs path. It needs no processor handle.
+  - The entry points are exported whether or not the build links `libamdcuid`; without it they return `AMDSMI_STATUS_NOT_SUPPORTED`.
+  - Every CUID is a temporary CUID, built from the machine ID and world-readable device information, the same for every caller and on any kernel. A GPU handle in SPX reports the whole GPU's CUID; in DPX and above each handle reports its own partition's, with the partition's UnitID taken from amdgpu's `cuid_unit_id` or, on a kernel without it, from the KFD topology.
+  - CLI: `amd-smi static --cuid` reports the CUID block and `--cuid-primary` adds the serial-bearing primary CUID (requires elevation). `amd-smi node --cuid` (`--cuid-primary` for root) lists every component's CUID. `--cuid` is opt-in.
+  - `amd-smi list` adds `cuid`, `identifier_kind`, `source`, `auxiliary` and `cuid_metadata_status`. The existing `uuid`/`gpu_uuid` fields keep reporting the CUID when available and the legacy UUID otherwise.
+  - Build: `BUILD_CUID` takes `AUTO` (default), `ON` or `OFF`. Without an installed `libamdcuid` package, the in-tree `shared/cuid` sources are built and absorbed into `libamd_smi`.
+
+  ```shell
+  $ amd-smi static --cuid
+  GPU: 0
+      CUID:
+          DERIVED_CUID: XXXXXXXX-XXXX-8XXX-XXXX-XXXXXXXXXXXX
+          PRIMARY_CUID: N/A (not requested)
+          COMPONENT_TYPE: GPU
+          AUXILIARY: True
+          SOURCE: LIBRARY
+          IDENTIFIER_KIND: cuid
+          CUID_METADATA_STATUS: available
+  ```
+
 ### Changed
 
 - **Use fwupd daemon to read and write UMA carveout information**.  
@@ -266,10 +289,10 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
   - `amdsmi_get_gpu_accelerator_partition_profile_config()` returns `AMDSMI_STATUS_NO_PERM` without filling its output, and the example read `num_profiles` from that uninitialized structure, so the profile loop ran past the end of the `profiles` array on every GPU. The loop now runs only when the query succeeds.
 
 - **Fixed nearest-GPU topology results**.
-  - Uses a strict comparator for ascending hop count, then ascending link weight. Equal-hop, equal-weight peers compare equal; their relative order is unspecified.
-  - Reports only the stored handle count. The former count could exceed the fixed array capacity and cause downstream consumers to read out of bounds.
-  - Resets processor discovery capacity for each socket so an earlier socket's device count does not limit later sockets.
-  - Rejects a discovery count exceeding its buffer capacity with `AMDSMI_STATUS_UNEXPECTED_SIZE` before reading entries.
+  - Results are ordered by hop count then link weight, and the reported count stays within the returned handle array.
+
+- **Fixed `amd-smi metric --fan` reporting `0.0 %` on Navi3x/4x GPUs with OverDrive enabled**.  
+  - Fan speed and maximum fan speed are read from the live hwmon fan duty cycle again, and `amd-smi set --fan --help` shows the range the GPU accepts.
 
 ## amd_smi_lib for ROCm 10.1.0
 
@@ -393,10 +416,8 @@ Full documentation for amd_smi_lib is available at [https://rocm.docs.amd.com/pr
 
 ### Upcoming Changes
 
-- **UUIDs will be replaced by CUIDs in an upcoming version**.  
-  - UUIDs will soon be replaced with Component Unified IDs (CUIDs). These CUIDs will be consistent across various AMD tools and products so users will be able to definitively identify their devices regardless of what tool they're using.
-  - `amdsmi_get_gpu_device_cuid` has been added as an API for this upcoming change but will remain disabled until full support from the amdgpu driver is available.
-  - The CLI `list` output and GPU selection now report the CUID in place of the UUID when a CUID is available, and fall back to the UUID otherwise.
+- **`uuid`/`gpu_uuid` in `amd-smi list` will report only the legacy UUID**.  
+  - In a future release they will no longer report the CUID. Use `cuid` and `identifier_kind` instead. GPU selection accepts both identifiers, and the legacy UUID API is unchanged.
 
 ## amd_smi_lib for ROCm 10.0.0
 

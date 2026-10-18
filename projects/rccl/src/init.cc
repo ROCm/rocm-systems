@@ -145,6 +145,14 @@ NCCL_PARAM(P2pDisable, "P2P_DISABLE", 0);
 // Opt-in: enables GPU-resident NCCL progress counters when RAS is enabled. When disabled,
 // counter buffers remain null and profiler() skips progress-counter updates.
 NCCL_PARAM(ProgressCountersEnable, "PROGRESS_COUNTERS", 0);
+// A partition reaches the NIC and xGMI over the physical device's paths, so GIN is as available
+// to it as to the whole GPU — same reasoning as NCCL_NET_GDR_MLOPART for GDR. Tri-state because
+// only the single-node case has been validated:
+//   -1 (default) admit a partitioned communicator on one node; refuse across nodes.
+//    0 refuse every partitioned communicator (pre-parameter behaviour).
+//    1 admit on any node count (multi-node is opt-in: unvalidated, and it also reaches the
+//      hierarchical CE path gated by ncclHierCeAllowed).
+NCCL_PARAM(GinMloPart, "GIN_MLOPART", -1);
 
 extern int64_t ncclParamSingleProcMemRegEnable();
 extern int64_t ncclParamPatEnable();
@@ -152,6 +160,20 @@ extern int64_t ncclParamRasDiagnostics();
 extern int64_t ncclParamDiagnostics();
 extern int64_t ncclParamRasEnable();
 extern int64_t ncclParamP2pLL128Enable();
+extern int64_t ncclParamTreeCompact();
+
+// Whether this communicator may use GIN. MI300X CPX stamps mloPart on every partition, so without
+// NCCL_GIN_MLOPART every CPX rank would turn GIN off and fall back to a path that can't export its
+// buffers (AICOMRCCL-2387). Takes the whole comm, not the loose bools, so the call site can't
+// transpose cuMemGdrSupport and hasMloPart.
+static bool ginGateAllows(uint64_t ginTypeBitMask, const struct ncclComm* comm) {
+  if (ginTypeBitMask == 0 || !comm->cuMemGdrSupport) return false;
+  if (!comm->hasMloPart) return true;
+  int64_t mloPart = ncclParamGinMloPart();
+  if (mloPart == 0) return false;
+  if (mloPart > 0) return true;
+  return comm->nNodes <= 1;
+}
 
 static bool ctaPolicyIsValid(int ctaPolicy) {
   int availCtaPolicies[3] = {NCCL_CTA_POLICY_DEFAULT, NCCL_CTA_POLICY_EFFICIENCY, NCCL_CTA_POLICY_ZERO};
@@ -878,6 +900,12 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 #ifdef USE_AMDSMI
   NCCLCHECK(amd_smi_init());
   NCCLCHECK(amd_smi_getDeviceIndexByPciBusId(busId, (unsigned int*)&comm->nvmlDev));
+  // Opt-in via RCCL_FABRIC_TELEMETRY_ENABLE, and a no-op otherwise. Only this
+  // comm's own device is sampled, so a rank does not report on GPUs it never uses.
+  // commHash is assigned before commAlloc on both init paths, and rank at the top of
+  // this function, so both are set here.
+  NCCLCHECK(amd_smi_fabricTelemetryAcquire((uint32_t)comm->nvmlDev, comm->commHash, comm->rank,
+                                           &comm->fabricTelemetryAcquired));
 #else
   NCCLCHECK(rocm_smi_init());
   NCCLCHECK(rocm_smi_getDeviceIndexByPciBusId(busId, (unsigned int*)&comm->nvmlDev));
@@ -1757,6 +1785,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
     int localRanks;
     int nc;
     int romeTopoModelIdx;
+    int treeCompact;
     bool pivotA2AEnabled;
     bool ll128Enabled;
     char hostname[128];
@@ -2190,7 +2219,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
       bool isXGMI;
       // Limit to single intermediate GPU for enabling clique
-      NCCLCHECK(ncclTopoGetLinkType(comm->topo, i, j, &isXGMI, 1));
+      NCCLCHECK(ncclTopoGetLinkType(comm->topo, comm->peerInfo[i].nvmlDev, comm->peerInfo[j].nvmlDev, &isXGMI, 1));
       allXgmi &= isXGMI;
     }
   }
@@ -2334,6 +2363,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   allGather3Data[rank].cpuArch = comm->cpuArch;
   allGather3Data[rank].cpuVendor = comm->cpuVendor;
   allGather3Data[rank].romeTopoModelIdx = comm->topo->romeTopoModelIdx;
+  allGather3Data[rank].treeCompact = ncclParamTreeCompact() ? 1 : 0;
   (void)getHostName(allGather3Data[rank].hostname, sizeof(allGather3Data[rank].hostname), '\0');
   allGather3Data[rank].p2pnChannelsPerPeer = comm->p2pnChannelsPerPeer;
   allGather3Data[rank].p2pMaxPeers = comm->p2pMaxPeers;
@@ -2364,6 +2394,17 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
                     [&](int r) { return allGather3Data[r].hostname; },
                     [&](int r) { return comm->peerInfo[r].hostHash; }),
                   ret, fail);
+  }
+
+  // NCCL_TREE_COMPACT changes the inter-node tree shape; ranks that disagree would build mismatched trees and hang
+  for (int r = 0; r < nranks; r++) {
+    if (allGather3Data[r].treeCompact != allGather3Data[rank].treeCompact) {
+      WARN("NCCL_TREE_COMPACT mismatch: rank %d (%s) has %d, rank %d (%s) has %d; all ranks must set the same value",
+           rank, allGather3Data[rank].hostname, allGather3Data[rank].treeCompact, r, allGather3Data[r].hostname,
+           allGather3Data[r].treeCompact);
+      ret = ncclInvalidUsage;
+      goto fail;
+    }
   }
 
   // Determine nNodes, firstRanks, ...
@@ -2809,7 +2850,7 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
 
   NCCLCHECKGOTO(ncclTopoPathAllDirectNVLink(comm->topo, &comm->isAllDirectNvlink), ret, fail);
   comm->globalGinSupport = NCCL_GIN_CONNECTION_NONE;
-  if (globalGinTypeBitMask && comm->cuMemGdrSupport && !comm->hasMloPart) {
+  if (ginGateAllows(globalGinTypeBitMask, comm)) {
     NCCLCHECKGOTO(ncclGinSetDefaultBackend(comm, globalGinTypeBitMask), ret, fail);
     if (globalCrossNicSupport) {
       comm->globalGinSupport = NCCL_GIN_CONNECTION_FULL;
@@ -2826,11 +2867,17 @@ static ncclResult_t initTransportsRank(struct ncclComm* comm, struct ncclComm* p
   // dedicated non-symmetric hostRma path for it. The numRmaCtx gate is upstream 2.31's.
   comm->hostRmaSupport = comm->config.numRmaCtx > 0 && (isOneLsaTeams || comm->globalRmaProxySupport);
   INFO(NCCL_INIT | NCCL_NET,
-       "GIN/RMA support: ginConnection %d hostRma %d symmetric %d (ginTypeMask 0x%lx mloPart %d nicFused %d "
-       "crossNic %d railable %d rmaPlugin %d cuMemGdr %d cuMemEnable %d oneLsaTeam %d numRmaCtx %d)",
+       "GIN/RMA support: ginConnection %d hostRma %d symmetric %d (ginTypeMask 0x%lx mloPart %d nNodes %d "
+       "nicFused %d crossNic %d railable %d rmaPlugin %d cuMemGdr %d cuMemEnable %d oneLsaTeam %d numRmaCtx %d)",
        comm->globalGinSupport, comm->hostRmaSupport, comm->symmetricSupport, (unsigned long)globalGinTypeBitMask,
-       comm->hasMloPart, globalNicFused, globalCrossNicSupport, comm->contiguousRanksPerHost != INT_MAX,
+       comm->hasMloPart, comm->nNodes, globalNicFused, globalCrossNicSupport, comm->contiguousRanksPerHost != INT_MAX,
        globalRmaPluginSupport, comm->cuMemGdrSupport, ncclCuMemEnable(), isOneLsaTeams, comm->config.numRmaCtx);
+  if (comm->hasMloPart && comm->nNodes > 1 && ncclParamGinMloPart() < 0) {
+    INFO(NCCL_INIT,
+         "NCCL_GIN_MLOPART admits a partitioned communicator on a single node only; set it to 1 to admit this "
+         "%d-node one, which no partitioned run has covered yet",
+         comm->nNodes);
+  }
 
   comm->ceColl.baseUCSymReadyPtr = NULL;
   comm->ceColl.baseUCSymComplPtr = NULL;
@@ -4346,6 +4393,27 @@ fail:
 }
 
 static ncclResult_t commCleanup(ncclComm_t comm) {
+#ifdef USE_AMDSMI
+  // This device's last reference frees its telemetry; the session's last device
+  // stops the sampler. Guarded by the per-comm flag so a comm that never joined
+  // (telemetry disabled, or an init that failed before acquiring) does not
+  // unbalance the count.
+  //
+  // Ahead of everything else because teardown is expected to fail on abort, and
+  // every step below can return early -- including the three before commFree, whose
+  // only caller this is. Any of them bailing would leave the device in
+  // telemetryDevices with the sampler polling a GPU whose comm is gone. This needs
+  // only comm->nvmlDev, which commAlloc sets.
+  //
+  // A comm whose intraComm0 is NULL never reaches commReclaim's teardown at all, so
+  // it never reaches here either; the atexit handler is the backstop for that case
+  // and for any process that exits with comms still alive.
+  if (comm->fabricTelemetryAcquired) {
+    NCCLCHECK(amd_smi_fabricTelemetryRelease((uint32_t)comm->nvmlDev));
+    comm->fabricTelemetryAcquired = false;
+  }
+#endif
+
   CUDACHECK(cudaSetDevice(comm->cudaDev));
   // Stop the counter monitor before freeing counter buffers.
   NCCLCHECK(ncclProgressCounterMonitorDestroy(comm));

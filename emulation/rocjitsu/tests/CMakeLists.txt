@@ -614,6 +614,7 @@ add_executable(
     sdma_ring_consumer_test.cpp
     cdna5_tensor_dma_test.cpp
     ds_memory_snapshot_test.cpp
+    ds_gws_test.cpp
     buffer_lds_transfer_test.cpp
     scalar_buffer_store_test.cpp
     lds_test.cpp
@@ -647,9 +648,11 @@ add_executable(
     scalar_cache_policy_test.cpp
     transcendental_test.cpp
     comparison_test.cpp
+    denormal_test.cpp
     floating_operation_test.cpp
     input_denormal_test.cpp
     minmax_test.cpp
+    output_denormal_test.cpp
     output_modifier_test.cpp
     source_modifier_test.cpp
     amdgpu_elf_test_support.cpp
@@ -674,6 +677,9 @@ add_executable(
     dbi/dbi_mask_sim_test.cpp
     dbi/dbi_entry_prologue_sim_test.cpp
     dbi/dbi_sim_memory_test.cpp
+    dbi/log_record_probe_test.cpp
+    dbi/scalar_builders_test.cpp
+    dbi/dbi_log_record_sim_test.cpp
     dbi/kernarg_sgpr_slot_test.cpp
     code/code_object_target_id_test.cpp
     code/relocation_function_table_test.cpp
@@ -915,12 +921,23 @@ set(_rj_l2_mutex_cases
     PendingWriterClosesAdmissionAndWakesAfterLastReader
     CollidingReadersOverlapAndWriterWaitsForTheLastOwner
     ExclusiveUnlockWakesBlockingReaders
+    RepeatedMaintenanceWakesArrivingReaders
+)
+set(_rj_idle_wakeup_cases
+    TerminationTest.RequestExitRacingShutdownIsSafe
+    TerminationTest.IdleExitAndLastPrimaryReleaseWakeEveryWorkerMode
+    TerminationTest.QuiescentEngineDoesNotSpinTheHost
+    AsyncCausalityTest.StaleWakeDoesNotHideConcurrentPublication
+    AsyncCausalityTest.QuiescentPublicationsToEveryPartitionMakeProgress
 )
 # Exclude exactly the cases registered below, so future cases still participate
 # in normal discovery until they receive an explicit timeout registration.
 set(_rj_gtest_exclusions
     "-*Benchmark*:*RequestExitWakesAllPartitions*:MatrixCoexecutionTest.SharedPoolMakesProgressUnderConcurrentHandoffs:*DispatchedWaitSurvivesAConcurrentFinalClose*:*EffectiveConfigTest.ReadsNativeLaunchConfigHandoff"
 )
+foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
+    string(APPEND _rj_gtest_exclusions ":${_idle_wakeup_case}")
+endforeach()
 foreach(_l2_mutex_case IN LISTS _rj_l2_mutex_cases)
     string(
         APPEND _rj_gtest_exclusions
@@ -930,10 +947,25 @@ endforeach()
 
 # Benchmarks are timing tools, not correctness tests; keep them out of the
 # default ctest run (invoke them directly via
-# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The request-exit, SharedPool
-# handoff, concurrent-close, and L2 mutex tests are registered separately so
+# ./rocjitsu_tests --gtest_filter='*Benchmark*'). The idle-wakeup, request-exit,
+# SharedPool handoff, concurrent-close, and L2 mutex tests are registered separately so
 # CTest can bound a deadlocked child process, including helper destruction.
 rj_add_gtest_tests(rocjitsu_tests TEST_FILTER "${_rj_gtest_exclusions}")
+
+# Bound worker joins in the idle notification and CPU-use regressions.
+# Register explicitly so build-tree and installed tests have the same timeout.
+foreach(_idle_wakeup_case IN LISTS _rj_idle_wakeup_cases)
+    rj_add_test(
+        NAME "${_idle_wakeup_case}"
+        COMMAND
+            $<TARGET_FILE:rocjitsu_tests>
+            "--gtest_filter=${_idle_wakeup_case}"
+        TIMEOUT 30
+        INSTALL_COMMAND
+            "bin/rocjitsu_tests"
+            "--gtest_filter=${_idle_wakeup_case}"
+    )
+endforeach()
 
 # Register separately to bound handoffs and shutdown with an external timeout.
 # The test stresses handoffs for 20 seconds; CTest also bounds a lost wake while

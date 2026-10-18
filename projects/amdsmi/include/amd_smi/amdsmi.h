@@ -1510,9 +1510,7 @@ typedef struct {
 #define AMDSMI_MAX_NUM_FREQUENCIES \
   33  //!< Guaranteed maximum possible number of supported frequencies
 
-//! Maximum possible value for fan speed for legacy hwmon GPUs.
-//! For GPUs with the gpu_od sysfs interface, use
-//! amdsmi_get_gpu_fan_speed_max() to query the actual maximum.
+//! Maximum fan speed (hwmon pwm1_max), as reported by amdsmi_get_gpu_fan_speed_max().
 //! @cond @tag{gpu_bm_linux} @endcond
 #define AMDSMI_MAX_FAN_SPEED 255
 
@@ -3563,9 +3561,16 @@ amdsmi_status_t amdsmi_get_gpu_device_bdf(amdsmi_processor_handle processor_hand
                                           amdsmi_bdf_t* bdf);
 
 /**
- *  @brief Returns the UUID of the device
+ *  @brief Returns the legacy device UUID
  *
  *  @ingroup tagProcDiscovery
+ *
+ *  Superseded by ::amdsmi_get_gpu_cuid_info. This value is **not** a Component
+ *  Unified ID: it is built from the SMU unique ID, the PCI device ID and the KFD
+ *  partition index, so it names an addressable device and changes when the GPU
+ *  is repartitioned. A CUID names the physical component and carries the
+ *  partition in its UnitID field instead. Retained unchanged for consumers that
+ *  have already recorded its output; record a CUID for new work.
  *
  *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
  *  @platform{guest_windows}
@@ -3589,8 +3594,10 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  *
  *  @ingroup tagProcDiscovery
  *
- *  @platform{gpu_bm_linux} @platform{host} @platform{guest_1vf} @platform{guest_mvf}
- *  @platform{guest_windows}
+ *  The derived CUID that ::amdsmi_get_gpu_cuid_info reports, without its
+ *  provenance.
+ *
+ *  @platform{gpu_bm_linux}
  *
  *  @param[in] processor_handle Device which to query
  *
@@ -3605,6 +3612,190 @@ amdsmi_status_t amdsmi_get_gpu_device_uuid(amdsmi_processor_handle processor_han
  */
 amdsmi_status_t amdsmi_get_gpu_device_cuid(amdsmi_processor_handle processor_handle,
                                            unsigned int* cuid_length, char* cuid);
+
+/**
+ *  @brief Source that answered a CUID lookup.
+ *
+ *  The staged lookup tries the driver, then its own computation. Only a
+ *  driver-sourced value is authoritative, because only the driver reads the
+ *  privileged identity.
+ *
+ *  libamdcuid records the answering stage through AMDCUID_QUERY_SOURCE, so
+ *  amd-smi reports DRIVER or LIBRARY, and UNKNOWN only when that query fails.
+ *  Treat ::AMDSMI_CUID_SOURCE_UNKNOWN as "not known to be driver-published"
+ *  rather than as "locally computed".
+ */
+typedef enum {
+  AMDSMI_CUID_SOURCE_UNKNOWN = 0,  //!< Source could not be determined
+  AMDSMI_CUID_SOURCE_DRIVER = 1,   //!< Published by the device driver
+  AMDSMI_CUID_SOURCE_LIBRARY = 3   //!< Computed by the CUID library
+} amdsmi_cuid_source_t;
+
+/**
+ *  @brief CUID Component Type, on the specification's on-wire values.
+ *
+ *  These are the values that appear in payload bits 118:121, so they can be
+ *  compared directly against a decoded CUID with no translation step. All
+ *  assigned values are named, so that a CUID from a component amd-smi does not
+ *  manage still arrives as a named value; 0xb through 0xe are reserved by the
+ *  specification and have no enumerator, so the assigned range is not
+ *  contiguous.
+ *
+ *  ::AMDSMI_CUID_COMPONENT_UNKNOWN is outside the range a 4-bit field can hold,
+ *  so the sentinel can never be mistaken for a Component Type. The values match
+ *  ::amdcuid_device_type_t one for one.
+ */
+typedef enum {
+  AMDSMI_CUID_COMPONENT_PLATFORM = 0x0,  //!< Platform (chassis, motherboard)
+  AMDSMI_CUID_COMPONENT_CPU = 0x1,       //!< CPU
+  AMDSMI_CUID_COMPONENT_GPU = 0x2,       //!< GPU
+  AMDSMI_CUID_COMPONENT_NIC = 0x3,       //!< Network interface controller
+  AMDSMI_CUID_COMPONENT_NPU = 0x4,       //!< Neural processing unit
+  AMDSMI_CUID_COMPONENT_STORAGE = 0x5,   //!< Storage device
+  AMDSMI_CUID_COMPONENT_MEMORY = 0x6,    //!< Memory device
+  AMDSMI_CUID_COMPONENT_GENPCIE = 0x7,   //!< Generic PCIe device
+  AMDSMI_CUID_COMPONENT_GENC = 0x8,      //!< Generic component
+  AMDSMI_CUID_COMPONENT_RACKTRAY = 0x9,  //!< Rack tray
+  AMDSMI_CUID_COMPONENT_RACK = 0xa,      //!< Rack
+  //! 0xb through 0xe are reserved by the specification and have no enumerator.
+  AMDSMI_CUID_COMPONENT_OTHER = 0xf,    //!< Any component none of the above names
+  AMDSMI_CUID_COMPONENT_UNKNOWN = 0xFF  //!< Not a value a 4-bit field can hold
+} amdsmi_cuid_component_type_t;
+
+/**
+ *  @brief A component's Component Unified ID and everything needed to trust it.
+ *
+ *  The fields describe one component and are returned together so that a caller
+ *  does not pair values from separate calls. They are filled from several
+ *  queries, so they are not an atomic snapshot under a concurrent re-key or
+ *  device rescan.
+ */
+typedef struct {
+  //! Canonical CUID as a UUIDv8 string. Empty when the caller lacks the
+  //! privilege to read it: the primary payload embeds the raw serial number, so
+  //! it is CAP_SYS_ADMIN-gated at the source. Also empty when the derived CUID
+  //! is temporary and the component has no primary. An empty primary is not an
+  //! error; the derived CUID below is still populated.
+  char primary[AMDSMI_GPU_CUID_SIZE];
+  //! Derived CUID as a UUIDv8 string. Names the component without
+  //! disclosing its serial, and is the value to record.
+  char derived[AMDSMI_GPU_CUID_SIZE];
+  //! Component Type field of the payload.
+  amdsmi_cuid_component_type_t component_type;
+  //! Which stage of the staged lookup answered.
+  amdsmi_cuid_source_t source;
+  //! Non-zero for a temporary CUID, payload bit 117: the identity was built
+  //! from the machine ID and world-readable device information, so it changes
+  //! when the machine ID changes and is not unique across nodes. Do not
+  //! record it in the same column as a canonical CUID. Meaningful only
+  //! on ::AMDSMI_STATUS_SUCCESS: there is no encoding for "undetermined", so a
+  //! call that cannot establish this flag fails rather than reporting zero.
+  uint8_t auxiliary;
+  //! Reserved. Eleven bytes rather than the seven the flags need, so that
+  //! `reserved` starts 8-byte aligned with no implicit padding ahead of it: a
+  //! compiler-inserted hole has to be reproduced by hand in every non-C binding.
+  uint8_t reserved_flags[11];
+  uint64_t reserved[8];
+} amdsmi_cuid_info_t;
+
+/**
+ *  @brief Returns the Component Unified ID of the device, with its provenance
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  Prefer this over ::amdsmi_get_gpu_device_uuid, which returns a legacy device
+ *  UUID rather than a CUID.
+ *
+ *  The handle is resolved through its render node. A GPU in SPX reports the
+ *  whole GPU's CUID. In DPX and above each handle is a compute partition and
+ *  reports that partition's own CUID, never the whole GPU's; a partition
+ *  whose UnitID cannot be determined gets ::AMDSMI_STATUS_NOT_SUPPORTED.
+ *
+ *  On failure @p info comes back cleared, never partly filled: a caller that
+ *  may not read the auxiliary flag gets ::AMDSMI_STATUS_NO_PERM rather than a
+ *  zero it cannot distinguish from a determined "not auxiliary". A caller
+ *  privileged to read the primary CUID of a derived CUID that is not temporary
+ *  gets the failure that kept it from doing so, not an empty primary.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in] processor_handle Device which to query
+ *
+ *  @param[out] info Pointer to an ::amdsmi_cuid_info_t allocated by the caller
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support, when
+ *          no CUID exists for this device, for a partition the driver
+ *          publishes, or for a partition other than partition 0 whose driver
+ *          publishes nothing,
+ *          ::AMDSMI_STATUS_NO_PERM when this caller may not read
+ *          a field the snapshot must report, non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_gpu_cuid_info(amdsmi_processor_handle processor_handle,
+                                         amdsmi_cuid_info_t* info);
+
+/**
+ *  @brief One component of the node and its Component Unified ID.
+ */
+typedef struct {
+  //! The component's CUID, as ::amdsmi_get_gpu_cuid_info reports it for a GPU.
+  amdsmi_cuid_info_t info;
+  //! PCI address, "dddd:bb:dd.f", of a PCI component. A GPU partition has
+  //! the address amd-smi uses for it, as `amd-smi list` shows it, with the
+  //! partition index in the function number. Empty for the platform and for
+  //! CPUs.
+  char bdf[AMDSMI_MAX_STRING_LENGTH];
+  //! Sysfs path the component was found at, for example
+  //! /sys/devices/system/cpu/cpu0 for the first CPU package,
+  //! /sys/class/drm/renderD128 for a GPU, or a partition's xcp directory.
+  //! Empty for the platform.
+  char device_path[AMDSMI_MAX_STRING_LENGTH];
+  //! PCI or CPUID vendor ID. Zero for the platform.
+  uint16_t vendor_id;
+  uint16_t reserved_id;   //!< Reserved.
+  uint32_t reserved_pad;  //!< Reserved.
+  uint64_t reserved[4];   //!< Reserved.
+} amdsmi_cuid_component_t;
+
+/**
+ *  @brief Lists every component on the node that has a CUID
+ *
+ *  @ingroup tagProcDiscovery
+ *
+ *  The platform, each CPU package, each AMD GPU or GPU partition, each NPU,
+ *  and each NIC function, ordered by component type, then BDF, then device
+ *  path.
+ *  Unlike ::amdsmi_get_gpu_cuid_info this needs no processor handle, so it
+ *  also covers components amd-smi does not manage.
+ *
+ *  Every PCI function with a CUID is listed. A NIC's UnitID is its PCI
+ *  function number, so the functions of one card have distinct CUIDs even
+ *  where they report one serial number. Two components whose CUIDs coincide
+ *  anyway are both left out, since such a CUID identifies neither.
+ *
+ *  Every CUID is temporary (::amdsmi_cuid_info_t::auxiliary is set), so the
+ *  primary CUIDs are empty.
+ *
+ *  @platform{gpu_bm_linux}
+ *
+ *  @param[in,out] count As input, the number of entries @p components can
+ *                 hold. As output, the number of components on the node, even
+ *                 when that is more than were written.
+ *
+ *  @param[out] components Array of @p count entries allocated by the caller,
+ *              or nullptr to learn the count only.
+ *
+ *  @return ::amdsmi_status_t | ::AMDSMI_STATUS_SUCCESS on success, including
+ *          with *@p count set to 0 when the node has no components,
+ *          ::AMDSMI_STATUS_INVAL when @p count is null,
+ *          ::AMDSMI_STATUS_INSUFFICIENT_SIZE when @p components is too small
+ *          (the first N entries, N being the input *@p count, are written),
+ *          ::AMDSMI_STATUS_NO_PERM when this caller may not read a
+ *          component's auxiliary flag,
+ *          ::AMDSMI_STATUS_NOT_SUPPORTED when built without CUID support,
+ *          non-zero on other failures
+ */
+amdsmi_status_t amdsmi_get_cuid_components(uint32_t* count, amdsmi_cuid_component_t* components);
 
 /**
  *  @brief          Returns the Enumeration information for the device
@@ -4659,9 +4850,12 @@ amdsmi_status_t amdsmi_get_gpu_fan_rpms(amdsmi_processor_handle processor_handle
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
  *  @p speed, this function will write the current fan speed (a value
  *  between 0 and the maximum fan speed) to the uint32_t pointed to by @p speed.
- *  For legacy hwmon GPUs the maximum is ::AMDSMI_MAX_FAN_SPEED (255).
- *  For GPUs with the gpu_od sysfs interface, use amdsmi_get_gpu_fan_speed_max()
- *  to query the actual maximum
+ *  The value is the hwmon pwm1 duty cycle, whose maximum is
+ *  ::AMDSMI_MAX_FAN_SPEED (255).
+ *
+ *  @note On GPUs exposing the gpu_od sysfs interface, the range accepted by
+ *  amdsmi_set_gpu_fan_speed() is the gpu_od OD_RANGE and is NOT derivable from
+ *  this value or from amdsmi_get_gpu_fan_speed_max()
  *
  *  @param[in] processor_handle a processor handle
  *
@@ -4691,9 +4885,12 @@ amdsmi_status_t amdsmi_get_gpu_fan_speed(amdsmi_processor_handle processor_handl
  *  @details Given a processor handle @p processor_handle and a pointer to a uint32_t
  *  @p max_speed, this function will write the maximum fan speed possible to
  *  the uint32_t pointed to by @p max_speed.
- *  For legacy hwmon GPUs this is ::AMDSMI_MAX_FAN_SPEED (255).
- *  For GPUs with the gpu_od sysfs interface, the maximum is read from the
- *  OD_RANGE section of the fan_minimum_pwm sysfs file (e.g. 100)
+ *  This is the hwmon pwm1_max ceiling, ::AMDSMI_MAX_FAN_SPEED (255), and pairs
+ *  with amdsmi_get_gpu_fan_speed().
+ *
+ *  @note On GPUs exposing the gpu_od sysfs interface, the range accepted by
+ *  amdsmi_set_gpu_fan_speed() is the gpu_od OD_RANGE and is NOT derivable from
+ *  this value
  *
  *  @param[in] processor_handle a processor handle
  *

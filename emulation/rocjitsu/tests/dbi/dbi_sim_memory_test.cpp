@@ -9,6 +9,7 @@
 
 #include "dbi_sim.h"
 #include "global_memory_builders.h"
+#include "scalar_builders.h"
 
 #include "rocjitsu/code/builders/instruction_builder.h"
 #include "rocjitsu/code/builders/spill_builders.h"
@@ -161,9 +162,6 @@ constexpr uint64_t kSource = 0x80000;
 constexpr uint32_t kDestinationDelta = 64;
 constexpr uint32_t kSeed = 0xC0FFEE11;
 
-constexpr uint16_t kScalarSrcLiteral = rdna4::OPR_SSRC_SRC_LITERAL;
-static_assert(cdna3::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral &&
-              cdna4::OPR_SSRC_SRC_LITERAL == kScalarSrcLiteral);
 constexpr uint16_t kInlineZero = scalar_positive_inline_u32(0);
 
 // Copies the dword at kSource to kSource + kDestinationDelta, addressing both
