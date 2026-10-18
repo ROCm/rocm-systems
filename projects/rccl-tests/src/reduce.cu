@@ -33,13 +33,15 @@
 // sender (slot = sender < owner ? sender : sender - 1); the owner then folds its
 // own sendbuff slice and the N-1 received slots in ascending source-rank order
 // and stores the result into the root's recvbuff. Non-root recvbuffs double as
-// the receive scratch, so -D 4 is out-of-place only (-O 1). Each CTA reduces its
-// own sub-range (chunk) of the partition and waits on its own GIN signal.
+// the receive scratch, so -D 4 is out-of-place only (-O 1). Large partitions go
+// out as several puts (chunks), each followed by a per-chunk GIN signal; every
+// reducing CTA folds its share of chunk k as soon as chunk k's signal has
+// counted all N-1 senders, so the reduce overlaps the rest of the copy. With
+// at least 2N CTAs the owner stages its reduced chunks in the root's slot and
+// SDMAs them to the root; with fewer, it stores them to the root from CUs.
 // Each peer's partition is put by a single thread: the anvil SDMA queue is per
 // peer, and concurrent producers on different XCDs can ring its doorbell out of
-// order, leaving committed packets unprocessed (the put hangs in quiet). Large
-// partitions go out as a few puts so the first CTAs reduce while the rest of
-// the data is still being copied.
+// order, leaving committed packets unprocessed (the put hangs in quiet).
 // Because the issuing CTA differs from the reducing CTA, a CTA's only guarantee
 // that the previous Reduce finished with its slots is the kernel boundary, so
 // -D 4 has no persistent device-timed variant.
@@ -78,11 +80,14 @@ testResult_t ReduceInitData(struct threadArgs* args, ncclDataType_t type, ncclRe
       // -D 4 leaves each sender's slice of this rank's partition in its slot.
       const size_t part = recvcount / (size_t)(nranks - 1);
       const int owner = (rank - root - 1 + nranks) % nranks;
+      // With issuer CTAs, the root's slot holds the reduced partition instead.
+      const bool staged = deviceCtaCount >= 2 * nranks;
       for (int sender = 0; sender < nranks; sender++) {
         if (sender == rank) continue;
         const int slot = sender < rank ? sender : sender - 1;
         void* slotPtr = (char*)args->expected[i] + (size_t)slot * part * wordSize(type);
-        TESTCHECK(InitData(slotPtr, part, (size_t)owner * part, type, op, rep, nranks, sender));
+        if (staged && sender == root) TESTCHECK(InitDataReduce(slotPtr, part, (size_t)owner * part, type, op, rep, nranks));
+        else TESTCHECK(InitData(slotPtr, part, (size_t)owner * part, type, op, rep, nranks, sender));
       }
     }
     CUDACHECK(cudaDeviceSynchronize());
@@ -134,7 +139,8 @@ testResult_t ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirement
 #endif
       reqs->barrierCount = deviceCtaCount;
       reqs->lsaBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+      // -D 4 alternates between two sets of per-chunk signals.
+      reqs->ginSignalCount = (deviceImpl == 4 ? 2 : 1) * deviceCtaCount;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2,29,7)
       reqs->ginConnectionType = NCCL_GIN_CONNECTION_FULL;
 #else
@@ -157,7 +163,7 @@ bool ReduceGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs)
     case 4: { // GinSdmaReduceKernel: SDMA puts to partition owners + CU reduce
       reqs->barrierCount = deviceCtaCount;
       reqs->lsaBarrierCount = deviceCtaCount;
-      reqs->ginSignalCount = deviceCtaCount;
+      reqs->ginSignalCount = (deviceImpl == 4 ? 2 : 1) * deviceCtaCount;
       return true;
     }
 #endif
@@ -341,6 +347,47 @@ __global__ void GinReduceTimedKernel(ncclWindow_t sendwin, size_t sendoffset, nc
   if (threadIdx.x == 0) end_time[blockIdx.x] = wall_clock64();
 }
 
+// Folds U packs per thread from NR sources in ascending source-rank order and
+// stores them, issuing all U*NR loads before the first combine.
+template <typename T, int NR, int U, typename Pack>
+__device__ __forceinline__ void sdmaFoldPacks(const Pack* const* src, Pack* dst, size_t first, size_t end, size_t stride, int redOp) {
+  constexpr int VEC = (int)(sizeof(Pack) / sizeof(T));
+  for (size_t base = first; base < end; base += stride * U) {
+    Pack v[U][NR];
+    #pragma unroll
+    for (int u = 0; u < U; u++) {
+      const size_t pk = base + (size_t)u * stride;
+      if (pk < end) {
+        #pragma unroll
+        for (int r = 0; r < NR; r++) v[u][r] = src[r][pk];
+      }
+    }
+    #pragma unroll
+    for (int u = 0; u < U; u++) {
+      const size_t pk = base + (size_t)u * stride;
+      if (pk >= end) continue;
+      T acc[VEC];
+      #pragma unroll
+      for (int r = 0; r < NR; r++) {
+        #pragma unroll
+        for (int e = 0; e < VEC; e++) {
+          const T x = gin_sdma_reduce::preOp(redOp, v[u][r].e[e], NR);
+          acc[e] = (r == 0) ? x : gin_sdma_reduce::combine(redOp, acc[e], x);
+        }
+      }
+      Pack o;
+      #pragma unroll
+      for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[e], NR);
+      dst[pk] = o;
+    }
+  }
+}
+
+// Per-chunk count of reducing CTAs that finished, in two sets alternated by
+// launch parity like the chunk signals. Device globals are per GPU, and each
+// GPU runs at most one -D 4 Reduce at a time.
+__device__ unsigned int gSdmaReduceChunkDone[2][128];
+
 // `count` is the FULL element count (== part*(nRanks-1), aligned by
 // ReduceGetCollByteCount).
 template <typename T>
@@ -349,86 +396,131 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
   const int me = devComm.rank;
   const int nOwners = nRanks - 1;
   const size_t partBytes = (count / (size_t)nOwners) * sizeof(T);
-  const size_t chunk = (partBytes / gridDim.x) & ~(size_t)15;
-  const size_t cOff = (size_t)blockIdx.x * chunk;
-  const size_t cLen = (blockIdx.x == gridDim.x - 1) ? partBytes - cOff : chunk;
+  constexpr int VEC = (sizeof(T) <= 16) ? (int)(16 / sizeof(T)) : 1;
+  struct alignas(16) Pack { T e[VEC]; };
+  const size_t partPacks = partBytes / sizeof(Pack);
+  const int G = (int)gridDim.x;
 
   ncclGin gin { devComm, 0 };
-  const unsigned int signalIndex = blockIdx.x;
   ncclLsaBarrierSession<ncclCoopCta> lsaBar { ncclCoopCta(), devComm, ncclTeamLsa(devComm), devComm.lsaBarrier, blockIdx.x };
+  // Every launch syncs each barrier exactly twice, so the epoch gives every CTA
+  // on every rank the same launch parity. Launches alternate between two sets
+  // of G signals: this one counts chunks in set `sigBase` and clears the other
+  // set, which the previous launch has finished waiting on and which the next
+  // launch's senders cannot touch until this kernel has ended.
+  const unsigned int par = (lsaBar.epoch >> 1) & 1u;
+  const unsigned int sigBase = par * (unsigned int)G;
   lsaBar.sync(ncclCoopCta(), cuda::memory_order_acquire);
+  if (threadIdx.x == 0) gin.resetSignal((unsigned int)G - sigBase + blockIdx.x);
+  for (int j = blockIdx.x * blockDim.x + threadIdx.x; j < 128; j += G * blockDim.x) gSdmaReduceChunkDone[par ^ 1u][j] = 0;
 
-  // Peer q is served by CTA q % G. Passing the barrier with q's matching CTA
-  // means q has finished the previous Reduce, so its slots are free.
-  const int G = (int)gridDim.x;
-  const int nMine = (nRanks - (int)blockIdx.x + G - 1) / G;
-  // SDMA cost is per packet (~tens of us, serialized per engine), so each peer
-  // gets only dmaChunks puts (1 <= dmaChunks <= G, same on every rank). Put k
-  // covers CTAs [k*G/K, (k+1)*G/K); those CTAs are signalled as soon as it
-  // lands, so they reduce while put k+1 is still in flight.
-  for (int k = 0; k < dmaChunks; k++) {
-    const int c0 = k * G / dmaChunks;
-    const int c1 = (k + 1) * G / dmaChunks;
-    const size_t lo = (size_t)c0 * chunk;
-    const size_t hi = (c1 == G) ? partBytes : (size_t)c1 * chunk;
-    if ((int)threadIdx.x < nMine && hi > lo) {
+  // With at least 2N CTAs, CTAs [0, N) only issue puts, so no chunk waits on a
+  // CTA that is still busy draining queues. With fewer, CTA b issues for peers
+  // q = b (mod G) and then reduces alongside the rest. Passing the barrier with
+  // q's matching CTA means q has finished the previous Reduce, so its slots are
+  // free.
+  const int nIssue = (G >= 2 * nRanks) ? nRanks : 0;
+  const int nReducers = G - nIssue;
+  // With issuer CTAs, owners stage each reduced chunk in the root's slot (just
+  // consumed by that reduce) and SDMA it to the root. Storing to the root from
+  // CUs instead slows some of the concurrent owner-to-owner SDMA copies, and
+  // each chunk waits for its slowest sender.
+  if (nIssue && (int)blockIdx.x == root && me != root) {
+    // CTA `root` has no owner-to-owner peer, so it feeds the owner-to-root
+    // queue; it is that queue's only producer.
+    if (threadIdx.x == 0) {
+      const int owner = (me - root - 1 + nRanks) % nRanks;
+      const int rootSlot = root < me ? root : root - 1;
+      for (int k = 0; k < dmaChunks; k++) {
+        const size_t lo = (size_t)k * partPacks / dmaChunks * sizeof(Pack);
+        const size_t hi = (size_t)(k + 1) * partPacks / dmaChunks * sizeof(Pack);
+        if (hi == lo) continue;
+        while (__hip_atomic_load(&gSdmaReduceChunkDone[par][k], __ATOMIC_ACQUIRE, __HIP_MEMORY_SCOPE_AGENT) < (unsigned int)nReducers) {}
+        gin.put(ncclTeamWorld(devComm), root,
+                recvwin, recvoffset + (size_t)owner * partBytes + lo,
+                recvwin, recvoffset + (size_t)rootSlot * partBytes + lo,
+                hi - lo);
+      }
+    }
+  } else if (nIssue == 0 || (int)blockIdx.x < nIssue) {
+    const int nMine = (nRanks - (int)blockIdx.x + G - 1) / G;
+    if ((int)threadIdx.x < nMine) {
       const int q = blockIdx.x + threadIdx.x * G;
       if (q != root && q != me) {
         const int owner = (q - root - 1 + nRanks) % nRanks;
         const int slot = me < q ? me : me - 1;
-        gin.put(ncclTeamWorld(devComm), q,
-            recvwin, recvoffset + (size_t)slot * partBytes + lo,
-            sendwin, sendoffset + (size_t)owner * partBytes + lo,
-            hi - lo);
-      }
-    }
-    __syncthreads();
-    // A signal only quiets the queue (no packet), so many threads can send
-    // them without racing the doorbell. The quiet must finish before put k+1
-    // is queued, or it would also wait for that put.
-    const int nSig = c1 - c0;
-    for (int i = threadIdx.x; i < nMine * nSig; i += blockDim.x) {
-      const int q = blockIdx.x + (i / nSig) * G;
-      const int c = c0 + i % nSig;
-      const size_t len = (c == G - 1) ? partBytes - (size_t)c * chunk : chunk;
-      if (q == root || q == me || len == 0) continue;
-      gin.signal(ncclTeamWorld(devComm), q, ncclGin_SignalInc{(unsigned int)c});
-    }
-    __syncthreads();
-  }
-
-  if (me != root && cLen > 0) {
-    // Signals start at zero and are reset once all N-1 senders have landed, so
-    // no CTA depends on reading a baseline before a remote CTA's puts arrive.
-    gin.waitSignal(ncclCoopCta(), signalIndex, (uint64_t)nOwners);
-    if (threadIdx.x == 0) gin.resetSignal(signalIndex);
-    // The slots were written by a remote SDMA engine, not by a CU, so every
-    // thread needs system-scope acquire before loading them.
-    cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
-
-    constexpr int VEC = (sizeof(T) <= 16) ? (int)(16 / sizeof(T)) : 1;
-    struct alignas(16) Pack { T e[VEC]; };
-    const int owner = (me - root - 1 + nRanks) % nRanks;
-    const char* slots = (const char*)ncclGetLocalPointer(recvwin, recvoffset) + cOff;
-    const Pack* own = (const Pack*)((const char*)ncclGetLocalPointer(sendwin, sendoffset) + (size_t)owner * partBytes + cOff);
-    Pack* dst = (Pack*)((char*)ncclGetLsaPointer(recvwin, recvoffset, root) + (size_t)owner * partBytes + cOff);
-    const size_t nPacks = cLen / sizeof(Pack);
-    for (size_t pk = threadIdx.x; pk < nPacks; pk += blockDim.x) {
-      T acc[VEC];
-      for (int r = 0; r < nRanks; r++) {
-        const Pack v = (r == me) ? own[pk] : ((const Pack*)(slots + (size_t)(r < me ? r : r - 1) * partBytes))[pk];
-        #pragma unroll
-        for (int e = 0; e < VEC; e++) {
-          const T x = gin_sdma_reduce::preOp(redOp, v.e[e], nRanks);
-          acc[e] = (r == 0) ? x : gin_sdma_reduce::combine(redOp, acc[e], x);
+        // The signal quiets the queue first, so put k+1 is only queued once
+        // put k has landed and chunk k has been released to the owner.
+        for (int k = 0; k < dmaChunks; k++) {
+          const size_t lo = (size_t)k * partPacks / dmaChunks * sizeof(Pack);
+          const size_t hi = (size_t)(k + 1) * partPacks / dmaChunks * sizeof(Pack);
+          if (hi == lo) continue;
+          gin.put(ncclTeamWorld(devComm), q,
+                  recvwin, recvoffset + (size_t)slot * partBytes + lo,
+                  sendwin, sendoffset + (size_t)owner * partBytes + lo,
+                  hi - lo);
+          gin.signal(ncclTeamWorld(devComm), q, ncclGin_SignalInc{sigBase + (unsigned int)k});
         }
       }
-      Pack o;
-      #pragma unroll
-      for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[e], nRanks);
-      dst[pk] = o;
     }
   }
+
+  if (me != root && (int)blockIdx.x >= nIssue) {
+    const int owner = (me - root - 1 + nRanks) % nRanks;
+    const char* slots = (const char*)ncclGetLocalPointer(recvwin, recvoffset);
+    const Pack* own = (const Pack*)((const char*)ncclGetLocalPointer(sendwin, sendoffset) + (size_t)owner * partBytes);
+    // Each pack of the root's slot is read and then overwritten by the same
+    // thread, so staging the result there is safe.
+    Pack* dst = nIssue ? (Pack*)(slots + (size_t)(root < me ? root : root - 1) * partBytes)
+                       : (Pack*)((char*)ncclGetLsaPointer(recvwin, recvoffset, root) + (size_t)owner * partBytes);
+    const size_t first = (size_t)((int)blockIdx.x - nIssue) * blockDim.x + threadIdx.x;
+    const size_t stride = (size_t)nReducers * blockDim.x;
+    constexpr int NR8 = 8;
+    const Pack* src8[NR8];
+    if (nRanks == NR8) {
+      #pragma unroll
+      for (int r = 0; r < NR8; r++)
+        src8[r] = (r == me) ? own : (const Pack*)(slots + (size_t)(r < me ? r : r - 1) * partBytes);
+    }
+    // Every reducing CTA takes a share of every chunk, so the chunk that lands
+    // last is reduced by all of them rather than by a few.
+    for (int k = 0; k < dmaChunks; k++) {
+      const size_t p0 = (size_t)k * partPacks / dmaChunks;
+      const size_t p1 = (size_t)(k + 1) * partPacks / dmaChunks;
+      if (p1 == p0) continue;
+      gin.waitSignal(ncclCoopCta(), sigBase + (unsigned int)k, (uint64_t)nOwners);
+      // The slots were written by a remote SDMA engine, not by a CU, so every
+      // thread needs system-scope acquire before loading them.
+      cuda::atomic_thread_fence(cuda::memory_order_acquire, cuda::thread_scope_system);
+      if (nRanks == NR8) {
+        sdmaFoldPacks<T, NR8, 2>(src8, dst, p0 + first, p1, stride, redOp);
+      } else {
+        for (size_t pk = p0 + first; pk < p1; pk += stride) {
+          T acc[VEC];
+          for (int r = 0; r < nRanks; r++) {
+            const Pack v = (r == me) ? own[pk] : ((const Pack*)(slots + (size_t)(r < me ? r : r - 1) * partBytes))[pk];
+            #pragma unroll
+            for (int e = 0; e < VEC; e++) {
+              const T x = gin_sdma_reduce::preOp(redOp, v.e[e], nRanks);
+              acc[e] = (r == 0) ? x : gin_sdma_reduce::combine(redOp, acc[e], x);
+            }
+          }
+          Pack o;
+          #pragma unroll
+          for (int e = 0; e < VEC; e++) o.e[e] = gin_sdma_reduce::postOp(redOp, acc[e], nRanks);
+          dst[pk] = o;
+        }
+      }
+      if (nIssue) {
+        // The SDMA engine reads the staged chunk from memory, not through L2.
+        cuda::atomic_thread_fence(cuda::memory_order_release, cuda::thread_scope_system);
+        __syncthreads();
+        if (threadIdx.x == 0) __hip_atomic_fetch_add(&gSdmaReduceChunkDone[par][k], 1u, __ATOMIC_RELEASE, __HIP_MEMORY_SCOPE_AGENT);
+      }
+    }
+  }
+  // Flush drains this rank's SDMA queues, so the owner-to-root puts have landed
+  // before the exit barrier releases the root.
   gin.flush(ncclCoopCta());
   lsaBar.sync(ncclCoopCta(), cuda::memory_order_acq_rel);
 }
@@ -438,12 +530,13 @@ __global__ void GinSdmaReduceKernel(ncclWindow_t sendwin, size_t sendoffset, ncc
   ginSdmaReduceBody<typename gin_sdma_reduce::Elem<K>::type>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, redOp, dmaChunks);
 }
 
-// SDMA puts per partition for -D 4. Only split partitions large enough to hide
-// the per-packet cost behind the reduce, and only with enough CTAs that the
-// reduce, not the copy, is the long pole (on MI300X two puts lost to one below
-// 32 CTAs). NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS overrides the default. Every
-// rank must use the same value.
-static int sdmaReduceDmaChunks(size_t partBytes, int ctas) {
+// SDMA puts per partition for -D 4. More chunks overlap the copies with the
+// reduce and the owner-to-root copy, but each put waits for the previous one to
+// drain, so the default grows with sqrt(partBytes): about sqrt(partBytes/512KiB),
+// capped at 32. Partitions are only split when there are dedicated issuer CTAs
+// (ctas >= 2*nRanks). NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS overrides the default.
+// Every rank must use the same value.
+static int sdmaReduceDmaChunks(size_t partBytes, int ctas, int nRanks) {
   static const long envChunks = [] {
     const char* e = getenv("NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS");
     if (e == nullptr || e[0] == '\0' || e[0] == '-') return 0L;
@@ -451,8 +544,11 @@ static int sdmaReduceDmaChunks(size_t partBytes, int ctas) {
     long v = strtol(e, &end, 10);
     return (end != e && *end == '\0' && v >= 1) ? v : 0L;
   }();
-  long k = envChunks ? envChunks
-                     : (ctas < 32 ? 1L : (long)std::min<size_t>(2, partBytes / ((size_t)8 << 20)));
+  long k = envChunks;
+  if (k == 0 && ctas >= 2 * nRanks) {
+    const size_t units = partBytes >> 19;
+    while (k < 32 && (size_t)(k + 1) * (size_t)(k + 1) <= units) k++;
+  }
   return (int)std::max(1L, std::min(k, (long)ctas));
 }
 
@@ -494,7 +590,7 @@ testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
         const int nRanks = ((ncclDevComm*)comm)->nRanks;
         const size_t partBytes = count / (size_t)(nRanks - 1) * wordSize(type);
         TESTCHECK(ReduceLaunchDeviceKernel(SPECIALIZE_REDUCE_KERNEL(GinSdmaReduceKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream,
-                                           sdmaReduceDmaChunks(partBytes, deviceCtaCount)));
+                                           sdmaReduceDmaChunks(partBytes, deviceCtaCount, nRanks)));
         return testSuccess;
       }
 #endif
