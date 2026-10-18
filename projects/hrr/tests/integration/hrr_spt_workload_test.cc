@@ -77,7 +77,7 @@ __device__ int g_hrr_spt_symbol[256];
 //
 // Exercises hipMemcpy_spt, hipMemcpyAsync_spt, hipMemcpy2D_spt,
 // hipMemcpy2DAsync_spt, hipMemcpyToSymbol_spt and hipMemcpyToSymbolAsync_spt
-// through their ordinary names.  All six have no-op playback handlers, so they
+// through their ordinary names, and hipMemcpyFromSymbolAsync_spt by name.  All six have no-op playback handlers, so they
 // run against a scratch buffer that is freed before the validated one is
 // written: routing the oracle through them would leave the replayed buffer at
 // its zero-init value and fail the D2H for a reason that has nothing to do with
@@ -129,6 +129,17 @@ TEST_CASE("Unit_HRR_MemcpySpt_Direct", "[.][hrr-direct]") {
 
   HRR_HIP_CHECK(hipMemcpy2DAsync(d_spt, PITCH, h_src, PITCH, PITCH, ROWS,
                              hipMemcpyHostToDevice, nullptr));
+  // hipMemcpyFromSymbolAsync_spt does its copy through hipMemcpyAsync on the
+  // per-thread stream object it resolved, which capture must record as
+  // hipStreamPerThread: replay never saw that object created. Read before the
+  // symbol is written below, so the copied bytes are the zero initial value
+  // replay also has, and the nested copy is a D2H replay validates.
+  int* h_sym = new int[N]();
+  HRR_HIP_CHECK(hipMemcpyFromSymbolAsync_spt(h_sym, HIP_SYMBOL(g_hrr_spt_symbol), SZ, 0,
+                                             hipMemcpyDeviceToHost, nullptr));
+  HRR_HIP_CHECK(hipStreamSynchronize(hipStreamPerThread));
+  for (int i = 0; i < N; ++i) REQUIRE(h_sym[i] == 0);
+  delete[] h_sym;
   HRR_HIP_CHECK(hipMemcpyToSymbol(HIP_SYMBOL(g_hrr_spt_symbol), h_src, SZ, 0,
                               hipMemcpyHostToDevice));
   HRR_HIP_CHECK(hipMemcpyToSymbolAsync(HIP_SYMBOL(g_hrr_spt_symbol), h_src, SZ, 0,

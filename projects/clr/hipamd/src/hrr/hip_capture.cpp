@@ -901,6 +901,18 @@ hipError_t capture_hipMemcpy(void* dst, const void* src,
   return r;
 }
 
+// hipMemcpyFromSymbolAsync_spt resolves a null or hipStreamPerThread stream to
+// this thread's per-thread default stream object and then calls hipMemcpyAsync,
+// whose shim would record that object's address. Replay saw no call create it,
+// so record the hipStreamPerThread it stands for, which replay resolves on its
+// own thread.
+static uint64_t recorded_stream(hipStream_t stream) {
+  if (stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread &&
+      stream == hip::tls.stream_per_thread_obj_.Peek())
+    return reinterpret_cast<uint64_t>(hipStreamPerThread);
+  return reinterpret_cast<uint64_t>(stream);
+}
+
 hipError_t capture_hipMemcpyAsync(void* dst, const void* src,
                                           size_t sizeBytes, hipMemcpyKind kind,
                                           hipStream_t stream) {
@@ -925,7 +937,7 @@ hipError_t capture_hipMemcpyAsync(void* dst, const void* src,
     a.src          = reinterpret_cast<uint64_t>(src);
     a.sizeBytes    = static_cast<uint64_t>(sizeBytes);
     a.kind         = static_cast<int32_t>(kind);
-    a.stream       = reinterpret_cast<uint64_t>(stream);
+    a.stream       = recorded_stream(stream);
     a.blob_hash_lo = h.lo;
     a.blob_hash_hi = h.hi;
     hrr_cap::writer::write_event_raw(HRR_API_HIPMEMCPYASYNC, &a.hdr, sizeof(a));

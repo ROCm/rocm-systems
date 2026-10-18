@@ -965,8 +965,27 @@ HRR_TEST_CASE(Unit_HRR_MemcpySptRoundtrip) {
                            HRR_API_HIPMEMCPY2DASYNC_SPT,
                            HRR_API_HIPMEMCPYTOSYMBOL_SPT,
                            HRR_API_HIPMEMCPYTOSYMBOLASYNC_SPT,
+                           HRR_API_HIPMEMCPYFROMSYMBOLASYNC_SPT,
+                           HRR_API_HIPMEMCPYASYNC,
                            HRR_API_HIPMEMCPYHTOD,
                            HRR_API_HIPMEMCPYDTOH});
+
+  // The hipMemcpyAsync that hipMemcpyFromSymbolAsync_spt makes runs on the
+  // per-thread stream object it resolved; capture records hipStreamPerThread
+  // in its place, never an address no recorded call created.
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(cap.path.string(), arc));
+  size_t spt_copies = 0;
+  for (const hrr::Event& e : arc.events) {
+    if (e.header().event_type != HRR_API_HIPMEMCPYASYNC) continue;
+    hrr_args_hipMemcpyAsync a{};
+    REQUIRE(e.raw_payload.size() >= sizeof(a));
+    std::memcpy(&a, e.raw_payload.data(), sizeof(a));
+    INFO("recorded hipMemcpyAsync stream 0x" << std::hex << a.stream);
+    CHECK(a.stream <= reinterpret_cast<uint64_t>(hipStreamPerThread));
+    if (a.stream == reinterpret_cast<uint64_t>(hipStreamPerThread)) ++spt_copies;
+  }
+  CHECK(spt_copies >= 1);
 }
 
 HRR_TEST_CASE(Unit_HRR_Memset3DSptRoundtrip) {
