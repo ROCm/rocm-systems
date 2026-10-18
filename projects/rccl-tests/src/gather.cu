@@ -114,8 +114,12 @@ bool GatherGetDevCommRequirements(int deviceImpl, ncclDevCommRequirements* reqs)
 #endif
 
 #if defined(ENABLE_DEVICE_API) && NCCL_VERSION_CODE >= NCCL_VERSION(2,28,7)
-// Gather LSA<->SDMA crossover. GATHER overrides the shared AllGather threshold;
-// otherwise the global NCCL_GIN_ANVIL_SDMA_THRESHOLD, then the AllGather default.
+// Gather LSA<->SDMA crossover. GATHER overrides the global
+// NCCL_GIN_ANVIL_SDMA_THRESHOLD, which overrides kGatherSdmaThresholdDefault.
+// The default is higher than AllGather's 32 KiB because only root receives: on
+// 1p8g MI300X the SDMA tier's ~20 us floor loses to LSA stores up to 1 MiB/rank.
+static constexpr size_t kGatherSdmaThresholdDefault = 1u << 20;
+
 #if !defined(__CUDA_ARCH__) && !defined(__HIP_DEVICE_COMPILE__)
 static size_t gatherSdmaThresholdOnce() {
   unsigned long long perColl = 0;
@@ -123,7 +127,7 @@ static size_t gatherSdmaThresholdOnce() {
   const bool perCollSet = gin_sdma_allgather::parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD_GATHER", &perColl);
   const bool globalSet = gin_sdma_allgather::parseEnvU64("NCCL_GIN_ANVIL_SDMA_THRESHOLD", &global);
   return gin_sdma_allgather::pickSdmaThreshold(perCollSet, perColl, globalSet, global,
-                                               gin_sdma_allgather::kAllGatherSdmaThresholdDefault);
+                                               kGatherSdmaThresholdDefault);
 }
 
 static size_t gatherCtasEnvOnce() {
@@ -139,7 +143,7 @@ static size_t gatherCtasEnvOnce() {
 
 static inline size_t GatherResolveSdmaThreshold() {
 #if defined(__CUDA_ARCH__) || defined(__HIP_DEVICE_COMPILE__)
-  return gin_sdma_allgather::kAllGatherSdmaThresholdDefault;
+  return kGatherSdmaThresholdDefault;
 #else
   static const size_t cached = gatherSdmaThresholdOnce();
   return cached;
