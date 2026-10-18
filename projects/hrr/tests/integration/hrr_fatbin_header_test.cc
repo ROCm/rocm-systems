@@ -205,6 +205,8 @@ constexpr uint64_t kPreInitCompressedTag    = 0x4852524650524531ull;
 constexpr char     kLiveKernel[]            = "hrr_fatbin_live_probe";
 constexpr char     kFarEndKernel[]          = "hrr_fatbin_far_end_probe";
 constexpr char     kOversizedKernel[]       = "hrr_fatbin_oversized_probe";
+// Registered with device 1 current, to replay on that device.
+constexpr char     kDevice1Kernel[]         = "hrr_fatbin_device1_probe";
 constexpr char     kLiveForeignMarker[]     = "HRR fatbin live foreign";
 constexpr uint64_t kLiveCompressedTag       = 0x485252464C495631ull;
 
@@ -350,16 +352,17 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
 
   // Every registration is recorded, none with a blob: the seven the workload
   // made with a null handle (five before HIP initialised, two HIP refused),
-  // the three HIP loaded with a real one.
+  // the three HIP loaded with a real one, each naming its code object.
   size_t null_handle = 0, loaded = 0;
   for (const auto& ev : arc.events) {
     if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;
     REQUIRE(ev.raw_payload.size() >= sizeof(hrr_args___hipRegisterFatBinary));
     const auto* a =
         reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(ev.raw_payload.data());
-    CHECK(a->blob_hash_lo == 0);
-    CHECK(a->blob_hash_hi == 0);
     CHECK(a->blob_size == 0);
+    // A handle means HIP loaded a code object; a swept one may name one too.
+    if (a->ret || a->blob_hash_lo || a->blob_hash_hi)
+      CHECK(arc.code_objects.count(hrr::hash_hex(a->blob_hash_lo, a->blob_hash_hi)) == 1);
     ++(a->ret ? loaded : null_handle);
   }
   CHECK(loaded == 3);
@@ -408,6 +411,61 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
       CHECK_FALSE(contains(bytes, marker));
     }
   }
+}
+
+// ===========================================================================
+// Which device replay loads a registration's code object on. HIP loaded it on
+// the device current when the fat binary was registered, and on a host with
+// GPUs of more than one kind it may load on no other. The workload registers
+// with device 1 current, then makes device 0 current again.
+// ===========================================================================
+TEST_CASE("Unit_HRR_FatBinLoadDevice_Direct", "[.][hrr-direct]") {
+  int n = 0;
+  HRR_HIP_CHECK(hipGetDeviceCount(&n));
+  if (n < 2) HRR_SKIP("needs two GPUs");
+  HRR_HIP_CHECK(hipSetDevice(1));
+  hipDeviceProp_t prop{};
+  HRR_HIP_CHECK(hipGetDeviceProperties(&prop, 1));
+  const std::vector<uint8_t> co = compile_code_object(kDevice1Kernel);
+  const std::string target = std::string(kTargetPrefix) + prop.gcnArchName;
+  REQUIRE(register_fat_binary(pin(valid_bundle(target, co))) != nullptr);
+  HRR_HIP_CHECK(hipSetDevice(0));
+}
+
+// Replay pre-loads every code object before the first event, so it does not
+// replay the switch to device 1 first: it has to load this one there itself.
+// Run on GPUs of one kind, this shows where the load goes, not that a load
+// elsewhere fails.
+HRR_TEST_CASE(Unit_HRR_FatBinLoadDevice) {
+  int n = 0;
+  if (hipGetDeviceCount(&n) != hipSuccess || n < 2) HRR_SKIP("needs two GPUs");
+  ScopedDir cap(fs::temp_directory_path() / "hrr_fatbin_load_device.hrr");
+  { hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true,
+                              /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    set_proc_search_path(proc);
+    int ret = proc.run("\"Unit_HRR_FatBinLoadDevice_Direct\"");
+    INFO("Capture exit: " << ret << "\n" << proc.getOutput());
+    REQUIRE(ret == 0); }
+
+  const fs::path archive = hrr_single_process_archive(cap.path);
+  hrr::Archive arc;
+  REQUIRE(hrr::load_archive(archive.string(), arc));
+  std::string hex;
+  for (const auto& ev : arc.events) {
+    if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;
+    REQUIRE(ev.raw_payload.size() >= sizeof(hrr_args___hipRegisterFatBinary));
+    const auto* a =
+        reinterpret_cast<const hrr_args___hipRegisterFatBinary*>(ev.raw_payload.data());
+    if (a->ret) hex = hrr::hash_hex(a->blob_hash_lo, a->blob_hash_hi);
+  }
+  INFO("Code object: " << hex);
+  REQUIRE(arc.code_objects.count(hex) == 1);
+
+  auto [rc, out] = hrr_playback_merged(archive);
+  INFO("Replay:\n" << out);
+  CHECK(rc == 0);
+  CHECK(out.find("Pre-loading code object " + hex + " on device 1,") != std::string::npos);
 }
 
 #endif  // HRR_TEST_EXE

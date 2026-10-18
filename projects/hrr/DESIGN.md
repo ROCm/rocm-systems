@@ -700,9 +700,12 @@ before suspecting the `<<<>>>` / kernarg capture path.
 At init, all already-registered fat binaries are recovered retroactively via
 `ForEachFatBinary`. Capture does not store the bundle: its size could only come
 from the header, which nothing bounds. It records the code object HIP extracted
-from the bundle for the current device, with the size HIP knows, and the register
-event without a blob. Replay pre-loads every code object, so kernels and
-`__device__` globals resolve as they do for module loads. Archives from before this
+from the bundle for the current device, bounded by the ELF's own headers since the
+size HIP knows is the one the bundle entry declares, and the register event names
+that code object (blob hash set, blob size 0). Replay pre-loads every code object,
+so kernels and `__device__` globals resolve as they do for module loads; one a
+registration named goes on the device current on the registering thread at that
+event, which on a host with GPUs of more than one kind may be the only one it loads on. Archives from before this
 change still carry a blob, which playback loads with `hipModuleLoadData`.
 
 ## Multi-Threaded Capture

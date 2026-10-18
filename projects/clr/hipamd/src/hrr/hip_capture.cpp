@@ -1385,22 +1385,25 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 // the header and the code object it picks for each GPU, with a size COMGR
 // gives it; a whole-bundle size could only come from the header, and nothing
 // bounds that. Replay resolves kernels and globals in the code objects the
-// archive holds, so the register event is kept without a blob.
+// archive holds, so the register event names the code object, not a blob.
 // ---------------------------------------------------------------------------
 
 // Record the code object HIP extracted from a digested fat binary for the
 // current device, or device 0 before one is current, the device the global
 // variable sweep resolves on. A fat binary HIP has not digested yet has
 // nothing loaded; a launch from it records its code object then.
+//
+// Returns the code object's hash, which the register event carries so replay
+// loads it on the device that is current at that event, as HIP did here.
 // The size HIP holds is the bundle entry's declared one, so only an ELF, whose
 // headers bound it (see hash_program_image), is recorded.
-static void record_fat_binary_code_object(hip::FatBinaryInfo* fbi) {
-  if (!fbi) return;
+static hrr_cap::Hash128 record_fat_binary_code_object(hip::FatBinaryInfo* fbi) {
+  if (!fbi) return {0, 0};
   int dev = hip::ihipGetDevice();
   if (dev < 0) dev = 0;
-  if (static_cast<size_t>(dev) >= hip::g_devices.size()) return;
+  if (static_cast<size_t>(dev) >= hip::g_devices.size()) return {0, 0};
   amd::Program* prog = fbi->GetProgram(dev);
-  if (!prog) return;
+  if (!prog) return {0, 0};
   const uint8_t* image = nullptr;
   size_t size = 0;
   {
@@ -1412,8 +1415,20 @@ static void record_fat_binary_code_object(hip::FatBinaryInfo* fbi) {
   }
   if (!image || size < sizeof(Elf64_Ehdr) ||
       !amd::Elf::isElfMagic(reinterpret_cast<const char*>(image)))
-    return;
-  remember_program_hash(prog, image, size, hash_program_image(prog, image, size));
+    return {0, 0};
+  const hrr_cap::Hash128 h = hash_program_image(prog, image, size);
+  remember_program_hash(prog, image, size, h);
+  return h;
+}
+
+// The register event names the code object in its blob hash, with a blob
+// size of 0; a bundle blob (archives from before) always has a size.
+static void write_register_fat_binary_event(uint64_t ret, hrr_cap::Hash128 co) {
+  hrr_args___hipRegisterFatBinary a{};
+  a.ret = ret;
+  a.blob_hash_lo = co.lo;
+  a.blob_hash_hi = co.hi;
+  hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
 }
 
 void** capture___hipRegisterFatBinary(const void* data) {
@@ -1422,11 +1437,10 @@ void** capture___hipRegisterFatBinary(const void* data) {
 
   // PlatformState is initialized before this shim is installed, so HIP has already
   // digested the bundle and r, when set, is its FatBinaryInfo**.
-  if (r) record_fat_binary_code_object(*reinterpret_cast<hip::FatBinaryInfo**>(r));
-
-  hrr_args___hipRegisterFatBinary a{};
-  a.ret = reinterpret_cast<uint64_t>(r);
-  hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
+  const hrr_cap::Hash128 co =
+      r ? record_fat_binary_code_object(*reinterpret_cast<hip::FatBinaryInfo**>(r))
+        : hrr_cap::Hash128{0, 0};
+  write_register_fat_binary_event(reinterpret_cast<uint64_t>(r), co);
   return r;
 }
 
@@ -2572,10 +2586,8 @@ void hip_capture_install_compiler_table(const HipCompilerDispatchTable& shims) {
 // it so far (fbi is null until HIP digests it).
 static void record_fat_binary(const void* data, hip::FatBinaryInfo* fbi) {
   if (!data) return;
-  record_fat_binary_code_object(fbi);
-  hrr_args___hipRegisterFatBinary a{};
-  a.ret = 0;  // handle not meaningful at init time
-  hrr_cap::writer::write_event_raw(HRR_API_HIPREGISTERFATBINARY, &a.hdr, sizeof(a));
+  // ret 0: the handle is not meaningful at init time.
+  write_register_fat_binary_event(0, record_fat_binary_code_object(fbi));
 }
 
 // Record one registered __device__ global as a HRR_API_HIPREGISTERVAR event.

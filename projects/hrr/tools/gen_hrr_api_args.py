@@ -955,7 +955,7 @@ SKIP_IF_UNMAPPED_PLAYBACK_APIS: Dict[str, str] = {
 # Maps API name -> list of (field_type, field_name, comment) to append
 EXTRA_FIELDS: Dict[str, List[Tuple[str, str, str]]] = {
     "__hipRegisterFatBinary": [
-        ("uint64_t", "blob_hash_lo", "FNV-1a-128 lo of fat binary"),
+        ("uint64_t", "blob_hash_lo", "FNV-1a-128 lo of fat binary, or of its code object if blob_size is 0"),
         ("uint64_t", "blob_hash_hi", "FNV-1a-128 hi"),
         ("uint64_t", "blob_size",    "fat binary byte count"),
     ],
