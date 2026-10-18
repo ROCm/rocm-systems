@@ -65,7 +65,7 @@ std::function<int64_t(const char*, int64_t)> g_loadParam = [](const char* env, i
 
 #include "fakes/param_redirect.h"
 
-// --- HSA: the three ROCr entry points rocmwrap.cc calls.
+// --- HSA: the four ROCr entry points rocmwrap.cc calls.
 namespace {
 std::function<hsa_status_t(hsa_system_info_t, void*)> g_hsaSystemGetInfo;
 int g_hsaInitCalls = 0;
@@ -78,6 +78,7 @@ extern "C" hsa_status_t hsa_init() {
   ++g_hsaInitCalls;
   return HSA_STATUS_SUCCESS;
 }
+extern "C" hsa_status_t hsa_shut_down() { return HSA_STATUS_SUCCESS; }
 
 // --- Seams scoped to rocmwrap.cc's own function bodies.
 // Every header rocmwrap.cc includes is pulled in above, so their include guards

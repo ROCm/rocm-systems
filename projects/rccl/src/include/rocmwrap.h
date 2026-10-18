@@ -75,7 +75,7 @@
 ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CUstreamBatchMemOpParams* batchParams);
 
 // Re-declare the DMA-BUF export entry as a weak reference. hsa_init,
-// hsa_system_get_info and hsa_status_string are required and resolve as hard
+// hsa_shut_down, hsa_system_get_info and hsa_status_string are required and resolve as hard
 // dependencies, but hsa_amd_portable_export_dmabuf is optional: older ROCr
 // runtimes may not export it. A weak reference resolves to NULL at load time
 // when the symbol is absent (instead of failing librccl's load with an
@@ -85,7 +85,7 @@ ncclResult_t ncclCuStreamBatchMemOp(cudaStream_t stream, unsigned int numOps, CU
 extern "C" hsa_status_t hsa_amd_portable_export_dmabuf(const void* ptr, size_t size, int* dmabuf, uint64_t* offset)
   __attribute__((weak));
 
-// hsa_init, hsa_system_get_info and hsa_status_string are called directly via the
+// hsa_init, hsa_shut_down, hsa_system_get_info and hsa_status_string are called directly via the
 // hsa-runtime64 library that librccl links against. Only the DMA-BUF export entry
 // keeps a function-pointer indirection, because it doubles as the runtime feature
 // gate: pfn_hsa_amd_portable_export_dmabuf stays NULL when the platform does not
