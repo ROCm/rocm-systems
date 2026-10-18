@@ -114,7 +114,7 @@ std::optional<uint64_t> smem_calculate_address(const SmemInst &inst, amdgpu::Wav
     wf.report_undefined_behavior("negative combined scalar-memory offset");
   inst_offset &= ~0x3LL;
   reg_offset &= kDwordMask;
-  if (smem_is_buffer_load_op(inst.op))
+  if (gfx9_smem_is_buffer_op(inst.op))
     return scalar_buffer_address(wf, inst.sbase * 2, *base, inst_offset + reg_offset, state);
   const uint64_t addr = *base + inst_offset + reg_offset;
   util::Logger::vm([&](auto &os) {

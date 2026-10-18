@@ -21,6 +21,7 @@
 
 #ifdef MPI_TESTS_ENABLED
 
+#include "DdaFabricMPITestFixture.hpp"
 #include "DeviceBufferHelpers.hpp"
 #include "MPIHelpers.hpp"
 #include "MPITestBase.hpp"
@@ -77,14 +78,6 @@ bool launchesOnUserStream(int algo)
     case RCCL_GIN_SDMA: return true;
     default: return false;
     }
-}
-
-bool isGfx1250Device()
-{
-    hipDeviceProp_t props{};
-    if(hipGetDeviceProperties(&props, 0) != hipSuccess)
-        return false;
-    return std::string(props.gcnArchName).find("gfx1250") != std::string::npos;
 }
 
 void fillRankScalar(void* buf, size_t nElem, int rank)
@@ -150,12 +143,6 @@ std::vector<uint8_t> makeOrderSensitiveInput(ncclDataType_t type, size_t count, 
         }
     }
     return host;
-}
-
-bool logContainsNeedle(const MPIHelpers::TestLogAssertionContext& logCtx, const char* needle)
-{
-    const std::string merged = logCtx.readNcclDebugLog() + logCtx.readPerRankStderrLog();
-    return merged.find(needle) != std::string::npos;
 }
 
 // Kernel, copy and memset nodes of a graph. The captures below enqueue no work of their own, so
@@ -228,53 +215,19 @@ size_t countEventNodes(hipGraph_t graph, hipGraphNodeType type, hipEvent_t event
  * @class DdaAllReduceMPITest
  * @brief Shared fixture: COLL log capture and gfx1250 gate for DDA fabric LL tiers.
  */
-class DdaAllReduceMPITest : public MPITestBase
+class DdaAllReduceMPITest : public DdaFabricMPITest
 {
 protected:
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugGuard_;
-    std::unique_ptr<MPIHelpers::MpiEnvGuard>             debugSubsysGuard_;
-    std::unique_ptr<MPIHelpers::TestLogAssertionContext> logCtx_;
-
-    void SetUp() override
-    {
-        MPITestBase::SetUp();
-        debugGuard_       = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG", "INFO");
-        debugSubsysGuard_ = std::make_unique<MPIHelpers::MpiEnvGuard>("NCCL_DEBUG_SUBSYS", "NET,INIT,COLL,TUNING");
-        logCtx_           = std::make_unique<MPIHelpers::TestLogAssertionContext>(
-            MPIHelpers::makeCombinedAssertionLogOptions(getTestMpiRank()));
-    }
-
-    void TearDown() override
-    {
-        MPITestBase::TearDown();
-        logCtx_.reset();
-        debugSubsysGuard_.reset();
-        debugGuard_.reset();
-    }
-
     void runAllReduce(size_t count, const char* logNeedle, const char* testId)
     {
         if(!validateTestPrerequisites(kMinProcessesForMPI))
             GTEST_SKIP() << "Need at least 2 MPI ranks";
 
-        // Every rank must skip together, or the ones that did not would block in the next collective.
-        const std::string archSkip
-            = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric LL requires gfx1250");
-        if(!archSkip.empty())
-        {
-            GTEST_SKIP() << archSkip;
-        }
+        DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL requires gfx1250"));
 
-        ASSERT_EQ(ncclSuccess, createTestCommunicator());
+        ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
-        // Without MNNVL, or on a multi-clique comm, fabric DDA never initializes, so there is no path to assert.
-        const std::string fabricSkip
-            = mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
-                                       "DDA fabric path did not initialize");
-        if(!fabricSkip.empty())
-        {
-            GTEST_SKIP() << fabricSkip;
-        }
+        DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
 
         int rank{}, nRanks{};
         ncclCommUserRank(getActiveCommunicator(), &rank);
@@ -316,7 +269,7 @@ protected:
                                             [expectedSum](size_t) { return expectedSum; }))
             << "Rank " << rank << ": DDA LL AllReduce verification failed";
 
-        const bool tookExpectedPath = logContainsNeedle(*logCtx_, logNeedle);
+        const bool tookExpectedPath = logContainsNeedle(logNeedle);
         EXPECT_TRUE(tookExpectedPath)
             << "Rank " << rank << ": " << testId
             << " did not log the expected DDA LL tier (needle: \"" << logNeedle << "\")";
@@ -375,25 +328,14 @@ protected:
 
         if(logNeedle != nullptr)
         {
-            const std::string archSkip
-                = mpiCoordinatedSkipReason(!isGfx1250Device(), "DDA fabric LL requires gfx1250");
-            if(!archSkip.empty())
-            {
-                GTEST_SKIP() << archSkip;
-            }
+            DDA_FABRIC_SKIP_OR_FAIL(archSkipReason("DDA fabric LL requires gfx1250"));
         }
 
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
         if(logNeedle != nullptr)
         {
-            const std::string fabricSkip
-                = mpiCoordinatedSkipReason(getActiveCommunicator()->ddaFabricBarrierState == nullptr,
-                                           "DDA fabric path did not initialize");
-            if(!fabricSkip.empty())
-            {
-                GTEST_SKIP() << fabricSkip;
-            }
+            DDA_FABRIC_SKIP_OR_FAIL(fabricInitSkipReason());
         }
 
         int rank{}, nRanks{};
@@ -471,7 +413,7 @@ protected:
 
         if(logNeedle != nullptr)
         {
-            EXPECT_TRUE(logContainsNeedle(*logCtx_, logNeedle))
+            EXPECT_TRUE(logContainsNeedle(logNeedle))
                 << "Rank " << rank << ": " << testId << " did not log the expected DDA tier (needle: \""
                 << logNeedle << "\")";
         }

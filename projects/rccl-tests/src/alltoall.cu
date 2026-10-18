@@ -82,6 +82,9 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       reqs->barrierCount = deviceCtaCount;
       reqs->ginSignalCount = deviceCtaCount;
 #if NCCL_VERSION_CODE >= NCCL_VERSION(2, 29, 7)
@@ -99,6 +102,9 @@ testResult_t AlltoAllGetDevCommRequirements(int deviceImpl, ncclDevCommRequireme
         fprintf(stderr, "This test requires GIN support, but GIN support is not enabled for this communicator.\n");
         return testInvalidUsage;
       }
+#ifdef NCCL_GIN_BACKEND_MASK_ALL
+      TESTCHECK(testCheckGinBackendCompiled(commProperties.ginType));
+#endif
       // barrierCount provisions per-CTA hybrid world barriers (LSA+rail+world) used
       // by HybridAlltoAllTimedKernel to join CTA 0 (GIN) with LSA CTAs each iter.
       // The production body still uses barrier index 0 on CTA 0 and lsaBarrier on

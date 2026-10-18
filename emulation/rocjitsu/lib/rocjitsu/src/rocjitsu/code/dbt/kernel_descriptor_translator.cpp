@@ -566,7 +566,11 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
       }
     }
   }
-  if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
+  if (host_arch == ROCJITSU_CODE_ARCH_CDNA1 && result.target_agpr_count != 0) {
+    // CDNA1 has no ACCUM_OFFSET. Reserve the larger independent VGPR/AGPR count.
+    result.target_accvgpr_base = 0;
+    required_vgpr_allocation = std::max(required_vgprs, result.target_agpr_count);
+  } else if (arch_has_accvgpr(host_arch) && result.target_agpr_count != 0) {
     required_vgpr_allocation =
         std::max(required_vgprs, result.target_accvgpr_base + result.target_agpr_count);
   } else {
@@ -769,6 +773,7 @@ translate_one_descriptor(rj_code_arch_t guest_arch, rj_code_arch_t host_arch,
 Rsrc3Layout rsrc3_layout(rj_code_arch_t arch) {
   switch (arch) {
   case ROCJITSU_CODE_ARCH_CDNA1:
+    return Rsrc3Layout::Reserved;
   case ROCJITSU_CODE_ARCH_CDNA2:
   case ROCJITSU_CODE_ARCH_CDNA3:
   case ROCJITSU_CODE_ARCH_CDNA4:
