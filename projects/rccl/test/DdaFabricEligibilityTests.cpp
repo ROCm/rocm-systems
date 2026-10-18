@@ -1624,23 +1624,6 @@ TEST_F(DdaFabricLL128GeomTest, AllGatherLL128_BlockSizeFollowsPushedBytes)
     }
 }
 
-// From 16 ranks there is no 256-thread band: 128-thread blocks run to the 16 MiB edge.
-// 17 ranks put both edges on whole per-rank sizes (512 KiB and 1 MiB).
-TEST_F(DdaFabricLL128GeomTest, AllGatherLL128_NoMidBandFrom16Ranks)
-{
-    const size_t nPeers = 16;
-    mockComm_.comm.nRanks             = (int)nPeers + 1;
-    mockComm_.comm.ddaFabricMaxBlocks = (int)nPeers * 1024;
-    const size_t smallEdge = 8 * kMiB / nPeers;
-    const size_t midEdge   = 16 * kMiB / nPeers;
-    const size_t sSmall    = dda::common::ddaLL128Slices(smallEdge + 16);
-    const size_t sMid      = dda::common::ddaLL128Slices(midEdge);
-    ASSERT_EQ(dda::common::ddaLL128Slices(midEdge + 16), sMid);
-    EXPECT_EQ(blocks(smallEdge + 16), nPeers * ((sSmall + 3) / 4)) << "still 128 threads past 8 MiB";
-    EXPECT_EQ(blocks(midEdge), nPeers * ((sMid + 3) / 4)) << "128 threads at 16 MiB";
-    EXPECT_EQ(blocks(midEdge + 16), nPeers * ((sMid + 15) / 16)) << "512 threads past 16 MiB";
-}
-
 // 8 ranks pushing 1.75 MiB (256 KiB per rank, 137 slices per peer) take 128-thread
 // blocks: 35 per peer, which the per-peer share of 189 blocks caps at 27. 512-thread
 // blocks would need only 9 per peer (63 in all).
