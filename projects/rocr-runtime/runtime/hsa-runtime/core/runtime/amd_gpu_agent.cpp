@@ -124,6 +124,7 @@ GpuAgent::GpuAgent(HSAuint32 node, const HsaNodeProperties& node_props, bool xna
           [this](void* base, size_t size, bool large) { ReleaseScratch(base, size, large); }),
       trap_handler_tma_region_(NULL),
       rec_sdma_eng_override_(false),
+      sdma_native_(node_props.NativeSDMASupported),
       pcs_hosttrap_data_(),
       pcs_stochastic_data_(),
       xgmi_cpu_gpu_(false),
@@ -888,7 +889,7 @@ core::Blit* GpuAgent::CreateBlitSdma(bool use_xgmi, int rec_eng) {
       break;
     case 11:
     case 12:
-      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG()) {
+      if (core::Runtime::runtime_singleton_->thunkLoader()->IsDXG() && !sdma_native_) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV4());
       } else if (supported_isas()[0]->GetMinorVersion() >= 5) {
         sdma = static_cast<BlitSdmaBase*>(new BlitSdmaV6());
@@ -2750,11 +2751,47 @@ hsa_status_t GpuAgent::GetInfo(hsa_agent_info_t attribute, void* value) const {
         *((size_t*)value) = GetMaxPersistingL2CacheSize();
         break;
       }
+    case HSA_AMD_AGENT_INFO_PCIE_STORES_NEED_FLUSH:
+      *static_cast<bool*>(value) = PcieStoresNeedFlush();
+      break;
+    case HSA_AMD_AGENT_INFO_HOST_ATOMICS_SUPPORTED:
+      *static_cast<bool*>(value) = HostAtomicsSupported();
+      break;
+    case HSA_AMD_AGENT_INFO_SIGNAL_HINTS_SUPPORTED:
+      *static_cast<bool*>(value) = SignalHintsSupported();
+      break;
     default:
       return HSA_STATUS_ERROR_INVALID_ARGUMENT;
       break;
   }
   return HSA_STATUS_SUCCESS;
+}
+
+// CP FW writes amd_queue_t::caps only once it has processed a packet on the queue, so the first
+// query runs an empty barrier-AND on the utility queue and reads the bit there.
+bool GpuAgent::SignalHintsSupported() const {
+  std::call_once(signal_hints_once_, [this]() {
+    core::unique_signal_ptr completion(new core::DefaultSignal(1));
+    if (!completion->IsValid()) return;
+    core::Queue* queue = (*queues_[QueueUtility]).get();
+    hsa_queue_t& hsa_queue = queue->amd_queue_.hsa_queue;
+    const uint64_t index = queue->AddWriteIndexAcqRel(1);
+    while (index - queue->LoadReadIndexRelaxed() >= hsa_queue.size) {
+      os::YieldThread();
+    }
+    auto* packet = reinterpret_cast<hsa_barrier_and_packet_t*>(hsa_queue.base_address) +
+                   (index & (hsa_queue.size - 1));
+    memset(reinterpret_cast<uint8_t*>(packet) + sizeof(uint32_t), 0,
+           sizeof(*packet) - sizeof(uint32_t));
+    packet->completion_signal = core::Signal::Convert(completion.get());
+    atomic::Store(reinterpret_cast<uint32_t*>(packet),
+                  uint32_t(HSA_PACKET_TYPE_BARRIER_AND << HSA_PACKET_HEADER_TYPE),
+                  std::memory_order_release);
+    core::Signal::Convert(hsa_queue.doorbell_signal)->StoreRelease(index);
+    completion->WaitAcquire(HSA_SIGNAL_CONDITION_LT, 1, UINT64_MAX, HSA_WAIT_STATE_ACTIVE);
+    signal_hints_supported_ = (queue->amd_queue_.caps & AMD_QUEUE_CAPS_CP_SIGNAL_HINTS) != 0;
+  });
+  return signal_hints_supported_;
 }
 
 hsa_status_t GpuAgent::SetAgentAttribute(hsa_agent_info_t attribute, void* value) {
@@ -3240,7 +3277,7 @@ hsa_status_t GpuAgent::SetAsyncScratchThresholds(size_t use_once_limit) {
 
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_time_t& time) {
   uint64_t start, end;
-  signal->GetRawTs(false, start, end);
+  signal->GetRawTs(start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
     debug_print("Signal %p time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
@@ -3258,7 +3295,7 @@ void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_dispatch_ti
 
 void GpuAgent::TranslateTime(core::Signal* signal, hsa_amd_profiling_async_copy_time_t& time) {
   uint64_t start, end;
-  signal->GetRawTs(true, start, end);
+  signal->GetRawTs(start, end);
 
   if ((start == 0) || (end == 0) || (start < t0_.GPUClockCounter) || (end < t0_.GPUClockCounter)) {
     debug_print("Signal %p async copy time stamps may be invalid (start=%" PRIu64 ", end=%" PRIu64 ", t0=%" PRIu64 ").\n",
