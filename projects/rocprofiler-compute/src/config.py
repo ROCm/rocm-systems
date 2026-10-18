@@ -9,6 +9,5 @@ analysis_configs_dir = rocprof_compute_home / "rocprof_compute_soc" / "analysis_
 PROJECT_NAME = "rocprofiler-compute"
 
 HIDDEN_COLUMNS_CLI = ["Description"]
-HIDDEN_SECTIONS = [1900, 2000]
 
 TIME_UNITS = {"s": 10**9, "ms": 10**6, "us": 10**3, "ns": 1}
