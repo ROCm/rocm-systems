@@ -51,14 +51,17 @@ ncclResult_t ncclValidateCollConfigLaunchCompletionEvents(struct ncclComm* comm)
 // Addon backends launch onto the user's stream themselves instead of going through doLaunches, which is what
 // makes comm->cudaDev current and installs the cross-stream dependency. Bracket such a launch with these.
 //
-// The prologue also offers comm->doneEvent on the communicator, for the launch's last kernel to carry as its
-// stopEvent via rcclTakeAddonStopEvent() instead of paying for a standalone record. A launch that never takes
-// it, because its last stream operation is not a kernel or because it returned early, gets the record from the
-// epilogue.
+// Once the communicator records doneEvent (comm->doneEventNeeded: from its first stream switch, or from the start
+// with RCCL_DONE_EVENT_ELISION=0), the prologue also offers
+// comm->doneEvent on the communicator, for the launch's last kernel to carry as its stopEvent via
+// rcclTakeAddonStopEvent() instead of paying for a standalone record. A launch that never takes it, because
+// its last stream operation is not a kernel or because it returned early, gets the record from the epilogue.
+// Until then an uncaptured addon launch records nothing.
 struct rcclAddonLaunchState {
   int savedDev;
   // Whether the prologue offered the stop event, which is what lets the epilogue tell a taken event from one
-  // that was never on offer. False while capturing, where a fused stop event is not bound.
+  // that was never on offer. False while capturing, where a fused stop event is not bound, and while the
+  // communicator does not record doneEvent.
   bool eventOffered;
   bool capturing;
   struct ncclCudaGraph graph;

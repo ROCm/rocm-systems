@@ -2178,28 +2178,47 @@ TEST_F(EnqueueMicrotest, EffectiveP2pBatchEnable_MultiNodeOtherArch_IsDisabled) 
 
 namespace {
 // Opaque handles. Every HIP entry point this path reaches is faked, so nothing dereferences them.
-hipEvent_t const  kAddonDoneEvent = reinterpret_cast<hipEvent_t>(0xD0E);
-hipStream_t const kAddonStream    = reinterpret_cast<hipStream_t>(0x57A);
+hipEvent_t const  kAddonDoneEvent        = reinterpret_cast<hipEvent_t>(0xD0E);
+hipEvent_t const  kAddonFirstSwitchEvent = reinterpret_cast<hipEvent_t>(0xF15);
+hipStream_t const kAddonStream           = reinterpret_cast<hipStream_t>(0x57A);
 
 // ncclComm is far too large for the stack (see CostComm). cudaDev matches the seam's current
 // device, which keeps the prologue's hipSetDevice and the epilogue's restore out of the way.
+// doneEventNeeded: the comm has already switched streams once, so every launch records doneEvent;
+// the single-stream cases below clear it.
 struct AddonComm {
   std::unique_ptr<ncclComm> comm{new ncclComm{}};
   AddonComm() {
-    comm->cudaDev   = g_currentDevice;
-    comm->doneEvent = kAddonDoneEvent;
+    comm->cudaDev         = g_currentDevice;
+    comm->doneEvent        = kAddonDoneEvent;
+    comm->doneEventNeeded  = true;
+    comm->firstSwitchEvent = kAddonFirstSwitchEvent;
   }
   ncclComm* c() { return comm.get(); }
 };
+
+hipStream_t const        kAddonOtherStream   = reinterpret_cast<hipStream_t>(0x0E5);
+unsigned long long const kAddonOtherStreamId = 7;
+
+// A comm that has run only on kAddonOtherStream, whose HIP id it took then: the next launch on
+// kAddonStream is its first stream switch.
+struct FirstSwitchComm : AddonComm {
+  FirstSwitchComm() {
+    comm->doneEventNeeded = false;
+    comm->lastStreamTag   = ncclStreamTag(kAddonOtherStream);
+    comm->lastStreamId    = kAddonOtherStreamId;
+  }
+};
+
+ncclResult_t NotCapturing(struct ncclCudaGraph* graph, hipStream_t, int mode) {
+  if (graph) *graph = ncclCudaGraphNone(mode);
+  return ncclSuccess;
+}
 }  // namespace
 
 TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
   AddonComm ac;
-  ScopedHook notCapturing(g_cudaGetCapturingGraph,
-                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
-                            if (graph) *graph = ncclCudaGraphNone(mode);
-                            return ncclSuccess;
-                          });
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
   hipEvent_t recordedEvent = nullptr;
   hipStream_t recordedStream = nullptr;
   ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
@@ -2218,11 +2237,7 @@ TEST_F(EnqueueMicrotest, AddonLaunch_NothingTookTheEvent_EpilogueRecordsIt) {
 
 TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) {
   AddonComm ac;
-  ScopedHook notCapturing(g_cudaGetCapturingGraph,
-                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
-                            if (graph) *graph = ncclCudaGraphNone(mode);
-                            return ncclSuccess;
-                          });
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
 
   hipEvent_t stopEvent = nullptr;
@@ -2240,11 +2255,7 @@ TEST_F(EnqueueMicrotest, AddonLaunch_KernelTookTheEvent_EpilogueSkipsTheRecord) 
 
 TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag) {
   AddonComm ac;
-  ScopedHook notCapturing(g_cudaGetCapturingGraph,
-                          [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
-                            if (graph) *graph = ncclCudaGraphNone(mode);
-                            return ncclSuccess;
-                          });
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
   ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
 
   EXPECT_EQ(ncclInternalError,
@@ -2253,6 +2264,429 @@ TEST_F(EnqueueMicrotest, AddonLaunch_LaunchFailed_RecordsNothingAndLeavesTheTag)
   EXPECT_EQ(0, record.calls);
   EXPECT_EQ(0u, ac.c()->lastStreamTag);
 }
+
+// Until a comm's first stream switch, no launch records doneEvent: there is no other stream to
+// order against.
+TEST_F(EnqueueMicrotest, AddonLaunch_SingleStream_OffersAndRecordsNoEvent) {
+  AddonComm ac;
+  ac.c()->doneEventNeeded = false;
+  ac.c()->lastStreamTag   = ncclStreamTag(kAddonStream);
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorInvalidValue; });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipErrorInvalidValue; });
+
+  hipEvent_t stopEvent = kAddonDoneEvent;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    stopEvent = rcclTakeAddonStopEvent(ac.c());
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(nullptr, stopEvent);
+  EXPECT_EQ(0, record.calls);
+  EXPECT_EQ(0, drain.calls);
+  EXPECT_FALSE(ac.c()->doneEventNeeded);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+// The first-switch tests need hipStreamGetId (HIP 7.1); older HIP records doneEvent from the start.
+#if RCCL_DONE_EVENT_ELISION_SUPPORTED
+// The first switch finds no doneEvent recorded, so it orders after the comm's previous stream itself.
+// When that stream still exists (the same HIP id) and is not capturing, it records the comm's
+// firstSwitchEvent there and waits on it; from then on every launch records doneEvent -- this one
+// included.
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstStreamSwitch_RecordsOnTheLastStreamAndStartsRecording) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipErrorInvalidValue; });
+  std::vector<std::string> calls;
+  ScopedHook getId(g_hipStreamGetId, [&](hipStream_t stream, unsigned long long* id) {
+    EXPECT_EQ(kAddonOtherStream, stream);
+    *id = kAddonOtherStreamId;
+    calls.push_back("getId");
+    return hipSuccess;
+  });
+  ScopedHook isCapturing(g_hipStreamIsCapturing, [&](hipStream_t stream, hipStreamCaptureStatus* status) {
+    EXPECT_EQ(kAddonOtherStream, stream);
+    *status = hipStreamCaptureStatusNone;
+    calls.push_back("isCapturing");
+    return hipSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t stream) {
+    EXPECT_EQ(kAddonFirstSwitchEvent, event) << "doneEvent must not be tied to the previous stream";
+    EXPECT_EQ(kAddonOtherStream, stream);
+    calls.push_back("record");
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [&](hipStream_t stream, hipEvent_t event, unsigned int) {
+    EXPECT_EQ(kAddonStream, stream);
+    EXPECT_EQ(kAddonFirstSwitchEvent, event);
+    calls.push_back("wait");
+    return hipSuccess;
+  });
+
+  hipEvent_t stopEvent = nullptr;
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    stopEvent = rcclTakeAddonStopEvent(ac.c());
+    calls.push_back("launch");
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ((std::vector<std::string>{"getId", "isCapturing", "record", "wait", "launch"}), calls);
+  EXPECT_EQ(0, drain.calls);
+  EXPECT_TRUE(ac.c()->doneEventNeeded);
+  EXPECT_EQ(kAddonDoneEvent, stopEvent);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+// The event is created at the first switch that needs it; a failed creation fails the collective
+// and leaves the comm as it was.
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstStreamSwitch_CreatesTheEventOnce) {
+  FirstSwitchComm ac;
+  ac.c()->firstSwitchEvent = nullptr;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long* id) {
+    *id = kAddonOtherStreamId;
+    return hipSuccess;
+  });
+  std::vector<hipEvent_t> recorded;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t) {
+    recorded.push_back(event);
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t, hipEvent_t, unsigned int) { return hipSuccess; });
+  bool launched = false;
+
+  g_hipEventCreateResult = hipErrorOutOfMemory;
+  EXPECT_NE(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    launched = true;
+    return ncclSuccess;
+  }));
+  EXPECT_FALSE(launched);
+  EXPECT_FALSE(ac.c()->doneEventNeeded);
+  EXPECT_EQ(nullptr, ac.c()->firstSwitchEvent);
+  EXPECT_TRUE(recorded.empty());
+
+  g_hipEventCreateResult = hipSuccess;  // the fake hands out 0x1
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  EXPECT_EQ(reinterpret_cast<hipEvent_t>(0x1), ac.c()->firstSwitchEvent);
+  ASSERT_EQ(2u, recorded.size());
+  EXPECT_EQ(reinterpret_cast<hipEvent_t>(0x1), recorded[0]);
+  EXPECT_EQ(kAddonDoneEvent, recorded[1]) << "the epilogue's record, now that the comm records";
+}
+
+// The default stream always exists and never captures: recorded on without being probed.
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchFromDefaultStream_RecordsWithoutProbing) {
+  FirstSwitchComm ac;
+  ac.c()->lastStreamTag = ncclStreamTag(nullptr);
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook isCapturing(g_hipStreamIsCapturing,
+                         [](hipStream_t, hipStreamCaptureStatus*) { return hipErrorStreamCaptureImplicit; });
+  std::vector<hipStream_t> recordedOn;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t, hipStream_t stream) {
+    recordedOn.push_back(stream);
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t, hipEvent_t, unsigned int) { return hipSuccess; });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipErrorStreamCaptureUnsupported; });
+
+  // g_hipStreamGetId's default fails the test if the default stream is probed.
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(0, isCapturing.calls);
+  EXPECT_EQ(0, drain.calls);
+  ASSERT_FALSE(recordedOn.empty());
+  EXPECT_EQ(nullptr, recordedOn[0]);
+  EXPECT_EQ(1, wait.calls);
+}
+
+// No stream has the handle any more: the previous stream was destroyed, and hipStreamDestroy waited
+// for its work, so there is nothing to order after. The probe's sticky error is cleared.
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchFromDestroyedStream_WaitsOnNothingAndClearsTheProbeError) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long*) { return hipErrorInvalidResourceHandle; });
+  ScopedHook isCapturing(g_hipStreamIsCapturing,
+                         [](hipStream_t, hipStreamCaptureStatus*) { return hipErrorInvalidValue; });
+  ScopedHook lastError(g_hipGetLastError, [] { return hipErrorInvalidResourceHandle; });
+  std::vector<hipStream_t> recordedOn;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t, hipStream_t stream) {
+    recordedOn.push_back(stream);
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t, hipEvent_t, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(0, isCapturing.calls) << "a handle no stream has is not passed on";
+  EXPECT_EQ(1, lastError.calls);
+  EXPECT_EQ(0, wait.calls);
+  EXPECT_EQ(0, drain.calls);
+  EXPECT_EQ((std::vector<hipStream_t>{kAddonStream}), recordedOn) << "only the epilogue's record";
+  EXPECT_TRUE(ac.c()->doneEventNeeded);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchProbeFailsWithAnErrorPending_LeavesTheStickyError) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook peek(g_hipPeekAtLastError, [] { return hipErrorLaunchFailure; });
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long*) { return hipErrorInvalidResourceHandle; });
+  ScopedHook lastError(g_hipGetLastError, [] { return hipErrorLaunchFailure; });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(1, peek.calls);
+  EXPECT_EQ(0, lastError.calls) << "an error the caller has not read yet must stay pending";
+}
+
+// A live stream under the old handle but with another id reuses a destroyed stream's handle. It may
+// have run collectives under the same tag, so nothing short of a drain orders after it.
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchFromRecycledHandle_Drains) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long* id) {
+    *id = kAddonOtherStreamId + 1;
+    return hipSuccess;
+  });
+  std::vector<hipStream_t> recordedOn;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t, hipStream_t stream) {
+    recordedOn.push_back(stream);
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t, hipEvent_t, unsigned int) { return hipErrorInvalidValue; });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipSuccess; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(1, drain.calls);
+  EXPECT_EQ(0, wait.calls);
+  EXPECT_EQ((std::vector<hipStream_t>{kAddonStream}), recordedOn);
+}
+
+// The fake drain succeeds; real HIP refuses it while the previous stream (or any) captures, which fails
+// the collective. What is pinned here is that nothing is recorded into the capture.
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchFromCapturingStream_DrainsWithoutRecordingIntoIt) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long* id) {
+    *id = kAddonOtherStreamId;
+    return hipSuccess;
+  });
+  ScopedHook isCapturing(g_hipStreamIsCapturing, [](hipStream_t, hipStreamCaptureStatus* status) {
+    *status = hipStreamCaptureStatusActive;
+    return hipSuccess;
+  });
+  ScopedHook lastError(g_hipGetLastError, [] { return hipErrorInvalidValue; });
+  std::vector<hipStream_t> recordedOn;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t, hipStream_t stream) {
+    recordedOn.push_back(stream);
+    return hipSuccess;
+  });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipSuccess; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(1, drain.calls);
+  EXPECT_EQ(0, lastError.calls) << "the probes succeeded; there is nothing to clear";
+  EXPECT_EQ((std::vector<hipStream_t>{kAddonStream}), recordedOn);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchCaptureProbeFails_Drains) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long* id) {
+    *id = kAddonOtherStreamId;
+    return hipSuccess;
+  });
+  ScopedHook isCapturing(g_hipStreamIsCapturing,
+                         [](hipStream_t, hipStreamCaptureStatus*) { return hipErrorStreamCaptureImplicit; });
+  ScopedHook lastError(g_hipGetLastError, [] { return hipErrorStreamCaptureImplicit; });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipSuccess; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(1, drain.calls);
+  EXPECT_EQ(1, lastError.calls);
+  EXPECT_EQ(1, record.calls) << "only the epilogue's record";
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchFromPerThreadStream_DrainsWithoutProbing) {
+  FirstSwitchComm ac;
+  ac.c()->lastStreamTag = ncclStreamTag(hipStreamPerThread);
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipSuccess; });
+
+  // g_hipStreamGetId's default fails the test if the per-thread handle is probed.
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(1, drain.calls);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_LaterStreamSwitch_WaitsOnDoneEvent) {
+  AddonComm ac;
+  ac.c()->lastStreamTag = ncclStreamTag(kAddonOtherStream);
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipErrorInvalidValue; });
+  hipStream_t waitedStream = nullptr;
+  hipEvent_t waitedEvent   = nullptr;
+  ScopedHook wait(g_hipStreamWaitEvent, [&](hipStream_t stream, hipEvent_t event, unsigned int) {
+    waitedStream = stream;
+    waitedEvent  = event;
+    return hipSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+
+  // g_hipStreamGetId's default fails the test if a comm that already records probes a stream.
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(0, drain.calls);
+  ASSERT_EQ(1, wait.calls);
+  EXPECT_EQ(kAddonStream, waitedStream);
+  EXPECT_EQ(kAddonDoneEvent, waitedEvent);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchDrainFails_FailsAndStaysSingleStream) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long* id) {
+    *id = kAddonOtherStreamId + 1;
+    return hipSuccess;
+  });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipErrorStreamCaptureUnsupported; });
+  bool launched = false;
+
+  EXPECT_NE(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    launched = true;
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(1, drain.calls);
+  EXPECT_FALSE(launched);
+  EXPECT_FALSE(ac.c()->doneEventNeeded);
+  EXPECT_EQ(ncclStreamTag(kAddonOtherStream), ac.c()->lastStreamTag);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchRecordFails_FailsAndStaysSingleStream) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long* id) {
+    *id = kAddonOtherStreamId;
+    return hipSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipErrorLaunchFailure; });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipSuccess; });
+  bool launched = false;
+
+  EXPECT_NE(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    launched = true;
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(1, record.calls);
+  EXPECT_EQ(0, drain.calls);
+  EXPECT_FALSE(launched);
+  EXPECT_FALSE(ac.c()->doneEventNeeded);
+  EXPECT_EQ(ncclStreamTag(kAddonOtherStream), ac.c()->lastStreamTag);
+  EXPECT_EQ(kAddonFirstSwitchEvent, ac.c()->firstSwitchEvent);
+}
+
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchWaitFails_FailsAndStaysSingleStream) {
+  FirstSwitchComm ac;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long* id) {
+    *id = kAddonOtherStreamId;
+    return hipSuccess;
+  });
+  ScopedHook record(g_hipEventRecord, [](hipEvent_t, hipStream_t) { return hipSuccess; });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t, hipEvent_t, unsigned int) { return hipErrorLaunchFailure; });
+  bool launched = false;
+
+  EXPECT_NE(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    launched = true;
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(1, wait.calls);
+  EXPECT_FALSE(launched);
+  EXPECT_FALSE(ac.c()->doneEventNeeded);
+}
+
+// The legacy stream, like the default one, is recorded on without a probe.
+TEST_F(EnqueueMicrotest, AddonLaunch_FirstSwitchFromLegacyStream_RecordsWithoutProbing) {
+  FirstSwitchComm ac;
+  ac.c()->lastStreamTag = ncclStreamTag(hipStreamLegacy);
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  std::vector<hipStream_t> recordedOn;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t, hipStream_t stream) {
+    recordedOn.push_back(stream);
+    return hipSuccess;
+  });
+  ScopedHook wait(g_hipStreamWaitEvent, [](hipStream_t, hipEvent_t, unsigned int) { return hipSuccess; });
+
+  // g_hipStreamGetId's default fails the test if the legacy stream is probed.
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  ASSERT_FALSE(recordedOn.empty());
+  EXPECT_EQ(hipStreamLegacy, recordedOn[0]);
+  EXPECT_EQ(1, wait.calls);
+}
+
+// While the comm elides doneEvent, a launch on a new stream takes that stream's HIP id; a launch on
+// the same stream, or after the first switch, does not ask again.
+TEST_F(EnqueueMicrotest, AddonLaunch_NewStreamWhileEliding_TakesItsId) {
+  FirstSwitchComm ac;
+  ac.c()->lastStreamTag = 0;
+  ac.c()->lastStreamId  = 0;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t stream, unsigned long long* id) {
+    EXPECT_EQ(kAddonStream, stream);
+    *id = 42;
+    return hipSuccess;
+  });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(1, getId.calls);
+  EXPECT_EQ(42u, ac.c()->lastStreamId);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+// The kernel is already queued when the id is taken, so a failed lookup must not fail the launch:
+// it leaves id 0, which the first switch reads as a reused handle (a drain), and clears the error.
+TEST_F(EnqueueMicrotest, AddonLaunch_NewStreamIdLookupFails_LaunchSucceedsWithIdZero) {
+  FirstSwitchComm ac;
+  ac.c()->lastStreamTag = 0;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+  ScopedHook getId(g_hipStreamGetId, [](hipStream_t, unsigned long long* id) {
+    *id = 99;
+    return hipErrorInvalidResourceHandle;
+  });
+  ScopedHook lastError(g_hipGetLastError, [] { return hipErrorInvalidResourceHandle; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(0u, ac.c()->lastStreamId);
+  EXPECT_EQ(1, lastError.calls);
+  EXPECT_EQ(ncclStreamTag(kAddonStream), ac.c()->lastStreamTag);
+}
+
+// The default stream needs no id: the first switch never looks it up.
+TEST_F(EnqueueMicrotest, AddonLaunch_DefaultStreamWhileEliding_TakesNoId) {
+  FirstSwitchComm ac;
+  ac.c()->lastStreamTag = 0;
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
+
+  // g_hipStreamGetId's default fails the test if the default stream is looked up.
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), nullptr, [] { return ncclSuccess; }));
+
+  EXPECT_EQ(0u, ac.c()->lastStreamId);
+  EXPECT_EQ(ncclStreamTag(nullptr), ac.c()->lastStreamTag);
+}
+#endif  // RCCL_DONE_EVENT_ELISION_SUPPORTED
 
 // ===========================================================================
 // rcclAddonLaunch under graph capture (AICOMRCCL-2184). A captured addon collective joins the
@@ -2339,6 +2773,42 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithStreamOrdering_JoinsTheDeviceSt
             calls);
 }
 
+// A captured launch still records doneEvent into the graph, as captured launches always have, but it
+// neither ends the elision nor moves the tag: the next stream switch orders after the last stream that
+// ran a collective outside capture.
+TEST_F(EnqueueMicrotest, AddonLaunch_CapturedOnSingleStreamComm_StillRecordsDoneEvent) {
+  CapturingAddonComm ac(/*graphStreamOrdering=*/1);
+  ac.c()->doneEventNeeded = false;
+  ac.c()->lastStreamTag   = ncclStreamTag(kAddonOtherStream);
+  ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
+  ScopedHook acquire(g_strongStreamAcquire,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t* workStream) {
+                       *workStream = kAddonDeviceStream;
+                       return ncclSuccess;
+                     });
+  ScopedHook waitStream(g_ncclStreamWaitStream, [](hipStream_t, hipStream_t, hipEvent_t) { return ncclSuccess; });
+  int doneRecords = 0;
+  ScopedHook record(g_hipEventRecord, [&](hipEvent_t event, hipStream_t) {
+    doneRecords += event == kAddonDoneEvent;
+    return hipSuccess;
+  });
+  ScopedHook advance(g_ncclStreamAdvanceToEvent,
+                     [](struct ncclCudaGraph, hipStream_t, hipEvent_t) { return ncclSuccess; });
+  ScopedHook release(g_strongStreamRelease,
+                     [](struct ncclCudaGraph, struct ncclStrongStream*, bool) { return ncclSuccess; });
+  ScopedHook drain(g_hipDeviceSynchronize, [] { return hipErrorInvalidValue; });
+
+  EXPECT_EQ(ncclSuccess, rcclAddonLaunch(ac.c(), kAddonStream, [&] {
+    EXPECT_EQ(nullptr, rcclTakeAddonStopEvent(ac.c()));
+    return ncclSuccess;
+  }));
+
+  EXPECT_EQ(1, doneRecords);
+  EXPECT_EQ(0, drain.calls);
+  EXPECT_FALSE(ac.c()->doneEventNeeded);
+  EXPECT_EQ(ncclStreamTag(kAddonOtherStream), ac.c()->lastStreamTag);
+}
+
 TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRecordsTheSerialEvent) {
   CapturingAddonComm ac(/*graphStreamOrdering=*/0);
   ScopedHook capturing(g_cudaGetCapturingGraph, CapturingGraph);
@@ -2383,10 +2853,7 @@ TEST_F(EnqueueMicrotest, AddonLaunch_CapturedWithoutStreamOrdering_WaitsOnAndRec
 
 TEST_F(EnqueueMicrotest, AddonLaunch_NotCapturing_LeavesTheDeviceStreamAlone) {
   AddonComm ac;  // no sharedRes: touching the capture chain would crash, not just miscount
-  ScopedHook notCapturing(g_cudaGetCapturingGraph, [](struct ncclCudaGraph* graph, hipStream_t, int mode) {
-    if (graph) *graph = ncclCudaGraphNone(mode);
-    return ncclSuccess;
-  });
+  ScopedHook notCapturing(g_cudaGetCapturingGraph, NotCapturing);
   ScopedHook acquire(g_strongStreamAcquire,
                      [](struct ncclCudaGraph, struct ncclStrongStream*, bool, hipStream_t*) { return ncclInternalError; });
   ScopedHook release(g_strongStreamRelease,

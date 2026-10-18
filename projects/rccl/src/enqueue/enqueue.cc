@@ -2253,6 +2253,113 @@ NCCL_PARAM(GraphStreamOrdering, "GRAPH_STREAM_ORDERING", NCCL_CONFIG_UNDEF_INT);
 // Biased so the default stream (nullptr) tags as 1, leaving 0 free as the "no launch yet"
 // sentinel. See ncclComm::lastStreamTag.
 static inline uintptr_t ncclStreamTag(hipStream_t s) { return (uintptr_t)s + 1; }
+static inline hipStream_t ncclStreamFromTag(uintptr_t tag) {
+  return reinterpret_cast<hipStream_t>(tag - 1);
+}
+
+// [RCCL] After a failed stream probe: clear the probe's sticky error, unless the app had one pending, which stays
+// pending (though HIP now reports it under the probe's code).
+static void rcclClearProbeError(hipError_t pending) {
+  if (pending == hipSuccess) (void)hipGetLastError();
+}
+
+// [RCCL] hipStreamGetId where HIP has it. Without it the comm records doneEvent from the start (init.cc), so no
+// first switch ever asks.
+static hipError_t rcclStreamGetId(hipStream_t stream, unsigned long long* id) {
+#if RCCL_DONE_EVENT_ELISION_SUPPORTED
+  return hipStreamGetId(stream, id);
+#else
+  (void)stream;
+  *id = 0;
+  return hipErrorNotSupported;
+#endif
+}
+
+// [RCCL] Called after the fast-path, addon and uncaptured general-path launches: `stream` becomes the one the next
+// stream switch orders after. A captured launch leaves it alone, since nothing it records runs before the graph is
+// launched. While the comm elides doneEvent, a new named stream also has HIP's id taken (ncclComm::lastStreamId).
+// A failed lookup leaves id 0, which no stream has, so a first switch that still finds a stream under the handle
+// drains; it must not fail a launch already queued.
+static void rcclNoteLaunchStream(struct ncclComm* comm, hipStream_t stream) {
+  const uintptr_t tag = ncclStreamTag(stream);
+  if (!comm->doneEventNeeded && tag != comm->lastStreamTag) {
+    unsigned long long id = 0;
+    if (stream != nullptr && stream != hipStreamLegacy && stream != hipStreamPerThread) {
+      const hipError_t pending = hipPeekAtLastError();
+      if (rcclStreamGetId(stream, &id) != hipSuccess) {
+        id = 0;
+        rcclClearProbeError(pending);
+      }
+    }
+    comm->lastStreamId = id;
+  }
+  comm->lastStreamTag = tag;
+}
+
+// [RCCL] How the first stream switch orders after the comm's previous stream, which no launch has recorded
+// doneEvent on.
+enum rcclFirstSwitchOrder {
+  rcclFirstSwitchRecord, // record an event on the previous stream and wait on it
+  rcclFirstSwitchNone, // the previous stream was destroyed: nothing to wait on
+  rcclFirstSwitchDrain, // a record on the previous stream would not cover the comm's work: drain the device
+};
+
+static rcclFirstSwitchOrder rcclFirstSwitchOrderFor(const struct ncclComm* comm, hipStream_t lastStream) {
+  // Unreachable without hipStreamGetId (the comm records doneEvent from the start), but never "nothing to wait on".
+  if (!RCCL_DONE_EVENT_ELISION_SUPPORTED) return rcclFirstSwitchDrain;
+  // The null and legacy streams always exist and never capture.
+  if (lastStream == nullptr || lastStream == hipStreamLegacy) return rcclFirstSwitchRecord;
+  // A different stream on every thread.
+  if (lastStream == hipStreamPerThread) return rcclFirstSwitchDrain;
+  // hipStreamGetId looks the handle up in HIP's stream set rather than dereferencing it.
+  const hipError_t pending = hipPeekAtLastError();
+  unsigned long long id = 0;
+  hipStreamCaptureStatus capture = hipStreamCaptureStatusNone;
+  const hipError_t idErr = rcclStreamGetId(lastStream, &id);
+  const bool sameStream = idErr == hipSuccess && id == comm->lastStreamId;
+  const hipError_t captureErr = sameStream ? hipStreamIsCapturing(lastStream, &capture) : hipSuccess;
+  if (idErr != hipSuccess || captureErr != hipSuccess) rcclClearProbeError(pending);
+  // No stream has the handle: the previous one was destroyed. clr's hipStreamDestroy waits for a stream's work when
+  // it drops the last reference (HIP's API does not promise it, and a stream an execution context still holds is
+  // released later), and HIP's own hipStreamWaitEvent treats an event on a destroyed stream as complete.
+  if (idErr != hipSuccess) return rcclFirstSwitchNone;
+  // A stream with another id (or an id never taken) has the handle: the collectives under this tag may have run on
+  // it or on the stream it replaced, so only a drain covers them. A capturing stream would take the record into
+  // its graph; the drain then fails, since HIP refuses it while anything captures.
+  if (!sameStream || captureErr != hipSuccess || capture != hipStreamCaptureStatusNone) return rcclFirstSwitchDrain;
+  return rcclFirstSwitchRecord;
+}
+
+// [RCCL] Order `stream` after the collective that last ran on another stream. Before the first switch no launch
+// recorded doneEvent, so the first switch orders after the previous stream directly (rcclFirstSwitchOrderFor);
+// from then on every launch records doneEvent. The drain, needed only when the previous stream is capturing, is
+// hipStreamPerThread, or is a stream under that handle whose id the comm does not know, fails and invalidates
+// every capture in the process while any stream is capturing (so always for a capturing previous stream), and
+// does not return while other work on the device waits on the calling thread. RCCL_DONE_EVENT_ELISION=0
+// records doneEvent from the start and never drains.
+static ncclResult_t rcclWaitLastCollective(struct ncclComm* comm, hipStream_t stream) {
+  if (comm->doneEventNeeded) {
+    CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+    return ncclSuccess;
+  }
+  hipStream_t const lastStream = ncclStreamFromTag(comm->lastStreamTag);
+  switch (rcclFirstSwitchOrderFor(comm, lastStream)) {
+  case rcclFirstSwitchRecord:
+    if (comm->firstSwitchEvent == nullptr) {
+      CUDACHECK(hipEventCreateWithFlags(&comm->firstSwitchEvent, hipEventDisableTiming));
+    }
+    CUDACHECK(hipEventRecord(comm->firstSwitchEvent, lastStream));
+    CUDACHECK(hipStreamWaitEvent(stream, comm->firstSwitchEvent, 0));
+    break;
+  case rcclFirstSwitchNone:
+    break;
+  case rcclFirstSwitchDrain:
+    CUDACHECK(hipDeviceSynchronize());
+    break;
+  }
+  comm->doneEventNeeded = true;
+  return ncclSuccess;
+}
 
 namespace {
 enum ncclImplicitOrder {
@@ -2340,14 +2447,15 @@ ncclResult_t rcclAddonLaunchBegin(struct ncclComm* comm, cudaStream_t stream, st
     // doneEvent may carry a node from another capture or from outside one, and waiting on such an
     // event inside a capture breaks capture isolation, so a captured stream gets no edge here and is
     // ordered through deviceStream below instead, as native captured launches are.
-    CUDACHECK(hipStreamWaitEvent(stream, comm->doneEvent, 0));
+    NCCLCHECK(rcclWaitLastCollective(comm, stream));
   }
 
   // Capture never binds a fused stopEvent, so under capture nothing is offered and the epilogue
-  // records instead, exactly as the native general path does.
+  // records instead, as the native general path does for captured plans. Uncaptured, the event is
+  // offered only once the comm records doneEvent.
   if (state->capturing) {
     NCCLCHECK(rcclAddonCaptureOrderBegin(comm, stream, state));
-  } else {
+  } else if (comm->doneEventNeeded) {
     state->eventOffered = true;
     comm->addonStopEvent = comm->doneEvent;
   }
@@ -2364,14 +2472,15 @@ ncclResult_t rcclAddonLaunchEnd(struct ncclComm* comm, cudaStream_t stream,
   comm->addonStopEvent = nullptr;
 
   if (result == ncclSuccess) {
-    if (!taken) {
+    if (!taken && (state.capturing || comm->doneEventNeeded)) {
       CUDACHECKGOTO(hipEventRecord(comm->doneEvent, stream), result, release);
     }
-    // The tag advances however the event was recorded: it is what tells the next collective on
-    // another stream that an edge is needed.
-    comm->lastStreamTag = ncclStreamTag(stream);
+    // An uncaptured launch moves the tag, recorded or not: it is what tells the next collective on
+    // another stream that an edge is needed. A captured launch is ordered through the capture chain.
     if (state.capturing) {
       NCCLCHECKGOTO(rcclAddonCaptureOrderEnd(comm, stream, state), result, release);
+    } else {
+      rcclNoteLaunchStream(comm, stream);
     }
   }
 
@@ -2551,10 +2660,10 @@ ncclResult_t ncclLaunchPrepare(struct ncclComm* comm) {
       }
     } else if (comm->lastStreamTag != 0 &&
                comm->lastStreamTag != ncclStreamTag(launchStream)) {
-      // Stream changed. Wait on doneEvent, recorded by ncclLaunchKernel on the previous launch
-      // stream; deviceStream is stale here because the fast path skips the Finish-side advance.
-      // Don't record it here — that stream may already be destroyed (ROCM-29677).
-      CUDACHECKGOTO(hipStreamWaitEvent(launchStream, comm->doneEvent, 0), result, failure);
+      // Stream changed. Order after the previous launch stream through rcclWaitLastCollective: a wait on the
+      // doneEvent ncclLaunchKernel recorded there, or at the comm's first switch an order of its own; deviceStream
+      // is stale here because the fast path skips the Finish-side advance.
+      NCCLCHECKGOTO(rcclWaitLastCollective(comm, launchStream), result, failure);
     }
 
     enum ncclImplicitOrder implicitOrder;
@@ -2683,19 +2792,22 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
     latency_profiler::collTraceRecordStartEvent(comm, launchStream, event.get());
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
     // Sizes are work-items (grid*block), not blocks. Passing doneEvent as stopEvent fuses the record into the
-    // dispatch, so no separate hipEventRecord. Fast path only: graph capture never binds a fused stopEvent.
+    // dispatch, so no separate hipEventRecord; it is passed only while the comm records doneEvent
+    // (doneEventNeeded). Fast path only: graph capture never binds a fused stopEvent.
     CUDACHECKGOTO(hipExtModuleLaunchKernel(fn, grid.x * block.x, grid.y * block.y, grid.z * block.z, block.x, block.y,
                                            block.z, smem, launchStream, nullptr, extra, /*startEvent=*/nullptr,
-                                           /*stopEvent=*/comm->doneEvent, /*flags=*/0),
+                                           /*stopEvent=*/comm->doneEventNeeded ? comm->doneEvent : nullptr,
+                                           /*flags=*/0),
                   ret, do_return);
 #else
     CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr,
                                extra),
                 ret, do_return);
     // Record while launchStream is guaranteed live; bookkeeping after, so a failed record leaves no false claim.
+    // Unconditional: CUDA builds do not elide the record.
     CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
 #endif
-    comm->lastStreamTag = ncclStreamTag(launchStream);
+    rcclNoteLaunchStream(comm, launchStream);
     latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
     return ncclSuccess;
   }
@@ -2810,14 +2922,15 @@ ncclResult_t ncclLaunchKernel(struct ncclComm* comm, struct ncclKernelPlan* plan
   CUCHECKGOTO(cuLaunchKernel(fn, grid.x, grid.y, grid.z, block.x, block.y, block.z, smem, launchStream, nullptr, extra),
               ret, do_return);
   latency_profiler::collTraceRecordEndEvent(comm, plan, launchStream, std::move(event));
-  // Mirror the fast path. Deliberately not fused into the launch: this path also serves graph-captured plans, where
-  // a stopEvent is silently dropped (never bound), while hipEventRecord still does its stream-capture bookkeeping.
+  // Like the fast path, but unconditional, elision or not: this path serves multi-stream groups and graph-captured
+  // plans. Deliberately not fused into the launch: a captured plan's stopEvent is silently dropped (never bound),
+  // while hipEventRecord still does its stream-capture bookkeeping.
 #if defined(__HIP_PLATFORM_AMD__) || defined(__HIPCC__)
   CUDACHECKGOTO(hipEventRecord(comm->doneEvent, launchStream), ret, do_return);
 #else
   CUDACHECKGOTO(cudaEventRecord(comm->doneEvent, launchStream), ret, do_return);
 #endif
-  comm->lastStreamTag = ncclStreamTag(launchStream);
+  if (!plan->persistent) rcclNoteLaunchStream(comm, launchStream);
 
 do_return:
   NCCLCHECK(ncclProfilerStopKernelLaunchEvent(plan));

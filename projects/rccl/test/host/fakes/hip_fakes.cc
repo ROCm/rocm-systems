@@ -45,6 +45,12 @@ ASSERT_HOOK_MATCHES_PROD(g_hipPointerGetAttribute,        hipPointerGetAttribute
 ASSERT_HOOK_MATCHES_PROD(g_hipDriverGetVersion,           hipDriverGetVersion);
 ASSERT_HOOK_MATCHES_PROD(g_hipEventRecord,                hipEventRecord);
 ASSERT_HOOK_MATCHES_PROD(g_hipStreamWaitEvent,            hipStreamWaitEvent);
+ASSERT_HOOK_MATCHES_PROD(g_hipDeviceSynchronize,          hipDeviceSynchronize);
+#if HIP_VERSION >= 70100000  // hipStreamGetId is new in HIP 7.1
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamGetId,                hipStreamGetId);
+#endif
+ASSERT_HOOK_MATCHES_PROD(g_hipStreamIsCapturing,          hipStreamIsCapturing);
+ASSERT_HOOK_MATCHES_PROD(g_hipPeekAtLastError,            hipPeekAtLastError);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemGetAllocationGranularity, hipMemGetAllocationGranularity);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemImportFromShareableHandle, hipMemImportFromShareableHandle);
 ASSERT_HOOK_MATCHES_PROD(g_hipMemAddressReserve,          hipMemAddressReserve);
@@ -574,6 +580,22 @@ static hipError_t DefaultHipStreamWaitEvent(hipStream_t, hipEvent_t, unsigned in
 std::function<hipError_t(hipEvent_t, hipStream_t)> g_hipEventRecord = DefaultHipEventRecord;
 std::function<hipError_t(hipStream_t, hipEvent_t, unsigned int)> g_hipStreamWaitEvent =
     DefaultHipStreamWaitEvent;
+static hipError_t DefaultHipDeviceSynchronize() { return hipErrorInvalidValue; }
+std::function<hipError_t(void)> g_hipDeviceSynchronize = DefaultHipDeviceSynchronize;
+static hipError_t DefaultHipStreamGetId(hipStream_t, unsigned long long*)
+{
+    FailLoudUnfaked("hip_fakes", "hipStreamGetId");
+}
+static hipError_t DefaultHipStreamIsCapturing(hipStream_t, hipStreamCaptureStatus* status)
+{
+    if (status) *status = hipStreamCaptureStatusNone;
+    return hipSuccess;
+}
+static hipError_t DefaultHipPeekAtLastError() { return hipSuccess; }
+std::function<hipError_t(hipStream_t, unsigned long long*)> g_hipStreamGetId = DefaultHipStreamGetId;
+std::function<hipError_t(hipStream_t, hipStreamCaptureStatus*)> g_hipStreamIsCapturing =
+    DefaultHipStreamIsCapturing;
+std::function<hipError_t(void)> g_hipPeekAtLastError = DefaultHipPeekAtLastError;
 
 static hipError_t DefaultHipStreamBatchMemOp(hipStream_t, unsigned int,
                                              hipStreamBatchMemOpParams*, unsigned int)
@@ -676,6 +698,10 @@ void ResetHipFakes()
     g_hipExtLaunchKernel            = DefaultHipExtLaunchKernel;
     g_hipEventRecord                = DefaultHipEventRecord;
     g_hipStreamWaitEvent            = DefaultHipStreamWaitEvent;
+    g_hipDeviceSynchronize          = DefaultHipDeviceSynchronize;
+    g_hipStreamGetId                = DefaultHipStreamGetId;
+    g_hipStreamIsCapturing          = DefaultHipStreamIsCapturing;
+    g_hipPeekAtLastError            = DefaultHipPeekAtLastError;
     g_hipEventQueryRequiresRecord   = false;
     g_recordedEvents.clear();
     g_hipStreamBatchMemOp           = DefaultHipStreamBatchMemOp;
@@ -1009,7 +1035,18 @@ hipError_t hipMallocManaged(void** p, size_t size, unsigned int flags)
 }
 hipError_t hipMemcpy(void* d, const void* s, size_t n, hipMemcpyKind k) { return g_hipMemcpy(d, s, n, k); }
 hipError_t hipMemset(void* dst, int value, size_t bytes) { return g_hipMemset(dst, value, bytes); }
-hipError_t hipDeviceSynchronize(void) { return hipErrorInvalidValue; }
+hipError_t hipDeviceSynchronize(void) { return g_hipDeviceSynchronize(); }
+#if HIP_VERSION >= 70100000
+hipError_t hipStreamGetId(hipStream_t stream, unsigned long long* streamId)
+{
+    return g_hipStreamGetId(stream, streamId);
+}
+#endif
+hipError_t hipStreamIsCapturing(hipStream_t stream, hipStreamCaptureStatus* status)
+{
+    return g_hipStreamIsCapturing(stream, status);
+}
+hipError_t hipPeekAtLastError(void) { return g_hipPeekAtLastError(); }
 // We define hipGetDevicePropertiesR0600, the versioned public HIP ABI symbol,
 // rather than the unversioned hipGetDeviceProperties. Callers write
 // hipGetDeviceProperties in source, but the HIP header (post rocm-systems

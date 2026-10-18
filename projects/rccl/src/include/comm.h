@@ -970,19 +970,34 @@ struct ncclComm {
   struct ncclIntruQueueMpsc<struct ncclCommCallback, &ncclCommCallback::next> callbackQueue;
 
   hipEvent_t doneEvent;
-  // Opaque tag identifying the last launch stream, for stream-change detection only; 0 means
-  // no launch yet, which keeps "launched on the default stream" distinguishable. Not a
-  // hipStream_t: the app may destroy that stream while the comm lives on and HIP gives no
-  // notification, so this is compared, never passed to a HIP API.
+  // Opaque tag identifying the stream of the last launch outside graph capture, for stream-change
+  // detection; 0 means no such launch yet, which keeps "launched on the default stream"
+  // distinguishable. The app may destroy that stream while the comm lives on and HIP gives no
+  // notification, so the tag is compared, and turned back into a handle only at the comm's first
+  // stream switch, which records on it after a lookup (rcclFirstSwitchOrderFor); the default and legacy
+  // streams, which always exist, are recorded on without one.
   //
   // If the handle is recycled onto a new stream, tag equality deliberately skips the wait:
   // hipStreamDestroy defers reuse until the stream's work completes, so a matching tag
   // implies the prior kernel already finished.
   uintptr_t lastStreamTag;
+  // [RCCL] HIP's id for that stream, taken when the tag changed while doneEventNeeded was false, so the
+  // first stream switch can tell it from a later stream that reuses its handle. 0 for the default, legacy and
+  // per-thread streams, which are never looked up, and when the lookup failed.
+  unsigned long long lastStreamId;
   // The event the addon collective's last kernel carries as its stopEvent, in place of a standalone
-  // record. Non-null only between rcclAddonLaunchBegin, which sets it to doneEvent, and
-  // rcclTakeAddonStopEvent, which hands it out.
+  // record. Non-null only between rcclAddonLaunchBegin, which sets it to doneEvent when the comm
+  // records it, and rcclTakeAddonStopEvent, which hands it out.
   hipEvent_t addonStopEvent;
+  // [RCCL] Whether uncaptured fast-path and addon launches record doneEvent. Starts false unless
+  // RCCL_DONE_EVENT_ELISION=0 or HIP lacks hipStreamGetId (RCCL_DONE_EVENT_ELISION_SUPPORTED): until the comm's
+  // first stream switch every collective ran on one stream, so stream order alone serializes them and the
+  // record is skipped. rcclWaitLastCollective sets it at that switch.
+  bool doneEventNeeded;
+  // [RCCL] Created at the first stream switch to order the new stream after the previous one. A separate
+  // event because an explicit record ties an event to its stream in HIP, and the first-switch record is
+  // made on a stream the app may later destroy.
+  hipEvent_t firstSwitchEvent;
   latency_profiler::CollTrace* ctrace;
 
 #ifdef ENABLE_WARP_SPEED
@@ -1231,10 +1246,19 @@ static inline ncclRedOp_t ncclUserRedOpMangle(ncclComm* comm, ncclRedOp_t op) {
   return op1 < int(ncclNumOps) ? op : ncclRedOp_t(op1);
 }
 
+// [RCCL] The doneEvent elision relies on hipStreamGetId, new in HIP 7.1; older HIP records doneEvent on every
+// launch.
+#if defined(HIP_VERSION) && HIP_VERSION >= 70100000
+#define RCCL_DONE_EVENT_ELISION_SUPPORTED 1
+#else
+#define RCCL_DONE_EVENT_ELISION_SUPPORTED 0
+#endif
+
 // Returns the stop event for the collective's last stream operation. The result is nullptr while
-// capturing, and after an earlier launch in the same collective has taken it. Only the launch that
-// ends the collective may call this: rcclAddonLaunchEnd reads the cleared field as "a kernel will
-// record it" and skips the standalone record.
+// capturing, while the comm does not record doneEvent, and after an earlier launch in the same
+// collective has taken it. Only the launch that ends the collective may call this:
+// rcclAddonLaunchEnd reads the cleared field as "a kernel will record it" and skips the standalone
+// record.
 static inline hipEvent_t rcclTakeAddonStopEvent(struct ncclComm* comm) {
   hipEvent_t stopEvent = comm->addonStopEvent;
   comm->addonStopEvent = nullptr;

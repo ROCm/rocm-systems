@@ -2214,6 +2214,31 @@ TEST_F(InitMicrotest, CommAlloc_HappyPath_ReturnsSuccessAndSetsIdentity) {
   EXPECT_NE(nullptr, comm->sharedRes);          // parent==NULL -> owns sharedRes
 }
 
+// RCCL_DONE_EVENT_ELISION (default 1) decides whether a new comm starts out recording doneEvent;
+// HIP older than 7.1 always records it.
+#if RCCL_DONE_EVENT_ELISION_SUPPORTED
+TEST_F(InitMicrotest, CommAlloc_DoneEventElision_StartsWithoutRecording) {
+  InstallCommAllocSuccess();
+  auto comm = FreshComm();
+  comm->doneEventNeeded  = true;  // commAlloc must clear it, not inherit it
+  comm->lastStreamId     = 9;
+  comm->firstSwitchEvent = reinterpret_cast<hipEvent_t>(0x2);
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/3));
+  EXPECT_FALSE(comm->doneEventNeeded);
+  EXPECT_EQ(0u, comm->lastStreamTag);
+  EXPECT_EQ(0u, comm->lastStreamId);
+  EXPECT_EQ(nullptr, comm->firstSwitchEvent);
+}
+#endif
+
+TEST_F(InitMicrotest, CommAlloc_DoneEventElisionOff_RecordsFromTheStart) {
+  InstallCommAllocSuccess();
+  SetParams({{"RCCL_DONE_EVENT_ELISION", 0}});
+  auto comm = FreshComm();
+  EXPECT_EQ(ncclSuccess, commAlloc(comm.get(), nullptr, /*ndev=*/8, /*rank=*/3));
+  EXPECT_TRUE(comm->doneEventNeeded);
+}
+
 TEST_F(InitMicrotest, CommAlloc_NetInitFails_ReturnsError) {
   InstallCommAllocSuccess();
   g_ncclNetInitResult = ncclSystemError;

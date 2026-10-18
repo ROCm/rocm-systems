@@ -131,6 +131,9 @@ NCCL_PARAM(PatLazyInit, "PAT_LAZY_INIT", 1);
 // RCCL_PAT_SHARED_QPS=0 restores a separate set per collective. The value must be identical on
 // every rank, otherwise peers disagree on direction and the first PAT collective hangs.
 RCCL_PARAM(PatSharedQps, "PAT_SHARED_QPS", 1);
+// When enabled (default), fast-path and addon launches skip recording doneEvent until the communicator's first
+// stream switch (see rcclWaitLastCollective). RCCL_DONE_EVENT_ELISION=0 records it on every launch.
+RCCL_PARAM(DoneEventElision, "DONE_EVENT_ELISION", 1);
 NCCL_PARAM(WinEnable, "WIN_ENABLE", 1);
 NCCL_PARAM(CollnetEnable, "COLLNET_ENABLE", NCCL_CONFIG_UNDEF_INT);
 NCCL_PARAM(CtaPolicy, "CTA_POLICY", NCCL_CONFIG_UNDEF_INT);
@@ -612,6 +615,7 @@ static ncclResult_t commFree(ncclComm_t comm) {
     NCCLCHECK(freeChannel(comm->channels + channel, comm->nRanks, 1, comm->localRanks, comm));
 
   if (comm->doneEvent != NULL) CUDACHECK(hipEventDestroy(comm->doneEvent));
+  if (comm->firstSwitchEvent != nullptr) CUDACHECK(hipEventDestroy(comm->firstSwitchEvent));
 
   // GIN may use proxy. We need to finalize it before destroying the proxy.
   NCCLCHECK(ncclGinHostFinalize(comm));
@@ -881,7 +885,10 @@ static ncclResult_t commAlloc(struct ncclComm* comm, struct ncclComm* parent, in
 
   comm->doneEvent = doneEvent;
   comm->lastStreamTag = 0;
+  comm->lastStreamId = 0;
   comm->addonStopEvent = nullptr;
+  comm->doneEventNeeded = !RCCL_DONE_EVENT_ELISION_SUPPORTED || !rcclParamDoneEventElision();
+  comm->firstSwitchEvent = nullptr;
 
   // RCCL: acquire a scoped side stream for init-time allocations. It is
   // released once init completes (see ncclCommInitRankFunc) so it does not hold

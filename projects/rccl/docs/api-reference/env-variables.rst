@@ -747,6 +747,24 @@ application adds explicit synchronization between streams.
       - | ``0``: Disabled (default).
         | ``1``: Enabled. Operations execute in host launch order.
 
+    * - | ``RCCL_DONE_EVENT_ELISION``
+        | While a communicator has run on only one stream, its collectives
+          skip recording a completion event. Its first collective on another
+          stream orders itself after the previous stream instead. If that
+          stream was destroyed it waits on nothing, which is safe only if
+          ``hipStreamDestroy`` finished its work, as the HIP runtime does
+          unless something else, such as an execution context, still holds
+          the stream. If the stream is ``hipStreamPerThread``, or a new
+          stream reusing a destroyed stream's handle, it waits for the whole
+          device, which fails (and invalidates every capture in the process)
+          while any stream is capturing, and blocks while other device work
+          waits on the calling thread. If the previous stream is itself
+          capturing, the collective fails. Set to ``0`` if any of these can
+          happen in the application.
+        | HIP older than 7.1 always records the event.
+      - | ``1``: Enabled (default).
+        | ``0``: Disabled. Every collective records the event.
+
 Inspector profiling
 ===================
 

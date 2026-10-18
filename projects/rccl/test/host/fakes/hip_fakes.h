@@ -218,6 +218,15 @@ extern std::function<hipError_t(hipEvent_t /*event*/, hipStream_t /*stream*/)>
 extern std::function<hipError_t(hipStream_t /*stream*/, hipEvent_t /*event*/,
                                 unsigned int /*flags*/)>
     g_hipStreamWaitEvent;
+// Defaults to hipErrorInvalidValue, as the stub it replaced did.
+extern std::function<hipError_t(void)> g_hipDeviceSynchronize;
+// Stream probes for the first stream switch (rcclWaitLastCollective). hipStreamGetId fails loudly unless a
+// test sets it; hipStreamIsCapturing and hipPeekAtLastError default to what real HIP reports for an idle,
+// error-free process (not capturing, hipSuccess).
+extern std::function<hipError_t(hipStream_t /*stream*/, unsigned long long* /*streamId*/)> g_hipStreamGetId;
+extern std::function<hipError_t(hipStream_t /*stream*/, hipStreamCaptureStatus* /*status*/)>
+    g_hipStreamIsCapturing;
+extern std::function<hipError_t(void)> g_hipPeekAtLastError;
 
 extern std::function<hipError_t(hipStream_t /*stream*/, unsigned int /*count*/,
                                 hipStreamBatchMemOpParams* /*params*/, unsigned int /*flags*/)>
