@@ -476,7 +476,6 @@ def capture_subprocess_output(
     subprocess_args: list[str],
     new_env: Optional[dict[str, str]] = None,
     profileMode: bool = False,
-    enable_logging: bool = True,
 ) -> tuple[bool, str]:
     sanitized_env = (
         None
@@ -575,8 +574,6 @@ def capture_subprocess_output(
         if not line:
             break
         buf.write(line)
-        if not enable_logging:
-            continue
         if profileMode:
             console_log(get_rocprof_cmd(), line.strip(), indent_level=1)
         else:
@@ -764,7 +761,7 @@ def build_metric_list(
     Build metric_list from the panel configs.
 
     Returns a mapping of (panel/table/metric IDs -> display names)
-    without constructing DataFrames or metric_counters. Use this directly when
+    without constructing DataFrames. Use this directly when
     only the metric listing is needed (e.g. --list-metrics, --list-blocks).
     """
     metric_list: dict[str, str] = {}
@@ -794,8 +791,8 @@ def build_metric_list(
     return metric_list
 
 
-def get_uuid(length: int = 8) -> str:
-    return uuid.uuid4().hex[:length]
+def get_uuid() -> str:
+    return uuid.uuid4().hex[:8]
 
 
 def convert_filter_blocks_to_panel_ids(

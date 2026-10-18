@@ -20,7 +20,6 @@ from utils import schema
 from utils.file_io import validate_kernel_filter_ids
 from utils.logger import console_error, console_warning, demarcate
 from utils.metrics.evaluation_pipeline import eval_metric
-from utils.metrics.expression import gen_counter_list
 from utils.pattern_matching import fnmatch_glob_matches
 from utils.specs import MachineSpecs
 from utils.utils_common import (
@@ -74,7 +73,6 @@ def build_dfs(
     dfs: dict[int, pd.DataFrame] = {}
     dfs_type: dict[int, str] = {}
     dfs_expressions: dict[int, list[str]] = {}
-    metric_counters: dict[str, list[str]] = {}
 
     if filter_metrics:
         numeric_tokens = [t for t in filter_metrics if METRIC_ID_RE.match(str(t))]
@@ -113,7 +111,6 @@ def build_dfs(
                         panel_id=panel_id,
                         user_metric_filter=user_metric_filter,
                         profile_panel_filter=profile_panel_filter,
-                        metric_counters=metric_counters,
                     )
                     # Filter excluded every metric in this panel; skip the empty table.
                     if data_config["metric"] and df.empty:
@@ -159,7 +156,6 @@ def build_dfs(
     arch_configs.dfs = dfs
     arch_configs.dfs_type = dfs_type
     arch_configs.dfs_expressions = dfs_expressions
-    arch_configs.metric_counters = metric_counters
 
 
 def _metric_passes_filter(
@@ -196,11 +192,9 @@ def _build_metric_table_df(
     panel_id: int,
     user_metric_filter: Optional[list[str]],
     profile_panel_filter: set[int],
-    metric_counters: dict[str, list[str]],
 ) -> tuple[pd.DataFrame, list[str]]:
     """Build the metric_table dataframe and its list of formula strings for
-    data_config, dropping rows the active filter excludes. Updates
-    metric_counters in place.
+    data_config, dropping rows the active filter excludes.
     """
     table_id = data_config["id"]
     table_data_source_idx = f"{table_id // 100}.{table_id % 100}"
@@ -261,29 +255,13 @@ def _build_metric_table_df(
 
         rows.append(values)
 
-        filtered_counters: dict[str, None] = {}
-        formula_visited = False
-        for formula in eqn_content:
-            if formula is None or formula == "None":
-                continue
-            visited, counters = gen_counter_list(formula)
-            if visited:
-                formula_visited = True
-            for counter in counters:
-                filtered_counters[counter] = None
-
-        if filtered_counters or formula_visited:
-            metric_counters[key] = list(filtered_counters)
-
     df = pd.DataFrame(rows, columns=headers)
     df.set_index("Metric_ID", inplace=True)
     return df, expressions
 
 
 @demarcate
-def apply_filters(
-    workload: schema.Workload, dir_path: str, debug: bool
-) -> pd.DataFrame:
+def apply_filters(workload: schema.Workload, debug: bool) -> pd.DataFrame:
     """
     Apply user's filters to the raw_pmc df.
     """
@@ -706,7 +684,6 @@ def load_table_data(
     dir_path: str,
     args: argparse.Namespace,
     dfs_expressions: dict[int, list[str]],
-    skip_kernel_top: bool = False,
     pc_sampling_tool_data: Optional[list[dict[str, Any]]] = None,
 ) -> None:
     """
@@ -714,8 +691,7 @@ def load_table_data(
     - Load data for "pc_sampling_table"
     - Calculate mertric value for all "metric_table"
     """
-    if not skip_kernel_top:
-        load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
+    load_non_mertrics_table(workload, dir_path, args, pc_sampling_tool_data)
 
     eval_metric(
         workload.dfs,
@@ -723,7 +699,7 @@ def load_table_data(
         dfs_expressions,
         workload.sys_info.iloc[0],
         workload.roofline_peaks,
-        apply_filters(workload, dir_path, args.debug),
+        apply_filters(workload, args.debug),
         args.debug,
     )
 
