@@ -23,9 +23,10 @@ Execution semantics are provided by ``SemanticsSpec`` from
 
 import cgen
 
+from amdisa.codegen.execute import input_policy
 from amdisa.codegen.execute.floating_policy import (
+    F16_TRANSCENDENTAL_OPS,
     FLUSH_NEAREST_F32_OPS,
-    ROUNDED_F16_OPS,
 )
 import textwrap
 import re
@@ -52,6 +53,7 @@ from amdisa.fieldless_policy import (
 from amdisa.semantics import (
     F16_INPUT_CONVERSION_DTYPES,
     F32_TO_INTEGER_DTYPES,
+    INTEGER_RESULT_OPERATIONS,
     InstructionSemantics,
     SemanticsSpec,
 )
@@ -69,7 +71,6 @@ from amdisa.codegen.shared_baselines import (
 from amdisa.codegen.execute.vop3_modifiers import (
     vop3_src_mod,
     vop3_dst_mod,
-    vop3_dst_mod_f64,
 )
 from amdisa.codegen.execute.vector_special import (
     gen_vector_mbcnt,
@@ -416,6 +417,7 @@ class CodeGenerator:
         'ds_mskor': 'local',
         'ds_append_consume': 'local',
         'ds_barrier_arrive': 'local',
+        'ds_gws': 'local',
         'ds_read_addtid': 'local',
         'ds_write_addtid': 'local',
         'ds_read_tr_b16': 'local',
@@ -1042,12 +1044,7 @@ class CodeGenerator:
             return 'amdgpu::sdwa::ResultFormat::NONE'
         if sem and (conversion := re.match(r'^V_CVT_(F16|F32)_', sem.name)):
             return f'amdgpu::sdwa::ResultFormat::{conversion.group(1)}'
-        if sem and sem.operation in (
-            'frexp_exp_f32',
-            'frexp_exp_f16',
-            'cvt_norm_i16_f16',
-            'cvt_norm_u16_f16',
-        ):
+        if sem and sem.operation in INTEGER_RESULT_OPERATIONS:
             return 'amdgpu::sdwa::ResultFormat::NONE'
         if sem and (
             sem.name == 'V_PK_FMAC_F16'
@@ -1061,10 +1058,16 @@ class CodeGenerator:
 
     @staticmethod
     def _apply_sdwa_f16_omod(
-        body: str, instruction: str, *, rounded_result: bool = False
+        body: str, instruction: str, *, transcendental: bool = False
     ) -> str:
-        """Apply SDWA OMOD at the F16 producer, before result narrowing."""
-        helper = 'finish_rounded_f16' if rounded_result else 'round_f16_result'
+        """Retain the producer's legacy SDWA F16 OMOD ordering.
+
+        TRANS producers already return rounded halves; ordinary producers scale
+        before narrowing. Arithmetic producers retain their MODE-aware helper.
+        This ordering lacks SDWA hardware validation; VOP3 captures do not
+        establish it. Migrating SDWA requires separate capture evidence.
+        """
+        helper = 'finish_rounded_f16' if transcendental else 'round_f16_result'
         body = body.replace(
             'util::f32_to_f16_mode(',
             f'amdgpu::sdwa::{helper}({instruction}, wf, ',
@@ -2238,7 +2241,9 @@ class CodeGenerator:
                     '''
                     {
                       return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MaxNum>(
-                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                          '''
+                    + input_policy.policy_expr('f32')
+                    + ''', src0, src1);
                     }
                     ''',
                 ),
@@ -2257,7 +2262,9 @@ class CodeGenerator:
                     '''
                     {
                       return amdgpu::minmax::evaluate<amdgpu::fp_format::F32, amdgpu::minmax::MinNum>(
-                          amdgpu::input_denormal::Policy::make(wf.fp_denorm_mode_f32()), src0, src1);
+                          '''
+                    + input_policy.policy_expr('f32')
+                    + ''', src0, src1);
                     }
                     ''',
                 ),
@@ -4301,6 +4308,39 @@ class CodeGenerator:
                     f'{{{size_line}}}'
                 )
             class_func_impls.append(cgen.Line(class_ctor_impl))
+            image_atomic_source_display = ''
+            if any(inst.name.startswith('IMAGE_ATOMIC') for inst in inst_enc.insts):
+                public_members.append(
+                    cgen.Line(
+                        'bool should_print_dst_operand(uint8_t operand_index) const override {\n'
+                        '  // Image atomics have one encoded VDATA tuple, printed as a source.\n'
+                        '  return !mnemonic_.starts_with("image_atomic_") &&\n'
+                        '         Instruction::should_print_dst_operand(operand_index);\n'
+                        '}'
+                    )
+                )
+                if 'tfe' in enc_field_names:
+                    image_atomic_source_display = (
+                        '  if (operand_index == 0 && inst_.tfe && mnemonic_.starts_with("image_atomic_")) {\n'
+                        '    // VDATA is the first source. Assembly includes the status slot;\n'
+                        '    // the source dependency includes only the atomic payload.\n'
+                        '    const auto first = operand->encoding_value();\n'
+                        '    const auto last = first + operand->size_bits() / 32;\n'
+                        '    out += first == last ? "v" + std::to_string(first)\n'
+                        '                         : "v[" + std::to_string(first) + ":" + std::to_string(last) + "]";\n'
+                        '    return;\n'
+                        '  }\n'
+                    )
+                    if not profile.renders_gfx11_image_syntax:
+                        public_members.append(
+                            cgen.Line(
+                                'void append_src_operand(std::string &out, uint8_t operand_index) const override {\n'
+                                '  const ::rocjitsu::Operand *operand = src_operands_[operand_index];\n'
+                                + image_atomic_source_display
+                                + '  Instruction::append_src_operand(out, operand_index);\n'
+                                '}'
+                            )
+                        )
             if profile.has_gfx11_image_address_extension and enc_upper == 'ENC_MIMG':
                 public_members.append(
                     cgen.Line(
@@ -4313,8 +4353,9 @@ class CodeGenerator:
                         cgen.Line(
                             'void append_src_operand(std::string &out, '
                             'uint8_t operand_index) const override {\n'
-                            '  const Operand *operand = src_operands_[operand_index];\n'
-                            '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
+                            '  const ::rocjitsu::Operand *operand = src_operands_[operand_index];\n'
+                            + image_atomic_source_display
+                            + '  if (!inst_.nsa || operand != nsa_vaddr_operand_) {\n'
                             '    Instruction::append_src_operand(out, operand_index);\n'
                             '    return;\n'
                             '  }\n'
@@ -5560,28 +5601,68 @@ class CodeGenerator:
             return None
         return 'vflat_vaddr_bits(reinterpret_cast<const OpEncoding *>(inst))'
 
+    def _uses_image_vdata_helper(self, enc_name: str) -> bool:
+        # CDNA5 VIMAGE contains tensor transfers, not masked image operations.
+        return enc_name.upper() == 'ENC_MIMG' or (
+            self.isa_spec.arch_name == 'rdna4'
+            and enc_name.upper() in ('ENC_VIMAGE', 'ENC_VSAMPLE')
+        )
+
     def _mimg_operand_size_expr(
         self, enc_name: str, inst_name: str, opnd_name: str
     ) -> str | None:
+        if inst_name in ('IMAGE_LOAD_BY2', 'IMAGE_LOAD_BY4'):
+            # These multi-pixel operations do not use ordinary DMASK sizing.
+            # Keep the XML tuple until their result layout is qualified.
+            return None
+        if opnd_name == 'vdata' and inst_name.startswith('IMAGE_ATOMIC'):
+            # DMASK counts payload DWORDs, including both compare/swap inputs.
+            return (
+                '32u * std::popcount(uint32_t{'
+                'reinterpret_cast<const OpEncoding *>(inst)->dmask})'
+            )
+        # Derive data footprints independently of disassembly formatting and
+        # functional execution support. BVH and atomics have separate layouts.
+        if (
+            self._uses_image_vdata_helper(enc_name)
+            and opnd_name == 'vdata'
+            and (
+                inst_name.startswith(
+                    ('IMAGE_LOAD', 'IMAGE_STORE', 'IMAGE_SAMPLE', 'IMAGE_GATHER')
+                )
+                or inst_name
+                in ('IMAGE_MSAA_LOAD', 'IMAGE_GET_LOD', 'IMAGE_GET_RESINFO')
+            )
+        ):
+            gather4 = inst_name.startswith('IMAGE_GATHER') or (
+                inst_name == 'IMAGE_MSAA_LOAD'
+                and self.isa_spec.arch_name in ('rdna3', 'rdna3_5', 'rdna4')
+            )
+            d16_allowed = '_PCK' not in inst_name and inst_name not in (
+                'IMAGE_GET_LOD',
+                'IMAGE_GET_RESINFO',
+            )
+            status_allowed = (
+                not inst_name.startswith('IMAGE_STORE')
+                and inst_name != 'IMAGE_GET_RESINFO'
+            )
+            sampler = (
+                inst_name.startswith(('IMAGE_SAMPLE', 'IMAGE_GATHER'))
+                or inst_name == 'IMAGE_GET_LOD'
+            )
+            flags = ', '.join(
+                str(flag).lower()
+                for flag in (gather4, d16_allowed, status_allowed, sampler)
+            )
+            return (
+                f'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), {flags})'
+            )
         if enc_name.upper() != 'ENC_MIMG':
             return None
-        if (
-            self.isa_spec.arch_name == 'cdna2'
-            and inst_name.upper() == 'IMAGE_GET_RESINFO'
-            and opnd_name == 'vdata'
-        ):
-            return '(32 * std::max(1, std::popcount(uint32_t{reinterpret_cast<const OpEncoding *>(inst)->dmask})))'
-        if self._issues_image_memory(inst_name):
-            if opnd_name == 'vdata':
-                fields = 'reinterpret_cast<const OpEncoding *>(inst)'
-                return (
-                    f'(32 * ((std::max(1, std::popcount(uint32_t{{{fields}->dmask}})) + '
-                    f'{fields}->d16) >> {fields}->d16))'
-                )
-            if opnd_name == 'vaddr':
-                # GFX9 dimensions come from T#, unavailable at decode time.
-                # Three coordinates cover every supported load/store shape.
-                return '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)'
+        if self._issues_image_memory(inst_name) and opnd_name == 'vaddr':
+            # GFX9 dimensions come from T#, unavailable at decode time.
+            # Three coordinates cover every supported load/store shape.
+            return '(reinterpret_cast<const OpEncoding *>(inst)->a16 ? 64 : 96)'
         if not self.isa_spec.profile.renders_gfx11_image_syntax:
             return None
         if opnd_name == 'vdata':
@@ -5590,15 +5671,7 @@ class CodeGenerator:
             )
             if fixed_words is not None:
                 return str(fixed_words * 32)
-            gather = str(
-                inst_name.upper().startswith('IMAGE_GATHER')
-                or inst_name
-                in self.isa_spec.profile.gfx11_mimg_gather_style_instructions
-            ).lower()
-            return (
-                'mimg_vdata_bits(reinterpret_cast<const OpEncoding *>(inst), '
-                f'{gather})'
-            )
+            return None
         if opnd_name == 'vaddr':
             fixed_words = self.isa_spec.profile.gfx11_mimg_fixed_vaddr_words.get(
                 inst_name
@@ -5651,28 +5724,34 @@ class CodeGenerator:
         return result
 
     @staticmethod
-    def _emit_gfx11_mimg_helpers() -> str:
+    def _emit_mimg_vdata_helper() -> str:
         return textwrap.dedent('''\
             namespace {
             template <typename MimgMachineInst>
-            uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4) {
-              uint32_t words = gather4 ? 4u : 0u;
-              if (!gather4) {
-                uint32_t mask = inst->dmask & 0xfu;
-                while (mask) {
-                  words += mask & 1u;
-                  mask >>= 1;
-                }
-                if (words == 0)
-                  words = 1;
-              }
-              if (inst->d16)
+            uint32_t mimg_vdata_bits(const MimgMachineInst *inst, bool gather4,
+                                      bool d16_allowed, bool status_allowed,
+                                      bool sampler) {
+              uint32_t words = gather4 ? 4u : std::max(1, std::popcount(uint32_t{inst->dmask}));
+              if (d16_allowed && inst->d16)
                 words = (words + 1) / 2;
-              if (inst->tfe)
+              // A dropped fetch with DMASK=0 cannot produce TFE status. LWE
+              // can still return status for sampler operations. Both flags
+              // share one status word; stores do not consume that word.
+              bool status = false;
+              if constexpr (requires { inst->tfe; })
+                status = status_allowed && inst->tfe && inst->dmask;
+              if constexpr (requires { inst->lwe; })
+                status = status || (status_allowed && sampler && inst->lwe);
+              if (status)
                 ++words;
               return words * 32;
             }
+            } // namespace''')
 
+    @classmethod
+    def _emit_gfx11_mimg_helpers(cls) -> str:
+        return cls._emit_mimg_vdata_helper() + '\n\n' + textwrap.dedent('''\
+            namespace {
             bool mimg_name_has_token(std::string_view name, std::string_view token) {
               size_t pos = 0;
               while (pos < name.size()) {
@@ -6563,13 +6642,17 @@ class CodeGenerator:
                     and dtype in ('b16', 'u16')
                 )
                 is_float_op = dtype in ('f16', 'f32', 'f64', 'bf16')
-                is_integer_to_f32 = cls == 'vector_unary' and dtype in (
+                # Integer sources take no ABS/NEG, but the float result takes
+                # CLAMP and OMOD like any other VOP3 float result.
+                is_integer_to_float = cls == 'vector_unary' and dtype in (
                     'f32_i32',
                     'f32_u32',
                     'f32_ubyte0',
                     'f32_ubyte1',
                     'f32_ubyte2',
                     'f32_ubyte3',
+                    'f64_i32',
+                    'f64_u32',
                 )
                 is_f32_to_integer = (
                     cls == 'vector_unary' and dtype in F32_TO_INTEGER_DTYPES
@@ -6581,7 +6664,7 @@ class CodeGenerator:
                     is_vop3
                     and (
                         is_float_op
-                        or is_integer_to_f32
+                        or is_integer_to_float
                         or is_f32_to_integer
                         or is_f16_input_conversion
                     )
@@ -6590,13 +6673,16 @@ class CodeGenerator:
                 ):
                     from amdisa.sema_enrich import enrich_block
 
-                    ef = set() if is_integer_to_f32 else {'neg'}
-                    if has_abs and not is_integer_to_f32:
+                    ef = set() if is_integer_to_float else {'neg'}
+                    if has_abs and not is_integer_to_float:
                         ef.add('abs')
                     inst_fields = getattr(self, '_current_inst_fields', set())
-                    if 'clamp' in inst_fields and not is_f32_to_integer:
+                    integer_result = (
+                        is_f32_to_integer or op in INTEGER_RESULT_OPERATIONS
+                    )
+                    if 'clamp' in inst_fields and not integer_result:
                         ef.add('clamp')
-                    if 'omod' in inst_fields and not is_f32_to_integer:
+                    if 'omod' in inst_fields and not integer_result:
                         ef.add('omod')
                     sema_block = enrich_block(sema_block, enc_field_names=frozenset(ef))
                 # Preserve 6470's scalar_saveexec -> b64 dtype fix. Per-operand
@@ -6806,6 +6892,10 @@ class CodeGenerator:
                     and dtype == 'f64'
                     and is_vop3
                 ):
+                    # F64 FMA/FMAC retain finish_f64 OMOD/CLAMP on scalar and
+                    # SIMD paths instead of output_modifier::apply, unlike
+                    # ADD/MUL. output_modifier.h records the V_FMA_F64 captures
+                    # that favor the shared stage.
                     src_loads = ''.join(
                         f'    double src{i}_value = std::bit_cast<double>(amdgpu::RegisterAccess(wf).read_lane64({src_ops[i]}, lane));\n'
                         for i in range(3)
@@ -6835,6 +6925,7 @@ class CodeGenerator:
                         '  }\n'
                     )
                 if cls == 'vector_binop' and op == 'fmac' and dtype == 'f64':
+                    # VOP3 retains the same finish_f64 output policy as FMA above.
                     src_mods = ''
                     finish = ''
                     if is_vop3:
@@ -7872,6 +7963,22 @@ class CodeGenerator:
                 return gds_guard + self._gen_ds_append_consume(dst_ops, src_ops, sem)
             return gds_guard + self._gen_ds_barrier_arrive(dst_ops, src_ops, sem)
 
+        if cls == 'ds_gws':
+            # GWS legitimately targets GDS and is architecturally defined only for
+            # gds=1. Unlike the other DS classes (which reject gds=1), apply the
+            # inverse guard: reject the gds=0 encoding. Executing the stateful GWS
+            # semantics then would park a wave, while the instruction's completion is
+            # classified as LDS and omits the GDS EXPCNT obligation, so the stateful
+            # behavior and the memory-wait accounting would disagree. ISAs whose DS
+            # encoding carries no gds field always target GDS, so no guard is emitted.
+            gds_guard = ''
+            if self._enc_has_field('gds'):
+                gds_guard = (
+                    '  if (!inst_.gds)\n'
+                    '    throw util::UnimplementedInst(mnemonic());\n'
+                )
+            return gds_guard + self._gen_ds_gws(dst_ops, src_ops, sem)
+
         if cls in ('ds_permute', 'ds_swizzle'):
             is_swizzle = cls == 'ds_swizzle'
             is_bpermute = 'BPERMUTE' in sem.name.upper()
@@ -8435,6 +8542,7 @@ class CodeGenerator:
             )
         exec_masked = not (
             self._MEMORY_ISSUE_KINDS[sem_class] == 'scalar'
+            or sem.semantic_class == 'ds_gws'
             or (
                 sem.semantic_class.startswith('ds_read_tr_')
                 and self.isa_spec.profile.ds_transpose_ignores_exec
@@ -9210,6 +9318,99 @@ class CodeGenerator:
             L.append('    std::memcpy(&d->store_data[lane * 8], &lo, 4);')
             L.append('    std::memcpy(&d->store_data[lane * 8 + 4], &hi, 4);')
             L.append('  }')
+        L.append('  set_data(std::move(d));')
+        return '\n'.join(L)
+
+    def _gen_ds_gws(
+        self, dst: list[str], src: list[str], sem: InstructionSemantics
+    ) -> str:
+        """Generate a GWS (Global Wave Sync) execute() body (DS encoding).
+
+        * Decode the 6-bit resource id as (M0[21:16] + offset0[5:0]) & 0x3f
+          (the hardware convention; it is not spelled out in the ISA XML).
+        * For init/barrier/sema_br (which carry one source VGPR), read the
+          count from the ADDR operand's first active lane, honoring the DS acc
+          bit so the AGPR bank is used when selected. sema_v/p/release_all
+          carry no operand.
+        * Route to the matching ComputeUnitCore GWS hook, then publish a
+          zero-payload LOCAL_MEM VectorMemState so the DS pipeline still
+          increments and retires the lgkmcnt/GDS wait counter and plugins
+          observe the instruction (the structural accounting path).
+        * EXEC=0 handling is target-specific. On RDNA3/3.5 the count-carrying
+          operations (init/barrier/sema_br) execute even with EXEC=0, reading
+          their operand from lane 0 -- the lane-0 fallback documented in those
+          ISA manuals (section 13.4.2). Every other case (all ops on the older
+          targets, and the count-less sema_v/p/release_all) stays a pure
+          structural no-op when EXEC is zero, since no such rule is documented
+          for them and it must not be extrapolated silently.
+        """
+        op = sem.operation
+        has_count = op in ('init', 'barrier', 'sema_br')
+        # RDNA3/3.5 (ISA section 13.4.2) run the count-carrying GWS operations
+        # even when EXEC is zero, taking the operand from lane 0. No other target
+        # documents that rule, so they keep the EXEC-gated structural no-op.
+        exec_independent = has_count and self.isa_spec.arch_name in ('rdna3', 'rdna3_5')
+        rid_decl = (
+            'uint32_t rid = (((wf.m0() >> 16) & 0x3fu) + '
+            '(static_cast<uint32_t>(inst_.offset0) & 0x3fu)) & 0x3fu;'
+        )
+        L = []
+        L.append('  uint64_t exec = wf.exec();')
+        if exec_independent:
+            # No EXEC guard: the operation always takes effect, falling back to
+            # lane 0 when EXEC selects no active lane.
+            body_indent = '  '
+            L.append(f'  {rid_decl}')
+            L.append(
+                '  uint32_t lane = exec ? '
+                'static_cast<uint32_t>(std::countr_zero(exec)) : 0u;'
+            )
+            L.append('  auto &cu = wf.cu();')
+            L.append(
+                f'  uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=True)};'
+            )
+            L.append(
+                '  uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'
+            )
+        else:
+            body_indent = '    '
+            L.append('  if (exec) {')
+            L.append(f'    {rid_decl}')
+            if has_count:
+                L.append(
+                    '    uint32_t lane = static_cast<uint32_t>(std::countr_zero(exec));'
+                )
+                L.append('    auto &cu = wf.cu();')
+                L.append(
+                    f'    uint32_t gws_base = {self._vgpr_base_expr("addr", use_acc=True)};'
+                )
+                L.append(
+                    '    uint32_t gws_count = amdgpu::RegisterAccess(cu).read_vgpr(gws_base, lane);'
+                )
+        if op == 'init':
+            L.append(f'{body_indent}wf.gws_init(rid, gws_count);')
+        elif op == 'barrier':
+            L.append(f'{body_indent}wf.gws_barrier_arrive(rid, gws_count);')
+        elif op == 'sema_br':
+            L.append(f'{body_indent}wf.gws_sema_br(rid, gws_count);')
+        elif op == 'sema_v':
+            L.append(f'{body_indent}wf.gws_sema_v(rid);')
+        elif op == 'sema_p':
+            L.append(f'{body_indent}wf.gws_sema_p(rid);')
+        elif op == 'sema_release_all':
+            L.append(f'{body_indent}wf.gws_sema_release_all(rid);')
+        else:
+            L.append(f'{body_indent}(void)rid; // {op} has no stateful effect')
+        if not exec_independent:
+            L.append('  }')
+        L.append(
+            '  auto d = std::make_unique<amdgpu::VectorMemState>(amdgpu::LOCAL_MEM);'
+        )
+        L.append('  d->elem_size = 4;')
+        L.append('  d->num_elems = 0;')
+        L.append('  d->is_load = false;')
+        L.append('  d->lane_mask = 0;')
+        self._append_wait_counter_type(L, sem, 'ds_gws')
         L.append('  set_data(std::move(d));')
         return '\n'.join(L)
 
@@ -10648,14 +10849,15 @@ class CodeGenerator:
                         ):
                             opnd_size_expr = '32'
                         operand_size_exprs[opnd.name] = opnd_size_expr
-                        # Some ISA XMLs describe a buffer atomic's vdata only
+                        # Some ISA XMLs describe a vector atomic's vdata only
                         # as an output even though it always supplies the
                         # atomic payload. Keep the source dependency
                         # independent of whether the old memory value is
                         # returned.
-                        _is_buffer_atomic_payload = (
+                        _is_vector_atomic_payload = (
                             inst_sem is not None
-                            and inst_sem.semantic_class == 'buffer_atomic'
+                            and inst_sem.semantic_class
+                            in ('buffer_atomic', 'image_atomic')
                             and opnd.name == 'vdata'
                         )
                         _is_optional_vflat_saddr = (
@@ -10667,7 +10869,7 @@ class CodeGenerator:
                             and opnd.fieldless
                             and opnd.operand_type == 'OPR_FLAT_SCRATCH'
                         )
-                        if (opnd.is_input or _is_buffer_atomic_payload) and not (
+                        if (opnd.is_input or _is_vector_atomic_payload) and not (
                             _is_optional_vflat_saddr or _is_optional_flat_scratch
                         ):
                             opnd_body.append(
@@ -10715,7 +10917,8 @@ class CodeGenerator:
                                     and opnd.name == 'vdst'
                                 )
                                 or (
-                                    inst_sem.semantic_class == 'buffer_atomic'
+                                    inst_sem.semantic_class
+                                    in ('buffer_atomic', 'image_atomic')
                                     and opnd.name == 'vdata'
                                 )
                                 or (
@@ -10724,14 +10927,25 @@ class CodeGenerator:
                                 )
                             )
                         )
-                        # Compare-swap consumes two elements through vdata but
-                        # returns only the old element. Keep the destination
-                        # metadata on a narrow view of the same encoded VGPR so
-                        # liveness does not kill the untouched payload half.
+                        # Compare-swap consumes two elements but returns one.
+                        # Image TFE adds a status destination, not a payload
+                        # input. Keep these result widths independent of VDATA
+                        # so def/use reflects the registers actually accessed.
                         _needs_atomic_return_view = (
                             _is_optional_atomic_return
-                            and inst_sem.semantic_class == 'buffer_atomic'
-                            and inst_sem.operation in ('cmpswap', 'fcmpswap')
+                            and (
+                                (
+                                    inst_sem.semantic_class == 'buffer_atomic'
+                                    and inst_sem.operation in ('cmpswap', 'fcmpswap')
+                                )
+                                or (
+                                    inst_sem.semantic_class == 'image_atomic'
+                                    and (
+                                        'CMPSWAP' in inst.name
+                                        or 'tfe' in enc_field_names
+                                    )
+                                )
+                            )
                             and opnd.name == 'vdata'
                         )
                         _needs_tied_destination_result_view = (
@@ -10824,6 +11038,22 @@ class CodeGenerator:
                             )
                         elif opnd.name in inst_field_names:
                             opr_type = self._constructor_operand_type(inst_sem, opnd)
+                            # GWS carries its count in a DS data operand that, on
+                            # CDNA2/3, honors the acc bank bit (the execute path
+                            # already reads the AGPR). Promote the decoded operand
+                            # to VGPR-or-AGPR so disassembly and the source
+                            # register reference name the same register as
+                            # execution; _fold_acc_bank_selector then adds the
+                            # bank offset. Gated on the DS acc field so VGPR-only
+                            # ISAs keep the plain OPR_VGPR operand.
+                            if (
+                                inst_sem is not None
+                                and inst_sem.semantic_class == 'ds_gws'
+                                and opr_type == 'OPR_VGPR'
+                                and 'acc' in inst_field_names
+                                and 'OPR_VGPR_OR_ACCVGPR' in self.isa_spec.operand_types
+                            ):
+                                opr_type = 'OPR_VGPR_OR_ACCVGPR'
                             packed_16bit_source = (
                                 self._operand_uses_packed_16bit_source(
                                     enc.enc_name, opnd, reads_dst=reads_dst
@@ -10882,8 +11112,16 @@ class CodeGenerator:
                                 private_members.append(
                                     cgen.Statement('Operand vdata_return')
                                 )
+                                if inst_sem.semantic_class == 'image_atomic':
+                                    return_size = f'({opnd_size_expr})'
+                                    if 'CMPSWAP' in inst.name:
+                                        return_size += ' / 2'
+                                    if 'tfe' in enc_field_names:
+                                        return_size += ' + 32u * inst_.tfe'
+                                else:
+                                    return_size = str((inst_sem.elem_size or 4) * 8)
                                 opnd_ctor_init.append(
-                                    f'vdata_return({(inst_sem.elem_size or 4) * 8}, '
+                                    f'vdata_return({return_size}, '
                                     f'OperandType::{opr_type}, {operand_value})'
                                 )
                                 if _uses_vgpr_msb_roles or _uses_gpr_idx_roles:
@@ -13332,7 +13570,7 @@ class CodeGenerator:
                             _local_body = self._apply_sdwa_f16_omod(
                                 _local_body,
                                 '*this',
-                                rounded_result=sem.name in ROUNDED_F16_OPS,
+                                transcendental=sem.name in F16_TRANSCENDENTAL_OPS,
                             )
                         _local_body = re.sub(
                             r'amdgpu::RegisterAccess\(wf\)\.write_lane\(\s*'
@@ -14209,6 +14447,10 @@ class CodeGenerator:
                     class_func_impls.model.insert(
                         0, cgen.Line(self._emit_gfx11_mimg_helpers())
                     )
+                elif self._uses_image_vdata_helper(enc.enc_name):
+                    class_func_impls.model.insert(
+                        0, cgen.Line(self._emit_mimg_vdata_helper())
+                    )
 
                 if (
                     self.isa_spec.arch_name.lower() in {'cdna2', 'cdna3', 'cdna4'}
@@ -14781,7 +15023,7 @@ class CodeGenerator:
                 prefixed_body = self._apply_sdwa_f16_omod(
                     prefixed_body,
                     'inst',
-                    rounded_result=sem.name in ROUNDED_F16_OPS,
+                    transcendental=sem.name in F16_TRANSCENDENTAL_OPS,
                 )
             if sem.data_type == 'f16':
                 for result_format in ('F16', 'PK_F16'):

@@ -55,7 +55,7 @@ AMDSMI_MAX_NUM_PM_POLICIES = 32
 # Max supported frequencies
 AMDSMI_MAX_NUM_FREQUENCIES = 33
 
-# Max Fan speed (legacy hwmon). For gpu_od GPUs, use amdsmi_get_gpu_fan_speed_max().
+# Max Fan speed (hwmon pwm1_max), as reported by amdsmi_get_gpu_fan_speed_max()
 AMDSMI_MAX_FAN_SPEED = 255
 
 # Max Votlage Curve Points
@@ -2813,6 +2813,143 @@ def amdsmi_get_gpu_device_cuid(processor_handle: processor_handle_t) -> str:
     )
 
     return cuid.value.decode("utf-8")
+
+
+_CUID_SOURCE_NAMES = {
+    amdsmi_wrapper.AMDSMI_CUID_SOURCE_UNKNOWN: "UNKNOWN",
+    amdsmi_wrapper.AMDSMI_CUID_SOURCE_DRIVER: "DRIVER",
+    amdsmi_wrapper.AMDSMI_CUID_SOURCE_LIBRARY: "LIBRARY",
+}
+
+_CUID_COMPONENT_NAMES = {
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_PLATFORM: "PLATFORM",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_CPU: "CPU",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_GPU: "GPU",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_NIC: "NIC",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_NPU: "NPU",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_STORAGE: "STORAGE",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_MEMORY: "MEMORY",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_GENPCIE: "GENPCIE",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_GENC: "GENC",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_RACKTRAY: "RACKTRAY",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_RACK: "RACK",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_OTHER: "OTHER",
+    amdsmi_wrapper.AMDSMI_CUID_COMPONENT_UNKNOWN: "UNKNOWN",
+}
+
+
+def _amdsmi_entry_point(name: str):
+    """Return the wrapper's binding for `name`, or raise NOT_SUPPORTED.
+
+    amdsmi_wrapper binds every entry point inside `try: ... except
+    AttributeError: pass`, so against a libamd_smi.so older than a symbol the
+    attribute is absent. A shared library too old to carry the call is
+    AMDSMI_STATUS_NOT_SUPPORTED, not an AttributeError the caller has to handle
+    separately.
+    """
+    entry = getattr(amdsmi_wrapper, name, None)
+    if entry is None:
+        raise AmdSmiLibraryException(amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED)
+    return entry
+
+
+def amdsmi_get_gpu_cuid_info(processor_handle: processor_handle_t) -> Dict[str, Any]:
+    """
+    Retrieves a GPU's Component Unified ID together with its provenance.
+
+    Built from several queries, so not atomic under a concurrent rekey or
+    topology change.
+
+    Parameters:
+        processor_handle (amdsmi_processor_handle_t): The processor handle.
+
+    Returns:
+        Dict[str, Any]: with keys
+
+            primary (str): the canonical CUID, or "" when the caller lacks the
+                privilege to read it. The primary payload embeds the raw serial
+                number, so it is CAP_SYS_ADMIN-gated at the source; an empty
+                value is not an error.
+            derived (str): the derived CUID. This is the value to record.
+            component_type (str): the on-wire Component Type by name (PLATFORM,
+                CPU, GPU, NIC, NPU, STORAGE, MEMORY, GENPCIE, GENC, RACKTRAY,
+                RACK, OTHER), or UNKNOWN.
+            source (str): which stage of the staged lookup answered: DRIVER,
+                LIBRARY or UNKNOWN.
+            auxiliary (bool): True for a temporary CUID, built from the
+                machine ID and world-readable device information. Such a value
+                changes when the machine ID changes and is not unique across
+                nodes.
+
+    Raises:
+        AmdSmiParameterException: If the input parameters are invalid.
+        AmdSmiLibraryException: If the library reports an error, including
+            AMDSMI_STATUS_NOT_SUPPORTED against a libamd_smi.so that predates
+            the call, or when the auxiliary flag cannot be read.
+    """
+    if not isinstance(processor_handle, amdsmi_wrapper.amdsmi_processor_handle):
+        raise AmdSmiParameterException(processor_handle, amdsmi_wrapper.amdsmi_processor_handle)
+
+    entry = _amdsmi_entry_point("amdsmi_get_gpu_cuid_info")
+
+    info = amdsmi_wrapper.amdsmi_cuid_info_t()
+    _check_res(entry(processor_handle, ctypes.byref(info)))
+
+    return {
+        "primary": info.primary.decode("utf-8"),
+        "derived": info.derived.decode("utf-8"),
+        "component_type": _CUID_COMPONENT_NAMES.get(info.component_type, "UNKNOWN"),
+        "source": _CUID_SOURCE_NAMES.get(info.source, "UNKNOWN"),
+        "auxiliary": bool(info.auxiliary),
+    }
+
+
+def amdsmi_get_cuid_components() -> List[Dict[str, Any]]:
+    """
+    Lists every component on the node that has a CUID: the platform, each CPU
+    package, each AMD GPU or GPU partition, each NPU, and each NIC, ordered by
+    component type, then BDF, then device path. Needs no processor handle.
+
+    Every CUID is temporary, so the primary CUIDs are empty.
+
+    Returns:
+        List[Dict[str, Any]]: one dictionary per component, with the keys of
+        amdsmi_get_gpu_cuid_info plus
+
+            bdf (str): PCI address, or "" for the platform and CPUs.
+            device_path (str): sysfs path, or "" for the platform.
+            vendor_id (int): PCI or CPUID vendor ID, 0 for the platform.
+
+    Raises:
+        AmdSmiLibraryException: If the library reports an error, including
+            AMDSMI_STATUS_NO_PERM when this caller may not read a component's
+            auxiliary flag, and AMDSMI_STATUS_NOT_SUPPORTED when built without
+            CUID or against a libamd_smi.so that predates the call.
+    """
+    entry = _amdsmi_entry_point("amdsmi_get_cuid_components")
+
+    while True:
+        count = ctypes.c_uint32(0)
+        _check_res(entry(ctypes.byref(count), None))
+        components = (amdsmi_wrapper.amdsmi_cuid_component_t * count.value)()
+        status = entry(ctypes.byref(count), components)
+        if status != amdsmi_wrapper.AMDSMI_STATUS_INSUFFICIENT_SIZE:
+            _check_res(status)
+            break
+
+    return [
+        {
+            "primary": c.info.primary.decode("utf-8"),
+            "derived": c.info.derived.decode("utf-8"),
+            "component_type": _CUID_COMPONENT_NAMES.get(c.info.component_type, "UNKNOWN"),
+            "source": _CUID_SOURCE_NAMES.get(c.info.source, "UNKNOWN"),
+            "auxiliary": bool(c.info.auxiliary),
+            "bdf": c.bdf.decode("utf-8"),
+            "device_path": c.device_path.decode("utf-8"),
+            "vendor_id": c.vendor_id,
+        }
+        for c in components[: count.value]
+    ]
 
 
 def amdsmi_get_gpu_enumeration_info(processor_handle: processor_handle_t) -> Dict[str, Any]:

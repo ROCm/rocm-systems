@@ -151,6 +151,8 @@ cases:
   Unit_HRR_Fork_Direct: {}
   Unit_HRR_ForkedChildRecordsAfterShutdown: {}
   Unit_HRR_ForkedChildRecordsAfterShutdown_Direct: {}
+  Unit_HRR_ForkedChildStaysIncomplete: {}
+  Unit_HRR_ForkedChildStaysIncomplete_Direct: {}
   Unit_HRR_GpuWorkload_Direct: {}
   Unit_HRR_GraphExplicitRoundtrip: {}
   Unit_HRR_GraphExplicit_Direct: {}
@@ -166,6 +168,7 @@ cases:
   Unit_HRR_HostMemWorkload_Direct: {}
   Unit_HRR_HostRegLaunchRoundtrip: {}
   Unit_HRR_HostRegLaunch_Direct: {}
+  Unit_HRR_KernelArgs_DebugArgsOnlyInDebugRuntime: {}
   Unit_HRR_KernelArgs_Direct: {}
   Unit_HRR_KernelArgs_SentinelKeptLostPointerNulled: {}
   Unit_HRR_LoggingRoundtrip: {}
@@ -195,6 +198,7 @@ cases:
   Unit_HRR_MemsetVariantsRoundtrip: {}
   Unit_HRR_MemsetVariants_Direct: {}
   Unit_HRR_MetadataManifest: {}
+  Unit_HRR_MetadataOnlyCapture: {}
   Unit_HRR_MiscAPIsRoundtrip: {}
   Unit_HRR_MiscAPIs_Direct: {}
   Unit_HRR_ModuleAPIRoundtrip: {}

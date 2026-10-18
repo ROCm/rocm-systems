@@ -564,6 +564,7 @@ std::unordered_map<std::string, FactoryFn> &factories() {
       cc.sgprs_per_wf = config_u32(cfg, "sgprs_per_wf", default_sgprs_per_wf(arch));
       cc.vgprs_per_wf = config_u32(cfg, "vgprs_per_wf", default_vgprs_per_wf(arch));
       cc.lds_size_kb = config_u32(cfg, "lds_size_kb", 160);
+      cc.gws_wait_limit = config_u32(cfg, "gws_wait_limit", cc.gws_wait_limit);
       cc.functional_quantum =
           config_u32(cfg, "functional_quantum", amdgpu::ComputeUnitCore::kFunctionalQuantum);
       if (auto it = cfg.find("memory_wait_diagnostics"); it != cfg.end()) {
@@ -841,6 +842,12 @@ TopologyBuildResult build_topology(const fb::TopologyDef *topology_def, simdojo:
         // from the topology and must wire it here.
         if (xcd_cp && xcd_l2)
           xcd_cp->add_l2_cache(xcd_l2);
+        // Share one device-global GWS store across this XCD's CUs now that its
+        // shader engines and CUs are attached (see GwsDevice). A standalone XCD
+        // (no SoC) keeps this per-XCD store; when a SoC owns the XCD, add_xcd
+        // below supersedes it with the one device-wide store shared across every
+        // XCD, so a dispatch under XCD fan-out still rendezvouses.
+        xcd->wire_gws_to_cus();
         if (soc)
           soc->add_xcd(xcd);
       } else if (auto *iod = dynamic_cast<amdgpu::Iod *>(c)) {

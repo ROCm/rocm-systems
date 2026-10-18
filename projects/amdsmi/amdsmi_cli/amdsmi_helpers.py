@@ -389,14 +389,64 @@ class AMDSMIHelpers:
         except amdsmi_exception.AmdSmiLibraryException:
             return "N/A"
 
-    def get_gpu_cuid_or_uuid(self, device_handle):
-        """Return the device CUID when available, falling back to the UUID."""
-        identifier = self._query_or_na(amdsmi_interface.amdsmi_get_gpu_device_cuid, device_handle)
-        if identifier == "N/A":
-            identifier = self._query_or_na(
-                amdsmi_interface.amdsmi_get_gpu_device_uuid, device_handle
+    def get_gpu_cuid_info(self, device_handle, include_primary=False):
+        """CUID presentation metadata; unavailable metadata does not imply a legacy UUID."""
+        result = {
+            "derived_cuid": "N/A",
+            "primary_cuid": "N/A" if include_primary else "N/A (not requested)",
+            "component_type": "UNKNOWN",
+            "auxiliary": "unknown",
+            "source": "UNKNOWN",
+            "identifier_kind": "unknown",
+            "cuid_metadata_status": "unknown",
+        }
+        try:
+            info = amdsmi_interface.amdsmi_get_gpu_cuid_info(device_handle)
+        except (amdsmi_exception.AmdSmiLibraryException, AttributeError) as error:
+            if not isinstance(error, amdsmi_exception.AmdSmiLibraryException):
+                result["cuid_metadata_status"] = "unsupported"
+            elif (
+                error.get_error_code()
+                == amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+            ):
+                result.update(
+                    component_type="N/A",
+                    auxiliary="N/A",
+                    source="N/A",
+                    cuid_metadata_status="not_supported",
+                )
+            else:
+                result["cuid_metadata_status"] = f"amdsmi_error_{error.get_error_code()}"
+            # Older libraries may provide the CUID-only API but not its metadata.
+            try:
+                cuid = amdsmi_interface.amdsmi_get_gpu_device_cuid(device_handle)
+            except (amdsmi_exception.AmdSmiLibraryException, AttributeError):
+                return result
+            if cuid and cuid != "N/A":
+                result.update(derived_cuid=cuid, identifier_kind="cuid")
+            return result
+
+        cuid = info.get("derived")
+        if not cuid or cuid == "N/A":
+            result["cuid_metadata_status"] = "invalid_value"
+            return result
+        result.update(derived_cuid=cuid, identifier_kind="cuid", cuid_metadata_status="available")
+        result["component_type"] = info.get("component_type", "UNKNOWN")
+        source = info.get("source")
+        if source in ("DRIVER", "LIBRARY", "UNKNOWN"):
+            result["source"] = source
+        else:
+            result["cuid_metadata_status"] = "partial"
+        auxiliary = info.get("auxiliary")
+        if isinstance(auxiliary, bool):
+            result["auxiliary"] = auxiliary
+        else:
+            result["cuid_metadata_status"] = "partial"
+        if include_primary:
+            result["primary_cuid"] = info.get("primary") or (
+                "N/A (requires root)" if os.geteuid() != 0 else "N/A"
             )
-        return identifier
+        return result
 
     def get_gpu_choices(self):
         """Return dictionary of possible GPU choices and string of the output:
@@ -1674,14 +1724,14 @@ class AMDSMIHelpers:
                 power_cap_types = amdsmi_interface.amdsmi_get_supported_power_cap(dev)
                 for sensor in power_cap_types["sensor_inds"]:
                     power_cap_info = amdsmi_interface.amdsmi_get_power_cap_info(dev, sensor)
-                    if (
+                    if power_cap_info["max_power_cap"] != "N/A" and (
                         power_cap_info["max_power_cap"]
                         > power_limit_types[f"ppt{sensor}"]["power_cap_max"]
                     ):
                         power_limit_types[f"ppt{sensor}"]["power_cap_max"] = power_cap_info[
                             "max_power_cap"
                         ]
-                    if (
+                    if power_cap_info["min_power_cap"] != "N/A" and (
                         power_cap_info["min_power_cap"]
                         < power_limit_types[f"ppt{sensor}"]["power_cap_min"]
                     ):
@@ -1793,8 +1843,8 @@ class AMDSMIHelpers:
     def get_fan_support(self):
         """Check if fan control is supported and return dynamic range info for all devices.
 
-        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and detects
-        legacy hwmon GPUs. Results are cached to improve CLI performance.
+        This method reads actual OD_RANGE values from sysfs for gpu_od GPUs and falls
+        back to the legacy hwmon range. Results are cached to improve CLI performance.
 
         Returns:
             str: Range description for all GPUs, "N/A" if not supported.
@@ -1815,29 +1865,19 @@ class AMDSMIHelpers:
             try:
                 # Check if fan control is supported
                 _ = amdsmi_interface.amdsmi_get_gpu_fan_speed(dev, 0)
-                max_speed = amdsmi_interface.amdsmi_get_gpu_fan_speed_max(dev, 0)
 
-                # Determine the range based on interface type
-                if max_speed <= 100:
-                    # This is likely a gpu_od GPU - try to get actual min from sysfs
-                    gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
-                    has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
+                # Advertise the range the set path validates against: the gpu_od
+                # OD_RANGE where present, otherwise the legacy hwmon 0-255
+                gpu_bdf = amdsmi_interface.amdsmi_get_gpu_device_bdf(dev)
+                has_gpu_od, gpu_od_path = self.detect_gpu_od(gpu_bdf)
 
-                    if has_gpu_od:
-                        # Use shared helper function to parse OD_RANGE
-                        min_speed, parsed_max = self.parse_gpu_od_fan_range(gpu_od_path)
-                        if min_speed is not None:
-                            # Successfully parsed - use the actual range from sysfs
-                            gpu_ranges.append((idx, f"{min_speed}-{parsed_max} or 0-100%%"))
-                        else:
-                            # Parsing failed - fallback to 0-max_speed
-                            gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
-                    else:
-                        # gpu_od directory doesn't exist but max_speed <= 100
-                        # Could be an edge case - use 0-max_speed
-                        gpu_ranges.append((idx, f"0-{max_speed} or 0-100%%"))
+                min_speed = None
+                if has_gpu_od:
+                    min_speed, max_speed = self.parse_gpu_od_fan_range(gpu_od_path)
+
+                if min_speed is not None:
+                    gpu_ranges.append((idx, f"{min_speed}-{max_speed} or 0-100%%"))
                 else:
-                    # Legacy hwmon GPU (0-255)
                     gpu_ranges.append((idx, "0-255 or 0-100%%"))
 
             except amdsmi_interface.AmdSmiLibraryException as e:
@@ -2216,8 +2256,10 @@ class AMDSMIHelpers:
             unit_out - Requires using SI_Unit to set current value's SI unit
              default value is SI_Unit.BASE (eg. SI_Unit.MICRO)
         return:
-            int or float : converted SI unit of value requested
+            int or float : converted SI unit of value requested, or "N/A" if val is "N/A"
         """
+        if val == "N/A":
+            return val
         if isinstance(val, float):
             return val * unit_in / unit_out
         elif isinstance(val, int):
@@ -3505,6 +3547,10 @@ class AMDSMIHelpers:
             current_power_cap = self.convert_SI_unit(
                 power_cap_info["power_cap"], AMDSMIHelpers.SI_Unit.MICRO
             )
+            if "N/A" in (min_power_cap, max_power_cap, current_power_cap):
+                raise amdsmi_exception.AmdSmiLibraryException(
+                    amdsmi_interface.amdsmi_wrapper.AMDSMI_STATUS_NOT_SUPPORTED
+                )
             # Setting power cap to 0 reads back the current cap, so the technical minimum is 1
             min_power_cap = max(min_power_cap, 1)
 
