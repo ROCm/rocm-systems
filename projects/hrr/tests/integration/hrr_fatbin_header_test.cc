@@ -38,6 +38,10 @@
 #include <string>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <sys/mman.h>
+#endif
+
 // Exported by libamdhip64 and called by the module constructor clang emits for
 // every HIP translation unit; no header declares it.
 extern "C" void** __hipRegisterFatBinary(const void* data);
@@ -163,6 +167,17 @@ std::vector<uint8_t> far_end_bundle(const std::string& target_id,
   return b;
 }
 
+// The code object for target_id, whose entry declares a terabyte. HIP picks
+// that entry for this GPU and keeps the declared size: nothing bounds it.
+std::vector<uint8_t> oversized_bundle(const std::string& target_id,
+                                      const std::vector<uint8_t>& payload) {
+  auto b = uncompressed_bundle({{kPayloadOffset, 0, kHostId},
+                                {kPayloadOffset, uint64_t(1) << 40, target_id}},
+                               kPayloadOffset + payload.size());
+  std::memcpy(b.data() + kPayloadOffset, payload.data(), payload.size());
+  return b;
+}
+
 // What clang emits for one target: an empty host entry, then the code object.
 std::vector<uint8_t> valid_bundle(const std::string& target_id,
                                   const std::vector<uint8_t>& payload) {
@@ -186,9 +201,10 @@ constexpr char     kPreInitLongIdMarker[]   = "HRR fatbin pre-init long id";
 constexpr char     kPreInitOverflowMarker[] = "HRR fatbin pre-init overflow";
 constexpr char     kPreInitFarEndMarker[]   = "HRR fatbin pre-init far end";
 constexpr uint64_t kPreInitCompressedTag    = 0x4852524650524531ull;
-// And the ones after: two HIP loads, told apart by their kernel, two it refuses.
+// And the ones after: three HIP loads, told apart by their kernel, two it refuses.
 constexpr char     kLiveKernel[]            = "hrr_fatbin_live_probe";
 constexpr char     kFarEndKernel[]          = "hrr_fatbin_far_end_probe";
+constexpr char     kOversizedKernel[]       = "hrr_fatbin_oversized_probe";
 constexpr char     kLiveForeignMarker[]     = "HRR fatbin live foreign";
 constexpr uint64_t kLiveCompressedTag       = 0x485252464C495631ull;
 
@@ -215,6 +231,24 @@ const void* pin(const std::vector<uint8_t>& bytes) {
       (reinterpret_cast<uintptr_t>(raw) + kTableLimit - 1) & ~uintptr_t(kTableLimit - 1));
   std::memcpy(p, bytes.data(), bytes.size());
   return p;
+}
+
+// Like pin(), but the bundle's last page is followed by one that cannot be
+// read, so a read that runs past the bundle faults. Windows keeps pin().
+const void* pin_before_guard(const std::vector<uint8_t>& bytes) {
+#if defined(_WIN32)
+  return pin(bytes);
+#else
+  constexpr size_t kGuard = 65536;  // a multiple of any page size in use
+  const size_t span = (bytes.size() + kGuard - 1) / kGuard * kGuard;
+  void* m = mmap(nullptr, span + kGuard, PROT_READ | PROT_WRITE,
+                 MAP_PRIVATE | MAP_ANONYMOUS, -1, 0);
+  REQUIRE(m != MAP_FAILED);
+  auto* p = static_cast<uint8_t*>(m);
+  REQUIRE(mprotect(p + span, kGuard, PROT_NONE) == 0);
+  std::memcpy(p, bytes.data(), bytes.size());
+  return p;
+#endif
 }
 
 void** register_fat_binary(const void* bundle) {
@@ -266,14 +300,17 @@ TEST_CASE("Unit_HRR_FatBinHeader_Direct", "[.][hrr-direct]") {
   const std::string target = std::string(kTargetPrefix) + prop.gcnArchName;
   const std::vector<uint8_t> live_co = compile_code_object(kLiveKernel);
   const std::vector<uint8_t> far_end_co = compile_code_object(kFarEndKernel);
-  for (const auto* co : {&live_co, &far_end_co}) {
+  const std::vector<uint8_t> oversized_co = compile_code_object(kOversizedKernel);
+  for (const auto* co : {&live_co, &far_end_co, &oversized_co}) {
     REQUIRE(co->size() > 4);
     REQUIRE(std::memcmp(co->data(), "\x7f" "ELF", 4) == 0);
   }
 
-  // From here HIP digests each bundle inside the call. These two it loads.
+  // From here HIP digests each bundle inside the call. These three it loads.
   REQUIRE(register_fat_binary(pin(valid_bundle(target, live_co))) != nullptr);
   REQUIRE(register_fat_binary(pin(far_end_bundle(target, far_end_co))) != nullptr);
+  REQUIRE(register_fat_binary(pin_before_guard(oversized_bundle(target, oversized_co))) !=
+          nullptr);
   // And these it refuses: no code object for this GPU, a bad header.
   REQUIRE(register_fat_binary(pin(live_foreign())) == nullptr);
   REQUIRE(register_fat_binary(pin(live_compressed())) == nullptr);
@@ -313,7 +350,7 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
 
   // Every registration is recorded, none with a blob: the seven the workload
   // made with a null handle (five before HIP initialised, two HIP refused),
-  // the two HIP loaded with a real one.
+  // the three HIP loaded with a real one.
   size_t null_handle = 0, loaded = 0;
   for (const auto& ev : arc.events) {
     if (ev.header().event_type != HRR_API_HIPREGISTERFATBINARY) continue;
@@ -325,7 +362,7 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
     CHECK(a->blob_size == 0);
     ++(a->ret ? loaded : null_handle);
   }
-  CHECK(loaded == 2);
+  CHECK(loaded == 3);
   CHECK(null_handle >= 7);
 
   std::vector<std::vector<uint8_t>> stored;
@@ -338,15 +375,24 @@ HRR_TEST_CASE(Unit_HRR_FatBinHeaderChecks) {
   }
 
   // The code object of each bundle HIP loaded is there, an ELF on its own
-  // rather than inside a bundle.
-  for (const char* kernel : {kLiveKernel, kFarEndKernel}) {
+  // rather than inside a bundle, and only as long as the ELF: it ends with its
+  // section header table, as the linker lays it out, even where the bundle
+  // entry declared a terabyte. The page after that bundle cannot be read, so
+  // a capture that hashed the declared size did not get this far.
+  for (const char* kernel : {kLiveKernel, kFarEndKernel, kOversizedKernel}) {
     INFO("Kernel: " << kernel);
     size_t hits = 0;
     for (const auto& bytes : stored) {
       if (!contains(bytes, kernel)) continue;
       ++hits;
-      REQUIRE(bytes.size() > 4);
+      REQUIRE(bytes.size() >= 64);
       CHECK(std::memcmp(bytes.data(), "\x7f" "ELF", 4) == 0);
+      uint64_t shoff = 0;
+      uint16_t shentsize = 0, shnum = 0;
+      std::memcpy(&shoff, bytes.data() + 0x28, sizeof(shoff));
+      std::memcpy(&shentsize, bytes.data() + 0x3a, sizeof(shentsize));
+      std::memcpy(&shnum, bytes.data() + 0x3c, sizeof(shnum));
+      CHECK(shoff + uint64_t(shentsize) * shnum == bytes.size());
     }
     CHECK(hits == 1);
   }

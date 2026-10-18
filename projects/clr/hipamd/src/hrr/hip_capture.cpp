@@ -47,6 +47,7 @@
 #include "platform/kernel.hpp"     // amd::KernelSignature
 #include "opencl/amdocl/cl_kernel.h"  // T_POINTER enum
 #include "os/os.hpp"               // amd::Os::installExceptionHandlers()
+#include "elf/elf.hpp"             // amd::Elf::getElfSize()
 
 // Fat binary format structs (ClangOffloadBundleUncompressedHeader, etc.)
 #include "../hip_code_object.hpp"
@@ -951,6 +952,21 @@ static hrr_cap::Hash128 hash_program_image(const amd::Program* prog, const uint8
                      (const void*)prog, (unsigned long long)size, (const void*)data);
     return {0, 0};
   }
+  // The span's length is not a readable extent: a code object HIP took from a
+  // registered fat binary carries the size its bundle entry declares, and
+  // nothing bounds that. An ELF's own headers do, so hash no further than its
+  // sections and segments reach, and refuse one whose headers reach past the
+  // declared length.
+  if (amd::Elf::isElfMagic(reinterpret_cast<const char*>(data))) {
+    const uint64_t elf_size = amd::Elf::getElfSize(data, size);
+    if (elf_size == 0) {
+      LogPrintfWarning("[HRR capture] program %p: ELF at %p does not fit the %llu bytes"
+                       " HIP holds for it — not recording a code object for it",
+                       (const void*)prog, (const void*)data, (unsigned long long)size);
+      return {0, 0};
+    }
+    size = static_cast<size_t>(elf_size);
+  }
   return hrr_cap::writer::write_code_object(data, size);
 }
 
@@ -1376,6 +1392,8 @@ hipError_t capture_hipLaunchByPtr(const void* func) {
 // current device, or device 0 before one is current, the device the global
 // variable sweep resolves on. A fat binary HIP has not digested yet has
 // nothing loaded; a launch from it records its code object then.
+// The size HIP holds is the bundle entry's declared one, so only an ELF, whose
+// headers bound it (see hash_program_image), is recorded.
 static void record_fat_binary_code_object(hip::FatBinaryInfo* fbi) {
   if (!fbi) return;
   int dev = hip::ihipGetDevice();
@@ -1392,6 +1410,9 @@ static void record_fat_binary_code_object(hip::FatBinaryInfo* fbi) {
     image = std::get<0>(bin);
     size = std::get<1>(bin).first;
   }
+  if (!image || size < sizeof(Elf64_Ehdr) ||
+      !amd::Elf::isElfMagic(reinterpret_cast<const char*>(image)))
+    return;
   remember_program_hash(prog, image, size, hash_program_image(prog, image, size));
 }
 
