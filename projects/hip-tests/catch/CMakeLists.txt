@@ -366,11 +366,16 @@ set(CATCH_SCRIPT_BINARY_DIR ${CMAKE_CURRENT_BINARY_DIR}/${CATCH_BUILD_DIR}/scrip
 file(COPY ${CMAKE_CURRENT_SOURCE_DIR}/cmake/hip-tests.cmake
      DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 
-# Patch CatchAddTests.cmake in-place so that catch_discover_tests_impl writes
+# Catch.cmake uses this variable when generating the discovery includes. Keep
+# our patched helper in the build tree, never in an installed Catch2 package.
+configure_file("${CATCH_ADD_TESTS_SCRIPT}"
+               "${CATCH_SCRIPT_BINARY_DIR}/CatchAddTests.cmake" COPYONLY)
+set(CATCH_ADD_TESTS_SCRIPT "${CATCH_SCRIPT_BINARY_DIR}/CatchAddTests.cmake")
+set(_CATCH_DISCOVER_TESTS_SCRIPT "${CATCH_ADD_TESTS_SCRIPT}")
+
+# Patch the build-local CatchAddTests.cmake so that catch_discover_tests_impl writes
 # an empty _tests.cmake when zero tests match the filter, instead of returning
-# early without creating the file.  The generated _include.cmake hardcodes the
-# path to CatchAddTests.cmake from Catch2's source tree, so we must patch it
-# there (not a copy) for the fix to take effect at ctest startup.
+# early without creating the file.
 # Without this, catch_discover_tests("[disabled]") on a binary with no
 # [disabled] tests leaves a dangling _include.cmake whose include() fails:
 #   "include could not find requested file: ..._tests.cmake"
@@ -397,7 +402,7 @@ unset(_catch_content)
 unset(_catch_patched)
 unset(_catch_already_patched)
 
-# Patch CatchAddTests.cmake in-place so that tests tagged [exclude_amd_wsl] are
+# Patch the build-local CatchAddTests.cmake so that tests tagged [exclude_amd_wsl] are
 # registered as DISABLED when test discovery runs on WSL.  The Linux package is
 # shared between native Linux and WSL, so the tag is baked into every binary at
 # build time and can only be resolved on the machine that runs ctest.
@@ -477,8 +482,6 @@ unset(_wsl_content)
 unset(_wsl_patched)
 unset(_wsl_already_patched)
 
-file(COPY ${CATCH_ADD_TESTS_SCRIPT}
-         DESTINATION ${CATCH_SCRIPT_BINARY_DIR})
 set_property(GLOBAL APPEND PROPERTY G_INSTALL_SCRIPT_TARGETS ${CATCH_ADD_TESTS_SCRIPT})
 
 # copy python script and headers to catch test package
