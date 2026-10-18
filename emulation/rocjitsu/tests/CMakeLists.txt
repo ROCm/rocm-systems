@@ -635,6 +635,7 @@ add_executable(
     simulated_kfd_test.cpp
     kfd_events_test.cpp
     decode_smoke_test.cpp
+    rdna4_dot_dpp_test.cpp
     readlane_selector_test.cpp
     decoder_c_api_test.cpp
     buffer_operand_test.cpp

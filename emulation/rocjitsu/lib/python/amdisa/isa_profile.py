@@ -132,11 +132,21 @@ def _legacy_dpp_opcode_rule(inst_name: str) -> DppOpcodeRule:
     return DppOpcodeRule.ALLOW
 
 
+_RDNA4_DPP_FLOAT_DOT4 = frozenset(
+    {
+        'V_DOT4_F32_FP8_BF8',
+        'V_DOT4_F32_BF8_FP8',
+        'V_DOT4_F32_FP8_FP8',
+        'V_DOT4_F32_BF8_BF8',
+    }
+)
+
+
 def _modern_rdna_dpp_opcode_rule(
     enc_name: str,
     inst_name: str,
     *,
-    allow_dot2_vop3p: bool,
+    allow_dot4_float_vop3p: bool,
     forbid_cvt_pk_f32_vop3: bool,
     rdna4_vop1_exclusions: bool,
 ) -> DppOpcodeRule:
@@ -176,10 +186,14 @@ def _modern_rdna_dpp_opcode_rule(
     if enc == 'ENC_VOP3P':
         if name.startswith('V_FMA_MIX'):
             return DppOpcodeRule.ALLOW
-        if allow_dot2_vop3p and name in (
+        if name in (
             'V_DOT2_F32_F16',
             'V_DOT2_F32_BF16',
         ):
+            return DppOpcodeRule.ALLOW
+        # RDNA4 floating dot products have DPP16 and DPP8 encodings. The
+        # integer DOT4/DOT8 and packed arithmetic restrictions do not apply.
+        if allow_dot4_float_vop3p and name in _RDNA4_DPP_FLOAT_DOT4:
             return DppOpcodeRule.ALLOW
         if (
             name in _DPP_VOP3P_FORBIDDEN
@@ -887,6 +901,17 @@ class IsaProfile(ABC):
         """
         del enc_name, inst_name, src0_size_bits
         return DppOpcodeRule.ALLOW
+
+    def supports_dpp_opcode(
+        self,
+        enc_name: str,
+        inst_name: str,
+        *,
+        has_modifier_encoding: bool,
+    ) -> bool:
+        """Qualify DPP16/DPP8 availability when the XML omits a valid form."""
+        del enc_name, inst_name
+        return has_modifier_encoding
 
     def supports_sdwa_opcode(
         self,
@@ -2367,7 +2392,7 @@ class Rdna3Profile(_AmdgpuProfileBase):
         return _modern_rdna_dpp_opcode_rule(
             enc_name,
             inst_name,
-            allow_dot2_vop3p=True,
+            allow_dot4_float_vop3p=False,
             forbid_cvt_pk_f32_vop3=False,
             rdna4_vop1_exclusions=False,
         )
@@ -2686,10 +2711,24 @@ class Rdna4Profile(_AmdgpuProfileBase):
         return _modern_rdna_dpp_opcode_rule(
             enc_name,
             inst_name,
-            allow_dot2_vop3p=False,
+            allow_dot4_float_vop3p=True,
             forbid_cvt_pk_f32_vop3=True,
             rdna4_vop1_exclusions=True,
         )
+
+    def supports_dpp_opcode(
+        self,
+        enc_name: str,
+        inst_name: str,
+        *,
+        has_modifier_encoding: bool,
+    ) -> bool:
+        # The RDNA4 XML omits the floating DOT4 DPP alternates. LLVM's
+        # VOP3P_Realtriple_gfx11_gfx12 and physical gfx1201 execution confirm
+        # both DPP16 and DPP8 for these four opcodes.
+        if enc_name.upper() == 'ENC_VOP3P' and inst_name in _RDNA4_DPP_FLOAT_DOT4:
+            return True
+        return has_modifier_encoding
 
     @property
     def ds_b8_transpose_kind(self) -> int:
