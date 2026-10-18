@@ -73,6 +73,17 @@ static int ncclIbCalculateNqps(int isP2p, int localNdevs, int remoteNdevs, const
   INFO(NCCL_NET, "NET/IB: %s Max Nqps=%d, localNqps=%d, remoteNqps=%d", funcName, maxNqps, localNqps, remoteNqps);
   return maxNqps;
 }
+// Opt-in GDR flush through an RO=0 GPU flag written by the sender after the
+// payload. PCIe ordering only covers writes issued in order by one NIC, so it
+// requires a single device and a single QP per connection. The GPU kernel
+// waits on the flag and net.cc skips the proxy flush.
+RCCL_PARAM(IbGdrFlushFlag, "IB_GDR_FLUSH_FLAG", 0);
+
+static bool ncclIbFlagFlushEligible(struct ncclIbNetCommBase* base) {
+  return rcclParamIbGdrFlushFlag() != 0 && base->vProps.ndevs == 1 && base->nqps == 1 && base->nDataQps == 1 &&
+         base->resiliency == NULL && base->recvMatchingScheme == BY_INDEX;
+}
+
 NCCL_PARAM(IbSubnetAwareRouting, "IB_SUBNET_AWARE_ROUTING", 0);
 NCCL_PARAM(IbSubnetPrefixLen, "IB_SUBNET_PREFIX_LEN", 24);
 
@@ -1013,6 +1024,7 @@ ib_recv_dev_list:
             (trafficClass != NCCL_NET_TRAFFIC_CLASS_UNDEF) ? trafficClass :
                                                              NCCL_IB_TC_DEFAULT;
   strncpy(meta.devName, mergedDev->devName, MAX_MERGED_DEV_NAME);
+  meta.flagFlushCapable = ncclIbFlagFlushEligible(&comm->base) ? 1 : 0;
 
   stage->state = ncclIbCommStateSend;
   stage->offset = 0;
@@ -1081,6 +1093,20 @@ ib_connect:
                                   IBV_ACCESS_REMOTE_WRITE | IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_READ),
                   ret, fail);
     comm->devs[i].sge.lkey = comm->devs[i].cmplsRecordsMr->lkey;
+  }
+
+  // The receiver only advertises a flag after validating our capability.
+  if (remMeta.flagFlushAddr != 0 && ncclIbFlagFlushEligible(&comm->base)) {
+    NCCLCHECKGOTO(wrap_ibv_reg_mr(&comm->devs[0].flagFlushSrcMr, comm->devs[0].base.pd, comm->flagFlushSrc,
+                                  sizeof(comm->flagFlushSrc), IBV_ACCESS_LOCAL_WRITE),
+                  ret, fail);
+    comm->flagFlushSge.lkey = comm->devs[0].flagFlushSrcMr->lkey;
+    comm->flagFlushSge.length = sizeof(uint64_t);
+    comm->flagFlushRemAddr = remMeta.flagFlushAddr;
+    comm->flagFlushRkey = remMeta.flagFlushRkey;
+    comm->flagFlush = 1;
+    INFO(NCCL_NET, "NET/IB: %s: GDR flush flag enabled (remote flag 0x%lx rkey 0x%x)", __func__,
+         comm->flagFlushRemAddr, comm->flagFlushRkey);
   }
 
   NCCLCHECKGOTO(ncclIbSenderQpsToRts(comm, &remMeta), ret, fail);
@@ -1378,6 +1404,103 @@ static ncclResult_t ncclIbFreeGpuFlushMem(struct ncclIbGpuFlush* gpuFlush) {
   }
   gpuFlush->gpuFlushGpuMem = nullptr;
   gpuFlush->gpuFlushMemIsHipAlloc = false;
+  return ncclSuccess;
+}
+
+uint64_t* ncclIbGetGpuFlushFlag(void* recvComm) {
+  struct ncclIbRecvComm* rComm = (struct ncclIbRecvComm*)recvComm;
+  return (rComm && rComm->flagFlush) ? rComm->flagFlushGpuMem : nullptr;
+}
+
+void ncclIbSetGpuFlushFlagHint(void* recvComm, int need) {
+  ((struct ncclIbRecvComm*)recvComm)->flagFlushHint = need;
+}
+
+uint64_t ncclIbGetGpuFlushFlagSeq(void* recvComm) {
+  return ((struct ncclIbRecvComm*)recvComm)->flagFlushLastSeq;
+}
+
+static ncclResult_t ncclIbFreeFlagFlush(struct ncclIbRecvComm* rComm) {
+  if (rComm->flagFlushMr != nullptr) NCCLCHECK(wrap_ibv_dereg_mr(rComm->flagFlushMr));
+  rComm->flagFlushMr = nullptr;
+  if (rComm->flagFlushDmabufFd > 0) close(rComm->flagFlushDmabufFd);
+  rComm->flagFlushDmabufFd = -1;
+#if defined(__HIP_PLATFORM_AMD__)
+  if (rComm->flagFlushGpuMem != nullptr) CUDACHECK(hipFree((void*)rComm->flagFlushGpuMem));
+#endif
+  rComm->flagFlushGpuMem = nullptr;
+  rComm->flagFlush = 0;
+  return ncclSuccess;
+}
+
+// Allocates the receiver's GDR flush flag. The flag is registered without
+// IBV_ACCESS_RELAXED_ORDERING so the NIC issues its write with RO=0, which
+// cannot pass the preceding (RO=1) payload writes on the same QP. The proxy
+// writes the flag and the per-step sequences through the CPU mapping of
+// fine-grained VRAM, which is only available on gfx942/gfx950. The flag is
+// registered through dma-buf when the connection uses dma-buf for GDR, and
+// through peermem otherwise. Any failure falls back to the RDMA read flush.
+static ncclResult_t ncclIbSetupFlagFlush(struct ncclIbRecvComm* rComm, struct ncclIbConnectionMetadata* meta,
+                                         bool useDmaBuf) {
+#if defined(__HIP_PLATFORM_AMD__)
+  int dev = 0;
+  hipDeviceProp_t prop;
+  void* ptr = nullptr;
+  if (hipGetDevice(&dev) != hipSuccess || hipGetDeviceProperties(&prop, dev) != hipSuccess ||
+      (strncmp(prop.gcnArchName, "gfx942", 6) != 0 && strncmp(prop.gcnArchName, "gfx950", 6) != 0)) {
+    INFO(NCCL_NET, "NET/IB: GDR flush flag needs CPU-visible VRAM (gfx942/gfx950), using RDMA read flush");
+    return ncclSuccess;
+  }
+#if defined(HIP_UNCACHED_MEMORY)
+  const unsigned int flagFlags = hipDeviceMallocUncached;
+#else
+  const unsigned int flagFlags = hipDeviceMallocFinegrained;
+#endif
+  if (hipExtMallocWithFlags(&ptr, GPU_PAGE_SIZE, flagFlags) != hipSuccess) {
+    (void)hipGetLastError();
+    INFO(NCCL_NET, "NET/IB: GDR flush flag allocation failed, using RDMA read flush");
+    return ncclSuccess;
+  }
+  rComm->flagFlushGpuMem = (uint64_t*)ptr;
+  rComm->flagFlushDmabufFd = -1;
+  __atomic_store_n(rComm->flagFlushGpuMem, 0, __ATOMIC_RELAXED);
+  std::atomic_thread_fence(std::memory_order_seq_cst);
+  ncclResult_t regRes = ncclSystemError;
+  if (useDmaBuf) {
+    uint64_t exportOffset = 0;
+    void* alignedPtr = nullptr;
+    size_t alignedSize = 0;
+    get_aligned_ptr_and_size(ptr, GPU_PAGE_SIZE, &alignedPtr, &alignedSize);
+    if (hsa_amd_portable_export_dmabuf(alignedPtr, alignedSize, &rComm->flagFlushDmabufFd, &exportOffset) ==
+          HSA_STATUS_SUCCESS &&
+        rComm->flagFlushDmabufFd >= 0) {
+      regRes = wrap_ibv_reg_dmabuf_mr(&rComm->flagFlushMr, rComm->devs[0].base.pd, exportOffset, GPU_PAGE_SIZE,
+                                      (uint64_t)ptr, rComm->flagFlushDmabufFd,
+                                      IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+    }
+  } else {
+    regRes = wrap_ibv_reg_mr(&rComm->flagFlushMr, rComm->devs[0].base.pd, ptr, GPU_PAGE_SIZE,
+                             IBV_ACCESS_LOCAL_WRITE | IBV_ACCESS_REMOTE_WRITE);
+  }
+  if (regRes != ncclSuccess) {
+    INFO(NCCL_NET, "NET/IB: GDR flush flag %s registration failed, using RDMA read flush",
+         useDmaBuf ? "dma-buf" : "peermem");
+    rComm->flagFlushMr = nullptr;
+    NCCLCHECK(ncclIbFreeFlagFlush(rComm));
+    return ncclSuccess;
+  }
+  rComm->flagFlush = 1;
+  rComm->flagFlushHint = 0;
+  rComm->flagFlushLastSeq = 0;
+  meta->flagFlushAddr = (uint64_t)ptr;
+  meta->flagFlushRkey = rComm->flagFlushMr->rkey;
+  INFO(NCCL_NET, "NET/IB: GDR flush flag enabled via %s (flag %p rkey 0x%x)", useDmaBuf ? "dma-buf" : "peermem", ptr,
+       meta->flagFlushRkey);
+#else
+  (void)rComm;
+  (void)meta;
+  (void)useDmaBuf;
+#endif
   return ncclSuccess;
 }
 
@@ -1761,6 +1884,9 @@ ib_recv:
     meta.devs[i].mtu = ibDev->portAttr.active_mtu;
     meta.devs[i].ibv_dev_index = rCommDev->base.ibDevN;
   }
+  if (remMeta.flagFlushCapable && rComm->flushEnabled && ncclIbFlagFlushEligible(&rComm->base)) {
+    NCCLCHECKGOTO(ncclIbSetupFlagFlush(rComm, &meta, useDmaBuf), ret, fail);
+  }
   meta.addr = (uint64_t)rComm->cmplsRecords;
   meta.sl = remMeta.sl;
   meta.tc = remMeta.tc;
@@ -1827,6 +1953,7 @@ ncclResult_t ncclIbCloseSend(void* sendComm) {
       if (commDev->ctsFifoMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->ctsFifoMr));
       if (commDev->cmplsRecordsMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->cmplsRecordsMr));
       if (commDev->putSignalScratchpadMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->putSignalScratchpadMr));
+      if (commDev->flagFlushSrcMr != NULL) NCCLCHECK(wrap_ibv_dereg_mr(commDev->flagFlushSrcMr));
       if (comm->base.resiliency) {
         NCCLCHECK(ncclIbResiliencyDevDestroy(comm->base.resiliency, i));
       }
@@ -1854,6 +1981,7 @@ ncclResult_t ncclIbCloseRecv(void* recvComm) {
       NCCLCHECK(ncclIbResiliencyClose(comm->base.resiliency));
     }
 
+    NCCLCHECK(ncclIbFreeFlagFlush(comm));
     for (int i = 0; i < comm->base.vProps.ndevs; i++) {
       struct ncclIbRecvCommDev* commDev = comm->devs + i;
       if (comm->flushEnabled) {

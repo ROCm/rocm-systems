@@ -65,6 +65,12 @@ struct ncclIbConnectionMetadata {
   int tc;
   int sl;
   int isP2p;
+  // GDR flush flag negotiation. The sender sets flagFlushCapable; the receiver
+  // answers with a non-zero flagFlushAddr/flagFlushRkey only if it enabled the
+  // flag flush, so both sides always agree on whether the flag is written.
+  int flagFlushCapable;
+  uint32_t flagFlushRkey;
+  uint64_t flagFlushAddr;
 };
 
 ncclResult_t ncclIbQpCreate(struct ncclIbQp* qp, struct ncclIbQpCreateAttr* createQpAttrs);
