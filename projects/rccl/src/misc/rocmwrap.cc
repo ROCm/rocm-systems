@@ -21,7 +21,7 @@
 #define DECLARE_ROCM_PFN(symbol) PFN_##symbol pfn_##symbol = nullptr
 
 // DMA-BUF feature gate: stays NULL when the platform does not support DMA-BUF.
-// hsa_init/hsa_system_get_info/hsa_status_string are called directly via the
+// hsa_init/hsa_shut_down/hsa_system_get_info/hsa_status_string are called directly via the
 // hsa-runtime64 library librccl links against (no dlopen/dlsym).
 DECLARE_ROCM_PFN(hsa_amd_portable_export_dmabuf);
 NCCL_PARAM(DmaBufEnable, "DMABUF_ENABLE", 1);
@@ -34,6 +34,7 @@ bool ncclCudaLaunchBlocking = false;
 
 static pthread_once_t initOnceControl = PTHREAD_ONCE_INIT;
 static ncclResult_t initResult;
+static bool rocrRefHeld = false;
 
 // This env var (NCCL_CUMEM_ENABLE) toggles cuMem API usage
 NCCL_PARAM(CuMemEnable, "CUMEM_ENABLE", -2);
@@ -363,11 +364,12 @@ static void initOnceFunc() {
     }
   }
   /*
-   * Required to initialize the ROCr Driver.
-   * Multiple calls of hsa_init() will return immediately
-   * without making any relevant change
+   * hsa_init() is reference counted: every successful call must be matched by
+   * hsa_shut_down(), or ROCr stays loaded until process exit. Its GPU-mapped
+   * host buffers are then torn down by exit_mmap, which evicts every queue of
+   * the process on every GPU. rocmLibraryFini() drops this reference.
    */
-  hsa_init();
+  if (hsa_init() == HSA_STATUS_SUCCESS) rocrRefHeld = true;
 
   initResult = ncclSuccess;
   return;
@@ -379,4 +381,13 @@ error:
 ncclResult_t rocmLibraryInit() {
   pthread_once(&initOnceControl, initOnceFunc);
   return initResult;
+}
+
+// librccl depends on libamdhip64, so this runs before HIP's own teardown and
+// leaves HIP holding the last ROCr reference.
+__attribute__((destructor)) static void rocmLibraryFini() {
+  if (rocrRefHeld) {
+    rocrRefHeld = false;
+    hsa_shut_down();
+  }
 }
