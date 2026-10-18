@@ -37,7 +37,9 @@
 // own sub-range (chunk) of the partition and waits on its own GIN signal.
 // Each peer's partition is put by a single thread: the anvil SDMA queue is per
 // peer, and concurrent producers on different XCDs can ring its doorbell out of
-// order, leaving committed packets unprocessed (the put hangs in quiet).
+// order, leaving committed packets unprocessed (the put hangs in quiet). Large
+// partitions go out as a few puts so the first CTAs reduce while the rest of
+// the data is still being copied.
 // Because the issuing CTA differs from the reducing CTA, a CTA's only guarantee
 // that the previous Reduce finished with its slots is the kernel boundary, so
 // -D 4 has no persistent device-timed variant.
@@ -342,7 +344,7 @@ __global__ void GinReduceTimedKernel(ncclWindow_t sendwin, size_t sendoffset, nc
 // `count` is the FULL element count (== part*(nRanks-1), aligned by
 // ReduceGetCollByteCount).
 template <typename T>
-__device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp) {
+__device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, int dmaChunks) {
   const int nRanks = devComm.nRanks;
   const int me = devComm.rank;
   const int nOwners = nRanks - 1;
@@ -361,30 +363,39 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
   const int G = (int)gridDim.x;
   const int nMine = (nRanks - (int)blockIdx.x + G - 1) / G;
   // SDMA cost is per packet (~tens of us, serialized per engine), so each peer
-  // gets one put for its whole partition.
-  if ((int)threadIdx.x < nMine) {
-    const int q = blockIdx.x + threadIdx.x * G;
-    if (q != root && q != me) {
-      const int owner = (q - root - 1 + nRanks) % nRanks;
-      const int slot = me < q ? me : me - 1;
-      gin.put(ncclTeamWorld(devComm), q,
-          recvwin, recvoffset + (size_t)slot * partBytes,
-          sendwin, sendoffset + (size_t)owner * partBytes,
-          partBytes);
+  // gets only dmaChunks puts (1 <= dmaChunks <= G, same on every rank). Put k
+  // covers CTAs [k*G/K, (k+1)*G/K); those CTAs are signalled as soon as it
+  // lands, so they reduce while put k+1 is still in flight.
+  for (int k = 0; k < dmaChunks; k++) {
+    const int c0 = k * G / dmaChunks;
+    const int c1 = (k + 1) * G / dmaChunks;
+    const size_t lo = (size_t)c0 * chunk;
+    const size_t hi = (c1 == G) ? partBytes : (size_t)c1 * chunk;
+    if ((int)threadIdx.x < nMine && hi > lo) {
+      const int q = blockIdx.x + threadIdx.x * G;
+      if (q != root && q != me) {
+        const int owner = (q - root - 1 + nRanks) % nRanks;
+        const int slot = me < q ? me : me - 1;
+        gin.put(ncclTeamWorld(devComm), q,
+            recvwin, recvoffset + (size_t)slot * partBytes + lo,
+            sendwin, sendoffset + (size_t)owner * partBytes + lo,
+            hi - lo);
+      }
     }
+    __syncthreads();
+    // A signal only quiets the queue (no packet), so many threads can send
+    // them without racing the doorbell. The quiet must finish before put k+1
+    // is queued, or it would also wait for that put.
+    const int nSig = c1 - c0;
+    for (int i = threadIdx.x; i < nMine * nSig; i += blockDim.x) {
+      const int q = blockIdx.x + (i / nSig) * G;
+      const int c = c0 + i % nSig;
+      const size_t len = (c == G - 1) ? partBytes - (size_t)c * chunk : chunk;
+      if (q == root || q == me || len == 0) continue;
+      gin.signal(ncclTeamWorld(devComm), q, ncclGin_SignalInc{(unsigned int)c});
+    }
+    __syncthreads();
   }
-  __syncthreads();
-  // A signal only quiets the queue (no packet), so the per-chunk signals can be
-  // sent from many threads without racing the doorbell.
-  for (int i = threadIdx.x; i < nMine * G; i += blockDim.x) {
-    const int q = blockIdx.x + (i / G) * G;
-    const int c = i % G;
-    const size_t len = (c == G - 1) ? partBytes - (size_t)c * chunk : chunk;
-    if (q == root || q == me || len == 0) continue;
-    gin.signal(ncclTeamWorld(devComm), q, ncclGin_SignalInc{(unsigned int)c});
-  }
-  // waitSignal and flush below are CTA-collective.
-  __syncthreads();
 
   if (me != root && cLen > 0) {
     // Signals start at zero and are reset once all N-1 senders have landed, so
@@ -423,21 +434,40 @@ __device__ __forceinline__ void ginSdmaReduceBody(ncclWindow_t sendwin, size_t s
 }
 
 template <typename K>
-__global__ void GinSdmaReduceKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp) {
-  ginSdmaReduceBody<typename gin_sdma_reduce::Elem<K>::type>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, redOp);
+__global__ void GinSdmaReduceKernel(ncclWindow_t sendwin, size_t sendoffset, ncclWindow_t recvwin, size_t recvoffset, size_t count, int root, struct ncclDevComm devComm, int redOp, int dmaChunks) {
+  ginSdmaReduceBody<typename gin_sdma_reduce::Elem<K>::type>(sendwin, sendoffset, recvwin, recvoffset, count, root, devComm, redOp, dmaChunks);
 }
 
-// Like testLaunchDeviceKernel() but forwards the reduction op, which the shared
-// launcher's fixed signature does not carry.
-template <typename F>
+// SDMA puts per partition for -D 4. Only split partitions large enough to hide
+// the per-packet cost behind the reduce, and only with enough CTAs that the
+// reduce, not the copy, is the long pole (on MI300X two puts lost to one below
+// 32 CTAs). NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS overrides the default. Every
+// rank must use the same value.
+static int sdmaReduceDmaChunks(size_t partBytes, int ctas) {
+  static const long envChunks = [] {
+    const char* e = getenv("NCCL_GIN_ANVIL_SDMA_REDUCE_CHUNKS");
+    if (e == nullptr || e[0] == '\0' || e[0] == '-') return 0L;
+    char* end = nullptr;
+    long v = strtol(e, &end, 10);
+    return (end != e && *end == '\0' && v >= 1) ? v : 0L;
+  }();
+  long k = envChunks ? envChunks
+                     : (ctas < 32 ? 1L : (long)std::min<size_t>(2, partBytes / ((size_t)8 << 20)));
+  return (int)std::max(1L, std::min(k, (long)ctas));
+}
+
+// Like testLaunchDeviceKernel() but forwards the reduction op (and any extra
+// kernel arguments), which the shared launcher's fixed signature does not carry.
+template <typename F, typename... Extra>
 static testResult_t ReduceLaunchDeviceKernel(F kernel, void* sendbuff, size_t sendoffset,
                                              void* recvbuff, size_t recvoffset, size_t count,
-                                             ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream) {
+                                             ncclRedOp_t op, int root, ncclComm_t comm, cudaStream_t stream,
+                                             Extra... extra) {
   if (kernel == nullptr) return testNotImplemented;
   ncclDevComm* devComm = (ncclDevComm*)comm;
   ncclWindow_t sendwin = (ncclWindow_t)sendbuff;
   ncclWindow_t recvwin = (ncclWindow_t)recvbuff;
-  kernel<<<deviceCtaCount, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, (int)op);
+  kernel<<<deviceCtaCount, 512, 0, stream>>>(sendwin, sendoffset, recvwin, recvoffset, count, root, *devComm, (int)op, extra...);
   return testSuccess;
 }
 #endif
@@ -461,7 +491,10 @@ testResult_t ReduceRunColl(void* sendbuff, size_t sendoffset, void* recvbuff, si
           return testInvalidUsage;
         }
         if (count == 0) return testSuccess;
-        TESTCHECK(ReduceLaunchDeviceKernel(SPECIALIZE_REDUCE_KERNEL(GinSdmaReduceKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream));
+        const int nRanks = ((ncclDevComm*)comm)->nRanks;
+        const size_t partBytes = count / (size_t)(nRanks - 1) * wordSize(type);
+        TESTCHECK(ReduceLaunchDeviceKernel(SPECIALIZE_REDUCE_KERNEL(GinSdmaReduceKernel, type, op), sendbuff, sendoffset, recvbuff, recvoffset, count, op, root, comm, stream,
+                                           sdmaReduceDmaChunks(partBytes, deviceCtaCount)));
         return testSuccess;
       }
 #endif
