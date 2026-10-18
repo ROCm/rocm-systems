@@ -71,6 +71,12 @@
 #include <unordered_map>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <fcntl.h>
+#include <sys/stat.h>
+#include <unistd.h>
+#endif
+
 static std::once_flag g_hrr_atexit_once;
 
 
@@ -152,12 +158,32 @@ static std::string hrr_capture_consent() {
       std::strcmp(HIP_HRR_CAPTURE_CONSENT, "yes") == 0)
     return "HIP_HRR_CAPTURE_CONSENT";
   const std::string path = hrr_consent_file();
-  // Only a regular file: opening a FIFO planted there would block HIP's init.
-  std::error_code ec;
-  if (path.empty() || !std::filesystem::is_regular_file(path, ec)) return "";
-  std::ifstream in(path);
+  if (path.empty()) return "";
   std::string line;
+#if defined(_WIN32)
+  std::error_code ec;
+  if (!std::filesystem::is_regular_file(path, ec)) return "";
+  std::ifstream in(path);
   if (!std::getline(in, line)) return "";
+#else
+  // Only a regular file, checked on the descriptor that is read: a FIFO planted
+  // there, even after a check by path, must not block HIP's init in open().
+  const int fd = ::open(path.c_str(), O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+  if (fd < 0) return "";
+  struct stat st{};
+  if (::fstat(fd, &st) != 0 || !S_ISREG(st.st_mode)) {
+    ::close(fd);
+    return "";
+  }
+  FILE* f = ::fdopen(fd, "r");
+  if (f == nullptr) {
+    ::close(fd);
+    return "";
+  }
+  int c;
+  while ((c = std::fgetc(f)) != EOF && c != '\n') line.push_back(static_cast<char>(c));
+  std::fclose(f);
+#endif
   while (!line.empty() && std::isspace(static_cast<unsigned char>(line.back()))) line.pop_back();
   return line == "yes" ? "file" : "";
 }

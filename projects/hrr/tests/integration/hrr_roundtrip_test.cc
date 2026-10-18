@@ -47,6 +47,10 @@
 #include <string>
 #include <vector>
 
+#if !defined(_WIN32)
+#include <sys/stat.h>
+#endif
+
 // fs, kPathSep, set_proc_search_path, ScopedDir, hrr_single_process_archive,
 // read_text_file, hrr_run_playback, hrr_run_roundtrip, hrr_capture_direct,
 // hrr_playback_env and run_playback_raw all live in hrr_test_common.h so the
@@ -290,6 +294,9 @@ HRR_TEST_CASE(Unit_HRR_CaptureStartNotice) {
  *     written and its metadata records capture_consent "file".
  *   - Captures with HIP_HRR_CAPTURE_CONSENT=yes and no consent file: the
  *     metadata records capture_consent "HIP_HRR_CAPTURE_CONSENT".
+ *   - On POSIX, puts a FIFO with no writer at the consent path: the workload
+ *     must finish within a deadline, unrecorded, instead of blocking HIP's
+ *     init in the open of the consent file.
  */
 HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
   ScopedDir cap{fs::temp_directory_path() / "hrr_capture_consent"};
@@ -345,6 +352,26 @@ HRR_TEST_CASE(Unit_HRR_CaptureNeedsConsent) {
     capture(/*env_consent=*/true);
     CHECK(recorded_consent() == "HIP_HRR_CAPTURE_CONSENT");
   }
+
+#if !defined(_WIN32)
+  {
+    fs::remove_all(cap.path);
+    REQUIRE(::mkfifo(consent_file.c_str(), 0600) == 0);
+    hrr::test::SpawnProc proc(hrr_self_exe(), /*capture_stdout=*/true, /*capture_stderr=*/true);
+    proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+    proc.setEnv("AMD_LOG_LEVEL", "0");
+    proc.setEnv("XDG_CONFIG_HOME", cfg.path.string());
+    proc.unsetEnv("HIP_HRR_CAPTURE_CONSENT");
+    set_proc_search_path(proc);
+    const int ret = proc.runWithTimeout("\"Unit_HRR_DeviceInfo_Direct\"", 60);
+    const std::string out = proc.getOutput();
+    INFO("Capture subprocess output:\n" << out);
+    REQUIRE(ret != hrr::test::SpawnProc::kKilledOnTimeout);
+    REQUIRE(ret == 0);
+    CHECK(out.find("capture needs your consent.") != std::string::npos);
+    CHECK(hrr_process_archives(cap.path).empty());
+  }
+#endif
 }
 
 /**
