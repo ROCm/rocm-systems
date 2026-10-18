@@ -562,8 +562,11 @@ def test_json_output_is_machine_readable(tmp_path, capsys):
     assert payload["processes"][0]["pid"] == 99
 
 
-def make_elf(sections: dict[str, bytes]) -> bytes:
-    """A minimal ELF64 little-endian image holding `sections`, then .shstrtab."""
+def make_elf(sections: dict[str, bytes], allocated: tuple[str, ...] = ()) -> bytes:
+    """A minimal ELF64 little-endian image holding `sections`, then .shstrtab.
+
+    Sections named in `allocated` carry SHF_ALLOC.
+    """
     names = b"\0"
     offsets = {}
     for name in [*sections, ".shstrtab"]:
@@ -573,7 +576,10 @@ def make_elf(sections: dict[str, bytes]) -> bytes:
     headers = [struct.pack("<IIQQQQIIQQ", 0, 0, 0, 0, 0, 0, 0, 0, 0, 0)]
     for name, data in [*sections.items(), (".shstrtab", names)]:
         headers.append(
-            struct.pack("<IIQQQQIIQQ", offsets[name], 1, 0, 0, len(body), len(data), 0, 0, 1, 0)
+            struct.pack(
+                "<IIQQQQIIQQ",
+                offsets[name], 1, 2 if name in allocated else 0, 0, len(body), len(data), 0, 0, 1, 0,
+            )
         )
         body += data
     ident = b"\x7fELF" + bytes([2, 1, 1]) + b"\0" * 9
@@ -593,6 +599,19 @@ def make_bundle(elf: bytes) -> bytes:
     return table + elf
 
 
+def register_fat_binary(pid_dir: Path, lo: int, hi: int, data: bytes) -> None:
+    """Store `data` as the capture writer stores a fat binary, and append the
+    `__hipRegisterFatBinary` record that names it to `events.bin`.
+    """
+    name = f"{lo:016x}{hi:016x}"
+    (pid_dir / "blobs" / name[:2]).mkdir(parents=True, exist_ok=True)
+    (pid_dir / "blobs" / name[:2] / f"{name}.blob").write_bytes(data)
+    record = struct.pack("<HQQQI2x", inspect_archive.REGISTER_FAT_BINARY, 2, 0, 0, 64)
+    record += struct.pack("<QQQQ", 0, lo, hi, len(data))
+    with (pid_dir / "events.bin").open("ab") as handle:
+        handle.write(record)
+
+
 def test_verify_reports_hardware_identifiers_and_build_info(tmp_path, capsys):
     """A capture that will be shared should name neither the GPU nor the build
     tree, and `verify` is where whoever approves the transfer looks.
@@ -605,11 +624,10 @@ def test_verify_reports_hardware_identifiers_and_build_info(tmp_path, capsys):
     (leaky / "manifest.json").write_text(json.dumps(manifest))
     (leaky / "code_objects").mkdir()
     (leaky / "code_objects" / "a.hsaco").write_bytes(make_elf({".comment": b"AMD clang version 23\0"}))
-    (leaky / "blobs" / "ff").mkdir()
-    (leaky / "blobs" / "ff" / "b.blob").write_bytes(
-        make_bundle(make_elf({".text": b"\1" * 8, ".debug_line_str": b"/app/build\0"}))
+    register_fat_binary(
+        leaky, 0xFF01, 1, make_bundle(make_elf({".text": b"\1" * 8, ".debug_line_str": b"/app/build\0"}))
     )
-    (leaky / "blobs" / "ff" / "c.blob").write_bytes(b"CCOB" + b"\1" * 20)
+    register_fat_binary(leaky, 0xFF02, 2, b"CCOB" + b"\1" * 20)
 
     clean = make_process(tmp_path, 32)
     manifest = json.loads((clean / "manifest.json").read_text())
@@ -638,6 +656,37 @@ def test_verify_reports_hardware_identifiers_and_build_info(tmp_path, capsys):
         "1 compressed fat binaries not checked" in text
     )
     assert "hardware identifiers: blank   build info in 0 code objects" in text
+
+
+def test_an_allocated_comment_still_counts_as_build_info(tmp_path, capsys):
+    """Capture zeroes only non-allocated sections, so an allocated .comment
+    reaches the archive as it was; `verify` must not call it clean.
+    """
+    pid_dir = make_process(tmp_path, 33)
+    (pid_dir / "code_objects").mkdir()
+    (pid_dir / "code_objects" / "a.hsaco").write_bytes(
+        make_elf({".comment": b"/home/dev/build\0"}, allocated=(".comment",))
+    )
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    assert json.loads(capsys.readouterr().out)["processes"][0]["build_info_files"] == 1
+
+
+def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
+    """`blobs/` also holds host buffers, whose bytes can be anything: a 4-byte
+    buffer "CCOB", or an offload bundle the application keeps in memory. Only
+    the blobs a `__hipRegisterFatBinary` record names are fat binaries.
+    """
+    pid_dir = make_process(tmp_path, 34)
+    leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))
+    for name, data in (("aa" + "0" * 30, b"CCOB"), ("ab" + "0" * 30, leaky)):
+        (pid_dir / "blobs" / name[:2]).mkdir()
+        (pid_dir / "blobs" / name[:2] / f"{name}.blob").write_bytes(data)
+    register_fat_binary(pid_dir, 0xAC, 3, leaky)
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    proc = json.loads(capsys.readouterr().out)["processes"][0]
+    assert proc["build_info_files"] == 1
+    assert proc["unchecked_fat_binaries"] == 0
 
 
 def test_the_json_verdict_is_one_of_the_four_documented_ones(tmp_path, capsys):

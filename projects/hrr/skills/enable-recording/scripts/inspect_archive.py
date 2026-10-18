@@ -79,6 +79,11 @@ MAX_RECORD_BYTES = 64 * 1024 * 1024
 # See projects/clr/hipamd/src/hrr/hip_capture_scrub.h.
 BUNDLE_MAGIC = b"__CLANG_OFFLOAD_BUNDLE__"
 COMPRESSED_BUNDLE_MAGIC = b"CCOB"
+# `blobs/` holds buffer contents as well as fat binaries, so the fat binaries
+# are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
+# where the record keeps the hash after the event header and `uint64 ret`.
+REGISTER_FAT_BINARY = 550
+FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
 
 
@@ -181,7 +186,11 @@ def _dir_stats(path: Path) -> tuple[int, int]:
 
 
 def _elf_has_build_info(data: bytes) -> bool:
-    """Does this ELF64 image hold a .comment or .debug* section that is not all zero?"""
+    """Does this ELF64 image hold a .comment or .debug* section that is not all zero?
+
+    Allocated sections count too: capture leaves them as they are, so they are
+    exactly the ones that can still carry a build path.
+    """
     if len(data) < 64 or data[:4] != b"\x7fELF" or data[4] != 2 or data[5] != 1:
         return False
     shoff = struct.unpack_from("<Q", data, 0x28)[0]
@@ -190,12 +199,12 @@ def _elf_has_build_info(data: bytes) -> bool:
         return False
     names = struct.unpack_from("<Q", data, shoff + shstrndx * 64 + 24)[0]
     for i in range(shnum):
-        name, kind, flags, _, offset, size = struct.unpack_from("<IIQQQQ", data, shoff + i * 64)
+        name, kind, _, _, offset, size = struct.unpack_from("<IIQQQQ", data, shoff + i * 64)
         end = data.find(b"\0", names + name)
         label = data[names + name : end if end >= 0 else len(data)]
         if label != b".comment" and not label.startswith(b".debug"):
             continue
-        if kind == 8 or flags & 0x2:  # SHT_NOBITS, SHF_ALLOC
+        if kind == 8:  # SHT_NOBITS: nothing in the file
             continue
         if data[offset : offset + size].strip(b"\0"):
             return True
@@ -221,29 +230,54 @@ def _code_object_has_build_info(data: bytes) -> bool:
     return False
 
 
+def _fat_binary_blobs(pid_dir: Path) -> list[Path]:
+    """The blob files that `__hipRegisterFatBinary` records in `events.bin` name.
+
+    The first bytes of a blob cannot say this: a host buffer may well open with
+    "CCOB" or hold an offload bundle. Records are walked by their declared
+    length, as the reader does, up to the first one that is torn.
+    """
+    events = pid_dir / "events.bin"
+    hashes: set[str] = set()
+    try:
+        size = events.stat().st_size
+        with events.open("rb") as handle:
+            head = handle.read(HEADER_BYTES)
+            if len(head) < HEADER_BYTES or struct.unpack_from("<I", head)[0] != HEADER_MAGIC:
+                return []
+            pos = HEADER_BYTES
+            while pos + EVENT_HEADER_BYTES <= size:
+                record = handle.read(EVENT_HEADER_BYTES)
+                event_type, length = struct.unpack_from("<H24xI", record)
+                if length < EVENT_HEADER_BYTES or length > min(size - pos, MAX_RECORD_BYTES):
+                    break
+                if event_type == REGISTER_FAT_BINARY and length >= FAT_BINARY_HASH_OFFSET + 16:
+                    record += handle.read(FAT_BINARY_HASH_OFFSET + 16 - EVENT_HEADER_BYTES)
+                    lo, hi = struct.unpack_from("<QQ", record, FAT_BINARY_HASH_OFFSET)
+                    hashes.add(f"{lo:016x}{hi:016x}")  # hash_hex() in the capture writer
+                pos += length
+                handle.seek(pos)
+    except OSError:
+        pass
+    return [pid_dir / "blobs" / h[:2] / f"{h}.blob" for h in sorted(hashes)]
+
+
 def _scan_code_objects(pid_dir: Path, proc: ProcessArchive) -> None:
     """Count the stored code objects that still carry build information.
 
     Every file under `code_objects/` is one; under `blobs/` only the fat
-    binaries are, and the first bytes tell them from buffer contents without
-    reading the buffers.
+    binaries are, and the events say which those are.
     """
-    candidates = sorted((pid_dir / "code_objects").glob("*")) + sorted(
-        (pid_dir / "blobs").rglob("*")
-    )
+    candidates = sorted((pid_dir / "code_objects").glob("*")) + _fat_binary_blobs(pid_dir)
     for path in candidates:
         try:
             if not path.is_file():
                 continue
-            with path.open("rb") as handle:
-                head = handle.read(len(BUNDLE_MAGIC))
-                if head.startswith(COMPRESSED_BUNDLE_MAGIC):
-                    proc.unchecked_fat_binaries += 1
-                    continue
-                if path.parent.name != "code_objects" and head != BUNDLE_MAGIC:
-                    continue
-                data = head + handle.read()
+            data = path.read_bytes()
         except OSError:
+            continue
+        if data.startswith(COMPRESSED_BUNDLE_MAGIC):
+            proc.unchecked_fat_binaries += 1
             continue
         if _code_object_has_build_info(data):
             proc.build_info_files += 1
