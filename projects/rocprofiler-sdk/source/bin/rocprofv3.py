@@ -1775,6 +1775,24 @@ def run(app_args, args, **kwargs):
         ROCPROF_SDK_LIBRARY,
     ]
 
+    # glibc's ld.so(8) splits LD_PRELOAD on spaces *and* colons without any
+    # escaping support.  When a ROCm library path contains a space (e.g. a pip
+    # venv installed into a directory with a space in its name), the loader
+    # will silently fail to preload the library while emitting confusing
+    # "cannot preload" errors for every split fragment.
+    _all_preload = prepend_preload + append_preload
+    _space_paths = [p for p in _all_preload if " " in p]
+    if _space_paths:
+        sys.stderr.write(
+            "rocprofv3 warning: the following library paths contain spaces "
+            "and cannot be expressed in LD_PRELOAD; profiling may be "
+            "incomplete.  Move your ROCm installation to a space-free path "
+            "or use the ROCP_TOOL_LIBRARIES environment variable as a "
+            "workaround:\n"
+        )
+        for _p in _space_paths:
+            sys.stderr.write(f"  {_p}\n")
+
     if not args.pid:
         update_env("LD_PRELOAD", ":".join(prepend_preload), prepend=True)
         update_env("LD_PRELOAD", ":".join(append_preload), append=True)
