@@ -509,7 +509,10 @@ public:
 
   /// @brief Register a new workgroup with its expected WF count.
   /// @details Called by the DispatchController when assigning a WG to this CU.
-  /// Initializes the refcount so release_wf() can detect WG completion.
+  /// Initializes the refcount so release_wf() can detect WG completion. This
+  /// also performs the once-per-dispatch launch cache invalidation, so direct
+  /// callers of dispatch_wf() must call begin_workgroup() before execution
+  /// begins when modeling a kernel launch.
   void begin_workgroup(uint32_t dispatch_id, uint32_t wg_id, uint32_t wf_count,
                        uint32_t num_named_barriers = 0);
 
@@ -759,7 +762,10 @@ public:
   ///
   /// Used by the config loader for deferred initialization.
   /// @param memory New GPU memory (not owned).
-  void set_memory(GpuMemory *memory) { memory_ = memory; }
+  void set_memory(GpuMemory *memory) {
+    memory_ = memory;
+    inst_cache_.invalidate_all();
+  }
 
   /// @brief Set (or replace) the L2 cache pointer.
   ///
@@ -1458,11 +1464,11 @@ protected:
   std::atomic<uint64_t> inst_cache_debug_epoch_{0};
   /// @brief The epoch this CU's thread has already invalidated the I$ for.
   uint64_t inst_cache_debug_epoch_seen_ = 0;
-  /// @brief Dispatch whose launch invalidation the I$ has already taken.
+  /// @brief Dispatch whose launch invalidation the I$ and scalar cache have taken.
   /// @details Held as 64 bits so the initial value is outside the 32-bit
   /// dispatch-ID space and the first dispatch, including ID 0, still
   /// invalidates.
-  uint64_t inst_cache_dispatch_id_ = ~uint64_t{0};
+  uint64_t launch_cache_dispatch_id_ = ~uint64_t{0};
   Lds lds_;
   ImmediateClusterLdsMulticastEngine default_cluster_lds_multicast_engine_;
   ClusterLdsMulticastEngine *cluster_lds_multicast_engine_ = &default_cluster_lds_multicast_engine_;
