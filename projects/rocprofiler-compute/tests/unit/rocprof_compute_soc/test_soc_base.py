@@ -75,11 +75,6 @@ def perfmon_config():
 
 
 @pytest.fixture
-def empty_counter_file(perfmon_config):
-    return CounterFile("0", perfmon_config)
-
-
-@pytest.fixture
 def gfx1250_perfmon_config():
     return dict(GFX1250_PERFMON_CONFIG)
 
