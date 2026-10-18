@@ -43,6 +43,7 @@
 #include <cstring>
 #include <filesystem>
 #include <fstream>
+#include <iterator>
 #include <sstream>
 #include <string>
 #include <vector>
@@ -355,6 +356,57 @@ HRR_TEST_CASE(Unit_HRR_MetadataOnlyCapture) {
   CHECK(out.find("captured in metadata-only mode. Content mode "
                  "(HIP_HRR_CAPTURE_CONTENT=1 at capture) would have recorded it.") !=
         std::string::npos);
+}
+
+/**
+ * Test Description
+ * ----------------
+ *   - Captures Unit_HRR_SetupArgument_Direct, which pushes a known eight-byte
+ *     scalar through the legacy hipSetupArgument, once without and once with
+ *     HIP_HRR_CAPTURE_CONTENT. Both archives record the push.
+ *   - Without the opt-in no file in the archive holds the scalar's bytes. With
+ *     it the archive does, which shows the search would find them.
+ */
+HRR_TEST_CASE(Unit_HRR_MetadataOnlySetupArgument) {
+  // The scalar Unit_HRR_SetupArgument_Direct pushes.
+  constexpr uint64_t kMarker = 0x5e7a2c0ffee1d0a7ULL;
+  const auto* marker = reinterpret_cast<const char*>(&kMarker);
+
+  auto archive_holds_marker = [&](bool content) {
+    ScopedDir cap{fs::temp_directory_path() /
+                  (content ? "hrr_setup_argument_content" : "hrr_setup_argument_metadata")};
+    {
+      hrr::test::SpawnProc proc(hrr_self_exe());
+      proc.setEnv("HIP_HRR_CAPTURE_OUTPUT", cap.path.string());
+      if (content)
+        proc.setEnv("HIP_HRR_CAPTURE_CONTENT", "1");
+      else
+        proc.unsetEnv("HIP_HRR_CAPTURE_CONTENT");
+      set_proc_search_path(proc);
+      const int ret = proc.run("\"Unit_HRR_SetupArgument_Direct\"");
+      INFO("Capture exit code: " << ret);
+      REQUIRE(ret == 0);
+    }
+    const auto counts = hrr_info_api_counts(cap.path);
+    const auto it = counts.find("hipSetupArgument");
+    REQUIRE(it != counts.end());  // the push was recorded
+    CHECK(it->second == 1);
+
+    bool found = false;
+    for (const auto& e : fs::recursive_directory_iterator(cap.path)) {
+      if (!e.is_regular_file()) continue;
+      std::ifstream in(e.path(), std::ios::binary);
+      const std::string bytes((std::istreambuf_iterator<char>(in)),
+                              std::istreambuf_iterator<char>());
+      if (std::search(bytes.begin(), bytes.end(), marker, marker + sizeof(kMarker)) !=
+          bytes.end())
+        found = true;
+    }
+    return found;
+  };
+
+  CHECK_FALSE(archive_holds_marker(/*content=*/false));
+  CHECK(archive_holds_marker(/*content=*/true));
 }
 
 /**

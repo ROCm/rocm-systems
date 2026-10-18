@@ -1160,6 +1160,11 @@ class Deref:
     # the bytes field zero and records only whether the pointer was non-null.
     # The field keeps its size, so archives from before still read.
     capability: bool = False
+    # For a pointee that is application data, such as a kernel argument value:
+    # capture copies the bytes only when HIP_HRR_CAPTURE_CONTENT is set. In
+    # metadata-only mode the bytes field stays zero; the count and the
+    # present flag are recorded either way.
+    content: bool = False
 
     @property
     def is_array(self) -> bool:
@@ -1221,8 +1226,11 @@ DEREF_FIELDS: Dict[str, List[Deref]] = {
     # the pending kernarg buffer. Recorded as a bare address, replay handed the
     # runtime a pointer into the capturing process and the read segfaulted.
     # 256 bytes covers any single kernel argument, struct arguments included.
+    # The bytes are a kernel argument value, so metadata-only capture withholds
+    # them, as it does for a launch's by-value arguments.
     "hipSetupArgument": [
-        Deref("arg", "unsigned char", 1, count="size", max_count=256),
+        Deref("arg", "unsigned char", 1, count="size", max_count=256,
+              content=True),
     ],
     # The symbol name is the entire question these two ask, and it was recorded
     # as an address with none of the characters behind it: measured as a SIGSEGV
@@ -2513,6 +2521,21 @@ def _fill_param(lines: List[str], p: Param, name: str, ft: str) -> None:
         lines.append(f"    a.{name} = static_cast<decltype(a.{name})>({name});")
 
 
+def _emit_copy(lines: List[str], d: Deref, stmt: str) -> None:
+    """Emit the copy of a dereferenced pointee into its bytes field.
+
+    A content pointee (Deref.content) is application data, so the copy runs
+    only when HIP_HRR_CAPTURE_CONTENT is set. In metadata-only mode the field
+    keeps the zeros of the value-initialised event.
+    """
+    if d.content:
+        lines.append("      // Application data: withheld in metadata-only capture.")
+        lines.append("      if (HIP_HRR_CAPTURE_CONTENT)")
+        lines.append(f"        {stmt}")
+    else:
+        lines.append(f"      {stmt}")
+
+
 def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
     """Emit the memcpy that carries each dereferenced pointee into the event.
 
@@ -2552,7 +2575,7 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"            \"time; replay would pass a shortened string\");")
             lines.append(f"        _n = {d.max_count - 1}u;")
             lines.append(f"      }}")
-            lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param}, _n);")
+            _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param}, _n);")
             lines.append(f"      a.{d.bytes_field}[_n] = 0;")
             lines.append(f"      a.{d.present_field} = 1;")
             lines.append(f"    }}")
@@ -2573,8 +2596,8 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"            \"capture time; replay would pass a partial array\");")
             lines.append(f"        _n = {d.max_count}u;")
             lines.append(f"      }}")
-            lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param},"
-                         f" static_cast<size_t>(_n) * sizeof({d.ctype}));")
+            _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param},"
+                                 f" static_cast<size_t>(_n) * sizeof({d.ctype}));")
             lines.append(f"      a.{d.count_field}   = _n;")
             lines.append(f"      a.{d.present_field} = 1;")
             lines.append(f"    }}")
@@ -2583,7 +2606,7 @@ def _fill_derefs(lines: List[str], entry: ApiEntry) -> None:
             lines.append(f"    if ({d.param}) a.{d.present_field} = 1;")
         else:
             lines.append(f"    if ({d.param}) {{")
-            lines.append(f"      std::memcpy(a.{d.bytes_field}, {d.param}, sizeof({d.ctype}));")
+            _emit_copy(lines, d, f"std::memcpy(a.{d.bytes_field}, {d.param}, sizeof({d.ctype}));")
             lines.append(f"      a.{d.present_field} = 1;")
             lines.append(f"    }}")
 

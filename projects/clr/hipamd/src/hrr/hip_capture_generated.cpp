@@ -4432,7 +4432,9 @@ static hipError_t capture_hipSetupArgument(const void* arg, size_t size, size_t 
             "capture time; replay would pass a partial array");
         _n = 256u;
       }
-      std::memcpy(a.arg_bytes, arg, static_cast<size_t>(_n) * sizeof(unsigned char));
+      // Application data: withheld in metadata-only capture.
+      if (HIP_HRR_CAPTURE_CONTENT)
+        std::memcpy(a.arg_bytes, arg, static_cast<size_t>(_n) * sizeof(unsigned char));
       a.arg_n   = _n;
       a.arg_present = 1;
     }
