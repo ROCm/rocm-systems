@@ -20,7 +20,7 @@ part of the repository's default build or installation yet.
   implementation-neutral AMD GPU device-interface layer.
 - [`ddi/libamdf`](ddi/libamdf/README.md) implements the AMDF C table ABI and
   builds a static library. Its shared ABI is an alias of the shared image.
-- [`hsa/libhsa`](hsa/libhsa/README.md) implements the HSA C ABI and builds a
+- [`ddi/libhsa`](ddi/libhsa/README.md) implements the HSA C ABI and builds a
   shared ABI in the same image. It consumes rocddi directly, not through AMDF.
 
 Component directories own implementation and local tests. The root owns the
