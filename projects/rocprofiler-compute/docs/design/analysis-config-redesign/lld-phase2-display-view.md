@@ -245,6 +245,26 @@ Stage 4 (metrics must be migrated before views can reference them) and Stage 5
 
 ### Modifications
 
+Every production reader of the old analysis config tree moves to the new path:
+
+| Reader | Where | New source |
+|---|---|---|
+| Analyze panel configs | `generate_configs()`, `rocprof_compute_analyze/analysis_base.py` | `views_to_panel_configs()` |
+| `--list-metrics`, `--list-blocks` | `_build_arch_metric_list()`, `rocprof_compute_base.py` | `views_to_panel_configs()` |
+| Memory chart | `PanelConfigs.for_arch()`, `memory_chart/loader.py` | `views_to_panel_configs()` |
+| Profile counters (no filter, `-b`, `--set`, `--roof-only`) | `detect_counters()` and `_append_analysis_yaml_for_filter_token()`, `rocprof_compute_soc/soc_base.py` | `MetricLibrary.get_counters_for_metrics()` |
+| Metric-aware counter grouping | `_iter_arch_analysis_yaml_metrics()` and `profiling_counter_grouping_policy.yaml`, `soc_base.py` | Not designed yet: needs metric ids instead of positional ids |
+| `-b` panel aliases | `get_arch_panel_id_to_alias()`, `utils/utils_common.py` (reads `*_config_template.yaml`) | Not designed yet: views need to carry the alias |
+
+`load_panel_configs()` in `utils/utils_common.py` then has no production caller. The
+unused copy in `utils/file_io.py` is deleted.
+
+**Fallback for one release:** the old panel config files and `load_panel_configs()`
+stay for one release after the cutover, behind a hidden option that routes every reader
+above back to them. If the new path misbehaves in the field, users and support can switch
+back without a new build. The next release removes the option, the old files, the old
+loader and the tooling listed below.
+
 **`generate_configs()` in `analysis_base.py`** -- the new path replaces the
 `load_panel_configs()` call and becomes the only path (Phase 1 adds no runtime switch):
 
@@ -279,8 +299,9 @@ is removed.
 
 **`legacy_panel_id`** -- removed from all Layer 3 view files.
 
-**Old panel config YAML files** -- removed from per-arch directories. The base arch
-and `views/` directories are the canonical source.
+**Old panel config YAML files** -- removed from per-arch directories one release after
+the cutover (see the fallback above). The base arch and `views/` directories are the
+canonical source.
 
 **`compat_adapter.py`** -- removed.
 
@@ -303,6 +324,8 @@ and `views/` directories are the canonical source.
 - Counter extraction: for every architecture, compare `detect_counters()` output to
   golden file.
 - Pre-commit hooks: all pass with the new file structure.
+- Fallback: with the hidden option set, analyze, the list commands and profile counters
+  match the pre-cutover output.
 - Documentation pipeline: Sphinx-generated metric reference is identical to
   pre-migration version.
 
