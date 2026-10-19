@@ -387,7 +387,41 @@ def test_content_hash_is_fnv1a64():
     assert content_hash(b"foobar") == "fnv1a64:85944171f73967e8"
 
 
-def test_verified_decode_is_written_back(tmp_path, code_object):
+@pytest.mark.parametrize("storage_type", ["FILE", "MEMORY"])
+def test_verified_decode_is_written_back(tmp_path, code_object, storage_type):
+    path, data = code_object
+    db = tmp_path / "pc.db"
+    recorded_object = file_code_object(path, data)
+    recorded_object.update(
+        storage_type=storage_type,
+        memory_size=len(data) if storage_type == "MEMORY" else 0,
+    )
+    guid = build_db(
+        db,
+        code_objects=[recorded_object],
+        samples=[{"timestamp": 100, "offset": 4}],
+    )
+    rows = run_driver(tmp_path, inputs=[str(db)])
+    assert rows[0][3] == insn(data, 4)
+    assert stored_disassembly(db) == [(guid, 1, 4, insn(data, 4))]
+
+
+@pytest.mark.parametrize("comment", [None, "", "source line"])
+def test_cached_comment_matches_lazy_decode(
+    tmp_path, monkeypatch, counting_decoder, code_object, comment
+):
+    import rocpd.importer as importer
+
+    callbacks = []
+    monkeypatch.setattr(importer.atexit, "register", callbacks.append)
+    decode = counting_decoder.decode
+
+    def decode_with_comment(self, *args):
+        result = decode(self, *args)
+        result["comment"] = comment
+        return result
+
+    monkeypatch.setattr(counting_decoder, "decode", decode_with_comment)
     path, data = code_object
     db = tmp_path / "pc.db"
     guid = build_db(
@@ -395,9 +429,20 @@ def test_verified_decode_is_written_back(tmp_path, code_object):
         code_objects=[file_code_object(path, data)],
         samples=[{"timestamp": 100, "offset": 4}],
     )
-    rows = run_driver(tmp_path, inputs=[str(db)])
-    assert rows[0][3] == insn(data, 4)
+    query = (
+        "SELECT instruction, instruction_comment, instruction_comment IS NULL "
+        "FROM rocpd_gpu_pc_sample_decoded"
+    )
+    with open_db([db], cache_disassembly=True) as connection:
+        cold_rows = connection.execute(query).fetchall()
+    assert cold_rows == [(insn(data, 4), comment or None, int(not comment))]
+    assert callbacks
+    for callback in callbacks:
+        callback()
     assert stored_disassembly(db) == [(guid, 1, 4, insn(data, 4))]
+    with open_db([db]) as connection:
+        assert connection.execute(query).fetchall() == cold_rows
+    assert counting_decoder.decodes == 1
 
 
 def test_rebuilt_code_object_is_rejected(tmp_path, code_object):

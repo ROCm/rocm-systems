@@ -1871,16 +1871,18 @@ One row per collected PC sample. Key columns:
     - Dispatch ID of the kernel being sampled.
   * - ``correlation_id``
     - INTEGER
-    - Internal correlation ID of the PC sample record. The user-assigned
-      *external* correlation ID is available on the linked ``rocpd_event`` row
-      (``rocpd_event.correlation_id``).
+    - User-assigned external correlation ID, matching the linked
+      ``rocpd_event.correlation_id``. The internal ID is stored in the linked
+      event's ``stack_id``.
   * - ``exec_mask``
     - TEXT
     - Bitmask of active SIMD lanes at sample time. Stored as a decimal string so
       the full 64-bit mask is preserved without integer overflow. Because the
       column is TEXT, ``<``, ``>``, ``ORDER BY``, ``MIN``, and ``MAX`` compare
-      masks as text (``'255' > '1000'``), while ``=`` with an integer still
-      matches. ``CAST(exec_mask AS INTEGER)`` orders masks below 2^63
+      masks as text (``'255' > '1000'``). For exact equality, use a quoted decimal
+      string, such as ``exec_mask = '18446744073709551615'``, or bind a string
+      parameter. Numeric literals above 2^63 - 1 are interpreted as REAL and
+      may not match the stored text. ``CAST(exec_mask AS INTEGER)`` orders masks below 2^63
       numerically but clamps larger masks, including a full 64-lane mask, to
       9223372036854775807.
   * - ``code_object_id``
@@ -1891,10 +1893,12 @@ One row per collected PC sample. Key columns:
     - Byte offset within the code object (the program counter value).
   * - ``agent_id``
     - INTEGER
-    - GPU agent on which the sample was collected.
+    - GPU agent from the parent dispatch, falling back to recorded code-object
+      metadata when dispatch context is unavailable. NULL when neither is known.
   * - ``tid``
     - INTEGER
-    - CPU thread that launched the parent kernel dispatch.
+    - CPU thread that launched the parent kernel dispatch. NULL when dispatch
+      context is unavailable.
   * - ``wave_issued``
     - INTEGER
     - Whether the wave issued an instruction (1 = yes, 0 = no). Stochastic only; NULL for host-trap.
@@ -1968,6 +1972,8 @@ are NULL for rows whose blob schema does not contain them. The view additionally
 exposes the disassembled ``instruction`` and
 ``instruction_comment`` text for the sampled program counter and the
 human-readable ``inst_type_name`` and ``stall_reason_name`` columns.
+An empty instruction comment is exposed as ``NULL``, whether the instruction
+is decoded lazily or read from stored disassembly.
 
 Instruction disassembly
 +++++++++++++++++++++++++
@@ -2092,15 +2098,15 @@ controls whether *new* decodes are persisted:
 
 .. note::
 
-   Lazy decoding can only disassemble code objects that were loaded from a
-   file on disk (``storage_type = FILE``). Code objects loaded directly from
-   process memory (``storage_type = MEMORY``) are not written to disk during
-   PC sampling, so their instruction bytes are unavailable once the profiled
-   process exits, and the decoded view reports ``Decode unavailable`` for
-   those program counters. To capture disassembly for memory-resident code
-   objects, pass ``--complete-isa-decode`` at collection time; it
-   disassembles them in-process from live memory and persists the text into
-   the database.
+  Lazy decoding requires accessible code-object bytes through a local
+  ``file://`` URI. Both ``storage_type = FILE`` and ``storage_type = MEMORY``
+  objects can be decoded when such a URI resolves to matching bytes; MEMORY
+  objects must also match the recorded ``memory_size``. PC sampling does not
+  snapshot purely memory-resident objects to disk. Objects available only
+  through a ``memory://`` URI therefore cannot be decoded after the profiled
+  process exits, and the view reports ``Decode unavailable``. To retain their
+  disassembly, pass ``--complete-isa-decode`` at collection time; it decodes
+  the live bytes in-process and persists the text into the database.
 
 Querying PC sampling data
 ++++++++++++++++++++++++++
@@ -2123,7 +2129,8 @@ Querying PC sampling data
 
 Each PC sample event's ``parent_id`` in ``rocpd_event`` points to the dispatch
 event for the kernel being sampled when ``--kernel-trace`` is active.
-``parent_id`` is ``NULL`` for samples collected without kernel-dispatch tracing:
+Its ``parent_stack_id`` records that dispatch event's internal ``stack_id``.
+Both parent fields are ``NULL`` when the dispatch context was not captured:
 
 .. code-block:: bash
 

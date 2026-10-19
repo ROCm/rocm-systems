@@ -53,6 +53,11 @@ def pytest_addoption(parser):
         default=None,
         help="Expected PC-sampling method for this run: 'stochastic' or 'host_trap'.",
     )
+    parser.addoption(
+        "--expect-no-dispatches",
+        action="store_true",
+        help="Require a capture without kernel-dispatch tracing.",
+    )
 
 
 @pytest.fixture

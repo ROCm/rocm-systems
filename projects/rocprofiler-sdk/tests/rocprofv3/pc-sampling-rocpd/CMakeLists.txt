@@ -84,6 +84,41 @@ rocprofiler_add_integration_validate_test(
     FIXTURES_REQUIRED rocprofv3-test-pc-sampling-rocpd
     DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
 
+rocprofiler_add_integration_execute_test(
+    rocprofv3-test-pc-sampling-rocpd-no-dispatch
+    COMMAND
+        $<TARGET_FILE:rocprofiler-sdk::rocprofv3> --pc-sampling-beta-enabled 1
+        --kernel-trace false --pc-sampling-unit cycles --pc-sampling-method stochastic
+        --pc-sampling-interval 1048576 -d
+        ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input -o out
+        --output-format rocpd -- $<TARGET_FILE:exec-mask-manipulation>
+    DEPENDS exec-mask-manipulation
+    TIMEOUT 120
+    LABELS "integration-tests;pc-sampling;stochastic;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    ENVIRONMENT "${rocprofv3-pc-sampling-rocpd-env}"
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    FIXTURES_SETUP rocprofv3-test-pc-sampling-rocpd-no-dispatch
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+
+rocprofiler_add_integration_validate_test(
+    rocprofv3-test-pc-sampling-rocpd-no-dispatch
+    TEST_PATHS validate.py
+    COPY conftest.py
+    CONFIG pytest.ini LIBRARY_PATH "${rocprofiler-sdk_LIB_DIR}"
+    PYTHON_PATH
+        "${rocprofiler-sdk_LIB_DIR}/python${Python3_VERSION_MAJOR}.${Python3_VERSION_MINOR}/site-packages"
+    ARGS --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/pc-sampling-rocpd-no-dispatch-input/out_results.db
+         --expect-no-dispatches
+    DISCOVERY_ARGS -k test_rocpd_agent_attribution
+    TIMEOUT 120
+    LABELS "integration-tests;pc-sampling;stochastic;rocpd"
+    PRELOAD "${PRELOAD_ENV}"
+    SKIP_REGULAR_EXPRESSION "${ROCPROFV3_TESTS_PC_SAMPLING_SKIP_REGEX}"
+    FIXTURES_REQUIRED rocprofv3-test-pc-sampling-rocpd-no-dispatch
+    DISABLED "${IS_PC_SAMPLING_STOCHASTIC_DISABLED}")
+
 # Opt-in disassembly coverage: --complete-isa-decode persists the disassembled instruction
 # text at finalization into rocpd_disassembly_data (the second disassembly path); the
 # decoded view then serves the stored text instead of decoding on demand.
