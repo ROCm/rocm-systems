@@ -41,6 +41,12 @@ module:
     # Rock_Window_Failures_on_gfx1151
     disabled: [amd_windows, amd_wsl]
     tags: [launch]
+  Unit_hipModuleLaunchKernel_Extra_ShortBufferWarning:
+    <<: *level_default
+    unsupported:
+      targets: [amd_windows, amd_wsl, nvidia_linux, nvidia_windows]
+      reason: uses AMD runtime logging and launch_kernel_module.code, built on Linux only
+    tags: [launch]
   Unit_hipExtLaunchKernelGGL_Functional:
     <<: *level_default
     # SWDEV-438524: Below tests causing TDR & machine down in stress test on 15/12/23 ===
