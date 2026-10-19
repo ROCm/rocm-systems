@@ -96,9 +96,11 @@ So the recorder copies each dispatch's kernarg segment out at record time, while
 holds that launch's arguments, and the executor stages them in a kernarg block of its own, laying
 the recorded bytes out back to back with each kernel's 256-byte alignment honored and patching each
 packet to point at its slot. The block is refilled before every pass, so a pass never observes
-another pass's kernarg contents. It comes from the agent's kernarg pool, or is the block the agent's
-previous range used when that one fits; a block is kept for the next range only after the last pass
-that read it has drained.
+another pass's kernarg contents. It is the same kind of memory as the application's kernarg blocks,
+device memory or the agent's kernarg pool, so a replayed kernel reads its arguments as fast as the
+application's own launch did. It is either newly allocated or the block the agent's previous range
+used when that one fits; a block is kept for the next range only after the last pass that read it
+has drained.
 
 Each recorded dispatch's completion signal is also cleared. The application has already consumed
 (and may have destroyed or reused) the signal a recorded packet carried; re-firing it would corrupt

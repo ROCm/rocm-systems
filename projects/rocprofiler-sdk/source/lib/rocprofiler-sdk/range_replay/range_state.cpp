@@ -35,6 +35,7 @@
 
 #include <fmt/format.h>
 #include <hsa/hsa.h>
+#include <hsa/hsa_ext_amd.h>
 
 #include <algorithm>
 #include <atomic>
@@ -170,6 +171,21 @@ void
 set_kernarg_address(hsa::rocprofiler_packet& packet, void* address)
 {
     packet.kernel_dispatch.kernarg_address = address;
+}
+
+// True when `address` is device memory owned by the queue's agent.
+bool
+is_agent_memory(const hsa::Queue& queue, const void* address)
+{
+    const auto& ext = queue.ext_api();
+    if(ext.hsa_amd_pointer_info_fn == nullptr) return false;
+
+    auto info = hsa_amd_pointer_info_t{};
+    info.size = sizeof(info);
+    if(ext.hsa_amd_pointer_info_fn(address, &info, nullptr, nullptr, nullptr) != HSA_STATUS_SUCCESS)
+        return false;
+    return info.type == HSA_EXT_POINTER_TYPE_HSA &&
+           info.agentOwner.handle == queue.get_agent().get_hsa_agent().handle;
 }
 }  // namespace
 
@@ -413,10 +429,15 @@ note_submission(const hsa::Queue&              queue,
                 ctx->record.decline(ROCPROFILER_RANGE_REPLAY_STATUS_UNKNOWN_KERNARG_SIZE);
                 return;
             }
-            // Kernarg memory is host-accessible fine-grained memory, so the bytes can be copied
-            // directly. This must happen now: HIP recycles a kernarg block as soon as its kernel
-            // completes, so a later launch in the same range can overwrite these arguments.
+            // Kernarg memory is host-accessible, so the bytes can be copied directly. This must
+            // happen now: HIP recycles a kernarg block as soon as its kernel completes, so a later
+            // launch in the same range can overwrite these arguments.
             dispatch.kernarg.assign(args, args + layout->size);
+            if(!ctx->kernarg_placement_known)
+            {
+                ctx->device_kernargs         = is_agent_memory(queue, args);
+                ctx->kernarg_placement_known = true;
+            }
         }
         set_kernarg_address(dispatch.packet, nullptr);
 

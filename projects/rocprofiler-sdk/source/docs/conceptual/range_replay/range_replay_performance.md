@@ -48,13 +48,14 @@ Two differences from kernel replay matter when changing the shared snapshot code
 
 ### The kernarg block is kept between ranges
 
-Each pass reads its arguments from one kernarg block the executor allocates from the agent's
-kernarg pool and maps for the agent. Rather than freeing it when the range closes, the executor
-keeps it, and the next range on the same agent reuses it when it is at least as large as that range
-needs and no more than twice as large. A block outside that bound is freed, and the range allocates
-its own. Each agent holds at most one block, it is kept only after the last pass that read it has
-drained, it never enters a snapshot (the memory tracker does not track kernarg pool memory), and it
-is released with the process.
+Each pass reads its arguments from one kernarg block the executor allocates for the agent: device
+memory when the application's kernel arguments are in device memory, as HIP's are on devices that
+support it, and the agent's kernarg pool otherwise. Rather than freeing it when the range closes,
+the executor keeps it, and the next range on the same agent reuses it when it is the same kind of
+memory, at least as large as that range needs, and no more than twice as large. A block outside
+that bound is freed, and the range allocates its own. Each agent holds at most one block, it is
+kept only after the last pass that read it has drained, it never enters a snapshot, and it is
+released with the process.
 
 ### Reading the phase timings
 
@@ -63,8 +64,9 @@ With `ROCPROFILER_LOG_LEVEL=info`, each replayed range logs two lines:
 ```text
 range replay: range <id> entry: drain <t> ms, snapshot <t> ms (<bytes> bytes in <n> regions)
 range replay: range <id> (<n> dispatches) phases: lock+drain <t> ms, exit snapshot <t> ms
-    (<bytes> bytes in <n> regions), kernarg staging <t> ms (<bytes> bytes, reused|allocated|none),
-    <n> passes <t> ms, <n> restores <t> ms, verify <t> ms|off, exit restore <t> ms, window <t> ms
+    (<bytes> bytes in <n> regions), kernarg staging <t> ms (<bytes> bytes, reused|allocated|none,
+    device memory|kernarg pool), <n> passes <t> ms, <n> restores <t> ms, verify <t> ms|off,
+    exit restore <t> ms, window <t> ms
 ```
 
 The first is logged when the entry snapshot is taken, before the range's first dispatch reaches the
