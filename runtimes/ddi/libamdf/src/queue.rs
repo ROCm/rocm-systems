@@ -25,7 +25,9 @@ const DEFAULT_RING_BYTES: u64 = 64 * 1024;
 
 /// Native queue implementation or deterministic unit-test fixture.
 enum NativeQueue {
+    /// rocddi direct queue and its native transport.
     Provider(queue::Queue),
+    /// Scripted queue used by internal ownership tests.
     #[cfg(test)]
     Fixture(std::sync::Arc<tests::Fixture>),
 }
@@ -69,27 +71,40 @@ impl NativeQueue {
 /// destruction, and teardown remains separate from progress observation so a
 /// partial native cleanup cannot restore a revoked public transport.
 struct Queue {
+    /// Native transport whose teardown follows public producer retirement.
     native: NativeQueue,
+    /// Borrowed activated device kept alive by registration.
     device: *mut Device,
-    // These counters borrow the public device, which cannot be destroyed while
-    // this queue is registered. No public device ownership is retained.
+    /// Borrowed queue count of the public device, kept live by registration.
     device_queues: *const AtomicU64,
+    /// Fixture reset generation kept live by its test environment.
     #[cfg(test)]
     device_reset_epoch: *const AtomicU64,
+    /// Keeps queue scratch backing live for the queue's lifetime.
     _scratch_borrow: Option<memory::QueueScratchBorrow>,
+    /// Immutable public queue identity and creation facts.
     info: amdf_user_queue_info_t,
+    /// Cached host producer view of the native transport.
     host_mapping: amdf_user_queue_mapping_info_t,
+    /// Optional GPU producer view of that transport.
     device_mapping: Option<amdf_user_queue_mapping_info_t>,
+    /// Public producer mappings still borrowing this queue.
     mappings: AtomicU64,
+    /// Rejects new work after destruction begins.
     destroying: AtomicBool,
+    /// First terminal status, including the internal loss bit.
     terminal: AtomicU64,
+    /// Last native read position observed by this adapter.
     consumed: AtomicU64,
+    /// Last native write position observed by this adapter.
     producer: AtomicU64,
 }
 
 /// Public producer mapping borrowing one queue and its cached transport view.
 struct Mapping {
+    /// Queue borrowed by this public producer mapping.
     queue: *mut Queue,
+    /// Cached transport addresses returned through the ABI.
     info: amdf_user_queue_mapping_info_t,
 }
 
@@ -282,6 +297,7 @@ unsafe fn scratch_descriptor(
             device_address: resolved.device_address,
             byte_length: scratch.byte_length,
             maximum_private_segment_byte_length: scratch.maximum_private_segment_byte_length,
+            lanes_per_wave: 32,
             maximum_wave_count: scratch.maximum_wave_count,
         }),
         resolved.memory,
