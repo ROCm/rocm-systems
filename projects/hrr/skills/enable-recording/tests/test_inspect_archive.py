@@ -599,14 +599,16 @@ def make_bundle(elf: bytes) -> bytes:
     return table + elf
 
 
-def register_fat_binary(pid_dir: Path, lo: int, hi: int, data: bytes) -> None:
+def register_fat_binary(
+    pid_dir: Path, lo: int, hi: int, data: bytes, event_id: int = inspect_archive.REGISTER_FAT_BINARY[9]
+) -> None:
     """Store `data` as the capture writer stores a fat binary, and append the
     `__hipRegisterFatBinary` record that names it to `events.bin`.
     """
     name = f"{lo:016x}{hi:016x}"
     (pid_dir / "blobs" / name[:2]).mkdir(parents=True, exist_ok=True)
     (pid_dir / "blobs" / name[:2] / f"{name}.blob").write_bytes(data)
-    record = struct.pack("<HQQQI2x", inspect_archive.REGISTER_FAT_BINARY, 2, 0, 0, 64)
+    record = struct.pack("<HQQQI2x", event_id, 2, 0, 0, 64)
     record += struct.pack("<QQQQ", 0, lo, hi, len(data))
     with (pid_dir / "events.bin").open("ab") as handle:
         handle.write(record)
@@ -616,7 +618,7 @@ def test_verify_reports_hardware_identifiers_and_build_info(tmp_path, capsys):
     """A capture that will be shared should name neither the GPU nor the build
     tree, and `verify` is where whoever approves the transfer looks.
     """
-    leaky = make_process(tmp_path, 31)
+    leaky = make_process(tmp_path, 31, format_version=9)
     manifest = json.loads((leaky / "manifest.json").read_text())
     manifest["metadata"] = {
         "devices": [{"properties": {"name": "gfx950", "pci": "0:134:0", "uuid": "ab12", "luid": ""}}]
@@ -676,7 +678,7 @@ def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
     buffer "CCOB", or an offload bundle the application keeps in memory. Only
     the blobs a `__hipRegisterFatBinary` record names are fat binaries.
     """
-    pid_dir = make_process(tmp_path, 34)
+    pid_dir = make_process(tmp_path, 34, format_version=9)
     leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))
     for name, data in (("aa" + "0" * 30, b"CCOB"), ("ab" + "0" * 30, leaky)):
         (pid_dir / "blobs" / name[:2]).mkdir()
@@ -687,6 +689,41 @@ def test_only_blobs_registered_as_fat_binaries_are_checked(tmp_path, capsys):
     proc = json.loads(capsys.readouterr().out)["processes"][0]
     assert proc["build_info_files"] == 1
     assert proc["unchecked_fat_binaries"] == 0
+
+
+def test_fat_binaries_are_found_by_the_id_of_the_archive_version(tmp_path, capsys):
+    """`__hipRegisterFatBinary` was id 549 in format v8 and is 550 from v9. A v7
+    archive may hold either, so `verify` says it did not look rather than
+    report no build information.
+    """
+    leaky = make_bundle(make_elf({".text": b"\1" * 8, ".debug_str": b"/app/build\0"}))
+    cases = {40: (8, 549), 41: (8, 550), 42: (9, 550), 43: (7, 549)}
+    for pid, (version, event_id) in cases.items():
+        register_fat_binary(make_process(tmp_path, pid, format_version=version), pid, 1, leaky, event_id)
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    procs = {p["pid"]: p for p in json.loads(capsys.readouterr().out)["processes"]}
+    assert [procs[pid]["build_info_files"] for pid in cases] == [1, 0, 1, 0]
+    assert [procs[pid]["fat_binaries_scanned"] for pid in cases] == [True, True, True, False]
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback"])
+    assert "fat binaries not checked (archive format v7)" in capsys.readouterr().out
+
+
+def test_a_section_name_ends_inside_its_string_table(tmp_path, capsys):
+    """Capture skips a section whose name has no terminator inside the string
+    table; `verify` must not complete `.comm` into `.comment` from the bytes
+    after the table either.
+    """
+    pid_dir = make_process(tmp_path, 44)
+    (pid_dir / "code_objects").mkdir()
+    elf = make_elf({".comment": b"AMD clang version 23\0"})
+    (pid_dir / "code_objects" / "a.hsaco").write_bytes(elf)
+    cut = bytearray(elf)
+    struct.pack_into("<Q", cut, len(cut) - 64 + 32, 1 + len(".comm"))  # .shstrtab's sh_size
+    (pid_dir / "code_objects" / "b.hsaco").write_bytes(cut)
+
+    inspect_archive.main(["--archive", str(tmp_path), "--no-playback", "--json"])
+    assert json.loads(capsys.readouterr().out)["processes"][0]["build_info_files"] == 1
 
 
 def test_the_json_verdict_is_one_of_the_four_documented_ones(tmp_path, capsys):

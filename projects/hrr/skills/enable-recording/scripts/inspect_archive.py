@@ -82,7 +82,10 @@ COMPRESSED_BUNDLE_MAGIC = b"CCOB"
 # `blobs/` holds buffer contents as well as fat binaries, so the fat binaries
 # are the blobs a `__hipRegisterFatBinary` record names: its hrr_api_id_t, and
 # where the record keeps the hash after the event header and `uint64 ret`.
-REGISTER_FAT_BINARY = 550
+# The id is per archive format version (hrr_api_args.h): v8 put two compiler
+# APIs ahead of it and v9 one more. A v7 archive may hold either numbering, so
+# that and any other version leaves the fat binaries unscanned.
+REGISTER_FAT_BINARY = {8: 549, 9: 550}
 FAT_BINARY_HASH_OFFSET = EVENT_HEADER_BYTES + 8
 HARDWARE_ID_FIELDS = ("pci", "uuid", "luid")
 
@@ -111,6 +114,8 @@ class ProcessArchive:
     build_info_files: int = 0
     # Compressed fat binaries, which cannot be checked without decompressing.
     unchecked_fat_binaries: int = 0
+    # False when events.bin is in a format version whose fat binary id is unknown.
+    fat_binaries_scanned: bool = True
 
     @property
     def recorded(self) -> bool:
@@ -197,11 +202,15 @@ def _elf_has_build_info(data: bytes) -> bool:
     shentsize, shnum, shstrndx = struct.unpack_from("<HHH", data, 0x3A)
     if shentsize != 64 or shstrndx >= shnum or shoff + shnum * 64 > len(data):
         return False
-    names = struct.unpack_from("<Q", data, shoff + shstrndx * 64 + 24)[0]
+    names, names_size = struct.unpack_from("<QQ", data, shoff + shstrndx * 64 + 24)
+    if names + names_size > len(data):
+        return False
     for i in range(shnum):
         name, kind, _, _, offset, size = struct.unpack_from("<IIQQQQ", data, shoff + i * 64)
-        end = data.find(b"\0", names + name)
-        label = data[names + name : end if end >= 0 else len(data)]
+        end = data.find(b"\0", names + name, names + names_size)
+        if name >= names_size or end < 0:
+            continue  # the name does not end inside the string table
+        label = data[names + name : end]
         if label != b".comment" and not label.startswith(b".debug"):
             continue
         if kind == 8:  # SHT_NOBITS: nothing in the file
@@ -230,8 +239,9 @@ def _code_object_has_build_info(data: bytes) -> bool:
     return False
 
 
-def _fat_binary_blobs(pid_dir: Path) -> list[Path]:
-    """The blob files that `__hipRegisterFatBinary` records in `events.bin` name.
+def _fat_binary_blobs(pid_dir: Path) -> list[Path] | None:
+    """The blob files that `__hipRegisterFatBinary` records in `events.bin` name,
+    or None when the format version does not say which id those records have.
 
     The first bytes of a blob cannot say this: a host buffer may well open with
     "CCOB" or hold an offload bundle. Records are walked by their declared
@@ -245,13 +255,16 @@ def _fat_binary_blobs(pid_dir: Path) -> list[Path]:
             head = handle.read(HEADER_BYTES)
             if len(head) < HEADER_BYTES or struct.unpack_from("<I", head)[0] != HEADER_MAGIC:
                 return []
+            register_fat_binary = REGISTER_FAT_BINARY.get(struct.unpack_from("<H", head, 4)[0])
+            if register_fat_binary is None:
+                return None
             pos = HEADER_BYTES
             while pos + EVENT_HEADER_BYTES <= size:
                 record = handle.read(EVENT_HEADER_BYTES)
                 event_type, length = struct.unpack_from("<H24xI", record)
                 if length < EVENT_HEADER_BYTES or length > min(size - pos, MAX_RECORD_BYTES):
                     break
-                if event_type == REGISTER_FAT_BINARY and length >= FAT_BINARY_HASH_OFFSET + 16:
+                if event_type == register_fat_binary and length >= FAT_BINARY_HASH_OFFSET + 16:
                     record += handle.read(FAT_BINARY_HASH_OFFSET + 16 - EVENT_HEADER_BYTES)
                     lo, hi = struct.unpack_from("<QQ", record, FAT_BINARY_HASH_OFFSET)
                     hashes.add(f"{lo:016x}{hi:016x}")  # hash_hex() in the capture writer
@@ -268,7 +281,9 @@ def _scan_code_objects(pid_dir: Path, proc: ProcessArchive) -> None:
     Every file under `code_objects/` is one; under `blobs/` only the fat
     binaries are, and the events say which those are.
     """
-    candidates = sorted((pid_dir / "code_objects").glob("*")) + _fat_binary_blobs(pid_dir)
+    fat_binaries = _fat_binary_blobs(pid_dir)
+    proc.fat_binaries_scanned = fat_binaries is not None
+    candidates = sorted((pid_dir / "code_objects").glob("*")) + (fat_binaries or [])
     for path in candidates:
         try:
             if not path.is_file():
@@ -831,6 +846,8 @@ def render(report: ArchiveReport) -> str:
         build_info = f"build info in {proc.build_info_files} code objects"
         if proc.unchecked_fat_binaries:
             build_info += f", {proc.unchecked_fat_binaries} compressed fat binaries not checked"
+        if not proc.fat_binaries_scanned:
+            build_info += f", fat binaries not checked (archive format v{proc.format_version})"
         lines.append(f"    hardware identifiers: {hardware}   {build_info}")
 
     incomplete = [p for p in report.processes if p.complete is False]
@@ -899,6 +916,7 @@ def to_dict(report: ArchiveReport) -> dict:
                 "hardware_ids": p.hardware_ids,
                 "build_info_files": p.build_info_files,
                 "unchecked_fat_binaries": p.unchecked_fat_binaries,
+                "fat_binaries_scanned": p.fat_binaries_scanned,
             }
             for p in report.processes
         ],

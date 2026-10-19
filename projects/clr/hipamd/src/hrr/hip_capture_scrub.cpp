@@ -79,6 +79,7 @@ size_t scrub_elf(uint8_t* image, size_t size) {
     const uint64_t sec_size = read<uint64_t>(sh, 32);
     if (name >= names_size || type == kShtNobits || (flags & kShfAlloc) != 0) continue;
     const size_t name_len = strnlen(names + name, names_size - name);
+    if (name_len == names_size - name) continue;  // no terminator inside the table
     if (!is_scrubbed_section(names + name, name_len)) continue;
     if (sec_size == 0 || !in_range(offset, sec_size, size)) continue;
     std::memset(image + offset, 0, sec_size);
