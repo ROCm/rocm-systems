@@ -5,7 +5,7 @@
 // and ROCPROFSYS_USE_AINIC before any header gates code on that macro.
 #include "backends/amd_smi/ainic_feature.hpp"
 
-#include "core/control/clocks/timeline.hpp"
+#include "common/clocks.hpp"
 #include "library/pmc/collectors/common/collector_slice.hpp"
 #include "library/pmc/collectors/common/settings.hpp"
 #include "library/pmc/collectors/gpu/cache_policy.hpp"
@@ -54,7 +54,6 @@
 #include "logger/debug.hpp"
 
 #include <timemory/backends/threading.hpp>
-#include <timemory/components/timing/backends.hpp>
 #include <timemory/mpl/type_traits.hpp>
 #include <timemory/utility/locking.hpp>
 
@@ -292,7 +291,7 @@ sample()
         return;
     }
 
-    auto timestamp = control::clocks::timeline_ns<std::int64_t>();
+    const auto timestamp = clocks::timeline::now_ns<std::int64_t>();
 
     for(auto& slice : g_collector_slices)
     {
@@ -395,7 +394,7 @@ post_process()
 void
 pause()
 {
-    const auto timestamp = control::clocks::timeline_ns<std::int64_t>();
+    const auto timestamp = clocks::timeline::now_ns<std::int64_t>();
 
     // sample() holds this lock for a whole AMD SMI sweep, and the caller is an
     // application thread leaving a traced region. Hand the timestamp to the

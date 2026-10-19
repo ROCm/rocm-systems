@@ -2,6 +2,7 @@
 // SPDX-License-Identifier: MIT
 
 #include "library/perf.hpp"
+#include "common/clocks.hpp"
 #include "core/locking.hpp"
 #include "core/state.hpp"
 #include "core/timemory.hpp"
@@ -232,8 +233,7 @@ perf_event::open(double freq, std::uint32_t batch_size, pid_t pid, int cpu)
     perf_event_a.exclude_hv               = 1;
     perf_event_a.exclude_callchain_kernel = 1;
     perf_event_a.use_clockid              = 1;
-    // NOLINTNEXTLINE
-    perf_event_a.clockid = CLOCK_BOOTTIME;
+    perf_event_a.clockid                  = clocks::timeline::k_sdk_host_clock_id;
 
     return open(perf_event_a, pid, cpu);
 }

@@ -3,29 +3,29 @@
 
 #include "steady.hpp"
 
-#include "core/control/clock.hpp"
+#include "core/control/waitable_clocks/contract.hpp"
 #include "core/state.hpp"
 
 #include <chrono>
 #include <mutex>
 
-namespace rocprofsys::control::clocks
+namespace rocprofsys::control::waitable_clocks
 {
-clock_time_point
+time_point
 steady::now() const noexcept
 {
-    return std::chrono::time_point_cast<clock_duration>(std::chrono::steady_clock::now());
+    return std::chrono::time_point_cast<duration>(std::chrono::steady_clock::now());
 }
 
 bool
-steady::sleep_until(clock_time_point deadline)
+steady::sleep_until(time_point deadline)
 {
     const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
-    std::unique_lock<std::mutex> clk_lcoks{ m_mutex };
+    std::unique_lock<std::mutex> clk_lock{ m_mutex };
     // wait_until's predicate-form returns the predicate value at wakeup:
     //   true  -> interrupted (predicate satisfied before timeout)
     //   false -> deadline reached
-    return !m_cv.wait_until(clk_lcoks, deadline, [this] { return m_interrupted; });
+    return !m_cv.wait_until(clk_lock, deadline, [this] { return m_interrupted; });
 }
 
 void
@@ -33,7 +33,7 @@ steady::interrupt() noexcept
 {
     const auto thread_state_guard = state::thread::scoped(state::thread::Internal);
     {
-        const std::scoped_lock clk_lcoks{ m_mutex };
+        const std::scoped_lock clk_lock{ m_mutex };
         m_interrupted = true;
     }
     m_cv.notify_all();
@@ -42,7 +42,7 @@ steady::interrupt() noexcept
 void
 steady::reset() noexcept
 {
-    const std::scoped_lock clk_lcoks{ m_mutex };
+    const std::scoped_lock clk_lock{ m_mutex };
     m_interrupted = false;
 }
-}  // namespace rocprofsys::control::clocks
+}  // namespace rocprofsys::control::waitable_clocks
