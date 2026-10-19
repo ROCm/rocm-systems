@@ -111,6 +111,8 @@ def container_script(repo: Path, backend: str) -> str:
         targets = ";".join(job["arch"] for job in EMULATOR_JOBS)
     lines = [
         "set -euo pipefail",
+        # Non-root pip falls back to a user install; put its scripts on PATH.
+        'export PATH="$HOME/.local/bin:$PATH"',
         f'python3 -m pip install --no-cache-dir --index-url "{ROCM_INDEX_URL}" '
         f'"rocm[devel]=={ROCM_SDK_VERSION}"',
         "rocm-sdk init",

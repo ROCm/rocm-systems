@@ -88,6 +88,13 @@ class ScriptTest(unittest.TestCase):
         self.assertIn("GH_TOKEN", command)
         self.assertIn("HOME=/tmp", command)
 
+    def test_user_install_scripts_on_path_before_sdk_use(self):
+        script = hrr_dev.container_script(Path("/repo"), "emulator")
+        self.assertLess(
+            script.index('export PATH="$HOME/.local/bin:$PATH"'),
+            script.index("rocm-sdk init"),
+        )
+
 
 if __name__ == "__main__":
     unittest.main()
