@@ -165,7 +165,9 @@ sys.exit(1 if os.getenv("CORPUS_TEST_FAIL") and target == "gfx950" and "--last-f
         )
         self.assertEqual(result.returncode, 1, result.stderr)
         race_calls = [c for c in calls if self.option(c, '--suite') == 'race']
-        self.assertEqual([c['case_timeout'] for c in race_calls], ['17', '43', '17'])
+        self.assertEqual(
+            [c['case_timeout'] for c in race_calls], ['17', '17', '43', '17']
+        )
 
     def test_race_near_timeout_reporting_uses_the_execution_deadline(self):
         for timeout, duration in [('30', '29'), ('360', '349')]:
