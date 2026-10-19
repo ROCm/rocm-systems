@@ -1192,3 +1192,22 @@ def test_is_gfx1250_matches_only_the_supported_architecture():
     assert not utils_common.is_gfx1250("gfx12500")
     assert not utils_common.is_gfx1250("gfx1251")
     assert not utils_common.is_gfx1250(None)
+
+
+@pytest.mark.misc
+def test_sdk_config_has_no_gfx115_definitions_or_empty_nodes():
+    """gfx115 counters are not defined in the local SDK fallback."""
+    config_path = (
+        Path(utils_common.config.rocprof_compute_home)
+        / "rocprof_compute_soc/profile_configs/sdk_config.yaml"
+    )
+    sdk_config = utils_common.yaml.safe_load(config_path.read_text(encoding="utf-8"))
+    counters = sdk_config["rocprofiler-sdk"]["counters"]
+
+    assert counters
+    for counter in counters:
+        assert counter["definitions"]
+        for definition in counter["definitions"]:
+            architectures = definition["architectures"]
+            assert architectures
+            assert not any(str(arch).startswith("gfx115") for arch in architectures)
