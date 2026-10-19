@@ -1076,6 +1076,49 @@ def test_calc_metrics_data_builds_rows_and_preserves_schema():
     assert set(exprs["metric_id"]) == {"7.1.0"}
 
 
+def test_calc_metrics_data_ingests_null_min_max():
+    """YAML null min/max is an empty expression cell, not an AttributeError."""
+    workload_path = "/fake/workload"
+    metric_df = pd.DataFrame(
+        {
+            "Metric": ["VALU FLOPs"],
+            "Avg": [" 1 "],
+            "Min": ["x"],
+            "Max": ["y"],
+            "Unit": ["Gflop"],
+        },
+        index=pd.Index(["2.1.0"], name="Metric_ID"),
+    )
+    metric_df.at["2.1.0", "Min"] = None
+    metric_df.at["2.1.0", "Max"] = None
+    assert metric_df.loc["2.1.0", "Min"] is None
+    assert metric_df.loc["2.1.0", "Max"] is None
+    arch_config = schema.ArchConfig()
+    arch_config.dfs = {201: metric_df}
+    arch_config.panel_configs = {
+        200: {
+            "id": 200,
+            "title": "Workgroup",
+            "data source": [{"metric_table": {"id": 201, "title": "VALU"}}],
+        }
+    }
+
+    analyzer = db_analysis(MagicMock(verbose=0), {})
+    analyzer._pmc_df_per_workload = {workload_path: pd.DataFrame({"Counter1": [1]})}
+    analyzer._runs = {
+        workload_path: MagicMock(sys_info=pd.DataFrame([{"gpu_arch": "gfx942"}]))
+    }
+    analyzer._arch_configs = {"gfx942": arch_config}
+
+    _metrics_info, expressions = analyzer.calc_metrics_data()
+
+    exprs = expressions[workload_path]
+    by_name = dict(zip(exprs["value_name"], exprs["value"]))
+    assert by_name["Avg"] == "1"
+    assert by_name["Min"] == ""
+    assert by_name["Max"] == ""
+
+
 LONG_FORM_PMC_PERF = (
     "GPU_ID,Dispatch_ID,Grid_Size,Workgroup_Size,LDS_Per_Workgroup,"
     "Scratch_Per_Workitem,Arch_VGPR,Accum_VGPR,SGPR,Kernel_Name,"
