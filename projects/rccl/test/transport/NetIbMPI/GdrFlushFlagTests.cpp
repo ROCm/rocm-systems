@@ -518,19 +518,29 @@ TEST_F(GdrFlushFlagTest, OutstandingMixedHints_CtsIsolation) {
             op.id = nextId++;
         }
 
+        // A failure here must reach both ranks: returning on one would leave the
+        // other blocked in the next collective.
+        int setupFailed = 0;
         if (rank == 0) {
-            for (Op& op : ops)
-                ASSERT_TRUE(PostFlaggedRecv(pair.recvComm, op.flagged, op.n, op.bufs, op.sizes, op.tags, op.mhs,
-                                            &op.req, &err))
-                    << "round " << round << ": " << err;
+            for (Op& op : ops) {
+                if (!PostFlaggedRecv(pair.recvComm, op.flagged, op.n, op.bufs, op.sizes, op.tags, op.mhs, &op.req,
+                                     &err)) {
+                    ADD_FAILURE() << "round " << round << ": " << err;
+                    setupFailed = 1;
+                    break;
+                }
+            }
         } else {
             for (Op& op : ops)
-                for (int r = 0; r < op.n; r++)
-                    ASSERT_EQ(initializeBufferWithPattern<uint8_t>(op.bufs[r], op.sizes[r],
-                                                                   makeBytePattern(op.seeds[r])),
-                              hipSuccess);
+                for (int r = 0; r < op.n && !setupFailed; r++)
+                    if (initializeBufferWithPattern<uint8_t>(op.bufs[r], op.sizes[r], makeBytePattern(op.seeds[r])) !=
+                        hipSuccess) {
+                        ADD_FAILURE() << "round " << round << ": buffer init failed";
+                        setupFailed = 1;
+                    }
         }
-        MPI_Barrier(MPI_COMM_WORLD);
+        MPI_Allreduce(MPI_IN_PLACE, &setupFailed, 1, MPI_INT, MPI_MAX, MPI_COMM_WORLD);
+        if (setupFailed) break;
 
         if (rank == 0) {
             std::vector<int> pending(kWindow);

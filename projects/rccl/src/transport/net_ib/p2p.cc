@@ -461,6 +461,9 @@ ncclResult_t ncclIbPostFifo(struct ncclIbRecvComm* comm, struct ncclIbRequest* r
 
   wr.opcode = IBV_WR_RDMA_WRITE;
   wr.send_flags = comm->remCtsFifo.flags; // IBV_SEND_INLINE
+  // The QP's max_inline_data only covers one CTS entry, so multi-receive
+  // CTS writes must not be inlined.
+  if (req->nreqs > 1) wr.send_flags &= ~IBV_SEND_INLINE;
 
   // We need to occasionally post a request with the IBV_SEND_SIGNALED flag, otherwise
   // the send queue will never empty.
