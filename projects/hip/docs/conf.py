@@ -54,8 +54,9 @@ def _fix_empty_sectiondef_kind(xml_dir: Path) -> None:
 
     Remove once breathe tolerates the value doxygen actually emits.
     """
-    patched = 0
+    scanned = patched = 0
     for xml_file in sorted(xml_dir.glob("*.xml")):
+        scanned += 1
         text = xml_file.read_text(encoding="utf-8")
         if '<sectiondef kind="">' not in text:
             continue
@@ -64,11 +65,34 @@ def _fix_empty_sectiondef_kind(xml_dir: Path) -> None:
             encoding="utf-8",
         )
         patched += 1
-    if patched:
-        print(f"conf.py: set a kind on empty <sectiondef> in {patched} doxygen XML file(s)")
+    # Always report, including zero. A silent no-op here looks exactly like a
+    # working fix until breathe fails much later in the build.
+    print(
+        f"conf.py: gave a kind to empty <sectiondef> in {patched} of {scanned} "
+        f"doxygen XML file(s) in {xml_dir}"
+    )
 
 
-_fix_empty_sectiondef_kind(Path(__file__).parent / "doxygen" / "xml")
+def setup(app):
+    """Patch the doxygen XML after it is written and before breathe reads it.
+
+    This cannot be a plain call at the bottom of conf.py: rocm_docs.doxygen runs
+    doxygen from a config-inited handler (priority 400), so while conf.py is
+    executing the XML directory does not exist yet and there is nothing to
+    patch. builder-inited runs after every config-inited handler and before
+    source reading, which is when breathe parses the files.
+
+    The paths come from breathe_projects, which rocm_docs.doxygen populates in
+    that same config-inited handler, so this patches exactly the directories
+    breathe is going to read.
+    """
+
+    def _patch_doxygen_xml(app_) -> None:
+        for xml_dir in app_.config.breathe_projects.values():
+            _fix_empty_sectiondef_kind(Path(xml_dir))
+
+    app.connect("builder-inited", _patch_doxygen_xml)
+
 
 docs_core.enable_api_reference()
 docs_core.setup()
