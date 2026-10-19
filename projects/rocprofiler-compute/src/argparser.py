@@ -116,6 +116,20 @@ def non_negative_int(value: str) -> int:
     return parsed
 
 
+def positive_pid(value: str) -> str:
+    try:
+        parsed = int(value)
+    except ValueError:
+        raise argparse.ArgumentTypeError(
+            f"expected a positive process id, got {value!r}"
+        )
+    if parsed <= 0:
+        raise argparse.ArgumentTypeError(
+            f"process id must be a positive integer, got {parsed}"
+        )
+    return str(parsed)
+
+
 def print_avail_arch(avail_arch: list[str], args: str) -> str:
     ret_str = f"List all available {args} for analysis on specified arch:"
     for arch in avail_arch:
@@ -271,7 +285,7 @@ Examples:
     )
     profile_group.add_argument(
         "--attach-pid",
-        type=str,
+        type=positive_pid,
         dest="attach_pid",
         metavar="",
         default=None,

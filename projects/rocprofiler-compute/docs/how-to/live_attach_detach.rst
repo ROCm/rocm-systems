@@ -34,6 +34,26 @@ For using live attach and detach the configuration needed are:
 
    $ rocprof-compute profile -n try_live_attach_detach --set launch_stats --no-roof -VVV --attach-pid <process id of workload> --attach-duration-msec <time before detach>
 
+Attaching to a process in a container
+=====================================
+
+ROCm Compute Profiler can run on the host and attach to a process in a
+different mount namespace. Before attaching, it checks whether the configured
+ROCprofiler-SDK tool library is visible through the target process's
+``/proc/<pid>/root`` view.
+
+If the configured path is not visible, ROCm Compute Profiler locates the
+target's mapped ``librocprofiler-register.so`` in ``/proc/<pid>/maps`` and
+searches that ROCm installation for ``librocprofiler-sdk-tool.so``. The path
+passed to the attach library is always expressed as the target process sees it,
+not as the host sees it. If neither location contains the tool library, the
+attach command exits before injecting anything into the target process.
+
+When using ``--rocprofiler-sdk-tool-path`` with a containerized target, provide
+the SDK tool's path on the host. ROCm Compute Profiler uses it when that path is
+also visible to the target, or automatically locates the corresponding tool in
+the target's ROCm installation.
+
 Analysis options
 ================
 
