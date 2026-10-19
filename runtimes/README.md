@@ -24,6 +24,8 @@ part of the repository's default build or installation yet.
   code objects and constructs checked load images independently of rocddi.
 - [`image/rocaddr3`](image/rocaddr3/README.md) computes GFX12 surface
   layouts through AddrLib3 without owning device memory.
+- [`loader/rocloader`](loader/rocloader/README.md) validates AMD HSA
+  code objects and retains executable images over rocddi allocations.
 - [`ddi/libhsa`](ddi/libhsa/README.md) implements the HSA C ABI and builds a
   shared ABI in the same image. It consumes rocddi directly, not through AMDF.
 

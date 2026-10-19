@@ -3235,19 +3235,6 @@ mod tests {
     }
 
     #[test]
-    fn variable_metadata_matches_rocr_section_flag_interpretation() {
-        assert_eq!(variable_metadata(0), (VARIABLE_SEGMENT_GLOBAL, false));
-        assert_eq!(
-            variable_metadata(SECTION_FLAG_WRITE),
-            (VARIABLE_SEGMENT_GLOBAL, true)
-        );
-        assert_eq!(
-            variable_metadata(SECTION_FLAG_AMDGPU_HSA_READONLY),
-            (VARIABLE_SEGMENT_READONLY, false)
-        );
-    }
-
-    #[test]
     fn executable_symbol_lookup_checks_initialization_before_arguments() {
         assert!(lock().is_ok_and(|runtime| runtime.is_none()));
         // SAFETY: An uninitialized runtime returns before inspecting the
