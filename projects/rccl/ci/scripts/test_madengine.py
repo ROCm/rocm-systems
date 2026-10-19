@@ -676,23 +676,18 @@ def _needed_sonames(lib: Path) -> list[str]:
 def _soname_bridge_discovered(sonames: str) -> str:
     """Shell that bridges each missing soname beside every copy of that library.
 
-    _soname_bridge() links only inside the directories that received a librccl,
-    which is where the Primus image keeps both. It is the wrong set here, and
-    run 38480610532 showed why: the working copy,
-    ``_rocm_sdk_libraries/lib/librccl.so.1``, resolves its dependencies through
-    an RPATH that reaches ``_rocm_sdk_core/lib`` -- a directory that holds
-    ``libamd_smi.so.26`` and no librccl at all, so the bridge never touched it.
-    The artifact needs ``.27``, nothing in the image provided it, and
-    ``rocm_sdk.preload_libraries()`` died on the CDLL of librccl with
-
-        OSError: libamd_smi.so.27: cannot open shared object file
-
-    before a single step ran. The build gate could not see it: that copy's
-    ``ldd`` reported nothing either way.
-
-    So discover the directories from the library being bridged rather than from
-    librccl -- every directory that already holds some version of it, which is
+    The directories are discovered from the library being bridged, not from
+    librccl: every directory that already holds some version of it, which is
     exactly the set any RPATH or RUNPATH pointing at that library can reach.
+
+    _soname_bridge() links only inside the directories that received a librccl,
+    which is the wrong set. A librccl resolves its dependencies through an
+    RPATH that reaches directories holding no librccl at all -- in the Primus
+    image, ``_rocm_sdk_libraries/lib/librccl.so.1`` reaches
+    ``_rocm_sdk_core/lib``, which carries libamd_smi and nothing else of ours.
+    A soname missing there is not bridged, and the CDLL of librccl in
+    ``rocm_sdk.preload_libraries()`` fails at import. The build gate does not
+    catch it either: ``ldd`` on that copy reports nothing either way.
     """
     if not sonames:
         return ""
@@ -739,16 +734,15 @@ def _librccl_swap_snippet(bridge: str = "", kpack: bool = False) -> str:
       it is only ever dlopen'd where they are already loaded. The rule is that
       the swap must not make linkage worse than it found it.
 
-      Comparing exact names was too strict, and run 38404457804 proved it: the
-      artifact needs libamd_smi.so.27 where the base ships .26, and that copy's
-      RUNPATH is a row of empty entries, so the loader never searches its own
-      directory and _soname_bridge()'s symlink cannot help. `.26` was already
-      unresolved there before the swap and `.27` is unresolved after -- the same
-      library, equally absent, under a different version. Linkage is no worse,
-      but a set comparison reads it as new breakage and fails the build. So a
-      newly unresolved soname is tolerated only when some version of the same
-      library was already unresolved on that target; a library that resolved
-      before and does not now still fails.
+      Comparing exact names is too strict. Where the artifact needs
+      libamd_smi.so.27 and the base ships .26, a target whose RUNPATH is a row
+      of empty entries never searches its own directory, so the bridge's
+      symlink cannot help it: .26 was unresolved before the swap and .27 is
+      unresolved after -- the same library, equally absent, under a different
+      version. Linkage is no worse, yet a set comparison reads it as new
+      breakage. So a newly unresolved soname is tolerated only when some
+      version of the same library was already unresolved on that target; a
+      library that resolved before and does not now still fails.
 
     *bridge* runs after the copy and before the post-swap measurement, so a
     soname the artifact needs and the base predates (libamd_smi .27 against
@@ -972,20 +966,11 @@ def build_maxtext_baseline_image(
     dockerfile = ctx_dir / MAXTEXT_BASELINE_DOCKERFILE
     dockerfile.write_text(f"FROM {from_ref}\n\n{MAXTEXT_PRIMUS_PAYLOAD}")
 
-    # Tagged per A/B run, with the same token the candidate uses, and built
-    # unconditionally.
-    #
-    # Hashing the recipe was not enough: the digest covered the Dockerfile text
-    # but not the mutable base tag or the Primus tree, and on a tag hit
-    # `docker image inspect` skips the build altogether -- so the `--pull` that
-    # was supposed to defend against a stale base never ran in exactly the case
-    # it was added for. A long-lived runner could then pair a fresh candidate
-    # against a baseline built weeks earlier, which breaks the one invariant
-    # this pair exists to hold: that the two differ by the RCCL swap alone.
-    #
-    # Rebuilding every run costs very little. The payload layers are shared with
-    # the candidate and come out of the local cache; a rebuild with everything
-    # cached measured 2 seconds on ruby.
+    # Rebuilt every run under a per-run tag, with the same token the candidate
+    # uses: a cached tag would skip the build and could pair a fresh candidate
+    # with a stale baseline, breaking the one invariant this pair exists to
+    # hold -- that the two differ by the RCCL swap alone. The payload layers
+    # are shared with the candidate, so a cached rebuild takes ~2 s.
     tag = f"{base_image}-primus-{PRIMUS_REF}-{run_token}-{base_identity(from_ref)}"
     log.info("Building MaxText baseline image (Primus, stock RCCL): %s", tag)
     # No --pull: from_ref is already a digest, resolved once for both images.
@@ -1735,9 +1720,8 @@ def run_ab_in_one_allocation(
         #
         # -- on the healthy nodes, while the real message ("dial unix
         # /var/run/docker.sock: connect: no such file or directory") sits in a
-        # different node's log. Run 38602462914 lost both phases and five
-        # minutes of a four-node allocation to exactly that, with two of four
-        # nodes affected. The wider the job, the likelier it is to catch one.
+        # different node's log. The wider the job, the likelier it is to catch
+        # at least one such node.
         #
         # Try to start it, then check. Reported per node and failed fast, so
         # the allocation is released instead of burning its time limit.

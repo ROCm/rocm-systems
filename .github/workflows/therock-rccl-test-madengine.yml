@@ -21,22 +21,21 @@ on:
         type: string
         default: '2'
       job_timeout_minutes:
-        # Budget for the WHOLE JOB, not just the workload step. GitHub caps a
-        # job at 360 minutes unless the job says otherwise, so a step asking
-        # for more than that was silently cut short at the job limit -- the
-        # step-level number alone bought nothing.
+        # Budget for the WHOLE JOB, not just the workload step: GitHub caps a
+        # job at 360 minutes unless the job says otherwise, so a step-level
+        # number above that is cut short at the job limit.
         #
-        # The script is given 60 minutes less: roughly 30 for the setup that
-        # runs before it (conda, TheRock deps, artifact fetch -- about 20
-        # minutes observed) and 30 after, so it can write its report and append
-        # to the datastore before the job is killed. A job GitHub kills reports
-        # nothing and reads as an infrastructure fault.
+        # The script is given 60 minutes less -- ~30 for the setup ahead of it
+        # (conda, TheRock deps, artifact fetch) and ~30 after, so it can write
+        # its report and append to the datastore before the job is killed. A
+        # job GitHub kills reports nothing and reads as an infrastructure
+        # fault.
         #
-        # The script's own budget covers the SLURM time_limit PLUS queueing,
-        # because the allocation is taken inside it. 390 leaves the 2-node
-        # workloads (4 h limit) 90 minutes of queue slack; a longer time_limit
-        # must raise this by the same amount or the job dies while still
-        # queued, reporting that neither phase ran.
+        # The script's share covers the SLURM time_limit PLUS queueing, because
+        # the allocation is taken inside it. 390 leaves the 2-node workloads
+        # (4 h limit) 90 minutes of queue slack; a longer time_limit must raise
+        # this by the same amount, or the job dies while still queued and
+        # reports that neither phase ran.
         type: string
         default: '390'
       notify_email:
@@ -257,15 +256,15 @@ jobs:
           # Read from the environment and validated, NOT interpolated into the
           # script. A dispatch input pasted straight into a run block is
           # executed as shell, and this step holds MAD_SECRETS_HFTOKEN. The
-          # job-level fromJSON() does not protect it either: that parses the
-          # leading JSON value, so something like "450 $(...)" satisfies the
-          # timeout and still reaches bash here as code.
+          # job-level fromJSON() is no defence: it parses the leading JSON
+          # value, so "450 $(...)" satisfies the timeout and still reaches bash
+          # here as code.
           #
-          # Arithmetic stays in bash because workflow expressions have no
-          # arithmetic operators, and subtracting there is a parse error that
-          # rejects the whole file at dispatch. (Do not write an empty
-          # expression in these comments either -- the run block is scanned
-          # for expressions, comment lines included.)
+          # Arithmetic stays in bash: workflow expressions have no arithmetic
+          # operators, and a subtraction there is a parse error that rejects
+          # the whole file at dispatch. The run block is scanned for
+          # expressions including its comment lines, so do not write an empty
+          # one above either.
           case "${JOB_TIMEOUT_MINUTES}" in
             ''|*[!0-9]*)
               echo "::error::job_timeout_minutes must be a plain integer, got '${JOB_TIMEOUT_MINUTES}'"
