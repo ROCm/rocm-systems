@@ -242,3 +242,34 @@ install(
     DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
     COMPONENT ${TESTS_COMPONENT}
 )
+
+# rdc_metric_fetcher_tests: builds and destroys metric fetchers from several
+# threads at once. Compiles the metric fetcher into the test, so it runs on
+# GPU-less CI. amd_smi provides the calls the fetcher's other functions make,
+# librdc_bootstrap the logger.
+add_executable(
+    rdc_metric_fetcher_tests
+    ${SRC_DIR}/test_metric_fetcher.cc
+    ${PROJECT_SOURCE_DIR}/common/rdc_capabilities.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/RdcMetricFetcherImpl.cc
+    ${PROJECT_SOURCE_DIR}/rdc_libs/rdc/src/SmiUtils.cc
+)
+target_include_directories(
+    rdc_metric_fetcher_tests
+    PRIVATE ${PROJECT_SOURCE_DIR} ${PROJECT_SOURCE_DIR}/include ${AMD_SMI_INCLUDE_DIR}
+)
+target_link_libraries(
+    rdc_metric_fetcher_tests
+    PRIVATE rdc_bootstrap amd_smi cap GTest::gtest_main pthread
+)
+set_target_properties(
+    rdc_metric_fetcher_tests
+    PROPERTIES INSTALL_RPATH "\$ORIGIN:\$ORIGIN/../../../lib:${AMD_SMI_LIB_DIR}"
+)
+add_test(NAME rdc_metric_fetcher_tests COMMAND rdc_metric_fetcher_tests)
+set_tests_properties(rdc_metric_fetcher_tests PROPERTIES TIMEOUT 120)
+install(
+    TARGETS rdc_metric_fetcher_tests
+    DESTINATION ${CMAKE_INSTALL_DATAROOTDIR}/${RDC}/rdctst_tests
+    COMPONENT ${TESTS_COMPONENT}
+)

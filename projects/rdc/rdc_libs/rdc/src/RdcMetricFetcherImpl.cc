@@ -83,9 +83,17 @@ RdcMetricFetcherImpl::RdcMetricFetcherImpl() : task_started_(true) {
 }
 
 RdcMetricFetcherImpl::~RdcMetricFetcherImpl() {
-  // Notify the async task to stop
-  task_started_ = false;
+  {
+    // Under the worker's mutex, so a worker between its check and its wait cannot miss the
+    // wake-up and block forever.
+    std::lock_guard<std::mutex> lock(task_mutex_);
+    task_started_ = false;
+  }
   cv_.notify_all();
+  // Join the worker before the members it uses are destroyed.
+  if (updater_.valid()) {
+    updater_.wait();
+  }
 }
 
 uint64_t RdcMetricFetcherImpl::now() {
