@@ -77,17 +77,48 @@ rocprofiler_add_integration_execute_test(
     FIXTURES_SETUP rocprofv3-test-hip-event-trace-otf2
     FIXTURES_REQUIRED rocprofv3-test-hip-event-trace)
 
+# Convert to Perfetto with both kernel groupings: HIP events must follow kernels onto the
+# stream track by default and onto the agent-queue track with --group-by-queue.
+foreach(_grouping stream queue)
+    if(_grouping STREQUAL "queue")
+        set(_grouping_args --group-by-queue)
+    else()
+        set(_grouping_args)
+    endif()
+
+    rocprofiler_add_integration_execute_test(
+        rocprofv3-test-hip-event-trace-pftrace-${_grouping}-generation
+        COMMAND
+            ${Python3_EXECUTABLE} -m rocpd convert -f pftrace ${_grouping_args} -d
+            ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace -o out_${_grouping} -i
+            ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.db
+        DEPENDS rocprofiler-sdk::rocprofv3
+        TIMEOUT 120
+        LABELS "integration-tests;rocpd"
+        ENVIRONMENT "${rocprofv3-hip-event-rocpd-env}"
+        FIXTURES_SETUP rocprofv3-test-hip-event-trace-pftrace
+        FIXTURES_REQUIRED rocprofv3-test-hip-event-trace)
+endforeach()
+
 rocprofiler_add_integration_validate_test(
     rocprofv3-test-hip-event-trace
     TEST_PATHS validate.py
     COPY conftest.py
     CONFIG pytest.ini
-    ARGS --json-input ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.json
-         --rocpd-input ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.db
-         --otf2-input ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.otf2
+    ARGS --json-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.json
+         --rocpd-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.db
+         --otf2-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_results.otf2
+         --pftrace-stream-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_stream_results.pftrace
+         --pftrace-queue-input
+         ${CMAKE_CURRENT_BINARY_DIR}/hip-events-trace/out_queue_results.pftrace
     TIMEOUT 45
     LABELS "integration-tests;rocpd"
-    FIXTURES_REQUIRED rocprofv3-test-hip-event-trace rocprofv3-test-hip-event-trace-otf2)
+    FIXTURES_REQUIRED rocprofv3-test-hip-event-trace rocprofv3-test-hip-event-trace-otf2
+                      rocprofv3-test-hip-event-trace-pftrace)
 
 # Test hip event tracing without HIP API tracing enabled, exercising the correlation ID
 # self-construction path.

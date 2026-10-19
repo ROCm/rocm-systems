@@ -321,11 +321,36 @@ write_perfetto(
             }
     }
 
+    // A wait reports the stack id of the record it depends on (schema 3.0.6+). The record
+    // carries its own, so a record is linked to its waits only when it is in this trace.
+    auto hip_event_record_ids = std::unordered_set<uint64_t>{};
     for(auto ditr : hip_events_gen)
         for(const auto& itr : hip_events_gen.get(ditr))
         {
             agent_stream_ids.emplace(rocprofiler_stream_id_t{.handle = itr.stream_id});
+            if(ocfg.group_by_queue)
+            {
+                agent_queue_ids[itr.agent_abs_index].emplace(
+                    rocprofiler_queue_id_t{.handle = itr.queue_id});
+            }
+            if(itr.source_stack_id.value_or(0) != 0 && *itr.source_stack_id == itr.stack_id)
+                hip_event_record_ids.emplace(itr.stack_id);
         }
+
+    auto hip_event_waits = std::unordered_map<uint64_t, std::vector<uint64_t>>{};
+    for(auto ditr : hip_events_gen)
+        for(const auto& itr : hip_events_gen.get(ditr))
+        {
+            const auto source_stack_id = itr.source_stack_id.value_or(0);
+            if(source_stack_id != itr.stack_id && hip_event_record_ids.count(source_stack_id) > 0)
+                hip_event_waits[source_stack_id].emplace_back(itr.stack_id);
+        }
+
+    // Flow from a record to one of its waits. A record can be waited on any number of times,
+    // so each wait gets its own flow rather than continuing a chain through the others.
+    auto get_hip_event_flow_id = [uuid_pid](uint64_t record_stack_id, uint64_t wait_stack_id) {
+        return common::fnv1a_hasher::combine(uuid_pid, record_stack_id, wait_stack_id);
+    };
 
     for(auto ditr : memory_allocation_gen)
         for(const auto& itr : memory_allocation_gen.get(ditr))
@@ -661,12 +686,31 @@ write_perfetto(
         {
             for(auto itr : hip_events_gen.get(ditr))
             {
-                auto  stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
-                auto& _track    = stream_tracks.at(stream_id);
+                // Same track selection as kernel dispatches, so a HIP event sits next to the
+                // work it orders against in either grouping
+                ::perfetto::Track* _track = nullptr;
+                if(ocfg.group_by_queue)
+                {
+                    auto queue_id = rocprofiler_queue_id_t{.handle = itr.queue_id};
+                    _track        = &agent_queue_tracks.at(itr.agent_abs_index).at(queue_id);
+                }
+                else
+                {
+                    auto stream_id = rocprofiler_stream_id_t{.handle = itr.stream_id};
+                    _track         = &stream_tracks.at(stream_id);
+                }
 
+                const auto  source_stack_id = itr.source_stack_id.value_or(0);
+                const auto* waits           = (source_stack_id == itr.stack_id)
+                                                  ? common::get_val(hip_event_waits, itr.stack_id)
+                                                  : nullptr;
+                const bool  is_linked_wait  = (source_stack_id != itr.stack_id &&
+                                             hip_event_record_ids.count(source_stack_id) > 0);
+
+                auto agent_index = agent_data.at(itr.agent_abs_index).second;
                 TRACE_EVENT_BEGIN(sdk::perfetto_category<sdk::category::hip_event>::name,
                                   perfetto_session.get_static_event_name(itr.name),
-                                  _track,
+                                  *_track,
                                   itr.start,
                                   ::perfetto::Flow::Global(itr.stack_id ^ uuid_pid),
                                   "begin_ns",
@@ -675,12 +719,52 @@ write_perfetto(
                                   itr.end,
                                   "delta_ns",
                                   (itr.end - itr.start),
+                                  "kind",
+                                  itr.category,
+                                  "agent",
+                                  agent_index.as_string("-"),
+                                  "corr_id",
+                                  itr.stack_id,
+                                  "queue",
+                                  itr.queue_id,
+                                  "tid",
+                                  itr.tid,
+                                  "stream_id",
+                                  itr.stream_id,
                                   "hip_event_handle",
                                   itr.hip_event_handle,
                                   "source_queue_id",
-                                  itr.source_queue_id);
-                TRACE_EVENT_END(
-                    sdk::perfetto_category<sdk::category::hip_event>::name, _track, itr.end);
+                                  itr.source_queue_id,
+                                  [&](::perfetto::EventContext ctx) {
+                                      if(source_stack_id != 0)
+                                          rocprofiler::sdk::add_perfetto_annotation(
+                                              ctx, "source_corr_id", source_stack_id);
+
+                                      if(waits)
+                                      {
+                                          for(auto wait_stack_id : *waits)
+                                              ::perfetto::Flow::Global(get_hip_event_flow_id(
+                                                  itr.stack_id, wait_stack_id))(ctx);
+                                      }
+                                  });
+                // A wait barrier is usually dispatched, and so starts, before the record it
+                // depends on, but it ends after it. Trace processor binds flows in timestamp
+                // order, so the wait terminates the flow from its end event. When the record
+                // and the wait run on different agents, the ordering holds only up to the
+                // skew between the two agents' calibrated clocks.
+                if(is_linked_wait)
+                {
+                    TRACE_EVENT_END(sdk::perfetto_category<sdk::category::hip_event>::name,
+                                    *_track,
+                                    itr.end,
+                                    ::perfetto::TerminatingFlow::Global(
+                                        get_hip_event_flow_id(source_stack_id, itr.stack_id)));
+                }
+                else
+                {
+                    TRACE_EVENT_END(
+                        sdk::perfetto_category<sdk::category::hip_event>::name, *_track, itr.end);
+                }
             }
             tracing_session->FlushBlocking();
         }

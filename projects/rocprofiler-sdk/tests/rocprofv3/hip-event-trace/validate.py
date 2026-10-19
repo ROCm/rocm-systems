@@ -431,6 +431,59 @@ def test_hip_event_same_stream_wait_spellings(json_data):
         )
 
 
+def test_hip_event_source_correlation(json_data):
+    """Verify source_correlation_id links each WAIT to the RECORD it depends on.
+
+    A RECORD reports its own internal correlation id. A WAIT reports the internal
+    correlation id of the RECORD that recorded the awaited event, or zero when that
+    record was not seen, in which case source_queue_id is zero too.
+    """
+    records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    record_records = {
+        r.correlation_id.internal: r for r in records if r.operation == HIP_EVENT_RECORD
+    }
+    for r in record_records.values():
+        assert r.source_correlation_id == r.correlation_id.internal, (
+            f"RECORD (correlation {r.correlation_id.internal}) reports "
+            f"source_correlation_id {r.source_correlation_id}, expected its own"
+        )
+
+    linked = 0
+    for w in (r for r in records if r.operation == HIP_EVENT_WAIT):
+        if w.source_queue_id.handle == 0:
+            assert w.source_correlation_id == 0, (
+                f"WAIT (correlation {w.correlation_id.internal}) has no source queue but "
+                f"reports source_correlation_id {w.source_correlation_id}"
+            )
+            continue
+
+        rec = record_records.get(w.source_correlation_id)
+        assert rec is not None, (
+            f"WAIT (correlation {w.correlation_id.internal}) reports "
+            f"source_correlation_id {w.source_correlation_id}, which is not a RECORD"
+        )
+        assert rec.hip_event_handle == w.hip_event_handle, (
+            f"WAIT (correlation {w.correlation_id.internal}) on event "
+            f"{w.hip_event_handle:#x} links to a RECORD on event {rec.hip_event_handle:#x}"
+        )
+        assert rec.queue_id.handle == w.source_queue_id.handle, (
+            f"WAIT (correlation {w.correlation_id.internal}) source_queue_id "
+            f"{w.source_queue_id.handle} differs from its RECORD's queue {rec.queue_id.handle}"
+        )
+        assert rec.correlation_id.internal < w.correlation_id.internal, (
+            f"WAIT (correlation {w.correlation_id.internal}) links to a later RECORD "
+            f"(correlation {rec.correlation_id.internal})"
+        )
+        assert w.end_timestamp >= rec.end_timestamp, (
+            f"WAIT (correlation {w.correlation_id.internal}) ended at {w.end_timestamp}, "
+            f"before its RECORD ended at {rec.end_timestamp}"
+        )
+        linked += 1
+
+    assert linked > 0, "No WAIT record links to a RECORD through source_correlation_id"
+
+
 def test_hip_event_handle_consistency(json_data):
     """Verify the same hip_event_handle appears in both RECORD and WAIT records."""
     records = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
@@ -745,6 +798,24 @@ def test_rocpd_hip_events_cross_stream(rocpd_data):
     assert cross_stream > 0, "No cross-stream WAIT records in rocpd"
 
 
+def test_rocpd_hip_events_source_stack_id(rocpd_data, json_data):
+    """Verify rocpd source_stack_id carries source_correlation_id, NULL when zero."""
+    js_data = json_data["rocprofiler-sdk-tool"]["buffer_records"]["hip_event"]
+
+    expected = sorted(
+        (r.correlation_id.internal, r.source_correlation_id or None) for r in js_data
+    )
+    actual = sorted(
+        rocpd_data.execute("SELECT stack_id, source_stack_id FROM hip_events").fetchall()
+    )
+
+    assert actual == expected, (
+        f"rocpd (stack_id, source_stack_id) pairs differ from JSON "
+        f"(correlation_id.internal, source_correlation_id):\n"
+        f"rocpd={actual}\njson={expected}"
+    )
+
+
 def test_otf2_data(otf2_data, json_data):
     """Cross-check the OTF2 conversion against the JSON records.
 
@@ -758,6 +829,159 @@ def test_otf2_data(otf2_data, json_data):
         json_data,
         ("hip_event",),
     )
+
+
+def test_otf2_hip_event_location(otf2_data, json_data):
+    """Verify HIP events share the OTF2 location of kernels on the same queue.
+
+    Each location is keyed by thread, agent and queue. HIP event records must be written to
+    the same location as kernel dispatches with that key, not to a location of their own,
+    and carry the correlation attributes that link them to their API call and RECORD.
+    """
+    data = json_data["rocprofiler-sdk-tool"]["buffer_records"]
+    hip_events = data["hip_event"]
+
+    def get_attributes(row):
+        ret = {}
+        for itr in row["attributes"]:
+            for key, val in itr.items():
+                ret[key.name] = val
+        return ret
+
+    otf2_events = otf2_data.loc[otf2_data["category"] == "hip_event"]
+    otf2_kernels = otf2_data.loc[otf2_data["category"] == "kernel_dispatch"]
+    assert len(otf2_events) == len(hip_events)
+
+    kernel_locations = set(loc.name for loc in otf2_kernels["location"])
+    shared = 0
+    for _, row in otf2_events.iterrows():
+        name = row["location"].name
+        assert " Compute on " in name, f"HIP event written to location '{name}'"
+        shared += name in kernel_locations
+
+        attributes = get_attributes(row)
+        assert (
+            attributes.get("correlation_id", 0) > 0
+        ), f"HIP event in location '{name}' has no correlation_id: {attributes}"
+        if "RECORD" in row["name"]:
+            assert attributes.get("source_correlation_id") == attributes["correlation_id"]
+
+    assert shared > 0, "No HIP event shares a location with a kernel dispatch"
+
+    expected = sorted(
+        (r.correlation_id.internal, r.source_correlation_id) for r in hip_events
+    )
+    actual = sorted(
+        (
+            get_attributes(row)["correlation_id"],
+            get_attributes(row).get("source_correlation_id", 0),
+        )
+        for _, row in otf2_events.iterrows()
+    )
+    assert actual == expected
+
+
+def _query_hip_event_slices(pftrace_reader, category):
+    def arg(key):
+        return (
+            f"(SELECT int_value FROM args a WHERE a.arg_set_id = s.arg_set_id "
+            f"AND a.key = 'debug.{key}') AS {key}"
+        )
+
+    return pftrace_reader.query_tp(f"""
+        SELECT s.id, s.ts, s.track_id, s.name, {arg("corr_id")}, {arg("source_corr_id")},
+            {arg("stream_id")}, {arg("queue")},
+            (SELECT string_value FROM args a WHERE a.arg_set_id = s.arg_set_id
+                AND a.key = 'debug.agent') AS agent
+        FROM slice s WHERE s.category = '{category}'
+    """)
+
+
+@pytest.mark.parametrize("grouping", ["stream", "queue"])
+def test_perfetto_hip_event_track(pftrace_reader, grouping):
+    """Verify HIP events sit on the same Perfetto track as kernels of their stream or queue.
+
+    By default kernels are grouped by stream; with --group-by-queue they are grouped by
+    agent and queue. HIP events must follow the same grouping.
+    """
+    events = _query_hip_event_slices(pftrace_reader, "hip_event")
+    kernels = _query_hip_event_slices(pftrace_reader, "kernel_dispatch")
+
+    assert len(events) > 0, "No HIP event slices"
+    assert len(kernels) > 0, "No kernel dispatch slices"
+
+    def key(row):
+        if grouping == "stream":
+            return row["stream_id"]
+        return (row["agent"], row["queue"])
+
+    kernel_tracks = {}
+    for _, row in kernels.iterrows():
+        kernel_tracks.setdefault(key(row), set()).add(row["track_id"])
+
+    for k, tracks in kernel_tracks.items():
+        assert len(tracks) == 1, f"kernels for {grouping} {k} span tracks {tracks}"
+
+    shared = 0
+    for _, row in events.iterrows():
+        tracks = kernel_tracks.get(key(row))
+        if tracks is None:
+            continue
+        assert row["track_id"] in tracks, (
+            f"{row['name']} (corr_id {row['corr_id']}) for {grouping} {key(row)} is on "
+            f"track {row['track_id']}, kernels are on {tracks}"
+        )
+        shared += 1
+
+    assert shared > 0, f"No HIP event shares a {grouping} with a kernel dispatch"
+
+
+@pytest.mark.parametrize("grouping", ["stream", "queue"])
+def test_perfetto_hip_event_flows(pftrace_reader, grouping):
+    """Verify the Perfetto flows linking HIP events to their API call and RECORD.
+
+    Each HIP event has a flow with the HIP API call of the same corr_id, and each WAIT whose
+    RECORD is in the trace has an incoming flow from that RECORD.
+
+    Trace processor directs a flow from the earlier slice to the later one. A RECORD that CLR
+    coalesced onto the previous barrier reports that barrier's GPU times, which can precede its
+    own API call, so its flow then runs from the RECORD to the API call.
+    """
+    events = _query_hip_event_slices(pftrace_reader, "hip_event")
+    api = _query_hip_event_slices(pftrace_reader, "hip_api")
+    flows = pftrace_reader.query_tp("SELECT slice_out, slice_in FROM flow")
+
+    flow_pairs = set(zip(flows["slice_out"], flows["slice_in"]))
+    api_slices = {}
+    for _, row in api.iterrows():
+        api_slices.setdefault(row["corr_id"], []).append((row["id"], row["ts"]))
+    record_ids = {
+        row["corr_id"]: row["id"]
+        for _, row in events.iterrows()
+        if "RECORD" in row["name"]
+    }
+
+    linked_waits = 0
+    for _, row in events.iterrows():
+        assert any(
+            (
+                (api_id, row["id"])
+                if api_ts <= row["ts"] or "RECORD" not in row["name"]
+                else (row["id"], api_id)
+            )
+            in flow_pairs
+            for api_id, api_ts in api_slices.get(row["corr_id"], [])
+        ), f"{row['name']} (corr_id {row['corr_id']}) has no flow with its HIP API call"
+
+        if "WAIT" not in row["name"] or row["source_corr_id"] not in record_ids:
+            continue
+        assert (record_ids[row["source_corr_id"]], row["id"]) in flow_pairs, (
+            f"{row['name']} (corr_id {row['corr_id']}) has no flow from its RECORD "
+            f"(corr_id {row['source_corr_id']})"
+        )
+        linked_waits += 1
+
+    assert linked_waits > 0, "No WAIT slice is linked to its RECORD"
 
 
 if __name__ == "__main__":

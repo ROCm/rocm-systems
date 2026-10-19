@@ -432,6 +432,12 @@ typedef struct rocprofiler_buffer_tracing_kernel_dispatch_record_t
  * For WAIT operations, @p source_queue_id identifies where the event was originally recorded; for
  * RECORD operations it equals @p queue_id.
  *
+ * For WAIT operations, @p source_correlation_id is the internal correlation id of the RECORD
+ * operation the wait depends on, or zero when that record was not seen. For RECORD operations it
+ * equals the record's own internal correlation id. It is only present when @p size covers it.
+ * A non-zero id can name a RECORD that was itself not reported, for example because its
+ * barrier had no GPU timestamps.
+ *
  * The start and end timestamps are when the GPU command processor began processing and retired
  * the barrier packet that the operation was carried on, in the same clock domain as kernel
  * dispatch records. Every barrier retires only after the work submitted ahead of it on its own
@@ -460,6 +466,7 @@ typedef struct rocprofiler_buffer_tracing_hip_event_record_t
     rocprofiler_queue_id_t             queue_id;          ///< queue where barrier was dispatched
     uint64_t                           hip_event_handle;  ///< hipEvent_t pointer value
     rocprofiler_queue_id_t             source_queue_id;   ///< queue where event was recorded
+    uint64_t source_correlation_id;  ///< internal correlation id of the recording operation
 
     /// @var kind
     /// @brief ::ROCPROFILER_BUFFER_TRACING_HIP_EVENT
