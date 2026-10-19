@@ -131,6 +131,10 @@ __launch_bounds__(1024)
 
   // Phase 2: poll my slots for the other ranks, reduce with my own data, then
   // publish the reduced shard to every peer's second stage.
+  // A sticky abort, not an early return: an exit per unrolled wait nearly doubles
+  // the NRANKS_CT == 8 kernel. Once aborted, the remaining waits are skipped and
+  // the kernel still reaches the epoch bump at the end.
+  bool aborted = false;
   LLPacket16* myBase = reinterpret_cast<LLPacket16*>(peerScratch[selfRank]) + bankOffsetPkts;
   for (size_t pk = gtid; pk < nPk_rank; pk += stride) {
     uint32_t acc0 = in[2 * pk];
@@ -138,11 +142,8 @@ __launch_bounds__(1024)
     for (int r = 1; r < nRanks; ++r) {
       const int peer = (selfRank + r) % nRanks;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1)) {
-        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
-        return;
-      }
+      uint32_t d0 = 0, f0, d1 = 0, f1;
+      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1);
       ddaLLAddPayload<T>(acc0, acc1, d0, d1);
     }
     out[2 * pk] = acc0;
@@ -164,11 +165,8 @@ __launch_bounds__(1024)
       const int peer = (selfRank + r) % nRanks;
       uint32_t *peer_out = reinterpret_cast<uint32_t*>(recvbuff) + peer * nPk_rank * 2;
       volatile LLPacket16* src = myBase + (size_t)peer * slot;
-      uint32_t d0, f0, d1, f1;
-      if (!ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1)) {
-        ddaSetLLEpoch(epochDev, epochLen, blockIdx.x, gridDim.x, flag);
-        return;
-      }
+      uint32_t d0 = 0, f0, d1 = 0, f1;
+      if (!aborted) aborted = !ddaLLWaitLineFlags(&src[pk], flag, abortFlag, d0, f0, d1, f1);
       peer_out[2 * pk] = d0;
       peer_out[2 * pk + 1] = d1;
     }
