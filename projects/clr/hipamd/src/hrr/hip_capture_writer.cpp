@@ -226,8 +226,9 @@ static std::atomic<uint64_t> g_blob_count{0};
 
 // Blob and code object writes claimed under g_blob_mu and not finished yet.
 // flush() waits for them before it decides on the trailer, since one that fails
-// leaves events naming a file that does not exist. flush() waits holding
-// g_file_mu, so a claimed write must finish without taking it.
+// leaves events naming a file that does not exist. flush(), close() and
+// atfork_prepare wait holding g_file_mu, so a claimed write must finish without
+// taking it.
 static uint64_t                g_blob_writes_in_flight = 0;  // under g_blob_mu
 static std::condition_variable g_blob_writes_done;
 
@@ -623,7 +624,12 @@ static void atfork_prepare() {
   if (g_events_fd >= 0)
     flush_buffer_locked();
   g_buf_busy.clear(std::memory_order_release);
-  g_blob_mu.lock();
+  // A blob write in flight holds its blobs/<xx> descriptor, which the child
+  // would keep without the thread that closes it. Wait for those writes, as
+  // flush() does; g_blob_mu stays locked across fork().
+  std::unique_lock<std::mutex> blk(g_blob_mu);
+  g_blob_writes_done.wait(blk, [] { return g_blob_writes_in_flight == 0; });
+  blk.release();
   // The child's shutdown writes its manifest under this one.
   g_unreplayable_mu.lock();
 }
@@ -636,8 +642,6 @@ static void atfork_parent() {
 }
 
 static void atfork_child() {
-  // The parent's blob writers are not in the child to finish their claims.
-  g_blob_writes_in_flight = 0;
   g_unreplayable_mu.unlock();
   g_blob_mu.unlock();
   g_file_mu.unlock();
@@ -1386,14 +1390,20 @@ void close() {
   // The archive's directory descriptors go with events.bin, so the application
   // keeps none of them after the capture. Blob and code object writes use them
   // without a lock: stop new ones and wait for those in flight, as flush() does,
-  // which it skips after a space stop. The crash path, which writes the manifest
-  // through g_dir_fd, has nothing left to do once flush() has written it.
+  // which it skips after a space stop. The crash path opens the manifest through
+  // g_dir_fd holding g_emergency_manifest_busy, so take that too: a callback
+  // that has loaded the descriptor finishes before it is closed and its number
+  // reused, and a later one finds -1. A callback on this thread, interrupting
+  // it here, skips the manifest rather than waiting.
   {
     std::unique_lock<std::mutex> blk(g_blob_mu);
     g_events_finalized = true;
     g_blob_writes_done.wait(blk, [] { return g_blob_writes_in_flight == 0; });
   }
+  while (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire))
+    std::this_thread::yield();
   close_dir_fds();
+  g_emergency_manifest_busy.clear(std::memory_order_release);
 #endif
 }
 
@@ -1453,7 +1463,7 @@ void emergency_finalize(bool clean_shutdown) {
   // absence-of-trailer is how the reader detects truncation.
   if (g_manifest_path[0] == '\0') return;
   // Concurrent crash callbacks must not share the emergency buffer. A second
-  // entrant skips the manifest.
+  // entrant skips the manifest. close() holds the flag while it closes g_dir_fd.
   if (g_emergency_manifest_busy.test_and_set(std::memory_order_acquire)) return;
   bool complete = clean_shutdown && locked;
 #ifdef _WIN32

@@ -75,6 +75,8 @@ cases:
   Unit_HRR_CaptureWritesThroughCheckedDirs: {}
   Unit_HRR_ChevronLaunchRoundtrip: {}
   Unit_HRR_ChevronLaunch_Direct: {}
+  Unit_HRR_CloseDuringCrashManifest: {}
+  Unit_HRR_CloseDuringCrashManifest_Direct: {}
   Unit_HRR_ConfigureCallRoundtrip: {}
   Unit_HRR_ConfigureCall_Direct: {}
   Unit_HRR_ContextRoundtrip: {}
@@ -144,6 +146,8 @@ cases:
   Unit_HRR_ForkAfterCaptureShutdown_Direct: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose: {}
   Unit_HRR_ForkBetweenCaptureFlushAndClose_Direct: {}
+  Unit_HRR_ForkDuringBlobWrite: {}
+  Unit_HRR_ForkDuringBlobWrite_Direct: {}
   Unit_HRR_ForkWhileNotingUnreplayable: {}
   Unit_HRR_ForkWhileNotingUnreplayable_Direct: {}
   Unit_HRR_ForkWhileRecording: {}

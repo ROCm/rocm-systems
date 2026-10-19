@@ -144,7 +144,9 @@ blob or code object after the fork, so it switches to its own `pid-<childpid>/`
 sub-archive. `atfork_child` only drops the parent's events fd, directory descriptors
 and paths, and the child's `writer::open()` opens its own: the
 child of a multithreaded process may make only async-signal-safe calls until it
-execs, and a child that execs or exits without recording leaves no archive. The root
+execs, and a child that execs or exits without recording leaves no archive. `fork()`
+waits for the blob and code object writes in flight, so the child inherits no
+`blobs/<xx>/` descriptor of theirs. The root
 `manifest.json` is a common aggregate index with the schema fields
 `version`, `capture_mode`, `owner_pid`, and `processes[]`; each process rewrites
 it best-effort on clean shutdown by scanning existing `pid-<pid>/manifest.json`
