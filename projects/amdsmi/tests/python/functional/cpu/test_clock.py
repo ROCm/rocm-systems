@@ -279,14 +279,13 @@ class TestCpuClock(unittest.TestCase):
                         val = amdsmi.amdsmi_get_cpu_df_pstate_range(cpu)
                     self.common.print(f"\t    data: {val}")
                     # A SUCCESS must also carry sane data -- status alone would let
-                    # swapped min/max or out-of-range P-states pass.
+                    # out-of-range P-states pass. Note DF P-states are numbered
+                    # with P0 as the highest-performance state, so min/max are not
+                    # numerically ordered (eg. a valid result is min_pstate=2,
+                    # max_pstate=0); only the [0, 7] range is asserted.
                     if isinstance(val, dict):
                         assert 0 <= val["min_pstate"] <= 7 and 0 <= val["max_pstate"] <= 7, (
                             f"df pstate values out of range [0, 7]: {val}"
-                        )
-                        assert val["min_pstate"] <= val["max_pstate"], (
-                            f"df pstate min ({val['min_pstate']}) must be <= "
-                            f"max ({val['max_pstate']})"
                         )
         except Exception as e:
             failures.append(e)
