@@ -258,7 +258,7 @@ bool rcclUseAlltoAllGda(struct ncclComm* comm);
 // Pass the bias buffer as acc (nullptr when the caller is plain AllReduce).
 // Does NOT check ceARTmpBuf initialization; the caller is responsible.
 bool rcclUseCeAr2Shot(struct ncclComm* comm, size_t count, ncclDataType_t datatype, ncclRedOp_t op, const void* acc);
-size_t rcclCeAr2ShotMax(const struct ncclComm* comm);
+size_t rcclCeNonRegMax(const struct ncclComm* comm, ncclFunc_t func);
 size_t rcclCeAr2ShotMin(const struct ncclComm* comm);
 // Opt-in CE ReduceScatter gate (RCCL_CE_REDUCESCATTER=1). Staging path (scatter
 // into ceARTmpBuf, then local reduce). No message-size cap: large messages are
