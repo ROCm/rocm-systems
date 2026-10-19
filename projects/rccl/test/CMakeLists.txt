@@ -1042,6 +1042,7 @@ if(BUILD_TESTS)
       CommMPITests.cpp
       NChannelsPerNetPeerMPITests.cpp
       MaxP2pPeersMPITests.cpp
+      GdrFlushFlagProtoSwitchMPITests.cpp
       RegistrationMPITests.cpp
       HostApiMPITests.cpp
       HostApiCustomGinPluginMPITests.cpp
