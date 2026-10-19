@@ -615,6 +615,9 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
     std::vector<std::unique_ptr<MPIHelpers::MpiEnvGuard>> envGuards;
     for(const DdaEnvSetting& e : tc.overrides)
         envGuards.push_back(std::make_unique<MPIHelpers::MpiEnvGuard>(e.name, e.value));
+    // A non-default check mode sends the collective down the generic enqueue path
+    // while rcclGetCollImplInfo still reports DDA.
+    MPIHelpers::MpiEnvUnsetGuard checkModeGuard("NCCL_CHECK_MODE");
 
     ASSERT_MPI_EQ(ncclSuccess, test.createTestCommunicator());
 
@@ -844,6 +847,9 @@ protected:
 
     void runIncompleteDdaAbort(const DdaRevokeCase& tc)
     {
+        // A non-default check mode sends the collective down the generic enqueue
+        // path while rcclGetCollImplInfo still reports DDA.
+        MPIHelpers::MpiEnvUnsetGuard checkModeGuard("NCCL_CHECK_MODE");
         ASSERT_MPI_EQ(ncclSuccess, createTestCommunicator());
 
         ncclComm_t   comm      = getActiveCommunicator();
