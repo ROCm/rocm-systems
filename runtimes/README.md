@@ -22,6 +22,8 @@ part of the repository's default build or installation yet.
   builds a static library. Its shared ABI is an alias of the shared image.
 - [`loader/rocelf`](loader/rocelf/README.md) parses ELF64 and AMDGPU
   code objects and constructs checked load images independently of rocddi.
+- [`image/rocaddr3`](image/rocaddr3/README.md) computes GFX12 surface
+  layouts through AddrLib3 without owning device memory.
 - [`ddi/libhsa`](ddi/libhsa/README.md) implements the HSA C ABI and builds a
   shared ABI in the same image. It consumes rocddi directly, not through AMDF.
 
