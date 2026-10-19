@@ -566,4 +566,159 @@ TEST(AieElfParse, FindsStringTablesThroughSymbolTableLinks) {
   }
 }
 
+
+/**
+ * @brief Renames a section in place. The new name must be no longer than the old one, so nothing in
+ * the section-name table has to move.
+ *
+ * @param image ELF contents to modify
+ * @param from current section name
+ * @param to new section name
+ * @return false if there is no section named `from` or `to` is longer
+ */
+bool RenameSection(std::vector<std::uint8_t>& image, const char* from, const char* to) {
+  const std::uint32_t index = FindSection(image, from);
+  if (index == 0 || std::strlen(to) > std::strlen(from)) return false;
+  const Elf32_Ehdr ehdr = Header(image);
+  const Elf32_Shdr shstrtab = SectionHeader(image, ehdr.e_shstrndx);
+  auto* name = image.data() + shstrtab.sh_offset + SectionHeader(image, index).sh_name;
+  std::memset(name, 0, std::strlen(from));
+  std::memcpy(name, to, std::strlen(to));
+  return true;
+}
+
+/**
+ * @brief The patch site aie4 relocation 0 becomes: an aie4 full ELF has no PDI relocations, so
+ * relocation 0 is argument 0's only site.
+ *
+ * @param k parsed kernel
+ * @return the site, or nullptr if argument 0 has none
+ */
+const rocr::AMD::aie_elf::PatchSite* Arg0Site(const rocr::AMD::aie_elf::Kernel& k) {
+  if (k.arg_sites.empty() || k.arg_sites[0].size() != 1) return nullptr;
+  return &k.arg_sites[0].front();
+}
+
+TEST(AieElfParse, Aie4SiteOffsetsAreRelativeToThePagePayload) {
+  // aiebu's convention: an aie4 relocation's r_offset counts from the page's payload, 16 bytes in,
+  // across the page's ctrltext and then its ctrldata, whichever section the symbol names.
+  if (!IsAie4()) GTEST_SKIP() << "aie4 relocation convention";
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto* site = Arg0Site(kernels.begin()->second);
+  ASSERT_NE(site, nullptr) << "artifact has no argument patch sites";
+  const auto ctrltext_size =
+      static_cast<std::uint32_t>(kernels.begin()->second.pages[site->page].ctrltext.size());
+
+  // A site inside ctrltext lands past the 16-byte header.
+  auto in_ctrltext = image;
+  ASSERT_TRUE(SetRelocationOffset(in_ctrltext, /*index=*/0, 0x20));
+  ASSERT_EQ(ParseImage(in_ctrltext, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  site = Arg0Site(kernels.begin()->second);
+  ASSERT_NE(site, nullptr);
+  EXPECT_FALSE(site->in_ctrldata);
+  EXPECT_EQ(site->offset, 0x30u);
+
+  // The header pushes a site in ctrltext's last 16 bytes over into ctrldata.
+  auto at_boundary = image;
+  ASSERT_TRUE(SetRelocationOffset(at_boundary, /*index=*/0, ctrltext_size - 16));
+  ASSERT_EQ(ParseImage(at_boundary, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  site = Arg0Site(kernels.begin()->second);
+  ASSERT_NE(site, nullptr);
+  EXPECT_TRUE(site->in_ctrldata);
+  EXPECT_EQ(site->offset, 0u);
+}
+
+TEST(AieElfParse, Aie4AcceptsASiteInTheLastTwoDwords) {
+  // The 57-bit scheme writes the site and the dword after it, so a site in the last eight bytes of
+  // its buffer fits.
+  if (!IsAie4()) GTEST_SKIP() << "57-bit scheme";
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto* site = Arg0Site(kernels.begin()->second);
+  ASSERT_NE(site, nullptr) << "artifact has no argument patch sites";
+  ASSERT_TRUE(site->in_ctrldata) << "expected the artifact's argument sites in ctrldata";
+  const auto& page = kernels.begin()->second.pages[site->page];
+  // Back from an in-ctrldata offset to the raw r_offset, per the convention above.
+  const auto raw = static_cast<std::uint32_t>(page.ctrltext.size() + page.ctrldata.size() - 8 - 16);
+
+  ASSERT_TRUE(SetRelocationOffset(image, /*index=*/0, raw));
+  EXPECT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+}
+
+TEST(AieElfParse, RejectsArgumentSchemeOfAnotherArch) {
+  // The driver patches every argument site with its arch's own scheme, so a site written for the
+  // other arch's buffer descriptor must be refused rather than patched wrongly.
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+
+  // Relocation 1 is always an argument site (see RejectsArgumentPatchSiteOutOfRange).
+  const std::uint32_t rela = FindSection(image, ".rela.dyn");
+  ASSERT_NE(rela, 0u);
+  std::uint32_t r_info = 0;
+  std::memcpy(&r_info,
+              image.data() + SectionHeader(image, rela).sh_offset + sizeof(Elf32_Rela) +
+                  offsetof(Elf32_Rela, r_info),
+              sizeof(r_info));
+  constexpr std::uint32_t kShimDma48 = 5;
+  constexpr std::uint32_t kShimDma57Aie4 = 6;
+  ASSERT_TRUE(MutateRelocation(image, /*index=*/1, r_info >> 8,
+                               IsAie4() ? kShimDma48 : kShimDma57Aie4));
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS);
+  EXPECT_NE(error.find("unsupported patch scheme"), std::string::npos)
+      << "rejected for the wrong reason: " << error;
+}
+
+TEST(AieElfParse, Aie4RejectsMultiColumnControlCode) {
+  // Each column's control code goes to its own microcontroller, which UMQ dispatch does not do.
+  if (!IsAie4()) GTEST_SKIP() << "aie4 page naming";
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+  ASSERT_TRUE(RenameSection(image, ".ctrltext.0.1.0", ".ctrltext.1.1.0"));
+  ASSERT_TRUE(RenameSection(image, ".ctrldata.0.1.0", ".ctrldata.1.1.0"));
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  EXPECT_NE(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS);
+  EXPECT_NE(error.find("multi-column"), std::string::npos)
+      << "rejected for the wrong reason: " << error;
+}
+
+TEST(AieElfParse, Aie4OrdersPagesByNumber) {
+  // A page's place in the control code is its number, so pages "0.2" and "0.10" come out in that
+  // order -- the reverse of their names' string order.
+  if (!IsAie4()) GTEST_SKIP() << "aie4 page naming";
+  auto image = ReadFile(kElf);
+  if (image.empty()) GTEST_SKIP() << "full-ELF artifact not built";
+  const auto first = SectionContents(image, ".ctrltext.0.0.0");
+  const auto second = SectionContents(image, ".ctrltext.0.1.0");
+  ASSERT_FALSE(first.empty());
+  ASSERT_FALSE(second.empty());
+  ASSERT_TRUE(RenameSection(image, ".ctrltext.0.0.0", ".ctrltext.0.10"));
+  ASSERT_TRUE(RenameSection(image, ".ctrldata.0.0.0", ".ctrldata.0.10"));
+  ASSERT_TRUE(RenameSection(image, ".ctrltext.0.1.0", ".ctrltext.0.2"));
+  ASSERT_TRUE(RenameSection(image, ".ctrldata.0.1.0", ".ctrldata.0.2"));
+
+  std::map<std::string, rocr::AMD::aie_elf::Kernel> kernels;
+  std::string error;
+  ASSERT_EQ(ParseImage(image, &kernels, &error), HSA_STATUS_SUCCESS) << error;
+  const auto& pages = kernels.begin()->second.pages;
+  ASSERT_EQ(pages.size(), 2u);
+  EXPECT_EQ(pages[0].number, 2u);
+  EXPECT_EQ(pages[0].ctrltext, second);
+  EXPECT_EQ(pages[1].number, 10u);
+  EXPECT_EQ(pages[1].ctrltext, first);
+}
+
 }  // namespace

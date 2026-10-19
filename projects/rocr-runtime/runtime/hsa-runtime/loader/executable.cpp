@@ -1909,12 +1909,10 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         }
       }
 
-      // Concatenate every page's ctrltext+ctrldata with no gap within a page (matching the +16
-      // rebase aie_elf::Parse() already applied to that page's argument offsets) and 16-byte
-      // alignment padding between pages (matching every ctrltext/ctrldata section's own alignment
-      // in a real aie4 full ELF, confirmed via readelf), reconstructing the combined address space
-      // the ELF's relocations were computed against. This becomes the pristine template a per-
-      // dispatch copy is patched from -- CERT does not patch argument addresses into the control
+      // Lay the pages out as aiebu's elf_reader_gen2plus does: page N at N * kAie4PageSize, its
+      // ctrltext immediately followed by its ctrldata (matching the offsets aie_elf::Parse() gave
+      // that page's argument sites), padded out to the next page. The firmware addresses pages by
+      // that position. This becomes the pristine template a per-dispatch copy is patched from -- CERT does not patch argument addresses into the control
       // code itself (confirmed on real hardware: leaving the ELF's placeholder offsets unpatched
       // faults the IOMMU on tiny near-zero addresses), so the host still has to, exactly as aie2p
       // does for its own (single-page) control code.
@@ -1936,13 +1934,21 @@ hsa_status_t ExecutableImpl::LoadAieCodeObject(hsa_agent_t agent, const void* da
         std::vector<uint8_t> ctrl_code;
         // Page index -> (ctrltext base, ctrldata base) in ctrl_code, for rebasing arg_sites below.
         std::vector<std::pair<uint32_t, uint32_t>> page_bases(kernel.pages.size());
+        constexpr size_t kPageSize = AMD::aie_elf::kAie4PageSize;
         for (size_t p = 0; p < kernel.pages.size(); ++p) {
           const AMD::aie_elf::Page& page = kernel.pages[p];
+          // Pages come in increasing number, so each starts at or after the end of the last.
+          if (page.ctrltext.size() + page.ctrldata.size() > kPageSize) {
+            log_warning_n(10, "AIE: kernel '%s' has a control-code page larger than %zu bytes.\n",
+                          kernel_name.c_str(), kPageSize);
+            return HSA_STATUS_ERROR_INVALID_CODE_OBJECT;
+          }
+          ctrl_code.resize(static_cast<size_t>(page.number) * kPageSize, 0);
           page_bases[p].first = static_cast<uint32_t>(ctrl_code.size());
           ctrl_code.insert(ctrl_code.end(), page.ctrltext.begin(), page.ctrltext.end());
           page_bases[p].second = static_cast<uint32_t>(ctrl_code.size());
           ctrl_code.insert(ctrl_code.end(), page.ctrldata.begin(), page.ctrldata.end());
-          while (ctrl_code.size() % 16 != 0) ctrl_code.push_back(0);
+          ctrl_code.resize((static_cast<size_t>(page.number) + 1) * kPageSize, 0);
         }
         // Every site now indexes this one combined buffer, so the page/in_ctrldata split that
         // distinguished a page's two buffers no longer means anything; collapse it away so the

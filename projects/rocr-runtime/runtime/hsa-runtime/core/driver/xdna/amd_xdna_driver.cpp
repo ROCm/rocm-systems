@@ -1915,8 +1915,9 @@ static hsa_status_t TranslateUmqPacket(hsa_amd_aie_kernel_dispatch_packet_t& pkt
   // into an unmapped page, and adds its values to the argument buffer descriptors
   // (APPLY_OFFSET_57).
   //  - CERT writes the packet's return code, a 32-bit store (measured), to completion_signal's
-  //    address. Nothing reads it (completion is read_index passing the packet), so it goes into
-  //    completion_signal itself, which CERT has finished reading by then.
+  //    address: an ert_cmd_state in its low 4 bits, COMPLETED or, for a failed packet, ERROR with
+  //    the error code above it. It goes into completion_signal itself, which CERT has finished
+  //    reading by then, and SubmitUmqPackets reads it back once read_index passes the packet.
   auto& cert = reinterpret_cast<host_queue_packet&>(pkt);
   cert.completion_signal = reinterpret_cast<uint64_t>(&cert.completion_signal);
   const uint64_t ctrl_code_addr = reinterpret_cast<uint64_t>(ctrl_copy);
@@ -1984,6 +1985,15 @@ hsa_status_t XdnaDriver::SubmitUmqPackets(hsa_amd_aie_kernel_dispatch_packet_t* 
       return wait_err;
     }
     aie_agent.system_deallocator()(ctrl_copy);
+    // Retired is not the same as succeeded: a failed packet is retired too, so its return code
+    // decides. A failed packet is not retired here, so its completion signal is never decremented,
+    // and the packets after it are not run, the same as a rejected one.
+    const auto& cert = reinterpret_cast<const host_queue_packet&>(pkt);
+    const uint32_t return_code =
+        *reinterpret_cast<const volatile uint32_t*>(&cert.completion_signal);
+    if ((return_code & 0xF) != ERT_CMD_STATE_COMPLETED) {
+      return HSA_STATUS_ERROR;
+    }
     // A UMQ device (AMDXDNA_DEV_TYPE_UMQ) is cache-coherent with the CPU, which is why XRT's
     // sync_bo does nothing for one and why UMQ submission never flushes before dispatch either.
     RetireCompletedPackets(ring, ring_capacity - 1, idx, /*num_pkts=*/1,

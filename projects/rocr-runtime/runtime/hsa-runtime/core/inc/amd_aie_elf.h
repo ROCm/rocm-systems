@@ -28,6 +28,11 @@ namespace rocr {
 namespace AMD {
 namespace aie_elf {
 
+/// @brief Size of an aie4 control-code page. Page N of a kernel's control code starts at
+/// N * kAie4PageSize, each page's ctrltext and ctrldata padded out to it, as aiebu's
+/// elf_reader_gen2plus lays it out; the firmware addresses pages by that position.
+constexpr uint32_t kAie4PageSize = 8192;
+
 /// @brief One place in the control code that takes an address.
 struct PatchSite {
   /// @brief Index into Kernel::pages naming which page's buffer @c offset is relative to.
@@ -61,11 +66,13 @@ struct Pdi {
 /// @brief One page of a kernel's control code: a chunk of instructions (ctrltext) and, for an
 /// aie4 full ELF, the buffer descriptors it addresses (ctrldata). aie2p has exactly one page and
 /// no ctrldata: its argument and PDI patch sites all live in ctrltext. aie4 bundles several pages
-/// per kernel, each potentially with its own argument patch sites in ctrldata; what a page
-/// corresponds to physically is not documented anywhere this reader could find, so a page is
-/// treated as an opaque unit, identified only by the suffix aiecc gave its ctrltext/ctrldata
-/// section names (e.g. ".ctrltext.0.2.0" and ".ctrldata.0.2.0" share the page).
+/// per kernel, each potentially with its own argument patch sites in ctrldata. A page is
+/// identified by the suffix aiecc gave its ctrltext/ctrldata section names, "<col>.<page>[.<id>]"
+/// (e.g. ".ctrltext.0.2.0" and ".ctrldata.0.2.0" share the page).
 struct Page {
+  /// @brief Page number: the <page> of the section names' suffix on aie4, where it places the page
+  /// at number * kAie4PageSize; always 0 on aie2p.
+  uint32_t number = 0;
   /// @brief Control-code bytes.
   std::vector<uint8_t> ctrltext;
   /// @brief Buffer-descriptor bytes the page's ctrltext addresses; empty if the page has none
@@ -82,8 +89,7 @@ struct Kernel {
   /// an empty PDI before and after the design runs). Each distinct PDI appears once: sites naming
   /// byte-identical PDIs share an entry, so it is placed in device memory once.
   std::vector<Pdi> pdis;
-  /// @brief The kernel's control-code pages, in the order Parse() found their sections. Never
-  /// empty.
+  /// @brief The kernel's control-code pages, in increasing page number. Never empty.
   std::vector<Page> pages;
   /// @brief Patch sites per argument index. Entries may be empty for unused arguments.
   std::vector<std::vector<PatchSite>> arg_sites;

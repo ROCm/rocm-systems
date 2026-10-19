@@ -130,7 +130,8 @@ if(AIE_KERNEL_TOOLCHAIN)
     )
     if(XRT_SMI_OUTPUT MATCHES "NPU Strix|NPU Strix Halo|NPU Krackan|RyzenAI-npu[456]")
       set(NPU_TARGET "npu2")
-    elseif(XRT_SMI_OUTPUT MATCHES "NPU Phoenix|RyzenAI-npu1")
+    # Bounded, so that RyzenAI-npu10/npu11 (npu3, below) do not match as npu1.
+    elseif(XRT_SMI_OUTPUT MATCHES "NPU Phoenix|RyzenAI-npu1([^0-9]|$)")
       set(NPU_TARGET "npu")
     elseif(XRT_SMI_OUTPUT MATCHES "NPU3|RyzenAI-npu9|RyzenAI-npu10|RyzenAI-npu11|Medusa")
       set(NPU_TARGET "npu3")
@@ -540,6 +541,16 @@ if(AIE_FULL_ELF_SUPPORTED AND NOT AIE_HSACO_ARCH STREQUAL "aie2")
   else()
     set(MULTIARCH_ELF_OTHER_ARCH "aie4")
   endif()
+endif()
+# The configure-time check above only covers AIE_HSACO_ARCH; a packer that predates the other arch
+# would pass it and then fail here at build time. The artifact is optional (its test skips without
+# it), so leave it out instead.
+if(MULTIARCH_ELF_OTHER_ARCH AND NOT AIE_HSACO_HELP MATCHES "[{,]${MULTIARCH_ELF_OTHER_ARCH}[,}]")
+  message(STATUS "aie-hsaco (${AIE_HSACO_CMD_STR}) does not accept --arch "
+                 "${MULTIARCH_ELF_OTHER_ARCH}; multiarch_elf.hsaco will not be built.")
+  unset(MULTIARCH_ELF_OTHER_ARCH)
+endif()
+if(MULTIARCH_ELF_OTHER_ARCH)
   add_custom_command(
     OUTPUT "${multiarch_elf_HSACO}"
     # aie-hsaco adds to an existing file, so start from none.

@@ -149,6 +149,19 @@ bool ParseArgIndex(const char* name, uint32_t* index) {
   return true;
 }
 
+/// @brief Splits a control-code section suffix, "<col>.<page>[.<id>]", into its column and page
+/// numbers.
+bool ParsePageKey(const std::string& key, uint32_t* col, uint32_t* page) {
+  const size_t first = key.find('.');
+  if (first == std::string::npos) return false;
+  const size_t second = key.find('.', first + 1);
+  const std::string col_str = key.substr(0, first);
+  const std::string page_str = key.substr(first + 1, second == std::string::npos
+                                                         ? std::string::npos
+                                                         : second - first - 1);
+  return ParseArgIndex(col_str.c_str(), col) && ParseArgIndex(page_str.c_str(), page);
+}
+
 }  // namespace
 
 hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view arch,
@@ -180,6 +193,7 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
     return fail("malformed section headers");
   }
   const uint8_t abi_version = ehdr->e_ident[EI_ABIVERSION];
+  const bool is_aie4 = arch == "aie4";
 
   const auto* shdrs = image.As<Elf32_Shdr>(ehdr->e_shoff, ehdr->e_shnum);
   if (shdrs == nullptr || ehdr->e_shstrndx >= ehdr->e_shnum) {
@@ -363,17 +377,30 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
       const Group& group = groups.at(role.group);
       const PageSections& page_secs = group.pages.at(role.page_key);
 
-      // A relocation names its page by its ctrltext section's symbol (confirmed against a real
-      // aie4 full ELF: both argument relocations' symbols are bound to a ctrltext section, never
-      // a ctrldata one), but the offset itself is given in a combined ctrltext+ctrldata address
-      // space (aiebu's own convention: transform_manager.cpp's get_controlcode_bd_offset/
-      // set_controlcode_bd_offset) -- that same ELF lays each page's ctrldata address out
-      // immediately after its ctrltext one, with no gap, so an offset past ctrltext's own size is
-      // one into ctrldata. Rebase it into ctrldata's own byte offset; +16 because a full-ELF
-      // control code opens with a 16-byte transaction header.
       uint32_t offset = relocs[r].r_offset;
       bool in_ctrldata = role.in_ctrldata;
-      if (!in_ctrldata && page_secs.ctrltext_section != 0) {
+      if (is_aie4) {
+        // aiebu's convention (elf_reader_gen2plus::init_patchers): a control-code relocation's
+        // r_offset is relative to its page's payload, which starts 16 bytes into the page, past
+        // the transaction header the control code opens with -- whichever of the page's sections
+        // the symbol names. The page is its ctrltext followed directly by its ctrldata, so the
+        // site is in ctrltext or in ctrldata depending on where that position falls. 64-bit so a
+        // huge r_offset (untrusted ELF input) is caught rather than wrapping back into range.
+        if (page_secs.ctrltext_section == 0) return fail("relocation into a page with no ctrltext");
+        const uint32_t ctrltext_size = shdrs[page_secs.ctrltext_section].sh_size;
+        uint64_t in_page = static_cast<uint64_t>(offset) + kControlCodeHeaderSize;
+        in_ctrldata = in_page >= ctrltext_size;
+        if (in_ctrldata) {
+          if (page_secs.ctrldata_section == 0) {
+            return fail("relocation offset past the end of ctrltext, but the page has no ctrldata");
+          }
+          in_page -= ctrltext_size;
+        }
+        if (in_page > std::numeric_limits<uint32_t>::max()) {
+          return fail("control-code relocation offset overflows");
+        }
+        offset = static_cast<uint32_t>(in_page);
+      } else if (!in_ctrldata && page_secs.ctrltext_section != 0) {
         const uint32_t ctrltext_size = shdrs[page_secs.ctrltext_section].sh_size;
         if (offset >= ctrltext_size) {
           if (page_secs.ctrldata_section == 0) {
@@ -424,8 +451,10 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
         // the control code, so refuse instead.
         return fail(std::string("unsupported relocation symbol: ") + sym_name);
       }
-      if (site.scheme != PatchScheme::kShimDma48 && site.scheme != PatchScheme::kShimDma57Aie4) {
-        return fail("unsupported patch scheme for a kernel argument");
+      // The dispatch path applies the arch's own scheme to every site, so a site written for the
+      // other arch's buffer descriptor would be patched wrongly.
+      if (site.scheme != (is_aie4 ? PatchScheme::kShimDma57Aie4 : PatchScheme::kShimDma48)) {
+        return fail("unsupported patch scheme for a kernel argument on " + std::string(arch));
       }
       if (arg_index > kMaxArgIndex) {
         return fail("kernel argument index out of range");
@@ -443,9 +472,32 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
     // ctrldata but no ctrltext has nothing to execute, so it is dropped rather than failing the
     // whole group: other pages, or other groups, may still be valid.
     std::map<std::string, uint32_t> page_index;
-    for (auto& [page_key, secs] : group.pages) {
+    // On aie4 a page's place in the control code is its number, so pages are taken in numeric
+    // order of the "<col>.<page>" their section names carry. Only column 0 is supported: each
+    // column's control code goes to its own microcontroller, which needs an indirect packet that
+    // UMQ dispatch does not build.
+    std::map<uint32_t, const std::string*> numbered;  // page number -> page_key
+    for (const auto& [page_key, secs] : group.pages) {
+      if (!is_aie4) break;
+      uint32_t col = 0, number = 0;
+      if (!ParsePageKey(page_key, &col, &number)) {
+        return fail("control-code section without a <col>.<page> suffix");
+      }
+      if (col != 0) return fail("multi-column control code is not supported");
+      if (!numbered.emplace(number, &page_key).second) return fail("duplicate control-code page");
+    }
+    std::vector<std::pair<uint32_t, const std::string*>> ordered;
+    if (is_aie4) {
+      ordered.assign(numbered.begin(), numbered.end());
+    } else {
+      for (const auto& [page_key, secs] : group.pages) ordered.emplace_back(0, &page_key);
+    }
+    for (const auto& [number, key] : ordered) {
+      const std::string& page_key = *key;
+      const PageSections& secs = group.pages.at(page_key);
       if (secs.ctrltext_section == 0) continue;
       Page page;
+      page.number = number;
       if (!section_bytes(secs.ctrltext_section, &page.ctrltext)) {
         return fail("section extends past end of file");
       }
@@ -505,14 +557,14 @@ hsa_status_t Parse(const void* image_data, size_t image_size, std::string_view a
           }
           const std::vector<uint8_t>& target = site.in_ctrldata ? k.pages[page_it->second].ctrldata
                                                                 : k.pages[page_it->second].ctrltext;
-          // PatchShimDma48 updates the two dwords after the site (site[1], site[2]); kShimDma57Aie4
-          // updates the site itself and the dword after (site[0], site[1]), per the scheme's own
-          // layout comment above. Either way three dwords from the offset must lie inside the named
-          // buffer and the offset must be dword aligned; otherwise the driver patches past the end
-          // of its per-dispatch buffer. Checked here because this is the first point at which the
-          // buffer's size is known.
+          // kShimDma48 updates the two dwords after the site (site[1], site[2]), so three dwords
+          // from the offset must lie inside the named buffer; kShimDma57Aie4 updates the site
+          // itself and the dword after (site[0], site[1]), so two. The offset must also be dword
+          // aligned; otherwise the driver patches past the end of its per-dispatch buffer. Checked
+          // here because this is the first point at which the buffer's size is known.
+          const size_t site_dwords = site.scheme == PatchScheme::kShimDma48 ? 3 : 2;
           if ((site.offset % sizeof(uint32_t)) != 0 ||
-              site.offset + 3 * sizeof(uint32_t) > target.size()) {
+              site.offset + site_dwords * sizeof(uint32_t) > target.size()) {
             return fail("argument patch site does not fit the control code");
           }
           dst.push_back(PatchSite{page_it->second, site.in_ctrldata, site.offset, site.addend});
