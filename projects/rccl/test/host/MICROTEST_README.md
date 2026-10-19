@@ -223,10 +223,10 @@ export colliding non-`static` symbols; otherwise a unit needs its own binary:
     selection in `findRingCutIndices`. `greedyRingGen`'s out-of-memory arm is
     driven through the heap half of `fakes/libc_seam.h`.
 - **`rccl-UnitTestsMicroBootstrap`**: `bootstrap.cc` (via `BOOTSTRAP_CC_PATH`, from
-  `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over an
-  in-memory socket layer and net plugin defined in the test. Its own binary because those
-  seams replace `misc/socket.cc` wholesale, and other binaries link `bootstrap_stubs.cc`
-  for this unit's symbols. See `test_categories_micro_bootstrap.yaml`.
+  `bootstrap-test.cc`); suites `Bootstrap*Microtest.*`. Ranks run as threads over the
+  in-memory socket layer and net plugin in `fakes/bootstrap_micro_fakes.cc`. Its own binary
+  because those seams replace `misc/socket.cc` wholesale, and other binaries link
+  `bootstrap_stubs.cc` for this unit's symbols. See `test_categories_micro_bootstrap.yaml`.
 - **`rccl-UnitTestsMicroEnqueue`** — `enqueue.cc` (via `ENQUEUE_CC_PATH`); suite
   `EnqueueMicrotest.*`. All tests live in `enqueue-test.cc`, grouped by unit under
   test; several fixtures are reused by later groups, so the order within the file
@@ -496,6 +496,7 @@ symbol.
 | `src/algorithms/dda/*.cc` (targets that do not compile the real file) | `fakes/dda_fakes.cc` |
 | `src/allocator.cc` | `fakes/allocator_fakes.cc` |
 | `src/bootstrap.cc` | `fakes/bootstrap_stubs.cc` |
+| externals `src/bootstrap.cc` reaches (`rccl-UnitTestsMicroBootstrap`, which compiles it) | `fakes/bootstrap_micro_fakes.cc` |
 | `src/ce_coll.cc` (targets that do not compile the real file) | `fakes/ce_fakes.cc` |
 | `src/collectives.cc` | `fakes/collectives_fakes.cc` |
 | `src/dev_runtime.cc` (targets that do not compile the real file) | `fakes/dev_runtime_fakes.cc` |

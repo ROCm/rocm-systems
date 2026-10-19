@@ -151,12 +151,15 @@ function(rccl_define_micro_source_lists)
     ../common/ProcessIsolatedTestRunner.cpp
     PARENT_SCOPE)
 
-  # rccl-UnitTestsMicroBootstrap -- src/bootstrap.cc. Own binary: the test supplies its own socket layer,
-  # net plugin and logging seams, and other binaries link bootstrap_stubs.cc for this unit's symbols.
+  # rccl-UnitTestsMicroBootstrap -- src/bootstrap.cc. Own binary: bootstrap_micro_fakes.cc replaces misc/socket.cc
+  # wholesale, and other binaries link bootstrap_stubs.cc for this unit's symbols.
   set(TEST_MICRO_BOOTSTRAP_SOURCE_FILES
     bootstrap-test.cc
+    fakes/bootstrap_micro_fakes.cc
     fakes/env_fakes.cc
+    fakes/hip_fakes.cc
     fakes/os_fakes.cc
+    ${RCCL_HOST_HIPIFY_DIR}/src/misc/utils.cc
     ../common/main_altrsmi.cpp
     PARENT_SCOPE)
 

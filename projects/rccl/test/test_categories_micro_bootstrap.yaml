@@ -4,7 +4,7 @@
 
 test_categories:
   quick: &micro_bootstrap_quick
-    description: "Smoke — host-only bootstrap micro-tests, sub-second."
+    description: "Smoke — host-only bootstrap micro-tests, about two seconds."
     test_patterns:
       - "Bootstrap*"
     exclude_windows:
