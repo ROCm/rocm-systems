@@ -8,7 +8,7 @@
 #
 # -----------------------------------------------------------------------------
 
-from .. import benchmark_base
+from .. import benchmark_base, ceilings
 
 
 # =============================================================================
@@ -63,30 +63,7 @@ class Bench_gfx12(benchmark_base.Bench_base):
             "WMMA-I8": super().matrix_i8_bench,
         }
 
-        self.csv_cols_map = {
-            "HBM": "HBMBw",
-            "MALL": "MALLBw",
-            "L2": "L2Bw",
-            "L1": "L1Bw",
-            "L0": "L0Bw",
-            "LDS": "LDSBw",
-            "F16": "FP16Flops",
-            "F32": "FP32Flops",
-            "F64": "FP64Flops",
-            "I8": "I8Ops",
-            "I32": "I32Ops",
-            "I64": "I64Ops",
-            "WMMA-F4": "WMMAF4Flops",
-            "WMMA-F6": "WMMAF6Flops",
-            "WMMA-F6F4": "WMMAF6F4Flops",
-            "WMMA-MXF8": "WMMAMXF8Flops",
-            "WMMA-F8": "WMMAF8Flops",
-            "WMMA-F16": "WMMAF16Flops",
-            "WMMA-BF16": "WMMABF16Flops",
-            "WMMA-F32": "WMMAF32Flops",
-            "WMMA-F64": "WMMAF64Flops",
-            "WMMA-I8": "WMMAI8Ops",
-        }
+        self.csv_cols_map = ceilings.FAMILY_CEILINGS["gfx12"]
 
     # -----------------------------------------------------------------------------
     # Benchmarking kernel source

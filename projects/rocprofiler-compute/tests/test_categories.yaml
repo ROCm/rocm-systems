@@ -22,6 +22,7 @@ test_categories:
       - test_amdsmi_interface
       - test_noise_clamper
       - test_benchmark_base
+      - test_ceilings
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
@@ -110,6 +111,7 @@ test_categories:
       - test_amdsmi_interface
       - test_noise_clamper
       - test_benchmark_base
+      - test_ceilings
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
@@ -209,6 +211,7 @@ test_categories:
       - test_amdsmi_interface
       - test_noise_clamper
       - test_benchmark_base
+      - test_ceilings
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
@@ -308,6 +311,7 @@ test_categories:
       - test_amdsmi_interface
       - test_noise_clamper
       - test_benchmark_base
+      - test_ceilings
       - test_analysis_cli
       - test_pattern_matching
       - test_list_metrics_cli
