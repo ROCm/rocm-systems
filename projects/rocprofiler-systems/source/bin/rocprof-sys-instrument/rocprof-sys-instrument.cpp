@@ -296,7 +296,7 @@ auto _activate =
 namespace
 {
 int
-run(int argc, char** argv)
+run_instrumentation(int argc, char** argv)
 {
     argv0 = argv[0];
 
@@ -2904,10 +2904,10 @@ main(int argc, char** argv)
 {
     try
     {
-        return run(argc, argv);
-    } catch(const std::exception& ex)
+        return run_instrumentation(argc, argv);
+    } catch(const std::exception& err)
     {
-        std::cerr << "[rocprof-sys] error: " << ex.what() << '\n';
+        std::cerr << "[rocprof-sys] error: " << err.what() << '\n';
         return EXIT_FAILURE;
     }
 }

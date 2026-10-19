@@ -24,14 +24,6 @@ def get_sleep_cmd() -> str:
     return sleep_cmd
 
 
-def get_true_cmd() -> str:
-    """Return the path to true, or skip the test if it isn't on PATH."""
-    true_cmd = shutil.which("true")
-    if not true_cmd:
-        pytest.skip("true command not found")
-    return true_cmd
-
-
 # ============================================================================
 # Avail format consistency data
 # ============================================================================
@@ -441,16 +433,24 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         )
 
     @pytest.mark.timeout(180)
-    def test_invalid_input_reinstrument(self, test_output_dir):
-        """Reject a second rewrite, and leave the first instrumented binary runnable."""
-        true_cmd = get_true_cmd()
+    def test_invalid_input_reinstrument(self, test_output_dir, rocprof_config):
+        """Reject a second rewrite, and leave the first instrumented binary runnable.
+
+        Use a built ELF example rather than /usr/bin/true: on RHEL that path is a
+        text coreutils wrapper, so instrumentation refuses it before rewrite.
+        """
+        try:
+            source_bin = str(rocprof_config.get_target_executable("parallel-overhead"))
+        except FileNotFoundError:
+            pytest.skip("parallel-overhead example not built")
+
         first_inst = test_output_dir / "first.inst"
         second_inst = test_output_dir / "second.inst"
 
         baseline = self.run_test(
             "baseline",
             target=self.target,
-            run_args=["-o", str(first_inst), "--", true_cmd],
+            run_args=["-o", str(first_inst), "--", source_bin],
             working_directory=test_output_dir,
             fail_on_not_found=True,
         )
@@ -475,10 +475,11 @@ class TestRocprofilerSystemsInstrument(RocprofsysTest):
         if second_inst.exists():
             pytest.fail(f"rejected rewrite wrote {second_inst}")
 
+        # Keep the instrumented binary runnable; tiny args so the check stays fast.
         kept = self.run_test(
             "baseline",
             target="rocprof-sys-run",
-            run_args=["--", str(first_inst)],
+            run_args=["--", str(first_inst), "1", "1", "1"],
             fail_on_not_found=True,
         )
         self.assert_regex(kept)
