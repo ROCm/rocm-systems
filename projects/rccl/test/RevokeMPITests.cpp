@@ -668,10 +668,10 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
     }
     ASSERT_MPI_TRUE(pathOk);
 
+    ncclResult_t launchRes = ncclSuccess;
     if(rank != skipRank)
-    {
-        ASSERT_EQ(ncclSuccess, ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, parent, stream));
-    }
+        launchRes = ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, parent, stream);
+    ASSERT_MPI_EQ(ncclSuccess, launchRes);
 
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -697,11 +697,12 @@ void runIncompleteDdaRevokeShrink(MPITestBase& test, const DdaRevokeCase& tc)
 
     MPI_Barrier(MPI_COMM_WORLD);
 
+    ncclResult_t childLaunchRes = ncclSuccess;
     if(!isExcluded)
-    {
-        ASSERT_EQ(ncclSuccess, ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, child, stream));
+        childLaunchRes = ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, child, stream);
+    ASSERT_MPI_EQ(ncclSuccess, childLaunchRes);
+    if(!isExcluded)
         HIP_TEST_CHECK_GTEST_FAIL(hipStreamSynchronize(stream));
-    }
 
     MPI_Barrier(MPI_COMM_WORLD);
 
@@ -893,10 +894,10 @@ protected:
                                           &maxChannels));
         ASSERT_MPI_TRUE(algo == tc.expectedAlgo && protocol == tc.expectedProtocol);
 
+        ncclResult_t launchRes = ncclSuccess;
         if(rank != skipRank)
-        {
-            ASSERT_EQ(ncclSuccess, ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, comm, stream));
-        }
+            launchRes = ddaLaunch(tc.func, sendBuf, recvBuf, tc.count, comm, stream);
+        ASSERT_MPI_EQ(ncclSuccess, launchRes);
 
         MPI_Barrier(MPI_COMM_WORLD);
 
