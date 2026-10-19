@@ -61,6 +61,18 @@ target_include_directories(
     PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
 )
 
+add_library(process-environment-tests OBJECT test_process_environment_info.cpp)
+
+target_link_libraries(
+    process-environment-tests
+    PRIVATE rocprofiler-systems-googletest-library rocprofiler-systems-json
+)
+
+target_include_directories(
+    process-environment-tests
+    PRIVATE ${PROJECT_SOURCE_DIR}/source/lib ${CMAKE_BINARY_DIR}/source/lib/
+)
+
 add_library(rank-passes-filter-tests OBJECT test_rank_passes_filter.cpp)
 
 target_link_libraries(
