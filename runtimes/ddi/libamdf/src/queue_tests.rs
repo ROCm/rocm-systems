@@ -416,6 +416,44 @@ fn pm4_transport_requires_dword_units_and_a_wrapping_read_index() {
 }
 
 #[test]
+fn invalid_native_transport_rolls_back_and_reports_cleanup_failure() {
+    let family = family(AMDF_QUEUE_COMMAND_TYPE_GPU_AQL);
+    let mut native = native_transport();
+    native.doorbell_host_address = 0;
+    assert!(matches!(
+        creation_transports(native, &family),
+        Err(INTERNAL)
+    ));
+    let invalid = INTERNAL;
+
+    let queues = AtomicU64::new(1);
+    let mapped_error = std::cell::Cell::new(false);
+    assert_eq!(
+        rollback_creation_result(&queues, invalid, Ok(()), |_| {
+            mapped_error.set(true);
+            BUSY
+        }),
+        INTERNAL
+    );
+    assert!(!mapped_error.get());
+    assert_eq!(queues.load(Ordering::Acquire), 0);
+
+    let queues = AtomicU64::new(1);
+    let failure = Error::Operation {
+        kind: ErrorKind::Busy,
+        detail: "injected rollback failure with live backing",
+    };
+    assert_eq!(
+        rollback_creation_result(&queues, invalid, Err(failure), |error| {
+            assert_eq!(error.kind(), ErrorKind::Busy);
+            BUSY
+        }),
+        BUSY
+    );
+    assert_eq!(queues.load(Ordering::Acquire), 0);
+}
+
+#[test]
 fn cached_queries_do_not_observe_native_loss_and_mapping_blocks_teardown() {
     #[repr(C)]
     struct Extended {
