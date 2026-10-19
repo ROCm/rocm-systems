@@ -878,11 +878,21 @@ class TestCpuMetrics(RocprofsysTest):
             },
             flag_args=self.CPU_METRICS_FLAGS,
         )
+        # Workload still has to show up in the trace.
+        self.assert_perfetto(
+            result,
+            label_substrings=["fib"],
+            subtest_name="CPU workload recorded with host metrics enabled",
+        )
+        if "Agent not found" in result.test_output and "type: CPU" in result.test_output:
+            pytest.skip(
+                "CPU agent unavailable; CLI settings checked, host Frequency/Load "
+                "counters not sampled on this host"
+            )
         self.assert_perfetto(
             result,
             subtest_name="host frequency and load counters",
             counter_names_present=["Frequency (S)", "Load (S)"],
-            label_substrings=["fib"],
         )
 
 
